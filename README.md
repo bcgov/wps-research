@@ -4,7 +4,8 @@ research software produced in collaboration between BCWS Predictive Service Unit
 * multispectral image viewer
 * clustering algorithm, a new minimalist implementation of
     * [Unsupervised Nonparametric Classification of Polarimetric SAR Data Using The K-nearest Neighbor Graph](http://ashlinrichardson.com/uvic/papers/2010_richardson_igarss.pdf), A. Richardson et al, proc. IEEE IGARSS, Honolulu, Hawaii, July 2010
-    
+
+To appear: utilities for integrating open remotely-sensed imagery
 ## requirements:
 * python 2 + matplotlib + numpy (for image viewer)
 * gnu/g++ (for discretization algorithm)
