@@ -161,44 +161,42 @@ unsigned int top(unsigned int j){
 }
 
 int main(int argc, char** argv){
-
   kmax = 2222;
 
   if(argc < 2) err("cluster [bin file name. hdr file must also be present");
+  
   str bfn(argv[1]);
-  //int nrow, ncol, nband;
   str hfn(split(bfn, '.')[0] + str(".hdr"));
   hread(hfn, nrow, ncol, nband);
   printf("nrow %d ncol %d nband %d\n", nrow, ncol, nband);
 
-  dat = bread(bfn, nrow, ncol, nband);
+  dat = bread(bfn, nrow, ncol, nband); // scale the data first?
 
   np = nrow * ncol;
   printf("np %d\n", np);
   printf("(np^2 - n) / 2=%f\n", (((float)np * (float)np) - (float)np) / 2.);
 
-  // scale the data first?
-
+  // allocate memory for truncated sorted distance matrix
   dmat_d = falloc(np * kmax);
   dmat_i = (unsigned int *)alloc(np * (size_t)kmax * (size_t)sizeof(unsigned int));
 
   if(fsize("dmat.d") < nrow * ncol * kmax * sizeof(float)){
 
-    //----------------------------------------
-    next_j = 0; // put a lock on this variable
-
+    next_j = 0; // start with the first pixel
+    
+    // find number of cores
     int numCPU = sysconf(_SC_NPROCESSORS_ONLN);
     cout << "Number of cores: " << numCPU << endl;
 
-    // mutex setup
+    // mutex setup for concurrency control
     pthread_mutex_init(&print_mutex, NULL);
     pthread_mutex_init(&next_j_mutex, NULL);
 
-    // make the threads joinable
+    // make threads joinable
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
 
-    // allocate threads
+    // allocate threads for concurrent / multithreaded computing
     pthread_t * my_pthread = new pthread_t[numCPU];
     unsigned int j;
     for0(j, numCPU){
@@ -220,27 +218,32 @@ int main(int argc, char** argv){
 
   }
   else{
-    FILE * f = fopen("dmat.d", "rb");
+    // load the truncated sorted distance matrix, if already calculated
+    FILE * f = fopen("dmat.d", "rb"); // distance to neighbour
     fread(dmat_d, np * kmax * sizeof(float), 1, f);
     fclose(f);
-    f = fopen("dmat.i", "rb");
+    f = fopen("dmat.i", "rb"); // pixel index of neighbour
     fread(dmat_i, np * kmax * sizeof(unsigned int), 1, f);
     fclose(f);
   }
 
+  // allocate memory for density estimate and class label
   rho = (float *)alloc(np * kmax * sizeof(float));
   label = (unsigned int *) alloc(np * sizeof(unsigned int));
 
+  // keep track of the number of classes produced, for a given choice of K
   FILE * f = fopen("class.csv", "wb");
   fprintf(f, "k_use,n_classes");
   fclose(f);
 
+  // iterate over different choices of K to produce the figure
   for(k_use = 1; k_use <= kmax; k_use++){
     top_i.clear();
     if(k_use > kmax) err("kuse > kmax");
-    //printf("density estimation..\n");
+
     unsigned int i, j;
     for0(i, np){
+      // density estimate for pixel i
       float d_avg = 0.;
       for0(j, k_use){
         d_avg += dmat_d[i * kmax + j];
@@ -248,20 +251,21 @@ int main(int argc, char** argv){
       rho[i] = 1. / d_avg;
     }
 
-    //printf("hill climbing..\n");
+    // get ready to start clustering
     top_i.push_back(0); // null is self-top
     next_label = 1;
     for0(i, np) label[i] = 0; // default label: unlabeled
 
-    // do the clustering
+    // hill-climbing heuristic
     for0(i, np) label[i] = top(i);
 
+    // keep track of the number of clusters produced for that choice of K
     printf("%ld %ld\n", (long int)k_use, (long int)(next_label-1));
     f = fopen("nclass.csv", "ab");
     fprintf(f, "\n%ld,%ld", (long int)k_use, (long int)(next_label-1));
     fclose(f);
 
-    // outputs
+    // output: label image
     f = fopen((str("label_") + to_string(k_use)).c_str(), "wb");
     float * label_float = falloc(np);
     for0(i, np) label_float[i] = (float)label[i];
@@ -269,6 +273,7 @@ int main(int argc, char** argv){
     free(label_float);
     fclose(f);
 
+    // output: pixels colored according to the assigned "cluster centre"
     f = fopen((str("out_") + to_string(k_use) + str(".bin")).c_str(), "wb");
     int u;
     float df;
