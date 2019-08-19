@@ -31,4 +31,5 @@ Hypothetically for a one-level analysis (non-hierarchical) taking K=100 is highl
 ### output formats
 The clustering algorithm output is provided in two formats:
     Cluster labels in IEEE 32-bit Floating-point format (0 is unlabelled, labels start at 1)
+    
     Image where the pixels are colored according to the cluster "centres" to which they're assigned
