@@ -2,7 +2,8 @@
 research software produced in collaboration between BCWS Predictive Service Unit and CITZ DSAB, for image analysis incl:
 
 * multispectral image viewer
-* clustering algorithm, a new minimalist implementation of [Unsupervised Nonparametric Classification of Polarimetric SAR Data Using The K-nearest Neighbor Graph](http://ashlinrichardson.com/uvic/papers/2010_richardson_igarss.pdf), A. Richardson, D. G. Goodenough, H. Chen, G. Hobart, B. Moa, W. Myrvold, proc. IEEE IGARSS, Honolulu, Hawaii, July 2010
+* clustering algorithm, a new minimalist implementation of
+    * [Unsupervised Nonparametric Classification of Polarimetric SAR Data Using The K-nearest Neighbor Graph](http://ashlinrichardson.com/uvic/papers/2010_richardson_igarss.pdf), A. Richardson et al, proc. IEEE IGARSS, Honolulu, Hawaii, July 2010
     
 ## requirements:
 python 2 (for image viewer) and gnu/g++ (for discretization algorithm); tested on ubuntu
