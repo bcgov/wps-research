@@ -6,7 +6,9 @@ research software produced in collaboration between BCWS Predictive Service Unit
     * [Unsupervised Nonparametric Classification of Polarimetric SAR Data Using The K-nearest Neighbor Graph](http://ashlinrichardson.com/uvic/papers/2010_richardson_igarss.pdf), A. Richardson et al, proc. IEEE IGARSS, Honolulu, Hawaii, July 2010
     
 ## requirements:
-python 2 (for image viewer) and gnu/g++ (for discretization algorithm); tested on ubuntu
+* python 2 + matplotlib + numpy (for image viewer)
+* gnu/g++ (for discretization algorithm)
+Tested on ubuntu
 
 ## how to:
 1) view the sample input data:
