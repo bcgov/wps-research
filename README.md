@@ -8,6 +8,7 @@ research software produced in collaboration between BCWS Predictive Service Unit
 ## requirements:
 * python 2 + matplotlib + numpy (for image viewer)
 * gnu/g++ (for discretization algorithm)
+
 Tested on ubuntu
 
 ## how to:
