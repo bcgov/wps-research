@@ -1,6 +1,6 @@
-# bcws
- bcws image analysis project
- 
+# bcws-pus-research
+research software produced in collaboration between BCWS Predictive Service Unit and CITZ DSAB, for image analysis
+
 multispectral image viewer and clustering algorithm included
 
 ## requirements:
