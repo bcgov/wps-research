@@ -4,8 +4,7 @@ research software produced in collaboration between BCWS Predictive Service Unit
 multispectral image viewer and clustering algorithm included
 
 ## requirements:
-python 2 (for image viewer) and gnu/g++ (for discretization algorithm)
-tested on ubuntu
+python 2 (for image viewer) and gnu/g++ (for discretization algorithm); tested on ubuntu
 
 ## how to:
 1) view the sample input data:
