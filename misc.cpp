@@ -1,4 +1,5 @@
 #include"misc.h"
+
 string cwd(){
   char s[PATH_MAX];
   _cwd(s, PATH_MAX);
@@ -41,13 +42,26 @@ void dbg(char c, int start_pos, int end_pos, str action, bool inside_quotes){
   cout << "c[" << c << "] start [" << start_pos << "] end [" << end_pos << "] " << action << " " << (inside_quotes?str("inside"):str("outside")) << "]" <<endl;
 }
 
+/*
+#include"misc.cpp"
+int main(int argc, char ** argv){
+  str data("1,\",,2,3\",,,hello,12345,\"{12,12,12}\",word");
+  cout << "[" << data << "]" << endl;
+  cout << split(data) << endl;
+  vector<str> ss(split_special(data));
+  cout << "good:"<< ss << endl;
+  cout << "bad:" << split(data) << endl;
+  cout << data << endl;
+  return 0;
+}
+*/
+
 vector<string> split_special(string s){
   // split string function for csv files that may have commas inside of double quotation marks!
   vector<string> ret;
   if(s.size() == 0) return ret;
   int start_pos = 0;
-  int end_pos = 0
-  // left-inclusive indices of selection (right index is not inclusive)
+  int end_pos = 0; // left-inclusive indices of selection (right index is not inclusive)
   bool inside_quotes = false;
   char c = s[end_pos];
   while(end_pos < s.size() - 1){
@@ -115,11 +129,21 @@ void err(const char * msg){
   err(string(msg));
 }
 
+/*
+void * balloc(long unsigned int nb){
+  void * d = malloc(nb);
+  memset(d, '\0', nb);
+  return (void *)d;
+}
+*/
+
+
 FILE * wopen(string fn){
   FILE * f = fopen(fn.c_str(), "wb");
   if(!f) err("failed to open file for writing");
   return f;
 }
+
 
 /* get size of file pointer */
 size_t size(FILE * f){
@@ -141,3 +165,53 @@ void rewind(ifstream &a){
   a.clear();
   a.seekg(0);
 }
+
+
+bool operator<(const f_idx& a, const f_idx&b){
+  return a.d > b.d; // priority_queue max first: we want min first
+}
+
+// read header file
+void hread(str hfn, int & nrow, int & ncol, int & nband){
+  str line;
+  vector<str> words;
+  ifstream hf(hfn);
+  nrow = ncol = nband = 0;
+  if(!hf.is_open()) err(str("failed to open header file: ") + hfn);
+  while(getline(hf, line)){
+    words = split(line, '=');
+    if(words.size() == 2){
+      strip(words[0]);
+      str w(words[0]);
+      int n = atoi(words[1].c_str());
+      if(w == str("samples")) ncol = n;
+      if(w == str("lines")) nrow = n;
+      if(w == str("bands")) nband = n;
+    }
+  }
+  hf.close();
+}
+
+float * falloc(size_t nf){
+  return (float *) alloc(nf * (size_t)sizeof(float));
+}
+
+// read binary file
+float * bread(str bfn, int nrow, int ncol, int nband){
+  FILE * f = fopen(bfn.c_str(), "rb");
+  size_t nf = (size_t)nrow * (size_t)ncol * (size_t)nband;
+  float * dat = falloc(nf);
+  size_t nr = fread(dat, nf * (size_t)sizeof(float), 1, f);
+  if(nr != 1) err("failed to read data");
+  fclose(f);
+  return dat;
+}
+
+pthread_mutex_t print_mutex;
+
+void cprint(str s){
+  pthread_mutex_lock(&print_mutex);
+  cout << s << endl;
+  pthread_mutex_unlock(&print_mutex);
+}
+
