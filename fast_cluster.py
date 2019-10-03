@@ -66,7 +66,6 @@ fig = plt.figure(figsize=(10, 10)) # 25, 10
 plt.title('hierarchical clustering dendrogram')
 rotate = False
 
-n_clusters = 33
 plt.ylabel('distance' if (not rotate) else 'index')
 plt.xlabel('index' if (not rotate) else 'distance')
 dn = dendrogram(Z,
