@@ -17,9 +17,12 @@ Tested on ubuntu
 
     python read_multispectral.py sentinel2_cut.bin
 
-2) compile and run the clustering algorithm:
+2) compile and run an original clustering algorithm:
 
     ./run.sh
+
+3) run an industry standard clustering algorithm:
+   python fast_cluster.py mS2.bin 10
 
 ## Results
 ### Discretized image output (unsupervised classification): r,g,b <- bands 12, 9, 3
