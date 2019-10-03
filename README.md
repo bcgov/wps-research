@@ -44,6 +44,8 @@ The clustering algorithm output is provided in two formats:
     2) Image where the pixels are colored according to the cluster "centres" to which they're assigned
 
 ### Discretized image output (unsupervised) an industry standard approach (color map)
+10 and 42 clusters:
+
 ![alt text](output/fastclust_10_vs_42.gif)
 
 ## License
