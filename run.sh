@@ -1,4 +1,6 @@
-# compile clustering method and run on input data
 rm cluster.exe
-./compile
-./cluster.exe sentinel2_cut.bin
+vim cluster.cpp
+dent cluster.cpp
+./compile.sh
+./cluster.exe mS2.bin
+Rscript --vanilla csv_plot.R nclass.csv
