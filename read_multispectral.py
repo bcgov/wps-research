@@ -41,7 +41,7 @@ data = read_float(sys.argv[1]).reshape((bands, npx))
 print("bytes read: " + str(data.size))
 
 # select bands for visualization: default value [3, 2, 1]. Try changing to anything from 0 to 12-1==11! 
-band_select = [3, 2, 1] if nband > 3 else [0, 1, 2]
+band_select = [3, 2, 1] if bands > 3 else [0, 1, 2]
 rgb = np.zeros((lines, samples, 3))
 for i in range(0, 3):
     rgb[:, :, i] = data[band_select[i],:].reshape((lines, samples))
