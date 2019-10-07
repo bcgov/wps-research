@@ -30,7 +30,7 @@ Tested on ubuntu
 ## Results
 ### Discretized image output (unsupervised classification): r,g,b <- bands 12, 9, 3 (original algo)
 Taking K, the number of k-nearest neighbours to be: 222, 444 and 666 resp.:
-![alt text](output/b_12-9-3_k222-444-666.gif)
+![alt text](output/out.gif)
 
 #### How the number of clusters changes by varying K (the number of K-nearest Neighbours)
 y = log(n_segments), x = number of k-nearest neighbours 
