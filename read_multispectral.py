@@ -28,15 +28,14 @@ if len(sys.argv) < 2:
 fn, hdr = sys.argv[1], hdr_fn(sys.argv[1])
 assert_exists([fn, hdr])
 
-#assert_exists(hdr)
-
 # read header and print parameters
 samples, lines, bands = read_hdr(hdr)
 for f in ['samples', 'lines', 'bands']:
     exec('print("' + f + ' =" + str(' +  f + '));')
 
 # read binary IEEE 32-bit float data
-data = np.fromfile(sys.argv[1], '<f4').reshape((bands, lines * samples))
+npx = lines * samples # number of pixels
+data = read_float(sys.argv[1]).reshape((bands, npx))
 print("bytes read: " + str(data.size))
 
 # select bands for visualization: default value [3, 2, 1]. Try changing to anything from 0 to 12-1==11! 
@@ -64,10 +63,10 @@ for i in range(0, 3):
     rgb[:, :, i] -= rgb_min
     rgb[:, :, i] /= (rgb_max - rgb_min)
 
-
-
 # plot the image
 plt.imshow(rgb)
 plt.tight_layout()
-plt.savefig(fn + ".png")
+plt_fn = fn + ".png"
+print "+w", plt_fn
+plt.savefig(plt_fn)
 plt.show()
