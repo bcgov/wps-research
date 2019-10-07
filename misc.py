@@ -7,6 +7,8 @@ import numpy as np
 import os.path as path
 import matplotlib.pyplot as plt
 
+args = sys.argv
+
 # print message and exit
 def err(c):
     print('Error: ' + c)
@@ -19,7 +21,7 @@ def hdr_fn(bin_fn):
     # return filename for header file, given name for bin file
     hfn = bin_fn[:-4] + '.hdr'
     if not exists(hfn):
-        hfn2 = bin_fn + '.bin'
+        hfn2 = bin_fn + '.hdr'
         if not exists(hfn2):
             err("didn't find header file at: " + hfn + " or: " + hfn2)
         return hfn2
@@ -61,6 +63,21 @@ def wopen(fn):
         err("failed to open file for writing: " + fn)
     print "+w", fn
     return f
+
+def read_binary(fn):
+    hdr = hdr_fn(fn)
+
+    # read header and print parameters
+    samples, lines, bands = read_hdr(hdr)
+    print "header," + hdr
+    for f in ['samples', 'lines', 'bands']:
+        exec('print("\t' + f + '," + str(' +  f + '));')
+
+    data = read_float(fn)
+    return samples, lines, bands, data
+
+
+
 
 
 
