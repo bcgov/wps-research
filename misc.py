@@ -12,6 +12,19 @@ def err(c):
     print('Error: ' + c)
     sys.exit(1)
 
+def exists(f):
+    return os.path.exists(f)
+
+def hdr_fn(bin_fn):
+    # return filename for header file, given name for bin file
+    hfn = bin_fn[:-4] + '.hdr'
+    if not exists(hfn):
+        hfn2 = bin_fn + '.bin'
+        if not exists(hfn2):
+            err("didn't find header file at: " + hfn + " or: " + hfn2)
+        return hfn2
+    return hfn
+
 def read_hdr(hdr):
     samples, lines, bands = 0, 0, 0
     for line in open(hdr).readlines():
@@ -34,5 +47,5 @@ def assert_exists(fn):
         # not iterable
         pass
 
-    if not os.path.exists(fn):
+    if not exists(fn):
         err("couldn't find required file: " + fn)

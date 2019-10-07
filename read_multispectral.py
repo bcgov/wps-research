@@ -25,7 +25,7 @@ if len(sys.argv) < 2:
     err('usage:\n\tread_multispectral.py [input file name]')
 
 # check file and header exist
-fn, hdr = sys.argv[1], sys.argv[1][:-4] + '.hdr'
+fn, hdr = sys.argv[1], hdr_fn(sys.argv[1])
 assert_exists([fn, hdr])
 
 #assert_exists(hdr)
