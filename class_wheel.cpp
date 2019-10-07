@@ -54,24 +54,23 @@ int main(int argc, char ** argv){
   hwrite(ohfn, nrow, ncol, 3); // 3 bands: it's an RGB file
 
   FILE * outf = fopen(ofn.c_str(), "wb");
-  
+
   for0(i, np){
-      r = code_r[dat[i]];
-      fwrite(&r, sizeof(float), 1, outf);
+    r = code_r[dat[i]];
+    fwrite(&r, sizeof(float), 1, outf);
   }
 
-    for0(i, np){
-      g = code_g[dat[i]];
-      fwrite(&g, sizeof(float), 1, outf);
+  for0(i, np){
+    g = code_g[dat[i]];
+    fwrite(&g, sizeof(float), 1, outf);
   }
 
- for0(i, np){
-      b = code_b[dat[i]];
-      fwrite(&b, sizeof(float), 1, outf);
+  for0(i, np){
+    b = code_b[dat[i]];
+    fwrite(&b, sizeof(float), 1, outf);
   }
-
 
   fclose(outf);
-  
+
   return 0;
 }
