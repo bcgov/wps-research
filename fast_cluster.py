@@ -78,7 +78,7 @@ dn = dendrogram(Z,
         show_leaf_counts=True)
 
 print "saving figure.."
-plt.savefig("fastcluster.png")
+plt.savefig(image + "_fastcluster.png")
 
 print "extracting labels.."
 from scipy.cluster.hierarchy import fcluster
@@ -88,7 +88,7 @@ labels=labels.reshape(img[:, :, 0].shape)
 plt.figure(figsize=(20, 20))
 print "min, max", np.min(labels), np.max(labels)
 plt.imshow(labels) #, cmap ='jet')
-plt.colorbar()
+#plt.colorbar()
 plt.tight_layout() #plt.show()
 plot_file = image + "_labels.png"
 

@@ -181,60 +181,32 @@ class f_idx{
 };
 
 bool operator<(const f_idx& a, const f_idx&b);
-//return a.d > b.d; // priority_queue max first: we want min first
-//}
 
 // read header file
-void hread(str hfn, int & nrow, int & ncol, int & nband);
-/*
-      	str line;
-  vector<str> words;
-  ifstream hf(hfn);
-  nrow = ncol = nband = 0;
-  if(!hf.is_open()) err(str("failed to open header file: ") + hfn);
-  while(getline(hf, line)){
-    words = split(line, '=');
-    if(words.size() == 2){
-      strip(words[0]);
-      str w(words[0]);
-      int n = atoi(words[1].c_str());
-      if(w == str("samples")) ncol = n;
-      if(w == str("lines")) nrow = n;
-      if(w == str("bands")) nband = n;
-    }
-  }
-  hf.close();
-}
-*/
+void hread(str hfn, size_t & nrow, size_t & ncol, size_t & nband);
+void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband);
 
 float * falloc(size_t nf);
-//
-//      	return (float *) alloc(nf * (size_t)sizeof(float));
-//}
 
 // read binary file
-float * bread(str bfn, int nrow, int ncol, int nband);
-/*
-       	FILE * f = fopen(bfn.c_str(), "rb");
-  size_t nf = (size_t)nrow * (size_t)ncol * (size_t)nband;
-  float * dat = falloc(nf);
-  size_t nr = fread(dat, nf * (size_t)sizeof(float), 1, f);
-  if(nr != 1) err("failed to read data");
-  fclose(f);
-  return dat;
-}
-*/
+float * bread(str bfn, size_t nrow, size_t ncol, size_t nband);
 
 extern  pthread_mutex_t print_mutex;
-
-
 void cprint(str s);
 /*
-      	pthread_mutex_lock(&print_mutex);
+  pthread_mutex_lock(&print_mutex);
   cout << s << endl;
   pthread_mutex_unlock(&print_mutex);
-}
 */
+
+int hsv_to_rgb(float *r, float *g, float *b, float h, float s, float v);
+
+str hdr_fn(str fn);
+
+/* get size of file pointer */
+size_t size(FILE * f);
+size_t fsize(string fn);
+bool exists(str fn);
 
 
 #endif
