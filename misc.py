@@ -3,6 +3,7 @@ import os
 import sys
 import copy
 import math
+import struct
 import numpy as np
 import os.path as path
 import matplotlib.pyplot as plt
@@ -13,6 +14,13 @@ args = sys.argv
 def err(c):
     print('Error: ' + c)
     sys.exit(1)
+
+def run(c):
+    print 'run("' + str(c) + '")'
+    a = os.system(c)
+    if a != 0:
+        err("command failed to run:\n\t" + c)
+    return a
 
 def exists(f):
     return os.path.exists(f)
@@ -76,8 +84,8 @@ def read_binary(fn):
     data = read_float(fn)
     return samples, lines, bands, data
 
-
-
-
-
+def write_binary(np_ndarray, fn):
+    of = wopen(fn)
+    np_ndarray.tofile(of, '', '<f4')
+    of.close()
 

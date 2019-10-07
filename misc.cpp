@@ -137,13 +137,11 @@ void * balloc(long unsigned int nb){
 }
 */
 
-
 FILE * wopen(string fn){
   FILE * f = fopen(fn.c_str(), "wb");
   if(!f) err("failed to open file for writing");
   return f;
 }
-
 
 /* get size of file pointer */
 size_t size(FILE * f){
@@ -166,30 +164,78 @@ void rewind(ifstream &a){
   a.seekg(0);
 }
 
-
 bool operator<(const f_idx& a, const f_idx&b){
   return a.d > b.d; // priority_queue max first: we want min first
 }
 
 // read header file
-void hread(str hfn, int & nrow, int & ncol, int & nband){
+void hread(str hfn, size_t & nrow, size_t & ncol, size_t & nband){
   str line;
   vector<str> words;
   ifstream hf(hfn);
   nrow = ncol = nband = 0;
-  if(!hf.is_open()) err(str("failed to open header file: ") + hfn);
+  if(hf.is_open()){
+  }
+  else{
+    err(str("failed to open header file: ") + hfn);
+  }
   while(getline(hf, line)){
     words = split(line, '=');
     if(words.size() == 2){
       strip(words[0]);
       str w(words[0]);
-      int n = atoi(words[1].c_str());
+      size_t n = (size_t) atoi(words[1].c_str());
       if(w == str("samples")) ncol = n;
       if(w == str("lines")) nrow = n;
       if(w == str("bands")) nband = n;
     }
   }
+  cout << "hread: " << hfn << " nrow: " << nrow << " ncol: " << ncol << " nband: " << nband << endl;
+
   hf.close();
+}
+
+void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband){
+  cout << "+w " << hfn << endl;  
+/*
+  ENVI
+  samples = 410
+  lines = 401
+  bands = 1
+  header offset = 0
+  file type = ENVI Standard
+  data type = 4
+  interleave = bsq
+  byte order = 0 */
+
+  ofstream hf(hfn);
+  if(hf.is_open()){
+  }
+  else{
+    err("failed to open header file for writing");
+  }
+
+  hf << "ENVI" << endl;
+  hf << "samples = " << ncol << endl;
+  hf << "lines = " << nrow << endl;
+  hf << "bands = " << nband << endl;
+  hf << "header offset = 0" << endl;
+  hf << "file type = ENVI Standard" << endl;
+  hf << "data type = 4" << endl;
+  hf << "interleave = bsq" << endl;
+  hf << "byte order = 0" << endl;
+  hf.close();
+}
+
+str hdr_fn(str fn){
+  str hfn(fn + str(".hdr"));
+  if(exists(hfn)) return hfn;
+  int s = fn.size();
+  str b(fn);
+  b = b.substr(0, s - 4);
+  str hfn2(b + str(".hdr"));
+  if(exists(hfn2)) return hfn2;
+  err(str("could not find header at: ") + hfn);
 }
 
 float * falloc(size_t nf){
@@ -197,9 +243,9 @@ float * falloc(size_t nf){
 }
 
 // read binary file
-float * bread(str bfn, int nrow, int ncol, int nband){
+float * bread(str bfn, size_t nrow, size_t ncol, size_t nband){
   FILE * f = fopen(bfn.c_str(), "rb");
-  size_t nf = (size_t)nrow * (size_t)ncol * (size_t)nband;
+  size_t nf = nrow * ncol * nband;
   float * dat = falloc(nf);
   size_t nr = fread(dat, nf * (size_t)sizeof(float), 1, f);
   if(nr != 1) err("failed to read data");
@@ -215,3 +261,67 @@ void cprint(str s){
   pthread_mutex_unlock(&print_mutex);
 }
 
+int hsv_to_rgb(float *r, float *g, float *b, float h, float s, float v){
+  if( (h>360.)||(h<0.)){
+    printf("H: HSV out of range %f %f %f %d %d\n", h, s, v);
+    return(1);
+  }
+  if((s<0.)||(s>1.)){
+    printf("S: HSV out of range %f %f %f %d %d\n", h, s, v);
+    return(1);
+  }
+  if((v<0.)||(v>1.)){
+    printf("V: HSV out of range %f %f %f %d %d\n", h, s, v);
+    return(1);
+  }
+  if (h==360.){
+    h=0;
+  }
+  int i;
+  float f, p, q, t;
+  if( s == 0 ) {
+    // achromatic (grey)
+    *r = *g = *b = v;
+    return 0;
+  }
+  float H,S,V;
+  H=h; V=v; S=s;
+  h /= 60.; // sector 0 to 5
+  i = (int)floor( h );
+  f = h - i; // factorial part of h
+  p = v * ( 1. - s );
+  q = v * ( 1. - s * f );
+  t = v * ( 1. - s * ( 1 - f ) );
+  switch( i ) {
+    case 0: *r = v; *g = t; *b = p; break;
+    case 1: *r = q; *g = v; *b = p; break;
+    case 2: *r = p; *g = v; *b = t; break;
+    case 3: *r = p; *g = q; *b = v; break;
+    case 4: *r = t; *g = p; *b = v; break;
+    case 5: *r = v; *g = p; *b = q; break;
+    default: printf("\nERROR HSV to RGB"); printf("i=%d hsv= %f %f %f\n", i, H, S, V);
+    //exit(1);
+  }
+  return 0;
+}
+
+/*
+size_t size(FILE * f){
+  fseek(f, 0L, SEEK_END);
+  size_t sz = ftell(f);
+  rewind(f);
+  return sz;
+}
+
+size_t fsize(string fn){
+  FILE * f = fopen(fn.c_str(), "rb");
+  if(!f) return (size_t) 0;
+  size_t fs = size(f);
+  fclose(f);
+  return fs;
+}
+*/
+
+bool exists(str fn){
+  return fsize(fn) > 0;
+}
