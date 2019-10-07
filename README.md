@@ -6,8 +6,9 @@ research software produced in collaboration between BCWS Predictive Service Unit
     * [Unsupervised Nonparametric Classification of Polarimetric SAR Data Using The K-nearest Neighbor Graph](http://ashlinrichardson.com/uvic/papers/2010_richardson_igarss.pdf), A. Richardson et al, proc. IEEE IGARSS, Honolulu, Hawaii, July 2010
 * invoking the following code, in python:
    * Daniel Müllner, fastcluster: Fast Hierarchical, Agglomerative Clustering Routines for R and Python, Journal of Statistical Software 53 (2013), no. 9, 1–18, URL http://www.jstatsoft.org/v53/i09/
+* manipulation or visualization of class maps (i.e., truth data or classification results)
 
-To appear: utilities for integrating open remotely-sensed imagery
+To appear: more utilities for integrating open remotely-sensed imagery
 ## requirements:
 * python 2 + matplotlib + numpy (for image viewer)
 * gnu/g++ (for discretization algorithm)
