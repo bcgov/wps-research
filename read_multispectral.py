@@ -26,7 +26,7 @@ if len(sys.argv) < 2:
 
 # check file and header exist
 fn, hdr = sys.argv[1], hdr_fn(sys.argv[1])
-assert_exists([fn, hdr])
+assert_exists(fn)
 
 # read header and print parameters
 samples, lines, bands = read_hdr(hdr)
