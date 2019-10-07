@@ -49,7 +49,9 @@ for i in range(0, 3):
     # scale band in range 0 to 1
     rgb_min, rgb_max = np.min(rgb[:, :, i]), np.max(rgb[:, :, i])
     rgb[:, :, i] -= rgb_min
-    rgb[:, :, i] /= (rgb_max - rgb_min)
+    rng = rgb_max - rgb_min
+    if rng != 0.:
+        rgb[:, :, i] /= rng #(rgb_max - rgb_min)
 
     # so called "2% linear stretch"
     values = copy.deepcopy(rgb[:,:,i]) # values.shape
@@ -63,7 +65,9 @@ for i in range(0, 3):
     rgb_min = values[int(math.floor(float(npx)*0.02))]
     rgb_max = values[int(math.floor(float(npx)*0.98))]
     rgb[:, :, i] -= rgb_min
-    rgb[:, :, i] /= (rgb_max - rgb_min)
+    rng = rgb_max - rgb_min
+    if rng > 0.:
+        rgb[:, :, i] /= (rgb_max - rgb_min)
 
 # plot the image
 plt.imshow(rgb)
