@@ -71,4 +71,5 @@ plt.tight_layout()
 plt_fn = fn + ".png"
 print "+w", plt_fn
 plt.savefig(plt_fn)
-plt.show()
+if show_plot:
+    plt.show()
