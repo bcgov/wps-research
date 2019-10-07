@@ -21,8 +21,10 @@ installation of numpy and matplotlib (Ubuntu):
 from misc import *
 
 # instructions to run
-if len(sys.argv) < 2:
+if len(args) < 2:
     err('usage:\n\tread_multispectral.py [input file name]')
+
+show_plot = len(args) < 3
 
 # check file and header exist
 fn, hdr = sys.argv[1], hdr_fn(sys.argv[1])
