@@ -49,3 +49,18 @@ def assert_exists(fn):
 
     if not exists(fn):
         err("couldn't find required file: " + fn)
+
+# use numpy to read a floating-point data file (4 bytes per float, byte order 0)
+def read_float(fn):
+    print "+r", fn
+    return np.fromfile(fn, '<f4')
+
+def wopen(fn):
+    f = open(fn, "wb")
+    if not f:
+        err("failed to open file for writing: " + fn)
+    print "+w", fn
+    return f
+
+
+
