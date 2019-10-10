@@ -2,11 +2,12 @@
 research software produced in collaboration with BCWS Predictive Services Unit (PSU), CITZ DSAB and researchers at Thompson Rivers University (TRU) for image analysis incl:
 
 * multispectral image viewer
-* clustering algorithm, a new minimalist implementation of
-    * [Unsupervised Nonparametric Classification of Polarimetric SAR Data Using The K-nearest Neighbor Graph](http://ashlinrichardson.com/uvic/papers/2010_richardson_igarss.pdf), A. Richardson et al, proc. IEEE IGARSS, Honolulu, Hawaii, July 2010
+* Kmeans clustering applied to multispectral imagery
 * invoking the following code, in python:
    * Daniel Müllner, fastcluster: Fast Hierarchical, Agglomerative Clustering Routines for R and Python, Journal of Statistical Software 53 (2013), no. 9, 1–18, URL http://www.jstatsoft.org/v53/i09/
 * manipulation or visualization of class maps (i.e., truth data or classification results)
+* clustering algorithm, a new minimalist implementation of
+    * [Unsupervised Nonparametric Classification of Polarimetric SAR Data Using The K-nearest Neighbor Graph](http://ashlinrichardson.com/uvic/papers/2010_richardson_igarss.pdf), A. Richardson et al, proc. IEEE IGARSS, Honolulu, Hawaii, July 2010
 
 To appear: more utilities for integrating open remotely-sensed imagery
 ## requirements:
