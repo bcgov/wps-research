@@ -1,5 +1,5 @@
 # bcws-psu-research
-research software produced in collaboration with BCWS Predictive Service Unit, CITZ DSAB and TRU for image analysis incl:
+research software produced in collaboration with BCWS Predictive Services Unit (PSU), CITZ DSAB and researchers at Thompson Rivers University (TRU) for image analysis incl:
 
 * multispectral image viewer
 * clustering algorithm, a new minimalist implementation of
