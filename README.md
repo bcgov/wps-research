@@ -28,7 +28,13 @@ Tested on ubuntu
 3) run an industry standard clustering algorithm:
    python fast_cluster.py mS2.bin 10
 
-## Results
+## Preliminary Results
+
+### K-means unsupervised classification
+
+### Hierarchical Agglomerative Clustering (HAC) unsupervised classification
+
+
 ### Discretized image output (unsupervised classification): r,g,b <- bands 12, 9, 3 (original algo)
 Taking K, the number of k-nearest neighbours to be: 222, 444 and 666 resp.:
 ![alt text](output/out.gif)
