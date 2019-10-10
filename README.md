@@ -1,5 +1,5 @@
 # bcws-psu-research
-research software produced in collaboration with BCWS Predictive Services Unit (PSU), CITZ DSAB and researchers at Thompson Rivers University (TRU) for image analysis incl:
+software produced in collaboration with BCWS Predictive Services Unit (PSU), CITZ Data Science and Analytics Branch (DSAB) and researchers at Thompson Rivers University (TRU) for image analysis incl:
 
 * multispectral image viewer
 * Kmeans clustering applied to multispectral imagery
