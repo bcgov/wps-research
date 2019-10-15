@@ -45,8 +45,8 @@ Tested on ubuntu
 <img src="output/fastclust.bin_wheel.bin.png" width="640">
 
 ### Discretized image output (unsupervised classification): r,g,b <- bands 12, 9, 3 (original algo)
-Taking K, the number of k-nearest neighbours to be: 222, 444 and 666 resp.:
-![alt text](output/out.gif)
+10 clusters: <br>
+<img src="output/317.out.png" width="640">
 
 #### How the number of clusters changes by varying K (the number of K-nearest Neighbours)
 y = log(n_segments), x = number of k-nearest neighbours 
