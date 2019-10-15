@@ -40,7 +40,9 @@ Tested on ubuntu
 ### K-means unsupervised classification
 
 ### Hierarchical Agglomerative Clustering (HAC) unsupervised classification
+10 and 42 clusters:
 
+![alt text](output/fastclust_10_vs_42.gif)
 
 ### Discretized image output (unsupervised classification): r,g,b <- bands 12, 9, 3 (original algo)
 Taking K, the number of k-nearest neighbours to be: 222, 444 and 666 resp.:
@@ -59,11 +61,6 @@ The clustering algorithm output is provided in two formats:
     1) Cluster labels in IEEE 32-bit Floating-point format: 0. unlabelled, labels start at 1.
         
     2) Image where the pixels are colored according to the cluster "centres" to which they're assigned
-
-### Discretized image output (unsupervised) an industry standard approach (color map)
-10 and 42 clusters:
-
-![alt text](output/fastclust_10_vs_42.gif)
 
 ## License
 
