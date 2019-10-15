@@ -42,7 +42,7 @@ Tested on ubuntu
 ### Hierarchical Agglomerative Clustering (HAC) unsupervised classification
 10 and 42 clusters:
 
-![alt text](output/fastclust_10_vs_42.gif)
+![alt text](output/fastclust_10_vs_42.gif | width = 640)
 
 ### Discretized image output (unsupervised classification): r,g,b <- bands 12, 9, 3 (original algo)
 Taking K, the number of k-nearest neighbours to be: 222, 444 and 666 resp.:
