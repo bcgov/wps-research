@@ -38,11 +38,11 @@ Tested on ubuntu
 ## Preliminary Results
 
 ### K-means unsupervised classification
+<img src="output/kmeans.bin_wheel.bin.png" width="640">
 
 ### Hierarchical Agglomerative Clustering (HAC) unsupervised classification
-10 and 42 clusters:<br>
-
-<img src="output/fastclust_10_vs_42.gif" width="640">
+10 clusters: <br>
+<img src="output/fastclust.bin_wheel.bin.png" width="640">
 
 ### Discretized image output (unsupervised classification): r,g,b <- bands 12, 9, 3 (original algo)
 Taking K, the number of k-nearest neighbours to be: 222, 444 and 666 resp.:
