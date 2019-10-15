@@ -4,13 +4,7 @@
 # tested with python 2.7 on ubuntu
 import os
 import sys
-
-def err(m):
-    print("Error: " + m); sys.exit(1)
-
-def run(c):
-    if os.system(c) != 0:
-        err("command failed: non-zero exit code")
+from misc import *
 
 def impt(lib):
     try:
@@ -94,3 +88,5 @@ plot_file = image + "_labels.png"
 
 print "plot written to file: " + plot_file
 plt.savefig(plot_file, orientation='portrait')
+
+write_binary(labels, "fastclust.bin")
