@@ -44,7 +44,7 @@ Tested on ubuntu
 10 clusters: <br>
 <img src="output/fastclust.bin_wheel.bin.png" width="640">
 
-### Discretized image output (unsupervised classification): r,g,b <- bands 12, 9, 3 (original algo)
+### unsupervised classification: an original method
 10 clusters: <br>
 <img src="output/317.lab_wheel.bin.png " width="640">
 
