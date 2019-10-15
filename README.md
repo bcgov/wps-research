@@ -21,12 +21,19 @@ Tested on ubuntu
 
     python read_multispectral.py sentinel2_cut.bin
 
-2) compile and run an original clustering algorithm:
+2) run hierarchical agglomerative clustering on sample data:
+
+    python fast_cluster.py mS2.bin
+    
+3) run kmeans clustering on the sample data:
+
+    python kmeans.py mS2.bin
+
+4) compile and run an original clustering algorithm:
 
     ./run.sh
 
-3) run an industry standard clustering algorithm:
-   python fast_cluster.py mS2.bin 10
+
 
 ## Preliminary Results
 
