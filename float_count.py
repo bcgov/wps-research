@@ -19,3 +19,5 @@ print "\tlabel,count"
 
 for c in class_labels:
     print '\t' + str(c) + ',' + str(count[c])
+
+print "count of counts,", str(len(count.keys()))
