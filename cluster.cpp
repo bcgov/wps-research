@@ -4,7 +4,7 @@ pthread_attr_t attr; // specify threads joinable
 pthread_mutex_t next_j_mutex;
 size_t next_j;
 size_t np;
-int nrow, ncol, nband;
+size_t nrow, ncol, nband;
 float * dat;
 
 float * dmat_d;// = falloc(np * kmax);
@@ -16,10 +16,11 @@ unsigned int * label;
 unsigned int next_label;
 
 void * dmat_threadfun(void * arg){
+  long k = (long)arg;
   cprint(str("dmat_threadfun(") + std::to_string(k) + str(")"));
   unsigned int i;
   long unsigned int my_next_j;
-  long k = (long)arg;
+  //long k = (long)arg;
   float d, df;
   unsigned int pi;
   unsigned int my_i = 0;
@@ -104,7 +105,7 @@ int main(int argc, char** argv){
 
   str bfn(argv[1]);
   //int nrow, ncol, nband;
-  str hfn(split(bfn, '.')[0] + str(".hdr"));
+  str hfn(hdr_fn(bfn)); //plit(bfn, '.')[0] + str(".hdr"));
   hread(hfn, nrow, ncol, nband);
   printf("nrow %d ncol %d nband %d\n", nrow, ncol, nband);
 
