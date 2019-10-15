@@ -70,10 +70,16 @@ for i in range(0, 3):
         rgb[:, :, i] /= (rgb_max - rgb_min)
 
 # plot the image
+plt.style.use('dark_background')
+fig = plt.figure()
+ax = fig.add_subplot(1,1,1)
+
 plt.imshow(rgb)
 plt.tight_layout()
 plt_fn = fn + ".png"
 print "+w", plt_fn
-plt.savefig(plt_fn)
+plt.savefig(plt_fn,
+        dpi=1200,
+        pad_inches =0.)
 if show_plot:
     plt.show()
