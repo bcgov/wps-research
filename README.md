@@ -46,7 +46,7 @@ Tested on ubuntu
 
 ### Discretized image output (unsupervised classification): r,g,b <- bands 12, 9, 3 (original algo)
 10 clusters: <br>
-<img src="output/317.out.png" width="640">
+<img src="output/317.lab_wheel.bin.png " width="640">
 
 #### How the number of clusters changes by varying K (the number of K-nearest Neighbours)
 y = log(n_segments), x = number of k-nearest neighbours 
