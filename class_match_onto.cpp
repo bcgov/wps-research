@@ -1,4 +1,6 @@
-/* by arichardson 20191023 identify transform between class maps */
+/* by arichardson 20191023 identify transform between class maps for
+  consistent visualization between a pair of labellings. Data input
+  type for label maps: ieee float 32 byte-order 0 */
 #include"misc.h"
 int main(int argc, char ** argv){
   if(argc < 3) err(str("class_match_onto ") +
@@ -57,7 +59,6 @@ int main(int argc, char ** argv){
     maxi = -1;
     a = it->first;
     // determine highest count
-    // note: for qa and analysis, should also output inclusion mtx
     for(it2 = count[a].begin(); it2 != count[a].end(); it2++){
       c = it2->second;
       if(maxi < 0. || c >= maxc){
@@ -75,7 +76,8 @@ int main(int argc, char ** argv){
   FILE * f = fopen(ofn.c_str(), "wb");
   fwrite(dat, sizeof(float), np, f);
   fclose(f);
-
+  // note: for qa and analysis, should also output inclusion mtx
+  
   free(dat);
   free(dat1);
   free(dat2);
