@@ -1,7 +1,9 @@
 /* by arichardson 20191023 identify transform between class maps for
   consistent visualization between a pair of labellings. Data input
   type for label maps: ieee float 32 byte-order 0 */
+
 #include"misc.h"
+
 int main(int argc, char ** argv){
   if(argc < 3) err(str("class_match_onto ") +
   str("[input class file #1] ") +
