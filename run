@@ -1,0 +1,61 @@
+# rm cluster
+# vim cluster.cpp
+# dent cluster.cpp
+# ./compile.sh
+# ./cluster mS2.bin
+# Rscript --vanilla csv_plot.R nclass.csv
+
+
+# clean the programs folder
+#rm -f bin/*
+python setup.py
+
+# clean the data folder
+#rm -f data/*
+#tar xvf data.tar.gz 
+
+# run clustering
+bin/kmeans data/mS2.bin 10
+bin/fast_cluster data/mS2.bin 10
+
+rm data/*.png
+
+bin/class_recode data/mS2.bin_fastclust.bin
+bin/class_recode data/mS2.bin_kmeans.bin
+
+mv data/mS2.bin_fastclust.bin_recode.bin data/mS2.bin_fastclust.bin
+mv data/mS2.bin_kmeans.bin_recode.bin data/mS2.bin_kmeans.bin
+
+bin/class_count data/mS2.bin_fastclust.bin
+bin/class_count data/mS2.bin_kmeans.bin
+
+bin/class_wheel data/mS2.bin_fastclust.bin
+bin/class_wheel data/mS2.bin_kmeans.bin
+
+
+bin/read_multispectral data/mS2.bin_fastclust.bin_wheel.bin 1
+bin/read_multispectral data/mS2.bin_kmeans.bin_wheel.bin 1
+
+
+bin/class_match_onto data/mS2.bin_fastclust.bin data/mS2.bin_kmeans.bin match.bin
+exit
+
+
+rm -f data/mS2.bin_kmeans.bin_match.bin
+bin/class_match_onto data/mS2.bin_kmeans.bin    data/mS2.bin_fastclust.bin data/mS2.bin_kmeans.bin_match.bin
+
+rm -f data/mS2.bin_fastclust.bin_match.bin
+bin/class_match_onto data/mS2.bin_fastclust.bin data/mS2.bin_kmeans.bin    data/mS2.bin_fastclust.bin_match.bin
+
+bin/class_wheel data/mS2.bin_kmeans.bin
+#bin/class_wheel data/mS2.bin_fastclust.bin
+#bin/class_wheel data/mS2.bin_kmeans.bin_match.bin
+bin/class_wheel data/mS2.bin_fastclust.bin_match.bin
+
+rm data/*.png
+bin/read_multispectral data/mS2.bin_fastclust.bin_match.bin_wheel.bin 1
+#bin/read_multispectral data/mS2.bin_kmeans.bin_match.bin_wheel.bin 1 
+#bin/read_multispectral data/mS2.bin_fastclust.bin_wheel.bin 1 
+bin/read_multispectral data/mS2.bin_kmeans.bin_wheel.bin 1
+
+
