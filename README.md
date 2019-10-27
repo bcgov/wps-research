@@ -17,6 +17,9 @@ To appear: more utilities for integrating open remotely-sensed imagery
 Tested on ubuntu
 
 ## how to:
+0) set up the programs:
+    python setup.py
+    
 1) view the sample input data:
 
     python read_multispectral.py sentinel2_cut.bin
@@ -28,12 +31,6 @@ Tested on ubuntu
 3) run kmeans clustering on the sample data:
 
     python kmeans.py mS2.bin
-
-4) compile and run an original clustering algorithm:
-
-    ./run.sh
-
-
 
 ## Preliminary Results
 
