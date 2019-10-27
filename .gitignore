@@ -7,3 +7,4 @@ vri*
 *.tar.gz
 bin*
 test*
+*.pyc
