@@ -20,24 +20,26 @@ bin/fast_cluster data/mS2.bin 10
 
 rm data/*.png
 
-bin/class_recode data/mS2.bin_fastclust.bin
-bin/class_recode data/mS2.bin_kmeans.bin
+class_recode data/mS2.bin_fastclust.bin
+class_recode data/mS2.bin_kmeans.bin
 
 mv data/mS2.bin_fastclust.bin_recode.bin data/mS2.bin_fastclust.bin
 mv data/mS2.bin_kmeans.bin_recode.bin data/mS2.bin_kmeans.bin
 
-bin/class_count data/mS2.bin_fastclust.bin
-bin/class_count data/mS2.bin_kmeans.bin
+class_count data/mS2.bin_fastclust.bin
+class_count data/mS2.bin_kmeans.bin
 
-bin/class_wheel data/mS2.bin_fastclust.bin
-bin/class_wheel data/mS2.bin_kmeans.bin
-
-
-bin/read_multispectral data/mS2.bin_fastclust.bin_wheel.bin 1
-bin/read_multispectral data/mS2.bin_kmeans.bin_wheel.bin 1
+class_wheel data/mS2.bin_fastclust.bin
+class_wheel data/mS2.bin_kmeans.bin
 
 
-bin/class_match_onto data/mS2.bin_fastclust.bin data/mS2.bin_kmeans.bin match.bin
+read_multi data/mS2.bin_fastclust.bin_wheel.bin 1
+read_multi data/mS2.bin_kmeans.bin_wheel.bin 1
+
+class_match_onto data/mS2.bin_fastclust.bin data/mS2.bin_kmeans.bin data/fastclust_onto_kmeans.bin
+class_wheel data/fastclust_onto_kmeans.bin
+read_multi data/fastclust_onto_kmeans.bin_wheel.bin 1
+
 exit
 
 
@@ -53,9 +55,9 @@ bin/class_wheel data/mS2.bin_kmeans.bin
 bin/class_wheel data/mS2.bin_fastclust.bin_match.bin
 
 rm data/*.png
-bin/read_multispectral data/mS2.bin_fastclust.bin_match.bin_wheel.bin 1
-#bin/read_multispectral data/mS2.bin_kmeans.bin_match.bin_wheel.bin 1 
-#bin/read_multispectral data/mS2.bin_fastclust.bin_wheel.bin 1 
-bin/read_multispectral data/mS2.bin_kmeans.bin_wheel.bin 1
+bin/read_multi data/mS2.bin_fastclust.bin_match.bin_wheel.bin 1
+#bin/read_multi data/mS2.bin_kmeans.bin_match.bin_wheel.bin 1 
+#bin/read_multi data/mS2.bin_fastclust.bin_wheel.bin 1 
+bin/read_multi data/mS2.bin_kmeans.bin_wheel.bin 1
 
 
