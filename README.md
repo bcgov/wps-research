@@ -47,7 +47,7 @@ Tested on ubuntu
 
 #### How the number of clusters changes by varying K (the number of K-nearest Neighbours)
 y = log(n_segments), x = number of k-nearest neighbours 
-![alt text](output/plot.png)
+![alt text](output/nclass.csv_plot.png)
 
 Hypothetically for a one-level analysis (non-hierarchical) taking K=100 is highly information-preserving choice, as the curve seems to depart strongly from monotonicity after K=200..
 
