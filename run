@@ -40,6 +40,9 @@ class_match_onto data/mS2.bin_fastclust.bin data/mS2.bin_kmeans.bin data/fastclu
 class_wheel data/fastclust_onto_kmeans.bin
 read_multi data/fastclust_onto_kmeans.bin_wheel.bin 1
 
+
+cd data/cluster; Rscript ../../R/csv_plot.R nclass.csv
+
 exit
 
 
