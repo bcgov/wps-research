@@ -201,7 +201,8 @@ void cprint(str s);
 
 int hsv_to_rgb(float *r, float *g, float *b, float h, float s, float v);
 
-str hdr_fn(str fn);
+str hdr_fn(str fn); //create = false
+str hdr_fn(str fn, bool create);
 
 /* get size of file pointer */
 size_t size(FILE * f);

@@ -211,7 +211,7 @@ void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband){
   hf.close();
 }
 
-str hdr_fn(str fn){
+str hdr_fn(str fn, bool create=false){
   str hfn(fn + str(".hdr"));
   if(exists(hfn)) return hfn;
   int s = fn.size();
@@ -219,8 +219,18 @@ str hdr_fn(str fn){
   b = b.substr(0, s - 4);
   str hfn2(b + str(".hdr"));
   if(exists(hfn2)) return hfn2;
-  err(str("could not find header at: ") + hfn);
+  if(create){
+    return hfn;
+  }
+  else{
+    err(str("could not find header at: ") + hfn + str(" or at: ") + hfn2);
+  }
 }
+
+str hdr_fn(str fn){
+  return hdr_fn(fn, false);
+}
+
 
 float * falloc(size_t nf){
   return (float *) alloc(nf * (size_t)sizeof(float));
