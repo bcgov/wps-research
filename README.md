@@ -45,7 +45,7 @@ Tested on ubuntu
 10 clusters: <br>
 <img src="output/317.lab_wheel.bin.png " width="640">
 
-#### How the number of clusters changes by varying K (the number of K-nearest Neighbours)
+#### How the number of clusters changes by varying K (the number of K-nearest Neighbours) for the latter method
 y = log(n_segments), x = number of k-nearest neighbours 
 ![alt text](output/nclass.csv_plot.png)
 
