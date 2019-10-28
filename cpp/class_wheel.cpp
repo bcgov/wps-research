@@ -5,7 +5,9 @@ int main(int argc, char ** argv){
   if(argc < 2) err("class_wheel [input binary file name]");
 
   str fn(argv[1]); // input file name
+  cout << "input file name:" << fn << endl;
   str hfn(hdr_fn(fn)); // auto-detect header file name
+  cout << "header file name:" << hfn << endl;
   size_t nrow, ncol, nband, np, i, j;
   hread(hfn, nrow, ncol, nband); // read header
 
