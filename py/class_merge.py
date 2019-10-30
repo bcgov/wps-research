@@ -2,7 +2,7 @@
 from misc import * 
 
 if len(args) < 2:
-    args.append('20190926kamloops_data/WATERSP.tif_project_4x.bin_sub.bin')
+    err("class_merge [input file name") # args.append('20190926kamloops_data/WATERSP.tif_project_4x.bin_sub.bin')
 
 fn = args[1]
 hfn = hdr_fn(fn)
@@ -24,6 +24,8 @@ for c in class_labels:
 print "class_labels", class_labels
 
 print "assume most-frequent label is non-positive.."
+
+max_label, max_count = None, None
 
 # detect non-positive class
 if 0. not in class_labels:
