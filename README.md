@@ -10,8 +10,20 @@ software produced in collaboration with BCWS Predictive Services Unit (PSU), CIT
     * [Unsupervised Nonparametric Classification of Polarimetric SAR Data Using The K-nearest Neighbor Graph](http://ashlinrichardson.com/uvic/papers/2010_richardson_igarss.pdf), A. Richardson et al, proc. IEEE IGARSS, Honolulu, Hawaii, July 2010
 
 To appear: more utilities for integrating open remotely-sensed imagery
+
+## Direct Collaborators and Contributors:
+* Brady Holliday, BCWS
+* Dana Hicks, BCWS
+* Joanna Wand, BCWS
+* Musfiq Rahman, TRU
+* Jabed Tomal, TRU
+### TRU Computing Science ML/AI Students Co-supervised:
+* Francesca Rammuno
+* Gagan Bajwa
+* Brad Crump
+
 ## requirements:
-* python 2 + matplotlib + numpy (for image viewer)
+* python 2 /3 + matplotlib + numpy (for image viewer)
 * gnu/g++ (for discretization algorithm)
 
 Tested on ubuntu
