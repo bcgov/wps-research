@@ -17,7 +17,7 @@ To appear: more utilities for integrating open remotely-sensed imagery
 * Brady Holliday
 * Dana Hicks
 * Joanna Wand
-### TRU Students co-supervised:
+### TRU Computing Science ML/AI Students co-supervised:
 * Francesca Rammuno
 * Gagan Bajwa
 * Brad Crump
