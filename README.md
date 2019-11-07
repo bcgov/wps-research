@@ -12,11 +12,11 @@ software produced in collaboration with BCWS Predictive Services Unit (PSU), CIT
 To appear: more utilities for integrating open remotely-sensed imagery
 
 ## Direct collaborators:
-* Musfiq Rahman
-* Jabed Tomal
-* Brady Holliday
-* Dana Hicks
-* Joanna Wand
+* Brady Holliday, BCWS
+* Dana Hicks, BCWS
+* Joanna Wand, BCWS
+* Musfiq Rahman, TRU
+* Jabed Tomal, TRU
 ### TRU Computing Science ML/AI Students co-supervised:
 * Francesca Rammuno
 * Gagan Bajwa
