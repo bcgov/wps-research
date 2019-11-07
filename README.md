@@ -11,7 +11,7 @@ software produced in collaboration with BCWS Predictive Services Unit (PSU), CIT
 
 To appear: more utilities for integrating open remotely-sensed imagery
 ## requirements:
-* python 2 + matplotlib + numpy (for image viewer)
+* python 2 /3 + matplotlib + numpy (for image viewer)
 * gnu/g++ (for discretization algorithm)
 
 Tested on ubuntu
