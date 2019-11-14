@@ -83,7 +83,8 @@ ax = fig.add_subplot(1,1,1)
 
 plt.imshow(rgb, vmin = 0., vmax = 1.)
 plt.tight_layout()
-plt.title(fn, fontsize=11)
+title_s = fn.split("/")[-1]
+plt.title(title_s, fontsize=11)
 plt_fn = fn + ".png"
 print "+w", plt_fn
 plt.savefig(plt_fn,
