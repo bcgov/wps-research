@@ -2,13 +2,21 @@
 import sys
 import dbfread
 
+in_file = None
+if len(sys.argv) < 1:
+    print("Error: usage: vri_dbf_to_csv [input dbf file]")
+else:
+    in_file = sys.argv[1]
+
+out_file = in_file + ".csv"
+print("+w " + out_file)
 ci = 0
 count = {}
 keys = None
 keytype = {}
-f = open("VRI_KLoops.csv", "wb")
+f = open(out_file, "wb") # "VRI_KLoops.csv", "wb")
 
-for record in dbfread.DBF("VRI_KLoops.dbf"):
+for record in dbfread.DBF(in_file):  #"VRI_KLoops.dbf"):
     if keys is None:
         keys = record.keys()
         keys = [k.replace(',', ';') for k in keys]

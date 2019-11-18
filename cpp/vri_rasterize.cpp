@@ -16,6 +16,7 @@ bool encode(vector<str> & d, vector<float> & e, map<str, float> & lookup){
     if(!is_numeric(*it)) all_numeric = false;
   }
 
+  cout << "  numeric=" << (all_numeric?str("TRUE"):str("FALSE")) << endl;
   // use LUT if any non-numerics
   if(all_numeric){
     for(it = d.begin(); it != d.end(); it++){
@@ -24,7 +25,7 @@ bool encode(vector<str> & d, vector<float> & e, map<str, float> & lookup){
   }
   else{
     float next_i = 1.;
-    map<str, float> lookup;
+    // map<str, float> lookup;
     for(it = d.begin(); it != d.end(); it++){
       if(lookup.count(*it) < 1){
         lookup[*it] = next_i++;
@@ -40,7 +41,7 @@ int main(int argc, char** argv){
   //if(argc < 3) err("vri_polygonize [vri polygon raster file (ENVI type 4)] [vri poly attr. csv file]");
 
   size_t nrow, ncol, nband, i, j;
-  str prf("vri/vri.bin"); // polygon raster file
+  str prf("vri.bin"); //VRI_KLoops_OBJECTID_1.bin"); // polygon raster file
   str prf_hf(hdr_fn(prf));
   hread(prf_hf, nrow, ncol, nband);
   float * pr = bread(prf, nrow, ncol, nband);
@@ -71,7 +72,7 @@ int main(int argc, char** argv){
   if(cf.size() != cs.size()) err("conversion from float failed");
   printf("max_i %ld min_i %ld n_i %ld\n", (long int)min_i, (long int)max_i, cf.size());
 
-  str dbf("vri/VRI_KLoops.csv");
+  str dbf("VRI_Kloops_clipv2_S2_reproject.dbf.csv");
 
   str s, hdr;
   ifstream f(dbf);
@@ -85,7 +86,9 @@ int main(int argc, char** argv){
   }
 
   cout << fields << endl;
+  // size_t idx = f_i[str("POLYGON_ID")];
   size_t idx = f_i[str("OBJECTID_1")];
+  // size_t idx = f_i[str("OBJECTID")];
   map<size_t, vector<str>> data;
   for0(i, fields.size()){
     data[i] = vector<str>();
@@ -112,6 +115,8 @@ int main(int argc, char** argv){
     idx_i[(size_t)atol(data[idx][i].c_str())] = i;
   }
 
+  system("mkdir vri");
+
   for0(i, fields.size()){
     vector<float> e;
     map<str, float> lut;
@@ -119,7 +124,7 @@ int main(int argc, char** argv){
     bool numeric = encode(data[i], e, lut);
     cout << fields[i] << ",\t" << (numeric?"Y":"N") << ",\t" << lut.size() << endl;
 
-    str pre(prf + str("_") + fields[i]);
+    str pre(str("./vri/") + fields[i]); //prf + str("_") + fields[i]);
     str ofn(pre + str(".bin"));
     str ohfn(pre + str(".hdr"));
 
@@ -148,7 +153,7 @@ int main(int argc, char** argv){
       FILE * outlf = fopen(lfn.c_str(), "wb");
       map<str, float>::iterator lf;
       for(lf = lut.begin(); lf != lut.end(); lf++){
-        fprintf(outlf, "%s,%f\n", lf->first.c_str(), lf->second);
+        fprintf(outlf, "%s,%f\n", lf->first.c_str(), (float)lf->second);
       }
       fclose(outlf);
       // dont forget to write lut
