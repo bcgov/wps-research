@@ -1,6 +1,5 @@
 from py.misc import *
 
-
 cpp = os.popen("find cpp/*.cpp").readlines()
 for c in cpp:
     c = c.strip()
@@ -36,10 +35,3 @@ for p in py:
         open(wf, 'wb').write('\n'.join(lines).encode())
         cmd = 'g++ -w -O3 -o ' + bf + ' ' + wf
         run(cmd + "; rm -rf " + wf)
-
-    
-
-
-
-
-
