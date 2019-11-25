@@ -5,6 +5,6 @@ quinlan*
 2019*
 vri*
 *.tar.gz
-bin*
+bin/*
 test*
 *.pyc
