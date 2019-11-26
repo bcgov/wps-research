@@ -111,18 +111,16 @@ def twop_str(data, band_select = [3, 2, 1]):
         # extract a channel
         rgb[:, :, i] = data[:, :, band_select[i]]
         
-        # reshape array and sort values
-        values = rgb[:,:,i]
-        values = values.reshape(np.prod(values.shape))
-        values = values.tolist() 
+        # slice, reshape and sort
+        values = rgb[:, :, i].reshape(samples * lines).tolist() 
         values.sort()
-        npx = len(values) # number of pixels
         
         # sanity check
         if values[-1] < values[0]:
             err("failed to sort")
 
         # so-called "2% linear stretch
+        npx = len(values) # number of pixels
         rgb_mn = values[int(math.floor(float(npx) * 0.02))]
         rgb_mx = values[int(math.floor(float(npx) * 0.98))]
         rgb[:, :, i] -= rgb_mn
