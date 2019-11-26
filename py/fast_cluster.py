@@ -1,5 +1,5 @@
-# use fastclust library https://pypi.org/project/fastcluster/
-# for unsupervised learning on an image (next: object-based version)
+# use fastclust library https://pypi.org/project/fastcluster/ for unsupervised learning on an image (next: object-based version)
+# this adapts our initial work here: https://github.com/franarama/satellite-clustering/blob/hierarchical-clustering/cluster.py
 
 # tested with python 2.7 on ubuntu
 import os
@@ -63,8 +63,8 @@ rotate = False
 plt.ylabel('distance' if (not rotate) else 'index')
 plt.xlabel('index' if (not rotate) else 'distance')
 dn = dendrogram(Z,
-        truncate_mode='lastp',
-        p = n_clusters,
+        #truncate_mode='lastp',
+        #p = n_clusters,
         leaf_rotation = 0. if rotate else 90.,
         show_contracted=True,
         orientation='right' if rotate else 'top',
@@ -93,3 +93,26 @@ samples, lines, bands = read_hdr(hdr_fn(args[1]))
 write_binary(labels, args[1] + "_fastclust.bin")
 write_hdr(args[1] + "_fastclust.hdr", samples, lines, 1)
 
+'''
+the below from https://docs.scipy.org/doc/scipy/reference/generated/scipy.cluster.hierarchy.fcluster.html
+criterionstr, optional
+    The criterion to use in forming flat clusters. This can be any of the following values:
+
+inconsistent: if a cluster node and all its descendants have an inconsistent value less than or equal to t then all its leaf descendants belong to the same flat cluster. When no non-singleton cluster meets this criterion, every node is assigned to its own cluster. (Default)
+
+distance: Forms flat clusters so that the original observations in each flat cluster have no greater a cophenetic distance than t.
+        
+maxclust: Finds a minimum threshold r so that the cophenetic distance between any two original observations in the same flat cluster is no more than r and no more than t flat clusters are formed.
+        
+monocrit: Forms a flat cluster from a cluster node c with index i when monocrit[j] <= t.
+
+            For example, to threshold on the maximum mean distance as computed in the inconsistency matrix R with a threshold of 0.8 do:
+
+            MR = maxRstat(Z, R, 3)
+            cluster(Z, t=0.8, criterion='monocrit', monocrit=MR)
+
+maxclust_monocrit: Forms a flat cluster from a non-singleton cluster node c when monocrit[i] <= r for all cluster indices i below and including c. r is minimized such that no more than t flat clusters are formed. monocrit must be monotonic. For example, to minimize the threshold t on maximum inconsistency values so that no more than 3 flat clusters are formed, do:
+
+            MI = maxinconsts(Z, R)
+            cluster(Z, t=3, criterion='maxclust_monocrit', monocrit=MI)
+'''

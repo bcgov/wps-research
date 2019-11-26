@@ -46,46 +46,9 @@ for b in range(img.shape[2]): img[:, :, b] = img_ds.GetRasterBand(b + 1).ReadAsA
 ncol, nrow, nband = img.shape
 print "img.shape", nrow, ncol, nband
 
-# need to put this function in the "misc"
-def twop_str(data):
-    lines, samples, bands = data.shape
-    band_select = [3, 2, 1]
-    print "data.shape", data.shape, np.prod(data.shape)
-    rgb = np.zeros((lines, samples, 3))
-    for i in range(0, 3):
-        dbs = data[:, :, band_select[i]]
-        #dbs = dbs.reshape((lines, samples))
-        rgb[:, :, i] = dbs
-
-        # scale band in range 0 to 1
-        rgb_min, rgb_max = np.min(rgb[:, :, i]), np.max(rgb[:, :, i])
-        print("rgb_min: " + str(rgb_min) + " rgb_max: " + str(rgb_max))
-        rgb[:, :, i] -= rgb_min
-        rng = rgb_max - rgb_min
-        if rng != 0.:
-            rgb[:, :, i] /= rng #(rgb_max - rgb_min)
-        # so called "2% linear stretch"
-        values = copy.deepcopy(rgb[:,:,i]) # values.shape
-        values = values.reshape(np.prod(values.shape))
-        values = values.tolist() # len(values)
-        values.sort()
-        npx = len(values) # number of pixels
-        if values[-1] < values[0]:
-            err("failed to sort")
-
-        rgb_min = values[int(math.floor(float(npx)*0.02))]
-        rgb_max = values[int(math.floor(float(npx)*0.98))]
-        rgb[:, :, i] -= rgb_min
-        rng = rgb_max - rgb_min
-        if rng > 0.:
-            rgb[:, :, i] /= (rgb_max - rgb_min)
-    return rgb
-
-ntile_x = ncol / tile_size
-if ncol % tile_size > 0: ntile_x += 1
-
-ntile_y = nrow / tile_size
-if nrow % tile_size > 0: ntile_y += 1
+rx, ry = ncol / tile_size, nrow / tile_size
+ntile_x = rx if ncol % tile_size == 0 else rx + 1
+ntile_y = ry if nrow % tile_size == 0 else ry + 1
 
 print "ntilex", ntile_x, "ntiley", ntile_y
 
@@ -106,11 +69,6 @@ for x in range(0, ntile_x):
         plt.tight_layout()
         plt.show()
 err("done")
-
-# need to handle the "remainder" of the lengths
-
-
-
 
 # reshape image again to match expected format for scikit-learn (NRow * NCol, NBand)
 new_shape = (img.shape[0] * img.shape[1], img.shape[2])

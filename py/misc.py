@@ -100,3 +100,39 @@ def write_hdr(hfn, samples, lines, bands):
              'interleave = bsq',
              'byte order = 0']
     open(hfn, 'wb').write('\n'.join(lines))
+
+
+# two-percent linear, histogram stretch. N.b. this impl. does not preserve colour ratios
+def twop_str(data):
+    lines, samples, bands = data.shape
+    band_select = [3, 2, 1]
+    print "data.shape", data.shape, np.prod(data.shape)
+    rgb = np.zeros((lines, samples, 3))
+    for i in range(0, 3):
+        dbs = data[:, :, band_select[i]]
+        #dbs = dbs.reshape((lines, samples))
+        rgb[:, :, i] = dbs
+
+        # scale band in range 0 to 1
+        rgb_min, rgb_max = np.min(rgb[:, :, i]), np.max(rgb[:, :, i])
+        print("rgb_min: " + str(rgb_min) + " rgb_max: " + str(rgb_max))
+        rgb[:, :, i] -= rgb_min
+        rng = rgb_max - rgb_min
+        if rng != 0.:
+            rgb[:, :, i] /= rng #(rgb_max - rgb_min)
+        # so called "2% linear stretch"
+        values = copy.deepcopy(rgb[:,:,i]) # values.shape
+        values = values.reshape(np.prod(values.shape))
+        values = values.tolist() # len(values)
+        values.sort()
+        npx = len(values) # number of pixels
+        if values[-1] < values[0]:
+            err("failed to sort")
+
+        rgb_min = values[int(math.floor(float(npx)*0.02))]
+        rgb_max = values[int(math.floor(float(npx)*0.98))]
+        rgb[:, :, i] -= rgb_min
+        rng = rgb_max - rgb_min
+        if rng > 0.:
+            rgb[:, :, i] /= (rgb_max - rgb_min)
+    return rgb
