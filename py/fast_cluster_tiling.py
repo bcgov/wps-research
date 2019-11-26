@@ -53,7 +53,7 @@ ntile_y = ry if nrow % tile_size == 0 else ry + 1
 
 print "ntilex", ntile_x, "ntiley", ntile_y
 
-for x in f_n = image + "_" + str(x) + "_" + str(y) + "_d.png"range(0, ntile_x):
+for x in range(0, ntile_x):
     x_start = x * tile_size
     x_end = min(x_start + tile_size - 1, ncol - 1) 
     x_start = max(0, x_start - border_size) # add border
