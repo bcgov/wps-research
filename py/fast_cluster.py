@@ -53,7 +53,7 @@ X = img[:, :, :img.shape[2]].reshape(new_shape)
 
 # use fastcluster.linkage instead of scipy.cluster.hierarchy.linkage
 print "calculating linkage.."
-Z = fc.linkage(X, 'average') #'ward')
+Z = fc.linkage(X, 'average') # https://en.wikipedia.org/wiki/UPGMA
 
 print "calculating dendrogram.."
 fig = plt.figure(figsize=(10, 10)) # 25, 10
