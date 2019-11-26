@@ -105,7 +105,7 @@ for x in range(0, ntile_x):
         p_mns[p] = p_mn
 
 
-# threshold distance
+# threshold distance (only needed this, could run linkage again if too big to store)
 d_t =  min(p_mns.values())
 
 for x in range(0, ntile_x):
@@ -125,8 +125,7 @@ for x in range(0, ntile_x):
         p = str(x) + "_" + str(y)
         pfx = image + "_" + p
 
-        Z = linkages[p]
-        X = Xs[p]
+        Z, X = linkages[p], Xs[p] # could run again if too much memory to store
 
         labels = fcluster(Z, d_t, criterion = 'distance') #criterion='maxclust') ##criterion='distance')
         labels=labels.reshape(X.shape[0], X.shape[1]) #X[:, :].shape)
@@ -146,3 +145,9 @@ for x in range(0, ntile_x):
 
 # isn't it a waste to calculate the full linkage, on something that's not merged all the way?
 
+# pull the other stuff out into a function..
+
+
+# 1) combine all the labels into one (with the appropriate offsets)
+
+# 2) do h_clustering on the new class map
