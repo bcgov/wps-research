@@ -247,12 +247,12 @@ float * bread(str bfn, size_t nrow, size_t ncol, size_t nband){
   return dat;
 }
 
-pthread_mutex_t print_mutex;
+pthread_mutex_t print_mtx;
 
 void cprint(str s){
-  pthread_mutex_lock(&print_mutex);
+  mtx_lock(&print_mtx);
   cout << s << endl;
-  pthread_mutex_unlock(&print_mutex);
+  mtx_unlock(&print_mtx);
 }
 
 int hsv_to_rgb(float *r, float *g, float *b, float h, float s, float v){
