@@ -319,3 +319,32 @@ size_t fsize(string fn){
 bool exists(str fn){
   return fsize(fn) > 0;
 }
+
+bool operator<(const f_i& a, const f_i&b){
+  return a.d > b.d; // priority_queue max first: we want min first
+}
+
+bool operator<(const f_ij& a, const f_ij&b){
+  return a.d > b.d; // priority_queue max first: we want min first
+}
+
+float * load_envi(str in_f, size_t & nrow, size_t & ncol, size_t & nband){
+  str ext(in_f.substr(in_f.size() - 3, 3));
+  if(ext != str("bin")){
+    err(".bin extension expected on input file");
+  }
+  str hdr(in_f.substr(0, in_f.size() - 3) + str("hdr"));
+  if(!exists(hdr)){
+    hdr = in_f + str(".hdr");
+    if(!exists(hdr)){
+      err(str("header file not found:") + hdr);
+    }
+  }
+
+  hread(hdr, nrow, ncol, nband);
+  cout << hdr << " nrow " << nrow << " ncol " << ncol << " nband " << nband << endl;
+
+  return bread(in_f, nrow, ncol, nband);
+}
+
+

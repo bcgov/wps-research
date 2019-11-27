@@ -12,8 +12,10 @@
 
 #include<map>
 #include<set>
+#include<list>
 #include<cmath>
 #include<queue>
+#include<cfloat>
 #include<vector>
 #include<string>
 #include<sstream>
@@ -28,6 +30,7 @@
 #include <algorithm>
 #include <cctype>
 #include <locale>
+#include<stack>
 
 
 using namespace std;
@@ -52,6 +55,7 @@ vector<string> split(string s); // comma
 vector<string> split_special(string s); // comma with possible commas inside quotation marks!
 string join(const char * delim, vector<string> s);
 
+// output operator for a vector container
 template<class T> std::ostream& operator << (std::ostream& os, const std::vector<T>& v){
   os << "[";
   for (typename std::vector<T>::const_iterator ii = v.begin(); ii != v.end(); ++ii){
@@ -61,6 +65,7 @@ template<class T> std::ostream& operator << (std::ostream& os, const std::vector
   return os;
 }
 
+// output operator for set container
 template<class T> std::ostream& operator << (std::ostream& os, const std::set<T>& v){
   os << "{";
   for (typename std::set<T>::const_iterator ii = v.begin(); ii != v.end(); ++ii){
@@ -70,12 +75,23 @@ template<class T> std::ostream& operator << (std::ostream& os, const std::set<T>
   return os;
 }
 
+// output operator for map container
 template<class A, class B> std::ostream& operator << (std::ostream& os, const std::map<A, B>& v){
   os << "{" << endl;
   for (typename std::map<A, B>::const_iterator ii = v.begin(); ii != v.end(); ++ii){
     os << ii->first << ":" << ii->second << ","; //endl;
   }
   os << "}" << endl;
+  return os;
+}
+
+// output operator for list container
+template<class T> std::ostream& operator << (std::ostream& os, const std::list<T>& v){
+  os << "{";
+  for (typename std::list<T>::const_iterator ii = v.begin(); ii != v.end(); ++ii){
+    os << " " << *ii;
+  }
+  os << "}";
   return os;
 }
 
@@ -209,5 +225,39 @@ size_t size(FILE * f);
 size_t fsize(string fn);
 bool exists(str fn);
 
+float * load_envi(str in_f, size_t & nrow, size_t & ncol, size_t & nband);
+
+class f_i{
+  public: // float, index tuple object
+  float d;
+  size_t i;
+  f_i(float d_ = 0., size_t i_ = 0){
+    d = d_;
+    i = i_;
+  }
+  f_i(const f_i &a){
+    d = a.d;
+    i = a.i;
+  }
+};
+
+class f_ij{
+  public: // float, two-index tuple object
+  float d;
+  size_t i, j;
+  f_ij(float d_ = 0., size_t i_ = 0, size_t j_ = 0){
+    d = d_;
+    i = i_;
+    j = j_;
+  }
+  f_ij(const f_ij &a){
+    d = a.d;
+    i = a.i;
+    j = a.j;
+  }
+};
+
+bool operator<(const f_i& a, const f_i&b);
+bool operator<(const f_ij& a, const f_ij&b);
 
 #endif
