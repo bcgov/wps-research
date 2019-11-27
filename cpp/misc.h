@@ -207,13 +207,8 @@ float * falloc(size_t nf);
 // read binary file
 float * bread(str bfn, size_t nrow, size_t ncol, size_t nband);
 
-extern  pthread_mutex_t print_mutex;
+extern  pthread_mutex_t print_mtx;
 void cprint(str s);
-/*
-  pthread_mutex_lock(&print_mutex);
-  cout << s << endl;
-  pthread_mutex_unlock(&print_mutex);
-*/
 
 int hsv_to_rgb(float *r, float *g, float *b, float h, float s, float v);
 
@@ -227,6 +222,8 @@ bool exists(str fn);
 
 float * load_envi(str in_f, size_t & nrow, size_t & ncol, size_t & nband);
 
+
+// need to compare / merge this with f_idx above?
 class f_i{
   public: // float, index tuple object
   float d;
@@ -260,4 +257,7 @@ class f_ij{
 bool operator<(const f_i& a, const f_i&b);
 bool operator<(const f_ij& a, const f_ij&b);
 
+
+#define mtx_lock pthread_mutex_lock
+#define mtx_unlock pthread_mutex_unlock
 #endif
