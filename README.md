@@ -10,10 +10,8 @@ Research collaboration in Image Analysis featuring:
    * K-Means++
    * Hierarchical Agglomerative Clustering (HAC) Scikit-Learn 
    * HAC: Daniel Müllner, fastcluster: Fast Hierarchical, Agglomerative Clustering Routines for R and Python, Journal of Statistical Software 53 (2013), no. 9, 1–18, URL http://www.jstatsoft.org/v53/i09/
-* manipulation or visualization of class maps (i.e., truth data or classification results)
-* clustering algorithm, a new minimalist implementation of
-    * [Unsupervised Nonparametric Classification of Polarimetric SAR Data Using The K-nearest Neighbor Graph](http://ashlinrichardson.com/uvic/papers/2010_richardson_igarss.pdf), A. Richardson et al, proc. IEEE IGARSS, Honolulu, Hawaii, July 2010
-
+   * KGC: a new minimalist implementation of [Unsupervised Nonparametric Classification of Polarimetric SAR Data Using The K-nearest Neighbor Graph](http://ashlinrichardson.com/uvic/papers/2010_richardson_igarss.pdf), A. Richardson et al, proc. IEEE IGARSS, Honolulu, Hawaii, July 2010
+* manipulation operations for class maps
 To appear: more utilities for integrating open remotely-sensed imagery
 
 ## Direct Collaborators and Contributors:
@@ -57,6 +55,8 @@ Tested on ubuntu
 5) Run HAC with seeds produced by 4), allowing HAC to run on larger images
 
     bin/hclust data/mS2.bin data/mS2.bin_label.bin 10
+    
+    video of clustering: https://www.youtube.com/watch?v=ooOHEubDNvM
    
 ## Preliminary Results
 
