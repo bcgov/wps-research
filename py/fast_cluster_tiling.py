@@ -1,9 +1,9 @@
-# use fastclust library https://pypi.org/project/fastcluster/ for unsupervised learning on an image (next: object-based version). Tested with python 2.7 on ubuntu
-# this adapts our initial work here: https://github.com/franarama/satellite-clustering/blob/hierarchical-clustering/cluster.py
+''' use fastclust library https://pypi.org/project/fastcluster/ for unsupervised image learning (next: object-based version)
 
-# e.g.
-# python py/fast_cluster_tiling.py  data/fran/mS2.bin 10 50 10
+Tested with python 2.7 on ubuntu
+e.g.:
 
+python py/fast_cluster_tiling.py  data/hclust/sentinel2_cut.bin 111 11 24.5 '''
 from misc import *
 
 def impt(lib):
@@ -25,12 +25,14 @@ from scipy.cluster.hierarchy import fcluster
 # Tell GDAL to throw Python exceptions, and register all drivers
 gdal.UseExceptions()
 gdal.AllRegister()
-n_clusters, tile_size, border_size = None, None, None
+image, tile_size, border_size, percent_trim = None, None, None, None
 
-try: image, n_clusters, tile_size, border_size = args[1], int(args[2]), int(args[3]), int(args[4])
-except: err("Usage: python fastcluster.py [image file name .bin] [n clusters desired]" +
+try: image, tile_size, border_size, percent_trim = args[1], int(args[2]), int(args[3]), float(args[4]) / 100.
+except: err("Usage: python fast_cluster_tiling.py " +
+            "[image file name .bin] " +
             "[square tiles: number of pixels n (tile size: n x n)] " +
-            "[border size around tile: number of pixels]")
+            "[border size around tile: number of pixels]" + 
+            "[distance trim histogram factor % e.g. 24.5]")
 
 # Read in raster image
 img_ds = gdal.Open(image, gdal.GA_ReadOnly)
@@ -90,7 +92,7 @@ for x in range(0, ntile_x):
         plt.tight_layout()
         plt.savefig(f_n)
     
-        print "calculating linkage.."
+        # print "calculating linkage.."
         X_r = X.reshape(X.shape[0] * X.shape[1], nband)
 
         # https://scikit-learn.org/stable/modules/generated/sklearn.cluster.AgglomerativeClustering.html
@@ -100,12 +102,12 @@ for x in range(0, ntile_x):
 
         values = Z.reshape(np.prod(Z.shape)).tolist()
         values.sort()
-        q = 0.2
+        q = percent_trim # 0.245
         pmn = min(values)
         p_mn = values[int(math.floor(q * len(values)))]
         p_mx = values[int(math.floor((1. - q) * len(values)))]
         pmx = max(values)
-        print pmn, p_mn, p_mx, pmx
+        print "\tdmin, d[q], d[1-q], dmax: ", pmn, p_mn, p_mx, pmx
         p_mns[p] = p_mn
 
 
@@ -118,12 +120,11 @@ for x in range(0, ntile_x):
         p = str(x) + "_" + str(y)
         pfx = image + "_" + p
 
-        #Z, X = linkages[p], Xs[p] # could run again if too much memory to store
-        Z = linkages[p]
+        Z = linkages[p] # could rerun if insuff. memory
         labels[p] = fcluster(Z, d_t, criterion = 'distance')
         labels[p] = labels[p].reshape(extent[p][1] - extent[p][0], extent[p][3] - extent[p][2])
 
-        print "min, max", np.min(labels), np.max(labels)
+        # print "min, max", np.min(labels), np.max(labels)
         plt.figure()
         plt.imshow(labels[p])
         plt.tight_layout()
@@ -133,9 +134,9 @@ for x in range(0, ntile_x):
         plt.savefig(plot_file, orientation='portrait')
 
         print "+w", pfx + ".bin"
-        labels[p] = labels[p].reshape(extent[p][3] - extent[p][2], extent[p][1] - extent[p][0], 1) #         extent[p][1] - extent[p][0], extent[p][3] - extent[p][2], 1)
+        labels[p] = labels[p].reshape(extent[p][3] - extent[p][2], extent[p][1] - extent[p][0], 1)
         write_binary(labels[p], pfx + ".bin")
-        write_hdr(pfx + ".hdr", extent[p][3] - extent[p][2], extent[p][1] - extent[p][0], 1) #extent[p][1] - extent[p][0], extent[p][3] - extent[p][2], 1) # samples, lines, 1)
+        write_hdr(pfx + ".hdr", extent[p][3] - extent[p][2], extent[p][1] - extent[p][0], 1)
 
 out_shape = (img_ds.RasterYSize, img_ds.RasterXSize)
 result = np.zeros(out_shape)
@@ -147,10 +148,9 @@ for x in range(0, ntile_x):
         label = labels[p].astype(float)
         label = label.reshape(np.prod(label.shape)).tolist()
         min_label, max_label, n_label = min(label), max(label), int(max(label) - min(label) + 1)
-        print "min_label", min_label, "max_label", max_label, "n_label", n_label, "start_label", next_label, "end_label", next_label + n_label - 1
-        
+        print "\tmin_label", min_label, "max_label", max_label, "n_label", n_label, "start_label", next_label, "end_label", next_label + n_label - 1
         x_start, x_end, y_start, y_end = extent[p]
-        print extent[p]
+        print "x_start, x_end, y_start, y_end", extent[p]
         labels[p] = labels[p].reshape(extent[p][1] - extent[p][0], extent[p][3] - extent[p][2])
         result[int(x_start): int(x_end), int(y_start): int(y_end)] = labels[p] + next_label 
         next_label += n_label
@@ -171,17 +171,3 @@ result = result.astype(np.float32)
 result = result.reshape(img_ds.RasterXSize, img_ds.RasterYSize, 1)
 write_binary(result, image + "_label.bin")
 write_hdr(image +"_label.hdr", img_ds.RasterXSize, img_ds.RasterYSize, 1)
-
-#write_binary(
-# isn't it a waste to calculate the full linkage, on something that's not merged all the way?
-
-# pull the other stuff out into a function..
-
-
-# 1) combine all the labels into one (with the appropriate offsets)
-
-# 2) do h_clustering on the new class map
-
-
-
-# IF NOT CALCULATING DENDROGRAM, DEFINITELY DON'T NEED TO SAVE DMAT
