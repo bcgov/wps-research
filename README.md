@@ -1,13 +1,14 @@
 # bcws-psu-research
-An image analysis research collaboration featuring:
-* Digital Platforms and Data Division (DPDD), Office of The BC Chief Information Officer (OCIO) 
-* BC Wildfire Service (BCWS) Predictive Services Unit (PSU)
+Research collaboration in Image Analysis featuring:
 * Thompson Rivers University (TRU)
+* BC Wildfire Service (BCWS) Predictive Services Unit (PSU)
+* Digital Platforms and Data Division (DPDD), Office of The BC Chief Information Officer (OCIO) 
 
 ## features
-* multispectral image viewer
-* Kmeans clustering applied to multispectral imagery
-* invoking the following code, in python:
+* High-contrast visualization for multispectral imagery and classification maps
+* Supervised and unsupervised classification methods, for multispectral imagery
+   * K-Means++
+   * Hierarchical Agglomerative Clustering (HAC)  
    * Daniel Müllner, fastcluster: Fast Hierarchical, Agglomerative Clustering Routines for R and Python, Journal of Statistical Software 53 (2013), no. 9, 1–18, URL http://www.jstatsoft.org/v53/i09/
 * manipulation or visualization of class maps (i.e., truth data or classification results)
 * clustering algorithm, a new minimalist implementation of
@@ -21,33 +22,42 @@ To appear: more utilities for integrating open remotely-sensed imagery
 * Joanna Wand, BCWS
 * Musfiq Rahman, TRU
 * Jabed Tomal, TRU
+
 ### TRU Computing Science ML/AI Students Co-supervised:
-* Francesca Rammuno
 * Gagan Bajwa
 * Brad Crump
+* Francesca Rammuno
 
 ## requirements:
-* python 2 /3 + matplotlib + numpy (for image viewer)
-* gnu/g++ (for discretization algorithm)
+* python 2
+* gnu g++
 
 Tested on ubuntu
 
 ## how to:
-0) set up the programs:
+0) Set up the programs:
     python setup.py
     
-1) view the sample input data:
+1) View sample input data:
 
-    python read_multispectral.py sentinel2_cut.bin
-
-2) run hierarchical agglomerative clustering on sample data:
-
-    python fast_cluster.py mS2.bin
+    python py/read_multispectral.py data/mS2.bin
     
-3) run kmeans clustering on the sample data:
+2) Run K-Means clustering on the sample data:
 
-    python kmeans.py mS2.bin
+    python py/kmeans.py data/mS2.bin
 
+3) Run Hierarchical Agglomerative Clustering (HAC) on sample data:
+
+    python py/fast_cluster.py data/mS2.bin
+ 
+4) Run HAC to produce tiled seeds:
+    
+    python py/fast_cluster_tiling.py data/mS2.bin 50 5 24.5
+    
+5) Run HAC with seeds produced by 4), allowing HAC to run on larger images
+
+    bin/hclust data/mS2.bin data/mS2.bin_label.bin 10
+   
 ## Preliminary Results
 
 ### K-means unsupervised classification
