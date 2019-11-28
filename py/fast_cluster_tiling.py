@@ -54,38 +54,42 @@ ntile_y = ry if nrow % tile_size == 0 else ry + 1
 
 print "ntilex", ntile_x, "ntiley", ntile_y
 
+# outputs from first step:
+p_mns = {} # histogram distance thresholds, per tile
+extent = {} # tile extents, per tile
+X_shape = {} # data shape, per tile
 linkages = {}
-p_mns = {}
-Xs = {}
 
 for x in range(0, ntile_x):
     x_start = x * tile_size
-    x_end = min(x_start + tile_size - 1, ncol - 1) 
+    x_end = min(x_start + tile_size, ncol)  # x_start + tile_size - 1, ncol - 1
     x_start = max(0, x_start - border_size) # add border
-    x_end = min(ncol - 1, x_end + border_size)
+    x_end = min(ncol, x_end + border_size) # ncol - 1 
     x_size = x_end - x_start + 1 #  calculate size
 
     for y in range(0, ntile_y):
         y_start = y * tile_size
-        y_end = min(y_start + tile_size - 1, nrow - 1)
+        y_end = min(y_start + tile_size, nrow)  # y_start + sile_size - 1, nrow - 1
         y_start = max(0, y_start - border_size)  # add border
-        y_end = min(nrow - 1, y_end + border_size)
+        y_end = min(nrow, y_end + border_size) # nrow - 1
         y_size = y_end - y_start + 1 # calculate size
         
+        # tile index
         p = str(x) + "_" + str(y)
         pfx = image + "_" + p
 
-        # plot image tile
-        plt.figure()
+        # extract tile
+        extent[p] = [x_start, x_end, y_start, y_end]
         X = img[int(x_start): int(x_end), int(y_start): int(y_end),:]
+        
+        # show tile
+        plt.figure()
         plt.imshow(twop_str(X))
-        plt.tight_layout()
-        pfx = image + "_" + str(x) + "_" + str(y)
         f_n = pfx + ".png"
         print "+w", f_n
+        plt.tight_layout()
         plt.savefig(f_n)
     
-        Xs[p] = X
         print "calculating linkage.."
         X_r = X.reshape(X.shape[0] * X.shape[1], nband)
 
@@ -107,42 +111,68 @@ for x in range(0, ntile_x):
 
 # threshold distance (only needed this, could run linkage again if too big to store)
 d_t =  min(p_mns.values())
+labels = {}
 
 for x in range(0, ntile_x):
-    x_start = x * tile_size
-    x_end = min(x_start + tile_size - 1, ncol - 1)
-    x_start = max(0, x_start - border_size) # add border
-    x_end = min(ncol - 1, x_end + border_size)
-    x_size = x_end - x_start + 1 #  calculate size
-
     for y in range(0, ntile_y):
-        y_start = y * tile_size
-        y_end = min(y_start + tile_size - 1, nrow - 1)
-        y_start = max(0, y_start - border_size)  # add border
-        y_end = min(nrow - 1, y_end + border_size)
-        y_size = y_end - y_start + 1 # calculate size
-
         p = str(x) + "_" + str(y)
         pfx = image + "_" + p
 
-        Z, X = linkages[p], Xs[p] # could run again if too much memory to store
+        #Z, X = linkages[p], Xs[p] # could run again if too much memory to store
+        Z = linkages[p]
+        labels[p] = fcluster(Z, d_t, criterion = 'distance')
+        labels[p] = labels[p].reshape(extent[p][1] - extent[p][0], extent[p][3] - extent[p][2])
 
-        labels = fcluster(Z, d_t, criterion = 'distance') #criterion='maxclust') ##criterion='distance')
-        labels=labels.reshape(X.shape[0], X.shape[1]) #X[:, :].shape)
-        # plt.figure(figsize=(20, 20))
         print "min, max", np.min(labels), np.max(labels)
-        plt.imshow(labels)
-        plt.tight_layout() #plt.show()
+        plt.figure()
+        plt.imshow(labels[p])
+        plt.tight_layout()
         plot_file = pfx + "_labels.png"
 
         print "plot written to file: " + plot_file
         plt.savefig(plot_file, orientation='portrait')
 
-        write_binary(labels, pfx + ".bin")
-        write_hdr(pfx + ".hdr", X.shape[0], X.shape[1], 1) # samples, lines, 1)
+        print "+w", pfx + ".bin"
+        labels[p] = labels[p].reshape(extent[p][3] - extent[p][2], extent[p][1] - extent[p][0], 1) #         extent[p][1] - extent[p][0], extent[p][3] - extent[p][2], 1)
+        write_binary(labels[p], pfx + ".bin")
+        write_hdr(pfx + ".hdr", extent[p][3] - extent[p][2], extent[p][1] - extent[p][0], 1) #extent[p][1] - extent[p][0], extent[p][3] - extent[p][2], 1) # samples, lines, 1)
 
+out_shape = (img_ds.RasterYSize, img_ds.RasterXSize)
+result = np.zeros(out_shape)
 
+next_label = 0
+for x in range(0, ntile_x):
+    for y in range(0, ntile_y):
+        p = str(x) + "_" + str(y)
+        label = labels[p].astype(float)
+        label = label.reshape(np.prod(label.shape)).tolist()
+        min_label, max_label, n_label = min(label), max(label), int(max(label) - min(label) + 1)
+        print "min_label", min_label, "max_label", max_label, "n_label", n_label, "start_label", next_label, "end_label", next_label + n_label - 1
+        
+        x_start, x_end, y_start, y_end = extent[p]
+        print extent[p]
+        labels[p] = labels[p].reshape(extent[p][1] - extent[p][0], extent[p][3] - extent[p][2])
+        result[int(x_start): int(x_end), int(y_start): int(y_end)] = labels[p] + next_label 
+        next_label += n_label
 
+print "number of segments: ", next_label
+plt.figure()
+plt.imshow(result)
+print "result.size", result.shape
+print "img.shape", nrow, ncol, nband
+
+plt.title("result")
+plt.tight_layout()
+#plt.xlim([0, img_ds.RasterXSize -1])
+plt.savefig(image + "_result.png")
+
+print  "**", img_ds.RasterYSize, img_ds.RasterXSize
+result = result.astype(np.float32)
+result = result.reshape(img_ds.RasterXSize, img_ds.RasterYSize, 1)
+write_binary(result, image + "_label.bin")
+write_hdr(image +"_label.hdr", img_ds.RasterXSize, img_ds.RasterYSize, 1)
+
+#write_binary(
 # isn't it a waste to calculate the full linkage, on something that's not merged all the way?
 
 # pull the other stuff out into a function..
@@ -151,3 +181,7 @@ for x in range(0, ntile_x):
 # 1) combine all the labels into one (with the appropriate offsets)
 
 # 2) do h_clustering on the new class map
+
+
+
+# IF NOT CALCULATING DENDROGRAM, DEFINITELY DON'T NEED TO SAVE DMAT

@@ -47,7 +47,10 @@ inline void distance(size_t & j, size_t & i, size_t & np_j, size_t & np_i, size_
   // cprint(to_string(np_j) + str(",") + to_string(np_i) + str(",") + to_string(((float)np_j * (float)np_i)));
 
   size_t npji = np_j * np_i;
-  if(npji > 0) d /= (float)npji;
+
+  if(false){
+    if(npji > 0.) d /= (float)npji;
+  }
 }
 
 // the activity for each thread
@@ -372,8 +375,11 @@ int main(int argc, char** argv){
       i ++;
     }
 
-    str ofn(str(argv[1]) + str("_iter_") + to_string(iter) + ".bin");
-    str ohf(str(argv[1]) + str("_iter_") + to_string(iter) + ".hdr");
+    int n_zero = 6;
+    str iter_s(to_string(iter));
+    std::string iter_s2 = std::string(n_zero - iter_s.length(), '0') + iter_s;
+    str ofn(str(argv[1]) + str("_iter_") + iter_s2 + ".bin");
+    str ohf(str(argv[1]) + str("_iter_") + iter_s2 + ".hdr");
     hwrite(ohf, nr, nc, 1);
     FILE * of = wopen(ofn);
     fwrite(lab, sizeof(float), np, of);
@@ -381,18 +387,18 @@ int main(int argc, char** argv){
 
     if(iter % 50 == 0){
 
-    str cmd(str("bin/class_recode ") + ofn);
-    cout << cmd << endl;
-    system(cmd.c_str());
+      str cmd(str("bin/class_recode ") + ofn);
+      cout << cmd << endl;
+      system(cmd.c_str());
 
-    str cm2(str("bin/class_wheel ") + ofn + str("_recode.bin"));
-    cout << cm2 << endl;
-    system(cm2.c_str());
+      str cm2(str("bin/class_wheel ") + ofn + str("_recode.bin"));
+      cout << cm2 << endl;
+      system(cm2.c_str());
 
       str cm3(str("python py/read_multi.py ") + ofn + str("_recode.bin_wheel.bin") + str(" 1"));
       cout << cm3 << endl;
       system(cm3.c_str());
-    } 
+    }
   }
   return 0;
 }
