@@ -60,15 +60,15 @@ void * dmat_j(void * arg){
     d_count ++;
     mtx_unlock(&next_j_mtx);
 
-    size_t np_j = pix[j].size();
-
-    // don't process if no pixels
-    if(np_j == 0) continue;
-
     if(j > max_label){
       cprint(str("\texit work ") + to_string(w));
       return(NULL);
     }
+
+    size_t np_j = pix[j].size();
+
+    // don't process if no pixels
+    if(np_j == 0) continue;
 
     if(j % 100 == 0){
       float pct = 100. * (float)j / (float)max_label;
@@ -306,7 +306,12 @@ int main(int argc, char** argv){
     }
   }
   cout << "dcount " << d_count << "d_min " << d_min << " d_max " << d_max << endl;
-  if(d_count != expected) err("unexpected distance count");
+  // if(d_count != expected) err("unexpected distance count");
+
+  // track frames for movie
+  str flist_fn("hclust_files.txt");
+  ofstream flist(flist_fn);
+  if(!flist.is_open()) err("failed to open framelist file");
 
   // start merging
   size_t iter = 1;
@@ -391,7 +396,14 @@ int main(int argc, char** argv){
       cmd = (str("python py/read_multi.py ") + ofn + str("_recode.bin_wheel.bin") + str(" 1"));
       cout << cmd << endl;
       system(cmd.c_str());
+
+      flist << "file '" + ofn + str("_recode.bin_wheel.bin.png'") << endl;
     }
   }
+
+  str mp4_fn(str(argv[1]) + "_iter.mp4");
+  str cmd(str("ffmpeg -f concat -r 5 -i ") + flist_fn + str(" -shortest ") + mp4_fn);
+  cout << cmd << endl;
+  system(cmd.c_str());
   return 0;
 }

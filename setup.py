@@ -7,7 +7,7 @@ for c in cpp:
     leaf = w[-1]
     stem = leaf.split(".")[0]
     bf = 'bin/' + stem # + '.exe'
-    cmd = "g++ -w -O3 -march=native -o " + bf + " " + c + " cpp/misc.cpp -lpthread"
+    cmd = "g++ -w -O4 -march=native -o " + bf + " " + c + " cpp/misc.cpp -lpthread"  # -g 
     if stem != "misc" and not exists(bf):
         run(cmd)
 
