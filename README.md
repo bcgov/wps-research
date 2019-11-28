@@ -8,8 +8,8 @@ Research collaboration in Image Analysis featuring:
 * High-contrast visualization for multispectral imagery and classification maps
 * Supervised and unsupervised classification methods, for multispectral imagery
    * K-Means++
-   * Hierarchical Agglomerative Clustering (HAC)  
-   * Daniel Müllner, fastcluster: Fast Hierarchical, Agglomerative Clustering Routines for R and Python, Journal of Statistical Software 53 (2013), no. 9, 1–18, URL http://www.jstatsoft.org/v53/i09/
+   * Hierarchical Agglomerative Clustering (HAC) Scikit-Learn 
+   * HAC: Daniel Müllner, fastcluster: Fast Hierarchical, Agglomerative Clustering Routines for R and Python, Journal of Statistical Software 53 (2013), no. 9, 1–18, URL http://www.jstatsoft.org/v53/i09/
 * manipulation or visualization of class maps (i.e., truth data or classification results)
 * clustering algorithm, a new minimalist implementation of
     * [Unsupervised Nonparametric Classification of Polarimetric SAR Data Using The K-nearest Neighbor Graph](http://ashlinrichardson.com/uvic/papers/2010_richardson_igarss.pdf), A. Richardson et al, proc. IEEE IGARSS, Honolulu, Hawaii, July 2010
