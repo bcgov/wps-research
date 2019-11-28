@@ -67,7 +67,7 @@ Tested on ubuntu
 10 clusters: <br>
 <img src="output/fastclust.bin_wheel.bin.png" width="640">
 
-### unsupervised classification: an original method
+### KGC unsupervised classification: an original method
 10 clusters: <br>
 <img src="output/317.lab_wheel.bin.png " width="640">
 
@@ -78,12 +78,6 @@ y = log(n_segments), x = number of k-nearest neighbours
 Hypothetically for a one-level analysis (non-hierarchical) taking K=100 is highly information-preserving choice, as the curve seems to depart strongly from monotonicity after K=200..
 
 ..hence K=200 or so provides efficiency without excessive info. loss
-#### output formats
-The clustering algorithm output is provided in two formats:
-
-    1) Cluster labels in IEEE 32-bit Floating-point format: 0. unlabelled, labels start at 1.
-        
-    2) Image where the pixels are colored according to the cluster "centres" to which they're assigned
 
 ## License
 
