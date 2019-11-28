@@ -1,8 +1,8 @@
 # bcws-psu-research
-software for image analysis produced in collaboration w.:
-* BCWS Predictive Services Unit (PSU)
-* CITZ Data Science and Analytics Branch (DSAB), Office of The BC Chief Information Officer (OCIO) and 
-* Thompson Rivers University (TRU) :
+collaboration in image analysis research among:
+* Digital Platforms and Data Division (DPDD), Office of The BC Chief Information Officer (OCIO) 
+* BC Wildfire Service (BCWS) Predictive Services Unit (PSU)
+* Thompson Rivers University (TRU)
 
 ## features
 * multispectral image viewer
