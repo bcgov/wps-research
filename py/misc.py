@@ -125,6 +125,8 @@ def twop_str(data, band_select = [3, 2, 1]):
         rgb_mx = values[int(math.floor(float(npx) * 0.98))]
         rgb[:, :, i] -= rgb_mn
         rng = rgb_mx - rgb_mn
+        mask = rgb[:, :, i] < 0
+        rgb[mask] = 0.
         if rng > 0.:
-            rgb[:, :, i] /= (rgb_mx - rgb_mn)
+            rgb[:, :, i] /= rng
     return rgb
