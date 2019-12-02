@@ -1,6 +1,13 @@
 /*
 dent cpp/hclust.cpp; vim cpp/hclust.cpp; rm bin/hclust; python setup.py; ./bin/hclust data/fran/mS2.bin data/fran/mS2.bin_label.bin 10
 dent cpp/hclust.cpp; vim cpp/hclust.cpp; rm bin/hclust; python setup.py; ./bin/hclust data/fran/mS2.bin 10
+
+
+20191201:
+
+python py/fast_cluster_tiling.py  data/fran/mS2.bin 70 10 24.8
+bin/hclust data/fran/mS2.bin data/fran/mS2.bin_label.bin 15
+
 */
 
 #include"misc.h"
@@ -230,7 +237,7 @@ int main(int argc, char** argv){
   np = nr * nc; // pixel count
 
   if(argc < 4){
-    //reduced args: no seed labels
+    printf("reduced args: setting each pixel as a seed\n")
     nr2 = nr;
     nc2 = nc;
     nb2 = nb;
@@ -240,6 +247,7 @@ int main(int argc, char** argv){
   }
   else{
     //full args
+    printf("full args: seed labels supplied from: %s\n", argv[2]);
     lab = load_envi(argv[2], nr2, nc2, nb2);
     if(nr != nr2 || nc != nc2) err("image size mismatch");
     if(nb2 != 1) err("second file should be 1-band label file");
@@ -384,7 +392,7 @@ int main(int argc, char** argv){
     fclose(of);
 
     // color-code every n-th map
-    if(iter % 50 == 0){
+    if(iter % 50 == 0 || labels.size() == nclust ){
       str cmd(str("bin/class_recode ") + ofn);
       cout << cmd << endl;
       system(cmd.c_str());
