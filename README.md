@@ -12,6 +12,7 @@ Research collaboration in Image Analysis featuring:
    * HAC: Daniel Müllner, fastcluster: Fast Hierarchical, Agglomerative Clustering Routines for R and Python, Journal of Statistical Software 53 (2013), no. 9, 1–18, URL http://www.jstatsoft.org/v53/i09/
    * KGC: a new minimalist implementation of [Unsupervised Nonparametric Classification of Polarimetric SAR Data Using The K-nearest Neighbor Graph](http://ashlinrichardson.com/uvic/papers/2010_richardson_igarss.pdf), A. Richardson et al, proc. IEEE IGARSS, Honolulu, Hawaii, July 2010
 * manipulation operations for class maps
+
 To appear: more utilities for integrating open remotely-sensed imagery
 
 ## Direct Collaborators and Contributors:
@@ -67,7 +68,7 @@ Tested on ubuntu
 10 clusters: <br>
 <img src="output/fastclust.bin_wheel.bin.png" width="640">
 
-### unsupervised classification: an original method
+### KGC unsupervised classification: an original method
 10 clusters: <br>
 <img src="output/317.lab_wheel.bin.png " width="640">
 
@@ -78,12 +79,6 @@ y = log(n_segments), x = number of k-nearest neighbours
 Hypothetically for a one-level analysis (non-hierarchical) taking K=100 is highly information-preserving choice, as the curve seems to depart strongly from monotonicity after K=200..
 
 ..hence K=200 or so provides efficiency without excessive info. loss
-#### output formats
-The clustering algorithm output is provided in two formats:
-
-    1) Cluster labels in IEEE 32-bit Floating-point format: 0. unlabelled, labels start at 1.
-        
-    2) Image where the pixels are colored according to the cluster "centres" to which they're assigned
 
 ## License
 
