@@ -81,6 +81,7 @@ for i in range(0, 3):
         if rng > 0.:
             rgb[:, :, i] /= (rgb_max - rgb_min)
 
+        # need to add this update in misc.py as well, and move this code out
         d = rgb[:, :, i]
         (rgb[:, :, i])[d < 0.] = 0.
         (rgb[:, :, i])[d > 1.] = 1.
