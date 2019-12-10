@@ -12,7 +12,19 @@ sgd = SGDClassifier(random_state=42, verbose=False, max_iter=1000, tol=1.e-3)
 if len(args) < 3:
     err("sgd [input image] [binary ground-reference data]")
 
-# multispectral image
+def varname(s):
+    s = s.strip()
+    w = s.split(os.path.sep)[-1]
+    w = w.split('.')[0]
+    w = w.replace('_', '-')
+    print(w)
+    return(w)
+
+# data names
+img_name = varname(args[1])
+cls_name = varname(args[2])
+
+# read multispectral image
 ncol, nrow, nband, img = read_binary(args[1])
 
 # binary class map to predict
@@ -77,6 +89,7 @@ if True:
 
     plt.close('all')
     f, (ax1, ax2, ax3) = plt.subplots(1, 3, sharey=True)
+    plt.gcf().set_size_inches(6 * 3, 6.) #, 7. * float(lines) / float(samples))
     ax1.imshow(a)
     ax2.imshow(ref.reshape(nrow, ncol), cmap = 'binary_r') # why we have to reverse colourmap, don't know!
     ax3.imshow(pred.reshape(nrow, ncol), cmap = 'binary_r') #, cmap='binary')
@@ -84,4 +97,6 @@ if True:
     ax2.set_title('reference') #: ' + groundref_name)
     ax3.set_title('predicted') #: ' + groundref_name)
     plt.tight_layout()
-    plt.show()
+    fn = 'plot_' + img_name + '_' + cls_name + '.png'
+    print("+w", fn)
+    plt.savefig(fn)

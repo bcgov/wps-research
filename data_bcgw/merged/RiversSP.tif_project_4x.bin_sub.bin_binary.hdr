@@ -1,6 +1,6 @@
 ENVI
 description = {
-WATERSP.tif_project_4x.bin_sub.bin}
+RiversSP.tif_project_4x.bin_sub.bin}
 samples = 410
 lines   = 401
 bands   = 1
