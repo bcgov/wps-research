@@ -4,6 +4,8 @@ from misc import *
 if len(args) < 2:
     err("class_merge [input file name") # args.append('20190926kamloops_data/WATERSP.tif_project_4x.bin_sub.bin')
 
+generate_binaries_all = len(args) < 3
+
 fn = args[1]
 hfn = hdr_fn(fn)
 samples, lines, bands, data = read_binary(fn)
@@ -42,6 +44,10 @@ for i in range(0, len(data)):
 ofn, ohfn = fn + '_binary.bin', fn + '_binary.hdr'
 write_binary(output, ofn)
 run('cp ' + hfn + ' ' + ohfn)
+
+# skip generating binary for each class
+if not generate_binaries_all:
+    sys.exit(0)
 
 # create a binary map for each separate class
 for c in class_labels:
