@@ -102,3 +102,31 @@ plt.savefig(plt_fn,
         pad_inches =0.)
 if show_plot:
     plt.show()
+
+
+'''
+compare with this:
+
+print("X.shape", X.shape)
+    a[:, :, 0] = X.S2A_4.values.reshape(lines, samples)
+    a[:, :, 1] = X.S2A_3.values.reshape(lines, samples)
+    a[:, :, 2] = X.S2A_2.values.reshape(lines, samples)
+    a = (a - np.min(a)) / np.max(a)
+
+    for i in range(0, 3):
+        d = a[:, :, i]
+        npx = samples * lines
+        values = d.reshape(np.prod(d.shape)).tolist()
+        values.sort()
+        mn = values[int(math.floor(float(npx) * 0.01))]
+        mx = values[int(math.floor(float(npx) * 0.99))]
+        print("i", i, "mn", mn, "mx", mx)
+        rng = mx - mn
+        a[:, :, i] -= mn 
+        if rng > 0.:
+            a[:, :, i] /= rng
+        (a[:, :, i])[a[:, :, i] < 0.] = 0.
+        (a[:, :, i])[a[:, :, i] > 1.] = 1.
+
+'''
+
