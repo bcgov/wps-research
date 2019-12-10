@@ -7,13 +7,7 @@ if len(args) < 2:
 fn = args[1]
 hfn = hdr_fn(fn)
 samples, lines, bands, data = read_binary(fn)
-
-count = {}
-for d in data:
-    if d not in count:
-        count[d] = 0
-    count[d] += 1
-
+count = hist(data)
 class_labels = count.keys()
 print "number of class labels,", len(class_labels)
 print "\tlabel,count"
@@ -23,7 +17,7 @@ for c in class_labels:
 
 print "class_labels", class_labels
 
-print "assume most-frequent label is non-positive.."
+print "if 0. label not present, assume most-frequent label is non-positive.."
 
 max_label, max_count = None, None
 
@@ -36,11 +30,13 @@ if 0. not in class_labels:
 
     print "\tmax_label,max_count"
     print "\t", str(max_label) + ',' + str(max_count)
+else:
+    max_label = 0.
 
 # output a binary class map for merged class
 output = copy.deepcopy(data)
 for i in range(0, len(data)):
-    output[i] = 0. if data[i] == max_label else 1.
+    output[i] = 0. if (data[i] == max_label) else 1.
 
 # write output and copy header
 ofn, ohfn = fn + '_binary.bin', fn + '_binary.hdr'
