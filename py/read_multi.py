@@ -60,21 +60,30 @@ for i in range(0, 3):
         rng = rgb_max - rgb_min
         if rng != 0.:
             rgb[:, :, i] /= rng #(rgb_max - rgb_min)
-        # so called "2% linear stretch"
-        values = copy.deepcopy(rgb[:,:,i]) # values.shape
-        values = values.reshape(np.prod(values.shape))
-        values = values.tolist() # len(values)
+
+        # so called "1% linear stretch"
+        values = rgb[:, :, i]
+        values = values.reshape(np.prod(values.shape)).tolist()
         values.sort()
-        npx = len(values) # number of pixels
+
+        # sanity check
         if values[-1] < values[0]:
             err("failed to sort")
 
-        rgb_min = values[int(math.floor(float(npx)*0.02))]
-        rgb_max = values[int(math.floor(float(npx)*0.98))]
+        for j in range(0, npx - 1):
+            if values[j] > values[j + 1]:
+                err("failed to sort")
+
+        rgb_min = values[int(math.floor(float(npx)*0.01))]
+        rgb_max = values[int(math.floor(float(npx)*0.99))]
         rgb[:, :, i] -= rgb_min
         rng = rgb_max - rgb_min
         if rng > 0.:
             rgb[:, :, i] /= (rgb_max - rgb_min)
+
+        d = rgb[:, :, i]
+        (rgb[:, :, i])[d < 0.] = 0.
+        (rgb[:, :, i])[d > 1.] = 1.
 
 # plot the image
 plt.style.use('dark_background')
@@ -86,7 +95,7 @@ plt.tight_layout()
 title_s = fn.split("/")[-1]
 plt.title(title_s, fontsize=11)
 plt_fn = fn + ".png"
-print "+w", plt_fn
+print("+w", plt_fn)
 plt.savefig(plt_fn,
         dpi=300,
         pad_inches =0.)
