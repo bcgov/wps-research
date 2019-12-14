@@ -1,5 +1,7 @@
 '''SGD classifier-- linear SVM
 
+RADIAL BASIS FUNCTION SVM....
+
 cd bcws_psu_research
 mkdir out
 python3 py/sgd.py data_img/S2A.bin_4x.bin_sub.bin data_bcgw/merged/WATERSP.tif_project_4x.bin_sub.bin_binary.bin out/
@@ -52,7 +54,7 @@ npx = nrow * ncol # number of pixels
 
 # count positives, negatives
 ref_count = hist(ref)
-print("ref_count", ref_count)
+print("ref_layer_count", ref_count)
 NP, NN = ref_count[1.], ref_count[0.]
 
 # force groundref map to bool (assume any merging etc. already done)
@@ -87,6 +89,7 @@ sgd = SGDClassifier(random_state=42,
 sgd.fit(img_samp, ref_samp)  # fit on sampled data
 pred = sgd.predict(img_np)  # predict on full data
 
+# need to validate this, and count accuracy
 TP = TN = FN = FP = 0
 for i in range(npx):
     if ref[i]:
