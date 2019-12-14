@@ -12,8 +12,14 @@ validation) determined in sgd.py
 example of one run of sgd.py:
   "python3 py/sgd.py data_img/S2A.bin_4x.bin_sub.bin
     data_bcgw/merged/WATERSP.tif_project_4x.bin_sub.bin_binary.bin out"
-'''
+
+todo: put accuracy on charts. Sort charts by accuracy'''
 from misc import *
+img_f = 'data_img/S2A.bin_4x.bin_sub.bin'
+
+# sentinel 2: data_img/S2A.bin_4x.bin_sub.bin
+# sentinel 2, landsat 8 fused: data_img/S2A_L8.bin_4x.bin_sub.bin
+# landsat 8: data_img/L8.bin_4x.bin_sub.bin
 
 # load bc geographic warehouse layers
 ref = os.popen("ls -1 data_bcgw/merged/*binary.bin").readlines()
@@ -27,6 +33,8 @@ for v in vri:
 
     # specify min # of points, positive or negative
     enough_points = min(count.values()) > 1000
+
+    # todo: experiment with params or turn this off!
     if len(count) > 1 and enough_points:
         ref.append(v)
 
@@ -42,7 +50,7 @@ if not os.path.isdir('out'):
 jobs = []
 for r in ref:
     r = r.strip()
-    cmd = 'python3 py/sgd.py data_img/S2A.bin_4x.bin_sub.bin ' + r + ' out'
+    cmd = 'python3 py/sgd.py ' + img_f.strip() + ' ' + r + ' out'
     jobs.append(cmd)
 
 # run all (model + predict) operations
