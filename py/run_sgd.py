@@ -14,8 +14,8 @@ validation) determined in sgd.py
     data_bcgw/merged/WATERSP.tif_project_4x.bin_sub.bin_binary.bin out"
 
 (*) example of running sgd.py on multiple ground-reference classes:
-    python3 py/run_sgd.py
-    
+    python3 py/run_sgd.py # no inputs, results get put in folder: out/
+
 todo: put accuracy on charts. Sort charts by accuracy'''
 from misc import *
 img_f = 'data_img/S2A.bin_4x.bin_sub.bin'
