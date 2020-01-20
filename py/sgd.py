@@ -9,6 +9,7 @@ todo:
     write inputs, accuracy etc, to log file!!!!!
 '''
 import sklearn
+import datetime
 import numpy as np
 from misc import *
 import matplotlib.pyplot as plt
@@ -139,3 +140,20 @@ if True:
     fn = out_d + 'plot_' + img_name + '_' + cls_name + '.png'
     print("+w", fn)
     plt.savefig(fn)
+
+    # write stats to log file
+
+    d = datetime.date.today()
+    date_str = str(d.year) + str(d.month).zfill(2) + str(d.day).zfill(2)
+    lfn = out_d + date_str + '_log.txt'
+
+    f = open(lfn, 'ab')
+    accuracy = (TP + TN) / (TP + TN + FP + FN) 
+    log_data = [os.path.basename(__file__), img_name, cls_name, fn, TP, TN, FP, FN, accuracy]
+    log_data = [str(log_d) for log_d in log_data]
+    for log_d in log_data:
+        if len(log_d.split(',') ) > 1:
+            err('delimiter should not be present within data')
+    print("write:\n\t" + str(log_data))
+    f.write((','.join(log_data) + '\n').encode())
+    f.close()
