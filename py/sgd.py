@@ -1,7 +1,6 @@
 '''SGD classifier-- linear SVM
 
-RADIAL BASIS FUNCTION SVM....
-
+Try RADIAL BASIS FUNCTION SVM??? https://scikit-learn.org/stable/auto_examples/svm/plot_rbf_parameters.html
 cd bcws_psu_research
 mkdir out
 python3 py/sgd.py data_img/S2A.bin_4x.bin_sub.bin data_bcgw/merged/WATERSP.tif_project_4x.bin_sub.bin_binary.bin out/
