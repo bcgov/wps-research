@@ -4,6 +4,9 @@ Try RADIAL BASIS FUNCTION SVM??? https://scikit-learn.org/stable/auto_examples/s
 cd bcws_psu_research
 mkdir out
 python3 py/sgd.py data_img/S2A.bin_4x.bin_sub.bin data_bcgw/merged/WATERSP.tif_project_4x.bin_sub.bin_binary.bin out/
+
+todo:
+    write inputs, accuracy etc, to log file!!!!!
 '''
 import sklearn
 import numpy as np
