@@ -9,10 +9,13 @@ producing
 The data fraction excluded from modelling (withheld for model
 validation) determined in sgd.py
 
-example of one run of sgd.py:
+(*) example of one run of sgd.py:
   "python3 py/sgd.py data_img/S2A.bin_4x.bin_sub.bin
     data_bcgw/merged/WATERSP.tif_project_4x.bin_sub.bin_binary.bin out"
 
+(*) example of running sgd.py on multiple ground-reference classes:
+    python3 py/run_sgd.py
+    
 todo: put accuracy on charts. Sort charts by accuracy'''
 from misc import *
 img_f = 'data_img/S2A.bin_4x.bin_sub.bin'
