@@ -148,8 +148,11 @@ if True:
     lfn = out_d + date_str + '_log.txt'
 
     f = open(lfn, 'ab')
-    accuracy = (TP + TN) / (TP + TN + FP + FN) 
-    log_data = [os.path.basename(__file__), img_name, cls_name, fn, TP, TN, FP, FN, accuracy]
+    P, N = TP + FN, TN + FP
+    TPR, TNR = TP / P, TN / N
+    accuracy = (TP + TN) / (P + N)
+    balanced_accuracy = (TPR + TNR) / 2  # https://en.wikipedia.org/wiki/Precision_and_recall 
+    log_data = [os.path.basename(__file__), img_name, cls_name, fn, TP, TN, FP, FN, accuracy, balanced_accuracy]
     log_data = [str(log_d) for log_d in log_data]
     for log_d in log_data:
         if len(log_d.split(',') ) > 1:
