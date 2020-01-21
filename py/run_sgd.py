@@ -20,9 +20,11 @@ todo: put accuracy on charts. Sort charts by accuracy'''
 import datetime
 from misc import *
 
-run_models = False
+run_models = True
 if run_models:
-    img_f = 'data_img/S2A.bin_4x.bin_sub.bin'
+    #img_f = 'data_img/S2A.bin_4x.bin_sub.bin'
+    #img_f = 'data_img/L8.bin_4x.bin_sub.bin'
+    img_f = 'data_img/S2A_L8.bin_4x.bin_sub.bin'
 
     # sentinel 2: data_img/S2A.bin_4x.bin_sub.bin
     # sentinel 2, landsat 8 fused: data_img/S2A_L8.bin_4x.bin_sub.bin
@@ -68,7 +70,19 @@ if run_models:
         for job in jobs:
             run(job)
 
-make_plots = True
+hdr = '''\\documentclass[english]{article}
+\\usepackage[T1]{fontenc}
+\\usepackage[latin9]{inputenc}
+\\usepackage{geometry}
+\\geometry{verbose,tmargin=2cm,bmargin=2cm,lmargin=2cm,rmargin=2cm}
+\\setlength{\\parskip}{\\smallskipamount}
+\\setlength{\\parindent}{0pt}
+\\usepackage{graphicx}
+\\usepackage{babel}
+\\begin{document}
+'''
+
+make_plots = False # True
 if make_plots:
     d = datetime.date.today()
     out_d = 'out' + os.path.sep
@@ -83,3 +97,34 @@ if make_plots:
 
     for line in lines:
         print(str(line))
+
+    tex_fn = 'out' + os.path.sep + 'plots.tex'
+    tex_f = open(tex_fn, 'wb')
+
+    tex_f.write(hdr.encode())
+
+    for line in lines:
+        if len(line[3].split("{")) > 1:
+            continue
+
+        if len(line[3].split("$")) > 1:
+            continue
+        line[1] = line[1].replace("$", "\\$")
+        line[1] = line[1].replace("{", "\\{")
+        
+        line[2] = line[2].replace("$", "\\$")
+        line[2] = line[2].replace("{", "\\{")
+        
+        line[3] = line[3].replace("$", "\\$")
+        line[3] = line[3].replace("{", "\\{")
+
+        tex_f.write(("\\subsubsection*{Data: " + line[1] +
+                     " VRI Attr: " + line[2] +
+                     " Acc: " + str(round(float(line[8]),3)) +
+                     " Bal. Acc: " + str(round(float(line[9]), 3)) +
+                     "}\n").encode())
+
+        tex_f.write(("\\includegraphics[width=\\textwidth]{" + line[3] + "}\n").encode())
+        tex_f.write(("\\newpage\n").encode())
+    tex_f.write(("\\end{document}").encode())
+    tex_f.close()
