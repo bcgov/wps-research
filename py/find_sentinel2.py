@@ -25,7 +25,7 @@ else:
 
 def c(add= ''):
     cmd = ('wget --no-check-certificate --user=' + user_ + ' --password=' + pass_ +
-           ' --output-document=out.html "https://scihub.copernicus.eu/dhus/search?q=(platformname:Sentinel-2 AND footprint:\\"Intersects(51.0602686,-120.9083258)\\")' + add + '"')
+           ' --output-document=out.html "https://scihub.copernicus.eu/dhus/search?q=(platformname:Sentinel-2 AND cloudcoverpercentage:[0 TO 5] AND footprint:\\"Intersects(51.0602686,-120.9083258)\\")' + add + '"')
     return cmd
 
 # get the first page
