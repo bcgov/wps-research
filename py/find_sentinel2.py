@@ -3,9 +3,9 @@
     1) point-- lat, long
     2) a TILE ID of interest?
 '''
-
 import os
 import sys
+import math
 
 # save username and password to files:
 user_, pass_ = None, None
@@ -28,17 +28,20 @@ def c(add= ''):
            ' --output-document=out.html "https://scihub.copernicus.eu/dhus/search?q=(platformname:Sentinel-2 AND footprint:\\"Intersects(51.0602686,-120.9083258)\\")' + add + '"')
     return cmd
 
-
-cmd = c()
+# get the first page
+cmd = c('&rows=100')
 print(cmd)
 r = os.popen(cmd).read()
 
 # read in result
 dat = open('out.html').read()
-lines = dat.strip().split('\n')
+a = os.system('mv out.html out0.html')
+lines, lines_all = dat.strip().split('\n'), []
+lines_all = [*lines_all, *lines]
 
+row_per_page = 100
 n_results = -1
-# search for number of results: <opensearch:totalResults>563</opensearch:totalResults>
+# extract results count: <opensearch:totalResults>563</opensearch:totalResults>
 for i in range(0, len(lines)):
     line = lines[i].strip()
     if line[0:25] == '<opensearch:totalResults>':
@@ -49,6 +52,42 @@ for i in range(0, len(lines)):
         w = w.split('</opensearch:totalResults>')[0]
         n_results = int(w)
 
+dats = []
+dats.append(dat)
 
-            
+# get the other pages
+n_page = int(math.ceil(n_results / row_per_page))
+for i in range(1, n_page):
+    print(row_per_page * i)
+    cmd = c('&rows=100&start=' + str(row_per_page * i))
+    r = os.popen(cmd).read()
+
+    dat = open('out.html').read()
+    dats.append(dat)
+    a = os.system('mv -v out.html out' + str(i) + '.html')
+    
+    lines = dat.strip().split('\n')
+    lines_all = [*lines_all, *lines]   
+
+a = os.system('chmod 777 out*.html')
+
+print('+w out_all.html')
+open('out_all.html', 'wb').write('\n'.join(lines_all).encode())
+
+lst = set()
+titles = os.popen('grep "<title>" out_all.html').readlines()
+for t in titles:
+    t = t.strip()
+    lst.add(t)
+
+f = open('out_titles.txt','wb')
+i = 0
+for t in lst:
+    if i == 0:
+        f.write(t.encode())
+    else:
+        f.write(('\n' + t).encode())
+    i += 1
+f.close()
+
 
