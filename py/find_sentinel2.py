@@ -90,4 +90,12 @@ for t in lst:
     i += 1
 f.close()
 
-
+# download the data
+links = os.popen('grep alternative out_all.html').readlines()
+for i in range(0, len(links)):
+    link = links[i]
+    w = link.strip().split('<link rel="alternative" href="')[1].split('"/>')[0]
+    ti = titles[i]
+    tw= ti.strip().split(">")[1].split("<")[0].strip()
+    cmd = 'wget --content-disposition --continue --user=' + user_ + ' --password=' + pass_ + ' "' + w + '\\$value"' 
+    a = os.system(cmd)
