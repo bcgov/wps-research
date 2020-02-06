@@ -90,6 +90,9 @@ for t in lst:
     i += 1
 f.close()
 
+# open file to record the download commands
+f = open("./.sentinel2_download.sh", "wb")
+
 # download the data
 links = os.popen('grep alternative out_all.html').readlines()
 for i in range(0, len(links)):
@@ -98,4 +101,7 @@ for i in range(0, len(links)):
     ti = titles[i]
     tw= ti.strip().split(">")[1].split("<")[0].strip()
     cmd = 'wget --content-disposition --continue --user=' + user_ + ' --password=' + pass_ + ' "' + w + '\\$value"' 
-    a = os.system(cmd)
+    if i > 0:
+        f.write('\n'.encode())
+    f.write(cmd.encode())
+f.close()
