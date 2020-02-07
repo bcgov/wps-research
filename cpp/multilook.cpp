@@ -6,7 +6,7 @@ int main(int argc, char ** argv){
 
   str fn(argv[1]); // input file name
   str hfn(hdr_fn(fn)); // auto-detect header file name
-  size_t nrow, ncol, nband, np, i, j, k, n, ip, jp, ix_1, ix_2; // variables
+  size_t nrow, ncol, nband, np, i, j, k, n, ip, jp, ix1, ix2; // variables
   hread(hfn, nrow, ncol, nband); // read header
   np = nrow * ncol; // number of input pix
   n = (size_t) atoi(argv[2]);
@@ -27,12 +27,12 @@ int main(int argc, char ** argv){
     for0(j, ncol){
       jp = j / n;
       for0(k, nband){
-        ix_1 = k * nrow * ncol + i * ncol + j;
-        ix_2 = k * nrow2 * ncol2 + ip * ncol2 + jp;
-        float d = dat[ix_1];
-        if(ix_2 < nf2 && !isnan(d) && !isinf(d)){
-          dat2[ix_2] += d;
-          count[ix_2]++;
+        ix1 = k * nrow * ncol + i * ncol + j;
+        ix2 = k * nrow2 * ncol2 + ip * ncol2 + jp;
+        float d = dat[ix1];
+        if(ix2 < nf2 && !isnan(d) && !isinf(d)){
+          dat2[ix2] += d;
+          count[ix2]++;
         }
       }
     }
@@ -42,8 +42,8 @@ int main(int argc, char ** argv){
   for0(ip, nrow2){
     for0(jp, ncol2){
       for0(k, nband){
-        ix_1 = (k * np2) + (ip * ncol2) + jp;
-        if(count[ix_1] > 0.) dat2[ix_1] /= count[ix_1];
+        ix1 = (k * np2) + (ip * ncol2) + jp;
+        if(count[ix1] > 0.) dat2[ix1] /= count[ix_1];
       }
     }
   }
