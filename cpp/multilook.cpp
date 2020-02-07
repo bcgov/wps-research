@@ -1,9 +1,7 @@
 /* multilook a multispectral image or radar stack, square window */
 #include"misc.h"
 int main(int argc, char ** argv){
-  if(argc < 3){
-    err("multilook [input binary class file name] [multilook factor] ");
-  }
+  if(argc < 3) err("multilook [input binary file name] [multilook factor] ");
 
   str fn(argv[1]); // input file name
   str hfn(hdr_fn(fn)); // auto-detect header file name
@@ -13,16 +11,14 @@ int main(int argc, char ** argv){
   n = (size_t) atoi(argv[2]); // read multilook factor
   printf("multilook factor: %zu\n", n);
 
-  float * dat = bread(fn, nrow, ncol, nband); // load data to float array
+  float * dat = bread(fn, nrow, ncol, nband); // load floats to array
   size_t nrow2 = nrow / n; // output image row dimensions
   size_t ncol2 = ncol / n;
-  
   size_t np2 = nrow2 * ncol2;  // allocate space for output
   size_t nf2 = np2 * nband;
   float * count = (float *) falloc(nf2);
   float * dat2 = (float *) falloc(nf2);
   for0(i, nf2) count[i] = dat2[i] = 0.; // set to zero
-
   for0(i, nrow){
     ip = i / n;
     for0(j, ncol){
@@ -40,14 +36,11 @@ int main(int argc, char ** argv){
   }
 
   // divide by n
-
   for0(ip, nrow2){
     for0(jp, ncol2){
       for0(k, nband){
         size_t ix = (k * nrow2 * ncol2) + (ip * ncol2) + jp;
-        if(count[ix] > 0.){
-          dat2[ix] /= count[ix];
-        }
+        if(count[ix] > 0.) dat2[ix] /= count[ix];
       }
     }
   }
@@ -65,11 +58,9 @@ int main(int argc, char ** argv){
   // write the inverted data
   cout << "nf2 " << nf2 << endl;
   cout << "nf2 * sizeof(f)" << nf2 * sizeof(float) << endl;
-  for0(i, nf2){
-    fwrite(&dat2[i], sizeof(float), 1, f);
-  }
+  for0(i, nf2) fwrite(&dat2[i], sizeof(float), 1, f);
+ 
   fclose(f);
-
   free(dat);
   free(dat2);
   free(count);
