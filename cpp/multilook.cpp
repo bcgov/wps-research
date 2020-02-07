@@ -1,4 +1,6 @@
-/* multilook a multispectral image or radar stack, square window */
+/* multilook a multispectral image or radar stack, square window, input
+assumed ENVI type-4 32-bit IEEE standard floating-point format, BSQ
+interleave */
 #include"misc.h"
 
 int main(int argc, char ** argv){
