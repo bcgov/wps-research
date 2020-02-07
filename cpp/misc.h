@@ -110,6 +110,11 @@ inline void * alloc(size_t nb){
   return d;
 }
 
+/*
+float * falloc(size_t nf){
+  return (float *) alloc(nf * sizeof(float));
+}
+*/
 
 //a trim from start (in place)
 static inline void ltrim(std::string &s){
