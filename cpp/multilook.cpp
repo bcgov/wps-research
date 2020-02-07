@@ -4,29 +4,24 @@ int main(int argc, char ** argv){
   if(argc < 3){
     err("multilook [input binary class file name] [multilook factor] ");
   }
+
   str fn(argv[1]); // input file name
   str hfn(hdr_fn(fn)); // auto-detect header file name
   size_t nrow, ncol, nband, np, i, j, k, n, ip, jp;
   hread(hfn, nrow, ncol, nband); // read header
   np = nrow * ncol; // number of input pix
   n = (size_t) atoi(argv[2]); // read multilook factor
+  printf("multilook factor: %zu\n", n);
 
-  // read data into float array
-  float * dat = bread(fn, nrow, ncol, nband);
-
-  // output image dimensions
-  size_t nrow2 = nrow / n;
+  float * dat = bread(fn, nrow, ncol, nband); // load data to float array
+  size_t nrow2 = nrow / n; // output image row dimensions
   size_t ncol2 = ncol / n;
-
-  // allocate space for output
-  size_t np2 = nrow2 * ncol2;
+  
+  size_t np2 = nrow2 * ncol2;  // allocate space for output
   size_t nf2 = np2 * nband;
   float * count = (float *) falloc(nf2);
   float * dat2 = (float *) falloc(nf2);
-
-  for0(i, nf2){
-    count[i] = dat2[i] = 0.;
-  }
+  for0(i, nf2) count[i] = dat2[i] = 0.; // set to zero
 
   for0(i, nrow){
     ip = i / n;
@@ -61,6 +56,7 @@ int main(int argc, char ** argv){
   str ofn(fn + str("_mlk.bin"));
   str ohfn(fn + str("_mlk.hdr"));
 
+  printf("nr2 %zu nc2 %zu nband %zu\n", nrow2, ncol2, nband);
   hwrite(ohfn, nrow2, ncol2, nband); // write output header
   cout << "+w " << ofn << endl;
   FILE * f = fopen(ofn.c_str(), "wb");
@@ -70,7 +66,7 @@ int main(int argc, char ** argv){
   cout << "nf2 " << nf2 << endl;
   cout << "nf2 * sizeof(f)" << nf2 * sizeof(float) << endl;
   for0(i, nf2){
-    fwrite(&dat2, sizeof(float), 1, f);
+    fwrite(&dat2[i], sizeof(float), 1, f);
   }
   fclose(f);
 
