@@ -45,7 +45,7 @@ int main(int argc, char ** argv){
     for0(jp, ncol2){
       for0(k, nband){
         ix1 = (k * np2) + (ip * ncol2) + jp;
-        if(count[ix1] > 0.) dat2[ix1] /= count[ix_1];
+        if(count[ix1] > 0.) dat2[ix1] /= count[ix1];
       }
     }
   }
