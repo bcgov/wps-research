@@ -169,11 +169,12 @@ bool operator<(const f_idx& a, const f_idx&b){
 }
 
 // read header file
-void hread(str hfn, size_t & nrow, size_t & ncol, size_t & nband){
+size_t hread(str hfn, size_t & nrow, size_t & ncol, size_t & nband){
   str line;
+  size_t data_type;
   vector<str> words;
   ifstream hf(hfn);
-  nrow = ncol = nband = 0;
+  data_type = nrow = ncol = nband = 0;
   if(hf.is_open()){
   }
   else{
@@ -191,8 +192,8 @@ void hread(str hfn, size_t & nrow, size_t & ncol, size_t & nband){
     }
   }
   cout << "hread: " << hfn << " nrow: " << nrow << " ncol: " << ncol << " nband: " << nband << endl;
-
   hf.close();
+  return data_type;
 }
 
 void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband){

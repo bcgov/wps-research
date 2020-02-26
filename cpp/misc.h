@@ -204,7 +204,7 @@ class f_idx{
 bool operator<(const f_idx& a, const f_idx&b);
 
 // read header file
-void hread(str hfn, size_t & nrow, size_t & ncol, size_t & nband);
+size_t hread(str hfn, size_t & nrow, size_t & ncol, size_t & nband);
 void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband);
 
 float * falloc(size_t nf);
