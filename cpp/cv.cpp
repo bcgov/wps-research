@@ -36,7 +36,8 @@ int main(int argc, char ** argv){
   if(argc != 8){
     printf("cv.cpp: Convert between ENVI image data types Ash Richardson 200806 with updates 200905;\n");
     printf("\treimplemented 20170617 and updated 20200226\n");
-    printf("Usage: cv [input file name] [input data type] [samples] [lines] [bands] [output file name] [output data type]\n");
+
+    printf("Usage: cv [input file name] [output file name] [output data type]\n");
     printf("Supported Data Types:\n1=8-bit byte\n2=16-bit signed integer\n3=32-bit signed long integer\n4=32-bit floating point\n5=64-bit double-precision floating point\n12=16-bit unsigned integer\n13=32-bit unsigned long integer\n14=64-bit signed long integer\n15=64-bit unsigned long integer\n\nUnsupported types:\n6=2x32-bit complex, real-imaginary pair of double precision\n9=2x64-bit double-precision complex, real-imaginary pair of double precision\n");
     printf("\nNote: this program is not affected by interleave type (although it naively processes the file on a band by band basis).\n");
     printf("\nIMPORTANT: program assumes intel convention (byte order 0).\n");
@@ -44,13 +45,22 @@ int main(int argc, char ** argv){
   }
 
   char * infilename = argv[1]; // input file name
-  int idatatype = atoi(argv[2]); // data type
-  int samples = atoi(argv[3]); // image dimensions
-  int lines = atoi(argv[4]);
-  int bands = atoi(argv[5]);
-  char * outfilename = argv[6]; // output file name
-  int odatatype = atoi(argv[7]); // output data type
+
+  size_t ns, nl, nb; 
+  int idatatype = -1; // atoi(argv[2]); // data type
+  int samples = -1; // atoi(argv[3]); // image dimensions
+  int lines = -1; // atoi(argv[4]);
+  int bands = -1; //atoi(argv[5]);
+  char * outfilename = argv[2]; // output file name
+  int odatatype = atoi(argv[3]); // output data type
   
+  str ifn(infilename);
+  str hfn(hdr_fn(ifn));
+  idatatype = (int) hread(hfn, nl, ns, nb);
+  samples = (int) ns;
+  lines = (int) nl;
+  bands = (int) nb; // clean up the redundant variables later
+
   FILE * infile; FILE * outfile; // file handles
   long int n_pix = lines * samples; // number of pixels
 
