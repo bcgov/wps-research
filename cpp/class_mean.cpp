@@ -1,34 +1,43 @@
-/* visualize a class map by coloring each class with its mean, from the imagery */
+/* extract means under polygons and,
+visualize a class/segment map by:
+coloring each class with its mean, from the imagery
+inputs:
+1) multispectral image (ENVI type 4)
+2) co-registered label map (ENVI type 4)
 
-// inputs: 
-// 1) multispectral image (ENVI type 4)
-// 2) co-registered label map (ENVI type 4)
-
-// outputs:
-// 1) averaged product: same values over polygons
-// 2) averages, by polygon index, for each polygon
-
+outputs:
+1 ) averaged product: same values over polygons
+2) averages, by polygon index, for each polygon
+*/
 
 #include"misc.h"
 int main(int argc, char ** argv){
 
-  if(argc < 4) err("class_mean [input binary class file name] [input binary image file name] [output file name]");
+  if(argc < 5){
+    err("class_mean [input binary image file] [input binary class map file] [output image file name] [output spectra file name]");
+  }
 
   // class file input
-  str fn(argv[1]); // input file name
-  cout << "input file name:" << fn << endl;
+  str fn(argv[2]); // input file name
+  cout << "input class file name:" << fn << endl;
   str hfn(hdr_fn(fn)); // auto-detect header file name
-  cout << "header file name:" << hfn << endl;
+  cout << "header class file name:" << hfn << endl;
   size_t nrow, ncol, nband, np, i, j, k;
   hread(hfn, nrow, ncol, nband); // read header
 
   // imagery input
-  str fn2(argv[2]); // input file name
-  cout << "input file 2 name:" << fn2 << endl;
+  str fn2(argv[1]); // input file name
+  cout << "input data file name:" << fn2 << endl;
   str hfn2(hdr_fn(fn2)); // auto-detect header file name
-  cout << "header file 2 name:" << hfn2 << endl;
+  cout << "header data file name:" << hfn2 << endl;
   size_t nrow2, ncol2, nband2;
   hread(hfn2, nrow2, ncol2, nband2); // read header
+
+  str ofn(argv[3]);
+  if(exists(ofn)) err("output file already exists");
+
+  str of2(argv[4]);
+  if(exists(of2)) err("output spectra file already exists");
 
   np = nrow * ncol;
   float d;//r, g, b, h, s, v;
@@ -79,9 +88,7 @@ int main(int argc, char ** argv){
     }
   }
 
-  // number of codes: count.size()
-  str ofn(argv[3]);
-  if(exists(ofn)) err("output file already exists");
+  // number of codes: count.size(). write output image header:
   str ohfn(hdr_fn(ofn, true));
   cout << "output header file name: " << ohfn << endl;
   hwrite(ohfn, nrow2, ncol2, nband2); // rgb file: 3 bands
@@ -90,10 +97,25 @@ int main(int argc, char ** argv){
   FILE * outf = fopen(ofn.c_str(), "wb");
   for0(k, nband2){
     for0(i, np){
-	d = avg[dat[i]][k];
-	fwrite(&d, sizeof(float), 1, outf);
+      d = avg[dat[i]][k];
+      fwrite(&d, sizeof(float), 1, outf);
     }
   }
   fclose(outf);
+
+  // write spectra to CSV file
+  FILE * outf2 = fopen(of2.c_str(), "wb");  // should output band names to spectra
+  
+  size_t ci = 0;
+  for(it = count.begin(); it != count.end(); it++){
+    float class_i = it->first;
+    if(ci > 0) fprintf(out2, "\n");
+    for0(k, nband2){
+      if(k > 0) fprintf(outf2, ",");
+      fprintf(outf2, "%e", avg[class_i][k]);
+    } 
+  }
+
+  fclose(outf2);
   return 0;
 }
