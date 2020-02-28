@@ -1,4 +1,14 @@
 /* visualize a class map by coloring each class with its mean, from the imagery */
+
+// inputs: 
+// 1) multispectral image (ENVI type 4)
+// 2) co-registered label map (ENVI type 4)
+
+// outputs:
+// 1) averaged product: same values over polygons
+// 2) averages, by polygon index, for each polygon
+
+
 #include"misc.h"
 int main(int argc, char ** argv){
 
