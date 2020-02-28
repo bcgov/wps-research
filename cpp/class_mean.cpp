@@ -110,9 +110,9 @@ int main(int argc, char ** argv){
   for(it = count.begin(); it != count.end(); it++){
     float class_i = it->first;
     if(ci > 0) fprintf(out2, "\n");
+    fprintf("%zu", class_i);
     for0(k, nband2){
-      if(k > 0) fprintf(outf2, ",");
-      fprintf(outf2, "%e", avg[class_i][k]);
+      fprintf(outf2, ",%e", avg[class_i][k]);
     } 
   }
 
