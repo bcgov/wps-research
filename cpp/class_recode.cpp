@@ -39,8 +39,8 @@ int main(int argc, char ** argv){
   FILE * f = fopen(ofn.c_str(), "wb");
 
   for0(i, np){
-	d = lookup[dat[i]];
-	fwrite(&d, sizeof(float), 1, f);
+    d = lookup[dat[i]];
+    fwrite(&d, sizeof(float), 1, f);
   }
   fclose(f);
   return 0;
