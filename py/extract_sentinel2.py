@@ -19,6 +19,8 @@ if not os.path.exists(fn):
 df = fn[:-4] + '.SAFE'
 if not os.path.exists(df):
     a = os.system('unzip ' + fn)
+    import time
+    time.sleep(1.)
 
 if not os.path.exists(df):
     err('failed to unzip')
@@ -30,11 +32,17 @@ for line in xml:
     line = line.strip()
     if len(line.split('.xml')) > 1:
         print('\t' + line)
-        x = df + line.split(df)[1]
-        ds = 'SENTINEL2_L1C:' + x
-        cmd = ['gdal_translate', ds, '--config GDAL_NUM_THREADS 8', '-of ENVI', '-ot Float32', x.replace('MTD_MSIL1C.xml', 'SENTINEL2_L1C').replace(':', '_') + '.bin']
-        cmds.append(' '.join(cmd))
-
+        try:
+            df = df.split(os.path.sep)[-1]
+            print("split on:", df)
+            dfw = line.split(df)
+            print(dfw)
+            x = df + dfw[1]
+            ds = 'SENTINEL2_L1C:' + x
+            cmd = ['gdal_translate', ds, '--config GDAL_NUM_THREADS 8', '-of ENVI', '-ot Float32', x.replace('MTD_MSIL1C.xml', 'SENTINEL2_L1C').replace(':', '_') + '.bin']
+            cmds.append(' '.join(cmd))
+        except Exception:
+            pass
 for cmd in cmds:
     run(cmd)
 
