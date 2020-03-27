@@ -213,16 +213,37 @@ void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband){
   hf.close();
 }
 
+void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband, size_t data_type){
+  cout << "+w " << hfn << endl;
+  ofstream hf(hfn);
+  if(!hf.is_open()) err("failed to open header file for writing");
+   hf << "ENVI" << endl;
+  hf << "samples = " << ncol << endl;
+  hf << "lines = " << nrow << endl;
+  hf << "bands = " << nband << endl;
+  hf << "header offset = 0" << endl;
+  hf << "file type = ENVI Standard" << endl;
+  hf << "data type = " << data_type << endl;
+  hf << "interleave = bsq" << endl;
+  hf << "byte order = 0" << endl;
+  hf.close();
+}
+
+
 str hdr_fn(str fn, bool create=false){
   str hfn(fn + str(".hdr"));
   if(exists(hfn)) return hfn;
   int s = fn.size();
   str b(fn);
   b = b.substr(0, s - 4);
+  //cout << "b " << b << endl;
   str hfn2(b + str(".hdr"));
-  if(exists(hfn2)) return hfn2;
+  //cout << "hfn2 "  << hfn2 << endl;
+  if(exists(hfn2)){
+    return hfn2; // don't create two headers for the same file
+  }
   if(create){
-    return hfn;
+    return hfn2;
   }
   else{
     err(str("could not find header at: ") + hfn + str(" or at: ") + hfn2);
