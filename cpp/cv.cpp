@@ -56,6 +56,9 @@ int main(int argc, char ** argv){
   
   str ifn(infilename);
   str hfn(hdr_fn(ifn));
+  str ofn(outfilename);
+  str ofh(hdr_fn(ofn, true));  // create = true
+
   idatatype = (int) hread(hfn, nl, ns, nb);
   samples = (int) ns;
   lines = (int) nl;
@@ -72,6 +75,8 @@ int main(int argc, char ** argv){
   if(!outfile){
     printf("Error: could not open input file\n"); exit(1);
   }
+
+  hwrite(ofh, lines, samples, bands, (size_t)odatatype);
 
   /* data variables */
   char * dat_1; // char 
@@ -93,6 +98,7 @@ int main(int argc, char ** argv){
   unsigned long int * dat_15; // long unsigned int
   unsigned long int * out_15;
 
+  printf("datatype: %d\n", idatatype);
   switch(idatatype){
     case 1:
     dat_1 = (char *) malloc(n_pix * sizeof(char));

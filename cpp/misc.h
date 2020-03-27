@@ -206,6 +206,7 @@ bool operator<(const f_idx& a, const f_idx&b);
 // read header file
 size_t hread(str hfn, size_t & nrow, size_t & ncol, size_t & nband);
 void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband);
+void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband, size_t data_type);
 
 float * falloc(size_t nf);
 
