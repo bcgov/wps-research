@@ -33,7 +33,7 @@ int main(int argc, char ** argv){
   check("long signed int", sizeof(long signed int), 8);
   check("long unsigned int", sizeof(long unsigned int), 8);
 
-  if(argc != 8){
+  if(argc != 4){
     printf("cv.cpp: Convert between ENVI image data types Ash Richardson 200806 with updates 200905;\n");
     printf("\treimplemented 20170617 and updated 20200226\n");
 
