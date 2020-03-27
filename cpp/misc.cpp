@@ -189,9 +189,10 @@ size_t hread(str hfn, size_t & nrow, size_t & ncol, size_t & nband){
       if(w == str("samples")) ncol = n;
       if(w == str("lines")) nrow = n;
       if(w == str("bands")) nband = n;
+      if(w == str("data type")) data_type = n;
     }
   }
-  cout << "hread: " << hfn << " nrow: " << nrow << " ncol: " << ncol << " nband: " << nband << endl;
+  cout << "hread: " << hfn << " nrow: " << nrow << " ncol: " << ncol << " nband: " << nband << "data_type: " << data_type << endl;
   hf.close();
   return data_type;
 }
