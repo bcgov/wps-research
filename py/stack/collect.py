@@ -1,3 +1,4 @@
+# this script makes a copy of output files, in one folder with new filenames
 import os
 import sys
 files = os.popen('find kamloops-data-ufb-pansharpen/ -name "*4.bin"').readlines()

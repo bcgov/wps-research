@@ -1,3 +1,7 @@
+''' draft script for removing bands 11 and 13
+ these band indices (from 1) refer to the indexing used,
+ in the output from sentinel2 superresolution utility http://nicolas.brodu.net/recherche/sen2res/
+'''
 import os
 import sys
 
@@ -12,7 +16,6 @@ for f in files:
 
     hf2 = "new" + os.path.sep + hf
 
-
     lines = open(hf).readlines()
     lines = [line.strip() for line in lines]
 
@@ -21,11 +24,8 @@ for f in files:
         if line == "bands   = 13":
             lines[i] = "bands   = 11"
 
-    #print("------------------------")
     print(hf2)
-    #for line in lines:
-    #    print("  " + line)
-
+    #for line in lines: print("  " + line)
 
     del lines[-1]
     del lines[-2]

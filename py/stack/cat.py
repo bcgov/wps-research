@@ -1,3 +1,10 @@
+'''
+draft high level interface for stacking
+
+this script asserts geo and other information match, as output from 
+http://nicolas.brodu.net/recherche/sen2res/
+
+and collets band names from the output header files'''
 import os
 import sys
 

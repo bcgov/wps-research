@@ -1,3 +1,4 @@
+// this is a duplicate, would delete this when the other files in this folder get merged
 #include"misc.h"
 
 string cwd(){
