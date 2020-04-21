@@ -1,4 +1,7 @@
-// drop specified bands from a hyperspectral image (don't write header)
+/* 20200420 drop specified bands from a hyperspectral image:
+ 
+   no header written by this script 
+*/
 #include"misc.h"
 #include<set>
 
