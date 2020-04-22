@@ -1,3 +1,5 @@
+# don't forget to modify this script to restrict for time, need to be able to fetch relevant records that we've not yet considered
+
 '''
   query sentinel-2 products over a given:
     1) point-- lat, long
@@ -6,6 +8,10 @@
 import os
 import sys
 import math
+
+no_clobber = None
+if len(sys.argv) > 1:
+    no_clobber = ' -nc '
 
 # save username and password to files:
 user_, pass_ = None, None
@@ -75,7 +81,8 @@ print('+w out_all.html')
 open('out_all.html', 'wb').write('\n'.join(lines_all).encode())
 
 lst = set()
-titles = os.popen('grep "<title>" out_all.html').readlines()
+# index from 1 [1:] to exclude title of search page 
+titles = os.popen('grep "<title>" out_all.html').readlines()[1:]
 for t in titles:
     t = t.strip()
     lst.add(t)
@@ -100,8 +107,9 @@ for i in range(0, len(links)):
     w = link.strip().split('<link rel="alternative" href="')[1].split('"/>')[0]
     ti = titles[i]
     tw= ti.strip().split(">")[1].split("<")[0].strip()
-    cmd = 'wget --content-disposition --continue --user=' + user_ + ' --password=' + pass_ + ' "' + w + '\\$value"' 
+    cmd = 'wget ' + no_clobber + ' --content-disposition --continue --user=' + user_ + ' --password=' + pass_ + ' "' + w + '\\$value"' + " #" + titles[i].strip()
     if i > 0:
         f.write('\n'.encode())
     f.write(cmd.encode())
 f.close()
+print("+w .sentinel2_download.sh")
