@@ -1,4 +1,6 @@
 # bcws-psu-research
+** This page needs to be updated **
+
 Research collaboration in Image Analysis featuring:
 * Thompson Rivers University (TRU)
 * BC Wildfire Service (BCWS) Predictive Services Unit (PSU)
