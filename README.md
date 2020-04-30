@@ -16,12 +16,14 @@ Research collaboration in Image Analysis featuring:
 
 To appear: more utilities for integrating open remotely-sensed imagery
 
-## Direct Collaborators and Contributors:
-* Brady Holliday, BCWS
+## Collaborators and Contributors:
 * Dana Hicks, BCWS
 * Joanna Wand, BCWS
 * Musfiq Rahman, TRU
 * Jabed Tomal, TRU
+
+## Alumni:
+* Brady Holliday, BCWS
 
 ### TRU Computing Science ML/AI Students Co-supervised:
 * Gagan Bajwa
