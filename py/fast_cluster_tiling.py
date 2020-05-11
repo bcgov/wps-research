@@ -67,14 +67,14 @@ for x in range(0, ntile_x):
     x_end = min(x_start + tile_size, ncol)  # x_start + tile_size - 1, ncol - 1
     x_start = max(0, x_start - border_size) # add border
     x_end = min(ncol, x_end + border_size) # ncol - 1 
-    x_size = x_end - x_start + 1 #  calculate size
+    x_size = x_end - x_start #  calculate size
 
     for y in range(0, ntile_y):
         y_start = y * tile_size
         y_end = min(y_start + tile_size, nrow)  # y_start + sile_size - 1, nrow - 1
         y_start = max(0, y_start - border_size)  # add border
         y_end = min(nrow, y_end + border_size) # nrow - 1
-        y_size = y_end - y_start + 1 # calculate size
+        y_size = y_end - y_start # calculate size
         
         # tile index
         p = str(x) + "_" + str(y)
@@ -82,14 +82,16 @@ for x in range(0, ntile_x):
 
         # extract tile
         extent[p] = [x_start, x_end, y_start, y_end]
-        X = img[int(x_start): int(x_end), int(y_start): int(y_end),:]
+        X = img[int(x_start): int(x_end), int(y_start): int(y_end), :]
         
         # show tile
         plt.figure()
+        print("X.shape", X.shape, "x_size", x_size, "y_size", y_size, "x_size * y_size", x_size * y_size)
         plt.imshow(twop_str(X))
         f_n = pfx + ".png"
         print "+w", f_n
         plt.tight_layout()
+        # plt.show()
         plt.savefig(f_n)
     
         # print "calculating linkage.."
@@ -101,6 +103,8 @@ for x in range(0, ntile_x):
         linkages[p] = Z
 
         values = Z.reshape(np.prod(Z.shape)).tolist()
+
+        print("Z.shape", Z.shape, "x_size", x_size, "y_size", y_size, "x_size * y_size", x_size * y_size)
         values.sort()
         q = percent_trim # 0.245
         pmn = min(values)
@@ -112,7 +116,8 @@ for x in range(0, ntile_x):
 
 
 # threshold distance (only needed this, could run linkage again if too big to store)
-d_t =  min(p_mns.values())
+d_t =  max(p_mns.values())
+# d_t =  min(p_mns.values())
 labels = {}
 
 for x in range(0, ntile_x):
@@ -122,6 +127,7 @@ for x in range(0, ntile_x):
 
         Z = linkages[p] # could rerun if insuff. memory
         labels[p] = fcluster(Z, d_t, criterion = 'distance')
+        print("labels[p].shape", labels[p].shape, "x_size", x_size, "y_size", y_size, "x_size * y_size", x_size * y_size)
         labels[p] = labels[p].reshape(extent[p][1] - extent[p][0], extent[p][3] - extent[p][2])
 
         # print "min, max", np.min(labels), np.max(labels)
