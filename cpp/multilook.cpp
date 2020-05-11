@@ -17,13 +17,13 @@ int main(int argc, char ** argv){
   float * dat = bread(fn, nrow, ncol, nband); // load floats to array
   size_t nrow2 = nrow / n; // output image row dimensions
   size_t ncol2 = ncol / n;
-  size_t np2 = nrow2 * ncol2;  // allocate space for output
+  size_t np2 = nrow2 * ncol2; // allocate space for output
   size_t nf2 = np2 * nband;
 
   float * count = (float *) falloc(nf2);
   float * dat2 = (float *) falloc(nf2);
   for0(i, nf2) count[i] = dat2[i] = 0.; // set to zero
-  
+
   for0(i, nrow){
     ip = i / n;
     for0(j, ncol){
@@ -56,11 +56,11 @@ int main(int argc, char ** argv){
 
   printf("nr2 %zu nc2 %zu nband %zu\n", nrow2, ncol2, nband);
   hwrite(ohfn, nrow2, ncol2, nband); // write output header
-  
+
   FILE * f = fopen(ofn.c_str(), "wb");
   if(!f) err("failed to open output file");
   for0(i, nf2) fwrite(&dat2[i], sizeof(float), 1, f); // write data
- 
+
   fclose(f);
   free(dat);
   free(dat2);
