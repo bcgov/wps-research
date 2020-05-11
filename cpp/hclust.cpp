@@ -237,7 +237,7 @@ int main(int argc, char** argv){
   np = nr * nc; // pixel count
 
   if(argc < 4){
-    printf("reduced args: setting each pixel as a seed\n")
+    printf("reduced args: setting each pixel as a seed\n");
     nr2 = nr;
     nc2 = nc;
     nb2 = nb;
@@ -380,6 +380,7 @@ int main(int argc, char** argv){
       i++;
     }
 
+    if(iter % 50 == 0 || labels.size() == nclust){
     // output label maps. left zero-pad output filenames
     int n_zero = 6;
     str iter_s(to_string(iter));
@@ -392,7 +393,8 @@ int main(int argc, char** argv){
     fclose(of);
 
     // color-code every n-th map
-    if(iter % 50 == 0 || labels.size() == nclust ){
+
+    // if(iter % 50 == 0 || labels.size() == nclust )
       str cmd(str("bin/class_recode ") + ofn);
       cout << cmd << endl;
       system(cmd.c_str());
