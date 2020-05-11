@@ -38,7 +38,9 @@ assert_exists(fn)
 samples, lines, bands = read_hdr(hdr)
 for f in ['samples', 'lines', 'bands']:
     exec('print("' + f + ' =" + str(' +  f + '));')
-
+samples = int(samples)
+lines = int(lines)
+bands = int(bands)
 # read binary IEEE 32-bit float data
 npx = lines * samples # number of pixels
 data = read_float(sys.argv[1]).reshape((bands, npx))
