@@ -26,6 +26,9 @@ def run(c):
 def exist(f):
     return os.path.exists(f)
 
+def exists(f):
+    return exist(f)
+
 def hdr_fn(bin_fn):
     # return filename for header file, given name for bin file
     hfn = bin_fn[:-4] + '.hdr'
