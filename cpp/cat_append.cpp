@@ -1,4 +1,6 @@
 /* cat in-place: append files onto another file: e.g., use case: if wanted to use cat to combine files, but insuff. space! */
+
+// note: instead of cat_append a b
 #include"misc.h"
 
 int main(int argc, char ** argv){
