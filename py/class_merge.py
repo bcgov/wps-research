@@ -1,4 +1,7 @@
-# guess at what the "null" / non-positive class is: output a new map with the other classes merged. Result: a binary class map
+''' create a binary class map by:
+1) guess at what the "null" / non-positive class is:
+2) output a new map with the other classes merged
+'''
 from misc import * 
 
 if len(args) < 2:
