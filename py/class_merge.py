@@ -14,15 +14,15 @@ hfn = hdr_fn(fn)
 samples, lines, bands, data = read_binary(fn)
 count = hist(data)
 class_labels = count.keys()
-print "number of class labels,", len(class_labels)
-print "\tlabel,count"
+print("number of class labels,", len(class_labels))
+print("\tlabel,count")
 
 for c in class_labels:
-    print '\t' + str(c) + ',' + str(count[c])
+    print('\t' + str(c) + ',' + str(count[c]))
 
-print "class_labels", class_labels
+print("class_labels", class_labels)
 
-print "if 0. label not present, assume most-frequent label is non-positive.."
+print("if 0. label not present, assume most-frequent label is non-positive..")
 
 max_label, max_count = None, None
 
@@ -33,8 +33,8 @@ if 0. not in class_labels:
         if count[c] > max_count:
             max_label, max_count = class_labels[c], count[c]
 
-    print "\tmax_label,max_count"
-    print "\t", str(max_label) + ',' + str(max_count)
+    print("\tmax_label,max_count")
+    print("\t", str(max_label) + ',' + str(max_count))
 else:
     max_label = 0.
 
