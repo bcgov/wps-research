@@ -1,12 +1,8 @@
-// cat in-place: append files onto another file:
-// use case: if wanted to use cat to combine files, but insuff. space!
-
+/* cat in-place: append files onto another file: e.g., use case: if wanted to use cat to combine files, but insuff. space! */
 #include"misc.h"
 
 int main(int argc, char ** argv){
-  if(argc < 3){
-    err("cat_append [file to cat onto] [other file] .. [possible additional file] ..");
-  }
+  if(argc < 3) err("cat_append [file: cat onto] [file] .. [another file?] ..");
 
   int i;
   for0(i, argc){
@@ -20,7 +16,7 @@ int main(int argc, char ** argv){
     }
   }
 
-  string name;
+  str name;
   cout << "concatenate other files onto: " << argv[1] << endl;
   cout << "press RETURN or ctrl-c to exit";
   getline(std::cin, name);
@@ -32,7 +28,9 @@ int main(int argc, char ** argv){
       char s;
       while(1){
         s = fgetc(g);
-        if(s == EOF) break;
+        if(s == EOF){
+          break;
+        }
         fwrite(&s, sizeof(char), 1, f);
       }
       fclose(g);
@@ -41,5 +39,4 @@ int main(int argc, char ** argv){
   fclose(f);
 
   return 0;
-
 }
