@@ -1,0 +1,64 @@
+n_skip = 10
+import sklearn
+import datetime
+import numpy as np
+from misc import *
+import matplotlib.pyplot as plt
+from sklearn.linear_model import SGDClassifier
+from sklearn.ensemble import RandomForestClassifier
+
+infile, out_d = "stack.bin", "output" + os.path.sep
+if not exist(out_d): os.mkdir(out_d)
+
+# read multispectral image
+ncol, nrow, nband, data = read_binary(infile)
+print("data.shape", data.shape)
+
+img_bands = 12
+npx = nrow * ncol
+ref_bands = nband - img_bands
+nf_img, nf_ref = npx * img_bands, npx * ref_bands
+img, ref = data[0: nf_img], data[nf_img: ]
+
+img2 = bsq_to_scikit(ncol, nrow, img_bands, img)
+
+def n_th(img, n): # take every n-th data point (data in scikit-learn expected format)
+    npx, nband = img.shape
+    result = np.zeros((int(math.floor(npx / n)), nband))
+    for i in range(0, npx, n):
+        ip = int(math.floor(i/n))
+        for k in range(0, nband):
+            result[ip, k] = img[i, k]
+    return result
+
+img3 = n_th(img2, n_skip)
+
+for i in range(0, ref_bands):
+    print(i)
+    ref_b = bsq_to_scikit2(npx, 1, ref[(i * nrow * ncol): ((i+1) * nrow * ncol)])
+    ref_b = ref_b.astype(int)
+
+    ref_b2 = n_th(ref_b, n_skip)
+
+    print(ref_b)
+
+    rf = RandomForestClassifier(n_estimators=33, oob_score=True) # could crash on warn and increase # of estimators
+
+    X = img3
+    y = ref_b2.ravel()
+    # Fit our model to training data
+    rf.fit(X, y)
+
+    predict = rf.predict(X)
+    df = np.sum(predict - y)
+    npx_t = math.floor(npx / n_skip)
+    acc = 100. * ((npx_t - abs(df)) / npx_t)
+    print("train%", acc)
+    predict2 = rf.predict(img2)
+    df =  np.sum(predict2 - ref_b.ravel())
+    acc = 100. * ((npx - abs(df)) / npx)
+    print("test %", acc)
+
+    plt.imshow(predict2.reshape(nrow, ncol), cmap = 'binary_r')
+    plt.tight_layout()
+    plt.show()
