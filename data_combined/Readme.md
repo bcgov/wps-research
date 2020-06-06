@@ -6,3 +6,12 @@ python3 -m "pip install scikit-learn"
 python3 rf_stack.py
 ```
 ![BROADLEAF](output/BROADLEAF.png)
+![CONIFER](output/CONIFER.png)
+![CUTBL](output/CUTBL.png)
+![EXPOSED](output/EXPOSED.png)
+![HERB_GRAS](output/HERB_GRAS.png)
+![MIXED](output/MIXED.png)
+![RIVER](output/RIVER.png)
+![SHRUB](output/SHRUB.png)
+![WATER](output/WATER.png)
+
