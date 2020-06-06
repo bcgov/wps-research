@@ -2,8 +2,8 @@
 # e.g., n_skip = 2 -->  train on 50%
 #       n_skip = 10 --> train on 10%
 
-n_skip = 2 # 10
-n_est = 33 # number of estimators for random_forest
+n_skip = 5 # 5 --> 20% train
+n_est = 7 # number of estimators for random_forest
 import sklearn
 import datetime
 import numpy as np
@@ -45,7 +45,6 @@ def n_th(img, n): # take every n-th data point (data in scikit-learn expected fo
 img3 = n_th(img2, n_skip)
 
 for i in range(0, ref_bands):
-    print(i)
     ref_b = bsq_to_scikit2(npx, 1, ref[(i * nrow * ncol): ((i+1) * nrow * ncol)])
     ref_b2 = n_th(ref_b, n_skip)
 
@@ -58,8 +57,7 @@ for i in range(0, ref_bands):
     npx_t = math.floor(npx / n_skip)
     acc = 100. * ((npx_t - abs(df)) / npx_t)
     print("train%", acc)
-    predict2 = rf.predict(img2)
-    print("set(predict2)", set(predict2))
+    predict2 = rf.predict(img2) # print("set(predict2)", set(predict2))
     df =  np.sum(predict2 - ref_b.ravel())
     acc = 100. * ((npx - abs(df)) / npx)
     print("all  %", acc)
@@ -71,5 +69,8 @@ for i in range(0, ref_bands):
     ax[0].set_title(ref_names[i])
     ax[0].set_xlabel("groundref")
     ax[1].set_xlabel("predict")
+    plt.gcf().set_size_inches(12,7)
     plt.tight_layout()
-    plt.show()
+    ofn = out_d + ref_names[i] + '.png'
+    print("+w", ofn)
+    plt.savefig(ofn)
