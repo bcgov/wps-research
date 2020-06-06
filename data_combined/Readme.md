@@ -1,6 +1,6 @@
 **Random forest demo**
 * [Source Code rf_stack.py](rf_stack.py)
-* S2 image and BCGW groundref are in stack.tar.gz which rf_stack.py will auto-extract
+* S2 image and BCGW groundref are in stack.tar.gz which rf_stack.py will auto-extract (isn't it fun to read data without a driver?)
 * 20% of pixels were selected for training
 * seven estimators were used
 
