@@ -201,6 +201,5 @@ def band_names(hdr, nb):  # pull band names out of ENVI header file, making some
         names[i] = names[i].strip().strip(",").strip().strip("}")
         if len(names[i].split("{")) > 1:
             names[i] = names[i].split("{")[1]
-        print([names[i]])
 
     return names
