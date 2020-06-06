@@ -5,3 +5,4 @@ S2 image and BCGW groundref are in stack.tar.gz. 20% of pixels were selected for
 python3 -m "pip install scikit-learn"
 python3 rf_stack.py
 ```
+![BROADLEAF](output/BROADLEAF.png)
