@@ -1,4 +1,4 @@
-# n_skip: use every n_skip-th pixel for trainingral gun ban quietly expanded, potentially putting owners unknowingly on wrong side of the law
+# n_skip: use every n_skip-th pixel for training
 # e.g., n_skip = 2 -->  train on 50%
 #       n_skip = 10 --> train on 10%
 
