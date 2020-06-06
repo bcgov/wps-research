@@ -19,8 +19,10 @@ if not exist(infile): a = os.system("tar xvf stack.tar.gz") # open data
 if not exist(out_d): os.mkdir(out_d)
 
 # read multispectral image
-ncol, nrow, nband, data = read_binary(infile)  # print("data.shape", data.shape)
-bnames = band_names("stack.hdr", nband) # print("band names", bnames)
+ncol, nrow, nband, data = read_binary(infile)
+print("data.shape", data.shape)
+bnames = band_names("stack.hdr", nband)
+print("band names", bnames)
 
 img_bands = 12
 npx = nrow * ncol  # number of pix
