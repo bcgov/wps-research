@@ -27,8 +27,8 @@ using namespace std;
 #define str string
 
 void err(char * msg);
-
 void err(string msg);
+bool is_int(string i);
 
 /*convert char to string: single character: interpret whitspace as space character */
 string chartos(char s);

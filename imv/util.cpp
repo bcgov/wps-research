@@ -17,6 +17,12 @@ void err(string msg){
   err(msg.c_str());
 }
 
+// if it is an int, should be able to cast to int and back!
+bool is_int(string i){
+  int x = atoi(i.c_str());
+  return (std::to_string(x) == i);
+}
+
 void init_mtx(){
   // mutex setup
   pthread_mutex_init(&print_mtx, NULL);
@@ -287,7 +293,7 @@ vector<string> parse_band_names(string fn){
   }
 
   vector<string> band_names;
-  
+
   // parse first band name
   vector<string> w(split(lines[bni], '{'));
   string bn(w[1]);
@@ -305,9 +311,9 @@ vector<string> parse_band_names(string fn){
 
   // parse last band name
   if(true){
-	str w(lines[lines.size() -1]);
-  	w = trim(w, '}');
-  	band_names.push_back(w);
+    str w(lines[lines.size() -1]);
+    w = trim(w, '}');
+    band_names.push_back(w);
   }
   return band_names;
 }
@@ -319,8 +325,24 @@ vector<int> parse_groundref_names(string fn){
 
   //cout << "loop" << endl;
   vector<string> names(parse_band_names(fn));
+  int ci = 0;
   for(vector<string>::iterator it = names.begin(); it != names.end(); it++){
-	cout << *it << endl;
+    vector<string> w(split(*it));
+    bool has_number = false;
+
+    for(vector<string>::iterator it2 = w.begin(); it2 != w.end(); it2++){
+      if(is_int(*it2)){
+        has_number = true;
+        break;
+      }
+    }
+    if(has_number){
+    }
+    else{
+      cout << "\tgroundref: " << *it << " bi " << ci + 1 << "\n\t\tbi (0-indexed) " << ci << endl;
+      results.push_back(ci);
+    }
+    ci ++;
   }
   // cout << "Exit loop" << endl;
   return results;
