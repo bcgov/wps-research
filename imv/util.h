@@ -26,16 +26,9 @@
 using namespace std;
 #define str string
 
-void err(char * msg){
-  printf("Error: %s\n", msg);
-  exit(1);
-}
+void err(char * msg);
 
-void err(string msg){
-  err(msg.c_str());
-}
-
-
+void err(string msg);
 
 /*convert char to string: single character: interpret whitspace as space character */
 string chartos(char s);

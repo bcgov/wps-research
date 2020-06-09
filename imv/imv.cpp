@@ -48,9 +48,14 @@ int main(int argc, char ** argv){
   min = 3 * min / 5; // can adjust scale here
   printf("min %d\n", min);
 
-  // get image scale
   size_t nr, nc, nb;
   string hfn(getHeaderFileName(string(infile)));
+  
+  // read band names
+  parse_band_names(hfn);
+  exit(1);
+
+  // get image scale
   parseHeaderFile(hfn, nr, nc, nb);
   printf(" infile: %s nrow %ld ncol %ld nband %ld\n", infile, nr, nc, nb);
   printf(" getFileSize %ld expected %ld\n", getFileSize(infile), nr * nc * nb * sizeof(float));

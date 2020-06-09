@@ -8,11 +8,22 @@ size_t pthread_next_j; // next job to run
 size_t pthread_start_j, pthread_end_j; // start and end indices for job
 void (*pthread_eval)(size_t); // function pointer to execute in parallel, over range start_j:end_j inclusive
 
+void err(char * msg){
+  printf("Error: %s\n", msg);
+  exit(1);
+}
+
+void err(string msg){
+  err(msg.c_str());
+}
+
+
 void init_mtx(){
   // mutex setup
   pthread_mutex_init(&print_mtx, NULL);
   pthread_mutex_init(&pthread_next_j_mtx, NULL);
 }
+
 
 void cprint(string s){
   pthread_mutex_lock(&print_mtx);
