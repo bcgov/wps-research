@@ -12,6 +12,7 @@ void fx(size_t n){
 
 int main(int argc, char ** argv){
   init_mtx(); // parfor(10, 15, fx); // parfor(20, 25, fx);
+  groundref.clear();
 
   char * infile;
   if(sizeof(float) != 4){

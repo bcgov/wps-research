@@ -28,6 +28,9 @@ SA<float> * TGT = NULL;
 myImg * TGT_MYIMG = NULL;
 void * TGT_GLIMG = NULL;
 
+// groundref detection
+vector<int> groundref;
+
 
 extern zprManager * myZprManager = NULL;
 
