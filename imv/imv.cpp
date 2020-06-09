@@ -54,10 +54,11 @@ int main(int argc, char ** argv){
   // read band names
   groundref = parse_groundref_names(hfn);
   if(true){
-
+	vector<int>::iterator it;
+	for(it = groundref.begin(); it != groundref.end(); it++){
+	  cout << "groundref " << *it << endl;
+	}
   }
-
-  exit(1);
 
   // get image scale
   parseHeaderFile(hfn, nr, nc, nb);
