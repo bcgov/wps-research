@@ -1,3 +1,7 @@
+#pragma once
+#ifndef UTIL_H
+#define UTIL_H
+
 #include<vector>
 #include<string>
 #include<fstream>
@@ -6,9 +10,6 @@
 #include<iostream>
 #include<pthread.h>
 #include"ansicolor.h"
-#pragma once
-#ifndef UTIL_H
-#define UTIL_H
 
 #include <stdio.h> /* defines FILENAME_MAX */
 #ifdef WINDOWS
@@ -24,6 +25,17 @@
 
 using namespace std;
 #define str string
+
+void err(char * msg){
+  printf("Error: %s\n", msg);
+  exit(1);
+}
+
+void err(string msg){
+  err(msg.c_str());
+}
+
+
 
 /*convert char to string: single character: interpret whitspace as space character */
 string chartos(char s);
@@ -48,6 +60,8 @@ vector<string> readLines(string fn);
 string getHeaderFileName( string fn);
 vector<string> parseHeaderFile(string hfn, size_t & NRow, size_t & NCol, size_t & NBand);
 void writeHeader(const char * filename, int NRows, int NCols, int NBand);
+
+vector<string> parse_band_names(string fn); // read band names from header file
 
 // parallelism stuff
 #define mtx_lock pthread_mutex_lock
