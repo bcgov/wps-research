@@ -17,13 +17,11 @@ void err(string msg){
   err(msg.c_str());
 }
 
-
 void init_mtx(){
   // mutex setup
   pthread_mutex_init(&print_mtx, NULL);
   pthread_mutex_init(&pthread_next_j_mtx, NULL);
 }
-
 
 void cprint(string s){
   pthread_mutex_lock(&print_mtx);
@@ -171,24 +169,19 @@ string getHeaderFileName( string fn){
   string gfn(trim(fn, '\"'));
   string hfn(gfn + string(".hdr"));
   string hfn2((gfn.substr(0, gfn.size()-3)) + string("hdr"));
-  if(exists(hfn)){
-    return hfn;
-  }
-  else if(exists(hfn2)){
-    return hfn2;
-  }
-  else{
-    printf("%sError: could not find header file [%s] or [%s]\n", KRED, hfn.c_str(), hfn2.c_str());
-    return string("");
-  }
+  if(exists(hfn)) return hfn;
+  if(exists(hfn2)) return hfn2;
+  printf("%sError: could not find header file [%s] or [%s]\n", KRED, hfn.c_str(), hfn2.c_str());
+  err("");
 }
 
 long int getFileSize(std::string fn){
   ifstream i;
   i.open(fn.c_str(), ios::binary);
-  if(!i.is_open()){
-    cout << "error: couldn't open file: " << fn << endl;
-    return -1;
+  bool condition = i.is_open();
+  if(!condition){
+    cout << "Warning: couldn't open file: " << fn << endl;
+    return 0;
   }
   i.seekg(0, ios::end);
   long int len = i.tellg();
@@ -196,11 +189,10 @@ long int getFileSize(std::string fn){
 }
 
 bool exists(string fn){
-  if(getFileSize(fn) > 0){
-    printf("%sFound file %s%s\n%s", KGRN, KRED, fn.c_str(), KNRM);
-    return true;
-  }
-  return false;
+  size_t fs = getFileSize(fn);
+  bool condition = fs > 0;
+  if(condition) printf("%sFound file %s%s\n%s", KGRN, KRED, fn.c_str(), KNRM);
+  return condition;
 }
 
 /* special case of split (for newline character) */
@@ -273,17 +265,67 @@ string chartos(char s){
 
 vector<string> parse_band_names(string fn){
   if(!exists(fn)) err("parse_band_names: header file not found");
- 
+
+  str band("band");
+  str names("names");
+  int ci = 0;
+  int bni = -1; // band names start index
   vector<string> lines(readLines(fn)); // read header file
   for(vector<string>::iterator it = lines.begin(); it != lines.end(); it++){
+    //cout << "\t" << *it << endl;
     vector<string> w(split(*it));
+    //for(vector<string>::iterator it2 = w.begin(); it2 != w.end(); it2++){
+      // cout << "\t\t" << *it2 << endl;
+    //}
+    if(w.size() >= 2){
+      if((w[0] == band) && (w[1] == names)){
+        bni = ci;
+        break;
+      }
+    }
+    ci ++;
   }
 
+  vector<string> band_names;
+  
+  // parse first band name
+  vector<string> w(split(lines[bni], '{'));
+  string bn(w[1]);
+  bn = trim(bn, ',');
+  //cout << bn << endl;
+  band_names.push_back(bn);
 
+  // parse middle band names
+  for(ci = bni + 1; ci < lines.size() - 1; ci++){
+    str line(lines[ci]);
+    line = trim(line, ',');
+    //cout << line << endl;
+    band_names.push_back(line);
+  }
+
+  // parse last band name
+  if(true){
+	str w(lines[lines.size() -1]);
+  	w = trim(w, '}');
+  	band_names.push_back(w);
+  }
+  return band_names;
 }
 
+vector<int> parse_groundref_names(string fn){
+  // assume a groundref name doesn't have numbers in it!
 
+  vector<int> results;
 
+  //cout << "loop" << endl;
+  vector<string> names(parse_band_names(fn));
+  for(vector<string>::iterator it = names.begin(); it != names.end(); it++){
+	cout << *it << endl;
+  }
+  // cout << "Exit loop" << endl;
+  return results;
+
+}
 
 // parameters for (full-res) image subset extraction
 size_t load_sub_np;
