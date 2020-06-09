@@ -77,6 +77,9 @@ extern SA<float> * TGT;
 extern myImg * TGT_MYIMG;
 extern void * TGT_GLIMG;
 
+// groundref detection
+extern vector<int> groundref;
+
 // stuff
 class zprManager;
 extern zprManager * myZprManager; // = NULL;
