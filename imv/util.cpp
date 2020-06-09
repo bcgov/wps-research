@@ -260,6 +260,19 @@ string chartos(char s){
   return ret;
 }
 
+vector<string> parse_band_names(string fn){
+  if(!exists(fn)) err("parse_band_names: header file not found");
+ 
+  vector<string> lines(readLines(fn)); // read header file
+  for(vector<string>::iterator it = lines.begin(); it != lines.end(); it++){
+    vector<string> w(split(*it));
+  }
+
+
+}
+
+
+
 
 // parameters for (full-res) image subset extraction
 size_t load_sub_np;
