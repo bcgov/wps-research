@@ -22,10 +22,11 @@ To appear: more utilities for integrating open remotely-sensed imagery
 * Dana Hicks, BCWS
 * Joanna Wand, BCWS
 * Musfiq Rahman, TRU
-* Jabed Tomal, TRU
+* David Hill, TRU
 
 ## Alumni:
 * Brady Holliday, BCWS
+* Jabed Tomal, TRU
 
 ### TRU Computing Science ML/AI Students Co-supervised:
 * Gagan Bajwa
