@@ -52,7 +52,11 @@ int main(int argc, char ** argv){
   string hfn(getHeaderFileName(string(infile)));
   
   // read band names
-  parse_band_names(hfn);
+  groundref = parse_groundref_names(hfn);
+  if(true){
+
+  }
+
   exit(1);
 
   // get image scale
