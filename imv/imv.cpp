@@ -50,7 +50,8 @@ int main(int argc, char ** argv){
 
   // get image scale
   size_t nr, nc, nb;
-  parseHeaderFile(getHeaderFileName(string(infile)), nr, nc, nb);
+  string hfn(getHeaderFileName(string(infile)));
+  parseHeaderFile(hfn, nr, nc, nb);
   printf(" infile: %s nrow %ld ncol %ld nband %ld\n", infile, nr, nc, nb);
   printf(" getFileSize %ld expected %ld\n", getFileSize(infile), nr * nc * nb * sizeof(float));
   size_t np = nr * nc;
