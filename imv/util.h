@@ -13,11 +13,11 @@
 
 #include <stdio.h> /* defines FILENAME_MAX */
 #ifdef WINDOWS
-  #include <direct.h>
-  #define _cwd _getcwd
+#include <direct.h>
+#define _cwd _getcwd
 #else
-  #include <unistd.h>
-  #define _cwd getcwd
+#include <unistd.h>
+#define _cwd getcwd
 #endif
 
 /* shorthand for for loops from 0 to N */
