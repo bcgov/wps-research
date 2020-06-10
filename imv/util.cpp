@@ -47,7 +47,9 @@ void * worker_fun(void * arg){
     mtx_unlock(&pthread_next_j_mtx);
 
     if(my_next_j >= pthread_end_j){
-      cprint(str("\texit thread ") + to_string(k));
+      if(false){
+        cprint(str("\texit thread ") + to_string(k));
+      }
       return(NULL);
     }
     pthread_eval(my_next_j); // perform action segment
@@ -63,8 +65,7 @@ void parfor(size_t start_j, size_t end_j, void(*eval)(size_t)){
   size_t n_cores = sysconf(_SC_NPROCESSORS_ONLN);
   cout << "Number of cores: " << n_cores << endl;
 
-  // allocate threads
-  // // make the threads joinable
+  // allocate threads, make threads joinable whatever that means
   pthread_attr_init(&pthread_attr);
   pthread_attr_setdetachstate(&pthread_attr, PTHREAD_CREATE_JOINABLE);
   pthread_t * my_pthread = new pthread_t[n_cores];
