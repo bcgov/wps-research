@@ -50,14 +50,14 @@ int main(int argc, char ** argv){
 
   size_t nr, nc, nb;
   string hfn(getHeaderFileName(string(infile)));
-  
+
   // read band names
   groundref = parse_groundref_names(hfn);
   if(true){
-	vector<int>::iterator it;
-	for(it = groundref.begin(); it != groundref.end(); it++){
-	  cout << "groundref " << *it << endl;
-	}
+    vector<int>::iterator it;
+    for(it = groundref.begin(); it != groundref.end(); it++){
+      cout << "groundref " << *it << endl;
+    }
   }
 
   // get image scale
@@ -202,13 +202,13 @@ int main(int argc, char ** argv){
     for0(k, IMG_NB){
       for0(i, NWIN){
         for0(j, NWIN){
-	  float d= dat3.at(mm*mm*k + (WIN_I+i)*mm + (WIN_J + j));
-	  dat4.at((NWIN * NWIN * k) + (NWIN *i) + j) = d;
+          float d = dat3.at(mm * mm * k + (WIN_I + i) * mm + (WIN_J + j));
+          dat4.at((NWIN * NWIN * k) + (NWIN * i) + j) = d;
         }
       }
     }
   }
-  
+
   TGT_MYIMG = &c;
 
   //zprInstance *myZpr3 = myManager->newZprInstance(abs((long int)nr2 - (long int)mm), abs((long int)nr2 - (long int)mm), nb);
