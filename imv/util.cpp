@@ -47,8 +47,8 @@ void * worker_fun(void * arg){
     mtx_unlock(&pthread_next_j_mtx);
 
     if(my_next_j >= pthread_end_j){
-      //  cprint(str("\texit thread ") + to_string(k));
-      
+      // cprint(str("\texit thread ") + to_string(k));
+
       return(NULL);
     }
     pthread_eval(my_next_j); // perform action segment
@@ -319,6 +319,7 @@ vector<string> parse_band_names(string fn){
 }
 
 vector<int> parse_groundref_names(string fn){
+  cout << "PARSE_GROUNDREF_NAMES" << endl;
   // assume a groundref name doesn't have numbers in it!
 
   vector<int> results;
@@ -327,11 +328,18 @@ vector<int> parse_groundref_names(string fn){
   vector<string> names(parse_band_names(fn));
   int ci = 0;
   for(vector<string>::iterator it = names.begin(); it != names.end(); it++){
-    vector<string> w(split(*it));
+    string x(*it);
+    std::replace(x.begin(), x.end(), '_', ' ');
+    vector<string> w(split(x));
     bool has_number = false;
 
     for(vector<string>::iterator it2 = w.begin(); it2 != w.end(); it2++){
-      if(is_int(*it2)){
+      string y(*it2);
+      y = trim(y, '(');
+      y = trim(y, ')');
+      cout << "\t\t" << y << endl;
+      if(is_int(y)){
+        cout << "\t\t\tNUMBER" << endl;
         has_number = true;
         break;
       }
