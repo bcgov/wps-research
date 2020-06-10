@@ -646,27 +646,28 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
 
   if(myZprInstanceID == 0){
     //cout << "moving window\n";
-    //printf("SUB_SCALE_F %f\n", SUB_SCALE_F);
+    printf("SUB_SCALE_F %f\n", SUB_SCALE_F);
 
     size_t dx = (int)floor(((float)x) / SUB_SCALE_F);
     size_t dy = (int)floor(((float)y) / SUB_SCALE_F);
-    printf("dx %d dy %d ", dx, dy);
+    printf("dx %zu dy %zu\n", dx, dy);
+    printf("(IMG_NR - SUB_MM) %zu (IMG_NC - SUB_MM) %zu\n", (IMG_NR - SUB_MM), (IMG_NC - SUB_MM));
     //SUB_START_J = (int)floor((float)x / SUB_SCALE_F);
     //SUB_START_I = (int)floor((float)y / SUB_SCALE_F);
 
     // overflow protect
-    if(dx >= (IMG_NR - SUB_MM)){
-      dx = IMG_NR - SUB_MM;
+    if(dy >= (IMG_NR - SUB_MM)){
+      dy = IMG_NR - SUB_MM;
     }
-    if(dy >= (IMG_NC - SUB_MM)){
-      dy = IMG_NC - SUB_MM;
+    if(dx >= (IMG_NC - SUB_MM)){
+      dx = IMG_NC - SUB_MM;
     }
 
     SUB_START_J = dx;
     SUB_START_I = dy;
 
-    printf("IMG_NR %d IMG_NC %d ", IMG_NR, IMG_NC);
-    printf("dx %d dy %d\n", dx, dy);
+    printf("IMG_NR %zu IMG_NC %zu\n", IMG_NR, IMG_NC);
+    printf("dx %zu dy %zu\n", dx, dy);
 
     // this is where the fopen / big-data resilient read needs to go!
     //SA<float> * dat0 = IMG;
