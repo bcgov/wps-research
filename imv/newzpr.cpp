@@ -31,7 +31,6 @@ void * TGT_GLIMG = NULL;
 // groundref detection
 vector<int> groundref;
 
-
 extern zprManager * myZprManager = NULL;
 
 void GLERROR(){
@@ -540,7 +539,6 @@ void zprInstance::setTitle(string t){
   glutSetWindowTitle(t.c_str());
 }
 
-
 void zprInstance::zprReshape(int w,int h){
 
   GLfloat ratio; // http://faculty.ycp.edu/~dbabcock/cs370/labs/lab07.html
@@ -627,8 +625,8 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
     for0(k, IMG_NB){
       for0(i, NWIN){
         for0(j, NWIN){
-	  float d = (*SUB)[(k * SUB_MM * SUB_MM) + (SUB_MM * (WIN_I + i)) + (WIN_J + j)];
-	  (*dat4)[(k * NWIN* NWIN) + (i * NWIN) + j] = d; 
+          float d = (*SUB)[(k * SUB_MM * SUB_MM) + (SUB_MM * (WIN_I + i)) + (WIN_J + j)];
+          (*dat4)[(k * NWIN* NWIN) + (i * NWIN) + j] = d;
         }
       }
     }
@@ -636,9 +634,9 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
     ((glImage *)TGT_GLIMG)->rebuffer();
     zprInstance * p = this;
     zprInstance * a = myZprManager->myZprInstances->at(2);
-      a->focus();
-      a->mark();
-      a->display();
+    a->focus();
+    a->mark();
+    a->display();
 
     focus();
     mark();
@@ -648,22 +646,26 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
 
   if(myZprInstanceID == 0){
     //cout << "moving window\n";
-    printf("SUB_SCALE_F %f\n", SUB_SCALE_F);
+    //printf("SUB_SCALE_F %f\n", SUB_SCALE_F);
 
     size_t dx = (int)floor(((float)x) / SUB_SCALE_F);
     size_t dy = (int)floor(((float)y) / SUB_SCALE_F);
-    printf("dx %d dy %d\n", dx, dy);
+    printf("dx %d dy %d ", dx, dy);
     //SUB_START_J = (int)floor((float)x / SUB_SCALE_F);
     //SUB_START_I = (int)floor((float)y / SUB_SCALE_F);
 
     // overflow protect
-    if(dx >= (IMG_NR - SUB_MM)) dx = IMG_NR - SUB_MM;
-    if(dy >= (IMG_NC - SUB_MM)) dy = IMG_NC - SUB_MM;
+    if(dx >= (IMG_NR - SUB_MM)){
+      dx = IMG_NR - SUB_MM;
+    }
+    if(dy >= (IMG_NC - SUB_MM)){
+      dy = IMG_NC - SUB_MM;
+    }
 
     SUB_START_J = dx;
     SUB_START_I = dy;
 
-    printf("IMG_NR %d IMG_NC %d\n", IMG_NR, IMG_NC);
+    printf("IMG_NR %d IMG_NC %d ", IMG_NR, IMG_NC);
     printf("dx %d dy %d\n", dx, dy);
 
     // this is where the fopen / big-data resilient read needs to go!
