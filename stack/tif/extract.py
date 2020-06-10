@@ -1,3 +1,6 @@
+# NB PROBABLY NEED TO EXPLICITLY SET THE MAP PROJECTION, BEFORE PROJECTING...
+
+
 # project_onto [src image to reproject] [target img to project onto] [output filename] [optional parameter: override bilinear and use nearest-neighbour]
 import os
 import sys
