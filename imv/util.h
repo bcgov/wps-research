@@ -7,6 +7,7 @@
 #include<fstream>
 #include<sstream>
 #include<memory.h>
+#include<algorithm>
 #include<iostream>
 #include<pthread.h>
 #include"ansicolor.h"
