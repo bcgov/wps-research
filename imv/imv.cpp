@@ -34,7 +34,7 @@ int main(int argc, char ** argv){
     NWIN = atoi(argv[2]);
   }
   else{
-    NWIN = 125;
+    NWIN = 125;  // obviously this is for purposes of testing the extraction. Too big!
   }
   WIN_I = WIN_J = 0;
 
