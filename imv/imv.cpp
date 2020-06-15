@@ -226,7 +226,7 @@ int main(int argc, char ** argv){
   zprInstance *myZpr3 = myManager->newZprInstance(NWIN, NWIN, nb);
   glImage * myImage3 = new glImage(myZpr3, &c);
   TGT_GLIMG = (void *)myImage3;
-  myZpr3->setScreenPosition(0, nr2);
+  myZpr3->setScreenPosition(0, nr2 + 65);
   myZpr3->setTitle(string("Analysis"));
 
   glutMainLoop();
