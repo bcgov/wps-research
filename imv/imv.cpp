@@ -6,27 +6,31 @@ that inspired further developments at UVic, CFS and elsewhere.. */ // todo: disp
 #include<iostream>
 
 // example function for parfor
+/*
 void fx(size_t n){
   cprint(std::to_string(n));
 }
+
+*/
 
 int main(int argc, char ** argv){
   init_mtx(); // parfor(10, 15, fx); // parfor(20, 25, fx);
   groundref.clear();
 
-  char * infile;
+  IMG_FN = string("stack.bin");
+
   if(sizeof(float) != 4){
     printf("Error: sizeof(float) != 4\n");
     exit(1);
   }
   if(argc < 2){
     printf("imv.cpp: [infile]\n");
-    exit(1);
+  }
+  else{
+    IMG_FN = string(argv[1]);
   }
 
-  infile = argv[1];
-  IMG_FN = string(infile);
-  string mfn(string(argv[1]) + string(".ml"));
+  string mfn(IMG_FN + string(".ml"));
   cout << "multilook file name: " << mfn << endl;
 
   // analysis window size
@@ -52,10 +56,11 @@ int main(int argc, char ** argv){
   size_t nr, nc, nb;
 
   // get image scale
-  string hfn(getHeaderFileName(string(infile)));
+  string hfn(getHeaderFileName(IMG_FN));
+  cout << "hfn: " << hfn << endl;
   parseHeaderFile(hfn, nr, nc, nb);
-  printf(" infile: %s nrow %ld ncol %ld nband %ld\n", infile, nr, nc, nb);
-  printf(" getFileSize %ld expected %ld\n", getFileSize(infile), nr * nc * nb * sizeof(float));
+  printf(" infile: %s nrow %ld ncol %ld nband %ld\n", IMG_FN.c_str(), nr, nc, nb);
+  printf(" getFileSize %ld expected %ld\n", getFileSize(IMG_FN.c_str()), nr * nc * nb * sizeof(float));
   size_t np = nr * nc;
 
   // account for case that image may be small
@@ -116,7 +121,7 @@ int main(int argc, char ** argv){
     }
 
     printf("scaling %d x %d image to %d x %d\n", nr, nc, nr2, nc2);
-    FILE * f = fopen(infile, "rb");
+    FILE * f = fopen(IMG_FN.c_str(), "rb");
     size_t nread = 0;
     for(size_t bi = 0; bi < nb; bi++){
       printf("fread band %zu/%d\n", bi + 1, nb);
@@ -193,7 +198,7 @@ int main(int argc, char ** argv){
     load_sub_j_start = j_start;
     load_sub_nc = nc;
     load_sub_dat3 = &dat3[0];
-    load_sub_infile = string(infile);
+    load_sub_infile = string(IMG_FN.c_str());
 
     parfor(0, nb, load_sub);
   }
@@ -208,14 +213,14 @@ int main(int argc, char ** argv){
   // set up window for overview image
   zprInstance * myZpr = myManager->newZprInstance(nr2, nc2, nb);
   glImage * myImage = new glImage(myZpr, &a);
-  myZpr->setTitle(string("Scene"));
+  // myZpr->setTitle(string("Scene"));
 
   // set up window for fullres subset image
   zprInstance * myZpr2 = myManager->newZprInstance(mm, mm, nb);
   glImage * myImage2 = new glImage(myZpr2, &b);
   SUB_GLIMG = (void *)myImage2;
   myZpr2->setRightOf(myZpr);
-  myZpr2->setTitle(string("Subset"));
+  // myZpr2->setTitle(string("Subset"));
 
   // target window setup
 
@@ -243,8 +248,25 @@ int main(int argc, char ** argv){
   glImage * myImage3 = new glImage(myZpr3, &c);
   TGT_GLIMG = (void *)myImage3;
   myZpr3->setScreenPosition(0, nr2 + 65);
-  myZpr3->setTitle(string("Analysis"));
+  // myZpr3->setTitle(string("Analysis"));
 
+  // scatter
+  zprInstance * myZpr4 = myManager->newZprInstance(200, 200, nb);
+  myZpr4->setScreenPosition(nc2, nr2 + 65); // ightOf(myZpr3);
+  // myZpr4->setTitle(string("3d scatterplot"));
+   glBasicSphere * s = new glBasicSphere(0, myZpr4, 0, 0, 0, 1, 1, 1, 1. /*size*/, 10, 10);
+    
+  // glArrow * aR = new glArrow(myZpr4, 1, 0, 0);
+  // aR->setXYZ(0, 0, 0, 1, 0, 0);
+   /*
+  glArrow * aG = new glArrow(myZpr4, 0, 1, 0);
+  glArrow * aB = new glArrow(myZpr4, 0, 0, 1); 
+  aR->setXYZ(0, 0, 0, 1, 0, 0);
+  aG->setXYZ(0, 0, 0, 0, 1, 0);
+  aB->setXYZ(0, 0, 0, 0, 0, 1);
+*/
+  printf("glutMainLoop()\n");
+  
   glutMainLoop();
   return 0;
 }
