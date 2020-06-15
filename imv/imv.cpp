@@ -67,6 +67,7 @@ int main(int argc, char ** argv){
   //printf("min %f\n", (float)min);
 
   // read band names
+  vec_band_names = parse_band_names(hfn);
   groundref = parse_groundref_names(hfn);
   if(true){
     vector<int>::iterator it;
@@ -80,7 +81,6 @@ int main(int argc, char ** argv){
   // printf("imin %d\n", imin);
   float scalef = (float)min / (float)imin;
   printf("scalef %f\n", scalef);
-  exit(1);
 
   SUB_SCALE_F = scalef;
   SUB_START_I = 0;

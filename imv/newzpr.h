@@ -79,6 +79,7 @@ extern void * TGT_GLIMG;
 
 // groundref detection
 extern vector<int> groundref;
+extern vector<string> vec_band_names;
 
 // stuff
 class zprManager;

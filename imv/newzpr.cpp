@@ -30,6 +30,7 @@ void * TGT_GLIMG = NULL;
 
 // groundref detection
 vector<int> groundref;
+vector<string> vec_band_names;
 
 extern zprManager * myZprManager = NULL;
 
@@ -614,6 +615,7 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
 
   printf("\nmouse (x/col,y/row)=(%d,%d) myZprInstanceID=%d\n", x, y, myZprInstanceID);
 
+
   if(myZprInstanceID == 1){
     // subset window
     WIN_I = (y + NWIN) >= SUB_MM ? SUB_MM - NWIN : y;
@@ -621,6 +623,19 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
 
     SA<float> * dat4 = TGT;
     size_t i, j, k;
+
+    // print out data under cursor
+    printf("bi\tbn\td\n");
+    for0(k, IMG_NB){
+      for0(i, 1){
+        for0(j, 1){
+          float d = (*SUB)[(k * SUB_MM * SUB_MM) + (SUB_MM * (WIN_I + i)) + (WIN_J + j)];
+	  printf("%d\t%s\t%e\n", k, vec_band_names[k].c_str(), (double)d);
+        }
+      }
+    }
+
+    // do the work
     for0(k, IMG_NB){
       for0(i, NWIN){
         for0(j, NWIN){
@@ -707,6 +722,24 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
       // cout << "\tband " << i << "->" << FB->at(i)->at(y * NCol + x) << endl;
     }
   }
+
+
+  if(myZprInstanceID < 3){
+    std::vector<glPlottable *>::iterator it;
+    int i = 0;
+    it = myGraphics.begin();
+    glImage * image = (glImage * )(glPlottable *) (*it);
+    int NRow = image->image->NRow;
+    int NCol = image->image->NCol;
+    int NBand = image->image->NBand;
+    SA< SA<float> * > * FB = image->image->getFloatBuffers();
+    printf("bi\tbn\td\n");
+    for(i = 0; i < NBand; i++){
+      // could turn this on to print image information
+      printf("%d\t%s\t%e\n", i, vec_band_names[i].c_str(), (double)(FB->at(i)->at(y * NCol + x)));
+    }
+  }
+
 
   if(callMeWithMouseClickCoordinates){
     (*callMeWithMouseClickCoordinates)(x,y);
