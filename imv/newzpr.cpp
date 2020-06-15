@@ -644,7 +644,7 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
   }
 
   if(myZprInstanceID == 0){
-	  // overview window
+    // overview window
     printf("SUB_SCALE_F %f\n", SUB_SCALE_F);
 
     size_t dx = (int)floor(((float)x) / SUB_SCALE_F);
