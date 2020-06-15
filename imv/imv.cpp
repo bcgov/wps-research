@@ -34,7 +34,7 @@ int main(int argc, char ** argv){
     NWIN = atoi(argv[2]);
   }
   else{
-    NWIN = 125;  // obviously this is for purposes of testing the extraction. Too big!
+    NWIN = 125; // obviously this is for purposes of testing the extraction. Too big!
   }
   WIN_I = WIN_J = 0;
 
@@ -44,12 +44,27 @@ int main(int argc, char ** argv){
   // get screen scale
   size_t width = glutGet(GLUT_SCREEN_WIDTH);
   size_t height = glutGet(GLUT_SCREEN_HEIGHT);
-  size_t min = width > height ? height: width;
-  min = 3 * min / 5; // can adjust scale here
-  printf("min %d\n", min);
+  size_t min_wh = width > height ? height: width;
+  printf("min_wh %f\n", (float)min_wh);
+  size_t min = 3 * min_wh / 5; // can adjust scale here
 
+  printf("min %f\n", (float)min);
   size_t nr, nc, nb;
+
+  // get image scale
   string hfn(getHeaderFileName(string(infile)));
+  parseHeaderFile(hfn, nr, nc, nb);
+  printf(" infile: %s nrow %ld ncol %ld nband %ld\n", infile, nr, nc, nb);
+  printf(" getFileSize %ld expected %ld\n", getFileSize(infile), nr * nc * nb * sizeof(float));
+  size_t np = nr * nc;
+
+  // account for case that image may be small
+  size_t min_wh_img = nr > nc ? nc: nr;
+  //printf("min_wh_img %f\n", (float)min_wh_img);
+  if(min > min_wh_img){
+    min = min_wh_img;
+  }
+  //printf("min %f\n", (float)min);
 
   // read band names
   groundref = parse_groundref_names(hfn);
@@ -60,17 +75,13 @@ int main(int argc, char ** argv){
     }
   }
 
-  // get image scale
-  parseHeaderFile(hfn, nr, nc, nb);
-  printf(" infile: %s nrow %ld ncol %ld nband %ld\n", infile, nr, nc, nb);
-  printf(" getFileSize %ld expected %ld\n", getFileSize(infile), nr * nc * nb * sizeof(float));
-  size_t np = nr * nc;
-
   // determine scaling factor
   size_t imin = nr > nc ? nc: nr;
-  printf("imin %d\n", imin);
+  // printf("imin %d\n", imin);
   float scalef = (float)min / (float)imin;
   printf("scalef %f\n", scalef);
+  exit(1);
+
   SUB_SCALE_F = scalef;
   SUB_START_I = 0;
   SUB_START_J = 0;
