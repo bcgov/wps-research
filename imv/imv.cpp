@@ -128,7 +128,7 @@ int main(int argc, char ** argv){
         for(size_t i = 0; i < np; i++){
           float d = bb[i];
           if(!(d == 0. || d == 1.)){
-            err("groundref must only take values in {0,1}");
+            err("assertion failed: that groundref be valued in {0,1} only");
           }
         }
       }
