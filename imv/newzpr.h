@@ -768,7 +768,7 @@ class glImage: public glPlottable{
 
     int NRow = image->NRow;
     int NCol = image->NCol;
-    
+
     int nr = NRow; //myParent->NRow;
     int nc = NCol; //myParent->NCol;
     //printf("drawMe nrow %d ncol %d nr %d nc%d\n", NRow, NCol, nr, nc);
