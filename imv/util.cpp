@@ -186,7 +186,7 @@ long int getFileSize(std::string fn){
   i.open(fn.c_str(), ios::binary);
   bool condition = i.is_open();
   if(!condition){
-    cout << "Warning: couldn't open file: " << fn << endl;
+    // cout << "Warning: couldn't open file: " << fn << endl;
     return 0;
   }
   i.seekg(0, ios::end);
@@ -197,7 +197,13 @@ long int getFileSize(std::string fn){
 bool exists(string fn){
   size_t fs = getFileSize(fn);
   bool condition = fs > 0;
-  if(condition) printf("%sFound file %s%s\n%s", KGRN, KRED, fn.c_str(), KNRM);
+  if(condition){
+    // printf("%sFound file %s%s\n%s", KGRN, KRED, fn.c_str(), KNRM);
+  }
+  else{
+    printf("%sError: failed to find file %s%s\n%s", KGRN, KRED, fn.c_str(), KNRM);
+  }
+
   return condition;
 }
 
@@ -319,7 +325,9 @@ vector<string> parse_band_names(string fn){
 }
 
 vector<int> parse_groundref_names(string fn){
-  cout << "PARSE_GROUNDREF_NAMES" << endl;
+  int debug = false;
+
+  if(debug) cout << "PARSE_GROUNDREF_NAMES" << endl;
   // assume a groundref name doesn't have numbers in it!
 
   vector<int> results;
@@ -337,9 +345,9 @@ vector<int> parse_groundref_names(string fn){
       string y(*it2);
       y = trim(y, '(');
       y = trim(y, ')');
-      cout << "\t\t" << y << endl;
+      if(debug) cout << "\t\t" << y << endl;
       if(is_int(y)){
-        cout << "\t\t\tNUMBER" << endl;
+        if(debug) cout << "\t\t\tNUMBER" << endl;
         has_number = true;
         break;
       }
@@ -347,12 +355,12 @@ vector<int> parse_groundref_names(string fn){
     if(has_number){
     }
     else{
-      cout << "\tgroundref: " << *it << " bi " << ci + 1 << "\n\t\tbi (0-indexed) " << ci << endl;
+      if(debug) cout << "\tgroundref: " << *it << " bi " << ci + 1 << "\n\t\tbi (0-indexed) " << ci << endl;
       results.push_back(ci);
     }
     ci ++;
   }
-  // cout << "Exit loop" << endl;
+  if(debug) cout << "Exit loop" << endl;
   return results;
 
 }
