@@ -63,7 +63,7 @@ for tif in tifs:
     type4 = "type4" + os.path.sep + tif + '.bin'
     out = "out" + os.path.sep + tif + '.bin'
     if not exist(out):
-        cmds.append(" ".join(["project_onto", type4, tgt, out]))
+        cmds.append(" ".join(["project_onto", type4, tgt, out, "1"]))
         print(cmds[-1])
 parfor(run, cmds)
 
