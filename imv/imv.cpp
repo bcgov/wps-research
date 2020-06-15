@@ -124,7 +124,13 @@ int main(int argc, char ** argv){
 
       //const bool is_in = container.find(element) != container.end();
       if(groundref_set.find(bi) != groundref_set.end()){
-        printf("DETECT\n");
+        // assert all 1. / 0. for ground ref!
+        for(size_t i = 0; i < np; i++){
+          float d = bb[i];
+          if(!(d == 0. || d == 1.)){
+            err("groundref must only take values in {0,1}");
+          }
+        }
       }
 
       for(size_t i = 0; i < nr; i++){
