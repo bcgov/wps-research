@@ -110,12 +110,23 @@ int main(int argc, char ** argv){
     fclose(f);
   }
   else{
+	set<int> groundref_set;
+	for(vector<int>::iterator it = groundref.begin(); it != groundref.end(); it++){
+	  groundref_set.insert(*it);
+	}
+
+
     printf("scaling %d x %d image to %d x %d\n", nr, nc, nr2, nc2);
     FILE * f = fopen(infile, "rb");
     size_t nread = 0;
     for(size_t bi = 0; bi < nb; bi++){
       printf("fread band %zu/%d\n", bi + 1, nb);
       nread += fread(&bb[0], 1, sizeof(float) * np, f);
+
+      if(groundref_set.contains(bi) > 0){
+      print("DETECT\n");
+      }
+
 
       for(size_t i = 0; i < nr; i++){
         int ip = (int)floor(scalef * (float)i);
