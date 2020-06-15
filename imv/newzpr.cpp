@@ -773,8 +773,8 @@ void zprInstance::zprMotion(int x, int y){
       for(it=myPickNames.begin(); it!=myPickNames.end(); it++){
         //std::map<GLint, glPlottable* > myGraphicsAsAFunctionOfGLName;
         if( myGraphicsAsAFunctionOfGLName.count( *it) != 1) continue; //don't move an object unless we have a unique reference (based on this name) of an object to move.
-        glPlottable * a = (* (myGraphicsAsAFunctionOfGLName.find( *it ))).second;
-        a->setRelativePosition=0;
+        glPlottable * a = myGraphicsAsAFunctionOfGLName.find( *it )->second;
+        a->setRelativePosition = 0;
         GLdouble proj[16]; // vars
         GLdouble model[16];
         GLint view[4];
