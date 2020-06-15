@@ -612,11 +612,10 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
     _mouseMiddle = ZPR_ZOOM_MODE;
   }
 
-  printf("\nmouse (x,y)=(%d,%d) myZprInstanceID=%d\n", x, y, myZprInstanceID);
-  printf("row %d col %d\n", y, x);
+  printf("\nmouse (x/col,y/row)=(%d,%d) myZprInstanceID=%d\n", x, y, myZprInstanceID);
 
   if(myZprInstanceID == 1){
-
+    // subset window
     WIN_I = (y + NWIN) >= SUB_MM ? SUB_MM - NWIN : y;
     WIN_J = (x + NWIN) >= SUB_MM ? SUB_MM - NWIN : x;
 
@@ -645,15 +644,13 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
   }
 
   if(myZprInstanceID == 0){
-    //cout << "moving window\n";
+	  // overview window
     printf("SUB_SCALE_F %f\n", SUB_SCALE_F);
 
     size_t dx = (int)floor(((float)x) / SUB_SCALE_F);
     size_t dy = (int)floor(((float)y) / SUB_SCALE_F);
     printf("dx %zu dy %zu\n", dx, dy);
     printf("(IMG_NR - SUB_MM) %zu (IMG_NC - SUB_MM) %zu\n", (IMG_NR - SUB_MM), (IMG_NC - SUB_MM));
-    //SUB_START_J = (int)floor((float)x / SUB_SCALE_F);
-    //SUB_START_I = (int)floor((float)y / SUB_SCALE_F);
 
     // overflow protect
     if(dy >= (IMG_NR - SUB_MM)){
@@ -669,8 +666,7 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
     printf("IMG_NR %zu IMG_NC %zu\n", IMG_NR, IMG_NC);
     printf("dx %zu dy %zu\n", dx, dy);
 
-    // this is where the fopen / big-data resilient read needs to go!
-    //SA<float> * dat0 = IMG;
+    // big-data resilient read!
     SA<float> * dat3 = SUB;
     if(true){
       load_sub_np = IMG_NR * IMG_NC;
@@ -687,8 +683,7 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
     SUB_MYIMG->initFrom(dat3, SUB_MM, SUB_MM, IMG_NB);
     ((glImage *)SUB_GLIMG)->rebuffer();
     for(int m = 0; m < myZprManager->myZprInstances->size(); m++){
-      if(m > 1) continue; // why is this line here?
-
+      if(m > 1) continue; // update the first two windows (otherwise get segfault)
       zprInstance * a = myZprManager->myZprInstances->at(m);
       a->focus();
       a->mark();
