@@ -821,8 +821,7 @@ class glImage: public glPlottable{
       float y = (float)WIN_I;
       float w = (float)NWIN;
       float h = (float)NWIN;
-      printf("NWIN %d\n", NWIN);
-      printf("target: x %f y %f w %f h %f\n", x, y, w, h);
+      printf("target: x %f y %f w %f h %f NWIN %f\n", x, y, w, h, NWIN);
       glColor3f(1., 0., 0.);
       glLineWidth(1.5);
       glPushMatrix(); //Make sure our transformations don't affect any other transformations in other code
