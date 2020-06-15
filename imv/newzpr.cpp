@@ -234,15 +234,23 @@ void zprInstance::drawGraphics(){
   std::vector<glPlottable *>::iterator it;
   int i = 0;
   for(it = myGraphics.begin(); it!=myGraphics.end(); it++){
+	  cout << "i = " << i << " of " << myGraphics.size() << endl;
     (*it)->drawMe();
+    /*
+    if(false){
+	    // (*it)->myType != NULL)
     if( (*it)->myType.compare(std::string("glMusicSphere")) == 0){
       //reflexive (yin yang inside out) fxn.
     }
+    }
+    */
     if((*it)->forceUpdate){
       forceUpdate = true;
       myZprManager->forceUpdate = true;
     }
+    i++;
   }
+  printf("drawGraphics() return\n");
 }
 
 void zprInstance::drawGraphicsExternal(){
@@ -283,7 +291,9 @@ void zprInstance::display(){
   }
   glutSetWindow(myGlutID()); //obviously redundant.
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+  printf("display::drawGraphics()\n");
   this->drawGraphics();
+  printf("display::drawText()\n");
   this->drawText();
   glutSwapBuffers();
   GLERROR;
@@ -292,6 +302,7 @@ void zprInstance::display(){
   }
   else{
   }
+  printf("return\n");
 }
 
 void zprInstance::idle(){
@@ -577,6 +588,7 @@ void zprInstance::zprReshape(int w,int h){
 //http://graphics.stanford.edu/courses/cs248-01/OpenGLHelpSession/code_example.html
 
 void zprInstance::zprMouse(int button, int state, int x, int y){
+  printf("zprMouse()\n");
   GLint viewport[4]; /* Do picking */
   refreshflag = true;
 
