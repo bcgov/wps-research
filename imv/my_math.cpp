@@ -37,3 +37,11 @@ void ijScreen2(float & iScreen, float &jScreen, int i, int j, int NRow, int NCol
 float scaleF(float z, float xMin, float xMax, int NRow, int NCol){
   return(max((float)NRow, (float)NCol ) * (z - xMin) / (abs(xMax - xMin)));
 }
+
+std::ostream& operator<<(std::ostream& out, const vec3& v){
+  out << "[";
+  out << v.x << " " << v.y << " " << v.z;
+  out << "]\n";
+}
+
+

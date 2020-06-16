@@ -40,7 +40,7 @@ template<class T> class SA{
 
   void init(my_int size){
     if(elements && mySize != size){
-      free(elements);
+      // free(elements);
     }
     elements = NULL;
     mySize = size;

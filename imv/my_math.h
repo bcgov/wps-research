@@ -5,6 +5,7 @@
 #pragma once
 
 #include <cmath>
+#include<ostream>
 
 #ifdef __APPLE__
 #include <OpenGL/gl.h>
@@ -118,5 +119,23 @@ class vec3{
     glVertex3f(x, y, z);
   }
 };
+
+std::ostream& operator<<(std::ostream& out, const vec3& v);
+
+
+
+
+/*
+
+   template<class T> std::ostream& operator << (std::ostream& os, const std::vector<T>& v){
+  os << "[";
+  for (typename std::vector<T>::const_iterator ii = v.begin(); ii != v.end(); ++ii){
+    os << " '" << *ii << "'";
+  }
+  os << "]";
+  return os;
+}
+
+ */
 
 #endif

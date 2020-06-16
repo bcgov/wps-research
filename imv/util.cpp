@@ -77,7 +77,8 @@ void parfor(size_t start_j, size_t end_j, void(*eval)(size_t)){
   for0(j, n_cores){
     pthread_join(my_pthread[j], NULL);
   }
-  delete my_pthread;
+  // delete my_pthread;
+  cprint(str("return parfor()"));
 }
 
 void writeHeader(const char * filename, int NRows, int NCols, int NBand){
@@ -113,7 +114,7 @@ vector<string> parseHeaderFile(string hfn, size_t & NRow, size_t & NCol, size_t 
     printf("%sError: couldn't find header file\n", KRED);
   }
   else{
-    vector<string> lines = readLines(hfn);
+    vector<string> lines(readLines(hfn));
     vector<string>::iterator it;
     for(it=lines.begin(); it!=lines.end(); it++){
       string sss(*it);
@@ -141,7 +142,7 @@ vector<string> parseHeaderFile(string hfn, size_t & NRow, size_t & NCol, size_t 
 /* split a string (a-la python) */
 vector<string> split(string s, char delim){
   vector<string> ret;
-  long int N = s.size();
+  size_t N = s.size();
   if(N == 0) return ret;
   if(delim == '\n'){
     return(split(s, delim, 0));
@@ -153,21 +154,47 @@ vector<string> split(string s, char delim){
   return ret;
 }
 
+// need to replace string with SA concept, to make this work! Use "binary string" instead of string
+vector<string> split(char * s, size_t s_len, char delim){
+  // needed to write a special split, for string that might contain newlines / might be a file. In the future we should subsume string, array and file with a generic class like we did in meta4
+
+  // printf("split()\n");
+  vector<string> ret;
+  string ss("");
+  size_t i = 0;
+  while(i < s_len){
+    if(s[i] == delim){
+      ret.push_back(ss);
+      //cout << "\t" << ss << endl;
+      ss = "";
+    }
+    else{
+      ss += s[i];
+    }
+    i++;
+  }
+  if(ss.length() > 0){
+    ret.push_back(ss);
+    //cout << "\t" << ss << endl;
+    ss = "";
+  }
+  return ret;
+}
+
 vector<string> split(string s){
   return split(s, ' ');
 }
 
 vector<string> readLines(string fn){
   vector<string> ret;
-  long int fs = getFileSize(fn);
+  size_t fs = getFileSize(fn);
   char * fd = (char *)(void *)malloc(fs);
   memset(fd, '\0',fs);
   FILE * f = fopen(fn.c_str(), "rb");
-  long int br = fread(fd, fs, 1, f);
+  size_t br = fread(fd, fs, 1, f);
   fclose(f);
-  string s(fd);
-  free(fd);
-  ret = split(s, '\n');
+  // free(fd);
+  ret = split(fd, fs, '\n');
   return(ret);
 }
 
@@ -181,7 +208,7 @@ string getHeaderFileName( string fn){
   err("");
 }
 
-long int getFileSize(std::string fn){
+size_t getFileSize(std::string fn){
   ifstream i;
   i.open(fn.c_str(), ios::binary);
   bool condition = i.is_open();
@@ -190,7 +217,7 @@ long int getFileSize(std::string fn){
     return 0;
   }
   i.seekg(0, ios::end);
-  long int len = i.tellg();
+  size_t len = i.tellg();
   return(len);
 }
 
@@ -211,7 +238,7 @@ bool exists(string fn){
 vector<string> split(string s, char delim, long int i){
   //delimiter unused-- function unfinished. need to test this function properly
   vector<string> ret;
-  long int N = s.size();
+  size_t N = s.size();
   if(N == 0) return ret;
   istringstream iss(s);
   string token;
@@ -224,7 +251,7 @@ vector<string> split(string s, char delim, long int i){
 /*strip leading or trailing whitespace from a string*/
 string strip(string s){
   string ret("");
-  long int i, j, N;
+  size_t i, j, N;
   N = s.size();
   if(N == 0) return s;
   i = 0;
@@ -244,7 +271,7 @@ string strip(string s){
 /*trim leading or trailing characters from a string*/
 string trim(string s, char a){
   string ret("");
-  long int i, j, N;
+  size_t i, j, N;
   N = s.size();
   if(N == 0){
     return s;
@@ -280,11 +307,11 @@ vector<string> parse_band_names(string fn){
 
   str band("band");
   str names("names");
-  int ci = 0;
-  int bni = -1; // band names start index
+  size_t ci = 0;
+  size_t bni = -1; // band names start index
   vector<string> lines(readLines(fn)); // read header file
   for(vector<string>::iterator it = lines.begin(); it != lines.end(); it++){
-    //cout << "\t" << *it << endl;
+    cout << "\t" << *it << endl;
     vector<string> w(split(*it));
     //for(vector<string>::iterator it2 = w.begin(); it2 != w.end(); it2++){
       // cout << "\t\t" << *it2 << endl;
@@ -376,6 +403,7 @@ float * load_sub_dat3;
 string load_sub_infile;
 
 void load_sub(size_t k){
+  printf("load_sub()\n");
   // load one band of a rectangular image subset
   float d;
   FILE * f = fopen(load_sub_infile.c_str(), "rb");
