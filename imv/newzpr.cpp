@@ -235,11 +235,11 @@ void zprManager::zprDrawGraphics(){
 }
 
 void zprInstance::drawGraphics(){
-  printf("zprInstance::drawGraphics() id=%d\n", myZprInstanceID);
+  // printf("zprInstance::drawGraphics() id=%d\n", myZprInstanceID);
   std::vector<glPlottable *>::iterator it;
   int i = 0;
   for(it = myGraphics.begin(); it!=myGraphics.end(); it++){
-    cout << "\tzprInstance::drawGraphics() id=" << myZprInstanceID << " i = " << i << " of " << myGraphics.size() << " type: " << (*it)->myType << endl;
+    // cout << "\tzprInstance::drawGraphics() id=" << myZprInstanceID << " i = " << i << " of " << myGraphics.size() << " type: " << (*it)->myType << endl;
     (*it)->drawMe();
     /*
     if(false){
@@ -255,7 +255,7 @@ void zprInstance::drawGraphics(){
     }
     i++;
   }
-  printf("drawGraphics() return\n");
+  // printf("drawGraphics() return\n");
 }
 
 void zprInstance::drawGraphicsExternal(){
@@ -296,10 +296,10 @@ void zprInstance::display(){
   }
   glutSetWindow(myGlutID()); //obviously redundant.
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-  printf("display::drawGraphics()\n");
+  // printf("display::drawGraphics()\n");
   this->drawGraphics();
-  printf("display::drawText()\n");
-  this->drawText();
+  // printf("display::drawText()\n");
+  // this->drawText();
   glutSwapBuffers();
   GLERROR;
   if(!forceUpdate){
@@ -307,7 +307,7 @@ void zprInstance::display(){
   }
   else{
   }
-  printf("return\n");
+  // printf("return\n");
 }
 
 void zprInstance::idle(){

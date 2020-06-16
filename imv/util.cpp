@@ -403,7 +403,7 @@ float * load_sub_dat3;
 string load_sub_infile;
 
 void load_sub(size_t k){
-  printf("load_sub()\n");
+  // printf("load_sub()\n");
   // load one band of a rectangular image subset
   float d;
   FILE * f = fopen(load_sub_infile.c_str(), "rb");
