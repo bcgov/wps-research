@@ -363,7 +363,7 @@ class zprInstance{
     myZprManager->nextGLUTName++;
   }
 
-  void add( glPlottable * a);
+  void add(glPlottable * a);
 
   void setTitle(string t); // set title string
 
@@ -612,10 +612,10 @@ class glPlottable{
 
   virtual void drawMe(){
   }
-
+  
   virtual void drawMe(int highlight){
   }
-
+  
   void setDefault(){
     hideMe = false;
     forceUpdate = false;
@@ -894,6 +894,8 @@ class glRect: public glPlottable{
 
 */
 
+
+/*
 class glSimpleRect: public glPlottable{
   // this is a rectangle plotted in up to 3d
   public:
@@ -1020,6 +1022,7 @@ class glPoint: public glPlottable{
     glPopMatrix();
   }
 };
+*/
 
 class glLine: public glPlottable{
   public:
