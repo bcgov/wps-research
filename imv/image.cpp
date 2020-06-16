@@ -1,11 +1,11 @@
 /* m3ta3: reimagination of a (late 2011, early 2012) personal, primordial visualization library that inspired further developments at UVic, CFS and elsewhere.. */
 
 #include "image.h"
-void myImg::init(char * filename, int nrow, int ncol, int nb){
-	printf("myImg::init(%s) nrow %d ncol %d nb %d\n", filename, nrow, ncol, nb);
+void myImg::init(const char * filename, size_t nrow, size_t ncol, size_t nb){
+	printf("myImg::init(%s) nrow %zu ncol %zu nb %zu\n", filename, nrow, ncol, nb);
   NRow = nrow; NCol = ncol; NBand = nb;
   dat.init(nrow*ncol*nb);
-  FILE * f = fopen(filename,"rb");
+  FILE * f = fopen(filename, "rb");
 
   if(!f){
      cout << "filename: " << filename << endl;
@@ -16,13 +16,13 @@ void myImg::init(char * filename, int nrow, int ncol, int nb){
      exit(1);
   }
 
-  int bytesread = fread( &dat[0], sizeof(float), nrow*ncol*nb, f);
+  size_t bytesread = fread( &dat[0], sizeof(float), nrow*ncol*nb, f);
   dprintf("Read %d bytes / %d floats / %d rows / %d cols / %d bands from %s",
   bytesread, nrow*ncol*nb, nrow, ncol, nb, filename);
   fclose(f);
 
-  int ci = 0;
-  int i, j;
+  size_t ci = 0;
+  size_t i, j;
 
   float_buffers = new SA< SA<float> * >((my_int)nb);
   printf("\n");
@@ -75,7 +75,7 @@ void myImg::printAsciiCSV(char * ASCIIFILE){
     dprintf("Error: could not open file: %s\n", ASCIIFILE);
     exit(1);
   }
-  int kk, i;
+  size_t kk, i;
   for(kk = 0; kk < NRow * NCol; kk++){
     for(i = 0; i < NBand; i++){
       fprintf(afile, "%7.7e,", (float_buffers->at(i))->at(kk));

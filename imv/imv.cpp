@@ -243,8 +243,11 @@ int main(int argc, char ** argv){
   // scatter
   zprInstance * myZpr4 = myManager->newZprInstance(200, 200, nb);
   glBasicSphere * s = new glBasicSphere(0, myZpr4, 0, 0, 0, 1, 1, 1, 1. /*size*/, 10, 10);
-  // glArrow * aR = new glArrow(myZpr4, 1, 0, 0, 0, 0, 0, 1, 0, 0);
-
+ // glArrow * aR = new glArrow(myZpr4); //, 1, 0, 0, 0, 0, 0, 1, 0, 0);
+  
+  vec3 va(0,0,0);
+  vec3 vb(1,1,1);
+  glLine aL(myZpr4, va, vb, 1, 1, 0); 
   myZpr4->setScreenPosition(nc2, nr2 + 65); // ightOf(myZpr3);
   myZpr4->setTitle(string("3d scatterplot"));
   /// aR->setXYZ(0, 0, 0, 1, 0, 0);

@@ -28,13 +28,16 @@ class myImg{
   }
 
   myImg(myImg * other); //this version just makes a shadow.
-  void init(char * filename, int nrow, int ncol, int nb);
+  void init(const char * filename, size_t nrow, size_t ncol, size_t nb);
 
   void initSameSize(myImg * other){
-    NRow = other->NRow; NCol =other->NCol; NBand = other->NBand;
-    dat.init(NRow * NCol * NBand); int nb = other->NBand;
+    NRow = other->NRow;
+    NCol = other->NCol;
+    NBand = other->NBand;
+    dat.init(NRow * NCol * NBand);
+    size_t nb = other->NBand;
     float_buffers = new SA< SA<float> * >( (my_int) nb );
-    printf("\n"); int i;
+    printf("\n"); size_t i;
     for(i = 0; i < nb; i++){
       SA<float> * newB = new SA<float>((my_int)0);
       newB->mySize = NRow*NCol;
@@ -50,11 +53,11 @@ class myImg{
       myBi->at(i) = other->getBi(i);
     }
   }
-  void initFrom(SA<float> * other, int nr, int nc, int nb){
+  void initFrom(SA<float> * other, size_t nr, size_t nc, size_t nb){
     NRow = nr; NCol = nc; NBand = nb;
     dat.init(NRow*NCol*NBand);
     dat.sizeI = NRow; dat.sizeJ = NCol; dat.sizeK = NBand;
-    int i;
+    size_t i;
     for(i = 0; i < other->size(); i++){
       dat[i] = (*other)[i];
     }
@@ -77,11 +80,11 @@ class myImg{
     }
   }
 
-  void initBlank(int nr, int nc, int nb){
+  void initBlank(size_t nr, size_t nc, size_t nb){
     NRow = nr; NCol = nc; NBand = nb;
     dat.init(NRow*NCol*NBand);
     dat.sizeI = NRow; dat.sizeJ = NCol; dat.sizeK = NBand;
-    int i;
+    size_t i;
     float_buffers = new SA< SA<float> *>(nb);
     for(i = 0; i < nb; i++){
       SA<float> * newB = new SA<float>(0);
@@ -114,7 +117,7 @@ class myImg{
     if(other->mySize() != this->mySize()){
       dprintf("Error: myImg.h: tried to assign from array of different size.");
     }
-    int i;
+    size_t i;
     for(i = 0; i < other->mySize(); i++){
       (*this)[i] = (*other)[i];
     }
@@ -124,7 +127,7 @@ class myImg{
     if(other->size() != this->mySize()){
       dprintf("Error: myImg.h: tried to assign from array of different size.");
     }
-    int i;
+    size_t i;
     for(i = 0; i < other->size(); i++){
       (*this)[i] = (*other)[i];
     }
@@ -138,7 +141,7 @@ class myImg{
     return float_buffers;
   }
 
-  int NRow, NCol, NBand;
+  size_t NRow, NCol, NBand;
   SA<float> dat;
 
   private:

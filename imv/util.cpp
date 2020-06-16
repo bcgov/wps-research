@@ -311,7 +311,7 @@ vector<string> parse_band_names(string fn){
   size_t bni = -1; // band names start index
   vector<string> lines(readLines(fn)); // read header file
   for(vector<string>::iterator it = lines.begin(); it != lines.end(); it++){
-    cout << "\t" << *it << endl;
+    // cout << "\t" << *it << endl;
     vector<string> w(split(*it));
     //for(vector<string>::iterator it2 = w.begin(); it2 != w.end(); it2++){
       // cout << "\t\t" << *it2 << endl;
@@ -418,7 +418,7 @@ void load_sub(size_t k){
 
     // read row
     fseek(f, p, SEEK_SET);
-    fread(&load_sub_dat3[jp], load_sub_mm, sizeof(float), f);
+    size_t nr = fread(&load_sub_dat3[jp], load_sub_mm, sizeof(float), f);
   }
   fclose(f);
 }
