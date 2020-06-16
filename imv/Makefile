@@ -1,3 +1,10 @@
+# to debug:
+# turn optimization flag to -O1 or -O2
+# use debug flag -ggdb
+# gdb
+# file imv.exe
+# run
+
 # m3ta3: reimagination of a (late 2011, early 2012) personal, primordial visualization library that inspired further developments at UVic, CFS and elsewhere
 OBJS = imv.o newzpr.o my_math.o	image.o	util.o
 CC = g++ # i686-apple-darwin11-llvm-g++-4.2 #-mp-4.7
