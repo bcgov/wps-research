@@ -2,13 +2,18 @@
 
 #include "image.h"
 void myImg::init(char * filename, int nrow, int ncol, int nb){
+	printf("myImg::init(%s) nrow %d ncol %d nb %d\n", filename, nrow, ncol, nb);
   NRow = nrow; NCol = ncol; NBand = nb;
   dat.init(nrow*ncol*nb);
   FILE * f = fopen(filename,"rb");
 
   if(!f){
-    dprintf("Error: could not open file: %s", filename);
-    exit(1);
+     cout << "filename: " << filename << endl;
+    // dprintf("Error: could not open file: %s", filename);
+     std::string dummy;
+    std::cout << "Enter to continue..." << std::endl;
+    std::getline(std::cin, dummy);
+     exit(1);
   }
 
   int bytesread = fread( &dat[0], sizeof(float), nrow*ncol*nb, f);

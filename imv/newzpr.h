@@ -588,6 +588,7 @@ class glPlottable{
   }
 
   glPlottable(){
+	  cout << "glPlottable()\n";
     myType = std::string("glPlottable");
     Update = false;
     isLabelled=false;
@@ -750,7 +751,9 @@ class glImage: public glPlottable{
   }
 
   void initFrom(zprInstance * parent, myImg * img){
-    myParent = parent;
+    cout << "glImage::initFrom()\n";
+
+	  myParent = parent;
     image = img;
     dat = new SA<float>(image->NRow * image->NCol *image->NBand);
     initName(parent,false); Update = false; isClusteringImage = false;
@@ -764,7 +767,8 @@ class glImage: public glPlottable{
   void drawMeUnHide();
 
   void drawMe(){
-    if(hideMe) return;
+	  printf("myImg::drawMe()\n");
+    // if(hideMe) return;
     if(Update) rebuffer();
 
     int NRow = image->NRow;
@@ -1053,6 +1057,7 @@ class glBasicSphere: public glPlottable{
 
   glBasicSphere(){
     setRelativePosition = 0;
+    myType = std::string("glBasicSphere");
   }
 
   glBasicSphere(zprInstance * parent, float X, float Y, float Z, float R, float G, float B, float Size, int Circles, int Stacks){
@@ -1062,6 +1067,7 @@ class glBasicSphere: public glPlottable{
     addPointToBoundingBox(X,Y,Z);
     myLinks.clear();
     isLinkd=false;
+    myType = std::string("glBasicSphere");
   }
 
   glBasicSphere(int _myLabel, zprInstance * parent, float X, float Y, float Z, float R, float G, float B, float Size, int Circles, int Stacks){
@@ -1072,6 +1078,7 @@ class glBasicSphere: public glPlottable{
     addPointToBoundingBox(X,Y,Z);
     myLinks.clear();
     isLinkd=false;
+    myType = std::string("glBasicSphere");
   }
 
   void init(zprInstance * parent, float X, float Y, float Z, float R, float G, float B, float Size, int Circles, int Stacks){
@@ -1111,7 +1118,7 @@ class glBasicSphere: public glPlottable{
     glPopMatrix();
   }
 };
-
+/* 
 class glClustSphere: public glBasicSphere{
   public:
   int b1;
@@ -1169,16 +1176,38 @@ class glClustSphere: public glBasicSphere{
   void drawMe();
 
 };
+*/
 
 class glArrow: public glPlottable{
   public:
   vec3 x1;
   vec3 x2;
 
-  glArrow(zprInstance * parent, float rr, float gg, float bb){
-    initName(parent,false);
+  glArrow(zprInstance * parent, float rr, float gg, float bb, float x_1, float y_1, float z_1, float x_2, float y_2, float z_2){
+    initName(parent, true); //false);
     rgb.init(rr,gg,bb);
+    x1.init(x_1, y_1, z_1);
+    x2.init(x_2, y_2, z_2);
+//    addPointToBoundingBox(X,Y,Z);
+    setRelativePosition = 0;
+    myLinks.clear();
+    isLinkd=false;
+    myType = std::string("glArrow");
   }
+
+  void init(){
+  }	
+  /* 
+      x.init(X,Y,Z); rgb.init(R,G,B);
+    size=Size; circles=Circles; stacks=Stacks;
+    initName(parent,true);
+    addPointToBoundingBox(X,Y,Z);
+    setRelativePosition = 0;
+    myLinks.clear();
+    isLinkd=false;
+
+   * */
+
 
   void setXYZ(float x1x, float x1y, float x1z, float x2x, float x2y, float x2z){
     x1.init(x1x,x1y,x1z);
@@ -1205,7 +1234,10 @@ class glArrow: public glPlottable{
     addPointToBoundingBox(x2.x,x2.y,x2.z);
   }
 
-  void drawMe(){
+  void drawMe();
+  
+  /* 
+   
     vec3 Mx1(x1-(parentZprInstance->rX));
     vec3 Mx2(x2-(parentZprInstance->rX));
 
@@ -1254,8 +1286,8 @@ class glArrow: public glPlottable{
     glPopMatrix();
 
     glPopName();
-  }
-
+ 
+*/
   void drawMe(int highlight){
     vec3 Mx1(x1-(parentZprInstance->rX));
     vec3 Mx2(x2-(parentZprInstance->rX));

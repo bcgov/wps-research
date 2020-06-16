@@ -40,7 +40,7 @@ string strip(string s);
 /*trim leading or trailing characters from a string*/
 string trim(string s, char a);
 
-long int getFileSize(std::string fn);
+size_t getFileSize(std::string fn);
 bool exists(string fn);
 
 /* special case of split (for newline character) */

@@ -35,11 +35,15 @@ vector<string> vec_band_names;
 extern zprManager * myZprManager = NULL;
 
 void GLERROR(){
+  cout << "GLERROR\n";
+  /*
   GLenum code = glGetError();
   while(code != GL_NO_ERROR){
     printf("%s\n",(char *) gluErrorString(code));
     code = glGetError();
   }
+  */
+
 }
 
 void glImage::drawMeUnHide(){
@@ -231,17 +235,18 @@ void zprManager::zprDrawGraphics(){
 }
 
 void zprInstance::drawGraphics(){
+  printf("zprInstance::drawGraphics() id=%d\n", myZprInstanceID);
   std::vector<glPlottable *>::iterator it;
   int i = 0;
   for(it = myGraphics.begin(); it!=myGraphics.end(); it++){
-	  cout << "i = " << i << " of " << myGraphics.size() << endl;
+    cout << "\tzprInstance::drawGraphics() id=" << myZprInstanceID << " i = " << i << " of " << myGraphics.size() << " type: " << (*it)->myType << endl;
     (*it)->drawMe();
     /*
     if(false){
-	    // (*it)->myType != NULL)
-    if( (*it)->myType.compare(std::string("glMusicSphere")) == 0){
-      //reflexive (yin yang inside out) fxn.
-    }
+      // (*it)->myType != NULL)
+      if( (*it)->myType.compare(std::string("glMusicSphere")) == 0){
+        //reflexive (yin yang inside out) fxn.
+      }
     }
     */
     if((*it)->forceUpdate){
@@ -627,7 +632,6 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
 
   printf("\nmouse (x/col,y/row)=(%d,%d) myZprInstanceID=%d\n", x, y, myZprInstanceID);
 
-
   if(myZprInstanceID == 1){
     // subset window
     WIN_I = (y + NWIN) >= SUB_MM ? SUB_MM - NWIN : y;
@@ -642,7 +646,7 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
       for0(i, 1){
         for0(j, 1){
           float d = (*SUB)[(k * SUB_MM * SUB_MM) + (SUB_MM * (WIN_I + i)) + (WIN_J + j)];
-	  printf("%d\t%s\t%e\n", k, vec_band_names[k].c_str(), (double)d);
+          printf("%d\t%s\t%e\n", k, vec_band_names[k].c_str(), (double)d);
         }
       }
     }
@@ -735,7 +739,6 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
     }
   }
 
-
   if(myZprInstanceID < 3){
     std::vector<glPlottable *>::iterator it;
     int i = 0;
@@ -751,7 +754,6 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
       printf("%d\t%s\t%e\n", i, vec_band_names[i].c_str(), (double)(FB->at(i)->at(y * NCol + x)));
     }
   }
-
 
   if(callMeWithMouseClickCoordinates){
     (*callMeWithMouseClickCoordinates)(x,y);
@@ -1197,4 +1199,62 @@ void glPlottable::initName(zprInstance * parent, int useName){
   }
   parentZprInstance->add( (glPlottable *) this);
   return;
+}
+
+void glArrow::drawMe(){
+  cout << "glArrow::drawMe()" << endl;
+
+  vec3 Mx1(x1-(parentZprInstance->rX));
+  vec3 Mx2(x2-(parentZprInstance->rX));
+  vec3 dx(Mx2 - Mx1);
+
+  float len = dx.length();
+  float tPL = ARROWHEAD_LENGTH;
+
+  vec3 tx(dx - (dx * (tPL / len)));
+  vec3 normalV( -dx.y, dx.x, 0.);
+  cout << "there" << normalV << endl;
+  return;
+
+  cout << "normalV.length(): " << normalV.length() << endl;
+  return;
+  normalV = normalV / normalV.length();
+  float tNormal = ARROWHEAD_WIDTH;
+  vec3 leftP( tx + ( normalV*tNormal));
+  vec3 rightP( tx - ( normalV*tNormal));
+
+  vec3 nV2( tx.cross(normalV));
+  nV2 = nV2 / nV2.length();
+  vec3 leftP2( tx + ( nV2*tNormal));
+  vec3 rightP2( tx - ( nV2*tNormal));
+
+  glPushName(myName);
+  colorMe();
+  glLineWidth(1.5);
+
+  glPushMatrix();
+  glBegin(GL_LINES); Mx1.vertex(); Mx2.vertex(); glEnd();
+  glPopMatrix();
+
+  glPushMatrix();
+  glTranslatef(Mx1.x, Mx1.y, Mx1.z);
+  glBegin(GL_TRIANGLES); tx.vertex(); leftP.vertex(); dx.vertex(); glEnd();
+  glPopMatrix();
+
+  glPushMatrix();
+  glTranslatef(Mx1.x, Mx1.y, Mx1.z);
+  glBegin(GL_TRIANGLES); tx.vertex(); rightP.vertex(); dx.vertex(); glEnd();
+  glPopMatrix();
+
+  glPushMatrix();
+  glTranslatef(Mx1.x, Mx1.y, Mx1.z);
+  glBegin(GL_TRIANGLES); tx.vertex(); leftP2.vertex(); dx.vertex(); glEnd();
+  glPopMatrix();
+
+  glPushMatrix();
+  glTranslatef(Mx1.x, Mx1.y, Mx1.z);
+  glBegin(GL_TRIANGLES); tx.vertex(); rightP2.vertex(); dx.vertex(); glEnd();
+  glPopMatrix();
+
+  glPopName();
 }

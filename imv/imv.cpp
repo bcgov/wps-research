@@ -5,29 +5,20 @@ that inspired further developments at UVic, CFS and elsewhere.. */ // todo: disp
 #include"newzpr.h"
 #include<iostream>
 
-// example function for parfor
-/*
-void fx(size_t n){
-  cprint(std::to_string(n));
-}
-
-*/
-
 int main(int argc, char ** argv){
-  init_mtx(); // parfor(10, 15, fx); // parfor(20, 25, fx);
+  init_mtx();
   groundref.clear();
-
   IMG_FN = string("stack.bin");
 
-  if(sizeof(float) != 4){
-    printf("Error: sizeof(float) != 4\n");
-    exit(1);
-  }
   if(argc < 2){
     printf("imv.cpp: [infile]\n");
   }
   else{
     IMG_FN = string(argv[1]);
+  }
+
+  if(!exists(IMG_FN)){
+    err("failed to open input file");
   }
 
   string mfn(IMG_FN + string(".ml"));
@@ -213,14 +204,14 @@ int main(int argc, char ** argv){
   // set up window for overview image
   zprInstance * myZpr = myManager->newZprInstance(nr2, nc2, nb);
   glImage * myImage = new glImage(myZpr, &a);
-  // myZpr->setTitle(string("Scene"));
+  myZpr->setTitle(string("Scene"));
 
   // set up window for fullres subset image
   zprInstance * myZpr2 = myManager->newZprInstance(mm, mm, nb);
   glImage * myImage2 = new glImage(myZpr2, &b);
   SUB_GLIMG = (void *)myImage2;
   myZpr2->setRightOf(myZpr);
-  // myZpr2->setTitle(string("Subset"));
+  myZpr2->setTitle(string("Subset"));
 
   // target window setup
 
@@ -243,30 +234,30 @@ int main(int argc, char ** argv){
 
   TGT_MYIMG = &c;
 
-  //zprInstance *myZpr3 = myManager->newZprInstance(abs((long int)nr2 - (long int)mm), abs((long int)nr2 - (long int)mm), nb);
   zprInstance *myZpr3 = myManager->newZprInstance(NWIN, NWIN, nb);
   glImage * myImage3 = new glImage(myZpr3, &c);
   TGT_GLIMG = (void *)myImage3;
   myZpr3->setScreenPosition(0, nr2 + 65);
-  // myZpr3->setTitle(string("Analysis"));
+  myZpr3->setTitle(string("Analysis"));
 
   // scatter
   zprInstance * myZpr4 = myManager->newZprInstance(200, 200, nb);
+  glBasicSphere * s = new glBasicSphere(0, myZpr4, 0, 0, 0, 1, 1, 1, 1. /*size*/, 10, 10);
+  // glArrow * aR = new glArrow(myZpr4, 1, 0, 0, 0, 0, 0, 1, 0, 0);
+
   myZpr4->setScreenPosition(nc2, nr2 + 65); // ightOf(myZpr3);
-  // myZpr4->setTitle(string("3d scatterplot"));
-   glBasicSphere * s = new glBasicSphere(0, myZpr4, 0, 0, 0, 1, 1, 1, 1. /*size*/, 10, 10);
-    
-  // glArrow * aR = new glArrow(myZpr4, 1, 0, 0);
-  // aR->setXYZ(0, 0, 0, 1, 0, 0);
-   /*
+  myZpr4->setTitle(string("3d scatterplot"));
+  /// aR->setXYZ(0, 0, 0, 1, 0, 0);
+
+  /*
   glArrow * aG = new glArrow(myZpr4, 0, 1, 0);
-  glArrow * aB = new glArrow(myZpr4, 0, 0, 1); 
+  glArrow * aB = new glArrow(myZpr4, 0, 0, 1);
   aR->setXYZ(0, 0, 0, 1, 0, 0);
   aG->setXYZ(0, 0, 0, 0, 1, 0);
   aB->setXYZ(0, 0, 0, 0, 0, 1);
-*/
+  */
   printf("glutMainLoop()\n");
-  
+
   glutMainLoop();
   return 0;
 }
