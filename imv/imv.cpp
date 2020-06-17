@@ -260,6 +260,7 @@ int main(int argc, char ** argv){
 
   printf("glutMainLoop()\n");
 
+  initLighting();
   glutMainLoop();
   return 0;
 }

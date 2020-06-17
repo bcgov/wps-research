@@ -43,7 +43,6 @@ void GLERROR(){
     code = glGetError();
   }
   */
-
 }
 
 void glImage::drawMeUnHide(){
@@ -75,27 +74,30 @@ void zprInstance::mark(){
   for(it = myGraphics.begin(); it != myGraphics.end(); it++){
   }
 }
-/*
-void glClustSphere::drawMe(){
-  dprintf("drawme(clust sphere");
-  if(isPicked() && isLabelled){
-  }
-  parentZprInstance->focus();
-  glBasicSphere::drawMe();
-}
-*/
 
 void two_percent(float & min, float & max, SA<float> * b){
+  // not actually 2%, gasp!
   priority_queue<float> q;
   float * d = b->elements;
-  unsigned int n_two = floor(0.035 * ((float)b->size()));
+  unsigned int n_two = floor(0.02 * ((float)b->size()));
   unsigned int i;
-  for(i = 0; i < b->size(); i++) q.push(d[i]);
-  for(i = 0; i < n_two; i++) q.pop();
+  for(i = 0; i < b->size(); i++){
+    q.push(d[i]);
+  }
+
+  for(i = 0; i < n_two; i++){
+    q.pop();
+  }
   max = q.top();
-  while(q.size() > n_two) q.pop();
+
+  while(q.size() > n_two){
+    q.pop();
+  }
   min = q.top();
-  while(q.size() > 0) q.pop();
+
+  while(q.size() > 0){
+    q.pop();
+  }
   printf("two_p n=%zu min %f max %f\n", b->size(), min, max);
 }
 
@@ -121,20 +123,26 @@ void glImage::rebuffer(){
 
   printf("myZprInstanceID %d r1 %f r2 %f r3 %f min1 %f min2 %f min3 %f\n", parentZprInstance->myZprInstanceID, r1, r2, r3, min1, min2, min3);
 
-  float d;
+  float r, g, b;
   int i, j, k, ri;
   k = 0;
   for(i = 0; i < NRow; i++){
     ri = NRow - i - 1;
     for(j = 0; j < NCol; j++){
-      d = r1 * (b1->at(ri, j) - min1);
-      dat->at(k++) = d;
+      r = r1 * (b1->at(ri, j) - min1);
+      r = (r<0. ? 0.: r);
+      r = (r>1. ? 1.: r);
+      dat->at(k++) = r;
 
-      d = r2 * (b2->at(ri, j) - min2);
-      dat->at(k++) = d;
+      g = r2 * (b2->at(ri, j) - min2);
+      g = (g<0. ? 0.: g);
+      g = (g>1. ? 1.: g);
+      dat->at(k++) = g;
 
-      d = r3 * (b3->at(ri, j) - min3);
-      dat->at(k++) = d;
+      b = r3 * (b3->at(ri, j) - min3);
+      b = (b<0. ? 0.: b);
+      b = (b>1. ? 1.: b);
+      dat->at(k++) = b;
     }
   }
   Update = false;
@@ -1210,18 +1218,18 @@ void glPlottable::initName(zprInstance * parent, int useName){
 }
 
 void glPoints::drawMe(){
-    size_t nr = myI->image->NRow;
-    size_t nc = myI->image->NCol;
-    size_t nf = nr * nc * 3;
-    float * d = myI->dat->elements;
+  size_t nr = myI->image->NRow;
+  size_t nc = myI->image->NCol;
+  size_t nf = nr * nc * 3;
+  float * d = myI->dat->elements;
 
-    glColor3f(1,1,1);
-    for(size_t i = 0; i < nf; i += 3){
-      glColor3f(d[i], d[i+1], d[i+2]);
-      glBegin(GL_POINTS);
-      glVertex3f(d[i], d[i+1], d[i+2]);
-      glEnd();
-      // printf("%f %f %f]\n", d[i], d[i+1], d[i+2]);
-    }
-
+  glColor3f(1,1,1);
+  for(size_t i = 0; i < nf; i += 3){
+    glColor3f(d[i], d[i+1], d[i+2]);
+    glBegin(GL_POINTS);
+    glVertex3f(d[i], d[i+1], d[i+2]);
+    glEnd();
+    // printf("%f %f %f]\n", d[i], d[i+1], d[i+2]);
   }
+
+}
