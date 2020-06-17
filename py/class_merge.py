@@ -5,7 +5,7 @@
 from misc import * 
 
 if len(args) < 2:
-    err("class_merge [input file name") # args.append('20190926kamloops_data/WATERSP.tif_project_4x.bin_sub.bin')
+    err("class_merge [input file name]") # args.append('20190926kamloops_data/WATERSP.tif_project_4x.bin_sub.bin')
 
 generate_binaries_all = len(args) < 3
 
