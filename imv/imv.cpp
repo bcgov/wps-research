@@ -253,6 +253,8 @@ int main(int argc, char ** argv){
   glLine yL(myZpr4, v0, vy, 0, 1, 0);
   glLine zL(myZpr4, v0, vz, 0, 0, 1);
 
+  glPoints scatter(myZpr4, myImage3);
+
   myZpr4->setScreenPosition(nc2, nr2 + 65); // ightOf(myZpr3);
   myZpr4->setTitle(string("3d scatterplot"));
 

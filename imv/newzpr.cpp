@@ -110,7 +110,7 @@ void glImage::rebuffer(){
   r1 = r2 = r3 = 1.;
   min1 = min2 = min3 = 0.;
 
-  two_percent(min1, max1, b1);
+  two_percent(min1, max1, b1); // so the 2p stretch happens in the secondary buffer (this one)
   two_percent(min2, max2, b2);
   two_percent(min3, max3, b3);
   r1 = 1./(max1 - min1);
@@ -754,6 +754,12 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
       printf("%d\t%s\t%e\n", i, vec_band_names[i].c_str(), (double)(FB->at(i)->at(y * NCol + x)));
     }
   }
+
+  // update the scatter plot window
+  zprInstance * s = myZprManager->myZprInstances->at(3);
+  s->focus();
+  s->mark();
+  s->display();
 
   if(callMeWithMouseClickCoordinates){
     (*callMeWithMouseClickCoordinates)(x,y);
