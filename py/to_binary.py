@@ -1,5 +1,5 @@
 # convert class maps to binary class maps, in parallel 20200602
-import os
+import os; exist = os.path.exists
 import sys
 
 def parfor(my_function, my_inputs):
@@ -25,9 +25,17 @@ files = ["BROADLEAF_SP.bin",
          "SHRUB_SP.bin",
          "WATERSP.bin"]
 
-cmds = []
-
+search_files = False
 for f in files:
+    if not exist(f):
+        search_files = True
+
+if search_files:
+    files = [f.strip() for f in os.popen("ls -1 b*.bin").readlines()]
+print("files", files)
+
+cmds = []
+or f in files:
     cmd = "python3 " + merge + " " + f
     print(cmd)
     if not os.path.exists(f + "_binary.bin"):
