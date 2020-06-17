@@ -5,14 +5,16 @@
 from misc import * 
 
 if len(args) < 2:
-    err("class_merge [input file name]") # args.append('20190926kamloops_data/WATERSP.tif_project_4x.bin_sub.bin')
+    err("class_merge [input file name] # [optional argument]" +
+        "\n\t#adding the optional arg. skips generating binaries for all labels")
+    # args.append('20190926kamloops_data/WATERSP.tif_project_4x.bin_sub.bin')
 
-generate_binaries_all = len(args) < 3
+generate_binaries_all = len(args) < 3 # detect optional flag
 
 fn = args[1]
 hfn = hdr_fn(fn)
 samples, lines, bands, data = read_binary(fn)
-count = hist(data)
+count = hist(data)  # histogram of labels
 class_labels = count.keys()
 print("number of class labels,", len(class_labels))
 print("\tlabel,count")
@@ -21,8 +23,7 @@ for c in class_labels:
     print('\t' + str(c) + ',' + str(count[c]))
 
 print("class_labels", class_labels)
-
-print("if 0. label not present, assume most-frequent label is non-positive..")
+print("** if 0. label not present, assume most-frequent label is non-positive..")
 
 max_label, max_count = None, None
 
@@ -62,4 +63,3 @@ for c in class_labels:
     ofn, ohfn = fn + '_binary_' + str(c) + '.bin', fn + '_binary_' + str(c) + '.hdr'
     write_binary(output, ofn)
     run('cp ' + hfn + ' ' + ohfn)
-
