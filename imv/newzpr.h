@@ -888,20 +888,7 @@ class glPoints: public glPlottable{
     initName(parent, false); // only use true if it's something you want to use picking to click on
   }
 
-  void drawMe(){
-    size_t nr = myI->image->NRow;
-    size_t nc = myI->image->NCol;
-    size_t nf = nr * nc * 3;
-    float * d = myI->dat->elements;
-
-    glColor3f(1,1,1);
-    glBegin(GL_POINTS);
-    for(size_t i = 0; i < nf; i += 3){
-      glVertex3f(d[i], d[i+1], d[i+2]);
-    }
-    glEnd();
-
-  }
+  void drawMe();
 };
 
 class glBasicSphere: public glPlottable{
