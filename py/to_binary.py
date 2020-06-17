@@ -36,10 +36,14 @@ print("files", files)
 
 cmds = []
 for f in files:
-    cmd = "python3 " + merge + " " + f
+    cmd = "python3 " + merge + " " + f + " 1" # last arg skips generating binaries for all labels
     print(cmd)
     if not os.path.exists(f + "_binary.bin"):
         cmds.append(cmd)
 
 parfor(run, cmds)
 
+print("N.B., if class merging didn't work for a band, " +
+      "try re-running the class_merge script for that band, " +
+      "without the last argument, and examine the label maps " + 
+      "using py/read_multi.py")
