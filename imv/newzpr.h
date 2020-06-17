@@ -849,181 +849,6 @@ class glImage: public glPlottable{
   void rebuffer();
 };
 
-/*
-class glRect: public glPlottable{
-  // two dimensional rectangle plotted in 2d only
-  public:
-  zprInstance *myParent;
-  int x, y, w, h; // x position, y position, width, height
-
-  glRect(){
-    myType = std::string("glRect");
-    Update = false;
-  }
-
-  glRect(zprInstance * parent, int x, int y, int w, int h){
-    myParent = parent;
-    myType = std::string("glRect");
-  }
-
-  void drawMeUnHide();
-
-  void drawMe(){
-    if(hideMe) return; // if(Update) rebuffer();
-
-    int NRow = myParent->NRow;
-    int NCol = myParent->NCol;
-
-    cout << "glRect::drawMe()" << endl;
-    glViewport(0,0,NCol, NRow);
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    gluOrtho2D(0.0, (GLfloat)NCol, 0.0, (GLfloat)NRow);
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
-    glColor3f(1, 0, 1);
-    glRectf((float)x, (float)y, (float)(x + w), (float)(y - h));
-    // glRasterPos2f(0.,0.);
-    //glPixelStoref(GL_UNPACK_ALIGNMENT, 1);
-    //glDrawPixels(NCol, NRow, GL_RGB, GL_FLOAT, (GLvoid *)(&((dat->elements)[0])));
-
-  }
-
-  void rebuffer();
-};
-
-*/
-
-
-/*
-class glSimpleRect: public glPlottable{
-  // this is a rectangle plotted in up to 3d
-  public:
-  vec3 x;
-  int myVal;
-  int * myParam;
-  int K1, K2;
-  glSimpleRect(zprInstance * parent, float R, float G, float B, int myValue,int * _myParam, float a1, float a2, float a3, int k1, int k2){
-    K1 = k1;
-    K2 = k2;
-    myParam = _myParam;
-    setDefault();
-    x.init(a1, a2, a3);
-    myVal = myValue;
-    rgb.init(R,G,B);
-    parentZprInstance = parent;
-    initName(parent,true);
-    float j = (float)K1;
-    float k = (float)K2;
-    addPointToBoundingBox(a1, a2, a3+1.);
-    addPointToBoundingBox(a1+j, a2+k, 0.);
-  }
-
-  void drawMeGL(){
-    int isP = isPicked();
-
-    if(isP){
-      printf("glSimpleRect select (prev: %d) (new: %d) \n",*myParam, myVal);
-      (*myParam) = myVal;
-    }
-    float j = (float)K1;
-    float k = (float)K2;
-    glBegin(GL_POLYGON);
-    glVertex3f(x.x, x.y, x.z);
-    glVertex3f(x.x+j, x.y, x.z);
-    glVertex3f(x.x+j, x.y+k, x.z);
-    glVertex3f(x.x , x.y+k, x.z);
-    glEnd();
-  }
-
-  void drawMe(){
-    colorMe();
-    glPushMatrix();
-    glPushName(myName);
-    drawMeGL();
-    glPopName();
-    glPopMatrix();
-  }
-};
-
-class glSlider{
-  public:
-  int nItems;
-  int pixWidth; int blankWidth;
-  int * myParam;
-  SA< glSimpleRect *> * myRects;
-  zprInstance * myZpr;
-
-  glSlider(zprInstance * _myZpr, int nMax, int * paramVal, int pixW, int blankW){
-    pixWidth = pixW; blankWidth = blankW;
-    myParam = paramVal;
-    myZpr = _myZpr;
-    nItems = nMax;
-    myRects = new SA<glSimpleRect * >(nMax);
-
-    int i;
-    for(i=0; i<nMax; i++){
-      myRects->at(i)=NULL;
-    }
-    for(i=0; i<nItems; i++){
-      vec3 rgb( 0., 1., 0.);//* (((float)i)+1.)/((float)nItems), 0.);
-      (*myRects)[i] = new glSimpleRect( myZpr, rgb.x, rgb.y, rgb.z, i, paramVal, (float)(i*(pixWidth+blankWidth)), 0.,0., pixWidth, pixWidth);
-    }
-  }
-
-  void resetMe(){
-    int i;
-    for(i=0; i<nItems; i++){
-      myRects->at(i)->isInverted = false;
-    }
-  }
-};
-
-class glPixelRect;
-
-class glVideo: public glPlottable{
-  public:
-  glSlider * mySlider;
-  SA<glImage *> * myImages;
-  vector<int> frameIndex;
-  int loopMode;
-  int isPaused;
-  vector<int>::iterator ii;
-  int iit;
-  int iitLast;
-  SA< vector< glPixelRect *> > * imagePointsOnPath;
-  int * randomFramePointer;
-
-  glVideo(zprInstance * parent, vector<glImage *> * _myFrames, int * _randomFramePointer, glSlider * mySlide, SA< vector< glPixelRect *> > * imagePointsOnPath_);
-
-  void drawMe();
-  int nFrames();
-  void rebuffer();
-};
-
-class glPoint: public glPlottable{
-  public:
-  SA<float> * p;
-  int N;
-  vec3 x;
-  glPoint(zprInstance * parent, float X, float Y, float Z, float R, float G, float B){
-    x.init(X,Y,Z); rgb.init(R,G,B);
-    initName(parent,false);
-    addPointToBoundingBox(X,Y,Z);
-
-  }
-  void drawMe(){
-    colorMe();
-    glPushMatrix();
-    glPointSize(2.);
-    glBegin(GL_POINTS);
-    x.vertex();
-    glEnd();
-    glPopMatrix();
-  }
-};
-*/
-
 class glLine: public glPlottable{
   public:
 
@@ -1121,6 +946,38 @@ class glBasicSphere: public glPlottable{
     glPopMatrix();
   }
 };
+
+class glPoints: public glPlottable{
+  public:
+
+	//  vec3 x1, x2;
+  //int myWidth;
+  glPoints( zprInstance * parent){
+    /* x1.init(a); x2.init(b);
+    rgb.init(R,G,B);
+    myWidth = 1.;
+    initName(parent, false);
+    addPointToBoundingBox(x1.x, x1.y, x1.z);
+    addPointToBoundingBox(x2.x, x2.y, x2.z);
+  */
+  }
+
+
+  void drawMe(){
+    /*
+     colorMe();
+    glLineWidth(myWidth);
+    glPushMatrix();
+    glBegin(GL_LINES);
+    x1.vertex();
+    x2.vertex();
+    glEnd();
+    glPopMatrix();
+    */
+  }
+};
+
+
 
 #endif //#ifndef NEWZPR_H
 

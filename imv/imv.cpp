@@ -243,7 +243,6 @@ int main(int argc, char ** argv){
   // scatter
   zprInstance * myZpr4 = myManager->newZprInstance(200, 200, nb);
   // glBasicSphere * s = new glBasicSphere(0, myZpr4, 0, 0, 0, 1, 1, 1, 1., 10, 10);
-  // glArrow * aR = new glArrow(myZpr4); //, 1, 0, 0, 0, 0, 0, 1, 0, 0);
 
   // unit square axes
   vec3 v0(0,0,0);
@@ -256,15 +255,7 @@ int main(int argc, char ** argv){
 
   myZpr4->setScreenPosition(nc2, nr2 + 65); // ightOf(myZpr3);
   myZpr4->setTitle(string("3d scatterplot"));
-  /// aR->setXYZ(0, 0, 0, 1, 0, 0);
 
-  /*
-  glArrow * aG = new glArrow(myZpr4, 0, 1, 0);
-  glArrow * aB = new glArrow(myZpr4, 0, 0, 1);
-  aR->setXYZ(0, 0, 0, 1, 0, 0);
-  aG->setXYZ(0, 0, 0, 0, 1, 0);
-  aB->setXYZ(0, 0, 0, 0, 0, 1);
-  */
   printf("glutMainLoop()\n");
 
   glutMainLoop();
