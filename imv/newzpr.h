@@ -588,7 +588,7 @@ class glPlottable{
   }
 
   glPlottable(){
-	  cout << "glPlottable()\n";
+    cout << "glPlottable()\n";
     myType = std::string("glPlottable");
     Update = false;
     isLabelled=false;
@@ -612,10 +612,10 @@ class glPlottable{
 
   virtual void drawMe(){
   }
-  
+
   virtual void drawMe(int highlight){
   }
-  
+
   void setDefault(){
     hideMe = false;
     forceUpdate = false;
@@ -753,7 +753,7 @@ class glImage: public glPlottable{
   void initFrom(zprInstance * parent, myImg * img){
     cout << "glImage::initFrom()\n";
 
-	  myParent = parent;
+    myParent = parent;
     image = img;
     dat = new SA<float>(image->NRow * image->NCol *image->NBand);
     initName(parent,false); Update = false; isClusteringImage = false;
@@ -767,7 +767,7 @@ class glImage: public glPlottable{
   void drawMeUnHide();
 
   void drawMe(){
-	  printf("myImg::drawMe()\n");
+    printf("myImg::drawMe()\n");
     // if(hideMe) return;
     if(Update) rebuffer();
 
@@ -879,6 +879,31 @@ class glLine: public glPlottable{
   }
 };
 
+class glPoints: public glPlottable{
+  public:
+  glImage * myI;
+  glPoints(zprInstance * parent, glImage * myI_){
+    myI = myI_;
+    myType = std::string("glImage");
+    initName(parent, false); // only use true if it's something you want to use picking to click on
+  }
+
+  void drawMe(){
+    size_t nr = myI->image->NRow;
+    size_t nc = myI->image->NCol;
+    size_t nf = nr * nc * 3;
+    float * d = myI->dat->elements;
+
+    glColor3f(1,1,1);
+    glBegin(GL_POINTS);
+    for(size_t i = 0; i < nf; i += 3){
+      glVertex3f(d[i], d[i+1], d[i+2]);
+    }
+    glEnd();
+
+  }
+};
+
 class glBasicSphere: public glPlottable{
   public:
   float size; int circles, stacks;
@@ -946,38 +971,6 @@ class glBasicSphere: public glPlottable{
     glPopMatrix();
   }
 };
-
-class glPoints: public glPlottable{
-  public:
-
-	//  vec3 x1, x2;
-  //int myWidth;
-  glPoints( zprInstance * parent){
-    /* x1.init(a); x2.init(b);
-    rgb.init(R,G,B);
-    myWidth = 1.;
-    initName(parent, false);
-    addPointToBoundingBox(x1.x, x1.y, x1.z);
-    addPointToBoundingBox(x2.x, x2.y, x2.z);
-  */
-  }
-
-
-  void drawMe(){
-    /*
-     colorMe();
-    glLineWidth(myWidth);
-    glPushMatrix();
-    glBegin(GL_LINES);
-    x1.vertex();
-    x2.vertex();
-    glEnd();
-    glPopMatrix();
-    */
-  }
-};
-
-
 
 #endif //#ifndef NEWZPR_H
 
