@@ -86,15 +86,17 @@ void glClustSphere::drawMe(){
 */
 
 void two_percent(float & min, float & max, SA<float> * b){
-  unsigned int n_two = floor(0.035 * ((float)b->size()));
   priority_queue<float> q;
+  float * d = b->elements;
+  unsigned int n_two = floor(0.035 * ((float)b->size()));
   unsigned int i;
-  for(i = 0; i < b->size(); i++) q.push( (*b)[i]);
+  for(i = 0; i < b->size(); i++) q.push(d[i]);
   for(i = 0; i < n_two; i++) q.pop();
   max = q.top();
   while(q.size() > n_two) q.pop();
   min = q.top();
   while(q.size() > 0) q.pop();
+  printf("two_p n=%zu min %f max %f\n", b->size(), min, max);
 }
 
 void glImage::rebuffer(){
@@ -1207,3 +1209,19 @@ void glPlottable::initName(zprInstance * parent, int useName){
   return;
 }
 
+void glPoints::drawMe(){
+    size_t nr = myI->image->NRow;
+    size_t nc = myI->image->NCol;
+    size_t nf = nr * nc * 3;
+    float * d = myI->dat->elements;
+
+    glColor3f(1,1,1);
+    for(size_t i = 0; i < nf; i += 3){
+      glColor3f(d[i], d[i+1], d[i+2]);
+      glBegin(GL_POINTS);
+      glVertex3f(d[i], d[i+1], d[i+2]);
+      glEnd();
+      // printf("%f %f %f]\n", d[i], d[i+1], d[i+2]);
+    }
+
+  }
