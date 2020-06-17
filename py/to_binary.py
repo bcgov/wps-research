@@ -35,7 +35,7 @@ if search_files:
 print("files", files)
 
 cmds = []
-or f in files:
+for f in files:
     cmd = "python3 " + merge + " " + f
     print(cmd)
     if not os.path.exists(f + "_binary.bin"):
