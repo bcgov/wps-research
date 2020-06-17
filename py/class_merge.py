@@ -29,10 +29,11 @@ max_label, max_count = None, None
 
 # detect non-positive class
 if 0. not in class_labels:
-    max_label, max_count = class_labels[0], count[class_labels[0]]
-    for c in class_labels:
+    class_lab = list(class_labels)
+    max_label, max_count = class_lab[0], count[class_lab[0]]
+    for c in class_lab:
         if count[c] > max_count:
-            max_label, max_count = class_labels[c], count[c]
+            max_label, max_count = class_lab[c], count[c]
 
     print("\tmax_label,max_count")
     print("\t", str(max_label) + ',' + str(max_count))
