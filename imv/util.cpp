@@ -466,4 +466,3 @@ int hsv_to_rgb(float *r, float *g, float *b, float h, float s, float v){
   }
   return 0;
 }
-

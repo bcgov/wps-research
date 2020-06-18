@@ -2,6 +2,7 @@
 #ifndef UTIL_H
 #define UTIL_H
 
+#include<math.h>
 #include<vector>
 #include<string>
 #include<fstream>
@@ -91,4 +92,5 @@ void load_sub(size_t k);
 
 int hsv_to_rgb(float *r, float *g, float *b, float h, float s, float v);
 
+vector<float> color_wheel_rgb(size_t n_class);
 #endif
