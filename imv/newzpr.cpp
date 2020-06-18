@@ -102,7 +102,6 @@ void two_percent(float & min, float & max, SA<float> * b){
 }
 
 void glImage::rebuffer(){
-  // dprintf("glImage:: rebuffer()");
   myBi = parentZprInstance->myBi;
   int NRow = image->NRow; int NCol = image->NCol;
   printf("glImage::rebuffer() %d %d %d nr %d nc %d\n", myBi->at(0), myBi->at(1), myBi->at(2), NRow, NCol);
@@ -124,8 +123,11 @@ void glImage::rebuffer(){
   printf("myZprInstanceID %d r1 %f r2 %f r3 %f min1 %f min2 %f min3 %f\n", parentZprInstance->myZprInstanceID, r1, r2, r3, min1, min2, min3);
 
   float r, g, b;
-  int i, j, k, ri;
+  long int i, j, k, ri, m;
+  int class_i, n_class, gi;
   k = 0;
+  m = 0;
+
   for(i = 0; i < NRow; i++){
     ri = NRow - i - 1;
     for(j = 0; j < NCol; j++){
@@ -143,9 +145,22 @@ void glImage::rebuffer(){
       b = (b<0. ? 0.: b);
       b = (b>1. ? 1.: b);
       dat->at(k++) = b;
+
+      class_i = -1;
+      n_class = 0;
+      for(gi = 0; gi < groundref.size(); gi++){
+	// for(gi = groundref.begin(); gi != groundref.end(); gi++)
+        if(FB->at(groundref[gi])->at(ri, j) > 0.){
+          class_i = gi;
+          n_class += 1;
+        }
+      }
+      // set the class label to class_i if only one label. set to 0 if none. set to -1 if more than one!
+      class_label->at(m++) = (n_class == 1. ? (float)class_i : (n_class > 1 ? -1. : 0.));
     }
   }
   Update = false;
+  printf("\tdone rebuffer\n");
 }
 
 zprInstance * zprManager::newZprInstance(int NROW, int NCOL, int NBAND){
@@ -437,10 +452,14 @@ void zprInstance::processString(){
 
 void zprInstance::special(int key, int x, int y){
   refreshflag = true; //need to draw graphics.
-  if(key ==GLUT_KEY_F1){
+  if(key == GLUT_KEY_F1){
     _F1 = true;
     printf("Move atom active\n");
     //printf("Special Key dn: %d, %d\n", key, _F1);
+  }
+  if(key == GLUT_KEY_F2){
+    _F2 = !_F2;
+    printf("groundref class colouring toggle\n");
   }
 }
 
@@ -449,6 +468,12 @@ void zprInstance::specialUp(int key, int x, int y){
   if( key ==GLUT_KEY_F1){
     _F1 = false;
   }
+  /* 
+  if( key ==GLUT_KEY_F2){
+    _F2 = false;
+  }
+  */
+  // should actually have a toggle vs. on/ off mode function available but whatever
 }
 
 void zprInstance::keyboardUp(unsigned char key, int x, int y){
@@ -1219,18 +1244,53 @@ void glPlottable::initName(zprInstance * parent, int useName){
 }
 
 void glPoints::drawMe(){
+  printf("glPoints::drawMe()\n");
   size_t nr = myI->image->NRow;
   size_t nc = myI->image->NCol;
   size_t nf = nr * nc * 3;
   float * d = myI->dat->elements;
+  float r, g, b, h, s, v;
+  float class_label;
 
   glColor3f(1,1,1);
-  for(size_t i = 0; i < nf; i += 3){
-    glColor3f(d[i], d[i+1], d[i+2]);
-    glBegin(GL_POINTS);
-    glVertex3f(d[i], d[i+1], d[i+2]);
-    glEnd();
-    // printf("%f %f %f]\n", d[i], d[i+1], d[i+2]);
+  if(!myI->myParent->_F2){
+    for(size_t i = 0; i < nf; i += 3){
+      r = d[i];
+      g = d[i+1];
+      b = d[i+2];
+      glColor3f(r, g, b);
+      glBegin(GL_POINTS);
+      glVertex3f(r, g, b);
+      glEnd();
+      // printf("%f %f %f]\n", d[i], d[i+1], d[i+2]);
+    }
   }
+  else{
+    s = v = 1.;
+    d = myI->class_label->elements;
+    float * dd = myI->dat->elements;
+    for(size_t i = 0; i < nf; i += 3){
+      class_label = d[i / 3];
+      if(class_label == 0.){
+        r = g = b = 0.;
+      }
+      else if(class_label == -1.){
+        r = g = b = 1.;
+      }
+      else{
+        h = 360. * (float)(class_label - 1) / (float)(groundref.size());
+	if(h > 360.){
+		printf("class_label %f groundref.size() %zu\n", class_label, (size_t)groundref.size());
+		err("out of range");
+	}
 
+        hsv_to_rgb(&r, &g, &b, h, s, v);
+      }
+
+      glColor3f(r, g, b);
+      glBegin(GL_POINTS);
+      glVertex3f(dd[i], dd[i + 1], dd[i + 2]);
+      glEnd();
+    }
+  }
 }

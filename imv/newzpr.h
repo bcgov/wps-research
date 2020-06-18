@@ -313,6 +313,7 @@ class zprInstance{
   int forceUpdate;
   SA<int> * myBi;
   int ZPR_ZOOM_MODE, ZPR_PAN_MODE, ZPR_ROTATE_MODE;
+
   int NBand, NRow, NCol;
   set<int> * myLabelsPicked;
   knnClusteringInstance * myKnnClusteringInstance;
@@ -341,7 +342,7 @@ class zprInstance{
   std::set<GLint> myPickNames;
   vec3 rX;
   int myWindowWidth; int myWindowHeight;
-  int _F1; //F1 key active?
+  int _F1, _F2, _F3, _F4, _F5, _F6, _F7, _F8, _F9, _F10, _F11, _F12; //F1 key active?
   int _mouseX,_mouseY, _mouseLeft, _mouseMiddle, _mouseRight;
   double _left,_right, _top,_bottom,_near,_far,_zNear,_zFar, _dragPosX, _dragPosY, _dragPosZ;
   double _matrix[16];
@@ -427,6 +428,7 @@ class zprInstance{
     myTop=FLT_MIN;
     myZNear=0.;
     myZFar=1.;
+      _F1 = _F2 = _F3 = _F4 = _F5 = _F6 = _F7 = _F8 = _F9 = _F10 = _F11 = _F12 = false;
   }
 
   zprInstance(int ZprID, int glutID, zprManager * manager, int _NROW, int _NCOL, int nb){
@@ -733,6 +735,7 @@ class glImage: public glPlottable{
   public:
   myImg * image;
   SA<float> * dat;
+  SA<float> * class_label;
   int isClusteringImage;
   zprInstance *myParent;
 
@@ -756,6 +759,7 @@ class glImage: public glPlottable{
     myParent = parent;
     image = img;
     dat = new SA<float>(image->NRow * image->NCol *image->NBand);
+    class_label = new SA<float>(image->NRow * image->NCol); // supervised class label
     initName(parent,false); Update = false; isClusteringImage = false;
     addPointToBoundingBox(0., 0., 0.);
     addPointToBoundingBox(0., (float)(image->NCol), 0.);
