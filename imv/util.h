@@ -89,4 +89,6 @@ extern string load_sub_infile;
 
 void load_sub(size_t k);
 
+int hsv_to_rgb(float *r, float *g, float *b, float h, float s, float v);
+
 #endif
