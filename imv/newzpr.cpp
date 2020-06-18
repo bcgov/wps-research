@@ -439,6 +439,7 @@ void zprInstance::special(int key, int x, int y){
   refreshflag = true; //need to draw graphics.
   if(key ==GLUT_KEY_F1){
     _F1 = true;
+    printf("Move atom active\n");
     //printf("Special Key dn: %d, %d\n", key, _F1);
   }
 }
