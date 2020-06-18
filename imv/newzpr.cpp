@@ -151,7 +151,7 @@ void glImage::rebuffer(){
       for(gi = 0; gi < groundref.size(); gi++){
 	// for(gi = groundref.begin(); gi != groundref.end(); gi++)
         if(FB->at(groundref[gi])->at(ri, j) > 0.){
-          class_i = gi;
+          class_i = gi + 1;
           n_class += 1;
         }
       }
@@ -324,7 +324,7 @@ void zprInstance::display(){
   // printf("display::drawGraphics()\n");
   this->drawGraphics();
   // printf("display::drawText()\n");
-  // this->drawText();
+  this->drawText();
   glutSwapBuffers();
   GLERROR;
   if(!forceUpdate){
@@ -996,7 +996,7 @@ void zprInstance::drawText(){
   glPushMatrix();
   glLoadIdentity();
   int lightingState = glIsEnabled(GL_LIGHTING);
-  glDisable(GL_LIGHTING);
+  if(lightingState) glDisable(GL_LIGHTING);
   renderBitmapString(3,(this->myWindowHeight)-3,(void *)MYFONT,this->console_string);
   if(lightingState) glEnable(GL_LIGHTING);
   glPopMatrix();
@@ -1291,6 +1291,24 @@ void glPoints::drawMe(){
       glBegin(GL_POINTS);
       glVertex3f(dd[i], dd[i + 1], dd[i + 2]);
       glEnd();
+    }
+   
+    for(size_t i = 0; i < groundref.size(); i++){
+	const char * class_string = vec_band_names[groundref[i]].c_str();
+	h = 360. * (float)(i) / (float)(groundref.size());
+        hsv_to_rgb(&r, &g, &b, h, s, v);
+
+    	glColor3f(r, g, b);
+    	parentZprInstance->setOrthographicProjection();
+    	glPushMatrix();
+    	glLoadIdentity();
+    	int lightingState = glIsEnabled(GL_LIGHTING);
+    	if(lightingState) glDisable(GL_LIGHTING);
+	int dy = (parentZprInstance->myWindowHeight)- 3 - (MYFONT_SIZE * i);
+    	parentZprInstance->renderBitmapString(3,dy,(void *)MYFONT,(char *) (void*)class_string);
+    	if(lightingState) glEnable(GL_LIGHTING);
+    	glPopMatrix();
+    	parentZprInstance->resetPerspectiveProjection();
     }
   }
 }
