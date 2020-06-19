@@ -593,22 +593,20 @@ void zprInstance::setTitle(string t){
 }
 
 void zprInstance::zprReshape(int w,int h){
+  // focus();
+  printf("zprReshape\n");
   GLfloat ratio; // http://faculty.ycp.edu/~dbabcock/cs370/labs/lab07.html
+  //glPushMatrix();
   glViewport(0,0,w,h); // Set new screen extents
 
-  // Select projection matrix
+	  // Select projection matrix
   glMatrixMode(GL_PROJECTION);
   glLoadIdentity();
-  getMatrix(); // added 20200619 from cymh_cli_utils
+  //getMatrix(); // added 20200619 from cymh_cli_utils
 
   // Adjust viewing volume (orthographic)
   // If taller than wide adjust y
   if(w <= h){
-	  /*
-    ratio = (GLfloat) h/ (GLfloat) w;
-    glOrtho(-1.0f,1.0f,-1.0f*ratio,1.0f*ratio,-1.0f,1.0f);
-    _bottom = -1.*ratio; _top = 1.*ratio;
-    */
     ratio = (GLfloat) h/ (GLfloat) w;
     glOrtho(-1.0f, 1.0f, -1.0f * ratio, 1.0f * ratio, -1.0f, 1.0f);
     _bottom = -1. * ratio; _top = 1. * ratio;
@@ -616,18 +614,18 @@ void zprInstance::zprReshape(int w,int h){
   }
   // If wider than tall adjust x
   else if (h <= w){
-    /* ratio = (GLfloat) w/ (GLfloat) h;
-    glOrtho(-1.0f*ratio,1.0f*ratio,-1.0f,1.0f,-1.0f,1.0f);
-    _left = -1.*ratio; _right = 1.*ratio; */
     ratio = (GLfloat) w / (GLfloat) h;
     glOrtho(-1.0f * ratio, 1.0f * ratio, -1.0f, 1.0f, -1.0f, 1.0f);
     _left = -1. * ratio; _right = 1. * ratio;
     _bottom = -1.; _top = 1.;
-
   }
   //glPopMatrix();
+  //myWindowWidth = glutGet( GLUT_WINDOW_WIDTH );
+  //myWindowHeight = glutGet( GLUT_WINDOW_HEIGHT );
+
   glMatrixMode(GL_MODELVIEW);  // put back in 20200619
   refreshflag = true;
+  //glPopMatrix(); // need this?
   /*
   myWindowWidth = glutGet( GLUT_WINDOW_WIDTH );
   myWindowHeight = glutGet( GLUT_WINDOW_HEIGHT );
@@ -641,7 +639,7 @@ void zprInstance::zprReshape(int w,int h){
 //http://graphics.stanford.edu/courses/cs248-01/OpenGLHelpSession/code_example.html
 
 void zprInstance::zprMouse(int button, int state, int x, int y){
-  printf("zprMouse()\n");
+  // printf("zprMouse()\n");
   GLint viewport[4]; /* Do picking */
   refreshflag = true;
 
@@ -711,10 +709,13 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
     TGT_MYIMG->initFrom(dat4, NWIN, NWIN, IMG_NB);
     ((glImage *)TGT_GLIMG)->rebuffer();
     zprInstance * p = this;
-    zprInstance * a = myZprManager->myZprInstances->at(2);
-    a->focus();
-    a->mark();
-    a->display();
+
+    for(int k = 2; k <= 4; k++){
+      zprInstance * a = myZprManager->myZprInstances->at(2);
+      a->focus();
+      a->mark();
+      a->display();
+    }
 
     focus();
     mark();
@@ -903,7 +904,7 @@ void zprInstance::zprMotion(int x, int y){
         glTranslatef( zprReferencePoint[0], zprReferencePoint[1], zprReferencePoint[2]);
         glScalef(s,s,s);
         glTranslatef(-zprReferencePoint[0],-zprReferencePoint[1],-zprReferencePoint[2]);
-        changed = true; refreshflag = true;
+        changed = true;
       }
       else
       if (_mouseLeft){
@@ -920,7 +921,6 @@ void zprInstance::zprMotion(int x, int y){
         glTranslatef( zprReferencePoint[0], zprReferencePoint[1], zprReferencePoint[2]);
         glRotatef(angle,bx,by,bz);
         glTranslatef(-zprReferencePoint[0],-zprReferencePoint[1],-zprReferencePoint[2]);
-        refreshflag = true;
         changed = true;
       }
       else
@@ -935,7 +935,7 @@ void zprInstance::zprMotion(int x, int y){
         glTranslatef(px-_dragPosX,py-_dragPosY,pz-_dragPosZ);
         glMultMatrixd(_matrix);
         _dragPosX = px; _dragPosY = py; _dragPosZ = pz;
-        changed = true; refreshflag = true;
+        changed = true;
         //glPopMatrix();
         //glutPostRedisplay();
         //return;
@@ -1261,7 +1261,7 @@ void glPlottable::initName(zprInstance * parent, int useName){
 }
 
 void glPoints::drawMe(){
-  printf("glPoints::drawMe()\n");
+  // printf("glPoints::drawMe()\n");
   size_t nr = myI->image->NRow;
   size_t nc = myI->image->NCol;
   size_t nf = nr * nc * 3;
@@ -1270,6 +1270,7 @@ void glPoints::drawMe(){
   float class_label;
 
   glColor3f(1,1,1);
+  glPointSize(2.);
   if(!myI->myParent->_F2){
     for(size_t i = 0; i < nf; i += 3){
       r = d[i];
