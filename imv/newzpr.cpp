@@ -678,50 +678,6 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
 
   printf("\nmouse (x/col,y/row)=(%d,%d) myZprInstanceID=%d\n", x, y, myZprInstanceID);
 
-  if(myZprInstanceID == 1){
-    // subset window
-    WIN_I = (y + NWIN) >= SUB_MM ? SUB_MM - NWIN : y;
-    WIN_J = (x + NWIN) >= SUB_MM ? SUB_MM - NWIN : x;
-
-    SA<float> * dat4 = TGT;
-    size_t i, j, k;
-
-    // print out data under cursor
-    printf("bi\tbn\td\n");
-    for0(k, IMG_NB){
-      for0(i, 1){
-        for0(j, 1){
-          float d = (*SUB)[(k * SUB_MM * SUB_MM) + (SUB_MM * (WIN_I + i)) + (WIN_J + j)];
-          printf("%d\t%s\t%e\n", k, vec_band_names[k].c_str(), (double)d);
-        }
-      }
-    }
-
-    // do the work
-    for0(k, IMG_NB){
-      for0(i, NWIN){
-        for0(j, NWIN){
-          float d = (*SUB)[(k * SUB_MM * SUB_MM) + (SUB_MM * (WIN_I + i)) + (WIN_J + j)];
-          (*dat4)[(k * NWIN* NWIN) + (i * NWIN) + j] = d;
-        }
-      }
-    }
-    TGT_MYIMG->initFrom(dat4, NWIN, NWIN, IMG_NB);
-    ((glImage *)TGT_GLIMG)->rebuffer();
-    zprInstance * p = this;
-
-    for(int k = 2; k <= 4; k++){
-      zprInstance * a = myZprManager->myZprInstances->at(2);
-      a->focus();
-      a->mark();
-      a->display();
-    }
-
-    focus();
-    mark();
-    display();
-    myZprDisplay();
-  }
 
   if(myZprInstanceID == 0){
     // overview window
@@ -762,30 +718,66 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
 
     SUB_MYIMG->initFrom(dat3, SUB_MM, SUB_MM, IMG_NB);
     ((glImage *)SUB_GLIMG)->rebuffer();
-    for(int m = 0; m < 4; m++){
+    
+    for(int m = 0; m <= 4; m++){
       // if(m > 1) continue; // update the first two windows (otherwise get segfault)
       zprInstance * a = myZprManager->myZprInstances->at(m);
       a->focus();
       a->mark();
       a->display();
     }
-    myZprDisplay();
+    //myZprDisplay();
+    this->focus();
+    this->mark();
+    this->display();
+   
   }
 
-  if(myZprInstanceID == 0){
+  
+  if(myZprInstanceID == 1){
+    // subset window
+    WIN_I = (y + NWIN) >= SUB_MM ? SUB_MM - NWIN : y;
+    WIN_J = (x + NWIN) >= SUB_MM ? SUB_MM - NWIN : x;
 
-    std::vector<glPlottable *>::iterator it;
-    int i = 0;
-    it = myGraphics.begin();
-    glImage * image = (glImage * )(glPlottable *) (*it);
-    int NRow = image->image->NRow;
-    int NCol = image->image->NCol;
-    int NBand = image->image->NBand;
-    SA< SA<float> * > * FB = image->image->getFloatBuffers();
-    for(i = 0; i < NBand; i++){
-      // could turn this on to print image information
-      // cout << "\tband " << i << "->" << FB->at(i)->at(y * NCol + x) << endl;
+    SA<float> * dat4 = TGT;
+    size_t i, j, k;
+
+    // print out data under cursor
+    printf("bi\tbn\td\n");
+    for0(k, IMG_NB){
+      for0(i, 1){
+        for0(j, 1){
+          float d = (*SUB)[(k * SUB_MM * SUB_MM) + (SUB_MM * (WIN_I + i)) + (WIN_J + j)];
+          printf("%d\t%s\t%e\n", k, vec_band_names[k].c_str(), (double)d);
+        }
+      }
     }
+
+    // do the work
+    for0(k, IMG_NB){
+      for0(i, NWIN){
+        for0(j, NWIN){
+          float d = (*SUB)[(k * SUB_MM * SUB_MM) + (SUB_MM * (WIN_I + i)) + (WIN_J + j)];
+          (*dat4)[(k * NWIN* NWIN) + (i * NWIN) + j] = d;
+        }
+      }
+    }
+    TGT_MYIMG->initFrom(dat4, NWIN, NWIN, IMG_NB);
+    ((glImage *)TGT_GLIMG)->rebuffer();
+    zprInstance * p = this;
+
+    for(int k = 0; k <= 4; k++){
+      zprInstance * a = myZprManager->myZprInstances->at(k);
+      a->focus();
+      a->mark();
+      a->display();
+    }
+
+    focus();
+    mark();
+    display();
+    myZprDisplay();
+   
   }
 
   if(myZprInstanceID < 3){
@@ -804,16 +796,21 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
     }
   }
 
-  // update the scatter plot window
-  zprInstance * s = myZprManager->myZprInstances->at(3);
-  s->focus();
-  s->mark();
-  s->display();
+  // update windows 
+  /*
+  for(int m = 2; m < myZprManager->myZprInstances->size(); m++){
 
-  s = myZprManager->myZprInstances->at(4);
-  s->focus();
-  s->mark();
-  s->display();
+    zprInstance * s = myZprManager->myZprInstances->at(3);
+    if(s->myZprInstanceID == myZprInstanceID) continue;
+    s->focus();
+    s->mark();
+    s->display();
+  }
+
+  focus();
+  mark();
+  display();
+*/
 
   if(callMeWithMouseClickCoordinates){
     (*callMeWithMouseClickCoordinates)(x,y);
