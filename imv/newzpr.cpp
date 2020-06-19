@@ -718,7 +718,26 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
 
     SUB_MYIMG->initFrom(dat3, SUB_MM, SUB_MM, IMG_NB);
     ((glImage *)SUB_GLIMG)->rebuffer();
-    
+
+    // now rebuffer under secondary window too 
+    WIN_I = (y + NWIN) >= SUB_MM ? SUB_MM - NWIN : y;
+    WIN_J = (x + NWIN) >= SUB_MM ? SUB_MM - NWIN : x;
+
+    size_t i, j, k;
+    SA<float> * dat4 = TGT;
+    // do the work
+    for0(k, IMG_NB){
+      for0(i, NWIN){
+        for0(j, NWIN){
+          float d = (*SUB)[(k * SUB_MM * SUB_MM) + (SUB_MM * (WIN_I + i)) + (WIN_J + j)];
+          (*dat4)[(k * NWIN* NWIN) + (i * NWIN) + j] = d;
+        }
+      }
+    }
+
+    TGT_MYIMG->initFrom(dat4, NWIN, NWIN, IMG_NB);
+    ((glImage *)TGT_GLIMG)->rebuffer();
+
     for(int m = 0; m <= 4; m++){
       // if(m > 1) continue; // update the first two windows (otherwise get segfault)
       zprInstance * a = myZprManager->myZprInstances->at(m);
