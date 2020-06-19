@@ -240,7 +240,7 @@ int main(int argc, char ** argv){
   myZpr3->setScreenPosition(0, nr2 + 65);
   myZpr3->setTitle(string("Analysis"));
 
-  // scatter
+  // analysis scatter
   zprInstance * myZpr4 = myManager->newZprInstance(200, 200, nb);
   // glBasicSphere * s = new glBasicSphere(0, myZpr4, 0, 0, 0, 1, 1, 1, 1., 10, 10);
 
@@ -254,12 +254,22 @@ int main(int argc, char ** argv){
   glLine zL(myZpr4, v0, vz, 0, 0, 1);
 
   glPoints scatter(myZpr4, myImage3);
-
   myZpr4->setScreenPosition(nc2, nr2 + 65); // ightOf(myZpr3);
-  myZpr4->setTitle(string("3d scatterplot"));
+  myZpr4->setTitle(string("3d scatterplot: Analysis"));
+
+  
+
+  // preview scatter
+  zprInstance * myZpr5 = myManager->newZprInstance(200, 200, nb);
+  glLine xL2(myZpr5, v0, vx, 1, 0, 0);
+  glLine yL2(myZpr5, v0, vy, 0, 1, 0);
+  glLine zL2(myZpr5, v0, vz, 0, 0, 1);
+  glPoints scatter2(myZpr5, myImage2);
+  myZpr5->setRightOf(myZpr4) ; //ScreenPosition(nc2, nr2 + 65); // ightOf(myZpr3);
+  myZpr5->setTitle(string("3d scatterplot: Subset"));
+
 
   printf("glutMainLoop()\n");
-
   initLighting();
   glutMainLoop();
   return 0;

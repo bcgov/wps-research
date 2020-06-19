@@ -593,36 +593,48 @@ void zprInstance::setTitle(string t){
 }
 
 void zprInstance::zprReshape(int w,int h){
-
   GLfloat ratio; // http://faculty.ycp.edu/~dbabcock/cs370/labs/lab07.html
-
-  // Set new screen extents
-  glViewport(0,0,w,h);
+  glViewport(0,0,w,h); // Set new screen extents
 
   // Select projection matrix
   glMatrixMode(GL_PROJECTION);
   glLoadIdentity();
+  getMatrix(); // added 20200619 from cymh_cli_utils
 
   // Adjust viewing volume (orthographic)
   // If taller than wide adjust y
   if(w <= h){
+	  /*
     ratio = (GLfloat) h/ (GLfloat) w;
     glOrtho(-1.0f,1.0f,-1.0f*ratio,1.0f*ratio,-1.0f,1.0f);
     _bottom = -1.*ratio; _top = 1.*ratio;
+    */
+    ratio = (GLfloat) h/ (GLfloat) w;
+    glOrtho(-1.0f, 1.0f, -1.0f * ratio, 1.0f * ratio, -1.0f, 1.0f);
+    _bottom = -1. * ratio; _top = 1. * ratio;
+    _left = -1.; _right = 1.;
   }
   // If wider than tall adjust x
   else if (h <= w){
-    ratio = (GLfloat) w/ (GLfloat) h;
+    /* ratio = (GLfloat) w/ (GLfloat) h;
     glOrtho(-1.0f*ratio,1.0f*ratio,-1.0f,1.0f,-1.0f,1.0f);
-    _left = -1.*ratio; _right = 1.*ratio;
+    _left = -1.*ratio; _right = 1.*ratio; */
+    ratio = (GLfloat) w / (GLfloat) h;
+    glOrtho(-1.0f * ratio, 1.0f * ratio, -1.0f, 1.0f, -1.0f, 1.0f);
+    _left = -1. * ratio; _right = 1. * ratio;
+    _bottom = -1.; _top = 1.;
+
   }
   //glPopMatrix();
-  //glMatrixMode(GL_MODELVIEW);
+  glMatrixMode(GL_MODELVIEW);  // put back in 20200619
+  refreshflag = true;
+  /*
   myWindowWidth = glutGet( GLUT_WINDOW_WIDTH );
   myWindowHeight = glutGet( GLUT_WINDOW_HEIGHT );
   refreshflag = true;
   glMatrixMode(GL_MODELVIEW);
-
+  //commented out 20200616
+*/
   return;
 
 }
@@ -793,6 +805,11 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
 
   // update the scatter plot window
   zprInstance * s = myZprManager->myZprInstances->at(3);
+  s->focus();
+  s->mark();
+  s->display();
+
+  s = myZprManager->myZprInstances->at(4);
   s->focus();
   s->mark();
   s->display();
