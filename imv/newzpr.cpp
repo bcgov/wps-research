@@ -762,7 +762,7 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
 
     SUB_MYIMG->initFrom(dat3, SUB_MM, SUB_MM, IMG_NB);
     ((glImage *)SUB_GLIMG)->rebuffer();
-    for(int m = 0; m < 2; m++){
+    for(int m = 0; m < 4; m++){
       // if(m > 1) continue; // update the first two windows (otherwise get segfault)
       zprInstance * a = myZprManager->myZprInstances->at(m);
       a->focus();
