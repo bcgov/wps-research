@@ -9,7 +9,7 @@ import os
 import sys
 import math
 
-no_clobber = None
+no_clobber = '' # was None: might supposed to be ''
 if len(sys.argv) > 1:
     no_clobber = ' -nc '
 
