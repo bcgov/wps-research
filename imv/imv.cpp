@@ -29,7 +29,7 @@ int main(int argc, char ** argv){
     NWIN = atoi(argv[2]);
   }
   else{
-    NWIN = 100; // obviously this is for purposes of testing the extraction. Too big!
+    NWIN = 75; // obviously this is for purposes of testing the extraction. Too big!
   }
   WIN_I = WIN_J = 0;
 
@@ -41,7 +41,8 @@ int main(int argc, char ** argv){
   size_t height = glutGet(GLUT_SCREEN_HEIGHT);
   size_t min_wh = width > height ? height: width;
   printf("min_wh %f\n", (float)min_wh);
-  size_t min = 2 * min_wh / 5; // can adjust scale here
+  size_t min = 3 * min_wh / 6; // can adjust scale here
+  // 2 / 5 
   // was 3 * min_wh / 5
 
   printf("min %f\n", (float)min);
@@ -255,10 +256,9 @@ int main(int argc, char ** argv){
   glLine zL(myZpr4, v0, vz, 0, 0, 1);
 
   glPoints scatter(myZpr4, myImage3);
-  myZpr4->setScreenPosition(nc2, nr2 + 65); // ightOf(myZpr3);
+  myZpr4->setRightOf(myZpr3);
+  //myZpr4->setScreenPosition(nc2, nr2 + 65);
   myZpr4->setTitle(string("Analysis"));
-
-  
 
   // preview scatter
   zprInstance * myZpr5 = myManager->newZprInstance(200, 200, nb);
@@ -266,7 +266,7 @@ int main(int argc, char ** argv){
   glLine yL2(myZpr5, v0, vy, 0, 1, 0);
   glLine zL2(myZpr5, v0, vz, 0, 0, 1);
   glPoints scatter2(myZpr5, myImage2);
-  myZpr5->setRightOf(myZpr4) ; //ScreenPosition(nc2, nr2 + 65); // ightOf(myZpr3);
+  myZpr5->setRightOf(myZpr2) ; //ScreenPosition(nc2, nr2 + 65); // ightOf(myZpr3);
   myZpr5->setTitle(string("Subset"));
 
 
