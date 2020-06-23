@@ -368,21 +368,23 @@ void zprInstance::getrgb(int & r, int & g, int & b){
 }
 
 void zprInstance::processString(){
-  char strSleep[] = "sleep";
   int i = 0;
+  char strSleep[] = "sleep";
   if(console_string[i] == '\0'){
     isPaused = !isPaused;
     printf("isPaused=%d\n", (int)isPaused);
     return;
   }
   while(console_string[i] != '\0') i++;
-
   int count = i + 1;
+  
   SA<char> s(count);
   strcpy(&s[0], console_string);
 
   int r, g, b, tk;
   int ndim = NBand;
+
+  // does string have "sleep" prefix?
   if(strcmpz(&s[0], &strSleep[0])){
     int st = atoi(&s[5]);
     if(st < 1) return;
@@ -390,7 +392,7 @@ void zprInstance::processString(){
     return;
   }
 
-  i = grabint(&s[1]);
+  i = grabint(&s[1]); // see if string is of form xyy..yy where x is char and yy.yy contains int
   switch(s[0]){
     case 'd':
     resetViewPoint();
