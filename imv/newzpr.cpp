@@ -31,6 +31,7 @@ void * TGT_GLIMG = NULL;
 // groundref detection
 vector<int> groundref;
 vector<string> vec_band_names;
+set<int> groundref_disable;
 
 extern zprManager * myZprManager = NULL;
 
@@ -146,9 +147,13 @@ void glImage::rebuffer(){
       b = (b>1. ? 1.: b);
       dat->at(k++) = b;
 
-      class_i = -1;
-      n_class = 0;
+      // assign a groundref label to each pixel, if the pixel isn't confused
+      // 0. for no label, -1 for 
+
+      class_i = -1; // -1: affirmative gt value not yet found
+      n_class = 0; // number of gt-affirmative matches
       for(gi = 0; gi < groundref.size(); gi++){
+	if(groundref_disable.count(gi)) continue;
         // for(gi = groundref.begin(); gi != groundref.end(); gi++)
         if(FB->at(groundref[gi])->at(ri, j) > 0.){
           class_i = gi + 1;
@@ -342,9 +347,11 @@ void zprInstance::idle(){
   }
 }
 
+/*
 int zprInstance::grabint(char * p){
   return atoi(p);
 }
+*/
 
 void zprInstance::setrgb(int r, int g, int b){
   myBi->at(0) = r;
@@ -377,7 +384,7 @@ void zprInstance::processString(){
   }
   while(console_string[i] != '\0') i++;
   int count = i + 1;
-  
+
   SA<char> s(count);
   strcpy(&s[0], console_string);
 
@@ -392,7 +399,39 @@ void zprInstance::processString(){
     return;
   }
 
-  i = grabint(&s[1]); // see if string is of form xyy..yy where x is char and yy.yy contains int
+  // gt prefix?
+  if(strcmpz(console_string, "gt\0")){
+    /*
+    extern vector<int> groundref;
+    extern vector<string> vec_band_names;
+    extern set<int> groundref_disable;
+    */
+
+    int gi = -1;
+    for(int k = 0; k < groundref.size(); k++){
+      const char * grbn = vec_band_names[groundref[k]].c_str();
+      if(strcmpz(&console_string[2], grbn)){
+        gi = k;
+        break;
+      }
+      printf("%d%s\n", k, grbn);
+    }
+
+    // printf("%s\n", &console_string[2]);
+    if(gi >= 0){
+      if(groundref_disable.count(gi)){
+        groundref_disable.erase(gi);
+      }
+      else{
+        groundref_disable.insert(gi);
+      }
+      for(set<int>::iterator it = groundref_disable.begin(); it != groundref_disable.end(); it++){
+        cout << "***" << *it << endl; 
+      }
+    }
+  }
+
+  i = atoi(&s[1]); // see if string is of form xyy..yy where x is char and yy.yy contains int
   switch(s[0]){
     case 'd':
     resetViewPoint();
@@ -504,6 +543,9 @@ void zprInstance::keyboard(unsigned char key, int x, int y){
     //executes Acommand. ==========================================================
     case 13 :
     //printf( "%d Pressed RETURN\n",(char)key);
+    console_position++;
+    console_string[console_position] = '\0';
+
     processString();
     console_string[0]='\0';
     console_position=0;
@@ -1286,23 +1328,25 @@ void glPoints::drawMe(){
   glColor3f(1,1,1);
   glPointSize(2.);
   if(!myI->myParent->_F2){
+	  // plot data points with color: (r,g,b) = (x,y,z)
     for(size_t i = 0; i < nf; i += 3){
       r = d[i];
-      g = d[i+1];
-      b = d[i+2];
+      g = d[i + 1];
+      b = d[i + 2];
       glColor3f(r, g, b);
       glBegin(GL_POINTS);
       glVertex3f(r, g, b);
-      glEnd();
-      // printf("%f %f %f]\n", d[i], d[i+1], d[i+2]);
+      glEnd(); // printf("%f %f %f]\n", d[i], d[i + 1], d[i + 2]);
     }
   }
   else{
+	  // plot data points colored by GT label
     s = v = 1.;
     d = myI->class_label->elements;
     float * dd = myI->dat->elements;
     for(size_t i = 0; i < nf; i += 3){
       class_label = d[i / 3];
+      if(groundref_disable.count(class_label -1)) continue; // skip plot if this class disabled
       if(class_label == 0.){
         r = g = b = 0.;
       }
@@ -1326,6 +1370,11 @@ void glPoints::drawMe(){
     }
 
     for(size_t i = 0; i < groundref.size(); i++){
+      if(groundref_disable.count(i)) continue; // skip this one if we indicate to skip it!
+
+      // however, should also skip this class in selecting the label for this pix. Did we?
+      // that would be in the refreshing of the glPoints data
+
       const char * class_string = vec_band_names[groundref[i]].c_str();
       h = 360. * (float)(i) / (float)(groundref.size());
       hsv_to_rgb(&r, &g, &b, h, s, v);
