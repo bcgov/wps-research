@@ -81,6 +81,7 @@ extern void * TGT_GLIMG;
 // groundref detection
 extern vector<int> groundref;
 extern vector<string> vec_band_names;
+extern set<int> groundref_disable;
 
 // stuff
 class zprManager;
@@ -556,7 +557,7 @@ class zprInstance{
   void keyboardUp(unsigned char key, int x, int y);
   void special(int key, int x, int y);
   void specialUp(int key, int x, int y);
-  int grabint(char * p );
+  // int grabint(char * p );
   void setrgb(int r, int g, int b);
   void getrgb(int & r, int & g, int & b);
 
