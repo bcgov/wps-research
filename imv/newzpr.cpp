@@ -149,7 +149,7 @@ void glImage::rebuffer(){
       class_i = -1;
       n_class = 0;
       for(gi = 0; gi < groundref.size(); gi++){
-	// for(gi = groundref.begin(); gi != groundref.end(); gi++)
+        // for(gi = groundref.begin(); gi != groundref.end(); gi++)
         if(FB->at(groundref[gi])->at(ri, j) > 0.){
           class_i = gi + 1;
           n_class += 1;
@@ -368,30 +368,28 @@ void zprInstance::getrgb(int & r, int & g, int & b){
 }
 
 void zprInstance::processString(){
-
   char strSleep[] = "sleep";
   int i = 0;
   if(console_string[i] == '\0'){
     isPaused = !isPaused;
+    printf("isPaused=%d\n", (int)isPaused);
     return;
   }
-  while(console_string[i] != '\0'){
-    i++;
-  }
+  while(console_string[i] != '\0') i++;
+
   int count = i + 1;
   SA<char> s(count);
-
   strcpy(&s[0], console_string);
-  int r,g,b, tk;
+
+  int r, g, b, tk;
   int ndim = NBand;
   if(strcmpz(&s[0], &strSleep[0])){
     int st = atoi(&s[5]);
-    if(st < 1){
-      return;
-    }
+    if(st < 1) return;
     usleepNupdate = st;
     return;
   }
+
   i = grabint(&s[1]);
   switch(s[0]){
     case 'd':
@@ -417,11 +415,13 @@ void zprInstance::processString(){
     getrgb( r,g,b);
     setrgb(i - 1, g, b);
     break;
+
     case 'g':
-    if( (i<1) || (i>ndim)) break;
+    if((i < 1) || (i > ndim)) break;
     getrgb(r, g, b);
     setrgb(r, i - 1, b);
     break;
+
     case 'b':
     if(i < 1 || i > ndim) break;
     getrgb(r, g, b);
@@ -431,22 +431,20 @@ void zprInstance::processString(){
     case 'p':
     getrgb(r, g, b);
     printf("r band %d g band %d b band %d\n", r + 1, g + 1, b + 1);
-
     break;
-    default:
 
+    default:
+    // console input is just a number: set r, g, b to same band index
     try{
-      int i = atoi(&s[0]);
+      i = atoi(&s[0]);
       if(i >= 1 && i <= ndim){
         setrgb(i - 1 , i - 1, i - 1);
       }
-
     }
     catch(std::exception e){
-
     }
-
     break;
+
   }
 }
 
@@ -468,7 +466,7 @@ void zprInstance::specialUp(int key, int x, int y){
   if( key ==GLUT_KEY_F1){
     _F1 = false;
   }
-  /* 
+  /*
   if( key ==GLUT_KEY_F2){
     _F2 = false;
   }
@@ -599,7 +597,7 @@ void zprInstance::zprReshape(int w,int h){
   //glPushMatrix();
   glViewport(0,0,w,h); // Set new screen extents
 
-	  // Select projection matrix
+  // Select projection matrix
   glMatrixMode(GL_PROJECTION);
   glLoadIdentity();
   //getMatrix(); // added 20200619 from cymh_cli_utils
@@ -623,7 +621,7 @@ void zprInstance::zprReshape(int w,int h){
   //myWindowWidth = glutGet( GLUT_WINDOW_WIDTH );
   //myWindowHeight = glutGet( GLUT_WINDOW_HEIGHT );
 
-  glMatrixMode(GL_MODELVIEW);  // put back in 20200619
+  glMatrixMode(GL_MODELVIEW); // put back in 20200619
   refreshflag = true;
   //glPopMatrix(); // need this?
   /*
@@ -632,7 +630,7 @@ void zprInstance::zprReshape(int w,int h){
   refreshflag = true;
   glMatrixMode(GL_MODELVIEW);
   //commented out 20200616
-*/
+  */
   return;
 
 }
@@ -678,7 +676,6 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
 
   printf("\nmouse (x/col,y/row)=(%d,%d) myZprInstanceID=%d\n", x, y, myZprInstanceID);
 
-
   if(myZprInstanceID == 0){
     // overview window
     printf("SUB_SCALE_F %f\n", SUB_SCALE_F);
@@ -719,7 +716,7 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
     SUB_MYIMG->initFrom(dat3, SUB_MM, SUB_MM, IMG_NB);
     ((glImage *)SUB_GLIMG)->rebuffer();
 
-    // now rebuffer under secondary window too 
+    // now rebuffer under secondary window too
     WIN_I = (y + NWIN) >= SUB_MM ? SUB_MM - NWIN : y;
     WIN_J = (x + NWIN) >= SUB_MM ? SUB_MM - NWIN : x;
 
@@ -749,10 +746,9 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
     this->focus();
     this->mark();
     this->display();
-   
+
   }
 
-  
   if(myZprInstanceID == 1){
     // subset window
     WIN_I = (y + NWIN) >= SUB_MM ? SUB_MM - NWIN : y;
@@ -796,7 +792,7 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
     mark();
     display();
     myZprDisplay();
-   
+
   }
 
   if(myZprInstanceID < 3){
@@ -815,7 +811,7 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
     }
   }
 
-  // update windows 
+  // update windows
   /*
   for(int m = 2; m < myZprManager->myZprInstances->size(); m++){
 
@@ -829,7 +825,7 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
   focus();
   mark();
   display();
-*/
+  */
 
   if(callMeWithMouseClickCoordinates){
     (*callMeWithMouseClickCoordinates)(x,y);
@@ -1313,10 +1309,10 @@ void glPoints::drawMe(){
       }
       else{
         h = 360. * (float)(class_label - 1) / (float)(groundref.size());
-	if(h > 360.){
-		printf("class_label %f groundref.size() %zu\n", class_label, (size_t)groundref.size());
-		err("out of range");
-	}
+        if(h > 360.){
+          printf("class_label %f groundref.size() %zu\n", class_label, (size_t)groundref.size());
+          err("out of range");
+        }
 
         hsv_to_rgb(&r, &g, &b, h, s, v);
       }
@@ -1326,23 +1322,23 @@ void glPoints::drawMe(){
       glVertex3f(dd[i], dd[i + 1], dd[i + 2]);
       glEnd();
     }
-   
-    for(size_t i = 0; i < groundref.size(); i++){
-	const char * class_string = vec_band_names[groundref[i]].c_str();
-	h = 360. * (float)(i) / (float)(groundref.size());
-        hsv_to_rgb(&r, &g, &b, h, s, v);
 
-    	glColor3f(r, g, b);
-    	parentZprInstance->setOrthographicProjection();
-    	glPushMatrix();
-    	glLoadIdentity();
-    	int lightingState = glIsEnabled(GL_LIGHTING);
-    	if(lightingState) glDisable(GL_LIGHTING);
-	int dy = (parentZprInstance->myWindowHeight)- 3 - (MYFONT_SIZE * i);
-    	parentZprInstance->renderBitmapString(3,dy,(void *)MYFONT,(char *) (void*)class_string);
-    	if(lightingState) glEnable(GL_LIGHTING);
-    	glPopMatrix();
-    	parentZprInstance->resetPerspectiveProjection();
+    for(size_t i = 0; i < groundref.size(); i++){
+      const char * class_string = vec_band_names[groundref[i]].c_str();
+      h = 360. * (float)(i) / (float)(groundref.size());
+      hsv_to_rgb(&r, &g, &b, h, s, v);
+
+      glColor3f(r, g, b);
+      parentZprInstance->setOrthographicProjection();
+      glPushMatrix();
+      glLoadIdentity();
+      int lightingState = glIsEnabled(GL_LIGHTING);
+      if(lightingState) glDisable(GL_LIGHTING);
+      int dy = (parentZprInstance->myWindowHeight)- 3 - (MYFONT_SIZE * i);
+      parentZprInstance->renderBitmapString(3,dy,(void *)MYFONT,(char *) (void*)class_string);
+      if(lightingState) glEnable(GL_LIGHTING);
+      glPopMatrix();
+      parentZprInstance->resetPerspectiveProjection();
     }
   }
 }

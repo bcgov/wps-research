@@ -148,16 +148,11 @@ static GLfloat high_shininess[] = {
 };
 
 static int strcmpz(const char * a, const char * b){
-  int i=0;
-  while(a[i]!=NULL && b[i] !=NULL && a[i]==b[i]){
-    i++;
-  }
-  if(b[i]==NULL){
-    return(true);
-  }
-  else{
-    return(false);
-  }
+  // answer question: does string a have string b at beginning?
+  // see if strings agree up to (at most) length of string b
+  int i = 0;
+  while(a[i] != NULL && b[i] != NULL && a[i] == b[i]) i++;
+  return b[i] == NULL; // got to end of b?
 }
 
 static void initLighting(){
