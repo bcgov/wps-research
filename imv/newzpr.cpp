@@ -133,27 +133,28 @@ void glImage::rebuffer(){
     ri = NRow - i - 1;
     for(j = 0; j < NCol; j++){
       r = r1 * (b1->at(ri, j) - min1);
-      r = (r<0. ? 0.: r);
-      r = (r>1. ? 1.: r);
+      r = (r < 0. ? 0.: r);
+      r = (r > 1. ? 1.: r);
       dat->at(k++) = r;
 
       g = r2 * (b2->at(ri, j) - min2);
-      g = (g<0. ? 0.: g);
-      g = (g>1. ? 1.: g);
+      g = (g < 0. ? 0.: g);
+      g = (g > 1. ? 1.: g);
       dat->at(k++) = g;
 
       b = r3 * (b3->at(ri, j) - min3);
-      b = (b<0. ? 0.: b);
-      b = (b>1. ? 1.: b);
+      b = (b < 0. ? 0.: b);
+      b = (b > 1. ? 1.: b);
       dat->at(k++) = b;
 
       // assign a groundref label to each pixel, if the pixel isn't confused
-      // 0. for no label, -1 for 
+      // 0. for no affirmative label, -1 for multiple affirmative labels
 
       class_i = -1; // -1: affirmative gt value not yet found
       n_class = 0; // number of gt-affirmative matches
+
       for(gi = 0; gi < groundref.size(); gi++){
-	if(groundref_disable.count(gi)) continue;
+        if(groundref_disable.count(gi)) continue;
         // for(gi = groundref.begin(); gi != groundref.end(); gi++)
         if(FB->at(groundref[gi])->at(ri, j) > 0.){
           class_i = gi + 1;
@@ -271,21 +272,12 @@ void zprInstance::drawGraphics(){
   for(it = myGraphics.begin(); it!=myGraphics.end(); it++){
     // cout << "\tzprInstance::drawGraphics() id=" << myZprInstanceID << " i = " << i << " of " << myGraphics.size() << " type: " << (*it)->myType << endl;
     (*it)->drawMe();
-    /*
-    if(false){
-      // (*it)->myType != NULL)
-      if( (*it)->myType.compare(std::string("glMusicSphere")) == 0){
-        //reflexive (yin yang inside out) fxn.
-      }
-    }
-    */
     if((*it)->forceUpdate){
       forceUpdate = true;
       myZprManager->forceUpdate = true;
     }
     i++;
   }
-  // printf("drawGraphics() return\n");
 }
 
 void zprInstance::drawGraphicsExternal(){
@@ -347,12 +339,6 @@ void zprInstance::idle(){
   }
 }
 
-/*
-int zprInstance::grabint(char * p){
-  return atoi(p);
-}
-*/
-
 void zprInstance::setrgb(int r, int g, int b){
   myBi->at(0) = r;
   myBi->at(1) = g;
@@ -401,11 +387,6 @@ void zprInstance::processString(){
 
   // gt prefix?
   if(strcmpz(console_string, "gt\0")){
-    /*
-    extern vector<int> groundref;
-    extern vector<string> vec_band_names;
-    extern set<int> groundref_disable;
-    */
 
     int gi = -1;
     for(int k = 0; k < groundref.size(); k++){
@@ -426,7 +407,14 @@ void zprInstance::processString(){
         groundref_disable.insert(gi);
       }
       for(set<int>::iterator it = groundref_disable.begin(); it != groundref_disable.end(); it++){
-        cout << "***" << *it << endl; 
+        cout << "***" << *it << endl;
+      }
+      // would want to rebuffer the related glImage here!
+      std::vector<glPlottable *>::iterator it;
+      for(it = myGraphics.begin(); it!=myGraphics.end(); it++){
+ 	if((*it)->myType == string("glPoints")){
+	  ((glPoints *)(*it))->myI->rebuffer();
+	}
       }
     }
   }
@@ -1328,7 +1316,7 @@ void glPoints::drawMe(){
   glColor3f(1,1,1);
   glPointSize(2.);
   if(!myI->myParent->_F2){
-	  // plot data points with color: (r,g,b) = (x,y,z)
+    // plot data points with color: (r,g,b) = (x,y,z)
     for(size_t i = 0; i < nf; i += 3){
       r = d[i];
       g = d[i + 1];
@@ -1340,7 +1328,7 @@ void glPoints::drawMe(){
     }
   }
   else{
-	  // plot data points colored by GT label
+    // plot data points colored by GT label
     s = v = 1.;
     d = myI->class_label->elements;
     float * dd = myI->dat->elements;
