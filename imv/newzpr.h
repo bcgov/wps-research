@@ -885,7 +885,7 @@ class glPoints: public glPlottable{
   glImage * myI;
   glPoints(zprInstance * parent, glImage * myI_){
     myI = myI_;
-    myType = std::string("glImage");
+    myType = std::string("glPoints");
     initName(parent, false); // only use true if it's something you want to use picking to click on
   }
 
