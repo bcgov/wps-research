@@ -99,7 +99,7 @@ template<class T> class SA{
   }
 
   ~SA(){
-    //free(elements);
+    free(elements);
   }
 
   inline SA(SA<T> * other){

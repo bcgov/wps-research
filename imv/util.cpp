@@ -446,22 +446,76 @@ float * load_sub_dat3;
 string load_sub_infile;
 
 void load_sub(size_t k){
-  // printf("load_sub()\n");
-  // load one band of a rectangular image subset
   float d;
   FILE * f = fopen(load_sub_infile.c_str(), "rb");
-  // printf("band %zu of %zu..\n", k + 1, load_sub_nb);
+  // printf("load band %zu of %zu on rect. image subset..\n", k + 1, load_sub_nb);
   size_t ki = k * load_sub_np;
   size_t kmi = k * load_sub_mm * load_sub_mm;
+
   for(size_t i = load_sub_i_start; i < load_sub_mm + load_sub_i_start; i++){
     size_t j = load_sub_j_start;
-    size_t p = ki + (i * load_sub_nc) + j;
-    p *= sizeof(float); // byte pos'n in file
-    size_t jp = kmi + ((i - load_sub_i_start) * load_sub_mm); // + (j - j_start);
+    size_t jp = kmi + ((i - load_sub_i_start) * load_sub_mm);
+    size_t p = (ki + (i * load_sub_nc) + j) * sizeof(float); // file byte pos
 
     // read row
     fseek(f, p, SEEK_SET);
     size_t nr = fread(&load_sub_dat3[jp], load_sub_mm, sizeof(float), f);
   }
   fclose(f);
+}
+
+// scene subsampling, parallelized by band
+size_t mlk_scene_nb; // infile nbands
+size_t mlk_scene_nr; // infile nrows
+size_t mlk_scene_nc; // infile ncols
+size_t mlk_scene_nr2; // infile nrows
+size_t mlk_scene_nc2; // infile ncols
+size_t mlk_scene_np2;
+float mlk_scene_scalef; // scaling factor
+string * mlk_scene_fn; // input filename
+float * mlk_scene_dat; // float data output
+vector<int> * mlk_scene_groundref; // groundref indices
+
+void multilook_scene(size_t k){
+  size_t np = mlk_scene_nr * mlk_scene_nc;
+  SA<float> bb(np); // whole image, one-band buffer
+
+  set<int> groundref_set;
+  for(vector<int>::iterator it = mlk_scene_groundref->begin(); it != mlk_scene_groundref->end(); it++){
+    groundref_set.insert(*it);
+  }
+
+  // printf("scaling %d x %d image to %d x %d\n", nr, nc, nr2, nc2);
+  FILE * f = fopen(mlk_scene_fn->c_str(), "rb");
+
+  printf("fread band %zu/%d\n", k + 1, mlk_scene_nb);
+  
+  // read band
+  size_t nbyte = np * sizeof(float);
+  fseek(f, nbyte * k, SEEK_SET);
+  size_t nread = fread(&bb[0], 1, nbyte, f);
+  if(nread != nbyte){
+    printf("read %zu bytes instead of %zu (expected) from file: %s\n", nread, nbyte, mlk_scene_fn->c_str());
+    err("exit");
+  }
+
+
+  if(groundref_set.find(k) != groundref_set.end()){
+    // assert all 1. / 0. for ground ref!
+    for(size_t i = 0; i < np; i++){
+      float d = bb[i];
+      if(!(d == 0. || d == 1.)){
+        err("assertion failed: that groundref be valued in {0,1} only");
+      }
+    }
+  }
+
+  for(size_t i = 0; i < mlk_scene_nr; i++){
+    size_t ip = (size_t)floor(mlk_scene_scalef * (float)i);
+    for(size_t j = 0; j < mlk_scene_nc; j++){
+      size_t jp = (size_t)floor(mlk_scene_scalef * (float)j);
+      mlk_scene_dat[k * mlk_scene_np2 + ip * mlk_scene_nc2 + jp] = bb[(i * mlk_scene_nc) + j];
+      // last line could / should be += ?
+    }
+  }
 }
