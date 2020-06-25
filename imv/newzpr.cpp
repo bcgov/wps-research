@@ -387,36 +387,42 @@ void zprInstance::processString(){
 
   // gt prefix?
   if(strcmpz(console_string, "gt\0")){
-
-    int gi = -1;
-    for(int k = 0; k < groundref.size(); k++){
-      const char * grbn = vec_band_names[groundref[k]].c_str();
-      if(strcmpz(&console_string[2], grbn)){
-        gi = k;
-        break;
-      }
-      printf("%d%s\n", k, grbn);
+    if(console_string[2] == '\0'){
+	    // toggle gt colouring
+      groundref_class_colouring = !groundref_class_colouring;
     }
+    else{
+      int gi = -1;
+      for(int k = 0; k < groundref.size(); k++){
+        const char * grbn = vec_band_names[groundref[k]].c_str();
+        if(strcmpz(&console_string[2], grbn)){
+          gi = k;
+          break;
+        }
+        printf("%d%s\n", k, grbn);
+      }
 
-    // printf("%s\n", &console_string[2]);
-    if(gi >= 0){
-      if(groundref_disable.count(gi)){
-        groundref_disable.erase(gi);
-      }
-      else{
-        groundref_disable.insert(gi);
-      }
-      for(set<int>::iterator it = groundref_disable.begin(); it != groundref_disable.end(); it++){
-        cout << "***" << *it << endl;
-      }
-      // would want to rebuffer the related glImage here!
-      std::vector<glPlottable *>::iterator it;
-      for(it = myGraphics.begin(); it!=myGraphics.end(); it++){
- 	if((*it)->myType == string("glPoints")){
-	  ((glPoints *)(*it))->myI->rebuffer();
-	}
+      // printf("%s\n", &console_string[2]);
+      if(gi >= 0){
+        if(groundref_disable.count(gi)){
+          groundref_disable.erase(gi);
+        }
+        else{
+          groundref_disable.insert(gi);
+        }
+        for(set<int>::iterator it = groundref_disable.begin(); it != groundref_disable.end(); it++){
+          cout << "***" << *it << endl;
+        }
       }
     }
+    // rebuffer the related glImage here!
+    std::vector<glPlottable *>::iterator it;
+    for(it = myGraphics.begin(); it!=myGraphics.end(); it++){
+      if((*it)->myType == string("glPoints")){
+        ((glPoints *)(*it))->myI->rebuffer();
+      }
+    }
+    // done rebuffer
   }
 
   i = atoi(&s[1]); // see if string is of form xyy..yy where x is char and yy.yy contains int
@@ -485,8 +491,9 @@ void zprInstance::special(int key, int x, int y){
     //printf("Special Key dn: %d, %d\n", key, _F1);
   }
   if(key == GLUT_KEY_F2){
-    _F2 = !_F2;
-    printf("groundref class colouring toggle\n");
+    if(!_F2){
+      _F2 = true; // !_F2;
+    }
   }
 }
 
@@ -495,11 +502,11 @@ void zprInstance::specialUp(int key, int x, int y){
   if( key ==GLUT_KEY_F1){
     _F1 = false;
   }
-  /*
-  if( key ==GLUT_KEY_F2){
+
+  if(key == GLUT_KEY_F2){
     _F2 = false;
   }
-  */
+
   // should actually have a toggle vs. on/ off mode function available but whatever
 }
 
@@ -661,7 +668,7 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
   // printf("zprMouse()\n");
   GLint viewport[4]; /* Do picking */
   refreshflag = true;
- 
+
   if(state == GLUT_DOWN && button == GLUT_LEFT_BUTTON){
     zprPick(x, glutGet(GLUT_WINDOW_HEIGHT) - 1 - y, 3, 3);
     _pickme(0);
@@ -1016,7 +1023,7 @@ void zprInstance::zprMotion(int x, int y){
 void zprInstance::renderBitmapString(float x, float y, void *font, char *string){
   char *c;
   glRasterPos2f(x,y);
-  for (c=string; *c != '\0'; c++){
+  for(c = string; *c != '\0'; c++){
     glutBitmapCharacter(font, *c);
   }
 }
@@ -1304,7 +1311,8 @@ void glPoints::drawMe(){
 
   glColor3f(1,1,1);
   glPointSize(2.);
-  if(!myI->myParent->_F2){
+  // if(!myI->myParent->groundref_class_colouring)
+  if(!parentZprInstance->groundref_class_colouring){
     // plot data points with color: (r,g,b) = (x,y,z)
     for(size_t i = 0; i < nf; i += 3){
       r = d[i];

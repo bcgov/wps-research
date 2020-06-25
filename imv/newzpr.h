@@ -83,6 +83,7 @@ extern vector<int> groundref;
 extern vector<string> vec_band_names;
 extern set<int> groundref_disable;
 
+
 // stuff
 class zprManager;
 extern zprManager * myZprManager; // = NULL;
@@ -309,6 +310,7 @@ class zprInstance{
   int isPaused;
   int forceUpdate;
   SA<int> * myBi;
+  int groundref_class_colouring;
   int ZPR_ZOOM_MODE, ZPR_PAN_MODE, ZPR_ROTATE_MODE;
 
   int NBand, NRow, NCol;
@@ -426,6 +428,7 @@ class zprInstance{
     myZNear=0.;
     myZFar=1.;
       _F1 = _F2 = _F3 = _F4 = _F5 = _F6 = _F7 = _F8 = _F9 = _F10 = _F11 = _F12 = false;
+  groundref_class_colouring = false;
   }
 
   zprInstance(int ZprID, int glutID, zprManager * manager, int _NROW, int _NCOL, int nb){
