@@ -2,6 +2,8 @@
 #ifndef UTIL_H
 #define UTIL_H
 
+#include"SA.h"
+#include<set>
 #include<math.h>
 #include<vector>
 #include<string>
@@ -59,6 +61,9 @@ void writeHeader(const char * filename, int NRows, int NCols, int NBand);
 vector<string> parse_band_names(string fn); // read band names from header file
 vector<int> parse_groundref_names(string fn); // indices of groundref bands
 
+int hsv_to_rgb(float *r, float *g, float *b, float h, float s, float v);
+// vector<float> color_wheel_rgb(size_t n_class);
+
 // parallelism stuff
 #define mtx_lock pthread_mutex_lock
 #define mtx_unlock pthread_mutex_unlock
@@ -88,9 +93,20 @@ extern size_t load_sub_nc;
 extern float * load_sub_dat3;
 extern string load_sub_infile;
 
-void load_sub(size_t k);
+void load_sub(size_t k); // subset data loading, parallelized by band
 
-int hsv_to_rgb(float *r, float *g, float *b, float h, float s, float v);
+// scene subsampling, parallelized by band
+extern size_t mlk_scene_nb;  // infile nbands
+extern size_t mlk_scene_nr; // infile nrows
+extern size_t mlk_scene_nc; // infile ncols
+extern size_t mlk_scene_nr2; // infile nrows
+extern size_t mlk_scene_nc2; // infile ncols
+extern size_t mlk_scene_np2;
+extern float mlk_scene_scalef; // scaling factor
+extern float * mlk_scene_dat; // float data output
+extern string * mlk_scene_fn; // input filename
+extern vector<int> * mlk_scene_groundref; // groundref indices
 
-vector<float> color_wheel_rgb(size_t n_class);
+void multilook_scene(size_t k); // scene subsampling, parallelized by band
+
 #endif

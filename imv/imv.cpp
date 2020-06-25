@@ -42,7 +42,7 @@ int main(int argc, char ** argv){
   size_t min_wh = width > height ? height: width;
   printf("min_wh %f\n", (float)min_wh);
   size_t min = 3 * min_wh / 6; // can adjust scale here
-  // 2 / 5 
+  // 2 / 5
   // was 3 * min_wh / 5
 
   printf("min %f\n", (float)min);
@@ -108,6 +108,7 @@ int main(int argc, char ** argv){
     fclose(f);
   }
   else{
+    /*
     set<int> groundref_set;
     for(vector<int>::iterator it = groundref.begin(); it != groundref.end(); it++){
       groundref_set.insert(*it);
@@ -141,13 +142,30 @@ int main(int argc, char ** argv){
         }
       }
     }
+    */
+    // scene subsampling, parallelized by band
+    mlk_scene_nb = nb; // infile nbands
+    mlk_scene_nr = nr; // infile nrows
+    mlk_scene_nc = nc; // infile ncols
+    mlk_scene_nr2 = nr2; // infile nrows
+    mlk_scene_nc2 = nc2; // infile ncols
+    mlk_scene_np2 = np2;
+    mlk_scene_scalef = scalef; // scaling factor
+    mlk_scene_dat = &dat[0]; // float data output
+    mlk_scene_fn = &IMG_FN; // input filename
+    mlk_scene_groundref = &groundref; // groundref indices
+
+    //void multilook_scene(size_t k); // scene subsampling, parallelized by band
+    parfor(0, nb, multilook_scene); 
+    /* 
     if(nread != nr * nc * nb * sizeof(float)){
       printf("Error (imv.cpp): unexpected # of elements read (%d) expected (%d)\n", nread, nr * nc * nb);
       exit(1);
     }
-    fclose(f);
+    */
+    // fclose(f);
 
-    f = fopen(mfn.c_str(), "wb");
+    FILE * f = fopen(mfn.c_str(), "wb");
     fwrite(&dat[0], 1, np2 * nb * sizeof(float), f);
     fclose(f);
   }
@@ -193,6 +211,7 @@ int main(int argc, char ** argv){
     load_sub_dat3 = &dat3[0];
     load_sub_infile = string(IMG_FN.c_str());
 
+    // run parallel job
     parfor(0, nb, load_sub);
   }
   IMG = NULL; // &dat0;
@@ -268,7 +287,6 @@ int main(int argc, char ** argv){
   glPoints scatter2(myZpr5, myImage2);
   myZpr5->setRightOf(myZpr2) ; //ScreenPosition(nc2, nr2 + 65); // ightOf(myZpr3);
   myZpr5->setTitle(string("Subset"));
-
 
   printf("glutMainLoop()\n");
   initLighting();
