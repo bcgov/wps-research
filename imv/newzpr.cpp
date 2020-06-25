@@ -637,7 +637,7 @@ void zprInstance::zprReshape(int w,int h){
   // Adjust viewing volume (orthographic)
   // If taller than wide adjust y
   if(w <= h){
-    ratio = (GLfloat) h/ (GLfloat) w;
+    ratio = (GLfloat) h / (GLfloat) w;
     glOrtho(-1.0f, 1.0f, -1.0f * ratio, 1.0f * ratio, -1.0f, 1.0f);
     _bottom = -1. * ratio; _top = 1. * ratio;
     _left = -1.; _right = 1.;
@@ -649,32 +649,21 @@ void zprInstance::zprReshape(int w,int h){
     _left = -1. * ratio; _right = 1. * ratio;
     _bottom = -1.; _top = 1.;
   }
-  //glPopMatrix();
-  //myWindowWidth = glutGet( GLUT_WINDOW_WIDTH );
-  //myWindowHeight = glutGet( GLUT_WINDOW_HEIGHT );
 
   glMatrixMode(GL_MODELVIEW); // put back in 20200619
   refreshflag = true;
-  //glPopMatrix(); // need this?
-  /*
-  myWindowWidth = glutGet( GLUT_WINDOW_WIDTH );
-  myWindowHeight = glutGet( GLUT_WINDOW_HEIGHT );
-  refreshflag = true;
-  glMatrixMode(GL_MODELVIEW);
-  //commented out 20200616
-  */
   return;
 
 }
-//http://graphics.stanford.edu/courses/cs248-01/OpenGLHelpSession/code_example.html
+// http://graphics.stanford.edu/courses/cs248-01/OpenGLHelpSession/code_example.html
 
 void zprInstance::zprMouse(int button, int state, int x, int y){
   // printf("zprMouse()\n");
   GLint viewport[4]; /* Do picking */
   refreshflag = true;
-
-  if (state==GLUT_DOWN && button==GLUT_LEFT_BUTTON){
-    zprPick(x,glutGet(GLUT_WINDOW_HEIGHT)-1-y,3,3);
+ 
+  if(state == GLUT_DOWN && button == GLUT_LEFT_BUTTON){
+    zprPick(x, glutGet(GLUT_WINDOW_HEIGHT) - 1 - y, 3, 3);
     _pickme(0);
   }
   else{
@@ -684,15 +673,15 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
   _mouseX = x;
   _mouseY = y;
 
-  if (state==GLUT_UP){
-    switch (button){
+  if(state == GLUT_UP){
+    switch(button){
       case GLUT_LEFT_BUTTON: _mouseLeft = false; myPickNames.clear(); break;
       case GLUT_MIDDLE_BUTTON: _mouseMiddle = false; break;
       case GLUT_RIGHT_BUTTON: _mouseRight = false; break;
     }
   }
   else{
-    switch (button){
+    switch(button){
       case GLUT_LEFT_BUTTON: _mouseLeft = true; break;
       case GLUT_MIDDLE_BUTTON: _mouseMiddle = true; break;
       case GLUT_RIGHT_BUTTON: _mouseRight = true; break;
