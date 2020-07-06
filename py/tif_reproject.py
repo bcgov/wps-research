@@ -67,3 +67,4 @@ for tif in tifs:
         print(cmds[-1])
 parfor(run, cmds)
 
+# need to add call to class_merge.py, here!
