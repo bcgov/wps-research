@@ -105,8 +105,8 @@ links = os.popen('grep alternative out_all.html').readlines()
 for i in range(0, len(links)):
     link = links[i]
     w = link.strip().split('<link rel="alternative" href="')[1].split('"/>')[0]
-    ti = titles[i]
-    tw= ti.strip().split(">")[1].split("<")[0].strip()
+    ti = titles[i] # need to compare this to list of files already downloaded: skip existing files!
+    tw = ti.strip().split(">")[1].split("<")[0].strip()
     cmd = 'wget ' + no_clobber + ' --content-disposition --continue --user=' + user_ + ' --password=' + pass_ + ' "' + w + '\\$value"' + " #" + titles[i].strip()
     if i > 0:
         f.write('\n'.encode())
