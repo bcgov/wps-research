@@ -34,7 +34,7 @@ if not exist(tgt):
 tifs = [t.strip() for t in os.popen("ls -1 *.tif").readlines()]
 
 # look for intermediary folder
-for f in ["reprj", "type4", "out"]:
+for f in ["reprj", "type4", "merge", "out"]:
     if not exist(f):
         os.mkdir(f)
 
@@ -57,14 +57,23 @@ for tif in tifs:
         print(cmds[-1])
 parfor(run, cmds)
 
+# class_merge
+cmds = []
+for tif in tifs:
+    type4 = "type4" + os.path.sep + tif + '.bin'
+    out = type4 + '_binary.bin'
+    if not exist(out):
+        cmds.append(" ".join(["python3 ~/GitHub/bcws-psu-research/py/class_merge.py", type4, "1"]))
+        print(cmds[-1])
+parfor(run, cmds)
+
 # project_onto
 cmds = []
 for tif in tifs:
     type4 = "type4" + os.path.sep + tif + '.bin'
+    merge = type4 + '_binary.bin'
     out = "out" + os.path.sep + tif + '.bin'
     if not exist(out):
-        cmds.append(" ".join(["project_onto", type4, tgt, out, "1"]))
+        cmds.append(" ".join(["project_onto", merge, tgt, out, "1"]))
         print(cmds[-1])
 parfor(run, cmds)
-
-# need to add call to class_merge.py, here!
