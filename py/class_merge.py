@@ -9,7 +9,7 @@ if len(args) < 2:
         "\n\t#adding the optional arg. skips generating binaries for all labels")
     # args.append('20190926kamloops_data/WATERSP.tif_project_4x.bin_sub.bin')
 
-generate_binaries_all = len(args) < 3 # detect optional flag
+generate_binaries_all = len(args) < 3 # detect optional flag: presence skips breaking out all labels
 
 fn = args[1]
 hfn = hdr_fn(fn)
