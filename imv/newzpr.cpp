@@ -33,6 +33,9 @@ vector<int> groundref;
 vector<string> vec_band_names;
 set<int> groundref_disable;
 
+// other
+int bands_per_frame; // bands per frame if known, should autodetect this
+
 extern zprManager * myZprManager = NULL;
 
 void GLERROR(){
@@ -502,15 +505,31 @@ void zprInstance::special(int key, int x, int y){
   }
 
   switch(key){
-    case GLUT_KEY_UP:
-    //do something here
+    case GLUT_KEY_UP:  // "next frame" if applicable
+    getrgb(r, g, b);
+    r += bands_per_frame; // increment
+    g += bands_per_frame;
+    b += bands_per_frame;
+    if(r >= NBand) r -= NBand;  // check if wrap
+    if(g >= NBand) g -= NBand;
+    if(b >= NBand) b -= NBand;
+    setrgb(r, g, b);
+    printf("incremented band selection: (r,g,b)=(%d,%d,%d)\n", r, g, b);
     break;
     
-    case GLUT_KEY_DOWN:
-    //do something here
+    case GLUT_KEY_DOWN: // "last frame" if applicable
+    getrgb(r, g, b);
+    r -= bands_per_frame;  // decrement
+    g -= bands_per_frame;
+    b -= bands_per_frame;
+    if(r < 0) r += NBand;  // check if wrap
+    if(g < 0) g += NBand;
+    if(b < 0) b += NBand;
+    setrgb(r, g, b);
+    printf("decremented band selection: (r,g,b)=(%d,%d,%d)\n", r, g, b);
     break;
     
-    case GLUT_KEY_LEFT:
+    case GLUT_KEY_LEFT: // decrement selected-band indices
     getrgb(r, g, b);
     r--;  // decrement
     g--;
@@ -519,10 +538,10 @@ void zprInstance::special(int key, int x, int y){
     if(g < 0) g += NBand;
     if(b < 0) b += NBand;
     setrgb(r, g, b);
-    printf("decremented band selection\n");
+    printf("decremented band selection: (r,g,b)=(%d,%d,%d)\n", r, g, b);
     break;
 
-    case GLUT_KEY_RIGHT:
+    case GLUT_KEY_RIGHT:  // increment selected-band indices
     getrgb(r, g, b);
     r++; // increment
     g++;
@@ -531,7 +550,7 @@ void zprInstance::special(int key, int x, int y){
     if(g >= NBand) g -= NBand;
     if(b >= NBand) b -= NBand;
     setrgb(r, g, b);
-    printf("incremented band selection\n");
+    printf("incremented band selection: (r,g,b)=(%d,%d,%d)\n", r, g, b);
     break;
 
     default:

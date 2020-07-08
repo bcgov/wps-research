@@ -83,6 +83,8 @@ extern vector<int> groundref;
 extern vector<string> vec_band_names;
 extern set<int> groundref_disable;
 
+// other
+extern int bands_per_frame; // bands per frame if known (later should autodetect this)
 
 // stuff
 class zprManager;
@@ -427,8 +429,10 @@ class zprInstance{
     myTop=FLT_MIN;
     myZNear=0.;
     myZFar=1.;
-      _F1 = _F2 = _F3 = _F4 = _F5 = _F6 = _F7 = _F8 = _F9 = _F10 = _F11 = _F12 = false;
-  groundref_class_colouring = false;
+    _F1 = _F2 = _F3 = _F4 = _F5 = _F6 = _F7 = _F8 = _F9 = _F10 = _F11 = _F12 = false;
+    groundref_class_colouring = false;
+
+    bands_per_frame = 11; // need to set this automatically later
   }
 
   zprInstance(int ZprID, int glutID, zprManager * manager, int _NROW, int _NCOL, int nb){
