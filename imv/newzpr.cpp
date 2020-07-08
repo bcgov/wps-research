@@ -505,23 +505,35 @@ void zprInstance::special(int key, int x, int y){
     case GLUT_KEY_UP:
     //do something here
     break;
+    
     case GLUT_KEY_DOWN:
     //do something here
     break;
+    
     case GLUT_KEY_LEFT:
     getrgb(r, g, b);
-    if((r - 1) >= 0 && (g - 1) >= 0 && (b - 1) > 0){
-      setrgb(r - 1, g - 1, b - 1);
-    }
+    r--;  // decrement
+    g--;
+    b--;
+    if(r < 0) r += NBand;  // check if wrap
+    if(g < 0) g += NBand;
+    if(b < 0) b += NBand;
+    setrgb(r, g, b);
     printf("decremented band selection\n");
     break;
+
     case GLUT_KEY_RIGHT:
     getrgb(r, g, b);
-    if((r + 1) < NBand && (g + 1) < NBand && (b + 1) < NBand){
-      setrgb(r + 1, g + 1, b + 1);
-    }
+    r++; // increment
+    g++;
+    b++;
+    if(r >= NBand) r -= NBand;  // check if wrap
+    if(g >= NBand) g -= NBand;
+    if(b >= NBand) b -= NBand;
+    setrgb(r, g, b);
     printf("incremented band selection\n");
     break;
+
     default:
     break;
   }
