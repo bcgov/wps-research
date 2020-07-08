@@ -388,8 +388,12 @@ void zprInstance::processString(){
   // gt prefix?
   if(strcmpz(console_string, "gt\0")){
     if(console_string[2] == '\0'){
-	    // toggle gt colouring
+      // toggle gt colouring
       groundref_class_colouring = !groundref_class_colouring;
+      if(!groundref_class_colouring){
+        groundref_disable.clear(); // enable all groundref bands, if colouring turned off
+      }
+
     }
     else{
       int gi = -1;
@@ -485,6 +489,7 @@ void zprInstance::processString(){
 
 void zprInstance::special(int key, int x, int y){
   refreshflag = true; //need to draw graphics.
+  int r, g, b;
   if(key == GLUT_KEY_F1){
     _F1 = true;
     printf("Move atom active\n");
@@ -494,6 +499,31 @@ void zprInstance::special(int key, int x, int y){
     if(!_F2){
       _F2 = true; // !_F2;
     }
+  }
+
+  switch(key){
+    case GLUT_KEY_UP:
+    //do something here
+    break;
+    case GLUT_KEY_DOWN:
+    //do something here
+    break;
+    case GLUT_KEY_LEFT:
+    getrgb(r, g, b);
+    if((r - 1) >= 0 && (g - 1) >= 0 && (b - 1) > 0){
+      setrgb(r - 1, g - 1, b - 1);
+    }
+    printf("decremented band selection\n");
+    break;
+    case GLUT_KEY_RIGHT:
+    getrgb(r, g, b);
+    if((r + 1) < NBand && (g + 1) < NBand && (b + 1) < NBand){
+      setrgb(r + 1, g + 1, b + 1);
+    }
+    printf("incremented band selection\n");
+    break;
+    default:
+    break;
   }
 }
 
