@@ -98,7 +98,9 @@ int main(int argc, char ** argv){
   size_t np2 = nr2 * nc2;
   SA<float> bb(np); // whole image, one-band buffer
 
-  if(exists(mfn)){
+  size_t mfn_fs = getFileSize(mfn);
+
+  if(exists(mfn) && mfn_fs == np2 * nb * sizeof(float)){
     FILE * f = fopen(mfn.c_str(), "rb");
     if(!f){
       printf("Error: failed to open multilook file\n");
@@ -156,8 +158,8 @@ int main(int argc, char ** argv){
     mlk_scene_groundref = &groundref; // groundref indices
 
     //void multilook_scene(size_t k); // scene subsampling, parallelized by band
-    parfor(0, nb, multilook_scene); 
-    /* 
+    parfor(0, nb, multilook_scene);
+    /*
     if(nread != nr * nc * nb * sizeof(float)){
       printf("Error (imv.cpp): unexpected # of elements read (%d) expected (%d)\n", nread, nr * nc * nb);
       exit(1);
