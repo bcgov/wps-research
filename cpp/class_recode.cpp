@@ -44,5 +44,7 @@ int main(int argc, char ** argv){
     fwrite(&d, sizeof(float), 1, f);
   }
   fclose(f);
+  
+  free(dat);
   return 0;
 }
