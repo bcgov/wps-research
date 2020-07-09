@@ -1,8 +1,8 @@
-/* visualize a class map by going around the colour wheel */
+/* recode a class map by counting up from one */
 #include"misc.h"
 int main(int argc, char ** argv){
 
-  if(argc < 2) err("class_wheel [input binary file name]");
+  if(argc < 2) err("class_wheel [input binary (classification) file name]");
 
   str fn(argv[1]); // input file name
   str ofn(fn + str("_recode.bin"));
@@ -27,17 +27,18 @@ int main(int argc, char ** argv){
     count[dat[i]] += 1;
   }
 
+  float d;
   float ci = 1.;
   map<float, float> lookup;
-  for(map<float, size_t>::iterator it = count.begin(); it != count.end(); it++){
+  map<float, size_t>::iterator ii;
+
+  for(it = count.begin(); it != count.end(); it++){
     lookup[it->first] = ci ++;
   }
 
   hwrite(ohfn, nrow, ncol, 1); // write header
 
-  float d;
   FILE * f = fopen(ofn.c_str(), "wb");
-
   for0(i, np){
     d = lookup[dat[i]];
     fwrite(&d, sizeof(float), 1, f);
