@@ -4,10 +4,10 @@ int main(int argc, char ** argv){
   if(argc < 3) err(str("class_match_onto ") +
   str("[input class file #1] ") +
   str("[class file #2 to match onto] ") +
-  str("[output class file (#1 transformed)]"));
+  str("[output class file (#1 transformed to match classes of #2)]"));
 
   str fn1(argv[1]); // input file name
-  str fn2(argv[2]); // input file #2
+  str fn2(argv[2]); // input file name #2
   str ofn(argv[3]);
   if(exists(ofn)) err("output file already exists.");
 
@@ -85,11 +85,10 @@ int main(int argc, char ** argv){
   i = 0;
   map<float, size_t>::iterator ti;
   for(ti = count_b.begin(); ti != count_b.end(); ti++){
-     dat[i] = ti->first;
-     cout << "\tforce value: " << i << " --> " << dat[i] << endl;
-     i++;
+    dat[i] = ti->first;
+    cout << "\tforce value: " << i << " --> " << dat[i] << endl;
+    i++;
   }
-
 
   FILE * f = fopen(ofn.c_str(), "wb");
   fwrite(dat, sizeof(float), np, f);
