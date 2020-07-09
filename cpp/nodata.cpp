@@ -4,9 +4,11 @@ bands exactly equal to 0. */
 #include"misc.h"
 
 int main(int argc, char ** argv){
+  bool invert = false;
   size_t nrow, ncol, nband, np, i, j, k, ix, ijx;
 
-  if(argc < 2) err("nodata [input binary file name]");
+  if(argc < 2) err("nodata [input binary file name] # optional flag specifies invert");
+  invert = argc > 2;
 
   str fn(argv[1]); // input file name
   str hfn(hdr_fn(fn)); // auto-detect header file name
@@ -33,6 +35,12 @@ int main(int argc, char ** argv){
       if(nz == nband){
         dat2[ijx] = 1.;
       }
+    }
+  }
+
+  if(invert){
+    for0(i, np){
+      dat2[i] = 1. - dat2[i];
     }
   }
 
