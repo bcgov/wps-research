@@ -41,7 +41,7 @@ int main(int argc, char ** argv){
   size_t height = glutGet(GLUT_SCREEN_HEIGHT);
   size_t min_wh = width > height ? height: width;
   printf("min_wh %f\n", (float)min_wh);
-  size_t min = 3 * min_wh / 6; // can adjust scale here
+  size_t min = 3 * min_wh / 5; // can adjust scale here. has been 3/6
   // 2 / 5
   // was 3 * min_wh / 5
 
