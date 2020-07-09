@@ -896,7 +896,8 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
     printf("bi\tbn\td\n");
     for(i = 0; i < NBand; i++){
       // could turn this on to print image information
-      printf("%d\t%s\t%e\n", i, vec_band_names[i].c_str(), (double)(FB->at(i)->at(y * NCol + x)));
+      double d = (double)(FB->at(i)->at((y * NCol) + x));
+      printf("%d\t%s\t%e\n", i, vec_band_names[i].c_str(), d);
     }
   }
 
