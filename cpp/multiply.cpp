@@ -1,8 +1,10 @@
-/* multiply two images value by value */
+/* multiply two images value by value, not interleave dependent but assuming data in same dimensions / format */
 #include"misc.h"
 int main(int argc, char ** argv){
 
-  if(argc < 2) err("multiply [image 1] [image 2]");
+  if(argc < 2){
+    err("multiply [image 1] [image 2]");
+  }
 
   size_t nrow, ncol, nband, nf, i, j, k;
   size_t nrow2, ncol2, nband2;
