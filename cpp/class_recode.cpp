@@ -2,7 +2,9 @@
 #include"misc.h"
 int main(int argc, char ** argv){
 
-  if(argc < 2) err("class_wheel [input binary (classification) file name]");
+  if(argc < 2) err("class_recode [input binary (classification) file name] # [optional extra arg that specifies start from zero, instead of 1]");
+
+  int start_0 = argc > 2;
 
   str fn(argv[1]); // input file name
   str ofn(fn + str("_recode.bin"));
@@ -28,10 +30,9 @@ int main(int argc, char ** argv){
   }
 
   float d;
-  float ci = 1.;
+  float ci = start_0 ? 0. : 1.; // default: start on 1
   map<float, float> lookup;
-  map<float, size_t>::iterator ii;
-
+  map<float, size_t>::iterator it;
   for(it = count.begin(); it != count.end(); it++){
     lookup[it->first] = ci ++;
   }
