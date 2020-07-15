@@ -42,6 +42,7 @@ int main(int argc, char ** argv){
 
   if(dilate){
     for0(i, nrow){
+      if(i % 1000 == 0) printf("i=%ld of %zu\n", i, nrow);
       for0(j, ncol){
         if(dat[i * ncol + j] == 1.){
           n_dilate ++;
@@ -58,6 +59,7 @@ int main(int argc, char ** argv){
   }
   else{
     for0(i, nrow){
+      if(i % 1000 == 0) printf("i=%ld of %zu\n", i, nrow);
       for0(j, ncol){
         if(dat[i * ncol + j] == 0.){
           n_erode ++;
