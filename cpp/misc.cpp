@@ -271,6 +271,15 @@ float * bread(str bfn, size_t nrow, size_t ncol, size_t nband){
   return dat;
 }
 
+void bwrite(float * d, str bfn, size_t nrow, size_t ncol, size_t nband){
+  size_t nf = nrow * ncol * nband;
+  FILE * f = fopen(bfn.c_str(), "wb");
+  if(!f) err("bwrite(): failed to open output file");
+  fwrite(d, sizeof(float), nf, f);
+  fclose(f);
+}
+
+
 pthread_mutex_t print_mtx;
 
 void cprint(str s){
