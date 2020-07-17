@@ -13,13 +13,13 @@ int main(int argc, char ** argv){
   str fn2(argv[2]); // input file name, single band that will overwrite one band in stack
   str hfn2(hdr_fn(fn2)); // auto-detect header-file name
 
-  int bi = atoi(argv[3]); // band index
-  if(bi < 0 || bi > nband) err("please verify index of band to splice");
-
   size_t nrow, ncol, nband, np, nrow2, ncol2, nband2;
   long int i, j, di, dj;
   hread(hfn, nrow, ncol, nband); // read header
   hread(hfn2, nrow2, ncol2, nband2); // read header
+
+  int bi = atoi(argv[3]); // band index
+  if(bi < 0 || bi > nband) err("please verify index of band to splice");
 
   np = nrow * ncol;
   if(nband2 != 1) err("this program expects the data to be spliced in, to be 1-band");
@@ -34,14 +34,14 @@ int main(int argc, char ** argv){
   // do the splice
   float * dat = bread(fn2, nrow2, ncol2, nband2); // read in band to splice
   FILE * f = fopen(argv[1], "r+b"); // open stack with read/write access, then splice in
-  size_t p = (size_t bi) * np; // splice location: should implement a shuffle version too
+  size_t p = np * (size_t) bi; // splice location: should implement a shuffle version too
   fseek(f, p, SEEK_SET); // goto splice location
-  size_t nr = fwrite(dat, np * sizeof(float), 1, f);  // random-access write
+  size_t nr = fwrite(dat, sizeof(float) * np, 1, f);  // random-access write
   printf("nr %zu\n", nr);
   fclose(f);
 
   // qa: assert file size unchanged
-  size fs1p = fsize(fn);
+  size_t fs1p = fsize(fn);
   if(fs1p != fs1){
     printf("File size: %zu expected %zu\n", fs1p, fs1);
     err("splice failed");
