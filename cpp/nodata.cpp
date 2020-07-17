@@ -1,6 +1,8 @@
 /* find out where a stack, assumed ENVI type-4 32-bit IEEE standard
 floating-point format BSQ interleave, image is "no data" i.e. all
-bands exactly equal to 0. */
+bands exactly equal to 0. 
+
+This well but not perfectly when we tried it, a shannon-entropy based method (as suggested by A. Mendelev) would likely be an improvement*/
 #include"misc.h"
 
 int main(int argc, char ** argv){
