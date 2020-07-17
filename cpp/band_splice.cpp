@@ -31,19 +31,23 @@ int main(int argc, char ** argv){
   if(fs1 != np * nband * sizeof(float)) err("please verify file size for input stack");
   if(fs2 != np * sizeof(float)) err("please verify file size for replacement band to splice");
 
+  // do the splice
   float * dat = bread(fn2, nrow2, ncol2, nband2); // read in band to splice
   FILE * f = fopen(argv[1], "r+b"); // open stack with read/write access, then splice in
   size_t p = (size_t bi) * np; // splice location: should implement a shuffle version too
   fseek(f, p, SEEK_SET); // goto splice location
-  size_t nr = fwrite(dat, np * sizeof(float), 1, f);
+  size_t nr = fwrite(dat, np * sizeof(float), 1, f);  // random-access write
   printf("nr %zu\n", nr);
   fclose(f);
 
-  size fs1p = fsize(fn); // make sure the file size didn't change
+  // qa: assert file size unchanged
+  size fs1p = fsize(fn);
   if(fs1p != fs1){
     printf("File size: %zu expected %zu\n", fs1p, fs1);
     err("splice failed");
   }
+
+  // could also read the spliced band back in, to verify
 
   printf("done splice\n");
   return 0;
