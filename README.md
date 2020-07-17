@@ -2,9 +2,9 @@
 ** This page needs to be updated **
 
 Research collaboration in Image Analysis featuring:
-* Thompson Rivers University (TRU)
-* BC Wildfire Service (BCWS) Predictive Services Unit (PSU)
 * Digital Platforms and Data Division (DPDD), Office of The BC Chief Information Officer (OCIO) 
+* BC Wildfire Service (BCWS) Predictive Services Unit (PSU)
+* Thompson Rivers University (TRU)
 
 ## features
 * High-contrast visualization for multispectral imagery and classification maps
@@ -24,20 +24,20 @@ To appear: more utilities for integrating open remotely-sensed imagery
 * Musfiq Rahman, TRU
 * David Hill, TRU
 
-## Alumni:
-* Brady Holliday, BCWS
-* Jabed Tomal, TRU
-
 ### TRU Computing Science ML/AI Students Co-supervised:
 * Gagan Bajwa
 * Brad Crump
 * Francesca Rammuno
 
+## Alumni:
+* Brady Holliday, BCWS
+* Jabed Tomal, TRU
+
 ## requirements:
 * python 2
 * gnu g++
 
-Tested on ubuntu
+Tested on ubuntu 20
 
 ## how to:
 0) Set up the programs:
@@ -65,7 +65,7 @@ Tested on ubuntu
     
     video of clustering: https://www.youtube.com/watch?v=ooOHEubDNvM
    
-## Preliminary Results
+## Some outdated prelminary results (to be updated)
 
 ### K-means unsupervised classification
 <img src="output/kmeans.bin_wheel.bin.png" width="640">
