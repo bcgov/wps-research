@@ -5,7 +5,7 @@ replace a band with the single-band supplied */
 int main(int argc, char ** argv){
 
   if(argc < 4){
-    err("band_splice [input BSQ image stack] [replacement band] [0-index of band to replace]");
+    err("band_splice [input BSQ image stack] [replacement band] [1-index of band to replace]");
   }
   str fn(argv[1]); // input file name, stack which will get one band replaced
   str hfn(hdr_fn(fn)); // auto-detect header-file name
@@ -25,10 +25,12 @@ int main(int argc, char ** argv){
     nband2 = 1;
   }
 
-  int bi = atoi(argv[3]); // band index
-  if(bi < 0 || bi > nband) err("please verify index of band to splice");
-
+  int bi = atoi(argv[3]) - 1; // band index
+  if(bi < 0 || bi > nband) err("please verify 1-index of band to splice");
+  printf("band 0-index %d\n", bi);
+  
   np = nrow * ncol;
+  printf("pixels %zu\n", np);
   if(nband2 != 1) err("this program expects the data to be spliced in, to be 1-band");
   if(nrow != nrow2 || ncol != ncol2) err("please verify input image dimensions");
 
@@ -37,13 +39,15 @@ int main(int argc, char ** argv){
   size_t fs2 = fsize(fn2);
   if(fs1 != np * nband * sizeof(float)) err("please verify file size for input stack");
   if(fs2 != np * sizeof(float)) err("please verify file size for replacement band to splice");
+  printf("file_size %zu\n", fs1);
 
   // do the splice
   float * dat = bread(fn2, nrow2, ncol2, nband2); // read in band to splice
   FILE * f = fopen(argv[1], "r+b"); // open stack with read/write access, then splice in
-  size_t p = np * (size_t) bi; // splice location: should implement a shuffle version too
-  fseek(f, p, SEEK_SET); // goto splice location
-  size_t nr = fwrite(dat, sizeof(float) * np, 1, f);  // random-access write
+  size_t f_p = np * sizeof(float) * (size_t) bi; // splice location: should implement a shuffle version too
+  printf("fp %zu\n", f_p);
+  fseek(f, f_p, SEEK_SET); // goto splice location
+  size_t nr = fwrite(dat, sizeof(float), np, f);  // random-access write
   printf("nr %zu\n", nr);
   fclose(f);
 
