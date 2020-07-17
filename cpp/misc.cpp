@@ -151,6 +151,7 @@ size_t size(FILE * f){
   return sz;
 }
 
+/* get file size */
 size_t fsize(string fn){
   FILE * f = fopen(fn.c_str(), "rb");
   if(!f) return (size_t) 0;
@@ -158,6 +159,16 @@ size_t fsize(string fn){
   fclose(f);
   return fs;
 }
+
+/* get file size */
+size_t fsize(const char * fn){
+  FILE * f = fopen(fn, "rb");
+  if(!f) return (size_t) 0;
+  size_t fs = size(f);
+  fclose(f);
+  return fs;
+}
+
 
 void rewind(ifstream &a){
   a.clear();

@@ -224,6 +224,7 @@ str hdr_fn(str fn, bool create);
 /* get size of file pointer */
 size_t size(FILE * f);
 size_t fsize(string fn);
+size_t fsize(const char * fn);
 bool exists(str fn);
 
 float * load_envi(str in_f, size_t & nrow, size_t & ncol, size_t & nband);
