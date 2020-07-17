@@ -27,10 +27,10 @@ int main(int argc, char ** argv){
 
   int bi = atoi(argv[3]) - 1; // band index
   if(bi < 0 || bi > nband) err("please verify 1-index of band to splice");
-  printf("band 0-index %d\n", bi);
+  // printf("band 1-index %d\n", bi);
   
   np = nrow * ncol;
-  printf("pixels %zu\n", np);
+  // printf("pixels %zu\n", np);
   if(nband2 != 1) err("this program expects the data to be spliced in, to be 1-band");
   if(nrow != nrow2 || ncol != ncol2) err("please verify input image dimensions");
 
@@ -39,13 +39,13 @@ int main(int argc, char ** argv){
   size_t fs2 = fsize(fn2);
   if(fs1 != np * nband * sizeof(float)) err("please verify file size for input stack");
   if(fs2 != np * sizeof(float)) err("please verify file size for replacement band to splice");
-  printf("file_size %zu\n", fs1);
+  // printf("file_size %zu\n", fs1);
 
   // do the splice
   float * dat = bread(fn2, nrow2, ncol2, nband2); // read in band to splice
   FILE * f = fopen(argv[1], "r+b"); // open stack with read/write access, then splice in
   size_t f_p = np * sizeof(float) * (size_t) bi; // splice location: should implement a shuffle version too
-  printf("fp %zu\n", f_p);
+  // printf("fp %zu\n", f_p);
   fseek(f, f_p, SEEK_SET); // goto splice location
   size_t nr = fwrite(dat, sizeof(float), np, f);  // random-access write
 
@@ -64,6 +64,5 @@ int main(int argc, char ** argv){
   }
   // could also read the spliced band back in, to verify. We didn't do that yet
 
-  printf("done splice\n");
   return 0;
 }
