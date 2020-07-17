@@ -11,12 +11,19 @@ int main(int argc, char ** argv){
   str hfn(hdr_fn(fn)); // auto-detect header-file name
 
   str fn2(argv[2]); // input file name, single band that will overwrite one band in stack
-  str hfn2(hdr_fn(fn2)); // auto-detect header-file name
+  str hfn2(hdr_fn(fn2, true)); // auto-detect header-file name, don't assume exists
 
   size_t nrow, ncol, nband, np, nrow2, ncol2, nband2;
   long int i, j, di, dj;
   hread(hfn, nrow, ncol, nband); // read header
-  hread(hfn2, nrow2, ncol2, nband2); // read header
+  if(exists(hfn2)){
+    hread(hfn2, nrow2, ncol2, nband2); // read header, if exists
+  }
+  else{
+    nrow2 = nrow; // else, assume replacement band has same dimensions
+    ncol2 = ncol;
+    nband2 = 1;
+  }
 
   int bi = atoi(argv[3]); // band index
   if(bi < 0 || bi > nband) err("please verify index of band to splice");
