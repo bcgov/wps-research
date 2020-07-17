@@ -55,6 +55,5 @@ int main(int argc, char** argv){
   cout << "Truncating file to remove whitespace: \n\t" << cmd << endl;
   system(cmd.c_str());
   cout << "done" << endl;
-
   return 0;
 }
