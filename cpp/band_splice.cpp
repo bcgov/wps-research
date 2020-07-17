@@ -48,7 +48,12 @@ int main(int argc, char ** argv){
   printf("fp %zu\n", f_p);
   fseek(f, f_p, SEEK_SET); // goto splice location
   size_t nr = fwrite(dat, sizeof(float), np, f);  // random-access write
-  printf("nr %zu\n", nr);
+
+  // check float count as expected
+  if(nr != np){
+    printf("floats written: %zu expected: %zu\n", nr, np);
+    err("write failed");
+  }
   fclose(f);
 
   // qa: assert file size unchanged
@@ -57,8 +62,7 @@ int main(int argc, char ** argv){
     printf("File size: %zu expected %zu\n", fs1p, fs1);
     err("splice failed");
   }
-
-  // could also read the spliced band back in, to verify
+  // could also read the spliced band back in, to verify. We didn't do that yet
 
   printf("done splice\n");
   return 0;
