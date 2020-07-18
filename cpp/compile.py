@@ -6,10 +6,10 @@ files = [f.strip() for f in files]
 
 of = open("compile.sh", "wb")
     #!/usr/bin/env bash
-of.write("#!/usr/bin/env bash\n".encode())
+of.write("#!/usr/bin/env bash".encode())
 for f in files:
     fn = f[:-4]
     if fn != "misc":
-        s = 'test ! -f ' + fn + '.exe && g++ -O3 ' + fn + '.cpp  misc.cpp -o ' + fn + '.exe'
+        s = '\ntest ! -f ' + fn + '.exe && g++ -w -O3 ' + fn + '.cpp  misc.cpp -o ' + fn + '.exe -lpthread'
         of.write(s.encode())
 of.close()

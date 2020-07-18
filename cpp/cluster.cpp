@@ -129,7 +129,7 @@ int main(int argc, char** argv){
     cout << "Number of cores: " << numCPU << endl;
 
     // mutex setup
-    pthread_mutex_init(&print_mutex, NULL);
+    pthread_mutex_init(&print_mtx, NULL);
     pthread_mutex_init(&next_j_mutex, NULL);
 
     // make the threads joinable

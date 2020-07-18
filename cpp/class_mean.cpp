@@ -104,16 +104,18 @@ int main(int argc, char ** argv){
   fclose(outf);
 
   // write spectra to CSV file
-  FILE * outf2 = fopen(of2.c_str(), "wb");  // should output band names to spectra
-  
+  FILE * outf2 = fopen(of2.c_str(), "wb"); // should output band names to spectra
+
   size_t ci = 0;
   for(it = count.begin(); it != count.end(); it++){
     float class_i = it->first;
-    if(ci > 0) fprintf(out2, "\n");
-    fprintf("%zu", class_i);
+    if(ci > 0){
+      fprintf(outf2, "\n");
+    }
+    fprintf(outf2, "%zu", class_i);
     for0(k, nband2){
       fprintf(outf2, ",%e", avg[class_i][k]);
-    } 
+    }
   }
 
   fclose(outf2);
