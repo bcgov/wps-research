@@ -9,7 +9,7 @@ i, n_cpu = 0, mp.cpu_count()
 files = os.popen('ls -1 *.cpp').readlines()
 files = [f.strip() for f in files]
 
-of = open('compile.sh", "wb')
+of = open('compile.sh', 'wb')
     #!/usr/bin/env bash
 of.write('#!/usr/bin/env bash'.encode())
 for f in files:
