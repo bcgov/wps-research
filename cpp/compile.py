@@ -1,3 +1,5 @@
+# compile all .cpp files in folder to .exe files
+# remove -w flag from g++ to examine warnings
 import os
 import sys
 
