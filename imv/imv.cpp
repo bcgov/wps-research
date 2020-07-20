@@ -227,14 +227,14 @@ int main(int argc, char ** argv){
   // set up window for overview image
   zprInstance * myZpr = myManager->newZprInstance(nr2, nc2, nb);
   glImage * myImage = new glImage(myZpr, &a);
-  myZpr->setTitle(string("Scene"));
+  myZpr->setTitle(string("Scene   "));
 
   // set up window for fullres subset image
   zprInstance * myZpr2 = myManager->newZprInstance(mm, mm, nb);
   glImage * myImage2 = new glImage(myZpr2, &b);
   SUB_GLIMG = (void *)myImage2;
   myZpr2->setRightOf(myZpr);
-  myZpr2->setTitle(string("Subset"));
+  myZpr2->setTitle(string("Subset  "));
 
   // target window setup
 
@@ -288,7 +288,7 @@ int main(int argc, char ** argv){
   glLine zL2(myZpr5, v0, vz, 0, 0, 1);
   glPoints scatter2(myZpr5, myImage2);
   myZpr5->setRightOf(myZpr2) ; //ScreenPosition(nc2, nr2 + 65); // ightOf(myZpr3);
-  myZpr5->setTitle(string("Subset"));
+  myZpr5->setTitle(string("Subset  "));
 
   printf("glutMainLoop()\n");
   initLighting();

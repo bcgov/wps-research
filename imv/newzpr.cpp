@@ -685,9 +685,10 @@ void zprInstance::zprInit(){
   glutSetWindowTitle(&(asdf[0]));
 
 }
-void zprInstance::setTitle(string t){
+void zprInstance::setTitle(string s){
   focus();
-  glutSetWindowTitle(t.c_str());
+  myTitle = s;
+  glutSetWindowTitle(s.c_str());
 }
 
 void zprInstance::zprReshape(int w,int h){

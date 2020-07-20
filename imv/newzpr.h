@@ -307,6 +307,7 @@ class knnClusteringInstance;
 class zprInstance{
   public:
   void (*callMeWithMouseClickCoordinates)(int, int);
+  string myTitle;
   float myLeft, myRight, myBottom, myTop, myZNear, myZFar;
   int usleepN, usleepNupdate;
   int isPaused;
@@ -367,7 +368,10 @@ class zprInstance{
 
   void add(glPlottable * a);
 
-  void setTitle(string t); // set title string
+  void setTitle(string s); // set title string
+  string getTitle(){
+	  return myTitle;
+  }
 
   double vlen(double x,double y,double z);
   void pos(double *px,double *py,double *pz,const int x,const int y,const int *viewport);
@@ -439,11 +443,14 @@ class zprInstance{
     zprInstanceInit(ZprID, glutID, manager, _NROW, _NCOL, nb);
   }
 
-  void setTitle( char * s){
+  /* 
+  void setTitle(string s){
+    myTitle = s;
     char asdf[1000]="\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
     sprintf(&asdf[0], "GLUTID (%d) %s\0", myGlutID(), s);
     glutSetWindowTitle(&(asdf[0]));
   }
+  */
 
   void mark();
 
