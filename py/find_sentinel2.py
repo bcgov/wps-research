@@ -1,17 +1,20 @@
-# don't forget to modify this script to restrict for time, need to be able to fetch relevant records that we've not yet considered
+''' query sentinel-2 products over a given point. Later: tile-ID of interest. Restrict for time?
 
-'''
-  query sentinel-2 products over a given:
-    1) point-- lat, long
-    2) a TILE ID of interest?
-'''
+Also need to know how to fetch products from LTA'''
 import os
 import sys
 import math
+foot_print = 'Intersects(51.0602686,-120.9083258)' # default location: Kamloops
+# VICTORIA: (48.4283334, -123.3647222)
 
-no_clobber = '' # was None: might supposed to be ''
 if len(sys.argv) > 1:
-    no_clobber = ' -nc '
+    import geopy # python geocoder
+    from geopy.geocoders import DataBC
+    geolocator = DataBC() # user_agent = "my-application")
+    location = geolocator.geocode(sys.argv[1])
+    print(location.address)
+    print((location.latitude, location.longitude))
+    foot_print = 'Intersects(' + str(location.latitude) + ',' + str(location.longitude) + ')'
 
 # save username and password to files:
 user_, pass_ = None, None
@@ -31,7 +34,7 @@ else:
 
 def c(add= ''):
     cmd = ('wget --no-check-certificate --user=' + user_ + ' --password=' + pass_ +
-           ' --output-document=out.html "https://scihub.copernicus.eu/dhus/search?q=(platformname:Sentinel-2 AND cloudcoverpercentage:[0 TO 5] AND footprint:\\"Intersects(51.0602686,-120.9083258)\\")' + add + '"')
+           ' --output-document=out.html "https://scihub.copernicus.eu/dhus/search?q=(platformname:Sentinel-2 AND cloudcoverpercentage:[0 TO 11] AND footprint:\\"' + foot_print + '\\")' + add + '"')
     return cmd
 
 # get the first page
@@ -105,9 +108,11 @@ links = os.popen('grep alternative out_all.html').readlines()
 for i in range(0, len(links)):
     link = links[i]
     w = link.strip().split('<link rel="alternative" href="')[1].split('"/>')[0]
-    ti = titles[i] # need to compare this to list of files already downloaded: skip existing files!
-    tw = ti.strip().split(">")[1].split("<")[0].strip()
-    cmd = 'wget ' + no_clobber + ' --content-disposition --continue --user=' + user_ + ' --password=' + pass_ + ' "' + w + '\\$value"' + " #" + titles[i].strip()
+    ti = titles[i].strip() # need to compare this to list of files already downloaded: skip existing files!
+    tw = ti.split(">")[1].split("<")[0].strip()
+    zfn = ti[7:-8] + '.zip'
+    cmd ='test ! -f ' + zfn + ' && wget ' + ' --content-disposition --continue --user='
+    cmd += (user_ + ' --password=' + pass_ + ' "' + w + '\\$value"' + " #" + ti)
     if i > 0:
         f.write('\n'.encode())
     f.write(cmd.encode())
