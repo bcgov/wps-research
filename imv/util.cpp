@@ -477,6 +477,7 @@ float * mlk_scene_dat; // float data output
 vector<int> * mlk_scene_groundref; // groundref indices
 
 void multilook_scene(size_t k){
+  // due a crude sampling of scene, for scene overview window
   size_t np = mlk_scene_nr * mlk_scene_nc;
   SA<float> bb(np); // whole image, one-band buffer
 
@@ -489,7 +490,7 @@ void multilook_scene(size_t k){
   FILE * f = fopen(mlk_scene_fn->c_str(), "rb");
 
   printf("fread band %zu/%d\n", k + 1, mlk_scene_nb);
-  
+
   // read band
   size_t nbyte = np * sizeof(float);
   fseek(f, nbyte * k, SEEK_SET);
@@ -498,7 +499,6 @@ void multilook_scene(size_t k){
     printf("read %zu bytes instead of %zu (expected) from file: %s\n", nread, nbyte, mlk_scene_fn->c_str());
     err("exit");
   }
-
 
   if(groundref_set.find(k) != groundref_set.end()){
     // assert all 1. / 0. for ground ref!
