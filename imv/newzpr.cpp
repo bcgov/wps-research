@@ -343,6 +343,8 @@ void zprInstance::idle(){
 }
 
 void zprInstance::setrgb(int r, int g, int b){
+
+  // do the thing
   myBi->at(0) = r;
   myBi->at(1) = g;
   myBi->at(2) = b;
@@ -355,6 +357,17 @@ void zprInstance::setrgb(int r, int g, int b){
       ((glImage *)((void *)((glPlottable *)(*it))))->rebuffer();
     }
   }
+
+  // now change the display title
+  string s(getTitle().substr(0,8));
+  str rs(vec_band_names[r]);
+  str gs(vec_band_names[g]);
+  str bs(vec_band_names[b]);
+
+  setTitle(s + str("R,G,B=")
+	   + to_string(r + 1) + str(":") + rs.substr(0, 15) + str(",")
+	   + to_string(g + 1) + str(":") + gs.substr(0, 15) + str(",")
+	   + to_string(b + 1) + str(":") + bs.substr(0, 15));
 }
 
 void zprInstance::getrgb(int & r, int & g, int & b){
