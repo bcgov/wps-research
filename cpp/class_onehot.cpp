@@ -34,6 +34,7 @@ int main(int argc, char ** argv){
   for(it = count.begin(); it != count.end(); it++){
     lookup[it->first] = ci ++;
   }
+  cout << "lookup:" << lookup << endl;
 
   for(it = count.begin(); it != count.end(); it++){
     float di = it->first;
