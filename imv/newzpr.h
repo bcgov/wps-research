@@ -49,7 +49,7 @@ void GLERROR();
 //#define MYFONT GLUT_BITMAP_TIMES_ROMAN_24
 //#define MYFONT GLUT_BITMAP_HELVETICA_10
 #define MYFONT GLUT_BITMAP_HELVETICA_12
-#define MYFONT_SIZE 12
+#define MYFONT_SIZE 7
 //define MYFONT GLUT_BITMAP_HELVETICA_18
 ///ii=frameIndex.begin();/ii=frameIndex.begin();
 static clock_t start_time;

@@ -352,16 +352,13 @@ vector<string> parse_band_names(string fn){
 }
 
 vector<int> parse_groundref_names(string fn){
-  int debug = false;
-
-  if(debug) cout << "PARSE_GROUNDREF_NAMES" << endl;
-  // assume a groundref name doesn't have numbers in it!
-
-  vector<int> results;
-
-  //cout << "loop" << endl;
-  vector<string> names(parse_band_names(fn));
   int ci = 0;
+  int debug = false;
+  int at_gt = false;
+  vector<int> results;
+  vector<string> names(parse_band_names(fn));
+  if(debug) cout << "PARSE_GROUNDREF_NAMES" << endl; // assume a groundref name doesn't have numbers in it!
+
   for(vector<string>::iterator it = names.begin(); it != names.end(); it++){
     string x(*it);
     std::replace(x.begin(), x.end(), '_', ' ');
@@ -379,9 +376,10 @@ vector<int> parse_groundref_names(string fn){
         break;
       }
     }
-    if(!has_number){
+    if(!has_number || at_gt){
       if(debug) cout << "\tgroundref: " << *it << " bi " << ci + 1 << "\n\t\tbi (0-indexed) " << ci << endl;
       results.push_back(ci);
+      at_gt = true;
     }
     ci ++;
   }
