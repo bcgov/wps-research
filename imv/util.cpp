@@ -379,9 +379,7 @@ vector<int> parse_groundref_names(string fn){
         break;
       }
     }
-    if(has_number){
-    }
-    else{
+    if(!has_number){
       if(debug) cout << "\tgroundref: " << *it << " bi " << ci + 1 << "\n\t\tbi (0-indexed) " << ci << endl;
       results.push_back(ci);
     }
