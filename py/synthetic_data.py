@@ -1,5 +1,6 @@
 # produce fake data, square chip, with one-hot encoded groundref
 import math
+import copy
 from misc import *
 import numpy as np
 
@@ -20,7 +21,7 @@ n = (npx * (nb + n_class))
 print("n_float", n)
 d = np.zeros(n, dtype=np.float32)
 
-sigma, ci = .5 / n_class, 0
+sigma, ci = 1 / n_class, 0
 
 # simulate the multi/hyperspectral data bands
 for k in range(0, nb):
@@ -40,7 +41,24 @@ for k in range(0, n_class):
             d[ci] = (1. if (class_i == float(k)) else 0.)
             ci += 1
 
-write_binary(d, 'stack.bin')
+# make the data dirty by making the groundref classes slightly overlap!
+dp = copy.deepcopy(d)
+for k in range(0, n_class):
+    for i in range(0, L):
+        for j in range(0, L):
+            if d[npx * (nb + k) + ((i * L) + j)] == 1.:
+                # grow
+                wg = 3
+                for di in range(-wg, wg + 1):
+                    ii = i + di
+                    if ii < 0 or ii >= L: continue
+                    for dj in range(-wg, wg+1):
+                        jj = j + dj
+                        if jj < 0 or jj >= L: continue 
+                        # print("i", i, "j", j, "di", di, "ii", ii, "dj", dj, "jj", jj)
+                        dp[npx * (nb + k) + ((ii * L) + jj)] = 1.
+
+write_binary(dp, 'stack.bin')
 write_hdr('stack.hdr', L, L, nb + n_class)
 
 f = open('stack.hdr', 'ab')  # append band name info onto header
