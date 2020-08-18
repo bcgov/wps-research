@@ -3,6 +3,9 @@ import math
 from misc import *
 import numpy as np
 
+if exists('stack.bin'): # don't overwrite a stack
+    err('file: stack.bin already exists')
+
 nwin = 100 # number of pixels per side of "small" square
 nsq = 5 # number of squares/side of big square
 nb = nsq # 4 # number of bands, fake multispec data
@@ -24,8 +27,6 @@ ci = 0
 for k in range(0, nb):
     for i in range(0, L):
         for j in range(0, L):
-            # class_i = (math.floor(i / nwin) * nsq) + math.floor(j / nwin)
-            # bi = (class_i + k) % nsq
             bi = math.floor(i / nwin) if (k % 2 == 0) else math.floor(j/nwin)
             d[ci] = np.random.normal((bi -.5 / n_class), sigma)
             ci += 1
