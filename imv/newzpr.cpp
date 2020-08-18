@@ -365,9 +365,9 @@ void zprInstance::setrgb(int r, int g, int b){
   str bs(vec_band_names[b]);
 
   setTitle(s + str("R,G,B=")
-	   + to_string(r + 1) + str(":") + rs.substr(0, 15) + str(",")
-	   + to_string(g + 1) + str(":") + gs.substr(0, 15) + str(",")
-	   + to_string(b + 1) + str(":") + bs.substr(0, 15));
+  + to_string(r + 1) + str(":") + rs.substr(0, 15) + str(",")
+  + to_string(g + 1) + str(":") + gs.substr(0, 15) + str(",")
+  + to_string(b + 1) + str(":") + bs.substr(0, 15));
 }
 
 void zprInstance::getrgb(int & r, int & g, int & b){
@@ -518,48 +518,48 @@ void zprInstance::special(int key, int x, int y){
   }
 
   switch(key){
-    case GLUT_KEY_UP:  // "next frame" if applicable
+    case GLUT_KEY_UP: // "next frame" if applicable
     getrgb(r, g, b);
     r += bands_per_frame; // increment
     g += bands_per_frame;
     b += bands_per_frame;
-    if(r >= NBand) r -= NBand;  // check if wrap
+    if(r >= NBand) r -= NBand; // check if wrap
     if(g >= NBand) g -= NBand;
     if(b >= NBand) b -= NBand;
     setrgb(r, g, b);
     printf("incremented band selection: (r,g,b)=(%d,%d,%d)\n", r, g, b);
     break;
-    
+
     case GLUT_KEY_DOWN: // "last frame" if applicable
     getrgb(r, g, b);
-    r -= bands_per_frame;  // decrement
+    r -= bands_per_frame; // decrement
     g -= bands_per_frame;
     b -= bands_per_frame;
-    if(r < 0) r += NBand;  // check if wrap
-    if(g < 0) g += NBand;
-    if(b < 0) b += NBand;
-    setrgb(r, g, b);
-    printf("decremented band selection: (r,g,b)=(%d,%d,%d)\n", r, g, b);
-    break;
-    
-    case GLUT_KEY_LEFT: // decrement selected-band indices
-    getrgb(r, g, b);
-    r--;  // decrement
-    g--;
-    b--;
-    if(r < 0) r += NBand;  // check if wrap
+    if(r < 0) r += NBand; // check if wrap
     if(g < 0) g += NBand;
     if(b < 0) b += NBand;
     setrgb(r, g, b);
     printf("decremented band selection: (r,g,b)=(%d,%d,%d)\n", r, g, b);
     break;
 
-    case GLUT_KEY_RIGHT:  // increment selected-band indices
+    case GLUT_KEY_LEFT: // decrement selected-band indices
+    getrgb(r, g, b);
+    r--; // decrement
+    g--;
+    b--;
+    if(r < 0) r += NBand; // check if wrap
+    if(g < 0) g += NBand;
+    if(b < 0) b += NBand;
+    setrgb(r, g, b);
+    printf("decremented band selection: (r,g,b)=(%d,%d,%d)\n", r, g, b);
+    break;
+
+    case GLUT_KEY_RIGHT: // increment selected-band indices
     getrgb(r, g, b);
     r++; // increment
     g++;
     b++;
-    if(r >= NBand) r -= NBand;  // check if wrap
+    if(r >= NBand) r -= NBand; // check if wrap
     if(g >= NBand) g -= NBand;
     if(b >= NBand) b -= NBand;
     setrgb(r, g, b);
@@ -1402,20 +1402,55 @@ void glPoints::drawMe(){
   }
   else{
     // plot data points colored by GT label
+    //
+    // todo: translate disabled list, into "enabled" list, and recolour based on that!
     s = v = 1.;
     d = myI->class_label->elements;
     float * dd = myI->dat->elements;
+
+    float ci = 0.;
+    int n_groundref_enabled = groundref.size() - groundref_disable.size();
+    map<float, float> class_label_mapping; //     for(size_t i = 0; i < groundref.size(); i++) if(groundref_disable.count(i))
+    class_label_mapping.clear();
+    for(int i = 0; i < groundref.size(); i++){
+      if(groundref_disable.count(i)){
+      }
+      else{
+        if(class_label_mapping.count(i) < 1){
+          class_label_mapping[i] = ci ++;
+        }
+      }
+    }
+    map<float, float> groundref_index_map;
+    for(int i = 0; i < groundref.size(); i++){
+      groundref_index_map[groundref[i]] = i;
+    }
+
+    cout << "class_label_mapping: " << class_label_mapping << endl;
+    cout << "groundref_disable: " << groundref_disable << endl;
+    cout << "groundref_index_map: " << groundref_index_map << endl;
+
+    map<float, float> labels_in_window;
+    for(size_t i = 0; i < nf; i += 3){
+      class_label = d[i / 3];
+      if(labels_in_window.count(class_label) < 1){
+	      labels_in_window[class_label] = 0.;
+      }
+      labels_in_window[class_label] +=1.;
+    }
+    cout << "labels_in_window: " << labels_in_window << endl;
     for(size_t i = 0; i < nf; i += 3){
       class_label = d[i / 3];
       if(groundref_disable.count(class_label -1)) continue; // skip plot if this class disabled
       if(class_label == 0.){
-        r = g = b = 0.;
+        r = g = b = 0.; // what does this code mean?
       }
       else if(class_label == -1.){
-        r = g = b = 1.;
+        r = g = b = 1.; // is -1 class label N/A?
       }
       else{
-        h = 360. * (float)(class_label - 1) / (float)(groundref.size());
+        // h = 360. * (float)(class_label - 1) / (float)(groundref.size());
+        h = 360. * (float)(class_label_mapping[class_label - 1]) / (float)(n_groundref_enabled);
         if(h > 360.){
           printf("class_label %f groundref.size() %zu\n", class_label, (size_t)groundref.size());
           err("out of range");
@@ -1430,6 +1465,7 @@ void glPoints::drawMe(){
       glEnd();
     }
 
+    // colored legend!!!!!!
     for(size_t i = 0; i < groundref.size(); i++){
       if(groundref_disable.count(i)) continue; // skip this one if we indicate to skip it!
 
@@ -1439,7 +1475,8 @@ void glPoints::drawMe(){
       str pre(str("(") + to_string((int)i) + str(") "));
       str class_str(pre + vec_band_names[groundref[i]]);
       const char * class_string = class_str.c_str();
-      h = 360. * (float)(i) / (float)(groundref.size());
+      // h = 360. * (float)(i) / (float)(groundref.size());
+      h = 360. * (float)(class_label_mapping[i]) / (float)(n_groundref_enabled);
       hsv_to_rgb(&r, &g, &b, h, s, v);
 
       glColor3f(r, g, b);
