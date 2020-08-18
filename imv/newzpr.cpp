@@ -1435,8 +1435,10 @@ void glPoints::drawMe(){
 
       // however, should also skip this class in selecting the label for this pix. Did we?
       // that would be in the refreshing of the glPoints data
-
-      const char * class_string = vec_band_names[groundref[i]].c_str();
+      int ii = (int)i;
+      str pre(str("(") + to_string((int)i) + str(") "));
+      str class_str(pre + vec_band_names[groundref[i]]);
+      const char * class_string = class_str.c_str();
       h = 360. * (float)(i) / (float)(groundref.size());
       hsv_to_rgb(&r, &g, &b, h, s, v);
 
