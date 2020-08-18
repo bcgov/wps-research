@@ -20,8 +20,7 @@ n = (npx * (nb + n_class))
 print("n_float", n)
 d = np.zeros(n, dtype=np.float32)
 
-sigma = .5 / n_class
-ci = 0
+sigma, ci = .5 / n_class, 0
 
 # simulate the multi/hyperspectral data bands
 for k in range(0, nb):
