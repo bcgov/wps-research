@@ -29,7 +29,7 @@ int main(int argc, char ** argv){
     NWIN = atoi(argv[2]);
   }
   else{
-    NWIN = 75; // obviously this is for purposes of testing the extraction. Too big!
+    NWIN = 25; // obviously this is for purposes of testing the extraction. Too big!
   }
   WIN_I = WIN_J = 0;
 
