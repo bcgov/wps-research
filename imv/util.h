@@ -4,6 +4,7 @@
 
 #include"SA.h"
 #include<set>
+#include<map>
 #include<math.h>
 #include<vector>
 #include<string>
@@ -53,6 +54,34 @@ vector<string> split(string s, char delim, long int i);
 vector<string> split(string s, char delim);
 
 vector<string> split(string s);
+
+template<class T> std::ostream& operator << (std::ostream& os, const std::vector<T>& v){
+  os << "[";
+  for (typename std::vector<T>::const_iterator ii = v.begin(); ii != v.end(); ++ii){
+    os << " '" << *ii << "'";
+  }
+  os << "]";
+  return os;
+}
+
+template<class T> std::ostream& operator << (std::ostream& os, const std::set<T>& v){
+  os << "{";
+  for (typename std::set<T>::const_iterator ii = v.begin(); ii != v.end(); ++ii){
+    os << " " << *ii;
+  }
+  os << "}";
+  return os;
+}
+
+template<class A, class B> std::ostream& operator << (std::ostream& os, const std::map<A, B>& v){
+  os << "{" << endl;
+  for (typename std::map<A, B>::const_iterator ii = v.begin(); ii != v.end(); ++ii){
+    os << ii->first << ":" << ii->second << ","; //endl;
+  }
+  os << "}" << endl;
+  return os;
+}
+
 vector<string> readLines(string fn);
 string getHeaderFileName( string fn);
 vector<string> parseHeaderFile(string hfn, size_t & NRow, size_t & NCol, size_t & NBand);
