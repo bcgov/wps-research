@@ -166,6 +166,8 @@ for k in range(n, nband):
 
         # 6. projection of fit onto seed derived from thresholding probability
     
+        thres = 0.5
+        '''
         ti = len(bins) - 1 # start at right of histogram
 
         while hst[ti - 1] > hst[ti]: # go left until reach max
@@ -176,7 +178,7 @@ for k in range(n, nband):
             ti -= 1
         thres = bins[ti]
         
-        print("automatically determined probability threshold", thres)
+        print("automatically determined probability threshold", thres) '''
 
         ref = ((prob[:, 1]).reshape(nrow, ncol)) 
         ref = ref.ravel()
