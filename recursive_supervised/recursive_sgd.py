@@ -55,6 +55,8 @@ for k in range(n + 1, nband):
     ref = img[k * npx: (k + 1) * npx]
     cls_name = band_names[k]
     print("class name: " + cls_name)
+    if cls_name != "WATER":
+        continue
 
     # count positives, negatives
     ref_count = hist(ref)
@@ -84,14 +86,15 @@ for k in range(n + 1, nband):
         err("unexpected n")
 
     # init classifier
-    sgd = SGDClassifier(random_state=42,
-                        loss='modified_huber',
-                        penalty="elasticnet",
+    sgd = SGDClassifier(random_state=1,
+                        loss='modified_huber', #'log', # modified_huber',
+                        penalty='l2', # "elasticnet",
                         verbose=False,
                         max_iter=1000,
-                        tol=1.e-3)
+                        tol=.01) # 1.e-3
     sgd.fit(img_samp, ref_samp)  # fit on sampled data
     pred = sgd.predict(img_np)  # predict on full data
+    prob = sgd.predict_proba(img_np)
 
     # need to validate this, and count accuracy
     TP = TN = FN = FP = 0
@@ -108,10 +111,11 @@ for k in range(n + 1, nband):
                 FP += 1
 
     if True:
+        db = [0, 1, 2] # [3, 2, 1] # default band index
         a = np.zeros((nrow, ncol, 3))
-        a[:, :, 0] = img_np[:, 3].reshape(nrow, ncol)
-        a[:, :, 1] = img_np[:, 2].reshape(nrow, ncol)
-        a[:, :, 2] = img_np[:, 1].reshape(nrow, ncol)
+        a[:, :, 0] = img_np[:, db[0]].reshape(nrow, ncol)
+        a[:, :, 1] = img_np[:, db[1]].reshape(nrow, ncol)
+        a[:, :, 2] = img_np[:, db[2]].reshape(nrow, ncol)
         a = (a - np.min(a)) / np.max(a)
 
         for i in range(0, 3):
@@ -129,14 +133,66 @@ for k in range(n + 1, nband):
             (a[:, :, i])[a[:, :, i] > 1.] = 1.
 
         plt.close('all')
-        f, (ax1, ax2, ax3) = plt.subplots(1, 3, sharey=True)
-        plt.gcf().set_size_inches(6 * 3, 6.)
+        f, (ax1, ax2, ax3, ax4, ax5, ax6) = plt.subplots(1, 6) # , sharey=True)
+        plt.gcf().set_size_inches(6 * 6, 6.2)
+
+        # 1. raw image
         ax1.imshow(a)
+
+        # 2. groundref
         ax2.imshow(ref.reshape(nrow, ncol), cmap = 'binary_r') # dont' know why colour !
+        
+        # 3. prediction
         ax3.imshow(pred.reshape(nrow, ncol), cmap = 'binary_r')
+
+        # 4. probability: 0:npx because there's probabilities for two classes!
+        print(prob.shape)
+        ax4.imshow((prob[:, 1]).reshape(nrow, ncol), label='prob', cmap='gray') # two channels: one per class
+
+        # 5. histogram of probability:
+        hist, bins = np.histogram((prob[:, 1]).reshape(nrow, ncol), bins = 25) # 'auto')
+        hist = hist.ravel().tolist()
+        bins = bins.ravel().tolist()
+        bins = bins[0:len(hist)] 
+        print("hist", hist, "|hist|", len(hist)) # hist.shape)
+        print("bins", bins, "|bins|", len(bins)) #  bins.shape)
+        for i in range(0, len(hist)):
+            print(i, bins[i], hist[i])
+        # ax5.plot(bins[1:], hist) 
+        ax5.bar(bins, hist, width = 1/25., align='edge')
+
+        # 6. projection of fit onto seed derived from thresholding probability
+        ref = ((prob[:, 1]).reshape(nrow, ncol)) 
+        ref = ref.ravel()
+        ref = ref > .9
+        ref = [1. if i==True else 0. for i in ref]
+        
+        #img_samp, ref_samp = np.zeros((n_samp, nband)), np.zeros((n_samp))
+        ref_samp = np.zeros(n_samp)
+        nxt_i = 0 # index for next element to copy
+        for i in range(0, npx):
+            if i % skip_i != 0:
+                # img_samp[nxt_i, :] = img_np[i, :]
+                ref_samp[nxt_i] = ref[i]
+                nxt_i += 1
+
+        # sanity check: make sure we didn't fudge our integer math
+        if nxt_i != n_samp:
+            print("nxt_i", nxt_i, "n_samp", n_samp)
+            err("unexpected n")
+
+        sgd.fit(img_samp, ref_samp)
+        pred = sgd.predict(img_np)  # predict on full data
+        print("ooh..")
+        ax6.imshow(pred.reshape(nrow, ncol), cmap = 'binary_r')
+
+        
+
+        # set titles
         ax1.set_title('image')
         ax2.set_title('groundref P ' + str(NP) + ' N ' + str(NN)) #: ' + groundref_name)
         ax3.set_title('predicted' + " TP " + str(TP) + " TN " + str(TN) + " FP " + str(FP) + " FN " + str(FN) ) #: ' + groundref_name)
+        ax4.set_title('probability(true)')
         plt.tight_layout()
         fn = out_d + 'plot_' + img_name + '_' + cls_name + '.png'
         print("+w", fn)
@@ -161,3 +217,5 @@ for k in range(n + 1, nband):
         print("write:\n\t" + str(log_data))
         f.write((','.join(log_data) + '\n').encode())
         f.close()
+
+        # next: probability, seeded prediction
