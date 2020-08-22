@@ -152,27 +152,27 @@ for k in range(n, nband):
         ax4.imshow((prob[:, 1]).reshape(nrow, ncol), label='prob', cmap='gray') # two channels: one per class
 
         # 5. histogram of probability:
-        hist, bins = np.histogram((prob[:, 1]).reshape(nrow, ncol), bins = 25) # 'auto')
-        hist = hist.ravel().tolist()
+        hst, bins = np.histogram((prob[:, 1]).reshape(nrow, ncol), bins = 25) # 'auto')
+        hst = hst.ravel().tolist()
         bins = bins.ravel().tolist()
-        bins = bins[0:len(hist)] 
-        print("hist", hist, "|hist|", len(hist)) # hist.shape)
+        bins = bins[0:len(hst)] 
+        print("hst", hst, "|hst|", len(hst)) # hst.shape)
         print("bins", bins, "|bins|", len(bins)) #  bins.shape)
-        for i in range(0, len(hist)):
-            print(i, bins[i], hist[i])
+        for i in range(0, len(hst)):
+            print(i, bins[i], hst[i])
         # ax5.plot(bins[1:], hist) 
-        ax5.bar(bins, hist, width = 1/25., align='edge')
+        ax5.bar(bins, hst, width = 1/25., align='edge')
 
 
         # 6. projection of fit onto seed derived from thresholding probability
     
         ti = len(bins) - 1 # start at right of histogram
 
-        while hist[ti - 1] > hist[ti]: # go left until reach max
+        while hst[ti - 1] > hst[ti]: # go left until reach max
             ti -= 1
         thres = bins[ti]
 
-        while hist[ti - 1] < hist[ti]: # continue left until reach min
+        while hst[ti - 1] < hst[ti]: # continue left until reach min
             ti -= 1
         thres = bins[ti]
         
