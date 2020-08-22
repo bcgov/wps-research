@@ -58,14 +58,16 @@ def band_names(hdr): # read band names from header file
     names, lines = [], open(hdr).readlines()
     for i in range(0, len(lines)):
         line = lines[i].strip()
+        print("i", i, "line", line)
         x = line.split(' = ')
         if len(x) > 1:
             if x[0] == 'band names':
                 names.append(x[1].split('{')[1].strip(','))
                 for j in range(i + 1, len(lines)):
+                    line = lines[j].strip()
                     names.append(line.strip(',').strip('}'))
-                break
-    return names
+                return names
+    return []
 
 # require a filename, or list of filenames, to exist
 def assert_exists(fn):
