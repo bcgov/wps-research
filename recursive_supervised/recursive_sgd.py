@@ -51,12 +51,14 @@ npx = nrow * ncol # number of pixels
 img_np = bsq_to_scikit(ncol, nrow, n, img[0: n * npx])
 
 
-for k in range(n + 1, nband):
+for k in range(n, nband):
+    print("k", k, "__________________________")
     ref = img[k * npx: (k + 1) * npx]
     cls_name = band_names[k]
     print("class name: " + cls_name)
-    if cls_name != "WATER":
-        continue
+    
+    # if cls_name != "WATER":
+    #     continue
 
     # count positives, negatives
     ref_count = hist(ref)
@@ -161,10 +163,24 @@ for k in range(n + 1, nband):
         # ax5.plot(bins[1:], hist) 
         ax5.bar(bins, hist, width = 1/25., align='edge')
 
+
         # 6. projection of fit onto seed derived from thresholding probability
+    
+        ti = len(bins) - 1 # start at right of histogram
+
+        while hist[ti - 1] > hist[ti]: # go left until reach max
+            ti -= 1
+        thres = bins[ti]
+
+        while hist[ti - 1] < hist[ti]: # continue left until reach min
+            ti -= 1
+        thres = bins[ti]
+        
+        print("automatically determined probability threshold", thres)
+
         ref = ((prob[:, 1]).reshape(nrow, ncol)) 
         ref = ref.ravel()
-        ref = ref > .9
+        ref = ref > thres
         ref = [1. if i==True else 0. for i in ref]
         
         #img_samp, ref_samp = np.zeros((n_samp, nband)), np.zeros((n_samp))
@@ -183,7 +199,6 @@ for k in range(n + 1, nband):
 
         sgd.fit(img_samp, ref_samp)
         pred = sgd.predict(img_np)  # predict on full data
-        print("ooh..")
         ax6.imshow(pred.reshape(nrow, ncol), cmap = 'binary_r')
 
         
