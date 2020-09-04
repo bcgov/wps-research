@@ -1,0 +1,45 @@
+ENVI
+samples = 512
+lines   = 512
+bands   = 36
+header offset = 0
+file type = ENVI Standard
+data type = 4
+interleave = bsq
+byte order = 0
+band names = {fake_and_real_peppers_ms_01,
+fake_and_real_peppers_ms_02,
+fake_and_real_peppers_ms_03,
+fake_and_real_peppers_ms_04,
+fake_and_real_peppers_ms_05,
+fake_and_real_peppers_ms_06,
+fake_and_real_peppers_ms_07,
+fake_and_real_peppers_ms_08,
+fake_and_real_peppers_ms_09,
+fake_and_real_peppers_ms_10,
+fake_and_real_peppers_ms_11,
+fake_and_real_peppers_ms_12,
+fake_and_real_peppers_ms_13,
+fake_and_real_peppers_ms_14,
+fake_and_real_peppers_ms_15,
+fake_and_real_peppers_ms_16,
+fake_and_real_peppers_ms_17,
+fake_and_real_peppers_ms_18,
+fake_and_real_peppers_ms_19,
+fake_and_real_peppers_ms_20,
+fake_and_real_peppers_ms_21,
+fake_and_real_peppers_ms_22,
+fake_and_real_peppers_ms_23,
+fake_and_real_peppers_ms_24,
+fake_and_real_peppers_ms_25,
+fake_and_real_peppers_ms_26,
+fake_and_real_peppers_ms_27,
+fake_and_real_peppers_ms_28,
+fake_and_real_peppers_ms_29,
+fake_and_real_peppers_ms_30,
+fake_and_real_peppers_ms_31,
+left_top,
+left_bottom,
+middle_bottom,
+right_both,
+middle_top}
