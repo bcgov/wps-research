@@ -103,6 +103,12 @@ void two_percent(float & min, float & max, SA<float> * b){
     q.pop();
   }
   printf("two_p n=%zu min %f max %f\n", b->size(), min, max);
+
+  bool disable_stretch = true;
+  if(disable_stretch){
+    min = 0.;
+    max = 1.;
+  }
 }
 
 void glImage::rebuffer(){
