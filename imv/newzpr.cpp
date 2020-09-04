@@ -407,6 +407,24 @@ void zprInstance::processString(){
     return;
   }
 
+  // i prefix?
+  if(strcmpz(console_string, "i\0")){
+    // iterate analysis window!
+    printf("iterate analysis window..\n");
+
+    long int i, j;
+    for0(i, SUB_MM){
+    for0(j, SUB_MM){
+    }
+    }
+
+
+    // WIN_I = (y + NWIN) >= SUB_MM ? SUB_MM - NWIN : y;
+    // WIN_J = (x + NWIN) >= SUB_MM ? SUB_MM - NWIN : x;
+
+
+  }
+
   // gt prefix?
   if(strcmpz(console_string, "gt\0")){
     if(console_string[2] == '\0'){
