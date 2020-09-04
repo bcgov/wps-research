@@ -413,35 +413,24 @@ void zprInstance::processString(){
     printf("iterate analysis window..\n");
 
     int half_win = (NWIN - 1) / 2;
-    long int i, j;
-    int n_inc = 10;
+    long int ii, jj;
+    int n_inc = half_win;
 
-    for(i =0; i < SUB_MM; i += n_inc){
+    for(ii =0; ii < SUB_MM; ii += n_inc){
 
-      if(i >= half_win && i <= (SUB_MM - 1 - half_win)){
+      if(ii - half_win >= 0 && ii - half_win - 1 + NWIN < SUB_MM){
 
-        for(j = 0; j < SUB_MM; j += n_inc){
+        for(jj = 0; jj < SUB_MM; jj += n_inc){
 
-          if(j >= half_win && j < (SUB_MM - 1 - half_win)){
+          if(jj - half_win >= 0 && jj - half_win - 1 + NWIN < SUB_MM){
 
-            printf("i %ld j %ld\n", i, j);
-            WIN_I = i;
-            WIN_J = j;
+            printf("i %ld j %ld\n", ii, jj);
+            WIN_I = ii - half_win;
+            WIN_J = jj - half_win;
 
             if(true){
               SA<float> * dat4 = TGT;
               size_t i, j, k;
-
-              // print out data under cursor
-              printf("bi\tbn\td\n");
-              for0(k, IMG_NB){
-                for0(i, 1){
-                  for0(j, 1){
-                    float d = (*SUB)[(k * SUB_MM * SUB_MM) + (SUB_MM * (WIN_I + i)) + (WIN_J + j)];
-                    printf("%d\t%s\t%e\n", k, vec_band_names[k].c_str(), (double)d);
-                  }
-                }
-              }
 
               // do the work
               for0(k, IMG_NB){
