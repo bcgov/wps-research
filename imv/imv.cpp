@@ -20,8 +20,10 @@ int main(int argc, char ** argv){
 
   // analysis window size
   if(argc > 2) NWIN = atoi(argv[2]);
-  else NWIN = 133; // obviously this is for purposes of testing the extraction. Too big!
+  else NWIN = 49; // obviously this is for purposes of testing the extraction. Too big!
   
+  if((NWIN - 1) % 2 != 0) err("analysis window size must be odd"); 
+
   WIN_I = WIN_J = 0;
 
   // window manager
