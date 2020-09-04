@@ -420,6 +420,7 @@ void zprInstance::processString(){
     else{
       int gi = -1;
       for(int k = 0; k < groundref.size(); k++){
+	 // ground ref band name
         const char * grbn = vec_band_names[groundref[k]].c_str();
         if(strcmpz(&console_string[2], grbn)){
           gi = k;
