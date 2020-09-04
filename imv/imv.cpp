@@ -10,27 +10,18 @@ int main(int argc, char ** argv){
   groundref.clear();
   IMG_FN = string("stack.bin");
 
-  if(argc < 2){
-    printf("imv.cpp: [infile]\n");
-  }
-  else{
-    IMG_FN = string(argv[1]);
-  }
+  if(argc < 2) printf("imv.cpp: [infile]\n");
+  else IMG_FN = string(argv[1]);
 
-  if(!exists(IMG_FN)){
-    err("failed to open input file");
-  }
+  if(!exists(IMG_FN)) err("failed to open input file");
 
   string mfn(IMG_FN + string(".ml"));
   cout << "multilook file name: " << mfn << endl;
 
   // analysis window size
-  if(argc > 2){
-    NWIN = atoi(argv[2]);
-  }
-  else{
-    NWIN = 25; // obviously this is for purposes of testing the extraction. Too big!
-  }
+  if(argc > 2) NWIN = atoi(argv[2]);
+  else NWIN = 133; // obviously this is for purposes of testing the extraction. Too big!
+  
   WIN_I = WIN_J = 0;
 
   // window manager
@@ -42,9 +33,8 @@ int main(int argc, char ** argv){
   size_t min_wh = width > height ? height: width;
   printf("min_wh %f\n", (float)min_wh);
   size_t min = 3 * min_wh / 5; // can adjust scale here. has been 3/6
-  // 2 / 5
-  // was 3 * min_wh / 5
-
+  // 2 / 5 // was 3 * min_wh / 5? 
+ 
   printf("min %f\n", (float)min);
   size_t nr, nc, nb;
 
@@ -59,9 +49,8 @@ int main(int argc, char ** argv){
   // account for case that image may be small
   size_t min_wh_img = nr > nc ? nc: nr;
   //printf("min_wh_img %f\n", (float)min_wh_img);
-  if(min > min_wh_img){
-    min = min_wh_img;
-  }
+  if(min > min_wh_img) min = min_wh_img;
+  
   //printf("min %f\n", (float)min);
 
   // read band names
@@ -75,8 +64,7 @@ int main(int argc, char ** argv){
   }
 
   // determine scaling factor
-  size_t imin = nr > nc ? nc: nr;
-  // printf("imin %d\n", imin);
+  size_t imin = nr > nc ? nc: nr; // printf("imin %d\n", imin);
   float scalef = (float)min / (float)imin;
   printf("scalef %f\n", scalef);
 
@@ -110,41 +98,6 @@ int main(int argc, char ** argv){
     fclose(f);
   }
   else{
-    /*
-    set<int> groundref_set;
-    for(vector<int>::iterator it = groundref.begin(); it != groundref.end(); it++){
-      groundref_set.insert(*it);
-    }
-
-    printf("scaling %d x %d image to %d x %d\n", nr, nc, nr2, nc2);
-    FILE * f = fopen(IMG_FN.c_str(), "rb");
-    size_t nread = 0;
-    for(size_t bi = 0; bi < nb; bi++){
-      printf("fread band %zu/%d\n", bi + 1, nb);
-      nread += fread(&bb[0], 1, sizeof(float) * np, f);
-
-      //const bool is_in = container.find(element) != container.end();
-      if(groundref_set.find(bi) != groundref_set.end()){
-        // assert all 1. / 0. for ground ref!
-        for(size_t i = 0; i < np; i++){
-          float d = bb[i];
-          if(!(d == 0. || d == 1.)){
-            err("assertion failed: that groundref be valued in {0,1} only");
-          }
-        }
-      }
-
-      for(size_t i = 0; i < nr; i++){
-        int ip = (int)floor(scalef * (float)i);
-        for(size_t j = 0; j < nc; j++){
-          size_t jp = (int)floor(scalef * (float)j);
-          size_t k = bi;
-          dat[k * np2 + ip * nc2 + jp] = bb[(i * nc) + j];
-          // last line could / should be += ?
-        }
-      }
-    }
-    */
     // scene subsampling, parallelized by band
     mlk_scene_nb = nb; // infile nbands
     mlk_scene_nr = nr; // infile nrows
