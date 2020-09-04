@@ -418,9 +418,9 @@ void zprInstance::processString(){
 
     }
     else{
-      int gi = -1;
+      int gi = -1; // see if the argument matches one of the band names
       for(int k = 0; k < groundref.size(); k++){
-	 // ground ref band name
+        // ground ref band name
         const char * grbn = vec_band_names[groundref[k]].c_str();
         if(strcmpz(&console_string[2], grbn)){
           gi = k;
@@ -431,6 +431,7 @@ void zprInstance::processString(){
 
       // printf("%s\n", &console_string[2]);
       if(gi >= 0){
+        // had a match on one of the groundref names
         if(groundref_disable.count(gi)){
           groundref_disable.erase(gi);
         }
@@ -441,6 +442,23 @@ void zprInstance::processString(){
           cout << "***" << *it << endl;
         }
       }
+      else{
+        // didn't match on groundref name. Is this a number?
+        str y(&console_string[2]);
+        if(is_int(y)){
+	  int gi = atoi(y.c_str());
+          if(groundref_disable.count(gi)){
+            groundref_disable.erase(gi);
+          }
+          else{
+            groundref_disable.insert(gi);
+          }
+          for(set<int>::iterator it = groundref_disable.begin(); it != groundref_disable.end(); it++){
+            cout << "***" << *it << endl;
+          }
+        }
+      }
+
     }
     // rebuffer the related glImage here!
     std::vector<glPlottable *>::iterator it;
@@ -1417,7 +1435,7 @@ void glPoints::drawMe(){
 
     float ci = 0.;
     int n_groundref_enabled = groundref.size() - groundref_disable.size();
-    map<float, float> class_label_mapping; //     for(size_t i = 0; i < groundref.size(); i++) if(groundref_disable.count(i))
+    map<float, float> class_label_mapping; // for(size_t i = 0; i < groundref.size(); i++) if(groundref_disable.count(i))
     class_label_mapping.clear();
     for(int i = 0; i < groundref.size(); i++){
       if(groundref_disable.count(i)){
@@ -1441,7 +1459,7 @@ void glPoints::drawMe(){
     for(size_t i = 0; i < nf; i += 3){
       class_label = d[i / 3];
       if(labels_in_window.count(class_label) < 1){
-	      labels_in_window[class_label] = 0.;
+        labels_in_window[class_label] = 0.;
       }
       labels_in_window[class_label] +=1.;
     }
