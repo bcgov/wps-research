@@ -352,8 +352,9 @@ vector<string> parse_band_names(string fn){
 }
 
 vector<int> parse_groundref_names(string fn){
+  // groundref one-hot encoded bands, are assumed to NOT contain numbers within the band name
   int ci = 0;
-  int debug = false;
+  int debug = false; // turn this on to debug problems with ground-ref bandnames recognition
   int at_gt = false;
   vector<int> results;
   vector<string> names(parse_band_names(fn));
@@ -367,6 +368,7 @@ vector<int> parse_groundref_names(string fn){
 
     for(vector<string>::iterator it2 = w.begin(); it2 != w.end(); it2++){
       string y(*it2);
+      y = strip_leading_zeros(y);
       y = trim(y, '(');
       y = trim(y, ')');
       if(debug) cout << "\t\t" << y << endl;
@@ -501,6 +503,7 @@ void multilook_scene(size_t k){
     for(size_t i = 0; i < np; i++){
       float d = bb[i];
       if(!(d == 0. || d == 1.)){
+	printf("\tband_index %zu\n", k);
         err("assertion failed: that groundref be valued in {0,1} only");
       }
     }
@@ -515,3 +518,10 @@ void multilook_scene(size_t k){
     }
   }
 }
+
+str strip_leading_zeros(str s){
+  str ss(s);
+  ss =  ss.erase(0, min(ss.find_first_not_of('0'), ss.size() - 1));
+  return(ss);
+}
+
