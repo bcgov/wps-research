@@ -446,15 +446,17 @@ void zprInstance::processString(){
         // didn't match on groundref name. Is this a number?
         str y(&console_string[2]);
         if(is_int(y)){
-	  int gi = atoi(y.c_str());
-          if(groundref_disable.count(gi)){
-            groundref_disable.erase(gi);
-          }
-          else{
-            groundref_disable.insert(gi);
-          }
-          for(set<int>::iterator it = groundref_disable.begin(); it != groundref_disable.end(); it++){
-            cout << "***" << *it << endl;
+          int gi = atoi(y.c_str());
+          if(gi >=0 && gi < groundref.size()){
+            if(groundref_disable.count(gi)){
+              groundref_disable.erase(gi);
+            }
+            else{
+              groundref_disable.insert(gi);
+            }
+            for(set<int>::iterator it = groundref_disable.begin(); it != groundref_disable.end(); it++){
+              cout << "***" << *it << endl;
+            }
           }
         }
       }
