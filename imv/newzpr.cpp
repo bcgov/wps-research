@@ -412,16 +412,71 @@ void zprInstance::processString(){
     // iterate analysis window!
     printf("iterate analysis window..\n");
 
+    int half_win = (NWIN - 1) / 2;
     long int i, j;
-    for0(i, SUB_MM){
-    for0(j, SUB_MM){
-    }
-    }
+    int n_inc = 10;
 
+    for(i =0; i < SUB_MM; i += n_inc){
+
+      if(i >= half_win && i <= (SUB_MM - 1 - half_win)){
+
+        for(j = 0; j < SUB_MM; j += n_inc){
+
+          if(j >= half_win && j < (SUB_MM - 1 - half_win)){
+
+            printf("i %ld j %ld\n", i, j);
+            WIN_I = i;
+            WIN_J = j;
+
+            if(true){
+              SA<float> * dat4 = TGT;
+              size_t i, j, k;
+
+              // print out data under cursor
+              printf("bi\tbn\td\n");
+              for0(k, IMG_NB){
+                for0(i, 1){
+                  for0(j, 1){
+                    float d = (*SUB)[(k * SUB_MM * SUB_MM) + (SUB_MM * (WIN_I + i)) + (WIN_J + j)];
+                    printf("%d\t%s\t%e\n", k, vec_band_names[k].c_str(), (double)d);
+                  }
+                }
+              }
+
+              // do the work
+              for0(k, IMG_NB){
+                for0(i, NWIN){
+                  for0(j, NWIN){
+                    float d = (*SUB)[(k * SUB_MM * SUB_MM) + (SUB_MM * (WIN_I + i)) + (WIN_J + j)];
+                    (*dat4)[(k * NWIN* NWIN) + (i * NWIN) + j] = d;
+                  }
+                }
+              }
+              TGT_MYIMG->initFrom(dat4, NWIN, NWIN, IMG_NB);
+              ((glImage *)TGT_GLIMG)->rebuffer();
+              zprInstance * p = this;
+
+              for(int k = 0; k <= 4; k++){
+                zprInstance * a = myZprManager->myZprInstances->at(k);
+                a->focus();
+                a->mark();
+                a->display();
+              }
+
+              focus();
+              mark();
+              display();
+              myZprDisplay();
+
+            }
+
+          }
+        }
+      }
+    }
 
     // WIN_I = (y + NWIN) >= SUB_MM ? SUB_MM - NWIN : y;
     // WIN_J = (x + NWIN) >= SUB_MM ? SUB_MM - NWIN : x;
-
 
   }
 
