@@ -90,6 +90,9 @@ void writeHeader(const char * filename, int NRows, int NCols, int NBand);
 vector<string> parse_band_names(string fn); // read band names from header file
 vector<int> parse_groundref_names(string fn); // indices of groundref bands
 
+str strip_leading_zeros(str s);
+
+
 int hsv_to_rgb(float *r, float *g, float *b, float h, float s, float v);
 // vector<float> color_wheel_rgb(size_t n_class);
 
