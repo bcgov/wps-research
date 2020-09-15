@@ -19,6 +19,6 @@ zips = os.popen("ls -1 " + i_d + "*.zip").readlines()
 zips = [z.strip() for z in zips]
 
 for z in zips:
-    cmd = "unzip -d " + o_d + " " + z
+    cmd = "unzip -o -d " + o_d + " " + z
     print(cmd)
     a = os.system(cmd)
