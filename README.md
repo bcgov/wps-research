@@ -21,8 +21,8 @@ To appear: more utilities for integrating open remotely-sensed imagery
 ## Collaborators and Contributors:
 * Dana Hicks, BCWS
 * Joanna Wand, BCWS
-* Musfiq Rahman, TRU
-* David Hill, TRU
+* Dr. Musfiq Rahman, TRU
+* Dr. David Hill, TRU
 
 ### TRU Computing Science ML/AI Students Co-supervised:
 * Gagan Bajwa
