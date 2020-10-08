@@ -64,5 +64,5 @@ print("mu_2 = mu_2 + d_mu = ", mu_2)
 write_binary(d_2, ofn)
 ohfn = (ofn[:-4] + '.hdr') if (ofn[-4:] == '.bin') else (ofn + '.hdr')
 
-write_hdr(ohfn, samples_1, lines_1, bands_1):
-print("ohfn " + ohfn)a
+write_hdr(ohfn, samples_1, lines_1, bands_1)
+print("ohfn " + ohfn)
