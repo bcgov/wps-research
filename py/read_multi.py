@@ -6,15 +6,8 @@ adapted from a script worked on with francesca at: https://github.com/franarama/
 usage:
     python read_multispectral.py sentinel2.bin
     
-tested on Python 2.7.15+ (default, Nov 27 2018, 23:36:35) [GCC 7.3.0] on linux2
-Ubuntu 18.04.2 LTS
-
-with
-    numpy.version.version
-        '1.16.2'
-and
-    matplotlib.__version__
-        '2.2.4'
+tested on Python 2.7.15+ (default, Nov 27 2018, 23:36:35) [GCC 7.3.0] on linux2 (Ubuntu 18.04.2 LTS)
+with numpy.version.version '1.16.2' and matplotlib.__version__ '2.2.4'
 
 installation of numpy and matplotlib (Ubuntu):
     sudo apt install python-matplotlib python-numpy
@@ -37,10 +30,9 @@ assert_exists(fn)
 # read header and print parameters
 samples, lines, bands = read_hdr(hdr)
 for f in ['samples', 'lines', 'bands']:
-    exec('print("' + f + ' =" + str(' +  f + '));')
-samples = int(samples)
-lines = int(lines)
-bands = int(bands)
+    exec('print("' + f + ' =" + str(' +  f + '))')
+    exec(f + ' = int(' + f + ')')
+    
 # read binary IEEE 32-bit float data
 npx = lines * samples # number of pixels
 data = read_float(sys.argv[1]).reshape((bands, npx))
@@ -52,7 +44,7 @@ if bands == 1:
     band_select = [0, 0, 0,]
 rgb = np.zeros((lines, samples, 3))
 for i in range(0, 3):
-    rgb[:, :, i] = data[band_select[i],:].reshape((lines, samples))
+    rgb[:, :, i] = data[band_select[i], :].reshape((lines, samples))
     
     if not override_scaling:
         # scale band in range 0 to 1
@@ -93,18 +85,23 @@ plt.style.use('dark_background')
 fig = plt.figure()
 ax = fig.add_subplot(1,1,1)
 
-plt.imshow(rgb, vmin = 0., vmax = 1.)
-plt.tight_layout()
-title_s = fn.split("/")[-1]
+plt.imshow(rgb, vmin = 0., vmax = 1.) #plt.tight_layout()
+
+title_s = fn.split("/")[-1] if not exists('title_string.txt') else open('title_string.txt').read().strip() 
 plt.title(title_s, fontsize=11)
+
+if exists('copyright_string.txt'):
+    plt.xlabel(open('copyright_string.txt').read().strip())
+
+plt.tight_layout()
 plt_fn = fn + ".png"
 print("+w", plt_fn)
+
 plt.savefig(plt_fn,
         dpi=300,
         pad_inches =0.)
-if show_plot:
-    plt.show()
 
+if show_plot: plt.show()
 
 '''
 compare with this:
@@ -129,6 +126,4 @@ print("X.shape", X.shape)
             a[:, :, i] /= rng
         (a[:, :, i])[a[:, :, i] < 0.] = 0.
         (a[:, :, i])[a[:, :, i] > 1.] = 1.
-
 '''
-
