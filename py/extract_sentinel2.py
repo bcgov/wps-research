@@ -8,7 +8,7 @@ info = os.popen("gdalinfo --version").read().strip().split(',')
 info = info[0].split()[1].replace('.', '')
 if int(info) < 223:
     err('GDAL version 2.2.3 or higher required')
-
+    
 fn = args[1]
 if fn[-4:] != '.zip':
     err('expected zip format input')
@@ -17,6 +17,7 @@ if not os.path.exists(fn):
     err('could not find input file')
 
 df = fn[:-4] + '.SAFE'
+print(df)
 if not os.path.exists(df):
     a = os.system('unzip ' + fn)
     import time
