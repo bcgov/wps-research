@@ -34,17 +34,27 @@ for line in xml:
     if len(line.split('.xml')) > 1:
         print('\t' + line)
         try:
-            df = df.split(os.path.sep)[-1]
-            print("split on:", df)
+            # need to match MTD_MSIL1C.xml and SENTINEL2_L1C
+            # print("df", str([df]))
+            df = df.split(os.path.sep)[-1] # print("split on:", df)
             dfw = line.split(df)
-            print(dfw)
-            x = df + dfw[1]
-            ds = 'SENTINEL2_L1C:' + x
-            cmd = ['gdal_translate', ds, '--config GDAL_NUM_THREADS 8', '-of ENVI', '-ot Float32', x.replace('MTD_MSIL1C.xml', 'SENTINEL2_L1C').replace(':', '_') + '.bin']
+            
+            terminator = dfw[-1].strip(os.path.sep).split(':')[0] # print("terminator", terminator)
+
+            # print("dfw", str([dfw]))
+            ident = dfw[0].split('=')[1].split(':')[0]
+            # print("ident", str([ident]))
+            ds = ident + ':' + df + dfw[1]
+            # print("ds", str([ds]))
+            of = (df + dfw[1]).replace(terminator, ident).replace(':', '_') + '.bin'
+            # print("of", str([of]))
+            cmd = ['gdal_translate', ds, '--config GDAL_NUM_THREADS 8', '-of ENVI', '-ot Float32', of]
             cmds.append(' '.join(cmd))
+            print('\t' + cmd)
         except Exception:
             pass
 for cmd in cmds:
+    # print(cmd)
     run(cmd)
 
 '''
