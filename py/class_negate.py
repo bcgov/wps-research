@@ -9,6 +9,6 @@ if len(args) < 2:
 fn = args[1]
 samples, lines, bands, data = read_binary(fn)
 
-data = [1. - d for d in data]
+data = np.array([1. - d for d in data])
 
 write_binary(data, args[1] + "_negate.bin")
