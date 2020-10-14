@@ -96,7 +96,7 @@ for f in bin_files:
         ofn, hfn = of + ".bin", of + ".hdr"
         output = copy.deepcopy(data)
         for i in range(0, len(data)):
-            output[i] = 0. if data[i] == c else 1.
+            output[i] = 1. if data[i] == c else 0.
         write_binary(output, ofn)
         write_hdr(hfn, samples, lines, bands)
         n_files_written += 1
