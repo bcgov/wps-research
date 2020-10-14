@@ -9,12 +9,6 @@ if len(args) < 2:
 fn = args[1]
 samples, lines, bands, data = read_binary(fn)
 
-count = {}
-for d in data:
-    if d not in count:
-        count[d] = 0
-    count[d] += 1
+data = [1. - d for d in data]
 
-print(count.keys())
-
-# not finished
+write_binary(data, args[1] + "_negate.bin")
