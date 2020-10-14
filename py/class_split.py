@@ -1,7 +1,9 @@
-'''class_split.py: split float valued map, into binary class maps
+'''class_split.py: split float valued map, into binary class maps..
 
-use associated *.lut file, if available to code the file names for the binary
-class maps produced '''
+..this was developed to translate the VRI into a one-hot encoded format.
+
+it will use an associated *.lut file, if available to code the file names
+for the binary class maps produced '''
 import os
 import sys
 from misc import *
@@ -93,10 +95,11 @@ for f in bin_files:
             print("value_to_name", str(value_to_name))
             err("lookup not found:" + str(c) +
                 " count.keys():" + str(count.keys()))
+    
         ofn, hfn = of + ".bin", of + ".hdr"
         output = copy.deepcopy(data)
         for i in range(0, len(data)):
-            output[i] = 1. if data[i] == c else 0.
+            output[i] = (1. if data[i] == c else 0.)
         write_binary(output, ofn)
         write_hdr(hfn, samples, lines, bands)
         n_files_written += 1
