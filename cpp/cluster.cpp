@@ -76,8 +76,8 @@ unsigned int top(unsigned int j){
 
     for0(i, k_use){
       ki = (j * kmax) + i;
-      ni = dmat_i[ki];
-      // printf("j %ld i %ld ki %ld ni %ld rho[ni] %f\n", j, i, ki, ni, rho[ni]);
+      ni = dmat_i[ki]; // printf("j %ld i %ld ki %ld ni %ld rho[ni] %f\n", j, i, ki, ni, rho[ni]);
+
       if(rho[ni] > rho_max){
         rho_max = rho[ni];
         max_i = ni;
@@ -88,8 +88,7 @@ unsigned int top(unsigned int j){
     }
     else{
       label[j] = next_label ++;
-      top_i.push_back(j);
-      // printf("next_label %ld np %ld\n", (long int)next_label, (long int)np);
+      top_i.push_back(j); // printf("next_label %ld np %ld\n", (long int)next_label, (long int)np);
       return label[j];
     }
   }
@@ -103,9 +102,8 @@ int main(int argc, char** argv){
   system("mkdir label");
   system("mkdir out");
 
-  str bfn(argv[1]);
-  //int nrow, ncol, nband;
-  str hfn(hdr_fn(bfn)); //plit(bfn, '.')[0] + str(".hdr"));
+  str bfn(argv[1]); //int nrow, ncol, nband;
+  str hfn(hdr_fn(bfn));
   hread(hfn, nrow, ncol, nband);
   printf("nrow %d ncol %d nband %d\n", nrow, ncol, nband);
 
@@ -116,7 +114,6 @@ int main(int argc, char** argv){
   printf("(np^2 - n) / 2=%f\n", (((float)np * (float)np) - (float)np) / 2.);
 
   // scale the data first?
-
   dmat_d = falloc(np * kmax);
   dmat_i = (unsigned int *)alloc(np * (size_t)kmax * (size_t)sizeof(unsigned int));
 
@@ -186,8 +183,7 @@ int main(int argc, char** argv){
       rho[i] = 1. / d_avg;
     }
 
-    //printf("hill climbing..\n");
-    top_i.push_back(0); // null is self-top
+    top_i.push_back(0); // hill climbing; null is self-top
     next_label = 1;
     for0(i, np) label[i] = 0; // default label: unlabeled
 
