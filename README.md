@@ -65,7 +65,9 @@ Tested on ubuntu 20
     
     video of clustering: https://www.youtube.com/watch?v=ooOHEubDNvM
    
-## Some outdated prelminary results (to be updated)
+## Some preliminary figures (not current)
+### Forest change detection using RCM
+<img src="output/difference.gif" width="640">
 
 ### K-means unsupervised classification
 <img src="output/kmeans.bin_wheel.bin.png" width="640">
