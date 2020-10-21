@@ -1,7 +1,7 @@
 #include"../misc.h" // tiler for ML app
 size_t nrow, ncol, nband, np;
 
-void incr(map<float, unsigned int> &m, float key){
+void accumulate(map<float, unsigned int> &m, float key){
   if(m.count(key) < 1) m[key] = 0;
   m[key] += 1;
 }
@@ -44,6 +44,7 @@ int main(int argc, char ** argv){
     for(j = 0; j < ncol - ps; j += ps){
       // start col for patch
       ci = 0;
+
       for0(di, ps){
         m = i + di;
         for0(dj, ps){
@@ -62,21 +63,15 @@ int main(int argc, char ** argv){
 	  int no_match = true;
           
 	  for0(k, nref){
-            unsigned int key = k + 1;
-            float d = dat[((k + nb) * np) + n];
-            if(d == 1.){
+            if(dat[((k + nb) * np) + n] == 1.){
 	      no_match = false;
-              if(count.count(key) < 1) count[key] = 0;
-              count[key] += 1;
+	      accumulate(count, k + 1);
             }
           }
-
-	  if(no_match){
-	    if(count.count(0) < 1) count[0] = 0;
-	    count[0] += 1;
-	  }
+	  if(no_match) accumulate(count, 0);
         }
       }
+
       float max_k = 0.;
       size_t max_c = 0;
       map<float, unsigned int>::iterator it; // lazy match
@@ -86,6 +81,7 @@ int main(int argc, char ** argv){
           max_k = it->first;
         }
       }
+
       size_t n_match = 0;
       for(it = count.begin(); it != count.end(); it++) if(it->second == max_c) n_match ++;
 
@@ -95,6 +91,7 @@ int main(int argc, char ** argv){
         if(n_match > 1) printf("\tWarning: patch had competing classes\n");
       }
       else nontruthed ++;
+      
       fwrite(&i, sizeof(size_t), 1, f_patch_i);
       fwrite(&j, sizeof(size_t), 1, f_patch_j);
       fwrite(&max_k, sizeof(float), 1, f_patch_label);
