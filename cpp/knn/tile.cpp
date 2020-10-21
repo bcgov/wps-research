@@ -25,6 +25,8 @@ int main(int argc, char ** argv){
   float * patch = falloc(sizeof(float) * floats_per_patch);
 
   FILE * f_patch = wopen("patch.dat");
+  FILE * f_patch_i = wopen("patch_i.dat");
+  FILE * f_patch_j = wopen("patch_j.dat");
   FILE * f_patch_label = wopen("patch_label.dat");
 
   map<float, unsigned int> count; // count labels on a patch
@@ -115,6 +117,8 @@ int main(int argc, char ** argv){
   // patch data
 
   fclose(f_patch);
+  fclose(f_patch_i);
+  fclose(f_patch_j);
   fclose(f_patch_label);
   free(patch);
   return 0;
