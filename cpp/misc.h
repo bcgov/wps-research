@@ -77,11 +77,14 @@ template<class T> std::ostream& operator << (std::ostream& os, const std::set<T>
 
 // output operator for map container
 template<class A, class B> std::ostream& operator << (std::ostream& os, const std::map<A, B>& v){
-  os << "{" << endl;
+  os << "{";
   for (typename std::map<A, B>::const_iterator ii = v.begin(); ii != v.end(); ++ii){
-    os << ii->first << ":" << ii->second << ","; //endl;
+    os << ii->first << ":" << ii->second;
+    if(std::next(ii) != v.end()){
+      os << ",\n"; //endl;
+    }
   }
-  os << "}" << endl;
+  os << "}";
   return os;
 }
 
