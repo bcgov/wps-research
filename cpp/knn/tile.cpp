@@ -4,7 +4,7 @@ size_t nrow, ncol, nband, np;
 int main(int argc, char ** argv){
   if(argc < 4) err("tile [input envi-type4 floating point stack bsq with gr] [# of groundref classes at end] [patch size]\n");
 
-  int ps, nref;
+  unsigned int ps, nref;
   str bfn(argv[1]);
   str hfn(hdr_fn(bfn));
   hread(hfn, nrow, ncol, nband);
@@ -24,9 +24,12 @@ int main(int argc, char ** argv){
   unsigned int floats_per_patch = ps * ps * nb;
   float * patch = falloc(sizeof(float) * floats_per_patch);
 
-  FILE * f_patch = wopen("patches.dat");
+  FILE * f_patch = wopen("patch.dat");
+  FILE * f_patch_label = wopen("patch_label.dat");
 
-  map<float, size_t> count; // count labels on a patch
+  map<float, unsigned int> count; // count labels on a patch
+  size_t truthed = 0;
+  size_t nontruthed = 0;
 
   for(i = 0; i < nrow - ps; i += ps){
     // start row for patch
@@ -44,39 +47,66 @@ int main(int argc, char ** argv){
       }
       if(ci != ps * ps * nb) err("patch element count mismatch");
       // don't forget to calculate class for patch, by majority
-      //
-      count.clear();
+      count.clear(); // mass for each label
+
+      // count labels on a patch
       for0(di, ps){
         m = (i + di) * ncol;
         for0(dj, ps){
-          n = j + dj + m;
+          n = (j + dj) + m;
+
+	  int no_match = true;
           for0(k, nref){
-            // histogram: mass for each label
-            float key = dat[((k + nb) * np) + n];
-            if(count.count(key) < 1) count[key] = 0;
-            count[key] += 1;
+	    unsigned int key = k + 1;
+
+            float d = dat[((k + nb) * np) + n];
+            if(d == 1.){
+	      no_match = false;
+              if(count.count(key) < 1) count[key] = 0;
+              count[key] += 1;
+            }
           }
+
+	  if(no_match){
+	    if(count.count(0) < 1) count[0] = 0;
+	    count[0] += 1;
+	  }
         }
       }
-      float max_key = -1.;
-      size_t max_count = 0;
-      map<float, size_t>::iterator it; // lazy match
+      float max_k = 0.;
+      size_t max_c = 0;
+      map<float, unsigned int>::iterator it; // lazy match
       for(it = count.begin(); it != count.end(); it++){
-        if(it->second > max_count){
-          max_count = it->second;
-          max_key = it->first;
+
+        if(it->first > 0 && it->second > max_c){
+          max_c = it->second; // no leading class: doesn't count
+          max_k = it->first;
         }
       }
       size_t n_match = 0;
-      for(it = count.begin(); it != count.end(); it++) if(it->second == max_count) n_match ++;
+      for(it = count.begin(); it != count.end(); it++) if(it->second == max_c) n_match ++;
 
-      if(n_match > 1){
-        printf("\tWarning: patch had competing classes\n");
+      if(max_c > 0){
+        truthed ++;
+        cout << count << " max_c " << max_c << endl;
+        if(n_match > 1) printf("\tWarning: patch had competing classes\n");
+      }
+      else{
+        nontruthed ++;
       }
 
       fwrite(patch, sizeof(float), floats_per_patch, f_patch);
+      fwrite(&max_k, sizeof(float), 1, f_patch_label);
     }
   }
+  printf("\n");
+  printf("nwin:          %zu\n", (size_t)ps);
+  printf("image pixels:  %zu\n", np);
+  printf("pix per patch: %zu\n",(size_t)(ps * ps));
+  printf("approx patches:%zu\n", np / (ps * ps));
+  printf("total patches: %zu\n", truthed + nontruthed);
+  printf("truthed:       %zu\t\t[%.2f / 100]\n", truthed, 100. * (float)(truthed) / ((float)(truthed + nontruthed)));
+  printf("nontruthed:    %zu\n", nontruthed);
 
   // patch label
   // patch i, patch j
@@ -85,6 +115,7 @@ int main(int argc, char ** argv){
   // patch data
 
   fclose(f_patch);
+  fclose(f_patch_label);
   free(patch);
   return 0;
 }
