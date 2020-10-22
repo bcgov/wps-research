@@ -6,7 +6,6 @@ void accumulate(map<float, unsigned int> &m, float key){
   m[key] += 1;
 }
 
-
 // could add "stride" parameter later (increase patches towards moving window)
 int main(int argc, char ** argv){
   if(argc < 4) err("tile [input envi-type4 floating point stack bsq with gr] [# of groundref classes at end] [patch size]\n");
