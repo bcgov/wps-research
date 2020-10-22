@@ -7,6 +7,7 @@ void accumulate(map<float, unsigned int> &m, float key){
 }
 
 
+// could add "stride" parameter later (increase patches towards moving window)
 int main(int argc, char ** argv){
   if(argc < 4) err("tile [input envi-type4 floating point stack bsq with gr] [# of groundref classes at end] [patch size]\n");
 
@@ -40,7 +41,7 @@ int main(int argc, char ** argv){
   map<float, unsigned int> count; // count labels on a patch
 
   for(i = 0; i < nrow - ps; i += ps){
-    // start row for patch
+    // start row for patch (stride parameter would be the step for this loop)
     for(j = 0; j < ncol - ps; j += ps){
       // start col for patch
       ci = 0;
