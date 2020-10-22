@@ -108,16 +108,10 @@ int main(int argc, char ** argv){
   printf("  truthed:       %zu\t\t[%.2f / 100]\n", truthed, 100. * (float)(truthed) / ((float)(truthed + nontruthed)));
   printf("  nontruthed:    %zu\n", nontruthed);
 
-  // patch label
-  // patch i, patch j
-  // patch start coord i, j (patch i, j * ps)
-  // patch centre coord i, j
-  // patch data
-
-  fclose(f_patch);
-  fclose(f_patch_i);
-  fclose(f_patch_j);
-  fclose(f_patch_label);
+  fclose(f_patch); // patch data
+  fclose(f_patch_i); // patch start i
+  fclose(f_patch_j); // patch start j
+  fclose(f_patch_label); // patch label
   free(patch);
   return 0;
 }
