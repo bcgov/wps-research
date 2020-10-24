@@ -84,7 +84,7 @@ int main(int argc, char ** argv){
     }
 
     size_t nw = fwrite(dd, sizeof(float), np * 2, of[i]);
-    if(nr != np * 2) err("unexpected write size");
+    if(nw != np * 2) err("unexpected write size");
 
     free(df);
     free(dg);
