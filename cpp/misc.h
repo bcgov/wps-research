@@ -128,6 +128,7 @@ float * falloc(size_t nf){
 }
 */
 
+
 //a trim from start (in place)
 static inline void ltrim(std::string &s){
   s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](int ch){
@@ -143,6 +144,27 @@ static inline void rtrim(std::string &s){
   }
   ).base(), s.end());
 }
+
+
+static inline void ltrim(str & s, str chars){
+      //	= "\t\n\v\f\r ")
+    s.erase(0, s.find_first_not_of(chars));
+}
+ 
+static inline void rtrim(str & s, str chars){
+       //	= "\t\n\v\f\r "){
+   std::size_t found = s.find_last_not_of(chars);
+   printf("found %zu strlen %zu\n", found, (size_t)strlen(s.c_str()));
+   if (found!=std::string::npos) s.erase(found + 1);
+
+}
+ 
+static inline void trim(str & s, str chars){
+	       //	= "\t\n\v\f\r "){
+    ltrim(s, chars);
+    rtrim(s, chars);
+}
+
 
 // trim from both ends (in place)
 static inline void trim(std::string &s){
