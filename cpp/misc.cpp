@@ -209,7 +209,7 @@ size_t hread(str hfn, size_t & nrow, size_t & ncol, size_t & nband){
 }
 
 void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband){
-  cout << "+w " << hfn << endl;  
+  cout << "+w " << hfn << " nrow " << nrow << " ncol " << ncol << " nband " << nband << endl;  
   ofstream hf(hfn);
   if(!hf.is_open()) err("failed to open header file for writing");
    hf << "ENVI" << endl;
@@ -225,7 +225,7 @@ void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband){
 }
 
 void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband, size_t data_type){
-  cout << "+w " << hfn << endl;
+  cout << "+w " << hfn << " nrow " << nrow << " ncol " << ncol << " nband " << nband << endl;
   ofstream hf(hfn);
   if(!hf.is_open()) err("failed to open header file for writing");
    hf << "ENVI" << endl;

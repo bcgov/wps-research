@@ -10,10 +10,11 @@ test ! -f class_onehot.exe && g++ -w -O3 class_onehot.cpp  misc.cpp -o class_one
 test ! -f class_recode.exe && g++ -w -O3 class_recode.cpp  misc.cpp -o class_recode.exe -lpthread &
 test ! -f class_wheel.exe && g++ -w -O3 class_wheel.cpp  misc.cpp -o class_wheel.exe -lpthread &
 test ! -f cluster.exe && g++ -w -O3 cluster.cpp  misc.cpp -o cluster.exe -lpthread &
+test ! -f convert_iq_to_s2.exe && g++ -w -O3 convert_iq_to_s2.cpp  misc.cpp -o convert_iq_to_s2.exe -lpthread &
 test ! -f cv.exe && g++ -w -O3 cv.cpp  misc.cpp -o cv.exe -lpthread &
 test ! -f hclust.exe && g++ -w -O3 hclust.cpp  misc.cpp -o hclust.exe -lpthread &
 test ! -f multilook.exe && g++ -w -O3 multilook.cpp  misc.cpp -o multilook.exe -lpthread &
-test ! -f multiply.exe && g++ -w -O3 multiply.cpp  misc.cpp -o multiply.exe -lpthread &
-test ! -f nodata.exe && g++ -w -O3 nodata.cpp  misc.cpp -o nodata.exe -lpthread
+test ! -f multiply.exe && g++ -w -O3 multiply.cpp  misc.cpp -o multiply.exe -lpthread
+test ! -f nodata.exe && g++ -w -O3 nodata.cpp  misc.cpp -o nodata.exe -lpthread &
 test ! -f snip.exe && g++ -w -O3 snip.cpp  misc.cpp -o snip.exe -lpthread &
 test ! -f vri_rasterize.exe && g++ -w -O3 vri_rasterize.cpp  misc.cpp -o vri_rasterize.exe -lpthread &
