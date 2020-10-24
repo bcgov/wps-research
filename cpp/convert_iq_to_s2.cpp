@@ -72,10 +72,9 @@ int main(int argc, char ** argv){
     FILE * g = fopen(b.c_str(), "rb");
     if(f == NULL || g == NULL) err("failed to open input binary file");
 
-    float * df = bread(a, nr, nc, nb);
-    float * dg = bread(b, nr, nc, nb);
-
-    float * dd = falloc(np * 2);
+    float * df = bread(a, nr, nc, nb); // read file
+    float * dg = bread(b, nr, nc, nb); // read file
+    float * dd = falloc(np * 2); // allocate floats
 
     size_t j, j2;
     for0(j, np){
@@ -84,7 +83,7 @@ int main(int argc, char ** argv){
       dd[j2 + 1] = dg[j];
     }
 
-    size_t nr = fwrite(dd, sizeof(float), np * 2, of[i]);
+    size_t nw = fwrite(dd, sizeof(float), np * 2, of[i]);
     if(nr != np * 2) err("unexpected write size");
 
     free(df);
