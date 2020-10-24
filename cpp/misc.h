@@ -35,6 +35,15 @@
 
 using namespace std;
 
+inline char sep(){
+	#ifdef _WIN32
+    		return '\\';
+	#else
+    		return '/';
+	#endif
+}
+
+
 #include <stdio.h> /* defines FILENAME_MAX */
 #ifdef WINDOWS
 #include <direct.h>
