@@ -91,6 +91,9 @@ int main(int argc, char ** argv){
     free(dg);
     free(dd);
 
+    str c(odir + sep() + str(outb[i]) + str(".hdr"));
+    hwrite(c, nr, nc, nb, 6);
+
   }
 
   for0(i, 4) fclose(of[i]);
