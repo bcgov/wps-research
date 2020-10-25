@@ -45,3 +45,12 @@ for i in range(0, len(folders)):
                             'yes', # correct for average faraday rotation on scene
                             '1', # alpha angle used for visualization
                             '4'])) # vertical multiook factor
+
+    f1 = folders[i] + 'scm_fr'
+    f2 = folders[i] + 'scm_fr_t4'
+    f3 = folders[i] + 'scm_fr_t4_fl'
+    for fi in [f1, f2, f3]:
+        cmd = 'rm -rf ' + fi
+        print(cmd)
+        a = os.system(cmd)
+
