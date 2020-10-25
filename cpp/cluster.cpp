@@ -143,11 +143,13 @@ int main(int argc, char** argv){
 
   }
   else{
-    FILE * f = ropen("dmat.d"); // restore dmat
+    FILE * f = fopen("dmat.d", "rb"); // restore dmat
+    if(!f) err("failed to open dmat.d");
     fread(dmat_d, np * kmax * sizeof(float), 1, f);
     fclose(f);
 
-    f = ropen("dmat.i");
+    f = fopen("dmat.i", "rb");
+    if(!f) err("failed to open dmat.i");
     fread(dmat_i, np * kmax * sizeof(unsigned int), 1, f);
     fclose(f);
   }
