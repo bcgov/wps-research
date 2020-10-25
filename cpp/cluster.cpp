@@ -199,6 +199,7 @@ int main(int argc, char** argv){
     float df;
     unsigned int ti, pi;
 
+    // should actually colour by MEAN instead of MODE so that the colouring is more distinct!
     for0(u, nband){
       for0(i, np){
         pi = np * u;
