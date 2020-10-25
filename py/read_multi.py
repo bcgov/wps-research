@@ -87,11 +87,13 @@ ax = fig.add_subplot(1,1,1)
 
 plt.imshow(rgb, vmin = 0., vmax = 1.) #plt.tight_layout()
 
-title_s = fn.split("/")[-1] if not exists('title_string.txt') else open('title_string.txt').read().strip() 
+ff = (fn.split(os.path.sep))[:-1] + os.path.sep
+
+title_s = fn.split("/")[-1] if not exists(ff + 'title_string.txt') else open(ff + 'title_string.txt').read().strip() 
 plt.title(title_s, fontsize=11)
 
-if exists('copyright_string.txt'):
-    plt.xlabel(open('copyright_string.txt').read().strip())
+if exists(ff + 'copyright_string.txt'):
+    plt.xlabel(open(ff+ 'copyright_string.txt').read().strip())
 
 plt.tight_layout()
 plt_fn = fn + ".png"
