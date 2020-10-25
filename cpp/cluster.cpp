@@ -91,7 +91,7 @@ unsigned int top(unsigned int j){
 }
 
 int main(int argc, char** argv){
-  kmax = 2222; // should probably modulate this somewhere. Probably good for practical purposes
+  kmax = 1111; // should probably modulate this somewhere. Probably good for practical purposes
 
   if(argc < 2) err("cluster [bin file name. hdr file must also be present");
 
@@ -162,8 +162,8 @@ int main(int argc, char** argv){
   float d_avg;
   unsigned int i, j;
 
-  // there is an arbitrary threshold in this loop, need to remove it!
-  for(k_use = 1; k_use <= kmax / 2; k_use++){
+  // need to make arbitrary step, a parameter
+  for(k_use = 1; k_use <= kmax; k_use += 10){
 
     top_i.clear();
     if(k_use > kmax) err("kuse > kmax"); //printf("density estimation..\n");
