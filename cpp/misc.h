@@ -220,6 +220,10 @@ size_t fsize(string fn);
 // note this should be able to modulate between available protocols (like ifstream, ofstream, etc. , fwrite, fread, if available)
 
 FILE * wopen(string fn);
+FILE * wopen(const char * fn);
+FILE * ropen(string fn);
+FILE * ropen(const char * fn);
+
 
 class f_idx{
   public: // float, index tuple object
