@@ -16,7 +16,8 @@ int main(int argc, char ** argv){
   if(argc > 3) n_groundref = atoi(argv[3]); // number of bands at end, to consider as groundref
 
   if(!exists(IMG_FN)) err("failed to open input file"); // check if input file exists
-  string mfn(IMG_FN + string(".ml")); // look for saved multilook file // cout << "multilook file name: " << mfn << endl;
+  string mfn(IMG_FN + string(".ml")); // look for saved multilook file 
+  cout << "multilook file name: " << mfn << endl;
 
   // analysis window size
   if(argc > 2){
