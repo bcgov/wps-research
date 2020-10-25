@@ -87,7 +87,7 @@ ax = fig.add_subplot(1,1,1)
 
 plt.imshow(rgb, vmin = 0., vmax = 1.) #plt.tight_layout()
 
-ff = (fn.split(os.path.sep))[:-1] + os.path.sep
+ff = os.path.sep.join((fn.split(os.path.sep))[:-1]) + os.path.sep
 
 title_s = fn.split("/")[-1] if not exists(ff + 'title_string.txt') else open(ff + 'title_string.txt').read().strip() 
 plt.title(title_s, fontsize=11)
