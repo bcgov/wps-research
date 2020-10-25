@@ -88,7 +88,7 @@ vector<string> parseHeaderFile(string hfn, size_t & NRow, size_t & NCol, size_t 
 void writeHeader(const char * filename, int NRows, int NCols, int NBand);
 
 vector<string> parse_band_names(string fn); // read band names from header file
-vector<int> parse_groundref_names(string fn); // indices of groundref bands
+vector<int> parse_groundref_names(string fn, int n_groundref); // indices of groundref bands
 
 str strip_leading_zeros(str s);
 
