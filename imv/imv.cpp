@@ -62,6 +62,12 @@ int main(int argc, char ** argv){
   float scalef = (float)min / (float)imin;
   printf("scalef %f\n", scalef);
 
+  // width, height, nr, nc
+  int height_lim = nr > height; // screen height too small for image
+  int width_lim = nc > width; // screen width too small for image
+
+  scalef = 0.98 * (float)(height > width ? width : height) / (float)(nr > nc? nr: nc);
+
   SUB_START_I = SUB_START_J = 0;
   SUB_SCALE_F = scalef;
   IMG_NR = nr; IMG_NC = nc; IMG_NB = nb;
@@ -153,7 +159,7 @@ int main(int argc, char ** argv){
   SUB_MYIMG = &b;
 
   // set up window for overview image
-  zprInstance * myZpr = myManager->newZprInstance(nr2, nc2, nb);
+  zprInstance * myZpr = myManager->newZprInstance(nr2, nc2, nb); // "Scene" / overview image
   glImage * myImage = new glImage(myZpr, &a);
   myZpr->setTitle(string("Scene "));
 
