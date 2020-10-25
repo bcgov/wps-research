@@ -33,9 +33,9 @@ int main(int argc, char ** argv){
   size_t width = glutGet(GLUT_SCREEN_WIDTH); // this section: get screen scale
   size_t height = glutGet(GLUT_SCREEN_HEIGHT);
   size_t min_wh = width > height ? height: width;
-  // printf("min_wh %f\n", (float)min_wh);
+  printf("min_wh %f\n", (float)min_wh);
   size_t min = 3 * min_wh / 6; // can adjust scale here. has been 3/6, 3/5, 2/5
-  // printf("min %f\n", (float)min);
+  printf("min %f\n", (float)min);
   size_t nr, nc, nb, nr2, nc2, np2;
 
   string hfn(getHeaderFileName(IMG_FN)); // this section: get image scale
@@ -45,11 +45,10 @@ int main(int argc, char ** argv){
   // printf(" getFileSize %ld expected %ld\n", getFileSize(IMG_FN.c_str()), nr * nc * nb * sizeof(float));
   size_t np = nr * nc;
 
-  // account for case that image may be small
-  size_t min_wh_img = nr > nc ? nc: nr;
+  size_t min_wh_img = nr > nc ? nc: nr; // account for case that image is small!
   //printf("min_wh_img %f\n", (float)min_wh_img);
   if(min > min_wh_img) min = min_wh_img;
-  //printf("min %f\n", (float)min);
+  printf("min %f\n", (float)min);
 
   vec_band_names = parse_band_names(hfn); // read band names
   groundref = parse_groundref_names(hfn, n_groundref);
@@ -61,7 +60,7 @@ int main(int argc, char ** argv){
   }
   size_t imin = nr > nc ? nc: nr;  // this section determine scaling factor 
   float scalef = (float)min / (float)imin;
-  // printf("scalef %f\n", scalef);
+  printf("scalef %f\n", scalef);
 
   SUB_START_I = SUB_START_J = 0;
   SUB_SCALE_F = scalef;
@@ -163,7 +162,7 @@ int main(int argc, char ** argv){
   glImage * myImage2 = new glImage(myZpr2, &b);
   SUB_GLIMG = (void *)myImage2;
   myZpr2->setRightOf(myZpr);
-  myZpr2->setTitle(string("Subset "));
+  myZpr2->setTitle(string("Subscene"));
 
   // target window setup
 
@@ -185,15 +184,13 @@ int main(int argc, char ** argv){
   }
 
   TGT_MYIMG = &c;
-
-  zprInstance *myZpr3 = myManager->newZprInstance(NWIN, NWIN, nb);
-  glImage * myImage3 = new glImage(myZpr3, &c);
+  zprInstance *myZpr3 = myManager->newZprInstance(NWIN, NWIN, nb); // analysis window
+  glImage * myImage3 = new glImage(myZpr3, &c); // image object for analysis window data
   TGT_GLIMG = (void *)myImage3;
   myZpr3->setScreenPosition(0, nr2 + 65);
   myZpr3->setTitle(string("Analysis"));
 
-  // analysis scatter
-  zprInstance * myZpr4 = myManager->newZprInstance(200, 200, nb);
+  zprInstance * myZpr4 = myManager->newZprInstance(200, 200, nb); // analysis window scatter window
   // glBasicSphere * s = new glBasicSphere(0, myZpr4, 0, 0, 0, 1, 1, 1, 1., 10, 10);
 
   vec3 v0(0,0,0); // origin. this section: unit square axes
@@ -202,17 +199,17 @@ int main(int argc, char ** argv){
   glLine yL(myZpr4, v0, vy, 0, 1, 0);
   glLine zL(myZpr4, v0, vz, 0, 0, 1);
 
-  glPoints scatter(myZpr4, myImage3);
+  glPoints scatter(myZpr4, myImage3); // analysis window scatter window scatter plot
   myZpr4->setRightOf(myZpr3); //myZpr4->setScreenPosition(nc2, nr2 + 65);
-  myZpr4->setTitle(string("Analysis"));
+  myZpr4->setTitle(string("Analysis scatter"));
 
   zprInstance * myZpr5 = myManager->newZprInstance(200, 200, nb); // preview scatter plot
   glLine xL2(myZpr5, v0, vx, 1, 0, 0); glLine yL2(myZpr5, v0, vy, 0, 1, 0);
   glLine zL2(myZpr5, v0, vz, 0, 0, 1);
   
-  glPoints scatter2(myZpr5, myImage2); // scatter plot for: what?
-  myZpr5->setRightOf(myZpr2) ; //ScreenPosition(nc2, nr2 + 65); 
-  myZpr5->setTitle(string("Subset ")); // printf("glutMainLoop()\n");
+  glPoints scatter2(myZpr5, myImage2); // scatter plot for: preview window
+  myZpr5->setRightOf(myZpr2) ; // ScreenPosition(nc2, nr2 + 65); 
+  myZpr5->setTitle(string("Subscene scatter")); // printf("glutMainLoop()\n");
   initLighting();
   glutMainLoop();
   return 0;
