@@ -15,12 +15,17 @@ from snappy import ProductIO
 def md(d):  # make folder if not yet exist
     if not os.path.exists(d): os.mkdir(d)
 
-if not os.path.exists("~/GitHub/bcws-psu-research/cpp/convert_iq_to_s2.exe"):
+exe = "home/" + os.popen("whoami").read().strip() + "/GitHub/bcws-psu-research/cpp/convert_iq_to_s2.exe"
+exe = os.path.abspath(exe)
+print(exe)
+
+if not os.path.exists(exe):
     print("Error: failed to find convert_iq_to_s2.exe"); sys.exit(1)
 
-files = [f.strip() for f in os.popen("ls -1 RCM_SLC_ZIP/*.zip").readlines()]
-folders = [f[:-4] + '/' for f in files]
+files = [f.strip() for f in os.popen("ls -1d RCM_SLC_ZIP/*_SLC").readlines()]
+folders = [f + '/' for f in files]
 
+print(folders)
 for i in range(0, len(folders)):
     f = folders[i] + 'manifest.safe'; print(f)
 
@@ -31,7 +36,7 @@ for i in range(0, len(folders)):
     d = ProductIO.readProduct(f)  # read SLC data 
     ProductIO.writeProduct(d, out_folder, 'PolSARPro')  # convert to PolSARPro format
 
-    a = os.system("~/GitHub/bcws-psu-research/cpp/convert_iq_to_s2.exe " + out_folder + " " + s2_folder)
+    a = os.system(exe + " " + out_folder + " " + s2_folder)
     a = os.system(' '.join(['scm',  # a visualization method of Shane Cloude
                             s2_folder, # input s2 matrix format data
                             scm_folder, # output for visualization result
