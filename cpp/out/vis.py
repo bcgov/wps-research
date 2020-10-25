@@ -23,7 +23,8 @@ if not os.path.exists(fn):
 def run(c):
     print(c)
     a = os.system(c)
-    if(a != 0): err("cmd failed" + c)
+    # if(a != 0): err("cmd failed" + c)
+
 run('cp ' + fn + " " + fn[:-4] + '.bin')
 
 run("grep -n n_class ../n_class.csv")
