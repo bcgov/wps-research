@@ -68,6 +68,9 @@ int main(int argc, char ** argv){
   int width_lim = nc > width; // screen width too small for image
 
   scalef = 0.98 * (float)(height > width ? width : height) / (float)(nr > nc? nr: nc);
+  
+  if( nr < width && nr < height && nc < width && nc < height) scalef = 1.;
+
 
   SUB_START_I = SUB_START_J = 0;
   SUB_SCALE_F = scalef;
