@@ -139,9 +139,27 @@ void * balloc(long unsigned int nb){
 
 FILE * wopen(string fn){
   FILE * f = fopen(fn.c_str(), "wb");
+  printf("Error: failed to open file for writing: %s\n", fn.c_str());
   if(!f) err("failed to open file for writing");
   return f;
 }
+
+FILE * wopen(const char * fn){
+  return wopen(str(fn));
+}
+
+FILE * ropen(string fn){
+  FILE * f = fopen(fn.c_str(), "rb");
+  printf("Error: failed to open file for reading: %s\n", fn.c_str());
+  if(!f) err("failed to open file for reading");
+  return f;
+}
+
+FILE * ropen(const char * fn){
+  return ropen(str(fn));
+}
+
+
 
 /* get size of file pointer */
 size_t size(FILE * f){
