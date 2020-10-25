@@ -57,18 +57,18 @@ int main(int argc, char ** argv){
 
       for0(di, ps){
         m = (i + di) * ncol; // count labels on patch
-        
-	for0(dj, ps){
+
+        for0(dj, ps){
           n = (j + dj) + m;
-	  int no_match = true;
-          
-	  for0(k, nref){
+          int no_match = true;
+
+          for0(k, nref){
             if(dat[((k + nb) * np) + n] == 1.){
-	      no_match = false;
-	      accumulate(count, k + 1);
+              no_match = false;
+              accumulate(count, k + 1);
             }
           }
-	  if(no_match) accumulate(count, 0);
+          if(no_match) accumulate(count, 0);
         }
       }
 
@@ -91,7 +91,7 @@ int main(int argc, char ** argv){
         if(n_match > 1) printf("\tWarning: patch had competing classes\n");
       }
       else nontruthed ++;
-      
+
       fwrite(&i, sizeof(size_t), 1, f_patch_i);
       fwrite(&j, sizeof(size_t), 1, f_patch_j);
       fwrite(&max_k, sizeof(float), 1, f_patch_label);
@@ -99,13 +99,13 @@ int main(int argc, char ** argv){
     }
   }
   printf("\n");
-  printf("  nwin:          %zu\n", (size_t)ps);
-  printf("  image pixels:  %zu\n", np);
-  printf("  pix per patch: %zu\n",(size_t)(ps * ps));
-  printf("  approx patches:%zu\n", np / (ps * ps));
-  printf("  total patches: %zu\n", truthed + nontruthed);
-  printf("  truthed:       %zu\t\t[%.2f / 100]\n", truthed, 100. * (float)(truthed) / ((float)(truthed + nontruthed)));
-  printf("  nontruthed:    %zu\n", nontruthed);
+  printf(" nwin: %zu\n", (size_t)ps);
+  printf(" image pixels: %zu\n", np);
+  printf(" pix per patch: %zu\n",(size_t)(ps * ps));
+  printf(" approx patches:%zu\n", np / (ps * ps));
+  printf(" total patches: %zu\n", truthed + nontruthed);
+  printf(" truthed: %zu\t\t[%.2f / 100]\n", truthed, 100. * (float)(truthed) / ((float)(truthed + nontruthed)));
+  printf(" nontruthed: %zu\n", nontruthed);
 
   fclose(f_patch); // patch data
   fclose(f_patch_i); // patch start i
