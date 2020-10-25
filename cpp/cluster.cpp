@@ -192,7 +192,7 @@ int main(int argc, char** argv){
     free(label_float);
     fclose(f);
 
-    f = wopen(str("out/") + to_string(k_use) + str(".out"));
+    f = wopen(str("out/") + to_string(k_use) + str(".bin"));
     int u;
     float df;
     unsigned int ti, pi;
