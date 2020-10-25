@@ -44,7 +44,7 @@ for i in range(0, len(folders)):
                             '5', # filter window size
                             'yes', # correct for average faraday rotation on scene
                             '1', # alpha angle used for visualization
-                            '4'])) # vertical multiook factor
+                            '3'])) # vertical multiook factor
 
     f1 = folders[i] + 'scm_fr'
     f2 = folders[i] + 'scm_fr_t4'
@@ -53,4 +53,3 @@ for i in range(0, len(folders)):
         cmd = 'rm -rf ' + fi
         print(cmd)
         a = os.system(cmd)
-
