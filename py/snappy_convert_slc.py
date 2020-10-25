@@ -15,7 +15,7 @@ from snappy import ProductIO
 def md(d):  # make folder if not yet exist
     if not os.path.exists(d): os.mkdir(d)
 
-if not os.path.exists("/home/a/GitHub/bcws-psu-research/cpp/convert_iq_to_s2.exe"):
+if not os.path.exists("~/GitHub/bcws-psu-research/cpp/convert_iq_to_s2.exe"):
     print("Error: failed to find convert_iq_to_s2.exe"); sys.exit(1)
 
 files = [f.strip() for f in os.popen("ls -1 RCM_SLC_ZIP/*.zip").readlines()]
