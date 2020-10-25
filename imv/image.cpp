@@ -17,8 +17,7 @@ void myImg::init(const char * filename, size_t nrow, size_t ncol, size_t nb){
   }
 
   size_t bytesread = fread( &dat[0], sizeof(float), nrow*ncol*nb, f);
-  dprintf("Read %d bytes / %d floats / %d rows / %d cols / %d bands from %s",
-  bytesread, nrow*ncol*nb, nrow, ncol, nb, filename);
+  // dprintf("Read %d bytes / %d floats / %d rows / %d cols / %d bands from %s", bytesread, nrow*ncol*nb, nrow, ncol, nb, filename);
   fclose(f);
 
   size_t ci = 0;

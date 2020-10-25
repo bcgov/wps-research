@@ -351,7 +351,7 @@ vector<string> parse_band_names(string fn){
   return band_names;
 }
 
-vector<int> parse_groundref_names(string fn){
+vector<int> parse_groundref_names(string fn, int n_groundref){
   // groundref one-hot encoded bands, are assumed to NOT contain numbers within the band name
   int ci = 0;
   int debug = false; // turn this on to debug problems with ground-ref bandnames recognition
@@ -359,6 +359,9 @@ vector<int> parse_groundref_names(string fn){
   vector<int> results;
   vector<string> names(parse_band_names(fn));
   if(debug) cout << "PARSE_GROUNDREF_NAMES" << endl; // assume a groundref name doesn't have numbers in it!
+
+  int guess_groundref = false;
+  if(guess_groundref){
 
   for(vector<string>::iterator it = names.begin(); it != names.end(); it++){
     string x(*it);
@@ -386,6 +389,14 @@ vector<int> parse_groundref_names(string fn){
     ci ++;
   }
   if(debug) cout << "Exit loop" << endl;
+  }
+  else{
+	int start = names.size() - n_groundref;
+	for(ci = start; ci < names.size(); ci ++){
+		printf("groundref[%s]\n", names[ci].c_str());
+		results.push_back(ci);
+	}
+  }
   return results;
 
 }

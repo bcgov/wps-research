@@ -601,7 +601,7 @@ class glPlottable{
   }
 
   glPlottable(){
-    cout << "glPlottable()\n";
+    // cout << "glPlottable()\n";
     myType = std::string("glPlottable");
     Update = false;
     isLabelled=false;
@@ -765,7 +765,7 @@ class glImage: public glPlottable{
   }
 
   void initFrom(zprInstance * parent, myImg * img){
-    cout << "glImage::initFrom()\n";
+    // cout << "glImage::initFrom()\n";
 
     myParent = parent;
     image = img;
@@ -782,7 +782,7 @@ class glImage: public glPlottable{
   void drawMeUnHide();
 
   void drawMe(){
-    printf("myImg::drawMe()\n");
+    // printf("myImg::drawMe()\n");
     // if(hideMe) return;
     if(Update) rebuffer();
 

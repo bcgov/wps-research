@@ -175,7 +175,7 @@ void glImage::rebuffer(){
     }
   }
   Update = false;
-  printf("\tdone rebuffer\n");
+  // printf("\tdone rebuffer\n");
 }
 
 zprInstance * zprManager::newZprInstance(int NROW, int NCOL, int NBAND){
@@ -183,7 +183,7 @@ zprInstance * zprManager::newZprInstance(int NROW, int NCOL, int NBAND){
   int myWindowHeight = NROW;
   int myDims = NBAND;
 
-  dprintf("zprManager::newZprInstance(%d,%d)", myWindowWidth, myWindowHeight);
+  // dprintf("zprManager::newZprInstance(%d,%d)", myWindowWidth, myWindowHeight);
 
   zprInstance * ret = NULL;
   glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
@@ -216,7 +216,7 @@ zprInstance * zprManager::newZprInstance(int NROW, int NCOL, int NBAND){
   ret->zprSelectionFunc(myZprDrawGraphics);
   nextZprInstanceID++;
 
-  dprintf("zprManager::newZprInstance: newWindowID (%d), myZprInstanceID (%d), nextZprInstanceID (%d), myZprWindowID_AsFunctionOfGlutID[ newWindowID](%d), myGlutID_AsFunctionOfZprWindowID[nextZprInstanceID](%d)", newWindowID, ret->myZprInstanceID, nextZprInstanceID, myZprWindowID_AsFunctionOfGlutID[newWindowID], myGlutID_AsFunctionOfZprWindowID[ret->myZprInstanceID]);
+  // dprintf("zprManager::newZprInstance: newWindowID (%d), myZprInstanceID (%d), nextZprInstanceID (%d), myZprWindowID_AsFunctionOfGlutID[ newWindowID](%d), myGlutID_AsFunctionOfZprWindowID[nextZprInstanceID](%d)", newWindowID, ret->myZprInstanceID, nextZprInstanceID, myZprWindowID_AsFunctionOfGlutID[newWindowID], myGlutID_AsFunctionOfZprWindowID[ret->myZprInstanceID]);
   return(ret);
 }
 
@@ -294,7 +294,7 @@ void zprInstance::drawGraphicsExternal(){
   int activeGLUTID = glutGetWindow();
   if(myGlutID() == activeGLUTID) return;
   glutSetWindow(myGlutID());
-  dprintf("Draw graphics external.. Caller ID (%d) My ID (%d)", activeGLUTID, myGlutID());
+  // dprintf("Draw graphics external.. Caller ID (%d) My ID (%d)", activeGLUTID, myGlutID());
 
   GLERROR;
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -304,7 +304,7 @@ void zprInstance::drawGraphicsExternal(){
   for(it = myGraphics.begin(); it!=myGraphics.end(); it++){
     ++i;
     if((*it)->isLinkd){
-      dprintf(" Drawing LINKED item (%d of %d) \n",i,myGraphics.size());
+      // dprintf(" Drawing LINKED item (%d of %d) \n",i,myGraphics.size());
       (*it)->drawMe(true);
     }
     else{
@@ -314,7 +314,7 @@ void zprInstance::drawGraphicsExternal(){
   glutSwapBuffers();
   GLERROR;
   glutSetWindow(activeGLUTID);
-  dprintf("Return from drawGraphics()");
+  // dprintf("Return from drawGraphics()");
 }
 
 void zprInstance::display(){
@@ -795,7 +795,7 @@ void zprInstance::setTitle(string s){
 
 void zprInstance::zprReshape(int w,int h){
   // focus();
-  printf("zprReshape\n");
+  // printf("zprReshape\n");
   GLfloat ratio; // http://faculty.ycp.edu/~dbabcock/cs370/labs/lab07.html
   //glPushMatrix();
   glViewport(0,0,w,h); // Set new screen extents
