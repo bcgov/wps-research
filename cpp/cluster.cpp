@@ -164,7 +164,8 @@ int main(int argc, char** argv){
   float d_avg;
   unsigned int i, j;
 
-  // need to make arbitrary step, a parameter
+  // need to make arbitrary step, a parameter??? 
+  // also, can add parallelism here!!!!
   for(k_use = 1; k_use <= kmax; k_use += 10){
 
     top_i.clear();
