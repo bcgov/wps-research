@@ -13,6 +13,7 @@ unsigned int * label; // label assigned
 unsigned int next_label;
 
 void * dmat_threadfun(void * arg){
+	// did we throw away the redundant half dmat we don't need?
   float d, df;
   unsigned int i, ki;
   long k = (long)arg;
@@ -31,9 +32,9 @@ void * dmat_threadfun(void * arg){
       return(NULL);
     }
 
-    if(my_next_j % 37 == 0){
+    if(my_next_j % 100 == 0){
       float pct = 100. * (float)next_j / (float) np;
-      cprint(str(" worker: ") + to_string(k) + str(" pickup: ") + to_string(my_next_j) + str(" %") + to_string(pct));
+      cprint(str(" worker: ") + to_string(k) + str(" job: ") + to_string(my_next_j) + str(" %") + to_string(pct));
     }
 
     priority_queue<f_idx> pq;
