@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/python3
 '''20190619 read_multispectral.py: read and visualize multispectral image!
 
 adapted from a script worked on with francesca at: https://github.com/franarama/satellite-clustering
