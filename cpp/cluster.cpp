@@ -90,19 +90,50 @@ unsigned int top(unsigned int j){
   }
 }
 
+void data_conditioning(float * dat, size_t nr, size_t nc, size_t nb){
+  float d;
+  long unsigned int i, j, k;
+  long unsigned int np = nr * nc;
+
+  for0(i, np){
+    bool all_zero = true; // for each pixel
+    for0(k, nb){
+      d = dat[(k * np) + i]; // data value, this pixel, this band
+      if(isnan(d) || isinf(d)){
+        dat[(k * np) + i] = ((float)rand() / (float)RAND_MAX) / 111111111.; // replace NaN / inf with small random #s
+      }
+      else{
+        if(d != 0.){
+          all_zero = false;
+        }
+      }
+    }
+    if(all_zero){
+      // if a pixel has all 0 values..
+      for0(k, nb){
+        dat[(k * np) + i] = ((float)rand() / (float)RAND_MAX) / 111111111.; // replace the values with small random #s
+      }
+    }
+  }
+}
+
 int main(int argc, char** argv){
+  srand(0);
   kmax = 1111; // should probably modulate this somewhere. Probably good for practical purposes
 
   if(argc < 2) err("cluster [bin file name. hdr file must also be present");
 
   system("mkdir -p label");
   system("mkdir -p out");
+  system("mkdir -p mean");
 
   str bfn(argv[1]); // input "envi type-4" aka IEEE Floating-point 32bit BSQ (band sequential) data stack
   str hfn(hdr_fn(bfn)); // get name of header file
   hread(hfn, nrow, ncol, nband); // get image shape from header
   printf("nrow %d ncol %d nband %d\n", nrow, ncol, nband);
   dat = bread(bfn, nrow, ncol, nband); // read image data
+
+  data_conditioning(dat, nrow, ncol, nband); // preconditioning on data
 
   np = nrow * ncol;
   printf("np %d\n", np); // number of pixels
@@ -162,9 +193,9 @@ int main(int argc, char** argv){
   fclose(f);
 
   float d_avg;
-  unsigned int i, j;
+  unsigned int i, j, u;
 
-  // need to make arbitrary step, a parameter??? 
+  // need to make arbitrary step, a parameter???
   // also, can add parallelism here!!!!
   for(k_use = 1; k_use <= kmax; k_use += 10){
 
@@ -181,26 +212,25 @@ int main(int argc, char** argv){
     top_i.push_back(0); // hill climbing; null is self-top
     for0(i, np) label[i] = 0; // default label: unlabeled
     for0(i, np) label[i] = top(i); // do the clustering
-    printf("k_use %ld n_classes %ld\n", (long int)k_use, (long int)(next_label-1)); // print out K, # of classes
+    size_t number_of_classes = next_label - 1;
+    printf("k_use %ld n_classes %ld\n", (long int)k_use, number_of_classes); // print out K, # of classes
 
     f = fopen("n_class.csv", "ab"); // append number of classes
     if(!f) err("failed to open file: n_class.csv");
-    fprintf(f, "\n%ld,%ld", (long int)(next_label-1), (long int)k_use); // (long int)(next_label-1));
+    fprintf(f, "\n%ld,%ld", (long int)number_of_classes, (long int)k_use); // (long int)(next_label-1));
     fclose(f);
 
-    f = wopen(str("label/") + to_string(k_use) + str(".lab")); // write outputs
+    f = wopen(str("label/") + to_string(k_use) + str(".lab")); // 1. write class outputs
     float * label_float = falloc(np);
     for0(i, np) label_float[i] = (float)label[i];
     fwrite(label_float, np *sizeof(float), 1, f);
     free(label_float);
     fclose(f);
 
-    f = wopen(str("out/") + to_string(k_use) + str(".bin"));
-    int u;
+    f = wopen(str("out/") + to_string(k_use) + str(".bin")); // 2. write out hilltops
     float df;
     unsigned int ti, pi;
 
-    // should actually colour by MEAN instead of MODE so that the colouring is more distinct!
     for0(u, nband){
       for0(i, np){
         pi = np * u;
@@ -210,6 +240,36 @@ int main(int argc, char** argv){
       }
     }
     fclose(f);
+
+    f = wopen(str("mean/") + to_string(k_use) + str(".bin")); // 3. write out means // should actually colour by MEAN instead of MODE so that the colouring is more distinct!
+
+    // variables to put means in..
+    float * nmean = falloc(number_of_classes);
+    float * means = falloc(number_of_classes * nband);
+    for0(i, number_of_classes) nmean[i] = 0.; // start with 0.
+    for0(i, (number_of_classes * nband)) means[i] = 0.; // start with 0.
+
+    // now finally calculate the class means!
+    for0(i, np){
+      u = label[i] - 1; // 0-indexed label for this pixel
+      nmean[u] += 1.; // increment count for this 0-indexed label
+      for0(j, nband) means[(u * nband) + j] += dat[(np * j) + i]; // for each data band (for this pixel)
+    }
+    for0(i, number_of_classes) means[i] /= nmean[i];
+
+    // for each band
+    for0(j, nband){
+      //for each pixel
+      for0(i, np){
+        u = label[i] - 1;
+        df = means[(u * nband) + j];
+        fwrite(&df, sizeof(float), 1, f);
+      }
+    }
+    fclose(f);
+    free(nmean);
+    free(means);
+
   }
   return 0;
 }
