@@ -225,14 +225,17 @@ int main(int argc, char** argv){
     fprintf(f, "\n%ld,%ld", (long int)number_of_classes, (long int)k_use); // (long int)(next_label-1));
     fclose(f);
 
-    f = wopen(str("label/") + to_string(k_use) + str(".lab")); // 1. write class outputs
+    str lab_fn(str("label/") + zero_pad(to_string(k_use), 5));
+    f = wopen(lab_fn + str(".bin")); // 1. write class outputs
     float * label_float = falloc(np);
     for0(i, np) label_float[i] = (float)label[i];
     fwrite(label_float, np *sizeof(float), 1, f);
     free(label_float);
     fclose(f);
+    hwrite((lab_fn + str(".hdr")), nrow, ncol, 1);
 
-    f = wopen(str("out/") + to_string(k_use) + str(".bin")); // 2. write out hilltops
+    str out_fn(str("out/") + zero_pad(to_string(k_use), 5));
+    f = wopen(out_fn + str(".bin")); // 2. write out hilltops
     float df;
     unsigned int ti, pi;
 
@@ -245,8 +248,10 @@ int main(int argc, char** argv){
       }
     }
     fclose(f);
+    hwrite((lab_fn + str(".hdr")), nrow, ncol, nband);
 
-    f = wopen(str("mean/") + to_string(k_use) + str(".bin")); // 3. write out means // should actually colour by MEAN instead of MODE so that the colouring is more distinct!
+    str mean_fn(str("mean/") + zero_pad(to_string(k_use)));
+    f = wopen(mean_fn + str(".bin")); // 3. write out means // should actually colour by MEAN instead of MODE so that the colouring is more distinct!
 
     // variables to put means in..
     float * nmean = falloc(number_of_classes);
@@ -309,7 +314,7 @@ int main(int argc, char** argv){
     fclose(f);
     free(nmean);
     free(means);
-
+    hwrite((mean_fn + str(".hdr")), nrow, ncol, nband);
   }
   return 0;
 }
