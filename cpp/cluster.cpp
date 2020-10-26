@@ -325,7 +325,7 @@ int main(int argc, char** argv){
     }
     bwrite(nearest_mean, (near_fn + str(".bin")), nrow, ncol, 1); // use this notation elsewhere?
     
-    f = wopen((near_fn + str(".txt"));
+    f = wopen((near_fn + str(".txt")).c_str());
     fprintf(f, "class_i,count");
     for0(i, number_of_classes){
       fprintf(f, "\n%zu,%zu", (size_t)( i + 1), (size_t)(nmean[i]));
