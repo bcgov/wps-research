@@ -120,7 +120,7 @@ void data_conditioning(float * dat, size_t nr, size_t nc, size_t nb){
 
 int main(int argc, char** argv){
   srand(0);
-  kmax = 50; // should probably modulate this somewhere. Probably good for practical purposes
+  kmax = 1000; // should probably modulate this somewhere. Probably good for practical purposes
 
   if(argc < 2) err("cluster [bin file name. hdr file must also be present");
 
@@ -199,7 +199,7 @@ int main(int argc, char** argv){
 
   // need to make arbitrary step, a parameter???
   // also, can add parallelism here!!!!
-  for(k_use = 1; k_use <= kmax; k_use += 1){
+  for(k_use = 1; k_use <= kmax; k_use += 10){
 
     top_i.clear();
     if(k_use > kmax) err("kuse > kmax"); //printf("density estimation..\n");
