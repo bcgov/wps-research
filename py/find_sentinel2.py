@@ -114,7 +114,7 @@ for i in range(0, len(links)):
     tw = ti.split(">")[1].split("<")[0].strip()
     zfn = ti[7:-8] + '.zip'
     cmd ='test ! -f ' + zfn + ' && wget ' + ' --content-disposition --continue --user='
-    cmd += (user_ + ' --password=' + pass_ + ' "' + w + '\\$value"' + " #" + ti)
+    cmd += (user_ + ' --password=' + pass_ + ' "' + w + '\\$value"') # + " #" + ti)
     
     if i > 0:
         f.write('\n'.encode())
@@ -123,7 +123,10 @@ for i in range(0, len(links)):
     
     if i % 2 == 0:
         f.write(' &'.encode())
-    else:
+    
+    f.write((" #" + ti).encode())
+
+    if i % 2 == 1:
         f.write('\nwait'.encode())
 
 f.close()
