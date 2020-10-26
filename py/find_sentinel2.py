@@ -121,7 +121,7 @@ for i in range(0, len(links)):
 
     f.write(cmd.encode())
 
-    f.write((' &> ' + zfn + '_log.txt ').encode())
+    f.write((' > ' + zfn + '_stdout.txt 2> ' + zfn + '_stderr.txt').encode())
     
     if i % 2 == 0:
         f.write(' &'.encode())
