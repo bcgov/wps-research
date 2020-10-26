@@ -115,8 +115,13 @@ for i in range(0, len(links)):
     zfn = ti[7:-8] + '.zip'
     cmd ='test ! -f ' + zfn + ' && wget ' + ' --content-disposition --continue --user='
     cmd += (user_ + ' --password=' + pass_ + ' "' + w + '\\$value"' + " #" + ti)
+    if i % 2 == 0:
+        f.write(' &'.encode())
     if i > 0:
         f.write('\n'.encode())
+    if i % 2 == 1:
+        f.write('wait\n')
+
     f.write(cmd.encode())
 f.close()
 print("+w .sentinel2_download.sh")
