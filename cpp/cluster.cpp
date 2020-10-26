@@ -250,63 +250,43 @@ int main(int argc, char** argv){
     fclose(f);
     hwrite((out_fn + str(".hdr")), nrow, ncol, nband);
 
-    str mean_fn(str("mean/") + zero_pad(to_string(k_use), 5));
-    f = wopen(mean_fn + str(".bin")); // 3. write out means // should actually colour by MEAN instead of MODE so that the colouring is more distinct!
-
-    // variables to put means in..
-    float * nmean = falloc(number_of_classes);
+    str mean_fn(str("mean/") + zero_pad(to_string(k_use), 5)); // 3. write out means
+    f = wopen(mean_fn + str(".bin"));
+    float * nmean = falloc(number_of_classes); // variables to put means in
     float * means = falloc(number_of_classes * nband);
     for0(i, number_of_classes) nmean[i] = 0.; // start with 0.
     for0(i, (number_of_classes * nband)) means[i] = 0.; // start with 0.
 
-    // now finally calculate the class means!
     for0(i, np){
-      //printf("i %zu u %zu\n", i, u);
       u = label[i] - 1; // 0-indexed label for this pixel
       nmean[u] += 1.; // increment count for this 0-indexed label
-      //printf("dd i %zu label=[%zu]: ", i, (size_t)u);
       for0(j, nband){
-	      float dd = dat[(np * j) + i];
-	      means[(u * nband) + j] += dd; //dat[(np * j) + i]; // for each data band (for this pixel)
-	      //printf("\tdd %f", dd);
+        float dd = dat[(np * j) + i];
+        means[(u * nband) + j] += dd; // for each data band (for this pixel)
       }
-      //printf("\n");
-    }
-    //printf("nmean: ");
-    for0(i, number_of_classes){
-	//printf("\t%f", nmean[i]);
-    }
-    //printf("\n");
-
-
-    for0(i, number_of_classes){
-	    for0(j, nband){
-		    means[i * nband + j] /= nmean[i];
-	    }
-    }
-/*
-    for0(i, (number_of_classes * nband)) means[i] /= nmean[i];
-    */ 
-    for0(i, number_of_classes){
-	//printf("i %zu nmean[i] %f\n", i, nmean[i]);
-	for0(j, nband){
-		float dd = means[(i * nband) + j];
-		if(isinf(dd) || isnan(dd)){
-			size_t idx = i * nband + j;
-			printf("idx %zu\n", idx);
-			printf("nclasses * nband %zu\n", number_of_classes * nband);
-		       	err("stop");
-		}
-		//printf("\t%f", dd); 
-	}
-	//printf("\n");
     }
 
-    // for each band
+    for0(i, number_of_classes){
+      for0(j, nband){
+        means[i * nband + j] /= nmean[i];
+      }
+    }
+
+    for0(i, number_of_classes){
+      for0(j, nband){
+        float dd = means[(i * nband) + j];
+        if(isinf(dd) || isnan(dd)){
+          size_t idx = i * nband + j;
+          printf("idx %zu\n", idx);
+          printf("nclasses * nband %zu\n", number_of_classes * nband);
+          err("stop");
+        }
+      }
+    }
+
     for0(j, nband){
-      //for each pixel
       for0(i, np){
-        u = label[i] - 1;
+        u = label[i] - 1; // for each band, for each pixel, get label
         df = means[(u * nband) + j];
         fwrite(&df, sizeof(float), 1, f);
       }
@@ -315,6 +295,8 @@ int main(int argc, char** argv){
     free(nmean);
     free(means);
     hwrite((mean_fn + str(".hdr")), nrow, ncol, nband);
+
+    // so now that we have the means, do class re-assignment based on nearest mean!
   }
   return 0;
 }
