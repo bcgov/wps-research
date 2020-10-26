@@ -127,6 +127,7 @@ int main(int argc, char** argv){
   system("mkdir -p label");
   system("mkdir -p out");
   system("mkdir -p mean");
+  system("mkdir -p nearest");
 
   printf("%s\n", argv[1]);
   str bfn(argv[1]); // input "envi type-4" aka IEEE Floating-point 32bit BSQ (band sequential) data stack
@@ -298,26 +299,27 @@ int main(int argc, char** argv){
 
     // so now that we have the means, do class re-assignment based on nearest mean
 
+    str near_fn(str("nearest/") + zero_pad(to_string(k_use), 5)); // 3. write out labels
     float * nearest_mean = falloc(np);
     for0(i, np){
-	    size_t k;
+      size_t k;
       size_t min_i = 0;
       float min_d = FLT_MAX;
       for0(k, number_of_classes){
         float d = 0.;
         for0(j, nband){
-          float dd = dat[(np * j) + i] -  means[(k * nband) + j];
-	  d += dd * dd;
+          float dd = dat[(np * j) + i] - means[(k * nband) + j];
+          d += dd * dd;
         }
         d = sqrt(d);
         if(d < min_d){
-	  min_i = k;
-	  min_d = d;
-	}
+          min_i = k;
+          min_d = d;
+        }
       }
       nearest_mean[i] = (float)min_i;
     }
-    bwrite(nearest_mean, string("nearest.bin"), nrow, ncol, 1);
+    bwrite(near_fn, string("nearest.bin"), nrow, ncol, 1); // use this notation elsewhere?
     hwrite(string("nearest.hdr"), nrow, ncol, 1);
     free(nearest_mean);
 
