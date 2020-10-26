@@ -250,7 +250,7 @@ int main(int argc, char** argv){
     fclose(f);
     hwrite((lab_fn + str(".hdr")), nrow, ncol, nband);
 
-    str mean_fn(str("mean/") + zero_pad(to_string(k_use)));
+    str mean_fn(str("mean/") + zero_pad(to_string(k_use), 5));
     f = wopen(mean_fn + str(".bin")); // 3. write out means // should actually colour by MEAN instead of MODE so that the colouring is more distinct!
 
     // variables to put means in..
