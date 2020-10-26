@@ -120,10 +120,12 @@ for i in range(0, len(links)):
         f.write('\n'.encode())
 
     f.write(cmd.encode())
+
+    f.write((' &> ' + zfn + '_log.txt ').encode())
     
     if i % 2 == 0:
         f.write(' &'.encode())
-    
+
     f.write((" #" + ti).encode())
 
     if i % 2 == 1:
