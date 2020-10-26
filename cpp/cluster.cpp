@@ -120,7 +120,7 @@ void data_conditioning(float * dat, size_t nr, size_t nc, size_t nb){
 
 int main(int argc, char** argv){
   srand(0);
-  kmax = 1000; // should probably modulate this somewhere. Probably good for practical purposes
+  kmax = 1111; // should probably modulate this somewhere. Probably good for practical purposes
 
   if(argc < 2) err("cluster [bin file name. hdr file must also be present");
 
@@ -248,7 +248,7 @@ int main(int argc, char** argv){
       }
     }
     fclose(f);
-    hwrite((lab_fn + str(".hdr")), nrow, ncol, nband);
+    hwrite((out_fn + str(".hdr")), nrow, ncol, nband);
 
     str mean_fn(str("mean/") + zero_pad(to_string(k_use), 5));
     f = wopen(mean_fn + str(".bin")); // 3. write out means // should actually colour by MEAN instead of MODE so that the colouring is more distinct!
