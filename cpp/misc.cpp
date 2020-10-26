@@ -140,8 +140,8 @@ void * balloc(long unsigned int nb){
 FILE * wopen(string fn){
   FILE * f = fopen(fn.c_str(), "wb");
   if(!f) {
-	  printf("Error: failed to open file for writing: %s\n", fn.c_str());
- 	   err("failed to open file for writing");
+    printf("Error: failed to open file for writing: %s\n", fn.c_str());
+    err("failed to open file for writing");
   }
   return f;
 }
@@ -153,8 +153,8 @@ FILE * wopen(const char * fn){
 FILE * ropen(string fn){
   FILE * f = fopen(fn.c_str(), "rb");
   if(!f){
-	  printf("Error: failed to open file for reading: %s\n", fn.c_str());
-  	err("failed to open file for reading");
+    printf("Error: failed to open file for reading: %s\n", fn.c_str());
+    err("failed to open file for reading");
   }
   return f;
 }
@@ -162,7 +162,6 @@ FILE * ropen(string fn){
 FILE * ropen(const char * fn){
   return ropen(str(fn));
 }
-
 
 
 /* get size of file pointer */
@@ -190,7 +189,6 @@ size_t fsize(const char * fn){
   fclose(f);
   return fs;
 }
-
 
 void rewind(ifstream &a){
   a.clear();
@@ -231,10 +229,10 @@ size_t hread(str hfn, size_t & nrow, size_t & ncol, size_t & nband){
 }
 
 void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband){
-  cout << "+w " << hfn << " nrow " << nrow << " ncol " << ncol << " nband " << nband << endl;  
+  cout << "+w " << hfn << " nrow " << nrow << " ncol " << ncol << " nband " << nband << endl;
   ofstream hf(hfn);
   if(!hf.is_open()) err("failed to open header file for writing");
-   hf << "ENVI" << endl;
+  hf << "ENVI" << endl;
   hf << "samples = " << ncol << endl;
   hf << "lines = " << nrow << endl;
   hf << "bands = " << nband << endl;
@@ -250,7 +248,7 @@ void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband, size_t data_type){
   cout << "+w " << hfn << " nrow " << nrow << " ncol " << ncol << " nband " << nband << endl;
   ofstream hf(hfn);
   if(!hf.is_open()) err("failed to open header file for writing");
-   hf << "ENVI" << endl;
+  hf << "ENVI" << endl;
   hf << "samples = " << ncol << endl;
   hf << "lines = " << nrow << endl;
   hf << "bands = " << nband << endl;
@@ -262,7 +260,6 @@ void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband, size_t data_type){
   hf.close();
 }
 
-
 str hdr_fn(str fn, bool create=false){
   str hfn(fn + str(".hdr"));
   if(exists(hfn)) return hfn;
@@ -271,7 +268,7 @@ str hdr_fn(str fn, bool create=false){
   b = b.substr(0, s - 4);
   //cout << "b " << b << endl;
   str hfn2(b + str(".hdr"));
-  //cout << "hfn2 "  << hfn2 << endl;
+  //cout << "hfn2 " << hfn2 << endl;
   if(exists(hfn2)){
     return hfn2; // don't create two headers for the same file
   }
@@ -287,7 +284,6 @@ str hdr_fn(str fn, bool create=false){
 str hdr_fn(str fn){
   return hdr_fn(fn, false);
 }
-
 
 float * falloc(size_t nf){
   return (float *) alloc(nf * (size_t)sizeof(float));
@@ -311,7 +307,6 @@ void bwrite(float * d, str bfn, size_t nrow, size_t ncol, size_t nband){
   fwrite(d, sizeof(float), nf, f);
   fclose(f);
 }
-
 
 pthread_mutex_t print_mtx;
 
@@ -416,4 +411,3 @@ float * load_envi(str in_f, size_t & nrow, size_t & ncol, size_t & nband){
 str zero_pad(str x, int n_zero){
   return std::string(n_zero - x.length(), '0') + x;
 }
-

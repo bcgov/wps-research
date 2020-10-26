@@ -32,17 +32,15 @@
 #include <locale>
 #include<stack>
 
-
 using namespace std;
 
 inline char sep(){
-	#ifdef _WIN32
-    		return '\\';
-	#else
-    		return '/';
-	#endif
+  #ifdef _WIN32
+  return '\\';
+  #else
+  return '/';
+  #endif
 }
-
 
 #include <stdio.h> /* defines FILENAME_MAX */
 #ifdef WINDOWS
@@ -128,7 +126,6 @@ float * falloc(size_t nf){
 }
 */
 
-
 //a trim from start (in place)
 static inline void ltrim(std::string &s){
   s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](int ch){
@@ -145,26 +142,21 @@ static inline void rtrim(std::string &s){
   ).base(), s.end());
 }
 
-
 static inline void ltrim(str & s, str chars){
-      //	= "\t\n\v\f\r ")
-    s.erase(0, s.find_first_not_of(chars));
+  s.erase(0, s.find_first_not_of(chars));
 }
- 
+
 static inline void rtrim(str & s, str chars){
-       //	= "\t\n\v\f\r "){
-   std::size_t found = s.find_last_not_of(chars);
-   printf("found %zu strlen %zu\n", found, (size_t)strlen(s.c_str()));
-   if (found!=std::string::npos) s.erase(found + 1);
+  std::size_t found = s.find_last_not_of(chars);
+  printf("found %zu strlen %zu\n", found, (size_t)strlen(s.c_str()));
+  if (found!=std::string::npos) s.erase(found + 1);
 
 }
- 
+
 static inline void trim(str & s, str chars){
-	       //	= "\t\n\v\f\r "){
-    ltrim(s, chars);
-    rtrim(s, chars);
+  ltrim(s, chars);
+  rtrim(s, chars);
 }
-
 
 // trim from both ends (in place)
 static inline void trim(std::string &s){
@@ -192,7 +184,7 @@ static inline std::string trim_copy(std::string s){
 
 static inline void trim(std::string &s, char delim){
   str ret("");
-  int end = s.size() - 1; 
+  int end = s.size() - 1;
   int start = 0;
   while(s[start] == delim) start += 1;
   while(s[end] == delim) end -= 1;
@@ -224,7 +216,6 @@ FILE * wopen(const char * fn);
 FILE * ropen(string fn);
 FILE * ropen(const char * fn);
 
-
 class f_idx{
   public: // float, index tuple object
   float d;
@@ -249,9 +240,9 @@ void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband, size_t data_type);
 float * falloc(size_t nf);
 
 float * bread(str bfn, size_t nrow, size_t ncol, size_t nband); // read binary file
-void bwrite(float * d, str bfn, size_t nrow, size_t ncol, size_t nband); // write binary file 
+void bwrite(float * d, str bfn, size_t nrow, size_t ncol, size_t nband); // write binary file
 
-extern  pthread_mutex_t print_mtx;
+extern pthread_mutex_t print_mtx;
 void cprint(str s);
 
 int hsv_to_rgb(float *r, float *g, float *b, float h, float s, float v);
@@ -266,7 +257,6 @@ size_t fsize(const char * fn);
 bool exists(str fn);
 
 float * load_envi(str in_f, size_t & nrow, size_t & ncol, size_t & nband);
-
 
 // need to compare / merge this with f_idx above?
 class f_i{
@@ -302,12 +292,9 @@ class f_ij{
 bool operator<(const f_i& a, const f_i&b);
 bool operator<(const f_ij& a, const f_ij&b);
 
-
 #define mtx_lock pthread_mutex_lock
 #define mtx_unlock pthread_mutex_unlock
 #endif
 
-
 // zero pad a string (from left)
 str zero_pad(str x, int n_zero);
-
