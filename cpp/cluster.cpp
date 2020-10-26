@@ -13,7 +13,7 @@ unsigned int * label; // label assigned
 unsigned int next_label;
 
 void * dmat_threadfun(void * arg){
-	// did we throw away the redundant half dmat we don't need?
+  // did we throw away the redundant half dmat we don't need?
   float d, df;
   unsigned int i, ki;
   long k = (long)arg;
@@ -120,7 +120,7 @@ void data_conditioning(float * dat, size_t nr, size_t nc, size_t nb){
 
 int main(int argc, char** argv){
   srand(0);
-  kmax = 1111; // should probably modulate this somewhere. Probably good for practical purposes
+  kmax = 50; // should probably modulate this somewhere. Probably good for practical purposes
 
   if(argc < 2) err("cluster [bin file name. hdr file must also be present");
 
@@ -128,6 +128,7 @@ int main(int argc, char** argv){
   system("mkdir -p out");
   system("mkdir -p mean");
 
+  printf("%s\n", argv[1]);
   str bfn(argv[1]); // input "envi type-4" aka IEEE Floating-point 32bit BSQ (band sequential) data stack
   str hfn(hdr_fn(bfn)); // get name of header file
   hread(hfn, nrow, ncol, nband); // get image shape from header
@@ -198,15 +199,18 @@ int main(int argc, char** argv){
 
   // need to make arbitrary step, a parameter???
   // also, can add parallelism here!!!!
-  for(k_use = 1; k_use <= kmax; k_use += 10){
+  for(k_use = 1; k_use <= kmax; k_use += 1){
 
     top_i.clear();
     if(k_use > kmax) err("kuse > kmax"); //printf("density estimation..\n");
 
     for0(i, np){
       d_avg = 0.;
-      for0(j, k_use) d_avg += dmat_d[i * kmax + j];
-      rho[i] = 1. / d_avg;
+      for0(j, k_use){
+        d_avg += dmat_d[i * kmax + j];
+      }
+      rho[i] = - d_avg;
+      // rho[i] = 1. / d_avg;
     }
 
     next_label = 1; // start with label 1-- 0 for non-labelled / undefined
@@ -252,11 +256,46 @@ int main(int argc, char** argv){
 
     // now finally calculate the class means!
     for0(i, np){
+      //printf("i %zu u %zu\n", i, u);
       u = label[i] - 1; // 0-indexed label for this pixel
       nmean[u] += 1.; // increment count for this 0-indexed label
-      for0(j, nband) means[(u * nband) + j] += dat[(np * j) + i]; // for each data band (for this pixel)
+      //printf("dd i %zu label=[%zu]: ", i, (size_t)u);
+      for0(j, nband){
+	      float dd = dat[(np * j) + i];
+	      means[(u * nband) + j] += dd; //dat[(np * j) + i]; // for each data band (for this pixel)
+	      //printf("\tdd %f", dd);
+      }
+      //printf("\n");
     }
-    for0(i, number_of_classes) means[i] /= nmean[i];
+    //printf("nmean: ");
+    for0(i, number_of_classes){
+	//printf("\t%f", nmean[i]);
+    }
+    //printf("\n");
+
+
+    for0(i, number_of_classes){
+	    for0(j, nband){
+		    means[i * nband + j] /= nmean[i];
+	    }
+    }
+/*
+    for0(i, (number_of_classes * nband)) means[i] /= nmean[i];
+    */ 
+    for0(i, number_of_classes){
+	//printf("i %zu nmean[i] %f\n", i, nmean[i]);
+	for0(j, nband){
+		float dd = means[(i * nband) + j];
+		if(isinf(dd) || isnan(dd)){
+			size_t idx = i * nband + j;
+			printf("idx %zu\n", idx);
+			printf("nclasses * nband %zu\n", number_of_classes * nband);
+		       	err("stop");
+		}
+		//printf("\t%f", dd); 
+	}
+	//printf("\n");
+    }
 
     // for each band
     for0(j, nband){
