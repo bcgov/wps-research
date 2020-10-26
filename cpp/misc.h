@@ -306,3 +306,10 @@ bool operator<(const f_ij& a, const f_ij&b);
 #define mtx_lock pthread_mutex_lock
 #define mtx_unlock pthread_mutex_unlock
 #endif
+
+
+// zero pad a string (from left)
+str zero_pad(str x, int n_zero){
+  return std::string(n_zero - x.length(), '0') + x;
+}
+
