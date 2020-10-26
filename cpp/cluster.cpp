@@ -296,7 +296,32 @@ int main(int argc, char** argv){
     free(means);
     hwrite((mean_fn + str(".hdr")), nrow, ncol, nband);
 
-    // so now that we have the means, do class re-assignment based on nearest mean!
+    // so now that we have the means, do class re-assignment based on nearest mean
+
+    float * nearest_mean = falloc(np);
+    for0(i, np){
+	    size_t k;
+      size_t min_i = 0;
+      float min_d = FLT_MAX;
+      for0(k, number_of_classes){
+        float d = 0.;
+        for0(j, nband){
+          float dd = dat[(np * j) + i] -  means[(k * nband) + j];
+	  d += dd * dd;
+        }
+        d = sqrt(d);
+        if(d < min_d){
+	  min_i = k;
+	  min_d = d;
+	}
+      }
+      nearest_mean[i] = (float)min_i;
+    }
+    bwrite(nearest_mean, string("nearest.bin"), nrow, ncol, 1);
+    hwrite(string("nearest.hdr"), nrow, ncol, 1);
+    free(nearest_mean);
+
+    // OK what about re-assignment based on random samples from classes? as in kgc2010?
   }
   return 0;
 }
