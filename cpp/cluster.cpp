@@ -293,15 +293,16 @@ int main(int argc, char** argv){
       }
     }
     fclose(f);
-    free(nmean);
-    free(means);
+    free(nmean); // keep the means open!
     hwrite((mean_fn + str(".hdr")), nrow, ncol, nband);
 
     // so now that we have the means, do class re-assignment based on nearest mean
 
     str near_fn(str("nearest/") + zero_pad(to_string(k_use), 5)); // 3. write out labels
+    hwrite((near_fn + str(".hdr")), nrow, ncol, 1);
     float * nearest_mean = falloc(np);
     for0(i, np){
+	//   if(i % 100 == 0) printf("i %zu\n", i);
       size_t k;
       size_t min_i = 0;
       float min_d = FLT_MAX;
@@ -319,9 +320,9 @@ int main(int argc, char** argv){
       }
       nearest_mean[i] = (float)min_i;
     }
-    bwrite(near_fn, string("nearest.bin"), nrow, ncol, 1); // use this notation elsewhere?
-    hwrite(string("nearest.hdr"), nrow, ncol, 1);
+    bwrite(nearest_mean, (near_fn + str(".bin")), nrow, ncol, 1); // use this notation elsewhere?
     free(nearest_mean);
+    free(means);
 
     // OK what about re-assignment based on random samples from classes? as in kgc2010?
   }
