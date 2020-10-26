@@ -14,8 +14,9 @@ of.write('#!/usr/bin/env bash'.encode())
 for f in files:
     fn = f[:-4]
     if fn != "misc":
-        s = '\ntest ! -f ' + fn + '.exe && g++ -w -O3 ' + fn + '.cpp  misc.cpp -o ' + fn + '.exe -lpthread'
+        s = '\ntest ! -f ' + fn + '.exe && g++ -w -O4 ' + fn + '.cpp  misc.cpp -o ' + fn + '.exe -lpthread'
         s += '' if ((i + 1) % n_cpu == 0) else ' &'
         of.write(s.encode())
         i += 1
+of.write("\nwait")
 of.close()
