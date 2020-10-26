@@ -413,4 +413,7 @@ float * load_envi(str in_f, size_t & nrow, size_t & ncol, size_t & nband){
   return bread(in_f, nrow, ncol, nband);
 }
 
+str zero_pad(str x, int n_zero){
+  return std::string(n_zero - x.length(), '0') + x;
+}
 
