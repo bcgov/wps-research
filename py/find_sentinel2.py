@@ -124,4 +124,5 @@ for i in range(0, len(links)):
 
     f.write(cmd.encode())
 f.close()
+a = os.system('chmod 755 ./.sentinel2_download.sh') 
 print("+w .sentinel2_download.sh")
