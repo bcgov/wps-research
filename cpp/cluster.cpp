@@ -325,9 +325,10 @@ int main(int argc, char** argv){
       nmean[min_i] += 1.;
     }
     bwrite(nearest_mean, (near_fn + str(".bin")), nrow, ncol, 1); // use this notation elsewhere?
-    
-    
-    const char * nfn = (near_fn + str(".txt")).c_str();
+   
+    str nfnn(near_fn + str(".txt"));
+    printf("*%s\n", nfnn.c_str());
+    const char * nfn = nfnn.c_str();
     f = wopen(nfn);
     fprintf(f, "class_i,count");
     for0(i, number_of_classes){
@@ -343,6 +344,8 @@ int main(int argc, char** argv){
     free(means);
 
     // OK what about re-assignment based on random samples from classes? as in kgc2010?
+    //
+    // ALSO PRINT OUT THE CLASS NUMBER FILES, FOR KGC RULE!!!!
   }
   return 0;
 }
