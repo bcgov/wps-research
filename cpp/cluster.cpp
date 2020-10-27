@@ -46,9 +46,8 @@ void * dmat_threadfun(void * arg){
         d += df * df;
       }
       d = sqrt(d);
-      if(my_next_j == 0){
-        printf("i %zu d %f\n", (size_t)i, d);
-      }
+//      if(my_next_j == 0) printf("i %zu d %f\n", (size_t)i, d);
+      
       pq.push(f_idx(d, i)); // my_next_j
     }
 
@@ -121,9 +120,39 @@ void data_conditioning(float * dat, size_t nr, size_t nc, size_t nb){
 }
 
 void data_scaling(float * dat, size_t nr, size_t nc, size_t nb){
+  float * min = falloc(nb);
+  float * max = falloc(nb);
+  size_t i, j, k, np;
+  float d;
 
+  for0(i, nb){
+    min[i] = FLT_MAX;
+    max[i] = FLT_MIN;
+  }
+  np = nr * nc;
+  for0(k, nb){
+    j = k * np;
+    for0(i, np){
+      d = dat[j + i];
+      if(d < min[k]) min[k] = d;
+      if(d > max[k]) max[k] = d;
+    }
+  }
+
+  for0(k, nb) printf("K %zu min %f max %f\n", k, min[k], max[k]);
+
+  // scale data to [0, 1]
+  for0(k, nb){
+    j = k * np;
+    for0(i, np){
+      dat[j + i] -= min[k];
+      dat[j + i] /= (max[k] - min[k]);
+    }
+  }
+
+  free(min);
+  free(max);
 }
-
 
 int main(int argc, char** argv){
   srand(0);
@@ -144,6 +173,7 @@ int main(int argc, char** argv){
   dat = bread(bfn, nrow, ncol, nband); // read image data
 
   data_conditioning(dat, nrow, ncol, nband); // preconditioning on data
+  data_scaling(dat, nrow, ncol, nband);
 
   np = nrow * ncol;
   printf("np %d\n", np); // number of pixels
