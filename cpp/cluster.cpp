@@ -302,7 +302,7 @@ int main(int argc, char** argv){
     for0(i, number_of_classes) nmean[i] = 0.;
     
     hwrite((near_fn + str(".hdr")), nrow, ncol, 1);
-    float * nearest_mean = falloc(np);
+    float * nearest_mean = (float *) (void *) alloc(np * sizeof(float));
     for0(i, np){
 	//   if(i % 100 == 0) printf("i %zu\n", i);
       size_t k;
@@ -321,11 +321,11 @@ int main(int argc, char** argv){
         }
       }
       nearest_mean[i] = (float)min_i;
-      nmean[min_i - 1] += 1.;
+      nmean[min_i] += 1.;
     }
     bwrite(nearest_mean, (near_fn + str(".bin")), nrow, ncol, 1); // use this notation elsewhere?
     
-    /*
+    
     const char * nfn = (near_fn + str(".txt")).c_str();
     f = wopen(nfn);
     fprintf(f, "class_i,count");
@@ -335,8 +335,9 @@ int main(int argc, char** argv){
      	    fprintf(f, "\n%zu,%zu", class_i, class_count);
     }
     fclose(f);
-   */
+   
     free(nearest_mean);
+  
     free(nmean);
     free(means);
 
