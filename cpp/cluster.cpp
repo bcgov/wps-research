@@ -1,3 +1,4 @@
+// would be nice to have some dmat restore / parameter type features...
 #include"misc.h"
 size_t next_j, np, nrow, ncol, nband, kmax, k_use;
 pthread_mutex_t next_j_mutex;
