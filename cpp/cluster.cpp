@@ -6,20 +6,20 @@ pthread_attr_t attr; // specify threads joinable
 
 float * dat;
 float * dmat_d; // = falloc(np * kmax);
-unsigned int * dmat_i; // (unsigned int *)alloc(np * (size_t)kmax * (size_t)sizeof(unsigned int));
-vector<unsigned int> top_i;
+size_t * dmat_i; // (unsigned int *)alloc(np * (size_t)kmax * (size_t)sizeof(unsigned int));
+vector<size_t> top_i;
 
 float * rho; // density estimate
-unsigned int * label; // label assigned
-unsigned int next_label;
+size_t * label; // label assigned
+size_t next_label;
 
 void * dmat_threadfun(void * arg){
   // did we throw away the redundant half dmat we don't need?
   float d, df;
-  unsigned int i, ki;
-  long k = (long)arg;
-  unsigned int pi, u, my_i;
-  long unsigned int my_next_j; //long k = (long)arg;
+  size_t i, ki;
+  size_t k = (size_t)arg;
+  size_t pi, u, my_i;
+  size_t my_next_j; //long k = (long)arg;
   cprint(str("dmat_threadfun(") + std::to_string(k) + str(")"));
   my_i = 0;
 
@@ -40,19 +40,21 @@ void * dmat_threadfun(void * arg){
 
     priority_queue<f_idx> pq;
     for0(i, np){
-      if(i != my_next_j){
-        d = 0.;
-        for(u = 0; u < nband; u++){
-          pi = np * u;
-          df = dat[pi + i] - dat[pi + my_next_j];
-          d += df * df;
-        }
-        pq.push(f_idx(d, i)); // my_next_j
+      d = 0.;
+      for(u = 0; u < nband; u++){
+        pi = np * u;
+        df = dat[pi + i] - dat[pi + my_next_j];
+        d += df * df;
       }
+      d = sqrt(d);
+      if(my_next_j == 0){
+	printf("i %zu d %f\n", (size_t)i, d);
+      }
+      pq.push(f_idx(d, i)); // my_next_j
     }
 
     for0(i, kmax){
-      f_idx x(pq.top()); // dmat row is sorted
+      f_idx x(pq.top()); // dmat row already sorted
       ki = (my_next_j * kmax) + i;
       dmat_d[ki] = x.d;
       dmat_i[ki] = x.idx;
@@ -63,14 +65,14 @@ void * dmat_threadfun(void * arg){
   }
 }
 
-unsigned int top(unsigned int j){
-  unsigned int i, ki, ni;
+size_t top(size_t j){
+  size_t i, ki, ni;
   if(label[j] > 0){
     return label[j];
   }
   else{
     float rho_max = rho[j];
-    unsigned int max_i = j;
+    size_t max_i = j;
 
     for0(i, k_use){
       ki = (j * kmax) + i;
@@ -94,8 +96,8 @@ unsigned int top(unsigned int j){
 
 void data_conditioning(float * dat, size_t nr, size_t nc, size_t nb){
   float d;
-  long unsigned int i, j, k;
-  long unsigned int np = nr * nc;
+  size_t i, j, k;
+  size_t np = nr * nc;
 
   for0(i, np){
     bool all_zero = true; // for each pixel
@@ -119,9 +121,16 @@ void data_conditioning(float * dat, size_t nr, size_t nc, size_t nb){
   }
 }
 
+void data_scaling(float * dat, size_t nr, size_t nc, size_t nb){
+  
+
+}
+
+
+
 int main(int argc, char** argv){
   srand(0);
-  kmax = 1111; // should probably modulate this somewhere. Probably good for practical purposes
+  kmax = 1500; // should probably modulate this somewhere. Probably good for practical purposes
 
   if(argc < 2) err("cluster [bin file name. hdr file must also be present");
 
@@ -144,13 +153,13 @@ int main(int argc, char** argv){
   printf("(np^2 - n) / 2=%f\n", (((float)np * (float)np) - (float)np) / 2.); // distance matrix size
 
   dmat_d = falloc(np * kmax); // scale data first? could put data scaling step here
-  dmat_i = (unsigned int *)alloc(np * (size_t)kmax * (size_t)sizeof(unsigned int));
+  dmat_i = (size_t *)alloc(np * (size_t)kmax * (size_t)sizeof(size_t));
 
   if(fsize("dmat.d") < nrow * ncol * kmax * sizeof(float)){
     next_j = 0; // this variable is what the mutex (lock) goes on: "take a number"
 
-    int numCPU = sysconf(_SC_NPROCESSORS_ONLN);
-    printf("number of cores: %d\n", numCPU);
+    size_t numCPU = sysconf(_SC_NPROCESSORS_ONLN);
+    printf("number of cores: %zu\n", numCPU);
 
     pthread_mutex_init(&print_mtx, NULL); // mutex setup
     pthread_mutex_init(&next_j_mutex, NULL);
@@ -158,9 +167,9 @@ int main(int argc, char** argv){
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
 
     pthread_t * my_pthread = new pthread_t[numCPU]; // allocate threads
-    unsigned int j;
+    size_t j;
     for0(j, numCPU){
-      long k = j;
+      size_t k = j;
       pthread_create(&my_pthread[j], &attr, dmat_threadfun, (void *) k);
     }
 
@@ -173,7 +182,7 @@ int main(int argc, char** argv){
 
     f = wopen("dmat.i"); // write index corresponding to dmat element in dmat.d
     if(!f) err("failed to open: dmat.i");
-    fwrite(dmat_i, np * kmax * sizeof(unsigned int), 1, f);
+    fwrite(dmat_i, np * kmax * sizeof(size_t), 1, f);
     fclose(f);
 
   }
@@ -185,19 +194,19 @@ int main(int argc, char** argv){
 
     f = fopen("dmat.i", "rb");
     if(!f) err("failed to open dmat.i");
-    fread(dmat_i, np * kmax * sizeof(unsigned int), 1, f);
+    fread(dmat_i, np * kmax * sizeof(size_t), 1, f);
     fclose(f);
   }
 
   rho = (float *)alloc(np * kmax * sizeof(float)); // buffer for density estimate
-  label = (unsigned int *) alloc(np * sizeof(unsigned int)); // buffer for class label
+  label = (size_t *) alloc(np * sizeof(size_t)); // buffer for class label
 
   FILE * f = wopen("n_class.csv"); // record number of classes! Append to file on each run..
   fprintf(f, "n_classes,k_use"); // first record header line.. "k_use,n_classes");
   fclose(f);
 
   float d_avg;
-  unsigned int i, j, u;
+  size_t i, j, u;
 
   // need to make arbitrary step, a parameter???
   // also, can add parallelism here!!!!
@@ -220,11 +229,11 @@ int main(int argc, char** argv){
     for0(i, np) label[i] = 0; // default label: unlabeled
     for0(i, np) label[i] = top(i); // do the clustering
     size_t number_of_classes = next_label - 1;
-    printf("k_use %ld n_classes %ld\n", (long int)k_use, number_of_classes); // print out K, # of classes
+    printf("k_use %zu n_classes %zu\n", k_use, number_of_classes); // print out K, # of classes
 
     f = fopen("n_class.csv", "ab"); // append number of classes
     if(!f) err("failed to open file: n_class.csv");
-    fprintf(f, "\n%ld,%ld", (long int)number_of_classes, (long int)k_use); // (long int)(next_label-1));
+    fprintf(f, "\n%zu,%zu", number_of_classes, k_use); // (long int)(next_label-1));
     fclose(f);
 
     str lab_fn(str("label/") + zero_pad(to_string(k_use), 5));
@@ -239,7 +248,7 @@ int main(int argc, char** argv){
     str out_fn(str("out/") + zero_pad(to_string(k_use), 5));
     f = wopen(out_fn + str(".bin")); // 2. write out hilltops
     float df;
-    unsigned int ti, pi;
+    size_t ti, pi;
 
     for0(u, nband){
       for0(i, np){
@@ -301,11 +310,11 @@ int main(int argc, char** argv){
 
     str near_fn(str("nearest/") + zero_pad(to_string(k_use), 5)); // 3. write out labels
     for0(i, number_of_classes) nmean[i] = 0.;
-    
+
     hwrite((near_fn + str(".hdr")), nrow, ncol, 1);
     float * nearest_mean = (float *) (void *) alloc(np * sizeof(float));
     for0(i, np){
-	//   if(i % 100 == 0) printf("i %zu\n", i);
+      // if(i % 100 == 0) printf("i %zu\n", i);
       size_t k;
       size_t min_i = 0;
       float min_d = FLT_MAX;
@@ -325,21 +334,21 @@ int main(int argc, char** argv){
       nmean[min_i] += 1.;
     }
     bwrite(nearest_mean, (near_fn + str(".bin")), nrow, ncol, 1); // use this notation elsewhere?
-   
+
     str nfnn(near_fn + str(".txt"));
     printf("*%s\n", nfnn.c_str());
     const char * nfn = nfnn.c_str();
     f = wopen(nfn);
     fprintf(f, "class_i,count");
     for0(i, number_of_classes){
-	    size_t class_i = (size_t)(i + 1);
-	    size_t class_count = (size_t)(nmean[i]);
-     	    fprintf(f, "\n%zu,%zu", class_i, class_count);
+      size_t class_i = (size_t)(i + 1);
+      size_t class_count = (size_t)(nmean[i]);
+      fprintf(f, "\n%zu,%zu", class_i, class_count);
     }
     fclose(f);
-   
+
     free(nearest_mean);
-  
+
     free(nmean);
     free(means);
 
