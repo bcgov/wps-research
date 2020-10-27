@@ -1,27 +1,25 @@
-// MORE parallelization ....!!!!
-// would be nice to have some dmat restore / parameter type features...
+// MORE parallelization ....!!!! // dmat restore / parameter-spec?
 #include"misc.h"
 size_t next_j, np, nrow, ncol, nband, kmax, k_use;
+size_t * dmat_i;
 pthread_mutex_t next_j_mutex;
 pthread_attr_t attr; // specify threads joinable
 
 float * dat, * dmat_d; // = falloc(np * kmax);
-size_t * dmat_i; // (unsigned int *)alloc(np * (size_t)kmax * (size_t)sizeof(unsigned int));
 vector<size_t> top_i;
 
 float * rho; // density estimate
-size_t * label; // label assigned
-size_t next_label;
+size_t * label;
+size_t next_label; // label assigned, next label
 
 void * dmat_threadfun(void * arg){
   // did we throw away the redundant half dmat we don't need?
   float d, df;
-  size_t i, ki;
-  size_t k = (size_t)arg;
-  size_t pi, u, my_i;
-  size_t my_next_j; //long k = (long)arg;
-  cprint(str("dmat_threadfun(") + std::to_string(k) + str(")"));
+  size_t i, ki, pi, u, my_i, my_next_j, k;
+  k = (size_t)arg;
   my_i = 0;
+
+  cprint(str("dmat_threadfun(") + std::to_string(k) + str(")"));
 
   while(1){
     pthread_mutex_lock(&next_j_mutex); // try to pick up a job
@@ -47,8 +45,6 @@ void * dmat_threadfun(void * arg){
         d += df * df;
       }
       d = sqrt(d);
-//      if(my_next_j == 0) printf("i %zu d %f\n", (size_t)i, d);
-      
       pq.push(f_idx(d, i)); // my_next_j
     }
 
@@ -66,28 +62,25 @@ void * dmat_threadfun(void * arg){
 
 size_t top(size_t j){
   size_t i, ki, ni;
-  if(label[j] > 0){
-    return label[j];
-  }
+  if(label[j] > 0) return label[j];
+
   else{
     float rho_max = rho[j];
     size_t max_i = j;
 
     for0(i, k_use){
       ki = (j * kmax) + i;
-      ni = dmat_i[ki]; // printf("j %ld i %ld ki %ld ni %ld rho[ni] %f\n", j, i, ki, ni, rho[ni]);
-
+      ni = dmat_i[ki];
       if(rho[ni] > rho_max){
         rho_max = rho[ni];
         max_i = ni;
       }
     }
-    if(max_i != j){
-      return top(max_i);
-    }
+
+    if(max_i != j) return top(max_i);
     else{
       label[j] = next_label ++;
-      top_i.push_back(j); // printf("next_label %ld np %ld\n", (long int)next_label, (long int)np);
+      top_i.push_back(j);
       return label[j];
     }
   }
@@ -95,21 +88,18 @@ size_t top(size_t j){
 
 void data_conditioning(float * dat, size_t nr, size_t nc, size_t nb){
   float d;
+  bool all_zero;
   size_t i, j, k;
   size_t np = nr * nc;
 
   for0(i, np){
-    bool all_zero = true; // for each pixel
+    all_zero = true; // for each pixel
     for0(k, nb){
       d = dat[(k * np) + i]; // data value, this pixel, this band
       if(isnan(d) || isinf(d)){
         dat[(k * np) + i] = ((float)rand() / (float)RAND_MAX) / 111111111.; // replace NaN / inf with small random #s
       }
-      else{
-        if(d != 0.){
-          all_zero = false;
-        }
-      }
+      else if(d != 0.) all_zero = false;
     }
     if(all_zero){
       // if a pixel has all 0 values..
@@ -150,7 +140,6 @@ void data_scaling(float * dat, size_t nr, size_t nc, size_t nb){
       dat[j + i] /= (max[k] - min[k]);
     }
   }
-
   free(min);
   free(max);
 }
@@ -162,11 +151,10 @@ int main(int argc, char** argv){
   if(argc < 2) err("cluster [bin file name. hdr file must also be present");
 
   system("mkdir -p label");
-  system("mkdir -p out");
-  system("mkdir -p mean");
   system("mkdir -p nearest");
+  system("mkdir -p mean");
+  system("mkdir -p out");
 
-  printf("%s\n", argv[1]);
   str bfn(argv[1]); // input "envi type-4" aka IEEE Floating-point 32bit BSQ (band sequential) data stack
   str hfn(hdr_fn(bfn)); // get name of header file
   hread(hfn, nrow, ncol, nband); // get image shape from header
@@ -179,7 +167,6 @@ int main(int argc, char** argv){
   np = nrow * ncol;
   printf("np %d\n", np); // number of pixels
   printf("(np^2 - n) / 2=%f\n", (((float)np * (float)np) - (float)np) / 2.); // distance matrix size
-
   dmat_d = falloc(np * kmax); // scale data first? could put data scaling step here
   dmat_i = (size_t *)alloc(np * (size_t)kmax * (size_t)sizeof(size_t));
 
@@ -196,10 +183,7 @@ int main(int argc, char** argv){
 
     pthread_t * my_pthread = new pthread_t[numCPU]; // allocate threads
     size_t j;
-    for0(j, numCPU){
-      size_t k = j;
-      pthread_create(&my_pthread[j], &attr, dmat_threadfun, (void *) k);
-    }
+    for0(j, numCPU) pthread_create(&my_pthread[j], &attr, dmat_threadfun, (void *) j);
 
     for0(j, numCPU) pthread_join(my_pthread[j], NULL); // (re)calculate dmat, wait for threads to finish
     printf("end dmat_calc()\n");
@@ -311,18 +295,6 @@ int main(int argc, char** argv){
       }
     }
 
-    for0(i, number_of_classes){
-      for0(j, nband){
-        float dd = means[(i * nband) + j];
-        if(isinf(dd) || isnan(dd)){
-          size_t idx = i * nband + j;
-          printf("idx %zu\n", idx);
-          printf("nclasses * nband %zu\n", number_of_classes * nband);
-          err("stop");
-        }
-      }
-    }
-
     for0(j, nband){
       for0(i, np){
         u = label[i] - 1; // for each band, for each pixel, get label
@@ -343,13 +315,14 @@ int main(int argc, char** argv){
     float * nearest_mean = (float *) (void *) alloc(np * sizeof(float));
     for0(i, np){
       // if(i % 100 == 0) printf("i %zu\n", i);
-      size_t k;
-      size_t min_i = 0;
-      float min_d = FLT_MAX;
+      size_t k, min_i;
+      min_i = 0;
+      float min_d, d, dd;
+      min_d = FLT_MAX;
       for0(k, number_of_classes){
-        float d = 0.;
+        d = 0.;
         for0(j, nband){
-          float dd = dat[(np * j) + i] - means[(k * nband) + j];
+          dd = dat[(np * j) + i] - means[(k * nband) + j];
           d += dd * dd;
         }
         d = sqrt(d);
@@ -365,8 +338,7 @@ int main(int argc, char** argv){
 
     str nfnn(near_fn + str(".txt"));
     printf("*%s\n", nfnn.c_str());
-    const char * nfn = nfnn.c_str();
-    f = wopen(nfn);
+    f = wopen(nfnn);
     fprintf(f, "class_i,count");
     for0(i, number_of_classes){
       size_t class_i = (size_t)(i + 1);
@@ -376,10 +348,8 @@ int main(int argc, char** argv){
     fclose(f);
 
     free(nearest_mean);
-
     free(nmean);
     free(means);
-
     // OK what about re-assignment based on random samples from classes? as in kgc2010?
     //
     // ALSO PRINT OUT THE CLASS NUMBER FILES, FOR KGC RULE!!!!
