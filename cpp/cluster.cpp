@@ -4,8 +4,7 @@ size_t next_j, np, nrow, ncol, nband, kmax, k_use;
 pthread_mutex_t next_j_mutex;
 pthread_attr_t attr; // specify threads joinable
 
-float * dat;
-float * dmat_d; // = falloc(np * kmax);
+float * dat, * dmat_d; // = falloc(np * kmax);
 size_t * dmat_i; // (unsigned int *)alloc(np * (size_t)kmax * (size_t)sizeof(unsigned int));
 vector<size_t> top_i;
 
@@ -48,7 +47,7 @@ void * dmat_threadfun(void * arg){
       }
       d = sqrt(d);
       if(my_next_j == 0){
-	printf("i %zu d %f\n", (size_t)i, d);
+        printf("i %zu d %f\n", (size_t)i, d);
       }
       pq.push(f_idx(d, i)); // my_next_j
     }
@@ -122,10 +121,8 @@ void data_conditioning(float * dat, size_t nr, size_t nc, size_t nb){
 }
 
 void data_scaling(float * dat, size_t nr, size_t nc, size_t nb){
-  
 
 }
-
 
 
 int main(int argc, char** argv){
