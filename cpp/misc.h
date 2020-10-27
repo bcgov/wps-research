@@ -219,8 +219,8 @@ FILE * ropen(const char * fn);
 class f_idx{
   public: // float, index tuple object
   float d;
-  unsigned int idx;
-  f_idx(float d_ = 0., unsigned int idx_ = 0){
+  size_t idx;
+  f_idx(float d_ = 0., size_t idx_ = 0){
     d = d_;
     idx = idx_;
   }
