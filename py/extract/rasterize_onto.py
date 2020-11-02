@@ -13,33 +13,36 @@ if len(args) < 4:
         "  python3 rasterize_onto.py [shapefile to rasterize] [image file: footprint to rasterize onto] [output filename]")
     sys.exit(1)
 
-shp = args[1] # shapefile to rasterize
-footprint_img = args[2] # footprint to rasterize onto
-output = args[3]
+InputVector = args[1] # shapefile to rasterize
+RefImage = args[2] # footprint to rasterize onto
+OutputImage = args[3]
 if os.path.exists(output):
     err("output file already exists")
 
-data = gdal.Open(footprint_img, gdalconst.GA_ReadOnly)
-geo_transform = data.GetGeoTransform()
-source_layer = data.GetLayer()
-x_min = geo_transform[0]
-y_max = geo_transform[3]
-x_max = x_min + geo_transform[1] * data.RasterXSize
-y_min = y_max + geo_transform[5] * data.RasterYSize
-x_res = data.RasterXSize
-y_res = data.RasterYSize
-mb_v = ogr.Open(shp)
-mb_l = mb_v.GetLayer()
-pixel_width = geo_transform[1]
-target_ds = gdal.GetDriverByName('GTiff').Create(output, x_res, y_res, 1,
-        gdal.GDT_Float32) #target_ds.SetGeoTransform((x_min, pixel_width, 0, y_min, 0, pixel_width))
-target_ds.SetGeoTransform(data.GetGeoTransform())
-band = target_ds.GetRasterBand(1)
-NoData_value = 0.
-band.SetNoDataValue(NoData_value)
-band.FlushCache()
-gdal.RasterizeLayer(target_ds, [1], mb_l) #, options=["ATTRIBUTE=hedgerow"])
+gdalformat = 'ENVI'
+datatype = gdal.GDT_Float32 # Byte
+burnVal = 1. #value for the output image pixels
+##########################################################
+# Get projection info from reference image
+Image = gdal.Open(RefImage, gdal.GA_ReadOnly)
 
-target_ds = None
+# Open Shapefile
+Shapefile = ogr.Open(InputVector)
+Shapefile_layer = Shapefile.GetLayer()
 
+# Rasterise
+print("Rasterising shapefile...")
+Output = gdal.GetDriverByName(gdalformat).Create(OutputImage, Image.RasterXSize, Image.RasterYSize, 1, datatype) #, options=['COMPRESS=DEFLATE'])
+Output.SetProjection(Image.GetProjectionRef())
+Output.SetGeoTransform(Image.GetGeoTransform())
 
+# Write data to band 1
+Band = Output.GetRasterBand(1)
+Band.SetNoDataValue(0)
+gdal.RasterizeLayer(Output, [1], Shapefile_layer, burn_values=[burnVal])
+
+# Close datasets
+Band = None
+Output = None
+Image = None
+Shapefile = None
