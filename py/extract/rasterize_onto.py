@@ -32,7 +32,8 @@ y_res = data.RasterYSize
 mb_v = ogr.Open(shp)
 mb_l = mb_v.GetLayer()
 pixel_width = geo_transform[1]
-target_ds = gdal.GetDriverByName('GTiff').Create(output, x_res, y_res, 1, gdal.GDT_Byte) #target_ds.SetGeoTransform((x_min, pixel_width, 0, y_min, 0, pixel_width))
+target_ds = gdal.GetDriverByName('GTiff').Create(output, x_res, y_res, 1,
+        gdal.GDT_FLoat32) #target_ds.SetGeoTransform((x_min, pixel_width, 0, y_min, 0, pixel_width))
 target_ds.SetGeoTransform(data.GetGeoTransform())
 band = target_ds.GetRasterBand(1)
 NoData_value = 0.
