@@ -13,13 +13,12 @@ if len(args) < 4:
         "  python3 rasterize_onto.py [shapefile to rasterize] [image file: footprint to rasterize onto] [output filename]")
     sys.exit(1)
 
-shp = args[1]
-footprint_img = args[2] #  '/home/zeito/pyqgis_data/utah_demUTM2.tif'
+shp = args[1] # shapefile to rasterize
+footprint_img = args[2] # footprint to rasterize onto
 output = args[3]
 if os.path.exists(output):
     err("output file already exists")
 
-# shp = '/home/zeito/pyqgis_data/polygon8.shp'
 data = gdal.Open(footprint_img, gdalconst.GA_ReadOnly)
 geo_transform = data.GetGeoTransform()
 source_layer = data.GetLayer()
