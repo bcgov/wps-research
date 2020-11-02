@@ -1,12 +1,13 @@
 import os
 import sys
-from osgeo import gdal
+from osgeo import gdal # need gdal / python installed!
 from osgeo import ogr
 from osgeo import gdalconst
 
 def err(m):
     print("Error: " + m); sys.exit(1)
 
+# parse arguments 
 args = sys.argv
 if len(args) < 4:
     err("Error: rasterize_onto.py: usage:" +
@@ -19,10 +20,11 @@ OutputImage = args[3]
 if os.path.exists(OutputImage):
     err("output file already exists")
 
+# data output formatting
 gdalformat = 'ENVI'
 datatype = gdal.GDT_Float32 # Byte
 burnVal = 1. #value for the output image pixels
-##########################################################
+
 # Get projection info from reference image
 Image = gdal.Open(RefImage, gdal.GA_ReadOnly)
 
@@ -32,7 +34,7 @@ Shapefile_layer = Shapefile.GetLayer()
 
 # Rasterise
 print("Rasterising shapefile...")
-Output = gdal.GetDriverByName(gdalformat).Create(OutputImage, Image.RasterXSize, Image.RasterYSize, 1, datatype) #, options=['COMPRESS=DEFLATE'])
+Output = gdal.GetDriverByName(gdalformat).Create(OutputImage, Image.RasterXSize, Image.RasterYSize, 1, datatype)
 Output.SetProjection(Image.GetProjectionRef())
 Output.SetGeoTransform(Image.GetGeoTransform())
 
