@@ -16,7 +16,7 @@ if len(args) < 4:
 InputVector = args[1] # shapefile to rasterize
 RefImage = args[2] # footprint to rasterize onto
 OutputImage = args[3]
-if os.path.exists(output):
+if os.path.exists(OutputImage):
     err("output file already exists")
 
 gdalformat = 'ENVI'
