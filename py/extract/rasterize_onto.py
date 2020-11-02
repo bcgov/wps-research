@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 from osgeo import gdal # need gdal / python installed!
 from osgeo import ogr
 from osgeo import gdalconst
@@ -30,7 +31,33 @@ Image = gdal.Open(RefImage, gdal.GA_ReadOnly)
 
 # Open Shapefile
 Shapefile = ogr.Open(InputVector)
-Shapefile_layer = Shapefile.GetLayer()
+layer = Shapefile.GetLayer()
+layerDefinition = layer.GetLayerDefn()
+feature_count = layer.GetFeatureCount()
+
+def records(layer):
+    # generator
+    for i in range(layer.GetFeatureCount()):
+        feature = layer.GetFeature(i)
+        yield json.loads(feature.ExportToJson())
+
+print("feature count: " + str(feature_count))
+features = records(layer)
+feature_names = []
+for f in features:
+    # print(f.keys())
+    # print(f['properties'].keys())
+    feature_name = f['properties']['Name']
+    feature_names.append(feature_name)
+
+# print("Name  -  Type  Width  Precision")
+for i in range(layerDefinition.GetFieldCount()):
+    fieldName =  layerDefinition.GetFieldDefn(i).GetName()
+    fieldTypeCode = layerDefinition.GetFieldDefn(i).GetType()
+    fieldType = layerDefinition.GetFieldDefn(i).GetFieldTypeName(fieldTypeCode)
+    fieldWidth = layerDefinition.GetFieldDefn(i).GetWidth()
+    GetPrecision = layerDefinition.GetFieldDefn(i).GetPrecision()
+    # print(fieldName + " - " + fieldType+ " " + str(fieldWidth) + " " + str(GetPrecision))
 
 # Rasterise
 print("Rasterising shapefile...")
@@ -41,7 +68,7 @@ Output.SetGeoTransform(Image.GetGeoTransform())
 # Write data to band 1
 Band = Output.GetRasterBand(1)
 Band.SetNoDataValue(0)
-gdal.RasterizeLayer(Output, [1], Shapefile_layer, burn_values=[burnVal])
+gdal.RasterizeLayer(Output, [1], layer, burn_values=[burnVal])
 
 # Close datasets
 Band = None
