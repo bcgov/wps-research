@@ -51,7 +51,7 @@ for f in features:
     # print(f['properties'].keys())
     feature_name = f['properties']['Name']
     feature_names.append(feature_name)
-    print("feature id=", feature_id, "name", feature_name)
+    # print("feature id=", feature_id, "name", feature_name)
 
 # print("Name  -  Type  Width  Precision")
 for i in range(layerDefinition.GetFieldCount()):
