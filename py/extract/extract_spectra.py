@@ -23,6 +23,9 @@ shp, img = args[1], args[2] # input shapefile, image
 if not os.path.exists(shp): err('file not found: ' + shp)
 if not os.path.exists(img): err('file not found: ' + img)
 
+out_spec_fn = img + "_spectra.csv"
+out_spec_f = open(out_spec_fn, "wb")
+
 res, rad = float(args[3]), float(args[4])  # assert numbers
 cmd = "python3 extract_window_offset.py " + args[3] + " " + args[4]
 print(cmd)
@@ -34,6 +37,11 @@ y_off = [int(i) for i in open(".y_off").read().strip().split(",")]
 # Open image
 Image = gdal.Open(img, gdal.GA_ReadOnly)
 nc, nr, nb = Image.RasterXSize, Image.RasterYSize, Image.RasterCount # rows, cols, bands
+out_hdr = "feature,lon,lat,row,lin,xoff,yoff" 
+for i in range(nb):
+    out_hdr += ",b" + str(i)
+out_spec_f.write(out_hdr.encode())
+
 print("projection", Image.GetProjection)
 proj = osr.SpatialReference(wkt=Image.GetProjection())
 EPSG = proj.GetAttrValue('AUTHORITY', 1)
@@ -93,7 +101,7 @@ for i in range(feature_count): # print(feature_ids[i], coordinates[i])
         if pix_i[-1] != 'P' or lin_i[-1] != 'L':
             err('unexpected data')
 
-        pix_i, lin_i = pix_i[:-1], lin_i[:-1]
+        pix_i, lin_i = int(pix_i[:-1]), int(lin_i[:-1])
         print([pix_i, lin_i])
         count += 1
         data = []
@@ -104,7 +112,43 @@ for i in range(feature_count): # print(feature_ids[i], coordinates[i])
 
             value = float(lines[3 + (2*j)].split()[1].strip())
             data.append(value)
-        print(data)
-        
+        print("centre_data", data)
 
+        for j in range(len(x_off)):
+            xo, yo = x_off[j], y_off[j]
+            pix_j, lin_j = pix_i + xo, lin_i + yo
+            cmd = ["gdallocationinfo",
+                   img, # input image
+                   str(pix_j), # default: pixl number (0-indexed) aka row
+                   str(lin_j)] # default: line number (0-indexed) aka col
+            cmd = ' '.join(cmd)
+            print("\t" + cmd)
+            lines = [x.strip() for x in os.popen(cmd).readlines()]
+            if len(lines) != 2 * (1 + nb):
+                err("unexpected result line count")
+
+            w = lines[1].split()
+            if w[0] != "Location:":
+                err("unexpected field")
+            pix_i, lin_i = w[1].strip('(').strip(')').split(',')
+            if pix_i[-1] != 'P' or lin_i[-1] != 'L':
+                err('unexpected data')
+
+            pix_i, lin_i = int(pix_i[:-1]), int(lin_i[:-1])
+            print([pix_i, lin_i])
+            count += 1
+            data = []
+            for j in range(0, nb): # for each band
+                bn = lines[2 * (1 + j)].strip(":").strip().split()
+                if int(bn[1]) != j + 1:
+                    err("expected: Band: " + str(j + 1) + "; found: " + lines[2 * (1 + j)])
+
+                value = float(lines[3 + (2*j)].split()[1].strip())
+                data.append(value)
+            print("\tdata", data)
+
+
+
+
+out_spec_f.close()
 print("number of spectra extracted:", count)
