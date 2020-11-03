@@ -17,5 +17,7 @@ test ! -f multilook.exe && g++ -w -O4 multilook.cpp  misc.cpp -o multilook.exe -
 test ! -f multiply.exe && g++ -w -O4 multiply.cpp  misc.cpp -o multiply.exe -lpthread
 test ! -f nodata.exe && g++ -w -O4 nodata.cpp  misc.cpp -o nodata.exe -lpthread &
 test ! -f snip.exe && g++ -w -O4 snip.cpp  misc.cpp -o snip.exe -lpthread &
+test ! -f tmp.exe && g++ -w -O4 tmp.cpp  misc.cpp -o tmp.exe -lpthread &
+test ! -f unstack.exe && g++ -w -O4 unstack.cpp  misc.cpp -o unstack.exe -lpthread &
 test ! -f vri_rasterize.exe && g++ -w -O4 vri_rasterize.cpp  misc.cpp -o vri_rasterize.exe -lpthread &
 wait
