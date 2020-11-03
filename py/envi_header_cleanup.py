@@ -64,6 +64,7 @@ if nb != n_band_names:
             bandname_lines.append("Band " + str(i + 1) + ",")
         bandname_lines[-1] = bandname_lines[-1].strip().strip(",") + "}"
 
+bandname_lines[-1] = bandname_lines[-1].replace(',', '') # no comma in last band names record
 lines = non_bandname_lines + bandname_lines
 data = ('\n'.join(lines)).strip()
 
