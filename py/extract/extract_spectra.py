@@ -1,6 +1,8 @@
 # this script extracts spectra (from a raster) at point locations in a shapefile
+# example:
+#  python3 extract_spectra.py FTL_test1.shp S2A_MSIL2A_20190908T195941_N0213_R128_T09VUE_20190908T233509_RGB.tif
 
-# next: extract on grid pattern
+# next: extract on grid pattern (add parameter for distance around centre)
 
 import os
 import sys
@@ -68,4 +70,8 @@ for i in range(feature_count): # print(feature_ids[i], coordinates[i])
     if len(lines) >= 2 * (1 + nb):
         print(lines)
         count += 1
+        data = []
+        for j in range(0, nb): # for each band
+            print(lines[3 + (2*j)])
+
 print("number of spectra extracted:", count)
