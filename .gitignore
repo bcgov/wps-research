@@ -8,3 +8,9 @@ vri*
 bin/*
 test*
 *.pyc
+*.shp
+*.shx
+*.dbf
+*.zip
+*.cpg
+*.prj
