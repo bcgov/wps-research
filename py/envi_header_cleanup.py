@@ -44,4 +44,5 @@ print(data)
 open(args[1] + '.bak', 'wb').write(open(args[1]).read().encode())
 open(args[1], 'wb').write(data.encode())
 
-# count band names to make sure there's the right number?
+print("number of bands", nb)
+print("number of band names", n_band_names)
