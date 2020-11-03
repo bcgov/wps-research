@@ -2,8 +2,8 @@
 # example:
 #  python3 extract_spectra.py FTL_test1.shp S2A_MSIL2A_20190908T195941_N0213_R128_T09VUE_20190908T233509_RGB.bin 20 10
 
-# next: extract on grid pattern (add parameter for distance around centre)
-
+# extracts on grid pattern with specified radius..
+#.. not sure if GeoTiffs store band names, we read in from ENVI format Float32 file
 import os
 import sys
 import json
