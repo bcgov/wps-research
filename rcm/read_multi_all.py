@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# create png from rgb.bin files within subdirectories
 import os
 import sys
 
