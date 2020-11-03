@@ -20,3 +20,7 @@ for f in files:
         i += 1
 of.write("\nwait".encode())
 of.close()
+
+a = os.system("chmod 755 compile.sh")
+a = os.system("./compile.sh")
+
