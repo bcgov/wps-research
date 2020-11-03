@@ -44,7 +44,7 @@ for i in range(nb):
     print("band name", band.GetDescription()) # andName())
     band_names.append(band.GetDescription().replace(",", "_").strip())
 
-out_hdr = "feature_id,lon,lat,image,row,lin,xoff,yoff" 
+out_hdr = "feature_id,ctr_lat,ctr_lon,image,row,lin,xoff,yoff" 
 for i in range(nb):
     out_hdr += "," + band_names[i]
 out_spec_f.write(out_hdr.encode())
@@ -121,7 +121,8 @@ for i in range(feature_count): # print(feature_ids[i], coordinates[i])
             data.append(value)
         print("centre_data", data)
         # feature,ctr_lat,ctr_lon,row,lin,xoff,yoff,b0,b1,b2,b3
-        data_line = [feature_ids[i], coordinates[i][0], coordinates[i][1], pix_i, lin_i, 0, 0] + data
+        data_line = [feature_ids[i], coordinates[i][0], coordinates[i][1],
+                     img, pix_i, lin_i, 0, 0] + data
         data_line = ','.join([str(x) for x in data_line])
         out_spec_f.write(("\n" + data_line).encode())     
 
@@ -157,7 +158,7 @@ for i in range(feature_count): # print(feature_ids[i], coordinates[i])
                 value = float(lines[3 + (2*j)].split()[1].strip())
                 data.append(value)
             print("\tdata", data)
-            data_line = [feature_ids[i], coordinates[i][0], coordinates[i][1], pix_i, lin_i, xo, yo] + data
+            data_line = [feature_ids[i], coordinates[i][0], coordinates[i][1], img, pix_i, lin_i, xo, yo] + data
             data_line = ','.join([str(x) for x in data_line])
             out_spec_f.write(("\n" + data_line).encode())
 
