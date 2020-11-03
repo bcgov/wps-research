@@ -34,5 +34,10 @@ for i in range(0, len(lines)):
         if len(line.split("}")) > 1:
             in_band_names = False
 
+data = ('\n'.join(lines)).strip()
+print(data)
 
-print('\n'.join(lines))
+open(args[1] + '.bak', 'wb').write(open(args[1]).read().encode())
+open(args[1], 'wb').write(data.encode())
+
+# count band names to make sure there's the right number?
