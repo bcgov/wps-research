@@ -50,7 +50,11 @@ ax.set_yticks(np.arange(-(xmax / 2.) * resolution, (xmax / 2) * resolution, reso
 # plot the offsets
 plt.scatter(X,Y)
 plt.grid()
-window_png = "window_" + str(dist_max) + ".png"
+d_string = str(dist_max)
+if float(int(dist_max)) == dist_max:
+    d_string = str(int(dist_max))
+
+window_png = "window_" + d_string + ".png"
 print("+w", window_png)
 plt.savefig(window_png)
 npts = len(X)
