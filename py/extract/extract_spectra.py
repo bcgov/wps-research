@@ -68,10 +68,15 @@ for i in range(feature_count): # print(feature_ids[i], coordinates[i])
     lines = [x.strip() for x in os.popen(cmd).readlines()]
     
     if len(lines) >= 2 * (1 + nb):
-        print(lines)
+        # print(lines)
         count += 1
         data = []
         for j in range(0, nb): # for each band
-            print(lines[3 + (2*j)])
+            bn = lines[2 * (1 + j)].strip(":").strip().split()
+            if int(bn[1]) != j + 1:
+                err("expected: Band: " + str(j + 1) + "; found: " + lines[2 * (1 + j)])
 
+            value = float(lines[3 + (2*j)].split()[1].strip())
+            data.append(value)
+        print(data)
 print("number of spectra extracted:", count)
