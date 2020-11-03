@@ -9,6 +9,8 @@ e.g. to calculate the x,y coordinate offsets for a round window of radius 30,
 for a sensor with resolution 10m:
     python3 window.py 30 10 
 
+Offsets are stored in a file
+
 '''
 
 import os
@@ -55,8 +57,13 @@ npts = len(X)
 
 x = np.array(X) / resolution
 y = np.array(Y) / resolution
-x = list(x)
-y = list(y)
+x = [int(i) for i in x.tolist()]
+y = [int(i) for i in y.tolist()]
 print(x)
 print(y)
-rint("number of points:", npts)
+print("number of points:", npts)
+
+open(".x_off", "wb").write((str(x).strip('[').strip(']').strip().replace(' ','')).encode())
+open(".y_off", "wb").write((str(y).strip('[').strip(']').strip().replace(' ','')).encode())
+print("+w .x_off")
+print("+w .y_off")
