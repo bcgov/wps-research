@@ -68,7 +68,7 @@ x = [int(i) for i in x.tolist()]
 y = [int(i) for i in y.tolist()]
 print(x)
 print(y)
-print("number of points:", npts)
+print("number of points:", npts, "plus centre point = ", npts + 1)
 
 open(".x_off", "wb").write((str(x).strip('[').strip(']').strip().replace(' ','')).encode())
 open(".y_off", "wb").write((str(y).strip('[').strip(']').strip().replace(' ','')).encode())
