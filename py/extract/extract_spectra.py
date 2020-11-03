@@ -10,6 +10,7 @@ import json
 import struct
 from osgeo import gdal
 from osgeo import ogr
+from osgeo import osr
 args = sys.argv
 
 def err(m):
@@ -25,11 +26,17 @@ if not os.path.exists(img): err('file not found: ' + img)
 # Open image
 Image = gdal.Open(img, gdal.GA_ReadOnly)
 nc, nr, nb = Image.RasterXSize, Image.RasterYSize, Image.RasterCount # rows, cols, bands
+print("projection", Image.GetProjection)
+proj = osr.SpatialReference(wkt=Image.GetProjection())
+EPSG = proj.GetAttrValue('AUTHORITY',1)
+EPSG = int(EPSG)
+print("Image EPSG", EPSG)
 
 # Open Shapefile
 Shapefile = ogr.Open(shp)
 layer = Shapefile.GetLayer()
 layerDefinition, feature_count = layer.GetLayerDefn(), layer.GetFeatureCount()
+print("Shapefile spatialref:", layer.GetSpatialRef())
 
 def records(layer):
     for i in range(layer.GetFeatureCount()):
@@ -54,6 +61,7 @@ for f in features: # print(f.keys())
     if fgt != 'Point':
         err('Point geometry expected. Found geometry type: ' + str(fgt))
     coordinates.append(f['geometry']['coordinates'])
+    #    print("geom", f) # ['geometry'])
 
 count = 0 # extract spectra
 for i in range(feature_count): # print(feature_ids[i], coordinates[i])
@@ -65,8 +73,10 @@ for i in range(feature_count): # print(feature_ids[i], coordinates[i])
            str(coordinates[i][0]), # lat
            str(coordinates[i][1])] # long
     cmd = ' '.join(cmd)
+    print(cmd)
     lines = [x.strip() for x in os.popen(cmd).readlines()]
     
+
     if len(lines) >= 2 * (1 + nb):
         # print(lines)
         count += 1
@@ -79,4 +89,6 @@ for i in range(feature_count): # print(feature_ids[i], coordinates[i])
             value = float(lines[3 + (2*j)].split()[1].strip())
             data.append(value)
         print(data)
+        
+
 print("number of spectra extracted:", count)
