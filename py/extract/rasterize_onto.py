@@ -89,6 +89,7 @@ Output = None
 # Shapefile = None
 
 for i in range(feature_count):
+    # ideally we'd like to confirm the feature intersects the reference map, before rasterizing..
     fid_list = [feature_ids[i]]
     my_filter = "FID in {}".format(tuple(fid_list))
     my_filter = my_filter.replace(",", "")  # the comma in a tuple, if only one element, throws an error
