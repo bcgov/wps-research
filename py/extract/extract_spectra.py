@@ -16,19 +16,23 @@ args = sys.argv
 def err(m):
     printf("Error: " + str(m)); sys.exit(1)
 
-if len(args) < 3:
-    err("python3 extract_spectra.py [input shapefile name] [input image name]")
+if len(args) < 5:
+    err("python3 extract_spectra.py [input shapefile name] [input image name] [input image resolution (m)] [round extraction window radius (m)]")
 
 shp, img = args[1], args[2] # input shapefile, image
 if not os.path.exists(shp): err('file not found: ' + shp)
 if not os.path.exists(img): err('file not found: ' + img)
+
+res = float(args[3])
+rad = float(args[4])
+a = os.system("python3 extract_window_offset.py " + args[3] + " " + args[4])
 
 # Open image
 Image = gdal.Open(img, gdal.GA_ReadOnly)
 nc, nr, nb = Image.RasterXSize, Image.RasterYSize, Image.RasterCount # rows, cols, bands
 print("projection", Image.GetProjection)
 proj = osr.SpatialReference(wkt=Image.GetProjection())
-EPSG = proj.GetAttrValue('AUTHORITY',1)
+EPSG = proj.GetAttrValue('AUTHORITY', 1)
 EPSG = int(EPSG)
 print("Image EPSG", EPSG)
 
