@@ -1,3 +1,6 @@
+# this script not finished..
+#   .. think the code is from GDAL OGR cookbook
+
 # reproject a shapefile based on EPSG
 import os
 import sys
