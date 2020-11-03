@@ -33,6 +33,8 @@ xmax = int(xmax) # print(xmax)
 X, Y = [], []
 for i in range(xmin, xmax + 1):
     for j in range(xmin, xmax + 1):
+        if i == 0 and j == 0: # we'll tackle the centre point separately
+            continue
         x = (i - (xmax/2)) * resolution
         y = (j - (xmax/2)) * resolution
         d = math.sqrt(x*x + y*y)
