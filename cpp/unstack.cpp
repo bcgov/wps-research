@@ -10,7 +10,7 @@ int main(int argc, char *argv[]){
   hread(hfn, nr, nc, nb);
   np = nr * nc;
 
-  float d = bread(ifn, nr, nc, nb); // read input data
+  float * d = bread(ifn, nr, nc, nb); // read input data
 
   for0(i, nb){
     str obfn(ifn + str("_") + to_string(i + 1) + str(".bin"));
