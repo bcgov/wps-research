@@ -63,7 +63,7 @@ for i in range(layerDefinition.GetFieldCount()):
     # print(fieldName + " - " + fieldType+ " " + str(fieldWidth) + " " + str(GetPrecision))
 
 # Rasterise
-print("Rasterising shapefile...")
+print("+w", OutputImage)
 Output = gdal.GetDriverByName(gdalformat).Create(OutputImage, Image.RasterXSize, Image.RasterYSize, 1, datatype)
 Output.SetProjection(Image.GetProjectionRef())
 Output.SetGeoTransform(Image.GetGeoTransform())
@@ -80,19 +80,15 @@ Output = None
 # Shapefile = None
 
 for i in range(feature_count):
-    #Output = gdal.GetDriverByName(gdalformat).Create(OutputImage, Image.RasterXSize, Image.RasterYSize, 1, datatype)
-    #Output.SetProjection(Image.GetProjectionRef())
-    #Output.SetGeoTransform(Image.GetGeoTransform())
-
     fid_list = [feature_ids[i]]
     my_filter = "FID in {}".format(tuple(fid_list))
-    my_filter = my_filter.replace(",", "")
+    my_filter = my_filter.replace(",", "")  # the comma in a tuple, if only one element, throws an error
     layer.SetAttributeFilter(my_filter)
 
     out_fn = OutputImage[:-4] + '_' + feature_names[i].strip() + '.bin'
     print("+w", out_fn)
+    
     # Rasterise
-    print("Rasterising shapefile...")
     Output = gdal.GetDriverByName(gdalformat).Create(out_fn, Image.RasterXSize, Image.RasterYSize, 1, datatype)
     Output.SetProjection(Image.GetProjectionRef())
     Output.SetGeoTransform(Image.GetGeoTransform())
