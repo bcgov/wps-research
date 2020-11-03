@@ -1,45 +1,75 @@
-# this script isn't working yet, try:
-#  gdallocationinfo x.tif -wgs84 -131.125631744031 57.9156512571252
+# this script extracts spectra (from a raster) at point locations in a shapefile
 
-# extract spectra on grid pattern, for each point
+# next: extract on grid pattern
+
+import os
+import sys
+import json
+import struct
 from osgeo import gdal
 from osgeo import ogr
-import struct
-import sys
+args = sys.argv
 
 def err(m):
     printf("Error: " + str(m)); sys.exit(1)
 
-def pt2fmt(pt):
-    fmttypes = {gdal.GDT_Byte: 'B',
-                gdal.GDT_Int16: 'h',
-		gdal.GDT_UInt16: 'H',
-		gdal.GDT_Int32: 'i',
-		gdal.GDT_UInt32: 'I',
-		gdal.GDT_Float32: 'f',
-		gdal.GDT_Float64: 'f'}
-    return fmttypes.get(pt, 'x')
+if len(args) < 3:
+    err("python3 extract_spectra.py [input shapefile name] [input image name]")
 
-lat = float(sys.argv[2]) # lat
-lon = float(sys.argv[3]) # long
-ds = gdal.Open(sys.argv[1], gdal.GA_ReadOnly) # input data file
-print("ds", ds)
+shp = args[1] # input shapefile
+img = args[2]
+if not os.path.exists(shp): err('file not found: ' + shp)
+if not os.path.exists(img): err('file not found: ' + img)
 
-transf = ds.GetGeoTransform()
-cols = ds.RasterXSize
-rows = ds.RasterYSize
-bands = ds.RasterCount #1
-band = ds.GetRasterBand(1)
-bandtype = gdal.GetDataTypeName(band.DataType) #Int16
-driver = ds.GetDriver().LongName #'GeoTIFF'
-# success, transfInv = 
-transfInv = gdal.InvGeoTransform(transf)
+# Open image
+Image = gdal.Open(img, gdal.GA_ReadOnly)
+nc, nr, nb = Image.RasterXSize, Image.RasterYSize, Image.RasterCount # rows, cols, bands
 
-px, py = gdal.ApplyGeoTransform(transfInv, lon, lat)
-structval = band.ReadRaster(int(px), int(py), 1,1, buf_type = band.DataType)
-fmt = pt2fmt(band.DataType)
-print("fmt", fmt)
-print("structval", structval)
-intval = struct.unpack(fmt , structval)
-print(round(intval[0], 2)) #intval is a tuple, length=1 as we only asked for 1 pixel value
+# Open Shapefile
+Shapefile = ogr.Open(shp)
+layer = Shapefile.GetLayer()
+layerDefinition, feature_count = layer.GetLayerDefn(), layer.GetFeatureCount()
 
+def records(layer):
+    for i in range(layer.GetFeatureCount()):
+        feature = layer.GetFeature(i)
+        yield json.loads(feature.ExportToJson())
+print("feature count: " + str(feature_count))
+features = records(layer)
+
+feature_names, feature_ids, coordinates = [], [], []
+for f in features: # print(f.keys())
+    feature_id = f['id']
+    feature_ids.append(feature_id) # print("feature properties.keys()", f['properties'].keys())
+    feature_name = ''
+    try:
+        feature_name = f['properties']['Name']
+    except Exception:
+        pass # feature name not available
+    feature_names.append(feature_name)
+    
+    # print("feature id=", feature_id, "name", feature_name)
+    # print("feature geometry=", f['geometry'])
+    fgt = f['geometry']['type']
+    if fgt != 'Point':
+        err('Point geometry expected. Found geometry type: ' + str(fgt))
+    coordinates.append(f['geometry']['coordinates'])
+
+count = 0
+# extract spectra
+for i in range(feature_count):
+    # print(feature_ids[i], coordinates[i])
+
+    cmd = ["gdallocationinfo",
+           img,
+           '-wgs84',
+           str(coordinates[i][0]),
+           str(coordinates[i][1])]
+    cmd = ' '.join(cmd)
+    # print(cmd) 
+
+    lines = [x.strip() for x in os.popen(cmd).readlines()]
+    if len(lines) >= 2 * (1 + nb):
+        print(lines)
+        count += 1
+print("number of spectra extracted:", count)
