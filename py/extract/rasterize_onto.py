@@ -73,7 +73,7 @@ for i in range(layerDefinition.GetFieldCount()):
     GetPrecision = layerDefinition.GetFieldDefn(i).GetPrecision()
     # print(fieldName + " - " + fieldType+ " " + str(fieldWidth) + " " + str(GetPrecision))
 
-# Rasterise
+# Rasterise all features to same layer (coverage of all features)
 print("+w", OutputImage)
 Output = gdal.GetDriverByName(gdalformat).Create(OutputImage, Image.RasterXSize, Image.RasterYSize, 1, datatype)
 Output.SetProjection(Image.GetProjectionRef())
