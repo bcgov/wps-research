@@ -1,3 +1,5 @@
+# rasterize a shapefile, separate raster for each "feature"!
+
 # examples:
 #   python3 rasterize_onto.py boundary.shp S2A_MSIL2A_20190908T195941_N0213_R128_T09VUE_20190908T233509_RGB.tif boundary.bin
 #   python3 rasterize_onto.py FTL_test1.shp S2A_MSIL2A_20190908T195941_N0213_R128_T09VUE_20190908T233509_RGB.tif out.bin
