@@ -18,8 +18,8 @@ if len(args) < 4:
 InputVector = args[1] # shapefile to rasterize
 RefImage = args[2] # footprint to rasterize onto
 OutputImage = args[3]
-if os.path.exists(OutputImage):
-    err("output file already exists")
+if os.path.exists(OutputImage): err("output file already exists")
+if OutputImage[-4:] != '.bin': err("output file extension expected: .bin")
 
 # data output formatting
 gdalformat = 'ENVI'
@@ -43,12 +43,15 @@ def records(layer):
 
 print("feature count: " + str(feature_count))
 features = records(layer)
-feature_names = []
+feature_names, feature_ids = [], []
 for f in features:
     # print(f.keys())
+    feature_id = f['id']
+    feature_ids.append(feature_id)
     # print(f['properties'].keys())
     feature_name = f['properties']['Name']
     feature_names.append(feature_name)
+    print("feature id=", feature_id, "name", feature_name)
 
 # print("Name  -  Type  Width  Precision")
 for i in range(layerDefinition.GetFieldCount()):
@@ -71,7 +74,38 @@ Band.SetNoDataValue(0)
 gdal.RasterizeLayer(Output, [1], layer, burn_values=[burnVal])
 
 # Close datasets
-Band = None
+# Band = None
 Output = None
+#  Image = None
+# Shapefile = None
+
+for i in range(feature_count):
+    #Output = gdal.GetDriverByName(gdalformat).Create(OutputImage, Image.RasterXSize, Image.RasterYSize, 1, datatype)
+    #Output.SetProjection(Image.GetProjectionRef())
+    #Output.SetGeoTransform(Image.GetGeoTransform())
+
+    fid_list = [feature_ids[i]]
+    my_filter = "FID in {}".format(tuple(fid_list))
+    my_filter = my_filter.replace(",", "")
+    layer.SetAttributeFilter(my_filter)
+
+    out_fn = OutputImage[:-4] + '_' + feature_names[i].strip() + '.bin'
+    print("+w", out_fn)
+    # Rasterise
+    print("Rasterising shapefile...")
+    Output = gdal.GetDriverByName(gdalformat).Create(out_fn, Image.RasterXSize, Image.RasterYSize, 1, datatype)
+    Output.SetProjection(Image.GetProjectionRef())
+    Output.SetGeoTransform(Image.GetGeoTransform())
+
+    # Write data to band 1
+    Band = Output.GetRasterBand(1)
+    Band.SetNoDataValue(0)
+    gdal.RasterizeLayer(Output, [1], layer, burn_values=[burnVal])
+
+    Output = None
+
+    # Close datasets
+Band = None
 Image = None
 Shapefile = None
+
