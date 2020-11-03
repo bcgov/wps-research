@@ -49,7 +49,12 @@ for f in features:
     feature_id = f['id']
     feature_ids.append(feature_id)
     # print(f['properties'].keys())
-    feature_name = f['properties']['Name']
+    feature_name = ''
+    try:
+        feature_name = f['properties']['Name']
+    except Exception:
+        pass # feature name not available
+
     feature_names.append(feature_name)
     # print("feature id=", feature_id, "name", feature_name)
 
@@ -85,7 +90,7 @@ for i in range(feature_count):
     my_filter = my_filter.replace(",", "")  # the comma in a tuple, if only one element, throws an error
     layer.SetAttributeFilter(my_filter)
 
-    out_fn = OutputImage[:-4] + '_' + str(feature_ids[i]) + '_' + str(feature_names[i]).strip() + '.bin'
+    out_fn = OutputImage[:-4] + '_' + str(feature_ids[i]) + ('' if feature_names[i] == ''  else ('_' + str(feature_names[i]).strip())) + '.bin'
     print("+w", out_fn)
     
     # Rasterise
