@@ -16,8 +16,7 @@ def err(m):
 if len(args) < 3:
     err("python3 extract_spectra.py [input shapefile name] [input image name]")
 
-shp = args[1] # input shapefile
-img = args[2]
+shp, img = args[1], args[2] # input shapefile, image
 if not os.path.exists(shp): err('file not found: ' + shp)
 if not os.path.exists(img): err('file not found: ' + img)
 
@@ -41,6 +40,7 @@ feature_names, feature_ids, coordinates = [], [], []
 for f in features: # print(f.keys())
     feature_id = f['id']
     feature_ids.append(feature_id) # print("feature properties.keys()", f['properties'].keys())
+    
     feature_name = ''
     try:
         feature_name = f['properties']['Name']
@@ -48,27 +48,23 @@ for f in features: # print(f.keys())
         pass # feature name not available
     feature_names.append(feature_name)
     
-    # print("feature id=", feature_id, "name", feature_name)
-    # print("feature geometry=", f['geometry'])
     fgt = f['geometry']['type']
     if fgt != 'Point':
         err('Point geometry expected. Found geometry type: ' + str(fgt))
     coordinates.append(f['geometry']['coordinates'])
 
-count = 0
-# extract spectra
-for i in range(feature_count):
-    # print(feature_ids[i], coordinates[i])
-
+count = 0 # extract spectra
+for i in range(feature_count): # print(feature_ids[i], coordinates[i])
+    
+    # not efficient for "many" points
     cmd = ["gdallocationinfo",
-           img,
-           '-wgs84',
-           str(coordinates[i][0]),
-           str(coordinates[i][1])]
+           img, # input image
+           '-wgs84', # specify lat long input
+           str(coordinates[i][0]), # lat
+           str(coordinates[i][1])] # long
     cmd = ' '.join(cmd)
-    # print(cmd) 
-
     lines = [x.strip() for x in os.popen(cmd).readlines()]
+    
     if len(lines) >= 2 * (1 + nb):
         print(lines)
         count += 1
