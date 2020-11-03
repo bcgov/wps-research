@@ -1,3 +1,5 @@
+// need to document this!
+//
 #include"misc.h" // should check for float <--> int conversion out of bounds
 
 /* return true if string is numeric / digital */
