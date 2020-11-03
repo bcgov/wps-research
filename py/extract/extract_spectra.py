@@ -1,6 +1,6 @@
 # this script extracts spectra (from a raster) at point locations in a shapefile
 # example:
-#  python3 extract_spectra.py FTL_test1.shp S2A_MSIL2A_20190908T195941_N0213_R128_T09VUE_20190908T233509_RGB.tif
+#  python3 extract_spectra.py FTL_test1.shp S2A_MSIL2A_20190908T195941_N0213_R128_T09VUE_20190908T233509_RGB.bin 20 10
 
 # next: extract on grid pattern (add parameter for distance around centre)
 
@@ -37,9 +37,16 @@ y_off = [int(i) for i in open(".y_off").read().strip().split(",")]
 # Open image
 Image = gdal.Open(img, gdal.GA_ReadOnly)
 nc, nr, nb = Image.RasterXSize, Image.RasterYSize, Image.RasterCount # rows, cols, bands
-out_hdr = "feature,lon,lat,row,lin,xoff,yoff" 
+
+band_names = []
 for i in range(nb):
-    out_hdr += ",b" + str(i)
+    band = Image.GetRasterBand(i+1)
+    print("band name", band.GetDescription()) # andName())
+    band_names.append(band.GetDescription().replace(",", "_").strip())
+
+out_hdr = "feature_id,lon,lat,image,row,lin,xoff,yoff" 
+for i in range(nb):
+    out_hdr += "," + band_names[i]
 out_spec_f.write(out_hdr.encode())
 
 print("projection", Image.GetProjection)
