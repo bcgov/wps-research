@@ -25,10 +25,12 @@ if not os.path.exists(img): err('file not found: ' + img)
 
 res, rad = float(args[3]), float(args[4])  # assert numbers
 cmd = "python3 extract_window_offset.py " + args[3] + " " + args[4]
-print([cmd])
+print(cmd)
 a = os.system(cmd)
 
-sys.exit(1)
+x_off = [int(i) for i in open(".x_off").read().strip().split(",")]
+y_off = [int(i) for i in open(".y_off").read().strip().split(",")]
+
 # Open image
 Image = gdal.Open(img, gdal.GA_ReadOnly)
 nc, nr, nb = Image.RasterXSize, Image.RasterYSize, Image.RasterCount # rows, cols, bands
@@ -84,7 +86,15 @@ for i in range(feature_count): # print(feature_ids[i], coordinates[i])
     
 
     if len(lines) >= 2 * (1 + nb):
-        # print(lines)
+        w = lines[1].split()
+        if w[0] != "Location:":
+            err("unexpected field")
+        pix_i, lin_i = w[1].strip('(').strip(')').split(',')
+        if pix_i[-1] != 'P' or lin_i[-1] != 'L':
+            err('unexpected data')
+
+        pix_i, lin_i = pix_i[:-1], lin_i[:-1]
+        print([pix_i, lin_i])
         count += 1
         data = []
         for j in range(0, nb): # for each band
