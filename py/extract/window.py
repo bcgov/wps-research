@@ -52,6 +52,11 @@ window_png = "window_" + str(dist_max) + ".png"
 print("+w", window_png)
 plt.savefig(window_png)
 npts = len(X)
-print(np.array(X)/resolution)
-print(np.array(Y)/resolution)
-print("number of points:", npts)
+
+x = np.array(X) / resolution
+y = np.array(Y) / resolution
+x = list(x)
+y = list(y)
+print(x)
+print(y)
+rint("number of points:", npts)
