@@ -36,26 +36,15 @@ for line in lines[1:]:
     c = plt.Circle((pix, lin), 150, color=(r,g,b))
     circles.append(c)
 
-# circle1 = plt.Circle((0, 0), 0.2, color='r')
-# circle2 = plt.Circle((0.5, 0.5), 0.2, color='blue')
-# circle3 = plt.Circle((1, 1), 0.2, color='g', clip_on=False)
 
-# fig, ax = plt.subplots() # note we must use plt.subplots, not plt.subplot
-# (or if you have an existing figure)
-# fig = plt.gcf()
-# ax = fig.gca()
-
-
+ax.set_aspect('equal')
 for c in circles:
     ax.add_artist(c)
 
-#ax.add_artist(circle1)
-#ax.add_artist(circle2)
-#ax.add_artist(circle3)
 plt.xlim((x_min, x_max))
 plt.ylim((y_min, y_max))
 plt.xlim((0, 10980))
 plt.ylim((-10980, 0))
 
-fig.savefig('plotcircles.png')
+fig.savefig('plotcircles.png', dpi = 1000)
 
