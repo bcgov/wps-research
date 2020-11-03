@@ -18,5 +18,5 @@ for f in files:
         s += '' if ((i + 1) % n_cpu == 0) else ' &'
         of.write(s.encode())
         i += 1
-of.write("\nwait")
+of.write("\nwait".encode())
 of.close()
