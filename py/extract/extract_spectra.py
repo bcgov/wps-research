@@ -113,6 +113,10 @@ for i in range(feature_count): # print(feature_ids[i], coordinates[i])
             value = float(lines[3 + (2*j)].split()[1].strip())
             data.append(value)
         print("centre_data", data)
+        # feature,ctr_lat,ctr_lon,row,lin,xoff,yoff,b0,b1,b2,b3
+        data_line = [feature_ids[i], coordinates[i][0], coordinates[i][1], pix_i, lin_i, 0, 0] + data
+        data_line = ','.join([str(x) for x in data_line])
+        out_spec_f.write(("\n" + data_line).encode())     
 
         for j in range(len(x_off)):
             xo, yo = x_off[j], y_off[j]
@@ -146,6 +150,9 @@ for i in range(feature_count): # print(feature_ids[i], coordinates[i])
                 value = float(lines[3 + (2*j)].split()[1].strip())
                 data.append(value)
             print("\tdata", data)
+            data_line = [feature_ids[i], coordinates[i][0], coordinates[i][1], pix_i, lin_i, xo, yo] + data
+            data_line = ','.join([str(x) for x in data_line])
+            out_spec_f.write(("\n" + data_line).encode())
 
 
 
