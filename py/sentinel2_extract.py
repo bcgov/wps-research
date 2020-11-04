@@ -34,20 +34,12 @@ for line in xml:
     if len(line.split('.xml')) > 1:
         print('\t' + line)
         try:
-            # need to match MTD_MSIL1C.xml and SENTINEL2_L1C
-            # print("df", str([df]))
-            df = df.split(os.path.sep)[-1] # print("split on:", df)
+            df = df.split(os.path.sep)[-1]
             dfw = line.split(df)
-            
-            terminator = dfw[-1].strip(os.path.sep).split(':')[0] # print("terminator", terminator)
-
-            # print("dfw", str([dfw]))
+            terminator = dfw[-1].strip(os.path.sep).split(':')[0]
             ident = dfw[0].split('=')[1].split(':')[0]
-            # print("ident", str([ident]))
             ds = ident + ':' + df + dfw[1]
-            # print("ds", str([ds]))
             of = (df + dfw[1]).replace(terminator, ident).replace(':', '_') + '.bin'
-            # print("of", str([of]))
             cmd = ['gdal_translate', ds, '--config GDAL_NUM_THREADS 8', '-of ENVI', '-ot Float32', of]
             cmds.append(' '.join(cmd))
             print('\t' + cmd)
@@ -57,7 +49,7 @@ for cmd in cmds:
     # print(cmd)
     run(cmd)
 
-'''
+'''e.g. outputs: 
 S2A_MSIL1C_20191129T190741_N0208_R013_T10UFB_20191129T204451.SAFE/MTD_MSIL1C.xml:10m:EPSG_32610
 S2A_MSIL1C_20191129T190741_N0208_R013_T10UFB_20191129T204451.SAFE/MTD_MSIL1C.xml:20m:EPSG_32610
 S2A_MSIL1C_20191129T190741_N0208_R013_T10UFB_20191129T204451.SAFE/MTD_MSIL1C.xml:60m:EPSG_32610
