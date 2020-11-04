@@ -39,6 +39,6 @@ for f in features:  # print(f.keys())
     except Exception:
         pass # feature name not available
     feature_names.append(feature_name)
-
+    print("\t", feature_name)
 
 
