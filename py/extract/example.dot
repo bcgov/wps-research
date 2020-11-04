@@ -1,13 +1,60 @@
 digraph D {
 node [shape=plaintext fontname="Sans serif" fontsize="8"];
 
-task_1 [label=<Seearch Sentinel-2 data>];  
-task_2 [label=<Another step> ];
-task_3 [label=<stuff here> ];
+task_1 [
+shape = plaintext
+label=<
+<table border='0' cellborder='0'>
+  <tr><td>python3 find_sentinel2.py "Telegraph Creek, BC"</td></tr>
+</table> >];  
+
+
+task_2 [
+shape = plaintext
+label=<
+<table border='0' cellborder='0'>
+  <tr><td>mkdir use/</td></tr>
+  <tr><td>cp S2A_MSIL2A_20190809T195901_N0213_R128_T09VUE_20190810T001439.zip use/</td></tr>
+  <tr><td>cp S2A_MSIL2A_20190908T195941_N0213_R128_T09VUE_20190908T233509.zip use/</td></tr>
+  <tr><td>cp S2A_MSIL2A_20200405T195931_N0214_R128_T09VUE_20200406T001803.zip use/</td></tr>
+  <tr><td>cp S2A_MSIL2A_20200915T201051_N0214_R028_T09VUE_20200915T225402.zip use/</td></tr>
+</table> >];
+
+
+task_3 [
+shape = plaintext
+label=<
+<table border='0' cellborder='0'>
+<tr><td>python3 sentinel2_extract.py S2A_MSIL2A_20190809T195901_N0213_R128_T09VUE_20190810T001439.zip</td></tr>
+<tr><td>python3 sentinel2_extract.py S2A_MSIL2A_20190908T195941_N0213_R128_T09VUE_20190908T233509.zip</td></tr>
+<tr><td>python3 sentinel2_extract.py S2A_MSIL2A_20200405T195931_N0214_R128_T09VUE_20200406T001803.zip</td></tr>
+<tr><td>python3 sentinel2_extract.py S2A_MSIL2A_20200915T201051_N0214_R028_T09VUE_20200915T225402.zip</td></tr>
+</table> >];
+
+
+
+
+task_4 [
+shape = plaintext
+label=<
+<table border='0' cellborder='0'>
+<tr><td>Download shapefile data from Survey123</td></tr>
+</table> >];
+
+
+task_5 [
+shape = plaintext
+label=<
+<table border='0' cellborder='0'>
+<tr><td>python3 shapefile_enforce_crs.py FTL_test1.shp</td></tr>
+</table> >];
+
+
+
 
 task_1 -> task_2;
 task_2 -> task_3;
-task_1 -> task_3;
+task_4 -> task_5;
 
 }
 
