@@ -22,6 +22,7 @@ the swig/python folder and manually do the:
 import os
 import sys
 args = sys.argv
+pd = sep.join(__file__.split(sep)[:-1]) + sep
 
 def err(m):
     print("Error: " + m); sys.exit(1)
@@ -87,13 +88,12 @@ del dst
 # copy band name info over if it got lost!
 dst_hfn = dst_filename[:-4] + '.hdr'
 src_hfn = src_filename[:-4] + '.hdr'
-print(src_hfn)
-a = os.system("cat " + src_hfn)
-print(dst_hfn)
-a = os.system("cat " + dst_hfn)
+# print(src_hfn)
+# a = os.system("cat " + src_hfn)
+# print(dst_hfn)
+# a = os.system("cat " + dst_hfn)
 
-
-
+a = os.system(pd + 'envi_update_band_names.py ' + src_hfn + ' ' + dst_hfn)
 
 
 '''
