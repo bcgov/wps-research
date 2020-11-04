@@ -27,7 +27,7 @@ except Exception:
     err("please check input filename format, needs extension .xxx")
 
 input_raster, output_raster = fn, ofn
-cmd = ['gdalwarp',
+cmd = ['gdalwarp -of ENVI -ot Float32 ',
         '-t_srs',
         'EPSG:' + str(dst_EPSG),
         input_raster,
