@@ -57,4 +57,4 @@ cmd = ['ogr2ogr',
 
 cmd = ' '.join(cmd)
 print(cmd)
-
+a = os.system(cmd)
