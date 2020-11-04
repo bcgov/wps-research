@@ -22,6 +22,7 @@ the swig/python folder and manually do the:
 import os
 import sys
 args = sys.argv
+sep = os.path.sep
 pd = sep.join(__file__.split(sep)[:-1]) + sep
 
 def err(m):
