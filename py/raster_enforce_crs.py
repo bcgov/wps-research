@@ -22,14 +22,18 @@ if not os.path.exists(fn):
 
 ofn = fn + "_epsg_" + str(dst_EPSG)
 try:
-    ofn = fn[:-4] + "epsg_" + str(dst_EPSG) + fn[-4:]
+    ofn = fn[:-4] + "_epsg_" + str(dst_EPSG) + fn[-4:]
 except Exception:
     err("please check input filename format, needs extension .xxx")
 
+input_raster, output_raster = fn, ofn
 cmd = ['gdalwarp',
         '-t_srs',
         'EPSG:' + str(dst_EPSG),
         input_raster,
         output_raster]
 
+cmd = ' '.join(cmd)
+print(cmd)
 
+a = os.system(cmd)
