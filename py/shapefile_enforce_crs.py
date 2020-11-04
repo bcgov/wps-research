@@ -6,11 +6,10 @@ args = sys.argv
 def err(m):
     print("Error: " + m); sys.exit(1)
 
-print(args)
+dst_EPSG = 32609 # default CRS: EPSG 32609 
 
 if len(args) < 2:
     err("python3 shapefile_enforce_crs.py [input shapefile] [optional argument: destination crs EPSG number] # default EPSG 32609")
-
 
 fn = args[1]
 try:
@@ -18,6 +17,15 @@ try:
         err("shapefile input req'd")
 except Exception:
     err("please check input file")
+
+if not os.path.exists(fn):
+    err("could not find input file: " + fn)
+
+if len(args) > 2:
+    try:
+        dst_EPSG = int(args[2]) # override default EPSG
+    except Exception:
+        err("EPSG parameter must be an integer")
 
 cmd = "gdalsrsinfo -v " + fn
 data = os.popen(cmd).read().strip()
