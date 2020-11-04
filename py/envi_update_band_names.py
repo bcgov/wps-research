@@ -27,7 +27,7 @@ def get_band_names_lines(data):
             in_band_names = True
 
         if in_band_names:
-            print(lines[i])
+            # print(lines[i])
             band_name_lines.append(lines[i])
             if len(lines[i].split("}")) > 1:
                 in_band_names = False
@@ -40,21 +40,11 @@ run('python3 ' + pd + 'envi_header_cleanup.py ' + args[1])
 run('python3 ' + pd + 'envi_header_cleanup.py ' + args[2]) # should really call directly, whatever
 
 i_dat, o_dat = open(args[1]).read(),  open(args[2]).read()
-
-
-print("get band names..")
-
-bn_1 = get_band_names_lines(i_dat)
-bn_2 = get_band_names_lines(o_dat)
-
+bn_1, bn_2 = get_band_names_lines(i_dat), get_band_names_lines(o_dat)
 lines = o_dat.strip().split('\n')
 
 for i in range(0, len(lines)):
-    line = lines[i]
-    if line in 
-
-
-
-
-
-
+    line = lines[i].strip()
+    if line in bn_2:
+        lines[i] = bn_1[bn_2.index(line)]
+open(args[2], 'wb').write('\n'.join(lines).encode()) # write the result
