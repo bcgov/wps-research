@@ -1,3 +1,4 @@
+# transfer band names from one file to another. Useful if you run a program that throws band name info away!
 import os
 import sys
 args = sys.argv
