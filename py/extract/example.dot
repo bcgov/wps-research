@@ -46,7 +46,7 @@ task_5 [
 shape = plaintext
 label=<
 <table border='0' cellborder='0'>
-<tr><td>python3 shapefile_enforce_crs.py FTL_test1.shp</td></tr>
+<tr><td>python3 shapefile_enforce_crs.py FTL_test1.shp 32609</td></tr>
 </table> >];
 
 
