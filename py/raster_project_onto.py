@@ -87,6 +87,10 @@ del dst
 # copy band name info over if it got lost!
 dst_hfn = dst_filename[:-4] + '.hdr'
 src_hfn = src_filename[:-4] + '.hdr'
+print(src_hfn)
+a = os.system("cat " + src_hfn)
+print(dst_hfn)
+a = os.system("cat " + dst_hfn)
 
 
 
