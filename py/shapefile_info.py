@@ -48,4 +48,9 @@ for f in features:
     feature_names.append(feature_name)
 
     if geom['type'] == 'Point':
-        print(feature_id, geom['type'], geom['coordinates'][0], geom['coordinates'][1])
+        stuff = [feature_id,
+                 geom['type'],
+                 geom['coordinates'][0],
+                 geom['coordinates'][1]]
+        print(','.join([str(x) for x in stuff]))
+
