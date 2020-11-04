@@ -6,14 +6,15 @@ args = sys.argv
 def err(m):
     print("Error: " + m); sys.exit(1)
 
-if len(args) < 3:
-    err("raster_enforce_crs [input image file] [crs in EPSG]")
+if len(args) < 2:
+    err("raster_enforce_crs [input image file] [crs in EPSG] # default target crs: EPSG 32609")
 
 dst_EPSG = 32609 # default CRS: EPSG 32609
-try:
-    dst_EPSG = int(args[2])
-except:
-    err("target crs in EPSG must be an integer")
+if len(args) > 2:
+    try:
+        dst_EPSG = int(args[2])
+    except:
+        err("target crs in EPSG must be an integer")
 
 fn = args[1]
 if not os.path.exists(fn):
