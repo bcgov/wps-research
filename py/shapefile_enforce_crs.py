@@ -27,6 +27,8 @@ if len(args) > 2:
     except Exception:
         err("EPSG parameter must be an integer")
 
+ofn = fn[:-4] + '_epsg_' + str(dst_EPSG) + '.shp'
+
 cmd = "gdalsrsinfo -v " + fn
 data = os.popen(cmd).read().strip()
 
@@ -42,4 +44,17 @@ for line in lines:
     if len(w) > 1:
         w = w[1].strip('"').strip(',').strip(']').strip(']').strip()
         src_EPSG = int(w)
+
+print("reproject")
+print("from EPSG:", src_EPSG, '\t input file:', fn)
+print("  to EPSG:", dst_EPSG, '\toutput file:', ofn)
+
+cmd = ['ogr2ogr',
+        '-t_srs',
+        'EPSG:' + str(dst_EPSG),
+        ofn,
+        fn] # source data goes second, ogr is weird!
+
+cmd = ' '.join(cmd)
+print(cmd)
 
