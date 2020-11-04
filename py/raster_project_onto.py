@@ -94,7 +94,7 @@ src_hfn = src_filename[:-4] + '.hdr'
 # print(dst_hfn)
 # a = os.system("cat " + dst_hfn)
 
-a = os.system(pd + 'envi_update_band_names.py ' + src_hfn + ' ' + dst_hfn)
+a = os.system('python3 ' + pd + 'envi_update_band_names.py ' + src_hfn + ' ' + dst_hfn)
 
 
 '''
