@@ -1,0 +1,3 @@
+#!/usr/bin/bash
+dot -Tpdf example.dot -o example.pdf; evince example.pdf&
+
