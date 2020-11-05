@@ -6,7 +6,7 @@ that inspired further developments at UVic, CFS and elsewhere.. */ // todo: disp
 #include<iostream>
 
 int main(int argc, char ** argv){
-  system("grep -n grep stretch newzpr.cpp")
+  system("grep -n grep stretch newzpr.cpp");
 
   int n_groundref = 0;
   init_mtx();
