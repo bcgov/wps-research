@@ -349,14 +349,11 @@ void zprInstance::idle(){
 }
 
 void zprInstance::setrgb(int r, int g, int b){
-
-  // do the thing
   myBi->at(0) = r;
   myBi->at(1) = g;
   myBi->at(2) = b;
 
-  // gotta have the trickle-down. N.b. the glImage()::rebuffer() gets the
-  // band-select info from zprInstance
+  // trickle-down. N.b. the glImage()::rebuffer() gets band-select info from zprInstance
   for(vector<glPlottable *>::iterator it = myGraphics.begin(); it != myGraphics.end(); it++){
     if((*it)->myType.compare(std::string("glImage")) == 0){
       // cout << "\tmyGraphics " << (*it)->myType << " rebuffer " << endl;
@@ -364,8 +361,7 @@ void zprInstance::setrgb(int r, int g, int b){
     }
   }
 
-  // now change the display title
-  string s(getTitle().substr(0, 6));
+  string s(getTitle().substr(0, 6)); // update display title
   str rs(vec_band_names[r]);
   str gs(vec_band_names[g]);
   str bs(vec_band_names[b]);
@@ -417,11 +413,8 @@ void zprInstance::processString(){
     int n_inc = half_win;
 
     for(ii =0; ii < SUB_MM; ii += n_inc){
-
       if(ii - half_win >= 0 && ii - half_win - 1 + NWIN < SUB_MM){
-
         for(jj = 0; jj < SUB_MM; jj += n_inc){
-
           if(jj - half_win >= 0 && jj - half_win - 1 + NWIN < SUB_MM){
 
             printf("i %ld j %ld\n", ii, jj);
@@ -463,10 +456,8 @@ void zprInstance::processString(){
         }
       }
     }
-
     // WIN_I = (y + NWIN) >= SUB_MM ? SUB_MM - NWIN : y;
     // WIN_J = (x + NWIN) >= SUB_MM ? SUB_MM - NWIN : x;
-
   }
 
   // gt prefix?
@@ -536,8 +527,7 @@ void zprInstance::processString(){
 
   i = atoi(&s[1]); // see if string is of form xyy..yy where x is char and yy.yy contains int
   switch(s[0]){
-    case 'd':
-    resetViewPoint();
+    case 'd': resetViewPoint();
     break;
 
     case 'c':
@@ -608,55 +598,62 @@ void zprInstance::special(int key, int x, int y){
 
   switch(key){
     case GLUT_KEY_UP: // "next frame" if applicable
-    getrgb(r, g, b);
-    r += bands_per_frame; // increment
-    g += bands_per_frame;
-    b += bands_per_frame;
-    if(r >= NBand) r -= NBand; // check if wrap
-    if(g >= NBand) g -= NBand;
-    if(b >= NBand) b -= NBand;
-    setrgb(r, g, b);
-    printf("incremented band selection: (r,g,b)=(%d,%d,%d)\n", r, g, b);
+    if(true){
+      getrgb(r, g, b);
+      r += bands_per_frame; // increment
+      g += bands_per_frame;
+      b += bands_per_frame;
+      if(r >= NBand) r -= NBand; // check if wrap
+      if(g >= NBand) g -= NBand;
+      if(b >= NBand) b -= NBand;
+      setrgb(r, g, b);
+      printf("incremented band selection: (r,g,b)=(%d,%d,%d)\n", r, g, b);
+    }
     break;
 
     case GLUT_KEY_DOWN: // "last frame" if applicable
-    getrgb(r, g, b);
-    r -= bands_per_frame; // decrement
-    g -= bands_per_frame;
-    b -= bands_per_frame;
-    if(r < 0) r += NBand; // check if wrap
-    if(g < 0) g += NBand;
-    if(b < 0) b += NBand;
-    setrgb(r, g, b);
-    printf("decremented band selection: (r,g,b)=(%d,%d,%d)\n", r, g, b);
+    if(true){
+      getrgb(r, g, b);
+      r -= bands_per_frame; // decrement
+      g -= bands_per_frame;
+      b -= bands_per_frame;
+      if(r < 0) r += NBand; // check if wrap
+      if(g < 0) g += NBand;
+      if(b < 0) b += NBand;
+      setrgb(r, g, b);
+      printf("decremented band selection: (r,g,b)=(%d,%d,%d)\n", r, g, b);
+    }
     break;
 
     case GLUT_KEY_LEFT: // decrement selected-band indices
-    getrgb(r, g, b);
-    r--; // decrement
-    g--;
-    b--;
-    if(r < 0) r += NBand; // check if wrap
-    if(g < 0) g += NBand;
-    if(b < 0) b += NBand;
-    setrgb(r, g, b);
-    printf("decremented band selection: (r,g,b)=(%d,%d,%d)\n", r, g, b);
+    if(true){
+      getrgb(r, g, b);
+      r--; // decrement
+      g--;
+      b--;
+      if(r < 0) r += NBand; // check if wrap
+      if(g < 0) g += NBand;
+      if(b < 0) b += NBand;
+      setrgb(r, g, b);
+      printf("decremented band selection: (r,g,b)=(%d,%d,%d)\n", r, g, b);
+    }
     break;
 
     case GLUT_KEY_RIGHT: // increment selected-band indices
-    getrgb(r, g, b);
-    r++; // increment
-    g++;
-    b++;
-    if(r >= NBand) r -= NBand; // check if wrap
-    if(g >= NBand) g -= NBand;
-    if(b >= NBand) b -= NBand;
-    setrgb(r, g, b);
-    printf("incremented band selection: (r,g,b)=(%d,%d,%d)\n", r, g, b);
+    if(true){
+      getrgb(r, g, b);
+      r++; // increment
+      g++;
+      b++;
+      if(r >= NBand) r -= NBand; // check if wrap
+      if(g >= NBand) g -= NBand;
+      if(b >= NBand) b -= NBand;
+      setrgb(r, g, b);
+      printf("incremented band selection: (r,g,b)=(%d,%d,%d)\n", r, g, b);
+    }
     break;
 
-    default:
-    break;
+    default: break;
   }
 }
 
