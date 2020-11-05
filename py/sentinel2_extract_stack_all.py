@@ -94,6 +94,7 @@ for z in zips:
            dp10]
     
     print(' '.join(cmd))
+    a = os.system(cmd)
 
     cmd = ['python3',
             pd + 'envi_header_cat.py',
@@ -103,6 +104,7 @@ for z in zips:
             dp60]
 
     print(' '.join(cmd))
+    a = os.system(cmd)
     raster_files.append(sfn)
 
 # cat the bin files together, combining headers
