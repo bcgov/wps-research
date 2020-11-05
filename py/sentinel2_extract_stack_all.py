@@ -57,4 +57,8 @@ for z in zips:
            m20r]
 
     cmd = ' '.join(cmd)
-    print(cmd)
+
+    if not exists(m20r):
+        run(cmd)
+
+    sys.exit(1)
