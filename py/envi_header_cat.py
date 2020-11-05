@@ -16,7 +16,17 @@ def run(c):
 
 if len(args) < 4:
     err("envi_header_cat.py [.hdr file #1] " +
-        "[.hdr file #2] [output .hdr file]")
+        "[.hdr file #2] [output .hdr file] #" +
+        "[optional prefix for bandnanes from .hdr file #1] " +
+        "[optional prefix for bandnames from .hdr file #2]")
+
+pre1, pre2 = '', ''
+
+if len(args) > 4:
+    pre1 = args[4]
+
+if len(args) > 5:
+    pre2 = args[5]
 
 def get_band_names_lines(data):
     band_name_lines, in_band_names = [], False
