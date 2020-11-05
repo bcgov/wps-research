@@ -43,23 +43,13 @@ run(cmd)
 
 print("")
 
-for i in range(1, len(rasters)):
-    cmd = ['python3', # envi_header_cat.py is almost like a reverse-polish notation. Have to put the "first thing" on the back..
-           pd + 'envi_header_cat.py',
-           rasters[i][:-4] + '.hdr',
-           'raster.hdr',
-           'raster.hdr']
+if len(rasters) > 2:
+    for i in range(2, len(rasters)):
+        cmd = ['python3', # envi_header_cat.py is almost like a reverse-polish notation. Have to put the "first thing" on the back..
+               pd + 'envi_header_cat.py',
+               rasters[i][:-4] + '.hdr',
+               'raster.hdr',
+               'raster.hdr']
 
-    cmd = ' '.join(cmd)
-    print('*', cmd)
-
-
-
-
-
-
-
-
-
-
-
+        cmd = ' '.join(cmd)
+        print('*', cmd)
