@@ -20,6 +20,31 @@ if not exists(outf):
     a = os.system(cmd)
 
 
+cmd = ['python3', # envi_header_cat.py is almost like a reverse-polish notation. Have to put the "first thing" on the back..
+       pd + 'envi_header_cat.py',
+       rasters[1][:-4] + '.hdr',
+       rasters[0][:-4] + '.hdr',
+       'raster.hdr']
+
+cmd = ' '.join(cmd)
+run(cmd)
+
+
+for i in range(2, len(rasters)):
+    cmd = ['python3', # envi_header_cat.py is almost like a reverse-polish notation. Have to put the "first thing" on the back..
+           pd + 'envi_header_cat.py',
+           rasters[i][:-4] + '.hdr',
+           'raster.hdr'.
+           'raster.hdr']
+
+cmd = ' '.join(cmd)
+print('*', cmd)
+
+
+
+
+
+
 
 
 
