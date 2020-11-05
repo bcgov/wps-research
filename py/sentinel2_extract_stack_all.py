@@ -105,5 +105,7 @@ for z in zips:
     print(' '.join(cmd))
     raster_files.append(sfn)
 
-print("now need to cat these together:")
-print(raster_files)
+# cat the bin files together, combining headers
+cmd = ['python3', pd + 'raster_stack.py']
+cmd = cmd + raster_files + ['raster.bin']
+a = os.system(' '.join(cmd))
