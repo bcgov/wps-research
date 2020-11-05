@@ -70,6 +70,7 @@ int main(int argc, char ** argv){
   
   str my_user(exec("whoami"));
   str cmd(str("python3 /home/") + my_user + str("/GitHub/bcws-psu-research/py/envi_header_number_of_dates.py ") + hfn);
+  cout << "[" << cmd << "]" << endl;
   cout << exec(cmd.c_str());
 		  exit(1);
 
