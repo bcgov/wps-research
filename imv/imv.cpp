@@ -82,9 +82,6 @@ int main(int argc, char ** argv){
   vector<str> date_strings(split(dates, '\n'));
   int number_of_dates = date_strings.size();
  
-
-  exit(1);
-
   // cout << "hfn: " << hfn << endl;
   parseHeaderFile(hfn, nr, nc, nb);
   // printf(" infile: %s nrow %ld ncol %ld nband %ld\n", IMG_FN.c_str(), nr, nc, nb);
