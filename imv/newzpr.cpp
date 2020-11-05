@@ -370,10 +370,10 @@ void zprInstance::setrgb(int r, int g, int b){
   str gs(vec_band_names[g]);
   str bs(vec_band_names[b]);
 
-  setTitle(s + str("R,G,B=")
-  + to_string(r + 1) + str(":") + rs.substr(0, 25) + str(",")
-  + to_string(g + 1) + str(":") + gs.substr(0, 25) + str(",")
-  + to_string(b + 1) + str(":") + bs.substr(0, 25));
+  setTitle(s + str("R,G,B=[")
+  + to_string(r + 1) + str(":") + rs.substr(0, 31) + str(", ")
+  + to_string(g + 1) + str(":") + gs.substr(0, 31) + str(", ")
+  + to_string(b + 1) + str(":") + bs.substr(0, 31) + str("]"));
 }
 
 void zprInstance::getrgb(int & r, int & g, int & b){
