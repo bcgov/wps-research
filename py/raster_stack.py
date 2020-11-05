@@ -52,4 +52,4 @@ if len(rasters) > 2:
                'raster.hdr']
 
         cmd = ' '.join(cmd)
-        print('*', cmd)
+        run(cmd)
