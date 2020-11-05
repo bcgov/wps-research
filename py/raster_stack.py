@@ -24,8 +24,12 @@ outf = args[-1]
 cmd = ['cat'] + rasters + ['>', outf]
 cmd = ' '.join(cmd)
 print(cmd)
+print("")
 if not exists(outf):
     a = os.system(cmd)
+
+for r in rasters:
+    print(" ", r)
 
 
 cmd = ['python3', # envi_header_cat.py is almost like a reverse-polish notation. Have to put the "first thing" on the back..
@@ -37,16 +41,17 @@ cmd = ['python3', # envi_header_cat.py is almost like a reverse-polish notation.
 cmd = ' '.join(cmd)
 run(cmd)
 
+print("")
 
-for i in range(2, len(rasters)):
+for i in range(1, len(rasters)):
     cmd = ['python3', # envi_header_cat.py is almost like a reverse-polish notation. Have to put the "first thing" on the back..
            pd + 'envi_header_cat.py',
            rasters[i][:-4] + '.hdr',
            'raster.hdr',
            'raster.hdr']
 
-cmd = ' '.join(cmd)
-print('*', cmd)
+    cmd = ' '.join(cmd)
+    print('*', cmd)
 
 
 
