@@ -67,4 +67,16 @@ for z in zips:
     sfn = safe + sep + m10.split(sep)[-1].replace("_10m", "")[:-4] + '_10m.bin'  # stacked file name..
     print(sfn)
 
+    cmd = ['cat',
+            m10,
+            m20r,
+            m60r,
+            '>', 
+            sfn] # cat bands together, don't forget to "cat" the header files after..
+
+    if not exists(sfn):
+        run(' '.join(cmd))
+
+
+
     sys.exit(1)
