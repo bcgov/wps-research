@@ -26,7 +26,7 @@ std::string exec(const char* cmd){
   return result;
 }
 
-std::string trim(const std::string& str, const std::string& whitespace = " \t\r\n"){
+std::string strp(const std::string& str, const std::string& whitespace = " \t\r\n"){
   const auto strBegin = str.find_first_not_of(whitespace);
   if (strBegin == std::string::npos) return ""; // no content
   const auto strEnd = str.find_last_not_of(whitespace);
@@ -73,14 +73,17 @@ int main(int argc, char ** argv){
 
   string hfn(getHeaderFileName(IMG_FN)); // this section: get image scale
 
+  // find out how many bands per date (for up arrow functionality)
   str my_user(exec("whoami"));
-  trim(my_user, '\n');
-  trim(my_user, '\r');
-  str cmd(str("python3 /home/") + my_user + str("/GitHub/bcws-psu-research/py/envi_header_number_of_dates.py ") + hfn);
+  my_user = strp(my_user);
+  str cmd(str("python3 /home/") + my_user + str("/GitHub/bcws-psu-research/py/envi_header_dates.py ") + hfn);
   cout << "[" << cmd << "]" << endl;
-  cout << exec(cmd.c_str());
-  exit(1);
+  str dates(exec(cmd.c_str()));
+  vector<str> date_strings(split(dates, '\n'));
+  int number_of_dates = date_strings.size();
+ 
 
+  exit(1);
 
   // cout << "hfn: " << hfn << endl;
   parseHeaderFile(hfn, nr, nc, nb);
@@ -262,9 +265,8 @@ int main(int argc, char ** argv){
   myZpr5->setTitle(string("Subscene scatter")); // printf("glutMainLoop()\n");
   initLighting();
 
-  bands_per_frame = 22;
-
-
+  bands_per_frame = nb / number_of_dates;
+  
   glutMainLoop();
   return 0;
 }
