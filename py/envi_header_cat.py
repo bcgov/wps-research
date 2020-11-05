@@ -81,9 +81,9 @@ for i in range(len(lines2)):
     if len(lines2[i].split("description =")) > 1:
         lines2[i] = "description = {" + args[3][:-4] + '.bin}'
 
-print("")
-for line in lines2:
-    print(line)
+# print("")
+# for line in lines2:
+#    print(line)
 
 f = open(args[3], "wb")
 if not f:
