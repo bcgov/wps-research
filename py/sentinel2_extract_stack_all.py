@@ -26,7 +26,7 @@ zips = os.popen("ls -1 *.zip").readlines()
 for z in zips:
     z = z.strip()
     safe = z[:-4] + ".SAFE" # print(safe)
-    bins = [x.strip() for x in os.popen("ls -1 " + safe + os.path.sep + "*.bin").readlines()]
+    bins = [x.strip() for x in os.popen("ls -1 " + safe + os.path.sep + "*m_EPSG*.bin").readlines()] # don't pull the TCI true colour image. Already covered in 10m
 
     print(safe)
     for b in bins:
