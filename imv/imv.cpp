@@ -6,6 +6,8 @@ that inspired further developments at UVic, CFS and elsewhere.. */ // todo: disp
 #include<iostream>
 
 int main(int argc, char ** argv){
+  system("grep -n grep stretch newzpr.cpp")
+
   int n_groundref = 0;
   init_mtx();
   groundref.clear();
@@ -16,7 +18,7 @@ int main(int argc, char ** argv){
   if(argc > 3) n_groundref = atoi(argv[3]); // number of bands at end, to consider as groundref
 
   if(!exists(IMG_FN)) err("failed to open input file"); // check if input file exists
-  string mfn(IMG_FN + string(".ml")); // look for saved multilook file 
+  string mfn(IMG_FN + string(".ml")); // look for saved multilook file
   cout << "multilook file name: " << mfn << endl;
 
   // analysis window size
@@ -59,7 +61,7 @@ int main(int argc, char ** argv){
       cout << "groundref " << *it << endl;
     }
   }
-  size_t imin = nr > nc ? nc: nr;  // this section determine scaling factor 
+  size_t imin = nr > nc ? nc: nr; // this section determine scaling factor
   float scalef = (float)min / (float)imin;
   printf("scalef %f\n", scalef);
 
@@ -81,8 +83,8 @@ int main(int argc, char ** argv){
   // SA<float> dat0(nr * nc * nb); // whole frame goes here
   np2 = nr2 * nc2;
   SA<float> dat(np2 * nb); // overview/ multilook image buffer
-  SA<float> bb(np); // whole image,  one-band buffer
-  
+  SA<float> bb(np); // whole image, one-band buffer
+
   size_t mfn_fs = getFileSize(mfn);
   if(exists(mfn) && mfn_fs == np2 * nb * sizeof(float)){
     FILE * f = fopen(mfn.c_str(), "rb");
@@ -214,9 +216,9 @@ int main(int argc, char ** argv){
   zprInstance * myZpr5 = myManager->newZprInstance(200, 200, nb); // preview scatter plot
   glLine xL2(myZpr5, v0, vx, 1, 0, 0); glLine yL2(myZpr5, v0, vy, 0, 1, 0);
   glLine zL2(myZpr5, v0, vz, 0, 0, 1);
-  
+
   glPoints scatter2(myZpr5, myImage2); // scatter plot for: preview window
-  myZpr5->setRightOf(myZpr2) ; // ScreenPosition(nc2, nr2 + 65); 
+  myZpr5->setRightOf(myZpr2) ; // ScreenPosition(nc2, nr2 + 65);
   myZpr5->setTitle(string("Subscene scatter")); // printf("glutMainLoop()\n");
   initLighting();
   glutMainLoop();

@@ -104,7 +104,7 @@ void two_percent(float & min, float & max, SA<float> * b){
   }
   printf("two_p n=%zu min %f max %f\n", b->size(), min, max);
 
-  bool disable_stretch = true;
+  bool disable_stretch = false;
   if(disable_stretch){
     min = 0.;
     max = 1.;
