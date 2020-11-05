@@ -6,6 +6,8 @@ that inspired further developments at UVic, CFS and elsewhere.. */ // todo: disp
 #include<iostream>
 
 int main(int argc, char ** argv){
+  bands_per_frame = 22; // defaults to 11
+
   system("grep -n grep stretch newzpr.cpp");
 
   int n_groundref = 0;
