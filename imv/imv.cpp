@@ -30,7 +30,8 @@ std::string exec(const char* cmd) {
 }
 
 int main(int argc, char ** argv){
-  system("grep -n grep stretch newzpr.cpp");
+  
+  system("grep -n grep stretch newzpr.cpp"); // should be able to turn stretching on and off!
 
   int n_groundref = 0;
   init_mtx();
@@ -66,6 +67,14 @@ int main(int argc, char ** argv){
   size_t nr, nc, nb, nr2, nc2, np2;
 
   string hfn(getHeaderFileName(IMG_FN)); // this section: get image scale
+  
+  str my_user(exec("whoami"));
+  str cmd(str("python3 /home/") + my_user + str("/GitHub/bcws-psu-research/py/envi_header_number_of_dates.py ") + hfn);
+  cout << exec(cmd.c_str());
+		  exit(1);
+
+  
+  
   // cout << "hfn: " << hfn << endl;
   parseHeaderFile(hfn, nr, nc, nb);
   // printf(" infile: %s nrow %ld ncol %ld nband %ld\n", IMG_FN.c_str(), nr, nc, nb);
