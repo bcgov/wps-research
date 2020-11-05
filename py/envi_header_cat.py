@@ -40,8 +40,16 @@ run('python3 ' + pd + 'envi_header_cleanup.py ' + args[2]) # should really call 
 
 i_dat, o_dat = open(args[1]).read(),  open(args[2]).read()
 bn_1, bn_2 = get_band_names_lines(i_dat), get_band_names_lines(o_dat)
-lines = o_dat.strip().split('\n')
+lines1 , lines2 = i_dat.strip().split('\n'), o_dat.strip().split('\n')
 
 
+# add band counts
+band_count = len(bn_1) + len(bn_2)
+print(band_count)
+
+if 
+
+
+# concat band names
 
 
