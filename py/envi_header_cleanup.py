@@ -23,7 +23,6 @@ for i in range(0, len(lines)):
 
     if len(line.split("band names =")) > 1:
         in_band_names = True
-    
     # print(line + (" TRUE" if in_band_names else ""))
 
     if in_band_names:
@@ -68,6 +67,6 @@ bandname_lines[-1] = bandname_lines[-1].replace(',', '') # no comma in last band
 lines = non_bandname_lines + bandname_lines
 data = ('\n'.join(lines)).strip()
 
-print(data)
+# print(data)
 open(args[1] + '.bak', 'wb').write(open(args[1]).read().encode())
 open(args[1], 'wb').write(data.encode())
