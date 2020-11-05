@@ -370,6 +370,20 @@ void zprInstance::setrgb(int r, int g, int b){
   + to_string(r + 1) + str(":") + rs.substr(0, 31) + str(", ")
   + to_string(g + 1) + str(":") + gs.substr(0, 31) + str(", ")
   + to_string(b + 1) + str(":") + bs.substr(0, 31) + str("]"));
+
+   for(int m = 0; m <= 4; m++){
+      // if(m > 1) continue; // update the first two windows (otherwise get segfault)
+      zprInstance * a = myZprManager->myZprInstances->at(m);
+      if(a != this){
+        a->focus();
+        a->mark();
+        a->display();
+      }
+    }
+    //myZprDisplay();
+    this->focus();
+    this->mark();
+    this->display();
 }
 
 void zprInstance::getrgb(int & r, int & g, int & b){
@@ -714,20 +728,16 @@ void zprInstance::keyboard(unsigned char key, int x, int y){
     // Escape
     case 27 :
     quitme();
-    exit(0);
-    //printf( "%d Pressed Esc\n",(char)key);
+    exit(0); //printf( "%d Pressed Esc\n",(char)key);
     break;
 
     // Delete
     /* case 127 :
     printf( "%d Pressed Del\n",(char)key);
-    break;
-    */
-    default:
-    //printf( "Pressed key %c AKA %d at position %d % d\n",(char)key, key, x, y);
+    break; */
+    default: //printf( "Pressed key %c AKA %d at position %d % d\n",(char)key, key, x, y);
     console_string[console_position++] = (char)key;
-    console_string[console_position]='\0';
-    // printf("STRING: %s\n", &console_string[0]);
+    console_string[console_position]='\0'; // printf("STRING: %s\n", &console_string[0]);
     display();
     break;
   }
