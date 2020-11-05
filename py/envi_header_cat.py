@@ -14,6 +14,10 @@ def run(c):
     a = os.system(c)
     if a != 0: err("failed to run: " + str(c))
 
+if len(args) < 4:
+    err("envi_header_cat.py [.hdr file #1] " +
+        "[.hdr file #2] [output .hdr file]")
+
 def get_band_names_lines(data):
     band_name_lines, in_band_names = [], False
     lines = [x.strip() for x in data.strip().split("\n")]
