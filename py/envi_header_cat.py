@@ -47,7 +47,24 @@ lines1 , lines2 = i_dat.strip().split('\n'), o_dat.strip().split('\n')
 band_count = len(bn_1) + len(bn_2)
 print(band_count)
 
-if 
+if lines2[-1] not in bn_2:
+    print("unexpected header formatting")
+
+lines2[-1] = lines2[-1].strip().strip('}') + ','
+# print(bn_1)
+
+bn_1[0] = bn_1[0].split('{')[1]
+# print(bn_1)
+
+lines2 = lines2 + bn_1
+
+for i in range(len(lines2)):
+    if len(lines2[i].split('bands   =')) > 1:
+        lines2[i] = lines2[i].split('=')[0] + ' ' + str(band_count)
+
+print("")
+for line in lines2:
+    print(line)
 
 
 # concat band names
