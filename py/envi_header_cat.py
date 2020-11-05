@@ -1,13 +1,10 @@
 # from two envi header files (given), produce a new header file reflecting the bands from both header files being combined
-
 import os
 import sys
 args = sys.argv
 sep = os.path.sep
 exists = os.path.exists
 pd = sep.join(__file__.split(sep)[:-1]) + sep
-
-print(pd)
 
 def err(m):
     print("Error: " + m); sys.exit(1)
