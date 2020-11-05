@@ -349,6 +349,7 @@ void zprInstance::idle(){
 }
 
 void zprInstance::setrgb(int r, int g, int b){
+  cout << getTitle() << "::setrgb()\n";
   myBi->at(0) = r;
   myBi->at(1) = g;
   myBi->at(2) = b;
