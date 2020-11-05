@@ -365,7 +365,7 @@ void zprInstance::setrgb(int r, int g, int b){
   }
 
   // now change the display title
-  string s(getTitle().substr(0,8));
+  string s(getTitle().substr(0, 7));
   str rs(vec_band_names[r]);
   str gs(vec_band_names[g]);
   str bs(vec_band_names[b]);
