@@ -62,11 +62,16 @@ for i in range(len(lines2)):
     if len(lines2[i].split('bands   =')) > 1:
         lines2[i] = lines2[i].split('=')[0] + ' ' + str(band_count)
 
+    if len(lines2[i].split("description =")) > 1L
+        lines2[i] = "description = {" + args[3][:-4] + '.bin'
+
 print("")
 for line in lines2:
     print(line)
 
+f = open(args[3], "wb")
+if not f:
+    err("failed to open output file: " + args[3])
 
-# concat band names
-
-
+f.write('\n'.join(lines2).encode())
+f.close()
