@@ -46,19 +46,25 @@ for z in zips:
 
     
     # names for files resampled to 10m
-    m20r = m20[:-4] + '_10m.bin'
-    print("   " + m20r)
-    m60r = m60[:-4] + '_10m.bin'
-    print("   " + m60r)
+    m20r, m60r = m20[:-4] + '_10m.bin', m60[:-4] + '_10m.bin'
 
+    # resample the 20m
     cmd = ['python3 ' + pd + 'raster_project_onto.py',
            m20,
            m10,
            m20r]
-
-    cmd = ' '.join(cmd)
-
+ 
     if not exists(m20r):
-        run(cmd)
+        run(' '.join(cmd))
+
+
+    # resample the 60m
+    cmd = ['python3 ' + pd + 'raster_project_onto.py',
+           m60,
+           m10,
+           m60r]
+
+    if not exists(m60r):
+        run(' '.join(cmd))
 
     sys.exit(1)
