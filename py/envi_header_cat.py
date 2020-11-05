@@ -18,7 +18,8 @@ if len(args) < 4:
     err("envi_header_cat.py [.hdr file #1] " +
         "[.hdr file #2] [output .hdr file] #" +
         "[optional prefix for bandnanes from .hdr file #1] " +
-        "[optional prefix for bandnames from .hdr file #2]")
+        "[optional prefix for bandnames from .hdr file #2]" +
+        " #  n.b. first gets appended onto second")
 
 pre1, pre2 = '', ''
 
