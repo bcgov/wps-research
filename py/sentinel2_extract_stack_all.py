@@ -26,11 +26,11 @@ zips = os.popen("ls -1 *.zip").readlines()
 for z in zips:
     z = z.strip()
     safe = z[:-4] + ".SAFE" # print(safe)
-    bins = [x.strip() for x in os.popen("ls -1 " + safe + os.path.sep + "*m_EPSG*.bin").readlines()] # don't pull the TCI true colour image. Already covered in 10m
+    bins = [x.strip() for x in os.popen("ls -1 " + safe + os.path.sep + "*m_EPSG_32609.bin").readlines()] # don't pull the TCI true colour image. Already covered in 10m
     print(safe)
 
     if len(bins) != 3:
-        err("unexpected number of bin files (expected 3): " + str(bins))
+        err("unexpected number of bin files (expected 3): " + str('\n'.join(bins)))
 
     m10, m20, m60 = bins
     print("  10m:", m10)
