@@ -5,32 +5,37 @@ that inspired further developments at UVic, CFS and elsewhere.. */ // todo: disp
 #include"newzpr.h"
 #include<iostream>
 
-
 //#include <iostream>
 #include <stdexcept>
 //#include <stdio.h>
 //#include <string>
 
-std::string exec(const char* cmd) {
-    char buffer[128];
-   std::string result = "";
-    FILE* pipe = popen(cmd, "r");
-    if (!pipe) throw std::runtime_error("popen() failed!");
-    try{
-        while(fgets(buffer, sizeof buffer, pipe) != NULL) {
-            result += buffer;
-        }
-    }
-    catch (...) {
-        pclose(pipe);
-        throw;
-    }
+std::string exec(const char* cmd){
+  char buffer[128];
+  std::string result = "";
+  FILE* pipe = popen(cmd, "r");
+  if (!pipe) throw std::runtime_error("popen() failed!");
+  try{
+    while(fgets(buffer, sizeof buffer, pipe) != NULL) result += buffer;
+  }
+  catch (...) {
     pclose(pipe);
-    return result;
+    throw;
+  }
+  pclose(pipe);
+  return result;
+}
+
+std::string trim(const std::string& str, const std::string& whitespace = " \t\r\n"){
+  const auto strBegin = str.find_first_not_of(whitespace);
+  if (strBegin == std::string::npos) return ""; // no content
+  const auto strEnd = str.find_last_not_of(whitespace);
+  const auto strRange = strEnd - strBegin + 1;
+  return str.substr(strBegin, strRange);
 }
 
 int main(int argc, char ** argv){
-  
+
   system("grep -n grep stretch newzpr.cpp"); // should be able to turn stretching on and off!
 
   int n_groundref = 0;
@@ -67,15 +72,16 @@ int main(int argc, char ** argv){
   size_t nr, nc, nb, nr2, nc2, np2;
 
   string hfn(getHeaderFileName(IMG_FN)); // this section: get image scale
-  
+
   str my_user(exec("whoami"));
+  trim(my_user, '\n');
+  trim(my_user, '\r');
   str cmd(str("python3 /home/") + my_user + str("/GitHub/bcws-psu-research/py/envi_header_number_of_dates.py ") + hfn);
   cout << "[" << cmd << "]" << endl;
   cout << exec(cmd.c_str());
-		  exit(1);
+  exit(1);
 
-  
-  
+
   // cout << "hfn: " << hfn << endl;
   parseHeaderFile(hfn, nr, nc, nb);
   // printf(" infile: %s nrow %ld ncol %ld nband %ld\n", IMG_FN.c_str(), nr, nc, nb);
@@ -255,11 +261,10 @@ int main(int argc, char ** argv){
   myZpr5->setRightOf(myZpr2) ; // ScreenPosition(nc2, nr2 + 65);
   myZpr5->setTitle(string("Subscene scatter")); // printf("glutMainLoop()\n");
   initLighting();
-  
-  bands_per_frame = 22;
-  
 
-  
+  bands_per_frame = 22;
+
+
   glutMainLoop();
   return 0;
 }
