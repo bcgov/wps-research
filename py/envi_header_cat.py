@@ -62,7 +62,7 @@ for i in range(len(lines2)):
     if len(lines2[i].split('bands   =')) > 1:
         lines2[i] = lines2[i].split('=')[0] + ' ' + str(band_count)
 
-    if len(lines2[i].split("description =")) > 1L
+    if len(lines2[i].split("description =")) > 1:
         lines2[i] = "description = {" + args[3][:-4] + '.bin'
 
 print("")
