@@ -85,7 +85,7 @@ for z in zips:
     # now "cat" the header files together
     shn = sfn[:-4] + '.hdr' # header file name for stack
 
-    cmd = ['python3',
+    cmd = ['python3', # envi_header_cat.py is almost like a reverse-polish notation. Have to put the "first thing" on the back..
            pd + 'envi_header_cat.py',
            m20r[:-4] + '.hdr',
            m10[:-4] + '.hdr', 
