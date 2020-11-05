@@ -26,8 +26,11 @@ zips = os.popen("ls -1 *.zip").readlines()
 for z in zips:
     z = z.strip()
     safe = z[:-4] + ".SAFE" # print(safe)
-    a = os.system("ls -1 " + safe + os.path.sep + "*.bin")
-    
+    bins = [x.strip() for x in os.popen("ls -1 " + safe + os.path.sep + "*.bin").readlines()]
+
+    print(safe)
+    for b in bins:
+        print('  ' + b) # print('  ' + b.split(sep)[-1])
     if not os.path.exists(safe):
         cmd = "python3 " + extract + " " + z
         print(cmd)
