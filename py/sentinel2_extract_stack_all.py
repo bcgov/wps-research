@@ -21,7 +21,7 @@ def run(c):
 
 extract = pd + "extract_sentinel2.py" # command to extract a zip
 zips = os.popen("ls -1 *.zip").readlines() # list the zip files
-# raster_files = 
+raster_files = []
 
 for z in zips:
     z = z.strip()
@@ -103,8 +103,7 @@ for z in zips:
             dp60]
 
     print(' '.join(cmd))
-    
-    # add not exists case back in after..
+    raster_files.append(sfn)
 
-
-    sys.exit(1)
+print("now need to cat these together:")
+print(raster_files)
