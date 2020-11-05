@@ -6,8 +6,6 @@ that inspired further developments at UVic, CFS and elsewhere.. */ // todo: disp
 #include<iostream>
 
 int main(int argc, char ** argv){
-  bands_per_frame = 22; // defaults to 11
-
   system("grep -n grep stretch newzpr.cpp");
 
   int n_groundref = 0;
@@ -223,6 +221,8 @@ int main(int argc, char ** argv){
   myZpr5->setRightOf(myZpr2) ; // ScreenPosition(nc2, nr2 + 65);
   myZpr5->setTitle(string("Subscene scatter")); // printf("glutMainLoop()\n");
   initLighting();
+  
+  bands_per_frame = 22;
   glutMainLoop();
   return 0;
 }
