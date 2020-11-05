@@ -15,9 +15,11 @@ outf = args[-1]
 
 cmd = ['cat'] + rasters + ['>', outf]
 cmd = ' '.join(cmd)
+print(cmd)
 if not exists(outf):
-    print(cmd)
     a = os.system(cmd)
+
+
 
 
 
