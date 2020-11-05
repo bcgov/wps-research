@@ -67,4 +67,10 @@ for z in zips:
     if not exists(m60r):
         run(' '.join(cmd))
 
+
+    # now do the stacking..
+    print(m10)
+    
+    #sfn # stacked file name..
+
     sys.exit(1)
