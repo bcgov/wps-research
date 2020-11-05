@@ -70,7 +70,9 @@ for z in zips:
 
     # now do the stacking..
     print(m10)
+ 
     
-    #sfn # stacked file name..
+    sfn = safe + sep + m10.split(sep)[-1].replace("_10m", "") # stacked file name..
+    print(sfn)
 
     sys.exit(1)
