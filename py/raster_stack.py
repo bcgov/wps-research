@@ -6,6 +6,14 @@ sep = os.path.sep
 exists = os.path.exists
 pd = sep.join(__file__.split(sep)[:-1]) + sep
 
+def err(m):
+    print("Error: " + m); sys.exit(1)
+
+def run(c):
+    print(c)
+    a = os.system(c)
+    if a != 0: err("failed to run: " + str(c))
+
 if len(args) < 4:
     err("python3 raster_stack.py [input raster 1] [input raster 2] .." +
         " [input raster n] [output raster name]")
