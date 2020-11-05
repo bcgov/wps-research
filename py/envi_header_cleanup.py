@@ -35,7 +35,7 @@ for i in range(0, len(lines)):
             lines[i] = line.replace(',', '')
 
     if in_band_names:
-        print("*", line)
+        # print("*", line)
         bandname_lines.append(line) # track band names we have
     else:
         non_bandname_lines.append(line) # record non-band-name lines,
