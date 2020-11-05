@@ -72,7 +72,7 @@ for z in zips:
     print(m10)
  
     
-    sfn = safe + sep + m10.split(sep)[-1].replace("_10m", "") # stacked file name..
+    sfn = safe + sep + m10.split(sep)[-1].replace("_10m", "")[:-4] + '_10m.bin'  # stacked file name..
     print(sfn)
 
     sys.exit(1)
