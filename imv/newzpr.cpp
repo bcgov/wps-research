@@ -356,7 +356,7 @@ void zprInstance::setrgb(int r, int g, int b){
   // trickle-down. N.b. the glImage()::rebuffer() gets band-select info from zprInstance
   for(vector<glPlottable *>::iterator it = myGraphics.begin(); it != myGraphics.end(); it++){
     if((*it)->myType.compare(std::string("glImage")) == 0){
-      // cout << "\tmyGraphics " << (*it)->myType << " rebuffer " << endl;
+      cout << "\tmyGraphics " << (*it)->myType << " rebuffer " << endl;
       ((glImage *)((void *)((glPlottable *)(*it))))->rebuffer();
     }
   }
@@ -371,7 +371,7 @@ void zprInstance::setrgb(int r, int g, int b){
   + to_string(g + 1) + str(":") + gs.substr(0, 31) + str(", ")
   + to_string(b + 1) + str(":") + bs.substr(0, 31) + str("]"));
 
-   for(int m = 0; m <= 4; m++){
+   for(int m = 0; m < 5; m++){
       // if(m > 1) continue; // update the first two windows (otherwise get segfault)
       zprInstance * a = myZprManager->myZprInstances->at(m);
       if(a != this){
