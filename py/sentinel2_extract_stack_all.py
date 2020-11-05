@@ -19,9 +19,9 @@ def run(c):
     a = os.system(c)
     if a != 0: err("failed to run: " + str(c))
 
-extract = pd + "extract_sentinel2.py"
-
-zips = os.popen("ls -1 *.zip").readlines()
+extract = pd + "extract_sentinel2.py" # command to extract a zip
+zips = os.popen("ls -1 *.zip").readlines() # list the zip files
+# raster_files = 
 
 for z in zips:
     z = z.strip()
@@ -47,7 +47,6 @@ for z in zips:
     
     # names for files resampled to 10m
     m20r, m60r = m20[:-4] + '_10m.bin', m60[:-4] + '_10m.bin'
-
     
     def resample(src, ref, dst): # resample src onto ref, w output file dst
         cmd = ['python3 ' + pd + 'raster_project_onto.py',
@@ -77,6 +76,35 @@ for z in zips:
     if not exists(sfn):
         run(' '.join(cmd))
 
+    # add a date prefix
+    dp = '"' + safe.split('T')[0].strip().split('_')[-1].strip()
+    dp10 = dp + ' 10m: "'
+    dp20 = dp + ' 20m: "'
+    dp60 = dp + ' 60m: "'
+
+    # now "cat" the header files together
+    shn = sfn[:-4] + '.hdr' # header file name for stack
+
+    cmd = ['python3',
+           pd + 'envi_header_cat.py',
+           m20r[:-4] + '.hdr',
+           m10[:-4] + '.hdr', 
+           shn,
+           dp20,
+           dp10]
+    
+    print(' '.join(cmd))
+
+    cmd = ['python3',
+            pd + 'envi_header_cat.py',
+            m60r[:-4] + '.hdr',
+            shn[:-4] + '.hdr',
+            shn,
+            dp60]
+
+    print(' '.join(cmd))
+    
+    # add not exists case back in after..
 
 
     sys.exit(1)
