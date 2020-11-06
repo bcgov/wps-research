@@ -220,7 +220,6 @@ class zprManager{
   void zprIdle();
   void zprDrawGraphics();
 
-  private:
   int nextZprInstanceID;
 
   zprManager(int argc, char *argv[]){
@@ -572,7 +571,7 @@ class zprInstance{
   void special(int key, int x, int y);
   void specialUp(int key, int x, int y);
   // int grabint(char * p );
-  void setrgb(int r, int g, int b);
+  void setrgb(int r, int g, int b, int call_depth);
   void getrgb(int & r, int & g, int & b);
 
 };
