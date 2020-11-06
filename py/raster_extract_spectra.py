@@ -75,8 +75,6 @@ for f in features: # print(f.keys())
     feature_id = f['id']
     feature_ids.append(feature_id) # print("feature properties.keys()", f['properties'].keys())
     
-    print("feature id", feature_id)
-
     feature_name = ''
     try:
         feature_name = f['properties']['Name']
@@ -91,7 +89,8 @@ for f in features: # print(f.keys())
     #    print("geom", f) # ['geometry'])
 
 count = 0 # extract spectra
-for i in range(feature_count): # print(feature_ids[i], coordinates[i])
+for i in range(feature_count):
+    print(feature_ids[i], coordinates[i])
     
     # not efficient for "many" points
     cmd = ["gdallocationinfo",
@@ -113,7 +112,7 @@ for i in range(feature_count): # print(feature_ids[i], coordinates[i])
             err('unexpected data')
 
         pix_i, lin_i = int(pix_i[:-1]), int(lin_i[:-1])
-        print([pix_i, lin_i])
+        print(str(pix_i) + 'P ' + str( lin_i) + 'L')
         count += 1
         data = []
         for j in range(0, nb): # for each band
@@ -123,22 +122,25 @@ for i in range(feature_count): # print(feature_ids[i], coordinates[i])
 
             value = float(lines[3 + (2*j)].split()[1].strip())
             data.append(value)
-        print("centre_data", data)
+        if False:
+            print("centre_data", data)
         # feature,ctr_lat,ctr_lon,row,lin,xoff,yoff,b0,b1,b2,b3
         data_line = [feature_ids[i], coordinates[i][0], coordinates[i][1],
                      img, pix_i, lin_i, 0, 0] + data
         data_line = ','.join([str(x) for x in data_line])
         out_spec_f.write(("\n" + data_line).encode())     
-
-        for j in range(len(x_off)):
+        
+        for j in range(len(x_off)): # for each of the non-centre window points
             xo, yo = x_off[j], y_off[j]
             pix_j, lin_j = pix_i + xo, lin_i + yo
+            print(pix_j, lin_j, xo, yo, pix_i, lin_i)
+            
             cmd = ["gdallocationinfo",
                    img, # input image
                    str(pix_j), # default: pixl number (0-indexed) aka row
                    str(lin_j)] # default: line number (0-indexed) aka col
             cmd = ' '.join(cmd)
-            print("\t" + cmd)
+            print("  \t" + cmd)
             lines = [x.strip() for x in os.popen(cmd).readlines()]
             if len(lines) != 2 * (1 + nb):
                 err("unexpected result line count")
@@ -146,27 +148,28 @@ for i in range(feature_count): # print(feature_ids[i], coordinates[i])
             w = lines[1].split()
             if w[0] != "Location:":
                 err("unexpected field")
-            pix_i, lin_i = w[1].strip('(').strip(')').split(',')
-            if pix_i[-1] != 'P' or lin_i[-1] != 'L':
+            pix_k, lin_k = w[1].strip('(').strip(')').split(',')
+            if pix_k[-1] != 'P' or lin_k[-1] != 'L':
                 err('unexpected data')
 
-            pix_i, lin_i = int(pix_i[:-1]), int(lin_i[:-1])
-            print([pix_i, lin_i])
+            pix_k, lin_k = int(pix_k[:-1]), int(lin_k[:-1])
+            print(str(pix_k) + 'P ' + str(lin_k) + 'L')
             count += 1
             data = []
-            for j in range(0, nb): # for each band
-                bn = lines[2 * (1 + j)].strip(":").strip().split()
-                if int(bn[1]) != j + 1:
-                    err("expected: Band: " + str(j + 1) + "; found: " + lines[2 * (1 + j)])
+            for k in range(0, nb): # for each band
+                bn = lines[2 * (1 + k)].strip(":").strip().split()
+                if int(bn[1]) != k + 1:
+                    err("expected: Band: " + str(k + 1) + "; found: " + lines[2 * (1 + k)])
 
-                value = float(lines[3 + (2*j)].split()[1].strip())
+                value = float(lines[3 + (2*k)].split()[1].strip())
                 data.append(value)
-            print("\tdata", data)
-            data_line = [feature_ids[i], coordinates[i][0], coordinates[i][1], img, pix_i, lin_i, xo, yo] + data
+            if False:
+                print("\tdata", data)
+            data_line = [feature_ids[i], coordinates[i][0], coordinates[i][1], img, pix_k, lin_k, xo, yo] + data
             data_line = ','.join([str(x) for x in data_line])
             out_spec_f.write(("\n" + data_line).encode())
-
-
+        
+        
 
 
 out_spec_f.close()
