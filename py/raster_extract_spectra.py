@@ -29,6 +29,7 @@ out_spec_f = open(out_spec_fn, "wb")
 res, rad = float(args[3]), float(args[4])  # assert numbers
 cmd = ("python3 " +
        "/home/" + os.popen("whoami").read().strip() + "/GitHub/bcws-psu-research/py/raster_extract_window_offset.py " + args[3] + " " + args[4])
+
 print(cmd)
 a = os.system(cmd)
 
@@ -74,6 +75,8 @@ for f in features: # print(f.keys())
     feature_id = f['id']
     feature_ids.append(feature_id) # print("feature properties.keys()", f['properties'].keys())
     
+    print("feature id", feature_id)
+
     feature_name = ''
     try:
         feature_name = f['properties']['Name']
