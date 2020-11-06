@@ -53,7 +53,8 @@ cmd = ['ogr2ogr',
         '-t_srs',
         'EPSG:' + str(dst_EPSG),
         ofn,
-        fn] # source data goes second, ogr is weird!
+        fn,
+        "-lco ENCODING=UTF-8"] # source data goes second, ogr is weird!
 
 cmd = ' '.join(cmd)
 print(cmd)
