@@ -348,8 +348,24 @@ void zprInstance::idle(){
   }
 }
 
-void zprInstance::setrgb(int r, int g, int b){
-  cout << getTitle() << "::setrgb()\n";
+void zprInstance::setrgb(int r, int g, int b, int call_depth = 2){
+  call_depth -= 1;
+  if(call_depth < 0) return;
+ 
+ /* 
+  int my_id = myGlutID();
+
+  for(int i = 0; i < myZprManager->nextZprInstanceID; i++){
+    int ix = myZprManager->myZprInstances->at(i)->myGlutID();
+    if(ix != my_id){
+
+      cout << " *" << my_id << " -> " << ix << " " << myZprManager->myZprInstances->at(i)->getTitle() << endl;
+      myZprManager->myZprInstances->at(i)->setrgb(r, g, b, call_depth);
+    }
+  }
+  */
+
+  cout << getTitle() << "(" << myGlutID() <<")" << "::setrgb()\n";
   myBi->at(0) = r;
   myBi->at(1) = g;
   myBi->at(2) = b;
@@ -372,19 +388,31 @@ void zprInstance::setrgb(int r, int g, int b){
   + to_string(g + 1) + str(":") + gs.substr(0, 31) + str(", ")
   + to_string(b + 1) + str(":") + bs.substr(0, 31) + str("]"));
 
-   for(int m = 0; m < 5; m++){
-      // if(m > 1) continue; // update the first two windows (otherwise get segfault)
-      zprInstance * a = myZprManager->myZprInstances->at(m);
-      if(a != this){
-        a->focus();
-        a->mark();
-        a->display();
-      }
+
+  int my_id = myGlutID();
+
+  for(int i = 0; i < myZprManager->nextZprInstanceID; i++){
+    int ix = myZprManager->myZprInstances->at(i)->myGlutID();
+    if(ix != my_id){
+
+      cout << " *" << my_id << " -> " << ix << " " << myZprManager->myZprInstances->at(i)->getTitle() << endl;
+      myZprManager->myZprInstances->at(i)->setrgb(r, g, b, call_depth);
     }
-    //myZprDisplay();
-    this->focus();
-    this->mark();
-    this->display();
+  }
+
+  for(int m = 0; m < 5; m++){
+    // if(m > 1) continue; // update the first two windows (otherwise get segfault)
+    zprInstance * a = myZprManager->myZprInstances->at(m);
+    if(a != this){
+      a->focus();
+      a->mark();
+      a->display();
+    }
+  }
+  //myZprDisplay();
+  this->focus();
+  this->mark();
+  this->display();
 }
 
 void zprInstance::getrgb(int & r, int & g, int & b){
