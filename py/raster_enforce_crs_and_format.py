@@ -13,7 +13,7 @@ dst_EPSG = 32609 # default CRS: EPSG 32609
 if len(args) > 2:
     try:
         dst_EPSG = int(args[2])
-    except:
+    except Exception:
         err("target crs in EPSG must be an integer")
 
 fn = args[1]
