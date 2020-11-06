@@ -27,7 +27,8 @@ out_spec_fn = img + "_spectra.csv"
 out_spec_f = open(out_spec_fn, "wb")
 
 res, rad = float(args[3]), float(args[4])  # assert numbers
-cmd = "python3 " + "/home/" + os.popen("whoami").read().strip() + "/GitHub/bcws-psu-research/py/extract_window_offset.py " + args[3] + " " + args[4]
+cmd = ("python3 " +
+       "/home/" + os.popen("whoami").read().strip() + "/GitHub/bcws-psu-research/py/raster_extract_window_offset.py " + args[3] + " " + args[4])
 print(cmd)
 a = os.system(cmd)
 
