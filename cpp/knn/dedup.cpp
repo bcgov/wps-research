@@ -5,12 +5,26 @@ float * dat;
 size_t nr, nc, nb, nf, np, ps, fpp; // image dimensions
 
 class px{
-public:
+  public:
   float * d;
   void init(size_t ix){
+    float f;
+    bool bad;
+    size_t i;
     d = &dat[ix * fpp];
+    for0(i, fpp){
+      f = d[i];
+      bad = false;
+      if(isinf(-x) || isnan(-x) || isinf(d) || isnan(d)){
+        bad = true;
+        break;
+      }
+      if(bad){
+	      printf("warning: bad data ix %zu\n", ix * fpp);
+        for0(i, fpp) d[i] = 0.;
+      }
+    }
   }
-
 };
 
 // output operator for set container
@@ -58,7 +72,6 @@ int main(int argc, char ** argv){
 
   px * p = new px[np];
   for0(i, np) p[i].init(i);
-
 
   return 0;
 }
