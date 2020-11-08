@@ -286,6 +286,17 @@ class f_ij{
     d = a.d;
     i = a.i;
     j = a.j;
+void float_write(float * d, size_t n, str fn){
+  FILE * f = wopen(fn);
+  size_t nr = fwrite(d, sizeof(float), n, f);
+  if(nr != n){
+          printf("nr=%zu != n= %zu\n", nr, n);
+         err("unexpected write length");
+  }
+  fclose(f);
+}
+
+float * float_read(str fn, size_t &n){
   }
 };
 
@@ -302,4 +313,16 @@ str zero_pad(str x, int n_zero);
 void int_write(size_t value, str fn);
 size_t int_read(str fn);
 
+void float_write(float * d, size_t n, str fn){
+  FILE * f = wopen(fn);
+  size_t nr = fwrite(d, sizeof(float), n, f);
+  if(nr != n){
+          printf("nr=%zu != n= %zu\n", nr, n);
+         err("unexpected write length");
+  }
+  fclose(f);
+}
+
+float * float_read(str fn, size_t &n);
+void float_write(float * d, size_t n, str fn);
 
