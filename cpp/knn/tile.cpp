@@ -1,4 +1,5 @@
-#include"../misc.h" // tile.cpp: tiling preprocessing to feed into an ML-type code
+// tile.cpp: tiling processing to feed into an ML-type code
+#include"../misc.h"
 size_t nrow, ncol, nband, np;
 
 void accumulate(map<float, unsigned int> &m, float key){
