@@ -38,8 +38,8 @@ int main(int argc, char ** argv){
   size_t floats_per_patch = ps * ps * nb; // floats per patch (image data)
   float * patch = falloc(sizeof(float) * floats_per_patch);
 
-  store_int(ps, bfn + str("_ps"));
-  store_int(nb, bfn + str("_nb"));
+  int_write(ps, bfn + str("_ps"));
+  int_write(nb, bfn + str("_nb"));
 
   FILE * f_patch = wopen((bfn + str("_patch")).c_str()); // patch data
   FILE * f_patch_i = wopen((bfn + str("_patch_i")).c_str()); // start row for patch 
