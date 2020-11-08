@@ -28,11 +28,11 @@ class px{
   }
 };
 
-// output operator for set container
+// output operator for patch container
 std::ostream& operator << (std::ostream& os, const px &v){
   size_t k;
   os << "{";
-  for0(k, nb) os << (k > 0 ? " " : "") << v.d[k];
+  for0(k, fpp) os << (k > 0 ? " " : "") << v.d[k];
   os << "}";
   return os;
 }
