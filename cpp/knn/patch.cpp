@@ -38,9 +38,8 @@ int main(int argc, char ** argv){
   size_t floats_per_patch = ps * ps * nb; // floats per patch (image data)
   float * patch = falloc(sizeof(float) * floats_per_patch);
 
-  FILE * f_ps = wopen((bfn + str("_ps")).c_str()); // patch size
-  fwrite(&ps, sizeof(size_t), 1, f_ps);
-  fclose(f_ps);
+  store_int(ps, bfn + str("_ps"));
+  store_int(nb, bfn + str("_nb"));
 
   FILE * f_patch = wopen((bfn + str("_patch")).c_str()); // patch data
   FILE * f_patch_i = wopen((bfn + str("_patch_i")).c_str()); // start row for patch 
@@ -48,6 +47,7 @@ int main(int argc, char ** argv){
   FILE * f_patch_label = wopen((bfn + str("_patch_label")).c_str()); // patch label
 
   size_t truthed = 0;
+  size_t n_patches = 0;
   size_t nontruthed = 0;
   map<float, size_t> count; // count labels on a patch
 
@@ -109,13 +109,19 @@ int main(int argc, char ** argv){
       fwrite(&j, sizeof(size_t), 1, f_patch_j);
       fwrite(&max_k, sizeof(float), 1, f_patch_label);
       fwrite(patch, sizeof(float), floats_per_patch, f_patch);
+      n_patches += 1;
     }
   }
   printf("\n");
+  hread(hfn, nrow, ncol, nband);
+  printf("nrow %zu ncol %zu nband %zu\n", nrow, ncol, nband);
+
   printf(" nwin: %zu\n", (size_t)ps);
   printf(" image pixels: %zu\n", np);
   printf(" pix per patch: %zu\n",(size_t)(ps * ps));
+  printf(" floats /patch: %zu\n", floats_per_patch);
   printf(" est. patches:%zu\n", np / (ps * ps));
+  printf(" n_patches    %zu\n", n_patches);
   printf(" total patches: %zu\n", truthed + nontruthed);
   printf(" truthed: %zu\t\t[%.2f / 100]\n", truthed, 100. * (float)(truthed) / ((float)(truthed + nontruthed)));
   printf(" nontruthed: %zu\n", nontruthed);
