@@ -2,7 +2,7 @@
 #include"../misc.h"
 
 float * dat;
-size_t nr, nc, nb, nf, np, ps, fpp; // image dimensions
+size_t nr, nc, nb, nf, np, ps, fpp, nz; // image dimensions, etc.
 
 class px{
   public:
@@ -25,6 +25,10 @@ class px{
         for0(i, fpp) d[i] = 0.;
       }
     }
+    bool zp = true;
+    for0(i, fpp) if(d[i] != 0.) zp = false;
+    if(zp) nz += 1;
+
   }
 };
 
@@ -78,6 +82,7 @@ int main(int argc, char ** argv){
   for0(i, np) lookup[i] = 0;
   size_t * s_i = (size_t *) alloc(sizeof(size_t) * np); // linear form of setoid index
 
+  printf("redundancy check..\n");
   size_t next_i = 0;
   for0(i, np){
     px * pi = &p[i];
@@ -92,6 +97,16 @@ int main(int argc, char ** argv){
     }
   }
 
+  if(m.size() < 1000){
+    for0(i, np) printf("%zu ", lookup[i]);
+    printf("\n");
+  }
+
+  size_t ms = m.size();
+  printf("zero count %zu\n", nz);
+  printf("redundant points %zu\n", np - ms);
+  printf("setoid count %zu\n", ms);
+  printf("data points total %zu\n", np);
 
   return 0;
 }
