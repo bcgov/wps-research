@@ -299,5 +299,7 @@ bool operator<(const f_ij& a, const f_ij&b);
 // zero pad a string (from left)
 str zero_pad(str x, int n_zero);
 
-void store_int(size_t value, str fn);
-size_t restore_int(str fn);
+void int_write(size_t value, str fn);
+size_t int_read(str fn);
+
+
