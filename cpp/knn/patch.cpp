@@ -9,7 +9,7 @@ Assume this is the portion of the data to fit the "model" on: kinda the image da
 #include"../misc.h"
 size_t nrow, ncol, nband, np; // image attributes
 
-void accumulate(map<float, unsigned int> &m, float key){
+void accumulate(map<float, size_t> &m, float key){
   if(m.count(key) < 1) m[key] = 0;
   m[key] += 1; // histogram on $\mathbb{R}^1
 }
