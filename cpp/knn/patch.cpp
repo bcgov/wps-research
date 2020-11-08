@@ -38,9 +38,9 @@ int main(int argc, char ** argv){
   unsigned int floats_per_patch = ps * ps * nb; // floats per patch (image data)
   float * patch = falloc(sizeof(float) * floats_per_patch);
 
-  FILE * f_patch = wopen((bfn + str("_patch").c_str()); // patch data
-  FILE * f_patch_i = wopen((bfn + str("_patch_i").c_str()); // start row for patch 
-  FILE * f_patch_j = wopen((bfn + str("_patch_j").c_str()); // start col for patch
+  FILE * f_patch = wopen((bfn + str("_patch")).c_str()); // patch data
+  FILE * f_patch_i = wopen((bfn + str("_patch_i")).c_str()); // start row for patch 
+  FILE * f_patch_j = wopen((bfn + str("_patch_j")).c_str()); // start col for patch
   FILE * f_patch_label = wopen((bfn + str("_patch_label")).c_str()); // patch label
 
   size_t truthed = 0;
