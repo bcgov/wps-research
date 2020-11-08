@@ -1,7 +1,7 @@
 /* patch.cpp: tiling processing to feed into an ML-type code
-   - cut image data (and ground reference data) into small patches (nonoverlapping at this point)
-   - use majority voting scheme to assign label to each patch
-   - if patches are too large relative to the homogeneous areas of a patch, results will suffer
+- cut image data (and ground reference data) into small patches (nonoverlapping at this point)
+- use majority voting scheme to assign label to each patch
+- if patches are too large relative to the homogeneous areas of a patch, results will suffer
 
 Assume this is the portion of the data to fit the "model" on: kinda the image data input here "is" the model..
 
@@ -41,8 +41,40 @@ int main(int argc, char ** argv){
   int_write(ps, bfn + str("_ps"));
   int_write(nb, bfn + str("_nb"));
 
+  // scale data into [0,1] before considering patches
+  float * d_min = falloc(nb);
+  float * d_max = falloc(nb);
+  float * r_k = falloc(nb);
+  for0(i, nb){
+    d_min[i] = FLT_MAX;
+    d_max[i] = FLT_MIN;
+  }
+
+  float d;
+  for0(i, np){
+    for0(k, nb){
+      d = dat[(np * k) + i];
+      if(d < d_min[k]) d_min[k] = d;
+      if(d > d_max[k]) d_max[k] = d;
+    }
+  }
+
+  for0(k, nb){
+    r_k[k] = 1. / (d_max[k] - d_min[k]);
+    printf("r_k[%zu] %f\n", k, r_k[k]);
+  }
+  printf("\n");
+
+  for0(i, np){
+    for0(k, nb){
+      m = (k * np) + i;
+      dat[m] = r_k[k] * (dat[m] - d_min[k]);
+    }
+  }
+
+
   FILE * f_patch = wopen((bfn + str("_patch")).c_str()); // patch data
-  FILE * f_patch_i = wopen((bfn + str("_patch_i")).c_str()); // start row for patch 
+  FILE * f_patch_i = wopen((bfn + str("_patch_i")).c_str()); // start row for patch
   FILE * f_patch_j = wopen((bfn + str("_patch_j")).c_str()); // start col for patch
   FILE * f_patch_label = wopen((bfn + str("_patch_label")).c_str()); // patch label
 
@@ -54,7 +86,7 @@ int main(int argc, char ** argv){
   // band-interleave-by-pixel, by patch!
   for(i = 0; i <= nrow - (nrow % ps + ps); i += ps){
     // start row for patch (stride parameter would be the step for this loop)
-    for(j = 0; j <=  ncol - (ncol % ps + ps); j += ps){
+    for(j = 0; j <= ncol - (ncol % ps + ps); j += ps){
       ci = 0; // j is start col for patch
 
       for0(di, ps){
@@ -69,7 +101,7 @@ int main(int argc, char ** argv){
       // count labels on each patch
       count.clear(); // mass for each label on the patch
       for0(di, ps){
-        m = (i + di) * ncol; 
+        m = (i + di) * ncol;
 
         for0(dj, ps){
           n = (j + dj) + m;
@@ -121,7 +153,7 @@ int main(int argc, char ** argv){
   printf(" pix per patch: %zu\n",(size_t)(ps * ps));
   printf(" floats /patch: %zu\n", floats_per_patch);
   printf(" est. patches:%zu\n", np / (ps * ps));
-  printf(" n_patches    %zu\n", n_patches);
+  printf(" n_patches %zu\n", n_patches);
   printf(" total patches: %zu\n", truthed + nontruthed);
   printf(" truthed: %zu\t\t[%.2f / 100]\n", truthed, 100. * (float)(truthed) / ((float)(truthed + nontruthed)));
   printf(" nontruthed: %zu\n", nontruthed);
