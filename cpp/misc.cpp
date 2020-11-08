@@ -163,7 +163,6 @@ FILE * ropen(const char * fn){
   return ropen(str(fn));
 }
 
-
 /* get size of file pointer */
 size_t size(FILE * f){
   fseek(f, 0L, SEEK_END);
@@ -419,34 +418,32 @@ void int_write(size_t value, str fn){
 }
 
 size_t int_read(str fn){
- size_t value;
- FILE * f = ropen(fn);
- fread(&value, sizeof(size_t), 1, f);
- fclose(f);
- return value;
+  size_t value;
+  FILE * f = ropen(fn);
+  fread(&value, sizeof(size_t), 1, f);
+  fclose(f);
+  return value;
 }
 
 void float_write(float * d, size_t n, str fn){
   FILE * f = wopen(fn);
   size_t nr = fwrite(d, sizeof(float), n, f);
   if(nr != n){
-	  printf("nr=%zu != n= %zu\n", nr, n);
-	 err("unexpected write length"); 
+    printf("nr=%zu != n= %zu\n", nr, n);
+    err("unexpected write length");
   }
   fclose(f);
 }
 
 float * float_read(str fn, size_t &n){
-   size_t fs = fsize(fn);
-   n = fs / sizeof(float);
-   float * dat = falloc(n);
-   FILE * f = ropen(fn);
-   fread(dat, sizeof(float), n, f);
-   fclose(f);
-   return(dat);
+  size_t fs = fsize(fn);
+  n = fs / sizeof(float);
+  float * dat = falloc(n);
+  FILE * f = ropen(fn);
+  fread(dat, sizeof(float), n, f);
+  fclose(f);
+  return(dat);
 }
 
+
 // parameters always named (in json-like format)?
-
-
-
