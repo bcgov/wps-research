@@ -111,7 +111,7 @@ int main(int argc, char ** argv){
   printf(" nwin: %zu\n", (size_t)ps);
   printf(" image pixels: %zu\n", np);
   printf(" pix per patch: %zu\n",(size_t)(ps * ps));
-  printf(" approx patches:%zu\n", np / (ps * ps));
+  printf(" est. patches:%zu\n", np / (ps * ps));
   printf(" total patches: %zu\n", truthed + nontruthed);
   printf(" truthed: %zu\t\t[%.2f / 100]\n", truthed, 100. * (float)(truthed) / ((float)(truthed + nontruthed)));
   printf(" nontruthed: %zu\n", nontruthed);
