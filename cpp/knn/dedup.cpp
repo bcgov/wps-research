@@ -41,9 +41,8 @@ bool operator < (const px& a, const px& b){
   size_t k; // dictionary order
   char * c = (char *)(void *)a.d;
   char * d = (char *)(void *)b.d;
-  size_t n_byte = nb * sizeof(float);
-
-  for0(k, n_byte) if(c[k] != d[k]) return c[k] < d[k];
+  size_t bpp = nff * sizeof(float); // bytes per patch
+  for0(k, bpp) if(c[k] != d[k]) return c[k] < d[k];
   return false;
 }
 
