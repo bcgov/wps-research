@@ -1,4 +1,8 @@
-// tile.cpp: tiling processing to feed into an ML-type code
+/* patch.cpp: tiling processing to feed into an ML-type code
+   - cut image data (and ground reference data) into small patches (nonoverlapping at this point)
+   - use majority voting scheme to assign label to each patch
+   - if patches are too large relative to the homogeneous areas of a patch, results will suffer
+*/
 #include"../misc.h"
 size_t nrow, ncol, nband, np; // image attributes
 
@@ -9,7 +13,7 @@ void accumulate(map<float, unsigned int> &m, float key){
 
 // could add "stride" parameter later (increase patches towards moving window)
 int main(int argc, char ** argv){
-  if(argc < 4) err("tile [input envi-type4 floating point stack bsq with gr] [# of groundref classes at end] [patch size]\n");
+  if(argc < 4) err("patch [input envi-type4 floating point stack bsq with gr] [# of groundref classes at end] [patch size]\n");
 
   str bfn(argv[1]);
   str hfn(hdr_fn(bfn));
