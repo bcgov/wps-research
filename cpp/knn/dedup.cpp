@@ -73,7 +73,7 @@ int main(int argc, char ** argv){
   dat = float_read(pfn, nf); // read patch data, as linear array of floats
   if(nf != np * fpp) err("unexpected number of floats read");
 
-  printf("precondition..\n");
+  // printf("precondition..\n");
   px * p = new px[np];
   for0(i, np) p[i].init(i);
 
@@ -82,7 +82,7 @@ int main(int argc, char ** argv){
   for0(i, np) lookup[i] = 0;
   size_t * s_i = (size_t *) alloc(sizeof(size_t) * np); // linear form of setoid index
 
-  printf("redundancy check..\n");
+  // printf("redundancy check..\n");
   size_t next_i = 0;
   for0(i, np){
     px * pi = &p[i];
@@ -107,6 +107,32 @@ int main(int argc, char ** argv){
   printf("redundant points %zu\n", np - ms);
   printf("setoid count %zu\n", ms);
   printf("data points total %zu\n", np);
+
+  i = 0;
+  size_t * idx = (size_t *) alloc(sizeof(size_t) * m.size());
+  map<px, size_t>::iterator it;
+  for(it = m.begin(); it != m.end(); it++){
+    size_t L_i = it->second;
+    // printf("%zu %zu %zu\n", i, L_i, s_i[i]);
+    idx[i++] = s_i[i]; //L_i;
+  }
+
+  str ofn(bfn + str("_dedup")); // dedup file
+  FILE * f = wopen(ofn);
+  size_t n_r = fwrite(idx, sizeof(size_t), ms, f);
+  fclose(f);
+  printf("records written %zu\n", n_r);
+  if(n_r != ms) err("unexpected record write count");
+
+  str of2(bfn + str("_dedup_lookup")); // invert index?
+  f = wopen(of2);
+  n_r = fwrite(lookup, sizeof(size_t), np, f);
+  fclose(f);
+  printf("records written %zu\n", n_r);
+  if(n_r != np) err("unexpected record write count");
+
+  free(idx);
+  m.clear();
 
   return 0;
 }
