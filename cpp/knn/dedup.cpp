@@ -14,8 +14,9 @@ class px{
     d = &dat[ix * fpp];
     for0(i, fpp){
       f = d[i];
-      bad = false;
-      if(isinf(-x) || isnan(-x) || isinf(d) || isnan(d)){
+      bad = false; 
+      // should check if isinf(-d) == isinf(d)
+      if(isinf(-f) || isnan(-f) || isinf(f) || isnan(f)){
         bad = true;
         break;
       }
@@ -70,6 +71,7 @@ int main(int argc, char ** argv){
   dat = float_read(pfn, nf); // read patch data, as linear array of floats
   if(nf != np * fpp) err("unexpected number of floats read");
 
+  printf("preconditioning..\n");
   px * p = new px[np];
   for0(i, np) p[i].init(i);
 
