@@ -14,14 +14,14 @@ class px{
     d = &dat[ix * fpp];
     for0(i, fpp){
       f = d[i];
-      bad = false; 
+      bad = false;
       // should check if isinf(-d) == isinf(d)
       if(isinf(-f) || isnan(-f) || isinf(f) || isnan(f)){
         bad = true;
         break;
       }
       if(bad){
-	      printf("warning: bad data ix %zu\n", ix * fpp);
+        printf("warning: bad data ix %zu\n", ix * fpp);
         for0(i, fpp) d[i] = 0.;
       }
     }
@@ -41,7 +41,7 @@ bool operator < (const px& a, const px& b){
   size_t k; // dictionary order
   char * c = (char *)(void *)a.d;
   char * d = (char *)(void *)b.d;
-  size_t bpp = nff * sizeof(float); // bytes per patch
+  size_t bpp = fpp * sizeof(float); // bytes per patch
   for0(k, bpp) if(c[k] != d[k]) return c[k] < d[k];
   return false;
 }
@@ -62,9 +62,9 @@ int main(int argc, char ** argv){
   nf = fsize(pfn) / sizeof(float); //number of floats
   np = nf / fpp; // number of patches
 
-  printf("ps %zu\n", ps); // patch size
-  printf("fpp %zu\n", fpp);
-  printf("np: %zu\n", np);
+  printf("patch size: %zu\n", ps); // patch size
+  printf("floats per patch: %zu\n", fpp);
+  printf("number of patches: %zu\n", np);
 
   dat = float_read(pfn, nf); // read patch data, as linear array of floats
   if(nf != np * fpp) err("unexpected number of floats read");
@@ -73,7 +73,25 @@ int main(int argc, char ** argv){
   px * p = new px[np];
   for0(i, np) p[i].init(i);
 
-  cout << p[0] << endl;
+  map<px, size_t> m; // setoid index
+  size_t * lookup = (size_t *) alloc(sizeof(size_t) * np); // setoid lookup
+  for0(i, np) lookup[i] = 0;
+  size_t * s_i = (size_t *) alloc(sizeof(size_t) * np); // linear form of setoid index
+
+  size_t next_i = 0;
+  for0(i, np){
+    px * pi = &p[i];
+    if(m.count(*pi) == 0){
+      m[*pi] = i; // retain index to one element of setoid
+      s_i[next_i] = i;
+      lookup[i] = next_i ++;
+    }
+    else{
+      cout << i << " redundant point: " << *pi << endl;
+      lookup[i] = lookup[m[*pi]];
+    }
+  }
+
 
   return 0;
 }
