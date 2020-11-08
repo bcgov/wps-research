@@ -1,25 +1,25 @@
 // tile.cpp: tiling processing to feed into an ML-type code
 #include"../misc.h"
-size_t nrow, ncol, nband, np;
+size_t nrow, ncol, nband, np; // image attributes
 
 void accumulate(map<float, unsigned int> &m, float key){
   if(m.count(key) < 1) m[key] = 0;
-  m[key] += 1;
+  m[key] += 1; // histogram on $\mathbb{R}^1
 }
 
 // could add "stride" parameter later (increase patches towards moving window)
 int main(int argc, char ** argv){
   if(argc < 4) err("tile [input envi-type4 floating point stack bsq with gr] [# of groundref classes at end] [patch size]\n");
 
-  unsigned int ps, nref;
   str bfn(argv[1]);
   str hfn(hdr_fn(bfn));
+  unsigned int ps, nref;
   hread(hfn, nrow, ncol, nband);
   printf("nrow %zu ncol %zu nband %zu\n", nrow, ncol, nband);
 
   float * dat = bread(bfn, nrow, ncol, nband); // read input data
-  np = nrow * ncol;
-  ps = atoi(argv[3]); // patch size
+  np = nrow * ncol; // number of pixels
+  ps = atoi(argv[3]); // patch width / length: square patch
   nref = atoi(argv[2]); // number of groundref classes one-hot encoded
 
   size_t i, j, m, n;
@@ -31,10 +31,10 @@ int main(int argc, char ** argv){
   unsigned int floats_per_patch = ps * ps * nb;
   float * patch = falloc(sizeof(float) * floats_per_patch);
 
-  FILE * f_patch = wopen("patch.dat");
-  FILE * f_patch_i = wopen("patch_i.dat");
-  FILE * f_patch_j = wopen("patch_j.dat");
-  FILE * f_patch_label = wopen("patch_label.dat");
+  FILE * f_patch = wopen("patch.dat"); // patch data
+  FILE * f_patch_i = wopen("patch_i.dat"); // start row for patch 
+  FILE * f_patch_j = wopen("patch_j.dat"); // start col for patch
+  FILE * f_patch_label = wopen("patch_label.dat"); // patch label
 
   size_t truthed = 0;
   size_t nontruthed = 0;
