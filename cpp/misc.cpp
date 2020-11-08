@@ -411,3 +411,17 @@ float * load_envi(str in_f, size_t & nrow, size_t & ncol, size_t & nband){
 str zero_pad(str x, int n_zero){
   return std::string(n_zero - x.length(), '0') + x;
 }
+
+void store_int(size_t value, str fn){
+  FILE * f = wopen(fn);
+  fwrite(&value, sizeof(size_t), 1, f);
+  fclose(f);
+}
+
+void restore_int(str fn){
+ size_t value;
+ FILE * f = ropen(fn);
+ fread(&value, sizeof(size_t), 1, f);
+ fclose(f);
+}
+
