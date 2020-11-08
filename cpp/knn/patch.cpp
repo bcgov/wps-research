@@ -47,6 +47,7 @@ int main(int argc, char ** argv){
   size_t nontruthed = 0;
   map<float, unsigned int> count; // count labels on a patch
 
+  // band-interleave-by-pixel, by patch!
   for(i = 0; i <= nrow - (nrow % ps + ps); i += ps){
     // start row for patch (stride parameter would be the step for this loop)
     for(j = 0; j <=  ncol - (ncol % ps + ps); j += ps){
