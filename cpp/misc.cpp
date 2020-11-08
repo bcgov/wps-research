@@ -418,10 +418,11 @@ void store_int(size_t value, str fn){
   fclose(f);
 }
 
-void restore_int(str fn){
+size_t restore_int(str fn){
  size_t value;
  FILE * f = ropen(fn);
  fread(&value, sizeof(size_t), 1, f);
  fclose(f);
+ return value;
 }
 

@@ -300,4 +300,4 @@ bool operator<(const f_ij& a, const f_ij&b);
 str zero_pad(str x, int n_zero);
 
 void store_int(size_t value, str fn);
-void restore_int(str fn);
+size_t restore_int(str fn);
