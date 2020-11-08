@@ -27,3 +27,5 @@ int main(int argc, char ** argv){
 
   return 0;
 }
+
+// might need to build image decimator later
