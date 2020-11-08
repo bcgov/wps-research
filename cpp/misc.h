@@ -289,19 +289,18 @@ class f_ij{
   }
 };
 
-  bool operator<(const f_i& a, const f_i&b);
-  bool operator<(const f_ij& a, const f_ij&b);
+bool operator<(const f_i& a, const f_i&b);
+bool operator<(const f_ij& a, const f_ij&b);
 
-  #define mtx_lock pthread_mutex_lock
-  #define mtx_unlock pthread_mutex_unlock
-  #endif
+#define mtx_lock pthread_mutex_lock
+#define mtx_unlock pthread_mutex_unlock
+#endif
 
-  // zero pad a string (from left)
-  str zero_pad(str x, int n_zero);
+// zero pad a string (from left)
+str zero_pad(str x, int n_zero);
 
-  void int_write(size_t value, str fn);
-  size_t int_read(str fn);
+void int_write(size_t value, str fn);
+size_t int_read(str fn);
 
-  float * float_read(str fn, size_t &n);
-  void float_write(float * d, size_t n, str fn);
-
+float * float_read(str fn, size_t &n);
+void float_write(float * d, size_t n, str fn);
