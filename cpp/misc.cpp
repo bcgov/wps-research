@@ -426,3 +426,27 @@ size_t int_read(str fn){
  return value;
 }
 
+void float_write(float * d, size_t n, str fn){
+  FILE * f = wopen(fn);
+  size_t nr = fwrite(d, sizeof(float), n, f);
+  if(nr != n){
+	  printf("nr=%zu != n= %zu\n", nr, n);
+	 err("unexpected write length"); 
+  }
+  fclose(f);
+}
+
+float * float_read(str fn, size_t &n){
+   size_t fs = fsize(fn);
+   n = fs / sizeof(float);
+   float * dat = falloc(n);
+   FILE * f = ropen(fn);
+   fread(dat, sizeof(float), n, f);
+   fclose(f);
+   return(dat);
+}
+
+// parameters always named (in json-like format)?
+
+
+
