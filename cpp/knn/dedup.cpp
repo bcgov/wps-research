@@ -70,7 +70,7 @@ int main(int argc, char ** argv){
   dat = float_read(pfn, nf); // read patch data, as linear array of floats
   if(nf != np * fpp) err("unexpected number of floats read");
 
-  printf("preconditioning..\n");
+  printf("precondition..\n");
   px * p = new px[np];
   for0(i, np) p[i].init(i);
 
