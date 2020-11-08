@@ -55,13 +55,12 @@ int main(int argc, char ** argv){
   str hfn(hdr_fn(bfn));
   hread(hfn, nr, nc, nb);
   printf("nr %zu nc %zu nb %zu\n", nr, nc, nb);
+  nb = int_read(bfn + str("_nb")); // number of actual image data bands (not incl. groundref)
+  ps = int_read(bfn + str("_ps")); // patch size
+  fpp = ps * ps * nb; // number of floats per patch
 
   str pfn(bfn + str("_patch"));
   nf = fsize(pfn) / sizeof(float); //number of floats
-
-  ps = int_read(bfn + str("_ps")); // patch size
-  nb = int_read(bfn + str("_nb")); // number of actual image data bands (not incl. groundref)
-  fpp = ps * ps * nb; // number of floats per patch
   np = nf / fpp; // number of patches
 
   printf("ps %zu\n", ps); // patch size
