@@ -5,7 +5,7 @@
 
 #include"../misc.h"
 int main(int argc, char ** argv){
-  printf("knn [input envi-type4 floating point stack bsq with gr] [# of one-hot encoded gr-ref maps] [input without gr to project onto] [patch size] [KMax] [K]\n");
+  printf("knn [input envi-type4 floating point stack bsq with gr] [input without gr to project onto] [KMax] [K]\n");
 
   /* 1. code patches in linear segs, crash if alloc fail */
 
