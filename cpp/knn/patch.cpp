@@ -20,7 +20,7 @@ int main(int argc, char ** argv){
 
   str bfn(argv[1]);
   str hfn(hdr_fn(bfn));
-  unsigned int ps, nref;
+  size_t ps, nref;
   hread(hfn, nrow, ncol, nband);
   printf("nrow %zu ncol %zu nband %zu\n", nrow, ncol, nband);
 
@@ -33,9 +33,9 @@ int main(int argc, char ** argv){
   if(ps >= nrow || ps >= ncol) err("patch size too big");
   if(nref >= nband) err("check number of groundref bands");
 
-  unsigned int di, dj, k, ci;
-  unsigned int nb = nband - nref; // image data bands: total image bands, less # of ref bands
-  unsigned int floats_per_patch = ps * ps * nb; // floats per patch (image data)
+  size_t di, dj, k, ci;
+  size_t nb = nband - nref; // image data bands: total image bands, less # of ref bands
+  size_t floats_per_patch = ps * ps * nb; // floats per patch (image data)
   float * patch = falloc(sizeof(float) * floats_per_patch);
 
   FILE * f_patch = wopen((bfn + str("_patch")).c_str()); // patch data
@@ -45,7 +45,7 @@ int main(int argc, char ** argv){
 
   size_t truthed = 0;
   size_t nontruthed = 0;
-  map<float, unsigned int> count; // count labels on a patch
+  map<float, size_t> count; // count labels on a patch
 
   // band-interleave-by-pixel, by patch!
   for(i = 0; i <= nrow - (nrow % ps + ps); i += ps){
@@ -83,7 +83,7 @@ int main(int argc, char ** argv){
 
       float max_k = 0.;
       size_t max_c = 0;
-      map<float, unsigned int>::iterator it; // lazy match
+      map<float, size_t>::iterator it; // lazy match
       for(it = count.begin(); it != count.end(); it++){
         if(it->first > 0 && it->second > max_c){
           max_c = it->second; // no leading class: doesn't count
