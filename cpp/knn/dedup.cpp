@@ -74,5 +74,7 @@ int main(int argc, char ** argv){
   px * p = new px[np];
   for0(i, np) p[i].init(i);
 
+  cout << p[0] << endl;
+
   return 0;
 }
