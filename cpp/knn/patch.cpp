@@ -2,6 +2,9 @@
    - cut image data (and ground reference data) into small patches (nonoverlapping at this point)
    - use majority voting scheme to assign label to each patch
    - if patches are too large relative to the homogeneous areas of a patch, results will suffer
+
+Assume this is the portion of the data to fit the "model" on: kinda the image data input here "is" the model..
+
 */
 #include"../misc.h"
 size_t nrow, ncol, nband, np; // image attributes
@@ -31,8 +34,8 @@ int main(int argc, char ** argv){
   if(nref >= nband) err("check number of groundref bands");
 
   unsigned int di, dj, k, ci;
-  unsigned int nb = nband - nref;
-  unsigned int floats_per_patch = ps * ps * nb;
+  unsigned int nb = nband - nref; // image data bands: total image bands, less # of ref bands
+  unsigned int floats_per_patch = ps * ps * nb; // floats per patch (image data)
   float * patch = falloc(sizeof(float) * floats_per_patch);
 
   FILE * f_patch = wopen("patch.dat"); // patch data
@@ -44,24 +47,24 @@ int main(int argc, char ** argv){
   size_t nontruthed = 0;
   map<float, unsigned int> count; // count labels on a patch
 
-  for(i = 0; i < nrow - ps; i += ps){
+  for(i = 0; i <= nrow - (nrow % ps + ps); i += ps){
     // start row for patch (stride parameter would be the step for this loop)
-    for(j = 0; j < ncol - ps; j += ps){
-      // start col for patch
-      ci = 0;
+    for(j = 0; j <=  ncol - (ncol % ps + ps); j += ps){
+      ci = 0; // j is start col for patch
 
       for0(di, ps){
         m = i + di;
         for0(dj, ps){
-          n = j + dj;
+          n = j + dj; // extract data on a patch (left->right to linear order)
           for0(k, nb) patch[ci ++] = dat[(k * nrow * ncol) + (m * ncol) + n];
         }
       }
       if(ci != ps * ps * nb) err("patch element count mismatch");
-      count.clear(); // mass for each label
 
+      // count labels on each patch
+      count.clear(); // mass for each label on the patch
       for0(di, ps){
-        m = (i + di) * ncol; // count labels on patch
+        m = (i + di) * ncol; 
 
         for0(dj, ps){
           n = (j + dj) + m;
@@ -73,7 +76,7 @@ int main(int argc, char ** argv){
               accumulate(count, k + 1);
             }
           }
-          if(no_match) accumulate(count, 0);
+          if(no_match) accumulate(count, 0); // default to 0 / null label
         }
       }
 
