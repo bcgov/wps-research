@@ -24,15 +24,15 @@ int main(int argc, char ** argv){
   /* 3. for each class, dmat calc (persist for params) -- incl. reflection in dcalc? (this is a non-square dmat) */
 
   // list reference patch indices, for each label observed..
-  // for each reference patch list, for each source patch, calculate a sorted truncated distance matrix 
+  // for each reference patch list, for each source patch, calculate a sorted truncated distance matrix "row"
 
+  /* 4. for each class, estimate density (with respect to "reference") for each "source" data pixels.. */
 
-  /* 4. for each class, estimate density */
-
-  /* 5. for each class, project density back into original image coordinates */
+  /* 5. for each class, project density (and max-density label) back onto "souce" image coordinates */
 
   /* 5. a enforce mathematical conditions for a probability density */
 
+  /* calculate entropy maps */
 
 
   return 0;
