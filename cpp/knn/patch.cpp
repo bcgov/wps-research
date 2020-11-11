@@ -72,15 +72,17 @@ int main(int argc, char ** argv){
     }
   }
 
-
   FILE * f_patch = wopen((bfn + str("_patch")).c_str()); // patch data
   FILE * f_patch_i = wopen((bfn + str("_patch_i")).c_str()); // start row for patch
   FILE * f_patch_j = wopen((bfn + str("_patch_j")).c_str()); // start col for patch
-  FILE * f_patch_label = wopen((bfn + str("_patch_label")).c_str()); // patch label
+  FILE * f_patch_label = (nref > 0) ? wopen((bfn + str("_patch_label")).c_str()) : NULL; // patch label
 
+  float max_k;
+  int no_match;
   size_t truthed = 0;
   size_t n_patches = 0;
   size_t nontruthed = 0;
+  size_t max_c, n_match;
   map<float, size_t> count; // count labels on a patch
 
   // band-interleave-by-pixel, by patch!
@@ -98,49 +100,51 @@ int main(int argc, char ** argv){
       }
       if(ci != ps * ps * nb) err("patch element count mismatch");
 
-      // count labels on each patch
-      count.clear(); // mass for each label on the patch
-      for0(di, ps){
-        m = (i + di) * ncol;
-
-        for0(dj, ps){
-          n = (j + dj) + m;
-          int no_match = true;
-
-          for0(k, nref){
-            if(dat[((k + nb) * np) + n] == 1.){
-              no_match = false;
-              accumulate(count, k + 1);
-            }
-          }
-          if(no_match) accumulate(count, 0); // default to 0 / null label
-        }
-      }
-
-      float max_k = 0.;
-      size_t max_c = 0;
-      map<float, size_t>::iterator it; // lazy match
-      for(it = count.begin(); it != count.end(); it++){
-        if(it->first > 0 && it->second > max_c){
-          max_c = it->second; // no leading class: doesn't count
-          max_k = it->first;
-        }
-      }
-
-      size_t n_match = 0;
-      for(it = count.begin(); it != count.end(); it++) if(it->second == max_c) n_match ++;
-
-      if(max_c > 0){
-        truthed ++;
-        cout << count << " max_c " << max_c << endl;
-        if(n_match > 1) printf("\tWarning: patch had competing classes\n");
-      }
-      else nontruthed ++;
-
       fwrite(&i, sizeof(size_t), 1, f_patch_i);
       fwrite(&j, sizeof(size_t), 1, f_patch_j);
-      fwrite(&max_k, sizeof(float), 1, f_patch_label);
       fwrite(patch, sizeof(float), floats_per_patch, f_patch);
+
+      if(nref > 0){
+        count.clear(); // count labels on each patch: mass for each label on the patch
+        for0(di, ps){
+          m = (i + di) * ncol;
+
+          for0(dj, ps){
+            n = (j + dj) + m;
+            no_match = true;
+
+            for0(k, nref){
+              if(dat[((k + nb) * np) + n] == 1.){
+                no_match = false;
+                accumulate(count, k + 1);
+              }
+            }
+            if(no_match) accumulate(count, 0); // default to 0 / null label
+          }
+        }
+
+	max_c = 0;
+        max_k = 0.;
+        map<float, size_t>::iterator it; // lazy match
+        for(it = count.begin(); it != count.end(); it++){
+          if(it->first > 0 && it->second > max_c){
+            max_c = it->second; // no leading class: doesn't count
+            max_k = it->first;
+          }
+        }
+
+        n_match = 0;
+        for(it = count.begin(); it != count.end(); it++) if(it->second == max_c) n_match ++;
+
+        if(max_c > 0){
+          truthed ++;
+          cout << count << " max_c " << max_c << endl;
+          if(n_match > 1) printf("\tWarning: patch had competing classes\n");
+        }
+        else nontruthed ++;
+        fwrite(&max_k, sizeof(float), 1, f_patch_label);
+      }
+
       n_patches += 1;
     }
   }
