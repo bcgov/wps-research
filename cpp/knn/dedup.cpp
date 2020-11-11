@@ -6,7 +6,7 @@ size_t nr, nc, nb, nf, np, ps, fpp, nz; // image dimensions, etc.
 
 class px{
   public:
-  float * d;
+  float * d; // patch data
   void init(size_t ix){
     float f;
     bool bad;
@@ -16,7 +16,8 @@ class px{
       f = d[i];
       bad = false;
       // should check if isinf(-d) == isinf(d)
-      if(isinf(-f) || isnan(-f) || isinf(f) || isnan(f)){
+      if(isinf(f) || isnan(f)){ 
+	     // || isinf(f) || isnan(f))
         bad = true;
         break;
       }
