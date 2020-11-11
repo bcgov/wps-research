@@ -8,3 +8,6 @@ wait
 ./patch.exe stack.bin 12 3
 ./dedup.exe stack.bin
 
+# run patch and dedup on target data too?
+
+# at end of running knn, make sure we de-de-duplicate the results!
