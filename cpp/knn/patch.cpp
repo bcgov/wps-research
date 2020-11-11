@@ -142,7 +142,7 @@ int main(int argc, char ** argv){
           if(n_match > 1) printf("\tWarning: patch had competing classes\n");
         }
         else nontruthed ++;
-        fwrite(&max_k, sizeof(float), 1, f_patch_label);
+        fwrite(&max_k, sizeof(float), 1, f_patch_label); // write patch label if there's groundref data
       }
 
       n_patches += 1;
@@ -165,7 +165,7 @@ int main(int argc, char ** argv){
   fclose(f_patch); // patch data
   fclose(f_patch_i); // patch start i
   fclose(f_patch_j); // patch start j
-  fclose(f_patch_label); // patch label
+  if(nref > 0) fclose(f_patch_label); // patch label
   free(patch);
   return 0;
 }
