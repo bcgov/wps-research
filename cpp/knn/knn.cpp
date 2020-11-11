@@ -5,17 +5,27 @@
 
 #include"../misc.h"
 int main(int argc, char ** argv){
-  printf("knn [input envi-type4 floating point stack bsq with gr] [input without gr to project onto] [KMax] [K]\n");
+  
+	//note: the inputs are both patched. Input to project onto is patched, but without GR! 
+	printf("knn [input envi-type4 floating point stack bsq with gr (1)] [input image without gr to project onto (2)] [KMax] [K]\n");
+
+ // 1) is called "reference" (groundref + image combined)
+ // 2) is called "source"
+ // 3) output (transformed source) called product
 
   size_t nr, nc, nb;
   str bfn(argv[1]);
   str bf2(argv[2]);
 
-  size_t kmax = atoi(argv[3]);
   size_t K = atoi(argv[4]);
+  size_t kmax = atoi(argv[3]); // how many things we persist
 
 
   /* 3. for each class, dmat calc (persist for params) -- incl. reflection in dcalc? (this is a non-square dmat) */
+
+  // list reference patch indices, for each label observed..
+  // for each reference patch list, for each source patch, calculate a sorted truncated distance matrix 
+
 
   /* 4. for each class, estimate density */
 
