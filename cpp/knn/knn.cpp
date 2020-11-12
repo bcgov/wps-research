@@ -13,6 +13,7 @@ map<float, vector<size_t>> * ppl; // patches per label
 vector<size_t> * pi; // patches this label
 
 void * dmat_threadfun(void * arg){
+  return NULL;
 }
 
 
