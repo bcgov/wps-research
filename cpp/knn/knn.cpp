@@ -61,7 +61,10 @@ int main(int argc, char ** argv){
   for(mfs::iterator it = c.begin(); it != c.end(); it++){
     patches_per_label[it->first] = vector<size_t>();
   }
-  for0(i, ref_np) patches_per_label[patch_label[i]].push_back(i); // list patches on each label
+  for0(i, ref_np){
+    float label = patch_label[i]; // list patches on each label
+    if(label > 0) patches_per_label[label].push_back(i);
+  }
 
 
 
