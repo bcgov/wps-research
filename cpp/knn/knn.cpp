@@ -12,8 +12,8 @@ size_t K, K_max, nb, ps, fpp, bpp, ref_ps, ref_nb;
 map<float, vector<size_t>> * ppl; // patches per label
 vector<size_t> * pi; // patches this label
 
-void * dmat_threadfun(void * arg){
-  return NULL;
+void dmat_j(size_t j){
+ // calculate ragged sorted truncated distance matrix "row" for jth "source" patch
 }
 
 
@@ -90,7 +90,8 @@ int main(int argc, char ** argv){
   
     // run the parfor over: [0, src_np): all src patches
 
-  
+    parfor(0, src_np, dmat_j);
+
   }
 
 
