@@ -508,6 +508,4 @@ void parfor(size_t start_j, size_t end_j, void(*eval)(size_t)){
   delete my_pthread;
 }
 
-
-
 // parameters always named (in json-like format)?
