@@ -302,5 +302,9 @@ str zero_pad(str x, int n_zero);
 void int_write(size_t value, str fn);
 size_t int_read(str fn);
 
+size_t * ints_read(str fn); // read a number of ints from files
+
+float * float_read(str fn); // read floats from a file
+
 float * float_read(str fn, size_t &n);
 void float_write(float * d, size_t n, str fn);
