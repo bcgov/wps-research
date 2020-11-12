@@ -65,6 +65,9 @@ int main(int argc, char ** argv){
     float label = patch_label[i]; // list patches on each label
     if(label > 0) patches_per_label[label].push_back(i);
   }
+  size_t n_labels = c.size();
+  if(c.count(0.)) n_labels --; // in C/c++ anything nonzero is "true"
+  cout << "c.size() " << c.size() << " n_labels " << n_labels << endl;
 
 
 
