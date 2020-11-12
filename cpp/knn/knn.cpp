@@ -1,9 +1,16 @@
+#include"../misc.h"
 // data is the model! "Training" a model is a simple as assigning training data. // non-commutative distance-matrix algorithm
 
 // if p is patch size, first write decimator to cut image modulo p, then take every n-th patch for train data (write train stack to width floor of sqrt number of train patches)
 // write non-train stack to image of width floor of sqrt number of non-train patches
 
-#include"../misc.h"
+pthread_attr_t attr; // specify threads joinable
+pthread_mutex_t nxt_j_mtx; // mtx on next data element to process
+
+size_t K, K_max, nb, ps, fpp, bpp, ref_ps, ref_nb;
+
+map<float, vector<size_t>> * ppl; // patches per label
+
 int main(int argc, char ** argv){
   if(argc < 5){
     //note: the inputs are both patched. Input to project onto is patched, but without GR!
@@ -14,12 +21,11 @@ int main(int argc, char ** argv){
   // 2) is called "source"
   // 3) output (transformed source) called product
 
-  size_t i, j, k, nr, nc, nb, ps, fpp, bpp, ref_ps, ref_nb, K, K_max;
+  size_t i, j, k;
   str ref_f(argv[1]);
   str src_f(argv[2]);
-
-  K = atoi(argv[4]);
   K_max = atoi(argv[3]); // how many things we persist
+  K = atoi(argv[4]);
 
   ref_ps = int_read(ref_f + str("_ps"));
   ref_nb = int_read(ref_f + str("_nb"));
@@ -65,9 +71,18 @@ int main(int argc, char ** argv){
     float label = patch_label[i]; // list patches on each label
     if(label > 0) patches_per_label[label].push_back(i);
   }
+  ppl = &patches_per_label;
   size_t n_labels = c.size();
   if(c.count(0.)) n_labels --; // in C/c++ anything nonzero is "true"
   cout << "c.size() " << c.size() << " n_labels " << n_labels << endl;
+
+  // for each label, calculate ragged sorted truncated distance matrix: {knn}_{y}(X) y \in src, X = ref
+  
+  for(mfs::iterator it = c.begin(); it != c.end(); it++){
+    float label = it->first;
+    vector<size_t> * pi = &patches_per_label[label]; // patches this label
+  }
+
 
 
 
@@ -91,3 +106,4 @@ int main(int argc, char ** argv){
 
 // might need to build image decimator latera
 // obviously need to hierarchicalize this (fractalize)
+// generalize to non-zero patch "stride" values?
