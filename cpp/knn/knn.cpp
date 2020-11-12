@@ -14,7 +14,7 @@ int main(int argc, char ** argv){
   // 2) is called "source"
   // 3) output (transformed source) called product
 
-  size_t nr, nc, nb, ps, fpp, bpp, ref_ps, ref_nb, K, K_max;
+  size_t i, j, k, nr, nc, nb, ps, fpp, bpp, ref_ps, ref_nb, K, K_max;
   str ref_f(argv[1]);
   str src_f(argv[2]);
 
@@ -47,16 +47,23 @@ int main(int argc, char ** argv){
 
   float * patch_label = float_read(ref_f + str("_patch_label"));
 
-
-  size_t i;
-  map<float, size_t> c;
+  #define mfs map<float, size_t>
+  mfs c; // accumulate patch labels
   for0(i, ref_np){
     float L = patch_label[i];
     if(c.count(L) < 1) c[L] = 0;
     c[L] += 1;
   }
+  cout << "patch labels:" << endl << c << endl;
 
-  cout << c << endl;
+  #define mfvs map<float, vector<size_t>>
+  mfvs patches_per_label;
+  for(mfs::iterator it = c.begin(); it != c.end(); it++) patches_per_label[it->first] = vector<size_t>();
+ 
+  for0(i, ref_np){
+  }
+
+
 
 
   // now, make sure to not stomp the output name!
@@ -77,4 +84,5 @@ int main(int argc, char ** argv){
   return 0;
 }
 
-// might need to build image decimator later
+// might need to build image decimator latera
+// obviously need to hierarchicalize this (fractalize)
