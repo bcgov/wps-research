@@ -425,6 +425,16 @@ size_t int_read(str fn){
   return value;
 }
 
+size_t * ints_read(str fn){
+  size_t fs = fsize(fn);
+  size_t * value = (size_t *)alloc(fs);
+  FILE * f = ropen(fn);
+  size_t br = fread(value, 1, fs, f);
+  if(br != fs) err("unexpected byte read count");
+  return value;
+}
+
+
 void float_write(float * d, size_t n, str fn){
   FILE * f = wopen(fn);
   size_t nr = fwrite(d, sizeof(float), n, f);
@@ -433,6 +443,16 @@ void float_write(float * d, size_t n, str fn){
     err("unexpected write length");
   }
   fclose(f);
+}
+
+float * float_read(str fn){
+  size_t fs = fsize(fn);
+  size_t n = fs / sizeof(float);
+  float * dat = falloc(n);
+  FILE * f = ropen(fn);
+  fread(dat, sizeof(float), n, f);
+  fclose(f);
+  return(dat);
 }
 
 float * float_read(str fn, size_t &n){
