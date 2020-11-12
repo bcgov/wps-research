@@ -86,8 +86,10 @@ int main(int argc, char ** argv){
   
   for(mfs::iterator it = c.begin(); it != c.end(); it++){
     float label = it->first;
-    pi = &patches_per_label[label]; // patches this label
+    pi = &patches_per_label[label]; // groundref patches this label
   
+    // run the parfor over: [0, src_np): all src patches
+
   
   }
 
