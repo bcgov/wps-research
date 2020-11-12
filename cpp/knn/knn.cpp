@@ -10,6 +10,11 @@ pthread_mutex_t nxt_j_mtx; // mtx on next data element to process
 size_t K, K_max, nb, ps, fpp, bpp, ref_ps, ref_nb;
 
 map<float, vector<size_t>> * ppl; // patches per label
+vector<size_t> * pi; // patches this label
+
+void * dmat_threadfun(void * arg){
+}
+
 
 int main(int argc, char ** argv){
   if(argc < 5){
@@ -80,7 +85,9 @@ int main(int argc, char ** argv){
   
   for(mfs::iterator it = c.begin(); it != c.end(); it++){
     float label = it->first;
-    vector<size_t> * pi = &patches_per_label[label]; // patches this label
+    pi = &patches_per_label[label]; // patches this label
+  
+  
   }
 
 
