@@ -236,9 +236,6 @@ float * falloc(size_t nf);
 float * bread(str bfn, size_t nrow, size_t ncol, size_t nband); // read binary file
 void bwrite(float * d, str bfn, size_t nrow, size_t ncol, size_t nband); // write binary file
 
-extern pthread_mutex_t print_mtx;
-void cprint(str s);
-
 int hsv_to_rgb(float *r, float *g, float *b, float h, float s, float v);
 
 str hdr_fn(str fn); //create = false
@@ -288,17 +285,32 @@ bool operator<(const f_ij& a, const f_ij&b);
 
 #define mtx_lock pthread_mutex_lock
 #define mtx_unlock pthread_mutex_unlock
-#endif
 
 // zero pad a string (from left)
 str zero_pad(str x, int n_zero);
 
+// input / output stuff
 void int_write(size_t value, str fn);
 size_t int_read(str fn);
-
 size_t * ints_read(str fn); // read a number of ints from files
-
 float * float_read(str fn); // read floats from a file
-
 float * float_read(str fn, size_t &n);
 void float_write(float * d, size_t n, str fn);
+
+
+// parallelism stuff
+extern pthread_mutex_t print_mtx;
+void cprint(str s);
+
+// parfor stuff
+extern pthread_attr_t pt_attr; // specify threads joinable
+extern pthread_mutex_t pt_next_j_mtx;
+extern size_t pt_nxt_j;
+extern size_t pt_start_j;
+extern size_t pt_end_j;
+void init_mtx();
+void * pt_worker_fun(void * arg); // worker function
+extern void (*pt_eval)(size_t); // function pointer to execute in parallel, over range start_j:end_j inclusive
+void parfor(size_t start_j, size_t end_j, void(*eval)(size_t));
+
+#endif
