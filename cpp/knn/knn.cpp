@@ -58,10 +58,10 @@ int main(int argc, char ** argv){
 
   #define mfvs map<float, vector<size_t>>
   mfvs patches_per_label;
-  for(mfs::iterator it = c.begin(); it != c.end(); it++) patches_per_label[it->first] = vector<size_t>();
- 
-  for0(i, ref_np) patches_per_label[patch_label[i]].push_back(i);
-
+  for(mfs::iterator it = c.begin(); it != c.end(); it++){
+    patches_per_label[it->first] = vector<size_t>();
+  }
+  for0(i, ref_np) patches_per_label[patch_label[i]].push_back(i); // list patches on each label
 
 
 
