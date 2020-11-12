@@ -13,9 +13,10 @@ map<float, vector<size_t>> * ppl; // patches per label
 vector<size_t> * pi; // patches this label
 
 void dmat_j(size_t j){
- // calculate ragged sorted truncated distance matrix "row" for jth "source" patch
-}
+  // calculate ragged sorted truncated distance matrix "row" for jth "source" patch
 
+  // consider rotations / reflections? At least implement a reversal?
+}
 
 int main(int argc, char ** argv){
   if(argc < 5){
@@ -83,17 +84,16 @@ int main(int argc, char ** argv){
   cout << "c.size() " << c.size() << " n_labels " << n_labels << endl;
 
   // for each label, calculate ragged sorted truncated distance matrix: {knn}_{y}(X) y \in src, X = ref
-  
+
   for(mfs::iterator it = c.begin(); it != c.end(); it++){
     float label = it->first;
     pi = &patches_per_label[label]; // groundref patches this label
-  
+
     // run the parfor over: [0, src_np): all src patches
 
     parfor(0, src_np, dmat_j);
 
   }
-
 
 
 
