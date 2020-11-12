@@ -480,48 +480,32 @@ void pt_init_mtx(){
 }
 
 void * pt_worker_fun(void * arg){
-  size_t k, my_nxt_j;
-  k = (size_t)arg;
-  // cprint(str("worker_fun(") + std::to_string(k) + str(")"));
-
+  size_t k, my_nxt_j; // pthread "worker" function for parfor
+  k = (size_t)arg; // cprint(str("worker_fun(") + std::to_string(k) + str(")"));
   while(1){
-    // try to pick up a job
-    mtx_lock(&pt_nxt_j_mtx);
+    mtx_lock(&pt_nxt_j_mtx); // try to pick up a job
     my_nxt_j = pt_nxt_j ++; // index of data this thread should pick up if it can
     mtx_unlock(&pt_nxt_j_mtx);
-
-    if(my_nxt_j >= pt_end_j){
-      // cprint(str("\texit thread ") + to_string(k));
-      return(NULL);
-    }
+    if(my_nxt_j >= pt_end_j) return(NULL);  // cprint(str("\texit thread ") + to_string(k));
+    if(my_nxt_j % 10000 == 0) cprint(to_string(my_nxt_j));
     pt_eval(my_nxt_j); // perform action segment
   }
 }
 
 void parfor(size_t start_j, size_t end_j, void(*eval)(size_t)){
   pt_eval = eval; // set global function pointer
-  pt_start_j = start_j;
   pt_end_j = end_j;
-
-  pt_nxt_j = start_j; // pthread_next_j_mtx is the lock on this variable
-  size_t n_cores = sysconf(_SC_NPROCESSORS_ONLN);
-  // cout << "Number of cores: " << n_cores << endl;
-
-  // allocate threads, make threads joinable whatever that means
-  pthread_attr_init(&pt_attr);
+  pt_nxt_j = start_j; // pt_nxt_j_mtx locks this variable
+  size_t j, n_cores;
+  pt_start_j = start_j;
+  n_cores = sysconf(_SC_NPROCESSORS_ONLN); // cout << "Number of cores: " << n_cores << endl;
+  pthread_attr_init(&pt_attr); // allocate threads, make threads joinable
   pthread_attr_setdetachstate(&pt_attr, PTHREAD_CREATE_JOINABLE);
   pthread_t * my_pthread = new pthread_t[n_cores];
-  size_t j;
-  for0(j, n_cores){
-    pthread_create(&my_pthread[j], &pt_attr, pt_worker_fun, (void *)j);
-  }
-
-  // wait for threads to finish
-  for0(j, n_cores){
-    pthread_join(my_pthread[j], NULL);
-  }
-  // delete my_pthread;
+  for0(j, n_cores) pthread_create(&my_pthread[j], &pt_attr, pt_worker_fun, (void *)j);
+  for0(j, n_cores) pthread_join(my_pthread[j], NULL); // wait for threads to finish
   cprint(str("return parfor()"));
+  delete my_pthread;
 }
 
 
