@@ -78,6 +78,9 @@ extern SA<float> * TGT;
 extern myImg * TGT_MYIMG;
 extern void * TGT_GLIMG;
 
+// analysis window scaling parameter
+extern float TGT_MAGNIFICATION; // number of times to magnify target / analysis window
+
 // groundref detection
 extern vector<int> groundref;
 extern vector<string> vec_band_names;
