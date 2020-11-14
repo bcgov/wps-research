@@ -752,6 +752,7 @@ class glImage: public glPlottable{
   int isClusteringImage;
   zprInstance *myParent;
   float magnification_factor; // convert from image size, to window size (presumably a positive integer e.g. 2 as in, 2x magnification)
+  
   glImage(){
     dat = NULL;
     magnification_factor = 1.; // default to no scaling
@@ -786,6 +787,8 @@ class glImage: public glPlottable{
   void drawMeUnHide();
 
   void drawMe(){
+
+    magnification_factor = (float)(myParent->NRow) / (float)(image->NRow);
     printf("glImage::drawMe(%f)\n", magnification_factor);
     // if(hideMe) return;
     if(Update) rebuffer();
