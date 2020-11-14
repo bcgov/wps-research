@@ -747,11 +747,11 @@ class myImg;
 class glImage: public glPlottable{
   public:
   myImg * image;
-  SA<float> * dat;
+  SA<float> * dat; // why to have myImg class, separate from glImage? Because we should put the htrim (histogram trim) scaling in glImage!
   SA<float> * class_label;
   int isClusteringImage;
   zprInstance *myParent;
-
+  float magnification_factor; // convert from image size, to window size (presumably a positive integer e.g. 2 as in, 2x magnification)
   glImage(){
     dat = NULL;
     myType = std::string("glImage");
