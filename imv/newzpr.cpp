@@ -28,6 +28,9 @@ SA<float> * TGT = NULL;
 myImg * TGT_MYIMG = NULL;
 void * TGT_GLIMG = NULL;
 
+// target / analysis window magnification parameter
+float TGT_MAGNIFICATION = 10.;
+
 // groundref detection
 vector<int> groundref;
 vector<string> vec_band_names;
