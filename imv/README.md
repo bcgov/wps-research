@@ -1,4 +1,6 @@
 # imv
+anagram of vim: "image viewer":
+
 minimalist hyperspectral image viewer. band switching by r[number]&lt;return>, g[number]&lt;return>, b[number]&lt;return>
 
 sample test data (ENVI binary format, data type "4" aka IEEE-standard (byte-order 0) Float32, "band sequential" format) red, green, blue, near-infrared
