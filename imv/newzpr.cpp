@@ -860,6 +860,9 @@ void zprInstance::zprReshape(int w,int h){
     _bottom = -1.; _top = 1.;
   }
 
+  NRow = h;
+  NCol = w; // might need to disable this for specific windows?
+
   glMatrixMode(GL_MODELVIEW); // put back in 20200619
   refreshflag = true;
   return;
