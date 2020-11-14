@@ -754,6 +754,7 @@ class glImage: public glPlottable{
   float magnification_factor; // convert from image size, to window size (presumably a positive integer e.g. 2 as in, 2x magnification)
   glImage(){
     dat = NULL;
+    magnification_factor = 1.; // default to no scaling
     myType = std::string("glImage");
     Update = false; isClusteringImage = false;
   }
@@ -805,13 +806,6 @@ class glImage: public glPlottable{
     glRasterPos2f(0.,0.);
     glPixelStoref(GL_UNPACK_ALIGNMENT, 1);
     glDrawPixels(NCol, NRow, GL_RGB, GL_FLOAT, (GLvoid *)(&((dat->elements)[0])));
-
-    /*
-    extern int SUB_START_I;
-    extern int SUB_START_J;
-    extern float SUB_SCALE_F;
-    extern int SUB_MM;
-    */
 
     if(myParent->myZprInstanceID == 0){
       float x = SUB_SCALE_F * (float)SUB_START_J;
