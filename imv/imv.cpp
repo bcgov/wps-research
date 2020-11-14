@@ -255,12 +255,11 @@ int main(int argc, char ** argv){
   myZpr4->setRightOf(myZpr3); //myZpr4->setScreenPosition(nc2, nr2 + 65);
   myZpr4->setTitle(string("Analysis scatter"));
 
-  zprInstance * myZpr5 = myManager->newZprInstance(200, 200, nb); // preview scatter plot
+  zprInstance * myZpr5 = myManager->newZprInstance(nr2 - mm, nr2 - mm, nb); // preview scatter plot
   glLine xL2(myZpr5, v0, vx, 1, 0, 0); glLine yL2(myZpr5, v0, vy, 0, 1, 0);
   glLine zL2(myZpr5, v0, vz, 0, 0, 1);
-
   glPoints scatter2(myZpr5, myImage2); // scatter plot for: preview window
-  myZpr5->setRightOf(myZpr2) ; // ScreenPosition(nc2, nr2 + 65);
+  myZpr5->setRightOf(myZpr4) ; // ScreenPosition(nc2, nr2 + 65);
   myZpr5->setTitle(string("Subscene scatter")); // printf("glutMainLoop()\n");
   initLighting();
 
