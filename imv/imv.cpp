@@ -11,7 +11,8 @@ that inspired further developments at UVic, CFS and elsewhere.. */ // todo: disp
 //#include <string>
 
 std::string exec(const char* cmd){
-  char buffer[128];
+	// run system command and catch result from stdout
+  char buffer[16384]; // watch the limit, should have a growing-stack version of this
   std::string result = "";
   FILE* pipe = popen(cmd, "r");
   if (!pipe) throw std::runtime_error("popen() failed!");
@@ -109,6 +110,7 @@ int main(int argc, char ** argv){
   int height_lim = nr > height; // screen height too small for image
   int width_lim = nc > width; // screen width too small for image
 
+  // for whatever reason, scalef seems to need to be a few percent or so, less than one or the window transformations get thrown off..
   scalef = 0.95 * (float)(height > width ? width : height) / (float)(nr > nc? nr: nc); // some simplification of above code..
   if( nr < width && nr < height && nc < width && nc < height) scalef = 1.; // account for "small image" case. 1-1 if can fit on screen!
 
