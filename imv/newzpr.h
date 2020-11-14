@@ -372,7 +372,7 @@ class zprInstance{
 
   void setTitle(string s); // set title string
   string getTitle(){
-	  return myTitle;
+    return myTitle;
   }
 
   double vlen(double x,double y,double z);
@@ -445,7 +445,7 @@ class zprInstance{
     zprInstanceInit(ZprID, glutID, manager, _NROW, _NCOL, nb);
   }
 
-  /* 
+  /*
   void setTitle(string s){
     myTitle = s;
     char asdf[1000]="\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
@@ -760,6 +760,7 @@ class glImage: public glPlottable{
   }
 
   glImage(zprInstance * parent, myImg * img ){
+    magnification_factor = (float)(parent->NRow) / (float)(img->NRow);
     myParent = parent;
     initFrom(parent,img);
     Update = false;
@@ -769,7 +770,7 @@ class glImage: public glPlottable{
 
   void initFrom(zprInstance * parent, myImg * img){
     // cout << "glImage::initFrom()\n";
-
+    magnification_factor = (float)(parent->NRow) / (float)(img->NRow);
     myParent = parent;
     image = img;
     dat = new SA<float>(image->NRow * image->NCol *image->NBand);
@@ -785,7 +786,7 @@ class glImage: public glPlottable{
   void drawMeUnHide();
 
   void drawMe(){
-    // printf("myImg::drawMe()\n");
+    printf("glImage::drawMe(%f)\n", magnification_factor);
     // if(hideMe) return;
     if(Update) rebuffer();
 
