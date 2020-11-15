@@ -159,7 +159,27 @@ void glImage::rebuffer(){
   two_percent(min3, max3, b3);
   */
 
+  int is_scene = strncmp(parentZprInstance->getTitle().c_str(), "Scene", 5) == 0;
+
+if(is_scene){
+
   two_percent(min1, max1, b1, b2, b3);
+  parentZprInstance->image_intensity_min = min1;
+  parentZprInstance->image_intensity_max = max1;
+
+}
+else{
+  zprInstance * scene = myZprManager->at(0);
+  int scene_is_scene = strncmp(scene->getTitle().c_str(), "Scene", 5) == 0;
+if(!scene_is_scene){
+cout << "found: " << scene->getTitle() << endl;
+  err("expected Scene window at myZprManager->at(0)");
+}
+  min1 = scene->image_intensity_min;
+  min2 = scene->image_intensity_max;
+}
+
+
   min2 = min3 = min1;
   max2 = max3 = max1;
   r1 = 1./(max1 - min1);

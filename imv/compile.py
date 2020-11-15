@@ -1,3 +1,4 @@
+#!/usr/bin/python3
 # this script should delete all the object files and exe files, so that everything recompiles from scratch (in parallel)
 import os
 
