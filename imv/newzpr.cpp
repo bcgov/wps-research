@@ -8,6 +8,10 @@ using namespace std;
 
 myImg * SCENE_MYIMG = NULL;
 void * SCENE_GLIMG = NULL;
+map<SA<float> *, float> scene_band_min;
+map<SA<float> *, float> scene_band_max;
+map<set<SA<float> *>, float> scene_bands_min;
+map<set<SA<float> *>, float> scene_bands_max;
 
 // subset window data
 size_t SUB_START_I;
@@ -88,27 +92,24 @@ void zprInstance::mark(){
 
 // declare a map (SA<float> * b, to min/max).. no recalc!
 void two_percent(float & min, float & max, SA<float> * b){
-  // not actually 2%, gasp! the real deal should calculate on intensity..
-  priority_queue<float> q;
-  float * d = b->elements;
-  unsigned int n_two = floor(0.02 * ((float)b->size()));
-  unsigned int i;
-  for(i = 0; i < b->size(); i++){
-    q.push(d[i]);
+  if(scene_band_min.count(b) < 1){
+    // not actually 2%, gasp! the real deal should calculate on intensity..
+    priority_queue<float> q;
+    float * d = b->elements;
+    unsigned int n_two = floor(0.02 * ((float)b->size()));
+    unsigned int i;
+    for(i = 0; i < b->size(); i++) q.push(d[i]);
+    for(i = 0; i < n_two; i++) q.pop();
+    max = q.top();
+    while(q.size() > n_two) q.pop();
+    min = q.top();
+    //while(q.size() > 0) q.pop();
+    scene_band_min[b] = min;
+    scene_band_max[b] = max;
   }
-
-  for(i = 0; i < n_two; i++){
-    q.pop();
-  }
-  max = q.top();
-
-  while(q.size() > n_two){
-    q.pop();
-  }
-  min = q.top();
-
-  while(q.size() > 0){
-    q.pop();
+  else{
+    min = scene_band_min[b];
+    max = scene_band_max[b];
   }
   printf("two_p n=%zu min %f max %f\n", b->size(), min, max);
 }
@@ -119,31 +120,32 @@ inline float max3(float r, float g, float b){
 
 void two_percent(float & min, float & max, SA<float> * r, SA<float> * g, SA<float> * b){
   // compared with the above, this version implements a "proportional" scaling
+  set<SA<float> *> bs;
+  bs.insert(r);
+  bs.insert(g);
+  bs.insert(b); // build the tuple to see if we've already calculated this
 
-  priority_queue<float> q;
-  float * R= b->elements;
-  float * G = g->elements;
-  float * B = b->elements;
+  if(scene_bands_min.count(bs) < 1){
 
-  unsigned int n_two = floor(0.01 * ((float)b->size()));
-  unsigned int i;
-  for(i = 0; i < b->size(); i++){
-    q.push(max3(R[i], G[i], B[i]));
+    priority_queue<float> q;
+    float * R= b->elements;
+    float * G = g->elements;
+    float * B = b->elements;
+
+    unsigned int n_two = floor(0.01 * ((float)b->size()));
+    unsigned int i;
+    for(i = 0; i < b->size(); i++) q.push(max3(R[i], G[i], B[i]));
+    for(i = 0; i < n_two; i++) q.pop();
+    max = q.top();
+    while(q.size() > n_two) q.pop();
+    min = q.top();
+    // while(q.size() > 0) q.pop();
+  }
+  else{
+    min = scene_bands_min[bs];
+    max = scene_bands_max[bs];
   }
 
-  for(i = 0; i < n_two; i++){
-    q.pop();
-  }
-  max = q.top();
-
-  while(q.size() > n_two){
-    q.pop();
-  }
-  min = q.top();
-
-  while(q.size() > 0){
-    q.pop();
-  }
   printf("two_p n=%zu min %f max %f\n", b->size(), min, max);
 }
 
@@ -429,44 +431,32 @@ void zprInstance::idle(){
   }
 }
 
-void zprInstance::setrgb(int r, int g, int b, int call_depth = 2){
-  call_depth -= 1;
-  if(call_depth < 0) return;
-  if(!USE_PROPORTIONAL_SCALING && call_depth == 2){
-	((glImage *)(void *)SCENE_GLIMG)->rebuffer();
-  }
+void zprInstance::setrgb(int r, int g, int b){
 
-  cout << getTitle() << "(" << myGlutID() <<")" << "::setrgb()\n";
-  myBi->at(0) = r;
-  myBi->at(1) = g;
-  myBi->at(2) = b;
+  for(int i=0; i < myZprManager->nextZprInstanceID; i++){
+    zprInstance * a = myZprManager->at(i);
+    cout << getTitle() << "(" << myGlutID() <<")" << "::setrgb()\n";
+    a->myBi->at(0) = r;
+    a->myBi->at(1) = g;
+    a->myBi->at(2) = b;
 
-  string s(getTitle().substr(0, 6)); // update display title
-  str rs(vec_band_names[r]);
-  str gs(vec_band_names[g]);
-  str bs(vec_band_names[b]);
+    string s(a->getTitle().substr(0, 6)); // update display title
+    str rs(vec_band_names[r]);
+    str gs(vec_band_names[g]);
+    str bs(vec_band_names[b]);
 
-  setTitle(s + str("R,G,B=[")
-  + to_string(r + 1) + str(":") + rs.substr(0, 31) + str(", ")
-  + to_string(g + 1) + str(":") + gs.substr(0, 31) + str(", ")
-  + to_string(b + 1) + str(":") + bs.substr(0, 31) + str("]"));
+    a->setTitle(s + str("R,G,B=[")
+    + to_string(r + 1) + str(":") + rs.substr(0, 31) + str(", ")
+    + to_string(g + 1) + str(":") + gs.substr(0, 31) + str(", ")
+    + to_string(b + 1) + str(":") + bs.substr(0, 31) + str("]"));
 
-  int my_id = myGlutID();
-
-  for(int i = 0; i < myZprManager->nextZprInstanceID; i++){
-    int ix = myZprManager->myZprInstances->at(i)->myGlutID();
-    if(ix != my_id){
-      myZprManager->myZprInstances->at(i)->setrgb(r, g, b, call_depth);
+    // trickle-down. N.b. the glImage()::rebuffer() gets band-select info from zprInstance
+    for(vector<glPlottable *>::iterator it = a->myGraphics.begin(); it != a->myGraphics.end(); it++){
+      if((*it)->myType.compare(std::string("glImage")) == 0){
+        ((glImage *)((void *)((glPlottable *)(*it))))->rebuffer();
+      }
     }
   }
-
-  // trickle-down. N.b. the glImage()::rebuffer() gets band-select info from zprInstance
-  for(vector<glPlottable *>::iterator it = myGraphics.begin(); it != myGraphics.end(); it++){
-    if((*it)->myType.compare(std::string("glImage")) == 0){
-      ((glImage *)((void *)((glPlottable *)(*it))))->rebuffer();
-    }
-  }
-
   for(int m = 0; m < 5; m++){
     zprInstance * a = myZprManager->myZprInstances->at(m);
     if(a != this){
@@ -479,7 +469,6 @@ void zprInstance::setrgb(int r, int g, int b, int call_depth = 2){
   this->focus();
   this->mark();
   this->display();
-
 }
 
 void zprInstance::getrgb(int & r, int & g, int & b){
@@ -577,8 +566,8 @@ void zprInstance::processString(){
     int r, g, b;
     getrgb(r,g,b);
     setrgb(r,g,b);
-   return;
-/*
+    return;
+    /*
 
     // trickle-down. N.b. the glImage()::rebuffer() gets band-select info from zprInstance
     for(vector<glPlottable *>::iterator it = myGraphics.begin(); it != myGraphics.end(); it++){
@@ -600,7 +589,7 @@ void zprInstance::processString(){
     this->focus();
     this->mark();
     this->display();
-*/
+    */
   }
 
   // gt prefix?
