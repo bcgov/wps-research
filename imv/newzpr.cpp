@@ -160,8 +160,8 @@ void glImage::rebuffer(){
   */
 
   int is_scene = strncmp(parentZprInstance->getTitle().c_str(), "Scene", 5) == 0;
+if(is_scene || ( parentZprInstance->image_intensity_min == 0 && parentZprInstance->image_intensity_max == 0.)){
 
-if(is_scene){
 
   two_percent(min1, max1, b1, b2, b3);
   parentZprInstance->image_intensity_min = min1;
