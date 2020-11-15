@@ -801,29 +801,26 @@ class glImage: public glPlottable{
     int nc = NCol; //myParent->NCol;
     //printf("drawMe nrow %d ncol %d nr %d nc%d\n", NRow, NCol, nr, nc);
 
-    if(strncmp(myParent->getTitle().c_str(), "Analys", 6) == 0){
-      printf("We're on Analysis window.\n");
+    int is_analysis = strncmp(myParent->getTitle().c_str(), "Analys", 6) == 0;
+    if(is_analysis){
+      // printf("We're on Analysis window.\n");
       nr = floor((float)nr * magnification_factor);
       nc = floor((float)nc * magnification_factor);
-      printf("NRow %d NCol %d nr %d nc %d\n", NRow, NCol, nr, nc);
+      // printf("NRow %d NCol %d nr %d nc %d\n", NRow, NCol, nr, nc);
     }
 
     glViewport(0, 0, nc, nr); //NCol, NRow);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    // gluOrtho2D(0.0, (GLfloat)NCol, 0.0, (GLfloat)NRow);
     gluOrtho2D(0., (GLfloat)nc, 0., (GLfloat)nr);
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
     glRasterPos2f(0.,0.);
     glPixelStoref(GL_UNPACK_ALIGNMENT, 1);
     //
-    GLint iViewport[4];
-    glGetIntegerv(GL_VIEWPORT, iViewport);
-    glPixelZoom(magnification_factor, magnification_factor); // wow this works! WOOHOO!
-    // glPixelZoom(iViewport[2]/NCol, iViewport[3]/NRow);
-    //  glDrawPixels(640,480,GL_RGB,GL_UNSIGNED_BYTE,frame);
-    //
+    if(is_analysis) {
+      glPixelZoom(magnification_factor, magnification_factor); // wow this works! WOOHOO!
+    }
     glDrawPixels(NCol, NRow, GL_RGB, GL_FLOAT, (GLvoid *)(&((dat->elements)[0])));
 
     if(myParent->myZprInstanceID == 0){
