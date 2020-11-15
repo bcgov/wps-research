@@ -83,7 +83,7 @@ void zprInstance::mark(){
 }
 
 void two_percent(float & min, float & max, SA<float> * b){
-  // not actually 2%, gasp!
+  // not actually 2%, gasp! the real deal should calculate on intensity..
   priority_queue<float> q;
   float * d = b->elements;
   unsigned int n_two = floor(0.02 * ((float)b->size()));
@@ -107,12 +107,39 @@ void two_percent(float & min, float & max, SA<float> * b){
   }
   printf("two_p n=%zu min %f max %f\n", b->size(), min, max);
 
-  bool disable_stretch = false;
-  if(disable_stretch){
-    min = 0.;
-    max = 1.;
-  }
 }
+
+
+void two_percent(float & min, float & max, SA<float> * r, SA<float> * g, SA<float> * b){
+  // not actually 2%, gasp! the real deal should calculate on intensity..
+  priority_queue<float> q;
+  float * d = b->elements;
+  unsigned int n_two = floor(0.02 * ((float)b->size()));
+  unsigned int i;
+  for(i = 0; i < b->size(); i++){
+    q.push(d[i]);
+  }
+
+  for(i = 0; i < n_two; i++){
+    q.pop();
+  }
+  max = q.top();
+
+  while(q.size() > n_two){
+    q.pop();
+  }
+  min = q.top();
+
+  while(q.size() > 0){
+    q.pop();
+  }
+  printf("two_p n=%zu min %f max %f\n", b->size(), min, max);
+
+}
+
+
+
+
 
 void glImage::rebuffer(){
   myBi = parentZprInstance->myBi;
@@ -126,9 +153,10 @@ void glImage::rebuffer(){
   r1 = r2 = r3 = 1.;
   min1 = min2 = min3 = 0.;
 
-  two_percent(min1, max1, b1); // so the 2p stretch happens in the secondary buffer (this one)
+ /* two_percent(min1, max1, b1); // so the 2p stretch happens in the secondary buffer (this one)
   two_percent(min2, max2, b2);
   two_percent(min3, max3, b3);
+  */
   r1 = 1./(max1 - min1);
   r2 = 1./(max2 - min2);
   r3 = 1./(max3 - min3);
