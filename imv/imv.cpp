@@ -252,14 +252,14 @@ int main(int argc, char ** argv){
 
   glPoints scatter(myZpr4, myImage3); // analysis window scatter window scatter plot
   myZpr4->setRightOf(myZpr3); //myZpr4->setScreenPosition(nc2, nr2 + 65);
-  myZpr4->setTitle(string("Analysis scatter"));
+  myZpr4->setTitle(string("Scatter (analysis)"));
 
   zprInstance * myZpr5 = myManager->newZprInstance(nr2 - mm, nr2 - mm, nb); // preview scatter plot
   glLine xL2(myZpr5, v0, vx, 1, 0, 0); glLine yL2(myZpr5, v0, vy, 0, 1, 0);
   glLine zL2(myZpr5, v0, vz, 0, 0, 1);
   glPoints scatter2(myZpr5, myImage2); // scatter plot for: preview window
   myZpr5->setRightOf(myZpr4) ; // ScreenPosition(nc2, nr2 + 65);
-  myZpr5->setTitle(string("Subscene scatter")); // printf("glutMainLoop()\n");
+  myZpr5->setTitle(string("Scatter(subsecne)")); // printf("glutMainLoop()\n");
   initLighting();
 
   bands_per_frame = nb / number_of_dates;
