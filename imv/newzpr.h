@@ -59,6 +59,8 @@ static clock_t stop_time;
 // image scene, multilooked
 extern myImg * SCENE_MYIMG;
 extern void * SCENE_GLIMG;
+extern map<SA<float> *, float> scene_band_min;
+extern map<SA<float> *, float> scene_band_max;
 
 // image subset selection parameters
 extern size_t SUB_START_I;
