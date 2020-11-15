@@ -106,22 +106,19 @@ void two_percent(float & min, float & max, SA<float> * b){
     q.pop();
   }
   printf("two_p n=%zu min %f max %f\n", b->size(), min, max);
-
 }
 
 float max3(float r, float g, float b){
-
-return max(r, max(g, b));
-
+  return max(r, max(g, b));
 }
 
-
 void two_percent(float & min, float & max, SA<float> * r, SA<float> * g, SA<float> * b){
-  // not actually 2%, gasp! the real deal should calculate on intensity..
+  // compared with the above, this version implements a "proportional" scaling
+
   priority_queue<float> q;
   float * R= b->elements;
-float * G = g->elements; 
-float * B = b->elements;
+  float * G = g->elements;
+  float * B = b->elements;
 
   unsigned int n_two = floor(0.02 * ((float)b->size()));
   unsigned int i;
@@ -145,10 +142,6 @@ float * B = b->elements;
   printf("two_p n=%zu min %f max %f\n", b->size(), min, max);
 }
 
-
-
-
-
 void glImage::rebuffer(){
   myBi = parentZprInstance->myBi;
   int NRow = image->NRow; int NCol = image->NCol;
@@ -161,7 +154,7 @@ void glImage::rebuffer(){
   r1 = r2 = r3 = 1.;
   min1 = min2 = min3 = 0.;
 
- /* two_percent(min1, max1, b1); // so the 2p stretch happens in the secondary buffer (this one)
+  /* two_percent(min1, max1, b1); // so the 2p stretch happens in the secondary buffer (this one)
   two_percent(min2, max2, b2);
   two_percent(min3, max3, b3);
   */
@@ -394,8 +387,8 @@ void zprInstance::idle(){
 void zprInstance::setrgb(int r, int g, int b, int call_depth = 2){
   call_depth -= 1;
   if(call_depth < 0) return;
- 
- /* 
+
+  /*
   int my_id = myGlutID();
 
   for(int i = 0; i < myZprManager->nextZprInstanceID; i++){
@@ -430,7 +423,6 @@ void zprInstance::setrgb(int r, int g, int b, int call_depth = 2){
   + to_string(r + 1) + str(":") + rs.substr(0, 31) + str(", ")
   + to_string(g + 1) + str(":") + gs.substr(0, 31) + str(", ")
   + to_string(b + 1) + str(":") + bs.substr(0, 31) + str("]"));
-
 
   int my_id = myGlutID();
 
@@ -915,9 +907,8 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
   GLint viewport[4]; /* Do picking */
   refreshflag = true;
 
-      int is_analysis = strncmp(getTitle().c_str(), "Analys", 6) == 0;
-    if(is_analysis) return;
-
+  int is_analysis = strncmp(getTitle().c_str(), "Analys", 6) == 0;
+  if(is_analysis) return;
 
   if(state == GLUT_DOWN && button == GLUT_LEFT_BUTTON){
     zprPick(x, glutGet(GLUT_WINDOW_HEIGHT) - 1 - y, 3, 3);
