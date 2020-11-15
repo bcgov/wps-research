@@ -57,7 +57,8 @@ int main(int argc, char ** argv){
     NWIN = atoi(argv[2]);
   }
   else{
-    NWIN = 49; // obviously this is for purposes of testing the extraction. Too big!
+
+    NWIN = 15; // 49; // obviously this is for purposes of testing the extraction. Too big!
   }
   if((NWIN - 1) % 2 != 0) err("analysis window size must be odd"); // assert analysis window size: odd
   WIN_I = WIN_J = 0; // window location? what is this?
@@ -176,7 +177,9 @@ int main(int argc, char ** argv){
   }
   if(nc < mm){
     mm = nc;
-  }
+  } 
+  mm = (6 * mm) / 7; // relative to full-scene overview window, make the full-res subscene window, a little smaller than it was before..
+ 
   SUB_MM = mm;
   size_t i_start = 0;
   size_t j_start = 0;
