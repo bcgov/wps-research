@@ -1017,8 +1017,10 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
     ((glImage *)SUB_GLIMG)->rebuffer();
 
     // now rebuffer under secondary window too
-    WIN_I = (y + NWIN) >= SUB_MM ? SUB_MM - NWIN : y;
+    /*
+WIN_I = (y + NWIN) >= SUB_MM ? SUB_MM - NWIN : y;
     WIN_J = (x + NWIN) >= SUB_MM ? SUB_MM - NWIN : x;
+*/
 
     size_t i, j, k;
     SA<float> * dat4 = TGT;
