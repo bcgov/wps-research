@@ -81,6 +81,9 @@ extern void * TGT_GLIMG;
 // analysis window scaling parameter
 extern float TGT_MAGNIFICATION; // number of times to magnify target / analysis window
 
+// image intensity scaling parameter
+extern int USE_PROPORTIONAL_SCALING;
+
 // groundref detection
 extern vector<int> groundref;
 extern vector<string> vec_band_names;
@@ -360,6 +363,9 @@ class zprInstance{
 
 // image scaling parameter:
 float image_intensity_min, image_intensity_max;
+float image_intensity_min1, image_intensity_max1;
+float image_intensity_min2, image_intensity_max2;
+float image_intensity_min3, image_intensity_max3;
 
   /* Picking API (Optional) */
   void zprSelectionFunc(void (*f)(void));
