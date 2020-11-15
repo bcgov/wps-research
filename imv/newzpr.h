@@ -56,6 +56,10 @@ static clock_t start_time;
 static clock_t stop_time;
 #define SECONDS_PAUSE 0.4
 
+// image scene, multilooked
+extern myImg * SCENE_MYIMG;
+extern void * SCENE_GLIMG;
+
 // image subset selection parameters
 extern size_t SUB_START_I;
 extern size_t SUB_START_J;
