@@ -752,7 +752,7 @@ class glImage: public glPlottable{
   int isClusteringImage;
   zprInstance *myParent;
   float magnification_factor; // convert from image size, to window size (presumably a positive integer e.g. 2 as in, 2x magnification)
-  
+
   glImage(){
     dat = NULL;
     magnification_factor = 1.; // default to no scaling
@@ -788,8 +788,9 @@ class glImage: public glPlottable{
 
   void drawMe(){
 
+    // dynamically recalcuate magnification factor, based on window size changes, only apply for Analysis window
     magnification_factor = (float)(myParent->NRow) / (float)(image->NRow);
-    printf("glImage::drawMe(%f)\n", magnification_factor);
+    printf("glImage::drawMe(%s, %f)\n", myParent->getTitle().c_str(), magnification_factor);
     // if(hideMe) return;
     if(Update) rebuffer();
 
@@ -800,6 +801,13 @@ class glImage: public glPlottable{
     int nc = NCol; //myParent->NCol;
     //printf("drawMe nrow %d ncol %d nr %d nc%d\n", NRow, NCol, nr, nc);
 
+    if(strncmp(myParent->getTitle().c_str(), "Analys", 6) == 0){
+      printf("We're on Analysis window.\n");
+      nr = floor((float)nr * magnification_factor);
+      nc = floor((float)nc * magnification_factor);
+      printf("NRow %d NCol %d nr %d nc %d\n", NRow, NCol, nr, nc);
+    }
+
     glViewport(0, 0, nc, nr); //NCol, NRow);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
@@ -809,6 +817,12 @@ class glImage: public glPlottable{
     glLoadIdentity();
     glRasterPos2f(0.,0.);
     glPixelStoref(GL_UNPACK_ALIGNMENT, 1);
+    //
+    GLint iViewport[4];
+    glGetIntegerv(GL_VIEWPORT, iViewport);
+    glPixelZoom(iViewport[2]/NCol, iViewport[3]/NRow);
+    //  glDrawPixels(640,480,GL_RGB,GL_UNSIGNED_BYTE,frame);
+    //
     glDrawPixels(NCol, NRow, GL_RGB, GL_FLOAT, (GLvoid *)(&((dat->elements)[0])));
 
     if(myParent->myZprInstanceID == 0){

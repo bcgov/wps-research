@@ -236,12 +236,11 @@ int main(int argc, char ** argv){
   }
 
   TGT_MYIMG = &c;
-  zprInstance *myZpr3 = myManager->newZprInstance(NWIN, NWIN, nb); // analysis window
+  zprInstance *myZpr3 = myManager->newZprInstance(nr2 - mm, nr2 - mm, nb); // analysis window
   glImage * myImage3 = new glImage(myZpr3, &c); // image object for analysis window data
   TGT_GLIMG = (void *)myImage3;
   myZpr3->setScreenPosition(nc2, mm + 65); //nr2 + 65);
   myZpr3->setTitle(string("Analysis"));
-
   zprInstance * myZpr4 = myManager->newZprInstance(nr2 - mm, nr2 - mm, nb); // analysis window scatter window
   // glBasicSphere * s = new glBasicSphere(0, myZpr4, 0, 0, 0, 1, 1, 1, 1., 10, 10);
 
