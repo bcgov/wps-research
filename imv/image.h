@@ -45,7 +45,7 @@ class myImg{
       newB->sizeJ = NCol;
       newB->sizeK = 0;
       newB->elements = (&(dat.elements)[i*NRow*NCol]);
-      scaleband(newB); //scale into range 0-1.
+      //scaleband(newB); //scale into range 0-1.
       float_buffers->at(i) = newB;
     }
     printf("\n");
@@ -70,7 +70,7 @@ class myImg{
       newB->sizeJ = NCol;
       newB->sizeK = 0;
       newB->elements = (&(dat.elements)[i*NRow*NCol]);
-      scaleband(newB); //scale into range 0-1.
+      //scaleband(newB); //scale into range 0-1.
       float_buffers->at(i) = newB;
     }
     printf("\n");
