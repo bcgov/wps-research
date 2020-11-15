@@ -820,7 +820,8 @@ class glImage: public glPlottable{
     //
     GLint iViewport[4];
     glGetIntegerv(GL_VIEWPORT, iViewport);
-    glPixelZoom(iViewport[2]/NCol, iViewport[3]/NRow);
+    glPixelZoom(magnification_factor, magnification_factor); // wow this works! WOOHOO!
+    // glPixelZoom(iViewport[2]/NCol, iViewport[3]/NRow);
     //  glDrawPixels(640,480,GL_RGB,GL_UNSIGNED_BYTE,frame);
     //
     glDrawPixels(NCol, NRow, GL_RGB, GL_FLOAT, (GLvoid *)(&((dat->elements)[0])));
