@@ -56,6 +56,8 @@ void * worker_fun(void * arg){
 }
 
 void parfor(size_t start_j, size_t end_j, void(*eval)(size_t)){
+  // ideally the worker fun would be an inline (inside of here)
+
   pthread_eval = eval; // set global function pointer
   pthread_start_j = start_j;
   pthread_end_j = end_j;
