@@ -263,7 +263,10 @@ int main(int argc, char ** argv){
   initLighting();
 
   bands_per_frame = nb / number_of_dates;
-  
+myImage->rebuffer();
+myImage2->rebuffer();
+myImage3->rebuffer(); 
+
   glutMainLoop();
   return 0;
 }
