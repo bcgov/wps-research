@@ -444,7 +444,7 @@ float image_intensity_min, image_intensity_max;
     myZFar=1.;
     _F1 = _F2 = _F3 = _F4 = _F5 = _F6 = _F7 = _F8 = _F9 = _F10 = _F11 = _F12 = false;
     groundref_class_colouring = false;
-
+	image_intensity_min = image_intensity_max = 0.;
     bands_per_frame = 11; // need to set this automatically later
   }
 
