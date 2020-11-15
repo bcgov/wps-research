@@ -109,6 +109,12 @@ void two_percent(float & min, float & max, SA<float> * b){
 
 }
 
+float max3(float r, float g, float b){
+
+return max(r, max(g, b));
+
+}
+
 
 void two_percent(float & min, float & max, SA<float> * r, SA<float> * g, SA<float> * b){
   // not actually 2%, gasp! the real deal should calculate on intensity..
@@ -120,7 +126,7 @@ float * B = b->elements;
   unsigned int n_two = floor(0.02 * ((float)b->size()));
   unsigned int i;
   for(i = 0; i < b->size(); i++){
-    q.push(max(R[i], max(G[i], B[i])));
+    q.push(max3(R[i], G[i], B[i]));
   }
 
   for(i = 0; i < n_two; i++){
