@@ -120,7 +120,7 @@ void two_percent(float & min, float & max, SA<float> * r, SA<float> * g, SA<floa
   float * G = g->elements;
   float * B = b->elements;
 
-  unsigned int n_two = floor(0.02* ((float)b->size()));
+  unsigned int n_two = floor(0.01 *  ((float)b->size()));
   unsigned int i;
   for(i = 0; i < b->size(); i++){
     q.push(max3(R[i], G[i], B[i]));
@@ -461,28 +461,6 @@ void zprInstance::setrgb(int r, int g, int b, int call_depth = 2){
       ((glImage *)((void *)((glPlottable *)(*it))))->rebuffer();
     }
   }
-/*
-  string s(getTitle().substr(0, 6)); // update display title
-  str rs(vec_band_names[r]);
-  str gs(vec_band_names[g]);
-  str bs(vec_band_names[b]);
-
-  setTitle(s + str("R,G,B=[")
-  + to_string(r + 1) + str(":") + rs.substr(0, 31) + str(", ")
-  + to_string(g + 1) + str(":") + gs.substr(0, 31) + str(", ")
-  + to_string(b + 1) + str(":") + bs.substr(0, 31) + str("]"));
-
-  int my_id = myGlutID();
-
-  for(int i = 0; i < myZprManager->nextZprInstanceID; i++){
-    int ix = myZprManager->myZprInstances->at(i)->myGlutID();
-    if(ix != my_id){
-
-      cout << " *" << my_id << " -> " << ix << " " << myZprManager->myZprInstances->at(i)->getTitle() << endl;
-      myZprManager->myZprInstances->at(i)->setrgb(r, g, b, call_depth);
-    }
-  }
-*/
 
   for(int m = 0; m < 5; m++){
     // if(m > 1) continue; // update the first two windows (otherwise get segfault)
@@ -1600,6 +1578,7 @@ void glPoints::drawMe(){
   float r, g, b, h, s, v;
   float class_label;
 
+  float m;
   glColor3f(1,1,1);
   glPointSize(2.);
   // if(!myI->myParent->groundref_class_colouring)
@@ -1609,7 +1588,8 @@ void glPoints::drawMe(){
       r = d[i];
       g = d[i + 1];
       b = d[i + 2];
-      glColor3f(r, g, b);
+	m  = max3(r, g, b);
+      glColor3f(r/m, g/m, b/m); // g, b);
       glBegin(GL_POINTS);
       glVertex3f(r, g, b);
       glEnd(); // printf("%f %f %f]\n", d[i], d[i + 1], d[i + 2]);
