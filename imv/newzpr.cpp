@@ -173,7 +173,7 @@ else{
   int scene_is_scene = strncmp(scene->getTitle().c_str(), "Scene", 5) == 0;
 if(!scene_is_scene){
 cout << "found: " << scene->getTitle() << endl;
-  err("expected Scene window at myZprManager->at(0)");
+cout << "WARNING **********************\n" << endl;
 }
   min1 = scene->image_intensity_min;
   min2 = scene->image_intensity_max;
