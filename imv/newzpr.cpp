@@ -569,6 +569,12 @@ void zprInstance::processString(){
     return;
   }
 
+ // a prefix?
+  if(strcmpz(console_string, "a\0") && console_string[1] == ' '){
+    cout << "ANNOTATE" << endl;
+    return;
+  }
+
   // gt prefix?
   if(strcmpz(console_string, "gt\0")){
     if(console_string[2] == '\0'){
