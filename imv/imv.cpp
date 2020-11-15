@@ -165,6 +165,7 @@ int main(int argc, char ** argv){
   else{
     a.initFrom(&dat, nr2, nc2, nb);
   }
+SUB_MYIMG = &a;
 
   // fullres display loading..
   printf("loading fullres data..\n");
@@ -207,6 +208,7 @@ int main(int argc, char ** argv){
   // set up window for overview image
   zprInstance * myZpr = myManager->newZprInstance(nr2, nc2, nb); // "Scene" / overview image
   glImage * myImage = new glImage(myZpr, &a);
+  SCENE_GLIMG = (void*)(glImage*)myImage;
   myZpr->setTitle(string("Scene "));
 
   // set up window for fullres subset image

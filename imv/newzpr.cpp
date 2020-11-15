@@ -6,6 +6,9 @@
 #include <iostream>
 using namespace std;
 
+myImg * SCENE_MYIMG = NULL;
+void * SCENE_GLIMG = NULL;
+
 // subset window data
 size_t SUB_START_I;
 size_t SUB_START_J;
@@ -179,6 +182,7 @@ void glImage::rebuffer(){
     max2 = max3 = max1;
   }
   else{
+
     if(is_scene){
       two_percent(min1, max1, b1); // so the 2p stretch happens in the secondary buffer (this one)
       two_percent(min2, max2, b2);
@@ -193,7 +197,7 @@ void glImage::rebuffer(){
     }
     else{
       zprInstance * s = myZprManager->at(0);
-      int s_is_scene = strncmp(parentZprInstance->getTitle().c_str(), "Scene", 5) == 0;
+      int s_is_scene = strncmp(s->getTitle().c_str(), "Scene", 5) == 0;
       if(!s_is_scene){
         cout << "WARNING: TITLES NOT INITIALIZED YET" << endl;
         return; // get out if titles not initialized yet
@@ -205,6 +209,7 @@ void glImage::rebuffer(){
       max2 = s->image_intensity_max2;
       max3 = s->image_intensity_max3;
     }
+
   }
 
   r1 = 1./(max1 - min1);
@@ -431,6 +436,9 @@ void zprInstance::idle(){
 void zprInstance::setrgb(int r, int g, int b, int call_depth = 2){
   call_depth -= 1;
   if(call_depth < 0) return;
+  if(!USE_PROPORTIONAL_SCALING && call_depth == 2){
+	((glImage *)(void *)SCENE_GLIMG)->rebuffer();
+  }
 
   cout << getTitle() << "(" << myGlutID() <<")" << "::setrgb()\n";
   myBi->at(0) = r;
@@ -574,6 +582,11 @@ void zprInstance::processString(){
   if(strcmpz(console_string, "s\0") && console_string[2] == '\0'){
     USE_PROPORTIONAL_SCALING = !USE_PROPORTIONAL_SCALING;
     printf("PROPORTIONAL_SCALING: %s\n", USE_PROPORTIONAL_SCALING?"On":"Off");
+    int r, g, b;
+    getrgb(r,g,b);
+    setrgb(r,g,b);
+   return;
+/*
 
     // trickle-down. N.b. the glImage()::rebuffer() gets band-select info from zprInstance
     for(vector<glPlottable *>::iterator it = myGraphics.begin(); it != myGraphics.end(); it++){
@@ -584,18 +597,18 @@ void zprInstance::processString(){
 
     for(int m = 0; m < 5; m++){
       zprInstance * a = myZprManager->myZprInstances->at(m);
-if(a != this){
+      if(a != this){
 
         a->focus();
         a->mark();
         a->display();
-}
+      }
     }
 
     this->focus();
     this->mark();
     this->display();
-
+*/
   }
 
   // gt prefix?
