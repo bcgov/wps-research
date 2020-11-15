@@ -86,6 +86,7 @@ void zprInstance::mark(){
   }
 }
 
+// declare a map (SA<float> * b, to min/max).. no recalc!
 void two_percent(float & min, float & max, SA<float> * b){
   // not actually 2%, gasp! the real deal should calculate on intensity..
   priority_queue<float> q;
@@ -112,7 +113,7 @@ void two_percent(float & min, float & max, SA<float> * b){
   printf("two_p n=%zu min %f max %f\n", b->size(), min, max);
 }
 
-float max3(float r, float g, float b){
+inline float max3(float r, float g, float b){
   return max(r, max(g, b));
 }
 
