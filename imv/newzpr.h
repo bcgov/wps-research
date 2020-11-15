@@ -249,6 +249,10 @@ class zprManager{
   }
 
   public:
+  zprInstance * at(int i){
+	return myZprInstances->at(i);
+}
+
 
   void mark();
   static zprManager * Instance(int argc, char *argv[]);
@@ -353,6 +357,9 @@ class zprInstance{
   double _matrixInverse[16];
   void zprInit();
   GLfloat zprReferencePoint[4];
+
+// image scaling parameter:
+float image_intensity_min, image_intensity_max;
 
   /* Picking API (Optional) */
   void zprSelectionFunc(void (*f)(void));
