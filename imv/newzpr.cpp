@@ -169,7 +169,7 @@ void glImage::rebuffer(){
       zprInstance * scene = myZprManager->at(0);
       int scene_is_scene = strncmp(scene->getTitle().c_str(), "Scene", 5) == 0;
       if(!scene_is_scene){
-		cout << "WARNING1: titles not initialized yet" << endl;
+        cout << "WARNING1: titles not initialized yet" << endl;
         return; // get out if titles not initialized yet
       }
       min1 = scene->image_intensity_min;
@@ -195,9 +195,9 @@ void glImage::rebuffer(){
       zprInstance * s = myZprManager->at(0);
       int s_is_scene = strncmp(parentZprInstance->getTitle().c_str(), "Scene", 5) == 0;
       if(!s_is_scene){
-cout << "WARNING: TITLES NOT INITIALIZED YET" << endl;
-return; // get out if titles not initialized yet
-}
+        cout << "WARNING: TITLES NOT INITIALIZED YET" << endl;
+        return; // get out if titles not initialized yet
+      }
       min1 = s->image_intensity_min1;
       min2 = s->image_intensity_min2;
       min3 = s->image_intensity_min3;
@@ -429,8 +429,8 @@ void zprInstance::idle(){
 }
 
 void zprInstance::setrgb(int r, int g, int b, int call_depth = 2){
-   call_depth -= 1;
-   if(call_depth < 0) return;
+  call_depth -= 1;
+  if(call_depth < 0) return;
 
   cout << getTitle() << "(" << myGlutID() <<")" << "::setrgb()\n";
   myBi->at(0) = r;
@@ -468,7 +468,7 @@ void zprInstance::setrgb(int r, int g, int b, int call_depth = 2){
   for(int m = 0; m < 5; m++){
     // if(m > 1) continue; // update the first two windows (otherwise get segfault)
     zprInstance * a = myZprManager->myZprInstances->at(m);
-   if(a != this){
+    if(a != this){
       a->focus();
       a->mark();
       a->display();
@@ -573,8 +573,27 @@ void zprInstance::processString(){
   // s prefix?
   if(strcmpz(console_string, "s\0") && console_string[2] == '\0'){
     USE_PROPORTIONAL_SCALING = !USE_PROPORTIONAL_SCALING;
-    printf("PROPORTIONAL_SCALING: %s\n", USE_PROPORTIONAL_SCALING?"On":"Off");  
-}
+    printf("PROPORTIONAL_SCALING: %s\n", USE_PROPORTIONAL_SCALING?"On":"Off");
+
+    // trickle-down. N.b. the glImage()::rebuffer() gets band-select info from zprInstance
+    for(vector<glPlottable *>::iterator it = myGraphics.begin(); it != myGraphics.end(); it++){
+      if((*it)->myType.compare(std::string("glImage")) == 0){
+        ((glImage *)((void *)((glPlottable *)(*it))))->rebuffer();
+      }
+    }
+
+    for(int m = 0; m < 5; m++){
+      zprInstance * a = myZprManager->myZprInstances->at(m);
+        a->focus();
+        a->mark();
+        a->display();
+    }
+/*
+    this->focus();
+    this->mark();
+    this->display();
+*/
+  }
 
   // gt prefix?
   if(strcmpz(console_string, "gt\0")){
