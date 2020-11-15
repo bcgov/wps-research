@@ -584,15 +584,18 @@ void zprInstance::processString(){
 
     for(int m = 0; m < 5; m++){
       zprInstance * a = myZprManager->myZprInstances->at(m);
+if(a != this){
+
         a->focus();
         a->mark();
         a->display();
+}
     }
-/*
+
     this->focus();
     this->mark();
     this->display();
-*/
+
   }
 
   // gt prefix?
