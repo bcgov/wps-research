@@ -159,6 +159,10 @@ void glImage::rebuffer(){
   two_percent(min2, max2, b2);
   two_percent(min3, max3, b3);
   */
+
+  two_percent(min1, max1, b1, b2, b3);
+  min2 = min3 = min1;
+  max2 = max3 = max1;
   r1 = 1./(max1 - min1);
   r2 = 1./(max2 - min2);
   r3 = 1./(max3 - min3);
