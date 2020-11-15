@@ -57,7 +57,6 @@ int main(int argc, char ** argv){
     NWIN = atoi(argv[2]);
   }
   else{
-
     NWIN = 13; // 49; // obviously this is for purposes of testing the extraction. Too big!
   }
   if((NWIN - 1) % 2 != 0) err("analysis window size must be odd"); // assert analysis window size: odd
