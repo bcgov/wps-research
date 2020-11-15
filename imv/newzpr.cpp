@@ -425,16 +425,13 @@ void zprInstance::idle(){
 }
 
 void zprInstance::setrgb(int r, int g, int b, int call_depth = 2){
-  // call_depth -= 1;
-  // if(call_depth < 0) return;
+   call_depth -= 1;
+   if(call_depth < 0) return;
 
   cout << getTitle() << "(" << myGlutID() <<")" << "::setrgb()\n";
   myBi->at(0) = r;
   myBi->at(1) = g;
   myBi->at(2) = b;
-
-  call_depth -=1;
-  if(call_depth< 0) return;
 
   string s(getTitle().substr(0, 6)); // update display title
   str rs(vec_band_names[r]);
@@ -467,7 +464,7 @@ void zprInstance::setrgb(int r, int g, int b, int call_depth = 2){
   for(int m = 0; m < 5; m++){
     // if(m > 1) continue; // update the first two windows (otherwise get segfault)
     zprInstance * a = myZprManager->myZprInstances->at(m);
-    if(a != this){
+   if(a != this){
       a->focus();
       a->mark();
       a->display();
@@ -572,7 +569,8 @@ void zprInstance::processString(){
   // s prefix?
   if(strcmpz(console_string, "s\0") && console_string[2] == '\0'){
     USE_PROPORTIONAL_SCALING = !USE_PROPORTIONAL_SCALING;
-  }
+    printf("PROPORTIONAL_SCALING: %s\n", USE_PROPORTIONAL_SCALING?"On":"Off");  
+}
 
   // gt prefix?
   if(strcmpz(console_string, "gt\0")){
