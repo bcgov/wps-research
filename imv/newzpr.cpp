@@ -113,11 +113,14 @@ void two_percent(float & min, float & max, SA<float> * b){
 void two_percent(float & min, float & max, SA<float> * r, SA<float> * g, SA<float> * b){
   // not actually 2%, gasp! the real deal should calculate on intensity..
   priority_queue<float> q;
-  float * d = b->elements;
+  float * R= b->elements;
+float * G = g->elements; 
+float * B = b->elements;
+
   unsigned int n_two = floor(0.02 * ((float)b->size()));
   unsigned int i;
   for(i = 0; i < b->size(); i++){
-    q.push(d[i]);
+    q.push(max(R[i], max(G[i], B[i])));
   }
 
   for(i = 0; i < n_two; i++){
@@ -134,7 +137,6 @@ void two_percent(float & min, float & max, SA<float> * r, SA<float> * g, SA<floa
     q.pop();
   }
   printf("two_p n=%zu min %f max %f\n", b->size(), min, max);
-
 }
 
 
