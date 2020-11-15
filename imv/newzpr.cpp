@@ -722,7 +722,7 @@ void zprInstance::special(int key, int x, int y){
       if(g >= NBand) g -= NBand;
       if(b >= NBand) b -= NBand;
       setrgb(r, g, b);
-      printf("incremented band selection: (r,g,b)=(%d,%d,%d)\n", r, g, b);
+   //   printf("incremented band selection: (r,g,b)=(%d,%d,%d)\n", r, g, b);
     }
     break;
 
@@ -736,7 +736,7 @@ void zprInstance::special(int key, int x, int y){
       if(g < 0) g += NBand;
       if(b < 0) b += NBand;
       setrgb(r, g, b);
-      printf("decremented band selection: (r,g,b)=(%d,%d,%d)\n", r, g, b);
+      //printf("decremented band selection: (r,g,b)=(%d,%d,%d)\n", r, g, b);
     }
     break;
 
@@ -750,7 +750,7 @@ void zprInstance::special(int key, int x, int y){
       if(g < 0) g += NBand;
       if(b < 0) b += NBand;
       setrgb(r, g, b);
-      printf("decremented band selection: (r,g,b)=(%d,%d,%d)\n", r, g, b);
+    //   printf("decremented band selection: (r,g,b)=(%d,%d,%d)\n", r, g, b);
     }
     break;
 
@@ -764,7 +764,7 @@ void zprInstance::special(int key, int x, int y){
       if(g >= NBand) g -= NBand;
       if(b >= NBand) b -= NBand;
       setrgb(r, g, b);
-      printf("incremented band selection: (r,g,b)=(%d,%d,%d)\n", r, g, b);
+    //   printf("incremented band selection: (r,g,b)=(%d,%d,%d)\n", r, g, b);
     }
     break;
 
