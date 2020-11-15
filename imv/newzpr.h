@@ -811,7 +811,7 @@ class glImage: public glPlottable{
 
     // dynamically recalcuate magnification factor, based on window size changes, only apply for Analysis window
     magnification_factor = (float)(myParent->NRow) / (float)(image->NRow);
-    printf("glImage::drawMe(%s)\n", myParent->getTitle().c_str()); // magnification_factor);
+    // printf("glImage::drawMe(%s)\n", myParent->getTitle().c_str()); // magnification_factor);
     // if(hideMe) return;
     if(Update) rebuffer();
 
