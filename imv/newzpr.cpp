@@ -412,18 +412,13 @@ void zprInstance::display(){
   }
   glutSetWindow(myGlutID()); //obviously redundant.
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-  // printf("display::drawGraphics()\n");
   this->drawGraphics();
-  // printf("display::drawText()\n");
   this->drawText();
   glutSwapBuffers();
   GLERROR;
   if(!forceUpdate){
     refreshflag = false;
   }
-  else{
-  }
-  // printf("return\n");
 }
 
 void zprInstance::idle(){
@@ -460,7 +455,6 @@ void zprInstance::setrgb(int r, int g, int b, int call_depth = 2){
   for(int i = 0; i < myZprManager->nextZprInstanceID; i++){
     int ix = myZprManager->myZprInstances->at(i)->myGlutID();
     if(ix != my_id){
-      // cout << " *" << my_id << " -> " << ix << " " << myZprManager->myZprInstances->at(i)->getTitle() << endl;
       myZprManager->myZprInstances->at(i)->setrgb(r, g, b, call_depth);
     }
   }
@@ -468,13 +462,11 @@ void zprInstance::setrgb(int r, int g, int b, int call_depth = 2){
   // trickle-down. N.b. the glImage()::rebuffer() gets band-select info from zprInstance
   for(vector<glPlottable *>::iterator it = myGraphics.begin(); it != myGraphics.end(); it++){
     if((*it)->myType.compare(std::string("glImage")) == 0){
-      // cout << "\tmyGraphics " << (*it)->myType << " rebuffer " << endl;
       ((glImage *)((void *)((glPlottable *)(*it))))->rebuffer();
     }
   }
 
   for(int m = 0; m < 5; m++){
-    // if(m > 1) continue; // update the first two windows (otherwise get segfault)
     zprInstance * a = myZprManager->myZprInstances->at(m);
     if(a != this){
       a->focus();
@@ -483,7 +475,6 @@ void zprInstance::setrgb(int r, int g, int b, int call_depth = 2){
     }
   }
 
-  //myZprDisplay();
   this->focus();
   this->mark();
   this->display();
