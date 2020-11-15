@@ -61,6 +61,8 @@ extern myImg * SCENE_MYIMG;
 extern void * SCENE_GLIMG;
 extern map<SA<float> *, float> scene_band_min;
 extern map<SA<float> *, float> scene_band_max;
+extern map<set<SA<float> *>, float> scene_bands_min;
+extern map<set<SA<float> *>, float> scene_bands_max;
 
 // image subset selection parameters
 extern size_t SUB_START_I;
@@ -593,7 +595,7 @@ float image_intensity_min3, image_intensity_max3;
   void special(int key, int x, int y);
   void specialUp(int key, int x, int y);
   // int grabint(char * p );
-  void setrgb(int r, int g, int b, int call_depth);
+  void setrgb(int r, int g, int b); // int call_depth);
   void getrgb(int & r, int & g, int & b);
 
 };
@@ -809,7 +811,7 @@ class glImage: public glPlottable{
 
     // dynamically recalcuate magnification factor, based on window size changes, only apply for Analysis window
     magnification_factor = (float)(myParent->NRow) / (float)(image->NRow);
-    printf("glImage::drawMe(%s, %f)\n", myParent->getTitle().c_str(), magnification_factor);
+    printf("glImage::drawMe(%s)\n", myParent->getTitle().c_str()); // magnification_factor);
     // if(hideMe) return;
     if(Update) rebuffer();
 
