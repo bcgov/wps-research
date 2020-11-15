@@ -169,6 +169,7 @@ void glImage::rebuffer(){
       zprInstance * scene = myZprManager->at(0);
       int scene_is_scene = strncmp(scene->getTitle().c_str(), "Scene", 5) == 0;
       if(!scene_is_scene){
+		cout << "WARNING1: titles not initialized yet" << endl;
         return; // get out if titles not initialized yet
       }
       min1 = scene->image_intensity_min;
@@ -193,7 +194,10 @@ void glImage::rebuffer(){
     else{
       zprInstance * s = myZprManager->at(0);
       int s_is_scene = strncmp(parentZprInstance->getTitle().c_str(), "Scene", 5) == 0;
-      if(!s_is_scene) return; // get out if titles not initialized yet
+      if(!s_is_scene){
+cout << "WARNING: TITLES NOT INITIALIZED YET" << endl;
+return; // get out if titles not initialized yet
+}
       min1 = s->image_intensity_min1;
       min2 = s->image_intensity_min2;
       min3 = s->image_intensity_min3;
