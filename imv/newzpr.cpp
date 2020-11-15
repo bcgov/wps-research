@@ -145,7 +145,8 @@ void two_percent(float & min, float & max, SA<float> * r, SA<float> * g, SA<floa
 void glImage::rebuffer(){
   myBi = parentZprInstance->myBi;
   int NRow = image->NRow; int NCol = image->NCol;
-  printf("glImage::rebuffer() %d %d %d nr %d nc %d\n", myBi->at(0), myBi->at(1), myBi->at(2), NRow, NCol);
+ printf("=======================================\n");
+ printf("glImage::rebuffer() %d %d %d nr %d nc %d\n", myBi->at(0), myBi->at(1), myBi->at(2), NRow, NCol);
   SA< SA<float> * > * FB = image->getFloatBuffers();
   SA<float> * b1 = FB->at(myBi->at(0));
   SA<float> * b2 = FB->at(myBi->at(1));
@@ -160,25 +161,23 @@ void glImage::rebuffer(){
   */
 
   int is_scene = strncmp(parentZprInstance->getTitle().c_str(), "Scene", 5) == 0;
-if(is_scene || ( parentZprInstance->image_intensity_min == 0 && parentZprInstance->image_intensity_max == 0.)){
+  if(is_scene){
+//| ( parentZprInstance->image_intensity_min == 0. && parentZprInstance->image_intensity_max == 0.))
+    two_percent(min1, max1, b1, b2, b3);
+    parentZprInstance->image_intensity_min = min1;
+    parentZprInstance->image_intensity_max = max1;
+    printf("\t\tmin %f max %f\n", min1, max1);
 
-
-  two_percent(min1, max1, b1, b2, b3);
-  parentZprInstance->image_intensity_min = min1;
-  parentZprInstance->image_intensity_max = max1;
-
+  }
+  else{
+    zprInstance * scene = myZprManager->at(0);
+    int scene_is_scene = strncmp(scene->getTitle().c_str(), "Scene", 5) == 0;
+    if(!scene_is_scene){
+return; // get out if titles not initialized yet
 }
-else{
-  zprInstance * scene = myZprManager->at(0);
-  int scene_is_scene = strncmp(scene->getTitle().c_str(), "Scene", 5) == 0;
-if(!scene_is_scene){
-cout << "found: " << scene->getTitle() << endl;
-cout << "WARNING **********************\n" << endl;
-}
-  min1 = scene->image_intensity_min;
-  min2 = scene->image_intensity_max;
-}
-
+    min1 = scene->image_intensity_min;
+    max1 = scene->image_intensity_max;
+  }
 
   min2 = min3 = min1;
   max2 = max3 = max1;
