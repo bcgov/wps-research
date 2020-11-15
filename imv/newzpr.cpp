@@ -875,6 +875,10 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
   GLint viewport[4]; /* Do picking */
   refreshflag = true;
 
+      int is_analysis = strncmp(getTitle().c_str(), "Analys", 6) == 0;
+    if(is_analysis) return;
+
+
   if(state == GLUT_DOWN && button == GLUT_LEFT_BUTTON){
     zprPick(x, glutGet(GLUT_WINDOW_HEIGHT) - 1 - y, 3, 3);
     _pickme(0);

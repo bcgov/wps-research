@@ -58,7 +58,7 @@ int main(int argc, char ** argv){
   }
   else{
 
-    NWIN = 15; // 49; // obviously this is for purposes of testing the extraction. Too big!
+    NWIN = 13; // 49; // obviously this is for purposes of testing the extraction. Too big!
   }
   if((NWIN - 1) % 2 != 0) err("analysis window size must be odd"); // assert analysis window size: odd
   WIN_I = WIN_J = 0; // window location? what is this?
