@@ -121,7 +121,7 @@ void two_percent(float & min, float & max, SA<float> * r, SA<float> * g, SA<floa
   float * G = g->elements;
   float * B = b->elements;
 
-  unsigned int n_two = floor(0.01 *  ((float)b->size()));
+  unsigned int n_two = floor(0.01 * ((float)b->size()));
   unsigned int i;
   for(i = 0; i < b->size(); i++){
     q.push(max3(R[i], G[i], B[i]));
@@ -146,8 +146,8 @@ void two_percent(float & min, float & max, SA<float> * r, SA<float> * g, SA<floa
 void glImage::rebuffer(){
   myBi = parentZprInstance->myBi;
   int NRow = image->NRow; int NCol = image->NCol;
- printf("=======================================\n");
- printf("glImage::rebuffer() %d %d %d nr %d nc %d\n", myBi->at(0), myBi->at(1), myBi->at(2), NRow, NCol);
+  printf("=======================================\n");
+  printf("glImage::rebuffer() %d %d %d nr %d nc %d\n", myBi->at(0), myBi->at(1), myBi->at(2), NRow, NCol);
   SA< SA<float> * > * FB = image->getFloatBuffers();
   SA<float> * b1 = FB->at(myBi->at(0));
   SA<float> * b2 = FB->at(myBi->at(1));
@@ -156,32 +156,53 @@ void glImage::rebuffer(){
   r1 = r2 = r3 = 1.;
   min1 = min2 = min3 = 0.;
 
-  /* two_percent(min1, max1, b1); // so the 2p stretch happens in the secondary buffer (this one)
-  two_percent(min2, max2, b2);
-  two_percent(min3, max3, b3);
-  */
-
   int is_scene = strncmp(parentZprInstance->getTitle().c_str(), "Scene", 5) == 0;
-  if(is_scene){
-//| ( parentZprInstance->image_intensity_min == 0. && parentZprInstance->image_intensity_max == 0.))
-    two_percent(min1, max1, b1, b2, b3);
-    parentZprInstance->image_intensity_min = min1;
-    parentZprInstance->image_intensity_max = max1;
-    printf("\t\tmin %f max %f\n", min1, max1);
+  if(USE_PROPORTIONAL_SCALING){
+    if(is_scene){
+      two_percent(min1, max1, b1, b2, b3);
+      parentZprInstance->image_intensity_min = min1;
+      parentZprInstance->image_intensity_max = max1;
+      printf("\t\tmin %f max %f\n", min1, max1);
 
+    }
+    else{
+      zprInstance * scene = myZprManager->at(0);
+      int scene_is_scene = strncmp(scene->getTitle().c_str(), "Scene", 5) == 0;
+      if(!scene_is_scene){
+        return; // get out if titles not initialized yet
+      }
+      min1 = scene->image_intensity_min;
+      max1 = scene->image_intensity_max;
+    }
+    min2 = min3 = min1; // proportional scaling: same for all bands
+    max2 = max3 = max1;
   }
   else{
-    zprInstance * scene = myZprManager->at(0);
-    int scene_is_scene = strncmp(scene->getTitle().c_str(), "Scene", 5) == 0;
-    if(!scene_is_scene){
-return; // get out if titles not initialized yet
-}
-    min1 = scene->image_intensity_min;
-    max1 = scene->image_intensity_max;
+    if(is_scene){
+      two_percent(min1, max1, b1); // so the 2p stretch happens in the secondary buffer (this one)
+      two_percent(min2, max2, b2);
+      two_percent(min3, max3, b3);
+      zprInstance * p = parentZprInstance;
+      p->image_intensity_min1 = min1;
+      p->image_intensity_min2 = min2;
+      p->image_intensity_min3 = min3;
+      p->image_intensity_max1 = max1;
+      p->image_intensity_max2 = max2;
+      p->image_intensity_max3 = max3;
+    }
+    else{
+      zprInstance * s = myZprManager->at(0);
+      int s_is_scene = strncmp(parentZprInstance->getTitle().c_str(), "Scene", 5) == 0;
+      if(!s_is_scene) return; // get out if titles not initialized yet
+      min1 = s->image_intensity_min1;
+      min2 = s->image_intensity_min2;
+      min3 = s->image_intensity_min3;
+      max1 = s->image_intensity_max1;
+      max2 = s->image_intensity_max2;
+      max3 = s->image_intensity_max3;
+    }
   }
 
-  min2 = min3 = min1;
-  max2 = max3 = max1;
   r1 = 1./(max1 - min1);
   r2 = 1./(max2 - min2);
   r3 = 1./(max3 - min3);
@@ -191,8 +212,7 @@ return; // get out if titles not initialized yet
   float r, g, b;
   long int i, j, k, ri, m;
   int class_i, n_class, gi;
-  k = 0;
-  m = 0;
+  k = m = 0;
 
   for(i = 0; i < NRow; i++){
     ri = NRow - i - 1;
@@ -405,35 +425,17 @@ void zprInstance::idle(){
 }
 
 void zprInstance::setrgb(int r, int g, int b, int call_depth = 2){
-  call_depth -= 1;
-  if(call_depth < 0) return;
-
-  /*
-  int my_id = myGlutID();
-
-  for(int i = 0; i < myZprManager->nextZprInstanceID; i++){
-    int ix = myZprManager->myZprInstances->at(i)->myGlutID();
-    if(ix != my_id){
-
-      cout << " *" << my_id << " -> " << ix << " " << myZprManager->myZprInstances->at(i)->getTitle() << endl;
-      myZprManager->myZprInstances->at(i)->setrgb(r, g, b, call_depth);
-    }
-  }
-  */
+  // call_depth -= 1;
+  // if(call_depth < 0) return;
 
   cout << getTitle() << "(" << myGlutID() <<")" << "::setrgb()\n";
   myBi->at(0) = r;
   myBi->at(1) = g;
   myBi->at(2) = b;
-/*
-  // trickle-down. N.b. the glImage()::rebuffer() gets band-select info from zprInstance
-  for(vector<glPlottable *>::iterator it = myGraphics.begin(); it != myGraphics.end(); it++){
-    if((*it)->myType.compare(std::string("glImage")) == 0){
-      cout << "\tmyGraphics " << (*it)->myType << " rebuffer " << endl;
-      ((glImage *)((void *)((glPlottable *)(*it))))->rebuffer();
-    }
-  }
-*/
+
+  call_depth -=1;
+  if(call_depth< 0) return;
+
   string s(getTitle().substr(0, 6)); // update display title
   str rs(vec_band_names[r]);
   str gs(vec_band_names[g]);
@@ -449,8 +451,7 @@ void zprInstance::setrgb(int r, int g, int b, int call_depth = 2){
   for(int i = 0; i < myZprManager->nextZprInstanceID; i++){
     int ix = myZprManager->myZprInstances->at(i)->myGlutID();
     if(ix != my_id){
-
-      cout << " *" << my_id << " -> " << ix << " " << myZprManager->myZprInstances->at(i)->getTitle() << endl;
+      // cout << " *" << my_id << " -> " << ix << " " << myZprManager->myZprInstances->at(i)->getTitle() << endl;
       myZprManager->myZprInstances->at(i)->setrgb(r, g, b, call_depth);
     }
   }
@@ -458,7 +459,7 @@ void zprInstance::setrgb(int r, int g, int b, int call_depth = 2){
   // trickle-down. N.b. the glImage()::rebuffer() gets band-select info from zprInstance
   for(vector<glPlottable *>::iterator it = myGraphics.begin(); it != myGraphics.end(); it++){
     if((*it)->myType.compare(std::string("glImage")) == 0){
-      cout << "\tmyGraphics " << (*it)->myType << " rebuffer " << endl;
+      // cout << "\tmyGraphics " << (*it)->myType << " rebuffer " << endl;
       ((glImage *)((void *)((glPlottable *)(*it))))->rebuffer();
     }
   }
@@ -472,10 +473,12 @@ void zprInstance::setrgb(int r, int g, int b, int call_depth = 2){
       a->display();
     }
   }
+
   //myZprDisplay();
   this->focus();
   this->mark();
   this->display();
+
 }
 
 void zprInstance::getrgb(int & r, int & g, int & b){
@@ -568,9 +571,8 @@ void zprInstance::processString(){
 
   // s prefix?
   if(strcmpz(console_string, "s\0") && console_string[2] == '\0'){
-  	USE_PROPORTIONAL_SCALING = !USE_PROPORTIONAL_SCALING;
+    USE_PROPORTIONAL_SCALING = !USE_PROPORTIONAL_SCALING;
   }
-
 
   // gt prefix?
   if(strcmpz(console_string, "gt\0")){
@@ -1595,7 +1597,7 @@ void glPoints::drawMe(){
       r = d[i];
       g = d[i + 1];
       b = d[i + 2];
-	m  = max3(r, g, b);
+      m = max3(r, g, b);
       glColor3f(r/m, g/m, b/m); // g, b);
       glBegin(GL_POINTS);
       glVertex3f(r, g, b);
