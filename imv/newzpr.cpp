@@ -31,6 +31,7 @@ void * TGT_GLIMG = NULL;
 // target / analysis window magnification parameter
 float TGT_MAGNIFICATION = 10.;
 
+int USE_PROPORTIONAL_SCALING = true; // default to proportional scaling
 // groundref detection
 vector<int> groundref;
 vector<string> vec_band_names;
@@ -564,6 +565,12 @@ void zprInstance::processString(){
     // WIN_I = (y + NWIN) >= SUB_MM ? SUB_MM - NWIN : y;
     // WIN_J = (x + NWIN) >= SUB_MM ? SUB_MM - NWIN : x;
   }
+
+  // s prefix?
+  if(strcmpz(console_string, "s\0") && console_string[2] == '\0'){
+  	USE_PROPORTIONAL_SCALING = !USE_PROPORTIONAL_SCALING;
+  }
+
 
   // gt prefix?
   if(strcmpz(console_string, "gt\0")){
