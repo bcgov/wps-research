@@ -567,29 +567,6 @@ void zprInstance::processString(){
     getrgb(r,g,b);
     setrgb(r,g,b);
     return;
-    /*
-
-    // trickle-down. N.b. the glImage()::rebuffer() gets band-select info from zprInstance
-    for(vector<glPlottable *>::iterator it = myGraphics.begin(); it != myGraphics.end(); it++){
-      if((*it)->myType.compare(std::string("glImage")) == 0){
-        ((glImage *)((void *)((glPlottable *)(*it))))->rebuffer();
-      }
-    }
-
-    for(int m = 0; m < 5; m++){
-      zprInstance * a = myZprManager->myZprInstances->at(m);
-      if(a != this){
-
-        a->focus();
-        a->mark();
-        a->display();
-      }
-    }
-
-    this->focus();
-    this->mark();
-    this->display();
-    */
   }
 
   // gt prefix?
@@ -961,7 +938,7 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
   GLint viewport[4]; /* Do picking */
   refreshflag = true;
 
-  int is_analysis = strncmp(getTitle().c_str(), "Analys", 6) == 0;
+  int is_analysis = strncmp(getTitle().c_str(), "Analys", 6) == 0; // no mouse clicks allowed on Analysis window
   if(is_analysis) return;
 
   if(state == GLUT_DOWN && button == GLUT_LEFT_BUTTON){
@@ -1058,18 +1035,20 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
     TGT_MYIMG->initFrom(dat4, NWIN, NWIN, IMG_NB);
     ((glImage *)TGT_GLIMG)->rebuffer();
 
-    for(int m = 0; m <= 4; m++){
+    for(int m = 0; m < 5; m++){
       // if(m > 1) continue; // update the first two windows (otherwise get segfault)
       zprInstance * a = myZprManager->myZprInstances->at(m);
-      a->focus();
-      a->mark();
-      a->display();
+      if(a != this){
+        a->focus();
+        a->mark();
+        a->display();
+      }
     }
     //myZprDisplay();
     this->focus();
     this->mark();
     this->display();
-
+    // end overview window section
   }
 
   if(myZprInstanceID == 1){
@@ -1104,17 +1083,19 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
     ((glImage *)TGT_GLIMG)->rebuffer();
     zprInstance * p = this;
 
-    for(int k = 0; k <= 4; k++){
+    for(int k = 0; k < 5; k++){
       zprInstance * a = myZprManager->myZprInstances->at(k);
+     if(a != this){
       a->focus();
       a->mark();
       a->display();
+}
     }
 
     focus();
     mark();
     display();
-    myZprDisplay();
+    // myZprDisplay(); what is this?
 
   }
 
