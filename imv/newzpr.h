@@ -964,7 +964,7 @@ class glImage: public glPlottable{
         glVertex2f(x - w, y); glVertex2f(x + w, y);
         glEnd();
 
-        myParent->drawText(x, NWIN-y, tgt_label.c_str());
+        myParent->drawText(x, y, tgt_label.c_str());
       }
     }
   }
