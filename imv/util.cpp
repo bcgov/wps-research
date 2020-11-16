@@ -474,10 +474,10 @@ void load_sub(size_t k){
     size_t nr = fread(&load_sub_dat3[jp], load_sub_mm, sizeof(float), f); // read row
 
     if(k == 0){
-     size_t mi, mj, jj;
-     size_t * lsj, *lsi; // record transformation between global img coordinates, and subimage
-     lsj = &load_sub_j->at(0);
-     lsi = &load_sub_i->at(0);
+      size_t mi, mj, jj;
+      size_t * lsj, *lsi; // record transformation between global img coordinates, and subimage
+      lsj = &load_sub_j->at(0);
+      lsi = &load_sub_i->at(0);
       mi = (i - load_sub_i_start) * load_sub_mm;
       for(jj = load_sub_j_start; jj < load_sub_mm + load_sub_j_start; jj++){
         mj = (jj - load_sub_j_start);
@@ -549,4 +549,19 @@ str strip_leading_zeros(str s){
   str ss(s);
   ss = ss.erase(0, min(ss.find_first_not_of('0'), ss.size() - 1));
   return(ss);
+}
+
+vector<vector<str>> read_csv(str fn){
+  // read csv file
+  vector<vector<str>> output;
+  ifstream ifs(fn); // stream to input file
+  str token;
+  size_t ci = 0;
+  while(getline(ifs, token, '\n')){
+    vector<str> words(split(token, ','));
+    cout << words << endl; 
+    ++ci;
+  }
+
+  return output;
 }
