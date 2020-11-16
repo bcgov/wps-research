@@ -676,7 +676,6 @@ class glPlottable{
     if(z>parentZprInstance->myZFar){
       parentZprInstance->myZFar = z;
     }
-
     //printf("glortho(left=%f, right=%f, bottom=%f, top=%f, near=%f, far=%f\n",parentZprInstance->myLeft, parentZprInstance->myRight, parentZprInstance->myBottom, parentZprInstance->myTop, parentZprInstance->myZNear, parentZprInstance->myZFar);
   }
 
