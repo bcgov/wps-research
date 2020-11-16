@@ -90,10 +90,14 @@ extern SA<float> * TGT;
 extern myImg * TGT_MYIMG;
 extern void * TGT_GLIMG;
 
-// analysis window scaling parameter
-extern float TGT_MAGNIFICATION; // number of times to magnify target / analysis window
+extern float TGT_MAGNIFICATION; // number of times to magnify target / analysis window: analysis window scaling param
 
-// image intensity scaling parameter
+// vector target locations
+extern vector<size_t> targets_i;
+extern vector<size_t> targets_j;
+extern vector<str> targets_label; // add other fields using a map/ json structure?
+
+// global image intensity scaling parameter
 extern int USE_PROPORTIONAL_SCALING;
 
 // groundref detection
@@ -102,9 +106,9 @@ extern vector<string> vec_band_names;
 extern set<int> groundref_disable;
 
 // other
-extern int bands_per_frame; // bands per frame if known (later should autodetect this)
+extern int bands_per_frame; // bands per frame if known: think we autodetect this for S2 stacks
 
-// stuff
+// big cheeze
 class zprManager;
 extern zprManager * myZprManager; // = NULL;
 class zprInstance;
