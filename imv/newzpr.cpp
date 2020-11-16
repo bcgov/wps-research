@@ -607,7 +607,6 @@ void zprInstance::processString(){
 
   }
 
-
   if(strcmpz(console_string, "ls\0")){
     // ls-prefix: list vector target names and i, j global image coords
     size_t i, n_tgt;
@@ -629,6 +628,16 @@ void zprInstance::processString(){
       printf("%zu,%s,%zu,%zu\n", i, targets_label[i].c_str(), targets_i[i], targets_j[i]);
     }
     return;
+  }
+
+  if(strcmpz(console_string, "d\0") && console_string[1] == ' '){
+    str del_i(&console_string[2]);
+    size_t i_del = atoi(del_i.c_str());
+    tgt_csv.erase(tgt_csv.begin() + i_del);
+    targets_i.erase(targets_i.begin() + i_del);
+    targets_j.erase(targets_j.begin() + i_del);
+    targets_label.erase(targets_label.begin() + i_del);
+
   }
 
   if(strcmpz(console_string, "ij\0") && console_string[2] == ' '){
