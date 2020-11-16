@@ -858,7 +858,7 @@ class glImage: public glPlottable{
       glEnd();
       glPopMatrix();
 
-      // now draw target locations?
+      // now draw target locations on overview window?
       size_t i, tgt_i, tgt_j; str tgt_label;
       for0(i, targets_i.size()){
         tgt_i = targets_i[i];
@@ -867,6 +867,7 @@ class glImage: public glPlottable{
 
         float x = SUB_SCALE_F * (float)tgt_j;
         float y = nr - SUB_SCALE_F * (float)tgt_i;
+ 
         // y = y - (SUB_SCALE_F * (float)NRow);
         float w = (float)NWIN / 2.;
 
@@ -884,7 +885,7 @@ class glImage: public glPlottable{
     }
 
     if(myParent->myZprInstanceID == 1){
-      float x = (float)WIN_J; // draw target / analysis window location rect, on subset window
+      float x = (float)WIN_J; // draw target / analysis window location rect, on subset window?
       float y = (float)WIN_I; // note : WIN_I, WIN_J locations are relative to subset window (not global coords)
       float w = (float)NWIN;
       float h = (float)NWIN;
@@ -906,7 +907,7 @@ class glImage: public glPlottable{
       glEnd();
       glPopMatrix(); // go back to where we were!
 
-      // now draw target locations on subset window
+      // now draw target locations on subset window?
       size_t i, tgt_i, tgt_j; str tgt_label;
       for0(i, targets_i.size()){
         tgt_i = targets_i[i] - SUB_START_I;
@@ -933,14 +934,19 @@ class glImage: public glPlottable{
     if(is_analysis){
       // draw any target locations that are within bounds? this is lower priority than drawing on subset window
 
+     size_t i, tgt_i, tgt_j; str tgt_label;
       for0(i, targets_i.size()){
         tgt_i = targets_i[i] - SUB_START_I - WIN_I;
         tgt_j = targets_j[i] - SUB_START_J - WIN_J;
+        printf("ANALYSIS %zu %zu\n", tgt_i, tgt_j);
         tgt_label = targets_label[i];
 
         float x = (float)tgt_j + .5;
-        float y = (float)SUB_MM - ((float)tgt_i + 0.5);
+        float y = (float)NWIN- ((float)tgt_i + 0.5);
         float w = (float)NWIN / 2.;
+        x *= magnification_factor;
+        y *= magnification_factor;
+	w *= magnification_factor;
 
         glColor3f(1, 0, 0);
         glLineWidth(1.);
@@ -955,7 +961,6 @@ class glImage: public glPlottable{
       }
     }
   }
-}
 
 void rebuffer();
 };
