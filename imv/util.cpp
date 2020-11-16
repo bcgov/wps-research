@@ -565,3 +565,21 @@ vector<vector<str>> read_csv(str fn, vector<str> & hdr){
   }
   return output; // n.b., we assumed CSV was simple and well-formed (no quotes, same number of fields per line, etc).
 }
+
+bool vin(vector<str> x, str a){
+  // does a appear in x? should be templated
+  vector<str>::iterator i;
+  for(i = x.begin(); i != x.end(); i++) if(*i == a) return true;
+  return false;
+}
+
+size_t vix(vector<str> x, str a){
+  // does a appear in x? should be templated
+  size_t ix = 0;
+  vector<str>::iterator i;
+  for(i = x.begin(); i != x.end(); i++){
+    if(*i == a) return ix;
+    ++ix;
+  }
+  err("should have checked for element before using vix");
+}
