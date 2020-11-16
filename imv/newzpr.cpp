@@ -633,7 +633,7 @@ void zprInstance::processString(){
     targets_i.erase(targets_i.begin() + i_del);
     targets_j.erase(targets_j.begin() + i_del);
     targets_label.erase(targets_label.begin() + i_del);
-
+    write_csv(str("targets.csv"), tgt_csv_hdr, tgt_csv);
   }
 
   if(strcmpz(console_string, "ij\0") && console_string[2] == ' '){
