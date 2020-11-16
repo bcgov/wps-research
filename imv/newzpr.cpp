@@ -592,7 +592,6 @@ void zprInstance::processString(){
     }
     printf("\n");
 
-    return;
   }
   if(strcmpz(console_string, "ls\0")){
     // ls-prefix: list vector target names and i, j global image coords
@@ -1342,6 +1341,20 @@ void zprInstance::drawText(){
   if(lightingState) glEnable(GL_LIGHTING);
   glPopMatrix();
   resetPerspectiveProjection();
+}
+
+void zprInstance::drawText(float x, float y, const char * s){
+  glColor3f(0.0f,1.0f,0.0f);
+  setOrthographicProjection();
+  glPushMatrix();
+  glLoadIdentity();
+  int lightingState = glIsEnabled(GL_LIGHTING);
+  if(lightingState) glDisable(GL_LIGHTING);
+  renderBitmapString(x, y, (void *)MYFONT, (char *)(void *)s);
+  if(lightingState) glEnable(GL_LIGHTING);
+  glPopMatrix();
+  resetPerspectiveProjection();
+
 }
 
 void zprInstance::add(glPlottable * a){

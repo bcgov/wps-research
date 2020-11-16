@@ -581,6 +581,7 @@ class zprInstance{
 
   void drawGraphics(); void drawGraphicsExternal();
   void drawText();
+  void drawText(float x, float y, const char * s);
   void display(void);
   void idle();
 
@@ -881,6 +882,8 @@ class glImage: public glPlottable{
         glBegin(GL_LINES);
         glVertex2f(x - w, y); glVertex2f(x + w, y);
         glEnd();
+
+	myParent->drawText(x, nr - y, tgt_label.c_str());
       }
     }
 
@@ -927,7 +930,9 @@ class glImage: public glPlottable{
 
         glBegin(GL_LINES);
         glVertex2f(x - w, y); glVertex2f(x + w, y);
-        glEnd();
+        glEnd(); 
+
+	myParent->drawText(tgt_j, tgt_i, tgt_label.c_str());
       }
     }
 
@@ -958,6 +963,8 @@ class glImage: public glPlottable{
         glBegin(GL_LINES);
         glVertex2f(x - w, y); glVertex2f(x + w, y);
         glEnd();
+
+        myParent->drawText(x, NWIN-y, tgt_label.c_str());
       }
     }
   }
