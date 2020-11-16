@@ -124,6 +124,8 @@ extern size_t load_sub_j_start;
 extern size_t load_sub_nc;
 extern float * load_sub_dat3;
 extern string load_sub_infile;
+extern size_t * load_sub_i;
+extern size_t * load_sub_j;
 
 void load_sub(size_t k); // subset data loading, parallelized by band
 
