@@ -551,17 +551,17 @@ str strip_leading_zeros(str s){
   return(ss);
 }
 
-vector<vector<str>> read_csv(str fn){
-  // read csv file
-  vector<vector<str>> output;
+vector<vector<str>> read_csv(str fn, vector<str> & hdr){
+  vector<vector<str>> output; // read lines from csv file
   ifstream ifs(fn); // stream to input file
   str token;
   size_t ci = 0;
   while(getline(ifs, token, '\n')){
     vector<str> words(split(token, ','));
-    cout << words << endl; 
+    // cout << words << endl;
+    if(ci == 0) hdr = words;
+    else output.push_back(words);
     ++ci;
   }
-
-  return output;
+  return output; // n.b., we assumed CSV was simple and well-formed (no quotes, same number of fields per line, etc).
 }
