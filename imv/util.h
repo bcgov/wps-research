@@ -143,5 +143,5 @@ extern vector<int> * mlk_scene_groundref; // groundref indices
 
 void multilook_scene(size_t k); // scene subsampling, parallelized by band
 
-vector<vector<str>> read_csv(str fn); // csv reader
+vector<vector<str>> read_csv(str fn, vector<str> & hdr); // csv reader
 #endif
