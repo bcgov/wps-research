@@ -573,6 +573,10 @@ void zprInstance::processString(){
   // a prefix?
   if(strcmpz(console_string, "a\0") && console_string[1] == ' '){
 size_t i, j, k;
+    i = j = k = 0;
+    	  size_t subi = (*SUB_I)[ (SUB_MM * (WIN_I + i)) + (WIN_J + j)]; // look at this now
+	  size_t subj = (*SUB_J)[ (SUB_MM * (WIN_I + i)) + (WIN_J + j)];
+	  printf("(%zu %zu) ", subi, subj);
     cout << "WINDOW: ";
     // do the work 
     for0(k, IMG_NB){
@@ -581,6 +585,9 @@ size_t i, j, k;
           float d = (*SUB)[(k * SUB_MM * SUB_MM) + (SUB_MM * (WIN_I + i)) + (WIN_J + j)];
 	  printf("%f ", d);
           //(*dat4)[(k * NWIN* NWIN) + (i * NWIN) + j] = d;
+	  //size_t subi = (*SUB_I)[ (SUB_MM * (WIN_I + i)) + (WIN_J + j)]; // look at this now
+	  //size_t subj = (*SUB_J)[ (SUB_MM * (WIN_I + i)) + (WIN_J + j)];
+	  //printf("(%zu %zu %f) ", subi, subj, d);
         }
       }
     }
