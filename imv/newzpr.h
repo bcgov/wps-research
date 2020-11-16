@@ -261,9 +261,8 @@ class zprManager{
 
   public:
   zprInstance * at(int i){
-	return myZprInstances->at(i);
-}
-
+    return myZprInstances->at(i);
+  }
 
   void mark();
   static zprManager * Instance(int argc, char *argv[]);
@@ -369,11 +368,11 @@ class zprInstance{
   void zprInit();
   GLfloat zprReferencePoint[4];
 
-// image scaling parameter:
-float image_intensity_min, image_intensity_max;
-float image_intensity_min1, image_intensity_max1;
-float image_intensity_min2, image_intensity_max2;
-float image_intensity_min3, image_intensity_max3;
+  // image scaling parameter:
+  float image_intensity_min, image_intensity_max;
+  float image_intensity_min1, image_intensity_max1;
+  float image_intensity_min2, image_intensity_max2;
+  float image_intensity_min3, image_intensity_max3;
 
   /* Picking API (Optional) */
   void zprSelectionFunc(void (*f)(void));
@@ -458,7 +457,7 @@ float image_intensity_min3, image_intensity_max3;
     myZFar=1.;
     _F1 = _F2 = _F3 = _F4 = _F5 = _F6 = _F7 = _F8 = _F9 = _F10 = _F11 = _F12 = false;
     groundref_class_colouring = false;
-	image_intensity_min = image_intensity_max = 0.;
+    image_intensity_min = image_intensity_max = 0.;
     bands_per_frame = 11; // need to set this automatically later
   }
 
@@ -808,9 +807,7 @@ class glImage: public glPlottable{
   void drawMeUnHide();
 
   void drawMe(){
-
-    // dynamically recalcuate magnification factor, based on window size changes, only apply for Analysis window
-    magnification_factor = (float)(myParent->NRow) / (float)(image->NRow);
+    magnification_factor = (float)(myParent->NRow) / (float)(image->NRow); // dynamically recalc magnif factor, from windowsize changes, only apply to analysis window
     // printf("glImage::drawMe(%s)\n", myParent->getTitle().c_str()); // magnification_factor);
     // if(hideMe) return;
     if(Update) rebuffer();
@@ -838,10 +835,7 @@ class glImage: public glPlottable{
     glLoadIdentity();
     glRasterPos2f(0.,0.);
     glPixelStoref(GL_UNPACK_ALIGNMENT, 1);
-    //
-    if(is_analysis) {
-      glPixelZoom(magnification_factor, magnification_factor); // wow this works! WOOHOO!
-    }
+    if(is_analysis) glPixelZoom(magnification_factor, magnification_factor); // wow this works! WOOHOO!
     glDrawPixels(NCol, NRow, GL_RGB, GL_FLOAT, (GLvoid *)(&((dat->elements)[0])));
 
     if(myParent->myZprInstanceID == 0){
