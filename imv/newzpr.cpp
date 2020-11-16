@@ -484,6 +484,7 @@ void zprInstance::getrgb(int & r, int & g, int & b){
 }
 
 void zprInstance::processString(){
+  // ideally we would rewrite the console function more symbolically, for reflection / querying on the available commands..plus, don't forget on the visual size: to oltips!
   int i = 0;
   char strSleep[] = "sleep";
   if(console_string[i] == '\0'){
@@ -543,26 +544,19 @@ void zprInstance::processString(){
               ((glImage *)TGT_GLIMG)->rebuffer();
               zprInstance * p = this;
 
-              for(int k = 0; k <= 4; k++){
+              int n_zpr_inst = myZprManager->myZprInstances->size();
+              for(int k = 0; k < n_zpr_inst; k++){
                 zprInstance * a = myZprManager->myZprInstances->at(k);
                 a->focus();
                 a->mark();
                 a->display();
               }
-
-              focus();
-              mark();
-              display();
-              myZprDisplay();
-
             }
 
           }
         }
       }
     }
-    // WIN_I = (y + NWIN) >= SUB_MM ? SUB_MM - NWIN : y;
-    // WIN_J = (x + NWIN) >= SUB_MM ? SUB_MM - NWIN : x;
   }
 
   // s prefix?
@@ -575,18 +569,19 @@ void zprInstance::processString(){
     return;
   }
 
-  // a prefix?
   if(strcmpz(console_string, "a\0") && console_string[1] == ' '){
-
-    cout << "Annotation window: "; // action: add annotation target / vector:
+    cout << "Annotation window: "; //a-prefix to string: action: add annotation target / vector:
     size_t i, j, k;
     i = j = k = 0;
     size_t subi = (*SUB_I)[ (SUB_MM * (WIN_I + i)) + (WIN_J + j)]; // "global" image-domain coordinates
     size_t subj = (*SUB_J)[ (SUB_MM * (WIN_I + i)) + (WIN_J + j)];
-    size_t dw = (NWIN - 1) / 2;
+    size_t dw = (NWIN - 1) / 2; // add half window to get to centre!
     size_t tci = subi + dw;
     size_t tcj = subj + dw;
-    printf("upper left: (%zu %zu) centre: (%zu %zu)", subi, subj, tci, tcj);
+    printf("upper left: (%zu %zu) centre: (%zu %zu) label: [%s]", subi, subj, tci, tcj, str(&console_string[2]).c_str());
+    targets_i.push_back(tci);
+    targets_j.push_back(tcj);
+    targets_label.push_back(str(&console_string[2]));
 
     for0(k, IMG_NB){
       for0(i, NWIN){
@@ -598,6 +593,20 @@ void zprInstance::processString(){
     printf("\n");
 
     return;
+  }
+  if(strcmpz(console_string, "ls\0")){
+    // ls-prefix: list vector target names and i, j global image coords
+    size_t i, n_tgt;
+    n_tgt = targets_i.size();
+    printf("ix,target_label,i,j\n");
+    for0(i, n_tgt){
+      printf("%zu,%s,%zu,%zu\n", i, targets_label[i].c_str(), targets_i[i], targets_j[i]);
+    }
+    return;
+  }
+
+  if(strcmpz(console_string, "ij\0") && console_string[2] == ' '){
+	// set pix / line for analysis window (in global coordinates). Not implemented yet. Would need to implement the same feature, to iterate over known target locations..
   }
 
   // gt prefix?
@@ -971,9 +980,7 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
     zprPick(x, glutGet(GLUT_WINDOW_HEIGHT) - 1 - y, 3, 3);
     _pickme(0);
   }
-  else{
-    pick(-1);
-  }
+  else pick(-1);
 
   _mouseX = x;
   _mouseY = y;
@@ -1011,13 +1018,8 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
     printf("(IMG_NR - SUB_MM) %zu (IMG_NC - SUB_MM) %zu dx %zu dy %zu\n", (IMG_NR - SUB_MM), (IMG_NC - SUB_MM), dx, dy);
 
     // overflow protect
-    if(dy >= (IMG_NR - SUB_MM)){
-      dy = IMG_NR - SUB_MM;
-    }
-    if(dx >= (IMG_NC - SUB_MM)){
-      dx = IMG_NC - SUB_MM;
-    }
-
+    if(dy >= (IMG_NR - SUB_MM)) dy = IMG_NR - SUB_MM;
+    if(dx >= (IMG_NC - SUB_MM)) dx = IMG_NC - SUB_MM;
     SUB_START_J = dx;
     SUB_START_I = dy;
 
@@ -1043,10 +1045,6 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
     ((glImage *)SUB_GLIMG)->rebuffer();
 
     // now rebuffer under secondary window too
-    /*
-    WIN_I = (y + NWIN) >= SUB_MM ? SUB_MM - NWIN : y;
-    WIN_J = (x + NWIN) >= SUB_MM ? SUB_MM - NWIN : x;
-    */
 
     size_t i, j, k;
     SA<float> * dat4 = TGT;
@@ -1064,15 +1062,13 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
     ((glImage *)TGT_GLIMG)->rebuffer();
 
     for(int m = 0; m < 5; m++){
-      // if(m > 1) continue; // update the first two windows (otherwise get segfault)
-      zprInstance * a = myZprManager->myZprInstances->at(m);
+      zprInstance * a = myZprManager->myZprInstances->at(m); // update this window after else get segfault?
       if(a != this){
         a->focus();
         a->mark();
         a->display();
       }
     }
-    //myZprDisplay();
     this->focus();
     this->mark();
     this->display();

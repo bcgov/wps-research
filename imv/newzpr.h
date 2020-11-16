@@ -835,15 +835,16 @@ class glImage: public glPlottable{
     glDrawPixels(NCol, NRow, GL_RGB, GL_FLOAT, (GLvoid *)(&((dat->elements)[0])));
 
     if(myParent->myZprInstanceID == 0){
-      float x = SUB_SCALE_F * (float)SUB_START_J;
+      float x = SUB_SCALE_F * (float)SUB_START_J; // draw subset window location rect, on overview window
       float y = SUB_SCALE_F * (float)SUB_START_I;
       float w = SUB_SCALE_F * (float)SUB_MM;
-      float h = SUB_SCALE_F *(float) SUB_MM;
+      float h = SUB_SCALE_F * (float)SUB_MM;
       printf("x %f y %f w %f h %f\n", x, y, w, h);
       glLineWidth(1.5);
       glPushMatrix(); //Make sure our transformations don't affect any other transformations in other code
       glTranslatef(x, (float)NRow - y, 0);
       glColor3f(1., 0., 0.);
+
       //Put other transformations here
       glBegin(GL_LINES); //We want to draw a quad, i.e. shape with four sides
       glVertex2f(0, 0); //Draw the four corners of the rectangle
@@ -856,11 +857,37 @@ class glImage: public glPlottable{
       glVertex2f(0, 0);
       glEnd();
       glPopMatrix();
+
+     // now draw target locations?
+     size_t i, tgt_i, tgt_j; str tgt_label;
+     for0(i, targets_i.size()){
+       tgt_i = targets_i[i];
+       tgt_j = targets_j[i];
+       tgt_label = targets_label[i];
+
+       float x = SUB_SCALE_F * (float)tgt_j;
+       float y = nr - SUB_SCALE_F * (float)tgt_i;
+      //  y = y - (SUB_SCALE_F * (float)NRow);
+       float w = (float)NWIN / 2.;
+       
+       glColor3f(1, 0, 0);
+       glLineWidth(1.5);
+
+       glBegin(GL_LINES);
+       glVertex2f(x, y - w); glVertex2f(x, y + w);
+       glEnd();
+      
+       glBegin(GL_LINES);
+       glVertex2f(x - w, y); glVertex2f(x + w, y);
+       glEnd();
+      
+	
+     }
     }
 
     if(myParent->myZprInstanceID == 1){
-      float x = (float)WIN_J; // draw target / analysis window, on subset window
-      float y = (float)WIN_I;
+      float x = (float)WIN_J; // draw target / analysis window location rect, on subset window
+      float y = (float)WIN_I; // note : WIN_I, WIN_J locations are relative to subset window (not global coords)
       float w = (float)NWIN;
       float h = (float)NWIN;
       printf("target: x %f y %f w %f h %f NWIN %zu\n", x, y, w, h, (size_t)NWIN);
@@ -879,6 +906,12 @@ class glImage: public glPlottable{
       glVertex2f(w, 0);
       glVertex2f(0, 0);
       glEnd();
+
+      // now draw target locations
+    }
+
+    if(is_analysis){
+      // draw any target locations that are within bounds? this is lower priority than drawing on subset window
     }
   }
 
