@@ -45,8 +45,8 @@ int main(int argc, char ** argv){
   size_t fid_i = vix(tgt_csv_hdr, str("feature_id"));
   for(size_t i = 0; i < tgt_csv.size(); i++){
      size_t ti, tj; str tl;
-     ti = atoi((tgt_csv[i])[row_i].c_str());
-     tj = atoi((tgt_csv[i])[lin_i].c_str());
+     tj = atoi((tgt_csv[i])[row_i].c_str());
+     ti = atoi((tgt_csv[i])[lin_i].c_str());
      tl = (tgt_csv[i])[fid_i];
      targets_i.push_back(ti);
      targets_j.push_back(tj);
