@@ -474,6 +474,9 @@ void load_sub(size_t k){
     size_t nr = fread(&load_sub_dat3[jp], load_sub_mm, sizeof(float), f); // read row
 
     for(size_t j = load_sub_j_start; j < load_sub_mm + load_sub_j_start; j++){
+	size_t mi = i * load_sub_mm;
+	(*load_sub_i)[mi + j] = i;
+	(*load_sub_j)[mi + j] = j;
     }
   }
   fclose(f);

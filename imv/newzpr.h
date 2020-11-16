@@ -469,15 +469,6 @@ class zprInstance{
     zprInstanceInit(ZprID, glutID, manager, _NROW, _NCOL, nb);
   }
 
-  /*
-  void setTitle(string s){
-    myTitle = s;
-    char asdf[1000]="\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
-    sprintf(&asdf[0], "GLUTID (%d) %s\0", myGlutID(), s);
-    glutSetWindowTitle(&(asdf[0]));
-  }
-  */
-
   void mark();
 
   void resetViewPoint(){
