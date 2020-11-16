@@ -139,7 +139,6 @@ void two_percent(float & min, float & max, SA<float> * r, SA<float> * g, SA<floa
   bs.insert(b); // build the tuple to see if we've already calculated this
 
   if(scene_bands_min.count(bs) < 1){
-
     priority_queue<float> q;
     float * R= b->elements;
     float * G = g->elements;
@@ -152,13 +151,11 @@ void two_percent(float & min, float & max, SA<float> * r, SA<float> * g, SA<floa
     max = q.top();
     while(q.size() > n_two) q.pop();
     min = q.top();
-    // while(q.size() > 0) q.pop();
   }
   else{
     min = scene_bands_min[bs];
     max = scene_bands_max[bs];
   }
-
   printf("two_p n=%zu min %f max %f\n", b->size(), min, max);
 }
 
@@ -180,7 +177,6 @@ void glImage::rebuffer(){
       two_percent(min1, max1, b1, b2, b3);
       parentZprInstance->image_intensity_min = min1;
       parentZprInstance->image_intensity_max = max1;
-      // printf("\t\tmin %f max %f\n", min1, max1);
     }
     else{
       zprInstance * scene = myZprManager->at(0);
