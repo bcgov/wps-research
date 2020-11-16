@@ -148,5 +148,7 @@ vector<vector<str>> read_csv(str fn, vector<str> & hdr); // csv reader
 bool vin(vector<str> x, str a);
 size_t vix(vector<str> x, str a);
 
+void write_csv(str fn, vector<str> hdr, vector<vector<str>> lines);
+
   
 #endif

@@ -583,3 +583,22 @@ size_t vix(vector<str> x, str a){
   }
   err("should have checked for element before using vix");
 }
+
+void write_csv(str fn, vector<str> hdr, vector<vector<str>> lines){
+size_t n = hdr.size();
+  ofstream f(fn);
+  size_t i, j;
+  f << hdr[0];
+  for(i = 1; i < n; i++){
+    f << "," << hdr[i];
+  }
+  for0(i, lines.size()){
+    f << "\n";
+    f << lines[i][0];
+    for(j = 1; j < n; j++){
+      f << "," << lines[i][j];
+    }
+  }
+  f.close();
+}
+
