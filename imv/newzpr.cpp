@@ -27,6 +27,10 @@ myImg * SUB_MYIMG = NULL;
 void * SUB_GLIMG = NULL;
 string IMG_FN;
 
+// image coordinate data, just to make math easier for poor brain
+SA<size_t> * SUB_I;
+SA<size_t> * SUB_J;
+
 // target window data
 size_t NWIN; // square window length/width
 size_t WIN_I; // target selection index (window upper-left corner)
@@ -568,7 +572,20 @@ void zprInstance::processString(){
 
   // a prefix?
   if(strcmpz(console_string, "a\0") && console_string[1] == ' '){
-    cout << "ANNOTATE" << endl;
+size_t i, j, k;
+    cout << "WINDOW: ";
+    // do the work 
+    for0(k, IMG_NB){
+      for0(i, NWIN){
+        for0(j, NWIN){
+          float d = (*SUB)[(k * SUB_MM * SUB_MM) + (SUB_MM * (WIN_I + i)) + (WIN_J + j)];
+	  printf("%f ", d);
+          //(*dat4)[(k * NWIN* NWIN) + (i * NWIN) + j] = d;
+        }
+      }
+    }
+    printf("\n");
+
     return;
   }
 
@@ -1011,6 +1028,8 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
       load_sub_nc = IMG_NC; //nc;
       load_sub_dat3 = &((*dat3)[0]);
       load_sub_infile = IMG_FN; //string(infile);
+      load_sub_i = &(*SUB_I)[0]; // I, J coordinates of the image subsection we extracted
+      load_sub_j = &(*SUB_J)[0]; 
       parfor(0, IMG_NB, load_sub);
     }
 
@@ -1082,6 +1101,7 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
         }
       }
     }
+
     TGT_MYIMG->initFrom(dat4, NWIN, NWIN, IMG_NB);
     ((glImage *)TGT_GLIMG)->rebuffer();
     zprInstance * p = this;
@@ -1098,8 +1118,6 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
     focus();
     mark();
     display();
-    // myZprDisplay(); what is this?
-
   }
 
   if(myZprInstanceID < 3){

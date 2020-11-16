@@ -78,6 +78,10 @@ extern myImg * SUB_MYIMG;
 extern void * SUB_GLIMG;
 extern string IMG_FN;
 
+// image pix/lin coordintes, projected onto subset
+extern SA<size_t> * SUB_I;
+extern SA<size_t> * SUB_J;
+
 // target window parameters
 extern size_t NWIN;
 extern size_t WIN_I;

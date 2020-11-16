@@ -183,6 +183,8 @@ int main(int argc, char ** argv){
   size_t j_start = 0;
   SA<float> dat3(mm * mm * nb); // full-data subset
   printf("mm %d dat3.size %d\n", mm, dat3.size());
+  SUB_I = new SA<size_t>(mm * mm);
+  SUB_J = new SA<size_t>(mm * mm);
   if(true){
     // parameters for job. Parallelized on band idx
     load_sub_np = np;

@@ -455,6 +455,8 @@ size_t load_sub_j_start;
 size_t load_sub_nc;
 float * load_sub_dat3;
 string load_sub_infile;
+size_t * load_sub_i;
+size_t * load_sub_j;
 
 void load_sub(size_t k){
   float d;
@@ -467,10 +469,12 @@ void load_sub(size_t k){
     size_t j = load_sub_j_start;
     size_t jp = kmi + ((i - load_sub_i_start) * load_sub_mm);
     size_t p = (ki + (i * load_sub_nc) + j) * sizeof(float); // file byte pos
-
-    // read row
+    
     fseek(f, p, SEEK_SET);
-    size_t nr = fread(&load_sub_dat3[jp], load_sub_mm, sizeof(float), f);
+    size_t nr = fread(&load_sub_dat3[jp], load_sub_mm, sizeof(float), f); // read row
+
+    for(size_t j = load_sub_j_start; j < load_sub_mm + load_sub_j_start; j++){
+    }
   }
   fclose(f);
 }
@@ -501,11 +505,9 @@ void multilook_scene(size_t k){
   FILE * f = fopen(mlk_scene_fn->c_str(), "rb");
 
   printf("fread band %zu/%d\n", k + 1, mlk_scene_nb);
-
-  // read band
   size_t nbyte = np * sizeof(float);
   fseek(f, nbyte * k, SEEK_SET);
-  size_t nread = fread(&bb[0], 1, nbyte, f);
+  size_t nread = fread(&bb[0], 1, nbyte, f); // read band
   if(nread != nbyte){
     printf("read %zu bytes instead of %zu (expected) from file: %s\n", nread, nbyte, mlk_scene_fn->c_str());
     err("exit");
