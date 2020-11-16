@@ -42,6 +42,11 @@ void * TGT_GLIMG = NULL;
 // target / analysis window magnification parameter
 float TGT_MAGNIFICATION = 10.;
 
+// vector targets info, in-memory
+vector<size_t> targets_i;
+vector<size_t> targets_j;
+vector<str> targets_label;
+
 int USE_PROPORTIONAL_SCALING = true; // default to proportional scaling
 // groundref detection
 vector<int> groundref;
@@ -582,6 +587,9 @@ size_t i, j, k;
           size_t dw = (NWIN - 1) / 2;
 	  size_t tci = subi + dw;
 	  size_t tcj = subj + dw;
+
+
+	
 
 		
     for0(k, IMG_NB){
@@ -1138,22 +1146,6 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
       printf("%d\t%s\t%e\n", i, vec_band_names[i].c_str(), d);
     }
   }
-
-  // update windows
-  /*
-  for(int m = 2; m < myZprManager->myZprInstances->size(); m++){
-
-    zprInstance * s = myZprManager->myZprInstances->at(3);
-    if(s->myZprInstanceID == myZprInstanceID) continue;
-    s->focus();
-    s->mark();
-    s->display();
-  }
-
-  focus();
-  mark();
-  display();
-  */
 
   if(callMeWithMouseClickCoordinates){
     (*callMeWithMouseClickCoordinates)(x,y);
