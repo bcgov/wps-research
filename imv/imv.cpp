@@ -35,24 +35,16 @@ std::string strp(const std::string& str, const std::string& whitespace = " \t\r\
   return str.substr(strBegin, strRange);
 }
 
-bool vin(vector<str> x, str a){
-  // does a appear in x? should be templated 
-  vector<str>::iterator i;
-  for(i = x.begin(); i != x.end(); i++) if(*i == a) return true;
-  return false;
-}
-
 int main(int argc, char ** argv){
   tgt_csv = read_csv("targets.csv", tgt_csv_hdr);
   if(!vin(tgt_csv_hdr, str("lin"))) err("req'd col missing: lin");
   if(!vin(tgt_csv_hdr, str("row"))) err("req'd col missing: lin");
   if(!vin(tgt_csv_hdr, str("feature_id"))) err("req'd col missing: lin");
   for(size_t i = 0; i < tgt_csv.size(); i++){
-
+     size_t ti, tj; str tl;
 
   }
 
-  
   system("grep -n stretch newzpr.cpp"); // should be able to turn stretching on and off! Streching of what?
   int n_groundref = 0;
   init_mtx();
