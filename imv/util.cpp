@@ -474,12 +474,13 @@ void load_sub(size_t k){
     size_t nr = fread(&load_sub_dat3[jp], load_sub_mm, sizeof(float), f); // read row
 
     if(k == 0){
+     size_t mi, mj, jj;
      size_t * lsj, *lsi; // record transformation between global img coordinates, and subimage
      lsj = &load_sub_j->at(0);
      lsi = &load_sub_i->at(0);
-      for(size_t jj = load_sub_j_start; jj < load_sub_mm + load_sub_j_start; jj++){
-        size_t mi = (i - load_sub_i_start) * load_sub_mm;
-        size_t mj = (jj - load_sub_j_start);
+      mi = (i - load_sub_i_start) * load_sub_mm;
+      for(jj = load_sub_j_start; jj < load_sub_mm + load_sub_j_start; jj++){
+        mj = (jj - load_sub_j_start);
         // printf("mi %zu j mj %zu i %zu j %zu\n", mi, mj, i, jj); // only need to do this for one band
         lsi[mi + mj] = i;
         lsj[mi + mj] = jj;
