@@ -606,7 +606,7 @@ void zprInstance::processString(){
   }
 
   if(strcmpz(console_string, "ij\0") && console_string[2] == ' '){
-	// set pix / line for analysis window (in global coordinates). Not implemented yet. Would need to implement the same feature, to iterate over known target locations..
+    // set pix / line for analysis window (in global coordinates). Not implemented yet. Would need to implement the same feature, to iterate over known target locations..
   }
 
   // gt prefix?
@@ -1078,7 +1078,7 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
   if(myZprInstanceID == 1){
     // subset window has been clicked, move everything below, i.e., analysis window
     WIN_I = (y + NWIN) >= SUB_MM ? SUB_MM - NWIN : y;
-    WIN_J = (x + NWIN) >= SUB_MM ? SUB_MM - NWIN : x;
+    WIN_J = (x + NWIN) >= SUB_MM ? SUB_MM - NWIN : x; // adjust analysis window coordinates, but don't go over the "edge"
 
     SA<float> * dat4 = TGT;
     size_t i, j, k;
