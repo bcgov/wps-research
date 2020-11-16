@@ -868,7 +868,7 @@ class glImage: public glPlottable{
 
         float x = SUB_SCALE_F * (float)tgt_j;
         float y = nr - SUB_SCALE_F * (float)tgt_i;
- 
+
         // y = y - (SUB_SCALE_F * (float)NRow);
         float w = (float)NWIN / 2.;
 
@@ -883,7 +883,7 @@ class glImage: public glPlottable{
         glVertex2f(x - w, y); glVertex2f(x + w, y);
         glEnd();
 
-	myParent->drawText(x, nr - y, tgt_label.c_str());
+        myParent->drawText(x, nr - y, tgt_label.c_str());
       }
     }
 
@@ -930,16 +930,16 @@ class glImage: public glPlottable{
 
         glBegin(GL_LINES);
         glVertex2f(x - w, y); glVertex2f(x + w, y);
-        glEnd(); 
+        glEnd();
 
-	myParent->drawText(tgt_j, tgt_i, tgt_label.c_str());
+        myParent->drawText(tgt_j, tgt_i, tgt_label.c_str());
       }
     }
 
     if(is_analysis){
       // draw any target locations that are within bounds? this is lower priority than drawing on subset window
 
-     size_t i, tgt_i, tgt_j; str tgt_label;
+      size_t i, tgt_i, tgt_j; str tgt_label;
       for0(i, targets_i.size()){
         tgt_i = targets_i[i] - SUB_START_I - WIN_I;
         tgt_j = targets_j[i] - SUB_START_J - WIN_J;
@@ -951,7 +951,7 @@ class glImage: public glPlottable{
         float w = (float)NWIN / 2.;
         x *= magnification_factor;
         y *= magnification_factor;
-	w *= magnification_factor;
+        w *= magnification_factor;
 
         glColor3f(1, 0, 0);
         glLineWidth(1.);
@@ -964,122 +964,122 @@ class glImage: public glPlottable{
         glVertex2f(x - w, y); glVertex2f(x + w, y);
         glEnd();
 
-        myParent->drawText(x, (NWIN * magnification_factor) -  y, tgt_label.c_str());
+        myParent->drawText(x, (NWIN * magnification_factor) - y, tgt_label.c_str());
       }
     }
   }
 
-void rebuffer();
+  void rebuffer();
 };
 
 class glLine: public glPlottable{
-public:
+  public:
 
-vec3 x1, x2;
-int myWidth;
-glLine( zprInstance * parent, vec3 & a, vec3 & b, int R, int G, int B){
-  x1.init(a); x2.init(b);
-  rgb.init(R,G,B);
-  myWidth = 1.;
-  initName(parent, false);
-  addPointToBoundingBox(x1.x, x1.y, x1.z);
-  addPointToBoundingBox(x2.x, x2.y, x2.z);
-}
+  vec3 x1, x2;
+  int myWidth;
+  glLine( zprInstance * parent, vec3 & a, vec3 & b, int R, int G, int B){
+    x1.init(a); x2.init(b);
+    rgb.init(R,G,B);
+    myWidth = 1.;
+    initName(parent, false);
+    addPointToBoundingBox(x1.x, x1.y, x1.z);
+    addPointToBoundingBox(x2.x, x2.y, x2.z);
+  }
 
-void setWidth( int w){
-  myWidth = w;
-}
+  void setWidth( int w){
+    myWidth = w;
+  }
 
-void drawMe(){
-  colorMe();
-  glLineWidth(myWidth);
-  glPushMatrix();
-  glBegin(GL_LINES);
-  x1.vertex();
-  x2.vertex();
-  glEnd();
-  glPopMatrix();
-}
+  void drawMe(){
+    colorMe();
+    glLineWidth(myWidth);
+    glPushMatrix();
+    glBegin(GL_LINES);
+    x1.vertex();
+    x2.vertex();
+    glEnd();
+    glPopMatrix();
+  }
 };
 
 class glPoints: public glPlottable{
-public:
-glImage * myI;
-glPoints(zprInstance * parent, glImage * myI_){
-  myI = myI_;
-  myType = std::string("glPoints");
-  initName(parent, false); // only use true if it's something you want to use picking to click on
-}
+  public:
+  glImage * myI;
+  glPoints(zprInstance * parent, glImage * myI_){
+    myI = myI_;
+    myType = std::string("glPoints");
+    initName(parent, false); // only use true if it's something you want to use picking to click on
+  }
 
-void drawMe();
+  void drawMe();
 };
 
 class glBasicSphere: public glPlottable{
-public:
-float size; int circles, stacks;
+  public:
+  float size; int circles, stacks;
 
-glBasicSphere(){
-  setRelativePosition = 0;
-  myType = std::string("glBasicSphere");
-}
-
-glBasicSphere(zprInstance * parent, float X, float Y, float Z, float R, float G, float B, float Size, int Circles, int Stacks){
-  x.init(X,Y,Z);
-  setRelativePosition = 0;
-  init(parent, X, Y, Z, R, G, B, Size, Circles, Stacks);
-  addPointToBoundingBox(X,Y,Z);
-  myLinks.clear();
-  isLinkd=false;
-  myType = std::string("glBasicSphere");
-}
-
-glBasicSphere(int _myLabel, zprInstance * parent, float X, float Y, float Z, float R, float G, float B, float Size, int Circles, int Stacks){
-  x.init(X,Y,Z);
-  setRelativePosition = 0;
-  isLabelled = true; myLabel = _myLabel;
-  init(parent, X, Y, Z, R, G, B, Size, Circles, Stacks);
-  addPointToBoundingBox(X,Y,Z);
-  myLinks.clear();
-  isLinkd=false;
-  myType = std::string("glBasicSphere");
-}
-
-void init(zprInstance * parent, float X, float Y, float Z, float R, float G, float B, float Size, int Circles, int Stacks){
-  x.init(X,Y,Z); rgb.init(R,G,B);
-  size=Size; circles=Circles; stacks=Stacks;
-  initName(parent,true);
-  addPointToBoundingBox(X,Y,Z);
-  setRelativePosition = 0;
-  myLinks.clear();
-  isLinkd=false;
-}
-void drawMe(int highlight){
-  colorMe(highlight);
-  if(isPicked() && (setRelativePosition==1)){
-    parentZprInstance->rX = x;
+  glBasicSphere(){
+    setRelativePosition = 0;
+    myType = std::string("glBasicSphere");
   }
-  glPushMatrix();
-  vec3 tx(x-parentZprInstance->rX);
-  glTranslatef(tx.x, tx.y, tx.z);
-  glPushName(myName);
-  glutSolidSphere(size, circles, stacks);
-  glPopName();
-  glPopMatrix();
-}
 
-void drawMe(){
-  colorMe();
-  if(isPicked() && (setRelativePosition==1)){
-    parentZprInstance->rX = x;
+  glBasicSphere(zprInstance * parent, float X, float Y, float Z, float R, float G, float B, float Size, int Circles, int Stacks){
+    x.init(X,Y,Z);
+    setRelativePosition = 0;
+    init(parent, X, Y, Z, R, G, B, Size, Circles, Stacks);
+    addPointToBoundingBox(X,Y,Z);
+    myLinks.clear();
+    isLinkd=false;
+    myType = std::string("glBasicSphere");
   }
-  glPushMatrix();
-  vec3 tx(x-parentZprInstance->rX);
-  glTranslatef(tx.x, tx.y, tx.z);
-  glPushName(myName);
-  glutSolidSphere(size, circles, stacks);
-  glPopName();
-  glPopMatrix();
-}
+
+  glBasicSphere(int _myLabel, zprInstance * parent, float X, float Y, float Z, float R, float G, float B, float Size, int Circles, int Stacks){
+    x.init(X,Y,Z);
+    setRelativePosition = 0;
+    isLabelled = true; myLabel = _myLabel;
+    init(parent, X, Y, Z, R, G, B, Size, Circles, Stacks);
+    addPointToBoundingBox(X,Y,Z);
+    myLinks.clear();
+    isLinkd=false;
+    myType = std::string("glBasicSphere");
+  }
+
+  void init(zprInstance * parent, float X, float Y, float Z, float R, float G, float B, float Size, int Circles, int Stacks){
+    x.init(X,Y,Z); rgb.init(R,G,B);
+    size=Size; circles=Circles; stacks=Stacks;
+    initName(parent,true);
+    addPointToBoundingBox(X,Y,Z);
+    setRelativePosition = 0;
+    myLinks.clear();
+    isLinkd=false;
+  }
+  void drawMe(int highlight){
+    colorMe(highlight);
+    if(isPicked() && (setRelativePosition==1)){
+      parentZprInstance->rX = x;
+    }
+    glPushMatrix();
+    vec3 tx(x-parentZprInstance->rX);
+    glTranslatef(tx.x, tx.y, tx.z);
+    glPushName(myName);
+    glutSolidSphere(size, circles, stacks);
+    glPopName();
+    glPopMatrix();
+  }
+
+  void drawMe(){
+    colorMe();
+    if(isPicked() && (setRelativePosition==1)){
+      parentZprInstance->rX = x;
+    }
+    glPushMatrix();
+    vec3 tx(x-parentZprInstance->rX);
+    glTranslatef(tx.x, tx.y, tx.z);
+    glPushName(myName);
+    glutSolidSphere(size, circles, stacks);
+    glPopName();
+    glPopMatrix();
+  }
 };
 
 #endif //#ifndef NEWZPR_H
