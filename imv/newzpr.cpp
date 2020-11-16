@@ -572,12 +572,13 @@ void zprInstance::processString(){
 
   // a prefix?
   if(strcmpz(console_string, "a\0") && console_string[1] == ' '){
+
+cout << "Annotation window: ";
 size_t i, j, k;
     i = j = k = 0;
     	  size_t subi = (*SUB_I)[ (SUB_MM * (WIN_I + i)) + (WIN_J + j)]; // look at this now
 	  size_t subj = (*SUB_J)[ (SUB_MM * (WIN_I + i)) + (WIN_J + j)];
 	  printf("(%zu %zu) ", subi, subj);
-    cout << "WINDOW: ";
     // do the work 
     for0(k, IMG_NB){
       for0(i, NWIN){
