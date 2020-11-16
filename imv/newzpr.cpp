@@ -47,6 +47,10 @@ vector<size_t> targets_i;
 vector<size_t> targets_j;
 vector<str> targets_label;
 
+// vector targets table
+vector<str> tgt_csv_hdr;
+vector<vector<str>> tgt_csv;
+
 int USE_PROPORTIONAL_SCALING = true; // default to proportional scaling
 // groundref detection
 vector<int> groundref;
