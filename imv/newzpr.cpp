@@ -578,20 +578,16 @@ void zprInstance::processString(){
   // a prefix?
   if(strcmpz(console_string, "a\0") && console_string[1] == ' '){
 
-cout << "Annotation window: ";
-size_t i, j, k;
+    cout << "Annotation window: "; // action: add annotation target / vector:
+    size_t i, j, k;
     i = j = k = 0;
-    	  size_t subi = (*SUB_I)[ (SUB_MM * (WIN_I + i)) + (WIN_J + j)]; // "global" image-domain coordinates
-	  size_t subj = (*SUB_J)[ (SUB_MM * (WIN_I + i)) + (WIN_J + j)];
-	  printf("(%zu %zu) ", subi, subj);
-          size_t dw = (NWIN - 1) / 2;
-	  size_t tci = subi + dw;
-	  size_t tcj = subj + dw;
+    size_t subi = (*SUB_I)[ (SUB_MM * (WIN_I + i)) + (WIN_J + j)]; // "global" image-domain coordinates
+    size_t subj = (*SUB_J)[ (SUB_MM * (WIN_I + i)) + (WIN_J + j)];
+    size_t dw = (NWIN - 1) / 2;
+    size_t tci = subi + dw;
+    size_t tcj = subj + dw;
+    printf("upper left: (%zu %zu) centre: (%zu %zu)", subi, subj, tci, tcj);
 
-
-	
-
-		
     for0(k, IMG_NB){
       for0(i, NWIN){
         for0(j, NWIN){
@@ -1039,7 +1035,7 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
       load_sub_dat3 = &((*dat3)[0]);
       load_sub_infile = IMG_FN; //string(infile);
       load_sub_i = SUB_I; // I, J coordinates of the image subsection we extracted
-      load_sub_j = SUB_J; 
+      load_sub_j = SUB_J;
       parfor(0, IMG_NB, load_sub);
     }
 
@@ -1102,7 +1098,7 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
       }
     }
 
-    // do the work 
+    // do the work
     for0(k, IMG_NB){
       for0(i, NWIN){
         for0(j, NWIN){
