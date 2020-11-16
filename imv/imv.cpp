@@ -51,17 +51,13 @@ int main(int argc, char ** argv){
   cout << "multilook file name: " << mfn << endl;
 
   // analysis window size
-  if(argc > 2){
-    NWIN = atoi(argv[2]);
-  }
-  else{
-    NWIN = 13; // 49; // obviously this is for purposes of testing the extraction. Too big!
-  }
+  if(argc > 2) NWIN = atoi(argv[2]);
+  else NWIN = 13; // 49; // obviously 49x49 for purposes of testing the extraction. Too big!
+
   if((NWIN - 1) % 2 != 0) err("analysis window size must be odd"); // assert analysis window size: odd
   WIN_I = WIN_J = 0; // window location? what is this?
 
   zprManager * myManager = zprManager::Instance(argc, argv); // window manager class
-
   size_t width = glutGet(GLUT_SCREEN_WIDTH); // this section: get screen scale
   size_t height = glutGet(GLUT_SCREEN_HEIGHT);
   size_t min_wh = width > height ? height: width;
@@ -156,26 +152,19 @@ int main(int argc, char ** argv){
     size_t i, j, k;
     k = 0;
     for(i = 0; i < 3; i++){
-      for(j = 0; j < nr2 * nc2; j++){
-        dat2[k++] = dat[j];
-      }
+      for(j = 0; j < nr2 * nc2; j++) dat2[k++] = dat[j];
     }
     a.initFrom(&dat2, nr2, nc2, 3);
   }
-  else{
-    a.initFrom(&dat, nr2, nc2, nb);
-  }
+  else a.initFrom(&dat, nr2, nc2, nb);
+
   SUB_MYIMG = &a;
 
   // fullres display loading..
   printf("loading fullres data..\n");
   size_t mm = 3 * min / 2;
-  if(nr < mm){
-    mm = nr;
-  }
-  if(nc < mm){
-    mm = nc;
-  }
+  if(nr < mm) mm = nr;
+  if(nc < mm) mm = nc;
   mm = (6 * mm) / 7; // relative to full-scene overview window, make the full-res subscene window, a little smaller than it was before..
 
   SUB_MM = mm;
@@ -187,8 +176,7 @@ int main(int argc, char ** argv){
   SUB_J = new SA<size_t>(mm * mm);
   for(size_t i = 0; i < mm * mm; i++) SUB_I->at(i) = SUB_J->at(i) = 0;
   if(true){
-    // parameters for job. Parallelized on band idx
-    load_sub_np = np;
+    load_sub_np = np; // parallelize on band idx (k)
     load_sub_nb = nb;
     load_sub_mm = mm;
     load_sub_i_start = i_start;
@@ -198,9 +186,7 @@ int main(int argc, char ** argv){
     load_sub_infile = string(IMG_FN.c_str());
     load_sub_i = SUB_I;
     load_sub_j = SUB_J;
-
-    // run parallel job
-    parfor(0, nb, load_sub);
+    parfor(0, nb, load_sub); // run parallel job
   }
   IMG = NULL; // &dat0;
   SUB = &dat3;
@@ -210,22 +196,18 @@ int main(int argc, char ** argv){
   b.initFrom(&dat3, mm, mm, nb);
   SUB_MYIMG = &b;
 
-  // set up window for overview image
-  zprInstance * myZpr = myManager->newZprInstance(nr2, nc2, nb); // "Scene" / overview image
+  zprInstance * myZpr = myManager->newZprInstance(nr2, nc2, nb); // "Scene" / overview image WINDOW
   glImage * myImage = new glImage(myZpr, &a);
   SCENE_GLIMG = (void*)(glImage*)myImage;
   myZpr->setTitle(string("Scene "));
 
-  // set up window for fullres subset image
-  zprInstance * myZpr2 = myManager->newZprInstance(mm, mm, nb);
+  zprInstance * myZpr2 = myManager->newZprInstance(mm, mm, nb); // fullres subset image WINDOW
   glImage * myImage2 = new glImage(myZpr2, &b);
   SUB_GLIMG = (void *)myImage2;
   myZpr2->setRightOf(myZpr);
   myZpr2->setTitle(string("Subscene"));
 
-  // target window setup
-
-  myImg c;
+  myImg c; // target window image setup
   c.initBlank(NWIN, NWIN, nb);
   SA<float> dat4(NWIN * NWIN * nb); // target subset
   TGT = &dat4;
@@ -270,9 +252,26 @@ int main(int argc, char ** argv){
   initLighting();
 
   bands_per_frame = nb / number_of_dates;
+
+/*
+  size_t i, j;
+  for0(j, 2){
+    for0(i, myZprManager->nextZprInstanceID){
+      zprInstance * z = myZprManager->at(i);
+      vector<glPlottable *>::iterator a;
+      for(a = z->myGraphics.begin(); a != z->myGraphics.end(); a++){
+        if((*a)->myType.compare(str("glImage")) == 0){
+          ((glImage *)(void *)(glPlottable *)(*a))->rebuffer();
+          printf("%zu REBUFFER\n", i);
+        }
+      }
+    }
+  }
+*/
   myImage->rebuffer();
   myImage2->rebuffer();
   myImage3->rebuffer();
+
 
   glutMainLoop();
   return 0;
