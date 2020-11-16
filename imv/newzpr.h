@@ -97,6 +97,10 @@ extern vector<size_t> targets_i;
 extern vector<size_t> targets_j;
 extern vector<str> targets_label; // add other fields using a map/ json structure?
 
+// vector data table
+extern vector<str> tgt_csv_hdr;
+extern vector<vector<str>> tgt_csv;
+
 // global image intensity scaling parameter
 extern int USE_PROPORTIONAL_SCALING;
 
