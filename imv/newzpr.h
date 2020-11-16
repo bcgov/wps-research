@@ -858,31 +858,29 @@ class glImage: public glPlottable{
       glEnd();
       glPopMatrix();
 
-     // now draw target locations?
-     size_t i, tgt_i, tgt_j; str tgt_label;
-     for0(i, targets_i.size()){
-       tgt_i = targets_i[i];
-       tgt_j = targets_j[i];
-       tgt_label = targets_label[i];
+      // now draw target locations?
+      size_t i, tgt_i, tgt_j; str tgt_label;
+      for0(i, targets_i.size()){
+        tgt_i = targets_i[i];
+        tgt_j = targets_j[i];
+        tgt_label = targets_label[i];
 
-       float x = SUB_SCALE_F * (float)tgt_j;
-       float y = nr - SUB_SCALE_F * (float)tgt_i;
-      //  y = y - (SUB_SCALE_F * (float)NRow);
-       float w = (float)NWIN / 2.;
-       
-       glColor3f(1, 0, 0);
-       glLineWidth(1.5);
+        float x = SUB_SCALE_F * (float)tgt_j;
+        float y = nr - SUB_SCALE_F * (float)tgt_i;
+        // y = y - (SUB_SCALE_F * (float)NRow);
+        float w = (float)NWIN / 2.;
 
-       glBegin(GL_LINES);
-       glVertex2f(x, y - w); glVertex2f(x, y + w);
-       glEnd();
-      
-       glBegin(GL_LINES);
-       glVertex2f(x - w, y); glVertex2f(x + w, y);
-       glEnd();
-      
-	
-     }
+        glColor3f(1, 0, 0);
+        glLineWidth(1.5);
+
+        glBegin(GL_LINES);
+        glVertex2f(x, y - w); glVertex2f(x, y + w);
+        glEnd();
+
+        glBegin(GL_LINES);
+        glVertex2f(x - w, y); glVertex2f(x + w, y);
+        glEnd();
+      }
     }
 
     if(myParent->myZprInstanceID == 1){
@@ -906,8 +904,30 @@ class glImage: public glPlottable{
       glVertex2f(w, 0);
       glVertex2f(0, 0);
       glEnd();
+      glPopMatrix(); // go back to where we were!
 
-      // now draw target locations
+      // now draw target locations on subset window
+      size_t i, tgt_i, tgt_j; str tgt_label;
+      for0(i, targets_i.size()){
+        tgt_i = targets_i[i] - SUB_START_I;
+        tgt_j = targets_j[i] - SUB_START_J;
+        tgt_label = targets_label[i];
+
+        float x = (float)tgt_j + 1.;
+        float y = (float)SUB_MM - ((float)tgt_i + 1.);
+        float w = (float)NWIN / 2.;
+
+        glColor3f(1, 0, 0);
+        glLineWidth(1.5);
+
+        glBegin(GL_LINES);
+        glVertex2f(x, y - w); glVertex2f(x, y + w);
+        glEnd();
+
+        glBegin(GL_LINES);
+        glVertex2f(x - w, y); glVertex2f(x + w, y);
+        glEnd();
+      }
     }
 
     if(is_analysis){
