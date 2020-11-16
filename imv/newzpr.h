@@ -913,8 +913,8 @@ class glImage: public glPlottable{
         tgt_j = targets_j[i] - SUB_START_J;
         tgt_label = targets_label[i];
 
-        float x = (float)tgt_j + 2.;
-        float y = (float)SUB_MM - ((float)tgt_i + 2.);
+        float x = (float)tgt_j + 0.;
+        float y = (float)SUB_MM - ((float)tgt_i + 0.);
         float w = (float)NWIN / 2.;
 
         glColor3f(1, 0, 0);
