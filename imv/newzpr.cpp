@@ -576,19 +576,18 @@ void zprInstance::processString(){
 cout << "Annotation window: ";
 size_t i, j, k;
     i = j = k = 0;
-    	  size_t subi = (*SUB_I)[ (SUB_MM * (WIN_I + i)) + (WIN_J + j)]; // look at this now
+    	  size_t subi = (*SUB_I)[ (SUB_MM * (WIN_I + i)) + (WIN_J + j)]; // "global" image-domain coordinates
 	  size_t subj = (*SUB_J)[ (SUB_MM * (WIN_I + i)) + (WIN_J + j)];
 	  printf("(%zu %zu) ", subi, subj);
-    // do the work 
+          size_t dw = (NWIN - 1) / 2;
+	  size_t tci = subi + dw;
+	  size_t tcj = subj + dw;
+
+		
     for0(k, IMG_NB){
       for0(i, NWIN){
         for0(j, NWIN){
-          float d = (*SUB)[(k * SUB_MM * SUB_MM) + (SUB_MM * (WIN_I + i)) + (WIN_J + j)];
-	  printf("%f ", d);
-          //(*dat4)[(k * NWIN* NWIN) + (i * NWIN) + j] = d;
-	  //size_t subi = (*SUB_I)[ (SUB_MM * (WIN_I + i)) + (WIN_J + j)]; // look at this now
-	  //size_t subj = (*SUB_J)[ (SUB_MM * (WIN_I + i)) + (WIN_J + j)];
-	  //printf("(%zu %zu %f) ", subi, subj, d);
+          float d = (*SUB)[(k * SUB_MM * SUB_MM) + (SUB_MM * (WIN_I + i)) + (WIN_J + j)]; // window data
         }
       }
     }
