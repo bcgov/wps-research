@@ -37,10 +37,8 @@ std::string strp(const std::string& str, const std::string& whitespace = " \t\r\
 
 int main(int argc, char ** argv){
   vector<str> csv_f;
-  read_csv("targets.csv", csv_f);
+  tgt_csv = read_csv("targets.csv", tgt_csv_hdr);
   
-
-
   system("grep -n stretch newzpr.cpp"); // should be able to turn stretching on and off! Streching of what?
   int n_groundref = 0;
   init_mtx();
