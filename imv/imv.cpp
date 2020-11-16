@@ -11,7 +11,7 @@ that inspired further developments at UVic, CFS and elsewhere.. */ // todo: disp
 //#include <string>
 
 std::string exec(const char* cmd){
-	// run system command and catch result from stdout
+  // run system command and catch result from stdout
   char buffer[16384]; // watch the limit, should have a growing-stack version of this
   std::string result = "";
   FILE* pipe = popen(cmd, "r");
@@ -80,7 +80,7 @@ int main(int argc, char ** argv){
   str dates(exec(cmd.c_str()));
   vector<str> date_strings(split(dates, '\n'));
   int number_of_dates = date_strings.size();
- 
+
   // cout << "hfn: " << hfn << endl;
   parseHeaderFile(hfn, nr, nc, nb);
   // printf(" infile: %s nrow %ld ncol %ld nband %ld\n", IMG_FN.c_str(), nr, nc, nb);
@@ -165,7 +165,7 @@ int main(int argc, char ** argv){
   else{
     a.initFrom(&dat, nr2, nc2, nb);
   }
-SUB_MYIMG = &a;
+  SUB_MYIMG = &a;
 
   // fullres display loading..
   printf("loading fullres data..\n");
@@ -175,9 +175,9 @@ SUB_MYIMG = &a;
   }
   if(nc < mm){
     mm = nc;
-  } 
+  }
   mm = (6 * mm) / 7; // relative to full-scene overview window, make the full-res subscene window, a little smaller than it was before..
- 
+
   SUB_MM = mm;
   size_t i_start = 0;
   size_t j_start = 0;
@@ -265,9 +265,9 @@ SUB_MYIMG = &a;
   initLighting();
 
   bands_per_frame = nb / number_of_dates;
-myImage->rebuffer();
-myImage2->rebuffer();
-myImage3->rebuffer(); 
+  myImage->rebuffer();
+  myImage2->rebuffer();
+  myImage3->rebuffer();
 
   glutMainLoop();
   return 0;
