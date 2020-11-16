@@ -599,8 +599,7 @@ size_t i, j, k;
   // gt prefix?
   if(strcmpz(console_string, "gt\0")){
     if(console_string[2] == '\0'){
-      // toggle gt colouring
-      groundref_class_colouring = !groundref_class_colouring;
+      groundref_class_colouring = !groundref_class_colouring; // toggle gt / gr colouring
       if(!groundref_class_colouring){
         groundref_disable.clear(); // enable all groundref bands, if colouring turned off
       }
@@ -618,11 +617,9 @@ size_t i, j, k;
         printf("%d%s\n", k, grbn);
       }
 
-      // printf("%s\n", &console_string[2]);
       if(gi >= 0){
-        // had a match on one of the groundref names
         if(groundref_disable.count(gi)){
-          groundref_disable.erase(gi);
+          groundref_disable.erase(gi); // had a match on a groundref name
         }
         else{
           groundref_disable.insert(gi);
@@ -651,14 +648,12 @@ size_t i, j, k;
       }
 
     }
-    // rebuffer the related glImage here!
     std::vector<glPlottable *>::iterator it;
     for(it = myGraphics.begin(); it!=myGraphics.end(); it++){
       if((*it)->myType == string("glPoints")){
-        ((glPoints *)(*it))->myI->rebuffer();
+        ((glPoints *)(*it))->myI->rebuffer(); // rebuffer related glImage here
       }
     }
-    // done rebuffer
   }
 
   i = atoi(&s[1]); // see if string is of form xyy..yy where x is char and yy.yy contains int
