@@ -811,10 +811,8 @@ class glImage: public glPlottable{
     // printf("glImage::drawMe(%s)\n", myParent->getTitle().c_str()); // magnification_factor);
     // if(hideMe) return;
     if(Update) rebuffer();
-
     int NRow = image->NRow;
     int NCol = image->NCol;
-
     int nr = NRow; //myParent->NRow;
     int nc = NCol; //myParent->NCol;
     //printf("drawMe nrow %d ncol %d nr %d nc%d\n", NRow, NCol, nr, nc);
@@ -862,13 +860,12 @@ class glImage: public glPlottable{
       glPopMatrix();
     }
 
-    // draw target/analysis window on subset window
     if(myParent->myZprInstanceID == 1){
-      float x = (float)WIN_J;
+      float x = (float)WIN_J; // draw target / analysis window, on subset window
       float y = (float)WIN_I;
       float w = (float)NWIN;
       float h = (float)NWIN;
-      printf("target: x %f y %f w %f h %f NWIN %f\n", x, y, w, h, NWIN);
+      printf("target: x %f y %f w %f h %f NWIN %zu\n", x, y, w, h, (size_t)NWIN);
       glColor3f(1., 0., 0.);
       glLineWidth(1.5);
       glPushMatrix(); //Make sure our transformations don't affect any other transformations in other code
@@ -885,7 +882,6 @@ class glImage: public glPlottable{
       glVertex2f(0, 0);
       glEnd();
     }
-
   }
 
   void rebuffer();

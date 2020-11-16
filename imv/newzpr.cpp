@@ -152,8 +152,7 @@ void two_percent(float & min, float & max, SA<float> * r, SA<float> * g, SA<floa
 void glImage::rebuffer(){
   myBi = parentZprInstance->myBi;
   int NRow = image->NRow; int NCol = image->NCol;
-  printf("=======================================\n");
-  printf("glImage::rebuffer() %d %d %d nr %d nc %d\n", myBi->at(0), myBi->at(1), myBi->at(2), NRow, NCol);
+  printf("--> glImage::rebuffer() %d %d %d nr %d nc %d: %s\n", myBi->at(0), myBi->at(1), myBi->at(2), NRow, NCol, parentZprInstance->getTitle().c_str());
   SA< SA<float> * > * FB = image->getFloatBuffers();
   SA<float> * b1 = FB->at(myBi->at(0));
   SA<float> * b2 = FB->at(myBi->at(1));
@@ -168,8 +167,7 @@ void glImage::rebuffer(){
       two_percent(min1, max1, b1, b2, b3);
       parentZprInstance->image_intensity_min = min1;
       parentZprInstance->image_intensity_max = max1;
-      printf("\t\tmin %f max %f\n", min1, max1);
-
+      // printf("\t\tmin %f max %f\n", min1, max1);
     }
     else{
       zprInstance * scene = myZprManager->at(0);
@@ -432,7 +430,6 @@ void zprInstance::idle(){
 }
 
 void zprInstance::setrgb(int r, int g, int b){
-
   for(int i=0; i < myZprManager->nextZprInstanceID; i++){
     zprInstance * a = myZprManager->at(i);
     cout << getTitle() << "(" << myGlutID() <<")" << "::setrgb()\n";
@@ -980,16 +977,15 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
     _mouseMiddle = ZPR_ZOOM_MODE;
   }
 
-  printf("\nmouse (x/col,y/row)=(%d,%d) myZprInstanceID=%d\n", x, y, myZprInstanceID);
+  printf("\nmouse (x/col,y/row)=(%d,%d) myZprInstanceID=%d NWIN %zu\n", x, y, myZprInstanceID, (size_t)NWIN);
 
   if(myZprInstanceID == 0){
-    // overview window
+    // overview window has been clicked.. move everything below overview: subset, analysis!
     printf("SUB_SCALE_F %f\n", SUB_SCALE_F);
 
     size_t dx = (int)floor(((float)x) / SUB_SCALE_F);
     size_t dy = (int)floor(((float)y) / SUB_SCALE_F);
-    printf("dx %zu dy %zu\n", dx, dy);
-    printf("(IMG_NR - SUB_MM) %zu (IMG_NC - SUB_MM) %zu\n", (IMG_NR - SUB_MM), (IMG_NC - SUB_MM));
+    printf("(IMG_NR - SUB_MM) %zu (IMG_NC - SUB_MM) %zu dx %zu dy %zu\n", (IMG_NR - SUB_MM), (IMG_NC - SUB_MM), dx, dy);
 
     // overflow protect
     if(dy >= (IMG_NR - SUB_MM)){
@@ -1002,8 +998,7 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
     SUB_START_J = dx;
     SUB_START_I = dy;
 
-    printf("IMG_NR %zu IMG_NC %zu\n", IMG_NR, IMG_NC);
-    printf("dx %zu dy %zu\n", dx, dy);
+    printf("IMG_NR %zu IMG_NC %zu dx %zu dy %zu\n", IMG_NR, IMG_NC, dx, dy);
 
     // big-data resilient read!
     SA<float> * dat3 = SUB;
@@ -1060,7 +1055,7 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
   }
 
   if(myZprInstanceID == 1){
-    // subset window
+    // subset window has been clicked, move everything below, i.e., analysis window
     WIN_I = (y + NWIN) >= SUB_MM ? SUB_MM - NWIN : y;
     WIN_J = (x + NWIN) >= SUB_MM ? SUB_MM - NWIN : x;
 
@@ -1078,7 +1073,7 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
       }
     }
 
-    // do the work
+    // do the work 
     for0(k, IMG_NB){
       for0(i, NWIN){
         for0(j, NWIN){
