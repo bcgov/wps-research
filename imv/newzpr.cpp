@@ -1028,8 +1028,8 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
       load_sub_nc = IMG_NC; //nc;
       load_sub_dat3 = &((*dat3)[0]);
       load_sub_infile = IMG_FN; //string(infile);
-      load_sub_i = &(*SUB_I)[0]; // I, J coordinates of the image subsection we extracted
-      load_sub_j = &(*SUB_J)[0]; 
+      load_sub_i = SUB_I; // I, J coordinates of the image subsection we extracted
+      load_sub_j = SUB_J; 
       parfor(0, IMG_NB, load_sub);
     }
 

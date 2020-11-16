@@ -185,6 +185,10 @@ int main(int argc, char ** argv){
   printf("mm %d dat3.size %d\n", mm, dat3.size());
   SUB_I = new SA<size_t>(mm * mm);
   SUB_J = new SA<size_t>(mm * mm);
+  for(size_t i = 0; i < mm * mm; i++){
+	SUB_I->at(i) = SUB_J->at(i) = 0;
+  }
+printf("here\n");
   if(true){
     // parameters for job. Parallelized on band idx
     load_sub_np = np;
@@ -195,10 +199,13 @@ int main(int argc, char ** argv){
     load_sub_nc = nc;
     load_sub_dat3 = &dat3[0];
     load_sub_infile = string(IMG_FN.c_str());
+    load_sub_i = SUB_I;
+    load_sub_j = SUB_J;
 
     // run parallel job
     parfor(0, nb, load_sub);
   }
+  printf("there\n");
   IMG = NULL; // &dat0;
   SUB = &dat3;
 

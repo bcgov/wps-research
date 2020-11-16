@@ -365,39 +365,39 @@ vector<int> parse_groundref_names(string fn, int n_groundref){
   int guess_groundref = false;
   if(guess_groundref){
 
-  for(vector<string>::iterator it = names.begin(); it != names.end(); it++){
-    string x(*it);
-    std::replace(x.begin(), x.end(), '_', ' ');
-    vector<string> w(split(x));
-    bool has_number = false;
+    for(vector<string>::iterator it = names.begin(); it != names.end(); it++){
+      string x(*it);
+      std::replace(x.begin(), x.end(), '_', ' ');
+      vector<string> w(split(x));
+      bool has_number = false;
 
-    for(vector<string>::iterator it2 = w.begin(); it2 != w.end(); it2++){
-      string y(*it2);
-      y = strip_leading_zeros(y);
-      y = trim(y, '(');
-      y = trim(y, ')');
-      if(debug) cout << "\t\t" << y << endl;
-      if(is_int(y)){
-        if(debug) cout << "\t\t\tNUMBER" << endl;
-        has_number = true;
-        break;
+      for(vector<string>::iterator it2 = w.begin(); it2 != w.end(); it2++){
+        string y(*it2);
+        y = strip_leading_zeros(y);
+        y = trim(y, '(');
+        y = trim(y, ')');
+        if(debug) cout << "\t\t" << y << endl;
+        if(is_int(y)){
+          if(debug) cout << "\t\t\tNUMBER" << endl;
+          has_number = true;
+          break;
+        }
       }
+      if(!has_number || at_gt){
+        if(debug) cout << "\tgroundref: " << *it << " bi " << ci + 1 << "\n\t\tbi (0-indexed) " << ci << endl;
+        results.push_back(ci);
+        at_gt = true;
+      }
+      ci ++;
     }
-    if(!has_number || at_gt){
-      if(debug) cout << "\tgroundref: " << *it << " bi " << ci + 1 << "\n\t\tbi (0-indexed) " << ci << endl;
-      results.push_back(ci);
-      at_gt = true;
-    }
-    ci ++;
-  }
-  if(debug) cout << "Exit loop" << endl;
+    if(debug) cout << "Exit loop" << endl;
   }
   else{
-	int start = names.size() - n_groundref;
-	for(ci = start; ci < names.size(); ci ++){
-		printf("groundref[%s]\n", names[ci].c_str());
-		results.push_back(ci);
-	}
+    int start = names.size() - n_groundref;
+    for(ci = start; ci < names.size(); ci ++){
+      printf("groundref[%s]\n", names[ci].c_str());
+      results.push_back(ci);
+    }
   }
   return results;
 
@@ -455,8 +455,8 @@ size_t load_sub_j_start;
 size_t load_sub_nc;
 float * load_sub_dat3;
 string load_sub_infile;
-size_t * load_sub_i;
-size_t * load_sub_j;
+SA<size_t> * load_sub_i;
+SA<size_t> * load_sub_j;
 
 void load_sub(size_t k){
   float d;
@@ -469,14 +469,21 @@ void load_sub(size_t k){
     size_t j = load_sub_j_start;
     size_t jp = kmi + ((i - load_sub_i_start) * load_sub_mm);
     size_t p = (ki + (i * load_sub_nc) + j) * sizeof(float); // file byte pos
-    
+
     fseek(f, p, SEEK_SET);
     size_t nr = fread(&load_sub_dat3[jp], load_sub_mm, sizeof(float), f); // read row
 
-    for(size_t j = load_sub_j_start; j < load_sub_mm + load_sub_j_start; j++){
-	size_t mi = i * load_sub_mm;
-	(*load_sub_i)[mi + j] = i;
-	(*load_sub_j)[mi + j] = j;
+    if(k == 0){
+     size_t * lsj, *lsi; // record transformation between global img coordinates, and subimage
+     lsj = &load_sub_j->at(0);
+     lsi = &load_sub_i->at(0);
+      for(size_t jj = load_sub_j_start; jj < load_sub_mm + load_sub_j_start; jj++){
+        size_t mi = (i - load_sub_i_start) * load_sub_mm;
+        size_t mj = (jj - load_sub_j_start);
+        // printf("mi %zu j mj %zu i %zu j %zu\n", mi, mj, i, jj); // only need to do this for one band
+        lsi[mi + mj] = i;
+        lsj[mi + mj] = jj;
+      }
     }
   }
   fclose(f);
@@ -521,7 +528,7 @@ void multilook_scene(size_t k){
     for(size_t i = 0; i < np; i++){
       float d = bb[i];
       if(!(d == 0. || d == 1.)){
-	printf("\tband_index %zu\n", k);
+        printf("\tband_index %zu\n", k);
         err("assertion failed: that groundref be valued in {0,1} only");
       }
     }
@@ -539,7 +546,6 @@ void multilook_scene(size_t k){
 
 str strip_leading_zeros(str s){
   str ss(s);
-  ss =  ss.erase(0, min(ss.find_first_not_of('0'), ss.size() - 1));
+  ss = ss.erase(0, min(ss.find_first_not_of('0'), ss.size() - 1));
   return(ss);
 }
-
