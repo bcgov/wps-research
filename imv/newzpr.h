@@ -913,12 +913,12 @@ class glImage: public glPlottable{
         tgt_j = targets_j[i] - SUB_START_J;
         tgt_label = targets_label[i];
 
-        float x = (float)tgt_j + 0.;
-        float y = (float)SUB_MM - ((float)tgt_i + 0.);
+        float x = (float)tgt_j + .5;
+        float y = (float)SUB_MM - ((float)tgt_i + 0.5);
         float w = (float)NWIN / 2.;
 
         glColor3f(1, 0, 0);
-        glLineWidth(1.5);
+        glLineWidth(1.);
 
         glBegin(GL_LINES);
         glVertex2f(x, y - w); glVertex2f(x, y + w);
