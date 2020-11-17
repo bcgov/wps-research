@@ -585,7 +585,8 @@ size_t vix(vector<str> x, str a){
 }
 
 void write_csv(str fn, vector<str> hdr, vector<vector<str>> lines){
-size_t n = hdr.size();
+  cout << "+w " << fn << endl;
+  size_t n = hdr.size();
   ofstream f(fn);
   size_t i, j;
   f << hdr[0];
@@ -601,4 +602,3 @@ size_t n = hdr.size();
   }
   f.close();
 }
-
