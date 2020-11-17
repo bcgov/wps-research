@@ -13,8 +13,8 @@ int main(int argc, char *argv[]){
   float * d = bread(ifn, nr, nc, nb); // read input data
 
   for0(i, nb){
-    str obfn(ifn + str("_") + to_string(i + 1) + str(".bin"));
-    str obhn(ifn + str("_") + to_string(i + 1) + str(".hdr"));
+    str obfn(ifn + str("_") + zero_pad(to_string(i + 1), 3) + str(".bin"));
+    str obhn(ifn + str("_") + zero_pad(to_string(i + 1), 3) + str(".hdr"));
     f = wopen(obfn.c_str());
     fwrite(&d[np * i], sizeof(float), np, f);
     fclose(f);
