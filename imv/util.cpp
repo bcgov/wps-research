@@ -584,21 +584,32 @@ size_t vix(vector<str> x, str a){
   err("should have checked for element before using vix");
 }
 
-void write_csv(str fn, vector<str> hdr, vector<vector<str>> lines){
+size_t write_csv(str fn, vector<str> hdr, vector<vector<str>> lines){
   cout << "+w " << fn << endl;
   size_t n = hdr.size();
-  ofstream f(fn);
-  size_t i, j;
-  f << hdr[0];
+  FILE * f = fopen(fn.c_str(), "wb");
+  if(!f) err("failed to open output file");
+  cout << "hdr" << hdr << endl;
+ 
+  size_t i, j; 
+  cout << "hdr[0]: " << hdr[0] << endl;
+  fprintf(f, "%s", hdr[0].c_str());
   for(i = 1; i < n; i++){
-    f << "," << hdr[i];
+    cout << i << " " << hdr[i] << endl;
+    fprintf(f, ",%s", hdr[i].c_str());
   }
   for0(i, lines.size()){
-    f << "\n";
-    f << lines[i][0];
-    for(j = 1; j < n; j++){
-      f << "," << lines[i][j];
+    if(lines[i].size() != n) err("warning: internal csv data formatting error");
+    str ij((lines[i])[0]);
+    fprintf(f, "\n%s", ij.c_str()); 
+    for(j = 1; j < lines[i].size(); j++){
+        str ij((lines[i])[j]);
+	fprintf(f, ",%s", ij.c_str()); 
     }
   }
-  f.close();
+  cout << "got here!" << endl;
+  fclose(f);
+  cout << "got here!" << endl;
+
+  return 0;
 }

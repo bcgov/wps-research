@@ -595,8 +595,9 @@ void zprInstance::processString(){
     size_t lin_i = vix(tgt_csv_hdr, str("lin"));
     size_t fid_i = vix(tgt_csv_hdr, str("feature_id"));
     vector<str> csv_line(tgt_csv_hdr.size());
-    csv_line[row_i] = to_string(tci);
-    csv_line[lin_i] = to_string(tcj);
+    for0(i, csv_line.size()) csv_line[i] = str(" ");
+    csv_line[row_i] = to_string(tcj);
+    csv_line[lin_i] = to_string(tci);
     csv_line[fid_i] = str(str(&console_string[2]));
     tgt_csv.push_back(csv_line);
     write_csv(str("targets.csv"), tgt_csv_hdr, tgt_csv);
@@ -627,7 +628,7 @@ void zprInstance::processString(){
   }
 
   if(strcmpz(console_string, "d\0") && console_string[1] == ' '){
-    str del_i(&console_string[2]);
+    str del_i(&console_string[2]); // delete vector target at index provided (from 0)
     size_t i_del = atoi(del_i.c_str());
     tgt_csv.erase(tgt_csv.begin() + i_del);
     targets_i.erase(targets_i.begin() + i_del);
