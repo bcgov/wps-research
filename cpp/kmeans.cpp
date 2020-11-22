@@ -111,7 +111,7 @@ int main(int argc, char ** argv){
 
     for0(i, np) update[i] = 0.;
 
-    if(pct_change < 1.) break; // close enough? stop iterating if <1% of pixels changed class
+    if(pct_chg < 1.) break; // close enough? stop iterating if <1% of pixels changed class
 
   }
 
