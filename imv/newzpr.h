@@ -109,6 +109,8 @@ extern vector<int> groundref;
 extern vector<string> vec_band_names;
 extern set<int> groundref_disable;
 
+extern vector<float> spectra;
+
 // other
 extern int bands_per_frame; // bands per frame if known: think we autodetect this for S2 stacks
 
@@ -1084,6 +1086,17 @@ class glBasicSphere: public glPlottable{
     glPopName();
     glPopMatrix();
   }
+};
+
+class glCurve: public glPlottable{
+  public:
+  vector<float> * d;
+  glCurve(zprInstance * parent, vector<float> * d_){
+    d = d_;
+    myType = std::string("glCurve");
+    initName(parent, false); // only use true if it's something you want to use picking to click on
+  }
+  void drawMe();
 };
 
 #endif //#ifndef NEWZPR_H

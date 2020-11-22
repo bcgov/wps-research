@@ -57,7 +57,8 @@ vector<int> groundref;
 vector<string> vec_band_names;
 set<int> groundref_disable;
 
-// other
+vector<float> spectra;
+
 int bands_per_frame; // bands per frame if known, should autodetect this
 
 extern zprManager * myZprManager = NULL;
@@ -611,7 +612,7 @@ void zprInstance::processString(){
     cout << tgt_csv_hdr << endl;
     for0(i, n_tgt){
       cout << tgt_csv[i] << endl;
-     // printf("%zu,%s,%zu,%zu\n", i, targets_label[i].c_str(), targets_i[i], targets_j[i]);
+      // printf("%zu,%s,%zu,%zu\n", i, targets_label[i].c_str(), targets_i[i], targets_j[i]);
     }
     return;
   }
@@ -989,19 +990,16 @@ void zprInstance::zprReshape(int w,int h){
     _left = -1. * ratio; _right = 1. * ratio;
     _bottom = -1.; _top = 1.;
   }
-
   NRow = h;
   NCol = w; // might need to disable this for specific windows?
 
   glMatrixMode(GL_MODELVIEW); // put back in 20200619
   refreshflag = true;
   return;
-
 }
-// http://graphics.stanford.edu/courses/cs248-01/OpenGLHelpSession/code_example.html
 
+// http://graphics.stanford.edu/courses/cs248-01/OpenGLHelpSession/code_example.html
 void zprInstance::zprMouse(int button, int state, int x, int y){
-  // printf("zprMouse()\n");
   GLint viewport[4]; /* Do picking */
   refreshflag = true;
 
@@ -1076,14 +1074,16 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
     SUB_MYIMG->initFrom(dat3, SUB_MM, SUB_MM, IMG_NB);
     ((glImage *)SUB_GLIMG)->rebuffer();
 
-    // write out subscene data to file!
-    str sub_fn("tmp_subset.bin");
-    str sub_hn("tmp_subset.hdr");
-    FILE * tmp = fopen(sub_fn.c_str(), "wb");
-    if(!tmp) err("failed to open tmp_subset.bin");
-    fwrite(dat3->elements, sizeof(float), SUB_MM * SUB_MM * IMG_NB, tmp);
-    fclose(tmp);
-    writeHeader(sub_hn.c_str(), SUB_MM, SUB_MM, IMG_NB);
+    if(true){
+      // write out subscene data to file! ADD CONDITIONAL TO THIS..
+      str sub_fn("tmp_subset.bin");
+      str sub_hn("tmp_subset.hdr");
+      FILE * tmp = fopen(sub_fn.c_str(), "wb");
+      if(!tmp) err("failed to open tmp_subset.bin");
+      fwrite(dat3->elements, sizeof(float), SUB_MM * SUB_MM * IMG_NB, tmp);
+      fclose(tmp);
+      writeHeader(sub_hn.c_str(), SUB_MM, SUB_MM, IMG_NB);
+    }
 
     // now rebuffer under secondary window too
 
@@ -1132,6 +1132,13 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
           float d = (*SUB)[(k * SUB_MM * SUB_MM) + (SUB_MM * (WIN_I + i)) + (WIN_J + j)];
           printf("%d\t%s\t%e\n", k, vec_band_names[k].c_str(), (double)d);
         }
+      }
+    }
+    if(spectra.size() != IMG_NB){
+      spectra.clear();
+      for0(k, IMG_NB){
+        float d = (*SUB)[(k * SUB_MM * SUB_MM) + (SUB_MM * (WIN_I + i)) + (WIN_J + j)];
+        spectra.push_back(d);
       }
     }
 
