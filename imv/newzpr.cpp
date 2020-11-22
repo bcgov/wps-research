@@ -512,7 +512,7 @@ void zprInstance::processString(){
 
   // i prefix?
   if(strcmpz(console_string, "i\0")){
-    // iterate analysis window!
+    // iterate analysis window! could deprecate this one..
     printf("iterate analysis window..\n");
 
     int half_win = (NWIN - 1) / 2;
@@ -558,6 +558,13 @@ void zprInstance::processString(){
         }
       }
     }
+  }
+
+  if(strcmpz(console_string, "k\0") && console_string[2] == '\0'){ 
+     // k prefix: run K means, increasing K, until points with same references, are discriminated
+     // open the output in imv!!!!
+
+    
   }
 
   // s prefix?
