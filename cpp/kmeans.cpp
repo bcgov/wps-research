@@ -2,7 +2,7 @@
 // nb should be generalized to include spatial information (patch point instead of vector)
 #include"misc.h"
 int debug = false; // set to true for output messages // tolerance should be adjustable
-
+// nb should PARALLELIZE on for each point loop, within iteration loop
 int main(int argc, char ** argv){
   size_t nrow, ncol, nband, np, i, j, k, n;// variables
   if(argc < 3) err("kmeans [input binary file name] [k]");
@@ -128,6 +128,8 @@ int main(int argc, char ** argv){
     }
   }
   bwrite(means, omn, nrow, ncol, nband);
-  hwrite(omh, nrow, ncol, nband, 4);
+  system((str("cp ") + hfn + str(" ") + omh).c_str());
+
+  hwrit1e(omh, nrow, ncol, nband, 4);
   return 0;
 }
