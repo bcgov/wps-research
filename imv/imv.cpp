@@ -265,7 +265,14 @@ int main(int argc, char ** argv){
   glPoints scatter2(myZpr5, myImage2); // scatter plot for: preview window
   myZpr5->setRightOf(myZpr4) ; // ScreenPosition(nc2, nr2 + 65);
   myZpr5->setTitle(string("Scatter(subsecne)")); // printf("glutMainLoop()\n");
-  initLighting();
+
+	
+  // spectra band window
+  zprInstance * myZpr6 = myManager->newZprInstance(100, 250, 3);
+  myZpr6->setRightOf(myZpr5);
+  myZpr6->setTitle(string("spectra"));
+
+initLighting();
 
   bands_per_frame = nb / number_of_dates;
 
