@@ -1101,8 +1101,18 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
 
     TGT_MYIMG->initFrom(dat4, NWIN, NWIN, IMG_NB);
     ((glImage *)TGT_GLIMG)->rebuffer();
+ 
+    i = j = 0;
+    if(true){
+      spectra.clear(); // rebuffer the spectra
+      for0(k, IMG_NB){
+        float d = (*SUB)[(k * SUB_MM * SUB_MM) + (SUB_MM * (WIN_I + i)) + (WIN_J + j)];
+        spectra.push_back(d);
+      }
+      myZprManager->myZprInstances->at(5)->mark();      
+    }
 
-    for(int m = 0; m < 5; m++){
+    for(int m = 0; m < 6; m++){
       zprInstance * a = myZprManager->myZprInstances->at(m); // update this window after else get segfault?
       if(a != this){
         a->focus();
@@ -1134,12 +1144,14 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
         }
       }
     }
-    if(spectra.size() != IMG_NB){
+    if(true){
+      i = j = 0;
       spectra.clear();
       for0(k, IMG_NB){
         float d = (*SUB)[(k * SUB_MM * SUB_MM) + (SUB_MM * (WIN_I + i)) + (WIN_J + j)];
         spectra.push_back(d);
       }
+      myZprManager->myZprInstances->at(5)->mark();
     }
 
     // do the work
@@ -1156,7 +1168,7 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
     ((glImage *)TGT_GLIMG)->rebuffer();
     zprInstance * p = this;
 
-    for(int k = 0; k < 5; k++){
+    for(int k = 0; k < 6; k++){
       zprInstance * a = myZprManager->myZprInstances->at(k);
       if(a != this){
         a->focus();
@@ -1767,6 +1779,46 @@ void glPoints::drawMe(){
 }
 
 void glCurve::drawMe(){
+  glColor3f(0.0f,1.0f,0.0f);
+  parentZprInstance->setOrthographicProjection();
+  glPushMatrix();
+  glLoadIdentity();
+  int lightingState = glIsEnabled(GL_LIGHTING);
+  if(lightingState) glDisable(GL_LIGHTING);
+  //renderBitmapString(x, y, (void *)MYFONT, (char *)(void *)s);
 
+  if(IMG_NB == spectra.size()){
+    size_t i, nr;
+    float mx = spectra[0];
+    float mn = spectra[0];
+    nr = parentZprInstance->NRow;
 
+    for0(i, IMG_NB){
+      if(spectra[i] > mx) mx = spectra[i];
+      if(spectra[i] < mn) mn = spectra[i];
+    }
+    // printf("*** mn %f mx %f\n", mn, mx);
+
+    for0(i, IMG_NB){
+      float x = (float)(parentZprInstance->NCol) / (float)spectra.size();
+      x *= (float)i;
+      if(i > 0){
+        float x1 = x;
+        float y1 = (spectra[i] - mn) / (mx - mn);
+        float x2 = (x / (float)i) * float(i - 1);
+        float y2 = (spectra[i-1] - mn) / (mx - mn);
+        y1 *= nr;
+        y2 *= nr;
+        glBegin(GL_LINES);
+        glVertex2f(x1, y1);
+        glVertex2f(x2, y2);
+        glEnd();
+        // printf("%f %f %f %f\n", x1, nr - y1, x2, nr - y2);
+      }
+    }
+  }
+
+  if(lightingState) glEnable(GL_LIGHTING);
+  glPopMatrix();
+  parentZprInstance->resetPerspectiveProjection();
 }
