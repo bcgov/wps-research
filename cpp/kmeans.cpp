@@ -1,7 +1,7 @@
 //implementation of k-means algorithm, with envi type-4 image input
 // nb should be generalized to include spatial information (patch point instead of vector)
 #include"misc.h"
-int debug = false; // set to true for output messages
+int debug = false; // set to true for output messages // tolerance should be adjustable
 
 int main(int argc, char ** argv){
   size_t nrow, ncol, nband, np, i, j, k, n;// variables
@@ -93,15 +93,14 @@ int main(int argc, char ** argv){
         for0(k, nband) printf(" %f", dat[(np * k) + i]);
         printf("\n");
       }
-      // printf(" %zu %zu\n", i, nearest_i);
     }
 
     size_t n_change = 0;
     for0(i, np) if(label[i] != update[i]) n_change ++;
     float pct_chg =  100. * (float)n_change / (float)np;
-    printf("iter %zu of %zu n_change %f\n", n + 1, iter_max, pct_chg);
+    printf("iter %zu of %zu n_change %f ", n + 1, iter_max, pct_chg);
 
-    set<size_t> observed;
+    set<size_t> observed;  // plot observed labels
     for0(i, np) observed.insert(label[i]);
     cout << " " << observed << endl;
 
@@ -110,7 +109,6 @@ int main(int argc, char ** argv){
     update = tmp;
 
     for0(i, np) update[i] = 0.;
-
     if(pct_chg < 1.) break; // close enough? stop iterating if <1% of pixels changed class
 
   }
