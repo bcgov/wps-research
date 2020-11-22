@@ -36,6 +36,12 @@ std::string strp(const std::string& str, const std::string& whitespace = " \t\r\
 }
 
 int main(int argc, char ** argv){
+  if(!exists(str("targets.csv"))){
+    FILE * f = fopen("targets.csv", "wb");
+    fprintf(f, "%s", "feature_id,row,lin");
+    fclose(f);
+  } 
+
   tgt_csv = read_csv("targets.csv", tgt_csv_hdr);
   if(!vin(tgt_csv_hdr, str("lin"))) err("req'd col missing: lin");
   if(!vin(tgt_csv_hdr, str("row"))) err("req'd col missing: lin");
@@ -84,24 +90,17 @@ int main(int argc, char ** argv){
   size_t nr, nc, nb, nr2, nc2, np2;
 
   string hfn(getHeaderFileName(IMG_FN)); // this section: get image scale
-
-  // find out how many bands per date (for up arrow functionality)
-  str my_user(exec("whoami"));
+  str my_user(exec("whoami"));  // find out how many bands per date (for up arrow functionality)
   my_user = strp(my_user);
   str cmd(str("python3 /home/") + my_user + str("/GitHub/bcws-psu-research/py/envi_header_dates.py ") + hfn);
   cout << "[" << cmd << "]" << endl;
   str dates(exec(cmd.c_str()));
   vector<str> date_strings(split(dates, '\n'));
-  int number_of_dates = date_strings.size();
+  int number_of_dates = date_strings.size(); // number of dates: hence number of bands per date
 
-  // cout << "hfn: " << hfn << endl;
   parseHeaderFile(hfn, nr, nc, nb);
-  // printf(" infile: %s nrow %ld ncol %ld nband %ld\n", IMG_FN.c_str(), nr, nc, nb);
-  // printf(" getFileSize %ld expected %ld\n", getFileSize(IMG_FN.c_str()), nr * nc * nb * sizeof(float));
   size_t np = nr * nc;
-
   size_t min_wh_img = nr > nc ? nc: nr; // account for case that image is small!
-  //printf("min_wh_img %f\n", (float)min_wh_img);
   if(min > min_wh_img) min = min_wh_img;
   printf("min %f\n", (float)min);
 
