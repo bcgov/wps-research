@@ -40,7 +40,7 @@ int main(int argc, char ** argv){
     FILE * f = fopen("targets.csv", "wb");
     fprintf(f, "%s", "feature_id,row,lin");
     fclose(f);
-  } 
+  }
 
   tgt_csv = read_csv("targets.csv", tgt_csv_hdr);
   if(!vin(tgt_csv_hdr, str("lin"))) err("req'd col missing: lin");
@@ -50,13 +50,13 @@ int main(int argc, char ** argv){
   size_t lin_i = vix(tgt_csv_hdr, str("lin"));
   size_t fid_i = vix(tgt_csv_hdr, str("feature_id"));
   for(size_t i = 0; i < tgt_csv.size(); i++){
-     size_t ti, tj; str tl;
-     tj = atoi((tgt_csv[i])[row_i].c_str());
-     ti = atoi((tgt_csv[i])[lin_i].c_str());
-     tl = (tgt_csv[i])[fid_i];
-     targets_i.push_back(ti);
-     targets_j.push_back(tj);
-     targets_label.push_back(tl);
+    size_t ti, tj; str tl;
+    tj = atoi((tgt_csv[i])[row_i].c_str());
+    ti = atoi((tgt_csv[i])[lin_i].c_str());
+    tl = (tgt_csv[i])[fid_i];
+    targets_i.push_back(ti);
+    targets_j.push_back(tj);
+    targets_label.push_back(tl);
   }
 
   system("grep -n stretch newzpr.cpp"); // should be able to turn stretching on and off! Streching of what?
@@ -90,7 +90,7 @@ int main(int argc, char ** argv){
   size_t nr, nc, nb, nr2, nc2, np2;
 
   string hfn(getHeaderFileName(IMG_FN)); // this section: get image scale
-  str my_user(exec("whoami"));  // find out how many bands per date (for up arrow functionality)
+  str my_user(exec("whoami")); // find out how many bands per date (for up arrow functionality)
   my_user = strp(my_user);
   str cmd(str("python3 /home/") + my_user + str("/GitHub/bcws-psu-research/py/envi_header_dates.py ") + hfn);
   cout << "[" << cmd << "]" << endl;
@@ -266,17 +266,17 @@ int main(int argc, char ** argv){
   myZpr5->setRightOf(myZpr4) ; // ScreenPosition(nc2, nr2 + 65);
   myZpr5->setTitle(string("Scatter(subsecne)")); // printf("glutMainLoop()\n");
 
-	
   // spectra band window
   zprInstance * myZpr6 = myManager->newZprInstance(100, 250, 3);
   myZpr6->setRightOf(myZpr5);
   myZpr6->setTitle(string("spectra"));
+  glCurve spectraCurve(myZpr6, &spectra);
 
-initLighting();
+  initLighting();
 
   bands_per_frame = nb / number_of_dates;
 
-/*
+  /*
   size_t i, j;
   for0(j, 2){
     for0(i, myZprManager->nextZprInstanceID){
@@ -290,11 +290,10 @@ initLighting();
       }
     }
   }
-*/
+  */
   myImage->rebuffer();
   myImage2->rebuffer();
   myImage3->rebuffer();
-
 
   glutMainLoop();
   return 0;

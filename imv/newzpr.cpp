@@ -1765,3 +1765,8 @@ void glPoints::drawMe(){
     }
   }
 }
+
+void glCurve::drawMe(){
+
+
+}
