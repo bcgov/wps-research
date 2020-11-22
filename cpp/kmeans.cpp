@@ -113,9 +113,21 @@ int main(int argc, char ** argv){
 
   }
 
-  str ofn(str(argv[1]) + str("_kmeans.bin"));
+  str ofn(str(argv[1]) + str("_kmeans.bin")); // output class labels
   str ohn(str(argv[1]) + str("_kmeans.hdr"));
   bwrite(label, ofn, nrow, ncol, 1);
   hwrite(ohn, nrow, ncol, 1, 4); // write type 4 header
+
+
+  str omn(str(argv[1]) + str("_means.bin")); // output class centres
+  str omh(str(argv[1]) + str("_means.hdr"));
+  for0(i, np){
+    size_t my_label = label[i];
+    for0(k, nband){
+      means[(k * np) + i] = mean[(my_label * nband) + k];
+    }
+  }
+  bwrite(means, omn, nrow, ncol, nband);
+  hwrite(omh, nrow, ncol, nband, 4);
   return 0;
 }
