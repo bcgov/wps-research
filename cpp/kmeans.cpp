@@ -130,6 +130,5 @@ int main(int argc, char ** argv){
   bwrite(means, omn, nrow, ncol, nband);
   system((str("cp ") + hfn + str(" ") + omh).c_str());
 
-  hwrit1e(omh, nrow, ncol, nband, 4);
   return 0;
 }
