@@ -37,12 +37,12 @@ std::string strp(const std::string& str, const std::string& whitespace = " \t\r\
 
 int main(int argc, char ** argv){
   if(!exists(str("targets.csv"))){
-    FILE * f = fopen("targets.csv", "wb");
+    FILE * f = fopen("targets.csv", "wb"); // load point/window vector targets
     fprintf(f, "%s", "feature_id,row,lin");
     fclose(f);
   }
 
-  tgt_csv = read_csv("targets.csv", tgt_csv_hdr);
+  tgt_csv = read_csv("targets.csv", tgt_csv_hdr); // read target point/window vector database
   if(!vin(tgt_csv_hdr, str("lin"))) err("req'd col missing: lin");
   if(!vin(tgt_csv_hdr, str("row"))) err("req'd col missing: lin");
   if(!vin(tgt_csv_hdr, str("feature_id"))) err("req'd col missing: lin");
@@ -59,7 +59,6 @@ int main(int argc, char ** argv){
     targets_label.push_back(tl);
   }
 
-  system("grep -n stretch newzpr.cpp"); // should be able to turn stretching on and off! Streching of what?
   int n_groundref = 0;
   init_mtx();
   groundref.clear();
@@ -276,21 +275,6 @@ int main(int argc, char ** argv){
 
   bands_per_frame = nb / number_of_dates;
 
-  /*
-  size_t i, j;
-  for0(j, 2){
-    for0(i, myZprManager->nextZprInstanceID){
-      zprInstance * z = myZprManager->at(i);
-      vector<glPlottable *>::iterator a;
-      for(a = z->myGraphics.begin(); a != z->myGraphics.end(); a++){
-        if((*a)->myType.compare(str("glImage")) == 0){
-          ((glImage *)(void *)(glPlottable *)(*a))->rebuffer();
-          printf("%zu REBUFFER\n", i);
-        }
-      }
-    }
-  }
-  */
   myImage->rebuffer();
   myImage2->rebuffer();
   myImage3->rebuffer();
