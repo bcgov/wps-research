@@ -45,6 +45,7 @@ int main(int argc, char ** argv){
     }
     else{
       s = v = 1.;
+      v = ci / (float)(count.size() - 1);
       h = 360. * (float)ci / (float)(count.size() - 1);
       hsv_to_rgb(&r, &g, &b, h, s, v);
 
