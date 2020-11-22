@@ -1,11 +1,9 @@
 //implementation of k-means algorithm, with envi type-4 image input
 // nb should be generalized to include spatial information (patch point instead of vector)
 #include"misc.h"
-
 int debug = false; // set to true for output messages
 
 int main(int argc, char ** argv){
-
   size_t nrow, ncol, nband, np, i, j, k, n;// variables
   if(argc < 3) err("kmeans [input binary file name] [k]");
   str fn(argv[1]); // input image file name
@@ -100,7 +98,7 @@ int main(int argc, char ** argv){
 
     size_t n_change = 0;
     for0(i, np) if(label[i] != update[i]) n_change ++;
-    float pct_change =  100. * (float)n_change / (float)np;
+    float pct_chg =  100. * (float)n_change / (float)np;
     printf("iter %zu of %zu n_change %f\n", n + 1, iter_max, pct_chg);
 
     set<size_t> observed;
