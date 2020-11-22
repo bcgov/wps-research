@@ -100,7 +100,8 @@ int main(int argc, char ** argv){
 
     size_t n_change = 0;
     for0(i, np) if(label[i] != update[i]) n_change ++;
-    printf("iter %zu of %zu n_change %f\n", n + 1, iter_max, 100. * (float)n_change / (float)np);
+    float pct_change =  100. * (float)n_change / (float)np;
+    printf("iter %zu of %zu n_change %f\n", n + 1, iter_max, pct_chg);
 
     set<size_t> observed;
     for0(i, np) observed.insert(label[i]);
@@ -111,6 +112,8 @@ int main(int argc, char ** argv){
     update = tmp;
 
     for0(i, np) update[i] = 0.;
+
+    if(pct_change < 1.) break; // close enough? stop iterating if <1% of pixels changed class
 
   }
 
