@@ -128,7 +128,9 @@ int main(int argc, char ** argv){
     }
   }
   bwrite(means, omn, nrow, ncol, nband);
-  system((str("cp ") + hfn + str(" ") + omh).c_str());
+  str cmd(str("cp ") + hfn + str(" ") + omh);
+  cout << cmd << endl;
+  system(cmd.c_str());
 
   return 0;
 }
