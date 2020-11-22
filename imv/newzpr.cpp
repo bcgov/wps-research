@@ -1076,6 +1076,15 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
     SUB_MYIMG->initFrom(dat3, SUB_MM, SUB_MM, IMG_NB);
     ((glImage *)SUB_GLIMG)->rebuffer();
 
+    // write out subscene data to file!
+    str sub_fn("tmp_subset.bin");
+    str sub_hn("tmp_subset.hdr");
+    FILE * tmp = fopen(sub_fn.c_str(), "wb");
+    if(!tmp) err("failed to open tmp_subset.bin");
+    fwrite(dat3->elements, sizeof(float), SUB_MM * SUB_MM * IMG_NB, tmp);
+    fclose(tmp);
+    writeHeader(sub_hn.c_str(), SUB_MM, SUB_MM, IMG_NB);
+
     // now rebuffer under secondary window too
 
     size_t i, j, k;
