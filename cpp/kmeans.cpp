@@ -66,7 +66,7 @@ int main(int argc, char ** argv){
     for0(i, K) if(count[i] > 0) for0(j, nband) mean[(i * nband) + j] /= count[i];
 
     //print out means
-    for0(j, K){
+    if(debug) for0(j, K){
       printf("mean %zu", j);
       for0(k, nband) printf(" %f", mean[j * nband + k]);
       printf("\n");
