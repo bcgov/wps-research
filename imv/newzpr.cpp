@@ -604,7 +604,6 @@ void zprInstance::processString(){
       size_t my_j = targets_j[i] - SUB_START_J;
       size_t my_k = (my_i * SUB_MM) + my_j;
       printf("\n%zu my_k %zu\n", SUB_MM* SUB_MM * IMG_NB, my_k);
-      exit(1);
       cout <<  targets_label[i] << " " << lab[my_k] << endl; // ( size_t) lab[(targets_i[i] * SUB_MM
      
 
@@ -632,6 +631,7 @@ void zprInstance::processString(){
     cout << endl << "RESULT " << good << endl;
     cout << endl;
     free(lab);
+    exit(1);
   }
 
   // s prefix?
