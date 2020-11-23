@@ -150,5 +150,5 @@ size_t vix(vector<str> x, str a);
 
 size_t write_csv(str fn, vector<str> hdr, vector<vector<str>> lines);
 
-  
+std::string exec(const char* cmd);  
 #endif

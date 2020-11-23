@@ -563,7 +563,8 @@ void zprInstance::processString(){
   if(strcmpz(console_string, "k\0") && console_string[2] == '\0'){ 
      // k prefix: run K means, increasing K, until points with same references, are discriminated
      // open the output in imv!!!!
-
+    size_t kmeans_k = 10;
+    system((str("/home/") + str(exec("whoami")) + str("/GitHub/bcws-psu-research/cpp/kmeans.exe tmp_subset.bin ") + to_string(kmeans_k)).c_str());
     
   }
 
