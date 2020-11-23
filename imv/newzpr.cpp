@@ -560,78 +560,82 @@ void zprInstance::processString(){
     }
   }
 
-  if(strcmpz(console_string, "k\0") && console_string[2] == '\0'){ 
-     // k prefix: run K means, increasing K, until points with same references, are discriminated
-     // open the output in imv!!!!
-    size_t kmeans_k = 11;
-    str use_name(exec("whoami"));
-    use_name = strip(use_name);
-    str cmd(str("/home/") + use_name + str("/GitHub/bcws-psu-research/cpp/kmeans.exe tmp_subset.bin ") + to_string(kmeans_k)); 
-    
-    cout << "[" << cmd << "]" << endl;
-    system(cmd.c_str());
+  if(strcmpz(console_string, "k\0") && console_string[2] == '\0'){
+    // k prefix: run K means, increasing K, until points with same references, are discriminated
+    // open the output in imv!!!!
+    size_t kmeans_k;
+    for(kmeans_k = 11; kmeans_k < 100; kmeans_k++){
+      str use_name(exec("whoami"));
+      use_name = strip(use_name);
+      str cmd(str("/home/") + use_name + str("/GitHub/bcws-psu-research/cpp/kmeans.exe tmp_subset.bin ") + to_string(kmeans_k));
 
-    cmd = str("imv tmp_subset.bin_means.bin"); 
+      cout << "[" << cmd << "]" << endl;
+      system(cmd.c_str());
+
+
+      // get the row / col idx of the different tagged points
+      // check if our points with different tags, in different classes..
+      // .. and points with same tags, in same classes
+      // if both were satisfied, we have a viable match
+      // else, go to next iteration
+
+      // vector target locations
+      // extern vector<size_t> targets_i;
+      // extern vector<size_t> targets_j;
+      // extern vector<str> targets_label; // add other fields using a map/ json structure?
+      if(targets_i.size() != targets_j.size() || targets_j.size() != targets_label.size()) err("vector target locations arrays mismatch");
+
+      FILE * labf = fopen("tmp_subset.bin_kmeans.bin", "rb");
+      if(!labf) err("failed to open label file");
+      float * lab = (float *) (void *)alloc(SUB_MM * SUB_MM * IMG_NB * sizeof(float));
+      fread(lab, SUB_MM * SUB_MM * IMG_NB, sizeof(float), labf);
+      fclose(labf);
+      size_t i;
+      size_t n = targets_i.size();
+      cout << "tgt_i tgt_j tgt_lab kmeans_label";
+
+      bool good = true; // innocent until proven guilty
+      map<str, float> labs; // accumulate cluster-output class-labels, per target identifier string (label)
+      labs.clear();
+      for0(i, n){
+        size_t my_i = targets_i[i] - SUB_START_I;
+        size_t my_j = targets_j[i] - SUB_START_J;
+        size_t my_k = (my_i * SUB_MM) + my_j;
+        printf("\n%zu my_k %zu\n", SUB_MM* SUB_MM * IMG_NB, my_k);
+        cout << targets_label[i] << " " << lab[my_k] << endl; // ( size_t) lab[(targets_i[i] * SUB_MM
+
+        // need image coordintes, in subscene reference coordinate scheme, for each target that's within the subscene window
+        str id(targets_label[i]); // string identifier for the annotation "target"
+        if(labs.count(id) < 1){
+          labs[id] = lab[my_k]; // record a class label w the string identifier, which is associated with this target
+        }
+        else{
+          // if different than existing, fail
+          if(labs[id] != lab[my_k]){
+            good = false; // if there is a different label, for a target with the same string identifier, bail..
+            break;
+          }
+        }
+        printf("after\n");
+        // ok so that was make sure same targets have same label. now, different targets have different label
+      }
+
+      // different targets have different label
+      set<float> label_set;
+      map<str, float>::iterator it;
+      for(it = labs.begin(); it != labs.end(); it++){
+        cout << it->first << " -> " << it->second << endl;
+        label_set.insert(it->second);
+      }
+      if(labs.size() != label_set.size()) good = false; // different targets must have same label
+      cout << endl << "RESULT " << good << endl;
+      cout << endl;
+      free(lab);
+      if(good) break;
+    }
+    str cmd("imv tmp_subset.bin_means.bin");
     cout << cmd << endl;
     system(cmd.c_str());
-
-    // get the row / col idx of the different tagged points
-    // check if our points with different tags, in different classes..
-    // .. and points with same tags, in same classes
-    // if both were satisfied, we have a viable match
-    // else, go to next iteration
-
-    // vector target locations
-    // extern vector<size_t> targets_i;
-    // extern vector<size_t> targets_j;
-    //  extern vector<str> targets_label; // add other fields using a map/ json structure?
-    if(targets_i.size() != targets_j.size() || targets_j.size() != targets_label.size()) err("vector target locations arrays mismatch");
-  
-    FILE * labf = fopen("tmp_subset.bin_kmeans.bin", "rb");
-    if(!labf) err("failed to open label file");
-    float * lab = (float *) (void *)alloc(SUB_MM * SUB_MM * IMG_NB * sizeof(float));
-    fread(lab, SUB_MM * SUB_MM * IMG_NB, sizeof(float), labf);
-    fclose(labf);
-    size_t i;
-    size_t n = targets_i.size();
-    cout << "tgt_i tgt_j tgt_lab kmeans_label";
-
-    bool good = true; // innocent until proven guilty
-    map<str, float> labs; // accumulate cluster-output class-labels, per target identifier string (label)
-    labs.clear();
-    for0(i, n){
-      size_t my_i = targets_i[i] - SUB_START_I;
-      size_t my_j = targets_j[i] - SUB_START_J;
-      size_t my_k = (my_i * SUB_MM) + my_j;
-      printf("\n%zu my_k %zu\n", SUB_MM* SUB_MM * IMG_NB, my_k);
-      cout <<  targets_label[i] << " " << lab[my_k] << endl; // ( size_t) lab[(targets_i[i] * SUB_MM
-     
-
-      // need image coordintes, in subscene reference coordinate scheme, for each target that's within the subscene window
-      str id(targets_label[i]); // string identifier for the annotation "target"
-      if(labs.count(id) < 1){
-        labs[id] = lab[my_k]; // record a class label w the string identifier, which is associated with this target
-      }
-      else{ 
-        // if different than existing, fail
-        if(labs[id] != lab[my_k]){
-          good = false; // if there is a different label, for a target with the same string identifier, bail..
-          break;
-        }
-      }
-
-      // ok so that was make sure same targets have same label. now, different targets have different label
-    }
-
-    // different targets have different label
-    set<float> label_set;
-    map<str, float>::iterator it;
-    for(it == labs.begin(); it != labs.end(); it++) label_set.insert(it->second);
-    if(labs.size() != label_set.size()) good = false; // different targets must have same label
-    cout << endl << "RESULT " << good << endl;
-    cout << endl;
-    free(lab);
-    exit(1);
   }
 
   // s prefix?
@@ -1175,7 +1179,7 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
 
     TGT_MYIMG->initFrom(dat4, NWIN, NWIN, IMG_NB);
     ((glImage *)TGT_GLIMG)->rebuffer();
- 
+
     i = j = NWIN / 2;
     if(true){
       spectra.clear(); // rebuffer the spectra
@@ -1183,7 +1187,7 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
         float d = (*SUB)[(k * SUB_MM * SUB_MM) + (SUB_MM * (WIN_I + i)) + (WIN_J + j)];
         spectra.push_back(d);
       }
-      myZprManager->myZprInstances->at(5)->mark();      
+      myZprManager->myZprInstances->at(5)->mark();
     }
 
     for(int m = 0; m < 6; m++){
