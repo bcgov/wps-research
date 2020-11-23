@@ -574,6 +574,35 @@ void zprInstance::processString(){
     cmd = str("imv tmp_subset.bin_means.bin"); 
     cout << cmd << endl;
     system(cmd.c_str());
+
+    // get the row / col idx of the different tagged points
+    // check if our points with different tags, in different classes..
+    // .. and points with same tags, in same classes
+    // if both were satisfied, we have a viable match
+    // else, go to next iteration
+
+    // vector target locations
+    // extern vector<size_t> targets_i;
+    // extern vector<size_t> targets_j;
+    //  extern vector<str> targets_label; // add other fields using a map/ json structure?
+    if(targets_i.size() != targets_j.size() || targets_j.size() != targets_label.size()) err("vector target locations arrays mismatch");
+  
+    FILE * labf = fopen("tmp_subset.bin_kmeans.bin", "rb");
+    if(!labf) err("failed to open label file");
+    float * lab = (float *) (void *)alloc(SUB_MM * SUB_MM * IMG_NB * sizeof(float));
+    fread(lab, SUB_MM * SUB_MM * IMG_NB, sizeof(float), labf);
+    fclose(labf);
+    size_t i;
+    size_t n = targets_i.size();
+    cout << "tgt_i tgt_j tgt_lab kmeans_label";
+    for0(i, n){
+      cout << endl << targets_i[i] << " " << targets_j[i] << " " << targets_label[i] << " " <<; // ( size_t) lab[(targets_i[i] * SUB_MM
+
+      // need image coordintes, in subscene reference coordinate scheme, for each target that's within the subscene window
+    }
+    cout << endl;
+    free(lab);
+    
   }
 
   // s prefix?
@@ -1795,7 +1824,7 @@ void glPoints::drawMe(){
 }
 
 void glCurve::drawMe(){
-  glColor3f(0.0f,1.0f,0.0f);
+  glColor3f(0.0f,1.0f,0.0f); // spectra curve in spectra window
   parentZprInstance->setOrthographicProjection();
   glPushMatrix();
   glLoadIdentity();

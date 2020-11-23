@@ -151,4 +151,15 @@ size_t vix(vector<str> x, str a);
 size_t write_csv(str fn, vector<str> hdr, vector<vector<str>> lines);
 
 std::string exec(const char* cmd);  
+
+/* allocate memory */
+inline void * alloc(size_t nb){
+  void * d = malloc(nb);
+  if(!d){
+    printf("%zu\n", nb);
+    err("failed to allocate memory");
+  }
+  memset(d, '\0', nb);
+  return d;
+}
 #endif
