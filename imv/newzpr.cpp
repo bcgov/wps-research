@@ -595,6 +595,10 @@ void zprInstance::processString(){
     size_t i;
     size_t n = targets_i.size();
     cout << "tgt_i tgt_j tgt_lab kmeans_label";
+
+    bool good = true; // innocent until proven guilty
+    map<str, float> labs; // accumulate cluster-output class-labels, per target identifier string (label)
+    labs.clear();
     for0(i, n){
       size_t my_i = targets_i[i] - SUB_START_I;
       size_t my_j = targets_j[i] - SUB_START_J;
@@ -603,10 +607,29 @@ void zprInstance::processString(){
      
 
       // need image coordintes, in subscene reference coordinate scheme, for each target that's within the subscene window
+      str id(targets_label[i]); // string identifier for the annotation "target"
+      if(labs.count(id) < 1){
+        labs[id] = lab[my_k]; // record a class label w the string identifier, which is associated with this target
+      }
+      else{ 
+        // if different than existing, fail
+        if(labs[id] != lab[my_k]){
+          good = false; // if there is a different label, for a target with the same string identifier, bail..
+          break;
+        }
+      }
+
+      // ok so that was make sure same targets have same label. now, different targets have different label
     }
+
+    // different targets have different label
+    set<float> label_set;
+    map<str, float>::iterator it;
+    for(it == labs.begin(); it != labs.end(); it++) label_set.insert(it->second);
+    if(labs.size() != label_set.size()) good = false; // different targets must have same label
+    
     cout << endl;
     free(lab);
-    
   }
 
   // s prefix?
