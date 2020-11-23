@@ -627,7 +627,7 @@ void zprInstance::processString(){
     map<str, float>::iterator it;
     for(it == labs.begin(); it != labs.end(); it++) label_set.insert(it->second);
     if(labs.size() != label_set.size()) good = false; // different targets must have same label
-    
+    cout << endl << "RESULT " << good << endl;
     cout << endl;
     free(lab);
   }
