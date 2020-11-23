@@ -602,8 +602,10 @@ void zprInstance::processString(){
     for0(i, n){
       size_t my_i = targets_i[i] - SUB_START_I;
       size_t my_j = targets_j[i] - SUB_START_J;
-             size_t my_k = (my_i * SUB_MM) + my_j;
-      cout << endl << targets_i[i] << " " << targets_j[i] << " " << targets_label[i] << " " << lab[my_k] << endl; // ( size_t) lab[(targets_i[i] * SUB_MM
+      size_t my_k = (my_i * SUB_MM) + my_j;
+      printf("\n%zu my_k %zu\n", SUB_MM* SUB_MM * IMG_NB, my_k);
+      exit(1);
+      cout <<  targets_label[i] << " " << lab[my_k] << endl; // ( size_t) lab[(targets_i[i] * SUB_MM
      
 
       // need image coordintes, in subscene reference coordinate scheme, for each target that's within the subscene window
