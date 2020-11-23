@@ -564,8 +564,16 @@ void zprInstance::processString(){
      // k prefix: run K means, increasing K, until points with same references, are discriminated
      // open the output in imv!!!!
     size_t kmeans_k = 10;
-    system((str("/home/") + str(exec("whoami")) + str("/GitHub/bcws-psu-research/cpp/kmeans.exe tmp_subset.bin ") + to_string(kmeans_k)).c_str());
+    str use_name(exec("whoami"));
+    use_name = strip(use_name);
+    str cmd(str("/home/") + use_name + str("/GitHub/bcws-psu-research/cpp/kmeans.exe tmp_subset.bin ") + to_string(kmeans_k)); 
     
+    cout << "[" << cmd << "]" << endl;
+    system(cmd.c_str());
+
+    cmd = str("imv tmp_subset.bin_means.bin"); 
+    cout << cmd << endl;
+    system(cmd.c_str());
   }
 
   // s prefix?
