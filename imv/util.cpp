@@ -613,3 +613,20 @@ size_t write_csv(str fn, vector<str> hdr, vector<vector<str>> lines){
 
   return 0;
 }
+
+std::string exec(const char* cmd){
+  // run system command and catch result from stdout
+  char buffer[16384]; // watch the limit, should have a growing-stack version of this
+  std::string result = "";
+  FILE* pipe = popen(cmd, "r");
+  if (!pipe) throw std::runtime_error("popen() failed!");
+  try{
+    while(fgets(buffer, sizeof buffer, pipe) != NULL) result += buffer;
+  }
+  catch (...) {
+    pclose(pipe);
+    throw;
+  }
+  pclose(pipe);
+  return result;
+}
