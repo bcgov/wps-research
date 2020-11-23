@@ -564,7 +564,7 @@ void zprInstance::processString(){
     // k prefix: run K means, increasing K, until points with same references, are discriminated
     // open the output in imv!!!!
     size_t kmeans_k;
-    for(kmeans_k = 11; kmeans_k < 100; kmeans_k++){
+    for(kmeans_k = 2; kmeans_k < 100; kmeans_k++){
       str use_name(exec("whoami"));
       use_name = strip(use_name);
       str cmd(str("/home/") + use_name + str("/GitHub/bcws-psu-research/cpp/kmeans.exe tmp_subset.bin ") + to_string(kmeans_k));
@@ -602,7 +602,7 @@ void zprInstance::processString(){
         size_t my_j = targets_j[i] - SUB_START_J;
         size_t my_k = (my_i * SUB_MM) + my_j;
         printf("\n%zu my_k %zu\n", SUB_MM* SUB_MM * IMG_NB, my_k);
-        cout << targets_label[i] << " " << lab[my_k] << endl; // ( size_t) lab[(targets_i[i] * SUB_MM
+        cout << "  " << targets_label[i] << " -> " << lab[my_k] << endl; // ( size_t) lab[(targets_i[i] * SUB_MM
 
         // need image coordintes, in subscene reference coordinate scheme, for each target that's within the subscene window
         str id(targets_label[i]); // string identifier for the annotation "target"
@@ -612,6 +612,7 @@ void zprInstance::processString(){
         else{
           // if different than existing, fail
           if(labs[id] != lab[my_k]){
+            printf("labs[id] %zu lab[my_k] %zu\n", labs[id], lab[my_k]);
             good = false; // if there is a different label, for a target with the same string identifier, bail..
             break;
           }
@@ -619,7 +620,8 @@ void zprInstance::processString(){
         printf("after\n");
         // ok so that was make sure same targets have same label. now, different targets have different label
       }
-
+  	
+     if(true){
       // different targets have different label
       set<float> label_set;
       map<str, float>::iterator it;
@@ -628,6 +630,7 @@ void zprInstance::processString(){
         label_set.insert(it->second);
       }
       if(labs.size() != label_set.size()) good = false; // different targets must have same label
+}
       cout << endl << "RESULT " << good << endl;
       cout << endl;
       free(lab);
