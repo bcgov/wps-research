@@ -596,7 +596,11 @@ void zprInstance::processString(){
     size_t n = targets_i.size();
     cout << "tgt_i tgt_j tgt_lab kmeans_label";
     for0(i, n){
-      cout << endl << targets_i[i] << " " << targets_j[i] << " " << targets_label[i] << " " <<; // ( size_t) lab[(targets_i[i] * SUB_MM
+      size_t my_i = targets_i[i] - SUB_START_I;
+      size_t my_j = targets_j[i] - SUB_START_J;
+             size_t my_k = (my_i * SUB_MM) + my_j;
+      cout << endl << targets_i[i] << " " << targets_j[i] << " " << targets_label[i] << " " << lab[my_k] << endl; // ( size_t) lab[(targets_i[i] * SUB_MM
+     
 
       // need image coordintes, in subscene reference coordinate scheme, for each target that's within the subscene window
     }
