@@ -646,8 +646,17 @@ void zprInstance::processString(){
      // exit(1);
   */
    
-    size_t xoff = (size_t)(SUB_SCALE_F * (float) SUB_START_J);
-    size_t yoff = (size_t)(SUB_SCALE_F * (float) SUB_START_I);
+    size_t xoff = SUB_START_J; // size_t)(SUB_SCALE_F * (float) SUB_START_J);
+    size_t yoff = SUB_START_I; // (size_t)(SUB_SCALE_F * (float) SUB_START_I);
+    cout << "xoff " << xoff << " yoff " << yoff << " SUB_START_J " << SUB_START_J << " SUB_START_I " << SUB_START_I << endl;
+    write_csv(str("tmp_subset.bin_means.bin_targets.csv"), tgt_csv_hdr, tgt_csv);
+    ofstream out1("tmp_subset.bin_means.bin_targets.csv_xoff", ios::out | ios::binary); 
+    out1 << to_string(xoff);
+    out1.close();
+    
+    ofstream out2("tmp_subset.bin_means.bin_targets.csv_yoff", ios::out | ios::binary); 
+    out2 << to_string(yoff);
+    out2.close();
 
     cmd = str("rm -f tmp_subset.bin_means.bin.ml; imv tmp_subset.bin_means.bin & ");
     cout << cmd << endl;
