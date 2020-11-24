@@ -4,12 +4,7 @@ that inspired further developments at UVic, CFS and elsewhere.. */ // todo: disp
 #include<fstream>
 #include"newzpr.h"
 #include<iostream>
-
-//#include <iostream>
 #include <stdexcept>
-//#include <stdio.h>
-//#include <string>
-
 
 std::string strp(const std::string& str, const std::string& whitespace = " \t\r\n"){
   const auto strBegin = str.find_first_not_of(whitespace);
