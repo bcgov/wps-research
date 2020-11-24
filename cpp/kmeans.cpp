@@ -1,5 +1,5 @@
 //implementation of k-means algorithm, with envi type-4 image input
-// nb should be generalized to include spatial information (patch point instead of vector)
+// Next: formulate as patch instead of vector?
 #include"misc.h"
 int debug = false; // set to true for output messages // tolerance should be adjustable
 // nb should PARALLELIZE on for each point loop, within iteration loop
@@ -110,14 +110,12 @@ int main(int argc, char ** argv){
 
     for0(i, np) update[i] = 0.;
     if(pct_chg < 1.) break; // close enough? stop iterating if <1% of pixels changed class
-
   }
 
   str ofn(str(argv[1]) + str("_kmeans.bin")); // output class labels
   str ohn(str(argv[1]) + str("_kmeans.hdr"));
   bwrite(label, ofn, nrow, ncol, 1);
   hwrite(ohn, nrow, ncol, 1, 4); // write type 4 header
-
 
   str omn(str(argv[1]) + str("_means.bin")); // output class centres
   str omh(str(argv[1]) + str("_means.hdr"));
@@ -128,9 +126,9 @@ int main(int argc, char ** argv){
     }
   }
   bwrite(means, omn, nrow, ncol, nband);
+  hwrite(omh, nrow, ncol, nband, 4);
   str cmd(str("cp ") + hfn + str(" ") + omh);
   cout << cmd << endl;
-  system(cmd.c_str());
-
+   // system(cmd.c_str());
   return 0;
 }
