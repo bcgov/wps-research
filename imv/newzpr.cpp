@@ -641,7 +641,7 @@ void zprInstance::processString(){
       if(good) break;
      // exit(1);
   */
-    cmd = str("rm -f tmp_subset.bin_means.ml; imv tmp_subset.bin_means.bin");
+    cmd = str("rm -f tmp_subset.bin_means.bin.ml; imv tmp_subset.bin_means.bin");
     cout << cmd << endl;
     system(cmd.c_str());
   }
@@ -687,7 +687,7 @@ void zprInstance::processString(){
     csv_line[lin_i] = to_string(tci);
     csv_line[fid_i] = str(str(&console_string[2]));
     tgt_csv.push_back(csv_line);
-    write_csv(str("targets.csv"), tgt_csv_hdr, tgt_csv);
+    write_csv(str(IMG_FN + str("_targets.csv")), tgt_csv_hdr, tgt_csv);
 
   }
 
@@ -721,7 +721,7 @@ void zprInstance::processString(){
     targets_i.erase(targets_i.begin() + i_del);
     targets_j.erase(targets_j.begin() + i_del);
     targets_label.erase(targets_label.begin() + i_del);
-    write_csv(str("targets.csv"), tgt_csv_hdr, tgt_csv);
+    write_csv(str(IMG_FN + str("_targets.csv")), tgt_csv_hdr, tgt_csv);
   }
 
   if(strcmpz(console_string, "ij\0") && console_string[2] == ' '){

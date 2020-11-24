@@ -21,30 +21,8 @@ std::string strp(const std::string& str, const std::string& whitespace = " \t\r\
 }
 
 int main(int argc, char ** argv){
-  if(!exists(str("targets.csv"))){
-    FILE * f = fopen("targets.csv", "wb"); // load point/window vector targets
-    fprintf(f, "%s", "feature_id,row,lin");
-    fclose(f);
-  }
 
-  tgt_csv = read_csv("targets.csv", tgt_csv_hdr); // read target point/window vector database
-  if(!vin(tgt_csv_hdr, str("lin"))) err("req'd col missing: lin");
-  if(!vin(tgt_csv_hdr, str("row"))) err("req'd col missing: lin");
-  if(!vin(tgt_csv_hdr, str("feature_id"))) err("req'd col missing: lin");
-  size_t row_i = vix(tgt_csv_hdr, str("row"));
-  size_t lin_i = vix(tgt_csv_hdr, str("lin"));
-  size_t fid_i = vix(tgt_csv_hdr, str("feature_id"));
-  for(size_t i = 0; i < tgt_csv.size(); i++){
-    size_t ti, tj; str tl;
-    tj = atoi((tgt_csv[i])[row_i].c_str());
-    ti = atoi((tgt_csv[i])[lin_i].c_str());
-    tl = (tgt_csv[i])[fid_i];
-    targets_i.push_back(ti);
-    targets_j.push_back(tj);
-    targets_label.push_back(tl);
-  }
-
-  int n_groundref = 0;
+int n_groundref = 0;
   init_mtx();
   groundref.clear();
   IMG_FN = string("stack.bin"); // default image filename to load
@@ -64,6 +42,31 @@ int main(int argc, char ** argv){
   if((NWIN - 1) % 2 != 0) err("analysis window size must be odd"); // assert analysis window size: odd
   WIN_I = WIN_J = 0; // window location? what is this?
 
+  str targets_fn(IMG_FN + "_targets.csv");// load vector targets
+  if(!exists(targets_fn)){
+    FILE * f = fopen(targets_fn.c_str(), "wb"); // load point/window vector targets
+    fprintf(f, "%s", "feature_id,row,lin");
+    fclose(f);
+  }
+
+  tgt_csv = read_csv(targets_fn, tgt_csv_hdr); // read target point/window vector database
+  if(!vin(tgt_csv_hdr, str("lin"))) err("req'd col missing: lin");
+  if(!vin(tgt_csv_hdr, str("row"))) err("req'd col missing: lin");
+  if(!vin(tgt_csv_hdr, str("feature_id"))) err("req'd col missing: lin");
+  size_t row_i = vix(tgt_csv_hdr, str("row"));
+  size_t lin_i = vix(tgt_csv_hdr, str("lin"));
+  size_t fid_i = vix(tgt_csv_hdr, str("feature_id"));
+  for(size_t i = 0; i < tgt_csv.size(); i++){
+    size_t ti, tj; str tl;
+    tj = atoi((tgt_csv[i])[row_i].c_str());
+    ti = atoi((tgt_csv[i])[lin_i].c_str());
+    tl = (tgt_csv[i])[fid_i];
+    targets_i.push_back(ti);
+    targets_j.push_back(tj);
+    targets_label.push_back(tl);
+  }
+
+  
   zprManager * myManager = zprManager::Instance(argc, argv); // window manager class
   size_t width = glutGet(GLUT_SCREEN_WIDTH); // this section: get screen scale
   size_t height = glutGet(GLUT_SCREEN_HEIGHT);
