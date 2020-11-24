@@ -573,6 +573,10 @@ void zprInstance::processString(){
 
       cout << "[" << cmd << "]" << endl;
       system(cmd.c_str());
+
+//      float x = SUB_SCALE_F * (float)SUB_START_J; // draw subset window location rect, on overview window
+//     float y = SUB_SCALE_F * (float)SUB_START_I;
+
 /*
       if(targets_i.size() != targets_j.size() || targets_j.size() != targets_label.size()) err("vector target locations arrays mismatch");
 
