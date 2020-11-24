@@ -574,7 +574,7 @@ void zprInstance::processString(){
       cout << "[" << cmd << "]" << endl;
       system(cmd.c_str());
 
-//      float x = SUB_SCALE_F * (float)SUB_START_J; // draw subset window location rect, on overview window
+//     float x = SUB_SCALE_F * (float)SUB_START_J; // draw subset window location rect, on overview window
 //     float y = SUB_SCALE_F * (float)SUB_START_I;
 
 /*
@@ -645,7 +645,11 @@ void zprInstance::processString(){
       if(good) break;
      // exit(1);
   */
-    cmd = str("rm -f tmp_subset.bin_means.bin.ml; imv tmp_subset.bin_means.bin");
+   
+    size_t xoff = (size_t)(SUB_SCALE_F * (float) SUB_START_J);
+    size_t yoff = (size_t)(SUB_SCALE_F * (float) SUB_START_I);
+
+    cmd = str("rm -f tmp_subset.bin_means.bin.ml; imv tmp_subset.bin_means.bin & ");
     cout << cmd << endl;
     system(cmd.c_str());
   }
