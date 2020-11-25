@@ -240,6 +240,12 @@ void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband){
   hf << "data type = 4" << endl;
   hf << "interleave = bsq" << endl;
   hf << "byte order = 0" << endl;
+  hf << "band names = {band 1";
+  size_t i;
+  for0(i, nband - 1){
+    hf << ",\n" << "band " << i + 2;
+  }
+  hf << "}" << endl;
   hf.close();
 }
 
@@ -256,6 +262,12 @@ void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband, size_t data_type){
   hf << "data type = " << data_type << endl;
   hf << "interleave = bsq" << endl;
   hf << "byte order = 0" << endl;
+  hf << "band names = {band 1";
+    size_t i;
+  for0(i, nband - 1){
+    hf << ",\n" << "band " << i + 2;
+  }
+  hf << "}" << endl;
   hf.close();
 }
 
