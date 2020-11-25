@@ -5,9 +5,8 @@ int main(int argc, char ** argv){
   if(argc < 3) err("kmeans [input binary file name] [k]");
   str fn(argv[1]); // input image file name
   str hfn(hdr_fn(fn)); // input header file name
-  size_t K = atoi(argv[2]); // prescribed number of classes
   size_t iter_max = 100;
-
+  size_t K = atoi(argv[2]); // prescribed number of classes
   hread(hfn, nrow, ncol, nband); // read header
   np = nrow * ncol; // number of input pix
   float * dat = bread(fn, nrow, ncol, nband); // load floats to array
@@ -28,6 +27,7 @@ int main(int argc, char ** argv){
       if(d > max[k]) max[k] = d;
     }
   }
+
   for0(i, np){
     for0(k, nband){
       float d = dat[(np * k) + i];
@@ -38,14 +38,12 @@ int main(int argc, char ** argv){
   float * label = falloc(np); // init one label per pixel. 0 is non-labelled
   float * update = falloc(np); // new set of labels
   for0(i, np) label[i] = (i % K); // uniform initialization
-
-  size_t nmf = K * nband;
+  size_t nmf = K * nband; // number of floats in means array
   float * mean = falloc(nmf); // mean vector for each class
   float * count = falloc(K); // count
 
   for0(n, iter_max){
-    // for each iteration, calculate class means
-    for0(i, nmf) mean[i] = 0.;
+    for0(i, nmf) mean[i] = 0.; // for each iter, calculate class means
     for0(k, K) count[k] = 0.; // denominator for average
     for0(i, np){
       for0(k, nband){
@@ -78,10 +76,10 @@ int main(int argc, char ** argv){
 
     size_t n_change = 0;
     for0(i, np) if(label[i] != update[i]) n_change ++;
-    float pct_chg =  100. * (float)n_change / (float)np;
+    float pct_chg = 100. * (float)n_change / (float)np;
     printf("iter %zu of %zu n_change %f ", n + 1, iter_max, pct_chg);
 
-    set<size_t> observed;  // plot observed labels
+    set<size_t> observed; // plot observed labels
     for0(i, np) observed.insert(label[i]);
     cout << " " << observed << endl;
 
