@@ -20,7 +20,7 @@ int main(int argc, char ** argv){
   groundref.clear();
   IMG_FN = string("stack.bin"); // default image filename to load
 
-  if(argc < 2) printf("imv.cpp: [infile] optional: [nwin] [n bands groundref (one hot encoded, appearing at end of file..]\n");
+  if(argc < 2) printf("imv.cpp: [infile] optional: [nwin] [n bands groundref (one hot encoded, appearing at end of file..] [optional: bands per frame]\n");
   else IMG_FN = string(argv[1]);
   if(argc > 3) n_groundref = atoi(argv[3]); // number of bands at end, to consider as groundref
 
@@ -274,6 +274,7 @@ int main(int argc, char ** argv){
   initLighting();
 
   bands_per_frame = nb / number_of_dates;
+  if(argc > 4) bands_per_frame = atoi(argv[4]);
 
   myImage->rebuffer();
   myImage2->rebuffer();
