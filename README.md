@@ -65,7 +65,7 @@ Tested on ubuntu 20
     
     video of clustering: https://www.youtube.com/watch?v=ooOHEubDNvM
    
-## Some preliminary figures (not current)
+## Some preliminary figures (not current).. need to put the youtube video links in here!!!
 ### Forest change detection using RCM
 <img src="output/difference.gif" width="640">
 
