@@ -499,7 +499,7 @@ void * pt_worker_fun(void * arg){
     my_nxt_j = pt_nxt_j ++; // index of data this thread should pick up if it can
     mtx_unlock(&pt_nxt_j_mtx);
     if(my_nxt_j >= pt_end_j) return(NULL);  // cprint(str("\texit thread ") + to_string(k));
-    if(my_nxt_j % 10000 == 0) cprint(to_string(my_nxt_j));
+    //if(my_nxt_j % 10000 == 0) cprint(to_string(my_nxt_j));
     pt_eval(my_nxt_j); // perform action segment
   }
 }
@@ -516,7 +516,7 @@ void parfor(size_t start_j, size_t end_j, void(*eval)(size_t)){
   pthread_t * my_pthread = new pthread_t[n_cores];
   for0(j, n_cores) pthread_create(&my_pthread[j], &pt_attr, pt_worker_fun, (void *)j);
   for0(j, n_cores) pthread_join(my_pthread[j], NULL); // wait for threads to finish
-  cprint(str("return parfor()"));
+  // cprint(str("return parfor()"));
   delete my_pthread;
 }
 
