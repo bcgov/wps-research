@@ -569,7 +569,7 @@ void zprInstance::processString(){
    // for(kmeans_k = 2; kmeans_k < 100; kmeans_k++){
       str use_name(exec("whoami"));
       use_name = strip(use_name);
-      str cmd(str("/home/") + use_name + str("/GitHub/bcws-psu-research/cpp/kmeans.exe tmp_subset.bin ") + to_string(kmeans_k));
+      str cmd(str("/home/") + use_name + str("/GitHub/bcws-psu-research/cpp/kmeans_multi.exe tmp_subset.bin ") + to_string(kmeans_k));
 
       cout << "[" << cmd << "]" << endl;
       system(cmd.c_str());
