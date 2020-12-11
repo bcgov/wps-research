@@ -653,12 +653,11 @@ void zprInstance::processString(){
     ofstream out1("tmp_subset.bin_means.bin_targets.csv_xoff", ios::out | ios::binary); 
     out1 << to_string(xoff);
     out1.close();
-    
     ofstream out2("tmp_subset.bin_means.bin_targets.csv_yoff", ios::out | ios::binary); 
     out2 << to_string(yoff);
     out2.close();
 
-    cmd = str("rm -f tmp_subset.bin_means.bin.ml; imv tmp_subset.bin_means.bin & ");
+    cmd = str("rm -f tmp_subset.bin_means.bin.ml; imv tmp_subset.bin_means.bin 13 0 ") + to_string(bands_per_frame) + str(" &");
     cout << cmd << endl;
     system(cmd.c_str());
   }
