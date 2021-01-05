@@ -86,10 +86,23 @@ while go:
         # clean up labels so that everything outside the known classes is 0, and all clusters for class get same label..
         used_labels = set()
         for k in kmeans_label_by_class:
-            for j in k:
-                used_labels.insert(j)
+            for j in kmeans_label_by_class[k]:
+                used_labels.add(j)
         print("used_labels", used_labels)        
 
+        lookup = {}
+        for k in range(0, K):
+            k = float(k)
+            if k not in used_labels:
+                lookup[k] =  0.
+
+        ci = 1
+        for k in kmeans_label_by_class:
+            for j in kmeans_label_by_class[k]:
+                lookup[j] = ci
+            ci += 1
+
+        print("lookup", lookup)
 
         break
 
