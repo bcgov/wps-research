@@ -45,5 +45,4 @@ for i in range(1, len(lines)):
     y = int(line[i_lin])
     print("row", line[i_row], line[i_lin], line[i_xof], line[i_yof], line[i_lab], "class", data[(y * ncol) + x])
 
-#cmd = "python3 " + path + "read_multi.py " + infile + "_kmeans.bin" 
-#run(cmd)
+run("python3 " + path + "read_multi.py " + infile + "_kmeans.bin")
