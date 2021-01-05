@@ -42,19 +42,21 @@ for i in range(1, len(lines)):
 K = len(c) # starting number of classes
 K -= 1 # for testing, delete this line later
 
-whoami = os.popen("whoami").read().strip()
-run(path + "../cpp/kmeans_multi.exe stack.bin " + str(K))
+go = True
+while go:
+    whoami = os.popen("whoami").read().strip()
+    run(path + "../cpp/kmeans_multi.exe stack.bin " + str(K))
 
-class_file = infile + "_kmeans.bin"
-ncol, nrow, bands, data = read_binary(class_file)
+    class_file = infile + "_kmeans.bin"
+    ncol, nrow, bands, data = read_binary(class_file)
 
-kmeans_label = {}
-for i in range(1, len(lines)):
-    line = lines[i]
-    x = int(line[i_row])
-    y = int(line[i_lin])
-    ix = (y * ncol) + x
-    print("row", line[i_row], line[i_lin], line[i_xof], line[i_yof], line[i_lab], "class", data[ix])
-    kmeans_label[ix] = data[ix]
-print(label)
-run("python3 " + path + "read_multi.py " + infile + "_kmeans.bin")
+    kmeans_label = {}
+    for i in range(1, len(lines)):
+        line = lines[i]
+        x = int(line[i_row])
+        y = int(line[i_lin])
+        ix = (y * ncol) + x
+        print("row", line[i_row], line[i_lin], line[i_xof], line[i_yof], line[i_lab], "class", data[ix])
+        kmeans_label[ix] = data[ix]
+    print(label)
+    run("python3 " + path + "read_multi.py " + infile + "_kmeans.bin")
