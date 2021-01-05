@@ -602,6 +602,7 @@ size_t write_csv(str fn, vector<str> hdr, vector<vector<str>> lines){
     if(lines[i].size() != n){
       cout << "n," << n << endl;
       cout << "lines[i].size() " << lines[i].size() << endl;
+      cout << lines[i] << endl;
       err("warning: internal csv data formatting error");
     }
     str ij((lines[i])[0]);
