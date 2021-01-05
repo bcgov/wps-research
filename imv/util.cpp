@@ -599,7 +599,11 @@ size_t write_csv(str fn, vector<str> hdr, vector<vector<str>> lines){
     fprintf(f, ",%s", hdr[i].c_str());
   }
   for0(i, lines.size()){
-    if(lines[i].size() != n) err("warning: internal csv data formatting error");
+    if(lines[i].size() != n){
+      cout << "n," << n << endl;
+      cout << "lines[i].size() " << lines[i].size() << endl;
+      err("warning: internal csv data formatting error");
+    }
     str ij((lines[i])[0]);
     fprintf(f, "\n%s", ij.c_str()); 
     for(j = 1; j < lines[i].size(); j++){
