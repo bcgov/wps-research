@@ -562,6 +562,7 @@ void zprInstance::processString(){
 
   if(strcmpz(console_string, "k\0") && console_string[1] == ' '){
 
+    printf("kmeans\n");
     str kk(&console_string[2]);
     size_t kmeans_k = atoi(kk.c_str());
     // k prefix: run K means, increasing K, until points with same references, are discriminated
@@ -573,6 +574,7 @@ void zprInstance::processString(){
 
       cout << "[" << cmd << "]" << endl;
       system(cmd.c_str());
+      printf("done kmeans\n");
 /*
       // float x = SUB_SCALE_F * (float)SUB_START_J; // draw subset window location rect, on overview window
       // float y = SUB_SCALE_F * (float)SUB_START_I;
@@ -643,19 +645,22 @@ void zprInstance::processString(){
       // exit(1);
     }
 */
+    printf("output csv..\n");
     size_t xoff = SUB_START_J; // size_t)(SUB_SCALE_F * (float) SUB_START_J);
     size_t yoff = SUB_START_I; // (size_t)(SUB_SCALE_F * (float) SUB_START_I);
     cout << "xoff " << xoff << " yoff " << yoff << " SUB_START_J " << SUB_START_J << " SUB_START_I " << SUB_START_I << endl;
     write_csv(str("tmp_subset.bin_means.bin_targets.csv"), tgt_csv_hdr, tgt_csv);
+    printf("done write csv..\n");
     ofstream out1("tmp_subset.bin_means.bin_targets.csv_xoff", ios::out | ios::binary);
     out1 << to_string(xoff);
     out1.close();
     ofstream out2("tmp_subset.bin_means.bin_targets.csv_yoff", ios::out | ios::binary);
     out2 << to_string(yoff);
     out2.close();
+    printf("----------------------------------------------\n");
     // str cmd("");
     cmd = str("rm -f tmp_subset.bin_means.bin.ml; imv tmp_subset.bin_means.bin 13 0 ") + to_string(bands_per_frame) + str(" &");
-    cout << cmd << endl;
+    cout << "[" << cmd << "]" << endl;
     system(cmd.c_str());
   }
 

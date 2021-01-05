@@ -600,6 +600,13 @@ size_t write_csv(str fn, vector<str> hdr, vector<vector<str>> lines){
   }
   for0(i, lines.size()){
     if(lines[i].size() != n){
+      while(lines[i].size() != n){
+        lines[i].push_back(str(""));
+      }
+    }
+
+    if(lines[i].size() != n){
+      cout << "hdr: " << hdr << endl;
       cout << "n," << n << endl;
       cout << "lines[i].size() " << lines[i].size() << endl;
       cout << lines[i] << endl;
