@@ -103,6 +103,10 @@ while go:
             ci += 1
 
         print("lookup", lookup)
+        # apply lookup
+
+        for i in range(0, nrow* ncol):
+            data[i] = lookup[data[i]]
 
         break
 
