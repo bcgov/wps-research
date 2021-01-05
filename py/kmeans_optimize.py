@@ -26,12 +26,21 @@ i_lab = hdr.index('feature_id')
 sep = os.path.sep
 path = sep.join(__file__.split(sep)[:-1]) + sep  # path to this file
 
+# read info from image file
+ncol, nrow, bands = read_hdr(infile[:-3] + 'hdr')
+ncol, nrow, bands = int(ncol), int(nrow), int(bands)
+
 # start K at number of labels
-c = {}
+c, class_label = {}, {}
 for i in range(1, len(lines)):
-    label = lines[i][i_lab]
+    line = lines[i]
+    label = line[i_lab]
+    x, y = int(line[i_row]), int(line[i_lin])
+    ix = (y * ncol) + x
+    class_label[ix] = label
     c[label] = (c[label] + 1) if label in c else 1
 K = len(c) # starting number of classes
+K -= 1 # for testing, delete this line later
 
 whoami = os.popen("whoami").read().strip()
 run(path + "../cpp/kmeans_multi.exe stack.bin " + str(K))
@@ -39,10 +48,13 @@ run(path + "../cpp/kmeans_multi.exe stack.bin " + str(K))
 class_file = infile + "_kmeans.bin"
 ncol, nrow, bands, data = read_binary(class_file)
 
+kmeans_label = {}
 for i in range(1, len(lines)):
     line = lines[i]
     x = int(line[i_row])
     y = int(line[i_lin])
-    print("row", line[i_row], line[i_lin], line[i_xof], line[i_yof], line[i_lab], "class", data[(y * ncol) + x])
-
+    ix = (y * ncol) + x
+    print("row", line[i_row], line[i_lin], line[i_xof], line[i_yof], line[i_lab], "class", data[ix])
+    kmeans_label[ix] = data[ix]
+print(label)
 run("python3 " + path + "read_multi.py " + infile + "_kmeans.bin")
