@@ -84,7 +84,7 @@ while go:
         print("good")
 
         # clean up labels so that everything outside the known classes is 0, and all clusters for class get same label..
-        used_labels = ()
+        used_labels = set()
         for k in kmeans_label_by_class:
             for j in k:
                 used_labels.insert(j)
