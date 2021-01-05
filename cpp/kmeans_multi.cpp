@@ -60,6 +60,7 @@ int main(int argc, char ** argv){
   for0(i, np) label[i] = (i % K); // uniform initialization
 
   for0(n, iter_max){
+    // still more to parallelize here!
     for0(k, K) dcount[k] = 0.; // denominator for average
     for0(i, nmf) mean[i] = 0.; // for each iter, calculate class means
     for0(i, np){
@@ -69,34 +70,16 @@ int main(int argc, char ** argv){
     for0(i, K) if(dcount[i] > 0) for0(j, nband) mean[(i * nband) + j] /= dcount[i];
 
     parfor(0, np, find_nearest);
-    /*
-    for0(i, np){
-      size_t nearest_i = 0; // for each point, reassign to nearest cluster centre
-      float nearest_d = FLT_MAX;
-
-      for0(j, K){
-        float dd = 0.; // distance from this point to centre
-        for0(k, nband){
-          float d = dat[(np * k) + i] - mean[(j * nband) + k];
-          dd += d * d;
-        }
-        dd = sqrt(dd);
-        if(dd < nearest_d){
-          nearest_d = dd;
-          nearest_i = j;
-        }
-      }
-      update[i] = nearest_i;
-    }
-    */
 
     size_t n_change = 0;
     for0(i, np) if(label[i] != update[i]) n_change ++;
     float pct_chg = 100. * (float)n_change / (float)np; // plot change info
-    printf("iter %zu of %zu n_change %f ", n + 1, iter_max, pct_chg);
+    printf("iter %zu of %zu n_change %f\n", n + 1, iter_max, pct_chg);
+    /*
     set<size_t> observed; // plot observed labels
     for0(i, np) observed.insert(label[i]);
     cout << " " << observed << endl;
+    */
     float * tmp = label; // swap
     label = update;
     update = tmp;
