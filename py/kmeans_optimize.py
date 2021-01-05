@@ -56,7 +56,18 @@ while go:
         x = int(line[i_row])
         y = int(line[i_lin])
         ix = (y * ncol) + x
-        print("row", line[i_row], line[i_lin], line[i_xof], line[i_yof], line[i_lab], "class", data[ix])
+        # print("row", line[i_row], line[i_lin], line[i_xof], line[i_yof], line[i_lab], "class", data[ix])
         kmeans_label[ix] = data[ix]
-    print(label)
+     
+    print(class_label)
+    print(kmeans_label)
+
+    kmeans_label_by_class = {}
+    for p in class_label:
+        L = class_label[p]
+        kmeans_label_by_class[L] = [] if (L not in kmeans_label_by_class) else (kmeans_label_by_class[L])
+        kmeans_label_by_class[L].append(kmeans_label[p])
+    print(kmeans_label_by_class)
+
     run("python3 " + path + "read_multi.py " + infile + "_kmeans.bin")
+    K += 1
