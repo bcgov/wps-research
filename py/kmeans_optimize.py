@@ -31,7 +31,7 @@ whoami = os.popen("whoami").read().strip()
 run(path + "../cpp/kmeans_multi.exe stack.bin " + str(K))
 
 class_file = infile + "_kmeans.bin"
-samples, lines, bands, data = read_binary(class_file)
+ncol, nrow, bands, data = read_binary(class_file)
 
 for i in range(1, len(lines)):
     line = lines[i]
