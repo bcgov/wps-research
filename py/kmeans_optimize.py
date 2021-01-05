@@ -12,17 +12,22 @@ else:
 if not os.path.exists(infile):
     err("failed to find input file: " + infile)
 
+tf = infile + "_targets.csv"
+if not os.path.exists(tf):
+    error("targets file not found: " + str(tf))
+
 sep = os.path.sep
-path = sep.join(__file__.split(sep)[:-1]) + sep 
-print(path)
+path = sep.join(__file__.split(sep)[:-1]) + sep  # path to this file
 
 K = 5
 whoami = os.popen("whoami").read().strip()
-cmd = path + "kmeans_multi.exe stack.bin " + str(K)
+cmd = path + "../cpp/kmeans_multi.exe stack.bin " + str(K)
 
-print(cmd)
-# run(cmd)
+run(cmd)
 
-cmd = "python3 " + path + "read_multi.py stack.bin_means.bin"
+class_file = infile + "_kmeans.bin"
 
-print(cmd)
+samples, lines, bands, data = read_binary(class_file)
+
+#cmd = "python3 " + path + "read_multi.py " + infile + "_kmeans.bin" 
+#run(cmd)
