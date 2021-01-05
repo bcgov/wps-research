@@ -168,9 +168,6 @@ for i in range(feature_count):
             data_line = [feature_ids[i], coordinates[i][0], coordinates[i][1], img, pix_k, lin_k, xo, yo] + data
             data_line = ','.join([str(x) for x in data_line])
             out_spec_f.write(("\n" + data_line).encode())
-        
-        
-
 
 out_spec_f.close()
 print("number of spectra extracted:", count)
