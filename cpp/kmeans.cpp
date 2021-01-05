@@ -42,7 +42,7 @@ int main(int argc, char ** argv){
     for0(i, nmf) mean[i] = 0.; // for each iter, calculate class means
     for0(i, np){
       for0(k, nband) mean[(((size_t)label[i]) * nband) + k] += dat[(np * k) + i];
-      count[(size_t)label[i]] += 1;
+      count[(size_t)label[i]] += 1; 
     }
     for0(i, K) if(count[i] > 0) for0(j, nband) mean[(i * nband) + j] /= count[i];
     for0(i, np){
