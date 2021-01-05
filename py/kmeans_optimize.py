@@ -108,10 +108,11 @@ while go:
         for i in range(0, nrow* ncol):
             data[i] = lookup[data[i]]
 
+        write_binary(data, class_file) # relabel the data and output
         break
 
           
     # kmeans_label_by_class: {'fireweedandaspen': [0.0], 'blowdownwithlichen': [1.0, 0.0], 'pineburned': [1.0, 1.0, 1.0]}
     K += 1
-
-    # run("python3 " + path + "read_multi.py " + infile + "_kmeans.bin")
+ 
+run("python3 " + path + "read_multi.py " + infile + "_kmeans.bin")
