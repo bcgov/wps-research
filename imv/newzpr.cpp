@@ -1181,7 +1181,19 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
       if(!tmp) err("failed to open tmp_subset.bin");
       fwrite(dat3->elements, sizeof(float), SUB_MM * SUB_MM * IMG_NB, tmp);
       fclose(tmp);
-      writeHeader(sub_hn.c_str(), SUB_MM, SUB_MM, IMG_NB);
+      writeHeader(sub_hn.c_str(), SUB_MM, SUB_MM, IMG_NB); // write header
+
+      FILE * f = fopen("tmp_subset.hdr", "ab"); // append band name info to header
+      vector<string>::iterator it = vec_band_names.begin();
+      str bn("band names = {");
+      fwrite(bn.c_str(), strlen(bn.c_str()), 1, f);
+      fwrite(it->c_str(), strlen(it->c_str()), 1, f);
+      while(++it != vec_band_names.end()){
+        fwrite(",\n", 2, 1, f);
+        fwrite(it->c_str(), strlen(it->c_str()), 1, f);
+      }
+      fwrite("}", 1, 1, f);
+      fclose(f);
     }
 
     // now rebuffer under secondary window too
