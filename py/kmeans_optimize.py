@@ -67,11 +67,14 @@ while go:
         L = class_label[p]
         kmeans_label_by_class[L] = [] if (L not in kmeans_label_by_class) else (kmeans_label_by_class[L])
         kmeans_label_by_class[L].append(kmeans_label[p])
+
+    for c in kmeans_label_by_class: # what would a vectorization for an op like this look like?
+        kmeans_label_by_class[c] = set(kmeans_label_by_class[c])
     print(kmeans_label_by_class)
 
-    run("python3 " + path + "read_multi.py " + infile + "_kmeans.bin")
     # check if we're done
-
 
     # kmeans_label_by_class: {'fireweedandaspen': [0.0], 'blowdownwithlichen': [1.0, 0.0], 'pineburned': [1.0, 1.0, 1.0]}
     K += 1
+
+    run("python3 " + path + "read_multi.py " + infile + "_kmeans.bin")
