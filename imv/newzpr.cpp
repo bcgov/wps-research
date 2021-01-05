@@ -562,22 +562,21 @@ void zprInstance::processString(){
 
   if(strcmpz(console_string, "k\0") && console_string[1] == ' '){
 
-    str kk(&console_string[2]); 
+    str kk(&console_string[2]);
     size_t kmeans_k = atoi(kk.c_str());
     // k prefix: run K means, increasing K, until points with same references, are discriminated
     // open the output in imv!!!!
-   // for(kmeans_k = 2; kmeans_k < 100; kmeans_k++){
-      str use_name(exec("whoami"));
+    //for(kmeans_k = 2; kmeans_k < 100; kmeans_k++){
+      str use_name(exec("whoami")); // get user name
       use_name = strip(use_name);
-      str cmd(str("/home/") + use_name + str("/GitHub/bcws-psu-research/cpp/kmeans_multi.exe tmp_subset.bin ") + to_string(kmeans_k));
+      str cmd(str("/home/") + use_name + str("/GitHub/bcws-psu-research/cpp/kmeans_multi.exe tmp_subset.bin ") + to_string(kmeans_k)); // should not have abs path
 
       cout << "[" << cmd << "]" << endl;
       system(cmd.c_str());
-
-//     float x = SUB_SCALE_F * (float)SUB_START_J; // draw subset window location rect, on overview window
-//     float y = SUB_SCALE_F * (float)SUB_START_I;
-
 /*
+      // float x = SUB_SCALE_F * (float)SUB_START_J; // draw subset window location rect, on overview window
+      // float y = SUB_SCALE_F * (float)SUB_START_I;
+
       if(targets_i.size() != targets_j.size() || targets_j.size() != targets_label.size()) err("vector target locations arrays mismatch");
 
       FILE * labf = fopen("tmp_subset.bin_kmeans.bin", "rb");
@@ -597,7 +596,7 @@ void zprInstance::processString(){
         size_t my_i = targets_i[i] - SUB_START_I;
         size_t my_j = targets_j[i] - SUB_START_J;
         size_t my_k = (my_i * SUB_MM) + my_j;
-        cout << targets_label[i] << " " <<  my_i << "," << my_j << "," << lab[my_k] << endl;
+        cout << targets_label[i] << " " << my_i << "," << my_j << "," << lab[my_k] << endl;
         //printf("\n%zu lab[my_k] %zu", SUB_MM* SUB_MM * IMG_NB, (size_t)lab[ my_k]);
         //cout << " " << targets_label[i] << " -> " << lab[my_k] << endl; // ( size_t) lab[(targets_i[i] * SUB_MM
 
@@ -609,14 +608,12 @@ void zprInstance::processString(){
         str id(targets_label[i]); // string identifier for the annotation "target"
 
         classes[id].insert(lab[my_k]);
-        
+
         if(labs.count(targets_label[i]) < 1){
           labs[targets_label[i]] = lab[my_k];
-	}
-	else{
-}
-
-	
+        }
+        else{
+        }
 
         // ok so that was make sure same targets have same label. now, different targets have different label
       }
@@ -633,7 +630,7 @@ void zprInstance::processString(){
           std::inserter(z,z.begin()));
 
           if(z.size() > 0){
-            good = false; 
+            good = false;
           }
           cout << it->first << "->" << it->second << " " << ti->first << "->" << ti->second << " " << z << endl;
         }
@@ -643,20 +640,20 @@ void zprInstance::processString(){
       cout << endl;
       free(lab);
       if(good) break;
-     // exit(1);
-  */
-   
+      // exit(1);
+    }
+*/
     size_t xoff = SUB_START_J; // size_t)(SUB_SCALE_F * (float) SUB_START_J);
     size_t yoff = SUB_START_I; // (size_t)(SUB_SCALE_F * (float) SUB_START_I);
     cout << "xoff " << xoff << " yoff " << yoff << " SUB_START_J " << SUB_START_J << " SUB_START_I " << SUB_START_I << endl;
     write_csv(str("tmp_subset.bin_means.bin_targets.csv"), tgt_csv_hdr, tgt_csv);
-    ofstream out1("tmp_subset.bin_means.bin_targets.csv_xoff", ios::out | ios::binary); 
+    ofstream out1("tmp_subset.bin_means.bin_targets.csv_xoff", ios::out | ios::binary);
     out1 << to_string(xoff);
     out1.close();
-    ofstream out2("tmp_subset.bin_means.bin_targets.csv_yoff", ios::out | ios::binary); 
+    ofstream out2("tmp_subset.bin_means.bin_targets.csv_yoff", ios::out | ios::binary);
     out2 << to_string(yoff);
     out2.close();
-
+    // str cmd("");
     cmd = str("rm -f tmp_subset.bin_means.bin.ml; imv tmp_subset.bin_means.bin 13 0 ") + to_string(bands_per_frame) + str(" &");
     cout << cmd << endl;
     system(cmd.c_str());
