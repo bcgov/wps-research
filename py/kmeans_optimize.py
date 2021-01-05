@@ -35,8 +35,9 @@ ncol, nrow, bands, data = read_binary(class_file)
 
 for i in range(1, len(lines)):
     line = lines[i]
-    print("row", line[i_row], line[i_lin], line[i_xof], line[i_yof], line[i_lab])
-
+    x = int(line[i_row])
+    y = int(line[i_lin])
+    print("row", line[i_row], line[i_lin], line[i_xof], line[i_yof], line[i_lab], "class", data[(y * ncol) + x])
 
 #cmd = "python3 " + path + "read_multi.py " + infile + "_kmeans.bin" 
 #run(cmd)
