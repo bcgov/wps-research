@@ -70,4 +70,8 @@ while go:
     print(kmeans_label_by_class)
 
     run("python3 " + path + "read_multi.py " + infile + "_kmeans.bin")
+    # check if we're done
+
+
+    # kmeans_label_by_class: {'fireweedandaspen': [0.0], 'blowdownwithlichen': [1.0, 0.0], 'pineburned': [1.0, 1.0, 1.0]}
     K += 1
