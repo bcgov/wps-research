@@ -26,7 +26,13 @@ i_lab = hdr.index('feature_id')
 sep = os.path.sep
 path = sep.join(__file__.split(sep)[:-1]) + sep  # path to this file
 
-K = 5
+# start K at number of labels
+c = {}
+for i in range(1, len(lines)):
+    label = lines[i][i_lab]
+    c[label] = (c[label] + 1) if label in c else 1
+K = len(c) # starting number of classes
+
 whoami = os.popen("whoami").read().strip()
 run(path + "../cpp/kmeans_multi.exe stack.bin " + str(K))
 
