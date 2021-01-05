@@ -18,11 +18,7 @@ if not os.path.exists(tf):
 lines = open(tf).read().strip().split("\n")
 lines = [line.strip().split(",") for line in lines]
 hdr = lines[0] # 'row', 'lin', 'xoff', 'yoff'
-i_row = hdr.index('row')
-i_lin = hdr.index('lin')
-i_xof = hdr.index('xoff')
-i_yof = hdr.index('yoff')
-i_lab = hdr.index('feature_id')
+i_row, i_lin, i_xof, i_yof, i_labl = hdr.index('row'), hdr.index('lin'), hdr.index('xoff'), hdr.index('yoff'), hdr.index('feature_id')
 sep = os.path.sep
 path = sep.join(__file__.split(sep)[:-1]) + sep  # path to this file
 
@@ -110,9 +106,8 @@ while go:
 
         write_binary(data, class_file) # relabel the data and output
         break
-
           
     # kmeans_label_by_class: {'fireweedandaspen': [0.0], 'blowdownwithlichen': [1.0, 0.0], 'pineburned': [1.0, 1.0, 1.0]}
-    K += 1
+    K += 1 # try adding a class!
  
 run("python3 " + path + "read_multi.py " + infile + "_kmeans.bin")
