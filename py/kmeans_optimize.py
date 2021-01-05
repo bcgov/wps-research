@@ -59,9 +59,6 @@ while go:
         # print("row", line[i_row], line[i_lin], line[i_xof], line[i_yof], line[i_lab], "class", data[ix])
         kmeans_label[ix] = data[ix]
      
-    print(class_label)
-    print(kmeans_label)
-
     kmeans_label_by_class = {}
     for p in class_label:
         L = class_label[p]
@@ -73,8 +70,31 @@ while go:
     print(kmeans_label_by_class)
 
     # check if we're done
+    bad, empty = False, set()
+    for k in kmeans_label_by_class:
+        kk = kmeans_label_by_class[k]
+        for j in kmeans_label_by_class:
+            if k == j:
+                continue
+            kj = kmeans_label_by_class[j]
+            if kk.intersection(kj) != empty:
+                bad = True
+  
+    if not bad:
+        print("good")
 
+        # clean up labels so that everything outside the known classes is 0, and all clusters for class get same label..
+        used_labels = ()
+        for k in kmeans_label_by_class:
+            for j in k:
+                used_labels.insert(j)
+        print("used_labels", used_labels)        
+
+
+        break
+
+          
     # kmeans_label_by_class: {'fireweedandaspen': [0.0], 'blowdownwithlichen': [1.0, 0.0], 'pineburned': [1.0, 1.0, 1.0]}
     K += 1
 
-    run("python3 " + path + "read_multi.py " + infile + "_kmeans.bin")
+    # run("python3 " + path + "read_multi.py " + infile + "_kmeans.bin")
