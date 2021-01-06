@@ -18,8 +18,7 @@ if not os.path.exists(tf):
 lines = open(tf).read().strip().split("\n")
 lines = [line.strip().split(",") for line in lines]
 hdr = lines[0] # 'row', 'lin', 'xoff', 'yoff'
-i_row, i_lin, i_xof, i_yof, i_labl = hdr.index('row'), hdr.index('lin'), hdr.index('xoff'), hdr.index('yoff'), hdr.index('feature_id')
-sep = os.path.sep
+i_row, i_lin, i_xof, i_yof, i_lab, sep = hdr.index('row'), hdr.index('lin'), hdr.index('xoff'), hdr.index('yoff'), hdr.index('feature_id'), os.path.sep
 path = sep.join(__file__.split(sep)[:-1]) + sep  # path to this file
 
 # read info from image file
