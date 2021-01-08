@@ -20,6 +20,8 @@ lines = [line.strip().split(",") for line in lines]
 hdr = lines[0] # 'row', 'lin', 'xoff', 'yoff'
 i_row, i_lin, i_xof, i_yof, i_lab, sep = hdr.index('row'), hdr.index('lin'), hdr.index('xoff'), hdr.index('yoff'), hdr.index('feature_id'), os.path.sep
 path = sep.join(__file__.split(sep)[:-1]) + sep  # path to this file
+print("path", path)
+path = os.path.abspath(os.path.expanduser(os.path.expandvars(path))) + sep
 
 # read info from image file
 ncol, nrow, bands = read_hdr(infile[:-3] + 'hdr')
@@ -40,7 +42,11 @@ K -= 1 # for testing, delete this line later
 go = True
 while go:
     whoami = os.popen("whoami").read().strip()
-    run(path + "../cpp/kmeans_multi.exe stack.bin " + str(K))
+    exe = path + "../cpp/kmeans_multi.exe"
+    print("exe", exe)
+    exe = os.path.normpath(exe)
+    print("exe", exe)
+    run(exe + " " + infile + " " + str(K))
 
     class_file = infile + "_kmeans.bin"
     ncol, nrow, bands, data = read_binary(class_file)
@@ -108,5 +114,40 @@ while go:
           
     # kmeans_label_by_class: {'fireweedandaspen': [0.0], 'blowdownwithlichen': [1.0, 0.0], 'pineburned': [1.0, 1.0, 1.0]}
     K += 1 # try adding a class!
- 
-run("python3 " + path + "read_multi.py " + infile + "_kmeans.bin")
+print("kmeans_label_by_class", kmeans_label_by_class)
+print("lookup", lookup)
+
+# translate the lookup
+for label in kmeans_label_by_class:
+    labels = list(kmeans_label_by_class[label])
+    labels = [lookup[i] for i in labels]
+    kmeans_label_by_class[label] = set(labels)
+
+print(kmeans_label_by_class)
+
+import matplotlib.pyplot as plt
+hdr = hdr_fn(infile)
+npx = nrow * ncol
+#samples, lines, bands = read_hdr(hdr)
+#samples, lines, bands = int(samples), int(lines), int(bands)
+# npx = lines * samples # number of pixels
+# data = read_float(sys.argv[1]).reshape((bands, npx))
+data = data.reshape((nrow, ncol))
+
+fig, ax = plt.subplots()
+img = ax.imshow(data, cmap='Spectral')
+# ax.set_aspect("auto")
+cbar = plt.colorbar(img)#  .legend([0, 1, 2, 3], ['0', '1', '2', '3'])\
+n_labels = 5
+cbar.set_ticks(np.arange(n_labels))
+tick_labels = ["noise"]
+ci = 1
+for label in kmeans_label_by_class:
+    tick_labels.append(label)
+    x = kmeans_label_by_class[label]
+    if set([ci]) != x:
+        err("color index problem")
+    ci += 1
+cbar.ax.set_yticklabels(tick_labels) #"bad", "good", "other", "more", "what"])
+plt.show()
+# run("python3 " + path + "read_multi.py " + infile + "_kmeans.bin")
