@@ -699,11 +699,15 @@ void zprInstance::processString(){
     size_t row_i = vix(tgt_csv_hdr, str("row"));
     size_t lin_i = vix(tgt_csv_hdr, str("lin"));
     size_t fid_i = vix(tgt_csv_hdr, str("feature_id"));
+    size_t xof_i = vix(tgt_csv_hdr, str("xoff"));
+    size_t yof_i = vix(tgt_csv_hdr, str("yoff"));
     vector<str> csv_line(tgt_csv_hdr.size());
     for0(i, csv_line.size()) csv_line[i] = str(" ");
     csv_line[row_i] = to_string(tcj);
     csv_line[lin_i] = to_string(tci);
     csv_line[fid_i] = str(str(&console_string[2]));
+    csv_line[xof_i] = to_string(0);
+    csv_line[yof_i] = to_string(0);
     tgt_csv.push_back(csv_line);
     write_csv(str(IMG_FN + str("_targets.csv")), tgt_csv_hdr, tgt_csv);
 
