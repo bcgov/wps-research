@@ -58,7 +58,7 @@ int main(int argc, char ** argv){
   str targets_fn(IMG_FN + "_targets.csv");// load vector targets
   if(!exists(targets_fn)){
     FILE * f = fopen(targets_fn.c_str(), "wb"); // load point/window vector targets
-    fprintf(f, "%s", "feature_id,row,lin");
+    fprintf(f, "%s", "feature_id,row,lin,xoff,yoff");
     fclose(f);
   }
 
