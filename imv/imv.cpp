@@ -274,8 +274,11 @@ int main(int argc, char ** argv){
   initLighting();
 
   bands_per_frame = nb / number_of_dates;
-  if(argc > 4) bands_per_frame = atoi(argv[4]);
-
+  printf("bands_per_frame %zu\n", bands_per_frame);
+  if(argc > 4){
+    bands_per_frame = atoi(argv[4]);
+    printf("bands_per_frame %zu\n", bands_per_frame);
+  }
   myImage->rebuffer();
   myImage2->rebuffer();
   myImage3->rebuffer();
