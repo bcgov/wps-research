@@ -35,6 +35,7 @@ int main(int argc, char ** argv){
 
   float * bb = falloc(np); // buffer for one band
   for0(k, nband){
+    printf("band %zu of %zu\n", k + 1, nband);
     size_t fr = fread(bb, sizeof(float), np, f_i); // read a band
     if(fr != np) err("failed to read expected number of floats");
     size_t fw = fwrite(&bb[start_i], sizeof(float), np2, f_o);
