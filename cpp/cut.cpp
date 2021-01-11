@@ -9,7 +9,10 @@ int main(int argc, char ** argv){
   str hfn(hdr_fn(fn)); // auto-detect header file name
   str ofn(argv[6]);
   str ohfn(hdr_fn(ofn));
-
+ 
+  printf("input file: %s\n", fn.c_str());
+  printf("outputfile: %s\n", ofn.c_str());
+  
   FILE * f_i = fopen(fn.c_str(), "rb");
   FILE * f_o = fopen(ofn.c_str(), "wb");
 
