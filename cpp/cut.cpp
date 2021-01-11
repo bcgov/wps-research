@@ -26,9 +26,9 @@ int main(int argc, char ** argv){
 
   size_t start_i = (starty * ncol) + startx;
   size_t end_i = (endy * ncol) + endx;
-  size_t nrow2 = end_y - start_y + 1;
-  size_t ncol2 = end_x - start_x + 1;
-  size_t np_2 = nrow2 * ncol2;
+  size_t nrow2 = endy - starty + 1;
+  size_t ncol2 = endx - startx + 1;
+  size_t np2 = nrow2 * ncol2;
 
   float * bb = falloc(np); // buffer for one band
   for0(k, nband){
