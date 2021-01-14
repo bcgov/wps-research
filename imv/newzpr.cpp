@@ -220,11 +220,12 @@ void glImage::rebuffer(){
       max3 = s->image_intensity_max3;
     }
   }
-  r1 = 1./(max1 - min1);
-  r2 = 1./(max2 - min2);
-  r3 = 1./(max3 - min3);
+  r1 = 1. / (max1 - min1);
+  r2 = 1. / (max2 - min2);
+  r3 = 1. / (max3 - min3);
 
-  printf("myZprInstanceID %d r1 %f r2 %f r3 %f min1 %f min2 %f min3 %f\n", parentZprInstance->myZprInstanceID, r1, r2, r3, min1, min2, min3);
+  printf("myZprInstanceID %d r1 %f r2 %f r3 %f min1 %f min2 %f min3 %f\n",
+         parentZprInstance->myZprInstanceID, r1, r2, r3, min1, min2, min3);
 
   float r, g, b;
   long int i, j, k, ri, m;
