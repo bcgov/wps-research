@@ -103,6 +103,7 @@ extern vector<vector<str>> tgt_csv;
 
 // global image intensity scaling parameter
 extern int USE_PROPORTIONAL_SCALING;
+extern float N_PERCENT_SCALING;
 
 // groundref detection
 extern vector<int> groundref;

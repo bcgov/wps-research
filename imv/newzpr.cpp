@@ -52,6 +52,8 @@ vector<str> tgt_csv_hdr;
 vector<vector<str>> tgt_csv;
 
 int USE_PROPORTIONAL_SCALING = true; // default to proportional scaling
+float N_PERCENT_SCALING = 1.; // default to 1% linear scaling
+
 // groundref detection
 vector<int> groundref;
 vector<string> vec_band_names;
@@ -108,17 +110,16 @@ void zprInstance::mark(){
 void two_percent(float & min, float & max, SA<float> * b){
 
   if(scene_band_min.count(b) < 1){
-    float n_percent = 1.;  // set to 2% for 2% linear scaling. Or 1. for 1% linear scaling..
 
     priority_queue<float> q;
     float * d = b->elements;
-    unsigned int n_two = floor(0.01 * n_percent * ((float)b->size()));
+    unsigned int n_pct = floor(0.01 * N_PERCENT_SCALING * ((float)b->size()));
     unsigned int i;
     for(i = 0; i < b->size(); i++) q.push(d[i]);
-    for(i = 0; i < n_two; i++) q.pop();
+    for(i = 0; i < n_pct; i++) q.pop();
     max = q.top();
-    while(q.size() > n_two) q.pop();
-    min = q.top();
+    while(q.size() > n_pct) q.pop();
+    min = q.top(); 
     //while(q.size() > 0) q.pop();
     scene_band_min[b] = min;
     scene_band_max[b] = max;
@@ -147,9 +148,7 @@ void two_percent(float & min, float & max, SA<float> * r, SA<float> * g, SA<floa
     float * G = g->elements;
     float * B = b->elements;
 
-    float n_percent = 1.; // set to 2 for 2% linear scaling. Or 1 for 1% linear scaling
-
-    unsigned int n_pct = floor(0.01 * n_percent * ((float)b->size()));
+    unsigned int n_pct = floor(0.01 * N_PERCENT_SCALING * ((float)b->size()));
     unsigned int i;
     for(i = 0; i < b->size(); i++) q.push(max3(R[i], G[i], B[i]));
     for(i = 0; i < n_pct; i++) q.pop();
