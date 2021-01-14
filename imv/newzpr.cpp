@@ -220,7 +220,6 @@ void glImage::rebuffer(){
       max3 = s->image_intensity_max3;
     }
   }
-
   r1 = 1./(max1 - min1);
   r2 = 1./(max2 - min2);
   r3 = 1./(max3 - min3);
