@@ -1,9 +1,16 @@
 /* cut rectangular subset from multispectral image etc. input assumed ENVI
-type-4 32-bit IEEE standard floating-point format, BSQ interleave: */
+type-4 32-bit IEEE standard floating-point format, BSQ interleave
+
+similar to:
+gdal_translate -a_ullr startx starty endx endy -of ENVI -ot Float32 stack.bin stack_crop.bin
+
+but does not keep header / geo info */
+
 #include"misc.h"
 
 int main(int argc, char ** argv){
   if(argc < 3) err("cut [input binary file name] [startx] [starty] [endx] [endy] [output file name] ");
+
 
   str fn(argv[1]); // input file name
   str hfn(hdr_fn(fn)); // auto-detect header file name
