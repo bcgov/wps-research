@@ -575,76 +575,7 @@ void zprInstance::processString(){
       cout << "[" << cmd << "]" << endl;
       system(cmd.c_str());
       printf("done kmeans\n");
-/*
-      // float x = SUB_SCALE_F * (float)SUB_START_J; // draw subset window location rect, on overview window
-      // float y = SUB_SCALE_F * (float)SUB_START_I;
-
-      if(targets_i.size() != targets_j.size() || targets_j.size() != targets_label.size()) err("vector target locations arrays mismatch");
-
-      FILE * labf = fopen("tmp_subset.bin_kmeans.bin", "rb");
-      if(!labf) err("failed to open label file");
-      float * lab = (float *) (void *)alloc(SUB_MM * SUB_MM * IMG_NB * sizeof(float));
-      fread(lab, SUB_MM * SUB_MM * IMG_NB, sizeof(float), labf);
-      fclose(labf);
-      size_t i;
-      size_t n = targets_i.size();
-      cout << "tgt_i tgt_j tgt_lab kmeans_label" << endl;
-
-      bool good = true; // innocent until proven guilty
-      map<str, float> labs; // accumulate cluster-output class-labels, per target identifier string (label)
-      map<str, set<float>> classes;
-      labs.clear();
-      for0(i, n){
-        size_t my_i = targets_i[i] - SUB_START_I;
-        size_t my_j = targets_j[i] - SUB_START_J;
-        size_t my_k = (my_i * SUB_MM) + my_j;
-        cout << targets_label[i] << " " << my_i << "," << my_j << "," << lab[my_k] << endl;
-        //printf("\n%zu lab[my_k] %zu", SUB_MM* SUB_MM * IMG_NB, (size_t)lab[ my_k]);
-        //cout << " " << targets_label[i] << " -> " << lab[my_k] << endl; // ( size_t) lab[(targets_i[i] * SUB_MM
-
-        if(classes.count(targets_label[i]) < 1){
-          classes[targets_label[i]].clear();
-        }
-
-        // need image coordintes, in subscene reference coordinate scheme, for each target that's within the subscene window
-        str id(targets_label[i]); // string identifier for the annotation "target"
-
-        classes[id].insert(lab[my_k]);
-
-        if(labs.count(targets_label[i]) < 1){
-          labs[targets_label[i]] = lab[my_k];
-        }
-        else{
-        }
-
-        // ok so that was make sure same targets have same label. now, different targets have different label
-      }
-
-      for(map<str, set<float>>::iterator it = classes.begin(); it != classes.end(); it++){
-        str id(it->first);
-        set<float> x(it->second);
-        for(map<str, set<float>>::iterator ti = it; ti != classes.end(); ti++){
-          if(ti == it) continue;
-          set<float> y(ti->second);
-
-          set<float> z;
-          set_intersection(x.begin(),x.end(),y.begin(),y.end(),
-          std::inserter(z,z.begin()));
-
-          if(z.size() > 0){
-            good = false;
-          }
-          cout << it->first << "->" << it->second << " " << ti->first << "->" << ti->second << " " << z << endl;
-        }
-      }
-
-      cout << endl << "RESULT " << good << endl;
-      cout << endl;
-      free(lab);
-      if(good) break;
-      // exit(1);
-    }
-*/
+    
     printf("output csv..\n");
     size_t xoff = SUB_START_J; // size_t)(SUB_SCALE_F * (float) SUB_START_J);
     size_t yoff = SUB_START_I; // (size_t)(SUB_SCALE_F * (float) SUB_START_I);
