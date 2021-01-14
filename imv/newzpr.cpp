@@ -106,11 +106,13 @@ void zprInstance::mark(){
 
 // declare a map (SA<float> * b, to min/max).. no recalc!
 void two_percent(float & min, float & max, SA<float> * b){
+
   if(scene_band_min.count(b) < 1){
-    // not actually 2%, gasp! the real deal should calculate on intensity..
+    float n_percent = 1.;  // set to 2% for 2% linear scaling. Or 1. for 1% linear scaling..
+
     priority_queue<float> q;
     float * d = b->elements;
-    unsigned int n_two = floor(0.02 * ((float)b->size()));
+    unsigned int n_two = floor(0.01 * n_percent * ((float)b->size()));
     unsigned int i;
     for(i = 0; i < b->size(); i++) q.push(d[i]);
     for(i = 0; i < n_two; i++) q.pop();
@@ -145,12 +147,14 @@ void two_percent(float & min, float & max, SA<float> * r, SA<float> * g, SA<floa
     float * G = g->elements;
     float * B = b->elements;
 
-    unsigned int n_two = floor(0.02 * ((float)b->size()));
+    float n_percent = 1.; // set to 2 for 2% linear scaling. Or 1 for 1% linear scaling
+
+    unsigned int n_pct = floor(0.01 * n_percent * ((float)b->size()));
     unsigned int i;
     for(i = 0; i < b->size(); i++) q.push(max3(R[i], G[i], B[i]));
-    for(i = 0; i < n_two; i++) q.pop();
+    for(i = 0; i < n_pct; i++) q.pop();
     max = q.top();
-    while(q.size() > n_two) q.pop();
+    while(q.size() > n_pct) q.pop();
     min = q.top();
   }
   else{
