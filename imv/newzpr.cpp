@@ -561,8 +561,7 @@ void zprInstance::processString(){
   }
 
   if(strcmpz(console_string, "k\0") && console_string[1] == ' '){
-
-    printf("kmeans\n");
+    printf("run kmeans on window for specified \n");
     str kk(&console_string[2]);
     size_t kmeans_k = atoi(kk.c_str());
     // k prefix: run K means, increasing K, until points with same references, are discriminated
