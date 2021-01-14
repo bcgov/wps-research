@@ -193,7 +193,6 @@ void glImage::rebuffer(){
     max2 = max3 = max1;
   }
   else{
-
     if(is_scene){
       two_percent(min1, max1, b1); // so the 2p stretch happens in the secondary buffer (this one)
       two_percent(min2, max2, b2);
@@ -220,7 +219,6 @@ void glImage::rebuffer(){
       max2 = s->image_intensity_max2;
       max3 = s->image_intensity_max3;
     }
-
   }
 
   r1 = 1./(max1 - min1);
