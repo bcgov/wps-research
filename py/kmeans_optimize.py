@@ -34,8 +34,9 @@ for i in range(1, len(lines)):
     label = line[i_lab]
     x, y = int(line[i_row]), int(line[i_lin])
     ix = (y * ncol) + x
-    class_label[ix] = label
-    c[label] = (c[label] + 1) if label in c else 1
+    if ix < nrow * ncol:  # skip if out of bounds
+        class_label[ix] = label
+        c[label] = (c[label] + 1) if label in c else 1
 K = len(c) # starting number of classes
 K -= 1 # for testing, delete this line later
 
@@ -58,8 +59,9 @@ while go:
         y = int(line[i_lin])
         ix = (y * ncol) + x
         # print("row", line[i_row], line[i_lin], line[i_xof], line[i_yof], line[i_lab], "class", data[ix])
-        kmeans_label[ix] = data[ix]
-     
+        if ix < nrow * ncol:
+            kmeans_label[ix] = data[ix]
+
     kmeans_label_by_class = {}
     for p in class_label:
         L = class_label[p]
