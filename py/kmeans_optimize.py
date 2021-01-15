@@ -152,5 +152,6 @@ for label in kmeans_label_by_class:
 cbar.set_ticks(np.arange(len(tick_labels)))
 print("tick_labels", tick_labels)
 cbar.ax.set_yticklabels(tick_labels) #"bad", "good", "other", "more", "what"])
+plt.tight_layout()
 plt.show()
 # run("python3 " + path + "read_multi.py " + infile + "_kmeans.bin")
