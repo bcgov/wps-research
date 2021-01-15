@@ -1,5 +1,6 @@
 #include"misc.h" // implementation of k-means algorithm 20201123
 
+float tol; // tolerance percent
 size_t nrow, ncol, nband, np, i, j, k, n, iter_max, K, nmf;// variables
 float * dat, * means, * dmin, * dmax, *dcount, *mean, *label, *update;
 
@@ -31,6 +32,11 @@ int main(int argc, char ** argv){
   K = atoi(argv[2]); // prescribed number of classes
   str hfn(hdr_fn(fn)); // input header file name
   hread(hfn, nrow, ncol, nband); // read header
+  tol = 1.;
+  if(argc > 3) tol = atof(argv[3]);
+  if(tol < 0 || tol >= 100) err("tol must be 0 and 100.");
+
+
 
   np = nrow * ncol; // number of input pix
   dat = bread(fn, nrow, ncol, nband); // load floats to array
@@ -85,7 +91,7 @@ int main(int argc, char ** argv){
     update = tmp;
 
     for0(i, np) update[i] = 0.; // close enough? stop iterating if <1% of pix changed class
-    if(pct_chg < 1.) break;
+    if(pct_chg < tol) break;
   }
 
   str ofn(str(argv[1]) + str("_kmeans.bin")); // output class labels
