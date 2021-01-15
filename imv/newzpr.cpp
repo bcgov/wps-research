@@ -574,8 +574,20 @@ void zprInstance::processString(){
     }
   }
 
-  if(strcmpz(console_string, "k\0") && console_string[1] == ' '){
+  if(strcmpz(console_string, "k\0") && console_string[1] == '\0'){
     printf("run kmeans on window with k determined by optimization procedure \n");
+    system("cp -v tmp_subset.bin tmp.bin");
+    system("cp -v tmp_subset.hdr tmp.hdr");
+    str use_name(exec("whoami")); // get user name
+    use_name = strip(use_name);
+    str tt_cmd(str("python3 /home/") + use_name + str("/GitHub/bcws-psu-research/py/vector_target_translation.py "));
+    tt_cmd += (str("stack.bin_targets.csv ") + to_string(SUB_START_J) + str(" ") + to_string(SUB_START_I) + str(" stack.hdr tmp.bin_targets.csv"));
+    tt_cmd += (str(" ") + to_string(SUB_MM) + str(" ") + to_string(SUB_MM));
+    system(tt_cmd.c_str());
+    cout << tt_cmd << endl; // vector target translation
+
+    str cmd(str("python3 /home/") + use_name + str("/GitHub/bcws-psu-research/py/kmeans_optimize.py tmp.bin"));
+    system(cmd.c_str());
   }
 
   if(strcmpz(console_string, "k\0") && console_string[1] == ' '){
