@@ -6,10 +6,11 @@ from misc import *
 
 if len(args) < 6:
     print(args)
-    err("Usage: vector_target_translation [targets.csv] [xoff] [yoff] [image header file] [translated targets file]")
+    err("Usage: vector_target_translation [targets.csv] [xoff] [yoff] [image header file] [translated targets file] # optional args: [xmax] [ymax]")
 
 targets = open(args[1]).read().strip().split("\n")
 xoff, yoff, outf = None, None, None
+xmax, ymax = None, None
 
 try:
     xoff = int(args[2])
@@ -22,6 +23,12 @@ except Exception as e:
     yoff = int(open(args[3]).read().strip())
 
 print("xoff", xoff, "yoff", yoff)
+
+try:
+    xmax = int(args[6])
+    ymax = int(args[7])
+except Exception as e:
+    pass
 
 hdr = args[4]
 outf = open(args[5], "wb")
@@ -82,6 +89,12 @@ for i in i_use:
 
 outf.write((','.join(dat[0])).encode())
 for i in i_use:
+    use = True
     dat[i] = [str(dat[i][j]) for j in range(0, len(dat[i]))]
-    outf.write(('\n' + (','.join(dat[i]))).encode())
+    
+    if xmax is not None and ymax is not None:
+        if int(dat[i][rowi]) > xmax or int(dat[i][lini]) > ymax:
+            use = False
+    if use:
+        outf.write(('\n' + (','.join(dat[i]))).encode())
 outf.close()
