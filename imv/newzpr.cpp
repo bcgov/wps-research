@@ -596,7 +596,7 @@ void zprInstance::processString(){
     size_t kmeans_k = atoi(kk.c_str());
     str use_name(exec("whoami")); // get user name
     use_name = strip(use_name);
-    str cmd(str("/home/") + use_name + str("/GitHub/bcws-psu-research/cpp/kmeans_multi.exe tmp_subset.bin ") + to_string(kmeans_k)); // should not have abs path
+    str cmd(str("/home/") + use_name + str("/GitHub/bcws-psu-research/cpp/kmeans_multi.exe tmp_subset.bin ") + to_string(kmeans_k) + str(" 2.")); // shouldn't have abspath 
     cout << "[" << cmd << "]" << endl;
     system(cmd.c_str());
     size_t xoff = SUB_START_J; // size_t)(SUB_SCALE_F * (float) SUB_START_J);
