@@ -47,8 +47,7 @@ while go:
     print("exe", exe)
     exe = os.path.normpath(exe)
     print("exe", exe)
-    run(exe + " " + infile + " " + str(K))
-
+    run(exe + " " + infile + " " + str(K) + " 2.");
     class_file = infile + "_kmeans.bin"
     ncol, nrow, bands, data = read_binary(class_file)
 
