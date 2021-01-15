@@ -140,7 +140,7 @@ img = ax.imshow(data, cmap='Spectral')
 # ax.set_aspect("auto")
 cbar = plt.colorbar(img)#  .legend([0, 1, 2, 3], ['0', '1', '2', '3'])\
 n_labels = 5
-cbar.set_ticks(np.arange(n_labels + 1)) # add one for noise?
+#cbar.set_ticks(np.arange(n_labels + 1)) # add one for noise?
 tick_labels = ["noise"]
 ci = 1
 for label in kmeans_label_by_class:
@@ -149,7 +149,7 @@ for label in kmeans_label_by_class:
     if set([ci]) != x:
         err("color index problem")
     ci += 1
-
+cbar.set_ticks(np.arange(len(tick_labels)))
 print("tick_labels", tick_labels)
 cbar.ax.set_yticklabels(tick_labels) #"bad", "good", "other", "more", "what"])
 plt.show()
