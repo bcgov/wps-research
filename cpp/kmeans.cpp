@@ -1,15 +1,19 @@
 #include"misc.h" // implementation of k-means algorithm 20201123 
 
 int main(int argc, char ** argv){
-  if(argc < 3) err("kmeans [input binary file name] [k]");
-  
+  if(argc < 3) err("kmeans [input binary file name] [k] # opt. param [tol percent]"); 
   size_t nrow, ncol, nband, np, i, j, k, n, iter_max, K, nmf;// variables
   iter_max = 100;
   str fn(argv[1]); // input image file name
   K = atoi(argv[2]); // prescribed number of classes
   str hfn(hdr_fn(fn)); // input header file name
   hread(hfn, nrow, ncol, nband); // read header
-  
+
+  float tol = 1.;
+  if(argc > 3) tol = atof(argv[3]);
+  if(tol < 0 || tol >= 100.) err("please check tol in [0, 100]");  
+
+
   np = nrow * ncol; // number of input pix
   float * dat = bread(fn, nrow, ncol, nband); // load floats to array
   float * means = falloc(np * nband); // output nearest mean for visualization
@@ -76,7 +80,7 @@ int main(int argc, char ** argv){
     update = tmp;
 
     for0(i, np) update[i] = 0.; // close enough? stop iterating if <1% of pix changed class
-    if(pct_chg < 1.) break;
+    if(pct_chg < tol) break;
   }
 
   str ofn(str(argv[1]) + str("_kmeans.bin")); // output class labels
