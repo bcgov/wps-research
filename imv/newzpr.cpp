@@ -575,21 +575,18 @@ void zprInstance::processString(){
   }
 
   if(strcmpz(console_string, "k\0") && console_string[1] == ' '){
-    printf("run kmeans on window for specified \n");
+    printf("run kmeans on window with k determined by optimization procedure \n");
+  }
+
+  if(strcmpz(console_string, "k\0") && console_string[1] == ' '){
+    printf("run kmeans on window for specified k; open result in new window\n");
     str kk(&console_string[2]);
     size_t kmeans_k = atoi(kk.c_str());
-    // k prefix: run K means, increasing K, until points with same references, are discriminated
-    // open the output in imv!!!!
-    //for(kmeans_k = 2; kmeans_k < 100; kmeans_k++)
     str use_name(exec("whoami")); // get user name
     use_name = strip(use_name);
     str cmd(str("/home/") + use_name + str("/GitHub/bcws-psu-research/cpp/kmeans_multi.exe tmp_subset.bin ") + to_string(kmeans_k)); // should not have abs path
-
     cout << "[" << cmd << "]" << endl;
     system(cmd.c_str());
-    printf("done kmeans\n");
-
-    printf("output csv..\n");
     size_t xoff = SUB_START_J; // size_t)(SUB_SCALE_F * (float) SUB_START_J);
     size_t yoff = SUB_START_I; // (size_t)(SUB_SCALE_F * (float) SUB_START_I);
     cout << "xoff " << xoff << " yoff " << yoff << " SUB_START_J " << SUB_START_J << " SUB_START_I " << SUB_START_I << endl;
@@ -601,9 +598,7 @@ void zprInstance::processString(){
     ofstream out2("tmp_subset.bin_means.bin_targets.csv_yoff", ios::out | ios::binary);
     out2 << to_string(yoff);
     out2.close();
-    printf("----------------------------------------------\n");
-    // str cmd("");
-    cmd = str("rm -f tmp_subset.bin_means.bin.ml; imv tmp_subset.bin_means.bin 13 0 ") + to_string(bands_per_frame) + str(" &");
+    cmd = str("rm -f tmp_subset.bin_means.bin.ml; imv tmp_subset.bin_means.bin ") + to_string(NWIN) + str(" 0 ") + to_string(bands_per_frame) + str(" &");
     cout << "[" << cmd << "]" << endl;
     system(cmd.c_str());
   }
