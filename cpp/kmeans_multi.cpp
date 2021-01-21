@@ -133,7 +133,13 @@ int main(int argc, char ** argv){
 
   str omn(str(argv[1]) + str("_means.bin")); // output class centres, for each pixel categorized
   str omh(str(argv[1]) + str("_means.hdr"));
-  for0(i, np) for0(k, nband) means[(k * np) + i] = mean[((size_t)label[i] * nband) + k]; // colour by mean
+  for0(i, np){
+    if(good[i]){
+      for0(k, nband){
+        means[(k * np) + i] = mean[((size_t)label[i] * nband) + k]; // colour by mean
+      }
+    }
+  }
   bwrite(means, omn, nrow, ncol, nband);
   hwrite(omh, nrow, ncol, nband, 4); // write data
 
