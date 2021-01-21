@@ -38,13 +38,10 @@ K -= 1 # for testing, delete this line later
 go = True
 while go:
     whoami = os.popen("whoami").read().strip()
-    exe = path + "../cpp/kmeans_multi.exe"
-    print("exe", exe)
-    exe = os.path.normpath(exe)
-    print("exe", exe)
-    run(exe + " " + infile + " " + str(K) + " 2.");
+    exe = os.path.normpath(path + "../cpp/kmeans_multi.exe")  # parallel kmeans function executable
+    run(exe + " " + infile + " " + str(K) + " 2.")  # run kmeans in parallel
     class_file = infile + "_kmeans.bin"
-    ncol, nrow, bands, data = read_binary(class_file)
+    ncol, nrow, bands, data = read_binary(class_file) # read the class map data resulting from kmeans
 
     kmeans_label = {}
     for i in range(1, len(lines)):
