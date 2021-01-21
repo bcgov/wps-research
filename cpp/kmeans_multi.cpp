@@ -1,6 +1,5 @@
 #include"misc.h" // implementation of k-means algorithm 20201123
-// added nan tolerance 20210120
-// question: do we need 0 / null class?
+// added nan tolerance 20210120. Null class (0.) added which NAN pixels are assigned to
 
 float tol; // tolerance percent
 size_t nrow, ncol, nband, np, i, j, k, n, iter_max, K, nmf;// variables
