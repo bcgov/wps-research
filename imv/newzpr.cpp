@@ -110,7 +110,6 @@ void zprInstance::mark(){
 void two_percent(float & min, float & max, SA<float> * b){
 
   if(scene_band_min.count(b) < 1){
-
     priority_queue<float> q;
     float * d = b->elements;
     unsigned int n_pct = floor(0.01 * N_PERCENT_SCALING * ((float)b->size()));
@@ -513,6 +512,28 @@ void zprInstance::processString(){
     return;
   }
 
+  // n string: overwrite NAN under window
+  if(strcmpz(console_string, "n\0") && console_string[1] == '\0'){
+    // big-data resilient read!
+    SA<float> * dat3 = SUB;
+    if(true){
+      nan_sub_np = IMG_NR * IMG_NC;
+      nan_sub_nb = IMG_NB;
+      nan_sub_mm = SUB_MM;
+      nan_sub_i_start = SUB_START_I; //i_start;
+      nan_sub_j_start = SUB_START_J; //j_start;
+      nan_sub_nc = IMG_NC; //nc;
+      nan_sub_dat3 = &((*dat3)[0]);
+      nan_sub_infile = IMG_FN; //string(infile);
+      nan_sub_i = SUB_I; // I, J coordinates of the image subsection we extracted
+      nan_sub_j = SUB_J;
+      parfor(0, IMG_NB, nan_sub);
+    }
+    SUB_MYIMG->initFrom(dat3, SUB_MM, SUB_MM, IMG_NB);
+    ((glImage *)SUB_GLIMG)->rebuffer();
+    printf("GOT HERE !!!!!!!!!!!\n");
+  }
+
   // i prefix?
   if(strcmpz(console_string, "i\0")){
     // iterate analysis window! could deprecate this one..
@@ -596,7 +617,7 @@ void zprInstance::processString(){
     size_t kmeans_k = atoi(kk.c_str());
     str use_name(exec("whoami")); // get user name
     use_name = strip(use_name);
-    str cmd(str("/home/") + use_name + str("/GitHub/bcws-psu-research/cpp/kmeans_multi.exe tmp_subset.bin ") + to_string(kmeans_k) + str(" 2.")); // shouldn't have abspath 
+    str cmd(str("/home/") + use_name + str("/GitHub/bcws-psu-research/cpp/kmeans_multi.exe tmp_subset.bin ") + to_string(kmeans_k) + str(" 2.")); // shouldn't have abspath
     cout << "[" << cmd << "]" << endl;
     system(cmd.c_str());
     size_t xoff = SUB_START_J; // size_t)(SUB_SCALE_F * (float) SUB_START_J);

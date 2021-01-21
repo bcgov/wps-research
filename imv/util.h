@@ -115,7 +115,6 @@ extern void (*pthread_eval)(size_t); // function pointer to execute in parallel,
 void parfor(size_t start_j, size_t end_j, void(*eval)(size_t));
 
 // method for loading band of image, limited to subarea
-
 extern size_t load_sub_np;
 extern size_t load_sub_nb;
 extern size_t load_sub_mm;
@@ -126,8 +125,20 @@ extern float * load_sub_dat3;
 extern string load_sub_infile;
 extern SA<size_t> * load_sub_i; // this is an array full of row indices for extracted stuff
 extern SA<size_t> * load_sub_j; // this is an array full of col indices for extracted stuff
-
 void load_sub(size_t k); // subset data loading, parallelized by band
+
+// method for writing NaN over band of image, limited to subarea
+extern size_t nan_sub_np;
+extern size_t nan_sub_nb;
+extern size_t nan_sub_mm;
+extern size_t nan_sub_i_start;
+extern size_t nan_sub_j_start;
+extern size_t nan_sub_nc;
+extern float * nan_sub_dat3;
+extern string nan_sub_infile;
+extern SA<size_t> * nan_sub_i; // this is an array full of row indices for extracted stuff
+extern SA<size_t> * nan_sub_j; // this is an array full of col indices for extracted stuff
+void nan_sub(size_t k); // subset data loading, parallelized by band
 
 // scene subsampling, parallelized by band
 extern size_t mlk_scene_nb;  // infile nbands
