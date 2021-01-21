@@ -43,12 +43,17 @@ while go:
     class_file = infile + "_kmeans.bin"
     ncol, nrow, bands, data = read_binary(class_file) # read the class map data resulting from kmeans
 
+    # data[ data == 0.] = float("nan")
+    # print("labels", set(data))
+
+
     kmeans_label = {}
-    for i in range(1, len(lines)):
+    for i in range(1, len(lines)): # for each vector point of ours
         line = lines[i]
-        x, y = int(line[i_row]), int(line[i_lin])
+        x, y = int(line[i_row]), int(line[i_lin]) # rowcol coords for the point
         ix = (y * ncol) + x # print("row", line[i_row], line[i_lin], line[i_xof], line[i_yof], line[i_lab], "class", data[ix])
-        if ix < nrow * ncol: kmeans_label[ix] = data[ix]
+        if ix < nrow * ncol:
+            kmeans_label[ix] = data[ix]
 
     kmeans_label_by_class = {}
     for p in class_label:
@@ -114,8 +119,6 @@ fig, ax = plt.subplots()
 img = ax.imshow(data, cmap='Spectral')
 # ax.set_aspect("auto")
 cbar = plt.colorbar(img)#  .legend([0, 1, 2, 3], ['0', '1', '2', '3'])\
-n_labels = 5
-#cbar.set_ticks(np.arange(n_labels + 1)) # add one for noise?
 tick_labels = ["noise"]
 ci = 1
 for label in kmeans_label_by_class:
