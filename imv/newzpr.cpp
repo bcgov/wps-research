@@ -112,9 +112,14 @@ void two_percent(float & min, float & max, SA<float> * b){
   if(scene_band_min.count(b) < 1){
     priority_queue<float> q;
     float * d = b->elements;
-    unsigned int n_pct = floor(0.01 * N_PERCENT_SCALING * ((float)b->size()));
+
     unsigned int i;
-    for(i = 0; i < b->size(); i++) q.push(d[i]);
+    for(i = 0; i < b->size(); i++){
+      float dd = d[i];
+      if(!(isinf(dd) || isnan(dd))) q.push(dd);
+    }
+    unsigned int n_pct = floor(0.01 * N_PERCENT_SCALING * ((float)q.size())); // ((float)b->size()));
+
     for(i = 0; i < n_pct; i++) q.pop();
     max = q.top();
     while(q.size() > n_pct) q.pop();
@@ -143,13 +148,21 @@ void two_percent(float & min, float & max, SA<float> * r, SA<float> * g, SA<floa
 
   if(scene_bands_min.count(bs) < 1){
     priority_queue<float> q;
-    float * R= b->elements;
+    float * R = r->elements;
     float * G = g->elements;
     float * B = b->elements;
 
-    unsigned int n_pct = floor(0.01 * N_PERCENT_SCALING * ((float)b->size()));
     unsigned int i;
-    for(i = 0; i < b->size(); i++) q.push(max3(R[i], G[i], B[i]));
+    for(i = 0; i < b->size(); i++){
+      float Ri = R[i]; 
+      float Gi = G[i];
+      float Bi = B[i];
+      if(!(isnan(Ri) || isnan(Gi) || isnan(Bi) || isinf(Ri) || isinf(Gi) || isinf(Bi))){
+        q.push(max3(Ri, Gi, Bi)); // R[i], G[i], B[i]));
+      }
+    }
+    unsigned int n_pct = floor(0.01 * N_PERCENT_SCALING * ((float)q.size())); //  ((float)b->size()));
+
     for(i = 0; i < n_pct; i++) q.pop();
     max = q.top();
     while(q.size() > n_pct) q.pop();
