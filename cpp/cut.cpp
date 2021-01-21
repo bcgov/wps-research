@@ -2,7 +2,7 @@
 type-4 32-bit IEEE standard floating-point format, BSQ interleave
 
 similar to:
-gdal_translate -a_ullr startx starty endx endy -of ENVI -ot Float32 stack.bin stack_crop.bin
+gdal_translate -srcwin xoff yoff xsize ysize -of ENVI -ot Float32 stack.bin stack_crop.bin
 
 but does not keep header / geo info */
 
