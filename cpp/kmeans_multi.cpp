@@ -1,5 +1,6 @@
 #include"misc.h" // implementation of k-means algorithm 20201123
 // added nan tolerance 20210120
+// question: do we need 0 / null class?
 
 float tol; // tolerance percent
 size_t nrow, ncol, nband, np, i, j, k, n, iter_max, K, nmf;// variables
@@ -7,8 +8,8 @@ float * dat, * means, * dmin, * dmax, *dcount, *mean, *label, *update;
 bool * bad, * good;
 
 void find_nearest(size_t i){
-  size_t j, k;
-  size_t nearest_i = 0; // for each point, reassign to nearest cluster centre
+  size_t j, k; // find index of nearest cluster centre to this point
+  size_t nearest_i = 0;
   float nearest_d = FLT_MAX;
 
   // don't assign bad points
@@ -31,15 +32,15 @@ void find_nearest(size_t i){
 
 int main(int argc, char ** argv){
   if(argc < 3) err("kmeans [input binary file name] [k]");
-
-  iter_max = 100;
   str fn(argv[1]); // input image file name
   K = atoi(argv[2]); // prescribed number of classes
   str hfn(hdr_fn(fn)); // input header file name
   hread(hfn, nrow, ncol, nband); // read header
-  tol = 1.;
+
+  tol = 2.; // percent class change tolerance e.g. 2. is 2%!
+  iter_max = 100.; // max number of iterations
   if(argc > 3) tol = atof(argv[3]);
-  if(tol < 0 || tol >= 100) err("tol must be 0 and 100.");
+  if(tol < 0 || tol >= 100) err("tol must be between 0 and 100.");
 
   np = nrow * ncol; // number of input pix
   dat = bread(fn, nrow, ncol, nband); // load floats to array
@@ -62,7 +63,7 @@ int main(int argc, char ** argv){
         bad[i] = true; // mark this pixel as bad
       }
       else{
-        if(d < dmin[k]) dmin[k] = d;
+        if(d < dmin[k]) dmin[k] = d; // calculate min and max
         if(d > dmax[k]) dmax[k] = d;
       }
     }
@@ -76,7 +77,8 @@ int main(int argc, char ** argv){
   for0(i, np){
     if(good[i]){
       for0(k, nband){
-        dat[(np * k) + i] = (dat[(np * k) + i]- dmin[k]) / (dmax[k] - dmin[k]); // scale data
+        // scale data
+        dat[(np * k) + i] = (dat[(np * k) + i]- dmin[k]) / (dmax[k] - dmin[k]);
       }
     }
   }
@@ -85,7 +87,14 @@ int main(int argc, char ** argv){
   mean = falloc(nmf); // mean vector for each class
   label = falloc(np); // init one label per pixel. 0 is non-labelled
   update = falloc(np); // new set of labels
-  for0(i, np) label[i] = (i % K); // uniform initialization
+  for0(i, np){
+    if(good[i]){
+      label[i] = 1 + (i % K); // uniform initialization outside of null label
+    }
+    else{
+      label[i] = 0; // null / nonclass label
+    }
+  }
 
   for0(n, iter_max){
     // still more to parallelize here!
