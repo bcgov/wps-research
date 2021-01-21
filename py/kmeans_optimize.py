@@ -1,16 +1,13 @@
 ''' optimization for k-means algorithm, given target file'''
 from misc import *
-
-infile = "stack.bin"
+infile = "stack.bin" # default input file
 
 if len(args) < 2 and not os.path.exists("stack.bin"):
     err("kmeans_optimization.py [input image to run kmeans on]")
 else:
-    if len(args) > 1:
-        infile = args[1]
+    if len(args) > 1: infile = args[1]
 
-if not os.path.exists(infile):
-    err("failed to find input file: " + infile)
+if not os.path.exists(infile): err("failed to find input file: " + infile)
 
 tf = infile + "_targets.csv"
 if not os.path.exists(tf):
@@ -23,12 +20,10 @@ path = sep.join(__file__.split(sep)[:-1]) + sep  # path to this file
 print("path", path)
 path = os.path.abspath(os.path.expanduser(os.path.expandvars(path))) + sep
 
-# read info from image file
-ncol, nrow, bands = read_hdr(infile[:-3] + 'hdr')
+ncol, nrow, bands = read_hdr(infile[:-3] + 'hdr') # read info from image file
 ncol, nrow, bands = int(ncol), int(nrow), int(bands)
 
-# start K at number of labels
-c, class_label = {}, {}
+c, class_label = {}, {} # start K at number of labels
 for i in range(1, len(lines)):
     line = lines[i]
     label = line[i_lab]
@@ -83,9 +78,7 @@ while go:
                 bad = True
   
     if not bad:
-        print("good")
-
-        # clean up labels so that everything outside the known classes is 0, and all clusters for class get same label..
+        print("good") # clean up labels so that everything outside the known classes is 0, and all clusters for class get same label..
         used_labels = set()
         for k in kmeans_label_by_class:
             for j in kmeans_label_by_class[k]:
