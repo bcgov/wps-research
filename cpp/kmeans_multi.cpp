@@ -26,7 +26,7 @@ void find_nearest(size_t i){
         nearest_i = j;
       }
     }
-    update[i] ++; // non-null label starts from 0
+    nearest_i ++; // non-null label starts from 0
   }
   update[i] = nearest_i;
 }
@@ -74,7 +74,7 @@ int main(int argc, char ** argv){
     good[i] = !bad[i];
     if(good[i]) n_good ++;
   }
- 
+
   for0(i, np){
     if(good[i]){
       for0(k, nband){
