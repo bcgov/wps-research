@@ -26,6 +26,7 @@ void find_nearest(size_t i){
         nearest_i = j;
       }
     }
+    update[i] ++; // non-null label starts from 0
   }
   update[i] = nearest_i;
 }
@@ -101,14 +102,13 @@ int main(int argc, char ** argv){
     for0(k, K) dcount[k] = 0.; // denominator for average
     for0(i, nmf) mean[i] = 0.; // for each iter, calculate class means
     for0(i, np){
-      if(good[i]){
-        for0(k, nband) mean[(((size_t)label[i]) * nband) + k] += dat[(np * k) + i];
-        dcount[(size_t)label[i]] += 1;
+      if(good[i] && label[i] > 0.){
+        for0(k, nband) mean[(((size_t)(label[i] - 1.)) * nband) + k] += dat[(np * k) + i];
+        dcount[(size_t)(label[i] - 1.)] += 1;
       }
     }
-    for0(i, K) if(dcount[i] > 0) for0(j, nband) mean[(i * nband) + j] /= dcount[i];
-
-    parfor(0, np, find_nearest);
+    for0(i, K) if(dcount[i] > 0) for0(j, nband) mean[(i * nband) + j] /= dcount[i]; // mean = total / count
+    parfor(0, np, find_nearest); // find nearest centre to each point
 
     size_t n_change = 0;
     for0(i, np){
