@@ -24,14 +24,14 @@ ncol, nrow, bands = read_hdr(infile[:-3] + 'hdr') # read info from image file
 ncol, nrow, bands = int(ncol), int(nrow), int(bands)
 
 c, class_label = {}, {} # start K at number of labels
-for i in range(1, len(lines)):
-    line = lines[i]
-    label = line[i_lab]
+for i in range(1, len(lines)): # iterate over the vector labels
+    line = lines[i] # csv data
+    label = line[i_lab] # text label from csv
     x, y = int(line[i_row]), int(line[i_lin])
-    ix = (y * ncol) + x
+    ix = (y * ncol) + x  # image coordinates of the point! 
     if ix < nrow * ncol:  # skip if out of bounds
-        class_label[ix] = label
-        c[label] = (c[label] + 1) if label in c else 1
+        class_label[ix] = label  # lookup from pix/line coords to text label
+        c[label] = (c[label] + 1) if label in c else 1 # start count from 1
 K = len(c) # starting number of classes
 K -= 1 # for testing, delete this line later
 
@@ -49,12 +49,9 @@ while go:
     kmeans_label = {}
     for i in range(1, len(lines)):
         line = lines[i]
-        x = int(line[i_row])
-        y = int(line[i_lin])
-        ix = (y * ncol) + x
-        # print("row", line[i_row], line[i_lin], line[i_xof], line[i_yof], line[i_lab], "class", data[ix])
-        if ix < nrow * ncol:
-            kmeans_label[ix] = data[ix]
+        x, y = int(line[i_row]), int(line[i_lin])
+        ix = (y * ncol) + x # print("row", line[i_row], line[i_lin], line[i_xof], line[i_yof], line[i_lab], "class", data[ix])
+        if ix < nrow * ncol: kmeans_label[ix] = data[ix]
 
     kmeans_label_by_class = {}
     for p in class_label:
@@ -71,8 +68,7 @@ while go:
     for k in kmeans_label_by_class:
         kk = kmeans_label_by_class[k]
         for j in kmeans_label_by_class:
-            if k == j:
-                continue
+            if k == j: continue
             kj = kmeans_label_by_class[j]
             if kk.intersection(kj) != empty:
                 bad = True
@@ -97,35 +93,24 @@ while go:
                 lookup[j] = ci
             ci += 1
 
-        print("lookup", lookup)
-        # apply lookup
-
-        for i in range(0, nrow* ncol):
-            data[i] = lookup[data[i]]
+        print("lookup", lookup)  # now apply lookup
+        for i in range(0, nrow* ncol): data[i] = lookup[data[i]]
 
         write_binary(data, class_file) # relabel the data and output
-        break
-          
-    # kmeans_label_by_class: {'fireweedandaspen': [0.0], 'blowdownwithlichen': [1.0, 0.0], 'pineburned': [1.0, 1.0, 1.0]}
+        break # kmeans_label_by_class: {'fireweedandaspen': [0.0], 'blowdownwithlichen': [1.0, 0.0], 'pineburned': [1.0, 1.0, 1.0]}
     K += 1 # try adding a class!
-print("kmeans_label_by_class", kmeans_label_by_class)
-print("lookup", lookup)
+print("kmeans_label_by_class", kmeans_label_by_class, "lookup", lookup)
 
 # translate the lookup
 for label in kmeans_label_by_class:
     labels = list(kmeans_label_by_class[label])
     labels = [lookup[i] for i in labels]
     kmeans_label_by_class[label] = set(labels)
-
 print("kmeans_label_by_class", kmeans_label_by_class)
 
 import matplotlib.pyplot as plt
 hdr = hdr_fn(infile)
 npx = nrow * ncol
-#samples, lines, bands = read_hdr(hdr)
-#samples, lines, bands = int(samples), int(lines), int(bands)
-# npx = lines * samples # number of pixels
-# data = read_float(sys.argv[1]).reshape((bands, npx))
 data = data.reshape((nrow, ncol))
 
 fig, ax = plt.subplots()
