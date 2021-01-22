@@ -110,6 +110,9 @@ for label in kmeans_label_by_class:
     kmeans_label_by_class[label] = set(labels)
 print("kmeans_label_by_class", kmeans_label_by_class)
 
+
+#  do the plotting! 
+
 import matplotlib.pyplot as plt
 hdr = hdr_fn(infile)
 npx = nrow * ncol
