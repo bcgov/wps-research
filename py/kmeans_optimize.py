@@ -39,7 +39,7 @@ go = True
 while go:
     whoami = os.popen("whoami").read().strip()
     exe = os.path.normpath(path + "../cpp/kmeans_multi.exe")  # parallel kmeans function executable
-    run(exe + " " + infile + " " + str(K) + " 2.")  # run kmeans in parallel
+    run(exe + " " + infile + " " + str(K) + " 3.")  # run kmeans in parallel
     class_file = infile + "_kmeans.bin"
     ncol, nrow, bands, data = read_binary(class_file) # read the class map data resulting from kmeans
 
