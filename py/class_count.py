@@ -1,5 +1,5 @@
 # count the number of classes in a ENVI type-4 (i.e., ieee floating-point 32-bit "byte-order=0") image
-from misc import * 
+from misc import *
 
 if len(args) < 2:
     err("class_count [input binary file]")
