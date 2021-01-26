@@ -33,7 +33,7 @@ for i in range(1, len(lines)): # iterate over the vector labels
         class_label[ix] = label  # lookup from pix/line coords to text label
         c[label] = (c[label] + 1) if label in c else 1 # start count from 1
 K = len(c) # starting number of classes
-K -= 1 # for testing, delete this line later
+# K -= 1 # for testing, delete this line later
 
 go = True
 while go:
