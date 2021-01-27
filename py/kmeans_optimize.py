@@ -103,38 +103,42 @@ for L in target_mean:
             target_mean[L][k] /= target_n[L]
 
 print("calculate seed layer..")
-# form seed layer by choosing each point's label by taking the closest mean (where the mean is calculated over different points with the same label)
-seed = []
-for ix in range(nrow * ncol):
-    bad = False
-    for k in range(bands):
-        if math.isnan(dat_img[nrow*ncol*k + ix]):
-            bad = True
-    if bad:
-        seed.append(float("NaN"))
-        continue    
-
-    min_c, min_d = None, float("NaN")
-    ci = 0
-    for c in target_mean:
-        d = 0.
+if not exist(infile + "_seed.bin"):
+    # form seed layer by choosing each point's label by taking the closest mean (where the mean is calculated over different points with the same label)
+    seed = []
+    dx = math.ceil(nrow * ncol / 1000.)
+    for ix in range(nrow * ncol):
+        if ix % dx == 0:
+            print(100. * ix / (nrow * ncol), "%")
+        bad = False
         for k in range(bands):
-            dd = target_mean[c][k] - dat_img[nrow*ncol*k + ix]
-            d += dd * dd
-        d = math.sqrt(d)
-        if min_c is None:
-            min_c = ci
-            min_d = d
-        else:
-            if d < min_d:
-                min_d = d
-                min_c = ci # represent class by number
-        ci += 1
-    seed.append(min_c)
+            if math.isnan(dat_img[nrow*ncol*k + ix]):
+                bad = True
+        if bad:
+            seed.append(float("NaN"))
+            continue    
 
-print("len(seed)", len(seed))
-write_binary(np.array(seed, dtype=np.float32), infile + "_seed.bin")
-write_hdr(infile + "_seed.hdr", ncol, nrow, 1) 
+        min_c, min_d = None, float("NaN")
+        ci = 0
+        for c in target_mean:
+            d = 0.
+            for k in range(bands):
+                dd = target_mean[c][k] - dat_img[nrow*ncol*k + ix]
+                d += dd * dd
+            d = math.sqrt(d)
+            if min_c is None:
+                min_c = ci
+                min_d = d
+            else:
+                if d < min_d:
+                    min_d = d
+                    min_c = ci # represent class by number
+            ci += 1
+        seed.append(min_c)
+
+    print("len(seed)", len(seed))
+    write_binary(np.array(seed, dtype=np.float32), infile + "_seed.bin")
+    write_hdr(infile + "_seed.hdr", ncol, nrow, 1) 
 
 go = True
 iteration = 0
@@ -142,12 +146,12 @@ next_label = K
 print("next_label", next_label)
 good_labels = np.full(nrow*ncol, float("NaN"),dtype=np.float32) #None # will store labels of points that are finally classified, here..
 
-while go: # turn this into a recursive function
+while go: # could have turned this into a recursive function!
     whoami = os.popen("whoami").read().strip()
     class_file = infile + "_kmeans.bin"
     seed_file = infile + "_seed.bin"
     if iteration > 0:
-        seed_file = infile + "_seed.bin" #  class_file
+        seed_file = infile + "_reseed.bin" #  class_file
     run("./kmeans_iter.exe " + infile + " " + seed_file + " 1. " + ("" if iteration == 0 else (" " + str(next_label))))
     print(">>>>>>> DONE RUN >>>>>>>>>>!!!!!!!%^&*%^&*%^&*")
     next_label += 1 # next iteration would need a higher label if it's reached..
@@ -219,8 +223,10 @@ while go: # turn this into a recursive function
     write_binary(good_labels, infile + "_good.bin") # relabel the data and output
     write_hdr(infile + "_good.hdr", ncol, nrow, 1)
 
-    write_binary(seeds, infile + "_seed.bin") # relabel the data and output
-    write_hdr(infile + "_seed.hdr", ncol, nrow, 1)
+    write_binary(seeds, infile + "_reseed.bin") # relabel the data and output
+    write_hdr(infile + "_reseed.hdr", ncol, nrow, 1)
+    sys.exit(1)
+
      
     # DONT FORGET THE MERGE STEP@@@@@@@@@@
    
