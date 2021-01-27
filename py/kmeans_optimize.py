@@ -102,7 +102,7 @@ for L in target_mean:
         for k in range(bands):
             target_mean[L][k] /= target_n[L]
 
-print("calculate seed layer..")
+print("calculate seed layer..") # should be parallelized in C/C++
 if not exist(infile + "_seed.bin"):
     # form seed layer by choosing each point's label by taking the closest mean (where the mean is calculated over different points with the same label)
     seed = []
