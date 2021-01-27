@@ -30,10 +30,7 @@ method above will be out of date... need to revise documentation
 '''
 from misc import *
 infile = "stack.bin" # default input file
-run("rm -f ../cpp/kmeans_iter.exe")
-if not exist("../cpp/kmeans_iter.exe"):
-    run("g++ -O3 ../cpp/kmeans_iter.cpp ../cpp/misc.cpp -o ../cpp/kmeans_iter.exe")
-sys.exit(1)
+
 if len(args) > 1: infile = args[1]
 if len(args) < 2 and not os.path.exists(infile):
     err("kmeans_optimization.py [input image to run kmeans on]")
@@ -48,6 +45,12 @@ i_row, i_lin, i_xof, i_yof, i_lab, sep = hdr.index('row'), hdr.index('lin'), hdr
 path = sep.join(__file__.split(sep)[:-1]) + sep  # path to this file
 print("path", path)
 path = os.path.abspath(os.path.expanduser(os.path.expandvars(path))) + sep
+
+print(path)
+p = path + "../cpp/"
+run("rm -f " + p + "kmeans_iter.exe")
+if not exist(p + "kmeans_iter.exe"):
+    run("g++ -w -O3 " + p + "kmeans_iter.cpp " + p + "misc.cpp -o " + p + "kmeans_iter.exe -lpthread")
 
 ncol, nrow, bands = read_hdr(infile[:-3] + 'hdr') # read info from image file
 ncol, nrow, bands = int(ncol), int(nrow), int(bands)
