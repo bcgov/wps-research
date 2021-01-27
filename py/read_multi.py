@@ -48,7 +48,7 @@ for i in range(0, 3):
     
     if not override_scaling:
         # scale band in range 0 to 1
-        rgb_min, rgb_max = np.min(rgb[:, :, i]), np.max(rgb[:, :, i])
+        rgb_min, rgb_max = np.nanmin(rgb[:, :, i]), np.nanmax(rgb[:, :, i])
         print("rgb_min: " + str(rgb_min) + " rgb_max: " + str(rgb_max))
         rgb[:, :, i] -= rgb_min
         rng = rgb_max - rgb_min
@@ -77,8 +77,17 @@ for i in range(0, 3):
 
         # need to add this update in misc.py as well, and move this code out
         d = rgb[:, :, i]
-        (rgb[:, :, i])[d < 0.] = 0.
-        (rgb[:, :, i])[d > 1.] = 1.
+    
+        for j in range(rgb.shape[0]):
+            for k in range(rgb.shape[1]):
+                d = rgb[j,k,i]
+                if d < 0.:
+                    rgb[j,k,i] = 0.
+                if d > 1.:
+                    rgb[j,k,i] = 1.
+
+        # (rgb[:, :, i])[d < 0.] = 0.
+        # (rgb[:, :, i])[d > 1.] = 1.
 
 # plot the image
 plt.style.use('dark_background')
