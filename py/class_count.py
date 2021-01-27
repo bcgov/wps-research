@@ -9,6 +9,8 @@ samples, lines, bands, data = read_binary(args[1])
 
 count = {}
 for d in data:
+    if math.isnan(d):
+        continue
     if d not in count:
         count[d] = 0
     count[d] += 1
