@@ -25,12 +25,15 @@ first iteration start with seed layer as above.
   (a) list all labels that some pixel(s) actually use (incl. NAN)
   (b) 
 
+
+method above will be out of date... need to revise documentation
 '''
 from misc import *
 infile = "stack.bin" # default input file
-run("rm -f kmeans_iter.exe")
-run("python3 compile.py")
-
+run("rm -f ../cpp/kmeans_iter.exe")
+if not exist("../cpp/kmeans_iter.exe"):
+    run("g++ -O3 ../cpp/kmeans_iter.cpp ../cpp/misc.cpp -o ../cpp/kmeans_iter.exe")
+sys.exit(1)
 if len(args) > 1: infile = args[1]
 if len(args) < 2 and not os.path.exists(infile):
     err("kmeans_optimization.py [input image to run kmeans on]")
