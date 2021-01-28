@@ -44,9 +44,8 @@ Methods and Systems for Image Analysis developed in partnership with:
 * Jabed Tomal, TRU
 
 ## Setup:
-* Install Oracle virtualbox
+- Install Oracle virtualbox
 
-Tested on ubuntu 20
 
 ## how to:
 0) Set up the programs:
@@ -73,15 +72,13 @@ Tested on ubuntu 20
     bin/hclust data/mS2.bin data/mS2.bin_label.bin 10
     
     video of clustering: https://www.youtube.com/watch?v=ooOHEubDNvM
-   
-
 
 ## License
 
 Copyright 2021 Province of British Columbia
 
 Licensed under the Apache License, Version 2.0 (the "License");
-you mayn't use these files except in compliance with the License.
+you may not use these files except in compliance with the License.
 
 You may obtain a copy of the License at
 http://www.apache.org/licenses/LICENSE-2.0
