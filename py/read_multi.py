@@ -55,8 +55,13 @@ if bands == 1:
                 labels = line
         except:
             pass
-    labels = labels.replace("kmeans_label_by_class", "kmeans_label_by_class=")
-    exec(labels)
+    try:
+        labels = labels.replace("kmeans_label_by_class", "kmeans_label_by_class=")
+    except:
+        pass
+
+    exec(labels if labels is not None else "kmeans_label_by_class={}")
+
     print(kmeans_label_by_class)
     for L in kmeans_label_by_class:
         for lab in kmeans_label_by_class[L]:
@@ -64,7 +69,7 @@ if bands == 1:
         kmeans_labels[lab].add(L)
 
     if str(kmeans_labels) != str("{}"):
-        data = data.tolist()[0]
+        data = data.tolist()[0] # not sure why the data packed wierdly in here
         for i in range(npx):
             if data[i] == float("NaN"):
                 data[i] = 0.
@@ -122,22 +127,29 @@ for i in range(0, 3):
         # (rgb[:, :, i])[d > 1.] = 1.
 
 # plot the image
-if kmeans_labels == {}:
-    plt.style.use('dark_background')
+if str(kmeans_labels) == "{}":
+    fig = plt.figure()
+    ax = fig.add_subplot(1,1,1)
     ff = os.path.sep.join((fn.split(os.path.sep))[:-1]) + os.path.sep
     title_s = fn.split("/")[-1] if not exists(ff + 'title_string.txt') else open(ff + 'title_string.txt').read().strip() 
     plt.title(title_s, fontsize=11)
+    plt.style.use('dark_background')
+
+    d_min, d_max = np.nanmin(rgb), np.nanmax(rgb)
+    rgb = rgb / (d_max - d_min)
 
 
-    fig = plt.figure()
-    ax = fig.add_subplot(1,1,1)
     plt.imshow(rgb, vmin = 0., vmax = 1.) #plt.tight_layout()
 
     if exists(ff + 'copyright_string.txt'):
         plt.xlabel(open(ff+ 'copyright_string.txt').read().strip())
 
-if kmeans_labels != {}:
+if str(kmeans_labels) != "{}":
     data = read_float(sys.argv[1])
+
+    d_min, d_max = np.nanmin(data), np.nanmax(data)
+    data = 255. * (data - d_min) / (d_max - d_min)
+
     data = data.reshape((lines, samples))
     fig = plt.figure()
     fig, ax = plt.subplots()
