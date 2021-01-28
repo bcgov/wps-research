@@ -196,9 +196,7 @@ int main(int argc, char ** argv){
     for0(j, K){
       float c = buckets[j];
       printf(" c[%f] ", c);
-      for0(k, nband){
-        printf("%f,", means[c][k]);
-      }
+      for0(k, nband) printf("%f,", means[c][k]);
       printf("\n");
     }
 
