@@ -12,15 +12,15 @@ Methods and Systems for Image Analysis developed in partnership with:
 <img src="output/difference.gif" width="640">
 
 ## features
-* High-contrast visualization for multispectral imagery and classification maps
-* Supervised and unsupervised classification methods, for multispectral imagery
-   * K-Means++
+* Adjustable high-contrast visualization and manipulation of multispectral imagery and classification maps
+* Exascale viewer with interactive classification
+   * Interactively view multitemporal multispectral image stacks of size up to system limit
+* Codes for supervised, unsupervised and hybrid classification methods, for multispectral imagery
+   * K-Means ++
+   * HAC from [1]
+   * Paralellized semi-supervised K-Means
    * Hierarchical Agglomerative Clustering (HAC) Scikit-Learn
-   * HAC: Daniel Müllner, fastcluster: Fast Hierarchical, Agglomerative Clustering Routines for R and Python, Journal of Statistical Software 53 (2013), no. 9, 1–18, URL http://www.jstatsoft.org/v53/i09/
    * HAC: bootstrappable, direct implementation (can initialize with HAC results on tiles)
-* manipulation operations for class maps
-
-To appear: more utilities for integrating open remotely-sensed imagery
 
 ## Collaborators and Contributors:
 * Dana Hicks, BCWS
@@ -74,7 +74,7 @@ Tested on ubuntu 20
 
 ## License
 
-Copyright 2020 Province of British Columbia
+Copyright 2021 Province of British Columbia
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you mayn't use these files except in compliance with the License.
@@ -89,3 +89,6 @@ either express or implied.
 
 See the License for specific language governing permissions
 and limitations under the License.
+
+## References
+[1]  Daniel Müllner, fastcluster: Fast Hierarchical, Agglomerative Clustering Routines for R and Python, Journal of Statistical Software 53 (2013), no. 9, 1–18, URL http://www.jstatsoft.org/v53/i09/
