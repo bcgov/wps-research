@@ -109,9 +109,8 @@ int main(int argc, char ** argv){
   }
 
   K = my_seeds.size();
-  if(add_random_seed){
-    K ++;
-  }
+  if(add_random_seed) K ++;
+ 
 
   for0(i, np){
     d = seed[i]; // use seed file to assign points to buckets
