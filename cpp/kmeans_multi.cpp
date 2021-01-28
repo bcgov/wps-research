@@ -89,10 +89,10 @@ int main(int argc, char ** argv){
   update = falloc(np); // new set of labels
   for0(i, np){
     if(good[i]){
-      label[i] = 1 + (i % K); // uniform initialization outside of null label
+      label[i] = i % K; // uniform initialization outside of null label
     }
     else{
-      label[i] = 0; // null / nonclass label
+      label[i] = NAN; // null / nonclass label
     }
   }
 
@@ -102,11 +102,17 @@ int main(int argc, char ** argv){
     for0(i, nmf) mean[i] = 0.; // for each iter, calculate class means
     for0(i, np){
       if(good[i] && label[i] > 0.){
-        for0(k, nband) mean[(((size_t)(label[i] - 1.)) * nband) + k] += dat[(np * k) + i];
-        dcount[(size_t)(label[i] - 1.)] += 1;
+        for0(k, nband) mean[((size_t)label[i] * nband) + k] += dat[(np * k) + i];
+        dcount[(size_t)label[i]] += 1;
       }
     }
     for0(i, K) if(dcount[i] > 0) for0(j, nband) mean[(i * nband) + j] /= dcount[i]; // mean = total / count
+
+    for0(i, K){
+      printf("K=%d ", i);
+      for0(j, nband) printf("%f ", mean[(i * nband) + j]);
+      printf("\n");
+    }
     parfor(0, np, find_nearest); // find nearest centre to each point
 
     size_t n_change = 0;
@@ -117,7 +123,7 @@ int main(int argc, char ** argv){
     }
     float pct_chg = 100. * (float)n_change / (float)n_good; // plot change info
     printf("iter %zu of %zu n_change %f\n", n + 1, iter_max, pct_chg);
-    /* set<size_t> observed; for0(i, np) observed.insert(label[i]); cout << " " << observed << endl; // plot observed labels */
+    set<size_t> observed; for0(i, np) observed.insert(label[i]); cout << " " << observed << endl; // plot observed labels */
     float * tmp = label; // swap
     label = update;
     update = tmp;
