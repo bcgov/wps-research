@@ -85,7 +85,7 @@ target_data = {ix: [dat_img[nrow*ncol*k + ix] for k in range(0, bands)] for ix i
 for ix in target_data:
     print(ix, target_data[ix])
 
-# mean (by label) of image data under targets
+# mean (by label) of image data under targets (should average over small windows)..
 target_mean = {}
 target_n = {}
 for ix in target_ix:
@@ -239,6 +239,7 @@ while go: # could have turned this into a recursive function!
     # each iteration, save the good stuff. and attack the rest again!
     write_binary(good_labels, infile + "_good.bin") # relabel the data and output
     write_hdr(infile + "_good.hdr", ncol, nrow, 1)
+    open(infile + "_good.hdr", "a").write("\nkmeans_label_by_class " + str(kmeans_label_by_class))
 
     write_binary(seeds, infile + "_reseed.bin") # relabel the data and output
     write_hdr(infile + "_reseed.hdr", ncol, nrow, 1)
