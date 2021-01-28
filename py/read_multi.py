@@ -174,8 +174,8 @@ if str(kmeans_labels) != "{}":
     ci = 0 
     for label in kmeans_labels: # eans_label_by_class:
         x = kmeans_labels[label] #_by_class[label]
-        tick_labels.append(x) # label)
-        ticks.append(label)
+        tick_labels.append(str(x)) # this is the "set of classes" label
+        ticks.append(label) # this is the float label
         if set([ci]) != x:
             print(str(set([ci])), str(x))
             # err("color index problem")

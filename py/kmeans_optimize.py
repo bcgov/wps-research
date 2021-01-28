@@ -257,9 +257,6 @@ while go: # could have turned this into a recursive function!
     # LOOK AT BRAD NEW DATA
 	
 
-
-
-
     sys.exit(1)
 
      
