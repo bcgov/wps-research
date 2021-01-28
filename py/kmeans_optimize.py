@@ -1,4 +1,4 @@
-''' optimization for hkmeans algorithm, given target file
+''' optimization for hkmeans algorithm, given target (class annotation) file
 
 1. set seed layer:
    (a) extract data from under targets
@@ -6,27 +6,6 @@
    (c) find closest centre to each data point (this becomes seed layer)
    (d) data with NAN or INF are assigned class NAN
 
-first iteration start with seed layer as above.
-
-2. iterations:
-  (a) run kmeans_iter
-  (b) read revised labels
-  (c) for each target label, form list with no repetitions of kmeans labels associated with that label
-  (d) check for intersections. If there are no intersections we're done, proceed to 3. 
-  (e) define intersection list: list target labels (and associated KMEANS labels) associated with the intersection
-  (f) initialize K as length of intersection list (number of confused target classes).. print out intersection list (and target class labels + kmeans labels outside of intersect list)
-        - define seed layer so that kmeans classes outside of those associated with confused target classes are given the label NAN
-        - i.e., only refine confused classes!
-        - for kmeans classes associated with confused target classes, seed by calculating nearest labels to the target-class-means already calculated..
-  (g) if intersection list was unchanged from last iteration, increase number of K? Seed uniformly?
-  (h) record intersection list for reuse..
-
-3. Cleanup
-  (a) list all labels that some pixel(s) actually use (incl. NAN)
-  (b) 
-
-
-method above will be out of date... need to revise documentation
 '''
 from misc import *
 infile = "stack.bin" # default input file
