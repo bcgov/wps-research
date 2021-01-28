@@ -3,6 +3,7 @@ Methods and Systems for Image Analysis developed in partnership with:
 * Digital Platforms and Data Division (DPDD), Office of The BC Chief Information Officer (OCIO) 
 * BC Wildfire Service (BCWS) Predictive Services Unit (PSU)
 * Thompson Rivers University (TRU)
+
 in support of BC Wildfire Service (BCWS) Predictive Services Unit (PSU) program
 
 ## Sample results
