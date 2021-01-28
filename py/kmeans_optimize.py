@@ -51,6 +51,7 @@ p = path + "../cpp/"
 run("rm -f " + p + "kmeans_iter.exe")
 if not exist(p + "kmeans_iter.exe"):
     run("g++ -w -O3 " + p + "kmeans_iter.cpp " + p + "misc.cpp -o " + p + "kmeans_iter.exe -lpthread")
+cpp_path = p
 
 ncol, nrow, bands = read_hdr(infile[:-3] + 'hdr') # read info from image file
 ncol, nrow, bands = int(ncol), int(nrow), int(bands)
@@ -152,7 +153,7 @@ while go: # could have turned this into a recursive function!
     seed_file = infile + "_seed.bin"
     if iteration > 0:
         seed_file = infile + "_reseed.bin" #  class_file
-    run("./kmeans_iter.exe " + infile + " " + seed_file + " 1. " + ("" if iteration == 0 else (" " + str(next_label))))
+    run(cpp_path + "kmeans_iter.exe " + infile + " " + seed_file + " 1. " + ("" if iteration == 0 else (" " + str(next_label))))
     print(">>>>>>> DONE RUN >>>>>>>>>>!!!!!!!%^&*%^&*%^&*")
     next_label += 1 # next iteration would need a higher label if it's reached..
     ncol, nrow, bands, data = read_binary(class_file) # read the class map data resulting from kmeans
@@ -174,6 +175,22 @@ while go: # could have turned this into a recursive function!
     for L in kmeans_label_by_class: # what would a vectorization for an op like this look like?
         kmeans_label_by_class[L] = set(kmeans_label_by_class[L])
     print("kmeans_label_by_class", kmeans_label_by_class)
+
+
+    # kmeans_label_by_class {'fireweeddeciduous': {4.0}, 'blowdownlichen': {2.0}, 'fireweedgrass': {5.0}, 'exposed': {3.0}, 'pineburned': {0.0}, 'pineburnedfireweed': {1.0}}
+    found = False
+    lines = open(infile + "_kmeans.hdr").read()
+    lines = [line.strip() for line in lines]
+    for i in range(0, len(lines)):
+        line = lines[i]
+        w = line.split()
+        try:
+            if w[0] == "kmeans_label_by_class":
+                found = True
+        except:
+            pass
+    if not found:
+        open(infile + "_kmeans.hdr", "a").write("kmeans_label_by_class " + str(kmeans_label_by_class))
 
     # check if we're done
     bad, empty = False, set()
