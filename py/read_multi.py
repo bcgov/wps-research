@@ -4,14 +4,13 @@
 adapted from a script worked on with francesca at: https://github.com/franarama/satellite-clustering
 
 usage:
-    python read_multispectral.py sentinel2.bin
+    python read_multi.py sentinel2.bin
     
 tested on Python 2.7.15+ (default, Nov 27 2018, 23:36:35) [GCC 7.3.0] on linux2 (Ubuntu 18.04.2 LTS)
 with numpy.version.version '1.16.2' and matplotlib.__version__ '2.2.4'
 
 installation of numpy and matplotlib (Ubuntu):
-    sudo apt install python-matplotlib python-numpy
-'''
+    sudo apt install python-matplotlib python-numpy '''
 from misc import *
 args = sys.argv
 
@@ -40,8 +39,31 @@ print("bytes read: " + str(data.size))
 
 # select bands for visualization: default value [3, 2, 1]. Try changing to anything from 0 to 12-1==11! 
 band_select = [3, 2, 1] if bands > 3 else [0, 1, 2]
+
+kmeans_labels = {}
 if bands == 1:
+    # could be a class map! Or just a one-band map..
     band_select = [0, 0, 0,]
+
+    # detect class map! Should have label field in header!
+    ls = [line.strip() for line in open(hdr).readlines()]
+    labels = None
+    for line in ls:
+        w = line.split()
+        try:
+            if w[0] == "kmeans_label_by_class":
+                labels = line
+        except:
+            pass
+    labels = labels.replace("kmeans_label_by_class", "kmeans_label_by_class=")
+    exec(labels)
+    print(kmeans_label_by_class)
+    for L in kmeans_label_by_class:
+        for lab in kmeans_label_by_class[L]:
+            kmeans_labels[lab] = kmeans_labels[lab] if lab in kmeans_labels else set()
+        kmeans_labels[lab].add(L)
+print(kmeans_labels, "kmeans_labels")
+
 rgb = np.zeros((lines, samples, 3))
 for i in range(0, 3):
     rgb[:, :, i] = data[band_select[i], :].reshape((lines, samples))
