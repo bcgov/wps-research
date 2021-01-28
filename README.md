@@ -1,7 +1,5 @@
 # bcws-psu-research
-** This page needs to be updated **
-
-Research collaboration in Image Analysis featuring:
+Image analysis research collaboration featuring:
 * Digital Platforms and Data Division (DPDD), Office of The BC Chief Information Officer (OCIO) 
 * BC Wildfire Service (BCWS) Predictive Services Unit (PSU)
 * Thompson Rivers University (TRU)
