@@ -15,7 +15,8 @@ Methods and Systems for Image Analysis developed in partnership with:
 ### BCWS FTL MVP
 * Adjustable high-contrast visualization and manipulation of multispectral imagery and classification maps
 * Exascale viewer with interactive classification
-   * Semi-supervised hybrid classification method 
+   * Semi-supervised hybrid classification method
+   * Decision-support system keeping humans in the loop
    * Interactively view multitemporal multispectral image stacks of size up to system limit
 ### Scripts
 * Codes for supervised, unsupervised and hybrid classification methods, for multispectral imagery
