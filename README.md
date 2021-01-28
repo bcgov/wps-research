@@ -20,7 +20,13 @@ Methods and Systems for Image Analysis developed in partnership with:
 * Adjustable high-contrast visualization and manipulation of multispectral imagery and classification maps
 
 ## Setup:
-- Install Oracle virtualbox
+1. Install Oracle virtualbox https://www.virtualbox.org/wiki/Downloads under VirtualBox x.x.xx platform packages
+2. Install guest additions for your host operating system 
+3. Create a VM inside VirtualBox and install https://releases.ubuntu.com/20.04/ubuntu-20.04.1-desktop-amd64.iso
+4. Navigate to your home folder: cd ~
+5. Create a folder called GitHub: mkdir GitHub
+6. Enter the folder and clone the repo: cd GitHub; git clone git@github.com:bcgov/bcws-psu-research.git
+
 
 ## Collaborators and Contributors:
 * Dana Hicks, BCWS
