@@ -237,8 +237,16 @@ while go: # could have turned this into a recursive function!
 
     # put the good stuff on ice, now randomly select centres and crank up the N until something pops off...
     # each iteration, save the good stuff. and attack the rest again!
+    print("kmeans_labels_good", kmeans_labels_good)
+    print(kmeans_label_by_class)
     write_binary(good_labels, infile + "_good.bin") # relabel the data and output
     write_hdr(infile + "_good.hdr", ncol, nrow, 1)
+    good_kmeans_label_by_class = {}
+    for label in kmeans_label_by_class:
+        if set(kmeans_label_by_class[label]).intersection(set(kmeans_labels_confused)) != set():
+            pass # confused
+        else:
+            good_kmeans_label_by_class[label] = kmeans_label_by_class[label]
     open(infile + "_good.hdr", "a").write("\nkmeans_label_by_class " + str(kmeans_label_by_class))
 
     write_binary(seeds, infile + "_reseed.bin") # relabel the data and output
