@@ -5,7 +5,7 @@ Methods and Systems for Image Analysis developed in partnership with:
 * Thompson Rivers University (TRU)
 
 ## Sample results
-### Interactive mapping with BCWS FTL MVP software: end-to-end decision support system (DSS)
+###  BCWS FTL MVP software: interactive end-to-end decision support system (DSS)
 <img src="output/20210127_mvp.png" width="817" height="332">
 
 ### Forest change detection product using RCM
