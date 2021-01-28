@@ -6,6 +6,15 @@ Research collaboration in Image Analysis featuring:
 * BC Wildfire Service (BCWS) Predictive Services Unit (PSU)
 * Thompson Rivers University (TRU)
 
+## Sample results
+### Interactive classification using BCWS FTL MVP software: end-to-end decision support system (DSS
+<img src="output/difference.gif" width="640">
+
+### Forest change detection product using RCM
+<img src="output/20210127_mvp.png" height="640">
+
+
+
 ## features
 * High-contrast visualization for multispectral imagery and classification maps
 * Supervised and unsupervised classification methods, for multispectral imagery
@@ -64,16 +73,7 @@ Tested on ubuntu 20
     
     video of clustering: https://www.youtube.com/watch?v=ooOHEubDNvM
    
-## Some preliminary figures (not current).. need to put the youtube video links in here!!!
-### Forest change detection using RCM
-<img src="output/difference.gif" width="640">
 
-### K-means unsupervised classification
-<img src="output/kmeans.bin_wheel.bin.png" width="640">
-
-### Hierarchical Agglomerative Clustering (HAC) unsupervised classification
-10 clusters: <br>
-<img src="output/fastclust.bin_wheel.bin.png" width="640">
 
 ## License
 
