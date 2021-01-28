@@ -11,10 +11,13 @@ Methods and Systems for Image Analysis developed in partnership with:
 ### Forest change detection product using RCM
 <img src="output/difference.gif" width="640">
 
-## features
+## Features
+### BCWS FTL MVP
 * Adjustable high-contrast visualization and manipulation of multispectral imagery and classification maps
 * Exascale viewer with interactive classification
+   * Semi-supervised hybrid classification method 
    * Interactively view multitemporal multispectral image stacks of size up to system limit
+### Scripts
 * Codes for supervised, unsupervised and hybrid classification methods, for multispectral imagery
    * K-Means ++
    * HAC from [1]
@@ -38,9 +41,8 @@ Methods and Systems for Image Analysis developed in partnership with:
 * Brady Holliday, BCWS
 * Jabed Tomal, TRU
 
-## requirements:
-* python 2
-* gnu g++
+## Setup:
+* Install Oracle virtualbox
 
 Tested on ubuntu 20
 
