@@ -26,8 +26,10 @@ Methods and Systems for Image Analysis developed in partnership with:
 * Dana Hicks, BCWS
 * Joanna Wand, BCWS
 * Brad Martin, BCWS
-* Dr. Musfiq Rahman, TRU
 * Dr. David Hill, TRU
+* Dr. Musfiq Rahman, TRU
+* Ashlin Richardson, OCIO
+
 
 ### TRU Computing Science ML/AI Students Co-supervised:
 * Gagan Bajwa
