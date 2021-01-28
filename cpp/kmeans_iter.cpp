@@ -113,10 +113,10 @@ int main(int argc, char ** argv){
     K ++;
   }
 
-    for0(i, np){
-      d = seed[i]; // use seed file to assign points to buckets
-      if(!isnan(d)) points[d].push_back(i); // map<float, list<size_t>> points; // lists of datapoint indices, organized by label
-    }
+  for0(i, np){
+    d = seed[i]; // use seed file to assign points to buckets
+    if(!isnan(d)) points[d].push_back(i); // map<float, list<size_t>> points; // lists of datapoint indices, organized by label
+  }
 
   size_t ci = 0;
 
@@ -133,22 +133,22 @@ int main(int argc, char ** argv){
     means[random_seed_label] = falloc(nband);
     points[random_seed_label].clear();
   }
-  
+
   if(add_random_seed){
     for0(i, K) points[buckets[i]].clear();
     for0(i, np){
       d = seed[i];
       if(!isnan(d)){
-         // cout << "bucket " << buckets[i % K] << " i " << i << endl;
-          points[buckets[i % K]].push_back(i);
+        // cout << "bucket " << buckets[i % K] << " i " << i << endl;
+        points[buckets[i % K]].push_back(i);
       }
     }
   }
 
   printf("buckets: ");
   for0(i, K){
-     printf("\n,%f", buckets[i]); 
-     cout << points[buckets[i]];
+    printf("\n,%f", buckets[i]);
+    cout << points[buckets[i]];
     printf("\n");
   }
   if(true){
