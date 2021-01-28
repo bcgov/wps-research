@@ -6,7 +6,7 @@ Image analysis research collaboration featuring:
 
 ## Sample results
 ### Interactive classification using BCWS FTL MVP software: end-to-end decision support system (DSS
-<img src="output/20210127_mvp.png" width="1089" height="442">
+<img src="output/20210127_mvp.png" width="817" height="332">
 
 ### Forest change detection product using RCM
 <img src="output/difference.gif" width="640">
