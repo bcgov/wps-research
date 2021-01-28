@@ -4,7 +4,7 @@ Methods and Systems for Image Analysis developed in partnership with:
 * BC Wildfire Service (BCWS) Predictive Services Unit (PSU)
 * Thompson Rivers University (TRU)
 
-in support of BC Wildfire Service (BCWS) Predictive Services Unit (PSU) program. See also [https://github.com/bcgov/wps]
+in support of BC Wildfire Service (BCWS) Predictive Services Unit (PSU) program. See also: [Wildfire Predictive Services](https://github.com/bcgov/wps)
 
 ## Sample results
 ###  Interactive mapping w BCWS FTL MVP software: end-to-end decision support system (DSS)
