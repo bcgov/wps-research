@@ -19,33 +19,8 @@ Methods and Systems for Image Analysis developed in partnership with:
    * Interactively view multitemporal multispectral image stacks of size up to system limit
 * Adjustable high-contrast visualization and manipulation of multispectral imagery and classification maps
 
-### Scripts
-* Codes for supervised, unsupervised and hybrid classification methods, for multispectral imagery
-   * K-Means ++
-   * HAC from [1]
-   * Paralellized semi-supervised K-Means
-   * Hierarchical Agglomerative Clustering (HAC) Scikit-Learn
-   * HAC: bootstrappable, direct implementation (can initialize with HAC results on tiles)
-
-## Collaborators and Contributors:
-* Dana Hicks, BCWS
-* Joanna Wand, BCWS
-* Brad Martin, BCWS
-* Dr. Musfiq Rahman, TRU
-* Dr. David Hill, TRU
-
-### TRU Computing Science ML/AI Students Co-supervised:
-* Gagan Bajwa
-* Brad Crump
-* Francesca Rammuno
-
-## Alumni:
-* Brady Holliday, BCWS
-* Jabed Tomal, TRU
-
 ## Setup:
 - Install Oracle virtualbox
-
 
 ## how to:
 0) Set up the programs:
@@ -72,6 +47,30 @@ Methods and Systems for Image Analysis developed in partnership with:
     bin/hclust data/mS2.bin data/mS2.bin_label.bin 10
     
     video of clustering: https://www.youtube.com/watch?v=ooOHEubDNvM
+    
+## Scripts
+* Codes for supervised, unsupervised and hybrid classification methods, for multispectral imagery
+   * K-Means ++
+   * HAC from [1]
+   * Paralellized semi-supervised K-Means
+   * Hierarchical Agglomerative Clustering (HAC) Scikit-Learn
+   * HAC: bootstrappable, direct implementation (can initialize with HAC results on tiles)
+
+## Collaborators and Contributors:
+* Dana Hicks, BCWS
+* Joanna Wand, BCWS
+* Brad Martin, BCWS
+* Dr. Musfiq Rahman, TRU
+* Dr. David Hill, TRU
+
+### TRU Computing Science ML/AI Students Co-supervised:
+* Gagan Bajwa
+* Brad Crump
+* Francesca Rammuno
+
+## Alumni:
+* Brady Holliday, BCWS
+* Jabed Tomal, TRU
 
 ## License
 
