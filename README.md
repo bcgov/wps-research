@@ -6,7 +6,7 @@ Methods and Systems for Image Analysis developed in partnership with:
 
 ## Sample results
 ###  Interactive mapping w BCWS FTL MVP software: end-to-end decision support system (DSS)
-<img src="output/20210127_mvp.png" width="817" height="332">
+<img src="output/20210127_mvp.png" width="650" height="264">
 
 ### Forest change detection w Canadian Space Agency (CSA) Radarsat Constellation Mission (RCM) compact-pol SAR data
 <img src="output/difference.gif" width="640">
