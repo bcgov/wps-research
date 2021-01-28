@@ -62,6 +62,16 @@ if bands == 1:
         for lab in kmeans_label_by_class[L]:
             kmeans_labels[lab] = kmeans_labels[lab] if lab in kmeans_labels else set()
         kmeans_labels[lab].add(L)
+
+    if str(kmeans_labels) != str("{}"):
+        data = data.tolist()[0]
+        for i in range(npx):
+            if data[i] == float("NaN"):
+                data[i] = 0.
+            else:
+                data[i] = data[i] + 1.
+        data = np.array(data).reshape((bands, npx))
+
 print(kmeans_labels, "kmeans_labels")
 
 rgb = np.zeros((lines, samples, 3))
@@ -112,19 +122,44 @@ for i in range(0, 3):
         # (rgb[:, :, i])[d > 1.] = 1.
 
 # plot the image
-plt.style.use('dark_background')
-fig = plt.figure()
-ax = fig.add_subplot(1,1,1)
+if kmeans_labels == {}:
+    plt.style.use('dark_background')
+    ff = os.path.sep.join((fn.split(os.path.sep))[:-1]) + os.path.sep
+    title_s = fn.split("/")[-1] if not exists(ff + 'title_string.txt') else open(ff + 'title_string.txt').read().strip() 
+    plt.title(title_s, fontsize=11)
 
-plt.imshow(rgb, vmin = 0., vmax = 1.) #plt.tight_layout()
 
-ff = os.path.sep.join((fn.split(os.path.sep))[:-1]) + os.path.sep
+    fig = plt.figure()
+    ax = fig.add_subplot(1,1,1)
+    plt.imshow(rgb, vmin = 0., vmax = 1.) #plt.tight_layout()
 
-title_s = fn.split("/")[-1] if not exists(ff + 'title_string.txt') else open(ff + 'title_string.txt').read().strip() 
-plt.title(title_s, fontsize=11)
+    if exists(ff + 'copyright_string.txt'):
+        plt.xlabel(open(ff+ 'copyright_string.txt').read().strip())
 
-if exists(ff + 'copyright_string.txt'):
-    plt.xlabel(open(ff+ 'copyright_string.txt').read().strip())
+if kmeans_labels != {}:
+    data = read_float(sys.argv[1])
+    data = data.reshape((lines, samples))
+    fig = plt.figure()
+    fig, ax = plt.subplots()
+    img = ax.imshow(data, cmap='Spectral')
+
+    import collections
+    kmeans_labels = collections.OrderedDict(sorted(kmeans_labels.items()))
+    print("kmeans_labels", kmeans_labels)
+    cbar = plt.colorbar(img) # p.array(data)) #gb)#  .legend([0, 1, 2, 3], ['0', '1', '2', '3'])\
+    tick_labels = [] # "noise"]
+    ci = 0 
+    for label in kmeans_labels: # eans_label_by_class:
+        x = kmeans_labels[label] #_by_class[label]
+        tick_labels.append(x) # label)
+
+        if set([ci]) != x:
+            print(str(set([ci])), str(x))
+            # err("color index problem")
+        ci += 1
+    cbar.set_ticks(np.arange(len(tick_labels)))
+    print("tick_labels", tick_labels)
+    cbar.ax.set_yticklabels(tick_labels) #"bad", "good", "other", "more", "what"])
 
 plt.tight_layout()
 plt_fn = fn + ".png"
