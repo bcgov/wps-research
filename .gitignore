@@ -16,3 +16,7 @@ test*
 *.prj
 py/extract/out*
 cpp/out/*
+*user
+*pass
+cpp/mean/*
+cpp/label/*
