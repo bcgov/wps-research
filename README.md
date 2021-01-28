@@ -13,7 +13,7 @@ Methods and Systems for Image Analysis developed in partnership with:
 
 ## Features
 ### BCWS FTL MVP
-* Exascale viewer with interactive classification
+* Exascale viewer w interactive [2] classification
    * Semi-supervised hybrid classification method
    * Decision-support system keeping humans in the loop
    * Interactively view multitemporal multispectral image stacks of size up to system limit
@@ -60,3 +60,4 @@ and limitations under the License.
 
 ## References
 [1]  Daniel Müllner, fastcluster: Fast Hierarchical, Agglomerative Clustering Routines for R and Python, Journal of Statistical Software 53 (2013), no. 9, 1–18, URL http://www.jstatsoft.org/v53/i09/
+[2] based on gltZpr by Nigel Stewart
