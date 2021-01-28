@@ -190,8 +190,8 @@ plt_fn = fn + ".png"
 print("+w", plt_fn)
 
 plt.savefig(plt_fn,
-        dpi=300,
-        pad_inches =0.)
+            dpi=300,
+            pad_inches =0.)
 
 if show_plot:
     plt.show()
