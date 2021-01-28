@@ -251,19 +251,18 @@ while go: # could have turned this into a recursive function!
 
     write_binary(seeds, infile + "_reseed.bin") # relabel the data and output
     write_hdr(infile + "_reseed.hdr", ncol, nrow, 1)
+
+    # RUN KNN ON DATA WITH CONFUSED LABELS ONLY!!!!
+    # SPLICE THE RESULTS BACK INTO THE CLASS MAP
+    # LOOK AT BRAD NEW DATA
+	
+
+
+
+
     sys.exit(1)
 
      
-    # DONT FORGET THE MERGE STEP@@@@@@@@@@
-   
-
-    # before returning from the recursive function, merge the labels that are good with the labels that are returned from refinement..
-
-    # recurse into equivalence classes of things that are confused.. if equivalence classes of confused labels are unchanged after an iteration, uniform initialize over the selected data and add +1 to K
-    # extract label data from non-confused classes! Those won't be changed.
-    # rewrite seed file.. NB need to keep the label data that doesn't need to be refined, where does that go...
-    # recurse into confused sets...RECURSION!!!!! Call function onto each equivalence class of confused sets..
-  
     if not bad:
         # CLEAN UP AND FINISH....
         print("good")
