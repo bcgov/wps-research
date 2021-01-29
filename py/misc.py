@@ -15,7 +15,6 @@ def err(c):
     print('Error: ' + c)
     sys.exit(1)
 
-
 def run(c):
     print('run("' + str(c) + '")')
     a = os.system(c)
@@ -184,3 +183,8 @@ def bsq_to_scikit(ncol, nrow, nband, d):
                 # don't mess up the indexing
                 img_np[ii + j, k] = d[(k * npx) + ii + j]
     return(img_np)
+
+
+
+def add_commas(number):
+    return "{:,}".format(number)
