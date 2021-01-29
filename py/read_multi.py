@@ -12,6 +12,8 @@ with numpy.version.version '1.16.2' and matplotlib.__version__ '2.2.4'
 installation of numpy and matplotlib (Ubuntu):
     sudo apt install python-matplotlib python-numpy '''
 from misc import *
+import matplotlib
+matplotlib.rcParams.update({'font.size': 10})
 args = sys.argv
 
 # instructions to run
@@ -176,7 +178,7 @@ print("done scaling..")
 
 # plot the image: no class labels
 if str(kmeans_labels) == "{}":
-    fig = plt.figure()
+    fig = plt.figure(figsize=(6,3))
     ax = fig.add_subplot(1,1,1)
     ff = os.path.sep.join((fn.split(os.path.sep))[:-1]) + os.path.sep
     title_s = fn.split("/")[-1] if not exists(ff + 'title_string.txt') else open(ff + 'title_string.txt').read().strip() 
@@ -196,13 +198,13 @@ if str(kmeans_labels) == "{}":
 if str(kmeans_labels) != "{}":
     print("plotting..")
     data = read_float(sys.argv[1]).reshape((lines, samples))
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(1.9 * 24, 24))
     ff = os.path.sep.join((fn.split(os.path.sep))[:-1]) + os.path.sep
     title_s = fn.split("/")[-1] if not exists(ff + 'title_string.txt') else open(ff + 'title_string.txt').read().strip()
     title_s += " percent confused: %" + str(round(percent_confused, 2))
     plt.title(title_s, fontsize=11)
-    # plt.style.use('dark_background')A
-    img = ax.imshow(data, cmap='Spectral')
+    # plt.style.use('dark_background')
+    img = ax.imshow(data, cmap='tab10') # img = ax.imshow(data, cmap='Spectral')
 
     import collections
     print("kmeans_labels", kmeans_labels)
@@ -228,19 +230,19 @@ if str(kmeans_labels) != "{}":
             print(str(set([ci])), str(x))
             # err("color index problem")
         ci += 1
-    cbar.set_ticks(ticks) #/ (d_max - d_min)) # p.arange(len(tick_labels)) / (d_max - d_min)) #np.arange(len(tick_labels)) + 1) / (1. + d_max - d_min))
+    cbar.set_ticks(ticks) #, fontsize=9) #/ (d_max - d_min)) # p.arange(len(tick_labels)) / (d_max - d_min)) #np.arange(len(tick_labels)) + 1) / (1. + d_max - d_min))
     print("tick_labels", tick_labels)
     print("ticks", ticks) 
-    cbar.ax.set_yticklabels(tick_labels) #"bad", "good", "other", "more", "what"])
+    cbar.ax.set_yticklabels(tick_labels, fontsize=11) #"bad", "good", "other", "more", "what"])
     # plt.xlabel("confused labels: " + str(confused_kmeans_labels))
-    plt.xlabel(str("".join([ str( x) for x in ["n_nan ", n_nan, " n_points ", n_points]])))
+    plt.xlabel(str("".join([ str( x) for x in ["n_nan ", n_nan, " n_points ", n_points]])), fontsize=9)
     print("confused labels:", confused_kmeans_labels)
 plt.tight_layout()
 plt_fn = fn + ".png"
 print("+w", plt_fn)
 
 plt.savefig(plt_fn,
-            dpi=300,
+            dpi=600,
             pad_inches =0.)
 
 if show_plot:
