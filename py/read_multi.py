@@ -59,7 +59,7 @@ print(count_by_label)
 band_select = [0, 1, 2]
 kmeans_labels = {}
 kmeans_labels_by_class = None
-count_by_label, percent_by_label, percent_confused = {}, {}, 0
+percent_by_label, percent_confused = {}, 0
 confused_labels, confused_kmeans_labels = set(), set()
 n_points = 0
 n_nan = 0
@@ -134,8 +134,8 @@ if bands == 1:
         print("WHAT ARE WE DOING")
         data = data.tolist()[0] # not sure why the data packed wierdly in here
         for i in range(npx):
-            if i % 10000 == 0: 
-                print(i, len(data))
+            #if i % 10000 == 0: 
+            #    print(i, len(data))
             if data[i] == float("NaN"):
                 data[i] = 0.
             else:
