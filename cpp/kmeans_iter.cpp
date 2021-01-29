@@ -105,6 +105,7 @@ int main(int argc, char ** argv){
   set<float> my_seeds;
   for0(i, np){
     d = seed[i];
+    // my_seeds.insert(d); // label could be NaN without data being NaN!?
     if(!isnan(d)) my_seeds.insert(d);
   }
 
