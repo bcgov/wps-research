@@ -133,7 +133,6 @@ while go: # could have turned this into a recursive function!
     if iteration > 0:
         seed_file = infile + "_reseed.bin" #  class_file
     run(cpp_path + "kmeans_iter.exe " + infile + " " + seed_file + " 1. " + ("" if iteration == 0 else (" " + str(next_label))))
-    print(">>>>>>> DONE RUN >>>>>>>>>>!!!!!!!%^&*%^&*%^&*")
     next_label += 1 # next iteration would need a higher label if it's reached..
     ncol, nrow, bands, data = read_binary(class_file) # read the class map data resulting from kmeans
 
@@ -234,6 +233,8 @@ while go: # could have turned this into a recursive function!
     # RUN KNN ON DATA WITH CONFUSED LABELS ONLY!!!!
     # SPLICE THE RESULTS BACK INTO THE CLASS MAP
     # LOOK AT BRAD NEW DATA
+
+    
 	
 
     sys.exit(1)
