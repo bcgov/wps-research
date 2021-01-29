@@ -31,6 +31,10 @@ p = path + "../cpp/"
 run("rm -f " + p + "kmeans_iter.exe")
 if not exist(p + "kmeans_iter.exe"):
     run("g++ -w -O3 " + p + "kmeans_iter.cpp " + p + "misc.cpp -o " + p + "kmeans_iter.exe -lpthread")
+
+run("rm -f " + p + "raster_nearest_centre.exe")
+if not exist(p + "kmeans_iter.exe"):
+    run("g++ -w -O3 " + p + "raster_nearest_centre.cpp " + p + "misc.cpp -o " + p + "raster_nearest_centre.exe -lpthread")
 cpp_path = p
 
 ncol, nrow, bands = read_hdr(infile[:-3] + 'hdr') # read info from image file
@@ -81,8 +85,30 @@ for L in target_mean:
         for k in range(bands):
             target_mean[L][k] /= target_n[L]
 
+
+# print("target_mean", target_mean)
+from array import array
+output_file = open("target_mean.dat", "wb")
+outputfile2 = open("target_mean_dat.csv", "wb")
+
+ci = 0
+od = []
+for c in target_mean:
+    for x in target_mean[c]:
+        od.append(x)
+    outputfile2.write((c + " " + str(ci) + " " + str(target_mean[c]) + "\n").encode())
+    ci += 1
+
+output_file.write(("\n".join([str(x) for x in od])).encode())
+output_file.close()
+outputfile2.close()
+sys.exit(1)
+
 n_nan = 0
 print("calculate seed layer..") # should be parallelized in C/C++
+run(cpp_path + "raster_nearest_centre.exe " + infile + " target_mean.dat")
+
+'''
 if not exist(infile + "_seed.bin"):
     # form seed layer by choosing each point's label by taking the closest mean (where the mean is calculated over different points with the same label)
     seed = []
@@ -115,11 +141,12 @@ if not exist(infile + "_seed.bin"):
                     min_c = ci # represent class by number
             ci += 1
         seed.append(min_c)
-
+    print("n_nan", n_nan)
     print("len(seed)", len(seed))
     write_binary(np.array(seed, dtype=np.float32), infile + "_seed.bin")
     write_hdr(infile + "_seed.hdr", ncol, nrow, 1)
-
+'''
+ 
 go = True
 iteration = 0
 next_label = K
@@ -129,7 +156,7 @@ good_labels = np.full(nrow*ncol, float("NaN"),dtype=np.float32) #None # will sto
 while go: # could have turned this into a recursive function!
     whoami = os.popen("whoami").read().strip()
     class_file = infile + "_kmeans.bin"
-    seed_file = infile + "_seed.bin"
+    seed_file = infile + "_nearest_centre.bin"
     if iteration > 0:
         seed_file = infile + "_reseed.bin" #  class_file
     run(cpp_path + "kmeans_iter.exe " + infile + " " + seed_file + " 1. ") # + ("" if iteration == 0 else (" " + str(next_label))))
