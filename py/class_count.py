@@ -8,9 +8,10 @@ if len(args) < 2:
 samples, lines, bands, data = read_binary(args[1])
 
 count = {}
+n_nan = 0
 for d in data:
     if math.isnan(d):
-        continue
+        n_nan += 1
     if d not in count:
         count[d] = 0
     count[d] += 1
@@ -36,7 +37,7 @@ for c in class_labels:
         min_c, min_c_lab = count[c], c
     if count[c] > max_c:
         max_c, max_c_lab = count[c], c
-
+print("NaN", n_nan)
 print("number of class labels,", len(class_labels))
 print("min class label: ", min_lab)
 print("max class label: ", max_lab)
