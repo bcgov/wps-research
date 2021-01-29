@@ -44,11 +44,11 @@ void find_nearest(size_t b){
       if(isnan(d) || isinf(d)){
       }
       else{
-      if(d < nearest_d){
-        nearest_d = d;
-        nearest_c = c;
+        if(d < nearest_d){
+          nearest_d = d;
+          nearest_c = c;
+        }
       }
- }
     }
 
     update[i] = nearest_c;
@@ -62,7 +62,7 @@ int main(int argc, char ** argv){
   iter_max = 100; // default max iterations
 
   if(argc < 3) cout << "kmeans [input binary image file name] [input label file name] [percent tolerance] " << endl;
-  //  << " [optional parameter: float value: add random seed with label!] # default to random initialization # NAN = no label. Remember to scale data first!!" << endl;
+  // << " [optional parameter: float value: add random seed with label!] # default to random initialization # NAN = no label. Remember to scale data first!!" << endl;
 
   str fn("");
   if(argc > 1) fn = str(argv[1]); // input image file name
@@ -113,10 +113,10 @@ int main(int argc, char ** argv){
   for0(i, np){
     d = seed[i];
     // my_seeds.insert(d); // label could be NaN without data being NaN!?
-    if(!(isnan(d) || isinf(d))     ) my_seeds.insert(d);
+    if(!(isnan(d) || isinf(d)) ) my_seeds.insert(d);
   }
 
-  K = my_seeds.size(); //  if(add_random_seed) K ++;
+  K = my_seeds.size(); // if(add_random_seed) K ++;
 
   for0(i, np){
     d = seed[i]; // use seed file to assign points to buckets
@@ -150,7 +150,7 @@ int main(int argc, char ** argv){
       }
     }
   }
- */
+  */
 
   printf("buckets: ");
   for0(i, K){
@@ -159,7 +159,7 @@ int main(int argc, char ** argv){
     printf("\n");
   }
   if(true){
-     str ofn(fn + str("_kmeans_iter_") + zero_pad(to_string(0), 4) + str(".bin")); // output class labels
+    str ofn(fn + str("_kmeans_iter_") + zero_pad(to_string(0), 4) + str(".bin")); // output class labels
     str ohn(fn + str("_kmeans_iter_") + zero_pad(to_string(0), 4) + str(".hdr"));
     hwrite(ohn, nrow, ncol, 1, 4); // write type 4 header
     bwrite(seed, ofn, nrow, ncol, 1); // write data
