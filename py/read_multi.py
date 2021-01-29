@@ -41,6 +41,7 @@ print("bytes read: " + str(data.size))
 # band_select = [3, 2, 1] if bands > 3 else [0, 1, 2]
 band_select = [1, 2, 3]
 kmeans_labels = {}
+kmeans_labels_by_class = None
 if bands == 1:
     # could be a class map! Or just a one-band map..
     band_select = [0, 0, 0,]
@@ -59,15 +60,23 @@ if bands == 1:
         labels = labels.replace("kmeans_label_by_class", "kmeans_label_by_class=")
     except:
         pass
+    statement = labels if labels is not None else "kmeans_label_by_class={}"
+    print("statement", [statement])
+    exec(statement)
 
-    exec(labels if labels is not None else "kmeans_label_by_class={}")
-
-    print(kmeans_label_by_class)
-    for L in kmeans_label_by_class:
+    print("kmeans_labels_by_class", kmeans_label_by_class)
+    # kmeans_labels_by_class {'fireweeddeciduous': {2.0}, 'pineburneddeciduous': {11.0}, 'blowdownfireweed': {7.0}, 'blowdownlichen': {10.0, 3.0}, 'windthrowgreenherbs': {9.0}, 'exposed': {0.0, 6.0}, 'fireweedgrass': {8.0}, 'pineburned': {3.0, 4.0}, 'pineburnedfireweed': {4.0}, 'herb': {6.0}, 'lake': {1.0}, 'conifer': {12.0}, 'deciduous': {5.0}}
+    classes_by_kmeans_label = {}
+    for L in kmeans_label_by_class: # L is the text label...
+        # print("L", L)
         for lab in kmeans_label_by_class[L]:
-            kmeans_labels[lab] = kmeans_labels[lab] if lab in kmeans_labels else set()
-        kmeans_labels[lab].add(L)
+            if lab not in classes_by_kmeans_label:
+                classes_by_kmeans_label[lab] = set()
+            classes_by_kmeans_label[lab].add(L)
 
+    kmeans_labels = classes_by_kmeans_label
+    #kmeans_labels {2.0: {'fireweeddeciduous'}, 11.0: {'pineburneddeciduous'}, 7.0: {'blowdownfireweed'}, 10.0: set(), 3.0: {'blowdownlichen'}, 9.0: {'windthrowgreenherbs'}, 0.0: set(), 6.0: {'exposed', 'herb'}, 8.0: {'fireweedgrass'}, 4.0: {'pineburnedfireweed', 'pineburned'}, 1.0: {'lake'}, 12.0: {'conifer'}, 5.0: {'deciduous'}}
+    # 
     if str(kmeans_labels) != str("{}"):
         data = data.tolist()[0] # not sure why the data packed wierdly in here
         for i in range(npx):
@@ -167,12 +176,14 @@ if str(kmeans_labels) != "{}":
     img = ax.imshow(data, cmap='Spectral')
 
     import collections
+    print("kmeans_labels", kmeans_labels)
     kmeans_labels = collections.OrderedDict(sorted(kmeans_labels.items()))
     print("kmeans_labels", kmeans_labels)
     cbar = plt.colorbar(img) # p.array(data)) #gb)#  .legend([0, 1, 2, 3], ['0', '1', '2', '3'])\
     tick_labels = [] # "noise"]
     ticks = []
     ci = 0 
+    print("kmeans_labels", kmeans_labels)
     for label in kmeans_labels: # eans_label_by_class:
         x = kmeans_labels[label] #_by_class[label]
         tick_labels.append(str(label) + " --> " + str(x)) # this is the "set of classes" label
