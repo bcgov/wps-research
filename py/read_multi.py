@@ -204,14 +204,13 @@ if str(kmeans_labels) != "{}":
     title_s += " percent confused: %" + str(round(percent_confused, 2))
     plt.title(title_s, fontsize=11)
     # plt.style.use('dark_background')
-    img = ax.imshow(data, cmap='tab10') # img = ax.imshow(data, cmap='Spectral')
+
 
     import collections
     print("kmeans_labels", kmeans_labels)
     del kmeans_labels["NAN"]
     kmeans_labels = collections.OrderedDict(sorted(kmeans_labels.items()))
     print("kmeans_labels", kmeans_labels)
-    cbar = plt.colorbar(img) # p.array(data)) #gb)#  .legend([0, 1, 2, 3], ['0', '1', '2', '3'])\
     tick_labels = [] # "noise"]
     ticks = []
     ci = 0 
@@ -230,16 +229,25 @@ if str(kmeans_labels) != "{}":
             print(str(set([ci])), str(x))
             # err("color index problem")
         ci += 1
+
+
+    img = ax.imshow(data, cmap = discrete_cmap(len(ticks), 'Spectral')) # 'tab10')) # cmap='tab10') # img = ax.imshow(data, cmap='Spectral')
+    img.set_clim(-.5, len(ticks) - .5)
+    cbar = plt.colorbar(img) # p.array(data)) #gb)#  .legend([0, 1, 2, 3], ['0', '1', '2', '3'])\
+
     cbar.set_ticks(ticks) #, fontsize=9) #/ (d_max - d_min)) # p.arange(len(tick_labels)) / (d_max - d_min)) #np.arange(len(tick_labels)) + 1) / (1. + d_max - d_min))
+    #plt.clim(-.5, .5)
     print("tick_labels", tick_labels)
     print("ticks", ticks) 
     cbar.ax.set_yticklabels(tick_labels, fontsize=11) #"bad", "good", "other", "more", "what"])
+
     # plt.xlabel("confused labels: " + str(confused_kmeans_labels))
     plt.xlabel(str("".join([ str( x) for x in ["n_nan ", n_nan, " n_points ", n_points]])), fontsize=9)
     print("confused labels:", confused_kmeans_labels)
 plt.tight_layout()
 plt_fn = fn + ".png"
 print("+w", plt_fn)
+
 
 plt.savefig(plt_fn,
             dpi=600,
