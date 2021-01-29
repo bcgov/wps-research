@@ -116,7 +116,8 @@ if bands == 1:
         percent_by_label[label] = 100. * count_by_label[label] / n_points # float(len(data))
         if len(kmeans_labels[label]) > 1:
             print("kmeans_labels[label] > 1", kmeans_labels[label])
-            percent_confused += percent_by_label[label]
+            if str(kmeans_labels[label]).strip() != "None":
+                percent_confused += percent_by_label[label]
             for c in kmeans_labels[label]:
                 confused_labels.add(c)
             confused_kmeans_labels.add(str(kmeans_labels[label]))
