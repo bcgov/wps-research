@@ -34,17 +34,21 @@ void find_nearest(size_t b){
       c = buckets[j]; // float c = ti->first; // class label we're comparing against
       mean = means[c]; // vector representing the present mean
 
-      dd = 0.; // distance from this point to centre
+      d = 0.; // distance from this point to centre
 
       for0(k, nband){
-        d = dat[np * k + i] - mean[k]; // compare point to mean each band
-        dd += d * d;
+        dd = dat[np * k + i] - mean[k]; // compare point to mean each band
+        d += dd * dd;
       }
-      dd = sqrt(dd);
-      if(dd < nearest_d){
-        nearest_d = dd;
+      d = sqrt(d);
+      if(isnan(d) || isinf(d)){
+      }
+      else{
+      if(d < nearest_d){
+        nearest_d = d;
         nearest_c = c;
       }
+ }
     }
 
     update[i] = nearest_c;
