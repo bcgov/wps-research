@@ -1,4 +1,4 @@
-''' optimization for hkmeans algorithm, given target (class annotation) file
+''' seed kmeans algorithm on multispectral data, given target (class annotation) file
 
 1. set seed layer:
    (a) extract data from under targets
@@ -256,7 +256,7 @@ KNeighborsClassifier(...)
     print("target_ix", target_ix)
     print("target_data")
     for ix in target_data:
-        print(ix, target_data[ix])
+        print(ix, class_label[ix], target_data[ix])
 
     sys.exit(1)
 
