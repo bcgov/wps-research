@@ -42,6 +42,7 @@ print("bytes read: " + str(data.size))
 band_select = [1, 2, 3]
 kmeans_labels = {}
 kmeans_labels_by_class = None
+count_by_label, percent_by_label = {}, {}
 if bands == 1:
     # could be a class map! Or just a one-band map..
     band_select = [0, 0, 0,]
@@ -76,7 +77,19 @@ if bands == 1:
 
     kmeans_labels = classes_by_kmeans_label
     #kmeans_labels {2.0: {'fireweeddeciduous'}, 11.0: {'pineburneddeciduous'}, 7.0: {'blowdownfireweed'}, 10.0: set(), 3.0: {'blowdownlichen'}, 9.0: {'windthrowgreenherbs'}, 0.0: set(), 6.0: {'exposed', 'herb'}, 8.0: {'fireweedgrass'}, 4.0: {'pineburnedfireweed', 'pineburned'}, 1.0: {'lake'}, 12.0: {'conifer'}, 5.0: {'deciduous'}}
-    # 
+    
+    data = data.tolist()[0] # not sure why the data packed wierdly in here
+    for i in range(len(data)):
+        d = data[i]
+        if d not in count_by_label:
+            count_by_label[d] = 0
+        count_by_label[d] += 1
+    data = np.array(data).reshape((bands, npx))
+
+     
+    for label in count_by_label:
+        percent_by_label[label] = 100. * count_by_label[label] / len(data)
+        
     if str(kmeans_labels) != str("{}"):
         data = data.tolist()[0] # not sure why the data packed wierdly in here
         for i in range(npx):
@@ -186,7 +199,7 @@ if str(kmeans_labels) != "{}":
     print("kmeans_labels", kmeans_labels)
     for label in kmeans_labels: # eans_label_by_class:
         x = kmeans_labels[label] #_by_class[label]
-        tick_labels.append(str(label) + " --> " + str(x)) # this is the "set of classes" label
+        tick_labels.append(str(label) + " --> " + str(x) + " %" + percent_by_label[label]) # this is the "set of classes" label
         ticks.append(label) # this is the float label
         if set([ci]) != x:
             print(str(set([ci])), str(x))
