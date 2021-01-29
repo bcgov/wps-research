@@ -33,7 +33,7 @@ if not exist(p + "kmeans_iter.exe"):
     run("g++ -w -O3 " + p + "kmeans_iter.cpp " + p + "misc.cpp -o " + p + "kmeans_iter.exe -lpthread")
 
 run("rm -f " + p + "raster_nearest_centre.exe")
-if not exist(p + "kmeans_iter.exe"):
+if not exist(p + "raster_nearest_centre.exe"):
     run("g++ -w -O3 " + p + "raster_nearest_centre.cpp " + p + "misc.cpp -o " + p + "raster_nearest_centre.exe -lpthread")
 cpp_path = p
 
