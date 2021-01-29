@@ -51,7 +51,7 @@ void find_nearest(size_t b){
       }
     }
     update[i] = nearest_c;
-    if(nearest_c == NAN || isnan(nearest_c)) { printf("QUIT\n"); exit(1)}
+    // if(nearest_c == NAN || isnan(nearest_c)) { printf("QUIT\n"); exit(1); }
   }
 }
 
@@ -79,15 +79,6 @@ int main(int argc, char ** argv){
 
   printf("tolerance: %f\n", tol);
 
-  /*
-  int add_random_seed = argc > 4; // add a random seed from the data
-  float random_seed_label = NAN;
-  if(add_random_seed){
-    random_seed_label = atof(argv[4]);
-    printf("random seed label value: %f\n", random_seed_label);
-  }
-  */
-
   // K is not input in this version because it's prescribed by the seeding
   str hfn(hdr_fn(fn)); // input header file name
   hread(hfn, nrow, ncol, nband); // read header
@@ -105,7 +96,9 @@ int main(int argc, char ** argv){
   means_color = falloc(np * nband); // output nearest mean for visualization
 
   label = falloc(np); // one label per pixel; label is not defined if pix. index not appear in "points"
+  for0(i, np) label[i] = NAN; // default to NAN
   update = falloc(np); // new set of label
+  for0(i, np) label[i] = NAN;
 
   printf("seed\n");
 
@@ -133,24 +126,6 @@ int main(int argc, char ** argv){
     buckets[ci++] = c;
     means[c] = falloc(nband); // each mean needs the number of dimensions we have in our image
   }
-  /*
-  if(add_random_seed){
-    buckets[K - 1] = random_seed_label;
-    means[random_seed_label] = falloc(nband);
-    points[random_seed_label].clear();
-  }
-
-  if(add_random_seed){
-    for0(i, K) points[buckets[i]].clear();
-    for0(i, np){
-      d = seed[i];
-      if(!isnan(d)){
-        // cout << "bucket " << buckets[i % K] << " i " << i << endl;
-        points[buckets[i % K]].push_back(i);
-      }
-    }
-  }
-  */
 
   printf("buckets: ");
   for0(i, K){
