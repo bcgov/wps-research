@@ -62,7 +62,7 @@ kmeans_labels_by_class = None
 percent_by_label, percent_confused = {}, 0
 confused_labels, confused_kmeans_labels = set(), set()
 n_points = 0
-n_nan = 0
+n_nan = class_count[float('NaN')]
 if bands == 1:
     # could be a class map! Or just a one-band map..
     band_select = [0, 0, 0,]
