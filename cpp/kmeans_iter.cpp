@@ -35,9 +35,8 @@ void find_nearest(size_t b){
       float * mean = means[c]; // vector representing the present mean
       dd = 0.; // distance from this point to centre
 
-      // compare point to mean in each band
       for0(k, nband){
-        d = dat[np * k + i] - mean[k];
+        d = dat[np * k + i] - mean[k]; // compare point to mean each band
         dd += d * d;
       }
       dd = sqrt(dd);
@@ -56,8 +55,8 @@ int main(int argc, char ** argv){
   float d; // temporary data variable
   iter_max = 100; // default max iterations
 
-  if(argc < 4) cout << "kmeans [input binary image file name] [input label file name] [percent tolerance] " <<
-  " [optional parameter: float value: add random seed with label!] # default to random initialization # NAN = no label. Remember to scale data first!!" << endl;
+  if(argc < 3) cout << "kmeans [input binary image file name] [input label file name] [percent tolerance] " << endl;
+  //  << " [optional parameter: float value: add random seed with label!] # default to random initialization # NAN = no label. Remember to scale data first!!" << endl;
 
   str fn("");
   if(argc > 1) fn = str(argv[1]); // input image file name
@@ -74,12 +73,14 @@ int main(int argc, char ** argv){
 
   printf("tolerance: %f\n", tol);
 
+  /*
   int add_random_seed = argc > 4; // add a random seed from the data
   float random_seed_label = NAN;
   if(add_random_seed){
     random_seed_label = atof(argv[4]);
     printf("random seed label value: %f\n", random_seed_label);
   }
+  */
 
   // K is not input in this version because it's prescribed by the seeding
   str hfn(hdr_fn(fn)); // input header file name
@@ -106,16 +107,14 @@ int main(int argc, char ** argv){
   for0(i, np){
     d = seed[i];
     // my_seeds.insert(d); // label could be NaN without data being NaN!?
-    if(!isnan(d)) my_seeds.insert(d);
+    if(!(isnan(d) || isinf(d))     ) my_seeds.insert(d);
   }
 
-  K = my_seeds.size();
-  if(add_random_seed) K ++;
- 
+  K = my_seeds.size(); //  if(add_random_seed) K ++;
 
   for0(i, np){
     d = seed[i]; // use seed file to assign points to buckets
-    if(!isnan(d)) points[d].push_back(i); // map<float, list<size_t>> points; // lists of datapoint indices, organized by label
+    if(!(isnan(d) || isinf(d))) points[d].push_back(i); // map<float, list<size_t>> points; // lists of datapoint indices, organized by label
   }
 
   size_t ci = 0;
@@ -128,6 +127,7 @@ int main(int argc, char ** argv){
     buckets[ci++] = c;
     means[c] = falloc(nband); // each mean needs the number of dimensions we have in our image
   }
+  /*
   if(add_random_seed){
     buckets[K - 1] = random_seed_label;
     means[random_seed_label] = falloc(nband);
@@ -144,6 +144,7 @@ int main(int argc, char ** argv){
       }
     }
   }
+ */
 
   printf("buckets: ");
   for0(i, K){
@@ -152,7 +153,7 @@ int main(int argc, char ** argv){
     printf("\n");
   }
   if(true){
-    str ofn(fn + str("_kmeans_iter_") + zero_pad(to_string(0), 4) + str(".bin")); // output class labels
+     str ofn(fn + str("_kmeans_iter_") + zero_pad(to_string(0), 4) + str(".bin")); // output class labels
     str ohn(fn + str("_kmeans_iter_") + zero_pad(to_string(0), 4) + str(".hdr"));
     hwrite(ohn, nrow, ncol, 1, 4); // write type 4 header
     bwrite(seed, ofn, nrow, ncol, 1); // write data
