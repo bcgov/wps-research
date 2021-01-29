@@ -206,7 +206,6 @@ if str(kmeans_labels) == "{}":
     print("d_min", d_min, "d_max", d_max)
     rgb = rgb / (d_max - d_min)
 
-
     plt.imshow(rgb) #, vmin = 0., vmax = 1.) #plt.tight_layout()
     plt.tight_layout()
     if exists(ff + 'copyright_string.txt'):
@@ -214,6 +213,7 @@ if str(kmeans_labels) == "{}":
 
 # plot image with class labels
 if str(kmeans_labels) != "{}":
+    print("plotting..")
     data = read_float(sys.argv[1])
 
     # d_min, d_max = np.nanmin(data), np.nanmax(data)
@@ -222,8 +222,8 @@ if str(kmeans_labels) != "{}":
     #    if math.isnan(data[i]):
     #        data[i] = 0.
     # data = data / (d_max - d_min)
-    values = set(data)
-    print("values", values)
+    #values = set(data)
+    # print("values", values)
     data = data.reshape((lines, samples))
     # fig = plt.figure()
     fig, ax = plt.subplots()
