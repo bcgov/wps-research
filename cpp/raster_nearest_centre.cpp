@@ -2,14 +2,14 @@
 #include<float.h>
 
 int main(int argc, char ** argv){
-
   float * centres, *out, *dat, min_i, min_d, d, dd;
   size_t N = 0, nrow, ncol, nband, i, j, k, n, ix, jx, np;
-  if(argc < 3) err("raster_nearest_centre.cpp [input raster file] [input centres file BIP]");
+  if(argc < 3) err("raster_nearest_centre.cpp [input raster file] [input centres file newline-separated-value]");
+
   str cfn(argv[2]);
-  str bfn(argv[1]); // input "envi type-4" aka IEEE Floating-point 32bit BSQ (band sequential) data stack
+  str bfn(argv[1]); // input "envi type-4" bsq
   str hfn(hdr_fn(bfn)); // get name of header file
-  hread(hfn, nrow, ncol, nband); // get image shape from header
+  hread(hfn, nrow, ncol, nband); // get shape from header
   printf("nrow %d ncol %d nband %d\n", nrow, ncol, nband);
   dat = bread(bfn, nrow, ncol, nband); // read image data
 
@@ -17,15 +17,13 @@ int main(int argc, char ** argv){
   vector<str> lines;
   ifstream read(cfn);
   while(std::getline(read, s)){
-    cout << s << endl;
-    N++;
     trim(s);
     if(s != str(""))
     lines.push_back(s);
   }
-
-  printf("N %zu\n", N);
+  N = lines.size();
   centres = falloc(N);
+  printf("N %zu\n", N);
   for0(i, N) centres[i] = atof(lines[i].c_str());
 
   N /= nband;
@@ -75,4 +73,3 @@ int main(int argc, char ** argv){
   free(dat);
   return 0;
 }
-
