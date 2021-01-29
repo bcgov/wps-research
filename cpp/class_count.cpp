@@ -28,6 +28,7 @@ int main(int argc, char ** argv){
 
   if(count.size() == 0 && n_nan ==0) return 0;
   cout << "{";
+
   map<float, size_t>::iterator it = count.begin();
   cout << it->first << ":" << it->second;
 
