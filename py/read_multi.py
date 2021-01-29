@@ -37,6 +37,23 @@ npx = lines * samples # number of pixels
 data = read_float(sys.argv[1]).reshape((bands, npx))
 print("bytes read: " + str(data.size))
 
+
+'''use c program to count data'''
+sep = os.path.sep
+path = sep.join(__file__.split(sep)[:-1]) + sep  # path to this file
+print("path", path)
+path = os.path.abspath(os.path.expanduser(os.path.expandvars(path))) + sep
+p = path + "../cpp/"
+run("rm -f " + p + "class_count.exe")
+if not exist(p + "class_count.exe"):
+    run("g++ -w -O3 " + p + "class_count.cpp " + p + "misc.cpp -o " + p + "class_count.exe -lpthread")
+
+class_count = os.popen(p + "class_count.exe " + fn).read().strip().replace("\n", " ").replace("NAN", "float(\"NaN\")")
+statement = "count_by_label=" + class_count
+print(statement)
+exec(statement)
+print(count_by_label)
+
 # select bands for visualization: default value [3, 2, 1]. Try changing to anything from 0 to 12-1==11! 
 # band_select = [3, 2, 1] if bands > 3 else [0, 1, 2]
 band_select = [0, 1, 2]
@@ -80,10 +97,13 @@ if bands == 1:
 
     kmeans_labels = classes_by_kmeans_label
     #kmeans_labels {2.0: {'fireweeddeciduous'}, 11.0: {'pineburneddeciduous'}, 7.0: {'blowdownfireweed'}, 10.0: set(), 3.0: {'blowdownlichen'}, 9.0: {'windthrowgreenherbs'}, 0.0: set(), 6.0: {'exposed', 'herb'}, 8.0: {'fireweedgrass'}, 4.0: {'pineburnedfireweed', 'pineburned'}, 1.0: {'lake'}, 12.0: {'conifer'}, 5.0: {'deciduous'}}
-    
+    print('data op')
     data = data.tolist()[0] # not sure why the data packed wierdly in here
+    '''
     n_points = len(data)
     for i in range(len(data)):
+        if i % 10000 == 0: 
+            print(i, len(data))
         d = data[i]
         if math.isnan(d):
             # rint("NAN")
@@ -91,7 +111,11 @@ if bands == 1:
         if d not in count_by_label:
             count_by_label[d] = 0
         count_by_label[d] += 1
-    
+    '''
+    n_points =0
+    for label in count_by_label:
+        n_points += count_by_label[label] 
+
     print("count_by_label", count_by_label)
     print("kmeans_labels", kmeans_labels)
     for label in count_by_label:
@@ -107,21 +131,25 @@ if bands == 1:
     data = np.array(data).reshape((bands, npx))
         
     if str(kmeans_labels) != str("{}"):
+        print("WHAT ARE WE DOING")
         data = data.tolist()[0] # not sure why the data packed wierdly in here
         for i in range(npx):
+            if i % 10000 == 0: 
+                print(i, len(data))
             if data[i] == float("NaN"):
                 data[i] = 0.
             else:
                 data[i] = data[i] + 1.
         data = np.array(data).reshape((bands, npx))
 
-print(kmeans_labels, "kmeans_labels")
+print("kmeans_labels", kmeans_labels)
 
 rgb = np.zeros((lines, samples, 3))
 for i in range(0, 3):
     rgb[:, :, i] = data[band_select[i], :].reshape((lines, samples))
     
     if not override_scaling:
+        print("scaling")
         # scale band in range 0 to 1
         rgb_min, rgb_max = np.nanmin(rgb[:, :, i]), np.nanmax(rgb[:, :, i])
         print("rgb_min: " + str(rgb_min) + " rgb_max: " + str(rgb_max))
@@ -163,6 +191,7 @@ for i in range(0, 3):
 
         # (rgb[:, :, i])[d < 0.] = 0.
         # (rgb[:, :, i])[d > 1.] = 1.
+print("done scaling..")
 
 # plot the image: no class labels
 if str(kmeans_labels) == "{}":
