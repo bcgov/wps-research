@@ -84,11 +84,11 @@ if bands == 1:
         if d not in count_by_label:
             count_by_label[d] = 0
         count_by_label[d] += 1
-    data = np.array(data).reshape((bands, npx))
-
      
     for label in count_by_label:
-        percent_by_label[label] = 100. * count_by_label[label] / len(data)
+        percent_by_label[label] = 100. * count_by_label[label] / float(len(data))
+
+    data = np.array(data).reshape((bands, npx))
         
     if str(kmeans_labels) != str("{}"):
         data = data.tolist()[0] # not sure why the data packed wierdly in here
@@ -199,7 +199,7 @@ if str(kmeans_labels) != "{}":
     print("kmeans_labels", kmeans_labels)
     for label in kmeans_labels: # eans_label_by_class:
         x = kmeans_labels[label] #_by_class[label]
-        tick_labels.append(str(label) + " --> " + str(x) + " %" + percent_by_label[label]) # this is the "set of classes" label
+        tick_labels.append(str(label) + " --> " + str(x) + " %" + str(round(percent_by_label[label], 2)) # this is the "set of classes" label
         ticks.append(label) # this is the float label
         if set([ci]) != x:
             print(str(set([ci])), str(x))
