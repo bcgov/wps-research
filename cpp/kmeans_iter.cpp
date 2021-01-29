@@ -19,7 +19,7 @@ void find_nearest(size_t b){
   // find the nearest centre, for data point with index: i
   // put a loop in this one to find nearest neighbour of a chunk of points..
   size_t i, j, k;
-  float d, dd;
+  float d, dd, c, *mean;
 
   list<size_t> * p = &points[bucket_c]; // list the points in this class to iterate
 
@@ -31,8 +31,9 @@ void find_nearest(size_t b){
     float nearest_d = FLT_MAX;
 
     for0(j, K){
-      float c = buckets[j]; // float c = ti->first; // class label we're comparing against
-      float * mean = means[c]; // vector representing the present mean
+      c = buckets[j]; // float c = ti->first; // class label we're comparing against
+      mean = means[c]; // vector representing the present mean
+
       dd = 0.; // distance from this point to centre
 
       for0(k, nband){
@@ -45,6 +46,7 @@ void find_nearest(size_t b){
         nearest_c = c;
       }
     }
+
     update[i] = nearest_c;
   }
 }
@@ -187,7 +189,6 @@ int main(int argc, char ** argv){
       }
     }
 
-    printf(" div\n");
     for0(j, K){
       float c = buckets[j]; // it->first;
       float n_pts = (float) points[c].size();
@@ -203,11 +204,9 @@ int main(int argc, char ** argv){
 
     // for0(i, K) if(dcount[i] > 0) for0(j, nband) mean[(i * nband) + j] /= dcount[i]; // mean = total / count
 
-    printf(" find\n");
     size_t n_buckets = means.size();
     parfor(0, n_buckets, find_nearest); // find nearest centre to each point.. do this on per-bucket basis for now!!!!!
 
-    printf(" here\n");
     for0(i, np) if(label[i] != update[i]) n_change ++; // find out how many pixels changed
     float pct_chg = 100. * (float)n_change / (float)np; // (float)n_good; // plot change info
     printf("iter %zu of %zu n_change %f\n", n + 1, iter_max, pct_chg);
