@@ -11,7 +11,6 @@ from misc import *
 from sklean.neighbours import KNeighboursClassifier
 
 infile = "stack.bin" # default input file
-
 if len(args) > 1: infile = args[1]
 if len(args) < 2 and not os.path.exists(infile):
     err("kmeans_optimization.py [input image to run kmeans on]")
@@ -45,7 +44,7 @@ for i in range(1, len(lines)): # iterate over the vector labels
     line = lines[i] # csv data
     label = line[i_lab] # text label from csv.. target label
     x, y = int(line[i_row]), int(line[i_lin]) # image coordinates of point
-    ix = (y * ncol) + x  # linear image coordinates of the point! 
+    ix = (y * ncol) + x  # linear image coordinates of the point!
     if ix < nrow * ncol:  # skip if out of bounds
         class_label[ix] = label  # map pix/line coords to target label
         c[label] = (c[label] + 1) if label in c else 1 # count the occurrence for each label
@@ -96,14 +95,13 @@ if not exist(infile + "_seed.bin"):
                 bad = True
         if bad:
             seed.append(float("NaN"))
-            continue    
-
-        min_c, min_d = None, float("NaN")
+            continue
+        min_c, min_d = None, float("NaN") # find nearest centre, minimal distance
         ci = 0
         for c in target_mean:
-            d = 0.
+            d = 0. # distance
             for k in range(bands):
-                dd = target_mean[c][k] - dat_img[nrow*ncol*k + ix]
+                dd = target_mean[c][k] - dat_img[nrow * ncol * k + ix]
                 d += dd * dd
             d = math.sqrt(d)
             if min_c is None:
@@ -118,7 +116,7 @@ if not exist(infile + "_seed.bin"):
 
     print("len(seed)", len(seed))
     write_binary(np.array(seed, dtype=np.float32), infile + "_seed.bin")
-    write_hdr(infile + "_seed.hdr", ncol, nrow, 1) 
+    write_hdr(infile + "_seed.hdr", ncol, nrow, 1)
 
 go = True
 iteration = 0
@@ -155,7 +153,10 @@ while go: # could have turned this into a recursive function!
     print("kmeans_label_by_class", kmeans_label_by_class)
 
 
-    # kmeans_label_by_class {'fireweeddeciduous': {4.0}, 'blowdownlichen': {2.0}, 'fireweedgrass': {5.0}, 'exposed': {3.0}, 'pineburned': {0.0}, 'pineburnedfireweed': {1.0}}
+    '''kmeans_label_by_class {'fireweeddeciduous': {4.0}, 'blowdownlichen': {2.0},
+                              'fireweedgrass': {5.0}, 'exposed': {3.0}, 'pineburned': {0.0},
+                              'pineburnedfireweed': {1.0}}
+    '''
     found = False
     lines = open(infile + "_kmeans.hdr").read()
     lines = [line.strip() for line in lines]
@@ -167,6 +168,7 @@ while go: # could have turned this into a recursive function!
                 found = True
         except:
             pass
+
     if not found:
         open(infile + "_kmeans.hdr", "a").write("kmeans_label_by_class " + str(kmeans_label_by_class))
 
@@ -176,7 +178,8 @@ while go: # could have turned this into a recursive function!
     for k in kmeans_label_by_class:
         kk = kmeans_label_by_class[k]
         for j in kmeans_label_by_class:
-            if k == j: continue
+            if k == j:
+                continue
             kj = kmeans_label_by_class[j]
             inter = kk.intersection(kj)
             if inter != empty:
@@ -191,7 +194,7 @@ while go: # could have turned this into a recursive function!
 
     '''
       1. store the "good" labels to keep (final)... write out good label map.... (next iteration will need to merge with that one!!!!!!)
-      2. for the confused classes, write a new seed file with original seeds PLUS ONE SEED one more 
+      2. for the confused classes, write a new seed file with original seeds PLUS ONE SEED one more
       3. new iteration should shard off the good stuff (if there is any) and keep on dividing the stuff that isn't good yet..
     '''
 
@@ -211,7 +214,7 @@ while go: # could have turned this into a recursive function!
         if data[i] in kmeans_labels_good:
             good_labels[i] = data[i]
         if data[i] in kmeans_labels_confused:
-            seeds[i] = data[i] 
+            seeds[i] = data[i]
 
     # put the good stuff on ice, now randomly select centres and crank up the N until something pops off...
     # each iteration, save the good stuff. and attack the rest again!
@@ -249,13 +252,13 @@ KNeighborsClassifier(...)
 
     neigh = KNeighboursClassifier(n_neighbors = 2)
     neigh.fit(X, y)
-    
-    
-	
+
+
+
 
     sys.exit(1)
 
-     
+
     if not bad:
         # CLEAN UP AND FINISH....
         print("good")
@@ -264,7 +267,7 @@ KNeighborsClassifier(...)
         for k in kmeans_label_by_class:
             for j in kmeans_label_by_class[k]:
                 used_labels.add(j)
-        print("used_labels", used_labels)        
+        print("used_labels", used_labels)
 
         lookup = {}
         for k in range(0, K):
@@ -283,10 +286,10 @@ KNeighborsClassifier(...)
 
         write_binary(data, class_file) # relabel the data and output
         break # kmeans_label_by_class: {'fireweedandaspen': [0.0], 'blowdownwithlichen': [1.0, 0.0], 'pineburned': [1.0, 1.0, 1.0]}
-    
+
     K += 1 # try adding a class!
     iteration += 1
-    
+
 print("kmeans_label_by_class", kmeans_label_by_class, "lookup", lookup)
 
 # translate the lookup
@@ -297,7 +300,7 @@ for label in kmeans_label_by_class:
 print("kmeans_label_by_class", kmeans_label_by_class)
 
 
-#  do the plotting! 
+#  do the plotting!
 
 import matplotlib.pyplot as plt
 hdr = hdr_fn(infile)
@@ -309,7 +312,7 @@ img = ax.imshow(data, cmap='Spectral')
 # ax.set_aspect("auto")
 cbar = plt.colorbar(img)#  .legend([0, 1, 2, 3], ['0', '1', '2', '3'])\
 tick_labels = [] # "noise"]
-ci = 0 
+ci = 0
 for label in kmeans_label_by_class:
     tick_labels.append(label)
     x = kmeans_label_by_class[label]
