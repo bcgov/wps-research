@@ -19,7 +19,7 @@ void find_nearest(size_t b){
   // find the nearest centre, for data point with index: i
   // put a loop in this one to find nearest neighbour of a chunk of points..
   size_t i, j, k;
-  float d, dd, c, *mean;
+  float d, x, c, *mean;
 
   list<size_t> * p = &points[bucket_c]; // list the points in this class to iterate
 
@@ -37,8 +37,8 @@ void find_nearest(size_t b){
       d = 0.; // distance from this point to centre
 
       for0(k, nband){
-        dd = dat[np * k + i] - mean[k]; // compare point to mean each band
-        d += dd * dd;
+        x = dat[np * k + i] - mean[k]; // compare point to mean each band
+        d += x * x;
       }
       d = sqrt(d);
       if(isnan(d) || isinf(d)){
@@ -50,8 +50,8 @@ void find_nearest(size_t b){
         }
       }
     }
-
     update[i] = nearest_c;
+    if(nearest_c == NAN || isnan(nearest_c)) { printf("QUIT\n"); exit(1)}
   }
 }
 
