@@ -58,11 +58,9 @@ for ix in target_ix:
     if ix < nrow * ncol:
         for k in range(0, bands):
             pass # print(dat_img[nrow*ncol*k + ix])
-    else:
-        print("warning: target out of bounds")
+    else: print("warning: target out of bounds")
 
-target_data = {ix: [dat_img[nrow*ncol*k + ix] for k in range(0, bands)] for ix in target_ix}
-
+target_data = {ix: [dat_img[nrow * ncol * k + ix] for k in range(0, bands)] for ix in target_ix}
 for ix in target_data:
     print(ix, target_data[ix])
 
