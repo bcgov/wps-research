@@ -107,45 +107,6 @@ n_nan = 0
 print("calculate seed layer..") # should be parallelized in C/C++
 run(cpp_path + "raster_nearest_centre.exe " + infile + " target_mean.dat")
 
-'''
-if not exist(infile + "_seed.bin"):
-    # form seed layer by choosing each point's label by taking the closest mean (where the mean is calculated over different points with the same label)
-    seed = []
-    dx = math.ceil(nrow * ncol / 1000.)
-    for ix in range(nrow * ncol):
-        if ix % dx == 0:
-            print(100. * ix / (nrow * ncol), "%")
-        bad = False
-        for k in range(bands):
-            if math.isnan(dat_img[nrow*ncol*k + ix]):
-                bad = True
-        if bad:
-            seed.append(float("NaN"))
-            n_nan += 1
-            continue
-        min_c, min_d = None, float("NaN") # find nearest centre, minimal distance
-        ci = 0
-        for c in target_mean:
-            d = 0. # distance
-            for k in range(bands):
-                dd = target_mean[c][k] - dat_img[nrow * ncol * k + ix]
-                d += dd * dd
-            d = math.sqrt(d)
-            if min_c is None:
-                min_c = ci
-                min_d = d
-            else:
-                if d < min_d:
-                    min_d = d
-                    min_c = ci # represent class by number
-            ci += 1
-        seed.append(min_c)
-    print("n_nan", n_nan)
-    print("len(seed)", len(seed))
-    write_binary(np.array(seed, dtype=np.float32), infile + "_seed.bin")
-    write_hdr(infile + "_seed.hdr", ncol, nrow, 1)
-'''
- 
 go = True
 iteration = 0
 next_label = K
