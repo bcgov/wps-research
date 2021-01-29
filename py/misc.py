@@ -86,7 +86,7 @@ def assert_exists(fn):
 # use numpy to read a floating-point data file (4 bytes per float, byte order 0)
 def read_float(fn):
     print("+r", fn)
-    return np.fromfile(fn, '<f4')
+    return np.fromfile(fn, dtype = "float32") # '<f4')
 
 def wopen(fn):
     f = open(fn, "wb")
@@ -109,7 +109,7 @@ def read_binary(fn):
 
 def write_binary(np_ndarray, fn):
     of = wopen(fn)
-    np_ndarray.tofile(of, '', '<f4')
+    np_ndarray.tofile(of, '', dtype="float32") #'<f4')
     of.close()
 
 
