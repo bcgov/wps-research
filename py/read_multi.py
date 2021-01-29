@@ -65,11 +65,10 @@ n_points = 0
 print("count_by_label", count_by_label)
 n_nan = count_by_label["NAN"] # float('NaN')]
 if bands == 1:
-    # could be a class map! Or just a one-band map..
-    band_select = [0, 0, 0,]
+    band_select = [0, 0, 0,] # could be class map. or just one band map
 
     # detect class map! Should have label field in header!
-    ls = [line.strip() for line in open(hdr).readlines()]
+    ls = [line.strip() for line in open(hdr).readlines()] 
     labels = None
     for line in ls:
         w = line.split()
@@ -100,19 +99,7 @@ if bands == 1:
     #kmeans_labels {2.0: {'fireweeddeciduous'}, 11.0: {'pineburneddeciduous'}, 7.0: {'blowdownfireweed'}, 10.0: set(), 3.0: {'blowdownlichen'}, 9.0: {'windthrowgreenherbs'}, 0.0: set(), 6.0: {'exposed', 'herb'}, 8.0: {'fireweedgrass'}, 4.0: {'pineburnedfireweed', 'pineburned'}, 1.0: {'lake'}, 12.0: {'conifer'}, 5.0: {'deciduous'}}
     print('data op')
     data = data.tolist()[0] # not sure why the data packed wierdly in here
-    '''
-    n_points = len(data)
-    for i in range(len(data)):
-        if i % 10000 == 0: 
-            print(i, len(data))
-        d = data[i]
-        if math.isnan(d):
-            # rint("NAN")
-            n_nan += 1
-        if d not in count_by_label:
-            count_by_label[d] = 0
-        count_by_label[d] += 1
-    '''
+
     n_points =0
     for label in count_by_label:
         n_points += count_by_label[label] 
@@ -176,8 +163,7 @@ for i in range(0, 3):
         rgb_max = values[int(math.floor(float(npx)*0.99))]
         rgb[:, :, i] -= rgb_min
         rng = rgb_max - rgb_min
-        if rng > 0.:
-            rgb[:, :, i] /= (rgb_max - rgb_min)
+        if rng > 0.: rgb[:, :, i] /= (rgb_max - rgb_min)
 
         # need to add this update in misc.py as well, and move this code out
         d = rgb[:, :, i]
@@ -185,11 +171,8 @@ for i in range(0, 3):
         for j in range(rgb.shape[0]):
             for k in range(rgb.shape[1]):
                 d = rgb[j,k,i]
-                if d < 0.:
-                    rgb[j,k,i] = 0.
-                if d > 1.:
-                    rgb[j,k,i] = 1.
-
+                if d < 0.: rgb[j,k,i] = 0.
+                if d > 1.: rgb[j,k,i] = 1.
         # (rgb[:, :, i])[d < 0.] = 0.
         # (rgb[:, :, i])[d > 1.] = 1.
 print("done scaling..")
@@ -215,18 +198,7 @@ if str(kmeans_labels) == "{}":
 # plot image with class labels
 if str(kmeans_labels) != "{}":
     print("plotting..")
-    data = read_float(sys.argv[1])
-
-    # d_min, d_max = np.nanmin(data), np.nanmax(data)
-    #data = (data + 1.) / (1. + d_max - d_min)
-    #for i in range(0, len(data)):
-    #    if math.isnan(data[i]):
-    #        data[i] = 0.
-    # data = data / (d_max - d_min)
-    #values = set(data)
-    # print("values", values)
-    data = data.reshape((lines, samples))
-    # fig = plt.figure()
+    data = read_float(sys.argv[1]).reshape((lines, samples))
     fig, ax = plt.subplots()
     ff = os.path.sep.join((fn.split(os.path.sep))[:-1]) + os.path.sep
     title_s = fn.split("/")[-1] if not exists(ff + 'title_string.txt') else open(ff + 'title_string.txt').read().strip()
