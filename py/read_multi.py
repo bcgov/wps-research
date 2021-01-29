@@ -39,7 +39,7 @@ print("bytes read: " + str(data.size))
 
 # select bands for visualization: default value [3, 2, 1]. Try changing to anything from 0 to 12-1==11! 
 # band_select = [3, 2, 1] if bands > 3 else [0, 1, 2]
-band_select = [1, 2, 3]
+band_select = [0, 1, 2]
 kmeans_labels = {}
 kmeans_labels_by_class = None
 count_by_label, percent_by_label, percent_confused = {}, {}, 0
