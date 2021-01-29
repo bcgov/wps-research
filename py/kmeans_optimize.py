@@ -102,7 +102,6 @@ for c in target_mean:
 output_file.write(("\n".join([str(x) for x in od])).encode())
 output_file.close()
 outputfile2.close()
-sys.exit(1)
 
 n_nan = 0
 print("calculate seed layer..") # should be parallelized in C/C++
