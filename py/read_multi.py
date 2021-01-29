@@ -237,6 +237,7 @@ if str(kmeans_labels) != "{}":
 
     import collections
     print("kmeans_labels", kmeans_labels)
+    kmeans_labels.delete("NAN")
     kmeans_labels = collections.OrderedDict(sorted(kmeans_labels.items()))
     print("kmeans_labels", kmeans_labels)
     cbar = plt.colorbar(img) # p.array(data)) #gb)#  .legend([0, 1, 2, 3], ['0', '1', '2', '3'])\
