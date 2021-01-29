@@ -48,7 +48,7 @@ run("rm -f " + p + "class_count.exe")
 if not exist(p + "class_count.exe"):
     run("g++ -w -O3 " + p + "class_count.cpp " + p + "misc.cpp -o " + p + "class_count.exe -lpthread")
 
-class_count = os.popen(p + "class_count.exe " + fn).read().strip().replace("\n", " ").replace("NAN", "float(\"NaN\")")
+class_count = os.popen(p + "class_count.exe " + fn).read().strip().replace("\n", " ").replace("NAN", "\"NAN\"") #  "float(\"NaN\")")
 statement = "count_by_label=" + class_count
 print(statement)
 exec(statement)
@@ -62,7 +62,8 @@ kmeans_labels_by_class = None
 percent_by_label, percent_confused = {}, 0
 confused_labels, confused_kmeans_labels = set(), set()
 n_points = 0
-n_nan = count_by_label[float('NaN')]
+print("count_by_label", count_by_label)
+n_nan = count_by_label["NAN"] # float('NaN')]
 if bands == 1:
     # could be a class map! Or just a one-band map..
     band_select = [0, 0, 0,]
