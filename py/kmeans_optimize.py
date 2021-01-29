@@ -81,6 +81,7 @@ for L in target_mean:
         for k in range(bands):
             target_mean[L][k] /= target_n[L]
 
+n_nan = 0
 print("calculate seed layer..") # should be parallelized in C/C++
 if not exist(infile + "_seed.bin"):
     # form seed layer by choosing each point's label by taking the closest mean (where the mean is calculated over different points with the same label)
@@ -95,6 +96,7 @@ if not exist(infile + "_seed.bin"):
                 bad = True
         if bad:
             seed.append(float("NaN"))
+            n_nan += 1
             continue
         min_c, min_d = None, float("NaN") # find nearest centre, minimal distance
         ci = 0
@@ -130,7 +132,7 @@ while go: # could have turned this into a recursive function!
     seed_file = infile + "_seed.bin"
     if iteration > 0:
         seed_file = infile + "_reseed.bin" #  class_file
-    run(cpp_path + "kmeans_iter.exe " + infile + " " + seed_file + " 1. " + ("" if iteration == 0 else (" " + str(next_label))))
+    run(cpp_path + "kmeans_iter.exe " + infile + " " + seed_file + " 1. ") # + ("" if iteration == 0 else (" " + str(next_label))))
     next_label += 1 # next iteration would need a higher label if it's reached..
     ncol, nrow, bands, data = read_binary(class_file) # read the class map data resulting from kmeans
 
@@ -235,7 +237,7 @@ while go: # could have turned this into a recursive function!
 
     write_binary(seeds, infile + "_reseed.bin") # relabel the data and output
     write_hdr(infile + "_reseed.hdr", ncol, nrow, 1)
-
+    print("n_nan", n_nan)
     # RUN KNN ON DATA WITH CONFUSED LABELS ONLY!!!!
     # SPLICE THE RESULTS BACK INTO THE CLASS MAP
     # LOOK AT BRAD NEW DATA
