@@ -21,56 +21,81 @@ int main(int argc, char ** argv){
   while(std::getline(read, s)){
     cout << s << endl;
     N++;
+    trim(s);
+    if(s != str(""))
     lines.push_back(s);
   }
+  printf("N %zu\n", N);
   float * centres = falloc(N);
   for0(i, N){
     centres[i] = atof(lines[i].c_str());
-    
   }
   N /= nband;
-
-  
+  printf("N %zu\n", N);
  
   // size_t N = fsize(cfn) / (sizeof(float) * nband);
   printf("find nearest centre of: %zu\n", N);
   size_t np = nrow * ncol;
-  float min_i, min_d;
 
   float * out = falloc(np);
   for0(n, N){
     printf(" %d [", n);
     for0(k, nband){
-      printf("%f ",centres[N*n + k]);
+      printf("%f ",centres[n * nband + k]);
     }
     printf("]\n");
   }
 
+  float min_i, min_d, d, dd;
 
   for0(i, nrow){
     size_t ix = i * ncol;
     for0(j, ncol){
         size_t jx = ix + j;
+
         min_i = NAN;
         min_d = FLT_MAX;
-     
+
+/*
+          for0(n, N){
+    printf(" %d [", n);
+    for0(k, nband){
+      printf("%f ",centres[n * nband + k]);
+    }
+    printf("]\n");
+  }
+*/
+
         // calculate distance to centre
         for0(n, N){
-           float d = 0;
+           d = 0.;
            for0(k, nband){
-              float dd = dat[np * k + jx] - centres[N * n + k];
+              dd = dat[np * k + jx] - centres[n * nband + k];
               d += dd * dd;
            }
            d = sqrt(d);
+
            if(isnan(d) || isinf(d)){
            }
            else{
              if(d < min_d){
-                 min_i = n;
+                 min_i = (float)n;
                  min_d = d;
                }
            }
+           //printf("n %zu d %f\n", n, d);
         }
+
+        // if(min_i == NAN) continue; // don't forget to remove this!
+/*
+        if(true){
+        printf("[");
+        for0(k, nband){
+          printf("%f ", dat[np * k + jx]);
+        }
+        printf("]\nmini=%f min_d=%e \n", min_i, min_d);
+        } 
+*/
         out[jx] = min_i;
     }
   }
