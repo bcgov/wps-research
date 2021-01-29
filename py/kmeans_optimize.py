@@ -140,7 +140,8 @@ while go: # could have turned this into a recursive function!
         line = lines[i]
         x, y = int(line[i_row]), int(line[i_lin]) # rowcol coords for the point
         ix = (y * ncol) + x # print("row", line[i_row], line[i_lin], line[i_xof], line[i_yof], line[i_lab], "class", data[ix])
-        if ix < nrow * ncol: kmeans_label[ix] = data[ix]
+        if ix < nrow * ncol:
+            kmeans_label[ix] = data[ix]
 
     kmeans_label_by_class = {}
     for p in class_label:
@@ -175,6 +176,7 @@ while go: # could have turned this into a recursive function!
     # check if we're done
     bad, empty = False, set()
     confused_labels = set()
+    confusion_intersection = []
     for k in kmeans_label_by_class:
         kk = kmeans_label_by_class[k]
         for j in kmeans_label_by_class:
@@ -186,6 +188,7 @@ while go: # could have turned this into a recursive function!
                 bad = True
                 confused_labels.add(k)
                 confused_labels.add(j)
+                confusion_intersection.append(inter)
     print("confused_labels", confused_labels)
     print("labels", list(kmeans_label_by_class.keys()))
     all_labels = set(list(kmeans_label_by_class.keys()))
@@ -256,6 +259,11 @@ while go: # could have turned this into a recursive function!
     for ix in target_data:
         print(ix, class_label[ix], target_data[ix])
 
+    print("kmeans_labels_confused", kmeans_labels_confused)
+    print("confusion_intersection", confusion_intersection)
+    print("kmeans_labels_good", kmeans_labels_good)
+    print("kmeans_labels_confused", kmeans_labels_confused)
+    print("kmeans_label_by_class", kmeans_label_by_class)
     neigh = KNeighborsClassifier(n_neighbors = 2)
     # neigh.fit(X, y)
     sys.exit(1)
