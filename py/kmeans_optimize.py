@@ -280,8 +280,6 @@ while go: # could have turned this into a recursive function!
     >>> print(neigh.predict_proba([[0.9]]))
     [[0.66666667 0.33333333]]'''
 
-
-
     print("target_ix", target_ix)
     print("target_data")
     for ix in target_data:
@@ -293,7 +291,7 @@ while go: # could have turned this into a recursive function!
     print("kmeans_labels_confused", kmeans_labels_confused)
     print("kmeans_label_by_class", kmeans_label_by_class)
 
-    run(p + "../py/read_multi.py " + infile +"_kmeans.bin")
+    run(cpp_path + "../py/read_multi.py " + infile +"_kmeans.bin")
     neigh = KNeighborsClassifier(n_neighbors = 2)
     # neigh.fit(X, y)
     sys.exit(1)
