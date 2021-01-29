@@ -42,7 +42,10 @@ print("bytes read: " + str(data.size))
 band_select = [1, 2, 3]
 kmeans_labels = {}
 kmeans_labels_by_class = None
-count_by_label, percent_by_label = {}, {}
+count_by_label, percent_by_label, percent_confused = {}, {}, 0
+confused_labels, confused_kmeans_labels = set(), set()
+n_points = 0
+n_nan = 0
 if bands == 1:
     # could be a class map! Or just a one-band map..
     band_select = [0, 0, 0,]
@@ -79,14 +82,27 @@ if bands == 1:
     #kmeans_labels {2.0: {'fireweeddeciduous'}, 11.0: {'pineburneddeciduous'}, 7.0: {'blowdownfireweed'}, 10.0: set(), 3.0: {'blowdownlichen'}, 9.0: {'windthrowgreenherbs'}, 0.0: set(), 6.0: {'exposed', 'herb'}, 8.0: {'fireweedgrass'}, 4.0: {'pineburnedfireweed', 'pineburned'}, 1.0: {'lake'}, 12.0: {'conifer'}, 5.0: {'deciduous'}}
     
     data = data.tolist()[0] # not sure why the data packed wierdly in here
+    n_points = len(data)
     for i in range(len(data)):
         d = data[i]
+        if math.isnan(d):
+            print("NAN")
+            n_nan += 1
         if d not in count_by_label:
             count_by_label[d] = 0
         count_by_label[d] += 1
-     
+    
+    print("count_by_label", count_by_label)
+    print("kmeans_labels", kmeans_labels)
     for label in count_by_label:
+        if label not in kmeans_labels:
+            kmeans_labels[label] = "None"
         percent_by_label[label] = 100. * count_by_label[label] / float(len(data))
+        if len(kmeans_labels[label]) > 1:
+            percent_confused += percent_by_label[label]
+            for c in kmeans_labels[label]:
+                confused_labels.add(c)
+            confused_kmeans_labels.add(str(kmeans_labels[label]))
 
     data = np.array(data).reshape((bands, npx))
         
@@ -183,7 +199,8 @@ if str(kmeans_labels) != "{}":
     # fig = plt.figure()
     fig, ax = plt.subplots()
     ff = os.path.sep.join((fn.split(os.path.sep))[:-1]) + os.path.sep
-    title_s = fn.split("/")[-1] if not exists(ff + 'title_string.txt') else open(ff + 'title_string.txt').read().strip() 
+    title_s = fn.split("/")[-1] if not exists(ff + 'title_string.txt') else open(ff + 'title_string.txt').read().strip()
+    title_s += " percent confused: %" + str(round(percent_confused, 2))
     plt.title(title_s, fontsize=11)
     # plt.style.use('dark_background')A
     img = ax.imshow(data, cmap='Spectral')
@@ -199,7 +216,7 @@ if str(kmeans_labels) != "{}":
     print("kmeans_labels", kmeans_labels)
     for label in kmeans_labels: # eans_label_by_class:
         x = kmeans_labels[label] #_by_class[label]
-        tick_labels.append(str(label) + " --> " + str(x) + " %" + str(round(percent_by_label[label], 2)) # this is the "set of classes" label
+        tick_labels.append(str(label) + " --> " + str(x) + " %" + str(round(percent_by_label[label], 2))) # this is the "set of classes" label
         ticks.append(label) # this is the float label
         if set([ci]) != x:
             print(str(set([ci])), str(x))
@@ -209,7 +226,9 @@ if str(kmeans_labels) != "{}":
     print("tick_labels", tick_labels)
     print("ticks", ticks) 
     cbar.ax.set_yticklabels(tick_labels) #"bad", "good", "other", "more", "what"])
-
+    # plt.xlabel("confused labels: " + str(confused_kmeans_labels))
+    plt.xlabel(str("".join([ str( x) for x in ["n_nan ", n_nan, " n_points ", n_points]])))
+    print("confused labels:", confused_kmeans_labels)
 plt.tight_layout()
 plt_fn = fn + ".png"
 print("+w", plt_fn)
