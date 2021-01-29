@@ -245,7 +245,13 @@ if str(kmeans_labels) != "{}":
     print("kmeans_labels", kmeans_labels)
     for label in kmeans_labels: # eans_label_by_class:
         x = kmeans_labels[label] #_by_class[label]
-        tick_labels.append(str(label) + " --> " + str(x) + " %" + str(round(percent_by_label[label], 2))) # this is the "set of classes" label
+        try:
+            my_percent =  " %" + str(round(percent_by_label[label], 2))
+        except:
+            print("count_by_label", count_by_label)
+            print("percent_by_label", percent_by_label, "label", label)
+            err("fail")
+        tick_labels.append(str(label) + " --> " + str(x) + my_percent ) # this is the "set of classes" label
         ticks.append(label) # this is the float label
         if set([ci]) != x:
             print(str(set([ci])), str(x))
