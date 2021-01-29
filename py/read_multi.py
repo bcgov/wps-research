@@ -38,8 +38,8 @@ data = read_float(sys.argv[1]).reshape((bands, npx))
 print("bytes read: " + str(data.size))
 
 # select bands for visualization: default value [3, 2, 1]. Try changing to anything from 0 to 12-1==11! 
-band_select = [3, 2, 1] if bands > 3 else [0, 1, 2]
-
+# band_select = [3, 2, 1] if bands > 3 else [0, 1, 2]
+band_select = [1, 2, 3]
 kmeans_labels = {}
 if bands == 1:
     # could be a class map! Or just a one-band map..
@@ -136,11 +136,12 @@ if str(kmeans_labels) == "{}":
     plt.style.use('dark_background')
 
     d_min, d_max = np.nanmin(rgb), np.nanmax(rgb)
+    print("d_min", d_min, "d_max", d_max)
     rgb = rgb / (d_max - d_min)
 
 
-    plt.imshow(rgb, vmin = 0., vmax = 1.) #plt.tight_layout()
-
+    plt.imshow(rgb) #, vmin = 0., vmax = 1.) #plt.tight_layout()
+    plt.tight_layout()
     if exists(ff + 'copyright_string.txt'):
         plt.xlabel(open(ff+ 'copyright_string.txt').read().strip())
 
