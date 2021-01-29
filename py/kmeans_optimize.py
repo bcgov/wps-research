@@ -252,7 +252,7 @@ while go: # could have turned this into a recursive function!
     print("kmeans_labels_confused", kmeans_labels_confused)
     print("kmeans_label_by_class", kmeans_label_by_class)
 
-    run(cpp_path + "../py/read_multi.py " + infile +"_kmeans.bin")
+    run(cpp_path + "../py/read_multi.py " + infile +"_kmeans.bin 1")
     neigh = KNeighborsClassifier(n_neighbors = 2)
     # neigh.fit(X, y)
     sys.exit(1)

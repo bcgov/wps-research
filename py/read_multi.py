@@ -198,7 +198,7 @@ if str(kmeans_labels) == "{}":
 if str(kmeans_labels) != "{}":
     print("plotting..")
     data = read_float(sys.argv[1]).reshape((lines, samples))
-    fig, ax = plt.subplots(figsize=(1.9 * 24, 24))
+    fig, ax = plt.subplots(figsize=(1.9 * 12, 12))
     ff = os.path.sep.join((fn.split(os.path.sep))[:-1]) + os.path.sep
     title_s = fn.split("/")[-1] if not exists(ff + 'title_string.txt') else open(ff + 'title_string.txt').read().strip()
     title_s += " percent confused: %" + str(round(percent_confused, 2))
