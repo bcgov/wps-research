@@ -8,7 +8,7 @@
 
 '''
 from misc import *
-from sklean.neighbours import KNeighboursClassifier
+from sklearn.neighbors import KNeighborsClassifier
 
 infile = "stack.bin" # default input file
 if len(args) > 1: infile = args[1]
@@ -251,9 +251,9 @@ KNeighborsClassifier(...)
     '''
 
     neigh = KNeighboursClassifier(n_neighbors = 2)
-    neigh.fit(X, y)
+    # neigh.fit(X, y)
 
-
+    print("target_ix", target_ix)
 
 
     sys.exit(1)
