@@ -239,25 +239,25 @@ while go: # could have turned this into a recursive function!
 
     '''
     >>> X = [[0], [1], [2], [3]]
->>> y = [0, 0, 1, 1]
->>> from sklearn.neighbors import KNeighborsClassifier
->>> neigh = KNeighborsClassifier(n_neighbors=3)
->>> neigh.fit(X, y)
-KNeighborsClassifier(...)
->>> print(neigh.predict([[1.1]]))
-[0]
->>> print(neigh.predict_proba([[0.9]]))
-[[0.66666667 0.33333333]]
-    '''
+    >>> y = [0, 0, 1, 1]
+    >>> from sklearn.neighbors import KNeighborsClassifier
+    >>> neigh = KNeighborsClassifier(n_neighbors=3)
+    >>> neigh.fit(X, y)
+    KNeighborsClassifier(...)
+    >>> print(neigh.predict([[1.1]]))
+    [0]
+    >>> print(neigh.predict_proba([[0.9]]))
+    [[0.66666667 0.33333333]]'''
 
-    neigh = KNeighborsClassifier(n_neighbors = 2)
-    # neigh.fit(X, y)
+
 
     print("target_ix", target_ix)
     print("target_data")
     for ix in target_data:
         print(ix, class_label[ix], target_data[ix])
 
+    neigh = KNeighborsClassifier(n_neighbors = 2)
+    # neigh.fit(X, y)
     sys.exit(1)
 
 
