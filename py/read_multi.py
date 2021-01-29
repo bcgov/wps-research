@@ -104,20 +104,22 @@ if bands == 1:
 
     n_points =0
     for label in count_by_label:
-        n_points += count_by_label[label] 
+        if label != "NAN":
+            n_points += count_by_label[label] 
 
     print("count_by_label", count_by_label)
     print("kmeans_labels", kmeans_labels)
+    print('n_points', n_points)
     for label in count_by_label:
         if label not in kmeans_labels:
             kmeans_labels[label] = "None"
-        percent_by_label[label] = 100. * count_by_label[label] / float(len(data))
+        percent_by_label[label] = 100. * count_by_label[label] / n_points # float(len(data))
         if len(kmeans_labels[label]) > 1:
+            print("kmeans_labels[label] > 1", kmeans_labels[label])
             percent_confused += percent_by_label[label]
             for c in kmeans_labels[label]:
                 confused_labels.add(c)
             confused_kmeans_labels.add(str(kmeans_labels[label]))
-
     data = np.array(data).reshape((bands, npx))
         
     if str(kmeans_labels) != str("{}"):
@@ -231,7 +233,7 @@ if str(kmeans_labels) != "{}":
         ci += 1
 
 
-    img = ax.imshow(data, cmap = discrete_cmap(len(ticks), 'Spectral')) # 'tab10')) # cmap='tab10') # img = ax.imshow(data, cmap='Spectral')
+    img = ax.imshow(data, cmap = discrete_cmap(len(ticks), 'jet')) # 'Spectral')) # 'tab10')) # cmap='tab10') # img = ax.imshow(data, cmap='Spectral')
     img.set_clim(-.5, len(ticks) - .5)
     cbar = plt.colorbar(img) # p.array(data)) #gb)#  .legend([0, 1, 2, 3], ['0', '1', '2', '3'])\
 
@@ -242,7 +244,7 @@ if str(kmeans_labels) != "{}":
     cbar.ax.set_yticklabels(tick_labels, fontsize=11) #"bad", "good", "other", "more", "what"])
 
     # plt.xlabel("confused labels: " + str(confused_kmeans_labels))
-    plt.xlabel(str("".join([ str( x) for x in ["n_nan ", n_nan, " n_points ", n_points]])), fontsize=9)
+    plt.xlabel(str("".join([ str( x) for x in ["n_nan ", add_commas(n_nan), " n_points ", add_commas(n_points)]])), fontsize=9)
     print("confused labels:", confused_kmeans_labels)
 plt.tight_layout()
 plt_fn = fn + ".png"
