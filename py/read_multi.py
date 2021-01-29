@@ -86,7 +86,7 @@ if bands == 1:
     for i in range(len(data)):
         d = data[i]
         if math.isnan(d):
-            print("NAN")
+            # rint("NAN")
             n_nan += 1
         if d not in count_by_label:
             count_by_label[d] = 0
