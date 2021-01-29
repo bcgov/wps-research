@@ -64,14 +64,13 @@ int main(int argc, char ** argv){
   if(argc < 3) cout << "kmeans [input binary image file name] [input label file name] [percent tolerance] " << endl;
   // << " [optional parameter: float value: add random seed with label!] # default to random initialization # NAN = no label. Remember to scale data first!!" << endl;
 
-  str fn("");
+  str fn("stack.bin");
   if(argc > 1) fn = str(argv[1]); // input image file name
-  else fn = str("stack.bin");
   if(!exists(fn)) err(str("failed to open input file: ") + fn);
 
-  str lfn("");
+  str lfn("stack.bin_nearest_centre.bin");
   if(argc > 2) lfn = str(argv[2]);
-  else lfn = str("stack.bin_label.bin");
+  if(!exists(lfn)) err(str("failed to open input file: ") + lfn);
 
   if(argc > 3) tol = atof(argv[3]);
   else tol = 3.; // percent class change (%) tolerance
@@ -90,6 +89,9 @@ int main(int argc, char ** argv){
     err(str("please check file: ") + str(lhfn));
   }
   printf("loadfloat\n");
+
+  cout << "fn " << fn << endl;
+  cout << "lfn" << lfn << endl;
   np = nrow * ncol; // number of input pix
   dat = bread(fn, nrow, ncol, nband); // load floats to array
   seed = bread(lfn, nrow, ncol, 1); // label seed array
@@ -98,7 +100,7 @@ int main(int argc, char ** argv){
   label = falloc(np); // one label per pixel; label is not defined if pix. index not appear in "points"
   for0(i, np) label[i] = NAN; // default to NAN
   update = falloc(np); // new set of label
-  for0(i, np) label[i] = NAN;
+  for0(i, np) update[i] = NAN;
 
   printf("seed\n");
 
@@ -111,9 +113,17 @@ int main(int argc, char ** argv){
 
   K = my_seeds.size(); // if(add_random_seed) K ++;
 
+  int * is_nan = (int *) alloc(sizeof(int) * np);
+
   for0(i, np){
     d = seed[i]; // use seed file to assign points to buckets
-    if(!(isnan(d) || isinf(d))) points[d].push_back(i); // map<float, list<size_t>> points; // lists of datapoint indices, organized by label
+    if(isnan(d) || isinf(d)){
+      is_nan[i] = 1;
+    }
+    else{ 
+     is_nan[i] = 0;
+     points[d].push_back(i); // map<float, list<size_t>> points; // lists of datapoint indices, organized by label
+    }
   }
 
   size_t ci = 0;
@@ -212,7 +222,12 @@ int main(int argc, char ** argv){
   printf("write class labels..\n");
   str ofn(fn + str("_kmeans.bin")); // output class labels
   str ohn(fn + str("_kmeans.hdr"));
-  printf("got here..\n");
+  printf("got here..\n"); 
+  for0(i, np){
+    if(is_nan[i]) label[i] = NAN;
+  }
+  cout << "+w " << ofn << endl;
+  cout << "+w " << ohn << endl;
   bwrite(label, ofn, nrow, ncol, 1); // write data
   printf("got there..\n");
   hwrite(ohn, nrow, ncol, 1, 4); // write type 4 header
