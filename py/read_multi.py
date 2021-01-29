@@ -119,11 +119,8 @@ if bands == 1:
     data = np.array(data).reshape((bands, npx))
         
     if str(kmeans_labels) != str("{}"):
-        print("WHAT ARE WE DOING")
         data = data.tolist()[0] # not sure why the data packed wierdly in here
         for i in range(npx):
-            #if i % 10000 == 0: 
-            #    print(i, len(data))
             if data[i] == float("NaN"):
                 data[i] = 0.
             else:

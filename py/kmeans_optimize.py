@@ -292,75 +292,10 @@ while go: # could have turned this into a recursive function!
     print("kmeans_labels_good", kmeans_labels_good)
     print("kmeans_labels_confused", kmeans_labels_confused)
     print("kmeans_label_by_class", kmeans_label_by_class)
+
+    run(p + "../py/read_multi.py " + infile +"_kmeans.bin")
     neigh = KNeighborsClassifier(n_neighbors = 2)
     # neigh.fit(X, y)
     sys.exit(1)
 
 
-    if not bad:
-        # CLEAN UP AND FINISH....
-        print("good")
-        # clean up labels so that everything outside the known classes is NAN, and all clusters for class get same label..
-        used_labels = set()
-        for k in kmeans_label_by_class:
-            for j in kmeans_label_by_class[k]:
-                used_labels.add(j)
-        print("used_labels", used_labels)
-
-        lookup = {}
-        for k in range(0, K):
-            k = float(k)
-            if k not in used_labels:
-                lookup[k] = float("NaN")
-        ci = 0
-        for k in kmeans_label_by_class:
-            for j in kmeans_label_by_class[k]:
-                lookup[j] = ci
-            ci += 1
-
-        print("lookup", lookup)  # now apply lookup
-        for i in range(0, nrow* ncol):
-            data[i] = lookup[good_labels[i]]
-
-        write_binary(data, class_file) # relabel the data and output
-        break # kmeans_label_by_class: {'fireweedandaspen': [0.0], 'blowdownwithlichen': [1.0, 0.0], 'pineburned': [1.0, 1.0, 1.0]}
-
-    K += 1 # try adding a class!
-    iteration += 1
-
-print("kmeans_label_by_class", kmeans_label_by_class, "lookup", lookup)
-
-# translate the lookup
-for label in kmeans_label_by_class:
-    labels = list(kmeans_label_by_class[label])
-    labels = [lookup[i] for i in labels]
-    kmeans_label_by_class[label] = set(labels)
-print("kmeans_label_by_class", kmeans_label_by_class)
-
-
-#  do the plotting!
-
-import matplotlib.pyplot as plt
-hdr = hdr_fn(infile)
-npx = nrow * ncol
-data = data.reshape((nrow, ncol))
-
-fig, ax = plt.subplots()
-img = ax.imshow(data, cmap='Spectral')
-# ax.set_aspect("auto")
-cbar = plt.colorbar(img)#  .legend([0, 1, 2, 3], ['0', '1', '2', '3'])\
-tick_labels = [] # "noise"]
-ci = 0
-for label in kmeans_label_by_class:
-    tick_labels.append(label)
-    x = kmeans_label_by_class[label]
-    if set([ci]) != x:
-        print(str(set([ci])), str(x))
-        err("color index problem")
-    ci += 1
-cbar.set_ticks(np.arange(len(tick_labels)))
-print("tick_labels", tick_labels)
-cbar.ax.set_yticklabels(tick_labels) #"bad", "good", "other", "more", "what"])
-plt.tight_layout()
-plt.show()
-# run("python3 " + path + "read_multi.py " + infile + "_kmeans.bin")
