@@ -222,8 +222,8 @@ while go: # could have turned this into a recursive function!
             good_kmeans_label_by_class[label] = kmeans_label_by_class[label]
     open(infile + "_good.hdr", "a").write("\nkmeans_label_by_class " + str(kmeans_label_by_class))
 
-    write_binary(seeds, infile + "_reseed.bin") # relabel the data and output
-    write_hdr(infile + "_reseed.hdr", ncol, nrow, 1)
+    # write_binary(seeds, infile + "_reseed.bin") # relabel the data and output
+    # write_hdr(infile + "_reseed.hdr", ncol, nrow, 1)
     print("n_nan", n_nan)
     # RUN KNN ON DATA WITH CONFUSED LABELS ONLY!!!!
     # SPLICE THE RESULTS BACK INTO THE CLASS MAP

@@ -65,7 +65,7 @@ percent_by_label, percent_confused = {}, 0
 confused_labels, confused_kmeans_labels = set(), set()
 n_points = 0
 print("count_by_label", count_by_label)
-n_nan = count_by_label["NAN"] # float('NaN')]
+n_nan = count_by_label["NAN"] if "NAN" in count_by_label else 0# float('NaN')]
 if bands == 1:
     band_select = [0, 0, 0,] # could be class map. or just one band map
 
@@ -84,6 +84,7 @@ if bands == 1:
     except:
         pass
     statement = labels if labels is not None else "kmeans_label_by_class={}"
+    # aastatement = statement.replace("nan,", "")
     print("statement", [statement])
     exec(statement)
 
@@ -211,7 +212,8 @@ if str(kmeans_labels) != "{}":
 
     import collections
     print("kmeans_labels", kmeans_labels)
-    del kmeans_labels["NAN"]
+    if "NAN" in kmeans_labels:
+        del kmeans_labels["NAN"]
     kmeans_labels = collections.OrderedDict(sorted(kmeans_labels.items()))
     print("kmeans_labels", kmeans_labels)
     tick_labels = [] # "noise"]
