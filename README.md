@@ -58,11 +58,17 @@ cd bcws-psu-research
 ```bash
 cd imv
 ```
+10. Install some "standard" packages:
+```bash
+sudo apt install python3 python3-matplotlib python3-sklearn python3-scipy gcc g++ freeglut3-dev
+```
 
 10. Before we run it, a little housekeeping: upgrade packages
 ```bash
 sudo apt update && sudo apt upgrade
 ```
+
+
 
 
 * Session: always click somewhere on full-scene/ overview window, first to buffer data under it
