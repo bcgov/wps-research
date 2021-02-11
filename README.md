@@ -77,7 +77,11 @@ sudo chmod 755 /usr/bin/imv # make it runnable!
 python3 compile.py # compile the viewer and overwrite /usr/bin/imv
 ```
 
-
+12. navigate to peppers test data and run:
+'''
+cd peppers
+imv
+'''
 
 * Session: always click somewhere on full-scene/ overview window, first to buffer data under it
 
