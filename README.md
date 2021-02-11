@@ -44,10 +44,26 @@ mkdir GitHub
 cd GitHub
 ```
 
-6. Clone the repo:
+7. Clone the repo:
 ```bash
 git clone git@github.com:bcgov/bcws-psu-research.git
 ```
+
+8. Enter the repo:
+```bash
+cd bcws-psu-research
+```
+
+9. Navigate to the MVP software interface:
+```bash
+cd imv
+```
+
+10. Before we run it, a little housekeeping: upgrade packages
+```bash
+sudo apt update && sudo apt upgrade
+```
+
 
 * Session: always click somewhere on full-scene/ overview window, first to buffer data under it
 
