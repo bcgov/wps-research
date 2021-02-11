@@ -41,7 +41,12 @@ mkdir GitHub
 ```
 6. Enter the folder and clone the repo:
 ```bash
-cd GitHub; git clone git@github.com:bcgov/bcws-psu-research.git
+cd GitHub
+```
+
+6. Clone the repo:
+```bash
+git clone git@github.com:bcgov/bcws-psu-research.git
 ```
 
 * Session: always click somewhere on full-scene/ overview window, first to buffer data under it
