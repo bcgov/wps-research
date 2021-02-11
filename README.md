@@ -27,13 +27,16 @@ in support of BC Wildfire Service (BCWS) Predictive Services Unit (PSU) program.
 3. Boot your VM and install "guest additions" for your host operating system e.g. Windows host, ubuntu guest: https://www.tecmint.com/install-virtualbox-guest-additions-in-ubuntu/
 4. Under "activities" in top bar, search for Terminal (run it and add to favourites)
 5. Within Terminal, Navigate to your home folder:
-```cd ~
+```
+cd ~
 ```
 5. Create a folder called GitHub:
-```mkdir GitHub
+```
+mkdir GitHub
 ```
 6. Enter the folder and clone the repo:
-```cd GitHub; git clone git@github.com:bcgov/bcws-psu-research.git
+```
+cd GitHub; git clone git@github.com:bcgov/bcws-psu-research.git
 ```
 
 * Session: always click somewhere on full-scene/ overview window, first to buffer data under it
