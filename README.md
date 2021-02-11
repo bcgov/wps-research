@@ -23,7 +23,7 @@ in support of BC Wildfire Service (BCWS) Predictive Services Unit (PSU) program.
 
 ## Setup:
 1. Install Oracle virtualbox https://www.virtualbox.org/wiki/Downloads under VirtualBox x.x.xx platform packages
-2. Create a VM inside VirtualBox by downloading https://releases.ubuntu.com/20.04.2.0/ubuntu-20.04.2.0-desktop-amd64.iso
+2. Create a VM inside VirtualBox (type: Linux, Ubuntu 64bit) by downloading https://releases.ubuntu.com/20.04.2.0/ubuntu-20.04.2.0-desktop-amd64.iso
 and using it as your "startup disk" while using VirtualBox to create a new Virtual Machine
 * call your VM something creative like VM; use default options and write down your username / password 
 * use the default memory settings; try to adjust them later if they're not working
