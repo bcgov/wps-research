@@ -32,3 +32,5 @@
    * Hierarchical Agglomerative Clustering (HAC) Scikit-Learn
    * HAC: bootstrappable, direct implementation (can initialize with HAC results on tiles)
 
+## Literature references
+Crowley, M.A., Cardille, J.A., White, J.C. and Wulder, M.A., 2019. Multi-sensor, multi-scale, Bayesian data synthesis for mapping within-year wildfire progression. Remote Sensing Letters, 10(3), pp.302-311.
