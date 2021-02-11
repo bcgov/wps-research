@@ -63,11 +63,19 @@ cd imv
 sudo apt install python3 python3-matplotlib python3-sklearn python3-scipy gcc g++ freeglut3-dev
 ```
 
-10. Before we run it, a little housekeeping: upgrade packages
+11. Before we run it, a little housekeeping: upgrade packages
 ```bash
 sudo apt update && sudo apt upgrade
 ```
 
+12. Compile MVP viewer...
+```
+sudo touch /usr/bin/imv # this is where the command will go!
+
+sudo chmod 755 /usr/bin/imv # make it runnable!
+
+python3 compile.py # compile the viewer and overwrite /usr/bin/imv
+```
 
 
 
