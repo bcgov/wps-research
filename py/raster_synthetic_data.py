@@ -40,9 +40,7 @@ for k in range(0, n_class):
             d[ci] = (1. if (class_i == float(k)) else 0.)
             ci += 1
 
-
-# make the data dirty by making the groundref classes slightly overlap!
-dp = copy.deepcopy(d)
+dp = copy.deepcopy(d) # make data dirty by making groundref classes slightly overlap!
 
 for k in range(0, n_class):
     for i in range(0, L):
@@ -61,15 +59,10 @@ for k in range(0, n_class):
 
 write_binary(dp, 'stack.bin')
 write_hdr('stack.hdr', L, L, nb + n_class)
-
 f = open('stack.hdr', 'ab')  # append band name info onto header
 f.write('\nband names = {band 1'.encode())
-
-for i in range(1, nb):
-    f.write((',\nband ' + str(i + 1)).encode())
-
-for i in range(0, n_class):
-    f.write((',\n' + chr(97 + i)).encode())
+for i in range(1, nb): f.write((',\nband ' + str(i + 1)).encode())
+for i in range(0, n_class): f.write((',\n' + chr(97 + i)).encode())
 f.write("}".encode())
 
 f.close()
