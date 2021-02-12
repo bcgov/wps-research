@@ -64,5 +64,4 @@ f.write('\nband names = {band 1'.encode())
 for i in range(1, nb): f.write((',\nband ' + str(i + 1)).encode())
 for i in range(0, n_class): f.write((',\n' + chr(97 + i)).encode())
 f.write("}".encode())
-
 f.close()
