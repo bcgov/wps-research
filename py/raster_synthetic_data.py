@@ -9,15 +9,14 @@ if exists('stack.bin'): # don't overwrite a stack
 
 nwin = 100 # number of pixels per side of "small" square
 nsq = 3 # number of squares/side of big square
-nb = 3 # 4 # number of bands, fake multispec data
+nb = 3 # number of bands, fake multispec data
 
 L = nwin * nsq # image length
-print("image dimensions: " + str(L) + ',' + str(L) + ',' + str(nb))
 npx = L * L # number of pixels
 n_class = nsq * nsq # number of classes
-print("n_class", n_class)
+print("n_class", n_class, "\n", "image dimensions: " + str(L) + ',' + str(L) + ',' + str(nb))
 
-n = (npx * (nb + n_class))
+n = npx * (nb + n_class)
 print("n_float", n)
 d = np.zeros(n, dtype=np.float32)
 
@@ -41,8 +40,10 @@ for k in range(0, n_class):
             d[ci] = (1. if (class_i == float(k)) else 0.)
             ci += 1
 
+
 # make the data dirty by making the groundref classes slightly overlap!
 dp = copy.deepcopy(d)
+
 for k in range(0, n_class):
     for i in range(0, L):
         for j in range(0, L):
