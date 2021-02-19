@@ -15,9 +15,7 @@ int main(int argc, char ** argv){
   np = nrow * ncol; // number of input pix
 
   set<float> values;
-  for0(i, number_of_values){
-    values.insert(atof(argv[i + 2]));
-  }
+  for0(i, number_of_values) values.insert(atof(argv[i + 2]));
   cout << "values : " << values << endl;
 
   float * dat = bread(fn, nrow, ncol, nband); // load floats to array
@@ -33,16 +31,12 @@ int main(int argc, char ** argv){
       out[ix] = 0.;
       d = dat[ix];
       if(!(isnan(d) || isinf(d))){
-
-        if(values.find(d) != values.end()){
-          out[ix] = true;
-        }
+        if(values.find(d) != values.end()) out[ix] = true;
       }
     }
   }
 
-  // write output file
-  str ofn(fn + str("_mask.bin"));
+  str ofn(fn + str("_mask.bin")); // write output file
   str ohfn(fn + str("_mask.hdr"));
   hwrite(ohfn, nrow, ncol, nband); // write output header
 
