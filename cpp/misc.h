@@ -26,6 +26,7 @@
 #include<pthread.h>
 #include<algorithm>
 #include"ansicolor.h"
+#include<unordered_map>
 
 #include <algorithm>
 #include <cctype>
