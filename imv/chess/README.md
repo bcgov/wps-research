@@ -10,6 +10,7 @@
 <img src="chess.png" width="320">
 
 ## Semi-supervised classification session using imv
+At terminal, cd to this folder then type **imv** and press return
 <img src="session.png" width="640">
 
 ### Classification result
