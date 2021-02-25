@@ -3,6 +3,18 @@
 Entry point for BCWS FTL MVP software
 [Please click here for setup instructions for BCWS FTL MVP software](https://github.com/bcgov/bcws-psu-research/blob/master/SETUP.md)
 
+
+# Sample data
+## Chess sample data
+[please click here to explore chess sample data](https://github.com/bcgov/bcws-psu-research/tree/master/imv/chess)
+
+## Real chess sample data
+
+## Peppers hyperspectral data
+
+
+#info
+
 anagram of vim: "image viewer":
 
 minimalist hyperspectral image viewer. band switching by r[number]&lt;return>, g[number]&lt;return>, b[number]&lt;return>
