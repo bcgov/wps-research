@@ -3,7 +3,7 @@
 * S2 image and BCGW groundref are in stack.tar.gz which rf_stack.py will auto-extract (isn't it fun to read data without a driver?)
 * 20% of pixels were selected for training
 * seven estimators were used
-* surprisingly, the qualitative features of the ground-ref data seem to be decently recovered..
+* surprisingly, the qualitative features of some of the ground-ref data seem to be decently recovered..
 
 To run:
 ```
