@@ -1,4 +1,5 @@
 ## Real "chessboard" data
+<img src="stack.bin.png" width="640">
 
 ### Files
 * **stack.bin**: the image data
