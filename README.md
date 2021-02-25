@@ -14,7 +14,7 @@ in support of BC Wildfire Service (BCWS) Predictive Services Unit (PSU) program.
 <img src="output/difference.gif" width="640">
 
 # BCWS FTL MVP
-[Please click here for setup instructions for BCWS FTL MVP software](https://github.com/bcgov/bcws-psu-research/blob/master/SETUP.md)
+[Please click here for entry point for BCWS FTL MVP software](https://github.com/bcgov/bcws-psu-research/blob/master/imv/)
 * Exascale viewer w interactive [2] classification
    * Semi-supervised hybrid classification method
    * Decision-support system: accessible AI keeping humans in the loop
