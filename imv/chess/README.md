@@ -3,9 +3,9 @@
 * includes spectral noise, and one-hot encoded class bands which include some spatial overlap (the class bands were removed for the semi-supervised classification session below..)
 
 ### Files
-* stack.bin: the image data
-* stack.hdr: image header (metadata) incl. dimensions
-* stack.bin_targets.csv: targets selected by manual annotation using imv (delete this to try from scratch)..
+* **stack.bin**: the image data
+* **stack.hdr**: image header (metadata) incl. dimensions
+* **stack.bin_targets.csv**: targets selected by manual annotation using imv (delete this to try from scratch)..
 
 <img src="chess.png" width="320">
 
