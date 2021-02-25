@@ -9,9 +9,10 @@ Entry point for BCWS FTL MVP software
 [please click here to explore chess sample data](https://github.com/bcgov/bcws-psu-research/tree/master/imv/chess)
 
 ## Real chess sample data
+[please click here to explore real chess sample data](https://github.com/bcgov/bcws-psu-research/tree/master/imv/chess_real)
 
 ## Peppers hyperspectral data
-
+[please click here to explore hyperspectral peppers sample data](https://github.com/bcgov/bcws-psu-research/tree/master/imv/peppers)
 
 #info
 
