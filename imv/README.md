@@ -1,4 +1,8 @@
 # imv
+
+Entry point for BCWS FTL MVP software
+
+
 anagram of vim: "image viewer":
 
 minimalist hyperspectral image viewer. band switching by r[number]&lt;return>, g[number]&lt;return>, b[number]&lt;return>
