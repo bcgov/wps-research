@@ -1,7 +1,7 @@
 # imv
 
 Entry point for BCWS FTL MVP software
-
+[Please click here for setup instructions for BCWS FTL MVP software](https://github.com/bcgov/bcws-psu-research/blob/master/SETUP.md)
 
 anagram of vim: "image viewer":
 
