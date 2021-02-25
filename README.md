@@ -87,7 +87,7 @@ imv
 * Session: always click somewhere on full-scene/ overview window, first to buffer data under it
 
 ## Fun exploratory results
-### [Predicting BCGW layers from Sentinel-2 Imagery using RandomForest classifier](https://github.com/bcgov/bcws-psu-research/blob/master/data_combined/Readme.md)
+* [Predicting some BCGW layers from Sentinel-2 Imagery using RandomForest classifier](https://github.com/bcgov/bcws-psu-research/blob/master/data_combined/Readme.md)
 
 ## Collaborators and Contributors:
 * Dana Hicks, BCWS
