@@ -13,14 +13,13 @@ in support of BC Wildfire Service (BCWS) Predictive Services Unit (PSU) program.
 ## Forest change detection w Canadian Space Agency (CSA) Radarsat Constellation Mission (RCM) compact-pol SAR data
 <img src="output/difference.gif" width="640">
 
-# Features
-## BCWS FTL MVP
+# BCWS FTL MVP
 * Exascale viewer w interactive [2] classification
    * Semi-supervised hybrid classification method
    * Decision-support system: accessible AI keeping humans in the loop
    * Interactively view multitemporal multispectral image stacks of size up to system limit
 * Adjustable high-contrast visualization and manipulation of multispectral imagery and classification maps
-
+* [Please click here for setup instructions for BCWS FTL MVP software](https://github.com/bcgov/bcws-psu-research/blob/master/SETUP.md)
 
 
 # Fun exploratory results
