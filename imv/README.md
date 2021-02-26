@@ -23,7 +23,7 @@ Entry point for BCWS FTL MVP software
 
 # info
 
-Imv short for "image viewer", also an anagram of vim: ** imv is a minimalist hyperspectral image viewer** which happens to be loosely inspired by ENVI and Warcraft II.
+Imv short for "image viewer", also an anagram of vim: **imv is a minimalist hyperspectral image viewer** which happens to be loosely inspired by ENVI and Warcraft II.
 
 Raster data inputs always assumed to be: ENVI binary format, data type "4" aka IEEE-standard (byte-order 0) Float32, "band sequential" format, with certain restrictions on formatting of the header file
 
