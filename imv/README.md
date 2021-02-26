@@ -56,3 +56,9 @@ Note: don't attempt to resize the other windows (should be disabled, is not)
 ### Example: band selection (r,g,b = 4,3,2) so-called false colour
 
 ![sample](rgb-4,3,2.png)
+
+# formats
+## input raster format
+## output raster format
+## target / vector / annotation file format
+Tolerant of extra col's. Note the row/col convention
