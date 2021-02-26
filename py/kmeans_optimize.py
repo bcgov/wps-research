@@ -1,59 +1,68 @@
-''' seed kmeans algorithm on multispectral data, given target (class annotation) file
+''' taking as input:
+A)  multispectral data
+b)  target (class) annotation file i.e. records are triples consisting of text label plus x,y pixel coordinates
 
-1. set seed layer:
+perform
+
+1. nearest-centre algorthm to determine seed layer:
    (a) extract data from under targets
    (b) average the data from each target to get initial centres
-   (c) find closest centre to each data point (this becomes seed layer)
-   (d) data with NAN or INF are assigned class NAN
+   (c) find closest centre to each data point, nearest-centre label becomes seed layer
+   (d) pixel data with NAN or INF in any dimension, are assigned class NAN in seed layer
 
-2. perform kmeans iteration (Lloyd's algorithm)'''
+2. perform kmeans iteration (Lloyd's algorithm)
+
+3. output a map with legend'''
 from misc import *
-from sklearn.neighbors import KNeighborsClassifier
+from array import array
+from sklearn.neighbors import KNeighborsClassifier # didn't use this yet but need to for step 4.
 
 infile = "stack.bin" # default input file
-if len(args) > 1: infile = args[1]
+if len(args) > 1:
+    infile = args[1]
+
 if len(args) < 2 and not os.path.exists(infile):
     err("kmeans_optimization.py [input image to run kmeans on]")
-if not os.path.exists(infile): err("failed to find input file: " + infile)
+
+if not os.path.exists(infile):
+    err("failed to find input file: " + infile)
 
 tf = infile + "_targets.csv"
-if not os.path.exists(tf): error("targets file not found: " + str(tf))
+if not os.path.exists(tf):
+    error("targets file not found: " + str(tf))
+
 lines = open(tf).read().strip().split("\n")
 lines = [line.strip().split(",") for line in lines]
 hdr = lines[0] # 'row', 'lin', 'xoff', 'yoff'
 i_row, i_lin, i_xof, i_yof, i_lab, sep = hdr.index('row'), hdr.index('lin'), hdr.index('xoff'), hdr.index('yoff'), hdr.index('feature_id'), os.path.sep
 path = sep.join(__file__.split(sep)[:-1]) + sep  # path to this file
-print("path", path)
 path = os.path.abspath(os.path.expanduser(os.path.expandvars(path))) + sep
+p = path + "../cpp/" # path to c/c++ programs
 
-print(path)
-p = path + "../cpp/"
-run("rm -f " + p + "kmeans_iter.exe")
+run("rm -f " + p + "kmeans_iter.exe") # force recompile
 if not exist(p + "kmeans_iter.exe"):
     run("g++ -w -O3 " + p + "kmeans_iter.cpp " + p + "misc.cpp -o " + p + "kmeans_iter.exe -lpthread")
 
-run("rm -f " + p + "raster_nearest_centre.exe")
+run("rm -f " + p + "raster_nearest_centre.exe") # force recompile
 if not exist(p + "raster_nearest_centre.exe"):
     run("g++ -w -O3 " + p + "raster_nearest_centre.cpp " + p + "misc.cpp -o " + p + "raster_nearest_centre.exe -lpthread")
 cpp_path = p
 
 ncol, nrow, bands = read_hdr(infile[:-3] + 'hdr') # read info from image file
-ncol, nrow, bands = int(ncol), int(nrow), int(bands)
-ncol, nrow, bands, dat_img = read_binary(infile)
+ncol, nrow, bands = int(ncol), int(nrow), int(bands) # convert to int
+ncol, nrow, bands, dat_img = read_binary(infile) # read raster data
 
-# class_label[ix] = label
-target_ix = set()
+target_ix = set() # class_label[ix] = label
 c, class_label = {}, {} # start K at number of labels
-for i in range(1, len(lines)): # iterate over the vector labels
-    line = lines[i] # csv data
+for i in range(1, len(lines)): # iterate over the vector records in target file
+    line = lines[i] # csv data record
     label = line[i_lab] # text label from csv.. target label
-    x, y = int(line[i_row]), int(line[i_lin]) # image coordinates of point
-    ix = (y * ncol) + x  # linear image coordinates of the point!
-    if ix < nrow * ncol:  # skip if out of bounds
+    x, y = int(line[i_row]), int(line[i_lin]) # pixel image coordinates
+    ix = (y * ncol) + x  # linear array coordinates of the image pixl
+    if ix < nrow * ncol:  # skip if out of bounds..naive bounds check
         class_label[ix] = label  # map pix/line coords to target label
-        c[label] = (c[label] + 1) if label in c else 1 # count the occurrence for each label
-        if ix < nrow*ncol:
-            target_ix.add(ix)
+        c[label] = (c[label] + 1) if label in c else 1 # count label occurrence
+        target_ix.add(ix)
 K = len(c) # starting number of classes: number of distinct labels that ocurred
 
 # extract data under target points
@@ -63,13 +72,13 @@ for ix in target_ix:
             pass # print(dat_img[nrow*ncol*k + ix])
     else: print("warning: target out of bounds")
 
+# print out linear array index, and multispectral data contents for each target
 target_data = {ix: [dat_img[nrow * ncol * k + ix] for k in range(0, bands)] for ix in target_ix}
 for ix in target_data:
     print(ix, target_data[ix])
 
-# mean (by label) of image data under targets (should average over small windows)..
-target_mean = {}
-target_n = {}
+# mean (by label) of image data under targets (should average or represent small areas instead)
+target_mean, target_n = {}, {}
 for ix in target_ix:
     L = class_label[ix]
     if L not in target_mean:
@@ -79,20 +88,16 @@ for ix in target_ix:
     for k in range(bands):
         target_mean[L][k] += target_data[ix][k]
 
-# divide by n
-for L in target_mean:
+for L in target_mean: # divide by n
     if target_n[L] > 0:
         for k in range(bands):
             target_mean[L][k] /= target_n[L]
 
-
 # print("target_mean", target_mean)
-from array import array
 output_file = open("target_mean.dat", "wb")
 outputfile2 = open("target_mean_dat.csv", "wb")
 
-ci = 0
-od = []
+ci, od, n_nan = 0, [], 0
 for c in target_mean:
     for x in target_mean[c]:
         od.append(x)
@@ -103,7 +108,7 @@ output_file.write(("\n".join([str(x) for x in od])).encode())
 output_file.close()
 outputfile2.close()
 
-n_nan = 0
+# 1. run nearest centres algorithm
 print("calculate seed layer..") # should be parallelized in C/C++
 run(cpp_path + "raster_nearest_centre.exe " + infile + " target_mean.dat")
 
@@ -113,15 +118,15 @@ next_label = K
 print("next_label", next_label)
 good_labels = np.full(nrow*ncol, float("NaN"),dtype=np.float32) #None # will store labels of points that are finally classified, here..
 
-while go: # could have turned this into a recursive function!
-    whoami = os.popen("whoami").read().strip()
+while go: # don't forget duality between iteration and recursion
+    whoami = os.popen("whoami").read().strip() # user name
     class_file = infile + "_kmeans.bin"
     seed_file = infile + "_nearest_centre.bin"
     if iteration > 0:
         seed_file = infile + "_reseed.bin" #  class_file
-    run(cpp_path + "kmeans_iter.exe " + infile + " " + seed_file + " 1. ") # + ("" if iteration == 0 else (" " + str(next_label))))
+    run(cpp_path + "kmeans_iter.exe " + infile + " " + seed_file + " 1. ") 
     next_label += 1 # next iteration would need a higher label if it's reached..
-    ncol, nrow, bands, data = read_binary(class_file) # read the class map data resulting from kmeans
+    ncol, nrow, bands, data = read_binary(class_file) # read class map result from kmeans
 
     # calculate the set of kmeans labels associated with each class
     kmeans_label = {}
