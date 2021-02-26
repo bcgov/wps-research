@@ -8,7 +8,7 @@
 
 ## Semi-supervised classification session using imv
 At terminal, cd to this folder then type **imv** and press return
-<img src="session.png" width="640">
+<img src="session.png" width="530">
 
 ### Classification result
 <img src="stack.bin_kmeans.bin.png" width="640">
