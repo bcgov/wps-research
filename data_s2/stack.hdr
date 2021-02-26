@@ -1,0 +1,33 @@
+ENVI
+description = {S2A.bin_4x.bin_sub.bin}
+samples = 410
+lines   = 401
+bands   = 21
+header offset = 0
+file type = ENVI Standard
+data type = 4
+interleave = bsq
+byte order = 0
+map info = {UTM, 1, 1, 654739.941690962, 5683994.16909621, 80.0291545189504, 80.0291545189504, 10, North,WGS-84}
+coordinate system string = {PROJCS["WGS_1984_UTM_Zone_10N",GEOGCS["GCS_WGS_1984",DATUM["D_World Geodetic System 1984",SPHEROID["WGS_1984",6378137.0,298.257223563]],PRIMEM["Greenwich",0.0],UNIT["Degree",0.017453292519943295]],PROJECTION["Transverse_Mercator"],PARAMETER["central_meridian",-123.0],PARAMETER["latitude_of_origin",0.0],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000.0],PARAMETER["false_northing",0.0],UNIT["Meter",1]]}
+band names = {Band 4,
+Band 3,
+Band 2,
+Band 1,
+Band 5,
+Band 6,
+Band 7,
+Band 8,
+Band 9,
+Band 10,
+Band 11,
+Band 12
+BROADLEAF,
+CUTBL,
+CONIFER,
+EXPOSED,
+HERB_GRAS,
+MIXED,
+RIVER,
+SHRUB,
+WATER}
