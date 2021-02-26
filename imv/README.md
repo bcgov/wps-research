@@ -44,6 +44,7 @@ band switching by r[number]&lt;return>, g[number]&lt;return>, b[number]&lt;retur
 ### list annotation points
 ### run K-means semi-supervised algorithm on whole scene
 ### run K-means semi-supervised algorithm on sub-scene
+### change image-scaling method (s key)
 
 ### Example: default bands (r,g,b = 1,2,3) natural colour
 
