@@ -18,7 +18,10 @@ Entry point for BCWS FTL MVP software
 ## Peppers hyperspectral data
 [please click here to explore hyperspectral peppers sample data](https://github.com/bcgov/bcws-psu-research/tree/master/imv/peppers)
 
-#info
+## Bonaparte lake (Sentinel2) dataa
+[Bonaparte Lake, BC Sentinel2 data](https://github.com/bcgov/bcws-psu-research/blob/master/imv/bonaparte/README.md)
+
+# info
 
 anagram of vim: "image viewer":
 
