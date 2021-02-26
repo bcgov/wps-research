@@ -1,0 +1,14 @@
+feature_id,row,lin,xoff,yoff
+water,170,40,0,0
+water,246,27,0,0
+water,147,29,0,0
+water,205,129,0,0
+water,209,134,0,0
+forest,285,126,0,0
+forest,271,126,0,0
+cut,160,150,0,0
+cut,136,253,0,0
+cut,99,129,0,0
+regen,343,188,0,0
+regen,339,269,0,0
+regen,331,234,0,0
