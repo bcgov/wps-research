@@ -23,11 +23,12 @@ Entry point for BCWS FTL MVP software
 
 # info
 
-anagram of vim: "image viewer":
+Imv short for "image viewer", also an anagram of vim: minimalist hyperspectral image viewer loosely inspired by ENVI and Warcraft II.
 
-minimalist hyperspectral image viewer. band switching by r[number]&lt;return>, g[number]&lt;return>, b[number]&lt;return>
+Raster data inputs always assumed to be: ENVI binary format, data type "4" aka IEEE-standard (byte-order 0) Float32, "band sequential" format, with certain restrictions on formatting of the header file
 
-sample test data (ENVI binary format, data type "4" aka IEEE-standard (byte-order 0) Float32, "band sequential" format) red, green, blue, near-infrared
+# operations (key combinations)
+band switching by r[number]&lt;return>, g[number]&lt;return>, b[number]&lt;return>
 
 ## Example: default bands (r,g,b = 1,2,3) natural colour
 
