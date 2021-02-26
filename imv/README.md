@@ -45,6 +45,9 @@ band switching by r[number]&lt;return>, g[number]&lt;return>, b[number]&lt;retur
 ### run K-means semi-supervised algorithm on whole scene
 ### run K-means semi-supervised algorithm on sub-scene
 ### change image-scaling method (s key)
+### resize zoom window
+
+Note: don't attempt to resize the other windows (should be disabled, is not)
 
 ### Example: default bands (r,g,b = 1,2,3) natural colour
 
