@@ -17,7 +17,7 @@ At terminal, cd to this folder then type **imv** and press return
 # Notes
 * Dark things get confused (see c4, c5 labels) in legend
 * The real vs fake yellow peppers are harder to separate (right) than the real vs fake orange peppers (left)
-* band selection using the following commands:
+* band selection using the following "console" commands (typing when any window of imv interface is selected):
 ```
  r 30<press return> g 20 <press return> b 10<press return>
 ``` 
