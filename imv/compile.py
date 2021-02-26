@@ -1,10 +1,12 @@
 #!/usr/bin/python3
-# this script should delete all the object files and exe files, so that everything recompiles from scratch (in parallel)
 import os
 
 def run(cmd):
     print(cmd)
     return os.system(cmd)
+
+run("sudo touch /usr/bin/imv") # where the command will go
+run("sudo chmod 755 /usr/bin/imv") # make it runnable
 
 run("clean")
 run("rm -f imv.exe")
