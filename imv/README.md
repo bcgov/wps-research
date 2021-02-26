@@ -14,11 +14,12 @@ Entry point for BCWS FTL MVP software [please click here for setup instructions 
 * [kmeans iteration](https://github.com/bcgov/bcws-psu-research/blob/master/cpp/kmeans_iter.cpp) 
 
 # Sample data
-## Chess sample data
-[please click here to explore chess sample data](https://github.com/bcgov/bcws-psu-research/tree/master/imv/chess)
 
 ## Real chess sample data
 [please click here to explore real chess sample data](https://github.com/bcgov/bcws-psu-research/tree/master/imv/chess_real)
+
+## Synthetic chess sample data
+[please click here to explore chess sample data](https://github.com/bcgov/bcws-psu-research/tree/master/imv/chess)
 
 ## Peppers hyperspectral data
 [please click here to explore hyperspectral peppers sample data](https://github.com/bcgov/bcws-psu-research/tree/master/imv/peppers)
