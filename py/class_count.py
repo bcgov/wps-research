@@ -2,8 +2,7 @@
 from misc import *
 
 if len(args) < 2:
-    err("class_count [input binary file]")
-    #args.append('20190926kamloops_data/WATERSP.tif_project_4x.bin_sub.bin')
+    err("class_count [input binary file]") #args.append('20190926kamloops_data/WATERSP.tif_project_4x.bin_sub.bin')
 
 samples, lines, bands, data = read_binary(args[1])
 
