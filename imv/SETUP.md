@@ -10,7 +10,8 @@ and using it as your "startup disk" while using VirtualBox to create a new Virtu
 3. Boot your VM and install "guest additions" for your host operating system e.g. Windows host, ubuntu guest: https://www.tecmint.com/install-virtualbox-guest-additions-in-ubuntu/. Then reboot your VM
 4. Make sure that your VM window scales up to fit your screen. This may involve some fiddling in display settings (on your VM desktop or the settings for the VM in Virtualbox menu). You also likely want to enable the clipboard (at least into the VM), and perhaps a shared folder to move in data
 5. Under "activities" in top bar, search for Terminal (run it and add to favourites as well)
-6. Within Terminal, you should be in your home folder:
+6. Within Terminal, you should be in your home folder already that is:
+
 ```bash
 cd ~
 ```
