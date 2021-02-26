@@ -1,7 +1,8 @@
 # imv
 
-Entry point for BCWS FTL MVP software
-* [Please click here for setup instructions for BCWS FTL MVP software](https://github.com/bcgov/bcws-psu-research/blob/master/SETUP.md)
+Entry point for BCWS FTL MVP software [please click here for setup instructions for BCWS FTL MVP software](https://github.com/bcgov/bcws-psu-research/blob/master/SETUP.md)
+
+**imv** short for "image viewer" (also an anagram of vim the unix text editor): **imv is a minimalist hyperspectral image viewer** and is loosely inspired by ENVI and Warcraft II and conceptually derived from an earlier program called scg.
 
 **Basic ML algorithm** included: 
 * semi-supervised kmeans variant [Python based implementation](https://github.com/bcgov/bcws-psu-research/blob/master/py/kmeans_optimize.py) with C/C++ implementations under the hood:
@@ -22,8 +23,6 @@ Entry point for BCWS FTL MVP software
 [please click here to explore Bonaparte Lake, BC Sentinel2 data](https://github.com/bcgov/bcws-psu-research/blob/master/imv/bonaparte/README.md)
 
 # info
-
-Imv short for "image viewer", also an anagram of vim: **imv is a minimalist hyperspectral image viewer** which happens to be loosely inspired by ENVI and Warcraft II.
 
 Raster data inputs always assumed to be: ENVI binary format, data type "4" aka IEEE-standard (byte-order 0) Float32, "band sequential" format, with certain restrictions on formatting of the header file
 
