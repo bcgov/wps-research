@@ -7,6 +7,7 @@ Entry point for BCWS FTL MVP software [please click here for setup instructions 
 * contains a number of **multithreaded functions for high performance**
 * interactive 3d scatter plots for overview and subscene windows
 * big-data viewer with video game responsiveness
+* tested on images **hundreds of GB in size**
 * spectral plotting at point location
 * resizeable target/zoom window
 
