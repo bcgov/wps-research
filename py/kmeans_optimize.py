@@ -6,7 +6,7 @@
    (c) find closest centre to each data point (this becomes seed layer)
    (d) data with NAN or INF are assigned class NAN
 
-'''
+2. perform kmeans iteration (Lloyd's algorithm)'''
 from misc import *
 from sklearn.neighbors import KNeighborsClassifier
 
@@ -178,6 +178,7 @@ while go: # could have turned this into a recursive function!
                 confused_labels.add(k)
                 confused_labels.add(j)
                 confusion_intersection.append(inter)
+               
     print("confused_labels", confused_labels)
     print("labels", list(kmeans_label_by_class.keys()))
     all_labels = set(list(kmeans_label_by_class.keys()))
