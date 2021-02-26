@@ -4,6 +4,7 @@ Entry point for BCWS FTL MVP software [please click here for setup instructions 
 
 **imv** short for "image viewer" (also an anagram of vim the unix text editor): **imv is a minimalist hyperspectral image viewer** and is loosely inspired by ENVI and Warcraft II and conceptually derived from an earlier program called scg.
 * **will accept data size near to system limit e.g. exabyte scale on linux systems**
+* contains a number of multithreaded functions for high performance
 * interactive 3d scatter plots for overview and subscene windows
 * big-data viewer with video game responsiveness
 * spectral plotting at point location
