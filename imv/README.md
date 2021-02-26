@@ -61,4 +61,4 @@ Note: don't attempt to resize the other windows (should be disabled, is not)
 ## input raster format
 ## output raster format
 ## target / vector / annotation file format
-Tolerant of extra col's. Note the row/col convention
+Tolerant of extra col's. Note the row/col convention. Confirm data upload to LAN
