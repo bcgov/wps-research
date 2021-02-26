@@ -18,7 +18,7 @@ should do nothing
 
 7. Install some "standard" packages:
 ```bash
-sudo apt install python3 python3-matplotlib python3-sklearn python3-scipy gcc g++ freeglut3-dev git
+sudo apt install python3 python3-matplotlib python3-sklearn python3-scipy gcc g++ freeglut3-dev git wget
 ```
 
 8. Make sure packages are up to date
@@ -33,10 +33,19 @@ mkdir GitHub
 ```bash
 cd GitHub
 ```
-11. "Clone" the repo (download the source code and test data):
+11. "Clone" the repo (download the source code and test data): method for if you have ssh keys setup:
 ```bash
 git clone git@github.com:bcgov/bcws-psu-research.git
 ```
+
+method for not having ssh keys set up:
+
+```bash
+wget https://github.com/bcgov/bcws-psu-research/archive/master.zip
+unzip master
+mv bcws-psu-research-master bcws-psu-research
+```
+
 12. Enter the repo:
 ```bash
 cd bcws-psu-research
