@@ -1,14 +1,17 @@
 ''' taking as input:
 A)  multispectral data
-b)  target (class) annotation file i.e. records are triples consisting of text label plus x,y pixel coordinates
+b)  target (class) annotation file i.e. records are triples consisting of
+  text label plus x,y pixel coordinates
 
 perform
 
 1. nearest-centre algorthm to determine seed layer:
    (a) extract data from under targets
    (b) average the data from each target to get initial centres
-   (c) find closest centre to each data point, nearest-centre label becomes seed layer
-   (d) pixel data with NAN or INF in any dimension, are assigned class NAN in seed layer
+   (c) find closest centre to each data point, nearest-centre label becomes
+         seed layer
+   (d) pixel data with NAN or INF in any dimension, are assigned class NAN in
+         seed layer
 
 2. perform kmeans iteration (Lloyd's algorithm)
 
@@ -213,13 +216,15 @@ print("kmeans_labels_good", kmeans_labels_good)
 print(kmeans_label_by_class)
 write_binary(good_labels, infile + "_good.bin") # relabel the data and output
 write_hdr(infile + "_good.hdr", ncol, nrow, 1)
+
 good_kmeans_label_by_class = {}
 for label in kmeans_label_by_class:
     if set(kmeans_label_by_class[label]).intersection(set(kmeans_labels_confused)) != set():
-        pass # confused
+        pass  # confused
     else:
         good_kmeans_label_by_class[label] = kmeans_label_by_class[label]
-open(infile + "_good.hdr", "a").write("\nkmeans_label_by_class " + str(kmeans_label_by_class))
+my_class_string = "\nkmeans_label_by_class " + str(kmeans_label_by_class)
+open(infile + "_good.hdr", "a").write(my_class_string)
 
 print("n_nan", n_nan)
 print("target_ix", target_ix)
@@ -233,10 +238,12 @@ print("kmeans_labels_good", kmeans_labels_good)
 print("kmeans_labels_confused", kmeans_labels_confused)
 print("kmeans_label_by_class", kmeans_label_by_class)
 
-run(cpp_path + "../py/read_multi.py " + infile +"_kmeans.bin 1")
+run(cpp_path + "../py/read_multi.py " + infile + "_kmeans.bin 1")
 run("eog " + infile + "_kmeans.bin.png")
 
-# RUN KNN ON DATA WITH CONFUSED LABELS ONLY!!!! Splice results back into class map (didn't do this yet)
+''' RUN KNN ON DATA WITH CONFUSED LABELS ONLY!!!!
+Splice results back into class map (didn't do this yet)'''
+
 '''
 >>> X = [[0], [1], [2], [3]]
 >>> y = [0, 0, 1, 1]
@@ -249,5 +256,5 @@ KNeighborsClassifier(...)
 >>> print(neigh.predict_proba([[0.9]]))
 [[0.66666667 0.33333333]]'''
 
-neigh = KNeighborsClassifier(n_neighbors = 2)
+neigh = KNeighborsClassifier(n_neighbors=2)
 # neigh.fit(X, y)
