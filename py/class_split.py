@@ -3,7 +3,9 @@
 ..this was developed to translate the VRI into a one-hot encoded format.
 
 it will use an associated *.lut file, if available to code the file names
-for the binary class maps produced '''
+for the binary class maps produced
+
+lut file in the format we generated'''
 import os
 import sys
 from misc import *
