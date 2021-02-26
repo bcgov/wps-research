@@ -37,6 +37,13 @@ Raster data inputs always assumed to be: ENVI binary format, data type "4" aka I
 # operations (key combinations)
 ### band switching
 band switching by r[number]&lt;return>, g[number]&lt;return>, b[number]&lt;return>
+### move bands forward / back by one
+### move bands forward / back a full date
+### add annotation point
+### delete annotation point
+### list annotation points
+### run K-means semi-supervised algorithm on whole scene
+### run K-means semi-supervised algorithm on sub-scene
 
 ### Example: default bands (r,g,b = 1,2,3) natural colour
 
