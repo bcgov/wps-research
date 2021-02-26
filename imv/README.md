@@ -1,10 +1,10 @@
 # imv
 
 Entry point for BCWS FTL MVP software
-[Please click here for setup instructions for BCWS FTL MVP software](https://github.com/bcgov/bcws-psu-research/blob/master/SETUP.md)
+* [Please click here for setup instructions for BCWS FTL MVP software](https://github.com/bcgov/bcws-psu-research/blob/master/SETUP.md)
 
-Basic ML algorithm included: 
-*semi-supervised kmeans variant [Python based implementation](https://github.com/bcgov/bcws-psu-research/blob/master/py/kmeans_optimize.py) with
+**Basic ML algorithm** included: 
+* semi-supervised kmeans variant [Python based implementation](https://github.com/bcgov/bcws-psu-research/blob/master/py/kmeans_optimize.py) with
 * [nearest centres algorithm](https://github.com/bcgov/bcws-psu-research/blob/master/cpp/raster_nearest_centre.cpp) and
 * [kmeans iteration](https://github.com/bcgov/bcws-psu-research/blob/master/cpp/kmeans_iter.cpp) under the hood
 
