@@ -56,7 +56,7 @@ for i in range(0, ref_bands):
     X, y = img3, ref_b2.ravel()
     rf.fit(X, y)
 
-    # predict and do some QA (precision, recall and confusion matx would show the accuracy's exaggerated)
+    # predict and do some QA (precision, recall and confusion matx would show the accuracy is exaggerated)
     predict = rf.predict(X)
     df = np.sum(predict - y)
     npx_t = math.floor(npx / n_skip)
