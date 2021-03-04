@@ -37,6 +37,9 @@ Raster data inputs always assumed to be: ENVI binary format, data type "4" aka I
 # operations (key combinations)
 ### band switching
 band switching by r[number]&lt;return>, g[number]&lt;return>, b[number]&lt;return>
+### Adjust histogram scaling
+p xx 
+percent
 ### move bands forward / back by one
 ### move bands forward / back a full date
 ### add annotation point
