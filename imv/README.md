@@ -35,6 +35,7 @@ Entry point for BCWS FTL MVP software [please click here for setup instructions 
 Raster data inputs always assumed to be: ENVI binary format, data type "4" aka IEEE-standard (byte-order 0) Float32, "band sequential" format, with certain restrictions on formatting of the header file
 
 # operations (key combinations)
+### click on scene window area, to buffer data
 ### band switching
 band switching by r[number]&lt;return>, g[number]&lt;return>, b[number]&lt;return>
 ### Adjust histogram scaling
