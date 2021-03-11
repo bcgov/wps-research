@@ -1,4 +1,7 @@
 # Welcome to bcws-psu-research
+"where the future is being made, today!"
+
+
 Methods and Systems for Image Analysis developed in partnership with:
 * Digital Platforms and Data Division (DPDD), Office of The BC Chief Information Officer (OCIO) 
 * BC Wildfire Service (BCWS) Predictive Services Unit (PSU)
