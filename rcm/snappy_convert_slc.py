@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/python3
 ''' given a collection of unzipped RCM Quad-pol data: for each SLC folder:
         1) convert to PolSARPro format ("i/q format"
         2) convert i/q format to s2 "Scattering Matrix" format
