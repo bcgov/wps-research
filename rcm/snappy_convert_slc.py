@@ -1,16 +1,25 @@
-#!/usr/bin/python3
 ''' given a collection of unzipped RCM Quad-pol data: for each SLC folder:
         1) convert to PolSARPro format ("i/q format"
         2) convert i/q format to s2 "Scattering Matrix" format
         3) apply scm method (a visualization method of Shane Cloude)
 
 references:
-    [1] https://senbox.atlassian.net/wiki/spaces/SNAP/pages/19300362/How+to+use+the+SNAP+API+from+Python '''
+    [1] https://senbox.atlassian.net/wiki/spaces/SNAP/pages/19300362/How+to+use+the+SNAP+API+from+Python
+
+
+Note: might need to run from /home/$USER.snap/snap-python/snappy/ folder
+unless you know how to set the various paths
+
+export PYTHONPATH=$PYTHONPATH:/home/$USER/.snap/snap-python/
+'''
 
 import os # usual python stuff
 import sys
 import snappy # ESA SNAP stuff
 from snappy import ProductIO
+args = sys.argv
+
+# sys.path.append('/home/' + os.popen('whoami').read().strip() + '/.snap/snap-python/')
 
 def md(d):  # make folder if not yet exist
     if not os.path.exists(d): os.mkdir(d)
@@ -19,12 +28,15 @@ exe = "/home/" + os.popen("whoami").read().strip() + "/GitHub/bcws-psu-research/
 exe = os.path.abspath(exe)
 print(exe)
 
+
+
 if not os.path.exists(exe):
     print("Error: failed to find convert_iq_to_s2.exe"); sys.exit(1)
 
-files = [f.strip() for f in os.popen("ls -1d RCM_SLC_ZIP/*_SLC").readlines()]
+files = [f.strip() for f in os.popen("ls -1d " + os.path.abpath(args[1]) + os.path.sep + "RCM_SLC_ZIP/*_SLC").readlines()]
 folders = [f + '/' for f in files]
 
+sys.exit(1)
 print(folders)
 for i in range(0, len(folders)):
     f = folders[i] + 'manifest.safe'; print(f)
