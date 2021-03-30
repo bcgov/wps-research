@@ -46,7 +46,7 @@ path = sep.join(__file__.split(sep)[:-1]) + sep  # path to this file
 print("path", path)
 path = os.path.abspath(os.path.expanduser(os.path.expandvars(path))) + sep
 p = path + "../cpp/"
-run("rm -f " + p + "class_count.exe")
+# run("rm -f " + p + "class_count.exe")
 if not exist(p + "class_count.exe"):
     run("g++ -w -O3 " + p + "class_count.cpp " + p + "misc.cpp -o " + p + "class_count.exe -lpthread")
 
