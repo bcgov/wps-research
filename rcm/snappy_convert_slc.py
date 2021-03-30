@@ -28,18 +28,19 @@ exe = "/home/" + os.popen("whoami").read().strip() + "/GitHub/bcws-psu-research/
 exe = os.path.abspath(exe)
 print(exe)
 
-
+data_folder = args[1] if len(args) > 1 else os.path.abspath(os.getcwd()) + os.path.sep
 
 if not os.path.exists(exe):
     print("Error: failed to find convert_iq_to_s2.exe"); sys.exit(1)
 
-files = [f.strip() for f in os.popen("ls -1d " + os.path.abpath(args[1]) + os.path.sep + "RCM_SLC_ZIP/*_SLC").readlines()]
+cmd = "ls -1d " + os.path.abspath(data_folder) + os.path.sep + "*_SLC" 
+files = [f.strip() for f in os.popen(cmd).readlines()]
 folders = [f + '/' for f in files]
 
-sys.exit(1)
 print(folders)
 for i in range(0, len(folders)):
-    f = folders[i] + 'manifest.safe'; print(f)
+    f = folders[i] + 'manifest.safe'
+    print('  ' + f)
 
     out_folder = folders[i] + 'PolSARPro'; md(out_folder)
     s2_folder = folders[i]  + 's2'; md(s2_folder)
