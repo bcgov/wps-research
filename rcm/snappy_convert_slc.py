@@ -40,7 +40,7 @@ folders = [f + '/' for f in files]
 print(folders)
 for i in range(0, len(folders)):
     f = folders[i] + 'manifest.safe'
-    print('  ' + f)
+    print('\n  ' + f)
 
     out_folder = folders[i] + 'PolSARPro'; md(out_folder)
     s2_folder = folders[i]  + 's2'; md(s2_folder)
