@@ -46,11 +46,8 @@ int main(int argc, char ** argv){
   size_t np = nr * nc; // number of pxls
 
   // open the output images
-  FILE * of[4] = {
-    NULL,
-    NULL,
-    NULL,
-  NULL};
+  FILE * of[4];
+  for0(i, 4) of[i] = NULL;
 
   str odir(argv[2]);
   rtrim(odir, str("/"));
