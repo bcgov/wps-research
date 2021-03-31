@@ -1,5 +1,6 @@
 /* based on m3ta3: reimagination of a (late 2011, early 2012) primordial visualization library
-that inspired further developments at UVic, CFS and elsewhere.. */ // todo: display original (untransformed) values (apply reverse map)
+that inspired further developments at UVic, CFS and elsewhere.. 
+todo: display original (untransformed) values (apply reverse map)*/
 #include"util.h"
 #include<fstream>
 #include"newzpr.h"
