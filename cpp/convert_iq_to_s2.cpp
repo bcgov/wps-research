@@ -18,13 +18,13 @@ int main(int argc, char ** argv){
     "HH",
     "HV",
     "VH",
-  "VV"};
+    "VV"};
 
   char * outb[4] = {
     "s11",
     "s12",
     "s21",
-  "s22"};
+    "s22"};
 
   ci = 0;  // check the input image sizes match
   str idir(argv[1]);
