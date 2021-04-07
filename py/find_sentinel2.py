@@ -1,4 +1,4 @@
-''' query sentinel-2 products over a given point. Later: tile-ID of interest. Restrict for time?
+''' query sentinel-2 products over a given point (alternately, a place name). Later: tile-ID of interest. Restrict for time?
 
 Also need to know how to fetch products from LTA'''
 import os
