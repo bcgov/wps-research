@@ -18,16 +18,15 @@ int main(int argc, char ** argv){
     "HH",
     "HV",
     "VH",
-  "VV"};
+    "VV"};
 
   char * outb[4] = {
     "s11",
     "s12",
     "s21",
-  "s22"};
+    "s22"};
 
-  // check all the input image sizes match
-  ci = 0;
+  ci = 0;  // check the input image sizes match
   str idir(argv[1]);
   rtrim(idir, str("/"));
   for0(i, 4){
@@ -47,11 +46,8 @@ int main(int argc, char ** argv){
   size_t np = nr * nc; // number of pxls
 
   // open the output images
-  FILE * of[4] = {
-    NULL,
-    NULL,
-    NULL,
-  NULL};
+  FILE * of[4];
+  for0(i, 4) of[i] = NULL;
 
   str odir(argv[2]);
   rtrim(odir, str("/"));
@@ -63,10 +59,8 @@ int main(int argc, char ** argv){
   }
 
   for0(i, 4){
-    str a(idir + sep() + str("i_") + str(bands[i]) + str(".bin"));
-    str b(idir + sep() + str("q_") + str(bands[i]) + str(".bin"));
-    // print(a);
-    // print(b);
+    str a(idir + sep() + str("i_") + str(bands[i]) + str(".bin")); // print(a);
+    str b(idir + sep() + str("q_") + str(bands[i]) + str(".bin")); // print(b);
 
     FILE * f = fopen(a.c_str(), "rb");
     FILE * g = fopen(b.c_str(), "rb");
@@ -92,7 +86,6 @@ int main(int argc, char ** argv){
 
     str c(odir + sep() + str(outb[i]) + str(".hdr"));
     hwrite(c, nr, nc, nb, 6);
-
   }
 
   for0(i, 4) fclose(of[i]);

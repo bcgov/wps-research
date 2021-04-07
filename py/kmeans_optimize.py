@@ -189,13 +189,8 @@ all_labels = set(list(kmeans_label_by_class.keys()))
 non_confused_labels = all_labels.difference(confused_labels)
 print("unconfused labels", non_confused_labels) # which labels aren't confused?
 
-'''
-  1. store "good" labels to keep (final)... write out good label map.... (next iteration will need to merge with that one!!!!!!)
-  2. for the confused classes, write a new seed file with original seeds PLUS ONE SEED one more
-  3. new iteration should shard off the good stuff (if there is any) and keep on dividing the stuff that isn't good yet..
- (these were deprecated notes for an iterative version) '''
-
-seeds = np.full(nrow*ncol, float("NaN"),dtype=np.float32)  # new seeds will be saved here..i.e., points still need to classify!
+# init seeds array
+seeds = np.full(nrow*ncol, float("NaN"),dtype=np.float32) 
 kmeans_labels_good, kmeans_labels_confused = set(), set()
 for L in non_confused_labels:
     for x in kmeans_label_by_class[L]:
@@ -210,7 +205,7 @@ for i in range(nrow*ncol):
     if data[i] in kmeans_labels_good:
         good_labels[i] = data[i]
     if data[i] in kmeans_labels_confused:
-        seeds[i] = data[i] # points we still need to classify, e.g. by knn
+        seeds[i] = data[i] # points we should probably classify again, e.g. by knn
 
 print("kmeans_labels_good", kmeans_labels_good)
 print(kmeans_label_by_class)
@@ -241,8 +236,7 @@ print("kmeans_label_by_class", kmeans_label_by_class)
 run(cpp_path + "../py/read_multi.py " + infile + "_kmeans.bin 1")
 run("eog " + infile + "_kmeans.bin.png")
 
-''' RUN KNN ON DATA WITH CONFUSED LABELS ONLY!!!!
-Splice results back into class map (didn't do this yet)'''
+''' run knn on data with confused labels and splice results back into map? Something to try'''
 
 '''
 >>> X = [[0], [1], [2], [3]]
