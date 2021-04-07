@@ -27,12 +27,11 @@ for k in range(0, nb):
     for i in range(0, L):
         for j in range(0, L):
             bi = math.floor(i / nwin)
-            if((k % nsq) == 1): bi = math.floor(j/nwin)
+            if((k % nsq) == 1): bi = math.floor(j / nwin)
             if((k % nsq) == 2): bi = math.floor((L - i - 1) / nwin)
             d[ci] = np.random.normal((bi -.5 / n_class), sigma)
             ci += 1
 
-# for i in range(0, n_class)
 for k in range(0, n_class):
     for i in range(0, L):
         for j in range(0, L):
@@ -48,10 +47,10 @@ for k in range(0, n_class):
             if d[npx * (nb + k) + ((i * L) + j)] == 1.:
                 # grow
                 wg = 3
-                for di in range(-wg, wg + 1):
+                for di in range(- wg, wg + 1):
                     ii = i + di
                     if ii < 0 or ii >= L: continue
-                    for dj in range(-wg, wg+1):
+                    for dj in range(- wg, wg + 1):
                         jj = j + dj
                         if jj < 0 or jj >= L: continue 
                         # print("i", i, "j", j, "di", di, "ii", ii, "dj", dj, "jj", jj)
