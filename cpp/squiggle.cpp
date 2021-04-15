@@ -25,8 +25,8 @@ int main(int argc, char ** argv){
   int dw = (nwin - 1) / 2; // window increment
   if((nwin - 1) % 2 != 0) err("window size must be odd");
 
-  str ofn(fn + str("squiggle.bin"));
-  str ohn(fn + str("squiggle.hdr"));
+  str ofn(fn + str("_squiggle.bin"));
+  str ohn(fn + str("_squiggle.hdr"));
 
   FILE * f = wopen(ofn.c_str());
 
