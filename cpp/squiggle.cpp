@@ -3,7 +3,7 @@ but not computer resource:
 
 Take a raster and expand it such that: for every pixel with nb bands, there are now
 n * n * nb bands where n is the size of a window around the pixel where:
-  out of bounds entries are assigned the centre values..
+out of bounds entries are assigned the centre values..
 
 That is, this adapter transforms moving-window data into pixel based..
 
@@ -11,7 +11,7 @@ i.e. can use it to run a pixel based classifier on a moving window */
 
 #include"misc.h"
 int main(int argc, char ** argv){
-  
+
   if(argc < 3) err("squiggle.exe [input binary file name] [window size]");
   str fn(argv[1]);
   str hfn(hdr_fn(fn));
@@ -20,7 +20,7 @@ int main(int argc, char ** argv){
   np = nr * nc;
 
   float * dat = bread(fn, nr, nc, nb); // read the input data
-  
+
   int nwin = atoi(argv[2]); // square window length
   int dw = (nwin - 1) / 2; // window increment
   if((nwin - 1) % 2 != 0) err("window size must be odd");
@@ -44,7 +44,7 @@ int main(int argc, char ** argv){
             jj = j + dj;
             if(ii >= 0 && ii < nr && jj > 0 && jj < nc){
               // in bounds
-                d = dat[(np * k) + (ii * nc) + jj];
+              d = dat[(np * k) + (ii * nc) + jj];
             }
             else{
               d = dat[(np * k) + (i * nc) + j];
@@ -59,4 +59,3 @@ int main(int argc, char ** argv){
   hwrite(ohn, nr, nc, nb * nwin * nwin);
   return 0;
 }
-
