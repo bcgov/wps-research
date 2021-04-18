@@ -8,13 +8,14 @@ foot_print = 'Intersects(51.0602686,-120.9083258)' # default location: Kamloops
 # VICTORIA: (48.4283334, -123.3647222)
 
 if len(sys.argv) > 1:
-    import geopy # python geocoder
-    from geopy.geocoders import DataBC
-    geolocator = DataBC() # user_agent = "my-application")
-    location = geolocator.geocode(sys.argv[1])
-    print(location.address)
-    print((location.latitude, location.longitude))
-    foot_print = 'Intersects(' + str(location.latitude) + ',' + str(location.longitude) + ')'
+    if not os.path.exists(sys.argv[1]):
+        import geopy # python geocoder
+        from geopy.geocoders import DataBC
+        geolocator = DataBC() # user_agent = "my-application")
+        location = geolocator.geocode(sys.argv[1])
+        print(location.address)
+        print((location.latitude, location.longitude))
+        foot_print = 'Intersects(' + str(location.latitude) + ',' + str(location.longitude) + ')'
 
 # save username and password to files:
 user_, pass_ = None, None
