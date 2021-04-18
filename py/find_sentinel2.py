@@ -7,6 +7,7 @@ import math
 foot_print = 'Intersects(51.0602686,-120.9083258)' # default location: Kamloops
 # VICTORIA: (48.4283334, -123.3647222)
 
+fpfn = None
 if len(sys.argv) > 1:
     if not os.path.exists(sys.argv[1]):
         import geopy # python geocoder
@@ -17,7 +18,8 @@ if len(sys.argv) > 1:
         print((location.latitude, location.longitude))
         foot_print = 'Intersects(' + str(location.latitude) + ',' + str(location.longitude) + ')'
     else:
-        foot_print = open(sys.argv[1]).read().strip()
+        fpfn = sys.argv[1]
+        foot_print = open(fpfn).read().strip()
 
 # save username and password to files:
 user_, pass_ = None, None
@@ -137,3 +139,7 @@ for i in range(0, len(links)):
 f.close()
 a = os.system('chmod 755 ./.sentinel2_download.sh') 
 print("+w .sentinel2_download.sh")
+
+a = os.system('cp -v .sentinel2_download.sh ' + fpfn + '_download.sh')
+
+
