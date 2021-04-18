@@ -16,6 +16,8 @@ if len(sys.argv) > 1:
         print(location.address)
         print((location.latitude, location.longitude))
         foot_print = 'Intersects(' + str(location.latitude) + ',' + str(location.longitude) + ')'
+    else:
+        foot_print = open(sys.argv[1]).read().strip()
 
 # save username and password to files:
 user_, pass_ = None, None
