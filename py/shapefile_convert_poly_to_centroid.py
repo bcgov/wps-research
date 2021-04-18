@@ -1,3 +1,4 @@
+# this script is not finished
 '''
 
 cd path/to/shapefiles
