@@ -1,6 +1,8 @@
 import os
 import sys
-path = os.path.abspath(__file__).split(os.path.sep)[-1]
+path = os.path.abspath(__file__).split(os.path.sep)
+path = path[:-1]
+print(path)
 path = os.path.sep.join(path) + os.path.sep
 
 lines = open(path + 'centroid.csv').readlines()
