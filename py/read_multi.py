@@ -21,6 +21,7 @@ if len(args) < 2:
     err('usage:\n\tread_multispectral.py [input file name]\n' +
         'optional args: [hide plot] [cancel scaling]')
 
+class_map = False
 show_plot = len(args) < 3
 override_scaling = len(args) > 3
 
