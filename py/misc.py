@@ -106,7 +106,7 @@ def read_binary(fn):
     return samples, lines, bands, data
 
 
-def write_binary(np_ndarray, fn):
+def write_binary(np_ndarray, fn): # write a numpy array to ENVI format type 4
     of = wopen(fn)
     np_ndarray.tofile(of, '', '<f4')
     of.close()
