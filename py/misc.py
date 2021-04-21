@@ -108,6 +108,7 @@ def read_binary(fn):
 
 def write_binary(np_ndarray, fn): # write a numpy array to ENVI format type 4
     of = wopen(fn)
+    np_ndarray = np_ndarray.astype(np.float32)
     np_ndarray.tofile(of, '', '<f4')
     of.close()
 
