@@ -33,8 +33,8 @@ int main(int argc, char ** argv){
   }
 
 
-  str ofn(hfn + str("_rgb.bin"));
-  str ohn(hfn + str("_rgb.hdr"));
+  str ofn(fn + str("_rgb.bin"));
+  str ohn(fn + str("_rgb.hdr"));
 
   bwrite(out, ofn, nrow, ncol, nband);
   hwrite(ohn, nrow, ncol, nband);
