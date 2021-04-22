@@ -14,7 +14,7 @@ int main(int argc, char ** argv){
   str hfn2(hdr_fn(fn2)); // input header file name
 
   str ofn(argv[3]); // output file name
-  str ohn(hdr_fn(ofn), true); // output header file name
+  str ohn(hdr_fn(ofn, true)); // output header file name
 
 
   size_t nrow, ncol, nband, np;
