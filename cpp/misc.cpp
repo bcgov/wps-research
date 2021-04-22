@@ -283,7 +283,7 @@ str hdr_fn(str fn, bool create=false){
   if(exists(hfn2)){
     return hfn2; // don't create two headers for the same file
   }
-  if(create){
+  if(create== true){
     return hfn2;
   }
   else{
