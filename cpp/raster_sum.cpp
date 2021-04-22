@@ -16,7 +16,8 @@ int main(int argc, char ** argv){
   size_t nrow, ncol, nband, np, nrow2, ncol2, nband2;
   hread(hfn, nrow, ncol, nband); // read header 1
   hread(hfn2, nrow2, ncol2, nband2); // read header 2
-  if(nrow != nrow2 || ncol != ncol2 || nband != nband2) err("input image dimensions should match");
+  if(nrow != nrow2 || ncol != ncol2 || nband != nband2)
+    err("input image dimensions should match");
 
   np = nrow * ncol; // number of input pix
   size_t i, j, k, ix, ij, ik;
