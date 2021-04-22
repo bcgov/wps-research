@@ -4,10 +4,11 @@ int main(int argc, char ** argv){
   
   if(argc < 2) err("hsv2rgb.exe [input raster file name, 3 band]");
   
-  fn = str(argv[1]); // input image file name
+  str fn(argv[1]); // input image file name
   if(!exists(fn)) err(str("failed to open input file: ") + fn);
-
   str hfn(hdr_fn(fn)); // input header file name
+
+  size_t nrow, ncol, nband, np;
   hread(hfn, nrow, ncol, nband); // read header
   np = nrow * ncol; // number of input pix
   if(nband != 3) err("3 band input supported"); // need rgb
@@ -24,7 +25,7 @@ int main(int argc, char ** argv){
       s = dat[k + np];
       v = dat[k + np + np];
 
-      hsv2rgb(r, g, b, h, s, v);
+      hsv_to_rgb(&r, &g, &b, h, s, v);
       out[k] = r;
       out[k + np] = g;
       out[k + np + np] = b;
