@@ -1,4 +1,4 @@
-/* squiggle.cpp: named suchly because it is an efficient use of brain resource,
+/* need to test this. squiggle.cpp: named suchly because it is an efficient use of brain resource,
 but not computer resource:
 
 Take a raster and expand it such that: for every pixel with nb bands, there are now
