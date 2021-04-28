@@ -1,4 +1,4 @@
-/* raster_sum.cpp: band math, add hyperspectral cubes together */
+/* raster_sub.cpp: band math, subtract hyperspectral cubes */
 #include"misc.h"
 
 int main(int argc, char ** argv){
