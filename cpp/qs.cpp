@@ -74,7 +74,7 @@ int main(int argc, char ** argv){
   for0(k, nband) stdev[k] = sqrt(total_squared[k] / n[k]);
   
   printf("band_i,Min,Max,Mean,Stdv");
-  for0(k, nband) printf("\n%e,%e,%e,%e", fmin[k], fmax[k], avg[k], stdv[k]);
+  for0(k, nband) printf("\n%e,%e,%e,%e", fmin[k], fmax[k], avg[k], stdev[k]);
   printf("\n");
   return 0;
 }
