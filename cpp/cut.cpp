@@ -11,7 +11,6 @@ but does not keep header / geo info */
 int main(int argc, char ** argv){
   if(argc < 3) err("cut [input binary file name] [startx] [starty] [endx] [endy] [output file name] ");
 
-
   str fn(argv[1]); // input file name
   str hfn(hdr_fn(fn)); // auto-detect header file name
   str ofn(argv[6]);
@@ -51,7 +50,6 @@ int main(int argc, char ** argv){
      float * bb_start = &bb[((starty + i) * ncol) + startx];
       for0(j, ncol2) bb2[ix + j] = bb_start[j];
     }
-
 
     size_t fw = fwrite(bb2, sizeof(float), np2, f_o);
     if(fw != np2) err("failed to write expected number of floats"); 
