@@ -1,4 +1,4 @@
-/* raster_sum.cpp: band math, add hyperspectral cubes together */
+/* qs.cpp: quick stats for image cube */
 #include"misc.h"
 
 int main(int argc, char ** argv){
