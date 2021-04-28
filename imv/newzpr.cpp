@@ -848,6 +848,14 @@ void zprInstance::processString(){
     getrgb(r, g, b);
     setrgb(r, g, i - 1);
     break;
+
+    case 'x': // set image row idx. Not implemented
+    break;
+
+    case 'y': // set image col idx. Not implemented
+
+    break;
+
     /*
     case 'p':
     getrgb(r, g, b);
@@ -1108,6 +1116,11 @@ void zprInstance::zprReshape(int w,int h){
   return;
 }
 
+void load_at(int x, int y){
+   /* focus the analysis window on a given image coordinate */
+}
+
+
 // http://graphics.stanford.edu/courses/cs248-01/OpenGLHelpSession/code_example.html
 void zprInstance::zprMouse(int button, int state, int x, int y){
   GLint viewport[4]; /* Do picking */
@@ -1165,7 +1178,7 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
 
     printf("IMG_NR %zu IMG_NC %zu dx %zu dy %zu\n", IMG_NR, IMG_NC, dx, dy);
 
-    // big-data resilient read!
+    // big-data resilient read! rebuffer the 1-1 window. Overview window is static except for the subselection rectangle..
     SA<float> * dat3 = SUB;
     if(true){
       load_sub_np = IMG_NR * IMG_NC;
@@ -1208,7 +1221,6 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
     }
 
     // now rebuffer under secondary window too
-
     size_t i, j, k;
     SA<float> * dat4 = TGT;
     // do the work
