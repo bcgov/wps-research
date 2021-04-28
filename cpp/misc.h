@@ -233,6 +233,7 @@ void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband);
 void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband, size_t data_type);
 
 float * falloc(size_t nf);
+double * dalloc(size_t nd);
 
 float * bread(str bfn, size_t nrow, size_t ncol, size_t nband); // read binary file
 void bwrite(float * d, str bfn, size_t nrow, size_t ncol, size_t nband); // write binary file
