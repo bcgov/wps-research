@@ -1,6 +1,6 @@
 /* based on m3ta3: reimagination of a (late 2011, early 2012) primordial visualization library
 that inspired further developments at UVic, CFS and elsewhere.. 
-todo: display original (untransformed) values (apply reverse map)*/
+todo: display original (untransformed) values (apply reverse map)? */ 
 #include"util.h"
 #include<fstream>
 #include"newzpr.h"
@@ -120,7 +120,7 @@ int main(int argc, char ** argv){
   int height_lim = nr > height; // screen height too small for image
   int width_lim = nc > width; // screen width too small for image
 
-  // for whatever reason, scalef seems to need to be a few percent or so, less than one or the window transformations get thrown off..
+  // scalef seems to need to be a few percent or so, less than one or the window transformations get thrown off..
   scalef = 0.95 * (float)(height > width ? width : height) / (float)(nr > nc? nr: nc); // some simplification of above code..
   if( nr < width && nr < height && nc < width && nc < height) scalef = 1.; // account for "small image" case. 1-1 if can fit on screen!
 
