@@ -1,6 +1,7 @@
+[![Lifecycle:Maturing](https://img.shields.io/badge/Lifecycle-Maturing-007EC6)](<Redirect-URL>)
+
 # Welcome to bcws-psu-research
 "where the future is being made, today!"
-
 
 Methods and Systems for Image Analysis developed in partnership with:
 * Digital Platforms and Data Division (DPDD), Office of The BC Chief Information Officer (OCIO) 
@@ -63,6 +64,9 @@ either express or implied.
 
 See the License for specific language governing permissions
 and limitations under the License.
+
+This repository is maintained by the BC Wildfire Service (BCWS) Predictive Services Unit (PSU)
+
 
 # References
 [1]  Daniel Müllner, fastcluster: Fast Hierarchical, Agglomerative Clustering Routines for R and Python, Journal of Statistical Software 53 (2013), no. 9, 1–18, URL http://www.jstatsoft.org/v53/i09/
