@@ -45,7 +45,6 @@ int main(int argc, char ** argv){
       for0(k, nband){
         mn[k] = FLT_MAX;
         mx[k] = FLT_MIN;
-        c[k] = 0;
       }
 
       //first calculate min, max
@@ -65,11 +64,13 @@ int main(int argc, char ** argv){
                 if(d < mn[k]) mn[k] = d;
                 if(d > mx[k]) mx[k] = d;
             }
-
           }
         }
       }
-      for0(k, nband) w[k] = mx[k] - mn[k]; // metawindow length
+      for0(k, nband){
+        c[k] = 0;
+        w[k] = mx[k] - mn[k]; // metawindow length
+      }
     
       // now put stuff into bins
       for(di = -dw; di <= dw; di++){
@@ -87,6 +88,7 @@ int main(int argc, char ** argv){
             d = dat[ix + dy + dk];
             if(!(isinf(d) || isnan(d))){
               int ci = (int) ( float)floor( n_bin * (d - mn[k]) / w[k]);
+              if(ci < 0 || ci > nbin) err("invalid ci");
               c[k * nbin + ci] += 1;
             }
           }
@@ -115,12 +117,13 @@ int main(int argc, char ** argv){
 
   str ofn(fn + str("_raster_mode_filter.bin")); // write output file
   str ohfn(fn + str("_raster_mode_filter.hdr"));
+  cout << "+w " << ohfn << endl;
   hwrite(ohfn, nrow, ncol, nband); // write output header
   cout << "+w " << ofn << endl;
 
   FILE * f = fopen(ofn.c_str(), "wb");
   if(!f) err("failed to open output file");
-  fwrite(out, sizeof(float) * np * nband, 1, f); // write data
+  fwrite(out, sizeof(float), np * nband, f); // write data
   fclose(f);
 
   //free(dat);
