@@ -1,4 +1,8 @@
-/* 20210220 from a raster, select the most common value in a window */
+/* 20210220 from a raster, select the most common value in a window..
+this algorithm assumes that the output value exists in the input set
+..That is, it smooths by choosing, not by interpolating
+
+that is, use this for smoothing a class map, not a continuous raster */
 #include"misc.h"
 
 int main(int argc, char ** argv){
