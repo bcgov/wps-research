@@ -22,16 +22,13 @@ int main(int argc, char ** argv){
   str hfn("");
 
   if(argc < 4) {
-    //err("mode_filter [input binary file] [window size] [number of bins]");
+    err("mode_filter [input binary file] [window size] [number of bins]");
     ws = 3; //atoi(argv[2]);
-
     nbin = 2; //atoi(argv[3]);
     n_bin = (float)nbin; // bin size
-
     if(ws % 2 != 1) err("window size must be odd number");
     dw = (ws - 1) / 2;
-
-    fn = str("rcm_0815_b002_rcm_0831_match_b002_rcm_0831_match_b002.bin_mlk.bin"); // input file name
+    fn = str("test.bin");
     hfn = str(hdr_fn(fn)); // auto-detect header file name
   }
   else{
@@ -47,6 +44,11 @@ int main(int argc, char ** argv){
     hfn = str(hdr_fn(fn)); // auto-detect header file name
 
   }
+
+  str out_fn(fn + str("_raster_mode_filter.bin"));
+  str out_hf(fn + str("_raster_mode_filter.hdr"));
+  cout << out_fn << endl;
+  cout << out_hf << endl;
 
   size_t nrow, ncol, nband, np, k, n;
   hread(hfn, nrow, ncol, nband); // read header
@@ -145,23 +147,14 @@ int main(int argc, char ** argv){
       }
     }
   }
-  cout << "zing" << endl;
-  cout << fn << endl;
-  str ofn(str(fn) + str("_rmf.bin")); // write output file
-  str ohfn(str(fn) + str("_rmf.hdr"));
-  cout << ofn << endl;
-  cout << "ohfn" << endl;
-  cout << ohfn << endl;
-  cout << "+w " << ohfn << endl;
-  hwrite(ohfn, nrow, ncol, nband); // write output header
-  cout << "+w " << ofn << endl;
 
-  FILE * f = fopen(ofn.c_str(), "wb");
+  hwrite(str("test.hdr"), nrow, ncol, nband); // write output header
+  cout << "+w " << out_hf << endl;
+  FILE * f = fopen(out_fn.c_str(), "wb");
   if(!f) err("failed to open output file");
   fwrite(out, sizeof(float), np * nband, f); // write data
   fclose(f);
-
-  //free(dat);
-  //free(out);
+  free(dat);
+  free(out);
   return 0;
 }
