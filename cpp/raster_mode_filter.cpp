@@ -19,7 +19,6 @@ int main(int argc, char ** argv){
   int nbin = atoi(argv[3]);
   float n_bin = (float)nbin; // bin size
 
-
   if(ws % 2 != 1) err("window size must be odd number");
   int dw = (ws - 1) / 2;
 
@@ -41,7 +40,7 @@ int main(int argc, char ** argv){
 
   for0(i, nrow){
     for0(j, ncol){
-      printf("ij %d %d\n", i, j);
+      printf("i %d / %d j %d of %d\n", i, nrow, j, ncol);
 
       for0(k, nband){
         mn[k] = FLT_MAX;
@@ -70,11 +69,6 @@ int main(int argc, char ** argv){
           }
         }
       }
-
-      for0(k, nband){
-        printf("k %d mn %f mx %f\n", k, mn[k], mx[k]);
-      }
-
       for0(k, nband) w[k] = mx[k] - mn[k]; // metawindow length
     
       // now put stuff into bins
@@ -88,10 +82,11 @@ int main(int argc, char ** argv){
           if(dy > ncol || dy < 0) continue;
 
           for0(k, nband){
+            if(w[k] == 0.) continue;
             dk = np * k;
             d = dat[ix + dy + dk];
             if(!(isinf(d) || isnan(d))){
-              int ci = floor( n_bin * (d - mn[k]) / w[k]);
+              int ci = (int) ( float)floor( n_bin * (d - mn[k]) / w[k]);
               c[k * nbin + ci] += 1;
             }
           }
@@ -100,15 +95,20 @@ int main(int argc, char ** argv){
 
       // assign a value based on the greatest count. Don't test uniqueness
       for0(k, nband){
-        int max_i = 0;
-        float max_c = FLT_MIN;
-        for0(di, nbin){
-          if(c[k * nbin + di] > max_c){
-            max_c = c[k * nbin + di];
-            max_i = di;
+        if(w[k] > 0){
+          int max_i = 0;
+          float max_c = FLT_MIN;
+          for0(di, nbin){
+            if(c[k * nbin + di] > max_c){
+              max_c = c[k * nbin + di];
+              max_i = di;
+            }
           }
+          out[(np * k) + (i * ncol) + j] = (((float)max_i) + .5) * w[k] + mn[k];  
         }
-        out[(np * k) + (i * ncol) + j] = (((float)max_i) + .5) * w[k] + mn[k];  
+        else{
+          out[(np * k) + (i * ncol) + j] = mn[k]; // box has same values in it.
+        }
       }
     }
   }
@@ -120,10 +120,10 @@ int main(int argc, char ** argv){
 
   FILE * f = fopen(ofn.c_str(), "wb");
   if(!f) err("failed to open output file");
-  fwrite(out, sizeof(float) * nrow * ncol, 1, f); // write data
+  fwrite(out, sizeof(float) * np * nband, 1, f); // write data
   fclose(f);
 
-  free(dat);
-  free(out);
+  //free(dat);
+  //free(out);
   return 0;
 }
