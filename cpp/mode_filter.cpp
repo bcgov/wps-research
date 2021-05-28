@@ -1,6 +1,7 @@
-/* 20210220 from a raster, select the most common value in a window..
-this algorithm assumes that the output value exists in the input set
-..That is, it smooths by choosing, not by interpolating
+/* 20210220 mode_filter.cpp from a raster, select 
+most common value in a window.. this algorithm assumes that the
+output value exists in the input set. That is, it smooths by choosing,
+not by interpolating
 
 that is, use this for smoothing a class map, not a continuous raster */
 #include"misc.h"
