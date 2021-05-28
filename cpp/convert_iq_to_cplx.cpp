@@ -3,12 +3,19 @@
 
 int main(int argc, char ** argv){
   if(argc < 4) err("Convert iq format data to PolSARPro binary format (envi type 6)\n convert_iq_to_cplx [i file] [q file] [output file]");
-  str a(argv[0]);
-  str b(argv[1]);
+  str a(argv[1]);
+  str b(argv[2]);
+
+  str ah(hdr_fn(a));
+  str bh(hdr_fn(b));
+
 
   size_t nr, nc, nb, np;
+  hread(ah, nr, nc, nb);
+
   float * d_i = bread(a, nr, nc, nb); // read file
   float * d_q = bread(b, nr, nc, nb); // read file
+  printf("nr %zu nc %zu nb %zu\n", nr, nc, nb);
   np = nr * nc;
 
   float * dd = falloc(np * 2); // allocate floats
@@ -20,7 +27,7 @@ int main(int argc, char ** argv){
     dd[j2 + 1] = d_q[j];
   }
 
-  FILE * f = fopen(argv[2], "wb");
+  FILE * f = fopen(argv[3], "wb");
   if(!f) err("failed to open output file");
 
   size_t nw = fwrite(dd, sizeof(float), np * 2, f);
@@ -30,7 +37,7 @@ int main(int argc, char ** argv){
   free(d_q);
   free(dd);
 
-  str c(str(argv[2]) + str(".hdr"));
+  str c(str(argv[3]) + str(".hdr"));
   hwrite(c, nr, nc, nb, 6);
   return 0;
 }
