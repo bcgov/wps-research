@@ -13,17 +13,40 @@ window. */
 #include"misc.h"
 
 int main(int argc, char ** argv){
-  if(argc < 4) err("mode_filter [input binary file] [window size] [number of bins]");
-  size_t ws = atoi(argv[2]);
 
-  int nbin = atoi(argv[3]);
-  float n_bin = (float)nbin; // bin size
+  size_t ws;
+  int nbin;
+  float n_bin;
+  int dw;
+  str fn("");
+  str hfn("");
 
-  if(ws % 2 != 1) err("window size must be odd number");
-  int dw = (ws - 1) / 2;
+  if(argc < 4) {
+    //err("mode_filter [input binary file] [window size] [number of bins]");
+    ws = 3; //atoi(argv[2]);
 
-  str fn(argv[1]); // input file name
-  str hfn(hdr_fn(fn)); // auto-detect header file name
+    nbin = 2; //atoi(argv[3]);
+    n_bin = (float)nbin; // bin size
+
+    if(ws % 2 != 1) err("window size must be odd number");
+    dw = (ws - 1) / 2;
+
+    fn = str("rcm_0815_b002_rcm_0831_match_b002_rcm_0831_match_b002.bin_mlk.bin"); // input file name
+    hfn = str(hdr_fn(fn)); // auto-detect header file name
+  }
+  else{
+    ws = atoi(argv[2]);
+
+    nbin = atoi(argv[3]);
+    n_bin = (float)nbin; // bin size
+
+    if(ws % 2 != 1) err("window size must be odd number");
+    dw = (ws - 1) / 2;
+
+    fn = str(argv[1]); // input file name
+    hfn = str(hdr_fn(fn)); // auto-detect header file name
+
+  }
 
   size_t nrow, ncol, nband, np, k, n;
   hread(hfn, nrow, ncol, nband); // read header
@@ -61,8 +84,8 @@ int main(int argc, char ** argv){
             dk = np * k;
             d = dat[ix + dy + dk];
             if(!(isinf(d) || isnan(d))){
-                if(d < mn[k]) mn[k] = d;
-                if(d > mx[k]) mx[k] = d;
+              if(d < mn[k]) mn[k] = d;
+              if(d > mx[k]) mx[k] = d;
             }
           }
         }
@@ -70,8 +93,9 @@ int main(int argc, char ** argv){
       for0(k, nband){
         c[k] = 0;
         w[k] = mx[k] - mn[k]; // metawindow length
+        // cout << "w[k] " << w[k] << endl;
       }
-    
+
       // now put stuff into bins
       for(di = -dw; di <= dw; di++){
         dx = i + di;
@@ -88,15 +112,22 @@ int main(int argc, char ** argv){
             d = dat[ix + dy + dk];
             if(!(isinf(d) || isnan(d))){
               int ci = (int) ( float)floor( n_bin * (d - mn[k]) / w[k]);
-              if(ci < 0 || ci > nbin) err("invalid ci");
-              c[k * nbin + ci] += 1;
+              if(ci < 0 || ci > nbin){
+                cout << "ci: " << ci << endl;
+                err("invalid ci");
+              }
+              int cki = k * nbin + ci;
+              // cout << "cki: " << cki << endl;
+              c[cki] += 1;
             }
           }
         }
       }
-
+      //cout << " here \n";
       // assign a value based on the greatest count. Don't test uniqueness
       for0(k, nband){
+        int xi = (np * k) + (i * ncol) + j;
+        //cout << "xi: " << xi << " np*nb: " << np * nband << endl;
         if(w[k] > 0){
           int max_i = 0;
           float max_c = FLT_MIN;
@@ -106,17 +137,21 @@ int main(int argc, char ** argv){
               max_i = di;
             }
           }
-          out[(np * k) + (i * ncol) + j] = (((float)max_i) + .5) * w[k] + mn[k];  
+          out[xi] = (((float)max_i) + .5) * w[k] + mn[k];
         }
         else{
-          out[(np * k) + (i * ncol) + j] = mn[k]; // box has same values in it.
+          out[xi] = mn[k]; // box has same values in it.
         }
       }
     }
   }
-
-  str ofn(fn + str("_raster_mode_filter.bin")); // write output file
-  str ohfn(fn + str("_raster_mode_filter.hdr"));
+  cout << "zing" << endl;
+  cout << fn << endl;
+  str ofn(str(fn) + str("_rmf.bin")); // write output file
+  str ohfn(str(fn) + str("_rmf.hdr"));
+  cout << ofn << endl;
+  cout << "ohfn" << endl;
+  cout << ohfn << endl;
   cout << "+w " << ohfn << endl;
   hwrite(ohfn, nrow, ncol, nband); // write output header
   cout << "+w " << ofn << endl;
