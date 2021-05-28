@@ -45,13 +45,19 @@ int main(int argc, char ** argv){
 
   }
 
-  str out_fn(fn + str("_raster_mode_filter.bin"));
-  str out_hf(fn + str("_raster_mode_filter.hdr"));
+  str out_fn(fn + str("_rmf.bin"));
+  str out_hf(fn + str("_rmf.hdr"));
+
   cout << out_fn << endl;
   cout << out_hf << endl;
 
-  size_t nrow, ncol, nband, np, k, n;
-  hread(hfn, nrow, ncol, nband); // read header
+  size_t nr, nc, nb;
+  long int nrow, ncol, nband, np, k, n;
+  hread(hfn, nr, nc, nb);
+   //nrow, ncol, nband); // read header
+  nrow = nr;
+  ncol = nc;
+  nband = nb;
   np = nrow * ncol; // number of input pix
 
   float d, * dat = bread(fn, nrow, ncol, nband); // load floats to array
@@ -116,11 +122,13 @@ int main(int argc, char ** argv){
               int ci = (int) ( float)floor( n_bin * (d - mn[k]) / w[k]);
               if(ci < 0 || ci > nbin){
                 cout << "ci: " << ci << endl;
-                err("invalid ci");
+                //err("invalid ci");
               }
-              int cki = k * nbin + ci;
-              // cout << "cki: " << cki << endl;
-              c[cki] += 1;
+              else{
+                int cki = k * nbin + ci;
+                // cout << "cki: " << cki << endl;
+                c[cki] += 1;
+              }
             }
           }
         }
@@ -147,14 +155,21 @@ int main(int argc, char ** argv){
       }
     }
   }
-
-  hwrite(str("test.hdr"), nrow, ncol, nband); // write output header
+  for0(k, np*nband) out[k];
+  cout << "here" << endl;
+/*
+  hwrite(out_hf, nrow, ncol, nband); // write output header
   cout << "+w " << out_hf << endl;
-  FILE * f = fopen(out_fn.c_str(), "wb");
+  */
+  str os("out.bin");
+  bwrite(out, os, nr, nc, nb);
+  /*
+  FILE * f = fopen("out.bin", "wb");
   if(!f) err("failed to open output file");
-  fwrite(out, sizeof(float), np * nband, f); // write data
-  fclose(f);
-  free(dat);
-  free(out);
+  fwrite(out, sizeof(float), (size_t) (np * nband), f); // write data
+  fclose(f);*/
+
+  //free(dat);
+  //free(out);
   return 0;
 }
