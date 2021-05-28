@@ -43,7 +43,7 @@ int main(int argc, char ** argv){
     for0(j, ncol){
 
       for0(k, nband){
-        mn[k] = FLT_MAX:
+        mn[k] = FLT_MAX;
         mx[k] = FLT_MIN;
         c[k] = 0;
       }
