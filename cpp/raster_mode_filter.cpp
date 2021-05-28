@@ -37,10 +37,11 @@ int main(int argc, char ** argv){
   float * mn = falloc(nband); // window min this band
   float * mx = falloc(nband); // window max this band
   float * w = falloc(nband);
-  float * c = falloc(nbin); // count in "bin m" of for kth dimension at posn: k * nbin + m
+  float * c = falloc(nbin * nband); // count in "bin m" of for kth dimension at posn: k * nbin + m
 
   for0(i, nrow){
     for0(j, ncol){
+      printf("ij %d %d\n", i, j);
 
       for0(k, nband){
         mn[k] = FLT_MAX;
@@ -68,6 +69,10 @@ int main(int argc, char ** argv){
 
           }
         }
+      }
+
+      for0(k, nband){
+        printf("k %d mn %f mx %f\n", k, mn[k], mx[k]);
       }
 
       for0(k, nband) w[k] = mx[k] - mn[k]; // metawindow length
