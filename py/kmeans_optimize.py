@@ -32,7 +32,7 @@ if not os.path.exists(infile):
 
 tf = infile + "_targets.csv"
 if not os.path.exists(tf):
-    error("targets file not found: " + str(tf))
+    err("targets file not found: " + str(tf))
 
 lines = open(tf).read().strip().split("\n")
 lines = [line.strip().split(",") for line in lines]
