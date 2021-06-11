@@ -181,7 +181,7 @@ int main(int argc, char ** argv){
   size_t mm = 3 * min / 2;
   if(nr < mm) mm = nr;
   if(nc < mm) mm = nc;
-  mm = (6 * mm) / 7; // relative to full-scene overview window, make the full-res subscene window, a little smaller than it was before..
+  mm = (7 * mm) / 7; // relative to full-scene overview window, make the full-res subscene window, a little smaller than it was before..
 
   SUB_MM = mm;
   size_t i_start = 0;
