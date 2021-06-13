@@ -1317,6 +1317,7 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
   }
 
   if(myZprInstanceID < 3){
+   // 20210613 note: could add a virtual layer to the image, with the original indices (to simplify the reverse indexing to retrive image global target location)
     std::vector<glPlottable *>::iterator it;
     int i = 0;
     it = myGraphics.begin();
