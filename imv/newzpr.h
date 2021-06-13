@@ -950,7 +950,7 @@ class glImage: public glPlottable{
       for0(i, targets_i.size()){
         tgt_i = targets_i[i] - SUB_START_I - WIN_I;
         tgt_j = targets_j[i] - SUB_START_J - WIN_J;
-        printf("ANALYSIS %zu %zu\n", tgt_i, tgt_j);
+        printf("ANALYSIS target: %zu %zu\n", tgt_i, tgt_j);
         tgt_label = targets_label[i];
 
         float x = (float)tgt_j + .5;
