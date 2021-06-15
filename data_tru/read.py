@@ -16,7 +16,7 @@ for b in bins:
     print("+r " + b)
     pfn = b.split(sep)[-1][:-9] + '.png'
     X = pickle.load(open(b, 'rb'))
-    supervised[pfn[:-4]] = X
+    supervised[pfn[:-4]] = X.astype(np.float32)
     if not os.path.exists(pfn):
         plt.imshow(X)
         plt.title(pfn[:-4])
@@ -53,7 +53,9 @@ if len(supervised.keys()) != len(unsupervised.keys()):
     print("Error: different number of files to match."); sys.exit(1)
 
 for s in supervised:
+    ds = list(supervised[s])
     for u in unsupervised:
+        du = list(unsupervised[u])
         print(s, u, np.sum(supervised[s] * unsupervised[u]))
 
 '''
