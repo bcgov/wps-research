@@ -2,8 +2,10 @@ import os
 import sys
 import pickle
 import matplotlib.pyplot as plt
-
 sep = os.path.sep
+
+def read_float(fn):  # read raw float data file. 4byte / float, byte-order 0
+    return np.fromfile(fn, dtype = np.float32)
 
 # load supervised result
 supervised = {}
@@ -24,7 +26,21 @@ for b in bins:
 
 print(supervised.keys())
 print(len(supervised.keys()))
+
 # load unsupervised result
+bins = [x.strip() for x in os.popen("ls -1 gagan/*.png").readlines()]
+unsupervised = {}
+for b in bins:
+    bf =  b[:-4] + ".bin"
+    c = "gdal_translate -of ENVI -ot Float32 " + b + " " + bf
+    if not os.path.exists(bf):
+        print(c)
+        a = os.system(c)
+
+    pfn = b.split(sep)[-1]
+    print(pfn)
+
+    
 
 '''
 c = {}
