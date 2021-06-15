@@ -20,3 +20,5 @@ the unsupervised results are numbered..
 # Confusion matrix
 Need to check this..
 <img src="confusion.png">
+
+Nb need to confuse each of the sets with themselves..
