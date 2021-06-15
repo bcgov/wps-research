@@ -126,6 +126,6 @@ for i in range(len(pairs)):
         print(",", end="")
         print(str(np.sum(  sX * uX)), end="")
 
-        
+    print("\n", end="")
     
 
