@@ -1,6 +1,7 @@
 import os
 import sys
 import pickle
+import numpy as np
 import matplotlib.pyplot as plt
 sep = os.path.sep
 
@@ -16,6 +17,7 @@ for b in bins:
     pfn = b.split(sep)[-1][:-9] + '.png'
     X = pickle.load(open(b, 'rb'))
     supervised[pfn[:-4]] = X
+    print(X.shape)
     if not os.path.exists(pfn):
         plt.imshow(X)
         plt.title(pfn[:-4])
@@ -25,20 +27,26 @@ for b in bins:
 
 print(supervised.keys())
 print(len(supervised.keys()))
+s = supervised[list(supervised.keys())[0]].shape
 
 # load unsupervised result
 bins = [x.strip() for x in os.popen("ls -1 gagan/*.png").readlines()]
 unsupervised = {}
 for b in bins:
     bf =  b[:-4] + ".bin"
-    c = "gdal_translate -of ENVI -ot Float32 " + b + " " + bf
+    c = "gdal_translate -of ENVI -ot Float32 -b 1 " + b + " " + bf
     if not os.path.exists(bf):
         print(c)
         a = os.system(c)
 
-    pfn = b.split(sep)[-1]
+    X = read_float(bf)
+    print(X.shape, 1388 * 1388, 1388 * 1388 * 4, s)
+    X = X.reshape(s)
+    print(X.shape)
+    pfn = b.split(sep)[-1].split('.')[0]
     print(pfn)
 
+    unsupervised[pfn] = X
     
 
 '''
