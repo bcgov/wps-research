@@ -6,6 +6,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 sep = os.path.sep
 
+def err(m):
+    print("Error: " + str(m)); sys.exit(1)
+
 def read_float(fn):  # read raw float data file. 4byte / float, byte-order 0
     return np.fromfile(fn, dtype = np.float32)
 
@@ -61,21 +64,49 @@ for s in supervised:
     ds = supervised[s]
     for u in unsupervised:
         du = unsupervised[u]
-        Z = float((ds == du).sum())
+        Z = np.sum(ds * du)
         values.append([Z, s, u])
 
 values.sort()
 
 pairs = []
+
+
+def set(s, u):
+    if(s_used[s] == True):
+        err("already set:", s)
+    if(u_used[u] == True):
+        err("already set:", u)
+    pairs.append([s,u])
+    s_used[s] = True
+    u_used[u] = True
+
+set('pineburneddeciduous', '0')
+set('fireweed', '1')
+set('exposed', '2')
+set('windthrowgreenherbs', '3')
+set('grass', '4')
+set('deciduous', '5')
+set('lake', '6')
+set('herb', 7)
+set('conifer', '8')
+set('blowdownfirefeed', '9')
+set('blowdownlichen', '10')
+set('fireweeddeciduous', '11')
+set('pineburnedfireweed', '12')
+set('pineburned', '13')
+
+
 for (Z, s, u) in values:
     if s_used[s] != True and u_used[u] != True:
         s_used[s], u_used[u] = True, True
         pairs.append([s, u])
         print(Z, pairs[-1])
 
-        c = "convert -delay 111 " + s + ".png " + u + ".png " + s + "_" + u + ".gif"
-        print(c)
-        a = os.system(c)
+for (s, u) in pairs:
+    c = "convert -delay 111 " + s + ".png " + u + ".png " + s + "_" + u + ".gif"
+    print(c)
+    a = os.system(c)
 
 
 '''
