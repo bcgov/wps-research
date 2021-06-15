@@ -105,7 +105,9 @@ for (Z, s, u) in values:
 '''
 
 for (s, u) in pairs:
-    c = "convert -delay 111 " + s + ".png " + u + ".png " + s + "_" + u + ".gif"
-    print(c)
-    a = os.system(c)
+    gif_file = s + "_" + u + ".gif"
+    if not os.path.exists(gif_file):
+        c = "convert -delay 111 " + s + ".png " + u + ".png " + gif_file
+        print(c)
+        a = os.system(c)
 
