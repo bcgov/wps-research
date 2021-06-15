@@ -23,7 +23,6 @@ for b in bins:
         print("+w " + pfn)
         plt.savefig(pfn)
 
-
 print(supervised.keys())
 print(len(supervised.keys()))
 
