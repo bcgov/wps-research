@@ -111,3 +111,21 @@ for (s, u) in pairs:
         print(c)
         a = os.system(c)
 
+u_order = []
+for (s, u) in pairs:
+    u_order.append(u)
+
+print(','.join([u_order[j] for j in range(len(pairs))]))
+for i in range(len(pairs)):
+    s = pairs[i][0]
+    sX = supervised[s]
+    print(s, end='')
+    for j in range(len(pairs)):
+        u = u_order[j]
+        uX = unsupervised[u]
+        print(",", end="")
+        print(str(np.sum(  sX * uX)), end="")
+
+        
+    
+
