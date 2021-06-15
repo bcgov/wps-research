@@ -1,5 +1,6 @@
 import os
 import sys
+import math
 import pickle
 import numpy as np
 import matplotlib.pyplot as plt
@@ -52,11 +53,26 @@ for b in bins:
 if len(supervised.keys()) != len(unsupervised.keys()):
     print("Error: different number of files to match."); sys.exit(1)
 
+
+values = []
+s_used = {s:False for s in supervised}
+u_used = {u:False for u in unsupervised}
 for s in supervised:
-    ds = list(supervised[s])
+    ds = supervised[s]
     for u in unsupervised:
-        du = list(unsupervised[u])
-        print(s, u, np.sum(supervised[s] * unsupervised[u]))
+        du = unsupervised[u]
+        Z = np.sum(np.abs(ds - du))
+        values.append([Z, s, u])
+
+values.sort()
+
+pairs = []
+for (Z, s, u) in values:
+    if s_used[s] != True and u_used[u] != True:
+        s_used[s], u_used[s] = True, True
+        pairs.append([s, u])
+        print(Z, pairs[-1])
+
 
 '''
 c = {}
