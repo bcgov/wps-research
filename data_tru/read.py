@@ -61,7 +61,7 @@ for s in supervised:
     ds = supervised[s]
     for u in unsupervised:
         du = unsupervised[u]
-        Z = np.sum(np.abs(ds - du))
+        Z = float((ds == du).sum())
         values.append([Z, s, u])
 
 values.sort()
@@ -72,6 +72,10 @@ for (Z, s, u) in values:
         s_used[s], u_used[u] = True, True
         pairs.append([s, u])
         print(Z, pairs[-1])
+
+        c = "convert -delay 111 " + s + ".png " + u + ".png " + s + "_" + u + ".gif"
+        print(c)
+        a = os.system(c)
 
 
 '''
