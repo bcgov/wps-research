@@ -49,6 +49,9 @@ for b in bins:
         print("+w " + pfn)
         plt.savefig(pfn)
 
+if len(supervised.keys()) != len(unsupervised.keys()):
+    print("Error: different number of files to match."); sys.exit(1)
+
 
 '''
 c = {}
