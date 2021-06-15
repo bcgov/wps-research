@@ -52,6 +52,9 @@ for b in bins:
 if len(supervised.keys()) != len(unsupervised.keys()):
     print("Error: different number of files to match."); sys.exit(1)
 
+for s in supervised:
+    for u in unsupervised:
+        print(s, u, np.sum(supervised[s] * unsupervised[u]))
 
 '''
 c = {}
