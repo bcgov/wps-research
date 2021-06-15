@@ -69,7 +69,7 @@ values.sort()
 pairs = []
 for (Z, s, u) in values:
     if s_used[s] != True and u_used[u] != True:
-        s_used[s], u_used[s] = True, True
+        s_used[s], u_used[u] = True, True
         pairs.append([s, u])
         print(Z, pairs[-1])
 
