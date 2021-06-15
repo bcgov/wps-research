@@ -2,17 +2,17 @@ import os
 import sys
 import pickle
 import matplotlib.pyplot as plt
-sep = os.path.sep
 
-bins = os.popen("ls -1 brad/*.bin").readlines()
-bins = [f.strip() for f in bins]
+sep = os.path.sep
+bins = [x.strip() for x in os.popen("ls -1 brad/*.bin").readlines()]
 
 for b in bins:
     print("+r " + b)
-    pfn = b.split(sep)[-1] + '.png'
+    pfn = b.split(sep)[-1][:-9] + '.png'
     X = pickle.load(open(b, 'rb'))
     if not os.path.exists(pfn):
         plt.imshow(X)
+        plt.title(pfn[:-4])
         plt.tight_layout()
         print("+w " + pfn)
         plt.savefig(pfn)
