@@ -16,3 +16,7 @@ the unsupervised results are numbered..
 <img src="gif/pineburneddeciduous_0.gif" width=640>
 <img src="gif/pineburnedfireweed_12.gif" width=640>
 <img src="gif/windthrowgreenherbs_3.gif" width=640>
+
+# Confusion matrix
+Need to check this..
+<img src="confusion.png">
