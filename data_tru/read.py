@@ -88,34 +88,24 @@ set('windthrowgreenherbs', '3')
 set('grass', '4')
 set('deciduous', '5')
 set('lake', '6')
-set('herb', 7)
+set('herb', '7')
 set('conifer', '8')
-set('blowdownfirefeed', '9')
+set('blowdownfireweed', '9')
 set('blowdownlichen', '10')
 set('fireweeddeciduous', '11')
 set('pineburnedfireweed', '12')
 set('pineburned', '13')
 
-
+'''
 for (Z, s, u) in values:
     if s_used[s] != True and u_used[u] != True:
         s_used[s], u_used[u] = True, True
         pairs.append([s, u])
         print(Z, pairs[-1])
+'''
 
 for (s, u) in pairs:
     c = "convert -delay 111 " + s + ".png " + u + ".png " + s + "_" + u + ".gif"
     print(c)
     a = os.system(c)
 
-
-'''
-c = {}
-for i in range(X.shape[0]):
-    for j in range(X.shape[1]):
-        d = X[i,j]
-        if not d in c:
-            c[d] = 0
-        c[d] += 1
-print(c)
-'''
