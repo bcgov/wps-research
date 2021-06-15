@@ -1,3 +1,6 @@
+# Comparison: supervised vs. unsupervised
+Comparison of unsupervised (kmeans) vs supervised (random forest) methods:
+the unsupervised results are numbered..
 
 <img src="gif/blowdownfireweed_9.gif" width=640>
 <img src="gif/blowdownlichen_10.gif"  width=640>
