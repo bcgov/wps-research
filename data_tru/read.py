@@ -17,7 +17,6 @@ for b in bins:
     pfn = b.split(sep)[-1][:-9] + '.png'
     X = pickle.load(open(b, 'rb'))
     supervised[pfn[:-4]] = X
-    print(X.shape)
     if not os.path.exists(pfn):
         plt.imshow(X)
         plt.title(pfn[:-4])
@@ -39,15 +38,17 @@ for b in bins:
         print(c)
         a = os.system(c)
 
-    X = read_float(bf)
-    print(X.shape, 1388 * 1388, 1388 * 1388 * 4, s)
-    X = X.reshape(s)
-    print(X.shape)
+    X = read_float(bf).reshape(s) / 255.
     pfn = b.split(sep)[-1].split('.')[0]
-    print(pfn)
-
     unsupervised[pfn] = X
-    
+    pfn += '.png'
+    if not os.path.exists(pfn):
+        plt.imshow(X)
+        plt.title(pfn)
+        plt.tight_layout()
+        print("+w " + pfn)
+        plt.savefig(pfn)
+
 
 '''
 c = {}
