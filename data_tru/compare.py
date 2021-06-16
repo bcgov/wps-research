@@ -128,4 +128,4 @@ for i in range(len(pairs)):
 
     print("\n", end="")
     
-
+print("don't forget self-confusion matrix..")
