@@ -17,13 +17,15 @@ int main(int argc, char ** argv){
 
   if(nband < 2) err("need at least 2 bands..");
 
+  float d, d_max;
+  int i_max;
   float * dat = bread(fn, nrow, ncol, nband); // load floats to array
   float * out = falloc(nrow * ncol); // output channel
 
   for0(i, np){
     out[i] = 0;
-    float d_max = FLT_MIN;
-    int   i_max = -1;
+    d_max = FLT_MIN;
+    i_max = -1;
     for0(k, nband){
       d = dat[k * np + i];
       if(isnan(d) || isinf(d)){
@@ -40,7 +42,7 @@ int main(int argc, char ** argv){
 
   str ofn(fn + str("_inequality.bin"));
   str ohfn(fn + str("_inequality.hdr"));
-
+  hwrite(ohfn, nrow, ncol, 1);
   FILE * f = fopen(ofn.c_str(), "wb");
   if(!f) err("failed to open output file");
   fwrite(out, sizeof(float), np, f); // write data
