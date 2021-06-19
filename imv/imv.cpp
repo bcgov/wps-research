@@ -100,7 +100,7 @@ int main(int argc, char ** argv){
 
   parseHeaderFile(hfn, nr, nc, nb);
   if(nb == 1){
-    str IMG_FN_NEW(IMG_FN + str("_x3.bin"));
+    str IMG_FN_NEW(IMG_FN + str("_x3.bin")); // deal with the case of one band input.. use as r, g and b!
     str cmd(str("cat ") + IMG_FN + str(" ") + IMG_FN + str(" ") + IMG_FN + str(" > ") + IMG_FN_NEW);
     cout << cmd << endl;
     system(cmd.c_str());
@@ -111,9 +111,6 @@ int main(int argc, char ** argv){
     hfn = IMG_HDR_NEW;
     parseHeaderFile(hfn, nr, nc, nb); // reload the data
   }
-
-
-
 
   size_t np = nr * nc;
   size_t min_wh_img = nr > nc ? nc: nr; // account for case that image is small!
