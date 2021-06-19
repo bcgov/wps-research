@@ -60,6 +60,9 @@ vector<string> vec_band_names;
 set<int> groundref_disable;
 
 vector<float> spectra;
+vector<float> hist_r;
+vector<float> hist_g;
+vector<float> hist_b;
 
 int bands_per_frame; // bands per frame if known, should autodetect this
 
