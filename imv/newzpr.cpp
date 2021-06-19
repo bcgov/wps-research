@@ -310,17 +310,17 @@ void glImage::rebuffer(){
       b = X[1][i]; // - min2;
       c = X[2][i]; // - min3;
       if(isnan(a) || isnan(b) || isnan(c) || isinf(a) || isinf(b) || isinf(c)) continue;
-      printf("a %f b %f c %f\n", a, b, c);
+      //printf("a %f b %f c %f\n", a, b, c);
       aw = (max1 - min1); bw = (max2 - min2); cw = (max3 - min3); 
       // printf("aw %f bw %f cw %f\n", aw, bw, cw);
       ai = aw / n_bin; bi = bw / n_bin; ci = cw / n_bin;
-      printf("ai %f bi %f ci %f\n", ai, bi, ci);
+      //printf("ai %f bi %f ci %f\n", ai, bi, ci);
 
       int ia = (int)floor((a + (ai / 2.)) / ai);
       int ib = (int)floor((b + (bi / 2.)) / bi);
       int ic = (int)floor((c + (ci / 2.)) / ci);
 
-      printf("ia %d ib %d ic %d\n", ia, ib, ic);
+      //printf("ia %d ib %d ic %d\n", ia, ib, ic);
       hist_r[ia] += 1.;
       hist_g[ib] += 1.;
       hist_b[ic] += 1.;

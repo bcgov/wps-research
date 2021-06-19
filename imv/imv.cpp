@@ -291,9 +291,9 @@ int main(int argc, char ** argv){
   zprInstance * myZpr7 = myManager->newZprInstance(100, 250, 3);
   myZpr7->setScreenPosition(nc2 + mm, nr2 + mm + (nr2 - mm)); // 65 + nr2);
   myZpr7->setTitle(string("Analysis visible hist"));
-  glCurve histR(myZpr7, &hist_r, 1, 0, 0);
-  glCurve histG(myZpr7, &hist_g, 0, 1, 0);
-  glCurve histB(myZpr7, &hist_b, 0, 0, 1);
+  glCurve histR(myZpr7, &hist_r, 1., 0., 0.);
+  glCurve histG(myZpr7, &hist_g, 0., 1., 0.);
+  glCurve histB(myZpr7, &hist_b, 0., 0., 1.);
 
   initLighting();
 
