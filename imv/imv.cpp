@@ -99,6 +99,22 @@ int main(int argc, char ** argv){
   int number_of_dates = date_strings.size(); // number of dates: hence number of bands per date
 
   parseHeaderFile(hfn, nr, nc, nb);
+  if(nb == 1){
+    str IMG_FN_NEW(IMG_FN + str("_x3.bin"));
+    str cmd(str("cat ") + IMG_FN + str(" ") + IMG_FN + str(" ") + IMG_FN + str(" > ") + IMG_FN_NEW);
+    cout << cmd << endl;
+    system(cmd.c_str());
+
+    str IMG_HDR_NEW(IMG_FN + str("_x3.hdr"));
+    writeHeader(IMG_HDR_NEW.c_str(), nr, nc, 3);
+    IMG_FN = IMG_FN_NEW;
+    hfn = IMG_HDR_NEW;
+    parseHeaderFile(hfn, nr, nc, nb); // reload the data
+  }
+
+
+
+
   size_t np = nr * nc;
   size_t min_wh_img = nr > nc ? nc: nr; // account for case that image is small!
   if(min > min_wh_img) min = min_wh_img;
