@@ -1301,7 +1301,7 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
       myZprManager->myZprInstances->at(5)->mark();
     }
 
-    for(int m = 0; m < 6; m++){
+    for(int m = 0; m < 7; m++){
       zprInstance * a = myZprManager->myZprInstances->at(m); // update this window after else get segfault?
       if(a != this){
         a->focus();
@@ -1357,7 +1357,7 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
     ((glImage *)TGT_GLIMG)->rebuffer();
     zprInstance * p = this;
 
-    for(int k = 0; k < 6; k++){
+    for(int k = 0; k < 7; k++){
       zprInstance * a = myZprManager->myZprInstances->at(k);
       if(a != this){
         a->focus();
