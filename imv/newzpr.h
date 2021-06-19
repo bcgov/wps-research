@@ -110,7 +110,10 @@ extern vector<int> groundref;
 extern vector<string> vec_band_names;
 extern set<int> groundref_disable;
 
-extern vector<float> spectra;
+extern vector<float> spectra; // spectra to be calculated from real image data (not scaled values)
+extern vector<float> hist_r; // histograms to be calculated from the visible image values (scaled r,g,b)
+extern vector<float> hist_g;
+extern vector<float> hist_b;
 
 // other
 extern int bands_per_frame; // bands per frame if known: think we autodetect this for S2 stacks
@@ -1095,8 +1098,9 @@ class glBasicSphere: public glPlottable{
 class glCurve: public glPlottable{
   public:
   vector<float> * d;
-  glCurve(zprInstance * parent, vector<float> * d_){
-    d = d_;
+  float R,G,B;
+  glCurve(zprInstance * parent, vector<float> * d_, float r, float g, float b){
+    d = d_; R = r; G = g; B = b;
     myType = std::string("glCurve");
     initName(parent, false); // only use true if it's something you want to use picking to click on
   }
