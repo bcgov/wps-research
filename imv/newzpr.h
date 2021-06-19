@@ -281,8 +281,8 @@ class zprManager{
 
   void mark();
   static zprManager * Instance(int argc, char *argv[]);
-  zprInstance * newZprInstance();
-  zprInstance * newZprInstance(int NROW, int NCOL, int NBAND);
+  zprInstance * newZprInstance(bool reshape=false);
+  zprInstance * newZprInstance(int NROW, int NCOL, int NBAND, bool reshape=false);
 };
 
 static void myZprReshape(int w,int h){
@@ -342,6 +342,7 @@ class zprInstance{
   float myLeft, myRight, myBottom, myTop, myZNear, myZFar;
   int usleepN, usleepNupdate;
   int isPaused;
+  bool RESHAPE;
   int forceUpdate;
   SA<int> * myBi;
   int groundref_class_colouring;
