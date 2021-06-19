@@ -181,7 +181,9 @@ int main(int argc, char ** argv){
     size_t i, j, k;
     k = 0;
     for(i = 0; i < 3; i++){
-      for(j = 0; j < nr2 * nc2; j++) dat2[k++] = dat[j];
+      for(j = 0; j < nr2 * nc2; j++){
+        dat2[k++] = dat[j];
+      }
     }
     a.initFrom(&dat2, nr2, nc2, 3);
   }
