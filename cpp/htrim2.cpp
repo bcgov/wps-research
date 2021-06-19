@@ -7,6 +7,7 @@ float N_PERCENT; // histogram percentage to trim
 void p_percent(float * min, float * max, float * dd, int n){
   size_t i;
   priority_queue<float> q;
+  
   for0(i, n){
     float d = dd[i];
     if(isinf(d) || isnan(d)){
@@ -15,24 +16,27 @@ void p_percent(float * min, float * max, float * dd, int n){
       q.push(d);
     }
   }
+
   int n_pct = (int)floor(.01 * N_PERCENT * ((float)q.size()));
+  
   for0(i, n_pct) q.pop();
   *max = q.top();
   while(q.size() > n_pct) q.pop();
   *min = q.top();
+
   printf("two_p n=%zu min %f max %f\n", n, min, max);
 }
 
 int main(int argc, char ** argv){
   if(argc < 2) err("htrim2 [input binary file name] # [optional % trim factor e.g. 1.1]");
+  if(argc > 2) N_PERCENT = argc > 2 ? atof(argv[2]): 1.; // default one % trim
 
   str fn(argv[1]); // input file name
   str hfn(hdr_fn(fn)); // auto-detect header name
   size_t nrow, ncol, nband, np, i, j;
   hread(hfn, nrow, ncol, nband); // read hdr
   np = nrow * ncol; // n input pix
-
-  if(argc > 2) N_PERCENT = argc > 2 ? atof(argv[2]): 1.; // default one % trim
+  
   float * dat = bread(fn, nrow, ncol, nband);
   float * out = falloc(np * nband);
   float * mn = falloc(nband);
