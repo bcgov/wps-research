@@ -1,67 +1,50 @@
-/* generalizing an idea found in dr. Dey's paper, to more dimensions.. */
+/* generalizing an idea found in dr. Dey's paper, to more dimensions..
+..but starting with the simpler case */
 #include"misc.h"
 
+// class to sort the values' coordinate indices..
+
+// entropy.. ?
+
 int main(int argc, char ** argv){
-  if(argc < 3) err("raster_inequality [input binary file name] [multilook factor] ");
+  if(argc < 2) err("raster_inequality [input binary file name]");
 
   str fn(argv[1]); // input file name
   str hfn(hdr_fn(fn)); // auto-detect header file name
   size_t nrow, ncol, nband, np, i, j, k, n, ip, jp, ix1, ix2; // variables
   hread(hfn, nrow, ncol, nband); // read header
   np = nrow * ncol; // number of input pix
-  n = (size_t) atoi(argv[2]);
-  printf("multilook factor: %zu\n", n); // read mlk factor
+
+  if(nband < 2) err("need at least 2 bands..");
 
   float * dat = bread(fn, nrow, ncol, nband); // load floats to array
-  size_t nrow2 = nrow / n; // output image row dimensions
-  size_t ncol2 = ncol / n;
-  size_t np2 = nrow2 * ncol2; // allocate space for output
-  size_t nf2 = np2 * nband;
+  float * out = falloc(nrow * ncol); // output channel
 
-  float * count = (float *) falloc(nf2);
-  float * dat2 = (float *) falloc(nf2);
-  for0(i, nf2) count[i] = dat2[i] = 0.; // set to zero
-
-  for0(i, nrow){
-    ip = i / n;
-    for0(j, ncol){
-      jp = j / n;
-      for0(k, nband){
-        ix1 = k * nrow * ncol + i * ncol + j;
-        ix2 = k * nrow2 * ncol2 + ip * ncol2 + jp;
-        float d = dat[ix1];
-        if(ix2 < nf2 && !isnan(d) && !isinf(d)){
-          dat2[ix2] += d;
-          count[ix2]++;
+  for0(i, np){
+    out[i] = 0;
+    float d_max = FLT_MIN;
+    int   i_max = -1;
+    for0(k, nband){
+      d = dat[k * np + i];
+      if(isnan(d) || isinf(d)){
+      }
+      else{
+        if(d > d_max){
+            d_max = d;
+            i_max = k;
         }
       }
     }
+    if(i_max >= 0) out[i] = i_max + 1;
   }
 
-  // divide by n
-  for0(ip, nrow2){
-    for0(jp, ncol2){
-      for0(k, nband){
-        ix1 = (k * np2) + (ip * ncol2) + jp;
-        if(count[ix1] > 0.) dat2[ix1] /= count[ix1];
-      }
-    }
-  }
-
-  // write output file
-  str ofn(fn + str("_mlk.bin"));
-  str ohfn(fn + str("_mlk.hdr"));
-
-  printf("nr2 %zu nc2 %zu nband %zu\n", nrow2, ncol2, nband);
-  hwrite(ohfn, nrow2, ncol2, nband); // write output header
+  str ofn(fn + str("_inequality.bin"));
+  str ohfn(fn + str("_inequality.hdr"));
 
   FILE * f = fopen(ofn.c_str(), "wb");
   if(!f) err("failed to open output file");
-  for0(i, nf2) fwrite(&dat2[i], sizeof(float), 1, f); // write data
-
+  fwrite(out, sizeof(float), np, f); // write data
   fclose(f);
   free(dat);
-  free(dat2);
-  free(count);
   return 0;
 }
