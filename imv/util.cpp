@@ -106,6 +106,11 @@ void writeHeader(const char * filename, int NRows, int NCols, int NBand){
   fprintf(f, "sensor type = Unknown\n");
   fprintf(f, "byte order = 0\n");
   fprintf(f, "wavelength units = Unknown\n");
+  fprintf(f, "band names = {band 1");
+  for(int i = 1; i < NBand; i++){
+    fprintf(f, ",\nband %d", i);
+  }
+  fprintf(f, "}\n");
   fclose(f);
   printf("w %s\n",filename);
 }
