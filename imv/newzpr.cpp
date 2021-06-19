@@ -295,7 +295,6 @@ zprInstance * zprManager::newZprInstance(int NROW, int NCOL, int NBAND, bool res
   // dprintf("zprManager::newZprInstance(%d,%d)", myWindowWidth, myWindowHeight);
 
   zprInstance * ret = NULL;
-  ret->RESHAPE = reshape;
   glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
   glutInitWindowSize(myWindowWidth, myWindowHeight);
   int newWindowID = glutCreateWindow("zprInstance");
@@ -305,6 +304,7 @@ zprInstance * zprManager::newZprInstance(int NROW, int NCOL, int NBAND, bool res
   }
   myGlutWindowIDs.insert(newWindowID);
   ret = new zprInstance(nextZprInstanceID, newWindowID, this, NROW, NCOL, myDims);
+  ret->RESHAPE = reshape;
   ret->myKnnClusteringInstance = NULL;
   ret->myPickNames.clear();
   ret->zprInit();
