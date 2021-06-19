@@ -228,6 +228,7 @@ size_t hread(str hfn, size_t & nrow, size_t & ncol, size_t & nband){
 }
 
 void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband){
+  cout << "hwrite" << endl;
   cout << "+w " << hfn << " nrow " << nrow << " ncol " << ncol << " nband " << nband << endl;
   ofstream hf(hfn);
   if(!hf.is_open()) err("failed to open header file for writing");
@@ -250,6 +251,7 @@ void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband){
 }
 
 void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband, size_t data_type){
+  cout << "hwrite" << endl;
   cout << "+w " << hfn << " nrow " << nrow << " ncol " << ncol << " nband " << nband << endl;
   ofstream hf(hfn);
   if(!hf.is_open()) err("failed to open header file for writing");
@@ -436,7 +438,7 @@ void int_write(size_t value, str fn){
 size_t int_read(str fn){
   size_t value;
   FILE * f = ropen(fn);
-  fread(&value, sizeof(size_t), 1, f);
+  size_t nr = fread(&value, sizeof(size_t), 1, f);
   fclose(f);
   return value;
 }
@@ -466,7 +468,7 @@ float * float_read(str fn){
   size_t n = fs / sizeof(float);
   float * dat = falloc(n);
   FILE * f = ropen(fn);
-  fread(dat, sizeof(float), n, f);
+  size_t nr = fread(dat, sizeof(float), n, f);
   fclose(f);
   return(dat);
 }
@@ -476,7 +478,7 @@ float * float_read(str fn, size_t &n){
   n = fs / sizeof(float);
   float * dat = falloc(n);
   FILE * f = ropen(fn);
-  fread(dat, sizeof(float), n, f);
+  size_t nr = fread(dat, sizeof(float), n, f);
   fclose(f);
   return(dat);
 }
