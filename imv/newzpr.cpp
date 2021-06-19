@@ -300,7 +300,10 @@ void glImage::rebuffer(){
   if(parentZprInstance->myZprInstanceID == 2){
     //bin the float data that was buffered..
     int n_bin = 10;
-
+    hist_r.clear(); hist_g.clear(); hist_b.clear();
+    for0(i, n_bin){
+      hist_r.push_back(0); hist_g.push_back(0); hist_b.push_back(0);
+    }
   }
 }
 
