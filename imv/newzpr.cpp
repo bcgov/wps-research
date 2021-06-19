@@ -287,7 +287,7 @@ void glImage::rebuffer(){
   // printf("\tdone rebuffer\n");
 }
 
-zprInstance * zprManager::newZprInstance(int NROW, int NCOL, int NBAND){
+zprInstance * zprManager::newZprInstance(int NROW, int NCOL, int NBAND, bool reshape){
   int myWindowWidth = NCOL;
   int myWindowHeight = NROW;
   int myDims = NBAND;
@@ -295,6 +295,7 @@ zprInstance * zprManager::newZprInstance(int NROW, int NCOL, int NBAND){
   // dprintf("zprManager::newZprInstance(%d,%d)", myWindowWidth, myWindowHeight);
 
   zprInstance * ret = NULL;
+  ret->RESHAPE = reshape;
   glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
   glutInitWindowSize(myWindowWidth, myWindowHeight);
   int newWindowID = glutCreateWindow("zprInstance");
@@ -1082,6 +1083,10 @@ void zprInstance::setTitle(string s){
 }
 
 void zprInstance::zprReshape(int w,int h){
+  if(!RESHAPE){
+    w = NCol;
+    h = NRow;
+  }
   // focus();
   // printf("zprReshape\n");
   GLfloat ratio; // http://faculty.ycp.edu/~dbabcock/cs370/labs/lab07.html
@@ -1914,7 +1919,13 @@ void glPoints::drawMe(){
 }
 
 void glCurve::drawMe(){
-  glColor3f(0.0f,1.0f,0.0f); // spectra curve in spectra window
+  cout << "spectra: ";
+  for(int i = 0; i < spectra.size(); i++){
+    printf(" %f", spectra[i]);
+  }
+  cout << endl;
+
+  glColor3f(0.0f,0.0f,1.0f); // spectra curve in spectra window
   parentZprInstance->setOrthographicProjection();
   glPushMatrix();
   glLoadIdentity();
@@ -1924,8 +1935,8 @@ void glCurve::drawMe(){
 
   if(IMG_NB == spectra.size()){
     size_t i, nr, nc;
-    float mx = spectra[0];
-    float mn = spectra[0];
+    float mx = FLT_MIN; // spectra[0];
+    float mn = FLT_MAX; // spectra[0];
     nr = parentZprInstance->NRow;
     nc = parentZprInstance->NCol;
 
@@ -1933,10 +1944,10 @@ void glCurve::drawMe(){
       if(spectra[i] > mx) mx = spectra[i];
       if(spectra[i] < mn) mn = spectra[i];
     }
-    // printf("*** mn %f mx %f\n", mn, mx);
 
+    glLineWidth(1.5);
     for0(i, IMG_NB){
-      float x = (float)nc / (float)spectra.size();
+      float x = (float)nc / (-1. + (float)spectra.size());
       x *= (float)i;
       if(i > 0){
         float x2 = x;
@@ -1946,12 +1957,13 @@ void glCurve::drawMe(){
         y1 *= nr;
         y2 *= nr;
         glBegin(GL_LINES);
-        glVertex2f(x1, y1);
-        glVertex2f(x2, y2);
+        glVertex2f(x1, nr - y1);
+        glVertex2f(x2, nr - y2);
         glEnd();
         // printf("%f %f %f %f\n", x1, nr - y1, x2, nr - y2);
       }
     }
+    glLineWidth(1.);
   }
 
   if(lightingState) glEnable(GL_LIGHTING);
