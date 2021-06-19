@@ -1045,21 +1045,16 @@ int zprInstance::setScreenPositionAndReturnBorderHeight(int x, int y){
   return(borderHeight);
 }
 void zprInstance::setScreenPosition(int x, int y){
+  printf("i=%d setScreenPosition(%d,%d)\n", myZprInstanceID, x, y);
   int borderHeight = setScreenPositionAndReturnBorderHeight(x,y);
 }
 void zprInstance::setRightOf( zprInstance * other){
   focus();
-  setScreenPosition(
-  other->myScreenPositionX + other->myWindowWidth,
-  other->myScreenPositionY
-  );
+  setScreenPosition(other->myScreenPositionX + other->myWindowWidth, other->myScreenPositionY);
 }
 void zprInstance::setBelow(zprInstance * other){
   focus();
-  setScreenPosition(
-  other->myScreenPositionX,
-  other->myScreenPositionY+other->myWindowHeight // +67
-  );
+  setScreenPosition(other->myScreenPositionX, other->myScreenPositionY + other->myWindowHeight + 66);
 }
 
 void zprInstance::zprInit(){
@@ -1082,11 +1077,21 @@ void zprInstance::setTitle(string s){
   glutSetWindowTitle(s.c_str());
 }
 
-void zprInstance::zprReshape(int w,int h){
+void zprInstance::zprReshape(int ww,int hh){
+  if(ww * hh == 0) return;
+
+  printf("zprReshape %d %d NCol %d NRow %d\n", ww, hh, NCol, NRow);
+
+  int w = ww;
+  int h = hh;
+
   if(!RESHAPE){
-    w = NCol;
-    h = NRow;
+  // glutReshapeWindow(NCol, NRow);
   }
+  //w = NCol;
+  //h = NRow;
+  printf("\tzprReshape %d %d\n", ww, hh);
+  
   // focus();
   // printf("zprReshape\n");
   GLfloat ratio; // http://faculty.ycp.edu/~dbabcock/cs370/labs/lab07.html

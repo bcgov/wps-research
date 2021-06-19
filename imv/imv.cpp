@@ -232,7 +232,7 @@ int main(int argc, char ** argv){
   SCENE_GLIMG = (void*)(glImage*)myImage;
   myZpr->setTitle(string("Scene "));
 
-  zprInstance * myZpr2 = myManager->newZprInstance(mm, mm, nb); // fullres subset image WINDOW
+  zprInstance * myZpr2 = myManager->newZprInstance(mm, mm, nb); // fullres subset image WINDOW (subscene)
   glImage * myImage2 = new glImage(myZpr2, &b);
   SUB_GLIMG = (void *)myImage2;
   myZpr2->setRightOf(myZpr);
@@ -259,7 +259,7 @@ int main(int argc, char ** argv){
   zprInstance *myZpr3 = myManager->newZprInstance(nr2 - mm, nr2 - mm, nb); // analysis window
   glImage * myImage3 = new glImage(myZpr3, &c); // image object for analysis window data
   TGT_GLIMG = (void *)myImage3;
-  myZpr3->setScreenPosition(nc2, mm + 65); //nr2 + 65);
+  myZpr3->setRightOf(myZpr2); //setScreenPosition(nc2, mm + 65); //nr2 + 65);
   myZpr3->setTitle(string("Analysis"));
   zprInstance * myZpr4 = myManager->newZprInstance(nr2 - mm, nr2 - mm, nb); // analysis window scatter window
   // glBasicSphere * s = new glBasicSphere(0, myZpr4, 0, 0, 0, 1, 1, 1, 1., 10, 10);
@@ -271,19 +271,19 @@ int main(int argc, char ** argv){
   glLine zL(myZpr4, v0, vz, 0, 0, 1);
 
   glPoints scatter(myZpr4, myImage3); // analysis window scatter window scatter plot
-  myZpr4->setRightOf(myZpr3); //myZpr4->setScreenPosition(nc2, nr2 + 65);
+  myZpr4->setScreenPosition(nc2 + mm, nr2 + 65);
   myZpr4->setTitle(string("Scatter (analysis)"));
 
   zprInstance * myZpr5 = myManager->newZprInstance(nr2 - mm, nr2 - mm, nb); // preview scatter plot
   glLine xL2(myZpr5, v0, vx, 1, 0, 0); glLine yL2(myZpr5, v0, vy, 0, 1, 0);
   glLine zL2(myZpr5, v0, vz, 0, 0, 1);
   glPoints scatter2(myZpr5, myImage2); // scatter plot for: preview window
-  myZpr5->setRightOf(myZpr4) ; // ScreenPosition(nc2, nr2 + 65);
+  myZpr5->setBelow(myZpr2); //setRightOf(myZpr4) ; // ScreenPosition(nc2, nr2 + 65);
   myZpr5->setTitle(string("Scatter(subsecne)")); // printf("glutMainLoop()\n");
 
   // spectra band window
   zprInstance * myZpr6 = myManager->newZprInstance(100, 250, 3);
-  myZpr6->setRightOf(myZpr5);
+  myZpr6->setBelow(myZpr); // setRightOf(myZpr5);
   myZpr6->setTitle(string("spectra"));
   glCurve spectraCurve(myZpr6, &spectra);
 
