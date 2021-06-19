@@ -1924,9 +1924,11 @@ void glPoints::drawMe(){
 }
 
 void glCurve::drawMe(){
+  float di;
   cout << "spectra: ";
-  for(int i = 0; i < spectra.size(); i++){
-    printf(" %f", spectra[i]);
+  for(int i = 0; i < d->size(); i++){
+    di = (*d)[i];
+    printf(" %f", di);
   }
   cout << endl;
 
@@ -1938,7 +1940,7 @@ void glCurve::drawMe(){
   if(lightingState) glDisable(GL_LIGHTING);
   //renderBitmapString(x, y, (void *)MYFONT, (char *)(void *)s);
 
-  if(IMG_NB == spectra.size()){
+  if(IMG_NB == d->size()){
     size_t i, nr, nc;
     float mx = FLT_MIN; // spectra[0];
     float mn = FLT_MAX; // spectra[0];
@@ -1946,19 +1948,21 @@ void glCurve::drawMe(){
     nc = parentZprInstance->NCol;
 
     for0(i, IMG_NB){
-      if(spectra[i] > mx) mx = spectra[i];
-      if(spectra[i] < mn) mn = spectra[i];
+      di = (*d)[i];
+      if(di > mx) mx = di;
+      if(di < mn) mn = di;
     }
 
     glLineWidth(1.5);
     for0(i, IMG_NB){
-      float x = (float)nc / (-1. + (float)spectra.size());
+      float x = (float)nc / (-1. + (float)d->size());
       x *= (float)i;
       if(i > 0){
+        di = (*d)[i];
         float x2 = x;
-        float y2 = (spectra[i] - mn) / (mx - mn);
+        float y2 = (di - mn) / (mx - mn);
         float x1 = (x / (float)i) * float(i - 1);
-        float y1 = (spectra[i-1] - mn) / (mx - mn);
+        float y1 = ((*d)[i-1] - mn) / (mx - mn);
         y1 *= nr;
         y2 *= nr;
         glBegin(GL_LINES);
