@@ -1,4 +1,4 @@
-/* m3ta3: reimagination of a (late 2011, early 2012) personal, primordial visualization library that inspired further developments at UVic, CFS and elsewhere.. */
+/* based on m3ta3 */
 #include <math.h>
 #include "newzpr.h"
 #include <stdlib.h>
@@ -325,6 +325,9 @@ void glImage::rebuffer(){
       hist_g[ib] += 1.;
       hist_b[ic] += 1.;
 
+    }
+    for0(i, (int)n_bin){
+      printf("bin %d r %f g %f b %f\n", i, hist_r[i], hist_g[i], hist_b[i]);
     }
   }
 }
@@ -1980,23 +1983,23 @@ void glCurve::drawMe(){
   glLoadIdentity();
   int lightingState = glIsEnabled(GL_LIGHTING);
   if(lightingState) glDisable(GL_LIGHTING);
-  //renderBitmapString(x, y, (void *)MYFONT, (char *)(void *)s);
+  // renderBitmapString(x, y, (void *)MYFONT, "helooooo"); //(char *)(void *)s);
 
-  if(IMG_NB == d->size()){
+  if(d->size() > 0){
     size_t i, nr, nc;
     float mx = FLT_MIN; // spectra[0];
     float mn = FLT_MAX; // spectra[0];
     nr = parentZprInstance->NRow;
     nc = parentZprInstance->NCol;
 
-    for0(i, IMG_NB){
+    for0(i, d->size()){
       di = (*d)[i];
       if(di > mx) mx = di;
       if(di < mn) mn = di;
     }
 
     glLineWidth(1.5);
-    for0(i, IMG_NB){
+    for0(i, d->size()){
       float x = (float)nc / (-1. + (float)d->size());
       x *= (float)i;
       if(i > 0){
