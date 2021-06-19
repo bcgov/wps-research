@@ -24,7 +24,7 @@ void p_percent(float * min, float * max, float * dd, size_t n){
   while(q.size() > n_pct) q.pop();
   *min = q.top();
 
-  printf("two_p n=%zu min %f max %f\n", n, *min, *max);
+  printf("two_p n=%zu min %e max %e\n", n, *min, *max);
 }
 
 int main(int argc, char ** argv){
@@ -57,7 +57,7 @@ int main(int argc, char ** argv){
   hwrite(ohfn, nrow, ncol, nband);
   FILE * f = fopen(ofn.c_str(), "wb");
   if(!f) err("failed to open output file");
-  for0(i, np * nband) n = fwrite(out, sizeof(float), np * nband, f);
+  n = fwrite(out, sizeof(float), np * nband, f);
   fclose(f);
 
   free(dat); free(out);
