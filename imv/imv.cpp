@@ -287,6 +287,12 @@ int main(int argc, char ** argv){
   myZpr6->setTitle(string("spectra"));
   glCurve spectraCurve(myZpr6, &spectra);
 
+  //histogram window..
+  zprInstance * myZpr7 = myManager->newZprInstance(100, 250, 3);
+  myZpr7->setScreenPosition(nc2 + mm, nr2 + mm + (nr2 - mm)); // 65 + nr2);
+  myZpr7->setTitle(string("Analysis visible hist"));
+
+
   initLighting();
 
   bands_per_frame = nb / number_of_dates;
