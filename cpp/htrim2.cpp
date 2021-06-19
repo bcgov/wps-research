@@ -4,7 +4,7 @@
 float N_PERCENT; // histogram percentage to trim
 
 /* new min and max of float array -- n floats */
-void p_percent(float * min, float * max, float * dd, int n){
+void p_percent(float * min, float * max, float * dd, size_t n){
   size_t i;
   priority_queue<float> q;
   
@@ -24,7 +24,7 @@ void p_percent(float * min, float * max, float * dd, int n){
   while(q.size() > n_pct) q.pop();
   *min = q.top();
 
-  printf("two_p n=%zu min %f max %f\n", n, min, max);
+  printf("two_p n=%zu min %f max %f\n", n, *min, *max);
 }
 
 int main(int argc, char ** argv){
@@ -33,7 +33,7 @@ int main(int argc, char ** argv){
 
   str fn(argv[1]); // input file name
   str hfn(hdr_fn(fn)); // auto-detect header name
-  size_t nrow, ncol, nband, np, i, j;
+  size_t nrow, ncol, nband, np, i, j, n;
   hread(hfn, nrow, ncol, nband); // read hdr
   np = nrow * ncol; // n input pix
   
@@ -57,7 +57,7 @@ int main(int argc, char ** argv){
   hwrite(ohfn, nrow, ncol, nband);
   FILE * f = fopen(ofn.c_str(), "wb");
   if(!f) err("failed to open output file");
-  for0(i, np * nband) fwrite(out, sizeof(float), np * nband, f);
+  for0(i, np * nband) n = fwrite(out, sizeof(float), np * nband, f);
   fclose(f);
 
   free(dat); free(out);
