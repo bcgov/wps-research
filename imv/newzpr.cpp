@@ -250,6 +250,8 @@ void glImage::rebuffer(){
   int class_i, n_class, gi;
   k = m = 0;
 
+  vector<float> X[3];
+
   for(i = 0; i < NRow; i++){
     ri = NRow - i - 1;
     for(j = 0; j < NCol; j++){
@@ -268,6 +270,12 @@ void glImage::rebuffer(){
       b = (b > 1. ? 1.: b);
       dat->at(k++) = b;
 
+      if(parentZprInstance->myZprInstanceID == 2){
+        // buffer from analysis window into histograms..
+        X[0].push_back(r);
+        X[1].push_back(g);
+        X[2].push_back(b);
+      }
       // assign a groundref label to each pixel, if the pixel isn't confused
       // 0. for no affirmative label, -1 for multiple affirmative labels
 
@@ -288,6 +296,12 @@ void glImage::rebuffer(){
   }
   Update = false;
   // printf("\tdone rebuffer\n");
+
+  if(parentZprInstance->myZprInstanceID == 2){
+    //bin the float data that was buffered..
+    int n_bin = 10;
+
+  }
 }
 
 zprInstance * zprManager::newZprInstance(int NROW, int NCOL, int NBAND, bool reshape){
@@ -1935,7 +1949,7 @@ void glCurve::drawMe(){
   }
   cout << endl;
 
-  glColor3f(0.0f,0.0f,1.0f); // spectra curve in spectra window
+  glColor3f(R, G, B); //0.0f,0.0f,1.0f); // spectra curve in spectra window
   parentZprInstance->setOrthographicProjection();
   glPushMatrix();
   glLoadIdentity();
