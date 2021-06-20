@@ -300,7 +300,7 @@ void glImage::rebuffer(){
   float a, c, aw, bw, cw, ai, bi, ci;
   if(parentZprInstance->myZprInstanceID == 2){
     //bin the float data that was buffered..
-    float n_bin = 10.;
+    float n_bin = 11.;
     hist_r.clear(); hist_g.clear(); hist_b.clear();
     for0(i, (int)n_bin){
       hist_r.push_back(0); hist_g.push_back(0); hist_b.push_back(0);
@@ -319,6 +319,15 @@ void glImage::rebuffer(){
       int ia = (int)floor((a + (ai / 2.)) / ai);
       int ib = (int)floor((b + (bi / 2.)) / bi);
       int ic = (int)floor((c + (ci / 2.)) / ci);
+
+      if(ia > (int)n_bin - 1) ia = (int)n_bin - 1;
+      if(ib > (int)n_bin - 1) ib = (int)n_bin - 1;
+      if(ic > (int)n_bin - 1) ic = (int)n_bin - 1;
+
+      if(ia < 0) ia = 0;
+      if(ib < 0) ib = 0;
+      if(ic < 0) ic = 0;
+
 
       //printf("ia %d ib %d ic %d\n", ia, ib, ic);
       hist_r[ia] += 1.;
@@ -800,11 +809,13 @@ void zprInstance::processString(){
 
   // gt prefix?
   if(strcmpz(console_string, "gt\0")){
+    cout << "groundref prefix!!!" << endl;
     if(console_string[2] == '\0'){
       groundref_class_colouring = !groundref_class_colouring; // toggle gt / gr colouring
       if(!groundref_class_colouring){
         groundref_disable.clear(); // enable all groundref bands, if colouring turned off
       }
+      cout << "GROUNDREF_COLORING: " << groundref_class_colouring << endl;
 
     }
     else{
