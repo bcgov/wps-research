@@ -55,7 +55,7 @@ void * worker_fun(void * arg){
   }
 }
 
-void parfor(size_t start_j, size_t end_j, void(*eval)(size_t)){
+void parfor(size_t start_j, size_t end_j, void(*eval)(size_t), size_t cores_use){
   // ideally the worker fun would be an inline (inside of here)
 
   pthread_eval = eval; // set global function pointer
@@ -64,7 +64,8 @@ void parfor(size_t start_j, size_t end_j, void(*eval)(size_t)){
 
   pthread_next_j = start_j; // pthread_next_j_mtx is the lock on this variable
   size_t n_cores = sysconf(_SC_NPROCESSORS_ONLN);
-  // cout << "Number of cores: " << n_cores << endl;
+  if(cores_use > 0) n_cores = cores_use;
+  cout << "Using " << n_cores << " threads.." << endl;
 
   // allocate threads, make threads joinable whatever that means
   pthread_attr_init(&pthread_attr);

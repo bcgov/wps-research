@@ -114,7 +114,7 @@ extern size_t pthread_end_j;
 void init_mtx();
 void * worker_fun(void * arg); // worker function
 extern void (*pthread_eval)(size_t); // function pointer to execute in parallel, over range start_j:end_j inclusive
-void parfor(size_t start_j, size_t end_j, void(*eval)(size_t));
+void parfor(size_t start_j, size_t end_j, void(*eval)(size_t), size_t cores_use = 0);
 
 // method for loading band of image, limited to subarea
 extern size_t load_sub_np;
