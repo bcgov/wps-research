@@ -74,9 +74,11 @@ template<class T> std::ostream& operator << (std::ostream& os, const std::set<T>
 }
 
 template<class A, class B> std::ostream& operator << (std::ostream& os, const std::map<A, B>& v){
-  os << "{" << endl;
+  os << "\n{"; // endl;
+  int ci = 0;
   for (typename std::map<A, B>::const_iterator ii = v.begin(); ii != v.end(); ++ii){
-    os << ii->first << ":" << ii->second << ","; //endl;
+    os << (ci > 0 ? str("\n") : str("")) << ii->first << ":" << ii->second << ","; //endl;
+    ci += 1;
   }
   os << "}" << endl;
   return os;
