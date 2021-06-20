@@ -14,7 +14,7 @@ from osgeo import gdalconst
 def err(m):
     print("Error: " + m); sys.exit(1)
 
-# parse arguments 
+# parse arguments
 args = sys.argv
 if len(args) < 4:
     err("Error: rasterize_onto.py: usage:" +
@@ -99,7 +99,7 @@ for i in range(feature_count):
 
     out_fn = OutputImage[:-4] + '_' + str(feature_ids[i]) + ('' if feature_names[i] == ''  else ('_' + str(feature_names[i]).strip())) + '.bin'
     print("+w", out_fn)
-    
+
     # Rasterise
     Output = gdal.GetDriverByName(gdalformat).Create(out_fn, Image.RasterXSize, Image.RasterYSize, 1, datatype)
     Output.SetProjection(Image.GetProjectionRef())
@@ -116,4 +116,3 @@ for i in range(feature_count):
 Band = None
 Image = None
 Shapefile = None
-
