@@ -261,7 +261,7 @@ int main(int argc, char ** argv){
   TGT_GLIMG = (void *)myImage3;
   myZpr3->setRightOf(myZpr2); //setScreenPosition(nc2, mm + 65); //nr2 + 65);
   myZpr3->setTitle(string("Analysis"));
-  zprInstance * myZpr4 = myManager->newZprInstance(nr2 - mm, nr2 - mm, nb); // analysis window scatter window
+  zprInstance * myZpr4 = myManager->newZprInstance(max(333,nr2 - mm), max(333,nr2 - mm), nb); // analysis window scatter window
   // glBasicSphere * s = new glBasicSphere(0, myZpr4, 0, 0, 0, 1, 1, 1, 1., 10, 10);
 
   vec3 v0(0,0,0); // origin. this section: unit square axes
@@ -274,7 +274,7 @@ int main(int argc, char ** argv){
   myZpr4->setScreenPosition(nc2 + mm, nr2 + 65);
   myZpr4->setTitle(string("Scatter (analysis)"));
 
-  zprInstance * myZpr5 = myManager->newZprInstance(nr2 - mm, nr2 - mm, nb); // preview scatter plot
+  zprInstance * myZpr5 = myManager->newZprInstance(max(333, nr2 - mm), max(333,nr2 - mm), nb); // preview scatter plot
   glLine xL2(myZpr5, v0, vx, 1, 0, 0); glLine yL2(myZpr5, v0, vy, 0, 1, 0);
   glLine zL2(myZpr5, v0, vz, 0, 0, 1);
   glPoints scatter2(myZpr5, myImage2); // scatter plot for: preview window
