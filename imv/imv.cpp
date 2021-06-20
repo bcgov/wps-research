@@ -256,7 +256,7 @@ int main(int argc, char ** argv){
   }
 
   TGT_MYIMG = &c;
-  zprInstance *myZpr3 = myManager->newZprInstance(nr2 - mm, nr2 - mm, nb); // analysis window
+  zprInstance *myZpr3 = myManager->newZprInstance(max(222,nr2 - mm), max(222,nr2 - mm), nb); // analysis window
   glImage * myImage3 = new glImage(myZpr3, &c); // image object for analysis window data
   TGT_GLIMG = (void *)myImage3;
   myZpr3->setRightOf(myZpr2); //setScreenPosition(nc2, mm + 65); //nr2 + 65);
