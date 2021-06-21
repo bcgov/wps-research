@@ -1,9 +1,7 @@
-# extract Sentinel2, resample to 10m, 
-# prefix bandnames with dates..
-# .. stack everything!
+'''A) extract Sentinel2, B) resample to 10m c) prefix bandnames with dates..
+   D) stack everything!
 
-# extract Sentinel-2 data from zip..
-#.. if not already extracted (check for .SAFE folder)
+1. extract Sentinel-2 data from zip.. if not already extracted (check for .SAFE folder)'''
 import os
 import sys
 args = sys.argv
@@ -20,12 +18,26 @@ def run(c):
     if a != 0: err("failed to run: " + str(c))
 
 extract = pd + "sentinel2_extract.py" # command to extract a zip
-zips = os.popen("ls -1 *.zip").readlines() # list the zip files
-raster_files = []
+zips = [x.strip() for x in os.popen("ls -1 *.zip").readlines()] # list the zip files
+raster_files = [] # these will be the final rasters to concatenate
+
+'''before processing, sort zip files by date. Note, they would be already except the prefix
+varies with S2A / S2B'''
+
+x = []
+for z in zips:
+    w = z.split('_')
+    if w[0][:2] != "S2":
+        x.append(z) # don't have a rule for sorting, if not S2!
+    else:
+        x.append([w[2:], z])
+''' [['20190210T200551', 'N0211', 'R128', 'T09VUE', '20190210T222054.zip'],
+      'S2A_MSIL2A_20190210T200551_N0211_R128_T09VUE_20190210T222054.zip'] '''
+x.sort()
+zips = [i[1] for i in x]  # finally, these files should be sorted by date..
 
 for z in zips:
-    z = z.strip()
-    safe = z[:-4] + ".SAFE" # print(safe)
+    safe = z[:-4] + ".SAFE" # extracted location..
     
     print(safe)
     if not os.path.exists(safe):
