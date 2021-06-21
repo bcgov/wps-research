@@ -16,6 +16,8 @@ std::string strp(const std::string& str, const std::string& whitespace = " \t\r\
 }
 
 int main(int argc, char ** argv){
+  N_THREADS_IO = 4; // default number of threads for IO operations
+
   int n_groundref = 0;
   init_mtx();
   groundref.clear();
@@ -169,7 +171,7 @@ int main(int argc, char ** argv){
     mlk_scene_fn = &IMG_FN; // input filename
     mlk_scene_groundref = &groundref; // groundref indices
 
-    parfor(0, nb, multilook_scene); // scene subsampling, parallelized by band
+    parfor(0, nb, multilook_scene, N_THREADS_IO); // scene subsampling, parallelized by band
     FILE * f = fopen(mfn.c_str(), "wb");
     fwrite(&dat[0], 1, np2 * nb * sizeof(float), f);
     fclose(f);
@@ -217,7 +219,7 @@ int main(int argc, char ** argv){
     load_sub_infile = string(IMG_FN.c_str());
     load_sub_i = SUB_I;
     load_sub_j = SUB_J;
-    parfor(0, nb, load_sub); // run parallel job
+    parfor(0, nb, load_sub, N_THREADS_IO); // run parallel job
   }
   IMG = NULL; // &dat0;
   SUB = &dat3;

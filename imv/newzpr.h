@@ -55,6 +55,9 @@ static clock_t start_time;
 static clock_t stop_time;
 #define SECONDS_PAUSE 0.4
 
+// global params
+extern size_t N_THREADS_IO;
+
 // image scene, multilooked
 extern myImg * SCENE_MYIMG;
 extern void * SCENE_GLIMG;
