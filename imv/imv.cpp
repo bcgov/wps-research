@@ -16,7 +16,7 @@ std::string strp(const std::string& str, const std::string& whitespace = " \t\r\
 }
 
 int main(int argc, char ** argv){
-  N_THREADS_IO = 4; // default number of threads for IO operations
+  N_THREADS_IO = 8; // default number of threads for IO operations
 
   int n_groundref = 0;
   init_mtx();
