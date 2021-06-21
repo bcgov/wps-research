@@ -6,6 +6,9 @@
 #include <iostream>
 using namespace std;
 
+// global params
+size_t N_THREADS_IO;
+
 myImg * SCENE_MYIMG = NULL;
 void * SCENE_GLIMG = NULL;
 map<SA<float> *, float> scene_band_min;
@@ -595,7 +598,7 @@ void zprInstance::processString(){
       nan_sub_infile = IMG_FN; //string(infile);
       nan_sub_i = SUB_I; // I, J coordinates of the image subsection we extracted
       nan_sub_j = SUB_J;
-      parfor(0, IMG_NB, nan_sub);
+      parfor(0, IMG_NB, nan_sub, N_THREADS_IO);
     }
     SUB_MYIMG->initFrom(dat3, SUB_MM, SUB_MM, IMG_NB);
     ((glImage *)SUB_GLIMG)->rebuffer();
@@ -1257,7 +1260,7 @@ void zprInstance::zprMouse(int button, int state, int x, int y){
       load_sub_infile = IMG_FN; //string(infile);
       load_sub_i = SUB_I; // I, J coordinates of the image subsection we extracted
       load_sub_j = SUB_J;
-      parfor(0, IMG_NB, load_sub);
+      parfor(0, IMG_NB, load_sub, N_THREADS_IO);
     }
 
     SUB_MYIMG->initFrom(dat3, SUB_MM, SUB_MM, IMG_NB);
