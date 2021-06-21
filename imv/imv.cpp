@@ -15,6 +15,8 @@ std::string strp(const std::string& str, const std::string& whitespace = " \t\r\
   return str.substr(strBegin, strRange);
 }
 
+#define message "imv.cpp [infile] # [analysis window size] [n bands groundref, 1-hot encoded, at end of bsq stack] [bands per frame]"
+
 int main(int argc, char ** argv){
   N_THREADS_IO = 8; // default number of threads for IO operations
 
@@ -23,11 +25,14 @@ int main(int argc, char ** argv){
   groundref.clear();
   IMG_FN = string("stack.bin"); // default image filename to load
 
-  if(argc < 2) printf("imv.cpp: [infile] optional: [nwin] [n bands groundref (one hot encoded, appearing at end of file..] [optional: bands per frame]\n");
+  if(argc < 2) printf(message);
   else IMG_FN = string(argv[1]);
   if(argc > 3) n_groundref = atoi(argv[3]); // number of bands at end, to consider as groundref
 
-  if(!exists(IMG_FN)) err("failed to open input file"); // check if input file exists
+  if(!exists(IMG_FN)){
+    printf(message);
+    err("failed to open input file"); // check if input file exists
+  }
   string mfn(IMG_FN + string(".ml")); // look for saved multilook file
   cout << "multilook file name: " << mfn << endl;
 
