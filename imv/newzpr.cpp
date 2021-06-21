@@ -950,7 +950,6 @@ void zprInstance::special(int key, int x, int y){
       _F2 = true; // !_F2;
     }
   }
-
   switch(key){
     case GLUT_KEY_UP: // "next frame" if applicable
     if(true){
@@ -958,9 +957,9 @@ void zprInstance::special(int key, int x, int y){
       r += bands_per_frame; // increment
       g += bands_per_frame;
       b += bands_per_frame;
-      if(r >= NBand) r -= NBand; // check if wrap
-      if(g >= NBand) g -= NBand;
-      if(b >= NBand) b -= NBand;
+      if(r >= IMG_NB) r -= IMG_NB; // check if wrap
+      if(g >= IMG_NB) g -= IMG_NB;
+      if(b >= IMG_NB) b -= IMG_NB;
       setrgb(r, g, b);
       // printf("incremented band selection: (r,g,b)=(%d,%d,%d)\n", r, g, b);
     }
@@ -972,9 +971,9 @@ void zprInstance::special(int key, int x, int y){
       r -= bands_per_frame; // decrement
       g -= bands_per_frame;
       b -= bands_per_frame;
-      if(r < 0) r += NBand; // check if wrap
-      if(g < 0) g += NBand;
-      if(b < 0) b += NBand;
+      if(r < 0) r += IMG_NB; // check if wrap
+      if(g < 0) g += IMG_NB;
+      if(b < 0) b += IMG_NB;
       setrgb(r, g, b);
       //printf("decremented band selection: (r,g,b)=(%d,%d,%d)\n", r, g, b);
     }
@@ -986,9 +985,9 @@ void zprInstance::special(int key, int x, int y){
       r--; // decrement
       g--;
       b--;
-      if(r < 0) r += NBand; // check if wrap
-      if(g < 0) g += NBand;
-      if(b < 0) b += NBand;
+      if(r < 0) r += IMG_NB; // check if wrap
+      if(g < 0) g += IMG_NB;
+      if(b < 0) b += IMG_NB;
       setrgb(r, g, b);
       // printf("decremented band selection: (r,g,b)=(%d,%d,%d)\n", r, g, b);
     }
@@ -1000,9 +999,9 @@ void zprInstance::special(int key, int x, int y){
       r++; // increment
       g++;
       b++;
-      if(r >= NBand) r -= NBand; // check if wrap
-      if(g >= NBand) g -= NBand;
-      if(b >= NBand) b -= NBand;
+      if(r >= IMG_NB) r -= IMG_NB; // check if wrap
+      if(g >= IMG_NB) g -= IMG_NB;
+      if(b >= IMG_NB) b -= IMG_NB;
       setrgb(r, g, b);
       // printf("incremented band selection: (r,g,b)=(%d,%d,%d)\n", r, g, b);
     }
