@@ -11,9 +11,12 @@ size_t N_THREADS_IO;
 
 myImg * SCENE_MYIMG = NULL;
 void * SCENE_GLIMG = NULL;
-map<SA<float> *, float> scene_band_min;
+
+map<SA<float> *, float> scene_band_p; // percentage value used to calculate last version..
+map<set<SA<float> *>, float> scene_bands_p; // percentage value used to calculate last version.. proportional version..
+map<SA<float> *, float> scene_band_min; // non-proportional version... cache
 map<SA<float> *, float> scene_band_max;
-map<set<SA<float> *>, float> scene_bands_min;
+map<set<SA<float> *>, float> scene_bands_min; // proportional version.. cache
 map<set<SA<float> *>, float> scene_bands_max;
 
 // subset window data
@@ -115,7 +118,7 @@ void zprInstance::mark(){
 // declare a map (SA<float> * b, to min/max).. no recalc!
 void two_percent(float & min, float & max, SA<float> * b){
 
-  if(scene_band_min.count(b) < 1){
+  if(scene_band_min.count(b) < 1 || scene_band_p.count(b) < 1 || scene_band_p[b] != N_PERCENT_SCALING){
     priority_queue<float> q;
     float * d = b->elements;
 
@@ -133,6 +136,7 @@ void two_percent(float & min, float & max, SA<float> * b){
     //while(q.size() > 0) q.pop();
     scene_band_min[b] = min;
     scene_band_max[b] = max;
+    scene_band_p[b] = N_PERCENT_SCALING;
   }
   else{
     min = scene_band_min[b];
@@ -152,7 +156,7 @@ void two_percent(float & min, float & max, SA<float> * r, SA<float> * g, SA<floa
   bs.insert(g);
   bs.insert(b); // build the tuple to see if we've already calculated this
 
-  if(scene_bands_min.count(bs) < 1){
+  if(scene_bands_min.count(bs) < 1 || scene_bands_p.count(bs) < 1 || scene_bands_p[bs] != N_PERCENT_SCALING){
     priority_queue<float> q;
     float * R = r->elements;
     float * G = g->elements;
@@ -173,6 +177,9 @@ void two_percent(float & min, float & max, SA<float> * r, SA<float> * g, SA<floa
     max = q.top();
     while(q.size() > n_pct) q.pop();
     min = q.top();
+    scene_bands_min[bs] = min;
+    scene_bands_max[bs] = max;
+    scene_bands_p[bs] = N_PERCENT_SCALING;
   }
   else{
     min = scene_bands_min[bs];
