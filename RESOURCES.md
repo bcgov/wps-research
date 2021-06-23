@@ -10,6 +10,7 @@
 *[Burned area mapping using S2](https://www.youtube.com/watch?v=_swGA_61kNk)
 *[Deforestation monitoring with Sentinel-2](https://www.youtube.com/watch?v=LtxcBcgGo1g)
 *[Veg monitoring for Agri w Sentinel2](https://www.youtube.com/watch?v=xEwy8UMGu7M)
+*[Active fire monitoring with S3](https://www.youtube.com/watch?v=l_WiXEsLHaE)
 
 ## Hyperspectral
 ## LiDAR
