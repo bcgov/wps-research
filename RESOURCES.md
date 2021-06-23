@@ -7,11 +7,12 @@
 * [How to create mosaic of two S1 products in adjacent paths](https://asf.alaska.edu/how-to/data-recipes/generate-a-mosaic-of-two-sentinel-1-products-in-adjacent-paths/)
 * [Change detection using S1 in QGIS](https://asf.alaska.edu/how-to/data-recipes/change-detection-using-sar-data-in-qgis/)
 * [Data prep for Stamps permanent scatterer interferometry](https://www.youtube.com/watch?v=Xy7Y4Ea5mOo)
+
 ## Multispectral
-*[Burned area mapping using S2](https://www.youtube.com/watch?v=_swGA_61kNk)
-*[Deforestation monitoring with Sentinel-2](https://www.youtube.com/watch?v=LtxcBcgGo1g)
-*[Veg monitoring for Agri w Sentinel2](https://www.youtube.com/watch?v=xEwy8UMGu7M)
-*[Active fire monitoring with S3](https://www.youtube.com/watch?v=l_WiXEsLHaE)
+* [Burned area mapping using S2](https://www.youtube.com/watch?v=_swGA_61kNk)
+* [Deforestation monitoring with Sentinel-2](https://www.youtube.com/watch?v=LtxcBcgGo1g)
+* [Veg monitoring for Agri w Sentinel2](https://www.youtube.com/watch?v=xEwy8UMGu7M)
+* [Active fire monitoring with S3](https://www.youtube.com/watch?v=l_WiXEsLHaE)
 
 ## Hyperspectral
 ## LiDAR
