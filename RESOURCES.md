@@ -14,3 +14,5 @@
 ## LiDAR
 ## Data
 [SPOT data](https://regards.cnes.fr/user/swh/modules/60)
+## Training
+[Copernicus RUS webinars](https://www.youtube.com/channel/UCB01WjameYMvL7-XfI8vRIA/videos)
