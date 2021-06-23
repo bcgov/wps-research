@@ -12,6 +12,8 @@
 
 ## Hyperspectral
 ## LiDAR
+## Hyperspectral and Radar combination
+[Mapping waterbodies from Space](https://www.youtube.com/watch?v=UJcS24thVvc)
 ## Data
 [SPOT data](https://regards.cnes.fr/user/swh/modules/60)
 ## Training
