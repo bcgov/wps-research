@@ -30,4 +30,5 @@
 
 ## coding
 * [matplotlib animation](http://jakevdp.github.io/blog/2012/08/18/matplotlib-animation-tutorial/)
-*
+* [matplotlib figure](https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.figure.html)
+* 
