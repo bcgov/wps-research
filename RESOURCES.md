@@ -23,3 +23,6 @@
 ## Training
 * [Copernicus RUS webinars](https://www.youtube.com/channel/UCB01WjameYMvL7-XfI8vRIA/videos)
 * [Introduction to StreamLit](https://miro.com/app/board/o9J_l9oeooY=/)
+
+## ds-ish stuff
+*[tSNE embedding](https://scikit-learn.org/stable/modules/generated/sklearn.manifold.TSNE.html)
