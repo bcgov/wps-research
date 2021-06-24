@@ -31,4 +31,4 @@
 ## coding
 * [matplotlib animation](http://jakevdp.github.io/blog/2012/08/18/matplotlib-animation-tutorial/)
 * [matplotlib figure](https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.figure.html)
-* [3d plotting in matlab](https://jakevdp.github.io/PythonDataScienceHandbook/04.12-three-dimensional-plotting.html)
+* [3d plotting in matplotlib](https://jakevdp.github.io/PythonDataScienceHandbook/04.12-three-dimensional-plotting.html)
