@@ -27,3 +27,7 @@
 ## stats
 * [tSNE embedding](https://scikit-learn.org/stable/modules/generated/sklearn.manifold.TSNE.html)
 * [isotonic reg](https://en.wikipedia.org/wiki/Isotonic_regression)
+
+## coding
+* [matplotlib animation](http://jakevdp.github.io/blog/2012/08/18/matplotlib-animation-tutorial/)
+*
