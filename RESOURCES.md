@@ -25,4 +25,4 @@
 * [Introduction to StreamLit](https://miro.com/app/board/o9J_l9oeooY=/)
 
 ## ds-ish stuff
-*[tSNE embedding](https://scikit-learn.org/stable/modules/generated/sklearn.manifold.TSNE.html)
+* [tSNE embedding](https://scikit-learn.org/stable/modules/generated/sklearn.manifold.TSNE.html)
