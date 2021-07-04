@@ -1,4 +1,6 @@
-''' query sentinel-2 products over a given point (alternately, a place name). Later: tile-ID of interest. Restrict for time?
+'''NB need to redo this script using argparse!!!!!!
+
+query sentinel-2 products over a given point (alternately, a place name). Later: tile-ID of interest. Restrict for time?
 
 Also need to know how to fetch products from LTA'''
 import os
