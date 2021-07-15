@@ -53,4 +53,9 @@ for f in features:
                  geom['coordinates'][0],
                  geom['coordinates'][1]]
         print(','.join([str(x) for x in stuff]))
+    else:
+        print(geom['type'])
+        for c in geom['coordinates']:
+            for d in c:
+                print("  " + str(d))
 
