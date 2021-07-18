@@ -9,7 +9,6 @@ int main(int argc, char ** argv){
   str ah(hdr_fn(a));
   str bh(hdr_fn(b));
 
-
   size_t nr, nc, nb, np;
   hread(ah, nr, nc, nb);
 
