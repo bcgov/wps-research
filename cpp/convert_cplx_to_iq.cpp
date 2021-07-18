@@ -10,10 +10,10 @@ int main(int argc, char ** argv){
   if(argc < 2) err("convert_cplx_to_iq.cpp: convert a complex channel (ENVI type 6) into real(i) and imag(q) components, implemented 20210717. \n\tuse: convert_cplx_to_iq [ch] \n\tNote: config.txt file must be present in input directory\n");
   
   size_t sf = sizeof(float);
-  int nrow, ncol, row, col, i, j, k, ind, nb;
+  size_t nrow, ncol, row, col, i, j, k, ind, nb;
   char * ifn = argv[1];
   str ihfn(hdr_fn(ifn));
-  hread(ihfn, nrow, ncol, nband); // read header file for ENVI type 6 input file
+  hread(ihfn, nrow, ncol, nb); // read header file for ENVI type 6 input file
   printf("nrow %d ncol %d infile %s\n", nrow, ncol, ifn);
 
   str ofn1(str(ifn) + str("_i.bin"));
