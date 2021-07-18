@@ -7,13 +7,13 @@
 using namespace std;
 
 int main(int argc, char ** argv){
-  if(argc < 4) err("convert_cplx_to_iq.cpp: convert a complex channel (ENVI type 6) into real(i) and imag(q) components, implemented 20210717. \n\tuse: convert_cplx_to_iq [nrow] [ncol] [ch] \n\tNote: config.txt file must be present in input directory\n");
+  if(argc < 2) err("convert_cplx_to_iq.cpp: convert a complex channel (ENVI type 6) into real(i) and imag(q) components, implemented 20210717. \n\tuse: convert_cplx_to_iq [ch] \n\tNote: config.txt file must be present in input directory\n");
   
   size_t sf = sizeof(float);
-  int nrow, ncol, row, col, i, j, k, ind;
-  nrow = atoi(argv[1]);
-  ncol = atoi(argv[2]);
-  char * ifn = argv[3];
+  int nrow, ncol, row, col, i, j, k, ind, nb;
+  char * ifn = argv[1];
+  str ihfn(hdr_fn(ifn));
+  hread(ihfn, nrow, ncol, nband); // read header file for ENVI type 6 input file
   printf("nrow %d ncol %d infile %s\n", nrow, ncol, ifn);
 
   str ofn1(str(ifn) + str("_i.bin"));
