@@ -106,14 +106,20 @@ int main(int argc, char ** argv){
   int number_of_dates = date_strings.size(); // number of dates: hence number of bands per date
 
   parseHeaderFile(hfn, nr, nc, nb);
+  printf("nrow %zu ncol %zu nband %zu\n", nr, nc, nb);
   if(nb == 1){
     str IMG_FN_NEW(IMG_FN + str("_x3.bin")); // deal with the case of one band input.. use as r, g and b!
-    str cmd(str("cat ") + IMG_FN + str(" ") + IMG_FN + str(" ") + IMG_FN + str(" > ") + IMG_FN_NEW);
-    cout << cmd << endl;
-    system(cmd.c_str());
+    
+    if(!exists(IMG_FN_NEW)){
+      str cmd(str("cat ") + IMG_FN + str(" ") + IMG_FN + str(" ") + IMG_FN + str(" > ") + IMG_FN_NEW);
+      cout << cmd << endl;
+      system(cmd.c_str());
+    }
 
     str IMG_HDR_NEW(IMG_FN + str("_x3.hdr"));
-    writeHeader(IMG_HDR_NEW.c_str(), nr, nc, 3);
+    if(!exists(IMG_HDR_NEW)){
+      writeHeader(IMG_HDR_NEW.c_str(), nr, nc, 3);
+    }
     IMG_FN = IMG_FN_NEW;
     hfn = IMG_HDR_NEW;
     parseHeaderFile(hfn, nr, nc, nb); // reload the data
