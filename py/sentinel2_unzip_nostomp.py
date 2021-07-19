@@ -1,3 +1,7 @@
+'''
+20210718 unzip all sentinel-2 zip files in a folder, unzipping the contents into .SAFE folders..
+.. this is for the google-format data solution..
+'''
 import os
 import sys
 
