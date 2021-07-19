@@ -15,7 +15,11 @@ method to adapt to case where zip file does not contain a high-level folder..
 
     i.e.,:
 
-    python3 ~/path_to_scripts/sentinel2_extract_stack_all.py no_stomp=True'''
+    python3 ~/path_to_scripts/sentinel2_extract_stack_all.py no_stomp=True
+
+
+TO FINISH OFF THIS IMPLEMENTATION (GCLOUD DL) START BY LOOKING AT THE FILE:
+MTD_MSIL1C.xml     '''
 import os
 import sys
 args = sys.argv
@@ -25,6 +29,9 @@ pd = sep.join(__file__.split(sep)[:-1]) + sep
 
 all_args = list(set(args[1:]))
 no_stomp = ("no_stomp=True" in all_args) or ("nostomp" in all_args) # create a folder with the name of the zipfile (minus .zip, plus .SAFE
+
+if no_stomp:
+    print("NO STOMP MODE!!!!!")
 
 def err(m):
     print("Error: " + m); sys.exit(1)
@@ -58,7 +65,7 @@ for z in zips:
     
     print(safe)
     if not os.path.exists(safe):
-        cmd = "python3 " + extract + " " + z
+        cmd = "python3 " + extract + " " + z + " no_stomp=True"
         print(cmd)
         a = os.system(cmd)
 
