@@ -1,13 +1,30 @@
 '''A) extract Sentinel2, B) resample to 10m c) prefix bandnames with dates..
    D) stack everything!
 
-1. extract Sentinel-2 data from zip.. if not already extracted (check for .SAFE folder)'''
+1. extract Sentinel-2 data from zip.. if not already extracted (check for .SAFE folder)
+
+method:
+    python3 ~/path_to_scripts/sentinel2_extract_stack_all.py
+
+
+method to adapt to case where zip file does not contain a high-level folder..
+..so this script doesn't stomp itself when extracting!
+
+
+    * add parameter: no_stomp=True
+
+    i.e.,:
+
+    python3 ~/path_to_scripts/sentinel2_extract_stack_all.py no_stomp=True'''
 import os
 import sys
 args = sys.argv
 sep = os.path.sep
 exists = os.path.exists
 pd = sep.join(__file__.split(sep)[:-1]) + sep
+
+all_args = list(set(args[1:]))
+no_stomp = ("no_stomp=True" in all_args) or ("nostomp" in all_args) # create a folder with the name of the zipfile (minus .zip, plus .SAFE
 
 def err(m):
     print("Error: " + m); sys.exit(1)

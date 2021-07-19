@@ -1,7 +1,12 @@
 from misc import *
 
 if len(args) < 2:
-    err('python3 extract_sentinel2.py [input sentinel2 zip file name]')
+    err('python3 extract_sentinel2.py [input sentinel2 zip file name] # [optional parameter: no_stomp=True]')
+
+no_stomp = False
+if len(args) > 2:
+    if args[2] == 'no_stomp' or args[2] == 'no_stomp=True':
+        no_stomp = True
 
 # check gdal version
 info = os.popen("gdalinfo --version").read().strip().split(',')
@@ -19,7 +24,12 @@ if not os.path.exists(fn):
 df = fn[:-4] + '.SAFE'
 print(df)
 if not os.path.exists(df):
-    a = os.system('unzip ' + fn)
+    if no_stomp == False:
+        a = os.system('unzip ' + fn)
+    else:
+        a = os.system('mkdir -p ' + df)  # special no_stomp mode!! needed for using google cloud drive script 
+        a = os.system('unzip -d ' + df + ' ' + fn)
+        
     import time
     time.sleep(1.)
 
