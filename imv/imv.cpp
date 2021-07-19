@@ -18,7 +18,7 @@ std::string strp(const std::string& str, const std::string& whitespace = " \t\r\
 #define message "imv.cpp [infile] # [analysis window size] [n bands groundref, 1-hot encoded, at end of bsq stack] [bands per frame]"
 
 int main(int argc, char ** argv){
-  N_THREADS_IO = 8; // default number of threads for IO operations
+  N_THREADS_IO = 4; // default number of threads for IO operations
 
   int n_groundref = 0;
   init_mtx();
