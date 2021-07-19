@@ -19,7 +19,8 @@ method to adapt to case where zip file does not contain a high-level folder..
 
 
 TO FINISH OFF THIS IMPLEMENTATION (GCLOUD DL) START BY LOOKING AT THE FILE:
-MTD_MSIL1C.xml     '''
+MTD_MSIL1C.xml 
+manifest.safe'''
 import os
 import sys
 args = sys.argv
