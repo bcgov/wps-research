@@ -34,13 +34,18 @@ if not os.path.exists(df):
     time.sleep(1.)
 
 if not os.path.exists(df):
-    err('failed to unzip')
+    err('failed to unzip: cant find folder: ' + df)
 
-xml = os.popen('gdalinfo ' + fn + '  |  grep SUBDATA').readlines()
+print("try gdalinfo..")
+gdfn = fn[:-4] + '.SAFE/MTD_MSIL1C.xml' if no_stomp else fn
+xml = os.popen('gdalinfo ' + gdfn + '  |  grep SUBDATA').readlines()
+print("gdalinfo done.")
 
 cmds = []
 for line in xml:
+    found_line = False
     line = line.strip()
+    print('  ' + line)
     if len(line.split('.xml')) > 1:
         print('\t' + line)
         try:
@@ -50,11 +55,23 @@ for line in xml:
             ident = dfw[0].split('=')[1].split(':')[0]
             ds = ident + ':' + df + dfw[1]
             of = (df + dfw[1]).replace(terminator, ident).replace(':', '_') + '.bin'
+            print("DS: " + ds) 
+            sys.exit(1)
             cmd = ['gdal_translate', ds, '--config GDAL_NUM_THREADS 8', '-of ENVI', '-ot Float32', of]
+            print(cmd)
             cmds.append(' '.join(cmd))
             print('\t' + cmd)
+            found_line = True
         except Exception:
             pass
+
+    if not found_line:
+        # we must be in google mode?
+        print("in google mode?")
+        if no_stomp:
+            # must be in google mode!
+            print("definitely in google mode")
+            sys.exit(1)
 for cmd in cmds:
     # print(cmd)
     run(cmd)
