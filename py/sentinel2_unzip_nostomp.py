@@ -1,7 +1,5 @@
-'''
-20210718 unzip all sentinel-2 zip files in a folder, unzipping the contents into .SAFE folders..
-.. this is for the google-format data solution..
-'''
+'''20210718 unzip all sentinel-2 zip files in a folder, unzipping the contents into .SAFE folders..
+.. this is for the google-format data solution.. (s2 frames dl from google cloud platform..'''
 import os
 import sys
 
