@@ -7,7 +7,7 @@ float N_PERCENT; // histogram percentage to trim
 void p_percent(float * min, float * max, float * dd, size_t n){
   size_t i;
   priority_queue<float> q;
-  
+
   float mn = FLT_MAX;
   float mx = FLT_MIN;
   for0(i, n){
@@ -22,7 +22,7 @@ void p_percent(float * min, float * max, float * dd, size_t n){
   }
 
   int n_pct = (int)floor(.01 * N_PERCENT * ((float)q.size()));
-  
+
   for0(i, n_pct) q.pop();
   *max = q.top();
   while(q.size() > n_pct) q.pop();
@@ -40,7 +40,7 @@ int main(int argc, char ** argv){
   size_t nrow, ncol, nband, np, i, j, n;
   hread(hfn, nrow, ncol, nband); // read hdr
   np = nrow * ncol; // n input pix
-  
+
   float * dat = bread(fn, nrow, ncol, nband);
   float * out = falloc(np * nband);
   float * mn = falloc(nband);
@@ -49,11 +49,18 @@ int main(int argc, char ** argv){
   for0(i, nband) p_percent(&mn[i], &mx[i], &dat[i *np], np);
 
   int jx;
-  float jmn, jmx, r;
+  float jmn, jmx, r, d;
   for0(j, nband){
     jx = np * j;
-    jmn = mn[j]; jmx = mx[j]; r = 1. / (jmx - jmn);
-    for0(i, np) out[jx + i] = (dat[jx + i] - jmn) * r;
+    jmn = mn[j];
+    jmx = mx[j];
+    r = 1. / (jmx - jmn);
+    for0(i, np){
+      d = r * (dat[jx + i] - jmn);
+      if(d < 0.) d = 0.;
+      if(d > 1.) d = 1.;
+      out[jx + i] = d;
+    }
   }
 
   str ofn(fn + str("_ht.bin")); // output file
