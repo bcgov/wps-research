@@ -8,11 +8,15 @@ void p_percent(float * min, float * max, float * dd, size_t n){
   size_t i;
   priority_queue<float> q;
   
+  float mn = FLT_MAX;
+  float mx = FLT_MIN;
   for0(i, n){
     float d = dd[i];
     if(isinf(d) || isnan(d)){
     }
     else{
+      if(d < mn) mn = d;
+      if(d > mx) mx = d;
       q.push(d);
     }
   }
@@ -24,7 +28,7 @@ void p_percent(float * min, float * max, float * dd, size_t n){
   while(q.size() > n_pct) q.pop();
   *min = q.top();
 
-  printf("two_p n=%zu min %e max %e\n", n, *min, *max);
+  printf("mn %e mx %e two_p n=%zu min %e max %e\n",mn, mx, n, *min, *max);
 }
 
 int main(int argc, char ** argv){
