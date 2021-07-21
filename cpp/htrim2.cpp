@@ -1,4 +1,5 @@
-/* "non-proportional" histogram trimming, for hyperspectral imagery 20210618 */
+/* "non-proportional" histogram trimming, for hyperspectral imagery with scaling between 0 and 1.. 20210618 bugfix 20210721*/
+
 #include"misc.h"
 
 float N_PERCENT; // histogram percentage to trim
