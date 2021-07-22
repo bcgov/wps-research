@@ -31,7 +31,7 @@ if not os.path.exists(out):
 
 print("updating band names for " + out + "..")
 bi = 1
-cmd = [set_band_desc, out]
+cmd = ['python3', set_band_desc, out]
 for f in files:
     cmd += [str(bi), f]
     bi += 1
