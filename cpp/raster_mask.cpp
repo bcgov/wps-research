@@ -6,8 +6,10 @@ int main(int argc, char ** argv){
 
   size_t number_of_values = argc - 2;
   printf("number of values %d\n", number_of_values);
-  if(argc < 3) err("raster_mask.exe [input binary file] [value to select 1].. [value to select n]");
-
+  if(argc < 3){
+    printf("From a raster, generate a mask indicating where the raster matches the number (likely representing a class) values listed */
+    err("raster_mask.exe [input binary file] [value to select 1].. [value to select n]");
+  }
   str fn(argv[1]); // input file name
   str hfn(hdr_fn(fn)); // auto-detect header file name
   size_t nrow, ncol, nband, np, i, j, k, n, ip, jp, ix1, ix2; // variables
