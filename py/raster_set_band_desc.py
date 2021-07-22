@@ -18,6 +18,7 @@ def set_band_descriptions(filepath, bands):
     """
     ds = gdal.Open(filepath, gdal.GA_Update)
     for band, desc in bands:
+        print("Setting band description of band: " + str(band) + " to: " + desc)
         rb = ds.GetRasterBand(band)
         rb.SetDescription(desc)
     del ds
