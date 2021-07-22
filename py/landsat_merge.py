@@ -26,9 +26,9 @@ print(cmd)
 a = os.system(cmd)
 
 bi = 1
-cmd = [set_band_desc out]
+cmd = [set_band_desc, out]
 for f in files:
-    cmd += [str(bi) f]
+    cmd += [str(bi), f]
     bi += 1
 cmd = ' '.join(cmd)
 print(cmd)
