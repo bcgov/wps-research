@@ -1,5 +1,10 @@
 import os
 import sys
+
+def run(c):
+    print(c)
+    a = os.system(c)
+
 sep = os.path.sep
 pd = sep.join(__file__.split(sep)[:-1]) + sep
 set_band_desc = pd + 'raster_set_band_desc.py'
@@ -17,14 +22,14 @@ out = ("_".join(w)) + '_stack.tif'
 
 cmd = ['gdalbuildvrt', '-r', 'bilinear', '-resolution', 'highest', '-separate', vrt] + files
 cmd = ' '.join(cmd)
-print(cmd)
 
-a = os.system(cmd)
+if not os.path.exists(vrt):
+    run(cmd)
 
-cmd = ' '.join(['gdal_translate', vrt, out])
-print(cmd)
-a = os.system(cmd)
+if not os.path.exists(out):
+    run(' '.join(['gdal_translate', vrt, out]))
 
+print("updating band names for " + out + "..")
 bi = 1
 cmd = [set_band_desc, out]
 for f in files:
