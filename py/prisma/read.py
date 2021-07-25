@@ -43,11 +43,11 @@ def iterate(x, s="", parent=None):
 
 with h5py.File(filename, "r") as f:
     iterate(f)  # list all groups
-    print("fields available:\n", list(data_sets.keys()))
+    print("fields available:", list(data_sets.keys()))
     # swaths = f['HDFEOS']['SWATHS']
     want = ['SWIR_Cube', 'VNIR_Cube', 'Latitude', 'Longitude',
             'Cw_Swir_Matrix', 'Cw_Vnir_Matrix', 'Fwhm_Swir_Matrix', 'Fwhm_Vnir_Matrix']
-    print("fields selected:\n", str(want))
+    print("fields selected:", str(want))
     for w in want:
         if w not in data_sets: err("key not found: " + str(w))
 
