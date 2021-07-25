@@ -8,6 +8,7 @@ def err(m):
     print("Error: " + str(m)); sys.exit(1)
 
 def write_hdr(hfn, samples, lines, bands):
+    print('+w', hfn)
     lines = ['ENVI',
              'samples = ' + str(samples),
              'lines = ' + str(lines),
@@ -66,12 +67,11 @@ with h5py.File(filename, "r") as f:
         x = x[()]
         data = np.array(x)
         N = len(data.shape) # how many dimensions? 3 is cube. 2 is 1-band..
+        nrow, ncol, nband = None, None, None # image dimensions
         fn = fn_base + '_' + (dsn.replace(' ', '_')) + '.bin'
         hn = fn[:-4] + '.hdr'
-        print('+w', fn)
-        # print('\t', dsn, dsp, data.shape)
+        print('+w', fn) # print('\t', dsn, dsp, data.shape)
         o_f = open(fn, 'wb')
-        
         dt = '>f4' # default data type to write! always float32, byte order 0
         if N == 3:
             nband = data.shape[1]
@@ -87,9 +87,7 @@ with h5py.File(filename, "r") as f:
         if N == 3:
             print("\tclosing file..")
         o_f.close()
-
-        print('+w',hn)
-
+        write_hdr(hn, ncol, nrow, bands)
 
     '''
 
