@@ -87,7 +87,7 @@ with h5py.File(filename, "r") as f:
         if N == 3:
             print("\tclosing file..")
         o_f.close()
-        write_hdr(hn, ncol, nrow, bands)
+        write_hdr(hn, ncol, nrow, nband)
 
     '''
 
