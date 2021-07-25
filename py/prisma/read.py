@@ -46,10 +46,10 @@ def write_hdr(hfn, samples, lines, bands, dsn=None):
                     if rgb_d[j] is None or di[j] < rgb_d[j]:
                         rgb_d[j] = di[j]
                         rgb_i[j] = i
-                        print("better", i, j, w, di[j])
+                        # print("better", i, j, w, di[j])
                     else:
-                        print("not better")
-                        print("\t", i, j, w, rgb_t[j], rgb_i[j], rgb_d[j], di[j])
+                        # print("not better")
+                        # print("\t", i, j, w, rgb_t[j], rgb_i[j], rgb_d[j], di[j])
         rgb_i = [x + 1 for x in rgb_i] # 1 index
 
     w_len = ': ' if (SWIR or VNIR) else ''
