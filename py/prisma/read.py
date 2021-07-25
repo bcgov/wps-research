@@ -77,7 +77,7 @@ with h5py.File(filename, "r") as f:
             nband = data.shape[1]
             nrow, ncol = data[:,0,:].shape
             for i in range(nband):
-                print("\twriting band", str(i + 1))
+                # print("\twriting band", str(i + 1))
                 data[:,i,:].astype(np.float32).tofile(o_f, '', dt)
         elif N == 2:
             nrow, ncol = data.shape
