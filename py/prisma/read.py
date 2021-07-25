@@ -18,6 +18,13 @@ def write_hdr(hfn, samples, lines, bands):
              'data type = 4',
              'interleave = bsq',
              'byte order = 0']
+    
+    lines.append('band names = {Band 1') # }')
+    if bands > 1:
+        for i in range(1, bands):
+            lines[-1] += ','
+            lines.append('Band ' + str(i + 1))
+    lines[-1] += '}'
     open(hfn, 'wb').write('\n'.join(lines).encode())
 
 filename = sys.argv[1]
