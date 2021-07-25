@@ -1,4 +1,4 @@
-'''script for reading primsa data. in progress.'''
+'''Script for reading primsa data. Tested on L2d 20210725'''
 import numpy as np
 import h5py
 import sys
