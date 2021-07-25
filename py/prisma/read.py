@@ -8,6 +8,7 @@ def err(m):
     print("Error: " + str(m)); sys.exit(1)
 
 def write_hdr(hfn, samples, lines, bands):
+    bands = 1 if bands is None else bands
     print('+w', hfn)
     lines = ['ENVI',
              'samples = ' + str(samples),
@@ -17,9 +18,8 @@ def write_hdr(hfn, samples, lines, bands):
              'file type = ENVI Standard',
              'data type = 4',
              'interleave = bsq',
-             'byte order = 0']
-    
-    lines.append('band names = {Band 1') # }')
+             'byte order = 0',
+             'band names = {Band 1']
     if bands > 1:
         for i in range(1, bands):
             lines[-1] += ','
@@ -94,44 +94,3 @@ with h5py.File(filename, "r") as f:
             # print("\tclosing file..")
         o_f.close()
         write_hdr(hn, ncol, nrow, nband)
-
-    '''
-
-
-    sys.exit(1)
-
-    y = np.array(f['HDFEOS']['SWATHS']['PRS_L1_HCO']['Data Fields']['SWIR_Cube'][()])
-    nband = y.shape[1]
-    nrow, ncol = y[:,0,:].shape
-    print("nrow", nrow, "ncol", ncol, "nband", nband)
-
-    dt = '>f4'
-    o_f = open("swir.bin", "wb")
-    for i in range(nband):
-        print(i)
-        y[:,i,:].astype(np.float32).tofile(o_f, '', dt)
-    o_f.close()
-    '''
-
-    #print(f['Info']['Header']['FrameNumber']) # keys())
-'''
-Keys: <KeysViewHDF5 ['HDFEOS', 'HDFEOS INFORMATION', 'Info', 'KDP_AUX']>
-HDFEOS -> <KeysViewHDF5 ['ADDITIONAL', 'SWATHS']>
-HDFEOS INFORMATION -> <KeysViewHDF5 ['StructMetadata.0']>
-Info -> <KeysViewHDF5 ['Ancillary', 'Header', 'Housekeeping']>
-KDP_AUX -> <KeysViewHDF5 ['Cw_Swir_Matrix', 'Cw_Vnir_Matrix', 'Fwhm_Swir_Matrix', 'Fwhm_Vnir_Matrix', 'LOS_Pan', 'LOS_Swir', 'LOS_Vnir']>
-'''
-
-# type "<u4"  : 4 byte unsigned float, little endian..
-
-'''
-________ <HDF5 group "/HDFEOS/SWATHS/PRS_L1_HCO/Data Fields" (8 members)>
-__________ <HDF5 dataset "Cloud_Mask": shape (1000, 1000), type "|u1">
-__________ <HDF5 dataset "FrameNumber": shape (1000,), type "<u4">
-__________ <HDF5 dataset "LandCover_Mask": shape (1000, 1000), type "|u1">
-__________ <HDF5 dataset "SWIR_Cube": shape (1000, 173, 1000), type "<u2">
-__________ <HDF5 dataset "SWIR_PIXEL_SAT_ERR_MATRIX": shape (1000, 173, 1000), type "|u1">
-__________ <HDF5 dataset "SunGlint_Mask": shape (1000, 1000), type "|u1">
-__________ <HDF5 dataset "VNIR_Cube": shape (1000, 66, 1000), type "<u2">
-__________ <HDF5 dataset "VNIR_PIXEL_SAT_ERR_MATRIX": shape (1000, 66, 1000), type "|u1">
-'''
