@@ -1,5 +1,9 @@
-'''Script for reading primsa data. Tested on L2d 20210725'''
+'''Script for reading primsa data. Tested on L2d 20210725
+
+vnir best fit: r,g,b=37,49,58} '''
+
 import numpy as np
+import math
 import h5py
 import sys
 import os
@@ -27,16 +31,33 @@ print(spec.keys())
 def write_hdr(hfn, samples, lines, bands, dsn=None):
     # WL_VNIR[nm] WL_SWIR[nm] # SWIR_Cube VNIR_Cube
     bands = 1 if bands is None else bands
-    
+    rgb_d = None # rgb band indexes from 1
     SWIR = (dsn == 'SWIR_Cube')
     VNIR = (dsn == 'VNIR_Cube')
+    if VNIR:
+        # 630 nm red, 532 nm green, 465 nm blue
+        rgb_t, rgb_i, rgb_d = [630, 532, 465], [0,0,0], [None, None, None]
+        w_l = spec['WL_VNIR[nm]']
+        for i in range(len(w_l)):
+            if w_l[i] != '':
+                w = int(round(float(w_l[i])))
+                di = [abs(rgb_t[j] - w) for j in range(3)]
+                for j in range(3):
+                    if rgb_d[j] is None or di[j] < rgb_d[j]:
+                        rgb_d[j] = di[j]
+                        rgb_i[j] = i
+                        print("better", i, j, w, di[j])
+                    else:
+                        print("not better")
+                        print("\t", i, j, w, rgb_t[j], rgb_i[j], rgb_d[j], di[j])
+        rgb_i = [x + 1 for x in rgb_i] # 1 index
 
     w_len = ': ' if (SWIR or VNIR) else ''
     if (SWIR or VNIR):
         w_len += str(int(round(float(spec['WL_SWIR[nm]'][0] if SWIR else spec['WL_VNIR[nm]'][0])))) + ' nm'
 
     print('+w', hfn)
-    lines = ['ENVI',
+    lines = ['ENVI' + ('\ndescription = {r,g,b=' + ','.join([str(x) for x in rgb_i]) + '}') if VNIR else '',
              'samples = ' + str(samples),
              'lines = ' + str(lines),
              'bands = ' + str(bands),
