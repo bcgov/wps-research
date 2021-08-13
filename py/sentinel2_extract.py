@@ -1,4 +1,9 @@
 from misc import *
+args = sys.argv
+sep = os.path.sep
+exists = os.path.exists
+pd = sep.join(__file__.split(sep)[:-1]) + sep
+ehc = pd + 'envi_header_cleanup.py' # envi header cleanup command.. makes file open in "imv"
 
 if len(args) < 2:
     err('python3 extract_sentinel2.py [input sentinel2 zip file name] # [optional parameter: no_stomp=True]')
@@ -59,6 +64,9 @@ for line in xml:
             # sys.exit(1)
             cmd = ['gdal_translate', ds, '--config GDAL_NUM_THREADS 8', '-of ENVI', '-ot Float32', of]
             # print(cmd)
+            cmds.append(' '.join(cmd))
+
+            cmd = ['python3', ehc, of[:-4] + '.hdr']
             cmds.append(' '.join(cmd))
             # print('\t' + cmd)
             found_line = True
