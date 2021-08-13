@@ -56,7 +56,7 @@ for line in xml:
             ds = ident + ':' + df + dfw[1]
             of = (df + dfw[1]).replace(terminator, ident).replace(':', '_') + '.bin'
             print("DS: " + ds) 
-            sys.exit(1)
+            # sys.exit(1)
             cmd = ['gdal_translate', ds, '--config GDAL_NUM_THREADS 8', '-of ENVI', '-ot Float32', of]
             print(cmd)
             cmds.append(' '.join(cmd))
