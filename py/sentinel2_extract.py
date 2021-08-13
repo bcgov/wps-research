@@ -45,9 +45,9 @@ cmds = []
 for line in xml:
     found_line = False
     line = line.strip()
-    print('  ' + line)
+    #print('  ' + line)
     if len(line.split('.xml')) > 1:
-        print('\t' + line)
+        #print('\t' + line)
         try:
             df = df.split(os.path.sep)[-1]
             dfw = line.split(df)
@@ -55,12 +55,12 @@ for line in xml:
             ident = dfw[0].split('=')[1].split(':')[0]
             ds = ident + ':' + df + dfw[1]
             of = (df + dfw[1]).replace(terminator, ident).replace(':', '_') + '.bin'
-            print("DS: " + ds) 
+            # print("DS: " + ds) 
             # sys.exit(1)
             cmd = ['gdal_translate', ds, '--config GDAL_NUM_THREADS 8', '-of ENVI', '-ot Float32', of]
-            print(cmd)
+            # print(cmd)
             cmds.append(' '.join(cmd))
-            print('\t' + cmd)
+            # print('\t' + cmd)
             found_line = True
         except Exception:
             pass
