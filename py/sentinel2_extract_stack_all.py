@@ -59,8 +59,8 @@ for z in zips:
         x.append(z) # don't have a rule for sorting, if not S2!
     else:
         x.append([w[2:], z])
-''' [['20190210T200551', 'N0211', 'R128', 'T09VUE', '20190210T222054.zip'],
-      'S2A_MSIL2A_20190210T200551_N0211_R128_T09VUE_20190210T222054.zip'] '''
+''' e.g. [['20190210T200551', 'N0211', 'R128', 'T09VUE', '20190210T222054.zip'],
+           'S2A_MSIL2A_20190210T200551_N0211_R128_T09VUE_20190210T222054.zip'] '''
 x.sort()
 zips = [i[1] for i in x]  # finally, these files should be sorted by date..
 
@@ -73,6 +73,11 @@ for z in zips:
         print(cmd)
         a = os.system(cmd)
 
+    ''' ls -1 *.bin
+        SENTINEL2_L2A_10m_EPSG_32610.bin
+        SENTINEL2_L2A_20m_EPSG_32610.bin
+        SENTINEL2_L2A_60m_EPSG_32610.bin
+        SENTINEL2_L2A_TCI_EPSG_32610.bin'''
     bins = [x.strip() for x in os.popen("ls -1 " + safe + os.path.sep + "*m_EPSG_*.bin").readlines()] # don't pull the TCI true colour image. Already covered in 10m
 
     if len(bins) != 3:
