@@ -48,7 +48,8 @@ print(cmd)
 xml = os.popen(cmd).readlines()
 # print("gdalinfo done.")
 
-cmds = []
+cmds = []  # commands to run after this section
+data_files = []
 for line in xml:
     found_line = False
     line = line.strip()
@@ -68,6 +69,7 @@ for line in xml:
 
             cmd = ' '.join(['gdal_translate', ds, '--config GDAL_NUM_THREADS 8', '-of ENVI', '-ot Float32', of])
             print('\t' + cmd)
+            data_files.append(cmd)
             if not os.path.exists(of):  # don't extract if we did already!
                 cmds.append(cmd)
 
