@@ -177,5 +177,8 @@ if True:
             shn,
             dp60]
 
+    
     cmd = ' '.join(cmd)
-    run(cmd)
+    d = os.popen(cmd).readlines()[1].strip().split()[-1][:-4] + '.bin'
+    print("stack resampled to 10m:")
+    print("\t" + d)
