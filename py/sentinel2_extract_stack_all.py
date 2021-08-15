@@ -69,7 +69,7 @@ for z in zips:
 
     print(safe)
     if not os.path.exists(safe):
-        cmd = "python3 " + extract + " " + z + " no_stomp=True"
+        cmd = "python3 " + extract + " " + z + (" no_stomp=True" if no_stomp else "")
         print(cmd)
         a = os.system(cmd)
 
