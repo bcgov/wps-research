@@ -50,8 +50,8 @@ xml = os.popen(cmd).readlines()
 
 cmds = []  # commands to run after this section
 data_files = []
+found_line = False
 for line in xml:
-    found_line = False
     line = line.strip()
     #print('  ' + line)
     if len(line.split('.xml')) > 1:
