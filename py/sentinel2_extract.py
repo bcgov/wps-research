@@ -26,8 +26,8 @@ if fn[-4:] != '.zip':
 if not os.path.exists(fn):
     err('could not find input file')
 
-df = fn[:-4] + '.SAFE'
-print(df)
+df = fn[:-4] + '.SAFE'  # extracted data folder
+# print(df)
 if not os.path.exists(df):
     if no_stomp == False:
         a = os.system('unzip ' + fn)
@@ -41,10 +41,12 @@ if not os.path.exists(df):
 if not os.path.exists(df):
     err('failed to unzip: cant find folder: ' + df)
 
-print("try gdalinfo..")
+# print("try gdalinfo..")
 gdfn = fn[:-4] + '.SAFE/MTD_MSIL1C.xml' if no_stomp else fn
-xml = os.popen('gdalinfo ' + gdfn + '  |  grep SUBDATA').readlines()
-print("gdalinfo done.")
+cmd = 'gdalinfo ' + gdfn + ' | grep SUBDATA'
+print(cmd)
+xml = os.popen(cmd).readlines()
+# print("gdalinfo done.")
 
 cmds = []
 for line in xml:
@@ -55,6 +57,7 @@ for line in xml:
         #print('\t' + line)
         try:
             df = df.split(os.path.sep)[-1]
+            safe = df # .SAFE directory 
             dfw = line.split(df)
             terminator = dfw[-1].strip(os.path.sep).split(':')[0]
             ident = dfw[0].split('=')[1].split(':')[0]
@@ -62,24 +65,31 @@ for line in xml:
             of = (df + dfw[1]).replace(terminator, ident).replace(':', '_') + '.bin'
             # print("DS: " + ds) 
             # sys.exit(1)
-            cmd = ['gdal_translate', ds, '--config GDAL_NUM_THREADS 8', '-of ENVI', '-ot Float32', of]
-            # print(cmd)
-            cmds.append(' '.join(cmd))
 
-            cmd = ['python3', ehc, of[:-4] + '.hdr']
-            cmds.append(' '.join(cmd))
-            # print('\t' + cmd)
-            found_line = True
+            cmd = ' '.join(['gdal_translate', ds, '--config GDAL_NUM_THREADS 8', '-of ENVI', '-ot Float32', of])
+            print('\t' + cmd)
+            if not os.path.exists(of):  # don't extract if we did already!
+                cmds.append(cmd)
+
+            hfn = of[:-4] + '.hdr'
+            cmd = ' '.join(['python3', ehc, hfn]) # of[:-4] + '.hdr']
+            print('\t' + cmd)
+            if not os.path.exists(hfn):
+                 cmds.append(cmd)
+                # print('\t' + cmd)
+
+            found_line = True  # what line were we looking for?
         except Exception:
             pass
 
-    if not found_line:
-        # we must be in google mode?
-        print("in google mode?")
-        if no_stomp:
-            # must be in google mode!
-            print("definitely in google mode")
-            sys.exit(1)
+if not found_line:
+    # we must be in google mode?
+    # print("in google mode?")
+    if no_stomp:
+        # must be in google mode!
+        print("definitely in google mode")
+        sys.exit(1)
+
 for cmd in cmds:
     # print(cmd)
     run(cmd)
