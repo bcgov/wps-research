@@ -18,7 +18,7 @@ info = os.popen("gdalinfo --version").read().strip().split(',')
 info = info[0].split()[1].replace('.', '')
 if int(info) < 223:
     err('GDAL version 2.2.3 or higher required')
-    
+
 fn = args[1]
 if fn[-4:] != '.zip':
     err('expected zip format input')
@@ -32,9 +32,9 @@ if not os.path.exists(df):
     if no_stomp == False:
         a = os.system('unzip ' + fn)
     else:
-        a = os.system('mkdir -p ' + df)  # special no_stomp mode!! needed for using google cloud drive script 
+        a = os.system('mkdir -p ' + df)  # special no_stomp mode!! needed for using google cloud drive script
         a = os.system('unzip -d ' + df + ' ' + fn)
-        
+
     import time
     time.sleep(1.)
 
@@ -58,13 +58,13 @@ for line in xml:
         #print('\t' + line)
         try:
             df = df.split(os.path.sep)[-1]
-            safe = df # .SAFE directory 
+            safe = df # .SAFE directory
             dfw = line.split(df)
             terminator = dfw[-1].strip(os.path.sep).split(':')[0]
             ident = dfw[0].split('=')[1].split(':')[0]
             ds = ident + ':' + df + dfw[1]
             of = (df + dfw[1]).replace(terminator, ident).replace(':', '_') + '.bin'
-            # print("DS: " + ds) 
+            # print("DS: " + ds)
             # sys.exit(1)
 
             cmd = ' '.join(['gdal_translate', ds, '--config GDAL_NUM_THREADS 8', '-of ENVI', '-ot Float32', of])
@@ -98,7 +98,7 @@ for cmd in cmds:
     # print(cmd)
     run(cmd)
 
-'''e.g. outputs: 
+'''e.g. outputs:
 S2A_MSIL1C_20191129T190741_N0208_R013_T10UFB_20191129T204451.SAFE/MTD_MSIL1C.xml:10m:EPSG_32610
 S2A_MSIL1C_20191129T190741_N0208_R013_T10UFB_20191129T204451.SAFE/MTD_MSIL1C.xml:20m:EPSG_32610
 S2A_MSIL1C_20191129T190741_N0208_R013_T10UFB_20191129T204451.SAFE/MTD_MSIL1C.xml:60m:EPSG_32610
@@ -115,10 +115,10 @@ if True:
 
     #for b in bins:
     #    print('  ' + b) # print('  ' + b.split(sep)[-1])
-    
+
     # names for files resampled to 10m
     m20r, m60r = m20[:-4] + '_10m.bin', m60[:-4] + '_10m.bin'
-    
+
     def resample(src, ref, dst): # resample src onto ref, w output file dst
         cmd = ['python3 ' + pd + 'raster_project_onto.py',
            src, # source image
@@ -129,12 +129,12 @@ if True:
         if not exists(dst):
             run(cmd)
 
-    resample(m20, m10, m20r) # resample the 20m 
+    resample(m20, m10, m20r) # resample the 20m
     resample(m60, m10, m60r) # resample the 60m
 
     # now do the stacking..
     print(m10)
-     
+
     sfn = safe + sep + m10.split(sep)[-1].replace("_10m", "")[:-4] + '_10m.bin'  # stacked file name..
     print(sfn)
 
@@ -142,7 +142,7 @@ if True:
             m10,
             m20r,
             m60r,
-            '>', 
+            '>',
             sfn] # cat bands together, don't forget to "cat" the header files after..
 
     cmd = ' '.join(cmd)
@@ -162,11 +162,11 @@ if True:
     cmd = ['python3', # envi_header_cat.py is almost like a reverse-polish notation. Have to put the "first thing" on the back..
            pd + 'envi_header_cat.py',
            m20r[:-4] + '.hdr',
-           m10[:-4] + '.hdr', 
+           m10[:-4] + '.hdr',
            shn,
            dp20,
            dp10]
-    
+
     cmd = ' '.join(cmd)
     run(cmd)
 
@@ -177,7 +177,6 @@ if True:
             shn,
             dp60]
 
-    
     cmd = ' '.join(cmd)
     d = os.popen(cmd).readlines()[1].strip().split()[-1][:-4] + '.bin'
     print("stack resampled to 10m:")
