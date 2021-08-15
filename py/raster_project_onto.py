@@ -62,6 +62,9 @@ except:
         "Please install with e.g., ./configure --with-python" +
         "Or, google: pip install gdal python")
 
+# use multithread option
+gdal.SetConfigOption('GDAL_NUM_THREADS', '4')  # 4 is probably SSD limit of write channels..
+
 # source image
 src = gdal.Open(src_filename, gdalconst.GA_ReadOnly)
 src_proj, src_geotrans = src.GetProjection(), src.GetGeoTransform()
