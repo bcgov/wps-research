@@ -19,7 +19,7 @@ method to adapt to case where zip file does not contain a high-level folder..
 
 
 TO FINISH OFF THIS IMPLEMENTATION (GCLOUD DL) START BY LOOKING AT THE FILE:
-MTD_MSIL1C.xml 
+MTD_MSIL1C.xml
 manifest.safe
 
 Need xml reader such as:
@@ -66,7 +66,7 @@ zips = [i[1] for i in x]  # finally, these files should be sorted by date..
 
 for z in zips:
     safe = z[:-4] + ".SAFE" # extracted location..
-    
+
     print(safe)
     if not os.path.exists(safe):
         cmd = "python3 " + extract + " " + z + " no_stomp=True"
@@ -90,25 +90,25 @@ for z in zips:
 
     #for b in bins:
     #    print('  ' + b) # print('  ' + b.split(sep)[-1])
-    
+
     # names for files resampled to 10m
     m20r, m60r = m20[:-4] + '_10m.bin', m60[:-4] + '_10m.bin'
-    
+
     def resample(src, ref, dst): # resample src onto ref, w output file dst
         cmd = ['python3 ' + pd + 'raster_project_onto.py',
            src, # source image
            ref, # project onto
            dst] # result image
- 
+
         if not exists(dst):
             run(' '.join(cmd))
 
-    resample(m20, m10, m20r) # resample the 20m 
+    resample(m20, m10, m20r) # resample the 20m
     resample(m60, m10, m60r) # resample the 60m
 
     # now do the stacking..
     print(m10)
-     
+
     sfn = safe + sep + m10.split(sep)[-1].replace("_10m", "")[:-4] + '_10m.bin'  # stacked file name..
     print(sfn)
 
@@ -116,7 +116,7 @@ for z in zips:
             m10,
             m20r,
             m60r,
-            '>', 
+            '>',
             sfn] # cat bands together, don't forget to "cat" the header files after..
 
     if not exists(sfn):
@@ -134,11 +134,11 @@ for z in zips:
     cmd = ['python3', # envi_header_cat.py is almost like a reverse-polish notation. Have to put the "first thing" on the back..
            pd + 'envi_header_cat.py',
            m20r[:-4] + '.hdr',
-           m10[:-4] + '.hdr', 
+           m10[:-4] + '.hdr',
            shn,
            dp20,
            dp10]
-    
+
     cmd = ' '.join(cmd)
     run(cmd)
 
