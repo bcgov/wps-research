@@ -49,9 +49,9 @@ xml = os.popen(cmd).readlines()
 # print("gdalinfo done.")
 
 cmds = []  # commands to run after this section
-data_files = []
-found_line = False
+bins = []
 for line in xml:
+    found_line = False
     line = line.strip()
     #print('  ' + line)
     if len(line.split('.xml')) > 1:
@@ -69,7 +69,7 @@ for line in xml:
 
             cmd = ' '.join(['gdal_translate', ds, '--config GDAL_NUM_THREADS 8', '-of ENVI', '-ot Float32', of])
             print('\t' + cmd)
-            data_files.append(cmd)
+            bins.append(of)
             if not os.path.exists(of):  # don't extract if we did already!
                 cmds.append(cmd)
 
@@ -92,6 +92,8 @@ if not found_line:
         print("definitely in google mode")
         sys.exit(1)
 
+print(bins)
+bins = bins[0:3]
 for cmd in cmds:
     # print(cmd)
     run(cmd)
@@ -103,3 +105,79 @@ S2A_MSIL1C_20191129T190741_N0208_R013_T10UFB_20191129T204451.SAFE/MTD_MSIL1C.xml
 S2A_MSIL1C_20191129T190741_N0208_R013_T10UFB_20191129T204451.SAFE/MTD_MSIL1C.xml:TCI:EPSG_32610
 '''
 # gdal_translate SENT--roi_x_y=INEL2_L1C:S2A_MSIL1C_20191129T190741_N0208_R013_T10UFB_20191129T204451.SAFE/MTD_MSIL1C.xml:10m:EPSG_32610   --config GDAL_NUM_THREADS 32 -of ENVI -ot Float32 out.bin
+
+# resample everything to 10m:
+if True:
+    m10, m20, m60 = bins
+    print("  10m:", m10)
+    print("  20m:", m20)
+    print("  60m:", m60)
+
+    #for b in bins:
+    #    print('  ' + b) # print('  ' + b.split(sep)[-1])
+
+    # names for files resampled to 10m
+    m20r, m60r = m20[:-4] + '_10m.bin', m60[:-4] + '_10m.bin'
+
+    def resample(src, ref, dst): # resample src onto ref, w output file dst
+        cmd = ['python3 ' + pd + 'raster_project_onto.py',
+           src, # source image
+           ref, # project onto
+           dst] # result image
+        cmd = ' '.join(cmd)
+        print(cmd)
+        if not exists(dst):
+            run(cmd)
+
+    resample(m20, m10, m20r) # resample the 20m
+    resample(m60, m10, m60r) # resample the 60m
+
+    # now do the stacking..
+    print(m10)
+
+    sfn = safe + sep + m10.split(sep)[-1].replace("_10m", "")[:-4] + '_10m.bin'  # stacked file name..
+    print(sfn)
+
+    cmd = ['cat',
+            m10,
+            m20r,
+            m60r,
+            '>',
+            sfn] # cat bands together, don't forget to "cat" the header files after..
+
+    cmd = ' '.join(cmd)
+    print(cmd)
+    if not exists(sfn):
+        run(cmd)
+
+    # add a date prefix
+    dp = '"' + safe.split('T')[0].strip().split('_')[-1].strip()
+    dp10 = dp + ' 10m: "'
+    dp20 = dp + ' 20m: "'
+    dp60 = dp + ' 60m: "'
+
+    # now "cat" the header files together
+    shn = sfn[:-4] + '.hdr' # header file name for stack
+
+    cmd = ['python3', # envi_header_cat.py is almost like a reverse-polish notation. Have to put the "first thing" on the back..
+           pd + 'envi_header_cat.py',
+           m20r[:-4] + '.hdr',
+           m10[:-4] + '.hdr',
+           shn,
+           dp20,
+           dp10]
+
+    cmd = ' '.join(cmd)
+    run(cmd)
+
+    cmd = ['python3',
+            pd + 'envi_header_cat.py',
+            m60r[:-4] + '.hdr',
+            shn[:-4] + '.hdr',
+            shn,
+            dp60]
+
+    cmd = ' '.join(cmd)
+    d = os.popen(cmd).readlines()[1].strip().split()[-1][:-4] + '.bin'
+    print("stack resampled to 10m:")
+    print("\t" + d)
