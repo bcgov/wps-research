@@ -13,7 +13,7 @@ def err(m):
     print("Error: " + str(m)); sys.exit(1)
 
 if len(args) < 2:
-    err("prisma/read.py [input PRISMA hdf5 file]")
+    err("usage:\n\tprisma/read.py [input PRISMA hdf5 file]")
 
 def read_csv(f):
     lines = [x.strip().split(',') for x in open(f).read().strip().split('\n')]
