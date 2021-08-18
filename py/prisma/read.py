@@ -81,7 +81,7 @@ def write_hdr(hfn, samples, lines, bands, dsn=None):
     open(hfn, 'wb').write('\n'.join(lines).encode())
 
 filename = sys.argv[1]
-if filename[-3:] != 'he5': err("unexpected filename")
+if filename[-3:] != 'he5': err("unexpected filename: .h35 expected")
 fn_base = filename[:-4] # print(fn_base) 
 datasets, data_sets = [], {}
 
