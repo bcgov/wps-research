@@ -8,11 +8,9 @@ int main(int argc, char ** argv){
 
   str fn(argv[1]); // input file name
   str hfn(hdr_fn(fn)); // auto-detect header file name
-  size_t nrow, ncol, nband, np, i, j, k, n, ix; // variables
+  size_t nrow, ncol, nband, np, i, j, k, n, ix, jx; // variables
   hread(hfn, nrow, ncol, nband); // read header
   np = nrow * ncol; // number of input pix
-  n = (size_t) atoi(argv[2]);
-  printf("multilook factor: %zu\n", n); // read mlk factor
   size_t nf = np * nband;
 
   float * dat = bread(fn, nrow, ncol, nband); // load floats to array
@@ -50,12 +48,12 @@ int main(int argc, char ** argv){
   str ofn(fn + str("_norm.bin"));
   str ohfn(fn + str("_norm.hdr"));
 
-  printf("nr2 %zu nc2 %zu nband %zu\n", nrow2, ncol2, nband);
+  printf("nr %zu nc %zu nband %zu\n", nrow, ncol, nband);
   hwrite(ohfn, nrow, ncol, nband); // write output header
 
   FILE * f = fopen(ofn.c_str(), "wb");
   if(!f) err("failed to open output file");
-  for0(i, nf2) fwrite(&dat2[i], sizeof(float), 1, f); // write data
+  for0(i, nf) fwrite(&dat2[i], sizeof(float), 1, f); // write data
 
   fclose(f);
   free(dat);
