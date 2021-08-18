@@ -1,5 +1,4 @@
 '''Script for reading primsa data. Tested on L2d 20210725
-
 vnir best fit: r,g,b=37,49,58} '''
 
 import numpy as np
@@ -50,6 +49,7 @@ def write_hdr(hfn, samples, lines, bands, dsn=None):
                     else:
                         # print("not better")
                         # print("\t", i, j, w, rgb_t[j], rgb_i[j], rgb_d[j], di[j])
+                        pass
         rgb_i = [x + 1 for x in rgb_i] # 1 index
 
     w_len = ': ' if (SWIR or VNIR) else ''
