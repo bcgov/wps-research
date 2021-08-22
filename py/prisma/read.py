@@ -1,17 +1,19 @@
 '''Script for reading primsa data. Tested on L2d 20210725
-
 vnir best fit: r,g,b=37,49,58} '''
-
 import numpy as np
 import math
 import h5py
 import sys
 import os
+args = sys.argv
 sep = os.path.sep
 pd = sep.join(__file__.split(sep)[:-1]) + sep # present directory
 
 def err(m):
     print("Error: " + str(m)); sys.exit(1)
+
+if len(args) < 2:
+    err("usage:\n\tprisma/read.py [input PRISMA hdf5 file]")
 
 def read_csv(f):
     lines = [x.strip().split(',') for x in open(f).read().strip().split('\n')]
@@ -50,6 +52,7 @@ def write_hdr(hfn, samples, lines, bands, dsn=None):
                     else:
                         # print("not better")
                         # print("\t", i, j, w, rgb_t[j], rgb_i[j], rgb_d[j], di[j])
+                        pass
         rgb_i = [x + 1 for x in rgb_i] # 1 index
 
     w_len = ': ' if (SWIR or VNIR) else ''
@@ -78,7 +81,7 @@ def write_hdr(hfn, samples, lines, bands, dsn=None):
     open(hfn, 'wb').write('\n'.join(lines).encode())
 
 filename = sys.argv[1]
-if filename[-3:] != 'he5': err("unexpected filename")
+if filename[-3:] != 'he5': err("unexpected filename: .h35 expected")
 fn_base = filename[:-4] # print(fn_base) 
 datasets, data_sets = [], {}
 

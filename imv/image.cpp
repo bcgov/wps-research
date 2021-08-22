@@ -40,6 +40,13 @@ void myImg::init(const char * filename, size_t nrow, size_t ncol, size_t nb){
   for(i = 0; i < 3; i++){
     (*myBi)[i]=i;
   }
+/*
+  if(nb == 66){
+    (*myBi)[0] = 36;
+    (*myBi)[1] = 48;
+    (*myBi)[2] = 57;
+  }
+*/
   //set default band visualization to 1,2,3;
 }
 myImg::myImg(myImg * other){
