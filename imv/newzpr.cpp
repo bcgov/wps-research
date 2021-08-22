@@ -612,6 +612,30 @@ void zprInstance::processString(){
     printf("GOT HERE !!!!!!!!!!!\n");
   }
 
+  // m string: overwrite NAN under analysis window..
+  if(strcmpz(console_string, "m\0") && console_string[1] == '\0'){
+    // big-data resilient read!
+    SA<float> * dat3 = SUB;
+    if(true){
+      nan_sub_np = NWIN * NWIN; //IMG_NR * IMG_NC;
+      nan_sub_nb = IMG_NB;
+      nan_sub_mm = NWIN; // SUB_MM;
+      nan_sub_i_start = SUB_START_I + WIN_I; //i_start;
+      nan_sub_j_start = SUB_START_J + WIN_J; //j_start;
+      nan_sub_nc = IMG_NC; //nc;
+      nan_sub_dat3 = &((*dat3)[0]); // don't think this param is USED..
+      nan_sub_infile = IMG_FN; //string(infile);
+      nan_sub_i = SUB_I; // I, J coordinates of the image subsection we extracted
+      nan_sub_j = SUB_J;
+      parfor(0, IMG_NB, nan_sub, N_THREADS_IO);
+    }
+    //SUB_MYIMG->initFrom(dat3, SUB_MM, SUB_MM, IMG_NB);
+    //((glImage *)SUB_GLIMG)->rebuffer();
+    printf("GOT HERE2 !!!!!!!!!!!\n");
+  }
+
+
+
   // i prefix?
   if(strcmpz(console_string, "i\0")){
     // iterate analysis window! could deprecate this one..

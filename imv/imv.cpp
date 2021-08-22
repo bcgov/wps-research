@@ -316,6 +316,11 @@ int main(int argc, char ** argv){
     bands_per_frame = atoi(argv[4]);
     printf("bands_per_frame %zu\n", bands_per_frame);
   }
+
+  if(nb == 66){
+    myZpr2->setrgb(36, 48, 57);
+  }
+
   myImage->rebuffer();
   myImage2->rebuffer();
   myImage3->rebuffer();
