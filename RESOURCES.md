@@ -34,7 +34,7 @@
 * [3d plotting in matplotlib](https://jakevdp.github.io/PythonDataScienceHandbook/04.12-three-dimensional-plotting.html)
 
 # Fuels
-[Judi Beck](https://www.youtube.com/watch?v=dX15tC1UHcE&list=PLrpIXKIj6MaEJw41Fi-F-UpqAR1vVOKmt&index=17)
-[Marty Alexander](https://www.youtube.com/watch?v=ZkWeaI2c0zo&list=PLrpIXKIj6MaEJw41Fi-F-UpqAR1vVOKmt&index=16)
-[Brian Stocks](https://www.youtube.com/watch?v=Jvx3A63JNUg&list=PLrpIXKIj6MaEJw41Fi-F-UpqAR1vVOKmt&index=18)
+*[Judi Beck](https://www.youtube.com/watch?v=dX15tC1UHcE&list=PLrpIXKIj6MaEJw41Fi-F-UpqAR1vVOKmt&index=17)
+*[Marty Alexander](https://www.youtube.com/watch?v=ZkWeaI2c0zo&list=PLrpIXKIj6MaEJw41Fi-F-UpqAR1vVOKmt&index=16)
+*[Brian Stocks](https://www.youtube.com/watch?v=Jvx3A63JNUg&list=PLrpIXKIj6MaEJw41Fi-F-UpqAR1vVOKmt&index=18)
 
