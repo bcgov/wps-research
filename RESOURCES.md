@@ -32,3 +32,7 @@
 * [matplotlib animation](http://jakevdp.github.io/blog/2012/08/18/matplotlib-animation-tutorial/)
 * [matplotlib figure](https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.figure.html)
 * [3d plotting in matplotlib](https://jakevdp.github.io/PythonDataScienceHandbook/04.12-three-dimensional-plotting.html)
+
+# Fuels
+[Judi Beck](https://www.youtube.com/watch?v=dX15tC1UHcE&list=PLrpIXKIj6MaEJw41Fi-F-UpqAR1vVOKmt&index=17)
+
