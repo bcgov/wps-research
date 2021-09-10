@@ -20,6 +20,10 @@
 * [Mapping waterbodies from Space](https://www.youtube.com/watch?v=UJcS24thVvc)
 ## Data
 * [SPOT data](https://regards.cnes.fr/user/swh/modules/60)
+
+## Related projects
+[National Terrestrial Ecosystem monitoring system](https://irsslab.forestry.ubc.ca/research/ntems-national-terrestrial-ecosystem-monitoring-system/)
+
 ## Training
 * [Copernicus RUS webinars](https://www.youtube.com/channel/UCB01WjameYMvL7-XfI8vRIA/videos)
 * [Introduction to StreamLit](https://miro.com/app/board/o9J_l9oeooY=/)
