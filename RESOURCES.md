@@ -22,7 +22,7 @@
 * [SPOT data](https://regards.cnes.fr/user/swh/modules/60)
 
 ## Related projects
-*[National Terrestrial Ecosystem monitoring system](https://irsslab.forestry.ubc.ca/research/ntems-national-terrestrial-ecosystem-monitoring-system/)
+* [National Terrestrial Ecosystem monitoring system](https://irsslab.forestry.ubc.ca/research/ntems-national-terrestrial-ecosystem-monitoring-system/)
 
 ## Training
 * [Copernicus RUS webinars](https://www.youtube.com/channel/UCB01WjameYMvL7-XfI8vRIA/videos)
@@ -38,7 +38,9 @@
 * [3d plotting in matplotlib](https://jakevdp.github.io/PythonDataScienceHandbook/04.12-three-dimensional-plotting.html)
 
 # Fuels
-*[Judi Beck](https://www.youtube.com/watch?v=dX15tC1UHcE&list=PLrpIXKIj6MaEJw41Fi-F-UpqAR1vVOKmt&index=17)
-*[Marty Alexander](https://www.youtube.com/watch?v=ZkWeaI2c0zo&list=PLrpIXKIj6MaEJw41Fi-F-UpqAR1vVOKmt&index=16)
-*[Brian Stocks](https://www.youtube.com/watch?v=Jvx3A63JNUg&list=PLrpIXKIj6MaEJw41Fi-F-UpqAR1vVOKmt&index=18)
+* [Judi Beck](https://www.youtube.com/watch?v=dX15tC1UHcE&list=PLrpIXKIj6MaEJw41Fi-F-UpqAR1vVOKmt&index=17)
+* [Marty Alexander](https://www.youtube.com/watch?v=ZkWeaI2c0zo&list=PLrpIXKIj6MaEJw41Fi-F-UpqAR1vVOKmt&index=16)
+* [Brian Stocks](https://www.youtube.com/watch?v=Jvx3A63JNUg&list=PLrpIXKIj6MaEJw41Fi-F-UpqAR1vVOKmt&index=18)
 
+# GEE apps
+* https://kkraoj.users.earthengine.app/view/live-fuel-moisture
