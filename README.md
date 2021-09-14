@@ -29,7 +29,6 @@ Includes A) routines applying or implementing supervised and unsupervised classi
 
 # Sample exploratory results
 * [Predicting some BCGW layers from Sentinel-2 Imagery using RandomForest classifier](https://github.com/bcgov/bcws-psu-research/blob/master/data_combined/Readme.md)
-* https://code.earthengine.google.com/e27240a92ecf64bbadf8a082b91c711c?hideCode=true
 
 # Collaborators and Contributors:
 * Dana Hicks, BCWS
