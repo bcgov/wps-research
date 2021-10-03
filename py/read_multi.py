@@ -1,6 +1,5 @@
 #!/usr/bin/python3
 '''20190619 read_multispectral.py: read and visualize multispectral image!
-
 adapted from a script worked on with francesca at: https://github.com/franarama/satellite-clustering
 
 usage:
@@ -10,7 +9,12 @@ tested on Python 2.7.15+ (default, Nov 27 2018, 23:36:35) [GCC 7.3.0] on linux2 
 with numpy.version.version '1.16.2' and matplotlib.__version__ '2.2.4'
 
 installation of numpy and matplotlib (Ubuntu):
-    sudo apt install python-matplotlib python-numpy '''
+    sudo apt install python-matplotlib python-numpy
+
+
+
+this version adapted for ftl mpv presentation march 2020. Use read_multi_simple.py for basic function'''
+
 from misc import *
 import matplotlib
 matplotlib.rcParams.update({'font.size': 10})
