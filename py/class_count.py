@@ -21,9 +21,13 @@ min_lab = max_lab = class_labels[0]
 max_c = min_c = count[min_lab]
 max_c_lab = min_c_lab = min_lab
 
-print("\tlabel, count")
+total = 0
+for c in count:
+    total += count[c]
+
+print("\tlabel, count,freq")
 for c in class_labels:
-    print('\t' + str(c) + ',' + str(count[c]))
+    print('\t' + str(c) + ',' + str(count[c]) + ',' + str(100. * count[c] / total))
     if c < min_lab:
         min_lab = c
     if c > max_lab:
