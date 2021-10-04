@@ -1,0 +1,18 @@
+ENVI
+description = {20170829 Sentinel-2}
+samples = 685
+lines = 877
+bands = 3
+header offset = 0
+file type = ENVI Standard
+data type = 4
+interleave = bsq
+byte order = 0
+band names = {red,
+green,
+blue}
+map info = {UTM,344.0,440.0,368100.0,6430500.0,60.0,60.0,9,North,World Geodetic System 1984,units=Meters}
+coordinate system string = {PROJCS["WGS 84 / UTM zone 9N", GEOGCS["WGS 84", DATUM["World Geodetic System 1984", SPHEROID["WGS 84", 6378137.0, 298.257223563, AUTHORITY["EPSG","7030"]], AUTHORITY["EPSG","6326"]], PRIMEM["Greenwich", 0.0, AUTHORITY["EPSG","8901"]], UNIT["degree", 0.017453292519943295], AXIS["Geodetic longitude", EAST], AXIS["Geodetic latitude", NORTH], AUTHORITY["EPSG","4326"]], PROJECTION["Transverse_Mercator"], PARAMETER["central_meridian", -129.0], PARAMETER["latitude_of_origin", 0.0], PARAMETER["scale_factor", 0.9996], PARAMETER["false_easting", 500000.0], PARAMETER["false_northing", 0.0], UNIT["m", 1.0], AXIS["Easting", EAST], AXIS["Northing", NORTH], AUTHORITY["EPSG","32609"]]}
+wavelength = {665.0}
+data gain values = {1.0E-4}
+data offset values = {0.0}
