@@ -1,4 +1,8 @@
 # tested on Ubuntu 20 with ESA SNAP 8.0 which demands java 8
+# configure snappy by installing java 8 stuff, to build:
+#     * jpy (python/java bridge)
+# finally then showing snappy where python is!
+
 tar xvf jpy-0.9.0.tar.gz
 sudo apt install openjdk-8-jre openjdk-8-jdk python3-pip maven
 
