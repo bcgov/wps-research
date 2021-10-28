@@ -19,5 +19,5 @@ cp -v dist/*.whl "/home/$USER/.snap/snap-python/snappy"
 /usr/local/snap/bin/snappy-conf /usr/bin/python3
 
 echo "COPYING SNAPPY TO EXPECTED FOLDER.."
-cp -rv "/home/$USER/.snap/snap-python/snappy/" "/home/$USER/.local/lib/python3.8/site-packages/snappy/"
+cp -rv "/home/$USER/.snap/snap-python/snappy/" "/home/$USER/.local/lib/python3.8/site-packages/"
 
