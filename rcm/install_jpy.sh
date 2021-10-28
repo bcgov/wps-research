@@ -9,3 +9,8 @@ export JAVA_HOME=$JDK_HOME
 cd jpy-0.9.0
 python3 setup.py --maven bdist_wheel
 
+cp -v dist/*.whl "/home/$USER/.snap/snap-python/snappy"
+
+# configure snappy
+/usr/local/snap/bin/snappy-conf /usr/bin/python3
+
