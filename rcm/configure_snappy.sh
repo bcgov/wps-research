@@ -18,7 +18,6 @@ cp -v dist/*.whl "/home/$USER/.snap/snap-python/snappy"
 # configure snappy
 /usr/local/snap/bin/snappy-conf /usr/bin/python3
 
-
 # note, the above command doesn't complete for some reason.. 
 # might have to execute this separately, don't know why
 cp -rv "/home/$USER/.snap/snap-python/snappy/" "/home/$USER/.local/lib/python3.8/site-packages/"
