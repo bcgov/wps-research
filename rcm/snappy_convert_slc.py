@@ -18,7 +18,6 @@ import sys
 import snappy # ESA SNAP stuff
 from snappy import ProductIO
 args = sys.argv
-
 # sys.path.append('/home/' + os.popen('whoami').read().strip() + '/.snap/snap-python/')
 
 def md(d):  # make folder if not yet exist
