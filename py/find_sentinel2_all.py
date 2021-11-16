@@ -1,4 +1,8 @@
-# centroid.csv has the list of TILE ID with centroid coords incl.
+'''centroid.csv has the list of TILE ID with centroid coords incl.
+
+Write the centroid coordinates to "footprint" files and run find_sentinel2.py
+on each footprint (actually a centroid but whatever)
+'''
 import os
 import sys
 path = os.path.abspath(__file__).split(os.path.sep)[:-1]
