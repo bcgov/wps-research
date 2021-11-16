@@ -39,7 +39,12 @@ else:
     pass_ = open('./.pass', 'rb').read().decode()
 
 def c(add= ''):
-    cmd = ('wget --no-check-certificate --user=' + user_ + ' --password=' + pass_ + ' --output-document=out.html "https://scihub.copernicus.eu/dhus/search?q=(platformname:Sentinel-2 AND cloudcoverpercentage:[0 TO 11] AND footprint:\\"' + foot_print + '\\")' + add + '"')
+    cmd = ('wget --no-check-certificate --user=' +
+           user_ + ' --password=' +
+           pass_ + ' --output-document=out.html ' +
+           '"https://scihub.copernicus.eu/dhus/search?q=(platformname:Sentinel-2 ' +
+           'AND cloudcoverpercentage:[0 TO 25] AND ' +
+           'footprint:\\"' + foot_print + '\\")' + add + '"')
     return cmd
 
 user_ = user_.strip()
