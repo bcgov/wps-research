@@ -1,7 +1,9 @@
 '''centroid.csv has the list of TILE ID with centroid coords incl.
 
 Write the centroid coordinates to "footprint" files and run find_sentinel2.py
-on each footprint (actually a centroid but whatever)'''
+on each footprint (actually a centroid but whatever)
+
+e.g. python3 sentinel2_find_all.py 09VUE'''
 import os
 import sys
 args = sys.argv
