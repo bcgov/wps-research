@@ -43,7 +43,7 @@ def c(add= ''):
            user_ + ' --password=' +
            pass_ + ' --output-document=out.html ' +
            '"https://scihub.copernicus.eu/dhus/search?q=(platformname:Sentinel-2 ' +
-           'AND cloudcoverpercentage:[0 TO 25] AND ' +
+           'AND cloudcoverpercentage:[0 TO 10] AND ' +
            'footprint:\\"' + foot_print + '\\")' + add + '"')
     return cmd
 
