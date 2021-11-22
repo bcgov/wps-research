@@ -35,13 +35,19 @@ for i in pos:  # check new idx in range
 npx = nrow * ncol   # read IEEE 32-bit floats
 d = read_float(fn).reshape(nband, npx)
 
-of = open(ofn, 'wb')
+of = open(ofn, 'wb')  # write the re-ordered binary
 for i in range(nband):
     print('+w band(' + str(i) + ')')
     d[pos[i],:].astype(np.float32).tofile(of,
                                           '',
                                           '<f4')
 of.close()
+
+# now re-order the header!
+bn = band_names(hdr)
+for b in bn:
+    print(b)
+
 sys.exit(1)
 
 # read header and print parameters
