@@ -167,6 +167,9 @@ for safe in safes:
     mod = open(shn).read().replace('central wavelength ', '').replace(' nm,', 'nm,').encode()
     open(shn, 'wb').write(mod)
     print('+w', shn)
+    
+
+    # reorder bands should go here
     sys.exit(1)
 
 # cat the bin files together, combining headers
