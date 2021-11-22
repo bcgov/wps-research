@@ -164,7 +164,8 @@ for safe in safes:
     run(' '.join(cmd))
 
     raster_files.append(sfn)
-    print(shn)
+    open(shn, 'wb').write(open(shn).read().replace('central wavelength ', ''))
+    print('+w', shn)
     sys.exit(1)
 
 # cat the bin files together, combining headers
