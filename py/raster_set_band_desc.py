@@ -1,12 +1,11 @@
 '''Set Band descriptions from https://gis.stackexchange.com/questions/290796/how-to-edit-the-metadata-for-individual-bands-of-a-multiband-raster-preferably
 Usage:
-    python set_band_desc.py /path/to/file.ext band desc [band desc...]
+    python set_band_desc.py /path/to/file.ext band1 desc1 [band2 desc2] .. [band-n desc-n]
 Where:
     band = band number to set (starting from 1)
     desc = band description string (enclose in "double quotes" if it contains spaces)
 Example:
     python set_band_desc.py /path/to/dem.tif 1 "Band 1 desc"  2 "Band 2 desc"  3 "Band 3 desc"
-
 '''
 import sys
 from osgeo import gdal
