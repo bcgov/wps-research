@@ -33,7 +33,7 @@ for i in pos:  # check new idx in range
         err('invalid index')
 
 npx = nrow * ncol   # read IEEE 32-bit floats
-d = read_float(fn).reshape(bands, npx)
+d = read_float(fn).reshape(nband, npx)
 
 of = open(ofn, 'wb')
 for i in range(nband):
