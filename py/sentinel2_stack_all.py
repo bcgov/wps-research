@@ -103,6 +103,7 @@ for safe in safes:
         print('  ' + b)
 
     if len(bins) != 3:
+        continue
         err('unexpected number of bin files (expected 3): ' +
             str('\n'.join(bins)))
 
