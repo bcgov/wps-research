@@ -1,6 +1,8 @@
 /* based on m3ta3: reimagination of a (late 2011, early 2012) primordial visualization library
 that inspired further developments at UVic, CFS and elsewhere.. 
-todo: display original (untransformed) values (apply reverse map)? */ 
+todo: display original (untransformed) values (apply reverse map)?
+
+spectra could have everything under window displayed! */ 
 #include"util.h"
 #include<fstream>
 #include"newzpr.h"
@@ -307,6 +309,12 @@ int main(int argc, char ** argv){
   glCurve histR(myZpr7, &hist_r, 1., 0., 0.);
   glCurve histG(myZpr7, &hist_g, 0., 1., 0.);
   glCurve histB(myZpr7, &hist_b, 0., 0., 1.);
+
+  //myZpr6->setRightOf(myZpr7);
+  myZpr4->setRightOf(myZpr5);
+  myZpr6->setRightOf(myZpr4);
+  myZpr7->setBelow(myZpr6);
+  myZpr3->setRightOf(myZpr6);
 
   initLighting();
 
