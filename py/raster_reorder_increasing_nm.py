@@ -28,7 +28,7 @@ for i in range(len(bn)):  # band name indices
             spectral_value = float(w[j][:-2])
             print(spectral_value)
             to_sort.append([spectral_value, i])
-to_sort.sort(reverse=True)
+to_sort.sort(reverse=False)
 for s in to_sort:
     print(s)
 
@@ -38,7 +38,7 @@ for si in range(len(to_sort)):
     lookup[s[1]] = si
 
 for s in lookup:
-    print(s, '->', lookup[s])
+    print(s + 1, '->', lookup[s] + 1)
 
 s = ''
 for i in range(len(bn)):
@@ -57,6 +57,6 @@ run(' '.join(['python3',
               s]))
 
 # now overwrite the input file, and the input header file, with the created files!
-shutil.move(ofn_tmp, fn)
-shutil.move(ofhn_tmp, hdr)
+#shutil.move(ofn_tmp, fn)
+#shutil.move(ofhn_tmp, hdr)
 print('done')
