@@ -7,20 +7,20 @@ exists = os.path.exists
 pd = sep.join(__file__.split(sep)[:-1]) + sep
 
 def err(m):
-    print("Error: " + m); sys.exit(1)
+    print('Error: ' + m); sys.exit(1)
 
 def run(c):
     print(c)
     a = os.system(c)
-    if a != 0: err("failed to run: " + str(c))
+    if a != 0: err('failed to run: ' + str(c))
 
 if len(args) < 3:
-    err("envi_update_band_names.py [.hdr file with band names to use] " +
-        "[.hdr file with band names to overwrite]")
+    err('envi_update_band_names.py [.hdr file with band names to use] ' +
+        '[.hdr file with band names to overwrite]')
 
 def get_band_names_line_idx(data):
     band_name_lines, in_band_names = [], False
-    lines = [x.strip() for x in data.strip().split("\n")]
+    lines = [x.strip() for x in data.strip().split('\n')]
     for i in range(0, len(lines)):
         if len(lines[i].split("band names =")) > 1:
             in_band_names = True
@@ -31,7 +31,7 @@ def get_band_names_line_idx(data):
     return band_name_lines
 
 if not exists(args[1]) or not exists(args[2]):
-    err("please check input files:\n\t" + args[1] + "\n\t" + args[2])
+    err('please check input files:\n\t' + args[1] + '\n\t' + args[2])
 
 # need to run this first to make sure the band name fields are where we expect!
 run('python3 ' + pd + 'envi_header_cleanup.py ' + args[1])
