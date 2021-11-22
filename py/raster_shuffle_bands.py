@@ -36,6 +36,9 @@ for i in pos:  # check new idx in range
     if i < 0 or i >= nband:
         err('invalid index')
 
+# reverse = {pos[i]: i for i in range(len(pos))}
+# pos = [reverse[i] for i in range(len(pos))]
+
 '''1 of 2: write the re-ordered header'''
 bn = band_names(hdr)  # now re-order the header
 if len(bn) != len(pos):  # sanity check
@@ -44,7 +47,7 @@ bn_new = [bn[pos[i]] for i in range(len(bn))]
 for b in bn:
     print(b)
 
-ohn = ofn[:-4] + '_tmp.hdr'
+ohn = ofn[:-4] + '_temp.hdr'
 write_hdr(ohn, ncol, nrow, nband)
 
 bn_ix = get_band_names_line_idx(open(hdr).read())  # get line idx of band names fields for original file
@@ -55,7 +58,8 @@ for i in range(len(bn)):
 
 mod = open(ohn).read().strip().split('\n')
 mod += [old_lines[bn_ix[i]] for i in range(len(bn))]
-print('+w', ohn)
+print("mod", mod)
+print('+w', ohn, "from mod")
 open(ohn, 'wb').write('\n'.join(mod).encode())
 
 real_ohn = ofn[:-4] + '.hdr' # actual output header file
@@ -82,7 +86,7 @@ of.close()  # close the output ENVI type-4 binary file
 bn = band_names(hdr)  # now re-order the header
 if len(bn) != len(pos):  # sanity check
     err('unexpected number of band names read')
-bn_new = [bn[pos[i]] for i in range(len(bn))]
+# bn_new = [bn_new[i] for i in range(len(bn))]
 for b in bn_new:
     print(b)
 print('done')

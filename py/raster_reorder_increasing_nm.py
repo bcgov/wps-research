@@ -47,8 +47,8 @@ s = s.strip()
 print(s)
 
 # now reorder the input file, to a temp file..
-ofn_tmp = fn[:-4] + '_tmp.bin'
-ofhn_tmp = fn[:-4] + '_tmp.hdr'
+ofn_tmp = fn + '_tmp.bin'
+ofhn_tmp = fn + '_tmp.hdr'
 
 run(' '.join(['python3',
               pd + 'raster_shuffle_bands.py',
