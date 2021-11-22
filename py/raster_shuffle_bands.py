@@ -20,26 +20,27 @@ print(len(args))
 ncol, nrow, nband = [int(x) for x in read_hdr(hdr)]  # read image dims
 if len(args) != nband + 3:  # check new pos'n listed for each band
     err('must supply a new position-index for each band')
-
 pos = args[3:] # new positions
 try:
     pos = [int(x) -1 for x in pos]
 except:
     err("failed parsing new band pos'n idx")
 print(pos)
-
-# check each band represented once
-if len(list(set(pos))) != nband:
+if len(list(set(pos))) != nband:  # check bands reprsented
     err("one new pos'n-index req'd for each band")
-
-# check new idx are all in range
-for i in pos:
+for i in pos:  # check new idx in range
     if i < 0 or i >= nband:
         err('invalid index')
 
 npx = nrow * ncol   # read IEEE 32-bit floats
 d = read_float(fn).reshape(bands, npx)
 
+of = open(ofn, 'wb')
+for i in range(nband):
+    d[pos[i],:].astype(np.float32).tofile(of,
+                                          '',
+                                          '<f4')
+of.close()
 sys.exit(1)
 
 # read header and print parameters
