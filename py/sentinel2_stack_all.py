@@ -34,10 +34,14 @@ for f in files:
     if f[-5:] == '.SAFE':
         w = f.split('_'); print(w)
         if w[1] == 'MSIL2A':
-                safes.append(f)
-print("number of L1:", n_l1)
-print("number of l2:", n_l2)
-print("number to do:", len(do))
+                safes.append(w)
+
+# sort on w[2]
+srt = [[w[2], w] for w in safes]
+srt.sort()
+safes = [w[1] for w in srt]
+for s in safes:
+    print(s)
 sys.exit(1)
 
 x = []
