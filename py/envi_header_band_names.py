@@ -1,4 +1,4 @@
-# print out band names from envi header file
+# print out band names from envi header file # check if this is redundant with misc.py
 import os
 import sys
 args = sys.argv
