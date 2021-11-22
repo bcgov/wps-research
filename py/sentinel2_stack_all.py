@@ -1,11 +1,11 @@
-'''
-same as sentinel2_extract_stack_all.py except this one doesn't extract from zip. 
+'''20211121 same as sentinel2_extract_stack_all.py except this one doesn't extract from zip. 
 
 Assumption:
     we've created L2 data with sen2cor
 
 A) extract Sentinel2, B) resample to 10m c) prefix bandnames with dates..
    D) stack everything!
+   E) worry about masks later
 
 Need xml reader? such as:
 https://docs.python.org/3/library/xml.etree.elementtree.html '''
@@ -20,16 +20,25 @@ def err(m):
     print("Error: " + m); sys.exit(1)
 
 def run(c):
-    print(c)
-    a = os.system(c)
+    print(c); a = os.system(c)
     if a != 0: err("failed to run: " + str(c))
 
-extract = pd + "sentinel2_extract.py" # command to extract a zip
-zips = [x.strip() for x in os.popen("ls -1 *.zip").readlines()] # list the zip files
+# extract = pd + "sentinel2_extract.py" # command to extract a zip
 raster_files = [] # these will be the final rasters to concatenate
 
 '''before processing, sort zip files by date. Note, they would be already except the prefix
 varies with S2A / S2B'''
+
+safes, files = [], [x.strip() for x in os.popen('ls -1').readlines()]
+for f in files:
+    if f[-5:] == '.SAFE':
+        w = f.split('_'); print(w)
+        if w[1] == 'MSIL2A':
+                safes.append(f)
+print("number of L1:", n_l1)
+print("number of l2:", n_l2)
+print("number to do:", len(do))
+sys.exit(1)
 
 x = []
 for z in zips:
@@ -57,7 +66,8 @@ for z in zips:
         SENTINEL2_L2A_20m_EPSG_32610.bin
         SENTINEL2_L2A_60m_EPSG_32610.bin
         SENTINEL2_L2A_TCI_EPSG_32610.bin'''
-    bins = [x.strip() for x in os.popen("ls -1 " + safe + os.path.sep + "*m_EPSG_*.bin").readlines()] # don't pull the TCI true colour image. Already covered in 10m
+    bins = [x.strip() for x in os.popen("ls -1 " + safe + os.path.sep + "*m_EPSG_*.bin").readlines()]
+    # don't pull the TCI true colour image. Already covered in 10m
 
     if len(bins) != 3:
         err("unexpected number of bin files (expected 3): " + str('\n'.join(bins)))
