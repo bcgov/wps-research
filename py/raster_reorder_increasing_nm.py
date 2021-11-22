@@ -42,7 +42,7 @@ for s in lookup:
 
 s = ''
 for i in range(len(bn)):
-    s += (str(lookup[i] + 1) + ' ')
+    s += (str(lookup[i] + 1) + ' ')  # haha we used 1-idxing
 s = s.strip()
 print(s)
 
