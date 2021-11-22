@@ -9,9 +9,7 @@ e.g. to calculate the x,y coordinate offsets for a round window of radius 30,
 for a sensor with resolution 10m:
     python3 window.py 30 10 
 
-Offsets are stored in a file
-
-'''
+Offsets are stored in a file'''
 
 import os
 import sys
