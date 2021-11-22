@@ -83,6 +83,6 @@ bn = band_names(hdr)  # now re-order the header
 if len(bn) != len(pos):  # sanity check
     err('unexpected number of band names read')
 bn_new = [bn[pos[i]] for i in range(len(bn))]
-for b in bn:
+for b in bn_new:
     print(b)
 print('done')
