@@ -164,12 +164,16 @@ for safe in safes:
     run(' '.join(cmd))
 
     raster_files.append(sfn)
-    mod = open(shn).read().replace('central wavelength ', '').replace(' nm,', 'nm,').encode()
+    mod = open(shn).read().replace('central wavelength ',
+                                   '').replace(' nm,',
+                                               'nm,').replace(' nm}', 'nm}').encode()
     open(shn, 'wb').write(mod)
     print('+w', shn)
     
 
     # reorder bands should go here
+    for s in safes:
+        print(s)
     sys.exit(1)
 
 # cat the bin files together, combining headers
