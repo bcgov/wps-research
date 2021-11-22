@@ -10,7 +10,7 @@ pd = sep.join(__file__.split(sep)[:-1]) + sep
 # instructions to run
 if len(args) < 2:
     err('usage:\n\traster_shuffle_bands.py [input file] [output file] ' +
-            '[new position for band 1]... [new position for last band] ' +
+            '[new position to be placed INto band 1]... [new position to be placed Into last band] ' +
             '#note: indices are from 1, not 0')
 
 # check file and header exist

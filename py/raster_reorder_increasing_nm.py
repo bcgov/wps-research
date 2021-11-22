@@ -20,26 +20,28 @@ bn = band_names(hdr)  # read the band names
 # find the band-name indices that have a space-separated field, ending with nm
 bni = []
 to_sort = []
+sv = []
 for i in range(len(bn)):  # band name indices
     spectral_value = None
     w = bn[i].strip().strip(',').strip('}').split()
+    print(w)
     for j in range(len(w)):
         if w[j][-2:] == 'nm':
             spectral_value = float(w[j][:-2])
             print(spectral_value)
             to_sort.append([spectral_value, i])
-to_sort.sort(reverse=False)
-for s in to_sort:
-    print(s)
+    sv.append(spectral_value)
 
-lookup = {}
+to_sort.sort(reverse=False)
+print("to_sort", to_sort)
+
+lookup = {i:to_sort[i][1] for i in range(len(to_sort))}
+'''
 for si in range(len(to_sort)):
     s = to_sort[si]
     lookup[s[1]] = si 
-
-
-for i in lookup.keys():
-    print(i, '==>', lookup[i])
+'''
+print("new thing in a position", lookup)
 
 for si in range(nband):
     print(si, '->', lookup[si])
