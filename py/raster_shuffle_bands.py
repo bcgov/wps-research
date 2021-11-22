@@ -50,7 +50,9 @@ for b in bn:
 ohn = ofn[:-4] + '_temp.hdr'
 write_hdr(ohn, ncol, nrow, nband)
 
+print("+r", hdr)
 bn_ix = get_band_names_line_idx(open(hdr).read())  # get line idx of band names fields for original file
+print("bn_ix", bn_ix)
 old_lines = open(hdr).read().strip().split('\n')
 for i in range(len(bn)):
     bn_ix_i = int(bn_ix[i])
