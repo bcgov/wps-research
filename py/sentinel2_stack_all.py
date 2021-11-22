@@ -172,8 +172,8 @@ for safe in safes:
     
 
     # reorder bands should go here
-    for s in safes:
-        print(s)
+    # for s in safes:
+    #     print(s)
     sys.exit(1)
 
 # cat the bin files together, combining headers
