@@ -164,7 +164,8 @@ for safe in safes:
     run(' '.join(cmd))
 
     raster_files.append(sfn)
-    open(shn, 'wb').write(open(shn).read().replace('central wavelength ', '').encode())
+    mod = open(shn).read().replace('central wavelength ', '').encode()
+    open(shn, 'wb').write(mod)
     print('+w', shn)
     sys.exit(1)
 
