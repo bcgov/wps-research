@@ -22,13 +22,13 @@ bni = []
 to_sort = []
 for i in range(len(bn)):  # band name indices
     spectral_value = None
-    w = bn[i].strip().split()
+    w = bn[i].strip().strip(',').strip('}').split()
     for j in range(len(w)):
         if w[j][-2:] == 'nm':
             spectral_value = float(w[j][:-2])
             print(spectral_value)
             to_sort.append([spectral_value, i])
-to_sort.sort(reverse=False)
+to_sort.sort(reverse=True)
 for s in to_sort:
     print(s)
 
