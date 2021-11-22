@@ -53,7 +53,8 @@ ofhn_tmp = fn[:-4] + '_tmp.hdr'
 run(' '.join(['python3',
               pd + 'raster_shuffle_bands.py',
               fn,
-              ofn_tmp]))
+              ofn_tmp,
+              s]))
 
 # now overwrite the input file, and the input header file, with the created files!
 shutil.move(ofn_tmp, fn)
