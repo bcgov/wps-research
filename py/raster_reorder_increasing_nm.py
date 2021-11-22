@@ -35,10 +35,14 @@ for s in to_sort:
 lookup = {}
 for si in range(len(to_sort)):
     s = to_sort[si]
-    lookup[s[1]] = si
+    lookup[s[1]] = si 
 
-for s in lookup:
-    print(s + 1, '->', lookup[s] + 1)
+
+for i in lookup.keys():
+    print(i, '==>', lookup[i])
+
+for si in range(nband):
+    print(si, '->', lookup[si])
 
 s = ''
 for i in range(len(bn)):
@@ -47,13 +51,13 @@ s = s.strip()
 print(s)
 
 # now reorder the input file, to a temp file..
-ofn_tmp = fn + '_tmp.bin'
-ofhn_tmp = fn + '_tmp.hdr'
+ofn = fn + '_reorder.bin'
+ofh = fn + '_reorder.hdr'
 
 run(' '.join(['python3',
               pd + 'raster_shuffle_bands.py',
               fn,
-              ofn_tmp,
+              ofn,
               s]))
 
 # now overwrite the input file, and the input header file, with the created files!
