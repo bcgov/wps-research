@@ -308,6 +308,8 @@ int main(int argc, char ** argv){
   glCurve histG(myZpr7, &hist_g, 0., 1., 0.);
   glCurve histB(myZpr7, &hist_b, 0., 0., 1.);
 
+  myZpr6->setRightOf(myZpr7);
+
   initLighting();
 
   bands_per_frame = nb / number_of_dates;
