@@ -24,8 +24,7 @@ def get_band_names_lines(data):
     for i in range(0, len(lines)):
         if len(lines[i].split("band names =")) > 1:
             in_band_names = True
-        if in_band_names:
-            # print(lines[i])
+        if in_band_names:  # print(lines[i])
             band_name_lines.append(lines[i])
             if len(lines[i].split("}")) > 1:
                 in_band_names = False
