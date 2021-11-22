@@ -51,8 +51,8 @@ if(not(os.path.exists(src_filename)) or
    not(os.path.exists(match_filename))):
     err("input parameters must exist.")
 
-if(os.path.exists(dst_filename)):
-    err("estination filename already exists. Aborting.")
+# if(os.path.exists(dst_filename)):
+#    err("destination filename already exists. Aborting.")
 
 try:
     from osgeo import gdal
