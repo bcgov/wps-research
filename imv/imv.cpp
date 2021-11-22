@@ -308,7 +308,11 @@ int main(int argc, char ** argv){
   glCurve histG(myZpr7, &hist_g, 0., 1., 0.);
   glCurve histB(myZpr7, &hist_b, 0., 0., 1.);
 
-  myZpr6->setRightOf(myZpr7);
+  //myZpr6->setRightOf(myZpr7);
+  myZpr4->setRightOf(myZpr5);
+  myZpr6->setRightOf(myZpr4);
+  myZpr7->setBelow(myZpr6);
+  myZpr3->setRightOf(myZpr6);
 
   initLighting();
 
