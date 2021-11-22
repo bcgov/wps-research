@@ -1,8 +1,7 @@
-'''NB need to redo this script using argparse!!!!!!
+'''Should redo this script using argparse!!!!!!
 
-query sentinel-2 products over a given point (alternately, a place name). Later: tile-ID of interest. Restrict for time?
-
-Also need to know how to fetch products from LTA'''
+Query sentinel-2 products over a given point (alternately, a place name). Later: tile-ID of interest. Restrict for time?
+'''
 import os
 import sys
 import math
@@ -40,7 +39,12 @@ else:
     pass_ = open('./.pass', 'rb').read().decode()
 
 def c(add= ''):
-    cmd = ('wget --no-check-certificate --user=' + user_ + ' --password=' + pass_ + ' --output-document=out.html "https://scihub.copernicus.eu/dhus/search?q=(platformname:Sentinel-2 AND cloudcoverpercentage:[0 TO 11] AND footprint:\\"' + foot_print + '\\")' + add + '"')
+    cmd = ('wget --no-check-certificate --user=' +
+           user_ + ' --password=' +
+           pass_ + ' --output-document=out.html ' +
+           '"https://scihub.copernicus.eu/dhus/search?q=(platformname:Sentinel-2 ' +
+           'AND cloudcoverpercentage:[0 TO 10] AND ' +
+           'footprint:\\"' + foot_print + '\\")' + add + '"')
     return cmd
 
 user_ = user_.strip()
@@ -145,5 +149,3 @@ a = os.system('chmod 755 ./.sentinel2_download.sh')
 print("+w .sentinel2_download.sh")
 
 a = os.system('cp -v .sentinel2_download.sh ' + fpfn + '_download.sh')
-
-
