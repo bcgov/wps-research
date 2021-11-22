@@ -32,7 +32,7 @@ varies with S2A / S2B'''
 safes, files = [], [x.strip() for x in os.popen('ls -1').readlines()]
 for f in files:
     if f[-5:] == '.SAFE':
-        w = f.split('_'); print(w)
+        w = f.split('_'); # print(w)
         if w[1] == 'MSIL2A':
                 safes.append(w)
 
