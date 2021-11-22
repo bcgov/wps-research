@@ -36,7 +36,7 @@ for i in pos:  # check new idx in range
     if i < 0 or i >= nband:
         err('invalid index')
 
-'''write the header'''
+'''1 of 2: write the re-ordered header'''
 bn = band_names(hdr)  # now re-order the header
 if len(bn) != len(pos):  # sanity check
     err('unexpected number of band names read')
@@ -69,7 +69,7 @@ a = os.system(' '.join(['python3',
 os.remove(ohn) # cleanup fake file
 print('+w', real_ohn)
 
-'''write the binary'''
+'''2 of 2: write the binary'''
 npx = nrow * ncol   # read IEEE 32-bit floats
 d = read_float(fn).reshape(nband, npx)
 of = open(ofn, 'wb')  # write the re-ordered binary
