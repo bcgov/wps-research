@@ -67,20 +67,15 @@ def band_names(hdr): # read band names from header file
                 return names
     return []
 
-def get_band_names_line_idx(data):  # input: file data
+def get_band_names_line_idx(hdr):  # input: file data
+    samples, lines, bands = read_hdr(hdr)
+    lines = [x.strip() for x in open(hdr).readlines()]
     #  Output: line idx of lines with band names data in them!
-    band_name_lines, in_band_names = [], False
-    band_name_lines_idx = []
-    lines = [x.strip() for x in data.strip().split('\n')]
-    for i in range(0, len(lines)):
+    for i in range(len(lines)):
         if len(lines[i].split("band names =")) > 1:
-            in_band_names = True
-        if in_band_names:  # print(lines[i])
-            band_name_lines.append(lines[i])
-            if len(lines[i].split("}")) > 1:
-                in_band_names = False
-            band_name_lines_idx.append(i)
-    return band_name_lines_idx # this function is different, we return idx here not contents
+            print("lines[i]", lines[i])
+            return list(range(i, i + int(bands)))
+    return []
 
 # require a filename, or list of filenames, to exist
 def assert_exists(fn):
