@@ -8,7 +8,10 @@ A) extract Sentinel2, B) resample to 10m c) prefix bandnames with dates..
    E) worry about masks later
 
 Need xml reader? such as:
-https://docs.python.org/3/library/xml.etree.elementtree.html '''
+https://docs.python.org/3/library/xml.etree.elementtree.html
+
+
+MAKE SURE WE SORTED BY TIME AND FREQUENCY !!!'''
 import os
 import sys
 args = sys.argv
@@ -52,19 +55,19 @@ srt.sort()
 safes = [w[1] for w in srt]
 safes = ['_'.join(s) for s in safes]
 
-cmds = []
 for safe in safes: 
-    print(safe)
+    cmds = []; #print(safe)
     ''' ls -1 *.bin
      SENTINEL2_L2A_10m_EPSG_32610.bin
      SENTINEL2_L2A_20m_EPSG_32610.bin
      SENTINEL2_L2A_60m_EPSG_32610.bin
      SENTINEL2_L2A_TCI_EPSG_32610.bin '''
-    # have to make those files ourselves!
+    # have to make those files!
     gdfn = safe + sep + 'MTD_MSIL2A.xml'
     if not exists(gdfn):
         err("expected file: " + gdfn)
     
+    print('detect:')
     for line in [x.strip() for x
                  in os.popen('gdalinfo ' +
                              gdfn +
@@ -82,84 +85,75 @@ for safe in safes:
                             '-of ENVI',
                             '-ot Float32',
                             of])
+            hfn = of[:-4] + '.hdr'; print('  ' + hfn)
             if not exists(of):
-                hfn = of[:-4] + '.hdr'
                 cmd += '; ' + (' '.join(['python3',
                                          ehc,
                                          hfn]))
                 cmds.append(cmd)
-    
-    print(cmds)
     parfor(run, cmds, 4)  # 4 hw mem channels a good guess?
+    bins = [x.strip() for x in os.popen("ls -1 " +
+                                        safe +
+                                        sep +
+                                        "*m_EPSG_32609.bin").readlines()]
+    # don't pull the TCI true colour image?  Already covered in 10m
 
-    bins = [x.strip() for x in os.popen("ls -1 " + safe + os.path.sep + "*m_EPSG_*.bin").readlines()]
-    # don't pull the TCI true colour image. Already covered in 10m
-
+    print('extract:')
     for b in bins:
-        print(b)
-    sys.exit(1)
+        print('  ' + b)
 
     if len(bins) != 3:
-        err("unexpected number of bin files (expected 3): " + str('\n'.join(bins)))
+        err('unexpected number of bin files (expected 3): ' +
+            str('\n'.join(bins)))
 
     m10, m20, m60 = bins
-    print("  10m:", m10)
-    print("  20m:", m20)
-    print("  60m:", m60)
-
-    #for b in bins:
-    #    print('  ' + b) # print('  ' + b.split(sep)[-1])
+    print('10m:', m10); print('20m:', m20); print('60m:', m60)
 
     # names for files resampled to 10m
-    m20r, m60r = m20[:-4] + '_10m.bin', m60[:-4] + '_10m.bin'
+    m20r, m60r = (m20[:-4] + '_10m.bin',
+                  m60[:-4] + '_10m.bin')
 
-    def resample(src, ref, dst): # resample src onto ref, w output file dst
-        cmd = ['python3 ' + pd + 'raster_project_onto.py',
-           src, # source image
-           ref, # project onto
-           dst] # result image
+    def resample(pars): # resample src onto ref, w output file dst
+        src, ref, dst = pars
+        cmd = ['python3 ' +
+                pd + 'raster_project_onto.py',
+                src, # source image
+                ref, # project onto
+                dst] # result image
+        #if not exists(dst): 
+        run(' '.join(cmd))
+        return 0
 
-        if not exists(dst):
-            run(' '.join(cmd))
+    a = parfor(resample,
+              [[m20, m10, m20r], # resample the 20m
+              [m60, m10, m60r]],
+              2) # resample the 60m
 
-    resample(m20, m10, m20r) # resample the 20m
-    resample(m60, m10, m60r) # resample the 60m
-
-    # now do the stacking..
-    print(m10)
-
-    sfn = safe + sep + m10.split(sep)[-1].replace("_10m", "")[:-4] + '_10m.bin'  # stacked file name..
+    sfn = (safe + sep + m10.split(sep)[-1].replace("_10m", "")[:-4]
+            + '_10m.bin')  # name of stacked file
     print(sfn)
-
-    cmd = ['cat',
+    cmd = ['cat', # cat bands together, remember to cat the header files after
             m10,
             m20r,
             m60r,
             '>',
-            sfn] # cat bands together, don't forget to "cat" the header files after..
-
-    if not exists(sfn):
-        run(' '.join(cmd))
+            sfn]
+    run(' '.join(cmd))  # things got wierd by not recomputing this
 
     # add a date prefix
     dp = '"' + safe.split('T')[0].strip().split('_')[-1].strip()
-    dp10 = dp + ' 10m: "'
-    dp20 = dp + ' 20m: "'
-    dp60 = dp + ' 60m: "'
-
-    # now "cat" the header files together
+    dp10, dp20, dp60 = (dp + ' 10m: "',
+                        dp + ' 20m: "',
+                        dp + ' 60m: "')
     shn = sfn[:-4] + '.hdr' # header file name for stack
-
-    cmd = ['python3', # envi_header_cat.py is almost like a reverse-polish notation. Have to put the "first thing" on the back..
+    cmd = ['python3', # envi_header_cat.py like an rpn, first thing goes on back
            pd + 'envi_header_cat.py',
            m20r[:-4] + '.hdr',
            m10[:-4] + '.hdr',
            shn,
            dp20,
            dp10]
-
-    cmd = ' '.join(cmd)
-    run(cmd)
+    run(' '.join(cmd))
 
     cmd = ['python3',
             pd + 'envi_header_cat.py',
@@ -167,10 +161,11 @@ for safe in safes:
             shn[:-4] + '.hdr',
             shn,
             dp60]
+    run(' '.join(cmd))
 
-    cmd = ' '.join(cmd)
-    run(cmd)
     raster_files.append(sfn)
+    print(shn)
+    sys.exit(1)
 
 # cat the bin files together, combining headers
 cmd = ['python3', pd + 'raster_stack.py']
