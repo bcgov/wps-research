@@ -15,13 +15,23 @@ args = sys.argv
 sep = os.path.sep
 exists = os.path.exists
 pd = sep.join(__file__.split(sep)[:-1]) + sep
+ehc = pd + 'envi_header_cleanup.py' # envi header cleanup command.. makes file open in "imv"
+
+import multiprocessing as mp
+sep = os.path.sep
+
+def parfor(my_function, my_inputs, n_thread=mp.cpu_count()): # evaluate a function in parallel, collect the results
+    pool = mp.Pool(n_thread)
+    result = pool.map(my_function, my_inputs)
+    return(result)
 
 def err(m):
     print("Error: " + m); sys.exit(1)
 
 def run(c):
     print(c); a = os.system(c)
-    if a != 0: err("failed to run: " + str(c))
+    return a
+    # if a != 0: err("failed to run: " + str(c))
 
 # extract = pd + "sentinel2_extract.py" # command to extract a zip
 raster_files = [] # these will be the final rasters to concatenate
@@ -40,38 +50,56 @@ for f in files:
 srt = [[w[2], w] for w in safes]
 srt.sort()
 safes = [w[1] for w in srt]
-for s in safes:
-    print(s)
-sys.exit(1)
+safes = ['_'.join(s) for s in safes]
 
-x = []
-for z in zips:
-    w = z.split('_')
-    if w[0][:2] != "S2":
-        x.append(z) # don't have a rule for sorting, if not S2!
-    else:
-        x.append([w[2:], z])
-''' e.g. [['20190210T200551', 'N0211', 'R128', 'T09VUE', '20190210T222054.zip'],
-           'S2A_MSIL2A_20190210T200551_N0211_R128_T09VUE_20190210T222054.zip'] '''
-x.sort()
-zips = [i[1] for i in x]  # finally, these files should be sorted by date..
-
-for z in zips:
-    safe = z[:-4] + ".SAFE" # extracted location..
-
+cmds = []
+for safe in safes:
     print(safe)
-    if not os.path.exists(safe):
-        cmd = "python3 " + extract + " " + z + (" no_stomp=True" if no_stomp else "")
-        print(cmd)
-        a = os.system(cmd)
-
     ''' ls -1 *.bin
-        SENTINEL2_L2A_10m_EPSG_32610.bin
-        SENTINEL2_L2A_20m_EPSG_32610.bin
-        SENTINEL2_L2A_60m_EPSG_32610.bin
-        SENTINEL2_L2A_TCI_EPSG_32610.bin'''
+     SENTINEL2_L2A_10m_EPSG_32610.bin
+     SENTINEL2_L2A_20m_EPSG_32610.bin
+     SENTINEL2_L2A_60m_EPSG_32610.bin
+     SENTINEL2_L2A_TCI_EPSG_32610.bin
+    '''
+    # have to make those files ourselves!
+
+    gdfn = safe + sep + 'MTD_MSIL2A.xml'
+    if not os.path.exists(gdfn): err("expected file: " + gdfn)
+        
+    for line in [x.strip() for x
+                 in os.popen('gdalinfo ' + gdfn + ' | grep SUBDATA').readlines()]:
+        if len(line.split('.xml')) > 1:
+            df = safe.split(sep)[-1]
+            dfw = line.split(df)
+            term = dfw[-1].strip(sep).split(':')[0]
+            iden = dfw[0].split('=')[1].split(':')[0]
+            ds = iden + ':' + df + dfw[1]
+            of = (df + dfw[1]).replace(term, iden).replace(':', '_') + '.bin'
+
+            cmd = ' '.join(['gdal_translate',
+                            ds,
+                            '--config GDAL_NUM_THREADS 8',
+                            '-of ENVI',
+                            '-ot Float32',
+                            of])
+            if not exists(of):
+                hfn = of[:-4] + '.hdr'
+                cmd += '; ' + (' '.join(['python3',
+                                         ehc,
+                                         hfn]))
+                cmds.append(cmd)
+    
+    print(cmds)
+    parfor(run, cmds, 4)
+
+    sys.exit(1)
+
     bins = [x.strip() for x in os.popen("ls -1 " + safe + os.path.sep + "*m_EPSG_*.bin").readlines()]
     # don't pull the TCI true colour image. Already covered in 10m
+
+    for b in bins:
+        print(b)
+    sys.exit(1)
 
     if len(bins) != 3:
         err("unexpected number of bin files (expected 3): " + str('\n'.join(bins)))
