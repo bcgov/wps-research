@@ -37,6 +37,7 @@ d = read_float(fn).reshape(nband, npx)
 
 of = open(ofn, 'wb')
 for i in range(nband):
+    print('+w band(' + str(i) + ')')
     d[pos[i],:].astype(np.float32).tofile(of,
                                           '',
                                           '<f4')
