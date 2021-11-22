@@ -35,6 +35,8 @@ def get_band_names_lines(data):
 if not exists(args[1]) or not exists(args[2]):
     err("please check input files:\n\t" + args[1] + "\n\t" + args[2])
 
+
+# need to run this first to make sure the band name fields are where we expect!
 run('python3 ' + pd + 'envi_header_cleanup.py ' + args[1])
 run('python3 ' + pd + 'envi_header_cleanup.py ' + args[2]) # should really call directly, whatever
 
