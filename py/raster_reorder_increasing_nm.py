@@ -1,5 +1,6 @@
 '''in-place/overwrite reordering of raster bands based on wavelength..
 ..only reorder the fields that are in nm (but put them first)'''
+import shutil
 from misc import *
 args = sys.argv
 sep = os.path.sep
@@ -45,5 +46,16 @@ for i in range(len(bn)):
 s = s.strip()
 print(s)
 
+# now reorder the input file, to a temp file..
+ofn_tmp = fn[:-4] + '_tmp.bin'
+ofhn_tmp = fn[:-4] + '_tmp.hdr'
 
-sys.exit(1)
+run(' '.join(['python3',
+              pd + 'raster_shuffle_bands.py',
+              fn,
+              ofn_tmp]))
+
+# now overwrite the input file, and the input header file, with the created files!
+shutil.move(ofn_tmp, fn)
+shutil.move(ofhn_tmp, hdr)
+print('done')
