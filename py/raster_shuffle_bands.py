@@ -68,7 +68,6 @@ a = os.system(' '.join(['python3',
                         real_ohn]))
 os.remove(ohn) # cleanup fake file
 print('+w', real_ohn)
-sys.exit(1)
 
 '''write the binary'''
 npx = nrow * ncol   # read IEEE 32-bit floats
@@ -86,40 +85,4 @@ if len(bn) != len(pos):  # sanity check
 bn_new = [bn[pos[i]] for i in range(len(bn))]
 for b in bn:
     print(b)
-
-sys.exit(1)
-
-# read header and print parameters
-samples_1, lines_1, bands_1 = read_hdr(hdr_1)
-for f in ['samples_1', 'lines_1', 'bands_1']:
-    exec(f + ' = int(' + f +')')
-
-samples_2, lines_2, bands_2 = read_hdr(hdr_2)
-for f in ['samples_2', 'lines_2', 'bands_2']:
-    exec(f + ' = int(' + f +')')
-
-if not(samples_1 == samples_2 and lines_1 == lines_2 and bands_1 == bands_2):
-    err('input files dimension mismatch')
-
-if os.path.exists(ofn):
-    err("output file already exists: " + ofn)
-
-# read binary IEEE 32-bit float data
-npx = lines_1 * samples_1 # number of pixels
-d_1 = read_float(fn_1).reshape((bands_1, npx))
-d_2 = read_float(fn_2).reshape((bands_1, npx))
-print("d_1", d_1.shape)
-
-mu_1, mu_2 = np.zeros((bands_1)), np.zeros((bands_1))
-d_3 = np.zeros((bands_1, npx), dtype = np.float32)
-
-print("d_3", d_3.shape)
-
-for i in range(0, npx):
-    for j in range(0, bands_1):
-        d_3[j, i] = abs(d_1[j, i] - d_2[j, i])
-
-write_binary(d_3, ofn)
-ohfn = (ofn[:-4] + '.hdr') if (ofn[-4:] == '.bin') else (ofn + '.hdr')
-
-write_hdr(ohfn, samples_1, lines_1, bands_1)
+print('done')
