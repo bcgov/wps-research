@@ -53,21 +53,22 @@ safes = [w[1] for w in srt]
 safes = ['_'.join(s) for s in safes]
 
 cmds = []
-for safe in safes:
+for safe in safes: 
     print(safe)
     ''' ls -1 *.bin
      SENTINEL2_L2A_10m_EPSG_32610.bin
      SENTINEL2_L2A_20m_EPSG_32610.bin
      SENTINEL2_L2A_60m_EPSG_32610.bin
-     SENTINEL2_L2A_TCI_EPSG_32610.bin
-    '''
+     SENTINEL2_L2A_TCI_EPSG_32610.bin '''
     # have to make those files ourselves!
-
     gdfn = safe + sep + 'MTD_MSIL2A.xml'
-    if not os.path.exists(gdfn): err("expected file: " + gdfn)
-        
+    if not exists(gdfn):
+        err("expected file: " + gdfn)
+    
     for line in [x.strip() for x
-                 in os.popen('gdalinfo ' + gdfn + ' | grep SUBDATA').readlines()]:
+                 in os.popen('gdalinfo ' +
+                             gdfn +
+                             ' | grep SUBDATA').readlines()]:
         if len(line.split('.xml')) > 1:
             df = safe.split(sep)[-1]
             dfw = line.split(df)
@@ -75,7 +76,6 @@ for safe in safes:
             iden = dfw[0].split('=')[1].split(':')[0]
             ds = iden + ':' + df + dfw[1]
             of = (df + dfw[1]).replace(term, iden).replace(':', '_') + '.bin'
-
             cmd = ' '.join(['gdal_translate',
                             ds,
                             '--config GDAL_NUM_THREADS 8',
@@ -90,9 +90,7 @@ for safe in safes:
                 cmds.append(cmd)
     
     print(cmds)
-    parfor(run, cmds, 4)
-
-    sys.exit(1)
+    parfor(run, cmds, 4)  # 4 hw mem channels a good guess?
 
     bins = [x.strip() for x in os.popen("ls -1 " + safe + os.path.sep + "*m_EPSG_*.bin").readlines()]
     # don't pull the TCI true colour image. Already covered in 10m
