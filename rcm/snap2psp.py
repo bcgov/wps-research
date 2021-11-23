@@ -1,4 +1,5 @@
-'''convert .img files (with byte-order =1) to .bin files (with byte order 0)'''
+'''convert .img files (with byte-order =1) to .bin files (with byte order 0) by swapping byte order..
+..this is for converting .img files produced by SNAP, to PolSARPro format files'''
 import os
 import sys
 args = sys.argv
