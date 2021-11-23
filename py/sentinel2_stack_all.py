@@ -32,7 +32,7 @@ def err(m):
     print("Error: " + m); sys.exit(1)
 
 def run(c):
-    print(c); a = os.system(c)
+    print([c]); a = os.system(c)
     return a
     # if a != 0: err("failed to run: " + str(c))
 
