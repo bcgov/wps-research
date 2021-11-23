@@ -68,7 +68,7 @@ def get_band_names_line_idx(hdr):  # input: file data
     #  Output: line idx of lines with band names data in them!
     for i in range(len(lines)):
         if len(lines[i].split("band names =")) > 1:
-            print("lines[i]", lines[i])
+            # print("lines[i]", lines[i])
             return list(range(i, i + int(bands)))
     return []
 
