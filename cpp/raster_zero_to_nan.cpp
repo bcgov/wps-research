@@ -16,7 +16,7 @@ int main(int argc, char ** argv){
   for0(i, nrow){
     for0(j, ncol){
       ix = i * ncol + j;
-      bool all_zero = true
+      bool all_zero = true;
       for0(k, nband){
         if(dat[np * k + ix] != 0.){
 	  all_zero = false;
