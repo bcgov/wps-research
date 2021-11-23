@@ -47,7 +47,7 @@ for i in range(0, len(lines)):
 
 if nb != n_band_names:
     if n_band_names > nb:
-        print("n_band_names", n_band_names, "nb", nb)
+        # print("n_band_names", n_band_names, "nb", nb)
         bandname_lines = bandname_lines[:nb]
         bandname_lines[-1] = bandname_lines[-1].strip() + "}"
     if n_band_names > 0 and n_band_names < nb:
