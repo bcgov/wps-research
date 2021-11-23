@@ -26,13 +26,15 @@ int main(int argc, char ** argv){
   /* define output files, write header */
   str ofn(fn + str("_mlk.bin"));
   str ohfn(fn + str("_mlk.hdr"));
-  printf("nr2 %zu nc2 %zu nband %zu\n", nrow2, ncol2, nband);
+  printf("nr2 %zu nc2 %zu np2 %zu nband %zu\n", nrow2, ncol2, np2, nband);
   hwrite(ohfn, nrow2, ncol2, nband); // write output hdr
 
   /* init data buffer, open files */
   float * dat = (float *)falloc(np); // read one band at a time
   FILE * f = ropen(argv[1]); // open file for reading
   FILE * g = wopen(ofn.c_str()); // open output file to write
+  if(!f) err("failed to open input file");
+  if(!g) err("failed to open output file");
 
   for0(k, nband){
     size_t nr = fread(dat, sizeof(float), np, f); // read a band
@@ -66,9 +68,9 @@ int main(int argc, char ** argv){
       }
     }
 
-    size_t bw = fwrite(dat2, np2, sizeof(float), g);
+    size_t bw = fwrite(dat2, sizeof(float), np2, g);
     if(bw != np2){
-      printf("%zu %zu\n", bw, np2);
+      printf("written %zu np2 %zu\n", bw, np2);
       err("unexpected write count");
     }
   }
