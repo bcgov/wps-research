@@ -51,7 +51,7 @@ int main(int argc, char ** argv){
         ix1 = /*k * nrow * ncol + */ i * ncol + j;
         ix2 = /*k * nrow2 * ncol2 + */ ip * ncol2 + jp;
         float d = dat[ix1];
-        if(ix2 < nf2 && !isnan(d) && !isinf(d)){
+        if(ix2 < np2 && !isnan(d) && !isinf(d)){
           dat2[ix2] += d;
           count[ix2]++;
         }
