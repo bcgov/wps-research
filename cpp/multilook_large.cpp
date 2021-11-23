@@ -66,7 +66,7 @@ int main(int argc, char ** argv){
       }
     }
 
-    if(np != fwrite(dat2, np, sizeof(float), f)){
+    if(np2 != fwrite(dat2, np2, sizeof(float), f)){
       err("unexpected write count");
     }
   }
