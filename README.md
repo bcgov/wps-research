@@ -8,16 +8,16 @@ Methods and Systems for Image Analysis developed in partnership with:
 * BC Wildfire Service (BCWS) Predictive Services Unit (PSU)
 * Thompson Rivers University (TRU)
 
-in support of BC Wildfire Service (BCWS) Predictive Services Unit (PSU) program. See also: [Wildfire Predictive Services](https://github.com/bcgov/wps)
+supporting BC Wildfire Service (BCWS) Predictive Services Unit (PSU) program. See also: [Wildfire Predictive Services](https://github.com/bcgov/wps)
 
 Includes A) routines applying or implementing supervised and unsupervised classification, B) visualization and manipulation for high dimensional imagery as well as classification maps
 
-# Selected outputs
+# Sample outputs
 ##  Interactive mapping w BCWS FTL MVP software: end-to-end decision support system (DSS)
-<img src="output/20210127_mvp.png" width="650" height="264">
+<img src="data/output/20210127_mvp.png" width="650" height="264">
 
 ## Forest change detection w Canadian Space Agency (CSA) Radarsat Constellation Mission (RCM) compact-pol SAR data
-<img src="output/difference.gif" width="640">
+<img src="data/output/difference.gif" width="640">
 
 # BCWS FTL MVP
 [Please click here for entry point for BCWS FTL MVP software](https://github.com/bcgov/bcws-psu-research/blob/master/imv/)
@@ -28,8 +28,8 @@ Includes A) routines applying or implementing supervised and unsupervised classi
 * Adjustable high-contrast visualization and manipulation of multispectral imagery and classification maps
 
 # Sample exploratory results
-* [Predicting some BCGW layers from Sentinel-2 Imagery using RandomForest classifier](https://github.com/bcgov/bcws-psu-research/blob/master/data_combined/Readme.md)
-Other classifiers that are typically used Minimum Dist; Max Likelihood; Spectral Angle Mapper; Spectral Information Divergence; SVM; neural net
+* [Predicting some BCGW layers from Sentinel-2 Imagery using RandomForest classifier](https://github.com/bcgov/bcws-psu-research/blob/master/data/data_combined/Readme.md)
+Other classifiers that may be used: Minimum Dist; Max Likelihood; Spectral Angle Mapper; Spectral Information Divergence; SVM; neural net
 
 # Collaborators and Contributors:
 * Dana Hicks, BCWS
