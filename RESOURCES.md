@@ -20,6 +20,7 @@
 * [Mapping waterbodies from Space](https://www.youtube.com/watch?v=UJcS24thVvc)
 ## Data
 * [SPOT data](https://regards.cnes.fr/user/swh/modules/60)
+* [Sentinel2 data from GCP](https://cloud.google.com/storage/docs/public-datasets/sentinel-2)
 
 ## Related projects
 * [National Terrestrial Ecosystem monitoring system](https://irsslab.forestry.ubc.ca/research/ntems-national-terrestrial-ecosystem-monitoring-system/)
