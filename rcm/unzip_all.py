@@ -1,4 +1,5 @@
-'''parallel unzip of everything in the file sub-hierarchy'''
+'''parallel unzip of everything in the file sub-hierarchy..
+..needs to do a hierarchical search due to rcm_group_by_beam.py'''
 import os
 import sys
 import multiprocessing as mp
