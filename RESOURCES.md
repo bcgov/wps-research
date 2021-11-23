@@ -13,7 +13,7 @@
 * [Deforestation monitoring with Sentinel-2](https://www.youtube.com/watch?v=LtxcBcgGo1g)
 * [Veg monitoring for Agri w Sentinel2](https://www.youtube.com/watch?v=xEwy8UMGu7M)
 * [Active fire monitoring with S3](https://www.youtube.com/watch?v=l_WiXEsLHaE)
-
+* [Sentinel2 Users Manual](https://sentinel.esa.int/web/sentinel/user-guides/sentinel-2-msi)
 ## Hyperspectral
 ## LiDAR
 ## Hyperspectral and Radar combination
