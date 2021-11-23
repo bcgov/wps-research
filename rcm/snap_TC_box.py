@@ -60,7 +60,7 @@ for p in folders:
 
     if not exist(r_f):
         c, t = 'cat', in_3[:-3] + 'data' + sep + ('T' if not use_C else 'C') 
-        for i in (['22.bin', '33.bin', '11.bin'] if not use_C else ['C11.bin', 'C22.bin', 'C12_real.bin', 'C12_imag.bin']) :
+        for i in (['22.bin', '33.bin', '11.bin'] if not use_C else ['11.bin', '22.bin', '12_real.bin', '12_imag.bin']) :
             ti = t + i
             if not exist(ti):
                 run('sbo ' + (ti[:-3] + 'img') + ' ' + ti + ' 4')
