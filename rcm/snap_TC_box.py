@@ -1,5 +1,8 @@
-'''in SNAP /snappy.. perform terrain correction followed by box filter..
-..on all SLC folders in working directory'''
+'''in SNAP /snappy..: for COMPACT-pol datasets..
+..on all SLC folders in working directory:
+    1) perform terrain correction followed by
+    2) box filter..
+'''
 import os
 import sys
 sep = os.path.sep
@@ -9,14 +12,15 @@ def err(m):
     print("Error: " + m); sys.exit(1)
 
 def run(c):
-    print(c)
+    w = c.strip().split(' ')
+    print('run ' + w[0])
+    for i in range(1, len(w)):
+        print('    ' + w[i])
     a = os.system(c)
     if a != 0: err('command failed: ' + c)
 
-folders = [x.strip() for x in os.popen("ls -1 -d *SLC").readlines()]
-# snap = '/home/' + os.popen('whoami').read().strip() +
-snap = '/usr/local/snap/bin/gpt' # assume we installed snap
-ci = 1
+folders = [x.strip() for x in os.popen("ls -1 -d *SLC").readlines()] # snap = '/home/' + os.popen('whoami').read().strip()
+snap, ci = '/usr/local/snap/bin/gpt', 1 # assume we installed snap
 
 for p in folders:
     print('*** processing ' + str(ci) + ' of ' + str(len(folders)))
@@ -38,7 +42,7 @@ for p in folders:
                   '-PfilterSize=7',
                   in_2, '-t', in_3])  # -t is for output file
     
-    use_C = False
+    use_C = False  # default to T matrix.
     if not exist(in_2): run(c1)
     if not exist(in_3): run(c2)
     r_f, r_h = p + '_rgb.bin', p + '_rgb.hdr'
@@ -53,14 +57,22 @@ for p in folders:
             run('cp ' + hf + ' ' + r_h)
 
     dat = open(r_h).read().strip()
-    dat = dat.replace("bands = 1", "bands = 3")
+    dat = dat.replace("bands = 1", "bands = " + "3" if not use_C else "4")
     dat = dat.replace("byte order = 1", "byte order = 0")
-    dat = dat.replace("band names = { T11 }", "band names = {red, \ngreen,\nblue}")
+    if not use_C:
+        dat = dat.replace("band names = { T11 }",
+                          "band names = {T22,\nT33,\nT11}")
+    else:
+        dat = dat.replace("band names = { C11 }",
+                          "band names = {C11,\nC22,\nC12_real,\nC12_imag}")
+
     open(r_h, 'wb').write(dat.encode())  # write revised header
 
     if not exist(r_f):
-        c, t = 'cat', in_3[:-3] + 'data' + sep + ('T' if not use_C else 'C') 
-        for i in (['22.bin', '33.bin', '11.bin'] if not use_C else ['11.bin', '22.bin', '12_real.bin', '12_imag.bin']) :
+        file_pre = 'T' if not use_C else 'C'  # file prefix: T or C mtx
+        c, t = 'cat', in_3[:-3] + 'data' + sep + file_pre # ('T' if not use_C else 'C') 
+        file_i = ['22.bin', '33.bin', '11.bin'] if not use_C else ['11.bin', '22.bin', '12_real.bin', '12_imag.bin']
+        for i in file_i: # (['22.bin', '33.bin', '11.bin'] if not use_C else ['11.bin', '22.bin', '12_real.bin', '12_imag.bin']) :
             ti = t + i
             if not exist(ti):
                 run('sbo ' + (ti[:-3] + 'img') + ' ' + ti + ' 4')
