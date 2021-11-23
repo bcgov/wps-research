@@ -19,9 +19,20 @@ def run(c):
     a = os.system(c)
     if a != 0: err('command failed: ' + c)
 
-folders = [x.strip() for x in os.popen("ls -1 -d *SLC").readlines()] # snap = '/home/' + os.popen('whoami').read().strip()
-snap, ci = '/usr/local/snap/bin/gpt', 1 # assume we installed snap
+# folders = [x.strip() for x in os.popen("ls -1 -d *SLC").readlines()] # snap = '/home/' + os.popen('whoami').read().strip()
+folders = os.popen('find ./').readlines()
+folders_use = []
+for f in folders:
+    f = f.strip()
+    if f[-3:] == 'SLC':
+        if os.path.isdir(f):
+            folders_use.append(f.strip())
 
+for f in folders_use:
+    print(f)
+    
+snap, ci = '/usr/local/snap/bin/gpt', 1 # assume we installed snap
+sys.exit(1)
 for p in folders:
     print('*** processing ' + str(ci) + ' of ' + str(len(folders)))
     if os.path.abspath(p) == os.path.abspath('.'): continue
