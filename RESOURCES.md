@@ -13,13 +13,14 @@
 * [Deforestation monitoring with Sentinel-2](https://www.youtube.com/watch?v=LtxcBcgGo1g)
 * [Veg monitoring for Agri w Sentinel2](https://www.youtube.com/watch?v=xEwy8UMGu7M)
 * [Active fire monitoring with S3](https://www.youtube.com/watch?v=l_WiXEsLHaE)
-
+* [Sentinel2 Users Manual](https://sentinel.esa.int/web/sentinel/user-guides/sentinel-2-msi)
 ## Hyperspectral
 ## LiDAR
 ## Hyperspectral and Radar combination
 * [Mapping waterbodies from Space](https://www.youtube.com/watch?v=UJcS24thVvc)
 ## Data
 * [SPOT data](https://regards.cnes.fr/user/swh/modules/60)
+* [Sentinel2 data from GCP](https://cloud.google.com/storage/docs/public-datasets/sentinel-2)
 
 ## Related projects
 * [National Terrestrial Ecosystem monitoring system](https://irsslab.forestry.ubc.ca/research/ntems-national-terrestrial-ecosystem-monitoring-system/)

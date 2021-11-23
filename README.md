@@ -72,3 +72,6 @@ This repository is maintained by the BC Wildfire Service (BCWS) Predictive Servi
 # References
 [1]  Daniel Müllner, fastcluster: Fast Hierarchical, Agglomerative Clustering Routines for R and Python, Journal of Statistical Software 53 (2013), no. 9, 1–18, URL http://www.jstatsoft.org/v53/i09/
 [2] based on gltZpr by Nigel Stewart
+
+### Resources
+[Misc RS resources](https://github.com/bcgov/bcws-psu-research/blob/master/RESOURCES.md)
