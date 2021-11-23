@@ -37,6 +37,7 @@ int main(int argc, char ** argv){
   if(!g) err("failed to open output file");
 
   for0(k, nband){
+    printf("band %zu of %zu\n", k + 1, nband);
     size_t nr = fread(dat, sizeof(float), np, f); // read a band
     if(nr != np){
       printf("Err: number of floats read: %zu expected %zu\n", nr, np);
