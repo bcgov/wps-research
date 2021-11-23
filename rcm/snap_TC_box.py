@@ -1,3 +1,5 @@
+'''in SNAP /snappy.. perform terrain correction followed by box filter..
+..on all SLC folders in working directory'''
 import os
 import sys
 sep = os.path.sep
@@ -9,11 +11,11 @@ def err(m):
 def run(c):
     print(c)
     a = os.system(c)
-    if a != 0:
-        err('command failed: ' + c)
+    if a != 0: err('command failed: ' + c)
 
 folders = [x.strip() for x in os.popen("ls -1 -d *SLC").readlines()]
-snap = '/home/' + os.popen('whoami').read().strip() + '/snap/bin/gpt' # assume we installed snap
+# snap = '/home/' + os.popen('whoami').read().strip() +
+snap = '/usr/local/snap/bin/gpt' # assume we installed snap
 ci = 1
 
 for p in folders:
@@ -36,11 +38,19 @@ for p in folders:
                   '-PfilterSize=7',
                   in_2, '-t', in_3])  # -t is for output file
     
+    use_C = False
     if not exist(in_2): run(c1)
     if not exist(in_3): run(c2)
     r_f, r_h = p + '_rgb.bin', p + '_rgb.hdr'
     hf = in_3[:-3] + 'data' + sep + 'T11.hdr'
-    if not exist(r_h): run('cp ' + hf + ' ' + r_h)
+    if exist(hf):
+        if not exist(r_h):
+            run('cp ' + hf + ' ' + r_h)
+    hf = in_3[:-3] + 'data' + sep + 'C11.hdr'
+    if exist(hf):
+        use_C = True
+        if not exist(r_h):
+            run('cp ' + hf + ' ' + r_h)
 
     dat = open(r_h).read().strip()
     dat = dat.replace("bands = 1", "bands = 3")
@@ -49,8 +59,8 @@ for p in folders:
     open(r_h, 'wb').write(dat.encode())  # write revised header
 
     if not exist(r_f):
-        c, t = 'cat', in_3[:-3] + 'data' + sep + 'T'
-        for i in ['22.bin', '33.bin', '11.bin']:
+        c, t = 'cat', in_3[:-3] + 'data' + sep + ('T' if not use_C else 'C') 
+        for i in (['22.bin', '33.bin', '11.bin'] if not use_C else ['C11.bin', 'C22.bin', 'C12_real.bin', 'C12_imag.bin']) :
             ti = t + i
             if not exist(ti):
                 run('sbo ' + (ti[:-3] + 'img') + ' ' + ti + ' 4')
