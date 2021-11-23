@@ -95,7 +95,7 @@ for safe in safes:
     bins = [x.strip() for x in os.popen("ls -1 " +
                                         safe +
                                         sep +
-                                        "*m_EPSG_32609.bin").readlines()]
+                                        "*m_EPSG_*.bin").readlines()]
     # don't pull the TCI true colour image?  Already covered in 10m
 
     print('extract:')
