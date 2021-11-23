@@ -312,7 +312,7 @@ float * bread(str bfn, size_t nrow, size_t ncol, size_t nband){
   size_t nf = nrow * ncol * nband;
   float * dat = falloc(nf);
   size_t nr = fread(dat, nf * (size_t)sizeof(float), 1, f);
-  if(nr != 1) err("failed to read data");
+  if(nr != 1) err("misc.cpp: bread(): failed to read data");
   fclose(f);
   return dat;
 }
