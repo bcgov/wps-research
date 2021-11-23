@@ -6,14 +6,13 @@ import math
 import struct
 import numpy as np
 import os.path as path
+import multiprocessing as mp
 import matplotlib.pyplot as plt
-
 args = sys.argv
 
 # print message and exit
 def err(c):
-    print('Error: ' + c)
-    sys.exit(1)
+    print('Error:', c); sys.exit(1)
 
 def run(c):
     print('run("' + str(c) + '")')
@@ -22,19 +21,15 @@ def run(c):
         err("command failed to run:\n\t" + c)
     return a
 
-def exist(f):
-    return os.path.exists(f)
+def exist(f): return os.path.exists(f)
+def exists(f): return os.path.exists(f)
 
-def exists(f):
-    return exist(f)
-
-def hdr_fn(bin_fn):
-    # return filename for header file, given name for bin file
+def hdr_fn(bin_fn):  # return filename for hdr file, given binfile name
     hfn = bin_fn[:-4] + '.hdr'
     if not exist(hfn):
         hfn2 = bin_fn + '.hdr'
         if not exist(hfn2):
-            err("didn't find header file at: " + hfn + " or: " + hfn2)
+            err("header not found at:", hfn, "or:", hfn2)
         return hfn2
     return hfn
 
@@ -105,16 +100,12 @@ def wopen(fn):
     return f
 
 def read_binary(fn):
-    hdr = hdr_fn(fn)
-
-    # read header and print parameters
+    hdr = hdr_fn(fn) # read header and print parameters
     samples, lines, bands = read_hdr(hdr)
     samples, lines, bands = int(samples), int(lines), int(bands)
     print("\tsamples", samples, "lines", lines, "bands", bands)
-
     data = read_float(fn)
     return samples, lines, bands, data
-
 
 def write_binary(np_ndarray, fn): # write a numpy array to ENVI format type 4
     of = wopen(fn)
@@ -142,22 +133,17 @@ def hist(data):
         count[d] = 1 if d not in count else count[d] + 1
     return count
 
-
 # two-percent linear, histogram stretch. N.b. this impl. does not preserve colour ratios
 def twop_str(data, band_select = [3, 2, 1]):
     samples, lines, bands = data.shape
     rgb = np.zeros((samples, lines, 3))
 
     for i in range(0, 3):
-        # extract a channel
-        rgb[:, :, i] = data[:, :, band_select[i]]
+        rgb[:, :, i] = data[:, :, band_select[i]]  # pull a channel
+        values = rgb[:, :, i].reshape(samples * lines).tolist()  # slice, reshape
+        values.sort()  # sort
         
-        # slice, reshape and sort
-        values = rgb[:, :, i].reshape(samples * lines).tolist() 
-        values.sort()
-        
-        # sanity check
-        if values[-1] < values[0]:
+        if values[-1] < values[0]:  # sanity
             err("failed to sort")
 
         # so-called "2% linear stretch
@@ -172,10 +158,8 @@ def twop_str(data, band_select = [3, 2, 1]):
             rgb[:, :, i] /= rng
     return rgb
 
-def parfor(my_function, my_inputs):
-    # evaluate a function in parallel, and collect the results
-    import multiprocessing as mp
-    pool = mp.Pool(mp.cpu_count())
+def parfor(my_function, my_inputs, n_thread=mp.cpu_count()): # eval fxn in parallel, collect
+    pool = mp.Pool(n_thread)
     result = pool.map(my_function, my_inputs)
     return(result)
 
