@@ -176,7 +176,8 @@ for safe in safes:
            sfn]
     run(' '.join(cmd))
     
-    raster_files.append(sfn + '_reorder.bin')
+    raster_files.append(sfn) # reorder is "in-place"... so not + '_reorder.bin')
+    # sys.exit(1) # would turn this on to debug one frame
 
     # reorder bands should go here
     # for s in safes:
