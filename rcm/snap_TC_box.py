@@ -50,14 +50,18 @@ for p in folders:
     if exist(hf):
         if not exist(r_h):
             run('cp ' + hf + ' ' + r_h)
-    hf = in_3[:-3] + 'data' + sep + 'C11.hdr'
-    if exist(hf):
-        use_C = True
-        if not exist(r_h):
-            run('cp ' + hf + ' ' + r_h)
+
+    else:
+        hf = in_3[:-3] + 'data' + sep + 'C11.hdr'
+        if exist(hf):
+            use_C = True
+            if not exist(r_h):
+                run('cp ' + hf + ' ' + r_h)
+        else:
+            err('not found', hf)
 
     dat = open(r_h).read().strip()
-    dat = dat.replace("bands = 1", "bands = " + "3" if not use_C else "4")
+    dat = dat.replace("bands = 1", "bands = " + ("3" if not use_C else "4"))
     dat = dat.replace("byte order = 1", "byte order = 0")
     if not use_C:
         dat = dat.replace("band names = { T11 }",
@@ -67,6 +71,8 @@ for p in folders:
                           "band names = {C11,\nC22,\nC12_real,\nC12_imag}")
 
     open(r_h, 'wb').write(dat.encode())  # write revised header
+    print(r_h, ':')
+    a = os.system('cat ' + r_h)
 
     if not exist(r_f):
         file_pre = 'T' if not use_C else 'C'  # file prefix: T or C mtx
@@ -80,3 +86,5 @@ for p in folders:
         c += ' > ' + r_f 
         run(c)
     ci += 1
+
+
