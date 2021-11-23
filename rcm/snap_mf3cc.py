@@ -1,6 +1,5 @@
 '''assuming we are inside a .dim folder from snap for compact-pol data..
-
-apply Dey et al [1] mf3cc compact-pol decom'''
+apply Dey et al [1] mf3cc compact-pol decom, C implementation'''
 import os
 import sys
 args = sys.argv
@@ -13,15 +12,17 @@ def run(c):
     print(c); a = os.system(c)
     if a != 0: err("command failed:\n\t" + c)
 
-print("snap_m3fcc # optional param: window size: default 9 # needs to be run from inside a .dim folder for compact-pol data")
 nwin = 9
+print("snap_m3fcc # optional param: window size: default 9 # needs to be run from inside a .dim folder for compact-pol data")
 if len(args) > 1: nwin = int(args[1])
 
 ''' input files:'''
 ins = ['i_RCH2.img', 'i_RCH.img', 'q_RCH2.img', 'q_RCH.img']
 for i in ins:
-    if not os.path.exists(i): err("req'd input file: " + i)
-if not os.path.exists("i_RCH.hdr"): err("req'd input file: i_RCH.hdr")
+    if not os.path.exists(i):
+        err("req'd input file: " + i)
+if not os.path.exists("i_RCH.hdr"):
+    err("req'd input file: i_RCH.hdr")
 
 # swap byte order from european to american convention
 run("snap2psp ./")
@@ -67,25 +68,13 @@ lines = ['ENVI', # write a header for the stack
 open('stack.hdr', 'wb').write(('\n'.join(lines)).encode())
 
 # clean up some intermediary files
-d = ['C11.bin',
-     'C12_imag.bin',
-     'C12_real.bin',
-     'C22.bin',
-     'ch.bin',
-     'cv.bin',
-     'i_RCH2.bin',
-     'i_RCH.bin',
-     'Pd_CP.bin',
-     'Ps_CP.bin',
-     'Pv_CP.bin',
-     'q_RCH2.bin',
-     'q_RCH.bin',
-     'Theta_CP.bin']
-
-for i in d:
-    run('rm ' + i)
+d = ['C11.bin', 'C12_imag.bin', 'C12_real.bin', 'C22.bin',
+     'ch.bin', 'cv.bin',
+     'i_RCH2.bin', 'i_RCH.bin',
+     'Pd_CP.bin', 'Ps_CP.bin', 'Pv_CP.bin',
+     'q_RCH2.bin', 'q_RCH.bin', 'Theta_CP.bin']
+for i in d: run('rm ' + i)
 
 '''
 [1] Dey et al S. Dey, A. Bhattacharya, D. Ratha, D. Mandal and A. C. Frery, "Target Characterization and Scattering Power Decomposition for Full and Compact Polarimetric SAR Data," in IEEE Transactions on Geoscience and Remote Sensing, doi: https://doi.org/10.1109/TGRS.2020.3010840.
-
 [2] Cloude et al "Compact Decomposition Theory" IEEE GRSL 2011'''
