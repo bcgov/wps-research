@@ -1,10 +1,17 @@
 from misc import *
 
 if len(args) < 2:
-    err("python3 envi_header_cleanup.py [input envi header filename .hdr]")
-
-if not exist(args[1]):
-    err("file not found: " + args[1])
+    # err("python3 envi_header_cleanup.py [input envi header filename .hdr]")
+    lines = [x.strip() for x in os.popen('ls -1 *.hdr').readlines()]
+    found = False
+    for line in lines:
+        if exist(line):
+            c = 'python3 ' + __file__ + ' ' + line
+            print(c)
+            found = True
+    if not found:
+        err("file not found: " + args[1])
+    sys.exit(0)
 
 data = open(args[1]).read().strip()
 n_band_names, in_band_names, nb = 0, False, 0
