@@ -1,3 +1,4 @@
+# the -n is important on gdal_merge otherwise data gets stomped!
 import os
 sep = os.path.sep
 s = ['5MCP19/1/20210710/rgb.bin',
@@ -33,7 +34,7 @@ for i in s:
 c = []
 for k in d:
     print(k, d[k])
-    c += ['gdal_merge.py -o ' + k + '.bin -of ENVI -ot Float32 ' + (' '.join(d[k]))]
+    c += ['gdal_merge.py -n -o ' + k + '.bin -of ENVI -ot Float32 ' + (' '.join(d[k]))]
 
 import multiprocessing as mp
 def run(c):
