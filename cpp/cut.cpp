@@ -9,7 +9,7 @@ but does not keep header / geo info */
 #include"misc.h"
 
 int main(int argc, char ** argv){
-  if(argc < 3) err("cut [input binary file name] [startx] [starty] [endx] [endy] [output file name] ");
+  if(argc < 3) err("cut [input binary file name] [startx] [starty] [endx] [endy] [output file name]");
 
   str fn(argv[1]); // input file name
   str hfn(hdr_fn(fn)); // auto-detect header file name
