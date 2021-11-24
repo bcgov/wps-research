@@ -35,7 +35,6 @@ int main(int argc, char ** argv){
   FILE * f = fopen(fn.c_str(), "wb");
   if(!f) err("failed to open output file");
   fwrite(dat, sizeof(float) * nrow * ncol * nband, 1, f); // write data
-
   fclose(f);
   free(dat);
   return 0;
