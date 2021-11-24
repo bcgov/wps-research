@@ -25,10 +25,14 @@ int main(int argc, char ** argv){
   double * total_squared = dalloc(nband);
   double * stdev = dalloc(nband);
  
+  double * n_inf = dalloc(nband); // count infinity
+  double * n_nan = dalloc(nband); // count nan
+
   for0(i, nband){
     fmax[i] = DBL_MIN;
     fmin[i] = DBL_MAX;
     total[i] = n[i] = avg[i] = total_squared[i] = stdev[i] = 0.;
+    n_inf[i] = n_nan[i] = 0.;
   }
 
   for0(i, nrow){
@@ -36,7 +40,6 @@ int main(int argc, char ** argv){
     
     for0(j, ncol){
       ij = ix + j;
-      
       for0(k, nband){
         ik = ij + k * np;
         d = dat[ik];
@@ -47,6 +50,10 @@ int main(int argc, char ** argv){
           total[k] += d;
           n[k] ++;
         }
+	else{
+	  if(isinf(d)) n_inf++;
+	  if(isnan(d)) n_nan++;
+	}
       }
     }
   }
@@ -73,8 +80,8 @@ int main(int argc, char ** argv){
 
   for0(k, nband) stdev[k] = sqrt(total_squared[k] / n[k]);
   
-  printf("band_i,Min,Max,Mean,Stdv");
-  for0(k, nband) printf("\n%d,%e,%e,%e,%e", k, fmin[k], fmax[k], avg[k], stdev[k]);
+  printf("band_i,Min,Max,Mean,Stdv,n_nan,n_inf");
+  for0(k, nband) printf("\n%d,%e,%e,%e,%e", k, fmin[k], fmax[k], avg[k], stdev[k], n_nan[k], n_inf[k]);
   printf("\n");
   return 0;
 }
