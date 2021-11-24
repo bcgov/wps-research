@@ -32,7 +32,8 @@ for f in folders_use:
     print(f)
     
 snap, ci = '/usr/local/snap/bin/gpt', 1 # assume we installed snap
-sys.exit(1)
+folders = folders_use
+
 for p in folders:
     print('*** processing ' + str(ci) + ' of ' + str(len(folders)))
     if os.path.abspath(p) == os.path.abspath('.'): continue
