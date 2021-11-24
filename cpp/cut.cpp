@@ -14,7 +14,7 @@ int main(int argc, char ** argv){
   str fn(argv[1]); // input file name
   str hfn(hdr_fn(fn)); // auto-detect header file name
   str ofn(argv[6]);
-  str ohfn(hdr_fn(ofn), create=true);
+  str ohfn(hdr_fn(ofn, true));  // create=true! 
  
   printf("input file: %s\n", fn.c_str());
   printf("outputfile: %s\n", ofn.c_str());
