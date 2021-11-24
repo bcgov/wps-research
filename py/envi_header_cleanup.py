@@ -7,7 +7,7 @@ if len(args) < 2:
     for line in lines:
         if exist(line):
             c = 'python3 ' + __file__ + ' ' + line
-            print(c)
+            run(c)
             found = True
     if not found:
         err("file not found: " + args[1])
