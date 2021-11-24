@@ -1,3 +1,4 @@
+# now translate back to type4 after projecting onto the first date!
 gdal_translate 5MCP13_20210715.tif -of ENVI -ot Float32 5MCP13_20210715.bin & 
 gdal_translate 5MCP13_20210719.tif -of ENVI -ot Float32 5MCP13_20210719.bin &
 gdal_translate 5MCP18_20210718.tif -of ENVI -ot Float32 5MCP18_20210718.bin &

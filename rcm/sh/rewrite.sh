@@ -1,3 +1,4 @@
+# rewrite the data to overcome an error encountered in reprojecting
 gdal_translate 5MCP13_20210715.bin -of GTiff -ot Float32 -co "TILED=YES" 5MCP13_20210715.tif &
 gdal_translate 5MCP13_20210719.bin -of GTiff -ot Float32 -co "TILED=YES" 5MCP13_20210719.tif &
 gdal_translate 5MCP18_20210718.bin -of GTiff -ot Float32 -co "TILED=YES" 5MCP18_20210718.tif &
