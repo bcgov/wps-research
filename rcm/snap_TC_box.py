@@ -2,7 +2,9 @@
 ..on all SLC folders in working directory:
     1) perform terrain correction followed by
     2) box filter..
-'''
+
+
+This actually placed the C2 matrix, in a ENVI/PolSARPro file'''
 import os
 import sys
 sep = os.path.sep
