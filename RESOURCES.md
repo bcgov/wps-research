@@ -8,12 +8,14 @@
 * [Change detection using S1 in QGIS](https://asf.alaska.edu/how-to/data-recipes/change-detection-using-sar-data-in-qgis/)
 * [Data prep for Stamps permanent scatterer interferometry](https://www.youtube.com/watch?v=Xy7Y4Ea5mOo)
 * [6th ESA radar polarimetry training](https://eo4society.esa.int/resources/6th-advanced-polarimetry-2021/)
+* [StaMPS](http://homepages.see.leeds.ac.uk/~earahoo/stamps/)
 ## Multispectral
 * [Burned area mapping using S2](https://www.youtube.com/watch?v=_swGA_61kNk)
 * [Deforestation monitoring with Sentinel-2](https://www.youtube.com/watch?v=LtxcBcgGo1g)
 * [Veg monitoring for Agri w Sentinel2](https://www.youtube.com/watch?v=xEwy8UMGu7M)
 * [Active fire monitoring with S3](https://www.youtube.com/watch?v=l_WiXEsLHaE)
 * [Sentinel2 Users Manual](https://sentinel.esa.int/web/sentinel/user-guides/sentinel-2-msi)
+* [SentinelHub Playground](https://apps.sentinel-hub.com/sentinel-playground/?source=S2L2A&lat=49.14600819722735&lng=-119.542236328125&zoom=11&preset=4_FALSE_COLOR__URBAN&layers=B01,B02,B03&maxcc=100&gain=1.0&gamma=1.0&time=2021-01-01%7C2021-07-21&atmFilter=&showDates=false)
 ## Hyperspectral
 ## LiDAR
 ## Hyperspectral and Radar combination
