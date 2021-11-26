@@ -21,7 +21,8 @@
 ## Data
 * [SPOT data](https://regards.cnes.fr/user/swh/modules/60)
 * [Sentinel2 data from GCP](https://cloud.google.com/storage/docs/public-datasets/sentinel-2)
-* *[EODMS python api](https://pypi.org/project/eodms-api-client/)
+* [EODMS python api](https://pypi.org/project/eodms-api-client/)
+* [Active Floods in Canada](https://open.canada.ca/data/en/dataset/9cad712a-5ac5-4248-b7d7-2db1a3892509)
 
 ## Related projects
 * [National Terrestrial Ecosystem monitoring system](https://irsslab.forestry.ubc.ca/research/ntems-national-terrestrial-ecosystem-monitoring-system/)
