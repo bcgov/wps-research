@@ -35,8 +35,8 @@
 
 ## Stats and Algorithms
 * [tSNE embedding](https://scikit-learn.org/stable/modules/generated/sklearn.manifold.TSNE.html)
-* [isotonic reg](https://en.wikipedia.org/wiki/Isotonic_regression)
-*[Overview of clustering methods: scikit-learn](https://scikit-learn.org/stable/modules/clustering.html)
+* [isotonic regression](https://en.wikipedia.org/wiki/Isotonic_regression)
+* [Overview of clustering methods: scikit-learn](https://scikit-learn.org/stable/modules/clustering.html)
 ## coding
 * [matplotlib animation](http://jakevdp.github.io/blog/2012/08/18/matplotlib-animation-tutorial/)
 * [matplotlib figure](https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.figure.html)
