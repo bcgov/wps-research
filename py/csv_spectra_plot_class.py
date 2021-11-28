@@ -9,7 +9,7 @@ import csv
 
 
 def read_csv(f):
-    f, data, i = 'survey_label.csv', [], 0
+    data, i = [], 0
     reader = csv.reader(open(f), delimiter=',', quotechar='"')
 
     for row in reader:
