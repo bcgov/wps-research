@@ -88,6 +88,6 @@ for i in range(N):
              #label=value)
     # don't forget to put the spectra field labels on the bottom as ticks!
 #plt.legend() # loc='lower left') # upper right')
-# plt.tight_layout()
 plt.xticks(x, [fields[i] for i in spec_fi], rotation='vertical')
+plt.tight_layout()
 plt.savefig("spectra_plot.png")
