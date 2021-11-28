@@ -57,4 +57,3 @@ for i in range(0, len(X)):
 #  plt.plot(X,Y, 'x')
 plt.show()
 # fig.savefig('plotcircles.png', dpi = 3000)
-
