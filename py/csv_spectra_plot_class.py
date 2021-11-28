@@ -68,21 +68,24 @@ values = lookup.keys()
 reverse_lookup = {lookup[x]: x for x in values}
 print("lookup", lookup)   # take categorical value and encode it as int 0,1,..
 print("revers", reverse_lookup)  # recover original value from int code!
-plt.figure(figsize=(8*1.5,6*1.5))
+
+'''now do the actual plotting'''
+plt.figure(figsize=(8*2.5,6*2.5))
 plt.title("Spectra aggregated by categorical field: " + args[2])
 plt.ylabel("Digital number")
 plt.xlabel("Date, resolution(m) and Frequency (nm)")
 
-x = range(N)
+x = range(len(spec_fi))
 for i in range(N):
     value = data[fi][i] # categorical value
-    spectrum = [data[i][j] for j in spec_fi]
-    plt.plot(x, spectrum,
+    spectrum = [data[j][i] for j in spec_fi]
+    plt.plot(x,
+             spectrum,
              marker=markers[lookup[value]],
-             color=colors[lookup[value]],
-             label=value)
+             color=colors[lookup[value]])
+             #label=value)
     # don't forget to put the spectra field labels on the bottom as ticks!
-plt.legend() # loc='lower left') # upper right')
+#plt.legend() # loc='lower left') # upper right')
 plt.tight_layout()
-plt.show()
+plt.savefig("spectra_plot.png")
 
