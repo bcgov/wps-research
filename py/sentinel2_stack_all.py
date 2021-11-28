@@ -186,4 +186,4 @@ for safe in safes:
 # cat the bin files together, combining headers
 cmd = ['python3', pd + 'raster_stack.py']
 cmd = cmd + raster_files + ['raster.bin']
-a = os.system(' '.join(cmd))
+run(' '.join(cmd))
