@@ -74,18 +74,20 @@ plt.figure(figsize=(8*2.5,6*2.5))
 plt.title("Spectra aggregated by categorical field: " + args[2])
 plt.ylabel("Digital number")
 plt.xlabel("Date, resolution(m) and Frequency (nm)")
+plt.gca().axes.get_yaxis().set_visible(False)
 
 x = range(len(spec_fi))
 for i in range(N):
     value = data[fi][i] # categorical value
     spectrum = [data[j][i] for j in spec_fi]
+    print(value, spectrum)
     plt.plot(x,
              spectrum,
-             marker=markers[lookup[value]],
+             # marker=markers[lookup[value]],
              color=colors[lookup[value]])
              #label=value)
     # don't forget to put the spectra field labels on the bottom as ticks!
 #plt.legend() # loc='lower left') # upper right')
-plt.tight_layout()
+# plt.tight_layout()
+plt.xticks(x, [fields[i] for i in spec_fi], rotation='vertical')
 plt.savefig("spectra_plot.png")
-
