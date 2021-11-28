@@ -4,7 +4,6 @@
 
 usage: python3 window.py [radius (m)] [image resolution (m)]
 
-
 e.g. to calculate the x,y coordinate offsets for a round window of radius 30, 
 for a sensor with resolution 10m:
     python3 window.py 30 10 
@@ -35,11 +34,10 @@ for i in range(xmin, xmax + 1):
         y = (j - (xmax/2)) * resolution
         d = math.sqrt(x*x + y*y)
     
-        if d == 0.: # tackle centre point separately
+        if d == 0.: # tackle centre point separately. Did we tackle it?
             continue
 
-        if d <= dist_max:
-            # print(x,y)
+        if d <= dist_max: # print(x,y)
             X.append(x)
             Y.append(y)
 
