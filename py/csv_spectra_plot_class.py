@@ -26,15 +26,18 @@ def read_csv(f):
         if i % 1000 == 0:
             print(i)
     fields = [x.strip().replace(' ', '_') for x in fields] # spaces are always bad!
-    return data
+    return fields, data
 
 
-data = read_csv(args[1])
-fi = args[2]
-fields = data.keys()
-if fi not in fields:
+fields, data = read_csv(args[1])
+nf = len(fields)  # number of fields
+f_i = {fields[i]:i for i in range(nf)}
+if args[2] not in fields:
     print("Error: field not found:", fi)
     print(fields)
+fi = f_i[args[2]]  # col index of selected field for legending
 
-
+spec_fi = []
+for i in range(nf):
+    
 
