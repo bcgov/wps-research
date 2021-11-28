@@ -888,12 +888,16 @@ class glImage: public glPlottable{
         glColor3f(1, 0, 0);
         glLineWidth(1.);
 
+	// vertical of crosshair
         glBegin(GL_LINES);
-        glVertex2f(x, y - w); glVertex2f(x, y + w);
+        glVertex2f(x, y - w);
+	glVertex2f(x, y + w);
         glEnd();
 
+	// horizontal of crosshair
         glBegin(GL_LINES);
-        glVertex2f(x - w, y); glVertex2f(x + w, y);
+        glVertex2f(x - w, y);
+	glVertex2f(x + w, y);
         glEnd();
 
         myParent->drawText(x, nr - y, tgt_label.c_str());
