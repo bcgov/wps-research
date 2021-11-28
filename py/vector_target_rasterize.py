@@ -1,5 +1,7 @@
-'''rasterize a target file (one hot encoding)..tgt file of the format used in the MVP software'''
+'''rasterize a target file (one hot encoding)..
+..tgt file of the format used in the MVP software
 
+what was this script for? '''
 from misc import * 
 
 if len(args) < 3:
@@ -41,7 +43,6 @@ for line in lines[1:]:
         i = row + di
         for dj in range(-1, 2, 1):
             j = col + dj
-
             d_s[label][i * nc + j] = 1.
 
 for label in d_s: # write a mask for each label
