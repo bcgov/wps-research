@@ -26,6 +26,9 @@ try:
 except Exception:
     err("please check input filename format, needs extension .xxx")
 
+if os.path.exists(ofn):
+    err('output already exists: check file:' + ofn)
+
 input_raster, output_raster = fn, ofn
 cmd = ['gdalwarp -of ENVI -ot Float32 ',
         '-t_srs',
