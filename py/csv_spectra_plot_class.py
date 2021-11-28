@@ -48,6 +48,8 @@ if args[2] not in fields:
     print(fields)
 fi = f_i[args[2]]  # col index of selected field for legending
 
+field_label = args[2].strip().replace(' ', '-')
+
 spec_fi = []
 for i in range(nf):
     if fields[i][-2:] == 'nm':
@@ -76,18 +78,82 @@ plt.ylabel("Digital number")
 plt.xlabel("Date, resolution(m) and Frequency (nm)")
 plt.gca().axes.get_yaxis().set_visible(False)
 
+max_y, min_y = 0, 0
+ci = 0
+for i in range(N):
+    value = data[fi][i]
+    spec = [float(data[j][i]) for j in spec_fi]
+    for j in range(len(spec)):
+        y = spec[j]
+        max_y = y if y > max_y else max_y
+        min_y = y if y < min_y else min_y
+        ci += 1
+
+print("ymin", min_y, "ymax", max_y)
+
+used_value=set()
 x = range(len(spec_fi))
 for i in range(N):
     value = data[fi][i] # categorical value
-    spectrum = [data[j][i] for j in spec_fi]
+    spectrum = [float(data[j][i]) for j in spec_fi]
+    print(value, spectrum)
+    plt.plot(x,
+             spectrum, # marker=markers[lookup[value]],
+             color=colors[lookup[value]],
+             label=(value if value not in used_value else None))
+    used_value.add(value)
+    # don't forget to put the spectra field labels on the bottom as ticks!
+#plt.legend() # loc='lower left') # upper right')
+plt.xticks(x, [fields[i] for i in spec_fi], rotation='vertical')
+plt.legend()
+plt.tight_layout()
+fn = "spectra_plot_" + field_label + ".png"
+print("+w", fn)
+plt.savefig(fn)
+
+'''now do the actual plotting'''
+plt.figure(figsize=(8*2.5,6*2.5))
+plt.title("Spectra aggregated by categorical field: " + args[2])
+plt.ylabel("Digital number")
+plt.xlabel("Date, resolution(m) and Frequency (nm)")
+# plt.gca().axes.get_yaxis().set_visible(False)
+plt.yticks(rotation=90)
+'''
+max_y, min_y = 0, 0
+ci = 0
+for i in range(N):
+    value = data[fi][i]
+    spec = [(data[j][i]) for j in spec_fi]
+    for j in range(len(spec)):
+        y = spec[j]
+        max_y = y if y > max_y else max_y
+        min_y = y if y < min_y else min_y
+        ci += 1
+
+print("ymin", min_y, "ymax", max_y)
+'''
+used_value = set()
+x = range(len(spec_fi))
+for i in range(N):
+    value = data[fi][i] # categorical value
+    spectrum = [(data[j][i]) for j in spec_fi]
     print(value, spectrum)
     plt.plot(x,
              spectrum,
              # marker=markers[lookup[value]],
-             color=colors[lookup[value]])
-             #label=value)
+             color=colors[lookup[value]],
+             label=(value if value not in used_value else None))
+    used_value.add(value)
     # don't forget to put the spectra field labels on the bottom as ticks!
 #plt.legend() # loc='lower left') # upper right')
 plt.xticks(x, [fields[i] for i in spec_fi], rotation='vertical')
+plt.legend()
 plt.tight_layout()
-plt.savefig("spectra_plot.png")
+fn = "spectra_plot_discrete_" + field_label + ".png"
+print("+w", fn)
+plt.savefig(fn)
+
+
+
+
+
