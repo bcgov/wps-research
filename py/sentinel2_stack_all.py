@@ -6,11 +6,8 @@ Assumption:
 A) extract Sentinel2, B) resample to 10m c) prefix bandnames with dates..
    D) stack everything!
    E) worry about masks later
-
 Need xml reader? such as:
 https://docs.python.org/3/library/xml.etree.elementtree.html
-
-
 MAKE SURE WE SORTED BY TIME AND FREQUENCY !!!'''
 import os
 import sys
@@ -41,7 +38,6 @@ raster_files = [] # these will be the final rasters to concatenate
 
 '''before processing, sort zip files by date. Note, they would be already except the prefix
 varies with S2A / S2B'''
-
 safes, files = [], [x.strip() for x in os.popen('ls -1').readlines()]
 for f in files:
     if f[-5:] == '.SAFE':
@@ -100,15 +96,22 @@ for safe in safes:
 
     print('extract:')
     for b in bins:
-        print('  ' + b)
+        print('* ' + b)
 
-    if len(bins) != 3:
+    if len(bins) < 3:
+        print("unexpected number of bin files (expected 3)")
         continue
         err('unexpected number of bin files (expected 3): ' +
             str('\n'.join(bins)))
 
-    m10, m20, m60 = bins
+    m10 = bins[0]  # 10m doesn't get resampled so should be first
+    # m10, m20, m60 = bins
+    m20, m60 = m10.replace('_10m_', '_20m_'),\
+               m10.replace('_10m_', '_60m_')
     print('10m:', m10); print('20m:', m20); print('60m:', m60)
+    if not exists(m10): err("file not found:", m10)
+    if not exists(m20): err("file not found:", m20)
+    if not exists(m60): err("file not found", m60)
 
     # names for files resampled to 10m
     m20r, m60r = (m20[:-4] + '_10m.bin',
@@ -121,8 +124,9 @@ for safe in safes:
                 src, # source image
                 ref, # project onto
                 dst] # result image
-        #if not exists(dst): 
-        run(' '.join(cmd))
+        print(cmd)
+        if not exists(dst): 
+            run(' '.join(cmd))
         return 0
 
     a = parfor(resample,
@@ -132,7 +136,7 @@ for safe in safes:
 
     sfn = (safe + sep + m10.split(sep)[-1].replace("_10m", "")[:-4]
             + '_10m.bin')  # name of stacked file
-    print(sfn)
+    print("sfn", sfn)
     cmd = ['cat', # cat bands together, remember to cat the header files after
             m10,
             m20r,
