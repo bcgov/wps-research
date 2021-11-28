@@ -6,12 +6,13 @@ input: field label of class..
 import os
 import sys
 import csv
-
+args = sys.argv
 
 def read_csv(f):
     data, i = [], 0
-    reader = csv.reader(open(f), delimiter=',', quotechar='"')
-
+    reader = csv.reader(open(f),
+                        delimiter=',',
+                        quotechar='"')
     for row in reader:
         row = [x.strip() for x in row]
         if i == 0:
@@ -24,11 +25,16 @@ def read_csv(f):
         i += 1
         if i % 1000 == 0:
             print(i)
-
     fields = [x.strip().replace(' ', '_') for x in fields] # spaces are always bad!
     return data
 
 
+data = read_csv(args[1])
+fi = args[2]
+fields = data.keys()
+if fi not in fields:
+    print("Error: field not found:", fi)
+    print(fields)
 
 
 
