@@ -12,6 +12,8 @@ import matplotlib.pyplot as plt
 from misc import read_csv
 from misc import markers
 from misc import colors
+from misc import exist
+from misc import err
 args = sys.argv
 
 '''read the csv and locate the spectra'''
@@ -22,7 +24,6 @@ if args[2] not in fields:
     print("Error: field not found:", fi)
     print(fields)
 fi = f_i[args[2]]  # col index of selected field for legending
-
 field_label = args[2].strip().replace(' ', '-')
 
 spec_fi = []

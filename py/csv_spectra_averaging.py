@@ -10,17 +10,22 @@ args = sys.argv
 from misc import read_csv
 from misc import markers
 from misc import colors
+from misc import exist
+from misc import err
+
+in_f = args[1]
+if not exist(in_f):
+    err('could not find input file: ' + in_f)
 
 '''read the csv and locate the spectra'''
-fields, data = read_csv(args[1])
+fields, data = read_csv(in_f)
 nf = len(fields)  # number of fields
 f_i = {fields[i]:i for i in range(nf)}
 if args[2] not in fields:
-    print("Error: field not found:", fi)
-    print(fields)
+    print('fields available:', fields)
+    err('field: ' + fi + 'not found in:' + in_f)
 fi = f_i[args[2]]  # col index of selected field for legending
-
-field_label = args[2].strip().replace(' ', '-')
+field_label = args[2].strip().replace(' ', '-')  # spaces always bad?
 
 spec_fi = []
 for i in range(nf):
