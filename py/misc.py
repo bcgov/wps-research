@@ -200,6 +200,7 @@ def discrete_cmap(N, base_cmap=None): # https://gist.github.com/jakevdp/91077b0c
 '''method for reading a csv file. Returns a list of fields, and a list of lists..
 indexed by field index e.g. data[0] is columnar representation of the first field'''
 def read_csv(f):
+    import csv
     data, i = [], 0
     reader = csv.reader(open(f),
                         delimiter=',',
