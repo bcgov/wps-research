@@ -19,8 +19,19 @@ args = sys.argv
 fields, data = read_csv(args[1])
 nf = len(fields)  # number of fields
 f_i = {fields[i]:i for i in range(nf)}
+
+if len(args) < 3:  # call the program on all fields!
+    for f in fields:
+        if (f[-2:] != 'nm') and \
+                (f not in ['ObjectID', 'GlobalID', 'x', 'y',
+                           'ctr_lat', 'ctr_lon', 'image']):
+            cmd = 'python3 ' + __file__ + ' ' + args[1] + ' ' + f
+            print(cmd)
+            a = os.system(cmd)
+    sys.exit(1)
+
 if args[2] not in fields:
-    print("Error: field not found:", fi)
+    print("Error: field not found:", args[2])
     print(fields)
 fi = f_i[args[2]]  # col index of selected field for legending
 field_label = args[2].strip().replace(' ', '-')
@@ -74,7 +85,7 @@ for i in range(N):
     print(value, spectrum)
     plt.plot(x,
              spectrum, # marker=markers[lookup[value]],
-             color=colors[lookup[value]],
+             color=colors()[lookup[value]],
              label=(value if value not in used_value else None))
     used_value.add(value)
     # don't forget to put the spectra field labels on the bottom as ticks!
@@ -82,6 +93,6 @@ for i in range(N):
 plt.xticks(x, [fields[i] for i in spec_fi], rotation='vertical')
 plt.legend()
 plt.tight_layout()
-fn = "spectra_plot_" + field_label + ".png"
+fn = args[1] + "_spectra_plot_" + field_label + ".png"
 print("+w", fn)
 plt.savefig(fn)
