@@ -152,8 +152,3 @@ plt.tight_layout()
 fn = "spectra_plot_discrete_" + field_label + ".png"
 print("+w", fn)
 plt.savefig(fn)
-
-
-
-
-
