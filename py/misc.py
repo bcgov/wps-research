@@ -222,9 +222,10 @@ def read_csv(f):
 
 '''returns a list of colors for use with matplotlib'''
 def colors():
+    import matplotlib
     mcolors = matplotlib.colors
     cols = list(mcolors.BASE_COLORS.keys()) + list(mcolors.TABLEAU_COLORS.keys())
-    return cols[0:7] + col[8:]  # skipped one that looked indistinct
+    return cols[0:7] + cols[8:]  # skipped one that looked indistinct
 
 '''returns a list of marker patterns for use with matplotlib'''
 def markers():

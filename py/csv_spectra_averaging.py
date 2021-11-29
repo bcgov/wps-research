@@ -27,7 +27,7 @@ for i in range(nf):
     if fields[i][-2:] == 'nm':
         spec_fi += [i]
     else:  # list non-spec fields except: offset-index coding analysis-window pos'n
-        if fields[i] not in ['xoff', 'yoff']:
+        if fields[i] not in ['xoff', 'yoff', 'row', 'lin']:
             nonspec_fi += [i]
 N = len(data[0])  # number of data points
 print('spectra col-ix', spec_fi)
@@ -36,9 +36,9 @@ print('number of cols', len(spec_fi))
 print("number of data points", N)
 
 spectra = {}
-x = range(len(spec_fi))
 for i in range(N):
     key = ','.join([data[j][i] for j in nonspec_fi])
+    print(key)
     if key not in spectra:
         spectra[key] = []
     spectrum = [float(data[j][i]) for j in spec_fi]
@@ -49,7 +49,7 @@ for key in spectra:
     total += len(spectra[key])
 total /= len(list(spectra.keys()))
 print('average number of spectra per point', total)
-
+print('number of keys:', len(list(spectra.keys())))
 new_spectra = {}
 M = range(len(spec_fi))
 for key in spectra:
