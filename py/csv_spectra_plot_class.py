@@ -8,7 +8,6 @@ import sys
 import csv
 import matplotlib
 import matplotlib.pyplot as plt
-
 from misc import read_csv
 from misc import markers
 from misc import colors
