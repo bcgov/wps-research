@@ -14,15 +14,11 @@ if not exist(in_f):
 
 '''read the csv and locate the spectra'''
 fields, data = read_csv(in_f)
+fields = [x.strip().replace(',', '_') for x in fields]  # forbid comma in header
 nf = len(fields)  # number of fields
 f_i = {fields[i]:i for i in range(nf)}
-if args[2] not in fields:
-    print('fields available:', fields)
-    err('field: ' + fi + 'not found in:' + in_f)
-fi = f_i[args[2]]  # col index of selected field for legending
-field_label = args[2].strip().replace(' ', '-')  # spaces always bad?
 
-spec_fi = []
+spec_fi = []  # col idx for spectral data
 for i in range(nf):
     if fields[i][-2:] == 'nm':
         spec_fi += [i]
@@ -31,6 +27,8 @@ print('number of cols', len(spec_fi))
 
 N = len(data[0]) # number of data points
 print("number of data points", N)
+
+sys.exit(1)
 
 x = range(len(spec_fi))
 for i in range(N):
