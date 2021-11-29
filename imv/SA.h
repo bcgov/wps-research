@@ -46,11 +46,13 @@ template<class T> class SA{
     mySize = size;
     if(mySize > 0){
       elements = NULL;
-      elements = new T[mySize];
-      if(!elements){
+      printf("SA.h: malloc(%zu = %f MB)\n", mySize * sizeof(T), (float)(mySize * sizeof(T)) / ((float)1024 * (float)1024));
+      void * mem = (void*) malloc(mySize * sizeof(T)); //new T[mySize];
+      if(!mem){
         dprintf("Error (SA.h): Array allocation failure.\n");
         exit(1);
       }
+      elements = (T*) mem;
       memset(elements, '\0', mySize * sizeof(T));
     }
   }
