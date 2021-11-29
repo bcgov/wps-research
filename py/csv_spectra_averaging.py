@@ -22,23 +22,33 @@ f_i = {fields[i]:i for i in range(nf)}
 if (not 'xoff' in fields) or (not 'yoff' in fields):
     err("missing req'd fields: xoff, yoff")
 
-spec_fi, non_spec_fi = [], []  # list col-idx for all spectral data columns
+spec_fi, nonspec_fi = [], []  # list col-idx for all spectral data columns
 for i in range(nf):
     if fields[i][-2:] == 'nm':
         spec_fi += [i]
-    else: 
-        non_spec_fi += [1]
-
+    else:  # list non-spec fields except: offset-index coding analysis-window pos'n
+        if fields[i] not in ['xoff', 'yoff']:
+            nonspec_fi += [1]
+N = len(data[0])  # number of data points
 print('spectra col-ix', spec_fi)
 print('number of cols', len(spec_fi))
-
-N = len(data[0]) # number of data points
 print("number of data points", N)
 
+spectra = {}
 x = range(len(spec_fi))
 for i in range(N):
-
+    key = ','.join([data[j][i] for j in nonspec_fi])
+    if key not in spectra:
+        spectra[key] = []
     spectrum = [float(data[j][i]) for j in spec_fi]
+    spectra[key].append(spectrum)  # list all the spectra for this key
+
+total = 0
+for key in spectra:
+    total += len(spectra[key])
+total /= len(list(spectra.keys()))
+print('average number of spectra per point')
+
 
 '''
 feature_id,ctr_lat,ctr_lon,image,row,lin,xoff,yoff,20190908 60m: B1 443nm,20190908 10m: B2 490nm,20190908 10m: B3 560nm,20190908 10m: B4 665nm,20190908 20m: B5 705nm,20190908 20m: B6 740nm,20190908 20m: B7 783nm,20190908 10m: B8 842nm,20190908 20m: B8A 865nm,20190908 60m: B9 945nm,20190908 20m: B11 1610nm,20190908 20m: B12 2190nm,20210729 60m: B1 443nm,20210729 10m: B2 490nm,20210729 10m: B3 560nm,20210729 10m: B4 665nm,20210729 20m: B5 705nm,20210729 20m: B6 740nm,20210729 20m: B7 783nm,20210729 10m: B8 842nm,20210729 20m: B8A 865nm,20210729 60m: B9 945nm,20210729 20m: B11 1610nm,20210729 20m: B12 2190nm
