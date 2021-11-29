@@ -196,3 +196,38 @@ def discrete_cmap(N, base_cmap=None): # https://gist.github.com/jakevdp/91077b0c
     color_list = base(np.linspace(0, 1, N))
     cmap_name = base.name + str(N)
     return base.from_list(cmap_name, color_list, N)
+
+'''method for reading a csv file. Returns a list of fields, and a list of lists..
+indexed by field index e.g. data[0] is columnar representation of the first field'''
+def read_csv(f):
+    data, i = [], 0
+    reader = csv.reader(open(f),
+                        delimiter=',',
+                        quotechar='"')
+    for row in reader:
+        row = [x.strip() for x in row]
+        if i == 0:
+            N = len(row)
+            I = range(N)
+            fields, data = row, [[] for j in I]
+        else:
+            for j in I:
+                data[j].append(row[j])
+        i += 1
+        if i % 1000 == 0:
+            print(i)
+    fields = [x.strip().replace(' ', '_') for x in fields] # spaces are always bad!
+    return fields, data
+
+'''returns a list of colors for use with matplotlib'''
+def colors():
+    mcolors = matplotlib.colors
+    cols = list(mcolors.BASE_COLORS.keys()) + list(mcolors.TABLEAU_COLORS.keys())
+    return cols[0:7] + col[8:]  # skipped one that looked indistinct
+
+'''returns a list of marker patterns for use with matplotlib'''
+def markers():
+    return [".", ",", "o", "v", "^", "<", ">", "1", "2", "3", "4", "8", "s",
+            "p", "P", "*", "h", "H", "+", "x", "X", "D", "d", "|", "_", 0, 1,
+            2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+
