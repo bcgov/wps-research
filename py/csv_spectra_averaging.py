@@ -28,9 +28,10 @@ for i in range(nf):
         spec_fi += [i]
     else:  # list non-spec fields except: offset-index coding analysis-window pos'n
         if fields[i] not in ['xoff', 'yoff']:
-            nonspec_fi += [1]
+            nonspec_fi += [i]
 N = len(data[0])  # number of data points
 print('spectra col-ix', spec_fi)
+print('nonspec col-ix', nonspec_fi)
 print('number of cols', len(spec_fi))
 print("number of data points", N)
 
@@ -49,11 +50,24 @@ for key in spectra:
 total /= len(list(spectra.keys()))
 print('average number of spectra per point', total)
 
+new_spectra = {}
+M = range(len(spec_fi))
+for key in spectra:
+    spectrums = spectra[key]
+    new_spectrum = [0. for i in M]
+    for s in spectrums:
+        for i in M:
+            new_spectrum[i] += s[i]
+    new_spectra[key] = new_spectrum
 
-'''
-feature_id,ctr_lat,ctr_lon,image,row,lin,xoff,yoff,20190908 60m: B1 443nm,20190908 10m: B2 490nm,20190908 10m: B3 560nm,20190908 10m: B4 665nm,20190908 20m: B5 705nm,20190908 20m: B6 740nm,20190908 20m: B7 783nm,20190908 10m: B8 842nm,20190908 20m: B8A 865nm,20190908 60m: B9 945nm,20190908 20m: B11 1610nm,20190908 20m: B12 2190nm,20210729 60m: B1 443nm,20210729 10m: B2 490nm,20210729 10m: B3 560nm,20210729 10m: B4 665nm,20210729 20m: B5 705nm,20210729 20m: B6 740nm,20210729 20m: B7 783nm,20210729 10m: B8 842nm,20210729 20m: B8A 865nm,20210729 60m: B9 945nm,20210729 20m: B11 1610nm,20210729 20m: B12 2190nm
-1,-131.1119300232046,58.094511533295574,raster.bin,7550,5885,0,0,321.923614501953,408.0,664.0,677.0,1079.1875,1881.3125,2052.625,2255.0,2207.6875,2235.91674804688,2484.5,1830.75,320.277770996094,393.0,656.0,545.0,1106.8125,2442.375,2691.0625,3004.0,2858.8125,2725.73608398438,2257.8125,1400.25
-1,-131.1119300232046,58.094511533295574,raster.bin,7549,5885,-1,0,328.4375,435.0,679.0,728.0,1070.5625,1811.4375,1979.875,2100.0,2125.0625,2213.58325195312,2459.5,1818.25,327.166656494141,381.0,673.0,580.0,1090.9375,2342.125,2647.6875,2820.0,2814.9375,2689.375,2240.4375,1396.25
-'''
-
-
+'''now we have new spectrums, output them'''
+lines = []
+lines.append(','.join([fields[i] for i in nonspec_fi] + [fields[i] for i in spec_fi]))
+print('new fields:', lines[0])
+for key in new_spectra:
+    spectrum = new_spectra[key]
+    lines.append(key + ',' +
+                 ','.join([str(x) for x in spectrum]))
+ofn = in_f + '_averaged.csv'
+print('+w', ofn)
+open(ofn, 'wb').write(('\n'.join(lines)).encode())
