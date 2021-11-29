@@ -217,7 +217,7 @@ def read_csv(f):
         i += 1
         if i % 1000 == 0:
             print(i)
-    fields = [x.strip().replace(' ', '_') for x in fields] # spaces are always bad!
+    fields = [x.strip() for x in fields]
     return fields, data
 
 '''returns a list of colors for use with matplotlib'''
