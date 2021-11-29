@@ -47,7 +47,7 @@ total = 0
 for key in spectra:
     total += len(spectra[key])
 total /= len(list(spectra.keys()))
-print('average number of spectra per point')
+print('average number of spectra per point', total)
 
 
 '''
