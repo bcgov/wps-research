@@ -20,6 +20,8 @@ if len(args) < 4:
 
 rasters = args[1:-1]
 outf = args[-1]
+ofhn = args[-1][:-4] + '.hdr'
+
 
 cmd = ['cat'] + rasters + ['>', outf]
 cmd = ' '.join(cmd)
@@ -36,7 +38,7 @@ cmd = ['python3', # envi_header_cat.py is almost like a reverse-polish notation.
        pd + 'envi_header_cat.py',
        rasters[1][:-4] + '.hdr',
        rasters[0][:-4] + '.hdr',
-       'raster.hdr']
+       ofhn]  # 'raster.hdr']
 
 cmd = ' '.join(cmd)
 run(cmd)
@@ -48,8 +50,8 @@ if len(rasters) > 2:
         cmd = ['python3', # envi_header_cat.py is almost like a reverse-polish notation. Have to put the "first thing" on the back..
                pd + 'envi_header_cat.py',
                rasters[i][:-4] + '.hdr',
-               'raster.hdr',
-               'raster.hdr']
+               ofhn,  # 'raster.hdr',
+               ofhn]  # 'raster.hdr']
 
         cmd = ' '.join(cmd)
         run(cmd)
