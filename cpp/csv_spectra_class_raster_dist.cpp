@@ -63,7 +63,10 @@ int main(int argc, char ** argv){
   float * spec = falloc(M); // buffer for a spectrum
   float * trans = falloc(M); // transformed spec
   float * ts; // pointer to transformed spec (or not)
-
+  float * mean = falloc(M);
+  for0(i, M) mean[i] = 0.;
+  float count = 0;
+  
   vector<str>::iterator ii;
   vector<vector<str>>::iterator it;
 
@@ -84,16 +87,23 @@ int main(int argc, char ** argv){
     for(it = lines.begin(); it != lines.end(); it++){
       if((*it)[fi] == str(argv[3])){
 
-        for0(i, M)
+        for0(i, M){
           spec[i] = atof((*it)[spec_fi[i]].c_str());
+          mean[i] += spec[i];
+        }
 
         for0(i, M)
           printf("%s%f", (i > 0 ? ",": ""), spec[i]);
         
         printf("\n");
+        count += 1.;
       }
     }
   }
+  printf("mean:\n");
+  for0(i, M)
+    printf("%s%f", (i > 0 ? ",": ""), spec[i]);
+  printf("\n");
 
   //hwrite(ohn, nrow, ncol, nband);
   return 0;
