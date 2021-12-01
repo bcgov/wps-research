@@ -111,7 +111,7 @@ int main(int argc, char ** argv){
     for0(i, nrow){
       ix = i * ncol;
       for0(j, ncol){
-        ij = ix + k;
+        ij = ix + j;
         for0(k, nband){
           spec[k] = dat[np * k + ij];
         }
