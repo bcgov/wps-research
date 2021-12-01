@@ -13,11 +13,11 @@ lookup = {fields[i]: i for i in range(len(fields))}
 for j in range(len(data)):
     data[j] = [x.strip().replace(',', ';') for x in data[j]]
 
-N = len(data[0])
+N = range(len(data[0]))  # number of records
 print("+w", ofn)
-M = range(len(fields))
+M = range(len(fields))  # number of fields
 lines = [','.join(fields)]
-for i in range(N):
-    lines += ','.join([data[j][i] for j in range(M)])
+for i in N:
+    lines += [','.join([data[j][i] for j in M])]
 open(ofn, 'wb').write(('\n'.join(lines)).encode())
 
