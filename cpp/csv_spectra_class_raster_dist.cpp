@@ -92,18 +92,23 @@ int main(int argc, char ** argv){
           mean[i] += spec[i];
         }
 
+        printf("[");
         for0(i, M)
           printf("%s%f", (i > 0 ? ",": ""), spec[i]);
         
-        printf("\n");
+        printf("]\n");
         count += 1.;
       }
     }
   }
-  printf("mean:\n");
+  
   for0(i, M)
-    printf("%s%f", (i > 0 ? ",": ""), spec[i]);
-  printf("\n");
+    mean[i] /= count;
+
+  printf("mean:\n[");
+  for0(i, M)
+    printf("%s%f", (i > 0 ? ",": ""), mean[i]);
+  printf("]\n");
 
   //hwrite(ohn, nrow, ncol, nband);
   return 0;
