@@ -315,4 +315,5 @@ void * pt_worker_fun(void * arg); // worker function
 extern void (*pt_eval)(size_t); // function pointer to execute in parallel, over range start_j:end_j inclusive
 void parfor(size_t start_j, size_t end_j, void(*eval)(size_t));
 
+vector<vector<str>> read_csv(str fn, vector<str> & hdr);
 #endif
