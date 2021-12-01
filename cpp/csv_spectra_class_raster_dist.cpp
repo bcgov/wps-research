@@ -10,10 +10,14 @@ we are assuming that the
 void deriv(float * x, int x_len, float * y){
   int i;
   for0(i, (x_len - 1))
-  y[i] = x[i + 1] - x[i];
+    y[i] = x[i + 1] - x[i];
 }
 
 void integ(float * x, int x_len, float * y){
+  int i;
+  y[0] = x[0];
+  for0(i, (x_len - 1))
+    y[i + 1] = y[i] + x[i + 1]; 
 }
 
 int main(int argc, char ** argv){
@@ -58,11 +62,25 @@ int main(int argc, char ** argv){
   int M = spec_fi.size();
   float * spec = falloc(M); // buffer for a spectrum
   float * trans = falloc(M); // transformed spec
-  
+  float * ts; // pointer to transformed spec (or not)
+
   vector<str>::iterator ii;
   vector<vector<str>>::iterator it;
 
   for(ii=cases.begin(); ii != cases.end(); ii++){
+    int tM = M;
+    ts = trans;
+    if((*ii) == str("derivative")){
+      tM = M - 1;
+      deriv(spec, M, trans);
+    }
+    else if((*ii) == str("integral")){
+      integ(spec, M, trans);
+    }
+    else{
+      ts = spec; // use the untransformed spectra
+    }
+
     for(it = lines.begin(); it != lines.end(); it++){
       if((*it)[fi] == str(argv[3])){
 
