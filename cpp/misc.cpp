@@ -530,3 +530,18 @@ void parfor(size_t start_j, size_t end_j, void(*eval)(size_t)){
 }
 
 // parameters always named (in json-like format)?
+
+vector<vector<str>> read_csv(str fn, vector<str> & hdr){
+  vector<vector<str>> output; // read lines from csv file
+  ifstream ifs(fn); // stream to input file
+  str token;
+  size_t ci = 0;
+  while(getline(ifs, token, '\n')){
+    vector<str> words(split(token, ','));
+    // cout << words << endl;
+    if(ci == 0) hdr = words;
+    else output.push_back(words);
+    ++ci;
+  }
+  return output; // n.b., we assumed CSV was simple and well-formed (no quotes, same number of fields per line, etc).
+}
