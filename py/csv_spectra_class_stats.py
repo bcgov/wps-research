@@ -7,6 +7,7 @@ import os
 import sys
 import csv
 import matplotlib
+import numpy as np
 import matplotlib.pyplot as plt
 from misc import read_csv
 from misc import markers
@@ -78,8 +79,9 @@ for case in ['regular', 'derivative', 'integral']:
     plt.gca().axes.get_yaxis().set_visible(False)
 
     spec = None
-    mean = {}
+    mean = {}  # calculate mean spectra, per class..
     mean_count = {}
+    values = {}  # record values so we can calculate stdv!
     max_y, min_y = 0, 0
     ci = 0
     for i in range(N):  # for each ground reference point
@@ -88,17 +90,26 @@ for case in ['regular', 'derivative', 'integral']:
 
         if value not in mean:
             mean[value] = []
+            values[value] = []
             for j in range(len(spec)):
                 mean[value].append(0.)
+                values[value].append([])
             mean_count[value] = 0.
         for j in range(len(spec)):
             y = spec[j]
             max_y = y if y > max_y else max_y
             min_y = y if y < min_y else min_y
             ci += 1
-            mean[value][j] += spec[j]  # average value of spectra this class, posn j
+            mean[value][j] += float(spec[j])  # average value of spectra this class, posn j
+            values[value][j] += [float(spec[j])]  # collect the unaveraged values, for stats..
         mean_count[value] += 1.
     print("ymin", min_y, "ymax", max_y)
+
+
+    # divide mean by n
+    x = range(len(spec_fi))
+    for value in mean:
+        mean[value] = [mean[value][j] / mean_count[value] for j in x]
 
     # don't forget stdv
 
@@ -106,7 +117,7 @@ for case in ['regular', 'derivative', 'integral']:
     for value in mean: #for i in range(N):
         x = range(len(spec_fi))
         # value = data[fi][i] # categorical value
-        spectrum = [mean[value][j] for j in len(spec_fi)]
+        spectrum = [mean[value][j] for j in x]
         # spectrum = [float(data[j][i]) for j in spec_fi]
         print(value, spectrum)
         if case == 'derivative':
@@ -117,6 +128,13 @@ for case in ['regular', 'derivative', 'integral']:
                  spectrum, # marker=markers[lookup[value]],
                  color=colors()[lookup[value]],
                  label=(value if value not in used_value else None))
+
+        stdv = [np.std(values[value][j]) for j in x]
+        for dx in [-1., 1.]:
+            plt.plot(np.array(x),
+                    np.array(spectrum) + (float(dx) * np.array(stdv)),
+                    color=colors()[lookup[value]],
+                    marker = '.')# label=(value if value not in used_value else None))
         used_value.add(value)
         # don't forget to put the spectra field labels on the bottom as ticks!
     #plt.legend() # loc='lower left') # upper right')
