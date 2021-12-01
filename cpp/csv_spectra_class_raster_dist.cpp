@@ -10,14 +10,14 @@ we are assuming that the
 void deriv(float * x, int x_len, float * y){
   int i;
   for0(i, (x_len - 1))
-    y[i] = x[i + 1] - x[i];
+  y[i] = x[i + 1] - x[i];
 }
 
 void integ(float * x, int x_len, float * y){
   int i;
   y[0] = x[0];
   for0(i, (x_len - 1))
-    y[i + 1] = y[i] + x[i + 1]; 
+  y[i + 1] = y[i] + x[i + 1];
 }
 
 int main(int argc, char ** argv){
@@ -28,22 +28,18 @@ int main(int argc, char ** argv){
   str("[raster image to project onto]"));
 
   vector<str> cases;
-  cases.push_back(str("regular"));
   cases.push_back(str("derivative"));
   cases.push_back(str("integral"));
+  cases.push_back(str("regular"));
 
   str csv_fn(argv[1]); // input image file name
   str fn(argv[4]); // input image 2 file name
   if(!(exists(csv_fn) && exists(fn))) err("failed to open all input files");
   str hfn(hdr_fn(fn)); // input raster header file name
 
-  // str ohn(hdr_fn(ofn, true)); // out header file name
-
   size_t nrow, ncol, nband, np, i, j, k, ix, ij, ik;
   hread(hfn, nrow, ncol, nband); // read header 1
   np = nrow * ncol; // number of input pix
-
-  // float * dat = bread(fn, nrow, ncol, nband);
 
   vector<str> fields;
   vector<int> spec_fi;
@@ -60,59 +56,93 @@ int main(int argc, char ** argv){
   printf("fi %d: %s\n", fi, fields[fi].c_str());
   cout << spec_fi << endl;
   int M = spec_fi.size();
+
+  if(nband != M) err("unexpected number of bands in raster file");
+
   float * spec = falloc(M); // buffer for a spectrum
   float * trans = falloc(M); // transformed spec
   float * ts; // pointer to transformed spec (or not)
   float * mean = falloc(M);
   for0(i, M) mean[i] = 0.;
   float count = 0;
-  
+
+  float * out = falloc(nrow * ncol); // output distance
   vector<str>::iterator ii;
   vector<vector<str>>::iterator it;
+  float * dat = bread(fn, nrow, ncol, nband);
 
   for(ii=cases.begin(); ii != cases.end(); ii++){
-    int tM = M;
-    ts = trans;
-    if((*ii) == str("derivative")){
-      tM = M - 1;
-      deriv(spec, M, trans);
-    }
-    else if((*ii) == str("integral")){
-      integ(spec, M, trans);
-    }
-    else{
-      ts = spec; // use the untransformed spectra
-    }
+    for0(i, M) mean[i] = 0.;
+    count = 0;
 
     for(it = lines.begin(); it != lines.end(); it++){
       if((*it)[fi] == str(argv[3])){
-
         for0(i, M){
           spec[i] = atof((*it)[spec_fi[i]].c_str());
-          mean[i] += spec[i];
         }
 
-        /*printf("[");
-        for0(i, M)
-          printf("%s%f", (i > 0 ? ",": ""), spec[i]);
-        
-        printf("]\n");*/
+        int tM = M;
+        ts = trans;
+        if((*ii) == str("derivative")){
+          tM = M - 1;
+          deriv(spec, M, trans);
+        }
+        else if((*ii) == str("integral")){
+          integ(spec, M, trans);
+        }
+        else{
+          ts = spec; // use the untransformed spectra
+        }
+
+        for0(i, M){
+          mean[i] += ts[i];
+        }
         count += 1.;
       }
     }
-  }
-  
-  for0(i, M)
+    for0(i, M)
     mean[i] /= count;
 
-  printf("mean:\n[");
-  for0(i, M)
+    printf("mean (%s):\n[", ii->c_str());
+    for0(i, M)
     printf("%s%f", (i > 0 ? ",": ""), mean[i]);
-  printf("]\n");
+    printf("]\n");
 
-  float * 
+    for0(i, nrow){
+      ix = i * ncol;
+      for0(j, ncol){
+        ij = ix + k;
+        for0(k, nband){
+          spec[k] = dat[np * k + ij];
+        }
 
+        int tM = M;
+        ts = trans;
+        if((*ii) == str("derivative")){
+          tM = M - 1;
+          deriv(spec, M, trans);
+        }
+        else if((*ii) == str("integral")){
+          integ(spec, M, trans);
+        }
+        else{
+          ts = spec; // use the untransformed spectra
+        }
 
-  //hwrite(ohn, nrow, ncol, nband);
+        // calcuate distance here
+        float d = 0;
+        for0(k, tM){
+          float x = (ts[k] - mean[k]);
+          d += x * x;
+        }
+        out[ij] = d;
+      }
+    }
+
+    str ofn(fn + str("_") + (*ii) + str("_class_dist.bin"));
+    str ohn(hdr_fn(ofn, true)); // out header file name
+    hwrite(ohn, nrow, ncol, 1); // expand this to per-class right away!
+    bwrite(out, ofn, nrow, ncol, nband);
+  }
   return 0;
 }
