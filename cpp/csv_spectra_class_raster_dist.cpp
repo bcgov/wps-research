@@ -92,11 +92,11 @@ int main(int argc, char ** argv){
           mean[i] += spec[i];
         }
 
-        printf("[");
+        /*printf("[");
         for0(i, M)
           printf("%s%f", (i > 0 ? ",": ""), spec[i]);
         
-        printf("]\n");
+        printf("]\n");*/
         count += 1.;
       }
     }
@@ -109,6 +109,9 @@ int main(int argc, char ** argv){
   for0(i, M)
     printf("%s%f", (i > 0 ? ",": ""), mean[i]);
   printf("]\n");
+
+  float * 
+
 
   //hwrite(ohn, nrow, ncol, nband);
   return 0;
