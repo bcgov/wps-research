@@ -113,7 +113,7 @@ for case in ['regular', 'derivative', 'integral']:
 
     # don't forget stdv
 
-    used_value=set()
+    used_value, spec = set(), []
     for value in mean: #for i in range(N):
         x = range(len(spec_fi))
         # value = data[fi][i] # categorical value
@@ -129,12 +129,38 @@ for case in ['regular', 'derivative', 'integral']:
                  color=colors()[lookup[value]],
                  label=(value if value not in used_value else None))
 
-        stdv = [np.std(values[value][j]) for j in x]
+        stdv = None  # integr and deriv commute w.r.t mean but not wrt stdev? 
+        if case == 'regular':
+            stdv = [np.std(values[value][j]) for j in x]
+        elif case == 'derivative' or case == 'integral':
+            my_values = []
+            # take the derivatives of every spectrum, and store by categorical value..
+            for i in range(N):
+                x = range(len(spec_fi))
+                if data[fi][i] == value: # discrete class label..
+                    spec = [float(data[j][i]) for j in spec_fi]
+                    x, spec = deriv(x, spec) if case == 'derivative' else integ(x, spec)
+                    for j in range(len(x)):
+                        try:
+                            my_values[j]
+                        except:
+                            my_values.append([])
+                        my_values[j].append(spec[j])
+            # for the present categorical value, take the stdev of the derivatives
+            stdv = [np.std([my_values[j][i] for i in range(len(my_values[j]))]) for j in range(len(my_values))]
+        else:
+            err('unexpected case')
+        
         for dx in [-1., 1.]:
+            x = range(len(spectrum))
+            # if case == 'derivative':
+            #     x = (range(len(spectrum))[1:]) # range(len(my_values[0])) 
+            # x, spec = deriv(x, spec) if case == 'derivative' else integ(x, spec) # recover x for this case
+            # print(case, len(x), len(stdv))
             plt.plot(np.array(x),
-                    np.array(spectrum) + (float(dx) * np.array(stdv)),
-                    color=colors()[lookup[value]],
-                    marker = '.')# label=(value if value not in used_value else None))
+                     np.array(spectrum) + (float(dx) * np.array(stdv)),
+                     color=colors()[lookup[value]],
+                     marker = '.')# label=(value if value not in used_value else None))
         used_value.add(value)
         # don't forget to put the spectra field labels on the bottom as ticks!
     #plt.legend() # loc='lower left') # upper right')
