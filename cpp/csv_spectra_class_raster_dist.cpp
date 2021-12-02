@@ -28,9 +28,10 @@ int main(int argc, char ** argv){
   str("[raster image to project onto]"));
 
   vector<str> cases;
+  cases.push_back(str("regular"));
   cases.push_back(str("derivative"));
   cases.push_back(str("integral"));
-  cases.push_back(str("regular"));
+
 
   str csv_fn(argv[1]); // input image file name
   str fn(argv[4]); // input image 2 file name
@@ -141,8 +142,8 @@ int main(int argc, char ** argv){
     str ofn(fn + str("_") + (*ii) + str("_class_dist.bin"));
     str ohn(hdr_fn(ofn, true)); // out header file name
     hwrite(ohn, nrow, ncol, 1); // expand this to per-class right away!
-    bwrite(out, ofn, nrow, ncol, nband);
-    exit(1)
+    bwrite(out, ofn, nrow, ncol, 1); // nband :  this produces a very trippy result);
+    exit(1);
   }
   return 0;
 }
