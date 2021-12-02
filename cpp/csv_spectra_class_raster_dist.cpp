@@ -137,7 +137,7 @@ int main(int argc, char ** argv){
           float x = (spec[k] - mean[k]); // CHANGE BACK TO TS[K]
           d += sqrt(x * x);
         }
-        out[ij] = -1. * d;
+        out[ij] = d;
       }
     }
 
