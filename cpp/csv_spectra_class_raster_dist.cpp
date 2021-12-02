@@ -142,6 +142,7 @@ int main(int argc, char ** argv){
     str ofn(fn + str("_") + (*ii) + str("_class_dist.bin"));
     str ohn(hdr_fn(ofn, true)); // out header file name
     hwrite(ohn, nrow, ncol, 1); // expand this to per-class right away!
+    cout << "+w " << ofn << endl;
     bwrite(out, ofn, nrow, ncol, 1); // nband :  this produces a very trippy result);
     exit(1);
   }
