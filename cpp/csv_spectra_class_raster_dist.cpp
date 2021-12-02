@@ -32,7 +32,6 @@ int main(int argc, char ** argv){
   cases.push_back(str("derivative"));
   cases.push_back(str("integral"));
 
-
   str csv_fn(argv[1]); // input image file name
   str fn(argv[4]); // input image 2 file name
   if(!(exists(csv_fn) && exists(fn))) err("failed to open all input files");
@@ -107,9 +106,9 @@ int main(int argc, char ** argv){
     for0(i, M)
     printf("%s%f", (i > 0 ? ",": ""), mean[i]);
     printf("]\n");
-str ofn(fn + str("_") + (*ii) + str("_class_dist.bin"));
+    str ofn(fn + str("_") + (*ii) + str("_class_dist.bin"));
 
-cout << "+w " << ofn << endl;
+    cout << "+w " << ofn << endl;
 
     for0(i, nrow){
       ix = i * ncol;
@@ -134,7 +133,6 @@ cout << "+w " << ofn << endl;
 
         // calcuate distance here
         float d = 0;
-        cout << "nband " << tM << endl;
         for0(k, tM){
           float x = (ts[k] - mean[k]);
           d += sqrt(x * x);
@@ -143,9 +141,9 @@ cout << "+w " << ofn << endl;
       }
     }
 
-        str ohn(hdr_fn(ofn, true)); // out header file name
+    str ohn(hdr_fn(ofn, true)); // out header file name
     hwrite(ohn, nrow, ncol, 1); // expand this to per-class right away!
-        bwrite(out, ofn, nrow, ncol, 1); // nband :  this produces a very trippy result);
+    bwrite(out, ofn, nrow, ncol, 1); // nband : this produces a very trippy result);
     exit(1);
   }
   return 0;
