@@ -107,6 +107,7 @@ int main(int argc, char ** argv){
     for0(i, M)
     printf("%s%f", (i > 0 ? ",": ""), mean[i]);
     printf("]\n");
+str ofn(fn + str("_") + (*ii) + str("_class_dist.bin"));
 
 cout << "+w " << ofn << endl;
 
@@ -133,16 +134,16 @@ cout << "+w " << ofn << endl;
 
         // calcuate distance here
         float d = 0;
+        cout << "nband " << tM << endl;
         for0(k, tM){
           float x = (ts[k] - mean[k]);
-          d += x * x;
+          d += sqrt(x * x);
         }
         out[ij] = d;
       }
     }
 
-    str ofn(fn + str("_") + (*ii) + str("_class_dist.bin"));
-    str ohn(hdr_fn(ofn, true)); // out header file name
+        str ohn(hdr_fn(ofn, true)); // out header file name
     hwrite(ohn, nrow, ncol, 1); // expand this to per-class right away!
         bwrite(out, ofn, nrow, ncol, 1); // nband :  this produces a very trippy result);
     exit(1);
