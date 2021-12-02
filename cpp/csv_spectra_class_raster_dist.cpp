@@ -132,9 +132,9 @@ int main(int argc, char ** argv){
         }
 
         // calcuate distance here
-        float d = 0;
+        float d = 0.;
         for0(k, tM){
-          float x = (ts[k] - mean[k]);
+          float x = (spec[k] - mean[k]); // CHANGE BACK TO TS[K]
           d += sqrt(x * x);
         }
         out[ij] = d;
