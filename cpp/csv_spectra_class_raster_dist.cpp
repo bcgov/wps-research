@@ -100,8 +100,7 @@ int main(int argc, char ** argv){
         count += 1.;
       }
     }
-    for0(i, M)
-    mean[i] /= count;
+    for0(i, M) mean[i] /= count;
 
     printf("mean (%s):\n[", ii->c_str());
     for0(i, M)
@@ -113,7 +112,7 @@ int main(int argc, char ** argv){
       for0(j, ncol){
         ij = ix + j;
         for0(k, nband){
-          spec[k] = dat[np * k + ij];
+          spec[k] = dat[(np * k) + ij];
         }
 
         int tM = M;
@@ -143,6 +142,7 @@ int main(int argc, char ** argv){
     str ohn(hdr_fn(ofn, true)); // out header file name
     hwrite(ohn, nrow, ncol, 1); // expand this to per-class right away!
     bwrite(out, ofn, nrow, ncol, nband);
+    exit(1)
   }
   return 0;
 }
