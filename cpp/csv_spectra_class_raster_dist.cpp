@@ -29,8 +29,9 @@ int main(int argc, char ** argv){
 
   vector<str> cases;
   cases.push_back(str("regular"));
-  cases.push_back(str("derivative"));
+  /* cases.push_back(str("derivative"));
   cases.push_back(str("integral"));
+  */
 
   str csv_fn(argv[1]); // input image file name
   str fn(argv[4]); // input image 2 file name
@@ -54,11 +55,14 @@ int main(int argc, char ** argv){
   }
 
   printf("fi %d: %s\n", fi, fields[fi].c_str());
-  cout << spec_fi << endl;
+  cout << "spec_fi" << spec_fi << endl;
   int M = spec_fi.size();
 
-  if(nband != M) err("unexpected number of bands in raster file");
-
+  if(nband != M){
+    cout << "nband " << nband << endl;
+    cout << "M " << M << endl;
+	  err("unexpected number of bands in raster file");
+  }
   float * spec = falloc(M); // buffer for a spectrum
   float * trans = falloc(M); // transformed spec
   float * ts; // pointer to transformed spec (or not)
@@ -106,7 +110,7 @@ int main(int argc, char ** argv){
     for0(i, M)
     printf("%s%f", (i > 0 ? ",": ""), mean[i]);
     printf("]\n");
-    str ofn(fn + str("_") + (*ii) + str("_class_dist.bin"));
+    str ofn(fn + str("_") + str(fields[fi]) + str("_eq_") + str(argv[3]) +  str("_") + (*ii) + str("_class_dist.bin"));
 
     cout << "+w " << ofn << endl;
 
