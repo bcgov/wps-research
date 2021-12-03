@@ -42,7 +42,7 @@ rgb = np.zeros((lines, samples, 3))
 for i in range(0, 3):
     rgb[:, :, i] = data[band_select[i], :].reshape((lines, samples))
     
-    if not override_scaling:
+    if True: # if not override_scaling
         print("scaling")  # scale band in range 0 to 1
         rgb_min, rgb_max = np.nanmin(rgb[:, :, i]), np.nanmax(rgb[:, :, i])
         print("rgb_min: " + str(rgb_min) + " rgb_max: " + str(rgb_max))
@@ -97,4 +97,7 @@ if True:
     plt.tight_layout()
     if exists(ff + 'copyright_string.txt'):
         plt.xlabel(open(ff+ 'copyright_string.txt').read().strip())
-    plt.savefig(fn + "_rgb.png")
+    plt.show()
+    ofn = fn + "_rgb.png"
+    print("+w", ofn)
+    plt.savefig(ofn)
