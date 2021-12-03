@@ -15,8 +15,10 @@ args = sys.argv
 
 # instructions to run
 if len(args) < 2:
-    err('usage:\n\tread_multispectral.py [input file name]')
-
+    err('usage:\n\tread_multispectral.py [input file name]' +
+        ' [optional: red band idx]' + 
+        ' [optional: green band idx]' +
+        ' [optional: blue band idx] #band idx from 1')
 # check file and header exist
 fn, hdr = sys.argv[1], hdr_fn(sys.argv[1])
 assert_exists(fn)
@@ -31,9 +33,21 @@ npx = lines * samples # number of pixels.. binary IEEE 32-bit float data
 data = read_float(sys.argv[1]).reshape((bands, npx))
 print("bytes read: " + str(data.size))
 
+
 # select bands for visualization: default value [3, 2, 1]. Try changing to anything from 0 to 12-1==11! 
 # band_select = [3, 2, 1] if bands > 3 else [0, 1, 2]
 band_select = [0, 1, 2]
+
+try:  # see if we can set the (r,g,b) encoding (band selection) from the command args
+    for i in range(0, 3):
+        bs = int(args[i + 2]) - 1
+        if bs < 0 or bs >= bands:
+            err('band index out of range')
+
+        band_select[i] = bs
+except Exception:
+    pass
+
 n_points = 0
 if bands == 1:
     band_select = [0, 0, 0,] # could be class map. or just one band map
