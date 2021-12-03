@@ -20,8 +20,8 @@ img = args[1] # input image
 if not os.path.exists(img):
     err('file not found: ' + img)
 
-pix_j = int(args[2])
-lin_j = int(args[3])
+pix_j = int(args[2]) # row 0-idx
+lin_j = int(args[3]) # col 0-idx
 
 out_spec_fn = img + "_spectrum_row_col_" + args[2] + "_" + args[3] + ".csv"
 out_spec_f = open(out_spec_fn, "wb")
@@ -78,9 +78,12 @@ if True:
             data_line = [img, pix_k, lin_k] + data
             data_line = ','.join([str(x) for x in data_line])
             out_spec_f.write(("\n" + data_line).encode())
-
+        
             plt.figure()
+            plt.title('Spectra ' + args[1] + ' row: ' + args[2] + ' col ' + args[3])
             plt.plot(range(nb), data)
+            plt.xticks(range(nb), band_names, rotation='vertical')
+            plt.tight_layout()
             plt.show()
 
 out_spec_f.close()
