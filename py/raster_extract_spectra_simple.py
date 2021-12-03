@@ -52,11 +52,11 @@ if True:
             cmd = ' '.join(cmd)
             print("  \t" + cmd)
             lines = [x.strip() for x in os.popen(cmd).readlines()]
-            if len(lines) != 2 * (1 + nb):
-                err("unexpected result line count")
 
             for line in lines:
                 print('\t' + line)
+            if len(lines) != 2 * (1 + nb):
+                err("unexpected result line count")
 
             w = lines[1].split()
             if w[0] != "Location:":
