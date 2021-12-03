@@ -111,7 +111,7 @@ if True:
     plt.tight_layout()
     if exists(ff + 'copyright_string.txt'):
         plt.xlabel(open(ff+ 'copyright_string.txt').read().strip())
-    plt.show()
     ofn = fn + "_rgb.png"
     print("+w", ofn)
     plt.savefig(ofn)
+    plt.show()
