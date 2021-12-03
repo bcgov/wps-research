@@ -52,6 +52,7 @@ if True:
     out = numpy.zeros(nrow * ncol)
 
     for i in range(nrow):
+        print(i)
         for j in range(ncol):
             d = 0.
             ix = i * ncol + j
