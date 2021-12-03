@@ -1,4 +1,4 @@
-# this script extracts one spectrum at a row, col point location
+# this script extracts one spectrum only from a raster: from at a row, col point location
 import os
 import sys
 import json
@@ -20,8 +20,8 @@ img = args[1] # input image
 if not os.path.exists(img):
     err('file not found: ' + img)
 
-pix_j = int(args[2]) # row 0-idx
-lin_j = int(args[3]) # col 0-idx
+pix_j = int(args[3]) # col 0-idx
+lin_j = int(args[2]) # row 0-idx
 
 out_spec_fn = img + "_spectrum_row_col_" + args[2] + "_" + args[3] + ".csv"
 out_spec_f = open(out_spec_fn, "wb")
@@ -55,6 +55,9 @@ if True:
             if len(lines) != 2 * (1 + nb):
                 err("unexpected result line count")
 
+            for line in lines:
+                print('\t' + line)
+
             w = lines[1].split()
             if w[0] != "Location:":
                 err("unexpected field")
@@ -84,7 +87,7 @@ if True:
             plt.plot(range(nb), data)
             plt.xticks(range(nb), band_names, rotation='vertical')
             plt.tight_layout()
-            plt.show()
+            plt.savefig(out_spec_fn[:-4] + '.png')
 
 out_spec_f.close()
 print("number of spectra extracted:", count)
