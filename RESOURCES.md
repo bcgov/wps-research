@@ -50,3 +50,6 @@
 # GEE apps
 * https://kkraoj.users.earthengine.app/view/live-fuel-moisture
 * https://code.earthengine.google.com/e27240a92ecf64bbadf8a082b91c711c?hideCode=true
+
+# Data Science Resources
+[NumPy Documentation](https://numpy.org/doc/stable/)
