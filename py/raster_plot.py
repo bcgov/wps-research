@@ -36,8 +36,7 @@ print("bytes read: " + str(data.size))
 
 # select bands for visualization: default value [3, 2, 1]. Try changing to anything from 0 to 12-1==11! 
 # band_select = [3, 2, 1] if bands > 3 else [0, 1, 2]
-band_select = [0, 1, 2]
-
+band_select, ofn = [0, 1, 2], None
 try:  # see if we can set the (r,g,b) encoding (band selection) from the command args
     for i in range(0, 3):
         bs = int(args[i + 2]) - 1
@@ -47,6 +46,8 @@ try:  # see if we can set the (r,g,b) encoding (band selection) from the command
         band_select[i] = bs
 except Exception:
     pass
+try: ofn = '_'.join([fn] + args[2: 2 + 3] + ["rgb.png"])
+except: ofn = '_'.join([fn] + [str(b + 1) for b in band_select] + ["rgb.png"])
 
 n_points = 0
 if bands == 1:
@@ -78,8 +79,10 @@ for i in range(0, 3):
             if values[j] > values[j + 1]:
                 err("failed to sort")
 
-        rgb_min = values[int(math.floor(float(npx)*0.01))]
-        rgb_max = values[int(math.floor(float(npx)*0.99))]
+        n_pct = 2. # percent for stretch value
+        frac = n_pct / 100.
+        rgb_min = values[int(math.floor(float(npx)*frac))]
+        rgb_max = values[int(math.floor(float(npx)*(1. - frac)))]
         rgb[:, :, i] -= rgb_min
         rng = rgb_max - rgb_min
         if rng > 0.: rgb[:, :, i] /= (rgb_max - rgb_min)
@@ -110,7 +113,6 @@ if True:
     plt.imshow(rgb) #, vmin = 0., vmax = 1.) #plt.tight_layout()
     if exists(ff + 'copyright_string.txt'):
         plt.xlabel(open(ff+ 'copyright_string.txt').read().strip())
-    ofn = fn + "_rgb.png"
     print("+w", ofn)
     plt.tight_layout()
     plt.savefig(ofn)
