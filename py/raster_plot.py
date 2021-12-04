@@ -55,26 +55,35 @@ bn = [bn[i] for i in band_select] if bn else bn  # cut out the band names used, 
 print("band_select", band_select)
 
 def scale_rgb(i):  # for i in range(3)
+    rfn = fn + '_rgb_scaling_' + str(i) + '.txt'
+    rgb_min, rgb_max = None, None
     rgb_i = data[band_select[i], :].reshape((lines, samples))
     
     if True: # if not override_scaling
-        values = rgb_i  # now do the so called x-% linear stretch (separate bands version)
-        values = values.reshape(np.prod(values.shape)).tolist()
-        values.sort()
+        if not exists(rfn):
+            values = rgb_i  # now do the so called x-% linear stretch (separate bands version)
+            values = values.reshape(np.prod(values.shape)).tolist()
+            values.sort()
 
-        if values[-1] < values[0]:   # sanity check
-            err("failed to sort")
-
-        for j in range(0, npx - 1):
-            if values[j] > values[j + 1]:
+            if values[-1] < values[0]:   # sanity check
                 err("failed to sort")
 
-        n_pct = 2. # percent for stretch value
-        frac = n_pct / 100.
-        rgb_min, rgb_max = values[int(math.floor(float(npx)*frac))],\
+            for j in range(0, npx - 1):
+                if values[j] > values[j + 1]:
+                    err("failed to sort")
+
+            n_pct = 2. # percent for stretch value
+            frac = n_pct / 100.
+            rgb_min, rgb_max = values[int(math.floor(float(npx)*frac))],\
                            values[int(math.floor(float(npx)*(1. - frac)))]
+            print('+w', rfn)
+            open(rfn, 'wb').write((','.join([str(x) for x in [rgb_min, rgb_max]])).encode())
+            # DONT FORGET TO WRITE THE FILE HERE
+        else:  # assume we can restore
+            rgb_min, rgb_max = [float(x) \
+                    for x in open(rfn).read().strip().split(',')]
         
-        rng = rgb_max - rgb_min  # apply scaling we just derived
+        rng = rgb_max - rgb_min  # apply restored or derived scaling
         rgb_i = (rgb_i - rgb_min) / (rng if rng != 0. else 1.)
 
         rgb_i[rgb_i < 0.] = 0.  # clip
