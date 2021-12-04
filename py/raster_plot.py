@@ -96,7 +96,7 @@ print("done scaling..")
 
 # plot the image: no class labels
 if True:
-    fig = plt.figure(figsize=(6,3))
+    fig = plt.figure(figsize=(12,8))
     ax = fig.add_subplot(1,1,1)
     ff = os.path.sep.join((fn.split(os.path.sep))[:-1]) + os.path.sep
     title_s = fn.split("/")[-1] if not exists(ff + 'title_string.txt') else open(ff + 'title_string.txt').read().strip() 
@@ -108,10 +108,10 @@ if True:
     rgb = rgb / (d_max - d_min)
 
     plt.imshow(rgb) #, vmin = 0., vmax = 1.) #plt.tight_layout()
-    plt.tight_layout()
     if exists(ff + 'copyright_string.txt'):
         plt.xlabel(open(ff+ 'copyright_string.txt').read().strip())
     ofn = fn + "_rgb.png"
     print("+w", ofn)
+    plt.tight_layout()
     plt.savefig(ofn)
     plt.show()
