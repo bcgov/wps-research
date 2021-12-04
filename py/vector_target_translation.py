@@ -6,7 +6,7 @@ from misc import *
 
 if len(args) < 6:
     print(args)
-    err("Usage: vector_target_translation [targets.csv] [xoff] [yoff] [image header file] [translated targets file] # optional args: [xmax] [ymax]")
+    err("Usage: vector_target_translation [targets.csv] [xoff] [yoff] [image header file (for new cut image file to translate vectors onto!)] [translated targets file] # optional args: [xmax] [ymax]")
 
 targets = open(args[1]).read().strip().split("\n")
 xoff, yoff, outf = None, None, None
@@ -30,7 +30,7 @@ try:
 except Exception as e:
     pass
 
-hdr = args[4]
+hdr = args[4] # header for what?
 outf = open(args[5], "wb")
 
 dat = [t.strip().split(',') for t in targets] # tabluar representation for csv
