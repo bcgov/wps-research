@@ -96,7 +96,7 @@ print("done scaling..")
 
 # plot the image: no class labels
 if True:
-    fig = plt.figure(figsize=(12,8))
+    fig = plt.figure(figsize=(8.,8. * float(lines) / float(samples)))
     ax = fig.add_subplot(1,1,1)
     ff = os.path.sep.join((fn.split(os.path.sep))[:-1]) + os.path.sep
     title_s = fn.split("/")[-1] if not exists(ff + 'title_string.txt') else open(ff + 'title_string.txt').read().strip() 
