@@ -1,6 +1,13 @@
 ''' filter vector data by:
 1. translation
-2. remove out of range targets!'''
+2. remove out of range targets!
+
+For example, if on TC site we did: 
+gdal_translate -srcwin 7172 5393 2500 2000 2021.bin -of ENVI -ot Float32 sub.bin
+
+we could translate our "imv" targets file by:
+python3 ~/GitHub/bcws-psu-research/py/vector_target_translation.py 2021.bin_targets.csv 7172 5393 sub.hdr sub.bin_targets.csv
+'''
 
 from misc import *
 
