@@ -52,6 +52,7 @@ ofn = '_'.join([fn] + middle + ["rgb.png"])
 n_points, rgb = 0, np.zeros((lines, samples, 3))
 band_select = [0, 0, 0,] if bands == 1 else band_select # could be class map. or just one band map
 bn = [bn[i] for i in band_select] if bn else bn  # cut out the band names used, if applicable
+print("band_select", band_select)
 
 def scale_rgb(i):  # for i in range(3)
     rgb_i = data[band_select[i], :].reshape((lines, samples))
@@ -72,11 +73,11 @@ def scale_rgb(i):  # for i in range(3)
         frac = n_pct / 100.
         rgb_min, rgb_max = values[int(math.floor(float(npx)*frac))],\
                            values[int(math.floor(float(npx)*(1. - frac)))]
-        rng = rgb_max - rgb_min
-        rgb_i = (rgb_max - rgb_min) / (rng if rng != 0. else 1.)
         
-        # clip
-        rgb_i[rgb_i < 0.] = 0.
+        rng = rgb_max - rgb_min  # apply scaling we just derived
+        rgb_i = (rgb_i - rgb_min) / (rng if rng != 0. else 1.)
+
+        rgb_i[rgb_i < 0.] = 0.  # clip
         rgb_i[rgb_i > 1.] = 1.
     return rgb_i
 
