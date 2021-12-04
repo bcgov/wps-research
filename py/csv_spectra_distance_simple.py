@@ -19,10 +19,10 @@ args = sys.argv
 if len(args) < 3:
     err('python3 csv_spectra_distance_simple.py [csv spectra file (one spectrum)] [raster file]')
 
-dfn = args[2]
+csv_fn, dfn = args[1], args[2]
 
 '''read the csv and locate the spectra'''
-fields, data = read_csv(args[1])
+fields, data = read_csv(csv_fn)
 nf = len(fields)  # number of fields
 f_i = {fields[i]:i for i in range(nf)}
 
@@ -43,7 +43,6 @@ if True:
     spec = [float(data[j][i]) for j in spec_fi]
     print("spectrum", spec)
 
-
     ncol, nrow, nband, data = read_binary(dfn)
     np = nrow * ncol
     if len(spec) != nband:
@@ -59,7 +58,15 @@ if True:
             for k in range(nband):
                 x = spec[k] - data[ix + (k * np)]
                 d += math.sqrt(x * x)
-            out[ix] = d
-
+            out[ix] = d  
+    numbers = []
+    w = csv_fn.split(os.path.sep)[-1][:-4].split('_')
+    for i in w:
+        try:
+            numbers.append(int(i))
+        except Exception:
+            pass
+    ofn = '_'.join([dfn] + [str(x) for x in numbers]) + '_distance.bin'
+    ohn = ofn[:-4] + '.hdr'
     write_binary(out, dfn + '_distance.bin')
     write_hdr(dfn + '_distance.hdr', ncol, nrow, 1)
