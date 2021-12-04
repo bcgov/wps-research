@@ -21,6 +21,10 @@ if len(args) < 2:
 fn, hdr = sys.argv[1], hdr_fn(sys.argv[1])  # check header exists
 assert_exists(fn)  # check file exists
 
+skip_plot = False
+if len(args) > 5:
+    skip_plot = True
+
 samples, lines, bands = read_hdr(hdr)  # read header and print parameters
 for f in ['samples', 'lines', 'bands']:
     exec('print("' + f + ' =" + str(' +  f + '))')
@@ -95,9 +99,21 @@ for i in range(3):
     rgb[:, :, i] = rgb_i[i]
 
 if True:  # plot image: no class labels 
+
+    if skip_plot:
+        mpl = matplotlib
+        COLOR = 'white'
+        mpl.rcParams['text.color'] = COLOR
+        mpl.rcParams['axes.labelcolor'] = COLOR
+        mpl.rcParams['xtick.color'] = COLOR
+        mpl.rcParams['ytick.color'] = COLOR
+
     base_in = 12.
-    fig = plt.figure(figsize=(base_in, base_in * float(lines) / float(samples)))
+    fig = plt.figure(frameon=True,
+                     figsize=(base_in, base_in * float(lines) / float(samples)))
     ax = fig.add_subplot(1, 1, 1)
+    ax.set_frame_on(True)
+    plt.axis('on')
     ff = os.path.sep.join((os.path.abspath(fn).split(os.path.sep))[:-1]) + os.path.sep
     title_s = fn.split("/")[-1] if not exists(ff + 'title_string.txt') else open(ff + 'title_string.txt').read().strip() 
     x_label = ''
@@ -108,8 +124,7 @@ if True:  # plot image: no class labels
 
     d_min, d_max = np.nanmin(rgb), np.nanmax(rgb)
     print("d_min", d_min, "d_max", d_max)
-    rgb = rgb / (d_max - d_min)
-
+    # rgb = rgb / (d_max - d_min)
     plt.imshow(rgb) #, vmin = 0., vmax = 1.) #plt.tight_layout()
     print(ff)
     if exists(ff + 'copyright_string.txt'):
@@ -117,5 +132,6 @@ if True:  # plot image: no class labels
     plt.xlabel(x_label)
     print("+w", ofn)
     plt.tight_layout()
-    plt.savefig(ofn)
-    plt.show()
+    if not skip_plot:
+        plt.show()
+    fig.savefig(ofn, transparent=(not skip_plot))
