@@ -42,12 +42,12 @@
 * [matplotlib figure](https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.figure.html)
 * [3d plotting in matplotlib](https://jakevdp.github.io/PythonDataScienceHandbook/04.12-three-dimensional-plotting.html)
 
-# Fuels
+## Fuels
 * [Judi Beck](https://www.youtube.com/watch?v=dX15tC1UHcE&list=PLrpIXKIj6MaEJw41Fi-F-UpqAR1vVOKmt&index=17)
 * [Marty Alexander](https://www.youtube.com/watch?v=ZkWeaI2c0zo&list=PLrpIXKIj6MaEJw41Fi-F-UpqAR1vVOKmt&index=16)
 * [Brian Stocks](https://www.youtube.com/watch?v=Jvx3A63JNUg&list=PLrpIXKIj6MaEJw41Fi-F-UpqAR1vVOKmt&index=18)
 
-# GEE apps
+## GEE apps
 * https://kkraoj.users.earthengine.app/view/live-fuel-moisture
 * https://code.earthengine.google.com/e27240a92ecf64bbadf8a082b91c711c?hideCode=true
 
