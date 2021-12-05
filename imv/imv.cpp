@@ -335,6 +335,12 @@ int main(int argc, char ** argv){
   myImage2->rebuffer();
   myImage3->rebuffer();
 
+    glEnable(GL_DEPTH_TEST); // wow thanks to: https://learnopengl.com/Advanced-OpenGL/Depth-testing
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glDepthMask(GL_FALSE);
+    glDepthFunc(GL_LESS);
+
+
   glutMainLoop();
   return 0;
 }

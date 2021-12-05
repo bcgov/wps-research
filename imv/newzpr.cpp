@@ -46,7 +46,7 @@ myImg * TGT_MYIMG = NULL;
 void * TGT_GLIMG = NULL;
 
 // target / analysis window magnification parameter
-float TGT_MAGNIFICATION = 10.;
+float TGT_MAGNIFICATION = 1.;
 
 // vector targets info, in-memory
 vector<size_t> targets_i;
@@ -1641,15 +1641,14 @@ void zprInstance::drawText(){
 void zprInstance::drawText(float x, float y, const char * s){
   glColor3f(0.0f,1.0f,0.0f);
   setOrthographicProjection();
-  glPushMatrix();
-  glLoadIdentity();
+  //glPushMatrix();
+  //glLoadIdentity();
   int lightingState = glIsEnabled(GL_LIGHTING);
   if(lightingState) glDisable(GL_LIGHTING);
   renderBitmapString(x, y, (void *)MYFONT, (char *)(void *)s);
   if(lightingState) glEnable(GL_LIGHTING);
-  glPopMatrix();
+  //glPopMatrix();
   resetPerspectiveProjection();
-
 }
 
 void zprInstance::add(glPlottable * a){
