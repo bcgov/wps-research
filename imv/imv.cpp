@@ -150,7 +150,9 @@ int main(int argc, char ** argv){
 
   // scalef seems to need to be a few percent or so, less than one or the window transformations get thrown off..
   scalef = 0.95 * (float)(height > width ? width : height) / (float)(nr > nc? nr: nc); // some simplification of above code..
-  if( nr < width && nr < height && nc < width && nc < height) scalef = 1.; // account for "small image" case. 1-1 if can fit on screen!
+  if(nr < width && nr < height && nc < width && nc < height){
+	  scalef = 1.; // account for "small image" case. 1-1 if can fit on screen!
+  }
 
   SUB_START_I = SUB_START_J = 0;
   SUB_SCALE_F = scalef;
