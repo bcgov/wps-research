@@ -819,6 +819,12 @@ class glImage: public glPlottable{
   void drawMeUnHide();
 
   void drawMe(){
+    /*
+     glEnable(GL_DEPTH_TEST); // wow thanks to: https://learnopengl.com/Advanced-OpenGL/Depth-testing
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glDepthMask(GL_FALSE);
+    glDepthFunc(GL_LESS);
+  */
     //printf("glImage::drawMe(%s, %f)\n", myParent->getTitle().c_str(), magnification_factor); // magnification_factor); // if(hideMe) return;
     if(Update) rebuffer();
     int NRow = image->NRow;
@@ -847,9 +853,19 @@ class glImage: public glPlottable{
     glRasterPos2f(0.,0.);
     glPixelStoref(GL_UNPACK_ALIGNMENT, 1);
     
-    if(is_analysis) glPixelZoom(magnification_factor, magnification_factor); // wow this works! WOOHOO!
-    else glDrawPixels(NCol, NRow, GL_RGB, GL_FLOAT, (GLvoid *)(&((dat->elements)[0]))); // PUT THIS BACK FOR ANALYSIS WINDOW AFTER FIXING TEXT
-
+    if(is_analysis){
+      glPixelZoom(magnification_factor, magnification_factor); // wow this works! WOOHOO!
+    }
+    glDrawPixels(NCol,
+		 NRow,
+		 GL_RGB,
+		 GL_FLOAT,
+		 (GLvoid *)(&((dat->elements)[0]))); // PUT THIS BACK FOR ANALYSIS WINDOW AFTER FIXING TEXT
+    /*
+    if(is_analysis){
+    	glPixelZoom(1.,1.);
+    }
+    */
     if(myParent->myZprInstanceID == 0){
       float x = SUB_SCALE_F * (float)SUB_START_J; // draw subset window location rect, on overview window
       float y = SUB_SCALE_F * (float)SUB_START_I;
@@ -874,8 +890,7 @@ class glImage: public glPlottable{
       glEnd();
       glPopMatrix();
 
-      // now draw target locations on overview window?
-      size_t i, tgt_i, tgt_j; str tgt_label;
+      size_t i, tgt_i, tgt_j; str tgt_label; // draw target locations on overview
       for0(i, targets_i.size()){
         tgt_i = targets_i[i];
         tgt_j = targets_j[i];
@@ -930,7 +945,6 @@ class glImage: public glPlottable{
 
     if(is_analysis){
       // draw target locations on ANALYSIS window that are in bounds
-      // IMPLEMENT THE IN BOUNDS FILTER!!!
       long int i, tgt_i, tgt_j; str tgt_label;
       float mf = magnification_factor;
       long int nw = (long int) NWIN;
@@ -968,7 +982,6 @@ class glImage: public glPlottable{
       }
     }
   }
-
   void rebuffer();
 };
 
