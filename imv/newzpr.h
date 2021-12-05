@@ -820,6 +820,7 @@ class glImage: public glPlottable{
 
   void drawMe(){
     /*
+     We put this in the main.. but this was what fixed the text vs. texture ordering problem...
      glEnable(GL_DEPTH_TEST); // wow thanks to: https://learnopengl.com/Advanced-OpenGL/Depth-testing
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glDepthMask(GL_FALSE);
