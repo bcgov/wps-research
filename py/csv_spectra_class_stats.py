@@ -16,6 +16,9 @@ from misc import exist
 from misc import err
 args = sys.argv
 
+if len(args) < 3:
+    err('python3 csv_raster_class_stats.py [csv file] [label of col to aggregate over]')
+
 '''read the csv and locate the spectra'''
 fields, data = read_csv(args[1])
 nf = len(fields)  # number of fields

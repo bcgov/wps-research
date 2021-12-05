@@ -9,10 +9,12 @@ import sys
 import csv
 import numpy
 import math
+from misc import pd
+from misc import run
+from misc import err
 from misc import parfor
 from misc import read_csv
 from misc import exist
-from misc import err
 from misc import hdr_fn
 from misc import read_binary
 from misc import write_hdr
@@ -68,32 +70,36 @@ if n_select < 1:
 ncol, nrow, nband, data = read_binary(dfn)
 if len(spec_fi) != nband:
     err("unexpected number of spectral bands")
-np = nrow * ncol
-out = numpy.zeros(np)
+out = numpy.zeros(nrow * ncol)
+print("done read")
 
-def dist_row(i):
-    global lock, out, spec, nrow, ncol, nband, data, n_processed   #for i in range(nrow):
-    
-    with lock:
-        n_processed += 1
-    print('%', 100. * n_processed / nrow, i)
+def dist_row(i): # , nrow, ncol, nband, data):
+    global nrow, ncol, nband, data, n_processed, spec
+    lock.acquire()
+    n_processed += 1
+    print('%', 100. * n_processed / nrow, i, n_processed)
+    lock.release()
 
     result = []
     ix = i * ncol
-    knp = [k * np for k in range(nband)]
+    knp = [(k * nrow * ncol) for k in range(nband)]
     for j in range(ncol):
         d = 0.
         ij = ix + j
         for k in range(nband):
             x = spec[k] - data[ij + knp[k]]
-            d += x * x # math.sqrt(x * x)
+            d += math.sqrt(x * x)
         result.append(d)
+    # print(i, result)
     return result
 
-x = parfor(dist_row, range(nrow))
+x = parfor(dist_row, [i for i in range(nrow)])
 print("assembling")
 for i in range(nrow):
-    out[i*ncol: (i+1)*ncol] = x[i]
+    print("assemble", i, x[i])
+    ix = range(i * ncol, (i + 1) * ncol)
+    out[ix] = x[i]
+    print(i, x[i])
 
 numbers = []
 w = csv_fn.split(os.path.sep)[-1][:-4].split('_')
@@ -109,3 +115,4 @@ ofn = ('_'.join([dfn] +
 ohn = ofn[:-4] + '.hdr'
 write_binary(out, ofn)
 write_hdr(ohn, ncol, nrow, 1)
+run('python3 ' + pd + 'envi_header_cleanup.py ' + ohn)
