@@ -934,6 +934,7 @@ class glImage: public glPlottable{
       long int i, tgt_i, tgt_j; str tgt_label;
       float mf = magnification_factor;
       long int nw = (long int) NWIN;
+      printf("TARGETS UNDER ANALYSIS WINDOW:\n");
       for0(i, targets_i.size()){
         tgt_i = (long int)targets_i[i] - (long int)SUB_START_I - (long int)WIN_I;
         tgt_j = (long int)targets_j[i] - (long int)SUB_START_J - (long int)WIN_J;
@@ -942,7 +943,7 @@ class glImage: public glPlottable{
 	if(tgt_i > (-nw) && tgt_j > (-nw) && tgt_i <= (2*nw) && tgt_j <=(2*nw)){
           tgt_label = targets_label[i];
 	  printf("\tSUB_START_I,J %zu %zu WIN_I,J %zu %zu\n", SUB_START_I, SUB_START_J, WIN_I, WIN_J);
-          printf("(%zu %zu) ANALYSIS (tgt_i, tgt_j)=(%ld,%ld) magnif %f NWIN %zu label=%s\n",
+          printf("\t(%zu %zu) ANALYSIS (tgt_i, tgt_j)=(%ld,%ld) magnif %f NWIN %zu label=%s\n",
 		 targets_i[i],
 		 targets_j[i],
 		 tgt_i, tgt_j,
@@ -953,10 +954,16 @@ class glImage: public glPlottable{
           float x = mf * ((float)tgt_j + .5);
           float y = mf * ((float)NWIN - ((float)tgt_i + 0.5));
           float w = mf * ((float)NWIN / 2.);
+
+	  float tx = (float)tgt_j + .5;
+	  float ty = (float)tgt_i + .5;
+	  tx *= (float)NWIN;
+	  ty *= (float)NWIN;
           glColor3f(1., 0., 0.); glLineWidth(1.);
           glBegin(GL_LINES); glVertex2f(x, y - w); glVertex2f(x, y + w); glEnd();
           glBegin(GL_LINES); glVertex2f(x - w, y); glVertex2f(x + w, y); glEnd();
-          myParent->drawText(x, (NWIN * mf) - y, tgt_label.c_str());
+          myParent->drawText(tx, ty, tgt_label.c_str()); //NWIN * x / mf, NWIN * ((NWIN * mf) - y)/mf, tgt_label.c_str());
+	  // myParent->drawText(x, (NWIN * mf) - y, tgt_label.c_str());
 	}
       }
     }
