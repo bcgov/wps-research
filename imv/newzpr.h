@@ -819,22 +819,23 @@ class glImage: public glPlottable{
   void drawMeUnHide();
 
   void drawMe(){
-    magnification_factor = (float)(myParent->NRow) / (float)(image->NRow); // dynamically recalc magnif factor, from windowsize changes, only apply to analysis window
-    // printf("glImage::drawMe(%s)\n", myParent->getTitle().c_str()); // magnification_factor);
-    // if(hideMe) return;
+    //printf("glImage::drawMe(%s, %f)\n", myParent->getTitle().c_str(), magnification_factor); // magnification_factor); // if(hideMe) return;
     if(Update) rebuffer();
     int NRow = image->NRow;
     int NCol = image->NCol;
     int nr = NRow; //myParent->NRow;
     int nc = NCol; //myParent->NCol;
-    //printf("drawMe nrow %d ncol %d nr %d nc%d\n", NRow, NCol, nr, nc);
+    printf("drawMe nrow %d ncol %d nr %d nc%d\n", NRow, NCol, nr, nc);
 
     int is_analysis = strncmp(myParent->getTitle().c_str(), "Analys", 6) == 0;
     if(is_analysis){
-      // printf("We're on Analysis window.\n");
+      //dynamic recalc magnif factor!
+      magnification_factor = (float)(myParent->NRow) / (float)(image->NRow);
+      printf("glImage::drawMe(%s, %f)\n", myParent->getTitle().c_str(), magnification_factor); // magnification_factor);
+      printf("We're on Analysis window.\n");
       nr = floor((float)nr * magnification_factor);
       nc = floor((float)nc * magnification_factor);
-      // printf("NRow %d NCol %d nr %d nc %d\n", NRow, NCol, nr, nc);
+      printf("NRow %d NCol %d nr %d nc %d\n", NRow, NCol, nr, nc);
     }
 
     glViewport(0, 0, nc, nr); //NCol, NRow);
@@ -845,8 +846,9 @@ class glImage: public glPlottable{
     glLoadIdentity();
     glRasterPos2f(0.,0.);
     glPixelStoref(GL_UNPACK_ALIGNMENT, 1);
+    
     if(is_analysis) glPixelZoom(magnification_factor, magnification_factor); // wow this works! WOOHOO!
-    glDrawPixels(NCol, NRow, GL_RGB, GL_FLOAT, (GLvoid *)(&((dat->elements)[0])));
+    else glDrawPixels(NCol, NRow, GL_RGB, GL_FLOAT, (GLvoid *)(&((dat->elements)[0])));
 
     if(myParent->myZprInstanceID == 0){
       float x = SUB_SCALE_F * (float)SUB_START_J; // draw subset window location rect, on overview window
@@ -881,25 +883,14 @@ class glImage: public glPlottable{
 
         float x = SUB_SCALE_F * (float)tgt_j;
         float y = nr - SUB_SCALE_F * (float)tgt_i;
-
         // y = y - (SUB_SCALE_F * (float)NRow);
         float w = (float)NWIN / 2.;
 
         glColor3f(1, 0, 0);
         glLineWidth(1.);
-
-	// vertical of crosshair
-        glBegin(GL_LINES);
-        glVertex2f(x, y - w);
-	glVertex2f(x, y + w);
-        glEnd();
-
-	// horizontal of crosshair
-        glBegin(GL_LINES);
-        glVertex2f(x - w, y);
-	glVertex2f(x + w, y);
-        glEnd();
-
+        glBegin(GL_LINES); glVertex2f(x, y - w); glVertex2f(x, y + w); glEnd(); // crosshair vertical
+        glBegin(GL_LINES); glVertex2f(x - w, y); glVertex2f(x + w, y); glEnd(); // crosshair horiz
+	cout << "tgt_label[" << tgt_label << "]"<<endl;
         myParent->drawText(x, nr - y, tgt_label.c_str());
       }
     }
@@ -912,78 +903,49 @@ class glImage: public glPlottable{
       size_t tg_i = SUB_START_I + WIN_I;
       size_t tg_j = SUB_START_J + WIN_J;
       printf("*** TARGET (global) ix: i=%zu j=%zu; target subi: x %f y %f w %f h %f NWIN %zu\n", tg_i, tg_j, x, y, w, h, (size_t)NWIN);
-      glColor3f(1., 0., 0.);
-      glLineWidth(1.5);
-      glPushMatrix(); //Make sure our transformations don't affect any other transformations in other code
+      glColor3f(1., 0., 0.); glLineWidth(1.5);
+      glPushMatrix(); //Make sure our transformations don't affect transforms in other code?
       glTranslatef(x, ((float)NRow) - y, 0);// (y + (h/2.)), 0);
-      //Put other transformations here
+      
       glBegin(GL_LINES); //We want to draw a quad, i.e. shape with four sides
-      glVertex2f(0, 0); //Draw the four corners of the rectangle
-      glVertex2f(0, -h);
-      glVertex2f(0, -h);
-      glVertex2f(w, -h);
-      glVertex2f(w, -h);
-      glVertex2f(w, 0);
-      glVertex2f(w, 0);
-      glVertex2f(0, 0);
+      glVertex2f(0, 0);  glVertex2f(0, -h); glVertex2f(0, -h); glVertex2f(w, -h);
+      glVertex2f(w, -h); glVertex2f(w, 0);  glVertex2f(w, 0);  glVertex2f(0, 0);
       glEnd();
       glPopMatrix(); // go back to where we were!
 
-      // now draw target locations on subset window?
-      size_t i, tgt_i, tgt_j; str tgt_label;
+      size_t i, tgt_i, tgt_j; str tgt_label;  // draw target locations on SUBSET window
       for0(i, targets_i.size()){
         tgt_i = targets_i[i] - SUB_START_I;
         tgt_j = targets_j[i] - SUB_START_J;
         tgt_label = targets_label[i];
-
         float x = (float)tgt_j + .5;
         float y = (float)SUB_MM - ((float)tgt_i + 0.5);
         float w = (float)NWIN / 2.;
-
-        glColor3f(1, 0, 0);
-        glLineWidth(1.);
-
-        glBegin(GL_LINES);
-        glVertex2f(x, y - w); glVertex2f(x, y + w);
-        glEnd();
-
-        glBegin(GL_LINES);
-        glVertex2f(x - w, y); glVertex2f(x + w, y);
-        glEnd();
-
+        glColor3f(1, 0, 0); glLineWidth(1.);
+        glBegin(GL_LINES); glVertex2f(x, y - w); glVertex2f(x, y + w); glEnd();
+        glBegin(GL_LINES); glVertex2f(x - w, y); glVertex2f(x + w, y); glEnd();
         myParent->drawText(tgt_j, tgt_i, tgt_label.c_str());
       }
     }
 
     if(is_analysis){
-      // draw any target locations that are within bounds? this is lower priority than drawing on subset window
-
-      size_t i, tgt_i, tgt_j; str tgt_label;
+      // draw target locations on ANALYSIS window that are in bounds
+      long int i, tgt_i, tgt_j; str tgt_label;
+      float mf = magnification_factor;
       for0(i, targets_i.size()){
-        tgt_i = targets_i[i] - SUB_START_I - WIN_I;
-        tgt_j = targets_j[i] - SUB_START_J - WIN_J;
-        printf("ANALYSIS target: %zu %zu\n", tgt_i, tgt_j);
+        tgt_i = (long int)targets_i[i] - (long int)SUB_START_I - (long int)WIN_I;
+        tgt_j = (long int)targets_j[i] - (long int)SUB_START_J - (long int)WIN_J;
+	printf("\tSUB_START_I,J %zu %zu WIN_I,J %zu %zu\n", SUB_START_I, SUB_START_J, WIN_I, WIN_J);
+        printf("(%zu %zu) ANALYSIS target: %ld %ld magnification %f\n", targets_i[i], targets_j[i], tgt_i, tgt_j, magnification_factor);
         tgt_label = targets_label[i];
 
-        float x = (float)tgt_j + .5;
-        float y = (float)NWIN- ((float)tgt_i + 0.5);
-        float w = (float)NWIN / 2.;
-        x *= magnification_factor;
-        y *= magnification_factor;
-        w *= magnification_factor;
-
-        glColor3f(1, 0, 0);
-        glLineWidth(1.);
-
-        glBegin(GL_LINES);
-        glVertex2f(x, y - w); glVertex2f(x, y + w);
-        glEnd();
-
-        glBegin(GL_LINES);
-        glVertex2f(x - w, y); glVertex2f(x + w, y);
-        glEnd();
-
-        myParent->drawText(x, (NWIN * magnification_factor) - y, tgt_label.c_str());
+        float x = mf * ((float)tgt_j + .5);
+        float y = mf * ((float)NWIN - ((float)tgt_i + 0.5));
+        float w = mf * ((float)NWIN / 2.);
+        glColor3f(1., 0., 0.); glLineWidth(1.);
+        glBegin(GL_LINES); glVertex2f(x, y - w); glVertex2f(x, y + w); glEnd();
+        glBegin(GL_LINES); glVertex2f(x - w, y); glVertex2f(x + w, y); glEnd();
+        myParent->drawText(x, (NWIN * mf) - y, tgt_label.c_str());
       }
     }
   }
