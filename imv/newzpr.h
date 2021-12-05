@@ -832,17 +832,17 @@ class glImage: public glPlottable{
     int NCol = image->NCol;
     int nr = NRow; //myParent->NRow;
     int nc = NCol; //myParent->NCol;
-    printf("drawMe nrow %d ncol %d nr %d nc%d\n", NRow, NCol, nr, nc);
+    //printf("drawMe nrow %d ncol %d nr %d nc%d\n", NRow, NCol, nr, nc);
 
     int is_analysis = strncmp(myParent->getTitle().c_str(), "Analys", 6) == 0;
     if(is_analysis){
       //dynamic recalc magnif factor!
       magnification_factor = (float)(myParent->NRow) / (float)(image->NRow);
-      printf("glImage::drawMe(%s, %f)\n", myParent->getTitle().c_str(), magnification_factor); // magnification_factor);
-      printf("We're on Analysis window.\n");
+      //printf("glImage::drawMe(%s, %f)\n", myParent->getTitle().c_str(), magnification_factor); // magnification_factor);
+      //printf("We're on Analysis window.\n");
       nr = floor((float)nr * magnification_factor);
       nc = floor((float)nc * magnification_factor);
-      printf("NRow %d NCol %d nr %d nc %d\n", NRow, NCol, nr, nc);
+      //printf("NRow %d NCol %d nr %d nc %d\n", NRow, NCol, nr, nc);
     }
 
     glViewport(0, 0, nc, nr); //NCol, NRow);
@@ -872,7 +872,7 @@ class glImage: public glPlottable{
       float y = SUB_SCALE_F * (float)SUB_START_I;
       float w = SUB_SCALE_F * (float)SUB_MM;
       float h = SUB_SCALE_F * (float)SUB_MM;
-      printf("x %f y %f w %f h %f\n", x, y, w, h);
+      //printf("x %f y %f w %f h %f\n", x, y, w, h);
       glLineWidth(1.5);
       glPushMatrix(); //Make sure our transformations don't affect any other transformations in other code
       glTranslatef(x, (float)NRow - y, 0);
@@ -906,7 +906,7 @@ class glImage: public glPlottable{
         glLineWidth(1.);
         glBegin(GL_LINES); glVertex2f(x, y - w); glVertex2f(x, y + w); glEnd(); // crosshair vertical
         glBegin(GL_LINES); glVertex2f(x - w, y); glVertex2f(x + w, y); glEnd(); // crosshair horiz
-	cout << "tgt_label[" << tgt_label << "]"<<endl;
+	//cout << "tgt_label[" << tgt_label << "]"<<endl;
         myParent->drawText(x, nr - y, tgt_label.c_str());
       }
     }
@@ -949,7 +949,7 @@ class glImage: public glPlottable{
       long int i, tgt_i, tgt_j; str tgt_label;
       float mf = magnification_factor;
       long int nw = (long int) NWIN;
-      printf("TARGETS UNDER ANALYSIS WINDOW:\n");
+      //printf("TARGETS UNDER ANALYSIS WINDOW:\n");
       for0(i, targets_i.size()){
         tgt_i = (long int)targets_i[i] - (long int)SUB_START_I - (long int)WIN_I;
         tgt_j = (long int)targets_j[i] - (long int)SUB_START_J - (long int)WIN_J;
@@ -957,18 +957,18 @@ class glImage: public glPlottable{
 	// skip targets that are out of bounds (wrt analysis window)
 	if(tgt_i > (-nw) && tgt_j > (-nw) && tgt_i <= (2*nw) && tgt_j <=(2*nw)){
           tgt_label = targets_label[i];
-	  printf("\tSUB_START_I,J %zu %zu WIN_I,J %zu %zu\n", SUB_START_I, SUB_START_J, WIN_I, WIN_J);
-          printf("\t(%zu %zu) ANALYSIS (tgt_i, tgt_j)=(%ld,%ld) magnif %f NWIN %zu label=%s\n",
+	  //printf("\tSUB_START_I,J %zu %zu WIN_I,J %zu %zu\n", SUB_START_I, SUB_START_J, WIN_I, WIN_J);
+         /* printf("\t(%zu %zu) ANALYSIS (tgt_i, tgt_j)=(%ld,%ld) magnif %f NWIN %zu label=%s\n",
 		 targets_i[i],
 		 targets_j[i],
 		 tgt_i, tgt_j,
 		 magnification_factor,
 		 NWIN,
 		 tgt_label.c_str());
-
+		*/
           float x = mf * ((float)tgt_j + .5);
           float y = mf * ((float)NWIN - ((float)tgt_i + 0.5));
-          float w = mf * ((float)NWIN / 2.);
+          float w = mf * 5.; // ((float)NWIN / 2.);
 
 	  float tx = (float)tgt_j + .5;
 	  float ty = (float)tgt_i + .5;
