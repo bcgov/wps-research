@@ -968,7 +968,7 @@ class glImage: public glPlottable{
 		*/
           float x = mf * ((float)tgt_j + .5);
           float y = mf * ((float)NWIN - ((float)tgt_i + 0.5));
-          float w = mf * 5.; // ((float)NWIN / 2.);
+          float w = mf * 2.; // ((float)NWIN / 2.);
 
 	  float tx = (float)tgt_j + .5;
 	  float ty = (float)tgt_i + .5;
