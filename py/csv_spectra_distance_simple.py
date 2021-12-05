@@ -58,6 +58,7 @@ for i in range(N):
 
 # divide by N
 spec_avg = [spec_avg[i] / n_select for i in range(len(spec_avg))]
+print("spec_avg", spec_avg)
 
 # check we selected something
 if n_select < 1:
@@ -87,10 +88,10 @@ def dist_row(i):
             x = spec[k] - data[ij + knp[k]]
             d += x * x # math.sqrt(x * x)
         result.append(d)
-    return 0
+    return result
 
-print('assembling')
 x = parfor(dist_row, range(nrow))
+print("assembling")
 for i in range(nrow):
     out[i*ncol: (i+1)*ncol] = x[i]
 
