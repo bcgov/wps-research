@@ -24,28 +24,32 @@ int main(int argc, char ** argv){
   float * out = falloc(nrow * ncol * nband);
   float * dat = bread(fn, nrow, ncol, nband);
 
-  float dd; // dominant value this pixel
-  size_t di = 0; // dominant index
+  float dom_v; // dominant value this pixel
+  size_t dom_k = 0; // dominant index
   for0(i, nrow){
     ix = (i * ncol);
     for0(j, ncol){
       ij = ix + j;
 
-      di = 0; //assume first band dominant
       ik = ij;
-      dd = dat[ik];
+      dom_k = 0; //assume first band dominant
+      dom_v = dat[ik];
+      
 
       for0(k, nband){
 	ik = (np * k) + ij;
-	if(dat[ik] > dd){
-	  dd = dat[ik];  // find dominant band
-	  di = k;
+	if(dat[ik] > dom_v){
+	  dom_v = dat[ik];  // find dominant band
+	  dom_k = k;
 	}
       }
 
       for0(k, nband){
         ik = (np * k) + ij;
-	out[ik] = (di == k) ? dat[ik]: 0.;  // dominant band retains value
+	out[ik] = 0.;
+	if(dom_k == k){
+		out[ik] = dat[ik];
+	}
       }
     }
   }
