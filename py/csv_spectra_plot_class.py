@@ -15,13 +15,13 @@ from misc import exist
 from misc import err
 args = sys.argv
 
+if len(args) < 3:
+    print("python3 csv_spectra_plot_class.py [csv input file with spectra (nm)] [selected field for legending]")
+
 '''read the csv and locate the spectra'''
 fields, data = read_csv(args[1])
 nf = len(fields)  # number of fields
 f_i = {fields[i]:i for i in range(nf)}
-
-if len(args) < 3:
-    print("python3 csv_spectra_plot_class.py [csv input file with spectra (nm)] [selected field for legending]")
 
 if len(args) < 3:  # call the program on all fields!
     for f in fields:
