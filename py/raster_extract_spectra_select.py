@@ -1,4 +1,4 @@
-'''20211205 
+'''20211205  wow 
 Extract and average spectra on a CSV.. for instances where the selected field [field to select from]
 matches the value provided [value to select]
 * the entry point for spectra extraction..
@@ -37,7 +37,6 @@ N = len(csv_data[0]) # number of data points in whole csv
 
 hfn = hdr_fn(img_fn)  # raster info: samples, lines, bands, and band names
 [nc, nr, nb], bn = [int(i) for i in read_hdr(hfn)], band_names(hfn)
-
 
 new = []
 mean = None
