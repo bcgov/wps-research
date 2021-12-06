@@ -20,7 +20,7 @@ int main(int argc, char ** argv){
   hread(hfn, nrow, ncol, nband); // read header 1
   np = nrow * ncol; // number of input pix
 
-  size_t n, i, j, K, k1, k2, ix, ij, ik;
+  size_t n, i, j, k, ix, ij, ik;
   float * out = falloc(nrow * ncol * nband);
   float * dat = bread(fn, nrow, ncol, nband);
 
