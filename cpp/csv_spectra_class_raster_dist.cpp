@@ -6,6 +6,7 @@ we are assuming that the
 */
 #include"misc.h"
 #include<vector>
+int debug = false;
 
 void deriv(float * x, int x_len, float * y){
   int i;
@@ -82,7 +83,7 @@ int main(int argc, char ** argv){
     for(it = lines.begin(); it != lines.end(); it++){
       if((*it)[fi] == str(argv[3])){
         for0(i, M){
-          spec[i] = atof((*it)[spec_fi[i]].c_str());
+          spec[i] = (float)strtod((*it)[spec_fi[i]].c_str(), NULL);
         }
 
         int tM = M;
@@ -139,9 +140,14 @@ int main(int argc, char ** argv){
         float d = 0.;
         for0(k, tM){
           float x = (spec[k] - mean[k]); // CHANGE BACK TO TS[K]
+	  if(debug) printf("x %f\n", x);
           d += sqrt(x * x);
         }
         out[ij] = d;
+	if(debug){
+	  printf("d %f\n", d); 
+	  exit(1);
+	}
       }
     }
 
