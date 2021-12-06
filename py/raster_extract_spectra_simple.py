@@ -1,4 +1,5 @@
 # this script extracts one spectrum only from a raster: from at a row, col point location
+# considered to be the "trusted" spectra extraction
 import os
 import sys
 import json
