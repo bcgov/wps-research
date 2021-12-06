@@ -45,7 +45,7 @@ int main(int argc, char ** argv){
 
       for0(k, nband){
         ik = (np * k) + ij;
-	out[ij] = (di == k) ? dat[ik]: 0.;  // dominant band retains value
+	out[ik] = (di == k) ? dat[ik]: 0.;  // dominant band retains value
       }
     }
   }
