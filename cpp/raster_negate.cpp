@@ -27,9 +27,9 @@ int main(int argc, char ** argv){
   for0(k, nband){
     ik = np * k;
     for0(i, nrow){
-      ix = i * ncol + ik;
+      ix = (i * ncol) + ik;
       for0(j, ncol){
-        ij = ik + j;
+        ij = ix + j;
         out[ij] = -dat[ij];
       }
     }
