@@ -234,3 +234,38 @@ def markers():
             "p", "P", "*", "h", "H", "+", "x", "X", "D", "d", "|", "_", 0, 1,
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 
+
+def xy_to_pix_lin(fn, x, y, nb):  # raster fn, lat/lon, number of bands (assume we read it already)
+    cmd = ["gdallocationinfo",
+           fn, # input image
+           '-wgs84', # specify lat long input
+           str(x), # lat
+           str(y)] # long
+    cmd = ' '.join(cmd)
+    print(cmd)
+    lines = [x.strip() for x in os.popen(cmd).readlines()]
+    count = 0
+    if len(lines) >= 2 * (1 + nb):
+        w = lines[1].split()
+        if w[0] != "Location:":
+            err("unexpected field")
+        pix_i, lin_i = w[1].strip('(').strip(')').split(',')
+        if pix_i[-1] != 'P' or lin_i[-1] != 'L':
+            err('unexpected data')
+
+        pix_i, lin_i = int(pix_i[:-1]), int(lin_i[:-1])
+        print(str(pix_i) + 'P ' + str( lin_i) + 'L')
+        count += 1
+        data = []
+        for j in range(0, nb): # for each band
+            bn = lines[2 * (1 + j)].strip(":").strip().split()
+            if int(bn[1]) != j + 1:
+                err("expected: Band: " + str(j + 1) + "; found: " + lines[2 * (1 + j)])
+            value = float(lines[3 + (2*j)].split()[1].strip())
+            data.append(value)
+        print(data)
+        
+        row, col = lin_i, pix_i
+        return row, col, data  # return the goods!
+    else:
+        err("misc.py: unexpected output from gdallocationinfo: number of lines: " + str(len(lines)))
