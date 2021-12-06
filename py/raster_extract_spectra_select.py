@@ -1,10 +1,7 @@
-'''
-THIS SCRIPT NOT OPERATIONAL YET, MIGHT NEED TO DELETE THIS ONE..
-
-20211205 just average the spectra on a CSV.. for instances where the selected field [field to select from]
+'''20211205 
+Extract and average spectra on a CSV.. for instances where the selected field [field to select from]
 matches the value provided [value to select]
-
-this script not tested yet'''
+* the entry point for spectra extraction..'''
 DEBUG = False
 import os
 import sys
@@ -13,35 +10,43 @@ import math
 import numpy
 from misc import * 
 
-if len(args) < 3:
-    err('python3 csv_spectra_aggregate.py [csv spectra file (one spectrum)] ' +
-        ' [field to select from] [value to select]' +     
-        ' [raster file]')
+if len(args) < 5:
+    err('python3 raster_extract_spectra_select.py ' +
+        '[csv spectra file (no spectra but x, y (wgs-84) and select-field)] ' +
+        '[field to select from (select-field)] ' +
+        '[value to select (select-value)]' +     
+        '[raster file to select spectra from]')
 
-csv_fn, dfn = args[1], args[4]
-select_field = args[2]
-select_value = args[3]
+csv_fn, select_field, select_value, img_fn = args[1:5]
 
-'''read the csv and locate the spectra'''
+'''read the csv'''
 fields, csv_data = read_csv(csv_fn)
 nf = len(fields)  # number of fields
 f_i = {fields[i]:i for i in range(nf)}
 
-spec_fi = []
-for i in range(nf):
-    if fields[i][-2:] == 'nm':
-        spec_fi += [i]
-print('spectra col-ix', spec_fi)
-print('number of cols', len(spec_fi))
+for i in ['x', 'y', select_field]:  # assert it contains lat/lon..
+    if i not in fields:
+        err('expected field in ' + csv_fn + ': ' + i)
+[x_i, y_i, select_i] = [f_i[i]
+                        for i in ['x', 'y', select_field]]  # which col-idx to use?
 
-select_i = f_i[select_field] # index of col indicated to match on..
 
 ''' average the spectra where field select_field matches the value select_value'''
-N = len(csv_data[0]) # number of data points
-n_select, spec_avg = 0., [0. for i in range(len(spec_fi))] # averaged spectra goes here
+N = len(csv_data[0]) # number of data points in whole csv
 
-for i in range(N):
+hfn = hdr_fn(img_fn)  # raster info: samples, lines, bands, and band names
+[nc, nr, nb], bn = [int(i) for i in read_hdr(hfn)], band_names(hfn)
+
+for i in range(N):  # look at all rows in the csv
     if csv_data[select_i][i] == select_value:
+        x = csv_data[x_i][i] 
+        y = csv_data[y_i][i]
+        row, col, spec = xy_to_pix_lin(img_fn, x, y, nb)  # extract pix lin loc, and spectra from file
+        print("row", row, "col", col)
+# output by catting onto the original csv! include the parameters in the addition!
+# also output the averaged spectra (with stdv??) on the segment (segment of the csv)
+
+'''
         n_select += 1
         spec =  [float(csv_data[j][i]) for j in spec_fi]  # extract a spectrum
         print(spec)
@@ -55,10 +60,9 @@ print("spec_avg", spec_avg)
 if n_select < 1:
     err("no spectra selected")
 
-'''now we have new spectrums, output them'''
 lines = []
 lines.append(','.join([fields[i] for i in spec_fi]))
 lines.append(','.join([str(x) for x in spec_avg]))
 ofn = in_f + '_' + select_field + '_eq_' + select_value + '_aggregate.csv'
 print('+w', ofn)
-open(ofn, 'wb').write(('\n'.join(lines)).encode())
+open(ofn, 'wb').write(('\n'.join(lines)).encode())'''
