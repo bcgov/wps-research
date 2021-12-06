@@ -62,10 +62,10 @@ int main(int argc, char ** argv){
     }
   }
 
-  printf("band index, average relative difference(%)\n");
+  printf("band index, average relative difference, %\n");
   for0(k, nband){
     avg[k] /= N[k];
-    printf("%d, %f = %e\n", k, 100. * avg[k], 100. * avg[k]);
+    printf("%d, %f, %%%f = %%%e\n", k, avg[k], 100. * avg[k], 100. * avg[k]);
   }
 
   bwrite(out, ofn, nrow, ncol, nband);
