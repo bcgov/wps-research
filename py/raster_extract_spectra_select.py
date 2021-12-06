@@ -1,8 +1,9 @@
 '''20211205 
 Extract and average spectra on a CSV.. for instances where the selected field [field to select from]
 matches the value provided [value to select]
-* the entry point for spectra extraction..'''
-DEBUG = False
+* the entry point for spectra extraction..
+e.g.
+    python3 ~/GitHub/bcws-psu-research/py/raster_extract_spectra_select.py survey_label.csv cluster_label 6 sub.bin '''
 import os
 import sys
 import csv
@@ -37,32 +38,49 @@ N = len(csv_data[0]) # number of data points in whole csv
 hfn = hdr_fn(img_fn)  # raster info: samples, lines, bands, and band names
 [nc, nr, nb], bn = [int(i) for i in read_hdr(hfn)], band_names(hfn)
 
+
+new = []
+mean = None
+count = 0.
 for i in range(N):  # look at all rows in the csv
     if csv_data[select_i][i] == select_value:
         x = csv_data[x_i][i] 
         y = csv_data[y_i][i]
         row, col, spec = xy_to_pix_lin(img_fn, x, y, nb)  # extract pix lin loc, and spectra from file
+        new.append([i, row, col, spec])
         print("row", row, "col", col)
-# output by catting onto the original csv! include the parameters in the addition!
-# also output the averaged spectra (with stdv??) on the segment (segment of the csv)
+        mean = spec if mean is None else [mean[j] + spec[j] for j in range(len(spec))]
+        count += 1.
+mean = [mean[j] / count for j in range(len(mean))]  # divide by N
+print("mean", mean)
+stdv = [numpy.std([new[j][3][k] for j in range(len(new))]) for k in range(len(mean))] # k in rnge(len(new))]) for j in range(len(mean))]
+print("stdv", stdv)
 
-'''
-        n_select += 1
-        spec =  [float(csv_data[j][i]) for j in spec_fi]  # extract a spectrum
-        print(spec)
-        spec_avg = [spec_avg[j] + spec[j] for j in range(len(spec_fi))] # add it onto the to-be average
+csv_ofn = '_'.join([csv_fn, 'spectra', select_field, select_value + '.csv'])
+print('+w', csv_ofn)
 
-# divide by N
-spec_avg = [spec_avg[i] / n_select for i in range(len(spec_avg))]
-print("spec_avg", spec_avg)
+lines = [fields + ['row', 'col'] + bn] # first line: header
+# print(lines)
+for i, row, col, spec in new:
+    orig = [csv_data[j][i] for j in range(nf)]
+    rowcol =  [str(row), str(col)] 
+    spec = [str(x) for x in spec]
+    lines += [orig + rowcol + spec]
+lines = [','.join(line) for line in lines]
+open(csv_ofn, 'wb').write(('\n'.join(lines)).encode())
 
-# check we selected something
-if n_select < 1:
-    err("no spectra selected")
+csv_afn = '_'.join([csv_fn, 'spectra_mean', select_field, select_value + '.csv'])
+lines = [bn]
+lines += [[str(j) for j in mean]]
+print(lines)
+lines = [','.join(line) for line in lines]
+open(csv_afn, 'wb').write(('\n'.join(lines)).encode())
+print('+w', csv_afn)
 
-lines = []
-lines.append(','.join([fields[i] for i in spec_fi]))
-lines.append(','.join([str(x) for x in spec_avg]))
-ofn = in_f + '_' + select_field + '_eq_' + select_value + '_aggregate.csv'
-print('+w', ofn)
-open(ofn, 'wb').write(('\n'.join(lines)).encode())'''
+
+csv_sfn = '_'.join([csv_fn, 'spectra_stdv', select_field, select_value + '.csv'])
+lines = [bn]
+lines += [[str(j) for j in stdv]]
+lines = [','.join(line) for line in lines]
+open(csv_sfn, 'wb').write(('\n'.join(lines)).encode())
+print('+w', csv_sfn)
