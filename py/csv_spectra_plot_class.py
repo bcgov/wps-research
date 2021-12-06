@@ -78,7 +78,7 @@ for case in ['regular', 'derivative', 'integral']:
     plt.title((case if case != 'regular' else '') + "Spectra aggregated by categorical field: " + args[2])
     plt.ylabel("Digital number")
     plt.xlabel("Date, resolution(m) and Frequency (nm)")
-    plt.gca().axes.get_yaxis().set_visible(False)
+    # plt.gca().axes.get_yaxis().set_visible(False)
 
     max_y, min_y = 0, 0
     ci = 0
