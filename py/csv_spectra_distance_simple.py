@@ -4,6 +4,7 @@ python3 ~/GitHub/bcws-psu-research/py/csv_spectra_distance_simple.py ./sub.bin_f
 to a raster
 
 python3 csv_spectra_distance_simple.py [input csv file] [raster file]'''
+DEBUG = False
 import os
 import sys
 import csv
@@ -88,10 +89,22 @@ def dist_row(i): # , nrow, ncol, nband, data):
         ij = ix + j
         for k in range(nband):
             x = spec[k] - data[ij + knp[k]]
+            if DEBUG:
+                print("x", x) # REMOVE THIS
             d += math.sqrt(x * x)
         result.append(d)
-    # print(i, result)
+        # print(i, result)
+        if DEBUG:
+            print("d", d) # REMOVE THIS
+            sys.exit(1) # REMOVE THIS
     return result
+
+if DEBUG:
+    def fake_parfor(dist_row, ix): # REMOVE THIS
+        for i in ix:
+            dist_row(i)
+    fake_parfor(dist_row, [i for i in range(nrow)])  # REMOVE THIS
+    sys.exit(1) # REMOVE THIS
 
 x = parfor(dist_row, [i for i in range(nrow)])
 print("assembling")
@@ -99,7 +112,8 @@ for i in range(nrow):
     print("assemble", i, x[i])
     ix = range(i * ncol, (i + 1) * ncol)
     out[ix] = x[i]
-    print(i, x[i])
+    if DEBUG:
+        print(i, x[i])
 
 numbers = []
 w = csv_fn.split(os.path.sep)[-1][:-4].split('_')
@@ -116,3 +130,4 @@ ohn = ofn[:-4] + '.hdr'
 write_binary(out, ofn)
 write_hdr(ohn, ncol, nrow, 1)
 run('python3 ' + pd + 'envi_header_cleanup.py ' + ohn)
+print("spec_avg", spec_avg)
