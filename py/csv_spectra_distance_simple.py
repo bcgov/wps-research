@@ -25,7 +25,7 @@ from multiprocessing import Lock
 lock = Lock()
 n_processed = 0
 
-if len(args) < 3:
+if len(args) < 5:
     err('python3 csv_spectra_distance_simple.py [csv spectra file (one spectrum)] ' +
         ' [field to select from] [field value to select]' +     
         ' [raster file]')
