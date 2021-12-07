@@ -24,7 +24,7 @@ int main(int argc, char ** argv){
 
   float dom_v; // dominant value this pixel
   size_t dom_k = 0; // dominant index
- 
+
   for0(i, nrow){
     ix = (i * ncol);
     for0(j, ncol){
