@@ -11,8 +11,8 @@ int main(int argc, char ** argv){
   str ofn(str(argv[1]) + str("_dominant.bin")); // output file name: 1-hot encoding
   str ohn(hdr_fn(ofn, true)); // out header file name
 
-  str(oln(str(argv[1]) + str("dominant_label.bin")); // output file, as label
-  str(olh(str(argv[1]) + str("dominant_label.hdr"));
+  str oln(str(argv[1]) + str("_dominant_label.bin")); // output file, as label
+  str olh(str(argv[1]) + str("_dominant_label.hdr"));
 
   printf("+w %s\n", ofn.c_str());
   printf("+w %s\n", ohn.c_str());
