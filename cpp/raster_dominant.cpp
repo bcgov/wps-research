@@ -1,10 +1,8 @@
-/* 20211206: raster_negate.cpp */
+/* 20211206: adapted from raster_negate.cpp */
 #include"misc.h"
 
 int main(int argc, char ** argv){
-  if(argc < 2){
-    err("raster_dominant.exe [hyperspec cube] # multiply by indicator of dominant coordinate \n");
-  }
+  if(argc < 2) err("raster_dominant.exe [hyperspec cube] # multiply by indicator fxn of dominant\n");
 
   str fn(argv[1]); // input image file name
   if(!(exists(fn))) err("failed to open input file");
@@ -35,7 +33,6 @@ int main(int argc, char ** argv){
       ik = ij;
       dom_k = 0; //assume first band dominant
       dom_v = dat[ik];
-      
 
       for0(k, nband){
 	ik = (np * k) + ij;
