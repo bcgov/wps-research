@@ -76,7 +76,7 @@ for i in range(len(lines2)):
 lines2 = lines2 + bn_1
 
 for i in range(len(lines2)):
-    if len(lines2[i].split('bands   =')) > 1:
+    if len(lines2[i].split('bands =')) > 1:
         lines2[i] = lines2[i].split('=')[0] + '= ' + str(band_count)
 
     if len(lines2[i].split("description =")) > 1:
