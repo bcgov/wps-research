@@ -18,7 +18,7 @@ int main(int argc, char *argv[]){
     f = wopen(obfn.c_str());
     fwrite(&d[np * i], sizeof(float), np, f);
     fclose(f);
-    hwrite(obhn, nr, nc, nb, 4); // always type 4!
+    hwrite(obhn, nr, nc, 1, 4); // always type 4! always one band
   }
   return 0;
 }
