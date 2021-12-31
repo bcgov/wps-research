@@ -84,12 +84,25 @@ for f in features:
 
                     pts = [[p[0], p[1]] for p in pts]
                     print(geom['type'], pts)
-                    
-                    hull = ConvexHull(points)
+                    hull = ConvexHull(pts)
                     import matplotlib.pyplot as plt
-                    plt.plot(points[:,0], points[:,1], 'o')
-                    for simplex in hull.simplices:
-                        plt.plot(points[simplex, 0], points[simplex, 1], 'k-')
+                    plt.plot([p[0] for p in pts], [p[1] for p in pts], 'o', label='data')
+                    bbx_min, bby_min = p[0][0], p[0][1]
+                    bbx_max, bby_max = p[0][0], p[0][1]
+                    for p in pts:
+                        if p[0] < bbx_min:
+                            bbx_min = p[0]
+                        if p[0] > bbx_max:
+                            bbx_max = p[0]
+                        if p[1] < bby_min:
+                            bby_min = p[1]
+                        if p[1] > bby_max:
+                            bby_max = p[1]
+                
+                    plt.plot([bbx_min, bbx_max, bbx_max, bbx_min, bbx_min],
+                              [bby_min, bby_min, bby_max, bby_max, bby_min], label='bbx')
+                    plt.legend()
+                    plt.show()
                     sys.exit(1)
 
 
