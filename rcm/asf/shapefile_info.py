@@ -84,6 +84,12 @@ for f in features:
 
                     pts = [[p[0], p[1]] for p in pts]
                     print(geom['type'], pts)
+                    
+                    hull = ConvexHull(points)
+                    import matplotlib.pyplot as plt
+                    plt.plot(points[:,0], points[:,1], 'o')
+                    for simplex in hull.simplices:
+                        plt.plot(points[simplex, 0], points[simplex, 1], 'k-')
                     sys.exit(1)
 
 
