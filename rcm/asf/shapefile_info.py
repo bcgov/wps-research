@@ -1,5 +1,5 @@
 # min size in hectares
-MIN_SIZE = 10000
+MIN_SIZE = 3000
 MIN_YEAR = 2006
 MAX_YEAR = 2011
 PROV = 'BC'
@@ -47,7 +47,11 @@ for f in features:
     
     if year <= MAX_YEAR and year >= MIN_YEAR:
         if prov == PROV:
-            print(f['properties'])
+            ix = f['properties']['FIRE_ID']
+            sz = f['properties']['SIZE_HA']
+            sz = int(sz)
+            if sz > MIN_SIZE:
+                print(ix, year, sz) #             print(f['properties'])
 
     feature_id = f['id']
     feature_ids.append(feature_id) # print(f['properties'].keys())
