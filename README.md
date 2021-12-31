@@ -12,7 +12,16 @@ supporting BC Wildfire Service (BCWS) Predictive Services Unit (PSU) program. Se
 
 Includes A) routines applying or implementing supervised and unsupervised classification, B) visualization and manipulation for high dimensional imagery as well as classification maps
 
-# Sample outputs
+# Sample results
+## Presentations
+* Field Observations and Remote Sensing of Wildland Fuels: A Case Study, Bulkley Valley Research Centre, Oct 8 2021 2021
+* All Hazards Application of RCM in BC, CSA RCM Users Group Meeting, Nov 25 2021
+* Simple Character Recognition, BC Gov Data Science CoP and Python Programming CoP, May 26 2021
+* Semi-supervised Classification of Images in Python, BC Gov Data Science CoP and Python Programming CoP, Mar 31 2021
+* Fuel Type Layer Project, BC Gov DM Board on Integrated Data, Mar 3 2021
+* Fuel Type Layer Project, BC Gov Fire Behaviour CoP, Feb 22 2021
+* Can We Predict Forest Fires Before They Start?, BC Gov Data Science CoP, Nov 24 2020
+
 ##  Interactive mapping w BCWS FTL MVP software: end-to-end decision support system (DSS)
 <img src="data/output/20210127_mvp.png" width="650" height="264">
 
