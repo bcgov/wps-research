@@ -10,7 +10,6 @@ import json
 from osgeo import gdal # need gdal / python installed!
 from osgeo import ogr
 from osgeo import gdalconst
-from scipy.spatial import ConvexHull, convex_hull_plot_2d
 
 def err(m):
     print("Error: " + m); sys.exit(1)
@@ -84,26 +83,21 @@ for f in features:
 
                     pts = [[p[0], p[1]] for p in pts]
                     print(geom['type'], pts)
-                    hull = ConvexHull(pts)
                     import matplotlib.pyplot as plt
                     plt.plot([p[0] for p in pts], [p[1] for p in pts], 'o', label='data')
                     bbx_min, bby_min = p[0][0], p[0][1]
                     bbx_max, bby_max = p[0][0], p[0][1]
                     for p in pts:
-                        if p[0] < bbx_min:
-                            bbx_min = p[0]
-                        if p[0] > bbx_max:
-                            bbx_max = p[0]
-                        if p[1] < bby_min:
-                            bby_min = p[1]
-                        if p[1] > bby_max:
-                            bby_max = p[1]
+                        if p[0] < bbx_min: bbx_min = p[0]
+                        if p[0] > bbx_max: bbx_max = p[0]
+                        if p[1] < bby_min: bby_min = p[1]
+                        if p[1] > bby_max: bby_max = p[1]
                 
                     plt.plot([bbx_min, bbx_max, bbx_max, bbx_min, bbx_min],
                               [bby_min, bby_min, bby_max, bby_max, bby_min], label='bbx')
                     plt.legend()
                     plt.show()
-                    sys.exit(1)
+                    # sys.exit(1)
 
 
                     print(geom['type'])
