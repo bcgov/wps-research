@@ -10,6 +10,7 @@ import json
 from osgeo import gdal # need gdal / python installed!
 from osgeo import ogr
 from osgeo import gdalconst
+from scipy.spatial import ConvexHull, convex_hull_plot_2d
 
 def err(m):
     print("Error: " + m); sys.exit(1)
@@ -52,26 +53,43 @@ for f in features:
             sz = int(sz)
             if sz > MIN_SIZE:
                 print(ix, year, sz) #             print(f['properties'])
+                print(geom.keys())
+                '''feature_id = f['id']
+                feature_ids.append(feature_id) # print(f['properties'].keys())
+                feature_name = ''
+                try:
+                    feature_name = f['properties']['Name']
+                except Exception:
+                    pass # feature name not available
+                feature_names.append(feature_name)
+                '''
+                if geom['type'] == 'Point':
+                    stuff = [feature_id,
+                             geom['type'],
+                             geom['coordinates'][0],
+                             geom['coordinates'][1]]
+                    print(','.join([str(x) for x in stuff]))
+                else: # assume polygon or multipolygon
+                    pts = geom['coordinates']
+                    if geom['type'] == 'MultiPolygon':
+                        p = []
+                        for x in pts:
+                            p += x
+                        pts = p
 
-    feature_id = f['id']
-    feature_ids.append(feature_id) # print(f['properties'].keys())
-    feature_name = ''
-    try:
-        feature_name = f['properties']['Name']
-    except Exception:
-        pass # feature name not available
-    feature_names.append(feature_name)
+                    p = []
+                    for x in pts:
+                        p += x
+                    pts = p
 
-    if True:
-        continue
-    if geom['type'] == 'Point':
-        stuff = [feature_id,
-                 geom['type'],
-                 geom['coordinates'][0],
-                 geom['coordinates'][1]]
-        print(','.join([str(x) for x in stuff]))
-    else:
-        print(geom['type'])
-        for c in geom['coordinates']:
-            for d in c:
-                print("  " + str(d))
+                    pts = [[p[0], p[1]] for p in pts]
+                    print(geom['type'], pts)
+                    sys.exit(1)
+
+
+                    print(geom['type'])
+                    for c in pts: # geom['coordinates']:
+                        for d in c:
+                            print("  " + str(d))
+
+            # sys.exit(1)
