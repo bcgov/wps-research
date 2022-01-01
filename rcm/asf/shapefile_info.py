@@ -25,7 +25,8 @@ print(crs)
 def err(m):
     print("Error: " + m); sys.exit(1)
 args = sys.argv  # arguments
-if len(args) < 2: err("Error: shapefile_info.py [input shapefile .shp]")
+if len(args) < 2:
+    err("Error: shapefile_info.py [input shapefile .shp]")
 InputVector = args[1] # shapefile to rasterize
 
 Shapefile = ogr.Open(InputVector) # open shp
