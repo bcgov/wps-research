@@ -14,6 +14,9 @@ from osgeo import gdalconst
 from pyproj import CRS
 from pyproj import Transformer
 
+if not os.path.exists('data'):
+    os.mkdir('data')
+
 crs = CRS.from_wkt('PROJCS["NAD_1983_Lambert_Conformal_Conic",GEOGCS["GCS_North_American_1983",DATUM["D_North_American_1983",SPHEROID["GRS_1980",6378137.0,298.257222101]],PRIMEM["Greenwich",0.0],UNIT["Degree",0.0174532925199433]],PROJECTION["Lambert_Conformal_Conic"],PARAMETER["False_Easting",0.0],PARAMETER["False_Northing",0.0],PARAMETER["Central_Meridian",-95.0],PARAMETER["Standard_Parallel_1",49.0],PARAMETER["Standard_Parallel_2",77.0],PARAMETER["Latitude_Of_Origin",49.0],UNIT["Meter",1.0]]')
 proj = Transformer.from_crs(crs, crs.geodetic_crs)
 
@@ -128,7 +131,7 @@ for f in features:
                                     str(bbx_min), str(bby_min)]))
                     c += '))'
                     c = c.replace(', ', ',')
-                    print(year, ix, sz, c)
+                    print(ix, year, sz, c)
 
                     c = c.replace(' ', '%20')
                     c = c.replace('(', '%28')
