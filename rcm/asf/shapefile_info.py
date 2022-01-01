@@ -11,6 +11,13 @@ import urllib.parse
 from osgeo import gdal # need gdal / python installed!
 from osgeo import ogr
 from osgeo import gdalconst
+from pyproj import CRS
+from pyproj import Transformer
+
+crs = CRS.from_wkt('PROJCS["NAD_1983_Lambert_Conformal_Conic",GEOGCS["GCS_North_American_1983",DATUM["D_North_American_1983",SPHEROID["GRS_1980",6378137.0,298.257222101]],PRIMEM["Greenwich",0.0],UNIT["Degree",0.0174532925199433]],PROJECTION["Lambert_Conformal_Conic"],PARAMETER["False_Easting",0.0],PARAMETER["False_Northing",0.0],PARAMETER["Central_Meridian",-95.0],PARAMETER["Standard_Parallel_1",49.0],PARAMETER["Standard_Parallel_2",77.0],PARAMETER["Latitude_Of_Origin",49.0],UNIT["Meter",1.0]]')
+proj = Transformer.from_crs(crs, crs.geodetic_crs)
+
+print(crs)
 
 def err(m):
     print("Error: " + m); sys.exit(1)
@@ -92,6 +99,13 @@ for f in features:
                         if p[0] > bbx_max: bbx_max = p[0]
                         if p[1] < bby_min: bby_min = p[1]
                         if p[1] > bby_max: bby_max = p[1]
+
+                    # convert to lat, lon
+                    [bbx_min, bby_min] = proj.transform(bbx_min, bby_min)
+                    [bbx_max, bby_max] = proj.transform(bbx_max, bby_max)
+
+                    [bbx_min, bbx_max, bby_min, bby_max] = [round(x, 4) for x in
+                                                            [bbx_min, bbx_max, bby_min, bby_max]]
                     '''
                     import matplotlib.pyplot as plt
                     plt.plot([p[0] for p in pts], [p[1] for p in pts], 'o', label='data')
@@ -116,12 +130,21 @@ for f in features:
                     c = c.replace(', ', ',')
                     print(year, ix, sz, c)
 
+                    c = c.replace(' ', '%20')
+                    c = c.replace('(', '%28')
+                    c = c.replace(')', '%29')
                     url = 'https://api.daac.asf.alaska.edu/services/search/param?' #keyword1=value1&keyword2=value2,value3&keyword3=value4-6'
                     url += 'platform=ALOS'
                     url += '&instrument=PALSAR'
                     url += '&polarization=QUADRATURE,FULL'
-                    url += ('&' + urllib.parse.quote_plus(c))
+                    url += ('&' + c) 
+                    # urllib.parse.quote_plus(c))
                     print(url)
+
+                    import urllib. request #pip install concat("urllib", number of current versio
+                    my_request = urllib.request.urlopen(url)
+                    my_HTML = my_request.read().decode("utf8")
+                    print(my_HTML)
                     sys.exit(1)
             # sys.exit(1)
 
