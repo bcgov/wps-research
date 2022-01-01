@@ -24,7 +24,7 @@ print(crs)
 
 def err(m):
     print("Error: " + m); sys.exit(1)
-args = sys.argv  # arguments
+args = sys.argv  # arguments e.g. NFDB_poly_20210707_large_fires.shp
 if len(args) < 2:
     err("Error: shapefile_info.py [input shapefile .shp]")
 InputVector = args[1] # shapefile to rasterize
