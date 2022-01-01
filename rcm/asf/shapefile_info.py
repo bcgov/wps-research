@@ -134,7 +134,7 @@ for f in features:
                     c = c.replace(', ', ',')
                     print(ix, year, sz, c)
 
-                    c = c.replace(' ', '%20')
+                    c = c.replace(' ', '%20')  # https://docs.asf.alaska.edu/api/tools/
                     c = c.replace('(', '%28')
                     c = c.replace(')', '%29')
                     url = 'https://api.daac.asf.alaska.edu/services/search/param?' #keyword1=value1&keyword2=value2,value3&keyword3=value4-6'
