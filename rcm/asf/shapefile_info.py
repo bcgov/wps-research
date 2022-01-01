@@ -147,9 +147,13 @@ for f in features:
 
                     import urllib. request #pip install concat("urllib", number of current versio
                     my_request = urllib.request.urlopen(url)
-                    my_HTML = my_request.read().decode("utf8")
-                    print(my_HTML)
-                    sys.exit(1)
+                    my_HTML = my_request.read().decode('utf8')
+                    # print(my_HTML)
+
+                    ofn = 'data' + os.path.sep + ix + '.xml'
+                    print('+w', ofn)
+
+                    open(ofn, 'wb').write(my_HTML.encode('utf8'))
             # sys.exit(1)
 
 '''
