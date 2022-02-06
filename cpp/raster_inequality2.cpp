@@ -32,7 +32,7 @@ int main(int argc, char ** argv){
       }
       else{
         for0(j, nband){
-	  size_t class_i = i * nband + j;
+	  size_t class_i = k * nband + j;
 	  e = dat[k * np + j];
 	  if(isnan(e) || isinf(e)){
 	  }
