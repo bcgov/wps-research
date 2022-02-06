@@ -17,7 +17,7 @@ int main(int argc, char ** argv){
   hread(hfn, nrow, ncol, nband); // read header
 
   np = nrow * ncol; // number of input pix
-  size_t i, j, k, ix, ij, ik;
+  size_t i, j, k, ix, ij, ik, m, im, out_i;
 
   size_t nband2 = nband * nband; // number of output bands
   float * out = falloc(np * nband2);
@@ -34,7 +34,7 @@ int main(int argc, char ** argv){
 
 	for0(m, nband){
 	  im = ij + m * np;
-          size_t out_i = k * nband + m;
+          out_i = k * nband + m;
 	  out[ij + out_i * np] = dat[ik] - dat[im];
 	}
       }
