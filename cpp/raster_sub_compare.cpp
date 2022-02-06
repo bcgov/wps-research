@@ -4,7 +4,7 @@
 #include"misc.h"
 
 int main(int argc, char ** argv){
-  if(argc < 4) err("raster_sub_compare.exe [raster cube 1]\n");
+  if(argc < 2) err("raster_sub_compare.exe [raster cube 1]\n");
 
   str fn(argv[1]); // input image file name
   if(!(exists(fn))) err("failed to open input file");
