@@ -26,6 +26,8 @@ int main(int argc, char ** argv){
   for0(i, np * n_class) out[i] = 0.;
 
   for0(i, np){
+    if(i % 1000 == 0.) printf("%zu of %zu\n", i, np);
+
     for0(k, nband){
       d = dat[k * np + i];
       if(isnan(d) || isinf(d)){
