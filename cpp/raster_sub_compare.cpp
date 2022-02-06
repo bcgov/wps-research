@@ -26,6 +26,7 @@ int main(int argc, char ** argv){
   for0(i, np * nband2) out[i] = 0.;
 
   for0(i, nrow){
+    if(i % 100 == 0) printf("%zu / %zu\n", i, nrow);
     ix = i * ncol;
     for0(j, ncol){
       ij = ix + j;
