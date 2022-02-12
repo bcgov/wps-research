@@ -545,3 +545,216 @@ vector<vector<str>> read_csv(str fn, vector<str> & hdr){
   }
   return output; // n.b., we assumed CSV was simple and well-formed (no quotes, same number of fields per line, etc).
 }
+
+
+vector<string> parseHeaderFile(string hfn, size_t & NRow, size_t & NCol, size_t & NBand){
+  vector<string> bandNames;
+  if(!exists(hfn)){
+    printf("%sError: couldn't find header file\n", KRED);
+  }
+  else{
+    vector<string> lines(readLines(hfn));
+    vector<string>::iterator it;
+    for(it=lines.begin(); it!=lines.end(); it++){
+      string sss(*it);
+      vector<string> splitLine(split(sss, '='));
+      if(splitLine.size()==2){
+        if(strncmp(strip_space(splitLine[0]).c_str(), "samples", 7) == 0){
+          NCol = atoi(strip_space(splitLine[1]).c_str());
+        }
+        if(strncmp(strip_space(splitLine[0]).c_str(), "lines", 5) == 0){
+          NRow = atoi(strip_space(splitLine[1]).c_str());
+        }
+        if(strncmp(strip_space(splitLine[0]).c_str(), "bands", 5)== 0){
+          NBand = atoi(strip_space(splitLine[1]).c_str());
+        }
+        if(strncmp(strip_space(splitLine[0]).c_str(), "band names", 10) == 0){
+          string bandNameList(trim2(trim2(strip_space(splitLine[1]),
+			      ('{')),
+			      ('}')));
+          bandNames = split(bandNameList, ',');
+        }
+      }
+    }
+  }
+  return bandNames;
+}
+
+vector<string> readLines(string fn){
+  vector<string> ret;
+  size_t fs = fsize(fn);
+  char * fd = (char *)(void *)malloc(fs);
+  memset(fd, '\0',fs);
+  FILE * f = fopen(fn.c_str(), "rb");
+  size_t br = fread(fd, fs, 1, f);
+  fclose(f);
+  // free(fd);
+  ret = split(fd, fs, '\n');
+  return(ret);
+}
+
+/* split a string (a-la python) */
+/*vector<string> split(string s, char delim){
+  vector<string> ret;
+  size_t N = s.size();
+  if(N == 0) return ret;
+  if(delim == '\n'){
+    return(split(s, delim, 0));
+  }
+  istringstream iss(s); string token;
+  while(getline(iss,token,delim)){
+    ret.push_back(token);
+  }
+  return ret;
+}
+// should probably compare this with the above..
+*/
+
+
+// need to replace string with SA concept, to make this work! Use "binary string" instead of string
+vector<string> split(char * s, size_t s_len, char delim){
+  // needed to write a special split, for string that might contain newlines / might be a file. In the future we should subsume string, array and file with a generic class like we did in meta4
+
+  // printf("split()\n");
+  vector<string> ret;
+  string ss("");
+  size_t i = 0;
+  while(i < s_len){
+    if(s[i] == delim){
+      ret.push_back(ss);
+      //cout << "\t" << ss << endl;
+      ss = "";
+    }
+    else{
+      ss += s[i];
+    }
+    i++;
+  }
+  if(ss.length() > 0){
+    ret.push_back(ss);
+    //cout << "\t" << ss << endl;
+    ss = "";
+  }
+  return ret;
+}
+
+/*
+vector<string> split(string s){
+  return split(s, ' ');
+}
+*/
+
+/*trim leading or trailing characters from a string*/
+string trim2(string s, char a){
+  string ret("");
+  size_t i, j, N;
+  N = s.size();
+  if(N == 0){
+    return s;
+  }
+  i = 0;
+  while(i < N && (s[i] == a)){
+    i++;
+  }
+  j = N - 1;
+  while(j > i && (s[j] == a)){
+    j--;
+  }
+  for(N = i; N <= j; N++){
+    ret = ret + chartos(s[N]);
+  }
+  return ret;
+}
+
+/*convert char to string: single character: interpret whitspace as space character */
+string chartos(char s){
+  string ret("");
+  stringstream ss;
+  ss << s;
+  ss >> ret;
+  if(isspace(s)){
+    ret += " ";
+  }
+  return ret;
+}
+
+/*strip leading or trailing whitespace from a string*/
+string strip_space(string s){
+  string ret("");
+  size_t i, j, N;
+  N = s.size();
+  if(N == 0) return s;
+  i = 0;
+  while(i < N && isspace(s[i])){
+    i++;
+  }
+  j = N-1;
+  while(j > i && isspace(s[j])){
+    j--;
+  }
+  for(N = i; N <= j; N++){
+    ret = ret + chartos(s[N]);
+  }
+  return ret;
+}
+
+
+vector<string> parse_band_names(string fn){
+  if(!exists(fn)) err("parse_band_names: header file not found");
+
+  str band("band");
+  str names("names");
+  size_t ci = 0;
+  size_t bni = -1; // band names start index
+  vector<string> lines(readLines(fn)); // read header file
+  for(vector<string>::iterator it = lines.begin(); it != lines.end(); it++){
+    //cout << "\t" << *it << endl;
+    vector<string> w(split(*it, ' '));
+    /*
+    for(vector<string>::iterator it2 = w.begin(); it2 != w.end(); it2++){
+       cout << "\t\t" << *it2 << endl;
+    }
+    */
+    // cout << w << endl;
+    if(w.size() >= 2){
+      if((w[0] == band) && (w[1] == names)){
+        bni = ci;
+        break;
+      }
+    }
+    ci ++;
+  }
+
+  vector<string> band_names;
+
+  // parse first band name
+  vector<string> w(split(lines[bni], '{'));
+  string bn(w[1]);
+  bn = trim2(bn, ',');
+  //cout << bn << endl;
+  band_names.push_back(bn);
+
+  // parse middle band names
+  for(ci = bni + 1; ci < lines.size() - 1; ci++){
+    str line(lines[ci]);
+    line = trim2(line, ',');
+    //cout << line << endl;
+    band_names.push_back(line);
+  }
+
+  // parse last band name
+  if(true){
+    str w(lines[lines.size() -1]);
+    w = trim2(w, '}');
+    band_names.push_back(w);
+  }
+  return band_names;
+}
+
+size_t hread(str hfn, size_t & nrow, size_t & ncol, size_t & nband, vector<string>& bandNames){
+  size_t ret = hread(hfn, nrow, ncol, nband);
+  bandNames = parse_band_names(hfn);
+  return ret;
+}
+
+
