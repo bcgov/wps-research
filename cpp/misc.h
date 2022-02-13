@@ -528,4 +528,9 @@ vector<string> parse_band_names(string fn);
 }
 */
 
+bool contains(string s1, string s2);
+/*       	// does one string contain another as substring?
+	return s1.find(s2) != std::string::npos;
+*/
+
 #endif
