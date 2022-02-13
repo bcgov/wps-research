@@ -124,9 +124,11 @@ inline void * alloc(size_t nb){
   return !std::isspace(ch);
 }*/
 
-bool not_space(int data){
-    return !std::isspace(data);
+bool not_space(int data); 
+/* 
+   return !std::isspace(data);
 }
+*/
 
 static inline void ltrim(std::string &s){
   s.erase(s.begin(), std::find_if(s.begin(), s.end(), /* [](int ch){
