@@ -757,4 +757,10 @@ size_t hread(str hfn, size_t & nrow, size_t & ncol, size_t & nband, vector<strin
   return ret;
 }
 
+bool contains(string s1, string s2){
+ // does one string contain another as substring?
+ // 	cout << "\tcontains(" << s1 << "," << s2 << ")=" << (s1.find(s2) != std::string::npos) << endl;
+	return s1.find(s2) != std::string::npos;
+}
+
 
