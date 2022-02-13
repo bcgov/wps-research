@@ -27,8 +27,6 @@
 #include<algorithm>
 #include"ansicolor.h"
 #include<unordered_map>
-
-#include <algorithm>
 #include <cctype>
 #include <locale>
 #include<stack>
@@ -122,18 +120,29 @@ inline void * alloc(size_t nb){
 }
 
 //a trim from start (in place)
+/*bool is_space(int ch){
+  return !std::isspace(ch);
+}*/
+
+bool not_space(int data){
+    return !std::isspace(data);
+}
+
 static inline void ltrim(std::string &s){
-  s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](int ch){
+  s.erase(s.begin(), std::find_if(s.begin(), s.end(), /* [](int ch){
     return !std::isspace(ch);
-  }
+  }*/ 
+  not_space
   ));
 }
 
 // trim from end (in place)
 static inline void rtrim(std::string &s){
-  s.erase(std::find_if(s.rbegin(), s.rend(), [](int ch){
+  s.erase(std::find_if(s.rbegin(), s.rend(),
+ /* [](int ch){
     return !std::isspace(ch);
-  }
+  }*/
+ not_space
   ).base(), s.end());
 }
 
@@ -317,7 +326,7 @@ void * pt_worker_fun(void * arg); // worker function
 extern void (*pt_eval)(size_t); // function pointer to execute in parallel, over range start_j:end_j inclusive
 void parfor(size_t start_j, size_t end_j, void(*eval)(size_t));
 
-vector<vector<str>> read_csv(str fn, vector<str> & hdr);
+vector< vector<str> > read_csv(str fn, vector<str> & hdr);
 
 vector<string> parseHeaderFile(string hfn, size_t & NRow, size_t & NCol, size_t & NBand);
 /*
