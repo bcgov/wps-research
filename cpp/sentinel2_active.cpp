@@ -19,7 +19,7 @@ int main(int argc, char ** argv){
   for0(j, 3) cout << "\t" << bi[j] << endl;
   float * dat = bread(fn, nrow, ncol, nband);
 
-  int n_out = 4;
+  int n_out = 1; // 6;
   float * out = falloc(np * n_out);
   
   size_t ij;
@@ -28,17 +28,22 @@ int main(int argc, char ** argv){
   bi1 = np * bi[1];
   bi2 = np * bi[2];
 
-  size_t np0, np1, np2, np3;
+  size_t np0, np1, np2, np3, np4, np5;
   np0 = 0;
   np1 = np;
   np2 = np * 2;
   np3 = np * 3;
+  np4 = np * 4;
+  np5 = np * 5;
   for0(i, nrow) for0(j, ncol){
 	  ij = i * ncol + j;
-	  out[ij + np0] = dat[ij + bi1] - dat[ij + bi0];
-	  out[ij + np1] = dat[ij + bi2] - dat[ij + bi1];
-	  out[ij + np2] = out[ij + np1] - out[ij + np0];
-	  out[ij + np3] = out[ij + np1] > 4.*out[ij + np3]; 
+	  out[ij + np0] = dat[ij + bi2] - dat[ij + bi1] > 175.;
+	  // out[ij + np1] = dat[ij + bi2] - dat[ij + bi1];
+	  // out[ij + np2] = out[ij + bi2] - out[ij + bi0];
+	  // out[ij + np3] = out[ij + np2] - out[ij + np1];
+	  //out[ij + np4] = out[ij + np1] > out[ij + np0];
+	  // out[ij + np4] = out[ij + np1] > 4.*out[ij + np3]; 
+	  //out[ij + np5] = out[ij + np2] > (.5 * out[ij + np4] + .5 * out[ij + np1]);
   }
 
 
