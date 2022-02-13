@@ -1,5 +1,9 @@
 #include"misc.h"
 
+bool not_space(int data){
+    return !std::isspace(data);
+}
+
 string cwd(){
   char s[PATH_MAX];
   char * ss = _cwd(s, PATH_MAX);
@@ -526,13 +530,13 @@ void parfor(size_t start_j, size_t end_j, void(*eval)(size_t)){
   for0(j, n_cores) pthread_create(&my_pthread[j], &pt_attr, pt_worker_fun, (void *)j);
   for0(j, n_cores) pthread_join(my_pthread[j], NULL); // wait for threads to finish
   // cprint(str("return parfor()"));
-  delete my_pthread;
+  delete [] my_pthread;
 }
 
 // parameters always named (in json-like format)?
 
-vector<vector<str>> read_csv(str fn, vector<str> & hdr){
-  vector<vector<str>> output; // read lines from csv file
+vector< vector<str> > read_csv(str fn, vector<str> & hdr){
+  vector< vector<str> > output; // read lines from csv file
   ifstream ifs(fn); // stream to input file
   str token;
   size_t ci = 0;
