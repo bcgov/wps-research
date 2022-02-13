@@ -83,11 +83,11 @@ if True:
             data_line = ','.join([str(x) for x in data_line])
             out_spec_f.write(("\n" + data_line).encode())
         
-            plt.figure()
+            plt.figure(figsize=(16, 16), dpi=300)
             plt.title('Spectra ' + args[1] + ' row: ' + args[2] + ' col ' + args[3])
             plt.plot(range(nb), data)
             plt.xticks(range(nb), band_names, rotation='vertical')
-            plt.tight_layout()
+            # plt.tight_layout()
             plt.savefig(out_spec_fn[:-4] + '.png')
 
 out_spec_f.close()
