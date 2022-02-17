@@ -3,8 +3,7 @@
 comps of image areas equalling 1. 20220216 */
 
 float * dat;
-size_t * out;
-size_t i_next, nrow, ncol, nband, nf;
+size_t *out, i_next, nrow, ncol, nband, nf;
 
 void flood(long int i, long int j, size_t label){
   if(i < 0 || j < 0 || i >=nrow || j >=ncol) return;
@@ -58,5 +57,4 @@ int main(int argc, char ** argv){
   free(out);
   return 0;
 }
-
 /* list distances by passing a moving window. Then, merge any distances less than a threshold */
