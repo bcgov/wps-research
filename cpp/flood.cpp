@@ -1,21 +1,30 @@
 #include"misc.h"
 /* raster flood fill on mask: background is label 0: new labels to connected
- comps of image areas equalling 1. 20220216 */
+comps of image areas equalling 1. 20220216 */
 
 float * dat;
 size_t * out;
-size_t next, nrow, ncol, nband, nf;
+size_t i_next, nrow, ncol, nband, nf;
 
 void flood(long int i, long int j, size_t label){
   if(i < 0 || j < 0 || i >=nrow || j >=ncol) return;
   size_t ij = i * ncol + j;
   float d = dat[ij];
 
-  if(d != 1. || out[ij] > 0) return;
+  if(d != 1. || out[ij] > 0) return; // labelled or not under mask
+  out[ij] = label; // label this point
+  nf ++; // marked something
+  printf("i %zu j %zu\n", i, j);
 
-
-  /* execute this function at each point, with the data value */
-  /* if the data value matches, keep going if we haven't been already */
+  int di, dj;
+  long int ii, jj;
+  for(di = -1; di <= 1; di++){
+    ii = i + di;
+    for(dj = -1; dj <= 1; dj++){
+      jj = j + dj;
+      if(ii != i && jj != j) flood(ii, jj, label);
+    }
+  }
 }
 
 int main(int argc, char ** argv){
@@ -24,22 +33,22 @@ int main(int argc, char ** argv){
 
   str fn(argv[1]); /* binary files */
   str ofn(fn + "_flood.bin");
-  str hfn(hdr_fn(fn));  /* headers */
+  str hfn(hdr_fn(fn)); /* headers */
   str hf2(hdr_fn(ofn, true));
 
   hread(hfn, nrow, ncol, nband);
   np = nrow * ncol;
   if(nband != 1) err("expected 1-band image");
-  
+
   out = (size_t *)(void *)alloc(np * sizeof(size_t));
   dat = bread(fn, nrow, ncol, nband);
 
-  next = 1;
+  i_next = 1;
   for0(i, np) out[i] = -1.;
   for0(i, nrow) for0(j, ncol){
-	  nf = 0;
-	  flood(i, j, next);
-	  if(nf > 0) next ++;
+    nf = 0;
+    flood(i, j, i_next);
+    if(nf > 0) i_next ++;
   }
 
   FILE * f = wopen(ofn);
