@@ -702,7 +702,6 @@ string strip_space(string s){
   return ret;
 }
 
-
 vector<string> parse_band_names(string fn){
   if(!exists(fn)) err("parse_band_names: header file not found");
 
@@ -730,9 +729,7 @@ vector<string> parse_band_names(string fn){
   }
 
   vector<string> band_names;
-
-  // parse first band name
-  vector<string> w(split(lines[bni], '{'));
+  vector<string> w(split(lines[bni], '{')); // parse first band name
   string bn(w[1]);
   bn = trim2(bn, ',');
   //cout << bn << endl;
