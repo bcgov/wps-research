@@ -3,8 +3,8 @@
 int main(int argc, char ** argv){
 
   if(argc < 2) err("class_recode [input binary (classification) file name] # [optional extra arg that specifies start from zero, instead of 1]");
-
   int start_0 = argc > 2;
+  int skip_0 = argc > 2;
 
   str fn(argv[1]); // input file name
   str ofn(fn + str("_recode.bin"));
