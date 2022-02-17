@@ -61,7 +61,7 @@ int main(int argc, char ** argv){
 	  visited[i] = false;
   }
   for0(i, nrow) for0(j, ncol){
-    if(!visited[i * ncol + j]){
+    if(!visited[i * ncol + j] && dat[i * ncol + j] > 0.){
       nf = 0;
       flood((long int)i, (long int)j, i_next);
       if(nf > 0){
