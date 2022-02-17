@@ -2,7 +2,7 @@
 #include"misc.h"
 
 int main(int argc, char ** argv){
-  if(argc < 4) err("raster_sub.exe [raster cube 1] [raster cube 2 to subtract] [output cube]\n");
+  if(argc < 4) err("raster_sub [raster cube 1] [raster cube 2 to subtract] [output cube]\n");
 
   str fn(argv[1]); // input image file name
   str fn2(argv[2]); // input image 2 file name
