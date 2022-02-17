@@ -14,7 +14,7 @@ void flood(long int i, long int j, size_t label){
   if(d != 1. || out[ij] > 0) return; // labelled or not under mask
   out[ij] = label; // label this point
   nf ++; // marked something
-  printf("i %zu j %zu\n", i, j);
+  printf("\ti %zu j %zu label=%zu\n", i, j, label);
 
   int di, dj;
   long int ii, jj;
@@ -53,7 +53,7 @@ int main(int argc, char ** argv){
 
   FILE * f = wopen(ofn);
   fwrite(out, sizeof(size_t), np, f);
-  hwrite(hf2, nrow, ncol, 1);
+  hwrite(hf2, nrow, ncol, 1, 16); /* type 16 = size_t */
   free(dat);
   free(out);
   return 0;
