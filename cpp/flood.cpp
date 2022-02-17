@@ -1,41 +1,58 @@
 #include"misc.h"
 /* raster flood fill on mask: background is label 0: new labels to connected
 comps of image areas equalling 1. 20220216 */
-
 float * dat;
 int * visited;
 size_t *out, i_next, nrow, ncol, nband, nf;
 float * out_f;
 
-void flood(long int i, long int j, size_t label){
-  printf("i %ld j %ld\n", i, j);
-  if(i < 0 || j < 0 || i >=nrow || j >=ncol) return;
+int flood(long int i, long int j, int depth){
+  printf("flood(%ld, %ld, %d) label=%ld d=%f depth=%d\n", i, j, depth, i_next, dat[i * ncol + j],depth);
+	int ret = 0;
+	// printf("i %ld j %ld (%f)\n", i, j, dat[i * ncol + j]);
+  if(i < 0 || j < 0 ||  i >= nrow || j >=ncol ){
+	printf("oub\n");
+	  return 0;
+  }
   long int ij = i * ncol + j;
   float d = dat[ij];
 
-  if(d != 1. || visited[ij]) return; // labelled or not under mask
+  if(d != 1. || visited[ij]){
+	  print("ret\n");
+	  return 0; // labelled or not under mask
+  }
   visited[ij] = true;
-  out[ij] = label; // label this point
+  out[ij] = i_next;
   nf ++; // marked something
-  printf("\ti %ld j %ld label=%zu\n", i, j, label);
+//  printf("\ti %ld j %ld label=%zu depth=%d\n", i, j, i_next, depth);
 
-  long int di, dj;
-  long int ii, jj;
-  for(di = -1; di <= 1; di++){
-    ii = i + di;
-    for(dj = -1; dj <= 1; dj++){
-      jj = j + dj;
-      if(di != 0 && dj != 0){
-	    if(!visited[ii*ncol + jj] && dat[ii*ncol + jj] !=0.)
-	      flood(ii, jj, label);
+  for(long int di = 1; di >= -1 ; di --){
+    long int ii = i + di;
+    for(long int dj = 1; dj >= -1; dj --){
+      long int jj = j + dj;
+      if((!(di == 0 && dj == 0)) &&
+         (i + di > 0) &&
+	 (j + dj > 0) &&
+	 (i + di < nrow) &&
+	 (j + dj < ncol)){
+
+        if(!visited[ii*ncol + jj] &&
+	    dat[ii*ncol + jj] == 1.){
+		//printf("  call(%ld, %ld) di %ld dj %ld\n", ii,jj, di, dj);
+          ret += flood(ii, jj, depth+1);
+	}
       }
     }
   }
+  return ret;
 }
 
 int main(int argc, char ** argv){
   if(argc < 2) err("flood.exe [input file name] # raster flood fill on mask");
-  size_t np, i, j, k, n, ij;
+  size_t np, k, n;
+ long int ij;
+  long int i;
+  long int j;
 
   str fn(argv[1]); /* binary files */
   str ofn(fn + "_flood.bin");
@@ -57,18 +74,21 @@ int main(int argc, char ** argv){
 
   i_next = 1;
   for0(i, np){
-	  out[i] = 0;
-	  visited[i] = false;
+    out[i] = 0;
+    visited[i] = false;
   }
-  for0(i, nrow) for0(j, ncol){
-    if(!visited[i * ncol + j] && dat[i * ncol + j] > 0.){
-      nf = 0;
-      flood((long int)i, (long int)j, i_next);
-      if(nf > 0){
-  	    cout << i << "," << j << "=" << i_next << endl;
-  	    i_next ++;
+  for0(i, (long int)nrow){
+    for0(j, (long int)ncol){
+      ij = i * ncol + j;
+      if(!visited[ij] && dat[ij] ==1.){
+        nf = 0;
+	cout << "--" << endl;
+        int r = flood(i, j, 0);
+        if(nf > 0){
+          i_next ++;
+        }
       }
-     }
+    }
   }
   for0(i, np) out_f[i] = (float)out[i];
 
