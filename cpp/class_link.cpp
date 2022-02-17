@@ -5,6 +5,7 @@
  in same window get merged */
 
 unordered_map<size_t, size_t> p; // disjoint-set forest / union-find
+set<str> merges;
 
 size_t find(size_t x){
   if(p[x] == x) return x;
@@ -48,7 +49,9 @@ int main(int argc, char ** argv){
 
   for0(i, np){
     d = dat[i];
-    p[d] = d;
+    if(d > 0){
+      p[d] = d;
+    }
   }
   unordered_set<size_t> merge;
   unordered_set<size_t>::iterator it;
@@ -72,7 +75,10 @@ int main(int argc, char ** argv){
       if(merge.size() > 1){
         size_t parent = *(merge.begin());
         for(it = merge.begin(); it != merge.end(); it++){
-          if(it != merge.begin()) unite(parent, *it);
+          if(it != merge.begin()){
+		  unite(parent, *it);
+		  merges.insert(to_string(parent) + str(",") + to_string(*it));
+	  }
         }
       }
     }
@@ -83,6 +89,9 @@ int main(int argc, char ** argv){
     d = dat[ij];
     out[ij] = (d == (size_t)0) ? (size_t)0 : find(d);
   }
+
+  cout << merges << endl;
+  // cout << "p:" << p << endl;
 
   FILE * f = wopen(ofn);
   fwrite(out, sizeof(size_t), np, f);
