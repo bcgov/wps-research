@@ -23,11 +23,10 @@ fn = args[1]
 if fn[-4:] != '.zip':
     err('expected zip format input')
 
-if not os.path.exists(fn):
+df = fn[:-4] + '.SAFE'  # extracted data folder
+if not os.path.exists(fn) and not os.path.exists(df):
     err('could not find input file')
 
-df = fn[:-4] + '.SAFE'  # extracted data folder
-# print(df)
 if not os.path.exists(df):
     if no_stomp == False:
         a = os.system('unzip ' + fn)
