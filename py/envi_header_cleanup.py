@@ -23,12 +23,14 @@ bandname_lines = []
 for i in range(0, len(lines)):
     line = lines[i].strip()
 
-    w = line.split("=")
+    w = [x.strip() for x in line.split("=")]
     if len(w) > 1:
         if w[0].strip() == 'bands':
             nb = int(w[1].strip())
+        lines[i] = ' = '.join([x.strip() for x in w])
+    line = lines[i].strip()
 
-    if len(line.split("band names =")) > 1:
+    if len(line.split("band names")) > 1:
         in_band_names = True
     # print(line + (" TRUE" if in_band_names else ""))
 
