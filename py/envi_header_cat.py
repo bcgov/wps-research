@@ -89,6 +89,7 @@ for i in range(len(lines2)):
 f = open(args[3], "wb")
 if not f:
     err("failed to open output file: " + args[3])
-
-f.write('\n'.join(lines2).encode())
-f.close()
+else:
+    print("+w", args[3])
+    f.write('\n'.join(lines2).encode())
+    f.close()
