@@ -1,10 +1,20 @@
-#include"misc.h"
 /* raster flood fill on mask: background is label 0: new labels to connected
-comps of image areas equalling 1. 20220216 */
-float * dat;
-int * visited;
+comps of image areas equalling 1. (20220216). 20220226 bugfix */
+#include"misc.h"
 size_t *out, i_next, nrow, ncol, nband, nf;
-float * out_f;
+float *dat, * out_f;
+int * visited;
+size_t FLT_MX;
+
+size_t float_max(){
+  float x = 0.;
+  size_t y = 0;
+  while(((float)y == x) && ((size_t)x == y)){
+    x ++;
+    y ++;
+  }
+  return y - 1;
+}
 
 int flood(long int i, long int j, int depth){
   printf("flood(%ld, %ld, %d) label=%ld d=%f depth=%d\n", i, j, depth, i_next, dat[i * ncol + j],depth);
@@ -25,18 +35,16 @@ int flood(long int i, long int j, int depth){
   nf ++; // marked something
   // printf("\ti %ld j %ld label=%zu depth=%d\n", i, j, i_next, depth);
 
-  for(long int di = 1; di >= -1; di -= 1){
-    long int ii = i + di;
-    for(long int dj = 1; dj >= -1; dj -=1){
-      long int jj = j + dj;
+  long int ii, jj, di, dj, ik;
+  for(di = 1; di >= -1; di -= 1){
+    ii = i + di;
+    for(dj = 1; dj >= -1; dj -=1){
+      jj = j + dj;
       printf("di %ld dj %ld (%ld, %ld) \n", di, dj, i, j);
       if((!(di == 0 && dj == 0)) &&
-      (i + di >= 0) &&
-      (j + dj >= 0) &&
-      (i + di < nrow) &&
-      (j + dj < ncol)){
-
-        long int ik = ii * ncol + jj;
+         (i + di >= 0) && (j + dj >= 0) &&
+	 (i + di < nrow) && (j + dj < ncol)){
+        ik = ii * ncol + jj;
         if(!visited[ik] && dat[ik] == 1.){
           printf(" call(%ld, %ld) di %ld dj %ld\n", ii,jj, di, dj);
           ret += flood(ii, jj, depth+1);
@@ -49,6 +57,7 @@ int flood(long int i, long int j, int depth){
 
 int main(int argc, char ** argv){
   if(argc < 2) err("flood.exe [input file name] # raster flood fill on mask");
+  FLT_MX = float_max();
   size_t np, k, n;
   long int ij;
   long int i;
