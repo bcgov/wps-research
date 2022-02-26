@@ -4,82 +4,76 @@
 /* 20220216 group nearby (non-zero) segs using a moving window: any two labels
  in same window get merged */
 
-unordered_map<size_t, size_t> p; // disjoint-set forest / union-find
+unordered_map<float, float> p; //<size_t, size_t> p; // disjoint-set forest / union-find
 set<str> merges;
-
-size_t find(size_t x){
+float find(float x){
   if(p[x] == x) return x;
   else{
     p[x] = find(p[x]); // path compression
     return p[x];
   }
 }
-
-void unite(size_t x, size_t y){
-  x = find(x);
-  y = find(y);
+void unite(float x, float y){
+  x = find(x); y = find(y);
   if(x == y) return; // already in same set
   else p[y] = x; // make x parent of y
 }
 
 int main(int argc, char ** argv){
   if(argc < 3) err("class_link.exe [input file name] [window width] # windowed seg grouping, ike top hat");
-  size_t d, np, i, j, k, n, ij, ii, jj, di, dj, *dat, *out, nrow, ncol, nband;
-  int nwin = atoi(argv[2]);
-  str fn(argv[1]); /* data */
-  str ofn(fn + "_link.bin");
-  str hfn(hdr_fn(fn)); /* headers */
-  str hf2(hdr_fn(ofn, true));
+  size_t d, np, k, n, ij, nrow, ncol, nband;
+  float * dat, * out;
+  long int nwin = (long int)atoi(argv[2]);
+  cout << "nwin " << nwin << endl;
+  str fn(argv[1]); str ofn(fn + "_link.bin");
+  str hfn(hdr_fn(fn)); str hf2(hdr_fn(ofn, true));
+  long int i, j, di, dj, ii, jj;
 
   size_t d_type = hread(hfn, nrow, ncol, nband);
-  if(d_type != 16) err("expected type-16 (size_t) image");
+  if(d_type != 4) err("expected type-4 (float) image");
   if(nband != 1) err("expected 1-band image");
   np = nrow * ncol;
-
-  out = (size_t *)(void *)alloc(np * sizeof(size_t));
-  dat = (size_t *)(void *)alloc(np * sizeof(size_t));
-  FILE * g = ropen(fn);
-  size_t nr = fread(dat, nrow*ncol* sizeof(size_t), 1, g);
-
-  cout << "expected size: " << nrow * ncol * sizeof(size_t) << endl;
-  if(nr != 1){
-    cout << "nr: " << nr << endl;
-    err("incorrect read count");
-  }
-
+  out = falloc(np);
+  dat = bread(fn, nrow, ncol, nband);
+  
   for0(i, np){
     d = dat[i];
-    if(d > 0){
-      p[d] = d;
-    }
+    if(d > 0) p[d] = d;
   }
-  unordered_set<size_t> merge;
-  unordered_set<size_t>::iterator it;
-  int frac = nwin / 2; // 2 could be another whole number
-  for(i = 0; i < ncol + frac; i += frac){
-    printf("%zu\n", i);
-    for(j = 0; j < nrow + frac; j += frac){
+  unordered_set<float> merge;
+  unordered_set<float>::iterator it;
+  long int frac = nwin / 2; // 2 could be another whole number
+  for(i = 0; i < nrow + frac; i += frac){
+    for(j = 0; j < ncol + frac; j += frac){
+      printf("i %ld j %ld\n", i, j);
       merge.clear();
+
       for0(di, nwin){
         ii = i + di;
         if(ii < nrow){
+
           for0(dj, nwin){
             jj = i + dj;
             if(jj < ncol){
+
 	      d = dat[ii * ncol + jj];
-              if(d > 0) merge.insert(d);
+              if(d > 0){
+	        printf("  %ld  %ld  >0 %zu\n", ii, jj, d);
+	        merge.insert(d);
+	      }
             }
           }
         }
       }
       if(merge.size() > 1){
-        size_t parent = *(merge.begin());
+        float parent = *(merge.begin());
         for(it = merge.begin(); it != merge.end(); it++){
           if(it != merge.begin()){
-		  unite(parent, *it);
-		  merges.insert(to_string(parent) + str(",") + to_string(*it));
+            unite(parent, *it);
+	     merges.insert(to_string(parent) + str(",") + to_string(*it));
 	  }
         }
+	cout << "i " << i << " j " << j << merge << endl;
       }
     }
   }
@@ -91,11 +85,9 @@ int main(int argc, char ** argv){
   }
 
   cout << merges << endl;
-  // cout << "p:" << p << endl;
-
   FILE * f = wopen(ofn);
-  fwrite(out, sizeof(size_t), np, f);
-  hwrite(hf2, nrow, ncol, 1, 16); /* type 16 = size_t */
+  fwrite(out, sizeof(float), np, f);
+  hwrite(hf2, nrow, ncol, 1, 4); /* type 16 = size_t */
   free(dat);
   free(out);
   return 0;
