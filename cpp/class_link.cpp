@@ -53,7 +53,7 @@ int main(int argc, char ** argv){
         if(ii < nrow){
 
           for0(dj, nwin){
-            jj = i + dj;
+            jj = j + dj;
             if(jj < ncol){
 
 	      d = dat[ii * ncol + jj];
