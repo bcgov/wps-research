@@ -19,14 +19,15 @@ if __name__ == '__main__':
         err('usage:\n\tread_multispectral.py [input file name]' +
             ' [optional: red band idx]' +
             ' [optional: green band idx]' +
-            ' [optional: blue band idx] #band idx from 1')
+            ' [optional: blue band idx] #band idx from 1' + 
+            ' [optional: background plotting]' + 
+            ' [optional: no hist trimming]')
     fn, hdr = sys.argv[1], hdr_fn(sys.argv[1])  # check header exists
     assert_exists(fn)  # check file exists
     
-    skip_plot = False
-    if len(args) > 5:
-        skip_plot = True
-    
+    skip_plot = True if (len(args) > 5  and args[5] == '1')else False
+    use_trim = False if len(args) > 6 else True
+
     samples, lines, bands = read_hdr(hdr)  # read header and print parameters
     for f in ['samples', 'lines', 'bands']:
         exec('print("' + f + ' =" + str(' +  f + '))')
@@ -65,7 +66,7 @@ if __name__ == '__main__':
         rgb_min, rgb_max = None, None
         rgb_i = data[band_select[i], :].reshape((lines, samples))
     
-        if True: # if not override_scaling
+        if use_trim: # if not override_scaling
             if not exists(rfn):
                 values = rgb_i  # now do the so called x-% linear stretch (separate bands version)
                 values = values.reshape(np.prod(values.shape)).tolist()
@@ -89,11 +90,15 @@ if __name__ == '__main__':
                 rgb_min, rgb_max = [float(x) \
                         for x in open(rfn).read().strip().split(',')]
     
-            rng = rgb_max - rgb_min  # apply restored or derived scaling
-            rgb_i = (rgb_i - rgb_min) / (rng if rng != 0. else 1.)
+        else:
+            rgb_min, rgb_max = np.min(rgb_i), np.max(rgb_i)
+
+        rng = rgb_max - rgb_min  # apply restored or derived scaling
+        rgb_i = (rgb_i - rgb_min) / (rng if rng != 0. else 1.)
     
-            rgb_i[rgb_i < 0.] = 0.  # clip
-            rgb_i[rgb_i > 1.] = 1.
+        rgb_i[rgb_i < 0.] = 0.  # clip
+        rgb_i[rgb_i > 1.] = 1.
+
         return rgb_i
     
     rgb_i = parfor(scale_rgb, range(3), 3)
