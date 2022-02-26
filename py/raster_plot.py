@@ -21,12 +21,14 @@ if __name__ == '__main__':
             ' [optional: green band idx]' +
             ' [optional: blue band idx] #band idx from 1' + 
             ' [optional: background plotting]' + 
-            ' [optional: no hist trimming]')
+            ' [optional: no hist trimming]' +
+            ' [optional: class_legend (not implemented)]')
     fn, hdr = sys.argv[1], hdr_fn(sys.argv[1])  # check header exists
     assert_exists(fn)  # check file exists
     
-    skip_plot = True if (len(args) > 5  and args[5] == '1')else False
-    use_trim = False if len(args) > 6 else True
+    skip_plot = True if (len(args) > 5  and args[5] == '1') else False
+    use_trim = False if (len(args) > 6  and args[6] == '1') else True
+    class_legend = True if (len(args) > 7 and args[7] == '1') else False
 
     samples, lines, bands = read_hdr(hdr)  # read header and print parameters
     for f in ['samples', 'lines', 'bands']:
