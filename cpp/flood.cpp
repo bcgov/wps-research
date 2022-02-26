@@ -18,13 +18,13 @@ size_t float_max(){
 
 int flood(long int i, long int j, int depth){
   printf("flood(%ld, %ld, %d) label=%ld d=%f depth=%d\n", i, j, depth, i_next, dat[i * ncol + j],depth);
-  int ret = 0;
   if(i < 0 || j < 0 || i >= nrow || j >=ncol ){
     printf("oub\n");
     return 0;
   }
   long int ij = i * ncol + j;
   float d = dat[ij];
+  int ret = 0;
 
   if(d != 1. || visited[ij]){
     printf("ret\n");
@@ -40,10 +40,12 @@ int flood(long int i, long int j, int depth){
     ii = i + di;
     for(dj = 1; dj >= -1; dj -=1){
       jj = j + dj;
+
       printf("di %ld dj %ld (%ld, %ld) \n", di, dj, i, j);
       if((!(di == 0 && dj == 0)) &&
          (i + di >= 0) && (j + dj >= 0) &&
 	 (i + di < nrow) && (j + dj < ncol)){
+
         ik = ii * ncol + jj;
         if(!visited[ik] && dat[ik] == 1.){
           printf(" call(%ld, %ld) di %ld dj %ld\n", ii,jj, di, dj);
@@ -95,6 +97,9 @@ int main(int argc, char ** argv){
         int r = flood(i, j, 0);
         if(nf > 0){
           i_next ++;
+	  if(i_next >= FLT_MX){
+	    err("exceeded max int representable by float type");
+	  }
         }
       }
     }
