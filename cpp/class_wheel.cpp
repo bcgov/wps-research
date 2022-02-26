@@ -5,6 +5,8 @@
 int main(int argc, char ** argv){
 
   if(argc < 2) err("class_wheel [input binary file name]");
+  int simple = argc > 2;
+
   str fn(argv[1]); // input file name
   cout << "input file name:" << fn << endl;
   str hfn(hdr_fn(fn)); // auto-detect header file name
@@ -43,8 +45,10 @@ int main(int argc, char ** argv){
     }
     else{
       s = v = 1.;
-      v = ci / (float)(count.size() - 1);
-      h = 60 + 300. * (float)ci / (float)(count.size() - 1);
+      v = simple ? 1: ci / (float)(count.size() - 1);
+      h = 90 + 270. * (float)ci;
+      h /= (float)(count.size() - 1);
+
       hsv_to_rgb(&r, &g, &b, h, s, v);
 
       cout << "d=" << d << " ci=" << ci << " h,s,v=" << h <<"," << s << "," << v<< endl;
@@ -55,15 +59,18 @@ int main(int argc, char ** argv){
     }
   }
 
+  printf("shuffle..\n");
   /* add shuffling 20220216 */
   vector<size_t> shuf;
   for(i = 1; i < count.size(); i++) shuf.push_back(i);
   unsigned seed = 1;
   shuffle(shuf.begin(), shuf.end(), std::default_random_engine(seed));
 
+  printf("iter..\n");
   map<float, float> c_r, c_g, c_b;
   for(map<float, float>::iterator it = code_r.begin(); it != code_r.end(); it++){
     float d = it->first;
+    printf("%d\n", d);
     if(d == 0.){
       c_r[d] = c_g[d] = c_b[d] = 0.;
     }
@@ -74,24 +81,21 @@ int main(int argc, char ** argv){
       c_b[d] = code_b[sv];
     }
   }
-
   str ofn(fn + str("_wheel.bin"));
   str ohfn(fn + str("_wheel.hdr"));
   hwrite(ohfn, nrow, ncol, 3); // rgb file: 3 bands
 
+  printf("write..\n");
   // write colour encoded output
   FILE * outf = fopen(ofn.c_str(), "wb");
   for0(i, np){
-    r = c_r[dat[i]];
-    fwrite(&r, sizeof(float), 1, outf);
+    r = c_r[dat[i]]; fwrite(&r, sizeof(float), 1, outf);
   }
   for0(i, np){
-    g = c_g[dat[i]];
-    fwrite(&g, sizeof(float), 1, outf);
+    g = c_g[dat[i]]; fwrite(&g, sizeof(float), 1, outf);
   }
   for0(i, np){
-    b = c_b[dat[i]];
-    fwrite(&b, sizeof(float), 1, outf);
+    b = c_b[dat[i]]; fwrite(&b, sizeof(float), 1, outf);
   }
   fclose(outf);
   return 0;
