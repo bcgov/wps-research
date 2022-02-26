@@ -78,4 +78,3 @@ if not exists(out_file):
                    out_20m,
                    d + 'SENTINEL2_L2A_EPSG_32610_10m.bin',
                    out_file]))
-
