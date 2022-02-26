@@ -1,4 +1,5 @@
-/* Find the largest successive float that's intra-convertible with integer */
+/* Find the largest successive float that's intra-convertible with integer..
+.. the number of "classes" that could be represented using a float type */
 #include<stdio.h>
 #include<stdlib.h>
 int main(int argc, char ** argv){
