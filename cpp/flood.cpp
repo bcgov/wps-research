@@ -9,7 +9,7 @@ float * out_f;
 int flood(long int i, long int j, int depth){
   printf("flood(%ld, %ld, %d) label=%ld d=%f depth=%d\n", i, j, depth, i_next, dat[i * ncol + j],depth);
   int ret = 0;
-  if(i < 0 || j < 0 ||  i >= nrow || j >=ncol ){
+  if(i < 0 || j < 0 || i >= nrow || j >=ncol ){
     printf("oub\n");
     return 0;
   }
@@ -17,13 +17,13 @@ int flood(long int i, long int j, int depth){
   float d = dat[ij];
 
   if(d != 1. || visited[ij]){
-	  printf("ret\n");
-	  return 0; // labelled or not under mask
+    printf("ret\n");
+    return 0; // labelled or not under mask
   }
   visited[ij] = true;
   out[ij] = i_next;
   nf ++; // marked something
-//  printf("\ti %ld j %ld label=%zu depth=%d\n", i, j, i_next, depth);
+  // printf("\ti %ld j %ld label=%zu depth=%d\n", i, j, i_next, depth);
 
   for(long int di = 1; di >= -1; di -= 1){
     long int ii = i + di;
@@ -31,16 +31,16 @@ int flood(long int i, long int j, int depth){
       long int jj = j + dj;
       printf("di %ld dj %ld (%ld, %ld) \n", di, dj, i, j);
       if((!(di == 0 && dj == 0)) &&
-         (i + di >= 0) &&
-	 (j + dj >= 0) &&
-	 (i + di < nrow) &&
-	 (j + dj < ncol)){
+      (i + di >= 0) &&
+      (j + dj >= 0) &&
+      (i + di < nrow) &&
+      (j + dj < ncol)){
 
         long int ik = ii * ncol + jj;
         if(!visited[ik] && dat[ik] == 1.){
-	  printf("  call(%ld, %ld) di %ld dj %ld\n", ii,jj, di, dj);
+          printf(" call(%ld, %ld) di %ld dj %ld\n", ii,jj, di, dj);
           ret += flood(ii, jj, depth+1);
-	}
+        }
       }
     }
   }
@@ -82,7 +82,7 @@ int main(int argc, char ** argv){
       ij = i * ncol + j;
       if(!visited[ij] && dat[ij] ==1.){
         nf = 0;
-	cout << "--" << endl;
+        cout << "--" << endl;
         int r = flood(i, j, 0);
         if(nf > 0){
           i_next ++;
@@ -101,6 +101,28 @@ int main(int argc, char ** argv){
   free(visited);
   free(dat);
   free(out);
+
+  str ofn2(fn + "_flood_onehot.bin");
+  str ohfn5(fn + "_flood_onehot.hdr");
+  FILE * g = wopen(ofn2);
+  size_t n_bands = 0;
+
+  float * out_i = falloc(np);
+  for0(k, i_next){
+    if(k > 0){
+	    n_bands ++;
+	    float this_band = 0.;
+	    for0(i, np){
+		    out_i[i] = (out_f[i] == (float)k)?1.: 0.;
+		    this_band += out_i[i];
+	    }
+	    printf("this band %f\n", this_band);
+	    fwrite(out_i, np, sizeof(float), g);
+    }
+  }
+  hwrite(ohfn5, nrow, ncol, n_bands, 4);
+
+
   return 0;
 }
 /* list distances by passing a moving window. Then, merge any distances less than a threshold */
