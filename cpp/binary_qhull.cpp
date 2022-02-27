@@ -15,7 +15,7 @@ int main(int argc, char ** argv){
   // read data into float array
   float * dat = bread(fn, nrow, ncol, nband);
 
-  ofstream of; 
+  ofstream of;
   of.open("qhull.dat");
 
   str s(" ");
@@ -35,10 +35,10 @@ int main(int argc, char ** argv){
       }
     }
   }
-
   of << endl;
   of.close();
 
+  // run linux program qhull
   str r(exec("qhull -i < qhull.dat"));
   strip(r);
   vector<str> lines(split(r, '\n'));
@@ -46,18 +46,38 @@ int main(int argc, char ** argv){
 
   cout << lines << endl;
 
-  int n_pts = atoi(lines[0].c_str());
-  cout << lines.size() << endl;
+  int n_pts = atoi(lines[0].c_str()); // cout << lines.size() << endl;
+
+  // confirm data consistency
   if(n_pts != lines.size() - 1) err("unexpected number of output lines");
-  
+  for0(i, n_pts){
+    vector<str> x(split(lines[i+1], ' '));
+    if(x.size() != 2) err("unexpected number of records");
+    long int xi = atol(x[0].c_str());
+    long int yi = atol(x[1].c_str());
+  }
+
+  // burn the points into dat and write out
+  for0(i, np) dat[i] =0.;
+
   for0(i, n_pts){
     vector<str> x(split(lines[i+1], ' '));
     cout << s << s << x << endl;
     if(x.size() != 2) err("unexpected number of records");
     long int xi = atol(x[0].c_str());
     long int yi = atol(x[1].c_str());
+
+    if(xi < 0 || xi > nrow || yi < 0 || yi > ncol){
+      err("point out of bounds");
+    }
+
+    dat[xi * ncol + yi] = 1.;
   }
 
+  str ofn(fn + str("_qhull.bin"));
+  str ohn(fn + str("_qhull.hdr"));
+  hwrite(ohn, nrow, ncol, 1, 4); // write output header
+  bwrite(dat, ofn, nrow, ncol, 1); // write binary data
 
   return 0;
 }
