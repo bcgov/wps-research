@@ -5,7 +5,6 @@
 int main(int argc, char ** argv){
 
   if(argc < 2) err("class_wheel [input binary file name]");
-  int simple = argc > 2;
 
   str fn(argv[1]); // input file name
   cout << "input file name:" << fn << endl;
@@ -45,8 +44,8 @@ int main(int argc, char ** argv){
     }
     else{
       s = v = 1.;
-      v = simple ? 1: ci / (float)(count.size() - 1);
-      h = 90 + 270. * (float)ci;
+      v = 1.; //ci / (float)(count.size() - 1);
+      h = 360. * (float)ci;
       h /= (float)(count.size() - 1);
 
       hsv_to_rgb(&r, &g, &b, h, s, v);
@@ -70,7 +69,7 @@ int main(int argc, char ** argv){
   map<float, float> c_r, c_g, c_b;
   for(map<float, float>::iterator it = code_r.begin(); it != code_r.end(); it++){
     float d = it->first;
-    printf("%d\n", d);
+    printf("%f\n", d);
     if(d == 0.){
       c_r[d] = c_g[d] = c_b[d] = 0.;
     }
