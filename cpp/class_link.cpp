@@ -4,6 +4,7 @@
 /* 20220216 group nearby (non-zero) segs using a moving window: any two labels
 in same window get merged */
 
+unordered_map<float, set<size_t>> members;
 unordered_map<float, float> p; //<size_t, size_t> p; // disjoint-set forest / union-find
 set<str> merges;
 
@@ -50,8 +51,26 @@ int main(int argc, char ** argv){
 
   for0(i, np){
     d = dat[i];
-    if(d > 0) p[d] = d;
+    if(d > 0){
+	    p[d] = d;
+	    if(members.count(d) < 1){
+	      members[d] = set<size_t>();
+	    }
+	    members[d].insert(i);
+    }
   }
+
+  for(unordered_map<float, set<size_t>>::iterator it = members.begin(); it != members.end(); it++){
+    cout << endl;
+    cout << it->first;
+    cout << "={";
+    for(set<size_t>::iterator ti = (*it).second.begin(); ti != (*it).second.end(); ti++){
+	  cout << *ti << ",";
+    }
+    cout << "}" << endl;
+  }
+
+
   size_t iter = 0;
   unordered_set<float> merge;
   unordered_set<float>::iterator it;
@@ -86,9 +105,31 @@ int main(int argc, char ** argv){
             if(new_merge)
             merges.insert(to_string(parent) + str(",") + to_string(*it));
           }
-	  // connecting the dots goes here
         }
-        cout << "iter" << iter << " merge: i " << i << " j " << j << merge << endl;
+	/*
+	// connecting the dots goes here..
+	// need the membership of the base sets being joined..
+        for(it = merge.begin(); it != merge.end(); it++){
+	  for(unordered_set<float>::iterator ti = it; ti != merge.end(); ti ++){
+	    if(*it != *ti){
+	      //draw lines
+	      cout << "connect(" << *it << "," << *ti << ")" << endl;
+  		// check if we've already connected this pair!
+	      
+	      float c1 = *it;
+	      float c2 = *it;
+	      for(set<size_t>::iterator ca = members[c1].begin(); ca != members[c1].end(); ca++){
+	        for(set<size_t>::iterator cb = members[c2].begin(); cb != members[c2].end(); cb++){
+		}
+	      }
+
+	    }
+	  }
+	}
+	*/
+
+	
+	cout << "iter" << iter << " merge: i " << i << " j " << j << merge << endl;
 
         // write provisinal output this step
         if(debug){
