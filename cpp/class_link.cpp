@@ -39,6 +39,7 @@ int main(int argc, char ** argv){
   str fn(argv[1]); str ofn(fn + "_link.bin");
   str hfn(hdr_fn(fn)); str hf2(hdr_fn(ofn, true));
   long int i, j, di, dj, ii, jj;
+  int debug = false;
 
   size_t d_type = hread(hfn, nrow, ncol, nband);
   if(d_type != 4) err("expected type-4 (float) image");
@@ -87,26 +88,27 @@ int main(int argc, char ** argv){
           }
         }
         cout << "iter" << iter << " merge: i " << i << " j " << j << merge << endl;
-	
-	// write provisinal output this step
-	
-	str ofn_i(str("merge_") + to_string(iter)   + str(".bin"));
-	str hfn_i(str("merge_") + to_string(iter) + str(".hdr"));
-        for0(ii, nrow) for0(jj, ncol){
-          ij = ii * ncol + jj;
-          d = dat[ij];
-          out[ij] = (d == (size_t)0) ? (size_t)0 : find(d);
-        }
 
-        cout << merges << endl;
-        FILE * f = wopen(ofn_i);
-        fwrite(out, sizeof(float), np, f);
-        hwrite(hfn_i, nrow, ncol, 1, 4); /* type 16 = size_t */
-	iter ++;
+        // write provisinal output this step
+        if(debug){
+          str ofn_i(str("merge_") + to_string(iter) + str(".bin"));
+          str hfn_i(str("merge_") + to_string(iter) + str(".hdr"));
+          for0(ii, nrow) for0(jj, ncol){
+            ij = ii * ncol + jj;
+            d = dat[ij];
+            out[ij] = (d == (size_t)0) ? (size_t)0 : find(d);
+          }
+
+          cout << merges << endl;
+          FILE * f = wopen(ofn_i);
+          fwrite(out, sizeof(float), np, f);
+          hwrite(hfn_i, nrow, ncol, 1, 4); /* type 16 = size_t */
+        }
+        iter ++;
       }
     }
   }
-
+  
   for0(i, nrow) for0(j, ncol){
     ij = i * ncol + j;
     d = dat[ij];
@@ -117,6 +119,7 @@ int main(int argc, char ** argv){
   FILE * f = wopen(ofn);
   fwrite(out, sizeof(float), np, f);
   hwrite(hf2, nrow, ncol, 1, 4); /* type 16 = size_t */
+  
   free(dat);
   free(out);
   return 0;
