@@ -41,13 +41,20 @@ int main(int argc, char ** argv){
 
   str r(exec("qhull -i < qhull.dat"));
   strip(r);
-  vector<str> lines(split(r));
+  vector<str> lines(split(r, '\n'));
   cout << "[" << r << "]" << endl;
 
   cout << lines << endl;
 
   int n_pts = atoi(lines[0].c_str());
+  cout << lines.size() << endl;
   if(n_pts != lines.size() - 1) err("unexpected number of output lines");
   
+  for0(i, n_pts){
+    vector<str> x(split(lines[i+1], ' '));
+    cout << s << s << x << endl;
+  }
+
+
   return 0;
 }
