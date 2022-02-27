@@ -86,6 +86,7 @@ int main(int argc, char ** argv){
             if(new_merge)
             merges.insert(to_string(parent) + str(",") + to_string(*it));
           }
+	  // connecting the dots goes here
         }
         cout << "iter" << iter << " merge: i " << i << " j " << j << merge << endl;
 

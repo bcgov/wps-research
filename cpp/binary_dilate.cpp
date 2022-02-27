@@ -35,34 +35,40 @@ int main(int argc, char ** argv){
     }
   }
 
-  for0(i, np) out[i] = dat[i]; // initialize output with input values, then modify
-
+  for0(i, np){
+	  out[i] = dat[i]; // initialize output with input values, then modify
+  }
   size_t n_dilate, n_erode;
   n_dilate = n_erode = 0;
+  float dd = (float)dx; // + dx);
+  dd *= dd;
+  float d, ext;
 
-  float dx2 = 1. + 2. * (float)dx;
-  dx2 *= dx2;
   if(dilate){
     for0(i, nrow){
       if(i % 1000 == 0) printf("i=%ld of %zu\n", i, nrow);
       for0(j, ncol){
-        if(dat[i * ncol + j] == 1.){
+	ext = dat[i * ncol + j];
+        if(true){
           n_dilate ++;
           for(di = i - dx; di <= i + dx; di++){
 	    if(di < 0 || di > ncol) continue;
-	    //float id = (float)(i -  di);
-	    //id *= id;
+	    float id = (float)i - (float)di;
+	    id *= id;
             for(dj = j - dx; dj <= j + dx; dj++){
 	      if(dj < 0 || dj > nrow) continue;
-	      //float jd = (float)(j - dj);
-	      //jd *= jd;
-	      //printf("id %f jd %d\n", id, jd);
-	      //if(id + jd <= dx2 / 2.){
-                out[di * ncol + dj] = 1.;
-	      //}
+	      float jd = (float)j - (float)dj;
+	      jd *= jd;
+	      d = dat[di * ncol + dj];
+	      if(id + jd <= dd){
+                if(d > ext) ext = d;
+	      }
+	      else{
+	      }
             }
           }
         }
+	out[i * ncol + j] = ext;
       }
     }
   }
@@ -70,19 +76,29 @@ int main(int argc, char ** argv){
     for0(i, nrow){
       if(i % 1000 == 0) printf("i=%ld of %zu\n", i, nrow);
       for0(j, ncol){
-        if(dat[i * ncol + j] == 0.){
+	ext = dat[i * ncol + j];
+        if(ext == 0.){
           n_erode ++;
           for(di = i - dx; di <= i + dx; di++){
 	    if(di < 0 || di > ncol) continue;
+	    float id = (float)i - (float)di;
+	    id *= id;
             for(dj = j - dx; dj <= j + dx; dj++){
 	      if(dj < 0 || dj > nrow) continue;
-              out[di * ncol + dj] = 0.;
+	      float jd = (float)j - (float)dj;
+	      jd *= jd;
+	      d = dat[di * ncol + dj];
+	      if(id + jd <= dd){
+		      if(d < ext) ext = d;
+	      }
+	      else{
+	      }
             }
           }
         }
+	out[i * ncol + j] = ext;
       }
     }
-
   }
   printf("n_dilate %zu n_erode %zu\n", n_dilate, n_erode);
 
@@ -92,5 +108,7 @@ int main(int argc, char ** argv){
 
   hwrite(ohfn, nrow, ncol, nband); // write header
   bwrite(out, ofn, nrow, ncol, nband); // write output product
+  free(dat);
+  free(out);
   return 0;
 }
