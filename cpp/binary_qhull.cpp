@@ -53,6 +53,7 @@ int main(int argc, char ** argv){
   for0(i, n_pts){
     vector<str> x(split(lines[i+1], ' '));
     cout << s << s << x << endl;
+    if(len(x) != 2) err("unexpected number of records");
   }
 
 
