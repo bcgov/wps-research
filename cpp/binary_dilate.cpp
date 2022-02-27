@@ -40,6 +40,8 @@ int main(int argc, char ** argv){
   size_t n_dilate, n_erode;
   n_dilate = n_erode = 0;
 
+  float dx2 = 1. + 2. * (float)dx;
+  dx2 *= dx2;
   if(dilate){
     for0(i, nrow){
       if(i % 1000 == 0) printf("i=%ld of %zu\n", i, nrow);
@@ -48,9 +50,16 @@ int main(int argc, char ** argv){
           n_dilate ++;
           for(di = i - dx; di <= i + dx; di++){
 	    if(di < 0 || di > ncol) continue;
+	    //float id = (float)(i -  di);
+	    //id *= id;
             for(dj = j - dx; dj <= j + dx; dj++){
 	      if(dj < 0 || dj > nrow) continue;
-              out[di * ncol + dj] = 1.;
+	      //float jd = (float)(j - dj);
+	      //jd *= jd;
+	      //printf("id %f jd %d\n", id, jd);
+	      //if(id + jd <= dx2 / 2.){
+                out[di * ncol + dj] = 1.;
+	      //}
             }
           }
         }
@@ -77,8 +86,8 @@ int main(int argc, char ** argv){
   }
   printf("n_dilate %zu n_erode %zu\n", n_dilate, n_erode);
 
-  str ofn(fn + str("_dilate.bin")); // output product file
-  str ohfn(fn + str("_dilate.hdr")); // output product header
+  str  ofn(fn + str("_") + (dilate? str("dilate"): str("erode")) + str(".bin")); // output product file
+  str ohfn(fn + str("_") + (dilate? str("dilate"): str("erode")) + str(".hdr")); // output product header
   printf("output %s\n", ofn.c_str());
 
   hwrite(ohfn, nrow, ncol, nband); // write header
