@@ -15,6 +15,9 @@ int main(int argc, char ** argv){
   // read data into float array
   float * dat = bread(fn, nrow, ncol, nband);
 
+  ofstream of; 
+  of.open("qhull.dat");
+
   str s(" ");
   size_t n = 0;
 
@@ -24,15 +27,27 @@ int main(int argc, char ** argv){
     }
   }
 
-  cout << "qhull " << 2 << s << n << s;
+  of << to_string(2) << s << to_string(n) << s;
   for0(i, nrow){
     for0(j, ncol){
       if(dat[i * ncol + j] == 1.){
-        cout << i << s << j << s;
+        of << i << s << j << s;
       }
     }
   }
 
-  cout << endl;
+  of << endl;
+  of.close();
+
+  str r(exec("qhull -i < qhull.dat"));
+  strip(r);
+  vector<str> lines(split(r));
+  cout << "[" << r << "]" << endl;
+
+  cout << lines << endl;
+
+  int n_pts = atoi(lines[0].c_str());
+  if(n_pts != lines.size() - 1) err("unexpected number of output lines");
+  
   return 0;
 }
