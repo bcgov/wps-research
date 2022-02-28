@@ -43,9 +43,11 @@ int main(int argc, char ** argv){
   strip(r);
   vector<str> lines(split(r, '\n'));
   //cout << "[" << r << "]" << endl;
-  cout << lines << endl;
+  cout << lines[lines.size() -1] << endl;
+  
   exit(1);
 
+  /*
   int n_pts = atoi(lines[0].c_str()); // cout << lines.size() << endl;
 
   // confirm data consistency
@@ -73,7 +75,7 @@ int main(int argc, char ** argv){
 
     dat[xi * ncol + yi] = 1.;
   }
-
+  */
   str ofn(fn + str("_qhull.bin"));
   str ohn(fn + str("_qhull.hdr"));
   hwrite(ohn, nrow, ncol, 1, 4); // write output header
