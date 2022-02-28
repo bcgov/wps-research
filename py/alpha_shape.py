@@ -1,3 +1,4 @@
+print("load deps..")
 import alphashape
 import matplotlib.pyplot as plt
 from descartes import PolygonPatch
@@ -41,3 +42,6 @@ if False:
     ax.scatter(*zip(*points)) # plot inputs
     ax.add_patch(PolygonPatch(alpha_shape, alpha=.2)) # plot alpha shape
     plt.savefig("alpha_shape.png")
+''' don't forget to revisit:
+(2007) Concave hull: A k-nearest neighbours approach for
+the computation of the region occupied by a set of points.'''
