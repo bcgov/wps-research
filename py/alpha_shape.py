@@ -1,4 +1,5 @@
-print("load deps..")
+'''20220227 this program calculates a concave-hull for a set
+of points in 2d'''
 import copy
 import fileinput
 import alphashape
