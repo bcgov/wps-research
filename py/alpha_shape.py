@@ -22,7 +22,7 @@ X = [float(x) for x in X]
 ci = 0
 points = []
 for i in range(N):
-    points.append((X[ci], X[ci+1]))
+    points.append((X[ci + 1], -X[ci]))
     ci += 2
 
 print("optimizing alpha..")
