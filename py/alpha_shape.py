@@ -1,9 +1,9 @@
 print("load deps..")
+import copy
+import fileinput
 import alphashape
 import matplotlib.pyplot as plt
 from descartes import PolygonPatch
-import copy
-import fileinput
 
 ci = 0
 X = None
