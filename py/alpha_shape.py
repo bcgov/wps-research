@@ -31,7 +31,9 @@ for i in range(N):
     points.append((X[ci], X[ci+1]))
     ci += 2
 
+print("optimizing alpha..")
 alpha = 0.95 * alphashape.optimizealpha(points) # optimal alpha
+print("finding alpha shape..")
 alpha_shape = alphashape.alphashape(points, alpha); # create alpha shape
 print(alpha_shape)
 if False:
