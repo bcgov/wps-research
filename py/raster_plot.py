@@ -108,7 +108,6 @@ if __name__ == '__main__':
         rgb[:, :, i] = rgb_i[i]
     
     if True:  # plot image: no class labels
-    
         if skip_plot:
             mpl = matplotlib
             COLOR = 'white'
