@@ -1,4 +1,5 @@
-/* recode a class map by counting up from one */
+/* recode a class map by counting up from one, or 0
+use this to make class labels contiguous again, after merging ops */
 #include"misc.h"
 int main(int argc, char ** argv){
 
@@ -16,16 +17,10 @@ int main(int argc, char ** argv){
 
   np = nrow * ncol;
   if(nband != 1) err("this program defines results for 1-band images");
-
-  // read data into float array
-  float * dat = bread(fn, nrow, ncol, nband);
-
-  // accumulate the data
-  map<float, size_t> count;
+  float * dat = bread(fn, nrow, ncol, nband); // read data into array
+  map<float, size_t> count; // accumulate the data
   for0(i, np){
-    if(count.count(dat[i]) < 1){
-      count[dat[i]] = 0;
-    }
+    if(count.count(dat[i]) < 1) count[dat[i]] = 0;
     count[dat[i]] += 1;
   }
 
@@ -33,10 +28,7 @@ int main(int argc, char ** argv){
   float ci = start_0 ? 0. : 1.; // default: start on 1
   map<float, float> lookup;
   map<float, size_t>::iterator it;
-  for(it = count.begin(); it != count.end(); it++){
-    lookup[it->first] = ci ++;
-  }
-
+  for(it = count.begin(); it != count.end(); it++) lookup[it->first] = ci ++;
   hwrite(ohfn, nrow, ncol, 1); // write header
 
   FILE * f = fopen(ofn.c_str(), "wb");
@@ -45,7 +37,6 @@ int main(int argc, char ** argv){
     fwrite(&d, sizeof(float), 1, f);
   }
   fclose(f);
-  
   free(dat);
   return 0;
 }

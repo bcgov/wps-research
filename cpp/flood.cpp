@@ -1,5 +1,5 @@
-/* raster flood fill on mask: background is label 0: new labels to connected
-comps of image areas equalling 1. (20220216). 20220226 bugfix */
+/* 20220225 raster flood fill on mask: background is label 0.
+New labels to connected components of image areas equalling 1. */
 #include"misc.h"
 size_t *out, i_next, nrow, ncol, nband, nf;
 float *dat, * out_f;
@@ -7,44 +7,39 @@ int * visited;
 size_t FLT_MX;
 
 size_t float_max(){
+  /* largest integer representable in float type*/
   float x = 0.;
   size_t y = 0;
   while(((float)y == x) && ((size_t)x == y)){
-    x ++;
-    y ++;
+    x ++; y ++;
   }
   return y - 1;
 }
 
 int flood(long int i, long int j, int depth){
-  printf("flood(%ld, %ld, %d) label=%ld d=%f depth=%d\n", i, j, depth, i_next, dat[i * ncol + j],depth);
-  if(i < 0 || j < 0 || i >= nrow || j >=ncol ){
-    printf("oub\n");
-    return 0;
-  }
+  printf("flood(%ld, %ld, %d) label=%ld d=%f depth=%d\n",
+    	 i, j, depth, i_next, dat[i * ncol + j], depth);
+
+  if(i < 0 || j < 0 || i >= nrow || j >=ncol ) return 0;
   long int ij = i * ncol + j;
   float d = dat[ij];
   int ret = 0;
 
-  if(d != 1. || visited[ij]){
-    printf("ret\n");
-    return 0; // labelled or not under mask
-  }
+  if(d != 1. || visited[ij]) return 0; // labelled or outside mask
   visited[ij] = true;
   out[ij] = i_next;
   nf ++; // marked something
-  // printf("\ti %ld j %ld label=%zu depth=%d\n", i, j, i_next, depth);
 
   long int ii, jj, di, dj, ik;
   for(di = 1; di >= -1; di -= 1){
     ii = i + di;
     for(dj = 1; dj >= -1; dj -=1){
       jj = j + dj;
+      // printf("di %ld dj %ld (%ld, %ld) \n", di, dj, i, j);
 
-      printf("di %ld dj %ld (%ld, %ld) \n", di, dj, i, j);
       if((!(di == 0 && dj == 0)) &&
-         (i + di >= 0) && (j + dj >= 0) &&
-	 (i + di < nrow) && (j + dj < ncol)){
+      (i + di >= 0) && (j + dj >= 0) &&
+      (i + di < nrow) && (j + dj < ncol)){
 
         ik = ii * ncol + jj;
         if(!visited[ik] && dat[ik] == 1.){
@@ -61,9 +56,7 @@ int main(int argc, char ** argv){
   if(argc < 2) err("flood.exe [input file name] # raster flood fill on mask");
   FLT_MX = float_max();
   size_t np, k, n;
-  long int ij;
-  long int i;
-  long int j;
+  long int i, j, ij;
 
   str fn(argv[1]); /* binary files */
   str ofn(fn + "_flood.bin");
@@ -93,13 +86,12 @@ int main(int argc, char ** argv){
       ij = i * ncol + j;
       if(!visited[ij] && dat[ij] ==1.){
         nf = 0;
-        cout << "--" << endl;
         int r = flood(i, j, 0);
         if(nf > 0){
           i_next ++;
-	  if(i_next >= FLT_MX){
-	    err("exceeded max int representable by float type");
-	  }
+          if(i_next >= FLT_MX){
+            err("exceeded max int representable by float type");
+          }
         }
       }
     }
@@ -116,27 +108,25 @@ int main(int argc, char ** argv){
   free(dat);
   free(out);
 
+  // write a multi-band one hot encoded output
   str ofn2(fn + "_flood_onehot.bin");
   str ohfn5(fn + "_flood_onehot.hdr");
-  FILE * g = wopen(ofn2);
-  size_t n_bands = 0;
 
+  size_t n_bands = 0;
+  FILE * g = wopen(ofn2);
   float * out_i = falloc(np);
   for0(k, i_next){
     if(k > 0){
-	    n_bands ++;
-	    float this_band = 0.;
-	    for0(i, np){
-		    out_i[i] = (out_f[i] == (float)k)?1.: 0.;
-		    this_band += out_i[i];
-	    }
-	    printf("this band %f\n", this_band);
-	    fwrite(out_i, np, sizeof(float), g);
+      n_bands ++;
+      float this_band = 0.;
+      for0(i, np){
+        out_i[i] = (out_f[i] == (float)k)?1.: 0.;
+        this_band += out_i[i];
+      }
+      printf("this band %f\n", this_band);
+      fwrite(out_i, np, sizeof(float), g);
     }
   }
   hwrite(ohfn5, nrow, ncol, n_bands, 4);
-
-
   return 0;
 }
-/* list distances by passing a moving window. Then, merge any distances less than a threshold */
