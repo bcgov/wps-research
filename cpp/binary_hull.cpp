@@ -20,13 +20,13 @@ int main(int argc, char ** argv){
 
   str s(" ");
   size_t n = 0;
-
   for0(i, nrow){
     for0(j, ncol){
-      if(dat[i * ncol + j] == 1.) n++;
+      if(dat[i * ncol + j] == 1.){
+        n++;
+      }
     }
   }
-
   of << to_string(2) << s << to_string(n) << s;
   for0(i, nrow){
     for0(j, ncol){
@@ -82,8 +82,8 @@ int main(int argc, char ** argv){
     dat[xi * ncol + yi] = 1.;
   }
   */
-  str ofn(fn + str("_qhull.bin"));
-  str ohn(fn + str("_qhull.hdr"));
+  str ofn(fn + str("_hull.bin"));
+  str ohn(fn + str("_hull.hdr"));
   hwrite(ohn, nrow, ncol, 1, 4); // write output header
   bwrite(dat, ofn, nrow, ncol, 1); // write binary data
 
