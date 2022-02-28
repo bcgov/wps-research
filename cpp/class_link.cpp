@@ -32,7 +32,9 @@ bool unite(float x, float y){
 }
 
 int main(int argc, char ** argv){
-  if(argc < 3) err("class_link.exe [input file name] [window width] # windowed seg grouping, ike top hat");
+  if(argc < 3){
+    err("class_link.exe [input file name] [window width] # windowed seg grouping, ike top hat");
+  }
   size_t d, np, k, n, ij, nrow, ncol, nband;
   float * dat, * out;
   long int nwin = (long int)atoi(argv[2]);
@@ -52,11 +54,11 @@ int main(int argc, char ** argv){
   for0(i, np){
     d = dat[i];
     if(d > 0){
-	    p[d] = d;
-	    if(members.count(d) < 1){
-	      members[d] = set<size_t>();
-	    }
-	    members[d].insert(i);
+      p[d] = d;
+      if(members.count(d) < 1){
+        members[d] = set<size_t>();
+      }
+      members[d].insert(i);
     }
   }
 
@@ -65,11 +67,10 @@ int main(int argc, char ** argv){
     cout << it->first;
     cout << "={";
     for(set<size_t>::iterator ti = (*it).second.begin(); ti != (*it).second.end(); ti++){
-	  cout << *ti << ",";
+      cout << *ti << ",";
     }
     cout << "}" << endl;
   }
-
 
   size_t iter = 0;
   unordered_set<float> merge;
@@ -106,32 +107,8 @@ int main(int argc, char ** argv){
             merges.insert(to_string(parent) + str(",") + to_string(*it));
           }
         }
-	/*
-	// connecting the dots goes here..
-	// need the membership of the base sets being joined..
-        for(it = merge.begin(); it != merge.end(); it++){
-	  for(unordered_set<float>::iterator ti = it; ti != merge.end(); ti ++){
-	    if(*it != *ti){
-	      //draw lines
-	      cout << "connect(" << *it << "," << *ti << ")" << endl;
-  		// check if we've already connected this pair!
-	      
-	      float c1 = *it;
-	      float c2 = *it;
-	      for(set<size_t>::iterator ca = members[c1].begin(); ca != members[c1].end(); ca++){
-	        for(set<size_t>::iterator cb = members[c2].begin(); cb != members[c2].end(); cb++){
-		}
-	      }
-
-	    }
-	  }
-	}
-	*/
-
-	
-	cout << "iter" << iter << " merge: i " << i << " j " << j << merge << endl;
-
-        // write provisinal output this step
+        cout << "iter" << iter << " merge: i " << i << " j " << j << merge << endl;
+        // optional: write provisinal output this step
         if(debug){
           str ofn_i(str("merge_") + to_string(iter) + str(".bin"));
           str hfn_i(str("merge_") + to_string(iter) + str(".hdr"));
@@ -150,7 +127,7 @@ int main(int argc, char ** argv){
       }
     }
   }
-  
+
   for0(i, nrow) for0(j, ncol){
     ij = i * ncol + j;
     d = dat[ij];
@@ -161,7 +138,7 @@ int main(int argc, char ** argv){
   FILE * f = wopen(ofn);
   fwrite(out, sizeof(float), np, f);
   hwrite(hf2, nrow, ncol, 1, 4); /* type 16 = size_t */
-  
+
   free(dat);
   free(out);
   return 0;
