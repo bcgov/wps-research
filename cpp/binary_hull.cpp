@@ -44,14 +44,14 @@ int main(int argc, char ** argv){
   vector<str> lines(split(r, '\n'));
   //cout << "[" << r << "]" << endl;
   str X(lines[lines.size() -1]); // polygon
- trim(X, 'P'); trim(X, 'O');
- trim(X, 'L'); trim(X, 'Y');
- trim(X, 'G'); trim(X, 'O');
- trim(X, 'N'); trim(X, ' ');
- trim(X, ' '); trim(X, '(');
- trim(X, '('); trim(X, ')');
- trim(X, ')'); cout << X<<endl;
- exit(1);
+  trim(X, 'P'); trim(X, 'O');
+  trim(X, 'L'); trim(X, 'Y');
+  trim(X, 'G'); trim(X, 'O');
+  trim(X, 'N'); trim(X, ' ');
+  trim(X, ' '); trim(X, '(');
+  trim(X, '('); trim(X, ')');
+  trim(X, ')'); cout << X<<endl;
+  exit(1);
 
   /*
   int n_pts = atoi(lines[0].c_str()); // cout << lines.size() << endl;
