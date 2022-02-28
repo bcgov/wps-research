@@ -39,12 +39,12 @@ int main(int argc, char ** argv){
   of.close();
 
   // run linux program qhull
-  str r(exec("qhull -i < qhull.dat"));
+  str r(exec("python3 ~/GitHub/bcws-psu-research/py/alpha_shape.py < qhull.dat"));
   strip(r);
   vector<str> lines(split(r, '\n'));
-  cout << "[" << r << "]" << endl;
-
+  //cout << "[" << r << "]" << endl;
   cout << lines << endl;
+  exit(1);
 
   int n_pts = atoi(lines[0].c_str()); // cout << lines.size() << endl;
 
