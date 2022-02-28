@@ -2,9 +2,10 @@
 type-4 32-bit IEEE standard floating-point format, BSQ interleave
 
 i.e., subset a raster.. similar to:
-gdal_translate -srcwin xoff yoff xsize ysize -of ENVI -ot Float32 stack.bin stack_crop.bin
-..doesn't keep header / geo info */
+gdal_translate -srcwin xoff yoff xsize ysize -of ENVI -ot Float32\
+	stack.bin stack_crop.bin
 
+..but doesn't keep header / geo info. Revised 20220227*/
 #include"misc.h"
 
 int main(int argc, char ** argv){
@@ -19,10 +20,10 @@ int main(int argc, char ** argv){
   FILE * f_o = fopen(ofn.c_str(), "wb");
   FILE * f_i = fopen(fn.c_str(), "rb");
   size_t startx, starty, endx, endy;
-  startx = (size_t) atol(argv[2]);
-  starty = (size_t) atol(argv[3]);
-  endx =   (size_t) atol(argv[4]);
-  endy =   (size_t) atol(argv[5]);
+  startx = (size_t)atol(argv[2]);
+  starty = (size_t)atol(argv[3]);
+  endx =   (size_t)atol(argv[4]);
+  endy =   (size_t)atol(argv[5]);
   
   if(startx > endx || starty > endy) err("check subset coordinate params");
   size_t nrow, ncol, nband, np, i, j, k;

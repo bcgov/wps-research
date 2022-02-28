@@ -1,7 +1,6 @@
-/* convert a class map to one-hot encoding */
+/* convert a class map to one-hot encoding. Revised 20220227 */
 #include"misc.h"
 int main(int argc, char ** argv){
-
   if(argc < 2) err("class_onehot [input binary (classification) file name]");
 
   size_t nrow, ncol, nband, np, i, j;
@@ -28,26 +27,21 @@ int main(int argc, char ** argv){
   float d;
   float ci = 1.;
   map<float, float> lookup;
-  map<float, size_t>::iterator it;
-
-  // integral recoding
-  for(it = count.begin(); it != count.end(); it++){
-    lookup[it->first] = ci ++;
-  }
+  map<float, size_t>::iterator it; // integral recoding
+  for(it = count.begin(); it != count.end(); it++) lookup[it->first] = ci ++;
   cout << "lookup:" << lookup << endl;
 
   for(it = count.begin(); it != count.end(); it++){
     float di = it->first;
     ci = lookup[di];
     str num(to_string(ci));
-    num.erase(num.find_last_not_of('0') + 1, std::string::npos); // erase trailing 0s
-    num.erase(num.find_last_not_of('.') + 1, std::string::npos); // erase trailing .s
+    num.erase(num.find_last_not_of('0') + 1, std::string::npos); // trailing 0
+    num.erase(num.find_last_not_of('.') + 1, std::string::npos); // trailing .s
     str fnp(fn + str("_") + num);
     str ofn(fnp + ".bin");
     str ohfn(fnp + ".hdr");
   
     hwrite(ohfn, nrow, ncol, 1); // write header
-
     FILE * f = fopen(ofn.c_str(), "wb");
     for0(i, np){
       d = (dat[i] == di);

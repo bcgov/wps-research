@@ -1,11 +1,9 @@
-/* visualize a class map by going around the colour wheel */
+/* visualize a class map by going around the colour wheel revised 20220227 */
 #include"misc.h"
 #include<vector>
 #include<random>
 int main(int argc, char ** argv){
-
   if(argc < 2) err("class_wheel [input binary file name]");
-
   str fn(argv[1]); // input file name
   cout << "input file name:" << fn << endl;
   str hfn(hdr_fn(fn)); // auto-detect header file name
@@ -16,22 +14,17 @@ int main(int argc, char ** argv){
   np = nrow * ncol;
   float r, g, b, h, s, v;
   if(nband != 1) err("this program defines results for 1-band images");
-  
   float * dat = bread(fn, nrow, ncol, nband); // read floats
   map<float, size_t> count; // accumulate
   for0(i, np){
-    if(count.count(dat[i]) < 1){
-      count[dat[i]] = 0.;
-    }
+    if(count.count(dat[i]) < 1) count[dat[i]] = 0.;
     count[dat[i]] += 1.;
   }
 
   priority_queue<float> pq;
   map<float, size_t>::iterator it;
   map<float, float> code_r, code_g, code_b;
-  for(it = count.begin(); it != count.end(); it++){
-    pq.push(it->first);
-  }
+  for(it = count.begin(); it != count.end(); it++) pq.push(it->first);
 
   // number of codes: count.size()
   long int ci = 0;
@@ -39,18 +32,15 @@ int main(int argc, char ** argv){
     float d = pq.top();
     pq.pop();
 
-    if(d == 0.){
-      code_r[d] = code_g[d] = code_b[d] = 0.;
-    }
+    if(d == 0.) code_r[d] = code_g[d] = code_b[d] = 0.;
     else{
       s = v = 1.;
-      v = 1.; //ci / (float)(count.size() - 1);
+      v = 1.;
       h = 360. * (float)ci;
       h /= (float)(count.size() - 1);
-
       hsv_to_rgb(&r, &g, &b, h, s, v);
-
-      cout << "d=" << d << " ci=" << ci << " h,s,v=" << h <<"," << s << "," << v<< endl;
+      cout << "d=" << d << " ci=" << ci <<
+	      " h,s,v=" << h <<"," << s << "," << v<< endl;
       code_r[d] = r;
       code_g[d] = g;
       code_b[d] = b;
@@ -58,8 +48,7 @@ int main(int argc, char ** argv){
     }
   }
 
-  printf("shuffle..\n");
-  /* add shuffling 20220216 */
+  printf("shuffle..\n"); // add shuffle 20220216
   vector<size_t> shuf;
   for(i = 1; i < count.size(); i++) shuf.push_back(i);
   unsigned seed = 1;
@@ -70,9 +59,7 @@ int main(int argc, char ** argv){
   for(map<float, float>::iterator it = code_r.begin(); it != code_r.end(); it++){
     float d = it->first;
     printf("%f\n", d);
-    if(d == 0.){
-      c_r[d] = c_g[d] = c_b[d] = 0.;
-    }
+    if(d == 0.) c_r[d] = c_g[d] = c_b[d] = 0.;
     else{
       float sv = shuf[(int)d - 1];
       c_r[d] = code_r[sv];
@@ -88,13 +75,16 @@ int main(int argc, char ** argv){
   // write colour encoded output
   FILE * outf = fopen(ofn.c_str(), "wb");
   for0(i, np){
-    r = c_r[dat[i]]; fwrite(&r, sizeof(float), 1, outf);
+    r = c_r[dat[i]];
+    fwrite(&r, sizeof(float), 1, outf);
   }
   for0(i, np){
-    g = c_g[dat[i]]; fwrite(&g, sizeof(float), 1, outf);
+    g = c_g[dat[i]];
+    fwrite(&g, sizeof(float), 1, outf);
   }
   for0(i, np){
-    b = c_b[dat[i]]; fwrite(&b, sizeof(float), 1, outf);
+    b = c_b[dat[i]];
+    fwrite(&b, sizeof(float), 1, outf);
   }
   fclose(outf);
   return 0;
