@@ -30,7 +30,8 @@ alpha = 0.95 * alphashape.optimizealpha(points) # optimal alpha
 print("finding alpha shape..")
 alpha_shape = alphashape.alphashape(points, alpha); # create alpha shape
 print(alpha_shape)
-if False:
+if True:
+    print('+w alpha_shape.png')
     fig, ax = plt.subplots() # plot init
     ax.scatter(*zip(*points)) # plot inputs
     ax.add_patch(PolygonPatch(alpha_shape, alpha=.2)) # plot alpha shape
