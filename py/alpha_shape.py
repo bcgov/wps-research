@@ -12,16 +12,9 @@ for line in fileinput.input():
         X = copy.deepcopy(line)
     ci += 1
 
-# print(" ****** X=", X)
-# print(type(X))
-X = X.strip()
-# print(X)
-X = X.split()
-# print(X)
+X = X.strip().split()
 N = int(X[1])
-# print(N)
 X = X[2:]
-# print(X)
 
 if len(X) != 2*N:
     err("bad data count")
