@@ -5,5 +5,5 @@ from misc import run
 
 run('mkdir -p L1C')
 run('mkdir -p L2A')
-run('mv -v *L1C* L1C')
-run('mv -v *L2A* L2A')
+run('mv -v *L1C* L1C', False)
+run('mv -v *L2A* L2A', False)
