@@ -32,6 +32,7 @@
 #include<stack>
 #include<unordered_set>
 #include<unordered_map>
+#include<stdexcept>
 
 using namespace std;
 
@@ -51,6 +52,8 @@ inline char sep(){
 #include <unistd.h>
 #define _cwd getcwd
 #endif
+
+std::string exec(const char* cmd);
 
 void rewind(ifstream &a);
 
