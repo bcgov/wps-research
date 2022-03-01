@@ -5,6 +5,10 @@ import fileinput
 import alphashape
 import matplotlib.pyplot as plt
 from descartes import PolygonPatch
+from misc import args, err
+
+if len(args) < 2:
+    err('python3 alphashape.py # please check ../cpp/binary_hull.cpp for parameters')
 
 ci = 0
 X = None
@@ -27,7 +31,7 @@ for i in range(N):
     ci += 2
 
 print("optimizing alpha..")
-alpha = 0.95 * alphashape.optimizealpha(points) # optimal alpha
+alpha = .05 # 0.95 * alphashape.optimizealpha(points) # optimal alpha
 print("finding alpha shape..")
 alpha_shape = alphashape.alphashape(points, alpha); # create alpha shape
 print(alpha_shape)
@@ -37,6 +41,9 @@ if True:
     ax.scatter(*zip(*points)) # plot inputs
     ax.add_patch(PolygonPatch(alpha_shape, alpha=.2)) # plot alpha shape
     plt.savefig("alpha_shape.png")
-''' don't forget to revisit:
-(2007) Concave hull: A k-nearest neighbours approach for
-the computation of the region occupied by a set of points.'''
+''' remember to look at:
+
+[1] (2007) Concave hull: A k-nearest neighbours approach for
+the computation of the region occupied by a set of points.
+    [2] "On the shape of a set of points in the plane" Herbert Edelsbrunner, et al" 
+'''
