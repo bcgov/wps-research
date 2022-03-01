@@ -17,8 +17,8 @@ size_t float_max(){
 }
 
 int flood(long int i, long int j, int depth){
-  printf("flood(%ld, %ld, %d) label=%ld d=%f depth=%d\n",
-    	 i, j, depth, i_next, dat[i * ncol + j], depth);
+  /* printf("flood(%ld, %ld, %d) label=%ld d=%f depth=%d\n",
+    	 i, j, depth, i_next, dat[i * ncol + j], depth); */
 
   if(i < 0 || j < 0 || i >= nrow || j >=ncol ) return 0;
   long int ij = i * ncol + j;
@@ -43,7 +43,7 @@ int flood(long int i, long int j, int depth){
 
         ik = ii * ncol + jj;
         if(!visited[ik] && dat[ik] == 1.){
-          printf(" call(%ld, %ld) di %ld dj %ld\n", ii,jj, di, dj);
+          // printf(" call(%ld, %ld) di %ld dj %ld\n", ii,jj, di, dj);
           ret += flood(ii, jj, depth+1);
         }
       }
@@ -123,7 +123,7 @@ int main(int argc, char ** argv){
         out_i[i] = (out_f[i] == (float)k)?1.: 0.;
         this_band += out_i[i];
       }
-      printf("this band %f\n", this_band);
+      //printf("this band %f\n", this_band);
       fwrite(out_i, np, sizeof(float), g);
     }
   }
