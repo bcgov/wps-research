@@ -16,10 +16,10 @@ pd = sep.join(__file__.split(sep)[:-1]) + sep  # python directory i.e. path to h
 def err(c):
     print('Error:', c); sys.exit(1)
 
-def run(c):
+def run(c, quit_on_nonzero=True):
     print('run("' + str(c) + '")')
     a = os.system(c)
-    if a != 0:
+    if a != 0 and quit_on_nonzero:
         err("command failed to run:\n\t" + c)
     return a
 
