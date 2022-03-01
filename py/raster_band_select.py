@@ -25,15 +25,13 @@ if not exists(fn + '_001.hdr'):
     run(cd + 'unstack.exe ' + fn)
 
 for i in bi:
-    f = fn + '_' + str(i).zfill(3) + '.bin'
+    f = fn + '_' + str(i + 1).zfill(3) + '.bin'
     print(f)
-fni = [fn + '_' + str(i).zfill(3) + '.bin' for i in bi]
+fni = [fn + '_' + str(i + 1).zfill(3) + '.bin' for i in bi]
 bands = str(len(bi))  # number of bands to write
 ofn = fn + '_' + s + '.bin'
 ohn = fn + '_' + s + '.hdr'
-
-if not exists(ohn):
-    run('cp ' + hfn + ' ' + ohn)
+run('cp ' + hfn + ' ' + ohn)
 
 c = ['python3',
      pd + 'envi_header_modify.py',
