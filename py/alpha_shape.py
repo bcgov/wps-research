@@ -1,7 +1,6 @@
 '''20220227 this program calculates a concave-hull for a set
 of points in 2d'''
 import copy
-import sha3
 import pickle
 import fileinput
 import alphashape
@@ -9,11 +8,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from descartes import PolygonPatch
 from misc import args, err
+pfn = 'alpha_shape.pkl'
 
-# generate unique filename to store params in
-k = sha3.keccak_512()
-k.update(b"data")
-pfn = '.' + k.hexdigest() + '.pkl'
 '''
 if len(args) < 2:
     err('python3 alphashape.py ' +
