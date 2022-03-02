@@ -24,7 +24,7 @@ int main(int argc, char ** argv){
   float * out = falloc(nf); // out buffer
   float * dat1 = bread(fn, nrow, ncol, nband);
   float * dat2 = bread(fn2, nrow, ncol, nband);
-  for0(i, nf) out[ik] = dat1[ik] * dat2[ik];
+  for0(i, nf) out[i] = dat1[i] * dat2[i];
   bwrite(out, ofn, nrow, ncol, nband);
   hwrite(ohn, nrow, ncol, nband);
   return 0;
