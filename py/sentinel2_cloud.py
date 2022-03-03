@@ -22,7 +22,7 @@ CLD = CLD[0]
 d += sep
 
 out_20m = d + 'cloud_20m.bin'
-if not exists(out_20):
+if not exists(out_20m):
     run(' '.join(['gdal_translate',
                   '-of ENVI',
                   '-ot Float32', 
@@ -30,12 +30,16 @@ if not exists(out_20):
                   out_20m]))
 
 out_file = d + 'cloud.bin'
+f10m = os.popen('find ' + d + ' -name "SENTINEL2_L2A_EPSG*_10m.bin"').read().strip()
+if len(f10m.split('\n')) > 1:
+    err('multiple files found when one expected:' + str(f10m))
+f10m = os.path.abspath(f10m)
 
 if not exists(out_file):
     run(' '.join(['python3',
                    project,
                    out_20m,
-                   d + 'SENTINEL2_L2A_EPSG_32610_10m.bin',
+                   f10m, # d + 'SENTINEL2_L2A_EPSG_32610_10m.bin',
                    out_file]))
 
 ''' From https://sentinels.copernicus.eu/web/sentinel/technical-guides/sentinel-2-msi/level-2a/algorithm
@@ -76,5 +80,5 @@ if not exists(out_file):
     run(' '.join(['python3',
                    project,
                    out_20m,
-                   d + 'SENTINEL2_L2A_EPSG_32610_10m.bin',
+                   f10m, #d + 'SENTINEL2_L2A_EPSG_32610_10m.bin',
                    out_file]))
