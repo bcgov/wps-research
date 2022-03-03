@@ -8,7 +8,7 @@ int main(int argc, char ** argv){
 
   if(argc < 4){
     printf("From a raster, produce a mask that shows where the inequality is true:");
-    err("raster_mask.exe [input binary file] [mode: GT, LT, GEQ, LEQ] [threshold value]");
+    err("raster_mask.exe [input binary file] [mode: GT, LT, GEQ, LEQ, EQ, NEQ] [threshold value]");
   }
 
   str fn(argv[1]); // input file name
@@ -22,6 +22,8 @@ int main(int argc, char ** argv){
   modes.insert(str("LT"));
   modes.insert(str("GEQ"));
   modes.insert(str("LEQ"));
+  modes.insert(str("EQ"));
+  modes.insert(str("NEQ"));
   if(modes.count(mode) < 1) err("mode string not found");
 
   float d;
@@ -33,6 +35,8 @@ int main(int argc, char ** argv){
   if(mode == str("LT")) for0(i, np) out[i] = (float)(dat[i] < thres);
   if(mode == str("GEQ")) for0(i, np) out[i] = (float)(dat[i] >= thres);
   if(mode == str("LEQ")) for0(i, np) out[i] = (float)(dat[i] <= thres);
+  if(mode == str("EQ")) for0(i, np) out[i] = (float)(dat[i] == thres);
+  if(mode == str("NEQ")) for0(i, np) out[i] = (float)(dat[i] != thres);
 
   str ofn(fn + str("_thres.bin")); // write output file
   str ohfn(fn + str("_thres.hdr"));
