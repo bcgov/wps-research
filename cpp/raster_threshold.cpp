@@ -30,13 +30,14 @@ int main(int argc, char ** argv){
   float thres = atof(argv[3]);
   float * dat = bread(fn, nrow, ncol, nband); // load floats to array
   float * out = falloc(np * nband * sizeof(float));
+  cout << "Operation: data " << mode << " " << thres << endl;
 
-  if(mode == str("GT")) for0(i, np) out[i] = (float)(dat[i] > thres);
-  if(mode == str("LT")) for0(i, np) out[i] = (float)(dat[i] < thres);
+  if(mode == str("GT"))  for0(i, np) out[i] = (float)(dat[i]  > thres);
+  if(mode == str("LT"))  for0(i, np) out[i] = (float)(dat[i]  < thres);
   if(mode == str("GEQ")) for0(i, np) out[i] = (float)(dat[i] >= thres);
   if(mode == str("LEQ")) for0(i, np) out[i] = (float)(dat[i] <= thres);
-  if(mode == str("EQ")) for0(i, np) out[i] = (float)(dat[i] == thres);
-  if(mode == str("NEQ")) for0(i, np) out[i] = (float)(dat[i] != thres);
+  if(mode == str("EQ")) for0(i, np) out[i] =  (float)(dat[i] == thres);
+  if(mode == str("NEQ")) for0(i, np) out[i] = (float)(dat[i] != thres); 
 
   str ofn(fn + str("_thres.bin")); // write output file
   str ohfn(fn + str("_thres.hdr"));
