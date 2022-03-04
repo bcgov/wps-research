@@ -48,12 +48,16 @@ for i in range(n_coords):
     # lon, lat = myProj(df['Meters East'].values, df['Meters South'].values, inverse=True)
 
 import simplekml
+pts2 = [(p[1], p[0]) for p in pts]
 kml = simplekml.Kml()
-pol = kml.newpolygon(name="fire",
-                     outerboundaryis=pts,
-                     innerboundaryis=pts)
-pol.style.polystyle.color = '990000ff' # transparent red
-pol.style.polystyle.outline = 0
+pol = kml.newpolygon(name="fire")
+pol.outerboundaryis.coords = pts2
+
+for p in pts:
+    print("point", p)
+    pp = kml.newpoint(name='Point: {0}{0}'.format(p[1], p[0])) # lon,lat))
+    pp.coords = [(p[1],p[0])]
+    pp.style=simplekml.Style()
 kml.save('poly.kml')
 
 '''Note that the pixel/line coordinates in the above are from (0.0,0.0) at the top left corner of the top left pixel to (width_in_pixels,height_in_pixels) at the bottom right corner of the bottom right pixel. The pixel/line location of the center of the top left pixel would therefore be (0.5,0.5).'''
