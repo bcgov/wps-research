@@ -1,4 +1,5 @@
 '''demo method to map an effective fire boundary'''
+POINT_THRES = 50 # don't get hulls for shapes with less than 50 points
 import os
 import sys
 from misc import err, run, pd, sep, exists, args
@@ -12,11 +13,16 @@ if not exists(fn):
     err('please check input file')
     
 for i in [50]: # [10, 20, 60]: # 90 
-    run(cd + 'flood.exe ' + fn)
-    run(cd + 'class_link.exe ' + fn + '_flood4.bin  ' + str(i)) # 40')
-    run(cd + 'class_recode.exe ' + fn + '_flood4.bin_link.bin 1')
-    run(cd + 'class_wheel.exe ' + fn + '_flood4.bin_link.bin_recode.bin')
-    run('python3 ' + pd + 'raster_plot.py ' + fn + '_flood4.bin_link.bin_recode.bin_wheel.bin  1 2 3 1 1')
+    if not exists(fn + '_flood4.bin'):
+        run(cd + 'flood.exe ' + fn)
+    if not exists(fn + '_flood4.bin_link.bin'):
+        run(cd + 'class_link.exe ' + fn + '_flood4.bin  ' + str(i)) # 40')
+    if not exists(fn + '_flood4.bin_link.bin_recode.bin'):
+        run(cd + 'class_recode.exe ' + fn + '_flood4.bin_link.bin 1')
+    if not exists(fn + '_flood4.bin_link.bin_recode.bin_wheel.bin'):
+        run(cd + 'class_wheel.exe ' + fn + '_flood4.bin_link.bin_recode.bin')
+        run('python3 ' + pd + 'raster_plot.py ' + fn + '_flood4.bin_link.bin_recode.bin_wheel.bin  1 2 3 1 1')
+    print('class onehot..')
     lines = os.popen(cd + 'class_onehot.exe ' + fn + '_flood4.bin_link.bin_recode.bin').readlines()
 
     for line in lines:
@@ -35,13 +41,24 @@ for i in [50]: # [10, 20, 60]: # 90
                     continue
                 N = int(f.split('.')[-2].split('_')[-1])
                 print(N)
-
+                c = ''.join(os.popen(cd + 'class_count.exe ' + f).read().split())
+                c = c.strip('{').strip('}').split(',')
+                if len(c) != 2:
+                    err('expected tuple of len 2')
+                print("c", c)
+                n_px = int(c[1].split(':')[1])
+                if n_px < POINT_THRES:
+                    print('********* SKIP this class,', n_px, ' below threshold: ', POINT_THRES) 
+                    continue
                 lines = os.popen(cd + 'binary_hull.exe ' + f).readlines()
                 for line in lines:
                     print(line.strip())
 
                 run('python3 ' + pd + 'raster_plot.py ' + f + ' 1 1 1 1 1')
                 run('mv alpha_shape.png alpha_shape_' + str(N) + '.png')
+                run('mv alpha_shape.pkl alpha_shape_' + str(N) + '.pkl')
+
+                # print out the coords here and pass to KML generator! 
             except:
                 pass
     # run('mv test.bin_flood4.bin_link.bin_recode.bin_wheel.bin_1_2_3_rgb.png test' + str(i) + '.png')

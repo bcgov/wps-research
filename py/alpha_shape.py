@@ -7,7 +7,7 @@ import alphashape
 import numpy as np
 import matplotlib.pyplot as plt
 from descartes import PolygonPatch
-from misc import args, err
+from misc import args, err, run, pd
 pfn = 'alpha_shape.pkl'
 
 '''
@@ -32,7 +32,8 @@ X = [float(x) for x in X]
 
 ci, points = 0, []
 for i in range(N):
-    points.append((X[ci + 1], -X[ci]))
+    #points.append((X[ci + 1], -X[ci]))
+    points.append((X[ci], X[ci+1]))
     ci += 2
 
 points = np.array(points)
@@ -42,10 +43,13 @@ alpha = 1. / 50. # 0.95 * alphashape.optimizealpha(points) # optimal alpha
 patch_alpha = .2
 print("finding alpha shape..")
 alpha_shape = alphashape.alphashape(points, alpha); # create alpha shape
-print(alpha_shape)
+print("alpha_shape", alpha_shape)
 print('+w', pfn) # write stuff to pickle file
 pickle.dump([X_bak, points, alpha, alpha_shape, patch_alpha], open(pfn, 'wb'))
 
+alpha_pts = str(alpha_shape).strip('P').strip('O').strip('L').strip('Y').strip('G').strip('O').strip('N').strip().strip('(').strip('(').strip(')').strip(')').replace(',', '')
+print('+w alpha_points.txt')
+open('alpha_points.txt', 'wb').write(alpha_pts.encode())
 if True:
     print('+w alpha_shape.png')
     fig, ax = plt.subplots() # plot init

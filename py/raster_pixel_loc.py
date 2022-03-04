@@ -19,10 +19,8 @@ img = args[1]
 if not img: err('pls check input file')
 src = gdal.Open(img)
 GT = src.GetGeoTransform()
-print('GeoTransform', GT)
 n_coords = int((len(args) - 2) / 2)  # number of coordinate pairs provided
-print('X_pixel,X_line,X_geo,Y_geo,lat,lon')
-
+print('X_pixel,Y_line,X_geo,Y_geo,Lat,Lon')
 from pyproj import Proj
 d = os.popen('gdalsrsinfo -o proj4 ' + img).read().strip()
 print(d)
@@ -52,38 +50,15 @@ pts2 = [(p[1], p[0]) for p in pts]
 kml = simplekml.Kml()
 pol = kml.newpolygon(name="fire")
 pol.outerboundaryis.coords = pts2
+pol.polystyle.color = '990000ff'  # Red
 
+
+'''
+# alternately, for adding points to the kmz
 for p in pts:
     print("point", p)
     pp = kml.newpoint(name='Point: {0}{0}'.format(p[1], p[0])) # lon,lat))
     pp.coords = [(p[1],p[0])]
     pp.style=simplekml.Style()
+'''
 kml.save('poly.kml')
-
-'''Note that the pixel/line coordinates in the above are from (0.0,0.0) at the top left corner of the top left pixel to (width_in_pixels,height_in_pixels) at the bottom right corner of the bottom right pixel. The pixel/line location of the center of the top left pixel would therefore be (0.5,0.5).'''
-
-
-'''
-if True:
-    if True:
-        if True:
-            cmd = ["gdallocationinfo",
-                   img, # input image
-                   str(pix_j), # default: pixl number (0-indexed) aka row
-                   str(lin_j)] # default: line number (0-indexed) aka col
-            cmd = ' '.join(cmd)
-            print("  \t" + cmd)
-            lines = [x.strip() for x in os.popen(cmd).readlines()]
-
-            for line in lines:
-                print('\t' + line)
-            if len(lines) != 2 * (1 + nb):
-                err("unexpected result line count")
-
-            w = lines[1].split()
-            if w[0] != "Location:":
-                err("unexpected field")
-            pix_k, lin_k = w[1].strip('(').strip(')').split(',')
-            if pix_k[-1] != 'P' or lin_k[-1] != 'L':
-                err('unexpected data')
-'''
