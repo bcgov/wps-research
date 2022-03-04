@@ -18,7 +18,7 @@ size_t float_max(){
 
 int flood(long int i, long int j, int depth){
   /* printf("flood(%ld, %ld, %d) label=%ld d=%f depth=%d\n",
-    	 i, j, depth, i_next, dat[i * ncol + j], depth); */
+  i, j, depth, i_next, dat[i * ncol + j], depth); */
 
   if(i < 0 || j < 0 || i >= nrow || j >=ncol ) return 0;
   long int ij = i * ncol + j;
@@ -53,7 +53,8 @@ int flood(long int i, long int j, int depth){
 }
 
 int main(int argc, char ** argv){
-  if(argc < 2) err("flood.exe [input file name] # raster flood fill on mask");
+  if(argc < 2) err("flood.exe [input file name] [optional parameter: write one-hot encoding (huge file)]# raster flood fill on mask");
+  int create_onehot = argc > 3;
   FLT_MX = float_max();
   size_t np, k, n;
   long int i, j, ij;
@@ -108,25 +109,27 @@ int main(int argc, char ** argv){
   free(dat);
   free(out);
 
-  // write a multi-band one hot encoded output
-  str ofn2(fn + "_flood_onehot.bin");
-  str ohfn5(fn + "_flood_onehot.hdr");
+  if(create_onehot){
+    // write a multi-band one hot encoded output
+    str ofn2(fn + "_flood_onehot.bin");
+    str ohfn5(fn + "_flood_onehot.hdr");
 
-  size_t n_bands = 0;
-  FILE * g = wopen(ofn2);
-  float * out_i = falloc(np);
-  for0(k, i_next){
-    if(k > 0){
-      n_bands ++;
-      float this_band = 0.;
-      for0(i, np){
-        out_i[i] = (out_f[i] == (float)k)?1.: 0.;
-        this_band += out_i[i];
+    size_t n_bands = 0;
+    FILE * g = wopen(ofn2);
+    float * out_i = falloc(np);
+    for0(k, i_next){
+      if(k > 0){
+        n_bands ++;
+        float this_band = 0.;
+        for0(i, np){
+          out_i[i] = (out_f[i] == (float)k)?1.: 0.;
+          this_band += out_i[i];
+        }
+        //printf("this band %f\n", this_band);
+        fwrite(out_i, np, sizeof(float), g);
       }
-      //printf("this band %f\n", this_band);
-      fwrite(out_i, np, sizeof(float), g);
     }
+    hwrite(ohfn5, nrow, ncol, n_bands, 4);
   }
-  hwrite(ohfn5, nrow, ncol, n_bands, 4);
   return 0;
 }
