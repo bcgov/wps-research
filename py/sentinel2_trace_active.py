@@ -59,11 +59,15 @@ for i in [50]: # [10, 20, 60]: # 90
                 if n_px < POINT_THRES:
                     print('********* SKIP this class,', n_px, ' below threshold: ', POINT_THRES) 
                     continue
-                lines = os.popen(cd + 'binary_hull.exe ' + f).readlines()
+
+                if not exists('alpha_shape_' + str(N) + '.pkl'):
+                    lines = os.popen(cd + 'binary_hull.exe ' + f).readlines()
                 for line in lines:
                     print(line.strip())
-
-                run('python3 ' + pd + 'raster_plot.py ' + f + ' 1 1 1 1 1')
+                print("png_f", png_f)
+                png_f = f + '_1_1_1_rgb.png'
+                if not exists(png_f):
+                    run('python3 ' + pd + 'raster_plot.py ' + f + ' 1 1 1 1 1')
                 run('mv alpha_shape.png alpha_shape_' + str(N) + '.png')
                 run('mv alpha_shape.pkl alpha_shape_' + str(N) + '.pkl')
 
