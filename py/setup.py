@@ -2,8 +2,9 @@ from misc import *
 
 # setup for python stuff
 run('sudo apt install python3-pip python3-setuptools')
+run('sudo apt install python3-gdal libgdal-dev gdal-bin python3-rasterio rasterio')
 run('sudo apt update && sudo apt upgrade')
-run('python3 -m pip install numpy scikit-learn matplotlib alphashape descartes')
+run('python3 -m pip install numpy scikit-learn matplotlib alphashape descartes utm pyproj')
 
 cpp = os.popen("find ../cpp/*.cpp").readlines()
 for c in cpp:
