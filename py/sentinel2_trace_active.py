@@ -23,7 +23,16 @@ for i in [50]: # [10, 20, 60]: # 90
         run(cd + 'class_wheel.exe ' + fn + '_flood4.bin_link.bin_recode.bin')
         run('python3 ' + pd + 'raster_plot.py ' + fn + '_flood4.bin_link.bin_recode.bin_wheel.bin  1 2 3 1 1')
     print('class onehot..')
-    lines = os.popen(cd + 'class_onehot.exe ' + fn + '_flood4.bin_link.bin_recode.bin').readlines()
+    cmd = cd + 'class_onehot.exe ' + fn + '_flood4.bin_link.bin_recode.bin ' + str(POINT_THRES)
+    print(cmd)
+    lines = None
+    if not exists('class_onehot.dat'):
+        lines = os.popen(cmd).read()
+        open('class_onehot.dat', 'wb').write(lines.encode())
+    else:
+        lines = open('class_onehot.dat').read()
+
+    lines = lines.split('\n')
 
     for line in lines:
         print(line)
