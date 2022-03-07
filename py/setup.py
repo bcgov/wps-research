@@ -1,10 +1,16 @@
 from misc import *
 
 # setup for python stuff
+if not exists('../bin'):
+    run('mkdir -p ../bin')
+
 run('sudo apt install python3-pip python3-setuptools')
-run('sudo apt install python3-gdal libgdal-dev gdal-bin python3-rasterio rasterio')
+run('sudo apt install python3-gdal libgdal-dev gdal-bin python3-rasterio rasterio simplekml')
 run('sudo apt update && sudo apt upgrade')
 run('python3 -m pip install numpy scikit-learn matplotlib alphashape descartes utm pyproj')
+
+if not exists('../deb'):
+    run('mkdir -p ../deb')
 
 cpp = os.popen("find ../cpp/*.cpp").readlines()
 for c in cpp:
