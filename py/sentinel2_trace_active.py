@@ -6,7 +6,12 @@ from misc import err, run, pd, sep, exists, args
 cd = pd + '..' + sep + 'cpp' + sep
 
 if len(args) < 2:
-    err('sentinel2_trace_active.py [input file, binary mask envi type 4]')
+    err('sentinel2_trace_active.py [input file, binary mask envi type 4] [optional arg: class index]')
+
+class_select = None 
+if len(args) > 2:
+    class_select = int(args[2])
+print(class_select)
 
 fn = args[1]
 if not exists(fn):
@@ -50,6 +55,10 @@ for i in [50]: # [10, 20, 60]: # 90
                     continue
                 N = int(f.split('.')[-2].split('_')[-1])
                 print(N)
+                if class_select is not None:
+                    if N != class_select:
+                        continue
+
                 c = ''.join(os.popen(cd + 'class_count.exe ' + f).read().split())
                 c = c.strip('{').strip('}').split(',')
                 if len(c) != 2:
@@ -62,6 +71,9 @@ for i in [50]: # [10, 20, 60]: # 90
 
                 if not exists('alpha_shape_' + str(N) + '.pkl'):
                     lines = os.popen(cd + 'binary_hull.exe ' + f).readlines()
+                    run('mv alpha_shape.png alpha_shape_' + str(N) + '.png')
+                    run('mv alpha_shape.pkl alpha_shape_' + str(N) + '.pkl')
+                    run('mv alpha_points.txt alpha_points_' + str(N) + '.txt')
                 for line in lines:
                     print(line.strip())
                 print("png_f", png_f)
