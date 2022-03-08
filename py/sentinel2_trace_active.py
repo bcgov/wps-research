@@ -17,7 +17,7 @@ fn = args[1]
 if not exists(fn):
     err('please check input file')
     
-for i in [50]: # [10, 20, 60]: # 90 
+for i in [70]: # [10, 20, 60]: # 90 
     if not exists(fn + '_flood4.bin'):
         run(cd + 'flood.exe ' + fn)
     if not exists(fn + '_flood4.bin_link.bin'):
