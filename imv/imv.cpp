@@ -328,8 +328,13 @@ int main(int argc, char ** argv){
   }
 
   if(nb == 66){
-    myZpr2->setrgb(36, 48, 57);
+    myZpr2->setrgb(36, 48, 57); // for PRISMA
   }
+  if(nb == 173){
+    myZpr2->setrgb(43, 108, 171); // for PRISMA
+  }
+  
+
 
   myImage->rebuffer();
   myImage2->rebuffer();
