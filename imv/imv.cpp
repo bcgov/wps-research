@@ -154,6 +154,9 @@ int main(int argc, char ** argv){
 	  scalef = 1.; // account for "small image" case. 1-1 if can fit on screen!
   }
 
+  if(nr < height && nc < width) scalef /= 2.;
+ 
+
   SUB_START_I = SUB_START_J = 0;
   SUB_SCALE_F = scalef;
   IMG_NR = nr; IMG_NC = nc; IMG_NB = nb;
@@ -331,7 +334,7 @@ int main(int argc, char ** argv){
     myZpr2->setrgb(36, 48, 57); // for PRISMA
   }
   if(nb == 173){
-    myZpr2->setrgb(43, 108, 171); // for PRISMA
+    myZpr2->setrgb(43-1, 108-1, 171-1); // for PRISMA
   }
   
 
