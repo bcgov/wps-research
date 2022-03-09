@@ -124,7 +124,7 @@ if __name__ == '__main__':
         rgb_i[rgb_i > 1.] = 1.
         return rgb_i
     
-    use_par = False
+    use_par = True # False
     if use_par:
         rgb_i = parfor(scale_rgb, range(3), 3)
     else:
