@@ -273,6 +273,7 @@ size_t hread(str hfn, size_t & nrow, size_t & ncol, size_t & nband, vector<strin
 
 void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband);
 void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband, size_t data_type);
+void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband, size_t data_type, vector<string> & bandNames);
 
 float * falloc(size_t nf);
 double * dalloc(size_t nd);
