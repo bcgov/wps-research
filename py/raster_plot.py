@@ -93,7 +93,8 @@ if __name__ == '__main__':
                         for x in open(rfn).read().strip().split(',')]
     
         else:
-            rgb_min, rgb_max = np.min(rgb_i), np.max(rgb_i)
+            rgb_min, rgb_max = np.nanmin(rgb_i), np.nanmax(rgb_i)
+        print("min, max", rgb_min, rgb_max)
 
         rng = rgb_max - rgb_min  # apply restored or derived scaling
         rgb_i = (rgb_i - rgb_min) / (rng if rng != 0. else 1.)
@@ -129,7 +130,7 @@ if __name__ == '__main__':
             x_label += '(R,G,B) = (' + (','.join(bn)) + ')'
         plt.title(title_s, fontsize=11)
         plt.style.use('dark_background')
-    
+        
         d_min, d_max = np.nanmin(rgb), np.nanmax(rgb)
         print("d_min", d_min, "d_max", d_max)
         # rgb = rgb / (d_max - d_min)
