@@ -11,7 +11,7 @@ int main(int argc, char ** argv){
   }
   cout << "wavelengths (nm) to interpolate at:" << interp << endl;
   str fn(argv[1]); /* binary files */
-  str ofn(fn + "_active.bin");
+  str ofn(fn + "_spectral_interp.bin");
   str hfn(hdr_fn(fn)); /* headers */
   str hf2(hdr_fn(ofn, true));
 
@@ -22,9 +22,10 @@ int main(int argc, char ** argv){
 
   map<float, int> lower_i;
   map<float, int> upper_i;
+  set<float>::iterator it;
   map<float, float> lower_last;
   map<float, float> upper_last;
-  set<float>::iterator it;
+
   for0(i, n){
     vector<string> w;
     w = split(s[i], ' ');
@@ -62,30 +63,32 @@ int main(int argc, char ** argv){
       }
     }
   }
-  cout << i << endl;
+  /* cout << i << endl;
   cout << lower_i << endl;
   cout << lower_last << endl;
   cout << upper_i << endl;
   cout << upper_last << endl;
+  */
 
-  for(it = interp.begin(); it != interp.end(); it++){
-  	cout << *it << ": " << endl;
-  }
-  /*
   float * out = falloc(np);
   float * dat = bread(fn, nrow, ncol, nband);
+  FILE * f = wopen(ofn);
+  vector<str> band_names;
+  for(it = interp.begin(); it != interp.end(); it++){
+    float y = *it;
+    cout << y << ": f(" << lower_last[y] << ") + (" << y << " - " << lower_last[y] << ") * (f(" << upper_last[y] << ") - f(" << lower_last[y] << ") / (" << upper_last[y] << " - " << lower_last[y] << "))" << endl;
 
-  float * b1, *b2, *b3;
-  b1 = &dat[bi[0]]; b2 = &dat[bi[1]]; b3 = &dat[bi[2]];
-  for0(i, np) out[i] = (float)(b2[i] - b1[i]) > 175.;
-  cout << "second" << endl;
-  for0(i, np){
-    out[i] *= (float)(b3[i] > b2[i]);
+    cout << "\t=" << " f(" << lower_last[y] << ") + " << (y - lower_last[y]) << " * (f(" << upper_last[y] << ") - f(" << lower_last[y] << ") / " << (upper_last[y] - lower_last[y]) << ")" << endl;
+    float * dx = &dat[np * lower_i[y]];
+    float * dz = &dat[np * upper_i[y]];
+    for0(i, np){
+      out[i] = dx[i] + (y - lower_last[y]) * (dz[i] - dx[i]) / (upper_last[y] - lower_last[y]);
+    }
+    size_t nw = fwrite(out, np, sizeof(float), f);
+    band_names.push_back(str("Interpolated value at: ") + std::to_string((int)y) + str("nm"));
   }
-  bwrite(out, ofn, nrow, ncol, 1);
-  hwrite(hf2, nrow, ncol, 1);
+  hwrite(hf2, nrow, ncol, interp.size(), 4, band_names);
   free(dat);
   free(out);
-  */
   return 0;
 }

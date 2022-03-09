@@ -271,6 +271,7 @@ void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband){
   hf.close();
 }
 
+// need to clean these up:
 void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband, size_t data_type){
   cout << "hwrite" << endl;
   cout << "+w " << hfn << " nrow " << nrow << " ncol " << ncol << " nband " << nband << endl;
@@ -289,6 +290,30 @@ void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband, size_t data_type){
     size_t i;
   for0(i, nband - 1){
     hf << ",\n" << "band " << i + 2;
+  }
+  hf << "}" << endl;
+  hf.close();
+}
+
+void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband, size_t data_type, vector<string> & bandNames){
+  cout << "hwrite" << endl;
+  cout << "+w " << hfn << " nrow " << nrow << " ncol " << ncol << " nband " << nband << endl;
+  ofstream hf(hfn);
+  if(!hf.is_open()) err("failed to open header file for writing");
+  hf << "ENVI" << endl;
+  hf << "samples = " << ncol << endl;
+  hf << "lines = " << nrow << endl;
+  hf << "bands = " << nband << endl;
+  hf << "header offset = 0" << endl;
+  hf << "file type = ENVI Standard" << endl;
+  hf << "data type = " << data_type << endl;
+  hf << "interleave = bsq" << endl;
+  hf << "byte order = 0" << endl;
+  hf << "band names = {";
+  hf << bandNames[0];
+    size_t i;
+  for0(i, nband - 1){
+    hf << ",\n" << bandNames[i + 1];
   }
   hf << "}" << endl;
   hf.close();
