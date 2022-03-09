@@ -1,7 +1,7 @@
 '''Script for reading ASI PRISMA L2D data (.he5) to ENVI .bin file.
 Tested on 20210729 date. VNIR best match: r,g,b=37,49,58
         
-    * write ENVI headers with map info'''
+    * write ENVI headers with map info. 20210307'''
 import os
 import sys
 import h5py
