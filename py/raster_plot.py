@@ -12,6 +12,30 @@ from misc import *
 import matplotlib
 args = sys.argv
 
+def naninf_list(x):
+    Y = []
+    X = list(x.ravel().tolist())
+    for i in X:
+        if not (math.isnan(i) or math.isinf(i)):
+            Y.append(i)
+    return Y
+
+def nanmin(x):
+    Y = naninf_list(x)
+    xm = Y[0]
+    for i in Y:
+        if i < xm:
+            xm = i;
+    return xm
+
+def nanmax(x):
+    Y = naninf_list(x)
+    xm = Y[0]
+    for i in Y:
+        if i > xm:
+            xm = i;
+    return xm
+
 if __name__ == '__main__':
 
     # instructions to run
@@ -71,40 +95,40 @@ if __name__ == '__main__':
         if use_trim: # if not override_scaling
             if not exists(rfn):
                 values = rgb_i  # now do the so called x-% linear stretch (separate bands version)
-                values = values.reshape(np.prod(values.shape)).tolist()
+                values = naninf_list(values) # values.reshape(np.prod(values.shape)).tolist()
                 values.sort()
     
                 if values[-1] < values[0]:   # sanity check
                     err("failed to sort")
     
-                for j in range(0, npx - 1):
+                for j in range(0, len(values) -1): #npx - 1):
                     if values[j] > values[j + 1]:
                         err("failed to sort")
     
-                n_pct = 2. # percent for stretch value
+                n_pct = 1. # percent for stretch value
                 frac = n_pct / 100.
-                rgb_min, rgb_max = values[int(math.floor(float(npx)*frac))],\
-                               values[int(math.floor(float(npx)*(1. - frac)))]
+                rgb_min, rgb_max = values[int(math.floor(float(len(values))*frac))],\
+                               values[int(math.floor(float(len(values))*(1. - frac)))]
                 print('+w', rfn)
                 open(rfn, 'wb').write((','.join([str(x) for x in [rgb_min, rgb_max]])).encode())
                 # DONT FORGET TO WRITE THE FILE HERE
             else:  # assume we can restore
                 rgb_min, rgb_max = [float(x) \
                         for x in open(rfn).read().strip().split(',')]
-    
         else:
-            rgb_min, rgb_max = np.nanmin(rgb_i), np.nanmax(rgb_i)
-        print("min, max", rgb_min, rgb_max)
-
+            rgb_min, rgb_max = nanmin(rgb_i), nanmax(rgb_i)
+        print("i, min, max", i, rgb_min, rgb_max)
         rng = rgb_max - rgb_min  # apply restored or derived scaling
         rgb_i = (rgb_i - rgb_min) / (rng if rng != 0. else 1.)
-    
         rgb_i[rgb_i < 0.] = 0.  # clip
         rgb_i[rgb_i > 1.] = 1.
-
         return rgb_i
     
-    rgb_i = parfor(scale_rgb, range(3), 3)
+    use_par = False
+    if use_par:
+        rgb_i = parfor(scale_rgb, range(3), 3)
+    else:
+        rgb_i = [scale_rgb(i) for i in range(3)]
     for i in range(3):
         rgb[:, :, i] = rgb_i[i]
     
@@ -131,7 +155,7 @@ if __name__ == '__main__':
         plt.title(title_s, fontsize=11)
         plt.style.use('dark_background')
         
-        d_min, d_max = np.nanmin(rgb), np.nanmax(rgb)
+        d_min, d_max = nanmin(rgb), nanmax(rgb)
         print("d_min", d_min, "d_max", d_max)
         # rgb = rgb / (d_max - d_min)
         plt.imshow(rgb) #, vmin = 0., vmax = 1.) #plt.tight_layout()
