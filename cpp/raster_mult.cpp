@@ -3,7 +3,7 @@ adapted from raster_sum.cpp 20220302 */
 #include"misc.h"
 
 int main(int argc, char ** argv){
-  if(argc < 4) err("raster_sum.exe [raster cube1] [raster cube2] [out cube]\n");
+  if(argc < 4) err("raster_sum.exe [raster cube1] [raster cube2 (could be 1d)] [out cube]\n");
   str fn(argv[1]); // input image file name
   str fn2(argv[2]); // input image 2 file name
   if(!(exists(fn) && exists(fn2))) err("failed to open input file");
