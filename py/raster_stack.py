@@ -1,7 +1,7 @@
 # stack raster files
 import os
 import sys
-from misc import args, sep, exists, pd
+from misc import args, sep, exists, pd, run
 
 if len(args) < 4:
     err("python3 raster_stack.py [input raster 1] [input raster 2] .." +
