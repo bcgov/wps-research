@@ -333,9 +333,13 @@ int main(int argc, char ** argv){
   if(nb == 66){
     myZpr2->setrgb(36, 48, 57); // for PRISMA (VNIR)
   }
-  if(nb == 173 || nb == 239){
+  if(nb == 173){
     myZpr2->setrgb(43-1, 108-1, 171-1); // for PRISMA (SWIR)
   }
+  if(nb == 239){
+  	//PRISMA combined sorted (SWIR)
+  }
+
  
   myImage->rebuffer();
   myImage2->rebuffer();
