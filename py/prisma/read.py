@@ -36,6 +36,7 @@ def write_hdr(hfn, samples, lines, bands, dsn=None, other=''):
     rgb_d = None # rgb band indexes from 1
     SWIR = (dsn == 'SWIR_Cube')
     VNIR = (dsn == 'VNIR_Cube')
+    rgb_i = None
     if VNIR:  # 630 nm red, 532 nm green, 465 nm blue
         rgb_t, rgb_i, rgb_d = [630, 532, 465], [0,0,0], [None, None, None]
         w_l = spec['WL_VNIR[nm]']
@@ -53,9 +54,9 @@ def write_hdr(hfn, samples, lines, bands, dsn=None, other=''):
     w_len = ': ' if (SWIR or VNIR) else ''
     if (SWIR or VNIR):
         w_len += str(int(round(float(spec['WL_SWIR[nm]'][0] if SWIR
-                     else spec['WL_VNIR[nm]'][0])))) + ' nm'
+                     else spec['WL_VNIR[nm]'][0])))) + 'nm'
     print('+w', hfn)
-    rgb_s = ','.join([str(x) for x in rgb_i])
+    rgb_s = (','.join([str(x) for x in rgb_i])) if rgb_i else ''
     lines = ['ENVI' + ('\ndescription = {rgb=' + rgb_s + '}' if VNIR else ''),
              'samples = ' + str(samples),
              'lines = ' + str(lines),
@@ -73,7 +74,7 @@ def write_hdr(hfn, samples, lines, bands, dsn=None, other=''):
             lines[-1] += ','
             w_len = ': ' if (SWIR or VNIR) else ''
             if(SWIR or VNIR):
-                w_len += str(int(round(float(spec['WL_SWIR[nm]'][i] if SWIR else spec['WL_VNIR[nm]'][i])))) + ' nm'
+                w_len += str(int(round(float(spec['WL_SWIR[nm]'][i] if SWIR else spec['WL_VNIR[nm]'][i])))) + 'nm'
             lines.append('Band ' + str(i + 1) + w_len)
     lines[-1] += '}'
     open(hfn, 'wb').write('\n'.join(lines).encode())
@@ -127,18 +128,12 @@ with h5py.File(filename, "r") as f:
     iterate(f, printed=False)  # print("fields available:", list(data_sets.keys()))
     want = ['SWIR_Cube', 'VNIR_Cube'] # the meat
     
-    if False:  # enable this for more stuff
-        want += ['Latitude',
-                 'Longitude',
-                 'Wgs84_pos_x',
-                 'Wgs84_pos_y',
-                 'Wgs84_pos_z',
-                 'Cw_Swir_Matrix',
-                 'Cw_Vnir_Matrix',
-                 'Fwhm_Swir_Matrix', 
-                 'Fwhm_Vnir_Matrix']
-
-    print("fields selected:", str(want))
+    if False:  # enable this for more stuff.. examples of avail. stuff
+        want += ['Latitude', 'Longitude',
+                 'Wgs84_pos_x', 'Wgs84_pos_y', 'Wgs84_pos_z', 
+                 'Cw_Swir_Matrix', 'Cw_Vnir_Matrix',
+                 'Fwhm_Swir_Matrix', 'Fwhm_Vnir_Matrix']
+    # print("fields selected:", str(want))
     for w in want:
         if w not in data_sets:
             err("key not found: " + str(w))
@@ -191,17 +186,18 @@ with h5py.File(filename, "r") as f:
             * Datum
             * Units
         '''
-        mapinfo = 'map info = {' + (','.join([map_info['P_N'].decode('utf-8'),
-                                              str(1),
-                                              str(1),
-                                              str(map_info['P_U_e']),
-                                              str(map_info['P_U_n']),
-                                              str(X_size),
-                                              str(Y_size),
-                                              map_info['P_I'].decode('utf-8'),
-                                              'North' if N_S == 'N' else 'South',
-                                              map_info['R_E'].decode('utf-8'),
-                                              'units=Meters'])) + '}'
+        m_i = [map_info['P_N'].decode('utf-8'),
+               str(1),
+               str(1),
+               str(map_info['P_U_e']),
+               str(map_info['P_U_n']),
+               str(X_size),
+               str(Y_size),
+               map_info['P_I'].decode('utf-8'),
+               'North' if N_S == 'N' else 'South',
+               map_info['R_E'].decode('utf-8'),
+               'units=Meters']
+        mapinfo = 'map info = {' + ','.join(m_i) + '}'
         other = mapinfo + '\n' + wkt
         write_hdr(hn, ncol, nrow, nband, dsn, other=other)
         o_f.close()
