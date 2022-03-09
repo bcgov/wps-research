@@ -1,6 +1,5 @@
 #include"misc.h"
-/* Simple Spectral interpolation with wavelengths (nm) in header file
-20220308 */
+/* Simple Spectral interpolation with wavelengths (nm) in header file 20220308 */
 int main(int argc, char ** argv){
   if(argc < 3) err("raster_spectral_interp [input file name] [wavelength value to interpolate] .. [more values]");
   size_t nrow, ncol, nband, np, i, j, k, n, ij;
@@ -25,19 +24,17 @@ int main(int argc, char ** argv){
   map<float, int> upper_i;
   map<float, float> lower_last;
   map<float, float> upper_last;
+  set<float>::iterator it;
   for0(i, n){
     vector<string> w;
     w = split(s[i], ' ');
     str last(w[w.size() -1]);
     char m = last[strlen(last.c_str()) - 1];
     char n = last[strlen(last.c_str()) - 2];
-    if(m != 'm' || n != 'n'){
-      err("expected band name to end in nm");
-    }
+    if(m != 'm' || n != 'n') err("expected band name to end in nm");
     str wl(last.substr(0, strlen(last.c_str()) - 2));
     float wavelength = atof(wl.c_str());
-
-    for(set<float>::iterator it = interp.begin(); it != interp.end(); it++){
+    for(it = interp.begin(); it != interp.end(); it++){
       if(lower_i.count(*it) < 1){
         // haven't compared anything with this interpolation value
         if(wavelength <= *it){
@@ -71,8 +68,10 @@ int main(int argc, char ** argv){
   cout << upper_i << endl;
   cout << upper_last << endl;
 
+  for(it = interp.begin(); it != interp.end(); it++){
+  	cout << *it << ": " << endl;
+  }
   /*
-
   float * out = falloc(np);
   float * dat = bread(fn, nrow, ncol, nband);
 
