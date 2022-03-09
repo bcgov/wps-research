@@ -1,12 +1,10 @@
 /* qs.cpp: quick stats for image cube */
 #include"misc.h"
-
 int main(int argc, char ** argv){
   if(argc < 2) err("qs.exe [raster cube 1]");
 
   str fn(argv[1]); // input image file name
   if(!exists(fn)) err("failed to open input file");
-
   str hfn(hdr_fn(fn)); // input header file name
 
   size_t nrow, ncol, nband, np;
@@ -59,16 +57,13 @@ int main(int argc, char ** argv){
       }
     }
   }
-
   for0(k, nband){
-    printf("k total_squared[k] n[k] %zu %e %e\n", k, total_squared[k], n[k]);
     stdev[k] = sqrt(total_squared[k] / n[k]);
   }
-
   printf("band_i,Min,Max,Mean,Stdv,n_nan,n_inf");
+  
   for0(k, nband){
-    printf("\n%zu,%e,%e,%e,%e,%e,%e", k + 1,
- 	   fmin[k], fmax[k], avg[k], stdev[k], n_nan[k], n_inf[k]);
+    printf("\n%zu,%e,%e,%e,%e,%e,%e", k + 1, fmin[k], fmax[k], avg[k], stdev[k], n_nan[k], n_inf[k]);
   }
   printf("\n");
   return 0;
