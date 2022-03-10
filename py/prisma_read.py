@@ -341,11 +341,11 @@ with h5py.File(filename, "r") as f:
             err('unexpected dimensions')
         if N == 3:
             pass
-
-        X_size = abs((map_info['P_U_e'] - map_info['P_L_e']) / float(ncol))
-        Y_size = abs((map_info['P_U_n'] - map_info['P_L_n']) / float(nrow))
-        print("X_size", X_size, "Y_size", Y_size)
-        ''' map info. Lists geographic information in the following order:
+        try:
+            X_size = abs((map_info['P_U_e'] - map_info['P_L_e']) / float(ncol))
+            Y_size = abs((map_info['P_U_n'] - map_info['P_L_n']) / float(nrow))
+            print("X_size", X_size, "Y_size", Y_size)
+            ''' map info. Lists geographic information in the following order:
             * Projection name
             * Reference (tie point) pixel x location (in file coordinates)
             * Reference (tie point) pixel y location (in file coordinates)
@@ -357,19 +357,22 @@ with h5py.File(filename, "r") as f:
             * North or South (UTM only)
             * Datum
             * Units
-        '''
-        m_i = [map_info['P_N'].decode('utf-8'),
-               str(1),
-               str(1),
-               str(map_info['P_U_e']),
-               str(map_info['P_U_n']),
-               str(X_size),
-               str(Y_size),
-               map_info['P_I'].decode('utf-8'),
-               'North' if N_S == 'N' else 'South',
-               map_info['R_E'].decode('utf-8'),
-               'units=Meters']
-        mapinfo = 'map info = {' + ','.join(m_i) + '}'
-        other = mapinfo + '\n' + wkt
-        write_hdr(hn, ncol, nrow, nband, dsn, other=other)
+            '''
+            m_i = [map_info['P_N'].decode('utf-8'),
+                   str(1),
+                   str(1),
+                   str(map_info['P_U_e']),
+                   str(map_info['P_U_n']),
+                   str(X_size),
+                   str(Y_size),
+                   map_info['P_I'].decode('utf-8'),
+                   'North' if N_S == 'N' else 'South',
+                   map_info['R_E'].decode('utf-8'),
+                   'units=Meters']
+            mapinfo = 'map info = {' + ','.join(m_i) + '}'
+            other = mapinfo + '\n' + wkt
+            write_hdr(hn, ncol, nrow, nband, dsn=dsn, other=other)
+        except:
+            # handle L1 data for example, without geoloc info
+            write_hdr(hn, ncol, nrow, nband, dsn=dsn)
         o_f.close()
