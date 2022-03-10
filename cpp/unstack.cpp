@@ -24,6 +24,7 @@ int main(int argc, char *argv[]){
   float * d = bread(ifn, nr, nc, nb); // read input data
   
   for0(i, nb){
+	  // there's a bug in here!
     if(!(selected.size() < 1 || selected.count((int)(i + 1)) < 1)){
       str pre(ifn + str("_") + zero_pad(to_string(i + 1), 3));
       str ofn(pre + str(".bin"));
