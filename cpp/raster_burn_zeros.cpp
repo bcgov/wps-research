@@ -13,35 +13,36 @@ int main(int argc, char ** argv){
 
   str hfn(hdr_fn(fn)); // input header file name
   str hfn2(hdr_fn(fn2)); // input 2 header file name
-  str ofn(argv[3]); // output file name
-  str ohn(hdr_fn(ofn, true)); // out header file name
 
   size_t nrow, ncol, nband, np, nrow2, ncol2, nband2;
   hread(hfn, nrow, ncol, nband); // read header 1
   hread(hfn2, nrow2, ncol2, nband2); // read header 2
-  if(nrow != nrow2 || ncol != ncol2 || nband != nband2)
-  err("input image dimensions should match");
-
+  if(nrow != nrow2 || ncol != ncol2)
+    err("input image dimensions should match");
+ 
   np = nrow * ncol; // number of input pix
   size_t i, j, k;
-  float * out = falloc(nrow * ncol * nband);
   float * dat1 = bread(fn, nrow, ncol, nband);
-  float * dat2 = bread(fn2, nrow, ncol, nband);
-
+  float * dat2 = bread(fn2, nrow, ncol, nband2);
   bool is_zero;
   for0(i, np){
     is_zero = true;
     for0(k, nband){
-      if(dat1[i + k * np] != 0.){
+      float d = dat1[i + k * np];
+      // printf("%f ", d);
+      if( d != 0){ 
+	      //fabs((double)d) > 0.0000000001){
         is_zero = false;
       }
     }
-    if(is_zero) for0(k, nband) dat2[i + k * np] = 0.;
-    else{
-      j = i + k * np;
-      for0(k, nband) dat2[j] = dat1[j];
+    // printf("%s\n", is_zero?" == 0": " != 0");
+    if(is_zero){
+      for0(k, nband2){
+        dat2[i + k * np] = 0.;
+      }
     }
   }
-  bwrite(out, fn2, nrow, ncol, nband);
+  printf("+w %s\n", fn2.c_str());
+  bwrite(dat2, fn2, nrow, ncol, nband2);
   return 0;
 }
