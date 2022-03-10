@@ -4,7 +4,7 @@ Note: input raster to transform, assumed already scaled in 0-1. */
 #include"misc.h"
 int main(int argc, char ** argv){
   if(argc < 3){
-    err("raster_scale.exe [hyperspec cube to get max/min from] [hyperspec cube to transform]\n");
+    err("raster_scale.exe [hyperspec cube to get max/min from] [hyperspec cube to transform (in 0-1 already)]\n");
   }
 
   str fn(argv[1]); // input image file name (to get max and min from)
