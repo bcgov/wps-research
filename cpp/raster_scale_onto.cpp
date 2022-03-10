@@ -1,6 +1,8 @@
 /* 20220309: scale each band of raster, to match the range of a different raster.
  
-Note: input raster to transform, assumed already scaled in 0-1. */
+Note: input raster to transform, assumed already scaled in 0-1.
+
+Note: will need to do histogram matching, to have meaningful comparison!! */
 #include"misc.h"
 int main(int argc, char ** argv){
   if(argc < 3){
