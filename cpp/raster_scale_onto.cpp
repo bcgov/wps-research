@@ -62,7 +62,7 @@ int main(int argc, char ** argv){
       dat2[j] = (dat2[j] * m) + mk;
     }
   }
-  bwrite(dat, ofn, nrow, ncol, nband);
+  bwrite(dat2, ofn, nrow, ncol, nband);
   hwrite(ohn, nrow, ncol, nband);
   return 0;
 }
