@@ -1,7 +1,7 @@
 [![Lifecycle:Maturing](https://img.shields.io/badge/Lifecycle-Maturing-007EC6)](<Redirect-URL>)
 
 # Welcome to bcws-psu-research
-"where the future is being made, today!"
+Motto: "where the future is being made, today!"
 
 Methods and Systems for Image Analysis developed in partnership with:
 * Digital Platforms and Data Division (DPDD), Office of The BC Chief Information Officer (OCIO) 
