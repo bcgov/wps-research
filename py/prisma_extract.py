@@ -46,3 +46,29 @@ for f in files:
             sc(f),
             vc(f),
             cc(f)])
+
+for f in files:
+    # 37, 49, 58 for VNIR
+    cmd = ['python3',
+            pd + 'raster_plot.py',
+            vc(f),
+            str(37), 
+            str(49),
+            str(58),
+            '1']
+    vc_png = vc(f) + '_37_49_58_rgb.png'
+    if not exists(vc_png):
+        run(cmd)
+    # 43 108 171 for SWIR
+    cmd = ['python3',
+            pd + 'raster_plot.py',
+            sc(f),
+            str(43),
+            str(108),
+            str(171),
+            '1']
+    sc_png = sc(f) + '_43_108_171_rgb.png'
+    if not exists(sc_png):
+        run(cmd)
+
+    print(vc_png, sc_png)
