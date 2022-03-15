@@ -42,7 +42,7 @@ def fix_s2(f):  # make sure expected folders are there for sen2cor
 
 def run_sen2cor(f):
     fix_s2(f)
-    L2A = '/home/' + os.popen('whoami').read().strip() + '/sen2cor/2.5/Sen2Cor-02.05.05-Linux64/bin/L2A_Process'
+    L2A = 'L2A_Process' # '/home/' + os.popen('whoami').read().strip() + '/sen2cor/2.5/Sen2Cor-02.05.05-Linux64/bin/L2A_Process'
     cmd = (L2A + ' ' + f)
     print([cmd])
     a = os.system(cmd)
