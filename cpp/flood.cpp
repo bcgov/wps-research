@@ -1,6 +1,7 @@
 /* 20220225 raster flood fill on mask: background is label 0.
-New labels to connected components of image areas equalling 1. */
+  New labels to connected components of image areas valued 1. */
 #include"misc.h"
+
 size_t *out, i_next, nrow, ncol, nband, nf;
 float *dat, * out_f;
 int * visited;
@@ -11,21 +12,23 @@ size_t float_max(){
   float x = 0.;
   size_t y = 0;
   while(((float)y == x) && ((size_t)x == y)){
-    x ++; y ++;
+    x ++;
+    y ++;
   }
   return y - 1;
 }
 
 int flood(long int i, long int j, int depth){
-  /* printf("flood(%ld, %ld, %d) label=%ld d=%f depth=%d\n",
-  i, j, depth, i_next, dat[i * ncol + j], depth); */
+  if(i < 0 || j < 0 || i >= nrow || j >= ncol)
+    return 0;
 
-  if(i < 0 || j < 0 || i >= nrow || j >=ncol ) return 0;
   long int ij = i * ncol + j;
   float d = dat[ij];
   int ret = 0;
 
-  if(d != 1. || visited[ij]) return 0; // labelled or outside mask
+  if(d != 1. || visited[ij])
+    return 0; // labelled or not on mask
+  
   visited[ij] = true;
   out[ij] = i_next;
   nf ++; // marked something
@@ -35,17 +38,12 @@ int flood(long int i, long int j, int depth){
     ii = i + di;
     for(dj = 1; dj >= -1; dj -=1){
       jj = j + dj;
-      // printf("di %ld dj %ld (%ld, %ld) \n", di, dj, i, j);
-
       if((!(di == 0 && dj == 0)) &&
-      (i + di >= 0) && (j + dj >= 0) &&
-      (i + di < nrow) && (j + dj < ncol)){
-
+         (i + di >= 0) && (j + dj >= 0) &&
+         (i + di < nrow) && (j + dj < ncol)){
         ik = ii * ncol + jj;
-        if(!visited[ik] && dat[ik] == 1.){
-          // printf(" call(%ld, %ld) di %ld dj %ld\n", ii,jj, di, dj);
+        if(!visited[ik] && dat[ik] == 1.)
           ret += flood(ii, jj, depth+1);
-        }
       }
     }
   }
@@ -98,20 +96,16 @@ int main(int argc, char ** argv){
     }
   }
   for0(i, np) out_f[i] = (float)out[i];
-
+  
   FILE * f = wopen(ofn);
   fwrite(out, sizeof(size_t), np, f);
   hwrite(hf2, nrow, ncol, 1, 16); /* type 16 = size_t */
-
+  
   bwrite(out_f, ofn4, nrow, ncol, 1);
   hwrite(hfn4, nrow, ncol, 1, 4);
-  free(visited);
-  free(dat);
-  free(out);
 
   if(create_onehot){
-    // write a multi-band one hot encoded output
-    str ofn2(fn + "_flood_onehot.bin");
+    str ofn2(fn + "_flood_onehot.bin"); /* multi-band onehot encoded output*/
     str ohfn5(fn + "_flood_onehot.hdr");
 
     size_t n_bands = 0;
@@ -125,11 +119,13 @@ int main(int argc, char ** argv){
           out_i[i] = (out_f[i] == (float)k)?1.: 0.;
           this_band += out_i[i];
         }
-        //printf("this band %f\n", this_band);
         fwrite(out_i, np, sizeof(float), g);
       }
     }
     hwrite(ohfn5, nrow, ncol, n_bands, 4);
   }
+  free(visited);
+  free(dat);
+  free(out);
   return 0;
 }
