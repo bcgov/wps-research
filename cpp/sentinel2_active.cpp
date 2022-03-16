@@ -8,8 +8,6 @@ int main(int argc, char ** argv){
   float * out, * dat, * b1, * b2, * b3;
   long int bi[3];
 
-  for0(i, 3) bi[i] = -1;
-
   str fn(argv[1]); /* binary files */
   str ofn(fn + "_active.bin");
   str hfn(hdr_fn(fn)); /* headers */
@@ -21,6 +19,7 @@ int main(int argc, char ** argv){
   t.push_back(str("2190nm"));
 
   hread(hfn, nrow, ncol, nband, s);
+  for0(i, 3) bi[i] = -1;
   np = nrow * ncol;
   n = s.size();
 
@@ -32,11 +31,9 @@ int main(int argc, char ** argv){
       }
     }
   }
-  for0(i, 3){
-    if(bi[i] < 0){
-      printf("Missing band: %s\n", t[i].c_str());
-      err("Missing band");
-    }
+  for0(i, 3) if(bi[i] < 0){
+    printf("Missing band: %s\n", t[i].c_str());
+    err("Missing band");
   }
 
   dat = bread(fn, nrow, ncol, nband); /* read the data */
@@ -47,9 +44,6 @@ int main(int argc, char ** argv){
 
   for0(i, np){
     out[i] = (float)(b2[i] - b1[i]) > 175.;
-  }
-
-  for0(i, np){
     out[i] *= (float)(b3[i] > b2[i]); /* reduce fp? */
   }
 
