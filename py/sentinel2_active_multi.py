@@ -1,7 +1,7 @@
 '''
 multitemporal accumulation of area detection result. Possibly mutate result using land cover filter before combining that
 '''
-from misc import sep, pd, exists, parfor
+from misc import sep, pd, exists, parfor, run
 import os
 # list L2 folders in the present directory. Will sort those in time! 
 
@@ -28,7 +28,7 @@ for x in L:
         # run detector
         fn = y + '_active.bin'
         print('* ' + fn)
-        dets.append([x[0], x[1], y])
+        dets.append([x[0], x[1], y, fn])
         if not exists(fn):
             cmd = pd + '../cpp/sentinel2_active.exe ' + y
             print(cmd)
@@ -36,8 +36,13 @@ for x in L:
 
 def r(x):
     return os.popen(x).read()
+parfor(r, cmds, 1)  # limited by disk I/O
 
-parfor(r, cmds, 4)  # limited by disk I/O
-
+cmd = 'cat '
 for d in dets:
     print(d)
+    cmd += d[3] + ' '
+cmd += " > multi.bin"
+
+if not exists('multi.bin'):
+    run(cmd)
