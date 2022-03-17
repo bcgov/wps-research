@@ -165,7 +165,7 @@ def parfor(my_function, my_inputs, n_thread=mp.cpu_count()): # eval fxn in paral
         result = []
         for i in range(len(my_inputs)):
             result.append(my_function(my_inputs[i]))
-            return result
+        return result
     else:
         pool = mp.Pool(n_thread)
         result = pool.map(my_function, my_inputs)
