@@ -117,6 +117,7 @@ def write_binary(np_ndarray, fn): # write a numpy array to ENVI format type 4
     of.close()
 
 def write_hdr(hfn, samples, lines, bands):
+    print('+w', hfn)
     lines = ['ENVI',
              'samples = ' + str(samples),
              'lines = ' + str(lines),
