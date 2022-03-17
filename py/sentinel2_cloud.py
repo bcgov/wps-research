@@ -1,3 +1,4 @@
+'''get cloud and scene classif masks'''
 from misc import * 
 sep = os.path.sep
 exists = os.path.exists
