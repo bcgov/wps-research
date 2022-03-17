@@ -160,9 +160,16 @@ def twop_str(data, band_select = [3, 2, 1]):
     return rgb
 
 def parfor(my_function, my_inputs, n_thread=mp.cpu_count()): # eval fxn in parallel, collect
-    pool = mp.Pool(n_thread)
-    result = pool.map(my_function, my_inputs)
-    return(result)
+    
+    if n_thread == 1:
+        result = []
+        for i in range(len(my_inputs)):
+            result.append(my_function(my_inputs[i]))
+            return result
+    else:
+        pool = mp.Pool(n_thread)
+        result = pool.map(my_function, my_inputs)
+        return(result)
 
 
 def bsq_to_scikit(ncol, nrow, nband, d):
