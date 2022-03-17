@@ -44,11 +44,12 @@ int main(int argc, char ** argv){
 
   for0(i, np){
     out[i] = (float)(b2[i] - b1[i]) > 175.;
+  }
+  for0(i, np){
     out[i] *= (float)(b3[i] > b2[i]); /* reduce fp? */
   }
-
-  bwrite(out, ofn, nrow, ncol, 1);
   hwrite(hf2, nrow, ncol, 1);
+  bwrite(out, ofn, nrow, ncol, 1);
   free(dat); /* plot spectra? */
   free(out);
   return 0;
