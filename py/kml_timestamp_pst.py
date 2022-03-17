@@ -3,11 +3,10 @@ a Sentinel-2 UTM date/timestamped folder
 
 if kml file does not have a time stamp, take parent folder timestamp (assumed UTC), 
 convert to PST and include that in the kml filename'''
-
 from datetime import datetime
 from pytz import timezone
 from misc import *
-
+import shutil
 PST = timezone('US/Pacific')
 
 for f in [x.strip() for x in os.popen('find ./ -name "*.kml"').readlines()]:
@@ -28,6 +27,23 @@ for f in [x.strip() for x in os.popen('find ./ -name "*.kml"').readlines()]:
         x = PST.localize(d)
         time_diff = x.tzinfo.utcoffset(x)
         local_time = d + time_diff
-        print(x)
-        print(local_time)
 
+        w = f.split(sep)[-1]
+        if len(w.split('_' + str(YYYY))) < 2:
+            # no terminal timestamp
+            w = w.split('.')
+            L = local_time
+            L = ''.join([str(L.year).zfill(4),
+                         str(L.month).zfill(2),
+                         str(L.day).zfill(2),
+                         str(L.hour).zfill(2),
+                         str(L.minute).zfill(2),
+                         str(L.second).zfill(2)])
+            L = '.'.join(w[:-1]) + '_' + L + '.' + w[-1]
+            nf = f.split(sep)[:-1] + [L]
+            nf = sep.join(nf)
+            # print('mv ' + f + ' ' + nf)
+            shutil.move(f, nf)
+            print(nf)
+        else:
+            print(f)
