@@ -14,6 +14,8 @@ Includes A) routines applying or implementing supervised and unsupervised classi
 
 # Sample results
 ## Presentations
+* Fire mapping with Sentinel-2, BCWS Geomatics CoP, Mar 16 2022
+* Remote Sensing and Pattern Recognition in BCWS Predictive Services Unit, BCWS Priorities Forum, Jan 6 2022
 * Field Observations and Remote Sensing of Wildland Fuels: A Case Study, Bulkley Valley Research Centre, Oct 8 2021 2021
 * All Hazards Application of RCM in BC, CSA RCM Users Group Meeting, Nov 25 2021
 * Simple Character Recognition, BC Gov Data Science CoP and Python Programming CoP, May 26 2021
