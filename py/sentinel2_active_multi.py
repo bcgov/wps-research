@@ -50,5 +50,13 @@ if not exists('multi.bin'):
     run(cmd)
 
 if not exists('multi.hdr'):
-    write_hdr('multi.hdr', ncol, nrow, nband)
+    write_hdr('multi.hdr', ncol, nrow, len(dets))
+    lines = open('multi.hdr').readlines()
+    lines = [x.strip() for x in lines]
+    lines += ['band names ={' + dets[0][3] + ',']
+    for i in range(1, len(dets) - 1):
+        lines += [dets[i][3] + ',']
+    lines += [dets[len(dets)-1][3] + '}']
+    open('multi.hdr', 'wb').write(('\n'.join(lines)).encode())
+
 
