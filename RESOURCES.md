@@ -56,4 +56,6 @@
 * https://code.earthengine.google.com/e27240a92ecf64bbadf8a082b91c711c?hideCode=true
 
 # Data Science Resources
-[NumPy Documentation](https://numpy.org/doc/stable/)
+* [NumPy Documentation](https://numpy.org/doc/stable/)
+* [Scikit-learn: machine learning in Python](https://scikit-learn.org/stable/)
+* [NVIDIA: even easier introduction to CUDA](https://developer.nvidia.com/blog/even-easier-introduction-cuda/)
