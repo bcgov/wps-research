@@ -59,3 +59,4 @@
 * [NumPy Documentation](https://numpy.org/doc/stable/)
 * [Scikit-learn: machine learning in Python](https://scikit-learn.org/stable/)
 * [NVIDIA: even easier introduction to CUDA](https://developer.nvidia.com/blog/even-easier-introduction-cuda/)
+* [Research software engineering with Python](https://merely-useful.tech/py-rse/index.html)
