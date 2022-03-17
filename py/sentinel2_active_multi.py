@@ -1,7 +1,7 @@
 '''
 multitemporal accumulation of area detection result. Possibly mutate result using land cover filter before combining that
 '''
-from misc import sep, pd, exists, parfor, run
+from misc import sep, pd, exists, parfor, run, read_hdr, write_hdr
 import os
 # list L2 folders in the present directory. Will sort those in time! 
 
@@ -38,11 +38,17 @@ def r(x):
     return os.popen(x).read()
 parfor(r, cmds, 1)  # limited by disk I/O
 
+nrow, ncol, nband = 0, 0, 0
 cmd = 'cat '
 for d in dets:
     print(d)
+    ncol, nrow, nband = [int(x) for x in read_hdr(d[3][:-3] + 'hdr')]
     cmd += d[3] + ' '
 cmd += " > multi.bin"
 
 if not exists('multi.bin'):
     run(cmd)
+
+if not exists('multi.hdr'):
+    write_hdr('multi.hdr', ncol, nrow, nband)
+
