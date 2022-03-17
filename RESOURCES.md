@@ -37,6 +37,7 @@
 * [tSNE embedding](https://scikit-learn.org/stable/modules/generated/sklearn.manifold.TSNE.html)
 * [isotonic regression](https://en.wikipedia.org/wiki/Isotonic_regression)
 * [Overview of clustering methods: scikit-learn](https://scikit-learn.org/stable/modules/clustering.html)
+
 ## coding
 * [matplotlib animation](http://jakevdp.github.io/blog/2012/08/18/matplotlib-animation-tutorial/)
 * [matplotlib figure](https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.figure.html)
@@ -48,7 +49,7 @@
 * [Brian Stocks](https://www.youtube.com/watch?v=Jvx3A63JNUg&list=PLrpIXKIj6MaEJw41Fi-F-UpqAR1vVOKmt&index=18)
 
 ## Fire
-*[Prometheus simulation software](http://www.firegrowthmodel.ca/prometheus/overview_e.php)
+* [Prometheus simulation software](http://www.firegrowthmodel.ca/prometheus/overview_e.php)
 
 ## GEE apps
 * https://kkraoj.users.earthengine.app/view/live-fuel-moisture
