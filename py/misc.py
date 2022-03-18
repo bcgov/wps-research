@@ -79,6 +79,18 @@ def get_band_names_line_idx(hdr):  # input: file data
             return list(range(i, i + int(bands)))
     return []
 
+def get_map_info_lines_idx(hdr):
+    # given filename, get indices of map info lines (should be two of those)
+    result = [None, None]
+    lines = [x.strip() for x in open(hdr).readlines()]
+    for i in range(len(lines)):
+        w = [x.strip() for x in lines[i].split('=')]
+        if w[0] == 'map info':
+            result[0] = i
+        if w[0] == 'coordinate system string':
+            result[1] = i
+    return result
+
 # require a filename, or list of filenames, to exist
 def assert_exists(fn):
     try:
