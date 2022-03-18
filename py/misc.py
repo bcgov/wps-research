@@ -12,6 +12,10 @@ args = sys.argv
 sep = os.path.sep
 pd = sep.join(__file__.split(sep)[:-1]) + sep  # python directory i.e. path to here
 
+
+def file_size(f): # get size of a file
+    return os.stat(f).st_size
+
 # print message and exit
 def err(c):
     print('Error:', c); sys.exit(1)
