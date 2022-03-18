@@ -58,5 +58,3 @@ if not exists('multi.hdr'):
         lines += [dets[i][3] + ',']
     lines += [dets[len(dets)-1][3] + '}']
     open('multi.hdr', 'wb').write(('\n'.join(lines)).encode())
-
-
