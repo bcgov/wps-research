@@ -28,6 +28,7 @@ print('reference tile ID=', ref_tile)
 
 coreg_files = []
 for f in [x.strip() for x in os.popen('find ./ -name "SENTINEL2_L2A_EPSG*10m.bin"').readlines()]:
+    f = f + '_active.bin'
     parent_path = sep.join(os.path.abspath(f).split(sep)[:-1])
     parent_f = parent_path.split(sep)[-1]
 
@@ -38,6 +39,9 @@ for f in [x.strip() for x in os.popen('find ./ -name "SENTINEL2_L2A_EPSG*10m.bin
             err('unexpected folder name format: ' + parent_path)
         ds, ts = w[6][:8], w[6][9: 15]
 
+        if not exists(f):
+            err('file does not exist:' + f)
+
         coreg_f = f
         if ref_tile is not None and ref_tile == w[5]:
             print("Don't need coreg:")
@@ -47,6 +51,7 @@ for f in [x.strip() for x in os.popen('find ./ -name "SENTINEL2_L2A_EPSG*10m.bin
         print(w, ds, ts, coreg_f)
         coreg_files.append([ds + ts, coreg_f, str(file_size(f) / (1024. * 1024.))+ 'MB'])
 
+print("-----------------------")
 coreg_files.sort()
 for f in coreg_files:
     print(f)
