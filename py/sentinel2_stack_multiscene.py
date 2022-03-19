@@ -1,10 +1,8 @@
-''' 
-within present hierarchy, find Sentinel2 data in expected format
+''' 20220317 within present hierarchy, find Sentinel2 data in expected format
 - stack multiple overlapping frames by co-registering the other frames,
 onto the selected reference footprint
-- reference footprint could be a sentinel2 frame OR something else (an AOI)
-
-
+- reference footprint could be a sentinel2 frame OR something else (an AOI) e.g.:
+python3 ~/GitHub/bcws-psu-research/py/sentinel2_stack_multiscene.py ./T10UGA/S2A_MSIL2A_20210721T185921_N0301_R013_T10UGA_20210721T230008.SAFE/SENTINEL2_L2A_EPSG_32610_10m.bin
 '''
 from misc import *
 if len(args) < 2:
@@ -23,12 +21,23 @@ try:
     print(ref_tile)
 except:
     pass
-
 print('reference tile ID=', ref_tile)
 
 coreg_files = []
 for f in [x.strip() for x in os.popen('find ./ -name "SENTINEL2_L2A_EPSG*10m.bin"').readlines()]:
+    ff = f
+    hff = ff[:-4] + '.hdr'
     f = f + '_active.bin'
+    hf = f[:-4] + '.hdr'
+
+    # active fire detection result needs map info for coreg step
+    X = get_map_info_lines_idx(hf)
+    if X[0] is None or X[1] is None:
+        cmd = ' '.join(['python3',
+                        pd + 'envi_header_copy_mapinfo.py',
+                        hff,
+                        hf])
+        run(cmd)
     parent_path = sep.join(os.path.abspath(f).split(sep)[:-1])
     parent_f = parent_path.split(sep)[-1]
 
@@ -43,17 +52,28 @@ for f in [x.strip() for x in os.popen('find ./ -name "SENTINEL2_L2A_EPSG*10m.bin
             err('file does not exist:' + f)
 
         coreg_f = f
+        need_coreg = False
         if ref_tile is not None and ref_tile == w[5]:
             print("Don't need coreg:")
         else:
             coreg_f = f + '_coreg.bin'
+            need_coreg = True
 
         print(w, ds, ts, coreg_f)
-        coreg_files.append([ds + ts, coreg_f, str(file_size(f) / (1024. * 1024.))+ 'MB'])
+        coreg_files.append([ds + ts, coreg_f, str(file_size(f) / (1024. * 1024.))+ 'MB', need_coreg])
 
 print("-----------------------")
 coreg_files.sort()
 for f in coreg_files:
-    print(f)
-
+    # print(f)
+    if f[-1]:
+        corg_fn = f[-3]
+        orig_fn = corg_fn[:-10]
+        cmd = ' '.join(['python3',
+                        pd + 'raster_project_onto.py',
+                        orig_fn,
+                        rf,
+                        corg_fn])
+        if not exists(corg_fn):
+            run(cmd) # should run a few in parallel?
 
