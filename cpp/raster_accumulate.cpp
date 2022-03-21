@@ -8,7 +8,7 @@ int main(int argc, char ** argv){
   str fn(argv[1]); // input image file name
   if(!exists(fn)) err("failed to open input file");
   str hfn(hdr_fn(fn)); // input header file name
-  
+
   str ofn(fn + str("_accumulate.bin")); // output file name
   str ohn(hdr_fn(ofn, true)); // out header file name
 
@@ -21,9 +21,17 @@ int main(int argc, char ** argv){
   float * dat = bread(fn, nrow, ncol, nband);
 
   for0(k, nband){
-   size_t ik = np * k;
-   if(k == 0) for0(i, np) out[i] = dat[i];
-   else for0(i, np) out[i + ik] = dat[i + ik] + out[i + ik - np];
+    size_t ik = np * k;
+    if(k == 0){
+      for0(i, np){
+        out[i] = dat[i];
+      }
+    }
+    else{
+      for0(i, np){
+        out[i + ik] = dat[i + ik] + out[i + ik - np];
+      }
+    }
   }
   bwrite(out, ofn, nrow, ncol, nband);
   hwrite(ohn, nrow, ncol, nband);
