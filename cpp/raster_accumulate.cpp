@@ -21,8 +21,9 @@ int main(int argc, char ** argv){
   float * dat = bread(fn, nrow, ncol, nband);
 
   for0(k, nband){
+   size_t ik = np * k;
    if(k == 0) for0(i, np) out[i] = dat[i];
-   else for0(i, np) out[i] = dat[i] + out[i - np];
+   else for0(i, np) out[i + ik] = dat[i + ik] + out[i + ik - np];
   }
   bwrite(out, ofn, nrow, ncol, nband);
   hwrite(ohn, nrow, ncol, nband);
