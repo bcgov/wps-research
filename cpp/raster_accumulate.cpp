@@ -1,4 +1,5 @@
-/* raster_sum.cpp: band math, add hyperspectral cubes together */
+/* raster_accumulate.cpp:
+20220320: cumulative sum (by band index) of bands */
 #include"misc.h"
 
 int main(int argc, char ** argv){
