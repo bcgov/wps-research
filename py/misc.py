@@ -166,7 +166,7 @@ def twop_str(data, band_select = [3, 2, 1]):
         rgb[:, :, i] = data[:, :, band_select[i]]  # pull a channel
         values = rgb[:, :, i].reshape(samples * lines).tolist()  # slice, reshape
         values.sort()  # sort
-        
+
         if values[-1] < values[0]:  # sanity
             err("failed to sort")
 
@@ -183,7 +183,7 @@ def twop_str(data, band_select = [3, 2, 1]):
     return rgb
 
 def parfor(my_function, my_inputs, n_thread=mp.cpu_count()): # eval fxn in parallel, collect
-    
+
     if n_thread == 1:
         result = []
         for i in range(len(my_inputs)):
@@ -294,7 +294,7 @@ def xy_to_pix_lin(fn, x, y, nb):  # raster fn, lat/lon, number of bands (assume 
             value = float(lines[3 + (2*j)].split()[1].strip())
             data.append(value)
         print(data)
-        
+
         row, col = lin_i, pix_i
         return row, col, data  # return the goods!
     else:
