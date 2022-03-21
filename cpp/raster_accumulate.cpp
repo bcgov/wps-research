@@ -22,6 +22,7 @@ int main(int argc, char ** argv){
 
   for0(k, nband){
     size_t ik = np * k;
+    size_t ii;
     if(k == 0){
       for0(i, np){
         out[i] = dat[i];
@@ -29,8 +30,9 @@ int main(int argc, char ** argv){
     }
     else{
       for0(i, np){
-        out[i + ik] = dat[i + ik] + out[i + ik - np];
-	if(out[i + ik] > 1.) out[i + ik] = 1.;
+        ii = i + ik;
+        out[ii] = dat[ii] + out[ii - np];
+	if(out[ii] > 1.) out[ii] = 1.;
       }
     }
   }
