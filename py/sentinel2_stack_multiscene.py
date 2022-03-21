@@ -81,4 +81,8 @@ cmd = 'cat ' + (' '.join(files)) + ' > raster.bin'
 if not exists('raster.bin'):
     run(cmd)
 
-write_hdr('raster.hdr', samples, lines, len(coreg_files), files)
+if not exists('raster.hdr'):
+    write_hdr('raster.hdr', samples, lines, len(coreg_files), files)
+    run(['python3 ' + pd + 'envi_header_copy_mapinfo.py',
+         hdr_fn(rf),
+         'raster.hdr'])

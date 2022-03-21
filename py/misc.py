@@ -22,6 +22,7 @@ def err(c):
 
 def run(c, quit_on_nonzero=True):
     print('run("' + str(c) + '")')
+    c = ' '.join(c) if type(c) == list else c
     a = os.system(c)
     if a != 0 and quit_on_nonzero:
         err("command failed to run:\n\t" + c)
@@ -144,9 +145,12 @@ def write_hdr(hfn, samples, lines, bands, band_names = None):
              'interleave = bsq',
              'byte order = 0']
     if band_names is not None:
-        lines += ['band names = {' + band_names[0]]
+        lines += ['']
+        bs1 = "band names = {" + band_names[0] + ','
+        lines += [bs1]
         for i in range(1, len(band_names)):
-            lines += [band_names[i] + ',']
+            bsi = (band_names[i] + ',')
+            lines += [bsi]
         lines[-1] = lines[-1][:-1] + '}'
     open(hfn, 'wb').write('\n'.join(lines).encode())
 
