@@ -30,6 +30,7 @@ int main(int argc, char ** argv){
     else{
       for0(i, np){
         out[i + ik] = dat[i + ik] + out[i + ik - np];
+	if(out[i + ik] > 1.) out[i + ik] = 1.;
       }
     }
   }
