@@ -36,7 +36,7 @@ for f in [x.strip() for x in os.popen('find ./ -name "SENTINEL2_L2A_EPSG*10m.bin
                         pd + 'envi_header_copy_mapinfo.py',
                         hff,
                         hf])
-        run(cmd)
+        run(cmd)  # run if either map info field in target is blank
     parent_path = sep.join(os.path.abspath(f).split(sep)[:-1])
     parent_f = parent_path.split(sep)[-1]
 
