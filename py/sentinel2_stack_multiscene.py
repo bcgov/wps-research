@@ -6,23 +6,22 @@ python3 ~/GitHub/bcws-psu-research/py/sentinel2_stack_multiscene.py ./T10UGA/S2A
 '''
 from misc import *
 if len(args) < 2:
-    err('python3 sentinel2_stack_multiscene.py [AOI footprint ENVI format .bin]')
+    err('python3 sentinel2_stack_multiscene.py [AOI footprint ENVI-type .bin]')
 
 rf = args[1]
 if rf[-4:] != '.bin':
     err('reference footprint must be raster (extension .bin) ENVI format')
+samples, lines, bands = read_hdr(hdr_fn(rf))
 
-# check if reference footprint is a Sentinel2 tile.
-ref_tile = None
+ref_tile = None  # check if reference footprint is Sentinel2 tile
 try:
-    w = rf.split(sep)[-2]
-    w = w.split('_')
+    w = rf.split(sep)[-2].split('_')
     ref_tile = w[5]
     print(ref_tile)
 except:
     pass
-print('reference tile ID=', ref_tile)
 
+print('reference tile ID=', ref_tile)
 coreg_files = []
 for f in [x.strip() for x in os.popen('find ./ -name "SENTINEL2_L2A_EPSG*10m.bin"').readlines()]:
     ff = f
@@ -54,7 +53,7 @@ for f in [x.strip() for x in os.popen('find ./ -name "SENTINEL2_L2A_EPSG*10m.bin
         coreg_f = f
         need_coreg = False
         if ref_tile is not None and ref_tile == w[5]:
-            print("Don't need coreg:")
+            pass # print("Don't need coreg:")
         else:
             coreg_f = f + '_coreg.bin'
             need_coreg = True
@@ -65,7 +64,7 @@ for f in [x.strip() for x in os.popen('find ./ -name "SENTINEL2_L2A_EPSG*10m.bin
 print("-----------------------")
 coreg_files.sort()
 for f in coreg_files:
-    # print(f)
+    print(f)
     if f[-1]:
         corg_fn = f[-3]
         orig_fn = corg_fn[:-10]
@@ -77,3 +76,9 @@ for f in coreg_files:
         if not exists(corg_fn):
             run(cmd) # should run a few in parallel?
 
+files = [coreg_files[i][1] for i in range(len(coreg_files))]
+cmd = 'cat ' + (' '.join(files)) + ' > raster.bin'
+if not exists('raster.bin'):
+    run(cmd)
+
+write_hdr('raster.hdr', samples, lines, len(coreg_files), files)

@@ -132,7 +132,7 @@ def write_binary(np_ndarray, fn): # write a numpy array to ENVI format type 4
     np_ndarray.tofile(of, '', '<f4')
     of.close()
 
-def write_hdr(hfn, samples, lines, bands):
+def write_hdr(hfn, samples, lines, bands, band_names = None):
     print('+w', hfn)
     lines = ['ENVI',
              'samples = ' + str(samples),
@@ -143,6 +143,11 @@ def write_hdr(hfn, samples, lines, bands):
              'data type = 4',
              'interleave = bsq',
              'byte order = 0']
+    if band_names is not None:
+        lines += ['band names = {' + band_names[0]]
+        for i in range(1, len(band_names)):
+            lines += [band_names[i] + ',']
+        lines[-1] = lines[-1][:-1] + '}'
     open(hfn, 'wb').write('\n'.join(lines).encode())
 
 # counts of each data instance
