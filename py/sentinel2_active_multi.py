@@ -1,5 +1,4 @@
-'''
-multitemporal accumulation of area detection result. Possibly mutate result using land cover filter before combining that
+'''multitemporal accumulation of area detection result. Possibly mutate result using land cover filter before combining that
 '''
 from misc import sep, pd, exists, parfor, run, read_hdr, write_hdr
 import os
