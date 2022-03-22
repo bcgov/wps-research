@@ -27,7 +27,7 @@ int main(int argc, char *argv[]){
   for0(i, nb){
     if(selected.size() < 1 || selected.count((int)(i + 1)) > 0){
       str pre(ifn + str("_") + zero_pad(to_string(i + 1), 3));
-      pre += band_names[i];
+      pre += (str("_") + band_names[i]);
       str ofn(pre + str(".bin"));
       str ohn(pre + str(".hdr"));
       f = wopen(ofn.c_str());
