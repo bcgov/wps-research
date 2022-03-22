@@ -61,4 +61,4 @@ for p in pts:
     pp.coords = [(p[1],p[0])]
     pp.style=simplekml.Style()
 '''
-kml.save('poly.kml')
+kml.save('poly_' +  ('.'.join(args[1].split('.')[:-1])) + '.kml')

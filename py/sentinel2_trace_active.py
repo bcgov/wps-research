@@ -17,7 +17,7 @@ fn = args[1]
 if not exists(fn):
     err('please check input file')
     
-for i in [100]: # [10, 20, 60]: # 90 
+for i in [150]: # [10, 20, 60]: # 90 
     if not exists(fn + '_flood4.bin'):
         run('ulimit -s 1000000')
         run(cd + 'flood.exe ' + fn)

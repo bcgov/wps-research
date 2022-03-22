@@ -9,7 +9,9 @@ from misc import *
 import shutil
 PST = timezone('US/Pacific')
 
-for f in [x.strip() for x in os.popen('find ./ -name "*.kml"').readlines()]:
+files = [x.strip() for x in os.popen('find ./ -name "*.kml"').readlines()] if len(args) < 2 else [args[1]]
+
+for f in files:
     parent_path = sep.join(os.path.abspath(f).split(sep)[:-1])
     parent_f = parent_path.split(sep)[-1]
 
