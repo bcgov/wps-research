@@ -159,6 +159,7 @@ void * balloc(long unsigned int nb){
 */
 
 FILE * wopen(string fn){
+  printf("+w %s\n", fn.c_str());
   FILE * f = fopen(fn.c_str(), "wb");
   if(!f) {
     printf("Error: failed to open file for writing: %s\n", fn.c_str());
@@ -368,7 +369,7 @@ float * bread(str bfn, size_t nrow, size_t ncol, size_t nband){
 
 void bwrite(float * d, str bfn, size_t nrow, size_t ncol, size_t nband){
   size_t nf = nrow * ncol * nband;
-  FILE * f = fopen(bfn.c_str(), "wb");
+  FILE * f = wopen(bfn.c_str()); //fopen(bfn.c_str(), "wb");
   if(!f) err("bwrite(): failed to open output file");
   fwrite(d, sizeof(float), nf, f);
   fclose(f);
