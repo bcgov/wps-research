@@ -16,6 +16,7 @@ int main(int argc, char ** argv){
   str ofn(fn + str("_accumulate.bin")); // output image
   str ohn(hdr_fn(ofn, true)); // output header, create mode
 
+  vector<str> band_names(parse_band_names(hfn)); // read band names
   hread(hfn, nrow, ncol, nband); // read dimensions from header
   np = nrow * ncol; // number of input pix
 
@@ -33,7 +34,7 @@ int main(int argc, char ** argv){
       }
     }
   }
-  hwrite(ohn, nrow, ncol, nband); // write out dimensions to header
+  hwrite(ohn, nrow, ncol, nband, 4, band_names); // write out dimensions to header
   bwrite(out, ofn, nrow, ncol, nband); // write out image
   return 0;
 }
