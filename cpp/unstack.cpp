@@ -13,7 +13,8 @@ int main(int argc, char *argv[]){
   str ifn(argv[1]);
   str hfn(hdr_fn(ifn));
   hread(hfn, nr, nc, nb);
-  
+  vector<str> band_names(parse_band_names(hfn));
+
   np = nr * nc;
   for(set<int>::iterator it = selected.begin(); it != selected.end(); it ++){
     if(*it < 1 || *it > nb){
@@ -24,9 +25,9 @@ int main(int argc, char *argv[]){
   float * d = bread(ifn, nr, nc, nb); // read input data
   
   for0(i, nb){
-	  // there's a bug in here!
     if(selected.size() < 1 || selected.count((int)(i + 1)) > 0){
       str pre(ifn + str("_") + zero_pad(to_string(i + 1), 3));
+      pre += band_names[i];
       str ofn(pre + str(".bin"));
       str ohn(pre + str(".hdr"));
       f = wopen(ofn.c_str());
