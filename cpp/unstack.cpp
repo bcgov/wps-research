@@ -25,7 +25,7 @@ int main(int argc, char *argv[]){
   
   for0(i, nb){
 	  // there's a bug in here!
-    if(!(selected.size() < 1 || selected.count((int)(i + 1)) < 1)){
+    if(selected.size() < 1 || selected.count((int)(i + 1)) > 0){
       str pre(ifn + str("_") + zero_pad(to_string(i + 1), 3));
       str ofn(pre + str(".bin"));
       str ohn(pre + str(".hdr"));
