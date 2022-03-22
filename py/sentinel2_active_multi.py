@@ -1,5 +1,4 @@
-'''
-20220321 perform active fire detection on multiple frames.
+'''20220321 perform active fire detection on multiple frames.
 - multitemporal accumulation of area detection result?
 Possibly mutate result using land cover filter before combining ??? '''
 from misc import sep, pd, exists, parfor, run, read_hdr, write_hdr
