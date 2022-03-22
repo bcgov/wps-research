@@ -3,10 +3,12 @@ in a video of (single band) rasters 20220321*/
 #include"misc.h"
 
 int main(int argc, char ** argv){
-  size_t nrow, ncol, nband, nband2, np, i, j, k, ki, kj;
+  size_t nrow, ncol, nband, nband2, np, i, j, k, ki, kj, n_min, n_dif;
   if(argc < 2){
-    err("raster_ts_dedup.exe [raster cube]\n");
+    err("raster_ts_dedup.exe [raster cube] [optional arg: min # changed pix]\n");
   }
+  n_min = argc > 2 ? (size_t) atol(argv[2]): 0;
+
   str fn(argv[1]); // input image
   str hfn(hdr_fn(fn)); // input header
   if(!exists(fn)) err("failed to open input file");
@@ -26,14 +28,18 @@ int main(int argc, char ** argv){
   retain.push_back(0);
 
   for0(k, nband - 1){
-    int different = false;
+    n_dif = 0;
     ki = k * np;
     kj = ki + np;
-    for0(i, np) if(dat[ki++] != dat[kj++]) different = true;
-    if(different) retain.push_back(k + 1);
-    cout << retain << endl;
+    for0(i, np) if(dat[ki++] != dat[kj++]) n_dif ++;
+    if((n_min == 0 && n_dif > 0) ||
+       (n_min > 0 && n_dif >= n_min)){
+      retain.push_back(k + 1);
+    }
+    cout << retain << " ";
+    printf("band %zu npx_chg %zu\n", k + 1, n_dif);
   }
-
+  
   nband2 = retain.size();
   for0(k, nband2) name_retain.push_back(band_names[retain[k]]);
 
