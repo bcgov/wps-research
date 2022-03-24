@@ -42,7 +42,8 @@
 * [matplotlib animation](http://jakevdp.github.io/blog/2012/08/18/matplotlib-animation-tutorial/)
 * [matplotlib figure](https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.figure.html)
 * [3d plotting in matplotlib](https://jakevdp.github.io/PythonDataScienceHandbook/04.12-three-dimensional-plotting.html)
-
+* [geemap: Python package for interactive mapping w Google Earth Engine (GEE)](https://geemap.org/)
+* [geemap in Google Co-lab](https://colab.research.google.com/github/giswqs/geemap/blob/master/examples/notebooks/11_export_image.ipynb) 
 ## Fuels
 * [Judi Beck](https://www.youtube.com/watch?v=dX15tC1UHcE&list=PLrpIXKIj6MaEJw41Fi-F-UpqAR1vVOKmt&index=17)
 * [Marty Alexander](https://www.youtube.com/watch?v=ZkWeaI2c0zo&list=PLrpIXKIj6MaEJw41Fi-F-UpqAR1vVOKmt&index=16)
