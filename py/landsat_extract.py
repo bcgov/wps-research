@@ -1,5 +1,6 @@
 '''20210324 extract landsat from .tar to ENVI bsq/float'''
 from misc import *
+fire_mapping = len(args) > 1  # add optional arg to enable fire mapping
 lines = os.popen('ls -1 *.tar').readlines()
 
 for line in lines:
@@ -20,12 +21,10 @@ for line in lines:
         x += os.popen('ls -1 ' + d + sep + '*ST_B10.TIF').readlines()
         x = [i.strip() for i in x]
         return x
-
     x = find_bands()
 
     if len(x) < 7:
         run(['tar xvf', f, '-C', d])
-
     x = find_bands()
     print(d)
     for i in x:
@@ -45,7 +44,6 @@ for line in lines:
           'B7':   av( 2090.,  2350.),
           'B8':   av(  520.,   900.),
           'TRAD': av(10400., 12500.)}
-
     S7 = {'B1': 30,  # resolution (m)
           'B2': 30,
           'B3': 30,
@@ -55,7 +53,7 @@ for line in lines:
           'B7': 30,
           'B8': 15,
           'TRAD': 30}
-
+    
     C8 = {'B1':        443.,  # docs.sentinel-hub.com/api/latest/data/landsat-8/
           'B2':        482.,
           'B3':        561.5,
@@ -69,7 +67,6 @@ for line in lines:
           'B11':     12005.,
           'TRAD': av(10895.,
                      12005.)}
-
     S8 = {'B1': 30,  # resolution (m)
           'B2': 30,
           'B3': 30,
@@ -93,20 +90,19 @@ for line in lines:
             CF, R = C7[w], S7[w]
         if N == 8:
             CF, R = C8[w], S8[w]
+        
         CF, R = str(CF), str(R)
         CF = CF[:-2] if CF[-2:] == '.0' else CF
 
-        print('* ', CF, w, i)
+        # print('* ', CF, w, i)
         bn = ' '.join([ds,
                        R + 'm:',
                        w,
                        CF + 'nm'])
         band_names.append(bn)
-
-    print(band_names)
+    # print(band_names)
     fn = d + sep + d + '.bin'
-    hfn = fn[:-4] + '.hdr'
-    print(fn)
+    hfn = fn[:-4] + '.hdr' # print(fn)
     if not exists(fn):
         run(['gdal_merge.py -of ENVI -ot Float32 -o',
             fn,
@@ -123,4 +119,3 @@ for line in lines:
             ['"' + i + '"' for i in band_names])
         run(['python3 ' + pd + 'raster_reorder_increasing_nm.py',
              fn])
-    sys.exit(1)
