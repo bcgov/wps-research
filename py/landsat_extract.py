@@ -5,7 +5,7 @@ lines = os.popen('ls -1 *.tar').readlines()
 for line in lines:
     f = line.strip()
     d, N = f[:-4], int(f[3]) # directory
-    
+
     if f[0] != 'L':
         err('expected L prefix for landsat')
     if not exist(d):
@@ -46,6 +46,16 @@ for line in lines:
           'B8':   av(  520.,   900.),
           'TRAD': av(10400., 12500.)}
 
+    S7 = {'B1': 30,  # resolution (m)
+          'B2': 30,
+          'B3': 30,
+          'B4': 30,
+          'B5': 30,
+          'B6': 30,
+          'B7': 30,
+          'B8': 15,
+          'TRAD': 30}
+
     C8 = {'B1':        443.,  # docs.sentinel-hub.com/api/latest/data/landsat-8/
           'B2':        482.,
           'B3':        561.5,
@@ -59,19 +69,38 @@ for line in lines:
           'B11':     12005.,
           'TRAD': av(10895.,
                      12005.)}
-    
+
+    S8 = {'B1': 30,  # resolution (m)
+          'B2': 30,
+          'B3': 30,
+          'B4': 30,
+          'B5': 30,
+          'B6': 30,
+          'B7': 30,
+          'B8': 15,
+          'B9':  30,
+          'B10': 30,
+          'B11': 30,
+          'TRAD': 30}
+
     band_names = []
     for i in x:
+        ds = f.split('_')[3]
         w = i.split(sep)[-1].split('_')[-1].split('.')[0]
-    
-        CF = None
+
+        CF, R = None, None
         if N == 7:
-            CF = C7[w]
+            CF, R = C7[w], S7[w]
         if N == 8:
-            CF = C8[w]
+            CF, R = C8[w], S8[w]
+        CF, R = str(CF), str(R)
+        CF = CF[:-2] if CF[-2:] == '.0' else CF
 
         print('* ', CF, w, i)
-        band_names.append(w + ' ' + str(CF) + 'nm')
+        bn = ' '.join([ds,
+                       R + 'm:',
+                       CF + 'nm'])
+        band_names.append(bn)
 
     print(band_names)
     fn = d + sep + d + '.bin'
