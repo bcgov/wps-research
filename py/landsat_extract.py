@@ -146,9 +146,6 @@ for line in lines:
             run(['python3 ' + pd + 'envi_header_copy_mapinfo.py',
                  hfn,
                  ffh])
-            run(['python3 ' + pd + 'envi_update_band_names.py',
-                 hfn,
-                 ffh])
         else:
             print('+r', ff)
     sys.exit(1)
