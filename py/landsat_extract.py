@@ -24,7 +24,7 @@ for line in lines:
     x = find_bands()
 
     if len(x) < 7:
-        run(['tar xvf', f, '-C', d])
+        run(['tar xf', f, '-C', d])
     x = find_bands()
     
     print(d)  # display this file's avail. bands
