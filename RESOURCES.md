@@ -44,6 +44,8 @@
 * [3d plotting in matplotlib](https://jakevdp.github.io/PythonDataScienceHandbook/04.12-three-dimensional-plotting.html)
 * [geemap: Python package for interactive mapping w Google Earth Engine (GEE)](https://geemap.org/)
 * [geemap in Google Co-lab](https://colab.research.google.com/github/giswqs/geemap/blob/master/examples/notebooks/11_export_image.ipynb) 
+* [landsat on GCS](https://cloud.google.com/storage/docs/public-datasets/landsat)
+
 ## Fuels
 * [Judi Beck](https://www.youtube.com/watch?v=dX15tC1UHcE&list=PLrpIXKIj6MaEJw41Fi-F-UpqAR1vVOKmt&index=17)
 * [Marty Alexander](https://www.youtube.com/watch?v=ZkWeaI2c0zo&list=PLrpIXKIj6MaEJw41Fi-F-UpqAR1vVOKmt&index=16)
