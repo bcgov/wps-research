@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 args = sys.argv
 sep = os.path.sep
 pd = sep.join(__file__.split(sep)[:-1]) + sep  # python directory i.e. path to here
-
+cd = pd.split(sep)[:-1] + sep + 'cpp'
 
 def file_size(f): # get size of a file
     return os.stat(f).st_size
