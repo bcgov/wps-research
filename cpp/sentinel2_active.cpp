@@ -21,13 +21,16 @@ int main(int argc, char ** argv){
   hread(hfn, nrow, ncol, nband, s);
   for0(i, 3) bi[i] = -1;
   np = nrow * ncol;
-  n = s.size();
-
+  n = s.size(); 
+  
+  str date_s;
   for0(i, n){
     for0(j, 3){
       if(contains(s[i], t[j])){
         bi[j] = i * np; /* found a required band */
         printf("bi[%zu]=%zu \"%s\"\n", j, bi[j], s[i].c_str());
+	vector<string> w(split(s[i], ' '));
+	date_s = w[0]; /* assume datetime string at beginning */
       }
     }
   }
@@ -48,7 +51,10 @@ int main(int argc, char ** argv){
   for0(i, np){
     out[i] *= (float)(b3[i] > b2[i]); /* reduce fp? */
   }
-  hwrite(hf2, nrow, ncol, 1);
+
+  vector<str> bn;
+  bn.push_back(date_s + str(" sentinel2_active.cpp"));
+  hwrite(hf2, nrow, ncol, 1, 4, bn);
   bwrite(out, ofn, nrow, ncol, 1);
   free(dat); /* plot spectra? */
   free(out);
