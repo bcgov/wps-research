@@ -26,7 +26,8 @@ for line in lines:
     if len(x) < 7:
         run(['tar xvf', f, '-C', d])
     x = find_bands()
-    print(d)
+    
+    print(d)  # display this file's avail. bands
     for i in x:
         print('\t', i.strip())
         # print(os.popen('gdalinfo ' + i + ' | grep "Pixel Size"').read())
@@ -104,10 +105,13 @@ for line in lines:
     fn = d + sep + d + '.bin'
     hfn = fn[:-4] + '.hdr' # print(fn)
     if not exists(fn):
+        # merge the bands at resolution of Band #1
         run(['gdal_merge.py -of ENVI -ot Float32 -o',
             fn,
             ' -seperate',
             ' '.join(x)])
+
+        # cleanup header and update band names w wavelengths
         run(['python3 ' + pd + 'envi_header_cleanup.py',
              hfn])
         samples, lines, bands = read_hdr(hfn)
@@ -123,6 +127,7 @@ for line in lines:
     if fire_mapping:
         f2 = fn + '_spectral_interp.bin'
         if not exists(f2):
+            # simulate Sentinel2 Level2, from Landsat 7/8/9 Level2 
             run(['python3 ' + pd + 'raster_simulate_s2.py',
                 fn])
             run(['python3 ' + pd + 'envi_header_copy_mapinfo.py',
@@ -133,6 +138,7 @@ for line in lines:
         ff = f2 + '_active.bin'
         
         if not exists(ff):
+            # run fire detection filter
             run([cd + 'sentinel2_active.exe',
                 f2])
             run(['python3 ' + pd + 'envi_header_copy_mapinfo.py',
