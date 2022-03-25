@@ -124,6 +124,7 @@ for line in lines:
         run(['python3 ' + pd + 'raster_reorder_increasing_nm.py',
              fn])
 
+    # fire mapping section
     if fire_mapping:
         f2 = fn + '_spectral_interp.bin'
         if not exists(f2):
