@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 args = sys.argv
 sep = os.path.sep
 pd = sep.join(__file__.split(sep)[:-1]) + sep  # python directory i.e. path to here
-cd = pd.split(sep)[:-1] + sep + 'cpp'
+cd = sep.join(pd.split(sep)[:-2] + ['cpp']) + sep
 
 def file_size(f): # get size of a file
     return os.stat(f).st_size
@@ -22,14 +22,17 @@ def err(c):
 
 def run(c, quit_on_nonzero=True):
     print('run("' + str(c) + '")')
-    c = ' '.join(c) if type(c) == list else c
+    c = ' '.join([str(i) for i in c]) if type(c) == list else c
     a = os.system(c)
     if a != 0 and quit_on_nonzero:
         err("command failed to run:\n\t" + c)
     return a
 
-def exist(f): return os.path.exists(f)
-def exists(f): return os.path.exists(f)
+def exist(f):
+    return os.path.exists(f)
+
+def exists(f):
+    return os.path.exists(f)
 
 def hdr_fn(bin_fn):  # return filename for hdr file, given binfile name
     hfn = bin_fn[:-4] + '.hdr'
@@ -187,7 +190,6 @@ def twop_str(data, band_select = [3, 2, 1]):
     return rgb
 
 def parfor(my_function, my_inputs, n_thread=mp.cpu_count()): # eval fxn in parallel, collect
-
     if n_thread == 1:
         result = []
         for i in range(len(my_inputs)):
@@ -197,7 +199,6 @@ def parfor(my_function, my_inputs, n_thread=mp.cpu_count()): # eval fxn in paral
         pool = mp.Pool(n_thread)
         result = pool.map(my_function, my_inputs)
         return(result)
-
 
 def bsq_to_scikit(ncol, nrow, nband, d):
     # convert image to a format expected by sgd / scikit learn
@@ -214,11 +215,8 @@ def bsq_to_scikit(ncol, nrow, nband, d):
                 img_np[ii + j, k] = d[(k * npx) + ii + j]
     return(img_np)
 
-
-
 def add_commas(number):
     return "{:,}".format(number)
-
 
 def discrete_cmap(N, base_cmap=None): # https://gist.github.com/jakevdp/91077b0cae40f8f8244a
     """Create an N-bin discrete colormap from the specified input map"""
