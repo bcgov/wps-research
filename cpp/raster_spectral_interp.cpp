@@ -28,9 +28,14 @@ int main(int argc, char ** argv){
   map<float, float> lower_last;
   map<float, float> upper_last;
 
+  str datestr("");
   for0(i, n){
     vector<string> w;
     w = split(s[i], ' ');
+    str date_str(w[0]); // get date string if we can
+    long long dsn = atoll(date_str.c_str()); // could check for number
+    datestr = date_str;
+
     str last(w[w.size() -1]);
     char m = last[strlen(last.c_str()) - 1];
     char n = last[strlen(last.c_str()) - 2];
@@ -87,7 +92,7 @@ int main(int argc, char ** argv){
       out[i] = dx[i] + (y - lower_last[y]) * (dz[i] - dx[i]) / (upper_last[y] - lower_last[y]);
     }
     size_t nw = fwrite(out, np, sizeof(float), f);
-    band_names.push_back(str("Interpolated value at: ") + std::to_string((int)y) + str("nm"));
+    band_names.push_back(datestr + str("Interpolated value at: ") + std::to_string((int)y) + str("nm"));
   }
   hwrite(hf2, nrow, ncol, interp.size(), 4, band_names);
   free(dat);
