@@ -99,11 +99,13 @@ for line in lines:
         print('* ', CF, w, i)
         bn = ' '.join([ds,
                        R + 'm:',
+                       w,
                        CF + 'nm'])
         band_names.append(bn)
 
     print(band_names)
     fn = d + sep + d + '.bin'
+    hfn = fn[:-4] + '.hdr'
     print(fn)
     if not exists(fn):
         run(['gdal_merge.py -of ENVI -ot Float32 -o',
@@ -111,7 +113,14 @@ for line in lines:
             ' -seperate',
             ' '.join(x)])
         run(['python3 ' + pd + 'envi_header_cleanup.py',
-            fn[:-4] + '.hdr'])
-
-        # need to add date, frame id, and wavelength info
+             hfn])
+        samples, lines, bands = read_hdr(hfn)
+        run(['python3 ' + pd + 'envi_header_modify.py',
+             hfn,
+             lines,
+             samples,
+             bands] +
+            ['"' + i + '"' for i in band_names])
+        run(['python3 ' + pd + 'raster_reorder_increasing_nm.py',
+             fn])
     sys.exit(1)
