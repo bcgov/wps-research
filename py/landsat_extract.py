@@ -46,15 +46,10 @@ for line in lines:
           'B7':   av( 2090.,  2350.),
           'B8':   av(  520.,   900.),
           'TRAD': av(10400., 12500.)}
-    S7 = {'B1': 30,  # resolution (m)
-          'B2': 30,
-          'B3': 30,
-          'B4': 30,
-          'B5': 30,
-          'B6': 30,
-          'B7': 30,
-          'B8': 15,
-          'TRAD': 30}
+
+    S7 = {'B8': 15}  # resolution (m)
+    for i in ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'TRAD']:
+        S7[i] = 30
     
     C8 = {'B1':        443.,  # docs.sentinel-hub.com/api/latest/data/landsat-8/
           'B2':        482.,
@@ -69,18 +64,11 @@ for line in lines:
           'B11':     12005.,
           'TRAD': av(10895.,
                      12005.)}
-    S8 = {'B1': 30,  # resolution (m)
-          'B2': 30,
-          'B3': 30,
-          'B4': 30,
-          'B5': 30,
-          'B6': 30,
-          'B7': 30,
-          'B8': 15,
-          'B9':  30,
-          'B10': 30,
-          'B11': 30,
-          'TRAD': 30}
+    S8 = {'B8': 15} # resolution(m)
+
+    for i in ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7',
+              'B8', 'B9', 'B10', 'B11', 'TRAD']:
+        S8[i] = 30
 
     # get UTC timestamp information
     txt_f = os.popen('ls -1 ' + d + sep + '*MTL.txt').readlines()
