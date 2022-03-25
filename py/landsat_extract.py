@@ -119,3 +119,21 @@ for line in lines:
             ['"' + i + '"' for i in band_names])
         run(['python3 ' + pd + 'raster_reorder_increasing_nm.py',
              fn])
+
+    if fire_mapping:
+        f2 = fn + '_spectral_interp.bin'
+        if not exists(f2):
+            run(['python3 ' + pd + 'raster_simulate_s2.py',
+                fn])
+        else:
+            print('+r', f2)
+        ff = f2 + '_active.bin'
+        
+        if not exists(ff):
+            run([cd + 'sentinel2_active.exe',
+                f2])
+        else:
+            print('+r', ff)
+
+    sys.exit(1)
+
