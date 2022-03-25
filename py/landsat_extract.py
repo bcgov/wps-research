@@ -140,5 +140,4 @@ for line in lines:
                  ff[:-4] + '.hdr'])
         else:
             print('+r', ff)
-    sys.exit(1)
-
+    #sys.exit(1)
