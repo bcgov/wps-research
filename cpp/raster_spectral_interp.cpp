@@ -1,5 +1,7 @@
 #include"misc.h"
-/* Simple Spectral interpolation with wavelengths (nm) in header file 20220308 */
+/* Simple Spectral interpolation with wavelengths (nm) in header file 20220308
+ 
+20220324: need to add extrapolation case for data outside? */
 int main(int argc, char ** argv){
   if(argc < 3) err("raster_spectral_interp [input file name] [wavelength value to interpolate] .. [more values]");
   size_t nrow, ncol, nband, np, i, j, k, n, ij;
