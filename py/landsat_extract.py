@@ -125,6 +125,9 @@ for line in lines:
         if not exists(f2):
             run(['python3 ' + pd + 'raster_simulate_s2.py',
                 fn])
+            run(['python3 ' + pd + 'envi_header_copy_mapinfo.py',
+                 hfn,
+                 f2[:-4] + '.hdr'])
         else:
             print('+r', f2)
         ff = f2 + '_active.bin'
@@ -132,8 +135,10 @@ for line in lines:
         if not exists(ff):
             run([cd + 'sentinel2_active.exe',
                 f2])
+            run(['python3 ' + pd + 'envi_header_copy_mapinfo.py',
+                 hfn,
+                 ff[:-4] + '.hdr'])
         else:
             print('+r', ff)
-
     sys.exit(1)
 
