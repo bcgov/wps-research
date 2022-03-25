@@ -6,6 +6,7 @@ lines = os.popen('ls -1 *.tar').readlines()
 for line in lines:
     f = line.strip()
     d, N = f[:-4], int(f[3]) # directory
+    print('[' + d + ']')
 
     if f[0] != 'L':
         err('expected L prefix for landsat')
@@ -18,18 +19,18 @@ for line in lines:
         # will need to revisit exactly which bands get pulled
         x = os.popen('ls -1 ' + d + sep + '*SR_B*.TIF').readlines()
         x += os.popen('ls -1 ' + d + sep + '*ST_TRAD.TIF').readlines()
-        x += os.popen('ls -1 ' + d + sep + '*ST_B10.TIF').readlines()
+        if N != 7:
+            x += os.popen('ls -1 ' + d + sep + '*ST_B10.TIF').readlines()
         x = [i.strip() for i in x]
         return x
     x = find_bands()
 
     if len(x) < 7:
         run(['tar xf', f, '-C', d])
-    x = find_bands()
     
-    print(d)  # display this file's avail. bands
+    x = find_bands()  # display avail. bands
     for i in x:
-        print('\t', i.strip())
+        print('\t', i.strip().split(sep)[-1])
         # print(os.popen('gdalinfo ' + i + ' | grep "Pixel Size"').read())
         # print(os.popen('gdalinfo ' + i + ' | grep "wave"').read())
 
@@ -81,7 +82,15 @@ for line in lines:
           'B11': 30,
           'TRAD': 30}
 
+    # get UTC timestamp information
+    txt_f = os.popen('ls -1 ' + d + sep + '*MTL.txt').readlines()
+    if len(txt_f) > 1:
+        err('expected only one text file')
+    t_s = os.popen('grep SCENE_CENTER_TIME ' + txt_f[0].strip())
+    t_s = t_s.read().strip().split('=')[-1].strip().strip('"')
+    t_s = t_s.split('.')[0].replace(':', '')
     band_names = []
+
     for i in x:
         ds = f.split('_')[3]
         w = i.split(sep)[-1].split('_')[-1].split('.')[0]
@@ -96,7 +105,7 @@ for line in lines:
         CF = CF[:-2] if CF[-2:] == '.0' else CF
 
         # print('* ', CF, w, i)
-        bn = ' '.join([ds,
+        bn = ' '.join([ds + t_s,
                        R + 'm:',
                        w,
                        CF + 'nm'])
@@ -147,4 +156,4 @@ for line in lines:
                  ff[:-4] + '.hdr'])
         else:
             print('+r', ff)
-    #sys.exit(1)
+    sys.exit(1)
