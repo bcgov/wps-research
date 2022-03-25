@@ -35,8 +35,7 @@ for line in lines:
         # print(os.popen('gdalinfo ' + i + ' | grep "Pixel Size"').read())
         # print(os.popen('gdalinfo ' + i + ' | grep "wave"').read())
 
-    # https://docs.sentinel-hub.com/api/latest/data/landsat-etm/
-    C7 = {'B1': (450. + 520.) / 2.,
+    C7 = {'B1': (450. + 520.) / 2.,  # docs.sentinel-hub.com/api/latest/data/landsat-etm/
           'B2': (520. + 600.) / 2.,
           'B3': (630. + 690.) / 2.,
           'B4': (770. + 900.) / 2.,
@@ -46,8 +45,7 @@ for line in lines:
           'B8': (520. + 900.) / 2.,
           'TRAD': (10400. + 12500.) / 2.}
 
-    # https://docs.sentinel-hub.com/api/latest/data/landsat-8/
-    C8 = {'B1': 443.,
+    C8 = {'B1': 443.,  # docs.sentinel-hub.com/api/latest/data/landsat-8/
           'B2': 482.,
           'B3': 561.5,
           'B4': 654.5,
@@ -81,7 +79,4 @@ for line in lines:
             fn[:-4] + '.hdr'])
 
         # need to add date, frame id, and wavelength info
-
-
-
     sys.exit(1)
