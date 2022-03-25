@@ -14,6 +14,7 @@ band names = {20210719 60m: B1 443nm,
 from misc import err, run, cd, args
 if len(args) < 2:
     err('python3 raster_simulate_s2.py [input hyperspectral file name (ENVI format)]')
+
 run([cd + 'raster_spectral_interp.exe',
      args[1],
      443, 
