@@ -124,24 +124,31 @@ for line in lines:
     # fire mapping section
     if fire_mapping:
         f2 = fn + '_spectral_interp.bin'
+        f2h = f2[:-4] + '.hdr'
         if not exists(f2):
             # simulate Sentinel2 Level2, from Landsat 7/8/9 Level2 
             run(['python3 ' + pd + 'raster_simulate_s2.py',
                 fn])
             run(['python3 ' + pd + 'envi_header_copy_mapinfo.py',
                  hfn,
-                 f2[:-4] + '.hdr'])
+                 f2h])
+            run(['python3 ' + pd + 'envi_update_band_names.py',
+                 hfn,
+                 f2h])
         else:
             print('+r', f2)
         ff = f2 + '_active.bin'
-        
+        ffh = ff[:-4] + '.hdr'
         if not exists(ff):
             # run fire detection filter
             run([cd + 'sentinel2_active.exe',
                 f2])
             run(['python3 ' + pd + 'envi_header_copy_mapinfo.py',
                  hfn,
-                 ff[:-4] + '.hdr'])
+                 ffh])
+            run(['python3 ' + pd + 'envi_update_band_names.py',
+                 hfn,
+                 ffh])
         else:
             print('+r', ff)
     sys.exit(1)
