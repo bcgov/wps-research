@@ -1,4 +1,7 @@
-'''update the band names portion of a header file'''
+'''update an ENVI header file:
+    - band names portion
+    - image dimensions or number of bands
+(updated 20220324)'''
 import os
 import sys
 from misc import *
