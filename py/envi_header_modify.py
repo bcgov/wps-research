@@ -46,6 +46,7 @@ if len(bn_new) != int(nband):
     err('inconsistent input')
 
 lines_new += ['band names = {' + bn_new[0]]
+print([bn_new[0]])
 for i in range(1, len(bn_new)):
     lines_new[-1] += ','
     print([bn_new[i]])
