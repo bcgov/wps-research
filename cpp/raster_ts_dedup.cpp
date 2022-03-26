@@ -26,18 +26,25 @@ int main(int argc, char ** argv){
 
   vector<size_t> retain;
   retain.push_back(0);
-
+  cout << retain;
+  printf("band %zu\n", 1);
   for0(k, nband - 1){
     n_dif = 0;
     ki = k * np;
     kj = ki + np;
-    for0(i, np) if(dat[ki++] != dat[kj++]) n_dif ++;
+    for0(i, np){
+	    float fki = dat[ki];
+	    float fkj = dat[kj];
+	    if(!isnan(fki) && !isinf(fki) && !isnan(fkj) && !isinf(fkj)){
+	    if(dat[ki++] != dat[kj++]) n_dif ++;
+	    }
+    }
     if((n_min == 0 && n_dif > 0) ||
        (n_min > 0 && n_dif >= n_min)){
       retain.push_back(k + 1);
     }
     cout << retain << " ";
-    printf("band %zu npx_chg %zu\n", k + 1, n_dif);
+    printf("band %zu npx_chg %zu\n", k + 2, n_dif);
   }
   
   nband2 = retain.size();
