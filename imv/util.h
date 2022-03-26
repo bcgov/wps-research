@@ -140,7 +140,8 @@ extern float * nan_sub_dat3;
 extern string nan_sub_infile;
 extern SA<size_t> * nan_sub_i; // this is an array full of row indices for extracted stuff
 extern SA<size_t> * nan_sub_j; // this is an array full of col indices for extracted stuff
-void nan_sub(size_t k); // subset data loading, parallelized by band
+void nan_sub(size_t k); // apply nan under subscene window
+void zero_sub(size_t k); //  apply zero under subscene window
 
 // scene subsampling, parallelized by band
 extern size_t mlk_scene_nb;  // infile nbands
