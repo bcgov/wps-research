@@ -609,8 +609,31 @@ void zprInstance::processString(){
     }
     SUB_MYIMG->initFrom(dat3, SUB_MM, SUB_MM, IMG_NB);
     ((glImage *)SUB_GLIMG)->rebuffer();
-    printf("GOT HERE !!!!!!!!!!!\n");
+    printf("Overwrote NAN under subscene window\n");
   }
+
+    // n string: overwrite NAN under window
+  if(strcmpz(console_string, "z\0") && console_string[1] == '\0'){
+    // big-data resilient read!
+    SA<float> * dat3 = SUB;
+    if(true){
+      nan_sub_np = IMG_NR * IMG_NC;
+      nan_sub_nb = IMG_NB;
+      nan_sub_mm = SUB_MM;
+      nan_sub_i_start = SUB_START_I; //i_start;
+      nan_sub_j_start = SUB_START_J; //j_start;
+      nan_sub_nc = IMG_NC; //nc;
+      nan_sub_dat3 = &((*dat3)[0]);
+      nan_sub_infile = IMG_FN; //string(infile);
+      nan_sub_i = SUB_I; // I, J coordinates of the image subsection we extracted
+      nan_sub_j = SUB_J;
+      parfor(0, IMG_NB, zero_sub, N_THREADS_IO);
+    }
+    SUB_MYIMG->initFrom(dat3, SUB_MM, SUB_MM, IMG_NB);
+    ((glImage *)SUB_GLIMG)->rebuffer();
+    printf("Overwrote Zero-values under subscene window\n");
+  }
+
 
   // m string: overwrite NAN under analysis window..
   if(strcmpz(console_string, "m\0") && console_string[1] == '\0'){

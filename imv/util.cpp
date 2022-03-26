@@ -547,6 +547,46 @@ void nan_sub(size_t k){
   free(w_nan);
 }
 
+void zero_sub(size_t k){
+  float d;
+  FILE * f = fopen(nan_sub_infile.c_str(), "r+b");
+  // printf("nan band %zu of %zu on rect. image subset..\n", k + 1, load_sub_nb);
+  size_t ki = k * nan_sub_np;
+  size_t kmi = k * nan_sub_mm * load_sub_mm;
+
+  float * w_nan = (float *) alloc(sizeof(float) * load_sub_mm);
+  for(size_t i = 0; i < load_sub_mm; i++){
+    w_nan[i] = 0.; //NAN;
+  }
+
+  for(size_t i = nan_sub_i_start; i < load_sub_mm + load_sub_i_start; i++){
+    size_t j = nan_sub_j_start;
+    size_t jp = kmi + ((i - nan_sub_i_start) * load_sub_mm);
+    size_t p = (ki + (i * nan_sub_nc) + j) * sizeof(float); // file byte pos
+
+    fseek(f, p, SEEK_SET);
+    // size_t nr = fread(&nan_sub_dat3[jp], load_sub_mm, sizeof(float), f); // read row
+    size_t nr = fwrite(w_nan, load_sub_mm, sizeof(float), f);
+
+    if(k == 0){
+      size_t mi, mj, jj;
+      size_t * lsj, *lsi; // record transformation between global img coordinates, and subimage
+      lsj = &nan_sub_j->at(0);
+      lsi = &nan_sub_i->at(0);
+      mi = (i - nan_sub_i_start) * load_sub_mm;
+      for(jj = nan_sub_j_start; jj < load_sub_mm + load_sub_j_start; jj++){
+        mj = (jj - nan_sub_j_start);
+        // printf("mi %zu j mj %zu i %zu j %zu\n", mi, mj, i, jj); // only need to do this for one band
+        lsi[mi + mj] = i;
+        lsj[mi + mj] = jj;
+      }
+    }
+  }
+  fclose(f);
+  free(w_nan);
+}
+
+
 
 
 
