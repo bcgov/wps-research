@@ -22,19 +22,31 @@ if not exists(fn):
     
 for i in [150]: # [10, 20, 60]: # 90 
     if not exists(fn + '_flood4.bin'):
-        run('ulimit -s 1000000')
-        run(cd + 'flood.exe ' + fn)
+        run(['ulimit',
+             '-s 1000000'])
+        run([cd + 'flood.exe',
+             fn])
+
     if not exists(fn + '_flood4.bin_link.bin'):
-        run(cd + 'class_link.exe ' + fn + '_flood4.bin  ' + str(i)) # 40')
+        run([cd + 'class_link.exe',
+             fn + '_flood4.bin',
+             str(i)]) # 40')
+
     if not exists(fn + '_flood4.bin_link.bin_recode.bin'):
-        run(cd + 'class_recode.exe ' + fn + '_flood4.bin_link.bin 1')
+        run([cd + 'class_recode.exe',
+             fn + '_flood4.bin_link.bin',
+             '1'])
+
     if not exists(fn + '_flood4.bin_link.bin_recode.bin_wheel.bin'):
-        run(cd + 'class_wheel.exe ' + fn + '_flood4.bin_link.bin_recode.bin')
-        run('python3 ' + pd + 'raster_plot.py ' + fn + '_flood4.bin_link.bin_recode.bin_wheel.bin  1 2 3 1 1')
-    print('class onehot..')
+        run([cd + 'class_wheel.exe',
+             fn + '_flood4.bin_link.bin_recode.bin'])
+
+        run(['python3 ' + pd + 'raster_plot.py',
+             fn + '_flood4.bin_link.bin_recode.bin_wheel.bin',
+             '1 2 3 1 1'])
+    
     cmd = cd + 'class_onehot.exe ' + fn + '_flood4.bin_link.bin_recode.bin ' + str(POINT_THRES)
     print(cmd)
-
     lines = None
     run('rm -f class_onehot.dat')
     if not exists('class_onehot.dat'):
