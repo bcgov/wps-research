@@ -42,7 +42,7 @@ elif data.startswith('MULTIPOLYGON'):
         X = x.strip().split()
         pts_in.append([(int(X[i].strip(',')), int(X[i+1].strip(','))) for i in range(0, len(X), 2)])
 else:
-    err('unrecognized')        
+    err('unrecognized')
 
 # let's output the largest of multipolygons first
 Y = [[len(i), i] for i in pts_in]
