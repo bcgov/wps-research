@@ -301,3 +301,22 @@ def xy_to_pix_lin(fn, x, y, nb):  # raster fn, lat/lon, number of bands (assume 
         return row, col, data  # return the goods!
     else:
         err("misc.py: unexpected output from gdallocationinfo: number of lines: " + str(len(lines)))
+
+def utc_to_pst(YYYY, MM, DD, hh, mm, ss):
+    from datetime import datetime
+    from pytz import timezone
+    PST = timezone('US/Pacific')
+
+    d = datetime(YYYY, MM, DD, hh, mm, ss)
+    x = PST.localize(d)
+    time_diff = x.tzinfo.utcoffset(x)
+    local_time = d + time_diff
+
+    L = local_time
+    L = ''.join([str(L.year).zfill(4),
+                 str(L.month).zfill(2),
+                 str(L.day).zfill(2),
+                 str(L.hour).zfill(2),
+                 str(L.minute).zfill(2),
+                 str(L.second).zfill(2)])
+    return L
