@@ -34,15 +34,14 @@ for i in [150]: # [10, 20, 60]: # 90
     print('class onehot..')
     cmd = cd + 'class_onehot.exe ' + fn + '_flood4.bin_link.bin_recode.bin ' + str(POINT_THRES)
     print(cmd)
+
     lines = None
     if not exists('class_onehot.dat'):
         lines = os.popen(cmd).read()
         open('class_onehot.dat', 'wb').write(lines.encode())
     else:
         lines = open('class_onehot.dat').read()
-
     lines = lines.split('\n')
-
     for line in lines:
         print(line)
     for line in lines:
@@ -62,7 +61,6 @@ for i in [150]: # [10, 20, 60]: # 90
                 if class_select is not None:
                     if N != class_select:
                         continue
-
                 # point count to see if we need to skip this thing???
                 c = ''.join(os.popen(cd + 'class_count.exe ' + f).read().split())
                 c = c.strip('{').strip('}').split(',')
@@ -79,9 +77,6 @@ for i in [150]: # [10, 20, 60]: # 90
                     lines = os.popen(cd + 'binary_hull.exe ' + f).readlines()
                     a = os.system('rm -f qhull.dat')
                     a = os.system('rm -f alpha_shape_input_file.txt')
-                    # run('mv alpha_shape.png alpha_shape_' + str(N) + '.png')
-                    # run('mv alpha_shape.pkl alpha_shape_' + str(N) + '.pkl')
-                    # run('mv alpha_points.txt alpha_points_' + str(N) + '.txt')
                 for line in lines:
                     print(line.strip())
                 
@@ -89,8 +84,6 @@ for i in [150]: # [10, 20, 60]: # 90
                 png_f = f + '_1_1_1_rgb.png'
                 if not exists(f  + png_f) and WRITE_PNG:
                     run('python3 ' + pd + 'raster_plot.py ' + f + ' 1 1 1 1 1')
-                # run('mv alpha_shape.png alpha_shape_' + str(N) + '.png')
-                # run('mv alpha_shape.pkl alpha_shape_' + str(N) + '.pkl')
 
                 print('copy mapinfo', fn[:-4] + '.hdr', f[:-4] + '.hdr') #hdr_fn(fn), hdr_fn(f))
                 ptfn = f + '_alpha_points.txt'
@@ -100,13 +93,11 @@ for i in [150]: # [10, 20, 60]: # 90
                         f[:-4] + '.hdr']
                 print(cmd)
                 run(cmd)
-
                 print('pixel loc')
                 run(['python3',
                      pd + 'raster_pixel_loc.py',
                      f,
                      open(ptfn).read().strip()])
-
             except:
                 pass
     a = os.system('rm -f class_onehot.dat')
