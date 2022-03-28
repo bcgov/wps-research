@@ -1,6 +1,5 @@
 '''get timestamps from landsat and sentinel2
-
-and put them in result filenames
+and include those in them in result filenames
 '''
 
 FOOT_H = 'footprint3.hdr'
