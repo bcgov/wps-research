@@ -6,6 +6,7 @@ import utm
 import json
 import struct
 import pyproj
+import simplekml
 from osgeo import ogr
 from osgeo import osr
 from osgeo import gdal
@@ -20,7 +21,6 @@ img = args[1]
 if not img: err('pls check input file')
 src = gdal.Open(img)
 GT = src.GetGeoTransform()
-n_coords = int((len(args) - 2) / 2)  # number of coordinate pairs provided
 print('X_pixel,Y_line,X_geo,Y_geo,Lat,Lon')
 from pyproj import Proj
 d = os.popen('gdalsrsinfo -o proj4 ' + img).read().strip()
@@ -32,27 +32,48 @@ w = [x.strip('+').split('=') for x in w]
 srs_info = {x[0]: x[1] if len(x) > 1 else '' for x in w}
 print(srs_info)
 
-pts = []
-for i in range(n_coords):
-    i2 = 2 * i
-    X_pixel = float(args[i2 + 3]) # col 0-idx
-    Y_line = float(args[i2 + 2 ]) # row 0-idx
-    X_geo = GT[0] + X_pixel * GT[1] + Y_line * GT[2]
-    Y_geo = GT[3] + X_pixel * GT[4] + Y_line * GT[5]
-    latlon = utm.to_latlon(X_geo, Y_geo, int(srs_info['zone']), 'N')
-    print(X_pixel, Y_line, X_geo, Y_geo, latlon[0], latlon[1])
-    pts.append(latlon)
-    # latlon 
-    # lon.append(myProj(X_geo, Y_geo, inverse=True))
-    # lon, lat = myProj(df['Meters East'].values, df['Meters South'].values, inverse=True)
+pts_in = []
+data = open(args[2]).read().strip()
+if data.startswith('POLYGON'):
+    data = data.split('((')[1].strip(')').strip(')').split(',')
+    X = [x.strip().split() for x in data]
+    pts_in.append([(int(x[0]), int(x[1])) for x in X])
+elif data.startswith('MULTIPOLYGON'):
+    data = data.split('(((')[1].strip(')').strip(')').strip(')').split(')) ((')
+    
+    for x in data:
+        X = x.strip().split()
+        pts_in.append([(int(X[i]), int(X[i+1])) for i in range(0, len(X), 2)])
+else:
+    err('unrecognized')        
 
-import simplekml
-pts2 = [(p[1], p[0]) for p in pts]
+Y = [[len(i), i] for i in pts_in]
+Y.sort(reverse=True)
+pts_in = [i[1] for i in Y]
+
 kml = simplekml.Kml()
-pol = kml.newpolygon(name="fire")
-pol.outerboundaryis.coords = pts2
-pol.polystyle.color = '990000ff'  # Red
+for k in range(len(pts_in)):
+    P = pts_in[k]
+    n_coords, pts = len(P), []
+    for i in range(n_coords):
+        X_pixel = P[i][1] # float(args[i2 + 3]) # col 0-idx
+        Y_line = P[i][0] # float(args[i2 + 2 ]) # row 0-idx
+        X_geo = GT[0] + X_pixel * GT[1] + Y_line * GT[2]
+        Y_geo = GT[3] + X_pixel * GT[4] + Y_line * GT[5]
+        latlon = utm.to_latlon(X_geo, Y_geo, int(srs_info['zone']), 'N')
+        print(X_pixel, Y_line, X_geo, Y_geo, latlon[0], latlon[1])
+        pts.append(latlon)
+        # latlon 
+        # lon.append(myProj(X_geo, Y_geo, inverse=True))
+        # lon, lat = myProj(df['Meters East'].values, df['Meters South'].values, inverse=True)
+    pts2 = [(p[1], p[0]) for p in pts]
+    pol = kml.newpolygon(name=("fire" + ("" if k == 0 else ('_' + str(k)))))
+    pol.outerboundaryis.coords = pts2
+    pol.polystyle.color = '990000ff'  # Red
 
+pfn = 'poly_' + args[1][:-4] + '.kml'
+print('+w', pfn)
+kml.save(pfn)
 
 '''
 # alternately, for adding points to the kmz

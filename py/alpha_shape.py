@@ -31,7 +31,7 @@ print("finding alpha shape..")
 alpha_shape = alphashape.alphashape(points, alpha); # create alpha shape
 print("alpha_shape", alpha_shape)
 print('+w', pfn) # write stuff to pickle file
-pickle.dump([X_bak, points, alpha, alpha_shape, patch_alpha], open(pfn, 'wb'))
+pickle.dump([points, alpha, alpha_shape, patch_alpha], open(pfn, 'wb'))
 
 alpha_pts = str(alpha_shape)# .strip('P').strip('O').strip('L').strip('Y').strip('G').strip('O').strip('N').strip().strip('(').strip('(').strip(')').strip(')').replace(',', '')
 apfn = fn + '_alpha_points.txt'
