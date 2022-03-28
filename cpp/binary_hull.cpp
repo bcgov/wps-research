@@ -38,6 +38,12 @@ int main(int argc, char ** argv){
   of << endl;
   of.close();
 
+  ofstream pf;
+  pf.open("alpha_shape_input_file.txt");
+  pf << fn;
+  pf.close();
+
+
   // run linux program qhull
   str r(exec("python3 ~/GitHub/bcws-psu-research/py/alpha_shape.py < qhull.dat"));
   strip(r);
