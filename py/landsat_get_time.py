@@ -1,4 +1,7 @@
-'''get timestamps from landsat and sentinel2'''
+'''get timestamps from landsat and sentinel2
+
+and put them in result filenames
+'''
 
 FOOT_H = 'footprint3.hdr'
 from misc import *
