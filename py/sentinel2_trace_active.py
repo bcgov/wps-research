@@ -47,6 +47,10 @@ for i in [150]: # [10, 20, 60]: # 90
     
     cmd = cd + 'class_onehot.exe ' + fn + '_flood4.bin_link.bin_recode.bin ' + str(POINT_THRES)
     print(cmd)
+    lines = os.popen(cmd).read().split('\n')
+    for line in lines:
+        print(line)
+    '''
     lines = None
     run('rm -f class_onehot.dat')
     if not exists('class_onehot.dat'):
@@ -54,9 +58,7 @@ for i in [150]: # [10, 20, 60]: # 90
         open('class_onehot.dat', 'wb').write(lines.encode())
     else:
         lines = open('class_onehot.dat').read()
-    lines = lines.split('\n')
-    for line in lines:
-        print(line)
+    '''
     for line in lines:
         w, f = line.strip().split(), None
         try:
@@ -69,12 +71,12 @@ for i in [150]: # [10, 20, 60]: # 90
             if True:
                 if f == fn + '_flood4.bin_link.bin_recode.bin_1.bin':
                     continue  # first class should be empty !
-                N = int(f.split('.')[-2].split('_')[-1])
-                print(N)
+                N = int(f.split('.')[-2].split('_')[-1]) # print(N)
                 if class_select is not None:
                     if N != class_select:
                         continue
-                # point count to see if we need to skip this thing???
+
+                # point count this class: skip if under threshold
                 c = ''.join(os.popen(cd + 'class_count.exe ' + f).read().split())
                 c = c.strip('{').strip('}').split(',')
                 if len(c) != 2:
@@ -85,12 +87,12 @@ for i in [150]: # [10, 20, 60]: # 90
                     print('********* SKIP this class,', n_px, ' below threshold: ', POINT_THRES) 
                     continue
           
-                # create the outline (alpha shape)
+                # create outline (alpha shape)
                 run(['python3',
                     pd + 'alpha_shape.py',
                     f])
 
-                # maybe plot
+                # plotting
                 png_f = f + '_1_1_1_rgb.png'
                 if not exists(f  + png_f) and WRITE_PNG:
                     run('python3 ' + pd + 'raster_plot.py ' + f + ' 1 1 1 1 1')
