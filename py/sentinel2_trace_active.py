@@ -1,8 +1,8 @@
 '''demo method to map an effective fire boundary
 
-
 n.b. would need to place results in separate folders for running in parallel (script needs to be cleaned up)'''
 POINT_THRES = 50 # don't get hulls for shapes with less than 50 points
+WRITE_PNG = False # set to true for debug visuals
 import os
 import sys
 from misc import err, run, pd, sep, exists, args
@@ -63,6 +63,7 @@ for i in [150]: # [10, 20, 60]: # 90
                     if N != class_select:
                         continue
 
+                # point count to see if we need to skip this thing???
                 c = ''.join(os.popen(cd + 'class_count.exe ' + f).read().split())
                 c = c.strip('{').strip('}').split(',')
                 if len(c) != 2:
@@ -76,20 +77,36 @@ for i in [150]: # [10, 20, 60]: # 90
                 apfn = f + '_alpha_shape.pkl'
                 if not exists(apfn):
                     lines = os.popen(cd + 'binary_hull.exe ' + f).readlines()
-                    run('rm qhull.dat')
-                    run('rm alpha_shape_input_file.txt')
+                    a = os.system('rm -f qhull.dat')
+                    a = os.system('rm -f alpha_shape_input_file.txt')
                     # run('mv alpha_shape.png alpha_shape_' + str(N) + '.png')
                     # run('mv alpha_shape.pkl alpha_shape_' + str(N) + '.pkl')
                     # run('mv alpha_points.txt alpha_points_' + str(N) + '.txt')
                 for line in lines:
                     print(line.strip())
+                
+                print('write png?')
                 png_f = f + '_1_1_1_rgb.png'
-                if not exists(f  + png_f):
+                if not exists(f  + png_f) and WRITE_PNG:
                     run('python3 ' + pd + 'raster_plot.py ' + f + ' 1 1 1 1 1')
                 # run('mv alpha_shape.png alpha_shape_' + str(N) + '.png')
                 # run('mv alpha_shape.pkl alpha_shape_' + str(N) + '.pkl')
 
+                print('copy mapinfo', fn[:-4] + '.hdr', f[:-4] + '.hdr') #hdr_fn(fn), hdr_fn(f))
+                ptfn = f + '_alpha_points.txt'
                 # print out the coords here and pass to KML generator! 
+                cmd = ['python3 ' + pd + 'envi_header_copy_mapinfo.py',
+                        fn[:-4] + '.hdr',
+                        f[:-4] + '.hdr']
+                print(cmd)
+                run(cmd)
+
+                print('pixel loc')
+                run(['python3',
+                     pd + 'raster_pixel_loc.py',
+                     f,
+                     open(ptfn).read().strip()])
+
             except:
                 pass
-    rm('class_onehot.dat')
+    a = os.system('rm -f class_onehot.dat')

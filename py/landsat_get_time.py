@@ -57,6 +57,5 @@ for b in bn:
     if not exist(oh):
         run('cp ' + hf + ' ' + oh)
 
-
     run('python3 ' + pd + 'envi_header_copy_mapinfo.py ' + FOOT_H + ' ' + oh)
     ci += 1
