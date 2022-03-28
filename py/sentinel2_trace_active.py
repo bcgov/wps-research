@@ -1,4 +1,7 @@
-'''demo method to map an effective fire boundary'''
+'''demo method to map an effective fire boundary
+
+
+n.b. would need to place results in separate folders for running in parallel (script needs to be cleaned up)'''
 POINT_THRES = 50 # don't get hulls for shapes with less than 50 points
 import os
 import sys
@@ -73,6 +76,8 @@ for i in [150]: # [10, 20, 60]: # 90
                 apfn = f + '_alpha_shape.pkl'
                 if not exists(apfn):
                     lines = os.popen(cd + 'binary_hull.exe ' + f).readlines()
+                    run('rm qhull.dat')
+                    run('rm alpha_shape_input_file.txt')
                     # run('mv alpha_shape.png alpha_shape_' + str(N) + '.png')
                     # run('mv alpha_shape.pkl alpha_shape_' + str(N) + '.pkl')
                     # run('mv alpha_points.txt alpha_points_' + str(N) + '.txt')
@@ -87,3 +92,4 @@ for i in [150]: # [10, 20, 60]: # 90
                 # print out the coords here and pass to KML generator! 
             except:
                 pass
+    rm('class_onehot.dat')
