@@ -1,20 +1,21 @@
 '''get timestamps from landsat and sentinel2'''
 
+FOOT_H = 'footprint3.hdr'
 from misc import *
 args = ['', 'landsat.bin_accumulate.bin_dedup.hdr']
 bn = band_names(hdr_fn(args[1]))
 
+ci = 1
 for b in bn:
     w = b.strip().strip('.').strip(sep).split(sep)
     print(w)
-    base, TS = '', ''
+    base, TS, TYPE = '', '', ''
     if w[1][0] == 'L':
-        # landsat
+        TYPE = 'landsats'
         base = sep.join(w[:2])
         txt = base + sep + w[1] + '_MTL.txt'
         if not exist(txt):
             err('file not found')
-
         d, t = None, None
         lines = [x.strip() for x in open(txt).readlines()]
         for line in lines:
@@ -28,6 +29,7 @@ for b in bn:
         TS = '-'.join([yyyy, mm, dd, h, m, s])
     elif w[1][0] == 'S':
         # sentinel2
+        TYPE = 'sentinel'
         d,t  = w[1].split('_')[2].split('T')
         yyyy, mm, dd = d[0:4], d[4:6], d[6:8]
         h, m, s = t[:2], t[2:4], t[4:6]
@@ -36,4 +38,22 @@ for b in bn:
         err('unrecognized')
     x = [int(i) for i in TS.split('-')]
     L = utc_to_pst(x[0], x[1], x[2], x[3], x[4], x[5])
-    print('   **', L)
+    #print('   **', L)
+    zs = str(ci).zfill(3)
+    fn = 'landsat.bin_accumulate.bin_dedup.bin_' + zs + '.bin'
+    #print(fn)
+
+    hf = hdr_fn(fn)
+    print(fn, hf)
+
+    of = 'result_' + zs + '_' + TYPE + '_' + TS + '.bin'
+    oh = 'result_' + zs + '_' + TYPE + '_' + TS + '.hdr'
+
+    if not exist(of):
+        run('cp ' + fn + ' ' + of)
+    if not exist(oh):
+        run('cp ' + hf + ' ' + oh)
+
+
+    run('python3 ' + pd + 'envi_header_copy_mapinfo.py ' + FOOT_H + ' ' + oh)
+    ci += 1
