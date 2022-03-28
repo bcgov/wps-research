@@ -37,10 +37,13 @@ if data.startswith('POLYGON'):
     X = [x.strip().split() for x in data]
     pts_in.append([(int(x[0]), int(x[1])) for x in X])
 elif data.startswith('MULTIPOLYGON'):
+    data = data.replace(')), ((', ')) ((')
     data = data.split('(((')[1].strip(')').strip(')').strip(')').split(')) ((')
     for x in data:
         X = x.strip().split()
-        pts_in.append([(int(X[i].strip(',')), int(X[i+1].strip(','))) for i in range(0, len(X), 2)])
+        pts_in.append([(int(X[i].strip(',')),
+                        int(X[i+1].strip(',')))
+                        for i in range(0, len(X), 2)])
 else:
     err('unrecognized')
 
