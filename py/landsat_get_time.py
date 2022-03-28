@@ -1,0 +1,39 @@
+'''get timestamps from landsat and sentinel2'''
+
+from misc import *
+args = ['', 'landsat.bin_accumulate.bin_dedup.hdr']
+bn = band_names(hdr_fn(args[1]))
+
+for b in bn:
+    w = b.strip().strip('.').strip(sep).split(sep)
+    print(w)
+    base, TS = '', ''
+    if w[1][0] == 'L':
+        # landsat
+        base = sep.join(w[:2])
+        txt = base + sep + w[1] + '_MTL.txt'
+        if not exist(txt):
+            err('file not found')
+
+        d, t = None, None
+        lines = [x.strip() for x in open(txt).readlines()]
+        for line in lines:
+            w = [x.strip() for x in line.split('=')]
+            if w[0] == 'DATE_ACQUIRED':
+                d = w[1]
+            if w[0] == 'SCENE_CENTER_TIME':
+                t = w[1]
+        yyyy, mm, dd = d.split('-')
+        h, m, s = t.strip('"').split('.')[0].split(':')
+        TS = '-'.join([yyyy, mm, dd, h, m, s])
+    elif w[1][0] == 'S':
+        # sentinel2
+        d,t  = w[1].split('_')[2].split('T')
+        yyyy, mm, dd = d[0:4], d[4:6], d[6:8]
+        h, m, s = t[:2], t[2:4], t[4:6]
+        TS = '-'.join([yyyy, mm, dd, h, m, s])
+    else:
+        err('unrecognized')
+    x = [int(i) for i in TS.split('-')]
+    L = utc_to_pst(x[0], x[1], x[2], x[3], x[4], x[5])
+    print('   **', L)
