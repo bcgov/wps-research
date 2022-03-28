@@ -36,6 +36,7 @@ for i in [150]: # [10, 20, 60]: # 90
     print(cmd)
 
     lines = None
+    run('rm -f class_onehot.dat')
     if not exists('class_onehot.dat'):
         lines = os.popen(cmd).read()
         open('class_onehot.dat', 'wb').write(lines.encode())
@@ -53,7 +54,7 @@ for i in [150]: # [10, 20, 60]: # 90
         except:
             pass
         if f:
-            try:
+            if True:
                 if f == fn + '_flood4.bin_link.bin_recode.bin_1.bin':
                     continue  # first class should be empty !
                 N = int(f.split('.')[-2].split('_')[-1])
@@ -71,33 +72,25 @@ for i in [150]: # [10, 20, 60]: # 90
                 if n_px < POINT_THRES:
                     print('********* SKIP this class,', n_px, ' below threshold: ', POINT_THRES) 
                     continue
+          
+                # create the outline (alpha shape)
+                run(['python3',
+                    pd + 'alpha_shape.py',
+                    f])
 
-                apfn = f + '_alpha_shape.pkl'
-                if not exists(apfn):
-                    lines = os.popen(cd + 'binary_hull.exe ' + f).readlines()
-                    a = os.system('rm -f qhull.dat')
-                    a = os.system('rm -f alpha_shape_input_file.txt')
-                for line in lines:
-                    print(line.strip())
-                
-                print('write png?')
+                # maybe plot
                 png_f = f + '_1_1_1_rgb.png'
                 if not exists(f  + png_f) and WRITE_PNG:
                     run('python3 ' + pd + 'raster_plot.py ' + f + ' 1 1 1 1 1')
 
-                print('copy mapinfo', fn[:-4] + '.hdr', f[:-4] + '.hdr') #hdr_fn(fn), hdr_fn(f))
-                ptfn = f + '_alpha_points.txt'
-                # print out the coords here and pass to KML generator! 
-                cmd = ['python3 ' + pd + 'envi_header_copy_mapinfo.py',
+                # copy map info
+                run(['python3 ' + pd + 'envi_header_copy_mapinfo.py',
                         fn[:-4] + '.hdr',
-                        f[:-4] + '.hdr']
-                print(cmd)
-                run(cmd)
-                print('pixel loc')
+                        f[:-4] + '.hdr'])
+
+                # generate KML
+                ptfn = f + '_alpha_points.txt'
                 run(['python3',
                      pd + 'raster_pixel_loc.py',
                      f,
-                     open(ptfn).read().strip()])
-            except:
-                pass
-    a = os.system('rm -f class_onehot.dat')
+                     ptfn]) # open(ptfn).read().strip()])
