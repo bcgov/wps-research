@@ -53,7 +53,7 @@ for i in [150]: # [10, 20, 60]: # 90
         if f:
             try:
                 if f == fn + '_flood4.bin_link.bin_recode.bin_1.bin':
-                    continue
+                    continue  # first class should be empty !
                 N = int(f.split('.')[-2].split('_')[-1])
                 print(N)
                 if class_select is not None:
@@ -70,21 +70,20 @@ for i in [150]: # [10, 20, 60]: # 90
                     print('********* SKIP this class,', n_px, ' below threshold: ', POINT_THRES) 
                     continue
 
-                if not exists('alpha_shape_' + str(N) + '.pkl'):
+                apfn = f + '_alpha_shape.pkl'
+                if not exists(apfn):
                     lines = os.popen(cd + 'binary_hull.exe ' + f).readlines()
-                    run('mv alpha_shape.png alpha_shape_' + str(N) + '.png')
-                    run('mv alpha_shape.pkl alpha_shape_' + str(N) + '.pkl')
-                    run('mv alpha_points.txt alpha_points_' + str(N) + '.txt')
+                    # run('mv alpha_shape.png alpha_shape_' + str(N) + '.png')
+                    # run('mv alpha_shape.pkl alpha_shape_' + str(N) + '.pkl')
+                    # run('mv alpha_points.txt alpha_points_' + str(N) + '.txt')
                 for line in lines:
                     print(line.strip())
-                print("png_f", png_f)
                 png_f = f + '_1_1_1_rgb.png'
-                if not exists(png_f):
+                if not exists(f  + png_f):
                     run('python3 ' + pd + 'raster_plot.py ' + f + ' 1 1 1 1 1')
-                run('mv alpha_shape.png alpha_shape_' + str(N) + '.png')
-                run('mv alpha_shape.pkl alpha_shape_' + str(N) + '.pkl')
+                # run('mv alpha_shape.png alpha_shape_' + str(N) + '.png')
+                # run('mv alpha_shape.pkl alpha_shape_' + str(N) + '.pkl')
 
                 # print out the coords here and pass to KML generator! 
             except:
                 pass
-    # run('mv test.bin_flood4.bin_link.bin_recode.bin_wheel.bin_1_2_3_rgb.png test' + str(i) + '.png')

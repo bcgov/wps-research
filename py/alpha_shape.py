@@ -8,7 +8,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 from descartes import PolygonPatch
 from misc import args, err, run, pd
-pfn = 'alpha_shape.pkl'
+
+fn = open('alpha_shape_input_file.txt').read().strip()
+
+pfn = fn + '_alpha_shape.pkl'
 
 '''
 if len(args) < 2:
@@ -38,7 +41,7 @@ for i in range(N):
 
 points = np.array(points)
 
-print("optimizing alpha..")
+# print("optimizing alpha..")
 alpha = 1. / 50. # 0.95 * alphashape.optimizealpha(points) # optimal alpha
 patch_alpha = .2
 print("finding alpha shape..")
@@ -48,17 +51,19 @@ print('+w', pfn) # write stuff to pickle file
 pickle.dump([X_bak, points, alpha, alpha_shape, patch_alpha], open(pfn, 'wb'))
 
 alpha_pts = str(alpha_shape).strip('P').strip('O').strip('L').strip('Y').strip('G').strip('O').strip('N').strip().strip('(').strip('(').strip(')').strip(')').replace(',', '')
-print('+w alpha_points.txt')
-open('alpha_points.txt', 'wb').write(alpha_pts.encode())
+apfn = fn + '_alpha_points.txt'
+print('+w', apfn)
+open(apfn, 'wb').write(alpha_pts.encode())
 if True:
-    print('+w alpha_shape.png')
+    pfn = fn + '_alpha_points.png'
+    print('+w', pfn)
     fig, ax = plt.subplots() # plot init
     ax.scatter(*zip(*points)) # plot inputs
     ax.add_patch(PolygonPatch(alpha_shape, alpha=patch_alpha)) # plot alpha shape
-    plt.savefig("alpha_shape.png")
+    plt.savefig(pfn)
 
 ''' remember to look at:
 [1] (2007) Concave hull: A k-nearest neighbours approach for
 the computation of the region occupied by a set of points.
     [2] "On the shape of a set of points in the plane" Herbert Edelsbrunner, et al" 
-'''
+''' 
