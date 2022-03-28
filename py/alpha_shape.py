@@ -7,38 +7,21 @@ import alphashape
 import numpy as np
 import matplotlib.pyplot as plt
 from descartes import PolygonPatch
-from misc import args, err, run, pd
+from misc import args, err, run, pd, read_binary
 
-fn = open('alpha_shape_input_file.txt').read().strip()
-
+fn = args[1] # fn = open('alpha_shape_input_file.txt').read().strip()
 pfn = fn + '_alpha_shape.pkl'
+samples, lines, bands, data = read_binary(fn)
+samples, lines, bands = int(samples), int(lines), int(bands)
 
-'''
-if len(args) < 2:
-    err('python3 alphashape.py ' +
-        '# please check ../cpp/binary_hull.cpp for parameters')
-'''
-ci, x = 0, None
-for line in fileinput.input():
-    if ci == 0: 
-        X = copy.deepcopy(line)
-    ci += 1
+if bands != 1:
+    err('expected 1-band image')
 
-X_bak = copy.deepcopy(X)
-X = X.strip().split()
-N = int(X[1])
-X = X[2:]
-
-if len(X) != 2*N:
-    err("bad data count")
-X = [float(x) for x in X]
-
-ci, points = 0, []
-for i in range(N):
-    #points.append((X[ci + 1], -X[ci]))
-    points.append((X[ci], X[ci+1]))
-    ci += 2
-
+points = []
+for i in range(lines):
+    for j in range(samples):
+        if data[i * samples + j] == 1.:
+            points.append((i, j))
 points = np.array(points)
 
 # print("optimizing alpha..")
@@ -50,7 +33,7 @@ print("alpha_shape", alpha_shape)
 print('+w', pfn) # write stuff to pickle file
 pickle.dump([X_bak, points, alpha, alpha_shape, patch_alpha], open(pfn, 'wb'))
 
-alpha_pts = str(alpha_shape).strip('P').strip('O').strip('L').strip('Y').strip('G').strip('O').strip('N').strip().strip('(').strip('(').strip(')').strip(')').replace(',', '')
+alpha_pts = str(alpha_shape)# .strip('P').strip('O').strip('L').strip('Y').strip('G').strip('O').strip('N').strip().strip('(').strip('(').strip(')').strip(')').replace(',', '')
 apfn = fn + '_alpha_points.txt'
 print('+w', apfn)
 open(apfn, 'wb').write(alpha_pts.encode())

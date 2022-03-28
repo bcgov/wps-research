@@ -11,9 +11,10 @@ from osgeo import osr
 from osgeo import gdal
 import matplotlib.pyplot as plt
 from misc import args, err, run
-if len(args) < 4:
-    err("python3 raster pixel location [input image name] [row] [col].. " +
-        "..plus additional [row] [col] pairs as needed")
+if len(args) < 3:
+    err("python3 raster_pixel_location.py [input image name] [alpha points file]")
+# need to handle multipolygon case
+
 # open image and get geotransform
 img = args[1]
 if not img: err('pls check input file')
