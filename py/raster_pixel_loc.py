@@ -1,5 +1,6 @@
 '''determine pixel location (lat lon) for point within a raster.
-Uses map info from the raster, but not the raster data itself'''
+Uses map info from the raster, but not the raster data itself
+20220328 added support for multipolygon case'''
 import os
 import sys
 import utm
@@ -14,7 +15,6 @@ import matplotlib.pyplot as plt
 from misc import args, err, run
 if len(args) < 3:
     err("python3 raster_pixel_location.py [input image name] [alpha points file]")
-# need to handle multipolygon case
 
 # open image and get geotransform
 img = args[1]
@@ -23,9 +23,7 @@ src = gdal.Open(img)
 GT = src.GetGeoTransform()
 print('X_pixel,Y_line,X_geo,Y_geo,Lat,Lon')
 from pyproj import Proj
-d = os.popen('gdalsrsinfo -o proj4 ' + img).read().strip()
-print(d)
-# myProj = Proj(os.popen('gdalsrsinfo -o proj4 ' + img).read().strip())
+d = os.popen('gdalsrsinfo -o proj4 ' + img).read().strip() # print(d)
 
 w = d.split()
 w = [x.strip('+').split('=') for x in w]
@@ -40,17 +38,18 @@ if data.startswith('POLYGON'):
     pts_in.append([(int(x[0]), int(x[1])) for x in X])
 elif data.startswith('MULTIPOLYGON'):
     data = data.split('(((')[1].strip(')').strip(')').strip(')').split(')) ((')
-    
     for x in data:
         X = x.strip().split()
-        pts_in.append([(int(X[i]), int(X[i+1])) for i in range(0, len(X), 2)])
+        pts_in.append([(int(X[i].strip(',')), int(X[i+1].strip(','))) for i in range(0, len(X), 2)])
 else:
     err('unrecognized')        
 
+# let's output the largest of multipolygons first
 Y = [[len(i), i] for i in pts_in]
 Y.sort(reverse=True)
 pts_in = [i[1] for i in Y]
 
+# prepare to write KML
 kml = simplekml.Kml()
 for k in range(len(pts_in)):
     P = pts_in[k]
@@ -63,9 +62,6 @@ for k in range(len(pts_in)):
         latlon = utm.to_latlon(X_geo, Y_geo, int(srs_info['zone']), 'N')
         print(X_pixel, Y_line, X_geo, Y_geo, latlon[0], latlon[1])
         pts.append(latlon)
-        # latlon 
-        # lon.append(myProj(X_geo, Y_geo, inverse=True))
-        # lon, lat = myProj(df['Meters East'].values, df['Meters South'].values, inverse=True)
     pts2 = [(p[1], p[0]) for p in pts]
     pol = kml.newpolygon(name=("fire" + ("" if k == 0 else ('_' + str(k)))))
     pol.outerboundaryis.coords = pts2
@@ -75,12 +71,10 @@ pfn = 'poly_' + args[1][:-4] + '.kml'
 print('+w', pfn)
 kml.save(pfn)
 
-'''
-# alternately, for adding points to the kmz
+'''# alternately, for adding points to the kmz
 for p in pts:
     print("point", p)
     pp = kml.newpoint(name='Point: {0}{0}'.format(p[1], p[0])) # lon,lat))
     pp.coords = [(p[1],p[0])]
-    pp.style=simplekml.Style()
+    pp.style = simplekml.Style()
 '''
-kml.save('poly_' +  ('.'.join(args[1].split('.')[:-1])) + '.kml')
