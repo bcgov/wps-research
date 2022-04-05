@@ -10,8 +10,13 @@ import multiprocessing as mp
 import matplotlib.pyplot as plt
 args = sys.argv
 sep = os.path.sep
-pd = sep.join(__file__.split(sep)[:-1]) + sep  # python directory i.e. path to here
-cd = sep.join(pd.split(sep)[:-2] + ['cpp']) + sep
+abspath = os.path.abspath
+def get_pd():
+    return os.path.abspath(sep.join(abspath(__file__).split(sep)[:-1])) + sep  # python directory i.e. path to here
+pd = get_pd()
+def get_cd():
+    return os.path.abspath(sep.join(abspath(__file__).split(sep)[:-2]) + sep + 'cpp') + sep
+cd = get_cd()
 
 def file_size(f): # get size of a file
     return os.stat(f).st_size
