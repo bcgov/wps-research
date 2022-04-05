@@ -26,7 +26,7 @@ def err(c):
     print('Error:', c); sys.exit(1)
 
 def run(c, quit_on_nonzero=True):
-    print('run("' + str(c) + '")')
+    print('run(' + str(c) + ')')
     c = ' '.join([str(i) for i in c]) if type(c) == list else c
     a = os.system(c)
     if a != 0 and quit_on_nonzero:
