@@ -77,6 +77,7 @@ extern zprManager * myZprManager = NULL;
 static void quitme(){
   cout << "quitme\n";
 
+  /* add support for writing back, if modified a 1-band image */
   if((int)IMG_FN.find("_x3.bin") < 0){
   }
   else{
@@ -111,8 +112,10 @@ static void quitme(){
       else{
 	printf("Warning: one-band result changed, overwriting with new result\n");
         cmd = (str("cp -v ") + band1_fn + str(" ") + old_fn);
+	cout << cmd << endl;
 	ret = system(cmd.c_str());
 	cmd = str("rm " ) + old_fn + str(".ml");
+	cout << cmd << endl;
 	ret = system(cmd.c_str());
       }
     }
