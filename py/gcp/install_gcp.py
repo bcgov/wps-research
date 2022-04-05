@@ -34,3 +34,7 @@ if gsutil != gsutil_t:
     err('expected: ' + gsutil + ' == ' + gsutil_t)
 else:
     print('gsutil installed')
+
+''' do we need this step:?
+     ./google-cloud-sdk/bin/gcloud init
+'''
