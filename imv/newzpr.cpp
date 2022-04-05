@@ -74,6 +74,51 @@ int bands_per_frame; // bands per frame if known, should autodetect this
 
 extern zprManager * myZprManager = NULL;
 
+static void quitme(){
+  cout << "quitme\n";
+
+  if((int)IMG_FN.find("_x3.bin") < 0){
+  }
+  else{
+    str old_fn(IMG_FN.substr(0, IMG_FN.find("_x3.bin")));
+    cout << "old_fn: " << old_fn << endl;
+      
+    size_t nr, nc, nb;
+    string hfn(getHeaderFileName(old_fn));
+    parseHeaderFile(hfn, nr, nc, nb);
+      
+   str band1_fn(IMG_FN + str("_001.bin"));
+   if(nb == 1){
+      str x(exec("which vri_rasterize.exe"));
+      x = trim(x, '\\r');
+      x = trim(x, '\\n');
+      x = trim(x, ' ');
+      if(!exists(x)){
+        printf("Error: please add bcws-psu-research/cpp folder to bash $PATH and try again\n");
+        exit(1);
+      }
+      str cmd(str("unstack.exe ") + IMG_FN);
+      int ret = system(cmd.c_str());
+      if(!exists(band1_fn)){
+        printf("Error: file not found: %s\n", band1_fn.c_str());
+        exit(1);
+      }
+      cmd = str("diff " ) + str(old_fn) + str(" ") + str(band1_fn);
+      str result(exec(cmd.c_str()));
+      result = trim(result, ' ');
+      if(result == ""){
+      }
+      else{
+	printf("Warning: one-band result changed, overwriting with new result\n");
+        cmd = (str("cp -v ") + band1_fn + str(" ") + old_fn);
+	ret = system(cmd.c_str());
+	cmd = str("rm " ) + old_fn + str(".ml");
+	ret = system(cmd.c_str());
+      }
+    }
+  }
+}
+
 void GLERROR(){
   cout << "GLERROR\n";
   /*
@@ -609,10 +654,10 @@ void zprInstance::processString(){
     }
     SUB_MYIMG->initFrom(dat3, SUB_MM, SUB_MM, IMG_NB);
     ((glImage *)SUB_GLIMG)->rebuffer();
-    printf("Overwrote NAN under subscene window\n");
+    printf("Overwrote with NAN under subscene window\n");
   }
 
-    // n string: overwrite NAN under window
+  // z string: overwrite with 0-value under sub-scene window
   if(strcmpz(console_string, "z\0") && console_string[1] == '\0'){
     // big-data resilient read!
     SA<float> * dat3 = SUB;
@@ -634,7 +679,6 @@ void zprInstance::processString(){
     printf("Overwrote Zero-values under subscene window\n");
   }
 
-
   // m string: overwrite NAN under analysis window..
   if(strcmpz(console_string, "m\0") && console_string[1] == '\0'){
     // big-data resilient read!
@@ -654,7 +698,7 @@ void zprInstance::processString(){
     }
     //SUB_MYIMG->initFrom(dat3, SUB_MM, SUB_MM, IMG_NB);
     //((glImage *)SUB_GLIMG)->rebuffer();
-    printf("GOT HERE2 !!!!!!!!!!!\n");
+    printf("Overwrote NAN under analysis window\n");
   }
 
 
