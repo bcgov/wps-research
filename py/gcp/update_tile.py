@@ -10,7 +10,9 @@ The "gcp rsync" command is helpful for avoiding re-downloading the same data
 '''
 import os
 import sys
-sys.path.append("..")
+sep = os.path.sep
+my_path = sep.join(os.path.abspath(__file__).split(sep)[:-1]) + sep
+sys.path.append(my_path + "..")
 from datetime import date
 from misc import run, pd, sep, exists, args, cd
 
@@ -21,6 +23,8 @@ if True:
                    '[min date yyyymmdd]',
                    '[max date yyyymmdd]',
                    '[optional arg: no download!]']))
+if len(args) < 6:
+    sys.exit(1)
 
 TILE_ID = 'T09VUE' if len(args) < 2 else args[1]
 MAX_CLOUD = 10. if len(args) < 3 else args[2]  # max percent cloud cover to consider!
