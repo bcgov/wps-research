@@ -38,3 +38,12 @@ else:
 ''' do we need this step:?
      ./google-cloud-sdk/bin/gcloud init
 '''
+
+
+# install crcmod
+try:
+    import crcmod
+except Exception:
+    run('sudo apt-get install gcc python3-dev python3-setuptools')
+    run('sudo pip3 uninstall crcmod')
+    run('sudo pip3 install --no-cache-dir -U crcmod')
