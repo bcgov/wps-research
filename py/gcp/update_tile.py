@@ -172,5 +172,5 @@ for m in matches:
                   'rsync -r',
                   base_url[m[1]],
                   out_dir]
-    a = run(simple_cmd)
+    a = run(' '.join(simple_cmd))
 '''don't forget what fixedwidth was for this is inefficient'''
