@@ -12,7 +12,9 @@ Should have a path variable for adjusting this:
 '''
 import os
 import sys
-sys.path.append("..")
+sep = os.path.sep
+my_path = sep.join(os.path.abspath(__file__).split(sep)[:-1]) + sep
+sys.path.append(my_path + "..")
 from misc import sep, parfor, exists, args, run
 N_THREADS = None # default to number of CPU threads (could enter number to override here)
 
