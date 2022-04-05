@@ -12,8 +12,8 @@ Should have a path variable for adjusting this:
 '''
 import os
 import sys
-from ../misc import sep, parfor, exists, args
-
+sys.path.append("..")
+from misc import sep, parfor, exists, args, run
 N_THREADS = None # default to number of CPU threads (could enter number to override here)
 
 n_l1 = 0 # number of L1 folders
@@ -51,7 +51,11 @@ def fix_s2(f):  # add folders expected by Sen2Cor! Gcp omits empty dirs
 
 def run_sen2cor(f):
     fix_s2(f)
-    L2A = '/home/' + os.popen('whoami').read().strip() + '/sen2cor/2.5/Sen2Cor-02.05.05-Linux64/bin/L2A_Process'
+    L2A = os.popen('which L2A_Process').read().strip()
+    if not exists(L2A):
+        err('please install sen2cor and try again')
+    L2A = os.path.abspath(L2A)
+    # L2A = '/home/' + os.popen('whoami').read().strip() + '/sen2cor/2.5/Sen2Cor-02.05.05-Linux64/bin/L2A_Process'
     cmd = (L2A + ' ' + f)
     return run(cmd)
 
