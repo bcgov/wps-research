@@ -12,7 +12,8 @@ Should have a path variable for adjusting this:
 '''
 import os
 import sys
-from ../misc import sep, parfor, exists
+from ../misc import sep, parfor, exists, args
+
 N_THREADS = None # default to number of CPU threads (could enter number to override here)
 
 n_l1 = 0 # number of L1 folders
@@ -35,6 +36,10 @@ for f in files:
 print("number of L1:", n_l1)
 print("number of l2:", n_l2)
 print("number to do:", len(do))
+
+if len(args) > 1:
+    err('usage: python3 run_sen2cor.py [optional arg for info-only mode]' +
+        'info-only mode does not run sen2cor')
 
 def fix_s2(f):  # add folders expected by Sen2Cor! Gcp omits empty dirs
     def md(f):
