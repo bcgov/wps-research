@@ -25,6 +25,14 @@
 #define _cwd getcwd
 #endif
 
+inline char separator(){
+#ifdef _WIN32
+    return '\\';
+#else
+    return '/';
+#endif
+}
+
 /* shorthand for for loops from 0 to N */
 #define for0(i,n) for(i = 0; i < n; i++)
 

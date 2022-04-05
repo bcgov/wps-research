@@ -216,8 +216,7 @@ static void initLighting(){
   GLERROR();
 }
 
-static void quitme(){
-}
+static void quitme();
 
 class zprManager{
 
