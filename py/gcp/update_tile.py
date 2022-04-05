@@ -23,7 +23,7 @@ if True:
                    '[min date yyyymmdd]',
                    '[max date yyyymmdd]',
                    '[optional arg: no download!]']))
-if len(args) < 6:
+if len(args) < 5:
     sys.exit(1)
 
 TILE_ID = 'T09VUE' if len(args) < 2 else args[1]
