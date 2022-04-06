@@ -39,7 +39,8 @@ Includes A) data integration B) routines applying or implementing supervised and
 
 # Sample exploratory results
 * [Predicting some BCGW layers from Sentinel-2 Imagery using RandomForest classifier](https://github.com/bcgov/bcws-psu-research/blob/master/data/data_combined/Readme.md)
-Other classifiers that may be used: Minimum Dist; Max Likelihood; Spectral Angle Mapper; Spectral Information Divergence; SVM; neural net
+ 
+Other classifiers that could be used: Minimum Dist; Max Likelihood; Spectral Angle Mapper; Spectral Information Divergence; SVM; neural net
 
 # Collaborators and Contributors:
 * Dana Hicks, BCWS
