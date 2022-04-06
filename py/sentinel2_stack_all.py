@@ -183,9 +183,7 @@ for safe in safes:
     raster_files.append(sfn) # reorder is "in-place"... so not + '_reorder.bin')
     # sys.exit(1) # would turn this on to debug one frame
 
-    # reorder bands should go here
-    # for s in safes:
-    #     print(s)
+    # should check if "sfn" exists before doing anything on this folder.
 
 if len(args) < 2:
     # cat the bin files together, combining headers
