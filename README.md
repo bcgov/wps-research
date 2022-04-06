@@ -15,7 +15,7 @@ Includes A) data integration B) routines applying or implementing supervised and
 ## Forest change detection w Canadian Space Agency (CSA) Radarsat Constellation Mission (RCM) compact-pol SAR data
 <img src="data/output/difference.gif" width="640">
 
-##  Interactive mapping w BCWS FTL MVP software: end-to-end decision support system (DSS)
+##  Interactive mapping w BCWS FTL MVP software: end-to-end DSS
 <img src="data/output/20210127_mvp.png" width="650" height="264">
 
 ## Presentations
