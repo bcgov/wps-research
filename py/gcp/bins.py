@@ -7,7 +7,7 @@ from misc import run, args
 
 print('python3 sentinel2_imv.py [optional arg: just list sorted dates]')
 
-cmd = 'find ./ -name "*_10m.bin"'
+cmd = 'find ./ -name "*L2A_EPSG*_10m.bin"'
 X = [x.strip().split('_') for x in os.popen(cmd).readlines()]
 X = [[x[2], x] for x in X]
 X.sort()
