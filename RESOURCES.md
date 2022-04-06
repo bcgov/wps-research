@@ -65,3 +65,6 @@
 * [NVIDIA: even easier introduction to CUDA](https://developer.nvidia.com/blog/even-easier-introduction-cuda/)
 * [Research software engineering with Python](https://merely-useful.tech/py-rse/index.html)
 * [Data Science at command line](https://datascienceatthecommandline.com/2e/)
+
+# How to get into Linux if you work in Windows
+[Windows Subsystem for Linux (Ubuntu)](https://ubuntu.com/tutorials/install-ubuntu-on-wsl2-on-windows-10#1-overview)
