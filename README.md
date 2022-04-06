@@ -1,7 +1,7 @@
 [![Lifecycle:Maturing](https://img.shields.io/badge/Lifecycle-Maturing-007EC6)](<Redirect-URL>)
-
-# Welcome to bcws-psu-research
 Motto: "where the future is being made, today!"
+# Welcome to bcws-psu-research
+Remote sensing R&D Engineering in support of BC Wildfire Predictive Services Unit
 
 Methods and Systems for Image Analysis developed in partnership with:
 * Digital Platforms and Data Division (DPDD), Office of The BC Chief Information Officer (OCIO) 
