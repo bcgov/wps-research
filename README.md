@@ -24,11 +24,14 @@ Includes A) routines applying or implementing supervised and unsupervised classi
 * Fuel Type Layer Project, BC Gov Fire Behaviour CoP, Feb 22 2021
 * Can We Predict Forest Fires Before They Start?, BC Gov Data Science CoP, Nov 24 2020
 
-##  Interactive mapping w BCWS FTL MVP software: end-to-end decision support system (DSS)
-<img src="data/output/20210127_mvp.png" width="650" height="264">
+## Fire progression mapping with Sentinel-2 and Landsat 7/8
+<img src="data/output/sentinel2_and_landsat.gif" width="640">
 
 ## Forest change detection w Canadian Space Agency (CSA) Radarsat Constellation Mission (RCM) compact-pol SAR data
 <img src="data/output/difference.gif" width="640">
+
+##  Interactive mapping w BCWS FTL MVP software: end-to-end decision support system (DSS)
+<img src="data/output/20210127_mvp.png" width="650" height="264">
 
 # BCWS FTL MVP
 [Please click here for entry point for BCWS FTL MVP software](https://github.com/bcgov/bcws-psu-research/blob/master/imv/)
