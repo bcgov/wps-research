@@ -5,7 +5,7 @@
 * need instruction on general use:
 
 '''
- python3 update_tile.py
- python3 run_sen2cor.py
- python3 ~/GitHub/bcws-psu-research/py/sentinel2_stack_all.py
+ python3 ~/GitHub/bcws-psu-research/py/gcp/update_tile.py T10UFB 100.  20210615 20210815 
+ python3 ~/GitHub/bcws-psu-research/py/gcp/run_sen2cor.py 
+ python3 ~/GitHub/bcws-psu-research/py/sentinel2_stack_all.py  1 
 '''
