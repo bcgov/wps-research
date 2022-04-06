@@ -130,9 +130,9 @@ for safe in safes:
         return 0
 
     a = parfor(resample,
-              [[m20, m10, m20r], # resample the 20m
-              [m60, m10, m60r]],
-              2) # resample the 60m
+               [[m20, m10, m20r], # resample the 20m
+                [m60, m10, m60r]],
+               2) # resample the 60m
 
     sfn = (safe + sep + m10.split(sep)[-1].replace("_10m", "")[:-4]
             + '_10m.bin')  # name of stacked file
