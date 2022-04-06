@@ -2,10 +2,7 @@
 
 Remote-sensing Science R&D Engineering supporting BC Wildfire Predictive Services Unit. Motto: "where the future is being made, today!"
 # Welcome to bcws-psu-research
-Methods and Systems for Image Analysis developed with partners:
-* Digital Platforms and Data Division (DPDD), Office of The BC Chief Information Officer (OCIO) 
-* BC Wildfire Service (BCWS) Predictive Services Unit (PSU)
-* Thompson Rivers University (TRU)
+Methods and Systems for Image Analysis developed with partners incl. Digital Platforms and Data Division (DPDD) / Office of The BC Chief Information Officer (OCIO), BC Wildfire Service (BCWS) Predictive Services Unit (PSU) and Thompson Rivers University (TRU)
 
 supporting BC Wildfire Service (BCWS) Predictive Services Unit (PSU) program. See also: [Wildfire Predictive Services](https://github.com/bcgov/wps)
 
