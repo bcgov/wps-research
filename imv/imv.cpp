@@ -330,14 +330,18 @@ int main(int argc, char ** argv){
     printf("bands_per_frame %zu\n", bands_per_frame);
   }
 
+  /* default vis section */
   if(nb == 66){
-    myZpr2->setrgb(36, 48, 57); // for PRISMA (VNIR)
+    myZpr2->setrgb(36, 48, 57); // for PRISMA (VNIR cube)
   }
   if(nb == 173){
-    myZpr2->setrgb(43-1, 108-1, 171-1); // for PRISMA (SWIR)
+    myZpr2->setrgb(43-1, 108-1, 171-1); // for PRISMA (SWIR cube)
   }
   if(nb == 239){
-  	//PRISMA combined sorted (SWIR)
+    //PRISMA combined sorted (SWIR) ?
+  }
+  if(nb == 12){
+    myZpr2->setrgb(12, 11, 10); // Sentinel-2 L2A sorted
   }
 
  
