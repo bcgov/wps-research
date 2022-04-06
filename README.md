@@ -1,6 +1,6 @@
 [![Lifecycle:Maturing](https://img.shields.io/badge/Lifecycle-Maturing-007EC6)](<Redirect-URL>)
 
-Remote sensing R&D Engineering in support of BC Wildfire Predictive Services Unit
+Remote sensing Scientific R&D Engineering supporting the BC Wildfire Predictive Services Unit
 # Welcome to bcws-psu-research
 Motto: "where the future is being made, today!"
 
