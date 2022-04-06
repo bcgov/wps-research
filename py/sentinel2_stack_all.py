@@ -187,7 +187,8 @@ for safe in safes:
     # for s in safes:
     #     print(s)
 
-# cat the bin files together, combining headers
-cmd = ['python3', pd + 'raster_stack.py']
-cmd = cmd + raster_files + ['raster.bin']
-run(' '.join(cmd))
+if len(args) < 2:
+    # cat the bin files together, combining headers
+    cmd = ['python3', pd + 'raster_stack.py']
+    cmd = cmd + raster_files + ['raster.bin']
+    run(' '.join(cmd))
