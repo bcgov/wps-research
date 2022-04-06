@@ -9,10 +9,10 @@ supporting BC Wildfire Service (BCWS) Predictive Services Unit (PSU) program. Se
 Includes A) data integration B) routines applying or implementing supervised and unsupervised classification, C) visualization and manipulation for high dimensional imagery as well as classification maps
 
 # Sample results
-## Fire progression mapping with Sentinel-2 and Landsat 7/8
+## Fire progression mapping w Sentinel-2 and Landsat 7/8
 <img src="data/output/sentinel2_and_landsat.gif" width="640">
 
-## Forest change detection w Canadian Space Agency (CSA) Radarsat Constellation Mission (RCM) compact-pol SAR data
+## Forest change detection w CSA RCM compact-pol SAR data
 <img src="data/output/difference.gif" width="640">
 
 ##  Interactive mapping w BCWS FTL MVP software: end-to-end DSS
@@ -84,4 +84,4 @@ This repository is maintained by the BC Wildfire Service (BCWS) Predictive Servi
 [2] based on gltZpr by Nigel Stewart
 
 ### Resources
-[Misc RS resources](https://github.com/bcgov/bcws-psu-research/blob/master/RESOURCES.md)
+[Misc RS / fire resources](https://github.com/bcgov/bcws-psu-research/blob/master/RESOURCES.md)
