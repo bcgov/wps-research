@@ -6,7 +6,7 @@ Methods and Systems for Image Analysis developed with partners incl. Digital Pla
 
 supporting BC Wildfire Service (BCWS) Predictive Services Unit (PSU) program. See also: [Wildfire Predictive Services](https://github.com/bcgov/wps)
 
-Includes A) routines applying or implementing supervised and unsupervised classification, B) visualization and manipulation for high dimensional imagery as well as classification maps
+Includes A) data integration B) routines applying or implementing supervised and unsupervised classification, C) visualization and manipulation for high dimensional imagery as well as classification maps
 
 # Sample results
 ## Fire progression mapping with Sentinel-2 and Landsat 7/8
