@@ -343,7 +343,6 @@ int main(int argc, char ** argv){
   if(nb == 12){
     myZpr2->setrgb(12-1, 11-1, 10-1); // Sentinel-2 L2A sorted
   }
-
  
   myImage->rebuffer();
   myImage2->rebuffer();

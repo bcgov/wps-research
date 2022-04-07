@@ -165,7 +165,7 @@ void zprInstance::mark(){
 
 // declare a map (SA<float> * b, to min/max).. no recalc!
 void two_percent(float & min, float & max, SA<float> * b){
-
+  printf("two percent: non-proportional\n");
   if(scene_band_min.count(b) < 1 || scene_band_p.count(b) < 1 || scene_band_p[b] != N_PERCENT_SCALING){
     priority_queue<float> q;
     float * d = b->elements;
@@ -198,6 +198,7 @@ inline float max3(float r, float g, float b){
 }
 
 void two_percent(float & min, float & max, SA<float> * r, SA<float> * g, SA<float> * b){
+  printf("two_percent: proportional\n");
   // compared with the above, this version implements a "proportional" scaling
   set<SA<float> *> bs;
   bs.insert(r);
@@ -385,7 +386,6 @@ void glImage::rebuffer(){
       if(ia < 0) ia = 0;
       if(ib < 0) ib = 0;
       if(ic < 0) ic = 0;
-
 
       //printf("ia %d ib %d ic %d\n", ia, ib, ic);
       hist_r[ia] += 1.;
