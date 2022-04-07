@@ -375,6 +375,16 @@ void bwrite(float * d, str bfn, size_t nrow, size_t ncol, size_t nband){
   fclose(f);
 }
 
+/* append to binary file. Set start to true, to clear the file:
+     e.g. on a first iteration*/
+void bappend(float * d, FILE * f, size_t n_float){
+  size_t nw = fwrite(d, sizeof(float), n_float, f);
+  if(nw != n_float){
+    printf("wrote: %zu expected: %zu\n", nw, n_float);
+    err("bappend: incorrect number of records written");
+  }
+}
+
 pthread_mutex_t print_mtx;
 
 void cprint(str s){
