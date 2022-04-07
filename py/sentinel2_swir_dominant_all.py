@@ -6,7 +6,12 @@ lines = [x.strip() for x in os.popen('find ./ -name "S*10m.bin_swir.bin"').readl
 
 x = []
 for line in lines:
-    cmd = '~/GitHub/bcws-psu-research/cpp/raster_dominant.exe ' + line
+    df = line
+    cmd = '~/GitHub/bcws-psu-research/cpp/raster_normalize.exe ' + df
+    df += '_norm.bin'
+    if not exists(df):
+        run(cmd)
+    cmd = '~/GitHub/bcws-psu-research/cpp/raster_dominant.exe ' + df
     df = line + '_dominant.bin'
     if not exists(df):
         run(cmd)
