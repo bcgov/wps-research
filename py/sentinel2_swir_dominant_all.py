@@ -2,15 +2,15 @@
 import os
 import sys
 import multiprocessing as mp
-from misc import run, exists, parfor
+from misc import run, exists, parfor, args
 
 if False:
     try:
-        run('find ./ -name "*norm*" | xargs rm')
+        run('find ./ -name "*norm*bin" | xargs rm -f')
     except:
         pass
     try:
-        run('find ./ -name "*dominant*" | xargs rm')
+        run('find ./ -name "*dominant*bin" | xargs rm -f')
     except:
         pass
 lines = [x.strip() for x in os.popen('find ./ -name "S*10m.bin_swir.bin"').readlines()]
@@ -30,10 +30,12 @@ for line in lines:
         cmd2.append(cmd) # run(cmd)
     x.append(df)
 
-if len(cmd1) > 0:
+print(cmd1)
+print(cmd2)
+if len(cmd1) > 0 and len(args) < 2:
     print("normalizing..")
     parfor(run, cmd1, int(mp.cpu_count()/2))
-if len(cmd2) > 0:
+if len(cmd2) > 0 and len(args) < 2:
     print("classifying..")
     parfor(run, cmd2, int(mp.cpu_count()/2))
 
