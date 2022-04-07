@@ -11,14 +11,13 @@ https://docs.python.org/3/library/xml.etree.elementtree.html
 MAKE SURE WE SORTED BY TIME AND FREQUENCY !!!'''
 import os
 import sys
+import multiprocessing as mp
 args = sys.argv
 sep = os.path.sep
 exists = os.path.exists
+N_THREAD = mp.cpu_count()
 pd = sep.join(__file__.split(sep)[:-1]) + sep
 ehc = pd + 'envi_header_cleanup.py' # envi header cleanup command.. makes file open in "imv"
-
-import multiprocessing as mp
-sep = os.path.sep
 
 def parfor(my_function, my_inputs, n_thread=mp.cpu_count()): # evaluate a function in parallel, collect the results
     pool = mp.Pool(n_thread)
@@ -77,7 +76,7 @@ for safe in safes:
             of = (df + dfw[1]).replace(term, iden).replace(':', '_') + '.bin'
             cmd = ' '.join(['gdal_translate',
                             ds,
-                            '--config GDAL_NUM_THREADS 8',
+                            '--config GDAL_NUM_THREADS ' + str(N_THREAD),
                             '-of ENVI',
                             '-ot Float32',
                             of])
@@ -109,9 +108,10 @@ for safe in safes:
     m20, m60 = m10.replace('_10m_', '_20m_'),\
                m10.replace('_10m_', '_60m_')
     print('10m:', m10); print('20m:', m20); print('60m:', m60)
-    if not exists(m10): err("file not found:", m10)
-    if not exists(m20): err("file not found:", m20)
-    if not exists(m60): err("file not found", m60)
+    
+    for m_i in [m10, m20, m60]:
+        if not exists(m_i):
+            err('file not found:', m_i)
 
     # names for files resampled to 10m
     m20r, m60r = (m20[:-4] + '_10m.bin',
