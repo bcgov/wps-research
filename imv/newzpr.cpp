@@ -238,6 +238,7 @@ void two_percent(float & min, float & max, SA<float> * r, SA<float> * g, SA<floa
 }
 
 void glImage::rebuffer(){
+  bool use_first = false;
   myBi = parentZprInstance->myBi;
   int NRow = image->NRow; int NCol = image->NCol;
   printf("--> glImage::rebuffer() %d %d %d nr %d nc %d: %s\n", myBi->at(0), myBi->at(1), myBi->at(2), NRow, NCol, parentZprInstance->getTitle().c_str());
@@ -252,7 +253,11 @@ void glImage::rebuffer(){
   int is_scene = strncmp(parentZprInstance->getTitle().c_str(), "Scene", 5) == 0;
   if(USE_PROPORTIONAL_SCALING){
     if(is_scene){
-      two_percent(min1, max1, b1, b2, b3);
+      two_percent(min1,
+		  max1,
+		  use_first?FB->at(myBi->at(0)):b1,
+		  use_first?FB->at(myBi->at(1)):b2,
+		  use_first?FB->at(myBi->at(2)):b3);
       parentZprInstance->image_intensity_min = min1;
       parentZprInstance->image_intensity_max = max1;
     }
@@ -271,9 +276,9 @@ void glImage::rebuffer(){
   }
   else{
     if(is_scene){
-      two_percent(min1, max1, b1); // so the 2p stretch happens in the secondary buffer (this one)
-      two_percent(min2, max2, b2);
-      two_percent(min3, max3, b3);
+      two_percent(min1, max1, use_first?FB->at(myBi->at(0)): b1); // so the 2p stretch happens in the secondary buffer (this one)
+      two_percent(min2, max2, use_first?FB->at(myBi->at(1)): b2);
+      two_percent(min3, max3, use_first?FB->at(myBi->at(2)): b3);
       zprInstance * p = parentZprInstance;
       p->image_intensity_min1 = min1;
       p->image_intensity_min2 = min2;
