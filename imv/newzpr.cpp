@@ -249,8 +249,20 @@ void glImage::rebuffer(){
   float max1, max2, max3, min1, min2, min3, r1, r2, r3;
   r1 = r2 = r3 = 1.;
   min1 = min2 = min3 = 0.;
+  max1 = max2 = max3 = FLT_MAX;
 
+  str imv_sf("./.imv_scaling");
   int is_scene = strncmp(parentZprInstance->getTitle().c_str(), "Scene", 5) == 0;
+  if(exists(imv_sf)){
+	  /* example file contents: ./.imv_scaling. Just delete the file to disable manual scaling!
+	   0 0 0 4000 4000 4000
+	   */
+    vector<string> lines(readLines(imv_sf)); 
+    std::istringstream in(lines[0]); 
+    in >> min1 >> min2 >> min3 >> max1 >> max2 >> max3;
+    cout << min1 << min2 << min3 << max1 << max2 << max3 << endl;
+  }
+  else{
   if(USE_PROPORTIONAL_SCALING){
     if(is_scene){
       two_percent(min1,
@@ -301,6 +313,7 @@ void glImage::rebuffer(){
       max2 = s->image_intensity_max2;
       max3 = s->image_intensity_max3;
     }
+  }
   }
   r1 = 1. / (max1 - min1);
   r2 = 1. / (max2 - min2);
