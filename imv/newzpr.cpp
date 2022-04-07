@@ -2123,10 +2123,27 @@ void glCurve::drawMe(){
     nr = parentZprInstance->NRow;
     nc = parentZprInstance->NCol;
 
-    for0(i, d->size()){
-      di = (*d)[i];
-      if(di > mx) mx = di;
-      if(di < mn) mn = di;
+    str imv_sf("./.imv_scaling");
+    if(!exists(imv_sf)){
+      for0(i, d->size()){
+        di = (*d)[i];
+        if(di > mx) mx = di;
+        if(di < mn) mn = di;
+      }
+    }
+    else{
+      float min1, min2, min3, max1, max2, max3;
+      vector<string> lines(readLines(imv_sf));
+      std::istringstream in(lines[0]);
+      in >> min1 >> min2 >> min3 >> max1 >> max2 >> max3;
+      //cout << min1 << min2 << min3 << max1 << max2 << max3 << endl;
+      mx = max1;
+      if(max2 > mx) mx = max2;
+      if(max3 > mx) mx = max3;
+
+      mn = min1;
+      if(min2 < mn) mn = min2;
+      if(min3 < mn) mn = min3;
     }
 
     glLineWidth(1.5);
