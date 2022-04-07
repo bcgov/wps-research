@@ -76,7 +76,7 @@ for safe in safes:
             of = (df + dfw[1]).replace(term, iden).replace(':', '_') + '.bin'
             cmd = ' '.join(['gdal_translate',
                             ds,
-                            '--config GDAL_NUM_THREADS' + str(N_THREAD),
+                            '--config GDAL_NUM_THREADS ' + str(N_THREAD),
                             '-of ENVI',
                             '-ot Float32',
                             of])
