@@ -280,6 +280,7 @@ double * dalloc(size_t nd);
 
 float * bread(str bfn, size_t nrow, size_t ncol, size_t nband); // read binary file
 void bwrite(float * d, str bfn, size_t nrow, size_t ncol, size_t nband); // write binary file
+void bappend(float * d, FILE * f, size_t n_float); //, bool start=false); // append (e.g. a band) to a binary file
 
 int hsv_to_rgb(float *r, float *g, float *b, float h, float s, float v);
 
