@@ -61,8 +61,6 @@ int main(int argc, char ** argv){
   bwrite(lab, oln, nrow, ncol, 1);
   hwrite(olh, nrow, ncol, 1);
 
-  // also 
-  
   free(out); 
   free(dat);
   return 0;
