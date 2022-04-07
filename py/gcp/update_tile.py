@@ -6,8 +6,7 @@
 The "gcp rsync" command is helpful for avoiding re-downloading the same data
     https://cloud.google.com/storage/docs/gsutil/commands/rsync
 
-(*) need concurrency mechanism so we can download on multiple folders without fetching index twice!
-'''
+(*) need concurrency mechanism so we can download on multiple folders without fetching index twice!'''
 import os
 import sys
 sep = os.path.sep
@@ -167,6 +166,9 @@ for m in matches:
     if not exists(out_dir):
         print('mkdir', out_dir)
         a = run('mkdir -p ' + out_dir)
+    else:
+        print('Presumed already downloaded.. skipping')
+        continue # don't redownload files 
 
     simple_cmd = ['gsutil -m',
                   'rsync -r',
