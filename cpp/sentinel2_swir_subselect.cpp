@@ -44,15 +44,14 @@ int main(int argc, char ** argv){
       err("Missing band");
     }
     else{
-      cout << "i " << i << " bi[i] " << bi[i] << " " << bi[i] / np << endl;
+      //cout << "i " << i << " bi[i] " << bi[i] << " " << bi[i] / np << endl;
     }
   }
   dat = falloc(np);
   FILE * g = fopen(ofn.c_str(), "wb");
   fclose(g);
   for0(j, 3){
-
-    printf("write band %d %d %s\n", (int)j, (int)(bi[j]/np), s[bi[j]/np].c_str());
+    //printf("write band %d %d %s\n", (int)j, (int)(bi[j]/np), s[bi[j]/np].c_str());
     fseek(f, bi[j] * sizeof(float), SEEK_SET);
     size_t nr = fread(dat, sizeof(float), np, f);
 
@@ -65,15 +64,12 @@ int main(int argc, char ** argv){
       err("bappend: incorrect number of records written");
     }
   }
-  printf("bn\n");
   hread(hfn, nrow, ncol, nband, s);
   vector<str> bn;
   for0(j, 3){
     bi[j] /= np;
-    cout << "j " << j << " bi[j] " << bi[j] << " " << s[bi[j]] << endl;
     bn.push_back(s[bi[j]]); //date_s + str(" sentinel2_active.cpp"));
   }
-  printf("hw\n");
   hwrite(hf2, nrow, ncol, 3, 4, bn);
 
   /* copy map info */
