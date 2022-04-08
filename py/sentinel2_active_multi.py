@@ -1,7 +1,7 @@
 '''20220321 perform active fire detection on multiple frames.
 - multitemporal accumulation of area detection result?
 Possibly mutate result using land cover filter before combining ??? '''
-from misc import sep, pd, exists, parfor, run, read_hdr, write_hdr
+from misc import sep, pd, exists, parfor, run, read_hdr, write_hdr, args
 import os
 
 # 1) list L2 folders in the present directory. Will sort those in time! 
@@ -39,6 +39,8 @@ def r(x):
     return os.popen(x).read()
 parfor(r, cmds, 4)  # limited by disk I/O
 
+if len(args) > 1:
+    sys.exit(0)
 
 # 3) cat the results together?
 nrow, ncol, nband = 0, 0, 0
