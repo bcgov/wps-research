@@ -21,6 +21,8 @@ the swig/python folder and manually do the:
 
 import os
 import sys
+import multiprocessing as mp
+N_THREAD = mp.cpu_count() # number of cpu thread
 args = sys.argv
 sep = os.path.sep
 pd = sep.join(__file__.split(sep)[:-1]) + sep
@@ -63,7 +65,7 @@ except:
         "Or, google: pip install gdal python")
 
 # use multithread option
-gdal.SetConfigOption('GDAL_NUM_THREADS', '4')  # 4 is probably SSD limit of write channels..
+gdal.SetConfigOption('GDAL_NUM_THREADS', str(N_THREAD)) # '4')  # 4 limit of SSD write?
 
 # source image
 src = gdal.Open(src_filename, gdalconst.GA_ReadOnly)
