@@ -9,4 +9,4 @@ cmds = []
 for line in lines:
     cmd = '~/GitHub/bcws-psu-research/cpp/sentinel2_swir_subselect.exe ' + line
     cmds.append(cmd)
-parfor(run, cmds, mp.cpu_count() / 2)
+parfor(run, cmds, int(mp.cpu_count() / 2))
