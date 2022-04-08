@@ -3,7 +3,7 @@ import os
 import sys
 import multiprocessing as mp
 from misc import run, exists, parfor, args
-
+'''
 if False:
     try:
         run('find ./ -name "*norm*bin" | xargs rm -f')
@@ -13,8 +13,9 @@ if False:
         run('find ./ -name "*dominant*bin" | xargs rm -f')
     except:
         pass
+'''
 lines = [x.strip() for x in os.popen('find ./ -name "S*10m.bin_swir.bin"').readlines()]
-
+'''
 x = []
 cmd1 = []
 cmd2 = []
@@ -38,7 +39,8 @@ if len(cmd1) > 0 and len(args) < 2:
 if len(cmd2) > 0 and len(args) < 2:
     print("classifying..")
     parfor(run, cmd2, int(mp.cpu_count()/2))
-
+'''
+x = lines
 X = []
 for i in x:
     print(i)
@@ -49,5 +51,5 @@ X.sort()
 print()
 for i in X:
     x = i[1]
-    run('imv ' + x)
+    run('imv ' + x + '_norm.bin_dominant.bin')
 
