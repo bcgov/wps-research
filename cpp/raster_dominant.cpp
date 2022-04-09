@@ -1,19 +1,21 @@
-/* 20211206: adapted from raster_negate.cpp */
+/* 20211206: adapted from raster_negate.cpp
+20220408: add sub-dominant version
+  */
 #include"misc.h"
 
 int main(int argc, char ** argv){
-  if(argc < 2) err("raster_dominant.exe [hyperspec cube] # multiply by indicator fxn of dominant\n");
+  if(argc < 2) err("raster_dominant.exe [hyperspec cube] [optional arg: subdominant mode] # multiply by indicator fxn of dominant\n");
 
   str fn(argv[1]); // input image file name
   if(!(exists(fn))) err("failed to open input file");
   str hfn(hdr_fn(fn)); // input header file name
 
-  str ofn(str(argv[1]) + str("_dominant.bin")); // output file name: 1-hot encoding
+  str ofn(str(argv[1]) + (argc < 3 ? str("_dominant.bin") : str("_subdominant.bin"))); // output file name: 1-hot encoding
   str ohn(hdr_fn(ofn, true)); // out header file name
 
-  str oln(str(argv[1]) + str("_dominant_label.bin")); // output file, as label
-  str olh(str(argv[1]) + str("_dominant_label.hdr"));
-
+  str oln(str(argv[1]) + (argc < 3 ? str("_dominant_label.bin") : str("_subdominant_label.bin"))); // output file, as label
+  str olh(str(argv[1]) + (argc < 3 ? str("_dominant_label.hdr") : str("_subdominant_label.hdr")));
+  
   printf("+w %s\n", ofn.c_str());
   printf("+w %s\n", ohn.c_str());
 
@@ -40,7 +42,8 @@ int main(int argc, char ** argv){
 
       for0(k, nband){
 	ik = (np * k) + ij;
-	if(dat[ik] > dom_v){
+	if((argc < 3 && dat[ik] > dom_v) || (argc > 2 && dat[ik] < dom_v)){
+	//if(dat[ik] > dom_v){
 	  dom_v = dat[ik];  // find dominant band
 	  dom_k = k;
 	}
