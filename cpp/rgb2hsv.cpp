@@ -1,6 +1,11 @@
 /* from
 https://stackoverflow.com/questions/3018313/algorithm-to-convert-rgb-to-hsv-and-hsv-to-rgb-in-range-0-255-for-both
-  */
+ 
+
+Need to look at:
+https://en.wikipedia.org/wiki/HSL_and_HSV#From_RGB
+also
+*/
 typedef struct {
     double r;       // a fraction between 0 and 1
     double g;       // a fraction between 0 and 1
