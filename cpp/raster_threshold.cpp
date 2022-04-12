@@ -43,6 +43,7 @@ int main(int argc, char ** argv){
   str ohfn(fn + str("_thres.hdr"));
   hwrite(ohfn, nrow, ncol, nband); // write output header
   bwrite(out, ofn, nrow, ncol, nband);
+  
   free(dat);
   free(out);
   return 0;
