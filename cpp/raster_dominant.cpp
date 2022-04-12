@@ -1,6 +1,5 @@
 /* 20211206: adapted from raster_negate.cpp
-20220408: add sub-dominant version
-  */
+20220408: add sub-dominant version */
 #include"misc.h"
 
 int main(int argc, char ** argv){
@@ -59,11 +58,9 @@ int main(int argc, char ** argv){
     }
   }
   bwrite(out, ofn, nrow, ncol, nband);
-  hwrite(ohn, nrow, ncol, nband);
-  
   bwrite(lab, oln, nrow, ncol, 1);
+  hwrite(ohn, nrow, ncol, nband);
   hwrite(olh, nrow, ncol, 1);
-
   free(out); 
   free(dat);
   return 0;
