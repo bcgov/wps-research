@@ -178,6 +178,14 @@ if True:
             dp60]
 
     cmd = ' '.join(cmd)
-    d = os.popen(cmd).readlines()[1].strip().split()[-1][:-4] + '.bin'
+    stack_fn = os.popen(cmd).readlines()[1].strip().split()[-1][:-4] + '.bin'
     print("stack resampled to 10m:")
-    print("\t" + d)
+    print("\t" + stack_fn)
+
+    # clean up the header file a bit! Readability, and the nm part expected format for other progs
+    d = open(shn).read().strip()
+    open(shn, "wb").write((d.replace(' central wavelength', '').replace(' nm', 'nm')).encode())
+
+    run(['python3',
+         pd + 'raster_reorder_increasing_nm.py',
+         stack_fn])
