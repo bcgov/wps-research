@@ -1,3 +1,5 @@
+'''use GDAL to resample a raster to 20m (ENVI format)
+using parallelism (all cores) 20220411'''
 import os
 import sys
 from misc import err, run, args
@@ -10,5 +12,7 @@ infile = args[1]
 ofn = infile + '_20m.bin'
 
 run(' '.join(['gdalwarp -of ENVI -tr 20 20',
+              '-multi',
+              '-wo NUM_THREADS=val/ALL_CPUS',
               infile,
               ofn]))
