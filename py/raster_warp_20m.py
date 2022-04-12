@@ -14,6 +14,8 @@ ofn = infile + '_20m.bin'
 if not exists(infile):
     err("please check input file")
 
+print('+w ' + ofn)
+
 if exists(ofn):
     err("output file already exists: " + ofn)
 
