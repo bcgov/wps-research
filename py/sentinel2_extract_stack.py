@@ -49,6 +49,7 @@ xml = os.popen(cmd).readlines()
 
 cmds = []  # commands to run after this section
 bins = []
+found_line = True
 for line in xml:
     found_line = False
     line = line.strip()
