@@ -1,8 +1,8 @@
+'''Can Use this method to open Sentinel-2 data in Level1 from ESA Copernicus, or from Google Cloud Platform (after running gcp/fix_s2.py and zipping the folder)
+
+* have to revisit what the no_stomp was used for. '''
+import time
 from misc import *
-args = sys.argv
-sep = os.path.sep
-exists = os.path.exists
-pd = sep.join(__file__.split(sep)[:-1]) + sep
 ehc = pd + 'envi_header_cleanup.py' # envi header cleanup command.. makes file open in "imv"
 
 if len(args) < 2:
@@ -34,8 +34,6 @@ if not os.path.exists(df):
     else:
         a = os.system('mkdir -p ' + df)  # special no_stomp mode!! needed for using google cloud drive script
         a = os.system('unzip -d ' + df + ' ' + fn)
-
-    import time
     time.sleep(1.)
 
 if not os.path.exists(df):

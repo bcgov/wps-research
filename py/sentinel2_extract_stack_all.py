@@ -26,24 +26,13 @@ Need xml reader such as:
 https://docs.python.org/3/library/xml.etree.elementtree.html '''
 import os
 import sys
-args = sys.argv
-sep = os.path.sep
-exists = os.path.exists
-pd = sep.join(__file__.split(sep)[:-1]) + sep
+from misc import args, sep, exists, pd
 
 all_args = list(set(args[1:]))
 no_stomp = ("no_stomp=True" in all_args) or ("nostomp" in all_args) # create a folder with the name of the zipfile (minus .zip, plus .SAFE
 
 if no_stomp:
     print("NO STOMP MODE!!!!!")
-
-def err(m):
-    print("Error: " + m); sys.exit(1)
-
-def run(c):
-    print(c)
-    a = os.system(c)
-    if a != 0: err("failed to run: " + str(c))
 
 extract = pd + "sentinel2_extract.py" # command to extract a zip
 zips = [x.strip() for x in os.popen("ls -1 *.zip").readlines()] # list the zip files
