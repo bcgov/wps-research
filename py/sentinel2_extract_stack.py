@@ -1,8 +1,4 @@
 from misc import *
-args = sys.argv
-sep = os.path.sep
-exists = os.path.exists
-pd = sep.join(__file__.split(sep)[:-1]) + sep
 ehc = pd + 'envi_header_cleanup.py' # envi header cleanup command.. makes file open in "imv"
 
 if len(args) < 2:
@@ -27,7 +23,7 @@ df = fn[:-4] + '.SAFE'  # extracted data folder
 if not os.path.exists(fn) and not os.path.exists(df):
     err('could not find input file')
 
-if not os.path.exists(df):
+if not os.path.exists(df):  # should be able to read if the file contains the folder or not!
     if no_stomp == False:
         a = os.system('unzip ' + fn)
     else:
@@ -53,9 +49,7 @@ found_line = True
 for line in xml:
     found_line = False
     line = line.strip()
-    #print('  ' + line)
     if len(line.split('.xml')) > 1:
-        #print('\t' + line)
         try:
             df = df.split(os.path.sep)[-1]
             safe = df # .SAFE directory
@@ -64,8 +58,6 @@ for line in xml:
             ident = dfw[0].split('=')[1].split(':')[0]
             ds = ident + ':' + df + dfw[1]
             of = (df + dfw[1]).replace(terminator, ident).replace(':', '_') + '.bin'
-            # print("DS: " + ds)
-            # sys.exit(1)
 
             cmd = ' '.join(['gdal_translate', ds, '--config GDAL_NUM_THREADS 8', '-of ENVI', '-ot Float32', of])
             print('\t' + cmd)
@@ -75,27 +67,21 @@ for line in xml:
 
             hfn = of[:-4] + '.hdr'
             cmd = ' '.join(['python3', ehc, hfn]) # of[:-4] + '.hdr']
-            print('\t' + cmd)
             if not os.path.exists(hfn):
                  cmds.append(cmd)
-                # print('\t' + cmd)
-
             found_line = True  # what line were we looking for?
         except Exception:
             pass
 
 if not found_line:
-    # we must be in google mode?
-    # print("in google mode?")
+    # in google mode?
     if no_stomp:
-        # must be in google mode!
         print("definitely in google mode")
         sys.exit(1)
 
 print(bins)
 bins = bins[0:3]
 for cmd in cmds:
-    # print(cmd)
     run(cmd)
 
 '''e.g. outputs:
@@ -112,9 +98,6 @@ if True:
     print("  10m:", m10)
     print("  20m:", m20)
     print("  60m:", m60)
-
-    #for b in bins:
-    #    print('  ' + b) # print('  ' + b.split(sep)[-1])
 
     # names for files resampled to 10m
     m20r, m60r = m20[:-4] + '_10m.bin', m60[:-4] + '_10m.bin'
@@ -133,8 +116,6 @@ if True:
     resample(m60, m10, m60r) # resample the 60m
 
     # now do the stacking..
-    print(m10)
-
     sfn = safe + sep + m10.split(sep)[-1].replace("_10m", "")[:-4] + '_10m.bin'  # stacked file name..
     print(sfn)
 
