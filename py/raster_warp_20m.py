@@ -11,4 +11,4 @@ ofn = infile + '_20m.bin'
 
 run(' '.join(['gdalwarp -of ENVI -tr 20 20',
               infile,
-              ofn])
+              ofn]))
