@@ -1,5 +1,5 @@
 /* generalizing an idea found in dr. Dey's paper, to more dimensions..
-..but starting with the simpler case */
+..starting with the simpler case */
 #include"misc.h"
 
 // class to sort the values' coordinate indices..
