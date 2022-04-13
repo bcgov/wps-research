@@ -4,10 +4,11 @@ import os
 import sys
 from misc import err, run, args, exists, pd
 
-message = "python3 raster_warp_20m.py [input raster file name]"
+message = "python3 raster_warp_20m.py [input raster file name] [optional arg: skip outfile check]"
 
 if len(args) < 2:
     err(message)
+
 infile = args[1]
 ofn = infile + '_20m.bin'
 
@@ -16,7 +17,7 @@ if not exists(infile):
 
 print('+w ' + ofn)
 
-if exists(ofn):
+if exists(ofn) and len(args) > 2:
     print("output file already exists: " + ofn)
 else:
     run(' '.join(['gdalwarp -of ENVI -tr 20 20',
