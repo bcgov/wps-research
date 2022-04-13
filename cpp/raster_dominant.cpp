@@ -27,8 +27,10 @@ int main(int argc, char ** argv){
   float * dat = bread(fn, nrow, ncol, nband);
   float * lab = falloc(nrow * ncol); // save as label
 
+  float dik; // data value
   float dom_v; // dominant value this pixel
   size_t dom_k = 0; // dominant index
+  bool all_zero = true;
 
   for0(i, nrow){
     ix = (i * ncol);
@@ -38,12 +40,15 @@ int main(int argc, char ** argv){
       ik = ij;
       dom_k = 0; //assume first band dominant
       dom_v = dat[ik];
+      all_zero = true;
 
       for0(k, nband){
 	ik = (np * k) + ij;
-	if((argc < 3 && dat[ik] > dom_v) || (argc > 2 && dat[ik] < dom_v)){
+	dik = dat[ik];
+	if(dik != 0.) all_zero = false;
+	if((argc < 3 && dik > dom_v) || (argc > 2 && dik < dom_v)){
 	//if(dat[ik] > dom_v){
-	  dom_v = dat[ik];  // find dominant band
+	  dom_v = dik;  // find dominant band
 	  dom_k = k;
 	}
       }
@@ -52,9 +57,14 @@ int main(int argc, char ** argv){
       for0(k, nband){
         ik = (np * k) + ij;
 	out[ik] = 0.;
-	if(dom_k == k)
-	   out[ik] = 1. ;
+	if(dom_k == k){
+		out[ik] = 1. ;
+	}
+	if(all_zero){
+		out[ik] = NAN;
+	}
       }
+      // end of pixel based operation
     }
   }
   bwrite(out, ofn, nrow, ncol, nband);
