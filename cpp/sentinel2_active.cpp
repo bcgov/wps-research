@@ -45,8 +45,10 @@ int main(int argc, char ** argv){
   b3 = &dat[bi[2]];
   out = falloc(np);
 
+  float * dif = falloc(np);
   for0(i, np){
     out[i] = (float)(b2[i] - b1[i]) > 175.;
+    dif[i] = (float)(b3[i] - b1[i]);
   }
   for0(i, np){
     out[i] *= (float)(b3[i] > b2[i]); /* reduce fp? */
@@ -56,6 +58,9 @@ int main(int argc, char ** argv){
   bn.push_back(date_s + str(" sentinel2_active.cpp"));
   hwrite(hf2, nrow, ncol, 1, 4, bn);
   bwrite(out, ofn, nrow, ncol, 1);
+
+  hwrite(ofn + str("_diff.hdr"), nrow, ncol, 1);
+  bwrite(dif, ofn + str("_diff.bin"), nrow, ncol, 1);
   free(dat); /* plot spectra? */
   free(out);
   return 0;
