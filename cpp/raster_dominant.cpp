@@ -61,7 +61,7 @@ int main(int argc, char ** argv){
 		out[ik] = 1. ;
 	}
 	if(all_zero){
-		out[ik] = NAN;
+		out[ik] = FLT_NAN;
 	}
       }
       // end of pixel based operation
