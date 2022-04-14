@@ -1,4 +1,5 @@
-''' SWIR subselection for all bands 20220407'''
+''' SWIR subselection for all bands 20220407
+Assume 2 threads? '''
 import os
 import sys
 import multiprocessing as mp
@@ -9,4 +10,4 @@ cmds = []
 for line in lines:
     cmd = '~/GitHub/bcws-psu-research/cpp/sentinel2_swir_subselect.exe ' + line
     cmds.append(cmd)
-parfor(run, cmds, int(mp.cpu_count() / 2))
+parfor(run, cmds, 2) # int(mp.cpu_count() / 2))
