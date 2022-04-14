@@ -61,7 +61,7 @@ int main(int argc, char ** argv){
 		out[ik] = 1. ;
 	}
 	if(all_zero){
-		out[ik] = FLT_NAN;
+		out[ik] = NAN;
 	}
       }
       // end of pixel based operation
@@ -71,6 +71,9 @@ int main(int argc, char ** argv){
   bwrite(lab, oln, nrow, ncol, 1);
   hwrite(ohn, nrow, ncol, nband);
   hwrite(olh, nrow, ncol, 1);
+  str cmd(str("cp -v ") + hfn + str(" ") + ohn);
+  cout << cmd << endl;
+  system(cmd.c_str());
   free(out); 
   free(dat);
   return 0;
