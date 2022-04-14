@@ -10,5 +10,6 @@
  python3 ~/GitHub/bcws-psu-research/py/sentinel2_stack_all.py  1 
  python3 ~/GitHub/bcws-psu-research/py/sentinel2_swir_subselect_all.py
  python3 ~/GitHub/bcws-psu-research/py/sentinel2_swir_resample.py 
+ python3 ~/GitHub/bcws-psu-research/py/sentinel2_swir20_dominant.py
 # now need to add in script to replace B10!
 '''
