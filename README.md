@@ -19,6 +19,7 @@ Includes A) data integration B) routines applying or implementing supervised and
 <img src="data/output/20210127_mvp.png" width="650" height="264">
 
 ## Presentations
+* Fire mapping with Shortwave Infrared, BC Government Remote Sensing CoP, Apr 13 2022
 * Fire mapping with Sentinel-2, BCWS Geomatics CoP, Mar 16 2022
 * Remote Sensing and Pattern Recognition in BCWS Predictive Services Unit, BCWS Priorities Forum, Jan 6 2022
 * Field Observations and Remote Sensing of Wildland Fuels: A Case Study, Bulkley Valley Research Centre, Oct 8 2021 2021
