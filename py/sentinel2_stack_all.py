@@ -12,26 +12,10 @@ MAKE SURE WE SORTED BY TIME AND FREQUENCY !!!'''
 import os
 import sys
 import multiprocessing as mp
-args = sys.argv
-sep = os.path.sep
-exists = os.path.exists
+from misc import args, sep, exists, parfor, err, run, pd
+
 N_THREAD = mp.cpu_count()
-pd = sep.join(__file__.split(sep)[:-1]) + sep
-ehc = pd + 'envi_header_cleanup.py' # envi header cleanup command.. makes file open in "imv"
-
-def parfor(my_function, my_inputs, n_thread=mp.cpu_count()): # evaluate a function in parallel, collect the results
-    pool = mp.Pool(n_thread)
-    result = pool.map(my_function, my_inputs)
-    return(result)
-
-def err(m):
-    print("Error: " + m); sys.exit(1)
-
-def run(c):
-    print([c]); a = os.system(c)
-    return a
-    # if a != 0: err("failed to run: " + str(c))
-
+ehc = pd + 'envi_header_cleanup.py' # envi header cleanup command.. makes file open in "imv" 
 # extract = pd + "sentinel2_extract.py" # command to extract a zip
 raster_files = [] # these will be the final rasters to concatenate
 
@@ -43,7 +27,6 @@ for f in files:
         w = f.split('_'); # print(w)
         if w[1] == 'MSIL2A':
                 safes.append(w)
-
 # sort on w[2]
 srt = [[w[2], w] for w in safes]
 srt.sort()
@@ -128,7 +111,7 @@ for safe in safes:
         if not exists(dst): 
             run(' '.join(cmd))
         return 0
-
+    
     a = parfor(resample,
                [[m20, m10, m20r], # resample the 20m
                 [m60, m10, m60r]],
@@ -169,9 +152,9 @@ for safe in safes:
     run(' '.join(cmd))
 
     # raster_files.append(sfn)
-    mod = open(shn).read().replace('central wavelength ',
-                                   '').replace(' nm,',
-                                               'nm,').replace(' nm}', 'nm}').encode()
+    mod = open(shn).read().replace('central wavelength ', '')
+    mod = mod.replace(' nm,', 'nm,')
+    mod = mod.replace(' nm}', 'nm}').encode()
     open(shn, 'wb').write(mod)
     print('+w', shn)
  
@@ -179,10 +162,8 @@ for safe in safes:
            pd + 'raster_reorder_increasing_nm.py',
            sfn]
     run(' '.join(cmd))
-    
     raster_files.append(sfn) # reorder is "in-place"... so not + '_reorder.bin')
     # sys.exit(1) # would turn this on to debug one frame
-
     # should check if "sfn" exists before doing anything on this folder.
 
 if len(args) < 2:
