@@ -27,16 +27,15 @@ int main(int argc, char ** argv){
   if(argc < 4)
     err("sboi.exe [infile] [outfile] [n-bytes per record]\n");
 
+  char c;
   FILE * f, *g;
+  stack<char> d;
+  int n = atoi(argv[3]);
+  long unsigned int nb = 0;
   f = fopen(argv[1], "rb");
   g = fopen(argv[2], "wb");
   if(!f || !g)
     err("please check input and output files\n");
-
-  char c;
-  stack<char> d;
-  int n = atoi(argv[3]);
-  long unsigned int nb = 0;
 
   while(fread(&c, 1, 1, f) == 1){
     nb ++;
