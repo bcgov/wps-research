@@ -16,8 +16,9 @@ Compilation:
 #include<stack>
 #include<stdio.h>
 #include<stdlib.h>
+using namespace std;
 
-void err(char * s){
+void err(const char * s){
   printf("Error: %s\n", s);
   exit(1);
 }
