@@ -11,10 +11,10 @@ Usage:
   sboi.exe [infile] [outfile] [n-bytes per record]
 
 Compilation:
-  g++ -O3 sbo.cpp -o sbo.exe
+  g++ -O3 sbo.cpp -o sbo
 
 Running: 
-  ./sbo.exe file_from_SNAP.bin output_file.bin 4 
+  ./sbo file_from_SNAP.bin output_file.bin 4 
 */
 #include<stack>
 #include<stdio.h>
