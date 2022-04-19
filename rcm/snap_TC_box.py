@@ -2,8 +2,7 @@
 ..on all SLC folders in working directory:
     1) perform terrain correction followed by
     2) box filter..
-
-
+    3) finally, swap the byte order for use in PolSARPro (or outside SNAP)
 This actually placed the C2 matrix, in a ENVI/PolSARPro file'''
 import os
 import sys
