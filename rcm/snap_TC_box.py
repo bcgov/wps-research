@@ -94,7 +94,7 @@ for p in folders:
         for i in file_i: # (['22.bin', '33.bin', '11.bin'] if not use_C else ['11.bin', '22.bin', '12_real.bin', '12_imag.bin']) :
             ti = t + i
             if not exist(ti):
-                run('sbo ' + (ti[:-3] + 'img') + ' ' + ti + ' 4')
+                run('./sbo ' + (ti[:-3] + 'img') + ' ' + ti + ' 4')
             c += (' ' + t + i)
         c += ' > ' + r_f
         run(c)
