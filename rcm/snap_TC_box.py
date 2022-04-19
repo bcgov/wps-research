@@ -1,4 +1,4 @@
-'''in SNAP /snappy..: for COMPACT-pol datasets..
+'''20211123 in SNAP /snappy..: for COMPACT-pol datasets..
 ..on all SLC folders in working directory:
     1) perform terrain correction followed by
     2) box filter..
@@ -31,14 +31,14 @@ for f in folders:
 
 for f in folders_use:
     print(f)
-    
+
 snap, ci = '/usr/local/snap/bin/gpt', 1 # assume we installed snap
 folders = folders_use
 
 for p in folders:
     print('*** processing ' + str(ci) + ' of ' + str(len(folders)))
     if os.path.abspath(p) == os.path.abspath('.'): continue
-    
+
     in_1 = p + sep + 'manifest.safe'  # input
     in_2 = p + sep + 'tc.dim'  # terrain corrected output
     c1 = ' '.join([snap,
@@ -47,14 +47,14 @@ for p in folders:
                   '-PnodataValueAtSea=false', # '-PsaveLayoverShadowMask=true',
                   '-PimgResamplingMethod="NEAREST_NEIGHBOUR"', # why? because we will add an index for reverse geocoding...
                   in_1, '-t ' + in_2])
-    
+
     in_3 = p + sep + 'b7.dim'  # box filtered output # how to get parameters: ./gpt Polarimetric-Speckle-Filter -h
     c2 = ' '.join([snap,
                   'Polarimetric-Speckle-Filter',
                   '-Pfilter="Box Car Filter"',
                   '-PfilterSize=7',
                   in_2, '-t', in_3])  # -t is for output file
-    
+
     use_C = False  # default to T matrix.
     if not exist(in_2): run(c1)
     if not exist(in_3): run(c2)
@@ -89,15 +89,13 @@ for p in folders:
 
     if not exist(r_f):
         file_pre = 'T' if not use_C else 'C'  # file prefix: T or C mtx
-        c, t = 'cat', in_3[:-3] + 'data' + sep + file_pre # ('T' if not use_C else 'C') 
+        c, t = 'cat', in_3[:-3] + 'data' + sep + file_pre # ('T' if not use_C else 'C')
         file_i = ['22.bin', '33.bin', '11.bin'] if not use_C else ['11.bin', '22.bin', '12_real.bin', '12_imag.bin']
         for i in file_i: # (['22.bin', '33.bin', '11.bin'] if not use_C else ['11.bin', '22.bin', '12_real.bin', '12_imag.bin']) :
             ti = t + i
             if not exist(ti):
                 run('sbo ' + (ti[:-3] + 'img') + ' ' + ti + ' 4')
             c += (' ' + t + i)
-        c += ' > ' + r_f 
+        c += ' > ' + r_f
         run(c)
     ci += 1
-
-
