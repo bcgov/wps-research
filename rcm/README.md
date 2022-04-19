@@ -1,4 +1,8 @@
-compact workflow:
+### Snappy install instructions should go here
+
+###
+
+### compact workflow:
 
 1) place RCM zip files in pwd
 
