@@ -45,6 +45,10 @@
 * [geemap: Python package for interactive mapping w Google Earth Engine (GEE)](https://geemap.org/)
 * [geemap in Google Co-lab](https://colab.research.google.com/github/giswqs/geemap/blob/master/examples/notebooks/11_export_image.ipynb) 
 * [landsat on GCS](https://cloud.google.com/storage/docs/public-datasets/landsat)
+### GEE
+* [Math ops](https://developers.google.com/earth-engine/guides/image_math)
+* [Math ops: expressions](https://developers.google.com/earth-engine/guides/image_math#expressions)
+* [NDVI](https://developers.google.com/earth-engine/tutorials/tutorial_api_06)
 
 ## Fuels
 * [Judi Beck](https://www.youtube.com/watch?v=dX15tC1UHcE&list=PLrpIXKIj6MaEJw41Fi-F-UpqAR1vVOKmt&index=17)
@@ -69,3 +73,6 @@
 
 # How to get into Linux if you work in Windows
 [Windows Subsystem for Linux (Ubuntu)](https://ubuntu.com/tutorials/install-ubuntu-on-wsl2-on-windows-10#1-overview)
+
+# IEEE folks
+* [Alan N](https://people.compute.dtu.dk/alan/publications.html)
