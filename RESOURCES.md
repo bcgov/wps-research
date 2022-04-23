@@ -1,4 +1,7 @@
 # Remote Sensing Resources
+## GDAL
+* [Gdal translate](https://gdal.org/programs/gdal_translate.html)
+* [Lat/lon from gtiff](https://stackoverflow.com/questions/2922532/obtain-latitude-and-longitude-from-a-geotiff-file)
 
 ## Radar
 * [Flood monitoring with S1](https://www.youtube.com/watch?v=ux4tx87ux94)
@@ -9,6 +12,7 @@
 * [Data prep for Stamps permanent scatterer interferometry](https://www.youtube.com/watch?v=Xy7Y4Ea5mOo)
 * [6th ESA radar polarimetry training](https://eo4society.esa.int/resources/6th-advanced-polarimetry-2021/)
 * [StaMPS](http://homepages.see.leeds.ac.uk/~earahoo/stamps/)
+
 ## Multispectral
 * [Burned area mapping using S2](https://www.youtube.com/watch?v=_swGA_61kNk)
 * [Deforestation monitoring with Sentinel-2](https://www.youtube.com/watch?v=LtxcBcgGo1g)
@@ -16,10 +20,14 @@
 * [Active fire monitoring with S3](https://www.youtube.com/watch?v=l_WiXEsLHaE)
 * [Sentinel2 Users Manual](https://sentinel.esa.int/web/sentinel/user-guides/sentinel-2-msi)
 * [SentinelHub Playground](https://apps.sentinel-hub.com/sentinel-playground/?source=S2L2A&lat=49.14600819722735&lng=-119.542236328125&zoom=11&preset=4_FALSE_COLOR__URBAN&layers=B01,B02,B03&maxcc=100&gain=1.0&gamma=1.0&time=2021-01-01%7C2021-07-21&atmFilter=&showDates=false)
+
 ## Hyperspectral
+
 ## LiDAR
+
 ## Hyperspectral and Radar combination
 * [Mapping waterbodies from Space](https://www.youtube.com/watch?v=UJcS24thVvc)
+
 ## Data
 * [SPOT data](https://regards.cnes.fr/user/swh/modules/60)
 * [Sentinel2 data from GCP](https://cloud.google.com/storage/docs/public-datasets/sentinel-2)
@@ -45,6 +53,7 @@
 * [geemap: Python package for interactive mapping w Google Earth Engine (GEE)](https://geemap.org/)
 * [geemap in Google Co-lab](https://colab.research.google.com/github/giswqs/geemap/blob/master/examples/notebooks/11_export_image.ipynb) 
 * [landsat on GCS](https://cloud.google.com/storage/docs/public-datasets/landsat)
+
 ### GEE
 * [Math ops](https://developers.google.com/earth-engine/guides/image_math)
 * [Math ops: expressions](https://developers.google.com/earth-engine/guides/image_math#expressions)
@@ -75,4 +84,16 @@
 [Windows Subsystem for Linux (Ubuntu)](https://ubuntu.com/tutorials/install-ubuntu-on-wsl2-on-windows-10#1-overview)
 
 # IEEE folks
-* [Alan N](https://people.compute.dtu.dk/alan/publications.html)
+* [Alan N](https://people.compute.dtu.dk/alan/publications.html) e.g. [Linear and kernel multivar chdet](https://www2.imm.dtu.dk/pubdb/pubs/6005-full.html)
+
+# UAV
+* [ODM](https://www.opendronemap.org/odm/)
+* [Gimbal](https://en.wikipedia.org/wiki/Gimbal)
+* [Principal Axes](https://en.wikipedia.org/wiki/Aircraft_principal_axes)
+* [Pinhole camera model](https://en.wikipedia.org/wiki/Pinhole_camera_model)
+* [Depth of field](https://en.wikipedia.org/wiki/Depth_of_field)
+* [Adding location tags to images](https://hatarilabs.com/ih-en/how-to-geolocate-drone-imagery-from-a-csv-table-with-python-and-piexif-tutorial)
+* [ODM image geoloc files](https://docs.opendronemap.org/geo/)
+* [Geoloc w DEM](https://www.researchgate.net/publication/287121489_PRECISE_3D_GEO-LOCATION_OF_UAV_IMAGES_USING_GEO-REFERENCED_DATA)
+* [Image rect proj](https://gis.stackexchange.com/questions/384756/georeference-single-drone-image-from-exif-data)
+
