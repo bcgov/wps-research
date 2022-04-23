@@ -28,6 +28,10 @@
 ## Hyperspectral and Radar combination
 * [Mapping waterbodies from Space](https://www.youtube.com/watch?v=UJcS24thVvc)
 
+# General RS
+* [Types of resolution](https://learn.opengeoedu.de/en/fernerkundung/vorlesung/Remote%20Sensing/aufloesungen)
+* [Viewing geom and spatial res](https://www.nrcan.gc.ca/maps-tools-and-publications/satellite-imagery-and-air-photos/tutorial-fundamentals-remote-sensing/microwave-remote-sensing/viewing-geometry-and-spatial-resolution/9341)
+
 ## Data
 * [SPOT data](https://regards.cnes.fr/user/swh/modules/60)
 * [Sentinel2 data from GCP](https://cloud.google.com/storage/docs/public-datasets/sentinel-2)
@@ -94,6 +98,7 @@
 * [Depth of field](https://en.wikipedia.org/wiki/Depth_of_field)
 * [Adding location tags to images](https://hatarilabs.com/ih-en/how-to-geolocate-drone-imagery-from-a-csv-table-with-python-and-piexif-tutorial)
 * [ODM image geoloc files](https://docs.opendronemap.org/geo/)
+* [ODM high quality orthophotos](https://docs.opendronemap.org/tutorials/#creating-high-quality-orthophotos)
 * [Geoloc w DEM](https://www.researchgate.net/publication/287121489_PRECISE_3D_GEO-LOCATION_OF_UAV_IMAGES_USING_GEO-REFERENCED_DATA)
 * [Image rect proj](https://gis.stackexchange.com/questions/384756/georeference-single-drone-image-from-exif-data)
-
+* [Yaw, pitch, roll, omega, phi, kappa](https://support.pix4d.com/hc/en-us/articles/202558969-Yaw-Pitch-Roll-and-Omega-Phi-Kappa-angles)
