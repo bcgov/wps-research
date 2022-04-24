@@ -90,6 +90,17 @@
 # IEEE folks
 * [Alan N](https://people.compute.dtu.dk/alan/publications.html) e.g. [Linear and kernel multivar chdet](https://www2.imm.dtu.dk/pubdb/pubs/6005-full.html)
 
+# Geography
+* [Geographic coordinates conversion](https://en.wikipedia.org/wiki/Geographic_coordinate_conversion)
+* [Local tangent plane coordinates](https://en.wikipedia.org/wiki/Local_tangent_plane_coordinates)
+* [Geodetic datum](https://en.wikipedia.org/wiki/Geodetic_datum)
+* [Geodetic coordinates](https://en.wikipedia.org/wiki/Geodetic_coordinates)
+* [Axes conventions: world ref frames](https://en.wikipedia.org/wiki/Axes_conventions#World_reference_frames:_ENU_and_NED)
+* [ENU coordinates](https://en.wikipedia.org/wiki/Local_tangent_plane_coordinates#Local_east,_north,_up_(ENU)_coordinates)
+* [Convert ENU to ECEF](https://en.wikipedia.org/wiki/Geographic_coordinate_conversion#From_ENU_to_ECEF)
+* [ESA: transforms between ECEF and ENU coordinates](https://gssc.esa.int/navipedia/index.php/Transformations_between_ECEF_and_ENU_coordinates)
+* [Wiley: coordinate xforms](https://onlinelibrary.wiley.com/doi/pdf/10.1002/9780470099728.app3)
+
 # UAV
 * [ODM](https://www.opendronemap.org/odm/)
 * [Gimbal](https://en.wikipedia.org/wiki/Gimbal)
