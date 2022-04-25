@@ -71,7 +71,8 @@
 
 ## Fire
 * [Prometheus simulation software](http://www.firegrowthmodel.ca/prometheus/overview_e.php)
-*[how does fire think and act: Dana Hicks](https://podcasts.apple.com/ca/podcast/05-how-does-fire-think-and-act-guest-dana-hicks-bcws/)
+* [how does fire think and act: Dana Hicks](https://podcasts.apple.com/ca/podcast/05-how-does-fire-think-and-act-guest-dana-hicks-bcws/)
+* [Drones in wildfire mgmt](https://en.wikipedia.org/wiki/Drones_in_wildfire_management)
 
 ## GEE apps
 * https://kkraoj.users.earthengine.app/view/live-fuel-moisture
