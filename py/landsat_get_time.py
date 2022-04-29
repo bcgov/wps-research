@@ -53,13 +53,17 @@ for b in bn:
     hf = hdr_fn(fn)
     print(fn, hf)
 
-    of = 'result_' + zs + '_' + TYPE + '_' + TS + '.bin'
-    oh = 'result_' + zs + '_' + TYPE + '_' + TS + '.hdr'
+    pre = 'K61884' # 'results'
+    of = pre + '_' + zs + '_' + TYPE + '_' + TS + '.bin'
+    oh = pre + '_' + zs + '_' + TYPE + '_' + TS + '.hdr'
+    ot = pre + '_' + zs + '_' + TYPE + '_' + TS + '.tif'
 
     if not exist(of):
         run('cp ' + fn + ' ' + of)
     if not exist(oh):
         run('cp ' + hf + ' ' + oh)
+    if not exist(tf):
+        run('gdal_translate -of GTiff -ot Float32 ' + of + ' ' + ot)
 
     run('python3 ' + pd + 'envi_header_copy_mapinfo.py ' + FOOT_H + ' ' + oh)
     ci += 1
