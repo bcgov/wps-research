@@ -62,7 +62,7 @@ for b in bn:
         run('cp ' + fn + ' ' + of)
     if not exist(oh):
         run('cp ' + hf + ' ' + oh)
-    if not exist(tf):
+    if not exist(ot):
         run('gdal_translate -of GTiff -ot Float32 ' + of + ' ' + ot)
 
     run('python3 ' + pd + 'envi_header_copy_mapinfo.py ' + FOOT_H + ' ' + oh)
