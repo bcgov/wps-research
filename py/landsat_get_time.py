@@ -1,5 +1,10 @@
 '''get timestamps from landsat and sentinel2
 and include those in them in result filenames
+
+run this after:
+    raster_accumulate.exe
+and 
+    raster_ts_dedup.exe
 '''
 
 FOOT_H = 'footprint3.hdr'
