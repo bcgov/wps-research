@@ -1,5 +1,8 @@
 /* raster_accumulate.cpp: cumulative sum (by band) of single-band
-raster sequence 20220320 */
+raster sequence 20220320
+
+20220429: need to update this to propagate source date/time from
+band names strings, if available */
 #include"misc.h"
 
 int main(int argc, char ** argv){
