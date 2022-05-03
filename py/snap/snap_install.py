@@ -6,6 +6,7 @@ link to esa-snap, not snap (solve ubuntu issue)
 use_mirror = False
 main = 'https://download.esa.int/step/snap/8.0/installers/esa-snap_all_unix_8_0.sh'
 mirror = 'https://step.esa.int/downloads/8.0/installers/esa-snap_all_unix_8_0.sh'
+jpy = 'https://github.com/bcdev/jpy/archive/refs/heads/master.zip'
 
 import os
 import sys
@@ -87,6 +88,18 @@ except Exception:
             if len(w) > 1:
                 print('attempting to install jpy..')
                 print(line)
-    
 
+                # download jpy source
+                jpyz = pd + 'snap' + sep + 'jpy-master.zip'
+                if not exists(jpyz):
+                    run(['wget', jpy, '-O', jpyz])
+               
+                # unzip jpy source
+                jpyd = pd + 'snap' + sep + 'jpy-master'
+                if not exists(jpyd):
+                    run(['unzip', jpyd])
 
+                jpyc = jpyd + sep + 'setup.py'
+
+                run(['python3', jpyc])
+                # /usr/lib/jvm/default-java
