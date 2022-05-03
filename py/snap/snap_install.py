@@ -40,6 +40,11 @@ x = str(oct(stat.S_IMODE(os.lstat(target).st_mode)))[-3:]
 if x != '744':
     run(['sudo', 'chmod', '744', target])
 
+# the version of jdk SNAP expects
+JDK = '/usr/lib/jvm/java-8-openjdk-amd64/bin'
+if not exists(JDK + 'javac'):
+    run('sudo apt install openjdk-8-jdk')
+
 if not exists('/usr/local/bin/esa-snap'):
     def re_name():
         run('sudo mv /usr/local/bin/snap /usr/local/bin/esa-snap')
@@ -119,6 +124,8 @@ except Exception:
                         
                         java_home = os.popen('readlink -f $(which java)').read().strip()
                         java_home = '/'.join(java_home.split('/')[:-1])
+                        java_home = '/opt/snap/jre/bin'
+                        java_home = JDK
                         print(java_home)
 
                         bashrc_fn = '/home/' + os.popen('whoami').read().strip() + sep + '.bashrc'
@@ -129,14 +136,12 @@ except Exception:
                                    'export JAVA_HOME=' + java_home, # /usr/lib/jvm/default-java/bin',
                                    '']
                         
-                        if False:
-                            print('cp', bashrc_fn, bashrc_fn + '.bak')
-                            shutil.copyfile(bashrc_fn, bashrc_fn + '.bak')
-                            print('+w', bashrc_fn)
-                            open(bashrc_fn, 'wb').write(('\n'.join(bashrc)).encode())
+                        print('cp', bashrc_fn, bashrc_fn + '.bak')
+                        shutil.copyfile(bashrc_fn, bashrc_fn + '.bak')
+                        print('+w', bashrc_fn)
+                        open(bashrc_fn, 'wb').write(('\n'.join(bashrc)).encode())
                         
-                        java_home = '/opt/snap/jre/bin'
-                        jpy_cmd = 'JAVA_HOME=' + java_home + '; ' + jpy_cmd
+                        jpy_cmd = 'export JAVA_HOME=' + java_home + '; ' + jpy_cmd
                         print(jpy_cmd)
 
                         # run('sudo source ' + bashrc_fn)
