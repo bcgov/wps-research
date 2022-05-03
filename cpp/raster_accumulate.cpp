@@ -1,14 +1,15 @@
 /* raster_accumulate.cpp: cumulative sum (by band) of single-band
-raster sequence 20220320 */
+raster sequence 20220320
+
+20220429: need to update this to propagate source date/time from
+band names strings, if available */
 #include"misc.h"
 
 int main(int argc, char ** argv){
   size_t nrow, ncol, nband, np, i, j, k, ii, ik;
-  if(argc < 2){
-    err("raster_accumulate.exe [raster cube] [optional arg: max(result, 1.)] \n");
-  }
+  if(argc < 2) err("raster_accumulate [raster cube] [optional arg: max(result, 1.)] \n");
   int max_1 = argc > 2;
-
+  
   str fn(argv[1]); // input image
   str hfn(hdr_fn(fn)); // input header
   if(!exists(fn)) err("failed to open input file");
