@@ -44,6 +44,10 @@ if x != '744':
 JDK = '/usr/lib/jvm/java-8-openjdk-amd64/bin'
 if not exists(JDK + 'javac'):
     run('sudo apt install openjdk-8-jdk')
+try:
+    import setuptools
+except Exception:
+    run('sudo apt install python3-setuptools')
 
 if not exists('/usr/local/bin/esa-snap'):
     def re_name():
@@ -110,32 +114,40 @@ except Exception:
                 if not exists(jpyd):
                     run(['unzip', jpyd])
 
+                jpy_wheel = jpyd + sep + 'dist'
                 jpyc = jpyd + sep + 'setup.py'
-                jpy_cmd = ' '.join(['python3',
+                jpy_cmd = ('cd ' + jpyd + '; python3 setup.py build maven bdist_wheel') # python3 setup.py build; sudo python3 setup.py install; sudo python3 setup.py bdist_wheel'
+                '''jpy_cmd = ' '.join(['python3',
                                     jpyc,
                                     '--maven bdist_wheel',
                                     '2>&1'])
+                '''
                 print(jpy_cmd)
                 results = [x.strip() for x in os.popen(jpy_cmd).read().split('\n')]
                 print(results)
+                
+                run('cp -v ' + jpy_wheel + sep + '*.whl ~/.snap/snap-python/snappy/')
+
                 for x in results:
                     if len(x.split('environment variable "JAVA_HOME" must be set')) > 1:
                         print('need to set JAVA_HOME')
                         
+                        '''
                         java_home = os.popen('readlink -f $(which java)').read().strip()
                         java_home = '/'.join(java_home.split('/')[:-1])
                         java_home = '/opt/snap/jre/bin'
+                        '''
                         java_home = JDK
                         print(java_home)
 
+                        path_jpy = jpy_d + '/src/main/java/org' # ~/GitHub/bcws-psu-research/py/snap/jpy-master/src/main/java/org
                         bashrc_fn = '/home/' + os.popen('whoami').read().strip() + sep + '.bashrc'
-                        # print(bashrc_fn)
                         bashrc = open(bashrc_fn).read().split('\n')
                         bashrc += ['',
                                    '# set JAVA_HOME for esa SNAP installation', 
                                    'export JAVA_HOME=' + java_home, # /usr/lib/jvm/default-java/bin',
+                                   'export PATH=$PATH:' + path_jpy,
                                    '']
-                        
                         print('cp', bashrc_fn, bashrc_fn + '.bak')
                         shutil.copyfile(bashrc_fn, bashrc_fn + '.bak')
                         print('+w', bashrc_fn)
@@ -144,8 +156,8 @@ except Exception:
                         jpy_cmd = 'export JAVA_HOME=' + java_home + '; ' + jpy_cmd
                         print(jpy_cmd)
 
-                        run('cd ' + jpyd + '; python3 setup.py build; sudo python3 setup.py install')
+                        run('cd ' + jpyd + '; python3 setup.py build maven bdist_wheel') # python3 setup.py build; sudo python3 setup.py install; sudo python3 setup.py bdist_wheel')
                         # cd ~/GitHub/bcws-psu-research/py/snap/jpy-master/; python3 setup.py install -maven bdist_wheel 2>&1
                         # run('sudo source ' + bashrc_fn)
-
-                # /usr/lib/jvm/default-java
+                        # /usr/lib/jvm/default-java
+                        run('cp -v ' + jpy_wheel + sep + '*.whl ~/.snap/snap-python/snappy/')
