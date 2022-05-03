@@ -50,10 +50,10 @@ try:
 except Exception:
     run('sudo apt install python3-setuptools')
 
-if not exists('/usr/local/bin/esa-snap'):
-    def re_name():
-        run('sudo mv /usr/local/bin/snap /usr/local/bin/esa-snap')
+def re_name():
+    run('sudo mv /usr/local/bin/snap /usr/local/bin/esa-snap')
 
+if not exists('/usr/local/bin/esa-snap'):
     if exists('/usr/local/bin/snap'):
         re_name()
     else:
