@@ -19,6 +19,7 @@ sep = os.path.sep
 my_path = sep.join(os.path.abspath(__file__).split(sep)[:-1]) + sep
 sys.path.append(my_path + "..")  # relative import
 from misc import run, exists, pd, sep, err
+sys.path.append('/home/' + os.popen('whoami').read().strip() + '/.snap/snap-python')
 
 path = mirror if use_mirror else main
 fn = path.split('/')[-1]
@@ -85,7 +86,7 @@ except Exception:
     sc = '/opt/snap/bin/snappy-conf'
     if not exists(sc):
         err(sc + ' not found, please check snap install path')
-    
+    print([sc, py_cmd, '2>&1'])
     result = os.popen(' '.join([sc, py_cmd, '2>&1'])).read().strip()
     if len(result.split('Please check the log file')) > 1:
         logfile = None
@@ -95,7 +96,7 @@ except Exception:
             if len(w) > 1:
                 logfile = w[-1].strip().strip('.').strip("'")
             
-        print(logfile)
+        print('+r', logfile)
         lines = [x.strip() for x in open(logfile).read().strip().split('\n')]
         
         for line in lines:
@@ -162,3 +163,9 @@ except Exception:
                         # /usr/lib/jvm/default-java
                         run('cp -v ' + jpy_wheel + sep + '*.whl ~/.snap/snap-python/snappy/')
                         # thanks https://forum.step.esa.int/t/unable-to-install-snappy-jpy-problem/5372/7
+
+
+else:
+    print("SUCCESS")
+    print("(*) don't forget to use this in your python code:")
+    print("  sys.path.append('/home/' + os.popen('whoami').read().strip() + '/.snap/snap-python')")
