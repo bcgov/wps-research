@@ -55,6 +55,7 @@ int main(int argc, char *argv[]){
 	      hfn + str(" ") +
 	      ohn);
       cout << cmd << endl;
+      system(cmd.c_str());
     }
   }
   return 0;
