@@ -50,6 +50,11 @@ int main(int argc, char *argv[]){
       fwrite(&d[np * i], sizeof(float), np, f);
       fclose(f);
       hwrite(ohn, nr, nc, 1, 4); // always type 4, one band
+
+      str cmd(str("python3 ~/GitHub/bcws-psu-research/py/envi_header_copy_mapinfo.py ") + 
+	      hfn + str(" ") +
+	      ohn);
+      cout << cmd << endl;
     }
   }
   return 0;
