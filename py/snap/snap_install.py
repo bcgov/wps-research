@@ -43,7 +43,7 @@ if x != '744':
 
 # the version of jdk SNAP expects
 JDK = '/usr/lib/jvm/java-8-openjdk-amd64/bin'
-if not exists(JDK + 'javac'):
+if not exists(JDK + '/javac'):
     run('sudo apt install openjdk-8-jdk')
 try:
     import setuptools
@@ -148,6 +148,10 @@ except Exception:
                         run('cp -v ' + jpy_wheel + sep + '*.whl ~/.snap/snap-python/snappy/')
                         # thanks https://forum.step.esa.int/t/unable-to-install-snappy-jpy-problem/5372/7
 else:
+    print('=' * 40)
     print("SUCCESS")
-    print("(*) don't forget to use this in your python code:")
-    print("  sys.path.append('/home/' + os.popen('whoami').read().strip() + '/.snap/snap-python')")
+    print("(*) make sure to reference this folder in your python code:")
+    print("  sys.path.append('/home/' +")
+    print("                  os.popen('whoami').read().strip() +")
+    print("                  '/.snap/snap-python')")
+    print('=' * 40)
