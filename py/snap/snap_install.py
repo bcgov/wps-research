@@ -161,3 +161,4 @@ except Exception:
                         # run('sudo source ' + bashrc_fn)
                         # /usr/lib/jvm/default-java
                         run('cp -v ' + jpy_wheel + sep + '*.whl ~/.snap/snap-python/snappy/')
+                        # thanks https://forum.step.esa.int/t/unable-to-install-snappy-jpy-problem/5372/7
