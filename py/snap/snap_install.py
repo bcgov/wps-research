@@ -2,7 +2,10 @@
 
 link to esa-snap, not snap (solve ubuntu issue)
 
-*** include snappy install!'''
+*** includes snappy install and config!
+tested on Ubuntu 20
+'''
+
 use_mirror = False
 main = 'https://download.esa.int/step/snap/8.0/installers/esa-snap_all_unix_8_0.sh'
 mirror = 'https://step.esa.int/downloads/8.0/installers/esa-snap_all_unix_8_0.sh'
@@ -11,6 +14,7 @@ jpy = 'https://github.com/bcdev/jpy/archive/refs/heads/master.zip'
 import os
 import sys
 import stat
+import shutil
 sep = os.path.sep
 my_path = sep.join(os.path.abspath(__file__).split(sep)[:-1]) + sep
 sys.path.append(my_path + "..")  # relative import
@@ -52,6 +56,8 @@ try:
     import snappy
 except Exception:
     print('configuring snappy..')
+    if not exists(os.popen('which mvn').read().strip()):
+        run('sudo apt install python3-pip maven')
     def pyc():
         x = os.popen('which python3 2>&1').read().strip()
         if x == '' or x.split(':')[-1].strip() == 'command not found':
@@ -100,6 +106,39 @@ except Exception:
                     run(['unzip', jpyd])
 
                 jpyc = jpyd + sep + 'setup.py'
+                jpy_cmd = ' '.join(['python3',
+                                    jpyc,
+                                    '--maven bdist_wheel',
+                                    '2>&1'])
+                print(jpy_cmd)
+                results = [x.strip() for x in os.popen(jpy_cmd).read().split('\n')]
+                print(results)
+                for x in results:
+                    if len(x.split('environment variable "JAVA_HOME" must be set')) > 1:
+                        print('need to set JAVA_HOME')
+                        
+                        java_home = os.popen('readlink -f $(which java)').read().strip()
+                        java_home = '/'.join(java_home.split('/')[:-1])
+                        print(java_home)
 
-                run(['python3', jpyc])
+                        bashrc_fn = '/home/' + os.popen('whoami').read().strip() + sep + '.bashrc'
+                        # print(bashrc_fn)
+                        bashrc = open(bashrc_fn).read().split('\n')
+                        bashrc += ['',
+                                   '# set JAVA_HOME for esa SNAP installation', 
+                                   'export JAVA_HOME=' + java_home, # /usr/lib/jvm/default-java/bin',
+                                   '']
+                        
+                        if False:
+                            print('cp', bashrc_fn, bashrc_fn + '.bak')
+                            shutil.copyfile(bashrc_fn, bashrc_fn + '.bak')
+                            print('+w', bashrc_fn)
+                            open(bashrc_fn, 'wb').write(('\n'.join(bashrc)).encode())
+                        
+                        java_home = '/opt/snap/jre/bin'
+                        jpy_cmd = 'JAVA_HOME=' + java_home + '; ' + jpy_cmd
+                        print(jpy_cmd)
+
+                        # run('sudo source ' + bashrc_fn)
+
                 # /usr/lib/jvm/default-java
