@@ -19,8 +19,8 @@ sep = os.path.sep
 my_path = sep.join(os.path.abspath(__file__).split(sep)[:-1]) + sep
 sys.path.append(my_path + "..")  # relative import
 from misc import run, exists, pd, sep, err
-sys.path.append('/home/' + os.popen('whoami').read().strip() + '/.snap/snap-python')
-
+sys.path.append('/home/' + os.popen('whoami').read().strip() +
+                '/.snap/snap-python')
 path = mirror if use_mirror else main
 fn = path.split('/')[-1]
 target = pd + 'snap' + sep + fn
@@ -99,8 +99,9 @@ except Exception:
         print('+r', logfile)
         lines = [x.strip() for x in open(logfile).read().strip().split('\n')]
 
+        jpy_err = "ERROR: The module 'jpy' is required to run snappy"
         for line in lines:
-            w = line.split("ERROR: The module 'jpy' is required to run snappy")
+            w = line.split(jpy_err)
             if len(w) > 1:
                 print('attempting to install jpy..')
                 print(line)
@@ -117,36 +118,46 @@ except Exception:
 
                 jpy_wheel = jpyd + sep + 'dist'
                 jpyc = jpyd + sep + 'setup.py'
-                jpy_cmd = ('cd ' + jpyd +
-                           '; python3 setup.py build maven bdist_wheel')
-                print(jpy_cmd)
-                results = [x.strip() for x in os.popen(jpy_cmd).read().split('\n')]
-                print(results)
-                run('cp -v ' + jpy_wheel + sep + '*.whl ~/.snap/snap-python/snappy/')
+                jpy_cmd = 'cd ' + jpyd + \
+                          '; python3 setup.py build maven bdist_wheel'
 
+                print(jpy_cmd)
+                results = [x.strip() for x in
+                           os.popen(jpy_cmd).read().split('\n')]
+                print(results)
+                run('cp -v ' + jpy_wheel + sep +
+                    '*.whl ~/.snap/snap-python/snappy/')
+    
+                homeset = 'environment variable "JAVA_HOME" must be set'
                 for x in results:
-                    if len(x.split('environment variable "JAVA_HOME" must be set')) > 1:
+                    if len(x.split(homeset)) > 1:
                         print('need to set JAVA_HOME')
                         java_home = JDK
                         print(java_home)
                         path_jpy = jpy_d + '/src/main/java/org'
-                        bashrc_fn = '/home/' + os.popen('whoami').read().strip() + sep + '.bashrc'
+                        bashrc_fn = '/home/' + \
+                                    os.popen('whoami').read().strip() + \
+                                    sep + '.bashrc'
                         bashrc = open(bashrc_fn).read().split('\n')
                         bashrc += ['',
-                                   '# set JAVA_HOME for esa SNAP installation',
+                                   '# set JAVA_HOME for esa SNAP install',
                                    'export JAVA_HOME=' + java_home,
                                    'export PATH=$PATH:' + path_jpy,
                                    '']
                         print('cp', bashrc_fn, bashrc_fn + '.bak')
                         shutil.copyfile(bashrc_fn, bashrc_fn + '.bak')
                         print('+w', bashrc_fn)
-                        open(bashrc_fn, 'wb').write(('\n'.join(bashrc)).encode())
+                        out_data = ('\n'.join(bashrc)).encode()
+                        open(bashrc_fn, 'wb').write(out_data)
 
-                        jpy_cmd = 'export JAVA_HOME=' + java_home + '; ' + jpy_cmd
+                        jpy_cmd = 'export JAVA_HOME=' + java_home + '; ' + \
+                                  jpy_cmd
                         print(jpy_cmd)
-                        run('cd ' + jpyd + '; python3 setup.py build maven bdist_wheel')
-                        run('cp -v ' + jpy_wheel + sep + '*.whl ~/.snap/snap-python/snappy/')
-                        # thanks https://forum.step.esa.int/t/unable-to-install-snappy-jpy-problem/5372/7
+                        run('cd ' + jpyd + 
+                            '; python3 setup.py build maven bdist_wheel')
+                        
+                        run('cp -v ' + jpy_wheel + sep + 
+                            '*.whl ~/.snap/snap-python/snappy/')
 else:
     print('=' * 40)
     print("SUCCESS")
