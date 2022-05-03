@@ -61,7 +61,7 @@ if not exists('/usr/local/bin/esa-snap'):
               'Please select all defaults incl. python support')
         run('sudo ' + target)
         re_name()
-
+    
 try:
     import snappy
 except Exception:
@@ -117,36 +117,24 @@ except Exception:
 
                 jpy_wheel = jpyd + sep + 'dist'
                 jpyc = jpyd + sep + 'setup.py'
-                jpy_cmd = ('cd ' + jpyd + '; python3 setup.py build maven bdist_wheel') # python3 setup.py build; sudo python3 setup.py install; sudo python3 setup.py bdist_wheel'
-                '''jpy_cmd = ' '.join(['python3',
-                                    jpyc,
-                                    '--maven bdist_wheel',
-                                    '2>&1'])
-                '''
+                jpy_cmd = ('cd ' + jpyd +
+                           '; python3 setup.py build maven bdist_wheel')
                 print(jpy_cmd)
                 results = [x.strip() for x in os.popen(jpy_cmd).read().split('\n')]
                 print(results)
-                
                 run('cp -v ' + jpy_wheel + sep + '*.whl ~/.snap/snap-python/snappy/')
 
                 for x in results:
                     if len(x.split('environment variable "JAVA_HOME" must be set')) > 1:
                         print('need to set JAVA_HOME')
-                        
-                        '''
-                        java_home = os.popen('readlink -f $(which java)').read().strip()
-                        java_home = '/'.join(java_home.split('/')[:-1])
-                        java_home = '/opt/snap/jre/bin'
-                        '''
                         java_home = JDK
                         print(java_home)
-
-                        path_jpy = jpy_d + '/src/main/java/org' # ~/GitHub/bcws-psu-research/py/snap/jpy-master/src/main/java/org
+                        path_jpy = jpy_d + '/src/main/java/org'
                         bashrc_fn = '/home/' + os.popen('whoami').read().strip() + sep + '.bashrc'
                         bashrc = open(bashrc_fn).read().split('\n')
                         bashrc += ['',
                                    '# set JAVA_HOME for esa SNAP installation', 
-                                   'export JAVA_HOME=' + java_home, # /usr/lib/jvm/default-java/bin',
+                                   'export JAVA_HOME=' + java_home,
                                    'export PATH=$PATH:' + path_jpy,
                                    '']
                         print('cp', bashrc_fn, bashrc_fn + '.bak')
@@ -156,15 +144,9 @@ except Exception:
                         
                         jpy_cmd = 'export JAVA_HOME=' + java_home + '; ' + jpy_cmd
                         print(jpy_cmd)
-
-                        run('cd ' + jpyd + '; python3 setup.py build maven bdist_wheel') # python3 setup.py build; sudo python3 setup.py install; sudo python3 setup.py bdist_wheel')
-                        # cd ~/GitHub/bcws-psu-research/py/snap/jpy-master/; python3 setup.py install -maven bdist_wheel 2>&1
-                        # run('sudo source ' + bashrc_fn)
-                        # /usr/lib/jvm/default-java
+                        run('cd ' + jpyd + '; python3 setup.py build maven bdist_wheel')
                         run('cp -v ' + jpy_wheel + sep + '*.whl ~/.snap/snap-python/snappy/')
                         # thanks https://forum.step.esa.int/t/unable-to-install-snappy-jpy-problem/5372/7
-
-
 else:
     print("SUCCESS")
     print("(*) don't forget to use this in your python code:")
