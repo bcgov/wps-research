@@ -1,4 +1,5 @@
-'''20220502 determine pixel location (lat lon) for each point in a raster.'''
+'''20220502 determine pixel location (lat lon) for each point in a raster
+note this doesn't generalize to southern hemisphere'''
 import os
 import sys
 import utm
