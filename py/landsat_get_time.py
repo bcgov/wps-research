@@ -1,5 +1,10 @@
 '''get timestamps from landsat and sentinel2
 and include those in them in result filenames
+
+run this after:
+    raster_accumulate.exe
+and 
+    raster_ts_dedup.exe
 '''
 
 FOOT_H = 'footprint3.hdr'
@@ -48,13 +53,17 @@ for b in bn:
     hf = hdr_fn(fn)
     print(fn, hf)
 
-    of = 'result_' + zs + '_' + TYPE + '_' + TS + '.bin'
-    oh = 'result_' + zs + '_' + TYPE + '_' + TS + '.hdr'
+    pre = 'K61884' # 'results'
+    of = pre + '_' + zs + '_' + TYPE + '_' + TS + '.bin'
+    oh = pre + '_' + zs + '_' + TYPE + '_' + TS + '.hdr'
+    ot = pre + '_' + zs + '_' + TYPE + '_' + TS + '.tif'
 
     if not exist(of):
         run('cp ' + fn + ' ' + of)
     if not exist(oh):
         run('cp ' + hf + ' ' + oh)
+    if not exist(ot):
+        run('gdal_translate -of GTiff -ot Float32 ' + of + ' ' + ot)
 
     run('python3 ' + pd + 'envi_header_copy_mapinfo.py ' + FOOT_H + ' ' + oh)
     ci += 1
