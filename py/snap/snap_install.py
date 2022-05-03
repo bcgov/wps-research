@@ -144,6 +144,8 @@ except Exception:
                         jpy_cmd = 'export JAVA_HOME=' + java_home + '; ' + jpy_cmd
                         print(jpy_cmd)
 
+                        run('cd ' + jpyd + '; python3 setup.py build; sudo python3 setup.py install')
+                        # cd ~/GitHub/bcws-psu-research/py/snap/jpy-master/; python3 setup.py install -maven bdist_wheel 2>&1
                         # run('sudo source ' + bashrc_fn)
 
                 # /usr/lib/jvm/default-java
