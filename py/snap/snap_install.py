@@ -61,7 +61,7 @@ if not exists('/usr/local/bin/esa-snap'):
               'Please select all defaults incl. python support')
         run('sudo ' + target)
         re_name()
-    
+
 try:
     import snappy
 except Exception:
@@ -95,10 +95,10 @@ except Exception:
             w = line.split('Please check the log file')
             if len(w) > 1:
                 logfile = w[-1].strip().strip('.').strip("'")
-            
+
         print('+r', logfile)
         lines = [x.strip() for x in open(logfile).read().strip().split('\n')]
-        
+
         for line in lines:
             w = line.split("ERROR: The module 'jpy' is required to run snappy")
             if len(w) > 1:
@@ -109,7 +109,7 @@ except Exception:
                 jpyz = pd + 'snap' + sep + 'jpy-master.zip'
                 if not exists(jpyz):
                     run(['wget', jpy, '-O', jpyz])
-               
+
                 # unzip jpy source
                 jpyd = pd + 'snap' + sep + 'jpy-master'
                 if not exists(jpyd):
@@ -133,7 +133,7 @@ except Exception:
                         bashrc_fn = '/home/' + os.popen('whoami').read().strip() + sep + '.bashrc'
                         bashrc = open(bashrc_fn).read().split('\n')
                         bashrc += ['',
-                                   '# set JAVA_HOME for esa SNAP installation', 
+                                   '# set JAVA_HOME for esa SNAP installation',
                                    'export JAVA_HOME=' + java_home,
                                    'export PATH=$PATH:' + path_jpy,
                                    '']
@@ -141,7 +141,7 @@ except Exception:
                         shutil.copyfile(bashrc_fn, bashrc_fn + '.bak')
                         print('+w', bashrc_fn)
                         open(bashrc_fn, 'wb').write(('\n'.join(bashrc)).encode())
-                        
+
                         jpy_cmd = 'export JAVA_HOME=' + java_home + '; ' + jpy_cmd
                         print(jpy_cmd)
                         run('cd ' + jpyd + '; python3 setup.py build maven bdist_wheel')
