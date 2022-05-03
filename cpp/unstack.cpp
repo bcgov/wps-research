@@ -3,9 +3,10 @@
 #include"misc.h"
 
 int main(int argc, char *argv[]){
-  if(argc < 2) err("unstack [input data file] [optional arg: band to extract (from 1)] ... [optional arg: band to extract (from 1)]");
+  if(argc < 2){
+    err("unstack [input data file] [optional arg: band 1-ix] ... [optional: band 1-ix]");
+  }
   size_t i, j, nr, nc, nb, np;
-  
   set<int> selected;
   for(i = 2; i < argc; i++) selected.insert(atoi(argv[i]));
   
