@@ -1,7 +1,13 @@
 # Remote Sensing Resources
-## GDAL
+## Key tools
+### ESA SNAP
+* [click here to download ESA SNAP!](https://step.esa.int/main/download/snap-download/)
+### GDAL
 * [Gdal translate](https://gdal.org/programs/gdal_translate.html)
 * [Lat/lon from gtiff](https://stackoverflow.com/questions/2922532/obtain-latitude-and-longitude-from-a-geotiff-file)
+### PolSARPro
+* [PolSARPro ESA page](https://step.esa.int/main/toolboxes/polsarpro-v6-0-biomass-edition-toolbox/)
+* [PolSARPro home (U. Rennes)](https://ietr-lab.univ-rennes1.fr/polsarpro-bio/)
 
 ## Radar
 * [Flood monitoring with S1](https://www.youtube.com/watch?v=ux4tx87ux94)
