@@ -3,7 +3,7 @@
 int main(int argc, char ** argv){
   if(argc < 2)
     err("qs.exe [raster cube 1]"); // usage
-  
+
   str fn(argv[1]); // input image file name
   if(!exists(fn))
     err("failed to open input file");
@@ -66,7 +66,7 @@ int main(int argc, char ** argv){
   }
   for0(k, nband)
     stdev[k] = sqrt(total_squared[k] / n[k]);
- 
+
   printf("band_i,Min,Max,Mean,Stdv,n_nan,n_inf");
   for0(k, nband)
     printf("\n%zu,%e,%e,%e,%e,%e,%e",
