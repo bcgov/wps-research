@@ -1,4 +1,4 @@
-/* qs.cpp: quick stats for image cube */
+/* qs.cpp: quick stats for image cube: CSV output */
 #include"misc.h"
 int main(int argc, char ** argv){
   if(argc < 2)
