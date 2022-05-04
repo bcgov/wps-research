@@ -1,15 +1,11 @@
-/* qs.cpp: quick stats for raster image cube. Updated 20220503
-     Input: generic binary:
-       (*) band-sequential
-       (*) IEEE standard 32-bit (4 byte) float
-       (*) Byte-order 0 (ESA SNAP uses Byte-order 1)
-       (*) human-readable ENVI-format header file
-
-     Output: basic stats in CSV format
-       (*) Min, Max, Mean, Stdv returned
-       (*) NaN / infinity neglected in above
-       (*) NaN / infinity counts are returned
-*/
+/* qs.cpp: quick stats for raster/ image cube. Update: 20220503 
+Input: generic binary:
+  (*) band-sequential, IEEE standard 32-bit float
+  (*) Byte-order 0 (ESA SNAP uses Byte-order 1)
+  (*) human-readable ENVI-format header file
+Output: basic stats in CSV format
+  (*) Min, Max, Mean, Stdv (excluding NaN / infinity)
+  (*) NaN / infinity counts */
 #include"misc.h"
 int main(int argc, char ** argv){
   if(argc < 2)
@@ -24,22 +20,22 @@ int main(int argc, char ** argv){
   hread(hfn, nrow, ncol, nband); // read header 1
   np = nrow * ncol; // number of input pix
 
-  double d, diff;
-  size_t i, j, k, ix, ij, ik;
-  double * n = dalloc(nband);
-  double * avg = dalloc(nband);
-  double * fmax = dalloc(nband);
-  double * fmin = dalloc(nband);
-  double * total = dalloc(nband);
-  double * stdev = dalloc(nband);
-  double * n_inf = dalloc(nband); // count infinity
-  double * n_nan = dalloc(nband); // count nan
-  double * total_squared = dalloc(nband);
-  float * dat = bread(fn, nrow, ncol, nband); // output
+  double d, diff;  // data values
+  size_t i, j, k, ix, ij, ik;  // indices
+  double * n = dalloc(nband);  // counts by band
+  double * avg = dalloc(nband);  // mean
+  double * fmax = dalloc(nband); // max
+  double * fmin = dalloc(nband);  // min
+  double * total = dalloc(nband);  // total
+  double * stdev = dalloc(nband);  // stdev
+  double * n_inf = dalloc(nband); // infinity count
+  double * n_nan = dalloc(nband); // NaN count
+  double * total_squared = dalloc(nband);  // for stdv
+  float * dat = bread(fn, nrow, ncol, nband); // input
 
   for0(i, nband){
-    fmax[i] = -DBL_MAX;
-    fmin[i] =  DBL_MAX;
+    fmin[i] = DBL_MAX;
+    fmax[i] = -DBL_MAX;  // n.b.
     total[i] = n[i] = avg[i] = stdev[i] = 0.;
     total_squared[i] = n_inf[i] = n_nan[i] = 0.;
   }
@@ -63,6 +59,7 @@ int main(int argc, char ** argv){
       }
     }
   }
+
   for0(k, nband)
     avg[k] = total[k] / n[k];
 
@@ -75,6 +72,7 @@ int main(int argc, char ** argv){
       }
     }
   }
+
   for0(k, nband)
     stdev[k] = sqrt(total_squared[k] / n[k]);
 
