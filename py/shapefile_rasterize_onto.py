@@ -10,22 +10,17 @@ import json
 from osgeo import gdal # need gdal / python installed!
 from osgeo import ogr
 from osgeo import gdalconst
-
-def err(m):
-    print("Error: " + m); sys.exit(1)
-
-# parse arguments
-args = sys.argv
+from misc import err, args
 if len(args) < 4:
-    err("Error: rasterize_onto.py: usage:" +
-        "  python3 rasterize_onto.py [shapefile to rasterize] [image file: footprint to rasterize onto] [output filename]")
-    sys.exit(1)
-
+    err('python3 rasterize_onto.py [shapefile to rasterize] ' +
+       '[image file: footprint to rasterize onto] [output filename]')
 InputVector = args[1] # shapefile to rasterize
 RefImage = args[2] # footprint to rasterize onto
 OutputImage = args[3]
-if os.path.exists(OutputImage): err("output file already exists")
-if OutputImage[-4:] != '.bin': err("output file extension expected: .bin")
+if os.path.exists(OutputImage):
+    err("output file already exists")
+if OutputImage[-4:] != '.bin':
+    err("output file extension expected: .bin")
 
 # data output formatting
 gdalformat = 'ENVI'
