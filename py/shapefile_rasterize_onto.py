@@ -45,19 +45,15 @@ def records(layer):
 print("feature count: " + str(feature_count))
 features = records(layer)
 feature_names, feature_ids = [], []
-for f in features:
-    # print(f.keys())
+for f in features: # print(f.keys())
     feature_id = f['id']
-    feature_ids.append(feature_id)
-    # print(f['properties'].keys())
+    feature_ids.append(feature_id) # print(f['properties'].keys())
     feature_name = ''
     try:
         feature_name = f['properties']['Name']
     except Exception:
         pass # feature name not available
-
-    feature_names.append(feature_name)
-    # print("feature id=", feature_id, "name", feature_name)
+    feature_names.append(feature_name # print("feature id=", feature_id, "name", feature_name)
 
 # print("Name  -  Type  Width  Precision")
 for i in range(layerDefinition.GetFieldCount()):
@@ -66,48 +62,65 @@ for i in range(layerDefinition.GetFieldCount()):
     fieldType = layerDefinition.GetFieldDefn(i).GetFieldTypeName(fieldTypeCode)
     fieldWidth = layerDefinition.GetFieldDefn(i).GetWidth()
     GetPrecision = layerDefinition.GetFieldDefn(i).GetPrecision()
-    # print(fieldName + " - " + fieldType+ " " + str(fieldWidth) + " " + str(GetPrecision))
+    if False:
+        print(fieldName + " - " +
+              fieldType+ " " +
+              str(fieldWidth) + " " +
+              str(GetPrecision))
 
 # Rasterise all features to same layer (coverage of all features)
 print("+w", OutputImage)
-Output = gdal.GetDriverByName(gdalformat).Create(OutputImage, Image.RasterXSize, Image.RasterYSize, 1, datatype)
+Output = gdal.GetDriverByName(gdalformat).Create(OutputImage,
+                                                 Image.RasterXSize,
+                                                 Image.RasterYSize,
+                                                 1,
+                                                 datatype)
 Output.SetProjection(Image.GetProjectionRef())
 Output.SetGeoTransform(Image.GetGeoTransform())
 
 # Write data to band 1
 Band = Output.GetRasterBand(1)
 Band.SetNoDataValue(0)
-gdal.RasterizeLayer(Output, [1], layer, burn_values=[burnVal])
+gdal.RasterizeLayer(Output,
+                    [1],
+                    layer,
+                    burn_values=[burnVal])
 
-# Close datasets
-# Band = None
+# Close dataset
 Output = None
-#  Image = None
-# Shapefile = None
 
 for i in range(feature_count):
-    # ideally we'd like to confirm the feature intersects the reference map, before rasterizing..
+    # confirm the feature intersects reference map first?
     fid_list = [feature_ids[i]]
     my_filter = "FID in {}".format(tuple(fid_list))
-    my_filter = my_filter.replace(",", "")  # the comma in a tuple, if only one element, throws an error
+    my_filter = my_filter.replace(",", "")  # comma in tuple throws error for single element
     layer.SetAttributeFilter(my_filter)
-
-    out_fn = OutputImage[:-4] + '_' + str(feature_ids[i]) + ('' if feature_names[i] == ''  else ('_' + str(feature_names[i]).strip())) + '.bin'
+    X = ('_' + str(feature_names[i]).strip())
+    out_fn = (OutputImage[:-4] + '_' +
+              str(feature_ids[i]) +
+              ('' if feature_names[i] == ''  else ('_' + X)) +
+              '.bin')
     print("+w", out_fn)
 
     # Rasterise
-    Output = gdal.GetDriverByName(gdalformat).Create(out_fn, Image.RasterXSize, Image.RasterYSize, 1, datatype)
+    Output = gdal.GetDriverByName(gdalformat).Create(out_fn,
+                                                     Image.RasterXSize,
+                                                     Image.RasterYSize,
+                                                     1,
+                                                     datatype)
     Output.SetProjection(Image.GetProjectionRef())
     Output.SetGeoTransform(Image.GetGeoTransform())
 
     # Write data to band 1
     Band = Output.GetRasterBand(1)
     Band.SetNoDataValue(0)
-    gdal.RasterizeLayer(Output, [1], layer, burn_values=[burnVal])
-
+    gdal.RasterizeLayer(Output,
+                        [1],
+                        layer,
+                        burn_values=[burnVal])
     Output = None
 
-    # Close datasets
+# close datasets
 Band = None
 Image = None
 Shapefile = None
