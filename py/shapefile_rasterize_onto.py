@@ -112,19 +112,23 @@ for i in range(layerDefinition.GetFieldCount()):
 # Rasterise all features to same layer (coverage of all features)
 print("+w", OutputImage)
 gd = gdal.GetDriverByName(gdalformat)
+
 Output = gd.Create(OutputImage,
                    Image.RasterXSize,
                    Image.RasterYSize,
                    1,
                    datatype)
+
 Output.SetProjection(Image.GetProjectionRef())
 Output.SetGeoTransform(Image.GetGeoTransform())
 Band = Output.GetRasterBand(1) # write data to band 1
 Band.SetNoDataValue(0)
+
 gdal.RasterizeLayer(Output,
                     [1],
                     layer,
                     burn_values=[burnVal])
+
 Output = None  # close ds
 
 for i in range(feature_count): # confirm feature intersects reference map first?
@@ -139,9 +143,11 @@ for i in range(feature_count): # confirm feature intersects reference map first?
               '.bin')
 
     if 'FIRE_ID' in keys:
-        print("IS_FIRE")
-
-    print("+w", out_fn, feature_names[i])
+        out_fn = '_'.join([feature_names[i],
+                           OutputImage[:-4],
+                           feature_ids[i] + '.bin'])
+    print("+w",
+          out_fn)  # feature_names[i])
     
     # rasterise
     Output = gd.Create(out_fn,
@@ -149,16 +155,19 @@ for i in range(feature_count): # confirm feature intersects reference map first?
                        Image.RasterYSize,
                        1,
                        datatype)
+    
     Output.SetProjection(Image.GetProjectionRef())
     Output.SetGeoTransform(Image.GetGeoTransform())
 
     # write data to band1
     Band = Output.GetRasterBand(1) 
     Band.SetNoDataValue(0)
+    
     gdal.RasterizeLayer(Output,
                         [1],
                         layer,
                         burn_values=[burnVal])
+
     Output = None
 
 # close datasets
