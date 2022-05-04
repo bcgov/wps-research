@@ -55,9 +55,11 @@ def records(layer): # generator
 print("feature count: " + str(feature_count))
 features = records(layer)
 feature_names, feature_ids = [], []
+is_fire = False
+
 for f in features:
     print("f.keys()", f.keys())
-    feature_id = f['id']
+    feature_id = str(f['id']).zfill(4)
     feature_ids.append(feature_id)
     print("f['properties'].keys()", f['properties'].keys())
     '''f['properties'].keys():
@@ -74,6 +76,23 @@ for f in features:
         feature_name = f['properties']['Name']
     except Exception:
         pass # feature name not available
+
+    prop = f['properties']
+    keys = prop.keys()
+    
+    if 'FIRE_ID' in keys:
+        # this is Canadian NFDB
+        FIRE_ID = prop['FIRE_ID']
+        YEAR = str(prop['YEAR']).zfill(4)  # YYYY
+        MONTH = str(prop['MONTH']).zfill(2)  # MM
+        DAY = str(prop['DAY']).zfill(2)  # DD
+        feature_name = ''.join([YEAR, 
+                                MONTH, 
+                                DAY,
+                                '_',
+                                FIRE_ID])
+        is_fire = True
+    
     feature_names.append(feature_name)
     print("feature id=", feature_id, "name", feature_name)
 
@@ -92,11 +111,12 @@ for i in range(layerDefinition.GetFieldCount()):
 
 # Rasterise all features to same layer (coverage of all features)
 print("+w", OutputImage)
-Output = gdal.GetDriverByName(gdalformat).Create(OutputImage,
-                                                 Image.RasterXSize,
-                                                 Image.RasterYSize,
-                                                 1,
-                                                 datatype)
+gd = gdal.GetDriverByName(gdalformat)
+Output = gd.Create(OutputImage,
+                   Image.RasterXSize,
+                   Image.RasterYSize,
+                   1,
+                   datatype)
 Output.SetProjection(Image.GetProjectionRef())
 Output.SetGeoTransform(Image.GetGeoTransform())
 Band = Output.GetRasterBand(1) # write data to band 1
@@ -117,16 +137,23 @@ for i in range(feature_count): # confirm feature intersects reference map first?
               str(feature_ids[i]) +
               ('' if feature_names[i] == ''  else ('_' + X)) +
               '.bin')
+
+    if 'FIRE_ID' in keys:
+        print("IS_FIRE")
+
     print("+w", out_fn, feature_names[i])
-    # Rasterise
-    Output = gdal.GetDriverByName(gdalformat).Create(out_fn,
-                                                     Image.RasterXSize,
-                                                     Image.RasterYSize,
-                                                     1,
-                                                     datatype)
+    
+    # rasterise
+    Output = gd.Create(out_fn,
+                       Image.RasterXSize,
+                       Image.RasterYSize,
+                       1,
+                       datatype)
     Output.SetProjection(Image.GetProjectionRef())
     Output.SetGeoTransform(Image.GetGeoTransform())
-    Band = Output.GetRasterBand(1)  # write data to band 1
+
+    # write data to band1
+    Band = Output.GetRasterBand(1) 
     Band.SetNoDataValue(0)
     gdal.RasterizeLayer(Output,
                         [1],
