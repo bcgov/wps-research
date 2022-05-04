@@ -1,6 +1,7 @@
-'''20220502 determine pixel location (lat lon) for each point in a raster
+'''20220502 determine pixel loc'n (lat lon) for each point in raster
 NB doesn't generalize to southern hemisphere. Thanks:
-https://stackoverflow.com/questions/50191648/gis-geotiff-gdal-python-how-to-get-coordinates-from-pixel'''
+https://stackoverflow.com/questions/50191648/
+gis-geotiff-gdal-python-how-to-get-coordinates-from-pixel'''
 import os
 import osr
 import utm
@@ -8,7 +9,7 @@ import pyproj
 import shutil
 import numpy as np
 from osgeo import gdal
-from misc import args, err, run, read_hdr, hdr_fn, write_binary, pd, sep, pix_lin_to_xy
+from misc import args, err, run, read_hdr, hdr_fn, write_binary, pd, sep
 if len(args) < 2:
     err("python3 raster_pixels_location.py [input image name]")
 
@@ -38,16 +39,16 @@ dat = np.zeros(npx * 2)  # output raster for lon, lat
 for Y_line in range(nrow):  # row 0-idx
     y_i = Y_line * ncol
     y_i2 = y_i + npx
-    yl = Y_line # + .5
+    yl = Y_line  # + .5
     for X_pixel in range(ncol):  # col 0-idx
-        xp = X_pixel # + .5
+        xp = X_pixel  # + .5
         X_geo = gx[0] + xp * gx[1] + yl * gx[2]
         Y_geo = gx[3] + xp * gx[4] + yl * gx[5]
         X_geo += px_w / 2.  # shift to pixel centre
         Y_geo += px_h / 2.
         (lat, lon, z) = t.TransformPoint(X_geo, Y_geo)
         dat[y_i + X_pixel] = lon
-        dat[y_i2 + X_pixel] = lat 
+        dat[y_i2 + X_pixel] = lat
 fn = img + '_lonlat.bin'
 hn = img + '_lonlat.hdr'
 write_binary(dat, fn)  # write out raster
