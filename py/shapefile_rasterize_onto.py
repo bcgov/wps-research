@@ -86,12 +86,12 @@ for f in features:
         YEAR = str(prop['YEAR']).zfill(4)  # YYYY
         MONTH = str(prop['MONTH']).zfill(2)  # MM
         DAY = str(prop['DAY']).zfill(2)  # DD
-        SIZE = str(round(prop['SIZE_HA'], 0)).zfill(8)
+        SIZE = str(int(round(prop['SIZE_HA'], 0))).zfill(8)
         feature_name = ''.join([YEAR, 
                                 MONTH, 
                                 DAY,
                                 '_',
-                                FIRE_ID,
+                                FIRE_ID.ljust(12, '_'),
                                 '_',
                                 SIZE])
         is_fire = True
