@@ -10,14 +10,19 @@
                 S2A_MSIL2A_20190908T195941_N0213_R128_T09VUE_20190908T233509_RGB.tif \
                 out.bin
 
-20220504: output feature names / values?'''
+        python3 shapefile_rasterize_onto.py \
+                large_fires_reproject_clip.shp \
+                stack.bin_EPSG4326.bin \
+                rasterize.bin
+20220504: output feature names + values (special case)'''
 import os
 import sys
 import json
+import datetime
 from osgeo import ogr
 from osgeo import gdal # need gdal / python installed!
-from misc import err, args
 from osgeo import gdalconst
+from misc import err, exist, args, hdr_fn, read_hdr, write_binary, write_hdr
 
 if len(args) < 4:
     err('python3 rasterize_onto.py [shapefile to rasterize] ' +
@@ -58,10 +63,10 @@ feature_names, feature_ids = [], []
 is_fire = False
 
 for f in features:
-    print("f.keys()", f.keys())
+    # print("f.keys()", f.keys())
     feature_id = str(f['id']).zfill(4)
     feature_ids.append(feature_id)
-    print("f['properties'].keys()", f['properties'].keys())
+    # print("f['properties'].keys()", f['properties'].keys())
     '''f['properties'].keys():
          dict_keys(['SRC_AGENCY', 'FIRE_ID', 'FIRENAME', 'YEAR', 'MONTH',
                     'DAY', 'REP_DATE', 'DATE_TYPE', 'OUT_DATE', 'DECADE',
@@ -136,6 +141,7 @@ gdal.RasterizeLayer(Output,
 
 Output = None  # close ds
 '''
+out_files = []
 for i in range(feature_count): # confirm feature intersects reference map first?
     fid_list = [feature_ids[i]]
     my_filter = "FID in {}".format(tuple(fid_list))
@@ -151,6 +157,9 @@ for i in range(feature_count): # confirm feature intersects reference map first?
         out_fn = '_'.join([feature_names[i],
                            OutputImage[:-4],
                            feature_ids[i] + '.bin'])
+    
+    if exist(out_fn):
+        continue
     print("+w",
           out_fn)  # feature_names[i])
     
@@ -172,10 +181,25 @@ for i in range(feature_count): # confirm feature intersects reference map first?
                         [1],
                         layer,
                         burn_values=[burnVal])
-
+    out_files.append(out_fn)  # record output filename for post-processing
     Output = None
 
 # close datasets
 Band = None
 Image = None
 Shapefile = None
+
+if is_fire:  # post-processing of fire data
+    out_files.sort()  # sort in time!
+    ncol, nrow, nband = read_hdr(hdr_fn(out_files[0]))
+    
+    for f in out_files:
+        x = f.split('_')[0]
+        t = datetime.datetime(int(x[0: 4]),
+                              int(x[4: 6]),
+                              int(x[6: 8]))
+        print(t, f)
+
+    ofn = OutputImage[:-4] + '_days_since_burn.bin'
+    print('+w', ofn)
+    
