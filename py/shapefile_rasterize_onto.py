@@ -86,11 +86,14 @@ for f in features:
         YEAR = str(prop['YEAR']).zfill(4)  # YYYY
         MONTH = str(prop['MONTH']).zfill(2)  # MM
         DAY = str(prop['DAY']).zfill(2)  # DD
+        SIZE = str(round(prop['SIZE_HA'], 0)).zfill(8)
         feature_name = ''.join([YEAR, 
                                 MONTH, 
                                 DAY,
                                 '_',
-                                FIRE_ID])
+                                FIRE_ID,
+                                '_',
+                                SIZE])
         is_fire = True
     
     feature_names.append(feature_name)
@@ -109,10 +112,12 @@ for i in range(layerDefinition.GetFieldCount()):
               str(fieldWidth) + " " +
               str(GetPrecision))
 
+'''
 # Rasterise all features to same layer (coverage of all features)
 print("+w", OutputImage)
+'''
 gd = gdal.GetDriverByName(gdalformat)
-
+'''
 Output = gd.Create(OutputImage,
                    Image.RasterXSize,
                    Image.RasterYSize,
@@ -130,7 +135,7 @@ gdal.RasterizeLayer(Output,
                     burn_values=[burnVal])
 
 Output = None  # close ds
-
+'''
 for i in range(feature_count): # confirm feature intersects reference map first?
     fid_list = [feature_ids[i]]
     my_filter = "FID in {}".format(tuple(fid_list))
