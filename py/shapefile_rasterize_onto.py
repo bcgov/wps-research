@@ -158,6 +158,7 @@ for i in range(feature_count): # confirm feature intersects reference map first?
                            OutputImage[:-4],
                            feature_ids[i] + '.bin'])
     
+    out_files.append(out_fn)  # record output filename for post-processing
     if exist(out_fn):
         continue
     print("+w",
@@ -181,7 +182,6 @@ for i in range(feature_count): # confirm feature intersects reference map first?
                         [1],
                         layer,
                         burn_values=[burnVal])
-    out_files.append(out_fn)  # record output filename for post-processing
     Output = None
 
 # close datasets
@@ -189,17 +189,21 @@ Band = None
 Image = None
 Shapefile = None
 
+today = datetime.date.today()
+
 if is_fire:  # post-processing of fire data
     out_files.sort()  # sort in time!
-    ncol, nrow, nband = read_hdr(hdr_fn(out_files[0]))
-    
+    nc, nr, nb = [int(i)
+                  for i in read_hdr(hdr_fn(out_files[0]))]
+
     for f in out_files:
         x = f.split('_')[0]
-        t = datetime.datetime(int(x[0: 4]),
-                              int(x[4: 6]),
-                              int(x[6: 8]))
-        print(t, f)
+        YYYY, MM, DD = [int(i) for i in [x[0:4], x[4:6], x[6:8]]]
+        if MM == 0 and DD == 0:
+            MM, DD = 6, 15  # assume middle of year
+        # print([x, YYYY,MM,DD])
+        t = datetime.datetime(YYYY, MM, DD)
+        print([today - t, t, f])
 
     ofn = OutputImage[:-4] + '_days_since_burn.bin'
     print('+w', ofn)
-    
