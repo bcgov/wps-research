@@ -61,7 +61,7 @@ for f in features: # print(f.keys())
         feature_name = f['properties']['Name']
     except Exception:
         pass # feature name not available
-    feature_names.append(feature_name # print("feature id=", feature_id, "name", feature_name)
+    feature_names.append(feature_name) # print("feature id=", feature_id, "name", feature_name)
 
 # print("Name  -  Type  Width  Precision")
 for i in range(layerDefinition.GetFieldCount()):
