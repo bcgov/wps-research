@@ -309,16 +309,8 @@ def xy_to_pix_lin(fn, x, y, nb):  # raster fn, lat/lon, number of bands (assume 
     else:
         err("misc.py: unexpected output from gdallocationinfo: number of lines: " + str(len(lines)))
 
-def pix_lin_to_xy(fn, col, row):  # THIS IS WRONG
-    cmd = ["gdallocationinfo",
-            '-geoloc',
-            fn,
-            str(col),
-            str(row)]
-    print(cmd)
-    lines = os.popen(' '.join(cmd)).readlines()
-    print(lines)
-    return lines
+def pix_lin_to_xy(fn, col, row):
+    err('fix this with code from raster_pixels_location.py')
 
 def utc_to_pst(YYYY, MM, DD, hh, mm, ss):
     from datetime import datetime
