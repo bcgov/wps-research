@@ -12,7 +12,7 @@ if len(args) < 4:
         '[input raster] [input vector] [output vector]')
 inRasterPath, inVectorPath, outVectorPath = args[1: 4]  # file paths
 
-if exists(ouVectorPath):
+if exists(outVectorPath):
     err('output file already exists: ' + outVectorPath)
 
 if not exists(inRasterPath) or not exists(inVectorPath):
