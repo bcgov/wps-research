@@ -19,10 +19,11 @@ import os
 import sys
 import json
 import datetime
+import numpy as np
 from osgeo import ogr
 from osgeo import gdal # need gdal / python installed!
 from osgeo import gdalconst
-from misc import err, exist, args, hdr_fn, read_hdr, write_binary, write_hdr
+from misc import err, exist, args, hdr_fn, read_hdr, write_binary, write_hdr, read_binary
 
 if len(args) < 4:
     err('python3 rasterize_onto.py [shapefile to rasterize] ' +
@@ -190,12 +191,16 @@ Image = None
 Shapefile = None
 
 today = datetime.date.today()
+today = datetime.datetime(today.year, today.month, today.day)
 
 if is_fire:  # post-processing of fire data
     out_files.sort()  # sort in time!
     nc, nr, nb = [int(i)
                   for i in read_hdr(hdr_fn(out_files[0]))]
 
+    npx = nr * nc  # number of pixels
+    dat = np.array([np.nan for i in range(npx)])
+    
     for f in out_files:
         x = f.split('_')[0]
         YYYY, MM, DD = [int(i) for i in [x[0:4], x[4:6], x[6:8]]]
@@ -203,7 +208,20 @@ if is_fire:  # post-processing of fire data
             MM, DD = 6, 15  # assume middle of year
         # print([x, YYYY,MM,DD])
         t = datetime.datetime(YYYY, MM, DD)
-        print([today - t, t, f])
+        d = float((t - today).days)  # larger value: more recent
+
+        samples, lines, bands, data = read_binary(f)
+        [samples, lines, bands] = [int(i) for i in [samples, lines, bands]]
+        if samples*lines != npx:
+            err("unexpected image dimension")
+
+        for i in range(npx):
+            if data[i] == 1.:
+                if np.isnan(dat[i]):
+                    dat[i] = d
+                else:
+                    dat[i] = math.max(dat[i], d)
 
     ofn = OutputImage[:-4] + '_days_since_burn.bin'
     print('+w', ofn)
+    write_binary(dat, ofn)
