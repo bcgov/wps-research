@@ -1,22 +1,31 @@
-# rasterize a shapefile, separate raster for each "feature"!
+''' rasterize a shapefile, separate raster for each "feature"! e.g.
+        
+        python3 rasterize_onto.py \
+                boundary.shp \
+                S2A_MSIL2A_20190908T195941_N0213_R128_T09VUE_20190908T233509_RGB.tif \
+                boundary.bin
 
-# examples:
-#   python3 rasterize_onto.py boundary.shp S2A_MSIL2A_20190908T195941_N0213_R128_T09VUE_20190908T233509_RGB.tif boundary.bin
-#   python3 rasterize_onto.py FTL_test1.shp S2A_MSIL2A_20190908T195941_N0213_R128_T09VUE_20190908T233509_RGB.tif out.bin
-
+        python3 rasterize_onto.py \
+                FTL_test1.shp \
+                S2A_MSIL2A_20190908T195941_N0213_R128_T09VUE_20190908T233509_RGB.tif \
+                out.bin
+'''
 import os
 import sys
 import json
-from osgeo import gdal # need gdal / python installed!
 from osgeo import ogr
-from osgeo import gdalconst
+from osgeo import gdal # need gdal / python installed!
 from misc import err, args
+from osgeo import gdalconst
+
 if len(args) < 4:
     err('python3 rasterize_onto.py [shapefile to rasterize] ' +
        '[image file: footprint to rasterize onto] [output filename]')
+
 InputVector = args[1] # shapefile to rasterize
 RefImage = args[2] # footprint to rasterize onto
 OutputImage = args[3]
+
 if os.path.exists(OutputImage):
     err("output file already exists")
 if OutputImage[-4:] != '.bin':
@@ -36,8 +45,7 @@ layer = Shapefile.GetLayer()
 layerDefinition = layer.GetLayerDefn()
 feature_count = layer.GetFeatureCount()
 
-def records(layer):
-    # generator
+def records(layer): # generator
     for i in range(layer.GetFeatureCount()):
         feature = layer.GetFeature(i)
         yield json.loads(feature.ExportToJson())
@@ -77,20 +85,15 @@ Output = gdal.GetDriverByName(gdalformat).Create(OutputImage,
                                                  datatype)
 Output.SetProjection(Image.GetProjectionRef())
 Output.SetGeoTransform(Image.GetGeoTransform())
-
-# Write data to band 1
-Band = Output.GetRasterBand(1)
+Band = Output.GetRasterBand(1) # write data to band 1
 Band.SetNoDataValue(0)
 gdal.RasterizeLayer(Output,
                     [1],
                     layer,
                     burn_values=[burnVal])
+Output = None  # close ds
 
-# Close dataset
-Output = None
-
-for i in range(feature_count):
-    # confirm the feature intersects reference map first?
+for i in range(feature_count): # confirm feature intersects reference map first?
     fid_list = [feature_ids[i]]
     my_filter = "FID in {}".format(tuple(fid_list))
     my_filter = my_filter.replace(",", "")  # comma in tuple throws error for single element
@@ -110,9 +113,7 @@ for i in range(feature_count):
                                                      datatype)
     Output.SetProjection(Image.GetProjectionRef())
     Output.SetGeoTransform(Image.GetGeoTransform())
-
-    # Write data to band 1
-    Band = Output.GetRasterBand(1)
+    Band = Output.GetRasterBand(1)  # write data to band 1
     Band.SetNoDataValue(0)
     gdal.RasterizeLayer(Output,
                         [1],
