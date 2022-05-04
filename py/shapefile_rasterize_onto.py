@@ -9,7 +9,8 @@
                 FTL_test1.shp \
                 S2A_MSIL2A_20190908T195941_N0213_R128_T09VUE_20190908T233509_RGB.tif \
                 out.bin
-'''
+
+20220504: output feature names / values?'''
 import os
 import sys
 import json
@@ -28,6 +29,7 @@ OutputImage = args[3]
 
 if os.path.exists(OutputImage):
     err("output file already exists")
+
 if OutputImage[-4:] != '.bin':
     err("output file extension expected: .bin")
 
@@ -53,15 +55,27 @@ def records(layer): # generator
 print("feature count: " + str(feature_count))
 features = records(layer)
 feature_names, feature_ids = [], []
-for f in features: # print(f.keys())
+for f in features:
+    print("f.keys()", f.keys())
     feature_id = f['id']
-    feature_ids.append(feature_id) # print(f['properties'].keys())
+    feature_ids.append(feature_id)
+    print("f['properties'].keys()", f['properties'].keys())
+    '''f['properties'].keys():
+         dict_keys(['SRC_AGENCY', 'FIRE_ID', 'FIRENAME', 'YEAR', 'MONTH',
+                    'DAY', 'REP_DATE', 'DATE_TYPE', 'OUT_DATE', 'DECADE',
+                    'SIZE_HA', 'CALC_HA', 'CAUSE', 'MAP_SOURCE',
+                    'SOURCE_KEY', 'MAP_METHOD', 'WATER_REM',
+                    'UNBURN_REM', 'MORE_INFO', 'POLY_DATE', 'CFS_REF_ID',
+                    'CFS_NOTE1', 'CFS_NOTE2', 'AG_SRCFILE', 'ACQ_DATE',
+                    'SRC_AGY2']) 
+    '''
     feature_name = ''
     try:
         feature_name = f['properties']['Name']
     except Exception:
         pass # feature name not available
-    feature_names.append(feature_name) # print("feature id=", feature_id, "name", feature_name)
+    feature_names.append(feature_name)
+    print("feature id=", feature_id, "name", feature_name)
 
 # print("Name  -  Type  Width  Precision")
 for i in range(layerDefinition.GetFieldCount()):
@@ -103,8 +117,7 @@ for i in range(feature_count): # confirm feature intersects reference map first?
               str(feature_ids[i]) +
               ('' if feature_names[i] == ''  else ('_' + X)) +
               '.bin')
-    print("+w", out_fn)
-
+    print("+w", out_fn, feature_names[i])
     # Rasterise
     Output = gdal.GetDriverByName(gdalformat).Create(out_fn,
                                                      Image.RasterXSize,
