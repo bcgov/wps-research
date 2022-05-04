@@ -18,6 +18,7 @@
 import os
 import sys
 import json
+import math
 import datetime
 import numpy as np
 from osgeo import ogr
