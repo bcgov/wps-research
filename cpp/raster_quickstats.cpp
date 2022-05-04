@@ -15,10 +15,10 @@ int main(int argc, char ** argv){
   if(!exists(fn))
     err("failed to open input file");
 
-  str hfn(hdr_fn(fn)); // input header file name
+  str hfn(hdr_fn(fn)); // input header filename
   size_t nrow, ncol, nband, np;
-  hread(hfn, nrow, ncol, nband); // read header 1
-  np = nrow * ncol; // number of input pix
+  hread(hfn, nrow, ncol, nband); // read header
+  np = nrow * ncol; // input pixl count
 
   double d, diff;  // data values
   size_t i, j, k, ix, ij, ik;  // indices
@@ -42,41 +42,41 @@ int main(int argc, char ** argv){
 
   for0(i, np){
     for0(k, nband){
-      d = dat[k * np + i];
+      d = dat[k * np + i];  // band-sequential
       if(!(isinf(d) || isnan(d))){
-        if(d < fmin[k])
+        if(d < fmin[k])  // find min
 	  fmin[k] = d;
-        if(d > fmax[k])
+        if(d > fmax[k])  // find max
 	  fmax[k] = d;
-        total[k] += d;
+        total[k] += d;  // sum
         n[k] ++;
       }
       else{
-        if(isinf(d))
+        if(isinf(d))  // infinity count
 	  n_inf[k]++;
-        if(isnan(d))
+        if(isnan(d))  // nan count
 	  n_nan[k]++;
       }
     }
   }
 
-  for0(k, nband)
+  for0(k, nband)  // mean
     avg[k] = total[k] / n[k];
 
   for0(i, np){
     for0(k, nband){
       d = dat[np * k + i];
       if(!(isinf(d) || isnan(d))){
-        diff = d - avg[k];
+        diff = d - avg[k];  // for stdv
         total_squared[k] += diff * diff;
       }
     }
   }
 
-  for0(k, nband)
+  for0(k, nband)  // stdv
     stdev[k] = sqrt(total_squared[k] / n[k]);
 
-  printf("band_i,Min,Max,Mean,Stdv,n_nan,n_inf");
+  printf("band_i,Min,Max,Mean,Stdv,n_nan,n_inf");  // csv header
   for0(k, nband)
     printf("\n%zu,%e,%e,%e,%e,%e,%e",
 	    k + 1,  // band ix
