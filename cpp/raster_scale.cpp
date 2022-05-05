@@ -25,7 +25,7 @@ int main(int argc, char ** argv){
   float * mx = falloc(nband);
   for0(k, nband){
     mn[k] = FLT_MAX;
-    mx[k] = FLT_MIN;
+    mx[k] = -FLT_MAX;
   }
 
   float d;
