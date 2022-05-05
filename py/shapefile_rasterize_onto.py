@@ -24,7 +24,8 @@ import numpy as np
 from osgeo import ogr
 from osgeo import gdal # need gdal / python installed!
 from osgeo import gdalconst
-from misc import err, exist, args, hdr_fn, read_hdr, write_binary, write_hdr, read_binary
+from misc import err, exist, args, hdr_fn, read_hdr, write_binary, write_hdr, \
+        read_binary, parfor
 
 if len(args) < 4:
     err('python3 rasterize_onto.py [shapefile to rasterize] ' +
@@ -108,11 +109,12 @@ for f in features:
 
 # print("Name  -  Type  Width  Precision")
 for i in range(layerDefinition.GetFieldCount()):
-    fieldName =  layerDefinition.GetFieldDefn(i).GetName()
-    fieldTypeCode = layerDefinition.GetFieldDefn(i).GetType()
-    fieldType = layerDefinition.GetFieldDefn(i).GetFieldTypeName(fieldTypeCode)
-    fieldWidth = layerDefinition.GetFieldDefn(i).GetWidth()
-    GetPrecision = layerDefinition.GetFieldDefn(i).GetPrecision()
+    fd_i = layerDefinition.GetFieldDefn(i)
+    fieldName =  fd_i.GetName()
+    fieldTypeCode = fd_i.GetType()
+    fieldType = fd_i.GetFieldTypeName(fieldTypeCode)
+    fieldWidth = fd_i.GetWidth()
+    GetPrecision = fd_i.GetPrecision()
     if False:
         print(fieldName + " - " +
               fieldType+ " " +
@@ -123,27 +125,7 @@ for i in range(layerDefinition.GetFieldCount()):
 # Rasterise all features to same layer (coverage of all features)
 print("+w", OutputImage)
 '''
-gd = gdal.GetDriverByName(gdalformat)
-'''
-Output = gd.Create(OutputImage,
-                   Image.RasterXSize,
-                   Image.RasterYSize,
-                   1,
-                   datatype)
-
-Output.SetProjection(Image.GetProjectionRef())
-Output.SetGeoTransform(Image.GetGeoTransform())
-Band = Output.GetRasterBand(1) # write data to band 1
-Band.SetNoDataValue(0)
-
-gdal.RasterizeLayer(Output,
-                    [1],
-                    layer,
-                    burn_values=[burnVal])
-
-Output = None  # close ds
-'''
-out_files = []
+out_files, gd = [], gdal.GetDriverByName(gdalformat)
 for i in range(feature_count): # confirm feature intersects reference map first?
     fid_list = [feature_ids[i]]
     my_filter = "FID in {}".format(tuple(fid_list))
@@ -193,19 +175,22 @@ Shapefile = None
 
 '''NB need to break this part out into a separate program'''
 today = datetime.date.today()
-today = datetime.datetime(today.year, today.month, today.day)
+today = datetime.datetime(today.year,
+                          today.month,
+                          today.day)
 
 if is_fire:  # post-processing of fire data
     out_files.sort()  # sort in time!
     nc, nr, nb = [int(i)
                   for i in read_hdr(hdr_fn(out_files[0]))]
 
-    npx = nr * nc  # number of pixels
+    ci, npx = 0, nr * nc  # number of pixels
     dat = np.array([np.nan for i in range(npx)])
     
     for f in out_files:
+        print(ci + 1, '/', len(out_files), f)
         x = f.split('_')[0]
-        YYYY, MM, DD = [int(i) for i in [x[0:4], x[4:6], x[6:8]]]
+        YYYY, MM, DD = [int(i) for i in [x[0: 4], x[4: 6], x[6: 8]]]
         if MM == 0 and DD == 0:
             MM, DD = 6, 15  # assume middle of year
         # print([x, YYYY,MM,DD])
@@ -213,17 +198,31 @@ if is_fire:  # post-processing of fire data
         d = float((t - today).days)  # larger value: more recent
 
         samples, lines, bands, data = read_binary(f)
-        [samples, lines, bands] = [int(i) for i in [samples, lines, bands]]
-        if samples*lines != npx:
+        data = np.array(data)
+
+        [samples, lines, bands] = [int(i)
+                                   for i in
+                                   [samples, lines, bands]]
+        if samples * lines != npx:
             err("unexpected image dimension")
+        d_a = np.array([d for i in range(nc)])
 
-        for i in range(npx):
-            if data[i] == 1.:
-                if np.isnan(dat[i]):
-                    dat[i] = d
-                else:
-                    dat[i] = math.max(dat[i], d)
+        def process_row(i):
+            ix = i * nc
+            dat_i = dat[ix: ix + nc]
+            data_i = data[ix: ix + nc]
+            replace = (data_i == 1.)
+            da_r = d_a[replace]  # constant
+            di_r = dat_i[replace]
+            dat_i[replace] = np.where(np.isnan(di_r), da_r, np.maximum(da_r, di_r))
+            return dat_i
 
+        rows = parfor(process_row, range(nr)) # for debug:, 1)
+        for i in range(nr):
+            ix = i * nc
+            dat[ix: ix + nc] = rows[i]
+
+        ci += 1
     ofn = OutputImage[:-4] + '_days_since_burn.bin'
     print('+w', ofn)
     write_binary(dat, ofn)
