@@ -7,6 +7,15 @@ Output: basic stats in CSV format
   (*) Min, Max, Mean, Stdv (excluding NaN / infinity)
   (*) NaN / infinity counts */
 #include"misc.h"
+void printd(double d){
+  char s[DBL_DIG + 8];
+  sprintf(s, "%.*E", DBL_DIG, d);
+  vector<str> w(split(str(s), 'E'));
+  rtrim(w[0], str("0")); // trim  0's
+  if(w[0].back() == '.') w[0] += str("0");
+  printf(",%sE%s", w[0].c_str(), w[1].c_str());
+}
+
 int main(int argc, char ** argv){
   if(argc < 2)
     err("qs.exe [raster cube 1]"); // usage
@@ -76,16 +85,18 @@ int main(int argc, char ** argv){
   for0(k, nband)  // stdv
     stdev[k] = sqrt(total_squared[k] / n[k]);
 
-  printf("band_i,Min,Max,Mean,Stdv,n_nan,n_inf");  // csv header
-  for0(k, nband)
-    printf("\n%zu,%e,%e,%e,%e,%e,%e",
-	    k + 1,  // band ix
-	    fmin[k], // min value this band
-	    fmax[k], // max value this band
-	    avg[k], // mean value this band
-	    stdev[k], // standard deviation this band
-	    n_nan[k], // nan count this band
-	    n_inf[k]); // inf count this band
+  printf("band_i,Min,Max,Mean,Stdv,n_nan,n_inf,%%nan,%%inf");  // csv header
+  for0(k, nband){
+    printf("\n%zu", k + 1);
+    printd(fmin[k] !=  DBL_MAX? fmin[k]: NAN); // min value this band
+    printd(fmax[k] != -DBL_MAX? fmax[k]: NAN); // max value this band
+    printd(avg[k]); // mean value this band
+    printd(stdev[k]); // standard deviation this band
+    printd(n_nan[k]); // nan count this band
+    printd(n_inf[k]); // inf count this band
+    printd(100. * n_nan[k] / (double)np); // nan percent of total this band
+    printd(100. * n_inf[k] / (double)np); // inf percent of total this band
+  }
   printf("\n");
   return 0;
 }
