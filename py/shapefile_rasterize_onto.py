@@ -189,14 +189,15 @@ if is_fire:  # post-processing of fire data
     
     for f in out_files:
         print(ci + 1, '/', len(out_files), f)
+
         x = f.split('_')[0]
         YYYY, MM, DD = [int(i) for i in [x[0: 4], x[4: 6], x[6: 8]]]
+        
         if MM == 0 and DD == 0:
-            MM, DD = 6, 15  # assume middle of year
-        # print([x, YYYY,MM,DD])
+            MM, DD = 6, 15  # assume midyear?
+        
         t = datetime.datetime(YYYY, MM, DD)
-        d = float((t - today).days)  # larger value: more recent
-
+        d = float((t - today).days)  # larger <--> recenter
         samples, lines, bands, data = read_binary(f)
         data = np.array(data)
 
@@ -214,14 +215,14 @@ if is_fire:  # post-processing of fire data
             replace = (data_i == 1.)
             da_r = d_a[replace]  # constant
             di_r = dat_i[replace]
-            dat_i[replace] = np.where(np.isnan(di_r), da_r, np.maximum(da_r, di_r))
+            dat_i[replace] = np.where(np.isnan(di_r), da_r,
+                                      np.maximum(da_r, di_r))
             return dat_i
 
         rows = parfor(process_row, range(nr)) # for debug:, 1)
         for i in range(nr):
             ix = i * nc
             dat[ix: ix + nc] = rows[i]
-
         ci += 1
     ofn = OutputImage[:-4] + '_days_since_burn.bin'
     print('+w', ofn)
