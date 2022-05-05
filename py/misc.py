@@ -194,18 +194,19 @@ def twop_str(data, band_select = [3, 2, 1]):
             rgb[:, :, i] /= rng
     return rgb
 
-def parfor(my_function, my_inputs, n_thread=mp.cpu_count()): # eval fxn in parallel, collect
-    if n_thread == 1:
-        result = []
-        for i in range(len(my_inputs)):
-            result.append(my_function(my_inputs[i]))
-        return result
+
+def parfor(my_function,  # function to run in parallel
+           my_inputs,  # inputs evaluated by worker pool
+           n_thread=mp.cpu_count()): # cpu threads to use
+    
+    if n_thread == 1:  # don't use multiprocessing for 1-thread
+        return [my_function(my_inputs[i])
+                for i in range(len(my_inputs))]
     else:
-        if n_thread==None:
-            n_thread = mp.cpu_count()
-        pool = mp.Pool(n_thread)
-        result = pool.map(my_function, my_inputs)
-        return(result)
+        n_thread = (mp.cpu_count() if n_thread is None
+                    else n_thread)
+        return mp.Pool(n_thread).map(my_function, my_inputs)
+
 
 def bsq_to_scikit(ncol, nrow, nband, d):
     # convert image to a format expected by sgd / scikit learn
