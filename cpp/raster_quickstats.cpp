@@ -1,11 +1,12 @@
-/* qs.cpp: quick stats for raster/ image cube. Update: 20220503 
+/* qs.cpp: quick stats for raster/ image cube. Update: 20220504 
 Input: generic binary:
   (*) band-sequential, IEEE standard 32-bit float
   (*) Byte-order 0 (ESA SNAP uses Byte-order 1)
   (*) human-readable ENVI-format header file
 Output: basic stats in CSV format
   (*) Min, Max, Mean, Stdv (excluding NaN / infinity)
-  (*) NaN / infinity counts */
+  (*) NaN / infinity counts (and percentages)
+Note: uses lossless scientific notation */
 #include"misc.h"
 void printd(double d){
   char s[DBL_DIG + 8];
