@@ -191,6 +191,7 @@ Band = None
 Image = None
 Shapefile = None
 
+'''NB need to break this part out into a separate program'''
 today = datetime.date.today()
 today = datetime.datetime(today.year, today.month, today.day)
 
