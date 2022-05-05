@@ -183,7 +183,7 @@ static inline void ltrim(str & s, str chars){
 
 static inline void rtrim(str & s, str chars){
   std::size_t found = s.find_last_not_of(chars);
-  printf("found %zu strlen %zu\n", found, (size_t)strlen(s.c_str()));
+  // printf("found %zu strlen %zu\n", found, (size_t)strlen(s.c_str()));
   if (found!=std::string::npos) s.erase(found + 1);
 
 }
