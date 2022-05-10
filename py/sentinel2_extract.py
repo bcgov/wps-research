@@ -28,10 +28,13 @@ info = info[0].split()[1].replace('.', '')
 if int(info) < 223:
     err('GDAL version 2.2.3 or higher required')
 
-fn = args[1]
+fn = os.path.abspath(args[1])  # don't want sep at end if folder
+# print('input data target:', fn)
+df = fn[:-4] + '.SAFE'  # extracted data folder
 if fn[-4:] != '.zip':
     if fn[-4:] == 'SAFE':
         no_stomp = True
+        df = fn # extracted data folder
     else:
         err('expected input should be .zip (file) or .SAFE (folder)')
 
@@ -39,19 +42,19 @@ if fn[-4:] != '.zip':
 if not exist(fn):
     err('could not find input target:' + fn)
 
-df = fn[:-4] + '.SAFE'  # extracted data folder
+# check if extracted folder is there
 if not os.path.exists(df):
     if no_stomp == False:
         a = os.system('unzip ' + fn)
     else:
         a = os.system('mkdir -p ' + df)  # special no_stomp mode!! needed for using google cloud drive script
         a = os.system('unzip -d ' + df + ' ' + fn)
-    time.sleep(1.)
+    time.sleep(1.)  # not sure if this is needed
 
 if not os.path.exists(df):
     err('failed to unzip: cant find folder: ' + df)
 
-gdfn = fn[:-4] + '.SAFE/MTD_MSIL1C.xml' if no_stomp else fn
+gdfn = df + sep + 'MTD_MSIL1C.xml' if no_stomp else fn
 cmd = 'gdalinfo ' + gdfn + ' | grep SUBDATA'  # try gdalinfo
 print(cmd)
 xml = os.popen(cmd).readlines()
