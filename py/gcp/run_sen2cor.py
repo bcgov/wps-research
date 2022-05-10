@@ -15,7 +15,7 @@ import sys
 sep = os.path.sep
 my_path = sep.join(os.path.abspath(__file__).split(sep)[:-1]) + sep
 sys.path.append(my_path + "..")
-from misc import sep, parfor, exists, args, run
+from misc import sep, parfor, exists, args, run, err
 N_THREADS = None # default to number of CPU threads (could enter number to override here)
 
 n_l1 = 0 # number of L1 folders
