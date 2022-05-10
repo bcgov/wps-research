@@ -12,7 +12,7 @@ int main(int argc, char ** argv){
   }
 
   float wl_1, wl_2, wl_3;
-  int left1, left2, right2, right2;
+  int left1, left2, right1, right2;
   left1 = left2 = right1 = right2 = -1;
   if(argc == 12){
     left1 = atoi(argv[5]); right1 = atoi(argv[6]);
@@ -50,8 +50,8 @@ int main(int argc, char ** argv){
   // printf("file_size %zu\n", fs1);
 
 
-  size_t f_p = np * sizeof(float) * (size_t) bi; // splice location: should implement a shuffle version too
-  size_t f_p2 = np * sizeof(float) * (size_t) bi2;
+  size_t f_p = np * sizeof(float) * (size_t) bi; // splice target location: should implement a shuffle version too
+  size_t f_p2 = np * sizeof(float) * (size_t) bi2; // splice source location !!!!!!!
 
   FILE * f;
 
@@ -77,23 +77,29 @@ int main(int argc, char ** argv){
     
     f = fopen(argv[1], "rb");  // read "nextdoor" bands from first file
     fseek(f, (left1 - 1) * sizeof(float) * np, SEEK_SET);
-    fread(bleft1, sizeof(float) np, f);
+    fread(bleft1, sizeof(float), np, f);
     fseek(f, (right1 - 1) * sizeof(float) * np, SEEK_SET);
     fread(bright1, sizeof(float), np, f);
     fclose(f);
 
     f = fopen(argv[3], "rb");  // read "nextdoor" bands from 2nd file
     fseek(f, (left2 - 1) * sizeof(float) * np, SEEK_SET);
-    fread(bleft2, sizeof(float) np, f);
+    fread(bleft2, sizeof(float), np, f);
     fseek(f, (right2 - 1) * sizeof(float) * np, SEEK_SET);
     fread(bright2, sizeof(float), np, f);
     fclose(f);
 
     // now do the interp
-    for(i, np){
+    for0(i, np){
 	    // calculate m 
-     bs[i] *= (w_1 * (log(  (exp(bleft2[i] + 1.) /  exp(bleft1[i] + 1.)) - 1.)) + 
-	       w_2 * (log( (exp(bright2[i] + 1.) / exp(bright1[i] + 1.)) - 1.)));
+	  /*
+     bs[i] *= (w1 * (float)(log(  (exp((double)bleft2[i] + 1.) /  exp((double)bleft1[i] + 1.)) - 1.)) + 
+	       w3 * (float)(log( (exp((double)bright2[i] + 1.) / exp((double)bright1[i] + 1.)) - 1.)));
+    
+     */
+     bs[i] *= (w1 *  (bleft2[i]  / bleft1[i]) + 
+               w3 *  (bright2[i] / bright1[i]));
+
     }
   }
 
