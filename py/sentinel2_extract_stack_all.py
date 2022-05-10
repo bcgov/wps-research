@@ -162,7 +162,20 @@ for z in zips:
 
     cmd = ' '.join(cmd)
     run(cmd)
-    raster_files.append(sfn)
+
+    # raster_files.append(sfn)
+    mod = open(shn).read().replace('central wavelength ', '')
+    mod = mod.replace(' nm,', 'nm,')
+    mod = mod.replace(' nm}', 'nm}').encode()
+    open(shn, 'wb').write(mod)
+    print('+w', shn)
+
+    cmd = ['python3',
+           pd + 'raster_reorder_increasing_nm.py',
+           sfn]
+    run(' '.join(cmd))
+    raster_files.append(sfn) 
+
 
 if len(zips) > 1:
     # cat the bin files together, combining headers
