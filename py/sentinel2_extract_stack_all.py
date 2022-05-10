@@ -1,4 +1,6 @@
-'''A) extract Sentinel2, B) resample to 10m c) prefix bandnames with dates..
+'''A) extract Sentinel2,
+   B) resample to 10m
+   c) prefix bandnames with dates..
    D) stack everything!
 
 1. extract Sentinel-2 data from zip.. if not already extracted (check for .SAFE folder)
@@ -6,17 +8,14 @@
 method:
     python3 ~/path_to_scripts/sentinel2_extract_stack_all.py
 
-
 method to adapt to case where zip file does not contain a high-level folder..
 ..so this script doesn't stomp itself when extracting!
-
 
     * add parameter: no_stomp=True
 
     i.e.,:
 
     python3 ~/path_to_scripts/sentinel2_extract_stack_all.py no_stomp=True
-
 
 TO FINISH OFF THIS IMPLEMENTATION (GCLOUD DL) START BY LOOKING AT THE FILE:
 MTD_MSIL1C.xml
@@ -26,16 +25,29 @@ Need xml reader such as:
 https://docs.python.org/3/library/xml.etree.elementtree.html '''
 import os
 import sys
-from misc import args, sep, exists, pd
+from misc import args, sep, exists, pd, run
 
 all_args = list(set(args[1:]))
-no_stomp = ("no_stomp=True" in all_args) or ("nostomp" in all_args) # create a folder with the name of the zipfile (minus .zip, plus .SAFE
+no_stomp = (("no_stomp=True" in all_args) or
+            ("nostomp" in all_args)) # create a folder with the name of the zipfile (minus .zip, plus .SAFE
 
-if no_stomp:
-    print("NO STOMP MODE!!!!!")
+count_L1, count_L2, L1_folders = 0, 0, []
+folders = os.popen('ls -1 | grep S2*.SAFE').readlines()
+for f in folders:
+    w = f.strip().split('_')
+    if w[1] == 'MSIL1C':
+        count_L1 += 1
+        L1_folders += [f.strip()]
+    if w[1] == 'MSIL2A':
+        count_L2 += 1
 
-extract = pd + "sentinel2_extract.py" # command to extract a zip
+if count_L1 > 0 and count_L2 == 0:
+    no_stomp = True
+
 zips = [x.strip() for x in os.popen("ls -1 *.zip").readlines()] # list the zip files
+extract = pd + "sentinel2_extract.py" # command to extract a zip
+if no_stomp == True:
+    zips = [f[:-4] + 'zip' for f in L1_folders]
 raster_files = [] # these will be the final rasters to concatenate
 
 '''before processing, sort zip files by date. Note, they would be already except the prefix
