@@ -25,7 +25,7 @@ Need xml reader such as:
 https://docs.python.org/3/library/xml.etree.elementtree.html '''
 import os
 import sys
-from misc import args, sep, exists, pd, run
+from misc import args, sep, exists, pd, run, err
 
 all_args = list(set(args[1:]))
 no_stomp = (("no_stomp=True" in all_args) or
@@ -67,9 +67,11 @@ zips = [i[1] for i in x]  # finally, these files should be sorted by date..
 
 for z in zips:
     safe = z[:-4] + ".SAFE" # extracted location..
-
     print(safe)
-    if not os.path.exists(safe):
+    bins = [x.strip() for x in os.popen("ls -1 " + safe + os.path.sep + "*m_EPSG_*.bin").readlines()]
+    if not os.path.exists(safe) or (len(bins) != 3 and len(bins) != 5):
+        if not exists(z):
+            z = z[:-3] + 'SAFE'
         cmd = "python3 " + extract + " " + z + (" no_stomp=True" if no_stomp else "")
         print(cmd)
         a = os.system(cmd)
@@ -81,10 +83,18 @@ for z in zips:
         SENTINEL2_L2A_TCI_EPSG_32610.bin'''
     bins = [x.strip() for x in os.popen("ls -1 " + safe + os.path.sep + "*m_EPSG_*.bin").readlines()] # don't pull the TCI true colour image. Already covered in 10m
 
-    if len(bins) != 3:
-        err("unexpected number of bin files (expected 3): " + str('\n'.join(bins)))
+    if len(bins) != 3 and len(bins) != 5:
+        print("len(bins)", len(bins))
+        err('unexpected number of bin files (expected 3 or 5):\n  ' +
+            str('\n  '.join(bins)))
 
-    m10, m20, m60 = bins
+    m10, m20, m60 = [safe + sep + 'SENTINEL2_L1C_10m_EPSG_32610.bin',
+                     safe + sep + 'SENTINEL2_L1C_20m_EPSG_32610.bin',
+                     safe + sep + 'SENTINEL2_L1C_60m_EPSG_32610.bin']
+    try:
+        m10, m20, m60 = bins
+    except:
+        pass
     print("  10m:", m10)
     print("  20m:", m20)
     print("  60m:", m60)
@@ -154,7 +164,8 @@ for z in zips:
     run(cmd)
     raster_files.append(sfn)
 
-# cat the bin files together, combining headers
-cmd = ['python3', pd + 'raster_stack.py']
-cmd = cmd + raster_files + ['raster.bin']
-a = os.system(' '.join(cmd))
+if len(zips) > 1:
+    # cat the bin files together, combining headers
+    cmd = ['python3', pd + 'raster_stack.py']
+    cmd = cmd + raster_files + ['raster.bin']
+    a = os.system(' '.join(cmd))
