@@ -1,14 +1,19 @@
-'''20211121 same as sentinel2_extract_stack_all.py except this one doesn't extract from zip. 
+'''20211121 same as sentinel2_extract_stack_all.py EXCEPT:
+    this one doesn't extract from zip!!!!!!!! 
+
+WHY?????????????
 
 Assumption:
     we've created L2 data with sen2cor
 
 A) extract Sentinel2, B) resample to 10m c) prefix bandnames with dates..
    D) stack everything!
+   E) SORT BY TIME AND FREQUENCY
    E) worry about masks later
+
 Need xml reader? such as:
 https://docs.python.org/3/library/xml.etree.elementtree.html
-MAKE SURE WE SORTED BY TIME AND FREQUENCY !!!'''
+'''
 import os
 import sys
 import multiprocessing as mp
