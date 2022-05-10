@@ -1,7 +1,10 @@
 /* Assuming image is floating point 32bit IEEE standard type, BSQ interleave,
 insert a single-band from one raster, into another:
 
-modifying header accordingly
+modifying header accordingly (still todo.... e.g:
+
+
+raster_band_insert_interp_from.exe l2.bin 11 l1.bin 11  10 12 10 12 945 1375 1610
 */
 
 #include"misc.h"
