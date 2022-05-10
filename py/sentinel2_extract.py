@@ -6,7 +6,7 @@ Two cases:
 * after running gcp/fix_s2.py and zipping the folder
 * if there is no zip file (having downloaded from GCP
 
-Note: have to revisit what the no_stomp was used for. '''
+NOTE: no_stomp parameter avoids unzipping the zip file (again)'''
 import time
 from misc import *
 ehc = pd + 'envi_header_cleanup.py' # envi header cleanup command.. makes file open in "imv"
@@ -30,10 +30,14 @@ if int(info) < 223:
 
 fn = args[1]
 if fn[-4:] != '.zip':
-    err('expected zip format input')
+    if fn[-4:] == 'SAFE':
+        no_stomp = True
+    else:
+        err('expected input should be .zip (file) or .SAFE (folder)')
 
-if not os.path.exists(fn):
-    err('could not find input file')
+# check indicated input (.zip or .SAFE) exists
+if not exist(fn):
+    err('could not find input target:' + fn)
 
 df = fn[:-4] + '.SAFE'  # extracted data folder
 if not os.path.exists(df):
@@ -47,12 +51,10 @@ if not os.path.exists(df):
 if not os.path.exists(df):
     err('failed to unzip: cant find folder: ' + df)
 
-# print("try gdalinfo..")
 gdfn = fn[:-4] + '.SAFE/MTD_MSIL1C.xml' if no_stomp else fn
-cmd = 'gdalinfo ' + gdfn + ' | grep SUBDATA'
+cmd = 'gdalinfo ' + gdfn + ' | grep SUBDATA'  # try gdalinfo
 print(cmd)
 xml = os.popen(cmd).readlines()
-# print("gdalinfo done.")
 
 cmds = []  # commands to run after this section
 data_files = []
@@ -90,15 +92,10 @@ for line in xml:
             pass
 
 if not found_line:
-    # we must be in google mode?
-    # print("in google mode?")
     if no_stomp:
-        # must be in google mode!
-        print("definitely in google mode")
-        sys.exit(1)
+        err('Downloaded from GCP? check inputs')
 
 for cmd in cmds:
-    # print(cmd)
     run(cmd)
 
 '''e.g. outputs:
