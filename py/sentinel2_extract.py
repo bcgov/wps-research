@@ -1,12 +1,21 @@
-'''Can Use this method to open Sentinel-2 data in Level1 from ESA Copernicus, or from Google Cloud Platform (after running gcp/fix_s2.py and zipping the folder)
+'''Can use this method to open Level1 format Sentinel-2 data downloaded either from:
+* ESA Copernicus, or from
+* Google Cloud Platform
 
-* have to revisit what the no_stomp was used for. '''
+Two cases:
+* after running gcp/fix_s2.py and zipping the folder
+* if there is no zip file (having downloaded from GCP
+
+Note: have to revisit what the no_stomp was used for. '''
 import time
 from misc import *
 ehc = pd + 'envi_header_cleanup.py' # envi header cleanup command.. makes file open in "imv"
 
 if len(args) < 2:
-    err('python3 extract_sentinel2.py [input sentinel2 zip file name] # [optional parameter: no_stomp=True]')
+    err('python3 extract_sentinel2.py [input sentinel2 zip file name] ' +
+        '# [optional parameter: no_stomp=True]' +
+        ' #the optional parameter avoids creating a .SAFE folder if' +
+        ' there already is one')
 
 no_stomp = False
 if len(args) > 2:
