@@ -36,7 +36,6 @@ if not os.path.exists(fn):
     err('could not find input file')
 
 df = fn[:-4] + '.SAFE'  # extracted data folder
-# print(df)
 if not os.path.exists(df):
     if no_stomp == False:
         a = os.system('unzip ' + fn)
@@ -60,9 +59,7 @@ data_files = []
 found_line = False
 for line in xml:
     line = line.strip()
-    #print('  ' + line)
     if len(line.split('.xml')) > 1:
-        #print('\t' + line)
         try:
             df = df.split(os.path.sep)[-1]
             safe = df # .SAFE directory
@@ -71,10 +68,12 @@ for line in xml:
             ident = dfw[0].split('=')[1].split(':')[0]
             ds = ident + ':' + df + dfw[1]
             of = (df + dfw[1]).replace(terminator, ident).replace(':', '_') + '.bin'
-            # print("DS: " + ds)
-            # sys.exit(1)
 
-            cmd = ' '.join(['gdal_translate', ds, '--config GDAL_NUM_THREADS 8', '-of ENVI', '-ot Float32', of])
+            cmd = ' '.join(['gdal_translate',  # gdal to translate data formats
+                            ds, '--config GDAL_NUM_THREADS 8',  # use 8 threads
+                            '-of ENVI',   # raw / ENVI binary format
+                            '-ot Float32',  # 32-bit float format like PolSARPro
+                            of])  # output .SAFE folder
             print('\t' + cmd)
             data_files.append(cmd)
             if not os.path.exists(of):  # don't extract if we did already!
@@ -85,7 +84,6 @@ for line in xml:
             print('\t' + cmd)
             if not os.path.exists(hfn):
                  cmds.append(cmd)
-                # print('\t' + cmd)
 
             found_line = True  # what line were we looking for?
         except Exception:
