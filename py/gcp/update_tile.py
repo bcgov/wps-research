@@ -3,10 +3,13 @@
     * max cloud cover
     * date range
 
+And download from Google Cloud Platform (GCP).
+
 The "gcp rsync" command is helpful for avoiding re-downloading the same data
     https://cloud.google.com/storage/docs/gsutil/commands/rsync
 
-(*) need concurrency mechanism so we can download on multiple folders without fetching index twice!'''
+(*) need concurrency mechanism so we can download on multiple
+folders without fetching index twice!'''
 import os
 import sys
 sep = os.path.sep
@@ -26,7 +29,7 @@ if len(args) < 5:
     sys.exit(1)
 
 TILE_ID = 'T09VUE' if len(args) < 2 else args[1]
-MAX_CLOUD = 10. if len(args) < 3 else args[2]  # max percent cloud cover to consider!
+MAX_CLOUD = 22.2 if len(args) < 3 else args[2]  # max percent cloud cover to consider!
 MIN_DATE = None if len(args) < 4 else args[3]
 MAX_DATE = None if len(args) < 5 else args[4]
 DOWNLOAD = len(args) < 6 # skip the download step if an extra arg added!
@@ -153,6 +156,8 @@ else:
 base_url = [x.strip() for x in open(ip + 'index.csv:BASE_URL').readlines()]
 for m in matches:
     print(m, base_url[m[1]])
+    
+    # download L1 dataset from GCP
     cmd = ' '.join(['gsutil -m',
                     'rsync -r',
                     base_url[m[1]],
