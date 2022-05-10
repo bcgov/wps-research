@@ -17,10 +17,10 @@ Note: should update this to include a higher-level folder "by tile ID"
 import os
 import sys
 sep = os.path.sep
-my_path = sep.join(os.path.abspath(__file__).split(sep)[:-1]) + sep
-sys.path.append(my_path + "..")
 from datetime import date
+my_path = sep.join(os.path.abspath(__file__).split(sep)[:-1]) + sep
 from misc import run, pd, sep, exists, args, cd
+sys.path.append(my_path + "..")
 
 if True:
     print(' '.join(['python3 update_tile.py',
@@ -184,4 +184,10 @@ for m in matches:
                   base_url[m[1]],
                   out_dir]
     a = run(' '.join(simple_cmd))
-'''don't forget what fixedwidth was for this is inefficient'''
+
+    # "fix" the output by adding empty directories expected by ESA SNAP
+    run(['python3',
+         pd + 'gcp' + sep + 'fix_s2.py',
+         out_dir])
+
+'''don't forget what fixedwidth format was for, this is inefficient'''
