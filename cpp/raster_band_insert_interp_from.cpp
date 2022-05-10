@@ -8,8 +8,19 @@ modifying header accordingly
 int main(int argc, char ** argv){
 
   if(argc < 5){
-    err("raster_band_insert [input BSQ image stack] [1-index for insertion] [input stack containing desired band to be inserted] [1-index of band to be inserted]");
+    err("raster_band_insert [input BSQ image stack 1] [1-index for insertion] [input stack 2, containing desired band to be inserted] [1-index of band to be inserted] # optional args for interpolation transform: [1-index for left band, stack 1] [1-index for right band, stack 1] [1-index for left band, stack 2] [1-index for right band, stack 2] [wavelength for b1] [wavelength for b2] [wavelength for b3]");
   }
+
+  float wl_1, wl_2, wl_3;
+  int left1, left2, right2, right2;
+  left1 = left2 = right1 = right2 = -1;
+  if(argc == 12){
+    left1 = atoi(argv[5]); right1 = atoi(argv[6]);
+    left2 = atoi(argv[7]); right2 = atoi(argv[8]);
+    wl_2 = atof(argv[10]); wl_3 = atof(argv[11]);
+    wl_1 = atof(argv[9]);
+  }
+  float * bleft1, * bleft2, * bright1, * bright2;
 
   str fn(argv[1]); // input file name, stack which will get one band replaced
   str hfn(hdr_fn(fn)); // auto-detect header-file name
@@ -42,14 +53,51 @@ int main(int argc, char ** argv){
   size_t f_p = np * sizeof(float) * (size_t) bi; // splice location: should implement a shuffle version too
   size_t f_p2 = np * sizeof(float) * (size_t) bi2;
 
-  // read in band to splice
+  FILE * f;
+
+  // read in band to be spliced in (from 2nd file)
   float * bs = falloc(np); // alloc room to read a band
-  FILE * f = fopen(argv[3], "rb");
+  f = fopen(argv[3], "rb");
   fseek(f, f_p2, SEEK_SET);
   fread(bs, sizeof(float), np, f);
   fclose(f);
+ 
+  float b = wl_3 - wl_1;
+  float w1 = (wl_2 - wl_1) / b;
+  float w3 = (wl_3 - wl_2) / b;
+  
 
-  // go to splice location and read data from there
+  // interp mode:  do interp
+  if(left1 > 0){
+    // read stuff
+    bleft1 = falloc(np); 
+    bleft2 = falloc(np);
+    bright1 = falloc(np);
+    bright2 = falloc(np);
+    
+    f = fopen(argv[1], "rb");  // read "nextdoor" bands from first file
+    fseek(f, (left1 - 1) * sizeof(float) * np, SEEK_SET);
+    fread(bleft1, sizeof(float) np, f);
+    fseek(f, (right1 - 1) * sizeof(float) * np, SEEK_SET);
+    fread(bright1, sizeof(float), np, f);
+    fclose(f);
+
+    f = fopen(argv[3], "rb");  // read "nextdoor" bands from 2nd file
+    fseek(f, (left2 - 1) * sizeof(float) * np, SEEK_SET);
+    fread(bleft2, sizeof(float) np, f);
+    fseek(f, (right2 - 1) * sizeof(float) * np, SEEK_SET);
+    fread(bright2, sizeof(float), np, f);
+    fclose(f);
+
+    // now do the interp
+    for(i, np){
+	    // calculate m 
+     bs[i] *= (w_1 * (log(  (exp(bleft2[i] + 1.) /  exp(bleft1[i] + 1.)) - 1.)) + 
+	       w_2 * (log( (exp(bright2[i] + 1.) / exp(bright1[i] + 1.)) - 1.)));
+    }
+  }
+
+  
   size_t to_buf = np * (1 + nband - bi);  // number of floats to buffer
   float * buf = falloc(to_buf);
   f = fopen(argv[1], "r+b");
