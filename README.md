@@ -10,7 +10,7 @@ Includes A) data integration B) routines applying or implementing supervised and
 
 # Sample results
 ## Mapping major fires of 2021 in BC
-<img src="doc/gee/gee.gif" width="640">
+<img src="doc/gee/2022-05-10_16-53-41.png" width="640">
 
 ## Fire progression mapping w Sentinel-2 and Landsat 7/8
 <img src="data/output/sentinel2_and_landsat.gif" width="640">
