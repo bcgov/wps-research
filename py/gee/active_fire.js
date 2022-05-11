@@ -1,24 +1,24 @@
 /*20220510 active_fire.js*/
 
-/* PARAMETERS ==============================================================*/
-var t1 = ee.Date('2021-8-02T00:00', 'Etc/GMT-8');  //var t1 = ee.Date('2019-7-02T00:00', 'Etc/GMT-8');
-var N_DAYS = 14  // width of date-range for data search
-var CLOUD_THRES = 22.2 // % cloud cover max
-/* END PARAMETERS ==========================================================*/
+/* PARAMS ==============================================================*/
+var t1 = ee.Date('2021-8-02T00:00', 'Etc/GMT-8');
+var N_DAYS = 14  // date range: [t1, t1 + N_DAYS]
+var CLOUD_THRES = 22.2 // cloud cover max %
+/* END PARAMS ==========================================================*/
 
 // function from online example:
 function maskS2clouds(image) {
-  var qa = image.select('QA60'); // Bits 10 and 11 are clouds and cirrus, respectively.
+  var qa = image.select('QA60'); // Bits 10, 11: clouds, cirrus, resp.
   var cloudBitMask = 1 << 10;
-  var cirrusBitMask = 1 << 11;   // Both flags should be set to zero, indicating clear conditions.
+  var cirrusBitMask = 1 << 11;   // set both to zero: clear conditions
   var mask = qa.bitwiseAnd(cloudBitMask).eq(0).and(qa.bitwiseAnd(cirrusBitMask).eq(0));
   return image.updateMask(mask).divide(10000);
 }
 
-/* get DEM, LandCover, Sentinel-2 "L2A" (level two atmospherically corrected)
- * data */
-var nasa_dem = ee.Image('NASA/NASADEM_HGT/001').select('elevation');  // dem data
-var land_cover = ee.ImageCollection("ESA/WorldCover/v100").first(); // values of this layer shown below
+/* get DEM, LandCover, Sentinel-2 "L2A" (level two atmospherically-
+-corrected "bottom of atmosphere (BOA) reflectance) data */
+var nasa_dem = ee.Image('NASA/NASADEM_HGT/001').select('elevation'); 
+var land_cover = ee.ImageCollection("ESA/WorldCover/v100").first(); 
 var dataset = ee.ImageCollection('COPERNICUS/S2_SR').filterDate(t1, t1.advance(N_DAYS, 'day'))
 var dates = dataset.map(function(image){ return ee.Feature(null, {'date': image.date().format('YYYY-MM-dd')})}).distinct('date').aggregate_array('date')
 print(dates)
