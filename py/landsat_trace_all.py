@@ -1,14 +1,15 @@
 '''get timestamps from landsat and sentinel2
 and include those in them in result filenames
 
+landsat_get_time.py instructions said:
 run this after:
     raster_accumulate.exe
 and 
     raster_ts_dedup.exe
 
-THIS VERSION IS FOR ATTRIBUTING MOST RECENT DETECTION
-
-'''
+THIS VERSION IS FOR ATTRIBUTING MOST RECENT DETECTION and deprecates landsat_get_time.py
+Therefore, this version does not need raster_accumulate, not raster_ts_dedup'''
+PIXEL_CHANGE_THRES = 333 # magic number !!!!!!!!!!!
 
 import os
 import time
@@ -19,7 +20,8 @@ from osgeo import gdal
 import matplotlib.ticker as ticker
 FOOT_H = 'footprint3.hdr'
 import matplotlib.pyplot as plt
-from misc import band_names, run, err, hdr_fn, sep, exist, utc_to_pst
+from misc import band_names, run, err, hdr_fn, sep, exist, utc_to_pst, write_band_gtiff
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 args = ['', 'landsat.bin'] # bin_accumulate.bin_dedup.hdr']
 bn = band_names(hdr_fn('landsat.bin')) # args[1]))
 
@@ -27,7 +29,9 @@ out_d = 'results_landsat_trace'
 if not exist(out_d):
     os.mkdir(out_d)
 
-ci = 1  # gdal uses band from 1
+ci = 1  # band index, gdal uses band from 1
+out_i = 1  # index of output file
+
 dataset = gdal.Open('landsat.bin', gdal.GA_ReadOnly)
 nrow, ncol, latest = None, None, None
 cumulative = None
@@ -65,22 +69,23 @@ for b in bn:
     L = utc_to_pst(x[0], x[1], x[2], x[3], x[4], x[5])
     if False:
         print(x, '-->', L) # '   **', L)
-    zs = str(ci).zfill(3)
+    
+    zs = str(out_i).zfill(3)
     fn = 'landsat.bin_accumulate.bin_dedup.bin_' + zs + '.bin'
     # print(fn)
     # hf = hdr_fn(fn)
     # print(fn, hf)
     
-    pre = 'K61884' # 'results'
+    pre = out_d + sep + 'K61884' # 'results'
     of = pre + '_' + zs + '_' + TYPE + '_' + TS + '.bin'
     oh = pre + '_' + zs + '_' + TYPE + '_' + TS + '.hdr'
     ot = pre + '_' + zs + '_' + TYPE + '_' + TS + '.tif'
-    out_file = out_d + sep + str(ci).zfill(3) + '_' + L + of + '.tif'
-    cmd = ('find results_landsat/ -name "*' + TS + '*.tif"') # .read()
-    match = os.popen(cmd).read().strip()
-    print(out_file)
+    of2 = pre + '_' + zs + '_' + TYPE + '_' + TS + '_unixtime.tif' #  out_d + sep + str(ci).zfill(3) + '_' + L + of + '.tif'
+    op = pre + '_' + zs + '_' + TYPE + '_' + TS + '.png'
+    of2e=pre + '_' + zs + '_' + TYPE + '_' + TS + '_unixtime.bin'
+    # print(out_file)
 
-    print("+r", bn[ci-1])
+    # print("+r", bn[ci-1])
     band = dataset.GetRasterBand(ci)
     arr = band.ReadAsArray()
     rows, cols = arr.shape
@@ -94,48 +99,34 @@ for b in bn:
     yyyy, mm, dd, hour, minute, second = utc_to_pst(x[0], x[1], x[2], x[3], x[4], x[5], single_string=False)
     unix_t = time.mktime(datetime.datetime(yyyy, mm, dd, hour, minute, second).timetuple())
     # unix_t = int(unix_t)
-    print(unix_t, type(unix_t))
+    # print(unix_t, type(unix_t))
 
     fire = (arr > 0)   # fire detection result (this step)
+
     if ci == 1:
         cumulative = np.zeros((nrow, ncol), np.int32)
+
+    changed = np.logical_and(fire, np.logical_not(cumulative)) # detected this step and not detected before 
+    n_changed = np.count_nonzero(changed)
+
+    if ci == 1:
         cumulative[fire] = 1  # start with the first dataset
         latest +=  float('nan')
     else:
         cumulative = np.logical_or(fire, cumulative)  # anywhere fire has been detected until now.
     latest[fire] = unix_t
 
-    print('+w', out_file)
-    if False:
-        driver = gdal.GetDriverByName("GTiff")
-        outdata = driver.Create(out_file, cols, rows, 1, gdal.GDT_UInt32)
-        outdata.SetGeoTransform(dataset.GetGeoTransform())##sets same geotransform as input
-        outdata.SetProjection(dataset.GetProjection())##sets same projection as input
-        outdata.GetRasterBand(1).WriteArray(latest)
-        outdata.GetRasterBand(1).SetNoDataValue(0) # 
-        outdata.FlushCache() ##saves to disk!!
-        outdata = None
-        band=None
-        ds=None
-    else:
-        if match != '':
-            # cmap = matplotlib.cm.jet
-            # cmap.set_bad('black', 0.)
-            # plt.imshow(latest, interpolation='nearest', cmap=cmap)
-            # plt.imshow(latest)
-            # plt.tight_layout()
-            # plt.savefig('time_' + str(ci).zfill(3) + '.png')
 
-            from mpl_toolkits.axes_grid1 import make_axes_locatable
+    if n_changed > PIXEL_CHANGE_THRES:
+        print("\n\nn_changed", n_changed, "**********************")
+        if True:
+
+            # BEGIN WRITE PLOT**************************************************
             plt.figure(figsize=(16, 12))
             ax = plt.subplot()
-            # cmap = matplotlib.cm.cool
-            # cmap.set_bad('black', 0.)
             cmap = matplotlib.cm.get_cmap("rainbow").copy()
             cmap.set_bad('black', 0.)
-            im = ax.imshow(latest, interpolation='nearest', cmap=cmap) # np.arange(100).reshape((10, 10)))
-            # create an axes on the right side of ax. The width of cax will be 5%
-            # of ax and the padding between cax and ax will be fixed at 0.05 inch.
+            im = ax.imshow(latest, interpolation='nearest', cmap=cmap)
             divider = make_axes_locatable(ax)
             cax = divider.append_axes("right", size="5%", pad=0.05)
             
@@ -145,25 +136,22 @@ for b in bn:
                 return r'${} \times 10^{{{}}}$'.format(a, b)
 
             plt.colorbar(im, cax=cax, format=ticker.FuncFormatter(fmt))
-            # plt.show()
             ax.set_xlabel('Seconds (since 00:00:00 PST / Jan 1 1970) of last detection circa: ' + L + ' PST')
-            # plt.title('Time since last detection: ' + L) 
             plt.tight_layout()
-            plt.savefig('time_' + str(ci).zfill(3) + '.png')
+            print('+w', op)
+            plt.savefig(op) # output png file 
             plt.clf()
             plt.close()
-        
-
-    #if exist('results_landsat' + sep + ot):
-    #   print(of)
-    '''
-    if not exist(of):
-        run('cp ' + fn + ' ' + of)
-    if not exist(oh):
-        run('cp ' + hf + ' ' + oh)
-    if not exist(ot):
-        run('gdal_translate -of GTiff -ot Float32 ' + of + ' ' + ot)
-
-    run('python3 ' + pd + 'envi_header_copy_mapinfo.py ' + FOOT_H + ' ' + oh)
-    '''
+            # END WRITE PLOT **************************************************
+    
+            write_band_gtiff(fire, dataset, ot)  # gdal_datatype=gdal.GDT_Float32):
+            write_band_gtiff(latest, dataset, of2) # , gdal_datatype=gdal.GDT_UInt32)
+            run('gdal_translate -of ENVI -ot Float32 ' + ot + ' ' + of + ' &')
+            run('gdal_translate -of ENVI -ot Float32 ' + of2 + ' ' + of2e + ' &')
+        out_i += 1
     ci += 1
+
+
+
+    # seed at centroid of first detection. 
+    # 
