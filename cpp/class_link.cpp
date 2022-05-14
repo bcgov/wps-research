@@ -133,9 +133,11 @@ int main(int argc, char ** argv){
           }
 
           cout << merges << endl;
-          FILE * f = wopen(ofn_i);
-          fwrite(out, sizeof(float), np, f);
-          hwrite(hfn_i, nrow, ncol, 1, 4); /* type 16 = size_t */
+	  if(target_row < 0){
+            FILE * f = wopen(ofn_i);
+            fwrite(out, sizeof(float), np, f);
+            hwrite(hfn_i, nrow, ncol, 1, 4); /* type 16 = size_t */
+	  }
         }
         iter ++;
       }
@@ -149,19 +151,23 @@ int main(int argc, char ** argv){
   }
 
   cout << merges << endl;
-  FILE * f = wopen(ofn);
-  fwrite(out, sizeof(float), np, f);
-  hwrite(hf2, nrow, ncol, 1, 4); /* type 16 = size_t */
-  fclose(f);
+  FILE * f;
+  if(target_row < 0){
+    f = wopen(ofn);
+    fwrite(out, sizeof(float), np, f);
+    hwrite(hf2, nrow, ncol, 1, 4); /* type 16 = size_t */
+    fclose(f);
+  }
 
   if(target_row >= 0){
     /* determine class of target */
 
     str ofn2(fn + "_link_target.bin");
     str ohn2(fn + "_link_target.hdr");
-    float target_class = out[target_row * ncol + target_col];
+    float target_class = out[(target_row * ncol) + target_col];
+    cout << "target_class " << target_class << endl;
     for0(i, np){
-      out[i] = (out[i] == target_class) ? 1.: 0.;
+      out[i] = ((out[i] == target_class) ? 1.: 0.);
     }
 
     f = wopen(ofn2);
@@ -169,8 +175,6 @@ int main(int argc, char ** argv){
     fclose(f);
     hwrite(ohn2, nrow, ncol, 1, 4);
   }
-
-
 
   free(dat);
   free(out);
