@@ -38,6 +38,56 @@ nrow, ncol, latest = None, None, None
 cumulative = None
 target_row, target_col = None, None
 
+
+# calculate the closest detected point to centroid of the same points
+def detection_centroid(detect):
+    nrow, ncol = detect.shape
+    target_row, target_col = None, None
+    if True:
+        # calculate centroid of detection
+        indices = np.indices((nrow, ncol))
+        row_ix = indices[0]
+        col_ix = indices[1]
+
+        target_n = np.sum(detect)
+        target_row = np.sum(np.multiply(row_ix, detect))
+        target_col = np.sum(np.multiply(col_ix, detect))
+        target_row /= target_n
+        target_col /= target_n
+
+        target_row = int(target_row + .5)
+        target_col = int(target_col + .5)
+        target_row = max(target_row, 0)
+        target_col = max(target_col, 0)
+        target_row = min(target_row, nrow - 1)
+        target_col = min(target_col, ncol - 1)
+        print("target row", target_row)
+        print("target_col", target_col)
+        
+    # now get nearest element that's selected
+    fire_row, fire_col = np.where(detect)
+    min_row, min_col = fire_row[0], fire_col[0]
+
+    fx = fire_row[0] - target_row
+    fy = fire_col[0] - target_col
+    min_d = fx * fx + fy * fy
+    for i in range(len(fire_row)):
+        fx = fire_row[i] - target_row
+        fy = fire_col[i] - target_col
+        d = fx * fx + fy * fy
+
+        if d < min_d:
+            min_row = fire_row[i]
+            min_col = fire_col[i]
+            min_d = d
+    target_row = min_row
+    target_col = min_col
+    print("target row", target_row)
+    print("target_col", target_col)
+    if not detect[target_row, target_col]:
+        err("detection centroid not detected")
+    return target_row, target_col
+
 for b in bn:
     w = b.strip().strip('.').strip(sep).split(sep) # print(w)
     base, TS, TYPE = '', '', ''
@@ -108,50 +158,9 @@ for b in bn:
     if ci == 1:
         cumulative = np.zeros((nrow, ncol), np.int32)
 
-        # calculate centroid of detection
-        indices = np.indices((nrow, ncol))
-        row_ix = indices[0]
-        col_ix = indices[1]
 
-        target_n = np.sum(fire)
-        target_row = np.sum(np.multiply(row_ix, fire))
-        target_col = np.sum(np.multiply(col_ix, fire))
-
-        target_row /= target_n
-        target_col /= target_n
-        target_row = int(target_row + .5)
-        target_col = int(target_col + .5)
-        target_row = max(target_row, 0)
-        target_col = max(target_col, 0)
-        target_row = min(target_row, nrow - 1)
-        target_col = min(target_col, ncol - 1)
-        print("target row", target_row)
-        print("target_col", target_col)
-
-        # now get nearest element that's selected
-        fire_row, fire_col = np.where(fire)
-        min_row, min_col = fire_row[0], fire_col[0]
-
-        print("fire_row", fire_row)
-        print("fire_col", fire_col)
-        fx = fire_row[0] - target_row
-        fy = fire_col[0] - target_col
-        min_d = fx * fx + fy * fy
-        for i in range(len(fire_row)):
-            fx = fire_row[i] - target_row
-            fy = fire_col[i] - target_col
-            d = fx * fx + fy * fy
-
-            if d < min_d:
-                min_row = fire_row[i]
-                min_col = fire_col[i]
-                min_d = d
-        target_row = min_row
-        target_col = min_col
-        print("target row", target_row)
-        print("target_col", target_col)
-        print(fire[target_row, target_col])
-
+    '''
+    target_row, target_col = detection_centroid(cumulative)
     # run flood fill
     write_binary(fire.astype(np.float32), "fire_tmp.bin")
     write_hdr("fire_tmp.hdr", str(ncol), str(nrow), str(1))
@@ -163,10 +172,16 @@ for b in bn:
     run(cmd)
     print(cmd)
 
+    run('cp fire_tmp.bin_flood4.bin_link.bin ' + str(out_i).zfill(4) + '_link.bin')
+    run('cp fire_tmp.bin_flood4.bin_link.hdr ' + str(out_i).zfill(4) + '_link.hdr')
+    run('cp fire_tmp.bin_flood4.bin_link_target.bin ' + str(out_i).zfill(4) + '.bin')
+    run('cp fire_tmp.bin_flood4.bin_link_target.hdr ' + str(out_i).zfill(4) + '.hdr')
+ 
     [f_samp, f_lines, f_bands, f_d] = read_binary('fire_tmp.bin_flood4.bin_link_target.bin')
     f_d = f_d.reshape(rows, cols)
-    fire = f_d > 0  # now we revised the fire detection result, to include only this connected component
+    # fire = f_d > 0  # now we revised the fire detection result, to include only this connected component
 
+    '''
     changed = np.logical_and(fire, np.logical_not(cumulative)) # detected this step and not detected before 
     n_changed = np.count_nonzero(changed)
 
@@ -175,8 +190,29 @@ for b in bn:
         latest +=  float('nan')
     else:
         cumulative = np.logical_or(fire, cumulative)  # anywhere fire has been detected until now.
-    latest[fire] = unix_t
+    # latest[fire] = unix_t
 
+    # find cumulative extent
+    target_row, target_col = detection_centroid(cumulative)
+    # run flood fill
+    write_binary(cumulative.astype(np.float32), "cum.bin")
+    write_hdr("cum.hdr", str(ncol), str(nrow), str(1))
+    run('flood.exe cum.bin')
+    # now, run class linking (on nearest point to centroid that is a detection, as target)
+    cmd= ('class_link.exe cum.bin_flood4.bin 111 ' + str(target_row) + ' ' + str(target_col))
+    run(cmd)
+    print(cmd)
+    #    run('cp cum.bin_flood4.bin_link.bin ' + str(out_i).zfill(4) + '_link.bin')
+    # run('cp cum.bin_flood4.bin_link.hdr ' + str(out_i).zfill(4) + '_link.hdr')
+    run('cp cum.bin_flood4.bin_link_target.bin ' + str(ci).zfill(4) + '_' + str(out_i).zfill(4) + '.bin')
+    run('cp cum.bin_flood4.bin_link_target.hdr ' + str(ci).zfill(4) + '_' + str(out_i).zfill(4) + '.hdr')
+    [f_samp, f_lines, f_bands, f_d] = read_binary('cum.bin_flood4.bin_link_target.bin')
+    f_d = f_d.reshape(rows, cols)
+    # fire = f_d > 0  # now we revised the fire detection result, to include only this connected component
+    cumulative = f_d > 0
+    fire = np.logical_and(cumulative, fire)
+
+    latest[fire] = unix_t
 
     if n_changed > PIXEL_CHANGE_THRES:
         print("\n\nn_changed", n_changed, "**********************")
@@ -205,7 +241,7 @@ for b in bn:
             plt.close()
             # END WRITE PLOT **************************************************
     
-            write_band_gtiff(fire, dataset, ot)  # gdal_datatype=gdal.GDT_Float32):
+            write_band_gtiff(cumulative, dataset, ot)  # gdal_datatype=gdal.GDT_Float32):
             write_band_gtiff(latest, dataset, of2) # , gdal_datatype=gdal.GDT_UInt32)
             run('gdal_translate -of ENVI -ot Float32 ' + ot + ' ' + of + ' &')
             run('gdal_translate -of ENVI -ot Float32 ' + of2 + ' ' + of2e + ' &')
