@@ -124,7 +124,9 @@ int main(int argc, char ** argv){
             merges.insert(to_string(parent) + str(",") + to_string(*it));
           }
         }
-        cout << "iter" << iter << " merge: i " << i << " j " << j << merge << endl;
+	if(target_row < 0){
+		cout << "iter" << iter << " merge: i " << i << " j " << j << merge << endl;
+	}
         // optional: write provisinal output this step
         if(debug){
           str ofn_i(str("merge_") + to_string(iter) + str(".bin"));
