@@ -4,7 +4,11 @@
 /* 20220216 group nearby (non-zero) segs using a moving window: any two labels
 in same window get merged 
 
-20220513: option to only write out seg connected to target */
+20220513: option to only write out seg connected to target 
+
+NOTE: for class maps, need to use 0 as NULL class (no NAN for uint)
+*/
+
 
 unordered_map<float, set<size_t>> members;
 unordered_map<float, float> p; //<size_t, size_t> p; // disjoint-set forest / union-find
