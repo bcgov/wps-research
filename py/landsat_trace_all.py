@@ -170,14 +170,15 @@ for b in bn:
     cumulative = np.logical_or(fire, cumulative)  # anywhere fire has been detected until now.
     # latest[fire] = unix_t
 
-    # how many pixels changed? actually!
-    plt.imshow(fire)
-    plt.title("fire")
-    plt.show()
+    if False:
+        # how many pixels changed? actually!
+        plt.imshow(fire)
+        plt.title("fire")
+        plt.show()
 
-    plt.imshow(actual_cumulative)
-    plt.title("actual")
-    plt.show()
+        plt.imshow(actual_cumulative)
+        plt.title("actual")
+        plt.show()
 
     print("ci=", ci, "N_CHANGE", n_changed)
 
