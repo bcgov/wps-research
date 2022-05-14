@@ -35,7 +35,7 @@ out_i = 1  # index of output file
 
 dataset = gdal.Open('landsat.bin', gdal.GA_ReadOnly)
 nrow, ncol, latest = None, None, None
-cumulative = None
+cumulative, actual_cumulative = None, None
 target_row, target_col = None, None
 
 
@@ -156,14 +156,21 @@ for b in bn:
     fire = (arr > 0)   # fire detection result (this step)
 
     if ci == 1:
-        cumulative = np.zeros((nrow, ncol), np.int32)
+        actual_cumulative = np.zeros((nrow, ncol), np.int32)
+        actual_cumulative[fire] = 1
 
-    if ci == 1:
+        cumulative = np.zeros((nrow, ncol), np.int32)
         cumulative[fire] = 1  # start with the first dataset
         latest +=  float('nan')
     else:
+        actual_cumulative = np.logical_or(fire, actual_cumulative)
         cumulative = np.logical_or(fire, cumulative)  # anywhere fire has been detected until now.
     # latest[fire] = unix_t
+
+    # how many pixels changed? actually!
+    changed = np.logical_and(fire, np.logical_not(actual_cumulative)) # cumulative)) # detected this step and not detected before 
+    n_changed = np.count_nonzero(changed)
+    print("N_CHANGE", n_changed)
 
     # find cumulative extent
     target_row, target_col = detection_centroid(cumulative)
@@ -186,14 +193,10 @@ for b in bn:
     # fire = f_d > 0  # now we revised the fire detection result, to include only this connected component
     cumulative = f_d > 0
 
-    fire = np.logical_and(cumulative, fire)
-
-    changed = np.logical_and(fire, np.logical_not(cumulative)) # detected this step and not detected before 
-    n_changed = np.count_nonzero(changed)
-
+    fire = np.logical_and(actual_cumulative, fire)
     latest[fire] = unix_t
 
-    if n_changed > PIXEL_CHANGE_THRES:
+    if n_changed > PIXEL_CHANGE_THRES or ci == 1:
         print("\n\nn_changed", n_changed, "**********************")
         if True:
 
