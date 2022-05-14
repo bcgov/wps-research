@@ -157,20 +157,29 @@ for b in bn:
 
     if ci == 1:
         actual_cumulative = np.zeros((nrow, ncol), np.int32)
-        actual_cumulative[fire] = 1
+        # actual_cumulative[fire] = 1
 
         cumulative = np.zeros((nrow, ncol), np.int32)
         cumulative[fire] = 1  # start with the first dataset
         latest +=  float('nan')
-    else:
-        actual_cumulative = np.logical_or(fire, actual_cumulative)
-        cumulative = np.logical_or(fire, cumulative)  # anywhere fire has been detected until now.
+
+    changed = np.logical_and(fire, np.logical_not(actual_cumulative)) # cumulative)) # detected this step and not detected before 
+    n_changed = np.count_nonzero(changed)
+
+    actual_cumulative = np.logical_or(fire, actual_cumulative)
+    cumulative = np.logical_or(fire, cumulative)  # anywhere fire has been detected until now.
     # latest[fire] = unix_t
 
     # how many pixels changed? actually!
-    changed = np.logical_and(fire, np.logical_not(actual_cumulative)) # cumulative)) # detected this step and not detected before 
-    n_changed = np.count_nonzero(changed)
-    print("N_CHANGE", n_changed)
+    plt.imshow(fire)
+    plt.title("fire")
+    plt.show()
+
+    plt.imshow(actual_cumulative)
+    plt.title("actual")
+    plt.show()
+
+    print("ci=", ci, "N_CHANGE", n_changed)
 
     # find cumulative extent
     target_row, target_col = detection_centroid(cumulative)
@@ -196,8 +205,8 @@ for b in bn:
     fire = np.logical_and(actual_cumulative, fire)
     latest[fire] = unix_t
 
-    if n_changed > PIXEL_CHANGE_THRES or ci == 1:
-        print("\n\nn_changed", n_changed, "**********************")
+    if (n_changed > PIXEL_CHANGE_THRES) or ci == 1:
+        print("\n\n(ci)=", ci, "n_changed", n_changed, "**********************")
         if True:
 
             # BEGIN WRITE PLOT**************************************************
@@ -228,6 +237,9 @@ for b in bn:
             run('gdal_translate -of ENVI -ot Float32 ' + ot + ' ' + of) # + ' &')
             run('gdal_translate -of ENVI -ot Float32 ' + of2 + ' ' + of2e) # + ' &')
         out_i += 1
+
+    if ci >= 8:
+        sys.exit(1)
     ci += 1
 
 
