@@ -152,16 +152,20 @@ for b in bn:
         print("target_col", target_col)
         print(fire[target_row, target_col])
 
+    # run flood fill
     write_binary(fire.astype(np.float32), "fire_tmp.bin")
     write_hdr("fire_tmp.hdr", str(ncol), str(nrow), str(1))
-
     run('flood.exe fire_tmp.bin')
     # [flood_samp, flood_lines, flood_bands, flood_d] = read_binary('fire_tmp.bin_flood4.bin')
+    
+    # now, run class linking (on nearest point to centroid that is a detection, as target)
     cmd= ('class_link.exe fire_tmp.bin_flood4.bin 111 ' + str(target_row) + ' ' + str(target_col))
     run(cmd)
     print(cmd)
-    sys.exit(1)
-    # run('class_link.exe ' 
+
+    [f_samp, f_lines, f_bands, f_d] = read_binary('fire_tmp.bin_flood4.bin_link_target.bin')
+    f_d = f_d.reshape(rows, cols)
+    fire = f_d > 0  # now we revised the fire detection result, to include only this connected component
 
     changed = np.logical_and(fire, np.logical_not(cumulative)) # detected this step and not detected before 
     n_changed = np.count_nonzero(changed)
