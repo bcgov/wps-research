@@ -16,6 +16,7 @@ import datetime
 import matplotlib
 import numpy as np
 from osgeo import gdal
+import matplotlib.ticker as ticker
 FOOT_H = 'footprint3.hdr'
 import matplotlib.pyplot as plt
 from misc import band_names, run, err, hdr_fn, sep, exist, utc_to_pst
@@ -126,6 +127,7 @@ for b in bn:
             # plt.savefig('time_' + str(ci).zfill(3) + '.png')
 
             from mpl_toolkits.axes_grid1 import make_axes_locatable
+            plt.figure(figsize=(16, 12))
             ax = plt.subplot()
             # cmap = matplotlib.cm.cool
             # cmap.set_bad('black', 0.)
@@ -136,9 +138,15 @@ for b in bn:
             # of ax and the padding between cax and ax will be fixed at 0.05 inch.
             divider = make_axes_locatable(ax)
             cax = divider.append_axes("right", size="5%", pad=0.05)
-            plt.colorbar(im, cax=cax)
+            
+            def fmt(x, pos):
+                a, b = '{:.5e}'.format(x).split('e')
+                b = int(b)
+                return r'${} \times 10^{{{}}}$'.format(a, b)
+
+            plt.colorbar(im, cax=cax, format=ticker.FuncFormatter(fmt))
             # plt.show()
-            ax.set_xlabel('Time since last detect: ' + L)
+            ax.set_xlabel('Seconds (since 00:00:00 PST / Jan 1 1970) of last detection circa: ' + L + ' PST')
             # plt.title('Time since last detection: ' + L) 
             plt.tight_layout()
             plt.savefig('time_' + str(ci).zfill(3) + '.png')
