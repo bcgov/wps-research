@@ -239,8 +239,8 @@ for b in bn:
             run('gdal_translate -of ENVI -ot Float32 ' + of2 + ' ' + of2e) # + ' &')
         out_i += 1
 
-    if ci >= 8:
-        sys.exit(1)
+    # if ci >= 8:
+    #    sys.exit(1)
     ci += 1
 
 
