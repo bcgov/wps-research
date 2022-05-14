@@ -6,10 +6,7 @@ in same window get merged
 
 20220513: option to only write out seg connected to target 
 
-NOTE: for class maps, need to use 0 as NULL class (no NAN for uint)
-*/
-
-
+NOTE: for class maps, need to use 0 as NULL class (no NAN for uint) */
 unordered_map<float, set<size_t>> members;
 unordered_map<float, float> p; //<size_t, size_t> p; // disjoint-set forest / union-find
 set<str> merges;
@@ -44,7 +41,6 @@ int main(int argc, char ** argv){
   }
 
   size_t d, np, k, n, ij, nrow, ncol, nband;
-
   long int target_row, target_col;
   target_row = target_col = -1;
   
@@ -80,14 +76,17 @@ int main(int argc, char ** argv){
     }
   }
 
-  for(unordered_map<float, set<size_t>>::iterator it = members.begin(); it != members.end(); it++){
-    cout << endl;
-    cout << it->first;
-    cout << "={";
-    for(set<size_t>::iterator ti = (*it).second.begin(); ti != (*it).second.end(); ti++){
-      cout << *ti << ",";
+  if(target_row < 0){
+    // assume debug mode without target. 
+    for(unordered_map<float, set<size_t>>::iterator it = members.begin(); it != members.end(); it++){
+      cout << endl;
+      cout << it->first;
+      cout << "={";
+      for(set<size_t>::iterator ti = (*it).second.begin(); ti != (*it).second.end(); ti++){
+        cout << *ti << ",";
+      }
+      cout << "}" << endl;
     }
-    cout << "}" << endl;
   }
 
   size_t iter = 0;
