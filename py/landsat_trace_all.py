@@ -195,6 +195,7 @@ for b in bn:
     # find cumulative extent
     target_row, target_col = detection_centroid(cumulative)
     # run flood fill
+    run("rm cum.bin*")
     write_binary(cumulative.astype(np.float32), "cum.bin")
     write_hdr("cum.hdr", str(ncol), str(nrow), str(1))
     run('flood.exe cum.bin')
@@ -204,8 +205,16 @@ for b in bn:
     print(cmd)
     #    run('cp cum.bin_flood4.bin_link.bin ' + str(out_i).zfill(4) + '_link.bin')
     # run('cp cum.bin_flood4.bin_link.hdr ' + str(out_i).zfill(4) + '_link.hdr')
-    run('cp cum.bin_flood4.bin_link_target.bin ' + str(ci).zfill(4) + '_' + str(out_i).zfill(4) + '.bin')
-    run('cp cum.bin_flood4.bin_link_target.hdr ' + str(ci).zfill(4) + '_' + str(out_i).zfill(4) + '.hdr')
+    
+    p_re = out_d + sep + str(ci).zfill(4) + '_' + str(out_i).zfill(4)
+
+    run('cp cum.bin_flood4.bin ' + p_re + '_flood4.bin')
+    run('cp cum.bin_flood4.bin ' + p_re + '_flood4.hdr')
+    run('cp cum.bin_flood4.bin_link_target.bin ' + p_re + '_link_target.bin')
+    run('cp cum.bin_flood4.bin_link_target.hdr ' + p_re + '_link_target.hdr')
+    
+
+
     [f_samp, f_lines, f_bands, f_d] = read_binary('cum.bin_flood4.bin_link_target.bin')
     f_d = f_d.reshape(rows, cols)
     # fire = f_d > 0  # now we revised the fire detection result, to include only this connected component
