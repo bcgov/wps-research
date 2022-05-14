@@ -194,10 +194,11 @@ for b in bn:
     run(cmd)
     print(cmd)
     p_re = out_d + sep + str(ci).zfill(4) + '_' + str(out_i).zfill(4)
-    run('cp cum.bin_flood4.bin ' + p_re + '_flood4.bin')
-    run('cp cum.bin_flood4.hdr ' + p_re + '_flood4.hdr')
-    run('cp cum.bin_flood4.bin_link_target.bin ' + p_re + '_link_target.bin')
-    run('cp cum.bin_flood4.bin_link_target.hdr ' + p_re + '_link_target.hdr')
+    if False:  # definitely good for debug
+        run('cp cum.bin_flood4.bin ' + p_re + '_flood4.bin')
+        run('cp cum.bin_flood4.hdr ' + p_re + '_flood4.hdr')
+        run('cp cum.bin_flood4.bin_link_target.bin ' + p_re + '_link_target.bin')
+        run('cp cum.bin_flood4.bin_link_target.hdr ' + p_re + '_link_target.hdr')
     [f_samp, f_lines, f_bands, f_d] = read_binary('cum.bin_flood4.bin_link_target.bin')
     f_d = f_d.reshape(rows, cols)
     # fire = f_d > 0  # now we revised the fire detection result, to include only this connected component
