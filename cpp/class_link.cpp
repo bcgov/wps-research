@@ -155,7 +155,9 @@ int main(int argc, char ** argv){
     out[ij] = (d == (size_t)0) ? (size_t)0 : find(d);
   }
 
-  cout << merges << endl;
+  if(target_row < 0){
+    cout << merges << endl;
+  }
   FILE * f;
   if(target_row < 0){
     f = wopen(ofn);
