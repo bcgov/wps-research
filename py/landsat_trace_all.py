@@ -204,7 +204,7 @@ for b in bn:
     # fire = f_d > 0  # now we revised the fire detection result, to include only this connected component
     cumulative = f_d > 0
 
-    fire = np.logical_and(actual_cumulative, fire)
+    fire = np.logical_and(cumulative, fire)
     latest[fire] = unix_t
 
     if (n_changed > PIXEL_CHANGE_THRES) or ci == 1:
