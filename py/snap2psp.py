@@ -24,9 +24,8 @@ files = [x.strip() for x in os.popen(cmd).readlines()]
 for f in files:
     if os.path.isfile(f):
         of = f[:-4] + '_envi.bin'
-        hf0 = f[:-3] + 'hdr'
-        hf1 = of[:-3] + 'hdr'
-        cmds.append("sbo " + f + " " + of + " 4")
+        hf0, hf1 = f[:-3] + 'hdr', of[:-3] + 'hdr'
+        cmds.append('sbo ' + f + ' ' + of + ' 4')
         cmds.append('cp -v ' + hf0 + ' ' + hf1)
         hdrs.append(hf1)
     else:
