@@ -37,6 +37,7 @@ parfor(run, cmds, 4)
 
 # update the new headers to reflect the change in byte order
 for h in hdrs:
+    print('+w', h)
     d = open(h).read().replace('byte order = 1',
                                'byte order = 0')
     open(h, 'wb').write(d.encode())
