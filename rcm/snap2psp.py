@@ -1,7 +1,9 @@
 '''convert .img files (with byte-order =1) to .bin files (with byte order 0) by swapping byte order..
 ..this is for converting .img files produced by SNAP, to PolSARPro format files
 
-20220515: update this to read/write headers by copy/modify'''
+20220515: update this to read/write headers by copy/modify
+
+also put this in the py/ folder: not unique to radar'''
 import os
 import sys
 args = sys.argv
