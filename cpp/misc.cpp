@@ -353,7 +353,7 @@ double * dalloc(size_t nd){
   return (double *) alloc(nd * (size_t)sizeof(double));
 }
 
-// read binary file  (assumed float)
+// read bsq binary file  (assumed float)
 float * bread(str bfn, size_t nrow, size_t ncol, size_t nband){
   FILE * f = ropen(bfn); 
   size_t nf = nrow * ncol * nband;
