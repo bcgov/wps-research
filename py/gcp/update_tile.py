@@ -19,8 +19,8 @@ import sys
 sep = os.path.sep
 from datetime import date
 my_path = sep.join(os.path.abspath(__file__).split(sep)[:-1]) + sep
-from misc import run, pd, sep, exists, args, cd
 sys.path.append(my_path + "..")
+from misc import run, pd, sep, exists, args, cd
 
 if True:
     print(' '.join(['python3 update_tile.py',
