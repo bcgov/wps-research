@@ -1,13 +1,12 @@
 '''20220515 CONVERT FROM ESA SNAP, to raw binary format. i.e.,:
 
 Convert .img files (with byte-order =1) to:
-        .bin files (with byte order 0)
-by swapping byte order..
-..this is for converting .img files produced by SNAP, to PolSARPro format files
+        .bin files (with byte order 0)  (swap byte order)
+..converting .img files produced by SNAP, to generic/PolSARPro format files
 
-20220515: update this to read/write headers by copy/modify
+20220515: update to clone headers and modify.
 
-NOTE: can run this on the .data portion of a "dimap" format dataset in SNAP'''
+NOTE: run this on the .data portion of a "dimap" format dataset in SNAP'''
 import os
 import sys
 from misc import args, sep, run, parfor, exist, pd
@@ -30,15 +29,20 @@ for f in files:
         of = f[:-4] + '_envi.bin'
         hf0, hf1 = f[:-3] + 'hdr', of[:-3] + 'hdr'
         if not exist(of):
-            cmds.append('sbo ' + f + ' ' + of + ' 4')
+            cmds.append(['sbo',  # swap byte order
+                         f,  # input file
+                         of,  # target output file
+                         '4'])  # number of bytes per record
         if not exist(hf1):
-            cmds.append('cp -v ' + hf0 + ' ' + hf1)
+            cmds.append(['cp -v',
+                         hf0,  # input header file
+                         hf1])  # header file for output
         out_files.append(of)
         hdrs.append(hf1)
     else:
         err('not file:' + f)
 
-parfor(run, cmds, 4)
+parfor(run, cmds, 4)  # run with 4 threads
 
 # update the new headers to reflect the change in byte order
 for h in hdrs:
@@ -50,6 +54,7 @@ for h in hdrs:
 # stack the files into a BSQ stack?
 stack_f = p + 'stack.bin'
 if create_stack and not exist(stack_f):
-    run(['python3 ' + pd + 'raster_stack.py'] +
+    run(['python3',
+         pd + 'raster_stack.py'] +
          out_files +
          [stack_f])
