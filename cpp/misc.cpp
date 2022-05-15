@@ -353,7 +353,7 @@ double * dalloc(size_t nd){
   return (double *) alloc(nd * (size_t)sizeof(double));
 }
 
-// read binary file
+// read binary file  (assumed float)
 float * bread(str bfn, size_t nrow, size_t ncol, size_t nband){
   FILE * f = fopen(bfn.c_str(), "rb");
   size_t nf = nrow * ncol * nband;
@@ -365,6 +365,20 @@ float * bread(str bfn, size_t nrow, size_t ncol, size_t nband){
   }
   fclose(f);
   return dat;
+}
+
+//read binary file in char form
+char * read(str bfn, size_t & n_bytes){
+  n_bytes = fsize(bfn);
+  char * d = (char *)(void *)alloc(n_bytes);
+  FILE * f = fopen(bfn.c_str(), "rb");
+  size_t nr = fread(d, 1, n_bytes, f);
+  if(nr != n_bytes){
+    printf("Error: bytes expected %zu, read: %zu\n", n_bytes, nr);
+    err("unexpected number of bytes read\n");
+  }
+  fclose(f);
+  return d;
 }
 
 void bwrite(float * d, str bfn, size_t nrow, size_t ncol, size_t nband){

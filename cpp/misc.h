@@ -278,7 +278,8 @@ void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband, size_t data_type, v
 float * falloc(size_t nf);
 double * dalloc(size_t nd);
 
-float * bread(str bfn, size_t nrow, size_t ncol, size_t nband); // read binary file
+char * read(str bfn, size_t & n_bytes); // read binary file in char format 
+float * bread(str bfn, size_t nrow, size_t ncol, size_t nband); // read binary file  ( assumed float)
 void bwrite(float * d, str bfn, size_t nrow, size_t ncol, size_t nband); // write binary file
 void bappend(float * d, FILE * f, size_t n_float); //, bool start=false); // append (e.g. a band) to a binary file
 
