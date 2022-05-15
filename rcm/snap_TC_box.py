@@ -3,7 +3,13 @@
     1) perform terrain correction followed by
     2) box filter..
     3) finally, swap the byte order for use in PolSARPro (or outside SNAP)
-This actually placed the C2 matrix, in a ENVI/PolSARPro file'''
+This actually placed the C2 matrix, in a ENVI/PolSARPro file
+
+
+20220515 warning: complex output from TC feature was removed, but is now put back again (still not in the online version of SNAP yet)
+    https://forum.step.esa.int/t/outputcomplex-argument-removed-from-sentinel-1-terrain-correction/35013
+
+'''
 import os
 import sys
 sep = os.path.sep
