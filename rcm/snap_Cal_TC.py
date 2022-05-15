@@ -1,14 +1,13 @@
-'''20211123 in SNAP /snappy..: for COMPACT-pol datasets..
-..on all SLC folders in working directory:
-    1) perform terrain correction followed by
-    2) box filter..
-    3) finally, swap the byte order for use in PolSARPro (or outside SNAP)
-This actually placed the C2 matrix, in a ENVI/PolSARPro file
+'''
+20220515 for CP-pol datasets
+    1) calibration
+    2) terrain correction
+    3) box filter x3
+    4) do all the CP-pol decompositions
 
 20220515 warning: complex output from TC feature was removed, but is now put back again (still not in the online version of SNAP yet)
     https://forum.step.esa.int/t/outputcomplex-argument-removed-from-sentinel-1-terrain-correction/35013
 
-Quote of the day:
 from jun_lu (Feb 28, 2022 SNAP forum):
     "The complex output option has been removed from terrain correction operator based on the suggestions of the ESA scientists. This is because the result is scientifically totally wrong. Sorry about the confusion"
 '''
@@ -46,7 +45,6 @@ for p in folders:
     p_2 = p + sep + '01_calib.dim' # calibrated product
     p_3 = p + sep + '02_tc.dim'  # terrain corrected output
     p_4 = p + sep + '03_filter.dim' # filtered output
-    p_5 = p + sep + '04_decom.dim'  # decom result
 
     if not exist(p_2):
         run([snap,
@@ -74,14 +72,25 @@ for p in folders:
             '-Ssource=' + p_3,
             '-t ' + p_4])  # -t is for output file
 
-    if not exist(p_5):
-        run([snap,
-            'CP-Decomposition',
-            '-Pdecomposition=' + "'M-Chi Decomposition'",
-            '-PwindowSizeXStr=3',
-            '-PwindowSizeYStr=3',
-            '-Ssource=' + p_4,
-            '-t ' + p_5])
+    # run all the CP-pol decoms
+    decoms = ["'M-Chi Decomposition'",
+              "'M-Delta Decomposition'",
+              "'H-Alpha Decomposition'",
+              "'2 Layer RVOG Model Based Decomposition'",
+              "'Model-free 3-component decomposition'"]
+
+    for decom in decoms:
+        decom_name = decom.strip("'").replace(' ', '_')
+        p_5 = p + sep + decom_name + '.dim'
+
+        if not exist(p_5):
+            run([snap,
+                 'CP-Decomposition',
+                 '-Pdecomposition=' + decom,
+                 '-PwindowSizeXStr=3',
+                 '-PwindowSizeYStr=3',
+                 '-Ssource=' + p_4,
+                 '-t ' + p_5])
     sys.exit(1)
 
 '''
