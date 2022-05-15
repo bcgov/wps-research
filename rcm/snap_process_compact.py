@@ -1,16 +1,17 @@
-'''
-20220515 for CP-pol datasets
+''' 20220515 for CP-pol datasets
     1) calibration
     2) terrain correction
     3) box filter x3
-    4) do all the CP-pol decompositions
+    4) run the CP-pol decompositions
 
 20220515 warning: complex output from TC feature was removed, but is now put back again (still not in the online version of SNAP yet)
     https://forum.step.esa.int/t/outputcomplex-argument-removed-from-sentinel-1-terrain-correction/35013
 
 from jun_lu (Feb 28, 2022 SNAP forum):
     "The complex output option has been removed from terrain correction operator based on the suggestions of the ESA scientists. This is because the result is scientifically totally wrong. Sorry about the confusion"
-'''
+
+
+NB don't forget to export dem, lat/long, geometric parameters'''
 import os
 import sys
 sep = os.path.sep
@@ -79,10 +80,12 @@ for p in folders:
               "'2 Layer RVOG Model Based Decomposition'",
               "'Model-free 3-component decomposition'"]
 
+    decom_folders = []
     for decom in decoms:
         decom_name = decom.strip("'").replace(' ', '_')
         p_5 = p + sep + decom_name + '.dim'
-
+        decom_folders.append(p_5)
+        
         if not exist(p_5):
             run([snap,
                  'CP-Decomposition',
@@ -91,6 +94,15 @@ for p in folders:
                  '-PwindowSizeYStr=3',
                  '-Ssource=' + p_4,
                  '-t ' + p_5])
+
+        stack_f = p_5[:-3] + 'data' + sep + 'stack.bin'
+        print(stack_f)
+        if not exist(stack_f):
+            cmd = ['python3',
+                    pd + 'snap2psp_inplace.py',
+                    p_5[:-3] + 'data' + sep,
+                    '1']
+            run(cmd)
     sys.exit(1)
 
 '''
