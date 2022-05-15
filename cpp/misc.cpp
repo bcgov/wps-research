@@ -355,7 +355,7 @@ double * dalloc(size_t nd){
 
 // read binary file  (assumed float)
 float * bread(str bfn, size_t nrow, size_t ncol, size_t nband){
-  FILE * f = fopen(bfn.c_str(), "rb");
+  FILE * f = ropen(bfn); //.c_str(), "rb");
   size_t nf = nrow * ncol * nband;
   float * dat = falloc(nf);
   size_t nr = fread(dat, nf * (size_t)sizeof(float), 1, f);
