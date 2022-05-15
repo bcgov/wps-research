@@ -355,7 +355,7 @@ double * dalloc(size_t nd){
 
 // read binary file  (assumed float)
 float * bread(str bfn, size_t nrow, size_t ncol, size_t nband){
-  FILE * f = ropen(bfn); //.c_str(), "rb");
+  FILE * f = ropen(bfn); 
   size_t nf = nrow * ncol * nband;
   float * dat = falloc(nf);
   size_t nr = fread(dat, nf * (size_t)sizeof(float), 1, f);
@@ -371,7 +371,7 @@ float * bread(str bfn, size_t nrow, size_t ncol, size_t nband){
 char * read(str bfn, size_t & n_bytes){
   n_bytes = fsize(bfn);
   char * d = (char *)(void *)alloc(n_bytes);
-  FILE * f = fopen(bfn.c_str(), "rb");
+  FILE * f = ropen(bfn);
   size_t nr = fread(d, 1, n_bytes, f);
   if(nr != n_bytes){
     printf("Error: bytes expected %zu, read: %zu\n", n_bytes, nr);
