@@ -9,6 +9,9 @@ This actually placed the C2 matrix, in a ENVI/PolSARPro file
 20220515 warning: complex output from TC feature was removed, but is now put back again (still not in the online version of SNAP yet)
     https://forum.step.esa.int/t/outputcomplex-argument-removed-from-sentinel-1-terrain-correction/35013
 
+Quote of the day:
+from jun_lu (Feb 28, 2022 SNAP forum):
+    "The complex output option has been removed from terrain correction operator based on the suggestions of the ESA scientists. This is because the result is scientifically totally wrong. Sorry about the confusion"
 '''
 import os
 import sys
