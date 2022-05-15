@@ -33,6 +33,8 @@ for f in folders_use:
     print(f)
 
 snap, ci = '/usr/local/snap/bin/gpt', 1 # assume we installed snap
+if not exist(snap):
+    snap = '/opt/snap/bin/gpt'  # try another location if that failed
 folders = folders_use
 
 for p in folders:
@@ -56,8 +58,10 @@ for p in folders:
                   in_2, '-t', in_3])  # -t is for output file
 
     use_C = False  # default to T matrix.
-    if not exist(in_2): run(c1)
-    if not exist(in_3): run(c2)
+    if not exist(in_2):
+        run(c1)
+    if not exist(in_3):
+        run(c2)
     r_f, r_h = p + '_rgb.bin', p + '_rgb.hdr'
     hf = in_3[:-3] + 'data' + sep + 'T11.hdr'
     if exist(hf):
@@ -91,7 +95,8 @@ for p in folders:
         file_pre = 'T' if not use_C else 'C'  # file prefix: T or C mtx
         c, t = 'cat', in_3[:-3] + 'data' + sep + file_pre # ('T' if not use_C else 'C')
         file_i = ['22.bin', '33.bin', '11.bin'] if not use_C else ['11.bin', '22.bin', '12_real.bin', '12_imag.bin']
-        for i in file_i: # (['22.bin', '33.bin', '11.bin'] if not use_C else ['11.bin', '22.bin', '12_real.bin', '12_imag.bin']) :
+        for i in file_i:
+            # (['22.bin', '33.bin', '11.bin'] if not use_C else ['11.bin', '22.bin', '12_real.bin', '12_imag.bin']) :
             ti = t + i
             if not exist(ti):
                 run('./sbo ' + (ti[:-3] + 'img') + ' ' + ti + ' 4')
