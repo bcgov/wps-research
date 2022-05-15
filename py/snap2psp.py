@@ -10,7 +10,7 @@ by swapping byte order..
 NOTE: can run this on the .data portion of a "dimap" format dataset in SNAP'''
 import os
 import sys
-from misc import args, sep, run, parfor
+from misc import args, sep, run, parfor, exist
 d = os.getcwd()  # default: run in present directory
 if len(args) < 2:
     print('snap2psp.py [input folder name] # convert snap byte-order= 1 .img data to byte-order 0 .bin data')
@@ -25,8 +25,10 @@ for f in files:
     if os.path.isfile(f):
         of = f[:-4] + '_envi.bin'
         hf0, hf1 = f[:-3] + 'hdr', of[:-3] + 'hdr'
-        cmds.append('sbo ' + f + ' ' + of + ' 4')
-        cmds.append('cp -v ' + hf0 + ' ' + hf1)
+        if not exist(of):
+            cmds.append('sbo ' + f + ' ' + of + ' 4')
+        if not exist(hf1):
+            cmds.append('cp -v ' + hf0 + ' ' + hf1)
         hdrs.append(hf1)
     else:
         err('not file:' + f)
