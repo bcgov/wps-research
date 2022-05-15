@@ -103,7 +103,6 @@ for p in folders:
                     p_5[:-3] + 'data' + sep,
                     '1']
             run(cmd)
-    sys.exit(1)
 
 '''
     c1 = ' '.join([snap,
