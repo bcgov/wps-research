@@ -2,8 +2,11 @@
 #include<unordered_set>
 #include<unordered_map>
 /* 20220216 group nearby (non-zero) segs using a moving window: any two labels
-in same window get merged */
+in same window get merged 
 
+20220513: option to only write out seg connected to target 
+
+NOTE: for class maps, need to use 0 as NULL class (no NAN for uint) */
 unordered_map<float, set<size_t>> members;
 unordered_map<float, float> p; //<size_t, size_t> p; // disjoint-set forest / union-find
 set<str> merges;
@@ -33,13 +36,24 @@ bool unite(float x, float y){
 
 int main(int argc, char ** argv){
   if(argc < 3){
-    err("class_link.exe [input file name] [window width] # windowed seg grouping, ike top hat");
+    printf("optional arg: only output class connected to target\n");
+    err("class_link.exe [input file name] [window width] # [optional arg: target row] [optional arg: target col] # windowed seg grouping, ike top hat");
   }
+
   size_t d, np, k, n, ij, nrow, ncol, nband;
+  long int target_row, target_col;
+  target_row = target_col = -1;
+  
+  if(argc >= 5){
+    target_row = atol(argv[3]);
+    target_col = atol(argv[4]);
+  }
+
   float * dat, * out;
   long int nwin = (long int)atoi(argv[2]);
   cout << "nwin " << nwin << endl;
-  str fn(argv[1]); str ofn(fn + "_link.bin");
+  str fn(argv[1]);
+  str ofn(fn + "_link.bin");
   str hfn(hdr_fn(fn)); str hf2(hdr_fn(ofn, true));
   long int i, j, di, dj, ii, jj;
   int debug = false;
@@ -62,14 +76,17 @@ int main(int argc, char ** argv){
     }
   }
 
-  for(unordered_map<float, set<size_t>>::iterator it = members.begin(); it != members.end(); it++){
-    cout << endl;
-    cout << it->first;
-    cout << "={";
-    for(set<size_t>::iterator ti = (*it).second.begin(); ti != (*it).second.end(); ti++){
-      cout << *ti << ",";
+  if(target_row < 0){
+    // assume debug mode without target. 
+    for(unordered_map<float, set<size_t>>::iterator it = members.begin(); it != members.end(); it++){
+      cout << endl;
+      cout << it->first;
+      cout << "={";
+      for(set<size_t>::iterator ti = (*it).second.begin(); ti != (*it).second.end(); ti++){
+        cout << *ti << ",";
+      }
+      cout << "}" << endl;
     }
-    cout << "}" << endl;
   }
 
   size_t iter = 0;
@@ -107,7 +124,9 @@ int main(int argc, char ** argv){
             merges.insert(to_string(parent) + str(",") + to_string(*it));
           }
         }
-        cout << "iter" << iter << " merge: i " << i << " j " << j << merge << endl;
+	if(target_row < 0){
+		cout << "iter" << iter << " merge: i " << i << " j " << j << merge << endl;
+	}
         // optional: write provisinal output this step
         if(debug){
           str ofn_i(str("merge_") + to_string(iter) + str(".bin"));
@@ -119,9 +138,11 @@ int main(int argc, char ** argv){
           }
 
           cout << merges << endl;
-          FILE * f = wopen(ofn_i);
-          fwrite(out, sizeof(float), np, f);
-          hwrite(hfn_i, nrow, ncol, 1, 4); /* type 16 = size_t */
+	  if(target_row < 0){
+            FILE * f = wopen(ofn_i);
+            fwrite(out, sizeof(float), np, f);
+            hwrite(hfn_i, nrow, ncol, 1, 4); /* type 16 = size_t */
+	  }
         }
         iter ++;
       }
@@ -134,10 +155,33 @@ int main(int argc, char ** argv){
     out[ij] = (d == (size_t)0) ? (size_t)0 : find(d);
   }
 
-  cout << merges << endl;
-  FILE * f = wopen(ofn);
-  fwrite(out, sizeof(float), np, f);
-  hwrite(hf2, nrow, ncol, 1, 4); /* type 16 = size_t */
+  if(target_row < 0){
+    cout << merges << endl;
+  }
+  FILE * f;
+  if(target_row < 0){
+    f = wopen(ofn);
+    fwrite(out, sizeof(float), np, f);
+    hwrite(hf2, nrow, ncol, 1, 4); /* type 16 = size_t */
+    fclose(f);
+  }
+
+  if(target_row >= 0){
+    /* determine class of target */
+
+    str ofn2(fn + "_link_target.bin");
+    str ohn2(fn + "_link_target.hdr");
+    float target_class = out[(target_row * ncol) + target_col];
+    cout << "target_class " << target_class << endl;
+    for0(i, np){
+      out[i] = ((out[i] == target_class) ? 1.: 0.);
+    }
+
+    f = wopen(ofn2);
+    fwrite(out, sizeof(float), np, f);
+    fclose(f);
+    hwrite(ohn2, nrow, ncol, 1, 4);
+  }
 
   free(dat);
   free(out);

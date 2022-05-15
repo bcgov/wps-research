@@ -1,5 +1,8 @@
 /* 20220225 raster flood fill on mask: background is label 0.
-  New labels to connected components of image areas valued 1. */
+  New labels to connected components of image areas valued 1.
+  
+
+Need to fix the data type issue  */
 #include"misc.h"
 
 size_t *out, i_next, nrow, ncol, nband, nf;

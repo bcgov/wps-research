@@ -1,16 +1,24 @@
+'''Clean up envi header so that they can be opened in IMV
+
+20220514: 
+    default:
+        all hdr in present folder. Process in parallel!'''
 from misc import *
 
 if len(args) < 2:
     # err("python3 envi_header_cleanup.py [input envi header filename .hdr]")
     lines = [x.strip() for x in os.popen('ls -1 *.hdr').readlines()]
     found = False
+    jobs = []
     for line in lines:
         if exist(line):
             c = 'python3 ' + __file__ + ' ' + line
-            run(c)
+            jobs.append(c)
             found = True
     if not found:
         err("file not found: " + args[1])
+
+    parfor(run, jobs, 8)
     sys.exit(0)
 
 data = open(args[1]).read().strip()

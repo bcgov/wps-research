@@ -6,6 +6,7 @@ import math
 import struct
 import numpy as np
 import os.path as path
+from osgeo import gdal
 import multiprocessing as mp
 import matplotlib.pyplot as plt
 args = sys.argv
@@ -313,7 +314,7 @@ def xy_to_pix_lin(fn, x, y, nb):  # raster fn, lat/lon, number of bands (assume 
 def pix_lin_to_xy(fn, col, row):
     err('fix this with code from raster_pixels_location.py')
 
-def utc_to_pst(YYYY, MM, DD, hh, mm, ss):
+def utc_to_pst(YYYY, MM, DD, hh, mm, ss, single_string=True):
     from datetime import datetime
     from pytz import timezone
     PST = timezone('US/Pacific')
@@ -324,10 +325,30 @@ def utc_to_pst(YYYY, MM, DD, hh, mm, ss):
     local_time = d + time_diff
 
     L = local_time
-    L = ''.join([str(L.year).zfill(4),
-                 str(L.month).zfill(2),
-                 str(L.day).zfill(2),
-                 str(L.hour).zfill(2),
-                 str(L.minute).zfill(2),
-                 str(L.second).zfill(2)])
-    return L
+    if(single_string):
+        return ''.join([str(L.year).zfill(4),
+                        str(L.month).zfill(2),
+                        str(L.day).zfill(2),
+                        str(L.hour).zfill(2),
+                        str(L.minute).zfill(2),
+                        str(L.second).zfill(2)])
+    else:
+        return [L.year, L.month, L.day, L.hour, L.minute, L.second]
+
+def write_band_gtiff(output_data,  # 2d numpy array
+                     ref_dataset, # gdal dataset to copy map info from
+                     output_fn,  # output filename to write
+                     gdal_datatype=gdal.GDT_Float32):  # output datatype
+    print('+w', output_fn)
+    from osgeo import gdal
+    driver = gdal.GetDriverByName("GTiff")
+    rows, cols = output_data.shape  # assumed one-band
+    outd = driver.Create(output_fn, cols, rows, 1, gdal_datatype)
+    outd.SetGeoTransform(ref_dataset.GetGeoTransform())##sets same geotransform as input
+    outd.SetProjection(ref_dataset.GetProjection())##sets same projection as input
+    outd.GetRasterBand(1).WriteArray(output_data)
+    outd.GetRasterBand(1).SetNoDataValue(0) #
+    outd.FlushCache() ##saves to disk!!
+    outd = None
+    band=None
+    ds=None
