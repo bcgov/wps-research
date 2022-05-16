@@ -20,7 +20,7 @@ int main(int argc, char ** argv){
   int dw = (nwin - 1) / 2; // window increment
   
   if((nwin - 1) % 2 != 0) err("window size must be odd");
-  float * out = falloc(nb * nwin * nwin);
+  float * out = falloc(nr * nc * nb * nwin * nwin);
   str ofn(fn + str("_squiggle.bin"));
   str ohn(fn + str("_squiggle.hdr"));
   long int ii, jj;
