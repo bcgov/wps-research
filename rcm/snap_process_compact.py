@@ -10,7 +10,6 @@
 from jun_lu (Feb 28, 2022 SNAP forum):
     "The complex output option has been removed from terrain correction operator based on the suggestions of the ESA scientists. This is because the result is scientifically totally wrong. Sorry about the confusion"
 
-
 NB don't forget to export dem, lat/long, geometric parameters'''
 import os
 import sys
@@ -19,6 +18,9 @@ from datetime import date
 my_path = sep.join(os.path.abspath(__file__).split(sep)[:-1]) + sep
 sys.path.append(my_path + "../py/")
 from misc import run, pd, exist, args, cd, err
+
+FILTER_SIZE = 7
+RE_CALC = True
 
 # look for snap binary
 snap, ci = '/usr/local/snap/bin/gpt', 0 # assume we installed snap
@@ -40,14 +42,15 @@ for p in folders_use:
 # process each folder
 for p in folders:
     ci += 1
-    if os.path.abspath(p) == os.path.abspath('.'): continue
+    if os.path.abspath(p) == os.path.abspath('.'):
+        continue
 
     p_1 = p + sep + 'manifest.safe'  # input
     p_2 = p + sep + '01_calib.dim' # calibrated product
     p_3 = p + sep + '02_tc.dim'  # terrain corrected output
     p_4 = p + sep + '03_filter.dim' # filtered output
 
-    if not exist(p_2):
+    if not exist(p_2) or RE_CALC:
         run([snap,
              'Calibration',
              '-Ssource=' + p_1,
@@ -55,7 +58,7 @@ for p in folders:
         run(['cp -rv', 'target.dim', p_2])
         run(['cp -rv', 'target.data', p_2[:-4] + '.data'])
 
-    if not exist(p_3):
+    if not exist(p_3) or RE_CALC:
         run([snap,
             'Terrain-Correction',
             '-PoutputComplex=true',
@@ -65,11 +68,11 @@ for p in folders:
             '-Ssource=target.dim', # + p_2,
             '-t ' + p_3])
 
-    if not exist(p_4):
+    if not exist(p_4) or RE_CALC:
         run([snap,
             'Polarimetric-Speckle-Filter',
             '-Pfilter="Box Car Filter"',
-            '-PfilterSize=3',
+            '-PfilterSize=' + str(FILTER_SIZE), # 3',
             '-Ssource=' + p_3,
             '-t ' + p_4])  # -t is for output file
 
@@ -86,18 +89,18 @@ for p in folders:
         p_5 = p + sep + decom_name + '.dim'
         decom_folders.append(p_5)
         
-        if not exist(p_5):
+        if not exist(p_5) or RE_CALC:
             run([snap,
                  'CP-Decomposition',
                  '-Pdecomposition=' + decom,
-                 '-PwindowSizeXStr=3',
-                 '-PwindowSizeYStr=3',
+                 '-PwindowSizeXStr=' + str(FILTER_SIZE),
+                 '-PwindowSizeYStr=' + str(FILTER_SIZE),
                  '-Ssource=' + p_4,
                  '-t ' + p_5])
 
         stack_f = p_5[:-3] + 'data' + sep + 'stack.bin'
         print(stack_f)
-        if not exist(stack_f):
+        if not exist(stack_f) or RE_CALC:
             cmd = ['python3',
                     pd + 'snap2psp_inplace.py',
                     p_5[:-3] + 'data' + sep,
@@ -105,6 +108,7 @@ for p in folders:
             run(cmd)
 
 '''
+    # 20211125 analysis
     c1 = ' '.join([snap,
                   'Terrain-Correction',
                   '-PoutputComplex=true',
