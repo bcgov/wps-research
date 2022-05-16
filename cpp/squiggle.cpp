@@ -1,18 +1,14 @@
-/* need to test this. squiggle.cpp: named suchly because it is an efficient use of brain resource,
-but not computer resource:
+/* squiggle.cpp: named suchly due to mental efficiency at computational
+expense. Expand a raster with nb bands, for a result with: n * n * nb bands,
+where n is the size of a window around a pixel. Out of bounds entries are
+assigned window centre values! 
 
-Take a raster and expand it such that: for every pixel with nb bands, there are now
-n * n * nb bands where n is the size of a window around the pixel where:
-out of bounds entries are assigned the centre values..
-
-That is, this adapter transforms moving-window data into pixel based..
-
-i.e. can use it to run a pixel based classifier on a moving window */
+This adapter transforms moving-window into pixels, i.e. to run a pixel based
+classifier using a moving window */
 
 #include"misc.h"
 int main(int argc, char ** argv){
   if(argc < 3) err("squiggle [input raster] [window size (odd)]");
-  
   str fn(argv[1]);
   str hfn(hdr_fn(fn));
   size_t np, nr, nc, nb, i, j, k;
