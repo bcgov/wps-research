@@ -11,7 +11,7 @@ int main(int argc, char ** argv){
   if(argc < 3) err("squiggle [input raster] [window size (odd)]");
   str fn(argv[1]);
   str hfn(hdr_fn(fn));
-  size_t np, nr, nc, nb, i, j, k;
+  size_t np, nr, nc, nb, i, j, k, npk, ci;
   hread(hfn, nr, nc, nb);
   np = nr * nc;
 
@@ -20,17 +20,19 @@ int main(int argc, char ** argv){
   int dw = (nwin - 1) / 2; // window increment
   
   if((nwin - 1) % 2 != 0) err("window size must be odd");
-
+  float * out = falloc(nb * nwin * nwin);
   str ofn(fn + str("_squiggle.bin"));
   str ohn(fn + str("_squiggle.hdr"));
-  FILE * f = wopen(ofn.c_str());
   long int ii, jj;
   int di, dj;
   float d;
+  ci = 0;
 
   for(di = -dw; di <= dw; di++){
     for(dj = -dw; dj <= dw; dj++){
       for0(k, nb){
+	npk = np * k;
+
         for0(i, nr){
           ii = i + di;
 
@@ -38,17 +40,15 @@ int main(int argc, char ** argv){
             jj = j + dj;
 
             if(ii >= 0 && ii < nr && jj > 0 && jj < nc)
-              d = dat[(np * k) + (ii * nc) + jj];
+              out[ci++] = dat[npk + (ii * nc) + jj];
             else
-              d = dat[(np * k) + (i * nc) + j];
-            
-            fwrite(&d, sizeof(float), 1, f);
+              out[ci++] = dat[npk + (i * nc) + j];
           }
         }
       }
     }
   }
-  fclose(f);
+  bwrite(out, ofn, nr, nc, nb * nwin * nwin);
   hwrite(ohn, nr, nc, nb * nwin * nwin);
   return 0;
 }
