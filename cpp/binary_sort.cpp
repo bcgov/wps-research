@@ -36,9 +36,10 @@ int main(int argc, char ** argv){
   fclose(f);
 
   priority_queue<p_ix> pq;
-  for0(i, np)
+  for0(i, np){
+    if(i % 10000 == 0) printf("%zu of %zu\n", i, np);
     pq.push(p_ix(&d[i * nb * sizeof(float)]));
-  
+  }
   
   ci = 0;
   char ** g = (char **)(void *)alloc(sizeof(char *) * np);
