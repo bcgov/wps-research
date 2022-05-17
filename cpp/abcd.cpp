@@ -77,7 +77,7 @@ int main(int argc, char** argv){
   if(nb[0] != nb[2])
     err("need same # of bands: images 1, 3");
 
-  x = falloc(nr[0] * nc[0] * nb[1]); // out buf
+  x = falloc(nr[2] * nc[2] * nb[2]); // out buf
   for0(i, 3)
     y[i] = bread(str(argv[i + 1]), nr[i], nc[i], nb[i]);
 
