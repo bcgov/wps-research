@@ -54,7 +54,7 @@ void job(size_t i){
   }
 
   if(i % 100000 == 0)
-    cprint(to_string(100.* ((float)(i+1) / (float)np)) + str(" % ") + to_string(i) + str(" / ") + to_string(np));
+    cprint(to_string(100.* ((float)(i+1) / (float)np2)) + str(" % ") + to_string(i) + str(" / ") + to_string(np2));
 
   for0(k, nb[2])
     x[np2 * k + i] = y[1][np2 * k + mi];
