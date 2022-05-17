@@ -13,7 +13,7 @@ struct customLess{
 };
 
 int main(int argc, char ** argv){
-  if(argc < 3) err("binary_sort [input raster] [number of bytes per record]");
+  if(argc < 2) err("binary_sort [input raster]");
   str fn(argv[1]);
   str hfn(hdr_fn(fn));
   size_t np, nr, nc, i, k, ci;
