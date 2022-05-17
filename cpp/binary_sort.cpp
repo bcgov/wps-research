@@ -1,4 +1,10 @@
-/* 20220516 sort a binary file, assuming it consists of BIP (float32) data */
+/* 20220516 sort a binary file, assuming it consists of BIP (float32) data
+
+Need to debug the chain:
+   bsq2bip
+   binary_sort
+   bip2bsq
+ */
 #include"misc.h"
 static size_t nb;
 
