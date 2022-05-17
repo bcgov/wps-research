@@ -1,4 +1,4 @@
-/* 20220516 sort a binary file, assuming it consists of records of equal length N bytes */
+/* 20220516 sort a binary file, assuming it consists of BIP (float32) data */
 #include"misc.h"
 static size_t nb;
 
