@@ -2,15 +2,24 @@
 #include"misc.h"
 static size_t nb;
 
-struct customLess{
-  bool operator()(char * a, char * b) const {
-    int j;
-    for0(j, nb){
-      if(a[j] < b[j]) return true;
-    }
-    return false;
+class p_ix{
+  public: // float, index tuple object
+  char * p;
+  p_ix(char * q){
+    p = q;
+  }
+  p_ix(const p_ix &a){
+    p = a.p;
   }
 };
+
+bool operator<(const p_ix &a, const p_ix &b){
+  size_t i; 
+  for0(i, nb){
+    if(a.p[i] < b.p[i]) return false;
+  }
+  return true;
+}
 
 int main(int argc, char ** argv){
   if(argc < 2) err("binary_sort [input raster]");
@@ -20,25 +29,37 @@ int main(int argc, char ** argv){
   hread(hfn, nr, nc, nb);
   np = nr * nc;
 
-  float * dat = bread(fn, nr, nc, nb); // read the input data
-  char * d = (char *)(void *)dat;
-  float * out = falloc(np * nb);
-  char * e = (char *)(void *)out;
+  char * e = calloc(np * nb * sizeof(float));
+  char * d = calloc(np * nb * sizeof(float));
+  FILE * f = ropen(fn);
+  nr = fread(d, 1, np * nb * sizeof(float), f);
+  fclose(f);
 
-  std::vector<char *> p;
-  for0(i, np) p.push_back(&d[i * nb * sizeof(float)]);
-  std::sort(p.begin(), p.end(), customLess());
+  priority_queue<p_ix> pq;
+  for0(i, np)
+    pq.push(p_ix(&d[i * nb * sizeof(float)]));
+  
+  
+  ci = 0;
+  char ** g = (char **)(void *)alloc(sizeof(char *) * np);
+  while(pq.size() > 0){
+    p_ix x(pq.top());
+    g[ci++] = x.p;
+  }
 
   ci = 0;
-  vector<char *>::iterator it;
-  for0(k, nb){
-    for(it = p.begin(); it != p.end(); it++)
-      e[ci++] = (*it)[k];
-  }
+  for0(k, nb)
+    for0(i, np)
+      e[ci++] = g[i][k];
 
   str ofn(fn + str("_sort.bin"));
   str ohn(fn + str("_sort.hdr"));
-  bwrite(out, ofn, nr, nc, nb);
+  
+  // write output
+  f = wopen(ofn);
+  size_t nw = fwrite(e, 1, np * nb * sizeof(float), f);
+  fclose(f);
+
   hwrite(ohn, nr, nc, nb);
   return 0;
 }
