@@ -32,8 +32,12 @@ int main(int argc, char ** argv){
   char * e = calloc(np * nb * sizeof(float));
   char * d = calloc(np * nb * sizeof(float));
   FILE * f = ropen(fn);
-  nr = fread(d, 1, np * nb * sizeof(float), f);
+  size_t n_read = fread(d, 1, np * nb * sizeof(float), f);
   fclose(f);
+
+  printf("alloc\n");
+  char ** g = (char **)(void *)alloc(sizeof(char *) * np);
+  for0(i, np) g[i] = NULL;
 
   priority_queue<p_ix> pq;
   for0(i, np){
@@ -41,27 +45,31 @@ int main(int argc, char ** argv){
     pq.push(p_ix(&d[i * nb * sizeof(float)]));
   }
   
+  printf("pop\n");
   ci = 0;
-  char ** g = (char **)(void *)alloc(sizeof(char *) * np);
   while(pq.size() > 0){
-    if(i % 10000 == 0) printf("pop  %zu / %zu\n", i, np);
+    if(ci % 10000 == 0)
+      printf("pop  %zu / %zu\n", ci, np);
     p_ix x(pq.top());
     g[ci++] = x.p;
+    pq.pop();
   }
 
   ci = 0;
-  for0(k, nb)
-    for0(i, np)
-      e[ci++] = g[i][k];
+  for0(i, np){
+    for0(k, nb){
+      e[ci++] = (g[i])[k];
+    }
+  }
 
   str ofn(fn + str("_sort.bin"));
   str ohn(fn + str("_sort.hdr"));
   
   // write output
   f = wopen(ofn);
-  size_t nw = fwrite(e, 1, np * nb * sizeof(float), f);
+  if(!f) err("failed to open outfile");
+  size_t n_write = fwrite(e, 1, np * nb * sizeof(float), f);
   fclose(f);
-
   hwrite(ohn, nr, nc, nb);
   return 0;
 }
