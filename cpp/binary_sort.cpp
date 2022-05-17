@@ -37,13 +37,14 @@ int main(int argc, char ** argv){
 
   priority_queue<p_ix> pq;
   for0(i, np){
-    if(i % 10000 == 0) printf("%zu of %zu\n", i, np);
+    if(i % 10000 == 0) printf("push %zu / %zu\n", i, np);
     pq.push(p_ix(&d[i * nb * sizeof(float)]));
   }
   
   ci = 0;
   char ** g = (char **)(void *)alloc(sizeof(char *) * np);
   while(pq.size() > 0){
+    if(i % 10000 == 0) printf("pop  %zu / %zu\n", i, np);
     p_ix x(pq.top());
     g[ci++] = x.p;
   }
