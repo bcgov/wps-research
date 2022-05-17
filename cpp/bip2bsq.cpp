@@ -10,8 +10,8 @@ int main(int argc, char ** argv){
 
   float * dat = bread(fn, nr, nc, nb); // read the input data
   float * out = falloc(np * nb);
-  str ofn(fn + str("_bip.bin"));
-  str ohn(fn + str("_bip.hdr"));
+  str ofn(fn + str("_bsq.bin"));
+  str ohn(fn + str("_bsq.hdr"));
 
   ci = 0;
   for0(i, np)
