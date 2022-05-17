@@ -22,24 +22,23 @@ void job(size_t i){  // i is print-order pix idx of C
   bool zero = true;
   float md = FLT_MAX;
 
-  /*
-  for0(k, nb[0]){
-    d = y[0][np * k + i];
+  // check for bad pix in C
+  for0(k, nb[2]){
+    d = y[2][np2 * k + i];
     if(isnan(d) || isinf(d)) bad = true;
     if(d != 0) zero = false;
   }
 
   if(zero) bad = true;
   if(bad) return;
-  */
 
-  // find nearest pixel in A
+  // find nearest pix in A to this pix in C
   for(j = 0; j < np; j += skip_f){  // j: print-order pix idx in A/B
     bad = false;
     zero = true;
 
-    for0(k, nb[2]){
-      d = y[2][np2 * k + j];
+    for0(k, nb[0]){  // check A for bad pix
+      d = y[0][np * k + j];
       if(isnan(d) || isinf(d)) bad = true;
       if(d != 0) zero = false;
     }
@@ -47,7 +46,7 @@ void job(size_t i){  // i is print-order pix idx of C
     if(bad) continue;
 
     d = 0;
-    for0(k, nb[0])  // same as nb[2]
+    for0(k, nb[0])  // same as nb[2]. For each band in A
       d += (y[0][np * k + j] - y[2][np2 * k + i]) * (y[0][np * k + j] - y[2][np2 * k + i]);
 
     if(d < md){
