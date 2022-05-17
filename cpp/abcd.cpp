@@ -11,10 +11,10 @@ LAST IMAGE DIMENSION DOES NOT NEED TO MATCH! */
 #include"misc.h"
 
 static size_t nr[3], nc[3], nb[3], skip_f;
-static float * y[3], *x;
+static float * y[3], *x; // {A, B, C} and x=D
 static size_t np, np2;
 
-void job(size_t i){
+void job(size_t i){  // i is print-order pix idx of C
   float d;
   size_t j, k;
   size_t mi = 0;
@@ -22,6 +22,7 @@ void job(size_t i){
   bool zero = true;
   float md = FLT_MAX;
 
+  /*
   for0(k, nb[0]){
     d = y[0][np * k + i];
     if(isnan(d) || isinf(d)) bad = true;
@@ -30,13 +31,15 @@ void job(size_t i){
 
   if(zero) bad = true;
   if(bad) return;
+  */
 
-  for(j = 0; j < np; j += skip_f){
+  // find nearest pixel in A
+  for(j = 0; j < np; j += skip_f){  // j: print-order pix idx in A/B
     bad = false;
     zero = true;
 
-    for0(k, nb[0]){
-      d = y[2][np * k + j];
+    for0(k, nb[2]){
+      d = y[2][np2 * k + j];
       if(isnan(d) || isinf(d)) bad = true;
       if(d != 0) zero = false;
     }
@@ -44,8 +47,8 @@ void job(size_t i){
     if(bad) continue;
 
     d = 0;
-    for0(k, nb[0])
-      d += (y[0][np * k + i] - y[2][np * k + j]) * (y[0][np * k + i] - y[2][np * k + j]);
+    for0(k, nb[0])  // same as nb[2]
+      d += (y[0][np * k + j] - y[2][np2 * k + i]) * (y[0][np * k + j] - y[2][np2 * k + i]);
 
     if(d < md){
       md = d;
@@ -57,7 +60,7 @@ void job(size_t i){
     cprint(to_string(100.* ((float)(i+1) / (float)np2)) + str(" % ") + to_string(i) + str(" / ") + to_string(np2));
 
   for0(k, nb[2])
-    x[np2 * k + i] = y[1][np2 * k + mi];
+    x[np2 * k + i] = y[1][np * k + mi];
 }
 
 int main(int argc, char** argv){
@@ -84,7 +87,7 @@ int main(int argc, char** argv){
   np = nr[0] * nc[0];
   np2 = nr[2] * nc[2];
 
-  parfor(0, np2, job);
+  parfor(0, np2, job);  // for each output result pix (same shape as C)
   str pre(str("view_as_") +
 	  str(argv[1]) + str("_") + str(argv[2]) + str("_") +
 	  str(argv[3]) + str("_") + str(argv[4]));
