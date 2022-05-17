@@ -4,6 +4,8 @@
     3) box filter x3
     4) run the CP-pol decompositions
 
+5) todo: mosaic (on date), stack and project to match
+
 20220515 warning: complex output from TC feature was removed, but is now put back again (still not in the online version of SNAP yet)
     https://forum.step.esa.int/t/outputcomplex-argument-removed-from-sentinel-1-terrain-correction/35013
 
