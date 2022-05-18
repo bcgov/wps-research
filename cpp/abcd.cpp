@@ -12,6 +12,7 @@ void job(size_t i){
   float d, e, md = FLT_MAX;
   size_t j, k, mi = 0;
   size_t nb_0 = nb[0];
+
   for(j = 0; j < np; j += skip_f){
     if(bp[j]) continue;
     d = 0;
@@ -19,10 +20,8 @@ void job(size_t i){
       e = A[np * k + j] - C[np2 * k + i];
       d += e * e;
     }
-    if(d < md){
-      md = d;
-      mi = j;
-    }
+    if(d < md)
+      md, mi = d, j;
   }
   for0(k, nb[2])
     x[np2 * k + i] = B[np * k + mi];
