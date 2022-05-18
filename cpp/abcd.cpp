@@ -16,8 +16,10 @@ void infer_px(size_t i){
       e = A[np * k + j] - C[np2 * k + i];
       d += e * e;
     }
-    if(d < md)
-      md, mi = d, j;
+    if(d < md){
+	    md = d;
+	    mi = j;
+    }
   }
   for0(k, nb[2])
     x[np2 * k + i] = B[np * k + mi];
@@ -35,7 +37,7 @@ inline int is_bad(float * dat, size_t i, size_t n_b){
 }
 
 int main(int argc, char** argv){
-  size_t i, n_bad;
+  size_t i, n_bad = 0;
   if(argc < 5)
     err("abcd [img1 (n bands)] [img2 (m bands)] [img3 (n bands)] [skip]\n");
   skip_f = (size_t) atol(argv[4]); // bsq2bip -> binary_sort -> bip2bsq
@@ -52,7 +54,7 @@ int main(int argc, char** argv){
     y[i] = bread(str(argv[i + 1]), nr[i], nc[i], nb[i]);
   np, np2 = nr[0] * nc[0], nr[2] * nc[2];
 
-  n_bad, bp = 0, ialloc(np);  // bad px
+  bp = ialloc(np);  // bad px
   for0(i, np){
     bp[i] = is_bad(y[0], i, nb[0]) || is_bad(y[1], i, nb[1]);
     if(bp[i]) n_bad ++;
@@ -60,14 +62,15 @@ int main(int argc, char** argv){
   if(n_bad == np)
     err("no good pix: AxB");
 
-  n_bad, bp2 = 0, ialloc(np2);
+  n_bad = 0;
+  bp2 = ialloc(np2);
   for0(i, np2){
     bp2[i] = is_bad(y[2], i, nb[2]);
     if(bp2[i]) n_bad ++;
   }
   if(n_bad == np2)
     err("no good pix: C");
-  A, B, C = y[0], y[1], y[2];
+  A = y[0]; B = y[1]; C = y[2];
   
   parfor(0, np2, infer_px);  // for each output pix
   str pre(str("abcd_") + str(argv[1]) + str("_") + str(argv[2]) + str("_") +
