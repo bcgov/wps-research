@@ -18,7 +18,8 @@ int main(int argc, char ** argv){
   size_t ws;
   float n_bin;
   long int nbin, dw;
-  (str fn(""), str hfn(""));
+  str fn("");
+  str hfn("");
 
   if(argc < 4) {
     err("mode_filter [input binary file] [window size] [number of bins]");
