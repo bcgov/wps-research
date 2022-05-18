@@ -94,10 +94,9 @@ int main(int argc, char ** argv){
       for0(k, nband){
         c[k] = 0;
         w[k] = mx[k] - mn[k]; // metawindow length
-        // cout << "w[k] " << w[k] << endl;
       }
 
-      // now put stuff into bins
+      // put stuff into bins
       for(di = -dw; di <= dw; di++){
         dx = i + di;
         if(dx > nrow || dx < 0) continue;
@@ -114,23 +113,19 @@ int main(int argc, char ** argv){
             if(!(isinf(d) || isnan(d))){
               long int ci = (long int) (double)floor( (double)n_bin * (d - mn[k]) / w[k]);
               if(ci < 0 || ci > nbin){
-                cout << "ci: " << ci << endl;
-                //err("invalid ci");
+                cout << "invalid ci: " << ci << endl;
               }
               else{
-                int cki = k * nbin + ci;
-                // cout << "cki: " << cki << endl;
+                long int cki = k * nbin + ci;
                 c[cki] += 1;
               }
             }
           }
         }
       }
-      //cout << " here \n";
       // assign a value based on the greatest count. Don't test uniqueness
       for0(k, nband){
         int xi = (np * k) + (i * ncol) + j;
-        //cout << "xi: " << xi << " np*nb: " << np * nband << endl;
         if(w[k] > 0){
           int max_i = 0;
           float max_c = FLT_MIN;
