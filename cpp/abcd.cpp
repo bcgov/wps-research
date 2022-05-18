@@ -70,10 +70,9 @@ int main(int argc, char** argv){
   }
   if(n_bad == np2)
     err("no good pix: C");
-
   A, B, C = y[0], y[1], y[2];
+  
   parfor(0, np2, infer_px);  // for each output pix
-
   str pre(str("abcd_") + str(argv[1]) + str("_") + str(argv[2]) + str("_") +
 	  	         str(argv[3]) + str("_") + str(argv[4]));  // document
   bwrite(x, pre + str(".bin"), nr[2], nc[2], nb[1]);
