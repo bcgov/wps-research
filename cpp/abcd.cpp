@@ -15,6 +15,11 @@ static float *A, *B, *C;
 static size_t m;  // tmp band-ix
 static float t; // tmp float
 
+void status(size_t i){
+  cprint(to_string(100.* ((float)(i+1) / (float)np2)) + str(" % ") +
+         to_string(i) + str(" / ") + to_string(np2));
+}
+
 void job(size_t i){
   if(bp2[i]) return; // skip bad
   float d, e;
@@ -36,11 +41,10 @@ void job(size_t i){
     }
   }
 
-  if(i % 100000 == 0)
-    cprint(to_string(100.* ((float)(i+1) / (float)np2)) + str(" % ") + to_string(i) + str(" / ") + to_string(np2));
-
   for0(k, nb[2])
     x[np2 * k + i] = B[np * k + mi];
+
+  if(i % 100000 == 0) status(i);
 }
 
 inline int is_bad(float * dat, size_t i, size_t n_b){
@@ -94,10 +98,7 @@ int main(int argc, char** argv){
   }
   if(n_bad == np2)
     err("no good pix: C");
-
-  A = y[0]; 
-  B = y[1];
-  C = y[2];
+  A = y[0];  B = y[1]; C = y[2];
 
   parfor(0, np2, job);  // for each output result pix (same shape as C)
   str pre(str("view_as_") +
