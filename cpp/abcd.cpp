@@ -1,57 +1,44 @@
-/* 20220517 vim view_as.cpp; clean; python3 compile.py; ./view_as.exe A.bin B.bin C.bin # compare with D.bin
-vim view_as.cpp; clean; python3 compile.py; valgrind ./view_as.exe A.bin B.bin C.bin # add g flag for valgrind
+/* 20220517 vim abcd.cpp; clean; python3 compile.py; ./abcd.exe A.bin B.bin C.bin # compare with D.bin
+vim abcd.cpp; clean; python3 compile.py; valgrind ./abcd.exe A.bin B.bin C.bin # add g flag for valgrind
 Also:
-view_as.exe A.bin B.bin A.bin
-view_as.exe A.bin A.bin A.bin
+abcd.exe A.bin B.bin A.bin
+abcd.exe A.bin A.bin A.bin
 
-Easy: bin the input data? Or both?
-
-NEED TO FIX BUG:
-LAST IMAGE DIMENSION DOES NOT NEED TO MATCH! */
+NB bin input data using bsq2bip, binary_sort, bip2bsq
+2020517 support for C.shape != A.shape */
 #include"misc.h"
-
 static size_t nr[3], nc[3], nb[3], skip_f;
-static float * y[3], *x; // {A, B, C} and x=D
-static size_t np, np2;
+static int * bp, * bp2;  // bad px: {A,B}, C
+static float * y[3], *x; // {A, B, C}, D
+static size_t np, np2;  // npix A, C
+size_t m;  // tmp band-ix
+float t; // tmp float
 
-void job(size_t i){  // i is print-order pix idx of C
+void job(size_t i){
   float d;
   size_t j, k;
   size_t mi = 0;
-  bool bad = false;
-  bool zero = true;
+  int bad = false;
+  int zero = true;
   float md = FLT_MAX;
 
-  // check for bad pix in C
   for0(k, nb[2]){
     d = y[2][np2 * k + i];
     if(isnan(d) || isinf(d)) bad = true;
     if(d != 0) zero = false;
   }
-
-  if(zero) bad = true;
+  if(zero) bad = true; // skip bad pix in C
   if(bad) return;
 
-  // find nearest pix in A to this pix in C
-  for(j = 0; j < np; j += skip_f){  // j: print-order pix idx in A/B
-    bad = false;
-    zero = true;
-
-    for0(k, nb[0]){  // check A for bad pix
-      d = y[0][np * k + j];
-      if(isnan(d) || isinf(d)) bad = true;
-      if(d != 0) zero = false;
-    }
-    if(zero) bad = true;
-    if(bad) continue;
-
-    d = 0;
-    for0(k, nb[0])  // same as nb[2]. For each band in A
+  for(j = 0; j < np; j += skip_f){ 
+    if(bp[j]) continue;
+    d = 0;  // for each band in A
+    for0(k, nb[0]) 
       d += (y[0][np * k + j] - y[2][np2 * k + i]) * (y[0][np * k + j] - y[2][np2 * k + i]);
 
     if(d < md){
       md = d;
-      mi = j;
+      mi = j;  // nearest pix-j in A to pix-i in C
     }
   }
 
@@ -60,6 +47,16 @@ void job(size_t i){  // i is print-order pix idx of C
 
   for0(k, nb[2])
     x[np2 * k + i] = y[1][np * k + mi];
+}
+
+inline int is_bad(float * dat, size_t i, size_t n_b){
+  int zero = true;
+  for0(m, n_b){  // find bad/empty pix
+    t = dat[np * m + i];
+    if(isnan(t) || isinf(t)) return true;
+    if(t != 0) zero = false;
+  }
+  return zero;
 }
 
 int main(int argc, char** argv){
@@ -85,14 +82,32 @@ int main(int argc, char** argv){
 
   np = nr[0] * nc[0];
   np2 = nr[2] * nc[2];
+  bp = ialloc(np);  // bad pix mask
+
+  // flag bad data
+  size_t n_bad = 0;
+  for0(i, np){
+    bp[i] = is_bad(y[0], i, nb[0]) || is_bad(y[1], i, nb[1]);
+    if(bp[i]) n_bad ++;
+  }
+  if(n_bad == np)
+    err("no good pix: AxB");
+
+  n_bad = 0;
+  for0(i, np2){
+    bp2[i] = is_bad(y[3], i, nb[2]);
+    if(bp2[i]) n_bad ++;
+  }
+  if(n_bad == np2)
+    err("no good pix: C");
 
   parfor(0, np2, job);  // for each output result pix (same shape as C)
   str pre(str("view_as_") +
 	  str(argv[1]) + str("_") + str(argv[2]) + str("_") +
 	  str(argv[3]) + str("_") + str(argv[4]));
 
-  bwrite(x, pre + str(".bin"), nr[0], nc[0], nb[1]);
-  hwrite(pre + str(".hdr"), nr[0], nc[0], nb[1]);
+  bwrite(x, pre + str(".bin"), nr[2], nc[2], nb[1]);
+  hwrite(pre + str(".hdr"), nr[2], nc[2], nb[1]);
 
   system((str("python3 ~/GitHub/bcws-psu-research/py/raster_plot.py ") +
 	 pre + str(".bin 1 2 3 1")).c_str());
