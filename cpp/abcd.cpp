@@ -16,17 +16,20 @@ float t; // tmp float
 
 void job(size_t i){
   if(bp2[i]) return; // skip bad
-  float d;
+  float d, e;
   size_t j, k;
   size_t mi = 0;
+  float *A, *B, *C;
   float md = FLT_MAX;
+  size_t nb_0 = nb[0];
 
   for(j = 0; j < np; j += skip_f){ 
     if(bp[j]) continue;
     d = 0;
-    for0(k, nb[0])
-      d += (y[0][np * k + j] - y[2][np2 * k + i]) * (y[0][np * k + j] - y[2][np2 * k + i]);
-
+    for0(k, nb_0){
+      e = A[np * k + j] - C[np2 * k + i]; 
+      d += e * e;
+    }
     if(d < md){
       md = d;
       mi = j; 
@@ -37,7 +40,7 @@ void job(size_t i){
     cprint(to_string(100.* ((float)(i+1) / (float)np2)) + str(" % ") + to_string(i) + str(" / ") + to_string(np2));
 
   for0(k, nb[2])
-    x[np2 * k + i] = y[1][np * k + mi];
+    x[np2 * k + i] = B[np * k + mi];
 }
 
 inline int is_bad(float * dat, size_t i, size_t n_b){
