@@ -15,9 +15,9 @@ window. */
 int main(int argc, char ** argv){
 
   size_t ws;
-  int nbin;
+  long int nbin;
   float n_bin;
-  int dw;
+  long int dw;
   str fn("");
   str hfn("");
 
@@ -64,7 +64,7 @@ int main(int argc, char ** argv){
   float * c = falloc(nbin * nband); // count in "bin m" of for kth dimension at posn: k * nbin + m
 
   for0(i, nrow){
-    printf("row %d of %d\n", i, nrow);
+    if(i % 37 == 0) printf("row %d of %d\n", i, nrow);
     for0(j, ncol){
       for0(k, nband){
         mn[k] = FLT_MAX;
@@ -112,7 +112,7 @@ int main(int argc, char ** argv){
             dk = np * k;
             d = dat[ix + dy + dk];
             if(!(isinf(d) || isnan(d))){
-              int ci = (int) ( float)floor( n_bin * (d - mn[k]) / w[k]);
+              long int ci = (long int) (double)floor( (double)n_bin * (d - mn[k]) / w[k]);
               if(ci < 0 || ci > nbin){
                 cout << "ci: " << ci << endl;
                 //err("invalid ci");
@@ -149,18 +149,9 @@ int main(int argc, char ** argv){
     }
   }
   for0(k, np*nband) out[k];
-  cout << "here" << endl;
-/*
   hwrite(out_hf, nrow, ncol, nband); // write output header
-  cout << "+w " << out_hf << endl;
-  */
   str os("out.bin");
-  bwrite(out, os, nr, nc, nb);
-  /*
-  FILE * f = fopen("out.bin", "wb");
-  if(!f) err("failed to open output file");
-  fwrite(out, sizeof(float), (size_t) (np * nband), f); // write data
-  fclose(f);*/
+  bwrite(out, out_fn, nr, nc, nb);
 
   //free(dat);
   //free(out);
