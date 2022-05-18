@@ -15,9 +15,9 @@ clustering) algorithm in the window.
 #include"misc.h"
 
 int main(int argc, char ** argv){
-  size_t ws;
-  float n_bin;
-  long int nbin, dw;
+  size_t ws, nr, nc, nb;
+  float n_bin, max_c;
+  long int xi, max_i, nbin, dw, nrow, ncol, nband, np, k, n, ci, ix, iy, di, dj, dx, dy, dk, i, j;
   str fn("");
   str hfn("");
 
@@ -43,16 +43,12 @@ int main(int argc, char ** argv){
   str out_fn(fn + str("_rmf.bin"));
   str out_hf(fn + str("_rmf.hdr"));
 
-  size_t nr, nc, nb;
-  long int nrow, ncol, nband, np, k, n, ci;
   hread(hfn, nr, nc, nb);
   (nrow = nr, ncol = nc, nband = nb);
   np = nrow * ncol; // number of input pix
 
   float d, * dat = bread(fn, nrow, ncol, nband); // load floats to array
   float * out = falloc(np * nband * sizeof(float));
-  long int ix, iy, di, dj, dx, dy, dk, i, j;
-
   float * mn = falloc(nband); // window min this band
   float * mx = falloc(nband); // window max this band
   float * w = falloc(nband);
@@ -123,10 +119,10 @@ int main(int argc, char ** argv){
       }
       // assign a value based on the greatest count. Don't test uniqueness
       for0(k, nband){
-        long int xi = (np * k) + (i * ncol) + j;
+        xi = (np * k) + (i * ncol) + j;
         if(w[k] > 0){
-          long int max_i = 0;
-          float max_c = FLT_MIN;
+          max_i = 0;
+          max_c = FLT_MIN;
           for0(di, nbin){
             if(c[k * nbin + di] > max_c){
               max_c = c[k * nbin + di];
