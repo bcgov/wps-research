@@ -15,11 +15,6 @@ static float *A, *B, *C;
 static size_t m;  // tmp band-ix
 static float t; // tmp float
 
-void status(size_t i){
-  cprint(to_string(100.* ((float)(i+1) / (float)np2)) + str(" % ") +
-         to_string(i) + str(" / ") + to_string(np2));
-}
-
 void job(size_t i){
   if(bp2[i]) return; // skip bad
   float d, e, md = FLT_MAX;
@@ -42,7 +37,7 @@ void job(size_t i){
   for0(k, nb[2])
     x[np2 * k + i] = B[np * k + mi];
 
-  if(i % 100000 == 0) status(i);
+  if(i % 100000 == 0) status(i, np2);
 }
 
 inline int is_bad(float * dat, size_t i, size_t n_b){
