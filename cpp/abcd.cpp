@@ -1,8 +1,4 @@
-/* 20220517 vim abcd.cpp; clean; python3 compile.py; ./abcd.exe A.bin B.bin C.bin # compare with D.bin
-vim abcd.cpp; clean; python3 compile.py; valgrind ./abcd.exe A.bin B.bin C.bin # add -g flag for valgrind
-	abcd.exe A.bin B.bin A.bin; abcd.exe A.bin A.bin A.bin
-	NB bin input data using bsq2bip, binary_sort, bip2bsq. 2020517 support for C.shape != A.shape */
-#include"misc.h"
+#include"misc.h" /* 20220517 e.g. abcd A.bin B.bin C.bin # and compare with D.bin*/
 static size_t nr[3], nc[3], nb[3], skip_f, m, np, np2; // shapes
 static float * y[3], *x, t, *A, *B, *C;  // data
 static int * bp, * bp2;  // bad px: {A,B}, C
@@ -42,7 +38,7 @@ int main(int argc, char** argv){
   size_t i, n_bad = 0;
   if(argc < 5)
     err("abcd [img1 (n bands)] [img2 (m bands)] [img3 (n bands)] [skip]\n");
-  skip_f = (size_t) atol(argv[4]);
+  skip_f = (size_t) atol(argv[4]); // bsq2bip -> binary_sort -> bip2bsq
 
   for0(i, 3)
     hread(hdr_fn(argv[1 + i]), nr[i], nc[i], nb[i]);
