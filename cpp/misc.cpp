@@ -831,4 +831,7 @@ bool contains(string s1, string s2){
 	return s1.find(s2) != std::string::npos;
 }
 
-
+void status(size_t i, size_t of){
+  cprint(to_string(100.* ((float)(i+1) / (float)of)) + str(" % ") +
+         to_string(i) + str(" / ") + to_string(of));
+}
