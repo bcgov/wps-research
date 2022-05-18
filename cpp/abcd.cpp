@@ -52,7 +52,7 @@ int main(int argc, char** argv){
     y[i] = bread(str(argv[i + 1]), nr[i], nc[i], nb[i]);  // read input
   (np = nr[0] * nc[0], np2 = nr[2] * nc[2]);
   
-  (n_bad = 0, bp = ialloc(np));  // bad px
+  (n_bad = 0, bp = ialloc(np));  // bad pixels in A, B?
   for0(i, np){
     bp[i] = is_bad(y[0], i, nb[0]) || is_bad(y[1], i, nb[1]);
     if(bp[i]) n_bad ++;
@@ -60,7 +60,7 @@ int main(int argc, char** argv){
   if(n_bad == np)
     err("no good pix: AxB");
 
-  (n_bad = 0, bp2 = ialloc(np2));
+  (n_bad = 0, bp2 = ialloc(np2));  // bad pxls in C?
   for0(i, np2){
     bp2[i] = is_bad(y[2], i, nb[2]);
     if(bp2[i]) n_bad ++;
@@ -70,10 +70,12 @@ int main(int argc, char** argv){
   (A = y[0], B = y[1], C = y[2]);
   
   str u("_");
-  parfor(0, np2, infer_px);  // inference for each output pixel
+  parfor(0, np2, infer_px);  // inference by output pixel
+
   str pre(str("abcd_") + str(argv[1]) + u + str(argv[2]) + u +
 		         str(argv[3]) + u + str(argv[4])); 
-  bwrite(x, pre + str(".bin"), nr[2], nc[2], nb[1]);
+
+  bwrite(x, pre + str(".bin"), nr[2], nc[2], nb[1]);  // write out
   hwrite(pre + str(".hdr"), nr[2], nc[2], nb[1]);
 
   system((str("python3 ~/GitHub/bcws-psu-research/py/raster_plot.py ") + pre +
