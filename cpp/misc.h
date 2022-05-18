@@ -168,8 +168,6 @@ inline int * ialloc(size_t ni){
   return d;
 }
 
-
-
 //a trim from start (in place)
 /*bool is_space(int ch){
   return !std::isspace(ch);
