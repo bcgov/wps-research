@@ -9,7 +9,7 @@ void infer_px(size_t i){
   size_t j, k, mi = 0;
   size_t nb_0 = nb[0];
 
-  for(j = 0; j < np; j += skip_f){
+  for(j = 0; j < np; j += skip_f){  // uniform sample in space
     if(bp[j]) continue;
     d = 0;
     for0(k, nb_0){
@@ -47,9 +47,9 @@ int main(int argc, char** argv){
   if(nb[0] != nb[2])
     err("A.n_bands != C.n_bands");
 
-  x = falloc(nr[2] * nc[2] * nb[2]); // out bf
+  x = falloc(nr[2] * nc[2] * nb[2]); // out buf
   for0(i, 3)
-    y[i] = bread(str(argv[i + 1]), nr[i], nc[i], nb[i]);
+    y[i] = bread(str(argv[i + 1]), nr[i], nc[i], nb[i]);  // read input
   (np = nr[0] * nc[0], np2 = nr[2] * nc[2]);
   
   (n_bad = 0, bp = ialloc(np));  // bad px
@@ -70,7 +70,7 @@ int main(int argc, char** argv){
   (A = y[0], B = y[1], C = y[2]);
   
   str u("_");
-  parfor(0, np2, infer_px);  // for each output pix
+  parfor(0, np2, infer_px);  // inference for each output pixel
   str pre(str("abcd_") + str(argv[1]) + u + str(argv[2]) + u +
 		         str(argv[3]) + u + str(argv[4])); 
   bwrite(x, pre + str(".bin"), nr[2], nc[2], nb[1]);
