@@ -15,30 +15,21 @@ size_t m;  // tmp band-ix
 float t; // tmp float
 
 void job(size_t i){
+  if(bp2[i]) return; // skip bad
   float d;
   size_t j, k;
   size_t mi = 0;
-  int bad = false;
-  int zero = true;
   float md = FLT_MAX;
-
-  for0(k, nb[2]){
-    d = y[2][np2 * k + i];
-    if(isnan(d) || isinf(d)) bad = true;
-    if(d != 0) zero = false;
-  }
-  if(zero) bad = true; // skip bad pix in C
-  if(bad) return;
 
   for(j = 0; j < np; j += skip_f){ 
     if(bp[j]) continue;
-    d = 0;  // for each band in A
-    for0(k, nb[0]) 
+    d = 0;
+    for0(k, nb[0])
       d += (y[0][np * k + j] - y[2][np2 * k + i]) * (y[0][np * k + j] - y[2][np2 * k + i]);
 
     if(d < md){
       md = d;
-      mi = j;  // nearest pix-j in A to pix-i in C
+      mi = j; 
     }
   }
 
@@ -82,10 +73,9 @@ int main(int argc, char** argv){
 
   np = nr[0] * nc[0];
   np2 = nr[2] * nc[2];
+  
   bp = ialloc(np);  // bad pix mask
-
-  // flag bad data
-  size_t n_bad = 0;
+  size_t n_bad = 0;  // flag bad pix
   for0(i, np){
     bp[i] = is_bad(y[0], i, nb[0]) || is_bad(y[1], i, nb[1]);
     if(bp[i]) n_bad ++;
