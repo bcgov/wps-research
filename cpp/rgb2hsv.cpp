@@ -1,3 +1,4 @@
+#include<math.h>
 /* from
 https://stackoverflow.com/questions/3018313/algorithm-to-convert-rgb-to-hsv-and-hsv-to-rgb-in-range-0-255-for-both
  
@@ -123,5 +124,8 @@ rgb hsv2rgb(hsv in)
     }
     return out;     
 }
-
+int main(int argc, char ** argv){
+  //need to fill this out
+  return 0;
+}
 
