@@ -15,13 +15,10 @@ clustering) algorithm in the window.
 #include"misc.h"
 
 int main(int argc, char ** argv){
-
   size_t ws;
-  long int nbin;
   float n_bin;
-  long int dw;
-  str fn("");
-  str hfn("");
+  long int nbin, dw;
+  (str fn(""), str hfn(""));
 
   if(argc < 4) {
     err("mode_filter [input binary file] [window size] [number of bins]");
@@ -42,18 +39,13 @@ int main(int argc, char ** argv){
     fn = str(argv[1]); // input file name
     hfn = str(hdr_fn(fn)); // auto-detect header file name
   }
-
   str out_fn(fn + str("_rmf.bin"));
   str out_hf(fn + str("_rmf.hdr"));
-  cout << out_fn << endl;
-  cout << out_hf << endl;
 
   size_t nr, nc, nb;
-  long int nrow, ncol, nband, np, k, n;
+  long int nrow, ncol, nband, np, k, n, ci;
   hread(hfn, nr, nc, nb);
-  nrow = nr;
-  ncol = nc;
-  nband = nb;
+  (nrow = nr, ncol = nc, nband = nb);
   np = nrow * ncol; // number of input pix
 
   float d, * dat = bread(fn, nrow, ncol, nband); // load floats to array
@@ -68,22 +60,24 @@ int main(int argc, char ** argv){
   for0(i, nrow){
     if(i % 37 == 0) printf("row %d of %d\n", i, nrow);
     for0(j, ncol){
-      for0(k, nband){
-        mn[k] = FLT_MAX;
-        mx[k] = FLT_MIN;
-      }
 
-      //first calculate min, max
+      for0(k, nband)
+        (mn[k] = FLT_MAX, mx[k] = -FLT_MAX); // yes!
+
+      // calculate min, max in window
       for(di = -dw; di <= dw; di++){
+
         dx = i + di;
         if(dx > nrow || dx < 0) continue;
-        ix = dx * ncol;
-
+        
+	ix = dx * ncol;
         for(dj = -dw; dj <= dw; dj++){
-          dy = j + dj;
+          
+	  dy = j + dj;
           if(dy > ncol || dy < 0) continue;
 
           for0(k, nband){
+
             dk = np * k;
             d = dat[ix + dy + dk];
             if(!(isinf(d) || isnan(d))){
@@ -93,43 +87,44 @@ int main(int argc, char ** argv){
           }
         }
       }
-      for0(k, nband){
-        c[k] = 0;
-        w[k] = mx[k] - mn[k]; // metawindow length
-      }
+
+      for0(k, nband)
+        (c[k] = 0, w[k] = mx[k] - mn[k]); // w = metawindow width
 
       // put stuff into bins
       for(di = -dw; di <= dw; di++){
-        dx = i + di;
+        
+	dx = i + di;
         if(dx > nrow || dx < 0) continue;
-        ix = dx * ncol;
-
+        
+	ix = dx * ncol;
         for(dj = -dw; dj <= dw; dj++){
-          dy = j + dj;
+          
+	  dy = j + dj;
           if(dy > ncol || dy < 0) continue;
 
           for0(k, nband){
             if(w[k] == 0.) continue;
+
             dk = np * k;
             d = dat[ix + dy + dk];
+
             if(!(isinf(d) || isnan(d))){
-              long int ci = (long int) (double)floor( (double)n_bin * (d - mn[k]) / w[k]);
-              if(ci < 0 || ci > nbin){
-                cout << "invalid ci: " << ci << endl;
-              }
-              else{
-                long int cki = k * nbin + ci;
-                c[cki] += 1;
-              }
+	      ci = (long int) (double)floor( (double)n_bin * (d - mn[k]) / w[k]);
+              
+	      if(ci < 0 || ci > nbin)
+	        err("invalid ci");
+              else
+                c[k * nbin + ci] += 1;
             }
           }
         }
       }
       // assign a value based on the greatest count. Don't test uniqueness
       for0(k, nband){
-        int xi = (np * k) + (i * ncol) + j;
+        long int xi = (np * k) + (i * ncol) + j;
         if(w[k] > 0){
-          int max_i = 0;
+          long int max_i = 0;
           float max_c = FLT_MIN;
           for0(di, nbin){
             if(c[k * nbin + di] > max_c){
@@ -139,9 +134,8 @@ int main(int argc, char ** argv){
           }
           out[xi] = (((float)max_i) + .5) * w[k] + mn[k];
         }
-        else{
+        else
           out[xi] = mn[k]; // box has same values in it.
-        }
       }
     }
   }
