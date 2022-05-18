@@ -74,8 +74,9 @@ int main(int argc, char** argv){
   np = nr[0] * nc[0];
   np2 = nr[2] * nc[2];
   
-  bp = ialloc(np);  // bad pix mask
-  size_t n_bad = 0;  // flag bad pix
+  bp = ialloc(np);  // bad pix
+  size_t n_bad = 0;
+  bp2 = ialloc(np2);
   for0(i, np){
     bp[i] = is_bad(y[0], i, nb[0]) || is_bad(y[1], i, nb[1]);
     if(bp[i]) n_bad ++;
