@@ -11,7 +11,8 @@ the histogram on a n-dimensional rectangular grid. In
 yet another dimension we could use KGC 2010 (knn graph 
 clustering) algorithm in the window. 
 
-20220517 bugfix */
+20220517 bugfix. Could modify to detect all-zero pxls
+too */
 #include"misc.h"
 
 int main(int argc, char ** argv){
@@ -58,24 +59,23 @@ int main(int argc, char ** argv){
     if(i % 37 == 0) printf("row %d of %d\n", i, nrow);
     for0(j, ncol){
 
+      // calculate max and min, window around pxl (i, j) on wndw elements that are in-bounds
       for0(k, nband)
         (mn[k] = FLT_MAX, mx[k] = -FLT_MAX); // yes!
 
-      // calculate min, max in window
       for(di = -dw; di <= dw; di++){
-
         dx = i + di;
-        if(dx > nrow || dx < 0) continue;
+        if(dx >= nrow || dx < 0) continue;  // skip out of bounds row
         
-	ix = dx * ncol;
+	ix = dx * ncol;  // row contribution to data idx for pixel in windw
+
         for(dj = -dw; dj <= dw; dj++){
           
-	  dy = j + dj;
-          if(dy > ncol || dy < 0) continue;
+	  dy = j + dj;  // col contribution to data ix for pixel in windw
+          if(dy >= ncol || dy < 0) continue;  // skip out of bounds col i.e. pixel (now I get pix vs line!)
 
           for0(k, nband){
-
-            dk = np * k;
+            dk = np * k;  // band contribution to idx of pixel in wndw
             d = dat[ix + dy + dk];
             if(!(isinf(d) || isnan(d))){
               if(d < mn[k]) mn[k] = d;
@@ -83,7 +83,7 @@ int main(int argc, char ** argv){
             }
           }
         }
-      }
+      }  // for all pxls in window
 
       for0(k, nband)
         (c[k] = 0, w[k] = mx[k] - mn[k]); // w = metawindow width
@@ -91,56 +91,57 @@ int main(int argc, char ** argv){
       // put stuff into bins
       for(di = -dw; di <= dw; di++){
         
-	dx = i + di;
-        if(dx > nrow || dx < 0) continue;
+	dx = i + di; // row idx of pxl in wndw
+        if(dx >= nrow || dx < 0) continue;
         
-	ix = dx * ncol;
+	ix = dx * ncol; // row contrib to data idx
         for(dj = -dw; dj <= dw; dj++){
           
-	  dy = j + dj;
-          if(dy > ncol || dy < 0) continue;
+	  dy = j + dj;  // col contrib to data idx
+          if(dy >= ncol || dy < 0) continue;
 
           for0(k, nband){
-            if(w[k] == 0.) continue;
+            if(w[k] == 0.) continue;  // skip this band if no width
 
-            dk = np * k;
-            d = dat[ix + dy + dk];
+            dk = np * k;  // band contrib to data idx
+            d = dat[ix + dy + dk];  // data value in window
 
             if(!(isinf(d) || isnan(d))){
-	      ci = (long int) (double)floor( (double)n_bin * (d - mn[k]) / w[k]);
+ 	      // bin index, this band
+	      ci = (long int) (double)floor((double)n_bin * (d - mn[k]) / w[k]);
               
+	      // increment count in bin
 	      if(ci < 0 || ci > nbin)
-	        err("invalid ci");
+	        err("invalid bin idx");
               else
                 c[k * nbin + ci] += 1;
             }
-          }
-        }
-      }
-      // assign a value based on the greatest count. Don't test uniqueness
+          }  // for each band of pxl in wndw
+        }  // for each col in wndw
+      }  // for each row in wndw
+
+      // assign a value for pixl (i,j) of output, cf greatest count. Don't test uniqueness
       for0(k, nband){
         xi = (np * k) + (i * ncol) + j;
         if(w[k] > 0){
-          max_i = 0;
-          max_c = FLT_MIN;
-          for0(di, nbin){
-            if(c[k * nbin + di] > max_c){
-              max_c = c[k * nbin + di];
-              max_i = di;
-            }
-          }
-          out[xi] = (((float)max_i) + .5) * w[k] + mn[k];
+          (max_i = 0, max_c = -FLT_MAX);
+
+          for0(di, nbin)
+            if(c[k * nbin + di] > max_c)
+              (max_c = c[k * nbin + di], max_i = di);
+          
+	  out[xi] = (((float)max_i) + .5) * w[k] + mn[k];
         }
         else
           out[xi] = mn[k]; // box has same values in it.
-      }
-    }
-  }
+      }  // for each band
+    }  // for each col
+  }  // for each row
+
   for0(k, np*nband) out[k];
   hwrite(out_hf, nrow, ncol, nband); // write output header
   str os("out.bin");
   bwrite(out, out_fn, nr, nc, nb);
-
   //free(dat);
   //free(out);
   return 0;
