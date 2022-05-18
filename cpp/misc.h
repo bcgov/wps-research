@@ -158,8 +158,8 @@ inline char * calloc(size_t nb){
   return d;
 }
 
-inline char * ialloc(size_t ni){
-  char * d = (int *)malloc(ni * sizeof(int));
+inline int * ialloc(size_t ni){
+  int * d = (int *)malloc(ni * sizeof(int));
   if(!d){
     printf("%zu\n", ni);
     err("failed to allocate memory");
