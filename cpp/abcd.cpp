@@ -11,15 +11,15 @@ static size_t nr[3], nc[3], nb[3], skip_f;
 static int * bp, * bp2;  // bad px: {A,B}, C
 static float * y[3], *x; // {A, B, C}, D
 static size_t np, np2;  // npix A, C
-size_t m;  // tmp band-ix
-float t; // tmp float
+static float *A, *B, *C;
+static size_t m;  // tmp band-ix
+static float t; // tmp float
 
 void job(size_t i){
   if(bp2[i]) return; // skip bad
   float d, e;
   size_t j, k;
   size_t mi = 0;
-  float *A, *B, *C;
   float md = FLT_MAX;
   size_t nb_0 = nb[0];
 
@@ -94,6 +94,10 @@ int main(int argc, char** argv){
   }
   if(n_bad == np2)
     err("no good pix: C");
+
+  A = y[0]; 
+  B = y[1];
+  C = y[2];
 
   parfor(0, np2, job);  // for each output result pix (same shape as C)
   str pre(str("view_as_") +
