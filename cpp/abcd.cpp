@@ -62,10 +62,10 @@ int main(int argc, char** argv){
   hread(hdr_fn(argv[1 + i]), nr[i], nc[i], nb[i]);
 
   if(nr[0] != nr[1] || nc[0] != nc[1])
-    err("dimensions must match");
+    err("A.shape != B.shape");
 
   if(nb[0] != nb[2])
-    err("need same # of bands: images 1, 3");
+    err("A.n_bands != C.n_bands");
 
   x = falloc(nr[2] * nc[2] * nb[2]); // out buf
   for0(i, 3)
