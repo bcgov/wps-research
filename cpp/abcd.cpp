@@ -36,9 +36,9 @@ inline int is_bad(float * dat, size_t i, size_t n_b){
 
 int main(int argc, char** argv){
   size_t i, n_bad;
-  if(argc < 5)
-    err("abcd [img1 (n bands)] [img2 (m bands)] [img3 (n bands)] [skip]\n");
-  skip_f = (size_t) atol(argv[4]); // bsq2bip -> binary_sort -> bip2bsq
+  if(argc < 4)
+    err("abcd [img1 (n bands)] [img2 (m bands)] [img3 (n bands)] # [skip]\n");
+  skip_f = (argc > 4) ? (size_t) atol(argv[4]): 1; // bsq2bip -> binary_sort -> bip2bsq
 
   for0(i, 3)
     hread(hdr_fn(argv[1 + i]), nr[i], nc[i], nb[i]);
