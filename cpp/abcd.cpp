@@ -51,6 +51,8 @@ int main(int argc, char** argv){
   for0(i, 3)
     y[i] = bread(str(argv[i + 1]), nr[i], nc[i], nb[i]);  // read input
   (np = nr[0] * nc[0], np2 = nr[2] * nc[2]);
+  if(skip_f >= np)
+    err("illegal skip_f");
 
   (n_bad = 0, bp = ialloc(np));  // bad pixels in A, B?
   for0(i, np){
