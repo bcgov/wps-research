@@ -16,10 +16,8 @@ void infer_px(size_t i){
       e = A[np * k + j] - C[np2 * k + i];
       d += e * e;
     }
-    if(d < md){
-	    md = d;
-	    mi = j;
-    }
+    if(d < md)
+      (md = d, mi = j);
   }
   for0(k, nb[2])
     x[np2 * k + i] = B[np * k + mi];
@@ -52,11 +50,9 @@ int main(int argc, char** argv){
   x = falloc(nr[2] * nc[2] * nb[2]); // out bf
   for0(i, 3)
     y[i] = bread(str(argv[i + 1]), nr[i], nc[i], nb[i]);
-  np = nr[0] * nc[0];
-  np2 = nr[2] * nc[2];
+  (np = nr[0] * nc[0], np2 = nr[2] * nc[2]);
   
-  n_bad = 0;
-  bp = ialloc(np);  // bad px
+  (n_bad = 0, bp = ialloc(np));  // bad px
   for0(i, np){
     bp[i] = is_bad(y[0], i, nb[0]) || is_bad(y[1], i, nb[1]);
     if(bp[i]) n_bad ++;
@@ -64,15 +60,14 @@ int main(int argc, char** argv){
   if(n_bad == np)
     err("no good pix: AxB");
 
-  n_bad = 0;
-  bp2 = ialloc(np2);
+  (n_bad = 0, bp2 = ialloc(np2));
   for0(i, np2){
     bp2[i] = is_bad(y[2], i, nb[2]);
     if(bp2[i]) n_bad ++;
   }
   if(n_bad == np2)
     err("no good pix: C");
-  A = y[0]; B = y[1]; C = y[2];
+  (A = y[0], B = y[1], C = y[2]);
   
   parfor(0, np2, infer_px);  // for each output pix
   str pre(str("abcd_") + str(argv[1]) + str("_") + str(argv[2]) + str("_") +
