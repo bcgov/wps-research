@@ -8,8 +8,10 @@ for smoothing a continuous raster
 In this implementation a histogram is calculated in each
 dimension separately. In another version we could calculate
 the histogram on a n-dimensional rectangular grid. In
-yet another dimension we could use KGC algorithm in our
-window. */
+yet another dimension we could use KGC 2010 (knn graph 
+clustering) algorithm in the window. 
+
+20220517 bugfix */
 #include"misc.h"
 
 int main(int argc, char ** argv){
