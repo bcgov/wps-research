@@ -158,6 +158,17 @@ inline char * calloc(size_t nb){
   return d;
 }
 
+inline char * ialloc(size_t ni){
+  char * d = (int *)malloc(ni * sizeof(int));
+  if(!d){
+    printf("%zu\n", ni);
+    err("failed to allocate memory");
+  }
+  memset(d, '\0', ni);
+  return d;
+}
+
+
 
 //a trim from start (in place)
 /*bool is_space(int ch){
