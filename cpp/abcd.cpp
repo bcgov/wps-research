@@ -4,23 +4,23 @@ static float * y[3], *x, t, *A, *B, *C;  // data
 static int * bp, * bp2;  // bad px: {A,B}, C
 
 void infer_px(size_t i){
-  if(bp2[i]) return; // skip bad
+  if(bp2[i]) return; // skip bad px in A, B
   float d, e, md = FLT_MAX;
   size_t j, k, mi = 0;
   size_t nb_0 = nb[0];
 
   for(j = 0; j < np; j += skip_f){  // uniform sample in space
-    if(bp[j]) continue;
+    if(bp[j]) continue;  // skip bad px in C
     d = 0;
     for0(k, nb_0){
       e = A[np * k + j] - C[np2 * k + i];
       d += e * e;
     }
     if(d < md)
-      (md = d, mi = j);
+      (md = d, mi = j);  // nearer  
   }
   for0(k, nb[2])
-    x[np2 * k + i] = B[np * k + mi];
+    x[np2 * k + i] = B[np * k + mi];  // assign nearest
   if(i % 100000 == 0) status(i, np2);
 }
 
