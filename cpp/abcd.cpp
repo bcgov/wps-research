@@ -1,4 +1,4 @@
-#include"misc.h" /* 20220517 e.g. abcd A.bin B.bin C.bin # and compare with D.bin*/
+#include"misc.h" /* 20220517 e.g.: abcd.exe A.bin B.bin C.bin # and compare w D.bin! */
 static size_t nr[3], nc[3], nb[3], skip_f, m, np, np2; // shapes
 static float * y[3], *x, t, *A, *B, *C;  // data
 static int * bp, * bp2;  // bad px: {A,B}, C
@@ -69,9 +69,10 @@ int main(int argc, char** argv){
     err("no good pix: C");
   (A = y[0], B = y[1], C = y[2]);
   
+  str u("_");
   parfor(0, np2, infer_px);  // for each output pix
-  str pre(str("abcd_") + str(argv[1]) + str("_") + str(argv[2]) + str("_") +
-	  	         str(argv[3]) + str("_") + str(argv[4]));  // document
+  str pre(str("abcd_") + str(argv[1]) + u + str(argv[2]) + u +
+		         str(argv[3]) + u + str(argv[4])); 
   bwrite(x, pre + str(".bin"), nr[2], nc[2], nb[1]);
   hwrite(pre + str(".hdr"), nr[2], nc[2], nb[1]);
 
