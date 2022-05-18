@@ -12,16 +12,16 @@ void job(size_t i){
   float d, e, md = FLT_MAX;
   size_t j, k, mi = 0;
   size_t nb_0 = nb[0];
-  for(j = 0; j < np; j += skip_f){ 
+  for(j = 0; j < np; j += skip_f){
     if(bp[j]) continue;
     d = 0;
     for0(k, nb_0){
-      e = A[np * k + j] - C[np2 * k + i]; 
+      e = A[np * k + j] - C[np2 * k + i];
       d += e * e;
     }
     if(d < md){
       md = d;
-      mi = j; 
+      mi = j;
     }
   }
   for0(k, nb[2])
@@ -44,7 +44,7 @@ int main(int argc, char** argv){
   if(argc < 5)
     err("abcd [img1 (n bands)] [img2 (m bands)] [img3 (n bands)] [skip]\n");
   skip_f = (size_t) atol(argv[4]);
-  
+
   for0(i, 3)
     hread(hdr_fn(argv[1 + i]), nr[i], nc[i], nb[i]);
   if(nr[0] != nr[1] || nc[0] != nc[1])
@@ -57,7 +57,7 @@ int main(int argc, char** argv){
     y[i] = bread(str(argv[i + 1]), nr[i], nc[i], nb[i]);
   np = nr[0] * nc[0];
   np2 = nr[2] * nc[2];
-  
+
   n_bad = 0;
   bp = ialloc(np);  // bad pix
   for0(i, np){
@@ -75,17 +75,17 @@ int main(int argc, char** argv){
   }
   if(n_bad == np2)
     err("no good pix: C");
-  
+
   A = y[0];
   B = y[1];
   C = y[2];
-  parfor(0, np2, job);  // for each output pix 
-  
+  parfor(0, np2, job);  // for each output pix
+
   str pre(str("abcd_") + str(argv[1]) + str("_") + str(argv[2]) + str("_") +
 	  	         str(argv[3]) + str("_") + str(argv[4]));  // document
   bwrite(x, pre + str(".bin"), nr[2], nc[2], nb[1]);
   hwrite(pre + str(".hdr"), nr[2], nc[2], nb[1]);
-  
+
   system((str("python3 ~/GitHub/bcws-psu-research/py/raster_plot.py ") + pre +
 	  str(".bin 1 2 3 1")).c_str());
   return 0;
