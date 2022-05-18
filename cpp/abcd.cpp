@@ -56,7 +56,7 @@ int main(int argc, char** argv){
 
   skip_f = (size_t) atol(argv[4]);
   printf("skipf %zu\n", skip_f);
-  size_t i;
+  size_t i, n_bad = 0;
 
   for0(i, 3)
   hread(hdr_fn(argv[1 + i]), nr[i], nc[i], nb[i]);
@@ -74,9 +74,8 @@ int main(int argc, char** argv){
   np = nr[0] * nc[0];
   np2 = nr[2] * nc[2];
   
+  n_bad = 0;
   bp = ialloc(np);  // bad pix
-  size_t n_bad = 0;
-  bp2 = ialloc(np2);
   for0(i, np){
     bp[i] = is_bad(y[0], i, nb[0]) || is_bad(y[1], i, nb[1]);
     if(bp[i]) n_bad ++;
@@ -84,11 +83,14 @@ int main(int argc, char** argv){
   if(n_bad == np)
     err("no good pix: AxB");
 
+  printf("np %zu np2 %zu\n", np, np2);
   n_bad = 0;
+  bp2 = ialloc(np2);
   for0(i, np2){
-    bp2[i] = is_bad(y[3], i, nb[2]);
+    bp2[i] = is_bad(y[2], i, nb[2]);
     if(bp2[i]) n_bad ++;
   }
+  printf("n_bad %zu\n", n_bad);
   if(n_bad == np2)
     err("no good pix: C");
 
