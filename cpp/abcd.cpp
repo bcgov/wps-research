@@ -7,7 +7,7 @@ static size_t nr[3], nc[3], nb[3], skip_f, m, np, np2; // shapes
 static float * y[3], *x, t, *A, *B, *C;  // data
 static int * bp, * bp2;  // bad px: {A,B}, C
 
-void job(size_t i){
+void infer_px(size_t i){
   if(bp2[i]) return; // skip bad
   float d, e, md = FLT_MAX;
   size_t j, k, mi = 0;
@@ -76,7 +76,7 @@ int main(int argc, char** argv){
     err("no good pix: C");
 
   A, B, C = y[0], y[1], y[2];
-  parfor(0, np2, job);  // for each output pix
+  parfor(0, np2, infer_px);  // for each output pix
 
   str pre(str("abcd_") + str(argv[1]) + str("_") + str(argv[2]) + str("_") +
 	  	         str(argv[3]) + str("_") + str(argv[4]));  // document
