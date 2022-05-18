@@ -22,15 +22,13 @@ void status(size_t i){
 
 void job(size_t i){
   if(bp2[i]) return; // skip bad
-  float d, e;
-  size_t j, k;
-  size_t mi = 0;
-  float md = FLT_MAX;
+  float d, e, md = FLT_MAX;
+  size_t j, k, mi = 0;
   size_t nb_0 = nb[0];
 
   for(j = 0; j < np; j += skip_f){ 
-    if(bp[j]) continue;
     d = 0;
+    if(bp[j]) continue;
     for0(k, nb_0){
       e = A[np * k + j] - C[np2 * k + i]; 
       d += e * e;
@@ -59,14 +57,13 @@ inline int is_bad(float * dat, size_t i, size_t n_b){
 
 int main(int argc, char** argv){
   if(argc < 5)
-  err("view_as [img1 (n bands)] [img2 (m bands)] [img3 (n bands)] [skip]\n");
-
+    err("view_as [img1 (n bands)] [img2 (m bands)] [img3 (n bands)] [skip]\n");
   skip_f = (size_t) atol(argv[4]);
   printf("skipf %zu\n", skip_f);
   size_t i, n_bad = 0;
 
   for0(i, 3)
-  hread(hdr_fn(argv[1 + i]), nr[i], nc[i], nb[i]);
+    hread(hdr_fn(argv[1 + i]), nr[i], nc[i], nb[i]);
 
   if(nr[0] != nr[1] || nc[0] != nc[1])
     err("A.shape != B.shape");
@@ -98,16 +95,14 @@ int main(int argc, char** argv){
   }
   if(n_bad == np2)
     err("no good pix: C");
+  
   A = y[0];  B = y[1]; C = y[2];
-
-  parfor(0, np2, job);  // for each output result pix (same shape as C)
+  parfor(0, np2, job);  // for each output pix 
   str pre(str("view_as_") +
 	  str(argv[1]) + str("_") + str(argv[2]) + str("_") +
 	  str(argv[3]) + str("_") + str(argv[4]));
-
   bwrite(x, pre + str(".bin"), nr[2], nc[2], nb[1]);
   hwrite(pre + str(".hdr"), nr[2], nc[2], nb[1]);
-
   system((str("python3 ~/GitHub/bcws-psu-research/py/raster_plot.py ") +
 	 pre + str(".bin 1 2 3 1")).c_str());
   return 0;
