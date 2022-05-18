@@ -33,28 +33,22 @@ int main(int argc, char ** argv){
   }
   else{
     ws = atoi(argv[2]);
-
     nbin = atoi(argv[3]);
     n_bin = (float)nbin; // bin size
-
     if(ws % 2 != 1) err("window size must be odd number");
     dw = (ws - 1) / 2;
-
     fn = str(argv[1]); // input file name
     hfn = str(hdr_fn(fn)); // auto-detect header file name
-
   }
 
   str out_fn(fn + str("_rmf.bin"));
   str out_hf(fn + str("_rmf.hdr"));
-
   cout << out_fn << endl;
   cout << out_hf << endl;
 
   size_t nr, nc, nb;
   long int nrow, ncol, nband, np, k, n;
   hread(hfn, nr, nc, nb);
-   //nrow, ncol, nband); // read header
   nrow = nr;
   ncol = nc;
   nband = nb;
@@ -70,9 +64,8 @@ int main(int argc, char ** argv){
   float * c = falloc(nbin * nband); // count in "bin m" of for kth dimension at posn: k * nbin + m
 
   for0(i, nrow){
+    printf("row %d of %d\n", i, nrow);
     for0(j, ncol){
-      printf("i %d / %d j %d of %d\n", i, nrow, j, ncol);
-
       for0(k, nband){
         mn[k] = FLT_MAX;
         mx[k] = FLT_MIN;
