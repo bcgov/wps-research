@@ -35,7 +35,7 @@ inline int is_bad(float * dat, size_t i, size_t n_b){
 }
 
 int main(int argc, char** argv){
-  size_t i, n_bad = 0;
+  size_t i, n_bad;
   if(argc < 5)
     err("abcd [img1 (n bands)] [img2 (m bands)] [img3 (n bands)] [skip]\n");
   skip_f = (size_t) atol(argv[4]); // bsq2bip -> binary_sort -> bip2bsq
@@ -47,14 +47,12 @@ int main(int argc, char** argv){
   if(nb[0] != nb[2])
     err("A.n_bands != C.n_bands");
 
-  x = falloc(nr[2] * nc[2] * nb[2]); // out buf
+  x = falloc(nr[2] * nc[2] * nb[2]); // out bf
   for0(i, 3)
     y[i] = bread(str(argv[i + 1]), nr[i], nc[i], nb[i]);
-  np = nr[0] * nc[0];
-  np2 = nr[2] * nc[2];
+  np, np2 = nr[0] * nc[0], nr[2] * nc[2];
 
-  n_bad = 0;
-  bp = ialloc(np);  // bad pix
+  n_bad, bp = 0, ialloc(np);  // bad px
   for0(i, np){
     bp[i] = is_bad(y[0], i, nb[0]) || is_bad(y[1], i, nb[1]);
     if(bp[i]) n_bad ++;
@@ -62,8 +60,7 @@ int main(int argc, char** argv){
   if(n_bad == np)
     err("no good pix: AxB");
 
-  n_bad = 0;
-  bp2 = ialloc(np2);
+  n_bad, bp2 = 0, ialloc(np2);
   for0(i, np2){
     bp2[i] = is_bad(y[2], i, nb[2]);
     if(bp2[i]) n_bad ++;
