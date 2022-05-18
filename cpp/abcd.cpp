@@ -83,14 +83,12 @@ int main(int argc, char** argv){
   if(n_bad == np)
     err("no good pix: AxB");
 
-  printf("np %zu np2 %zu\n", np, np2);
   n_bad = 0;
   bp2 = ialloc(np2);
   for0(i, np2){
     bp2[i] = is_bad(y[2], i, nb[2]);
     if(bp2[i]) n_bad ++;
   }
-  printf("n_bad %zu\n", n_bad);
   if(n_bad == np2)
     err("no good pix: C");
 
