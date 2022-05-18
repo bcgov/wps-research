@@ -46,13 +46,13 @@ int main(int argc, char** argv){
     err("A.shape != B.shape");
   if(nb[0] != nb[2])
     err("A.n_bands != C.n_bands");
+  (np = nr[0] * nc[0], np2 = nr[2] * nc[2]);
+  if(skip_f >= np)
+    err("illegal skip_f");
 
   x = falloc(nr[2] * nc[2] * nb[2]); // out buf
   for0(i, 3)
     y[i] = bread(str(argv[i + 1]), nr[i], nc[i], nb[i]);  // read input
-  (np = nr[0] * nc[0], np2 = nr[2] * nc[2]);
-  if(skip_f >= np)
-    err("illegal skip_f");
 
   (n_bad = 0, bp = ialloc(np));  // bad pixels in A, B?
   for0(i, np){
