@@ -15,6 +15,9 @@ Includes A) data integration B) routines applying or implementing supervised and
 ## Mapping major fires of 2021 in BC
 <img src="doc/gee/2022-05-10_16-53-41.png" width="640">
 
+## Exploring time series of heterogeneous data
+<img src="doc/sentinel2_and_rcm.gif" width="640">
+
 ## Forest change detection w CSA RCM compact-pol SAR data
 <img src="data/output/difference.gif" width="640">
 
