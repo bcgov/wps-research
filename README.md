@@ -9,11 +9,11 @@ supporting BC Wildfire Service (BCWS) Predictive Services Unit (PSU) program. Se
 Includes A) data integration B) routines applying or implementing supervised and unsupervised classification, C) visualization and manipulation for high dimensional imagery as well as classification maps
 
 # Sample results
-## Mapping major fires of 2021 in BC
-<img src="doc/gee/2022-05-10_16-53-41.png" width="640">
-
 ## Fire progression mapping w Sentinel-2 and Landsat 7/8
 <img src="data/output/sentinel2_and_landsat.gif" width="640">
+
+## Mapping major fires of 2021 in BC
+<img src="doc/gee/2022-05-10_16-53-41.png" width="640">
 
 ## Forest change detection w CSA RCM compact-pol SAR data
 <img src="data/output/difference.gif" width="640">
