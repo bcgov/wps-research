@@ -10,16 +10,16 @@ Includes A) data integration B) routines applying or implementing supervised and
 
 # Sample results
 ## Fire progression mapping w Sentinel-2 and Landsat 7/8
-<img src="doc/fire_progression_times_whiterock_lake_2021.gif" width="640">
+<img src="doc/fire_progression_times_whiterock_lake_2021.gif" width="650">
 
 ## Mapping major fires of 2021 in BC
-<img src="doc/gee/2022-05-10_16-53-41.png" width="640">
+<img src="doc/gee/2022-05-10_16-53-41.png" width="650">
 
 ## Exploring time series of heterogeneous data
-<img src="doc/sentinel2_and_rcm.gif" width="640">
+<img src="doc/sentinel2_and_rcm.gif" width="650">
 
 ## Forest change detection w CSA RCM compact-pol SAR data
-<img src="data/output/difference.gif" width="640">
+<img src="data/output/difference.gif" width="650">
 
 ##  Interactive mapping w BCWS FTL MVP software: end-to-end DSS
 <img src="data/output/20210127_mvp.png" width="650" height="264">
