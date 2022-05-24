@@ -2,6 +2,7 @@
 another, in-place:
 use to remove data on image #2, where image #1 has nodata */
 #include"misc.h"
+#include<math.h>
 
 int main(int argc, char ** argv){
   if(argc < 3){
@@ -24,21 +25,27 @@ int main(int argc, char ** argv){
   size_t i, j, k;
   float * dat1 = bread(fn, nrow, ncol, nband);
   float * dat2 = bread(fn2, nrow, ncol, nband2);
-  bool is_zero;
+  bool is_zero, is_nan;
   for0(i, np){
     is_zero = true;
+    is_nan = false;
     for0(k, nband){
       float d = dat1[i + k * np];
-      // printf("%f ", d);
       if( d != 0){ 
-	      //fabs((double)d) > 0.0000000001){
         is_zero = false;
       }
+      if(isnan(d) || isinf(d)){
+        is_nan = true;
+      }
     }
-    // printf("%s\n", is_zero?" == 0": " != 0");
     if(is_zero){
       for0(k, nband2){
         dat2[i + k * np] = 0.;
+      }
+    }
+    if(is_nan || is_zero){
+      for0(k, nband2){
+        dat2[i + k * np] = NAN;
       }
     }
   }
