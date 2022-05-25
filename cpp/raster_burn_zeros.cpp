@@ -48,6 +48,19 @@ int main(int argc, char ** argv){
         dat2[i + k * np] = NAN;
       }
     }
+
+    is_zero = true;
+    for0(k, nband){
+      float d = dat2[i + k * np];
+      if( d != 0){
+        is_zero = false;
+      }
+    }
+    if(is_zero){
+      for0(k, nband2){
+        dat2[i + k * np] = NAN;
+      }
+    }
   }
   printf("+w %s\n", fn2.c_str());
   bwrite(dat2, fn2, nrow, ncol, nband2);
