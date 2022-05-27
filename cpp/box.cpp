@@ -1,21 +1,18 @@
-/* 20220526: box filter 
-Input: 
-32-bit IEEE standard floating-point BSQ format stack */
-
+/* 20220526: box filter
+Input:
+  32-bit IEEE standard floating-point BSQ format stack */
 #include"misc.h"
-
-static float *out, *dat;
 static size_t nrow, ncol, nband, np;
+static float *out, *dat;
 static int dw;
 
 void filter_line(size_t line_ix){
   size_t b_ix = line_ix / nrow;  // process a row
   size_t r_ix = line_ix % nrow;
-  //printf("ix %zu band %zu row %zu\n", line_ix, b_ix, r_ix);
   size_t bk = b_ix * np;
   size_t ki = bk + (r_ix * ncol);
   size_t y, ix;
-  float npix, d;
+  float npix, d, dd;
   long int dx, dy, wind;
 
   for0(y, ncol){
@@ -25,8 +22,11 @@ void filter_line(size_t line_ix){
       for(dy = (y - dw); dy <= (y + dw); dy++){
         wind = bk + (dx * ncol) + dy; // for each pixel in window
         if((dx >= 0) && (dy >= 0) && (dx < nrow) && (dy < ncol)){
-          npix++;
-          d += (double) dat[wind];
+	  dd = dat[wind];
+	  if(!(isnan(dd) || isinf(dd))){
+            npix++;
+            d += (double) dd;
+	  }
         }
       }
     }
