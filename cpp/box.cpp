@@ -2,9 +2,19 @@
 Input:
   32-bit IEEE standard floating-point BSQ format stack */
 #include"misc.h"
-static size_t nrow, ncol, nband, np;
-static float *out, *dat;
-static int dw;
+static size_t nrow, ncol, nband, np, m;
+static float *out, *dat, t;
+static int dw, *bp;
+
+inline int is_bad(float * dat, size_t i, size_t n_b){
+  int zero = true;
+  for0(m, n_b){  // find bad/empty pix
+    t = dat[np * m + i];
+    if(isnan(t) || isinf(t)) return true;
+    if(t != 0) zero = false;
+  }
+  return zero;
+}
 
 void filter_line(size_t line_ix){
   size_t b_ix = line_ix / nrow;  // process a row
@@ -56,6 +66,10 @@ int main(int argc, char ** argv){
   dat = bread(fn, nrow, ncol, nband); // load floats to array
   out = falloc(np * nband); // output data
 
+  bp = ialloc(np);
+  for0(i, np)
+    bp[i] = is_bad(dat, i, nband);
+  
   parfor(0, nband * nrow, filter_line);
 
   // write output file
