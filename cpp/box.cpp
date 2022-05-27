@@ -23,7 +23,7 @@ void filter_line(size_t line_ix){
   size_t r_ix = line_ix % nrow;
   size_t bk = b_ix * np;
   size_t ki = bk + (r_ix * ncol);
-  size_t y, ix;
+  size_t y, ix, iy;
   float npix, d, dd;
   long int dx, dy, wind;
 
@@ -32,7 +32,9 @@ void filter_line(size_t line_ix){
     out[ix] = npix = d = 0.;
     for(dx = (r_ix - dw); dx <= (r_ix + dw); dx++){
       for(dy = (y - dw); dy <= (y + dw); dy++){
-        wind = bk + (dx * ncol) + dy; // for each pixel in window
+	iy = dx *ncol + dy;
+	if(bp[iy]) continue; // skip bad px
+        wind = bk + iy; // for each pixel in window
         if((dx >= 0) && (dy >= 0) && (dx < nrow) && (dy < ncol)){
 	  dd = dat[wind];
 	  if(!(isnan(dd) || isinf(dd))){
