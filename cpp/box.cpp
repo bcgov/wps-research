@@ -4,8 +4,8 @@ Input:
 #include"misc.h"
 static size_t nrow, ncol, nband, np, m;
 static float *out, *dat, t;
-static int dw, *bp;
-
+static int *bp;
+static long int dw;
 
 // thsi should go in misc.h
 inline int is_bad(float * dat, size_t i, size_t n_b){
@@ -30,9 +30,15 @@ void filter_line(size_t line_ix){
   for0(y, ncol){
     ix = ki + y; // index of pix at row r_ix and col ix
     out[ix] = npix = d = 0.;
-    for(dx = (r_ix - dw); dx <= (r_ix + dw); dx++){
-      for(dy = (y - dw); dy <= (y + dw); dy++){
-	iy = dx * ncol + dy;
+    for(dx = ((long int)r_ix - dw);
+        dx <= ((long int)r_ix + dw);
+	dx++){
+
+      for(dy = ((long int)y - dw);
+          dy <= ((long int)y + dw);
+	  dy++){
+
+        iy = dx * ncol + dy;
 	if(bp[iy]) continue; // skip bad px
         wind = bk + iy; // for each pixel in window
         if((dx >= 0) && (dy >= 0) && (dx < nrow) && (dy < ncol)){
@@ -65,7 +71,7 @@ int main(int argc, char ** argv){
   n = (size_t) atoi(argv[2]);
   if((n - 1) %2 != 0)
   err("odd window size req'd");
-  dw = n / 2;
+  dw = (long int)(n / 2);
 
   dat = bread(fn, nrow, ncol, nband); // load floats to array
   out = falloc(np * nband); // output data
