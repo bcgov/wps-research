@@ -28,11 +28,11 @@ void filter_line(size_t line_ix){
   long int dx, dy, wind;
 
   for0(y, ncol){
-    ix = ki + y;
+    ix = ki + y; // index of pix at row r_ix and col ix
     out[ix] = npix = d = 0.;
     for(dx = (r_ix - dw); dx <= (r_ix + dw); dx++){
       for(dy = (y - dw); dy <= (y + dw); dy++){
-	iy = dx *ncol + dy;
+	iy = dx * ncol + dy;
 	if(bp[iy]) continue; // skip bad px
         wind = bk + iy; // for each pixel in window
         if((dx >= 0) && (dy >= 0) && (dx < nrow) && (dy < ncol)){
