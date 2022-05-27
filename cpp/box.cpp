@@ -6,6 +6,8 @@ static size_t nrow, ncol, nband, np, m;
 static float *out, *dat, t;
 static int dw, *bp;
 
+
+// thsi should go in misc.h
 inline int is_bad(float * dat, size_t i, size_t n_b){
   int zero = true;
   for0(m, n_b){  // find bad/empty pix
