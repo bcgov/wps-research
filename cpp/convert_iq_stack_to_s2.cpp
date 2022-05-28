@@ -31,6 +31,8 @@ int main(int argc, char ** argv){
     str mon(month[w[3].substr(2, 3)]);
     str year(w[3].substr(5, 4));
     str day(w[3].substr(0, 2));
+    str iq(w[0]); // i or q
+    str pp(w[1]); // HH, HV, VH, VV
     cout << w << " " << year << mon << day << endl;
     //string substr (size_t pos = 0, size_t len = npos) const;
   }
