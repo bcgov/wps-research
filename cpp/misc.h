@@ -409,7 +409,8 @@ string strip_space(string s);
 vector<string> parse_band_names(string fn);
 bool contains(string s1, string s2);
 
-
 void status(size_t i, size_t of);
+
+void write_config(str fn, size_t nrow, size_t ncol);
 
 #endif
