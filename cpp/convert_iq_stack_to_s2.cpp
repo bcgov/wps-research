@@ -68,6 +68,8 @@ int main(int argc, char ** argv){
     if(!exists(odir))
       system((str("mkdir -p ") + odir).c_str());
 
+    write_config(str(odir) + str("config.txt"), nrow, ncol);
+
     for0(i, 4){
       str a(odir + str(outb[i]) + str(".bin"));
       of[i] = wopen(a.c_str());
