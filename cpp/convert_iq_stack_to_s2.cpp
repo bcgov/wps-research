@@ -12,7 +12,7 @@ int main(int argc, char ** argv){
     err("convert_iqstack_to_s2 [input file.bin]");
   }
 
-  char * infile = argv[0];
+  char * infile = argv[1];
   
   printf("%s\n", infile);
   exit(1);
