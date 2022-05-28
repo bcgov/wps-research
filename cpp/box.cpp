@@ -30,6 +30,7 @@ void filter_line(size_t line_ix){
   for0(y, ncol){
     ix = ki + y; // index of pix at row r_ix and col ix
     out[ix] = npix = d = 0.;
+
     for(dx = ((long int)r_ix - dw);
         dx <= ((long int)r_ix + dw);
 	dx++){
