@@ -35,6 +35,12 @@ int main(int argc, char ** argv){
     str pp(w[1]); // HH, HV, VH, VV
     cout << w << " " << year << mon << day << endl;
     //string substr (size_t pos = 0, size_t len = npos) const;
+ 
+    // create folder with date! for one scattering matrix
+    //
+    // now convert to S2 format
+ 
+ 
   }
 
   exit(1);
