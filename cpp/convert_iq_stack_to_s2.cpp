@@ -28,7 +28,11 @@ int main(int argc, char ** argv){
   for(it = band_names.begin(); it != band_names.end(); it++){
     str x(*it);
     vector<str> w(split(x, '_'));
-    cout << w << endl;
+    str mon(month[w[3].substr(2, 3)]);
+    str year(w[3].substr(5, 4));
+    str day(w[3].substr(0, 2));
+    cout << w << " " << year << mon << day << endl;
+    //string substr (size_t pos = 0, size_t len = npos) const;
   }
 
   exit(1);
