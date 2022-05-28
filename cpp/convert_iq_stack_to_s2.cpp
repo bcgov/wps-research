@@ -7,6 +7,20 @@ void print(str s){
 }
 
 int main(int argc, char ** argv){
+  map<str, str> month;
+  month[str("Jan")] = str("01");
+  month[str("Feb")] = str("02");
+  month[str("Mar")] = str("03");
+  month[str("Apr")] = str("04");
+  month[str("May")] = str("05");
+  month[str("Jun")] = str("06");
+  month[str("Jul")] = str("07");
+  month[str("Aug")] = str("08");
+  month[str("Sep")] = str("09");
+  month[str("Oct")] = str("10");
+  month[str("Nov")] = str("11");
+  month[str("Dec")] = str("12");
+
   if(argc < 2){
     printf("Convert iq format data (time series stack) to PolSARPro scattering matrix (S2) format\n");
     err("convert_iqstack_to_s2 [input file.bin]");
