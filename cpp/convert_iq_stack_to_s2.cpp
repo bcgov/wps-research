@@ -57,9 +57,9 @@ int main(int argc, char ** argv){
   map<str, vector<str>>::iterator ti;
   for(ti = files.begin(); ti != files.end(); ti++){
     cout << "--------------------------------------------------\n";
-    cout << ti->first << endl;
-    cout << pols[ti->first] << endl;
-  
+    /*cout << ti->first << endl;
+    cout << pols[ti->first] << endl; */
+
     // open the output images
     FILE * of[4];
     for0(i, 4) of[i] = NULL;
@@ -68,11 +68,8 @@ int main(int argc, char ** argv){
     if(!exists(odir))
       system((str("mkdir -p ") + odir).c_str());
 
-    cout << "open s11 files:\n";
     for0(i, 4){
       str a(odir + str(outb[i]) + str(".bin"));
-      print(a);
-      
       of[i] = wopen(a.c_str());
       if(of[i] == NULL)
         err("failed to open output file");
@@ -82,15 +79,15 @@ int main(int argc, char ** argv){
     for0(i, 4){
       str a(pols[odir][str("i") + str(bands[i])]);
       str b(pols[odir][str("q") + str(bands[i])]);
-      print(a);
-      print(b);
 
       FILE * f = fopen(a.c_str(), "rb");
       FILE * g = fopen(b.c_str(), "rb");
       if(f == NULL || g == NULL) err("failed to open input binary file");
   
-      float * df = bread(a, nrow, ncol, nband); // read file
-      float * dg = bread(b, nrow, ncol, nband); // read file
+      cout << "  +r " << a << endl;
+      float * df = bread(a, nrow, ncol, 1); 
+      cout << "  +r " << b << endl;
+      float * dg = bread(b, nrow, ncol, 1);
       float * dd = falloc(np * 2); // allocate floats
 
       size_t j, j2;
@@ -103,7 +100,6 @@ int main(int argc, char ** argv){
       size_t nw = fwrite(dd, sizeof(float), np * 2, of[i]);
       if(nw != np * 2)
         err("unexpected write size");
-
       free(df);
       free(dg);
       free(dd);
