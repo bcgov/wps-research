@@ -835,3 +835,17 @@ void status(size_t i, size_t of){
   cprint(to_string(100.* ((float)(i+1) / (float)of)) + str(" % ") +
          to_string(i) + str(" / ") + to_string(of));
 }
+
+void write_config(str fn, size_t nrow, size_t ncol){
+  FILE * f = wopen(fn);
+  fprintf(f, "Nrow\n");
+  fprintf(f, "%zu\n", nrow);
+  fprintf(f, "---------\n");
+  fprintf(f, "Ncol\n");
+  fprintf(f, "%zu\n", ncol);
+  fprintf(f, "PolarCase\nbistatic\n");
+  fprintf(f, "---------\n");
+  fprintf(f, "PolarType\nfull");
+  fclose(f);
+}
+
