@@ -843,6 +843,7 @@ void write_config(str fn, size_t nrow, size_t ncol){
   fprintf(f, "---------\n");
   fprintf(f, "Ncol\n");
   fprintf(f, "%zu\n", ncol);
+  fprintf(f, "---------\n");
   fprintf(f, "PolarCase\nbistatic\n");
   fprintf(f, "---------\n");
   fprintf(f, "PolarType\nfull");
