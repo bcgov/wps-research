@@ -44,6 +44,14 @@ inline char sep(){
   #endif
 }
 
+inline string psep(){
+  char s[2];
+  s[0] = sep();
+  s[1] = '\0';
+  return string(s);
+}
+
+
 #include <stdio.h> /* defines FILENAME_MAX */
 #ifdef WINDOWS
 #include <direct.h>
