@@ -11,10 +11,12 @@ int main(int argc, char ** argv){
     printf("Convert iq format data (time series stack) to PolSARPro scattering matrix (S2) format\n");
     err("convert_iqstack_to_s2 [input file.bin]");
   }
-
   char * infile = argv[1];
-  
-  printf("%s\n", infile);
+  str in_f(infile);
+  str in_h(hdr_fn(in_f));
+
+  vector<str> band_names(parse_band_names(in_h));
+  cout << band_names <<endl;
   exit(1);
   /*
   char * o_d = argv[1];
