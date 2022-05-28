@@ -27,7 +27,7 @@ int main(int argc, char ** argv){
   vector<str>::iterator it;
   for(it = band_names.begin(); it != band_names.end(); it++){
     str x(*it);
-    vector<str> w(split(x));
+    vector<str> w(split(x, '_'));
     cout << w << endl;
   }
 
