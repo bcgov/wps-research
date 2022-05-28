@@ -24,7 +24,13 @@ int main(int argc, char ** argv){
   str in_h(hdr_fn(in_f));
 
   vector<str> band_names(parse_band_names(in_h));
-  cout << band_names <<endl;
+  vector<str>::iterator it;
+  for(it = band_names.begin(); it != band_names.end(); it++){
+    str x(*it);
+    vector<str> w(split(x));
+    cout << w << endl;
+  }
+
   exit(1);
   /*
   char * o_d = argv[1];
