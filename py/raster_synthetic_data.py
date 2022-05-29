@@ -7,7 +7,7 @@ import numpy as np
 if exists('stack.bin'): # don't overwrite a stack
     err('file: stack.bin already exists')
 
-nwin = 100 # number of pixels per side of "small" square
+nwin = 50 # number of pixels per side of "small" square
 nsq = 3 # number of squares/side of big square
 nb = 3 # number of bands, fake multispec data
 
