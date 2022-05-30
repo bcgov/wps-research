@@ -95,7 +95,7 @@ static void quitme(){
       x = trim(x, '\\n');
       x = trim(x, ' ');
       if(!exists(x)){
-        printf("Error: please add bcws-psu-research/cpp folder to bash $PATH and try again\n");
+        printf("Error: please add wps-research/cpp folder to bash $PATH and try again\n");
         exit(1);
       }
       str cmd(str("unstack.exe ") + IMG_FN);
@@ -791,13 +791,13 @@ void zprInstance::processString(){
     system("cp -v tmp_subset.hdr tmp.hdr");
     str use_name(exec("whoami")); // get user name
     use_name = strip(use_name);
-    str tt_cmd(str("python3 /home/") + use_name + str("/GitHub/bcws-psu-research/py/vector_target_translation.py "));
+    str tt_cmd(str("python3 /home/") + use_name + str("/GitHub/wps-research/py/vector_target_translation.py "));
     tt_cmd += (str("stack.bin_targets.csv ") + to_string(SUB_START_J) + str(" ") + to_string(SUB_START_I) + str(" stack.hdr tmp.bin_targets.csv"));
     tt_cmd += (str(" ") + to_string(SUB_MM) + str(" ") + to_string(SUB_MM));
     system(tt_cmd.c_str());
     cout << tt_cmd << endl; // vector target translation
 
-    str cmd(str("python3 /home/") + use_name + str("/GitHub/bcws-psu-research/py/kmeans_optimize.py tmp.bin"));
+    str cmd(str("python3 /home/") + use_name + str("/GitHub/wps-research/py/kmeans_optimize.py tmp.bin"));
     system(cmd.c_str());
   }
 
@@ -806,14 +806,14 @@ void zprInstance::processString(){
     str use_name(exec("whoami")); // get user name
     use_name = strip(use_name);
     /*
-    str tt_cmd(str("python3 /home/") + use_name + str("/GitHub/bcws-psu-research/py/vector_target_translation.py "));
+    str tt_cmd(str("python3 /home/") + use_name + str("/GitHub/wps-research/py/vector_target_translation.py "));
     tt_cmd += (str("stack.bin_targets.csv ") + to_string(SUB_START_J) + str(" ") + to_string(SUB_START_I) + str(" stack.hdr tmp.bin_targets.csv"));
     tt_cmd += (str(" ") + to_string(SUB_MM) + str(" ") + to_string(SUB_MM));
     system(tt_cmd.c_str());
     cout << tt_cmd << endl; // vector target translation
     */
 
-    str cmd(str("python3 /home/") + use_name + str("/GitHub/bcws-psu-research/py/kmeans_optimize.py stack.bin")); //tmp.bin"));
+    str cmd(str("python3 /home/") + use_name + str("/GitHub/wps-research/py/kmeans_optimize.py stack.bin")); //tmp.bin"));
     system(cmd.c_str());
   }
 
@@ -824,7 +824,7 @@ void zprInstance::processString(){
     size_t kmeans_k = atoi(kk.c_str());
     str use_name(exec("whoami")); // get user name
     use_name = strip(use_name);
-    str cmd(str("/home/") + use_name + str("/GitHub/bcws-psu-research/cpp/kmeans_multi.exe tmp_subset.bin ") + to_string(kmeans_k) + str(" 2.")); // shouldn't have abspath
+    str cmd(str("/home/") + use_name + str("/GitHub/wps-research/cpp/kmeans_multi.exe tmp_subset.bin ") + to_string(kmeans_k) + str(" 2.")); // shouldn't have abspath
     cout << "[" << cmd << "]" << endl;
     system(cmd.c_str());
     size_t xoff = SUB_START_J; // size_t)(SUB_SCALE_F * (float) SUB_START_J);
