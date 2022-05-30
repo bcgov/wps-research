@@ -1,6 +1,6 @@
 '''test this on smaller data
 
-python3 ~/GitHub/bcws-psu-research/py/csv_spectra_distance_simple.py ./sub.bin_first_spectrum.csv sub.binalculate distance from spectra in file resulting from raster_extract_spectra_simple.py,
+python3 ~/GitHub/wps-research/py/csv_spectra_distance_simple.py ./sub.bin_first_spectrum.csv sub.binalculate distance from spectra in file resulting from raster_extract_spectra_simple.py,
 to a raster
 
 python3 csv_spectra_distance_simple.py [input csv file] [raster file]'''
