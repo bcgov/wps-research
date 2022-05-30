@@ -3,7 +3,7 @@ Extract and average spectra on a CSV.. for instances where the selected field [f
 matches the value provided [value to select]
 * the entry point for spectra extraction..
 e.g.
-    python3 ~/GitHub/bcws-psu-research/py/raster_extract_spectra_select.py survey_label.csv cluster_label 6 sub.bin '''
+    python3 ~/GitHub/wps-research/py/raster_extract_spectra_select.py survey_label.csv cluster_label 6 sub.bin '''
 import os
 import sys
 import csv
