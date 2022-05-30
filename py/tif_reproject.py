@@ -63,7 +63,7 @@ for tif in tifs:
     type4 = "type4" + os.path.sep + tif + '.bin'
     out = type4 + '_binary.bin'
     if not exist(out):
-        cmds.append(" ".join(["python3 ~/GitHub/bcws-psu-research/py/class_merge.py", type4, "1"]))
+        cmds.append(" ".join(["python3 ~/GitHub/wps-research/py/class_merge.py", type4, "1"]))
         print(cmds[-1])
 parfor(run, cmds)
 
