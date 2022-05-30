@@ -1,6 +1,6 @@
 # imv
 
-Entry point for BCWS FTL MVP software [please click here for setup instructions for BCWS FTL MVP software](https://github.com/bcgov/bcws-psu-research/blob/master/imv/SETUP.md)
+Entry point for BCWS FTL MVP software [please click here for setup instructions for BCWS FTL MVP software](https://github.com/bcgov/wps-research/blob/master/imv/SETUP.md)
 
 **imv** short for "image viewer" (also an anagram of vim the unix text editor): **imv is a minimalist hyperspectral image viewer** and is loosely inspired by ENVI and Warcraft II and conceptually derived from an earlier program called scg.
 * **will accept data size near to system limit e.g. exabyte scale on linux systems**
@@ -12,23 +12,23 @@ Entry point for BCWS FTL MVP software [please click here for setup instructions 
 * resizeable target/zoom window
 
 **Basic ML algorithm** included: 
-* semi-supervised kmeans variant [Python based implementation](https://github.com/bcgov/bcws-psu-research/blob/master/py/kmeans_optimize.py) with C/C++ implementations under the hood:
-* [nearest centres algorithm](https://github.com/bcgov/bcws-psu-research/blob/master/cpp/raster_nearest_centre.cpp) followed by:
-* [kmeans iteration](https://github.com/bcgov/bcws-psu-research/blob/master/cpp/kmeans_iter.cpp) 
+* semi-supervised kmeans variant [Python based implementation](https://github.com/bcgov/wps-research/blob/master/py/kmeans_optimize.py) with C/C++ implementations under the hood:
+* [nearest centres algorithm](https://github.com/bcgov/wps-research/blob/master/cpp/raster_nearest_centre.cpp) followed by:
+* [kmeans iteration](https://github.com/bcgov/wps-research/blob/master/cpp/kmeans_iter.cpp) 
 
 # Sample data
 
 ## Real chess sample data
-[please click here to explore real chess sample data](https://github.com/bcgov/bcws-psu-research/tree/master/imv/chess_real)
+[please click here to explore real chess sample data](https://github.com/bcgov/wps-research/tree/master/imv/chess_real)
 
 ## Synthetic chess sample data
-[please click here to explore chess sample data](https://github.com/bcgov/bcws-psu-research/tree/master/imv/chess)
+[please click here to explore chess sample data](https://github.com/bcgov/wps-research/tree/master/imv/chess)
 
 ## Peppers hyperspectral data
-[please click here to explore hyperspectral peppers sample data](https://github.com/bcgov/bcws-psu-research/tree/master/imv/peppers)
+[please click here to explore hyperspectral peppers sample data](https://github.com/bcgov/wps-research/tree/master/imv/peppers)
 
 ## Bonaparte lake (Sentinel2) data
-[please click here to explore Bonaparte Lake, BC Sentinel2 data](https://github.com/bcgov/bcws-psu-research/blob/master/imv/bonaparte/README.md)
+[please click here to explore Bonaparte Lake, BC Sentinel2 data](https://github.com/bcgov/wps-research/blob/master/imv/bonaparte/README.md)
 
 # info
 
