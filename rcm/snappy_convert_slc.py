@@ -60,7 +60,7 @@ def md(d):  # make folder if not yet exist
 
 exe = "/home/" + \
       os.popen("whoami").read().strip() + \
-      "/GitHub/bcws-psu-research/cpp/convert_iq_to_s2.exe"
+      "/GitHub/wps-research/cpp/convert_iq_to_s2.exe"
 exe = os.path.abspath(exe)
 print(exe)
 
@@ -98,7 +98,7 @@ for i in range(0, len(folders)):
                 for bf in ['i_HH.bin', 'i_HV.bin', 'i_VH.bin', 'i_VV.bin',
                            'q_HH.bin', 'q_HV.bin', 'q_VH.bin', 'q_VV.bin']:
                     tf = out_folder + sep + 'tmp.bin'
-                    cv = "/home/" + os.popen("whoami").read().strip() + "/GitHub/bcws-psu-research/cpp/cv.exe"
+                    cv = "/home/" + os.popen("whoami").read().strip() + "/GitHub/wps-research/cpp/cv.exe"
                     run(' '.join([cv,
                                   out_folder + sep + bf,
                                   tf,

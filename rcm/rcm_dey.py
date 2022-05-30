@@ -26,7 +26,7 @@ for f in files:  # print(f)
     print(d)
 
     if not os.path.exists(d): os.mkdir(d)
-    a = os.system('~/GitHub/bcws-psu-research/cpp/unstack.exe ' + f)
+    a = os.system('~/GitHub/wps-research/cpp/unstack.exe ' + f)
     ci = ['C11.bin',
           'C22.bin',
           'C12_real.bin',
