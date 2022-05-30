@@ -35,20 +35,20 @@ cd GitHub
 ```
 11. "Clone" the repo (download the source code and test data): method for if you have ssh keys set up already:
 ```bash
-git clone git@github.com:bcgov/bcws-psu-research.git
+git clone git@github.com:bcgov/wps-research.git
 ```
 
 method for not having ssh keys set up:
 
 ```bash
-wget https://github.com/bcgov/bcws-psu-research/archive/master.zip
+wget https://github.com/bcgov/wps-research/archive/master.zip
 unzip master
-mv bcws-psu-research-master bcws-psu-research
+mv wps-research-master bcws-psu-research
 ```
 
 12. Enter the repo:
 ```bash
-cd bcws-psu-research
+cd wps-research
 ```
 13. Navigate to the MVP software interface:
 ```bash
