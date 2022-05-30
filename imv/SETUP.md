@@ -43,7 +43,7 @@ method for not having ssh keys set up:
 ```bash
 wget https://github.com/bcgov/wps-research/archive/master.zip
 unzip master
-mv wps-research-master bcws-psu-research
+mv wps-research-master wps-research
 ```
 
 12. Enter the repo:
