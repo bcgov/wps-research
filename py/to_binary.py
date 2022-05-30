@@ -13,7 +13,7 @@ def run(c):
     print(c)
     a = os.system(c)
 
-merge = "~/GitHub/bcws-psu-research/py/class_merge.py"
+merge = "~/GitHub/wps-research/py/class_merge.py"
 files = ["BROADLEAF_SP.bin",
          "CCUTBL_SP.bin",
          "CONIFER_SP.bin",
