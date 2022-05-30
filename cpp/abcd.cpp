@@ -80,7 +80,7 @@ int main(int argc, char** argv){
   bwrite(x, pre + str(".bin"), nr[2], nc[2], nb[1]);  // write out
   hwrite(pre + str(".hdr"), nr[2], nc[2], nb[1]);
 
-  system((str("python3 ~/GitHub/bcws-psu-research/py/raster_plot.py ") + pre +
+  system((str("python3 ~/GitHub/wps-research/py/raster_plot.py ") + pre +
 	  str(".bin 1 2 3 1")).c_str());
   return 0;
 }
