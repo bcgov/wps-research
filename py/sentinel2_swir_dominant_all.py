@@ -23,11 +23,11 @@ cmd1 = []
 cmd2 = []
 for line in lines:
     df = line
-    cmd = '~/GitHub/bcws-psu-research/cpp/raster_normalize.exe ' + df
+    cmd = '~/GitHub/wps-research/cpp/raster_normalize.exe ' + df
     df += '_norm.bin'
     if not exists(df):
         cmd1.append(cmd) #run(cmd)
-    cmd = '~/GitHub/bcws-psu-research/cpp/raster_dominant.exe ' + df
+    cmd = '~/GitHub/wps-research/cpp/raster_dominant.exe ' + df
     df = line + '_dominant.bin'
     if not exists(df):
         cmd2.append(cmd) # run(cmd)
