@@ -38,7 +38,7 @@ Includes A) data integration B) routines applying or implementing supervised and
 * Can We Predict Forest Fires Before They Start?, BC Gov Data Science CoP, Nov 24 2020
 
 # BCWS FTL MVP
-[Please click here for entry point for BCWS FTL MVP software](https://github.com/bcgov/bcws-psu-research/blob/master/imv/)
+[Please click here for entry point for BCWS FTL MVP software](https://github.com/bcgov/wps-research/blob/master/imv/)
 * Exascale viewer w interactive [2] classification
    * Semi-supervised hybrid classification method
    * Decision-support system: accessible AI keeping humans in the loop
@@ -46,7 +46,7 @@ Includes A) data integration B) routines applying or implementing supervised and
 * Adjustable high-contrast visualization and manipulation of multispectral imagery and classification maps
 
 # Sample exploratory results
-* [Predicting some BCGW layers from Sentinel-2 Imagery using RandomForest classifier](https://github.com/bcgov/bcws-psu-research/blob/master/data/data_combined/Readme.md)
+* [Predicting some BCGW layers from Sentinel-2 Imagery using RandomForest classifier](https://github.com/bcgov/wps-research/blob/master/data/data_combined/Readme.md)
  
 Other classifiers that could be used: Minimum Dist; Max Likelihood; Spectral Angle Mapper; Spectral Information Divergence; SVM; neural net
 
@@ -93,4 +93,4 @@ This repository is maintained by the BC Wildfire Service (BCWS) Predictive Servi
 [2] based on gltZpr by Nigel Stewart
 
 ### Resources
-[Misc RS / fire resources](https://github.com/bcgov/bcws-psu-research/blob/master/RESOURCES.md)
+[Misc RS / fire resources](https://github.com/bcgov/wps-research/blob/master/RESOURCES.md)
