@@ -73,7 +73,7 @@ int main(int argc, char ** argv){
   hwrite(hf2, nrow, ncol, 3, 4, bn);
 
   /* copy map info */
-  str cmd("python3 ~/GitHub/bcws-psu-research/py/envi_header_copy_mapinfo.py ");
+  str cmd("python3 ~/GitHub/wps-research/py/envi_header_copy_mapinfo.py ");
   cmd += (hfn + str(" ") + hf2);
   cout << cmd << endl;
   system(cmd.c_str());
