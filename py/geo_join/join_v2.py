@@ -2,7 +2,7 @@
 
 20220506 adapt this to arbitrary sheets
 
-e.g. python3 ~/GitHub/bcws-psu-research/py/geo_join/join.py ../Feb-16th-2022-03-35PM-Flight-Airdata.csv_select-select_file-exclude-.csv latitude longitude exif_table.csv decimal_latitude decimal_longitude
+e.g. python3 ~/GitHub/wps-research/py/geo_join/join.py ../Feb-16th-2022-03-35PM-Flight-Airdata.csv_select-select_file-exclude-.csv latitude longitude exif_table.csv decimal_latitude decimal_longitude
 '''
 import os
 import sys
