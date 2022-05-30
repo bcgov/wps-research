@@ -2,7 +2,7 @@
 - stack multiple overlapping frames by co-registering the other frames,
 onto the selected reference footprint
 - reference footprint could be a sentinel2 frame OR something else (an AOI) e.g.:
-python3 ~/GitHub/bcws-psu-research/py/sentinel2_stack_multiscene.py ./T10UGA/S2A_MSIL2A_20210721T185921_N0301_R013_T10UGA_20210721T230008.SAFE/SENTINEL2_L2A_EPSG_32610_10m.bin
+python3 ~/GitHub/wps-research/py/sentinel2_stack_multiscene.py ./T10UGA/S2A_MSIL2A_20210721T185921_N0301_R013_T10UGA_20210721T230008.SAFE/SENTINEL2_L2A_EPSG_32610_10m.bin
 '''
 from misc import *
 if len(args) < 2:
