@@ -101,7 +101,7 @@ int main(int argc, char ** argv){
   string hfn(getHeaderFileName(IMG_FN)); // this section: get image scale
   str my_user(exec("whoami")); // find out how many bands per date (for up arrow functionality)
   my_user = strp(my_user);
-  str cmd(str("python3 /home/") + my_user + str("/GitHub/bcws-psu-research/py/envi_header_dates.py ") + hfn);
+  str cmd(str("python3 /home/") + my_user + str("/GitHub/wps-research/py/envi_header_dates.py ") + hfn);
   cout << "[" << cmd << "]" << endl;
   str dates(exec(cmd.c_str()));
   vector<str> date_strings(split(dates, '\n'));
