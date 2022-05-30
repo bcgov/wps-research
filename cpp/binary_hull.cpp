@@ -45,7 +45,7 @@ int main(int argc, char ** argv){
 
 
   // run linux program qhull
-  str r(exec("python3 ~/GitHub/bcws-psu-research/py/alpha_shape.py < qhull.dat"));
+  str r(exec("python3 ~/GitHub/wps-research/py/alpha_shape.py < qhull.dat"));
   strip(r);
   vector<str> lines(split(r, '\n'));
   //cout << "[" << r << "]" << endl;
