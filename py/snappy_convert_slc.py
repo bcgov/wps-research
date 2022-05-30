@@ -15,7 +15,7 @@ from snappy import ProductIO
 def md(d):  # make folder if not yet exist
     if not os.path.exists(d): os.mkdir(d)
 
-exe = "/home/" + os.popen("whoami").read().strip() + "/GitHub/bcws-psu-research/cpp/convert_iq_to_s2.exe"
+exe = "/home/" + os.popen("whoami").read().strip() + "/GitHub/wps-research/cpp/convert_iq_to_s2.exe"
 exe = os.path.abspath(exe)
 print(exe)
 
