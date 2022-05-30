@@ -1,3 +1,6 @@
+'''
+https://docs.asf.alaska.edu/api/tools/#examples-using-wget
+'''
 import os
 import sys
 lines = open("L1.txt").readlines()
