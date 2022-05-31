@@ -17,7 +17,7 @@ std::string strp(const std::string& str, const std::string& whitespace = " \t\r\
   return str.substr(strBegin, strRange);
 }
 
-#define message "imv.cpp [infile] # [analysis window size] [n bands groundref, 1-hot encoded, at end of bsq stack] [bands per frame]"
+#define message "imv.cpp [infile] # [analysis window size] [n bands groundref, 1-hot encoded, at end of bsq stack] [bands per frame] # [height max] [width max]"
 
 int main(int argc, char ** argv){
   N_THREADS_IO = 4; // default number of threads for IO operations
@@ -92,6 +92,20 @@ int main(int argc, char ** argv){
   zprManager * myManager = zprManager::Instance(argc, argv); // window manager class
   size_t width = glutGet(GLUT_SCREEN_WIDTH); // this section: get screen scale
   size_t height = glutGet(GLUT_SCREEN_HEIGHT);
+  
+
+  if(argc > 5){
+    size_t width_max = (size_t)atol(argv[5]);
+    if(width_max < width) width = width_max;
+  }
+
+  if(argc > 6){
+    size_t height_max = (size_t)atol(argv[6]);
+    if(height_max < height) height = height_max;
+  }
+
+  
+  
   size_t min_wh = width > height ? height: width;
   printf("min_wh %f\n", (float)min_wh);
   size_t min = 3 * min_wh / 6; // can adjust scale here. has been 3/6, 3/5, 2/5
