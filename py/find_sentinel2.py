@@ -5,7 +5,9 @@ Query sentinel-2 products over a given point (alternately, a place name). Later:
 import os
 import sys
 import math
-foot_print = 'Intersects(51.0602686,-120.9083258)' # default location: Kamloops
+foot_print = 'Intersects(51.48252764574755,-123.95386296901019)' # bc 	2022-C50155 	52.003216999999999 	-123.13905 	2022-05-05 17:23 	2022-05-30 15:01 	UC 	H 
+
+# foot_print = 'Intersects(51.0602686,-120.9083258)' # default location: Kamloops
 # VICTORIA: (48.4283334, -123.3647222)
 
 fpfn = None
