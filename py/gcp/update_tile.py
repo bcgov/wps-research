@@ -13,6 +13,12 @@ folders without fetching index twice!
 
 
 Note: should update this to include a higher-level folder "by tile ID"
+
+Note: for "error while loading shared libraries: libgeos_c.so.1: cannot open shared object file"
+
+try:
+    sudo apt remove libgeos-c1v5
+    sudo apt install libgeos-c1v5
 '''
 import os
 import sys
