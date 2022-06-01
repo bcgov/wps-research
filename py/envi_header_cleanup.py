@@ -89,3 +89,13 @@ data = ('\n'.join(lines)).strip()
 # print(data)
 open(args[1] + '.bak', 'wb').write(open(args[1]).read().encode())
 open(args[1], 'wb').write(data.encode())
+
+# now trim the band names strings
+band_names = [x.strip() for x in os.popen("python3 ~/GitHub/wps-research/py/envi_header_band_names.py " + args[1]).readlines()]
+samples, lines, bands = read_hdr(args[1])
+run(['python3 ~/GitHub/wps-research/py/envi_header_modify.py', 
+     args[1],
+     lines,
+     samples, 
+     bands] +
+    band_names + ['1'])
