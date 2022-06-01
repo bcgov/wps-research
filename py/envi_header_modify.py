@@ -18,7 +18,8 @@ if not exists(args[1]):
     err('please check input files:\n\t' + args[1] + '\n\t' + args[2])
 
 # need to run this first to make sure the band name fields are where we expect!
-run('python3 ' + pd + 'envi_header_cleanup.py ' + args[1])
+if len(args) < int(nband) + 5:
+    run('python3 ' + pd + 'envi_header_cleanup.py ' + args[1])
 lines = open(args[1]).read().strip().split('\n')
 
 def get_band_names_lines(hdr):
@@ -41,7 +42,7 @@ for i in range(0, len(lines)):
         lines_new.append(line)
 
 # write new header file
-bn_new = args[5:]
+bn_new = args[5: 5 + int(nband)]
 if len(bn_new) != int(nband):
     err('inconsistent input')
 
