@@ -40,3 +40,7 @@ if len(rasters) > 2:
                ofhn]  # 'raster.hdr']
         cmd = ' '.join(cmd)
         run(cmd)
+
+    cmd = ['python3', pd + 'envi_header_cleanup.py',
+            ofhn]
+    run(cmd)
