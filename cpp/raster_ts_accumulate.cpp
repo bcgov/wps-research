@@ -10,8 +10,8 @@ band names strings, if available */
 
 int main(int argc, char ** argv){
   size_t nrow, ncol, nband, np, i, j, k, ii, ik, m, n_dates, date_offset;
-  if(argc < 2) err("raster_ts_accumulate [raster cube] [bands per date] [optional arg: max(result, 1.)] \n");
-  int max_1 = argc > 3;
+  if(argc < 3) err("raster_ts_accumulate [raster cube] [bands per date] [optional arg:red only \n");
+  int red_only = argc > 3;
   size_t bands_per_date = (size_t)atol(argv[2]);
 
   str fn(argv[1]); // input image
@@ -36,17 +36,24 @@ int main(int argc, char ** argv){
   for0(m, n_dates){
     date_offset = np * bands_per_date * m;
     for0(k, bands_per_date){
-      ik = np * k;
-      if(k == 0) for0(i, np) out[i + date_offset] = dat[i + date_offset]; //first band same
+      ik = (np * k) + date_offset;
+      if(m == 0){
+        for0(i, np){
+          out[i + date_offset] = dat[i + date_offset]; //first band same
+        }
+      }
       else{
         for0(i, np){
-          ii = i + ik + date_offset;
+          ii = i + ik;
           out[ii] = dat[ii] + out[ii - one_date_offset]; // add this band + last result
-          if(max_1 && out[ii] > 1.) out[ii] = 1.; // max result = 1.
+          if(out[ii] > 1.){
+            out[ii] = 1.; // max result = 1.
+          }
         }
       }
     }
   }
+
   hwrite(ohn, nrow, ncol, nband, 4, band_names); // write out dimensions to header
   bwrite(out, ofn, nrow, ncol, nband); // write out image
   return 0;
