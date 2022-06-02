@@ -41,7 +41,6 @@ int main(int argc, char ** argv){
 
     for0(i, nrow){
       ix = (i * ncol);
-      printf("date %zu row %zu n_dates %zu lab_date_off %zu labsize %zu\n", m, i, n_dates, lab_date_offset, nrow * ncol * n_dates);
       for0(j, ncol){
         ij = ix + j;
 
@@ -70,7 +69,6 @@ int main(int argc, char ** argv){
             out[ik] = 1. ;
           }
           if(all_zero){
-		  printf("ik %zu date_off %zu nrow *ncol*nband\n", ik, date_offset, nrow*ncol*nband); 
             out[ik] = NAN;
           }
         }
