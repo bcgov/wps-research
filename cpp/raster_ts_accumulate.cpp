@@ -12,6 +12,7 @@ int main(int argc, char ** argv){
   size_t nrow, ncol, nband, np, i, j, k, ii, ik, m, n_dates, date_offset;
   if(argc < 3) err("raster_ts_accumulate [raster cube] [bands per date] [optional arg:red only \n");
   int red_only = argc > 3;
+  cout << "red only" << red_only << endl;
   size_t bands_per_date = (size_t)atol(argv[2]);
 
   str fn(argv[1]); // input image
@@ -48,6 +49,23 @@ int main(int argc, char ** argv){
           out[ii] = dat[ii] + out[ii - one_date_offset]; // add this band + last result
           if(out[ii] > 1.){
             out[ii] = 1.; // max result = 1.
+          }
+        }
+      }
+    }
+  }
+
+  if(red_only){
+    cout << "red" << endl;
+    for0(m, n_dates){
+      date_offset = (np * bands_per_date) * m;
+      for0(k, bands_per_date){
+        if(k > 0){
+          ik = (np * k) + date_offset;
+          for0(i, np){
+            if(out[date_offset + i] > 0.){
+              out[ik+ i] = 0.;
+            }
           }
         }
       }
