@@ -1,4 +1,8 @@
 # Remote Sensing Resources
+## Space agencies
+*[ESA/JAXA/NASA dashboard](https://eodashboard.org/explore?poi=World-SMC)
+* [Japanese Space Agency JAXA: Research](https://earth.jaxa.jp/en/research/projects/index.html)
+* [Jaxa data products](https://www.eorc.jaxa.jp/ALOS/en/dataset/fnf_e.htm)
 ## Key tools
 ### QGIS
 * [QGIS home](https://www.qgis.org/en/site/)
