@@ -81,7 +81,7 @@ int main(int argc, char ** argv){
   bwrite(out, ofn, nrow, ncol, nband);
   bwrite(lab, oln, nrow, ncol, n_dates);
   hwrite(ohn, nrow, ncol, nband);
-  hwrite(olh, nrow, ncol, 1);
+  hwrite(olh, nrow, ncol, n_dates);
   str cmd(str("cp -v ") + hfn + str(" ") + ohn);
   cout << cmd << endl;
   system(cmd.c_str());
