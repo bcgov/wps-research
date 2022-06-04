@@ -1,6 +1,19 @@
+import sys
+from osgeo import ogr
+from osgeo import gdal
+from osgeo import gdalconst
+from misc import err, args, exist
+
+if len(args) < 4:
+    err('python3 shapefile_reproject.py [input shapefile] [output CRS (EPSG)] [output shapefile]')
 # https://gis.stackexchange.com/questions/265589/change-shapefile-coordinate-system-using-python
 
-# this script not yet tested. Might be able to use ogr2ogr
+in_shp = args[1]
+if not exist(in_shp):
+    err('please check input file')
+
+err("implementation not finished")
+sys.exit(1)
 
 in_epsg = 5514
 out_epsg = 4326
