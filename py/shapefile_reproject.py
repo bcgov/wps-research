@@ -41,8 +41,8 @@ except:
     feature = layer.GetNextFeature()
     geom = feature.GetGeometryRef()
     spatialRef = geom.GetSpatialReference()'''
-print("CRS to mATCH:", sr2)
 
+#print("CRS to mATCH:", sr2)
 # proj = osr.SpatialReference(wkt=d.GetProjection())
 # print(proj.GetAttrValue('AUTHORITY',1))
 
@@ -51,13 +51,14 @@ coordTrans = osr.CoordinateTransformation(sr, sr2)
 
 # create the output layer
 outDataSet = driver.CreateDataSource(out_shp)
-outLayer = outDataSet.CreateLayer("reproject", geom_type=ogr.wkbMultiPolygon)
+outLayer = outDataSet.CreateLayer("reproject", sr2, geom_type=ogr.wkbMultiPolygon)
 
 # add fields
 layerDefn = layer.GetLayerDefn()
 for i in range(0, layerDefn.GetFieldCount()):
     fieldDefn = layerDefn.GetFieldDefn(i)
     outLayer.CreateField(fieldDefn)
+    # outLayer.SetSpatialRef(sr2)
 
 # get the output layer's feature definition
 outLayerDefn = outLayer.GetLayerDefn()
@@ -77,4 +78,3 @@ while inFeature:   # get the input geometry
 
 dataset = None  # save and close shapefiles
 outDataSet = None
-
