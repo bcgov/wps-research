@@ -33,12 +33,12 @@ int main(int argc, char ** argv){
     str a(idir + sep() + str("i_") + str(bands[i]));
     str b(idir + sep() + str("q_") + str(bands[i]));
 
-    hread(a + str(".hdr"), nr2, nc2, nb2);
+    hread(hdr_fn(a), nr2, nc2, nb2);
     if(ci++ == 0){
       nr = nr2; nc = nc2; nb = nb2;
     }
     if(nr != nr2 || nc != nc2 || nb != nb2) err("image dimensions mismatch");
-    hread(b + str(".bin.hdr"), nr2, nc2, nb2);
+    hread(hdr_fn(b), nr2, nc2, nb2);
     if(nr != nr2 || nc != nc2 || nb != nb2) err("image dimensions mismatch");
   }
 
