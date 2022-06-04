@@ -7,20 +7,14 @@ To print out all keys of a feature:
 import os
 import sys
 import json
-from osgeo import gdal # need gdal / python installed!
 from osgeo import ogr
+from osgeo import gdal
 from osgeo import gdalconst
 
-def err(m):
-    print("Error: " + m); sys.exit(1)
-
-# parse arguments 
-args = sys.argv
+from misc import err, args
 if len(args) < 2:
     err("Error: shapefile_info.py [input shapefile .shp] [optional parameter: full]")
-
 print_all = 'all' in args
-
 InputVector = args[1] # shapefile to rasterize
 
 # Open Shapefile
@@ -28,6 +22,8 @@ Shapefile = ogr.Open(InputVector)
 layer = Shapefile.GetLayer()
 layerDefinition = layer.GetLayerDefn()
 feature_count = layer.GetFeatureCount()
+spatialRef = layer.GetSpatialRef()
+print("CRS:", spatialRef)
 
 def records(layer):
     # generator

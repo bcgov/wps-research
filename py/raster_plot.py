@@ -141,7 +141,7 @@ if __name__ == '__main__':
             mpl.rcParams['xtick.color'] = COLOR
             mpl.rcParams['ytick.color'] = COLOR
     
-        base_in = 12.
+        base_in = 20.
         fig = plt.figure(frameon=True,
                          figsize=(base_in, base_in * float(lines) / float(samples)))
         ax = fig.add_subplot(1, 1, 1)
