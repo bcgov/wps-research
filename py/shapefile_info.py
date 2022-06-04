@@ -1,3 +1,9 @@
+'''prints out info from a shapefile. Defaults to printing out "properties" of features.
+    python3 shapefile_info.py shapefile.shp
+
+To print out all keys of a feature:
+    python3 shapefile_info.py shapefile.shp all
+'''
 import os
 import sys
 import json
@@ -11,7 +17,9 @@ def err(m):
 # parse arguments 
 args = sys.argv
 if len(args) < 2:
-    err("Error: shapefile_info.py [input shapefile .shp]")
+    err("Error: shapefile_info.py [input shapefile .shp] [optional parameter: full]")
+
+print_all = 'all' in args
 
 InputVector = args[1] # shapefile to rasterize
 
@@ -32,7 +40,12 @@ print("feature","type", "x","y")
 features = records(layer)
 feature_names, feature_ids = [], []
 for f in features:  
-    geom = "" #  print(f.keys())
+    geom = "" 
+    if print_all:
+        print(f.keys())
+    for key in f.keys():
+        if key=='properties' or print_all:
+            print(f[key])
     try:
         geom = f['geometry']
     except Exception:
@@ -52,10 +65,11 @@ for f in features:
                  geom['type'],
                  geom['coordinates'][0],
                  geom['coordinates'][1]]
-        print(','.join([str(x) for x in stuff]))
+        #print(','.join([str(x) for x in stuff]))
     else:
-        print(geom['type'])
+        #print(geom['type'])
         for c in geom['coordinates']:
             for d in c:
-                print("  " + str(d))
+                pass
+                #print("  " + str(d))
 
