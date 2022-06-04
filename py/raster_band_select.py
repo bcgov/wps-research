@@ -5,9 +5,9 @@ from misc import args, sep, exists, pd, run, hdr_fn, band_names, err, read_hdr
 
 if len(args) < 3:
     err('raster_band_select.py [input binary file] ' +
-        '[string to match band names e.g. 20210721 for jul 21 2021')
+        '[string to match band names e.g. 20210721 for jul 21 2021] [additional string to match on..]')
 
-fn, s = args[1], args[2]
+fn, s = args[1], args[2:]
 cd = pd + '..' + sep + 'cpp' + sep
 
 hfn = hdr_fn(fn)
@@ -17,7 +17,11 @@ nrow, ncol = lines, samples
 bi = []
 bn = band_names(hfn)
 for i in range(len(bn)):
-    if len(bn[i].split(s)) > 1:
+    match = False
+    for pattern in s:
+        if len(bn[i].split(pattern)) > 1:
+            match = True
+    if match:
         bi.append(i)
         print('  ', str(i + 1), '  ', bn[i])
 
@@ -29,8 +33,8 @@ for i in bi:
     print(f)
 fni = [fn + '_' + str(i + 1).zfill(3) + '.bin' for i in bi]
 bands = str(len(bi))  # number of bands to write
-ofn = fn + '_' + s + '.bin'
-ohn = fn + '_' + s + '.hdr'
+ofn = fn + '_band_select.bin'
+ohn = fn + '_band_select.hdr'
 run('cp ' + hfn + ' ' + ohn)
 
 c = ['python3',
