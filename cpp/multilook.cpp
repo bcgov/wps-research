@@ -1,10 +1,10 @@
-/* multilook a multispectral image or radar stack, square window, input
+/* multilook a multispectral image or radar stack, square or rectangular window, input
 assumed ENVI type-4 32-bit IEEE standard floating-point format, BSQ
 interleave */
 #include"misc.h"
 
 int main(int argc, char ** argv){
-  if(argc < 3) err("multilook [input binary file name] [multilook factor] # [horiz multilook factor]");
+  if(argc < 3) err("multilook [input binary file name] [vertical or square multilook factor] # [optional: horiz multilook factor]");
 
   str fn(argv[1]); // input file name
   str hfn(hdr_fn(fn)); // auto-detect header file name
