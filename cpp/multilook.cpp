@@ -4,19 +4,24 @@ interleave */
 #include"misc.h"
 
 int main(int argc, char ** argv){
-  if(argc < 3) err("multilook [input binary file name] [multilook factor] ");
+  if(argc < 3) err("multilook [input binary file name] [multilook factor] # [horiz multilook factor]");
 
   str fn(argv[1]); // input file name
   str hfn(hdr_fn(fn)); // auto-detect header file name
-  size_t nrow, ncol, nband, np, i, j, k, n, ip, jp, ix1, ix2; // variables
+  size_t nrow, ncol, nband, np, i, j, k, n, m, ip, jp, ix1, ix2; // variables
   hread(hfn, nrow, ncol, nband); // read header
   np = nrow * ncol; // number of input pix
-  n = (size_t) atoi(argv[2]);
-  printf("multilook factor: %zu\n", n); // read mlk factor
+  n = (size_t) atol(argv[2]);
+  m = n;
+  if(argc > 3){
+    m = (size_t)atol(argv[3]);
+  }
+  printf("multilook factor (row): %zu\n", n); // read mlk factor
+  printf("multilook factor (col): %zu\n", m);
 
   float * dat = bread(fn, nrow, ncol, nband); // load floats to array
   size_t nrow2 = nrow / n; // output image row dimensions
-  size_t ncol2 = ncol / n;
+  size_t ncol2 = ncol / m;
   size_t np2 = nrow2 * ncol2; // allocate space for output
   size_t nf2 = np2 * nband;
 
@@ -27,7 +32,7 @@ int main(int argc, char ** argv){
   for0(i, nrow){
     ip = i / n;
     for0(j, ncol){
-      jp = j / n;
+      jp = j / m;
       for0(k, nband){
         ix1 = k * nrow * ncol + i * ncol + j;
         ix2 = k * nrow2 * ncol2 + ip * ncol2 + jp;
@@ -42,6 +47,9 @@ int main(int argc, char ** argv){
 
   // divide by n
   for0(ip, nrow2){
+    if(ip % 1000 == 0){
+      printf("row %zu of %zu\n", ip+1, nrow2);
+    }
     for0(jp, ncol2){
       for0(k, nband){
         ix1 = (k * np2) + (ip * ncol2) + jp;
