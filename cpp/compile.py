@@ -17,6 +17,7 @@ for f in files:
     if fn != "misc":
         if f[:4] == 'cuda':
             s = '\ntest ! -f ' + fn + '.exe && nvcc ' + fn + '.cpp misc.cpp -o ' + fn + '.exe'
+            print(s)
         else:
             s = '\ntest ! -f ' + fn + '.exe && g++ -w -O4 ' + fn + '.cpp  misc.cpp -o ' + fn + '.exe -lpthread'
         s += '' if ((i + 1) % n_cpu == 0) else ' &'
