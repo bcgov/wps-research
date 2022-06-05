@@ -12,9 +12,13 @@ files = [f.strip() for f in files]
 of = open('compile.sh', 'wb')
 of.write('#!/usr/bin/env bash'.encode())
 for f in files:
+    s = ''
     fn = f[:-4]
     if fn != "misc":
-        s = '\ntest ! -f ' + fn + '.exe && g++ -w -O4 ' + fn + '.cpp  misc.cpp -o ' + fn + '.exe -lpthread'
+        if f[:4] == 'cuda':
+            s = '\ntest ! -f ' + fn + '.exe && nvcc ' + fn + '.cpp misc.cpp -o ' + fn + '.exe'
+        else:
+            s = '\ntest ! -f ' + fn + '.exe && g++ -w -O4 ' + fn + '.cpp  misc.cpp -o ' + fn + '.exe -lpthread'
         s += '' if ((i + 1) % n_cpu == 0) else ' &'
         of.write(s.encode())
         i += 1
