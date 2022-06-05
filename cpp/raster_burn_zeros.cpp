@@ -38,7 +38,7 @@ int main(int argc, char ** argv){
       if(isnan(d) || isinf(d)) is_nan = true;
     }
 
-    if(is_nan || (is_zero && nband1 > 1)){
+    if(is_nan || (is_zero && nband > 1)){
       for0(k, nband2) dat2[i + k * np] = NAN; // set raster #2 to NAN
     }
     else{
