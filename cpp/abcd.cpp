@@ -31,7 +31,7 @@ inline int is_bad(float * dat, size_t i, size_t n_b){
     if(isnan(t) || isinf(t)) return true;
     if(t != 0) zero = false;
   }
-  return zero;
+  return (n_b > 1 && zero); // 0 in 1-band product isn't bad
 }
 
 int main(int argc, char** argv){
