@@ -48,10 +48,10 @@ int main(int argc, char ** argv){
       if(zero && nband > 1){
       }
       else{
-        ix_j = (ip * ncol2) + jp;
+        ix_ip = (ip * ncol2) + jp;
         for0(k, nband){
           ix1 = (k * np) + ix_i; //(i * ncol) + j;
-          ix2 = (k * np2) + ix_j; //(ip * ncol2) + jp;
+          ix2 = (k * np2) + ix_ip; //(ip * ncol2) + jp;
           d = dat[ix1];
           if(ix2 < nf2 && !isnan(d) && !isinf(d)){
             dat2[ix2] += d;
@@ -80,7 +80,6 @@ int main(int argc, char ** argv){
   hwrite(ohfn, nrow2, ncol2, nband); // write header
   bwrite(dat2, ofn, nrow2, ncol2, nband); // write output
 
-  fclose(f);
   free(dat);
   free(dat2);
   free(count);
