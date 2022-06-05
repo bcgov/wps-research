@@ -2,8 +2,7 @@
 assumed ENVI type-4 32-bit IEEE standard floating-point format, BSQ
 interleave
 
-20220506 consider all-zero (if nbands > 1) equivalent to NAN / no-data
-*/
+20220506 consider all-zero (if nbands > 1) equivalent to NAN / no-data */
 #include"misc.h"
 
 int main(int argc, char ** argv){
@@ -11,35 +10,34 @@ int main(int argc, char ** argv){
 
   str fn(argv[1]); // input file name
   str hfn(hdr_fn(fn)); // auto-detect header file name
-  size_t nrow, ncol, nband, np, i, j, k, n, m, ip, jp, ix1, ix2, ix_i, ix_ip; // variables
+  
+  int zero;
+  float d, *dat, *dat2, *count;
+  size_t nrow, ncol, nband, np, i, j, k, n, m, ix1;
+  size_t nrow2, ncol2, np2, ip, jp, ix2, ix_i, ix_ip, nf2;
+  
   hread(hfn, nrow, ncol, nband); // read header
   np = nrow * ncol; // number of input pix
-  n = (size_t) atol(argv[2]);
-  
-  m = n;
+  n = (size_t) atol(argv[2]); // multilook factor
+  m = n;  // assume proportional unless specified
   if(argc > 3) m = (size_t)atol(argv[3]);
   printf("multilook factor (row): %zu\n", n);
   printf("multilook factor (col): %zu\n", m);
   
-  float * dat = bread(fn, nrow, ncol, nband);
-  size_t nrow2 = nrow / n; // output image row dimensions
-  size_t ncol2 = ncol / m;
-  size_t np2 = nrow2 * ncol2; // allocate space for output
-  size_t nf2 = np2 * nband;
+  dat = bread(fn, nrow, ncol, nband);
+  (nrow2 = nrow / n), (ncol2 = ncol / m);
+  np2 = nrow2 * ncol2;
+  nf2 = np2 * nband; 
 
-  float d;
-  int zero = true;
-  float * dat2 = (float *) falloc(nf2);
-  float * count = (float *) falloc(nf2);
-  for0(i, nf2) count[i] = dat2[i] = 0.; // set to zero
+  zero = true;
+  dat2 = (float *) falloc(nf2);
+  count = (float *) falloc(nf2);
+  for0(i, nf2) count[i] = dat2[i] = 0.;
 
   for0(i, nrow){
     ip = i / n;
     for0(j, ncol){
-      jp = j / m;
-      ix_i = (i * ncol) + j;
-      
-      zero = true;  // consider this pixel if non-zero (or nband == 1)
+      (jp = j / m), (ix_i = (i * ncol) + j), zero = true;
       for0(k, nband){
         if(dat[k * np + ix_i] != 0.){
           zero = false;
@@ -50,8 +48,7 @@ int main(int argc, char ** argv){
       else{
         ix_ip = (ip * ncol2) + jp;
         for0(k, nband){
-          ix1 = (k * np) + ix_i; //(i * ncol) + j;
-          ix2 = (k * np2) + ix_ip; //(ip * ncol2) + jp;
+          (ix1 = (k * np) + ix_i), (ix2 = (k * np2) + ix_ip);
           d = dat[ix1];
           if(ix2 < nf2 && !isnan(d) && !isinf(d)){
             dat2[ix2] += d;
@@ -62,13 +59,12 @@ int main(int argc, char ** argv){
     }
   }
 
-  // divide by n
   for0(ip, nrow2){
     if(ip % 1000 == 0) printf("row %zu of %zu\n", ip+1, nrow2);
     
     for0(jp, ncol2){
       for0(k, nband){
-        ix2 = (k * np2) + (ip * ncol2) + jp;
+        ix2 = (k * np2) + (ip * ncol2) + jp;  // divide by n
         dat2[ix2] = (count[ix2] > 0.)? (dat2[ix2] / count[ix2]): NAN;
       }
     }
