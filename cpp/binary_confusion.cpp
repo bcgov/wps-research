@@ -50,7 +50,7 @@ int main(int argc, char ** argv){
   str fphfn(fn+ str("_fp.hdr"));
 
   
-  TN = TP = FN = FP = 0.;
+  N = P = TN = TP = FN = FP = 0.;
   // true negatives
   hwrite(tnhfn, nrow, ncol, 1);
   FILE * f = fopen(tnfn.c_str(), "wb");
@@ -123,8 +123,9 @@ int main(int argc, char ** argv){
 
   printf("P,N,TP,TN,FP,FN\n");
   float fnp = 100. / ((float)np);
+  printf("fnp %f\n", fnp);
+  printf("%zu\n", np);
   printf("%f,%f,%f,%f,%f,%f\n", P*fnp, N*fnp, TP*fnp, TN*fnp, FP*fnp, FN*fnp);
-
   printf("TPR=%f\n", TP/P); // true positive rate
   printf("TNR=%f\n", TN/N); // true negative rate
   printf("PPV=%f\n", TP/(TP + FP)); // positive predictive value
