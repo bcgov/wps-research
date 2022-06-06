@@ -2,14 +2,17 @@
 
 Assume that no relabeling is required
 
-map tp, tn, fn, fp! */
+map tp, tn, fn, fp!
+
+20220605: note: stats are calculated only where classification data raster, aren't nodata
+*/
 #include"misc.h"
 int main(int argc, char ** argv){
   if(argc < 3){
     err("binary_confusion [input binary class file name] [input ground reference file name]");
   }
 
-  float d, c_tn, c_tp, c_fn, c_fp, TN, TP, FN, FP; // confusion matrix params
+  float d, c_tn, c_tp, c_fn, c_fp, TN, TP, FN, FP, N, P; // confusion matrix params
   c_tn = c_tp = c_fn = c_fp = 0.;
 
   str fn(argv[1]); // input file name
@@ -46,6 +49,7 @@ int main(int argc, char ** argv){
   str fpfn(fn + str("_fp.bin"));
   str fphfn(fn+ str("_fp.hdr"));
 
+  
   TN = TP = FN = FP = 0.;
   // true negatives
   hwrite(tnhfn, nrow, ncol, 1);
@@ -57,6 +61,12 @@ int main(int argc, char ** argv){
     }
     else{
       d = ((dat[i] == cdat[i] && dat[i] == 0.)? 1. : 0);
+      if(cdat[i] == 1){
+	      P += 1.;
+      }
+      if(cdat[i] == 0.){
+	      N += 1.;
+      }
     }
     fwrite(&d, sizeof(float), 1, f);
     if(d == 1.) TN += 1.;
@@ -111,8 +121,25 @@ int main(int argc, char ** argv){
   }
   fclose(f);
 
-  printf("TP,TN,FP,FN\n");
+  printf("P,N,TP,TN,FP,FN\n");
   float fnp = 100. / ((float)np);
-  printf("%f,%f,%f,%f\n", TP*fnp, TN*fnp, FP*fnp, FN*fnp);
+  printf("%f,%f,%f,%f,%f,%f\n", P*fnp, N*fnp, TP*fnp, TN*fnp, FP*fnp, FN*fnp);
+
+  printf("TPR=%f\n", TP/P); // true positive rate
+  printf("TNR=%f\n", TN/N); // true negative rate
+  printf("PPV=%f\n", TP/(TP + FP)); // positive predictive value
+  printf("NPV=%f\n", TN/(TN + FN)); // negative predictive value
+  printf("FNR=%f\n", FN/P); // false negative rate
+  printf("FPR=%f\n", FP/N); // false positive rate
+  printf("FDR=%f\n", FP/(FP + TP)); // false discovery rate
+  printf("FOR=%f\n", FN/(FN + TN)); // false omission rate
+  printf("PLR=%f\n", (TP/P) / (FP/N)); // positive likelihood ratio
+  printf("NLR=%f\n", (FN/P) / (TN/N)); // negative likelihood ratio
+  printf("ACC=%f\n", (TP + TN) / (P + N)); // accuracy
+  printf("BA =%f\n", ((TP/P) + (TN/N))/2.); // balanced accuracy 
+  printf("F1 =%f\n", 2.* TP / ((2.* TP) + FP + FN)); // f1 score
+  printf("BM =%f\n", (TP/P) + (TN/N) + 1.); // bookmaker informedness
+  printf("MK =%f\n", ( TP/(TP + FP)) + (TN/(TN + FN)) -1.); // markedness
+
   return 0;
 }
