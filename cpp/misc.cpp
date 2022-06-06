@@ -779,14 +779,7 @@ vector<string> parse_band_names(string fn){
   size_t bni = -1; // band names start index
   vector<string> lines(readLines(fn)); // read header file
   for(vector<string>::iterator it = lines.begin(); it != lines.end(); it++){
-    //cout << "\t" << *it << endl;
     vector<string> w(split(*it, ' '));
-    /*
-    for(vector<string>::iterator it2 = w.begin(); it2 != w.end(); it2++){
-      cout << "\t\t" << *it2 << endl;
-    }
-    */
-    // cout << w << endl;
     if(w.size() >= 2){
       if((w[0] == band) && (w[1] == names)){
         bni = ci;
@@ -800,17 +793,14 @@ vector<string> parse_band_names(string fn){
   vector<string> w(split(lines[bni], '{')); // parse first band name
   string bn(w[1]);
   bn = trim2(bn, ',');
-  //cout << bn << endl;
   band_names.push_back(bn);
 
   if(nb > 1){
-
     if(nb > 2){
       // parse middle band names
       for(ci = bni + 1; ci < lines.size() - 1; ci++){
         str line(lines[ci]);
         line = trim2(line, ',');
-        //cout << line << endl;
         band_names.push_back(line);
       }
     }
