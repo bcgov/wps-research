@@ -86,8 +86,8 @@ int main(int argc, char ** argv){
 
   cudaMalloc(&cbp, np * sizeof(int));
   cudaMalloc(&cbp2, np2 * sizeof(int));
-  cudaMemcpy(cbp, bp, np * sizeof(int));
-  cudaMemcpy(cbp2, bp2, np2 * sizeof(int));
+  //cudaMemcpy(&cbp, bp, np * sizeof(int));
+  //cudaMemcpy(&cbp2, bp2, np2 * sizeof(int));
 
 
   cudaMalloc(&cA, nr[0] * nc[0] * nb[0] * sizeof(float));
