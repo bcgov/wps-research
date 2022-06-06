@@ -1,24 +1,27 @@
 #include"misc.h"
 /* run system command and collect results */
 std::string exec(const char* cmd) {
-    char buffer[128];
-    std::string result = "";
-    FILE* pipe = popen(cmd, "r");
-    if (!pipe) throw std::runtime_error("popen() failed!");
-    try {
-        while (fgets(buffer, sizeof buffer, pipe) != NULL) {
-            result += buffer;
-        }
-    } catch (...) {
-        pclose(pipe);
-        throw;
+  char buffer[128];
+  std::string result = "";
+  FILE* pipe = popen(cmd, "r");
+  if (!pipe){
+	  throw std::runtime_error("popen() failed!");
+  }
+  try{
+    while(fgets(buffer, sizeof buffer, pipe) != NULL){
+      result += buffer;
     }
+  }
+  catch (...){
     pclose(pipe);
-    return result;
+    throw;
+  }
+  pclose(pipe);
+  return result;
 }
 
 bool not_space(int data){
-    return !std::isspace(data);
+  return !std::isspace(data);
 }
 
 string cwd(){
@@ -65,16 +68,15 @@ void dbg(char c, int start_pos, int end_pos, str action, bool inside_quotes){
 
 /*
 #include"misc.cpp"
-int main(int argc, char ** argv){
-  str data("1,\",,2,3\",,,hello,12345,\"{12,12,12}\",word");
-  cout << "[" << data << "]" << endl;
-  cout << split(data) << endl;
-  vector<str> ss(split_special(data));
-  cout << "good:"<< ss << endl;
-  cout << "bad:" << split(data) << endl;
-  cout << data << endl;
-  return 0;
-}
+int main(int argc, char ** argv)
+str data("1,\",,2,3\",,,hello,12345,\"{12,12,12}\",word");
+cout << "[" << data << "]" << endl;
+cout << split(data) << endl;
+vector<str> ss(split_special(data));
+cout << "good:"<< ss << endl;
+cout << "bad:" << split(data) << endl;
+cout << data << endl;
+return 0;
 */
 
 vector<string> split_special(string s){
@@ -288,7 +290,7 @@ void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband, size_t data_type){
   hf << "interleave = bsq" << endl;
   hf << "byte order = 0" << endl;
   hf << "band names = {band 1";
-    size_t i;
+  size_t i;
   for0(i, nband - 1){
     hf << ",\n" << "band " << i + 2;
   }
@@ -312,7 +314,7 @@ void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband, size_t data_type, v
   hf << "byte order = 0" << endl;
   hf << "band names = {";
   hf << bandNames[0];
-    size_t i;
+  size_t i;
   for0(i, nband - 1){
     hf << ",\n" << bandNames[i + 1];
   }
@@ -353,9 +355,9 @@ double * dalloc(size_t nd){
   return (double *) alloc(nd * (size_t)sizeof(double));
 }
 
-// read bsq binary file  (assumed float)
+// read bsq binary file (assumed float)
 float * bread(str bfn, size_t nrow, size_t ncol, size_t nband){
-  FILE * f = ropen(bfn); 
+  FILE * f = ropen(bfn);
   size_t nf = nrow * ncol * nband;
   float * dat = falloc(nf);
   size_t nr = fread(dat, nf * (size_t)sizeof(float), 1, f);
@@ -390,7 +392,7 @@ void bwrite(float * d, str bfn, size_t nrow, size_t ncol, size_t nband){
 }
 
 /* append to binary file. Set start to true, to clear the file:
-     e.g. on a first iteration*/
+e.g. on a first iteration*/
 void bappend(float * d, FILE * f, size_t n_float){
   size_t nw = fwrite(d, sizeof(float), n_float, f);
   if(nw != n_float){
@@ -526,7 +528,6 @@ size_t * ints_read(str fn){
   return value;
 }
 
-
 void float_write(float * d, size_t n, str fn){
   FILE * f = wopen(fn);
   size_t nr = fwrite(d, sizeof(float), n, f);
@@ -578,7 +579,7 @@ void * pt_worker_fun(void * arg){
     mtx_lock(&pt_nxt_j_mtx); // try to pick up a job
     my_nxt_j = pt_nxt_j ++; // index of data this thread should pick up if it can
     mtx_unlock(&pt_nxt_j_mtx);
-    if(my_nxt_j >= pt_end_j) return(NULL);  // cprint(str("\texit thread ") + to_string(k));
+    if(my_nxt_j >= pt_end_j) return(NULL); // cprint(str("\texit thread ") + to_string(k));
     //if(my_nxt_j % 10000 == 0) cprint(to_string(my_nxt_j));
     pt_eval(my_nxt_j); // perform action segment
   }
@@ -617,7 +618,6 @@ vector< vector<str> > read_csv(str fn, vector<str> & hdr){
   return output; // n.b., we assumed CSV was simple and well-formed (no quotes, same number of fields per line, etc).
 }
 
-
 vector<string> parseHeaderFile(string hfn, size_t & NRow, size_t & NCol, size_t & NBand){
   vector<string> bandNames;
   if(!exists(hfn)){
@@ -641,8 +641,8 @@ vector<string> parseHeaderFile(string hfn, size_t & NRow, size_t & NCol, size_t 
         }
         if(strncmp(strip_space(splitLine[0]).c_str(), "band names", 10) == 0){
           string bandNameList(trim2(trim2(strip_space(splitLine[1]),
-			      ('{')),
-			      ('}')));
+          ('{')),
+          ('}')));
           bandNames = split(bandNameList, ',');
         }
       }
@@ -680,7 +680,6 @@ vector<string> readLines(string fn){
 }
 // should probably compare this with the above..
 */
-
 
 // need to replace string with SA concept, to make this work! Use "binary string" instead of string
 vector<string> split(char * s, size_t s_len, char delim){
@@ -770,7 +769,9 @@ string strip_space(string s){
 }
 
 vector<string> parse_band_names(string fn){
+  size_t nr, nc, nb;
   if(!exists(fn)) err("parse_band_names: header file not found");
+  hread(fn, nr, nc, nb);
 
   str band("band");
   str names("names");
@@ -782,7 +783,7 @@ vector<string> parse_band_names(string fn){
     vector<string> w(split(*it, ' '));
     /*
     for(vector<string>::iterator it2 = w.begin(); it2 != w.end(); it2++){
-       cout << "\t\t" << *it2 << endl;
+      cout << "\t\t" << *it2 << endl;
     }
     */
     // cout << w << endl;
@@ -802,19 +803,24 @@ vector<string> parse_band_names(string fn){
   //cout << bn << endl;
   band_names.push_back(bn);
 
-  // parse middle band names
-  for(ci = bni + 1; ci < lines.size() - 1; ci++){
-    str line(lines[ci]);
-    line = trim2(line, ',');
-    //cout << line << endl;
-    band_names.push_back(line);
-  }
+  if(nb > 1){
 
-  // parse last band name
-  if(true){
-    str w(lines[lines.size() -1]);
-    w = trim2(w, '}');
-    band_names.push_back(w);
+    if(nb > 2){
+      // parse middle band names
+      for(ci = bni + 1; ci < lines.size() - 1; ci++){
+        str line(lines[ci]);
+        line = trim2(line, ',');
+        //cout << line << endl;
+        band_names.push_back(line);
+      }
+    }
+
+    // parse last band name
+    if(true){
+      str w(lines[lines.size() -1]);
+      w = trim2(w, '}');
+      band_names.push_back(w);
+    }
   }
   return band_names;
 }
@@ -826,14 +832,14 @@ size_t hread(str hfn, size_t & nrow, size_t & ncol, size_t & nband, vector<strin
 }
 
 bool contains(string s1, string s2){
- // does one string contain another as substring?
- // 	cout << "\tcontains(" << s1 << "," << s2 << ")=" << (s1.find(s2) != std::string::npos) << endl;
-	return s1.find(s2) != std::string::npos;
+  // does one string contain another as substring?
+  // cout << "\tcontains(" << s1 << "," << s2 << ")=" << (s1.find(s2) != std::string::npos) << endl;
+  return s1.find(s2) != std::string::npos;
 }
 
 void status(size_t i, size_t of){
   cprint(to_string(100.* ((float)(i+1) / (float)of)) + str(" % ") +
-         to_string(i) + str(" / ") + to_string(of));
+  to_string(i) + str(" / ") + to_string(of));
 }
 
 void write_config(str fn, size_t nrow, size_t ncol){
@@ -849,4 +855,3 @@ void write_config(str fn, size_t nrow, size_t ncol){
   fprintf(f, "PolarType\nfull");
   fclose(f);
 }
-
