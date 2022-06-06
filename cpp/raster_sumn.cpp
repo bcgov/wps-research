@@ -1,4 +1,4 @@
-/* 20220605 multiply N-rasters (equal dimensions) together. Adapted from:
+/* 20220605 add N-rasters (equal dimensions) together. Adapted from:
 
 raster_mult.cpp: band math, multiply hyperspectral cubes together
 adapted from raster_sum.cpp 20220302 */
@@ -8,7 +8,7 @@ int main(int argc, char ** argv){
   size_t nrow, ncol, nband, np, nf, i, k, nrow2, ncol2, nband2;
 
   if(argc < 4){
-    err("raster_multn.exe [raster cube1] .. [raster cube #N] [out cube]\n");
+    err("raster_sum.exe [raster cube1] .. [raster cube #N] [out cube]\n");
   }
   int n_rasters = argc - 2;
   str fn(argv[1]); // input image file name
@@ -41,11 +41,11 @@ int main(int argc, char ** argv){
   str ofn(argv[argc -1]); // output file name
   str ohn(hdr_fn(ofn, true)); // out header file name
 
-  for0(i, nf) out[i] = 1.;
+  for0(i, nf) out[i] = 0.;
 
   for0(i, n_rasters){
     float * dat = bread(str(argv[1 + i]), nrow, ncol, nband);
-    for0(k, nf) out[k] *= dat[k];
+    for0(k, nf) out[k] += dat[k];
     free(dat);
   }
 
@@ -54,7 +54,7 @@ int main(int argc, char ** argv){
   for0(i, n_rasters){
     if(i > 0){
       for0(k, nband){
-        bn[k] += (str(" * ") + bnames[i][k]);
+        bn[k] += (str(" + ") + bnames[i][k]);
       }
     }
   }
