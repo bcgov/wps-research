@@ -2,16 +2,14 @@
 
 Assume that no relabeling is required
 
-map tp, tn, fn, fp!
-
-*/
+map tp, tn, fn, fp! */
 #include"misc.h"
 int main(int argc, char ** argv){
+  if(argc < 3){
+    err("binary_confusion [input binary class file name] [input ground reference file name]");
+  }
 
-  if(argc < 3) err("binary_confusion [input binary class file name] [input ground reference file name]");
-
-  // binary confusion matrix
-  float d, c_tn, c_tp, c_fn, c_fp;
+  float d, c_tn, c_tp, c_fn, c_fp, TN, TP, FN, FP; // confusion matrix params
   c_tn = c_tp = c_fn = c_fp = 0.;
 
   str fn(argv[1]); // input file name
@@ -34,7 +32,7 @@ int main(int argc, char ** argv){
 
   // read data into float array
   float * dat = bread(fn, nrow, ncol, nband);
-  float * cdat= bread(cfn, nrow, ncol, nband);
+  float * cdat = bread(cfn, nrow, ncol, nband);
 
   str tnfn(fn + str("_tn.bin"));
   str tnhfn(fn+ str("_tn.hdr"));
@@ -48,12 +46,20 @@ int main(int argc, char ** argv){
   str fpfn(fn + str("_fp.bin"));
   str fphfn(fn+ str("_fp.hdr"));
 
+  TN = TP = FN = FP = 0.;
   // true negatives
   hwrite(tnhfn, nrow, ncol, 1);
   FILE * f = fopen(tnfn.c_str(), "wb");
   for0(i, np){
-    d = ((dat[i] == cdat[i] && dat[i] == 0.)? 1. : 0);
+    d = dat[i];
+    if(isnan(d)){
+      d = NAN;
+    }
+    else{
+      d = ((dat[i] == cdat[i] && dat[i] == 0.)? 1. : 0);
+    }
     fwrite(&d, sizeof(float), 1, f);
+    if(d == 1.) TN += 1.;
   }
   fclose(f);
 
@@ -61,8 +67,15 @@ int main(int argc, char ** argv){
   hwrite(tphfn, nrow, ncol, 1);
   f = fopen(tpfn.c_str(), "wb");
   for0(i, np){
-    d = ((dat[i] == cdat[i] && dat[i] == 1.) ? 1. : 0);
+    d = dat[i];
+    if(isnan(d)){
+      d = NAN;
+    }
+    else{
+      d = ((dat[i] == cdat[i] && dat[i] == 1.) ? 1. : 0);
+    }
     fwrite(&d, sizeof(float), 1, f);
+    if(d == 1.) TP += 1.;
   }
   fclose(f);
 
@@ -70,8 +83,15 @@ int main(int argc, char ** argv){
   hwrite(fnhfn, nrow, ncol, 1);
   f = fopen(fnfn.c_str(), "wb");
   for0(i, np){
-    d = ((dat[i] != cdat[i] && dat[i] == 0.) ? 1. : 0);
+    d = dat[i];
+    if(isnan(d)){
+      d = NAN;
+    }
+    else{
+      d = ((dat[i] != cdat[i] && dat[i] == 0.) ? 1. : 0);
+    }
     fwrite(&d, sizeof(float), 1, f);
+    if(d == 1.) FN += 1.;
   }
   fclose(f);
 
@@ -79,10 +99,19 @@ int main(int argc, char ** argv){
   hwrite(fphfn, nrow, ncol, 1);
   f = fopen(fpfn.c_str(), "wb");
   for0(i, np){
-    d = ((dat[i] != cdat[i] && dat[i] == 1.) ? 1. : 0);
+    d = dat[i];
+    if(isnan(d)){
+      d = NAN;
+    }
+    else{
+      d = ((dat[i] != cdat[i] && dat[i] == 1.) ? 1. : 0);
+    }
     fwrite(&d, sizeof(float), 1, f);
+    if(d == 1.) FP += 1.;
   }
   fclose(f);
 
+  printf("TP,TN,FP,FN\n");
+  printf("%f,%f,%f,%f\n", TP*100., TN*100., FP*100, FN*100.);
   return 0;
 }
