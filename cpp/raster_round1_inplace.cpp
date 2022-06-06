@@ -1,4 +1,5 @@
-/* 20220605 round raster to 1. */
+/* 20220605 round raster to 1. E.g. if we had resampled a {0,1}
+ * mask by multilooking, this would put the values back in {0,1} */
 #include"misc.h"
 
 int main(int argc, char ** argv){
