@@ -66,6 +66,7 @@ int main(int argc, char** argv){
   for0(i, np2){
     bp2[i] = is_bad(y[2], i, nb[2]);
     if(bp2[i]) n_bad ++;
+    x[i] = NAN;
   }
   if(n_bad == np2)
     err("no good pix: C");
