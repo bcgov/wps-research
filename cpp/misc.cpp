@@ -822,6 +822,9 @@ vector<string> parse_band_names(string fn){
       band_names.push_back(w);
     }
   }
+  for0(ci, band_names.size()){
+    trim(band_names[ci], '}');
+  }
   return band_names;
 }
 
