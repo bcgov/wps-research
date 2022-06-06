@@ -112,6 +112,7 @@ int main(int argc, char ** argv){
   fclose(f);
 
   printf("TP,TN,FP,FN\n");
-  printf("%f,%f,%f,%f\n", TP*100., TN*100., FP*100, FN*100.);
+  float fnp = 100. / ((float)np);
+  printf("%f,%f,%f,%f\n", TP*fnp, TN*fnp, FP*fnp, FN*fnp);
   return 0;
 }
