@@ -16,6 +16,7 @@ int main(int argc, char ** argv){
   size_t nrow, ncol, nband, np, i, j, k, n, m, ix1;
   size_t nrow2, ncol2, np2, ip, jp, ix2, ix_i, ix_ip, nf2;
   
+  vector<str> band_names(parse_band_names(hfn));
   hread(hfn, nrow, ncol, nband); // read header
   np = nrow * ncol; // number of input pix
   n = (size_t) atol(argv[2]); // multilook factor
@@ -73,7 +74,7 @@ int main(int argc, char ** argv){
   str ofn(fn + str("_mlk.bin")); // write output file
   str ohfn(fn + str("_mlk.hdr"));
   printf("nr2 %zu nc2 %zu nband %zu\n", nrow2, ncol2, nband);
-  hwrite(ohfn, nrow2, ncol2, nband); // write header
+  hwrite(ohfn, nrow2, ncol2, nband, 4, band_names); // write header
   bwrite(dat2, ofn, nrow2, ncol2, nband); // write output
 
   free(dat);
