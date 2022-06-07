@@ -121,26 +121,26 @@ int main(int argc, char ** argv){
   }
   fclose(f);
 
-  printf("P,N,TP,TN,FP,FN\n");
   float fnp = 100. / ((float)np);
-  printf("fnp %f\n", fnp);
-  printf("%zu\n", np);
-  printf("%f,%f,%f,%f,%f,%f\n", P*fnp, N*fnp, TP*fnp, TN*fnp, FP*fnp, FN*fnp);
-  printf("TPR=%f\n", TP/P); // true positive rate
-  printf("TNR=%f\n", TN/N); // true negative rate
-  printf("PPV=%f\n", TP/(TP + FP)); // positive predictive value
-  printf("NPV=%f\n", TN/(TN + FN)); // negative predictive value
-  printf("FNR=%f\n", FN/P); // false negative rate
-  printf("FPR=%f\n", FP/N); // false positive rate
-  printf("FDR=%f\n", FP/(FP + TP)); // false discovery rate
-  printf("FOR=%f\n", FN/(FN + TN)); // false omission rate
-  printf("PLR=%f\n", (TP/P) / (FP/N)); // positive likelihood ratio
-  printf("NLR=%f\n", (FN/P) / (TN/N)); // negative likelihood ratio
-  printf("ACC=%f\n", (TP + TN) / (P + N)); // accuracy
-  printf("BA =%f\n", ((TP/P) + (TN/N))/2.); // balanced accuracy 
-  printf("F1 =%f\n", 2.* TP / ((2.* TP) + FP + FN)); // f1 score
-  printf("BM =%f\n", (TP/P) + (TN/N) + 1.); // bookmaker informedness
-  printf("MK =%f\n", ( TP/(TP + FP)) + (TN/(TN + FN)) -1.); // markedness
-
+  printf("class_map,ground_ref,P%%,N%%,TP%%,TN%%,FP%%,FN%%,TPR,TNR,PPV,NPV,FNR,FPR,FDR,FOR,PLR,NLR,ACC,BA,F1,BM,MK,ASH\n");
+  cout << fn << "," << cfn; 
+  printf(",%f,%f,%f,%f,%f,%f\n", P*fnp, N*fnp, TP*fnp, TN*fnp, FP*fnp, FN*fnp);
+  printf(",%f", TP/P); // true positive rate
+  printf(",%f", TN/N); // true negative rate
+  printf(",%f", TP/(TP + FP)); // positive predictive value
+  printf(",%f", TN/(TN + FN)); // negative predictive value
+  printf(",%f", FN/P); // false negative rate
+  printf(",%f", FP/N); // false positive rate
+  printf(",%f", FP/(FP + TP)); // false discovery rate
+  printf(",%f", FN/(FN + TN)); // false omission rate
+  printf(",%f", (TP/P) / (FP/N)); // positive likelihood ratio
+  printf(",%f", (FN/P) / (TN/N)); // negative likelihood ratio
+  printf(",%f", (TP + TN) / (P + N)); // accuracy
+  printf(",%f", ((TP/P) + (TN/N))/2.); // balanced accuracy 
+  printf(",%f", 2.* TP / ((2.* TP) + FP + FN)); // f1 score
+  printf(",%f", (TP/P) + (TN/N) + 1.); // bookmaker informedness
+  printf(",%f", ( TP/(TP + FP)) + (TN/(TN + FN)) -1.); // markedness
+  printf(",%f", .5*(((TP/P) + (TN/N)) - (FP/P + FN/N)));
+  printf("\n");
   return 0;
 }
