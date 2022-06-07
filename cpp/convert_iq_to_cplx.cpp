@@ -10,8 +10,11 @@ int main(int argc, char ** argv){
 
   float * d_i, * d_q, * dd;
   size_t nr, nc, nb, np, j, j2;
-  (str a(argv[1])), (str b(argv[2]));
-  (str ah(hdr_fn(a))), (str bh(hdr_fn(b)));
+
+  str a(argv[1]);
+  str b(argv[2]);
+  str ah(hdr_fn(a));
+  str bh(hdr_fn(b));
   hread(ah, nr, nc, nb);
 
   (d_i = bread(a, nr, nc, nb)), (d_q = bread(b, nr, nc, nb));
