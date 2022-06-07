@@ -32,7 +32,7 @@ int main(int argc, char ** argv){
   FILE * f = wopen(argv[3]);
   size_t nw = fwrite(dd, sizeof(float), np * 2, f);
   if(nw != np * 2) err("unexpected write size");
-  str c(hdr_fn(str(argv[3])));
+  str c(hdr_fn(str(argv[3]), true));
   hwrite(c, nr, nc, nb, 6);
 
   free(d_i);
