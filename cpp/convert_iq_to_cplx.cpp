@@ -1,5 +1,6 @@
 /* 20210514 convert iq format data to PolSARPro complex format (one complex band envi type 6)
 NB:
+"in-phase and quadrature":
 i-file and q-file are "real" and "imaginary" components of a complex number, respectively */
 #include"misc.h"
 
