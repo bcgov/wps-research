@@ -8,7 +8,6 @@ int main(int argc, char ** argv){
   if(argc < 4){
     err("Convert iq format to PolSARPro complex format (envi type 6)\n convert_iq_to_cplx [i file] [q file] [output file]");
   }
-
   float * d_i, * d_q, * dd;
   size_t nr, nc, nb, np, j, j2;
 
