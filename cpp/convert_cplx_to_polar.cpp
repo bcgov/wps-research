@@ -8,7 +8,7 @@ int main(int argc, char ** argv){
   }
 
   str fn(argv[1]);
-  size_t i, nf, np, nr, nc, nb;
+  size_t i, j, nf, np, nr, nc, nb;
   float * d = float_read(fn, nf);
   if(nf % 2 != 0){
     free(d);
@@ -29,8 +29,8 @@ int main(int argc, char ** argv){
   double re, im, r, theta;
 
   for0(i, np){
-    j2 = 2 * j;
-    (re = (double)d[j2]), (im = (double)d[j2 + 1]);
+    j = 2 * i;
+    (re = (double)d[j]), (im = (double)d[j + 1]);
     r = sqrt(re * re + im * im);
     theta = atan2(im, re);
     out1[i] = (float)theta;
