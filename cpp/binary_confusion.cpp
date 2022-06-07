@@ -49,7 +49,6 @@ int main(int argc, char ** argv){
   str fpfn(fn + str("_fp.bin"));
   str fphfn(fn+ str("_fp.hdr"));
 
-  
   N = P = TN = TP = FN = FP = 0.;
   // true negatives
   hwrite(tnhfn, nrow, ncol, 1);
@@ -62,10 +61,10 @@ int main(int argc, char ** argv){
     else{
       d = ((dat[i] == cdat[i] && dat[i] == 0.)? 1. : 0);
       if(cdat[i] == 1){
-	      P += 1.;
+        P += 1.;
       }
       if(cdat[i] == 0.){
-	      N += 1.;
+        N += 1.;
       }
     }
     fwrite(&d, sizeof(float), 1, f);
@@ -123,8 +122,8 @@ int main(int argc, char ** argv){
 
   float fnp = 100. / ((float)np);
   printf("class_map,ground_ref,P%%,N%%,TP%%,TN%%,FP%%,FN%%,TPR,TNR,PPV,NPV,FNR,FPR,FDR,FOR,PLR,NLR,ACC,BA,F1,BM,MK,ASH\n");
-  cout << fn << "," << cfn; 
-  printf(",%f,%f,%f,%f,%f,%f\n", P*fnp, N*fnp, TP*fnp, TN*fnp, FP*fnp, FN*fnp);
+  cout << fn << "," << cfn;
+  printf(",%f,%f,%f,%f,%f,%f", P*fnp, N*fnp, TP*fnp, TN*fnp, FP*fnp, FN*fnp);
   printf(",%f", TP/P); // true positive rate
   printf(",%f", TN/N); // true negative rate
   printf(",%f", TP/(TP + FP)); // positive predictive value
@@ -136,7 +135,7 @@ int main(int argc, char ** argv){
   printf(",%f", (TP/P) / (FP/N)); // positive likelihood ratio
   printf(",%f", (FN/P) / (TN/N)); // negative likelihood ratio
   printf(",%f", (TP + TN) / (P + N)); // accuracy
-  printf(",%f", ((TP/P) + (TN/N))/2.); // balanced accuracy 
+  printf(",%f", ((TP/P) + (TN/N))/2.); // balanced accuracy
   printf(",%f", 2.* TP / ((2.* TP) + FP + FN)); // f1 score
   printf(",%f", (TP/P) + (TN/N) + 1.); // bookmaker informedness
   printf(",%f", ( TP/(TP + FP)) + (TN/(TN + FN)) -1.); // markedness
