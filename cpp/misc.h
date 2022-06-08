@@ -412,5 +412,6 @@ bool contains(string s1, string s2);
 void status(size_t i, size_t of);
 
 void write_config(str fn, size_t nrow, size_t ncol);
+int run(str s);
 
 #endif

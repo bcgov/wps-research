@@ -835,6 +835,10 @@ void status(size_t i, size_t of){
   to_string(i) + str(" / ") + to_string(of));
 }
 
+int run(str s){
+  return system(s.c_str());
+}
+
 void write_config(str fn, size_t nrow, size_t ncol){
   FILE * f = wopen(fn);
   fprintf(f, "Nrow\n");
