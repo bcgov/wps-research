@@ -101,15 +101,17 @@ int main(int argc, char ** argv){
     for0(k, K) dcount[k] = 0.; // denominator for average
     for0(i, nmf) mean[i] = 0.; // for each iter, calculate class means
     for0(i, np){
-      if(good[i] && label[i] > 0.){
-        for0(k, nband) mean[((size_t)label[i] * nband) + k] += dat[(np * k) + i];
+      if(good[i] && label[i] > 0. && label[i] < (float)K){
+        for0(k, nband){
+		mean[((size_t)label[i] * nband) + k] += dat[(np * k) + i];
+	}
         dcount[(size_t)label[i]] += 1;
       }
     }
     for0(i, K) if(dcount[i] > 0) for0(j, nband) mean[(i * nband) + j] /= dcount[i]; // mean = total / count
 
     for0(i, K){
-      printf("K=%d ", i);
+      printf("K=%zu ", i);
       for0(j, nband) printf("%f ", mean[(i * nband) + j]);
       printf("\n");
     }
