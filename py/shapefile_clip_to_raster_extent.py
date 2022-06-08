@@ -1,8 +1,9 @@
 '''20220504 clip shapefile to raster extent, adapted from:
 https://gis.stackexchange.com/questions/275086/clipping-polygon-precisely-to-raster-extent-using-gdal
 
-Warning: may need to project to EPSG:4326 before using this!
-'''
+Warning: may need to project to EPSG:4326 (or other!) before using this..
+
+Use shapefile_reproject.py to do this!'''
 from misc import err, run, args, exists
 from osgeo import gdal
 import sys
