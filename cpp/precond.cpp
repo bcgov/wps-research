@@ -23,7 +23,7 @@ int main(int argc, char ** argv){
   str ohn(inf + str("_precond.hdr"));
   printf("ofn %s\n", ofn.c_str());
   printf("ohn %s\n", ohn.c_str());
-  hwrite(ohn, nr, nc, nb, 4, BIP);
+  hwrite(ohn, nr, nc, nb, 4);
 
   float x;
   size_t n = 0;
