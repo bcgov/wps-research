@@ -27,7 +27,7 @@ class px{
   }
 };
 
-// output operator for set container
+/* output operator for set container */
 std::ostream& operator << (std::ostream& os, const px &v){
   size_t k;
   os << "{";
