@@ -12,7 +12,7 @@ int main(int argc, char ** argv){
 
   str ofn(ifn + str("_bsq.bin")); // output image
   str ohn(ifn + str("_bsq.hdr")); // output header
-  hwrite(ohn, nr, nc, nb, 4, BSQ); // write BIP format output header
+  hwrite(ohn, nr, nc, nb); // write output header. Should really be BSQ
 
   size_t i, j, k, ki, ii;
   float * d2 = falloc(np * nb);
