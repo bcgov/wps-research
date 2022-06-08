@@ -254,6 +254,8 @@ int main(int argc, char ** argv){
     free(label_float);
     fclose(f);
     hwrite((lab_fn + str(".hdr")), nr, nc, 1);
+
+    if(number_of_classes == 1) break;
   }
 
   free(ddup_i);
