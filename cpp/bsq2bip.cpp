@@ -12,7 +12,7 @@ int main(int argc, char ** argv){
 
   str ofn(ifn + str("_bip.bin")); // output image
   str ohn(ifn + str("_bip.hdr")); // output header
-  hwrite(ohn, nr, nc, nb, 4, BIP); // write BIP format output header
+  hwrite(ohn, nr, nc, nb, 4); // write BIP format output header
 
   size_t i, j, k, ki, ii; 
   float * d2 = falloc(np * nb);
