@@ -213,6 +213,7 @@ int main(int argc, char ** argv){
   fprintf(f, "n_classes,k_use"); // first record header line.. "k_use,n_classes");
   fclose(f);
 
+  long int last_number_of_classes = -1;
   for(k_use = 1; k_use <= kmax; k_use += 15){
     np = n_ddup; 
     top_i.clear();
@@ -246,16 +247,20 @@ int main(int argc, char ** argv){
 
     // write label binary
     np = nr * nc; // not n_ddup anymore! map back onto pixels
-    str lab_fn(str("label/") + zero_pad(to_string(k_use), 5));
-    f = wopen(lab_fn + str(".bin")); // 1. write class outputs
-    float * label_float = falloc(np);
-    for0(i, np) label_float[i] = (float)label[ddup_lookup[i]];
-    fwrite(label_float, np *sizeof(float), 1, f);
-    free(label_float);
-    fclose(f);
-    hwrite((lab_fn + str(".hdr")), nr, nc, 1);
+    
+    if(number_of_classes != last_number_of_classes){
+      str lab_fn(str("label/") + zero_pad(to_string(k_use), 5));
+      f = wopen(lab_fn + str(".bin")); // 1. write class outputs
+      float * label_float = falloc(np);
+      for0(i, np) label_float[i] = (float)label[ddup_lookup[i]];
+      fwrite(label_float, np *sizeof(float), 1, f);
+      free(label_float);
+      fclose(f);
+      hwrite((lab_fn + str(".hdr")), nr, nc, 1);
+    }
 
     if(number_of_classes == 1) break;
+    last_number_of_classes = number_of_classes;
   }
 
   free(ddup_i);
