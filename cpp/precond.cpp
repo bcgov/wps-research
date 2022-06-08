@@ -11,7 +11,6 @@ int main(int argc, char ** argv){
     printf("output is data where any record that includes nan or infinity, is replaced with 0.");
     err("precond [input file bip format] # precondition bip format data.");
   }
-
   str inf(argv[1]); // input file
   str hfn(hdr_fn(inf)); // input header
   size_t np, i, j, ix, k;
