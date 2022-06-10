@@ -71,7 +71,7 @@ int main(int argc, char** argv){
   parfor(0, np2, infer_px);  // inference by output pixel
 
   str pre(str("abcd_") + str(argv[1]) + u + str(argv[2]) + u +
-		         str(argv[3]) + u + str(argv[4]));
+		         str(argv[3]) + u + to_string(skip_f) + u + to_string(skip_off));
   hwrite(pre + str(".hdr"), nr[2], nc[2], nb[1]);
   system((str("python3 ~/GitHub/wps-research/py/raster_plot.py ") + pre +
 	  str(".bin 1 2 3 1")).c_str());
