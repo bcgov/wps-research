@@ -24,7 +24,7 @@
 * [Data prep for Stamps permanent scatterer interferometry](https://www.youtube.com/watch?v=Xy7Y4Ea5mOo)
 * [6th ESA radar polarimetry training](https://eo4society.esa.int/resources/6th-advanced-polarimetry-2021/)
 * [StaMPS](http://homepages.see.leeds.ac.uk/~earahoo/stamps/)
-* Info on calibration / noise floor: S. R. Cloude, H. Chen, D. G. Goodenough and W. Hong, "A Pauli-Sylvester Approach for Calibration and Validation of ALOS2 Quad-Pol Data", Proc. of CEOS SAR Calval Workshop (available on-line), Tokyo Denki University, 7-9 September, 2016
+* Info on calibration / noise floor: [S. R. Cloude, H. Chen, D. G. Goodenough and W. Hong, "A Pauli-Sylvester Approach for Calibration and Validation of ALOS2 Quad-Pol Data", Proc. of CEOS SAR Calval Workshop , Tokyo Denki University, 7-9 September, 2016](https://calvalportal.ceos.org/html/portal/sarc/documents/documents/S14.2_Cloude.pdf)
 ## Multispectral
 * [Burned area mapping using S2](https://www.youtube.com/watch?v=_swGA_61kNk)
 * [Deforestation monitoring with Sentinel-2](https://www.youtube.com/watch?v=LtxcBcgGo1g)
