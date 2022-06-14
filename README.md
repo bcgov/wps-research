@@ -12,7 +12,7 @@ supporting BC Wildfire Service (BCWS) Predictive Services Unit (PSU) program. Se
 Includes A) data integration B) routines applying or implementing supervised and unsupervised classification, C) visualization and manipulation for high dimensional imagery as well as classification maps
 
 ## Projects being operationalized
-*[Fire mapping using Sentinel-2](https://github.com/bcgov/wps-fire-perimeter)
+* [Fire mapping using Sentinel-2](https://github.com/bcgov/wps-fire-perimeter)
 
 # Sample results
 ## Fire progression mapping w Sentinel-2 and Landsat 7/8
