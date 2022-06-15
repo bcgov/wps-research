@@ -1,7 +1,11 @@
-'''20210324 extract landsat from .tar to ENVI bsq/float'''
+'''20210324 extract landsat from .tar to ENVI bsq/float
+
+20220514 update for L7 (Surf refl), and add L5 (Surf refl)'''
 from misc import *
 fire_mapping = len(args) > 1  # add optional arg to enable fire mapping
 lines = os.popen('ls -1 *.tar').readlines()
+
+print(lines)
 
 for line in lines:
     f = line.strip()
@@ -12,14 +16,16 @@ for line in lines:
         err('expected L prefix for landsat')
     if not exist(d):
         os.mkdir(d)  # folder to extract into
-    if N not in [7, 8]:
-        err('expected Landsat 7 or 8')
+    if N not in [5, 7, 8]:
+        err('expected Landsat 5, 7 or 8')
 
     def find_bands():
         # will need to revisit exactly which bands get pulled
         x = os.popen('ls -1 ' + d + sep + '*SR_B*.TIF').readlines()
         x += os.popen('ls -1 ' + d + sep + '*ST_TRAD.TIF').readlines()
-        if N != 7:
+        if len(x) == 0:
+            x = os.popen('ls -1 ' + d + sep + '*sr_b*.tif').readlines()
+        if N == 8:
             x += os.popen('ls -1 ' + d + sep + '*ST_B10.TIF').readlines()
         x = [i.strip() for i in x]
         return x
@@ -47,10 +53,24 @@ for line in lines:
           'B8':   av(  520.,   900.),
           'TRAD': av(10400., 12500.)}
 
+    C7_2 = {'band1':   av(  450.,   520.),  # docs.sentinel-hub.com/api/latest/data/landsat-etm/
+           'band2':   av(  520.,   600.),
+           'band3':   av(  630.,   690.),
+           'band4':   av(  770.,   900.),
+           'band5':   av( 1550.,  1750.),
+           'band6':   av(10400., 12500.),
+           'band7':   av( 2090.,  2350.),
+           'band8':   av(  520.,   900.)}
+
     S7 = {'B8': 15}  # resolution (m)
     for i in ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'TRAD']:
         S7[i] = 30
     
+    S7_2 = {}  # resolution (m)
+    for i in ['band1', 'band2', 'band3', 'band4', 'band5', 'band6', 'band7']:
+        S7_2[i] = 30
+
+
     C8 = {'B1':        443.,  # docs.sentinel-hub.com/api/latest/data/landsat-8/
           'B2':        482.,
           'B3':        561.5,
@@ -80,12 +100,20 @@ for line in lines:
     band_names = []
 
     for i in x:
-        ds = f.split('_')[3]
+        print(f, i)
+        w = f.split('_')
+        # Underscore delimited vs. e..g LE070480202006060401T1-SC20220615003503 format
+        ds = w[3] if len(w) > 2 else f[10:18]
+        print(ds)
         w = i.split(sep)[-1].split('_')[-1].split('.')[0]
 
         CF, R = None, None
-        if N == 7:
-            CF, R = C7[w], S7[w]
+        if N == 7 or N == 5:
+            try:
+                CF, R = C7[w], S7[w]
+            except:
+                CF = C7_2[w]
+                R = S7_2[w]
         if N == 8:
             CF, R = C8[w], S8[w]
         
@@ -148,4 +176,3 @@ for line in lines:
                  ffh])
         else:
             print('+r', ff)
-    sys.exit(1)
