@@ -45,6 +45,7 @@
 * [Viewing geom and spatial res](https://www.nrcan.gc.ca/maps-tools-and-publications/satellite-imagery-and-air-photos/tutorial-fundamentals-remote-sensing/microwave-remote-sensing/viewing-geometry-and-spatial-resolution/9341)
 
 ## Data
+* [USGS earth explorer](https://earthexplorer.usgs.gov/)
 * [SPOT data](https://regards.cnes.fr/user/swh/modules/60)
 * [Sentinel2 data from GCP](https://cloud.google.com/storage/docs/public-datasets/sentinel-2)
 * [EODMS python api](https://pypi.org/project/eodms-api-client/)
