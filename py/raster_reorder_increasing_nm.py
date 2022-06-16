@@ -31,8 +31,7 @@ for i in range(len(bn)):  # band name indices
     sv.append(spectral_value)
 
 to_sort.sort(reverse=False)
-# print("to_sort", to_sort)
-
+print("to_sort", to_sort)
 lookup = {i:to_sort[i][1] for i in range(len(to_sort))}
 '''
 for si in range(len(to_sort)):
@@ -46,16 +45,18 @@ s = ''
 for i in range(len(bn)):
     s += (str(lookup[i] + 1) + ' ')  # haha we used 1-idxing
 s = s.strip()
-# print(s)
+print('s', s)
+default = ' '.join([str(x) for x in list(range(1, int(nband) + 1))])
 
-# now reorder the input file, to a temp file..
-ofn, ofh = fn + '_reorder.bin', fn + '_reorder.hdr'
-run(' '.join(['python3',
-              pd + 'raster_shuffle_bands.py',
-              fn,
-              ofn,
-              s]))
-# now overwrite the input file, and the input header file, with the created files!
-shutil.move(ofn, fn)
-shutil.move(ofh, hdr)
+if s != default:
+    # now reorder the input file, to a temp file..
+    ofn, ofh = fn + '_reorder.bin', fn + '_reorder.hdr'
+    run(' '.join(['python3',
+                  pd + 'raster_shuffle_bands.py',
+                  fn,
+                  ofn,
+                  s]))
+    # now overwrite the input file, and the input header file, with the created files!
+    shutil.move(ofn, fn)
+    shutil.move(ofh, hdr)
 # print('done')
