@@ -30,7 +30,6 @@ bandname_lines = []
 
 for i in range(0, len(lines)):
     line = lines[i].strip()
-
     w = [x.strip() for x in line.split("=")]
     if len(w) > 1:
         if w[0].strip() == 'bands':
@@ -52,7 +51,7 @@ for i in range(0, len(lines)):
             lines[i] = line.replace(',', '')
 
     if in_band_names:
-        # print("*", line)
+        print("*", line)
         bandname_lines.append(line) # track band names we have
     else:
         non_bandname_lines.append(line) # record non-band-name lines,
@@ -64,7 +63,7 @@ for i in range(0, len(lines)):
 
 if nb != n_band_names:
     if n_band_names > nb:
-        # print("n_band_names", n_band_names, "nb", nb)
+        print("n_band_names", n_band_names, "nb", nb)
         bandname_lines = bandname_lines[:nb]
         bandname_lines[-1] = bandname_lines[-1].strip() + "}"
     if n_band_names > 0 and n_band_names < nb:
@@ -86,16 +85,19 @@ bandname_lines[-1] = bandname_lines[-1].replace(',', '') # no comma in last band
 lines = non_bandname_lines + bandname_lines
 data = ('\n'.join(lines)).strip()
 
-# print(data)
+print(data)
+# sys.exit(1)
 open(args[1] + '.bak', 'wb').write(open(args[1]).read().encode())
 open(args[1], 'wb').write(data.encode())
 
 # now trim the band names strings
 band_names = [x.strip() for x in os.popen("python3 ~/GitHub/wps-research/py/envi_header_band_names.py " + args[1]).readlines()]
 samples, lines, bands = read_hdr(args[1])
-run(['python3 ~/GitHub/wps-research/py/envi_header_modify.py', 
-     args[1],
-     lines,
-     samples, 
-     bands] +
-    band_names + ['1'])
+cmd = (['python3 ~/GitHub/wps-research/py/envi_header_modify.py', 
+        args[1],
+        lines,
+        samples, 
+        bands] +
+       band_names + ['1'])
+
+run(cmd)

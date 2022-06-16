@@ -54,4 +54,5 @@ for i in range(1, len(bn_new)):
     lines_new += [bn_new[i]]
 lines_new[-1] += '}'
 print('+w', args[1])
+# print(lines_new); sys.exit(1)
 open(args[1], 'wb').write('\n'.join(lines_new).encode())
