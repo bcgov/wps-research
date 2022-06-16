@@ -28,7 +28,14 @@ def err(c):
 
 def run(c, quit_on_nonzero=True):
     print('run(' + str(c) + ')')
-    c = ' '.join([str(i) for i in c]) if type(c) == list else c
+    if type(c) == list:
+        c = [str(i) for i in c]
+        for i in range(1, len(c)):  # quote both sides of the argument if it's a parameter
+            if c[i][0] != '"':
+                c[i] = '"' + c[i]
+            if c[i][-1] != '"':
+                c[i] = c[i] + '"'
+    c = ' '.join(c) if type(c) == list else c
     a = os.system(c)
     if a != 0 and quit_on_nonzero:
         err("command failed to run:\n\t" + c)
