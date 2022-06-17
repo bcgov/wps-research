@@ -22,7 +22,7 @@ else:
     d = args[1]
     create_stack = True
 
-cmds, hdrs, out_files = [], [], []
+cmds, hdrs, out_files, cmds2 = [], [], [], []
 p = os.path.abspath(d) + sep
 cmd = 'ls -1 ' + p + '*.img'
 files = [x.strip() for x in os.popen(cmd).readlines()]
@@ -33,16 +33,17 @@ for f in files:
         if not exist(of):
             cmds.append(['sbo_inplace.exe',  # swap byte order
                          f,  # input file
-                         '4;',
-                         'mv -v',
-                         f,
-                         of])  # number of bytes per record
+                         '4'])
+            cmds2.append(['mv -v',
+                          f,
+                          of])  # number of bytes per record
         out_files.append(of)
         hdrs.append(hf1)
     else:
         err('not file:' + f)
 
 parfor(run, cmds, 4)  # run with 4 threads
+parfor(run, cmds2, 4)
 
 # update the new headers to reflect the change in byte order
 for h in hdrs:
