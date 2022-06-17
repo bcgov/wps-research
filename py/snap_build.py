@@ -6,9 +6,8 @@ https://senbox.atlassian.net/wiki/spaces/SNAP/pages/10879039/How+to+build+SNAP+f
 STEP developers: 
 https://step.esa.int/main/community/developers/
 '''
-
+from misc import run, err
 sources = ['snap-engine', 'snap-desktop', 's1tbx', 's2tbx', 's3tbx']
-
 cmds = ['git clone https://github.com/senbox-org/' + x + '.git' for x in sources]
 
 for c in cmds:
