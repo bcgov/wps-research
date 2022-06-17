@@ -11,6 +11,8 @@
 * [building SNAP from source](https://senbox.atlassian.net/wiki/spaces/SNAP/pages/10879039/How+to+build+SNAP+from+sources)
 * [SNAP developers](https://step.esa.int/main/community/developers/)
 * [Setting default Java version on Ubuntu (SNAP requires v8)](https://computingforgeeks.com/how-to-set-default-java-version-on-ubuntu-debian/) 
+* [STEP forum](https://forum.step.esa.int/faq)
+* [SNAP developer guide](https://senbox.atlassian.net/wiki/spaces/SNAP/pages/8847381/Developer+Guide)
 ### GDAL
 * [Gdal translate](https://gdal.org/programs/gdal_translate.html)
 * [Lat/lon from gtiff](https://stackoverflow.com/questions/2922532/obtain-latitude-and-longitude-from-a-geotiff-file)
