@@ -2,9 +2,10 @@
 
 20220514 update for L7 (Surf refl), and add L5 (Surf refl)'''
 from misc import *
-fire_mapping = len(args) > 1  # add optional arg to enable fire mapping
+fire_mapping = len(args) > 2  # add optional arg to enable fire mapping
 lines = os.popen('ls -1 *.tar').readlines()
 
+print(fire_mapping)
 print(lines)
 
 for line in lines:
@@ -126,7 +127,8 @@ for line in lines:
                        w,
                        CF + 'nm'])
         band_names.append(bn)
-    # print(band_names)
+    print('band names', band_names)
+    # sys.exit(1)
     fn = d + sep + d + '.bin'
     hfn = fn[:-4] + '.hdr' # print(fn)
     if not exists(fn):
@@ -149,6 +151,7 @@ for line in lines:
         run(['python3 ' + pd + 'raster_reorder_increasing_nm.py',
              fn])
 
+    # sys.exit(1)
     # fire mapping section
     if fire_mapping:
         f2 = fn + '_spectral_interp.bin'
@@ -176,3 +179,4 @@ for line in lines:
                  ffh])
         else:
             print('+r', ff)
+        #sys.exit(1)
