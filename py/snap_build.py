@@ -32,6 +32,11 @@ print("in each toolbox folder:")
 print('mvn clean install  -DskipTests=true')
 
 print("sudo snap install intellij-idea-ultimate --classic")
+
+# https://senbox.atlassian.net/wiki/spaces/SNAP/pages/24051775/IntelliJ+IDEA
+# https://senbox.atlassian.net/wiki/spaces/SNAP/pages/24051775/IntelliJ+IDEA#IntelliJIDEA-RunSNAPDesktopwithadditionalToolboxes(S1%2CS2%2CS3%2C...)
+
+
 '''
 e.g. possible commands:
 sudo update-java-alternatives -s java-1.8.0-openjdk-amd64
