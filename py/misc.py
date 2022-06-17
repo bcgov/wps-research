@@ -8,7 +8,10 @@ import numpy as np
 import os.path as path
 from osgeo import gdal
 import multiprocessing as mp
-import matplotlib.pyplot as plt
+try:
+    import matplotlib.pyplot as plt
+except:
+    pass
 args = sys.argv
 sep = os.path.sep
 abspath = os.path.abspath
