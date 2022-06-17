@@ -59,6 +59,8 @@ if(not(os.path.exists(src_filename)) or
 try:
     from osgeo import gdal
     from osgeo import gdalconst
+    from osgeo import ogr
+    from osgeo import osr
 except:
     err("Error: gdal python API not available.\n" + 
         "Please install with e.g., ./configure --with-python" +
@@ -70,6 +72,7 @@ gdal.SetConfigOption('GDAL_NUM_THREADS', str(N_THREAD)) # '4')  # 4 limit of SSD
 # source image
 src = gdal.Open(src_filename, gdalconst.GA_ReadOnly)
 src_proj, src_geotrans = src.GetProjection(), src.GetGeoTransform()
+src_sr = osr.SpatialReference(wkt=src.GetProjection())  # spatial reference
 
 # want section of source that matches:
 match_ds = gdal.Open(match_filename, gdalconst.GA_ReadOnly)
