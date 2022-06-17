@@ -21,4 +21,4 @@ print("how to find out where your java is:")
 print("readlink -f /usr/bin/java")
 
 print('add line to .bashrc:')
-print('export JAVA_HOME=/path/to/java/bin/')
+print('export JAVA_HOME=/path/to/java/jre/')
