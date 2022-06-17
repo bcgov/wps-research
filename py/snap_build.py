@@ -31,6 +31,7 @@ print('export JAVA_HOME=/path/to/java/jre/')a
 print("in each toolbox folder:")
 print('mvn clean install  -DskipTests=true')
 
+print("sudo snap install intellij-idea-ultimate --classic")
 '''
 e.g. possible commands:
 sudo update-java-alternatives -s java-1.8.0-openjdk-amd64
