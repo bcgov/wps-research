@@ -1,4 +1,10 @@
-'''building SNAP from source
+'''building SNAP from source:
+
+How to build SNAP from sources:
+https://senbox.atlassian.net/wiki/spaces/SNAP/pages/10879039/How+to+build+SNAP+from+sources
+
+STEP developers: 
+https://step.esa.int/main/community/developers/
 '''
 
 sources = ['snap-engine', 'snap-desktop', 's1tbx', 's2tbx', 's3tbx']
@@ -26,3 +32,9 @@ print('export JAVA_HOME=/path/to/java/jre/')a
 print("in each toolbox folder:")
 print('mvn clean install  -DskipTests=true')
 
+'''
+e.g. possible commands:
+sudo update-java-alternatives -s java-1.8.0-openjdk-amd64
+export JAVA_HOME=/usr/lib/jvm/java-1.8.0-openjdk-amd64/
+export PATH=$PATH:$JAVA_HOME
+'''
