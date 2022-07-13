@@ -22,10 +22,7 @@ if not exists(fn):
     
 for i in [150]: # [10, 20, 60]: # 90 
     if not exists(fn + '_flood4.bin'):
-        run(['ulimit',
-             '-s 1000000;',
-             cd + 'flood.exe',
-             fn])
+        run(['ulimit s 1000000;' + cd + 'flood.exe ' + fn])
 
     if not exists(fn + '_flood4.bin_link.bin'):
         run([cd + 'class_link.exe',
