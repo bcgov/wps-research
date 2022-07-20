@@ -1,7 +1,7 @@
 '''demo method to map an effective fire boundary
 
 n.b. would need to place results in separate folders for running in parallel (script needs to be cleaned up)'''
-POINT_THRES = 50 # don't get hulls for shapes with less than 50 points
+POINT_THRES = 100 # don't get hulls for shapes with less than 50 points
 WRITE_PNG = False # set to true for debug visuals
 import os
 import sys
@@ -20,9 +20,9 @@ fn = args[1]
 if not exists(fn):
     err('please check input file')
     
-for i in [150]: # [10, 20, 60]: # 90 
+for i in [60]: # [10, 20, 60]: # 90   # 150
     if not exists(fn + '_flood4.bin'):
-        run(['ulimit s 1000000;' + cd + 'flood.exe ' + fn])
+        run(['ulimit -s 1000000;' + cd + 'flood.exe ' + fn])
 
     if not exists(fn + '_flood4.bin_link.bin'):
         run([cd + 'class_link.exe',
