@@ -23,7 +23,7 @@ if len(args) < 2:
     err('python3 binary_polygonize.py [input raster mask file 1/0 values]')
 
 
-def create_in_memory_band(data: ndarray, cols, rows, projection, geotransform):
+def create_in_memory_band(data: np.ndarray, cols, rows, projection, geotransform):
     """ Create an in memory data band to represent a single raster layer.
     See https://gdal.org/user/raster_data_model.html#raster-band for a complete
     description of what a raster band is.
