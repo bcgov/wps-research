@@ -20,6 +20,7 @@ if len(args) < 2:
 
 raster_fn = args[1]
 geojson_filename = raster_fn + '_poly.json'  # output filename
+kml_filename = raster_fn + '_poly.kml'
 
 def _create_in_memory_band(data: np.ndarray, cols, rows, projection, geotransform):
     """ Create an in memory data band to represent a single raster layer.
@@ -99,3 +100,4 @@ def polygonize(raster_fn, geojson_filename):
             json.dump(data, file_pointer, indent=2)
 
 polygonize(raster_fn, geojson_filename)
+a = os.system('ogr2ogr -f "GeoJSON" ' + kml_filename + ' ' + geojson_filename) # + ' ' + kml_filename)
