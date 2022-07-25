@@ -22,7 +22,6 @@ from misc import exist, err, args
 if len(args) < 2:
     err('python3 binary_polygonize.py [input raster mask file 1/0 values]')
 
-polygonize(args[1] + '.json')
 
 def create_in_memory_band(data: ndarray, cols, rows, projection, geotransform):
     """ Create an in memory data band to represent a single raster layer.
@@ -69,3 +68,6 @@ def polygonize(geotiff_filename, geojson_filename):
 
     del dst_ds, raster, mask_ds
     print(f'{geojson_filename} written')
+
+
+polygonize(args[1] + '.json')
