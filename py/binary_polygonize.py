@@ -34,13 +34,12 @@ def polygonize(geotiff_filename, filename):
     band = raster.GetRasterBand(1)
     src_projection, geotransform = raster.GetProjection(), raster.GetGeoTransform()
     print(src_projection)
-    print(geotransform)
+    #print(geotransform)
     rows, cols = band.YSize, band.XSize
     
     # source coordinate reference system
     srs = osr.SpatialReference()
     srs.ImportFromWkt(raster.GetProjectionRef()) # as in: https://trac.osgeo.org/gdal/browser/trunk/gdal/swig/python/scripts/gdal_polygonize.py#L237
-    
     # generate mask data
     mask_data = np.where(band.ReadAsArray() == 0, False, True)
     mask_ds, mask_band = create_in_memory_band(mask_data, cols, rows, src_projection, geotransform)
