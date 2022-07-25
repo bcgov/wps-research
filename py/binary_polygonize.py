@@ -20,22 +20,6 @@ from misc import exist, err, args
 if len(args) < 2:
     err('python3 binary_polygonize.py [input raster mask file 1/0 values]')
 
-def get_wkt(epsg, wkt_format="esriwkt"):
-    default = 'GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295],UNIT["Meter",1]]'
-    spatial_ref = osr.SpatialReference()
-    try:
-        spatial_ref.ImportFromEPSG(epsg)
-    except TypeError:
-        print("ERROR: epsg must be integer. Returning default WKT(epsg=4326).")
-        return default
-    except Exception:
-        print("ERROR: epsg number does not exist. Returning default WKT(epsg=4326).")
-        return default
-    if wkt_format=="esriwkt":
-        spatial_ref.MorphToESRI()
-    # return a nicely formatted WKT string (alternatives: ExportToPCI(), ExportToUSGS(), or ExportToXML())
-    return spatial_ref.ExportToPrettyWkt()
-
 def create_in_memory_band(data: np.ndarray, cols, rows, projection, geotransform):
     mem_driver = gdal.GetDriverByName('MEM')
     dataset = mem_driver.Create('memory', cols, rows, 1, gdal.GDT_Byte)
