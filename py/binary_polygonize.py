@@ -22,63 +22,50 @@ from misc import exist, err, args
 if len(args) < 2:
     err('python3 binary_polygonize.py [input raster mask file 1/0 values]')
 
-raster_fn = args[1]
-geojson_filename = raster_fn + '_poly.json'  # output filename
-kml_filename = raster_fn + '_poly.kml'
-ofn = raster_fn + '.shp' # kml_filename
+polygonize(args[1] + '.json')
 
-def _create_in_memory_band(data: np.ndarray, cols, rows, original): # projection, geotransform):
+def create_in_memory_band(data: ndarray, cols, rows, projection, geotransform):
     """ Create an in memory data band to represent a single raster layer.
     See https://gdal.org/user/raster_data_model.html#raster-band for a complete
     description of what a raster band is.
     """
-
-    driver = gdal.GetDriverByName('ENVI') #MEM')
+    mem_driver = gdal.GetDriverByName('MEM')
     dataset = mem_driver.Create('memory', cols, rows, 1, gdal.GDT_Byte)
-    #dataset.SetProjection(projection)
-    #dataset.SetGeoTransform(geotransform)
-    dataset = driver.CreateCopy(dst_filename, src_ds, 0)
+    dataset.SetProjection(projection)
+    dataset.SetGeoTransform(geotransform)
     band = dataset.GetRasterBand(1)
     band.WriteArray(data)
     return dataset, band
 
-def polygonize(raster_fn, geojson_filename):
-    classification = gdal.Open(raster_fn, gdal.GA_ReadOnly)
-    band = classification.GetRasterBand(1)
-    classification_data = band.ReadAsArray()
 
-    sr = None
-    try:
-        sr = osr.SpatialReference(wkt=classification.GetProjection()) #wkt=d2.GetProjection())
-    except:
-        driver2 = ogr.GetDriverByName('ENVI')
-        dataset2 = driver.Open(raster_fn)
-        layer2 = dataset2.GetLayer()  # from layer
-        sr = layer2.GetSpatialRef()
+def polygonize(geotiff_filename, geojson_filename):
+    raster = gdal.Open(geotiff_filename, gdal.GA_ReadOnly)
+    band = raster.GetRasterBand(1)
 
-    #sr = classification.GetSpatialRef()
-    print("sr", sr)
+    projection = raster.GetProjection()
+    geotransform = raster.GetGeoTransform()
+    rows = band.YSize
+    cols = band.XSize
 
     # generate mask data
-    driver = ogr.GetDriverByName('ENVI')
     mask_data = np.where(classification_data == 0, False, True)
-    mask_ds, mask_band = _create_in_memory_band(
-        mask_data, band.XSize, band.YSize, classification) # classification.GetProjection(),
-        #classification.GetGeoTransform())
+    mask_ds, mask_band = create_in_memory_band(
+        mask_data, cols, rows, projection, geotransform)
 
-
-    # Create a vector layer.
-    driver = ogr.GetDriverByName('ESRI Shapefile') #'GeoJSON')
-    print('+w', ofn)    
-    dst_ds = driver.CreateDataSource(ofn) 
-    dst_layer = dst_ds.CreateLayer('polygonize', sr)
-    field_name = ogr.FieldDefn("polygonize", ogr.OFTInteger)
+    # Create a GeoJSON layer.
+    geojson_driver = ogr.GetDriverByName('GeoJSON')
+    dst_ds = geojson_driver.CreateDataSource(geojson_filename)
+    dst_layer = dst_ds.CreateLayer('fire')
+    field_name = ogr.FieldDefn("fire", ogr.OFTInteger)
     field_name.SetWidth(24)
     dst_layer.CreateField(field_name)
+
     # Turn the rasters into polygons.
     gdal.Polygonize(band, mask_band, dst_layer, 0, [], callback=None)
+
     # Ensure that all data in the target dataset is written to disk.
     dst_ds.FlushCache()
+    # Explicitly clean up (is this needed?)
 
-polygonize(raster_fn, geojson_filename)
-# a = os.system('ogr2ogr -f "GeoJSON" ' + kml_filename + ' ' + geojson_filename) # + ' ' + kml_filename)
+    del dst_ds, raster, mask_ds
+    print(f'{geojson_filename} written')
