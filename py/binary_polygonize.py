@@ -47,7 +47,7 @@ def polygonize(geotiff_filename, geojson_filename):
     cols = band.XSize
 
     # generate mask data
-    mask_data = np.where(band == 0, False, True)
+    mask_data = np.where(band.ReadAsArray() == 0, False, True)
     mask_ds, mask_band = create_in_memory_band(
         mask_data, cols, rows, projection, geotransform)
 
