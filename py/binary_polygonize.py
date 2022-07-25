@@ -66,7 +66,7 @@ def polygonize(raster_fn, geojson_filename):
         driver = ogr.GetDriverByName('KML') #'GeoJSON')
         print('+w', ofn)
         
-        dst_ds = driver.CreateDataSource(ofn, sr, classification.GetGeomType()) # geojson_filename) #temp_filename)
+        dst_ds = driver.CreateDataSource(ofn) # , sr, classification.GetGeomType()) # geojson_filename) #temp_filename)
         dst_layer = dst_ds.CreateLayer('polygonize')
         field_name = ogr.FieldDefn("polygonize", ogr.OFTInteger)
         field_name.SetWidth(24)
