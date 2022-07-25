@@ -2,6 +2,8 @@
 
 Polygonize a raster mask (values 0 or 1, data type and format otherwise not assumed)
 
+Output in same coordinate reference system as source data 
+
 Based on a module by Sybrand Strauss: 
     https://github.com/bcgov/wps/blob/story/classify_hfi/api/scripts/polygonize_hfi.py#L52
 '''
