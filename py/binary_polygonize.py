@@ -77,18 +77,5 @@ def polygonize(raster_fn, geojson_filename):
 
         # Ensure that all data in the target dataset is written to disk.
         dst_ds.FlushCache()
-        '''
-        source_projection = classification.GetProjection()
-        # Explicitly clean up (is this needed?)
-        del dst_ds, classification, mask_band, mask_ds
-
-        data = _re_project_and_classify_geojson(temp_filename, source_projection)
-
-        # Remove any existing target file.
-        if os.path.exists(geojson_filename):
-            os.remove(geojson_filename)
-        with open(geojson_filename, 'w') as file_pointer:
-            json.dump(data, file_pointer, indent=2)
-        '''
 polygonize(raster_fn, geojson_filename)
-a = os.system('ogr2ogr -f "GeoJSON" ' + kml_filename + ' ' + geojson_filename) # + ' ' + kml_filename)
+# a = os.system('ogr2ogr -f "GeoJSON" ' + kml_filename + ' ' + geojson_filename) # + ' ' + kml_filename)
