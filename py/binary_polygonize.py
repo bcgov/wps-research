@@ -34,7 +34,7 @@ def create_in_memory_band(data: np.ndarray, cols, rows, projection, geotransform
     return dataset, band
 
 
-def polygonize(geotiff_filename, json_filename):
+def polygonize(geotiff_filename, filename):
     raster = gdal.Open(geotiff_filename, gdal.GA_ReadOnly)
     band = raster.GetRasterBand(1)
     src_projection, geotransform = raster.GetProjection(), raster.GetGeoTransform()
@@ -49,15 +49,15 @@ def polygonize(geotiff_filename, json_filename):
     mask_data = np.where(band.ReadAsArray() == 0, False, True)
     mask_ds, mask_band = create_in_memory_band(mask_data, cols, rows, src_projection, geotransform)
 
-    # Create a GeoJSON layer.
+    # Create output 
     geojson_driver = ogr.GetDriverByName('ESRI Shapefile') #GeoJSON')
-    dst_ds = geojson_driver.CreateDataSource(json_filename)
+    dst_ds = geojson_driver.CreateDataSource(filename)
     dst_layer = dst_ds.CreateLayer('fire', srs)
     field_name = ogr.FieldDefn("fire", ogr.OFTInteger)
     field_name.SetWidth(24)
     dst_layer.CreateField(field_name)
     gdal.Polygonize(band, mask_band, dst_layer, 0, [], callback=None)  # polygonize
     dst_ds.FlushCache()
-    del dst_ds, raster, mask_ds # print(f'{json_filename} written')
+    del dst_ds, raster, mask_ds # print(f'{filename} written')
 
 polygonize(args[1], args[1] + '.shp')
