@@ -70,4 +70,4 @@ def polygonize(geotiff_filename, geojson_filename):
     print(f'{geojson_filename} written')
 
 
-polygonize(args[1] + '.json')
+polygonize(args[1], args[1] + '.json')
