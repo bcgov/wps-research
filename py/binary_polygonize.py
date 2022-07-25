@@ -10,6 +10,9 @@ import tempfile
 import numpy as np
 from osgeo import ogr
 from osgeo import gdal
+from pyproj import Transformer, Proj
+from shapely.ops import transform
+from shapely.geometry import shape, mapping
 
 from misc import exist, err, args
 if len(args) < 2:
@@ -17,6 +20,45 @@ if len(args) < 2:
 
 raster_fn = args[1]
 geojson_filename = raster_fn + '_poly.json'  # output filename
+
+def _create_in_memory_band(data: np.ndarray, cols, rows, projection, geotransform):
+    """ Create an in memory data band to represent a single raster layer.
+    See https://gdal.org/user/raster_data_model.html#raster-band for a complete
+    description of what a raster band is.
+    """
+    mem_driver = gdal.GetDriverByName('MEM')
+
+    dataset = mem_driver.Create('memory', cols, rows, 1, gdal.GDT_Byte)
+    dataset.SetProjection(projection)
+    dataset.SetGeoTransform(geotransform)
+    band = dataset.GetRasterBand(1)
+    band.WriteArray(data)
+
+    return dataset, band
+
+
+def _re_project_and_classify_geojson(source_json_filename: str,
+                                     source_projection: str) -> dict:
+    proj_from = Proj(projparams=source_projection)
+    proj_to = Proj('epsg:4326')
+    project = Transformer.from_proj(proj_from, proj_to, always_xy=True)
+    with open(source_json_filename, encoding="utf-8") as source_file:
+        geojson_data = json.load(source_file)
+
+        for feature in geojson_data.get('features', {}):
+            properties = feature.get('properties', {})
+            hfi = properties.get('hfi', None)
+            if hfi is not None:
+                if hfi == 1:
+                    properties['hfi'] = '4000 > hfi < 10000'
+                elif hfi == 2:
+                    properties['hfi'] = 'hfi >= 10000'
+            # Re-project to WGS84
+            source_geometry = shape(feature['geometry'])
+            geometry = transform(project.transform, source_geometry)
+            geojson_geometry = mapping(geometry)
+            feature['geometry']['coordinates'] = geojson_geometry['coordinates']
+    return geojson_data
 
 def polygonize(raster_fn, geojson_filename):
     classification = gdal.Open(raster_fn, gdal.GA_ReadOnly)
@@ -56,4 +98,4 @@ def polygonize(raster_fn, geojson_filename):
         with open(geojson_filename, 'w') as file_pointer:
             json.dump(data, file_pointer, indent=2)
 
-polygonize(raster_fn, gfeojson_filename)
+polygonize(raster_fn, geojson_filename)
