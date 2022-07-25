@@ -54,8 +54,7 @@ def polygonize(geotiff_filename, filename):
     gdal.Polygonize(band, mask_band, dst_layer, 0, [], callback=None)  # polygonize
     dst_ds.FlushCache()
     del dst_ds, raster, mask_ds # print(f'{filename} written')
-
-    open(args[1] + '.prj', 'wb').write(str(src_projection).encode()) #.write(get_wkt(32609).encode()) # str(srs).encode())
+    open(args[1] + '.prj', 'wb').write(str(src_projection).encode())
 
 polygonize(args[1],
            args[1] + '.shp')
