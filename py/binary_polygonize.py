@@ -45,9 +45,16 @@ def polygonize(geotiff_filename, filename):
     mask_ds, mask_band = create_in_memory_band(mask_data, cols, rows, src_projection, geotransform)
 
     # Create output 
-    geojson_driver = ogr.GetDriverByName('ESRI Shapefile') #GeoJSON')
-    dst_ds = geojson_driver.CreateDataSource(filename)
-    dst_layer = dst_ds.CreateLayer('fire', srs)   # not sure how to get the CRS info into the output
+    driver = ogr.GetDriverByName('ESRI Shapefile') #GeoJSON')
+    dst_ds = driver.CreateDataSource(filename)
+    # dst_ds.SetProjection(src_projection)  # AttributeError: 'DataSource' object has no attribute 'SetProjection'
+    # dst_ds.SetGeoTransform(geotransform)
+
+    # add layer
+    dst_layer = dst_ds.CreateLayer('fire')   # not sure how to get the CRS info into the output
+    # dst_layer.SetProjection(src_projection)  # AttributeError: 'Layer' object has no attribute 'SetProjection'
+    # dst_layer.SetGeoTransform(geotransform)
+
     field_name = ogr.FieldDefn("fire", ogr.OFTInteger)
     field_name.SetWidth(24)
     dst_layer.CreateField(field_name)
