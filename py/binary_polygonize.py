@@ -16,7 +16,7 @@ from osgeo import ogr
 from osgeo import gdal
 from osgeo import osr
 
-from misc import exist, err, args
+from misc import exist, err, args, run
 if len(args) < 2:
     err('python3 binary_polygonize.py [input raster mask file 1/0 values]')
 
@@ -65,3 +65,7 @@ def polygonize(geotiff_filename, filename):
 
 polygonize(args[1],
            args[1] + '.shp')
+
+run(' '.join(['ogr2ogr -f "KML"',
+              args[1] + '.kml',
+              args[1] + '.shp']))
