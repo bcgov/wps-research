@@ -69,3 +69,9 @@ polygonize(args[1],
 run(' '.join(['ogr2ogr -f "KML"',
               args[1] + '.kml',
               args[1] + '.shp']))
+
+'''
+osgeo.ogr.GetDriverByName vs osgeo.gdal.GetDriverByName
+Ok - so - ogr == vectors ; gdal == raster
+https://pcjericks.github.io/py-gdalogr-cookbook/projection.html#get-projection
+'''
