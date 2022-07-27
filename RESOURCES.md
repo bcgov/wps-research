@@ -1,4 +1,4 @@
-# Remote Sensing Resources
+# Remote Sensing + Fire Resources
 ## Space agencies
 * [ESA/JAXA/NASA dashboard](https://eodashboard.org/explore?poi=World-SMC)
 * [Japanese Space Agency JAXA: Research](https://earth.jaxa.jp/en/research/projects/index.html)
@@ -91,6 +91,7 @@
 * [Machine Learning of Wildfire Fuel Types](https://storymaps.arcgis.com/stories/bf1223e6a1564ee3933aa0b3641493c1)
 
 ## Fire Science
+* [Canada wildfire: Webinars and Training](https://www.canadawildfire.org/webinarsandcourses)
 * [Rob Skakun, National Burned Areas Composite(NBAC) Feb 18 2022](https://www.youtube.com/watch?v=yJX6kpnZEko)
 * [Mike Wotton, Lightning Fire Occurrence Preduction Modelling, July 8 2022](https://www.youtube.com/watch?v=UzwD9EXYS1Y)
 * [Prometheus simulation software](http://www.firegrowthmodel.ca/prometheus/overview_e.php)
