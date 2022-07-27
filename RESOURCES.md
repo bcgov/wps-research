@@ -91,6 +91,7 @@
 * [Machine Learning of Wildfire Fuel Types](https://storymaps.arcgis.com/stories/bf1223e6a1564ee3933aa0b3641493c1)
 
 ## Fire Science
+* [Rob Skakun, National Burned Areas Composite(NBAC) Feb 18 2022](https://www.youtube.com/watch?v=yJX6kpnZEko)
 * [Mike Wotton, Lightning Fire Occurrence Preduction Modelling, July 8 2022](https://www.youtube.com/watch?v=UzwD9EXYS1Y)
 * [Prometheus simulation software](http://www.firegrowthmodel.ca/prometheus/overview_e.php)
 * [how does fire think and act: Dana Hicks](https://podcasts.apple.com/ca/podcast/05-how-does-fire-think-and-act-guest-dana-hicks-bcws/)
