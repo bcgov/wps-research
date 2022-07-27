@@ -90,7 +90,8 @@
 * [Brian Stocks](https://www.youtube.com/watch?v=Jvx3A63JNUg&list=PLrpIXKIj6MaEJw41Fi-F-UpqAR1vVOKmt&index=18)
 * [Machine Learning of Wildfire Fuel Types](https://storymaps.arcgis.com/stories/bf1223e6a1564ee3933aa0b3641493c1)
 
-## Fire
+## Fire Science
+* [Mike Wotton, Lightning Fire Occurrence Preduction Modelling, July 8 2022](https://www.youtube.com/watch?v=UzwD9EXYS1Y)
 * [Prometheus simulation software](http://www.firegrowthmodel.ca/prometheus/overview_e.php)
 * [how does fire think and act: Dana Hicks](https://podcasts.apple.com/ca/podcast/05-how-does-fire-think-and-act-guest-dana-hicks-bcws/)
 * [Drones in wildfire mgmt](https://en.wikipedia.org/wiki/Drones_in_wildfire_management)
