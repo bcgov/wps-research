@@ -1,6 +1,8 @@
 '''Should redo this script using argparse!!!!!!
 
 Query sentinel-2 products over a given point (alternately, a place name). Later: tile-ID of interest. Restrict for time?
+
+20220728 Need to search using poly e.g. footprint:"Intersects(POLYGON((-4.53 29.85, 26.75 29.85, 26.75 46.80,-4.53 46.80,-4.53 29.85)))" 
 '''
 import os
 import sys
