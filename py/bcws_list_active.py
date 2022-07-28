@@ -51,8 +51,17 @@ selected = [selected[i[1]] for i in ix]
 ci = 0
 for s in selected:
     r = s[1]
+    lat, lon = r['LATITUDE'], r['LONGITUDE']
     print(r['GEOGRAPHIC'])
     print('\t', type(s[0]), ci, s)
+
+    view_str = ('https://apps.sentinel-hub.com/sentinel-playground/?source=S2L2A&lat=' +
+                lat + '&lng=' +
+                lon + 'zoom=11&preset=CUSTOM&layers=B01,B02,B03&maxcc=100&gain=1.0&gamma=1.0' +
+                #&time=2022-01-01%7C2022-07-26&atmFilter=&showDates=false&' +
+                'evalscript=cmV0dXJuIFtCMTIqMi41LEIxMSoyLjUsQjhBKjIuNV0%3D')
+
+    print(view_str)
     ci += 1
     if ci >= TOP_N:
         break
