@@ -1,4 +1,5 @@
 #include<math.h>
+#include"misc.h"
 /* from
 https://stackoverflow.com/questions/3018313/algorithm-to-convert-rgb-to-hsv-and-hsv-to-rgb-in-range-0-255-for-both
  
@@ -125,7 +126,48 @@ rgb hsv2rgb(hsv in)
     return out;     
 }
 int main(int argc, char ** argv){
-  //need to fill this out
+  if(argc < 2) err("rgb2hsv.exe [input raster file name, 3 band]");
+
+  str fn(argv[1]); // input image file name
+  if(!exists(fn)) err(str("failed to open input file: ") + fn);
+  str hfn(hdr_fn(fn)); // input header file name
+
+  size_t nrow, ncol, nband, np;
+  hread(hfn, nrow, ncol, nband); // read header
+  np = nrow * ncol; // number of input pix
+  if(nband != 3) err("3 band input supported"); // need rgb
+
+  size_t i, j, k;
+  float * dat = bread(fn, nrow, ncol, nband); // load floats to array
+  float * out = falloc(nrow * ncol * nband);
+
+  float h, s, v, r, g, b;
+  for0(i, nrow){
+    for0(j, ncol){
+      k = i * ncol + j;
+      r = dat[k];
+      g = dat[k + np];
+      b = dat[k + np + np];
+
+      rgb x;
+      x.r = r;
+      x.g = g;
+      x.b = b;
+
+     hsv y = rgb2hsv(x); //&r, &g, &b, h, s, v);
+      out[k] = y.h;
+      out[k + np] = y.s;
+      out[k + np + np] = y.v;
+    }
+  }
+
+
+  str ofn(fn + str("_rgb.bin"));
+  str ohn(fn + str("_rgb.hdr"));
+
+  bwrite(out, ofn, nrow, ncol, nband);
+  hwrite(ohn, nrow, ncol, nband);
+ 
   return 0;
 }
 
