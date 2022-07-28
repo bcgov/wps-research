@@ -4,7 +4,7 @@ import json
 import shutil
 import zipfile
 import datetime
-import webbrowser
+import webbrowser  # https://docs.python.org/3/library/webbrowser.html
 import urllib.request
 from osgeo import ogr
 from bounding_box import bounding_box
@@ -76,8 +76,19 @@ for s in selected:
     print("length of square", sq_len)
     sq_len_km = sq_len / 1000. # length of square in km
 
-    print(bounding_box(lat, lon, sq_len_km))
+    bb = bounding_box(lat, lon, 3. * sq_len_km)
+    print(bb)
+    fp = 'Intersects(POLYGON((-4.53 29.85, 26.75 29.85, 26.75 46.80,-4.53 46.80,-4.53 29.85)))'
+    # (57.6532417690325, -127.91022013221782, 57.7504922309675, -127.72821386778217)
+    # Intersects(59.76,-129.45)
 
+    fp = [str(bb[1]) + ' ' + str(bb[0]),
+          str(bb[1]) + ' ' + str(bb[2]),
+          str(bb[3]) + ' ' + str(bb[2]),
+          str(bb[3]) + ' ' + str(bb[0]),
+          str(bb[1]) + ' ' + str(bb[0])]
+    fp = 'Intersects(POLYGON((' + ','.join(fp) + ')))'
+    print(fp)
 
     ci += 1
     if ci >= TOP_N:
