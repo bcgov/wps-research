@@ -3,11 +3,12 @@ import json
 import shutil
 import zipfile
 import datetime
+import webbrowser
 import urllib.request
 from osgeo import ogr
 
 MIN_FIRE_SIZE_HA = 100.
-TOP_N = 3
+TOP_N = 5
 selected = []
 
 if __name__ == '__main__':
@@ -47,6 +48,8 @@ ix = [[selected[i][0], i] for i in range(len(selected))]
 ix.sort(reverse=True)
 selected = [selected[i[1]] for i in ix]
 
+browser = webbrowser.get('google-chrome')
+
 # consider the top N
 ci = 0
 for s in selected:
@@ -62,6 +65,7 @@ for s in selected:
                 + '&evalscript=cmV0dXJuIFtCMTIqMi41LEIxMSoyLjUsQjhBKjIuNV0%3D')
 
     print(view_str)
+    browser.open_new_tab(view_str)
     ci += 1
     if ci >= TOP_N:
         break
