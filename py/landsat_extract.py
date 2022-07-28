@@ -17,8 +17,8 @@ for line in lines:
         err('expected L prefix for landsat')
     if not exist(d):
         os.mkdir(d)  # folder to extract into
-    if N not in [5, 7, 8]:
-        err('expected Landsat 5, 7 or 8')
+    if N not in [5, 7, 8, 9]:
+        err('expected Landsat 5, 7, 8 or 9')
 
     def find_bands():
         # will need to revisit exactly which bands get pulled
