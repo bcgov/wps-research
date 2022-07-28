@@ -1,4 +1,14 @@
 '''list active fires listed by BCWS over 100 ha '''
+import json
+import shutil
+import zipfile
+import datetime
+import urllib.request
+from osgeo import ogr
+
+MIN_FIRE_SIZE_HA = 100.
+TOP_N = 3
+selected = []
 
 if __name__ == '__main__':
     fn = 'prot_current_fire_points.zip'  # download fire data
@@ -10,8 +20,7 @@ if __name__ == '__main__':
     zipfile.ZipFile(fn).extractall()
 
     # Open Shapefile
-    Shapefile = ogr.Open('prot_current_fire_points.shp')
-    print(Shapefile)
+    Shapefile = ogr.Open('prot_current_fire_points.shp') # print(Shapefile)
     layer = Shapefile.GetLayer()
     layerDefinition = layer.GetLayerDefn()
     feature_count = layer.GetFeatureCount()
@@ -23,13 +32,27 @@ if __name__ == '__main__':
             yield json.loads(feature.ExportToJson())
 
     features = records(layer)
-    feature_names, feature_ids, records_use = [], [], []
+    feature_names, feature_ids = [], []
     for f in features:
         for key in f.keys():
             if key == 'properties':
                 fk = f[key]
                 fire_size = float(fk['CURRENT_SI'])
-                if fk['FIRE_STATU'].lower() != 'out' and fire_size > 100.:  # fire_size > biggest_size
-                    records_use.append(fk)  # selected fires
-                    print(fk)
+                if fk['FIRE_STATU'].lower() != 'out' and fire_size >= MIN_FIRE_SIZE_HA:  # fire_size > biggest_size
+                    selected.append([fk['CURRENT_SI'], fk])  # selected fires
+                    #print(fk)
 
+# sort the fires by curent size, largest first
+ix = [[selected[i][0], i] for i in range(len(selected))]
+ix.sort(reverse=True)
+selected = [selected[i[1]] for i in ix]
+
+# consider the top N
+ci = 0
+for s in selected:
+    r = s[1]
+    print(r['GEOGRAPHIC'])
+    print('\t', type(s[0]), ci, s)
+    ci += 1
+    if ci >= TOP_N:
+        break
