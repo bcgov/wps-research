@@ -162,8 +162,8 @@ int main(int argc, char ** argv){
   }
 
 
-  str ofn(fn + str("_rgb.bin"));
-  str ohn(fn + str("_rgb.hdr"));
+  str ofn(fn + str("_hsv.bin"));
+  str ohn(fn + str("_hsv.hdr"));
 
   bwrite(out, ofn, nrow, ncol, nband);
   hwrite(ohn, nrow, ncol, nband);
