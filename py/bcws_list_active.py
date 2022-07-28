@@ -1,4 +1,5 @@
 '''list active fires listed by BCWS over 100 ha '''
+import math
 import json
 import shutil
 import zipfile
@@ -6,6 +7,7 @@ import datetime
 import webbrowser
 import urllib.request
 from osgeo import ogr
+from bounding_box import bounding_box
 
 MIN_FIRE_SIZE_HA = 100.
 TOP_N = 5
@@ -53,8 +55,8 @@ browser = webbrowser.get('google-chrome')
 # consider the top N
 ci = 0
 for s in selected:
-    r = s[1]
-    lat, lon = r['LATITUDE'], r['LONGITUDE']
+    r = s[1] 
+    lat, lon, size_ha = r['LATITUDE'], r['LONGITUDE'], r['CURRENT_SI']
     print(r['GEOGRAPHIC'])
     print('\t', type(s[0]), ci, s)
 
@@ -65,7 +67,18 @@ for s in selected:
                 + '&evalscript=cmV0dXJuIFtCMTIqMi41LEIxMSoyLjUsQjhBKjIuNV0%3D')
 
     print(view_str)
-    browser.open_new_tab(view_str)
+    # browser.open_new_tab(view_str)
+
+    # A hectare is equal to 10,000 square meters
+    # def bounding_box(latitudeInDegrees, longitudeInDegrees, halfSideInKm):
+    sq_m = size_ha * 10000.  # square metres area!
+    sq_len = math.sqrt(sq_m) # assuming (wrongly) the fire is square, the length/width of the fire
+    print("length of square", sq_len)
+    sq_len_km = sq_len / 1000. # length of square in km
+
+    print(bounding_box(lat, lon, sq_len_km))
+
+
     ci += 1
     if ci >= TOP_N:
         break
