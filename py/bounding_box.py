@@ -1,5 +1,6 @@
 ''' Copied from 
 https://itecnote.com/tecnote/r-how-to-calculate-the-bounding-box-for-a-given-lat-lng-location/ '''
+import math
 
 # degrees to radians
 def deg2rad(degrees):
