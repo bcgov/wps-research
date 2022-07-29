@@ -1,6 +1,4 @@
-'''Not finished.
-
-Polygonize a raster mask (values 0 or 1, data type and format otherwise not assumed)
+''' 202207 Polygonize a raster mask (values 0 or 1, data type and format otherwise not assumed)
 
 (*) Output in same coordinate reference system as source data 
 
