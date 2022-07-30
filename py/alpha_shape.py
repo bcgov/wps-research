@@ -25,7 +25,7 @@ for i in range(lines):
 points = np.array(points)
 
 # print("optimizing alpha..")
-alpha = 1. / 50. # 0.95 * alphashape.optimizealpha(points) # optimal alpha
+alpha = 1./10.; #1./500.; # 1. / 50. # 0.95 * alphashape.optimizealpha(points) # optimal alpha
 patch_alpha = .2
 print("finding alpha shape..")
 alpha_shape = alphashape.alphashape(points, alpha); # create alpha shape
