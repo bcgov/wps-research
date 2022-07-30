@@ -10,7 +10,7 @@ from osgeo import ogr
 from bounding_box import bounding_box
 
 MIN_FIRE_SIZE_HA = 100.
-TOP_N = 5
+TOP_N = 11
 selected = []
 
 if __name__ == '__main__':
@@ -67,7 +67,7 @@ for s in selected:
                 + '&evalscript=cmV0dXJuIFtCMTIqMi41LEIxMSoyLjUsQjhBKjIuNV0%3D')
 
     print(view_str)
-    # browser.open_new_tab(view_str)
+    browser.open_new_tab(view_str)
 
     # A hectare is equal to 10,000 square meters
     # def bounding_box(latitudeInDegrees, longitudeInDegrees, halfSideInKm):
