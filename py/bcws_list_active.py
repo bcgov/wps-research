@@ -90,6 +90,6 @@ for s in selected:
     fp = 'Intersects(POLYGON((' + ','.join(fp) + ')))'
     print(fp)
 
-    ci += 1
     if ci >= TOP_N:
         break
+    ci += 1
