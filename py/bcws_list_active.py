@@ -113,3 +113,5 @@ for s in selected:
     ci += 1
     if ci >= TOP_N:
         break
+
+    # need to add in OUT of CONTROL fires as well.
