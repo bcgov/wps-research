@@ -1,4 +1,5 @@
 '''list active fires listed by BCWS over 100 ha '''
+import os
 import math
 import json
 import shutil
@@ -8,6 +9,7 @@ import webbrowser  # https://docs.python.org/3/library/webbrowser.html
 import urllib.request
 from osgeo import ogr
 from bounding_box import bounding_box
+from misc import exists, err
 
 MIN_FIRE_SIZE_HA = 100.
 TOP_N = 11
@@ -56,7 +58,7 @@ browser = webbrowser.get('google-chrome')
 ci = 0
 for s in selected:
     r = s[1] 
-    lat, lon, size_ha = r['LATITUDE'], r['LONGITUDE'], r['CURRENT_SI']
+    lat, lon, size_ha, fire_number = r['LATITUDE'], r['LONGITUDE'], r['CURRENT_SI'], r['FIRE_NUMBE']
     print(r['GEOGRAPHIC'])
     print('\t', type(s[0]), ci, s)
 
@@ -67,7 +69,7 @@ for s in selected:
                 + '&evalscript=cmV0dXJuIFtCMTIqMi41LEIxMSoyLjUsQjhBKjIuNV0%3D')
 
     print(view_str)
-    browser.open_new_tab(view_str)
+    # browser.open_new_tab(view_str)
 
     # A hectare is equal to 10,000 square meters
     # def bounding_box(latitudeInDegrees, longitudeInDegrees, halfSideInKm):
@@ -90,6 +92,24 @@ for s in selected:
     fp = 'Intersects(POLYGON((' + ','.join(fp) + ')))'
     print(fp)
 
+    path = '/media/' + os.popen('whoami').read().strip() + '/disk4/active/'
+    if not exists(path):
+        path = '/home/' + os.popen('whoami').read().strip() + '/tmp/'
+
+    if not exists(path):
+        err("path not found:", path)
+    
+    path += fire_number.strip() + '/'
+    
+    if not os.path.exists(path):
+        os.mkdir(path)
+
+    browser.open_new_tab(view_str)
+
+    path += 'fpf'
+    print('+w', path)
+    open(path,'wb').write(fp.encode())
+
+    ci += 1
     if ci >= TOP_N:
         break
-    ci += 1
