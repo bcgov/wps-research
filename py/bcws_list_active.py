@@ -107,8 +107,9 @@ for s in selected:
     browser.open_new_tab(view_str)
 
     path += 'fpf'
-    print('+w', path)
-    open(path,'wb').write(fp.encode())
+    if not exists(path):
+        print('+w', path)
+        open(path,'wb').write(fp.encode())
 
     ci += 1
     if ci >= TOP_N:
