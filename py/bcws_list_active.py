@@ -75,7 +75,7 @@ ci = 0
 for s in selected:
     r = s[1]
     lat, lon, size_ha, fire_number = r['LATITUDE'], r['LONGITUDE'], r['CURRENT_SI'], r['FIRE_NUMBE']
-    print(r['GEOGRAPHIC'])
+    print(fire_number, r['GEOGRAPHIC'])
     # print('\t', type(s[0]), ci, s)
 
     view_str = ('https://apps.sentinel-hub.com/sentinel-playground/?source=S2L2A&lat=' +
