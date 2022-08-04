@@ -22,13 +22,14 @@ for line in lines:
 
     def find_bands():
         # will need to revisit exactly which bands get pulled
-        x = os.popen('ls -1 ' + d + sep + '*SR_B*.TIF').readlines()
+        x = os.popen('ls -1 ' + d + sep + '*_B*.TIF').readlines()
         x += os.popen('ls -1 ' + d + sep + '*ST_TRAD.TIF').readlines()
         if len(x) == 0:
-            x = os.popen('ls -1 ' + d + sep + '*sr_b*.tif').readlines()
+            x = os.popen('ls -1 ' + d + sep + '*_b*.tif').readlines()
         if N == 8:
-            x += os.popen('ls -1 ' + d + sep + '*ST_B10.TIF').readlines()
+            x += os.popen('ls -1 ' + d + sep + '*_B10.TIF').readlines()
         x = [i.strip() for i in x]
+        x = list(set(x))
         return x
     x = find_bands()
 
@@ -82,13 +83,15 @@ for line in lines:
           'B8':        589.5,
           'B9':       1373.5,
           'B10':     10895.,
-          'B11':     12005.,
-          'TRAD': av(10895.,
-                     12005.)}
+          'B11':     12005.}
+    if N != 9:
+        C8['TRAD'] = av(10895., 12005.) 
+
     S8 = {'B8': 15} # resolution(m)
 
-    for i in ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7',
-              'B8', 'B9', 'B10', 'B11', 'TRAD']:
+    for i in (['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7',
+               'B8', 'B9', 'B10', 'B11'] +
+              (['TRAD'] if N != 9 else [])):  # , 'TRAD']:
         S8[i] = 30
 
     # get UTC timestamp information
@@ -105,9 +108,9 @@ for line in lines:
         w = f.split('_')
         # Underscore delimited vs. e..g LE070480202006060401T1-SC20220615003503 format
         ds = w[3] if len(w) > 2 else f[10:18]
-        print(ds)
+        print(ds, w, f, i)
         w = i.split(sep)[-1].split('_')[-1].split('.')[0]
-
+        print('\t', w)
         CF, R = None, None
         if N == 7 or N == 5:
             try:
@@ -115,7 +118,7 @@ for line in lines:
             except:
                 CF = C7_2[w]
                 R = S7_2[w]
-        if N == 8:
+        if N == 8 or N == 9:
             CF, R = C8[w], S8[w]
         
         CF, R = str(CF), str(R)
@@ -133,10 +136,11 @@ for line in lines:
     hfn = fn[:-4] + '.hdr' # print(fn)
     if not exists(fn):
         # merge the bands at resolution of Band #1
-        run(['gdal_merge.py -of ENVI -ot Float32 -o',
-            fn,
-            ' -seperate',
-            ' '.join(x)])
+        cmd = ' '.join(['gdal_merge.py -of ENVI -ot Float32 -o',
+                       fn,
+                       '-seperate',
+                       ' '.join(x)])
+        run(cmd)
 
         # cleanup header and update band names w wavelengths
         run(['python3 ' + pd + 'envi_header_cleanup.py',
