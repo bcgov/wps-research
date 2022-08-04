@@ -12,7 +12,9 @@ from bounding_box import bounding_box
 from misc import exists, err
 
 MIN_FIRE_SIZE_HA = 100.
-TOP_N = 11
+TOP_N = 10
+
+selected_size = []
 selected = []
 
 if __name__ == '__main__':
@@ -44,23 +46,37 @@ if __name__ == '__main__':
                 fk = f[key]
                 fire_size = float(fk['CURRENT_SI'])
                 if fk['FIRE_STATU'].lower() != 'out' and fire_size >= MIN_FIRE_SIZE_HA:  # fire_size > biggest_size
-                    selected.append([fk['CURRENT_SI'], fk])  # selected fires
+                    selected_size.append([fk['CURRENT_SI'], fk])  # selected fires
                     #print(fk)
 
+                if fk['FIRE_STATU'] ==  'Fire of Note':
+                    selected.append([fk['CURRENT_SI'], fk])
+
 # sort the fires by curent size, largest first
-ix = [[selected[i][0], i] for i in range(len(selected))]
+selected_size = list(selected_size)
+ix = [[selected_size[i][0], i] for i in range(len(selected_size))]
 ix.sort(reverse=True)
-selected = [selected[i[1]] for i in ix]
+selected_size = [selected_size[i[1]] for i in ix]
+
+# select the top TOP_N by size
+selected_size = selected_size[0: TOP_N]
+
+# combine fires of note, with TOP_N by size
+selected += selected_size
+
+# remove duplicates
+selected = [json.loads(s) for s in list(set([json.dumps(s) for s in selected]))]
+
+print(selected)
 
 browser = webbrowser.get('google-chrome')
 
-# consider the top N
 ci = 0
 for s in selected:
-    r = s[1] 
+    r = s[1]
     lat, lon, size_ha, fire_number = r['LATITUDE'], r['LONGITUDE'], r['CURRENT_SI'], r['FIRE_NUMBE']
     print(r['GEOGRAPHIC'])
-    print('\t', type(s[0]), ci, s)
+    # print('\t', type(s[0]), ci, s)
 
     view_str = ('https://apps.sentinel-hub.com/sentinel-playground/?source=S2L2A&lat=' +
                 str(lat) + '&lng=' +
@@ -100,19 +116,18 @@ for s in selected:
         err("path not found:", path)
     
     path += fire_number.strip() + '/'
-    
-    if not os.path.exists(path):
-        os.mkdir(path)
+  
+    if True:
+        if not os.path.exists(path):
+            os.mkdir(path)
 
-    browser.open_new_tab(view_str)
+        browser.open_new_tab(view_str)
 
-    path += 'fpf'
-    if not exists(path):
-        print('+w', path)
-        open(path,'wb').write(fp.encode())
+        path += 'fpf'
+        if not exists(path):
+            print('+w', path)
+            open(path,'wb').write(fp.encode())
 
     ci += 1
-    if ci >= TOP_N:
-        break
 
     # need to add in OUT of CONTROL fires as well.
