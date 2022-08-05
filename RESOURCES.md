@@ -139,3 +139,9 @@
 * [Geoloc w DEM](https://www.researchgate.net/publication/287121489_PRECISE_3D_GEO-LOCATION_OF_UAV_IMAGES_USING_GEO-REFERENCED_DATA)
 * [Image rect proj](https://gis.stackexchange.com/questions/384756/georeference-single-drone-image-from-exif-data)
 * [Yaw, pitch, roll, omega, phi, kappa](https://support.pix4d.com/hc/en-us/articles/202558969-Yaw-Pitch-Roll-and-Omega-Phi-Kappa-angles)
+
+# Training videos
+* [NASA ARSET](https://www.youtube.com/user/NASAgovVideo/playlists?view=50&sort=dd&shelf_id=6)
+* [ESA EO Open Science](https://www.youtube.com/channel/UCPnL3aynCQxTOjPttxMiS3Q/videos)
+* [ESA RUS Copernicus Training](https://www.youtube.com/channel/UCB01WjameYMvL7-XfI8vRIA/videos)
+* [IEEE Geoscience and Remote Sensing Society](https://www.youtube.com/c/IEEEGRSS/videos)
