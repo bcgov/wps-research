@@ -12,7 +12,7 @@ pd = sep.join(__file__.split(sep)[:-1]) + sep
 
 fn = args[1]
 
-run('htrim2.exe ' + fn + ' 2. 2.')
+run('htrim2.exe ' + fn + ' 1. 1.')
 
 # copy map info
 run('python3 ' + pd + 'envi_header_copy_mapinfo.py '  + fn[:-3] + 'hdr ' + fn + '_ht.hdr')
