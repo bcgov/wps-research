@@ -28,7 +28,7 @@ for i in range(lines):
 points = np.array(points)
 
 # print("optimizing alpha..")
-alpha = 1./10.; #1./500.; # 1. / 50. # 0.95 * alphashape.optimizealpha(points) # optimal alpha
+alpha = 1. / 25 # 1./10.; #1./500.; # 1. / 50. # 0.95 * alphashape.optimizealpha(points) # optimal alpha
 if len(args) > 2:
     alpha = float(args[2])
 
