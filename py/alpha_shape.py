@@ -9,6 +9,9 @@ import matplotlib.pyplot as plt
 from descartes import PolygonPatch
 from misc import args, err, run, pd, read_binary
 
+if len(args) < 2:
+    err("alpha_shape.py [input file name] # [optional arg: alpha value]")
+
 fn = args[1] # fn = open('alpha_shape_input_file.txt').read().strip()
 pfn = fn + '_alpha_shape.pkl'
 samples, lines, bands, data = read_binary(fn)
@@ -26,6 +29,9 @@ points = np.array(points)
 
 # print("optimizing alpha..")
 alpha = 1./10.; #1./500.; # 1. / 50. # 0.95 * alphashape.optimizealpha(points) # optimal alpha
+if len(args) > 2:
+    alpha = float(args[2])
+
 patch_alpha = .2
 print("finding alpha shape..")
 alpha_shape = alphashape.alphashape(points, alpha); # create alpha shape
