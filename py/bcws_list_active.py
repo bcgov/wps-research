@@ -11,8 +11,8 @@ from osgeo import ogr
 from bounding_box import bounding_box
 from misc import exists, err
 
-MIN_FIRE_SIZE_HA = 100.
-TOP_N = 10
+MIN_FIRE_SIZE_HA = 50.
+TOP_N = 20
 
 selected_size = []
 selected = []
