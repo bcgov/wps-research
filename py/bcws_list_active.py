@@ -18,11 +18,21 @@ selected_size = []
 selected = []
 
 if __name__ == '__main__':
+
+    # timestamp for archive      
+    t = datetime.datetime.now().strftime("%Y%m%d")  # %H%M%S")  # timestamped backup
+
+    # save fire polygons
+    fn = 'prot_current_fire_polys.zip'
+    dl_path = 'https://pub.data.gov.bc.ca/datasets/cdfc2d7b-c046-4bf0-90ac-4897232619e1/' + fn
+    urllib.request.urlretrieve(dl_path, fn)
+    shutil.copyfile(fn, 'prot_current_fire_polys_' + t + '.zip')
+    zipfile.ZipFile(fn).extractall()
+
+    # save fire point locations
     fn = 'prot_current_fire_points.zip'  # download fire data
     dl_path = 'https://pub.data.gov.bc.ca/datasets/2790e3f7-6395-4230-8545-04efb5a18800/' + fn
     urllib.request.urlretrieve(dl_path, fn)
-
-    t = datetime.datetime.now().strftime("%Y%m%d")  # %H%M%S")  # timestamped backup
     shutil.copyfile(fn, 'prot_current_fire_points_' + t + '.zip')
     zipfile.ZipFile(fn).extractall()
 
