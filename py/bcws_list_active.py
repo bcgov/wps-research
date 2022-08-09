@@ -11,17 +11,17 @@ from osgeo import ogr
 from bounding_box import bounding_box
 from misc import exists, err
 
-MIN_FIRE_SIZE_HA = 50.
+MIN_FIRE_SIZE_HA = 25.
 TOP_N = 20
 
 selected_size = []
 selected = []
 
 if __name__ == '__main__':
-
     # timestamp for archive      
-    t = datetime.datetime.now().strftime("%Y%m%d")  # %H%M%S")  # timestamped backup
-
+    #t = datetime.datetime.now().strftime("%Y%m%d")  # %H%M%S")  # timestamped backup
+    t = datetime.datetime.now().strftime("%Y%m%d%H")  # timestamped backup
+    #t = datetime.datetime.now().strftime("%Y%m%d%H%M%S")  # timestamped backup
     # save fire polygons
     fn = 'prot_current_fire_polys.zip'
     dl_path = 'https://pub.data.gov.bc.ca/datasets/cdfc2d7b-c046-4bf0-90ac-4897232619e1/' + fn
