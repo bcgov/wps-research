@@ -1,5 +1,8 @@
-/* raster_sum.cpp: band math, add hyperspectral cubes together */
-#include"misc.h"
+/* raster_sum.cpp: band math, add hyperspectral cubes together
+
+20220808: should generalize this to > 2 input files */
+#
+include"misc.h"
 
 int main(int argc, char ** argv){
   if(argc < 4) err("raster_sum.exe [raster cube 1] [raster cube 2] [output cube]\n");
