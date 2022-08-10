@@ -104,7 +104,7 @@ for s in selected:
     print("length of square", sq_len)
     sq_len_km = sq_len / 1000. # length of square in km
 
-    bb = bounding_box(lat, lon, 3. * sq_len_km)
+    bb = bounding_box(lat, lon, 5. * sq_len_km)
     print(bb)
     fp = 'Intersects(POLYGON((-4.53 29.85, 26.75 29.85, 26.75 46.80,-4.53 46.80,-4.53 29.85)))'
     # (57.6532417690325, -127.91022013221782, 57.7504922309675, -127.72821386778217)
