@@ -14,9 +14,11 @@ int main(int argc, char ** argv){
   run(str("unstack.exe ") + s_d + str(" 1"));
 
   run(str("raster_sum.exe ") + a + str(" ") + s_d1 + str(" result.bin"));
-  run(str("python3 ~/GitHub/wps-research/py/envi_header_copy_mapinfo.py sub.hdr result.hdr"));
 
-  run(str("python3 ~/GitHub/wps-research/py/binary_polygonize.py result.bin"));
+  run(str("raster_threshold.exe result.bin GEQ 1."));
+  run(str("python3 ~/GitHub/wps-research/py/envi_header_copy_mapinfo.py sub.hdr result.bin_thres.hdr"));
+
+  run(str("python3 ~/GitHub/wps-research/py/binary_polygonize.py result.bin_thres.bin"));
   run(str("python3 ~/GitHub/wps-research/py/envi2tif.py ") + swir);
 
   return 0;
