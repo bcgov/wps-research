@@ -20,6 +20,7 @@ int main(int argc, char ** argv){
 
   run(str("python3 ~/GitHub/wps-research/py/binary_polygonize.py result.bin_thres.bin"));
   run(str("python3 ~/GitHub/wps-research/py/envi2tif.py ") + swir);
+  run(str("clean"));
 
   return 0;
 }
