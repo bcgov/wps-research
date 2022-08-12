@@ -11,13 +11,13 @@ from osgeo import ogr
 from bounding_box import bounding_box
 from misc import exists, err
 
-<<<<<<< HEAD
+# <<<<<<< HEAD
 MIN_FIRE_SIZE_HA = 20.
 TOP_N = 30
-=======
-MIN_FIRE_SIZE_HA = 25.
-TOP_N = 20
->>>>>>> ecd60f74a9bf2e0156b9d247b89a1780e6b61205
+#=======
+#MIN_FIRE_SIZE_HA = 25.
+#TOP_N = 20
+#>>>>>>> ecd60f74a9bf2e0156b9d247b89a1780e6b61205
 
 selected_size = []
 selected = []
