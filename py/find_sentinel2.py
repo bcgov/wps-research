@@ -26,6 +26,12 @@ if len(sys.argv) > 1:
     else:
         fpfn = sys.argv[1]
         foot_print = open(fpfn).read().strip()
+else:
+    fpfn = 'fpf'
+    if exists(fpfn):
+        foot_print = open(fpfn).read().strip()
+    else:
+        err("location not specified")
 
 # save username and password to files:
 user_, pass_ = None, None
