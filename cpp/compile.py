@@ -8,7 +8,7 @@ import os
 import sys
 import multiprocessing
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'py'))
-from misc import run, me, cd, exists
+from misc import run, me, cd, pd, exists
 ncpu = multiprocessing.cpu_count()
 print(ncpu)
 
@@ -51,37 +51,36 @@ for f in files:
         i += 1
 of.write("\nwait".encode())
 
-'''
-if True:  # process files in python folder
-    files = os.popen('ls -1 /home/' + me() + 'GitHub' + 
-    elif ext == 'py':
-        wrap_file = 'wrap-py_' + fn + '.cpp'
-        # for py files, write a cpp wrapper so we can call from bin folder
-        cf = open(wrap_file, 'wb') #'wrap_py.cpp', 'wb')
-        lines = ['#include<stdlib.h>',
-                 '#include<iostream>',
-                 '#include<string>',
-                 'using namespace std;',
-                 'int main(int argc, char ** argv){',
-                 #'  string cmd("/cygdrive/c/Program\\\\ Files/Python35/python.exe ");',
-                 '  string cmd("/cygdrive/c/Python27/python.exe ");',
-                 '  cmd += string("R:/' + os.popen("whoami").read().strip() + '/bin/py/' + fn + '.py");',
-                 '  for(int i=1; i<argc; i++){',
-                 '    cmd += string(" ") + string(argv[i]);',
-                 '  }',
-                 'std::cout << cmd << endl;',
-                 'system(cmd.c_str());',
-                 'return(0);',
-                 '}']
-        cf.write('\n'.join(lines).encode())
-        cf.close()
-        cmd = 'g++ -w -O3 -o ' + fn + '.exe ' + ' ' + wrap_file #wrap_py.cpp '
-        print('\t' + cmd)
-        cmds += " " + cmd # a = os.system(cmd)
-        if(True): # 20191113 might set to true later?
-            cmd =  ("rm -f " + wrap_file) #wrap_py.cpp")
-            cmds += "; " + cmd;
-'''
+# wrap the python files
+files = os.popen('ls -1 ' + pd + '*.py').readlines()
+for f in files:
+    f = os.path.abspath(f)
+    f = f.strip()
+    fn = f.split(os.path.sep)[-1]
+
+    wrap_file = 'wrap-py_' + fn + '.cpp'
+    print("+w", wrap_file)
+    cf = open(wrap_file, 'wb')
+    lines = ['#include<stdlib.h>',
+             '#include<iostream>',
+             '#include<string>',
+             'using namespace std;',
+             'int main(int argc, char ** argv){',
+             '  string cmd("python3 ");',
+             '  cmd += string("' + f + '")',
+             '  cmd += string(";")',
+             '  for(int i = 1; i < argc; i++){',
+             '    cmd += string(" ") + string(argv[i]);',
+             '  }',
+             '  std::cout << cmd << endl;',
+             '  system(cmd.c_str());',
+             '  return(0);',
+             '}']
+    cf.write('\n'.join(lines).encode())
+    cf.close()
+    cmd = 'g++ -w -O3 -o ' + fn + '.exe ' + ' ' + wrap_file #wrap_py.cpp '
+    print('\t' + cmd)
+    cmds += " " + cmd # a = os.system(cmd)
 
 of.close()
 
