@@ -13,10 +13,11 @@ sep = os.path.sep
 def g_pd():
     return os.path.abspath(sep.join(abspath(__file__).split(sep)[:-2])) + sep + 'py' # python directory i.e. path to here
 pd = g_pd()
-
+print("python dir", pd)
 def g_cd():
-    return os.path.abspath(sep.join(abspath(__file__).split(sep)[:-1]) + sep) + sep
+    return os.path.abspath(sep.join(abspath(__file__).split(sep)) + sep) + sep
 cd = g_cd()
+print("c dir", cd)
 
 def run(c):
     return os.system(c)
