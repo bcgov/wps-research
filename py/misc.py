@@ -25,6 +25,9 @@ cd = get_cd()
 def file_size(f): # get size of a file
     return os.stat(f).st_size
 
+def me():  # my user name
+    return os.popen('whoami').read().strip()
+
 # print message and exit
 def err(c):
     print('Error:', c); sys.exit(1)
