@@ -33,6 +33,7 @@ else:
         foot_print = open(fpfn).read().strip()
     else:
         err("location not specified")
+print("footprint", foot_print)
 
 # save username and password to files:
 user_, pass_ = None, None
