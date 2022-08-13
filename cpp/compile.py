@@ -49,7 +49,7 @@ for f in files:
             of.write("wait\n".encode())
 
         i += 1
-of.write("\nwait".encode())
+of.write("\nwait\n".encode())
 
 # wrap the python files
 files = os.popen('ls -1 ' + pd + '*.py').readlines()
@@ -67,8 +67,8 @@ for f in files:
              'using namespace std;',
              'int main(int argc, char ** argv){',
              '  string cmd("python3 ");',
-             '  cmd += string("' + f + '")',
-             '  cmd += string(";")',
+             '  cmd += string("' + f + '");',
+             # '  cmd += string(";")',
              '  for(int i = 1; i < argc; i++){',
              '    cmd += string(" ") + string(argv[i]);',
              '  }',
@@ -80,8 +80,9 @@ for f in files:
     cf.close()
     cmd = 'g++ -w -O3 -o ' + fn + '.exe ' + ' ' + wrap_file #wrap_py.cpp '
     print('\t' + cmd)
-    cmds += " " + cmd # a = os.system(cmd)
-
+    # cmds += " " + cmd # a = os.system(cmd)
+    of.write((cmd + '\n').encode())
+of.write("\nwait\n".encode())
 of.close()
 
 run("chmod 755 compile.sh")
