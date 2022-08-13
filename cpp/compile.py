@@ -79,6 +79,9 @@ for f in files:
     f = f.strip()
     fn = f.split(os.path.sep)[-1]
 
+    if fn == 'compile':
+        continue
+
     wrap_file = 'wrap-py_' + fn + '.cpp'
     print("+w", wrap_file)
     cf = open(wrap_file, 'wb')
