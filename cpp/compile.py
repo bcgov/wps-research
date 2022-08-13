@@ -11,11 +11,11 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'py'))
 abspath = os.path.abspath
 sep = os.path.sep
 def g_pd():
-    return os.path.abspath(sep.join(abspath(__file__).split(sep)[:-1])) + sep  # python directory i.e. path to here
+    return os.path.abspath(sep.join(abspath(__file__).split(sep)[:-2])) + sep + 'py' # python directory i.e. path to here
 pd = g_pd()
 
 def g_cd():
-    return os.path.abspath(sep.join(abspath(__file__).split(sep)[:-2]) + sep + 'cpp') + sep
+    return os.path.abspath(sep.join(abspath(__file__).split(sep)[:-1]) + sep) + sep
 cd = g_cd()
 
 def run(c):
