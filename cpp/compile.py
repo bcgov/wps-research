@@ -123,3 +123,4 @@ of.close()
 
 run("chmod 755 compile.sh")
 run("./compile.sh")
+run('rm ' + cd + 'wrap-py*')
