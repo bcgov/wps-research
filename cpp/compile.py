@@ -8,9 +8,30 @@ import os
 import sys
 import multiprocessing
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'py'))
-from misc import run, me, cd, pd, exists
+abspath = os.path.abspath
+sep = os.path.sep
+def g_pd():
+    return os.path.abspath(sep.join(abspath(__file__).split(sep)[:-1])) + sep  # python directory i.e. path to here
+pd = g_pd()
+
+def g_cd():
+    return os.path.abspath(sep.join(abspath(__file__).split(sep)[:-2]) + sep + 'cpp') + sep
+cd = g_cd()
+
+def run(c):
+    return os.system(c)
+
+def err(m):
+    print("Error", m); sys.exit(1)
+
+def me():
+    return os.popen("whoami").read().strip()
+exists = os.path.exists
+
+
 ncpu = multiprocessing.cpu_count()
 print(ncpu)
+
 
 files = os.popen('ls -1 ' + cd + '*.cpp').readlines()
 files = [f.strip() for f in files]
@@ -81,7 +102,16 @@ for f in files:
     cmd = 'g++ -w -O3 -o ' + fn + ' ' + wrap_file #wrap_py.cpp '
     print('\t' + cmd)
     # cmds += " " + cmd # a = os.system(cmd)
+
+    if (i + 1) % ncpu != 0:
+        cmd += ' &'
+
     of.write((cmd + '\n').encode())
+
+    if (i + 1) % ncpu == 0:
+        of.write("wait\n".encode())
+
+    i += 1
 of.write("\nwait\n".encode())
 of.close()
 
