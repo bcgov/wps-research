@@ -78,7 +78,7 @@ for f in files:
              '}']
     cf.write('\n'.join(lines).encode())
     cf.close()
-    cmd = 'g++ -w -O3 -o ' + fn + '.exe ' + ' ' + wrap_file #wrap_py.cpp '
+    cmd = 'g++ -w -O3 -o ' + fn + ' ' + wrap_file #wrap_py.cpp '
     print('\t' + cmd)
     # cmds += " " + cmd # a = os.system(cmd)
     of.write((cmd + '\n').encode())
