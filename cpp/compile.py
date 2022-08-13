@@ -11,7 +11,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'py'))
 abspath = os.path.abspath
 sep = os.path.sep
 def g_pd():
-    return os.path.abspath(sep.join(abspath(__file__).split(sep)[:-2])) + sep + 'py' # python directory i.e. path to here
+    return os.path.abspath(sep.join(abspath(__file__).split(sep)[:-2])) + sep + 'py' + sep # python directory i.e. path to here
 pd = g_pd()
 print("python dir", pd)
 def g_cd():
