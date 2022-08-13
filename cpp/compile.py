@@ -74,6 +74,7 @@ of.write("\nwait\n".encode())
 
 # wrap the python files
 files = os.popen('ls -1 ' + pd + '*.py').readlines()
+print(files)
 for f in files:
     f = os.path.abspath(f)
     f = f.strip()
