@@ -33,6 +33,9 @@ exists = os.path.exists
 ncpu = multiprocessing.cpu_count()
 print(ncpu)
 
+cmd = 'rm ' + cd + 'wrap_py*'
+err(cmd)
+
 
 files = os.popen('ls -1 ' + cd + '*.cpp').readlines()
 files = [f.strip() for f in files]
