@@ -7,7 +7,12 @@ Query sentinel-2 products over a given point (alternately, a place name). Later:
 import os
 import sys
 import math
-from misc import exists
+import datetime
+from misc import exists, run
+
+# t = datetime.datetime.now().strftime("%Y%m%d%H")  # timestamped backup
+t = datetime.datetime.now().strftime("%Y%m%d%H%M%S")  # timestamped backup
+
 foot_print = 'Intersects(51.48252764574755,-123.95386296901019)' # bc 	2022-C50155 	52.003216999999999 	-123.13905 	2022-05-05 17:23 	2022-05-30 15:01 	UC 	H 
 # careful, check if the lat/long are reversed in order (when comparing point location vs. polygon location?)
 
@@ -161,4 +166,6 @@ f.close()
 a = os.system('chmod 755 ./.sentinel2_download.sh') 
 print("+w .sentinel2_download.sh")
 
+t = datetime.datetime.now().strftime("%Y%m%d%H%M%S")  # timestamped backup
 a = os.system('cp -v .sentinel2_download.sh ' + fpfn + '_download.sh')
+run('cp ' + fpfn + '_download.sh ' + str(t) + '_fpf_download.sh')
