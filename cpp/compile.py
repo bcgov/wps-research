@@ -14,12 +14,13 @@ of.write('#!/usr/bin/env bash'.encode())
 for f in files:
     s = ''
     fn = f[:-4]
+    symlink = 'ln -s ' + fn + '.exe ' + fn # symbolic link to path without .exe!
     if fn != "misc":
         if f[:4] == 'cuda':
-            s = '\ntest ! -f ' + fn + '.exe && nvcc ' + fn + '.cpp misc.cpp -o ' + fn + '.exe'
+            s = '\ntest ! -f ' + fn + '.exe && nvcc ' + fn + '.cpp misc.cpp -o ' + fn + '.exe; ' + symlink
             print(s)
         else:
-            s = '\ntest ! -f ' + fn + '.exe && g++ -w -O4 ' + fn + '.cpp  misc.cpp -o ' + fn + '.exe -lpthread'
+            s = '\ntest ! -f ' + fn + '.exe && g++ -w -O4 ' + fn + '.cpp  misc.cpp -o ' + fn + '.exe -lpthread; ' + symlink
         s += '' if ((i + 1) % n_cpu == 0) else ' &'
         of.write(s.encode())
         i += 1
