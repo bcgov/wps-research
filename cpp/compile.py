@@ -15,7 +15,7 @@ def g_pd():
 pd = g_pd()
 print("python dir", pd)
 def g_cd():
-    return os.path.abspath(sep.join(abspath(__file__).split(sep)[-1]) + sep) + sep
+    return os.path.abspath(sep.join((abspath(__file__).split(sep))[:-1]) + sep) + sep
 cd = g_cd()
 print("c dir", cd)
 
