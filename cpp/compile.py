@@ -6,24 +6,49 @@
 '''
 import os
 import sys
-from misc import run, me
+import multiprocessing
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'py'))
+from misc import run, me, cd, exists
+ncpu = multiprocessing.cpu_count()
+print(ncpu)
 
-files = os.popen('ls -1 ' + get_cd() + '*.cpp').readlines()
+files = os.popen('ls -1 ' + cd + '*.cpp').readlines()
 files = [f.strip() for f in files]
 
+i = 0
 of = open('compile.sh', 'wb')
 of.write('#!/usr/bin/env bash'.encode())
 for f in files:
+    print(i % ncpu, f, i)
+    if f == 'misc.cpp':
+        run('g++ -c misc.cpp -pthread')
+        continue
     s = ''
     fn = f[:-4]
-    symlink = 'ln -s ' + fn + '.exe ' + fn # symbolic link to path without .exe!
+    symlink =  '' 
+    print(fn, os.path.islink(fn))
     if fn != "misc":
+        symlink = 'ln -s ' + fn + '.exe ' + fn if not os.path.islink(fn) else ''# symbolic link to path without .exe!
         if f[:4] == 'cuda':
-            s = '\ntest ! -f ' + fn + '.exe && nvcc ' + fn + '.cpp misc.cpp -o ' + fn + '.exe; ' + symlink
+            s = '\ntest ! -f ' + fn + '.exe && nvcc ' + fn + '.cpp misc.cpp -o ' + fn + '.exe' #+ symlink
             print(s)
         else:
-            s = '\ntest ! -f ' + fn + '.exe && g++ -w -O4 ' + fn + '.cpp  misc.cpp -o ' + fn + '.exe -lpthread; ' + symlink
-        of.write(s.encode())
+            s = '\ntest ! -f ' + fn + '.exe && g++ -w -O4 ' + fn + '.cpp  misc.cpp -o ' + fn + '.exe -lpthread' #  + symlink
+
+        if (i + 1) % ncpu != 0:
+            s += ' &'
+        of.write((s + "\n").encode())
+
+        if s != '' and symlink != '':
+            s = symlink
+            if (i + 1) % ncpu != 0:
+                s += ' &'
+            of.write((s + "\n").encode())
+   
+        if (i + 1) % ncpu == 0:
+            of.write("wait\n".encode())
+
+        i += 1
 of.write("\nwait".encode())
 
 '''
@@ -61,5 +86,4 @@ if True:  # process files in python folder
 of.close()
 
 run("chmod 755 compile.sh")
-run("multicore ./compile.sh")
-
+run("./compile.sh")
