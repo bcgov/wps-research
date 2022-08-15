@@ -9,8 +9,8 @@ A, B, C, D = args[2: 6]
 fn = args[1]
 
 of = 'sub.bin'
-if exist(of): 
-    err('output file already exists: sub.bin')
+#if exist(of): 
+#    err('output file already exists: sub.bin')
 
 run('gdal_translate -of ENVI -ot Float32 -srcwin ' + (' '.join([A, B, C, D])) +
     ' ' + fn +  # input file
