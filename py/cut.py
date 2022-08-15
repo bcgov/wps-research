@@ -17,3 +17,4 @@ run('gdal_translate -of ENVI -ot Float32 -srcwin ' + (' '.join([A, B, C, D])) +
     ' sub.bin')  # output file
 
 run('envi_header_cleanup.py sub.hdr')
+run('imv sub.bin')
