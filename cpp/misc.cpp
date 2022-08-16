@@ -836,6 +836,7 @@ void status(size_t i, size_t of){
 }
 
 int run(str s){
+  cout << s << endl;
   return system(s.c_str());
 }
 
