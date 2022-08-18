@@ -169,3 +169,6 @@ print("+w .sentinel2_download.sh")
 t = datetime.datetime.now().strftime("%Y%m%d%H%M%S")  # timestamped backup
 a = os.system('cp -v .sentinel2_download.sh ' + fpfn + '_download.sh')
 run('cp ' + fpfn + '_download.sh ' + str(t) + '_fpf_download.sh')
+
+t = datetime.datetime.now().strftime("%Y%m%d")  # ) %H%M%S")
+run('grep ' + t + ' fpf_download.sh')
