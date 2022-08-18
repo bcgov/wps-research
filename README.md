@@ -32,6 +32,7 @@ Includes A) data integration B) routines applying or implementing supervised and
 <img src="data/output/20210127_mvp.png" width="650" height="264">
 
 ## Presentations
+* All Hazards Application of RCM in BC Part 2, CSA RCM Users Forum, May 18, 2022
 * Fire mapping with Shortwave Infrared, BC Government Remote Sensing CoP, Apr 13 2022
 * Fire mapping with Sentinel-2, BCWS Geomatics CoP, Mar 16 2022
 * Remote Sensing and Pattern Recognition in BCWS Predictive Services Unit, BCWS Priorities Forum, Jan 6 2022
