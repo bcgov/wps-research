@@ -13,7 +13,7 @@ Includes A) data integration B) routines applying or implementing supervised and
 * [Fire mapping using Sentinel-2](https://github.com/bcgov/wps-fire-perimeter)
 
 # Sample results
-## Multi-date differencing and thresholding
+## Fire mapping: date differencing and threshold
 <img src="doc/20220816_diff.png" width="650">
 
 ## Fire progression mapping w Sentinel-2 and Landsat 7/8
