@@ -12,8 +12,8 @@ from bounding_box import bounding_box
 from misc import exists, err
 
 # <<<<<<< HEAD
-MIN_FIRE_SIZE_HA = 20.
-TOP_N = 30
+MIN_FIRE_SIZE_HA = 5.
+TOP_N = 60
 #=======
 #MIN_FIRE_SIZE_HA = 25.
 #TOP_N = 20
@@ -65,6 +65,9 @@ if __name__ == '__main__':
                     #print(fk)
 
                 if fk['FIRE_STATU'] ==  'Fire of Note':
+                    selected.append([fk['CURRENT_SI'], fk])
+
+                if fk['FIRE_STATU'] == 'Out of Control':
                     selected.append([fk['CURRENT_SI'], fk])
 
 # sort the fires by curent size, largest first
@@ -122,7 +125,6 @@ for s in selected:
           str(bb[1]) + ' ' + str(bb[0])]
     fp = 'Intersects(POLYGON((' + ','.join(fp) + ')))'
     print(fp)
-
     path = '/media/' + os.popen('whoami').read().strip() + '/disk4/active/'
     if not exists(path):
         path = '/media/' + os.popen('whoami').read().strip() + '/disk2/active/'
