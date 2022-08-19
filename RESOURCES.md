@@ -110,8 +110,9 @@
 * [Data Science at command line](https://datascienceatthecommandline.com/2e/)
 * [Big data for geoscience](https://www.pythonpodcast.com/pangeo-big-data-geoscience-episode-358/)
 
-# How to get into Linux if you work in Windows
+# Linux
 [Windows Subsystem for Linux (Ubuntu)](https://ubuntu.com/tutorials/install-ubuntu-on-wsl2-on-windows-10#1-overview)
+[Ubuntu hotkeys](https://www.howtogeek.com/howto/41418/how-to-be-more-productive-in-ubuntu-using-keyboard-shortcuts/)
 
 # IEEE folks
 * [Alan N](https://people.compute.dtu.dk/alan/publications.html) e.g. [Linear and kernel multivar chdet](https://www2.imm.dtu.dk/pubdb/pubs/6005-full.html)
