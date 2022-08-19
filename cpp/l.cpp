@@ -1,5 +1,5 @@
 #include "misc.h"
 int main(int argc, char ** argv){
-  run(str("ls -latrh"));
+  system("ls -latrh");
   return 0;
 }
