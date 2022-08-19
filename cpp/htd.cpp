@@ -13,8 +13,6 @@ int main(int argc, char ** argv){
   run(str("raster_dominant.exe " + ht));
   run(str("unstack.exe ") + dom + str(" 1"));
 
-  run(str("raster_sum.exe ") + a + str(" ") + s_d1 + str(" result.bin"));
-
   run(str("python3 ~/GitHub/wps-research/py/envi_header_copy_mapinfo.py sub.hdr sub.bin_swir.bin_ht.bin_dominant.bin_001.hdr"));
   run(str("clean"));
   run(str("imv sub.bin_swir.bin_ht.bin_dominant.bin_001.bin"));
