@@ -134,6 +134,7 @@ f.close()
 # open file to record the download commands
 f = open("./.sentinel2_download.sh", "wb")
 
+zipnames = []
 # download the data
 links = os.popen('grep alternative out_all.html').readlines()
 for i in range(0, len(links)):
@@ -142,6 +143,7 @@ for i in range(0, len(links)):
     ti = titles[i].strip() # need to compare this to list of files already downloaded: skip existing files!
     tw = ti.split(">")[1].split("<")[0].strip()
     zfn = ti[7:-8] + '.zip'
+    zipnames.append(zfn)
 
     # note: if you had a folder, not a directory (a directory in the case of google download): test -f should be test -d instead!!!!!!
     cmd ='test ! -f ' + zfn + ' && wget ' + ' --no-check-certificate --content-disposition --continue --user='
@@ -169,6 +171,8 @@ print("+w .sentinel2_download.sh")
 t = datetime.datetime.now().strftime("%Y%m%d%H%M%S")  # timestamped backup
 a = os.system('cp -v .sentinel2_download.sh ' + fpfn + '_download.sh')
 run('cp ' + fpfn + '_download.sh ' + str(t) + '_fpf_download.sh')
+
+print(zipnames)
 
 t = datetime.datetime.now().strftime("%Y%m%d")  # ) %H%M%S")
 run('grep ' + t + ' fpf_download.sh')
