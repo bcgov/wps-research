@@ -9,11 +9,17 @@ import webbrowser  # https://docs.python.org/3/library/webbrowser.html
 import urllib.request
 from osgeo import ogr
 from bounding_box import bounding_box
-from misc import exists, err
+from misc import exists, err, args
+
 
 # <<<<<<< HEAD
-MIN_FIRE_SIZE_HA = 5.
-TOP_N = 20 # 150
+MIN_FIRE_SIZE_HA = .5
+TOP_N = 33 # 150
+try:
+    TOP_N = int(args[1])
+except:
+    pass
+
 #=======
 #MIN_FIRE_SIZE_HA = 25.
 #TOP_N = 20
