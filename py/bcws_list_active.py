@@ -13,13 +13,12 @@ from misc import exists, err
 
 # <<<<<<< HEAD
 MIN_FIRE_SIZE_HA = 5.
-TOP_N = 60
+TOP_N = 150
 #=======
 #MIN_FIRE_SIZE_HA = 25.
 #TOP_N = 20
 #>>>>>>> ecd60f74a9bf2e0156b9d247b89a1780e6b61205
 
-selected_size = []
 selected = []
 
 if __name__ == '__main__':
@@ -60,46 +59,53 @@ if __name__ == '__main__':
             if key == 'properties':
                 fk = f[key]
                 fire_size = float(fk['CURRENT_SI'])
-                if fk['FIRE_STATU'].lower() != 'out' and fire_size >= MIN_FIRE_SIZE_HA:  # fire_size > biggest_size
-                    selected_size.append([fk['CURRENT_SI'], fk])  # selected fires
-                    #print(fk)
+                
+                if False:  # out and larger than MIN_FIRE_SIZE_HA
+                    if fk['FIRE_STATU'].lower() != 'out' and fire_size >= MIN_FIRE_SIZE_HA:  # > biggest_size
+                        selected.append([fk['CURRENT_SI'], fk])  # selected fires
+                        #print(fk)
+                if False:
+                    if fk['FIRE_STATU'].lower() == 'out':
+                        selected.append([fk['CURRENT_SI'], fk])
+                if True:  # fire of note
+                    if fk['FIRE_STATU'] ==  'Fire of Note':
+                        selected.append([fk['CURRENT_SI'], fk])
 
-                if fk['FIRE_STATU'] ==  'Fire of Note':
-                    selected.append([fk['CURRENT_SI'], fk])
+                if True:  # out of control
+                    if fk['FIRE_STATU'] == 'Out of Control':
+                        selected.append([fk['CURRENT_SI'], fk])
 
-                if fk['FIRE_STATU'] == 'Out of Control':
-                    selected.append([fk['CURRENT_SI'], fk])
+                if True:  # being held
+                    if fk['FIRE_STATU'] == 'Being Held':
+                        selected.append([fk['CURRENT_SI'], fk])
 
-# sort the fires by curent size, largest first
-selected_size = list(selected_size)
-ix = [[selected_size[i][0], i] for i in range(len(selected_size))]
-ix.sort(reverse=True)
-selected_size = [selected_size[i[1]] for i in ix]
-
-# select the top TOP_N by size
-selected_size = selected_size[0: TOP_N]
-
-# combine fires of note, with TOP_N by size
-selected += selected_size
+selected = list(selected)
 
 # remove duplicates
 selected = [json.loads(s) for s in list(set([json.dumps(s) for s in selected]))]
 
+# sort by order of size, largest first
+ix = [[selected[i][0], i] for i in range(len(selected))]
+ix.sort(reverse=True)
+print("ix", ix)
+selected = [selected[i[1]] for i in ix]
+
+# select the top TOP_N by size
+selected = selected[0: TOP_N]
 print(selected)
 
-browser = webbrowser.get('google-chrome')
-
-ci = 0
+browser, ci = webbrowser.get('google-chrome'), 0
 for s in selected:
     r = s[1]
     lat, lon, size_ha, fire_number = r['LATITUDE'], r['LONGITUDE'], r['CURRENT_SI'], r['FIRE_NUMBE']
-    print(ci + 1, "(" + str(fire_number) + ")", r['GEOGRAPHIC'])
+    print()
+    print(r['CURRENT_SI'], ci + 1, "(" + str(fire_number) + ")", r['GEOGRAPHIC']) #  + '(' + str(r['CURRENT_SI']) + ')')
     # print('\t', type(s[0]), ci, s)
 
     view_str = ('https://apps.sentinel-hub.com/sentinel-playground/?source=S2L2A&lat=' +
                 str(lat) + '&lng=' +
                 str(lon) +
-                '&zoom=11&preset=CUSTOM&layers=B12,B11,B8A&maxcc=100'
+                '&zoom=13&preset=CUSTOM&layers=B12,B11,B8A&maxcc=100'
                 + '&evalscript=cmV0dXJuIFtCMTIqMi41LEIxMSoyLjUsQjhBKjIuNV0%3D')
 
     print(view_str)
