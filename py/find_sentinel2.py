@@ -136,13 +136,17 @@ f = open("./.sentinel2_download.sh", "wb")
 
 zipnames = []
 # download the data
-links = os.popen('grep alternative out_all.html').readlines()
+links = os.popen('grep alternative out_all.html').readlines() # [1:]
 for i in range(0, len(links)):
     link = links[i]
     w = link.strip().split('<link rel="alternative" href="')[1].split('"/>')[0]
     ti = titles[i].strip() # need to compare this to list of files already downloaded: skip existing files!
     tw = ti.split(">")[1].split("<")[0].strip()
     zfn = ti[7:-8] + '.zip'
+
+    if zfn.strip().split()[0] == 'Sentinels':
+        continue
+    print("zfn", zfn)
     zipnames.append([zfn.split('_')[2], zfn])
 
     # note: if you had a folder, not a directory (a directory in the case of google download): test -f should be test -d instead!!!!!!
@@ -151,7 +155,7 @@ for i in range(0, len(links)):
     
     if i > 0:
         f.write('\n'.encode())
-
+    
     f.write(cmd.encode())
 
     f.write((' > ' + zfn + '_stdout.txt 2> ' + zfn + '_stderr.txt').encode())
@@ -163,7 +167,7 @@ for i in range(0, len(links)):
 
     if i % 2 == 1:
         f.write('\nwait'.encode())
-zipnames.sort()  # sort zip files by date string
+zipnames.sort(reverse=True)  # sort zip files by date string
 
 f.close()
 a = os.system('chmod 755 ./.sentinel2_download.sh') 
@@ -173,7 +177,11 @@ t = datetime.datetime.now().strftime("%Y%m%d%H%M%S")  # timestamped backup
 a = os.system('cp -v .sentinel2_download.sh ' + fpfn + '_download.sh')
 run('cp ' + fpfn + '_download.sh ' + str(t) + '_fpf_download.sh')
 
-print(zipnames)
+for z in zipnames:
+    print(z[0].split('T')[0], z[1]) 
+
+# need to find S2.zip's, S2*.SAFE in subfolders from exec and tell if there are new dates:
+#   on a per-tile basis
 
 t = datetime.datetime.now().strftime("%Y%m%d")  # ) %H%M%S")
 run('grep ' + t + ' fpf_download.sh')
