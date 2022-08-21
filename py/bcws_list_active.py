@@ -13,7 +13,7 @@ from misc import exists, err
 
 # <<<<<<< HEAD
 MIN_FIRE_SIZE_HA = 5.
-TOP_N = 150
+TOP_N = 20 # 150
 #=======
 #MIN_FIRE_SIZE_HA = 25.
 #TOP_N = 20
