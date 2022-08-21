@@ -143,7 +143,7 @@ for i in range(0, len(links)):
     ti = titles[i].strip() # need to compare this to list of files already downloaded: skip existing files!
     tw = ti.split(">")[1].split("<")[0].strip()
     zfn = ti[7:-8] + '.zip'
-    zipnames.append(zfn)
+    zipnames.append([zfn.split('_')[2], zfn])
 
     # note: if you had a folder, not a directory (a directory in the case of google download): test -f should be test -d instead!!!!!!
     cmd ='test ! -f ' + zfn + ' && wget ' + ' --no-check-certificate --content-disposition --continue --user='
@@ -163,6 +163,7 @@ for i in range(0, len(links)):
 
     if i % 2 == 1:
         f.write('\nwait'.encode())
+zipnames.sort()  # sort zip files by date string
 
 f.close()
 a = os.system('chmod 755 ./.sentinel2_download.sh') 
