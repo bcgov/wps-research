@@ -167,7 +167,7 @@ for i in range(0, len(links)):
 
     if i % 2 == 1:
         f.write('\nwait'.encode())
-zipnames.sort(reverse=True)  # sort zip files by date string
+zipnames.sort(reverse=False)  # sort zip files by date string
 
 f.close()
 a = os.system('chmod 755 ./.sentinel2_download.sh') 
