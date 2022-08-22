@@ -1,7 +1,12 @@
 /* fix envi header */
 #include"misc.h"
+
+vector<str> good;
+void runme(size_t i){
+  run(str("envi_header_cleanup.py ") + good[i]);
+}
+
 int main(int argc, char ** argv){
-  vector<str> good;
   
   if(argc < 2){
     vector<str> lines(split(exec("ls -1 *.hdr"), '\n'));
@@ -27,9 +32,6 @@ int main(int argc, char ** argv){
       }
     }
   }
-
-  for(vector<str>::iterator it = good.begin(); it != good.end(); it++){
-    run(str("envi_header_cleanup.py ") + *it);
-  }
+  parfor(0, good.size(), runme);
   return 0;
 }
