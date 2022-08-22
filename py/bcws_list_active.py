@@ -13,12 +13,13 @@ from misc import exists, err, args
 
 
 # <<<<<<< HEAD
-MIN_FIRE_SIZE_HA = .5
+MIN_FIRE_SIZE_HA = .1
 TOP_N = 33 # 150
 try:
     TOP_N = int(args[1])
 except:
     pass
+step = 10
 
 #=======
 #MIN_FIRE_SIZE_HA = 25.
@@ -66,22 +67,22 @@ if __name__ == '__main__':
                 fk = f[key]
                 fire_size = float(fk['CURRENT_SI'])
                 
-                if False:  # out and larger than MIN_FIRE_SIZE_HA
+                if True:  # not out and larger than MIN_FIRE_SIZE_HA
                     if fk['FIRE_STATU'].lower() != 'out' and fire_size >= MIN_FIRE_SIZE_HA:  # > biggest_size
                         selected.append([fk['CURRENT_SI'], fk])  # selected fires
                         #print(fk)
                 if False:
                     if fk['FIRE_STATU'].lower() == 'out':
                         selected.append([fk['CURRENT_SI'], fk])
-                if True:  # fire of note
+                if False:  # fire of note
                     if fk['FIRE_STATU'] ==  'Fire of Note':
                         selected.append([fk['CURRENT_SI'], fk])
 
-                if True:  # out of control
+                if False:  # out of control
                     if fk['FIRE_STATU'] == 'Out of Control':
                         selected.append([fk['CURRENT_SI'], fk])
 
-                if True:  # being held
+                if False:  # being held
                     if fk['FIRE_STATU'] == 'Being Held':
                         selected.append([fk['CURRENT_SI'], fk])
 
@@ -92,7 +93,8 @@ selected = [json.loads(s) for s in list(set([json.dumps(s) for s in selected]))]
 
 # sort by order of size, largest first
 ix = [[selected[i][0], i] for i in range(len(selected))]
-ix.sort(reverse=True)
+#ix.sort(reverse=True)
+ix.sort(reverse=False)
 print("ix", ix)
 selected = [selected[i[1]] for i in ix]
 
@@ -158,5 +160,7 @@ for s in selected:
             open(path,'wb').write(fp.encode())
 
     ci += 1
+    if ci % step == 0:
+        input("Press Enter to continue...")
 
     # need to add in OUT of CONTROL fires as well.
