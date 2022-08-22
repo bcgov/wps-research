@@ -1,4 +1,8 @@
-/* fix envi header */
+/* 20220822 "fix header". Ways to run:
+
+   fh envi_file.hdr # full filename specified
+   fh envi_file     # .hdr extension assumed
+   fh   	    # run on all header files in present dir */
 #include"misc.h"
 
 vector<str> good;
@@ -7,7 +11,6 @@ void runme(size_t i){
 }
 
 int main(int argc, char ** argv){
-  
   if(argc < 2){
     vector<str> lines(split(exec("ls -1 *.hdr"), '\n'));
     for(vector<str>::iterator it = lines.begin(); it != lines.end(); it++){
