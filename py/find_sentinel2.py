@@ -7,6 +7,7 @@ Query sentinel-2 products over a given point (alternately, a place name). Later:
 import os
 import sys
 import math
+import shutil
 import datetime
 from misc import exists, run
 
@@ -43,18 +44,24 @@ print("footprint", foot_print)
 # save username and password to files:
 user_, pass_ = None, None
 if not os.path.exists('./.user'):
-    user_ = input('please enter your copernicus username:').strip()
-    open('./.user', 'wb').write(user_.encode())
-    print('username written to ./.user')
-else:
-    user_ = open('./.user', 'rb').read().decode()
+    ufs = [x.strip() for x in os.popen("find ../ -name '.user'").readlines()]
+    pfs = [x.strip() for x in os.popen("find ../ -name '.pass'").readlines()]
+
+    if os.path.exists(ufs[0]) and os.path.exists(pfs[0]):
+        shutil.copyfile(ufs[0], './.user')
+        shutil.copyfile(pfs[0], './.pass')
+
+    else:
+        user_ = input('please enter your copernicus username:').strip()
+        open('./.user', 'wb').write(user_.encode())
+        print('username written to ./.user')
+user_ = open('./.user', 'rb').read().decode()
 
 if not os.path.exists('./.pass'):
     pass_ = input('please enter your copernicus password:').strip()
     open('./.pass', 'wb').write(pass_.encode())
     print('password written to ./.pass')
-else:
-    pass_ = open('./.pass', 'rb').read().decode()
+pass_ = open('./.pass', 'rb').read().decode()
 
 def c(add= ''):
     cmd = ('wget --no-check-certificate --user=' +
@@ -65,16 +72,11 @@ def c(add= ''):
            'footprint:\\"' + foot_print + '\\")' + add + '"')
     return cmd
 
-user_ = user_.strip()
-pass_ = pass_.strip()
-
-# get the first page
-cmd = c('&rows=100')
+user_, pass_ = user_.strip(), pass_.strip()
+cmd = c('&rows=100')  # get the first page
 print(cmd)
 r = os.popen(cmd).read()
-
-# read in result
-dat = open('out.html').read()
+dat = open('out.html').read()  # read in results
 a = os.system('mv out.html out0.html')
 lines, lines_all = dat.strip().split('\n'), []
 lines_all = [*lines_all, *lines]
@@ -155,18 +157,16 @@ for i in range(0, len(links)):
     
     if i > 0:
         f.write('\n'.encode())
-    
     f.write(cmd.encode())
-
     f.write((' > ' + zfn + '_stdout.txt 2> ' + zfn + '_stderr.txt').encode())
     
     if i % 2 == 0:
         f.write(' &'.encode())
-
     f.write((" #" + ti).encode())
 
     if i % 2 == 1:
         f.write('\nwait'.encode())
+
 zipnames.sort(reverse=False)  # sort zip files by date string
 
 f.close()
