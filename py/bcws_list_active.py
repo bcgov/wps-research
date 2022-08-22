@@ -14,7 +14,7 @@ from misc import exists, err, args
 
 # <<<<<<< HEAD
 MIN_FIRE_SIZE_HA = .1
-TOP_N = 33 # 150
+TOP_N = 30 # 150
 try:
     TOP_N = int(args[1])
 except:
