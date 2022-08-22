@@ -92,7 +92,8 @@ int main(int argc, char ** argv){
   zprManager * myManager = zprManager::Instance(argc, argv); // window manager class
   size_t width = glutGet(GLUT_SCREEN_WIDTH); // this section: get screen scale
   size_t height = glutGet(GLUT_SCREEN_HEIGHT);
-  
+  printf("glut width,height=(%zu, %zu)\n", width, height);
+
 
   if(argc > 5){
     size_t width_max = (size_t)atol(argv[5]);
