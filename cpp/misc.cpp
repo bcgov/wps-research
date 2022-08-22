@@ -585,6 +585,8 @@ void * pt_worker_fun(void * arg){
   }
 }
 
+/* define a function like this: void to_eval(size_t i){} and pass it to parfor
+*/
 void parfor(size_t start_j, size_t end_j, void(*eval)(size_t)){
   pt_eval = eval; // set global function pointer
   pt_end_j = end_j;
