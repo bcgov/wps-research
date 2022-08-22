@@ -7,7 +7,7 @@ int main(int argc, char ** argv){
   if(exists(fn)){
   }
   else{
-    if(exists(fn + str(".hdr")){
+    if(exists(fn + str(".hdr"))){
       fn += str(".hdr");
     }
   }
