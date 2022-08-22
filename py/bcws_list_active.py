@@ -93,8 +93,8 @@ selected = [json.loads(s) for s in list(set([json.dumps(s) for s in selected]))]
 
 # sort by order of size, largest first
 ix = [[selected[i][0], i] for i in range(len(selected))]
-#ix.sort(reverse=True)
-ix.sort(reverse=False)
+ix.sort(reverse=True)
+#ix.sort(reverse=False)
 print("ix", ix)
 selected = [selected[i[1]] for i in ix]
 
