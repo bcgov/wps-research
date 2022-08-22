@@ -105,7 +105,16 @@ int main(int argc, char ** argv){
     if(height_max < height) height = height_max;
   }
 
-  
+  if(!exists(".screen_min_x") ||
+     !exists(".screen_min_y")){
+    // screen dimensions not crossing boundaries between multiple displays
+    int a = system("screen_dimension.py");
+  }
+  size_t width_min = (size_t)atol(readLines(str(".screen_min_x"))[0].c_str());
+  size_t height_min = (size_t)atol(readLines(str(".screen_min_y"))[0].c_str());
+  if(width_min < width) width = width_min;
+  if(height_min < height) height = height_min;
+
   
   size_t min_wh = width > height ? height: width;
   printf("min_wh %f\n", (float)min_wh);
