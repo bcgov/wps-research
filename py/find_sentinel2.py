@@ -182,6 +182,12 @@ for z in zipnames:
 
 # need to find S2.zip's, S2*.SAFE in subfolders from exec and tell if there are new dates:
 #   on a per-tile basis
+# assume target product is a S2*MSIL2A_*.SAFE folder.
+# Apply run_sen2cor.py if only L1C products are available for the most recent date.
+
+# For list of newer dates available.
+
+# (if we don't have any dates, fetch the most recent only.
 
 t = datetime.datetime.now().strftime("%Y%m%d")  # ) %H%M%S")
 run('grep ' + t + ' fpf_download.sh')
