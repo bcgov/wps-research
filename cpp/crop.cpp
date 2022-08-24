@@ -41,21 +41,21 @@ int main(int argc, char ** argv){
       // bad pixel
     }
     else{
-      i = m / ncol;
-      j = m % ncol;
+      i = m / ncol; // row
+      j = m % ncol; // col 
       if(min_i < 0){
-        (min_i = i), (min_j = j);
+        (min_i = i), (min_j = j);  // init limits
       }
       else{
-        if(i < min_i) min_i = i;
+        if(i < min_i) min_i = i;  // revise limits
         if(j < min_j) min_j = j;
       }
 
       if(max_i < 0){
-        (max_i = i), (max_j = j);
+        (max_i = i), (max_j = j); // init limits
       }
       else{
-        if(i > max_i) max_i = i;
+        if(i > max_i) max_i = i;  // revise limits
         if(j > max_j) max_j = j;
       }
 
@@ -66,6 +66,5 @@ int main(int argc, char ** argv){
   cout << "min_j " << min_j << endl;
   cout << "max_i " << max_i << endl;
   cout << "max_j " << max_j << endl;
-
   return 0;
 }
