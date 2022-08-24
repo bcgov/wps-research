@@ -12,7 +12,12 @@ int main(int argc, char ** argv){
   str ht(swir + str("_ht.bin"));
   str dom(ht + str("_dominant.bin"));
 
-  run(str("htrim2 ") + ht + str(" ") + (argc < 2 ? str(".5 .5") : (str(argv[1]) + str(" ") + str(argv[1]))));
+  run(str("htrim2 ") + swir + str(" ") + (argc < 2 ? str(".5 .5") : (str(argv[1]) + str(" ") + str(argv[1]))));
+
+  if(!exists(ht)){
+	  printf("Error: could not find file: %s\n", ht.c_str());
+	  err("file not found");
+  }
 
   run(str("raster_dominant.exe " + ht));
   run(str("unstack.exe ") + dom + str(" 1"));
