@@ -74,5 +74,6 @@ int main(int argc, char ** argv){
       to_string(y) + str(" ") +
       fn + str(" ") +
       ofn); 
+  run(str("fh ") + ohn);
   return 0;
 }
