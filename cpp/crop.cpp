@@ -66,5 +66,13 @@ int main(int argc, char ** argv){
   size_t y = max_i - min_i + 1;
   cout << "x_size " << x << " min_i " << min_i << " max_i " << max_i << endl;
   cout << "y_size " << y << " min_j " << min_j << " max_j " << max_j << endl;
+
+  run(str("gdal_translate -of ENVI -ot Float32 -srcwin ") +
+      to_string(min_j) + str(" ") +
+      to_string(min_i) + str(" ") +
+      to_string(x) + str(" ") + 
+      to_string(y) + str(" ") +
+      fn + str(" ") +
+      ofn); 
   return 0;
 }
