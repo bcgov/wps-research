@@ -24,10 +24,10 @@ int main(int argc, char ** argv){
   hread(hfn, nrow, ncol, nband); // read header
 
   run(str("gdal_translate -of ENVI -ot Float32 -srcwin ") +
-      to_string(-N) + str(" ") +
-      to_string(-N) + str(" ") +
-      to_string(ncol+ N) + str(" ") + 
-      to_string(nrow + N) + str(" ") +
+      to_string(0 - N) + str(" ") +
+      to_string(0 - N) + str(" ") +
+      to_string(ncol + N + N) + str(" ") + 
+      to_string(nrow + N + N) + str(" ") +
       fn + str(" ") +
       ofn); 
   run(str("fh ") + ohn);
