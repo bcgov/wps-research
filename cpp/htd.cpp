@@ -5,6 +5,9 @@ int main(int argc, char ** argv){
 
   str f("sub.bin");
   str swir(f + str("_swir.bin"));
+  if(!exists(swir)){
+    run(str("sentinel2_swir_subselect sub.bin"));
+  }
 
   str ht(swir + str("_ht.bin"));
   str dom(ht + str("_dominant.bin"));
