@@ -29,6 +29,7 @@ int main(int argc, char ** argv){
   for0(i, np) out[i] = 0.;
 
   for0(m, N){
+    printf("+r %s\n", fn[m].c_str());
     dat = bread(fn[m], nrow, ncol, nband);
     for0(i, nrow){
       ix = i * ncol;
@@ -43,6 +44,7 @@ int main(int argc, char ** argv){
     free(dat);
   }
 
+  printf("+w %s\n", ofn.c_str());
   bwrite(out, ofn, nrow, ncol, nband);
   hwrite(ohn, nrow, ncol, nband);
   return 0;
