@@ -1,8 +1,6 @@
-'''Should redo this script using argparse!!!!!!
-
+'''Might be better to redo with argparse!!!!!!
 Query sentinel-2 products over a given point (alternately, a place name). Later: tile-ID of interest. Restrict for time?
-
-20220728 Need to search using poly e.g. footprint:"Intersects(POLYGON((-4.53 29.85, 26.75 29.85, 26.75 46.80,-4.53 46.80,-4.53 29.85)))" 
+20220728 Need to search using poly e.g. footprint:"Intersects(POLYGON((-4.53 29.85, 26.75 29.85, 26.75 46.80,-4.53 46.80,-4.53 29.85)))"    
 '''
 import os
 import sys
@@ -10,13 +8,10 @@ import math
 import shutil
 import datetime
 from misc import exists, run
-
 # t = datetime.datetime.now().strftime("%Y%m%d%H")  # timestamped backup
 t = datetime.datetime.now().strftime("%Y%m%d%H%M%S")  # timestamped backup
-
 foot_print = 'Intersects(51.48252764574755,-123.95386296901019)' # bc 	2022-C50155 	52.003216999999999 	-123.13905 	2022-05-05 17:23 	2022-05-30 15:01 	UC 	H 
 # careful, check if the lat/long are reversed in order (when comparing point location vs. polygon location?)
-
 # foot_print = 'Intersects(51.0602686,-120.9083258)' # default location: Kamloops
 # VICTORIA: (48.4283334, -123.3647222)
 
@@ -166,7 +161,6 @@ for i in range(0, len(links)):
 
     if i % 2 == 1:
         f.write('\nwait'.encode())
-
 zipnames.sort(reverse=False)  # sort zip files by date string
 
 f.close()
@@ -191,3 +185,5 @@ for z in zipnames:
 
 t = datetime.datetime.now().strftime("%Y%m%d")  # ) %H%M%S")
 run('grep ' + t + ' fpf_download.sh')
+
+run('update.py')
