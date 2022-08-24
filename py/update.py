@@ -95,3 +95,58 @@ if len(failed) > 0:
     for i in failed:
         print('\t', i)
     err('Download(s) failed please re-run later')
+
+if len(files) < 1:
+    # download the newest frame we can find, preferably L2 for that date.
+    dates_l1 = []
+    dates_l2 = []
+
+    lines = [x.strip() for x in open('fpf_download.sh').readlines()]
+    for line in lines:
+        line = line.strip().replace(' & ', ' ')
+        w = line.split()
+        if len(w) < 3:
+            continue
+        zfn = w[3]
+        w2 = zfn.split('_')
+        level = w2[1]
+        tsi = int(w2[2].split('T')[0])
+        d = [tsi, zfn.split('.')[0], line]
+        if level == 'MSIL1C':
+            dates_l1 += [d]
+        elif level == 'MSIL2A':
+            dates_l2 += [d]
+        else:
+            err('unrecognized processing level:', level)
+    dates_l1.sort(reverse=True)
+    dates_l2.sort(reverse=True)
+
+    d_use = None
+    if len(dates_l1) > 0:
+        d_use = dates_l1[0]
+
+    if len(dates_l2) > 0:
+        d_2 = dates_l2[0]
+        if d_use is not None:
+            if d_2[0] >= d_use[0]:
+                d_use = d_2
+        else:
+            d_use = d_2
+
+    if d_use is None:
+        print("Didn't find a date for footprint: " + open('fpf').read().strip())
+    else:
+        t_use = str(d_use[0])  # date string to download
+        if not os.path.exists(t_use):
+            os.mkdir(t_use)
+
+        zfn = d_use[1] + '.zip'
+        if not os.path.exists(t_use + sep + zfn):
+            cmd = d_use[2]
+            print('wget ' + zfn)
+            a = os.system(cmd)
+            run('mv -v ' + zfn + ' .' + sep + t_use + sep)
+        else:
+            print("Didn't find newer date for tile: " + ti)
+        if not os.path.exists(t_use + sep + zfn):
+            failed += [zfn]
