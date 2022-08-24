@@ -1,8 +1,6 @@
 /* raster_sum.cpp: band math, add hyperspectral cubes together
-
 20220808: should generalize this to > 2 input files
-
-20220824: generalize to N */
+20220824: generalized to N input files */
 #include"misc.h"
 
 int main(int argc, char ** argv){
