@@ -25,7 +25,7 @@ from osgeo import ogr
 from osgeo import gdal # need gdal / python installed!
 from osgeo import gdalconst
 from misc import err, exist, args, hdr_fn, read_hdr, write_binary, write_hdr, \
-        read_binary, parfor
+        read_binary, parfor, run
 
 if len(args) < 4:
     err('python3 rasterize_onto.py [shapefile to rasterize] ' +
@@ -227,3 +227,15 @@ if is_fire:  # post-processing of fire data
     ofn = OutputImage[:-4] + '_days_since_burn.bin'
     print('+w', ofn)
     write_binary(dat, ofn)
+
+# sum the rasterizations together
+sum_fn = OutputImage[:-4] + '_sum.bin'
+
+cmd = 'raster_sum ' + (' '.join(out_files)) + ' ' + sum_fn
+a = os.system(cmd)
+
+cmd = ('envi_header_copy_mapinfo.py ' + RefImage[:-4] + '.hdr ' + sum_fn[:-4] + '.hdr')
+a = os.system(cmd)
+
+cmd = 'crop ' + sum_fn
+a = os.system(cmd)
