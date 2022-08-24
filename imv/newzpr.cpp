@@ -254,7 +254,7 @@ void glImage::rebuffer(){
   min1 = min2 = min3 = 0.;
   max1 = max2 = max3 = FLT_MAX;
 
-  str imv_sf("./.imv_scaling");
+  str imv_sf(IMG_FN + "_imv_scaling");
   int is_scene = strncmp(parentZprInstance->getTitle().c_str(), "Scene", 5) == 0;
   if(exists(imv_sf)){
 	  /* example file contents: ./.imv_scaling. Just delete the file to disable manual scaling!
@@ -2128,7 +2128,7 @@ void glCurve::drawMe(){
     nr = parentZprInstance->NRow;
     nc = parentZprInstance->NCol;
 
-    str imv_sf("./.imv_scaling");
+    str imv_sf(IMG_FN + "_imv_scaling");
     if(!exists(imv_sf)){
       for0(i, d->size()){
         di = (*d)[i];
