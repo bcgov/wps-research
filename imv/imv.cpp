@@ -20,6 +20,7 @@ std::string strp(const std::string& str, const std::string& whitespace = " \t\r\
 #define message "imv.cpp [infile] # [analysis window size] [n bands groundref, 1-hot encoded, at end of bsq stack] [bands per frame] # [height max] [width max]"
 
 int main(int argc, char ** argv){
+  printf("Note: builtin classification method assumes input file: stack.bin\n");
   N_THREADS_IO = 4; // default number of threads for IO operations
 
   int n_groundref = 0;
