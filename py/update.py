@@ -23,7 +23,7 @@ for y in files:  # group by tile and refresh every tile that we can
         tiles[ti] = []
     tiles[ti] += [[ts, ix, fn]]
 
-ci = 0
+ci, failed = 0, []
 for ti in tiles:
     it = 0
     last_date = None
@@ -40,7 +40,7 @@ for ti in tiles:
     dates_l2 = []
     lines = [x.strip() for x in os.popen('grep _' + ti + '_ fpf_download.sh').readlines()]
     for line in lines:
-        line = line.strip().replace('&', '')
+        line = line.strip().replace(' & ', ' ')
         w = line.split()
         zfn = w[3]
         # print('\t', zfn)
@@ -76,5 +76,14 @@ for ti in tiles:
     zfn = d_use[1] + '.zip'
     if not os.path.exists(t_use + sep + zfn):
         cmd = d_use[2]
-        run(cmd)
+        print('wget ' + zfn)
+        a = os.system(cmd)
         run('mv -v ' + zfn + ' .' + sep + t_use + sep)
+    if not os.path.exists(t_use + sep + zfn):
+        failed += [zfn]
+
+if len(failed) > 0:
+    print("Failed to download:")
+    for i in failed:
+        print('\t', i)
+    err('Download(s) failed please re-run later')
