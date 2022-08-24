@@ -184,6 +184,8 @@ for z in zipnames:
 # (if we don't have any dates, fetch the most recent only.
 
 t = datetime.datetime.now().strftime("%Y%m%d")  # ) %H%M%S")
-run('grep ' + t + ' fpf_download.sh')
+cmd = ('grep ' + t + ' fpf_download.sh')
+print(cmd)
+a = os.system(cmd)
 
 run('update.py')
