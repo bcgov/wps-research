@@ -25,13 +25,15 @@ for y in files:  # group by tile and refresh every tile that we can
 
 ci, failed = 0, []
 for ti in tiles:
+    print(ti, '-' * 77)
     it = 0
     last_date = None
-    # tiles[ti].sort(reverse=True)
+    tiles[ti].sort(reverse=True)
     for [ts, ix, fn] in tiles[ti]:
+        # print(ts)
         if it == 0:
             last_date = ts
-            # print('\t', ts, ix, fn)
+            print('\t', ts, ix) #, fn)
         ci += 1
         it += 1
 
@@ -69,18 +71,24 @@ for ti in tiles:
         else:
             d_use = d_2
 
-    t_use = str(d_use[0])  # date string to download
-    if not os.path.exists(t_use):
-        os.mkdir(t_use)
+    if d_use is None:
+        print("Didn't find newer date for tile: " + ti)
 
-    zfn = d_use[1] + '.zip'
-    if not os.path.exists(t_use + sep + zfn):
-        cmd = d_use[2]
-        print('wget ' + zfn)
-        a = os.system(cmd)
-        run('mv -v ' + zfn + ' .' + sep + t_use + sep)
-    if not os.path.exists(t_use + sep + zfn):
-        failed += [zfn]
+    else:
+        t_use = str(d_use[0])  # date string to download
+        if not os.path.exists(t_use):
+            os.mkdir(t_use)
+
+        zfn = d_use[1] + '.zip'
+        if not os.path.exists(t_use + sep + zfn):
+            cmd = d_use[2]
+            print('wget ' + zfn)
+            # a = os.system(cmd)
+            run('mv -v ' + zfn + ' .' + sep + t_use + sep)
+        else:
+            print("Didn't find newer date for tile: " + ti)
+        if not os.path.exists(t_use + sep + zfn):
+            failed += [zfn]
 
 if len(failed) > 0:
     print("Failed to download:")
