@@ -7,12 +7,12 @@ int main(int argc, char ** argv){
   if(argc < 4) err("raster_sum.exe [raster cube 1] [raster cube 2] [output cube]\n");
   size_t nrow, ncol, nband, np, nrow2, ncol2, nband2;
   size_t i, j, k, ix, ij, ik, m;
+  float * out, * dat;
 
   int N = argc - 2; // one arg for exe name and one for output cube name
-  cout << "N " << N << endl;
-  if(exists(argv[argc - 1])){
-    err("output file exists");
-  }
+  str ofn(argv[argc - 1]); // output file name
+  if(exists(ofn)) err("output file exists");
+  str ohn(hdr_fn(ofn, true)); // out header file name
 
   vector<str> fn, hfn;
   for0(i, N){
@@ -24,15 +24,12 @@ int main(int argc, char ** argv){
     else (nrow = nrow2), (ncol = ncol2), (nband = nband2);
   }
 
-  str ofn(argv[3]); // output file name
-  str ohn(hdr_fn(ofn, true)); // out header file name
-
   np = nrow * ncol; // number of input pix
-  float * out = falloc(nrow * ncol * nband);
+  out = falloc(np * nband);
   for0(i, np) out[i] = 0.;
 
   for0(m, N){
-    float * dat = bread(fn[m], nrow, ncol, nband);
+    dat = bread(fn[m], nrow, ncol, nband);
     for0(i, nrow){
       ix = i * ncol;
       for0(j, ncol){
