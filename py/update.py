@@ -83,7 +83,7 @@ for ti in tiles:
         if not os.path.exists(t_use + sep + zfn):
             cmd = d_use[2]
             print('wget ' + zfn)
-            # a = os.system(cmd)
+            a = os.system(cmd)
             run('mv -v ' + zfn + ' .' + sep + t_use + sep)
         else:
             print("Didn't find newer date for tile: " + ti)
