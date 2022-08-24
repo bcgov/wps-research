@@ -8,7 +8,7 @@ int main(int argc, char ** argv){
   if(argc < 2){
     err("pad.exe [raster cube] # [optional arg: # of pixels] # pad a raster ");
   }
-  long int N = 50; // default value, 50 pixels
+  long int N = 25; // default value, 50 pixels
 
   if(argc > 2) N = atol(argv[2]);
 
