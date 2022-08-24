@@ -44,28 +44,28 @@ int main(int argc, char ** argv){
       i = m / ncol;
       j = m % ncol;
       if(min_i < 0){
-	      (min_i = i), (min_j = j);
+        (min_i = i), (min_j = j);
       }
       else{
-	if(i < min_i) min_i = i;
-	if(j < min_j) min_j = j;
+        if(i < min_i) min_i = i;
+        if(j < min_j) min_j = j;
       }
 
       if(max_i < 0){
-	      (max_i = i), (max_j = j);
+        (max_i = i), (max_j = j);
       }
       else{
         if(i > max_i) max_i = i;
-	if(j > max_j) max_j = j;
+        if(j > max_j) max_j = j;
       }
 
     }
   }
 
   cout << "min_i " << min_i << endl;
-  cout << "min_j " << min_i << endl;
+  cout << "min_j " << min_j << endl;
   cout << "max_i " << max_i << endl;
-  cout << "max_j " << max_i << endl;
+  cout << "max_j " << max_j << endl;
 
   return 0;
 }
