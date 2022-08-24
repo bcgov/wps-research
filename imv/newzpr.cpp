@@ -241,7 +241,10 @@ void glImage::rebuffer(){
   bool use_first = false;
   myBi = parentZprInstance->myBi;
   int NRow = image->NRow; int NCol = image->NCol;
-  printf("--> glImage::rebuffer() %d %d %d nr %d nc %d: %s\n", myBi->at(0), myBi->at(1), myBi->at(2), NRow, NCol, parentZprInstance->getTitle().c_str());
+  printf("--> glImage::rebuffer() %d %d %d nr %d nc %d: %s\n",
+	 myBi->at(0), myBi->at(1), myBi->at(2),
+	 NRow, NCol, parentZprInstance->getTitle().c_str());
+
   SA< SA<float> * > * FB = image->getFloatBuffers();
   SA<float> * b1 = FB->at(myBi->at(0));
   SA<float> * b2 = FB->at(myBi->at(1));
@@ -319,8 +322,10 @@ void glImage::rebuffer(){
   r2 = 1. / (max2 - min2);
   r3 = 1. / (max3 - min3);
 
-  printf("myZprInstanceID %d r1 %f r2 %f r3 %f min1 %f min2 %f min3 %f\n",
-  parentZprInstance->myZprInstanceID, r1, r2, r3, min1, min2, min3);
+  printf("myZprInstanceID %d r1 %f r2 %f r3 %f min1 %f min2 %f min3 %f\n", parentZprInstance->myZprInstanceID, r1, r2, r3, min1, min2, min3);
+  //myBi->at(0), myBi->at(1), myBi->at(2), NRow, NCol, parentZprInstance->getTitle().c_str());
+  // in >> min1 >> min2 >> min3 >> max1 >> max2 >> max3;
+  printf("\tmin1 min2 min3 max1 max2 max3 %f %f %f %f %f %f\n", min1, min2, min3, max1, max2, max3);
 
   float r, g, b;
   long int i, j, k, ri, m;
