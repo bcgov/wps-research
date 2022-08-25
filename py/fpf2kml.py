@@ -1,4 +1,6 @@
-'''20220824 convert "fpf" format (copernicus footprint string file) to kml
+'''20220824 convert "fpf" format (copernicus footprint string file) to kml. Example file "fpf":
+
+Intersects(POLYGON((-124.79178589364845 50.836204617080405,-124.79178589364845 50.914095382919584,-124.66834810635157 50.914095382919584,-124.66834810635157 50.836204617080405,-124.79178589364845 50.836204617080405)))
 '''
 import os
 import sys
