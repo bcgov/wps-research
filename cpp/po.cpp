@@ -1,6 +1,5 @@
 /* 20220824 project onto */
 #include"misc.h"
-
 int main(int argc, char ** argv){
   str args("");
   int i;
