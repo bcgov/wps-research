@@ -3,6 +3,8 @@ Query sentinel-2 products over a given point (alternately, a place name). Later:
 20220728 Need to search using poly e.g. footprint:"Intersects(POLYGON((-4.53 29.85, 26.75 29.85, 26.75 46.80,-4.53 46.80,-4.53 29.85)))"    
 
 (*) 20220824 need to insist that ALL tiles are refreshed, not just the ones we have already downloaded!
+(*) need to auto-run sen2cor for level1.
+(*) need to run sentinel2_stack_all.py for level2
 '''
 import os
 import sys
