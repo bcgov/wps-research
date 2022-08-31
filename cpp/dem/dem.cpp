@@ -208,21 +208,26 @@ void special(int key, int x, int y){
 	display();
   }
 
-  if(key == GLUT_KEY_UP){
+  if(key == GLUT_KEY_UP || key == GLUT_KEY_DOWN){
+	  if(key == GLUT_KEY_UP){
 	  ri++; 
 	  gi++;
 	  bi++;
 	  if(ri >= nband) ri = 0;
 	  if(gi >= nband) gi = 0;
 	  if(bi >= nband) bi = 0;
-  }
-  if(key == GLUT_KEY_DOWN){
+  	}
+  	if(key == GLUT_KEY_DOWN){
 	  ri--;
 	  gi--;
 	  bi--;
 	  if(ri < 0) ri = nband - 1;
 	  if(gi < 0) gi = nband - 1;
 	  if(bi < 0) bi = nband - 1;
+  	}
+	str title(str("z=(") + band_names[zi] + str(") r=(") + band_names[ri] + str(") g=(") + band_names[gi] + str(") b=(") + band_names[bi] + str(")"));
+        glutSetWindowTitle(title.c_str());
+	display();
   }
 }
 
