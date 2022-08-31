@@ -238,6 +238,29 @@ void keyboard(unsigned char key, int x, int y){
       }
       break;
 
+    case GLUT_KEY_LEFT:
+      {
+	zi -= 1;
+	if(zi < 0){
+	  zi = nband - 1;
+        }
+      }
+      break;
+    case GLUT_KEY_RIGHT:
+      {
+        zi += 1;
+        if(zi >= nband){
+          zi = 0;
+        }
+      }
+
+      break;
+    case GLUT_KEY_UP:
+      break;
+    case GLUT_KEY_DOWN:
+      break;
+
+
     // Escape
     case 27 :
       quitme();
@@ -284,12 +307,15 @@ int main(int argc, char ** argv){
   //==========================================================================
   /* DEM data file */
   str fn(argv[1]);
-  str fn2(fn + str("_scale.bin"));
+  
+  if(!exists(fn)) err("please check input file");
 
-  if(!exists(fn2)){
-    int a = system((str("raster_scale ") + fn).c_str());
-  }
+  /*str fn2(fn + str("_scale.bin"));
 
+    if(!exists(fn2)){
+      int a = system((str("raster_scale ") + fn).c_str());
+    }
+  */
   fn = fn2;
   str hfn(hdr_fn(fn));
 
