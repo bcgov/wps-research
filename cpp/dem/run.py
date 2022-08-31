@@ -6,4 +6,4 @@ def run(c):
     return a
 
 run("make")
-run("./dem dat/stack_scale.bin")
+run("./dem dat/stack.bin")
