@@ -20,16 +20,11 @@ int main(int argc, char ** argv){
   for0(i, np) out[i] = 0.;
     
   dat = bread(fn, nrow, ncol, nband);
-    for0(i, nrow){
-      ix = i * ncol;
-      for0(j, ncol){
-        ij = ix + j;
-        for0(k, nband){
-          out[ij] += dat[ik];
-        }
-      }
+  for0(i, np){
+    for0(k, nband){
+	    out[i] += dat[(nband * np) + i];
     }
-
+  }
   printf("+w %s\n", ofn.c_str());
   bwrite(out, ofn, nrow, ncol, 1);
   hwrite(ohn, nrow, ncol, 1);
