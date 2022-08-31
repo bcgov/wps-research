@@ -1,0 +1,26 @@
+ENVI
+description = {G61701/20220824/sub.bin}
+samples = 312
+lines = 242
+bands = 14
+header offset = 0
+file type = ENVI Standard
+data type = 4
+interleave = bsq
+byte order = 0
+map info = {UTM, 1, 1, 327930, 6220650, 20, 20, 10, North,WGS-84}
+coordinate system string = {PROJCS["WGS_1984_UTM_Zone_10N",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137.0,298.257223563]],PRIMEM["Greenwich",0.0],UNIT["Degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["False_Easting",500000.0],PARAMETER["False_Northing",0.0],PARAMETER["Central_Meridian",-123.0],PARAMETER["Scale_Factor",0.9996],PARAMETER["Latitude_Of_Origin",0.0],UNIT["Meter",1.0]]}
+band names = {SRTM,
+raster_mult sub.bin_swir.bin_total.bin_recip.bin sub.bin_swir.bin_001.bin prod.bin,
+20220824 60m: B1 443nm,
+20220824 10m: B2 490nm,
+20220824 10m: B3 560nm,
+20220824 10m: B4 665nm,
+20220824 20m: B5 705nm,
+20220824 20m: B6 740nm,
+20220824 20m: B7 783nm,
+20220824 10m: B8 842nm,
+20220824 20m: B8A 865nm,
+20220824 60m: B9 945nm,
+20220824 20m: B11 1610nm,
+20220824 20m: B12 2190nm}
