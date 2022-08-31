@@ -1,8 +1,9 @@
-/* 20220830
- dem.cpp: plot an image in 3d
+/* 20220830 dem.cpp: plot an image in 3d
 
 usage:
   dem [input raster file] [z coordinate band] [r coord band] [g coord band] [b coord band] 
+
+20220831 add left-right arrows to shift z band, up-down arrows to shift r,g,b bands
 */
 #define Z_SCALE 0.25
 int ri, gi, bi, zi;
