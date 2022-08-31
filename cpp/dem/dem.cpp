@@ -196,33 +196,38 @@ void keyboard(unsigned char key, int x, int y){
         //printf( "%d Pressed RETURN\n",(char)key);
         str S(console_string);
         cout << "[" << S << "]" << endl;
-        
+ 
+	long int x;
 	if(console_string[0] == 'r'){
-	  ri = atoi(str(&console_string[1]).c_str());
+	  x = atol(str(&console_string[1]).c_str());
+	  if(x >= 0 && x < nband) ri = x;
 	}
 
 	if(console_string[0] == 'g'){
-	  gi = atoi(str(&console_string[1]).c_str());
+	  x = atol(str(&console_string[1]).c_str());
+	  if(x >= 0 && x < nband) gi = x;
 	}
 
 	if(console_string[0] == 'b'){
-	  bi = atoi(str(&console_string[1]).c_str());
+	  x = atol(str(&console_string[1]).c_str());
+	  if(x >= 0 && x < nband) bi = x;
 	}
 
   	if(console_string[0] == 'z'){
-          zi = atoi(str(&console_string[1]).c_str());
-	  size_t i, j, k;
-  	  for0(i, nrow){
-   	    for0(j, ncol){
-      	      k = (i * ncol) + j;
-	      points[k].z = dat[k + (zi * np)];
-     	      //points[k].z -= zmin;
-    	      //points[k].z /= (zmax - zmin);
-   	      points[k].z *= Z_SCALE;
-    	    }
-	  }
-        }
-        
+          x = atoi(str(&console_string[1]).c_str());
+	  if(x >= 0 && x < nband){
+	    zi = x;
+	    size_t i, j, k;
+  	    for0(i, nrow){
+   	      for0(j, ncol){
+      	        k = (i * ncol) + j;
+	        points[k].z = dat[k + (zi * np)];
+   	        points[k].z *= Z_SCALE;
+    	      }
+	    }
+          }
+	}
+
 	console_string[0]='\0';
         console_position=0;
         display();
