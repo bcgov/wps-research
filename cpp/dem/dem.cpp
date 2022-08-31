@@ -329,8 +329,6 @@ int main(int argc, char ** argv){
       //points[k].z -= zmin;
       //points[k].z /= (zmax - zmin);
       points[k].z *= Z_SCALE; 
-
-      //printf("i,j %f %f x,y,z %f %f %f\n", (float)i, (float)j, points[k].x, points[k].y, points[k].z);
     }
   }
 
