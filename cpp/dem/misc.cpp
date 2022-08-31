@@ -305,39 +305,6 @@ bool exists(str fn){
 }
 
 
-vector<string> parseHeaderFile(string hfn, size_t & NRow, size_t & NCol, size_t & NBand){
-  vector<string> bandNames;
-  if(!exists(hfn)){
-    printf("Error: couldn't find header file\n");
-  }
-  else{
-    vector<string> lines(readLines(hfn));
-    vector<string>::iterator it;
-    for(it=lines.begin(); it!=lines.end(); it++){
-      string sss(*it);
-      vector<string> splitLine(split(sss, '='));
-      if(splitLine.size()==2){
-        if(strncmp(strip_space(splitLine[0]).c_str(), "samples", 7) == 0){
-          NCol = atoi(strip_space(splitLine[1]).c_str());
-        }
-        if(strncmp(strip_space(splitLine[0]).c_str(), "lines", 5) == 0){
-          NRow = atoi(strip_space(splitLine[1]).c_str());
-        }
-        if(strncmp(strip_space(splitLine[0]).c_str(), "bands", 5)== 0){
-          NBand = atoi(strip_space(splitLine[1]).c_str());
-        }
-        if(strncmp(strip_space(splitLine[0]).c_str(), "band names", 10) == 0){
-          string bandNameList(trim2(trim2(strip_space(splitLine[1]),
-          ('{')),
-          ('}')));
-          bandNames = split(bandNameList, ',');
-        }
-      }
-    }
-  }
-  return bandNames;
-}
-
 /*trim leading or trailing characters from a string*/
 string trim2(string s, char a){
   string ret("");
@@ -430,6 +397,63 @@ vector<string> split(char * s, size_t s_len, char delim){
     //cout << "\t" << ss << endl;
     ss = "";
   }
+  return ret;
+}
+
+
+vector<string> parse_band_names(string fn){
+  size_t nr, nc, nb;
+  if(!exists(fn)) err("parse_band_names: header file not found");
+  hread(fn, nr, nc, nb);
+
+  str band("band");
+  str names("names");
+  size_t ci = 0;
+  size_t bni = -1; // band names start index
+  vector<string> lines(readLines(fn)); // read header file
+  for(vector<string>::iterator it = lines.begin(); it != lines.end(); it++){
+    vector<string> w(split(*it, ' '));
+    if(w.size() >= 2){
+      if((w[0] == band) && (w[1] == names)){
+        bni = ci;
+        break;
+      }
+    }
+    ci ++;
+  }
+
+  vector<string> band_names;
+  vector<string> w(split(lines[bni], '{')); // parse first band name
+  string bn(w[1]);
+  bn = trim2(bn, ',');
+  band_names.push_back(bn);
+
+  if(nb > 1){
+    if(nb > 2){
+      // parse middle band names
+      for(ci = bni + 1; ci < lines.size() - 1; ci++){
+        str line(lines[ci]);
+        line = trim2(line, ',');
+        band_names.push_back(line);
+      }
+    }
+
+    // parse last band name
+    if(true){
+      str w(lines[lines.size() -1]);
+      w = trim2(w, '}');
+      band_names.push_back(w);
+    }
+  }
+  for0(ci, band_names.size()){
+    trim(band_names[ci], '}');
+  }
+  return band_names;
+}
+
+size_t hread(str hfn, size_t & nrow, size_t & ncol, size_t & nband, vector<string>& bandNames){
+  size_t ret = hread(hfn, nrow, ncol, nband);
+  bandNames = parse_band_names(hfn);
   return ret;
 }
 
