@@ -452,9 +452,9 @@ vector<string> parse_band_names(string fn){
 }
 
 size_t hread(str hfn, size_t & nrow, size_t & ncol, size_t & nband, vector<string>& bandNames){
-  size_t ret = hread(hfn, nrow, ncol, nband);
+  hread(hfn, nrow, ncol, nband);
   bandNames = parse_band_names(hfn);
-  return ret;
+  return bandNames.size();
 }
 
 

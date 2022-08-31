@@ -17,6 +17,7 @@ int ri, gi, bi, zi;
 #include<stdlib.h>
 #include<cfloat>
 
+vector<string> band_names;
 size_t np;
 
 vec3d rX; // 3d reference point
@@ -198,34 +199,36 @@ void keyboard(unsigned char key, int x, int y){
         cout << "[" << S << "]" << endl;
  
 	long int x;
-	if(console_string[0] == 'r'){
-	  x = atol(str(&console_string[1]).c_str());
-	  if(x >= 0 && x < nband) ri = x;
-	}
 
-	if(console_string[0] == 'g'){
-	  x = atol(str(&console_string[1]).c_str());
-	  if(x >= 0 && x < nband) gi = x;
-	}
+	str title(str("z=") + band_names[zi] + str(" r=") + band_names[ri] + str(" g=") + band_names[gi] + str(" b=") + band_names[bi]);
 
-	if(console_string[0] == 'b'){
+	if(console_string[0] == 'r' || console_string[0] == 'g' || console_string[0] == 'b' || console_string[0] == 'z'){
 	  x = atol(str(&console_string[1]).c_str());
-	  if(x >= 0 && x < nband) bi = x;
-	}
+	  if(console_string[0] == 'r'){
+	    if(x >= 0 && x < nband) ri = x;
+	  }
+	  if(console_string[0] == 'g'){
+	    if(x >= 0 && x < nband) gi = x;
+	  }
+    	  if(console_string[0] == 'b'){
+	    if(x >= 0 && x < nband) bi = x;
+	  }
+  	  if(console_string[0] == 'z'){
+	    if(x >= 0 && x < nband){
+	      zi = x;
+	      size_t i, j, k;
+  	      for0(i, nrow){
+   	        for0(j, ncol){
+      	          k = (i * ncol) + j;
+	          points[k].z = dat[k + (zi * np)];
+   	          points[k].z *= Z_SCALE;
+    	        }
+	      }
+            } 
+	  }
 
-  	if(console_string[0] == 'z'){
-          x = atoi(str(&console_string[1]).c_str());
-	  if(x >= 0 && x < nband){
-	    zi = x;
-	    size_t i, j, k;
-  	    for0(i, nrow){
-   	      for0(j, ncol){
-      	        k = (i * ncol) + j;
-	        points[k].z = dat[k + (zi * np)];
-   	        points[k].z *= Z_SCALE;
-    	      }
-	    }
-          }
+  	  str title(str("z=") + band_names[zi] + str(" r=") + band_names[ri] + str(" g=") + band_names[gi] + str(" b=") + band_names[bi]);
+	  glutSetWindowTitle(title.c_str());
 	}
 
 	console_string[0]='\0';
@@ -292,7 +295,9 @@ int main(int argc, char ** argv){
   size_t i, j;
   rX.x = rX.y = rX.z = 0.;
 
-  hread(hfn, nrow, ncol, nband); // load DEM data
+  band_names = vector<string>();
+
+  hread(hfn, nrow, ncol, nband, band_names); // load DEM data
   dat = bread(fn, nrow, ncol, nband);
   np = nrow * ncol;
   
@@ -344,12 +349,14 @@ int main(int argc, char ** argv){
   console_position = 0;
   fullscreen = 0;
 
+  str title(str("z=") + band_names[zi] + str(" r=") + band_names[ri] + str(" g=") + band_names[gi] + str(" b=") + band_names[bi]);
+
   /* Initialise GLUT & create window */
   printf("glutInit()\n");
   glutInit(&argc, argv);
   glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
   glutInitWindowSize(STARTX,STARTY);
-  glutCreateWindow("");
+  glutCreateWindow(title.c_str());
   zprInit();
   printf("glutCreateWindow()\n");
 
