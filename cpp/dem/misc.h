@@ -205,5 +205,16 @@ size_t size(FILE * f);
 size_t fsize(string fn);
 bool exists(str fn);
 
+vector<string> parseHeaderFile(string hfn, size_t & NRow, size_t & NCol, size_t & NBand);
+
+/*trim leading or trailing characters from a string*/
+string trim2(string s, char a);
+
+string chartos(char s);
+string strip_space(string s);
+vector<string> readLines(string fn);
+vector<string> split(char * s, size_t s_len, char delim);
+
+
 
 #endif
