@@ -4,7 +4,7 @@
 usage:
   dem [input raster file] [z coordinate band] [r coord band] [g coord band] [b coord band] 
 */
-#define Z_SCALE 0.1
+#define Z_SCALE 0.25
 int ri, gi, bi, zi;
 #define MYFONT GLUT_BITMAP_HELVETICA_12
 #define STR_MAX 1000
