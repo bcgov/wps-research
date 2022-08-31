@@ -200,7 +200,7 @@ void keyboard(unsigned char key, int x, int y){
  
 	long int x;
 
-	str title(str("z=") + band_names[zi] + str(" r=") + band_names[ri] + str(" g=") + band_names[gi] + str(" b=") + band_names[bi]);
+	str title(str("z=(") + band_names[zi] + str(") r=(") + band_names[ri] + str(") g=(") + band_names[gi] + str(") b=(") + band_names[bi] + str(")"));
 
 	if(console_string[0] == 'r' || console_string[0] == 'g' || console_string[0] == 'b' || console_string[0] == 'z'){
 	  x = atol(str(&console_string[1]).c_str());
@@ -349,7 +349,7 @@ int main(int argc, char ** argv){
   console_position = 0;
   fullscreen = 0;
 
-  str title(str("z=") + band_names[zi] + str(" r=") + band_names[ri] + str(" g=") + band_names[gi] + str(" b=") + band_names[bi]);
+  str title(str("z=(") + band_names[zi] + str(") r=(") + band_names[ri] + str(") g=(") + band_names[gi] + str(") b=(") + band_names[bi] + str(")"));
 
   /* Initialise GLUT & create window */
   printf("glutInit()\n");
