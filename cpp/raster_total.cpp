@@ -31,7 +31,7 @@ int main(int argc, char ** argv){
     }
 
   printf("+w %s\n", ofn.c_str());
-  bwrite(out, ofn, nrow, ncol, nband);
-  hwrite(ohn, nrow, ncol, nband);
+  bwrite(out, ofn, nrow, ncol, 1);
+  hwrite(ohn, nrow, ncol, 1);
   return 0;
 }
