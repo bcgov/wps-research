@@ -227,7 +227,7 @@ void keyboard(unsigned char key, int x, int y){
             } 
 	  }
 
-  	  str title(str("z=") + band_names[zi] + str(" r=") + band_names[ri] + str(" g=") + band_names[gi] + str(" b=") + band_names[bi]);
+	  str title(str("z=(") + band_names[zi] + str(") r=(") + band_names[ri] + str(") g=(") + band_names[gi] + str(") b=(") + band_names[bi] + str(")"));
 	  glutSetWindowTitle(title.c_str());
 	}
 
