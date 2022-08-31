@@ -17,6 +17,7 @@ int ri, gi, bi, zi;
 #include<stdlib.h>
 #include<cfloat>
 
+size_t np;
 
 vec3d rX; // 3d reference point
 char console_string[STR_MAX];
@@ -210,6 +211,16 @@ void keyboard(unsigned char key, int x, int y){
 
   	if(console_string[0] == 'z'){
           zi = atoi(str(&console_string[1]).c_str());
+	  size_t i, j, k;
+  	  for0(i, nrow){
+   	    for0(j, ncol){
+      	      k = (i * ncol) + j;
+	      points[k].z = dat[k + (zi * np)];
+     	      //points[k].z -= zmin;
+    	      //points[k].z /= (zmax - zmin);
+   	      points[k].z *= Z_SCALE;
+    	    }
+	  }
         }
         
 	console_string[0]='\0';
@@ -278,7 +289,7 @@ int main(int argc, char ** argv){
 
   hread(hfn, nrow, ncol, nband); // load DEM data
   dat = bread(fn, nrow, ncol, nband);
-  size_t np = nrow * ncol;
+  np = nrow * ncol;
   
   //dont forget to keep aspect ratio!
   zmax = -(float)FLT_MAX;  // Note: not FLT_MIN !!
@@ -296,8 +307,10 @@ int main(int argc, char ** argv){
       points[k].y = 1. - ((float)i) / ((float)nrow); //ncol); //- .5;
       points[k].z = dat[k]; // / 300. ;
 
+      /*
       if(points[k].z > zmax) zmax = points[k].z;
       if(points[k].z < zmin) zmin = points[k].z;
+      */
 //      printf("x,y,z %f %f %f\n", points[k].x, points[k].y, dat[k]);
     }
   }
@@ -308,8 +321,8 @@ int main(int argc, char ** argv){
   for0(i, nrow){
     for0(j, ncol){
       size_t k = (i * ncol) + j;
-      points[k].z -= zmin;
-      points[k].z /= (zmax - zmin);
+      //points[k].z -= zmin;
+      //points[k].z /= (zmax - zmin);
       points[k].z *= Z_SCALE; 
 
       //printf("i,j %f %f x,y,z %f %f %f\n", (float)i, (float)j, points[k].x, points[k].y, points[k].z);
