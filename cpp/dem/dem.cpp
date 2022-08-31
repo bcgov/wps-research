@@ -6,7 +6,7 @@ usage:
 20220831 add left-right arrows to shift z band, up-down arrows to shift r,g,b bands
 */
 #define Z_SCALE 0.25
-int ri, gi, bi, zi;
+long int ri, gi, bi, zi;
 #define MYFONT GLUT_BITMAP_HELVETICA_12
 #define STR_MAX 1000
 #include"newzpr.h"
@@ -176,6 +176,54 @@ void quitme(){
 void special(int key, int x, int y){
   printf("special %d\n", key);
   special_key = key;
+
+  if(key == GLUT_KEY_LEFT || key == GLUT_KEY_RIGHT){
+	if(key == GLUT_KEY_LEFT){
+		printf("LEFT\n");
+          zi--;
+          if(zi < 0){
+            zi = nband - 1;
+          }
+	}
+	if(key == GLUT_KEY_RIGHT){
+		printf("RIGHT\n");
+          zi ++;
+          if(zi >= nband){
+            zi = 0;
+          }
+	}
+
+        size_t i, j, k;
+        for0(i, nrow){
+          for0(j, ncol){
+            k = (i * ncol) + j;
+            points[k].z = dat[k + (zi * np)];
+            points[k].z *= Z_SCALE;
+          }
+        }
+
+	printf("zi %ld\n", zi);
+        str title(str("z=(") + band_names[zi] + str(") r=(") + band_names[ri] + str(") g=(") + band_names[gi] + str(") b=(") + band_names[bi] + str(")"));
+        glutSetWindowTitle(title.c_str());
+	display();
+  }
+
+  if(key == GLUT_KEY_UP){
+	  ri++; 
+	  gi++;
+	  bi++;
+	  if(ri >= nband) ri = 0;
+	  if(gi >= nband) gi = 0;
+	  if(bi >= nband) bi = 0;
+  }
+  if(key == GLUT_KEY_DOWN){
+	  ri--;
+	  gi--;
+	  bi--;
+	  if(ri < 0) ri = nband - 1;
+	  if(gi < 0) gi = nband - 1;
+	  if(bi < 0) bi = nband - 1;
+  }
 }
 
 /* Keyboard functions */
@@ -201,10 +249,15 @@ void keyboard(unsigned char key, int x, int y){
  
 	long int x;
 
-	str title(str("z=(") + band_names[zi] + str(") r=(") + band_names[ri] + str(") g=(") + band_names[gi] + str(") b=(") + band_names[bi] + str(")"));
+	if((console_string[0] == 'r') ||
+           (console_string[0] == 'g') ||
+	   (console_string[0] == 'b') ||
+	   (console_string[0] == 'z')){
 
-	if(console_string[0] == 'r' || console_string[0] == 'g' || console_string[0] == 'b' || console_string[0] == 'z'){
 	  x = atol(str(&console_string[1]).c_str());
+
+	  printf("%ci %ld\n", console_string[0], x);
+
 	  if(console_string[0] == 'r'){
 	    if(x >= 0 && x < nband) ri = x;
 	  }
@@ -237,29 +290,6 @@ void keyboard(unsigned char key, int x, int y){
         display();
       }
       break;
-
-    case GLUT_KEY_LEFT:
-      {
-	zi -= 1;
-	if(zi < 0){
-	  zi = nband - 1;
-        }
-      }
-      break;
-    case GLUT_KEY_RIGHT:
-      {
-        zi += 1;
-        if(zi >= nband){
-          zi = 0;
-        }
-      }
-
-      break;
-    case GLUT_KEY_UP:
-      break;
-    case GLUT_KEY_DOWN:
-      break;
-
 
     // Escape
     case 27 :
@@ -329,6 +359,14 @@ int main(int argc, char ** argv){
   dat = bread(fn, nrow, ncol, nband);
   np = nrow * ncol;
   
+  for0(i, nband){
+    cout << "\"" << band_names[i] << "\"" << endl;
+  }
+
+  ri = nband - 1;
+  gi = nband - 2;
+  bi = nband - 3;
+
   //dont forget to keep aspect ratio!
   zmax = -(float)FLT_MAX;  // Note: not FLT_MIN !!
   zmin = +(float)FLT_MAX;
@@ -365,8 +403,7 @@ int main(int argc, char ** argv){
     }
   }
 
-  /* centre point */
-  rX.x = points[ncol/2 + (nrow/2) * ncol].x;
+  rX.x = points[ncol/2 + (nrow/2) * ncol].x;  /* centre point */
   rX.y = points[ncol/2 + (nrow/2) * ncol].y;
   rX.z = points[ncol/2 + (nrow/2) * ncol].z;
   
@@ -379,28 +416,23 @@ int main(int argc, char ** argv){
 
   str title(str("z=(") + band_names[zi] + str(") r=(") + band_names[ri] + str(") g=(") + band_names[gi] + str(") b=(") + band_names[bi] + str(")"));
 
-  /* Initialise GLUT & create window */
-  printf("glutInit()\n");
+  printf("glutInit()\n");  /* init GLUT and create a window */
   glutInit(&argc, argv);
   glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
   glutInitWindowSize(STARTX,STARTY);
   glutCreateWindow(title.c_str());
   zprInit();
-  printf("glutCreateWindow()\n");
 
-  /* Configure GLUT callback functions */
-  glutDisplayFunc(display);
+  glutDisplayFunc(display);  /* Configure glut callback fxns */
   glutKeyboardFunc(keyboard);
   glutSpecialFunc(special); // glutKeyboardUpFunc(keyboardup);
   glutIdleFunc(idle);
   glScalef(0.25,0.25,0.25);
   
-  /* Configure ZPR module */
-  zprSelectionFunc(display); /* Selection mode draw function */
+  zprSelectionFunc(display); /* Configure ZPR: Selection mode draw function */
   zprPickFunc(pick); /* Pick event client callback */
 
-  /* Initialise OpenGL */
-  glDepthFunc(GL_LESS);
+  glDepthFunc(GL_LESS);  /* Init OpenGL */
   glEnable(GL_DEPTH_TEST);
   glEnable(GL_NORMALIZE);
   glEnable(GL_COLOR_MATERIAL);
