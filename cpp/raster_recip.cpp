@@ -10,7 +10,7 @@ int main(int argc, char ** argv){
   if(!(exists(fn))) err("failed to open input file");
   str hfn(hdr_fn(fn)); // input header file name
 
-  str ofn(str(argv[1]) + str("_negate.bin")); // output file name
+  str ofn(str(argv[1]) + str("_recip.bin")); // output file name
   str ohn(hdr_fn(ofn, true)); // out header file name
 
   printf("+w %s\n", ofn.c_str());
