@@ -13,6 +13,7 @@ int main(int argc, char ** argv){
   str ofn(argv[argc - 1]); // output file name
   if(exists(ofn)) err("output file exists");
   str ohn(hdr_fn(ofn, true)); // out header file name
+  cout << "N: " << N << endl;
 
   vector<str> fn, hfn;
   for0(i, N){
@@ -26,7 +27,7 @@ int main(int argc, char ** argv){
 
   np = nrow * ncol; // number of input pix
   out = falloc(np * nband);
-  for0(i, np) out[i] = 0.;
+  for0(i, np * nband) out[i] = 0.;
 
   for0(m, N){
     printf("+r %s\n", fn[m].c_str());
