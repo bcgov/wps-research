@@ -315,8 +315,9 @@ int main(int argc, char ** argv){
     if(!exists(fn2)){
       int a = system((str("raster_scale ") + fn).c_str());
     }
-  */
+  
   fn = fn2;
+  */
   str hfn(hdr_fn(fn));
 
   size_t i, j;
