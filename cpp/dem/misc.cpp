@@ -303,3 +303,137 @@ size_t fsize(string fn){
 bool exists(str fn){
   return fsize(fn) > 0;
 }
+
+
+vector<string> parseHeaderFile(string hfn, size_t & NRow, size_t & NCol, size_t & NBand){
+  vector<string> bandNames;
+  if(!exists(hfn)){
+    printf("Error: couldn't find header file\n");
+  }
+  else{
+    vector<string> lines(readLines(hfn));
+    vector<string>::iterator it;
+    for(it=lines.begin(); it!=lines.end(); it++){
+      string sss(*it);
+      vector<string> splitLine(split(sss, '='));
+      if(splitLine.size()==2){
+        if(strncmp(strip_space(splitLine[0]).c_str(), "samples", 7) == 0){
+          NCol = atoi(strip_space(splitLine[1]).c_str());
+        }
+        if(strncmp(strip_space(splitLine[0]).c_str(), "lines", 5) == 0){
+          NRow = atoi(strip_space(splitLine[1]).c_str());
+        }
+        if(strncmp(strip_space(splitLine[0]).c_str(), "bands", 5)== 0){
+          NBand = atoi(strip_space(splitLine[1]).c_str());
+        }
+        if(strncmp(strip_space(splitLine[0]).c_str(), "band names", 10) == 0){
+          string bandNameList(trim2(trim2(strip_space(splitLine[1]),
+          ('{')),
+          ('}')));
+          bandNames = split(bandNameList, ',');
+        }
+      }
+    }
+  }
+  return bandNames;
+}
+
+/*trim leading or trailing characters from a string*/
+string trim2(string s, char a){
+  string ret("");
+  size_t i, j, N;
+  N = s.size();
+  if(N == 0){
+    return s;
+  }
+  i = 0;
+  while(i < N && (s[i] == a)){
+    i++;
+  }
+  j = N - 1;
+  while(j > i && (s[j] == a)){
+    j--;
+  }
+  for(N = i; N <= j; N++){
+    ret = ret + chartos(s[N]);
+  }
+  return ret;
+}
+
+/*convert char to string: single character: interpret whitspace as space character */
+string chartos(char s){
+  string ret("");
+  stringstream ss;
+  ss << s;
+  ss >> ret;
+  if(isspace(s)){
+    ret += " ";
+  }
+  return ret;
+}
+
+/*strip leading or trailing whitespace from a string*/
+string strip_space(string s){
+  string ret("");
+  size_t i, j, N;
+  N = s.size();
+  if(N == 0) return s;
+  i = 0;
+  while(i < N && isspace(s[i])){
+    i++;
+  }
+  j = N-1;
+  while(j > i && isspace(s[j])){
+    j--;
+  }
+  for(N = i; N <= j; N++){
+    ret = ret + chartos(s[N]);
+  }
+  return ret;
+}
+
+
+vector<string> readLines(string fn){
+  vector<string> ret;
+  size_t fs = fsize(fn);
+  char * fd = (char *)(void *)malloc(fs);
+  memset(fd, '\0',fs);
+  FILE * f = fopen(fn.c_str(), "rb");
+  size_t br = fread(fd, fs, 1, f);
+  fclose(f);
+  // free(fd);
+  ret = split(fd, fs, '\n');
+  return(ret);
+}
+
+// need to replace string with SA concept, to make this work! Use "binary string" instead of string
+vector<string> split(char * s, size_t s_len, char delim){
+  // needed to write a special split, for string that might contain newlines / might be a file. In the future we should subsume string, array and file with a generic class like we did in meta4
+
+  // printf("split()\n");
+  vector<string> ret;
+  string ss("");
+  size_t i = 0;
+  while(i < s_len){
+    if(s[i] == delim){
+      ret.push_back(ss);
+      //cout << "\t" << ss << endl;
+      ss = "";
+    }
+    else{
+      ss += s[i];
+    }
+    i++;
+  }
+  if(ss.length() > 0){
+    ret.push_back(ss);
+    //cout << "\t" << ss << endl;
+    ss = "";
+  }
+  return ret;
+}
+
+
+
+
+
