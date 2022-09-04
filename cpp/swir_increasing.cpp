@@ -48,7 +48,7 @@ int main(int argc, char ** argv){
 
   float * dif = falloc(np);
   for0(i, np){
-    out[i] = (float)((b3[i] > b2[i]) && (b2[i] > b1[i]));      (float)(b2[i] - b1[i]) > 175.;
+    out[i] = (float)((b3[i] > b2[i]) && (b2[i] > b1[i]));  
   }
 
   vector<str> bn;
