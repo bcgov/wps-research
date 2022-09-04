@@ -14,8 +14,8 @@ Steps:
 '''
 from misc import run, err, args
 
-fn = args[1]
-out_fn = fn + '_dem.tif'
+fn = args[1]  # input raster footprint name
+out_fn = fn + '_dem.tif'  # output dem file name!
 
 
 # eio clip -o dem.tif --bounds -1.267663421630859E+02 5.595667114257812E+01 -1.246634750366211E+02 5.620212707519531E+01
