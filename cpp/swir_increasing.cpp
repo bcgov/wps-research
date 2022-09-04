@@ -10,7 +10,7 @@ int main(int argc, char ** argv){
   long int bi[3];
 
   str fn(argv[1]); /* binary files */
-  str ofn(fn + "_active.bin");
+  str ofn(fn + "_swir_increasing.bin");
   str hfn(hdr_fn(fn)); /* headers */
   str hf2(hdr_fn(ofn, true));
 
