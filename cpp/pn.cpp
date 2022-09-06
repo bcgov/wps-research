@@ -1,10 +1,10 @@
 /* 20220905 pn.cpp: simple "positive / negative" binary classifier */
 #include"misc.h"
-float * dat;
+float * dat, * out;
 size_t nrow, ncol, nband, np;
 
 float d(size_t i, size_t j){
-   cout << "d " << i << " " << j << endl;
+  // cout << "d " << i << " " << j << endl;
   float dd = 0.;
   float di;
   size_t k, nk;
@@ -12,7 +12,7 @@ float d(size_t i, size_t j){
     nk = (np * k);
     size_t ix = i + nk;
     size_t iy = j + nk;
-    cout << "ix " << ix << " iy " << iy << endl;
+    // cout << "ix " << ix << " iy " << iy << endl;
     di = dat[ix] - dat[iy];
     dd += di * di;
   }
@@ -62,6 +62,7 @@ int main(int argc, char ** argv){
   hread(hfn, nrow, ncol, nband); // read header
   np = nrow * ncol;
   dat = bread(fn, nrow, ncol, nband);
+
   printf("dat[0] %f\n", dat[0]);
 
   size_t Np = pi.size(); // size of positive class
@@ -79,7 +80,7 @@ int main(int argc, char ** argv){
       nnd = npd = FLT_MAX;
 
       for0(k, Np){
-	cout << "k " << k << " pi[k] " << pi[k] << " pj[k] " << pj[k] << " nrow " << nrow << " ncol " << ncol << endl;
+	//cout << "k " << k << " pi[k] " << pi[k] << " pj[k] " << pj[k] << " nrow " << nrow << " ncol " << ncol << endl;
 	size_t ix = i * ncol + j;
 	size_t iy = pi[k] * ncol + pj[k];
 	dd = d(ix, iy);
@@ -96,7 +97,7 @@ int main(int argc, char ** argv){
       }
 
       for0(k, Nn){
-	cout << "k " << k << endl;
+	//cout << "k " << k << endl;
         dd = d(i * ncol + j, ni[k] * ncol + nj[k]);
         if(k == 0){     
           nnd = dd;
@@ -109,10 +110,16 @@ int main(int argc, char ** argv){
           }
         }
       }  
-
-      printf("nnd %f nni %zu npd %f npi %zu\n", nnd, (size_t)nni, npd, (size_t)npi);
-      exit(1);
+      // should really be looking at the max, min, stdv of the distances to pos (neg) sets
+      // printf("nnd %f nni %zu npd %f npi %zu\n", nnd, (size_t)nni, npd, (size_t)npi);
+      out[i + np * j] = (float) (npd < nnd);
     }
   }
+
+  str ofn(fn + str("_pn.bin"));
+  str ohn(hdr_fn(ofn, true)); // out header file name
+
+  bwrite(out, ofn, nrow, ncol, 1);
+  hwrite(ohn, nrow, ncol, 1);
   return 0;
 }
