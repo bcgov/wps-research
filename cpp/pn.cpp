@@ -62,7 +62,7 @@ int main(int argc, char ** argv){
   hread(hfn, nrow, ncol, nband); // read header
   np = nrow * ncol;
   dat = bread(fn, nrow, ncol, nband);
-
+  out = falloc(nrow * ncol); // allocate output buffer
   printf("dat[0] %f\n", dat[0]);
 
   size_t Np = pi.size(); // size of positive class
