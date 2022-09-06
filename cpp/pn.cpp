@@ -112,7 +112,7 @@ int main(int argc, char ** argv){
       }  
       // should really be looking at the max, min, stdv of the distances to pos (neg) sets
       // printf("nnd %f nni %zu npd %f npi %zu\n", nnd, (size_t)nni, npd, (size_t)npi);
-      out[i + ncol * j] = (float) (npd < nnd);
+      out[i * ncol + j] = (float) (npd < nnd);
     }
   }
 
