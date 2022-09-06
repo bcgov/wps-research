@@ -122,4 +122,6 @@ int main(int argc, char ** argv){
   bwrite(out, ofn, nrow, ncol, 1);
   hwrite(ohn, nrow, ncol, 1);
   return 0;
+
+  // a more sophisticated version would integrate the density, to cancel out contradictory points
 }
