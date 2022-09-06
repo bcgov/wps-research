@@ -80,7 +80,7 @@ int main(int argc, char ** argv){
       nnd = npd = FLT_MAX;
 
       for0(k, Np){
-	cout << "k " << k << " pi[k] " << pi[k] << " pj[k] " << pj[k] << " nrow " << nrow << " ncol " << ncol << endl;
+	// cout << "k " << k << " pi[k] " << pi[k] << " pj[k] " << pj[k] << " nrow " << nrow << " ncol " << ncol << endl;
 	size_t ix = i * ncol + j;
 	size_t iy = pi[k] * ncol + pj[k];
 	dd = d(ix, iy);
@@ -97,7 +97,7 @@ int main(int argc, char ** argv){
       }
 
       for0(k, Nn){
-	cout << "k " << k << endl;
+	// cout << "k " << k << endl;
         dd = d(i * ncol + j, ni[k] * ncol + nj[k]);
         if(k == 0){     
           nnd = dd;
