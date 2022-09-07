@@ -67,5 +67,7 @@ int main(int argc, char ** argv){
 
   str hfn(hdr_fn(str(argv[1])));
   run(str("envi_header_copy_mapinfo.py ") + hfn + str(" ") + ohn);
+
+  run(str("binary_polygonize.py ") + ofn);
   return 0;
 }
