@@ -72,5 +72,10 @@ int main(int argc, char ** argv){
   run(str("crop ") + ofn);
 
   run(str("binary_polygonize.py ") + cf);
+
+  run(str("po sub.bin_swir.bin ") + cf + str("sub_swir.bin"));
+
+  run(str("envi2tif.py sub_swir.bin"));  
+
   return 0;
 }
