@@ -78,7 +78,7 @@ int main(int argc, char ** argv){
   run(str("envi2tif.py sub_swir.bin"));  
 
 
-  cout << "\t" << "combine.bin_crop.bin.kml" << endl;
-  cout << "\t" << "sub_swir.bin_ht.bin_smult.tif" << endl;
+  cout << "  combine.bin_crop.bin.kml" << endl;
+  cout << "  sub_swir.bin_ht.bin_smult.tif" << endl;
   return 0;
 }
