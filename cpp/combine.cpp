@@ -64,5 +64,8 @@ int main(int argc, char ** argv){
   hwrite(ohn, nrow, ncol, nband, 4, bn);
   bwrite(out, ofn, nrow, ncol, nband);
   free(out);
+
+  str hfn(hdr_fn(str(argv[1])));
+  run(str("envi_header_copy_mapinfo.py ") + hfn + str(" ") + ohn);
   return 0;
 }
