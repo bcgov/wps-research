@@ -14,9 +14,10 @@
 from misc import err, run, cd, args
 if len(args) < 2:
     err('python3 raster_simulate_s2.py [input hyperspectral raster (ENVI format)]')
+fn = args[1]
 
 run([cd + 'raster_spectral_interp.exe',
-     args[1],
+     fn,
      443, 
      490,
      560,
@@ -29,3 +30,9 @@ run([cd + 'raster_spectral_interp.exe',
      945,
      1610,
      2190])
+
+hfn = fn[:-3] + 'hdr'
+ohn = fn +  '_specral_interp.hdr'
+run(' '.join(['envi_header_copy_mapinfo.py',
+              hfn,
+              ohn]))
