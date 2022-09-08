@@ -32,7 +32,7 @@ run([cd + 'raster_spectral_interp.exe',
      2190])
 
 hfn = fn[:-3] + 'hdr'
-ohn = fn +  '_specral_interp.hdr'
+ohn = fn +  '_spectral_interp.hdr'
 run(' '.join(['envi_header_copy_mapinfo.py',
               hfn,
               ohn]))
