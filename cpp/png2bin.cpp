@@ -6,8 +6,10 @@ int main(int argc, char ** argv){
   }
   str fn(argv[1]);
   str ofn(fn + str(".bin"));
-   
+  str ohn(fn + str(".hdr")); 
+
   run(str("gdal_translate -of ENVI -ot Float32 -b 1 ") + fn + str(" ") + ofn);
+  run(str("fh ") + ohn);
 
   return 0;
 }
