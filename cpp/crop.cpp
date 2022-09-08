@@ -59,8 +59,8 @@ int main(int argc, char ** argv){
     }
   }
 
-  size_t x = max_j - min_j + 1;
-  size_t y = max_i - min_i + 1;
+  size_t x = max_j - min_j + 2;
+  size_t y = max_i - min_i + 2;
   cout << "x_size " << x << " min_i " << min_i << " max_i " << max_i << endl;
   cout << "y_size " << y << " min_j " << min_j << " max_j " << max_j << endl;
 
