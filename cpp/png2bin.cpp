@@ -5,7 +5,7 @@ int main(int argc, char ** argv){
     err("png2bin [input .png filename]");
   }
   str fn(argv[1]);
-  str ofn(fn + str(".png"));
+  str ofn(fn + str(".bin"));
    
   run(str("gdal_translate -of ENVI -ot Float32 -b 1 ") + fn + str(" ") + ofn);
 
