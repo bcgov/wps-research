@@ -37,6 +37,7 @@ int main(int argc, char ** argv){
     datestr = date_str;
 
     str last(w[w.size() -1]);
+    cout << "last: " << last << endl;
     char m = last[strlen(last.c_str()) - 1];
     char n = last[strlen(last.c_str()) - 2];
     if(m != 'm' || n != 'n'){
