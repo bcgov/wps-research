@@ -39,7 +39,10 @@ int main(int argc, char ** argv){
     str last(w[w.size() -1]);
     char m = last[strlen(last.c_str()) - 1];
     char n = last[strlen(last.c_str()) - 2];
-    if(m != 'm' || n != 'n') err("expected band name to end in nm");
+    if(m != 'm' || n != 'n'){
+      cout << "band name ending: " << m << n << endl;
+      err("expected band name to end in nm");
+    }
     str wl(last.substr(0, strlen(last.c_str()) - 2));
     float wavelength = atof(wl.c_str());
     for(it = interp.begin(); it != interp.end(); it++){
