@@ -48,7 +48,8 @@ def run(c, quit_on_nonzero=True):
     return a
 
 def runlines(cmd):
-    return [x.strip() for x in os.popen(cmd).readlines()]
+    y = os.popen(cmd).read().strip().split('\n')
+    return [x.strip() for x in y]
 
 def exist(f):
     return os.path.exists(f)
