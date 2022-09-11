@@ -22,5 +22,5 @@ if last:
         w = line.split()[-1]
         wf = w.split(sep)[-1] # print(wf, wf[:3])
         if wf[:3] != 'sub':
-            last_f = wf
+            last_f = w
 print("guess:", last_f)
