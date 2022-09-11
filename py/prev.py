@@ -23,4 +23,6 @@ if last:
         wf = w.split(sep)[-1] # print(wf, wf[:3])
         if wf[:3] != 'sub':
             last_f = w
-print("guess:", last_f)
+    print("guess:", last_f)
+else:
+    print("didn't find earlier result")
