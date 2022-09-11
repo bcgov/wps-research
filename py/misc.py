@@ -47,6 +47,9 @@ def run(c, quit_on_nonzero=True):
         err("command failed to run:\n\t" + c)
     return a
 
+def runlines(cmd):
+    return [x.strip() for x in os.popen(cmd).readlines())]
+
 def exist(f):
     return os.path.exists(f)
 
