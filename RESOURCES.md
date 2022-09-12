@@ -101,7 +101,7 @@
 ## GEE apps
 * https://kkraoj.users.earthengine.app/view/live-fuel-moisture
 * https://code.earthengine.google.com/e27240a92ecf64bbadf8a082b91c711c?hideCode=true
-
+* https://omegazhangpzh.users.earthengine.app/view/wildfire-monitor-v7
 # Data Science Resources
 * [NumPy Documentation](https://numpy.org/doc/stable/)
 * [Scikit-learn: machine learning in Python](https://scikit-learn.org/stable/)
