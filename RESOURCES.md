@@ -99,7 +99,7 @@
 * [Drones in wildfire mgmt](https://en.wikipedia.org/wiki/Drones_in_wildfire_management)
 
 ## Weather
-* [https://weather.gc.ca/astro/clds_vis_animation_e.html?id=nw&utc=00][https://weather.gc.ca/astro/clds_vis_animation_e.html?id=nw&utc=00]
+* [https://weather.gc.ca/astro/clds_vis_animation_e.html?id=nw&utc=00](https://weather.gc.ca/astro/clds_vis_animation_e.html?id=nw&utc=00)
 
 ## GEE apps
 * https://kkraoj.users.earthengine.app/view/live-fuel-moisture
