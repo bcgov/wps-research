@@ -100,6 +100,7 @@
 
 ## Weather
 * [https://weather.gc.ca/astro/clds_vis_animation_e.html?id=nw&utc=00](https://weather.gc.ca/astro/clds_vis_animation_e.html?id=nw&utc=00)
+* "change the last two digits from 00 to 12 to get the 12z model run. Usually ready 0915PDT ish each day"
 
 ## GEE apps
 * https://kkraoj.users.earthengine.app/view/live-fuel-moisture
