@@ -98,6 +98,9 @@
 * [how does fire think and act: Dana Hicks](https://podcasts.apple.com/ca/podcast/05-how-does-fire-think-and-act-guest-dana-hicks-bcws/)
 * [Drones in wildfire mgmt](https://en.wikipedia.org/wiki/Drones_in_wildfire_management)
 
+## Weather
+* [https://weather.gc.ca/astro/clds_vis_animation_e.html?id=nw&utc=00][https://weather.gc.ca/astro/clds_vis_animation_e.html?id=nw&utc=00]
+
 ## GEE apps
 * https://kkraoj.users.earthengine.app/view/live-fuel-moisture
 * https://code.earthengine.google.com/e27240a92ecf64bbadf8a082b91c711c?hideCode=true
