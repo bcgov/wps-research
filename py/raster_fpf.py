@@ -1,4 +1,7 @@
 '''20220824 run this from a dated active-fire mapping folder, that doesn't have an existing subarea defined for detection
+
+
+20221017 need to add point location case
 '''
 from misc import err, run, args
 
