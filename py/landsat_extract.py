@@ -119,8 +119,11 @@ for line in lines:
                 CF = C7_2[w]
                 R = S7_2[w]
         if N == 8 or N == 9:
-            CF, R = C8[w], S8[w]
-        
+            try:
+                CF, R = C8[w], S8[w]
+            except:
+                continue
+
         CF, R = str(CF), str(R)
         CF = CF[:-2] if CF[-2:] == '.0' else CF
 
