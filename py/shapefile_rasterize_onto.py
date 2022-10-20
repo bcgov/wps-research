@@ -91,6 +91,8 @@ for f in features:
     if 'FIRE_ID' in keys:
         # this is Canadian NFDB
         FIRE_ID = prop['FIRE_ID']
+        if FIRE_ID is None:
+            continue
         YEAR = str(prop['YEAR']).zfill(4)  # YYYY
         MONTH = str(prop['MONTH']).zfill(2)  # MM
         DAY = str(prop['DAY']).zfill(2)  # DD
