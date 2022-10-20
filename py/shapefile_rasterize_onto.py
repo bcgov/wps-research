@@ -29,11 +29,16 @@ from misc import err, exist, args, hdr_fn, read_hdr, write_binary, write_hdr, \
 
 if len(args) < 4:
     err('python3 rasterize_onto.py [shapefile to rasterize] ' +
-       '[image file: footprint to rasterize onto] [output filename]')
+            '[image file: footprint to rasterize onto] [output filename] # [optional arg: fire ID to select]')
 
 InputVector = args[1] # shapefile to rasterize
 RefImage = args[2] # footprint to rasterize onto
 OutputImage = args[3]
+select_feature_ID = None
+try:
+    select_feature_ID = args[4]
+except:
+    pass
 
 if os.path.exists(OutputImage):
     err("output file already exists")
@@ -68,6 +73,10 @@ is_fire = False
 for f in features:
     # print("f.keys()", f.keys())
     feature_id = str(f['id']).zfill(4)
+    #if select_feature_ID is not None:
+    #    if feature_id != select_feature_ID:
+    #        continue
+
     feature_ids.append(feature_id)
     # print("f['properties'].keys()", f['properties'].keys())
     '''f['properties'].keys():
@@ -93,6 +102,11 @@ for f in features:
         FIRE_ID = prop['FIRE_ID']
         if FIRE_ID is None:
             continue
+
+        if select_feature_ID is not None:
+            if FIRE_ID != select_feature_ID:
+                continue
+
         YEAR = str(prop['YEAR']).zfill(4)  # YYYY
         MONTH = str(prop['MONTH']).zfill(2)  # MM
         DAY = str(prop['DAY']).zfill(2)  # DD
@@ -128,7 +142,7 @@ for i in range(layerDefinition.GetFieldCount()):
 print("+w", OutputImage)
 '''
 out_files, gd = [], gdal.GetDriverByName(gdalformat)
-for i in range(feature_count): # confirm feature intersects reference map first?
+for i in range(len(feature_ids)): #feature_count): # confirm feature intersects reference map first?
     fid_list = [feature_ids[i]]
     my_filter = "FID in {}".format(tuple(fid_list))
     my_filter = my_filter.replace(",", "")  # comma in tuple throws error for single element
