@@ -13,5 +13,5 @@ if select not in files:
 for f in files:
     if f != select:
         cmd = ' '.join(['raster_burn_zeros', select, f])
-        print(cmd)
+        run(cmd)
 
