@@ -28,7 +28,14 @@ data = data.replace("band names = {\n", "band names = {")
 lines, non_bandname_lines = data.split("\n"), []
 bandname_lines = []
 
-for i in range(0, len(lines)):
+# clear the description field
+lines_new = []
+for i in range(len(lines)):
+    if len(lines[i].split('description =')) < 2:
+        lines_new.append(lines[i])
+lines = lines_new
+
+for i in range(len(lines)):
     line = lines[i].strip()
     w = [x.strip() for x in line.split("=")]
     if len(w) > 1:
