@@ -13,4 +13,4 @@ X.sort()
 for x in X:
     fn = x
     cmd = 'imv ' + fn
-    print(cmd)
+    run(cmd)
