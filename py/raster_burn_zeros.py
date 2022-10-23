@@ -15,8 +15,3 @@ for f in files:
         cmd = ' '.join(['raster_burn_zeros', select, f])
         print(cmd)
 
-
-
-
-
-
