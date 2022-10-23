@@ -11,9 +11,7 @@ Note: from GDAL documentation:
     cubic applies a cubic convolution kernel.
     cubicspline applies a B-Spline convolution kernel.
     lanczos applies a Lanczos windowed sinc convolution kernel.
-    mode selects the value which appears most often of all the sampled points.
-
-'''
+    mode selects the value which appears most often of all the sampled points.'''
 import os
 import sys
 from misc import err, run, args, exists, pd, sep
