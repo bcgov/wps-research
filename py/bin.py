@@ -1,4 +1,6 @@
-'''open .bin files in subfolders, with imv'''
+'''open .bin files in subfolders, with imv
+
+** for single-band files only!'''
 import os
 import sys
 sep = os.path.sep
