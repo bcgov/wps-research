@@ -46,3 +46,5 @@ for f in files:
                     of])
     run(cmd)
     run('envi_header_cleanup.py ' + oh)
+    run('rm ' + oh + '.bak')
+    run('rm ' + of + '.aux.xml')
