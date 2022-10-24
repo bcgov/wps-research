@@ -144,7 +144,7 @@ for s in selected:
         path = '/media/' + os.popen('whoami').read().strip() + '/disk2/active/'
 
     if not exists(path):
-        err("path not found:", path)
+        err("path not found:" + path)
     
     path += fire_number.strip() + '/'
   
