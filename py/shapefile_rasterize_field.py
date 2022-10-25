@@ -8,7 +8,7 @@ from osgeo import gdalconst
 
 stop = False
 shp = sys.argv[1] # 'V082M_reproject.shp'
-select_key = 'Fuel_Type_'
+select_key = 'FL_TYP_CD' # 'Fuel_Type_'
 InputVector = shp
 
 count = {}
