@@ -95,4 +95,4 @@ file_names = [ix + '.bin' for ix in ixs]
 if not os.path.exists('raster.bin'):
     cmd = 'cat ' + (' '.join(file_names)) + ' > raster.bin'
     run(cmd)
-    write_hdr('raster.hdr', samples, lines, bands, band_names)
+    write_hdr('raster.hdr', samples, lines, len(ixs), band_names)
