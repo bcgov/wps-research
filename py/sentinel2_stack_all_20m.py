@@ -43,7 +43,14 @@ srt.sort()
 safes = [w[1] for w in srt]
 safes = ['_'.join(s) for s in safes]
 
-for safe in safes: 
+for safe in safes:   # S2A_MSIL2A_20170804T190921_N0205_R056_T10UFB_20170804T191650
+    print(safe)
+    w= safe.split('_')
+    TILE_ID = w[5]
+    DATE = w[2].split('T')[0]
+    #print("TILE_ID", TILE_ID)
+    #print("DATE", DATE)
+    #sys.exit(1)
     cmds = []; #print(safe)
     ''' ls -1 *.bin
      SENTINEL2_L2A_10m_EPSG_32610.bin
@@ -79,6 +86,7 @@ for safe in safes:
                                          ehc,
                                          hfn]))
                 cmds.append(cmd)
+            print(cmd)
     parfor(run, cmds, 4)  # 4 hw mem channels a good guess?
     bins = [x.strip() for x in os.popen("ls -1 " +
                                         safe +
@@ -96,7 +104,6 @@ for safe in safes:
         err('unexpected number of bin files (expected 3): ' +
             str('\n'.join(bins)))
 
-    sys.exit(1)
     m10 = bins[0]  # 10m doesn't get resampled so should be first
     # m10, m20, m60 = bins
     m20, m60 = m10.replace('_10m_', '_20m_'),\
@@ -105,11 +112,11 @@ for safe in safes:
     
     for m_i in [m10, m20, m60]:
         if not exists(m_i):
-            err('file not found:', m_i)
+            err('file not found:' + m_i)
 
     # names for files resampled to 10m
-    m20r, m60r = (m20[:-4] + '_10m.bin',
-                  m60[:-4] + '_10m.bin')
+    m10r, m60r = (m10[:-4] + '_20m.bin',
+                  m60[:-4] + '_20m.bin')
 
     def resample(pars): # resample src onto ref, w output file dst
         src, ref, dst = pars
@@ -124,16 +131,18 @@ for safe in safes:
         return 0
     
     a = parfor(resample,
-               [[m20, m10, m20r], # resample the 20m
-                [m60, m10, m60r]],
-               2) # resample the 60m
+               [[m10, m20, m10r], # resample the 20m
+                [m60, m20, m60r]], 2) # resample the 60m
 
     sfn = (safe + sep + m10.split(sep)[-1].replace("_10m", "")[:-4]
-            + '_10m.bin')  # name of stacked file
+            + '_20m.bin')  # name of stacked file
+
+    sfn = TILE_ID + '_' + DATE + '.bin'
+
     print("sfn", sfn)
     cmd = ['cat', # cat bands together, remember to cat the header files after
-            m10,
-            m20r,
+            m10r,
+            m20,
             m60r,
             '>',
             sfn]
@@ -147,8 +156,8 @@ for safe in safes:
     shn = sfn[:-4] + '.hdr' # header file name for stack
     cmd = ['python3', # envi_header_cat.py like an rpn, first thing goes on back
            pd + 'envi_header_cat.py',
-           m20r[:-4] + '.hdr',
-           m10[:-4] + '.hdr',
+           m20[:-4] + '.hdr',
+           m10r[:-4] + '.hdr',
            shn,
            dp20,
            dp10]
