@@ -20,7 +20,6 @@ int main(int argc, char ** argv){
   np = nrow * ncol; // number of input pix
 
   float * dat = bread(fn, nrow, ncol, nband);
-
   float * mn = falloc(nband);
   float * mx = falloc(nband);
   for0(k, nband){
@@ -41,9 +40,7 @@ int main(int argc, char ** argv){
     }
   }
 
-  for0(k, nband){
-    printf(" %zu mn %f mx %f\n", k, mn[k], mx[k]);
-  }
+  for0(k, nband) printf(" %zu mn %f mx %f\n", k, mn[k], mx[k]);
 
   for0(k, nband){
     float mk = mn[k];
