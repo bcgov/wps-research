@@ -2,7 +2,10 @@
 assumed ENVI type-4 32-bit IEEE standard floating-point format, BSQ
 interleave
 
-pixel-based normalization */
+pixel-based normalization
+
+20221027 do a version of this that mimics imv default setting
+*/
 #include"misc.h"
 
 int main(int argc, char ** argv){
