@@ -11,10 +11,31 @@ WHY?????????????
 Assumption:
     we've created L2 data with sen2cor
 
-A) extract Sentinel2, B) resample to 10m c) prefix bandnames with dates..
+   A) extract Sentinel2,
+   B) resample to 20m (not 10m) 
+   C) prefix bandnames with dates..
    D) stack everything!
    E) SORT BY TIME AND FREQUENCY
-   E) worry about masks later
+   F) APPLY cloud threshold (7%)
+   G) Apply scene classification (below) NOT IMPLEMENTED
+   H) Convert all-zero areas to NaN
+
+From https://sentinels.copernicus.eu/web/sentinel/technical-guides/sentinel-2-msi/level-2a/algorithm
+=================================================================
+Figure 3: Scene Classification Values Label     Classification
+0       NO_DATA
+1       SATURATED_OR_DEFECTIVE
+2       DARK_AREA_PIXELS
+3       CLOUD_SHADOWS
+4       VEGETATION
+5       NOT_VEGETATED
+6       WATER
+7       UNCLASSIFIED
+8       CLOUD_MEDIUM_PROBABILITY
+9       CLOUD_HIGH_PROBABILITY
+10      THIN_CIRRUS
+11      SNOW
+=================================================================
 
 Need xml reader? such as:
 https://docs.python.org/3/library/xml.etree.elementtree.html
