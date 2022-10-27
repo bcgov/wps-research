@@ -8,7 +8,7 @@ global normalization (all bands same scaling)
 #include"misc.h"
 
 int main(int argc, char ** argv){
-  if(argc < 2) err("raster_normalize2 [input binary file name]");
+  if(argc < 2) err("raster_norm_global [input binary file name]");
 
   str fn(argv[1]); // input file name
   str hfn(hdr_fn(fn)); // auto-detect header file name
@@ -35,8 +35,8 @@ int main(int argc, char ** argv){
   for0(i, nf) dat[i] = r * (dat[i] - mn);
 
   // write output file
-  str ofn(fn + str("_norm2.bin"));
-  str ohfn(fn + str("_norm2.hdr"));
+  str ofn(fn + str("_norm_global.bin"));
+  str ohfn(fn + str("_norm_global.hdr"));
 
   printf("nr %zu nc %zu nband %zu\n", nrow, ncol, nband);
   hwrite(ohfn, nrow, ncol, nband); // write output header
