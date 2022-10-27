@@ -48,6 +48,11 @@ for safe in safes:   # S2A_MSIL2A_20170804T190921_N0205_R056_T10UFB_20170804T191
     w= safe.split('_')
     TILE_ID = w[5]
     DATE = w[2].split('T')[0]
+    sfn = TILE_ID + '_' + DATE + '.bin' # output file name
+
+    #if exists(sfn):
+    #    run("raster_zero_to_nan " + sfn)
+    #    continue
     #print("TILE_ID", TILE_ID)
     #print("DATE", DATE)
     #sys.exit(1)
