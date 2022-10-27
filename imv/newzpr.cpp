@@ -325,7 +325,9 @@ void glImage::rebuffer(){
   printf("myZprInstanceID %d r1 %f r2 %f r3 %f min1 %f min2 %f min3 %f\n", parentZprInstance->myZprInstanceID, r1, r2, r3, min1, min2, min3);
   //myBi->at(0), myBi->at(1), myBi->at(2), NRow, NCol, parentZprInstance->getTitle().c_str());
   // in >> min1 >> min2 >> min3 >> max1 >> max2 >> max3;
+  printf("paste these values into %s to force scaling\n", imv_sf.c_str());
   printf("\tmin1 min2 min3 max1 max2 max3 %f %f %f %f %f %f\n", min1, min2, min3, max1, max2, max3);
+  //cout << min1 << min2 << min3 << max1 << max2 << max3 << endl;
 
   float r, g, b;
   long int i, j, k, ri, m;
