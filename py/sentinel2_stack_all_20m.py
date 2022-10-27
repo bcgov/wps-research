@@ -189,14 +189,15 @@ for safe in safes:   # S2A_MSIL2A_20170804T190921_N0205_R056_T10UFB_20170804T191
     # produce cloud mask
     run("sentinel2_cloud.py " + safe)
 
-    # mark cloud areas as NAN (GEQ 7% cloud probability)
+    # Filter by the cloud mask: mark cloud areas as NAN (GEQ 7% cloud probability)
     run("cloud_nan.exe " + sfn + " " + safe + os.path.sep + "cloud_20m.bin")
 
     # cleanup extra files
     run("rm -v " + safe + os.path.sep + "*.bin")
 
-    # filter by the cloud mask!
-
+    # set no-data areas to NAN:
+    run("raster_zero_to_nan " + sfn)
+    
 if len(args) > 2:
     # cat the bin files together, combining headers
     cmd = ['python3', pd + 'raster_stack.py']
