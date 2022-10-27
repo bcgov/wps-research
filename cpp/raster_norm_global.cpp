@@ -20,11 +20,11 @@ int main(int argc, char ** argv){
   float * dat = bread(fn, nrow, ncol, nband); // load floats to array
   float mn = FLT_MAX;
   float mx = -FLT_MAX;
-  float mx, d, r;
+  float d, r;
 
   for0(i, nf){
     d = dat[i];
-    if(isnan(f) || isinf(f)){
+    if(isnan(d) || isinf(d)){
     }
     else{
       if(d < mn) mn = d;
