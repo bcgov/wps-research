@@ -1,4 +1,4 @@
-/* raster_sub.cpp: band math, divide hyperspectral cubes */
+/* 20221026 raster_sub.cpp: band math, divide hyperspectral cubes */
 #include"misc.h"
 
 int main(int argc, char ** argv){
