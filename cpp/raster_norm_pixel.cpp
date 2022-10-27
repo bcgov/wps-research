@@ -4,8 +4,7 @@ interleave
 
 pixel-based normalization
 
-20221027 do a version of this that mimics imv default setting
-*/
+20221027 do a version of this that mimics imv default setting */
 #include"misc.h"
 
 int main(int argc, char ** argv){
@@ -17,10 +16,7 @@ int main(int argc, char ** argv){
   hread(hfn, nrow, ncol, nband); // read header
   np = nrow * ncol; // number of input pix
   size_t nf = np * nband;
-
   float * dat = bread(fn, nrow, ncol, nband); // load floats to array
-  float * dat2 = (float *) falloc(nf);
-  for0(i, nf) dat2[i] = 0.; // set to zero
   float mn, mx, d, r;
 
   for0(i, nrow){
@@ -42,27 +38,27 @@ int main(int argc, char ** argv){
       for0(k, nband){
         jx = k * np + ix;
         d = dat[jx];
-        if(!isnan(d) && !isinf(d))
-          dat2[jx] = r * (d - mn);
-        else
-          dat2[jx] = d;
+        if(!isnan(d) && !isinf(d)){
+          dat[jx] = r * (d - mn);
+	}
+        else{
+          dat[jx] = NAN;
+	}
       }
     }
   }
 
   // write output file
-  str ofn(fn + str("_norm.bin"));
-  str ohfn(fn + str("_norm.hdr"));
+  str ofn(fn + str("_norm_pixel.bin"));
+  str ohfn(fn + str("_norm_pixel.hdr"));
 
   printf("nr %zu nc %zu nband %zu\n", nrow, ncol, nband);
   hwrite(ohfn, nrow, ncol, nband); // write output header
 
   FILE * f = fopen(ofn.c_str(), "wb");
   if(!f) err("failed to open output file");
-  for0(i, nf) fwrite(&dat2[i], sizeof(float), 1, f); // write data
-
+  fwrite(dat, sizeof(float), nf, f); // write data
   fclose(f);
   free(dat);
-  free(dat2);
   return 0;
 }
