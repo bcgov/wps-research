@@ -12,7 +12,7 @@ if d[-5:] != '.SAFE':
     print('expected folder ending in .SAFE')
     err('python3 sentinel2_cloud.py [Sentinel2 L2 folder: ___.SAFE] ')
 
-CLD = os.popen('find ' + d + os.path.sep + ' -name "*CLDPRB_20m.jp2"').readlines()
+CLD = os.popen('find ' + d + os.path.sep + ' -name "*CLD*20m.jp2"').readlines()
 CLD = [x.strip() for x in CLD]
 
 if len(CLD) > 1:
@@ -34,14 +34,19 @@ out_file = d + 'cloud.bin'
 f10m = os.popen('find ' + d + ' -name "SENTINEL2_L2A_EPSG*_10m.bin"').read().strip()
 if len(f10m.split('\n')) > 1:
     err('multiple files found when one expected:' + str(f10m))
-f10m = os.path.abspath(f10m)
 
-if not exists(out_file):
-    run(' '.join(['python3',
-                   project,
-                   out_20m,
-                   f10m, # d + 'SENTINEL2_L2A_EPSG_32610_10m.bin',
-                   out_file]))
+USE_20M = False
+if f10m.strip() != '':
+    f10m = os.path.abspath(f10m)
+
+    if not exists(out_file):
+        run(' '.join(['python3',
+                      project,
+                      out_20m,
+                      f10m, # d + 'SENTINEL2_L2A_EPSG_32610_10m.bin',
+                      out_file]))
+else:
+    USE_20M = True # we just need cloud at 20m!
 
 ''' From https://sentinels.copernicus.eu/web/sentinel/technical-guides/sentinel-2-msi/level-2a/algorithm
 Figure 3: Scene Classification Values Label 	Classification
@@ -76,10 +81,11 @@ if not exists(out_20m):
                   SCL,
                   out_20m]))
 
-out_file = d + 'class.bin'
-if not exists(out_file):
-    run(' '.join(['python3',
-                   project,
-                   out_20m,
-                   f10m, #d + 'SENTINEL2_L2A_EPSG_32610_10m.bin',
-                   out_file]))
+if not USE_20M:
+    out_file = d + 'class.bin'
+    if not exists(out_file):
+        run(' '.join(['python3',
+                      project,
+                      out_20m,
+                      f10m, #d + 'SENTINEL2_L2A_EPSG_32610_10m.bin',
+                      out_file]))
