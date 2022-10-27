@@ -26,7 +26,8 @@ int main(int argc, char ** argv){
   for0(i, nrow){
     for0(j, ncol){
       // max norm? or L2 norm? how about subtract min, divide by max, this pixel??????
-      mn = FLT_MAX; mx = FLT_MIN;
+      mn = FLT_MAX;
+      mx = -FLT_MAX;;
       ix = i * ncol + j;
 
       for0(k, nband){
