@@ -20,7 +20,7 @@ void infer_px(size_t i){
     if(d < md)
       (md = d, mi = j);  // nearer
   }
-  for0(k, nb[2])
+  for0(k, nb[1]) // B + D, same number of bands?
     x[np2 * k + i] = B[np * k + mi];  // assign nearest
   if(i % 100000 == 0) status(i, np2);
 }
@@ -48,7 +48,7 @@ int main(int argc, char** argv){
   (np = nr[0] * nc[0], np2 = nr[2] * nc[2]);
   if(skip_f >= np) err("illegal skip_f");
 
-  x = falloc(nr[2] * nc[2] * nb[2]); // out buf
+  x = falloc(nr[2] * nc[2] * nb[1]); // out buf
   for0(i, 3) y[i] = bread(str(argv[i + 1]), nr[i], nc[i], nb[i]);  // read input
 
   (n_bad = 0, bp = ialloc(np));  // bad pixels in A, B?
