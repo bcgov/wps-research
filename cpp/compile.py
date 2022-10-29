@@ -51,6 +51,7 @@ for f in files:
     symlink =  '' 
     print(fn, os.path.islink(fn))
     if fn != "misc":
+        run('rm -v ' + fn)
         symlink = 'ln -s ' + fn + '.exe ' + fn if not os.path.islink(fn) else ''# symbolic link to path without .exe!
         if f[:4] == 'cuda':
             s = '\ntest ! -f ' + fn + '.exe && nvcc ' + fn + '.cpp misc.cpp -o ' + fn + '.exe' #+ symlink
