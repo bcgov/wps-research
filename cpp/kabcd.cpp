@@ -2,12 +2,13 @@
 instead of just nearest neighbour.a
 
 Classification mode:
-(*) object given most common class (among k-nearest neighbours) 
+(*) object given most common class (among k-nearest neighbours) DONE.
+Todo:
 (*) expand this by outputting a tuple of the classes present, and the counts for each class. First most common, second most common, etc.
 (*) develop an entropy concept to show if results are conflicted
 (*) probability (pi) for each class, is the ratio of the count of observations (among the knn) for that class, divided by K (the number of neighbours)
 
-Regression mode:
+Regression mode: (NOT implemented)
 (*) Value for object is average of the values for the K-nearest neighbours. 
 (*) add a standard deviation, min, max or other parameters to characterize the distribution and assess conflict.
 
