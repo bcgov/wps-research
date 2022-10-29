@@ -165,17 +165,19 @@ int main(int argc, char** argv){
   (A = y[0], B = y[1], C = y[2]);
 
   str u("_");
-  parfor(0, np2, infer_px, 1);  // inference by output pixel
+  parfor(0, np2, infer_px, 0); //1);  // inference by output pixel
 
-  str pre(str("abcd_") + str(argv[1]) + u + str(argv[2]) + u +
+  str pre(str("kabcd_") + str(argv[1]) + u + str(argv[2]) + u +
  	  		 str(argv[3]) + u + to_string(skip_f) + u +
 			 		    to_string(skip_off));
   bwrite(x, pre + str(".bin"), nr[2], nc[2], nb[1]);  // write out
-  hwrite(pre + str(".hdr"), nr[2], nc[2], nb[1]);
+  hwrite(pre + str(".hdr"), nr[2], nc[2], nb[1]); // this info corroborates the choice above in alloc
   if(false){
     system((str("python3 ~/GitHub/wps-research/py/raster_plot.py ") + pre +
   	    str(".bin 1 2 3 1")).c_str());
   }
-  system((str("envi_header_copy_bandnames.py ") + str(hdr_fn(argv[1 + 1])) + str(" ") + pre + str(".hdr")).c_str());
+  str cmd;
+  cmd =(str("envi_header_copy_bandnames.py ") + str(hdr_fn(argv[1 + 1])) + str(" ") + pre + str(".hdr")).c_str();
+  run(cmd);
   return 0;
 }
