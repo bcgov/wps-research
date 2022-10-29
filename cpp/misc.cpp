@@ -482,6 +482,10 @@ bool operator<(const f_ij& a, const f_ij&b){
   return a.d > b.d; // priority_queue max first: we want min first
 }
 
+bool operator<(const f_v& a, const f_v&b){
+  return a.d < b.d; // priority_queue max first: we want MAX first, not min first
+}
+
 float * load_envi(str in_f, size_t & nrow, size_t & ncol, size_t & nband){
   str ext(in_f.substr(in_f.size() - 3, 3));
   if(ext != str("bin")){
@@ -586,14 +590,21 @@ void * pt_worker_fun(void * arg){
 }
 
 /* define a function like this: void to_eval(size_t i){} and pass it to parfor
+
+omit cores_use paramter to use all cores. 
+
+Set cores_use to 1 for debugging (serial operation, no parallelism).
 */
-void parfor(size_t start_j, size_t end_j, void(*eval)(size_t)){
+void parfor(size_t start_j, size_t end_j, void(*eval)(size_t), int cores_use=0){
   pt_eval = eval; // set global function pointer
   pt_end_j = end_j;
   pt_nxt_j = start_j; // pt_nxt_j_mtx locks this variable
   size_t j, n_cores;
   pt_start_j = start_j;
-  n_cores = sysconf(_SC_NPROCESSORS_ONLN); // cout << "Number of cores: " << n_cores << endl;
+  int cores_avail = sysconf(_SC_NPROCESSORS_ONLN);
+  n_cores = (cores_avail > cores_use) ? cores_use: cores_avail; //sysconf(_SC_NPROCESSORS_ONLN)
+  if(cores_use == 0) n_cores = cores_avail; // 0 sets cores to max available!
+  cout << "Number of cores: " << n_cores << endl;
   pthread_attr_init(&pt_attr); // allocate threads, make threads joinable
   pthread_attr_setdetachstate(&pt_attr, PTHREAD_CREATE_JOINABLE);
   pthread_t * my_pthread = new pthread_t[n_cores];
@@ -602,6 +613,11 @@ void parfor(size_t start_j, size_t end_j, void(*eval)(size_t)){
   // cprint(str("return parfor()"));
   delete [] my_pthread;
 }
+
+void parfor(size_t start_j, size_t end_j, void(*eval)(size_t)){
+  parfor(start_j, end_j, eval, 0);
+}
+
 
 // parameters always named (in json-like format)?
 
