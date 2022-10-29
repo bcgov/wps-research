@@ -26,8 +26,5 @@ c = ' '.join(['envi_header_modify.py',
               str(lines),
               str(samples),
               str(bands)] + band_names)
-print(c)
+run(c)
 # err('envi_header_modify.py [.hdr file to modify] [nrow] [ncol] [nband] [band 1 name]... [band n name]')
-
-
-
