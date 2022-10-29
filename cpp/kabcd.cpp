@@ -34,7 +34,9 @@ void infer_px(size_t i){
   if(pq.size() != 0) err("nonempty pq");
   int m;
   float d, e; //, md = FLT_MAX;
-  size_t j, k, nb_0 = nb[0];
+  size_t j, k;
+  size_t nb_0 = nb[0];
+  size_t nb_1 = nb[1];
 
   for(j = skip_off; j < np; j += skip_f){  // uniform sample in space
     if(bp[j]) continue;  // skip bad px in C
@@ -44,7 +46,7 @@ void infer_px(size_t i){
       d += e * e;
     }
     vector<float> v;
-    for0(k, nb[1]) v.push_back(B[np * k + j]);
+    for0(k, nb_1) v.push_back(B[np * k + j]);  // check abcd.cpp
     if(debug){
       printf("push %e %zu ", d, j);
       cout << v << endl;
