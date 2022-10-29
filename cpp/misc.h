@@ -355,8 +355,25 @@ class f_ij{
   }
 };
 
+// 20221028 now we know we need f_i<template class> definition!
+class f_v{
+  public:
+    size_t d;
+    vector<float> v;
+  f_v(size_t dd, vector<float> vv){
+    d = dd;
+    v = vv;
+  }
+  f_v(const f_v &a){
+    d = a.d;
+    v = a.v;
+  }
+};
+
+
 bool operator<(const f_i& a, const f_i&b);
 bool operator<(const f_ij& a, const f_ij&b);
+bool operator<(const f_v& a, const f_v&b);
 
 #define mtx_lock pthread_mutex_lock
 #define mtx_unlock pthread_mutex_unlock
@@ -386,6 +403,7 @@ extern size_t pt_end_j;
 void init_mtx();
 void * pt_worker_fun(void * arg); // worker function
 extern void (*pt_eval)(size_t); // function pointer to execute in parallel, over range start_j:end_j inclusive
+void parfor(size_t start_j, size_t end_j, void(*eval)(size_t), int cores_use);
 void parfor(size_t start_j, size_t end_j, void(*eval)(size_t));
 
 vector< vector<str> > read_csv(str fn, vector<str> & hdr);
