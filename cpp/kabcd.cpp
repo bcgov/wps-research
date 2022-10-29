@@ -16,7 +16,10 @@ Regression mode: (NOT implemented)
 20220610 add skip_offset factor
 
 How to project importance back on the dimensions?
-Should windowing be added? */
+Should windowing be added?
+
+Also need change detection relative to a cyclic component / baseline
+*/
 #include"misc.h"
 static size_t nr[3], nc[3], nb[3], skip_f, skip_off, m, np, np2; // shapes
 static float * y[3], *x, t, *A, *B, *C;  // data
