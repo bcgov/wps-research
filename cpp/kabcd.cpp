@@ -23,6 +23,8 @@ static int * bp, * bp2;  // bad px: {A,B}, C respectively
 static int knn_k; // number of neighbours to consider
 
 void infer_px(size_t i){
+  int debug = false;
+
   if(bp2[i]) return; // skip bad px in A, B
   priority_queue<f_i> pq;
   if(pq.size() != 0) err("nonempty pq");
@@ -39,12 +41,15 @@ void infer_px(size_t i){
     }
     vector<float> v;
     for0(k, nb[1]) v.push_back(B[np * k + j]);
-    printf("push %e %zu ", d, j);
-    cout << v << endl;
+    if(debug){
+      printf("push %e %zu ", d, j);
+      cout << v << endl;
+    }
     pq.push(f_i(d, j));
   }
 
   map<vector<float>, size_t> c;
+  //map<vector<float>, size_t> exemplar;
 
   if(pq.size() < knn_k) err("not enough elements pushed");
   for0(k, knn_k){
@@ -52,34 +57,42 @@ void infer_px(size_t i){
     pq.pop();
     vector<float> v;
     for0(m, nb[1]) v.push_back(B[np * m + t.i]);
-    printf("%e %zu ", t.d, t.i);
-    cout << v << endl;
+    
+    if(debug){
+      printf("%e %zu ", t.d, t.i);
+      cout << v << endl;
+    }
 
     if(c.count(v) < 1) c[v] = 1; // 1, 2, 3! 
     c[v] += 1;
 
+    //exemplar[v] = t.i; // hold index of instance of vector
   }
 
   priority_queue<f_v> pq2;
   map<vector<float>, size_t>::iterator ci;
   for(ci = c.begin(); ci != c.end(); ci ++){
-    cout << "  " << ci->first << " " << ci->second << endl;
+    if(debug) cout << "  " << ci->first << " " << ci->second << endl;
     pq2.push(f_v(ci->second, ci->first));
   }
 
+  f_v top_val(pq2.top());
   while(pq2.size() > 0){
     f_v val(pq2.top());
     pq2.pop();
-    cout << "  " << val.d << " " << val.v << endl;
+    if(debug) cout << "  " << val.d << " " << val.v << endl;
   }
 
-  cout << "exit" << endl;
-  exit(1);
+  if(debug){
+    cout << "mode: " << top_val.d << " " << top_val.v << endl;
+    cout << "exit" << endl;
+    exit(1);
+  }
 
   // mi should be j of most frequent
   size_t mi = 0;
-  for0(k, nb[2]){
-    x[np2 * k + i] = B[np * k + mi];  // assign most frequent // not nearest
+  for0(k, nb[1]){ // nb[2]) : need to revise in abcd.cpp?
+    x[np2 * k + i] = top_val.v[k]; //B[np * k + mi];  // assign most frequent // not nearest
   }
   if(i % 100000 == 0) status(i, np2);
 }
@@ -100,18 +113,39 @@ int main(int argc, char** argv){
 
   size_t i, n_bad;
   if(argc < 4){
+    printf("A is to B as C is to ? Answer: D (the output)\n");
+    printf("Note: A and B must have same shape (possibly different band count)\n");
+    printf("Note: C's dimensions can differ (from A's and B's); C's band count matches A's\n");
+    printf("The output result (i.e. \"D\") has the same dimensions as C\n");
+    printf("D's band count wil match the band count of B\n"); 
     err("kabcd [A: img1 (n bands)] [B: img2 (m bands)] [C: img3 (n bands)] # [skip] # [skip_offset]\n");
   }
   skip_f = (argc > 4) ? (size_t) atol(argv[4]): 1; // bsq2bip -> binary_sort -> bip2bsq
   skip_off = (argc > 5) ? (size_t) atol(argv[5]): 0;
 
-  for0(i, 3) hread(hdr_fn(argv[1 + i]), nr[i], nc[i], nb[i]);
-  if(nr[0] != nr[1] || nc[0] != nc[1]) err("A.shape != B.shape");
-  if(nb[0] != nb[2]) err("A.n_bands != C.n_bands");
-  (np = nr[0] * nc[0], np2 = nr[2] * nc[2]);
-  if(skip_f >= np) err("illegal skip_f");
+  for0(i, 3){
+    hread(hdr_fn(argv[1 + i]), nr[i], nc[i], nb[i]);
+  }
 
-  x = falloc(nr[2] * nc[2] * nb[2]); // out buf
+  // first pair of images have same dimensions, not necessarily same band count
+  if(nr[0] != nr[1] || nc[0] != nc[1]){
+    err("A.shape != B.shape");
+  }
+
+  // first and third images share band count
+  if(nb[0] != nb[2]){
+    err("A.n_bands != C.n_bands");
+  }
+
+  // first pair of images: equal dimensions (But not shape) hence pixel count
+  (np = nr[0] * nc[0], np2 = nr[2] * nc[2]); // same with second pair!
+  if(skip_f >= np){
+    err("illegal skip_f");
+  }
+
+  // same shape as image C, should be same band count as image B
+  // is this right? Do we need to fix this in abcd.cpp?
+  x = falloc(nr[2] * nc[2] * nb[1]); // out buf (image "D")
   for0(i, 3) y[i] = bread(str(argv[i + 1]), nr[i], nc[i], nb[i]);  // read input
 
   (n_bad = 0, bp = ialloc(np));  // bad pixels in A, B?
@@ -138,7 +172,10 @@ int main(int argc, char** argv){
 			 		    to_string(skip_off));
   bwrite(x, pre + str(".bin"), nr[2], nc[2], nb[1]);  // write out
   hwrite(pre + str(".hdr"), nr[2], nc[2], nb[1]);
-  system((str("python3 ~/GitHub/wps-research/py/raster_plot.py ") + pre +
-	  str(".bin 1 2 3 1")).c_str());
+  if(false){
+    system((str("python3 ~/GitHub/wps-research/py/raster_plot.py ") + pre +
+  	    str(".bin 1 2 3 1")).c_str());
+  }
+  system((str("envi_header_copy_bandnames.py ") + str(hdr_fn(argv[1 + 1])) + str(" ") + pre + str(".hdr")).c_str());
   return 0;
 }
