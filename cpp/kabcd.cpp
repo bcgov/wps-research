@@ -183,8 +183,7 @@ int main(int argc, char** argv){
     system((str("python3 ~/GitHub/wps-research/py/raster_plot.py ") + pre +
   	    str(".bin 1 2 3 1")).c_str());
   }
-  str cmd;
-  cmd =(str("envi_header_copy_bandnames.py ") + str(hdr_fn(argv[1 + 1])) + str(" ") + pre + str(".hdr")).c_str();
-  run(cmd);
+  run((str("envi_header_copy_bandnames.py ") + str(hdr_fn(argv[1 + 1])) + str(" ") + pre + str(".hdr")).c_str());
+  //run(cmd);
   return 0;
 }
