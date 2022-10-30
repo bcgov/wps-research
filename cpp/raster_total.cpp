@@ -2,7 +2,7 @@
 #include"misc.h"
 
 int main(int argc, char ** argv){
-  if(argc < 2) err("raster_total [raster cube]\n");
+  if(argc < 2) err("raster_total [raster cube] # add bands together for a raster\n");
   size_t nrow, ncol, nband, np;
   float * out, * dat;
   size_t i, j, k;
