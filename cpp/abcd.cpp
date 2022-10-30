@@ -8,7 +8,8 @@ void infer_px(size_t i){
   if(bp2[i]) return; // skip bad px in A, B
   float d, e, md = FLT_MAX;
   size_t j, k, mi = 0;
-  size_t nb_0 = nb[0];
+  int nb_0 = nb[0];
+  int nb_1 = nb[1];
 
   for(j = skip_off; j < np; j += skip_f){  // uniform sample in space
     if(bp[j]) continue;  // skip bad px in C
@@ -20,7 +21,7 @@ void infer_px(size_t i){
     if(d < md)
       (md = d, mi = j);  // nearer
   }
-  for0(k, nb[1]) // B + D, same number of bands?
+  for0(k, nb_1) // B + D, same number of bands?
     x[np2 * k + i] = B[np * k + mi];  // assign nearest
   if(i % 100000 == 0) status(i, np2);
 }
