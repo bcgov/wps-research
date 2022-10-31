@@ -45,9 +45,12 @@ int main(int argc, char ** argv){
    //cout << it->first << " " << it->second << endl;
    total += (double) it->second; 
   }
-
+  int ci = 0;
   for(it = count.begin(); it != count.end(); it ++){
-    cout << it->first << " " << it->second << " " << ((double)(it->second) / total) << " %" << 100. * ((double)(it->second) / total) << endl;
+    cout << it->first << " " << it->second;
+    cout << " " << ((double)(it->second) / total);
+    cout << " %" << 100. * ((double)(it->second) / total);
+    cout << " " << s[ci ++] << endl;
   }
   printf("grand total: %e\n", total);
   free(dat); 
