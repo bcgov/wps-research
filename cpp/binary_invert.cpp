@@ -20,8 +20,10 @@ int main(int argc, char ** argv){
 
   // check consistency of binary class map
   for0(i, np){
-    if(dat[i] != 0. && dat[i] != 1.){
-      cout << "warning: value detected: " << dat[i] << endl;
+    d = dat[i];
+    if(isnan(d)) continue;
+    if(d != 0. && d != 1.){
+      cout << "warning: value detected: " << d << endl;
       err("please check consistency of binary class map.");
     }
   }
