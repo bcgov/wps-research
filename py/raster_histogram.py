@@ -1,8 +1,9 @@
+'''20221105 update: add NAN resiliency (i.e. skip NAN valued pixels in stats) '''
 from misc import *
 import matplotlib
 args = sys.argv
 
-n_bins = 3000
+n_bins = 5000
 
 if __name__ == '__main__':     # instructions to run
     if len(args) < 2:
@@ -49,12 +50,12 @@ if __name__ == '__main__':     # instructions to run
     N = len(band_select)
     rng = range(N)
     dat = [data[band_select[i],] for i in rng]
-    my_min = [np.min(dat[i]) for i in rng]
-    my_max = [np.max(dat[i]) for i in rng]
+    my_min = [np.nanmin(dat[i]) for i in rng]
+    my_max = [np.nanmax(dat[i]) for i in rng]
     print("min", my_min)
     print("max", my_max)
-    my_min = np.min(my_min)
-    my_max = np.max(my_max)
+    my_min = np.nanmin(my_min)
+    my_max = np.nanmax(my_max)
     print("min", my_min, "max", my_max)
     bs = (my_max - my_min) / n_bins
     bins = [my_min + float(i + 1) *bs for i in range(n_bins)]
