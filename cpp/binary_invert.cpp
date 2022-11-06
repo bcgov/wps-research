@@ -38,7 +38,9 @@ int main(int argc, char ** argv){
   // write the inverted data
   for0(i, np){
     d = dat[i];
-    d = (d == 0.) ? 1. : 0.;
+    if(!isnan(d)){
+      d = (d == 0.) ? 1. : 0.;
+    }
     fwrite(&d, sizeof(float), 1, f);
   }
 
