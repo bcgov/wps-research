@@ -121,6 +121,8 @@ int main(int argc, char ** argv){
   dat = bread(fn, nrow, ncol, nband);
   out = falloc(nrow * ncol); // allocate output buffer
   printf("dat[0] %f\n", dat[0]);
+  size_t k;
+  for0(k, np) out[k] = NAN;
 
   /*size_t */ Np = pi.size(); // size of positive class
   /*size_t */ Nn = ni.size(); // size of negative class
