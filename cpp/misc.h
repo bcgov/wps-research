@@ -172,9 +172,20 @@ inline int * ialloc(size_t ni){
     printf("%zu\n", ni);
     err("failed to allocate memory");
   }
-  memset(d, '\0', ni);
+  memset(d, '\0', ni * sizeof(int));
   return d;
 }
+
+inline size_t * stalloc(size_t ni){
+  size_t * d = (size_t *)malloc(ni * sizeof(size_t));
+  if(!d){
+    printf("%zu\n", ni);
+    err("failed to allocate memory");
+  }
+  memset(d, '\0', ni * sizeof(size_t));
+  return d;
+}
+
 
 //a trim from start (in place)
 /*bool is_space(int ch){
