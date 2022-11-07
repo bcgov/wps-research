@@ -20,6 +20,7 @@ float d(size_t i, size_t j){
 }
 
 int main(int argc, char ** argv){
+  if(argc < 2) err("pn.exe [input raster file X.bin (note: X.bin_targets.csv must exist)");
   str fn(argv[1]);
   if(argc < 2 || !exists(fn)) err("please check input file");
 
