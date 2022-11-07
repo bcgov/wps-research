@@ -76,6 +76,7 @@ int main(int argc, char ** argv){
 
   size_t i, j, k;
   for0(i, nrow){
+    if(i % 100 == 0) printf("i=%zu of %zu\n", i + 1, nrow);
     for0(j, ncol){
       nni = npi = -1;
       nnd = npd = FLT_MAX;
@@ -124,5 +125,5 @@ int main(int argc, char ** argv){
   hwrite(ohn, nrow, ncol, 1);
   return 0;
 
-  // a more sophisticated version would integrate the density, to cancel out contradictory points
+  // a more sophisticated version would integrate the density (as in KNN) to cancel out contradictory points
 }
