@@ -5,11 +5,12 @@ int main(int argc, char ** argv){
   int n_bins;
   if(argc < 4){
     printf("modf.cpp: Band-wise Histogram binning mode filter on binary single-precision floating point file\n");
+    printf("Note: data expected to be scaled into [0,1]\n");
     printf("By A. Richardson, 20090821 revised 20170703 reimplemented 20221116\n");
     err("\n\tUsage: modf [input file] [Number of Histogram bins] [window size] [ optional ratio parameter, for what?\n");
   }
   size_t nrow, ncol, nband;
-  register int i, j;
+  register long int i, j;
   float ratio = 1.;
   if(argc > 4) ratio = atof(argv[4]);
   n_bins = atoi(argv[2]);
@@ -36,12 +37,12 @@ int main(int argc, char ** argv){
   double total, total_squared_dif, dif;
   fmax = fmin = total = total_squared_dif = dif = 0.;
   
-  int * hist = ialloc(n_bins);
-  int idx = 0;
+  size_t * hist = stalloc(n_bins);
+  long int idx = 0;
 
   int totaln = 0;
   size_t row, col;
-  int ind, max, maxi;
+  size_t ind, max, maxi;
   max = maxi = 0;
 
   int band, q;
@@ -64,10 +65,11 @@ int main(int argc, char ** argv){
               ind = i * ncol + j;
               d = dat[ind];
               if(!(isinf(d) || isnan(d))){
-                idx = (int)floor(d * ((float)n_bins));
-                if(idx == n_bins){
+                idx = (size_t)floor(d * ((float)n_bins));
+                if(idx == n_bins && idx > 0){
                   idx = idx - 1;
                 }
+		// cout << "idx " << idx << endl;
                 hist[idx]++;
               }
             }
