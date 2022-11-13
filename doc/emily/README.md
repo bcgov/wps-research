@@ -5,6 +5,11 @@
 * Using the most basic dependencies
 
 ## R version
+### How to install the pre-requisites (at R prompt)
+```
+install.packages(c("tcltk","tkrplot","extraDistr"))
+```
+
 * [Click here for R code](https://github.com/bcgov/wps-research/blob/master/doc/emily/triangle_slider.R)
 
 
