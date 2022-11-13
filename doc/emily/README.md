@@ -3,15 +3,15 @@
 * Web server notrequired
 * Single source code file
 
-## R implementation
+## R version
 * [Click here for R code](https://github.com/bcgov/wps-research/blob/master/doc/emily/triangle_slider.R)
 
 
-## Python implementation
+## Python version
 * [Click here for Python code](https://github.com/bcgov/wps-research/blob/master/doc/emily/triangle_slider.py)
 * Dependencies automatically installed, assuming you have Python3 installed already
 
-## Example output by clicking at different values on the slider
+### Python version example output
 <img src="triangle.gif" width="650">
 
 ### References
