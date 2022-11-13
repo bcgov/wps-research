@@ -17,4 +17,4 @@
 ### References
 Based on samples from:
 * [Matplotlib slider demo](https://matplotlib.org/stable/gallery/widgets/slider_demo.html)
-* [Scipy stats: triangluar distribution](https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.triang.html)
+* [Scipy stats: triangular distribution](https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.triang.html)
