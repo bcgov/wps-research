@@ -1,18 +1,18 @@
 # Triangle slider example
 **Plot the PMF of [Triangular distribution](https://en.wikipedia.org/wiki/Triangular_distribution) and vary a parameter using a "slider"**
-* NO web server required
-* Code lives in a single file
+* Web server notrequired
+* Single source code file
+
 ## R implementation
 * [Click here for R code](https://github.com/bcgov/wps-research/blob/master/doc/emily/triangle_slider.R)
+
+
 ## Python implementation
 * [Click here for Python code](https://github.com/bcgov/wps-research/blob/master/doc/emily/triangle_slider.py)
 * Dependencies automatically installed, assuming you have Python3 installed already
 
 ## Example output by clicking at different values on the slider
 <img src="triangle.gif" width="650">
-
-## Further work: 
-* Re-implement in R
 
 ### References
 Based on samples from:
