@@ -1,7 +1,8 @@
 # Triangle slider
-Plot the PMF of [Triangular distribution](https://en.wikipedia.org/wiki/Triangular_distribution)
-
-## Example output
+* Plot the PMF of [Triangular distribution](https://en.wikipedia.org/wiki/Triangular_distribution) and vary a parameter using a "slider"
+* Does not use a web server
+* 
+## Example output by clicking at different values on the slider
 <img src="triangle.gif" width="650">
 
 ### References
