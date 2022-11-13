@@ -1,6 +1,6 @@
 # Triangle slider example
 **Plot the PMF of [Triangular distribution](https://en.wikipedia.org/wiki/Triangular_distribution) and vary a parameter using a "slider"**
-* Web server notrequired
+* Web server not used
 * Single source code file
 
 ## R version
