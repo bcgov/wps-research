@@ -1,11 +1,27 @@
-'''
+'''If you have python3 installed, opening this script in IDLE and pressing RUN (F5 key)
+should automatically check the dependencies and run the script
+
 https://en.wikipedia.org/wiki/Triangular_distribution
 Triangular distribution:
     * lower limit a,
     * upper limit b and
     * mode c
-where a < b and a ≤ c ≤ b. 
-'''
+where a < b and a ≤ c ≤ b. '''
+import sys
+import pkg_resources
+required = {'numpy', 'matplotlib', 'scipy'}
+installed = {pkg.key for pkg in pkg_resources.working_set}
+missing = required - installed
+
+def install(packages):
+    import subprocess
+    for p in packages:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", p])
+
+if len(list(missing)) > 0:
+    install(missing)
+    print("Dependencies installed, please try running the script again..")
+    sys.exit(1)
 
 import numpy as np
 from scipy.stats import triang
