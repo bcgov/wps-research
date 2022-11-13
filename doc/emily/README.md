@@ -9,7 +9,11 @@
 ```
 install.packages(c("tcltk","tkrplot","extraDistr"))
 ```
-
+### How to run (at R prompt)
+Assuming your triangle_slider.R is saved in your present working directory, you can run the example at the R prompt by:
+```
+source("triangle_slider.R")
+```
 * [Click here for R code](https://github.com/bcgov/wps-research/blob/master/doc/emily/triangle_slider.R)
 
 
