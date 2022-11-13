@@ -16,12 +16,14 @@ source("triangle_slider.R")
 ```
 * [Click here for R code](https://github.com/bcgov/wps-research/blob/master/doc/emily/triangle_slider.R)
 
+### R version output
+<img src="triangle_R.gif" width="650">
 
 ## Python version
 * [Click here for Python code](https://github.com/bcgov/wps-research/blob/master/doc/emily/triangle_slider.py)
 * Dependencies automatically installed, assuming you have Python3 installed already
 
-### Python version example output
+### Python version output
 <img src="triangle.gif" width="650">
 
 ### References
