@@ -1,5 +1,7 @@
 # Triangle slider
-PMF of [Triangular distribution](https://en.wikipedia.org/wiki/Triangular_distribution)
+Plot the PMF of [Triangular distribution](https://en.wikipedia.org/wiki/Triangular_distribution)
+
+## Example output
 <img src="triangle.gif" width="650">
 
 ### References
