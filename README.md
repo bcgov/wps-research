@@ -5,7 +5,8 @@ BC Wildfire Service / Predictive Services Unit: Remote-sensing Science R&D Engin
 # Welcome to wps-research
 Methods and Systems for Image Analysis developed with partners incl. Digital Platforms and Data Division (DPDD) / Office of The BC Chief Information Officer (OCIO), BC Wildfire Service (BCWS) Predictive Services Unit (PSU) and Thompson Rivers University (TRU)
 
-supporting BC Wildfire Service (BCWS) Predictive Services Unit (PSU) program. See also: [Wildfire Predictive Services](https://github.com/bcgov/wps)
+supporting BC Wildfire Service (BCWS) Predictive Services Unit (PSU) program. See also:
+* [Wildfire Predictive Services](https://github.com/bcgov/wps)
 
 Includes A) data integration B) routines applying or implementing supervised and unsupervised classification, C) visualization and manipulation for high dimensional imagery as well as classification maps
 
