@@ -50,6 +50,7 @@ int main(int argc, char** argv){
   if(skip_f >= np) err("illegal skip_f");
 
   x = falloc(nr[2] * nc[2] * nb[1]); // out buf
+  for0(i, nr[2] * nc[2] * nb[1]) x[i] = NAN;
   for0(i, 3) y[i] = bread(str(argv[i + 1]), nr[i], nc[i], nb[i]);  // read input
 
   (n_bad = 0, bp = ialloc(np));  // bad pixels in A, B?
@@ -63,7 +64,6 @@ int main(int argc, char** argv){
   for0(i, np2){
     bp2[i] = is_bad(y[2], i, nb[2]);
     if(bp2[i]) n_bad ++;
-    x[i] = NAN;
   }
   if(n_bad == np2) err("no good pix: C");
   (A = y[0], B = y[1], C = y[2]);
