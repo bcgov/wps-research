@@ -116,7 +116,7 @@ inline int is_bad(float * dat, size_t i, size_t n_b){
 
 int main(int argc, char** argv){
   
-  knn_k = 7;  // don't forget to set this at the command line later
+  knn_k = 13;  // don't forget to set this at the command line later
 
   size_t i, n_bad;
   if(argc < 4){
