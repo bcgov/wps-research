@@ -19,6 +19,7 @@ inline int is_bad(float * dat, size_t i, size_t n_b){
 }
 
 void filter_line(size_t line_ix){
+  if(line_ix % 100 == 0) printf("line %zu\n", line_ix);
   size_t b_ix = line_ix / nrow;  // process a row
   size_t r_ix = line_ix % nrow;
   size_t bk = b_ix * np;
