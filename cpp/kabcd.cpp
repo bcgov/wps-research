@@ -179,7 +179,7 @@ int main(int argc, char** argv){
 			 		    to_string(skip_off));
   bwrite(x, pre + str(".bin"), nr[2], nc[2], nb[1]);  // write out
   hwrite(pre + str(".hdr"), nr[2], nc[2], nb[1]); // this info corroborates the choice above in alloc
-  if(true){
+  if(false){
     int r = system((str("python3 ~/GitHub/wps-research/py/raster_plot.py ") + pre +
   	            str(".bin 1 2 3 1")).c_str());
   }
