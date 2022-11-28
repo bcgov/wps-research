@@ -57,7 +57,7 @@ int main(int argc, char ** argv){
         double h = 6.6260755*pow(10.,-34.);
         double c = 2.9979246*pow(10.,8.);
         double K = 1.380658*pow(10.,-23.);
-        double RADIANCE = (double)d;
+        double RADIANCE = ((double)d); // * (1. / 10000.);
         double CWL = lambda[k] *0.000001;
         double T = h * c / (K * CWL) / log((2. * h * c * c) / (RADIANCE * 1000000. * pow(CWL, 5.)) + 1.);
 	d = (float) T;
