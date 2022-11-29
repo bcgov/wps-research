@@ -21,8 +21,6 @@ if not os.path.exists(img):
     err('file not found: ' + img)
 
 tf = img + "_targets.csv"
-
-
 lines = [x.strip() for x in open(tf).readlines()]
 if lines[0] != 'feature_id,row,lin,xoff,yoff':
     err('expected: feature_id,row,lin,xoff,yoff')
