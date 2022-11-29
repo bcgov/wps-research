@@ -212,11 +212,12 @@ for safe in safes:   # S2A_MSIL2A_20170804T190921_N0205_R056_T10UFB_20170804T191
     # sys.exit(1) # would turn this on to debug one frame
     # should check if "sfn" exists before doing anything on this folder.
 
-    # produce cloud mask
-    run("sentinel2_cloud.py " + safe)
+    if False:
+        # produce cloud mask
+        run("sentinel2_cloud.py " + safe)
 
-    # Filter by the cloud mask: mark cloud areas as NAN (GEQ 7% cloud probability)
-    run("cloud_nan.exe " + sfn + " " + safe + os.path.sep + "cloud_20m.bin")
+        # Filter by the cloud mask: mark cloud areas as NAN (GEQ 7% cloud probability)
+        run("cloud_nan.exe " + sfn + " " + safe + os.path.sep + "cloud_20m.bin")
 
     # cleanup extra files
     run("rm -v " + safe + os.path.sep + "*.bin")
