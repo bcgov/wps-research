@@ -43,7 +43,7 @@ run(' '.join(['gdal_translate -of ENVI -ot Float32',
               fn + '_dem.bin']))
 run('po ' + fn + '_dem.bin ' + fn + ' dem.bin')  # project onto
 
-run('raster_threshold dem.bin GEQ 0.')
+run('raster_threshold dem.bin GEQ 0.')  # mask out areas without elevation
 run('raster_mult dem.bin dem.bin_thres.bin DEM.bin')
 run('raster_zero_to_nan DEM.bin')
 run('raster_stack.py DEM.bin ' + fn + ' stack_dem.bin')
