@@ -1,4 +1,4 @@
-'''20220831 running https://github.com/bopen/elevation
+'''20220831 running https://github.com/bopen/elevation relative to raster footprint
 
 python3 -m pip install elevation
 
