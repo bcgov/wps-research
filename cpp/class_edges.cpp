@@ -6,16 +6,17 @@ int main(int argc, char ** argv){
   str fn(argv[1]); // input file name
   str hfn(hdr_fn(fn)); // auto-detect header file name
 
-  long int i, j, np, di, dj, ii, jj;
+  size_t nrow, ncol, nband, np, i, j, ix, ij;
+  long int di, dj, ii, jj;
   hread(hfn, nrow, ncol, nband); // read header
   if(nband != 1) err("class map expected: one band");
   np = nrow * ncol; // number of input pix
 
-  dat = bread(fn, nrow, ncol, nband); // load floats to array
-  float * out = falloc(np);
-  for0(i, np) out[i] = 0.;
   float d;
   bool other;
+  float * dat = bread(fn, nrow, ncol, nband); // load floats to array
+  float * out = falloc(np);
+  for0(i, np) out[i] = 0.;
 
   for0(i, nrow){
     if(i % 100 == 0) cout << i << " of " << (nrow + 1) << endl;
