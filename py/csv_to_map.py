@@ -22,7 +22,7 @@ for row in reader:
         domain_i = lookup[args[2]]
         range_i = lookup[args[3]]
     else:
-        if r[domain_i] != r[range_i]:
+        if r[domain_i] != r[range_i] and r[range_i] != '':
             arrow[r[domain_i]] = r[range_i]
     ri += 1
 print(arrow)
