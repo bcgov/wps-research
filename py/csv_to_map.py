@@ -7,7 +7,7 @@ args = sys.argv
 if len(args) < 4:
     print("csv_to_map.py [csv file] [col name 1] [col name 2]")
     sys.exit(1)
-reader = csv.reader(args[1], delimiter=',', quotechar='"')
+reader = csv.reader(open(args[1]), delimiter=',', quotechar='"')
 
 ri = 0
 arrow = {}
@@ -18,10 +18,10 @@ for row in reader:
     if ri == 0:
         fields = r
         lookup = {fields[i]: i for i in range(len(fields))}
+        print(lookup)
         domain_i = lookup[args[2]]
         range_i = lookup[args[3]]
     else:
         arrow[r[domain_i]] = r[range_i]
     ri += 1
-
 print(arrow)
