@@ -6,7 +6,7 @@ ou_f = 'tbreak_1985_2024_int32.tif'  # output file
 import datetime
 import numpy as np
 from osgeo import gdal
-ds = gdal.Open('tbreak_1985_2024.tif', gdal.GA_ReadOnly)  # open file
+ds = gdal.Open(in_f, gdal.GA_ReadOnly)  # open file
 band = ds.GetRasterBand(1)  # band info
 rb = band.ReadAsArray().ravel()  # read as linear array
 src_proj, geo_xform, rows, cols = ds.GetProjection(),\
