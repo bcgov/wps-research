@@ -1,5 +1,5 @@
 '''20220125 gtiff_decimal_to_yyyymmdd.py: convert tiff with decimal year to yyyymmdd.
-* No-data value=0. '''
+* No-data value=0. Leap years are taken into account'''
 in_f = 'tbreak_1985_2024.tif' # input file
 ou_f = 'tbreak_1985_2024_int32.tif'  # output file
 
