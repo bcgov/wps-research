@@ -33,6 +33,12 @@ Includes A) data integration B) routines applying or implementing supervised and
 <img src="data/output/20210127_mvp.png" width="650" height="264">
 
 ## Presentations
+* Satellite Fire Mapping: BCWS Operational Trial 2022, BC Gov GIS CoP F2F, Nov 30, 2022
+* Remote Sensing Show and Tell, WildfireSat Mission Knowledge Exchange (KE) Group Meeting, Nov 29, 2022
+* All Hazards Application of RCM in BC Part 3, CSA RCM Users Forum, Nov 23, 2022
+* Mapping Forest Fires and Fuels in Canada with ALOS-2 SAR data, Joint PI Meeting of JAXA Earth Observation Missions FY2022, Nov 7-11, 2022
+* Fuel Type Mapping with Remote Sensing and Machine Learning, Wildland Fire Canada Conference, Nov 1, 2022
+* A.I. Fire Perimeter Mapping, CIFFC Geomatics Working Group meeting, Oct 12, 2022
 * All Hazards Application of RCM in BC Part 2, CSA RCM Users Forum, May 18, 2022
 * Fire mapping with Shortwave Infrared, BC Government Remote Sensing CoP, Apr 13 2022
 * Fire mapping with Sentinel-2, BCWS Geomatics CoP, Mar 16 2022
