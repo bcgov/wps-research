@@ -19,12 +19,11 @@ addRowBtn.addEventListener("click", addRow);
 function renderTableRows() {
   for (let i = 0; i < tableData.length; i++) {
     const row = table.insertRow(-1);
-    const nameCell = row.insertCell(0);
-    const checkboxCell = row.insertCell(1);
+    const checkboxCell = row.insertCell(0);
+    const nameCell = row.insertCell(1);
 
-    nameCell.innerHTML = `<input type="text" value="${tableData[i].name}" oninput="updateTableData(${i}, 'name', this.value)">`;
     checkboxCell.innerHTML = `<input type="checkbox" ${tableData[i].isChecked ? "checked" : ""} onchange="updateTableData(${i}, 'isChecked', this.checked)">`;
-
+    nameCell.innerHTML = `<input type="text" value="${tableData[i].name}" oninput="updateTableData(${i}, 'name', this.value)">`;
   }
 }
 
@@ -35,11 +34,11 @@ function addRow() {
 
   const rowIndex = tableData.length - 1;
   const row = table.insertRow(-1);
-  const nameCell = row.insertCell(0);
-  const checkboxCell = row.insertCell(1);
+  const checkboxCell = row.insertCell(0);
+  const nameCell = row.insertCell(1);
 
-  nameCell.innerHTML = `<input type="text" value="" oninput="updateTableData(${rowIndex}, 'name', this.value)">`;
   checkboxCell.innerHTML = `<input type="checkbox" ${tableData[rowIndex].isChecked ? "checked" : ""} onchange="updateTableData(${rowIndex}, 'isChecked', this.checked)">`;
+  nameCell.innerHTML = `<input type="text" value="" oninput="updateTableData(${rowIndex}, 'name', this.value)">`;
 
   // Save the updated table data to localStorage
   saveTableData();
