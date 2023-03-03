@@ -1,76 +1,57 @@
-// Retrieve the table and button elements
-const table = document.getElementById("dataTable");
+const table = document.getElementById("dataTable");  // table and button elements
 const tbody = table.getElementsByTagName("tbody")[0];
 const addRowBtn = document.getElementById("addRowBtn");
 const listDataBtn = document.getElementById("listData");
 
-// Define the localStorage key
-const localStorageKey = "tableData";
+const localStorageKey = "tableData";  // define localStorage key
+let tableData = JSON.parse(localStorage.getItem(localStorageKey)) || [];  // load table data from localStorage
+renderTableRows();  // render table rows from loaded data
 
-// Load the table data from localStorage
-let tableData = JSON.parse(localStorage.getItem(localStorageKey)) || [];
-
-// Render the table rows from the loaded data
-renderTableRows();
-
-// Add event listener to the "Add Row" button
-addRowBtn.addEventListener("click", addRow);
-
-// Add event listener to the "List Data" button
+addRowBtn.addEventListener("click", addRow); // add event listeners
 listDataBtn.addEventListener("click", listData);
+clearBtn.addEventListener("click", clearData);
 
-// Function to render the table rows from the loaded data
-function renderTableRows() {
-  for (let i = 0; i < tableData.length; i++) {
-    const row = table.insertRow(-1);
-    const checkboxCell = row.insertCell(0);
-    const nameCell = row.insertCell(1);
-
-    checkboxCell.innerHTML = `<input type="checkbox" ${tableData[i].isChecked ? "checked" : ""} onchange="updateTableData(${i}, 'isChecked', this.checked)">`;
+function renderTableRows(){
+  for (let i = 0; i < tableData.length; i++){
+    const row = table.insertRow(-1);   // render table rows from loaded data
+    const checkboxCell = row.insertCell(0); const nameCell = row.insertCell(1);
+    checkboxCell.innerHTML = `<input type="checkbox" ${tableData[i].isChecked ? "checked": ""} onchange="updateTableData(${i}, 'isChecked', this.checked)">`;
     nameCell.innerHTML = `<input type="text" value="${tableData[i].name}" oninput="updateTableData(${i}, 'name', this.value)">`;
   }
 }
 
-// Function to add a row to the table
-function addRow() {
-  const newRowData = { name: "", isChecked: false };
-  tableData.push(newRowData);
-
+function addRow(){
+  const newRowData = {name: "", isChecked: false }; tableData.push(newRowData);  // add a row to the table
   const rowIndex = tableData.length - 1;
   const row = table.insertRow(-1);
   const checkboxCell = row.insertCell(0);
   const nameCell = row.insertCell(1);
-
   checkboxCell.innerHTML = `<input type="checkbox" ${tableData[rowIndex].isChecked ? "checked" : ""} onchange="updateTableData(${rowIndex}, 'isChecked', this.checked)">`;
   nameCell.innerHTML = `<input type="text" value="" oninput="updateTableData(${rowIndex}, 'name', this.value)">`;
-
-  // Save the updated table data to localStorage
-  saveTableData();
+  saveTableData();  // save updated table data to localStorage
 }
 
-// Function to update the table data and save to localStorage
-function updateTableData(rowIndex, property, value) {
-  tableData[rowIndex][property] = value;
-
-  // Save the updated table data to localStorage
-  saveTableData();
+function updateTableData(rowIndex, property, value){
+  tableData[rowIndex][property] = value;  // update table data
+  saveTableData();  // save to localStorage
 }
 
-// Function to save the table data to localStorage
-function saveTableData() {
-  localStorage.setItem(localStorageKey, JSON.stringify(tableData));
+function saveTableData(){
+  localStorage.setItem(localStorageKey, JSON.stringify(tableData));  // save table data to localStorage
 }
 
-// Function to list the table data to console
-function listData() {
-  const tableRows = table.getElementsByTagName("tr");
+function listData(){
   const tableDataArray = [];
-
-  // Loop through each table row and get the value of the second cell
-  for (let i = 1; i < tableRows.length; i++) {
-    const rowData = tableRows[i].getElementsByTagName("td")[1].getElementsByTagName("input")[0].value;
+  const tableRows = table.getElementsByTagName("tr");   // list table data to console
+  for (let i = 1; i < tableRows.length; i++){
+    const rowData = tableRows[i].getElementsByTagName("td")[1].getElementsByTagName("input")[0].value;  // get value of second cell
     tableDataArray.push(rowData);
   }
-
   console.log(tableDataArray);
+}
+
+function clearData(){
+  tableData = null;
+  localStorage.removeItem(localStorageKey);
+  location.reload()
 }
