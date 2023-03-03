@@ -20,13 +20,9 @@ function renderTableRows() {
 	for (let i = 0; i < tableData.length; i++) {
 		const row = table.insertRow(-1);
 		const nameCell = row.insertCell(0);
-		const ageCell = row.insertCell(1);
-		const emailCell = row.insertCell(2);
-		const deleteCell = row.insertCell(3);
+		const deleteCell = row.insertCell(1);
 
 		nameCell.innerHTML = `<input type="text" value="${tableData[i].name}" oninput="updateTableData(${i}, 'name', this.value)">`;
-		ageCell.innerHTML = `<input type="text" value="${tableData[i].age}" oninput="updateTableData(${i}, 'age', this.value)">`;
-		emailCell.innerHTML = `<input type="text" value="${tableData[i].email}" oninput="updateTableData(${i}, 'email', this.value)">`;
 		deleteCell.innerHTML = '<button class="deleteRowBtn">Delete</button>';
 
 		// Add event listener to the delete button
@@ -36,19 +32,15 @@ function renderTableRows() {
 
 // Function to add a row to the table
 function addRow() {
-	const newRowData = { name: "", age: "", email: "" };
+	const newRowData = { name: "" };
 	tableData.push(newRowData);
 
 	const rowIndex = tableData.length - 1;
 	const row = table.insertRow(-1);
 	const nameCell = row.insertCell(0);
-	const ageCell = row.insertCell(1);
-	const emailCell = row.insertCell(2);
-	const deleteCell = row.insertCell(3);
+	const deleteCell = row.insertCell(1);
 
 	nameCell.innerHTML = `<input type="text" value="" oninput="updateTableData(${rowIndex}, 'name', this.value)">`;
-	ageCell.innerHTML = `<input type="text" value="" oninput="updateTableData(${rowIndex}, 'age', this.value)">`;
-	emailCell.innerHTML = `<input type="text" value="" oninput="updateTableData(${rowIndex}, 'email', this.value)">`;
 	deleteCell.innerHTML = '<button class="deleteRowBtn">Delete</button>';
 
 	// Add event listener to the delete button
@@ -80,4 +72,3 @@ function deleteRow() {
 function saveTableData() {
 	localStorage.setItem(localStorageKey, JSON.stringify(tableData));
 }
-
