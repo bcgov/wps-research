@@ -2,6 +2,7 @@
 const table = document.getElementById("dataTable");
 const tbody = table.getElementsByTagName("tbody")[0];
 const addRowBtn = document.getElementById("addRowBtn");
+const listDataBtn = document.getElementById("listData");
 
 // Define the localStorage key
 const localStorageKey = "tableData";
@@ -14,6 +15,9 @@ renderTableRows();
 
 // Add event listener to the "Add Row" button
 addRowBtn.addEventListener("click", addRow);
+
+// Add event listener to the "List Data" button
+listDataBtn.addEventListener("click", listData);
 
 // Function to render the table rows from the loaded data
 function renderTableRows() {
@@ -55,4 +59,18 @@ function updateTableData(rowIndex, property, value) {
 // Function to save the table data to localStorage
 function saveTableData() {
   localStorage.setItem(localStorageKey, JSON.stringify(tableData));
+}
+
+// Function to list the table data to console
+function listData() {
+  const tableRows = table.getElementsByTagName("tr");
+  const tableDataArray = [];
+
+  // Loop through each table row and get the value of the second cell
+  for (let i = 1; i < tableRows.length; i++) {
+    const rowData = tableRows[i].getElementsByTagName("td")[1].getElementsByTagName("input")[0].value;
+    tableDataArray.push(rowData);
+  }
+
+  console.log(tableDataArray);
 }
