@@ -17,58 +17,43 @@ addRowBtn.addEventListener("click", addRow);
 
 // Function to render the table rows from the loaded data
 function renderTableRows() {
-	for (let i = 0; i < tableData.length; i++) {
-		const row = table.insertRow(-1);
-		const nameCell = row.insertCell(0);
-		const deleteCell = row.insertCell(1);
+  for (let i = 0; i < tableData.length; i++) {
+    const row = table.insertRow(-1);
+    const nameCell = row.insertCell(0);
+    const checkboxCell = row.insertCell(1);
 
-		nameCell.innerHTML = `<input type="text" value="${tableData[i].name}" oninput="updateTableData(${i}, 'name', this.value)">`;
-		deleteCell.innerHTML = '<button class="deleteRowBtn">Delete</button>';
+    nameCell.innerHTML = `<input type="text" value="${tableData[i].name}" oninput="updateTableData(${i}, 'name', this.value)">`;
+    checkboxCell.innerHTML = `<input type="checkbox" ${tableData[i].isChecked ? "checked" : ""} onchange="updateTableData(${i}, 'isChecked', this.checked)">`;
 
-		// Add event listener to the delete button
-		deleteCell.firstChild.addEventListener("click", deleteRow);
-	}
+  }
 }
 
 // Function to add a row to the table
 function addRow() {
-	const newRowData = { name: "" };
-	tableData.push(newRowData);
+  const newRowData = { name: "", isChecked: false };
+  tableData.push(newRowData);
 
-	const rowIndex = tableData.length - 1;
-	const row = table.insertRow(-1);
-	const nameCell = row.insertCell(0);
-	const deleteCell = row.insertCell(1);
+  const rowIndex = tableData.length - 1;
+  const row = table.insertRow(-1);
+  const nameCell = row.insertCell(0);
+  const checkboxCell = row.insertCell(1);
 
-	nameCell.innerHTML = `<input type="text" value="" oninput="updateTableData(${rowIndex}, 'name', this.value)">`;
-	deleteCell.innerHTML = '<button class="deleteRowBtn">Delete</button>';
+  nameCell.innerHTML = `<input type="text" value="" oninput="updateTableData(${rowIndex}, 'name', this.value)">`;
+  checkboxCell.innerHTML = `<input type="checkbox" ${tableData[rowIndex].isChecked ? "checked" : ""} onchange="updateTableData(${rowIndex}, 'isChecked', this.checked)">`;
 
-	// Add event listener to the delete button
-	deleteCell.firstChild.addEventListener("click", deleteRow);
-
-	// Save the updated table data to localStorage
-	saveTableData();
+  // Save the updated table data to localStorage
+  saveTableData();
 }
 
 // Function to update the table data and save to localStorage
 function updateTableData(rowIndex, property, value) {
-	tableData[rowIndex][property] = value;
+  tableData[rowIndex][property] = value;
 
-	// Save the updated table data to localStorage
-	saveTableData();
-}
-
-// Function to delete a row from the table and update the table data
-function deleteRow() {
-	const rowIndex = this.parentNode.parentNode.rowIndex - 1;
-	tableData.splice(rowIndex, 1);
-	table.deleteRow(rowIndex);
-
-	// Save the updated table data to localStorage
-	saveTableData();
+  // Save the updated table data to localStorage
+  saveTableData();
 }
 
 // Function to save the table data to localStorage
 function saveTableData() {
-	localStorage.setItem(localStorageKey, JSON.stringify(tableData));
+  localStorage.setItem(localStorageKey, JSON.stringify(tableData));
 }
