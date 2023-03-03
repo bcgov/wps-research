@@ -1,85 +1,29 @@
 <!DOCTYPE html>
-<HEAD>
-	<TITLE> Add/Remove dynamic rows in HTML table </TITLE>
-	<SCRIPT language="javascript">
+<html>
+<head>
+	<meta charset="UTF-8">
+	<title>Editable Table with localStorage</title>
+	<link rel="stylesheet" type="text/css" href="style.css">
+</head>
+<body>
+	<h1>Editable Table with localStorage</h1>
+	<div id="tableContainer">
+		<table id="dataTable">
+			<thead>
+				<tr>
+					<th>Name</th>
+					<th>Age</th>
+					<th>Email</th>
+					<th>Action</th>
+				</tr>
+			</thead>
+			<tbody>
+			</tbody>
+		</table>
+	</div>
 
-		alert(window.localStorage.getItem('foo'))
-		function saveTable(tableID){
-			var a = document.getElementById(tableID).getElementsByTagName("input");
-			var e = a.length; // get how many input inside the table
-			for(x=0;x<e;x++)
-			  console.log(a[x].name+"="+a[x].value);
-		}
+	<button id="addRowBtn">Add Row</button>
 
-		function addRow(tableID) {
-
-			var table = document.getElementById(tableID);
-
-			var rowCount = table.rows.length;
-			var row = table.insertRow(rowCount);
-
-			var cell1 = row.insertCell(0);
-			var element1 = document.createElement("input");
-			element1.type = "checkbox";
-			element1.name="chkbox[]";
-			cell1.appendChild(element1);
-
-			var cell2 = row.insertCell(1);
-			cell2.innerHTML = rowCount + 1;
-
-			var cell3 = row.insertCell(2);
-			var element2 = document.createElement("input");
-			element2.type = "text";
-			element2.name = "txtbox[]";
-			cell3.appendChild(element2);
-
-			saveTable(tableID);
-		}
-
-		function deleteRow(tableID) {
-			try {
-			var table = document.getElementById(tableID);
-			var rowCount = table.rows.length;
-
-			for(var i=0; i<rowCount; i++) {
-				var row = table.rows[i];
-				var chkbox = row.cells[0].childNodes[0];
-				if(null != chkbox && true == chkbox.checked) {
-					table.deleteRow(i);
-					rowCount--;
-					i--;
-				}
-
-
-			}
-			}catch(e) {
-				alert(e);
-			}
-
-
-			saveTable(tableID);
-		}
-
-	</SCRIPT>
-</HEAD>
-<BODY>
-
-	<INPUT type="button" value="Save + Add Row" onclick="addRow('dataTable')" />
-	<INPUT type="button" value="Delete Row" onclick="deleteRow('dataTable')" />
-
-	<TABLE id="dataTable" width="350px" border="1">
-		<TR>
-			<TD><INPUT type="checkbox" name="chk"/></TD>
-			<TD> 1 </TD>
-			<TD> <INPUT type="text" /> </TD>
-		</TR>
-	</TABLE>
-
-	<TABLE id="dataTable2" border="1">
-		<TR>
-		<TD> stufff </TD>
-		</TR>
-	</TABLE>
-
-</BODY>
-</HTML>
+	<script src="script.js"></script>
+</body>
+</html>
