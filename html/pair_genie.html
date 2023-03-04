@@ -9,6 +9,7 @@
   <h1>Pair Genie</h1>
   <button id="addRowBtn">Add Name</button>
   <button id="addColBtn">Generate Pairs</button>
+  <button id="reRollBtn">Reroll</button>
   <br>
   <br>
   <table id="dataTable">
@@ -68,7 +69,8 @@
     addRowBtn.addEventListener("click", addRow); // add hooks for the buttons
     addColBtn.addEventListener("click", addCol);
     clearBtn.addEventListener("click", clearData);
-    
+    reRollBtn.addEventListener("click", create_pairing);    
+
     var n_rows = parseInt(localStorage.getItem("n_rows"))
     var n_cols = parseInt(localStorage.getItem("n_cols"))
     if(!n_rows) n_rows = 0;
@@ -163,7 +165,6 @@
       n_cols = n_cols + 1
       renderTableRows();
       create_pairing();
-      saveTableData();
     }
     
     function updateTableData(rowIndex, property, value){
@@ -258,9 +259,11 @@
       }
       fill_undefined()
       renderTableRows()
+      saveTableData()
     }
     
     function listNames(){
+      // list the names in the first column
       var tableDataArray = [];
       var tableRows = table.getElementsByTagName("tr");   // list table data to console
       for(var i = 1; i < tableRows.length; i++){
@@ -268,6 +271,10 @@
         tableDataArray.push(rowData);
       }
       return tableDataArray;
+    }
+
+    function lastNames(){
+      // list the names in the last column. Use this in re-roll function
     }
     
     function clearData(){
