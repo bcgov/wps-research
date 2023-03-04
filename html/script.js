@@ -39,7 +39,7 @@ function renderTableRows(){
     headerRow.appendChild(newHeaderCell);
   }
 
-  for (let i = 0; i < tableData.length; i++){
+  for(var i = 0; i < tableData.length; i++){
     const row = table.insertRow(-1);   // render table rows from loaded data
     const checkboxCell = row.insertCell(0)
     const nameCell = row.insertCell(1)
@@ -47,7 +47,7 @@ function renderTableRows(){
     nameCell.innerHTML = `<input type="text" value="${tableData[i].name}" oninput="updateTableData(${i}, 'name', this.value)">`
 
     // render additional cols
-    for(let j = 2; j <= n_cols; j++){
+    for(var j = 2; j <= n_cols; j++){
       // console.log(i, j)
       var nameCells = row.insertCell(j)
       var nameData = tableData[i]["name" + j.toString()]
@@ -55,6 +55,17 @@ function renderTableRows(){
     }
   }
 }
+
+function fill_undefined(){
+  for(var i = 1; i <= tableData.length; i++){
+    for(var j = 1; j <= n_cols; j++){
+      if(!tableData[i-1]["name" + j.toString()]){
+        tableData[i-1]["name" + j.toString()] = ""
+      }
+    }
+  }
+}
+
 
 function addRow(){
   const newRowData = {isChecked: false, name: ""}; tableData.push(newRowData);  // add a row to the table
@@ -66,7 +77,13 @@ function addRow(){
   nameCell.innerHTML = `<input type="text" value="" oninput="updateTableData(${rowIndex}, 'name', this.value)">`;
 
   n_rows = n_rows + 1
-  saveTableData();  // save updated table data to localStorage
+  for(var j = 2; j <= n_cols; j++){
+    var new_cell = row.insertCell(-1);  // iterate over non-header rows
+    new_cell.innerHTML = `<input type="text" value="" oninput="updateTableData(${rowIndex}, 'name${j}', this.value)">`;
+    tableData[rowIndex]["name" + j.toString()] =  ""
+  }
+
+  saveTableData() // save updated table data to localStorage
 
   // make sure ragged rows are topped up!!!
 }
@@ -79,12 +96,13 @@ function addCol(){
   col_titles.push(new_col_title);
   headerRow.appendChild(newHeaderCell);
 
-  // iterate over the non-header rows
+  fill_undefined()
   for(var i = 1; i <= tableData.length; i++){
-    var new_cell = table.rows[i].insertCell(-1);
+    var new_cell = table.rows[i].insertCell(-1);  // iterate over non-header rows
     var rowIndex = tableData.length - 1;
-    new_cell.innerHTML = `<input type="text" value="new" oninput="updateTableData(${rowIndex}, 'name', this.value)">`;
-    tableData[i-1]["name" + (n_cols +1).toString()]= "stuff";
+    var j = n_cols + 1;
+    new_cell.innerHTML = `<input type="text" value="new" oninput="updateTableData(${rowIndex}, 'name${j}', this.value)">`;
+    tableData[i - 1]["name" + (n_cols +1).toString()]= "";
   }
   n_cols = n_cols + 1
   renderTableRows();
