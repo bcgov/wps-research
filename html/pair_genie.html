@@ -9,8 +9,8 @@
   <h1>Pair Genie</h1>
   <button id="addRowBtn">Add Name</button>
   <button id="addColBtn">Generate Pairs</button>
-  <button id="reRollBtn">Reroll</button>
-  <button id="reRollBtn2">Reroll2</button>
+  <!--<button id="reRollBtn">Reroll</button>
+  <button id="reRollBtn2">Reroll2</button>-->
   <br>
   <br>
   <table id="dataTable">
@@ -65,19 +65,18 @@
     
     var localStorageKey = "tableData";  // define localStorage key
     let tableData = JSON.parse(localStorage.getItem(localStorageKey)) || [];  // load table data from localStorage
-    console.log("DATA", tableData)
+    //console.log("DATA", tableData)
 
     addRowBtn.addEventListener("click", addRow); // add hooks for the buttons
     addColBtn.addEventListener("click", addCol);
     clearBtn.addEventListener("click", clearData);
-    reRollBtn.addEventListener("click", create_pairing);    
-    reRollBtn2.addEventListener("click", create_pairing2);  // non-random selection
-
+    /*reRollBtn.addEventListener("click", create_pairing);    
+    reRollBtn2.addEventListener("click", create_pairing2);  // non-random selection */
     var n_rows = parseInt(localStorage.getItem("n_rows"))
     var n_cols = parseInt(localStorage.getItem("n_cols"))
     if(!n_rows) n_rows = 0;
     if(!n_cols) n_cols = 1;
-    console.log("N_COLS", n_cols) 
+    //console.log("N_COLS", n_cols) 
 
     var col_titles = JSON.parse(localStorage.getItem("col_titles")) || [];  // titles for additional cols
     if(!col_titles) col_titles = []; // start with empty array
@@ -167,6 +166,33 @@
       n_cols = n_cols + 1
       renderTableRows();
       create_pairing();
+
+      var iter = 0;
+      var ITER_MAX = 1000
+
+      if(countBlanks() >= 2){
+        var min_blanks = countBlanks()
+        var min_assign = listLast()
+
+        while((countBlanks() >= 2) && (iter < ITER_MAX)){
+          create_pairing()
+          var blanks = countBlanks()
+          var assign = listLast()
+
+          if(blanks < min_blanks){
+            min_blanks = blanks;
+	    min_assign = assign;
+	  }
+          iter += 1
+        }
+
+        // assign the best result
+        for(var i = 0; i < tableData.length; i++){
+          tableData[i]["name" + (n_cols).toString()]= min_assign[i]
+	}
+	//alert("iter=" + iter.toString())
+      }
+      //alert("blanks=" + countBlanks().toString())
     }
 
     function updateTableData(rowIndex, property, value){
@@ -205,11 +231,11 @@
     }
 
     function create_pairing(){
-      console.log("Create pairing..")
-      console.log("DATA", tableData)
+      //console.log("Create pairing..")
+      //console.log("DATA", tableData)
       // create some new matches
       var names = listNames(); // list the names in row order
-      console.log("names", names)
+      //console.log("names", names)
 
       var name_to_ix = {}  // map name to row index
       for(var i = 0; i < names.length; i++) name_to_ix[names[i]] = i;    
@@ -224,10 +250,10 @@
       for(var i = 0; i < use.length; i++){
 	 var match = null;
 	 var name_ix = use[i]  // index of name to assign a partner to AKA "me"
-         console.log("------------me:", name_ix)
+         //console.log("------------me:", name_ix)
 	 if(name_ix in match_to){
            match = match_to[name_ix]  // don't try to match me if I'm already matched
-	   console.log("match", match)
+	   //console.log("match", match)
 	 }
 	 else{
 	   var possible = new Set(use)  // possible partners
@@ -251,7 +277,7 @@
              possible_array = shuffle(possible_array) // random selection
 	     match = possible_array[0]  // select from shuffled array
 	   }
-           console.log(name_ix, possible, "match", match)
+           //console.log(name_ix, possible, "match", match)
            match_to[match] = name_ix  // note reciprocal
 	 }
 
@@ -262,15 +288,14 @@
       fill_undefined()
       renderTableRows()
       saveTableData()
-      if(!hasBlanks()) alert("good combo")
     }
 
     function create_pairing2(){
-      console.log("Create non-random pairing..")
-      console.log("DATA", tableData)
+      //console.log("Create non-random pairing..")
+      //console.log("DATA", tableData)
       // create some new matches
       var names = listNames(); // list the names in row order
-      console.log("names", names)
+      //console.log("names", names)
 
       var name_to_ix = {}  // map name to row index
       for(var i = 0; i < names.length; i++) name_to_ix[names[i]] = i;    
@@ -334,24 +359,33 @@
         var rowData = tableRows[i].getElementsByTagName("td")[1].getElementsByTagName("input")[0].value;  // get value of second cell
         tableDataArray.push(rowData);
       }
-      console.log("listNames()", tableDataArray)
+      //console.log("listNames()", tableDataArray)
       return tableDataArray;
     }
 
-    function hasBlanks(){
+    function listLast(){
       // list the names in the last column. Use this in re-roll function
       var X = []
       var tableRows = table.getElementsByTagName("tr");
       for(var i = 1; i < tableRows.length; i++){
-	      try{
-        X.push(tableData[i - 1]["name" + (n_cols).toString()])
-	      }
-	      catch{
-		      X.push('')
-	      }
+	try{
+          X.push(tableData[i - 1]["name" + (n_cols).toString()])
+	}
+	catch{
+	  X.push('')
+	}
       }
-      var lastNames = new Set(X)
-      return lastNames.has('')
+      return X;
+    }
+
+    function countBlanks(){
+      // count the number of blanks in an arrangement
+      var X = listLast()
+      var c = 0;
+      for(var i = 0; i < X.length; i++){
+        if(X[i] == "") c += 1;
+      }
+      return c;
     }
     
     function clearData(){
