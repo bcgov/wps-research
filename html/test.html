@@ -201,7 +201,17 @@
       console.log("shuffled", use);
 
       for(var i = 0; i < use.length; i++){
-	 var name_ix = use[i];  // index of name to assign a partner to
+	 var name_ix = use[i]  // index of name to assign a partner to AKA "me"
+	 var possible = Set(use)  // possible partners
+	 try{
+           possible.remove(name_ix)  // don't partner with myself
+	 }
+	 catch{
+	 }
+
+	 
+
+
 
          // list of available names other than me
 
