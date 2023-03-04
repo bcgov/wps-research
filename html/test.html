@@ -167,11 +167,11 @@
       // create some new matches
       var names = listNames();
       console.log(names)
+      var checked_i = [];
       for(var i = 0; i < names.length; i++){
-        if(tableData[i].isChecked){
-          alert(i)
-	}
+        if(tableData[i].isChecked) checked_i.push(i);
       }
+      console.log(checked_i)
 
       // put the matches in the new column
 
