@@ -70,7 +70,7 @@
     addRowBtn.addEventListener("click", addRow); // add hooks for the buttons
     addColBtn.addEventListener("click", addCol);
     clearBtn.addEventListener("click", clearData);
-    reRollBtn.addEventListener("click", create_pairing);    
+    reRollBtn.addEventListener("click", reRoll);
 
     /*reRollBtn2.addEventListener("click", create_pairing2);  // non-random selection */
     var n_rows = parseInt(localStorage.getItem("n_rows"))
@@ -166,6 +166,10 @@
       }
       n_cols = n_cols + 1
       renderTableRows();
+      reRoll()
+    }
+
+    function reRoll(){
       create_pairing();
 
       var iter = 0;
@@ -195,6 +199,7 @@
 	//alert("iter=" + iter.toString())
       }
       //alert("blanks=" + countBlanks().toString())
+
     }
 
     function updateTableData(rowIndex, property, value){
