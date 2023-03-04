@@ -2,15 +2,19 @@
 <html>
   <head>
   <meta charset="UTF-8">
-  <title>Editable Table</title>
+  <title>Province of British Columbia -- Pair Genie</title>
   <style> table{ border: 1px solid black;} </style>
 </head>
 <body>
   <h1>Pair Genie</h1>
+  <button id="addRowBtn">Add Name</button>
+  <button id="addColBtn">Generate Pairs</button>
+  <br>
+  <br>
   <table id="dataTable">
     <thead>
       <tr>
-	<th>Exclude</th>
+	<th>Omit</th>
         <th>Name</th>
       </tr>
     </thead>
@@ -18,12 +22,17 @@
   </table>
   <br>
   <br>
-  <button id="addRowBtn">Add Row</button>
-  <button id="addColBtn">Add Col</button>
-  <button id="renderRowsBtn">renderRows</button>
+  <h3>Instructions</h3>
+  1) Click "Add Name" and enter a new name. Repeat until all names are added.
+  <br>2) Check the box in the "Omit" column, ext to any name(s) to be left out of this round.
+  <br>3) Click "Generate Pairs" to create a pairing. More names can be added for subsequent pairings.
+  <br>
+  <br>Note: Data are stored locally in your browser and persist until you press the "Clear Data" button below, or clear your browser's cache.
+  <br>
+  <br>
   <button id="clearBtn">Clear Data</button>
+  <br>
   <button id="listData">ListData</button>
-  
   <script>
     /* function to create a date stamp! */
     function yyyymmdd(){
@@ -51,7 +60,6 @@
     addColBtn.addEventListener("click", addCol);
     clearBtn.addEventListener("click", clearData);
     listDataBtn.addEventListener("click", listData);
-    renderRowsBtn.addEventListener("click", renderTableRows);
     var n_rows = parseInt(localStorage.getItem("n_rows"))
     var n_cols = parseInt(localStorage.getItem("n_cols"))
     if(!n_rows) n_rows = 0;
@@ -63,7 +71,7 @@
     
     function renderTableRows(){
       table = document.getElementById("dataTable");
-      table.innerHTML = "<thead><tr><th>Exclude</th><th>Name</th></tr><thead>"
+      table.innerHTML = "<thead><tr><th>Omit</th><th>Name</th></tr><thead>"
       table = document.getElementById("dataTable");
     
       var headerRow = table.rows[0];  // add a new table header cell
@@ -122,7 +130,7 @@
     function addCol(){
       var headerRow = table.rows[0];  // add a new table header cell
       var newHeaderCell = document.createElement("th");
-      var new_col_title = "new col";
+      var new_col_title = yyyymmdd();
       newHeaderCell.textContent = new_col_title;
       col_titles.push(new_col_title);
       headerRow.appendChild(newHeaderCell);
