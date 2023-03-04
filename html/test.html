@@ -220,11 +220,15 @@
 	   }
          }
 
-
+         var match = null;
+	 if(possible.size() > 0){
+           var possible_array = Array.from(possible) // stuff to choose from
+           possible_array = shuffle(possible_array) // random selection
+	   match = possible_array[0]  // select from shuffled array
+	 }
+  
+	 // assign match to the appropriate col
       }
-      // put the matches in the new column
-
-      // don't forget to add omit function
     }
     
     function listNames(){
