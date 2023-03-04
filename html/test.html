@@ -213,11 +213,9 @@
            match = match_to[name_ix]  // don't try to match me if I'm already matched
 	 }
 	 else{
-
-	   // NEED TO CHECK IF ALREADY MATCHED !!
 	   var possible = new Set(use)  // possible partners
 	   try{
-             possible.delete(name_ix)  // don't partner with myself
+             possible.delete(name_ix)  // don't partner with me 
 	   }
 	   catch{
 	   }
