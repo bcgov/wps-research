@@ -138,6 +138,13 @@
     }
     
     function addCol(){
+      var names = listNames(); // list the names in row order
+      var names_set = new Set(names)
+      if(names_set.has('')){
+              alert("Please fill in all names first")
+              return
+      }
+
       var headerRow = table.rows[0];  // add a new table header cell
       var newHeaderCell = document.createElement("th");
       var new_col_title = yyyymmdd();
@@ -199,6 +206,8 @@
       console.log("DATA", tableData)
       // create some new matches
       var names = listNames(); // list the names in row order
+      console.log("names", names)
+
       var name_to_ix = {}  // map name to row index
       for(var i = 0; i < names.length; i++) name_to_ix[names[i]] = i;    
       var match_to = {} // record the match for something that's already matched
