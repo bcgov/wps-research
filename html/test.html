@@ -191,7 +191,11 @@
     function create_pairing(){
       console.log("Create pairing..")
       // create some new matches
-      var names = listNames();
+      
+      var names = listNames(); // list the names in row order
+
+      var name_to_ix = {}  // map name to row index
+      for(var i = 0; i < names.length; i++) name_to_ix[names[i]] = i;    
 
       // list indices of available names
       var available = [];
