@@ -144,7 +144,7 @@
       col_titles.push(new_col_title);
       headerRow.appendChild(newHeaderCell);
     
-      fill_undefined()
+      fill_undefined()  // put "" in any undefined slots
       for(var i = 1; i <= tableData.length; i++){
         var new_cell = table.rows[i].insertCell(-1);  // iterate over non-header rows
         var rowIndex = tableData.length - 1;
