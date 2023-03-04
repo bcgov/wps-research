@@ -145,7 +145,13 @@
     }
     
     function updateTableData(rowIndex, property, value){
-      tableData[rowIndex][property] = value.trim();  // update table data
+      tableData[rowIndex][property] = value;  // update table data
+      try{
+        tableData[rowIndex][property] = tableData[rowIndex][property].trim();  // trim string data
+      }
+      catch(e){
+        // pass
+      }
       saveTableData();  // save to localStorage
     }
     
@@ -158,8 +164,17 @@
     }
 
     function create_pairing(){
+      // create some new matches
       var names = listNames();
       console.log(names)
+      for(var i = 0; i < names.length; i++){
+        if(tableData[i].isChecked){
+          alert(i)
+	}
+      }
+
+      // put the matches in the new column
+
       // don't forget to add omit function
     }
     
