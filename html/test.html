@@ -198,16 +198,12 @@
       console.log("Create pairing..")
       console.log("DATA", tableData)
       // create some new matches
-      
       var names = listNames(); // list the names in row order
-
       var name_to_ix = {}  // map name to row index
       for(var i = 0; i < names.length; i++) name_to_ix[names[i]] = i;    
-
       var match_to = {} // record the match for something that's already matched
-
-      // list indices of available names
-      var available = [];
+      
+      var available = [];  // list indices of available names 
       for(var i = 0; i < names.length; i++) if(!tableData[i].isChecked) available.push(i);
       var use = shuffle(available);
 
@@ -217,7 +213,6 @@
 	 var match = null;
 	 var name_ix = use[i]  // index of name to assign a partner to AKA "me"
          console.log("------------me:", name_ix)
-
 	 if(name_ix in match_to){
            match = match_to[name_ix]  // don't try to match me if I'm already matched
 	   console.log("match", match)
@@ -238,26 +233,19 @@
              catch{
 	     }
            }
-
-	   // remove names already paired this round
-	   possible = difference(possible, this_round)
-
+	   possible = difference(possible, this_round)  // remove names already paired
 	   if(possible.size > 0){
              var possible_array = Array.from(possible) // stuff to choose from
              possible_array = shuffle(possible_array) // random selection
 	     match = possible_array[0]  // select from shuffled array
 	   }
            console.log(name_ix, possible, "match", match)
-	   // assign match to the appropriate col
-  
-           match_to[match] = name_ix
+           match_to[match] = name_ix  // note reciprocal
 	 }
 
 	 this_round.add(match)  // record the match
 	 this_round.add(name_ix)
 	 tableData[name_ix]["name" + (n_cols).toString()]= names[match]  // actually assign the match
-         
-         //  NOTE: still have to exclude the stuff we already used this round !!! And add reciprocal entry
       }
       fill_undefined()
       renderTableRows()
