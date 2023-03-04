@@ -6,7 +6,7 @@
   <style> table{ border: 1px solid black;} </style>
 </head>
 <body>
-  <h1>Editable Table</h1>
+  <h1>Pair Genie</h1>
   <table id="dataTable">
     <thead>
       <tr>
@@ -23,8 +23,21 @@
   <button id="renderRowsBtn">renderRows</button>
   <button id="clearBtn">Clear Data</button>
   <button id="listData">ListData</button>
+  
   <script>
+    /* function to create a date stamp! */
+    function yyyymmdd(){
+      var d = new Date()
+      var mm = d.getMonth() + 1; // getMonth() is zero-based
+      var dd = d.getDate();
+      return [d.getFullYear(), (mm > 9 ? '' : '0') + mm,
+              		       (dd > 9 ? '' : '0') + dd].join('');
+    }
+  </script>
 
+  <script>
+	 console.log(yyyymmdd());
+    /* the software begins here */
     var table = document.getElementById("dataTable");  // table and button elements
     var tbody = table.getElementsByTagName("tbody")[0];
     var addRowBtn = document.getElementById("addRowBtn");
