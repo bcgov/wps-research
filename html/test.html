@@ -63,8 +63,8 @@
     
     var localStorageKey = "tableData";  // define localStorage key
     let tableData = JSON.parse(localStorage.getItem(localStorageKey)) || [];  // load table data from localStorage
-    console.log(tableData)
-    
+    console.log("DATA", tableData)
+
     addRowBtn.addEventListener("click", addRow); // add hooks for the buttons
     addColBtn.addEventListener("click", addCol);
     clearBtn.addEventListener("click", clearData);
@@ -73,7 +73,8 @@
     var n_cols = parseInt(localStorage.getItem("n_cols"))
     if(!n_rows) n_rows = 0;
     if(!n_cols) n_cols = 1;
-    
+    console.log("N_COLS", n_cols) 
+
     var col_titles = JSON.parse(localStorage.getItem("col_titles")) || [];  // titles for additional cols
     if(!col_titles) col_titles = []; // start with empty array
     renderTableRows();  // render table rows from loaded data
