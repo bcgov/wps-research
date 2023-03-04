@@ -216,9 +216,11 @@
       for(var i = 0; i < use.length; i++){
 	 var match = null;
 	 var name_ix = use[i]  // index of name to assign a partner to AKA "me"
+         console.log("------------me:", name_ix)
 
 	 if(name_ix in match_to){
            match = match_to[name_ix]  // don't try to match me if I'm already matched
+	   console.log("match", match)
 	 }
 	 else{
 	   var possible = new Set(use)  // possible partners
@@ -251,14 +253,11 @@
            match_to[match] = name_ix
 	 }
 
-	 if(!match){
-	 }
-	 else{
-	   this_round.add(match)  // record the match
-	   this_round.add(name_ix)
-	   tableData[name_ix]["name" + (n_cols).toString()]= names[match]  // actually assign the match
-         }
-	 //  NOTE: still have to exclude the stuff we already used this round !!! And add reciprocal entry
+	 this_round.add(match)  // record the match
+	 this_round.add(name_ix)
+	 tableData[name_ix]["name" + (n_cols).toString()]= names[match]  // actually assign the match
+         
+         //  NOTE: still have to exclude the stuff we already used this round !!! And add reciprocal entry
       }
       fill_undefined()
       renderTableRows()
