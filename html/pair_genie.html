@@ -10,6 +10,7 @@
   <button id="addRowBtn">Add Name</button>
   <button id="addColBtn">Generate Pairs</button>
   <button id="reRollBtn">Reroll</button>
+  <button id="reRollBtn2">Reroll2</button>
   <br>
   <br>
   <table id="dataTable">
@@ -70,6 +71,7 @@
     addColBtn.addEventListener("click", addCol);
     clearBtn.addEventListener("click", clearData);
     reRollBtn.addEventListener("click", create_pairing);    
+    reRollBtn2.addEventListener("click", create_pairing2);  // non-random selection
 
     var n_rows = parseInt(localStorage.getItem("n_rows"))
     var n_cols = parseInt(localStorage.getItem("n_cols"))
@@ -261,7 +263,68 @@
       saveTableData()
       if(!hasBlanks()) alert("good combo")
     }
-    
+
+    function create_pairing2(){
+      console.log("Create non-random pairing..")
+      console.log("DATA", tableData)
+      // create some new matches
+      var names = listNames(); // list the names in row order
+      console.log("names", names)
+
+      var name_to_ix = {}  // map name to row index
+      for(var i = 0; i < names.length; i++) name_to_ix[names[i]] = i;    
+      var match_to = {} // record the match for something that's already matched
+      
+      var available = [];  // list indices of available names 
+      for(var i = 0; i < names.length; i++) if(!tableData[i].isChecked) available.push(i);
+      var use = shuffle(available);
+
+      var this_round = new Set()
+
+      for(var i = 0; i < use.length; i++){
+         var match = null;
+         var name_ix = use[i]  // index of name to assign a partner to AKA "me"
+         console.log("------------me:", name_ix)
+         if(name_ix in match_to){
+           match = match_to[name_ix]  // don't try to match me if I'm already matched
+           console.log("match", match)
+         }
+         else{
+           var possible = new Set(use)  // possible partners
+           try{
+             possible.delete(name_ix)  // don't partner with me 
+           }
+           catch{
+           }
+
+           for(var j = 1; j <= n_cols; j++){
+             try{
+               var s = tableData[name_ix]["name" + j.toString()]
+               if(s) possible.delete(name_to_ix[s]);  // remove names I already met
+             }
+             catch{
+             }
+           }
+           possible = difference(possible, this_round)  // remove names already paired
+           if(possible.size > 0){
+             var possible_array = Array.from(possible) // stuff to choose from
+             possible_array = shuffle(possible_array) // random selection
+             match = possible_array[0]  // select from shuffled array
+           }
+           console.log(name_ix, possible, "match", match)
+           match_to[match] = name_ix  // note reciprocal
+         }
+
+         this_round.add(match)  // record the match
+         this_round.add(name_ix)
+         tableData[name_ix]["name" + (n_cols).toString()]= names[match]  // actually assign the match
+      }
+      fill_undefined()
+      renderTableRows()
+      saveTableData()
+      if(!hasBlanks()) alert("good combo")
+    }
+
     function listNames(){
       // list the names in the first column
       var tableDataArray = [];
