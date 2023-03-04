@@ -29,8 +29,6 @@
   <br>
   <br>
   <button id="clearBtn">Clear Data</button>
-  <br>
-  <button id="listData">ListData</button>
   <script>
     /* function to create a date stamp! */
     function yyyymmdd(){
@@ -54,10 +52,10 @@
     let tableData = JSON.parse(localStorage.getItem(localStorageKey)) || [];  // load table data from localStorage
     console.log(tableData)
     
-    addRowBtn.addEventListener("click", addRow); // add event listeners
+    addRowBtn.addEventListener("click", addRow); // add hooks for the buttons
     addColBtn.addEventListener("click", addCol);
     clearBtn.addEventListener("click", clearData);
-    listDataBtn.addEventListener("click", listData);
+    
     var n_rows = parseInt(localStorage.getItem("n_rows"))
     var n_cols = parseInt(localStorage.getItem("n_cols"))
     if(!n_rows) n_rows = 0;
@@ -142,12 +140,13 @@
         tableData[i - 1]["name" + (n_cols +1).toString()]= "";
       }
       n_cols = n_cols + 1
+      create_pairing(); // use combinations to generate pairs
       renderTableRows();
       saveTableData();
     }
     
     function updateTableData(rowIndex, property, value){
-      tableData[rowIndex][property] = value;  // update table data
+      tableData[rowIndex][property] = value.trim();  // update table data
       saveTableData();  // save to localStorage
     }
     
@@ -158,15 +157,21 @@
       localStorage.setItem("n_cols", n_cols.toString())
       localStorage.setItem("col_titles", JSON.stringify(col_titles));
     }
+
+    function create_pairing(){
+      var names = listNames();
+      console.log(names)
+      // don't forget to add omit function
+    }
     
-    function listData(){
+    function listNames(){
       var tableDataArray = [];
       var tableRows = table.getElementsByTagName("tr");   // list table data to console
       for(var i = 1; i < tableRows.length; i++){
         var rowData = tableRows[i].getElementsByTagName("td")[1].getElementsByTagName("input")[0].value;  // get value of second cell
         tableDataArray.push(rowData);
       }
-      console.log(tableDataArray);
+      return tableDataArray;
     }
     
     function clearData(){
