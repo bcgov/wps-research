@@ -188,6 +188,12 @@
       return JSON.parse(JSON.stringify(X));  // deep copy a non-(reference-type) object
     }
 
+    function difference(setA, setB){
+      const diff = new Set(setA);
+      for(const elem of setB) diff.delete(elem);
+      return diff;
+    }
+
     function create_pairing(){
       console.log("Create pairing..")
       console.log("DATA", tableData)
@@ -204,6 +210,8 @@
       var available = [];
       for(var i = 0; i < names.length; i++) if(!tableData[i].isChecked) available.push(i);
       var use = shuffle(available);
+
+      var this_round = new Set()
 
       for(var i = 0; i < use.length; i++){
 	 var match = null;
@@ -229,6 +237,9 @@
 	     }
            }
 
+	   // remove names already paired this round
+	   possible = difference(possible, this_round)
+
 	   if(possible.size > 0){
              var possible_array = Array.from(possible) // stuff to choose from
              possible_array = shuffle(possible_array) // random selection
@@ -239,9 +250,14 @@
   
            match_to[match] = name_ix
 	 }
-	 // actually assign the match
-	 tableData[name_ix]["name" + (n_cols).toString()]= names[match]
 
+	 if(!match){
+	 }
+	 else{
+	   this_round.add(match)  // record the match
+	   this_round.add(name_ix)
+	   tableData[name_ix]["name" + (n_cols).toString()]= names[match]  // actually assign the match
+         }
 	 //  NOTE: still have to exclude the stuff we already used this round !!! And add reciprocal entry
       }
       fill_undefined()
