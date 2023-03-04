@@ -176,6 +176,12 @@
       localStorage.setItem("col_titles", JSON.stringify(col_titles));
     }
 
+    function range(x, y){
+      var X = []  // generate list of integers: [x, y)
+      for(var i = x; i < y; i++) X.push(i);
+      return X;
+    }
+
     function create_pairing(){
       // create some new matches
       var names = listNames();
