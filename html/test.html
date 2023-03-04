@@ -41,6 +41,19 @@
   </script>
 
   <script>
+    /* Durstenfeld shuffle, randomly permute an array: 
+       https://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle#The_modern_algorithm */
+    function shuffle(X){
+      for(var i = X.length - 1; i > 0; i--){
+        var j = Math.floor(Math.random() * (i + 1));
+        var temp = X[i];
+        X[i] = X[j];
+        X[j] = temp;
+      }
+    }
+  </script>
+
+  <script>
     /* the software begins here */
     var table = document.getElementById("dataTable");  // table and button elements
     var tbody = table.getElementsByTagName("tbody")[0];
@@ -166,13 +179,18 @@
     function create_pairing(){
       // create some new matches
       var names = listNames();
-      console.log(names)
-      var available = [];
-      for(var i = 0; i < names.length; i++){
-        if(tableData[i].isChecked) checked_i.push(i);
-      }
-      console.log(checked_i)
 
+      // list indices of available names
+      var available = [];
+      for(var i = 0; i < names.length; i++) if(!tableData[i].isChecked) available.push(i);
+      	    console.log("Available", available)
+
+      for(var i = 0; i < names.length; i++){
+         // list of names other than me
+
+	 // scan my row, removing from this list names I already met with
+
+      }
       // put the matches in the new column
 
       // don't forget to add omit function
