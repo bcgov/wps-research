@@ -198,42 +198,55 @@
       var name_to_ix = {}  // map name to row index
       for(var i = 0; i < names.length; i++) name_to_ix[names[i]] = i;    
 
+      var match_to = {} // record the match for something that's already matched
+
       // list indices of available names
       var available = [];
       for(var i = 0; i < names.length; i++) if(!tableData[i].isChecked) available.push(i);
       var use = shuffle(available);
 
       for(var i = 0; i < use.length; i++){
+	 var match = null;
 	 var name_ix = use[i]  // index of name to assign a partner to AKA "me"
-	 // NEED TO CHECK IF ALREADY MATCHED !!
-	 var possible = new Set(use)  // possible partners
-	 try{
-           possible.delete(name_ix)  // don't partner with myself
-	 }
-	 catch{
-	 }
 
-         for(var j = 1; j <= n_cols; j++){
+	 if(name_ix in match_to){
+           match = match_to[name_ix]
+	 }
+	 else{
+
+	   // NEED TO CHECK IF ALREADY MATCHED !!
+	   var possible = new Set(use)  // possible partners
 	   try{
-             var s = tableData[name_ix]["name" + j.toString()]
-             if(s) possible.delete(name_to_ix[s]);  // remove names I already met
-           }
-           catch{
+             possible.delete(name_ix)  // don't partner with myself
 	   }
-         }
+	   catch{
+	   }
 
-         var match = null;
-	 if(possible.size > 0){
-           var possible_array = Array.from(possible) // stuff to choose from
-           possible_array = shuffle(possible_array) // random selection
-	   match = possible_array[0]  // select from shuffled array
+           for(var j = 1; j <= n_cols; j++){
+	     try{
+               var s = tableData[name_ix]["name" + j.toString()]
+               if(s) possible.delete(name_to_ix[s]);  // remove names I already met
+             }
+             catch{
+	     }
+           }
+
+	   if(possible.size > 0){
+             var possible_array = Array.from(possible) // stuff to choose from
+             possible_array = shuffle(possible_array) // random selection
+	     match = possible_array[0]  // select from shuffled array
+	   }
+           console.log(name_ix, possible, "match", match)
+	   // assign match to the appropriate col
+  
+           match_to[match] = name_ix
 	 }
-         console.log(name_ix, possible, "match", match)
-	 // assign match to the appropriate col
-	 tableData[name_ix - 1]["name" + (n_cols).toString()]= names[match]
+	 // actually assign the match
+	 tableData[name_ix]["name" + (n_cols).toString()]= names[match]
 
-	    //  NOTE: still have to exclude the stuff we already used this round !!! And add reciprocal entry
+	 //  NOTE: still have to exclude the stuff we already used this round !!! And add reciprocal entry
       }
+      fill_undefined()
       renderTableRows()
     }
     
