@@ -50,6 +50,7 @@
         X[i] = X[j];
         X[j] = temp;
       }
+      return X;
     }
   </script>
 
@@ -178,21 +179,30 @@
 
     function range(N){
       var X = []  // generate list of integers: [0, .., N-1]
-      for(var i = 0; i < y; i++) X.push(i);
+      for(var i = 0; i < N; i++) X.push(i);
       return X;
     }
 
+    function clone(X){
+    }
+
     function create_pairing(){
+      console.log("Create pairing..")
       // create some new matches
       var names = listNames();
 
       // list indices of available names
       var available = [];
       for(var i = 0; i < names.length; i++) if(!tableData[i].isChecked) available.push(i);
-      	    console.log("Available", available)
+      
+      console.log("Available", available)
+      var use = shuffle(available);
+      console.log("shuffled", use);
 
-      for(var i = 0; i < names.length; i++){
-         // list of names other than me
+      for(var i = 0; i < use.length; i++){
+	 var name_ix = use[i];  // index of name to assign a partner to
+
+         // list of available names other than me
 
 	 // scan my row, removing from this list names I already met with
 
