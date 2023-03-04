@@ -211,8 +211,12 @@
 	 }
 
          for(var j = 1; j <= n_cols; j++){
-           var s = tableData[i-1]["name" + j.toString()]
-           console.log("value", s)
+	   try{
+             var s = tableData[i-1]["name" + j.toString()]
+             console.log("value", s)
+           }
+           catch{
+	   }
          }
 
          // list of available names other than me
