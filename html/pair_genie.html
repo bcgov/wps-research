@@ -165,7 +165,6 @@
       n_cols = n_cols + 1
       renderTableRows();
       create_pairing();
-    }
     
     function updateTableData(rowIndex, property, value){
       tableData[rowIndex][property] = value;  // update table data
@@ -260,6 +259,7 @@
       fill_undefined()
       renderTableRows()
       saveTableData()
+      if(!hasBlanks()) alert("good combo")
     }
     
     function listNames(){
@@ -270,11 +270,24 @@
         var rowData = tableRows[i].getElementsByTagName("td")[1].getElementsByTagName("input")[0].value;  // get value of second cell
         tableDataArray.push(rowData);
       }
+      console.log("listNames()", tableDataArray)
       return tableDataArray;
     }
 
-    function lastNames(){
+    function hasBlanks(){
       // list the names in the last column. Use this in re-roll function
+      var X = []
+      var tableRows = table.getElementsByTagName("tr");
+      for(var i = 1; i < tableRows.length; i++){
+	      try{
+        X.push(tableData[i - 1]["name" + (n_cols).toString()])
+	      }
+	      catch{
+		      X.push('')
+	      }
+      }
+      var lastNames = new Set(X)
+      return lastNames.has('')
     }
     
     function clearData(){
