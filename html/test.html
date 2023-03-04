@@ -176,9 +176,9 @@
       localStorage.setItem("col_titles", JSON.stringify(col_titles));
     }
 
-    function range(x, y){
-      var X = []  // generate list of integers: [x, y)
-      for(var i = x; i < y; i++) X.push(i);
+    function range(N){
+      var X = []  // generate list of integers: [0, .., N-1]
+      for(var i = 0; i < y; i++) X.push(i);
       return X;
     }
 
