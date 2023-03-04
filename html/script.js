@@ -72,21 +72,22 @@ function addRow(){
 }
 
 function addCol(){
-  const headerRow = table.rows[0];  // add a new table header cell
-  const newHeaderCell = document.createElement("th"); 
+  var headerRow = table.rows[0];  // add a new table header cell
+  var newHeaderCell = document.createElement("th"); 
   var new_col_title = "new col";
   newHeaderCell.textContent = new_col_title;
   col_titles.push(new_col_title);
   headerRow.appendChild(newHeaderCell);
 
   // iterate over the non-header rows
-  for(let i = 1; i <= tableData.length; i++){
+  for(var i = 1; i <= tableData.length; i++){
     var new_cell = table.rows[i].insertCell(-1);
     var rowIndex = tableData.length - 1;
     new_cell.innerHTML = `<input type="text" value="new" oninput="updateTableData(${rowIndex}, 'name', this.value)">`;
     tableData[i-1]["name" + (n_cols +1).toString()]= "stuff";
   }
   n_cols = n_cols + 1
+  renderTableRows();
   saveTableData();
  
   // make sure ragged cols are topped up!!!
@@ -106,10 +107,10 @@ function saveTableData(){
 }
 
 function listData(){
-  const tableDataArray = [];
-  const tableRows = table.getElementsByTagName("tr");   // list table data to console
-  for (let i = 1; i < tableRows.length; i++){
-    const rowData = tableRows[i].getElementsByTagName("td")[1].getElementsByTagName("input")[0].value;  // get value of second cell
+  var tableDataArray = [];
+  var tableRows = table.getElementsByTagName("tr");   // list table data to console
+  for(var i = 1; i < tableRows.length; i++){
+    var rowData = tableRows[i].getElementsByTagName("td")[1].getElementsByTagName("input")[0].value;  // get value of second cell
     tableDataArray.push(rowData);
   }
   console.log(tableDataArray);
