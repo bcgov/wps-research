@@ -203,6 +203,7 @@
 
       for(var i = 0; i < use.length; i++){
 	 var name_ix = use[i]  // index of name to assign a partner to AKA "me"
+	 console.log("--------------me=", name_ix, names[name_ix])
 	 var possible = new Set(use)  // possible partners
 	 try{
            possible.remove(name_ix)  // don't partner with myself
@@ -212,8 +213,8 @@
 
          for(var j = 1; j <= n_cols; j++){
 	   try{
-             var s = tableData[i-1]["name" + j.toString()]
-             console.log("value", s)
+             var s = tableData[name_ix]["name" + j.toString()]
+             if(s) console.log(i, j, "value", s)
            }
            catch{
 	   }
