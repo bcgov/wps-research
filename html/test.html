@@ -200,17 +200,13 @@
       // list indices of available names
       var available = [];
       for(var i = 0; i < names.length; i++) if(!tableData[i].isChecked) available.push(i);
-      
-      console.log("Available", available)
       var use = shuffle(available);
-      console.log("shuffled", use);
 
       for(var i = 0; i < use.length; i++){
 	 var name_ix = use[i]  // index of name to assign a partner to AKA "me"
-	 console.log("--------------me=", name_ix, names[name_ix])
 	 var possible = new Set(use)  // possible partners
 	 try{
-           possible.remove(name_ix)  // don't partner with myself
+           possible.delete(name_ix)  // don't partner with myself
 	 }
 	 catch{
 	 }
@@ -218,16 +214,12 @@
          for(var j = 1; j <= n_cols; j++){
 	   try{
              var s = tableData[name_ix]["name" + j.toString()]
-             if(s) possible.remove(s);
+             if(s) possible.delete(name_to_ix[s]);  // remove names I already met
            }
            catch{
 	   }
          }
-	 console.log(names[name_ix], "possible", possible)
 
-         // list of available names other than me
-
-	 // scan my row, removing from this list names I already met with
 
       }
       // put the matches in the new column
