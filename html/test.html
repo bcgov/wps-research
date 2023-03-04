@@ -184,6 +184,7 @@
     }
 
     function clone(X){
+      return JSON.parse(JSON.stringify(X));  // deep copy a non-(reference-type) object
     }
 
     function create_pairing(){
