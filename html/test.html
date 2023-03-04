@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html>
-<head>
+  <head>
   <meta charset="UTF-8">
   <title>Editable Table</title>
   <style> table{ border: 1px solid black;} </style>
@@ -10,12 +10,11 @@
   <table id="dataTable">
     <thead>
       <tr>
-        <th>Exclude</th>
+	<th>Exclude</th>
         <th>Name</th>
       </tr>
     </thead>
-    <tbody>
-    </tbody>
+    <tbody></tbody>
   </table>
   <br>
   <br>
@@ -24,8 +23,8 @@
   <button id="renderRowsBtn">renderRows</button>
   <button id="clearBtn">Clear Data</button>
   <button id="listData">ListData</button>
-    
   <script>
+
     var table = document.getElementById("dataTable");  // table and button elements
     var tbody = table.getElementsByTagName("tbody")[0];
     var addRowBtn = document.getElementById("addRowBtn");
