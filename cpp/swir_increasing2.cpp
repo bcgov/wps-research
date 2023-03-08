@@ -8,6 +8,7 @@ int main(int argc, char ** argv){
 
   size_t nrow, ncol, nband, np, i, j, k, n, ij;
   float * out, * dat, * b1, * b2, * b3;
+  float H, S, V;
   long int bi[3];
 
   str fn(argv[1]); /* binary files */
@@ -51,6 +52,9 @@ int main(int argc, char ** argv){
   for0(i, np){
     out[i] = b3[i] * (float)(((b3[i] / b2[i])  > 1.1) && ((b3[i] / b1[i])) > 1.1); // && (b2[i] > b1[i]));  
     out[i] *= (float)(b3[i] > 2000.);
+
+    rgb_to_hsv(b1[i], b2[i], b3[i], &H, &S, &V);
+    if(!(H > 300. || H < 60.)) out[i] = 0.;
   }
 
   vector<str> bn;

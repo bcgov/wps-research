@@ -5,7 +5,7 @@ int main(int argc, char ** argv){
   if(argc < 2) err("red [raster cube 1]\n");
 
   str fn(argv[1]); // input image file name
-  if(!(exists(fn)) err("failed to open input file");
+  if(!(exists(fn))) err("failed to open input file");
 
   str hfn(hdr_fn(fn)); // input header file name
   str ofn(fn + str("_red.bin"));
