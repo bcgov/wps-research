@@ -28,17 +28,13 @@ int main(int argc, char ** argv){
 
      rgb_to_hsv(r, g, b, &H, &S, &V);
 
-     if(H < 60.){ // || H > 300){
-       out[i] = 1.;
-       out[i + np] = 0.;
-       out[i + np + np] = 0.;
-     }
-     else{
-       out[i] = 0.;
-       out[i + np] = 0.;
-       out[i + np + np] = 0.;
+     S = V = 1.;
 
-     }
+     hsv_to_rgb(&r, &g, &b, H, S, V);
+     out[i] = r;
+     out[i + np] = g;
+     out[i + np + np] = b;
+
   }
 
   bwrite(out, ofn, nrow, ncol, 3);

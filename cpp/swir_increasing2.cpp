@@ -3,7 +3,7 @@
 #include"misc.h"
 int main(int argc, char ** argv){
   if(argc < 2){
-    err("swir_increasing.exe [input file name]");
+    err("swir_increasing2 [input file name]  # optional arg sat fraction");
   }
 
   size_t nrow, ncol, nband, np, i, j, k, n, ij;
@@ -54,7 +54,8 @@ int main(int argc, char ** argv){
     out[i] *= (float)(b3[i] > 2000.);
 
     rgb_to_hsv(b1[i], b2[i], b3[i], &H, &S, &V);
-    if(!(H > 300. || H < 60.)) out[i] = 0.;
+    // if(!(H > 300. || H < 60.)) out[i] = 0.;
+    if(S < .35) out[i] = 0.;
   }
 
   vector<str> bn;
