@@ -323,6 +323,8 @@ void bwrite(float * d, str bfn, size_t nrow, size_t ncol, size_t nband); // writ
 void bappend(float * d, FILE * f, size_t n_float); //, bool start=false); // append (e.g. a band) to a binary file
 
 int hsv_to_rgb(float *r, float *g, float *b, float h, float s, float v);
+int rgb_to_hsv(float r, float g, float b, float * h, float * s, float * v);
+
 
 str hdr_fn(str fn); //create = false
 str hdr_fn(str fn, bool create);

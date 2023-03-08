@@ -409,6 +409,7 @@ void cprint(str s){
   mtx_unlock(&print_mtx);
 }
 
+
 int hsv_to_rgb(float *r, float *g, float *b, float h, float s, float v){
   if( (h>360.)||(h<0.)){
     printf("H: HSV out of range %f %f %f\n", h, s, v);
@@ -452,6 +453,44 @@ int hsv_to_rgb(float *r, float *g, float *b, float h, float s, float v){
   }
   return 0;
 }
+
+int rgb_to_hsv(float r, float g, float b, float * h, float * s, float * v){
+    double      min, max, delta;
+
+    min = (r < g) ? r : g;
+    min = (min  < b) ? min : b;
+
+    max = (r > g) ? r : g;
+    max = (max  > b) ? max : b;
+
+    *v = max;                                // v
+    delta = max - min;
+    if(delta < 0.00001){
+        *s = 0;
+        *h = 0; // undefined, maybe nan?
+    }
+    if( max > 0.0 ) { // NOTE: if Max is == 0, this divide would cause a crash
+        *s = (delta / max);                  // s
+    } else {
+        // if max is 0, then r = g = b = 0              
+        // s = 0, h is undefined
+        *s = 0.0;
+        *h = NAN;                            // its now undefined
+        return 0; 
+    }
+    if(r >= max )                           // > is bogus, just keeps compilor happy
+        (*h) = (g - b) / delta;        // between yellow & magenta
+    else
+    if(g >= max )
+        *h = 2.0 + (b - r) / delta;  // between cyan & yellow
+    else
+        *h = 4.0 + (r - g) / delta;  // between magenta & cyan
+
+    (*h) *= 60.0;                              // degrees
+    if(*h < 0.0 ) *h += 360.0;
+  return 0;
+}
+
 
 /*
 size_t size(FILE * f){
