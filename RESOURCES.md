@@ -150,3 +150,6 @@
 * [ESA EO Open Science](https://www.youtube.com/channel/UCPnL3aynCQxTOjPttxMiS3Q/videos)
 * [ESA RUS Copernicus Training](https://www.youtube.com/channel/UCB01WjameYMvL7-XfI8vRIA/videos)
 * [IEEE Geoscience and Remote Sensing Society](https://www.youtube.com/c/IEEEGRSS/videos)
+
+# Git
+*[On undoing, fixing, or removing commits in git](https://sethrobertson.github.io/GitFixUm/fixup.html)
