@@ -22,12 +22,11 @@ foot_print = 'Intersects(51.48252764574755,-123.95386296901019)' # bc 	2022-C501
 fpfn = None
 if len(sys.argv) > 1:
     if not os.path.exists(sys.argv[1]):
-        import geopy # python geocoder
+        import geopy # python location name geocoder
         from geopy.geocoders import DataBC
-        geolocator = DataBC() # user_agent = "my-application")
+        geolocator = ArcGIS() # DataBC()
         location = geolocator.geocode(sys.argv[1])
-        print(location.address)
-        print((location.latitude, location.longitude))
+        print(location.address, location.latitude, location.longitude)
         foot_print = 'Intersects(' + str(location.latitude) + ',' + str(location.longitude) + ')'
     else:
         fpfn = sys.argv[1]
