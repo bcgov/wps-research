@@ -32,7 +32,12 @@ from osgeo import gdal
 from osgeo import gdalconst
 args = sys.argv
 
-InputVector = "Sentinel_BC_Tiles.shp"
+abspath = os.path.abspath
+sep = os.path.sep
+def get_pd():
+    return abspath(sep.join(abspath(__file__).split(sep)[:-1])) + sep  # python directory i.e. path to here
+
+InputVector = get_pd() + "Sentinel_BC_Tiles.shp"
 print_all = False
 
 def err(m):
@@ -79,7 +84,7 @@ for f in features:
     feature_name = ''
     try:
         feature_name = f['properties']['Name']
-        #print("Name", feature_name)
+        print("Name", feature_name)
     except Exception:
         pass # feature name not available
     feature_names.append(feature_name)
@@ -104,6 +109,6 @@ for f in features:
             s += ')))'
 
             print(feature_name, s)
-'''
-Intersects(POLYGON((-124.96826369032179 55.06121519817568,-124.96826369032179 55.07545080182434,-124.9434023096782 55.07545080182434,-124.9434023096782 55.06121519817568,-124.96826369032179 55.06121519817568)))
-'''
+            if not os.path.exists(feature_name):
+                os.mkdir(feature_name)
+            open(feature_name + sep + 'fpf', 'wb').write(s.encode())
