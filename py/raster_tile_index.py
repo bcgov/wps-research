@@ -3,7 +3,7 @@ import sys
 from misc import timestamp
 ts = timestamp()
 
-rasters = [x.strip() for x in os.popen('find ./ -name "*.bin"').strip().split('\n')]
+rasters = [x.strip() for x in os.popen('find ./ -name "*.bin"').read().strip().split('\n')]
 
 open(ts + '_files.txt', 'wb').write(('\n'.join(rasters)).encode())
 
