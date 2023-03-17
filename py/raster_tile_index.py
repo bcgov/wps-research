@@ -1,3 +1,5 @@
+'''20230317 create a tile-index shapefile for rasters with .bin extension, in present worrking directory structure
+'''
 import os
 import sys
 from misc import timestamp
