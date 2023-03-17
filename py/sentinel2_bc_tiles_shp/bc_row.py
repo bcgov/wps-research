@@ -57,4 +57,4 @@ for f in features:
                 s += (str(coords[i][0]) + ' ' + str(coords[i][1]))
             s += ')))'
             row_id += [feature_name] # print(feature_name, s)
-print(row_id)
+print(' '.join(row_id))
