@@ -4,6 +4,7 @@ import sys
 import copy
 import math
 import struct
+import datetime
 import numpy as np
 import os.path as path
 from osgeo import gdal
@@ -369,3 +370,15 @@ def write_band_gtiff(output_data,  # 2d numpy array
     outd = None
     band=None
     ds=None
+
+
+def timestamp():
+    now = datetime.datetime.now()  # create timestamp
+    [year, month, day, hour, minute, second] = [str(now.year).zfill(4),
+                                                str(now.month).zfill(2),
+                                                str(now.day).zfill(2),
+                                                str(now.hour).zfill(2),
+                                                str(now.minute).zfill(2),
+                                                str(now.second).zfill(2)]
+    ts = ''.join([year, month, day, hour, minute, second])  # time stamp
+    return ts
