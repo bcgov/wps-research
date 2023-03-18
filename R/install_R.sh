@@ -22,3 +22,5 @@ sudo apt install libudunits2-dev
 #  update.packages(ask = FALSE, checkBuilt = TRUE)
 # install.packages("remotes")
 # remotes::install_github("r-spatial/sf")
+# install.packages("lidR")
+# install.packages("RMCC")
