@@ -20,3 +20,5 @@ sudo apt install libudunits2-dev
 
 # may need to update R packages with: run "sudo R" then enter:
 #  update.packages(ask = FALSE, checkBuilt = TRUE)
+# install.packages("remotes")
+# remotes::install_github("r-spatial/sf")
