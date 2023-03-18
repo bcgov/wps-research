@@ -17,4 +17,4 @@ gpg -a --export E298A3A825C0D65DFD57CBB651716619E084DAB9 | sudo apt-key add -
 sudo apt install r-base r-base-core r-recommended r-base-dev
 
 # may need to update R packages with: run "sudo R" then enter:
-#  update.packages(ask = FALSE)
+#  update.packages(ask = FALSE, checkBuilt = TRUE)
