@@ -42,6 +42,7 @@
 ## Hyperspectral
 
 ## LiDAR
+* [LiDR](https://r-lidar.github.io/lidRbook/gnd.html)
 
 ## Hyperspectral and Radar combination
 * [Mapping waterbodies from Space](https://www.youtube.com/watch?v=UJcS24thVvc)
