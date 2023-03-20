@@ -44,6 +44,10 @@ td:first-child, th:first-child {
     </thead>
     <tbody></tbody>
   </table>
+
+  <div class="putstuff">
+	  [pairs appear here]
+  </div>
   <h3>Instructions</h3>
   1) Click "Add Name" and enter a new name. Repeat until all names are added.
   <br>2) Check the box in the "Omit" column, next to any name(s) to be left out of this round.
@@ -188,12 +192,12 @@ td:first-child, th:first-child {
         tableData[i - 1]["name" + (n_cols +1).toString()]= "";
       }
       n_cols = n_cols + 1
-      renderTableRows();
-      reRoll()
+      renderTableRows()
+      reRoll() // create a pairing and assign the best result
     }
 
     function reRoll(){
-      create_pairing();
+      create_pairing()
 
       var iter = 0;
       var ITER_MAX = 1111
