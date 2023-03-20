@@ -351,25 +351,25 @@ div.col{
 	    var s = "<h3>Today's teams</h3>" //string to hold html code for team tables
 	var phone_book_keys = Object.keys(phone_book)
 	for(var i = 0; i < phone_book_keys.length; i++){
-		s+=  ' &nbsp &nbsp <div class="col"> <table>\
-    		<thead>\
-    		<tr>\
-        	<th>Team '
-			+ (i+1).toString()
-			+ '</th>\
-    		</tr>\
-    		</thead>\
-    		<tr>\
-        		<td>'
-			+ phone_book_keys[i] +
-			'</td>\
-    		</tr>\
-    		<tr>\
-        		<td>'
-		+ phone_book[phone_book_keys[i]] +
-		'</td>\
-    		</tr>\
-		</table></div>'
+		s+=  '&nbsp &nbsp <div class="col"> <table>\
+    		      <thead>\
+    		      <tr>\
+        	      <th>Team ' +
+		    	(i+1).toString() +
+	             '</th>\
+    		      </tr>\
+    		      </thead>\
+    		      <tr>\
+                      <td>' + 
+		      	phone_book[phone_book_keys[i]] + // phone_book_keys[i] +
+	             '</td>\
+    		      </tr>\
+    		      <tr>\
+        	      <td>' + 
+			phone_book_keys[i] + // phone_book[phone_book_keys[i]] +
+		     '</td>\
+    		      </tr>\
+		      </table></div>'
 	}
 	s += "\n<br><br>"
 	console.log(s)
