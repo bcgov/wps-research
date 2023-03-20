@@ -45,7 +45,7 @@ td:first-child, th:first-child {
     <tbody></tbody>
   </table>
 
-  <div class="putstuff">
+  <div id="putstuff">
 	  [pairs appear here]
   </div>
   <h3>Instructions</h3>
@@ -221,9 +221,32 @@ td:first-child, th:first-child {
         }
 
         // assign the best result
+	var s = ""  // string to hold html code for team tables
         for(var i = 0; i < tableData.length; i++){
           tableData[i]["name" + (n_cols).toString()]= min_assign[i]
+
+	  s+=  '<table>\
+    		<thead>\
+    		<tr>\
+        	<th>Team '
+			+ (i+1).toString()
+			+ '</th>\
+    		</tr>\
+    		</thead>\
+    		<tr>\
+        		<td>'
+			+ "player1" +
+			'</td>\
+    		</tr>\
+    		<tr>\
+        		<td>'
+		+ "player2" +
+		'</td>\
+    		</tr>\
+		</table>'
 	}
+	var div = document.getElementById("putstuff");
+	div.innerHTML = s;
 	//alert("iter=" + iter.toString())
       }
       //alert("blanks=" + countBlanks().toString())
