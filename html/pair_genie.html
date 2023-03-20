@@ -59,6 +59,10 @@ td:first-child, th:first-child {
   <br>
   <button id="clearBtn">Clear Data</button>
   <script>
+	  var phone_book = {}
+  </script>
+
+  <script>
     /* function to create a date stamp! */
     function yyyymmdd(){
       var d = new Date()
@@ -221,10 +225,14 @@ td:first-child, th:first-child {
         }
 
         // assign the best result
-	var s = ""  // string to hold html code for team tables
         for(var i = 0; i < tableData.length; i++){
           tableData[i]["name" + (n_cols).toString()]= min_assign[i]
+	}
 
+	var s = "" //string to hold html code for team tables
+	phone_book_keys = phone_book.keys()
+	
+	for(var i = 0; i < phone_book_keys.length; i++){
 	  s+=  '<table>\
     		<thead>\
     		<tr>\
@@ -235,16 +243,17 @@ td:first-child, th:first-child {
     		</thead>\
     		<tr>\
         		<td>'
-			+ "player1" +
+			+ phone_book_keys[i] +
 			'</td>\
     		</tr>\
     		<tr>\
         		<td>'
-		+ "player2" +
+		+ phone_book[phone_book_keys[i]] +
 		'</td>\
     		</tr>\
 		</table>'
 	}
+	      console.log(s)
 	var div = document.getElementById("putstuff");
 	div.innerHTML = s;
 	//alert("iter=" + iter.toString())
@@ -289,7 +298,8 @@ td:first-child, th:first-child {
     }
 
     function create_pairing(){
-      //console.log("Create pairing..")
+      phone_book = {}
+	    //console.log("Create pairing..")
       //console.log("DATA", tableData)
       // create some new matches
       var names = listNames(); // list the names in row order
@@ -342,6 +352,7 @@ td:first-child, th:first-child {
 	 this_round.add(match)  // record the match
 	 this_round.add(name_ix)
 	 tableData[name_ix]["name" + (n_cols).toString()]= names[match]  // actually assign the match
+         phone_book[names[match]] = names[name_ix]
       }
       fill_undefined()
       renderTableRows()
