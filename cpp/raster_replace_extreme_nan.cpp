@@ -24,7 +24,7 @@ int main(int argc, char ** argv){
   size_t ix;
   float d = 0.;
   for0(i, nf) d = f_max(d, f_abs(dat[i]));
-  for0(i, nf) dat[i] = (dat[i] == d) ? NAN: dat[i]; 
+  for0(i, nf) dat[i] = (dat[i] == d || dat[i] == -3.399999952144364E+38) ? NAN: dat[i]; 
 
   cout << "+w " << fn << endl;
   FILE * f = fopen(fn.c_str(), "wb");
