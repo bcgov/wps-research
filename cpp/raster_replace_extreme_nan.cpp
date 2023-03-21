@@ -4,6 +4,9 @@
 inline float f_abs(float f){
   return (f < 0) ? -f : f;
 }
+inline float f_max(float f, float g){
+  return f > g ? f: g;
+}
 
 int main(int argc, char ** argv){
   if(argc < 2) err("raster_replace_extreme_nan.exe [input binary file]\n");
@@ -20,7 +23,7 @@ int main(int argc, char ** argv){
   float * dat = bread(fn, nrow, ncol, nband); // load floats to array
   size_t ix;
   float d = 0.;
-  for0(i, nf) d = max(d, f_abs(dat[i]));
+  for0(i, nf) d = f_max(d, f_abs(dat[i]));
   for0(i, nf) dat[i] = (dat[i] == d) ? NAN: dat[i]; 
 
   cout << "+w " << fn << endl;
