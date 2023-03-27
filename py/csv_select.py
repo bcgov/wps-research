@@ -1,8 +1,15 @@
-# python csv_select.py vri/VRI_KLoops.csv vri/vri_objid.csv
+'''Revised 20230327: csv_select.py Select records from CSV based on a 1-column csv file of keys to match (on the field indicated in the header)  
+e..g 
+python csv_select.py vri/VRI_KLoops.csv vri/vri_objid.csv
+'''
 import os
 import sys
 import csv
 from misc import *
+
+if len(args) < 3:
+    err("")
+
 
 csv_file = args[1]
 select_file = args[2]
