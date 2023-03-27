@@ -4,15 +4,15 @@ python csv_select.py vri/VRI_KLoops.csv vri/vri_objid.csv'''
 import os
 import sys
 import csv
-from misc import *
+from misc import args, err
 
 if len(args) < 3:
     err("csv_select.py [csv file] [select file] # select file is 1-col csv with keys to select from col identified by header in 1-col csv")
 
 csv_file, select_file = args[1], args[2]
 
-csvf = open(csv_file)
-csv_hdr = csvf.readline().strip().split(',')
+csv_f = open(csv_file)
+csv_hdr = csv_f.readline().strip().split(',')
 csv_i_hdr = {csv_hdr[i]: i for i in range(0, len(csv_hdr))}
 
 select = open(select_file)
@@ -30,13 +30,15 @@ while True:
     if not line:
         break
     else:
-        select_list.append(line)
+        select_list.append(line.strip())
 
+print("select_list", select_list)
 of, ci = open("csv_select.csv", "wb"), 0
+of.write((','.join(csv_hdr)).encode())  # write the csv header to prefix any selected records written
 while True:
     if ci % 10000 == 0:
-        print "ci", ci
-    line = csvf.readline()
+        print("ci", ci)
+    line = csv_f.readline()
     if not line:
         break
     w = line.strip().split(",")
@@ -56,6 +58,6 @@ while True:
     if float(dd) == float(int(dd)):
         dd = str(int(dd))
     if dd in select_list:
-        of.write(line.strip() + "\n")
+        of.write(('\n' + line.strip()).encode())
     ci += 1
 of.close()
