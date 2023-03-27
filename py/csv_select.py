@@ -8,8 +8,7 @@ import csv
 from misc import *
 
 if len(args) < 3:
-    err("")
-
+    err("csv_select.py [csv file] [select file] # select file is 1-col csv with keys to select from col identified by header in 1-col csv")
 
 csv_file = args[1]
 select_file = args[2]
