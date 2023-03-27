@@ -7,10 +7,11 @@ import csv
 from misc import args, err
 
 if len(args) < 3:
-    err("csv_select.py [csv file] [select file] # select file is 1-col csv with keys to select from col identified by header in 1-col csv")
+    print('csv_select.py [csv file] [select file]')
+    print('# warning: csv-header fields expected to not contain comma') 
+    err('# select file is 1-col csv with keys to select from col identified by header in 1-col csv')
 
 csv_file, select_file = args[1], args[2]
-
 csv_f = open(csv_file)
 csv_hdr = csv_f.readline().strip().split(',')
 csv_i_hdr = {csv_hdr[i]: i for i in range(0, len(csv_hdr))}
@@ -18,10 +19,12 @@ csv_i_hdr = {csv_hdr[i]: i for i in range(0, len(csv_hdr))}
 select = open(select_file)
 select_hdr = select.readline().strip().split(',')
 
-if len(select_hdr) != 1: err("select file header length")
+if len(select_hdr) != 1:
+    err("select file header length")
 select_f = select_hdr[0]
 
-if select_f not in csv_hdr: err("select_f not in csv_hdr")
+if select_f not in csv_hdr:
+    err("select_f not in csv_hdr")
 csv_select_i = csv_i_hdr[select_f]
 print("csv_select_i", csv_select_i)
 select_list = []
@@ -34,26 +37,27 @@ while True:
 
 print("select_list", select_list)
 of, ci = open("csv_select.csv", "wb"), 0
-of.write((','.join(csv_hdr)).encode())  # write the csv header to prefix any selected records written
+
+# write csv header
+of.write((','.join(csv_hdr)).encode())
+
 while True:
-    if ci % 10000 == 0:
-        print("ci", ci)
+    if ci % 10000 == 0: print("ci", ci)
     line = csv_f.readline()
     if not line:
         break
     w = line.strip().split(",")
 
-    if len(w) != len(csv_hdr): #err("line length mismatch " + str(len(w)) + " " + str(len(csv_hdr)))
+    if len(w) != len(csv_hdr):
         csv.register_dialect('my',
                      delimiter=",",
                      quoting=csv.QUOTE_ALL,
                      skipinitialspace=True)
         r = []
         reader = csv.reader([line])
-        for row in reader:
+        for row in reader: 
             r.append(row)
         w = r[0]
-
     dd = w[csv_select_i]
     if float(dd) == float(int(dd)):
         dd = str(int(dd))
