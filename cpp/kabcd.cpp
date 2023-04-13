@@ -152,8 +152,10 @@ int main(int argc, char** argv){
 
   // same shape as image C, should be same band count as image B
   // is this right? Do we need to fix this in abcd.cpp?
+  size_t a_s = nr[2] * nc[2] * nb[1];
+  printf("alloc %zu\n", a_s);
   x = falloc(nr[2] * nc[2] * nb[1]); // out buf (image "D")
-  for0(i, nr[2] * nc[2] * nb[2]) x[i] = NAN;
+  for0(i, nr[2] * nc[2] * nb[1]) x[i] = NAN;
   for0(i, 3) y[i] = bread(str(argv[i + 1]), nr[i], nc[i], nb[i]);  // read input
 
   (n_bad = 0, bp = ialloc(np));  // bad pixels in A, B?
