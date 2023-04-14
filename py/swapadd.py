@@ -1,8 +1,7 @@
 '''20220414 add swap file and turn it on'''
 #!/usr/bin/env python3
-import ctypes
 import sys
-
+import os
 from misc import err, args, run
 
 if len(args) < 2:
