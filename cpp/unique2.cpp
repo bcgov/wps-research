@@ -1,5 +1,8 @@
-/* 20230424 unique2.cpp: deduplicate records by line */
+/* 20230424 unique2.cpp: deduplicate records by line
+ 
+Input file needs to fit in RAM */
 #include "misc.h"
+
 int main(int argc, char ** argv){
   if(argc < 2) err("unique2.cpp [input text file name]\n");
   
