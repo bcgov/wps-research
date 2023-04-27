@@ -1,7 +1,15 @@
 /* GLUT menu example from https://www.openglprojects.in/2016/12/opengl-glut-create-menu-example.html
-Modified 20230426. To compile and run:
+Modified 20230426.
+
+Dependencies:
+  sudo apt install g++ freeglut3-dev
+
+To compile and run:
 	g++ test.cpp -lglut -lGL  -o test
 	./test
+Biblio:
+[1] GLUT API:  https://freeglut.sourceforge.net/docs/api.php
+[2] Freeglut on github: https://github.com/FreeGLUTProject/freeglut
 */
 #include <GL/glut.h>
 static int window, returnmenu, returnsubmenu, returnsubmenucolor1, returnsubmenucolor2, returnsubmenucolor3, returnsubmenucolor4, value = 0;
