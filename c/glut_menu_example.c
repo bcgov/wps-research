@@ -2,10 +2,10 @@
 Modified 20230426.
 
 Dependencies:
-  sudo apt install g++ freeglut3-dev
+  sudo apt install gcc freeglut3-dev
 
 To compile and run:
-	g++ test.cpp -lglut -lGL  -o test
+	gcc glut_menu_example.c -lglut -lGL -o glut_menu_example
 	./test
 Biblio:
 [1] GLUT API:  https://freeglut.sourceforge.net/docs/api.php
