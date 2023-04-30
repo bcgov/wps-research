@@ -1,4 +1,6 @@
-'''list active fires listed by BCWS over 100 ha '''
+'''list active fires listed by BCWS over 100 ha 
+pip install --global-option=build_ext --global-option="-I/usr/include/gdal" GDAL==`gdal-config --version`
+'''
 import os
 import math
 import json
