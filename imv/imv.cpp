@@ -365,7 +365,7 @@ int main(int argc, char ** argv){
   if(nb == 239){
     //PRISMA combined sorted (SWIR) ?
   }
-  if(nb == 12){
+  if(nb >= 12){
     myZpr2->setrgb(12-1, 11-1, 10-1); // Sentinel-2 L2A sorted
   }
  
