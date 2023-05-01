@@ -49,7 +49,9 @@ for safe in safes:
     gdfn = safe + sep + 'MTD_MSIL2A.xml'
     if not exists(gdfn):
         err("expected file: " + gdfn)
-    
+    else:
+        print("found", gdfn)
+
     print('detect:')
     for line in [x.strip() for x
                  in os.popen('gdalinfo ' +
