@@ -110,7 +110,7 @@ print(selected)
 browser, ci = webbrowser.get('google-chrome'), 0
 for s in selected:
     r = s[1]
-    lat, lon, size_ha, fire_number = r['LATITUDE'], r['LONGITUDE'], r['CURRENT_SZ'], r['INCIDNT_NM']
+    lat, lon, size_ha, fire_number = r['LATITUDE'], r['LONGITUDE'], r['CURRENT_SZ'], r['FIRE_NUM']
     print()
     print(r['CURRENT_SZ'], ci + 1, "(" + str(fire_number) + ")", r['GEOGRAPHIC']) #  + '(' + str(r['CURRENT_SI']) + ')')
     # print('\t', type(s[0]), ci, s)
