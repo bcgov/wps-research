@@ -23,16 +23,22 @@ for i in range(len(bn)):  # band name indices
     spectral_value = None
     w = bn[i].strip().strip(',').strip('}').split()
     # print(w)
+    found = False
     for j in range(len(w)):
         if w[j][-2:] == 'nm':
             spectral_value = float(w[j][:-2])
             # print(spectral_value)
             to_sort.append([spectral_value, i])
+            found = True
+    if not found:
+        spectral_value = sys.float_info.max
+        to_sort.append([spectral_value, i])
     sv.append(spectral_value)
 
 to_sort.sort(reverse=False)
 print("to_sort", to_sort)
 lookup = {i:to_sort[i][1] for i in range(len(to_sort))}
+print(lookup)
 '''
 for si in range(len(to_sort)):
     s = to_sort[si]
