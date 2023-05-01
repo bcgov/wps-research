@@ -1,6 +1,8 @@
 '''list active fires listed by BCWS over 100 ha 
 pip install --global-option=build_ext --global-option="-I/usr/include/gdal" GDAL==`gdal-config --version`
-'''
+
+Notes:
+    20230430 some data fields changed since last year.'''
 import os
 import math
 import json
@@ -67,26 +69,27 @@ if __name__ == '__main__':
         for key in f.keys():
             if key == 'properties':
                 fk = f[key]
-                fire_size = float(fk['CURRENT_SI'])
+                print(fk)
+                fire_size = float(fk['CURRENT_SZ'])
                 
                 if True:  # not out and larger than MIN_FIRE_SIZE_HA
-                    if fk['FIRE_STATU'].lower() != 'out' and fire_size >= MIN_FIRE_SIZE_HA:  # > biggest_size
-                        selected.append([fk['CURRENT_SI'], fk])  # selected fires
+                    if fk['STATUS'].lower() != 'out' and fire_size >= MIN_FIRE_SIZE_HA:  # > biggest_size
+                        selected.append([fk['CURRENT_SZ'], fk])  # selected fires
                         #print(fk)
                 if False:
-                    if fk['FIRE_STATU'].lower() == 'out':
-                        selected.append([fk['CURRENT_SI'], fk])
+                    if fk['STATUS'].lower() == 'out':
+                        selected.append([fk['CURRENT_SZ'], fk])
                 if False:  # fire of note
-                    if fk['FIRE_STATU'] ==  'Fire of Note':
-                        selected.append([fk['CURRENT_SI'], fk])
+                    if fk['STATUS'] ==  'Fire of Note':
+                        selected.append([fk['CURRENT_SZ'], fk])
 
                 if False:  # out of control
-                    if fk['FIRE_STATU'] == 'Out of Control':
-                        selected.append([fk['CURRENT_SI'], fk])
+                    if fk['STATUS'] == 'Out of Control':
+                        selected.append([fk['CURRENT_SZ'], fk])
 
                 if False:  # being held
-                    if fk['FIRE_STATU'] == 'Being Held':
-                        selected.append([fk['CURRENT_SI'], fk])
+                    if fk['STATUS'] == 'Being Held':
+                        selected.append([fk['CURRENT_SZ'], fk])
 
 selected = list(selected)
 
@@ -107,9 +110,9 @@ print(selected)
 browser, ci = webbrowser.get('google-chrome'), 0
 for s in selected:
     r = s[1]
-    lat, lon, size_ha, fire_number = r['LATITUDE'], r['LONGITUDE'], r['CURRENT_SI'], r['FIRE_NUMBE']
+    lat, lon, size_ha, fire_number = r['LATITUDE'], r['LONGITUDE'], r['CURRENT_SZ'], r['INCIDNT_NM']
     print()
-    print(r['CURRENT_SI'], ci + 1, "(" + str(fire_number) + ")", r['GEOGRAPHIC']) #  + '(' + str(r['CURRENT_SI']) + ')')
+    print(r['CURRENT_SZ'], ci + 1, "(" + str(fire_number) + ")", r['GEOGRAPHIC']) #  + '(' + str(r['CURRENT_SI']) + ')')
     # print('\t', type(s[0]), ci, s)
 
     view_str = ('https://apps.sentinel-hub.com/sentinel-playground/?source=S2L2A&lat=' +
@@ -141,9 +144,11 @@ for s in selected:
           str(bb[1]) + ' ' + str(bb[0])]
     fp = 'Intersects(POLYGON((' + ','.join(fp) + ')))'
     print(fp)
-    path = '/media/' + os.popen('whoami').read().strip() + '/disk4/active/'
+    path = '/media/' + os.popen('whoami').read().strip() + '/disk41/active/'
     if not exists(path):
         path = '/media/' + os.popen('whoami').read().strip() + '/disk2/active/'
+    if not exists(path):
+        path = '/media/' + os.popen('whoami').read().strip() + '/disk4/active/'
 
     if not exists(path):
         err("path not found:" + path)
