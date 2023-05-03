@@ -2,6 +2,9 @@
 import os
 from misc import run, err, args
 
+if len(args) < 3:
+    err('raster_burn_zeros.py [file to select NAN areas from] [file to add NAN areas to')
+
 select = os.path.abspath(args[1])
 
 lines = os.popen('find ./ -name "*.bin"').readlines()
