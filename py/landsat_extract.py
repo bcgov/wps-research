@@ -26,17 +26,19 @@ for line in lines:
         x += os.popen('ls -1 ' + d + sep + '*ST_TRAD.TIF').readlines()
         if len(x) == 0:
             x = os.popen('ls -1 ' + d + sep + '*_b*.tif').readlines()
-        if N == 8:
+        if N >= 8:
             x += os.popen('ls -1 ' + d + sep + '*_B10.TIF').readlines()
         x = [i.strip() for i in x]
         x = list(set(x))
         return x
     x = find_bands()
+    x.sort(reverse=True)
 
     if len(x) < 7:
         run(['tar xf', f, '-C', d])
     
     x = find_bands()  # display avail. bands
+    print("Selected bands:")
     for i in x:
         print('\t', i.strip().split(sep)[-1])
         # print(os.popen('gdalinfo ' + i + ' | grep "Pixel Size"').read())
@@ -84,14 +86,14 @@ for line in lines:
           'B9':       1373.5,
           'B10':     10895.,
           'B11':     12005.}
-    if N != 9:
-        C8['TRAD'] = av(10895., 12005.) 
+    #if N != 9:
+    C8['TRAD'] = av(10895., 12005.) 
 
     S8 = {'B8': 15} # resolution(m)
 
     for i in (['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7',
                'B8', 'B9', 'B10', 'B11'] +
-              (['TRAD'] if N != 9 else [])):  # , 'TRAD']:
+              (['TRAD'] if N >= 8 else [])):  # , 'TRAD']:
         S8[i] = 30
 
     # get UTC timestamp information
@@ -103,6 +105,7 @@ for line in lines:
     t_s = t_s.split('.')[0].replace(':', '')
     band_names = []
 
+    print("Available bands:")
     for i in x:
         print(f, i)
         w = f.split('_')
@@ -110,7 +113,7 @@ for line in lines:
         ds = w[3] if len(w) > 2 else f[10:18]
         print(ds, w, f, i)
         w = i.split(sep)[-1].split('_')[-1].split('.')[0]
-        print('\t', w)
+        print('\tw=', [w])
         CF, R = None, None
         if N == 7 or N == 5:
             try:
