@@ -133,7 +133,9 @@ for line in lines:
                        w,
                        CF + 'nm'])
         band_names.append(bn)
-    print('band names', band_names)
+    print('band names')
+    for b in band names:
+        print('  ',b)
     # sys.exit(1)
     fn = d + sep + d + '.bin'
     hfn = fn[:-4] + '.hdr' # print(fn)
