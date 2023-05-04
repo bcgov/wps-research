@@ -1,3 +1,5 @@
+'''turn a point location into a bbox'''
+
 from misc import err, exists, run
 from bounding_box import bounding_box
 
