@@ -146,6 +146,8 @@ for s in selected:
     print(fp)
     path = '/media/' + os.popen('whoami').read().strip() + '/disk41/active/'
     if not exists(path):
+        path = '/home/' + os.popen('whoami').read().strip() + '/active/'
+    if not exists(path):
         path = '/media/' + os.popen('whoami').read().strip() + '/disk2/active/'
     if not exists(path):
         path = '/media/' + os.popen('whoami').read().strip() + '/disk4/active/'
