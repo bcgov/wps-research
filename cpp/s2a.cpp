@@ -24,5 +24,3 @@ int main(int argc, char ** argv){
   run(str("imv result.bin_thres.bin"));
   return 0;
 }
-
-
