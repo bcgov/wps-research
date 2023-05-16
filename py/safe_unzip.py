@@ -16,6 +16,4 @@ for f in files:
 def run(c):
 	return os.system(c)
 
-parfor(run, cmds, 2)
-
-
+parfor(run, cmds, 4)
