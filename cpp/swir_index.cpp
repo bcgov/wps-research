@@ -21,7 +21,7 @@ int main(int argc, char ** argv){
 
   hread(hfn, nrow, ncol, nband, s);
   for0(i, 3) bi[i] = -1;
-  np = nrow * ncol;
+	np = nrow * ncol;
   n = s.size();
 
   str date_s;
@@ -46,8 +46,8 @@ int main(int argc, char ** argv){
   b2 = &dat[bi[1]];
   b3 = &dat[bi[2]];
   out = falloc(np);
-	float ** b = malloc(sizeof(float *) * 3);
-	memset(0, b, sizeof(float *) * 3);
+	float ** b = (float **) (void *)malloc(sizeof(float *) * 3);
+	memset(b, '\0', sizeof(float *) * 3);
 	b[0] = b1;
   b[1] = b2;
  	b[2] = b3;
@@ -55,22 +55,34 @@ int main(int argc, char ** argv){
 	int nb = 0;
   FILE * f = fopen(ofn.c_str(), "wb");
 	vector<str> bn;
+	bn.clear();
   for0(j, 3){
     for0(i, j){
-		
+			printf("i %zu j %zu\n", i, j);		
+			cout << "t[i]" << t[i] << " t[j]" << t[j] << endl;
 			nb += 1;
 			float * A = b[j];
 		 	float * B = b[i];
-      for0(i, np){
-        out[i] = (A[i] - B[i]) / (A[i] + B[i])
-      }
-			fwrite(f, sizeof(float), np, out);
-			bn.push_back(str("(") + t[j] + str(" - ") + t[i] + str(") / (") + t[j] + str(" + ") + t[i] + ")");
-    }
+      for0(k, np) out[k] = (A[k] - B[k]) / (A[k] + B[k]);
+   		
+			size_t n_write = fwrite(out, sizeof(float), np, f);
+			printf("wrote %zu\n", n_write);
+			cout << "t[i]" << t[i] << " t[j]" << t[j] << endl;
+			str bns(str("("));
+			bns += str(t[j]);
+			bns += str(" - ");
+			bns += str(t[i]);
+			bns += str(") / (");
+			bns += str(t[j]);
+			bns += str(" + ");
+			bns += str(t[i]);
+			bns += str(")");
+    	cout << "bns: " << bns << endl;
+			bn.push_back(bns);
+		}
   }
-
+	fclose(f);
   hwrite(hf2, nrow, ncol, nb, 4, bn);
-  bwrite(out, ofn, nrow, ncol, nb);
   free(dat);
   free(out);
   return 0;
