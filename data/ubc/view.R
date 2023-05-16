@@ -11,7 +11,11 @@
 # Note: Band/channel order got reversed to make the fire look orange.
 #   Without reversing the order the fire looks blue. Cool but harder
 #   to see!
-
+# 
+# Tested on:
+#   R version 4.3.0 (2023-04-21) -- "Already Tomorrow"
+# 	Copyright (C) 2023 The R Foundation for Statistical Computing
+# 	Platform: x86_64-pc-linux-gnu (64-bit)
 
 # install.packages('raster')
 library(raster) 
