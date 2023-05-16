@@ -111,6 +111,7 @@
 * https://kkraoj.users.earthengine.app/view/live-fuel-moisture
 * https://code.earthengine.google.com/e27240a92ecf64bbadf8a082b91c711c?hideCode=true
 * https://omegazhangpzh.users.earthengine.app/view/wildfire-monitor-v7
+* 
 # Data Science Resources
 * [NumPy Documentation](https://numpy.org/doc/stable/)
 * [Scikit-learn: machine learning in Python](https://scikit-learn.org/stable/)
@@ -118,6 +119,7 @@
 * [Research software engineering with Python](https://merely-useful.tech/py-rse/index.html)
 * [Data Science at command line](https://datascienceatthecommandline.com/2e/)
 * [Big data for geoscience](https://www.pythonpodcast.com/pangeo-big-data-geoscience-episode-358/)
+* [K-prototypes algorithm (categorical K-means)](https://link.springer.com/article/10.1023/A:1009769707641)
 
 # Linux
 * [Windows Subsystem for Linux (Ubuntu)](https://ubuntu.com/tutorials/install-ubuntu-on-wsl2-on-windows-10#1-overview)
