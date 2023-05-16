@@ -27,7 +27,8 @@ int main(int argc, char ** argv){
 	vector<str> bn;
 	bn.clear();
   for0(i, nband){
-    for0(j, i){
+    for0(j, nband){
+			if(i == j) continue;
 			nb += 1;
 			float * A = &dat[np * j];
 		 	float * B = &dat[np * i];
