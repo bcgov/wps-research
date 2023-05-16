@@ -11,7 +11,7 @@ for f in files:
 	if os.path.exists(d):
 		pass
 	else:
-		cmds += 'unzip ' + f
+		cmds += ['unzip ' + f]
 
 def run(c):
 	return os.system(c)
