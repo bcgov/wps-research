@@ -4,6 +4,8 @@
 * [Japanese Space Agency JAXA: Research](https://earth.jaxa.jp/en/research/projects/index.html)
 * [Jaxa data products](https://www.eorc.jaxa.jp/ALOS/en/dataset/fnf_e.htm)
 ## Key tools
+### Websites
+* [Firesmoke.ca](https://firesmoke.ca/forecasts/current/)
 ### QGIS
 * [QGIS home](https://www.qgis.org/en/site/)
 ### ESA SNAP
