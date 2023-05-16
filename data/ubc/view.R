@@ -69,7 +69,7 @@ plot_tiff = function(in_file){
     b3_t[b3_t > 1.] <- 1.
     
 		# scale to [0, 255] so that plotRGB is happy!
-    data[[3]] <- 255. * b1_t  # switched 1,2,3 to 3,2,1 to make fire orange!
+		data[[3]] <- 255. * b1_t  # switched 1,2,3 to 3,2,1 to make fire orange!
     data[[2]] <- 255. * b2_t
     data[[1]] <- 255. * b3_t
 		write_png(in_file, data, "trimmed")  # plot to PNG
