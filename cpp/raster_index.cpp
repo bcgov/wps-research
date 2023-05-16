@@ -26,8 +26,8 @@ int main(int argc, char ** argv){
   FILE * f = fopen(ofn.c_str(), "wb");
 	vector<str> bn;
 	bn.clear();
-  for0(j, nband){
-    for0(i, j){
+  for0(i, nband){
+    for0(j, i){
 			nb += 1;
 			float * A = &dat[np * j];
 		 	float * B = &dat[np * i];
