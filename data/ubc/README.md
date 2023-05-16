@@ -1,9 +1,15 @@
-# Fire data: Short-wave Infrared
+# Sentinel-2 (SWIR bands only) fire data
 
 ## To run:
 ```
 Rscript view.R
 ```
+
+May need to 
+```
+install.packages('raster') 
+```
+first.
 
 ## Outputs:
 
