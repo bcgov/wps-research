@@ -18,8 +18,8 @@ With histogram trimming:
 
 <img src="png/G80223_20230513.tif_trimmed.png" width="650">
 
-| a  | b  | c  |
+|   | G90292  | G80223  |
 |---|---|---|
-| d  | e  | f  |
-| g  | h  | i  |
+| Linear scaling  | <img src="png/G90292_20230514.tif_scaled.png" width="650">  | f  |
+| Histogram trim  | h  | i  |
 
