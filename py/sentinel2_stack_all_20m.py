@@ -45,6 +45,8 @@ import sys
 import multiprocessing as mp
 from misc import args, sep, exists, parfor, err, run, pd
 
+swir_only = len(args) > 3
+
 N_THREAD = mp.cpu_count()
 ehc = pd + 'envi_header_cleanup.py' # envi header cleanup command.. makes file open in "imv" 
 # extract = pd + "sentinel2_extract.py" # command to extract a zip
