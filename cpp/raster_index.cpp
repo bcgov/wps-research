@@ -29,8 +29,8 @@ int main(int argc, char ** argv){
   for0(j, nband){
     for0(i, j){
 			nb += 1;
-			float * A = b[j];
-		 	float * B = b[i];
+			float * A = &dat[np * j];
+		 	float * B = &dat[np * i];
       for0(k, np) out[k] = (A[k] - B[k]) / (A[k] + B[k]);
 			size_t n_write = fwrite(out, sizeof(float), np, f);
 			str bns(str("("));
