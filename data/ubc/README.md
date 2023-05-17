@@ -1,4 +1,5 @@
 # Sentinel-2 (SWIR bands only) fire data
+First example includes non-uniform smoke/haze. Second example has haze and some strong shadow at SouthEast corner.
 
 ## To run:
 ```
