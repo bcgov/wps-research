@@ -9,6 +9,7 @@
 * [Hourly pm2.5 obs](https://cyclone.unbc.ca/aqmap/#5/53.671/-119.773)
 * [College of DuPage NEXLAB & satellite radar](https://weather.cod.edu/satrad/?parms=regional-ca_reg_west-natcolor-48-0-100-1&checked=map&colorbar=undefined)
 ### QGIS
+* [FIRMS Viirs hotspots in QGIS](https://firms.modaps.eosdis.nasa.gov/tutorials/qgis/)
 * [QGIS home](https://www.qgis.org/en/site/)
 ### ESA SNAP
 * [click here to download ESA SNAP!](https://step.esa.int/main/download/snap-download/)
