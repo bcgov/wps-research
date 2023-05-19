@@ -917,6 +917,7 @@ class glImage: public glPlottable{
       float h = (float)NWIN;
       size_t tg_i = SUB_START_I + WIN_I;
       size_t tg_j = SUB_START_J + WIN_J;
+		  printf("$$$ TARGET (global) %zu %zu (for cut.py)\n", tg_j, tg_i);
       printf("*** TARGET (global) ix: i=%zu j=%zu; target subi: x %f y %f w %f h %f NWIN %zu\n", tg_i, tg_j, x, y, w, h, (size_t)NWIN);
       glColor3f(1., 0., 0.); glLineWidth(1.5);
       glPushMatrix(); //Make sure our transformations don't affect transforms in other code?
