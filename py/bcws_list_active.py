@@ -163,10 +163,14 @@ for s in selected:
 
         browser.open_new_tab(view_str)
 
+        view_f = path + 'hyperlink'
         path += 'fpf'
         if not exists(path):
             print('+w', path)
             open(path,'wb').write(fp.encode())
+        
+        print('+w', view_f)
+        open(view_f, 'wb').write(view_str.encode())
 
     ci += 1
     if ci % step == 0:
