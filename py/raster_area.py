@@ -14,6 +14,6 @@ cols = data.RasterXSize
 rows = data.RasterYSize
 
 sq_m = pixel_area * rows * cols
-sq_km = sq_m * 1000. * 1000.  # 1000. * 1000. (square m) / (square km)  
+sq_km = sq_m / (1000. * 1000.)  # 1000. * 1000. (square m) / (square km)  
 print("Raster area: " + str(pixel_area * rows * cols) + ' m^2')
 print("= "  + str(sq_km) + ' km^2')
