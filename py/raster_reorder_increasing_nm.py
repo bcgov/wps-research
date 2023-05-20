@@ -1,5 +1,7 @@
 '''in-place/overwrite reordering of raster bands based on wavelength..
-..only reorder the fields that are in nm (but put them first)'''
+..only reorder the fields that are in nm (but put them first)
+
+20230519 add decreasing nm option (Add an extra arg after the input file'''
 import shutil
 from misc import *
 args = sys.argv
@@ -7,8 +9,9 @@ sep = os.path.sep
 pd = sep.join(__file__.split(sep)[:-1]) + sep
 
 # instructions to run
-if len(args) < 2:
-    err('usage:\n\traster_reorder_increasing_nm.py [input file]')
+if len(args) < 2 or len(args) > 3:
+    err('usage:\n\traster_reorder_increasing_nm.py [input file] [optional argument: decreasing nm')
+sort_increasing = (len(args) == 2)
 
 # check file and header exist
 fn, hdr = args[1], hdr_fn(args[1])
@@ -35,7 +38,7 @@ for i in range(len(bn)):  # band name indices
         to_sort.append([spectral_value, i])
     sv.append(spectral_value)
 
-to_sort.sort(reverse=False)
+to_sort.sort(reverse=(False if sort_increasing else True))
 print("to_sort", to_sort)
 lookup = {i:to_sort[i][1] for i in range(len(to_sort))}
 print(lookup)
