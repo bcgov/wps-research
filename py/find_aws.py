@@ -21,6 +21,7 @@ for line in lines:
 	print(line)
 
 latest = lines[0] # most recent date of AWS retrieval 
+print("LATEST", latest)
 
 to_merge = []
 for tile in tiles:
@@ -32,14 +33,17 @@ for tile in tiles:
 		to_merge += [line]
 print(to_merge)
 
-out_file = latest + ".bin"
-out_hdr = latest + ".hdr"
+
+# ../L2_20230520/S2B_MSIL2A_20230520T190919_N0509_R056_T10UEC_20230520T214840.hdr
+first = to_merge[0][:-4] + '.hdr'
+ts = first.split(sep)[-1].split("_")[2].split('T')[1][0:4]
+
+out_file = latest + "_" + ts + ".bin"
+out_hdr = latest + "_" + ts + ".hdr"
 
 if not exists(out_file):
 	run("gdal_merge.py -of ENVI -ot Float32 -n nan " + " ".join(to_merge) + " -o " + out_file)
 	run("fh " + out_hdr)
-
-first = to_merge[0][:-4] + '.hdr'
 
 run('envi_header_copy_bandnames.py ' + first + ' ' + out_hdr)
 #samples, lines, bands = read_hdr(out_hdr)
