@@ -12,6 +12,7 @@ from misc import run, err, sep
 files = [x.strip() for x in os.popen('find ./ -name "S2*L2A*"').readlines()]
 tiles = {}
 
+# get a list of tile ID we need to refresh!
 for y in files:  # group by tile and refresh every tile that we can
     fn = y.split(sep)[-1]  # filename e.g. .SAFE folder or zip file
     ix = fn.split('.')[0]  # scene ID
