@@ -270,6 +270,9 @@ for safe in safes:   # S2A_MSIL2A_20170804T190921_N0205_R056_T10UFB_20170804T191
 
     # set no-data areas to NAN:
     run("raster_zero_to_nan " + sfn)
+
+    if swir_only:  # flip the band order for SWIR data
+        run("raster_reorder_increasing_nm.py " + sfn + " 1")
     
 if len(args) > 1 and len(args) < 3:
     # cat the bin files together, combining headers
