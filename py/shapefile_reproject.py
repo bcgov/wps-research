@@ -1,4 +1,4 @@
-'''
+'''20230520 added support for different geometry types
 References:
 [1] https://pcjericks.github.io/py-gdalogr-cookbook/projection.html
 [2] https://gdal.org/programs/gdalsrsinfo.html
