@@ -108,3 +108,5 @@ for fire in my_tiles:
 
 tiles_select = list(tiles_select)
 print(tiles_select)
+
+open('.tiles_select', 'wb').write((' '.join(['T' + t for t in tiles_select])).encode())
