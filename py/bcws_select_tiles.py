@@ -1,4 +1,7 @@
 '''20230520 project fire locations onto Sentinel-2 tiles
+
+Use this to update :
+.tiles_select used by safe_unzip_select.py
 '''
 from misc import run, err, args, exists, sep
 from osgeo import ogr
