@@ -1,4 +1,6 @@
-'''Might be better to redo with argparse!!!!!!
+'''20230520 run this inside a folder "active/fire_number". 
+
+Might be better to redo with argparse!!!!!!
 Query sentinel-2 products over a given point (alternately, a place name). Later: tile-ID of interest. Restrict for time?
 20220728 Need to search using poly e.g. footprint:"Intersects(POLYGON((-4.53 29.85, 26.75 29.85, 26.75 46.80,-4.53 46.80,-4.53 29.85)))"    
 
