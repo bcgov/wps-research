@@ -29,18 +29,20 @@ sr = layer.GetSpatialRef()
 
 sr2 = None  # spatial reference to be matched in reprojected dataset
 try:
-    d2 = gdal.Open(args[2])
-    sr2 = osr.SpatialReference(wkt=d2.GetProjection())
+	print("Try to interpret as RASTER")
+	d2 = gdal.Open(args[2])
+	sr2 = osr.SpatialReference(wkt=d2.GetProjection())
 except:
-    driver2 = ogr.GetDriverByName('ESRI Shapefile')
-    dataset2 = driver.Open(args[2])
-    layer2 = dataset.GetLayer()  # from layer
-    sr2 = layer.GetSpatialRef()
-    '''
-    # from Geometry
-    feature = layer.GetNextFeature()
-    geom = feature.GetGeometryRef()
-    spatialRef = geom.GetSpatialReference()'''
+	driver2 = ogr.GetDriverByName('ESRI Shapefile')
+	dataset2 = driver.Open(args[2])
+	layer2 = dataset.GetLayer()  # from layer
+	sr2 = layer.GetSpatialRef()
+	print("interpreted as SHAPEFILE")
+	'''
+	# from Geometry
+	feature = layer.GetNextFeature()
+	geom = feature.GetGeometryRef()
+	spatialRef = geom.GetSpatialReference()'''
 
 #print("CRS to mATCH:", sr2)
 # proj = osr.SpatialReference(wkt=d.GetProjection())
@@ -51,7 +53,9 @@ coordTrans = osr.CoordinateTransformation(sr, sr2)
 
 # create the output layer
 outDataSet = driver.CreateDataSource(out_shp)
-outLayer = outDataSet.CreateLayer("reproject", sr2, geom_type=ogr.wkbMultiPolygon)
+geom_type=layer.GetLayerDefn().GetGeomType()
+print("GEOM_TYPE", geom_type, "ogr.wkbMultiPolygon", ogr.wkbMultiPolygon)
+outLayer = outDataSet.CreateLayer("reproject", sr2, geom_type=layer.GetLayerDefn().GetGeomType()) # ogr.wkbMultiPolygon)
 
 # add fields
 layerDefn = layer.GetLayerDefn()
