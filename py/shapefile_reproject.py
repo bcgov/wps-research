@@ -28,11 +28,11 @@ layer = dataset.GetLayer()
 sr = layer.GetSpatialRef()
 
 sr2 = None  # spatial reference to be matched in reprojected dataset
-try:
+if args[2].split('.')[-1] != 'shp':
 	print("Try to interpret as RASTER")
 	d2 = gdal.Open(args[2])
 	sr2 = osr.SpatialReference(wkt=d2.GetProjection())
-except:
+else:
 	driver2 = ogr.GetDriverByName('ESRI Shapefile')
 	dataset2 = driver.Open(args[2])
 	layer2 = dataset.GetLayer()  # from layer
@@ -53,9 +53,9 @@ coordTrans = osr.CoordinateTransformation(sr, sr2)
 
 # create the output layer
 outDataSet = driver.CreateDataSource(out_shp)
-geom_type=layer.GetLayerDefn().GetGeomType()
+geom_type=layer2.GetLayerDefn().GetGeomType()
 print("GEOM_TYPE", geom_type, "ogr.wkbMultiPolygon", ogr.wkbMultiPolygon)
-outLayer = outDataSet.CreateLayer("reproject", sr2, geom_type=layer.GetLayerDefn().GetGeomType()) # ogr.wkbMultiPolygon)
+outLayer = outDataSet.CreateLayer("reproject", sr2, geom_type=geom_type) # layer.GetLayerDefn().GetGeomType()) # ogr.wkbMultiPolygon)
 
 # add fields
 layerDefn = layer.GetLayerDefn()
@@ -70,15 +70,20 @@ outLayerDefn = outLayer.GetLayerDefn()
 # loop through the input features
 inFeature = layer.GetNextFeature()
 while inFeature:   # get the input geometry
-    geom = inFeature.GetGeometryRef()     # reproject the geometry
-    geom.Transform(coordTrans)     # create a new feature
-    outFeature = ogr.Feature(outLayerDefn)      # set the geometry and attribute
-    outFeature.SetGeometry(geom)
-    for i in range(0, outLayerDefn.GetFieldCount()):
-        outFeature.SetField(outLayerDefn.GetFieldDefn(i).GetNameRef(), inFeature.GetField(i))   # add the feature to the shapefile
-    outLayer.CreateFeature(outFeature) # dereference the features and get the next input feature
-    outFeature = None
-    inFeature = layer.GetNextFeature()
+	geom = inFeature.GetGeometryRef()     # reproject the geometry
+	# geom.Transform(coordTrans)     # create a new featur
+	if not sr.IsSame(sr2):
+		geom = inFeature.GetGeometryRef()
+		if not geom.GetSpatialReference().IsSame(sr2):
+			geom.Transform(coordTrans)
+
+	outFeature = ogr.Feature(outLayerDefn)      # set the geometry and attribute
+	outFeature.SetGeometry(geom)
+	for i in range(0, outLayerDefn.GetFieldCount()):
+		outFeature.SetField(outLayerDefn.GetFieldDefn(i).GetNameRef(), inFeature.GetField(i))   # add the feature to the shapefile
+	outLayer.CreateFeature(outFeature) # dereference the features and get the next input feature
+	outFeature = None
+	inFeature = layer.GetNextFeature()
 
 dataset = None  # save and close shapefiles
 outDataSet = None
