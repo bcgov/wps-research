@@ -2,5 +2,5 @@
 import os
 from misc import run
 lines = [x.strip() for x in os.popen('ls -1 *.bin').readlines()]
-cmd = 'gdal_merge.py ' + ' '.join(lines) + ' -of ENVI -ot Float32 -o merge.bin'
+cmd = 'gdal_merge.py -of ENVI -ot Float32 -n nan ' + ' '.join(lines) + ' -o merge.bin'
 run(cmd)
