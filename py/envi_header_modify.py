@@ -13,7 +13,7 @@ pd = sep.join(__file__.split(sep)[:-1]) + sep
 if len(args) < 6:
     err('envi_header_modify.py [.hdr file to modify] [nrow] [ncol] [nband] [band 1 name]... [band n name]')
 
-print(args)
+# print(args)
 nrow, ncol, nband = args[2], args[3], args[4]
 if not exists(args[1]): 
     err('please check input files:\n\t' + args[1] + '\n\t' + args[2])
