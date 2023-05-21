@@ -27,7 +27,6 @@ c = ' '.join(['envi_header_modify.py',
               str(lines),
               str(samples),
               str(bands)] + ['"' + b.replace(' ', '\\ ') + '"' for b in b_n]) # and_names])
-print(c)
-sys.exit(1)
+# print(c)
 run(c)
 # err('envi_header_modify.py [.hdr file to modify] [nrow] [ncol] [nband] [band 1 name]... [band n name]')
