@@ -1,6 +1,10 @@
 import os
 import sys
-from misc import err, run, exists, sep, band_names, read_hdr
+from misc import err, run, exists, sep, band_names, read_hdr, args
+
+latest = None
+if len(args) > 1:
+	latest = args[1]	
 
 if not exists('hyperlink') or not exists('fpf'):
 	err('expected to be run from active/$FIRE_NUMBER')
@@ -20,8 +24,12 @@ lines.sort(reverse=True)  # decreasing order, AKA most recent first
 for line in lines:
 	print(line)
 
-latest = lines[0] # most recent date of AWS retrieval 
+if latest is None:
+	latest = lines[0] # most recent date of AWS retrieval 
 print("LATEST", latest)
+
+if 'L2_' + latest not in lines:
+	err("selected date not found")
 
 to_merge = []
 for tile in tiles:
@@ -33,6 +41,8 @@ for tile in tiles:
 		to_merge += [line]
 print(to_merge)
 
+if len(to_merge) < 1:
+	err("no data found, please check data are retrieved, unzipped, unpacked, converted to the appropriate format, and that this tile is imaged on the provided date")
 
 # ../L2_20230520/S2B_MSIL2A_20230520T190919_N0509_R056_T10UEC_20230520T214840.hdr
 first = to_merge[0][:-4] + '.hdr'
