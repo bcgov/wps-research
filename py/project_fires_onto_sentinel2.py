@@ -90,10 +90,12 @@ def shapefile_intersect(s1_path, s2_path):
 	s1_dataSource = None
 	s2_dataSource = None
 
-s1 = 'reproject/prot_current_fire_polys_reproject.shp'
+s1 = 'prot_current_fire_polys.shp'
 s2 = 'sentinel2_bc_tiles_shp/Sentinel_BC_Tiles_reprojected.shp' #tiles_4326 # 'sentinel2_bc_tiles_shp/Sentinel_BC_Tiles_EPSG_4326.shp'
 
 shapefile_intersect(s1, s2)
+
+
 
 for fire in my_tiles:
 	print(fire, my_tiles[fire])
