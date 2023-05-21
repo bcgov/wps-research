@@ -18,14 +18,14 @@ for row in select:
 	files = [x.strip() for x in os.popen('ls -1 *.zip | grep ' + row).readlines()]
 	# only take largest file for this tile for today.
 
-	by_size = [[os.stat(f).st_size, f] for f in files]
-	by_size.sort(reverse=True)  # decreasing order
-	print(by_size)
-
-	f = by_size[0][1]
-	d = f[:-4] + '.SAFE'
-	if not os.path.exists(d):
-		cmds += ['unzip ' + f]
+	#by_size = [[os.stat(f).st_size, f] for f in files]
+	#by_size.sort(reverse=True)  # decreasing order
+	#print(by_size)
+	#f = by_size[0][1]
+	for f in files:
+		d = f[:-4] + '.SAFE'
+		if not os.path.exists(d):
+			cmds += ['unzip ' + f]
 
 def run(c):
 	return os.system(c)
