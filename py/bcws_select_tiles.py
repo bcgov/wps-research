@@ -100,5 +100,11 @@ s1 = 'prot_current_fire_points.shp'
 shapefile_intersect(s1, s2)
 
 
+tiles_select = set()
 for fire in my_tiles:
 	print(fire, my_tiles[fire])
+	for tile in my_tiles[file]:
+		tiles_select.add(tile)
+
+tiles_select = list(tiles_select)
+print(tiles_select)
