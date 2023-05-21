@@ -96,6 +96,9 @@ s2 = 'sentinel2_bc_tiles_shp/Sentinel_BC_Tiles_reprojected.shp' #tiles_4326 # 's
 shapefile_intersect(s1, s2)
 
 
+s1 = 'prot_current_fire_points.shp'
+shapefile_intersect(s1, s2)
+
 
 for fire in my_tiles:
 	print(fire, my_tiles[fire])
