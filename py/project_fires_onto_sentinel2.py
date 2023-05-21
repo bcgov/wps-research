@@ -76,6 +76,7 @@ def shapefile_intersect(s1_path, s2_path):
 			if geometry1.Intersects(geometry2):
 				print("Features intersect!")
 				print_feature(feature1)
+				print("-------------------")
 				print_feature(feature2)
 				#print(geometry1)
 				#print(geometry2)
@@ -84,7 +85,7 @@ def shapefile_intersect(s1_path, s2_path):
 	s1_dataSource = None
 	s2_dataSource = None
 
-s1 = 'sentinel2_bc_tiles_shp/Sentinel_BC_Tiles_reprojected.shp' #tiles_4326 # 'sentinel2_bc_tiles_shp/Sentinel_BC_Tiles_EPSG_4326.shp'
-s2 = 'reproject/prot_current_fire_polys_reproject.shp'
+s1 = 'reproject/prot_current_fire_polys_reproject.shp'
+s2 = 'sentinel2_bc_tiles_shp/Sentinel_BC_Tiles_reprojected.shp' #tiles_4326 # 'sentinel2_bc_tiles_shp/Sentinel_BC_Tiles_EPSG_4326.shp'
 
 shapefile_intersect(s1, s2)
