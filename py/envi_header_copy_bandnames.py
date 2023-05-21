@@ -18,13 +18,16 @@ run('python3 ' + pd + 'envi_header_cleanup.py ' + args[2])
 
 
 samples, lines, bands = read_hdr(args[2])
-band_names = [x.strip() for x in os.popen("envi_header_band_names.py " + args[1]).readlines()][1:]
+b_n = band_names(args[1]) #  = [x.strip() for x in os.popen("envi_header_band_names.py " + args[1]).readlines()][1:]
 
 
+print("b_n", b_n)
 c = ' '.join(['envi_header_modify.py',
               args[2],
               str(lines),
               str(samples),
-              str(bands)] + band_names)
+              str(bands)] + ['"' + b.replace(' ', '\\ ') + '"' for b in b_n]) # and_names])
+print(c)
+sys.exit(1)
 run(c)
 # err('envi_header_modify.py [.hdr file to modify] [nrow] [ncol] [nband] [band 1 name]... [band n name]')
