@@ -2,6 +2,7 @@
 '''
 from misc import run, err, args, exists, sep
 from osgeo import ogr
+import sys
 import os
 
 expected_path = '/home/' + os.popen('whoami').read().strip() + '/GitHub/wps-research/py'
@@ -74,10 +75,11 @@ def shapefile_intersect(s1_path, s2_path):
 			# print_feature(feature2)
 			if geometry1.Intersects(geometry2):
 				print("Features intersect!")
-				# print(feature1
-			print(geometry1)
-			print(geometry2)
-			sys.exit(1)
+				print_feature(feature1)
+				print_feature(feature2)
+				#print(geometry1)
+				#print(geometry2)
+				sys.exit(1)
 	# Clean up and close the shapefile data sources
 	s1_dataSource = None
 	s2_dataSource = None
