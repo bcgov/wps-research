@@ -13,6 +13,7 @@ pd = sep.join(__file__.split(sep)[:-1]) + sep
 if len(args) < 6:
     err('envi_header_modify.py [.hdr file to modify] [nrow] [ncol] [nband] [band 1 name]... [band n name]')
 
+print(args)
 nrow, ncol, nband = args[2], args[3], args[4]
 if not exists(args[1]): 
     err('please check input files:\n\t' + args[1] + '\n\t' + args[2])
@@ -43,6 +44,7 @@ for i in range(0, len(lines)):
 
 # write new header file
 bn_new = args[5: 5 + int(nband)]
+print("bn_new", bn_new)
 if len(bn_new) != int(nband):
     err('inconsistent input')
 
