@@ -103,7 +103,7 @@ shapefile_intersect(s1, s2)
 tiles_select = set()
 for fire in my_tiles:
 	print(fire, my_tiles[fire])
-	for tile in my_tiles[file]:
+	for tile in my_tiles[fire]:
 		tiles_select.add(tile)
 
 tiles_select = list(tiles_select)
