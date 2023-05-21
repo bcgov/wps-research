@@ -75,7 +75,7 @@ for safe in safes:   # S2A_MSIL2A_20170804T190921_N0205_R056_T10UFB_20170804T191
     w= safe.split('_')
     TILE_ID = w[5]
     DATE = w[2].split('T')[0]
-    sfn = TILE_ID + '_' + DATE + '.bin' # output file name
+    sfn = safe.split('.')[0] + '.bin' # TILE_ID + '_' + DATE + '.bin' # output file name
 
     #if exists(sfn):
     #    run("raster_zero_to_nan " + sfn)
@@ -183,14 +183,14 @@ for safe in safes:   # S2A_MSIL2A_20170804T190921_N0205_R056_T10UFB_20170804T191
     else:
         resample([m60, m20, m60r])
 
-    try:
-        sfn = (safe + sep + m10.split(sep)[-1].replace("_10m", "")[:-4]
-                + '_20m.bin')  # name of stacked file
-    except:
-        sfn = (safe + sep + m20.split(sep)[-1].replace("_20m", "")[:-4]
-                + '_20m.bin')
-
-    sfn = TILE_ID + '_' + DATE + '.bin'
+    #try:
+    #    sfn = (safe + sep + m10.split(sep)[-1].replace("_10m", "")[:-4]
+    #            + '_20m.bin')  # name of stacked file
+    #except:
+    #    sfn = (safe + sep + m20.split(sep)[-1].replace("_20m", "")[:-4]
+    #            + '_20m.bin')
+    #
+    #sfn = TILE_ID + '_' + DATE + '.bin'
 
     print("sfn", sfn)
     cmd = ['cat', # cat bands together, remember to cat the header files after
