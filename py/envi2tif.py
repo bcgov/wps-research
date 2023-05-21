@@ -23,7 +23,6 @@ run('raster_smult.exe ' +
 run('python3 ' + pd + 'envi_header_copy_mapinfo.py '  + fn[:-3] + 'hdr ' + fn + '_ht.bin_smult.hdr')
 run('python3 ' + pd + 'envi_update_band_names.py '    + fn[:-3] + 'hdr ' + fn + '_ht.bin_smult.hdr')
 
-
 # convert to TIF (byte format)
 run('gdal_translate -of GTiff -ot Byte ' +
     (fn + '_ht.bin_smult.bin') +
