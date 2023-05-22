@@ -28,12 +28,15 @@ if latest is None:
 	latest = lines[0] # most recent date of AWS retrieval 
 print("LATEST", latest)
 
-if 'L2_' + latest not in lines:
-	err("selected date not found")
+# if 'L2_' + latest not in lines:
+# 	err("selected date not found")
+
 
 to_merge = []
 for tile in tiles:
 	print(tile)
+	cmd = "ls -1 ../" + latest + sep + "*" + tile + "*.bin"
+	print(cmd)
 	for line in [x.strip() for x in os.popen("ls -1 ../" + latest + sep + "*" + tile + "*.bin").readlines()]:
 		if len(line.split('swir')) > 1:
 			err("please remove _swir_ files")
