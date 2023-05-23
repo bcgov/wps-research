@@ -14,15 +14,21 @@ Note: from GDAL documentation:
     mode selects the value which appears most often of all the sampled points.'''
 import os
 import sys
+import argparse
 from misc import err, run, args, exists, pd, sep
 
-message = "python3 raster_warp_2x_all.py [input raster folder] [output raster folder] # [extra arg: use NN resampling instead of bilinear (default)]"
-if len(args) < 3:
-    err(message)
+message = "python3 raster_warp_all.py [input raster folder] [output raster folder] # [extra arg: use NN resampling instead of bilinear (default)]"
 
-use_bilinear = len(args) < 4
+parser = argparse.ArgumentParser()
+parser.add_argument("input_raster_folder", type=str, help="input raster folder")
+parser.add_argument("output_raster_folder", type=str, help="output raster folder")
+parser.add_argument("-n", "--nearest_neighbour", action="count", default=0, help="use nearest neighbour resampling instead of bilinear")
+parser.add_argument("-s", "--scaling_factor", type=float, default=2, help="integer scaling factor")
+args = parser.parse_args()
 
-in_dir, out_dir = os.path.abspath(args[1]), os.path.abspath(args[2])
+print(args)
+use_bilinear = args.nearest_neighbour == 0
+in_dir, out_dir = args.input_raster_folder, args.output_raster_folder
 
 if not exists(in_dir):
     err("please check input dir")
@@ -38,7 +44,11 @@ for f in files:
     print(oh)
     print("  " + of)
     # -r {nearest (default),bilinear,cubic,cubicspline,lanczos,average,rms,mode}
-    cmd = ' '.join(["gdal_translate -of ENVI -ot Float32 -outsize 50% 50%",
+    s = 100. / args.scaling_factor
+    cmd = ' '.join(['gdal_translate',
+	                '-of ENVI',
+                    '-ot Float32',
+                    '-outsize ' + str(s) + '% ' + str(s) +'%',
                     '-r bilinear' if use_bilinear else '-r nearest',
                     f,
                     of])
