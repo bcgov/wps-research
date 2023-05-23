@@ -4,6 +4,5 @@ from misc import run
 lines = [x.strip() for x in os.popen('ls -1 *.bin').readlines()]
 cmd = 'gdal_merge.py -of ENVI -ot Float32 -n nan ' + ' '.join(lines) + ' -o merge.bin'
 run(cmd)
-
-cmd = 'envi_header_copy_bandnames.py ' + lines[0][:-4] + '.hdr merge.hdr'
-print(cmd)
+run('fh merge.hdr')
+run('envi_header_copy_bandnames.py ' + lines[0][:-4] + '.hdr merge.hdr')
