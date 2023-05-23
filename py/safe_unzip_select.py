@@ -6,7 +6,8 @@ import sys
 import datetime
 from misc import parfor, sep
 
-select_file = '/home/' + os.popen('whoami').read().strip() + sep + 'GitHub' + sep + 'wps-research' + sep + 'py' + sep + '.tiles_select'
+# unpack selected tiles. Tiles are selected if they intersect with known fires
+select_file = '/home/' + os.popen('whoami').read().strip() + sep + 'GitHub' + sep + 'wps-research' + sep + 'py' + sep + '.tiles_select' 
 select = open(select_file).read().strip().split()
 
 print(select)
