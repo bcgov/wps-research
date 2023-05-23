@@ -1,5 +1,4 @@
-'''use GDAL to resample a folder of raster (ENVI format) 
-by a factor of two in both dimensions
+'''use GDAL to resample a folder of raster (ENVI format) by a factor of X (default 2) in both dimensions
 
 Note: from GDAL documentation:
 -r {nearest (default),bilinear,cubic,cubicspline,lanczos,average,rms,mode}
@@ -16,8 +15,7 @@ import os
 import sys
 import argparse
 from misc import err, run, args, exists, pd, sep
-
-message = "python3 raster_warp_all.py [input raster folder] [output raster folder] # [extra arg: use NN resampling instead of bilinear (default)]"
+# message = "python3 raster_warp_all.py [input raster folder] [output raster folder] # [extra arg: use NN resampling instead of bilinear (default)]"
 
 parser = argparse.ArgumentParser()
 parser.add_argument("input_raster_folder", type=str, help="input raster folder")
@@ -25,10 +23,9 @@ parser.add_argument("output_raster_folder", type=str, help="output raster folder
 parser.add_argument("-n", "--nearest_neighbour", action="count", default=0, help="use nearest neighbour resampling instead of bilinear")
 parser.add_argument("-s", "--scaling_factor", type=float, default=2, help="integer scaling factor")
 args = parser.parse_args()
-
-print(args)
+# print(args)
 use_bilinear = args.nearest_neighbour == 0
-in_dir, out_dir = args.input_raster_folder, args.output_raster_folder
+in_dir, out_dir = os.path.abspath(args.input_raster_folder), os.path.abspath(args.output_raster_folder)
 
 if not exists(in_dir):
     err("please check input dir")
@@ -38,11 +35,8 @@ if not exists(out_dir):
 files = [x.strip() for x in os.popen("ls -1 " + in_dir + sep + "*.bin").readlines()]
 
 for f in files:
-    print(f)
     of = out_dir + sep + f.split(sep)[-1]
     oh = of[:-3] + 'hdr'
-    print(oh)
-    print("  " + of)
     # -r {nearest (default),bilinear,cubic,cubicspline,lanczos,average,rms,mode}
     s = 100. / args.scaling_factor
     cmd = ' '.join(['gdal_translate',
