@@ -31,7 +31,7 @@ for row in select:
 	for f in files:
 		d = f[:-4] + '.SAFE'
 		if not os.path.exists(d):
-			cmds += ['unzip ' + f] #  + ' -d ~/tmp/' + L2_F]
+			cmds += ['unzip ' + f] #  + ' -d ~/tmp/' + L2_F]  # would probably be a lot faster to unzip here!
 
 def run(c):
 	return os.system(c)
