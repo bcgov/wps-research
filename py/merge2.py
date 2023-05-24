@@ -6,7 +6,7 @@ EPSG = 3005  # BC Albers
 # EPSG = 3347 # Canada LCC
 import os
 import sys
-from misc import run, parfor, exists
+from misc import run, parfor, exists, sep
 lines = [x.strip() for x in os.popen('ls -1 *.bin').readlines()]
 
 if not exists('resample'):
