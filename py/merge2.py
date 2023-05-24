@@ -1,4 +1,5 @@
-'''20230516 run gdal_merge.py on all .bin files in present folder https://github.com/OSGeo/gdal/issues/3098
+'''20230516 mosaic all .bin files in present folder 
+Handles partial overlap. No-data value NAN assumed https://github.com/OSGeo/gdal/issues/3098
 
 EPSG 
 '''
