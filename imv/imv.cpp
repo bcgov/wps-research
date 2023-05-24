@@ -214,7 +214,9 @@ int main(int argc, char ** argv){
     mlk_scene_fn = &IMG_FN; // input filename
     mlk_scene_groundref = &groundref; // groundref indices
 
-    parfor(0, nb, multilook_scene, N_THREADS_IO); // scene subsampling, parallelized by band
+ 		bool use_multithread = N_THREADS_IO * np * 4 < 16000000000;
+
+    parfor(0, nb, multilook_scene, use_multithread?N_THREADS_IO:1); // scene subsampling, parallelized by band
     FILE * f = fopen(mfn.c_str(), "wb");
     fwrite(&dat[0], 1, np2 * nb * sizeof(float), f);
     fclose(f);
