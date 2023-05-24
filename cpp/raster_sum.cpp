@@ -31,6 +31,7 @@ int main(int argc, char ** argv){
   out = falloc(np * nband);
   for0(i, np * nband) out[i] = 0.;
 	bool all_nan;
+	float d;
 
   for0(m, N){
     printf("+r %s\n", fn[m].c_str());
@@ -42,8 +43,11 @@ int main(int argc, char ** argv){
 				all_nan = true;
         for0(k, nband){
           ik = ij + k * np;
-          out[ik] += dat[ik];
-					if(!isnan(dat[ik])) all_nan = false;
+					d = dat[ik];
+					if(!isnan(d)){
+            out[ik] += dat[ik];
+						all_nan = false;
+					}
         }
 				if(all_nan) out[ik] = NAN;
       }
