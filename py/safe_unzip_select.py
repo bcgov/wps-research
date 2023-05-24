@@ -8,7 +8,7 @@ from misc import parfor, sep
 
 # unpack selected tiles. Tiles are selected if they intersect with known fires
 select_file = '/home/' + os.popen('whoami').read().strip() + sep + 'GitHub' + sep + 'wps-research' + sep + 'py' + sep + '.tiles_select' 
-select = open(select_file).read().strip().split()
+select = open(select_file).read().strip().split()  # tiles selected for our jurisdiction
 
 print(select)
 
