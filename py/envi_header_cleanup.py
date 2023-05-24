@@ -109,7 +109,7 @@ open(in_file, 'wb').write(data.encode())
 band_names = [x.strip() for x in os.popen("python3 ~/GitHub/wps-research/py/envi_header_band_names.py " + in_file).readlines()]
 samples, lines, bands = read_hdr(in_file)
 cmd = (['python3 ~/GitHub/wps-research/py/envi_header_modify.py', 
-        args[1],
+        in_file,
         lines,
         samples, 
         bands] +
