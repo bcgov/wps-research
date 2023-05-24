@@ -30,7 +30,7 @@ int main(int argc, char ** argv){
   np = nrow * ncol; // number of input pix
   out = falloc(np * nband);
   for0(i, np * nband) out[i] = 0.;
-	bool not_nan;
+	bool all_nan;
 
   for0(m, N){
     printf("+r %s\n", fn[m].c_str());
@@ -39,13 +39,13 @@ int main(int argc, char ** argv){
       ix = i * ncol;
       for0(j, ncol){
         ij = ix + j;
-				not_nan = false;
+				all_nan = true;
         for0(k, nband){
           ik = ij + k * np;
           out[ik] += dat[ik];
-					if(!isnan(dat[ik])) not_nan = true;
+					if(!isnan(dat[ik])) all_nan = false;
         }
-				if(!not_nan) out[ik] = NAN;
+				if(all_nan) out[ik] = NAN;
       }
     }
     free(dat);
