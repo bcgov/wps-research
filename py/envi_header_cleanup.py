@@ -1,8 +1,12 @@
 '''Clean up envi header so that they can be opened in IMV
 
+20230524:
+	envi_header_cleanup.py [input file] # if input file is .bin, will redirect to .hdr
+
 20220514: 
     default:
-        all hdr in present folder. Process in parallel!'''
+        all hdr in present folder. Process in parallel!
+'''
 from misc import *
 
 if len(args) < 2:
@@ -21,7 +25,11 @@ if len(args) < 2:
     parfor(run, jobs, 8)
     sys.exit(0)
 
-data = open(args[1]).read().strip()
+in_file = args[1]
+if in_file[-4:] == '.bin':
+	in_file = '.'.join(in_file.split('.')[:-1] + ['hdr'])
+
+data = open(in_file).read().strip()
 n_band_names, in_band_names, nb = 0, False, 0
 data = data.replace("description = {\n", "description = {")
 data = data.replace("band names = {\n", "band names = {")
