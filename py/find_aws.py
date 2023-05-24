@@ -4,7 +4,7 @@ from misc import err, run, exists, sep, band_names, read_hdr, args
 
 latest = None
 if len(args) > 1:
-	latest = args[1]	
+	latest = 'L2_' + args[1]	
 
 if not exists('hyperlink') or not exists('fpf'):
 	err('expected to be run from active/$FIRE_NUMBER')
@@ -27,10 +27,6 @@ for line in lines:
 if latest is None:
 	latest = lines[0] # most recent date of AWS retrieval 
 print("LATEST", latest)
-
-# if 'L2_' + latest not in lines:
-# 	err("selected date not found")
-
 
 to_merge = []
 for tile in tiles:
