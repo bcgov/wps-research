@@ -14,7 +14,7 @@ if not exists('resample'):
 
 cmds = []
 for L in lines:
-	if not exists('resample/' + L):
+	if not exists('resample' + sep + L):
 		cmds += [' '.join(['gdalwarp',
 						   '-wm 1024',
 						   '-wo NUM_THREADS=4',
@@ -26,7 +26,7 @@ for L in lines:
 						   '-ot Float32',
 						   '-t_srs EPSG:' + str(EPSG),
 						   L,
-						   'resample/' + L])]
+						   'resample' + sep + L])]
 parfor(run, cmds, 2)
 
 run(' '.join(['gdalbuildvrt',
@@ -35,7 +35,7 @@ run(' '.join(['gdalbuildvrt',
 			  '-resolution highest',
 			  '-overwrite',
 			  'merge.vrt',
-			  'resample/*.bin']))
+			  'resample' + sep + '*.bin']))
 
 if not exists('merge.bin'):
 	run(' '.join(['gdalwarp',
