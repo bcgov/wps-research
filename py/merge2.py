@@ -16,6 +16,11 @@ run('fh merge.hdr')
 run('envi_header_copy_bandnames.py ' + lines[0][:-4] + '.hdr merge.hdr')
 
 
-# gdal_translate -a_srs "EPSG:32610" image1.tif image1_adjusted.tif
-# gdalbuildvrt merged.vrt image1.tif image2.tif
-# gdal_translate -a_nodata <nodata_value> merged.vrt output.tif
+'''
+gdalwarp  -of ENVI -ot Float32 -t_srs EPSG:4326 T10.bin T10_r.bin
+gdalwarp  -of ENVI -ot Float32 -t_srs EPSG:4326 T11.bin T11_r.bin 
+raster_zero_to_nan T11_r.bin 
+raster_zero_to_nan T10_r.bin 
+gdalbuildvrt merged.vrt T10_r.bin T11_r.bin 
+gdal_translate merged.vrt -of ENVI -ot Float32 -a_nodata '-nan' merge.bin
+'''
