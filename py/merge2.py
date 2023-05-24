@@ -14,3 +14,8 @@ run(' '.join(['gdal_translate',
 			  'merge.bin']))
 run('fh merge.hdr')
 run('envi_header_copy_bandnames.py ' + lines[0][:-4] + '.hdr merge.hdr')
+
+
+# gdal_translate -a_srs "EPSG:32610" image1.tif image1_adjusted.tif
+# gdalbuildvrt merged.vrt image1.tif image2.tif
+# gdal_translate -a_nodata <nodata_value> merged.vrt output.tif
