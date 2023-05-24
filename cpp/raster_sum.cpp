@@ -1,4 +1,6 @@
 /* raster_sum.cpp: band math, add hyperspectral cubes together
+
+20230523 needs to be able to accommodate NAN. Does it add all numbers except NAN? 
 20220808: should generalize this to > 2 input files
 20220824: generalized to N input files */
 #include"misc.h"
