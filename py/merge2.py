@@ -30,12 +30,12 @@ for L in lines:
 parfor(run, cmds, 2)
 
 run(' '.join(['gdalbuildvrt',
-			  '-srcnodata nan',
-		      '-vrtnodata nan',
-			  '-resolution highest',
-			  '-overwrite',
-			  'merge.vrt',
-			  'resample' + sep + '*.bin']))
+              '-srcnodata nan',
+              '-vrtnodata nan',
+              '-resolution highest',
+              '-overwrite',
+              'merge.vrt',
+              'resample' + sep + '*.bin']))
 
 if not exists('merge.bin'):
 	run(' '.join(['gdalwarp',
