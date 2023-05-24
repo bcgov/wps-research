@@ -603,10 +603,7 @@ float * mlk_scene_dat; // float data output
 vector<int> * mlk_scene_groundref; // groundref indices
 
 void multilook_scene(size_t k){
-  // due a crude sampling of scene, for scene overview window
-  size_t np = mlk_scene_nr * mlk_scene_nc;
-  printf("Nrow %zu Ncol %zu\n", mlk_scene_nr, mlk_scene_nc);	
-  
+  size_t np = mlk_scene_nr * mlk_scene_nc;  // crude subsampling of scene, for overview window
 	float * bb = (float *)(void *)malloc(np * sizeof(float));
 	if(!bb){
 		err("failed to allocate memory");
@@ -620,13 +617,10 @@ void multilook_scene(size_t k){
     groundref_set.insert(*it);
   }
 
-  // printf("scaling %d x %d image to %d x %d\n", nr, nc, nr2, nc2);
 	printf("+w %s\n", mlk_scene_fn->c_str());
   FILE * f = fopen(mlk_scene_fn->c_str(), "rb");
-	if(!f){
-		err("failed to open input file");
-  }
-
+	if(!f) err("failed to open input file");
+  
   printf("fread band %zu/%d\n", k + 1, mlk_scene_nb);
   size_t nbyte = np * sizeof(float);
 	printf("SEEK %zu\n", nbyte * k);
@@ -637,7 +631,7 @@ void multilook_scene(size_t k){
     if(x % 1000 == 0){
 			printf("x=%zu/ %zu  SEEK %zu\n", x + 1, mlk_scene_nr, (np*k) + mlk_scene_nc * x);
 		}
-    fseek(f, (np * k) + mlk_scene_nc * x, SEEK_SET);
+    //fseek(f, (np * k) + mlk_scene_nc * x, SEEK_SET);
   	size_t nread = fread(&bb[mlk_scene_nc * x], sizeof(float), mlk_scene_nc, f); // read band
 		if(nread != mlk_scene_nc){
     	printf("read %zu bytes instead of %zu (expected) from file: %s\n", nread, mlk_scene_nc * sizeof(float), mlk_scene_fn->c_str());
@@ -645,23 +639,27 @@ void multilook_scene(size_t k){
   	}
 	}
 
-  if(groundref_set.find(k) != groundref_set.end()){
-    // assert all 1. / 0. for ground ref!
-    for(size_t i = 0; i < np; i++){
-      float d = bb[i];
-      if(!(d == 0. || d == 1.)){
-        printf("\tband_index %zu\n", k);
-        err("assertion failed: that groundref be valued in {0,1} only");
+  if(groundref_set.size() > 0){
+    if(groundref_set.find(k) != groundref_set.end()){
+      // assert all 1. / 0. for ground ref!
+      for(size_t i = 0; i < np; i++){
+        float d = bb[i];
+        if(!(d == 0. || d == 1.)){
+          printf("\tband_index %zu\n", k);
+          err("assertion failed: that groundref be valued in {0,1} only");
+        }
       }
     }
   }
 
 	printf("averaging..\n");
+  size_t jp;
   for(size_t i = 0; i < mlk_scene_nr; i++){
     size_t ip = (size_t)floor(mlk_scene_scalef * (float)i);
+
     for(size_t j = 0; j < mlk_scene_nc; j++){
-      size_t jp = (size_t)floor(mlk_scene_scalef * (float)j);
-      mlk_scene_dat[k * mlk_scene_np2 + ip * mlk_scene_nc2 + jp] = bb[(i * mlk_scene_nc) + j];
+      jp = (size_t)floor(mlk_scene_scalef * (float)j);
+      mlk_scene_dat[(k * mlk_scene_np2) + (ip * mlk_scene_nc2) + jp] = bb[(i * mlk_scene_nc) + j];
       // last line could / should be += ?
     }
   }
