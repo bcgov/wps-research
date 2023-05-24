@@ -605,7 +605,15 @@ vector<int> * mlk_scene_groundref; // groundref indices
 void multilook_scene(size_t k){
   // due a crude sampling of scene, for scene overview window
   size_t np = mlk_scene_nr * mlk_scene_nc;
-  SA<float> bb(np); // whole image, one-band buffer
+  printf("Nrow %zu Ncol %zu\n", mlk_scene_nr, mlk_scene_nc);	
+  
+	float * bb = (float *)(void *)malloc(np * sizeof(float));
+	if(!bb){
+		err("failed to allocate memory");
+	}
+	else{
+		memset(bb, '\0', np*sizeof(float));
+	}
 
   set<int> groundref_set;
   for(vector<int>::iterator it = mlk_scene_groundref->begin(); it != mlk_scene_groundref->end(); it++){
@@ -613,16 +621,29 @@ void multilook_scene(size_t k){
   }
 
   // printf("scaling %d x %d image to %d x %d\n", nr, nc, nr2, nc2);
+	printf("+w %s\n", mlk_scene_fn->c_str());
   FILE * f = fopen(mlk_scene_fn->c_str(), "rb");
+	if(!f){
+		err("failed to open input file");
+  }
 
   printf("fread band %zu/%d\n", k + 1, mlk_scene_nb);
   size_t nbyte = np * sizeof(float);
+	printf("SEEK %zu\n", nbyte * k);
   fseek(f, nbyte * k, SEEK_SET);
-  size_t nread = fread(&bb[0], 1, nbyte, f); // read band
-  if(nread != nbyte){
-    printf("read %zu bytes instead of %zu (expected) from file: %s\n", nread, nbyte, mlk_scene_fn->c_str());
-    err("exit");
-  }
+
+	size_t x;
+	for0(x, mlk_scene_nr){
+    if(x % 100 == 0){
+			printf("x=%zu/ %zu  SEEK %zu\n", x + 1, mlk_scene_nr, (np*k) + mlk_scene_nc * x);
+		}
+    fseek(f, (np * k) + mlk_scene_nc * x, SEEK_SET);
+  	size_t nread = fread(&bb[mlk_scene_nc * x], sizeof(float), mlk_scene_nc, f); // read band
+		if(nread != mlk_scene_nc){
+    	printf("read %zu bytes instead of %zu (expected) from file: %s\n", nread, mlk_scene_nc * sizeof(float), mlk_scene_fn->c_str());
+    	err("exit");
+  	}
+	}
 
   if(groundref_set.find(k) != groundref_set.end()){
     // assert all 1. / 0. for ground ref!
@@ -635,6 +656,7 @@ void multilook_scene(size_t k){
     }
   }
 
+	printf("averaging..\n");
   for(size_t i = 0; i < mlk_scene_nr; i++){
     size_t ip = (size_t)floor(mlk_scene_scalef * (float)i);
     for(size_t j = 0; j < mlk_scene_nc; j++){
@@ -643,6 +665,7 @@ void multilook_scene(size_t k){
       // last line could / should be += ?
     }
   }
+	free(bb);
 }
 
 str strip_leading_zeros(str s){
