@@ -118,7 +118,13 @@ for fire in my_tiles:
 	open('.select/' + fire, 'wb').write((' '.join(this_fire)).encode())
 	bs = '/media/' + os.popen('whoami').read().strip() + '/disk4/active/'
 	if os.path.exists(bs):
-		tf =bs + fire + '.tiles'
+		tf = bs + fire
+		if not os.path.exists(tf):
+			try:
+				os.mkdir(tf)
+			except:
+				print("Warning: mkdir failed:", tf) 
+		tf +=  '/.tiles'
 		print('+w', tf)
 		open(bs + fire + '/.tiles', 'wb').write((' '.join(this_fire)).encode())
 
