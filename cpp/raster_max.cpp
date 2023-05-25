@@ -10,7 +10,7 @@ int main(int argc, char ** argv){
   size_t i, j, k;
 
   str fn(argv[1]);
-  str ofn(fn + str("_min.bin"));
+  str ofn(fn + str("_max.bin"));
   str ohn(hdr_fn(ofn, true)); // out header file name
 
   if(!exists(fn)) err("failed to open input file");
@@ -23,14 +23,14 @@ int main(int argc, char ** argv){
     
   dat = bread(fn, nrow, ncol, nband);
 
-	float d, min;
+	float d, max;
   for0(i, np){
-		min = FLT_MAX;
+		max = -FLT_MAX;
     for0(k, nband){
 	    d = dat[(k * np) + i];
-			if(d < min) min = d;
+			if(d > max) max = d;
     }
-		out[i] = min;
+		out[i] = max;
   }
   printf("+w %s\n", ofn.c_str());
   bwrite(out, ofn, nrow, ncol, 1);
