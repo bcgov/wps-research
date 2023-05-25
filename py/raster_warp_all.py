@@ -37,6 +37,10 @@ files = [x.strip() for x in os.popen("ls -1 " + in_dir + sep + "*.bin").readline
 for f in files:
     of = out_dir + sep + f.split(sep)[-1]
     oh = of[:-3] + 'hdr'
+
+	if exists(of):
+		print("Warning: file exists (skipping):", of)
+		continue
     # -r {nearest (default),bilinear,cubic,cubicspline,lanczos,average,rms,mode}
     s = 100. / args.scaling_factor
     cmd = ' '.join(['gdal_translate',
