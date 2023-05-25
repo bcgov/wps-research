@@ -116,6 +116,11 @@ for fire in my_tiles:
 		this_fire += [tile]
 	
 	open('.select/' + fire, 'wb').write((' '.join(this_fire)).encode())
+	bs = '/media/' + os.popen('whoami').read().strip() + '/disk4/active/'
+	if os.path.exists(bs):
+		tf =bs + fire + '.tiles'
+		print('+w', tf)
+		open(bs + fire + '/.tiles', 'wb').write((' '.join(this_fire)).encode())
 
 tiles_select = list(tiles_select)
 print(tiles_select)
