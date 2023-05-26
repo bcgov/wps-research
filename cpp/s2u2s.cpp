@@ -1,4 +1,7 @@
-/* 20230516  Extract all sentinel2 .SAFE folders to SWIR (re)sampled at 20m. */
+/* 20230516  Extract all sentinel2 .SAFE folders to SWIR (re)sampled at 20m.
+
+Note don't repeat steps if output files exist (check each step)
+*/
 #include"misc.h"
 int main(int argc, char ** argv){
   int x = system("safe_unzip_gid.py");
