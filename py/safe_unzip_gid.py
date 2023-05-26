@@ -29,7 +29,7 @@ cmds = []
 observed = []
 not_observed = []
 for gid in select:
-    print(gid)
+    # print(gid)
     if gid not in zip_gid:
         not_observed += [gid]
         continue
