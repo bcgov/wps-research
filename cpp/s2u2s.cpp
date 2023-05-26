@@ -1,9 +1,10 @@
 /* 20230516  Extract all sentinel2 .SAFE folders to SWIR (re)sampled at 20m. */
 #include"misc.h"
 int main(int argc, char ** argv){
-  system("safe_unzip_gid.py");
-  system("sentinel2_stack_all_20m.py 1 1");
-  system("clean");
+  int x = system("safe_unzip_gid.py");
+  x = system("sentinel2_stack_all_20m.py 1 1");
+  x = system("rm *swir*");
+  x = system("clean");
   return 0;
 }
 
