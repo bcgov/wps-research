@@ -1,5 +1,7 @@
 '''20230520 unzip (FOR A SPECIFIC DAY) sentinel2 files, just for tiles that are "on fire" according to bcws data
 
+20230525 should change this to any sentinel2 files over BC!
+
 20230515 unzip sentinel2 files that are not already unzipped'''
 import os
 import sys
