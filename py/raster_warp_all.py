@@ -38,13 +38,13 @@ for f in files:
     of = out_dir + sep + f.split(sep)[-1]
     oh = of[:-3] + 'hdr'
 
-	if exists(of):
-		print("Warning: file exists (skipping):", of)
-		continue
+    if exists(of):
+        print("Warning: file exists (skipping):", of)
+        continue
     # -r {nearest (default),bilinear,cubic,cubicspline,lanczos,average,rms,mode}
     s = 100. / args.scaling_factor
     cmd = ' '.join(['gdal_translate',
-	                '-of ENVI',
+                    '-of ENVI',
                     '-ot Float32',
                     '-outsize ' + str(s) + '% ' + str(s) +'%',
                     '-r bilinear' if use_bilinear else '-r nearest',
