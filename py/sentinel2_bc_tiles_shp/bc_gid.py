@@ -56,5 +56,6 @@ for f in features:
                     s += ','
                 s += (str(coords[i][0]) + ' ' + str(coords[i][1]))
             s += ')))'
-            row_id += [feature_name] # print(feature_name, s)
-print(' '.join(list(set(row_id))))
+            row_id += [feature_name]
+            print(feature_name, s)
+print(' '.join(['T' + x for x in list(set(row_id))]))
