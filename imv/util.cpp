@@ -629,7 +629,7 @@ void multilook_scene(size_t k){
 	size_t x;
 	for0(x, mlk_scene_nr){
     if(x % 1000 == 0){
-			printf("x=%zu/ %zu  SEEK %zu\n", x + 1, mlk_scene_nr, (np*k) + mlk_scene_nc * x);
+			printf("k=%zu x=%zu/ %zu  SEEK %zu\n", k, x + 1, mlk_scene_nr, (np*k) + mlk_scene_nc * x);
 		}
     //fseek(f, (np * k) + mlk_scene_nc * x, SEEK_SET);
   	size_t nread = fread(&bb[mlk_scene_nc * x], sizeof(float), mlk_scene_nc, f); // read band
