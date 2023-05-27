@@ -17,8 +17,7 @@ cmds = []
 for L in lines:
 	if not exists('resample' + sep + L):
 		cmds += [' '.join(['gdalwarp',
-                           '-wm 1024',
-                           '-wo NUM_THREADS=4',
+                           '-wo NUM_THREADS=2',
                            '-multi',
                            '-r bilinear',
                            '-srcnodata nan',
@@ -40,8 +39,7 @@ run(' '.join(['gdalbuildvrt',
 
 if not exists('merge.bin'):
 	run(' '.join(['gdalwarp',
-                  '-wm 4096',
-                  '-wo NUM_THREADS=8',
+                  '-wo NUM_THREADS=2',
                   '-multi',
                   '-overwrite',
                   '-r bilinear',
