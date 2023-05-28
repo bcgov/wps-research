@@ -1,9 +1,7 @@
 /* 20230527 calculate stokes parameters from C2 matrix (compact pol)
 We output C2 matrix from SNAP using snap2psp.py after speckle filtering
 
-** N.B. assumed RHC transmit ** 
-
-Should have a "named variables" class for writing files automatically from named variables
+** N.B. assumed RHC transmit ** Should have a "named variables" class for writing files automatically from named variables
 
 
 [1] IEEE GEOSCIENCE AND REMOTE SENSING LETTERS, VOL. 9, NO. 1, JANUARY 2012
