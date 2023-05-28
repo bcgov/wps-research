@@ -6,6 +6,12 @@ We output C2 matrix from SNAP using snap2psp.py after speckle filtering
 Should have a "named variables" class for writing files automatically from named variables */
 #include"misc.h"
 
+void copy_header(str in_dir, str * fn, str var_name){
+    str cmd(str("cp -v ") + hdr_fn(in_dir + str("/") + fn[0]) + str(" ") + in_dir + str("/") + var_name + str(".hdr"));
+    printf("%s\n", cmd.c_str());
+    system(cmd.c_str());
+}
+
 int main(int argc, char ** argv){
   if(argc < 2){
     err("c2_stokes [C2 input directory: polsarpro format .bin with .hdr");
@@ -72,22 +78,29 @@ int main(int argc, char ** argv){
   
   bwrite(m, in_dir + str("/m.bin"), nrow, ncol, nband);
   bwrite(delta, in_dir + str("/delta.bin"), nrow, ncol, nband);
+  bwrite(alpha_s, in_dir + str("/alpha_s.bin"), nrow, ncol, nband);
+  bwrite(phi, in_dir + str("/phi.bin"), nrow, ncol, nband);
+  bwrite(rvog_m_v, in_dir + str("/rvog_m_v.bin"), nrow, ncol, nband);
+  bwrite(rvog_m_s, in_dir + str("/rvog_m_s.bin"), nrow, ncol, nband);
+  bwrite(rvog_alpha_s, in_dir + str("/rvog_alpha_s.bin"), nrow, ncol, nband);
+  bwrite(p_d, in_dir + str("/p_d.bin"), nrow, ncol, nband);
+  bwrite(p_v, in_dir + str("/p_v.bin"), nrow, ncol, nband);
+  bwrite(p_s, in_dir + str("/p_s.bin"), nrow, ncol, nband);
 
    for0(i, 4){
-    str cmd(str("cp -v ") + hdr_fn(in_dir + str("/") + fn[0]) + str(" ") + in_dir + str("g") + to_string(i + 1) + str(".hdr"));
-    printf("%s\n", cmd.c_str());
-    system(cmd.c_str());
+    copy_header(in_dir, fn, str("g") + to_string(i + 1));
   }
-  {
-    str cmd(str("cp -v ") + hdr_fn(in_dir + str("/") + fn[0]) + str(" ") + in_dir + str("/m.hdr"));
-    printf("%s\n", cmd.c_str());
-    system(cmd.c_str());
-  }
-  {
-    str cmd(str("cp -v ") + hdr_fn(in_dir + str("/") + fn[0]) + str(" ") + in_dir + str("/delta.hdr"));
-    printf("%s\n", cmd.c_str());
-    system(cmd.c_str());
-  }
+
+  copy_header(in_dir, fn, str("m"));
+  copy_header(in_dir, fn, str("delta"));
+  copy_header(in_dir, fn, str("alpha_s"));
+  copy_header(in_dir, fn, str("phi"));
+  copy_header(in_dir, fn, str("rvog_m_v"));
+  copy_header(in_dir, fn, str("rvog_m_s"));
+  copy_header(in_dir, fn, str("rvog_alpha_s"));
+  copy_header(in_dir, fn, str("p_d"));
+  copy_header(in_dir, fn, str("p_v"));
+  copy_header(in_dir, fn, str("p_s")); 
 
   for0(i, 4) (free(C2[i]), free(g[i]));
   free(C2);
