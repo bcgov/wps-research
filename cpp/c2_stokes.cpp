@@ -29,6 +29,12 @@ int main(int argc, char ** argv){
   float * delta = falloc(np);  // phase between linear components of wave
   float * alpha_s = falloc(np);
   float * phi = falloc(np);
+  float * rvog_m_v = falloc(np);
+  float * rvog_m_s = falloc(np);
+  float * rvog_alpha_s = falloc(np);
+  float * p_d = falloc(np);
+  float * p_v = falloc(np);
+  float * p_s = falloc(np);
 
   #define C11 0
   #define C12_re 1
@@ -44,8 +50,20 @@ int main(int argc, char ** argv){
     m[i] = (float)(pow(g12g22 + (double)g[3][i] * (double)g[3][i], .5) / (double)g[0][i]); // eqn (4) from [1]
     delta[i] = (float)atan((double)g[3][i] / (double)g[2][i]);  // eqn. (4) from [1]
 
-    alpha_s[i] = 0.5 * atan(pow(g12g22, .5) / (- g[3][i]));  // - sign for RHC transmit
-    phi[i] = atan2(-g[2][i], g[1][i]);  // - sign for RHC xmit
+    alpha_s[i] = 0.5 * atan(pow(g12g22, .5) / (- g[3][i]));  // - sign for RHC transmit?
+    phi[i] = atan2(-g[2][i], g[1][i]);  // - sign for RHC xmit?
+
+    // H_w should go in here
+
+    // rvog model
+    rvog_m_v[i] = .5 * g[0][i] * ( 1. - m[i]);
+    rvog_m_s[i] = 2. * g[0][i] * m[i];
+    rvog_alpha_s[i] = 0.5 * (float)atan(pow(g12g22, .5) / (double)g[3][i]);
+
+    // pseudo 3-component decomp
+    p_d[i] = .5 * g[0][i] * m[i] * (1. - (float)cos(2. * (double)rvog_alpha_s[i]));
+    p_v[i] = g[0][i] * (1. - m[i]);
+    p_s[i] = .5 * g[0][i] * m[i] * (1 + (float)cos(2. * (double)rvog_alpha_s[i]));
 
   }   
 
@@ -76,5 +94,13 @@ int main(int argc, char ** argv){
   free(g);
   free(m);
   free(delta);
+  free(alpha_s);
+  free(phi);
+  free(rvog_m_v);
+  free(rvog_m_s);
+  free(rvog_alpha_s);
+  free(p_d);
+  free(p_v);
+  free(p_s);
   return 0;
 }
