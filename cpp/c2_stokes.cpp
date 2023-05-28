@@ -42,7 +42,7 @@ int main(int argc, char ** argv){
   float * p_v = falloc(np);
   float * p_s = falloc(np);
   float * rvi = falloc(np);
-  float * csv = falloc(np);
+  float * csi = falloc(np);
   float * rfdi = falloc(np);
 
   #define C11 0
@@ -76,8 +76,8 @@ int main(int argc, char ** argv){
 
     rvi[i] = 1 - m[i];
     float r = g[2][i] / g[1][i];
-    csv[i] = (4. * r) / (3. + m[i]);
-    rfdi[i] = 2. * (r + m) / (3. + 2. * r - m);
+    csi[i] = (4. * r) / (3. + m[i]);
+    rfdi[i] = 2. * (r + m[i]) / (3. + 2. * r - m[i]);
 
   }   
 
