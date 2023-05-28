@@ -10,6 +10,8 @@ sudo apt install openjdk-8-jre openjdk-8-jdk python3-pip maven
 export JDK_HOME=/usr/lib/jvm/java-8-openjdk-amd64/
 export JAVA_HOME=$JDK_HOME
 
+
+python3 -m pip install wheel
 cd jpy-0.9.0
 python3 setup.py --maven bdist_wheel
 
