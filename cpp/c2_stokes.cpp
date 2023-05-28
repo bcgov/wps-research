@@ -41,6 +41,9 @@ int main(int argc, char ** argv){
   float * p_d = falloc(np);
   float * p_v = falloc(np);
   float * p_s = falloc(np);
+  float * rvi = falloc(np);
+  float * csv = falloc(np);
+  float * rfdi = falloc(np);
 
   #define C11 0
   #define C12_re 1
@@ -71,6 +74,11 @@ int main(int argc, char ** argv){
     p_v[i] = g[0][i] * (1. - m[i]);
     p_s[i] = .5 * g[0][i] * m[i] * (1 + (float)cos(2. * (double)rvog_alpha_s[i]));
 
+    rvi[i] = 1 - m[i];
+    float r = g[2][i] / g[1][i];
+    csv[i] = (4. * r) / (3. + m[i]);
+    rfdi[i] = 2. * (r + m) / (3. + 2. * r - m);
+
   }   
 
   for0(i, 4)
@@ -86,6 +94,9 @@ int main(int argc, char ** argv){
   bwrite(p_d, in_dir + str("/p_d.bin"), nrow, ncol, nband);
   bwrite(p_v, in_dir + str("/p_v.bin"), nrow, ncol, nband);
   bwrite(p_s, in_dir + str("/p_s.bin"), nrow, ncol, nband);
+  bwrite(rvi, in_dir + str("/rvi.bin"), nrow, ncol, nband);
+  bwrite(csi, in_dir + str("/csi.bin"), nrow, ncol, nband);
+  bwrite(rfdi, in_dir + str("/rfdi.bin"), nrow, ncol, nband);
 
    for0(i, 4){
     copy_header(in_dir, fn, str("g") + to_string(i + 1));
@@ -101,6 +112,10 @@ int main(int argc, char ** argv){
   copy_header(in_dir, fn, str("p_d"));
   copy_header(in_dir, fn, str("p_v"));
   copy_header(in_dir, fn, str("p_s")); 
+  copy_header(in_dir, fn, str("rvi"));
+  copy_header(in_dir, fn, str("csi"));
+  copy_header(in_dir, fn, str("rfdi"));
+
 
   for0(i, 4) (free(C2[i]), free(g[i]));
   free(C2);
