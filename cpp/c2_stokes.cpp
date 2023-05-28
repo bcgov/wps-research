@@ -3,7 +3,17 @@ We output C2 matrix from SNAP using snap2psp.py after speckle filtering
 
 ** N.B. assumed RHC transmit ** 
 
-Should have a "named variables" class for writing files automatically from named variables */
+Should have a "named variables" class for writing files automatically from named variables
+
+
+[1] IEEE GEOSCIENCE AND REMOTE SENSING LETTERS, VOL. 9, NO. 1, JANUARY 2012
+"Compact Decomposition Theory" , S. R. Cloude, Fellow, IEEE, D. G. Goodenough, Fellow, IEEE, and H. Chen
+
+[2]  Hao Chen, Joanne C. White & André Beaudoin (2023) Derivation and
+assessment of forest-relevant polarimetric indices using RCM compact-pol data, International
+Journal of Remote Sensing, 44:1, 381-406, DOI: 10.1080/01431161.2022.2164528
+*/
+
 #include"misc.h"
 
 void copy_header(str in_dir, str * fn, str var_name){
@@ -62,18 +72,19 @@ int main(int argc, char ** argv){
     alpha_s[i] = 0.5 * atan(pow(g12g22, .5) / (- g[3][i]));  // - sign for RHC transmit?
     phi[i] = atan2(-g[2][i], g[1][i]);  // - sign for RHC xmit?
 
-    // H_w should go in here
+    // H_w should go in here from [1]
 
-    // rvog model
+    // rvog model [1]
     rvog_m_v[i] = .5 * g[0][i] * ( 1. - m[i]);
     rvog_m_s[i] = 2. * g[0][i] * m[i];
     rvog_alpha_s[i] = 0.5 * (float)atan(pow(g12g22, .5) / (double)g[3][i]);
 
-    // pseudo 3-component decomp
+    // pseudo 3-component decomp [1]
     p_d[i] = .5 * g[0][i] * m[i] * (1. - (float)cos(2. * (double)rvog_alpha_s[i]));
     p_v[i] = g[0][i] * (1. - m[i]);
     p_s[i] = .5 * g[0][i] * m[i] * (1 + (float)cos(2. * (double)rvog_alpha_s[i]));
 
+    // compact-pol parameters: eq'n 18 from [2] 
     rvi[i] = 1 - m[i];
     float r = g[2][i] / g[1][i];
     csi[i] = (4. * r) / (3. + m[i]);
