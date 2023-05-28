@@ -12,13 +12,7 @@ int main(int argc, char ** argv){
   str in_dir(argv[1]);
   size_t nrow, ncol, nband, np, i;
 
-  #define C11 0
-  #define C12_re 1
-  #define C12_im 2
-  #define C22 3
   str fn[4] = {str("C11.bin"), str("C12_real.bin"), str("C12_imag.bin"), str("C22.bin")};
-  str gn[4] = {str("g1.bin"), str("g2.bin"), str("g3.bin"), str("g4.bin")};
-
   str hfn(hdr_fn(in_dir + str("/") + fn[0]));
   hread(hfn, nrow, ncol, nband); // read header file for ENVI type 6 input file
   np = nrow * ncol; // number of pixels
@@ -33,6 +27,10 @@ int main(int argc, char ** argv){
   float * m = falloc(np); // degree of polarisation
   float * delta = falloc(np);  // phase between linear components of wave
 
+  #define C11 0
+  #define C12_re 1
+  #define C12_im 2
+  #define C22 3
   for0(i, np){
     g[0][i] = C2[C11][i] + C2[C22][i];
     g[1][i] = 2* C2[C11][i] - g[0][i];
@@ -53,17 +51,16 @@ int main(int argc, char ** argv){
     printf("%s\n", cmd.c_str());
     system(cmd.c_str());
   }
-{
-  str cmd(str("cp -v ") + hdr_fn(in_dir + str("/") + fn[0]) + str(" ") + in_dir + str("/m.hdr"));
-  printf("%s\n", cmd.c_str());
-  system(cmd.c_str());
-
-}
-{
-  str cmd(str("cp -v ") + hdr_fn(in_dir + str("/") + fn[0]) + str(" ") + in_dir + str("/delta.hdr"));
-  printf("%s\n", cmd.c_str());
-  system(cmd.c_str());
-}
+  {
+    str cmd(str("cp -v ") + hdr_fn(in_dir + str("/") + fn[0]) + str(" ") + in_dir + str("/m.hdr"));
+    printf("%s\n", cmd.c_str());
+    system(cmd.c_str());
+  }
+  {
+    str cmd(str("cp -v ") + hdr_fn(in_dir + str("/") + fn[0]) + str(" ") + in_dir + str("/delta.hdr"));
+    printf("%s\n", cmd.c_str());
+    system(cmd.c_str());
+  }
 
   for0(i, 4) (free(C2[i]), free(g[i]));
   free(C2);
