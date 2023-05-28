@@ -1,6 +1,7 @@
 /* 20230527 calculate stokes parameters from C2 matrix (compact pol)
 We output C2 matrix from SNAP using snap2psp.py after speckle filtering
 
+** N.B. assumed RHC transmit ** 
 
 Should have a "named variables" class for writing files automatically from named variables */
 #include"misc.h"
@@ -26,18 +27,26 @@ int main(int argc, char ** argv){
 
   float * m = falloc(np); // degree of polarisation
   float * delta = falloc(np);  // phase between linear components of wave
+  float * alpha_s = falloc(np);
+  float * phi = falloc(np);
 
   #define C11 0
   #define C12_re 1
   #define C12_im 2
   #define C22 3
   for0(i, np){
-    g[0][i] = C2[C11][i] + C2[C22][i];
-    g[1][i] = 2* C2[C11][i] - g[0][i];
-    g[2][i] = C2[C12_re][i];
-    g[3][i] = C2[C12_im][i];
-    m[i] = (float)(pow( (double)g[1][i] * (double)g[1][i] + (double)g[2][i] * (double)g[2][i] + (double)g[3][i] * (double)g[3][i], .5) / (double)g[0][i]);
-    delta[i] = (float)atan((double)g[3][i] / (double)g[2][i]);
+    g[0][i] = C2[C11][i] + C2[C22][i]; // eqn (2) from [1]
+    g[1][i] = 2* C2[C11][i] - g[0][i]; // eqn (2) from [1]
+    g[2][i] = C2[C12_re][i]; // eqn (2) from [1]
+    g[3][i] = C2[C12_im][i]; // eqn (2) from [1]
+
+    double g12g22 = (double)g[1][i] * (double)g[1][i] + (double)g[2][i] * (double)g[2][i];
+    m[i] = (float)(pow(g12g22 + (double)g[3][i] * (double)g[3][i], .5) / (double)g[0][i]); // eqn (4) from [1]
+    delta[i] = (float)atan((double)g[3][i] / (double)g[2][i]);  // eqn. (4) from [1]
+
+    alpha_s[i] = 0.5 * atan(pow(g12g22, .5) / (- g[3][i]));  // - sign for RHC transmit
+    phi[i] = atan2(-g[2][i], g[1][i]);  // - sign for RHC xmit
+
   }   
 
   for0(i, 4)
