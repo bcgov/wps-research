@@ -50,7 +50,7 @@ snap = '/opt/snap/bin/gpt' if not exist(snap) else snap  # try another location 
 if not exist(snap):
     err("could not find snap/bin/gpt")
 
-folders, zips = [], [x.strip() for x in os.popen("ls -1 *.zip").readlines()]
+folders, zips = [], [x.strip() for x in os.popen("ls -1 RCM*.zip").readlines()]
 for z in zips:
     slc = '.'.join(z.split(".")[:-1])
     if not exist(slc):
@@ -71,6 +71,7 @@ for p in folders:
     p_4 = p + sep + '03_Cal_Spk_Mlk.dim'
     p_5 = p + sep + '04_Cal_Spk_Mlk_TC.dim' # filtered output
     p_6 = p + sep + '05_Cal_Spk_Mlk_TC_Spk.dim'
+    p_7 = p + sep + '05_Cal_Spk_Mlk_TC_Spk.data/stack.bin'
 
     if not exist(p_2):
         run([snap, 'Calibration',
@@ -111,5 +112,23 @@ for p in folders:
             '-PfilterSize=' + str(FILTER_SIZE),
             '-Ssource=' + p_5,
             '-t ' + p_6])  # output
+
+    if not exist(p_7):
+        dat = '.'.join(p_6.split('.')[:-1]) + '.data'
+        run(['snap2psp',
+             dat])
+
     i += 1
 # now merge things of the same date
+
+
+date = {}
+last = [x.strip() for x in os.popen('find ./ -name "05_Cal_Spk_Mlk_TC_Spk.dim"').readlines()]
+for L in last:
+    slc = L.split(sep)[-2]
+    d = slc.split("_")[5]
+    if d not in date: date[d] = []
+    date[d] += [L]
+
+for d in date:
+    print(d, date[d])
