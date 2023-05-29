@@ -1,9 +1,14 @@
 ''' 20230528 snap processing for CP-pol datasets
     1) calibration
-    2) box filter (5)
-    2) terrain correction (30m ESA dem)
-    3) box filter (5)
-    4) run the CP-pol decompositions
+    2) box filter 5x5
+    3) multilook 2x2
+    4) terrain correction (30m ESA dem)
+    5) box filter 5x5
+
+       convert to ENVI format
+    6) merge by date
+
+    7) project series onto first date
 
 Mosaic in GDAL? 
 zero_to_nan and c2_stokes
@@ -33,47 +38,33 @@ sys.path.append(my_path + "../py/")
 from misc import pd, exist, args, cd, err
 
 def run(c):
-    if type(c) == list:
-        c = ' '.join(c)
     print(c)
+    c = ' '.join(c) if type(c) == list else c
     return os.system(c)
 
 FILTER_SIZE = 5
-RE_CALC = False
 
 # look for snap binary
-snap, ci = '/usr/local/snap/bin/gpt', 0 # assume we installed snap
+snap = '/usr/local/snap/bin/gpt' # assume we installed snap
+snap = '/opt/snap/bin/gpt' if not exist(snap) else snap  # try another location if that failed
 if not exist(snap):
-    snap = '/opt/snap/bin/gpt'  # try another location if that failed
+    err("could not find snap/bin/gpt")
 
-zips = [x.strip() for x in os.popen("ls -1 *.zip").readlines()]
+folders, zips = [], [x.strip() for x in os.popen("ls -1 *.zip").readlines()]
 for z in zips:
     slc = '.'.join(z.split(".")[:-1])
     if not exist(slc):
         run("unzip " + z + " " + "-d " + slc)
-
     if exist(slc + sep + slc):
         run("mv -v " + slc + sep + slc + sep + "* " + slc + sep) 
         run("rmdir " + slc + sep + slc + sep)
-
-
-# find SLC folders in present directory
-folders = [x.strip() for x in os.popen('ls -1 | grep _SLC').readlines()]
-folders_use = []
-for f in folders:
-    if f[-3:] == 'SLC':
-        if os.path.isdir(f):
-            folders_use.append(f.strip())
-folders = folders_use
-for p in folders_use:
-    print(p)
+    folders += [slc]
+    print(slc)
 
 # process each folder
+i = 0
 for p in folders:
-    ci += 1
-    if os.path.abspath(p) == os.path.abspath('.'):
-        continue
-
+    print("i=", str(i + 1), "of", str(len(folders)))
     p_1 = p + sep + 'manifest.safe'  # input
     p_2 = p + sep + '01_Cal.dim' # calibrated product
     p_3 = p + sep + '02_Cal_Spk.dim'  # terrain corrected output
@@ -81,48 +72,44 @@ for p in folders:
     p_5 = p + sep + '04_Cal_Spk_Mlk_TC.dim' # filtered output
     p_6 = p + sep + '05_Cal_Spk_Mlk_TC_Spk.dim'
 
-    if not exist(p_2) or RE_CALC:
-        run([snap,
-             'Calibration',
+    if not exist(p_2):
+        run([snap, 'Calibration',
              '-Ssource=' + p_1,
              '-t ' + p_2,
              '-PoutputImageInComplex=true'])
 
-    if not exist(p_3) or RE_CALC:
-        run([snap,
-            'Polarimetric-Speckle-Filter',
+    if not exist(p_3):
+        run([snap, 'Polarimetric-Speckle-Filter',
             '-Pfilter="Box Car Filter"',
             '-PfilterSize=' + str(FILTER_SIZE),
             '-Ssource=' + p_2,
-            '-t ' + p_3])  # output folder
+            '-t ' + p_3])  # output
 
-    if not exist(p_4) or RE_CALC:
-        run([snap,
-             'Multilook',
+    if not exist(p_4):
+        run([snap, 'Multilook',
              '-PnAzLooks=2',
              '-PnRgLooks=2',
              '-Ssource=' + p_3,
-             '-t ' + p_4])
+             '-t ' + p_4])  # output
 
-    if not exist(p_5) or RE_CALC:
-        run([snap,
-            'Terrain-Correction',
+    if not exist(p_5):
+        run([snap, 'Terrain-Correction',
             '-PnodataValueAtSea=false',
             '-Ssource=' + p_4, 
-            '-t ' + p_5])
+            '-t ' + p_5])  # output
 
-    if not exist(p_5) or RE_CALC:
-        run([snap,
-            'Polarimetric-Speckle-Filter',
+    if not exist(p_5):
+        run([snap, 'Polarimetric-Speckle-Filter',
             '-Pfilter="Box Car Filter"',
             '-PfilterSize=' + str(FILTER_SIZE),
             '-Ssource=' + p_4,
-            '-t ' + p_5])  # output foldera
+            '-t ' + p_5]) # output
 
-    if not exist(p_6) or RE_CALC:
-        run([snap,
-            'Polarimetric-Speckle-Filter',
+    if not exist(p_6):
+        run([snap, 'Polarimetric-Speckle-Filter',
             '-Pfilter="Box Car Filter"',
             '-PfilterSize=' + str(FILTER_SIZE),
             '-Ssource=' + p_5,
-            '-t ' + p_6])  # output folder
+            '-t ' + p_6])  # output
+    i += 1
+# now merge things of the same date
