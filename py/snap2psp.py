@@ -18,6 +18,8 @@ if len(args) < 2:
           '# convert snap byte-order= 1 .img data to byte-order 0 .bin data')
 else:
     d = args[1]
+
+if len(args) > 2:
     create_stack = True
 
 cmds, hdrs, out_files = [], [], []
@@ -58,3 +60,5 @@ if create_stack and not exist(stack_f):
          pd + 'raster_stack.py'] +
          out_files +
          [stack_f])
+
+print("create_stack", create_stack)
