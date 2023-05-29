@@ -142,4 +142,3 @@ for d in date:
     print([cmd])
     if not os.path.exists(ofn):
         a = os.system(cmd)
-    sys.exit(1)
