@@ -115,15 +115,18 @@ for p in folders:
 
     if not exist(p_7):
         dat = '.'.join(p_6.split('.')[:-1]) + '.data'
-        run(['snap2psp',
-             dat])
+        run(['snap2psp.py',  # convert to PolSARPro format
+             dat,
+             '1'])  # stack the bands
+
+        run(['raster_zero_to_nan', p_7])
 
     i += 1
 # now merge things of the same date
 
 
 date = {}
-last = [x.strip() for x in os.popen('find ./ -name "05_Cal_Spk_Mlk_TC_Spk.dim"').readlines()]
+last = [x.strip() for x in os.popen('find ./ -name "05_Cal_Spk_Mlk_TC_Spk.data"').readlines()]
 for L in last:
     slc = L.split(sep)[-2]
     d = slc.split("_")[5]
@@ -132,3 +135,11 @@ for L in last:
 
 for d in date:
     print(d, date[d])
+    files = [x + sep + 'stack.bin' for x in date[d]]
+
+    ofn = str(d) + '.bin'
+    cmd = 'merge.py ' + ' '.join(files) + ' ' + ofn
+    print([cmd])
+    if not os.path.exists(ofn):
+        a = os.system(cmd)
+    sys.exit(1)
