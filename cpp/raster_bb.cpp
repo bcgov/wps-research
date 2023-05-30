@@ -9,9 +9,6 @@ int main(int argc, char ** argv){
     err("raster_bb.cpp: apply inverse planck bb formula to each band\n");
   }
 
-  double c1 = 1.191042e08; // W/m^2-sr-um
-  double c2 = 1.4387752e04; // K um
-
   str fn(argv[1]); // input image file name
   vector<string> s;
   if(!(exists(fn))) err("failed to open input file");
@@ -49,6 +46,9 @@ int main(int argc, char ** argv){
   float * dat = bread(fn, nrow, ncol, nband);
   bool is_zero, is_nan;
 
+
+  double c1 = 1.191042e08; // W/m^2-sr-um
+  double c2 = 1.4387752e04; // K um
   for0(i, np){
     for0(k, nband){
       d = dat[i + k * np]; // check if raster #1 is zero or NAN
