@@ -75,7 +75,7 @@ int main(int argc, char ** argv){
       else{
         T = h * c / (K * CWL) / log((2. * h * c * c) / (RADIANCE * 1000000. * pow(CWL, 5.)) + 1.);
       }
-      printf("d %f T %e\n", d, T);
+      if(i %1000 == 0) printf("d %f T %e\n", d, T);
       dat[i + k * np] = (float)T;
     }
   }
