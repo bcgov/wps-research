@@ -5,7 +5,26 @@ https://ncc.nesdis.noaa.gov/data/planck.html
 Note:
 L1C data is in TOA reflectance. Need to apply (sentinel2 tbx) reflectance to radiance operator:
 https://github.com/senbox-org/s2tbx/blob/master/s2tbx-reflectance-to-radiance-ui/src/main/resources/org/esa/s2tbx/reflectance2radiance/docs/ReflectanceToRadianceAlgorithmSpecification.html
-*/
+
+
+Reflectance to Radiance Algorithm Specification
+Reflectance to Radiance
+
+Reflectance is the proportion of the radiation striking a surface to the radiation reflected off of it.
+Radiance is the amount of radiation coming from an area.
+Top-of-atmosphere reflectance (or TOA reflectance) is the reflectance measured by a space-based sensor flying higher than the earth's atmosphere.
+These reflectance values will include contributions from clouds and atmospheric aerosols and gases.
+
+The Reflectance to Radiance results from the following formula:
+
+radiance = pixelValue * cosinus(radians(incidenceAngle)) * solarIrradiance * scale / (pi * d2)
+
+, where:
+d2 = 1.0 / U (the sun-earth distance)
+solarIrradiance = the mean solar exoatmospheric irradiances for each band
+scale = 1 / (0.001 * 1000) = 1 (default)
+
+For Sentinel-2 the incidence angle is replaced with the values from the sun_zenith band.*/
 #include"misc.h"
 #include<math.h>
 
