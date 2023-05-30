@@ -1,12 +1,13 @@
 import os
 import sys
-sep = os.path.sep
+args = sys.argv, sep = os.path.sep
 
 lines = os.popen('find ./ -name "PRS*.zip"').readlines()
 lines = [x.strip() for x in lines]
 
 
 c = {}
+example = {}
 for line in lines:
     f = os.path.abspath(line)
     if os.path.exists(f):
@@ -17,6 +18,7 @@ for line in lines:
             c[fn] = 1
         else:
             c[fn] += 1
+        example[fn] = f
 
 for x in c:
     print(c[x], x)  
@@ -24,3 +26,13 @@ for x in c:
 L = list(c.keys())
 print(len(L), "unique files")
 
+
+if len(args) > 1:
+    dst = os.path.abspath(args[1]) + sep
+    if not os.path.exists(dst) or not os.path.isdir(dst):
+        print("Error: dst folder undefined")
+        sys.exit(1)
+    
+    for x in L:
+        cmd = 'cp -v ' + example[x] + ' ' + dst + sep
+        print(cmd)
