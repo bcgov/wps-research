@@ -1,6 +1,11 @@
 /* 20221128: raster_bb.cpp: apply inverse planck formula to each band
 Assumed units of Spectral Radiance (W/m2-sr-um)
-https://ncc.nesdis.noaa.gov/data/planck.html */
+https://ncc.nesdis.noaa.gov/data/planck.html
+
+Note:
+L1C data is in TOA reflectance. Need to apply (sentinel2 tbx) reflectance to radiance operator:
+https://github.com/senbox-org/s2tbx/blob/master/s2tbx-reflectance-to-radiance-ui/src/main/resources/org/esa/s2tbx/reflectance2radiance/docs/ReflectanceToRadianceAlgorithmSpecification.html
+*/
 #include"misc.h"
 #include<math.h>
 
@@ -75,8 +80,9 @@ int main(int argc, char ** argv){
       else{
         RADIANCE = ((double)d) / 10000.;
         T = ((h * c) / (K * Lambda))  / log((2. * h * pow(c, 2.) * pow(Lambda, -5.) / (RADIANCE * 1000000.)) + 1.);
+        T -= 273.15;
       }
-      if(i %1000 == 0) printf("cwl %f d %f T %e\n", lambda[k],d, T);
+      if(i %1000 == 0) printf("cwl %f d %f RAD %e T %f\n", lambda[k],d, RADIANCE, (float)T);
       dat[i + k * np] = (float)T;
     }
   }
