@@ -1,6 +1,6 @@
 import os
 import sys
-args = sys.argv, sep = os.path.sep
+args, sep = sys.argv, os.path.sep
 
 lines = os.popen('find ./ -name "PRS*.zip"').readlines()
 lines = [x.strip() for x in lines]
@@ -34,5 +34,9 @@ if len(args) > 1:
         sys.exit(1)
     
     for x in L:
-        cmd = 'cp -v ' + example[x] + ' ' + dst + sep
-        print(cmd)
+        if not os.path.exists(dst + x):
+            cmd = 'cp -v ' + example[x] + ' ' + dst
+            print(cmd)
+
+        else:
+            print("found: ", x)
