@@ -46,24 +46,33 @@ int main(int argc, char ** argv){
   float * dat = bread(fn, nrow, ncol, nband);
   bool is_zero, is_nan;
 
+  /*
+  function IPLANCKWL(){
+    h= 6.6260755*Math.pow(10,-34)
+    c= 2.9979246*Math.pow(10,8)
+    k=1.380658*Math.pow(10,-23)
+    form = document.formIWL
+    RADIANCE= form.RADIANCE.value
+    CWL= form.CWL.value*0.000001
 
-  double c1 = 1.191042e08; // W/m^2-sr-um
-  double c2 = 1.4387752e04; // K um
-  for0(i, np){
-    for0(k, nband){
+    T=h*c/(k*CWL)/Math.log((2*h*c*c)/(RADIANCE*1000000*Math.pow(CWL,5)) + 1)
+    form.TEMPERATURE.value=T
+  }
+  */
+  float T;
+  double h = 6.6260755 * pow(10.,-34.);
+  double c = 2.9979246 * pow(10.,8.);
+  double K = 1.380658 * pow(10.,-23.);
+  double RADIANCE = ((double)d); // * (1. / 10000.);
+  for0(k, nband){
+    double CWL = lambda[k] *0.000001;
+    for0(i, np){
       d = dat[i + k * np]; // check if raster #1 is zero or NAN
       if(d == 0 || isnan(d) || isinf(d)) d = NAN;
       else{
-        double h = 6.6260755*pow(10.,-34.);
-        double c = 2.9979246*pow(10.,8.);
-        double K = 1.380658*pow(10.,-23.);
-        double RADIANCE = ((double)d); // * (1. / 10000.);
-        double CWL = lambda[k] *0.000001;
-        double T = h * c / (K * CWL) / log((2. * h * c * c) / (RADIANCE * 1000000. * pow(CWL, 5.)) + 1.);
-	d = (float) T;
-        //d = (float)( c2 / ((double)lambda[k] * log(1. + c1 / ( pow((double)lambda[k], 5.) * d))));
+        T = (float)(h * c / (K * CWL) / log((2. * h * c * c) / (RADIANCE * 1000000. * pow(CWL, 5.)) + 1.));
       }
-      dat[i + k * np] = d;
+      dat[i + k * np] = T;
     }
   }
 
