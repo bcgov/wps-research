@@ -61,10 +61,10 @@ int main(int argc, char ** argv){
   }
   */
   double T;
+  double RADIANCE;
   double h = 6.6260755 * pow(10.,-34.);
   double c = 2.9979246 * pow(10.,8.);
   double K = 1.380658 * pow(10.,-23.);
-  double RADIANCE = ((double)d)  / 10000.;
   for0(k, nband){
     double wavelength_nm = (double) lambda[k];  // our wavelength is in nanometres
     double wavelength_um = 0.001 * wavelength_nm; // the form expected wavelength in micrometre(um)
@@ -73,6 +73,7 @@ int main(int argc, char ** argv){
       d = dat[i + k * np]; // get the value of pixl "i" for band "k"
       if(d == 0. || isnan(d) || isinf(d)) T = NAN; // check if value is zero or NAN (no-data)
       else{
+        RADIANCE = ((double)d)  / 10000.;
         T = h * c / (K * CWL) / log((2. * h * c * c) / (RADIANCE * 1000000. * pow(CWL, 5.)) + 1.);
       }
       if(i %1000 == 0) printf("d %f T %e\n", d, T);
