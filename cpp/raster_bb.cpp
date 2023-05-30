@@ -39,7 +39,7 @@ int main(int argc, char ** argv){
       err("expected band name to end in nm");
     }
     str wl(last.substr(0, strlen(last.c_str()) - 2));
-    lambda[i] = (double)atof(wl.c_str()) * (double).001; // convert nm to um
+    lambda[i] = (double)atof(wl.c_str()); 
     cout << "lambda:" << lambda[i] << endl;
   }
 
@@ -76,7 +76,7 @@ int main(int argc, char ** argv){
         RADIANCE = ((double)d) / 10000.;
         T = ((h * c) / (K * Lambda))  / log((2. * h * pow(c, 2.) * pow(Lambda, -5.) / (RADIANCE * 1000000.)) + 1.);
       }
-      if(i %1000 == 0) printf("d %f T %e\n", d, T);
+      if(i %1000 == 0) printf("cwl %f d %f T %e\n", lambda[k],d, T);
       dat[i + k * np] = (float)T;
     }
   }
