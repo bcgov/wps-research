@@ -1,6 +1,8 @@
 '''20230530 find centre point of raster.
 based on code from: 
 https://en.proft.me/2015/09/20/converting-latitude-and-longitude-decimal-values-p/
+
+** If more than one argument is supplied, calculate the average centre
 '''
 import sys
 import os
@@ -33,11 +35,24 @@ if len(sys.argv) < 2 or not os.path.exists(sys.argv[1]):
     print("Usage:\n\traster_centre [raster file that GDAL can read]")
     sys.exit(1)
 
-lines = [x.strip() for x in os.popen('gdalinfo ' + sys.argv[1]).readlines()]
 
-for line in lines:
-    w = line.split()
-    if w[0] == 'Center':
-        w = ' '.join(line.split('(')[-1].strip(')').split(',')).replace('"', "'").replace('d', '°').replace('N', ' N').replace('E', ' E').replace('S', ' S').replace('W', ' W').replace('.', '_') 
-        dd = parse_dms(w)
-        print(dd)
+total = None
+for i in range(1, len(sys.argv)):
+    lines = [x.strip() for x in os.popen('gdalinfo ' + sys.argv[i]).readlines()]
+
+    for line in lines:
+        w = line.split()
+        if w[0] == 'Center':
+            w = ' '.join(line.split('(')[-1].strip(')').split(',')).replace('"', "'").replace('d', '°').replace('N', ' N').replace('E', ' E').replace('S', ' S').replace('W', ' W').replace('.', '_') 
+            dd = parse_dms(w)
+            print(dd)
+
+            if total == None:
+                total = [0,0]
+                total[0], total[1] = dd[0], dd[1]
+            else:
+                total[0] += dd[0]
+                total[1] += dd[1]
+        
+total =[ x/(len(sys.argv)-1) for x in total]
+print("average", total)
