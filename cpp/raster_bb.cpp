@@ -5,6 +5,7 @@ https://ncc.nesdis.noaa.gov/data/planck.html */
 #include<math.h>
 
 int main(int argc, char ** argv){
+  printf("raster_bb\n");
   if(argc < 2){
     err("raster_bb.cpp: apply inverse planck bb formula to each band\n");
   }
@@ -59,22 +60,23 @@ int main(int argc, char ** argv){
     form.TEMPERATURE.value=T
   }
   */
-  float T;
+  double T;
   double h = 6.6260755 * pow(10.,-34.);
   double c = 2.9979246 * pow(10.,8.);
   double K = 1.380658 * pow(10.,-23.);
-  double RADIANCE = ((double)d); // * (1. / 10000.);
+  double RADIANCE = ((double)d)  / 10000.;
   for0(k, nband){
     double wavelength_nm = (double) lambda[k];  // our wavelength is in nanometres
     double wavelength_um = 0.001 * wavelength_nm; // the form expected wavelength in micrometre(um)
     double CWL = wavelength_um * 0.000001;
     for0(i, np){
       d = dat[i + k * np]; // get the value of pixl "i" for band "k"
-      if(d == 0 || isnan(d) || isinf(d)) d = NAN; // check if value is zero or NAN (no-data)
+      if(d == 0. || isnan(d) || isinf(d)) T = NAN; // check if value is zero or NAN (no-data)
       else{
-        T = (float)(h * c / (K * CWL) / log((2. * h * c * c) / (RADIANCE * 1000000. * pow(CWL, 5.)) + 1.));
+        T = h * c / (K * CWL) / log((2. * h * c * c) / (RADIANCE * 1000000. * pow(CWL, 5.)) + 1.);
       }
-      dat[i + k * np] = T;
+      printf("d %f T %e\n", d, T);
+      dat[i + k * np] = (float)T;
     }
   }
 
