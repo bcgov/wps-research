@@ -10,29 +10,11 @@ from osgeo import ogr
 import sys
 import os
 
-expected_path = '/home/' + os.popen('whoami').read().strip() + '/GitHub/wps-research/py'
-if os.getcwd() != expected_path:
-    err('need to run this from: ' + expected_path)
-
 rd = 'reproject'
 if not exists(rd):
     os.mkdir(rd)
 
 # shapefile_reproject.py [input shapefile] [shapefile or raster to get CRS from] [output shapefile]
-'''
-tiles_4326 = 'sentinel2_bc_tiles_shp/Sentinel_BC_Tiles_EPSG_4326.shp'
-for f in ['prot_current_fire_points.shp', 'prot_current_fire_polys.shp']:
-    base = f.split('.')[0]
-    reproject = rd + sep + base + '_reproject.shp'
-    if exists(reproject):
-        os.remove(reproject)
-
-    cmd = ' '.join(['shapefile_reproject.py',
-                                    f,
-                                    tiles_4326,
-                                    reproject])
-    run(cmd)
-'''
 
 def print_feature(feature):
 	num_fields = feature.GetFieldCount()
