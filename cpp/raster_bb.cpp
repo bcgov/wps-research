@@ -99,7 +99,7 @@ int main(int argc, char ** argv){
       else{
         RADIANCE = ((double)d) / 10000.;
         T = ((h * c) / (K * Lambda))  / log((2. * h * pow(c, 2.) * pow(Lambda, -5.) / (RADIANCE * 1000000.)) + 1.);
-        T -= 273.15;
+        //T -= 273.15;
       }
       if(i %1000 == 0) printf("cwl %f d %f RAD %e T %f\n", lambda[k],d, RADIANCE, (float)T);
       dat[i + k * np] = (float)T;
