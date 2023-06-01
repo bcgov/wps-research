@@ -46,6 +46,7 @@ import os
 import sys
 import shutil
 import multiprocessing as mp
+from envi import envi_header_modify
 from misc import args, sep, exists, parfor, err, run, pd, band_names, read_hdr
 
 
@@ -228,9 +229,14 @@ for safe in safes:   # S2A_MSIL2A_20170804T190921_N0205_R056_T10UFB_20170804T191
         band_names_20 = ['"' + x.replace('"', '').replace('(', '[').replace(')',']') + '"' for x in band_names_20]
         samples, lines, bands = read_hdr(shn)
         #     err('envi_header_modify.py [.hdr file to modify] [nrow] [ncol] [nband] [band 1 name]... [band n name]')
-        cmd = 'python3 ~/GitHub/wps-research/py/envi_header_modify.py ' + shn + ' ' + str(lines) + ' ' + str(samples) + ' ' + str(bands) + ' ' + ' '.join(band_names_20)
-        print([cmd])
-        run(cmd)
+        
+        envi_header_modify(['python3 ' + pd + sep + 'envi_header_modify.py', 
+                            shn,
+                            str(lines), 
+                            str(samples), 
+                            str(bands)] + [z.replace('"', '') for z in band_names_20])
+        # print([cmd])
+        # run(cmd)
 
     cmd = ['python3',
             pd + 'envi_header_cat.py',
