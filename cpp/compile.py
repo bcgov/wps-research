@@ -126,3 +126,11 @@ of.close()
 run("chmod 755 compile.sh")
 run("./compile.sh")
 run('rm ' + cd + 'wrap-py*')
+
+print('''
+# if not already installed, don't forget to install a current GDAL with 
+sudo apt install libopenjp2-7-dev libopenjp2-7 # or other newest jpeg2000 library
+cmake ..
+cmake --build .
+cmake --build . --target install
+''')
