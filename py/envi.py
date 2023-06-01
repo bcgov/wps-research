@@ -48,9 +48,9 @@ def envi_header_band_names(args):
 
 
 def envi_update_band_names(args):
-
-    # transfer band names from one file to another. Useful if you run a program that throws band name info away!
-    from misc import args, sep, exists, pd
+    print("envi_update_band_names", [args])
+    # transfer band names from one file to  another. Useful if you run a program that throws band name info away!
+    from misc import args, sep, exists, pd, get_band_names_line_idx
 
     if len(args) < 3:
         err('envi_update_band_names.py [.hdr file with band names to use] ' +
@@ -269,6 +269,7 @@ def envi_header_cleanup(args):
 
 
 def envi_header_cat(args):
+    print("envi_header_cat", args)
     from misc import exists, pd
     if len(args) < 4:
         err("envi_header_cat.py [.hdr file #1] " +
@@ -347,5 +348,3 @@ def envi_header_cat(args):
         print("+w", args[3])
         f.write('\n'.join(lines2).encode())
         f.close()
-
-
