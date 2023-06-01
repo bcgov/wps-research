@@ -47,6 +47,44 @@ def envi_header_band_names(args):
     return bandname_lines
 
 
+def envi_update_band_names(args):
+
+    # transfer band names from one file to another. Useful if you run a program that throws band name info away!
+    from misc import args, sep, exists, pd
+
+    if len(args) < 3:
+        err('envi_update_band_names.py [.hdr file with band names to use] ' +
+            '[.hdr file with band names to overwrite]')
+
+    if not exists(args[1]) or not exists(args[2]):
+        err('please check input files:\n\t' + args[1] + '\n\t' + args[2])
+
+    # put the band name fields in the expected places
+    envi_header_cleanup([pd + 'envi_header_cleanup.py',
+                         args[1]])
+    envi_header_cleanup([pd + 'envi_header_cleanup.py',
+                         args[2]])
+
+    i_dat, o_dat = open(args[1]).read(),  open(args[2]).read()
+
+    def get_band_names_lines(hdr):
+        idx = get_band_names_line_idx(hdr)
+        lines = open(hdr).readlines()
+        return [lines[i] for i in idx], idx
+
+    [bn1, ix1], [bn2, ix2] = get_band_names_lines(args[1]),\
+                             get_band_names_lines(args[2])
+
+    lines = o_dat.strip().split('\n')
+
+    ix = 0
+    for i in range(0, len(lines)):
+        line = lines[i]  # for every line in the output file...
+        if i in ix2:  # if it's supposed to be a band-names line!
+            lines[i] = bn1[ix].rstrip()  # replace it with the band-names line..
+            ix += 1
+    open(args[2], 'wb').write('\n'.join(lines).encode()) # write the result
+
 
 def envi_header_modify(args):
     print("envi_header_modify", args)
@@ -309,3 +347,5 @@ def envi_header_cat(args):
         print("+w", args[3])
         f.write('\n'.join(lines2).encode())
         f.close()
+
+
