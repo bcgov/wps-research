@@ -17,7 +17,7 @@ cmds = []
 for L in lines:
 	if not exists('resample' + sep + L):
 		cmds += [' '.join(['gdalwarp',
-                           '-wo NUM_THREADS=2',
+                           '-wo NUM_THREADS=8',
                            '-multi',
                            '-r bilinear',
                            '-srcnodata nan',
@@ -27,7 +27,7 @@ for L in lines:
                            '-t_srs EPSG:' + str(EPSG),
                            L,
                            'resample' + sep + L])]
-parfor(run, cmds, 2)
+parfor(run, cmds, 8)
 
 run(' '.join(['gdalbuildvrt',
               '-srcnodata nan',
@@ -39,7 +39,7 @@ run(' '.join(['gdalbuildvrt',
 
 if not exists('merge.bin'):
 	run(' '.join(['gdalwarp',
-                  '-wo NUM_THREADS=2',
+                  '-wo NUM_THREADS=16',
                   '-multi',
                   '-overwrite',
                   '-r bilinear',
