@@ -1,4 +1,5 @@
-'''20230526 note: should have target CRS in EPSG format as a parameter!
+'''20230601: note: need to parallelize on the first for loop.
+20230526 note: should have target CRS in EPSG format as a parameter!
 
 20230515 add swir-only option. NOte: need to modify the band extraction to select the relevant bands only.
 20221026 Adapted from sentinel2_stack_all.py.
