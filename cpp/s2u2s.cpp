@@ -4,7 +4,7 @@ Note don't repeat steps if output files exist (check each step)
 */
 #include"misc.h"
 int main(int argc, char ** argv){
-  int x = system("safe_unzip_gid.py");
+  int x = system("safe_unzip.py");
   x = system("sentinel2_stack_all_20m.py 1 1");
   x = system("rm *swir*");
   x = system("clean");
