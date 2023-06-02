@@ -6,6 +6,7 @@ lines = os.popen("ls -1 *.bin").readlines()
 lines = [x.strip() for x in lines]
 
 for line in lines:
-    a = os.system("imv " + line)
+    if line != "tmp_subset.bin":
+        a = os.system("imv " + line)
 
-
+# need to plot filename title on imv
