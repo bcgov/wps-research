@@ -1,4 +1,5 @@
 '''20230601: note: need to parallelize on the first for loop.
+        ******* Also need to clean up to eliminate extra python interpreters
 20230526 note: should have target CRS in EPSG format as a parameter!
 
 20230515 add swir-only option. NOte: need to modify the band extraction to select the relevant bands only.
@@ -56,7 +57,6 @@ swir_only = len(args) > 2
 
 N_THREAD = mp.cpu_count()
 ehc = pd + 'envi_header_cleanup.py' # envi header cleanup command.. makes file open in "imv" 
-# extract = pd + "sentinel2_extract.py" # command to extract a zip
 raster_files = [] # these will be the final rasters to concatenate
 
 '''before processing, sort zip files by date. Note, they would be already except the prefix
@@ -82,12 +82,6 @@ for safe in safes:   # S2A_MSIL2A_20170804T190921_N0205_R056_T10UFB_20170804T191
     if exists(sfn):
         print("+r", sfn)
         continue
-    #if exists(sfn):
-    #    run("raster_zero_to_nan " + sfn)
-    #    continue
-    #print("TILE_ID", TILE_ID)
-    #print("DATE", DATE)
-    #sys.exit(1)
     cmds = []; #print(safe)
     ''' ls -1 *.bin
      SENTINEL2_L2A_10m_EPSG_32610.bin
@@ -188,15 +182,6 @@ for safe in safes:   # S2A_MSIL2A_20170804T190921_N0205_R056_T10UFB_20170804T191
     else:
         resample([m60, m20, m60r])
 
-    #try:
-    #    sfn = (safe + sep + m10.split(sep)[-1].replace("_10m", "")[:-4]
-    #            + '_20m.bin')  # name of stacked file
-    #except:
-    #    sfn = (safe + sep + m20.split(sep)[-1].replace("_20m", "")[:-4]
-    #            + '_20m.bin')
-    #
-    #sfn = TILE_ID + '_' + DATE + '.bin'
-
     print("sfn", sfn)
     cmd = ['cat', # cat bands together, remember to cat the header files after
             m10r if not swir_only else '',
@@ -236,9 +221,6 @@ for safe in safes:   # S2A_MSIL2A_20170804T190921_N0205_R056_T10UFB_20170804T191
                             str(lines), 
                             str(samples), 
                             str(bands)] + [z.replace('"', '') for z in band_names_20])
-        # print([cmd])
-        # run(cmd)
-
     cmd = ['python3',
             pd + 'envi_header_cat.py',
             m60r[:-4] + '.hdr',
@@ -265,7 +247,7 @@ for safe in safes:   # S2A_MSIL2A_20170804T190921_N0205_R056_T10UFB_20170804T191
            sfn]
     run(' '.join(cmd))
     raster_files.append(sfn) # reorder is "in-place"... so not + '_reorder.bin')
-    # sys.exit(1) # would turn this on to debug one frame
+    # sys.exit(1) # turn this on to debug one frame
     # should check if "sfn" exists before doing anything on this folder.
 
     if False:
