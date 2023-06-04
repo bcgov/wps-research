@@ -9,6 +9,8 @@ import numpy as np
 import os.path as path
 from osgeo import gdal
 import multiprocessing as mp
+from joblib import Parallel, delayed
+
 try:
     import matplotlib.pyplot as plt
 except:
@@ -213,7 +215,7 @@ def twop_str(data, band_select = [3, 2, 1]):
             rgb[:, :, i] /= rng
     return rgb
 
-
+'''
 def parfor(my_function,  # function to run in parallel
            my_inputs,  # inputs evaluated by worker pool
            n_thread=mp.cpu_count()): # cpu threads to use
@@ -225,6 +227,15 @@ def parfor(my_function,  # function to run in parallel
         n_thread = (mp.cpu_count() if n_thread is None
                     else n_thread)
         return mp.Pool(n_thread).map(my_function, my_inputs)
+'''
+
+def parfor(my_function, my_inputs, n_thread=mp.cpu_count()):
+    if n_thread == 1:
+        return [my_function(my_inputs[i]) for i in range(len(my_inputs))]
+    else:
+        n_thread = mp.cpu_count() if n_thread is None else n_thread
+        return Parallel(n_jobs=n_thread)(delayed(my_function)(input) for input in my_inputs)
+
 
 
 def bsq_to_scikit(ncol, nrow, nband, d):
