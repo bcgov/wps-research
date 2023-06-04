@@ -34,7 +34,7 @@ if not exists(out_dir):
 
 files = [x.strip() for x in os.popen("ls -1 " + in_dir + sep + "*.bin").readlines()]
 
-def processing(c):
+def processing(f):
     of = out_dir + sep + f.split(sep)[-1]
     oh = of[:-3] + 'hdr'
 
