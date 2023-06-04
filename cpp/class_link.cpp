@@ -12,9 +12,7 @@ unordered_map<float, float> p; //<size_t, size_t> p; // disjoint-set forest / un
 set<str> merges;
 
 float find(float x){
-  if(p[x] == x){
-    return x;
-  }
+  if(p[x] == x) return x;
   else{
     p[x] = find(p[x]); // path compression
     return p[x];
@@ -22,11 +20,8 @@ float find(float x){
 }
 
 bool unite(float x, float y){
-  x = find(x);
-  y = find(y);
-  if(x == y){
-    return false; // already in same set
-  }
+  (x = find(x)), (y = find(y));
+  if(x == y) return false; // already in same set
   else{
     if(x < y) p[y] = x; // make x parent of y
     else p[x] = y;
@@ -69,9 +64,7 @@ int main(int argc, char ** argv){
     d = dat[i];
     if(d > 0){
       p[d] = d;
-      if(members.count(d) < 1){
-        members[d] = set<size_t>();
-      }
+      if(members.count(d) < 1) members[d] = set<size_t>();
       members[d].insert(i);
     }
   }
