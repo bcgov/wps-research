@@ -21,7 +21,7 @@ cmds = []
 for L in lines:
 	if not exists('resample' + sep + L):
 		cmds += [' '.join(['gdalwarp',
-                           '-wo NUM_THREADS=8',
+                           '-wo NUM_THREADS=16',
                            '-multi',
                            '-r bilinear',
                            '-srcnodata nan',
