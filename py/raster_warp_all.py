@@ -14,7 +14,7 @@ Note: from GDAL documentation:
 import os
 import sys
 import argparse
-from misc import err, run, args, exists, pd, sep
+from misc import err, run, args, exists, pd, sep, parfor
 # message = "python3 raster_warp_all.py [input raster folder] [output raster folder] # [extra arg: use NN resampling instead of bilinear (default)]"
 
 parser = argparse.ArgumentParser()
@@ -34,7 +34,7 @@ if not exists(out_dir):
 
 files = [x.strip() for x in os.popen("ls -1 " + in_dir + sep + "*.bin").readlines()]
 
-for f in files:
+def processing(c):
     of = out_dir + sep + f.split(sep)[-1]
     oh = of[:-3] + 'hdr'
 
@@ -54,3 +54,5 @@ for f in files:
     run('envi_header_cleanup.py ' + oh)
     run('rm ' + oh + '.bak')
     run('rm ' + of + '.aux.xml')
+
+parfor(processing, files, 16)
