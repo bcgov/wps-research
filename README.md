@@ -14,6 +14,9 @@ Includes A) data integration B) routines applying or implementing supervised and
 * [Fire mapping using Sentinel-2](https://github.com/bcgov/wps-fire-perimeter)
 
 # Sample results
+## Same-day/NRT SWIR mosaic over BC
+<img src="https://raw.githubusercontent.com/bcgov/wps-research/master/doc/20230525_may15-17_swir.gif" width="650">
+
 ## Fire mapping: date differencing and threshold
 <img src="doc/20220816_diff.png" width="650">
 
