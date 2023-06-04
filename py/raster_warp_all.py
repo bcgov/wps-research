@@ -40,7 +40,7 @@ def processing(c):
 
     if exists(of):
         print("Warning: file exists (skipping):", of)
-        continue
+        return
     # -r {nearest (default),bilinear,cubic,cubicspline,lanczos,average,rms,mode}
     s = 100. / args.scaling_factor
     cmd = ' '.join(['gdal_translate',
