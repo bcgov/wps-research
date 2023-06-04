@@ -8,6 +8,10 @@ EPSG = 3005  # BC Albers
 import os
 import sys
 from misc import run, parfor, exists, sep
+
+if len(sys.argv) > 1:
+    EPSG = 3347
+
 lines = [x.strip() for x in os.popen('ls -1 *.bin').readlines()]
 
 if not exists('resample'):
