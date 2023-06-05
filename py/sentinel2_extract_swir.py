@@ -42,6 +42,11 @@ geo_xform = target_sub_ds.GetGeoTransform()
 target_xs, target_ys = geo_xform[1], geo_xform[5]
 
 for [band, m, sub_dataset] in selected_bands:
+    w = sys.argv[1].split('_')  # split filename on '_'
+    ds = w[2].split('T')[0]  # date string
+    ofn = sys.argv[1][:-4] + "_" + m['BANDNAME'] + '.bin'
+    hdr_f = ofn[:-3] + 'hdr'  # output header file name
+
     band_name = m['BANDNAME']
     geotransform = sub_dataset.GetGeoTransform()
     px_sx, px_sy = geotransform[1], geotransform[5]
@@ -72,24 +77,19 @@ for [band, m, sub_dataset] in selected_bands:
         output_dataset = driver.CreateCopy("B9.bin", resampled_ds)
         resampled_ds = None
         input_ds = None
-
-
-    w = sys.argv[1].split('_')
-    ds = w[2].split('T')[0]
-    ofn = sys.argv[1][:-4] + "_" + m['BANDNAME'] + '.bin'
-    hdr_f = ofn[:-3] + 'hdr'  # output header file name
-    x_res, y_res = arrays[str(m)].shape
-    driver = gdal.GetDriverByName('ENVI')
-    output_dataset = driver.Create(ofn, x_res, y_res, 1, gdal.GDT_Float32)    
-    output_dataset.SetGeoTransform(sub_dataset.GetGeoTransform())
-    output_dataset.SetProjection(sub_dataset.GetProjection())
-    rb = output_dataset.GetRasterBand(1)
-    rb.SetNoDataValue(float('nan'))
-    rb.WriteArray(arrays[str(m)])
-    rb.SetDescription(' '.join([ds,  # dates string
-                                str(int(px_sx)) + 'm:',  # resolution
-                                band_name,   # band name and wavelength
-                                str(m['WAVELENGTH']) + str(m['WAVELENGTH_UNIT'])]))
+    else:
+        x_res, y_res = arrays[str(m)].shape
+        driver = gdal.GetDriverByName('ENVI')
+        output_dataset = driver.Create(ofn, x_res, y_res, 1, gdal.GDT_Float32)    
+        output_dataset.SetGeoTransform(sub_dataset.GetGeoTransform())
+        output_dataset.SetProjection(sub_dataset.GetProjection())
+        rb = output_dataset.GetRasterBand(1)
+        rb.SetNoDataValue(float('nan'))
+        rb.WriteArray(arrays[str(m)])
+        rb.SetDescription(' '.join([ds,  # dates string
+                                    str(int(px_sx)) + 'm:',  # resolution
+                                    band_name,   # band name and wavelength
+                                    str(m['WAVELENGTH']) + str(m['WAVELENGTH_UNIT'])]))
     
     # Close the datasets
     arrays[str(m)] = None
