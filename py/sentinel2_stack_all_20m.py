@@ -122,7 +122,7 @@ def extract_safe(safe): #    for safe in safes:   # S2A_MSIL2A_20170804T190921_N
                         cmds.append(cmd)
                         print(cmd)
     
-        parfor(run, cmds, 4)  # 4 hw mem channels a good guess?
+        parfor(run, cmds, int(mp.cpu_count()/2))  # 4 hw mem channels a good guess?
         bins = [x.strip() for x in os.popen("ls -1 " +
                                             safe +
                                             sep +
@@ -266,7 +266,7 @@ def extract_safe(safe): #    for safe in safes:   # S2A_MSIL2A_20170804T190921_N
         if swir_only:  # flip the band order for SWIR data
             run("raster_reorder_increasing_nm.py " + sfn + " 1")
  
-parfor(extract_safe, safes, mp.cpu_count()/2)
+parfor(extract_safe, safes, int(mp.cpu_count()/2))
 
 '''   
 if len(args) > 1 and len(args) < 3:
