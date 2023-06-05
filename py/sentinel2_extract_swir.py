@@ -13,6 +13,8 @@ from envi import envi_header_cleanup
 from osgeo import gdal
 import numpy as np
 import sys
+import os
+
 d = gdal.Open(sys.argv[1])
 subdatasets =  d.GetSubDatasets()
 desired_metadata = [{"BANDNAME": "B12"},
