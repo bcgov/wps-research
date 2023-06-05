@@ -3,7 +3,7 @@ import sys
 
 
 def envi_header_band_names(args): 
-    print("envi_header_band_names", args)
+    #print("envi_header_band_names", args)
      # print out band names from envi header file
     # check if this is redundant with misc.py
 
@@ -48,7 +48,7 @@ def envi_header_band_names(args):
 
 
 def envi_update_band_names(args):
-    print("envi_update_band_names", [args])
+    # print("envi_update_band_names", [args])
     # transfer band names from one file to  another. Useful if you run a program that throws band name info away!
     from misc import args, sep, exists, pd, get_band_names_line_idx
 
@@ -87,7 +87,7 @@ def envi_update_band_names(args):
 
 
 def envi_header_modify(args):
-    print("envi_header_modify", args)
+    # print("envi_header_modify", args)
     from misc import pd, err, exists, sep, get_band_names_line_idx
     '''update an ENVI header file:
         - band names portion
@@ -133,24 +133,24 @@ def envi_header_modify(args):
     # write new header file
     bn_new = args[5: 5 + int(nband)]
 
-    print("bn_new", bn_new)
+    # print("bn_new", bn_new)
     if len(bn_new) != int(nband):
         err('inconsistent input')
 
     lines_new += ['band names = {' + bn_new[0]]
-    print([bn_new[0]])
+    # print([bn_new[0]])
 
     for i in range(1, len(bn_new)):
         lines_new[-1] += ','
-        print([bn_new[i]])
+        #print([bn_new[i]])
         lines_new += [bn_new[i]]
     lines_new[-1] += '}'
-    print('+w', args[1])
+    # print('+w', args[1])
     open(args[1], 'wb').write('\n'.join(lines_new).encode())
 
 
 def envi_header_cleanup(args):
-    print("envi_header_cleanup", args)
+    # print("envi_header_cleanup", args)
     from misc import parfor, run, read_hdr, pd, sep
     '''Clean up envi header so that they can be opened in IMV
     20230601: add option to run without a new python interpreter
@@ -218,7 +218,7 @@ def envi_header_cleanup(args):
                 lines[i] = line.replace(',', '')
     
         if in_band_names:
-            print("*", line)
+            #print("*", line)
             bandname_lines.append(line) # track band names we have
         else:
             non_bandname_lines.append(line) # record non-band-name lines,
@@ -230,7 +230,7 @@ def envi_header_cleanup(args):
     
     if nb != n_band_names:
         if n_band_names > nb:
-            print("n_band_names", n_band_names, "nb", nb)
+            # print("n_band_names", n_band_names, "nb", nb)
             bandname_lines = bandname_lines[:nb]
             bandname_lines[-1] = bandname_lines[-1].strip() + "}"
         if n_band_names > 0 and n_band_names < nb:
@@ -252,7 +252,7 @@ def envi_header_cleanup(args):
     lines = non_bandname_lines + bandname_lines
     data = ('\n'.join(lines)).strip()
     
-    print(data)
+    # print(data)
     # sys.exit(1)
     open(in_file + '.bak', 'wb').write(open(in_file).read().encode())
     open(in_file, 'wb').write(data.encode())
@@ -269,7 +269,7 @@ def envi_header_cleanup(args):
 
 
 def envi_header_cat(args):
-    print("envi_header_cat", args)
+    # print("envi_header_cat", args)
     from misc import exists, pd
     if len(args) < 4:
         err("envi_header_cat.py [.hdr file #1] " +
