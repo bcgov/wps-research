@@ -1,10 +1,5 @@
-'''20230605 sentinel2_extract_swir.py'''
-from envi import envi_header_cleanup
-from osgeo import gdal
-import sys
-d = gdal.Open(sys.argv[1])
-subdatasets =  d.GetSubDatasets()
-'''
+'''20230605 sentinel2_extract_swir.py
+
 for subdataset in subdatasets:
     subdataset_path = subdataset[0]
     subdataset_dataset = gdal.Open(subdataset_path)
@@ -16,7 +11,11 @@ for subdataset in subdatasets:
         #print(f"Metadata for {subdataset_path}: Band {i}")
         #print(band_metadata)
 '''
-# band metadata to match
+from envi import envi_header_cleanup
+from osgeo import gdal
+import sys
+d = gdal.Open(sys.argv[1])
+subdatasets =  d.GetSubDatasets()
 desired_metadata = [{"BANDNAME": "B12"},
                     {"BANDNAME": "B11"},
                     {"BANDNAME": "B9"}]
