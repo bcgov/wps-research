@@ -105,7 +105,7 @@ def envi_header_modify(args):
 
     # need to run this first to make sure the band name fields are where we expect!
     if len(args) < int(nband) + 5:
-        envi_header_cleanup([pd + 'envi_header_cleanup.py',
+        envi_header_cleanup([None,
                              args[1]])
     
     lines = open(args[1]).read().strip().split('\n')
@@ -260,7 +260,7 @@ def envi_header_cleanup(args):
     # now trim the band names strings
     band_names = [x.strip() for x in envi_header_band_names([pd + sep + 'envi_header_band_names.py', in_file])]
     samples, lines, bands = read_hdr(in_file)
-    envi_header_modify([pd + sep + 'envi_header_modify.py',
+    envi_header_modify([None,
                         in_file,
                         lines,
                         samples,
