@@ -10,7 +10,7 @@ for subdataset in subdatasets:
         #print(f"Metadata for {subdataset_path}: Band {i}")
         #print(band_metadata)'''
 from envi import envi_header_cleanup
-from misc import err, args, exist
+from misc import err, args, exist, run
 from osgeo import gdal
 import numpy as np
 import sys
@@ -72,19 +72,19 @@ for [band, m, sub_dataset] in selected_bands:
     band_name = m['BANDNAME']
     geotransform = sub_dataset.GetGeoTransform()
     px_sx, px_sy = geotransform[1], geotransform[5]
-    nodata_val = band.GetNoDataValue()
-    
+    # nodata_val = band.GetNoDataValue()
+ 
     # set no-data value to NAN
-    ix = arrays[str(m)] == nodata_val
-    arrays[str(m)][ix] = float('nan')
-    band.SetNoDataValue(float('nan'))
-
+    # band.SetNoDataValue(float('nan'))
+    # ix = arrays[str(m)] == nodata_val
+    # arrays[str(m)][ix] = float('nan')
+   
     if band_name == "B9":
         mem_driver = gdal.GetDriverByName('MEM')
         input_ds = mem_driver.Create('', band.XSize, band.YSize, 1, gdal.GDT_Float32)
         input_ds.SetGeoTransform(sub_dataset.GetGeoTransform())
         input_ds.SetProjection(sub_dataset.GetProjection())
-        input_ds.GetRasterBand(1).SetNoDataValue(float('nan'))
+        # input_ds.GetRasterBand(1).SetNoDataValue(float('nan'))
         input_ds.GetRasterBand(1).WriteArray(arrays[str(m)]) 
         
         resampled_geotransform = list(input_ds.GetGeoTransform())
@@ -93,16 +93,17 @@ for [band, m, sub_dataset] in selected_bands:
         resampled_ds = mem_driver.Create('', target_sub_ds.RasterXSize, target_sub_ds.RasterYSize, 1, gdal.GDT_Float32) 
         resampled_ds.SetGeoTransform(resampled_geotransform)
         resampled_ds.SetProjection(input_ds.GetProjection())
-        resampled_ds.GetRasterBand(1).SetNoDataValue(float('nan'))
+        # resampled_ds.GetRasterBand(1).SetNoDataValue(float('nan'))
 
         gdal.Warp(resampled_ds, input_ds, xRes=target_xs, yRes=target_ys, resampleAlg='bilinear')
         arrays[str(m)] = resampled_ds.GetRasterBand(1).ReadAsArray() 
         resampled_ds = None
         input_ds = None
 
+
     # add band to the stack
     rb = stack_ds.GetRasterBand(bi)
-    rb.SetNoDataValue(float('nan'))
+    # rb.SetNoDataValue(float('nan'))
     rb.WriteArray(arrays[str(m)])
     rb.SetDescription(' '.join([ds,  # dates string
                                 str(int(px_sx)) + 'm:',  # resolution
@@ -111,12 +112,12 @@ for [band, m, sub_dataset] in selected_bands:
     arrays[str(m)] = None  # free memory
     bi += 1 
 
-hdr_f = stack_fn = args[1][:-4] + '.hdr'
+stack_ds = None
+hdr_f =  args[1][:-4] + '.hdr'
+envi_header_cleanup([None, hdr_f])
 xml_f = stack_fn + '.aux.xml'
 hdr_b = hdr_f + '.bak'
 for f in [xml_f, hdr_b]:
     if os.path.exists(f):
         os.remove(f)
-envi_header_cleanup([None, hdr_f])
-stack_ds = None
-print('+w', stack_fn)
+run('raster_zero_to_nan ' + stack_fn)
