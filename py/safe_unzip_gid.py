@@ -5,6 +5,7 @@ Used to be just for tiles that are "on fire" according to bcws data
 import os
 import sys
 import datetime
+import multiprocessing as mp
 from misc import parfor, sep
 
 from gid import bc
@@ -47,7 +48,7 @@ def run(c):
 for c in cmds:
     print(c)
 
-parfor(run, cmds, 4)
+parfor(run, cmds, mp.cpu_count())
 
 print("observed: ("  + str(len(observed)) + '/' + str(len(select)) + ') ' + ' '.join(observed))
 print("not obs.: ("  + str(len(not_observed)) + '/' + str(len(select)) + ') ' +  ' '.join(not_observed))
