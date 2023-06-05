@@ -68,8 +68,6 @@ for [band, m, sub_dataset] in selected_bands:
         input_ds.GetRasterBand(1).SetNoDataValue(float('nan'))
         input_ds.GetRasterBand(1).WriteArray(arrays[str(m)]) 
         
-        # resampled_ds = gdal.Warp('out.tif', input_ds, xRes=target_xs, yRes=target_ys, resampleAlg='bilinear')
-
         resampled_geotransform = list(input_ds.GetGeoTransform())
         resampled_geotransform[1] = target_xs
         resampled_geotransform[5] = target_ys 
@@ -78,15 +76,11 @@ for [band, m, sub_dataset] in selected_bands:
         resampled_ds.SetProjection(input_ds.GetProjection())
         resampled_ds.GetRasterBand(1).SetNoDataValue(float('nan'))
 
-        # Resample the dataset using gdal.Warp
         gdal.Warp(resampled_ds, input_ds, xRes=target_xs, yRes=target_ys, resampleAlg='bilinear')
-        print("dome")
-        input_ds = None
-        
         driver = gdal.GetDriverByName("ENVI")
         output_dataset = driver.CreateCopy("B9.bin", resampled_ds)
         resampled_ds = None
-        
+        input_ds = None
 
 
     w = sys.argv[1].split('_')
