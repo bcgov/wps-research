@@ -96,5 +96,7 @@ for [band, m, sub_dataset] in selected_bands:
         output_dataset = None  
     # Close the datasets
     arrays[str(m)] = None
-    os.remove(ofn + 'aux.xml')
+    xml_f = ofn + '.aux.xml'
+    if os.path.exists(xml_f):
+        os.remove(xml_f)
     envi_header_cleanup([None, hdr_f])
