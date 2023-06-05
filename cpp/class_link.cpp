@@ -2,9 +2,9 @@
 #include<unordered_set>
 #include<unordered_map>
 /* 20220216 group nearby (non-zero) segs using a moving window: any two labels
-in same window get merged 
+in same window get merged
 
-20220513: option to only write out seg connected to target 
+20220513: option to only write out seg connected to target
 
 NOTE: for class maps, need to use 0 as NULL class (no NAN for uint) */
 unordered_map<float, set<size_t>> members;
@@ -12,9 +12,7 @@ unordered_map<float, float> p; //<size_t, size_t> p; // disjoint-set forest / un
 set<str> merges;
 
 float find(float x){
-  if(p[x] == x){
-    return x;
-  }
+  if(p[x] == x) return x;
   else{
     p[x] = find(p[x]); // path compression
     return p[x];
@@ -22,11 +20,8 @@ float find(float x){
 }
 
 bool unite(float x, float y){
-  x = find(x);
-  y = find(y);
-  if(x == y){
-    return false; // already in same set
-  }
+  (x = find(x)), (y = find(y));
+  if(x == y) return false; // already in same set
   else{
     if(x < y) p[y] = x; // make x parent of y
     else p[x] = y;
@@ -43,7 +38,7 @@ int main(int argc, char ** argv){
   size_t d, np, k, n, ij, nrow, ncol, nband;
   long int target_row, target_col;
   target_row = target_col = -1;
-  
+
   if(argc >= 5){
     target_row = atol(argv[3]);
     target_col = atol(argv[4]);
@@ -69,15 +64,13 @@ int main(int argc, char ** argv){
     d = dat[i];
     if(d > 0){
       p[d] = d;
-      if(members.count(d) < 1){
-        members[d] = set<size_t>();
-      }
+      if(members.count(d) < 1) members[d] = set<size_t>();
       members[d].insert(i);
     }
   }
 
   if(target_row < 0){
-    // assume debug mode without target. 
+    // assume debug mode without target.
     for(unordered_map<float, set<size_t>>::iterator it = members.begin(); it != members.end(); it++){
       cout << endl;
       cout << it->first;
@@ -124,9 +117,9 @@ int main(int argc, char ** argv){
             merges.insert(to_string(parent) + str(",") + to_string(*it));
           }
         }
-	if(target_row < 0){
-		cout << "iter" << iter << " merge: i " << i << " j " << j << merge << endl;
-	}
+        if(target_row < 0){
+          cout << "iter" << iter << " merge: i " << i << " j " << j << merge << endl;
+        }
         // optional: write provisinal output this step
         if(debug){
           str ofn_i(str("merge_") + to_string(iter) + str(".bin"));
@@ -138,11 +131,11 @@ int main(int argc, char ** argv){
           }
 
           cout << merges << endl;
-	  if(target_row < 0){
+          if(target_row < 0){
             FILE * f = wopen(ofn_i);
             fwrite(out, sizeof(float), np, f);
             hwrite(hfn_i, nrow, ncol, 1, 4); /* type 16 = size_t */
-	  }
+          }
         }
         iter ++;
       }
@@ -155,9 +148,8 @@ int main(int argc, char ** argv){
     out[ij] = (d == (size_t)0) ? (size_t)0 : find(d);
   }
 
-  if(target_row < 0){
-    cout << merges << endl;
-  }
+  if(target_row < 0) cout << merges << endl;
+
   FILE * f;
   if(target_row < 0){
     f = wopen(ofn);
@@ -173,9 +165,7 @@ int main(int argc, char ** argv){
     str ohn2(fn + "_link_target.hdr");
     float target_class = out[(target_row * ncol) + target_col];
     cout << "target_class " << target_class << endl;
-    for0(i, np){
-      out[i] = ((out[i] == target_class) ? 1.: 0.);
-    }
+    for0(i, np) out[i] = ((out[i] == target_class) ? 1.: 0.);
 
     f = wopen(ofn2);
     fwrite(out, sizeof(float), np, f);
