@@ -13,6 +13,7 @@ for subdataset in subdatasets:
 '''
 from envi import envi_header_cleanup
 from osgeo import gdal
+import numpy as np
 import sys
 d = gdal.Open(sys.argv[1])
 subdatasets =  d.GetSubDatasets()
@@ -35,17 +36,59 @@ for subdataset in d.GetSubDatasets():
                 try:
                     if band_metadata[k] == j[k]:  # print("Selected: ", band_metadata)
                         selected_bands += [[band, band_metadata, subdataset_dataset]]
-                        arrays[str(band_metadata)] = band.ReadAsArray()
+                        arrays[str(band_metadata)] = band.ReadAsArray().astype(np.float32)
+                        print("type", type(arrays[str(band_metadata)]))
                 except:
                     pass
 
 resampled_bands = []
+target_sub_ds = selected_bands[0][2]
+geo_xform = target_sub_ds.GetGeoTransform()
+target_xs, target_ys = geo_xform[1], geo_xform[5]
+
 for [band, m, sub_dataset] in selected_bands:
+    band_name = m['BANDNAME']
     geotransform = sub_dataset.GetGeoTransform()
     # Extract the pixel size (resolution)
-    px_size_x = geotransform[1]
-    px_size_y = geotransform[5]
-    #if m['BANDNAME'] == "B9":
+    px_sx = geotransform[1]
+    px_sy = geotransform[5]
+    nodata_val = band.GetNoDataValue()
+
+    print(arrays.keys())
+    ix = arrays[str(m)] == nodata_val
+    arrays[str(m)][ix] = float('nan')
+    band.SetNoDataValue(float('nan'))
+
+    if band_name == "B9":
+        mem_driver = gdal.GetDriverByName('MEM')
+        
+        input_ds = mem_driver.Create('', band.XSize, band.YSize, 1, gdal.GDT_Float32)
+        input_ds.SetGeoTransform(sub_dataset.GetGeoTransform())
+        input_ds.SetProjection(sub_dataset.GetProjection())
+        input_ds.GetRasterBand(1).SetNoDataValue(float('nan'))
+        input_ds.GetRasterBand(1).WriteArray(arrays[str(m)]) 
+        
+        # resampled_ds = gdal.Warp('out.tif', input_ds, xRes=target_xs, yRes=target_ys, resampleAlg='bilinear')
+
+        resampled_geotransform = list(input_ds.GetGeoTransform())
+        resampled_geotransform[1] = target_xs
+        resampled_geotransform[5] = target_ys 
+        resampled_ds = mem_driver.Create('', target_sub_ds.RasterXSize, target_sub_ds.RasterYSize, 1, gdal.GDT_Float32) 
+        resampled_ds.SetGeoTransform(resampled_geotransform)
+        resampled_ds.SetProjection(input_ds.GetProjection())
+        resampled_ds.GetRasterBand(1).SetNoDataValue(float('nan'))
+
+        # Resample the dataset using gdal.Warp
+        gdal.Warp(resampled_ds, input_ds, xRes=target_xs, yRes=target_ys, resampleAlg='bilinear')
+        print("dome")
+        input_ds = None
+        
+        driver = gdal.GetDriverByName("ENVI")
+        output_dataset = driver.CreateCopy("B9.bin", resampled_ds)
+        resampled_ds = None
+        
+
+
     w = sys.argv[1].split('_')
     ds = w[2].split('T')[0]
     ofn = sys.argv[1][:-4] + "_" + m['BANDNAME'] + '.bin'
@@ -61,10 +104,11 @@ for [band, m, sub_dataset] in selected_bands:
     output_dataset.SetGeoTransform(sub_dataset.GetGeoTransform())
     output_dataset.SetProjection(sub_dataset.GetProjection())
     rb = output_dataset.GetRasterBand(1)
+    rb.SetNoDataValue(float('nan'))
     rb.WriteArray(arrays[str(m)])
     rb.SetDescription(' '.join([ds,
-                                str(int(px_size_x)) + 'm:', 
-                                m['BANDNAME'], 
+                                str(int(px_sx)) + 'm:', 
+                                band_name, 
                                 str(m['WAVELENGTH']) + str(m['WAVELENGTH_UNIT'])]))
     
     # Close the datasets
