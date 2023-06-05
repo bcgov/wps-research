@@ -34,34 +34,23 @@ for subdataset in d.GetSubDatasets():
         for k in band_metadata:
             for j in desired_metadata:
                 try:
-                    if band_metadata[k] == j[k]:
-                        # print("Selected: ", band_metadata)
+                    if band_metadata[k] == j[k]:  # print("Selected: ", band_metadata)
                         selected_bands += [[band, band_metadata, subdataset_dataset]]
-                        #if j['BANDNAME'] == "B9":
                         arrays[str(band_metadata)] = band.ReadAsArray()
                 except:
                     pass
 
-#print(selected_bands)
-#print(arrays)
-# resample band if required
 resampled_bands = []
 for [band, m, sub_dataset] in selected_bands:
     geotransform = sub_dataset.GetGeoTransform()
     # Extract the pixel size (resolution)
     px_size_x = geotransform[1]
     px_size_y = geotransform[5]
-
-    #print("band", m, band)
-    print(m)
     #if m['BANDNAME'] == "B9":
     w = sys.argv[1].split('_')
-    print(w)
     ds = w[2].split('T')[0]
     ofn = sys.argv[1][:-4] + "_" + m['BANDNAME'] + '.bin'
     hdr_f = ofn[:-3] + 'hdr'  # output header file name
-    # print("+w", ofn)    
-    print("+w", hdr_f)
     x_res, y_res = arrays[str(m)].shape
     driver = gdal.GetDriverByName('ENVI')
     output_dataset = driver.Create(ofn,
