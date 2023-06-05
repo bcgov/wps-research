@@ -266,7 +266,7 @@ def extract_safe(safe): #    for safe in safes:   # S2A_MSIL2A_20170804T190921_N
         if swir_only:  # flip the band order for SWIR data
             run("raster_reorder_increasing_nm.py " + sfn + " 1")
  
-parfor(extract_safe, safes, 8)
+parfor(extract_safe, safes, mp.cpu_count()/2)
 
 '''   
 if len(args) > 1 and len(args) < 3:
