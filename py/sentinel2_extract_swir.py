@@ -80,20 +80,15 @@ for [band, m, sub_dataset] in selected_bands:
     hdr_f = ofn[:-3] + 'hdr'  # output header file name
     x_res, y_res = arrays[str(m)].shape
     driver = gdal.GetDriverByName('ENVI')
-    output_dataset = driver.Create(ofn,
-                                   x_res,
-                                   y_res,
-                                   1,
-                                   gdal.GDT_Float32)    
-    # Set the geotransform and projection from the input dataset
+    output_dataset = driver.Create(ofn, x_res, y_res, 1, gdal.GDT_Float32)    
     output_dataset.SetGeoTransform(sub_dataset.GetGeoTransform())
     output_dataset.SetProjection(sub_dataset.GetProjection())
     rb = output_dataset.GetRasterBand(1)
     rb.SetNoDataValue(float('nan'))
     rb.WriteArray(arrays[str(m)])
-    rb.SetDescription(' '.join([ds,
-                                str(int(px_sx)) + 'm:', 
-                                band_name, 
+    rb.SetDescription(' '.join([ds,  # dates string
+                                str(int(px_sx)) + 'm:',  # resolution
+                                band_name,   # band name and wavelength
                                 str(m['WAVELENGTH']) + str(m['WAVELENGTH_UNIT'])]))
     
     # Close the datasets
