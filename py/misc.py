@@ -71,7 +71,7 @@ def hdr_fn(bin_fn):  # return filename for hdr file, given binfile name
 
 def read_hdr(hdr):
     samples, lines, bands = 0, 0, 0
-    print('+r', hdr)
+    # print('+r', hdr)
     for line in open(hdr).readlines():
         line = line.strip()
         words = line.split('=')
