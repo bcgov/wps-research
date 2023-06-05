@@ -1,5 +1,4 @@
 '''20230605 sentinel2_extract_swir.py
-
 for subdataset in subdatasets:
     subdataset_path = subdataset[0]
     subdataset_dataset = gdal.Open(subdataset_path)
@@ -9,8 +8,7 @@ for subdataset in subdatasets:
         band = subdataset_dataset.GetRasterBand(i)
         band_metadata = band.GetMetadata()
         #print(f"Metadata for {subdataset_path}: Band {i}")
-        #print(band_metadata)
-'''
+        #print(band_metadata)'''
 from envi import envi_header_cleanup
 from osgeo import gdal
 import numpy as np
@@ -20,10 +18,9 @@ subdatasets =  d.GetSubDatasets()
 desired_metadata = [{"BANDNAME": "B12"},
                     {"BANDNAME": "B11"},
                     {"BANDNAME": "B9"}]
-# select bands
 arrays = {}
 selected_bands = []
-for subdataset in d.GetSubDatasets():
+for subdataset in d.GetSubDatasets():  # select bands
     subdataset_path = subdataset[0]
     subdataset_dataset = gdal.Open(subdataset_path)
 
@@ -49,19 +46,15 @@ target_xs, target_ys = geo_xform[1], geo_xform[5]
 for [band, m, sub_dataset] in selected_bands:
     band_name = m['BANDNAME']
     geotransform = sub_dataset.GetGeoTransform()
-    # Extract the pixel size (resolution)
-    px_sx = geotransform[1]
-    px_sy = geotransform[5]
+    px_sx, px_sy = geotransform[1], geotransform[5]
     nodata_val = band.GetNoDataValue()
-
-    print(arrays.keys())
+    
     ix = arrays[str(m)] == nodata_val
     arrays[str(m)][ix] = float('nan')
     band.SetNoDataValue(float('nan'))
 
     if band_name == "B9":
         mem_driver = gdal.GetDriverByName('MEM')
-        
         input_ds = mem_driver.Create('', band.XSize, band.YSize, 1, gdal.GDT_Float32)
         input_ds.SetGeoTransform(sub_dataset.GetGeoTransform())
         input_ds.SetProjection(sub_dataset.GetProjection())
