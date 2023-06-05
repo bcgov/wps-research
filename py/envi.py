@@ -41,8 +41,8 @@ def envi_header_band_names(args):
     bandname_lines[-1] = bandname_lines[-1].strip('}')
     bandname_lines = [x.strip(',').strip() for x in bandname_lines]
 
-    for b in bandname_lines:
-        print(b)
+    #for b in bandname_lines:
+    #    print(b)
 
     return bandname_lines
 
@@ -312,10 +312,10 @@ def envi_header_cat(args):
     bn_1, bn_2 = get_band_names_lines(i_dat), get_band_names_lines(o_dat)
     lines1 , lines2 = i_dat.strip().split('\n'), o_dat.strip().split('\n')
     
-    print(i_dat)
-    print(o_dat)
+    # print(i_dat)
+    # print(o_dat)
     band_count = len(bn_1) + len(bn_2) # add band counts
-    print("band_count", band_count)
+    # print("band_count", band_count)
     
     if lines2[-1] not in bn_2:
         print("unexpected header formatting")
