@@ -76,6 +76,7 @@ for [band, m, sub_dataset] in selected_bands:
         driver = gdal.GetDriverByName("ENVI")
         output_dataset = driver.CreateCopy("B9.bin", resampled_ds)
         resampled_ds = None
+        output_ds = None
         input_ds = None
     else:
         x_res, y_res = arrays[str(m)].shape
@@ -90,8 +91,7 @@ for [band, m, sub_dataset] in selected_bands:
                                     str(int(px_sx)) + 'm:',  # resolution
                                     band_name,   # band name and wavelength
                                     str(m['WAVELENGTH']) + str(m['WAVELENGTH_UNIT'])]))
-    
+        output_dataset = None  
     # Close the datasets
     arrays[str(m)] = None
-    output_dataset = None
     envi_header_cleanup([None, hdr_f])
