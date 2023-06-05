@@ -229,13 +229,16 @@ def parfor(my_function,  # function to run in parallel
         return mp.Pool(n_thread).map(my_function, my_inputs)
 '''
 
-def parfor(my_function, my_inputs, n_thread=mp.cpu_count()):
+def parfor(my_function, my_inputs, n_thread=int(mp.cpu_count())):
     if n_thread == 1:
         return [my_function(my_inputs[i]) for i in range(len(my_inputs))]
     else:
         n_thread = mp.cpu_count() if n_thread is None else n_thread
-        return Parallel(n_jobs=n_thread)(delayed(my_function)(input) for input in my_inputs)
 
+        if my_inputs is None or type(my_inputs) == list and len(my_inputs) == 0:
+            return []
+
+        return Parallel(n_jobs=n_thread)(delayed(my_function)(input) for input in my_inputs)
 
 
 def bsq_to_scikit(ncol, nrow, nband, d):
