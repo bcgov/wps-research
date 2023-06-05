@@ -74,7 +74,7 @@ for [band, m, sub_dataset] in selected_bands:
 
         gdal.Warp(resampled_ds, input_ds, xRes=target_xs, yRes=target_ys, resampleAlg='bilinear')
         driver = gdal.GetDriverByName("ENVI")
-        output_dataset = driver.CreateCopy("B9.bin", resampled_ds)
+        output_dataset = driver.CreateCopy(ofn, resampled_ds)
         resampled_ds = None
         output_ds = None
         input_ds = None
