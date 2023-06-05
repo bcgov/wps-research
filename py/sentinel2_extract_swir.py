@@ -55,7 +55,7 @@ for subdataset in d.GetSubDatasets():  # select bands
                         arrays[str(band_metadata)] = band.ReadAsArray().astype(np.float32)
                 except: pass
 
-# reorder the band selection
+# reorder the selection
 selected_bands = [sbs['B12'], sbs['B11'], sbs['B9']]
 
 resampled_bands = []
@@ -69,18 +69,16 @@ stack_ds.SetGeoTransform(target_sub_ds.GetGeoTransform())
 
 bi = 1
 for [band, m, sub_dataset] in selected_bands:
-    # ofn = args[1][:-4] + "_" + m['BANDNAME'] + '.bin'
-    # hdr_f = ofn[:-3] + 'hdr'  # output header file name
     band_name = m['BANDNAME']
     geotransform = sub_dataset.GetGeoTransform()
     px_sx, px_sy = geotransform[1], geotransform[5]
     nodata_val = band.GetNoDataValue()
     
+    # set no-data value to NAN
     ix = arrays[str(m)] == nodata_val
     arrays[str(m)][ix] = float('nan')
     band.SetNoDataValue(float('nan'))
 
-    band_i = None
     if band_name == "B9":
         mem_driver = gdal.GetDriverByName('MEM')
         input_ds = mem_driver.Create('', band.XSize, band.YSize, 1, gdal.GDT_Float32)
@@ -99,18 +97,10 @@ for [band, m, sub_dataset] in selected_bands:
 
         gdal.Warp(resampled_ds, input_ds, xRes=target_xs, yRes=target_ys, resampleAlg='bilinear')
         arrays[str(m)] = resampled_ds.GetRasterBand(1).ReadAsArray() 
-        # stack_ds.GetRasterBand(bi).WriteArray(arrays[str(m)]) # resampled_ds.GetRasterBand(1)) # .AsArray())
-        # driver = gdal.GetDriverByName("ENVI")
-        # output_dataset = driver.CreateCopy(ofn, resampled_ds)
         resampled_ds = None
         input_ds = None
-    else:
-        pass
-        # x_res, y_res = arrays[str(m)].shape
-        # driver = gdal.GetDriverByName('ENVI')
-        # output_dataset = driver.Create(ofn, x_res, y_res, 1, gdal.GDT_Float32)    
-        # output_dataset.SetGeoTransform(sub_dataset.GetGeoTransform())
-        # output_dataset.SetProjection(sub_dataset.GetProjection())
+
+    # add band to the stack
     rb = stack_ds.GetRasterBand(bi)
     rb.SetNoDataValue(float('nan'))
     rb.WriteArray(arrays[str(m)])
@@ -118,8 +108,7 @@ for [band, m, sub_dataset] in selected_bands:
                                 str(int(px_sx)) + 'm:',  # resolution
                                 band_name,   # band name and wavelength
                                 str(m['WAVELENGTH']) + str(m['WAVELENGTH_UNIT'])]))
-    # Close the datasets
-    arrays[str(m)] = None
+    arrays[str(m)] = None  # free memory
     bi += 1 
 
 hdr_f = stack_fn = args[1][:-4] + '.hdr'
@@ -129,6 +118,5 @@ for f in [xml_f, hdr_b]:
     if os.path.exists(f):
         os.remove(f)
 envi_header_cleanup([None, hdr_f])
-
 stack_ds = None
 print('+w', stack_fn)
