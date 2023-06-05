@@ -131,6 +131,7 @@ int main(int argc, char ** argv){
   str dates(exec(cmd.c_str()));
   vector<str> date_strings(split(dates, '\n'));
   int number_of_dates = date_strings.size(); // number of dates: hence number of bands per date
+  if(number_of_dates < 1) number_of_dates = 1;
 
   parseHeaderFile(hfn, nr, nc, nb);
   printf("nrow %zu ncol %zu nband %zu\n", nr, nc, nb);
