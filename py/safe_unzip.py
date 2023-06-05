@@ -2,6 +2,7 @@
 '''
 import os
 import sys
+import multiprocessing as mp
 from misc import parfor
 
 cmds = []
@@ -16,4 +17,4 @@ for f in files:
 def run(c):
 	return os.system(c)
 
-parfor(run, cmds, 16)
+parfor(run, cmds, mp.cpu_count())
