@@ -1,12 +1,9 @@
-# convert shapefile to specified CRS, where a CRS is indicated in EPSG format
+# 20230604 reproject shapefile to specified CRS, where a CRS is indicated in EPSG format
 import os
 import sys
-args = sys.argv
+from misc import args, err, exist, run
 
-def err(m):
-    print("Error: " + m); sys.exit(1)
-
-dst_EPSG = 32609 # default CRS: EPSG 32609 
+dst_EPSG = 3347 # 3005? # 32609 # default CRS: EPSG 32609 
 
 if len(args) < 2:
     err("python3 shapefile_enforce_crs.py [input shapefile] [optional argument: destination crs EPSG number] # default EPSG 32609")
@@ -18,7 +15,7 @@ try:
 except Exception:
     err("please check input file")
 
-if not os.path.exists(fn):
+if not exist(fn):
     err("could not find input file: " + fn)
 
 if len(args) > 2:
@@ -27,35 +24,11 @@ if len(args) > 2:
     except Exception:
         err("EPSG parameter must be an integer")
 
-ofn = fn[:-4] + '_epsg_' + str(dst_EPSG) + '.shp'
-
-cmd = "gdalsrsinfo -v " + fn
-data = os.popen(cmd).read().strip()
-
-if len(data.split("Validate Succeeds")) < 2:
-    err("command:\n\t" + cmd + "\ndid not give expected result. Result:\n\n" + data) 
-
-lines = data.split('\n')
-
-src_EPSG = None
-for line in lines:
-    line = line.strip()
-    w = line.split('ID["EPSG')
-    if len(w) > 1:
-        w = w[1].strip('"').strip(',').strip(']').strip(']').strip()
-        src_EPSG = int(w)
-
-print("reproject")
-print("from EPSG:", src_EPSG, '\t input file:', fn)
-print("  to EPSG:", dst_EPSG, '\toutput file:', ofn)
-
-cmd = ['ogr2ogr',
-        '-t_srs',
-        'EPSG:' + str(dst_EPSG),
-        ofn,
-        fn,
-        "-lco ENCODING=UTF-8"] # source data goes second, ogr is weird!
-
-cmd = ' '.join(cmd)
-print(cmd)
-a = os.system(cmd)
+ofn = fn[:-4] + '_EPSG' + str(dst_EPSG) + '.shp'
+cmd = ' '.join['ogr2ogr',
+               '-t_srs',
+               'EPSG:' + str(dst_EPSG),
+               ofn,
+               fn,
+               "-lco ENCODING=UTF-8"] # source data goes second, ogr is weird!
+run(cmd)
