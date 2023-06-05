@@ -34,7 +34,6 @@ for subdataset in d.GetSubDatasets():  # select bands
                     if band_metadata[k] == j[k]:  # print("Selected: ", band_metadata)
                         selected_bands += [[band, band_metadata, subdataset_dataset]]
                         arrays[str(band_metadata)] = band.ReadAsArray().astype(np.float32)
-                        print("type", type(arrays[str(band_metadata)]))
                 except:
                     pass
 
