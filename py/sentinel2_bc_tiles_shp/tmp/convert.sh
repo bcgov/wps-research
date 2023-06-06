@@ -1,0 +1,1 @@
+ogr2ogr -f "ESRI Shapefile" -skipfailures -nlt polygon S2Atiles S2A_OPER_GIP_TILPAR_MPC__20151209T095117_V20150622T000000_21000101T000000_B00.kml
