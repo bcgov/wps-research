@@ -14,7 +14,7 @@ for f in lines:
     if f_size == expected:
         print(f, '[OK]')
     else:
-        print(f, f_size, '/', expected)
+        print(f, '[BAD]', f_size, '/', expected)
         fails += [f]
 
 if len(fails) > 0:
