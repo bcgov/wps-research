@@ -35,7 +35,7 @@ selected = []
 if __name__ == '__main__':
     # timestamp for archive      
     #t = datetime.datetime.now().strftime("%Y%m%d")  # %H%M%S")  # timestamped backup
-    t = datetime.datetime.now().strftime("%Y%m%d%H")  # timestamped backup
+    t = datetime.datetime.now().strftime("%Y%m%d%H%M")  # timestamped backup
     #t = datetime.datetime.now().strftime("%Y%m%d%H%M%S")  # timestamped backup
     # save fire polygons
     fn = 'prot_current_fire_polys.zip'
