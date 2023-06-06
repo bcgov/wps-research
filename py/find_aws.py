@@ -1,13 +1,13 @@
 import os
 import sys
-from misc import err, run, exists, sep, band_names, read_hdr, args
+from misc import err, run, exists, sep, band_names, read_hdr, args, datestamp
 
 latest = None
 if len(args) > 1:
-	latest = 'L2_' + args[1]	
+    latest = 'L2_' + args[1]    
 
 if not exists('hyperlink') or not exists('fpf'):
-	err('expected to be run from active/$FIRE_NUMBER')
+    err('expected to be run from active/$FIRE_NUMBER')
 
 # get the fire number
 fire_number = os.getcwd().strip().split(sep)[-1]
@@ -19,29 +19,40 @@ print("TILES", tiles)
 
 # get the latest AWS folder. Assume "active" folder is one level up!
 
-lines = [x.strip() for x in os.popen("ls -1 ../ | grep L2_").readlines()]
-lines.sort(reverse=True)  # decreasing order, AKA most recent first
-for line in lines:
-	print(line)
+'''
+if False:
+    lines = [x.strip() for x in os.popen("ls -1 ../ | grep L2_").readlines()]
+    lines.sort(reverse=True)  # decreasing order, AKA most recent first
+    for line in lines:
+        print(line)
 
-if latest is None:
-	latest = lines[0] # most recent date of AWS retrieval 
-print("LATEST", latest)
+    if latest is None:
+        latest = lines[0] # most recent date of AWS retrieval 
+    print("LATEST", latest)
+'''
+latest = 'L2_' + datestamp()
 
 to_merge = []
 for tile in tiles:
-	print(tile)
-	cmd = "ls -1 ../" + latest + sep + "*" + tile + "*.bin"
-	print(cmd)
-	for line in [x.strip() for x in os.popen("ls -1 ../" + latest + sep + "*" + tile + "*.bin").readlines()]:
-		if len(line.split('swir')) > 1:
-			err("please remove _swir_ files")
+    print(tile)
+    cmd = "ls -1 ../" + latest + sep + "*" + tile + "*.bin"
+    print(cmd)
+    for line in [x.strip() for x in os.popen("ls -1 ../" + latest + sep + "*" + tile + "*.bin").readlines()]:
+        if len(line.split('swir')) > 1:
+            err("please remove _swir_ files")
 
-		to_merge += [line]
+        to_merge += [line]
+
+    ssd = "/media/" + os.popen("whoami").read().strip() + "/SSD_2T/tmp/"
+    if os.path.exists(ssd):
+        cmd = "ls -1 " + ssd + "*" + tile + "*.bin"
+        for line in [x.strip() for x in os.popen(cmd).readlines()]:
+            to_merge += [line]        
+
 print(to_merge)
 
 if len(to_merge) < 1:
-	err("no data found, please check data are retrieved, unzipped, unpacked, converted to the appropriate format, and that this tile is imaged on the provided date")
+    err("no data found, please check data are retrieved, unzipped, unpacked, converted to the appropriate format, and that this tile is imaged on the provided date")
 
 # ../L2_20230520/S2B_MSIL2A_20230520T190919_N0509_R056_T10UEC_20230520T214840.hdr
 first = to_merge[0][:-4] + '.hdr'
@@ -51,8 +62,8 @@ out_file = latest + "_" + ts + ".bin"
 out_hdr = latest + "_" + ts + ".hdr"
 
 if not exists(out_file):
-	run("gdal_merge.py -of ENVI -ot Float32 -n nan " + " ".join(to_merge) + " -o " + out_file)
-	run("fh " + out_hdr)
+    run("gdal_merge.py -of ENVI -ot Float32 -n nan " + " ".join(to_merge) + " -o " + out_file)
+    run("fh " + out_hdr)
 
 run('envi_header_copy_bandnames.py ' + first + ' ' + out_hdr)
 #samples, lines, bands = read_hdr(out_hdr)
