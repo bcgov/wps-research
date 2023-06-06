@@ -15,4 +15,4 @@ open(ts + '_files.txt', 'wb').write(('\n'.join(rasters)).encode())
 shp = ts + '_tileindex.shp'
 
 # print out command to generate tile index file
-run'gdaltindex -t_srs EPSG:4326 ' + shp + ' --optfile ' + ts + '_files.txt')
+run('gdaltindex -t_srs EPSG:4326 ' + shp + ' --optfile ' + ts + '_files.txt')
