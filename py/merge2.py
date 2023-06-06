@@ -9,7 +9,7 @@ EPSG = 3005  # BC Albers
 import os
 import sys
 import multiprocessing as mp
-from misc import run, parfor, exists, sep
+from misc import run, parfor, exists, sep, err
 
 if len(sys.argv) > 1:
     EPSG = 3347
