@@ -4,7 +4,7 @@ import sys
 
 def envi_header_band_names(args): 
     #print("envi_header_band_names", args)
-     # print out band names from envi header file
+    # print out band names from envi header file
     # check if this is redundant with misc.py
 
     if len(args) < 2:
