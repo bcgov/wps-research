@@ -8,7 +8,7 @@ EPSG = 3005  # BC Albers
 # EPSG = 3347 # Canada LCC
 import os
 import sys
-from multiprocessing import mp
+import multiprocessing as mp
 from misc import run, parfor, exists, sep
 
 if len(sys.argv) > 1:
