@@ -398,6 +398,7 @@ def timestamp():
     return ts
 
 def datestamp():
+    now = datetime.datetime.now()
     [year, month, day] = [str(now.year).zfill(4),
                           str(now.month).zfill(2),
                           str(now.day).zfill(2)]
