@@ -1,12 +1,14 @@
 '''20230516 mosaic all .bin files in present folder 
 Handles partial overlap. No-data value NAN assumed https://github.com/OSGeo/gdal/issues/3098
 
-EPSG 
-'''
+Default EPSG for resampling: 3005 (BC Albers)
+
+*** add an extra arg to use 3347: Canada LCC'''
 EPSG = 3005  # BC Albers
 # EPSG = 3347 # Canada LCC
 import os
 import sys
+from multiprocessing import mp
 from misc import run, parfor, exists, sep
 
 if len(sys.argv) > 1:
@@ -31,7 +33,7 @@ for L in lines:
                            '-t_srs EPSG:' + str(EPSG),
                            L,
                            'resample' + sep + L])]
-parfor(run, cmds, 8)
+parfor(run, cmds, int(mp.cpu_count()))
 
 run(' '.join(['gdalbuildvrt',
               '-srcnodata nan',
