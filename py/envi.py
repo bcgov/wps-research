@@ -9,7 +9,7 @@ def envi_header_band_names(args):
 
     if len(args) < 2:
         print("python3 envi_header_band_names [envi .hdr file] # print band names within envi hdr file")
-
+        sys.exit(1)
     lines, bandname_lines = open(args[1]).readlines(), []
     n_band_names, in_band_names = 0, False
 
@@ -40,10 +40,8 @@ def envi_header_band_names(args):
     bandname_lines[0] = bandname_lines[0].split('{')[1]
     bandname_lines[-1] = bandname_lines[-1].strip('}')
     bandname_lines = [x.strip(',').strip() for x in bandname_lines]
-
-    #for b in bandname_lines:
-    #    print(b)
-
+    for b in bandname_lines:
+        print(b)  # don't comment this out, some C programs like imv need it.
     return bandname_lines
 
 
