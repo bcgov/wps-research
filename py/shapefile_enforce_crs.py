@@ -25,10 +25,10 @@ if len(args) > 2:
         err("EPSG parameter must be an integer")
 
 ofn = fn[:-4] + '_EPSG' + str(dst_EPSG) + '.shp'
-cmd = ' '.join['ogr2ogr',
+cmd = ' '.join(['ogr2ogr',
                '-t_srs',
                'EPSG:' + str(dst_EPSG),
                ofn,
                fn,
-               "-lco ENCODING=UTF-8"] # source data goes second, ogr is weird!
+               "-lco ENCODING=UTF-8"]) # source data goes second, ogr is weird!
 run(cmd)
