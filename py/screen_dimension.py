@@ -9,6 +9,8 @@ x,y = [int(x) for x in get('xdpyinfo | grep dimensions').strip().split()[1].spli
 
 [x2, y2] =[int(x) for x in get('xrandr | grep primary').split()[3].split('+')[0].split('x')]
 x_min, y_min = min(x, x2), min(y, y2)
+print('.screen_min_x=', x_min)
+print('.screen_min_y=', y_min)
 
 open('.screen_min_x', 'wb').write(str(x_min).encode())
 open('.screen_min_y', 'wb').write(str(y_min).encode())
