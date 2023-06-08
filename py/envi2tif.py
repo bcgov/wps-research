@@ -12,7 +12,7 @@ pd = sep.join(__file__.split(sep)[:-1]) + sep
 
 fn = args[1]
 
-run('htrim2.exe ' + fn + ' .5 .5')
+run('htrim2.exe ' + fn + ' .1 .1')
 
 # multiply by 255.
 run('raster_smult.exe ' +
