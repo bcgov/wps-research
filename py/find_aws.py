@@ -2,6 +2,9 @@ import os
 import sys
 from misc import err, run, exists, sep, band_names, read_hdr, args, datestamp
 
+if len(args) < 3:
+    err("find_aws.py [date yyyymmdd] [path to folder for that date]") # should only have one parameter but I'm tired
+
 latest, date = None, args[1]
 if len(args) > 1:
     latest = '../L2_' + date 
