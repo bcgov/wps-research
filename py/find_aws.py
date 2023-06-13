@@ -2,9 +2,12 @@ import os
 import sys
 from misc import err, run, exists, sep, band_names, read_hdr, args, datestamp
 
-latest = None
+latest, date = None, args[1]
 if len(args) > 1:
-    latest = 'L2_' + args[1]    
+    latest = '../L2_' + date 
+
+if len(args) > 2:
+    latest = args[2]
 
 if not exists('hyperlink') or not exists('fpf'):
     err('expected to be run from active/$FIRE_NUMBER')
@@ -30,14 +33,14 @@ if False:
         latest = lines[0] # most recent date of AWS retrieval 
     print("LATEST", latest)
 '''
-latest = 'L2_' + datestamp()
+# latest = 'L2_' + datestamp()
 
 to_merge = []
 for tile in tiles:
     print(tile)
-    cmd = "ls -1 ../" + latest + sep + "*" + tile + "*.bin"
+    cmd = "ls -1 " + latest + sep + "*" + tile + "*.bin"
     print(cmd)
-    for line in [x.strip() for x in os.popen("ls -1 ../" + latest + sep + "*" + tile + "*.bin").readlines()]:
+    for line in [x.strip() for x in os.popen("ls -1 " + latest + sep + "*" + tile + "*.bin").readlines()]:
         if len(line.split('swir')) > 1:
             err("please remove _swir_ files")
 
@@ -58,8 +61,8 @@ if len(to_merge) < 1:
 first = to_merge[0][:-4] + '.hdr'
 ts = first.split(sep)[-1].split("_")[2].split('T')[1][0:4]
 
-out_file = latest + "_" + ts + ".bin"
-out_hdr = latest + "_" + ts + ".hdr"
+out_file = ts + ".bin"
+out_hdr = ts + ".hdr"
 
 if not exists(out_file):
     run("gdal_merge.py -of ENVI -ot Float32 -n nan " + " ".join(to_merge) + " -o " + out_file)
