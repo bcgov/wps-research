@@ -46,15 +46,11 @@ for tile in tiles:
     for line in [x.strip() for x in os.popen("ls -1 " + latest + sep + "*" + tile + "*.bin").readlines()]:
         if len(line.split('swir')) > 1:
             err("please remove _swir_ files")
-
         to_merge += [line]
-
     cmd = "ls -1 " + latest + "*" + tile + "*.bin"
     for line in [x.strip() for x in os.popen(cmd).readlines()]:
         to_merge += [line]        
-
-
-            run('cp -v ' + line + ' .')
+        run('cp -v ' + line + ' .')
 print(to_merge)
 
 if len(to_merge) < 1:
