@@ -55,6 +55,8 @@ for tile in tiles:
         for line in [x.strip() for x in os.popen(cmd).readlines()]:
             to_merge += [line]        
 
+
+            run('cp -v ' + line + ' .')
 print(to_merge)
 
 if len(to_merge) < 1:
@@ -68,7 +70,8 @@ out_file = ts + ".bin"
 out_hdr = ts + ".hdr"
 
 if not exists(out_file):
-    run("gdal_merge.py -of ENVI -ot Float32 -n nan " + " ".join(to_merge) + " -o " + out_file)
+    run("merge2.py")
+    # run("gdal_merge.py -of ENVI -ot Float32 -n nan " + " ".join(to_merge) + " -o " + out_file)
     run("fh " + out_hdr)
 
 run('envi_header_copy_bandnames.py ' + first + ' ' + out_hdr)
