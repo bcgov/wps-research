@@ -53,6 +53,8 @@ for tile in tiles:
         run('cp -v ' + line[:-4] + '.* .')
 print(to_merge)
 
+run('rm -rf merge* resample')
+
 if len(to_merge) < 1:
     err("no data found, please check data are retrieved, unzipped, unpacked, converted to the appropriate format, and that this tile is imaged on the provided date")
 
