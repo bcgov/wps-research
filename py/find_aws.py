@@ -56,24 +56,4 @@ print(to_merge)
 if len(to_merge) < 1:
     err("no data found, please check data are retrieved, unzipped, unpacked, converted to the appropriate format, and that this tile is imaged on the provided date")
 
-# ../L2_20230520/S2B_MSIL2A_20230520T190919_N0509_R056_T10UEC_20230520T214840.hdr
-first = to_merge[0][:-4] + '.hdr'
-ts = first.split(sep)[-1].split("_")[2].split('T')[1][0:4]
-
-out_file = ts + ".bin"
-out_hdr = ts + ".hdr"
-
-if not exists(out_file):
-    run("merge2.py")
-    # run("gdal_merge.py -of ENVI -ot Float32 -n nan " + " ".join(to_merge) + " -o " + out_file)
-    run("fh " + out_hdr)
-
-run('envi_header_copy_bandnames.py ' + first + ' ' + out_hdr)
-#samples, lines, bands = read_hdr(out_hdr)
-
-#bn = band_names(first)
-
-
-#run(' '.join(['envi_header_modify.py', out_hdr, str(lines), str(samples), str(bands)] + bn))
-# merge the appropriate tiles if the merge file isn't already available
-
+run("merge2.py")
