@@ -12,8 +12,8 @@ if len(args) > 1:
 if len(args) > 2:
     latest = args[2]
 
-if not exists('hyperlink') or not exists('fpf'):
-    err('expected to be run from active/$FIRE_NUMBER')
+if not exists('../hyperlink') or not exists('../fpf'):
+    err('expected to be run from active/$FIRE_NUMBER/yyyymmdd')
 
 # get the fire number
 fire_number = os.getcwd().strip().split(sep)[-1]
