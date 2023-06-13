@@ -50,7 +50,7 @@ for tile in tiles:
     cmd = "ls -1 " + latest + "*" + tile + "*.bin"
     for line in [x.strip() for x in os.popen(cmd).readlines()]:
         to_merge += [line]        
-        run('cp -v ' + line + ' .')
+        run('cp -v ' + line[:-4] + '.* .')
 print(to_merge)
 
 if len(to_merge) < 1:
