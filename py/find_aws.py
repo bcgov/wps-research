@@ -49,11 +49,9 @@ for tile in tiles:
 
         to_merge += [line]
 
-    ssd = "/media/" + os.popen("whoami").read().strip() + "/SSD_2T/tmp/"
-    if os.path.exists(ssd):
-        cmd = "ls -1 " + ssd + "*" + tile + "*.bin"
-        for line in [x.strip() for x in os.popen(cmd).readlines()]:
-            to_merge += [line]        
+    cmd = "ls -1 " + latest + "*" + tile + "*.bin"
+    for line in [x.strip() for x in os.popen(cmd).readlines()]:
+        to_merge += [line]        
 
 
             run('cp -v ' + line + ' .')
