@@ -16,7 +16,7 @@ if not exists('../hyperlink') or not exists('../fpf'):
     err('expected to be run from active/$FIRE_NUMBER/yyyymmdd')
 
 # get the fire number
-fire_number = os.getcwd().strip().split(sep)[-1]
+fire_number = os.getcwd().strip().split(sep)[-2]
 print("FIRE_NUMBER", fire_number)
 
 # get the tiles
