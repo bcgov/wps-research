@@ -23,7 +23,8 @@ else:
 
 cmds = []
 for L in lines:
-	if not exists('resample' + sep + L):
+    ofn = 'resample' + sep + L
+	if not exists(ofn):
 		cmds += [' '.join(['gdalwarp',
                            '-wo NUM_THREADS=16',
                            '-multi',
@@ -34,7 +35,9 @@ for L in lines:
                            '-ot Float32',
                            '-t_srs EPSG:' + str(EPSG),
                            L,
-                           'resample' + sep + L])]
+                           ofn])]
+    else:
+        print("Skipping:", ofn)
 parfor(run, cmds, int(mp.cpu_count()))
 
 run(' '.join(['gdalbuildvrt',
