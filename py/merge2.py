@@ -19,7 +19,7 @@ lines = [x.strip() for x in os.popen('ls -1 *.bin').readlines()]
 if not exists('resample'):
 	os.mkdir('resample')
 else:
-    err('directory resample/ exists. Remove and run again')
+    pass #     err('directory resample/ exists. Remove and run again')
 
 cmds = []
 for L in lines:
