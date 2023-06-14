@@ -27,12 +27,13 @@
 #include<algorithm>
 #include"ansicolor.h"
 #include<unordered_map>
-#include <cctype>
-#include <locale>
+#include<cctype>
+#include<locale>
 #include<stack>
 #include<unordered_set>
 #include<unordered_map>
 #include<stdexcept>
+#include<sched.h>
 
 using namespace std;
 
@@ -408,6 +409,7 @@ extern pthread_mutex_t print_mtx;
 void cprint(str s);
 
 // parfor stuff
+void set_thread_affinity(pthread_t thread, int cpuIndex);
 extern pthread_attr_t pt_attr; // specify threads joinable
 extern pthread_mutex_t pt_next_j_mtx;
 extern size_t pt_nxt_j;
