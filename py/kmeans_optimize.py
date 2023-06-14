@@ -233,7 +233,7 @@ print("kmeans_labels_good", kmeans_labels_good)
 print("kmeans_labels_confused", kmeans_labels_confused)
 print("kmeans_label_by_class", kmeans_label_by_class)
 
-run(cpp_path + "../py/read_multi.py " + infile + "_kmeans.bin 1")
+run('python3 ' + cpp_path + "../py/read_multi.py " + infile + "_kmeans.bin 1")
 run("eog " + infile + "_kmeans.bin.png")
 
 ''' run knn on data with confused labels and splice results back into map? Something to try'''
