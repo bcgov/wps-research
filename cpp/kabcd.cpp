@@ -101,7 +101,7 @@ void infer_px(size_t i){
   for0(k, nb[1]){ // nb[2]) : need to revise in abcd.cpp?
     x[np2 * k + i] = top_val.v[k]; //B[np * k + mi];  // assign most frequent // not nearest
   }
-  if(i % 100000 == 0) status(i, np2);
+  if(i % 10000 == 0) status(i, np2);
 }
 
 inline int is_bad(float * dat, size_t i, size_t n_b){
