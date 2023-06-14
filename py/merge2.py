@@ -17,15 +17,15 @@ if len(sys.argv) > 1:
 lines = [x.strip() for x in os.popen('ls -1 *.bin').readlines()]
 
 if not exists('resample'):
-	os.mkdir('resample')
+    os.mkdir('resample')
 else:
     pass #     err('directory resample/ exists. Remove and run again')
 
 cmds = []
 for L in lines:
     ofn = 'resample' + sep + L
-	if not exists(ofn):
-		cmds += [' '.join(['gdalwarp',
+    if not exists(ofn):
+        cmds += [' '.join(['gdalwarp',
                            '-wo NUM_THREADS=16',
                            '-multi',
                            '-r bilinear',
@@ -49,7 +49,7 @@ run(' '.join(['gdalbuildvrt',
               'resample' + sep + '*.bin']))
 
 if not exists('merge.bin'):
-	run(' '.join(['gdalwarp',
+    run(' '.join(['gdalwarp',
                   '-wo NUM_THREADS=16',
                   '-multi',
                   '-overwrite',
