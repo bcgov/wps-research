@@ -48,7 +48,7 @@ int main(int argc, char ** argv){
   float * out = falloc(np * nband);
   float mn, mx;
 
-  p_percent(&mn, &mx, &dat, np, nband);
+  p_percent(&mn, &mx, dat, np, nband);
 
   int jx;
   float r, d;
