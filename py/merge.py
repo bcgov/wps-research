@@ -1,4 +1,5 @@
-'''20230516 run gdal_merge.py on all .bin files in present folder'''
+'''20230516 run gdal_merge.py on all .bin files in present folder
+NB can use this one if the data are in the same UTM zone'''
 import os
 import sys
 from misc import run
