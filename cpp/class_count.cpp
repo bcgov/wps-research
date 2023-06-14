@@ -39,6 +39,8 @@ int main(int argc, char ** argv){
   if(n_nan > 0) cout << "," << endl << "NAN:" << n_nan;
   cout << "}" << endl;
 
+
+  cout << "number of distinct values:" << count.size() << endl;
   free(d);
   return 0;
 }
