@@ -647,7 +647,11 @@ void parfor(size_t start_j, size_t end_j, void(*eval)(size_t), int cores_use=0){
   pthread_attr_init(&pt_attr); // allocate threads, make threads joinable
   pthread_attr_setdetachstate(&pt_attr, PTHREAD_CREATE_JOINABLE);
   pthread_t * my_pthread = new pthread_t[n_cores];
-  for0(j, n_cores) pthread_create(&my_pthread[j], &pt_attr, pt_worker_fun, (void *)j);
+  
+  for0(j, n_cores){
+    pthread_create(&my_pthread[j], &pt_attr, pt_worker_fun, (void *)j);
+    set_thread_affinity(my_pthread[j], j % cores_avail); // Set CPU affinity
+  }
   for0(j, n_cores) pthread_join(my_pthread[j], NULL); // wait for threads to finish
   // cprint(str("return parfor()"));
   delete [] my_pthread;
@@ -655,6 +659,13 @@ void parfor(size_t start_j, size_t end_j, void(*eval)(size_t), int cores_use=0){
 
 void parfor(size_t start_j, size_t end_j, void(*eval)(size_t)){
   parfor(start_j, end_j, eval, 0);
+}
+
+void set_thread_affinity(pthread_t thread, int cpuIndex){
+  cpu_set_t cpuset;
+  CPU_ZERO(&cpuset);
+  CPU_SET(cpuIndex, &cpuset);
+  pthread_setaffinity_np(thread, sizeof(cpu_set_t), &cpuset);
 }
 
 
