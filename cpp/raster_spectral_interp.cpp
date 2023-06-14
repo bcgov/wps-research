@@ -96,7 +96,7 @@ int main(int argc, char ** argv){
       out[i] = dx[i] + (y - lower_last[y]) * (dz[i] - dx[i]) / (upper_last[y] - lower_last[y]);
     }
     size_t nw = fwrite(out, np, sizeof(float), f);
-    band_names.push_back(datestr + str(" Interpolated value at: ") + std::to_string((int)y) + str("nm"));
+    band_names.push_back(datestr + str(" Interp: ") + std::to_string((int)y) + str("nm"));
   }
   hwrite(hf2, nrow, ncol, interp.size(), 4, band_names);
   free(dat);
