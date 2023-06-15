@@ -19,20 +19,12 @@ def load_image(image_path):
     image_data = band.ReadAsArray(0, 0, image_width, image_height).astype(np.float32)
     dataset = None
 
-
 def draw_scene():
     glClear(GL_COLOR_BUFFER_BIT)
-
-    # Normalize the image data
     normalized_image_data = (image_data - np.min(image_data)) / (np.max(image_data) - np.min(image_data))
-
-    # Flip the image vertically
-    flipped_image_data = np.flipud(normalized_image_data)
-
-    # Draw the image
-    glRasterPos2i(-1, -1)
+    flipped_image_data = np.flipud(normalized_image_data)  # flip the image vertically
+    glRasterPos2i(-1, -1)  # draw the image
     glDrawPixels(image_width, image_height, GL_RED, GL_FLOAT, flipped_image_data)
-
     glutSwapBuffers()
 
 def keyboard_callback(key, x, y):
@@ -56,8 +48,5 @@ def main():
     glutKeyboardFunc(keyboard_callback)
     glutMainLoop()
 
-
 if __name__ == "__main__":
     main()
-
-
