@@ -3,8 +3,9 @@ import sys
 from misc import err, run, exists, sep, band_names, read_hdr, args, datestamp
 
 if len(args) < 3:
-    err("find_aws.py [date yyyymmdd] [path to folder for that date]") # should only have one parameter but I'm tired
+    err("find_aws.py [date yyyymmdd] [path to folder for that date] # [optional arg: fire number]") # should only have one parameter but I'm tired
 
+fire_number = None
 latest, date = None, args[1]
 if len(args) > 1:
     latest = '../L2_' + date 
@@ -12,11 +13,13 @@ if len(args) > 1:
 if len(args) > 2:
     latest = args[2]
 
-if not exists('../hyperlink') or not exists('../fpf'):
-    err('expected to be run from active/$FIRE_NUMBER/yyyymmdd')
-
 # get the fire number
-fire_number = os.getcwd().strip().split(sep)[-2]
+if len(args) > 3:
+    fire_number = args[3]
+else:
+    if not exists('../hyperlink') or not exists('../fpf'):
+        err('expected to be run from active/$FIRE_NUMBER/yyyymmdd')
+    fire_number = os.getcwd().strip().split(sep)[-2]
 print("FIRE_NUMBER", fire_number)
 
 # get the tiles
