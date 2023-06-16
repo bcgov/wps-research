@@ -113,4 +113,6 @@ if __name__ == "__main__":
 
     else:
         files = [x.strip() for x in os.popen("ls -1 S*MSIL2A*.zip").readlines()]
+        files += [x.strip() for x in os.popen("ls -1 S*MSIL1C*.zip").readlines()]
+
         parfor(extract, files, int(mp.cpu_count()))
