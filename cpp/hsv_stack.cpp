@@ -8,6 +8,6 @@ int main(int argc, char ** argv){
   run(str("rgb2hsv sub.bin_ht.bin"));
   run("raster_stack.py sub.bin_ht.bin sub.bin_ht.bin_hsv.bin stack.bin");
   run("envi_header_copy_mapinfo.py sub.hdr stack.hdr");   
-  run("kgc stack.bin 33333 700 0");
+  run("~/GitHub/kgc2010/kgc.exe stack.bin 33333 700 0");
   return 0;
 }
