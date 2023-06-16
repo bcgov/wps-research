@@ -19,7 +19,7 @@ int main(int argc, char ** argv){
 
   run("png2bin output/result.png");
   run("envi_header_copy_mapinfo.py sub.hdr output/result.png.hdr");
-  run("binary_polygonize output/result.png.bin");
+  run("binary_polygonize.py output/result.png.bin");
 
  
   return 0;
