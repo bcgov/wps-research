@@ -9,17 +9,13 @@ int main(int argc, char ** argv){
   run("envi_header_copy_mapinfo.py sub.hdr stack.hdr");   
   run("~/GitHub/kgc2010/kgc.exe stack.bin 33333 700 0");
 
-  run("cd output");
-  run("cp ../sub.bin_ht.bin_smult.tif ./");
-  run("envi_header_copy_mapinfo.py ../sub.hdr ./out_binary.hdr");
-  run("envi2tif.py out_binary.bin");
+  run("envi_header_copy_mapinfo.py  sub.hdr ./output/out_binary.hdr");
+  run("envi2tif.py output/out_binary.bin");
 
-  run("cp ../sub.bin .");
-  run("cp ../sub.hdr .");
   run("envi2tif.py sub.bin");
+  run("mv *.tif output");
 
-
-  run("gimp *.tif");
+  run("gimp output/*.tif");
   
   return 0;
 }
