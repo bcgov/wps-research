@@ -9,5 +9,12 @@ int main(int argc, char ** argv){
   run("raster_stack.py sub.bin_ht.bin sub.bin_ht.bin_hsv.bin stack.bin");
   run("envi_header_copy_mapinfo.py sub.hdr stack.hdr");   
   run("~/GitHub/kgc2010/kgc.exe stack.bin 33333 700 0");
+
+  run("cd output");
+  run("cp ../sub.bin_ht.bin_smult.tif ./");
+  run("envi_header_copy_mapinfo.py ../sub.hdr ./out_binary.hdr");
+  run("envi2tif.py out_binary.bin");
+  run("gimp *.tif");
+  
   return 0;
 }
