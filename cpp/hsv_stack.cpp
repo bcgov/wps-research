@@ -16,6 +16,11 @@ int main(int argc, char ** argv){
   run("mv *.tif output");
 
   run("gimp output/*.tif");
-  
+
+  run("png2bin output/result.png");
+  run("envi_header_copy_mapinfo.py sub.hdr output/result.png.hdr");
+  run("binary_polygonize output/result.png.bin");
+
+ 
   return 0;
 }
