@@ -1,4 +1,6 @@
-/* normalize a multispectral image or radar stack, square window, input
+/* 20230616 version.. scale by intensity
+
+ normalize a multispectral image or radar stack, square window, input
 assumed ENVI type-4 32-bit IEEE standard floating-point format, BSQ
 interleave
 
