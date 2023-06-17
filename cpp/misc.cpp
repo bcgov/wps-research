@@ -491,6 +491,35 @@ int rgb_to_hsv(float r, float g, float b, float * h, float * s, float * v){
   return 0;
 }
 
+void rgb2cmyk(float R, float G, float B, float * Cyan, float* Magenta, float* Yellow, float* Black){
+    if(R < 0. || R > 1. || G < 0. || G > 1. || B < 0. || B > 1.){
+      printf("(R,G,B)=(%f, %f, %f)\n", R, G, B);
+      err("values out of range [0,1]");
+    }
+    double cyan, magenta, yellow, black, dif;
+    double r = (double)R;
+    double g = (double)G;
+    double b = (double)B;
+    double max = (r > g) ? ((r > b) ? r : b) : ((g > b) ? g : b);  // max value of RGB components
+    black = 1.0 - max;  // key black component
+
+    if (black == 1.0) {
+        cyan = 0.0;  // check for special case
+        magenta = 0.0;
+        yellow = 0.0;
+    }
+    else{
+        dif = 1. - black;
+        cyan = (dif - r) / dif; //(1.0 - r - black) / (1.0 - black);
+        magenta = (dif - g) / dif; //(1.0 - g - black) / (1.0 - black);
+        yellow = (dif - b) / dif; //(1.0 - b - black) / (1.0 - black);
+    }
+    *Cyan = (float)cyan;
+    *Magenta = (float)magenta;
+    *Yellow = (float)yellow;
+    *Black = (float)black;
+}
+
 
 /*
 size_t size(FILE * f){

@@ -447,4 +447,6 @@ void status(size_t i, size_t of);
 void write_config(str fn, size_t nrow, size_t ncol);
 int run(str s);
 
+void rgb2cmyk(float R, float G, float B, float * Cyan, float* Magenta, float* Yellow, float* Black);
+
 #endif
