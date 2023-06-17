@@ -29,10 +29,9 @@ int main(int argc, char ** argv){
       out[m] = C; m += np;
       out[m] = M; m += np;
       out[m] = Y; m += np;
-      out[m] = K;      
+      out[m] = K;
     }
   }
-
 
   str ofn(fn + str("_cmyk.bin"));
   str ohn(fn + str("_cmyk.hdr"));
@@ -49,6 +48,3 @@ int main(int argc, char ** argv){
 
   return 0;
 }
-
-
-
