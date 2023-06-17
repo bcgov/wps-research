@@ -1,19 +1,17 @@
-/* 20230613 adapted from htrim2.cpp
+/* "non-proportional" histogram trimming, for hyperspectral imagery with scaling between 0 and 1.. 20210618 bugfix 20210721*/
 
-"non-proportional" histogram trimming, for hyperspectral imagery with scaling between 0 and 1.. 20210618 bugfix 20210721*/
 #include"misc.h"
 
 float N_PERCENT; // histogram percentage to trim
 
 /* new min and max of float array -- n floats */
-void p_percent(float * min, float * max, float * dd, size_t n, size_t nb){
+void p_percent(float * min, float * max, float * dd, size_t n){
   size_t i;
   priority_queue<float> q;
 
   float mn = FLT_MAX;
   float mx = FLT_MIN;
-  
-  for0(i, n * nb){
+  for0(i, n){
     float d = dd[i];
     if(isinf(d) || isnan(d)){
     }
@@ -35,7 +33,7 @@ void p_percent(float * min, float * max, float * dd, size_t n, size_t nb){
 }
 
 int main(int argc, char ** argv){
-  if(argc < 2) err("htrim3 [input binary file name] # [optional % trim factor e.g. 1.1]");
+  if(argc < 2) err("htrim2 [input binary file name] # [optional % trim factor e.g. 1.1]");
   if(argc > 2) N_PERCENT = argc > 2 ? atof(argv[2]): 1.; // default one % trim
 
   str fn(argv[1]); // input file name
@@ -46,19 +44,22 @@ int main(int argc, char ** argv){
 
   float * dat = bread(fn, nrow, ncol, nband);
   float * out = falloc(np * nband);
-  float mn, mx;
+  float * mn = falloc(nband);
+  float * mx = falloc(nband);
 
-  p_percent(&mn, &mx, dat, np, nband);
+  for0(i, nband) p_percent(&mn[i], &mx[i], &dat[i *np], np);
 
   int jx;
-  float r, d;
+  float jmn, jmx, r, d;
   for0(j, nband){
     jx = np * j;
-    r = 1. / (mx - mn);
+    jmn = mn[j];
+    jmx = mx[j];
+    r = 1. / (jmx - jmn);
     for0(i, np){
-      d = r * (dat[jx + i] - mn);
-      if(d < 0.) d = 0.;
-      if(d > 1.) d = 1.;
+      d = r * (dat[jx + i] - jmn);
+      //if(d < 0.) d = 0.;
+      //if(d > 1.) d = 1.;
       out[jx + i] = d;
     }
   }
@@ -72,5 +73,6 @@ int main(int argc, char ** argv){
   fclose(f);
 
   free(dat); free(out);
+  free(mn); free(mx);
   return 0;
 }
