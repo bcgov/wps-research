@@ -47,8 +47,8 @@ int main(int argc, char ** argv){
   }
 
   // write output file
-  str ofn(fn + str("_norm_pixel.bin"));
-  str ohfn(fn + str("_norm_pixel.hdr"));
+  str ofn(fn + str("_norm_pixel2.bin"));
+  str ohfn(fn + str("_norm_pixel2.hdr"));
 
   printf("nr %zu nc %zu nband %zu\n", nrow, ncol, nband);
   hwrite(ohfn, nrow, ncol, nband); // write output header
