@@ -1,4 +1,5 @@
 /* 20230617 rgb2cmyk: convert RGB to CMYK color model */
+#include"misc.h"
 int main(int argc, char ** argv){
   if(argc < 2) err("rgb2cmyk [input ENVI-format raster file name, 3 band]");
 
@@ -23,7 +24,7 @@ int main(int argc, char ** argv){
       g = dat[k + np];
       b = dat[k + np + np];
 
-      rgb2cmyk(r, g, b, *C, *M, *Y, *K);
+      rgb2cmyk(r, g, b, &C, &M, &Y, &K);
 
       m = k;
       out[m] = C; m += np;
