@@ -38,7 +38,7 @@ int main(int argc, char ** argv){
   str ohn(fn + str("_cmyk.hdr"));
 
   str sep(" ");
-  bwrite(out, ofn, nrow, ncol, nband);
+  bwrite(out, ofn, nrow, ncol, nband + 1);
   str cmd(str("cp -v ") + hfn + sep + ohn);
   cout << cmd << endl;
   int a = run(cmd);
