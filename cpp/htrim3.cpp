@@ -1,4 +1,4 @@
-/* "non-proportional" histogram trimming, for hyperspectral imagery with scaling between 0 and 1.. 20210618 bugfix 20210721*/
+/* 20230616: this htrim "mostly" puts stuff into 0,1 */
 
 #include"misc.h"
 
