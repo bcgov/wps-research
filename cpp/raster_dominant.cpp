@@ -14,7 +14,7 @@ int main(int argc, char ** argv){
 
   str oln(str(argv[1]) + (argc < 3 ? str("_dominant_label.bin") : str("_subdominant_label.bin"))); // output file, as label
   str olh(str(argv[1]) + (argc < 3 ? str("_dominant_label.hdr") : str("_subdominant_label.hdr")));
-  
+
   printf("+w %s\n", ofn.c_str());
   printf("+w %s\n", ohn.c_str());
 
@@ -43,26 +43,26 @@ int main(int argc, char ** argv){
       all_zero = true;
 
       for0(k, nband){
-	ik = (np * k) + ij;
-	dik = dat[ik];
-	if(dik != 0.) all_zero = false;
-	if((argc < 3 && dik > dom_v) || (argc > 2 && dik < dom_v)){
-	//if(dat[ik] > dom_v){
-	  dom_v = dik;  // find dominant band
-	  dom_k = k;
-	}
+        ik = (np * k) + ij;
+        dik = dat[ik];
+        if(dik != 0.) all_zero = false;
+        if((argc < 3 && dik > dom_v) || (argc > 2 && dik < dom_v)){
+          //if(dat[ik] > dom_v)
+          dom_v = dik; // find dominant band
+          dom_k = k;
+        }
       }
       lab[ij] = (float)dom_k; // save dominant as label
 
       for0(k, nband){
         ik = (np * k) + ij;
-	out[ik] = 0.;
-	if(dom_k == k){
-		out[ik] = 1. ;
-	}
-	if(all_zero){
-		out[ik] = NAN;
-	}
+        out[ik] = 0.;
+        if(dom_k == k){
+          out[ik] = 1. ;
+        }
+        if(all_zero){
+          out[ik] = NAN;
+        }
       }
       // end of pixel based operation
     }
@@ -74,7 +74,7 @@ int main(int argc, char ** argv){
   str cmd(str("cp -v ") + hfn + str(" ") + ohn);
   cout << cmd << endl;
   system(cmd.c_str());
-  free(out); 
+  free(out);
   free(dat);
   return 0;
 }
