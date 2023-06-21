@@ -40,10 +40,8 @@ int main(int argc, char ** argv){
   out = falloc(np * 3);
 
   for0(i, np){
-
-    if(i % 5000 == 0){
-      printf("%zu\n", i);
-    }
+    if(i % 11111 == 0) printf("%f %zu/%zu\n", 100. * (float)(i+1) / (float)np, i+1, np);
+    
     herm3<cf> A;
     herm3<cf> B;
     A.initT3(a[0][i], a[1][i], a[2][i], a[3][i], a[4][i], a[5][i], a[6][i], a[7][i], a[8][i]);
