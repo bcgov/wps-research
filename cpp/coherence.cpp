@@ -28,16 +28,17 @@ int main(int argc, char ** argv){
   float * out = falloc(nrow * ncol * 2);
   size_t ci = 0;
 
+  size_t nr;
   printf("here\n");
   for0(row, nrow){
     if(nrow % 100 ==0){
       printf("\rProcessing row %zu of %zu ", row + 1, nrow);
     }
     for0(col, ncol){
-      fread(&re1, sizeof(float), 1, inf1);
-      fread(&im1, sizeof(float), 1, inf1);
-      fread(&re2, sizeof(float), 1, inf2);
-      fread(&im2, sizeof(float), 1, inf2);
+      nr += fread(&re1, sizeof(float), 1, inf1);
+      nr += fread(&im1, sizeof(float), 1, inf1);
+      nr += fread(&re2, sizeof(float), 1, inf2);
+      nr += fread(&im2, sizeof(float), 1, inf2);
 
       re3 = re1 * re2 + im1 * im2;
       im3 = im1 * re2 - re1 * im2;
@@ -45,7 +46,8 @@ int main(int argc, char ** argv){
       (out[ci++] = re3 / d1), (out[ci++] = im3 / d1);
     }
   }
-  fclose(infile);
+  fclose(inf1);
+  fclose(inf2);
   bwrite(out, ofn, nrow, ncol, 2);
   printf("\r");
 
