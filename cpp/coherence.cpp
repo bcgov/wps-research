@@ -17,8 +17,8 @@ int main(int argc, char ** argv){
   hread(hfn1, nrow, ncol, nband);
   hread(hfn2, nrow, ncol, nband);
 
-  str ofn(str(fn1) + str(fn2) + str("_coh.bin"));
-  str ohn(str(fn1) + str(fn2) + str("_coh.hdr"));
+  str ofn(str(fn1) + str("_") + str(fn2) + str("_coh.bin"));
+  str ohn(str(fn1) + + str("_") + str(fn2) + str("_coh.hdr"));
   float re1, im1, re2, im2, re3, im3, d1, d2;
   FILE * inf1 = fopen(fn1, "rb");
   if(!inf1) err("failed to open input file1");
