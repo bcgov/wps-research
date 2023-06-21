@@ -1,4 +1,5 @@
 from misc import run, err, exists, hdr_fn, args, band_names
+import os
 
 if len(args) < 2:
     err("ts_stack_change.py [stack.bin produced from SNAP stack operator, followed by snap2psp.py ./ 1")
