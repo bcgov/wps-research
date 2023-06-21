@@ -13,23 +13,24 @@ int main(int argc, char *argv[]){
   str ofn(argv[3]);
   str ifn(argv[1]);
 
-  str ifn(argv[1]);
-  str hfn(hdr_fn(ifn));
+  str fn(argv[1]);
+  str hfn(hdr_fn(fn));
   hread(hfn, nr, nc, nb);
   np = nr * nc;
 
   float * out = falloc(np);  // hold one band
   vector<str> band_names(parse_band_names(hfn));
 
-  FILE * f = ropen(ifn.c_str());
+  FILE * f = ropen(fn.c_str());
   fseek(f, np * (size_t)selected, SEEK_SET);
-  size_t nr = fread(out, sizeof(float), np, f);
+  nr = fread(out, sizeof(float), np, f);
   fclose(f);
 
   FILE * g = wopen(ofn.c_str());
   fwrite(out, sizeof(float), np, g);
   fclose(g);
 
+  str ohn(hdr_fn(ofn), true);
   hwrite(ohn, nr, nc, 1, 4); // always type 4, one band
   str cmd(str("envi_header_copy_mapinfo.py ") + 
 	      hfn + str(" ") +
