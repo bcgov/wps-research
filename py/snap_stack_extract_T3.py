@@ -26,13 +26,9 @@ for p in phone_book:
     if not exists(p):
         os.mkdir(p)
     for b in phone_book[p]:
-        #print("\t", b)
         w = b.split("_")
-        #print("  ",w[:-2])
-
         ofn = w[-1] + '/' + ('_'.join(w[:-2])) + '.bin'
         ohn = w[-1] + '/' + ('_'.join(w[:-2])) + '.hdr'
-
         cmd = ' '.join(['unstack2',
                         fn,
                         str(lookup[b]),
