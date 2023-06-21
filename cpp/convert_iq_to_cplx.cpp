@@ -13,9 +13,20 @@ int main(int argc, char ** argv){
 
   str a(argv[1]);
   str b(argv[2]);
-  str ah(hdr_fn(a));
-  str bh(hdr_fn(b));
-  hread(ah, nr, nc, nb);
+  str ah(exists(a)?hdr_fn(a):"");
+  str bh(exists(b)?hdr_fn(b):"");
+
+  if(exists(ah)){
+	  hread(ah, nr, nc, nb);
+  }
+  else{
+    if(exists(bh)){
+      hread(bh, nr, nc, nb);
+    }
+    else{
+      err("neither expected header found");
+    }
+  }
 
   d_i = d_q = NULL;
   if(exists(a)) d_i = bread(a, nr, nc, nb);
