@@ -17,10 +17,8 @@ int main(int argc, char ** argv){
   if(argc < 3) err("t3_change.py [t3 path: pre] [t3 path 2: post]");
 
   size_t nr, nc, nb, np, i, j;
-float * a[9]
-;
-float * b[9]
-;
+float * a[9];
+float * b[9];
 float * out;
 
 for0(i, 9){
