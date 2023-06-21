@@ -35,4 +35,4 @@ for p in phone_book:
                         fn,
                         str(lookup[b]),
                         ofn])
-        print(cmd)
+        run(cmd)
