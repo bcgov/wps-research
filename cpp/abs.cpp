@@ -7,9 +7,7 @@ int main(int argc, char ** argv){
   }
   size_t nrow, ncol, row, col, nband;
   long int i, j, k, ind;
-  nrow = atol(argv[1]);
-  ncol = atol(argv[2]);
-  char * infn = argv[3];
+  char * infn = argv[1];
   str hfn(hdr_fn(str(infn)));
   hread(hfn, nrow, ncol, nband);
   printf("nrow %zu ncol %zu infile %s\n", nrow, ncol, infn);
@@ -17,10 +15,13 @@ int main(int argc, char ** argv){
   str ofn(str(infn) + str("_abs.bin"));
   str ohn(str(infn) + str("_abs.hdr"));
   float real, imag;
-  FILE * infile = ropen(ofn);
+  FILE * infile = fopen(infn, "rb");
+  if(!infile) err("failed to open input file");
+  
   float * out = falloc(nrow * ncol);
   size_t ci = 0;
 
+  printf("here\n");
   for0(row, nrow){
     if(nrow % 100 ==0){
       printf("\rProcessing row %zu of %zu ", row + 1, nrow);
@@ -31,7 +32,7 @@ int main(int argc, char ** argv){
       out[ci++] = (float)(sqrt(sq(real) + sq(imag)));
     }
   }
-
+  fclose(infile);
   // bwrite(float * d, str bfn, size_t nrow, size_t ncol, size_t nband
   bwrite(out, ofn, nrow, ncol, 1);
   printf("\r");
