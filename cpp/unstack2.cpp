@@ -22,12 +22,16 @@ int main(int argc, char *argv[]){
   vector<str> band_names(parse_band_names(hfn));
 
   FILE * f = ropen(fn.c_str());
-  fseek(f, np * (size_t)selected, SEEK_SET);
+  size_t target = np * (size_t)selected;
+  fseek(f, target, SEEK_SET);
+  if(ftell(f) != target) err("seek failed");
   size_t rs = fread(out, sizeof(float), np, f);
+  if(rs != np) err("did not read expected");
   fclose(f);
 
   FILE * g = wopen(ofn.c_str());
-  fwrite(out, sizeof(float), np, g);
+  rs = fwrite(out, sizeof(float), np, g);
+  if(rs != np) err("did not write expected");
   fclose(g);
 
   vector<str> bn2;
