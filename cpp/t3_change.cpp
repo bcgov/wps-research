@@ -39,11 +39,10 @@ int main(int argc, char ** argv){
     B.initT3(b[0][i], b[1][i], b[2][i], b[3][i], b[4][i], b[5][i], b[6][i], b[7][i], b[8][i]);
     herm3<cf> C(B - A);
 
-    herm3<cf> D;
-    A.inv(); //* B);
+    // matrix3<cf> D(A.inv() *B); // multiplicative version
 
     vec3<cf> E1, E2, E3, L;
-    TYPE R = eig(C , L, E1, E2, E3);
+    TYPE R = eig(C, L, E1, E2, E3);  // use D or C here
 
     out[i] = abs(L.a);
     out[i + np] = abs(L.b);
