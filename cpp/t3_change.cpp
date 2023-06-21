@@ -77,8 +77,11 @@ int main(int argc, char ** argv){
     }
 
   }
-  bwrite(out, str("lambda.bin"), nr, nc, 3);
-  hwrite(str("lambda.hdr"), nr, nc, 3);
+
+  str ofn(str(args[1]) + str("_") + str(args[2]) + str("lambda.bin"));
+  str ohn(str(args[1]) + str("_") + str(args[2]) + str("lambda.hdr"));
+  bwrite(out, ofn, nr, nc, 3);
+  hwrite(ohn, nr, nc, 3);
 
   return 0;
 }
