@@ -46,7 +46,8 @@ int main(int argc, char ** argv){
       re3 /= d1;
       im3 /= d1;
 
-      printf("%f %f %f %f %f %f\n", re1, im1, re2, im2, re3, im3);
+      // printf("%f %f %f %f %f %f\n", re1, im1, re2, im2, re3, im3);
+      
       if(isinf(re3) || isinf(im3)){
         (out[ci++] = NAN), (out[ci++] = NAN);
       }
