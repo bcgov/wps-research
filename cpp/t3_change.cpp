@@ -29,7 +29,6 @@ int main(int argc, char ** argv){
   }
 
   for0(i, 9){
-    b[i] = NULL;
     str fn(str(argv[2]) + sep + channels[i]);
     str hfn(hdr_fn(str(argv[2]) + sep + channels[i]));
     hread(hfn, nr, nc, nb);
@@ -78,8 +77,8 @@ int main(int argc, char ** argv){
 
   }
 
-  str ofn(str(args[1]) + str("_") + str(args[2]) + str("lambda.bin"));
-  str ohn(str(args[1]) + str("_") + str(args[2]) + str("lambda.hdr"));
+  str ofn(str(argv[1]) + str("_") + str(argv[2]) + str("lambda.bin"));
+  str ohn(str(argv[1]) + str("_") + str(argv[2]) + str("lambda.hdr"));
   bwrite(out, ofn, nr, nc, 3);
   hwrite(ohn, nr, nc, 3);
 
