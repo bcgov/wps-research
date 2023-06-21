@@ -11,7 +11,6 @@ int main(int argc, char *argv[]){
   size_t i, j, nr, nc, nb, np;
   int selected = atoi(argv[2]);
   str ofn(argv[3]);
-  str ifn(argv[1]);
 
   str fn(argv[1]);
   str hfn(hdr_fn(fn));
@@ -22,7 +21,7 @@ int main(int argc, char *argv[]){
   vector<str> band_names(parse_band_names(hfn));
 
   FILE * f = ropen(fn.c_str());
-  size_t target = np * (size_t)selected;
+  size_t target = np * (size_t)selected *sizeof(float);
   fseek(f, target, SEEK_SET);
   if(ftell(f) != target) err("seek failed");
   size_t rs = fread(out, sizeof(float), np, f);
