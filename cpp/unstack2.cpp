@@ -23,7 +23,7 @@ int main(int argc, char *argv[]){
 
   FILE * f = ropen(fn.c_str());
   fseek(f, np * (size_t)selected, SEEK_SET);
-  nr = fread(out, sizeof(float), np, f);
+  size_t rs = fread(out, sizeof(float), np, f);
   fclose(f);
 
   FILE * g = wopen(ofn.c_str());
