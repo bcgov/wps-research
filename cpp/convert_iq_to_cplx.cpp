@@ -44,8 +44,11 @@ int main(int argc, char ** argv){
   FILE * f = wopen(argv[3]);
   size_t nw = fwrite(dd, sizeof(float), np * 2, f);
   if(nw != np * 2) err("unexpected write size");
+
+  vector<str>bn;
+  bn.push_back("Band 1");
   str c(hdr_fn(str(argv[3]), true));
-  hwrite(c, nr, nc, nb, 6);
+  hwrite(c, nr, nc, nb, 6, bn);
 
   free(d_i);
   free(d_q);
