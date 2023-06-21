@@ -3,26 +3,18 @@
 
 int main(int argc, char ** argv){
   str sep("/");
-  str channels[9] = {
-    str("T11.bin"),
-    str("T12_imag.bin"),
-    str("T12_real.bin"),
-    str("T13_imag.bin"),
-    str("T13_real.bin"),
-    str("T22.bin"),
-    str("T23_imag.bin"),
-    str("T23_real.bin"),
-    str("T33.bin")
-  }
-  ;
-
+  str channels[9] ={
+    str("T11.bin"), str("T12_imag.bin"), str("T12_real.bin"), str("T13_imag.bin"), str("T13_real.bin"), str("T22.bin"), str("T23_imag.bin"), str("T23_real.bin"), str("T33.bin")
+  };
   if(argc < 3){
     err("t3_change.py [t3 path 1 (pre)] [t3 path 2 (post)]");
   }
 
-  size_t nr, nc, nb, np, i, j;
+size_t nr, nc, nb, np, i, j;
 float * a[9];
 float * b[9];
+float * out;
+
 
 for0(i, 9){
 a[i] = NULL;
@@ -42,9 +34,11 @@ b[i] = bread(fn, nr, nc, nb);
 
 np = nr * nc;
 
+out = falloc(np * 3);
+
 for0(i, np){
 
-	if(i % 5000 == 0) printf("%zu\n", i);
+if(i % 5000 == 0) printf("%zu\n", i);
 herm3<cf> A;
 herm3<cf> B;
 A.initT3(a[0][i], a[1][i], a[2][i], a[3][i], a[4][i], a[5][i], a[6][i], a[7][i], a[8][i]);
@@ -58,6 +52,10 @@ vec3<cf> L;
 
 TYPE R = eig(C , L, E1, E2, E3);
 
+out[i] = abs(L.a);
+out[i + np] = abs(L.b);
+out[i + np + np] = abs(L.c);
+
 if(isnan(abs(L.a)) || isnan(abs(L.b)) || isnan(abs(L.c))) continue;
 
 if(abs(L.a) != 0. && abs(L.b) != 0. && abs(L.c) != 0.){
@@ -69,6 +67,8 @@ if(abs(L.a) != 0. && abs(L.b) != 0. && abs(L.c) != 0.){
 }
 
 }
+  bwrite(out, str("lambda.bin"),  nr, nc, 3);
+  hwrite(str("lambda.hdr"), nr, nc, 3);
 
 return 0;
 }
