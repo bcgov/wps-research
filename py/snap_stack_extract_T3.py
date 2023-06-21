@@ -34,3 +34,5 @@ for p in phone_book:
                         str(lookup[b]),
                         ofn])
         run(cmd)
+
+        run('raster_zero_to_nan ' + ofn)
