@@ -6,6 +6,7 @@ by Ash Richardson, Senior Data Scientist, BC Wildfire Service */
 #include <stdio.h>
 #include <stdlib.h>
 #include "matrix2.h"
+#include"misc.h"
 
 #define cf complex<TYPE>
 
@@ -13,11 +14,6 @@ by Ash Richardson, Senior Data Scientist, BC Wildfire Service */
 #define _zero ( cf(0.,0.) )
 
 using namespace std;
-
-void err(const char * m){
-  printf("Error: %s\n", m);
-  exit(1);
-}
 
 template<class T> struct vec3{
   T a; T b; T c; /* representation of 3-d vector */
@@ -64,7 +60,7 @@ template<class T> cf at(vec3<T> & A, int i){
   return _zero;
 }
 
-template<class T> void set(vec3<T> & A, int i, cf dat){
+template<class T> void vset(vec3<T> & A, int i, cf dat){
   /* accessor */
   if(i == 0) A.a = dat;
   else if(i == 1) A.b = dat;
@@ -439,7 +435,7 @@ TYPE eig(herm3<cf> &A , vec3<cf> &L, vec3<cf> &E1, vec3<cf> &E2, vec3<cf> &E3){
      vec3<cf> d3 = (A*e3)/l3 - e3;*/
 
   for(i = 0; i < 3; i++)
-      set(L, i, at(lambdas,ind[i]));
+      vset(L, i, at(lambdas,ind[i]));
 
   E1 = *(ptr[ind[0]]);
   E2 = *(ptr[ind[1]]);
