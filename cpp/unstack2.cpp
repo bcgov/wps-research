@@ -30,8 +30,10 @@ int main(int argc, char *argv[]){
   fwrite(out, sizeof(float), np, g);
   fclose(g);
 
+  vector<str> bn2;
+  bn2.push_back(band_names[selected]);
   str ohn(hdr_fn(ofn, true));
-  hwrite(ohn, nr, nc, 1, 4); // always type 4, one band
+  hwrite(ohn, nr, nc, 1, 4, bn2); // always type 4, one band
   str cmd(str("envi_header_copy_mapinfo.py ") + 
 	      hfn + str(" ") +
 	      ohn);
