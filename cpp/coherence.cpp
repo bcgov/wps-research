@@ -41,11 +41,8 @@ int main(int argc, char ** argv){
 
       re3 = re1 * re2 + im1 * im2;
       im3 = im1 * re2 - re1 * im2;
-
       d1 = float(sqrt(sq(re1) + sq(im1))) * float(sqrt(sq(re2) + sq(im2)));
-	
-      out[ci++] = re3 / d1;
-      out[ci++] = im3 / (d1 * d2);
+      (out[ci++] = re3 / d1), (out[ci++] = im3 / d1);
     }
   }
   fclose(infile);
