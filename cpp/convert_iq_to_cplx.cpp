@@ -17,15 +17,17 @@ int main(int argc, char ** argv){
   str bh(hdr_fn(b));
   hread(ah, nr, nc, nb);
 
-  (d_i = bread(a, nr, nc, nb)), (d_q = bread(b, nr, nc, nb));
+  d_i = d_q = NULL;
+  if(exists(a)) d_i = bread(a, nr, nc, nb);
+  if(exists(b)) d_q = bread(b, nr, nc, nb);
   printf("nr %zu nc %zu nb %zu\n", nr, nc, nb);
   np = nr * nc;
 
   dd = falloc(np * 2); // allocate floats
   for0(j, np){
     j2 = 2 * j;
-    dd[j2] = d_i[j];
-    dd[j2 + 1] = d_q[j];
+    dd[j2] = (d_i == NULL)? 0.: d_i[j];
+    dd[j2 + 1] = (d_q == NULL)? 0.: d_q[j];
   }
 
   FILE * f = wopen(argv[3]);
