@@ -1,3 +1,4 @@
+/* 20230620 absolute value of complex number (ENVI type-6 format)*/
 #include"misc.h"
 
 #define sq(x) x*x
