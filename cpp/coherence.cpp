@@ -43,7 +43,16 @@ int main(int argc, char ** argv){
       re3 = re1 * re2 + im1 * im2;
       im3 = im1 * re2 - re1 * im2;
       d1 = float(sqrt(sq(re1) + sq(im1))) * float(sqrt(sq(re2) + sq(im2)));
-      (out[ci++] = re3 / d1), (out[ci++] = im3 / d1);
+      re3 /= d1;
+      im3 /= d1;
+
+      printf("%f %f %f %f %f %f\n", re1, im1, re2, im2, re3, im3);
+      if(isinf(re3) || isinf(im3)){
+        (out[ci++] = NAN), (out[ci++] = NAN);
+      }
+      else{
+        (out[ci++] = re3), (out[ci++]= im3);
+      }
     }
   }
   fclose(inf1);
