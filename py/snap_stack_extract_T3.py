@@ -22,6 +22,7 @@ for b in bn:
         phone_book[w[-1]] = []
     phone_book[w[-1]] += [b]
 
+cfg = {}
 for p in phone_book:
     if not exists(p):
         os.mkdir(p)
@@ -36,3 +37,7 @@ for p in phone_book:
         run(cmd)
 
         run('raster_zero_to_nan ' + ofn)
+        if w[-1] not in cfg:
+            run('eh2cfg ' + ohn + ' ' + w[-1] + '/config.txt')
+            cfg[w[-1]] = True
+
