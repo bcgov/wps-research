@@ -58,6 +58,7 @@ int main(int argc, char ** argv){
       }
     }
 
+    // should add entropy here and maybe plot vector parameters as well.
   }
 
   str ofn(str("lambda_") + str(argv[1]) + str("_") + str(argv[2]) + str(".bin"));
