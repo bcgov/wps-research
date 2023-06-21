@@ -30,7 +30,7 @@ int main(int argc, char *argv[]){
   fwrite(out, sizeof(float), np, g);
   fclose(g);
 
-  str ohn(hdr_fn(ofn), false);
+  str ohn(hdr_fn(ofn, true));
   hwrite(ohn, nr, nc, 1, 4); // always type 4, one band
   str cmd(str("envi_header_copy_mapinfo.py ") + 
 	      hfn + str(" ") +
