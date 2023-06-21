@@ -16,7 +16,7 @@ for b in bn:
     ti = w[0].split('T')[1]
     
     if ti[0] == '4' or ti[1] == '4':
-        continue  # use T3 elements only
+        pass  # would be: "continue" instead of "pass" to use T3 elements only
     
     if not w[-1] in phone_book:
         phone_book[w[-1]] = []
