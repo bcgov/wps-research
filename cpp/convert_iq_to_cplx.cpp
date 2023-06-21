@@ -6,7 +6,7 @@ i-file and q-file are "real" and "imaginary" components of a complex number, res
 
 int main(int argc, char ** argv){
   if(argc < 4){
-    err("Convert iq format to PolSARPro complex format (envi type 6)\n convert_iq_to_cplx [i file] [q file] [output file]");
+    err("Convert iq format to PolSARPro complex format (envi type 6)\n convert_iq_to_cplx [i file] [q file] [output file]: # i-file could be NULL if pure imaginary; q-file could be null if pure-real # i is real component, q is imag component");
   }
   float * d_i, * d_q, * dd;
   size_t nr, nc, nb, np, j, j2;
