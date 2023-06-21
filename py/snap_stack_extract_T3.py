@@ -22,7 +22,8 @@ for b in bn:
     phone_book[w[-1]] += [b]
 
 for p in phone_book:
-    print(p)
+    if not exists(p):
+        os.mkdir(p)
     for b in phone_book[p]:
         #print("\t", b)
         w = b.split("_")
