@@ -1,8 +1,11 @@
+import matplotlib.pyplot as plt
 from cuda_slic import slic
 from skimage import data
+import numpy as np
+import sys
 
 # 2D RGB image
-img = data.astronaut() 
+img = plt.imread(sys.argv[1]) # data.astronaut() 
 labels = slic(img, n_segments=100) # , compactness=10)
 
 # 3D gray scale
