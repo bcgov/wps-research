@@ -30,3 +30,20 @@ plt.savefig("img.png")
 plt.imshow(labels)
 plt.tight_layout()
 plt.savefig("labels.png")
+
+# Calculate the mean color for each segment
+segment_means = np.zeros_like(img)
+for label in np.unique(labels):
+    segment_means[labels == label] = np.mean(img[labels == label], axis=0)
+
+# Display the original image and the segmented image
+fig, axs = plt.subplots(1, 2, figsize=(10, 5))
+axs[0].imshow(img)
+axs[0].set_title('Original Image')
+axs[0].axis('off')
+axs[1].imshow(segment_means)
+axs[1].set_title('Segmented Image')
+axs[1].axis('off')
+
+plt.tight_layout()
+plt.show()
