@@ -3,10 +3,15 @@ from cuda_slic import slic
 from skimage import data
 import numpy as np
 import sys
+import os
+
+if len(sys.argv) < 3:
+    print("raster_slic.py [input image] [number of segments]")
+    sys.exit(1)
 
 # 2D RGB image
 img = plt.imread(sys.argv[1]) # data.astronaut() 
-labels = slic(img, n_segments=100) # , compactness=10)
+labels = slic(img, n_segments=int(sys.argv[2])) # 100) # , compactness=10)
 
 # 3D gray scale
 #vol = data.binary_blobs(length=50, n_dim=3, seed=2)
