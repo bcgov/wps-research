@@ -5,13 +5,19 @@ import numpy as np
 import sys
 import os
 
-if len(sys.argv) < 3:
+
+args = sys.argv
+if len(args) < 3:
     print("raster_slic.py [input image] [number of segments]")
     sys.exit(1)
 
+
+ext = args[1][-3:]
+print([ext])
+
 # 2D RGB image
-img = plt.imread(sys.argv[1]) # data.astronaut() 
-labels = slic(img, n_segments=int(sys.argv[2])) # 100) # , compactness=10)
+img = plt.imread(args[1]) # data.astronaut() 
+labels = slic(img, n_segments=int(args[2])) # 100) # , compactness=10)
 
 # 3D gray scale
 #vol = data.binary_blobs(length=50, n_dim=3, seed=2)
@@ -36,14 +42,6 @@ segment_means = np.zeros_like(img)
 for label in np.unique(labels):
     segment_means[labels == label] = np.mean(img[labels == label], axis=0)
 
-# Display the original image and the segmented image
-fig, axs = plt.subplots(1, 2, figsize=(10, 5))
-axs[0].imshow(img)
-axs[0].set_title('Original Image')
-axs[0].axis('off')
-axs[1].imshow(segment_means)
-axs[1].set_title('Segmented Image')
-axs[1].axis('off')
+plt.imsave(sys.argv[1] + "_slic.png", segment_means)
 
-plt.tight_layout()
-plt.show()
+
