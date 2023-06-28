@@ -25,6 +25,8 @@ labels = slic(img, n_segments=int(sys.argv[2])) # 100) # , compactness=10)
 
 import matplotlib.pyplot as plt
 plt.imshow(img)
+plt.tight_layout()
 plt.savefig("img.png")
 plt.imshow(labels)
+plt.tight_layout()
 plt.savefig("labels.png")
