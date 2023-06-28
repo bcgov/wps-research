@@ -1,3 +1,5 @@
+'''Need to revise this to read the ENVI format images
+'''
 import matplotlib.pyplot as plt
 from cuda_slic import slic
 from skimage import data
@@ -16,6 +18,7 @@ ext = args[1][-3:]
 print([ext])
 
 # 2D RGB image
+plot("imread")
 img = plt.imread(args[1]) # data.astronaut() 
 labels = slic(img, n_segments=int(args[2])) # 100) # , compactness=10)
 
@@ -29,6 +32,7 @@ labels = slic(img, n_segments=int(args[2])) # 100) # , compactness=10)
 #vol = data.binary_blobs(length=33, n_dim=4, seed=2)
 #labels = slic(vol, n_segments=100, multichannel=True, compactness=1)
 
+'''
 import matplotlib.pyplot as plt
 plt.imshow(img)
 plt.tight_layout()
@@ -36,12 +40,13 @@ plt.savefig("img.png")
 plt.imshow(labels)
 plt.tight_layout()
 plt.savefig("labels.png")
+'''
 
 # Calculate the mean color for each segment
 segment_means = np.zeros_like(img)
 for label in np.unique(labels):
     segment_means[labels == label] = np.mean(img[labels == label], axis=0)
 
-plt.imsave(sys.argv[1] + "_slic.png", segment_means)
+plt.imsave("slic.png", segment_means)
 
 
