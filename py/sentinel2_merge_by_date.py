@@ -22,7 +22,16 @@ print("+w sentinel2_merge_by_date.sh")
 
 
 
+sc = "raster_stack.py"
+
 for line in lines:
     if len(line) == 8:
-        cmd = "po " + line + "/merge.bin " + master_date + "/merge.bin " + line + ".bin"
-        print(cmd)
+        if not exists(line + ".bin"):
+            cmd = "po " + line + "/merge.bin " + master_date + "/merge.bin " + line + ".bin"
+            run(cmd)
+
+        
+        sc += (" " + line + ".bin")
+
+sc += " stack.bin"
+print(sc)
