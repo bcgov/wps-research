@@ -34,7 +34,8 @@ def extract(file_name):
         for i in range(1, subdataset_dataset.RasterCount + 1):
             band = subdataset_dataset.GetRasterBand(i)
             band_metadata = band.GetMetadata()
-    
+            print(band_metadata) 
+   
             for k in band_metadata:
                 for j in desired_metadata:
                     try:
