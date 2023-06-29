@@ -150,9 +150,10 @@ if __name__ == '__main__':
         ff = os.path.sep.join((os.path.abspath(fn).split(os.path.sep))[:-1]) + os.path.sep
         title_s = fn.split("/")[-1] if not exists(ff + 'title_string.txt') else open(ff + 'title_string.txt').read().strip()
         x_label = ''
+        bn = [(' ' + bn[i] if i > 0 else bn[i])  for i in range(len(bn))]
         if bn:
             x_label += '(R,G,B) = (' + (','.join(bn)) + ')'
-        plt.title(title_s, fontsize=11)
+        plt.title(title_s, fontsize=30)
         plt.style.use('dark_background')
         
         d_min, d_max = nanmin(rgb), nanmax(rgb)
@@ -162,7 +163,7 @@ if __name__ == '__main__':
         print(ff)
         if exists(ff + 'copyright_string.txt'):
             x_label += (' ©' + open(ff+ 'copyright_string.txt').read().strip())
-        plt.xlabel(x_label)
+        plt.xlabel(x_label, fontsize=20)
         print("+w", ofn)
         plt.tight_layout()
         if not skip_plot:
