@@ -12,7 +12,8 @@ import os
 
 shapefile_path1 = sys.argv[1] # A) open shapefile
 shapefile_path2 = sys.argv[2] # B) 
-output_shapefile_fn = 'metric.shp'
+output_shapefile_fn = shapefile_path1 + "_onto_" + shapefile_path2 + ".shp"
+print("+w", output_shapefile_fn)
 
 if not exists(shapefile_path1): err("could not find input file:", shapefile_path1)
 if not exists(shapefile_path2): err("could not find input file:", shapefile_path2)
@@ -50,8 +51,8 @@ spatial_ref = layer2.GetSpatialRef()
 
 # create output shapefile to write
 output_shapefile = ogr.GetDriverByName('ESRI Shapefile').CreateDataSource(output_shapefile_fn)
-output_layer = output_shapefile.CreateLayer('metric', geom_type=ogr.wkbPolygon)
-output_layer.AssignSpatialReference(spatial_ref)
+output_layer = output_shapefile.CreateLayer('metric', geom_type=ogr.wkbPolygon,  srs=spatial_ref)
+
 
 # Define a new attribute field for the output shapefile
 new_field = ogr.FieldDefn('metric', ogr.OFTReal)
@@ -67,8 +68,6 @@ while feature2 is not None:  # attributes of the features
         if v not in values2[k]: values2[k][v] = 0
         values2[k][v] += 1
     # geometry = feature.GetGeometryRef() # print(geometry.ExportToWkt()) 
-    feature2 = layer2.GetNextFeature()  # next feature
-
     # print(values)
     # print(values2)
 
@@ -90,10 +89,6 @@ while feature2 is not None:  # attributes of the features
 
     # add numerical value into new shapefile!
     geometry = feature2.GetGeometryRef()
-
-    # Calculate the new attribute value using a formula or calculation
-    new_value = geometry.Area()  # Example: using the area of the polygon
-
     # Create new feature in the output shapefile
     output_feature = ogr.Feature(output_layer.GetLayerDefn())
     output_feature.SetGeometry(geometry)
@@ -103,6 +98,8 @@ while feature2 is not None:  # attributes of the features
 
     if ci % 100 == 0:
         print("%", 100. * ci / feature_count, " ",  ci, "of", feature_count)
+
+    feature2 = layer2.GetNextFeature()  # next feature
 
 # Close shapefiles
 dataset2 = None
