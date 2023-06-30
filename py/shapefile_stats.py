@@ -1,3 +1,5 @@
+'''20230630 plot bar charts for shapefile attributes
+'''
 import matplotlib.pyplot as plt
 from misc import err, exists
 from osgeo import ogr
