@@ -46,10 +46,12 @@ dataset2 = driver.Open(shapefile_path2, 0)  # 0 means read-only mode
 layer2 = dataset2.GetLayer()
 feature2 = layer2.GetNextFeature()  # iterate features for shapefile 1.
 feature_count = layer2.GetFeatureCount()
+spatial_ref = layer2.GetSpatialRef()
 
 # create output shapefile to write
 output_shapefile = ogr.GetDriverByName('ESRI Shapefile').CreateDataSource(output_shapefile_fn)
 output_layer = output_shapefile.CreateLayer('metric', geom_type=ogr.wkbPolygon)
+output_layer.AssignSpatialReference(spatial_ref)
 
 # Define a new attribute field for the output shapefile
 new_field = ogr.FieldDefn('metric', ogr.OFTReal)
@@ -106,26 +108,3 @@ while feature2 is not None:  # attributes of the features
 dataset2 = None
 output_shapefile = None
 print("+w", output_shapefile_fn)
-
-
-
-'''
-
-
-
-for k in values:
-    print(values[k])
-
-    labels = list(values[k].keys())
-    n_keys = len(labels)
-
-    has_none = False
-    stuff = [[labels[i], values[k][labels[i]]] for i in range(len(labels))]
-    for i in range(len(stuff)):
-        if labels[i] == None:
-            has_none = True
-
-    if has_none:
-        for i in range(len(stuff)):
-            stuff[i][0] = str(stuff[i][0])
-'''
