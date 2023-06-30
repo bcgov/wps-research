@@ -12,11 +12,10 @@ import os
 
 shapefile_path1 = sys.argv[1] # A) open shapefile
 shapefile_path2 = sys.argv[2] # B) 
+output_shapefile_fn = 'metric.shp'
 
-if not exists(shapefile_path1):
-    err("could not find input file:", shapefile_path1)
-if not exists(shapefile_path2):
-    err("could not find input file:", shapefile_path2)
+if not exists(shapefile_path1): err("could not find input file:", shapefile_path1)
+if not exists(shapefile_path2): err("could not find input file:", shapefile_path2)
 
 driver = ogr.GetDriverByName('ESRI Shapefile')
 dataset = driver.Open(shapefile_path1, 0)  # 0 means read-only mode
@@ -29,10 +28,8 @@ while feature is not None:  # attributes of the feature
     for k in attributes:
         types.add(type(attributes[k]))
         v = attributes[k]
-        if k not in values:
-            values[k] = {}
-        if v not in values[k]:
-            values[k][v] = 0
+        if k not in values: values[k] = {}
+        if v not in values[k]: values[k][v] = 0
         values[k][v] += 1
     # geometry = feature.GetGeometryRef() # print(geometry.ExportToWkt()) 
     feature = layer.GetNextFeature()  # next feature
@@ -41,34 +38,31 @@ dataset = None # close shapefile
 # normalize the counts to add to 1 for each attribute
 for k in values:
     total = 0.
-    for v in values[k]:
-        total += values[k][v]
-    # make it add to 1.
-    for v in values[k]:
-        values[k][v] /= total
+    for v in values[k]: total += values[k][v]
+    for v in values[k]: values[k][v] /= total  # make it add to 1.
 
 # open the second shapefile
 dataset2 = driver.Open(shapefile_path2, 0)  # 0 means read-only mode
 layer2 = dataset2.GetLayer()
 feature2 = layer2.GetNextFeature()  # iterate features for shapefile 1.
+feature_count = layer2.GetFeatureCount()
 
 # create output shapefile to write
-output_shapefile = ogr.GetDriverByName('ESRI Shapefile').CreateDataSource('metric.shp')
+output_shapefile = ogr.GetDriverByName('ESRI Shapefile').CreateDataSource(output_shapefile_fn)
 output_layer = output_shapefile.CreateLayer('metric', geom_type=ogr.wkbPolygon)
 
 # Define a new attribute field for the output shapefile
 new_field = ogr.FieldDefn('metric', ogr.OFTReal)
 output_layer.CreateField(new_field)
 
+ci = 1
 while feature2 is not None:  # attributes of the features
     values2 = {}  # vector for this feature only, not aggregate
     attributes2 = feature2.items()
     for k in attributes2:
         v = attributes2[k]
-        if k not in values2:
-            values2[k] = {}
-        if v not in values2[k]:
-            values2[k][v] = 0
+        if k not in values2: values2[k] = {}
+        if v not in values2[k]: values2[k][v] = 0
         values2[k][v] += 1
     # geometry = feature.GetGeometryRef() # print(geometry.ExportToWkt()) 
     feature2 = layer2.GetNextFeature()  # next feature
@@ -86,7 +80,7 @@ while feature2 is not None:  # attributes of the features
                     if values2[k][v] != 1.:
                         err("this quantity should always be 1.")
     metric /= n_terms  # total value should be <= 1.
-    print("metric", metric)
+    # print("metric", metric)
 
     # do the dot-producty bit here:
     # don't penalize for stuff we don't have. Only add on for stuff we do have!
@@ -103,9 +97,15 @@ while feature2 is not None:  # attributes of the features
     output_feature.SetGeometry(geometry)
     output_feature.SetField('metric', metric)
     output_layer.CreateFeature(output_feature)
+    ci += 1
+
+    if ci % 100 == 0:
+        print("%", 100. * ci / feature_count, " ",  ci, "of", feature_count)
+
 # Close shapefiles
 dataset2 = None
 output_shapefile = None
+print("+w", output_shapefile_fn)
 
 
 
