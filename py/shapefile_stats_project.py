@@ -52,6 +52,14 @@ dataset2 = driver.Open(shapefile_path2, 0)  # 0 means read-only mode
 layer2 = dataset2.GetLayer()
 feature2 = layer2.GetNextFeature()  # iterate features for shapefile 1.
 
+# create output shapefile to write
+output_shapefile = ogr.GetDriverByName('ESRI Shapefile').CreateDataSource('metric.shp')
+output_layer = output_shapefile.CreateLayer('metric', geom_type=ogr.wkbPolygon)
+
+# Define a new attribute field for the output shapefile
+new_field = ogr.FieldDefn('metric', ogr.OFTReal)
+output_layer.CreateField(new_field)
+
 while feature2 is not None:  # attributes of the features
     values2 = {}  # vector for this feature only, not aggregate
     attributes2 = feature2.items()
@@ -84,11 +92,20 @@ while feature2 is not None:  # attributes of the features
     # don't penalize for stuff we don't have. Only add on for stuff we do have!
     # want 1. if we have the same proportion for everything. Otherwise, less than that.
 
+    # add numerical value into new shapefile!
+    geometry = feature2.GetGeometryRef()
 
-    # add the numerical value into the new shapefile!
-# Close the shapefile
+    # Calculate the new attribute value using a formula or calculation
+    new_value = geometry.Area()  # Example: using the area of the polygon
+
+    # Create new feature in the output shapefile
+    output_feature = ogr.Feature(output_layer.GetLayerDefn())
+    output_feature.SetGeometry(geometry)
+    output_feature.SetField('metric', metric)
+    output_layer.CreateFeature(output_feature)
+# Close shapefiles
 dataset2 = None
-
+output_shapefile = None
 
 
 
