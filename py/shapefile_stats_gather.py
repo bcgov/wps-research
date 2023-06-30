@@ -27,6 +27,7 @@ for line in lines:
 
 attrs = sorted(list(attrs))
 # print(attrs)
+filenames = sorted(list(filenames), reverse=True)
 
 
 print("<table>")
@@ -40,8 +41,8 @@ print("</tr>")
 for attr in attrs:
     print("<tr>", end="")
     print("<td>" + attr + "</td>", end="")
-    for f in filenames:
-        print("<td>" + lookup[fn][attr] + "</td>", end="")
+    for fn in filenames:
+        print('<td><img src="' + lookup[fn][attr] + '"></td>', end="")
         #print(f, lookup[f])
         
 
