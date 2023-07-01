@@ -3,6 +3,13 @@ Given two shapefile (A) and (B) which are assumed to have the same (mostly the s
 
 Produce a third shapefile (C) which has a numerical value expresssing closeness between the same polygonal footprint's attributes vs. the aggregated attributes over the shapefile (A)
 '''
+
+avoid = ["ATTRIBUTIO", "AVAIL_LABE", "AVAIL_LA_1", "COMPARTMEN", "EARLIEST_1", "FEATURE_A", "FEATURE_CL", "FEATURE_ID", "FEATURE_LE", "FIZ_CD", "FULL_LABEL",
+         "GEOMETRY_A", "GEOMETRY_L", "HARVEST_DA", "INPUT_DATE", "INTERPRETA", "LABEL_CENT", "LABEL_CE_1", "LINE_2_POL", "LINE_6_SIT", "LINE_7A_ST", "LINE_8_PLA" , "MAP_ID",
+         "NON_PRODUC", "NON_PROD_1", "NON_VEG_6", "NON_VEG_7", "NON_VEG_8", "OBJECTID", "OPENING_ID", "ORG_UNIT_C", "ORG_UNIT_N", "POLYGON_AR", "POLYGON_ID", "PRINTABLE_", "PROJECT",
+         "PROJECTED", "REFERENCE_", "SMALL_LABE", "SPECIAL_CR", "SPECIAL__1", "SHAPE_AREA", "Shape_Leng", "fid"] 
+avoid = set(avoid)
+
 import matplotlib.pyplot as plt
 from misc import err, exists
 from osgeo import ogr
@@ -66,13 +73,15 @@ while feature2 is not None:  # attributes of the features
         v = attributes2[k]
         if k not in values2: values2[k] = {}
         if v not in values2[k]: values2[k][v] = 0
-        values2[k][v] += 1
+        values2[k][v] += 1.
     # geometry = feature.GetGeometryRef() # print(geometry.ExportToWkt()) 
     # print(values)
     # print(values2)
 
     metric, n_terms = 0., 0.
     for k in values:
+        if k in avoid:  # skip comparing "avoid" attributes
+            continue 
         if k in values2:
             for v in values2[k]:
                 if v in values[k]:
