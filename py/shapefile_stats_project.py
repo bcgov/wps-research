@@ -3,13 +3,18 @@ Given two shapefile (A) and (B) which are assumed to have the same (mostly the s
 
 Produce a third shapefile (C) which has a numerical value expresssing closeness between the same polygonal footprint's attributes vs. the aggregated attributes over the shapefile (A)
 '''
-
-avoid = ["ATTRIBUTIO", "AVAIL_LABE", "AVAIL_LA_1", "COMPARTMEN", "EARLIEST_1", "FEATURE_A", "FEATURE_CL", "FEATURE_ID", "FEATURE_LE", "FIZ_CD", "FULL_LABEL",
-         "GEOMETRY_A", "GEOMETRY_L", "HARVEST_DA", "INPUT_DATE", "INTERPRETA", "LABEL_CENT", "LABEL_CE_1", "LINE_2_POL", "LINE_6_SIT", "LINE_7A_ST", "LINE_8_PLA" , "MAP_ID",
-         "NON_PRODUC", "NON_PROD_1", "NON_VEG_6", "NON_VEG_7", "NON_VEG_8", "OBJECTID", "OPENING_ID", "ORG_UNIT_C", "ORG_UNIT_N", "POLYGON_AR", "POLYGON_ID", "PRINTABLE_", "PROJECT",
-         "PROJECTED", "REFERENCE_", "SMALL_LABE", "SPECIAL_CR", "SPECIAL__1", "SHAPE_AREA", "Shape_Leng", "fid"] 
-avoid = set(avoid)
-
+use_mode = True  # select to use only most occuring outcome (per attribute) w.r.t reference sample
+avoid = set(["ATTRIBUTIO", "AVAIL_LABE", "AVAIL_LA_1", "COMPARTMEN",
+             "EARLIEST_1", "FEATURE_A", "FEATURE_CL", "FEATURE_ID",
+             "FEATURE_LE", "FIZ_CD", "FULL_LABEL", "GEOMETRY_A",
+             "GEOMETRY_L", "HARVEST_DA", "INPUT_DATE", "INTERPRETA",
+             "LABEL_CENT", "LABEL_CE_1", "LINE_2_POL", "LINE_6_SIT",
+             "LINE_7A_ST", "LINE_8_PLA" , "MAP_ID", "NON_PRODUC",
+             "NON_PROD_1", "NON_VEG_6", "NON_VEG_7", "NON_VEG_8",
+             "OBJECTID", "OPENING_ID", "ORG_UNIT_C", "ORG_UNIT_N",
+             "POLYGON_AR", "POLYGON_ID", "PRINTABLE_", "PROJECT",
+             "PROJECTED", "REFERENCE_", "SMALL_LABE", "SPECIAL_CR",
+             "SPECIAL__1", "SHAPE_AREA", "Shape_Leng", "fid"])
 import matplotlib.pyplot as plt
 from misc import err, exists
 from osgeo import ogr
@@ -51,6 +56,9 @@ for k in values:  # normalize counts to add to 1 for each atribute?
     total = 0.
     for v in values[k]: total += values[k][v]
     for v in values[k]: values[k][v] /= total  # make it add to 1.
+
+if use_mode: # select most frequent outcome only
+
 
 # open the second shapefile
 dataset2 = driver.Open(shapefile_path2, 0)  # second shapefile, 0 is Read-only mode
