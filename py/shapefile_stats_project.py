@@ -36,8 +36,10 @@ while feature is not None:  # attributes of the feature
     for k in attributes:
         types.add(type(attributes[k]))
         v = attributes[k]
-        if k not in values: values[k] = {}
-        if v not in values[k]: values[k][v] = 0
+        if k not in values:
+            values[k] = {}
+        if v not in values[k]:
+            values[k][v] = 0
         values[k][v] += 1
     # geometry = feature.GetGeometryRef() # print(geometry.ExportToWkt()) 
     feature = layer.GetNextFeature()  # next feature
@@ -71,12 +73,12 @@ while feature2 is not None:  # attributes of the features
     attributes2 = feature2.items()
     for k in attributes2:
         v = attributes2[k]
-        if k not in values2: values2[k] = {}
-        if v not in values2[k]: values2[k][v] = 0
+        if k not in values2:
+            values2[k] = {}
+        if v not in values2[k]:
+            values2[k][v] = 0
         values2[k][v] += 1.
     # geometry = feature.GetGeometryRef() # print(geometry.ExportToWkt()) 
-    # print(values)
-    # print(values2)
 
     metric, n_terms = 0., 0.
     for k in values:
@@ -90,11 +92,6 @@ while feature2 is not None:  # attributes of the features
                     if values2[k][v] != 1.:
                         err("this quantity should always be 1.")
     metric /= n_terms  # total value should be <= 1.
-    # print("metric", metric)
-
-    # do the dot-producty bit here:
-    # don't penalize for stuff we don't have. Only add on for stuff we do have!
-    # want 1. if we have the same proportion for everything. Otherwise, less than that.
 
     # add numerical value into new shapefile!
     geometry = feature2.GetGeometryRef()
@@ -107,7 +104,6 @@ while feature2 is not None:  # attributes of the features
 
     if ci % 100 == 0:
         print("%", 100. * ci / feature_count, " ",  ci, "of", feature_count)
-
     feature2 = layer2.GetNextFeature()  # next feature
 
 # Close shapefiles
