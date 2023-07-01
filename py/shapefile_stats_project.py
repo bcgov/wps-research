@@ -41,10 +41,13 @@ while feature is not None:  # attributes of the feature
     for k in attributes:
         types.add(type(attributes[k]))
         v = attributes[k]
+        
         if k not in values:
             values[k] = {}
+        
         if v not in values[k]:
             values[k][v] = 0
+
         values[k][v] += 1
     # geometry = feature.GetGeometryRef() # print(geometry.ExportToWkt()) 
     feature = layer.GetNextFeature()  # next feature
@@ -54,8 +57,10 @@ dataset = None # close shapefile
 # normalize the counts to add to 1 for each attribute
 for k in values:  # normalize counts to add to 1 for each atribute?
     total = 0.
-    for v in values[k]: total += values[k][v]
-    for v in values[k]: values[k][v] /= total  # make it add to 1.
+    for v in values[k]:
+        total += values[k][v]
+    for v in values[k]:
+        values[k][v] /= total  # make it add to 1.
 
 if use_mode: # select most frequent outcome only
 
@@ -79,15 +84,18 @@ while feature2 is not None:  # attributes of the features
     attributes2 = feature2.items()
     for k in attributes2:
         v = attributes2[k]
+        
         if k not in values2:
             values2[k] = {}
+        
         if v not in values2[k]:
             values2[k][v] = 0
+        
         values2[k][v] += 1.
     # geometry = feature.GetGeometryRef() # print(geometry.ExportToWkt()) 
 
     metric, n_terms = 0., 0.
-
+    
     for k in values:
         if k in avoid:  # skip comparing "avoid" attributes
             continue 
