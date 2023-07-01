@@ -57,13 +57,24 @@ dataset = None # close shapefile
 # normalize the counts to add to 1 for each attribute
 for k in values:  # normalize counts to add to 1 for each atribute?
     total = 0.
+    
     for v in values[k]:
         total += values[k][v]
+    
     for v in values[k]:
         values[k][v] /= total  # make it add to 1.
 
 if use_mode: # select most frequent outcome only
-
+    for k in values:
+        max_c, max_v = None, None
+        
+        for v in values[k]:
+            if max_c is None:
+                max_c, max_v = v, values[k][v]
+            
+            if values[k][v] > max_v:
+                max_c, max_v = v, values[k][v]
+        values[k] = {max_c: 1.}
 
 # open the second shapefile
 dataset2 = driver.Open(shapefile_path2, 0)  # second shapefile, 0 is Read-only mode
