@@ -1,10 +1,9 @@
 '''20230712 match point-shapefile locations to raster
-* Assume one shapefile-point is in the raster and/or:
+
 * find the nearest shapefile-point to raster footprint 
       centroid
 
-
-* Make sure raster and shapefile are in same CRS.
+* Condition: make sure raster and shp are in same CRS.
 E.g. I transformed both to EPSG 4326 first.
 
 Does this script actually work?
