@@ -9,18 +9,15 @@ import sys
 from misc import err, run, pd, sep, exists, args
 cd = pd + '..' + sep + 'cpp' + sep
 
-if len(args) < 2:
-    err('sentinel2_trace_active.py [input file, binary mask envi type 4] [optional arg: class index]')
-
-class_select = None 
-if len(args) > 2:
-    class_select = int(args[2])
-print(class_select)
+if len(args) < 3:
+    err('sentinel2_trace_active.py [input file, binary mask envi type 4] [source data file]')
 
 fn = args[1]
 if not exists(fn):
     err('please check input file')
     
+run('rm -v *crop*')
+
 for i in [BRUSH_SIZE]: # [10, 20, 60]: # 90   # 150
     if not exists(fn + '_flood4.bin'):
         run(['ulimit -s 1000000;' + cd + 'flood.exe ' + fn])
@@ -48,34 +45,33 @@ for i in [BRUSH_SIZE]: # [10, 20, 60]: # 90   # 150
     lines = os.popen(cmd).read().split('\n')
     for line in lines:
         print(line)
-    '''
-    lines = None
-    run('rm -f class_onehot.dat')
-    if not exists('class_onehot.dat'):
-        lines = os.popen(cmd).read()
-        open('class_onehot.dat', 'wb').write(lines.encode())
-    else:
-        lines = open('class_onehot.dat').read()
-    '''
+    
     for line in lines:
-        w, f = line.strip().split(), None
+        w, f, hfn = line.strip().split(), None, None
         try:
             if w[1][-4:] == '.hdr' and w[0] == '+w':
                 f = w[1][:-4] + '.bin'
                 print(f)
+                hfn = w[1][:-4] + '.hdr'
         except:
             pass
         if f:
             if True:
                 if f == fn + '_flood4.bin_link.bin_recode.bin_1.bin':
                     continue  # first class should be empty !
-                N = int(f.split('.')[-2].split('_')[-1]) # print(N)
-                if class_select is not None:
-                    if N != class_select:
-                        continue
+                
+                run('cp ' + fn[:-4] + '.hdr ' + hfn)
 
-                # point count this class: skip if under threshold
-                print('run(' + cd + 'class_count.exe ' + f + ')')
+                N = int(f.split('.')[-2].split('_')[-1]) # print(N)
+
+                run('crop ' + f)
+                run('pad ' + f + '_crop.bin')
+                f_0 = f
+                f = f_0 + '_crop.bin_pad.bin'
+                hfn = f_0 + '_crop.bin_pad.hdr'
+
+
+                print('run(' + cd + 'class_count.exe ' + f + ')')  # skip if under threshold
                 c = ''.join(os.popen(cd + 'class_count.exe ' + f).read().split())
                 c = c.strip('{').strip('}').split(',')
                 if len(c) != 2:
@@ -86,24 +82,8 @@ for i in [BRUSH_SIZE]: # [10, 20, 60]: # 90   # 150
                     print('********* SKIP this class,', n_px, ' below threshold: ', POINT_THRES) 
                     continue
           
+
                 # create outline (alpha shape)
                 run(['python3',
-                    pd + 'alpha_shape.py',
+                    pd + 'binary_polygonize.py',
                     f])
-
-                # plotting
-                png_f = f + '_1_1_1_rgb.png'
-                if not exists(f  + png_f) and WRITE_PNG:
-                    run('python3 ' + pd + 'raster_plot.py ' + f + ' 1 1 1 1 1')
-
-                # copy map info
-                run(['python3 ' + pd + 'envi_header_copy_mapinfo.py',
-                        fn[:-4] + '.hdr',
-                        f[:-4] + '.hdr'])
-
-                # generate KML
-                ptfn = f + '_alpha_points.txt'
-                run(['python3',
-                     pd + 'raster_pixel_loc.py',
-                     f,
-                     ptfn]) # open(ptfn).read().strip()])
