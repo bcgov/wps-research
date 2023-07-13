@@ -15,7 +15,6 @@ if len(args) < 3:
 fn = args[1]
 if not exists(fn):
     err('please check input file')
-    
 run('rm -v *crop*')
 
 for i in [BRUSH_SIZE]: # [10, 20, 60]: # 90   # 150
@@ -70,7 +69,6 @@ for i in [BRUSH_SIZE]: # [10, 20, 60]: # 90   # 150
                 f = f_0 + '_crop.bin_pad.bin'
                 hfn = f_0 + '_crop.bin_pad.hdr'
 
-
                 print('run(' + cd + 'class_count.exe ' + f + ')')  # skip if under threshold
                 c = ''.join(os.popen(cd + 'class_count.exe ' + f).read().split())
                 c = c.strip('{').strip('}').split(',')
@@ -78,12 +76,17 @@ for i in [BRUSH_SIZE]: # [10, 20, 60]: # 90   # 150
                     err('expected tuple of len 2')
                 print("c", c)
                 n_px = int(c[1].split(':')[1])
+                
                 if n_px < POINT_THRES:
                     print('********* SKIP this class,', n_px, ' below threshold: ', POINT_THRES) 
                     continue
           
-
-                # create outline (alpha shape)
                 run(['python3',
                     pd + 'binary_polygonize.py',
                     f])
+
+                # project source data onto clip area
+                
+                # create tif 
+
+                # rename file to BCWS format
