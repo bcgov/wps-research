@@ -1,4 +1,7 @@
-'''20230712 match point shapefile locations to raster. Assume one point is in the raster.'''
+'''20230712 match point shapefile locations to raster. Assume one point is in the raster.
+
+Didn't quite get this working yet
+'''
 from osgeo import gdal
 from osgeo import ogr
 from misc import args, err
