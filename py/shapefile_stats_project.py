@@ -15,8 +15,8 @@ avoid = set(["ATTRIBUTIO", "AVAIL_LABE", "AVAIL_LA_1", "COMPARTMEN",
              "POLYGON_AR", "POLYGON_ID", "PRINTABLE_", "PROJECT",
              "PROJECTED", "REFERENCE_", "SMALL_LABE", "SPECIAL_CR",
              "SPECIAL__1", "SHAPE_AREA", "Shape_Leng", "fid"])
+from misc import err, exists, parfor
 import matplotlib.pyplot as plt
-from misc import err, exists
 from osgeo import ogr
 import numpy as np
 import sys
@@ -33,6 +33,7 @@ dataset = driver.Open(shapefile_path1, 0)  # 0 means read-only mode
 
 types, values = set(), {}
 layer = dataset.GetLayer()
+# geometry = layer.GetGeomType()
 feature = layer.GetNextFeature()  # iterate features for shapefile 1.
 
 while feature is not None:  # attributes of the feature
@@ -89,10 +90,52 @@ output_layer = output_shapefile.CreateLayer('metric', geom_type=ogr.wkbPolygon, 
 new_field = ogr.FieldDefn('metric', ogr.OFTReal)  # new attribute field for output shp
 output_layer.CreateField(new_field)
 
-ci = 1
-while feature2 is not None:  # attributes of the features
+N = layer2.GetFeatureCount()
+
+def read_feat(i):
+    shapefile_path2 = sys.argv[2]
+    dataset2 = driver.Open(shapefile_path2, 0)  # second shapefile, 0 is Read-only mode
+    layer2 = dataset2.GetLayer()
+    field_names = [field_defn.GetName() for field_defn in layer2.schema]
+
+    if i % 1000 == 0:
+        print(i, N)
+    x = layer2.GetFeature(i)
+    dataset2 = None
+
+
+    attributes = {}
+    for field_name in field_names:
+        field_value = x.GetField(field_name)
+        attributes[field_name] = field_value
+
+    x=  [x.GetGeometryRef().ExportToWkt(), attributes]
+    print(x)
+    # print([type(i) for i in x])
+    return x
+# features2 = parfor(read_feat, range(N))
+# N = 100
+# features2 = [read_feat(i) for i in range(N)]
+
+
+features2, ci = [], 1  # put the shp data into memory for parallelisation
+while feature2 is not None:
+    features2 += [[ci, feature2]] #layer2.GetNextFeature()]]    
+    ci += 1
+    if ci % 1000 == 0:
+        print(ci, N)
+    feature2 = layer2.GetNextFeature()
+
+def process_feature(stuff):
+    ci, feature2 = stuff # rint([stuff])
+    geom = feature2.GetGeometryRef()
+    # geom, attributes2 = stuff  # unpack
+    # geom = ogr.CreateGeometryFromWkt(geom)
+    # print(geom)
+
     values2 = {}  # vector for this feature only, not aggregate
     attributes2 = feature2.items()
+    
     for k in attributes2:
         v = attributes2[k]
         
@@ -102,11 +145,9 @@ while feature2 is not None:  # attributes of the features
         if v not in values2[k]:
             values2[k][v] = 0
         
-        values2[k][v] += 1.
-    # geometry = feature.GetGeometryRef() # print(geometry.ExportToWkt()) 
+        values2[k][v] += 1. # geometry = feature.GetGeometryRef() # print(geometry.ExportToWkt()) 
 
     metric, n_terms = 0., 0.
-    
     for k in values:
         if k in avoid:  # skip comparing "avoid" attributes
             continue 
@@ -121,15 +162,20 @@ while feature2 is not None:  # attributes of the features
                     if values2[k][v] != 1.:
                         err("this quantity should always be 1.")
     metric /= n_terms  # total value should be <= 1.
-    geometry = feature2.GetGeometryRef()
+    # geometry = feature2.GetGeometryRef()
+    return [metric, geom]    
+
+print("processing features..")
+results = parfor(process_feature, features2)
+
+print("writing features..")
+for [metric, geom] in results:  # oops, was serious error!
+    # geom = ogr.CreateGeometryFromWkt(geom)
     output_feature = ogr.Feature(output_layer.GetLayerDefn())
-    output_feature.SetGeometry(geometry)
+    output_feature.SetGeometry(geom)
     output_feature.SetField('metric', metric)  # numeric field in new shapefile
     output_layer.CreateFeature(output_feature)
-    ci += 1  # progress meter
-    if ci % 100 == 0:
-        print("%", 100. * ci / feature_count, " ",  ci, "of", feature_count)
-    feature2 = layer2.GetNextFeature()  # next feature
+    # feature2 = layer2.GetNextFeature()  # next feature
 
 dataset2 = None  # close shapefiles
 output_shapefile = None
