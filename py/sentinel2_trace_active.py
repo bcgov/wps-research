@@ -92,23 +92,49 @@ for i in [BRUSH_SIZE]: # [10, 20, 60]: # 90   # 150
 
                 f_i = str(N).zfill(3)
                 src_clip = f_i + '.bin'
-    
+                src_cliph = f_i + '.hdr'    
+
                 # project source data onto clip area
                 run('po ' + src_data + ' ' + f + ' ' + src_clip)
 
-                # project fire locations onto clip area
-                cmd = 'python3 ~/GitHub/wps-research/py/shapefile_nearest_point_to_raster.py  ~/GitHub/wps-research/py/prot_current_fire_points.shp ' + src_clip
-                print(cmd)
-                lines = [x.strip() for x in os.popen(cmd).readlines()]
+                # convert shapefile and raster to same projection
+                # run('
 
-                FIRE_NUM = None
-                for line in lines:
-                    w = line.split(':')
-                    if w[0] == "FIRE_NUM":
-                        FIRE_NUM = w[1]
- 
-                print(FIRE_NUM)               
 
+                # project fire locations onto clip area : COULDN'T GET THIS WORKING YET
+                # cmd = 'python3 ~/GitHub/wps-research/py/shapefile_nearest_point_to_raster.py  ~/GitHub/wps-research/py/prot_current_fire_points.shp ' + src_clip
+                #print(cmd)
+                #lines = [x.strip() for x in os.popen(cmd).readlines()]
+
+                #FIRE_NUM = None
+                #for line in lines:
+                #    w = line.split(':')
+                #    if w[0] == "FIRE_NUM":
+                #        FIRE_NUM = w[1]
+                #  
+                # print(FIRE_NUM)               
+                FIRE_NUM = f_i
+
+
+                # S2B_MSIL1C_20230712T191919_N0509_R099_T09UYV_20230712T212909.bin
+
+                w = src_data.split('_')
+                ts = w[2].split('T')
+                ds = ts[0]
+                ts = ts[1]
+            
+                hh = int(ts[0:2]) - 7  # convert utc to PST
+                mm = int(ts[2:4]) 
+    
+                print(ts, hh, mm)
+
+                string = '23_' + FIRE_NUM + "_" + ds + '_' + str(hh).zfill(2)  + str(mm).zfill(2) + '_detection_sentinel2'
+                print(string)
+
+                run('cp ' + f + '.kml ' + string + '.kml')
+                run('mv ' + src_clip + ' ' + string + '.bin')
+                run('mv ' + src_cliph + ' ' + string + '.hdr')
+            
                 sys.exit(1)
                 
                 # create tif 
