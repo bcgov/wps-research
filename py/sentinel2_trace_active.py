@@ -91,10 +91,25 @@ for i in [BRUSH_SIZE]: # [10, 20, 60]: # 90   # 150
                     f])
 
                 f_i = str(N).zfill(3)
-            
-                run('po ' + src_data + ' ' + f + ' ' + f_i + '.bin')
-                sys.exit(1)
+                src_clip = f_i + '.bin'
+    
                 # project source data onto clip area
+                run('po ' + src_data + ' ' + f + ' ' + src_clip)
+
+                # project fire locations onto clip area
+                cmd = 'python3 ~/GitHub/wps-research/py/shapefile_nearest_point_to_raster.py  ~/GitHub/wps-research/py/prot_current_fire_points.shp ' + src_clip
+                print(cmd)
+                lines = [x.strip() for x in os.popen(cmd).readlines()]
+
+                FIRE_NUM = None
+                for line in lines:
+                    w = line.split(':')
+                    if w[0] == "FIRE_NUM":
+                        FIRE_NUM = w[1]
+ 
+                print(FIRE_NUM)               
+
+                sys.exit(1)
                 
                 # create tif 
 
