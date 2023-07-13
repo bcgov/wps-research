@@ -1,10 +1,12 @@
-/* 20200128 count occurrence of float variable */
+/* 20200128 count occurrence of float variable 
+
+20230712 updated to fix issue with sentinel2_trace_active.py */
 #include<stdio.h>
 #include<stdlib.h>
 #include"misc.h"
 
 int main(int argc, char ** argv){
-  if(argc < 2) err("class_count.exe [input file name]");
+  if(argc < 2) err("class_count.exe [input file name] # [optional arg: display number of distinct values]");
 
   map<float, size_t> count;
   FILE * f = ropen(argv[1]);
@@ -39,8 +41,10 @@ int main(int argc, char ** argv){
   if(n_nan > 0) cout << "," << endl << "NAN:" << n_nan;
   cout << "}" << endl;
 
-
-  cout << "number of distinct values:" << count.size() << endl;
+  if(argc > 2){
+    cout << "number of distinct values:" << count.size() << endl;
+  }
+  
   free(d);
   return 0;
 }
