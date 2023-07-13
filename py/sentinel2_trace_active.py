@@ -134,9 +134,12 @@ for i in [BRUSH_SIZE]: # [10, 20, 60]: # 90   # 150
                 run('cp ' + f + '.kml ' + string + '.kml')
                 run('mv ' + src_clip + ' ' + string + '.bin')
                 run('mv ' + src_cliph + ' ' + string + '.hdr')
-            
-                sys.exit(1)
-                
-                # create tif 
 
-                # rename file to BCWS format
+                binfile = string + '.bin'
+                run('envi2tif.py ' + binfile)
+                run('mv ' + binfile + '_ht.bin_smult.tif ' + string + '.tif')
+run('chmod 755 23_*.tif')
+run('chmod 755 23_*.kml')
+run('rm *smult*')
+run('rm *bin_ht*')
+run('clean')
