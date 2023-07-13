@@ -1,6 +1,11 @@
-'''demo method to map an effective fire boundary
+'''20230712: trace multiple boundaries from one detection result
+- match to bc fire point locations for identification.
 
-n.b. would need to place results in separate folders for running in parallel (script needs to be cleaned up)'''
+hint: scrub the class map before applying this..
+
+demo method to map an effective fire boundary
+
+n.b. might place results in separate folders for running in parallel (script needs to be cleaned up)'''
 BRUSH_SIZE = 50
 POINT_THRES = 10 # don't get hulls for shapes with less than 50 points
 WRITE_PNG = False # set to true for debug visuals
@@ -12,8 +17,8 @@ cd = pd + '..' + sep + 'cpp' + sep
 if len(args) < 3:
     err('sentinel2_trace_active.py [input file, binary mask envi type 4] [source data file]')
 
-fn = args[1]
-if not exists(fn):
+fn, src_data = args[1], args[2]
+if not exists(fn) or not exists(src_data):
     err('please check input file')
 run('rm -v *crop*')
 
@@ -85,6 +90,10 @@ for i in [BRUSH_SIZE]: # [10, 20, 60]: # 90   # 150
                     pd + 'binary_polygonize.py',
                     f])
 
+                f_i = str(N).zfill(3)
+            
+                run('po ' + src_data + ' ' + f + ' ' + f_i + '.bin')
+                sys.exit(1)
                 # project source data onto clip area
                 
                 # create tif 
