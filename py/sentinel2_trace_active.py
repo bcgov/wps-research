@@ -64,7 +64,7 @@ for i in [BRUSH_SIZE]: # [10, 20, 60]: # 90   # 150
                 N = int(f.split('.')[-2].split('_')[-1]) # print(N)
 
                 run('crop ' + f)
-                run('pad ' + f + '_crop.bin')
+                run('pad ' + f + '_crop.bin ' + str(BRUSH_SIZE))
                 f_0 = f
                 f = f_0 + '_crop.bin_pad.bin'
                 hfn = f_0 + '_crop.bin_pad.hdr'
