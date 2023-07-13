@@ -131,7 +131,7 @@ for i in [BRUSH_SIZE]: # [10, 20, 60]: # 90   # 150
                 string = '23_' + FIRE_NUM + "_" + ds + '_' + str(hh).zfill(2)  + str(mm).zfill(2) + '_detection_sentinel2'
                 print(string)
 
-                run('cp ' + f + '.kml ' + string + '.kml')
+                run('mv ' + f + '.kml ' + string + '.kml')
                 run('mv ' + src_clip + ' ' + string + '.bin')
                 run('mv ' + src_cliph + ' ' + string + '.hdr')
 
