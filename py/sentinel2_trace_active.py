@@ -2,7 +2,7 @@
 
 n.b. would need to place results in separate folders for running in parallel (script needs to be cleaned up)'''
 BRUSH_SIZE = 50
-POINT_THRES = 50 # don't get hulls for shapes with less than 50 points
+POINT_THRES = 10 # don't get hulls for shapes with less than 50 points
 WRITE_PNG = False # set to true for debug visuals
 import os
 import sys
