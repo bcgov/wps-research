@@ -1,10 +1,14 @@
-'''20230712 match point shapefile locations to raster. Assume one point is in the raster.
+'''20230712 match point shapefile locations to raster. Assume one shapefile point is in the raster / find the nearest point to the centroid of the raster footprint
 
 Didn't quite get this working yet
 '''
 from osgeo import gdal
 from osgeo import ogr
-from misc import args, err
+import sys
+args = sys.argv
+
+def err(m):
+    print("Error", m); sys.exit(1)
 
 if len(args) < 3:
     err("shapefile_nearest_point_to_raster.py [input point shapefile] [ input raster]")
@@ -16,8 +20,8 @@ shapefile_ds = ogr.Open(shapefile_path)
 raster_ds = gdal.Open(raster_path)
 
 raster_extent = raster_ds.GetGeoTransform()
-raster_centroid_x = (raster_extent[0] + raster_extent[1])# / 2
-raster_centroid_y = (raster_extent[3] + raster_extent[5])# / 2
+raster_centroid_x = (raster_extent[0] + raster_extent[1]) / 2
+raster_centroid_y = (raster_extent[3] + raster_extent[5]) / 2
 raster_centroid = ogr.Geometry(ogr.wkbPoint)
 raster_centroid.AddPoint(raster_centroid_x, raster_centroid_y)
 
