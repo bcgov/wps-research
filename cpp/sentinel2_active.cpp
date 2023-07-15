@@ -52,6 +52,7 @@ int main(int argc, char ** argv){
   }
   for0(i, np){
     out[i] *= (float)(b3[i] > b2[i]); /* reduce fp? */
+    if(isnan(b3[i])) out[i] = 0.;
   }
 
   vector<str> bn;
