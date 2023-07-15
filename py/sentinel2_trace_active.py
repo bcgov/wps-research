@@ -20,7 +20,7 @@ if len(args) < 3:
 fn, src_data = args[1], args[2]
 if not exists(fn) or not exists(src_data):
     err('please check input file')
-run('rm -v *crop*')
+run('rm -f -v *crop*')
 
 for i in [BRUSH_SIZE]: # [10, 20, 60]: # 90   # 150
     if not exists(fn + '_flood4.bin'):
