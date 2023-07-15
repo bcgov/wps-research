@@ -63,6 +63,10 @@ int main(int argc, char ** argv){
         if(all_zero){
           out[ik] = NAN;
         }
+        if(isnan(dat[ik])){
+          out[ik] = NAN;
+          break;
+        }
       }
       // end of pixel based operation
     }
