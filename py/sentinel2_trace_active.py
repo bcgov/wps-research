@@ -6,7 +6,7 @@ hint: scrub the class map before applying this..
 demo method to map an effective fire boundary
 
 n.b. might place results in separate folders for running in parallel (script needs to be cleaned up)'''
-BRUSH_SIZE = 50
+BRUSH_SIZE = 80
 POINT_THRES = 10 # don't get hulls for shapes with less than 50 points
 WRITE_PNG = False # set to true for debug visuals
 import os
@@ -42,7 +42,7 @@ for i in [BRUSH_SIZE]: # [10, 20, 60]: # 90   # 150
 
         run(['python3 ' + pd + 'raster_plot.py',
              fn + '_flood4.bin_link.bin_recode.bin_wheel.bin',
-             '1 2 3 1 1'])
+             '1 2 3 1 1 &'])
     
     cmd = cd + 'class_onehot.exe ' + fn + '_flood4.bin_link.bin_recode.bin ' + str(POINT_THRES)
     print(cmd)
