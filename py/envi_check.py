@@ -5,8 +5,15 @@ import os
 lines = [x.strip() for x in os.popen("ls -1 *.bin").readlines()]
 
 fails = []
+no_hdr = []
 for f in lines:
-    hfn = hdr_fn(f)
+    hfn = f[:-4] + '.hdr'
+    print(hfn)
+    try:
+        hfn = hdr_fn(f)
+    except:
+        no_hdr += [f]
+
     if not exist(hfn):
         print('[ERR]', hfn, 'not found')
     else:
@@ -31,6 +38,14 @@ if len(fails) > 0:
             for x in [hf, f]:
                 print('rm', x)
                 os.remove(x)
+
+if len(no_hdr) > 0:
+    print("These files had no header:")
+    print(' '.join(no_hdr))
+    if len(args) > 1:
+        for f in no_hdr:
+            print('rm', f)
+            os.remove(f)
 else:
     print("All .bin files OK")
 
