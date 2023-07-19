@@ -1,13 +1,17 @@
 '''20230605 check .bin files to see if the file sizes match the header'''
-from misc import err, hdr_fn, read_hdr, args
+from misc import err, hdr_fn, read_hdr, args, exist
 import os
 
 lines = [x.strip() for x in os.popen("ls -1 *.bin").readlines()]
 
 fails = []
 for f in lines:
-    [samples, lines, bands] = [int(x)
-                               for x in read_hdr(hdr_fn(f))]
+    hfn = hdr_fn(f)
+    if not exist(hfn):
+        print('[ERR]', hfn, 'not found')
+    else:
+        [samples, lines, bands] = [int(x)
+                                   for x in read_hdr(hdr_fn(f))]
     f_size = os.stat(f).st_size
     expected = samples * lines * bands * 4 
 
