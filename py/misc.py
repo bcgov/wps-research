@@ -65,7 +65,7 @@ def hdr_fn(bin_fn):  # return filename for hdr file, given binfile name
     if not exist(hfn):
         hfn2 = bin_fn + '.hdr'
         if not exist(hfn2):
-            err("header not found at:", hfn, "or:", hfn2)
+            err("header not found at:" + hfn + " or: " + hfn2)
         return hfn2
     return hfn
 
