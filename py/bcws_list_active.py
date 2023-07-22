@@ -161,7 +161,8 @@ for s in selected:
         if not os.path.exists(path):
             os.mkdir(path)
 
-        browser.open_new_tab(view_str)
+        if len(args) < 3:
+            browser.open_new_tab(view_str)
 
         view_f = path + 'hyperlink'
         path += 'fpf'
@@ -173,7 +174,7 @@ for s in selected:
         open(view_f, 'wb').write(view_str.encode())
 
     ci += 1
-    if ci % step == 0:
+    if ci % step == 0 and len(args) < 3:
         input("Press Enter to continue...")
 
     # need to add in OUT of CONTROL fires as well.
