@@ -38,7 +38,7 @@ if len(args) < 2:
     sys.exit(1)
 
 TILE_ID = 'T09VUE' if len(args) < 2 else args[1]
-MAX_CLOUD = 22.2 if len(args) < 3 else args[2]  # max percent cloud cover to consider!
+MAX_CLOUD = 15. if len(args) < 3 else args[2]  # max percent cloud cover to consider!
 print("TILE_ID", TILE_ID)
 print("MAX_CLOUD", MAX_CLOUD)
 MAX_CLOUD = float(MAX_CLOUD) # convert to float
