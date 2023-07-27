@@ -64,10 +64,6 @@ if __name__ == "__main__":
         lines3.sort()
 
         lines = ['_'.join(x[1]) for x in lines3]
-        for line in lines:
-            print(line)
-        # extract(file_name)
-
 
         for line in lines:
             extract(line)
@@ -96,30 +92,3 @@ if __name__ == "__main__":
         rb.WriteArray(my_bands[i])
 
     stack_ds = None
-'''
-Table 3: SCL bit values
-
-Classification
-0: No data
-1: Saturated or defective
-2: Dark area pixels
-3: Cloud shadows
-4: Vegetation
-5: Bare soils
-6: Water
-7: Unclassified
-8: Cloud medium probability
-9: Cloud high probability
-10: Thin cirrus
-11: Snow or ice
-
-
-We don't want:
-0: No data
-1: Saturated or defective
-2: Dark area pixels
-3: Cloud shadows
-8: Cloud medium probability
-9: Cloud high probability
-10: Thin cirrus
-'''
