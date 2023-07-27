@@ -129,6 +129,9 @@ matches = [[int(product_id[j].split('_')[2].split('T')[0]),
             product_id[j]] for j in line_idx_match] 
 matches.sort()  # sort on date string
 
+for m in matches[-10:]:
+    print(m)
+
 print("all time matches:", len(matches))
 # filter by date: select most recent only
 matches = [matches[-1]]
