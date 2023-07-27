@@ -58,6 +58,7 @@ if __name__ == "__main__":
     else:
         gid = args[1]
 
+        # sort the dates in time...
         lines = [x.strip() for x in os.popen("ls -1r S*.bin")]
         lines2 = [x.split('_') for x in lines]
         lines3 = [[x[2], x] for x in lines2]
