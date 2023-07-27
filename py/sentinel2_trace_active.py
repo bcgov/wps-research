@@ -6,7 +6,7 @@ hint: scrub the class map before applying this..
 demo method to map an effective fire boundary
 
 n.b. might place results in separate folders for running in parallel (script needs to be cleaned up)'''
-BRUSH_SIZE = 80
+BRUSH_SIZE = 111
 POINT_THRES = 10 # don't get hulls for shapes with less than 50 points
 WRITE_PNG = False # set to true for debug visuals
 import os
