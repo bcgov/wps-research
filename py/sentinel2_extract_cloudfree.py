@@ -71,13 +71,14 @@ def extract(file_name):
     stack_ds = driver.Create(stack_fn,
                              target_sub_ds.RasterXSize,
                              target_sub_ds.RasterYSize,
-                             len(selected_bands),
+                             len(selected_bands) - 1,
                              gdal.GDT_Float32)
 
     stack_ds.SetProjection(target_sub_ds.GetProjection())
     stack_ds.SetGeoTransform(target_sub_ds.GetGeoTransform())
     
     bi = 1
+    cl_i = None
     for [band, m, sub_dataset] in selected_bands:
         band_name = m['BANDNAME']
         geotransform = sub_dataset.GetGeoTransform()
@@ -101,7 +102,42 @@ def extract(file_name):
             arrays[str(m)] = resampled_ds.GetRasterBand(1).ReadAsArray()
             resampled_ds = None
             input_ds = None
+        
+        if band_name == 'SCL':
+            cl_i = str(m) 
+
+    '''We don't want:
+    0: No data
+    1: Saturated or defective
+    2: Dark area pixels
+    3: Cloud shadows
+    8: Cloud medium probability
+    9: Cloud high probability
+    10: Thin cirrus
+    We don't want:
+    arr2 = arr[np.where((arr >5) & (arr 5) | (arr % 5 == 0))]
+    '''
+
+    # calculate the valid areas:
+    scl_d = arrays[cl_i]
+    bad_data = np.where((scl_d <= 3) | (scl_d == 8) | (scl_d == 9) | (scl_d == 10))
     
+
+    # apply valid areas to other bands:
+    for [band, m, sub_dataset] in selected_bands:
+        band_name = m['BANDNAME']
+        arrays[str(m)][bad_data] = 0.
+        
+
+    for [band, m, sub_dataset] in selected_bands:
+        band_name = m['BANDNAME']
+        geotransform = sub_dataset.GetGeoTransform()
+        px_sx, px_sy = geotransform[1], geotransform[5]
+
+        if band_name == 'SCL':  # don't write this one out
+            continue
+
+        # resume..
         rb = stack_ds.GetRasterBand(bi)
         d_out = arrays[str(m)]
         print("****", str(m), d_out.shape)
