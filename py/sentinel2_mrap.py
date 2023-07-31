@@ -14,19 +14,10 @@ import sys
 import os
 
 my_bands = {}
-my_proj = None
-my_geo = None
-my_xsize = None
-my_ysize = None
-nbands = None
+my_proj, my_geo, my_xsize, my_ysize, nbands  = None, None, None, None, None
 
 def extract(file_name):
-    global my_proj
-    global my_geo
-    global my_bands
-    global my_xsize
-    global my_ysize
-    global nbands
+    global my_proj, my_geo, my_bands, my_xsize, my_ysize, nbands
     print("+r", file_name)
     d = gdal.Open(file_name)
     
