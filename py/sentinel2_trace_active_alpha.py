@@ -94,7 +94,7 @@ for i in [BRUSH_SIZE]: # [10, 20, 60]: # 90   # 150
                 # create outline (alpha shape)
                 run(['python3',
                     pd + 'alpha_shape.py',
-                    f])
+                    f, "0.1"])
 
                 # plotting
                 png_f = f + '_1_1_1_rgb.png'
