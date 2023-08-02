@@ -18,8 +18,11 @@ if len(args) < 3:
     err('sentinel2_trace_active.py [input file, binary mask envi type 4] [source data file]')
 
 fn, src_data = args[1], args[2]
-if not exists(fn) or not exists(src_data):
-    err('please check input file')
+if not exists(fn):
+    err('please check input file:', fn)
+if not exists(src_data):
+    err('please check input file:', src_data)
+
 run('rm -f -v *crop*')
 
 for i in [BRUSH_SIZE]: # [10, 20, 60]: # 90   # 150
