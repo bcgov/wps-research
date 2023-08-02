@@ -19,9 +19,9 @@ if len(args) < 3:
 
 fn, src_data = args[1], args[2]
 if not exists(fn):
-    err('please check input file:', fn)
+    err('please check input file:' + fn)
 if not exists(src_data):
-    err('please check input file:', src_data)
+    err('please check input file:' + src_data)
 
 run('rm -f -v *crop*')
 
