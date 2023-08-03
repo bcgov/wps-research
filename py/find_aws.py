@@ -61,7 +61,7 @@ print(to_merge)
 
 
 if not skip_merge:
-    run('rm -rf tmp* merge* resample')
+    run('rm -rf tmp_sub* merge* resample')
 
     if len(to_merge) < 1:
         err("no data found, please check data are retrieved, unzipped, unpacked, converted to the appropriate format, and that this tile is imaged on the provided date")
