@@ -23,7 +23,7 @@ else:
 print("FIRE_NUMBER", fire_number)
 
 # skip merging?
-skip merge = len(args) > 4 
+skip_merge = len(args) > 4 
 
 # get the tiles
 tiles = open("/home/" + os.popen("whoami").read().strip() + sep + "GitHub/wps-research/py/.select/" + fire_number).read().strip().split()
