@@ -3,7 +3,7 @@ import sys
 from misc import err, run, exists, sep, band_names, read_hdr, args, datestamp
 
 if len(args) < 3:
-    err("find_aws.py [date yyyymmdd] [path to folder for that date] # [optional arg: fire number]") # should only have one parameter but I'm tired
+    err("find_aws.py [date yyyymmdd] [path to folder for that date] # [optional arg: fire number] # optional arg: skip merge.") # should only have one parameter but I'm tired
 
 fire_number = None
 latest, date = None, args[1]
@@ -21,6 +21,9 @@ else:
         err('expected to be run from active/$FIRE_NUMBER/yyyymmdd')
     fire_number = os.getcwd().strip().split(sep)[-2]
 print("FIRE_NUMBER", fire_number)
+
+# skip merging?
+skip merge = len(args) > 4 
 
 # get the tiles
 tiles = open("/home/" + os.popen("whoami").read().strip() + sep + "GitHub/wps-research/py/.select/" + fire_number).read().strip().split()
@@ -56,9 +59,11 @@ for tile in tiles:
         run('cp -v ' + line[:-4] + '.* .')
 print(to_merge)
 
-run('rm -rf tmp* merge* resample')
 
-if len(to_merge) < 1:
-    err("no data found, please check data are retrieved, unzipped, unpacked, converted to the appropriate format, and that this tile is imaged on the provided date")
+if not skip_merge:
+    run('rm -rf tmp* merge* resample')
 
-run("merge2.py")
+    if len(to_merge) < 1:
+        err("no data found, please check data are retrieved, unzipped, unpacked, converted to the appropriate format, and that this tile is imaged on the provided date")
+
+    run("merge2.py")
