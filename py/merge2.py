@@ -21,6 +21,9 @@ if not exists('resample'):
 else:
     pass #     err('directory resample/ exists. Remove and run again')
 
+run('rm -f tmp_subset.bin tmp_subset.hdr')
+run('rm -f merge.*') 
+
 cmds = []
 for L in lines:
     ofn = 'resample' + sep + L
