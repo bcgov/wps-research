@@ -25,6 +25,7 @@ for i in range(lines):
     for j in range(samples):
         if data[i * samples + j] == 1.:
             points.append((i, j))
+print(points)
 points = np.array(points)
 
 # print("optimizing alpha..")
