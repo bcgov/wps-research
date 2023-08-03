@@ -15,12 +15,12 @@ from misc import err, run, pd, sep, exists, args
 cd = pd + '..' + sep + 'cpp' + sep
 
 if len(args) < 2:
-    err('sentinel2_trace_active.py [input file, binary mask envi type 4] [optional arg: class index]')
+    err('sentinel2_trace_active.py [input file, binary mask envi type 4] [optional arg: alpha shape parameter]') 
 
+shape_parameter = None
 class_select = None 
 if len(args) > 2:
-    class_select = int(args[2])
-print(class_select)
+    shape_parameter = float(args[2])
 
 fn = args[1]
 if not exists(fn):
@@ -94,7 +94,7 @@ for i in [BRUSH_SIZE]: # [10, 20, 60]: # 90   # 150
                 # create outline (alpha shape)
                 run(['python3',
                     pd + 'alpha_shape.py',
-                    f, "0.1"])
+                    f, "0.1" if shape_parameter is None else str(shape_parameter)])
 
                 # plotting
                 png_f = f + '_1_1_1_rgb.png'
