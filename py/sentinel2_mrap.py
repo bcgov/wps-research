@@ -8,7 +8,7 @@ NOTE: assumes sentinel2_extract_cloudfree.py has been run.
 from envi import envi_header_cleanup
 import multiprocessing as mp
 from osgeo import gdal
-from misc import args
+from misc import args, run
 import numpy as np
 import sys
 import os
@@ -84,3 +84,5 @@ if __name__ == "__main__":
         rb.WriteArray(my_bands[i])
 
     stack_ds = None
+
+    run('fh mrap_' + args[1] + '.hdr')
