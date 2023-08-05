@@ -22,13 +22,21 @@ if not img: err('pls check input file')
 src = gdal.Open(img)
 GT = src.GetGeoTransform()
 print('X_pixel,Y_line,X_geo,Y_geo,Lat,Lon')
+
+
 from pyproj import Proj
-d = os.popen('gdalsrsinfo -o proj4 ' + img).read().strip() # print(d)
+cmd = 'gdalsrsinfo -o proj4 ' + img
+print(cmd)
+d = os.popen(cmd).read().strip()
+print(d)
 
 w = d.split()
 w = [x.strip('+').split('=') for x in w]
 srs_info = {x[0]: x[1] if len(x) > 1 else '' for x in w}
 print(srs_info)
+
+if 'zone' not in srs_info:
+    err("Assumed to be in UTM coordinates")
 
 pts_in = []
 data = open(args[2]).read().strip()
@@ -53,6 +61,7 @@ Y.sort(reverse=True)
 pts_in = [i[1] for i in Y]
 
 # prepare to write KML
+print("srs_info", srs_info)
 kml = simplekml.Kml()
 for k in range(len(pts_in)):
     P = pts_in[k]
