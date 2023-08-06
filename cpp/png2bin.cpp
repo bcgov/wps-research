@@ -2,7 +2,7 @@
 #include"misc.h"
 int main(int argc, char ** argv){
   if(argc < 2){
-    err("png2bin [input .png filename]");
+    err("png2bin [input .png filename] [optional factor: scale to 1]");
   }
   str fn(argv[1]);
   str ofn(fn + str(".bin"));
@@ -10,6 +10,11 @@ int main(int argc, char ** argv){
 
   run(str("gdal_translate -of ENVI -ot Float32 -b 1 ") + fn + str(" ") + ofn);
   run(str("fh ") + ohn);
+
+  if(argc > 2){
+    run(str("raster_scale ") + ofn);
+    run(str("cp ") + ofn + str("_scale.bin ") + ofn);
+  }
 
   return 0;
 }
