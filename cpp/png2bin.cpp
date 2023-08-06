@@ -16,5 +16,7 @@ int main(int argc, char ** argv){
     run(str("cp ") + ofn + str("_scale.bin ") + ofn);
   }
 
+  run(str("cp result.bin_thres.hdr " + ohn));
+
   return 0;
 }
