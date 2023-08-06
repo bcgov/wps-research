@@ -68,6 +68,8 @@ run(' '.join(['ogr2ogr -f "KML"',
               args[1] + '.kml',
               args[1] + '.shp']))
 
+run('sentinel2_trace_active.py ' + args[1])
+
 '''
 osgeo.ogr.GetDriverByName vs osgeo.gdal.GetDriverByName
 Ok - so - ogr == vectors ; gdal == raster
