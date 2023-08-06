@@ -68,7 +68,7 @@ run(' '.join(['ogr2ogr -f "KML"',
               args[1] + '.kml',
               args[1] + '.shp']))
 
-run('sentinel2_trace_active.py ' + args[1])
+run('sentinel2_trace_active_alpha.py ' + args[1])
 
 '''
 osgeo.ogr.GetDriverByName vs osgeo.gdal.GetDriverByName
