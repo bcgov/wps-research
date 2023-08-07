@@ -165,12 +165,12 @@ extern vector<int> * mlk_scene_groundref; // groundref indices
 
 void multilook_scene(size_t k); // scene subsampling, parallelized by band
 
-vector<vector<str>> read_csv(str fn, vector<str> & hdr); // csv reader
+vector<vector<str> > read_csv(str fn, vector<str> & hdr); // csv reader
 
 bool vin(vector<str> x, str a);
 size_t vix(vector<str> x, str a);
 
-size_t write_csv(str fn, vector<str> hdr, vector<vector<str>> lines);
+size_t write_csv(str fn, vector<str> hdr, vector<vector<str> > lines);
 
 std::string exec(const char* cmd);  
 
