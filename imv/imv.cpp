@@ -9,6 +9,13 @@ spectra could have everything under window displayed! */
 #include<iostream>
 #include <stdexcept>
 
+extern vector<int> groundref;
+extern size_t N_THREADS_IO;
+extern string IMG_FN;
+extern size_t NWIN;
+extern size_t WIN_I;
+extern size_t WIN_J;
+
 std::string strp(const std::string& str, const std::string& whitespace = " \t\r\n"){
   const auto strBegin = str.find_first_not_of(whitespace);
   if (strBegin == std::string::npos) return ""; // no content

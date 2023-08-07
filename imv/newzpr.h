@@ -56,7 +56,7 @@ static clock_t stop_time;
 #define SECONDS_PAUSE 0.4
 
 // global params
-extern size_t N_THREADS_IO;
+// extern size_t N_THREADS_IO;
 
 // image scene, multilooked
 extern myImg * SCENE_MYIMG;
@@ -78,7 +78,7 @@ extern SA<float> * IMG;
 extern SA<float> * SUB;
 extern myImg * SUB_MYIMG;
 extern void * SUB_GLIMG;
-extern string IMG_FN;
+//extern string IMG_FN;
 
 // image pix/lin coordintes, projected onto subset
 extern SA<size_t> * SUB_I;
@@ -108,7 +108,7 @@ extern int USE_PROPORTIONAL_SCALING;
 extern float N_PERCENT_SCALING;
 
 // groundref detection
-extern vector<int> groundref;
+//extern vector<int> groundref;
 extern vector<string> vec_band_names;
 extern set<int> groundref_disable;
 
