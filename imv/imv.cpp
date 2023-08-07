@@ -37,6 +37,7 @@ extern SA<size_t> * SUB_I;
 extern SA<size_t> * SUB_J;
 extern SA<float> * IMG;
 extern SA<float> * SUB;
+extern SA<float> * TGT;
 extern void * SCENE_GLIMG;
 extern void * SUB_GLIMG;
 extern myImg * TGT_MYIMG;
