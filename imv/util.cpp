@@ -672,8 +672,8 @@ str strip_leading_zeros(str s){
   return(ss);
 }
 
-vector<vector<str>> read_csv(str fn, vector<str> & hdr){
-  vector<vector<str>> output; // read lines from csv file
+vector<vector<str> > read_csv(str fn, vector<str> & hdr){
+  vector<vector<str> > output; // read lines from csv file
   ifstream ifs(fn); // stream to input file
   str token;
   size_t ci = 0;
