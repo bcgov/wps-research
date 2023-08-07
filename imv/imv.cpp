@@ -36,6 +36,7 @@ extern size_t SUB_MM;
 extern SA<size_t> * SUB_I;
 extern SA<size_t> * SUB_J;
 extern SA<float> * IMG;
+extern SA<float> * SUB;
 
 
 std::string strp(const std::string& str, const std::string& whitespace = " \t\r\n"){
