@@ -4,10 +4,11 @@ todo: display original (untransformed) values (apply reverse map)?
 
 spectra could have everything under window displayed! */ 
 #include"util.h"
+#include"image.h"
 #include<fstream>
 #include"newzpr.h"
 #include<iostream>
-#include <stdexcept>
+#include<stdexcept>
 
 extern vector<int> groundref;
 extern size_t N_THREADS_IO;
@@ -34,6 +35,7 @@ extern myImg * SUB_MYIMG;
 extern size_t SUB_MM;
 extern SA<size_t> * SUB_I;
 extern SA<size_t> * SUB_J;
+extern SA<float> * IMG;
 
 
 std::string strp(const std::string& str, const std::string& whitespace = " \t\r\n"){
