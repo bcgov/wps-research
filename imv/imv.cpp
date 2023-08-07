@@ -40,6 +40,7 @@ extern SA<float> * SUB;
 extern void * SCENE_GLIMG;
 extern void * SUB_GLIMG;
 extern myImg * TGT_MYIMG;
+extern glImage * myImage2;
 
 
 std::string strp(const std::string& str, const std::string& whitespace = " \t\r\n"){
