@@ -15,6 +15,12 @@ extern string IMG_FN;
 extern size_t NWIN;
 extern size_t WIN_I;
 extern size_t WIN_J;
+extern vector<vector<str>> tgt_csv;
+extern vector<str> tgt_csv_hdr;
+
+extern vector<size_t> targets_i;
+extern vector<size_t> targets_j;
+extern vector<str> targets_label;
 
 std::string strp(const std::string& str, const std::string& whitespace = " \t\r\n"){
   const auto strBegin = str.find_first_not_of(whitespace);
