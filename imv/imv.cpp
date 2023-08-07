@@ -38,6 +38,8 @@ extern SA<size_t> * SUB_J;
 extern SA<float> * IMG;
 extern SA<float> * SUB;
 extern void * SCENE_GLIMG;
+extern void * SUB_GLIMG;
+extern myImg * TGT_MYIMG;
 
 
 std::string strp(const std::string& str, const std::string& whitespace = " \t\r\n"){
