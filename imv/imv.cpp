@@ -30,6 +30,12 @@ extern size_t IMG_NR;
 extern size_t IMG_NC;
 extern size_t IMG_NB;
 
+extern myImg * SUB_MYIMG;
+extern size_t SUB_MM;
+extern SA<size_t> * SUB_I;
+extern SA<size_t> * SUB_J;
+
+
 std::string strp(const std::string& str, const std::string& whitespace = " \t\r\n"){
   const auto strBegin = str.find_first_not_of(whitespace);
   if (strBegin == std::string::npos) return ""; // no content
