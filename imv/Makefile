@@ -25,8 +25,8 @@ newzpr.o:	newzpr.cpp	newzpr.h
 image.o:	image.cpp	image.h
 	$(CC)	$(CFLAGS)	image.cpp
 
-imv.o:		imv.cpp
-	$(CC)	$(CFLAGS)	imv.cpp
-
 util.o:		util.cpp
 	$(CC)	$(CFLAGS)	util.cpp
+
+imv.o:		imv.cpp
+	$(CC)	$(CFLAGS)	imv.cpp
