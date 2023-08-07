@@ -22,6 +22,14 @@ extern vector<size_t> targets_i;
 extern vector<size_t> targets_j;
 extern vector<str> targets_label;
 
+extern size_t SUB_START_I;
+extern size_t SUB_START_J;
+extern float SUB_SCALE_F;
+
+extern size_t IMG_NR;
+extern size_t IMG_NC;
+extern size_t IMG_NB;
+
 std::string strp(const std::string& str, const std::string& whitespace = " \t\r\n"){
   const auto strBegin = str.find_first_not_of(whitespace);
   if (strBegin == std::string::npos) return ""; // no content
