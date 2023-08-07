@@ -45,7 +45,6 @@ extern glImage * myImage;
 extern glImage * myImage2;
 extern glImage * myImage3;
 
-
 std::string strp(const std::string& str, const std::string& whitespace = " \t\r\n"){
   const auto strBegin = str.find_first_not_of(whitespace);
   if (strBegin == std::string::npos) return ""; // no content
