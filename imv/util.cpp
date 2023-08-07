@@ -705,7 +705,7 @@ size_t vix(vector<str> x, str a){
   err("should have checked for element before using vix");
 }
 
-size_t write_csv(str fn, vector<str> hdr, vector<vector<str>> lines){
+size_t write_csv(str fn, vector<str> hdr, vector<vector<str> > lines){
   cout << "+w " << fn << endl;
   size_t n = hdr.size();
   FILE * f = fopen(fn.c_str(), "wb");
