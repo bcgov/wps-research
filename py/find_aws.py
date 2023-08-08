@@ -29,6 +29,9 @@ skip_merge = len(args) > 4
 tiles = open("/home/" + os.popen("whoami").read().strip() + sep + "GitHub/wps-research/py/.select/" + fire_number).read().strip().split()
 print("TILES", tiles)
 
+if len(tiles) < 2:
+    skip_merge = True
+
 # get the latest AWS folder. Assume "active" folder is one level up!
 
 '''
