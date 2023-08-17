@@ -178,3 +178,6 @@ for s in selected:
         input("Press Enter to continue...")
 
     # need to add in OUT of CONTROL fires as well.
+
+
+run('bcws_select_tiles.py')
