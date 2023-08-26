@@ -30,7 +30,7 @@ if w[-3] == 'active':
 print(w)
 
 print(pwd)
-sys.exit(1)
+# sys.exit(1)
 
 if len(args) < 2:
     err('python3 binary_polygonize.py [input raster mask file 1/0 values]')
@@ -89,6 +89,16 @@ run('sentinel2_trace_active_alpha.py ' + args[1])
 
 
 # assume were in an active/fire_number directory, rename the files accordingly for the product format specification.
+
+if fire_number is not None and image_date is not None:
+    print("ACTIVE")
+    # have fire_number (fire ID) and image date. 
+
+    # just need to get the image time right, now
+
+    # find the symbolic links to S2 data files, in the present directory. And/or real files (legacy compatibility)
+    # ls -1 S2*.bin
+    # count the date-time stamps, use the most-ocurring observed pair (date, time)
 
 '''
 osgeo.ogr.GetDriverByName vs osgeo.gdal.GetDriverByName
