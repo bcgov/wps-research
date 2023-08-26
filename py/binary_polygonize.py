@@ -4,7 +4,8 @@
 
 Based on a module by Sybrand Strauss: 
     https://github.com/bcgov/wps/blob/story/classify_hfi/api/scripts/polygonize_hfi.py#L52
-'''
+
+20230825 '''
 import os
 import sys
 import json
@@ -13,8 +14,24 @@ import numpy as np
 from osgeo import ogr
 from osgeo import gdal
 from osgeo import osr
+from misc import exist, err, args, run, sep
 
-from misc import exist, err, args, run
+fire_number = None
+image_date = None
+
+pwd = os.path.abspath( os.getcwd())
+w = pwd.split(sep)
+if w[-3] == 'active':
+    print("ACTIVE")
+    print("Fire_number", w[-2])
+    print("Image date", w[-1])
+    fire_number = w[-2]
+    image_date = w[-1]
+print(w)
+
+print(pwd)
+sys.exit(1)
+
 if len(args) < 2:
     err('python3 binary_polygonize.py [input raster mask file 1/0 values]')
 
@@ -69,6 +86,9 @@ run(' '.join(['ogr2ogr -f "KML"',
               args[1] + '.shp']))
 
 run('sentinel2_trace_active_alpha.py ' + args[1])
+
+
+# assume were in an active/fire_number directory, rename the files accordingly for the product format specification.
 
 '''
 osgeo.ogr.GetDriverByName vs osgeo.gdal.GetDriverByName
