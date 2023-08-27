@@ -6,12 +6,13 @@ Original documentation:
 demo method to map an effective fire boundary
 
 n.b. would need to place results in separate folders for running in parallel (script needs to be cleaned up)'''
-BRUSH_SIZE = 50
+BRUSH_SIZE = 222
 POINT_THRES = 10 # don't get hulls for shapes with less than 50 points
 WRITE_PNG = False # set to true for debug visuals
 import os
 import sys
-from misc import err, run, pd, sep, exists, args
+from envi_header_copy_mapinfo import envi_header_copy_mapinfo
+from misc import err, run, pd, sep, exists, args, hdr_fn
 cd = pd + '..' + sep + 'cpp' + sep
 
 if len(args) < 2:
@@ -25,17 +26,19 @@ if len(args) > 2:
 fn = args[1]
 if not exists(fn):
     err('please check input file')
-    
+hfn = hdr_fn(args[1])    
+
+
 for i in [BRUSH_SIZE]: # [10, 20, 60]: # 90   # 150
-    if not exists(fn + '_flood4.bin'):
+    if not exists(fn + '_flood4.bin'): # first output file
         run(['ulimit -s 1000000;' + cd + 'flood.exe ' + fn])
 
-    if not exists(fn + '_flood4.bin_link.bin'):
+    if not exists(fn + '_flood4.bin_link.bin'):  # second output file
         run([cd + 'class_link.exe',
              fn + '_flood4.bin',
              str(i)]) # 40')
 
-    if not exists(fn + '_flood4.bin_link.bin_recode.bin'):
+    if not exists(fn + '_flood4.bin_link.bin_recode.bin'):  # third output file
         run([cd + 'class_recode.exe',
              fn + '_flood4.bin_link.bin',
              '1'])
