@@ -13,7 +13,7 @@ def envi_header_copy_mapinfo(args):
     # need to run this first to make sure the band name fields are where we expect!
     # run('python3 ' + pd + 'envi_header_cleanup.py ' + args[1])
     # run('python3 ' + pd + 'envi_header_cleanup.py ' + args[2])
-    print("args", args)
+    # print("args", args)
     envi_header_cleanup(['envi_header_cleanup', args[1]])
     envi_header_cleanup(['envi_header_cleanup', args[2]])    
     lines = open(args[1]).read().strip().split('\n')
