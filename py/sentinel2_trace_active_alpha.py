@@ -33,15 +33,25 @@ for i in [BRUSH_SIZE]: # [10, 20, 60]: # 90   # 150
     if not exists(fn + '_flood4.bin'): # first output file
         run(['ulimit -s 1000000;' + cd + 'flood.exe ' + fn])
 
+        envi_header_copy_mapinfo(['envi_header_copy_mapinfo', hfn, fn + '_flood4.hdr'])
+
+
     if not exists(fn + '_flood4.bin_link.bin'):  # second output file
         run([cd + 'class_link.exe',
              fn + '_flood4.bin',
              str(i)]) # 40')
 
+
+        envi_header_copy_mapinfo(['envi_header_copy_mapinfo', hfn, fn + '_flood4.bin_link.hdr'])
+
+
     if not exists(fn + '_flood4.bin_link.bin_recode.bin'):  # third output file
         run([cd + 'class_recode.exe',
              fn + '_flood4.bin_link.bin',
              '1'])
+
+        envi_header_copy_mapinfo(['envi_header_copy_mapinfo', hfn, fn + '_flood4.bin_link.bin_recode.hdr'])
+
 
     if not exists(fn + '_flood4.bin_link.bin_recode.bin_wheel.bin'):
         run([cd + 'class_wheel.exe',
@@ -105,9 +115,11 @@ for i in [BRUSH_SIZE]: # [10, 20, 60]: # 90   # 150
                     run('python3 ' + pd + 'raster_plot.py ' + f + ' 1 1 1 1 1')
 
                 # copy map info
-                run(['python3 ' + pd + 'envi_header_copy_mapinfo.py',
-                        fn[:-4] + '.hdr',
-                        f[:-4] + '.hdr'])
+                #run(['python3 ' + pd + 'envi_header_copy_mapinfo.py',
+                #        fn[:-4] + '.hdr',
+                #        f[:-4] + '.hdr'])
+
+                envi_header_copy_mapinfo(["envi_header_copy_mapinfo", hfn, f[:-4] + '.hdr'])
 
                 # generate KML
                 ptfn = f + '_alpha_points.txt'
