@@ -9,6 +9,7 @@ Based on a module by Sybrand Strauss:
 import os
 import sys
 import json
+import time
 import tempfile
 import numpy as np
 from osgeo import ogr
@@ -16,8 +17,15 @@ from osgeo import gdal
 from osgeo import osr
 from misc import exist, err, args, run, sep
 
+def is_dst():
+    t = time.localtime()
+    print(t)
+    return t.tm_isdst
+
+
 fire_number = None
 image_date = None
+time_stamp = None
 
 pwd = os.path.abspath( os.getcwd())
 w = pwd.split(sep)
@@ -27,9 +35,26 @@ if w[-3] == 'active':
     print("Image date", w[-1])
     fire_number = w[-2]
     image_date = w[-1]
-print(w)
+    
+    # get image timstamp(s): assume the most frequent of the 
+else:
+    print(w)
+    print(pwd)
+    err('required to be run from within the active/FIRE_NUMBER folder')
 
-print(pwd)
+
+ts_count = {}  # count different timestamps: most frequent this folder assumed. Good practice to run this from active/FIRE_NUMBER type folder.
+lines = [x.strip() for x in os.popen("ls -1 S2*").readlines()]
+for line in lines:
+    line = line.strip()
+    try:
+        w = line.split('_')
+        print(w)
+
+        time_stamp = int(w[2].split('T')[1][:4]) - (700 if is_dst()==1 else 800)
+        # todo: accumulate/count these values in ts_count, retain key with largest count.
+    except:
+        pass
 # sys.exit(1)
 
 if len(args) < 2:
@@ -85,7 +110,8 @@ run(' '.join(['ogr2ogr -f "KML"',
               args[1] + '.kml',
               args[1] + '.shp']))
 
-run('sentinel2_trace_active_alpha.py ' + args[1])
+if False:
+    run('sentinel2_trace_active_alpha.py ' + args[1])
 
 
 # assume were in an active/fire_number directory, rename the files accordingly for the product format specification.
@@ -99,6 +125,33 @@ if fire_number is not None and image_date is not None:
     # find the symbolic links to S2 data files, in the present directory. And/or real files (legacy compatibility)
     # ls -1 S2*.bin
     # count the date-time stamps, use the most-ocurring observed pair (date, time)
+
+
+    # current year:
+    # time.localtime()
+    # time.struct_time(tm_year=2023
+    current_year = str(time.localtime().tm_year).zfill(4)[2:4]   
+    print("current_year", current_year)
+
+    file_string = '_'.join([current_year, str(fire_number), str(image_date), str(time_stamp), 'detection', 'sentinel2'])
+    print(file_string)
+
+    lines = [x.strip() for x in os.popen('ls -1atr result*.kml').readlines()]
+    recent_kml = lines[-1]
+    print("recent_kml", recent_kml)    
+    run('cp ' + recent_kml + ' ' + file_string + '.kml')
+
+    lines = [x.strip() for x in os.popen('ls -1atr poly*.kml').readlines()]
+    recent_alpha = lines[-1]
+    print("recent_alpha", recent_alpha)
+    run('cp ' + recent_alpha + ' ' + file_string + '_alpha.kml')
+
+    lines = [x.strip() for x in os.popen('ls -1atr sub*.tif').readlines()]
+    recent_tif = lines[-1]
+    print("recent_tif", recent_tif)
+    run('cp ' + recent_tif + ' ' + file_string + '.tif')
+
+    run('chmod 755 23_*')
 
 '''
 osgeo.ogr.GetDriverByName vs osgeo.gdal.GetDriverByName
