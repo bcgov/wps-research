@@ -110,7 +110,7 @@ for k in range(len(pts_in)):
 
         # latlon = utm.to_latlon(X_geo, Y_geo, int(srs_info['zone']), 'N')
         lon, lat = transformer.transform(X_geo, Y_geo)
-        latlon = [lon,lat]
+        latlon = [lat, lon] # [lon,lat]
          
         '''
 latlon (58.54544607900768, -120.24008482430301)
