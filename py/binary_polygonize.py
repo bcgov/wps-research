@@ -147,8 +147,14 @@ if fire_number is not None and image_date is not None:
     run('cp ' + recent_alpha + ' ' + file_string + '_alpha.kml')
 
     lines = [x.strip() for x in os.popen('ls -1atr sub*.tif').readlines()]
-    recent_tif = lines[-1]
+    recent_tif = lines[-1] if len(lines) >=2 else str('None')
     print("recent_tif", recent_tif)
+
+    if not os.path.exists(recent_tif):   
+        run('envi2tif.py sub.bin')
+        lines = [x.strip() for x in os.popen('ls -1atr sub*.tif').readlines()]
+        recent_tif = lines[-1]
+        print("recent_tif", recent_tif)
     run('cp ' + recent_tif + ' ' + file_string + '.tif')
 
     run('chmod 755 23_*')
