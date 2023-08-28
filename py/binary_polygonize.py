@@ -110,7 +110,7 @@ run(' '.join(['ogr2ogr -f "KML"',
               args[1] + '.kml',
               args[1] + '.shp']))
 
-if False:
+if True:
     run('sentinel2_trace_active_alpha.py ' + args[1])
 
 
