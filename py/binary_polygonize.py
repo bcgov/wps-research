@@ -58,6 +58,15 @@ for line in lines:
 if len(args) < 2:
     err('python3 binary_polygonize.py [input raster mask file 1/0 values]')
 
+# let's crop the result
+run('rm -f ' + args[1] + '*pad*')
+run('rm -f ' + args[1] + '*crop*')
+if not exist(args[1] + '_crop.bin_pad.bin'):
+    run('crop ' + args[1])
+    run('pad ' + args[1] + '_crop.bin 111')
+    run('cp ' + args[1] + '_crop.bin_pad.bin ' + args[1])
+    run('cp ' + args[1] + '_crop.bin_pad.hdr ' + args[1][:-3] + 'hdr')
+
 def create_in_memory_band(data: np.ndarray, cols, rows, projection, geotransform):
     mem_driver = gdal.GetDriverByName('MEM')
     dataset = mem_driver.Create('memory', cols, rows, 1, gdal.GDT_Byte)
@@ -140,19 +149,10 @@ if fire_number is not None and image_date is not None:
     print("recent_alpha", recent_alpha)
     run('cp ' + recent_alpha + ' ' + file_string + '_alpha.kml')
 
-    if not exist('sub.bin_ht.bin_smult.tif'): #  and not exist('sub.bin_swir.bin_ht.bin_smult.tif'):
-        run('envi2tif.py sub.bin')
 
     recent_tif = 'sub.bin_ht.bin_smult.tif'
-    #lines = [x.strip() for x in os.popen('ls -1atr sub*.tif').readlines()]
-    #recent_tif = lines[-1] if len(lines) >=2 else str('None')
-    print("recent_tif", recent_tif)
-
-    if not os.path.exists(recent_tif):   
-        run('envi2tif.py sub.bin')
-        lines = [x.strip() for x in os.popen('ls -1atr sub*.tif').readlines()]
-        recent_tif = lines[-1]
-        print("recent_tif", recent_tif)
+    if not exist(recent_tif):
+        run('envi2tif.py ' + args[1]) 
     run('cp ' + recent_tif + ' ' + file_string + '.tif')
 
     run('chmod 755 23_*')
