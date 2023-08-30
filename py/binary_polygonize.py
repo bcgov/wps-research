@@ -146,11 +146,12 @@ if fire_number is not None and image_date is not None:
     print("recent_alpha", recent_alpha)
     run('cp ' + recent_alpha + ' ' + file_string + '_alpha.kml')
 
-    if not exist('sub.bin_ht.bin_smult.tif') and not exist('sub.bin_swir.bin_ht.bin_smult.tif'):
+    if not exist('sub.bin_ht.bin_smult.tif'): #  and not exist('sub.bin_swir.bin_ht.bin_smult.tif'):
         run('envi2tif.py sub.bin')
 
-    lines = [x.strip() for x in os.popen('ls -1atr sub*.tif').readlines()]
-    recent_tif = lines[-1] if len(lines) >=2 else str('None')
+    recent_tif = 'sub.bin_ht.bin_smult.tif'
+    #lines = [x.strip() for x in os.popen('ls -1atr sub*.tif').readlines()]
+    #recent_tif = lines[-1] if len(lines) >=2 else str('None')
     print("recent_tif", recent_tif)
 
     if not os.path.exists(recent_tif):   
