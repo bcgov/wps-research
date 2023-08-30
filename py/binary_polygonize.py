@@ -66,6 +66,10 @@ if not exist(args[1] + '_crop.bin_pad.bin'):
     run('pad ' + args[1] + '_crop.bin 111')
     run('cp ' + args[1] + '_crop.bin_pad.bin ' + args[1])
     run('cp ' + args[1] + '_crop.bin_pad.hdr ' + args[1][:-3] + 'hdr')
+run('po sub.bin ' + args[1] + ' sub_project.bin')
+run('mv sub_project.bin sub.bin')
+run('mv sub_project.hdr sub.hdr')
+
 
 def create_in_memory_band(data: np.ndarray, cols, rows, projection, geotransform):
     mem_driver = gdal.GetDriverByName('MEM')
@@ -151,8 +155,9 @@ if fire_number is not None and image_date is not None:
 
 
     recent_tif = 'sub.bin_ht.bin_smult.tif'
+    run('rm -f ' + recent_tif)
     if not exist(recent_tif):
-        run('envi2tif.py ' + args[1]) 
+        run('envi2tif.py sub.bin')
     run('cp ' + recent_tif + ' ' + file_string + '.tif')
 
     run('chmod 755 23_*')
