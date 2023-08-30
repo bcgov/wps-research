@@ -22,7 +22,6 @@ def is_dst():
     print(t)
     return t.tm_isdst
 
-
 fire_number = None
 image_date = None
 time_stamp = None
@@ -41,7 +40,6 @@ else:
     print(w)
     print(pwd)
     err('required to be run from within the active/FIRE_NUMBER folder')
-
 
 ts_count = {}  # count different timestamps: most frequent this folder assumed. Good practice to run this from active/FIRE_NUMBER type folder.
 lines = [x.strip() for x in os.popen("ls -1 S2*").readlines()]
@@ -119,13 +117,9 @@ if True:
 if fire_number is not None and image_date is not None:
     print("ACTIVE")
     # have fire_number (fire ID) and image date. 
-
-    # just need to get the image time right, now
-
     # find the symbolic links to S2 data files, in the present directory. And/or real files (legacy compatibility)
     # ls -1 S2*.bin
     # count the date-time stamps, use the most-ocurring observed pair (date, time)
-
 
     # current year:
     # time.localtime()
