@@ -10,6 +10,8 @@ int main(int argc, char ** argv){
 
   run(str("sentinel2_active.exe " + f));
   run(str("sentinel2_swir_subselect.exe " + f));
+  run(str("python3 ~/GitHub/wps-research/py/envi2tif.py ") + swir);  
+  
   run(str("raster_dominant.exe " + swir));
   run(str("unstack.exe ") + s_d + str(" 1"));
 
@@ -19,7 +21,6 @@ int main(int argc, char ** argv){
   run(str("python3 ~/GitHub/wps-research/py/envi_header_copy_mapinfo.py sub.hdr result.bin_thres.hdr"));
 
   run(str("python3 ~/GitHub/wps-research/py/binary_polygonize.py result.bin_thres.bin"));
-  run(str("python3 ~/GitHub/wps-research/py/envi2tif.py ") + swir);
   run(str("clean"));
   run(str("envi2tif.py result.bin_thres.bin &"));
   run(str("imv result.bin_thres.bin"));
