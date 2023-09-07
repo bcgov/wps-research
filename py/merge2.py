@@ -21,7 +21,7 @@ if not exists('resample'):
 else:
     pass #     err('directory resample/ exists. Remove and run again')
 
-run('rm -f tmp_subset.bin tmp_subset.hdr')
+run('rm -f tmp_subset.*')
 run('rm -f merge.*') 
 
 cmds = []
@@ -66,4 +66,3 @@ if not exists('merge.bin'):
 
 run('fh merge.hdr')
 run('envi_header_copy_bandnames.py ' + lines[0][:-4] + '.hdr merge.hdr')
-
