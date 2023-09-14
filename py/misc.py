@@ -7,7 +7,20 @@ import struct
 import datetime
 import numpy as np
 import os.path as path
-from osgeo import gdal
+
+try:
+    from osgeo import gdal
+except:
+    print("Error: please install python/gdal:")
+    print("To install GDAL python interface:")
+    print("    python3 -m pip install GDAL")
+    print("Mac:")
+    print("    sudo port install gdal")
+    print("Linux:")
+    print("    sudo apt install libgdal-dev gdal-bin")
+    sys.exit(1)
+
+
 import multiprocessing as mp
 from joblib import Parallel, delayed
 
