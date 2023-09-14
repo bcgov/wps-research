@@ -22,7 +22,12 @@ except:
 
 
 import multiprocessing as mp
-from joblib import Parallel, delayed
+
+single_thread = False
+try:
+    from joblib import Parallel, delayed
+except:
+    single_thread = True
 
 try:
     import matplotlib.pyplot as plt
@@ -243,7 +248,7 @@ def parfor(my_function,  # function to run in parallel
 '''
 
 def parfor(my_function, my_inputs, n_thread=int(mp.cpu_count())):
-    if n_thread == 1:
+    if n_thread == 1 or single_thread:
         return [my_function(my_inputs[i]) for i in range(len(my_inputs))]
     else:
         n_thread = mp.cpu_count() if n_thread is None else n_thread
