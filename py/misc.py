@@ -7,9 +7,27 @@ import struct
 import datetime
 import numpy as np
 import os.path as path
-from osgeo import gdal
+
+try:
+    from osgeo import gdal
+except:
+    print("Error: please install python/gdal:")
+    print("To install GDAL python interface:")
+    print("    python3 -m pip install GDAL")
+    print("Mac:")
+    print("    sudo port install gdal")
+    print("Linux:")
+    print("    sudo apt install libgdal-dev gdal-bin")
+    sys.exit(1)
+
+
 import multiprocessing as mp
-from joblib import Parallel, delayed
+
+single_thread = False
+try:
+    from joblib import Parallel, delayed
+except:
+    single_thread = True
 
 try:
     import matplotlib.pyplot as plt
@@ -230,7 +248,7 @@ def parfor(my_function,  # function to run in parallel
 '''
 
 def parfor(my_function, my_inputs, n_thread=int(mp.cpu_count())):
-    if n_thread == 1:
+    if n_thread == 1 or single_thread:  # should default to old version if joblib not installed?
         return [my_function(my_inputs[i]) for i in range(len(my_inputs))]
     else:
         n_thread = mp.cpu_count() if n_thread is None else n_thread
