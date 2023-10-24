@@ -9,5 +9,5 @@ args = sys.argv
 for i in range(1, len(args)):
     x = args[i]
 
-    cmd = 'gnome-terminal --tab -- bash -c "cd ' + x + '; exec bash"'
+    cmd = 'gnome-terminal --tab -- bash -c "cd ' + x + '; cat hyperlink; exec bash"'
     run(cmd)
