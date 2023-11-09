@@ -691,10 +691,13 @@ void parfor(size_t start_j, size_t end_j, void(*eval)(size_t)){
 }
 
 void set_thread_affinity(pthread_t thread, int cpuIndex){
+
+  #ifdef cpu_set_t
   cpu_set_t cpuset;
   CPU_ZERO(&cpuset);
   CPU_SET(cpuIndex, &cpuset);
   pthread_setaffinity_np(thread, sizeof(cpu_set_t), &cpuset);
+  #endif
 }
 
 
