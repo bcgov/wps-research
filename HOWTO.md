@@ -1,1 +1,2 @@
-# How to install AWS cli from Git Bash
+# How to
+## install AWS cli from Git Bash
