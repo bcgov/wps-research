@@ -2,7 +2,7 @@
 
 ## Install AWS CLI from Git Bash
 
-Contributing to this repository requires the installation of Amazon Web Service's \(AWS\) command line interface \(CLI\). The instructions for installing the aws cli can be found in **<u>[Amazon's documentation](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)</u>**, which is a straightforward resource for accomplishing this task, regardless of your operating system \(OS\).
+Accessing NRCAN's Sentinel-2 mirror (such as for active fire mapping), requires the installation of Amazon Web Service's \(AWS\) command line interface \(CLI\). The instructions for installing the aws cli can be found in **<u>[Amazon's documentation](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)</u>**, which is a straightforward resource for accomplishing this task, regardless of your operating system \(OS\).
 
 Here's an <u>example</u> of how to complete the installation through a 64-bit Windows OS:
 
