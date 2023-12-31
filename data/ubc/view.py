@@ -47,9 +47,17 @@ else:
     rgb[:, :, 2] = scale(dataset.GetRasterBand(1).ReadAsArray().reshape((height, width)))
     rgb[:, :, 1] = scale(dataset.GetRasterBand(2).ReadAsArray().reshape((height, width)))
     rgb[:, :, 0] = scale(dataset.GetRasterBand(3).ReadAsArray().reshape((height, width)))
+    ''' A data cube indexed by row, column and band index (band index is in 1,2,3 rather: 0,1,2 from 0) 
 
-    print(rgb)
-    
+    0,1,2 are not actually red, green blue. They are B12, B11, B9 from Sentinel-2:
+        B12: 2190 nm
+        B11: 1610 nm
+        B9: 940 nm 
+    which are in the short-wave infrared (SWIR)
+
+    We chose the false-color encoding (R,G,B) = (B12, B11, B9) because fire looks orange/red/brown ish
+    ''' 
+   
     # Close the dataset
     dataset = None
 
