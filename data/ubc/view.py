@@ -11,28 +11,30 @@ import matplotlib.pyplot as plt
 tif_file_path = sys.argv[1] # "path/to/your/file.tif"
 dataset = gdal.Open(tif_file_path)
 
-def scale(rgb):
-    mymin = np.nanmin(rgb) # np.nanmin(rgb))
-    mymax = np.nanmax(rgb) # np.nanmax(rgb))
+def scale(X):
+    # default: scale a band to [0, 1] 
+    mymin = np.nanmin(X) # np.nanmin(X))
+    mymax = np.nanmax(X) # np.nanmax(X))
 
-    rgb -= mymin
-    rgb /= (mymax - mymin)
+    X -= mymin
+    X /= (mymax - mymin)
 
-    rgb[rgb < 0.] = 0.  # clip
-    rgb[rgb > 1.] = 1.
+    X[X < 0.] = 0.  # clip
+    X[X > 1.] = 1.
 
 
-    if True:  # turn this off to see what happens without histogram trimming!
-        values = rgb.ravel().tolist()
+    # use histogram trimming / turn it off to see what this step does!
+    if True:
+        values = X.ravel().tolist()
         values.sort()
         n_pct = 1. # percent for stretch value
         frac = n_pct / 100.
         lower = int(math.floor(float(len(values))*frac))
         upper = int(math.floor(float(len(values))*(1. - frac)))
         mymin, mymax = values[lower], values[upper]
-        rgb -= mymin
-        rgb /= (mymax - mymin)
-    return rgb
+        X -= mymin
+        X /= (mymax - mymin)
+    return X
 
 # Check if the dataset was successfully opened
 if not dataset:
