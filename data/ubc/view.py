@@ -3,6 +3,7 @@
       python3 view.py G90292_20230514.tif
 '''
 import sys
+import math
 import numpy as np
 from osgeo import gdal
 import matplotlib.pyplot as plt
@@ -13,13 +14,24 @@ dataset = gdal.Open(tif_file_path)
 def scale(rgb):
     mymin = np.nanmin(rgb) # np.nanmin(rgb))
     mymax = np.nanmax(rgb) # np.nanmax(rgb))
-    print(mymin, mymax)
 
     rgb -= mymin
     rgb /= (mymax - mymin)
 
     rgb[rgb < 0.] = 0.  # clip
     rgb[rgb > 1.] = 1.
+
+
+    if True:  # turn this off to see what happens without histogram trimming!
+        values = rgb.ravel().tolist()
+        values.sort()
+        n_pct = 1. # percent for stretch value
+        frac = n_pct / 100.
+        lower = int(math.floor(float(len(values))*frac))
+        upper = int(math.floor(float(len(values))*(1. - frac)))
+        mymin, mymax = values[lower], values[upper]
+        rgb -= mymin
+        rgb /= (mymax - mymin)
     return rgb
 
 # Check if the dataset was successfully opened
