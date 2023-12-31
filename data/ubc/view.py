@@ -1,3 +1,7 @@
+''' 20231230 view.py e.g. Usage:
+      python3 view.py G80223_20230513.tif
+      python3 view.py G90292_20230514.tif
+'''
 import sys
 import numpy as np
 from osgeo import gdal
