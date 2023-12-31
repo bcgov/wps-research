@@ -12,16 +12,13 @@ tif_file_path = sys.argv[1] # "path/to/your/file.tif"
 dataset = gdal.Open(tif_file_path)
 
 def scale(X):
-    # default: scale a band to [0, 1] 
+    # default: scale a band to [0, 1]  and then clip
     mymin = np.nanmin(X) # np.nanmin(X))
     mymax = np.nanmax(X) # np.nanmax(X))
-
-    X -= mymin
-    X /= (mymax - mymin)
+    X = (X-mymin) / (mymax - mymin)  # perform the linear transformation
 
     X[X < 0.] = 0.  # clip
     X[X > 1.] = 1.
-
 
     # use histogram trimming / turn it off to see what this step does!
     if True:
@@ -32,8 +29,8 @@ def scale(X):
         lower = int(math.floor(float(len(values))*frac))
         upper = int(math.floor(float(len(values))*(1. - frac)))
         mymin, mymax = values[lower], values[upper]
-        X -= mymin
-        X /= (mymax - mymin)
+        X = (X-mymin) / (mymax - mymin)  # perform the linear transformation
+
     return X
 
 # Check if the dataset was successfully opened
