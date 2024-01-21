@@ -24,3 +24,18 @@ Here's an <u>example</u> of how to complete the installation through a 64-bit Wi
     ```
 
     If Windows is unable to find the program, you might need to close and reopen the command prompt window to refresh the path. Another option is to follow the troubleshooting in [Troubleshoot AWS CLI errors](https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-troubleshooting.html).
+
+3. Working at the Git Bash prompt (or other MINGW) in Windows, if you get the error "bash: aws: command not found", add the following line at the end of your **~/.bashrc** file
+```
+export PATH=$PATH:/c/Program\ Files/Amazon/AWSCLIV2
+```
+then open a new prompt (aws command should now be found) or run the following command in the same prompt:
+```
+source ~/.bashrc
+```
+
+Assuming that **aws** is found, when you type **aws** and press "return", you should see something like: 
+```
+usage: aws [options] <command> <subcommand> [<subcommand> ...] [parameters]
+aws: error: the following arguments are required: command
+```
