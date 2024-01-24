@@ -21,4 +21,4 @@ def unzip(f):
     cmd = ('unzip -o ' + f + ' -d ' + dst)
     return os.system(cmd)
 
-parfor(unzip, files, 4)
+parfor(unzip, files, 2)
