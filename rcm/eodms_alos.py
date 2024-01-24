@@ -94,3 +94,5 @@ for d in dirs:
     print(p_6)
     '''
     # sys.exit(1)  # comment out to run on first set only
+
+    i += 1
