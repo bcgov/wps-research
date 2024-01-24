@@ -93,4 +93,4 @@ for d in dirs:
             '-t ' + p_6]) # output
     print(p_6)
     '''
-    sys.exit(1)
+    # sys.exit(1)  # comment out to run on first set only
