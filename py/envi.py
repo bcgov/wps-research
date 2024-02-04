@@ -1,6 +1,6 @@
 import os
 import sys
-
+from misc import err
 
 def envi_header_band_names(args): 
     #print("envi_header_band_names", args)
