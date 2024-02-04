@@ -1,9 +1,16 @@
 /* 20230527 calculate stokes parameters from C2 matrix (compact pol)
+<<<<<<< HEAD
 We output C2 matrix from SNAP using snap2psp.py after speckle filtering
 
 ** N.B. assumed RHC transmit ** Should have a "named variables" class for writing files automatically from named variables
 
 
+=======
+We output C2 matrix from SNAP (standard polsarpro binary format) using wps-research/py/snap2psp.py after speckle filtering
+
+** N.B. assumed RHC transmit ** Should have a "named variables" class for writing files automatically from named variables
+
+>>>>>>> 80640dc82dd2f210b1ec3615a6a3212db2eb412c
 [1] IEEE GEOSCIENCE AND REMOTE SENSING LETTERS, VOL. 9, NO. 1, JANUARY 2012
 "Compact Decomposition Theory" , S. R. Cloude, Fellow, IEEE, D. G. Goodenough, Fellow, IEEE, and H. Chen
 

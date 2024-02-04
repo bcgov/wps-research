@@ -21,4 +21,8 @@ def unzip(f):
     cmd = ('unzip -o ' + f + ' -d ' + dst)
     return os.system(cmd)
 
+<<<<<<< HEAD
 parfor(unzip, files, 4)
+=======
+parfor(unzip, files, 2)
+>>>>>>> 80640dc82dd2f210b1ec3615a6a3212db2eb412c

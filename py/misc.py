@@ -33,6 +33,10 @@ try:
     import matplotlib.pyplot as plt
 except:
     pass
+<<<<<<< HEAD
+=======
+
+>>>>>>> 80640dc82dd2f210b1ec3615a6a3212db2eb412c
 args = sys.argv
 sep = os.path.sep
 abspath = os.path.abspath
@@ -421,3 +425,34 @@ def datestamp():
                           str(now.month).zfill(2),
                           str(now.day).zfill(2)]
     return ''.join([year, month, day])
+<<<<<<< HEAD
+=======
+
+
+'''transform a shapefile to the desired crs in EPSG format'''
+def shapefile_to_EPSG(src_f, dst_f, dst_EPSG=3347): # or 3005 bc albers
+    t_epsg = dst_EPSG
+
+    # try to read EPSG from file:
+    if os.path.exists(dst_EPSG) and os.path.isfile(dst_EPSG):
+        try:
+            lines = [x.strip() for x in os.popen('gdalsrsinfo ' + dst_EPSG).read().strip().split('\n')]
+            t_epsg = int(lines[-1].split(',')[-1].strip(']').strip(']'))
+        except:
+            err('failed to read EPSG from file')
+    try:
+        if src_f[-4:] != '.shp':
+            err("shapefile input req'd")
+    except Exception:
+        err("please check input file")
+
+    if not exist(src_f):
+        err("could not find input file: " + src_f)
+
+    run(' '.join['ogr2ogr',
+                 '-t_srs',
+                 'EPSG:' + str(t_epsg),
+                 dst_f,
+                 fn,
+                 "-lco ENCODING=UTF-8"]);
+>>>>>>> 80640dc82dd2f210b1ec3615a6a3212db2eb412c
