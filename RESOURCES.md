@@ -52,6 +52,11 @@
 ## Hyperspectral and Radar combination
 * [Mapping waterbodies from Space](https://www.youtube.com/watch?v=UJcS24thVvc)
 
+# Geospatial Data Science
+* [Big data for geoscience](https://www.pythonpodcast.com/pangeo-big-data-geoscience-episode-358/)
+* [An open source Geographic Data Science (ENVS363/563)](https://darribas.org/gds_course/content/home.html#)
+    * The course was designed by Prof. Arribas-Bel from the University of Liverpool. Please refer to the accompanying [GitHub repository](https://github.com/darribas/gds19_) to the course as well.
+
 # General RS
 * [Types of resolution](https://learn.opengeoedu.de/en/fernerkundung/vorlesung/Remote%20Sensing/aufloesungen)
 * [Viewing geom and spatial res](https://www.nrcan.gc.ca/maps-tools-and-publications/satellite-imagery-and-air-photos/tutorial-fundamentals-remote-sensing/microwave-remote-sensing/viewing-geometry-and-spatial-resolution/9341)
@@ -70,11 +75,6 @@
 ## Training
 * [Copernicus RUS webinars](https://www.youtube.com/channel/UCB01WjameYMvL7-XfI8vRIA/videos)
 * [Introduction to StreamLit](https://miro.com/app/board/o9J_l9oeooY=/)
-
-## Stats and Algorithms
-* [tSNE embedding](https://scikit-learn.org/stable/modules/generated/sklearn.manifold.TSNE.html)
-* [isotonic regression](https://en.wikipedia.org/wiki/Isotonic_regression)
-* [Overview of clustering methods: scikit-learn](https://scikit-learn.org/stable/modules/clustering.html)
 
 ## coding
 * [matplotlib animation](http://jakevdp.github.io/blog/2012/08/18/matplotlib-animation-tutorial/)
@@ -114,14 +114,17 @@
 * https://code.earthengine.google.com/e27240a92ecf64bbadf8a082b91c711c?hideCode=true
 * https://omegazhangpzh.users.earthengine.app/view/wildfire-monitor-v7
 * 
-# Data Science Resources
+# Data Science
 * [NumPy Documentation](https://numpy.org/doc/stable/)
 * [Scikit-learn: machine learning in Python](https://scikit-learn.org/stable/)
 * [NVIDIA: even easier introduction to CUDA](https://developer.nvidia.com/blog/even-easier-introduction-cuda/)
 * [Research software engineering with Python](https://merely-useful.tech/py-rse/index.html)
 * [Data Science at command line](https://datascienceatthecommandline.com/2e/)
-* [Big data for geoscience](https://www.pythonpodcast.com/pangeo-big-data-geoscience-episode-358/)
 * [K-prototypes algorithm (categorical K-means)](https://link.springer.com/article/10.1023/A:1009769707641)
+* [tSNE embedding](https://scikit-learn.org/stable/modules/generated/sklearn.manifold.TSNE.html)
+* [isotonic regression](https://en.wikipedia.org/wiki/Isotonic_regression)
+* [Overview of clustering methods: scikit-learn](https://scikit-learn.org/stable/modules/clustering.html)
+* [Hastie, T., Tibshirani, R., & Friedman, J. H. (2009). <u>*The elements of statistical learning: Data mining, inference, and prediction</u>.* New York: Springer.](https://hastie.su.domains/Papers/ESLII.pdf)
 
 # Linux
 * [Windows Subsystem for Linux (Ubuntu)](https://ubuntu.com/tutorials/install-ubuntu-on-wsl2-on-windows-10#1-overview)

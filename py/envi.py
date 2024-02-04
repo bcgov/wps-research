@@ -1,6 +1,10 @@
 import os
 import sys
+<<<<<<< HEAD
+
+=======
 from misc import err
+>>>>>>> 80640dc82dd2f210b1ec3615a6a3212db2eb412c
 
 def envi_header_band_names(args): 
     #print("envi_header_band_names", args)
