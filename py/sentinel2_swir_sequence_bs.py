@@ -6,6 +6,7 @@ from envi import envi_header_cleanup
 import multiprocessing as mp
 from osgeo import gdal
 import numpy as np
+import copy
 import sys
 import os
 
@@ -75,9 +76,9 @@ for i in range(0, int(n_bands/3)): # , n_bands + 1):
         ix = i * 3 + j + 1  # band to write
         rb = stack.GetRasterBand(ix)
         b = np.zeros(d.RasterXSize * d.RasterYSize)
-        b = np.multiply(x, data[i + j])
+        b = copy.deepcopy(x) # np.multiply(x, data[i + j])
         if i > 0:
-            b += data2[i * 2 + j]
+            b += data2[(i - 1) * 3 + j]
         data2 += [b]
         b = b.reshape((d.RasterYSize, d.RasterXSize))
         rb.WriteArray(b)
