@@ -1,4 +1,7 @@
 # Remote Sensing + Fire Resources
+## Wildfire remote sensing data/products
+* [NASA VIIRS 375m active fire data](https://www.earthdata.nasa.gov/learn/find-data/near-real-time/firms/viirs-i-band-375-m-active-fire-data)
+  
 ## Space agencies
 * [ESA/JAXA/NASA dashboard](https://eodashboard.org/explore?poi=World-SMC)
 * [Japanese Space Agency JAXA: Research](https://earth.jaxa.jp/en/research/projects/index.html)
