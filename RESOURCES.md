@@ -3,9 +3,12 @@
 * [NASA VIIRS 375m active fire data](https://www.earthdata.nasa.gov/learn/find-data/near-real-time/firms/viirs-i-band-375-m-active-fire-data)
   
 ## Space agencies
-* [ESA/JAXA/NASA dashboard](https://eodashboard.org/explore?poi=World-SMC)
+* [Canadian Space Agency (CSA) Earth-observation (EO) satellites](https://www.asc-csa.gc.ca/eng/satellites/earth-observation/)
+* [European Space Agency (ESA) Earth-observation missions](https://www.esa.int/Applications/Observing_the_Earth/Earth_observing_missions)
+* [NASA EO missions: current fleet](https://science.nasa.gov/earth-science/missions/earth-missions/earth-missions-current/)
 * [Japanese Space Agency JAXA: Research](https://earth.jaxa.jp/en/research/projects/index.html)
 * [Jaxa data products](https://www.eorc.jaxa.jp/ALOS/en/dataset/fnf_e.htm)
+* [ESA/JAXA/NASA dashboard](https://eodashboard.org/explore?poi=World-SMC)
 ## Key tools
 ### Websites
 * [Firesmoke.ca](https://firesmoke.ca/forecasts/current/)
