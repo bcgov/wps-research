@@ -174,3 +174,13 @@
 
 # Git
 *[On undoing, fixing, or removing commits in git](https://sethrobertson.github.io/GitFixUm/fixup.html)
+
+# USFS/USGS resources
+* [USFS: Remote Sensing](https://www.fs.usda.gov/research/inventory/remotesensing)
+* [Field Guide for Mapping Post-Fire Soil Burn Severity](https://www.fs.usda.gov/rm/pubs/rmrs_gtr243.pdf)
+* [USGS burned severity portal](https://burnseverity.cr.usgs.gov/)
+* [USGS ravg](https://burnseverity.cr.usgs.gov/ravg/)
+* [USGS baer](https://burnseverity.cr.usgs.gov/baer/)
+* [USFS RSAC](https://en.wikipedia.org/wiki/Remote_Sensing_Applications_Center)
+* [USFS GTAC](https://www.fs.usda.gov/about-agency/gtac)
+* [USFS post-fire veg condition](https://data.fs.usda.gov/geodata/rastergateway/ravg/index.php)
