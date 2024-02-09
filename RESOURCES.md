@@ -1,10 +1,19 @@
 # Remote Sensing + Fire Resources
+## Wildfire remote sensing data/products
+* [NASA VIIRS 375m active fire data](https://www.earthdata.nasa.gov/learn/find-data/near-real-time/firms/viirs-i-band-375-m-active-fire-data)
+  
 ## Space agencies
-* [ESA/JAXA/NASA dashboard](https://eodashboard.org/explore?poi=World-SMC)
+* [Canadian Space Agency (CSA) Earth-observation (EO) satellites](https://www.asc-csa.gc.ca/eng/satellites/earth-observation/)
+* [European Space Agency (ESA) Earth-observation missions](https://www.esa.int/Applications/Observing_the_Earth/Earth_observing_missions)
+* [NASA EO missions: current fleet](https://science.nasa.gov/earth-science/missions/earth-missions/earth-missions-current/)
 * [Japanese Space Agency JAXA: Research](https://earth.jaxa.jp/en/research/projects/index.html)
+* [Italian Space Agency (ASI)](https://www.asi.it/en/)
+* [German Aerospace Centre (DLR)](https://www.dlr.de/en)
 * [Jaxa data products](https://www.eorc.jaxa.jp/ALOS/en/dataset/fnf_e.htm)
+* [ESA/JAXA/NASA dashboard](https://eodashboard.org/explore?poi=World-SMC)
 ## Key tools
 ### Websites
+* [GoC Firework: Daily smoke forecast maps](https://weather.gc.ca/firework/)
 * [Firesmoke.ca](https://firesmoke.ca/forecasts/current/)
 * [Hourly pm2.5 obs](https://cyclone.unbc.ca/aqmap/#5/53.671/-119.773)
 * [College of DuPage NEXLAB & satellite radar](https://weather.cod.edu/satrad/?parms=regional-ca_reg_west-natcolor-48-0-100-1&checked=map&colorbar=undefined)
@@ -165,3 +174,13 @@
 
 # Git
 *[On undoing, fixing, or removing commits in git](https://sethrobertson.github.io/GitFixUm/fixup.html)
+
+# USFS/USGS resources
+* [USFS: Remote Sensing](https://www.fs.usda.gov/research/inventory/remotesensing)
+* [Field Guide for Mapping Post-Fire Soil Burn Severity](https://www.fs.usda.gov/rm/pubs/rmrs_gtr243.pdf)
+* [USGS burned severity portal](https://burnseverity.cr.usgs.gov/)
+* [USGS ravg](https://burnseverity.cr.usgs.gov/ravg/)
+* [USGS baer](https://burnseverity.cr.usgs.gov/baer/)
+* [USFS RSAC](https://en.wikipedia.org/wiki/Remote_Sensing_Applications_Center)
+* [USFS GTAC](https://www.fs.usda.gov/about-agency/gtac)
+* [USFS post-fire veg condition](https://data.fs.usda.gov/geodata/rastergateway/ravg/index.php)
