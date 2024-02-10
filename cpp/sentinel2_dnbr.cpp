@@ -66,7 +66,7 @@ int main(int argc, char ** argv){
     out[i] = nbr_pre - nbr_pst;
   } 
 
-  hwrite(ohfn, nrow, ncol, 1, 4); // bn
+  hwrite(ohn, nrow, ncol, 1, 4); // bn
   bwrite(out, ofn, nrow, ncol, 1);
 
   return 0;
