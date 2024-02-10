@@ -51,8 +51,8 @@ int main(int argc, char ** argv){
   (hwrite(ohn, nrow, ncol, 1, 4), bwrite(out, ofn, nrow, ncol, 1));
 
   if(argc > 3){
-    (hwrite(ohn2, nrow, ncol, 1, 4), bwrite(out2, ofn, nrow, ncol, 1));
-    (hwrite(ohn3, nrow, ncol, 1, 4), bwrite(out3, ofn, nrow, ncol, 1)); 
+    (hwrite(ohn2, nrow, ncol, 1, 4), bwrite(out2, ofn2, nrow, ncol, 1));
+    (hwrite(ohn3, nrow, ncol, 1, 4), bwrite(out3, ofn3, nrow, ncol, 1)); 
   }
   (free(out), free(out2), free(out3), free(dat1), free(dat2));
   return 0;
