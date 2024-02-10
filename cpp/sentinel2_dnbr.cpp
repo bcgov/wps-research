@@ -53,7 +53,7 @@ int main(int argc, char ** argv){
   np = nrow * ncol;
   out = falloc(np);
   
-  float nbr_pre, nbr_post;
+  float nbr_pre, nbr_pst;
   float * b08_pre = &dat1[np * b08_ix_pre];
   float * b12_pre = &dat1[np * b12_ix_pre];
   float * b08_pst = &dat2[np * b08_ix_pst];
