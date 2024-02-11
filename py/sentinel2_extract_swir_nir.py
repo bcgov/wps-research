@@ -36,13 +36,14 @@ def extract(file_name):
         for i in range(1, subdataset_dataset.RasterCount + 1):
             band = subdataset_dataset.GetRasterBand(i)
             band_metadata = band.GetMetadata()
-            print(band_metadata) 
+            #print(band_metadata) 
    
             for k in band_metadata:
                 for j in desired_metadata:
                     try:
                         if band_metadata[k] == j[k]:  # print("Selected: ", band_metadata)
                             selected_bands += [[band, band_metadata, subdataset_dataset]]
+                            print("Selected: ", band_metadata)
                             sbs[band_metadata['BANDNAME']] = selected_bands[-1]
                             arrays[str(band_metadata)] = band.ReadAsArray().astype(np.float32)
                     except: pass
@@ -54,7 +55,7 @@ def extract(file_name):
     geo_xform = target_sub_ds.GetGeoTransform()
     target_xs, target_ys = geo_xform[1], geo_xform[5]
     driver = gdal.GetDriverByName('ENVI')
-    stack_ds = driver.Create(stack_fn, target_sub_ds.RasterXSize, target_sub_ds.RasterYSize, 3, gdal.GDT_Float32)
+    stack_ds = driver.Create(stack_fn, target_sub_ds.RasterXSize, target_sub_ds.RasterYSize, 4, gdal.GDT_Float32)
     stack_ds.SetProjection(target_sub_ds.GetProjection())
     stack_ds.SetGeoTransform(target_sub_ds.GetGeoTransform())
     
@@ -84,6 +85,7 @@ def extract(file_name):
             input_ds = None
     
         rb = stack_ds.GetRasterBand(bi)
+        print("m=", str(m))
         rb.WriteArray(arrays[str(m)])
         rb.SetDescription(' '.join([ds,  # dates string
                                     str(int(px_sx)) + 'm:',  # resolution
@@ -117,4 +119,4 @@ if __name__ == "__main__":
     else:
         files = [x.strip() for x in os.popen("ls -1 S*MSIL2A*.zip").readlines()]
         files += [x.strip() for x in os.popen("ls -1 S*MSIL1C*.zip").readlines()]
-        parfor(extract, files, int(mp.cpu_count()))
+        parfor(extract, files, 1 ) # nt(mp.cpu_count()))
