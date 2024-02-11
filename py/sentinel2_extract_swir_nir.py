@@ -85,7 +85,6 @@ def extract(file_name):
             input_ds = None
     
         rb = stack_ds.GetRasterBand(bi)
-        print("m=", str(m))
         rb.WriteArray(arrays[str(m)])
         rb.SetDescription(' '.join([ds,  # dates string
                                     str(int(px_sx)) + 'm:',  # resolution
