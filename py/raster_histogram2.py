@@ -59,7 +59,7 @@ if __name__ == '__main__':     # instructions to run
     M = len(dat[0][ix])
 
     plt.figure()
-    plt.title(sys.argv[2] + '=' + str(sys.argv[3]))
+    plt.title(sys.argv[1] + ' with ' + sys.argv[2] + '=' + str(sys.argv[3]))
     for i in range(N):
         di = dat[i][ix]
         plt.hist(di, range=[my_min, my_max], bins=n_bins, histtype='step', label=bn[band_select[i]])
