@@ -27,7 +27,9 @@ int main(int argc, char ** argv){
 
   str hfn(hdr_fn(fn)); // input header filename
   size_t nrow, ncol, nband, np;
-  hread(hfn, nrow, ncol, nband); // read header
+
+  vector<str> s;
+  hread(hfn, nrow, ncol, nband, s); // read header
   np = nrow * ncol; // input pixl count
 
   double d, diff;  // data values
@@ -86,7 +88,7 @@ int main(int argc, char ** argv){
   for0(k, nband)  // stdv
     stdev[k] = sqrt(total_squared[k] / n[k]);
 
-  printf("band_i,Min,Max,Mean,Stdv,n_nan,n_inf,%%nan,%%inf");  // csv header
+  printf("band_i,Min,Max,Mean,Stdv,n_nan,n_inf,%%nan,%%inf,band_name");  // csv header
   for0(k, nband){
     printf("\n%zu", k + 1);
     printd(fmin[k] !=  DBL_MAX? fmin[k]: NAN); // min value this band
@@ -97,6 +99,7 @@ int main(int argc, char ** argv){
     printd(n_inf[k]); // inf count this band
     printd(100. * n_nan[k] / (double)np); // nan percent of total this band
     printd(100. * n_inf[k] / (double)np); // inf percent of total this band
+    printf(",%s", s[k].c_str());
   }
   printf("\n");
   return 0;
