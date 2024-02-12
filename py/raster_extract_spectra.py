@@ -1,6 +1,4 @@
-# Something wrong with this script? Don't use for now..
-
-# this script extracts spectra (from a raster) at point locations in a shapefile
+# This script which may need some QA/QC, extracts spectra (from a raster) at point locations in a shapefile
 # example:
 #  python3 extract_spectra.py FTL_test1.shp S2A_MSIL2A_20190908T195941_N0213_R128_T09VUE_20190908T233509_RGB.bin 20 10
 
