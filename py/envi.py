@@ -176,9 +176,15 @@ def envi_header_cleanup(args):
         sys.exit(0)
     
     in_file = args[1]
+
+    # if a .bin file is provided, switch to the associated .hdr file:
     if in_file[-4:] == '.bin':
     	in_file = '.'.join(in_file.split('.')[:-1] + ['hdr'])
+
     
+    # also record the path to the associated .bin file    
+    base_file_path = '.'.join(in_file.split('.')[:-1])
+    # read the lines from the header file:
     data = open(in_file).read().strip()
     n_band_names, in_band_names, nb = 0, False, 0
     data = data.replace("description = {\n", "description = {")
@@ -228,6 +234,7 @@ def envi_header_cleanup(args):
     
     if nb != n_band_names:
         if n_band_names > nb:
+            # probably should throw an error here!
             # print("n_band_names", n_band_names, "nb", nb)
             bandname_lines = bandname_lines[:nb]
             bandname_lines[-1] = bandname_lines[-1].strip() + "}"
@@ -246,6 +253,10 @@ def envi_header_cleanup(args):
                 bandname_lines.append("Band " + str(i + 1) + ",")
             bandname_lines[-1] = bandname_lines[-1].strip().strip(",") + "}"
     
+    print(bandname_lines)
+    if [x.strip().lower() for x in bandname_lines] == ["band names = {band 1}"]:
+        base_filename = base_file_path.split(os.path.sep)[-1]
+        bandname_lines = ["band names = {" + base_filename + "}"]
     bandname_lines[-1] = bandname_lines[-1].replace(',', '') # no comma in last band names record
     lines = non_bandname_lines + bandname_lines
     data = ('\n'.join(lines)).strip()
