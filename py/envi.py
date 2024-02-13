@@ -166,7 +166,7 @@ def envi_header_cleanup(args):
         jobs = []
         for line in lines:
             if exist(line):
-                c = 'python3 ' + __file__ + ' ' + line
+                c = 'python3 ' + (os.path.sep).join(__file__.strip().split(os.path.sep)[:-1]) + os.path.sep + 'envi_header_cleanup.py' + ' ' + line
                 jobs.append(c)
                 found = True
         if not found:
@@ -253,7 +253,6 @@ def envi_header_cleanup(args):
                 bandname_lines.append("Band " + str(i + 1) + ",")
             bandname_lines[-1] = bandname_lines[-1].strip().strip(",") + "}"
     
-    print(bandname_lines)
     if [x.strip().lower() for x in bandname_lines] == ["band names = {band 1}"]:
         base_filename = base_file_path.split(os.path.sep)[-1]
         bandname_lines = ["band names = {" + base_filename.strip() + "}"]
