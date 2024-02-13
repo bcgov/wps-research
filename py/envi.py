@@ -149,7 +149,7 @@ def envi_header_modify(args):
 
 def envi_header_cleanup(args):
     # print("envi_header_cleanup", args)
-    from misc import parfor, run, read_hdr, pd, sep
+    from misc import parfor, run, read_hdr, pd, sep, exist
     '''Clean up envi header so that they can be opened in IMV
     20230601: add option to run without a new python interpreter
     20230524:
@@ -256,7 +256,7 @@ def envi_header_cleanup(args):
     print(bandname_lines)
     if [x.strip().lower() for x in bandname_lines] == ["band names = {band 1}"]:
         base_filename = base_file_path.split(os.path.sep)[-1]
-        bandname_lines = ["band names = {" + base_filename + "}"]
+        bandname_lines = ["band names = {" + base_filename.strip() + "}"]
     bandname_lines[-1] = bandname_lines[-1].replace(',', '') # no comma in last band names record
     lines = non_bandname_lines + bandname_lines
     data = ('\n'.join(lines)).strip()
