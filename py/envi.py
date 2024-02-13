@@ -235,7 +235,8 @@ def envi_header_cleanup(args):
     if nb != n_band_names:
         if n_band_names > nb:
             # probably should throw an error here!
-            # print("n_band_names", n_band_names, "nb", nb)
+            print("n_band_names", n_band_names, "nb", nb)
+            err("unexpected number of band names")
             bandname_lines = bandname_lines[:nb]
             bandname_lines[-1] = bandname_lines[-1].strip() + "}"
         if n_band_names > 0 and n_band_names < nb:
