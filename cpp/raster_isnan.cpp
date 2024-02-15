@@ -11,7 +11,7 @@ int main(int argc, char ** argv){
   hread(hfn, nrow, ncol, nband);
   dat = bread(fn, nrow, ncol, nband);
 
-  str ofn(in_file + "_isnan.bin");
+  str ofn(fn+ "_isnan.bin");
   str ohn(hdr_fn(ofn, true)); // create output header file
   
   np = nrow * ncol; // number of input pix
