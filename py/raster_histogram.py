@@ -1,4 +1,11 @@
-'''20221105 update: add NAN resiliency (i.e. skip NAN valued pixels in stats) '''
+'''Raster histogram: by default (no parameters) all bands get their own color histogram,
+together on the same plot. 
+
+If we are dealing with RGB or 3-channel representations, we could select 
+three bands only in which case histograms are plotted for these three
+bands only (red, green, blue respectively)
+
+20221105 update: add NAN resiliency (i.e. skip NAN valued pixels in stats) '''
 from misc import *
 import matplotlib
 args = sys.argv
