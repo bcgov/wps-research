@@ -1,12 +1,13 @@
 /* matrix2.h by Ashlin Richardson, Senior Data Scientist, BC Wildfire Service */
 #pragma once
 #include<cmath>
+#include<math.h>
 #include<string>
 #include<fstream>
 #include<iostream>
 
 #define TYPE double
-#define angle(x) (atan2(imag(x), real(x)))
+#define _angle(x) (atan2(imag(x), real(x)))
 #define cp(c) printf("%f + %fi\n", real(c), imag(c));
 
 using namespace std;
@@ -55,6 +56,9 @@ template<class T> struct complex{
   inline complex<T> log(){
     return complex<T>((T)(double)std::log((double)sqrt((double)(re*re + im*im))),
                       (T)(double)atan2((double)im, (double)re));
+  }
+  inline double angle(){
+    return atan2(im, re); //, real(*this));
   }
 };
 
