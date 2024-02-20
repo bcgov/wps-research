@@ -15,7 +15,7 @@ int main(int argc, char ** argv){
   str line;
   unordered_set<str> d;
 
-  while(getline(dfile, line) d.insert(line);
+  while(getline(dfile, line)) d.insert(line);
   dfile.close();
 
   ofstream outfile(ofn);
