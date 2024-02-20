@@ -1,4 +1,4 @@
-/* g++ forest.cpp -lgsl  -w -o forest
+/* g++ forest.cpp -lgsl  -w -o forest -O4
  */
 #include<map>
 #include<string>
@@ -627,6 +627,13 @@ int main(int argc, char ** argv){
     bwrite(out_buf[i], ofn[i], NRow, NCol, 1);
   }
   cout << "NRow " << NRow << " NCol " << NCol << endl;
+
+  string x("raster_stack.py ");
+  for0(i, var_n.size()){
+    x += ofn[i] + string(" ");
+  }
+  x += string("stack.bin");
+  cout << x << endl;
   printf("\rdone");
   return 0;
 }
