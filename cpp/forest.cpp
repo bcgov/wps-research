@@ -1,3 +1,5 @@
+/* g++ forest.cpp -lgsl  -w -o forest
+ */
 #include<map>
 #include<string>
 #include<math.h>
@@ -401,7 +403,7 @@ int main(int argc, char ** argv){
     std::string s = string(outdir) + string("/") + string("K") + ss.str() + string("_") + var_n[i] + string(".bin");
     ofn.push_back(s);
     ohn.push_back(hdr_fn(s, true));
-    out_files[i] = wopen(s.c_str());
+    //out_files[i] = wopen(s.c_str());
     hwrite(ohn[i], NRow, NCol, 1);
     out_buf[i] = falloc(np);
     for0(j, np) out_buf[i][j] = 0.; // default value: 0.
@@ -551,12 +553,10 @@ int main(int argc, char ** argv){
             break;
           }
         }
-
         /* free */
         gsl_root_fsolver_free(workspace_f);
         }
       catch(const std::exception& e){
-
       }
 
       mD = x_l;
