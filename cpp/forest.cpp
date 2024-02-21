@@ -599,26 +599,17 @@ int main(int argc, char ** argv){
 
       raleighp = (d / sigma2) * exp ( - d * d / ( 2. * sigma2));
 
-      if(isnan(t4[r11][ix])){
-        _raleighp[ix] = NAN;
-      }
-      else{
-        _raleighp[ix] = raleighp;
-      }
+      if(isnan(t4[r11][ix])) _raleighp[ix] = NAN;
+      else _raleighp[ix] = raleighp;
     }
   }
 
   if(warned) printf("WARNING: deltaalpha was less than 0.\n");
-
-  for0(i, var_n.size()){
-    bwrite(out_buf[i], ofn[i], NRow, NCol, 1);
-  }
+  for0(i, var_n.size()) bwrite(out_buf[i], ofn[i], NRow, NCol, 1);
   cout << "NRow " << NRow << " NCol " << NCol << endl;
 
   string xx("raster_stack.py ");
-  for0(i, var_n.size()){
-    xx += ofn[i] + string(" ");
-  }
+  for0(i, var_n.size()) xx += ofn[i] + string(" ");
   xx += string("stack.bin");
   cout << xx << endl;
   int retcode = system(xx.c_str());
