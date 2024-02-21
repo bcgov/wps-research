@@ -528,7 +528,7 @@ int main(int argc, char ** argv){
       x_r = gsl_root_fsolver_x_upper(workspace_f);
       //printf("%d times: [%10.3e, %10.3e]\n", times, x_l, x_r);
 
-      status = gsl_root_test_interval(x_l, x_r, 1.0e-13, 1.0e-20);
+      status = gsl_root_test_interval(x_l, x_r, 1.0e-10, 1.0e-20);
       if(status != GSL_CONTINUE){
         //printf("Status: %s\n", gsl_strerror(status));
         //printf("\n Root = [%25.17e, %25.17e]\n\n", x_l, x_r);
