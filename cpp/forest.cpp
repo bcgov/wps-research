@@ -1,5 +1,5 @@
-/* g++ forest.cpp -lgsl  -w -o forest -O4
- */
+/* g++ forest.cpp -lgsl -w -o forest -O4
+*/
 #include<map>
 #include<string>
 #include<math.h>
@@ -132,7 +132,8 @@ float * falloc(size_t nf){
 const vector<string> var_n{
   string("P"), string("theta"), string("R"), string("M"), string("delta"), string("entropy"),
   string("alpha"), string("mD"), string("aD"), string("dA"), string("raleighp")
-};
+}
+;
 vector<string> ofn;
 vector<string> ohn;
 map<string, int> lookup; // map variable names to indices in the band-sequential array
@@ -146,7 +147,6 @@ void bwrite(float * d, string bfn, size_t nrow, size_t ncol, size_t nband){
   fwrite(d, sizeof(float), nf, f);
   fclose(f);
 }
-
 
 double Hd;
 double func(double m, void *param){
@@ -179,26 +179,26 @@ void fdfunc(double x, void *param, double *ret_f, double *ret_df){
 float ** out_buf;
 
 const vector<string> t4fn = {
-        string("T11.bin"),
-        string("T12_real.bin"),
-        string("T12_imag.bin"),
-        string("T13_real.bin"),
-        string("T13_imag.bin"),
-        string("T14_real.bin"),
-        string("T14_imag.bin"),
-        string("T22.bin"),
-        string("T23_real.bin"),
-        string("T23_imag.bin"),
-        string("T24_real.bin"),
-        string("T24_imag.bin"),
-        string("T33.bin"),
-        string("T34_real.bin"),
-        string("T34_imag.bin"),
-        string("T44.bin")
-      };
+  string("T11.bin"),
+  string("T12_real.bin"),
+  string("T12_imag.bin"),
+  string("T13_real.bin"),
+  string("T13_imag.bin"),
+  string("T14_real.bin"),
+  string("T14_imag.bin"),
+  string("T22.bin"),
+  string("T23_real.bin"),
+  string("T23_imag.bin"),
+  string("T24_real.bin"),
+  string("T24_imag.bin"),
+  string("T33.bin"),
+  string("T34_real.bin"),
+  string("T34_imag.bin"),
+  string("T44.bin")
+};
 
 FILE * ropen(string fn){
-  printf("+r  %s\n", fn.c_str());
+  printf("+r %s\n", fn.c_str());
   FILE * ret = fopen(fn.c_str(), "rb");
   if(!ret){
     printf("Error: failed to open file: %s\n", fn.c_str());
@@ -225,11 +225,7 @@ bool not_space(int data){
 }
 
 static inline void ltrim(std::string &s){
-  s.erase(s.begin(), std::find_if(s.begin(), s.end(), /* [](int ch){
-    return !std::isspace(ch);
-  }*/
-  not_space
-  ));
+  s.erase(s.begin(), std::find_if(s.begin(), s.end(),not_space));
 }
 
 // trim from end (in place)
@@ -244,7 +240,6 @@ static inline string ltrim(string & s, string chars){
 
 static inline string rtrim(string & s, string chars){
   std::size_t found = s.find_last_not_of(chars);
-  // printf("found %zu strlen %zu\n", found, (size_t)strlen(s.c_str()));
   if (found!=std::string::npos) s.erase(found + 1);
   return s;
 }
@@ -282,13 +277,10 @@ vector<string> split(string s){
   string token;
   while(getline(iss,token,delim)) ret.push_back(token);
   vector<string>::iterator it;
-  for(it = ret.begin(); it != ret.end(); it++){
-    trim(*it);
-  }
+  for(it = ret.begin(); it != ret.end(); it++) trim(*it);
   if(extra) ret.push_back(string(""));
   return ret;
 }
-
 
 // read header file
 size_t hread(string hfn, size_t & nrow, size_t & ncol, size_t & nband){
@@ -320,31 +312,30 @@ size_t hread(string hfn, size_t & nrow, size_t & ncol, size_t & nband){
   return data_type;
 }
 
-  float ** t4;
+float ** t4;
 
 cf T(size_t ix, int i){
   /* retrieve T4 matrix element at position ix, subscript i */
-        switch(i){
-        case 11: return cf(t4[r11][ix], 0.); break;
-        case 22: return cf(t4[r22][ix], 0.); break;
-        case 33: return cf(t4[r33][ix], 0.); break;
-        case 44: return cf(t4[r44][ix], 0.); break;
-        case 12: return cf(t4[r12][ix], t4[i12][ix]); break;
-        case 13: return cf(t4[r13][ix], t4[i13][ix]); break;
-        case 14: return cf(t4[r14][ix], t4[i14][ix]); break;
-        case 21: return cf(t4[r12][ix], -t4[i12][ix]); break;
-        case 23: return cf(t4[r23][ix], t4[i23][ix]); break;
-        case 24: return cf(t4[r24][ix], t4[i24][ix]); break;
-        case 31: return cf(t4[r13][ix], -t4[i13][ix]); break;
-        case 32: return cf(t4[r23][ix], -t4[i23][ix]); break;
-        case 34: return cf(t4[r34][ix], t4[i34][ix]); break;
-        case 41: return cf(t4[r14][ix], -t4[i14][ix]); break;
-        case 42: return cf(t4[r24][ix], -t4[i24][ix]); break;
-        case 43: return cf(t4[r34][ix], -t4[r34][ix]); break;
-        default: printf("Error: invalid subscript on T4 matrix\n"); exit(1); break;
-      }
+  switch(i){
+    case 11: return cf(t4[r11][ix], 0.); break;
+    case 22: return cf(t4[r22][ix], 0.); break;
+    case 33: return cf(t4[r33][ix], 0.); break;
+    case 44: return cf(t4[r44][ix], 0.); break;
+    case 12: return cf(t4[r12][ix], t4[i12][ix]); break;
+    case 13: return cf(t4[r13][ix], t4[i13][ix]); break;
+    case 14: return cf(t4[r14][ix], t4[i14][ix]); break;
+    case 21: return cf(t4[r12][ix], -t4[i12][ix]); break;
+    case 23: return cf(t4[r23][ix], t4[i23][ix]); break;
+    case 24: return cf(t4[r24][ix], t4[i24][ix]); break;
+    case 31: return cf(t4[r13][ix], -t4[i13][ix]); break;
+    case 32: return cf(t4[r23][ix], -t4[i23][ix]); break;
+    case 34: return cf(t4[r34][ix], t4[i34][ix]); break;
+    case 41: return cf(t4[r14][ix], -t4[i14][ix]); break;
+    case 42: return cf(t4[r24][ix], -t4[i24][ix]); break;
+    case 43: return cf(t4[r34][ix], -t4[r34][ix]); break;
+    default: printf("Error: invalid subscript on T4 matrix\n"); exit(1); break;
+  }
 }
-
 
 int main(int argc, char ** argv){
   if(argc < 3){
@@ -356,7 +347,8 @@ int main(int argc, char ** argv){
 
   size_t i, j, k, np, ix, nband;
   float P, theta, R, M, delta, entropy, alpha, mD, aD, dA, raleighp;
-  float * _P, * _theta, * _R, * _M, * _delta, * _entropy, * _alpha, * _mD, * _aD, * _dA, * _raleighp;
+  float * _P, * _theta, * _R, * _M, * _delta, * _entropy;
+  float * _alpha, * _mD, * _aD, * _dA, * _raleighp;
 
   char * indir = argv[1];
   char * outdir = argv[2];
@@ -406,7 +398,7 @@ int main(int argc, char ** argv){
     //out_files[i] = wopen(s.c_str());
     hwrite(ohn[i], NRow, NCol, 1);
     out_buf[i] = falloc(np);
-    for0(j, np) out_buf[i][j] = 0.; // default value: 0.
+    for0(j, np) out_buf[i][j] = 0.;
   }
 
   _P = out_buf[lookup[string("P")]];
@@ -421,27 +413,26 @@ int main(int argc, char ** argv){
   _dA = out_buf[lookup[string("dA")]];
   _raleighp = out_buf[lookup[string("raleighp")]];
 
-
   printf("Was able to allocate memory...\n");
 
   float mHHmVV2, mHHpVV2, mHV2;
 
   printf("\n ");
-          /* Define Solver */
+  /* Define Solver */
   gsl_function f;
   gsl_root_fsolver *workspace_f = gsl_root_fsolver_alloc(gsl_root_fsolver_bisection);
   gsl_function_fdf fdf;
   gsl_root_fdfsolver *workspace;
   gsl_set_error_handler_off();
 
-      int times, status;
-      double x, x_l, x_r;
+  int times, status;
+  double x, x_l, x_r;
 
   float at13, at33, at23, rt23;
 
   for(i = 0; i < NRow; i++){
     if(i % (NRow / 200) == 0){
-     printf("%d/100\n", (int)((float)i/((float)NRow)*100.));
+      printf("%d/100\n", (int)((float)i/((float)NRow)*100.));
     }
     for(j = 0; j < NCol; j++){
       ix = i * NCol + j;
@@ -511,7 +502,7 @@ int main(int argc, char ** argv){
       if (lambda[k] < 0.) lambda[k] = 0.;
 
       for (k = 0; k < 4; k++) {
-        /* Unitary eigenvectors */
+        // Unitary eigenvectors
         Alpha[k] = acos(sqrt(v[0][k][0] * v[0][k][0] + v[0][k][1] * v[0][k][1]));
         p[k] = lambda[k] / (eps + lambda[0] + lambda[1] + lambda[2] + lambda[3]);
         if (p[k] < 0.) p[k] = 0.;
@@ -522,39 +513,39 @@ int main(int argc, char ** argv){
       entropy = 0;
       for(k = 0; k < 3; k++){
         alpha += p[k]*Alpha[k];
-        entropy += -p[k]*( log(p[k])/log(3.) );
+        entropy += -p[k]*(log(p[k])/log(3.));
       }
 
       //ROOT SOLVER
       Hd = entropy;
 
-        //printf("F solver: %s\n", gsl_root_fsolver_name(workspace_f));
-        f.function = &func;
-        f.params = 0;
+      //printf("F solver: %s\n", gsl_root_fsolver_name(workspace_f));
+      f.function = &func;
+      f.params = 0;
 
-        /* set initial interval */
-        x_l = 0.0+eps;
-        x_r = 1.0-eps;
+      /* set initial interval */
+      x_l = 0.0+eps;
+      x_r = 1.0-eps;
 
-        /* set solver */
-        gsl_root_fsolver_set(workspace_f, &f, x_l, x_r);
+      /* set solver */
+      gsl_root_fsolver_set(workspace_f, &f, x_l, x_r);
 
-        /* main loop */
-        for0(times, MAXTIMES){
-         //for(times = 0; times < MAXTIMES; times++){
-          status = gsl_root_fsolver_iterate(workspace_f);
+      /* main loop */
+      for0(times, MAXTIMES){
+        //for(times = 0; times < MAXTIMES; times++)
+        status = gsl_root_fsolver_iterate(workspace_f);
 
-          x_l = gsl_root_fsolver_x_lower(workspace_f);
-          x_r = gsl_root_fsolver_x_upper(workspace_f);
-          //printf("%d times: [%10.3e, %10.3e]\n", times, x_l, x_r);
+        x_l = gsl_root_fsolver_x_lower(workspace_f);
+        x_r = gsl_root_fsolver_x_upper(workspace_f);
+        //printf("%d times: [%10.3e, %10.3e]\n", times, x_l, x_r);
 
-          status = gsl_root_test_interval(x_l, x_r, 1.0e-13, 1.0e-20);
-          if(status != GSL_CONTINUE){
-            //printf("Status: %s\n", gsl_strerror(status));
-            //printf("\n Root = [%25.17e, %25.17e]\n\n", x_l, x_r);
-            break;
-          }
+        status = gsl_root_test_interval(x_l, x_r, 1.0e-13, 1.0e-20);
+        if(status != GSL_CONTINUE){
+          //printf("Status: %s\n", gsl_strerror(status));
+          //printf("\n Root = [%25.17e, %25.17e]\n\n", x_l, x_r);
+          break;
         }
+      }
 
       mD = x_l;
       aD = mD * PI / ( (2.* mD ) + 1);
@@ -601,6 +592,7 @@ int main(int argc, char ** argv){
   bool warned = false;
   for0(i, NRow){
     for0(j, NCol){
+
       ix = i * NCol + j;
       d = _dA[ix];
       if(d < 0 and !warned) warned = true;
