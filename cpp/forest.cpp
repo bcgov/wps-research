@@ -438,9 +438,9 @@ int main(int argc, char ** argv){
       at23 = abs(T(ix, 23));
       rt23 = real(T(ix, 23));
       //calculate K=1 (model as single layer) p.23 of Shane Cloude's presentation January 11, 2010.
-      mHHpVV2 = 2*at13*at13/at33;
-      mHHmVV2 = 2*at23*at23/at33;
-      mHV2 = 0.5*at33;
+      mHHpVV2 = 2 * at13 * at13 / at33;
+      mHHmVV2 = 2 * at23 * at23 / at33;
+      mHV2 = 0.5 * at33;
 
       P = 0.5 * ( mHHpVV2 + mHHmVV2 + 4.*mHV2);
       theta = 0.25 * atan2( 4.* rt23 , (mHHmVV2 - 4. * mHV2) );
