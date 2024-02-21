@@ -16,7 +16,7 @@
 #include"../psp/psp.h"
 using namespace std;
 /* Limit of Iterative Times */
-#define MAXTIMES 50
+#define MAXTIMES 25
 #define cf complex<float>
 
 #define strip trim
@@ -397,7 +397,7 @@ int main(int argc, char ** argv){
     //out_files[i] = wopen(s.c_str());
     hwrite(ohn[i], NRow, NCol, 1);
     out_buf[i] = falloc(np);
-    for0(j, np) out_buf[i][j] = 0.;
+    for0(j, np) out_buf[i][j] = NAN;
   }
 
   _P = out_buf[lookup[string("P")]];
@@ -414,7 +414,6 @@ int main(int argc, char ** argv){
 
   printf("Was able to allocate memory...\n");
 
-
   printf("\n ");
 
   /* Define Solver */
@@ -427,154 +426,146 @@ int main(int argc, char ** argv){
   int times, status;
   double x, x_l, x_r;
   float at13, at33, at23, rt23, mHHmVV2, mHHpVV2, mHV2;
+  double sigma2, d, count;
 
-  for(i = 0; i < NRow; i++){
-    for(j = 0; j < NCol; j++){
-      ix = i * NCol + j;
-      if(ix % (np / 1000) == 0) printf("%d/100\n", (int)((float)ix/((float)np)*100.));
+  for0(ix, np){
+    if(ix % (np / 1000) == 0) printf("%d/100\n", (int)((float)ix/((float)np)*100.));
 
-      at13 = abs(T(ix, 13));
-      at33 = abs(T(ix, 33));
-      at23 = abs(T(ix, 23));
-      rt23 = real(T(ix, 23));
-      //calculate K=1 (model as single layer) p.23 of Shane Cloude's presentation January 11, 2010.
-      mHHpVV2 = 2 * at13 * at13 / at33;
-      mHHmVV2 = 2 * at23 * at23 / at33;
-      mHV2 = 0.5 * at33;
+    if(isnan(t4[r11][ix])) continue;
 
-      P = 0.5 * ( mHHpVV2 + mHHmVV2 + 4.*mHV2);
-      theta = 0.25 * atan2( 4.* rt23 , (mHHmVV2 - 4. * mHV2) );
-      R = ( mHHmVV2 - 4.* mHV2 ) / (mHHmVV2 + 4. * mHV2);
-      M = (mHHmVV2 + 4.* mHV2) / mHHpVV2;
-      delta = (float) T(ix, 12).angle(); //arg(T[12]);
+    at13 = abs(T(ix, 13));
+    at33 = abs(T(ix, 33));
+    at23 = abs(T(ix, 23));
+    rt23 = real(T(ix, 23));
+    //calculate K=1 (model as single layer) p.23 of Shane Cloude's presentation January 11, 2010.
+    mHHpVV2 = 2 * at13 * at13 / at33;
+    mHHmVV2 = 2 * at23 * at23 / at33;
+    mHV2 = 0.5 * at33;
 
-      //write parameters
-      _P[ix] = P;
-      _theta[ix] = theta;
-      _R[ix] = R;
-      _M[ix] = M;
-      _delta[ix] = delta;
+    P = 0.5 * ( mHHpVV2 + mHHmVV2 + 4.*mHV2);
+    theta = 0.25 * atan2( 4.* rt23 , (mHHmVV2 - 4. * mHV2) );
+    R = ( mHHmVV2 - 4.* mHV2 ) / (mHHmVV2 + 4. * mHV2);
+    M = (mHHmVV2 + 4.* mHV2) / mHHpVV2;
+    delta = (float) T(ix, 12).angle(); //arg(T[12]);
 
-      //m = &(T.pixel[0]); /* Average complex coherency matrix determination*/
-      t[0][0][0] = eps + t4[r11][ix];
-      t[0][0][1] = 0.;
-      t[0][1][0] = eps + t4[r12][ix];
-      t[0][1][1] = eps + t4[i12][ix];
-      t[0][2][0] = eps + t4[r13][ix];
-      t[0][2][1] = eps + t4[i13][ix];
-      t[0][3][0] = eps + t4[r14][ix];
-      t[0][3][1] = eps + t4[i14][ix];
+    //m = &(T.pixel[0]); /* Average complex coherency matrix determination*/
+    t[0][0][0] = eps + t4[r11][ix];
+    t[0][0][1] = 0.;
+    t[0][1][0] = eps + t4[r12][ix];
+    t[0][1][1] = eps + t4[i12][ix];
+    t[0][2][0] = eps + t4[r13][ix];
+    t[0][2][1] = eps + t4[i13][ix];
+    t[0][3][0] = eps + t4[r14][ix];
+    t[0][3][1] = eps + t4[i14][ix];
 
-      t[1][0][0] = eps + t4[r12][ix];
-      t[1][0][1] = eps - t4[i12][ix];
-      t[1][1][0] = eps + t4[r22][ix];
-      t[1][1][1] = 0.;
-      t[1][2][0] = eps + t4[r23][ix];
-      t[1][2][1] = eps + t4[i23][ix];
-      t[1][3][0] = eps + t4[r24][ix];
-      t[1][3][1] = eps + t4[i24][ix];
+    t[1][0][0] = eps + t4[r12][ix];
+    t[1][0][1] = eps - t4[i12][ix];
+    t[1][1][0] = eps + t4[r22][ix];
+    t[1][1][1] = 0.;
+    t[1][2][0] = eps + t4[r23][ix];
+    t[1][2][1] = eps + t4[i23][ix];
+    t[1][3][0] = eps + t4[r24][ix];
+    t[1][3][1] = eps + t4[i24][ix];
 
-      t[2][0][0] = eps + t4[r13][ix];
-      t[2][0][1] = eps - t4[i13][ix];
-      t[2][1][0] = eps + t4[r23][ix];
-      t[2][1][1] = eps - t4[i23][ix];
-      t[2][2][0] = eps + t4[r33][ix];
-      t[2][2][1] = 0.;
-      t[2][3][0] = eps + t4[r34][ix];
-      t[2][3][1] = eps + t4[i34][ix];
+    t[2][0][0] = eps + t4[r13][ix];
+    t[2][0][1] = eps - t4[i13][ix];
+    t[2][1][0] = eps + t4[r23][ix];
+    t[2][1][1] = eps - t4[i23][ix];
+    t[2][2][0] = eps + t4[r33][ix];
+    t[2][2][1] = 0.;
+    t[2][3][0] = eps + t4[r34][ix];
+    t[2][3][1] = eps + t4[i34][ix];
 
-      t[3][0][0] = eps + t4[r14][ix];
-      t[3][0][1] = eps - t4[i14][ix];
-      t[3][1][0] = eps + t4[r24][ix];
-      t[3][1][1] = eps - t4[i24][ix];
-      t[3][2][0] = eps + t4[r34][ix];
-      t[3][2][1] = eps - t4[i34][ix];
-      t[3][3][0] = eps + t4[r44][ix];
-      t[3][3][1] = 0.;
+    t[3][0][0] = eps + t4[r14][ix];
+    t[3][0][1] = eps - t4[i14][ix];
+    t[3][1][0] = eps + t4[r24][ix];
+    t[3][1][1] = eps - t4[i24][ix];
+    t[3][2][0] = eps + t4[r34][ix];
+    t[3][2][1] = eps - t4[i34][ix];
+    t[3][3][0] = eps + t4[r44][ix];
+    t[3][3][1] = 0.;
 
-      Diagonalisation(4, t, v, lambda);
+    Diagonalisation(4, t, v, lambda);
 
-      for (k = 0; k < 4; k++)
-      if (lambda[k] < 0.) lambda[k] = 0.;
+    for (k = 0; k < 4; k++)
+    if (lambda[k] < 0.) lambda[k] = 0.;
 
-      for (k = 0; k < 4; k++) {
-        // Unitary eigenvectors
-        Alpha[k] = acos(sqrt(v[0][k][0] * v[0][k][0] + v[0][k][1] * v[0][k][1]));
-        p[k] = lambda[k] / (eps + lambda[0] + lambda[1] + lambda[2] + lambda[3]);
-        if (p[k] < 0.) p[k] = 0.;
-        if (p[k] > 1.) p[k] = 1.;
+    for (k = 0; k < 4; k++) {
+      // Unitary eigenvectors
+      Alpha[k] = acos(sqrt(v[0][k][0] * v[0][k][0] + v[0][k][1] * v[0][k][1]));
+      p[k] = lambda[k] / (eps + lambda[0] + lambda[1] + lambda[2] + lambda[3]);
+      if (p[k] < 0.) p[k] = 0.;
+      if (p[k] > 1.) p[k] = 1.;
+    }
+
+    alpha = 0;
+    entropy = 0;
+    for(k = 0; k < 3; k++){
+      alpha += p[k]*Alpha[k];
+      entropy += -p[k]*(log(p[k])/log(3.));
+    }
+
+    //ROOT SOLVER
+    Hd = entropy;
+
+    //printf("F solver: %s\n", gsl_root_fsolver_name(workspace_f));
+    f.function = &func;
+    f.params = 0;
+
+    /* set initial interval */
+    x_l = 0.0+eps;
+    x_r = 1.0-eps;
+
+    /* set solver */
+    gsl_root_fsolver_set(workspace_f, &f, x_l, x_r);
+
+    /* main loop */
+    for0(times, MAXTIMES){
+      //for(times = 0; times < MAXTIMES; times++)
+      status = gsl_root_fsolver_iterate(workspace_f);
+
+      x_l = gsl_root_fsolver_x_lower(workspace_f);
+      x_r = gsl_root_fsolver_x_upper(workspace_f);
+      //printf("%d times: [%10.3e, %10.3e]\n", times, x_l, x_r);
+
+      status = gsl_root_test_interval(x_l, x_r, 1.0e-13, 1.0e-20);
+      if(status != GSL_CONTINUE){
+        //printf("Status: %s\n", gsl_strerror(status));
+        //printf("\n Root = [%25.17e, %25.17e]\n\n", x_l, x_r);
+        break;
       }
+    }
 
-      alpha = 0;
-      entropy = 0;
-      for(k = 0; k < 3; k++){
-        alpha += p[k]*Alpha[k];
-        entropy += -p[k]*(log(p[k])/log(3.));
-      }
+    mD = x_l;
+    aD = mD * PI / ( (2.* mD ) + 1);
+    dA = alpha - aD;
 
-      //ROOT SOLVER
-      Hd = entropy;
+    //write parameters
+    _P[ix] = P;
+    _theta[ix] = theta;
+    _R[ix] = R;
+    _M[ix] = M;
+    _delta[ix] = delta;
+    _entropy[ix] = entropy;
+    _alpha[ix] = alpha;
+    _mD[ix] = mD;
+    _aD[ix] = aD;
+    _dA[ix] = dA;
+  }
 
-      //printf("F solver: %s\n", gsl_root_fsolver_name(workspace_f));
-      f.function = &func;
-      f.params = 0;
+  sigma2 = 0.;
+  count = 0.;
 
-      /* set initial interval */
-      x_l = 0.0+eps;
-      x_r = 1.0-eps;
-
-      /* set solver */
-      gsl_root_fsolver_set(workspace_f, &f, x_l, x_r);
-
-      /* main loop */
-      for0(times, MAXTIMES){
-        //for(times = 0; times < MAXTIMES; times++)
-        status = gsl_root_fsolver_iterate(workspace_f);
-
-        x_l = gsl_root_fsolver_x_lower(workspace_f);
-        x_r = gsl_root_fsolver_x_upper(workspace_f);
-        //printf("%d times: [%10.3e, %10.3e]\n", times, x_l, x_r);
-
-        status = gsl_root_test_interval(x_l, x_r, 1.0e-13, 1.0e-20);
-        if(status != GSL_CONTINUE){
-          //printf("Status: %s\n", gsl_strerror(status));
-          //printf("\n Root = [%25.17e, %25.17e]\n\n", x_l, x_r);
-          break;
-        }
-      }
-
-      mD = x_l;
-      aD = mD * PI / ( (2.* mD ) + 1);
-      if(isnan(t4[r11][ix])){
-        mD = NAN;
-        aD = NAN;
-      }
-
-      dA = alpha - aD;
-      _entropy[ix] = entropy;
-      _alpha[ix] = alpha;
-      _mD[ix] = mD;
-      _aD[ix] = aD;
-      _dA[ix] = dA;
+  for0(ix, np){
+    if(isnan(t4[r11][ix])){
+    }
+    else{
+      d = _dA[ix];
+      sigma2 += d*d;
+      count += 1.;
     }
   }
 
-  double sigma2=0.;
-  double d;
-  double count = 0.;
-
-  for0(i, NRow){
-    for0(j, NCol){
-      ix = i * NCol + j;
-      if(isnan(t4[r11][ix])){
-      }
-      else{
-        d = _dA[ix];
-        sigma2 += d*d;
-        count += 1.;
-      }
-    }
-  }
   sigma2 = sigma2 / ( 2. * ((float)count));
   printf("Sigma %e Sigma^2 %e\n", sqrt(sigma2), sigma2);
   printf("Mean %e\n", sqrt(sigma2)*sqrt(PI / 2.));
