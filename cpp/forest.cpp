@@ -414,9 +414,9 @@ int main(int argc, char ** argv){
 
   printf("Was able to allocate memory...\n");
 
-  float mHHmVV2, mHHpVV2, mHV2;
 
   printf("\n ");
+
   /* Define Solver */
   gsl_function f;
   gsl_root_fsolver *workspace_f = gsl_root_fsolver_alloc(gsl_root_fsolver_bisection);
@@ -426,15 +426,12 @@ int main(int argc, char ** argv){
 
   int times, status;
   double x, x_l, x_r;
-
-  float at13, at33, at23, rt23;
+  float at13, at33, at23, rt23, mHHmVV2, mHHpVV2, mHV2;
 
   for(i = 0; i < NRow; i++){
-    if(i % (NRow / 200) == 0){
-      printf("%d/100\n", (int)((float)i/((float)NRow)*100.));
-    }
     for(j = 0; j < NCol; j++){
       ix = i * NCol + j;
+      if(ix % (np / 1000) == 0) printf("%d/100\n", (int)((float)ix/((float)np)*100.));
 
       at13 = abs(T(ix, 13));
       at33 = abs(T(ix, 33));
