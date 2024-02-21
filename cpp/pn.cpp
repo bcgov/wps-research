@@ -93,10 +93,6 @@ int main(int argc, char ** argv){
   }
 
   // "row (= col) = j, line (= row) = i" format
-  /*
-  vector<long int> pi; vector<long int> pj;
-  vector<long int> ni; vector<long int> nj;
-*/
   vector<vector<str>>::iterator it;
   for(it = lines.begin(); it != lines.end(); it++){
     vector<str> record(*it);
@@ -127,59 +123,8 @@ int main(int argc, char ** argv){
   /*size_t */ Np = pi.size(); // size of positive class
   /*size_t */ Nn = ni.size(); // size of negative class
 
-  /*
-  long int nni, npi;
-  nni = npi = -1;
-  float nnd, npd, dd;
-  nnd = npd = FLT_MAX;
-*/
-
   parfor(0, nrow, run_row); // for debug: , 1);
-  /* 
-   for0(i, nrow){
-    if(i % 100 == 0) printf("i=%zu of %zu\n", i + 1, nrow);
-    for0(j, ncol){
-      nni = npi = -1;
-      nnd = npd = FLT_MAX;
 
-      for0(k, Np){
-        // cout << "k " << k << " pi[k] " << pi[k] << " pj[k] " << pj[k] << " nrow " << nrow << " ncol " << ncol << endl;
-        size_t ix = i * ncol + j;
-        size_t iy = pi[k] * ncol + pj[k];
-        dd = d(ix, iy);
-        if(k == 0){
-          npd = dd;
-          npi = 0;
-        }
-        else{
-          if(dd < npd){
-            npd = dd;
-            npi = k;
-          }
-        }
-      }
-
-      for0(k, Nn){
-        // cout << "k " << k << endl;
-        dd = d(i * ncol + j, ni[k] * ncol + nj[k]);
-        if(k == 0){
-          nnd = dd;
-          nni = 0;
-        }
-        else{
-          if(dd < nnd){
-            nnd = dd;
-            nni = k;
-          }
-        }
-      }
-      // should really be looking at the max, min, stdv of the distances to pos (neg) sets
-      // printf("nnd %f nni %zu npd %f npi %zu\n", nnd, (size_t)nni, npd, (size_t)npi);
-      out[i * ncol + j] = (float) (npd < nnd);
-    }
-    
-  }
- */
   str ofn(fn + str("_pn.bin"));
   str ohn(hdr_fn(ofn, true)); // out header file name
 
