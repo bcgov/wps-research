@@ -132,8 +132,7 @@ float * falloc(size_t nf){
 const vector<string> var_n{
   string("P"), string("theta"), string("R"), string("M"), string("delta"), string("entropy"),
   string("alpha"), string("mD"), string("aD"), string("dA"), string("raleighp")
-}
-;
+};
 vector<string> ofn;
 vector<string> ohn;
 map<string, int> lookup; // map variable names to indices in the band-sequential array
@@ -346,7 +345,7 @@ int main(int argc, char ** argv){
   const double PI = atan(1.0)*4;
 
   size_t i, j, k, np, ix, nband;
-  float P, theta, R, M, delta, entropy, alpha, mD, aD, dA, raleighp;
+  float P, theta, R, M, delta, entropy, alpha, mD, aD, dA;
   float * _P, * _theta, * _R, * _M, * _delta, * _entropy;
   float * _alpha, * _mD, * _aD, * _dA, * _raleighp;
 
@@ -592,15 +591,10 @@ int main(int argc, char ** argv){
   bool warned = false;
   for0(i, NRow){
     for0(j, NCol){
-
       ix = i * NCol + j;
       d = _dA[ix];
-      if(d < 0 and !warned) warned = true;
-
-      raleighp = (d / sigma2) * exp ( - d * d / ( 2. * sigma2));
-
-      if(isnan(t4[r11][ix])) _raleighp[ix] = NAN;
-      else _raleighp[ix] = raleighp;
+      if(d < 0) warned = true;
+      _raleighp[ix] = (isnan(t4[r11][ix]))? NAN: (d / sigma2) * exp ( - d * d / ( 2. * sigma2));
     }
   }
 
