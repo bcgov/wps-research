@@ -16,7 +16,7 @@
 #include"../psp/psp.h"
 using namespace std;
 /* Limit of Iterative Times */
-#define MAXTIMES 100
+#define MAXTIMES 50
 #define cf complex<float>
 
 #define strip trim
@@ -427,6 +427,17 @@ int main(int argc, char ** argv){
   float mHHmVV2, mHHpVV2, mHV2;
 
   printf("\n ");
+          /* Define Solver */
+  gsl_function f;
+  gsl_root_fsolver *workspace_f = gsl_root_fsolver_alloc(gsl_root_fsolver_bisection);
+  gsl_function_fdf fdf;
+  gsl_root_fdfsolver *workspace;
+  gsl_set_error_handler_off();
+
+      int times, status;
+      double x, x_l, x_r;
+
+  float at13, at33, at23, rt23;
 
   for(i = 0; i < NRow; i++){
     if(i % (NRow / 200) == 0){
@@ -435,10 +446,10 @@ int main(int argc, char ** argv){
     for(j = 0; j < NCol; j++){
       ix = i * NCol + j;
 
-      float at13 = abs(T(ix, 13));
-      float at33 = abs(T(ix, 33));
-      float at23 = abs(T(ix, 23));
-      float rt23 = real(T(ix, 23));
+      at13 = abs(T(ix, 13));
+      at33 = abs(T(ix, 33));
+      at23 = abs(T(ix, 23));
+      rt23 = real(T(ix, 23));
       //calculate K=1 (model as single layer) p.23 of Shane Cloude's presentation January 11, 2010.
       mHHpVV2 = 2*at13*at13/at33;
       mHHmVV2 = 2*at23*at23/at33;
@@ -516,17 +527,7 @@ int main(int argc, char ** argv){
 
       //ROOT SOLVER
       Hd = entropy;
-      int times, status;
-      gsl_function f;
-      gsl_root_fsolver *workspace_f;
-      gsl_function_fdf fdf;
-      gsl_root_fdfsolver *workspace;
-      double x, x_l, x_r;
 
-      try{
-        gsl_set_error_handler_off();
-        /* Define Solver */
-        workspace_f = gsl_root_fsolver_alloc(gsl_root_fsolver_bisection);
         //printf("F solver: %s\n", gsl_root_fsolver_name(workspace_f));
         f.function = &func;
         f.params = 0;
@@ -539,7 +540,8 @@ int main(int argc, char ** argv){
         gsl_root_fsolver_set(workspace_f, &f, x_l, x_r);
 
         /* main loop */
-        for(times = 0; times < MAXTIMES; times++){
+        for0(times, MAXTIMES){
+         //for(times = 0; times < MAXTIMES; times++){
           status = gsl_root_fsolver_iterate(workspace_f);
 
           x_l = gsl_root_fsolver_x_lower(workspace_f);
@@ -553,11 +555,6 @@ int main(int argc, char ** argv){
             break;
           }
         }
-        /* free */
-        gsl_root_fsolver_free(workspace_f);
-        }
-      catch(const std::exception& e){
-      }
 
       mD = x_l;
       aD = mD * PI / ( (2.* mD ) + 1);
@@ -567,13 +564,11 @@ int main(int argc, char ** argv){
       }
 
       dA = alpha - aD;
-
       _entropy[ix] = entropy;
       _alpha[ix] = alpha;
       _mD[ix] = mD;
       _aD[ix] = aD;
       _dA[ix] = dA;
-      //END ROOT SOLVER
     }
   }
 
@@ -628,12 +623,15 @@ int main(int argc, char ** argv){
   }
   cout << "NRow " << NRow << " NCol " << NCol << endl;
 
-  string x("raster_stack.py ");
+  string xx("raster_stack.py ");
   for0(i, var_n.size()){
-    x += ofn[i] + string(" ");
+    xx += ofn[i] + string(" ");
   }
-  x += string("stack.bin");
-  cout << x << endl;
+  xx += string("stack.bin");
+  cout << xx << endl;
+  int retcode = system(xx.c_str());
+
+  gsl_root_fsolver_free(workspace_f);
   printf("\rdone");
   return 0;
 }
