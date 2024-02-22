@@ -43,21 +43,15 @@ print("All lines had " + str(n_field) + " records")
 fields = [f.lower() for f in lines[0]]
 data = lines[1:]
 
-lat_i = -1
-lon_i = -1
+lat_i, lon_i = -1, -1
 for i in range(len(fields)):
     f = fields[i]
     if len(f.split('lat')) > 1:
-        if lat_i != -1:
-            err("more than one field matched lat")
-        else:
-            lat_i = i
-
+        if lat_i != -1: err("more than one field matched lat")
+        else: lat_i = i
     if len(f.split('lon')) > 1:
-        if lon_i != -1:
-            err("more than one field matched lon")
-        else:
-            lon_i = i    
+        if lon_i != -1: err("more than one field matched lon")
+        else: lon_i = i    
     
 
 for line in data:
