@@ -5,7 +5,7 @@
 Extract the data values under those locations.
 
 Also create a .tgt file for the image (don't overwrite)'''
-from misc import xy_to_pix_lin, err, exists, hdr_fn, read_hdr
+from misc import xy_to_pix_lin, err, exists, hdr_fn, read_hdr, band_names
 import sys
 args = sys.argv
 
@@ -26,6 +26,7 @@ if csv_f.split('.')[-1] != 'csv':
 
 ncol, nrow, nband = read_hdr(hdr_fn(fn))
 print([ncol, nrow, nband])
+bn = band_names(hdr_fn(fn))
 
 lines = open(csv_f).readlines()
 lines = [x.strip().split(',') for x in lines]
@@ -67,3 +68,5 @@ for line in data:
 
     f.write(("\n" + ','.join([line[name_i], str(col), str(row), str(0), str(0) ])).encode())
 f.close()
+
+print("band names", bn)
