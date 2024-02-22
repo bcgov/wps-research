@@ -65,5 +65,5 @@ for line in data:
     print(lat, lon, row, col)
     print(dat)
 
-    f.write(("\n" + ','.join([line[name_i], str(col), str(row), str(0), str(0) ]))
+    f.write(("\n" + ','.join([line[name_i], str(col), str(row), str(0), str(0) ])).encode())
 f.close()
