@@ -7,7 +7,6 @@ Extract the data values under those locations.
 Also create a .tgt file for the image (don't overwrite)'''
 from misc import xy_to_pix_lin, err, exists, hdr_fn, read_hdr
 import sys
-
 args = sys.argv
 
 fn = args[1]
@@ -43,7 +42,7 @@ print("All lines had " + str(n_field) + " records")
 fields = [f.lower() for f in lines[0]]
 data = lines[1:]
 
-lat_i, lon_i = -1, -1
+lat_i, lon_i, name_i = -1, -1, -1
 for i in range(len(fields)):
     f = fields[i]
     if len(f.split('lat')) > 1:
@@ -52,8 +51,12 @@ for i in range(len(fields)):
     if len(f.split('lon')) > 1:
         if lon_i != -1: err("more than one field matched lon")
         else: lon_i = i    
-    
+    if len(f.split('name')) > 1:
+        if name_i != -1: err("more than one field matched name")
+        else: name_i = i
 
+f = open(tgt_f, "wb")    
+f.write("feature_id,row,lin,xoff,yoff".encode())
 for line in data:
     lat, lon = line[lat_i], line[lon_i]
     
@@ -61,3 +64,6 @@ for line in data:
 
     print(lat, lon, row, col)
     print(dat)
+
+    f.write(("\n" + ','.join([line[name_i], str(col), str(row), str(0), str(0) ]))
+f.close()
