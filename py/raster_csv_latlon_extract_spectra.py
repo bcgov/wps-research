@@ -14,8 +14,8 @@ fn = args[1]
 csv_f = args[2]
 tgt_f = args[1] + "_targets.csv" 
 
-if exists(tgt_f):
-    err("target file already exists")
+#if exists(tgt_f):
+#    err("target file already exists")
 if not exists(fn):
     err("please check input file:" + fn)
 if not exists(csv_f):
@@ -26,7 +26,7 @@ if csv_f.split('.')[-1] != 'csv':
     err(".csv extension expected for " + csv_f)
 
 ncol, nrow, nband = read_hdr(hdr_fn(fn))
-print([ncol, nrow, nband])
+# print([ncol, nrow, nband])
 bn = band_names(hdr_fn(fn))
 
 lines = open(csv_f).readlines()
@@ -39,11 +39,13 @@ for line in lines:
     if n_field:
         if n_field != len(line):
             err("found line with " + str(len(line)) + " fields, expected: " + str(n_field))
-print("All lines had " + str(n_field) + " records")
+# print("All lines had " + str(n_field) + " records")
 
 fields = [f.lower() for f in lines[0]]
 data = lines[1:]
 
+all_fields = fields + ['lat', 'lon', 'row', 'col', 'image_fn'] + [' '.join(x.split()[2:]) for x in bn]
+print(','.join(all_fields))
 lat_i, lon_i, name_i = -1, -1, -1
 for i in range(len(fields)):
     f = fields[i]
@@ -64,10 +66,7 @@ for line in data:
     
     row, col, dat = xy_to_pix_lin(fn, lon, lat, int(nband))
 
-    print(lat, lon, row, col)
-    print(dat)
+    print(','.join([str(x) for x in (line + [lat, lon, row, col, fn] + dat)]))
 
     f.write(("\n" + ','.join([line[name_i], str(col), str(row), str(0), str(0) ])).encode())
 f.close()
-
-print("band names", bn)

@@ -334,7 +334,7 @@ def xy_to_pix_lin(fn, x, y, nb):  # raster fn, lat/lon, number of bands (assume 
            str(x), # lat
            str(y)] # long
     cmd = ' '.join(cmd)
-    print(cmd)
+    #print(cmd)
     lines = [x.strip() for x in os.popen(cmd).readlines()]
     count = 0
     if len(lines) >= 2 * (1 + nb):
@@ -346,7 +346,7 @@ def xy_to_pix_lin(fn, x, y, nb):  # raster fn, lat/lon, number of bands (assume 
             err('unexpected data')
 
         pix_i, lin_i = int(pix_i[:-1]), int(lin_i[:-1])
-        print(str(pix_i) + 'P ' + str( lin_i) + 'L')
+        #print(str(pix_i) + 'P ' + str( lin_i) + 'L')
         count += 1
         data = []
         for j in range(0, nb): # for each band
@@ -355,7 +355,7 @@ def xy_to_pix_lin(fn, x, y, nb):  # raster fn, lat/lon, number of bands (assume 
                 err("expected: Band: " + str(j + 1) + "; found: " + lines[2 * (1 + j)])
             value = float(lines[3 + (2*j)].split()[1].strip())
             data.append(value)
-        print(data)
+        #print(data)
 
         row, col = lin_i, pix_i
         return row, col, data  # return the goods!
