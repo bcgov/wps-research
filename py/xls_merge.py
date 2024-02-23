@@ -1,8 +1,12 @@
-'''20240222 merge sheets from multiple-sheet XLSX file, into csv. Repeat the col names only once at the beginning
-'''
-
+'''20240222 merge sheets from multiple-sheet XLSX file, into csv. Repeat the col names only once at the beginning'''
+from misc import err
 import pandas as pd
-xl_file = pd.ExcelFile("join.xlsx")
+import sys
+args = sys.argv
+
+if len(args) < 2:
+    err('xls_merge.py [.xlsx file with same col names, on top of multiple sheets]')
+xl_file = pd.ExcelFile(args[1])
 
 dfs = [[sheet_name, xl_file.parse(sheet_name)]
           for sheet_name in xl_file.sheet_names]
