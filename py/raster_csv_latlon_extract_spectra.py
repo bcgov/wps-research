@@ -8,7 +8,8 @@ Also create a .tgt file for the image (don't overwrite)'''
 from misc import xy_to_pix_lin, err, exists, hdr_fn, read_hdr, band_names
 import sys
 args = sys.argv
-
+if len(args) < 3:
+    print("raster_csv_latlon_extract_spectra.py [raster_filename] [csv_filename]"); sys.exit(1)
 fn = args[1]
 csv_f = args[2]
 tgt_f = args[1] + "_targets.csv" 
