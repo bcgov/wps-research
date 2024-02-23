@@ -44,7 +44,7 @@ for line in lines:
 fields = [f.lower() for f in lines[0]]
 data = lines[1:]
 
-all_fields = fields + ['lat', 'lon', 'row', 'col', 'image_fn'] + [' '.join(x.split()[2:]) for x in bn]
+all_fields = fields + ['lat', 'lon', 'row', 'col', 'image_fn'] + ['_'.join(x.split()[2:]) for x in bn]
 print(','.join(all_fields))
 lat_i, lon_i, name_i = -1, -1, -1
 for i in range(len(fields)):
