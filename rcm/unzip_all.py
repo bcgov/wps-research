@@ -12,13 +12,15 @@ def parfor(my_function, my_inputs, n_thread=mp.cpu_count()): # eval fxn in paral
 
 files = os.popen('find ./ -name "*.zip"').readlines()
 files = [x.strip() for x in files]
+print(files)
 for f in files:
     print(f)
 
 def unzip(f):
-    dst  = f.strip().split(sep)[:-1]
-    dst = sep.join(dst) + sep
-    os.mkdir(dst)
+    dst  = '.'.join(f.strip().split('.')[:-1])
+    dst = dst + sep
+    if not os.path.exists(dst):
+        os.mkdir(dst)
     cmd = ('unzip -o ' + f + ' -d ' + dst)
     return os.system(cmd)
 
