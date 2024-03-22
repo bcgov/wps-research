@@ -18,6 +18,7 @@ for f in files:
 def unzip(f):
     dst  = f.strip().split(sep)[:-1]
     dst = sep.join(dst) + sep
+    os.mkdir(dst)
     cmd = ('unzip -o ' + f + ' -d ' + dst)
     return os.system(cmd)
 
