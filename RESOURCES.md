@@ -110,9 +110,16 @@
 * [Canada wildfire: Webinars and Training](https://www.canadawildfire.org/webinarsandcourses)
 * [Rob Skakun, National Burned Areas Composite(NBAC) Feb 18 2022](https://www.youtube.com/watch?v=yJX6kpnZEko)
 * [Mike Wotton, Lightning Fire Occurrence Preduction Modelling, July 8 2022](https://www.youtube.com/watch?v=UzwD9EXYS1Y)
+* [U. Toronto: Michael Wotton](https://academic.daniels.utoronto.ca/forestry/wotton-m/)
 * [Prometheus simulation software](http://www.firegrowthmodel.ca/prometheus/overview_e.php)
 * [how does fire think and act: Dana Hicks](https://podcasts.apple.com/ca/podcast/05-how-does-fire-think-and-act-guest-dana-hicks-bcws/)
 * [Drones in wildfire mgmt](https://en.wikipedia.org/wiki/Drones_in_wildfire_management)
+
+## Fire occurrence 
+* [Wotton & Martell, A lightning fire occurrence model for Ontario](https://cdnsciencepub.com/doi/abs/10.1139/x05-071)
+* [Woolford et al, The development and implementation of a human-caused wildland FOP system for Ontario](https://cdnsciencepub.com/doi/full/10.1139/cjfr-2020-0313)
+* [Phelps & Woolford, Comparing calibrated Stat and ML methods for wildland fire occurrence prediction](https://www.publish.csiro.au/wf/wf20139)
+* [Phelps & Woolford, Guidelines for effective evaluation and comparison of wildland FOP models](https://www.publish.csiro.au/WF/WF20134)
 
 ## Weather
 * [https://weather.gc.ca/astro/clds_vis_animation_e.html?id=nw&utc=00](https://weather.gc.ca/astro/clds_vis_animation_e.html?id=nw&utc=00)
