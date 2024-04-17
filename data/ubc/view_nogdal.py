@@ -1,6 +1,6 @@
 ''' 20231230 view.py e.g. Usage:
-      python3 view.py G80223_20230513.bin
-      python3 view.py G90292_20230514.bin
+      python3 view_nogdal.py G80223_20230513.bin
+      python3 view_nogdal.py G90292_20230514.bin
 '''
 import os
 import sys
