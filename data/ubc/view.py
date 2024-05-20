@@ -21,7 +21,7 @@ def scale(X):
     X[X > 1.] = 1.
 
     # use histogram trimming / turn it off to see what this step does!
-    if True:
+    if  True:
         values = X.ravel().tolist()
         values.sort()
         n_pct = 1. # percent for stretch value
@@ -33,10 +33,8 @@ def scale(X):
 
     return X
 
-# Check if the dataset was successfully opened
-if not dataset:
-    print(f"Failed to open the TIF file: {tif_file_path}")
-else:
+
+def plot(dataset):
     # image dimensions
     width = int(dataset.RasterXSize)
     height = int(dataset.RasterYSize)
@@ -69,4 +67,16 @@ else:
     plt.tight_layout()
     plt.show()
 
+
+
+
+if __name__ == '__main__':
+    tif_file_path = sys.argv[1] # "path/to/your/file.tif"
+    dataset = gdal.Open(tif_file_path)
+
+    # Check if the dataset was successfully opened
+    if not dataset:
+        print(f"Failed to open the TIF file: {tif_file_path}")
+    else:  
+        plot(dataset)
 
