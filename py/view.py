@@ -33,6 +33,9 @@ def scale(X):
 
 
 def plot(dataset):
+    if type(dataset) == str:
+        dataset = gdal.Open(dataset)
+
     # image dimensions
     width = int(dataset.RasterXSize)
     height = int(dataset.RasterYSize)
