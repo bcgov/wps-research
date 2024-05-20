@@ -8,8 +8,6 @@ import numpy as np
 from osgeo import gdal
 import matplotlib.pyplot as plt
 
-tif_file_path = sys.argv[1] # "path/to/your/file.tif"
-dataset = gdal.Open(tif_file_path)
 
 def scale(X):
     # default: scale a band to [0, 1]  and then clip
@@ -66,8 +64,6 @@ def plot(dataset):
     plt.axis('off')  # Turn off axis labels
     plt.tight_layout()
     plt.show()
-
-
 
 
 if __name__ == '__main__':
