@@ -19,7 +19,7 @@ def scale(X, use_histogram_trimming=True):
     X[X > 1.] = 1.
 
     # use histogram trimming / turn it off to see what this step does!
-    if use_histogram_trimming::
+    if use_histogram_trimming:
         values = X.ravel().tolist()
         values.sort()
         n_pct = 1. # percent for stretch value
