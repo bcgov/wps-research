@@ -9,7 +9,7 @@ from osgeo import gdal
 import matplotlib.pyplot as plt
 
 
-def scale(X):
+def scale(X, use_histogram_trimming=True):
     # default: scale a band to [0, 1]  and then clip
     mymin = np.nanmin(X) # np.nanmin(X))
     mymax = np.nanmax(X) # np.nanmax(X))
@@ -19,7 +19,7 @@ def scale(X):
     X[X > 1.] = 1.
 
     # use histogram trimming / turn it off to see what this step does!
-    if  True:
+    if use_histogram_trimming::
         values = X.ravel().tolist()
         values.sort()
         n_pct = 1. # percent for stretch value
@@ -32,7 +32,7 @@ def scale(X):
     return X
 
 
-def plot(dataset):
+def plot(dataset, use_histogram_trimming=True):
     if type(dataset) == str:
         dataset = gdal.Open(dataset)
 
@@ -43,9 +43,9 @@ def plot(dataset):
     rgb = np.zeros((height, width, 3))
 
     # Read the data from the raster bands (assuming RGB bands are 1, 2, and 3)
-    rgb[:, :, 2] = scale(dataset.GetRasterBand(1).ReadAsArray().reshape((height, width)))
-    rgb[:, :, 1] = scale(dataset.GetRasterBand(2).ReadAsArray().reshape((height, width)))
-    rgb[:, :, 0] = scale(dataset.GetRasterBand(3).ReadAsArray().reshape((height, width)))
+    rgb[:, :, 2] = scale(dataset.GetRasterBand(1).ReadAsArray().reshape((height, width)), use_histogram_trimming)
+    rgb[:, :, 1] = scale(dataset.GetRasterBand(2).ReadAsArray().reshape((height, width)), use_histogram_trimming)
+    rgb[:, :, 0] = scale(dataset.GetRasterBand(3).ReadAsArray().reshape((height, width)), use_histogram_trimming)
     ''' A data cube indexed by row, column and band index (band index is in 1,2,3 rather: 0,1,2 from 0) 
 
     0,1,2 are not actually red, green blue. They are B12, B11, B9 from Sentinel-2:
