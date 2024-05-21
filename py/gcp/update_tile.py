@@ -5,7 +5,7 @@
 
 And download from Google Cloud Platform (GCP).
 
-The "gcp rsync" command is helpful for avoiding re-downloading the same data
+The "gsutil rsync" command is helpful for avoiding re-downloading the same data
     https://cloud.google.com/storage/docs/gsutil/commands/rsync
 
 (*) need concurrency mechanism so we can download on multiple
