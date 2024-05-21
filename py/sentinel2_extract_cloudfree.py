@@ -7,7 +7,7 @@ import numpy as np
 import sys
 import os
 
-def extract(file_name):
+def extract_cloudfree(file_name):
     w = file_name.split('_')  # split filename on '_'
     ds = w[2].split('T')[0]  # date string
     stack_fn = file_name[:-4] + '.bin' # output stack filename
@@ -175,13 +175,13 @@ if __name__ == "__main__":
             err('could not open input file: ' + d)
         if not file_name[-4:] == '.zip':
             err('zip expected')
-        extract(file_name)
+        extract_cloudfree(file_name)
 
     else:
         files = [x.strip() for x in os.popen("ls -1 S*MSIL2A*.zip").readlines()]
         files += [x.strip() for x in os.popen("ls -1 S*MSIL1C*.zip").readlines()]
 
-        parfor(extract, files, 1) # int(mp.cpu_count()))
+        parfor(extract_cloudfree, files, 1) # int(mp.cpu_count()))
 
 
 
