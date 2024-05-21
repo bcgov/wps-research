@@ -1,4 +1,9 @@
-'''20230605 sentinel2_extract_swir.py'''
+'''20230605 modified from sentinel2_extract_swir.py
+
+This script takes sentinel-2 .zip files as input.
+
+.bin files are produced "as usual", with the exception that NAN is included for "undesirable" data areas, according to the Sentinel-2 (level-2) class map. 
+'''
 from misc import err, args, exist, run, parfor
 from envi import envi_header_cleanup
 import multiprocessing as mp
