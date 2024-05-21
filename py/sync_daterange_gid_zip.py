@@ -64,6 +64,13 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2):
             f = w[-1]
             fw = f.split('_')
             gid = fw[5][1:]  # e.g. T10UGU
+
+            out_dir = "L2_" + gid
+            if not os.path.exists(out_dir):
+                os.mkdir(out_dir)
+
+            f = out_dir + os.path.sep + f 
+
             ts = fw[2].split('T')[0]  # e.g. 20230525
             if fw[1] != data_type or ts not in date_range:  # wrong product or outside date range
                 continue
@@ -88,6 +95,10 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2):
         print([c])
         return os.system(c)
     parfor(runc, cmds, int(mp.cpu_count()))  
+
+    ungrouped = os.popen('ls S2*MSIL2A*.zip').readlines()
+    for line in ungrouped:
+        print(line.strip())
 
 gids = []  # get gids from command line
 if len(args) > 3:
