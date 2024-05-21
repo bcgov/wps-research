@@ -1,27 +1,7 @@
 '''20230627: sync a date range for selected GID, in Level-2 to zip file format.
 
-20230627: sync a date range for selected GID
-
-Instructions: run from path on SSD,
-     with "/ram" device enabled using   
-        python3 py/ramdisk.py 
-
-20230605 need to revise away from the batch/cycling op
-20230604 added looping
-20230526 download data for each 5-char "UTM tiling-grid ID":
-        https://eatlas.org.au/data/uuid/f7468d15-12be-4e3f-a246-b2882a324f59
-specified, 
-for specified date: yyyymmdd only
-
-python3 sync_date_gid_ramdisk.py [date: yyyymmdd] e.g.
-python3 sync_date_gid_ramdisk.py 20230525  # download all data over BC for 20230525
-python3 sync_date_gid_ramdisk.py 20230525 all # download all data from national mirror 
-
-e.g. for NTFS001:
-    python3 ~/GitHub/s2-fire-mapping/sync_date_gid.py 20230530 10VEM 10VFM 
-
-e.g. for NTSSO08:
-    python3 ~/GitHub/s2-fire-mapping/sync_date_gid.py 20230530 11VLG 11VLH 11VMH 11VMG'''
+python3 sync_daterange_gid_zip.py [yyyymmdd] [yyyymmdd2] # optional: list of GID 
+'''
 use_L2 = True
 data_type = 'MSIL2A'
 if not use_L2:
