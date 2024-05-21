@@ -37,7 +37,24 @@ import os
 my_path = sep.join(os.path.abspath(__file__).split(sep)[:-1]) + sep
 product_target = os.getcwd() + sep # put ARD products into present folder
 
-def download_by_gids(gids, date_range):
+def download_by_gids(gids, yyyymmdd, yyyymmdd2):
+    if len(yyyymmdd) != 8 or len(yyyymmdd2) != 8:
+        err('expected date in format yyyymmdd')
+    start_d = datetime.datetime(int(yyyymmdd[0:4]),
+                                int(yyyymmdd[4:6]),
+                                int(yyyymmdd[6:8]))
+    end_d = datetime.datetime(int(yyyymmdd2[0:4]),
+                              int(yyyymmdd2[4:6]),
+                              int(yyyymmdd2[6:8]))
+    print("start", start_d, "end", end_d)
+    date_range = []
+    while start_d <= end_d:
+        print(start_d)
+        start_d += datetime.timedelta(days=1)
+        date_range += [str(start_d.year).zfill(4) + str(start_d.month).zfill(2) + str(start_d.day).zfill(2)]
+
+    print(date_range)
+
     ts = timestamp()
     cmd = ' '.join(['aws',  # read data from aws
                     's3api',
@@ -105,33 +122,7 @@ else:
         gids = None
         print('pulling Canada data..')
 
-yyyymmdd, yyyymmdd2 = args[1], args[2]
-if len(yyyymmdd) != 8 or len(yyyymmdd2) != 8:
-    err('expected date in format yyyymmdd')
 
-
-start_d = datetime.datetime(int(yyyymmdd[0:4]),
-                            int(yyyymmdd[4:6]),
-                            int(yyyymmdd[6:8]))
-
-end_d = datetime.datetime(int(yyyymmdd2[0:4]),
-                            int(yyyymmdd2[4:6]),
-                            int(yyyymmdd2[6:8]))
-
-print("start", start_d, "end", end_d)
-
-date_range = []
-while start_d <= end_d:
-    print(start_d)
-    start_d += datetime.timedelta(days=1)
-    date_range += [str(start_d.year).zfill(4) + str(start_d.month).zfill(2) + str(start_d.day).zfill(2)]
-
-print(date_range)
-   
-
-while(True):  # make it go. Need to add termination when completed.
-    download_by_gids(gids, date_range)
-    # print('waiting 1 min..')
-    # time.sleep(60)
-    break
-print('done')
+if __name__ == "__main__":
+    yyyymmdd, yyyymmdd2 = args[1], args[2]
+    download_by_gids(gids, yyyymmdd, yyyymmdd2)
