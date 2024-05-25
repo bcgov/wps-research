@@ -43,9 +43,8 @@ def plot(dataset, use_histogram_trimming=True):
     rgb = np.zeros((height, width, 3))
 
     # Read the data from the raster bands (assuming RGB bands are 1, 2, and 3)
-    rgb[:, :, 2] = scale(dataset.GetRasterBand(1).ReadAsArray().reshape((height, width)), use_histogram_trimming)
-    rgb[:, :, 1] = scale(dataset.GetRasterBand(2).ReadAsArray().reshape((height, width)), use_histogram_trimming)
-    rgb[:, :, 0] = scale(dataset.GetRasterBand(3).ReadAsArray().reshape((height, width)), use_histogram_trimming)
+    for i in range(3):
+        rgb[:, :, i] = scale(dataset.GetRasterBand(i+1).ReadAsArray().reshape((height, width)), use_histogram_trimming)
     ''' A data cube indexed by row, column and band index (band index is in 1,2,3 rather: 0,1,2 from 0) 
 
     0,1,2 are not actually red, green blue. They are B12, B11, B9 from Sentinel-2:
