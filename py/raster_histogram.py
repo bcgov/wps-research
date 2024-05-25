@@ -15,11 +15,8 @@ def raster_histogram(input_file, band_select = [0, 1, 2]):
     assert_exists(input_file)  # check file exists
     hdr = hdr_fn(input_file)  # locate header file
     skip_plot = False
-    samples, lines, bands = read_hdr(hdr)  # read header and print parameters
-    for f in ['samples', 'lines', 'bands']:
-        exec('print("' + f + ' =" + str(' +  f + '))')
-        exec(f + ' = int(' + f + ')')
-
+    [samples, lines, bands] = [int(x) for x in read_hdr(hdr)]  # read header and print parameters
+    
     npx = lines * samples # number of pixels.. binary IEEE 32-bit float data
     data = read_float(input_file).reshape((bands, npx))
     print("bytes read: " + str(data.size))
@@ -79,7 +76,6 @@ if __name__ == "__main__":
     
     fn, hdr = sys.argv[1], hdr_fn(sys.argv[1])  # check header exists
 
-    band_select = [int(x)
-                   for x in [(sys.argv[2], sys.argv[3], sys.argv[4]]]
+    band_select = [int(x) for x in [sys.argv[2], sys.argv[3], sys.argv[4]]]
     # make it go
     raster_histogram(fn, band_select)
