@@ -63,7 +63,7 @@ def plot(dataset, use_histogram_trimming=True):
     # Plot the RGB image using Matplotlib
     plt.figure()
     plt.imshow(rgb)
-    plt.title(sys.argv[1] + " with encoding R,G,B =(B12, B11, B9)")
+    plt.title("R,G,B =(B12, B11, B9) for " + sys.argv[1])
     plt.axis('off')  # Turn off axis labels
     plt.tight_layout()
     plt.show()

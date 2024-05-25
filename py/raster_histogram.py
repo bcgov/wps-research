@@ -5,7 +5,12 @@ If we are dealing with RGB or 3-channel representations, we could select
 three bands only in which case histograms are plotted for these three
 bands only (red, green, blue respectively)
 
-20221105 update: add NAN resiliency (i.e. skip NAN valued pixels in stats) '''
+20221105 update: add NAN resiliency (i.e. skip NAN valued pixels in stats)
+
+
+demo of some related features:
+    python3 raster_histogram.py ../data/ubc/G90292_20230514.bin 0 1 2
+'''
 from misc import *
 import matplotlib
 args = sys.argv
@@ -42,6 +47,7 @@ def raster_histogram(input_file, band_select = [0, 1, 2]):
     M = len(dat[0])
     
     plt.figure()
+    plt.title('r,g,b histograms for ' + input_file)
     col = ['r', 'g', 'b']
     for i in range(N):
         plt.hist(dat[i],
@@ -85,7 +91,9 @@ def raster_transect(input_file, band_select = [0, 1, 2], row_index= None, histog
 
     print(dat[0].shape)
 
+    # plot transect components in rgb
     plt.figure()
+    plt.title(input_file + ' transect rgb line=' + str(row_index))
     col = ['r', 'g', 'b']
     for i in range(N):
         plt.plot(range(samples),
@@ -98,12 +106,13 @@ def raster_transect(input_file, band_select = [0, 1, 2], row_index= None, histog
     plt.show()
 
 
+    # plot transect as image
     rgb = np.zeros((1, samples, 3))
     for i in range(N):
         rgb[0,:,i] = dat[i][samples * row_index: samples * (row_index + 1)]    
     
     plt.figure()
-    plt.title('transect')
+    plt.title(input_file + ' transect line=' + str(row_index))
     plt.imshow(rgb, aspect='auto')
     plt.show()
 
