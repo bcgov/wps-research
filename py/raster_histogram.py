@@ -56,7 +56,10 @@ def raster_histogram(input_file, band_select = [0, 1, 2]):
     plt.show()
 
 
-def raster_transect(input_file, band_select = [0, 1, 2], row_index= None):
+def raster_transect(input_file, band_select = [0, 1, 2], row_index= None, histogram_scaling = False):
+
+    from view import scale 
+
     assert_exists(input_file)  # check file exists
     hdr = hdr_fn(input_file)  # locate header file
     skip_plot = False
@@ -64,7 +67,7 @@ def raster_transect(input_file, band_select = [0, 1, 2], row_index= None):
     print(samples, lines, bands)
 
     npx = lines * samples # number of pixels.. binary IEEE 32-bit float data
-    data = read_float(input_file).reshape((bands, npx))
+    data = read_float(input_file) # .reshape((bands, npx))
     # print("bytes read: " + str(data.size))
 
     bn = None
@@ -75,7 +78,11 @@ def raster_transect(input_file, band_select = [0, 1, 2], row_index= None):
 
     N = len(band_select)
     rng = range(N)
-    dat = [data[band_select[i],] for i in rng]
+    dat = [ data[npx * i: npx *(i+1)] for i in rng]
+
+    if histogram_scaling:
+        for i in range(bands):
+            dat[i] = scale(np.array(dat[i]), True)
 
     print(dat[0].shape)
 
@@ -106,3 +113,5 @@ if __name__ == "__main__":
     band_select = [int(x) for x in [sys.argv[2], sys.argv[3], sys.argv[4]]]
     # make it go
     raster_histogram(fn, band_select)
+
+    raster_transect(fn, band_select, int(int(sys.argv[3])/2), True)
