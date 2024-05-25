@@ -20,7 +20,6 @@ def raster_histogram(input_file, band_select = [0, 1, 2]):
     
     npx = lines * samples # number of pixels.. binary IEEE 32-bit float data
     data = read_float(input_file).reshape((bands, npx))
-    # print("bytes read: " + str(data.size))
 
     bn = None
     try:
@@ -99,6 +98,15 @@ def raster_transect(input_file, band_select = [0, 1, 2], row_index= None, histog
     plt.show()
 
 
+    rgb = np.zeros((1, samples, 3))
+    for i in range(N):
+        rgb[0,:,i] = dat[i][samples * row_index: samples * (row_index + 1)]    
+    
+    plt.figure()
+    plt.title('transect')
+    plt.imshow(rgb, aspect='auto')
+    plt.show()
+
 
 
 if __name__ == "__main__":
@@ -114,4 +122,7 @@ if __name__ == "__main__":
     # make it go
     raster_histogram(fn, band_select)
 
-    raster_transect(fn, band_select, int(int(sys.argv[3])/2), True)
+    from view import plot
+    plot(fn, True) 
+
+    raster_transect(fn, band_select, 200, True) #@ int(int(sys.argv[3])/2), True)
