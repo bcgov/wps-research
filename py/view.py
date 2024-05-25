@@ -9,14 +9,11 @@ from osgeo import gdal
 import matplotlib.pyplot as plt
 
 
-def scale(X, use_histogram_trimming=True):
+def scale(X, use_histogram_trimming=True, use_clip=False):
     # default: scale a band to [0, 1]  and then clip
     mymin = np.nanmin(X) # np.nanmin(X))
     mymax = np.nanmax(X) # np.nanmax(X))
     X = (X-mymin) / (mymax - mymin)  # perform the linear transformation
-
-    X[X < 0.] = 0.  # clip
-    X[X > 1.] = 1.
 
     # use histogram trimming / turn it off to see what this step does!
     if use_histogram_trimming:
@@ -28,6 +25,11 @@ def scale(X, use_histogram_trimming=True):
         upper = int(math.floor(float(len(values))*(1. - frac)))
         mymin, mymax = values[lower], values[upper]
         X = (X-mymin) / (mymax - mymin)  # perform the linear transformation
+
+
+    if use_clip:
+        X[X < 0.] = 0.  # clip
+        X[X > 1.] = 1.
 
     return X
 
