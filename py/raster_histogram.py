@@ -59,9 +59,10 @@ def raster_histogram(input_file, band_select = [0, 1, 2]):
     M = len(dat[0])
     
     plt.figure()
+    col = ['r', 'g', 'b']
     for i in range(N):
         di = dat[i]
-        plt.hist(di, range=[my_min, my_max], bins=n_bins, histtype='step', label=bn[band_select[i]])
+        plt.hist(di, range=[my_min, my_max], bins=n_bins, histtype='step', label=bn[band_select[i]], color=col[i])
     plt.tight_layout()
     plt.legend()
     plt.show()
