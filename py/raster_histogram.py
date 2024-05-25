@@ -19,7 +19,7 @@ def raster_histogram(input_file, band_select = [0, 1, 2]):
     
     npx = lines * samples # number of pixels.. binary IEEE 32-bit float data
     data = read_float(input_file).reshape((bands, npx))
-    print("bytes read: " + str(data.size))
+    # print("bytes read: " + str(data.size))
 
     bn = None
     try:
@@ -46,16 +46,16 @@ def raster_histogram(input_file, band_select = [0, 1, 2]):
     dat = [data[band_select[i],] for i in rng]
     my_min = [np.nanmin(dat[i]) for i in rng]
     my_max = [np.nanmax(dat[i]) for i in rng]
-    print("min", my_min)
-    print("max", my_max)
+    # print("min", my_min)
+    # print("max", my_max)
     my_min = np.nanmin(my_min)
     my_max = np.nanmax(my_max)
-    print("min", my_min, "max", my_max)
+    # print("min", my_min, "max", my_max)
     bs = (my_max - my_min) / n_bins
     bins = [my_min + float(i + 1) *bs for i in range(n_bins)]
-    print(bins)
-    print("max/bs", math.floor((my_max - my_min) / bs))
-    print("min/bs", math.floor(((bs * 1.) + my_min - my_min) / bs))
+    # print(bins)
+    # print("max/bs", math.floor((my_max - my_min) / bs))
+    # print("min/bs", math.floor(((bs * 1.) + my_min - my_min) / bs))
     M = len(dat[0])
     
     plt.figure()
