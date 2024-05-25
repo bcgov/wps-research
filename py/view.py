@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 
 
 def scale(X, use_histogram_trimming=True, use_clip=False):
-    # default: scale a band to [0, 1]  and then clip
+    # default: scale a band to [0, 1]
     mymin = np.nanmin(X) # np.nanmin(X))
     mymax = np.nanmax(X) # np.nanmax(X))
     X = (X-mymin) / (mymax - mymin)  # perform the linear transformation
@@ -25,7 +25,6 @@ def scale(X, use_histogram_trimming=True, use_clip=False):
         upper = int(math.floor(float(len(values))*(1. - frac)))
         mymin, mymax = values[lower], values[upper]
         X = (X-mymin) / (mymax - mymin)  # perform the linear transformation
-
 
     if use_clip:
         X[X < 0.] = 0.  # clip
