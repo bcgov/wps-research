@@ -56,8 +56,9 @@ def raster_histogram(input_file, band_select = [0, 1, 2]):
                  histtype='step',
                  label=bn[band_select[i]],
                  color=(col[i] if i < 3 else None))
-    plt.tight_layout()
     plt.legend()
+    plt.tight_layout()
+    print('figsize', plt.rcParams["figure.figsize"])
     plt.show()
 
 
@@ -100,9 +101,9 @@ def raster_transect(input_file, band_select = [0, 1, 2], row_index= None, histog
                  dat[i][samples * row_index: samples * (row_index + 1)],
                  label = bn[band_select[i]],
                  color = (col[i] if i < 3 else None))
+    plt.legend()
     plt.tight_layout()
-    plt.legend()
-    plt.legend()
+    print('figsize', plt.rcParams["figure.figsize"])
     plt.show()
 
 
@@ -114,6 +115,8 @@ def raster_transect(input_file, band_select = [0, 1, 2], row_index= None, histog
     plt.figure()
     plt.title(input_file + ' transect line=' + str(row_index))
     plt.imshow(rgb, aspect='auto')
+    plt.tight_layout()
+    print('figsize', plt.rcParams["figure.figsize"])
     plt.show()
 
 
@@ -132,6 +135,6 @@ if __name__ == "__main__":
     raster_histogram(fn, band_select)
 
     from view import plot
-    plot(fn, True) 
+    plot(fn, True, 200)
 
     raster_transect(fn, band_select, 200, True) #@ int(int(sys.argv[3])/2), True)
