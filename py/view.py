@@ -9,7 +9,7 @@ from osgeo import gdal
 import matplotlib.pyplot as plt
 
 
-def scale(X, use_histogram_trimming=True, use_clip=False):
+def scale(X, use_histogram_trimming=True, use_clip=False, percent_scale=None):
     # default: scale a band to [0, 1]
     mymin = np.nanmin(X) # np.nanmin(X))
     mymax = np.nanmax(X) # np.nanmax(X))
@@ -20,6 +20,9 @@ def scale(X, use_histogram_trimming=True, use_clip=False):
         values = X.ravel().tolist()
         values.sort()
         n_pct = 1. # percent for stretch value
+
+        if percent_scale is not None:
+            n_pct = float(percent_scale)
         frac = n_pct / 100.
         lower = int(math.floor(float(len(values))*frac))
         upper = int(math.floor(float(len(values))*(1. - frac)))
@@ -33,7 +36,7 @@ def scale(X, use_histogram_trimming=True, use_clip=False):
     return X
 
 
-def plot(dataset, use_histogram_trimming=True):
+def plot(dataset, use_histogram_trimming=True, transect_line_ix=None):
     if type(dataset) == str:
         dataset = gdal.Open(dataset)
 
@@ -61,12 +64,17 @@ def plot(dataset, use_histogram_trimming=True):
     dataset = None
 
     # Plot the RGB image using Matplotlib
-    plt.figure()
-    plt.imshow(rgb)
+    plt.figure(figsize=(7.5, 7.5))
     plt.title("R,G,B =(B12, B11, B9) for " + sys.argv[1])
-    plt.axis('off')  # Turn off axis labels
-    plt.tight_layout()
+    plt.imshow(rgb)
+    if transect_line_ix != None:
+        plt.axhline(y = transect_line_ix, color = 'black', linestyle = '--', linewidth = 4, alpha=.5) 
+        # plt.hlines(transect_line_ix, color='black') 
+    # plt.axis('off')  # Turn off axis labels
+    # plt.tight_layout()
+    print('figsize', plt.rcParams["figure.figsize"])
     plt.show()
+    plt.rcParams["figure.figsize"] = (6.4, 4.8)
 
 
 if __name__ == '__main__':
