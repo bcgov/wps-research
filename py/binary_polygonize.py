@@ -63,16 +63,17 @@ if len(args) > 2:  # 20240509 auto-crop gave us grief in certain cases e.g. runn
     crop = False
 
 # let's crop the result
-run('rm -f ' + args[1] + '*pad*')
-run('rm -f ' + args[1] + '*crop*')
-if not exist(args[1] + '_crop.bin_pad.bin'):
-    run('crop ' + args[1])
-    run('pad ' + args[1] + '_crop.bin 111')
-    run('cp ' + args[1] + '_crop.bin_pad.bin ' + args[1])
-    run('cp ' + args[1] + '_crop.bin_pad.hdr ' + args[1][:-3] + 'hdr')
-run('po sub.bin ' + args[1] + ' sub_project.bin')
-run('mv sub_project.bin sub.bin')
-run('mv sub_project.hdr sub.hdr')
+if crop:
+    run('rm -f ' + args[1] + '*pad*')
+    run('rm -f ' + args[1] + '*crop*')
+    if not exist(args[1] + '_crop.bin_pad.bin'):
+        run('crop ' + args[1])
+        run('pad ' + args[1] + '_crop.bin 111')
+        run('cp ' + args[1] + '_crop.bin_pad.bin ' + args[1])
+        run('cp ' + args[1] + '_crop.bin_pad.hdr ' + args[1][:-3] + 'hdr')
+    run('po sub.bin ' + args[1] + ' sub_project.bin')
+    run('mv sub_project.bin sub.bin')
+    run('mv sub_project.hdr sub.hdr')
 
 
 def create_in_memory_band(data: np.ndarray, cols, rows, projection, geotransform):
