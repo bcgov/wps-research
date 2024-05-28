@@ -9,7 +9,7 @@ from osgeo import gdal
 import matplotlib.pyplot as plt
 
 
-def scale(X, use_histogram_trimming=True, use_clip=False, percent_scale=None):
+def scale(X, use_histogram_trimming=True, use_clip=False, percent_trim_factor=None):
     # default: scale a band to [0, 1]
     mymin = np.nanmin(X) # np.nanmin(X))
     mymax = np.nanmax(X) # np.nanmax(X))
@@ -21,8 +21,8 @@ def scale(X, use_histogram_trimming=True, use_clip=False, percent_scale=None):
         values.sort()
         n_pct = 1. # percent for stretch value
 
-        if percent_scale is not None:
-            n_pct = float(percent_scale)
+        if percent_trim_factor is not None:
+            n_pct = float(percent_trim_factor)
         frac = n_pct / 100.
         lower = int(math.floor(float(len(values))*frac))
         upper = int(math.floor(float(len(values))*(1. - frac)))
@@ -30,8 +30,8 @@ def scale(X, use_histogram_trimming=True, use_clip=False, percent_scale=None):
         X = (X-mymin) / (mymax - mymin)  # perform the linear transformation
 
     if use_clip:
-        X[X < 0.] = 0.  # clip
-        X[X > 1.] = 1.
+        X[X < 0.] = float('nan') # 0.  # clip
+        X[X > 1.] = float('nan') # 1.
 
     return X
 
