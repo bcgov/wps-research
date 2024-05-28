@@ -25,7 +25,6 @@ def extract(file_name):
         
         if i not in my_bands:
             my_bands[i] = array_data
-
         else:
             nans = np.isnan(array_data)
             update = my_bands[i]
@@ -39,22 +38,19 @@ def extract(file_name):
     if my_xsize is None:
         my_xsize, my_ysize, nbands = d.RasterXSize, d.RasterYSize, d.RasterCount 
 
-
     # write output file
     out_file_name = file_name + '_MRAP.bin'
     driver = gdal.GetDriverByName('ENVI')
-    print(out_file_name,
+    print(out_file_name, 
+          my_xsize,
+          my_ysize,
+          nbands,
+          gdal.GDT_Float32)
+    stack_ds = driver.Create(out_file_name,
                              my_xsize,
                              my_ysize,
                              nbands,
                              gdal.GDT_Float32)
-
-    stack_ds = driver.Create(out_file_name, # "mrap_" + args[1] + ".bin",
-                             my_xsize,
-                             my_ysize,
-                             nbands,
-                             gdal.GDT_Float32)
-
     stack_ds.SetProjection(my_proj)
     stack_ds.SetGeoTransform(my_geo)
 
@@ -64,9 +60,7 @@ def extract(file_name):
     stack_ds = None
 
     run('fh ' + out_file_name) # mrap_' + args[1] + '.hdr')
-
     envi_update_band_names(['envi_update_band_names.py', hdr_fn(file_name), hdr_fn(out_file_name)])
-
 
 
 if __name__ == "__main__":
@@ -79,6 +73,6 @@ if __name__ == "__main__":
         lines3 = [[x[2], x] for x in lines2]
         lines3.sort()
         lines = ['_'.join(x[1]) for x in lines3]
-
+        
         for line in lines:
             extract(line)
