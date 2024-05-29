@@ -15,14 +15,14 @@ if len(args) < 3:
             'G90228', 'G90324', 'G90287', 'G90319', 'G90399', 'G90289', 'G90285']
 
 # Path to the input shapefile
-input_shapefile_path = sys.argv[1] # 'path/to/your/input_shapefile.shp'
+input_shapefile_path = args[1] # 'path/to/your/input_shapefile.shp'
 
 # Path to the output shapefile
-output_shapefile_path = sys.argv[1] + '_select.shp' # spath/to/your/output_shapefile.shp'
+output_shapefile_path = args[1] + '_select.shp' # spath/to/your/output_shapefile.shp'
 
 # List of values to match
-attribute_name = sys.argv[2]   #   'your_attribute_name'
-attribute_values = sys.argv[3:] #  ['value1', 'value2', 'value3']  # Example list of values
+attribute_name = args[2]   #   'your_attribute_name'
+attribute_values = args[3:] #  ['value1', 'value2', 'value3']  # Example list of values
 
 # Open the input shapefile
 driver = ogr.GetDriverByName('ESRI Shapefile')
