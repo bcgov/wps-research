@@ -6,7 +6,6 @@ Create a new file limited to features where:
 usage: e.g. 
     python3 shapefile_select.py [input shapefile] [attribute] [value1] [value2] .. [valueN]
 e.g.
-
     python3 shapefile_select.py prot_current_fire_polys.shp FIRE_NUM G90228 G90324 G90287 G90319 G90399 G90289 G90285
 '''
 import os
