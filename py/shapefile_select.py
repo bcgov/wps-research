@@ -11,6 +11,7 @@ args = sys.argv
 
 if len(args) < 3:
     args = ['prot_current_fire_polys.shp',
+            'prot_current_fire_polys.shp',
             'FIRE_NUM',
             'G90228', 'G90324', 'G90287', 'G90319', 'G90399', 'G90289', 'G90285']
 
