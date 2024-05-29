@@ -1,7 +1,10 @@
 ''' 20240529 shapefile_select.py
 
 Create a new file limited to features where:
-    field = "value"
+    field \in {"value1", "value2", ...}
+
+usage: e.g. 
+    python3 shapefile_select.py [input shapefile] [attribute] [value1] [value2] .. [valueN]
 '''
 import os
 import sys
@@ -9,8 +12,8 @@ from osgeo import ogr, osr
 
 args = sys.argv
 
-if len(args) < 3:
-    args = ['prot_current_fire_polys.shp',
+if len(args) < 4:
+    args = [None,
             'prot_current_fire_polys.shp',
             'FIRE_NUM',
             'G90228', 'G90324', 'G90287', 'G90319', 'G90399', 'G90289', 'G90285']
