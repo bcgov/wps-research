@@ -31,7 +31,8 @@ def extract(file_name):
             nans, update = np.isnan(new_data), copy.deepcopy(my_bands[i])  # forgot copy before?
             update[~nans] = new_data[~nans]
             my_bands[i] = update
-   
+            # my_bands[i][~nans] = new_data[~nans]
+
     my_proj = d.GetProjection() if my_proj == None else my_proj
     my_geo = d.GetGeoTransform() if my_geo is None else my_geo
     if my_xsize is None:
@@ -61,7 +62,7 @@ if __name__ == "__main__":
         err("python3 sentinel2_mrap.py [sentinel-2 gid] # [optional: yyyymmdd 'maxdate' parameter] ")
     else:
         gid = args[1]
-        lines = [x.strip() for x in os.popen("ls -1r S2*.bin").readlines()]  # sort dates in time
+        lines = [x.strip() for x in os.popen("ls -1r L2_" + gid + os.path.sep + "S2*.bin").readlines()]  # sort dates in time
         lines = [x.split('_') for x in lines]
         lines = [[x[2], x] for x in lines]
         lines.sort()
