@@ -128,9 +128,12 @@ line_idx_match = []  # records matching our criteria
 cloud_covers = [x.strip() for x in open(ip + 'index.csv:CLOUD_COVER').readlines()]
 for i in range(len(line_idx)):
     j = line_idx[i]
-    cloud_cover = float(cloud_covers[j]) # print(j, cloud_cover, product_id[j])
-    if cloud_cover <= MAX_CLOUD:
-        line_idx_match.append(j) # print('\t', j, cloud_cover, product_id[j])
+    if MAX_CLOUD == 100.:
+        line_idx.match += [j]
+    else:
+        cloud_cover = float(cloud_covers[j]) # print(j, cloud_cover, product_id[j])
+        if cloud_cover <= MAX_CLOUD:
+            line_idx_match.append(j) # print('\t', j, cloud_cover, product_id[j])
 
 for i in range(len(line_idx_match)):
     j = line_idx_match[i]  #print(j, cloud_covers[j], product_id[j])
