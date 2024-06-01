@@ -6,7 +6,7 @@ can't process in parallel (By tile, at least)
 NOTE: assumes sentinel2_extract_cloudfree.py has been run.'''
 from envi import envi_update_band_names
 from envi import envi_header_cleanup
-from misc import args, run, hdr_fn
+from misc import args, run, hdr_fn, err
 import multiprocessing as mp
 from osgeo import gdal
 import numpy as np
@@ -62,11 +62,16 @@ if __name__ == "__main__":
         err("python3 sentinel2_mrap.py [sentinel-2 gid] # [optional: yyyymmdd 'maxdate' parameter] ")
     else:
         gid = args[1]
-        lines = [x.strip() for x in os.popen("ls -1r L2_" + gid + os.path.sep + "S2*.bin").readlines()]  # sort dates in time
-        lines = [x.split('_') for x in lines]
+        lines = [x.strip() for x in os.popen("ls -1r L2_" + gid + os.path.sep + "S2*.bin").readlines()]         # sort dates in time
+        lines = [x.split(os.path.sep)[-1].split('_') for x in lines]
         lines = [[x[2], x] for x in lines]
         lines.sort()
         lines = ['_'.join(x[1]) for x in lines]
         
         for line in lines:
-            extract(line)
+            gid = line.split("_")[5]
+            extract("L2_" +  gid + os.path.sep + line)
+
+        print("check sorting order")
+        for line in lines:
+            print("mrap " + line)
