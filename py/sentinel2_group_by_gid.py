@@ -6,7 +6,7 @@ import os
 
 lines = [x.strip() for x in os.popen("ls -1 S2*MSIL2A*.*").readlines()]
 for line in lines:
-    d = "L2_" + line.split("_")[4]
+    d = "L2_" + line.split("_")[5]
     if not exists(d):
         os.mkdir(d)
     run('mv -v ' + line + ' ' + d)
@@ -14,7 +14,7 @@ for line in lines:
 
 lines = [x.strip() for x in os.popen("ls -1 S2*MSIL1C*.*").readlines()]
 for line in lines:
-    d = "L1_" + line.split("_")[4]
+    d = "L1_" + line.split("_")[5]
     if not exists(d):
         os.mkdir(d)
     run('mv -v ' + line + ' ' + d)
