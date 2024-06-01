@@ -15,8 +15,11 @@ import os
 def extract_cloudfree(file_name):
     w = file_name.split('_')  # split filename on '_'
     ds = w[2].split('T')[0]  # date string
-    stack_fn = file_name[:-4] + '.bin' # output stack filename
-    
+    stack_fn = '.'.join(file_name.split('.')[:-1]) + '.bin' # output stack filename
+
+    if file_name.split('.')[-1] == 'SAFE':
+        file_name = file_name + os.path.sep + 'MTD_MSIL2A.xml'   
+
     if exist(stack_fn):
         print("Exists:", stack_fn, "skipping..")
         return
@@ -161,7 +164,7 @@ def extract_cloudfree(file_name):
         bi += 1
     
     stack_ds = None
-    hdr_f =  file_name[:-4] + '.hdr'
+    hdr_f =  stack_fn[:-4] + '.hdr'
     envi_header_cleanup([None, hdr_f])
     xml_f = stack_fn + '.aux.xml'
     hdr_b = hdr_f + '.bak'
@@ -184,11 +187,9 @@ if __name__ == "__main__":
 
     else:
         files = [x.strip() for x in os.popen("ls -1 S*MSIL2A*.zip").readlines()]
-        files += [x.strip() for x in os.popen("ls -1 S*MSIL1C*.zip").readlines()]
+        files += [x.strip() for x in os.popen("ls -1d S2*MSIL2A*.SAFE").readlines()]
 
-        parfor(extract_cloudfree, files, 1) # int(mp.cpu_count()))
-
-
+        parfor(extract_cloudfree, files, 2) # int(mp.cpu_count()))
 
 '''
 Table 3: SCL bit values
