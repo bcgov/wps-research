@@ -94,7 +94,7 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2):
     def runc(c):
         print([c])
         return os.system(c)
-    parfor(runc, cmds, int(mp.cpu_count()))  
+    parfor(runc, cmds, 2 * int(mp.cpu_count()))  
 
 gids = []  # get gids from command line
 if len(args) > 3:
