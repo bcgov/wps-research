@@ -11,7 +11,7 @@ e.g.
 import os
 import sys
 args = sys.argv
-from misc import err
+from misc import err, exist, assert_exists
 from osgeo import ogr, osr
 
 if len(args) < 4:
@@ -21,12 +21,21 @@ if len(args) < 4:
             'G90228', 'G90324', 'G90287', 'G90319', 'G90399', 'G90289', 'G90285']
 
 input_shapefile_path = args[1]
-output_shapefile_path = args[1] + '_select.shp'
+output_shapefile_path = ('.'.join(args[1].split('.')[:-1])) + '_select.shp'
+
+assert_exists(input_shapefile_path)
+print('+r', input_shapefile_path)
+print('+w', output_shapefile_path)
 
 attribute_name = args[2]   # attribute / column name to match
 attribute_values = args[3:] # list of values to match
+print('attribute_name', attribute_name)
+print('attribute_values', attribute_values)
 
 driver = ogr.GetDriverByName('ESRI Shapefile')  # input shapefile
+if not driver:
+    err('failed to get Shapefile driver')
+
 datasource = driver.Open(input_shapefile_path, 0)  # 0 means read-only, 1 means write
 
 if not datasource:
@@ -37,10 +46,15 @@ formatted_values = ", ".join(f"'{value}'" for value in attribute_values)
 filter_expression = f"{attribute_name} IN ({formatted_values})"
 input_layer.SetAttributeFilter(filter_expression) # set attr filter
 
-if os.path.exists(output_shapefile_path):  # output shapefile
+if exist(output_shapefile_path):  # output shapefile
+    print('rm ' + output_shapefile_path)
     driver.DeleteDataSource(output_shapefile_path)
 
-output_datasource = driver.CreateDataSource(output_shapefile_path)
+# driver = ogr.GetDriverByName('ESRI Shapefile')
+# if not driver:
+#     err('failed to get shapefile driver')
+
+output_datasource = driver.CreateDataSource(output_shapefile_path) # driver.Open(output_shapefile_path, 1) 
 if not output_datasource:
     err(f"Could not create {output_shapefile_path}")
 
