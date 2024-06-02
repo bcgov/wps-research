@@ -79,6 +79,7 @@ def run_mrap(gid):  # run MRAP on one tile
 
 if __name__ == "__main__":
     if len(args) < 2:
+        gids = []
         dirs = [x.strip() for x in os.popen('ls -1d L2_*').readlines()]
         for d in dirs:
             print(d)
@@ -87,8 +88,12 @@ if __name__ == "__main__":
                 err('unexpected folder name')
 
             gid = w[1]
+            gids += [gid]
             # should run on this frame here. 
             # but check for cloud-free data first
-        err("python3 sentinel2_mrap.py [sentinel-2 gid] # [optional: yyyymmdd 'maxdate' parameter] ")
+        # err("python3 sentinel2_mrap.py [sentinel-2 gid] # [optional: yyyymmdd 'maxdate' parameter] ")
+        def f(fn):
+            run_mrap(fn)
+        parfor(f, gids, int(mp.cpu_count()))
     else:
         run_mrap(args[1])  # single tile mode: no mosaicing
