@@ -59,6 +59,9 @@ def extract(file_name):
 
 if __name__ == "__main__":
     if len(args) < 2:
+        dirs = [x.strip() for x in os.popen('ls -1d L2_*').readlines()]
+        for d in dirs:
+            print(d)
         err("python3 sentinel2_mrap.py [sentinel-2 gid] # [optional: yyyymmdd 'maxdate' parameter] ")
     else:
         gid = args[1]
