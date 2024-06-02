@@ -128,7 +128,10 @@ def extract_cloudfree(file_name):
 
     # calculate the valid areas:
     scl_d = arrays[cl_i]
-    bad_data = np.where((scl_d <= 3) | (scl_d == 8) | (scl_d == 9) | (scl_d == 10))
+    bad_data = np.where((scl_d <= 3) |
+                        (scl_d == 8) |
+                        (scl_d == 9) |
+                        (scl_d == 10))
     
 
     # apply valid areas to other bands:
@@ -143,7 +146,7 @@ def extract_cloudfree(file_name):
         px_sx, px_sy = geotransform[1], geotransform[5]
 
         if band_name == 'SCL':  # don't write this one out
-            continue
+           continue
 
         # resume..
         rb = stack_ds.GetRasterBand(bi)
