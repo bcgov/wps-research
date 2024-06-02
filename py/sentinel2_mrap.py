@@ -57,20 +57,15 @@ def extract(file_name):
                             hdr_fn(out_file_name)])
 
 
-if __name__ == "__main__":
-    if len(args) < 2:
-        dirs = [x.strip() for x in os.popen('ls -1d L2_*').readlines()]
-        for d in dirs:
-            print(d)
-        err("python3 sentinel2_mrap.py [sentinel-2 gid] # [optional: yyyymmdd 'maxdate' parameter] ")
-    else:
-        gid = args[1]
-        lines = [x.strip() for x in os.popen("ls -1r L2_" + gid + os.path.sep + "S2*.bin").readlines()]         # sort dates in time
+def run_mrap(gid):  # run MRAP on one tile
+    if True:
+        # look for all the dates in this tile's folder and sort them in aquisition time
+        lines = [x.strip() for x in os.popen("ls -1r L2_" + gid + os.path.sep + "S2*.bin").readlines()]
         lines = [x.split(os.path.sep)[-1].split('_') for x in lines]
         lines = [[x[2], x] for x in lines]
         lines.sort()
         lines = ['_'.join(x[1]) for x in lines]
-        
+
         for line in lines:
             gid = line.split("_")[5]
             extract("L2_" +  gid + os.path.sep + line)
@@ -78,3 +73,20 @@ if __name__ == "__main__":
         print("check sorting order")
         for line in lines:
             print("mrap " + line)
+
+
+if __name__ == "__main__":
+    if len(args) < 2:
+        dirs = [x.strip() for x in os.popen('ls -1d L2_*').readlines()]
+        for d in dirs:
+            print(d)
+            w = d.split('_')
+            if len(w) != 2:
+                err('unexpected folder name')
+
+            gid = w[1]
+            # should run on this frame here. 
+            # but check for cloud-free data first
+        err("python3 sentinel2_mrap.py [sentinel-2 gid] # [optional: yyyymmdd 'maxdate' parameter] ")
+    else:
+        run_mrap(args[1])  # single tile mode: no mosaicing
