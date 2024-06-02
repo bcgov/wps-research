@@ -15,7 +15,7 @@ import os
 def extract_cloudfree(file_name):
     w = file_name.split('_')  # split filename on '_'
     ds = w[2].split('T')[0]  # date string
-    stack_fn = '.'.join(file_name.split('.')[:-1]) + '.bin' # output stack filename
+    stack_fn = '.'.join(file_name.split('.')[:-1]) + '_cloudfree.bin' # output stack filename
 
     if file_name.split('.')[-1] == 'SAFE':
         file_name = file_name + os.path.sep + 'MTD_MSIL2A.xml'   
