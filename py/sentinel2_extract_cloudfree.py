@@ -189,7 +189,17 @@ if __name__ == "__main__":
         files = [x.strip() for x in os.popen("ls -1 S*MSIL2A*.zip").readlines()]
         files += [x.strip() for x in os.popen("ls -1d S2*MSIL2A*.SAFE").readlines()]
 
+
+        dirs = [x.strip() for x in os.popen('ls -1d L2_*').readlines()]
+        for d in dirs:
+            print(d)
+            files += [x.strip() for x in os.popen("ls -1 " + d + os.path.sep + "S*MSIL2A*.zip").readlines()]
+            files += [x.strip() for x in os.popen("ls -1d " + d + os.path.sep + "S2*MSIL2A*.SAFE").readlines()]
+
+        for f in files:
+            print(f)
         parfor(extract_cloudfree, files, int(mp.cpu_count()) / 2)
+
 
 '''
 Table 3: SCL bit values
