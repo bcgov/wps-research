@@ -59,8 +59,10 @@ def extract(file_name):
 
 def run_mrap(gid):  # run MRAP on one tile
     if True:
+        
+
         # look for all the dates in this tile's folder and sort them in aquisition time
-        lines = [x.strip() for x in os.popen("ls -1r L2_" + gid + os.path.sep + "S2*.bin").readlines()]
+        lines = [x.strip() for x in os.popen("ls -1r L2_" + gid + os.path.sep + "S2*_cloudfree.bin").readlines()]
         lines = [x.split(os.path.sep)[-1].split('_') for x in lines]
         lines = [[x[2], x] for x in lines]
         lines.sort()
