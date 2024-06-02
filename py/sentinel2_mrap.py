@@ -6,7 +6,7 @@ can't process in parallel (By tile, at least)
 NOTE: assumes sentinel2_extract_cloudfree.py has been run.'''
 from envi import envi_update_band_names
 from envi import envi_header_cleanup
-from misc import args, run, hdr_fn, err
+from misc import args, run, hdr_fn, err, parfor
 import multiprocessing as mp
 from osgeo import gdal
 import numpy as np
