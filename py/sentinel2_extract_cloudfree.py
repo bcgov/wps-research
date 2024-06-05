@@ -15,7 +15,7 @@ import os
 def extract_cloudfree(file_name):
     w = file_name.split('_')  # split filename on '_'
     ds = w[2].split('T')[0]  # date string
-    stack_fn = '.'.join(file_name.split('.')[:-1]) + '.bin' # output stack filename
+    stack_fn = '.'.join(file_name.split('.')[:-1]) + '_cloudfree.bin' # output stack filename
 
     if file_name.split('.')[-1] == 'SAFE':
         file_name = file_name + os.path.sep + 'MTD_MSIL2A.xml'   
@@ -128,7 +128,10 @@ def extract_cloudfree(file_name):
 
     # calculate the valid areas:
     scl_d = arrays[cl_i]
-    bad_data = np.where((scl_d <= 3) | (scl_d == 8) | (scl_d == 9) | (scl_d == 10))
+    bad_data = np.where((scl_d <= 3) |
+                        (scl_d == 8) |
+                        (scl_d == 9) |
+                        (scl_d == 10))
     
 
     # apply valid areas to other bands:
@@ -143,7 +146,7 @@ def extract_cloudfree(file_name):
         px_sx, px_sy = geotransform[1], geotransform[5]
 
         if band_name == 'SCL':  # don't write this one out
-            continue
+           continue
 
         # resume..
         rb = stack_ds.GetRasterBand(bi)
@@ -189,7 +192,17 @@ if __name__ == "__main__":
         files = [x.strip() for x in os.popen("ls -1 S*MSIL2A*.zip").readlines()]
         files += [x.strip() for x in os.popen("ls -1d S2*MSIL2A*.SAFE").readlines()]
 
-        parfor(extract_cloudfree, files, int(mp.cpu_count()) / 2)
+
+        dirs = [x.strip() for x in os.popen('ls -1d L2_*').readlines()]
+        for d in dirs:
+            print(d)
+            files += [x.strip() for x in os.popen("ls -1 " + d + os.path.sep + "S*MSIL2A*.zip").readlines()]
+            files += [x.strip() for x in os.popen("ls -1d " + d + os.path.sep + "S2*MSIL2A*.SAFE").readlines()]
+
+        for f in files:
+            print(f)
+        parfor(extract_cloudfree, files, int(mp.cpu_count())) 
+
 
 '''
 Table 3: SCL bit values
