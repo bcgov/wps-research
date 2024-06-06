@@ -50,7 +50,7 @@ int main(int argc, char ** argv){
   }
  
   bwrite(is_nan,  fn + str("_NAN.bin"), nrow, ncol, 1);
-  hwrite( fn + str("_NAN.bin"), nrow, ncol, 1);
+  hwrite( fn + str("_NAN.hdr"), nrow, ncol, 1);
   free(dat);
   free(out);
   free(is_nan);
