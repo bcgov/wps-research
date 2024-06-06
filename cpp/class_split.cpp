@@ -13,15 +13,30 @@ int main(int argc, char ** argv){
   if(nband != 1) err("this program defines results for 1-band images");
 
   float * dat = bread(fn, nrow, ncol, nband); // read data into array
+  float * out = falloc(nrow * ncol);
+  float * is_nan = falloc(nrow * ncol);
+
+  for0(i, np){ 
+    dat[i] = 0.;
+    out[i] = 0;
+    is_nan[i] = 0.;
+  }
+
   map<float, size_t> count; // accumulate the data
   for0(i, np){
     float d = dat[i];
-    if(count.count(d) < 1) count[d] = 0;
-    count[d] += 1;
+
+    if(isnan(d)){
+      is_nan[i] = 1.;
+    }
+    else{
+      if(count.count(d) < 1) count[d] = 0;
+      count[d] += 1;
+    }
   }
-
-  float * out = falloc(nrow * ncol);
-
+  
+  cout << count << endl;
+  
   for(map<float, size_t>::iterator it = count.begin(); it != count.end(); it++){
     float w = it->first;
     for0(i, np){
@@ -32,6 +47,11 @@ int main(int argc, char ** argv){
     bwrite(out, fn + std::to_string(w) + str(".bin"), nrow, ncol, 1);
     hwrite(fn + std::to_string(w) + str(".hdr"), nrow, ncol, 1);
   }
+ 
+  bwrite(is_nan,  fn + str("_NAN.bin"), nrow, ncol, 1);
+  hwrite( fn + str("_NAN.bin"), nrow, ncol, 1);
   free(dat);
+  free(out);
+  free(is_nan);
   return 0;
 }
