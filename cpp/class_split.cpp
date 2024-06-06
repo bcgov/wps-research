@@ -44,13 +44,17 @@ int main(int argc, char ** argv){
       float d = dat[i];
       if(w == d) out[i] = 1.;
       else out[i] = 0.;
-    } 
+    }
+    str o_hdr(fn + str("_") + std::to_string(w) + str(".hdr"));
     bwrite(out, fn + str("_") + std::to_string(w) + str(".bin"), nrow, ncol, 1);
-    hwrite(fn + str("_") + std::to_string(w) + str(".hdr"), nrow, ncol, 1);
+    hwrite(o_hdr, nrow, ncol, 1);
+
+    run(str("envi_header_copy_mapinfo.py ") + hfn + str(" ") + o_hdr);
   }
  
   bwrite(is_nan,  fn + str("_NAN.bin"), nrow, ncol, 1);
   hwrite( fn + str("_NAN.hdr"), nrow, ncol, 1);
+  run(str("envi_header_copy_mapinfo.py ") + hfn + str(" ") + fn + str("_NAN.hdr"));
   free(dat);
   free(out);
   free(is_nan);
