@@ -88,16 +88,16 @@ def plot(dataset, use_histogram_trimming=True, transect_line_ix=None, use_propor
     plt.rcParams["figure.figsize"] = (6.4, 4.8)
 
 
-parser = argparse.ArgumentParser()
-parser.add_argument("filename", type=str, help="input raster filename")
-parser.add_argument("-p", "--proportional_scaling", action="count", default=0, help="use proportional scaling, instead of nonproportional scaling")
-parser.add_argument("-n", "--no_histogram_stretching", action="count", default=0, help="set to 1 to turn off histogram stretching: min/max only")
-args = parser.parse_args()
-
-use_proportional = args.proportional_scaling  != 0 
-histogram_stretching = args.no_histogram_stretching == 0 
-
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument("filename", type=str, help="input raster filename")
+    parser.add_argument("-p", "--proportional_scaling", action="count", default=0, help="use proportional scaling, instead of nonproportional scaling")
+    parser.add_argument("-n", "--no_histogram_stretching", action="count", default=0, help="set to 1 to turn off histogram stretching: min/max only")
+    args = parser.parse_args()
+
+    use_proportional = args.proportional_scaling  != 0
+    histogram_stretching = args.no_histogram_stretching == 0
+
     tif_file_path = args.filename # sys.argv[1] # "path/to/your/file.tif"
     dataset = gdal.Open(tif_file_path)
 
