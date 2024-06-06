@@ -26,7 +26,7 @@ int main(int argc, char ** argv){
   for0(i, np){
     float d = dat[i];
 
-    if(isnan(d)){
+    if(isnan(d) || isinf(d)){
       is_nan[i] = 1.;
     }
     else{
