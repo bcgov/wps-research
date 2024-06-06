@@ -13,12 +13,11 @@ int main(int argc, char ** argv){
   if(nband != 1) err("this program defines results for 1-band images");
 
   float * dat = bread(fn, nrow, ncol, nband); // read data into array
-  float * out = falloc(nrow * ncol);
-  float * is_nan = falloc(nrow * ncol);
+  float * out = falloc(np);
+  float * is_nan = falloc(np);
 
   for0(i, np){ 
-    dat[i] = 0.;
-    out[i] = 0;
+    out[i] = 0.;
     is_nan[i] = 0.;
   }
 
