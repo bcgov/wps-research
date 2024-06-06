@@ -30,7 +30,7 @@ int main(int argc, char ** argv){
       else out[i] = 0.;
     } 
     bwrite(out, fn + std::to_string(w) + str(".bin"), nrow, ncol, 1);
- //   void bwrite(float * d, str bfn, size_t nrow, size_t ncol, size_t nband) 
+    hwrite(fn + std::to_string(w) + str(".hdr"), nrow, ncol, 1);
   }
   free(dat);
   return 0;
