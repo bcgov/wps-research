@@ -68,7 +68,7 @@ def extract_cloudfree(file_name):
                             arrays[str(band_metadata)] = band.ReadAsArray().astype(np.float32)
                     except: pass
     
-    selected_bands = [sbs['B12'], sbs['B11'], sbs['B9'], ssbs['B8'], bs['SCL']]  # reorder band selection
+    selected_bands = [sbs['B12'], sbs['B11'], sbs['B9'], sbs['B8'], sbs['SCL']]  # reorder band selection
     
     resampled_bands = []
     target_sub_ds = selected_bands[0][2]  # last selected band is the one whose coordinates we should match
@@ -92,7 +92,7 @@ def extract_cloudfree(file_name):
         geotransform = sub_dataset.GetGeoTransform()
         px_sx, px_sy = geotransform[1], geotransform[5]
     
-        if band_name == "B9":
+        if band_name == "B9" or band_name == "B8":
             mem_driver = gdal.GetDriverByName('MEM')
             input_ds = mem_driver.Create('', band.XSize, band.YSize, 1, gdal.GDT_Float32)
             input_ds.SetGeoTransform(sub_dataset.GetGeoTransform())
