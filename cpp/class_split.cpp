@@ -44,8 +44,8 @@ int main(int argc, char ** argv){
       if(w == d) out[i] = 1.;
       else out[i] = 0.;
     } 
-    bwrite(out, fn + std::to_string(w) + str(".bin"), nrow, ncol, 1);
-    hwrite(fn + std::to_string(w) + str(".hdr"), nrow, ncol, 1);
+    bwrite(out, fn + str("_") + std::to_string(w) + str(".bin"), nrow, ncol, 1);
+    hwrite(fn + str("_") + std::to_string(w) + str(".hdr"), nrow, ncol, 1);
   }
  
   bwrite(is_nan,  fn + str("_NAN.bin"), nrow, ncol, 1);
