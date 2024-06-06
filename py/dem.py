@@ -19,10 +19,13 @@ lines = [x.strip() for x in
          os.popen('raster_quickstats ' + lon_lat).readlines()][1:]
 lines = [line.split(',') for line in lines]
 
-lat_min = float(lines[2][1]) - .01  # pad a bit to ensure no empty border pix
-lat_max = float(lines[2][2]) + .01
-lon_min = float(lines[1][1]) - .01
-lon_max = float(lines[1][2]) + .01
+for line in lines:
+    print(line)
+
+lat_min = float(lines[3][1]) - .01  # pad a bit to ensure no empty border pix
+lat_max = float(lines[3][2]) + .01
+lon_min = float(lines[2][1]) - .01
+lon_max = float(lines[2][2]) + .01
 print("lat", lat_min, lat_max)
 print("lon", lon_min, lon_max)
 
