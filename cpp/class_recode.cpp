@@ -17,11 +17,14 @@ int main(int argc, char ** argv){
 
   np = nrow * ncol;
   if(nband != 1) err("this program defines results for 1-band images");
-  float * dat = bread(fn, nrow, ncol, nband); // read data into array
+  float * dat = bread(fn, nrow, ncol, nband); // read data into array  
+	float * out = falloc(nrow * ncol) ;
   map<float, size_t> count; // accumulate the data
   for0(i, np){
-    if(count.count(dat[i]) < 1) count[dat[i]] = 0;
-    count[dat[i]] += 1;
+    float d = dat[i];
+    if(isnan(d)) continue;
+    if(count.count(d) < 1) count[d] = 0;
+    count[d] += 1;
   }
 
   float d;
@@ -33,9 +36,12 @@ int main(int argc, char ** argv){
 
   FILE * f = fopen(ofn.c_str(), "wb");
   for0(i, np){
-    d = lookup[dat[i]];
-    fwrite(&d, sizeof(float), 1, f);
+    d = dat[i];
+    if(!(isnan(d))){
+      d = lookup[dat[i]];
+    }
   }
+  fwrite(&d, sizeof(float), nrow * ncol, f);
   fclose(f);
   free(dat);
   return 0;
