@@ -1,6 +1,6 @@
 '''20240210 modified from sentinel2_extract_swir.py
 20230605 sentinel2_extract_swir.py'''
-from misc import err, args, exist, run, parfor
+from misc import err, args, exist, run, parfor, hdr_fn
 from envi import envi_header_cleanup
 import multiprocessing as mp
 from osgeo import gdal
@@ -13,6 +13,11 @@ def extract(file_name):
     ds = w[2].split('T')[0]  # date string
     stack_fn = file_name[:-4] + '.bin' # output stack filename
     
+    if file_name.split('.')[-1] == 'SAFE':
+        stack_fn = file_name[:-5] + '.bin' 
+        print(stack_fn) 
+        file_name += (os.path.sep + 'MTD_MSIL2A.xml')
+
     if exist(stack_fn):
         print("Exists:", stack_fn, "skipping..")
         return
@@ -94,7 +99,7 @@ def extract(file_name):
         bi += 1
     
     stack_ds = None
-    hdr_f =  file_name[:-4] + '.hdr'
+    hdr_f =  hdr_fn(stack_fn) # [:-4] + '.hdr'
     envi_header_cleanup([None, hdr_f])
     xml_f = stack_fn + '.aux.xml'
     hdr_b = hdr_f + '.bak'
@@ -111,11 +116,13 @@ if __name__ == "__main__":
         file_name = args[1]
         if not exist(file_name):
             err('could not open input file: ' + d)
-        if not file_name[-4:] == '.zip':
-            err('zip expected')
+        if file_name[-4:] != '.zip' and file_name[-4:] != 'SAFE':
+            err('zip or SAFE expected')
         extract(file_name)
 
     else:
-        files = [x.strip() for x in os.popen("ls -1 S*MSIL2A*.zip").readlines()]
+        # should really make sure these are non-redundant before extracting
+        files = [x.strip() for x in os.popen('ls -d S2*.SAFE').readlines()]
+        files += [x.strip() for x in os.popen("ls -1 S*MSIL2A*.zip").readlines()]
         files += [x.strip() for x in os.popen("ls -1 S*MSIL1C*.zip").readlines()]
-        parfor(extract, files, int(mp.cpu_count()))
+        parfor(extract, files, 1) # int(mp.cpu_count()))
