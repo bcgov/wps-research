@@ -17,7 +17,6 @@ int main(int argc, char ** argv){
   float * is_nan = falloc(np);
 
   for0(i, np){ 
-    out[i] = 0.;
     is_nan[i] = 0.;
   }
 
@@ -37,6 +36,9 @@ int main(int argc, char ** argv){
   cout << count << endl;
   
   for(map<float, size_t>::iterator it = count.begin(); it != count.end(); it++){
+    for0(i, np){
+      out[i] = 0.;
+    }
     float w = it->first;
     for0(i, np){
       float d = dat[i];
