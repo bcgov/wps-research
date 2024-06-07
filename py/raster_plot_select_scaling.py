@@ -27,6 +27,6 @@ for f in files:
 for i in [0, 1, 2]:
     lines = [x.strip() for x in os.popen('ls -1 *_rgb_scaling_' + str(i) + '.txt').readlines()]
     for line in lines:
-        if os.path.abspath(line) != files[i]:
+        if os.path.abspath(line) != os.path.abspath(files[i]):
             run('cp -v ' + files[i] + ' ' + line)
 
