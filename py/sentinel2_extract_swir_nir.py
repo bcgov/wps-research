@@ -15,8 +15,15 @@ def extract(file_name):
     
     if file_name.split('.')[-1] == 'SAFE':
         stack_fn = file_name[:-5] + '.bin' 
-        print(stack_fn) 
-        file_name += (os.path.sep + 'MTD_MSIL2A.xml')
+        print(stack_fn)
+        L1_fn = file_name + os.path.sep + 'MTD_MSIL2A.xml'
+        L2_fn = file_name + os.path.sep + 'MTD_MSIL1C.xml'
+        if exist(L1_fn):
+            file_name = L1_fn
+        elif exist(L2_fn):
+            file_name = L2_fn
+        else:
+            err('could not locate', L1_fn, 'or', L2_fn)
 
     if exist(stack_fn):
         print("Exists:", stack_fn, "skipping..")
