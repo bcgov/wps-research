@@ -114,6 +114,8 @@
 * [Prometheus simulation software](http://www.firegrowthmodel.ca/prometheus/overview_e.php)
 * [how does fire think and act: Dana Hicks](https://podcasts.apple.com/ca/podcast/05-how-does-fire-think-and-act-guest-dana-hicks-bcws/)
 * [Drones in wildfire mgmt](https://en.wikipedia.org/wiki/Drones_in_wildfire_management)
+* [Wildland fire evacuations in Canada from 1980 to 2021](https://www.publish.csiro.au/WF/WF23097)
+
 
 ## Fire occurrence 
 * [Wotton & Martell, A lightning fire occurrence model for Ontario](https://cdnsciencepub.com/doi/abs/10.1139/x05-071)
