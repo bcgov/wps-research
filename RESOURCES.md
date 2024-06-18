@@ -71,6 +71,9 @@
 * [Viewing geom and spatial res](https://www.nrcan.gc.ca/maps-tools-and-publications/satellite-imagery-and-air-photos/tutorial-fundamentals-remote-sensing/microwave-remote-sensing/viewing-geometry-and-spatial-resolution/9341)
 
 ## Data
+* [GOES satellite data](https://eccc-msc.github.io/open-data/msc-data/obs_satellite/readme_satellite_en/)
+* [National snow and ice data centre](https://nsidc.org/data/explore-data)
+* [NOAA snow and ice products](https://www.ospo.noaa.gov/Products/land/snow.html)
 * [Canadian National Fire (Polygon) Database](https://cwfis.cfs.nrcan.gc.ca/ha/nfdb)
 * [USGS earth explorer](https://earthexplorer.usgs.gov/)
 * [SPOT data](https://regards.cnes.fr/user/swh/modules/60)
