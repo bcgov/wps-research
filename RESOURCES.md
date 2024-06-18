@@ -116,6 +116,9 @@
 * [Drones in wildfire mgmt](https://en.wikipedia.org/wiki/Drones_in_wildfire_management)
 * [Wildland fire evacuations in Canada from 1980 to 2021](https://www.publish.csiro.au/WF/WF23097)
 
+## Fire-related Remote-sensing
+* [Use of MODIS data to assess atmospheric aerosol before, during, and after community evacuations related to wildfire smoke](https://www.sciencedirect.com/science/article/abs/pii/S0034425715300158)
+* [Tracking Pyrometeors With Meteorological Radar Using Unsupervised Machine Learning](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2019GL084305)
 
 ## Fire occurrence 
 * [Wotton & Martell, A lightning fire occurrence model for Ontario](https://cdnsciencepub.com/doi/abs/10.1139/x05-071)
