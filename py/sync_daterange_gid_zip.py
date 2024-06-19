@@ -44,11 +44,15 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2):
     print(cmd)
     data = os.popen(cmd).read()
 
+    list_dir = my_path + 'listing'
     if False:
-        if not exists(my_path + 'listing'):  # json backup for analysis
-            os.mkdir(my_path + 'listing')
-        df = my_path + 'listing' + sep + ts + '_objects.txt'  # file to write
+        print('caching at', list_dir)
+        if not exists(list_dir):  # json backup for analysis
+            os.mkdir(list_dir)
+        df = list_dir + sep + ts + '_objects.txt'  # file to write
         open(df, 'wb').write(data.encode())  # record json to file
+    else:
+        print('Skip caching listing at', list_dir)
 
     jobs, d = [], None
     try:
