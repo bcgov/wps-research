@@ -10,12 +10,18 @@ if not use_L2:
 from misc import args, sep, exists, parfor, run, timestamp, err
 import multiprocessing as mp
 import datetime
+import argparse
 import time
 import json
 import sys
 import os
 my_path = sep.join(os.path.abspath(__file__).split(sep)[:-1]) + sep
 product_target = os.getcwd() + sep # put ARD products into present folder
+
+# parser = argparse.ArgumentParser()
+# parser.add_argument("-n", "--no_refresh", action="store_true",
+#                     help="do not refresh aws bucket listing, use most recent list instead")
+no_refresh = True # args.no_refresh
 
 def download_by_gids(gids, yyyymmdd, yyyymmdd2):
     if len(yyyymmdd) != 8 or len(yyyymmdd2) != 8:
@@ -42,12 +48,25 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2):
                     '--no-sign-request',
                     '--bucket sentinel-products-ca-mirror'])
     print(cmd)
-    data = os.popen(cmd).read()
+    list_dir = my_path + 'listing' + sep
+    if not no_refresh:
+        data = os.popen(cmd).read()
+    else:
+        data_files = [x.strip() for x in os.popen('ls -1 ' + list_dir).readlines()] 
+        data_files.sort(reverse=True)
+        for d in data_files:
+            print('  ', d)
+        print('+r', list_dir + data_files[0])
+        data = open(list_dir + data_files[0]).read() # .decode()
 
-    if not exists(my_path + 'listing'):  # json backup for analysis
-        os.mkdir(my_path + 'listing')
-    df = my_path + 'listing' + sep + ts + '_objects.txt'  # file to write
-    open(df, 'wb').write(data.encode())  # record json to file
+    if not no_refresh:
+        print('caching at', list_dir)
+        if not exists(list_dir):  # json backup for analysis
+            os.mkdir(list_dir)
+        df = list_dir + ts + '_objects.txt'  # file to write
+        open(df, 'wb').write(data.encode())  # record json to file
+    else:
+        print('Skip caching listing at', list_dir)
 
     jobs, d = [], None
     try:
