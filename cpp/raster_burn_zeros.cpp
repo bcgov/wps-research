@@ -24,35 +24,36 @@ int main(int argc, char ** argv){
   np = nrow * ncol; // number of input pix
   float d;
   size_t i, j, k;
-  float * dat1 = bread(fn, nrow, ncol, nband);
-  float * dat2 = bread(fn2, nrow, ncol, nband2);
   bool is_zero, is_nan;
+  cout << "+r " << fn << endl;
+  float * dat1 = bread(fn, nrow, ncol, nband);
+  int * bad = ialloc(nrow * ncol);
 
   for0(i, np){
     is_zero = true;
     is_nan = false;
-
     for0(k, nband){
       d = dat1[i + k * np];  // check if raster #1 is zero or NAN
       if(d != 0) is_zero = false;
       if(isnan(d) || isinf(d)) is_nan = true;
-    }
 
-    if(is_nan || (is_zero && nband > 1)){
-      for0(k, nband2) dat2[i + k * np] = NAN; // set raster #2 to NAN
-    }
-    else{
-      is_zero = true; // check if raster #2 is already zero
-      for0(k, nband){
-        d = dat2[i + k * np];
-        if(d != 0) is_zero = false;
+      if(is_nan || (is_zero && nband > 1)){
+        bad[i] = true;
       }
-      if(is_zero && (nband2 > 1)){
-        for0(k, nband2) dat2[i + k * np] = NAN; // replace with NAN
+      else{
+        bad[i] = false;
       }
     }
   }
+  free(dat1);
+  cout << "+r " << fn2 << endl;
+  float * dat2 = bread(fn2, nrow, ncol, nband2);
 
+  for0(i, np){
+    if(bad[i]){
+      for0(k, nband2) dat2[i + k * np] = NAN; // set raster #2 to NAN
+    }
+  }
   printf("+w %s\n", fn2.c_str());
   bwrite(dat2, fn2, nrow, ncol, nband2);
   return 0;
