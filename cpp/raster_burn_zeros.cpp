@@ -36,13 +36,7 @@ int main(int argc, char ** argv){
       d = dat1[i + k * np];  // check if raster #1 is zero or NAN
       if(d != 0) is_zero = false;
       if(isnan(d) || isinf(d)) is_nan = true;
-
-      if(is_nan || (is_zero && nband > 1)){
-        bad[i] = true;
-      }
-      else{
-        bad[i] = false;
-      }
+      bad [i] = (is_nan || (is_zero && nband > 1));
     }
   }
   free(dat1);
@@ -54,7 +48,9 @@ int main(int argc, char ** argv){
       for0(k, nband2) dat2[i + k * np] = NAN; // set raster #2 to NAN
     }
   }
+  free(bad);
   printf("+w %s\n", fn2.c_str());
   bwrite(dat2, fn2, nrow, ncol, nband2);
+  free(dat2);
   return 0;
 }
