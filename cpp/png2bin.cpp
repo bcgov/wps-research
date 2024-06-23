@@ -16,15 +16,7 @@ int main(int argc, char ** argv){
     run(str("cp ") + ofn + str("_scale.bin ") + ofn);
   }
 
-/* 
- if(exists(str("result.bin_thres.hdr"))){
-    run(str("cp result.bin_thres.hdr " + ohn));
->>>>>>> d80e81d43f29e551d9d37c3bff2707b67b26e604
-  }
-  else{
-*/
-    run(str("envi_header_copy_mapinfo.py sub.hdr result.png.hdr"));
-//  }
+  run(str("envi_header_copy_mapinfo.py sub.hdr result.png.hdr"));
 
   return 0;
 }
