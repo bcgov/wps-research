@@ -3,7 +3,7 @@
 1) scan L2_XXXXX for each grid id
 2) create a new mosaic for every date there's new data
 '''
-from misc import sep, args, exists, run, err, parfor
+from misc import sep, args, exists, run, err, parfor, hdr_fn 
 import multiprocessing as mp
 import os
 
@@ -27,14 +27,15 @@ def resample(fn):
     else:
         return ['', ofn]
 
-def merge(to_merge, out_fn): # files to be merged, output file name
-    run(' '.join(['gdalbuildvrt',
-                  '-srcnodata nan',
-                  '-vrtnodata nan',
-                  '-resolution highest',
-                  '-overwrite',
-                  'merge.vrt',
-                  ' '.join(to_merge)]))
+def merge(to_merge, date, out_fn): # files to be merged, output file name
+    if not exists(str(date) + '_merge.vrt'):
+        run(' '.join(['gdalbuildvrt',
+                      '-srcnodata nan',
+                      '-vrtnodata nan',
+                      '-resolution highest',
+                      '-overwrite',
+                      str(date) + '_merge.vrt',
+                      ' '.join(to_merge)]))
 
     if not exists(out_fn):
         run(' '.join(['gdalwarp',
@@ -46,7 +47,7 @@ def merge(to_merge, out_fn): # files to be merged, output file name
                       '-ot Float32',
                       '-srcnodata nan',
                       '-dstnodata nan',
-                      'merge.vrt',
+                      str(date) + '_merge.vrt',
                       out_fn]))
 
     run('fh ' + hdr_fn(out_fn))
@@ -133,4 +134,4 @@ for d, df in date_mrap:
         resampled_files += [resampled_file]
     parfor(run, cmds, int(mp.cpu_count()))
 
-    merge(resampled_files, str(d) + '_mrap.bin')
+    merge(resampled_files, d, str(d) + '_mrap.bin')
