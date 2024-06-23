@@ -17,7 +17,7 @@ int main(int argc, char ** argv){
   }
 
   if(exists(str("result.bin_thres.hdr"))){
-    run(str("cp result.bin_thres.hdr " + ohn));
+   // run(str("cp result.bin_thres.hdr " + ohn));
   }
   else{
     run(str("envi_header_copy_mapinfo.py sub.hdr result.png.hdr"));
