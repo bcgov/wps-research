@@ -51,7 +51,7 @@ def merge(to_merge, date, out_fn): # files to be merged, output file name
                       out_fn]))
 
     run('fh ' + hdr_fn(out_fn))
-    run('envi_header_copy_bandnames.py ' + hdr_fn(to_merge[0]) + ' ' + hdr_fn(out_fn))
+    run('envi_header_copy_bandnames.py ' + hdr_fn(to_merge[-1]) + ' ' + hdr_fn(out_fn))
 
 
 dirs = [x.strip() for x in os.popen('ls -1d L2_*').readlines()]
