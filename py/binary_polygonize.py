@@ -57,7 +57,7 @@ for line in lines:
 
 if len(args) < 2:
     err('python3 binary_polygonize.py [input raster mask file 1/0 values] [# optional flag: nocrop]')
-crop = True
+crop = False # True
 
 if len(args) > 2:  # 20240509 auto-crop gave us grief in certain cases e.g. running htd.cpp or kgc2010 after
     crop = False
