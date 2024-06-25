@@ -9,6 +9,10 @@ import os
 
 EPSG = 3005 if len(args) < 2 else 3347  # BC Albers / Canada LCC
 
+merge_dates = None
+if exists('.mrap_merge_dates'):
+    merge_dates = [x.strip() for x in open('.mrap_merge_dates').readlines()]
+
 def resample(fn):
     ofn = fn[:-4] + '_resample.bin'
     if not exists(ofn):
@@ -76,8 +80,10 @@ date_mrap = [[d, dic[d]] for d in dic]
 date_mrap.sort() # list of MRAP files available on each date.
 cmds = []
 most_recent_by_gid = {}
+
 for d, df in date_mrap:
     # print(d)
+
     for f in df:
         #print('  ', f)
         # cmds += [resample(f)]
@@ -132,6 +138,15 @@ for d, df in date_mrap:
 
         cmds += [cmd]
         resampled_files += [resampled_file]
-    parfor(run, cmds, int(mp.cpu_count()))
 
-    merge(resampled_files, d, str(d) + '_mrap.bin')
+
+    if (merge_dates is not None) and (d not in merge_dates):
+            continue
+    else:
+        parfor(run,
+               cmds,
+               int(mp.cpu_count()))
+
+        merge(resampled_files,
+              d,
+              str(d) + '_mrap.bin')
