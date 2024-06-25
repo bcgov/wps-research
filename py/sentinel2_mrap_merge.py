@@ -143,10 +143,16 @@ for d, df in date_mrap:
     if (merge_dates is not None) and (d not in merge_dates):
             continue
     else:
+        mrap_product_file = str(d) + '_mrap.bin'
+        
+        if exists(mrap_product_file):
+            print('SKIPPING', mrap_product_file)
+            continue
+
         parfor(run,
                cmds,
                int(mp.cpu_count()))
 
         merge(resampled_files,
               d,
-              str(d) + '_mrap.bin')
+              mrap_product_file)
