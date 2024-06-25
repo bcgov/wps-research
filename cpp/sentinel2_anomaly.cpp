@@ -86,8 +86,13 @@ int main(int argc, char ** argv){
   hwrite(hf4, nrow, ncol, 1, 4, bn);
   bwrite(out3, ofn3, nrow, ncol, 1);
 
+  run(str("envi_header_copy_mapinfo.py ") + hfn + str(" ") + hf2);
+  run(str("envi_header_copy_mapinfo.py ") + hfn + str(" ") + hf3);
+  run(str("envi_header_copy_mapinfo.py ") + hfn + str(" ") + hf4);
+
   free(dat1);
   free(dat2);
   free(out);
+
   return 0;
 }
