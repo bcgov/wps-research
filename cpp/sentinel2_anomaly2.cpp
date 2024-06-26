@@ -72,7 +72,7 @@ int main(int argc, char ** argv){
   vector<str> bn;
   bn.push_back(date_s + str(" sentinel2_anomaly.cpp"));
   hwrite(hf2, nrow, ncol, 1, 4, bn);
-  bwrite(out, ofn, nrow, ncol, 1);
+  bwrite(out, ofn1, nrow, ncol, 1);
 
   bn.clear();
   bn.push_back(date_s + str(" sentinel2_anomaly.cpp"));
