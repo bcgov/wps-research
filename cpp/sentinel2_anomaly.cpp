@@ -64,11 +64,11 @@ int main(int argc, char ** argv){
   out2 = falloc(np);
   out3 = falloc(np);
   for0(i, np){
-    float ratio1 = (b11[i] - b21[i]) / (b11[i] + b21[i]);
-    float ratio2 = (b12[i] - b22[i]) / (b12[i] + b22[i]);
+    float ratio1 = (b21[i] - b11[i]) / (b21[i] + b11[i]);
+    float ratio2 = (b22[i] - b12[i]) / (b22[i] + b12[i]);
     out2[i] = ratio1;
     out3[i] = ratio2;
-    out[i] = (ratio1 - ratio2) / (ratio2 + ratio1);
+    out[i] = (ratio2 - ratio1) / (ratio2 + ratio1);
   }
 
   vector<str> bn;
