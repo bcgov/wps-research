@@ -15,7 +15,18 @@ int main(int argc, char ** argv){
   size_t nrow, ncol, nband, np, n_dates;
   hread(hfn, nrow, ncol, nband); // read header 1
 
-  printf("argc %f nband %zu\n", argc, nband);
+  printf("argc %d nband %zu\n", argc, nband);
+
+  if(argc - 2 != nband){
+    err(std::to_string(nband) + str(" parameter required"));
+  }
+
+  size_t i;
+
+  float * x = falloc(nband);
+  for0(i, nband){
+    x[i] = std::stof(str(argv[i + 2])); // >> x[i];
+  }
 
   str ofn(str(argv[1]) + str("_distance.bin")); // output file name
   str ohn(hdr_fn(ofn, true)); // out header file name
@@ -24,10 +35,20 @@ int main(int argc, char ** argv){
   printf("+w %s\n", ohn.c_str());
 
   np = nrow * ncol; // number of input pix
-  size_t n, i, j, K, k1, k2, ix, ij, ik;
- // float * out = falloc(nrow * ncol * nband);
-//  float * dat = bread(fn, nrow, ncol, nband);
+  size_t n, j, K, k1, k2, ix, ij, ik;
+  float * out = falloc(nrow * ncol * nband);
+  float * dat = bread(fn, nrow, ncol, nband);
 
-  
+  float d, di;
+  for0(i, np){
+    d = 0;
+    for0(j, nband){
+      di = dat[np * j + i] - x[j];
+      d += di * di;
+    }
+    out[i] = -d;
+  }
+  bwrite(out, ofn, nrow, ncol, 1);
+  hwrite(ohn, nrow, ncol, 1);
   return 0;
 }
