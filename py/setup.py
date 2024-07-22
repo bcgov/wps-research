@@ -1,4 +1,5 @@
-from misc import *
+from misc import exists, run
+import os
 
 # setup for python stuff
 if not exists('../bin'):
