@@ -5,9 +5,9 @@ import os
 if not exists('../bin'):
     run('mkdir -p ../bin')
 
-run('sudo apt install python3-pip python3-setuptools')
-run('sudo apt install python3-gdal libgdal-dev gdal-bin python3-rasterio rasterio') #  simplekml')
 run('sudo apt update && sudo apt upgrade')
+run('sudo apt install python3-pip python3-setuptools')
+run('sudo apt install python3-gdal libgdal-dev gdal-bin python3-rasterio rasterio awscli') #  simplekml')
 run('python3 -m pip install joblib numpy scikit-learn matplotlib alphashape descartes utm pyproj geopy')
 
 if not exists('../deb'):
