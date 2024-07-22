@@ -7,7 +7,7 @@ if not exists('../bin'):
 run('sudo apt install python3-pip python3-setuptools')
 run('sudo apt install python3-gdal libgdal-dev gdal-bin python3-rasterio rasterio') #  simplekml')
 run('sudo apt update && sudo apt upgrade')
-run('python3 -m pip install numpy scikit-learn matplotlib alphashape descartes utm pyproj geopy')
+run('python3 -m pip install joblib numpy scikit-learn matplotlib alphashape descartes utm pyproj geopy')
 
 if not exists('../deb'):
     run('mkdir -p ../deb')
