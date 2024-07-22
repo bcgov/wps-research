@@ -22,7 +22,8 @@ for c in cpp:
     bf = '../bin/' + stem # + '.exe'
     cmd = "g++ -w -O4 -march=native -o " + bf + " " + c + " ../cpp/misc.cpp -lpthread"  # -g 
     if stem != "misc" and not exists(bf):
-        run(cmd)
+        print(cmd)
+        a = os.system(cmd)
 
 py = os.popen("find ./*.py").readlines()
 for p in py:
@@ -47,4 +48,5 @@ for p in py:
     if w != "__init__.py" and not exists(bf):
         open(wf, 'wb').write('\n'.join(lines).encode())
         cmd = 'g++ -w -O3 -o ' + bf + ' ' + wf
-        run(cmd + "; rm -rf " + wf)
+        print(cmd)
+        a = os.system(cmd + "; rm -rf " + wf)
