@@ -49,22 +49,44 @@ print(','.join(all_fields))
 lat_i, lon_i, name_i = -1, -1, -1
 for i in range(len(fields)):
     f = fields[i]
-    if len(f.split('lat')) > 1:
-        if lat_i != -1: err("more than one field matched lat")
-        else: lat_i = i
-    if len(f.split('lon')) > 1:
-        if lon_i != -1: err("more than one field matched lon")
-        else: lon_i = i    
+    if f.strip() == 'y':
+        if lat_i != -1:
+            err("more than one field matched lat")
+        else:
+            lat_i = i
+    if f.strip() == 'x':
+        if lon_i != -1:
+            err("more than one field matched lon")
+        else:
+            lon_i = i    
     if len(f.split('name')) > 1:
-        if name_i != -1: err("more than one field matched name")
-        else: name_i = i
+        if name_i != -1:
+            err("more than one field matched name")
+        else:
+            name_i = i
 
+# X,Y preferred but lat, lon accepted as well
+for i in range(len(fields)):
+    f = fields[i]
+    if len(f.split('lat')) > 1:
+        if lat_i == -1:
+            lat_i = i
+    if len(f.split('lon')) > 1 or len(f.split('X')) > 1:
+        if lon_i == -1:
+            lon_i = i
+
+print("LAT_I", lat_i)
+print("LON_I", lon_i)
 f = open(tgt_f, "wb")    
 f.write("feature_id,row,lin,xoff,yoff".encode())
 for line in data:
+    print("data line:", [line])
     lat, lon = line[lat_i], line[lon_i]
     
-    row, col, dat = xy_to_pix_lin(fn, lon, lat, int(nband))
+    result = xy_to_pix_lin(fn, lon, lat, int(nband))
+    if result is None:
+        continue 
+    row, col, dat = result
 
     print(','.join([str(x) for x in (line + [lat, lon, row, col, fn] + dat)]))
 
