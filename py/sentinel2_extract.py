@@ -1,6 +1,7 @@
 '''Can use this method to open Level1 format Sentinel-2 data downloaded either from:
-* ESA Copernicus, or from
-* Google Cloud Platform
+    *** ESA Copernicus ***,
+     or from
+    *** Google Cloud Platform ***
 
 Two cases:
 * after running gcp/fix_s2.py and zipping the folder
