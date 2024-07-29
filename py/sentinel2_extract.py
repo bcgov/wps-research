@@ -7,6 +7,7 @@ Two cases:
 * after running gcp/fix_s2.py and zipping the folder
 * if there is no zip file (having downloaded from GCP
 
+NOTE: this script extracts products with different resolutions separately. They are NOT resampled into a common stack! 
 NOTE: no_stomp parameter avoids unzipping the zip file (again)'''
 import time
 from misc import *
