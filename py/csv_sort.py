@@ -9,11 +9,13 @@ ofn, fi = args[1] + '_sort.csv', -1
 fields, data = read_csv(args[1])
 lookup = {fields[i]: i for i in range(len(fields))}
 
-try: fi = lookup[args[2]]
-except: err('field not found:', args[2])
+try:
+    fi = lookup[args[2]]
+except:
+    err('field not found:', args[2])
 
 N = len(data[0])
-sortd = [ [data[fi][i], i] for i in range(N)] # intentional naming
+sortd = [[data[fi][i], i] for i in range(N)] # intentional naming
 sortd.sort(reverse=False)  # increasing order
 
 print("+w", ofn)
