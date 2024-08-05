@@ -10,6 +10,8 @@ int main(int argc, char ** argv){
   run(str("raster_warp_all.py -s 4 ./ ./small"));
   run("clean");
   run("find ./ -name \"*.vrt\" "); //| xargs rm")
+  run("find ./ -name \"tmp*\" ");
+  run("find ./ -name \"merge*\" "); 
   run(str("cd small; merge2.py"));
   return 0;
 }
