@@ -24,8 +24,8 @@ int main(int argc, char ** argv){
 
   run(str("python3 ~/GitHub/wps-research/py/envi_header_copy_mapinfo.py sub.hdr sub.bin_swir.bin_ht.bin_dominant.bin_001.hdr"));
   run(str("clean"));
-  run(str("imv sub.bin_swir.bin_ht.bin_dominant.bin_001.bin"));
   run(str("envi2tif.py sub.bin_swir.bin_ht.bin_dominant.bin_001.bin"));
+  run(str("imv sub.bin_swir.bin_ht.bin_dominant.bin_001.bin"));
   return 0;
 }
 
