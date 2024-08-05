@@ -7,11 +7,17 @@ int main(int argc, char ** argv){
   if(!exists(small)){
     run(str("mkdir small"));
   }
-  run(str("raster_warp_all.py -s 4 ./ ./small"));
+ 
+  // clean up bad stuff 
+  run("find ./ -name \"merge*.bin\" | xargs rm");
+  run("find ./ -name \"tmp*.bin\" | xargs rm");
+  run("find ./ -name \"*.vrt\" | xargs rm");
   run("clean");
-  run("find ./ -name \"*.vrt\" "); //| xargs rm")
-  run("find ./ -name \"tmp*\" ");
-  run("find ./ -name \"merge*\" "); 
+
+  // resample the imagery to smaller
+  run(str("raster_warp_all.py -s 4 ./ ./small"));
+
+  // run the merging (could this be better parallelised)
   run(str("cd small; merge2.py"));
   return 0;
 }
