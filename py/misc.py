@@ -346,7 +346,7 @@ def xy_to_pix_lin(fn, x, y, nb):  # raster fn, lat/lon, number of bands (assume 
             err('unexpected data')
 
         pix_i, lin_i = int(pix_i[:-1]), int(lin_i[:-1])
-        print(str(pix_i) + 'P ' + str( lin_i) + 'L')
+        #print(str(pix_i) + 'P ' + str( lin_i) + 'L')
         count += 1
         data = []
         for j in range(0, nb): # for each band
@@ -355,12 +355,15 @@ def xy_to_pix_lin(fn, x, y, nb):  # raster fn, lat/lon, number of bands (assume 
                 err("expected: Band: " + str(j + 1) + "; found: " + lines[2 * (1 + j)])
             value = float(lines[3 + (2*j)].split()[1].strip())
             data.append(value)
-        print(data)
+        #print(data)
 
         row, col = lin_i, pix_i
         return row, col, data  # return the goods!
     else:
-        err("misc.py: unexpected output from gdallocationinfo: number of lines: " + str(len(lines)))
+        for line in lines:
+            print([line])
+        print("misc.py: unexpected output from gdallocationinfo: number of lines: " + str(len(lines)))
+        return None
 
 def pix_lin_to_xy(fn, col, row):
     err('fix this with code from raster_pixels_location.py')

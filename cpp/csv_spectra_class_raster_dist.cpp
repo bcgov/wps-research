@@ -1,5 +1,5 @@
 /* csv_spectra_raster_distance.cpp:
-calculate the mean and stdv spectra for the class indicated
+calculate the mean and stdv spectra for the (already labelled) class indicated
 regular, derivative or integral mode..
 
 we are assuming that the

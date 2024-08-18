@@ -1,4 +1,5 @@
-'''20211216: burn point locations from a csv into a raster mask..
+'''DEPRECATED
+20211216: burn point locations from a csv into a raster mask..
 ..use this to convert csv groundref locations into format used by TRU students! 
 
 * input csv file must include columns named: row, col

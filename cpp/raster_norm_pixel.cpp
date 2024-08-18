@@ -40,10 +40,10 @@ int main(int argc, char ** argv){
         d = dat[jx];
         if(!isnan(d) && !isinf(d)){
           dat[jx] = r * (d - mn);
-	}
+	        }
         else{
           dat[jx] = NAN;
-	}
+	      }
       }
     }
   }

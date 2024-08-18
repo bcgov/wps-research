@@ -1,13 +1,14 @@
-from misc import *
+from misc import exists, run
+import os
 
 # setup for python stuff
 if not exists('../bin'):
     run('mkdir -p ../bin')
 
-run('sudo apt install python3-pip python3-setuptools')
-run('sudo apt install python3-gdal libgdal-dev gdal-bin python3-rasterio rasterio') #  simplekml')
 run('sudo apt update && sudo apt upgrade')
-run('python3 -m pip install numpy scikit-learn matplotlib alphashape descartes utm pyproj geopy')
+run('sudo apt install python3-pip python3-setuptools')
+run('sudo apt install python3-gdal libgdal-dev gdal-bin python3-rasterio rasterio awscli') #  simplekml')
+run('python3 -m pip install joblib numpy scikit-learn matplotlib alphashape descartes utm pyproj geopy')
 
 if not exists('../deb'):
     run('mkdir -p ../deb')
@@ -21,7 +22,8 @@ for c in cpp:
     bf = '../bin/' + stem # + '.exe'
     cmd = "g++ -w -O4 -march=native -o " + bf + " " + c + " ../cpp/misc.cpp -lpthread"  # -g 
     if stem != "misc" and not exists(bf):
-        run(cmd)
+        print(cmd)
+        a = os.system(cmd)
 
 py = os.popen("find ./*.py").readlines()
 for p in py:
@@ -46,4 +48,5 @@ for p in py:
     if w != "__init__.py" and not exists(bf):
         open(wf, 'wb').write('\n'.join(lines).encode())
         cmd = 'g++ -w -O3 -o ' + bf + ' ' + wf
-        run(cmd + "; rm -rf " + wf)
+        print(cmd)
+        a = os.system(cmd + "; rm -rf " + wf)

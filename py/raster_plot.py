@@ -115,6 +115,7 @@ if __name__ == '__main__':
             else:  # assume we can restore
                 rgb_min, rgb_max = [float(x) \
                         for x in open(rfn).read().strip().split(',')]
+                print('+r', rfn)
         else:
             rgb_min, rgb_max = nanmin(rgb_i), nanmax(rgb_i)
         print("i, min, max", i, rgb_min, rgb_max)

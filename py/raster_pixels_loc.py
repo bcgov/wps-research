@@ -3,11 +3,11 @@ NB doesn't generalize to southern hemisphere. Thanks:
 https://stackoverflow.com/questions/50191648/
 gis-geotiff-gdal-python-how-to-get-coordinates-from-pixel'''
 import os
-import osr
 import utm
 import pyproj
 import shutil
 import numpy as np
+from osgeo import osr
 from osgeo import gdal
 from misc import args, err, run, read_hdr, hdr_fn, write_binary, pd, sep
 if len(args) < 2:

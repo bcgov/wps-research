@@ -10,14 +10,18 @@ import os
 def extract(file_name):
     w = file_name.split('_')  # split filename on '_'
     ds = w[2].split('T')[0]  # date string
-    stack_fn = file_name[:-4] + '.bin' # output stack filename
-    
+    stack_fn = '.'.join(file_name.split('.')[:-1]) + '.bin' # output stack filename
+ 
     if exist(stack_fn):
         print("Exists:", stack_fn, "skipping..")
         return
 
     def ignore_warnings(x, y, z): pass
-    gdal.PushErrorHandler(ignore_warnings)  # suppress warnings
+    gdal.PushErrorHandler(ignore_warnings)  # suppress warnings  
+
+
+    if file_name.split('.')[-1] == 'SAFE':
+        file_name = file_name + os.path.sep + 'MTD_MSIL1C.xml'
     
     d = gdal.Open(file_name)
     subdatasets =  d.GetSubDatasets()
@@ -91,7 +95,7 @@ def extract(file_name):
         bi += 1
     
     stack_ds = None
-    hdr_f =  file_name[:-4] + '.hdr'
+    hdr_f =  stack_fn[:-4] + '.hdr'
     envi_header_cleanup([None, hdr_f])
     xml_f = stack_fn + '.aux.xml'
     hdr_b = hdr_f + '.bak'
@@ -108,12 +112,11 @@ if __name__ == "__main__":
         file_name = args[1]
         if not exist(file_name):
             err('could not open input file: ' + d)
-        if not file_name[-4:] == '.zip':
+        if not file_name[-4:] == '.zip' and not file_name[-5:] == '.SAFE':
             err('zip expected')
         extract(file_name)
 
     else:
-        files = [x.strip() for x in os.popen("ls -1 S*MSIL2A*.zip").readlines()]
-        files += [x.strip() for x in os.popen("ls -1 S*MSIL1C*.zip").readlines()]
-
+        files = [x.strip() for x in os.popen("ls -1 S2*MSI*.zip").readlines()]
+        files += [x.strip() for x in os.popen("ls -1d S*MSI*.SAFE").readlines()]
         parfor(extract, files, int(mp.cpu_count()))

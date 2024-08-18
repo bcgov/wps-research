@@ -1,88 +1,103 @@
 '''20230727 extract most recent available pixel (MRAP) from sentinel2 series.. assume tile based
-
-Difference from sentinel2_extract_swir.py: 
-can't process in parallel (By tile, at least)
-
+(*) Difference from sentinel2_extract_swir.py: 
+    can't process in parallel (By tile, at least)
 NOTE: assumes sentinel2_extract_cloudfree.py has been run.
-'''
+
+20240618 NOTE: need to make this fully incremental. I.e., initialize buffer (per tile) with last avaiable MRAP date'''
+from envi import envi_update_band_names
 from envi import envi_header_cleanup
+from misc import args, run, hdr_fn, err, parfor
 import multiprocessing as mp
 from osgeo import gdal
-from misc import args, run
 import numpy as np
+import copy
 import sys
 import os
 
-my_bands = {}
-my_proj, my_geo, my_xsize, my_ysize, nbands  = None, None, None, None, None
+my_bands, my_proj, my_geo, my_xsize, my_ysize, nbands, file_name  = {}, None, None, None, None, None, None
 
 def extract(file_name):
     global my_proj, my_geo, my_bands, my_xsize, my_ysize, nbands
     print("+r", file_name)
-    d = gdal.Open(file_name)
+    d = gdal.Open(file_name)  # open the file brought in for this update step
     
     for i in range(1, d.RasterCount + 1):
         band = d.GetRasterBand(i)
-        array_data = band.ReadAsArray().astype(np.float32)
+        new_data = band.ReadAsArray().astype(np.float32)
         
-        if i not in my_bands:
-            my_bands[i] = array_data
-
+        if i not in my_bands:  #initialize the band / first time
+            my_bands[i] = new_data # new data for this band becomes the band
         else:
-            nans = np.isnan(array_data)
-            update = my_bands[i]
-            update[~nans] = array_data[~nans]
+            nans, update = np.isnan(new_data), copy.deepcopy(my_bands[i])  # forgot copy before?
+            update[~nans] = new_data[~nans]
             my_bands[i] = update
-   
-    if my_proj is None:
-        my_proj = d.GetProjection()
-    if my_geo is None:
-        my_geo = d.GetGeoTransform()
+            # my_bands[i][~nans] = new_data[~nans]
+
+    my_proj = d.GetProjection() if my_proj == None else my_proj
+    my_geo = d.GetGeoTransform() if my_geo is None else my_geo
     if my_xsize is None:
-        my_xsize, my_ysize = d.RasterXSize, d.RasterYSize    
-        nbands = d.RasterCount 
+        my_xsize, my_ysize, nbands = d.RasterXSize, d.RasterYSize, d.RasterCount 
 
-if __name__ == "__main__":
-    file_name = None
-    if len(args) != 2:
-        err("python3 sentinel2_mrap.py [sentinel-2 gid]")
+    d = None  # close input file brought in for this update step
+
+    # write output file
+    out_file_name, driver = file_name + '_MRAP.bin', gdal.GetDriverByName('ENVI')
+    if not os.path.exists(out_file_name):
+        print(out_file_name, my_xsize, my_ysize, nbands, gdal.GDT_Float32)
+        stack_ds = driver.Create(out_file_name, my_xsize, my_ysize, nbands, gdal.GDT_Float32)
+        stack_ds.SetProjection(my_proj)
+        stack_ds.SetGeoTransform(my_geo)
+
+        for i in range(1, nbands + 1):
+            stack_ds.GetRasterBand(i).WriteArray(my_bands[i])
+        stack_ds = None
+
+        run('fh ' + out_file_name)  # fix envi header, then reproduce the band names
+        envi_update_band_names(['envi_update_band_names.py', 
+                                hdr_fn(file_name),
+                                hdr_fn(out_file_name)])
     else:
-        gid = args[1]
+        print(out_file_name, 'exists [SKIP WRITE]')
 
-        # sort the dates in time...
-        lines = [x.strip() for x in os.popen("ls -1r S*.bin")]
-        lines2 = [x.split('_') for x in lines]
-        lines3 = [[x[2], x] for x in lines2]
-        lines3.sort()
+def run_mrap(gid):  # run MRAP on one tile
+    if True:
+        # look for all the dates in this tile's folder and sort them in aquisition time
+        
+        def get_filename_lines(search_cmd):
+            lines = [x.strip() for x in os.popen(search_cmd).readlines()]
+            lines = [x.split(os.path.sep)[-1].split('_') for x in lines]
+            lines = [[x[2], x] for x in lines]
+            lines.sort()
+            return ['_'.join(x[1]) for x in lines]
 
-        lines = ['_'.join(x[1]) for x in lines3]
+        lines = get_filename_lines("ls -1r L2_" + gid + os.path.sep + "S2*_cloudfree.bin")
 
         for line in lines:
-            extract(line)
-        # now save the output
+            gid = line.split("_")[5]
+            extract("L2_" +  gid + os.path.sep + line)
+
+        print("check sorting order")
+        for line in lines:
+            print("mrap " + line)
 
 
-    driver = gdal.GetDriverByName('ENVI')
+if __name__ == "__main__":
+    if len(args) < 2:
+        gids = []
+        dirs = [x.strip() for x in os.popen('ls -1d L2_*').readlines()]
+        for d in dirs:
+            print(d)
+            w = d.split('_')
+            if len(w) != 2:
+                err('unexpected folder name')
 
-    print("mrap_" + args[1] + ".bin",
-                             my_xsize,
-                             my_ysize,
-                             nbands,
-                             gdal.GDT_Float32)
-
-    stack_ds = driver.Create("mrap_" + args[1] + ".bin",
-                             my_xsize,
-                             my_ysize,
-                             nbands,
-                             gdal.GDT_Float32)
-
-    stack_ds.SetProjection(my_proj)
-    stack_ds.SetGeoTransform(my_geo)
-
-    for i in range(1, nbands + 1):
-        rb = stack_ds.GetRasterBand(i)
-        rb.WriteArray(my_bands[i])
-
-    stack_ds = None
-
-    run('fh mrap_' + args[1] + '.hdr')
+            gid = w[1]
+            gids += [gid]
+            # should run on this frame here. 
+            # but check for cloud-free data first
+        # err("python3 sentinel2_mrap.py [sentinel-2 gid] # [optional: yyyymmdd 'maxdate' parameter] ")
+        def f(fn):
+            run_mrap(fn)
+        parfor(f, gids, int(mp.cpu_count()))
+    else:
+        run_mrap(args[1])  # single tile mode: no mosaicing

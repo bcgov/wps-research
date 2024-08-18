@@ -13,6 +13,10 @@ Includes A) data integration B) routines applying or implementing supervised and
 ## Projects being operationalized
 * [Fire mapping using Sentinel-2](https://github.com/bcgov/wps-fire-perimeter)
 
+## Co-op student projects
+* [NRT burned severity](https://github.com/bcgov/nrtbs)
+* [Lightning data comparison](https://github.com/bcgov/wps-lx-compare)
+  
 # Sample results
 ## Same-day/NRT SWIR mosaic over BC
 <img src="https://raw.githubusercontent.com/bcgov/wps-research/master/doc/20230525_may15-17_swir.gif" width="650">

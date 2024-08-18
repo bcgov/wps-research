@@ -1,10 +1,8 @@
 '''20211121 same as sentinel2_extract_stack_all.py EXCEPT:
     this one doesn't extract from zip!!!!!!!! 
 
-WHY?????????????
-
-Assumption:
-    we've created L2 data with sen2cor
+WHY????????????? Assumption:
+ *** we've created L2 data with sen2cor, most likely after fetching data from py/gcp/update_tile.py
 
 A) extract Sentinel2, B) resample to 10m c) prefix bandnames with dates..
    D) stack everything!

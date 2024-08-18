@@ -1,4 +1,9 @@
-'''20230605 sentinel2_extract_swir.py'''
+'''20230605 modified from sentinel2_extract_swir.py
+
+This script takes sentinel-2 .zip files as input.
+
+.bin files are produced "as usual", with the exception that NAN is included for "undesirable" data areas, according to the Sentinel-2 (level-2) class map. 
+'''
 from misc import err, args, exist, run, parfor
 from envi import envi_header_cleanup
 import multiprocessing as mp
@@ -7,11 +12,14 @@ import numpy as np
 import sys
 import os
 
-def extract(file_name):
+def extract_cloudfree(file_name):
     w = file_name.split('_')  # split filename on '_'
     ds = w[2].split('T')[0]  # date string
-    stack_fn = file_name[:-4] + '.bin' # output stack filename
-    
+    stack_fn = '.'.join(file_name.split('.')[:-1]) + '_cloudfree.bin' # output stack filename
+
+    if file_name.split('.')[-1] == 'SAFE':
+        file_name = file_name + os.path.sep + 'MTD_MSIL2A.xml'   
+
     if exist(stack_fn):
         print("Exists:", stack_fn, "skipping..")
         return
@@ -120,7 +128,10 @@ def extract(file_name):
 
     # calculate the valid areas:
     scl_d = arrays[cl_i]
-    bad_data = np.where((scl_d <= 3) | (scl_d == 8) | (scl_d == 9) | (scl_d == 10))
+    bad_data = np.where((scl_d <= 3) |
+                        (scl_d == 8) |
+                        (scl_d == 9) |
+                        (scl_d == 10))
     
 
     # apply valid areas to other bands:
@@ -135,7 +146,7 @@ def extract(file_name):
         px_sx, px_sy = geotransform[1], geotransform[5]
 
         if band_name == 'SCL':  # don't write this one out
-            continue
+           continue
 
         # resume..
         rb = stack_ds.GetRasterBand(bi)
@@ -156,7 +167,7 @@ def extract(file_name):
         bi += 1
     
     stack_ds = None
-    hdr_f =  file_name[:-4] + '.hdr'
+    hdr_f =  stack_fn[:-4] + '.hdr'
     envi_header_cleanup([None, hdr_f])
     xml_f = stack_fn + '.aux.xml'
     hdr_b = hdr_f + '.bak'
@@ -175,14 +186,22 @@ if __name__ == "__main__":
             err('could not open input file: ' + d)
         if not file_name[-4:] == '.zip':
             err('zip expected')
-        extract(file_name)
+        extract_cloudfree(file_name)
 
     else:
         files = [x.strip() for x in os.popen("ls -1 S*MSIL2A*.zip").readlines()]
-        files += [x.strip() for x in os.popen("ls -1 S*MSIL1C*.zip").readlines()]
+        files += [x.strip() for x in os.popen("ls -1d S2*MSIL2A*.SAFE").readlines()]
 
-        parfor(extract, files, 1) # int(mp.cpu_count()))
 
+        dirs = [x.strip() for x in os.popen('ls -1d L2_*').readlines()]
+        for d in dirs:
+            print(d)
+            files += [x.strip() for x in os.popen("ls -1 " + d + os.path.sep + "S*MSIL2A*.zip").readlines()]
+            files += [x.strip() for x in os.popen("ls -1d " + d + os.path.sep + "S2*MSIL2A*.SAFE").readlines()]
+
+        for f in files:
+            print(f)
+        parfor(extract_cloudfree, files, int(mp.cpu_count())) 
 
 
 '''

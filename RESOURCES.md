@@ -1,10 +1,19 @@
 # Remote Sensing + Fire Resources
+## Wildfire remote sensing data/products
+* [NASA VIIRS 375m active fire data](https://www.earthdata.nasa.gov/learn/find-data/near-real-time/firms/viirs-i-band-375-m-active-fire-data)
+  
 ## Space agencies
-* [ESA/JAXA/NASA dashboard](https://eodashboard.org/explore?poi=World-SMC)
+* [Canadian Space Agency (CSA) Earth-observation (EO) satellites](https://www.asc-csa.gc.ca/eng/satellites/earth-observation/)
+* [European Space Agency (ESA) Earth-observation missions](https://www.esa.int/Applications/Observing_the_Earth/Earth_observing_missions)
+* [NASA EO missions: current fleet](https://science.nasa.gov/earth-science/missions/earth-missions/earth-missions-current/)
 * [Japanese Space Agency JAXA: Research](https://earth.jaxa.jp/en/research/projects/index.html)
+* [Italian Space Agency (ASI)](https://www.asi.it/en/)
+* [German Aerospace Centre (DLR)](https://www.dlr.de/en)
 * [Jaxa data products](https://www.eorc.jaxa.jp/ALOS/en/dataset/fnf_e.htm)
+* [ESA/JAXA/NASA dashboard](https://eodashboard.org/explore?poi=World-SMC)
 ## Key tools
 ### Websites
+* [GoC Firework: Daily smoke forecast maps](https://weather.gc.ca/firework/)
 * [Firesmoke.ca](https://firesmoke.ca/forecasts/current/)
 * [Hourly pm2.5 obs](https://cyclone.unbc.ca/aqmap/#5/53.671/-119.773)
 * [College of DuPage NEXLAB & satellite radar](https://weather.cod.edu/satrad/?parms=regional-ca_reg_west-natcolor-48-0-100-1&checked=map&colorbar=undefined)
@@ -62,6 +71,9 @@
 * [Viewing geom and spatial res](https://www.nrcan.gc.ca/maps-tools-and-publications/satellite-imagery-and-air-photos/tutorial-fundamentals-remote-sensing/microwave-remote-sensing/viewing-geometry-and-spatial-resolution/9341)
 
 ## Data
+* [GOES satellite data](https://eccc-msc.github.io/open-data/msc-data/obs_satellite/readme_satellite_en/)
+* [National snow and ice data centre](https://nsidc.org/data/explore-data)
+* [NOAA snow and ice products](https://www.ospo.noaa.gov/Products/land/snow.html)
 * [Canadian National Fire (Polygon) Database](https://cwfis.cfs.nrcan.gc.ca/ha/nfdb)
 * [USGS earth explorer](https://earthexplorer.usgs.gov/)
 * [SPOT data](https://regards.cnes.fr/user/swh/modules/60)
@@ -101,9 +113,23 @@
 * [Canada wildfire: Webinars and Training](https://www.canadawildfire.org/webinarsandcourses)
 * [Rob Skakun, National Burned Areas Composite(NBAC) Feb 18 2022](https://www.youtube.com/watch?v=yJX6kpnZEko)
 * [Mike Wotton, Lightning Fire Occurrence Preduction Modelling, July 8 2022](https://www.youtube.com/watch?v=UzwD9EXYS1Y)
+* [U. Toronto: Michael Wotton](https://academic.daniels.utoronto.ca/forestry/wotton-m/)
 * [Prometheus simulation software](http://www.firegrowthmodel.ca/prometheus/overview_e.php)
 * [how does fire think and act: Dana Hicks](https://podcasts.apple.com/ca/podcast/05-how-does-fire-think-and-act-guest-dana-hicks-bcws/)
 * [Drones in wildfire mgmt](https://en.wikipedia.org/wiki/Drones_in_wildfire_management)
+* [Wildland fire evacuations in Canada from 1980 to 2021](https://www.publish.csiro.au/WF/WF23097)
+* [A comparison of plume rise algorithms to stack plume measurements in the Athabasca oil sands](https://acp.copernicus.org/articles/18/14695/2018/)
+
+## Fire-related Remote-sensing
+* [Use of MODIS data to assess atmospheric aerosol before, during, and after community evacuations related to wildfire smoke](https://www.sciencedirect.com/science/article/abs/pii/S0034425715300158)
+* [Tracking Pyrometeors With Meteorological Radar Using Unsupervised Machine Learning](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2019GL084305)
+* [The 2018 fire season in North America as seen by TROPOMI: aerosol layer height intercomparisons and evaluation of model-derived plume heights](https://amt.copernicus.org/articles/13/1427/2020/)
+
+## Fire occurrence 
+* [Wotton & Martell, A lightning fire occurrence model for Ontario](https://cdnsciencepub.com/doi/abs/10.1139/x05-071)
+* [Woolford et al, The development and implementation of a human-caused wildland FOP system for Ontario](https://cdnsciencepub.com/doi/full/10.1139/cjfr-2020-0313)
+* [Phelps & Woolford, Comparing calibrated Stat and ML methods for wildland fire occurrence prediction](https://www.publish.csiro.au/wf/wf20139)
+* [Phelps & Woolford, Guidelines for effective evaluation and comparison of wildland FOP models](https://www.publish.csiro.au/WF/WF20134)
 
 ## Weather
 * [https://weather.gc.ca/astro/clds_vis_animation_e.html?id=nw&utc=00](https://weather.gc.ca/astro/clds_vis_animation_e.html?id=nw&utc=00)
@@ -165,3 +191,13 @@
 
 # Git
 *[On undoing, fixing, or removing commits in git](https://sethrobertson.github.io/GitFixUm/fixup.html)
+
+# USFS/USGS resources
+* [USFS: Remote Sensing](https://www.fs.usda.gov/research/inventory/remotesensing)
+* [Field Guide for Mapping Post-Fire Soil Burn Severity](https://www.fs.usda.gov/rm/pubs/rmrs_gtr243.pdf)
+* [USGS burned severity portal](https://burnseverity.cr.usgs.gov/)
+* [USGS ravg](https://burnseverity.cr.usgs.gov/ravg/)
+* [USGS baer](https://burnseverity.cr.usgs.gov/baer/)
+* [USFS RSAC](https://en.wikipedia.org/wiki/Remote_Sensing_Applications_Center)
+* [USFS GTAC](https://www.fs.usda.gov/about-agency/gtac)
+* [USFS post-fire veg condition](https://data.fs.usda.gov/geodata/rastergateway/ravg/index.php)
