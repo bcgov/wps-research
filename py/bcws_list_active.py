@@ -144,6 +144,7 @@ for s in selected:
           str(bb[1]) + ' ' + str(bb[0])]
     fp = 'Intersects(POLYGON((' + ','.join(fp) + ')))'
     print(fp)
+
     path = '/media/' + os.popen('whoami').read().strip() + '/disk41/active/'
     if not exists(path):
         path = '/home/' + os.popen('whoami').read().strip() + '/active/'
