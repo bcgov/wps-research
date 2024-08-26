@@ -70,6 +70,9 @@ for s in sources:
     a = os.system(c)
 
 # but now how do we run the SNAP we just built?
+# RUN SNAP! 
+a = os.system('/home/' + os.popen('whoami').read().strip() + '/GitHub/snap-desktop/snap-application/target/snap/bin')
+
 
 '''
 cd /home/username/GitHub/snap/snap-desktop/snap-application/target/snap/bin  # enter the folder with the entry point 
