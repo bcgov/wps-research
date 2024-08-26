@@ -1,4 +1,4 @@
-'''20240826 (last test date) building SNAP from source:
+'''revised 20240826, building SNAP from source:
 
 1) Note: assume SNAP repos will be cloned into the PRESENT working folder. WARNING: need to rename snap executable to (e.g.):
 esa-snap
