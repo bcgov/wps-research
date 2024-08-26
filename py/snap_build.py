@@ -1,6 +1,9 @@
 '''20240826 (last test date) building SNAP from source:
 
-1) Note: assume SNAP repos will be cloned into the PRESENT working folder.
+1) Note: assume SNAP repos will be cloned into the PRESENT working folder. WARNING: need to rename snap executable to (e.g.):
+esa-snap
+
+to make sure "snap" package manager and ESA SNAP software don't collide (i.e. your computer tries to run SNAP every time the OS tries to install new software..
 
 Background: 
 * How to build SNAP from sources: https://senbox.atlassian.net/wiki/spaces/SNAP/pages/10879039/How+to+build+SNAP+from+sources
@@ -21,11 +24,14 @@ for x, c in cmds:
 
 # SNAP needs java v. 8! 
 lines = [x.strip().split('/')[0] for x in os.popen('apt list --installed | grep jdk').readlines()]
-to_install = ['openjdk-11-jre', 'openjdk-11-jdk']
+to_install = ['openjdk-11-jre', 'openjdk-11-jdk', 'maven']
 print(lines)
 for x in to_install:
     if x not in lines:
         run('sudo apt install ' + x)
+
+# install intellij-idea-ultimate
+run("sudo snap install intellij-idea-ultimate --classic")
 
 # not sure if we need these commands
 a = os.system('sudo update-java-alternatives --list')
@@ -35,8 +41,10 @@ a = os.system('sudo update-alternatives --config javac')
 
 
 # where is java ?
-java_path = os.popen('readlink -f /usr/bin/java').read().strip()  # where is your java?
-print(java_path)
+# java_path = os.popen('readlink -f /usr/bin/javac').read().strip()  # where is your java?
+# print(java_path)
+
+java_path = os.popen('sudo update-java-alternatives --list').readlines()[-1].split()[-1]
 
 bashrc = '/home/' + os.popen('whoami').read().strip() + os.path.sep + '.bashrc'
 lines = [x.rstrip() for x in open(bashrc).readlines()]  # existing bashrc lines
@@ -52,10 +60,17 @@ print('+w', bashrc)
 open(bashrc, 'wb').write(('\n'.join(new_lines)).encode())
 
 # assuming your java is set up:
-print("in each toolbox folder:")
-print('mvn clean install  -DskipTests=true')
+# print("in each toolbox folder:")
 
-print("sudo snap install intellij-idea-ultimate --classic")
+source = ('source /home/' + os.popen('whoami').read().strip() + '/.bashrc')
+print(c)
+
+# build the repos in parallel
+for s in sources:
+    c = 'cd ' + s + '; mvn clean install  -DskipTests=true & '
+    a = os.system(c)
+
+# but now how do we run the SNAP we just built?
 
 # https://senbox.atlassian.net/wiki/spaces/SNAP/pages/24051775/IntelliJ+IDEA
 # https://senbox.atlassian.net/wiki/spaces/SNAP/pages/24051775/IntelliJ+IDEA#IntelliJIDEA-RunSNAPDesktopwithadditionalToolboxes(S1%2CS2%2CS3%2C...)
