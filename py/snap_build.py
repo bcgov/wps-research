@@ -39,7 +39,6 @@ a = os.system('sudo update-alternatives --config java')
 a = os.system('java -version')
 a = os.system('sudo update-alternatives --config javac')
 
-
 # where is java ?
 # java_path = os.popen('readlink -f /usr/bin/javac').read().strip()  # where is your java?
 # print(java_path)
@@ -67,10 +66,18 @@ print(c)
 
 # build the repos in parallel
 for s in sources:
-    c = 'cd ' + s + '; mvn clean install  -DskipTests=true & '
+    c = 'cd ' + s + '; mvn clean install  -DskipTests=true '  # add & for parallel
     a = os.system(c)
 
 # but now how do we run the SNAP we just built?
+
+'''
+cd /home/username/GitHub/snap/snap-desktop/snap-application/target/snap/bin  # enter the folder with the entry point 
+vim ../etc/snap.conf  # edit the parameters incl. the cluster parameter
+#  clusters' paths separated by path.separator (semicolon on Windows, colon on Unix). Path needs to be full/explicit. And, for example to add s2tbx shown only:
+#  extra_clusters="/home/username/GitHub/snap/s2tbx/s2tbx-kit/target/netbeans_clusters/s2tbx"
+./snap  # run snap with the clusters indicated in the ../etc/snap.conf file ```
+'''
 
 # https://senbox.atlassian.net/wiki/spaces/SNAP/pages/24051775/IntelliJ+IDEA
 # https://senbox.atlassian.net/wiki/spaces/SNAP/pages/24051775/IntelliJ+IDEA#IntelliJIDEA-RunSNAPDesktopwithadditionalToolboxes(S1%2CS2%2CS3%2C...)
