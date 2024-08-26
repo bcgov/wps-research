@@ -13,7 +13,7 @@ from misc import run, err
 import sys
 import os
 
-sources = ['snap-engine', 'snap-desktop', 's1tbx', 's2tbx', 's3tbx']
+sources = ['snap-engine', 'snap-desktop', 's1tbx', 's2tbx'] # , 's3tbx']
 cmds = [[x, 'git clone https://github.com/senbox-org/' + x + '.git'] for x in sources]
 
 for x, c in cmds:
