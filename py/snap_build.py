@@ -13,7 +13,7 @@ from misc import run, err
 import sys
 import os
 
-sources = ['snap-engine', 'snap-desktop', 's1tbx', 's2tbx'] # , 's3tbx']
+sources = ['microwave-toolbox', 's2tbx', 'snap-engine', 'snap-desktop', 'snap-installer'] # , 's3tbx']
 cmds = [[x, 'git clone https://github.com/senbox-org/' + x + '.git'] for x in sources]
 
 for x, c in cmds:
@@ -84,10 +84,3 @@ vim ../etc/snap.conf  # edit the parameters incl. the cluster parameter
 # https://senbox.atlassian.net/wiki/spaces/SNAP/pages/24051775/IntelliJ+IDEA
 # https://senbox.atlassian.net/wiki/spaces/SNAP/pages/24051775/IntelliJ+IDEA#IntelliJIDEA-RunSNAPDesktopwithadditionalToolboxes(S1%2CS2%2CS3%2C...)
 
-
-'''
-e.g. possible commands:
-sudo update-java-alternatives -s java-1.8.0-openjdk-amd64
-export JAVA_HOME=/usr/lib/jvm/java-1.8.0-openjdk-amd64/
-export PATH=$PATH:$JAVA_HOME
-'''
