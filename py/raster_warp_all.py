@@ -50,9 +50,10 @@ def processing(f):
                     '-r bilinear' if use_bilinear else '-r nearest',
                     f,
                     of])
-    run(cmd)
-    run('envi_header_cleanup.py ' + oh)
-    run('rm ' + oh + '.bak')
-    run('rm ' + of + '.aux.xml')
+    a = run(cmd, False)
+    if a == 0:
+        run('envi_header_cleanup.py ' + oh)
+        run('rm ' + oh + '.bak')
+        run('rm ' + of + '.aux.xml')
 
 parfor(processing, files, 16)
