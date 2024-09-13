@@ -42,18 +42,28 @@ int main(int argc, char ** argv){
   nf = np * nband;
 
   float * out = falloc(nf); // out but
+  float * out_n = falloc(nf); // non-nan count
+
   str ofn(argv[argc -1]); // output file name
   str ohn(hdr_fn(ofn, true)); // out header file name
 
   for0(i, nf) out[i] = 0.;
+  for0(i, nf) out_n[i] = 0.;
 
   for0(i, n_rasters){
     float * dat = bread(str(argv[1 + i]), nrow, ncol, nband);
-    for0(k, nf) out[k] += dat[k];
+    for0(k, nf){
+      if(!isnan(dat[k])){
+        out[k] += dat[k];
+        out_n[k] += 1.;
+      }
+    }
     free(dat);
   }
-  float frac = 1. / ((float)n_rasters);
-  for0(k, nf) out[k] *= frac;
+
+  // divide by n
+  for0(k, nf) out[k] /= out_n[k];
+ 
 
   vector<str> bn(bnames[0]);
   bn.clear();
