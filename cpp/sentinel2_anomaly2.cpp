@@ -8,20 +8,15 @@ int main(int argc, char ** argv){
   }
 
   size_t nrow, ncol, nband, np, i, j, k, n, ij;
-  float * out, * dat1, *dat2, * b11, * b21, * b31, *b12, *b22, *b32, *out2, *out3;
+  float * out, * dat1, *dat2, * b11, * b21, * b31, *b12, *b22, *b32; 
   long int bi[3];
- 
 
   str fn1(argv[1]); /* binary files */
   str fn2(argv[2]);
   str hfn(hdr_fn(fn1)); /* headers */
 
-  str ofn1(fn1 + "_ratio1.bin");
-  str ofn2(fn1 + "_ratio2.bin");
-  str ofn3(fn1 + "_ratio3.bin");
-  str hf2(hdr_fn(ofn1, true));
-  str hf3(hdr_fn(ofn2, true));
-  str hf4(hdr_fn(ofn3, true));
+  str ofn(fn1 + "_" + fn2 + "_ratio.bin");
+  str ohn(hdr_fn(ofn, true));
 
   vector<string> s, t; /* band names + ones to use */
   t.push_back(str("2190nm"));
@@ -60,38 +55,23 @@ int main(int argc, char ** argv){
   b22 = &dat2[bi[1]];
   b32 = &dat2[bi[2]];
 
-  out = falloc(np);
-  out2 = falloc(np);
-  out3 = falloc(np);
+  out = falloc(np * 3);
   for0(i, np){
-    out[i] =  (b12[i] - b11[i]) / (b12[i] + b11[i]);
-    out2[i] = (b22[i] - b21[i]) / (b22[i] + b21[i]);
-    out3[i] = (b32[i] - b31[i]) / (b32[i] + b31[i]);
+    out[i + (2*np)]   = (b12[i] - b11[i]) / (b12[i] + b11[i]);
+    out[i + np]      = (b22[i] - b21[i]) / (b22[i] + b21[i]);
+    out[i]           = (b32[i] - b31[i]) / (b32[i] + b31[i]);
   }
 
   vector<str> bn;
-  bn.push_back(date_s + str(" sentinel2_anomaly.cpp"));
-  hwrite(hf2, nrow, ncol, 1, 4, bn);
-  bwrite(out, ofn1, nrow, ncol, 1);
-
-  bn.clear();
-  bn.push_back(date_s + str(" sentinel2_anomaly.cpp"));
-  hwrite(hf3, nrow, ncol, 1, 4, bn);
-  bwrite(out2, ofn2, nrow, ncol, 1);
-
-  bn.clear(); 
-  bn.push_back(date_s + str(" sentinel2_anomaly.cpp"));
-  hwrite(hf4, nrow, ncol, 1, 4, bn);
-  bwrite(out3, ofn3, nrow, ncol, 1);
-
-  run(str("envi_header_copy_mapinfo.py ") + hfn + str(" ") + hf2);
-  run(str("envi_header_copy_mapinfo.py ") + hfn + str(" ") + hf3);
-  run(str("envi_header_copy_mapinfo.py ") + hfn + str(" ") + hf4);
+  bn.push_back(date_s + str("(b32[i] - b31[i]) / (b32[i] + b31[i]) sentinel2_anomaly.cpp"));
+  bn.push_back(date_s + str("(b22[i] - b21[i]) / (b22[i] + b21[i]) sentinel2_anomaly.cpp"));
+  bn.push_back(date_s + str("(b12[i] - b11[i]) / (b12[i] + b11[i]) sentinel2_anomaly.cpp"));
   
-
+  hwrite(ohn, nrow, ncol, 3, 4, bn);
+  bwrite(out, ofn, nrow, ncol, 3);
+  run(str("envi_header_copy_mapinfo.py ") + hfn + str(" ") + ohn);  
   free(dat1);
   free(dat2);
   free(out);
-
   return 0;
 }
