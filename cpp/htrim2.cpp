@@ -72,7 +72,11 @@ int main(int argc, char ** argv){
   n = fwrite(out, sizeof(float), np * nband, f);
   fclose(f);
 
-  free(dat); free(out);
-  free(mn); free(mx);
+  free(dat);
+  free(out);
+  free(mn);
+  free(mx);
+
+  // NEED TO DO THE ENVI_COPY_HEADER here
   return 0;
 }
