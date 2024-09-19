@@ -57,9 +57,9 @@ int main(int argc, char ** argv){
 
   out = falloc(np * 3);
   for0(i, np){
-    out[i + (2*np)]   = (b12[i] - b11[i]) / (b12[i] + b11[i]);
+    out[i]   = (b12[i] - b11[i]) / (b12[i] + b11[i]);
     out[i + np]      = (b22[i] - b21[i]) / (b22[i] + b21[i]);
-    out[i]           = (b32[i] - b31[i]) / (b32[i] + b31[i]);
+    out[i + np + np]           = (b32[i] - b31[i]) / (b32[i] + b31[i]);
   }
 
   vector<str> bn;
