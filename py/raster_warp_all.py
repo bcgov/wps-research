@@ -13,7 +13,7 @@ Note: from GDAL documentation:
     mode selects the value which appears most often of all the sampled points.'''
 import os
 import sys
-import argparsea
+import argparse
 import multiprocessing as mp
 from misc import err, run, args, exists, pd, sep, parfor
 # message = "python3 raster_warp_all.py [input raster folder] [output raster folder] # [extra arg: use NN resampling instead of bilinear (default)]"
