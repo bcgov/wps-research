@@ -13,7 +13,8 @@ Note: from GDAL documentation:
     mode selects the value which appears most often of all the sampled points.'''
 import os
 import sys
-import argparse
+import argparsea
+import multiprocessing as mp
 from misc import err, run, args, exists, pd, sep, parfor
 # message = "python3 raster_warp_all.py [input raster folder] [output raster folder] # [extra arg: use NN resampling instead of bilinear (default)]"
 
@@ -22,6 +23,8 @@ parser.add_argument("input_raster_folder", type=str, help="input raster folder")
 parser.add_argument("output_raster_folder", type=str, help="output raster folder")
 parser.add_argument("-n", "--nearest_neighbour", action="count", default=0, help="use nearest neighbour resampling instead of bilinear")
 parser.add_argument("-s", "--scaling_factor", type=float, default=2, help="integer scaling factor")
+parser.add_argument("-c", "--cpu_count", type=int, default=mp.cpu_count(), help="cpu count: decrease for large files")
+
 args = parser.parse_args()
 # print(args)
 use_bilinear = args.nearest_neighbour == 0
@@ -56,4 +59,5 @@ def processing(f):
         run('rm ' + oh + '.bak')
         run('rm ' + of + '.aux.xml')
 
-parfor(processing, files, 16)
+# switch it on and make it go
+parfor(processing, files, args.cpu_count)
