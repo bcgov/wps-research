@@ -1,4 +1,6 @@
 '''20240527 plot sentinel2 products (filenames beginning with frame ID) 
+
+20241220: added support for *mrap.bin files
 '''
 from misc import err, run, parfor
 import os
@@ -10,6 +12,7 @@ lines = [[line.split('_')[2], line] for line in lines]
 lines.sort()
 lines = [line[1] for line in lines]
 
+lines += [x.strip() for x in os.popen('ls -1 *mrap.bin').readlines()]
 
 cmds = ["raster_plot.py " + line + " 1 2 3 1 " for line in lines]
 
