@@ -1,4 +1,4 @@
-# stack raster files
+# stack raster files # should really not do a cumulative / sequential header modification
 import os
 import sys
 from misc import args, sep, exists, pd, run, err
