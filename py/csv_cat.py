@@ -14,7 +14,7 @@ if len(args) == 1:
     print("default: cat all csv present in existing folder")
 else:
     if len(args) < 3:  # need to specify at least two files to concatenate, to proceed 
-        err("csv_cat [input csv file 1] .. [input csv file n]")
+        err("csv_cat [input csv file 1] .. [input csv file n] # alternate option: no arguments: concatenate all csv files in present working directory")
     files = args[1:]  # use files specified on the command-line
 
 dat, f0 = {}, None
