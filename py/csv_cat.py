@@ -17,8 +17,12 @@ else:
 dat = {}
 f0 = None
 for f in files:
-    print('+r', f)
     lines = [x.strip() for x in open(f).readlines()]
+    print("+r", f, 'EMPTY FILE' if len(lines) == 0 else '')
+
+    if len(lines) == 0:
+        continue
+
     dat[f] = lines
     
     if f0 is None:
@@ -27,8 +31,18 @@ for f in files:
         if lines[0] != f0:
             err("headers not exactly equal")
 print(f0)
+
+out_file = open('csv_cat.csv', 'w')
+out_file.write(f0) # write the header line once
+
 for f in files:
-    lines = dat[f][1:]
+    print(f)
+    if f not in dat:
+        continue
+
+    lines = dat[f][1:]  # Assuming you're skipping the first line
+
     for line in lines:
-        print(line)
-    
+        out_file.write("\n" + line)
+
+out_file.close()
