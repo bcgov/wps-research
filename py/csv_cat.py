@@ -3,17 +3,21 @@ Output on stdout
 '''
 from misc import err
 import sys
+import os
 
-args = sys.argv
+args, files = sys.argv, [x.strip() for x in os.popen('ls -1 *.csv').readlines()]
 
-if len(args) < 3:
-    err("csv_cat [input csv file 1] .. [input csv file n]")
-
-files = args[1:]
+if str(args) == "['']":
+    print("default: cat all csv")
+else:
+    if len(args) < 3:
+        err("csv_cat [input csv file 1] .. [input csv file n]")
+    files = args[1:]
 
 dat = {}
 f0 = None
 for f in files:
+    print('+r', f)
     lines = [x.strip() for x in open(f).readlines()]
     dat[f] = lines
     
