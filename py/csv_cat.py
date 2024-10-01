@@ -1,6 +1,6 @@
 '''20230222 concatenate csv files, no validation, matching header lines assumed
-Output to file csv_cat.csv
-'''
+20241001 Output to file csv_cat.csv
+simple CSV format assumed'''
 from misc import err
 import sys
 import os
@@ -43,6 +43,9 @@ for f in files:
     lines = dat[f][1:]  # Assuming you're skipping the first line
 
     for line in lines:
-        out_file.write("\n" + line)
+        split_line = line.split(',')
+        if len(split_line) != len(f0):
+            err('nonsimple CSV format')
+        out_file.write("\n" + ','.join([x.strip() for x in split_line])) 
 
 out_file.close()
