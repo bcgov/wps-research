@@ -7,7 +7,7 @@ import os
 
 args, files = sys.argv, [x.strip() for x in os.popen('ls -1 *.csv').readlines()]
 
-if str(args) == "['']":
+if len(args) == 1:
     print("default: cat all csv")
 else:
     if len(args) < 3:
