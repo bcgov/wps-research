@@ -14,8 +14,7 @@ else:
         err("csv_cat [input csv file 1] .. [input csv file n]")
     files = args[1:]
 
-dat = {}
-f0 = None
+dat, f0 = {}, None
 for f in files:
     lines = [x.strip() for x in open(f).readlines()]
     print("+r", f, 'EMPTY FILE' if len(lines) == 0 else '')
@@ -30,7 +29,8 @@ for f in files:
     else:
         if lines[0] != f0:
             err("headers not exactly equal")
-print(f0)
+
+f0_split = f0.split(',')
 
 out_file = open('csv_cat.csv', 'w')
 out_file.write(f0) # write the header line once
@@ -40,12 +40,13 @@ for f in files:
     if f not in dat:
         continue
 
-    lines = dat[f][1:]  # Assuming you're skipping the first line
+    lines = dat[f][1:]  # Assume skipping the first line to avoid repeating header
 
     for line in lines:
         split_line = line.split(',')
-        if len(split_line) != len(f0):
-            err('nonsimple CSV format')
-        out_file.write("\n" + ','.join([x.strip() for x in split_line])) 
 
+        if len(split_line) != len(f0_split):
+            err('nonsimple CSV format')
+
+        out_file.write("\n" + ','.join([x.strip() for x in split_line])) 
 out_file.close()
