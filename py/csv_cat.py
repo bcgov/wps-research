@@ -1,5 +1,5 @@
 '''20230222 concatenate csv files, no validation, matching header lines assumed
-Output on stdout
+Output to file csv_cat.csv
 '''
 from misc import err
 import sys
