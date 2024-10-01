@@ -1,18 +1,21 @@
-'''20230222 concatenate csv files, no validation, matching header lines assumed
+'''20230222 concatenate csv files, does not apply full validation/QA, matching header lines at beginning of each input file assumed
 20241001 Output to file csv_cat.csv
 simple CSV format assumed'''
-from misc import err
+from misc import err, args, exists
 import sys
 import os
 
-args, files = sys.argv, [x.strip() for x in os.popen('ls -1 *.csv').readlines()]
+if exists('csv_cat.csv'):
+    err('output file: csv_cat.csv already exists')
+
+files = [x.strip() for x in os.popen('ls -1 *.csv').readlines()]  # all csv files in present folder
 
 if len(args) == 1:
-    print("default: cat all csv")
+    print("default: cat all csv present in existing folder")
 else:
-    if len(args) < 3:
+    if len(args) < 3:  # need to specify at least two files to concatenate, to proceed 
         err("csv_cat [input csv file 1] .. [input csv file n]")
-    files = args[1:]
+    files = args[1:]  # use files specified on the command-line
 
 dat, f0 = {}, None
 for f in files:
@@ -22,7 +25,7 @@ for f in files:
     if len(lines) == 0:
         continue
 
-    dat[f] = lines
+    dat[f] = lines  # record the lines from this file
     
     if f0 is None:
         f0 = lines[0]
@@ -31,9 +34,8 @@ for f in files:
             err("headers not exactly equal")
 
 f0_split = f0.split(',')
-
 out_file = open('csv_cat.csv', 'w')
-out_file.write(f0) # write the header line once
+out_file.write(f0) # write the header line out just once
 
 for f in files:
     print(f)
@@ -48,5 +50,5 @@ for f in files:
         if len(split_line) != len(f0_split):
             err('nonsimple CSV format')
 
-        out_file.write("\n" + ','.join([x.strip() for x in split_line])) 
+        out_file.write("\n" + ','.join([x.strip() for x in split_line]))  # add newline at the front so there isn't any extra newline at the end of the file
 out_file.close()
