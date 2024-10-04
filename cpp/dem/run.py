@@ -6,4 +6,5 @@ def run(c):
     return a
 
 run("make")
-run("./dem dat/stack.bin")
+run("htrim2 dat/stack.bin 2. 2.")
+run("./dem dat/stack.bin_ht.bin")
