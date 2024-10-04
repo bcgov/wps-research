@@ -12,7 +12,7 @@ lines = [[line.split('_')[2], line] for line in lines]
 lines.sort()
 lines = [line[1] for line in lines]
 
-lines += [x.strip() for x in os.popen('ls -1 *mrap.bin').readlines()]
+lines += [x.strip() for x in os.popen('ls -1 *mrap*bin').readlines()]
 
 cmds = ["raster_plot.py " + line + " 1 2 3 1 " for line in lines]
 
