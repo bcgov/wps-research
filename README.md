@@ -39,6 +39,10 @@ Includes A) data integration B) routines applying or implementing supervised and
 ##  Interactive mapping w BCWS FTL MVP software: end-to-end DSS
 <img src="data/output/20210127_mvp.png" width="650" height="264">
 
+## Friendly repos
+[Fire behaviour R&D space](https://github.com/bcgov/wps-fire-behaviour)
+[Fire mapping intro tutorial using Sentinel-2 and GOES satellites](https://github.com/bcgov/wps-fire-mapping-tutorial-multisource-gee)
+
 ## Presentations
 * Satellite Fire Mapping: BCWS Operational Trial 2022, BC Gov GIS CoP F2F, Nov 30, 2022
 * Remote Sensing Show and Tell, WildfireSat Mission Knowledge Exchange (KE) Group Meeting, Nov 29, 2022
