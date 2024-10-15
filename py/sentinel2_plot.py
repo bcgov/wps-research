@@ -15,7 +15,13 @@ lines = [line[1] for line in lines]
 lines += [x.strip() for x in os.popen('ls -1 *mrap*.bin').readlines()]
 # lines += [x.strip() for x in os.popen('ls -1 *mrap*bin').readlines()]
 
-cmds = ["raster_plot.py " + line + " 1 2 3 1 " for line in lines]
+cmds = []
+
+for line in lines:
+    out_file = 'plot_1_' + line + '_1_2_3_rgb.png'
+    if not os.path.exists(out_file):
+        cmds += ["raster_plot.py " + line + " 1 2 3 1 " for line in lines]
+    # plot_1_20230902_mrap.bin_1_2_3_rgb.png
 
 def r(x):
     return os.system(x)
