@@ -19,6 +19,10 @@ max_height = 0
 
 for png in png_files:
     with Image.open(png) as img:
+
+        if img is None:
+            continue
+
         width, height = img.size
         max_width = max(max_width, width)
         max_height = max(max_height, height)
@@ -29,6 +33,9 @@ print(f"Largest dimensions found: {max_width}x{max_height}")
 with open('filelist.txt', 'w') as file:
     for png in png_files:
         with Image.open(png) as img:
+            if img is None:
+                continue
+
             # Resize the image
             resized_img = img.resize((max_width, max_height), Image.ANTIALIAS)
             resized_png = f"resized_{png}"  # New file name for the resized image
