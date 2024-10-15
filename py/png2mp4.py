@@ -13,34 +13,35 @@ if not png_files:
     print("No PNG files found in the current directory.")
     exit(1)
 
-# Check dimensions of the PNG files
-dimensions = None
+# Determine the largest dimensions
+max_width = 0
+max_height = 0
 
 for png in png_files:
     with Image.open(png) as img:
-        if dimensions is None:
-            dimensions = img.size  # (width, height)
-        elif dimensions != img.size:
-            print(f"Dimension mismatch: {png} has size {img.size}, expected {dimensions}.")
-            exit(1)
+        width, height = img.size
+        max_width = max(max_width, width)
+        max_height = max(max_height, height)
 
-print(f"All images have the same dimensions: {dimensions}")
+print(f"Largest dimensions found: {max_width}x{max_height}")
 
-# Write the file names to filelist.txt
-with open('.png2mp4_filelist.txt', 'w') as file:
+# Resize images to match the largest dimensions and create filelist.txt
+with open('filelist.txt', 'w') as file:
     for png in png_files:
-        file.write(f"file '{png}'\n")
+        with Image.open(png) as img:
+            # Resize the image
+            resized_img = img.resize((max_width, max_height), Image.ANTIALIAS)
+            resized_png = f"resized_{png}"  # New file name for the resized image
+            resized_img.save(resized_png)  # Save the resized image
+            file.write(f"file '{resized_png}'\n")
 
-# Use the common dimensions
-width, height = dimensions
-
-# Run the ffmpeg command with scaling
+# Run the ffmpeg command with the resized images
 ffmpeg_command = [
     'ffmpeg',
     '-f', 'concat',
     '-safe', '0',
-    '-i', '.png2mp4_filelist.txt',
-    '-vf', f'scale={width}:{height}',
+    '-i', 'filelist.txt',
+    '-vf', f'scale={max_width}:{max_height}',
     '-c:v', 'libx264',
     '-pix_fmt', 'yuv420p',
     'output.mp4'
@@ -48,3 +49,8 @@ ffmpeg_command = [
 
 subprocess.run(ffmpeg_command)
 
+# Optionally, clean up resized images after video creation
+for png in png_files:
+    resized_png = f"resized_{png}"
+    if os.path.exists(resized_png):
+        os.remove(resized_png)
