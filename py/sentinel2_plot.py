@@ -20,7 +20,7 @@ cmds = ["raster_plot.py " + line + " 1 2 3 1 " for line in lines]
 def r(x):
     return os.system(x)
 
-parfor(r, cmds, 8)
+parfor(r, cmds, 4)
 
 '''Now: prefix the S2.png files by date:
 '''
