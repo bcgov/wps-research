@@ -5,13 +5,17 @@
 from misc import err, run, parfor, hdr_fn, read_hdr
 import os
 
-lines = [x.strip() for x in os.popen('ls -1 S*.bin *mrap*.bin *BARC*.bin').readlines()]
+lines = [x.strip() for x in os.popen('ls -1 S*.bin *mrap*bin').readlines()]
+# add BARC files
+print(lines)
 
 # process in order
-lines = [[line.split('_')[2], line] for line in lines]
+#lines = [[line.split('_')[2], line] for line in lines]
 lines.sort()
-lines = [line[1] for line in lines]
+# lines = [line[1] for line in lines]
 
+
+print(lines)
 cmds = []
 
 for line in lines:
