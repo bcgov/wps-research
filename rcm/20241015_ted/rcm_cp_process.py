@@ -1,4 +1,6 @@
 '''20241015 process RCM data (in zip format) retrieved from EODMS
+
+Join the raster and csv data?
 '''
 FILTER_SIZE = 3
 import os
@@ -35,7 +37,8 @@ name
 crs
 features
 '''
-stuff=['Acquisition Start Date',
+stuff=['Granule',
+       'Acquisition Start Date',
        'Acquisition End Date',
        'Satellite ID',
        'Beam Mnemonic',
@@ -59,12 +62,15 @@ for f in j['features']:
 
     my_list = []
     for s in stuff:
-        if s not in data:
-            data[s] = []
-        data[s] += [p[s]]
         my_list += [p[s]]
     print(my_list)
-    out_csv.write(('\n' + ','.join(my_list)).encode())
+    out_csv.write(('\n' + ','.join([str(x) for x in my_list])).encode())
+
+    if Granule not in data:
+        data[Granule] = {}
+
+    for s in stuff:
+        data[Granule][s] = p[s]
 out_csv.close()
 
 for d in data:
@@ -79,12 +85,21 @@ for d in data:
 n = 0
 
 for z in zip_files:
-    print(z)
+    Granule = ('.'.join(z.split('.')[:-1])).split(sep)[-1]
+    
+    if str(data[Granule]['Relative Orbit']) != '84':
+        print(Granule, z, 'PASS')
+        continue
+    else:
+        print(Granule, z)
+
+    if Granule not in data:
+        err('frame not found in metadata')
     p_0 = z 
     p_1 = z + '_TF.dim'
     p_2 = z + '_TF_TC.dim'
     p_3 = z + '_TF_TC_box.dim'
-
+ 
     if not exist(p_1) and not exist(p_2) and not exist(p_3):
         run([snap,
              'Terrain-Flattening',
@@ -99,7 +114,7 @@ for z in zip_files:
              '-Ssource=' + p_1,
              '-t ' + p_2])  # output
       
-
+   
     if not exist(p_3):
         run([snap, 'Polarimetric-Speckle-Filter',
             '-Pfilter="Box Car Filter"',
@@ -107,7 +122,7 @@ for z in zip_files:
             '-Ssource=' + p_2,
             '-t ' + p_3]) # output
     n += 1
-    if n > 1:
+    if n > 2:
         sys.exit(1)
 
 '''
