@@ -87,7 +87,7 @@ n = 0
 for z in zip_files:
     Granule = ('.'.join(z.split('.')[:-1])).split(sep)[-1]
 
-    if str(data[Granule]['Relative Orbit']) != '84' or str(data[Granule]['Satellite ID']) != 'RCM-1':
+    if str(data[Granule]['Relative Orbit']) != '84': #  or str(data[Granule]['Satellite ID']) != 'RCM-1':
         print(Granule, z, 'PASS')
         continue
     else:
@@ -130,6 +130,6 @@ for z in zip_files:
             '-Ssource=' + p_3,
             '-t ' + p_4]) # output
     n += 1
-    if n > 2:
-        sys.exit(1)
+    #if n > 2:
+    #    sys.exit(1)
 
