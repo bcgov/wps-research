@@ -3,6 +3,7 @@
 FILTER_SIZE = 7
 import os
 import sys
+import glob
 sep = os.path.sep
 my_path = sep.join(os.path.abspath(__file__).split(sep)[:-1]) + sep
 sys.path.append(my_path + ".." + sep + '..' + sep + 'py')
@@ -21,10 +22,14 @@ if not exist(snap):
 
 print(snap)
 
-dirs = [f for f in os.listdir() if os.path.isdir(f)]
-# print(dirs)
+zip_files = glob.glob(os.path.join(os.getcwd(), 'RCM*.zip'))
+zip_files.sort()
+print(zip_files)
 
-sys.exit(1)
+
+for z in zip_files:
+    print(z)
+    sys.exit(1)
 
 i = 0
 for d in dirs:
