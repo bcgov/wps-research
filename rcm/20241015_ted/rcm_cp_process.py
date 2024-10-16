@@ -5,7 +5,7 @@ import os
 import sys
 sep = os.path.sep
 my_path = sep.join(os.path.abspath(__file__).split(sep)[:-1]) + sep
-sys.path.append(my_path + ".." + sep + 'py')
+sys.path.append(my_path + ".." + sep + '..' + sep + 'py')
 from misc import pd, sep, exist, args, cd, err
 
 def run(x):
@@ -24,6 +24,7 @@ print(snap)
 dirs = [f for f in os.listdir() if os.path.isdir(f)]
 # print(dirs)
 
+sys.exit(1)
 
 i = 0
 for d in dirs:
