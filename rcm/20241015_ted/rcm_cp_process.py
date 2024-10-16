@@ -58,7 +58,7 @@ for f in j['features']:
     Granule = p['Granule']
     z = Granule + '.zip'
     if not os.path.exists(z):
-        err('data not found: ' + z)
+        print('data not found: ' + z)
 
     my_list = []
     for s in stuff:
@@ -86,41 +86,49 @@ n = 0
 
 for z in zip_files:
     Granule = ('.'.join(z.split('.')[:-1])).split(sep)[-1]
-    
-    if str(data[Granule]['Relative Orbit']) != '84':
+
+    if str(data[Granule]['Relative Orbit']) != '84' or str(data[Granule]['Satellite ID']) != 'RCM-1':
         print(Granule, z, 'PASS')
         continue
     else:
-        print(Granule, z)
+        print(Granule, z, "RUN *** ")
 
     if Granule not in data:
         err('frame not found in metadata')
     p_0 = z 
-    p_1 = z + '_TF.dim'
-    p_2 = z + '_TF_TC.dim'
-    p_3 = z + '_TF_TC_box.dim'
+    p_1 = z + '_MLK.dim'
+    p_2 = z + '_MLK_TF.dim'
+    p_3 = z + '_MLK_TF_TC.dim'
+    p_4 = z + '_MLK_TF_TC_box.dim'
  
-    if not exist(p_1) and not exist(p_2) and not exist(p_3):
+    if not exist(p_1) and not exist(p_2) and not exist(p_3) and not exist(p_4):
         run([snap,
-             'Terrain-Flattening',
+             'Multilook',
+             '-PnAzLooks=4',
+             '-PnRgLooks=4',
              '-Ssource=' + p_0,
              '-t ' + p_1])
 
-    if not exist(p_2) and not exist(p_3):
+    if not exist(p_2) and not exist(p_3) and not exist(p_4):
+        run([snap,
+             'Terrain-Flattening',
+             '-Ssource=' + p_1,
+             '-t ' + p_2])
+
+    if not exist(p_3) and not exist(p_4):
         run([snap,
              'Terrain-Correction',
              '-PnodataValueAtSea=true',
              '-PoutputComplex=true',
-             '-Ssource=' + p_1,
-             '-t ' + p_2])  # output
-      
+             '-Ssource=' + p_2,
+             '-t ' + p_3])  # output
    
-    if not exist(p_3):
+    if not exist(p_4):
         run([snap, 'Polarimetric-Speckle-Filter',
             '-Pfilter="Box Car Filter"',
             '-PfilterSize=' + str(FILTER_SIZE),
-            '-Ssource=' + p_2,
-            '-t ' + p_3]) # output
+            '-Ssource=' + p_3,
+            '-t ' + p_4]) # output
     n += 1
     if n > 2:
         sys.exit(1)
@@ -162,7 +170,7 @@ Parameter Options:
   -PsourceBands=<string,string,string,...>    The list of source bands.
 '''
 
-
+'''
 i = 0
 for d in dirs:
     print("i=", str(i + 1), "of", str(len(dirs)))
@@ -221,7 +229,6 @@ for d in dirs:
             ' -PdemName="Copernicus 30m Global DEM"',
             '-t ' + p_5])  # output
     print(p_5)
-    '''
     if not exist(p_6):
         run([snap, 'Polarimetric-Speckle-Filter',
             '-Pfilter="Box Car Filter"',
@@ -229,7 +236,9 @@ for d in dirs:
             '-Ssource=' + p_5,
             '-t ' + p_6]) # output
     print(p_6)
-    '''
     # sys.exit(1)  # comment out to run on first set only
 
     i += 1
+
+
+'''
