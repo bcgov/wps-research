@@ -1,5 +1,8 @@
 '''20241015 process RCM data (in zip format) retrieved from EODMS
 
+ eodms -c RCM -g kamloops_afton_fire_weather_station.json -s 2023-06-14 -e 2024-09-26   -pt MLC --submit-order 
+ eodms -c RCM --order-ids  order_ids.txt
+
 Join the raster and csv data?
 '''
 FILTER_SIZE = 3
