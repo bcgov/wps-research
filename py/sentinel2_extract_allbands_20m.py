@@ -118,12 +118,12 @@ def extract(file_name):
         print(band_name)
         d_out = arrays[str(m)]
         print("****", str(m), d_out.shape)
-        try:
+
+        if "{'BANDNAME': 'CLD'}" in arrays:
             print(arrays["{'BANDNAME': 'CLD'}"])
-        except:
-            pass
+
         print(arrays.keys())
-        print("d_out", d_out)
+        # print("d_out", d_out)
         rb.WriteArray(d_out) # arrays[str(m)])
         rb.SetDescription(' '.join([ds,  # dates string
                                     str(int(px_sx)) + 'm:',  # resolution
@@ -133,7 +133,7 @@ def extract(file_name):
         bi += 1
     
     stack_ds = None
-    hdr_f =  ('.'.join(file_name.split('.')[:-1])) + '.hdr' #  file_name[:-4] + '.hdr'
+    hdr_f =  stack_fn[:-4] + '.hdr'
     envi_header_cleanup([None, hdr_f])
     xml_f = stack_fn + '.aux.xml'
     hdr_b = hdr_f + '.bak'
