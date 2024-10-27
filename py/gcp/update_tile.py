@@ -129,7 +129,7 @@ cloud_covers = [x.strip() for x in open(ip + 'index.csv:CLOUD_COVER').readlines(
 for i in range(len(line_idx)):
     j = line_idx[i]
     if MAX_CLOUD == 100.:
-        line_idx.match += [j]
+        line_idx_match += [j]
     else:
         try:
             cloud_cover = float(cloud_covers[j]) # print(j, cloud_cover, product_id[j])
