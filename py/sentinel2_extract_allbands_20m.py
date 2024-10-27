@@ -1,9 +1,19 @@
 '''
+20241027 this is now the default downloader script for all-bands research
 20240209 revised from sentinel2_extract_cloudfree_allbands.py to extract regardless of cloudfree
 20230731 revised from sentinel2_extract_cloudfree.py to include all bands.
 
-20230605 sentinel2_extract_swir.py'''
-from misc import err, args, exist, run, parfor
+20230605 sentinel2_extract_swir.py
+
+Weird errors may result in needing to downgrade to numpy version <2.0
+
+```
+python3 -m pip install --upgrade pip
+python3 -m pip install numpy==1.21.0
+```
+
+'''
+from misc import err, args, exist, run, parfor, sep
 from envi import envi_header_cleanup
 import multiprocessing as mp
 from osgeo import gdal
@@ -14,7 +24,7 @@ import os
 def extract(file_name):
     w = file_name.split('_')  # split filename on '_'
     ds = w[2].split('T')[0]  # date string
-    stack_fn = file_name[:-4] + '.bin' # output stack filename
+    stack_fn = '.'.join(file_name.split('.')[:-1]) + '.bin' #  file_name[:-4] + '.bin' # output stack filename
     
     if exist(stack_fn):
         print("Exists:", stack_fn, "skipping..")
@@ -22,7 +32,9 @@ def extract(file_name):
 
     def ignore_warnings(x, y, z): pass
     gdal.PushErrorHandler(ignore_warnings)  # suppress warnings
-    
+ 
+    file_name = file_name.rstrip(sep) + sep + 'MTD_MSIL1C.xml'
+    print(file_name)
     d = gdal.Open(file_name)
     subdatasets =  d.GetSubDatasets()
 
@@ -121,7 +133,7 @@ def extract(file_name):
         bi += 1
     
     stack_ds = None
-    hdr_f =  file_name[:-4] + '.hdr'
+    hdr_f =  ('.'.join(file_name.split('.')[:-1])) + '.hdr' #  file_name[:-4] + '.hdr'
     envi_header_cleanup([None, hdr_f])
     xml_f = stack_fn + '.aux.xml'
     hdr_b = hdr_f + '.bak'
@@ -138,11 +150,13 @@ if __name__ == "__main__":
         file_name = args[1]
         if not exist(file_name):
             err('could not open input file: ' + d)
-        if not file_name[-4:] == '.zip':
-            err('zip expected')
+        ext = file_name.split('.')[-1]
+        if not ((ext == '.zip') or (ext == '.SAFE')):
+            err('.zip or SAFE file expected')
         extract(file_name)
 
     else:
         files = [x.strip() for x in os.popen("ls -1 S*MSIL2A*.zip").readlines()]
         files += [x.strip() for x in os.popen("ls -1 S*MSIL1C*.zip").readlines()]
+        files += [x.strip() for x in os.popen("ls -1 | grep .SAFE").readlines()]
         parfor(extract, files, 1) # int(mp.cpu_count()))
