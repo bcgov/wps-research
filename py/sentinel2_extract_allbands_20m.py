@@ -159,4 +159,4 @@ if __name__ == "__main__":
         files = [x.strip() for x in os.popen("ls -1 S*MSIL2A*.zip").readlines()]
         files += [x.strip() for x in os.popen("ls -1 S*MSIL1C*.zip").readlines()]
         files += [x.strip() for x in os.popen("ls -1 | grep .SAFE").readlines()]
-        parfor(extract, files, 4) # int(mp.cpu_count()))
+        parfor(extract, files, 8) # int(mp.cpu_count()))
