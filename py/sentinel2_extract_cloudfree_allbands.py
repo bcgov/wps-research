@@ -1,7 +1,9 @@
-'''20230731 revised from sentinel2_extract_cloudfree.py to include all bands.
+'''
+20241027 added compatibility from L2A data converted from L1C data downloaded from Google Cloud platform (i.e. SAFE folder format, not zip
+20230731 revised from sentinel2_extract_cloudfree.py to include all bands.
 
 20230605 sentinel2_extract_swir.py'''
-from misc import err, args, exist, run, parfor
+from misc import err, args, exist, run, parfor, sep
 from envi import envi_header_cleanup
 import multiprocessing as mp
 from osgeo import gdal
@@ -10,17 +12,23 @@ import sys
 import os
 
 def extract(file_name):
+    ext = file_name.split('.')[-1] # .zip or .SAFE
+
     w = file_name.split('_')  # split filename on '_'
     ds = w[2].split('T')[0]  # date string
-    stack_fn = file_name[:-4] + '.bin' # output stack filename
-    
+
+    stack_fn = '.'.join(file_name.split('.')[:-1]) + '.bin' #  file_name[:-4] + '.bin' # output stack filename
     if exist(stack_fn):
         print("Exists:", stack_fn, "skipping..")
         return
 
     def ignore_warnings(x, y, z): pass
     gdal.PushErrorHandler(ignore_warnings)  # suppress warnings
-    
+ 
+    if ext == 'SAFE':    
+        file_name = file_name.rstrip(sep) + sep + 'MTD_MSIL2A.xml'
+   
+    print("file_name", file_name)
     d = gdal.Open(file_name)
     subdatasets =  d.GetSubDatasets()
     '''
@@ -158,7 +166,7 @@ def extract(file_name):
         bi += 1
     
     stack_ds = None
-    hdr_f =  file_name[:-4] + '.hdr'
+    hdr_f =  stack_fn[:-4] + '.hdr'
     envi_header_cleanup([None, hdr_f])
     xml_f = stack_fn + '.aux.xml'
     hdr_b = hdr_f + '.bak'
@@ -182,8 +190,9 @@ if __name__ == "__main__":
     else:
         files = [x.strip() for x in os.popen("ls -1 S*MSIL2A*.zip").readlines()]
         files += [x.strip() for x in os.popen("ls -1 S*MSIL1C*.zip").readlines()]
+        files += [x.strip() for x in os.popen("ls -1 | grep .SAFE").readlines()]
 
-        parfor(extract, files, 2) # int(mp.cpu_count()))
+        parfor(extract, files, 4) # int(mp.cpu_count()))
 
 
 

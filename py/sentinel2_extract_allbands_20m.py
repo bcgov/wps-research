@@ -22,6 +22,7 @@ import sys
 import os
 
 def extract(file_name):
+    ext = file_name.split('.')[-1] # .zip or .SAFE
     w = file_name.split('_')  # split filename on '_'
     ds = w[2].split('T')[0]  # date string
     stack_fn = '.'.join(file_name.split('.')[:-1]) + '.bin' #  file_name[:-4] + '.bin' # output stack filename
@@ -33,7 +34,8 @@ def extract(file_name):
     def ignore_warnings(x, y, z): pass
     gdal.PushErrorHandler(ignore_warnings)  # suppress warnings
  
-    file_name = file_name.rstrip(sep) + sep + 'MTD_MSIL1C.xml'
+    if ext == 'SAFE':
+        file_name = file_name.rstrip(sep) + sep + 'MTD_MSIL1C.xml'
     print(file_name)
     d = gdal.Open(file_name)
     subdatasets =  d.GetSubDatasets()
