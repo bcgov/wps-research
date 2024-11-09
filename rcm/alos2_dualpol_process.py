@@ -1,6 +1,6 @@
 '''20230123 process JAXA data retrieved from EODMS
 *** Assume each folder in present directory, is a dataset'''
-FILTER_SIZE = 5
+FILTER_SIZE = 3
 import os
 import sys
 sep = os.path.sep
@@ -40,9 +40,10 @@ for d in dirs:
     p_1 = d + sep + '01_Mlk.dim'
     p_2 = d + sep + '02_Cal.dim' # calibrated product
     p_3 = d + sep + '03_Mtx.dim'
-    p_4 = d + sep + '04_Box.dim'
-    p_5 = d + sep + '05_Ter.dim'
-    p_6 = d + sep + '06_Box.dim'
+    p_4 = d + sep + '04_Rtf.dim'
+    p_5 = d + sep + '05_Box.dim'
+    p_6 = d + sep + '06_Ter.dim'
+    p_7 = d + sep + '07_Box.dim'
     print(p_0)
     
     if not exist(p_1):
@@ -68,31 +69,94 @@ for d in dirs:
              '-Pmatrix=C2'])
     print(p_3)
 
+    '''
+     /opt/snap/bin/gpt  Terrain-Flattening  -h 
+  gpt Terrain-Flattening [options] 
+Description:
+  Terrain Flattening
+Source Options:
+  -Ssource=<file>    Sets source 'source' to <filepath>.
+                     This is a mandatory source.
+Parameter Options:
+  -PadditionalOverlap=<double>                The additional overlap percentage
+                                              Valid interval is [0, 1].
+                                              Default value is '0.1'.
+  -PdemName=<string>                          The digital elevation model.
+                                              Default value is 'SRTM 1Sec HGT'.
+  -PdemResamplingMethod=<string>              Sets parameter 'demResamplingMethod' to <string>.
+                                              Default value is 'BILINEAR_INTERPOLATION'.
+  -PexternalDEMApplyEGM=<boolean>             Sets parameter 'externalDEMApplyEGM' to <boolean>.
+                                              Default value is 'false'.
+  -PexternalDEMFile=<file>                    Sets parameter 'externalDEMFile' to <file>.
+  -PexternalDEMNoDataValue=<double>           Sets parameter 'externalDEMNoDataValue' to <double>.
+                                              Default value is '0'.
+  -PnodataValueAtSea=<boolean>                Mask the sea with no data value (faster)
+                                              Default value is 'true'.
+  -PoutputSigma0=<boolean>                    Sets parameter 'outputSigma0' to <boolean>.
+                                              Default value is 'false'.
+  -PoutputSimulatedImage=<boolean>            Sets parameter 'outputSimulatedImage' to <boolean>.
+                                              Default value is 'false'.
+  -PoversamplingMultiple=<double>             The oversampling factor
+                                              Valid interval is [1, 4].
+                                              Default value is '1.0'.
+  -PsourceBands=<string,string,string,...>    The list of source bands.
+Graph XML Format:
+  <graph id="someGraphId">
+    <version>1.0</version>
+    <node id="someNodeId">
+      <operator>Terrain-Flattening</operator>
+      <sources>
+        <source>${source}</source>
+      </sources>
+      <parameters>
+        <sourceBands>string,string,string,...</sourceBands>
+        <demName>string</demName>
+        <demResamplingMethod>string</demResamplingMethod>
+        <externalDEMFile>file</externalDEMFile>
+        <externalDEMNoDataValue>double</externalDEMNoDataValue>
+        <externalDEMApplyEGM>boolean</externalDEMApplyEGM>
+        <outputSimulatedImage>boolean</outputSimulatedImage>
+        <outputSigma0>boolean</outputSigma0>
+        <nodataValueAtSea>boolean</nodataValueAtSea>
+        <additionalOverlap>double</additionalOverlap>
+        <oversamplingMultiple>double</oversamplingMultiple>
+      </parameters>
+    </node>
+  </graph>
+    '''
     if not exist(p_4):
-        run([snap, 'Polarimetric-Speckle-Filter',
-            '-Pfilter="Box Car Filter"',
-            '-PfilterSize=' + str(FILTER_SIZE),
+        run([snap, 'Terrain-Flattening',
+            '-PdemName="Copernicus 30m Global DEM"',  #SRTM 1Sec HGT"',
             '-Ssource=' + p_3,
             '-t ' + p_4]) # output
     print(p_4)
- 
+
     if not exist(p_5):
-        run([snap, 'Terrain-Correction',
-            '-PnodataValueAtSea=true',
-            '-Ssource=' + p_4,
-            # '-PpixelSpacingInMeter=10.0',
-            ' -PdemName="Copernicus 30m Global DEM"',
-            '-t ' + p_5])  # output
-    print(p_5)
-    '''
-    if not exist(p_6):
         run([snap, 'Polarimetric-Speckle-Filter',
             '-Pfilter="Box Car Filter"',
             '-PfilterSize=' + str(FILTER_SIZE),
+            '-Ssource=' + p_4,
+            '-t ' + p_5]) # output
+    print(p_5)
+ 
+    if not exist(p_6):
+        run([snap, 'Terrain-Correction',
+            '-PnodataValueAtSea=true',
             '-Ssource=' + p_5,
-            '-t ' + p_6]) # output
+            # '-PpixelSpacingInMeter=10.0',
+            ' -PdemName="Copernicus 30m Global DEM"',
+            '-t ' + p_6])  # output
     print(p_6)
-    '''
-    # sys.exit(1)  # comment out to run on first set only
+    
+    if not exist(p_7):
+        run([snap, 'Polarimetric-Speckle-Filter',
+            '-Pfilter="Box Car Filter"',
+            '-PfilterSize=' + str(FILTER_SIZE),
+            '-Ssource=' + p_6,
+            '-t ' + p_7]) # output
+    print(p_6)
+    
+
+    sys.exit(1)  # comment out to run on first set only
 
     i += 1
