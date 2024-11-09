@@ -157,7 +157,7 @@ Graph XML Format:
     print(p_7)
     
 
-    sys.exit(1)  # comment out to run on first set only
+    # sys.exit(1)  # comment out to run on first set only
 
     i += 1
 
