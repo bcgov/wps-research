@@ -160,3 +160,8 @@ Graph XML Format:
     sys.exit(1)  # comment out to run on first set only
 
     i += 1
+
+
+    '''
+        Now need convert to ENVI, zero to NAN, and mutual coregistration 
+    '''
