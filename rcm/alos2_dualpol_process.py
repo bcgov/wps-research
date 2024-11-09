@@ -154,7 +154,7 @@ Graph XML Format:
             '-PfilterSize=' + str(FILTER_SIZE),
             '-Ssource=' + p_6,
             '-t ' + p_7]) # output
-    print(p_6)
+    print(p_7)
     
 
     sys.exit(1)  # comment out to run on first set only
