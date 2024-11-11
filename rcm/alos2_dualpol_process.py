@@ -29,6 +29,7 @@ dirs = [f for f in os.listdir() if os.path.isdir(f)]
 
 i = 0
 for d in dirs:
+    QUAD_POL = False
     print("i=", str(i + 1), "of", str(len(dirs)))
     print(d)
 
@@ -63,6 +64,7 @@ for d in dirs:
     # print(n_channels)
     if(n_channels == 4):
         print("DUAL-POL MODE")
+        QUAD_POL = False
     elif(n_channels == 8):
         print("QUAD-POL MODE")
         QUAD_POL = True
