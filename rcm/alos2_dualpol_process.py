@@ -56,6 +56,20 @@ for d in dirs:
              '-t ' + p_1])
     print(p_1)
 
+    # check number of channels to determine if dual-pol or quad-pol dataset
+    n_channels = os.popen('grep "Number of SAR channels" ' + p_1).read().strip().split('\n')[0]
+    # print(n_channels) 
+    n_channels = int(n_channels.split('>')[1].split('<')[0])
+    # print(n_channels)
+    if(n_channels == 4):
+        print("DUAL-POL MODE")
+    elif(n_channels == 8):
+        print("QUAD-POL MODE")
+        QUAD_POL = True
+    else:
+        print("UNEXPECTED NUMBER OF CHANNELS")
+        sys.exit(1)
+
 '''
 /opt/snap/bin/gpt Calibration -h 
 Usage:
@@ -122,20 +136,6 @@ Graph XML Format:
              '-t ' + p_2,
              '-PoutputImageInComplex=true'])
     print(p_2)
-
-    # check number of channels to determine if dual-pol or quad-pol dataset
-    n_channels = os.popen('grep "Number of SAR channels" ' + p_2).read().strip().split('\n')[0]
-    # print(n_channels) 
-    n_channels = int(n_channels.split('>')[1].split('<')[0])
-    # print(n_channels)
-    if(n_channels == 4):
-        print("DUAL-POL MODE")
-    elif(n_channels == 8):
-        print("QUAD-POL MODE")
-        QUAD_POL = True
-    else:
-        print("UNEXPECTED NUMBER OF CHANNELS")
-        sys.exit(1)
 
     if not exist(p_3):
         run([snap, 'Polarimetric-Matrices',
