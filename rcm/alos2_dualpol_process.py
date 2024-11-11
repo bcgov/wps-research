@@ -9,7 +9,7 @@ my_path = sep.join(os.path.abspath(__file__).split(sep)[:-1]) + sep
 sys.path.append(my_path + ".." + sep + 'py')
 from misc import pd, sep, exist, args, cd, err
 QUAD_POL = False # mode flag: base case is dual-pol ( revise for Quad-pol ) 
-
+QUAD_POL_SETS = []
 def run(x):
     cmd = ' '.join(x)
     print(cmd)
@@ -66,11 +66,12 @@ for d in dirs:
     elif(n_channels == 8):
         print("QUAD-POL MODE")
         QUAD_POL = True
+        QUAD_POL_SETS += [p_1]
     else:
         print("UNEXPECTED NUMBER OF CHANNELS")
         sys.exit(1)
 
-'''
+    '''
 /opt/snap/bin/gpt Calibration -h 
 Usage:
   gpt Calibration [options] 
@@ -128,20 +129,21 @@ Graph XML Format:
       </parameters>
     </node>
   </graph>
-'''
+    '''
 
     if not exist(p_2):
         run([snap, 'Calibration',
              '-Ssource=' + p_1,
              '-t ' + p_2,
-             '-PoutputImageInComplex=true'])
+             '-PoutputImageInComplex=true',
+             '-PoutputBetaBand=true' if QUAD_POL else ''])
     print(p_2)
 
     if not exist(p_3):
         run([snap, 'Polarimetric-Matrices',
              '-Ssource=' + p_2,
              '-t ' + p_3,
-             '-Pmatrix=' + ('C2' if not QUAD_POL else 'T4')])
+             '-Pmatrix=' + ('C2' if not QUAD_POL else 'T3')])
     print(p_3)
 
     '''
@@ -240,3 +242,7 @@ Graph XML Format:
     '''
         Now need convert to ENVI, zero to NAN, and mutual coregistration 
     '''
+
+print(QUAD_POL_SETS)
+for s in QUAD_POL_SETS:
+    print(s)
