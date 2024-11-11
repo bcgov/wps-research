@@ -1,7 +1,7 @@
 '''20230123 process JAXA data retrieved from EODMS
 *** Assume each folder in present directory, is a dataset'''
 
-FILTER_SIZE = 5
+FILTER_SIZE = 3
 import os
 import sys
 sep = os.path.sep
@@ -248,7 +248,10 @@ Graph XML Format:
             a = os.system('cd ' + d + sep + '07_Box.data; convert_iq_to_cplx C12_real.bin C12_imag.bin C12.bin; abs C12.bin;  raster_stack.py C11.bin C22.bin C12.bin_abs.bin ' + d + '_rgb.bin; raster_zero_to_nan ' + d + '_rgb.bin')
         else:
             err('unexpected mode')
-    # C11, C22, C12_bin.abs
+
+    p_10 = d + sep + '07_Box.data' + sep +  d + '_rgb.bin_1_2_3_rgb.png'
+    if not exists(p_10):
+        a = os.system('cd ' + d + sep + '07_Box.data; raster_plot.py ' +  d + '_rgb.bin 1 2 3 1')
 
     # sys.exit(1)  # comment out to run on first set only
 
