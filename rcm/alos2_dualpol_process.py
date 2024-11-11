@@ -242,7 +242,7 @@ Graph XML Format:
     if not exist(p_9):
         if QUAD_POL:
             a = os.system('cd ' + d + sep + '07_Box.data; raster_stack.py T22.bin T33.bin T11.bin ' + d + '_rgb.bin; raster_zero_to_nan ' + d + '_rgb.bin') 
-        elif if not(QUAD_POL):
+        elif not(QUAD_POL):
             a = os.system('cd ' + d + sep + '07_Box.data; convert_iq_to_cplx C12_real.bin C12_imag.bin C12.bin; abs C12.bin;  raster_stack.py C11.bin C22.bin C12.bin_abs.bin ' + d + '_rgb.bin; raster_zero_to_nan ' + d + '_rgb.bin')
         else:
             err('unexpected mode')
