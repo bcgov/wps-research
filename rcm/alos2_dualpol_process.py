@@ -8,8 +8,8 @@ sep = os.path.sep
 my_path = sep.join(os.path.abspath(__file__).split(sep)[:-1]) + sep
 sys.path.append(my_path + ".." + sep + 'py')
 from misc import pd, sep, exist, args, cd, err
-QUAD_POL = False # mode flag: base case is dual-pol ( revise for Quad-pol ) 
-QUAD_POL_SETS = []
+QUAD_POL_SETS = []  # track and list the quad-pol sets
+
 def run(x):
     cmd = ' '.join(x)
     print(cmd)
@@ -29,7 +29,7 @@ dirs = [f for f in os.listdir() if os.path.isdir(f)]
 
 i = 0
 for d in dirs:
-    QUAD_POL = False
+    QUAD_POL = False # mode flag: base case is dual-pol ( revise for Quad-pol ) 
     print("i=", str(i + 1), "of", str(len(dirs)))
     print(d)
 
