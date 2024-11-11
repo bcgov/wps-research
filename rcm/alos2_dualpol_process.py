@@ -250,7 +250,7 @@ Graph XML Format:
             err('unexpected mode')
 
     p_10 = d + sep + '07_Box.data' + sep +  d + '_rgb.bin_1_2_3_rgb.png'
-    if not exists(p_10):
+    if not exist(p_10):
         a = os.system('cd ' + d + sep + '07_Box.data; raster_plot.py ' +  d + '_rgb.bin 1 2 3 1')
 
     # sys.exit(1)  # comment out to run on first set only
