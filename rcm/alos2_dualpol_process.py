@@ -1,5 +1,6 @@
 '''20230123 process JAXA data retrieved from EODMS
 *** Assume each folder in present directory, is a dataset'''
+
 FILTER_SIZE = 3
 import os
 import sys
@@ -7,12 +8,12 @@ sep = os.path.sep
 my_path = sep.join(os.path.abspath(__file__).split(sep)[:-1]) + sep
 sys.path.append(my_path + ".." + sep + 'py')
 from misc import pd, sep, exist, args, cd, err
+QUAD_POL = False # mode flag: base case is dual-pol ( revise for Quad-pol ) 
 
 def run(x):
     cmd = ' '.join(x)
     print(cmd)
     a = os.system(cmd)
-
 
 snap, ci = '/usr/local/snap/bin/gpt', 0 # assume we installed snap
 if not exist(snap):
@@ -55,6 +56,66 @@ for d in dirs:
              '-t ' + p_1])
     print(p_1)
 
+'''
+/opt/snap/bin/gpt Calibration -h 
+Usage:
+  gpt Calibration [options] 
+
+Description:
+  Calibration of products
+
+
+Source Options:
+  -Ssource=<file>    Sets source 'source' to <filepath>.
+                     This is a mandatory source.
+
+Parameter Options:
+  -PauxFile=<string>                                    The auxiliary file
+                                                        Value must be one of 'Latest Auxiliary File', 'Product Auxiliary File', 'External Auxiliary File'.
+                                                        Default value is 'Latest Auxiliary File'.
+  -PcreateBetaBand=<boolean>                            Create beta0 virtual band
+                                                        Default value is 'false'.
+  -PcreateGammaBand=<boolean>                           Create gamma0 virtual band
+                                                        Default value is 'false'.
+  -PexternalAuxFile=<file>                              The antenna elevation pattern gain auxiliary data file.
+  -PoutputBetaBand=<boolean>                            Output beta0 band
+                                                        Default value is 'false'.
+  -PoutputGammaBand=<boolean>                           Output gamma0 band
+                                                        Default value is 'false'.
+  -PoutputImageInComplex=<boolean>                      Output image in complex
+                                                        Default value is 'false'.
+  -PoutputImageScaleInDb=<boolean>                      Output image scale
+                                                        Default value is 'false'.
+  -PoutputSigmaBand=<boolean>                           Output sigma0 band
+                                                        Default value is 'true'.
+  -PselectedPolarisations=<string,string,string,...>    The list of polarisations
+  -PsourceBands=<string,string,string,...>              The list of source bands.
+
+Graph XML Format:
+  <graph id="someGraphId">
+    <version>1.0</version>
+    <node id="someNodeId">
+      <operator>Calibration</operator>
+      <sources>
+        <source>${source}</source>
+      </sources>
+      <parameters>
+        <sourceBands>string,string,string,...</sourceBands>
+        <auxFile>string</auxFile>
+        <externalAuxFile>file</externalAuxFile>
+        <outputImageInComplex>boolean</outputImageInComplex>
+        <outputImageScaleInDb>boolean</outputImageScaleInDb>
+        <createGammaBand>boolean</createGammaBand>
+        <createBetaBand>boolean</createBetaBand>
+        <selectedPolarisations>string,string,string,...</selectedPolarisations>
+        <outputSigmaBand>boolean</outputSigmaBand>
+        <outputGammaBand>boolean</outputGammaBand>
+        <outputBetaBand>boolean</outputBetaBand>
+      </parameters>
+    </node>
+  </graph>
+'''
+
     if not exist(p_2):
         run([snap, 'Calibration',
              '-Ssource=' + p_1,
@@ -62,11 +123,25 @@ for d in dirs:
              '-PoutputImageInComplex=true'])
     print(p_2)
 
+    # check number of channels to determine if dual-pol or quad-pol dataset
+    n_channels = os.popen('grep "Number of SAR channels" ' + p_2).read().strip().split('\n')[0]
+    # print(n_channels) 
+    n_channels = int(n_channels.split('>')[1].split('<')[0])
+    # print(n_channels)
+    if(n_channels == 4):
+        print("DUAL-POL MODE")
+    elif(n_channels == 8):
+        print("QUAD-POL MODE")
+        QUAD_POL = True
+    else:
+        print("UNEXPECTED NUMBER OF CHANNELS")
+        sys.exit(1)
+
     if not exist(p_3):
         run([snap, 'Polarimetric-Matrices',
              '-Ssource=' + p_2,
              '-t ' + p_3,
-             '-Pmatrix=C2'])
+             '-Pmatrix=' + ('C2' if not QUAD_POL else 'T4')])
     print(p_3)
 
     '''
