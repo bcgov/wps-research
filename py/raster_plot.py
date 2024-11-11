@@ -160,7 +160,7 @@ if __name__ == '__main__':
         d_min, d_max = nanmin(rgb), nanmax(rgb)
         print("d_min", d_min, "d_max", d_max)
         # rgb = rgb / (d_max - d_min)
-        plt.imshow(rgb)) #, vmin = 0., vmax = 1.) #plt.tight_layout()
+        plt.imshow(rgb) #, vmin = 0., vmax = 1.) #plt.tight_layout()
         print(ff)
         if exists(ff + 'copyright_string.txt'):
             x_label += (' ©' + open(ff+ 'copyright_string.txt').read().strip())
