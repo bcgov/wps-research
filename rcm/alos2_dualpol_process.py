@@ -20,6 +20,12 @@ if not exist(snap):
     snap = '/opt/snap/bin/gpt'  # try another location if that failed
 if not exist(snap):
     snap = '/home/' + os.popen('whoami').read().strip() + sep + 'snap' + sep + 'bin' + sep + 'gpt'
+if not exist(snap):
+    snap = '/home/' + os.popen('whoami').read().strip() + sep + 'esa-snap' + sep + 'bin' + sep + 'gpt'
+
+if not exist(snap):
+    print("ERROR: snap binary 'gpt' not found")
+    sys.exit(1)
 
 print(snap)
 
@@ -59,8 +65,13 @@ for d in dirs:
 
     # check number of channels to determine if dual-pol or quad-pol dataset
     n_channels = os.popen('grep "Number of SAR channels" ' + p_1).read().strip().split('\n')[0]
-    # print(n_channels) 
-    n_channels = int(n_channels.split('>')[1].split('<')[0])
+    print(n_channels) 
+    n_channels = 8
+    try:
+        n_channels = int(n_channels.split('>')[1].split('<')[0])
+    except:
+        print("WARNING: defaulting to Quad-pol processing")
+
     # print(n_channels)
     if(n_channels == 4):
         print("DUAL-POL MODE")
