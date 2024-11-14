@@ -5,6 +5,8 @@
 20241114 Note: for ALOS case, ALOS-2 data from EODMS have a different file structure than ALOS-2 data from JAXA. 
 
 ../py/shallow.py may be need to run ( for the EODMS case ) to fix the file structure e.g. before running ./alos2_dualpol_processing.py 
+
+20241114: update: ( for resuming partial completion ): only perform unzipping for cases where the destination folder doesn't already exist
 '''
 import os
 import sys
@@ -27,7 +29,10 @@ def unzip(f):
     dst = dst + sep
     if not os.path.exists(dst):
         os.mkdir(dst)
-    cmd = ('unzip -o ' + f + ' -d ' + dst)
-    return os.system(cmd)
+        cmd = ('unzip -o ' + f + ' -d ' + dst)
+        return os.system(cmd)
+    else:
+        print(f, 'SKIPPING')
+        return ''
 
 parfor(unzip, files, 2)
