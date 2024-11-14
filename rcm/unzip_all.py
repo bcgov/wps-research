@@ -1,5 +1,11 @@
 '''parallel unzip of everything in the file sub-hierarchy..
-..needs to do a hierarchical search due to rcm_group_by_beam.py'''
+..needs to do a hierarchical search due to rcm_group_by_beam.py
+
+
+20241114 Note: for ALOS case, ALOS-2 data from EODMS have a different file structure than ALOS-2 data from JAXA. 
+
+../py/shallow.py may be need to run ( for the EODMS case ) to fix the file structure e.g. before running ./alos2_dualpol_processing.py 
+'''
 import os
 import sys
 import multiprocessing as mp
