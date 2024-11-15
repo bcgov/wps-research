@@ -1,4 +1,5 @@
-skip = True
+# 20241115 coregister alos2 sets to first date ( C2 or T3 case ) 
+skip = False # set to true for debug setting 
 
 import os
 import sys
