@@ -57,7 +57,7 @@ for i in range(1, len(by_date)):
 for i in range(0, len(by_date)):
     d = by_date[i][0]
     p_d = by_date[i][1] + '_rgb.bin'
-    if not exist(p_9):
+    if not exists(p_9):
         if is_quad_pol:
             a = os.system('cd ' + d + sep + '; raster_stack.py T22.bin T33.bin T11.bin ' + by_date[i][1] + '_rgb.bin; raster_zero_to_nan ' + d + '_rgb.bin') 
         elif not(quad_pol):
@@ -66,5 +66,5 @@ for i in range(0, len(by_date)):
             err('unexpected mode')
 
     p_10 = d + sep + by_date[i][1] + '_rgb.bin_1_2_3_rgb.png'
-    if not exist(p_10):
+    if not exists(p_10):
         a = os.system('cd ' + d + sep + '; raster_plot.py ' + by_date[i][1] + '_rgb.bin 1 2 3 1')
