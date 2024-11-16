@@ -33,8 +33,7 @@ for line in lines:
             # a = os.system("find ./" + line)
 
 if len(by_date) < 2:
-    print("Error: only one date")
-    sys.exit(1)
+    print("WARNING: only one date")
 
 by_date.sort()
 for d in by_date:
