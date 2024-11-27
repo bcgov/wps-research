@@ -15,12 +15,8 @@ int main(int argc, char ** argv){
 
   for0(i, np){
     total = 0.;
-
-    for0(k, nband)
-      total += dat[k * np + i];
-
-    for0(k, nband)
-      dat[k * np + i] /= total;
+    for0(k, nband) total += dat[k * np + i];
+    for0(k, nband) dat[k * np + i] /= total;
   }
 
   str ofn(fn + str("_bruce.bin"));
