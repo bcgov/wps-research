@@ -7,14 +7,23 @@
     with numpy.version.version '1.20.2' and matplotlib.__version__ '3.4.1'
     
     e.g. installation of numpy and matplotlib (Ubuntu):
-   sudo apt install python-matplotlib python-numpy '''
+   sudo apt install python-matplotlib python-numpy
+
+
+20241202 add flag to perform 1-d ( | r,g,b | ) scaling, instead of default: 
+|r|, |g|, |b| ( separate, l2 ) scaling. In both cases, histogram stretching.
+'''
 from misc import *
 import matplotlib
-args = sys.argv
 
 def naninf_list(x):
     Y = []
-    X = list(x.ravel().tolist())
+    X = None
+    if type(x) != list:
+        X = list(x.ravel().tolist())
+    else:
+        X = x
+
     for i in X:
         if not (math.isnan(i) or math.isinf(i)):
             Y.append(i)
@@ -38,6 +47,17 @@ def nanmax(x):
 
 if __name__ == '__main__':
 
+    args = sys.argv
+    keys, args_new = [], []
+    for arg in args:
+        if arg[0:2] == '--':
+            keys += [arg[2:]]
+        else:
+            args_new += [arg]
+    args = args_new
+    print("keys", keys)
+    print("args", args)
+
     # instructions to run
     if len(args) < 2:
         err('usage:\n\tread_multispectral.py [input file name]' +
@@ -45,14 +65,14 @@ if __name__ == '__main__':
             ' [optional: green band idx]' +
             ' [optional: blue band idx] #band idx from 1' + 
             ' [optional: background plotting]' + 
-            ' [optional: no hist trimming]' +
-            ' [optional: class_legend (not implemented)]')
+            ' [optional: no hist trimming]') 
+            # + ' [optional: class_legend (not implemented)]')
     fn, hdr = sys.argv[1], hdr_fn(sys.argv[1])  # check header exists
     assert_exists(fn)  # check file exists
     
     skip_plot = True if (len(args) > 5  and args[5] == '1') else False
     use_trim = False if (len(args) > 6  and args[6] == '1') else True
-    class_legend = True if (len(args) > 7 and args[7] == '1') else False
+    # class_legend = True if (len(args) > 7 and args[7] == '1') else False
 
     samples, lines, bands = read_hdr(hdr)  # read header and print parameters
     for f in ['samples', 'lines', 'bands']:
@@ -125,13 +145,69 @@ if __name__ == '__main__':
         rgb_i[rgb_i > 1.] = 1.
         return rgb_i
     
-    use_par = True # False
-    if use_par:
-        rgb_i = parfor(scale_rgb, range(3), 3)
+    def scale_rgb_global():  # scale |r| + |g| + |b| (l2) instead of |r|, |g|, |b| separately
+        print("scale_rgb_global..")
+        rfn = fn + '_rgb_scaling.txt'
+        rgb_min, rgb_max = None, None
+
+        values = []
+        for j in range(lines * samples):
+            my_values = [data[band_select[k], j] for k in range(3)]
+            values += [max(max(my_values[0], my_values[1]), my_values[2])]
+
+        if use_trim: # if not override_scaling
+            if not exists(rfn):
+
+                values = []
+                for j in range(lines * samples):
+                    my_values = [data[band_select[k], j] for k in range(3)]
+                    values += [max(max(my_values[0], my_values[1]), my_values[2])]
+
+                values = naninf_list(values) # values.reshape(np.prod(values.shape)).tolist()
+                values.sort()
+
+                if values[-1] < values[0]:   # sanity check
+                    err("failed to sort")
+
+                for j in range(0, len(values) -1): #npx - 1):
+                    if values[j] > values[j + 1]:
+                        err("failed to sort")
+
+                n_pct = 1. # percent for stretch value
+                frac = n_pct / 100.
+                rgb_min, rgb_max = values[int(math.floor(float(len(values))*frac))],\
+                               values[int(math.floor(float(len(values))*(1. - frac)))]
+                print('+w', rfn)
+                open(rfn, 'wb').write((','.join([str(x) for x in [rgb_min, rgb_max]])).encode())
+                # DONT FORGET TO WRITE THE FILE HERE
+            else:  # assume we can restore
+                rgb_min, rgb_max = [float(x) \
+                        for x in open(rfn).read().strip().split(',')]
+                print('+r', rfn)
+        else:
+            rgb_min, rgb_max = nanmin(rgb_i), nanmax(rgb_i)
+
+        for i in range(3):
+            rgb_i = data[band_select[i], :].reshape((lines, samples))
+            print("i, min, max", i, rgb_min, rgb_max)
+            rng = rgb_max - rgb_min  # apply restored or derived scaling
+            rgb_i = (rgb_i - rgb_min) / (rng if rng != 0. else 1.)
+            rgb_i[rgb_i < 0.] = 0.  # clip
+            rgb_i[rgb_i > 1.] = 1.
+            rgb[:, :, i] = rgb_i
+
+
+    if not 'global' in keys:
+        use_parfor = True # False
+        if use_parfor:
+            rgb_i = parfor(scale_rgb, range(3), 3)
+        else:
+            rgb_i = [scale_rgb(i) for i in range(3)]
+        for i in range(3):
+            rgb[:, :, i] = rgb_i[i]
     else:
-        rgb_i = [scale_rgb(i) for i in range(3)]
-    for i in range(3):
-        rgb[:, :, i] = rgb_i[i]
+        scale_rgb_global()
+        
     
     if True:  # plot image: no class labels
         if skip_plot:
