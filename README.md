@@ -10,13 +10,10 @@ supporting BC Wildfire Service (BCWS) Predictive Services Unit (PSU) program. Se
 
 Includes A) data integration B) routines applying or implementing supervised and unsupervised classification, C) visualization and manipulation for high dimensional imagery as well as classification maps
 
-## Projects being operationalized
-* [Fire mapping using Sentinel-2](https://github.com/bcgov/wps-fire-perimeter)
-
 ## Co-op student projects
 * [NRT burned severity](https://github.com/bcgov/nrtbs)
 * [Lightning data comparison](https://github.com/bcgov/wps-lx-compare)
-  
+ 
 # Sample results
 ## Same-day/NRT SWIR mosaic over BC
 <img src="https://raw.githubusercontent.com/bcgov/wps-research/master/doc/20230525_may15-17_swir.gif" width="650">
@@ -40,8 +37,11 @@ Includes A) data integration B) routines applying or implementing supervised and
 <img src="data/output/20210127_mvp.png" width="650" height="264">
 
 ## Friendly repos
-[Fire behaviour R&D space](https://github.com/bcgov/wps-fire-behaviour)
-[Fire mapping intro tutorial using Sentinel-2 and GOES satellites](https://github.com/bcgov/wps-fire-mapping-tutorial-multisource-gee)
+## Associated scratch spaces
+* [Fire mapping / Sentinel-2 via NRCAN aws](https://github.com/bcgov/wps-active)
+* [Fire mapping using Sentinel-2](https://github.com/bcgov/wps-fire-perimeter)
+* [Fire behaviour R&D space](https://github.com/bcgov/wps-fire-behaviour)
+* [Fire mapping intro tutorial using Sentinel-2 and GOES satellites](https://github.com/bcgov/wps-fire-mapping-tutorial-multisource-gee)
 
 ## Presentations
 * Satellite Fire Mapping: BCWS Operational Trial 2022, BC Gov GIS CoP F2F, Nov 30, 2022
