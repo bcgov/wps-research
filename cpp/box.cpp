@@ -5,10 +5,13 @@ Input:
 20241206 minor bugfix and added progress bar
 */
 #include"misc.h"
+#include"time.h"
 static size_t nrow, ncol, nband, np, m;
 static float *out, *dat, t;
 static int *bp;
 static long int dw;
+
+clock_t start_c, end_c;
 
 // this should go in misc.h
 inline int is_bad(float * dat, size_t i, size_t n_b){
@@ -27,8 +30,11 @@ inline int is_bad(float * dat, size_t i, size_t n_b){
 }
 
 void filter_line(size_t line_ix){
-  if(line_ix % 100 == 0){
-    printf("%%%f %zu / %zu\n", 100. * (float)(line_ix +1 ) / (float)(nband * nrow), line_ix, nband * nrow);
+  int report_interval = 1000;
+  if(line_ix % report_interval == 0){
+    if(line_ix == 0){
+      start_c = clock();
+    }
   }
   size_t b_ix = line_ix / nrow;  // process a row
   size_t r_ix = line_ix % nrow; // row index contrib
@@ -66,6 +72,15 @@ void filter_line(size_t line_ix){
     else{
       out[ix] = dat[ix];
     }
+  }
+
+  if(line_ix % report_interval == 0){
+    end_c = clock();
+    double time_taken = (double)(end_c - start_c) / CLOCKS_PER_SEC;
+
+    printf("%%%.2f %.1e / %.1e eta %.2f(s)\n", 100. * (float)(line_ix + 1) / (float)(nband * nrow), (float)(line_ix +1),(float)(nband * nrow), (time_taken / (double)(line_ix +1)) * (double)(nband * nrow - line_ix - 1) / (double) sysconf(_SC_NPROCESSORS_ONLN));
+
+
   }
 }
 
