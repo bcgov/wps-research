@@ -1,4 +1,5 @@
 # functions for reuse, for image processing, etc.
+# note: functionality in this library should be possible to install "incrementally"
 import os
 import sys
 import copy
