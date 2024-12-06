@@ -7,22 +7,29 @@ static float *out, *dat, t;
 static int *bp;
 static long int dw;
 
-// thsi should go in misc.h
+// this should go in misc.h
 inline int is_bad(float * dat, size_t i, size_t n_b){
   int zero = true;
-  for0(m, n_b){  // find bad/empty pix
+  for0(m, n_b){ 
+    // find bad/empty pix
     t = dat[np * m + i];
-    if(isnan(t) || isinf(t)) return true;
-    if(t != 0) zero = false;
+    if(isnan(t) || isinf(t)){
+      return true;
+    }
+    if(t != 0){
+      zero = false;
+    }
   }
   return zero;
 }
 
 void filter_line(size_t line_ix){
-  if(line_ix % 100 == 0) printf("line %zu\n", line_ix);
+  if(line_ix % 100 == 0){
+    printf("%%%f %zu / %zu\n", 100. * (float)(line_ix +1 ) / (float)(nband * nrow), line_ix, nband * nrow);
+  }
   size_t b_ix = line_ix / nrow;  // process a row
-  size_t r_ix = line_ix % nrow;
-  size_t bk = b_ix * np;
+  size_t r_ix = line_ix % nrow; // row index contrib
+  size_t bk = b_ix * np;  // single band computed on only
   size_t ki = bk + (r_ix * ncol);
   size_t y, ix, iy;
   float npix, d, dd;
@@ -32,30 +39,30 @@ void filter_line(size_t line_ix){
     ix = ki + y; // index of pix at row r_ix and col ix
     out[ix] = npix = d = 0.;
 
-    for(dx = ((long int)r_ix - dw);
-        dx <= ((long int)r_ix + dw);
-	dx++){
-
-      for(dy = ((long int)y - dw);
-          dy <= ((long int)y + dw);
-	  dy++){
-
+    for(dx = ((long int)r_ix - dw); dx <= ((long int)r_ix + dw); dx++){
+      for(dy = ((long int)y - dw); dy <= ((long int)y + dw); dy++){
         iy = dx * ncol + dy;
-	if(bp[iy]) continue; // skip bad px
         wind = bk + iy; // for each pixel in window
         if((dx >= 0) && (dy >= 0) && (dx < nrow) && (dy < ncol)){
-	  dd = dat[wind];
-	  if(!(isnan(dd) || isinf(dd))){
+
+          if(bp[iy]){
+            continue; // skip bad px
+          }
+
+	        dd = dat[wind];
+	        if(!(isnan(dd) || isinf(dd))){
             npix++;
             d += (double) dd;
-	  }
+	        }
         }
       }
     }
-    if(npix > 0.)
+    if(npix > 0.){
       out[ix] = (float)(d / ((double)npix));
-    else
+    }
+    else{
       out[ix] = dat[ix];
+    }
   }
 }
 
@@ -89,7 +96,7 @@ int main(int argc, char ** argv){
   str ohfn(fn + str("_box.hdr"));
 
   printf("nr2 %zu nc2 %zu nband %zu\n", nrow, ncol, nband);
-  str a(exec((str("cp -v ") + hfn + str(" ") + ohfn)).c_str());
+  str a(exec((str("cp -v ") + hfn + str(" ") + ohfn).c_str()));
   //hwrite(ohfn, nrow, ncol, nband); // write output header
   bwrite(out, ofn, nrow, ncol, nband);
   return 0;
