@@ -7,11 +7,10 @@ Input:
 #include"misc.h"
 #include"time.h"
 static size_t nrow, ncol, nband, np, m;
-static float *out, *dat, t;
+static float *out, *dat, t, n_threads;
 static int *bp;
 static long int dw;
-
-clock_t start_c, end_c;
+clock_t start_c;
 
 // this should go in misc.h
 inline int is_bad(float * dat, size_t i, size_t n_b){
@@ -75,12 +74,13 @@ void filter_line(size_t line_ix){
   }
 
   if(line_ix % report_interval == 0){
-    end_c = clock();
-    double time_taken = (double)(end_c - start_c) / CLOCKS_PER_SEC;
-
-    printf("%%%.2f %.1e / %.1e eta %.2f(s)\n", 100. * (float)(line_ix + 1) / (float)(nband * nrow), (float)(line_ix +1),(float)(nband * nrow), (time_taken / (double)(line_ix +1)) * (double)(nband * nrow - line_ix - 1) / (double) sysconf(_SC_NPROCESSORS_ONLN));
-
-
+    clock_t end_c = clock();
+    float time_taken = (float)(end_c - start_c) / CLOCKS_PER_SEC;
+    float percent = 100. * (float)(line_ix + 1) / (float)(nband * nrow);
+    float done = (float)(line_ix + 1);
+    float remain = (float)(nband * nrow);
+    float eta = (time_taken / (float)(line_ix +1)) * (float)(nband * nrow - line_ix - 1) / n_threads;
+    printf("%%%.2f %.1e / %.1e eta %.2f(s)\n", percent, done, remain, eta);
   }
 }
 
@@ -94,6 +94,8 @@ int main(int argc, char ** argv){
   size_t i, j, k, n;
   hread(hfn, nrow, ncol, nband); // read header
   np = nrow * ncol; // number of input pix
+  n_threads = (float) sysconf(_SC_NPROCESSORS_ONLN);
+
 
   n = (size_t) atoi(argv[2]);
   if((n - 1) %2 != 0)
