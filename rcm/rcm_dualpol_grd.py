@@ -1,4 +1,6 @@
 '''20241205 simple processing of RCM dual-pol SAR data in GRD format
+
+run unzp command first
 '''
 FILTER_SIZE = 3
 import os
