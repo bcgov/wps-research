@@ -89,7 +89,8 @@ int main(int argc, char ** argv){
   str ohfn(fn + str("_box.hdr"));
 
   printf("nr2 %zu nc2 %zu nband %zu\n", nrow, ncol, nband);
-  hwrite(ohfn, nrow, ncol, nband); // write output header
+  str a(exec((str("cp -v ") + hfn + str(" ") + ohfn)).c_str());
+  //hwrite(ohfn, nrow, ncol, nband); // write output header
   bwrite(out, ofn, nrow, ncol, nband);
   return 0;
 }
