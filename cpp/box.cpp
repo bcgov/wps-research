@@ -1,9 +1,8 @@
 /* 20220526: box filter
 Input:
-  32-bit IEEE standard floating-point BSQ format stack
+  32-bit IEEE standard floating-point BSQ "ENVI" format stack
 
-20241206 minor bugfix and added progress bar
-*/
+20241206 minor bugfix and added progress bar*/
 #include"misc.h"
 #include"time.h"
 static size_t nrow, ncol, nband, np, m;
