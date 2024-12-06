@@ -1,0 +1,18 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [-122.3045, 49.0497]
+      },
+      "properties": {
+        "name": "Abbotsford",
+        "city": "Abbotsford",
+        "province": "British Columbia",
+        "country": "Canada"
+      }
+    }
+  ]
+}
