@@ -28,7 +28,7 @@ inline int is_bad(float * dat, size_t i, size_t n_b){
 }
 
 void filter_line(size_t line_ix){
-  int report_interval = 1000;
+  int report_interval = 333;
   if(line_ix % report_interval == 0){
     if(line_ix == 0){
       start_c = clock();
