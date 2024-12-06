@@ -41,6 +41,7 @@ for d in dirs:
 
     # look for VOL file
     vol_files = [f for f in os.listdir(d) if len(f.split('VOL')) > 1]
+    print("vol_files", vol_files)
     if len(vol_files) > 1:
         err('expected only one *VOL* file')
 
