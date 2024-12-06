@@ -19,14 +19,16 @@ int main(int argc, char ** argv){
       ix = i * ncol + j;
       bool all_zero = true;
       for0(k, nband){
-        if(dat[np * k + ix] != 0.){
-	  all_zero = false;
-	}
+        d = dat[np * k + ix];
+        // 20241205 need to consider mixed 0 and nan
+        if(!( d == 0. || isnan(d))){
+	        all_zero = false;
+	      }
       }
       if(all_zero){
-    	for0(k, nband){
+    	  for0(k, nband){
           dat[np * k + ix] = NAN;
-	}
+      	}
       }
     }
   }
