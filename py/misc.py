@@ -8,6 +8,7 @@ import struct
 import datetime
 import numpy as np
 import os.path as path
+import warnings; warnings.filterwarnings("ignore", message="Unable to import Axes3D")
 
 try:
     from osgeo import gdal
