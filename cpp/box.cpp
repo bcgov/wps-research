@@ -1,28 +1,42 @@
 /* 20220526: box filter
 Input:
-  32-bit IEEE standard floating-point BSQ format stack */
+  32-bit IEEE standard floating-point BSQ "ENVI" format stack
+
+20241206 minor bugfix and added progress bar*/
 #include"misc.h"
+#include"time.h"
 static size_t nrow, ncol, nband, np, m;
-static float *out, *dat, t;
+static float *out, *dat, t, n_threads;
 static int *bp;
 static long int dw;
+clock_t start_c;
 
-// thsi should go in misc.h
+// this should go in misc.h
 inline int is_bad(float * dat, size_t i, size_t n_b){
   int zero = true;
-  for0(m, n_b){  // find bad/empty pix
+  for0(m, n_b){ 
+    // find bad/empty pix
     t = dat[np * m + i];
-    if(isnan(t) || isinf(t)) return true;
-    if(t != 0) zero = false;
+    if(isnan(t) || isinf(t)){
+      return true;
+    }
+    if(t != 0){
+      zero = false;
+    }
   }
   return zero;
 }
 
 void filter_line(size_t line_ix){
-  if(line_ix % 100 == 0) printf("line %zu\n", line_ix);
+  int report_interval = 333;
+  if(line_ix % report_interval == 0){
+    if(line_ix == 0){
+      start_c = clock();
+    }
+  }
   size_t b_ix = line_ix / nrow;  // process a row
-  size_t r_ix = line_ix % nrow;
-  size_t bk = b_ix * np;
+  size_t r_ix = line_ix % nrow; // row index contrib
+  size_t bk = b_ix * np;  // single band computed on only
   size_t ki = bk + (r_ix * ncol);
   size_t y, ix, iy;
   float npix, d, dd;
@@ -32,30 +46,40 @@ void filter_line(size_t line_ix){
     ix = ki + y; // index of pix at row r_ix and col ix
     out[ix] = npix = d = 0.;
 
-    for(dx = ((long int)r_ix - dw);
-        dx <= ((long int)r_ix + dw);
-	dx++){
-
-      for(dy = ((long int)y - dw);
-          dy <= ((long int)y + dw);
-	  dy++){
-
+    for(dx = ((long int)r_ix - dw); dx <= ((long int)r_ix + dw); dx++){
+      for(dy = ((long int)y - dw); dy <= ((long int)y + dw); dy++){
         iy = dx * ncol + dy;
-	if(bp[iy]) continue; // skip bad px
         wind = bk + iy; // for each pixel in window
         if((dx >= 0) && (dy >= 0) && (dx < nrow) && (dy < ncol)){
-	  dd = dat[wind];
-	  if(!(isnan(dd) || isinf(dd))){
+
+          if(bp[iy]){
+            continue; // skip bad px
+          }
+
+	        dd = dat[wind];
+	        if(!(isnan(dd) || isinf(dd))){
             npix++;
             d += (double) dd;
-	  }
+	        }
         }
       }
     }
-    if(npix > 0.)
+    if(npix > 0.){
       out[ix] = (float)(d / ((double)npix));
-    else
+    }
+    else{
       out[ix] = dat[ix];
+    }
+  }
+
+  if(line_ix % report_interval == 0){
+    clock_t end_c = clock();
+    float time_taken = (float)(end_c - start_c) / CLOCKS_PER_SEC;
+    float percent = 100. * (float)(line_ix + 1) / (float)(nband * nrow);
+    float done = (float)(line_ix + 1);
+    float remain = (float)(nband * nrow);
+    float eta = (time_taken / (float)(line_ix +1)) * (float)(nband * nrow - line_ix - 1) / n_threads;
+    printf("%%%.2f %.1e / %.1e eta %.2f(s)\n", percent, done, remain, eta);
   }
 }
 
@@ -69,6 +93,8 @@ int main(int argc, char ** argv){
   size_t i, j, k, n;
   hread(hfn, nrow, ncol, nband); // read header
   np = nrow * ncol; // number of input pix
+  n_threads = (float) sysconf(_SC_NPROCESSORS_ONLN);
+
 
   n = (size_t) atoi(argv[2]);
   if((n - 1) %2 != 0)
@@ -89,7 +115,8 @@ int main(int argc, char ** argv){
   str ohfn(fn + str("_box.hdr"));
 
   printf("nr2 %zu nc2 %zu nband %zu\n", nrow, ncol, nband);
-  hwrite(ohfn, nrow, ncol, nband); // write output header
+  str a(exec((str("cp -v ") + hfn + str(" ") + ohfn).c_str()));
+  //hwrite(ohfn, nrow, ncol, nband); // write output header
   bwrite(out, ofn, nrow, ncol, nband);
   return 0;
 }

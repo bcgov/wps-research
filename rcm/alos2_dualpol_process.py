@@ -7,7 +7,7 @@ import sys
 sep = os.path.sep
 my_path = sep.join(os.path.abspath(__file__).split(sep)[:-1]) + sep
 sys.path.append(my_path + ".." + sep + 'py')
-from misc import pd, sep, exist, args, cd, err
+from misc import pd, sep, exist, args, cd, err, find_snap
 QUAD_POL_SETS = []  # track and list the quad-pol sets
 
 def run(x):
@@ -15,20 +15,7 @@ def run(x):
     print(cmd)
     a = os.system(cmd)
 
-snap, ci = '/usr/local/snap/bin/gpt', 0 # assume we installed snap
-if not exist(snap):
-    snap = '/opt/snap/bin/gpt'  # try another location if that failed
-if not exist(snap):
-    snap = '/home/' + os.popen('whoami').read().strip() + sep + 'snap' + sep + 'bin' + sep + 'gpt'
-if not exist(snap):
-    snap = '/home/' + os.popen('whoami').read().strip() + sep + 'esa-snap' + sep + 'bin' + sep + 'gpt'
-
-if not exist(snap):
-    print("ERROR: snap binary 'gpt' not found")
-    sys.exit(1)
-
-print(snap)
-
+snap = find_snap()
 dirs = [f for f in os.listdir() if os.path.isdir(f)]
 # print(dirs)
 
@@ -41,6 +28,7 @@ for d in dirs:
 
     # look for VOL file
     vol_files = [f for f in os.listdir(d) if len(f.split('VOL')) > 1]
+    print("vol_files", vol_files)
     if len(vol_files) > 1:
         err('expected only one *VOL* file')
 

@@ -1,4 +1,5 @@
 # functions for reuse, for image processing, etc.
+# note: functionality in this library should be possible to install "incrementally"
 import os
 import sys
 import copy
@@ -7,6 +8,7 @@ import struct
 import datetime
 import numpy as np
 import os.path as path
+import warnings; warnings.filterwarnings("ignore", message="Unable to import Axes3D")
 
 try:
     from osgeo import gdal
@@ -176,7 +178,7 @@ def read_binary(fn):
     return samples, lines, bands, data
 
 def write_binary(np_ndarray, fn): # write a numpy array to ENVI format type 4
-    of = wopen(fn)
+    of = open(fn, 'wb')
     np_ndarray = np_ndarray.astype(np.float32)
     np_ndarray.tofile(of, '', '<f4')
     of.close()
@@ -453,3 +455,16 @@ def shapefile_to_EPSG(src_f, dst_f, dst_EPSG=3347): # or 3005 bc albers
                  dst_f,
                  fn,
                  "-lco ENCODING=UTF-8"]);
+
+
+def find_snap():  # find location of ESA's SNAP tool, command line interface ( gpt )
+    snap = '/usr/local/snap/bin/gpt'  # assume we installed snap here? 
+    if not exist(snap):
+        snap = '/opt/snap/bin/gpt'  # try another location if that failed
+    if not exist(snap):
+        snap = '/home/' + os.popen('whoami').read().strip() + sep + 'snap' + sep + 'bin' + sep + 'gpt'
+    if not exist(snap):
+        snap = '/home/' + os.popen('whoami').read().strip() + sep + 'esa-snap' + sep + 'bin' + sep + 'gpt'
+    if not exist(snap):
+        err('snap binary (gpt) not found')
+    return snap

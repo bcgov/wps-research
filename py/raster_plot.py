@@ -13,6 +13,7 @@
 20241202 add flag to perform 1-d ( | r,g,b | ) scaling, instead of default: 
 |r|, |g|, |b| ( separate, l2 ) scaling. In both cases, histogram stretching.
 '''
+import warnings; warnings.filterwarnings("ignore", message="Unable to import Axes3D")
 from misc import *
 import matplotlib
 
@@ -125,7 +126,7 @@ if __name__ == '__main__':
                     if values[j] > values[j + 1]:
                         err("failed to sort")
     
-                n_pct = 1. # percent for stretch value
+                n_pct = 1.5 # percent for stretch value
                 frac = n_pct / 100.
                 rgb_min, rgb_max = values[int(math.floor(float(len(values))*frac))],\
                                values[int(math.floor(float(len(values))*(1. - frac)))]
@@ -149,11 +150,13 @@ if __name__ == '__main__':
         print("scale_rgb_global..")
         rfn = fn + '_rgb_scaling.txt'
         rgb_min, rgb_max = None, None
-
+        
+        '''
         values = []
         for j in range(lines * samples):
             my_values = [data[band_select[k], j] for k in range(3)]
             values += [max(max(my_values[0], my_values[1]), my_values[2])]
+        '''
 
         if use_trim: # if not override_scaling
             if not exists(rfn):
@@ -236,6 +239,7 @@ if __name__ == '__main__':
         d_min, d_max = nanmin(rgb), nanmax(rgb)
         print("d_min", d_min, "d_max", d_max)
         # rgb = rgb / (d_max - d_min)
+        rgb = np.nan_to_num(rgb, nan=0.0)
         plt.imshow(rgb) #, vmin = 0., vmax = 1.) #plt.tight_layout()
         print(ff)
         if exists(ff + 'copyright_string.txt'):
