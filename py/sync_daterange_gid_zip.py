@@ -3,10 +3,11 @@
 python3 sync_daterange_gid_zip.py [yyyymmdd] [yyyymmdd2] # optional: list of GID 
 '''
 use_L2 = False
-data_type = 'MSIL2A'
+data_type = None 
+''''MSIL2A'
 if not use_L2:
     data_type = 'MSIL1C'
-
+'''
 from misc import args, sep, exists, parfor, run, timestamp, err
 import multiprocessing as mp
 import datetime
@@ -123,6 +124,10 @@ if '--L2' in args and '--L1' in args:
 
 if '--L1' in args:
     use_L2 = False
+
+data_type = 'MSIL2A'
+if not use_L2:
+    data_type = 'MSIL1C'
 
 new_args = []
 for arg in args:
