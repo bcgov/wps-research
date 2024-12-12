@@ -2,7 +2,7 @@
 
 python3 sync_daterange_gid_zip.py [yyyymmdd] [yyyymmdd2] # optional: list of GID 
 '''
-use_L2 = True
+use_L2 = False
 data_type = 'MSIL2A'
 if not use_L2:
     data_type = 'MSIL1C'
@@ -84,7 +84,7 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2):
             fw = f.split('_')
             gid = fw[5]   # e.g. T10UGU
 
-            out_dir = "L2_" + gid
+            out_dir = ("L2_" if use_L2 else "L1_") + gid
             f = out_dir + os.path.sep + f 
 
             ts = fw[2].split('T')[0]  # e.g. 20230525
@@ -114,6 +114,22 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2):
         print([c])
         return os.system(c)
     parfor(runc, cmds, 2 * int(mp.cpu_count()))  
+
+# check if L2 mode is desired ( L1 mode default ) 
+use_L2 = '--L2' in args
+
+if '--L2' in args and '--L1' in args:
+    err("Must select L2 or L1")
+
+if '--L1' in args:
+    use_L2 = False
+
+new_args = []
+for arg in args:
+    if arg[:2] != '--':
+        new_args += [arg]
+args = new_args
+
 
 gids = []  # get gids from command line
 if len(args) > 3:
