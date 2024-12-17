@@ -60,16 +60,19 @@ int main(int argc, char ** argv){
 
         red1 = out[j] / red1;  // red as fraction of sum of bands
         red2 = dat[j] / red2;  // red as fraction of sum of bands
-        if(red2 > red1 || (!old_good)){
+        if(red2 > 1.5 * red1 || (!old_good)){
           for0(k, nband) out[np * k + j]= dat[np * k + j];
         }
       }
     }
     // update the index of the file considered ( i only used to check if on the first pixel ) 
-    i++;   
+    i++;
+    free(dat);   
   }
 
   bwrite(out, str("sentinel2_redmax.bin"), nrow, ncol, nband);
   run((str("cp -v ") + hdr_fn(lines[0]) + str(" sentinel2_redmax.hdr")).c_str());
+
+  free(out)
   return 0;
 }
