@@ -58,8 +58,8 @@ int main(int argc, char ** argv){
 
         if(!new_good) continue;  // use the new data
 
-        red1 = out[i] / red1;  // red as fraction of sum of bands
-        red2 = dat[i] / red2;  // red as fraction of sum of bands
+        red1 = out[j] / red1;  // red as fraction of sum of bands
+        red2 = dat[j] / red2;  // red as fraction of sum of bands
         if(red2 > red1 || (!old_good)){
           for0(k, nband) out[np * k + j]= dat[np * k + j];
         }
