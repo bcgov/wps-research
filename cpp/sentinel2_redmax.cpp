@@ -60,7 +60,7 @@ int main(int argc, char ** argv){
 
         red1 = out[j] / red1;  // red as fraction of sum of bands
         red2 = dat[j] / red2;  // red as fraction of sum of bands
-        if(red2 > 1.5 * red1 || (!old_good)){
+        if(red2 > red1 || (!old_good)){
           for0(k, nband) out[np * k + j]= dat[np * k + j];
         }
       }
