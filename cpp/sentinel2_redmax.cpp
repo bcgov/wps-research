@@ -73,6 +73,6 @@ int main(int argc, char ** argv){
   bwrite(out, str("sentinel2_redmax.bin"), nrow, ncol, nband);
   run((str("cp -v ") + hdr_fn(lines[0]) + str(" sentinel2_redmax.hdr")).c_str());
 
-  free(out)
+  free(out);
   return 0;
 }
