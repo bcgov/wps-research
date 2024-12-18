@@ -10,12 +10,16 @@ import umap
 import math
 import pickle
 import rasterio
+import warnings 
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE  # Import t-SNE from scikit-learn
+warnings.filterwarnings("ignore", category=UserWarning, message="Unable to import Axes3D")
+warnings.filterwarnings("ignore", category=UserWarning, message="Dataset has no geotransform")
 
 # Function to choose between UMAP and t-SNE
 def get_model(model_type='tsne'):
+    print("fitting model..")
     if model_type == 'umap':
         return umap.UMAP(n_components=2)
     elif model_type == 'tsne':
@@ -41,7 +45,10 @@ reshaped_data = data.reshape(num_bands, -1).T  # Shape: (num_pixels, num_bands)
 # Choose model type (UMAP or t-SNE)
 model_type = sys.argv[2] if len(sys.argv) > 2 else 'tsne'  # Default to 'umap' if not specified
 pkl_exist = os.path.exists('model.pkl')
-model = pickle.load('model.pkl') if pkl_exist else get_model(model_type)
+
+if pkl_exist:
+    print("reloading model from pkl..")
+model = pickle.load(open('model.pkl', 'rb')) if pkl_exist else get_model(model_type)
 
 if not pkl_exist:
     pickle.dump(model, open('model.pkl', 'wb'))
