@@ -17,7 +17,6 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon
 from matplotlib.backend_bases import MouseEvent
 from matplotlib.path import Path
-
 warnings.filterwarnings("ignore", category=UserWarning, message="Unable to import Axes3D")
 warnings.filterwarnings("ignore", category=UserWarning, message="Dataset has no geotransform")
 
@@ -26,7 +25,7 @@ def get_model(model_type='tsne'):
     if model_type == 'umap':
         return umap.UMAP(n_components=2)
     elif model_type == 'tsne':
-        return TSNE(n_components=2, perplexity=222)
+        return TSNE(n_components=2, perplexity=22)
     else:
         raise ValueError("model_type should be either 'umap' or 'tsne'")
 
@@ -52,7 +51,7 @@ pkl_exist = os.path.exists('model.pkl')
 model = get_model(model_type)
 
 # Apply chosen model for dimensionality reduction (project to 2D)
-print("embedding..")
+print("embedding..", model_type)
 embedding = model.fit_transform(reshaped_data) if not pkl_exist else pickle.load(open('model.pkl', 'rb'))
 print("embedding loaded.")
 
@@ -60,7 +59,7 @@ if not pkl_exist:
     pickle.dump(embedding, open('model.pkl', 'wb'))
 
 # If the raster has 3 bands (RGB), we use the RGB values to color the projection
-if num_bands == 3:
+if True: 
     # Normalize the data for proper RGB scaling (values between 0 and 1)
     rgb_values = np.moveaxis(data[:3, :, :], 0, -1).reshape(-1, 3)  # Reshape (height * width, 3) for RGB
     print(rgb_values.shape)
@@ -78,10 +77,6 @@ if num_bands == 3:
         rgb_values[:, i] /= (rgb_max - rgb_min)
         rgb_values[:, i][np.where(rgb_values[:, i] < 0.)] = 0.
         rgb_values[:, i][np.where(rgb_values[:, i] > 1.)] = 1.
-
-else:
-    # If it's not RGB, use the first component (just for visualization purposes)
-    rgb_values = np.zeros((reshaped_data.shape[0], 3))  # Fallback: black color for non-RGB data
 
 # Create a figure with two subplots (for UMAP/t-SNE and RGB values)
 fig, axs = plt.subplots(1, 2, figsize=(16, 6))  # 1 row, 2 columns
