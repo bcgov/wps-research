@@ -19,7 +19,6 @@ import matplotlib.pyplot as plt
 
 # Function to choose between UMAP and t-SNE
 def get_model(model_type='tsne'):
-    print("fitting model..")
     if model_type == 'umap':
         return umap.UMAP(n_components=2)
     elif model_type == 'tsne':
@@ -49,7 +48,9 @@ pkl_exist = os.path.exists('model.pkl')
 model = get_model(model_type)
 
 # Apply chosen model for dimensionality reduction (project to 2D)
+print("embedding..")
 embedding = model.fit_transform(reshaped_data) if not pkl_exist else pickle.load(open('model.pkl', 'rb'))
+print("embedding loaded.")
 
 if not pkl_exist:
     pickle.dump(embedding, open('model.pkl', 'wb'))
