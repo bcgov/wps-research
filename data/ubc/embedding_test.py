@@ -1,4 +1,6 @@
-'''
+'''20241218 sample of embedding multispectral image data (SWIR example) into 2d 
+usage: 
+
 python3 embedding_test.py small/G80223_20230513.bin_scale.bin
 
 '''
@@ -88,7 +90,6 @@ plt.tight_layout()
 plt.show()
 
 # Optionally, you can reshape the projection result to match the original raster shape (height, width, 2)
-umap_image = embedding.reshape(height, width, 2)
+# umap_image = embedding.reshape(height, width, 2)
 
 # If you want to save or process the UMAP/t-SNE projection back into image form, you can save it using rasterio or another library
-
