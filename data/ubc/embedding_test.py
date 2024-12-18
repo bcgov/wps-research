@@ -4,9 +4,11 @@ usage:
 python3 embedding_test.py small/G80223_20230513.bin_scale.bin
 
 '''
+import os
 import sys
 import umap
 import math
+import pickle
 import rasterio
 import numpy as np
 import matplotlib.pyplot as plt
@@ -17,7 +19,7 @@ def get_model(model_type='tsne'):
     if model_type == 'umap':
         return umap.UMAP(n_components=2)
     elif model_type == 'tsne':
-        return TSNE(n_components=2, perplexity = 50) 
+        return TSNE(n_components=2, perplexity = 111) 
     else:
         raise ValueError("model_type should be either 'umap' or 'tsne'")
 
@@ -38,7 +40,11 @@ reshaped_data = data.reshape(num_bands, -1).T  # Shape: (num_pixels, num_bands)
 
 # Choose model type (UMAP or t-SNE)
 model_type = sys.argv[2] if len(sys.argv) > 2 else 'tsne'  # Default to 'umap' if not specified
-model = get_model(model_type)
+pkl_exist = os.path.exists('model.pkl')
+model = pickle.load('model.pkl') if pkl_exist else get_model(model_type)
+
+if not pkl_exist:
+    pickle.dump(model, open('model.pkl', 'wb'))
 
 # Apply chosen model for dimensionality reduction (project to 2D)
 embedding = model.fit_transform(reshaped_data)
