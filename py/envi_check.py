@@ -1,8 +1,13 @@
 '''20230605 check .bin files to see if the file sizes match the header'''
-from misc import err, hdr_fn, read_hdr, args, exist
+from misc import err, hdr_fn, read_hdr, args, exist, args
 import os
 
-lines = [x.strip() for x in os.popen("ls -1 *.bin").readlines()]
+lines = None
+if '-r' in args or '--recursive' in args:
+    lines = [x.strip() for x in os.popen('find ./ -name "*.bin"').readlines()]
+else:
+    # non-recursive ( default ) 
+    lines = [x.strip() for x in os.popen("ls -1 *.bin").readlines()]
 
 fails = []
 no_hdr = []

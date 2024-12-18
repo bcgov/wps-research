@@ -6,7 +6,7 @@ int main(int argc, char ** argv){
 
   vector<str> lines( split(exec("ls -1 *.bin"), '\n'));
 
-  size_t i, nrow, ncol, nband, np, k, nrow2, ncol2, nband2;
+  size_t i, j, nrow, ncol, nband, np, k, nrow2, ncol2, nband2;
 
   for(vector<str>::iterator it = lines.begin(); it != lines.end(); it++){
     i = 0;
@@ -40,35 +40,39 @@ int main(int argc, char ** argv){
     }
     else{
       // for each pixel, find out if the updated version is "more red"
-      for0(i, np){
+      for0(j, np){
         float red1 = 0.;
         float red2 = 0.;
         bool new_good = true;
         bool old_good = true;
         for0(k, nband){
-          if(isnan(dat[np*k + i])){
+          if(isnan(dat[np*k + j])){
               new_good = false;
           }
-          if(isnan(out[np*k + i])){
+          if(isnan(out[np*k + j])){
             old_good = false;
           }
-          red1 += out[np * k + i]; // add up the bands, this pixel ( candidate result so far ) 
-          red2 += dat[np * k + i]; // current image being processed, this pixel 
+          red1 += out[np * k + j]; // add up the bands, this pixel ( candidate result so far ) 
+          red2 += dat[np * k + j]; // current image being processed, this pixel 
         }
 
-        if(!new_good) continue;
+        if(!new_good) continue;  // use the new data
 
-        red1 = out[i] / red1;  // red as fraction of sum of bands
-        red2 = dat[i] / red2;  // red as fraction of sum of bands
-        if(red2 > red1 || (!old_good)){
-          for0(k, nband) out[np * k + i] = dat[np * k + i];
+        red1 = out[j] / red1;  // red as fraction of sum of bands
+        red2 = dat[j] / red2;  // red as fraction of sum of bands
+        if(red2 > 1.5 * red1 || (!old_good)){
+          for0(k, nband) out[np * k + j]= dat[np * k + j];
         }
       }
     }
-    i++;   
+    // update the index of the file considered ( i only used to check if on the first pixel ) 
+    i++;
+    free(dat);   
   }
 
   bwrite(out, str("sentinel2_redmax.bin"), nrow, ncol, nband);
   run((str("cp -v ") + hdr_fn(lines[0]) + str(" sentinel2_redmax.hdr")).c_str());
+
+  free(out);
   return 0;
 }
