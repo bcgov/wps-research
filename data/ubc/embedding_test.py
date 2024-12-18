@@ -4,8 +4,6 @@ usage:
 python3 embedding_test.py small/G80223_20230513.bin_scale.bin
 
 '''
-
-
 import os
 import sys
 import umap
@@ -28,7 +26,7 @@ def get_model(model_type='tsne'):
     if model_type == 'umap':
         return umap.UMAP(n_components=2)
     elif model_type == 'tsne':
-        return TSNE(n_components=2, perplexity=111)
+        return TSNE(n_components=2, perplexity=222)
     else:
         raise ValueError("model_type should be either 'umap' or 'tsne'")
 
