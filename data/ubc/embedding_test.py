@@ -12,10 +12,10 @@ import pickle
 import rasterio
 import warnings 
 import numpy as np
-import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE  # Import t-SNE from scikit-learn
 warnings.filterwarnings("ignore", category=UserWarning, message="Unable to import Axes3D")
 warnings.filterwarnings("ignore", category=UserWarning, message="Dataset has no geotransform")
+import matplotlib.pyplot as plt
 
 # Function to choose between UMAP and t-SNE
 def get_model(model_type='tsne'):
@@ -46,15 +46,13 @@ reshaped_data = data.reshape(num_bands, -1).T  # Shape: (num_pixels, num_bands)
 model_type = sys.argv[2] if len(sys.argv) > 2 else 'tsne'  # Default to 'umap' if not specified
 pkl_exist = os.path.exists('model.pkl')
 
-if pkl_exist:
-    print("reloading model from pkl..")
-model = pickle.load(open('model.pkl', 'rb')) if pkl_exist else get_model(model_type)
-
-if not pkl_exist:
-    pickle.dump(model, open('model.pkl', 'wb'))
+model = get_model(model_type)
 
 # Apply chosen model for dimensionality reduction (project to 2D)
-embedding = model.fit_transform(reshaped_data)
+embedding = model.fit_transform(reshaped_data) if not pkl_exist else pickle.load(open('model.pkl', 'rb'))
+
+if not pkl_exist:
+    pickle.dump(embedding, open('model.pkl', 'wb'))
 
 # If the raster has 3 bands (RGB), we use the RGB values to color the projection
 if num_bands == 3:
