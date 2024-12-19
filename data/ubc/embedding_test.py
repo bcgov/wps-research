@@ -19,8 +19,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon
 from matplotlib.backend_bases import MouseEvent
 from matplotlib.path import Path
-warnings.filterwarnings("ignore", category=UserWarning, message="Unable to import Axes3D")
-warnings.filterwarnings("ignore", category=UserWarning, message="Dataset has no geotransform")
+warnings.filterwarnings("ignore")
 
 # Function to choose between UMAP and t-SNE
 def get_model(model_type=None):
