@@ -15,11 +15,14 @@ import rasterio
 import warnings
 import numpy as np
 from sklearn.manifold import TSNE  # Import t-SNE from scikit-learn
+
+warnings.filterwarnings("ignore")
+warnings.filterwarnings("ignore", module="matplotlib")
+
 import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon
 from matplotlib.backend_bases import MouseEvent
 from matplotlib.path import Path
-warnings.filterwarnings("ignore")
 
 # Function to choose between UMAP and t-SNE
 def get_model(model_type=None):
