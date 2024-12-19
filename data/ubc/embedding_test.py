@@ -1,7 +1,8 @@
 '''20241218 sample of embedding multispectral image data (SWIR example) into 2d 
 usage: 
 
-python3 embedding_test.py small/G80223_20230513.bin_scale.bin
+python3 embedding_test.py small/stack.bin umap
+# python3 embedding_test.py small/G80223_20230513.bin_scale.bin
 
 '''
 
@@ -22,7 +23,7 @@ warnings.filterwarnings("ignore", category=UserWarning, message="Unable to impor
 warnings.filterwarnings("ignore", category=UserWarning, message="Dataset has no geotransform")
 
 # Function to choose between UMAP and t-SNE
-def get_model(model_type='tsne'):
+def get_model(model_type=None):
     if model_type == 'umap':
         return umap.UMAP(n_components=2)
     elif model_type == 'tsne':
@@ -44,6 +45,7 @@ with rasterio.open(raster_file) as src:
 
 # Reshape data for UMAP or t-SNE (flatten the image)
 reshaped_data = data.reshape(num_bands, -1).T  # Shape: (num_pixels, num_bands)
+reshaped_data = np.nan_to_num(reshaped_data)
 
 # Choose model type (UMAP or t-SNE)
 model_type = sys.argv[2] if len(sys.argv) > 2 else 'tsne'  # Default to 'umap' if not specified
