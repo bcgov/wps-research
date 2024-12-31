@@ -2,13 +2,13 @@
 #include"misc.h"
 
 int main(int argc, char ** argv){
-  if(argc < 2) err("raster_entropy [raster cube] # add bands together for a raster\n");
+  if(argc < 2) err("raster_entropy2 [raster cube] # add bands together for a raster\n");
   size_t nrow, ncol, nband, np;
   float * out, * dat;
   size_t i, j, k;
 
   str fn(argv[1]);
-  str ofn(fn + str("_entropy.bin"));
+  str ofn(fn + str("_entropy2.bin"));
   str ohn(hdr_fn(ofn, true)); // out header file name
 
   if(!exists(fn)) err("failed to open input file");
