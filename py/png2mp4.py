@@ -37,7 +37,7 @@ with open('filelist.txt', 'w') as file:
                 continue
 
             # Resize the image
-            resized_img = img.resize((max_width, max_height), Image.ANTIALIAS)
+            resized_img = img.resize((max_width, max_height), Image.LANCZOS)
             resized_png = f"resized_{png}"  # New file name for the resized image
             resized_img.save(resized_png)  # Save the resized image
             file.write(f"file '{resized_png}'\n")
