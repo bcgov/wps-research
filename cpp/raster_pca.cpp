@@ -25,16 +25,27 @@ extern "C" {
 void calculate_mean(const std::vector<std::vector<double>>& data, std::vector<double>& mean) {
     int num_samples = data.size();
     int num_features = data[0].size();
-    
+    double count = 0.;
+    double d;
+
+    cout << "num_samples " << num_samples << endl;
+    cout << "num_features " << num_features << endl;
     mean.resize(num_features, 0.0);
     
     for (int j = 0; j < num_features; j++) {
         mean[j] = 0.0;
         for (int i = 0; i < num_samples; i++) {
-            mean[j] += data[i][j];
+            
+            d = data[i][j];
+            if(!isnan(d)){
+              mean[j] += d;
+              count += 1;
+            }
         }
-        mean[j] /= num_samples;
+        mean[j] /= count; 
     }
+
+    cout << mean << endl;
 }
 
 // Function to center the data (subtract the mean from each feature)
@@ -43,12 +54,19 @@ void center_data(const std::vector<std::vector<double>>& data,
                  std::vector<std::vector<double>>& centered_data) {
     int num_samples = data.size();
     int num_features = data[0].size();
-    
+    double d;
+ 
     centered_data.resize(num_samples, std::vector<double>(num_features, 0.0));
     
     for (int i = 0; i < num_samples; i++) {
         for (int j = 0; j < num_features; j++) {
-            centered_data[i][j] = data[i][j] - mean[j];
+            d = data[i][j];
+            if(!isnan(d)){
+              centered_data[i][j] = d - mean[j];
+            }
+            else{
+              centered_data[i][j] = d;
+            }
         }
     }
 }
@@ -61,13 +79,21 @@ void compute_covariance_matrix(const std::vector<std::vector<double>>& centered_
     
     covariance_matrix.resize(num_features, std::vector<double>(num_features, 0.0));
     
+    double di, dj;
+    double count = 0.;
     for (int i = 0; i < num_features; i++) {
         for (int j = 0; j < num_features; j++) {
             covariance_matrix[i][j] = 0.0;
+            count = 0.;
             for (int k = 0; k < num_samples; k++) {
-                covariance_matrix[i][j] += centered_data[k][i] * centered_data[k][j];
+                di = centered_data[k][i]; 
+                dj = centered_data[k][j];
+                if((!isnan(di)) && (!isnan(dj))){ 
+                  covariance_matrix[i][j] += di * dj; //centered_data[k][i] * centered_data[k][j];
+                  count += 1.;
+                }
             }
-            covariance_matrix[i][j] /= (num_samples - 1);  // Normalizing by N-1
+            covariance_matrix[i][j] /= (count -1 );  // num_samples - 1);  // Normalizing by N-1
         }
     }
 }
@@ -90,6 +116,7 @@ void compute_eigenvalues_and_eigenvectors(std::vector<std::vector<double>>& matr
     char jobvr = 'N';  // Don't compute right eigenvectors
     int N = num_features;
     int lda = N;
+    cout << N << endl;
     std::vector<double> wr(N, 0.0);  // Real parts of eigenvalues
     std::vector<double> wi(N, 0.0);  // Imaginary parts of eigenvalues
     
@@ -198,24 +225,30 @@ int main(int argc, char *argv[]) {
 
   str fn(argv[1]); // input image file name
   int num_components = atoi(argv[2]);
+
+  cout << "input file: " << fn << endl;
+  cout << "number of components: " << num_components << endl;
+
   if(!(exists(fn)))  err("failed to open input file");
 
   str hfn(hdr_fn(fn)); // input header file name
   str ofn(fn + str("_pca.bin")); // output file name
   str ohn(hdr_fn(ofn, true)); // out header file name
 
-  size_t nrow, ncol, nband, np;
+  size_t nrow, ncol, nband, np, i, k;
   hread(hfn, nrow, ncol, nband); // read header 1
   np = nrow * ncol;
+  cout << "+r " << fn << endl;
   float * dat = bread(fn, nrow, ncol, nband);
-
+  
+  cout << "reformatting.." << endl;
   int num_samples = np;
   int num_features = nband;
   std::vector<std::vector<double>> data(num_samples, std::vector<double>(num_features));
 
   for0(i , np){
     for0(k, nband){
-      data[i][k] = dat[k * np + i];
+      data[i][k] = (double) dat[k * np + i];
     }
   }
   
@@ -243,21 +276,27 @@ int main(int argc, char *argv[]) {
     std::vector<double> eigenvalues;
     std::vector<std::vector<double>> projected_data;
 
+    cout << "calculate mean.." << endl;
     // Step 1: Calculate mean of each feature
     calculate_mean(data, mean);
 
+    cout << "centre data.." << endl;
     // Step 2: Center the data
     center_data(data, mean, centered_data);
-
+  
+    cout << "compute covariance matrix.." << endl;
     // Step 3: Compute covariance matrix
     compute_covariance_matrix(centered_data, covariance_matrix);
 
+    cout << "compute eigenvalues and eigenvectors.." << endl;
     // Step 4: Compute eigenvalues and eigenvectors using LAPACK
     compute_eigenvalues_and_eigenvectors(covariance_matrix, eigenvectors, eigenvalues);
 
+    cout << "sort eigenvalues and eigenvectors.." << endl;
     // Step 5: Sort eigenvalues and eigenvectors
     sort_eigenvectors(eigenvalues, eigenvectors);
 
+    cout << "reproject.." << endl;
     // Step 6: Project the data onto the new principal components
     project_data(centered_data, eigenvectors, projected_data, num_components);
 
