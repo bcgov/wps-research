@@ -322,5 +322,15 @@ int main(int argc, char *argv[]) {
         std::cout << std::endl;
     }
 
+
+    float * out = falloc( np * num_components );
+    for0(i, np){
+      for0(k, num_components){
+        out[k * np + i] = (float) projected_data[i][k];
+      }
+    }
+    bwrite(out, ofn, nrow, ncol, num_components);
+    hwrite(ohn, nrow, ncol, num_components);
+
     return 0;
 }
