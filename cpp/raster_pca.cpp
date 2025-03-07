@@ -7,10 +7,11 @@
   Used chatgpt to form original example. Used claude AI to modify to use a headerless (link only) method for accessing LAPACK
 */
 
-#include <iostream>
-#include <cstdlib>
-#include <cmath>
-#include <getopt.h>
+#include<iostream>
+#include<cstdlib>
+#include<cmath>
+#include<getopt.h>
+#include"misc.h"
 
 // External declarations for BLAS/LAPACK functions
 extern "C" {
@@ -20,60 +21,93 @@ extern "C" {
     extern double cblas_ddot(const int N, const double *X, const int incX, const double *Y, const int incY);
 }
 
-#define NUM_SAMPLES 5   // Number of samples (rows)
-#define NUM_FEATURES 3  // Number of features (columns)
-
 // Function to calculate the mean of each feature
-void calculate_mean(double data[NUM_SAMPLES][NUM_FEATURES], double mean[NUM_FEATURES]) {
-    for (int j = 0; j < NUM_FEATURES; j++) {
-        mean[j] = 0;
-        for (int i = 0; i < NUM_SAMPLES; i++) {
+void calculate_mean(const std::vector<std::vector<double>>& data, std::vector<double>& mean) {
+    int num_samples = data.size();
+    int num_features = data[0].size();
+    
+    mean.resize(num_features, 0.0);
+    
+    for (int j = 0; j < num_features; j++) {
+        mean[j] = 0.0;
+        for (int i = 0; i < num_samples; i++) {
             mean[j] += data[i][j];
         }
-        mean[j] /= NUM_SAMPLES;
+        mean[j] /= num_samples;
     }
 }
 
 // Function to center the data (subtract the mean from each feature)
-void center_data(double data[NUM_SAMPLES][NUM_FEATURES], double mean[NUM_FEATURES], double centered_data[NUM_SAMPLES][NUM_FEATURES]) {
-    for (int i = 0; i < NUM_SAMPLES; i++) {
-        for (int j = 0; j < NUM_FEATURES; j++) {
+void center_data(const std::vector<std::vector<double>>& data, 
+                 const std::vector<double>& mean, 
+                 std::vector<std::vector<double>>& centered_data) {
+    int num_samples = data.size();
+    int num_features = data[0].size();
+    
+    centered_data.resize(num_samples, std::vector<double>(num_features, 0.0));
+    
+    for (int i = 0; i < num_samples; i++) {
+        for (int j = 0; j < num_features; j++) {
             centered_data[i][j] = data[i][j] - mean[j];
         }
     }
 }
 
 // Function to compute the covariance matrix
-void compute_covariance_matrix(double centered_data[NUM_SAMPLES][NUM_FEATURES], double covariance_matrix[NUM_FEATURES][NUM_FEATURES]) {
-    for (int i = 0; i < NUM_FEATURES; i++) {
-        for (int j = 0; j < NUM_FEATURES; j++) {
-            covariance_matrix[i][j] = 0;
-            for (int k = 0; k < NUM_SAMPLES; k++) {
+void compute_covariance_matrix(const std::vector<std::vector<double>>& centered_data, 
+                              std::vector<std::vector<double>>& covariance_matrix) {
+    int num_samples = centered_data.size();
+    int num_features = centered_data[0].size();
+    
+    covariance_matrix.resize(num_features, std::vector<double>(num_features, 0.0));
+    
+    for (int i = 0; i < num_features; i++) {
+        for (int j = 0; j < num_features; j++) {
+            covariance_matrix[i][j] = 0.0;
+            for (int k = 0; k < num_samples; k++) {
                 covariance_matrix[i][j] += centered_data[k][i] * centered_data[k][j];
             }
-            covariance_matrix[i][j] /= (NUM_SAMPLES - 1);  // Normalizing by N-1
+            covariance_matrix[i][j] /= (num_samples - 1);  // Normalizing by N-1
         }
     }
 }
 
 // Function to compute eigenvalues and eigenvectors using LAPACK directly
-void compute_eigenvalues_and_eigenvectors(double matrix[NUM_FEATURES][NUM_FEATURES], double eigenvectors[NUM_FEATURES][NUM_FEATURES], double eigenvalues[NUM_FEATURES], int num_features) {
-    int N = num_features;
+void compute_eigenvalues_and_eigenvectors(std::vector<std::vector<double>>& matrix, 
+                                         std::vector<std::vector<double>>& eigenvectors, 
+                                         std::vector<double>& eigenvalues) {
+    int num_features = matrix.size();
+    
+    // Flatten the 2D matrix into a 1D array for LAPACK (column-major order)
+    std::vector<double> matrix_flat(num_features * num_features);
+    for (int i = 0; i < num_features; i++) {
+        for (int j = 0; j < num_features; j++) {
+            matrix_flat[j * num_features + i] = matrix[i][j];
+        }
+    }
+    
     char jobvl = 'V';  // Compute left eigenvectors
     char jobvr = 'N';  // Don't compute right eigenvectors
+    int N = num_features;
     int lda = N;
-    double* wr = new double[N];  // Real parts of eigenvalues
-    double* wi = new double[N];  // Imaginary parts of eigenvalues
-    double* vl = &eigenvectors[0][0];  // Left eigenvectors
+    std::vector<double> wr(N, 0.0);  // Real parts of eigenvalues
+    std::vector<double> wi(N, 0.0);  // Imaginary parts of eigenvalues
+    
+    // Prepare the output eigenvector matrix (flattened for LAPACK)
+    std::vector<double> vl(N * N, 0.0);  // Left eigenvectors
     int ldvl = N;
     double* vr = nullptr;  // We don't need right eigenvectors
     int ldvr = 1;
-    int lwork = 4 * N;  // Work array size
-    double* work = new double[lwork];
+    
+    // Prepare workspace
+    int lwork = 4 * N;
+    std::vector<double> work(lwork, 0.0);
     int info;
     
     // Call LAPACK dgeev function directly
-    dgeev_(&jobvl, &jobvr, &N, &matrix[0][0], &lda, wr, wi, vl, &ldvl, vr, &ldvr, work, &lwork, &info);
+    dgeev_(&jobvl, &jobvr, &N, matrix_flat.data(), &lda, 
+           wr.data(), wi.data(), vl.data(), &ldvl, vr, &ldvr, 
+           work.data(), &lwork, &info);
     
     if (info != 0) {
         std::cerr << "Error in eigenvalue decomposition: " << info << std::endl;
@@ -81,45 +115,77 @@ void compute_eigenvalues_and_eigenvectors(double matrix[NUM_FEATURES][NUM_FEATUR
     }
     
     // Copy eigenvalues to the result array
+    eigenvalues.resize(N);
     for (int i = 0; i < N; i++) {
         eigenvalues[i] = wr[i];
-        // If there are imaginary parts, just take the real part for simplicity in this PCA implementation
+        // Warn if there are imaginary parts
         if (std::abs(wi[i]) > 1e-10) {
             std::cerr << "Warning: Complex eigenvalue detected: " << wr[i] << " + " << wi[i] << "i" << std::endl;
         }
     }
     
-    // Cleanup
-    delete[] wr;
-    delete[] wi;
-    delete[] work;
-}
-
-// Function to sort eigenvalues and eigenvectors in descending order
-void sort_eigenvectors(double eigenvalues[NUM_FEATURES], double eigenvectors[NUM_FEATURES][NUM_FEATURES], int num_features) {
-    for (int i = 0; i < num_features - 1; i++) {
-        for (int j = i + 1; j < num_features; j++) {
-            if (eigenvalues[i] < eigenvalues[j]) {
-                double temp_val = eigenvalues[i];
-                eigenvalues[i] = eigenvalues[j];
-                eigenvalues[j] = temp_val;
-
-                for (int k = 0; k < num_features; k++) {
-                    double temp_vec = eigenvectors[k][i];
-                    eigenvectors[k][i] = eigenvectors[k][j];
-                    eigenvectors[k][j] = temp_vec;
-                }
-            }
+    // Copy and convert eigenvectors from column-major to row-major format
+    eigenvectors.resize(N, std::vector<double>(N, 0.0));
+    for (int i = 0; i < N; i++) {
+        for (int j = 0; j < N; j++) {
+            eigenvectors[i][j] = vl[j * N + i];
         }
     }
 }
 
+// Function to sort eigenvalues and eigenvectors in descending order
+void sort_eigenvectors(std::vector<double>& eigenvalues, 
+                      std::vector<std::vector<double>>& eigenvectors) {
+    int num_features = eigenvalues.size();
+    
+    // Create index vector for sorting
+    std::vector<int> indices(num_features);
+    for (int i = 0; i < num_features; i++) {
+        indices[i] = i;
+    }
+    
+    // Sort indices based on eigenvalues (descending order)
+    for (int i = 0; i < num_features - 1; i++) {
+        for (int j = i + 1; j < num_features; j++) {
+            if (eigenvalues[indices[i]] < eigenvalues[indices[j]]) {
+                std::swap(indices[i], indices[j]);
+            }
+        }
+    }
+    
+    // Create temporary copies of the sorted data
+    std::vector<double> sorted_eigenvalues(num_features);
+    std::vector<std::vector<double>> sorted_eigenvectors(num_features, std::vector<double>(num_features));
+    
+    for (int i = 0; i < num_features; i++) {
+        sorted_eigenvalues[i] = eigenvalues[indices[i]];
+        for (int j = 0; j < num_features; j++) {
+            sorted_eigenvectors[j][i] = eigenvectors[j][indices[i]];
+        }
+    }
+    
+    // Copy back the sorted data
+    eigenvalues = sorted_eigenvalues;
+    eigenvectors = sorted_eigenvectors;
+}
+
 // Function to project the data onto the principal components
-void project_data(double centered_data[NUM_SAMPLES][NUM_FEATURES], double eigenvectors[NUM_FEATURES][NUM_FEATURES], double projected_data[NUM_SAMPLES][NUM_FEATURES], int num_components) {
-    for (int i = 0; i < NUM_SAMPLES; i++) {
+void project_data(const std::vector<std::vector<double>>& centered_data, 
+                 const std::vector<std::vector<double>>& eigenvectors, 
+                 std::vector<std::vector<double>>& projected_data, 
+                 int num_components) {
+    int num_samples = centered_data.size();
+    int num_features = centered_data[0].size();
+    
+    // Ensure num_components is not greater than num_features
+    num_components = std::min(num_components, num_features);
+    
+    projected_data.resize(num_samples, std::vector<double>(num_components, 0.0));
+    
+    for (int i = 0; i < num_samples; i++) {
         for (int j = 0; j < num_components; j++) {
-            projected_data[i][j] = 0;
-            for (int k = 0; k < NUM_FEATURES; k++) {
+            projected_data[i][j] = 0.0;
+            for (int k = 0; k < num_features; k++) {
                 projected_data[i][j] += centered_data[i][k] * eigenvectors[k][j];
             }
         }
@@ -128,15 +194,23 @@ void project_data(double centered_data[NUM_SAMPLES][NUM_FEATURES], double eigenv
 
 // Main function that reads the number of components as a command-line argument
 int main(int argc, char *argv[]) {
-    if (argc != 2) {
-        std::cout << "Usage: " << argv[0] << " <num_components>" << std::endl;
-        return 1;
-    }
+  if(argc < 3) err("raster_pca [input ENVI-format data cube] [ number of components ]\n");
 
-    int num_components = atoi(argv[1]);
+  str fn(argv[1]); // input image file name
+  int num_components = atoi(argv[2]);
+  if(!(exists(fn)))  err("failed to open input file");
 
-    // Sample data: 5 samples and 3 features
-    double data[NUM_SAMPLES][NUM_FEATURES] = {
+  str hfn(hdr_fn(fn)); // input header file name
+  str ofn(fn + str("_pca.bin")); // output file name
+  str ohn(hdr_fn(ofn, true)); // out header file name
+
+  size_t nrow, ncol, nband, np;
+  hread(hfn, nrow, ncol, nband); // read header 1
+
+  float * dat = bread(fn, nrow, ncol, nband);
+
+  // Sample data - now using vectors
+    std::vector<std::vector<double>> data = {
         {2.5, 2.4, 3.5},
         {0.5, 0.7, 1.5},
         {2.2, 2.9, 3.0},
@@ -144,12 +218,22 @@ int main(int argc, char *argv[]) {
         {3.1, 3.0, 3.6}
     };
 
-    double mean[NUM_FEATURES];
-    double centered_data[NUM_SAMPLES][NUM_FEATURES];
-    double covariance_matrix[NUM_FEATURES][NUM_FEATURES];
-    double eigenvectors[NUM_FEATURES][NUM_FEATURES];
-    double eigenvalues[NUM_FEATURES];
-    double projected_data[NUM_SAMPLES][NUM_FEATURES];
+    int num_samples = data.size();
+    int num_features = data[0].size();
+    
+    // Check if num_components is valid
+    if (num_components <= 0 || num_components > num_features) {
+        std::cerr << "Error: Number of components must be between 1 and " << num_features << std::endl;
+        return 1;
+    }
+
+    // Data structures
+    std::vector<double> mean;
+    std::vector<std::vector<double>> centered_data;
+    std::vector<std::vector<double>> covariance_matrix;
+    std::vector<std::vector<double>> eigenvectors;
+    std::vector<double> eigenvalues;
+    std::vector<std::vector<double>> projected_data;
 
     // Step 1: Calculate mean of each feature
     calculate_mean(data, mean);
@@ -161,29 +245,30 @@ int main(int argc, char *argv[]) {
     compute_covariance_matrix(centered_data, covariance_matrix);
 
     // Step 4: Compute eigenvalues and eigenvectors using LAPACK
-    compute_eigenvalues_and_eigenvectors(covariance_matrix, eigenvectors, eigenvalues, NUM_FEATURES);
+    compute_eigenvalues_and_eigenvectors(covariance_matrix, eigenvectors, eigenvalues);
 
     // Step 5: Sort eigenvalues and eigenvectors
-    sort_eigenvectors(eigenvalues, eigenvectors, NUM_FEATURES);
+    sort_eigenvectors(eigenvalues, eigenvectors);
 
     // Step 6: Project the data onto the new principal components
     project_data(centered_data, eigenvectors, projected_data, num_components);
 
-    // Output eigenvectors and projected data
+    // Output results
     std::cout << "Eigenvalues:" << std::endl;
-    for (int i = 0; i < NUM_FEATURES; i++) {
+    for (int i = 0; i < num_features; i++) {
         std::cout << eigenvalues[i] << " ";
     }
+    
     std::cout << "\n\nEigenvectors:" << std::endl;
-    for (int i = 0; i < NUM_FEATURES; i++) {
-        for (int j = 0; j < NUM_FEATURES; j++) {
+    for (int i = 0; i < num_features; i++) {
+        for (int j = 0; j < num_features; j++) {
             std::cout << eigenvectors[i][j] << " ";
         }
         std::cout << std::endl;
     }
 
     std::cout << "\nProjected data onto first " << num_components << " principal components:" << std::endl;
-    for (int i = 0; i < NUM_SAMPLES; i++) {
+    for (int i = 0; i < num_samples; i++) {
         for (int j = 0; j < num_components; j++) {
             std::cout << projected_data[i][j] << " ";
         }
