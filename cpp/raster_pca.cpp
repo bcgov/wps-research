@@ -206,9 +206,20 @@ int main(int argc, char *argv[]) {
 
   size_t nrow, ncol, nband, np;
   hread(hfn, nrow, ncol, nband); // read header 1
-
+  np = nrow * ncol;
   float * dat = bread(fn, nrow, ncol, nband);
 
+  int num_samples = np;
+  int num_features = nband;
+  std::vector<std::vector<double>> data(num_samples, std::vector<double>(num_features));
+
+  for0(i , np){
+    for0(k, nband){
+      data[i][k] = dat[k * np + i];
+    }
+  }
+  
+/*
   // Sample data - now using vectors
     std::vector<std::vector<double>> data = {
         {2.5, 2.4, 3.5},
@@ -217,10 +228,7 @@ int main(int argc, char *argv[]) {
         {1.9, 2.2, 2.7},
         {3.1, 3.0, 3.6}
     };
-
-    int num_samples = data.size();
-    int num_features = data[0].size();
-    
+*/
     // Check if num_components is valid
     if (num_components <= 0 || num_components > num_features) {
         std::cerr << "Error: Number of components must be between 1 and " << num_features << std::endl;
