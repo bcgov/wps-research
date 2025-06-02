@@ -33,8 +33,8 @@ def extract(file_name):
             my_bands[i] = update
             # my_bands[i][~nans] = new_data[~nans]
 
-    my_proj = d.GetProjection() if my_proj == None else my_proj
-    my_geo = d.GetGeoTransform() if my_geo is None else my_geo
+    my_proj = d.GetProjection() # if my_proj == None else my_proj
+    my_geo = d.GetGeoTransform() # if my_geo is None else my_geo
     if my_xsize is None:
         my_xsize, my_ysize, nbands = d.RasterXSize, d.RasterYSize, d.RasterCount 
 
