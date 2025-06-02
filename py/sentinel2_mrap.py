@@ -60,6 +60,8 @@ def extract(file_name):
         print(out_file_name, 'exists [SKIP WRITE]')
 
 def run_mrap(gid):  # run MRAP on one tile
+    my_bands, my_proj, my_geo, my_xsize, my_ysize, nbands, file_name  = {}, None, None, None, None, None, None
+
     if True:
         # look for all the dates in this tile's folder and sort them in aquisition time
         
