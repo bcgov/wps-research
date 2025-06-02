@@ -114,7 +114,7 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2):
     def runc(c):
         print([c])
         return os.system(c)
-    parfor(runc, cmds, min(8, 2 * int(mp.cpu_count())))  
+    parfor(runc, cmds, min(int(4), 2 * int(mp.cpu_count())))  
 
 # check if L2 mode is desired ( L1 mode default ) 
 use_L2 = '--L2' in args
