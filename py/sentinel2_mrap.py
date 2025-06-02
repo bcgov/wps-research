@@ -33,8 +33,8 @@ def extract(file_name):
             my_bands[i] = update
             # my_bands[i][~nans] = new_data[~nans]
 
-    my_proj = d.GetProjection() # if my_proj == None else my_proj
-    my_geo = d.GetGeoTransform() # if my_geo is None else my_geo
+    my_proj = d.GetProjection()  if my_proj == None else my_proj
+    my_geo = d.GetGeoTransform() if my_geo is None else my_geo
     if my_xsize is None:
         my_xsize, my_ysize, nbands = d.RasterXSize, d.RasterYSize, d.RasterCount 
 
@@ -98,6 +98,6 @@ if __name__ == "__main__":
         # err("python3 sentinel2_mrap.py [sentinel-2 gid] # [optional: yyyymmdd 'maxdate' parameter] ")
         def f(fn):
             run_mrap(fn)
-        parfor(f, gids, int(mp.cpu_count()))
+        parfor(f, gids, 1) #  int(mp.cpu_count()))
     else:
         run_mrap(args[1])  # single tile mode: no mosaicing
