@@ -3,7 +3,10 @@
     can't process in parallel (By tile, at least)
 NOTE: assumes sentinel2_extract_cloudfree.py has been run.
 
-20240618 NOTE: need to make this fully incremental. I.e., initialize buffer (per tile) with last avaiable MRAP date'''
+20240618 NOTE: need to make this fully incremental. I.e., initialize buffer (per tile) with last avaiable MRAP date
+
+20250602: note: the program can't be run in parallel currently ( will try scoping the extract() function inside the run_mrap function)
+'''
 from envi import envi_update_band_names
 from envi import envi_header_cleanup
 from misc import args, run, hdr_fn, err, parfor
