@@ -33,7 +33,7 @@ def extract(file_name):
             my_bands[i] = update
             # my_bands[i][~nans] = new_data[~nans]
 
-    my_proj = d.GetProjection()  if my_proj == None else my_proj
+    my_proj = d.GetProjection() if my_proj == None else my_proj
     my_geo = d.GetGeoTransform() if my_geo is None else my_geo
     if my_xsize is None:
         my_xsize, my_ysize, nbands = d.RasterXSize, d.RasterYSize, d.RasterCount 
@@ -60,6 +60,7 @@ def extract(file_name):
         print(out_file_name, 'exists [SKIP WRITE]')
 
 def run_mrap(gid):  # run MRAP on one tile
+    global my_proj, my_geo, my_bands, my_xsize, my_ysize, nbands
     my_bands, my_proj, my_geo, my_xsize, my_ysize, nbands, file_name  = {}, None, None, None, None, None, None
 
     if True:
