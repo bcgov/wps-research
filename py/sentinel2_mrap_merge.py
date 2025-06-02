@@ -41,18 +41,23 @@ def merge(to_merge, date, out_fn): # files to be merged, output file name
                       str(date) + '_merge.vrt',
                       ' '.join(to_merge)]))
 
+    cmd = ' '.join(['gdalwarp',
+                    '-wo NUM_THREADS=16',
+                    '-multi',
+                    '-overwrite',
+                    '-r bilinear',
+                    '-of ENVI',
+                    '-ot Float32',
+                    '-srcnodata nan',
+                    '-dstnodata nan',
+                    str(date) + '_merge.vrt',
+                    out_fn])
+
     if not exists(out_fn):
-        run(' '.join(['gdalwarp',
-                      '-wo NUM_THREADS=16',
-                      '-multi',
-                      '-overwrite',
-                      '-r bilinear',
-                      '-of ENVI',
-                      '-ot Float32',
-                      '-srcnodata nan',
-                      '-dstnodata nan',
-                      str(date) + '_merge.vrt',
-                      out_fn]))
+        run(cmd) 
+
+    else:
+        print(cmd)
 
     run('fh ' + hdr_fn(out_fn))
     run('envi_header_copy_bandnames.py ' + hdr_fn(to_merge[-1]) + ' ' + hdr_fn(out_fn))
