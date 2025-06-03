@@ -61,8 +61,8 @@ if L2_folders != '':
 
     # Calculate the difference in days
     diff = (date1 - date2).days
-
-    print(f"Difference in days: {diff}")
+    print(f"Difference in days: {diff} -- look back this many days")
+    N = diff 
 print(gids)
 
 for i in range(0, N + 1):
