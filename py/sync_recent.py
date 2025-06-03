@@ -27,20 +27,20 @@ if L2_folders != '':
         # check latest date available, this gid
         def check_pattern(pattern):
             L = [x.strip() for x in os.popen("ls L2_" + gid + sep + pattern).readlines()]
-            print(L)
+            # print(L)
             for x in L:
                 # 'L2_T10VFL/S2A_MSIL2A_20250526T191831_N0511_R056_T10VFL_20250526T222916_cloudfree.bin',
                 pass
             dates = [[x.split(sep)[1].split('_')[2][:8], x] for x in L]
             dates.sort()
             for d in dates:
-                print(d)
-            print("most_recent_this_pattern", dates[-1])
+                pass # print(d)
+            # print("most_recent_this_pattern", dates[-1])
             return dates[-1][0]   # most recent date, this pattern
         most_recent_bin = check_pattern("*cloudfree.bin")
         most_recent_zip = check_pattern("*.zip")
         most_recent = most_recent_bin if most_recent_bin > most_recent_zip else most_recent_zip
-        print("most_recent", most_recent)
+        print(gid, "most_recent", most_recent)
 print(gids)
 
 # today's date
