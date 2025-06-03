@@ -25,7 +25,6 @@ if L2_folders != '':
         if gid not in bc_gid:
             err('unexpected gid')  # needs to be modified for other jurisdictions
 print(gids)
-sys.exit(1)
 
 # today's date
 today = datetime.date.today()
