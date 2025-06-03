@@ -16,6 +16,10 @@ print("bc row-id under obs:", bc_gid)
 
 gids = bc_gid # default to BC gids a
 
+# today's date
+today = datetime.date.today()
+N = 1  # default
+
 # check if we're in an MRAP folder, only update the GID present in the filesystem structure:
 L2_folders = os.popen("ls -d1 L2_*/").read().strip()
 if L2_folders != '':
@@ -49,11 +53,17 @@ if L2_folders != '':
                 min_most_recent = most_recent
             
     print("min_most_recent", min_most_recent)
+
+    # Convert to datetime objects
+    date1 = datetime.strptime(today, "%Y%m%d")
+    date2 = datetime.strptime(min_most_recent, "%Y%m%d")
+
+    # Calculate the difference in days
+    diff = (date1 - date2).days
+
+    print(f"Difference in days: {diff}")
 print(gids)
 
-# today's date
-today = datetime.date.today()
-N = 1
 for i in range(0, N + 1):
     print("i", i)
     now = today - timedelta(days=i)
