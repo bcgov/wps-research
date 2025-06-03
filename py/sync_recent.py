@@ -12,6 +12,7 @@ assert_aws_cli_installed()
 bc_gid = bc()
 print("bc row-id under obs:", bc_gid)
 
+gids = bc_gid # default to BC gids 
 # today's date
 today = datetime.date.today()
 N = 1
@@ -44,4 +45,5 @@ for i in range(0, N + 1):
     lines = [x.strip() for x in c1_d.strip().split('\n')]
     for line in lines:
         w = line.split()
-        print(w)
+        tile_id = w[4].split('_')[5]
+        
