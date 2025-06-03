@@ -18,7 +18,8 @@ year, month, day = str(now.year).zfill(4), str(now.month).zfill(2), str(now.day)
 print([year, month, day])
 ls = 'aws s3 ls --no-sign-request'
 path = 's3://sentinel-products-ca-mirror/Sentinel-2/'
-a = path
+s2 = path
+a = " "
 c1, c2 = ' '.join([ls, path + 'S2MSI1C/']), ' '.join([ls, path + 'S2MSI2A/'])
 c1 = ls + a + s2 + 'S2MSI1C/' # + '/'.join([year, month, day]) + '/' 
 c2 = ls + a + s2 + 'S2MSI2A/' # + '/'.join([year, month, day]) + '/'
