@@ -17,7 +17,7 @@ today = datetime.date.today()
 N = 1
 for i in range(0, N + 1):
     print("i", i)
-    now = today - timedelta(days=N)
+    now = today - timedelta(days=i)
     year, month, day = str(now.year).zfill(4), str(now.month).zfill(2), str(now.day).zfill(2)
 
     print([year, month, day])
