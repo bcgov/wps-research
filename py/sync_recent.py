@@ -1,6 +1,8 @@
 '''20250603 sync_recent.py: sync sentinel2 data from NRCAN AWS mirror from today ( or yesterday, or back N days )
 
 need to add options for --L1, --L2 ( default ), --n ( number of days to go back, default 1 )
+
+if we're in an MRAP folder ( as evidenced by 
 '''
 import os
 import sys
@@ -12,7 +14,15 @@ assert_aws_cli_installed()
 bc_gid = bc()
 print("bc row-id under obs:", bc_gid)
 
-gids = bc_gid # default to BC gids 
+gids = bc_gid # default to BC gids a
+
+# check if we're in an MRAP folder, only update the GID present in the filesystem structure:
+L2_folders = os.popen("ls -d1 L2_*/").read().strip()
+if L2_folders != '':
+    lines = [x.strip() for x in L2_folders.split('\n')]
+    print(lines)
+sys.exit(1)
+
 # today's date
 today = datetime.date.today()
 N = 1
