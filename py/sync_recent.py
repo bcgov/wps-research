@@ -41,4 +41,4 @@ for i in range(0, N + 1):
                    str(start_date.day).zfill(2)]) + '/'
 
     c1_d = get(c2 + cd)  # Level-2 data listings for today
-
+    print(c1_d)
