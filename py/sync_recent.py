@@ -35,9 +35,11 @@ if L2_folders != '':
             dates.sort()
             for d in dates:
                 print(d)
-            most_recent_date = d[-1]
-            print("most_recent", most_recent_date)
-        check_pattern("*cloudfree.bin")
+            return d[-1]  # most recent date, this pattern
+        most_recent_bin = check_pattern("*cloudfree.bin")
+        most_recent_zip = check_pattern("*.zip")
+        most_recent = most_recent_bin if most_recent_bin > most_recent zip else most_recent_zip
+        print("most_recent", most_recent)
 print(gids)
 
 # today's date
