@@ -65,6 +65,7 @@ if L2_folders != '':
     N = diff 
 print(gids)
 
+cmds = []
 for i in range(0, N + 1):
     print("i", i)
     now = today - timedelta(days=i)
@@ -98,3 +99,9 @@ for i in range(0, N + 1):
         tile_id = w[3].split('_')[5]
         if tile_id in gids:
             print(line)
+            '''
+            cmd = ' ' .join(['aws s3 sync',
+                             '--no-sign-request',
+                             's3://sentinel-products-ca-mirror/Sentinel-2/S2MSI2A/' + cd,
+                             L1_F])
+            '''
