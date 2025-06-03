@@ -32,6 +32,7 @@ if L2_folders != '':
                 # 'L2_T10VFL/S2A_MSIL2A_20250526T191831_N0511_R056_T10VFL_20250526T222916_cloudfree.bin',
                 pass
             dates = [[x.split(sep)[1].split('_')[2][:8], x] for x in L]
+            dates.sort()
             for d in dates:
                 print(d)
         check_pattern("*cloudfree.bin")
