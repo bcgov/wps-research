@@ -19,6 +19,7 @@ gids = bc_gid # default to BC gids a
 # check if we're in an MRAP folder, only update the GID present in the filesystem structure:
 L2_folders = os.popen("ls -d1 L2_*/").read().strip()
 if L2_folders != '':
+    min_most_recent = None
     lines = [x.strip().strip(sep) for x in L2_folders.split('\n')]
     gids = [line.split('_')[1] for line in lines]
     for gid in gids:
@@ -41,6 +42,13 @@ if L2_folders != '':
         most_recent_zip = check_pattern("*.zip")
         most_recent = most_recent_bin if most_recent_bin > most_recent_zip else most_recent_zip
         print(gid, "most_recent", most_recent)
+        if (min_most_recent is None):
+            min_most_recent = most_recent
+        else:
+            if most_recent < min_most_recent:
+                min_most_recent = most_recent
+            
+    print("min_most_recent", min_most_recent)
 print(gids)
 
 # today's date
