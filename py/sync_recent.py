@@ -44,7 +44,7 @@ for i in range(0, N + 1):
     c1_d = get(c2 + cd)  # Level-2 data listings for today
     lines = [x.strip() for x in c1_d.strip().split('\n')]
     for line in lines:
-        print([line])
+        if line == '': continue
         w = line.split()
         tile_id = w[4].split('_')[5]
         if tile_id in gids:
