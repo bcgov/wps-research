@@ -24,6 +24,9 @@ if L2_folders != '':
     for gid in gids:
         if gid not in bc_gid:
             err('unexpected gid')  # needs to be modified for other jurisdictions
+        # check latest date available, this gid
+        L = os.popen("ls L2_" + gid + sep + "*cloudfree.bin").readlines()
+        print(L)
 print(gids)
 
 # today's date
