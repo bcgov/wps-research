@@ -108,6 +108,7 @@ for i in range(0, N + 1):
                              's3://sentinel-products-ca-mirror/Sentinel-2/S2MSI2A/' + cd + w[3].strip(),
                              'L2_' + tile_id + sep + w[3].strip()])
             print(cmd)
+            cmds += [cmd] 
 
 
 def runc(c):
