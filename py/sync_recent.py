@@ -4,7 +4,8 @@ need to add options for --L1, --L2 ( default ), --n ( number of days to go back,
 '''
 import os
 import sys
-import datetime, timedelta
+import datetime
+from datetime import timedelta
 from gid import bc
 from misc import sep, assert_aws_cli_installed
 assert_aws_cli_installed()
