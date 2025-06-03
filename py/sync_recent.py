@@ -117,3 +117,6 @@ def runc(c):
     print([c])
     return os.system(c)
 parfor(runc, cmds, 2)  # min(int(4), 2 * int(mp.cpu_count())))
+
+if len(cmds) == 0:
+    print("All files up to date")
