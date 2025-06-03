@@ -9,7 +9,7 @@ import sys
 import datetime
 from datetime import timedelta
 from gid import bc
-from misc import sep, assert_aws_cli_installed
+from misc import err, sep, assert_aws_cli_installed
 assert_aws_cli_installed()
 bc_gid = bc()
 print("bc row-id under obs:", bc_gid)
@@ -20,7 +20,11 @@ gids = bc_gid # default to BC gids a
 L2_folders = os.popen("ls -d1 L2_*/").read().strip()
 if L2_folders != '':
     lines = [x.strip().strip(sep) for x in L2_folders.split('\n')]
-    print(lines)
+    gids = [line.split('_')[1] for line in lines]
+    for gid in gids:
+        if gid not in bc_gid:
+            err('unexpected gid')  # needs to be modified for other jurisdictions
+print(gids)
 sys.exit(1)
 
 # today's date
