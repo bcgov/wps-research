@@ -55,7 +55,8 @@ if L2_folders != '':
     print("min_most_recent", min_most_recent)
 
     # Convert to datetime objects
-    date1 = datetime.datetime.strptime(today, "%Y%m%d")
+    today_s = ''.join([str(today.year).zfill(4), str(today.month).zfill(2), str(today.day).zfill(2)]
+    date1 = datetime.datetime.strptime(today_s, "%Y%m%d")
     date2 = datetime.datetime.strptime(min_most_recent, "%Y%m%d")
 
     # Calculate the difference in days
