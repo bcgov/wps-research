@@ -46,4 +46,5 @@ for i in range(0, N + 1):
     for line in lines:
         w = line.split()
         tile_id = w[4].split('_')[5]
-        
+        if tile_id in gids:
+            print(line)
