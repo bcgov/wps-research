@@ -33,9 +33,13 @@ if L2_folders != '':
         def check_pattern(pattern):
             L = [x.strip() for x in os.popen("ls -1 L2_" + gid + sep + pattern).readlines()]
             print("L", [L])
+            L = [x.rstrip(":") for x in L]
+            L2 = []
             for x in L:
                 # 'L2_T10VFL/S2A_MSIL2A_20250526T191831_N0511_R056_T10VFL_20250526T222916_cloudfree.bin',
-                pass
+                if x != '':
+                    L2 += [x]
+            L = L2
             dates = [[x.split(sep)[1].split('_')[2][:8], x] for x in L]
             dates.sort()
             for d in dates:
