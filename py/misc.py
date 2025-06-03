@@ -468,3 +468,10 @@ def find_snap():  # find location of ESA's SNAP tool, command line interface ( g
     if not exist(snap):
         err('snap binary (gpt) not found')
     return snap
+
+def asset_aws_cli_installed():
+    # check that aws cli installed
+    if len(os.popen("aws 2>&1").read().split("not found")) > 1:
+        print('Need to install aws cli: e.g.:')
+        print('  sudo apt install awscli')
+        sys.exit(1)
