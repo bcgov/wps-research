@@ -114,7 +114,7 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2):
 
                 aws_download('sentinel-products-ca-mirror',
                              key,
-                             f) # LOCAL_PATH):
+                             Path(f)) # LOCAL_PATH):
                 # === CONFIGURATION ===
                 # BUCKET = "sentinel-products-ca-mirror"
                 # KEY = "Sentinel-2/S2MSI2A/2025/05/27/S2C_MSIL2A_20250527T191931_N0511_R099_T10VFL_20250528T002013.zip"
