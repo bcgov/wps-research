@@ -127,6 +127,8 @@ def run_mrap(gid):  # run MRAP on one tile
             if True:
                 extract(extract_path)
 
+    # THIS PART SHOULD MARK ( NEEDING REFRESHING ) MRAP COMPOSITES ( MERGED PRODUCTS ) THAT NEED REFRESHING / BY DELETING THEM !!!!
+
     '''
     print("check sorting order")
     for [line_date, line] in lines:
