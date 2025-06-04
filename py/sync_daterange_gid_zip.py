@@ -10,6 +10,7 @@ if not use_L2:
 '''
 from misc import args, sep, exists, parfor, run, timestamp, err
 import multiprocessing as mp
+from aws_download import aws_download
 from pathlib import Path
 import datetime
 import argparse
@@ -109,13 +110,25 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2):
                 print(f, "SKIPPING")
             else:
                 print(f)
-                cmds += [cmd]
+                #cmds += [cmd]
+
+                aws_download('sentinel-products-ca-mirror',
+                             key,
+                             f) # LOCAL_PATH):
+                # === CONFIGURATION ===
+                # BUCKET = "sentinel-products-ca-mirror"
+                # KEY = "Sentinel-2/S2MSI2A/2025/05/27/S2C_MSIL2A_20250527T191931_N0511_R099_T10VFL_20250528T002013.zip"
+                # LOCAL_PATH = Path("L2_T10VFL") / Path(KEY).name
+
+
     
+    '''
     print(cmds)
     def runc(c):
         print([c])
         return os.system(c)
     parfor(runc, cmds, 2) # min(int(2), 2 * int(mp.cpu_count())))  
+    '''
 
 # check if L2 mode is desired ( L1 mode default ) 
 use_L2 = '--L2' in args
