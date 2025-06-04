@@ -97,7 +97,7 @@ def run_mrap(gid):  # run MRAP on one tile
     last_mrap_date = None
     if len(mrap_lines) > 0:
         last_mrap_date = mrap_lines[-1][0][:8]
-        last_mrap_file = mrap_lines[-1][1]
+        last_mrap_file = "L2_" + gid + sep + mrap_lines[-1][1]
 
         # load the last MRAP file here!
         print("last_mrap_date", last_mrap_date)
