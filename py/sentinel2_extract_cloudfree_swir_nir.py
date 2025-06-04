@@ -203,7 +203,7 @@ if __name__ == "__main__":
         for f in files:
             print(f)
             if f.strip() != '':
-                new_files += [f.strip()]
+                new_files += [f.strip().strip(':')]
         files = new_files
 
         parfor(extract_cloudfree, files, int(mp.cpu_count())) 
