@@ -105,7 +105,7 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2):
                             '--no-sign-request',
                             's3://sentinel-products-ca-mirror/' + key,
                             f])
-     
+            print([f])
             if exists(f) and Path(f).stat().st_size == file_size:
                 print(f, "SKIPPING")
             else:
