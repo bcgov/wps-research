@@ -27,7 +27,7 @@ def run_mrap(gid):  # run MRAP on one tile
 
     
     def extract(file_name):
-        # global my_proj, my_geo, my_bands, my_xsize, my_ysize, nbands
+        nonlocal my_proj, my_geo, my_bands, my_xsize, my_ysize, nbands
         print("+r", file_name)
         d = gdal.Open(file_name)  # open the file brought in for this update step
     
