@@ -109,9 +109,11 @@ for i in range(0, N + 1):
                              '--no-sign-request',
                              's3://sentinel-products-ca-mirror/Sentinel-2/S2MSI2A/' + cd + w[3].strip(),
                              ofn]) # 'L2_' + tile_id + sep + w[3].strip()])
-            if not os.path.exists(ofn):
+            if not os.path.exists(ofn + w[3].strip()):
                 print(cmd)
                 cmds += [cmd] 
+            else:
+                print("exists:", ofn)
 
 
 def runc(c):
