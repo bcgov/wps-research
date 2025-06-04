@@ -13,6 +13,7 @@ import sys
 import os
 
 def extract_cloudfree(file_name):
+    print("file_name", file_name)
     w = file_name.split('_')  # split filename on '_'
     ds = w[2].split('T')[0]  # date string
     stack_fn = '.'.join(file_name.split('.')[:-1]) + '_cloudfree.bin' # output stack filename
@@ -199,8 +200,14 @@ if __name__ == "__main__":
             files += [x.strip() for x in os.popen("ls -1 " + d + os.path.sep + "S*MSIL2A*.zip").readlines()]
             files += [x.strip() for x in os.popen("ls -1d " + d + os.path.sep + "S2*MSIL2A*.SAFE").readlines()]
 
+        new_files = []
         for f in files:
             print(f)
+            if f.strip() != '':
+                new_files += [f.strip().strip(':')]
+        files = new_files
+
+        print("files", files)
         parfor(extract_cloudfree, files, int(mp.cpu_count())) 
 
 
