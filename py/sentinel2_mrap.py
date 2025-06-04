@@ -85,8 +85,6 @@ def run_mrap(gid):  # run MRAP on one tile
     mrap_lines = get_filename_lines("ls -1r L2_" + gid + os.path.sep + "S2*_cloudfree.bin_MRAP.bin")
     # before this step, check for latest completed MRAP file and "seed" with that..if possible!
     
-    print("mrap_dates", mrap_dates)
-    print("dates", dates)
     for [line_date, line] in lines:
         gid = line.split("_")[5]
         extract_path = "L2_" +  gid + os.path.sep + line
