@@ -71,7 +71,7 @@ print(gids)
 
 cmds = []
 for i in range(0, N + 1):
-    print("i", i)
+    print("i", i, "gids", gids)
     now = today - timedelta(days=i)
     year, month, day = str(now.year).zfill(4), str(now.month).zfill(2), str(now.day).zfill(2)
 
@@ -98,7 +98,8 @@ for i in range(0, N + 1):
     c1_d = get(c2 + cd)  # Level-2 data listings for today
     lines = [x.strip() for x in c1_d.strip().split('\n')]
     for line in lines:
-        if line == '': continue
+        if line == '':
+            continue
         w = line.split()
         tile_id = w[3].split('_')[5]
         if tile_id in gids:
