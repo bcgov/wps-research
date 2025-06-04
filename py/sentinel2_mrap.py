@@ -80,21 +80,21 @@ def run_mrap(gid):  # run MRAP on one tile
         lines.sort()
         return [[x[0], '_'.join(x[1])] for x in lines]
     
-    dates, lines = get_filename_lines("ls -1r L2_" + gid + os.path.sep + "S2*_cloudfree.bin")
+    lines = get_filename_lines("ls -1r L2_" + gid + os.path.sep + "S2*_cloudfree.bin")
     
-    mrap_dates, mrap_lines = get_filename_lines("ls -1r L2_" + gid + os.path.sep + "S2*_cloudfree.bin_MRAP.bin")
+    mrap_lines = get_filename_lines("ls -1r L2_" + gid + os.path.sep + "S2*_cloudfree.bin_MRAP.bin")
     # before this step, check for latest completed MRAP file and "seed" with that..if possible!
     
     print("mrap_dates", mrap_dates)
     print("dates", dates)
-    for line in lines:
+    for [line_date, line] in lines:
         gid = line.split("_")[5]
         extract_path = "L2_" +  gid + os.path.sep + line
         print('  ' + extract_path)
         if False:
             extract(extract_path)
 
-    for line in mrap_lines:
+    for [mrap_date, line] in mrap_lines:
         gid = line.split("_")[5]
         extract_path = "L2_" +  gid + os.path.sep + line
         print('**' + extract_path)
@@ -102,7 +102,7 @@ def run_mrap(gid):  # run MRAP on one tile
             extract(extract_path)
     
     print("check sorting order")
-    for line in lines:
+    for [line_date, line] in lines:
         print("mrap " + line)
 
 
