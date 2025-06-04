@@ -16,9 +16,9 @@ def aws_download(BUCKET, KEY, LOCAL_PATH):
     # BUCKET = "sentinel-products-ca-mirror"
     # KEY = "Sentinel-2/S2MSI2A/2025/05/27/S2C_MSIL2A_20250527T191931_N0511_R099_T10VFL_20250528T002013.zip"
     # LOCAL_PATH = Path("L2_T10VFL") / Path(KEY).name
-    CHUNK_SIZE = 8 * 1024 * 1024  # 8 MB
-    MAX_RETRIES = 10
-    NUM_THREADS = 8  # <== You can change this value
+    CHUNK_SIZE = 1024 * 1024  # 8 MB
+    MAX_RETRIES = 500
+    NUM_THREADS = 32  # <== You can change this value
 
     # === SETUP ===
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
