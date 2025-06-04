@@ -27,7 +27,7 @@ def run_mrap(gid):  # run MRAP on one tile
 
     
     def extract(file_name):
-        global my_proj, my_geo, my_bands, my_xsize, my_ysize, nbands
+        # global my_proj, my_geo, my_bands, my_xsize, my_ysize, nbands
         print("+r", file_name)
         d = gdal.Open(file_name)  # open the file brought in for this update step
     
@@ -85,12 +85,7 @@ def run_mrap(gid):  # run MRAP on one tile
     mrap_lines = get_filename_lines("ls -1r L2_" + gid + os.path.sep + "S2*_cloudfree.bin_MRAP.bin")
     # before this step, check for latest completed MRAP file and "seed" with that..if possible!
     
-    for [line_date, line] in lines:
-        gid = line.split("_")[5]
-        extract_path = "L2_" +  gid + os.path.sep + line
-        print('  ' + line_date + " " + extract_path)
-        if False:
-            extract(extract_path)
+
 
     for [mrap_date, line] in mrap_lines:
         gid = line.split("_")[5]
@@ -98,7 +93,20 @@ def run_mrap(gid):  # run MRAP on one tile
         print('**' + mrap_date + " " + extract_path)
         if False:
             extract(extract_path)
+
+    last_mrap_date = None
+    if len(mrap_lines) > 0:
+        last_mrap_date = mrap_lines[-1][0][:8]
+    print("last_mrap_date", last_mrap_date)
+
     
+    for [line_date, line] in lines:
+        gid = line.split("_")[5]
+        extract_path = "L2_" +  gid + os.path.sep + line
+        print('  ' + line_date + " " + extract_path)
+        if False:
+            extract(extract_path)
+
     print("check sorting order")
     for [line_date, line] in lines:
         print("mrap " + line)
