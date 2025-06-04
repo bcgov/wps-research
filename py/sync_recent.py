@@ -105,7 +105,7 @@ for i in range(0, N + 1):
         if tile_id in gids:
             print(line)
             ofn = 'L2_' + tile_id + sep # + w[3].strip()
-            cmd = ' ' .join(['aws s3 sync',
+            cmd = ' ' .join(['aws s3 cp',
                              '--no-sign-request',
                              's3://sentinel-products-ca-mirror/Sentinel-2/S2MSI2A/' + cd + w[3].strip(),
                              ofn]) # 'L2_' + tile_id + sep + w[3].strip()])
@@ -123,3 +123,7 @@ parfor(runc, cmds, 2)  # min(int(4), 2 * int(mp.cpu_count())))
 
 if len(cmds) == 0:
     print("All files up to date")
+
+'''
+aws s3 sync --no-sign-request s3://sentinel-products-ca-mirror/Sentinel-2/S2MSI2A/2025/06/02/S2C_MSIL2A_20250602T193921_N0511_R042_T10VDK_20250602T224815.zip L2_T10VDK/
+'''
