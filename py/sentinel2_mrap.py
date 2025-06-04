@@ -97,10 +97,25 @@ def run_mrap(gid):  # run MRAP on one tile
     last_mrap_date = None
     if len(mrap_lines) > 0:
         last_mrap_date = mrap_lines[-1][0][:8]
+        last_mrap_file = mrap_lines[-1][1]
 
         # load the last MRAP file here!
-    print("last_mrap_date", last_mrap_date)
+        print("last_mrap_date", last_mrap_date)
+        # -----------------------------------------------------------------------------
+        print("+r", last_mrap_file)
+        d = gdal.Open(last_mrap_file)  # open the file brought in for this update step
+    
+        for i in range(1, d.RasterCount + 1):
+            band = d.GetRasterBand(i)
+            my_bands[i] = band.ReadAsArray().astype(np.float32)
+    
+        my_proj = d.GetProjection()
+        my_geo = d.GetGeoTransform()
+        my_xsize, my_ysize, nbands = d.RasterXSize, d.RasterYSize, d.RasterCount
+        print(my_proj, my_geo, my_xsize, my_ysize, nbands)
+        #-------------------------------------------------------------------------------
 
+        
     
     for [line_date, line] in lines:
         gid = line.split("_")[5]
