@@ -6,8 +6,10 @@ NOTE: assumes sentinel2_extract_cloudfree.py has been run.
 20240618 NOTE: need to make this fully incremental. I.e., initialize buffer (per tile) with last avaiable MRAP date
 
 20250602: note: the program can't be run in parallel currently ( will try scoping the extract() function inside the run_mrap function)
-
 20250602: need to do the above before ____ ( DONE ) 
+
+20250602: NB need to run sentinel2_extract_cloudfree_swir_nir.py BEFORE running this script ( if we've updated with sync_recent.py )
+
 '''
 from envi import envi_update_band_names
 from envi import envi_header_cleanup
