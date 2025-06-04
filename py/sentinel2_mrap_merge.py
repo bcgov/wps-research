@@ -25,8 +25,8 @@ def resample(fn):
                           '-of ENVI',
                           '-ot Float32',
                           '-t_srs EPSG:' + str(EPSG),
-                          fn,
-                          ofn]))
+                          fn,  # input file
+                          ofn]))  # output file
         return [cmds, ofn]
     else:
         return ['', ofn]
@@ -38,7 +38,7 @@ def merge(to_merge, date, out_fn): # files to be merged, output file name
                       '-vrtnodata nan',
                       '-resolution highest',
                       '-overwrite',
-                      str(date) + '_merge.vrt',
+                      str(date) + '_merge.vrt',  # output file
                       ' '.join(to_merge)]))
 
     cmd = ' '.join(['gdalwarp',
@@ -51,11 +51,10 @@ def merge(to_merge, date, out_fn): # files to be merged, output file name
                     '-srcnodata nan',
                     '-dstnodata nan',
                     str(date) + '_merge.vrt',
-                    out_fn])
+                    out_fn])  # output file
 
     if not exists(out_fn):
         run(cmd) 
-
     else:
         print(cmd)
 
@@ -78,20 +77,16 @@ for d in dirs:
             dic[w] = []
         dic[w] += [m]
 
-    #  parfor(run, cmds, int(mp.cpu_count()))
-
 # sort dictionary contents by date
 date_mrap = [[d, dic[d]] for d in dic]
 date_mrap.sort() # list of MRAP files available on each date.
-cmds = []
-most_recent_by_gid = {}
+cmds, most_recent_by_gid = [], {}
 
 for d, df in date_mrap:
     # print(d)
 
     for f in df:
         #print('  ', f)
-        # cmds += [resample(f)]
         fn = f.split(sep)[-1]
         gid = fn.split('_')[5]
 
@@ -132,8 +127,8 @@ for d, df in date_mrap:
 
     for r in results_sort:
         print(r)
-    #   parfor(run, cmds, int(mp.cpu_count()))
-# iterate through dates, keeping a list of most-recent dates (by GID) 
+
+    # iterate through dates, keeping a list of most-recent dates (by GID) 
     to_merge = [rs[1] for  rs in results_sort]
 
     cmds, resampled_files = [], []
@@ -144,10 +139,11 @@ for d, df in date_mrap:
         cmds += [cmd]
         resampled_files += [resampled_file]
 
-
     if (merge_dates is not None) and (d not in merge_dates):
+            # MRAP mosaic product not to be created for this date.
             continue
     else:
+        # create MRAP mosaic product for this date. Thought this was every date?
         mrap_product_file = str(d) + '_mrap.bin'
         
         if exists(mrap_product_file):
