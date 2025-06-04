@@ -7,7 +7,7 @@ NOTE: assumes sentinel2_extract_cloudfree.py has been run.
 
 20250602: note: the program can't be run in parallel currently ( will try scoping the extract() function inside the run_mrap function)
 
-20250602: need to do the above before ____
+20250602: need to do the above before ____ ( DONE ) 
 '''
 from envi import envi_update_band_names
 from envi import envi_header_cleanup
