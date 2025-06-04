@@ -199,8 +199,13 @@ if __name__ == "__main__":
             files += [x.strip() for x in os.popen("ls -1 " + d + os.path.sep + "S*MSIL2A*.zip").readlines()]
             files += [x.strip() for x in os.popen("ls -1d " + d + os.path.sep + "S2*MSIL2A*.SAFE").readlines()]
 
+        new_files = []
         for f in files:
             print(f)
+            if f.strip() != '':
+                new_files += [f.strip()]
+        files = new_files
+
         parfor(extract_cloudfree, files, int(mp.cpu_count())) 
 
 
