@@ -84,8 +84,6 @@ def run_mrap(gid):  # run MRAP on one tile
     
     mrap_lines = get_filename_lines("ls -1r L2_" + gid + os.path.sep + "S2*_cloudfree.bin_MRAP.bin")
     # before this step, check for latest completed MRAP file and "seed" with that..if possible!
-    
-
 
     for [mrap_date, line] in mrap_lines:
         gid = line.split("_")[5]
@@ -99,7 +97,7 @@ def run_mrap(gid):  # run MRAP on one tile
         last_mrap_date = mrap_lines[-1][0][:8]
         last_mrap_file = "L2_" + gid + os.path.sep + mrap_lines[-1][1]
 
-        # load the last MRAP file here!
+        # load the last MRAP file here!  Seed from "most recent" in timestamp, MRAP file..
         print("last_mrap_date", last_mrap_date)
         # -----------------------------------------------------------------------------
         print("+r", last_mrap_file)
@@ -128,8 +126,6 @@ def run_mrap(gid):  # run MRAP on one tile
 
             if True:
                 extract(extract_path)
-
-    sys.exit(1)
 
     '''
     print("check sorting order")
