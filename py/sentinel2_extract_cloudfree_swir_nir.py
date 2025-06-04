@@ -13,6 +13,7 @@ import sys
 import os
 
 def extract_cloudfree(file_name):
+    print("file_name", file_name)
     w = file_name.split('_')  # split filename on '_'
     ds = w[2].split('T')[0]  # date string
     stack_fn = '.'.join(file_name.split('.')[:-1]) + '_cloudfree.bin' # output stack filename
