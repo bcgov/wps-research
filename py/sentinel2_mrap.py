@@ -107,11 +107,12 @@ def run_mrap(gid):  # run MRAP on one tile
         extract_path = "L2_" +  gid + os.path.sep + line
                 
         line_date_short = line_date[:8]
-        print('  ' + line_date_short + " " + extract_path)
 
+        if ( last_mrap_date is not None and line_date_short > last_mrap_date) or last_mrap_date is None:
+            print('  ' + line_date_short + " " + extract_path)
 
-        if False:
-            extract(extract_path)
+            if False:
+                extract(extract_path)
 
     '''
     print("check sorting order")
