@@ -101,10 +101,6 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2):
                             's3',
                             'cp',
                             '--no-sign-request',
-                            '--cli-read-timeout 500',
-                            '--cli-connect-timeout 60',
-                            '--retry-mode standard',
-                            '--max-attempts 500',
                             's3://sentinel-products-ca-mirror/' + key,
                             f])
      
