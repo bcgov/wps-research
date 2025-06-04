@@ -124,6 +124,8 @@ parfor(runc, cmds, 2)  # min(int(4), 2 * int(mp.cpu_count())))
 if len(cmds) == 0:
     print("All files up to date")
 
+print("don't forget to run sentinel2_extract_cloudfree_swir_nir.py")
+
 '''
 aws s3 sync --no-sign-request s3://sentinel-products-ca-mirror/Sentinel-2/S2MSI2A/2025/06/02/S2C_MSIL2A_20250602T193921_N0511_R042_T10VDK_20250602T224815.zip L2_T10VDK/
 '''
