@@ -23,7 +23,7 @@ if len(args) < 4:
             'G90207', 'G90228', 'G90319', 'G90287', 'G90399', 'G90289', 'G90324']   #'G90228', 'G90324', 'G90287', 'G90319', 'G90399', 'G90289', 'G90285', 'G80628']
 
 input_shapefile_path = args[1]
-output_shapefile_path = 'selected.shp' #  ('.'.join(args[1].split('.')[:-1])) + '_select.shp'
+output_shapefile_path = args[1] + '_selected.shp' #  ('.'.join(args[1].split('.')[:-1])) + '_select.shp'
 
 assert_exists(input_shapefile_path)
 print('+r', input_shapefile_path)
