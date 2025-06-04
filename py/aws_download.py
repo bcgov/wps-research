@@ -16,7 +16,7 @@ def aws_download(BUCKET, KEY, LOCAL_PATH):
     # BUCKET = "sentinel-products-ca-mirror"
     # KEY = "Sentinel-2/S2MSI2A/2025/05/27/S2C_MSIL2A_20250527T191931_N0511_R099_T10VFL_20250528T002013.zip"
     # LOCAL_PATH = Path("L2_T10VFL") / Path(KEY).name
-    CHUNK_SIZE = 1024 * 1024  # 8 MB
+    CHUNK_SIZE = 1024 * 512  # 8 MB
     MAX_RETRIES = 500
     NUM_THREADS = 10  # <== You can change this value
 
