@@ -53,8 +53,9 @@ def aws_download(BUCKET, KEY, LOCAL_PATH):
     # === RESUME SUPPORT ===
     existing_size = LOCAL_PATH.stat().st_size if LOCAL_PATH.exists() else 0
     if existing_size >= total_size:
-        logging.info("File already fully downloaded.")
-        raise SystemExit(0)
+        return
+        # logging.info("File already fully downloaded.")
+        # raise SystemExit(0)
 
     # === MULTITHREADED DOWNLOAD ===
     chunks = get_chunks(existing_size, total_size - 1, CHUNK_SIZE)
