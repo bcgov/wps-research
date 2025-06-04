@@ -1,72 +1,77 @@
 '''20250604 test downloading from AWS S3 using python api ( boto 3) 
 '''
-
 import boto3
 from botocore import UNSIGNED
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
+from pathlib import Path
+import logging
 import os
-import time
 
-# Settings
+# === CONFIGURATION ===
 BUCKET = "sentinel-products-ca-mirror"
 KEY = "Sentinel-2/S2MSI2A/2025/05/27/S2C_MSIL2A_20250527T191931_N0511_R099_T10VFL_20250528T002013.zip"
-LOCAL_PATH = "L2_T10VFL/" + os.path.basename(KEY)
+LOCAL_PATH = Path("L2_T10VFL") / Path(KEY).name
 CHUNK_SIZE = 8 * 1024 * 1024  # 8 MB
-MAX_RETRIES = 500
+MAX_RETRIES = 10
+NUM_THREADS = 8  # <== You can change this value
 
-# Ensure output directory exists
-os.makedirs(os.path.dirname(LOCAL_PATH), exist_ok=True)
+# === SETUP ===
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+LOCAL_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-# Configure anonymous client with retry settings
-config = Config(
-    signature_version=UNSIGNED,
-    retries={'max_attempts': MAX_RETRIES, 'mode': 'standard'}
-)
+config = Config(signature_version=UNSIGNED, retries={'max_attempts': MAX_RETRIES, 'mode': 'standard'})
 s3 = boto3.client("s3", config=config)
 
-# Get total file size
+# === GET FILE SIZE ===
 try:
-    head = s3.head_object(Bucket=BUCKET, Key=KEY)
-    total_size = head['ContentLength']
+    total_size = s3.head_object(Bucket=BUCKET, Key=KEY)['ContentLength']
 except Exception as e:
-    print("Error getting object metadata:", e)
-    raise
+    logging.error("Error getting object metadata: %s", e)
+    raise SystemExit(1)
 
-# Resume support
-existing_size = 0
-if os.path.exists(LOCAL_PATH):
-    existing_size = os.path.getsize(LOCAL_PATH)
+# === DEFINE CHUNKS ===
+def get_chunks(start, end, size):
+    return [(i, min(i + size - 1, end)) for i in range(start, end + 1, size)]
 
+# === DOWNLOAD FUNCTION ===
+def download_chunk(start, end):
+    byte_range = f"bytes={start}-{end}"
+    for attempt in range(MAX_RETRIES):
+        try:
+            resp = s3.get_object(Bucket=BUCKET, Key=KEY, Range=byte_range)
+            data = resp['Body'].read()
+            return start, data
+        except (BotoCoreError, ClientError) as e:
+            logging.warning(f"Retry {attempt + 1} failed for range {byte_range}: {e}")
+    raise RuntimeError(f"Failed to download range {byte_range} after {MAX_RETRIES} retries")
+
+# === RESUME SUPPORT ===
+existing_size = LOCAL_PATH.stat().st_size if LOCAL_PATH.exists() else 0
 if existing_size >= total_size:
-    print("File already fully downloaded.")
-    exit(0)
+    logging.info("File already fully downloaded.")
+    raise SystemExit(0)
 
-# Download loop with progress
-with open(LOCAL_PATH, "ab") as f, tqdm(
-    total=total_size, initial=existing_size, unit="B", unit_scale=True, desc="Downloading"
-) as pbar:
-    start = existing_size
-    while start < total_size:
-        end = min(start + CHUNK_SIZE - 1, total_size - 1)
-        byte_range = f"bytes={start}-{end}"
+# === MULTITHREADED DOWNLOAD ===
+chunks = get_chunks(existing_size, total_size - 1, CHUNK_SIZE)
 
-        for attempt in range(MAX_RETRIES):
-            try:
-                resp = s3.get_object(Bucket=BUCKET, Key=KEY, Range=byte_range)
-                data = resp['Body'].read()
-                f.write(data)
-                f.flush()
-                pbar.update(len(data))
-                break
-            except (BotoCoreError, ClientError) as e:
-                print(f"Retry {attempt + 1} failed for bytes {start}-{end}: {e}")
-                time.sleep(1)
-        else:
-            raise RuntimeError(f"Failed to download range {byte_range} after {MAX_RETRIES} retries")
+try:
+    with open(LOCAL_PATH, "r+b" if LOCAL_PATH.exists() else "wb") as f:
+        f.truncate(total_size)  # Pre-allocate file size
+        with ThreadPoolExecutor(max_workers=NUM_THREADS) as executor:
+            futures = {executor.submit(download_chunk, start, end): (start, end) for start, end in chunks}
+            with tqdm(total=total_size, initial=existing_size, unit="B", unit_scale=True, desc="Downloading") as pbar:
+                for future in as_completed(futures):
+                    start, data = future.result()
+                    f.seek(start)
+                    f.write(data)
+                    pbar.update(len(data))
+except KeyboardInterrupt:
+    logging.warning("Download interrupted by user.")
+    raise SystemExit(1)
 
-        start += CHUNK_SIZE
+logging.info("Download complete.")
 
-print("Download complete.")
 
