@@ -97,21 +97,27 @@ def run_mrap(gid):  # run MRAP on one tile
     last_mrap_date = None
     if len(mrap_lines) > 0:
         last_mrap_date = mrap_lines[-1][0][:8]
+
+        # load the last MRAP file here!
     print("last_mrap_date", last_mrap_date)
 
     
     for [line_date, line] in lines:
         gid = line.split("_")[5]
         extract_path = "L2_" +  gid + os.path.sep + line
-        print('  ' + line_date + " " + extract_path)
+                
+        line_date_short = line_date[:8]
+        print('  ' + line_date_short + " " + extract_path)
+
+
         if False:
             extract(extract_path)
 
+    '''
     print("check sorting order")
     for [line_date, line] in lines:
         print("mrap " + line)
-
-
+    '''
 
 if __name__ == "__main__":
     if len(args) < 2:
