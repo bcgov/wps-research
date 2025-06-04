@@ -10,6 +10,7 @@ if not use_L2:
 '''
 from misc import args, sep, exists, parfor, run, timestamp, err
 import multiprocessing as mp
+from pathlib import Path
 import datetime
 import argparse
 import time
@@ -104,7 +105,7 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2):
                             's3://sentinel-products-ca-mirror/' + key,
                             f])
      
-            if exists(f):
+            if exists(f) and Path(f).stat().st_size == file_size:
                 print(f, "SKIPPING")
             else:
                 print(f)
