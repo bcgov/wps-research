@@ -85,7 +85,7 @@ def run_mrap(gid):  # run MRAP on one tile
     for line in lines:
         gid = line.split("_")[5]
         extract_path = "L2_" +  gid + os.path.sep + line
-        print(extract_path)
+        print('  ' + extract_path)
         if False:
             extract(extract_path)
     
