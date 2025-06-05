@@ -17,7 +17,7 @@ def resample(fn):
     ofn = fn[:-4] + '_resample.bin'
     if not exists(ofn):
         cmds = (' '.join(['gdalwarp',
-                          '-wo NUM_THREADS=16',
+                          '-wo NUM_THREADS=64',
                           '-multi',
                           '-r bilinear',
                           '-srcnodata nan',
@@ -42,7 +42,7 @@ def merge(to_merge, date, out_fn): # files to be merged, output file name
                       ' '.join(to_merge)]))
 
     cmd = ' '.join(['gdalwarp',
-                    '-wo NUM_THREADS=16',
+                    '-wo NUM_THREADS=64',
                     '-multi',
                     '-overwrite',
                     '-r bilinear',
