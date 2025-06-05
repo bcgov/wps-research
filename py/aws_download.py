@@ -78,9 +78,11 @@ def aws_download(BUCKET, KEY, LOCAL_PATH):
     logging.info("Download complete.")
 
 
-BUCKET = "sentinel-products-ca-mirror"
-KEY = 'Sentinel-2/S2MSI2A/2025/06/02/S2C_MSIL2A_20250602T193921_N0511_R042_T10VDM_20250602T231915.zip' # "Sentinel-2/S2MSI2A/2025/05/27/S2C_MSIL2A_20250527T191931_N0511_R099_T10VFL_20250528T002013.zip"
-LOCAL_PATH = Path("L2_T10VDM") / Path(KEY).name
+if __name__ == '__main__':
+    # test case assumed if run from command line. This data file may not be hosted after 2025 
+    BUCKET = "sentinel-products-ca-mirror"
+    KEY = 'Sentinel-2/S2MSI2A/2025/06/02/S2C_MSIL2A_20250602T193921_N0511_R042_T10VDM_20250602T231915.zip' # "Sentinel-2/S2MSI2A/2025/05/27/S2C_MSIL2A_20250527T191931_N0511_R099_T10VFL_20250528T002013.zip"
+    LOCAL_PATH = Path("L2_T10VDM") / Path(KEY).name
 
-aws_download(BUCKET, KEY, LOCAL_PATH)
+    aws_download(BUCKET, KEY, LOCAL_PATH)
 
