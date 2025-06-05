@@ -98,14 +98,14 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2):
 
             if not os.path.exists(out_dir):
                 os.mkdir(out_dir)
-
+            '''
             cmd = ' '.join(['aws',
                             's3',
                             'cp',
                             '--no-sign-request',
                             's3://sentinel-products-ca-mirror/' + key,
                             f])
-            print([f])
+            print([f])'''
             if exists(f) and Path(f).stat().st_size == file_size:
                 print(f, "SKIPPING")
             else:
