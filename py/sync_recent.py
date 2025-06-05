@@ -7,10 +7,11 @@ if we're in an MRAP folder ( as evidenced by
 import os
 import sys
 import datetime
-from datetime import timedelta
 from gid import bc
+from datetime import timedelta
+from aws_download import aws_download
 from misc import err, parfor, sep, assert_aws_cli_installed
-assert_aws_cli_installed()
+# assert_aws_cli_installed()
 bc_gid = bc()
 print("bc row-id under obs:", bc_gid)
 
