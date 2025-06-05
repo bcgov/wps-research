@@ -43,7 +43,7 @@ if L2_folders != '':
             dates = [[x.split(sep)[1].split('_')[2][:8], x] for x in L]
             dates.sort()
             for d in dates:
-                pass # print(d)
+                print([d])
             # print("most_recent_this_pattern", dates[-1])
             return dates[-1][0]   # most recent date, this pattern
         most_recent_bin = check_pattern("*cloudfree.bin")
