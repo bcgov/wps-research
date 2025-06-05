@@ -139,7 +139,7 @@ lines = os.popen('find ./ -name "S2*.zip"').readlines()
 for line in lines:
     line = line.strip()
     f = line[:-4] + '_cloudfree.bin_MRAP.bin'
-    w = f.split('_')[-5].split('T')[0]
+    w = line[:-4].split('_')[-5].split('T')[0]
     print(w)
     #print(f)
     if not os.path.exists(f):
