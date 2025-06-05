@@ -9,8 +9,8 @@ if not use_L2:
     data_type = 'MSIL1C'
 '''
 from misc import args, sep, exists, parfor, run, timestamp, err
-import multiprocessing as mp
 from aws_download import aws_download
+import multiprocessing as mp
 from pathlib import Path
 import datetime
 import argparse
