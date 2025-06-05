@@ -118,7 +118,7 @@ for i in range(0, N + 1):
                              'Sentinel-2/S2MSI2A/' + cd + w[3].strip(),
                              Path(ofn + w[3].strip())) 
             else:
-                print("exists:", ofn)
+                print("exists:", ofn + w[3].strip())
 
 '''
 def runc(c):
