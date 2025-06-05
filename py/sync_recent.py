@@ -138,8 +138,8 @@ print(list(regen_dates))
 lines = os.popen('find ./ -name "S2*.zip"').readlines()
 for line in lines:
     line = line.strip()
-    f = line[:-3] + '_cloudfree.bin_MRAP.bin'
-    print(f)
+    f = line[:-4] + '_cloudfree.bin_MRAP.bin'
+    #print(f)
     if not os.path.exists(f):
         print('zip without MRAP file:', line.strip())
 
