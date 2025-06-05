@@ -134,6 +134,13 @@ if len(cmds) == 0:
 print("don't forget to run sentinel2_extract_cloudfree_swir_nir.py")
 print("mrap mosaic dates to regenerate:")
 print(list(regen_dates))
+
+lines = os.popen('find ./ -name "S2*.zip"').readlines()
+for line in lines:
+    f = line[:-3] + '_cloudfree.bin_MRAP.bin'
+    if not os.path.exists(f):
+        print('zip without MRAP file:', line.strip)
+
 '''
 aws s3 sync --no-sign-request s3://sentinel-products-ca-mirror/Sentinel-2/S2MSI2A/2025/06/02/S2C_MSIL2A_20250602T193921_N0511_R042_T10VDK_20250602T224815.zip L2_T10VDK/
 '''
