@@ -11,9 +11,9 @@ NOTE: assumes sentinel2_extract_cloudfree.py has been run.
 20250602: NB need to run sentinel2_extract_cloudfree_swir_nir.py BEFORE running this script ( if we've updated with sync_recent.py )
 
 '''
+from misc import args, run, hdr_fn, err, parfor
 from envi import envi_update_band_names
 from envi import envi_header_cleanup
-from misc import args, run, hdr_fn, err, parfor
 import multiprocessing as mp
 from osgeo import gdal
 import numpy as np
