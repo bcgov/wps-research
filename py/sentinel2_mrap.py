@@ -13,6 +13,7 @@ NOTE: assumes sentinel2_extract_cloudfree.py has been run.
 '''
 from misc import args, run, hdr_fn, err, parfor
 from envi import envi_update_band_names
+from aws_download import aws_download
 from envi import envi_header_cleanup
 import multiprocessing as mp
 from osgeo import gdal
