@@ -47,7 +47,11 @@ if L2_folders != '':
             for d in dates:
                 print([d])
             # print("most_recent_this_pattern", dates[-1])
-            return dates[-1][0]   # most recent date, this pattern
+            try:
+                return dates[-1][0]   # most recent date, this pattern
+            except:
+                return None
+
         most_recent_bin = check_pattern("*cloudfree.bin")
         most_recent_zip = check_pattern("*.zip")
         most_recent = most_recent_bin if most_recent_bin > most_recent_zip else most_recent_zip
