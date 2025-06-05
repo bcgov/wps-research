@@ -112,15 +112,18 @@ for i in range(0, N + 1):
             if not os.path.exists(ofn + w[3].strip()):
                 print(cmd)
                 cmds += [cmd] 
+                aws_download('sentinel-products-ca-mirror',
+                             'Sentinel-2/S2MSI2A/' + cd + w[3].strip(),
+                             Path(ofn + w[3].strip())) 
             else:
                 print("exists:", ofn)
 
-
+'''
 def runc(c):
     print([c])
     return os.system(c)
 parfor(runc, cmds, 2)  # min(int(4), 2 * int(mp.cpu_count())))
-
+'''
 if len(cmds) == 0:
     print("All files up to date")
 
