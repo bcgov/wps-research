@@ -105,7 +105,7 @@ for i in range(0, N + 1):
         w = line.split()
         tile_id = w[3].split('_')[5]
         if tile_id in gids:
-            print(line)
+            print('  ' + line)
             ofn = 'L2_' + tile_id + sep # + w[3].strip()
             cmd = ' ' .join(['aws s3 cp',
                              '--no-sign-request',
@@ -118,7 +118,7 @@ for i in range(0, N + 1):
                              'Sentinel-2/S2MSI2A/' + cd + w[3].strip(),
                              Path(ofn + w[3].strip())) 
             else:
-                print("exists:", ofn + w[3].strip())
+                print("  exists:", ofn + w[3].strip())
 
 '''
 def runc(c):
