@@ -72,6 +72,7 @@ if L2_folders != '':
 print(gids)
 
 cmds = []
+regen_dates = set()
 for i in range(0, N + 1):
     print("i", i, "gids", gids)
     now = today - timedelta(days=i)
@@ -112,6 +113,7 @@ for i in range(0, N + 1):
                              's3://sentinel-products-ca-mirror/Sentinel-2/S2MSI2A/' + cd + w[3].strip(),
                              ofn]) # 'L2_' + tile_id + sep + w[3].strip()])
             if not os.path.exists(ofn + w[3].strip()):
+                regen_dates.add(year + month + day)
                 print(cmd)
                 cmds += [cmd] 
                 aws_download('sentinel-products-ca-mirror',
@@ -130,7 +132,8 @@ if len(cmds) == 0:
     print("All files up to date")
 
 print("don't forget to run sentinel2_extract_cloudfree_swir_nir.py")
-
+print("mrap mosaic dates to regenerate:")
+print(list(regen_dates))
 '''
 aws s3 sync --no-sign-request s3://sentinel-products-ca-mirror/Sentinel-2/S2MSI2A/2025/06/02/S2C_MSIL2A_20250602T193921_N0511_R042_T10VDK_20250602T224815.zip L2_T10VDK/
 '''
