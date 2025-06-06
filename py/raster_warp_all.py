@@ -60,4 +60,5 @@ def processing(f):
         run('rm ' + of + '.aux.xml')
 
 # switch it on and make it go
+print("args.cpu_count", args.cpu_count)
 parfor(processing, files, args.cpu_count)
