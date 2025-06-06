@@ -79,9 +79,9 @@ def run_mrap(gid):  # run MRAP on one tile
         lines = [x.split(os.path.sep)[-1].split('_') for x in lines]
         lines = [[x[2], x] for x in lines]
         lines.sort()
-        return [[x[0], '_'.join(x[1])] for x in lines]
+        return [[x[0], '_'.join(x[1])] for x in lines]  # [date string, full S2 data filename]
     
-    lines = get_filename_lines("ls -1r L2_" + gid + os.path.sep + "S2*_cloudfree.bin")
+    data_lines = get_filename_lines("ls -1r L2_" + gid + os.path.sep + "S2*_cloudfree.bin")
     
     mrap_lines = get_filename_lines("ls -1r L2_" + gid + os.path.sep + "S2*_cloudfree.bin_MRAP.bin")
     # before this step, check for latest completed MRAP file and "seed" with that..if possible!
@@ -114,9 +114,8 @@ def run_mrap(gid):  # run MRAP on one tile
         print(my_proj, my_geo, my_xsize, my_ysize, nbands)
         #-------------------------------------------------------------------------------
 
-        
     
-    for [line_date, line] in lines:
+    for [line_date, line] in data_lines:
         gid = line.split("_")[5]
         extract_path = "L2_" +  gid + os.path.sep + line
                 
