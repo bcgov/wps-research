@@ -140,7 +140,7 @@ def run_mrap(gid):  # run MRAP on one tile
         extract_path = "L2_" +  gid + os.path.sep + line
         if last_good_mrap_date is None or ( last_good_mrap_date is not None and line_date > last_good_mrap_date):
             print('extract(' + extract_path + ')') 
-            # extract(extract_path)
+            extract(extract_path)
 
     # THIS PART SHOULD MARK ( NEEDING REFRESHING ) MRAP COMPOSITES ( MERGED PRODUCTS ) THAT NEED REFRESHING / BY DELETING THEM !!!!
 
