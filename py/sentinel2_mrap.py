@@ -27,6 +27,7 @@ import os
 
 
 def run_mrap(gid):  # run MRAP on one tile
+    print(gid, '-----------------------------------------------------------------------')
     my_bands, my_proj, my_geo, my_xsize, my_ysize, nbands, file_name  = {}, None, None, None, None, None, None
     
     def extract(file_name):
@@ -122,7 +123,6 @@ if __name__ == "__main__":
         gids = []
         dirs = [x.strip() for x in os.popen('ls -1d L2_*').readlines()]
         for d in dirs:
-            print('-----------------------------------------------------------------------')
             print(d)
             w = d.split('_')
             if len(w) != 2:
