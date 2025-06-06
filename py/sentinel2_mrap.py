@@ -87,21 +87,23 @@ def run_mrap(gid):  # run MRAP on one tile
         print('**' + mrap_date + " " + extract_path)
 
     last_mrap_date = None  # load a SEED if there are MRAP files, but data files without corresponding MRAP file
-    if len(mrap_lines) > 0 and len(mrap_lines) != len(data_lines):
+    if len(mrap_lines) > 0:
         if len(mrap_lines) > len(data_lines):
             err("unexpected: found more MRAP files than data files")
 
         last_mrap_date = mrap_lines[-1][0]
         last_mrap_file = "L2_" + gid + os.path.sep + mrap_lines[-1][1]
         print("last_mrap_date", last_mrap_date)
-        print("load SEED")
-        print("+r", last_mrap_file)  # load / seed from "most recent" MRAP file
-        d = gdal.Open(last_mrap_file)  # open the file brought in for this update step
-        my_bands = {i: d.GetRasterBand(i).ReadAsArray().astype(np.float32) for i in range(1, d.RasterCount + 1)}
-        my_proj = d.GetProjection()
-        my_geo = d.GetGeoTransform()
-        my_xsize, my_ysize, nbands = d.RasterXSize, d.RasterYSize, d.RasterCount
-        # print(my_proj, my_geo, my_xsize, my_ysize, nbands)
+
+        if len(mrap_lines) != len(data_lines):
+            print("load SEED")
+            print("+r", last_mrap_file)  # load / seed from "most recent" MRAP file
+            d = gdal.Open(last_mrap_file)  # open the file brought in for this update step
+            my_bands = {i: d.GetRasterBand(i).ReadAsArray().astype(np.float32) for i in range(1, d.RasterCount + 1)}
+            my_proj = d.GetProjection()
+            my_geo = d.GetGeoTransform()
+            my_xsize, my_ysize, nbands = d.RasterXSize, d.RasterYSize, d.RasterCount
+            # print(my_proj, my_geo, my_xsize, my_ysize, nbands)
     
     print("run extract:")  # run extract() on data files later than the last MRAP date
     for [line_date, line] in data_lines:
