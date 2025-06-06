@@ -2,6 +2,8 @@
 
 1) scan L2_XXXXX for each grid id
 2) create a new mosaic for every date there's new data
+
+20250605: nb, should have sentinel2_mrap.py pass in the dates that need to be (re) generated.
 '''
 from misc import sep, args, exists, run, err, parfor, hdr_fn 
 import multiprocessing as mp
