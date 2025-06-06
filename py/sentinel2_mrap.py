@@ -10,6 +10,10 @@ NOTE: assumes sentinel2_extract_cloudfree.py has been run.
 
 20250602: NB need to run sentinel2_extract_cloudfree_swir_nir.py BEFORE running this script ( if we've updated with sync_recent.py )
 '''
+
+import warnings
+warnings.filterwarnings("ignore")
+
 from misc import args, run, hdr_fn, err, parfor
 from envi import envi_update_band_names
 from aws_download import aws_download
@@ -20,6 +24,7 @@ import numpy as np
 import copy
 import sys
 import os
+
 
 def run_mrap(gid):  # run MRAP on one tile
     my_bands, my_proj, my_geo, my_xsize, my_ysize, nbands, file_name  = {}, None, None, None, None, None, None
