@@ -112,8 +112,8 @@ def run_mrap(gid):  # run MRAP on one tile
                 last_good_mrap_date = line_date
                 last_good_mrap_file = mrap_date_lookup[line_date]
         else:
-            print("line_date", line_date)
-            print("mrap_dates_set", mrap_dates_set)
+            # print("line_date", line_date)
+            # print("mrap_dates_set", mrap_dates_set)
             break
 
     print("last_good_mrap_date", last_good_mrap_date)
@@ -128,7 +128,7 @@ def run_mrap(gid):  # run MRAP on one tile
     if last_data_date > last_good_mrap_date:
         print("load SEED")
         print("+r", last_good_mrap_file)  # load / seed from "most recent" MRAP file
-        d = gdal.Open(last_good_mrap_file)  # open the file brought in for this update step
+        d = gdal.Open("L2_" +  gid + os.path.sep + last_good_mrap_file)  # open the file brought in for this update step
         my_bands = {i: d.GetRasterBand(i).ReadAsArray().astype(np.float32) for i in range(1, d.RasterCount + 1)}
         my_proj, my_geo = d.GetProjection(), d.GetGeoTransform()
         my_xsize, my_ysize, nbands = d.RasterXSize, d.RasterYSize, d.RasterCount
