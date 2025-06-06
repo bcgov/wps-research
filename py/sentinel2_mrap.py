@@ -94,7 +94,7 @@ def run_mrap(gid):  # run MRAP on one tile
         print("load SEED")
         print("+r", last_mrap_file)  # load / seed from "most recent" MRAP file
         d = gdal.Open(last_mrap_file)  # open the file brought in for this update step
-        my_bands = [d.GetRasterBand(i).ReadAsArray().astype(np.float32) for i in range(1, d.RasterCount + 1)]
+        my_bands = {i: d.GetRasterBand(i).ReadAsArray().astype(np.float32) for i in range(1, d.RasterCount + 1)}
         my_proj = d.GetProjection()
         my_geo = d.GetGeoTransform()
         my_xsize, my_ysize, nbands = d.RasterXSize, d.RasterYSize, d.RasterCount
