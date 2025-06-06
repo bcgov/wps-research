@@ -118,7 +118,7 @@ def run_mrap(gid):  # run MRAP on one tile
 
     print("last_mrap_date", last_mrap_date)
 
-    sys.exit(1)
+    return
 
     # last MRAP date string, that also has a data file with the same date string
     # load a SEED if there are MRAP files, but data files without corresponding MRAP file
