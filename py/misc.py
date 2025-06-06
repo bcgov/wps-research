@@ -29,7 +29,8 @@ single_thread = False
 try:
     from joblib import Parallel, delayed
 except:
-    single_thread = True
+    err("install joblib")
+    # single_thread = True
 
 try:
     import matplotlib.pyplot as plt
