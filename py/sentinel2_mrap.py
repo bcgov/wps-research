@@ -115,6 +115,7 @@ if __name__ == "__main__":
         gids = []
         dirs = [x.strip() for x in os.popen('ls -1d L2_*').readlines()]
         for d in dirs:
+            print('-----------------------------------------------------------------------')
             print(d)
             w = d.split('_')
             if len(w) != 2:
