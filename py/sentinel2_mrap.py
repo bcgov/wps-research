@@ -82,7 +82,11 @@ def run_mrap(gid):  # run MRAP on one tile
     data_lines = get_filename_lines("ls -1r L2_" + gid + os.path.sep + "S2*_cloudfree.bin")
     mrap_lines = get_filename_lines("ls -1r L2_" + gid + os.path.sep + "S2*_cloudfree.bin_MRAP.bin")
 
+    last_mrap_date = None   # last MRAP date that's still good.. i.e. before the first data file that doesn't have an MRAP file
+    last_mrap_file = None
     data_dates_set = set([line[0] for line in data_lines])
+    mrap_dates_set = set([line[0] for line in mrap_lines])
+    mrap_date_lookup = {line[0]: line[1] for line in mrap_lines}
     print(data_dates_set)  # have to match MRAP files and data files by collection timestamp in case original data reprocessed.
     for [mrap_date, line] in mrap_lines:
         if mrap_date not in data_dates_set:
@@ -91,18 +95,33 @@ def run_mrap(gid):  # run MRAP on one tile
 
     print("DATA lines", len(data_lines))
     for [line_date, line] in data_lines:
-        gid = line.split("_")[5]
+        if gid != line.split("_")[5]:
+            err('gid sanity check failed')
         extract_path = "L2_" +  gid + os.path.sep + line
         print('**' + line_date + " " + extract_path)
-
 
     print("MRAP lines", len(mrap_lines))
     for [mrap_date, line] in mrap_lines: # check for latest MRAP file and "seed" with that
         gid = line.split("_")[5]
         extract_path = "L2_" +  gid + os.path.sep + line
         print('**' + mrap_date + " " + extract_path)
+    
+    # find the last mrap date ( if applicable ) that's still good ( before first data file without MRAP file )
+    for [line_date, line] in data_lines:
+        if last_mrap_date is None:
+            if line_date in mrap_dates_set:
+                last_mrap_date = line_date
+                last_mrap_file = mrap_date_lookup[line_date]
+        else:
+            if line_date not in mrap_dates_set:
+                break
 
-    last_mrap_date = None  # load a SEED if there are MRAP files, but data files without corresponding MRAP file
+    print("last_mrap_date", last_mrap_date)
+
+    sys.exit(1)
+
+    # last MRAP date string, that also has a data file with the same date string
+    # load a SEED if there are MRAP files, but data files without corresponding MRAP file
     if len(mrap_lines) > 0:
         if len(mrap_lines) > len(data_lines):
             err("unexpected: found more MRAP files than data files")
