@@ -54,7 +54,7 @@ def run_mrap(gid):  # run MRAP on one tile
         # write output file
         out_file_name, driver = file_name + '_MRAP.bin', gdal.GetDriverByName('ENVI')
         print("+w", out_file_name)
-        if not os.path.exists(out_file_name):  # skip files that already exist
+        if True: # not os.path.exists(out_file_name):  # skip files that already exist
             print(out_file_name, my_xsize, my_ysize, nbands, gdal.GDT_Float32)
             stack_ds = driver.Create(out_file_name, my_xsize, my_ysize, nbands, gdal.GDT_Float32)
             stack_ds.SetProjection(my_proj)
@@ -68,7 +68,8 @@ def run_mrap(gid):  # run MRAP on one tile
                                     hdr_fn(file_name),
                                     hdr_fn(out_file_name)])
         else:
-            print(out_file_name, 'exists [SKIP WRITE]')
+            pass
+            # print(out_file_name, 'exists [SKIP WRITE]')
 
     # look for all the dates in this tile's folder and sort them in aquisition time
 
