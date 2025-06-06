@@ -25,6 +25,10 @@ except:
 
 import multiprocessing as mp
 
+# print message and exit
+def err(c):
+    print('Error:', c); sys.exit(1)
+
 single_thread = False
 try:
     from joblib import Parallel, delayed
@@ -52,10 +56,6 @@ def file_size(f): # get size of a file
 
 def me():  # my user name
     return os.popen('whoami').read().strip()
-
-# print message and exit
-def err(c):
-    print('Error:', c); sys.exit(1)
 
 def run(c, quit_on_nonzero=True):
     print('run(' + str(c) + ')')
