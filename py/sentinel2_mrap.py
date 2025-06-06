@@ -110,8 +110,12 @@ def run_mrap(gid):  # run MRAP on one tile
     # find the last mrap date ( if applicable ) that's still good ( before first data file without MRAP file )
     for [line_date, line] in data_lines:
         if last_good_mrap_date is None or line_date in mrap_dates_set:
-                last_good_mrap_date = line_date
-                last_good_mrap_file = mrap_date_lookup[line_date]
+                try:
+                    last_good_mrap_file = mrap_date_lookup[line_date]
+                    last_good_mrap_date = line_date
+                except:
+                    pass # might not have any mrap files generated.
+                
         else:
             # print("line_date", line_date)
             # print("mrap_dates_set", mrap_dates_set)
@@ -119,14 +123,14 @@ def run_mrap(gid):  # run MRAP on one tile
 
     print("last_good_mrap_date", last_good_mrap_date)
 
-    last_mrap_date = mrap_lines[-1][0]
-    last_mrap_file = "L2_" + gid + os.path.sep + mrap_lines[-1][1]
+    last_mrap_date = mrap_lines[-1][0] if len(mrap_lines) > 0 else None
+    last_mrap_file = "L2_" + gid + os.path.sep + mrap_lines[-1][1] if len(mrap_lines) > 0 else None
     print("last_mrap_date", last_mrap_date)
-    last_data_date = data_lines[-1][0]
+    last_data_date = data_lines[-1][0] if len(data_lines) > 0 else None
 
     # last MRAP date string, that also has a data file with the same date string
     # load a SEED if there are MRAP files, but data files without corresponding MRAP file
-    if last_data_date > last_good_mrap_date:
+    if last_mrap_date is not None and last_data_date is not None and last_data_date > last_good_mrap_date:
         print("load SEED")
         print("+r", "L2_" +  gid + os.path.sep + last_good_mrap_file)  # load / seed from "most recent" MRAP file
         d = gdal.Open("L2_" +  gid + os.path.sep + last_good_mrap_file)  # open the file brought in for this update step
