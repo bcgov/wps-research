@@ -255,7 +255,7 @@ def parfor(my_function, my_inputs, n_thread=int(mp.cpu_count())):
         return [my_function(my_inputs[i]) for i in range(len(my_inputs))]
     else:
         n_thread = mp.cpu_count() if n_thread is None else n_thread
-
+        print("PARFOR", n_thread)
         if my_inputs is None or type(my_inputs) == list and len(my_inputs) == 0:
             return []
 
