@@ -108,15 +108,13 @@ def run_mrap(gid):  # run MRAP on one tile
     
     # find the last mrap date ( if applicable ) that's still good ( before first data file without MRAP file )
     for [line_date, line] in data_lines:
-        if last_mrap_date is None:
-            if line_date in mrap_dates_set:
+        if last_mrap_date is None or line_date in mrap_dates_set:
                 last_mrap_date = line_date
                 last_mrap_file = mrap_date_lookup[line_date]
         else:
-            if line_date not in mrap_dates_set:
-                print("line_date", line_date)
-                print("mrap_dates_set", mrap_dates_set)
-                break
+            print("line_date", line_date)
+            print("mrap_dates_set", mrap_dates_set)
+            break
 
     print("last_mrap_date", last_mrap_date)
 
