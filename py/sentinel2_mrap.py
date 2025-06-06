@@ -109,6 +109,7 @@ def run_mrap(gid):  # run MRAP on one tile
     for [line_date, line] in lines:
         print("mrap " + line)
     '''
+    print("done " + gid + "------------------------------------")
 
 if __name__ == "__main__":
     if len(args) < 2:
