@@ -82,6 +82,11 @@ def run_mrap(gid):  # run MRAP on one tile
     data_lines = get_filename_lines("ls -1r L2_" + gid + os.path.sep + "S2*_cloudfree.bin")
     mrap_lines = get_filename_lines("ls -1r L2_" + gid + os.path.sep + "S2*_cloudfree.bin_MRAP.bin")
 
+    data_lines_set = set([line[1] for line in data_lines])
+    for [mrap_date, line] in mrap_lines:
+        if line not in data_lines_set:
+            err("found MRAP date: S2x_cloudfree.bin_MRAP.bin without S2x_cloudfree.bin file")
+
     print("DATA lines")
     for [line_date, line] in data_lines:
         gid = line.split("_")[5]
