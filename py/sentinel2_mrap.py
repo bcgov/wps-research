@@ -134,8 +134,6 @@ def run_mrap(gid):  # run MRAP on one tile
         my_xsize, my_ysize, nbands = d.RasterXSize, d.RasterYSize, d.RasterCount
         # print(my_proj, my_geo, my_xsize, my_ysize, nbands)
     
-    return
-
     print("run extract:")  # run extract() on data files later than the last MRAP date
     for [line_date, line] in data_lines:
         gid = line.split("_")[5]
