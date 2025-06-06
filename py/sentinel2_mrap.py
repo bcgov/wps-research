@@ -87,7 +87,7 @@ def run_mrap(gid):  # run MRAP on one tile
     data_dates_set = set([line[0] for line in data_lines])
     mrap_dates_set = set([line[0] for line in mrap_lines])
     mrap_date_lookup = {line[0]: line[1] for line in mrap_lines}
-    print(data_dates_set)  # have to match MRAP files and data files by collection timestamp in case original data reprocessed.
+    # print(data_dates_set)  # have to match MRAP files and data files by collection timestamp in case original data reprocessed.
     for [mrap_date, line] in mrap_lines:
         if mrap_date not in data_dates_set:
             print(line)
@@ -127,7 +127,7 @@ def run_mrap(gid):  # run MRAP on one tile
     # load a SEED if there are MRAP files, but data files without corresponding MRAP file
     if last_data_date > last_good_mrap_date:
         print("load SEED")
-        print("+r", last_good_mrap_file)  # load / seed from "most recent" MRAP file
+        print("+r", "L2_" +  gid + os.path.sep + last_good_mrap_file)  # load / seed from "most recent" MRAP file
         d = gdal.Open("L2_" +  gid + os.path.sep + last_good_mrap_file)  # open the file brought in for this update step
         my_bands = {i: d.GetRasterBand(i).ReadAsArray().astype(np.float32) for i in range(1, d.RasterCount + 1)}
         my_proj, my_geo = d.GetProjection(), d.GetGeoTransform()
@@ -140,9 +140,9 @@ def run_mrap(gid):  # run MRAP on one tile
     for [line_date, line] in data_lines:
         gid = line.split("_")[5]
         extract_path = "L2_" +  gid + os.path.sep + line
-        if ( last_mrap_date is not None and line_date > last_mrap_date) or last_mrap_date is None:
-            print('  ' + line_date + " " + extract_path)
-            extract(extract_path)
+        if last_good_mrap_date is None or ( last_good_mrap_date is not None and line_date > last_good_mrap_date):
+            print('extract(' + extract_path + ')') 
+            # extract(extract_path)
 
     # THIS PART SHOULD MARK ( NEEDING REFRESHING ) MRAP COMPOSITES ( MERGED PRODUCTS ) THAT NEED REFRESHING / BY DELETING THEM !!!!
 
