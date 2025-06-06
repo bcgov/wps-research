@@ -53,7 +53,7 @@ def fix_s2(f):  # add folders expected by Sen2Cor! Gcp omits empty dirs
 
 def run_sen2cor(f):
     fix_s2(f)
-    L2A = 'L2A_Process' # /home/' + os.popen('whoami').read().strip() + '/sen2cor/Sen2Cor-02.05.05-Linux64/bin/L2A_Process'
+    L2A = os.popen('which L2A_Process').read().strip() # /home/' + os.popen('whoami').read().strip() + '/sen2cor/Sen2Cor-02.05.05-Linux64/bin/L2A_Process'
     if not exists(L2A):
         err('please install sen2cor and try again')
     L2A = os.path.abspath(L2A)
