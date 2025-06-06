@@ -114,6 +114,8 @@ def run_mrap(gid):  # run MRAP on one tile
                 last_mrap_file = mrap_date_lookup[line_date]
         else:
             if line_date not in mrap_dates_set:
+                print("line_date", line_date)
+                print("mrap_dates_set", mrap_dates_set)
                 break
 
     print("last_mrap_date", last_mrap_date)
