@@ -66,23 +66,23 @@ dirs = [x.strip() for x in os.popen('ls -1d L2_*').readlines()]
 gids = [d.split('_')[-1] for d in dirs]
 print("gids", gids)
 
-dic = {}
+dic = {}  # list the tile-based MRAP files, for each associated date key. yyyymmdd
 for d in dirs:
     print(d)
     mraps = [x.strip() for x in os.popen('ls -1 ' + d + sep + '*MRAP.bin').readlines()]
     for m in mraps:
-        w = m.split(sep)[-1].split('_')[2].split('T')[0]
+        w = m.split(sep)[-1].split('_')[2].split('T')[0]  # key on date yyyymmdd
         #print(w, m)
         if w not in dic:
             dic[w] = []
         dic[w] += [m]
 
-# sort dictionary contents by date
+# sort the date keys to get a list of mrap files, for each date, ordered by date yyyymmdd 
 date_mrap = [[d, dic[d]] for d in dic]
 date_mrap.sort() # list of MRAP files available on each date.
-cmds, most_recent_by_gid = [], {}
+cmds, most_recent_by_gid = [], {}  # list the most recent MRAP file observed for this GID, for a given date yyyymmdd
 
-for d, df in date_mrap:
+for d, df in date_mrap:  # for each date ( and associated list of MRAP files observed that date yyyymmdd ) 
     # print(d)
 
     for f in df:
@@ -95,17 +95,28 @@ for d, df in date_mrap:
             most_recent_by_gid[gid] = {}
             most_recent_by_gid[gid][d] = [f]
         else:
-            keys = list(most_recent_by_gid[gid].keys())
+            # list the dates yyyymmdd observed ( this GID ) so far
+            keys = list(most_recent_by_gid[gid].keys())  
+
+            # "by definition" we should store only one "most recent" file ( per gid )  at one time.
             if len(keys) != 1:
-                err('consistency check')
+                err('consistency check 1 failed')
+
+            # there is only one most recent ( yyyymmdd ) date key. If we found a new date that's more recent:
             if int(keys[0]) < int(d):
+                # clear the dictionary and add this file as a key:
                 most_recent_by_gid[gid] = {}
                 most_recent_by_gid[gid][d] = [f]
+
+            # seems pedantic: 
             elif int(keys[0]) > int(d):
-                err('consistency check2')
-            elif int(keys[0]) == int(d):
-                # print('** multiples this date, insert')
+                err('consistency check 2 failed')
+
+            # multiple files this (gid, yyyymmdd) are allowed ( reprocessings, or multiple takes same calendar day, different times ) 
+            elif int(keys[0]) == int(d): # print('** multiples this date, insert')
                 most_recent_by_gid[gid][d] += [f] 
+
+            # sanity check: unreachable section: all cases should be covered
             else:
                 print(int(keys[0]), int(d))
                 err('unreachable')
@@ -152,8 +163,8 @@ for d, df in date_mrap:
 
         parfor(run,
                cmds,
-               int(mp.cpu_count()))
+               int(mp.cpu_count()))  # perform resampling steps in parallel
 
         merge(resampled_files,
               d,
-              mrap_product_file)
+              mrap_product_file)  # merge step can't be performed in parallel as easily, however techincally we should be able to add an ampersand here and continue over the loop since the MRAP files are cumulative in time ( on a per-time / gid basis ) that is the MRAP merge files aren't defined in terms of previous MRAP merge files.. only MRAP files ( on a per-tile/ gid basis)
