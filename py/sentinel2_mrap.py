@@ -52,8 +52,8 @@ def run_mrap(gid):  # run MRAP on one tile
         d = None  # close input file brought in for this update step
     
         # write output file
-        print("+w", out_file_name)
         out_file_name, driver = file_name + '_MRAP.bin', gdal.GetDriverByName('ENVI')
+        print("+w", out_file_name)
         if not os.path.exists(out_file_name):  # skip files that already exist
             print(out_file_name, my_xsize, my_ysize, nbands, gdal.GDT_Float32)
             stack_ds = driver.Create(out_file_name, my_xsize, my_ysize, nbands, gdal.GDT_Float32)
