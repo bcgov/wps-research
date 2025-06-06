@@ -51,6 +51,7 @@ def run_mrap(gid):  # run MRAP on one tile
         d = None  # close input file brought in for this update step
     
         # write output file
+        print("+w", out_file_name)
         out_file_name, driver = file_name + '_MRAP.bin', gdal.GetDriverByName('ENVI')
         if not os.path.exists(out_file_name):  # skip files that already exist
             print(out_file_name, my_xsize, my_ysize, nbands, gdal.GDT_Float32)
@@ -96,7 +97,7 @@ def run_mrap(gid):  # run MRAP on one tile
         my_proj = d.GetProjection()
         my_geo = d.GetGeoTransform()
         my_xsize, my_ysize, nbands = d.RasterXSize, d.RasterYSize, d.RasterCount
-        print(my_proj, my_geo, my_xsize, my_ysize, nbands)
+        # print(my_proj, my_geo, my_xsize, my_ysize, nbands)
     
     print("run extract:")
     for [line_date, line] in data_lines:
