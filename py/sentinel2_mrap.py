@@ -86,9 +86,12 @@ def run_mrap(gid):  # run MRAP on one tile
         extract_path = "L2_" +  gid + os.path.sep + line
         print('**' + mrap_date + " " + extract_path)
 
-    last_mrap_date = None
-    if len(mrap_lines) > 0:
-        last_mrap_date = mrap_lines[-1][0][:8]
+    last_mrap_date = None  # load a SEED if there are MRAP files, but data files without corresponding MRAP file
+    if len(mrap_lines) > 0 and len(mrap_lines) != len(data_lines):
+        if len(mrap_lines) > len(data_lines):
+            err("unexpected: found more MRAP files than data files")
+
+        last_mrap_date = mrap_lines[-1][0]
         last_mrap_file = "L2_" + gid + os.path.sep + mrap_lines[-1][1]
         print("last_mrap_date", last_mrap_date)
         print("load SEED")
@@ -100,13 +103,12 @@ def run_mrap(gid):  # run MRAP on one tile
         my_xsize, my_ysize, nbands = d.RasterXSize, d.RasterYSize, d.RasterCount
         # print(my_proj, my_geo, my_xsize, my_ysize, nbands)
     
-    print("run extract:")
+    print("run extract:")  # run extract() on data files later than the last MRAP date
     for [line_date, line] in data_lines:
         gid = line.split("_")[5]
         extract_path = "L2_" +  gid + os.path.sep + line
-        line_date_short = line_date[:8]
-        if ( last_mrap_date is not None and line_date_short > last_mrap_date) or last_mrap_date is None:
-            print('  ' + line_date_short + " " + extract_path)
+        if ( last_mrap_date is not None and line_date > last_mrap_date) or last_mrap_date is None:
+            print('  ' + line_date + " " + extract_path)
             extract(extract_path)
 
     # THIS PART SHOULD MARK ( NEEDING REFRESHING ) MRAP COMPOSITES ( MERGED PRODUCTS ) THAT NEED REFRESHING / BY DELETING THEM !!!!
