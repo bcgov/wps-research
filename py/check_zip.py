@@ -68,3 +68,10 @@ def main():
 if __name__ == "__main__":
     main()
 
+
+    if '--delete' in sys.argv:
+        for b in bad:
+            for f in [b, [b:-3] + 'hdr']:
+                if os.path.exists(f):
+                    print('rm ' + f)
+                    os.remove(f)
