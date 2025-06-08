@@ -35,6 +35,14 @@ for b in bin_files_added:
     os.symlink(b, bin_dir + sep + b)
     os.symlink(hdr_fn(b), bin_dir + sep + hdr_fn(b))
     
+    small_dir = 'small_' + date_s
 
+    if not os.path.exists(small_dir):
+        os.mkdir(small_dir)
 
+    run('raster_warp_all -s 2 ' + bin_dir + ' ' + small_dir)
 
+    gz_file = small_dir + '.tar.gz'
+
+    if not os.path.exists(gz_file):
+        run('tar cvfz ' + gz_file + ' ' + small_dir)
