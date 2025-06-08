@@ -32,8 +32,11 @@ for b in bin_files_added:
     if not os.path.exists(bin_dir):
         os.mkdir(bin_dir)
 
-    os.symlink(b, bin_dir + sep + b)
-    os.symlink(hdr_fn(b), bin_dir + sep + hdr_fn(b))
+    if not os.path.exists(bin_dir + sep + b):
+        os.symlink(b, bin_dir + sep + b)
+    
+    if not os.path.exists(bin_dir + sep + hdr_fn(b)):
+        os.symlink(hdr_fn(b), bin_dir + sep + hdr_fn(b))
     
     small_dir = 'small_' + date_s
 
