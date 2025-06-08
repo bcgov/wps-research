@@ -65,7 +65,7 @@ for g in gids:
         tile_id = w[3].split('_')[5]
         if tile_id in gids:
             print('  ' + line)
-            ofn = 'L2_' + tile_id + sep # + w[3].strip()
+            ofn = 'L1_' + tile_id + sep # + w[3].strip()
             cmd = ' ' .join(['aws s3 cp',
                              '--no-sign-request',
                              's3://sentinel-products-ca-mirror/Sentinel-2/S2MSI1C/' + cd + w[3].strip(),
