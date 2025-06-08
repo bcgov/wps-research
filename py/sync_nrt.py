@@ -28,7 +28,8 @@ N = 1  # default
 L1_folders = os.popen("ls -d1 L1_*").read().strip().split('\n')
 L2_folders = os.popen("ls -d1 L2_*").read().strip().split('\n')
 folders = set(L1_folders + L2_folders)
-folders.remove('')  # make sure there's no empty string
+if '' in folders:
+    folders.remove('')  # make sure there's no empty string
 gids = [line.split('_')[1] for line in folders]
 gids = list(set(gids))
 
