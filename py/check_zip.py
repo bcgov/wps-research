@@ -71,7 +71,7 @@ if __name__ == "__main__":
 
     if '--delete' in sys.argv:
         for b in bad:
-            for f in [b, [b:-3] + 'hdr']:
+            for f in [b, b[:-3] + 'hdr']:
                 if os.path.exists(f):
                     print('rm ' + f)
                     os.remove(f)
