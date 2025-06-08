@@ -71,7 +71,6 @@ for g in gids:
                              's3://sentinel-products-ca-mirror/Sentinel-2/S2MSI1C/' + cd + w[3].strip(),
                              ofn]) # 'L2_' + tile_id + sep + w[3].strip()])
             if not os.path.exists(ofn + w[3].strip()):
-                regen_dates.add(year + month + day)
                 print(cmd)
                 cmds += [cmd] 
                 aws_download('sentinel-products-ca-mirror',
