@@ -1,4 +1,6 @@
-'''20250607: mosaic all .bin files specified
+'''20250607: mosaic all .bin files specified on command line. 
+
+NB last file specified is output file!!!!
 
 adapted from:
 20230516 mosaic all .bin files in present folder 
@@ -17,7 +19,8 @@ from misc import run, parfor, exists, sep, err
 if len(sys.argv) > 1:
     EPSG = 3347
 '''
-lines = sys.argv[1:] #  [x.strip() for x in os.popen('ls -1 *.bin').readlines()]
+lines = sys.argv[1:-1] #  [x.strip() for x in os.popen('ls -1 *.bin').readlines()]
+output_file = sys.argv[-1]  # output file
 
 if not exists('resample'):
     os.mkdir('resample')
@@ -55,7 +58,7 @@ run(' '.join(['gdalbuildvrt',
               '-overwrite',
               'merge.vrt'] + resampled))
 
-if not exists('merge.bin'):
+if not exists(output_file):
     run(' '.join(['gdalwarp',
                   '-wo NUM_THREADS=16',
                   '-multi',
@@ -66,7 +69,7 @@ if not exists('merge.bin'):
                   '-srcnodata nan',
                   '-dstnodata nan',
                   'merge.vrt',
-                  'merge.bin']))  
+                  output_file]))  
 
 run('fh merge.hdr')
 run('envi_header_copy_bandnames.py ' + lines[0][:-4] + '.hdr merge.hdr')
