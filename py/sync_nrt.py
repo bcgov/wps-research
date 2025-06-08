@@ -32,7 +32,7 @@ if '' in folders:
     folders.remove('')  # make sure there's no empty string
 gids = [line.split('_')[1] for line in folders]
 gids = list(set(gids))
-
+files = []
 if True:
     # today's date
     now = today
@@ -78,4 +78,9 @@ if True:
                              Path(ofn + w[3].strip())) 
             else:
                 print("  exists:", ofn + w[3].strip())
-
+    
+            files += [ofn]
+now = today
+year, month, day = str(now.year).zfill(4), str(now.month).zfill(2), str(now.day).zfill(2)
+cmd = "merge3.py " + ' '.join(files) + ' ' + year + month + day + ".bin"
+print(cmd)
