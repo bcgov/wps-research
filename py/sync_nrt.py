@@ -26,10 +26,9 @@ N = 1  # default
 # check if we're in an MRAP folder, only update the GID present in the filesystem structure:
 L1_folders = os.popen("ls -d1 L1_*").read().strip().split('\n')
 L2_folders = os.popen("ls -d1 L2_*").read().strip().split('\n')
-print(L1_folders)
-print(L2_folders)
-
-gids = [line.split('_')[1] for line in L1_folders] + [line.split('_')[1] for line in L2_folders]
+folders = set(L1_folders + L2_folders)
+folders.remove('')  # make sure there's no empty string
+gids = [line.split('_')[1] for line in folders]
 gids = list(set(gids))
 
 for g in gids:
