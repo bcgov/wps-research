@@ -14,7 +14,7 @@ EPSG = 3005  # BC Albers
 import os
 import sys
 import multiprocessing as mp
-from misc import run, parfor, exists, sep, err
+from misc import run, parfor, exists, sep, err, hdr_fn
 '''assume we are in BC
 if len(sys.argv) > 1:
     EPSG = 3347
@@ -71,5 +71,5 @@ if not exists(output_file):
                   'merge.vrt',
                   output_file]))  
 
-run('fh merge.hdr')
-run('envi_header_copy_bandnames.py ' + lines[0][:-4] + '.hdr merge.hdr')
+run('fh ' + hdr_fn(output_file))
+run('envi_header_copy_bandnames.py ' + lines[0][:-4] + '.hdr ' + hdr_fn(output_file))
