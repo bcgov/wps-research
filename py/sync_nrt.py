@@ -79,7 +79,13 @@ if True:
             else:
                 print("  exists:", ofn + w[3].strip())
     
-            files += [ofn + sep + w[3].strip()]
+            files += [ofn + w[3].strip()]
+
+def extr(i):
+    return os.system("sentinel2_extract_swir.py " + i)
+
+parfor(extr, files)
+
 now = today
 year, month, day = str(now.year).zfill(4), str(now.month).zfill(2), str(now.day).zfill(2)
 cmd = "merge3.py " + ' '.join(files) + ' ' + year + month + day + ".bin"
