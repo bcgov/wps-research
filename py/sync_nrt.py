@@ -21,7 +21,7 @@ print("bc row-id under obs:", bc_gid)
 gids = bc_gid # default to BC gids a
 
 # today's date
-today = datetime.now(ZoneInfo("America/Vancouver")) 
+today = datetime.datetime.now(ZoneInfo("America/Vancouver")) 
 N = 1  # default
 
 # check if we're in an MRAP folder, only update the GID present in the filesystem structure:
