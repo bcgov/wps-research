@@ -47,7 +47,7 @@ for b in bin_files_added:
     if not os.path.exists(small_dir):
         os.mkdir(small_dir)
 
-    run('raster_warp_all -s 2 ' + bin_dir + ' ' + small_dir)
+    run('raster_warp_all.py -s 2 ' + bin_dir + ' ' + small_dir)
 
     gz_file = small_dir + '.tar.gz'
 
