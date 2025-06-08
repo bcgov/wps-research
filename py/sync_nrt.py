@@ -89,7 +89,7 @@ parfor(extr, files)
 now = today
 year, month, day = str(now.year).zfill(4), str(now.month).zfill(2), str(now.day).zfill(2)
 outfile =  year + month + day + ".bin"
-cmd = "merge3.py " + ' '.join(files) + ' ' + outfile
+cmd = "merge3.py " + ' '.join([x[:-3] + 'bin' for x in files]) + ' ' + outfile
 print(cmd)
 a = os.system(cmd) 
 print("done")
