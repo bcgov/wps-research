@@ -33,7 +33,7 @@ run('rm -f merge.*')
 cmds = []
 resampled = []
 for L in lines:
-    ofn = L + sep + '_resample.bin'
+    ofn = L + '_resample.bin'
     resampled += [ofn]
     if not exists(ofn):
         cmds += [' '.join(['gdalwarp',
