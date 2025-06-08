@@ -19,7 +19,10 @@ run('sentinel2_extract_cloudfree_swir_nir.py')
 run('sentinel2_mrap.py')
 run('sentinel2_mrap_merge.py')
 run('clean')
-run('rm *.vrt *.xml')
+try:
+    run('rm *.vrt *.xml')
+except:
+    pass
 
 bin_files_new = list_bins()
 bin_files_added = bin_files_new - bin_files
