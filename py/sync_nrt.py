@@ -10,6 +10,7 @@ import sys
 import datetime
 from gid import bc
 from pathlib import Path
+from zoneinfo import ZoneInfo
 from datetime import timedelta
 from aws_download import aws_download
 from misc import err, parfor, sep, assert_aws_cli_installed
@@ -20,7 +21,7 @@ print("bc row-id under obs:", bc_gid)
 gids = bc_gid # default to BC gids a
 
 # today's date
-today = datetime.date.today()
+today = datetime.now(ZoneInfo("America/Vancouver")) 
 N = 1  # default
 
 # check if we're in an MRAP folder, only update the GID present in the filesystem structure:
