@@ -20,7 +20,7 @@ run('sentinel2_mrap.py')
 run('sentinel2_mrap_merge.py')
 run('clean')
 try:
-    run('rm *.vrt *.xml')
+    a = os.system('rm *.vrt *.xml')
 except:
     pass
 
