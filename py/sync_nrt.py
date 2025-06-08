@@ -72,7 +72,6 @@ for g in gids:
                              ofn]) # 'L2_' + tile_id + sep + w[3].strip()])
             if not os.path.exists(ofn + w[3].strip()):
                 print(cmd)
-                cmds += [cmd] 
                 aws_download('sentinel-products-ca-mirror',
                              'Sentinel-2/S2MSI1C/' + cd + w[3].strip(),
                              Path(ofn + w[3].strip())) 
