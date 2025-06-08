@@ -32,7 +32,7 @@ folders.remove('')  # make sure there's no empty string
 gids = [line.split('_')[1] for line in folders]
 gids = list(set(gids))
 
-for g in gids:
+if True:
     # today's date
     now = today
     year, month, day = str(now.year).zfill(4), str(now.month).zfill(2), str(now.day).zfill(2)
