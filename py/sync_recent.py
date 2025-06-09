@@ -143,7 +143,7 @@ if len(cmds) == 0:
 
 print("don't forget to run sentinel2_extract_cloudfree_swir_nir.py")
 
-lines = os.popen('find ./ -name "S2*.zip"').readlines()
+lines = os.popen('find ./ -name "S2*MSIL2A.zip"').readlines()
 for line in lines:
     line = line.strip()
     f = line[:-4] + '_cloudfree.bin_MRAP.bin'
