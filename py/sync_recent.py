@@ -159,7 +159,7 @@ def min_d(dates):
     for d in dates:
         if d < md:
             md = d
-    return md
+    return [md]
 
 if len(regen_dates) > 0:
     regen_dates = min_d(regen_dates)  # find earliest date that needs regenerating 
