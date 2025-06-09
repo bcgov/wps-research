@@ -11,7 +11,7 @@ from gid import bc
 from pathlib import Path
 from datetime import timedelta
 from aws_download import aws_download
-from misc import err, parfor, sep, assert_aws_cli_installed
+from misc import err, exist, parfor, sep, assert_aws_cli_installed
 # assert_aws_cli_installed()
 bc_gid = bc()
 print("bc row-id under obs:", bc_gid)
@@ -154,6 +154,31 @@ for line in lines:
 
 print("mrap mosaic dates to regenerate:")
 print(list(regen_dates))
+
+def min_d(dates):
+    md = dates[0]
+    for d in dates:
+        if d < md:
+            md = d
+    return md
+
+
+if exist('.mrap_regen_date'):
+    regen_dates += [open('.mrap_regen_date').read().strip()]
+
+if len(regen_dates) > 0:
+    regen_dates = [min_d(regen_dates)]
+
+if len(regen_dates) == 1:
+    o_f = open('.mrap_regen_date', 'wb')
+    o_f.write(str(regen_dates[0]).encode())
+    o_f.close()
+elif len(regen_dates) == 0:
+    pass
+else:
+    err('unexpected state')
+
+
 
 '''
 aws s3 sync --no-sign-request s3://sentinel-products-ca-mirror/Sentinel-2/S2MSI2A/2025/06/02/S2C_MSIL2A_20250602T193921_N0511_R042_T10VDK_20250602T224815.zip L2_T10VDK/
