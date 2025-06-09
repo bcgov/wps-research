@@ -13,13 +13,15 @@ import warnings; warnings.filterwarnings("ignore", message="Unable to import Axe
 try:
     from osgeo import gdal
 except:
-    print("Error: please install python/gdal:")
-    print("To install GDAL python interface:")
+    print("Error: please install gdal and python/gdal interface:")
+    print("Linux:")
+    print("    sudo apt install libgdal-dev gdal-bin")
     print("    python3 -m pip install GDAL")
     print("Mac:")
     print("    sudo port install gdal")
-    print("Linux:")
-    print("    sudo apt install libgdal-dev gdal-bin")
+    print("    sudo port install py-gdal")
+    print("Windows:")
+    print("    # too bad")
     sys.exit(1)
 
 
