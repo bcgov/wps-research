@@ -161,21 +161,26 @@ def min_d(dates):
             md = d
     return md
 
+regen_dates = min_d(regen_dates)  # find earliest date that needs regenerating 
 
-if exist('.mrap_regen_date'):
-    regen_dates += [open('.mrap_regen_date').read().strip()]
+# delete mrap files / folders for dates equal or greater to then..
 
-if len(regen_dates) > 0:
-    regen_dates = [min_d(regen_dates)]
+mrap_files = os.popen("ls -1 *_mrap.bin").read().strip().split('\n')
 
-if len(regen_dates) == 1:
-    o_f = open('.mrap_regen_date', 'wb')
-    o_f.write(str(regen_dates[0]).encode())
-    o_f.close()
-elif len(regen_dates) == 0:
-    pass
-else:
-    err('unexpected state')
+to_delete = []
+for f in mrap_files:
+    ds = f.split('_')[0]
+
+    if f >= regen_dates[0]:
+        to_delete += [ds]
+
+print("mrap dates to delete:")
+
+print(to_delete)
+
+
+
+
 
 
 
