@@ -142,7 +142,6 @@ if len(cmds) == 0:
     print("All files up to date")
 
 print("don't forget to run sentinel2_extract_cloudfree_swir_nir.py")
-
 lines = os.popen('find ./ -name "S2*MSIL2A.zip"').readlines()
 for line in lines:
     line = line.strip()
@@ -154,7 +153,7 @@ for line in lines:
 
 print("mrap mosaic dates to regenerate:")
 print(list(regen_dates))
-
+regen_dates = list(regen_dates)
 def min_d(dates):
     md = dates[0]
     for d in dates:
