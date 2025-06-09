@@ -180,6 +180,14 @@ if len(regen_dates) > 0:
 
     print(to_delete)
 
+    for d in to_delete:
+        files_d = [d,
+                   d + '_mrap.bin',
+                   d + '_mrap.hdr',
+                   'small_' + d + 'tar.gz']
+        cmd = 'rm -rf ' + ' '.join(files_d)
+        print(cmd)
+        a = os.system(cmd)
 
 
 
