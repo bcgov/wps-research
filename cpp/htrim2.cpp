@@ -67,7 +67,7 @@ int main(int argc, char ** argv){
   str ofn(fn + str("_ht.bin")); // output file
   str ohfn(fn + str("_ht.hdr")); // out hdr
   // hwrite(ohfn, nrow, ncol, nband);
-  str cmd(str("cp -v ") + hfn + str(" ") + ohn);
+  str cmd(str("cp -v ") + hfn + str(" ") + ohfn);
   cout << cmd << endl;
   system(cmd.c_str());
 
