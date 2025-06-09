@@ -66,7 +66,11 @@ int main(int argc, char ** argv){
 
   str ofn(fn + str("_ht.bin")); // output file
   str ohfn(fn + str("_ht.hdr")); // out hdr
-  hwrite(ohfn, nrow, ncol, nband);
+  // hwrite(ohfn, nrow, ncol, nband);
+  str cmd(str("cp -v ") + hfn + str(" ") + ohn);
+  cout << cmd << endl;
+  system(cmd.c_str());
+
   FILE * f = fopen(ofn.c_str(), "wb");
   if(!f) err("failed to open output file");
   n = fwrite(out, sizeof(float), np * nband, f);
