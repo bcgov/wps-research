@@ -172,7 +172,7 @@ if len(regen_dates) > 0:
     for f in mrap_files:
         ds = f.split('_')[0]
 
-        if f >= regen_dates[0]:
+        if ds >= regen_dates[0]:
             to_delete += [ds]
 
     print("mrap dates to delete:")
