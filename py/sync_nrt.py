@@ -32,6 +32,10 @@ if '' in folders:
     folders.remove('')  # make sure there's no empty string
 gids = [line.split('_')[1] for line in folders]
 gids = list(set(gids))
+
+if len(gids) == 0:
+    gids = bc_gid
+
 files = []
 if True:
     # today's date
