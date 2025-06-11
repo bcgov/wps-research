@@ -1,4 +1,4 @@
-/* attempt at creating [B12, B11, B9] visualisation on SentinelHub */
+/* 20250611 attempt at creating [B12, B11, B9] visualisation on SentinelHub */
 
 let minVal = 0.0;
 let maxVal = 0.4;
