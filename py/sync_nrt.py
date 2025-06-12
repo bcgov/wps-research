@@ -17,12 +17,22 @@ from misc import args, err, parfor, sep, assert_aws_cli_installed
 # assert_aws_cli_installed()
 bc_gid = bc()
 print("bc row-id under obs:", bc_gid)
-
 gids = bc_gid # default to BC gids a
+# today = datetime.datetime.now(ZoneInfo("America/Vancouver")) 
 
-# today's date
-today = datetime.datetime.now(ZoneInfo("America/Vancouver")) 
-N = 1  # default
+if len(args) < 2:
+    err('sync_nrt.py [yyyymmdd]')
+
+now = sys.argv[1]
+if len(now) != 8:
+    err("expected date in format yyyymmdd")
+try:
+    now_int = int(now)
+except:
+    err("expected date in format yyyymmdd")
+
+# today
+year, month, day = now[0:4], now[4:6], now[6:8]
 
 # check if we're in an MRAP folder, only update the GID present in the filesystem structure:
 L1_folders = os.popen("ls -d1 L1_*").read().strip().split('\n')
@@ -39,8 +49,6 @@ if len(gids) == 0:
 files = []
 if True:
     # today's date
-    now = today
-    year, month, day = str(now.year).zfill(4), str(now.month).zfill(2), str(now.day).zfill(2)
     print([year, month, day])
     ls = 'aws s3 ls --no-sign-request'
     path = 's3://sentinel-products-ca-mirror/Sentinel-2/'
@@ -55,6 +63,7 @@ if True:
         t = [x.strip() for x in os.popen(c).read().strip().split('\n')]
         return '\n'.join(t)
 
+    now = datetime.datetime(year, month, day)
     start_date = now
 
     cd = '/'.join([str(start_date.year).zfill(4),
