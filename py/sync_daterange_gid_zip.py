@@ -50,8 +50,8 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2):
     date_range = []
     while start_d <= end_d:
         print(start_d)
-        start_d += datetime.timedelta(days=1)
         date_range += [str(start_d.year).zfill(4) + str(start_d.month).zfill(2) + str(start_d.day).zfill(2)]
+        start_d += datetime.timedelta(days=1)
 
     print(date_range)
 
