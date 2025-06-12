@@ -15,7 +15,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 from datetime import timedelta
 from aws_download import aws_download
-from misc import args, err, parfor, sep, assert_aws_cli_installed
+from misc import exist, args, err, parfor, sep, assert_aws_cli_installed
 # assert_aws_cli_installed()
 bc_gid = bc()
 print("bc row-id under obs:", bc_gid)
@@ -114,8 +114,22 @@ except:
 
 # today
 year, month, day = now[0:4], now[4:6], now[6:8] #str(now.year).zfill(4), str(now.month).zfill(2), str(now.day).zfill(2)
-outfile =  year + month + day + ".bin"
-cmd = "merge3.py " + ' '.join([x[:-3] + 'bin' for x in files]) + ' ' + outfile
-print(cmd)
-a = os.system(cmd) 
+out_dir = year + month + day
+if not exist(out_dir):
+    os.mkdir(out_dir)
+
+out_dir_small = 'small_' + year + month + day
+if not exist(out_dir_small):
+    os.mkdir(out_dir_small)
+
+def run(cmd):
+    print(cmd)
+    return os.system(cmd)
+
+outfile = out_dir + sep + year + month + day + ".bin"
+run("merge3.py " + ' '.join([x[:-3] + 'bin' for x in files]) + ' ' + outfile)
+run('raster_warp_all -s 10 ' + out_dir + ' ' + out_dir_small)
+run('tar cvfz ' + out_dir_small + '.tar.gz ' + out_dir_small)
+run('tar cvfz ' + out_dir + '.tar.gz ' + out_dir)
+
 print("done")
