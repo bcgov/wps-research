@@ -134,7 +134,7 @@ if len(changed) > 0:
     run("merge3.py " + ' '.join([x[:-3] + 'bin' for x in files]) + ' ' + outfile)
     
     run('rm ' + out_dir_small + sep + '*')
-    run('raster_warp_all -s 10 ' + out_dir + ' ' + out_dir_small)
+    run('raster_warp_all.py -s 10 ' + out_dir + ' ' + out_dir_small)
 
     run('rm ' + out_dir_small + '.tar.gz')
     run('tar cvfz ' + out_dir_small + '.tar.gz ' + out_dir_small)
