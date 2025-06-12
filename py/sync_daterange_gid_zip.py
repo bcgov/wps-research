@@ -18,7 +18,18 @@ import time
 import json
 import sys
 import os
-my_path = sep.join(os.path.abspath(__file__).split(sep)[:-1]) + sep
+my_path_0 = '/data/.listing/'
+my_path_1 = sep.join(os.path.abspath(__file__).split(sep)[:-1]) + sep
+my_path = my_path_1
+try:  # json backup
+    if not exists(my_path_0):
+        print('mkdir', my_path_0)
+        os.mkdir(my_path_0)
+    my_path = my_path_0
+except:
+    if not exists(my_path_1 + '.listing'):
+        os.mkdir(my_path_1 + '.listing')
+
 product_target = os.getcwd() + sep # put ARD products into present folder
 
 # parser = argparse.ArgumentParser()
@@ -51,7 +62,7 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2):
                     '--no-sign-request',
                     '--bucket sentinel-products-ca-mirror'])
     print(cmd)
-    list_dir = my_path + 'listing' + sep
+    list_dir = my_path + '.listing' + sep
     if not no_refresh:
         data = os.popen(cmd).read()
     else:
