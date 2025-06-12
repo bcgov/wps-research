@@ -36,14 +36,14 @@ except:
 # today
 year, month, day = now[0:4], now[4:6], now[6:8]
 
-# check if we're in an MRAP folder, only update the GID present in the filesystem structure:
-L1_folders = os.popen("ls -d1 L1_*").read().strip().split('\n')
-L2_folders = os.popen("ls -d1 L2_*").read().strip().split('\n')
-folders = set(L1_folders + L2_folders)
-if '' in folders:
-    folders.remove('')  # make sure there's no empty string
-gids = [line.split('_')[1] for line in folders]
-gids = list(set(gids))
+if False:  # only update existing GID listed in L1 or L2 folders 
+    L1_folders = os.popen("ls -d1 L1_*").read().strip().split('\n')
+    L2_folders = os.popen("ls -d1 L2_*").read().strip().split('\n')
+    folders = set(L1_folders + L2_folders)
+    if '' in folders:
+        folders.remove('')  # make sure there's no empty string
+    gids = [line.split('_')[1] for line in folders]
+    gids = list(set(gids))
 
 if len(gids) == 0:
     gids = bc_gid
