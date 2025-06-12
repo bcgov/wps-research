@@ -3,7 +3,7 @@
 from misc import timestamp, exists, sep
 import os
 
-my_path_0 = '/data/.listing'
+my_path_0 = '/data/'
 my_path_1 = sep.join(os.path.abspath(__file__).split(sep)[:-1]) + sep
 
 try:  # json backup
