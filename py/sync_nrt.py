@@ -63,7 +63,7 @@ if True:
         t = [x.strip() for x in os.popen(c).read().strip().split('\n')]
         return '\n'.join(t)
 
-    now = datetime.datetime(year, month, day)
+    now = datetime.datetime(int(year), int(month), int(day))
     start_date = now
 
     cd = '/'.join([str(start_date.year).zfill(4),
