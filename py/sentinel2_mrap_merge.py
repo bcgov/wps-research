@@ -18,6 +18,9 @@ if exists('.mrap_merge_dates'):
 def resample(fn):
     ofn = fn[:-4] + '_resample.bin'
     if True: # not exists(ofn):
+        if exists(ofn):
+            os.remove(ofn)
+
         cmds = (' '.join(['gdalwarp',
                           '-wo NUM_THREADS=64',
                           '-multi',
@@ -35,6 +38,8 @@ def resample(fn):
 
 def merge(to_merge, date, out_fn): # files to be merged, output file name
     if True: # not exists(str(date) + '_merge.vrt'):
+        if exists(str(date) + '_merge.vrt'):
+            os.remove(str(date) + '_merge.vrt')
         run(' '.join(['gdalbuildvrt',
                       '-srcnodata nan',
                       '-vrtnodata nan',
