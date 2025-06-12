@@ -15,6 +15,7 @@ except:
         os.mkdir(my_path_1 + '.listing')
 
 def update_listing():
+    global my_path
     if exists(my_path_0):
         my_path = my_path_0
     else:
