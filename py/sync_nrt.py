@@ -13,7 +13,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 from datetime import timedelta
 from aws_download import aws_download
-from misc import err, parfor, sep, assert_aws_cli_installed
+from misc import args, err, parfor, sep, assert_aws_cli_installed
 # assert_aws_cli_installed()
 bc_gid = bc()
 print("bc row-id under obs:", bc_gid)
@@ -90,8 +90,19 @@ def extr(i):
 
 parfor(extr, files)
 
-now = today
-year, month, day = str(now.year).zfill(4), str(now.month).zfill(2), str(now.day).zfill(2)
+if len(args) < 2:
+    err('sync_nrt.py [yyyymmdd]')
+
+now = sys.argv[1]
+if len(now) != 8: 
+    err("expected date in format yyyymmdd")
+try:
+    now_int = int(now)
+except:
+    err("expected date in format yyyymmdd")
+
+# today
+year, month, day = now[0:4], now[4:6], now[6:8] #str(now.year).zfill(4), str(now.month).zfill(2), str(now.day).zfill(2)
 outfile =  year + month + day + ".bin"
 cmd = "merge3.py " + ' '.join([x[:-3] + 'bin' for x in files]) + ' ' + outfile
 print(cmd)
