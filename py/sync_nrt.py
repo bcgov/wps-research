@@ -49,6 +49,7 @@ if len(gids) == 0:
     gids = bc_gid
 
 files = []
+changed = []
 if True:
     # today's date
     print([year, month, day])
@@ -87,6 +88,7 @@ if True:
                              's3://sentinel-products-ca-mirror/Sentinel-2/S2MSI1C/' + cd + w[3].strip(),
                              ofn]) # 'L2_' + tile_id + sep + w[3].strip()])
             if not os.path.exists(ofn + w[3].strip()):
+                changed += [ ofn + w[3].strip() ]
                 print(cmd)
                 aws_download('sentinel-products-ca-mirror',
                              'Sentinel-2/S2MSI1C/' + cd + w[3].strip(),
@@ -126,10 +128,17 @@ def run(cmd):
     print(cmd)
     return os.system(cmd)
 
-outfile = out_dir + sep + year + month + day + ".bin"
-run("merge3.py " + ' '.join([x[:-3] + 'bin' for x in files]) + ' ' + outfile)
-run('raster_warp_all -s 10 ' + out_dir + ' ' + out_dir_small)
-run('tar cvfz ' + out_dir_small + '.tar.gz ' + out_dir_small)
-run('tar cvfz ' + out_dir + '.tar.gz ' + out_dir)
+if len(changed) > 0:
+    outfile = out_dir + sep + year + month + day + ".bin"
+    run('rm ' + out_dir + sep + '*')
+    run("merge3.py " + ' '.join([x[:-3] + 'bin' for x in files]) + ' ' + outfile)
+    
+    run('rm ' + out_dir_small + sep + '*')
+    run('raster_warp_all -s 10 ' + out_dir + ' ' + out_dir_small)
 
+    run('rm ' + out_dir_small + '.tar.gz')
+    run('tar cvfz ' + out_dir_small + '.tar.gz ' + out_dir_small)
+
+    run('rm ' + out_dir + '.tar.gz')
+    run('tar cvfz ' + out_dir + '.tar.gz ' + out_dir)
 print("done")
