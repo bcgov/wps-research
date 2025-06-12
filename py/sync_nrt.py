@@ -72,7 +72,7 @@ if True:
                    str(start_date.month).zfill(2),
                    str(start_date.day).zfill(2)]) + '/'
 
-    c1_d = get(c1 + cd)  # Level-2 data listings for today
+    c1_d = get(c1 + cd)  # Level-1 data listings for today
     lines = [x.strip() for x in c1_d.strip().split('\n')]
     for line in lines:
         if line == '':
