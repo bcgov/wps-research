@@ -2,6 +2,8 @@
 
 Then, call merge2.py on those date.
 
+20250611: updated to pull for specified date (yyyymmdd)
+
 based on:  20250603 sync_recent.py: sync sentinel2 data from NRCAN AWS mirror from today ( or yesterday, or back N days )
 
 need to add options for --L1, --L2 ( default ), --n ( number of days to go back, default 1 )'''
