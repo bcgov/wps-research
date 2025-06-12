@@ -9,8 +9,11 @@ from envi import envi_header_cleanup
 import multiprocessing as mp
 from osgeo import gdal
 import numpy as np
+import warnings
 import sys
 import os
+warnings.filterwarnings("ignore", category=FutureWarning, module="osgeo.gdal")
+
 
 def extract_cloudfree(file_name):
     print("file_name", file_name)
