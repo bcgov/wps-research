@@ -18,7 +18,7 @@ import time
 import json
 import sys
 import os
-my_path_0 = '/data/.listing/'
+my_path_0 = '/data/'
 my_path_1 = sep.join(os.path.abspath(__file__).split(sep)[:-1]) + sep
 my_path = my_path_1
 try:  # json backup
