@@ -37,7 +37,7 @@ for L in lines:
     resampled += [ofn]
     if not exists(ofn):
         cmds += [' '.join(['gdalwarp',
-                           '-wo NUM_THREADS=16',
+                           '-wo NUM_THREADS=' + str(mp.cpu_count()),
                            '-multi',
                            '-r bilinear',
                            '-srcnodata nan',
@@ -60,7 +60,7 @@ run(' '.join(['gdalbuildvrt',
 
 if not exists(output_file):
     run(' '.join(['gdalwarp',
-                  '-wo NUM_THREADS=16',
+                  '-wo NUM_THREADS=' + str(mp.cpu_count()),
                   '-multi',
                   '-overwrite',
                   '-r bilinear',
