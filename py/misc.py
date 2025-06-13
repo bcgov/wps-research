@@ -253,7 +253,7 @@ def parfor(my_function,  # function to run in parallel
         return mp.Pool(n_thread).map(my_function, my_inputs)
 '''
 
-def parfor(my_function, my_inputs, n_thread=int(mp.cpu_count())):
+def parfor(my_function, my_inputs, n_thread=min(32,int(mp.cpu_count()))):
     print("PARFOR",n_thread)
     if n_thread == 1 or single_thread:  # should default to old version if joblib not installed?
         return [my_function(my_inputs[i]) for i in range(len(my_inputs))]
