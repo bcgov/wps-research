@@ -39,12 +39,15 @@ if len(fails) > 0:
 
     if True: # len(args) > 1:
         for f in fails:
-            hf = hdr_fn(f)
-            for x in [hf, f]:
-                print('rm', x)
-                os.remove(x)
-                print('rm', f)
-                os.remove(f)
+            hfn = f[:-4] + '.hdr'
+            try:
+                hfn = hdr_fn(f)
+            except:
+                pass
+            for x in [hfn, f]:
+                if exist(x):
+                    print('rm', x)
+                    os.remove(x)
 
 if len(no_hdr) > 0:
     print("These files had no header:")
