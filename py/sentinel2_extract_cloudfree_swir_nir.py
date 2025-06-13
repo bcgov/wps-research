@@ -211,7 +211,7 @@ if __name__ == "__main__":
         files = new_files
 
         print("files", files)
-        parfor(extract_cloudfree, files, min(32, int(mp.cpu_count())) )
+        parfor(extract_cloudfree, files, min(8, int(mp.cpu_count())) )
 
 
 '''
