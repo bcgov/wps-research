@@ -37,12 +37,14 @@ if len(fails) > 0:
     print("Checksum failed for files:")
     print(' '.join(fails))
 
-    if len(args) > 1:
+    if True: # len(args) > 1:
         for f in fails:
             hf = hdr_fn(f)
             for x in [hf, f]:
                 print('rm', x)
                 os.remove(x)
+                print('rm', f)
+                os.remove(f)
 
 if len(no_hdr) > 0:
     print("These files had no header:")
