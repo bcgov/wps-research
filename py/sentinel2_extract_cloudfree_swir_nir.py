@@ -12,7 +12,7 @@ import numpy as np
 import warnings
 import sys
 import os
-warnings.filterwarnings("ignore", category=FutureWarning, module="osgeo.gdal")
+warnings.filterwarnings("ignore")
 
 
 def extract_cloudfree(file_name):
@@ -211,7 +211,7 @@ if __name__ == "__main__":
         files = new_files
 
         print("files", files)
-        parfor(extract_cloudfree, files, int(mp.cpu_count())) 
+        parfor(extract_cloudfree, files, max(32, int(mp.cpu_count())) )
 
 
 '''
