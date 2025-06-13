@@ -37,6 +37,13 @@ def update_listing():
     open(df, 'wb').write(data.encode())  # record json to file
     print('done')
 
+def remove_empty_files(directory):
+    for filename in os.listdir(directory):
+    filepath = os.path.join(directory, filename)
+    if os.path.isfile(filepath) and os.path.getsize(filepath) == 0:
+        os.remove(filepath)
+        print(f"Deleted: {filepath}")
+
 def latest_listing():
     listings = os.popen('ls -1 '  + my_path + '.listing' + sep + '*_objects.txt').readlines()
     listings = [[x.split(sep)[-1].split('_')[0], x.strip()] for x in listings]
@@ -46,5 +53,7 @@ def latest_listing():
     return open(latest).read()
 
 if __name__ == '__main__':
+    remove_empty_files( my_path + '.listing' )
+    sys.exit(1)
     update_listing()
     d = latest_listing()
