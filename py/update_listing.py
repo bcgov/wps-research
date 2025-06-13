@@ -53,7 +53,7 @@ def latest_listing():
     return open(latest).read()
 
 if __name__ == '__main__':
+    print("removing empty listings..")
     remove_empty_files( my_path + '.listing' )
-    sys.exit(1)
     update_listing()
     d = latest_listing()
