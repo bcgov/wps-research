@@ -39,10 +39,10 @@ def update_listing():
 
 def remove_empty_files(directory):
     for filename in os.listdir(directory):
-    filepath = os.path.join(directory, filename)
-    if os.path.isfile(filepath) and os.path.getsize(filepath) == 0:
-        os.remove(filepath)
-        print(f"Deleted: {filepath}")
+        filepath = os.path.join(directory, filename)
+        if os.path.isfile(filepath) and os.path.getsize(filepath) == 0:
+            os.remove(filepath)
+            print(f"Deleted: {filepath}")
 
 def latest_listing():
     listings = os.popen('ls -1 '  + my_path + '.listing' + sep + '*_objects.txt').readlines()
