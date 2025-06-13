@@ -5,6 +5,7 @@ import os
 
 my_path_0 = '/data/'
 my_path_1 = sep.join(os.path.abspath(__file__).split(sep)[:-1]) + sep
+my_path = my_path_0
 
 try:  # json backup
     if not exists(my_path_0):
