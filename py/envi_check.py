@@ -52,6 +52,9 @@ if len(no_hdr) > 0:
             print('rm', f)
             os.remove(f)
 else:
-    print("All .bin files OK")
+    print("All .bin files had header")
 
+
+print("bad files:")
+print(' '.join(fails))
 
