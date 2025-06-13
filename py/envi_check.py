@@ -39,6 +39,7 @@ if len(fails) > 0:
 
     if True: # len(args) > 1:
         for f in fails:
+            print(f)
             hfn = f[:-4] + '.hdr'
             try:
                 hfn = hdr_fn(f)
