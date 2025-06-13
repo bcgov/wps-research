@@ -33,6 +33,16 @@ def extract_cloudfree(file_name):
     
     d = gdal.Open(file_name)
     subdatasets =  d.GetSubDatasets()
+
+    if subdatasets is None:
+        filepath = 'bad_files.txt'
+        file_is_empty = not os.path.exists(filepath) or os.path.getsize(filepath) == 0
+
+        with open(filepath, "a") as f:
+            if not file_is_empty:
+                f.write("\n")  # Add newline only if file is not empty
+            f.write(file_name)
+        return
     '''
 [('SENTINEL2_L2A:/vsizip/S2B_MSIL2A_20230725T192909_N0509_R142_T10VEJ_20230725T231042.zip/S2B_MSIL2A_20230725T192909_N0509_R142_T10VEJ_20230725T231042.SAFE/MTD_MSIL2A.xml:10m:EPSG_32610', 'Bands B2, B3, B4, B8 with 10m resolution, UTM 10N'),
 
