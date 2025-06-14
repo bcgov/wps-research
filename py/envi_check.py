@@ -1,5 +1,6 @@
 '''20230605 check .bin files to see if the file sizes match the header'''
 from misc import err, hdr_fn, read_hdr, args, exist, args
+from osgeo import gdal
 import os
 
 lines = None
@@ -11,6 +12,7 @@ else:
 
 fails = []
 no_hdr = []
+gdal_fails = []
 for f in lines:
     hfn = f[:-4] + '.hdr'
     print(hfn)
@@ -26,6 +28,10 @@ for f in lines:
                                    for x in read_hdr(hdr_fn(f))]
     f_size = os.stat(f).st_size
     expected = samples * lines * bands * 4 
+
+    gdal_f = gdal.open(f) # try opening file with GDAL
+    if gdal_f is None:
+        gdal_fails += [f]
 
     if f_size == expected:
         print(f, '[OK]')
@@ -64,3 +70,6 @@ else:
 print("bad files:")
 print(' '.join(fails))
 
+print("failed to open with GDAL:")
+for f in gdal_fails:
+    print("[BAD]", f)
