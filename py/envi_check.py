@@ -29,7 +29,7 @@ for f in lines:
     f_size = os.stat(f).st_size
     expected = samples * lines * bands * 4 
 
-    gdal_f = gdal.open(f) # try opening file with GDAL
+    gdal_f = gdal.Open(f) # try opening file with GDAL
     if gdal_f is None:
         gdal_fails += [f]
 
