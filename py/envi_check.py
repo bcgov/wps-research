@@ -39,6 +39,9 @@ for f in lines:
         print(f, '[BAD]', f_size, '/', expected)
         fails += [f]
 
+fails += gdal_fails
+fails = list(set(fails))
+
 if len(fails) > 0:
     print("Checksum failed for files:")
     print(' '.join(fails))
