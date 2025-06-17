@@ -19,6 +19,9 @@ if len(args) < 2 or len(args[1]) != 8:
 
 if len(args) < 3:
     gids = bc() 
+else:
+    gids = args[2:]
+
 
 if len(os.popen("aws 2>&1").read().split("not found")) > 1:
     err('please install aws cli, e.g. on linux:\n\tsudo apt install awscli')
