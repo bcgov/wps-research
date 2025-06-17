@@ -36,21 +36,27 @@ c1, c2 = ' '.join([ls, path + 'S2MSI1C/']), ' '.join([ls, path + 'S2MSI2A/'])
 c1 = c1 + year + '/' + month + '/' + day + '/'
 c2 = c2 + year + '/' + month + '/' + day + '/'
 
-L1_files = run(c1)
-L2_files = run(c2)
+L1_files = [x.strip() for x in run(c1).split('\n')]
+L2_files = [x.strip() for x in run(c2).split('\n')]
 
 L1_files_select = []
 L2_files_select = []
 
 for x in L1_files:
-    g = x.split()[-1].split('_')[5]
-    if g in gids:
-        print(x)
-
-for x in L2_files:
-    g = x.split()[-1].split('_')[5]
+    try:
+        g = x.split()[-1].split('_')[5]
         if g in gids:
             print(x)
+    except:
+        pass
+
+for x in L2_files:
+    try:
+        g = x.split()[-1].split('_')[5]
+        if g in gids:
+            print(x)
+    except:
+        pass
 
 # 2025-06-16 17:47:40  148896246 S2C_MSIL2A_20250616T173921_N0511_R098_T15VWE_20250616T225811.zip
 
