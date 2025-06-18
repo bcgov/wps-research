@@ -463,6 +463,8 @@ def shapefile_to_EPSG(src_f, dst_f, dst_EPSG=3347): # or 3005 bc albers
 def find_snap():  # find location of ESA's SNAP tool, command line interface ( gpt )
     snap = '/usr/local/snap/bin/gpt'  # assume we installed snap here? 
     if not exist(snap):
+        snap = '/usr/local/esa-snap/bin/gpt'
+    if not exist(snap):
         snap = '/opt/snap/bin/gpt'  # try another location if that failed
     if not exist(snap):
         snap = '/home/' + os.popen('whoami').read().strip() + sep + 'snap' + sep + 'bin' + sep + 'gpt'
