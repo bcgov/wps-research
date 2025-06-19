@@ -3,7 +3,7 @@ import os
 def run(c):
     return os.popen(c).read().strip()
 
-print("local time: yyyymmdd hh")
+print("local physical time: yyyymmdd hh (Vancouver time zone)")
 b= run('vancouver_hour=$(TZ="America/Vancouver" date +"%H"); echo "$vancouver_hour"')
 
 
