@@ -25,7 +25,8 @@ int main(int argc, char ** argv){
     }
     i ++;
   }
-  printf("All files dimensions matched.\n");
+  printf("All files: dimensions matched.\n");
+  printf("alloc: %zu floats\n", np * nband);
   np = nrow * ncol; // now that we are sure the files match, proceed!
   float * out = falloc(np * nband);
 
@@ -34,7 +35,7 @@ int main(int argc, char ** argv){
     str fn(*it);
     str hfn(hdr_fn(fn));  // input header file name
 
-    cout << "+r" << *it << endl;
+    cout << "+r " << *it << endl;
     float * dat = bread(*it, nrow, ncol, nband);
 
     if(i==0){
