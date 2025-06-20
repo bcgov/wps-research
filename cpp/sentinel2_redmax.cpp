@@ -35,7 +35,7 @@ int main(int argc, char ** argv){
     str fn(*it);
     str hfn(hdr_fn(fn));  // input header file name
 
-    cout << "+r " << fn << " " << size(fn.c_str()) << " bytes" <<  endl;
+    cout << "+r " << fn << " " << fsize(fn.c_str()) << " bytes" <<  endl;
     float * dat = bread(*it, nrow, ncol, nband);
 
     if(i==0){
