@@ -25,9 +25,9 @@ int main(int argc, char ** argv){
     }
     i ++;
   }
+  np = nrow * ncol;
   printf("All files: dimensions matched.\n");
-  printf("alloc: %zu floats\n", np * nband);
-  np = nrow * ncol; // now that we are sure the files match, proceed!
+  printf("alloc: %ld floats\n", (long int)(np * nband));
   float * out = falloc(np * nband);
 
   i = 0 ;
