@@ -44,30 +44,37 @@ int main(int argc, char ** argv){
     err("Missing band");
   }
 
+  printf("reading pre-image %s\n", fn1.c_str());
   dat1 = bread(fn1, nrow, ncol, nband); /* read the data */
   b11 = &dat1[bi[0]]; /* select the bands */
   b21 = &dat1[bi[1]];
   b31 = &dat1[bi[2]];
 
+  printf("reading post-image %s\n", fn2.c_str());
   dat2 = bread(fn2, nrow, ncol, nband); /* read the data */
 
   b12 = &dat2[bi[0]]; /* select the bands */
   b22 = &dat2[bi[1]];
   b32 = &dat2[bi[2]];
 
+  printf("allocating output buffer..\n");
   out = falloc(np * 3);
+
+  printf("processing data..\n");
   for0(i, np){
     out[i]   = (b12[i] - b11[i]) / (b12[i] + b11[i]);
     out[i + np]      = (b22[i] - b21[i]) / (b22[i] + b21[i]);
     out[i + np + np]           = (b32[i] - b31[i]) / (b32[i] + b31[i]);
   }
 
+  printf("writing output..\n");
   vector<str> bn;
   bn.push_back(date_s + str("(b32[i] - b31[i]) / (b32[i] + b31[i]) sentinel2_anomaly.cpp"));
   bn.push_back(date_s + str("(b22[i] - b21[i]) / (b22[i] + b21[i]) sentinel2_anomaly.cpp"));
   bn.push_back(date_s + str("(b12[i] - b11[i]) / (b12[i] + b11[i]) sentinel2_anomaly.cpp"));
-  
+ 
   hwrite(ohn, nrow, ncol, 3, 4, bn);
+  printf("+w %s\n", ofn.c_str());
   bwrite(out, ofn, nrow, ncol, 3);
   run(str("envi_header_copy_mapinfo.py ") + hfn + str(" ") + ohn);  
   free(dat1);
