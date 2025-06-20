@@ -24,6 +24,7 @@ int main(int argc, char ** argv){
     }
     i ++;
   }
+  printf("All files dimensions matched.\n");
   np = nrow * ncol; // now that we are sure the files match, proceed!
   float * out = falloc(np * nband);
 
