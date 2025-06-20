@@ -6,6 +6,7 @@ int main(int argc, char ** argv){
 
   vector<str> lines( split(exec("ls -1 *.bin"), '\n'));
 
+  cout << lines << endl;
   size_t i, j, nrow, ncol, nband, np, k, nrow2, ncol2, nband2;
 
   for(vector<str>::iterator it = lines.begin(); it != lines.end(); it++){
