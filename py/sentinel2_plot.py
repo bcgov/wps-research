@@ -3,6 +3,7 @@
 20241220: added support for *mrap.bin files
 '''
 from misc import err, run, parfor, hdr_fn, read_hdr
+import multiprocessing
 import os
 
 lines = [x.strip() for x in os.popen('ls -1 S*.bin *mrap*bin').readlines()]
@@ -33,7 +34,7 @@ for line in lines:
 def r(x):
     return os.system(x)
 
-parfor(r, cmds, 4)
+parfor(r, cmds, max(4, multiprocessing.cpu_count()))
 
 '''Now: prefix the S2.png files by date:
 '''
