@@ -2,6 +2,7 @@
    NB we didn't check if the headers of the two files match
 */
 #include"misc.h"
+#include <filesystem>
 int main(int argc, char ** argv){
   if(argc < 3){
     err("sentinel2_anomaly [pre date sentinel-2] [post date sentinel-2]");
@@ -13,9 +14,16 @@ int main(int argc, char ** argv){
 
   str fn1(argv[1]); /* binary files */
   str fn2(argv[2]);
-  str hfn(hdr_fn(fn1)); /* headers */
+  
+  /* discard the absolute path to create the output filename e.g. so we can run from ramdisk */
+  std::filesystem::path fn_1 = fn1;
+  std::filesystem::path fn_2 = fn2;
+  std::string filename1 = fn_1.filename().string();
+  std::string filename2 = fn_2.filename().string();
 
-  str ofn(fn1 + "_" + fn2 + "_ratio.bin");
+  str hfn(hdr_fn(fn_1)); /* headers */
+  
+  str ofn(filename1 + "_" + filename2 + "_ratio.bin");
   str ohn(hdr_fn(ofn, true));
 
   vector<string> s, t; /* band names + ones to use */
