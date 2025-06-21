@@ -80,6 +80,7 @@ def extract_cloudfree(file_name):
                         if band_metadata[k] == j[k]:  # print("Selected: ", band_metadata)
                             selected_bands += [[band, band_metadata, subdataset_dataset]]
                             sbs[band_metadata['BANDNAME']] = selected_bands[-1]
+                            print(selected_bands[-1])
                             arrays[str(band_metadata)] = band.ReadAsArray().astype(np.float32)
                     except: pass
     
@@ -112,6 +113,7 @@ def extract_cloudfree(file_name):
             input_ds = mem_driver.Create('', band.XSize, band.YSize, 1, gdal.GDT_Float32)
             input_ds.SetGeoTransform(sub_dataset.GetGeoTransform())
             input_ds.SetProjection(sub_dataset.GetProjection())
+            print(arrays.keys())
             input_ds.GetRasterBand(1).WriteArray(arrays[str(m)])
     
             resampled_geotransform = list(input_ds.GetGeoTransform())
@@ -150,10 +152,9 @@ def extract_cloudfree(file_name):
     
 
     # apply valid areas to other bands:
-    for [band, m, sub_dataset] in selected_bands:
-        band_name = m['BANDNAME']
-        arrays[str(m)][bad_data] = 0.
-        
+    # for [band, m, sub_dataset] in selected_bands:
+    #     band_name = m['BANDNAME']
+    #    arrays[str(m)][bad_data] = float('nan')  
 
     for [band, m, sub_dataset] in selected_bands:
         band_name = m['BANDNAME']
@@ -166,6 +167,10 @@ def extract_cloudfree(file_name):
         # resume..
         rb = stack_ds.GetRasterBand(bi)
         d_out = arrays[str(m)]
+
+        # try this: 
+        d_out[bad_data] = float('nan')
+
         print("****", str(m), d_out.shape)
         try:
             print(arrays["{'BANDNAME': 'CLD'}"])
@@ -189,7 +194,7 @@ def extract_cloudfree(file_name):
     for f in [xml_f, hdr_b]:
         if os.path.exists(f):
             os.remove(f)
-    run('raster_zero_to_nan ' + stack_fn)
+    # run('raster_zero_to_nan ' + stack_fn)
 
 
 if __name__ == "__main__":
