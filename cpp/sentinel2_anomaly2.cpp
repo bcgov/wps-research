@@ -26,6 +26,12 @@ int main(int argc, char ** argv){
   str ofn(filename1 + "_" + filename2 + "_ratio.bin");
   str ohn(hdr_fn(ofn, true));
 
+
+  cout << "output filename: " << ofn << endl;
+  cout << "output header:   " << ohn << endl;
+  exit(1);
+
+
   vector<string> s, t; /* band names + ones to use */
   t.push_back(str("2190nm"));
   t.push_back(str("1610nm"));
