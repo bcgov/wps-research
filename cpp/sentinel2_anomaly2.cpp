@@ -29,7 +29,6 @@ int main(int argc, char ** argv){
 
   cout << "output filename: " << ofn << endl;
   cout << "output header:   " << ohn << endl;
-  exit(1);
 
 
   vector<string> s, t; /* band names + ones to use */
