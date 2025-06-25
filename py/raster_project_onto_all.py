@@ -1,13 +1,7 @@
 import os
 import sys
-
-args = sys.argv
-
-def err(m):
-    print('Error:', m)
-    sys.exit(1)
-
-print(args)
+import multiprocessing as mp
+from misc import args, err, parfor
 
 if len(args) < 4:
     print(args)
@@ -19,6 +13,7 @@ if not os.path.exists(args[2]):
 in_dir = os.path.abspath(args[1])
 to_reproject = [x.strip() for x in os.popen('find ' + in_dir + os.path.sep + ' -name "*.bin"').readlines()]
 
+cmds = []
 for f in to_reproject:
     f = os.path.abspath(f)
     fn = f.split(os.path.sep)[-1]
@@ -32,5 +27,12 @@ for f in to_reproject:
     cmd = 'raster_project_onto.py ' + f + ' ' + footp + ' ' + ofn
     print(cmd)
 
-    a = os.system(cmd)
+    cmds += [cmd]
+
+
+def run(c):
+    print(c)
+    return os.system(c)
+
+parfor(run, cmds, min(32, int(mp.cpu_count())))
 
