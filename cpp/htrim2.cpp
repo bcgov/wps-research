@@ -67,9 +67,6 @@ int main(int argc, char ** argv){
   str ofn(fn + str("_ht.bin")); // output file
   str ohfn(fn + str("_ht.hdr")); // out hdr
   // hwrite(ohfn, nrow, ncol, nband);
-  str cmd(str("cp -v ") + hfn + str(" ") + ohfn);
-  cout << cmd << endl;
-  system(cmd.c_str());
 
   FILE * f = fopen(ofn.c_str(), "wb");
   if(!f) err("failed to open output file");
@@ -81,6 +78,10 @@ int main(int argc, char ** argv){
   free(mn);
   free(mx);
 
-  // NEED TO DO THE ENVI_COPY_HEADER here
+
+  str cmd(str("cp -v ") + hfn + str(" ") + ohfn);
+  cout << cmd << endl;
+  system(cmd.c_str());
+
   return 0;
 }
