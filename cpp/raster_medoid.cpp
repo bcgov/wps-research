@@ -81,6 +81,7 @@ void medioid(size_t j){
 
   // Return the medoid vector
   if (medoid_index >= 0) {
+    // cout << "medoid " << j << " " << data[medoid_index] << endl;
     for0(k, nband) out[k * np + j] = data[medoid_index][k];
   }
   else{
