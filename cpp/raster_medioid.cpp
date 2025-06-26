@@ -2,16 +2,23 @@
 
 #include"misc.h"
 
-size_t nrow, ncol, nband, np, n_files;
+size_t nrow, ncol, nband, np, T;
 FILE ** infiles; // input file pointers for random access
 float * out; // output buffer
+pthread_mutex_t print_mutex; // mutex for printing
 
 // calculate medioid for pixel j
 void medioid(size_t j){
-  vector<vector<float>> data(n_files);
+  if(j % 1000 == 0){
+    pthread_mutex_lock(&print_mutex);
+    printf("processing pixel %zu of %zu\n", j + 1, np);
+    pthread_mutex_unlock(&print_mutex);
+  }
+
+  vector<vector<float>> data(T);
   FILE * f;
   int i, k;
-  for0(i, n_files){
+  for0(i, T){
     f = infiles[i];
     data[i] = vector<float>(nband);
     for0(k, nband){
@@ -29,14 +36,14 @@ int main(int argc, char ** argv){
     err("raster_medioid [raster file 1] .. [raster file N] [output file]");
   }
 
-  n_files = argc - 2;
+  T = argc - 2;
   FILE * outfile = wopen(argv[argc-1]);
   
-  infiles = (FILE **)(void *)malloc(sizeof(FILE *) * n_files);
+  infiles = (FILE **)(void *)malloc(sizeof(FILE *) * T);
   if(!infiles) err("malloc failed");
-  memset(infiles, 0, sizeof(FILE *) * n_files);
+  memset(infiles, 0, sizeof(FILE *) * T);
 
-  for(i = 0; i < n_files; i++){
+  for(i = 0; i < T; i++){
     infiles[i] = ropen(argv[i + 1]);
     printf("+r %s\n", argv[i + 1]);
     if(infiles[i]==NULL) err("failed to open input file");
@@ -60,12 +67,12 @@ int main(int argc, char ** argv){
     medioid(j);
   }
   str ofn(argv[argc-1]);
-  str ohfn(hdr_fn(ofn));
+  str ohfn(hdr_fn(ofn, true));
   bwrite(out, ofn, nrow, ncol, nband);
   run((str("cp -v ") + hdr_fn(str(argv[1])) + str(" ") + ohfn).c_str());
 
   fclose(outfile);
-  for(i = 0; i < n_files; i++) {
+  for(i = 0; i < T; i++) {
     if(infiles[i]) fclose(infiles[i]);
   }
   free(infiles);
