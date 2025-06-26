@@ -4,7 +4,7 @@ one tile only supported'''
 from misc import run
 import os
 
-lines = [x.strip() for x in os.popen('ls -1 S*.bin').readlines()]
+lines = [x.strip() for x in os.popen('ls -1 S2*').readlines()]
 
 # process in order
 lines = [[line.split('_')[2], line] for line in lines]
