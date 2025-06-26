@@ -18,7 +18,7 @@ void medioid(size_t j){
       fseek(f, np * k + j, SEEK_SET);
       fread(&data[i][k], sizeof(float), 1, f);
     }
-    cout << data[i] << endl;
+    //cout << data[i] << endl;
   }
 }
 
@@ -55,8 +55,10 @@ int main(int argc, char ** argv){
   }
 
   out = falloc(np);
-  for0(j, np) medioid(j);
-
+  for0(j, np){
+    cout << j + 1 << " " << np << endl;
+    medioid(j);
+  }
   str ofn(argv[argc-1]);
   str ohfn(hdr_fn(ofn));
   bwrite(out, ofn, nrow, ncol, nband);
