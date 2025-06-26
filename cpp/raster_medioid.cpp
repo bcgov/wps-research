@@ -1,6 +1,9 @@
 /* 20250626 compute medioid for a list of rasters. Use random file access, to avoid loading the whole files in memory */
 
 #include"misc.h"
+#include <cmath>
+#include <algorithm>
+#include <limits>
 
 size_t nrow, ncol, nband, np, T;
 FILE ** infiles; // input file pointers for random access
@@ -27,6 +30,61 @@ void medioid(size_t j){
     }
     //cout << data[i] << endl;
   }
+
+  // Compute medoid index and vector with NaN tolerance (median inlined)
+  //int compute_medoid_with_nan(const std::vector<std::vector<float>>& data, std::vector<float>& medoid_out) {
+  std::vector<float> median(nbands);
+  std::vector<float> medioid_out(nbands);
+
+  // Inline median computation per band
+  for (int b = 0; b < nbands; ++b) {
+    std::vector<float> valid_values;
+    for (int t = 0; t < T; ++t) {
+      if (b < data[t].size() && !std::isnan(data[t][b])) {
+        valid_values.push_back(data[t][b]);
+      }
+    }
+
+    if (valid_values.empty()) {
+      median[b] = std::numeric_limits<float>::quiet_NaN();
+    } else {
+      std::sort(valid_values.begin(), valid_values.end());
+      int n = valid_values.size();
+      median[b] = (n % 2 == 0)
+        ? (valid_values[n / 2 - 1] + valid_values[n / 2]) / 2.0f
+        : valid_values[n / 2];
+    }
+  }
+
+  // Find medoid: vector closest to the median (NaN-tolerant distance)
+  int medoid_index = -1;
+  float min_dist = std::numeric_limits<float>::infinity();
+
+  for (int t = 0; t < T; ++t) {
+    const std::vector<float>& vec = data[t];
+    float sum = 0.0f;
+    int valid_count = 0;
+
+    for (int b = 0; b < nbands; ++b) {
+      if (b < vec.size() && !std::isnan(vec[b]) && !std::isnan(median[b])) {
+        float d = vec[b] - median[b];
+        sum += d * d;
+        ++valid_count;
+      }
+    }
+
+    float dist = (valid_count > 0) ? sum / valid_count : std::numeric_limits<float>::infinity();
+    if (dist < min_dist) {
+      min_dist = dist;
+      medoid_index = t;
+    }
+  }
+
+  // Return the medoid vector
+  if (medoid_index >= 0) {
+    medoid_out = data[medoid_index];
+  }
+
 }
 
 int main(int argc, char ** argv){
