@@ -95,6 +95,7 @@ void medoid(size_t j){
 
 int main(int argc, char ** argv){
   size_t i, j, nrow2, ncol2, nband2;
+  pthread_mutex_init(&mutex, NULL);
 
   if(argc < 4){
     err("raster_medoid [raster file 1] .. [raster file N] [output file]");
