@@ -54,11 +54,13 @@ int main(int argc, char ** argv){
     }
   }
 
+  out = falloc(np);
+  for0(j, np) medioid(j);
 
-
-
-
-
+  str ofn(argv[argc-1]);
+  str ohfn(hdr_fn(ofn));
+  bwrite(out, ofn, nrow, ncol, nband);
+  run((str("cp -v ") + hdr_fn(str(argv[1])) + str(" ") + ohfn).c_str());
 
   fclose(outfile);
   for(i = 0; i < n_files; i++) {
