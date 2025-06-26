@@ -57,6 +57,19 @@ void medoid(size_t j){
     }
   }
 
+  bool median_only = false;
+
+  if(median_only){
+    // cout << "median " << median << endl;
+    for0(k, nband){
+      // float mk = median[k];
+      out[k * np + j] =  median[k];
+    }
+    return;
+  }
+  else{
+
+
   // Find medoid: vector closest to the median (NaN-tolerant distance)
   int medoid_index = -1;
   float min_dist = std::numeric_limits<float>::infinity();
@@ -81,17 +94,6 @@ void medoid(size_t j){
     }
   }
 
-  bool median_only = false;
-
-  if(median_only){
-    // cout << "median " << median << endl;
-    for0(k, nband){
-      // float mk = median[k];
-      out[k * np + j] =  median[k];
-    }
-    return;
-  }
-
   // Return the medoid vector
   if (medoid_index >= 0) {
     // cout << "medoid " << j << " " << data[medoid_index] << endl;
@@ -99,6 +101,8 @@ void medoid(size_t j){
   }
   else{
     for0(k, nband) out[k * np + j] = NAN;
+  }
+
   }
 }
 
