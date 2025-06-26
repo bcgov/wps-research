@@ -129,18 +129,15 @@ int main(int argc, char ** argv){
     }
     np = nrow * ncol;
   }
-
+  
+  // allocate output product area 
   out = falloc(np * nband);
   if(false){
-    for0(j, np){
-      medoid(j);
-      // if( j >  100 ) exit(1);
-    }
+    for0(j, np) medoid(j);
   }
   else{
     parfor(0, np-1, medoid);
   }
-// parfor(size_t start_j, size_t end_j, void(*eval)(size_t), int cores_use=0)
 
   str ofn(argv[argc-1]);
   str ohfn(hdr_fn(ofn, true));
