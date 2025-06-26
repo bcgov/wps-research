@@ -88,7 +88,7 @@ void medioid(size_t j){
 }
 
 int main(int argc, char ** argv){
-  size_t i, j, np, k, nrow2, ncol2, nband2;
+  size_t i, j, k, nrow2, ncol2, nband2;
 
   if(argc < 4){
     err("raster_medioid [raster file 1] .. [raster file N] [output file]");
@@ -117,11 +117,11 @@ int main(int argc, char ** argv){
         err(str("file: ") + str(argv[i + 1]) + str(" has different shape than ") + str(argv[1]));
       }
     }
+    np = nrow * ncol;
   }
 
   out = falloc(np);
   for0(j, np){
-    cout << j + 1 << " " << np << endl;
     medioid(j);
   }
   str ofn(argv[argc-1]);
