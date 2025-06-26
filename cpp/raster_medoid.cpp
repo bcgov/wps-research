@@ -11,7 +11,7 @@ float * out; // output buffer
 pthread_mutex_t print_mutex; // mutex for printing
 
 // calculate medioid for pixel j
-void medioid(size_t j){
+void medoid(size_t j){
   if(j % 1000 == 0){
     pthread_mutex_lock(&print_mutex);
     printf("processing pixel %zu of %zu\n", j + 1, np);
@@ -25,8 +25,8 @@ void medioid(size_t j){
     f = infiles[i];
     data[i] = vector<float>(nband);
     for0(k, nband){
-      fseek(f, np * k + j, SEEK_SET);
-      fread(&data[i][k], sizeof(float), 1, f);
+      fseek(f, (np * k + j) * sizeof(float), SEEK_SET);
+      fread(&(data[i][k]), sizeof(float), 1, f);
     }
     //cout << data[i] << endl;
   }
@@ -45,7 +45,7 @@ void medioid(size_t j){
     }
 
     if (valid_values.empty()) {
-      median[b] = std::numeric_limits<float>::quiet_NaN();
+      median[b] = NAN; //std::numeric_limits<float>::quiet_NaN();
     } else {
       std::sort(valid_values.begin(), valid_values.end());
       int n = valid_values.size();
@@ -79,6 +79,10 @@ void medioid(size_t j){
     }
   }
 
+  // cout << "median " << median << endl;
+  for0(k, nband) out[k * np + j] = median[k];
+  return;
+
   // Return the medoid vector
   if (medoid_index >= 0) {
     // cout << "medoid " << j << " " << data[medoid_index] << endl;
@@ -93,7 +97,7 @@ int main(int argc, char ** argv){
   size_t i, j, nrow2, ncol2, nband2;
 
   if(argc < 4){
-    err("raster_medioid [raster file 1] .. [raster file N] [output file]");
+    err("raster_medoid [raster file 1] .. [raster file N] [output file]");
   }
 
   T = argc - 2;
@@ -123,9 +127,17 @@ int main(int argc, char ** argv){
   }
 
   out = falloc(np);
-  for0(j, np){
-    medioid(j);
+  if(false){
+    for0(j, np){
+      medoid(j);
+      // if( j >  100 ) exit(1);
+    }
   }
+  else{
+    parfor(0, np-1, medoid);
+  }
+// parfor(size_t start_j, size_t end_j, void(*eval)(size_t), int cores_use=0)
+
   str ofn(argv[argc-1]);
   str ohfn(hdr_fn(ofn, true));
   bwrite(out, ofn, nrow, ncol, nband);
