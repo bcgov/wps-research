@@ -56,7 +56,7 @@ int main(int argc, char ** argv){
     else{
       hread(hfn, nrow2, ncol2, nband2);
       if(nrow != nrow2 || ncol != ncol2 || nband != nband2){
-        err(str("file: ") + str(argv[i + 1]) + str(" has different dimenions than ") + str(argv[1]));
+        err(str("file: ") + str(argv[i + 1]) + str(" has different shape than ") + str(argv[1]));
       }
     }
   }
