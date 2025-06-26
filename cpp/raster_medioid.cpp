@@ -2,7 +2,25 @@
 
 #include"misc.h"
 
-size_t nrow, ncol, nband;
+size_t nrow, ncol, nband, np, n_files;
+FILE ** infiles; // input file pointers for random access
+float * out; // output buffer
+
+// calculate medioid for pixel j
+void medioid(size_t j){
+  vector<vector<float>> data(n_files);
+  FILE * f;
+  int i, k;
+  for0(i, n_files){
+    f = infiles[i];
+    data[i] = vector<float>(n_bands);
+    for0(k, n_bands){
+      fseek(f, np * k + j, SEEK_SET);
+      fread(&d[k], sizeof(float), 1, f);
+    }
+    cout << data[i] << endl;
+  }
+}
 
 int main(int argc, char ** argv){
   size_t i, j, np, k, nrow2, ncol2, nband2;
@@ -11,10 +29,10 @@ int main(int argc, char ** argv){
     err("raster_medioid [raster file 1] .. [raster file N] [output file]");
   }
 
-  int n_files = argc - 2;
+  n_files = argc - 2;
   FILE * outfile = wopen(argv[argc-1]);
   
-  FILE ** infiles = (FILE **)(void *)malloc(sizeof(FILE *) * n_files);
+  infiles = (FILE **)(void *)malloc(sizeof(FILE *) * n_files);
   if(!infiles) err("malloc failed");
   memset(infiles, 0, sizeof(FILE *) * n_files);
 
@@ -26,6 +44,7 @@ int main(int argc, char ** argv){
     str hfn(hdr_fn(str(argv[i + 1]));  // input header file name
     if(i==0){
       hread(hfn, nrow, ncol, nband);
+      np = nrow * ncol; // number of pixels
     }
     else{
       hread(hfn, nrow2, ncol2, nband2);
@@ -34,6 +53,7 @@ int main(int argc, char ** argv){
       }
     }
   }
+
 
 
 
