@@ -80,7 +80,10 @@ void medoid(size_t j){
   }
 
   // cout << "median " << median << endl;
-  for0(k, nband) out[k * np + j] = median[k];
+  for0(k, nband){
+    float mk = median[k];
+    out[k * np + j] = mk; // median[k];
+  }
   return;
 
   // Return the medoid vector
