@@ -90,7 +90,7 @@ void medioid(size_t j){
 }
 
 int main(int argc, char ** argv){
-  size_t i, j, k, nrow2, ncol2, nband2;
+  size_t i, j, nrow2, ncol2, nband2;
 
   if(argc < 4){
     err("raster_medioid [raster file 1] .. [raster file N] [output file]");
