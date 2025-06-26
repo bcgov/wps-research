@@ -130,7 +130,7 @@ int main(int argc, char ** argv){
     np = nrow * ncol;
   }
 
-  out = falloc(np);
+  out = falloc(np * nband);
   if(false){
     for0(j, np){
       medoid(j);
