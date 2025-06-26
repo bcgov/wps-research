@@ -45,8 +45,10 @@ void medoid(size_t j){
     }
 
     if (valid_values.empty()) {
-      median[b] = NAN; //std::numeric_limits<float>::quiet_NaN();
-    } else {
+      median[b] = NAN;
+    }
+    else
+    {
       std::sort(valid_values.begin(), valid_values.end());
       int n = valid_values.size();
       median[b] = (n % 2 == 0)
@@ -79,12 +81,16 @@ void medoid(size_t j){
     }
   }
 
-  // cout << "median " << median << endl;
-  for0(k, nband){
-    // float mk = median[k];
-    out[k * np + j] =  median[k];
+  bool median_only = false;
+
+  if(median_only){
+    // cout << "median " << median << endl;
+    for0(k, nband){
+      // float mk = median[k];
+      out[k * np + j] =  median[k];
+    }
+    return;
   }
-  return;
 
   // Return the medoid vector
   if (medoid_index >= 0) {
