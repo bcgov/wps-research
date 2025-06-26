@@ -33,11 +33,11 @@ void medioid(size_t j){
 
   // Compute medoid index and vector with NaN tolerance (median inlined)
   //int compute_medoid_with_nan(const std::vector<std::vector<float>>& data, std::vector<float>& medoid_out) {
-  std::vector<float> median(nbands);
-  std::vector<float> medioid_out(nbands);
+  std::vector<float> median(nband);
+  std::vector<float> medoid_out(nband);
 
   // Inline median computation per band
-  for (int b = 0; b < nbands; ++b) {
+  for (int b = 0; b < nband; ++b) {
     std::vector<float> valid_values;
     for (int t = 0; t < T; ++t) {
       if (b < data[t].size() && !std::isnan(data[t][b])) {
@@ -65,7 +65,7 @@ void medioid(size_t j){
     float sum = 0.0f;
     int valid_count = 0;
 
-    for (int b = 0; b < nbands; ++b) {
+    for (int b = 0; b < nband; ++b) {
       if (b < vec.size() && !std::isnan(vec[b]) && !std::isnan(median[b])) {
         float d = vec[b] - median[b];
         sum += d * d;
