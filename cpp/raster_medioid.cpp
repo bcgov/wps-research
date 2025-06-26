@@ -10,7 +10,7 @@ int main(int argc, char ** argv){
   int n_files = argc - 2;
   FILE * outfile = wopen(argv[argc-1]);
   
-  FILE ** infiles = malloc(sizeof(FILE *) * n_files);
+  FILE ** infiles = (FILE **)(void *)malloc(sizeof(FILE *) * n_files);
   if(!infiles) err("malloc failed");
   memset(infiles, 0, sizeof(FILE *) * n_files);
 
