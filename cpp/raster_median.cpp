@@ -18,7 +18,7 @@ void medoid(size_t j){
     pthread_mutex_unlock(&print_mutex);
   }
 
-  vector<vector<float>> data(T);
+  //vector<vector<float>> data(T);
 
   /*
   FILE * f;
@@ -33,16 +33,16 @@ void medoid(size_t j){
     }
   }
   */
-  int i, k;
+  size_t  i, k;
   // Compute medoid index and vector with NaN tolerance (median inlined)
   //int compute_medoid_with_nan(const std::vector<std::vector<float>>& data, std::vector<float>& medoid_out) {
   std::vector<float> median(nband);
   float d;
   // Inline median computation per band
-  for(int b = 0; b < nband; ++b){
+  for0(k, nband){
     std::vector<float> valid_values;
-    for(int t = 0; t < T; ++t){
-      d = dat[t][np * b + j];
+    for0(t, T){
+      d = dat[t][np * k + j];
       if(!std::isnan(d)){ 
         //data[t][b])){
         valid_values.push_back(d); //data[t][b]);
@@ -50,7 +50,7 @@ void medoid(size_t j){
     }
 
     if(valid_values.empty()){
-      median[b] = NAN;
+      median[k] = NAN;
     }
     else{
       std::sort(valid_values.begin(), valid_values.end());
