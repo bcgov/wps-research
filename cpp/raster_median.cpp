@@ -39,8 +39,9 @@ void medoid(size_t j){
   std::vector<float> median(nband);
   float d;
   // Inline median computation per band
+  std::vector<float> valid_values;
   for0(k, nband){
-    std::vector<float> valid_values;
+    valid_values.clear();
     for0(t, T){
       d = dat[t][np * k + j];
       if(!std::isnan(d)){ 
