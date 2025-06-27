@@ -34,7 +34,7 @@ for line in lines:
 def r(x):
     return os.system(x)
 
-parfor(r, cmds, max(4, multiprocessing.cpu_count()))
+parfor(r, cmds, min(16, multiprocessing.cpu_count()))
 
 '''Now: prefix the S2.png files by date:
 '''
