@@ -143,6 +143,7 @@ int main(int argc, char ** argv){
   }
 
   for0(i, T){
+    printf("+r %s\n", argv[i + 1]);
     dat[i] = bread(argv[i + 1], nrow, ncol, nband);
   }
 
