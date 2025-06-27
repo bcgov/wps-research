@@ -12,7 +12,7 @@ pthread_mutex_t print_mutex; // mutex for printing
 
 // calculate medioid for pixel j
 void medoid(size_t j){
-  if(j % 10000 == 0){
+  if(j % 100000 == 0){
     pthread_mutex_lock(&print_mutex);
     printf("processing pixel %zu of %zu\n", j + 1, np);
     pthread_mutex_unlock(&print_mutex);
