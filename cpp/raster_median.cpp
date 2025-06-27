@@ -33,7 +33,7 @@ void medoid(size_t j){
     }
   }
   */
-  size_t  i, k;
+  int i, k, t;
   // Compute medoid index and vector with NaN tolerance (median inlined)
   //int compute_medoid_with_nan(const std::vector<std::vector<float>>& data, std::vector<float>& medoid_out) {
   std::vector<float> median(nband);
@@ -55,7 +55,7 @@ void medoid(size_t j){
     else{
       std::sort(valid_values.begin(), valid_values.end());
       int n = valid_values.size();
-      median[b] = (n % 2 == 0)
+      median[k] = (n % 2 == 0)
         ? (valid_values[n / 2 - 1] + valid_values[n / 2]) / 2.0f
         : valid_values[n / 2];
     }
@@ -79,12 +79,12 @@ void medoid(size_t j){
   float min_dist = std::numeric_limits<float>::infinity();
 
   for(int t = 0; t < T; ++t){
-    const std::vector<float>& vec = data[t];
+    //const std::vector<float>& vec = data[t];
     float sum = 0.0f;
     int valid_count = 0;
 
     for0(k, nband){
-      d = data[t][np * k + j];
+      d = dat[t][np * k + j];
       if(!isnan(d) && !isnan(median[k])) {
         float dd = d - median[k];
         sum += dd * dd;
@@ -102,7 +102,7 @@ void medoid(size_t j){
   // Return the medoid vector
   if (medoid_index >= 0) {
     // cout << "medoid " << j << " " << data[medoid_index] << endl;
-    for0(k, nband) out[k * np + j] = data[medoid_index][k];
+    for0(k, nband) out[k * np + j] = dat[medoid_index][k];
   }
   else{
     for0(k, nband) out[k * np + j] = NAN;
