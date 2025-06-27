@@ -14,7 +14,7 @@ pthread_mutex_t print_mutex; // mutex for printing
 void medoid(size_t j){
   if(j % 100000 == 0){
     pthread_mutex_lock(&print_mutex);
-    printf("processing pixel %zu of %zu\n", j + 1, np);
+    printf("processing pixel %zu of %zu %f/100.\n", j + 1, np, 100. * (float)(j+1) / ((float)np) );
     pthread_mutex_unlock(&print_mutex);
   }
 
