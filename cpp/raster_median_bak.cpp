@@ -54,7 +54,7 @@ void medoid(size_t j){
     }
   }
 
-  bool median_only = false;
+  bool median_only = true;
 
   if(median_only){
     // cout << "median " << median << endl;
