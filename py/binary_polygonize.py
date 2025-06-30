@@ -68,6 +68,10 @@ crop = False # True
 if len(args) > 2:  # 20240509 auto-crop gave us grief in certain cases e.g. running htd.cpp or kgc2010 after
     crop = False
 
+if crop is False:
+    print("NOCROP")
+
+
 # let's crop the result
 if crop:
     run('rm -f ' + args[1] + '*pad*')
@@ -92,6 +96,7 @@ def create_in_memory_band(data: np.ndarray, cols, rows, projection, geotransform
     return dataset, band
 
 def polygonize(geotiff_filename, filename):
+    print("+r", geotiff_filename)
     raster = gdal.Open(geotiff_filename, gdal.GA_ReadOnly)
     band = raster.GetRasterBand(1)
     src_projection, geotransform = raster.GetProjection(), raster.GetGeoTransform()
@@ -103,9 +108,11 @@ def polygonize(geotiff_filename, filename):
     srs = osr.SpatialReference()
     srs.ImportFromWkt(raster.GetProjectionRef()) # as in: https://trac.osgeo.org/gdal/browser/trunk/gdal/swig/python/scripts/gdal_polygonize.py#L237
     # generate mask data
+    print("generate mask data..")
     mask_data = np.where(band.ReadAsArray() == 0, False, True)
     mask_ds, mask_band = create_in_memory_band(mask_data, cols, rows, src_projection, geotransform)
 
+    print("create output")
     # Create output 
     driver = ogr.GetDriverByName('ESRI Shapefile') #GeoJSON')
     dst_ds = driver.CreateDataSource(filename)
@@ -120,6 +127,7 @@ def polygonize(geotiff_filename, filename):
     field_name = ogr.FieldDefn("fire", ogr.OFTInteger)
     field_name.SetWidth(24)
     dst_layer.CreateField(field_name)
+    print("gdal.Polygonize")
     gdal.Polygonize(band, mask_band, dst_layer, 0, [], callback=None)  # polygonize
     dst_ds.FlushCache()
     del dst_ds, raster, mask_ds # print(f'{filename} written')
