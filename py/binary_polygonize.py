@@ -15,7 +15,11 @@ import numpy as np
 from osgeo import ogr
 from osgeo import gdal
 from osgeo import osr
-from misc import exist, err, args, run, sep
+from misc import exist, err, args, sep
+
+def run(c):
+    print(c)
+    return os.system(c)
 
 def is_dst():
     t = time.localtime()
