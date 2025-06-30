@@ -28,6 +28,8 @@ time_stamp = None
 
 pwd = os.path.abspath( os.getcwd())
 w = pwd.split(sep)
+
+'''
 if w[-3] == 'active':
     print("ACTIVE")
     print("Fire_number", w[-2])
@@ -40,7 +42,7 @@ else:
     print(w)
     print(pwd)
     err('required to be run from within the active/FIRE_NUMBER folder')
-
+'''
 ts_count = {}  # count different timestamps: most frequent this folder assumed. Good practice to run this from active/FIRE_NUMBER type folder.
 lines = [x.strip() for x in os.popen("ls -1 S2*").readlines()]
 for line in lines:
@@ -125,6 +127,9 @@ polygonize(args[1],
 run(' '.join(['ogr2ogr -f "KML"',
               args[1] + '.kml',
               args[1] + '.shp']))
+
+print("done")
+sys.exit(1)
 
 if True:
     run('sentinel2_trace_active_alpha.py ' + args[1])
