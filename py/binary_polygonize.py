@@ -129,6 +129,7 @@ def polygonize(geotiff_filename, filename):
     dst_layer.CreateField(field_name)
     print("gdal.Polygonize")
     gdal.Polygonize(band, mask_band, dst_layer, 0, [], callback=None)  # polygonize
+    print("flush")
     dst_ds.FlushCache()
     del dst_ds, raster, mask_ds # print(f'{filename} written')
     open(args[1] + '.prj', 'wb').write(str(src_projection).encode())
