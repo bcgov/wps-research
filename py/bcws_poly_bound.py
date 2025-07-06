@@ -7,6 +7,7 @@ import fiona
 from shapely.geometry import shape
 from osgeo import gdal, osr
 from pyproj import Transformer
+gdal.DontUseExceptions()
 
 def get_expanded_bbox(geom, src_crs_wkt, tgt_crs_wkt, size_ha):
     minx, miny, maxx, maxy = geom.bounds
@@ -42,17 +43,24 @@ def main():
         return
 
     # Open shapefile
+    required_fields = {'FIRE_NUM', 'FIRE_SZ_HA'}
     with fiona.open('prot_current_fire_polys.shp') as features:
+
+        first_props = features[0]['properties'].keys()
+        missing = required_fields - set(first_props)
+        if missing:
+            print(f"Error: Missing required fields in shapefile: {', '.join(missing)}")
+            exit(1)
+
         vector_crs_wkt = features.crs_wkt
 
         for f in features:
             props = f['properties']
-            FIRE_ID = props.get('FIRE_ID')
-            SIZE_HA = props.get('SIZE_HA', 0)
-
+            FIRE_ID = props.get('FIRE_NUM')
+            SIZE_HA = props.get('FIRE_SZ_HA')
             if not FIRE_ID == 'G90216':
                 continue
-
+            print([FIRE_ID, SIZE_HA, props])
             if not FIRE_ID or SIZE_HA <= 0:
                 continue
 
