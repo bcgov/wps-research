@@ -23,7 +23,7 @@ def get_expanded_bbox(geom, src_crs_wkt, tgt_crs_wkt, size_ha):
 def clip_raster_by_bbox(raster_path, bbox, output_path):
     minx, miny, maxx, maxy = bbox
     if os.path.exists(output_path):
-        print(f"File exists, skipping: {output_path}")
+        print(f"+r {output_path}")
         return
 
     gdal.Warp(
@@ -65,7 +65,7 @@ def main():
                 continue
 
             geom = shape(f['geometry'])
-            print(f"\nProcessing FIRE_ID: {FIRE_ID}, SIZE_HA: {SIZE_HA}")
+            print(f"\nFIRE_ID: {FIRE_ID}, SIZE_HA: {SIZE_HA}")
 
             for raster_path in raster_files:
                 # Open raster and get CRS
@@ -91,7 +91,7 @@ def main():
                 output_path = os.path.join(output_dir, output_file)
 
                 clip_raster_by_bbox(raster_path, expanded_bbox, output_path)
-                print(f"Saved to: {output_path}")
+                print(f"+w {output_path}")
 
 if __name__ == "__main__":
     main()
