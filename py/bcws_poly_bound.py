@@ -58,9 +58,9 @@ def main():
             props = f['properties']
             FIRE_ID = props.get('FIRE_NUM')
             SIZE_HA = props.get('FIRE_SZ_HA')
-            if not FIRE_ID == 'G90216':
-                continue
-            print([FIRE_ID, SIZE_HA, props])
+            #if not FIRE_ID == 'G90216':
+            #    continue
+            
             if not FIRE_ID or SIZE_HA <= 0:
                 continue
 
