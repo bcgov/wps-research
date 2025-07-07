@@ -1,7 +1,7 @@
 '''20250704 bcws_poly_bound.py: create bounding boxes for each polygon
 '''
-
 import os
+import sys
 import math
 import fiona
 from shapely.geometry import shape
@@ -35,6 +35,11 @@ def clip_raster_by_bbox(raster_path, bbox, output_path):
     )
 
 def main():
+    fire_number_use = None
+
+    if len(sys.argv) > 1:
+        fire_number_use = sys.argv[1]
+
     # Only include .bin raster files
     raster_files = [f for f in os.listdir('.') if f.lower().endswith('.bin')]
 
@@ -62,6 +67,9 @@ def main():
             #    continue
             
             if not FIRE_ID or SIZE_HA <= 0:
+                continue
+
+            if fire_number_use is not None and FIRE_ID != fire_number_use:
                 continue
 
             geom = shape(f['geometry'])
