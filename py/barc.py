@@ -4,7 +4,7 @@ from misc import err, read_binary, args, read_hdr, hdr_fn, band_names
 import matplotlib.pyplot as plt
 import numpy as np
 import os
-
+import matplotlib
 import rasterio
 from rasterio.transform import from_origin
 from osgeo import gdal
