@@ -182,18 +182,21 @@ if __name__ == '__main__':
        
     dNBR = NBR_pre - NBR_post #calculating dNBR
 
+    print("nbr_pre.png")
     plt.figure(figsize=(15,15))
     plt.imshow(NBR_pre.reshape(nrow, ncol))
     plt.title('NBR: pre-image: ' + str(args[1]))
     plt.tight_layout()
     plt.savefig('nbr_pre.png')
 
+    print("nbr_post.png")
     plt.figure(figsize=(15,15))
     plt.imshow(NBR_post.reshape(nrow, ncol))
     plt.title('NBR: post-image: ' + str(args[2]))
     plt.tight_layout()
     plt.savefig('nbr_post.png')
 
+    print("dnbr.png")
     plt.figure(figsize=(15,15))
     plt.imshow(dNBR.reshape(nrow, ncol))
     plt.title('dNBR: pre-image ' + str(args[1]) + ' post-image: ' + str(args[2]))
@@ -205,5 +208,6 @@ if __name__ == '__main__':
     end_date = '2025xxxx'
     class_map = barc_class_plot(dNBR, start_date, end_date, title='Not given')
 
-    end_file = str(argv[2])
+    print("barc.tiff")
+    end_file = str(args[2])
     write_matrix_to_tif(class_map, end_file, 'barc.tif')
