@@ -7,7 +7,17 @@ def get(c):
 
 x,y = [int(x) for x in get('xdpyinfo | grep dimensions').strip().split()[1].split('x')]
 
-[x2, y2] =[int(x) for x in get('xrandr | grep primary').split()[3].split('+')[0].split('x')]
+x2, y2 = None, None
+try:
+    [x2, y2] =[int(x) for x in get('xrandr | grep primary').split()[3].split('+')[0].split('x')]
+except:
+    pass
+
+try:
+    [x2, y2] =[int(x) for x in get('xrandr | grep rdp0').split()[3].split('+')[0].split('x')]
+except:
+    pass
+
 x_min, y_min = min(x, x2), min(y, y2)
 print('.screen_min_x=', x_min)
 print('.screen_min_y=', y_min)
