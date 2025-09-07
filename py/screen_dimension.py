@@ -8,6 +8,8 @@ def get(c):
 x,y = [int(x) for x in get('xdpyinfo | grep dimensions').strip().split()[1].split('x')]
 
 x2, y2 = None, None
+print(get('xrandr | grep primary'))
+print(get('xrandr | grep rdp'))
 try:
     print(get('xrandr | grep primary'))
     [x2, y2] =[int(x) for x in get('xrandr | grep primary').split()[3].split('+')[0].split('x')]
@@ -16,7 +18,7 @@ except:
 
 try:
     print(get('xrandr | grep rdp0'))
-    [x2, y2] =[int(x) for x in get('xrandr | grep rdp0').split()[3].split('+')[0].split('x')]
+    [x2, y2] =[int(x) for x in get('xrandr | grep rdp').split()[3].split('+')[0].split('x')]
 except:
     pass
 
