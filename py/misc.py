@@ -500,7 +500,7 @@ def extract_zip(filename: str, extract_to: str = '.'):
         zip_ref.extractall(extract_to)
     print(f"Extracted: {filename}")
 
-def download_file(url: str, filename: str, extract_zip=True):
+def download_file(url: str, filename: str, do_extract_zip=True):
     import urllib.request
     import datetime
     import certifi
@@ -512,7 +512,7 @@ def download_file(url: str, filename: str, extract_zip=True):
     timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M")  # timestamp for backups 
 
     """Download a file and save a timestamped backup."""
-    with urllib.request.urlopen(url, context=context) as response, open(filename, 'wb') as out_file:
+    with urllib.request.urlopen(url, context=ssl_context) as response, open(filename, 'wb') as out_file:
         shutil.copyfileobj(response, out_file)
     print(f"+w {filename}")
 
@@ -523,7 +523,7 @@ def download_file(url: str, filename: str, extract_zip=True):
     print(f"+w {backup_filename}")
 
     # auto-extract zip if applicable !!
-    if ext.strip('.') == 'zip' and extract_zip:
+    if ext.strip('.') == 'zip' and do_extract_zip:
         extract_zip(filename)
 '''
 
