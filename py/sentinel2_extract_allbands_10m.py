@@ -89,7 +89,7 @@ def extract(file_name):
         geotransform = sub_dataset.GetGeoTransform()
         px_sx, px_sy = geotransform[1], geotransform[5]
     
-        if band_name not in ['B5', 'B6', 'B7', 'B8A', 'B11', 'B12']: # != "B12":
+        if band_name not in ['B3']: # , 'B6', 'B7', 'B8A', 'B11', 'B12']: # != "B12":
             mem_driver = gdal.GetDriverByName('MEM')
             input_ds = mem_driver.Create('', band.XSize, band.YSize, 1, gdal.GDT_Float32)
             input_ds.SetGeoTransform(sub_dataset.GetGeoTransform())
