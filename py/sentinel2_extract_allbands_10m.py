@@ -109,8 +109,8 @@ def extract(file_name):
             resampled_geotransform[1] = target_xs
             resampled_geotransform[5] = target_ys
             resampled_ds = mem_driver.Create('', target_sub_ds.RasterXSize, target_sub_ds.RasterYSize, 1, gdal.GDT_Float32)
-            resampled_ds.SetGeoTransform(resampled_geotransform)
-            resampled_ds.SetProjection(input_ds.GetProjection())
+            resampled_ds.SetGeoTransform(target_sub_ds.GetGeoTransform()) # resampled_geotransform)
+            resampled_ds.SetProjection(target_sub_ds.GetProjection()) # input_ds.GetProjection())
     
             gdal.Warp(resampled_ds, input_ds, xRes=target_xs, yRes=target_ys, resampleAlg='bilinear')
             arrays[str(m)] = resampled_ds.GetRasterBand(1).ReadAsArray()
