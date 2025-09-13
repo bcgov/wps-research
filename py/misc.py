@@ -552,7 +552,7 @@ def find_sen2cor():
     for line in lines:
         line = line.strip()
         print(line)
-        location = line
+        location = (os.path.sep).join(line.split(os.path.sep)[:-1])
 
     if location is not None:
         addpath(location)
