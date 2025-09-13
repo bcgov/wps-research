@@ -1,4 +1,5 @@
 '''
+20250912: made this work on L2 data generated from L1 data using sen2cor ! 
 20241027 this is now the default downloader script for all-bands research
 20240209 revised from sentinel2_extract_cloudfree_allbands.py to extract regardless of cloudfree
 20230731 revised from sentinel2_extract_cloudfree.py to include all bands.
