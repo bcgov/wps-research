@@ -549,9 +549,9 @@ def find_sen2cor():
         lines = [x.strip() for x in open(bash_rc, 'rb').readlines()]
         print("bashrc file=", bash_rc)
         if pathline not in lines:
-            print('+w ' + bash_rc)
-            open(bash_rc, 'wb').write((open(bash_rc, 'rb').read() + '\n' + pathline).encode())
-            print('updated PATH variable to find L2A_process')
+            print(f"+w {bash_rc}")
+            with open(bash_rc, "a", encoding="utf-8") as f:  # append mode
+                f.write(pathline + "\n")
 if __name__ == '__main__':
     find_sen2cor()
 
