@@ -534,9 +534,13 @@ for file in files_to_process:
 '''
 
 def find_sen2cor():
-    lines = os.popen('find / -name "L2A_Process" -type f -print 2>/dev/null').readlines()
+    lines = os.popen('sudo find / -name "L2A_Process" -type f -print 2>/dev/null').readlines()
     
     # add path to .bashrc
     for line in lines:
         line = line.strip()
         print(line)
+
+if __name__ == '__main__':
+    find_sen2cor()
+
