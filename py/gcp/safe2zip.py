@@ -7,7 +7,7 @@ import os
 import sys
 import shutil
 
-from ../misc import err
+from ..misc import err
 
 to_zip = []
 files = os.popen("ls -1").readlines()
