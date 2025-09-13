@@ -560,8 +560,7 @@ def find_sen2cor():
 
 if __name__ == '__main__':
     find_sen2cor()
-    
-    addpath(os.path.expanduser('~').rstrip(sep) + sep + 'GitHub' + sep + 'wps-research' + sep + 'cpp')
     addpath(os.path.expanduser('~').rstrip(sep) + sep + 'GitHub' + sep + 'wps-research' + sep + 'py')
+    addpath(os.path.expanduser('~').rstrip(sep) + sep + 'GitHub' + sep + 'wps-research' + sep + 'cpp')
     addpath(os.path.expanduser('~').rstrip(sep) + sep + 'GitHub' + sep + 'bin' + sep + 'bin')
 
