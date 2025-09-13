@@ -535,12 +535,21 @@ for file in files_to_process:
 
 def find_sen2cor():
     lines = os.popen('sudo find / -name "L2A_Process" -type f -print 2>/dev/null').readlines()
-    
+ 
+    location = None
     # add path to .bashrc
     for line in lines:
         line = line.strip()
         print(line)
+        location = line
 
+    if location is not None:
+        pathline = 'export PATH=' + location.rstrip(os.path.sep) + ':$PATH'
+        lines = [x.strip() for x in open('~/.bashrc').readlines()]
+        if pathline not in lines:
+            print('+w ~/.bashrc')
+            open('~/.bashrc', 'wb').write(open('~/.bashrc').read() + '\n' + pathline)
+            print('updated PATH variable to find L2A_process')
 if __name__ == '__main__':
     find_sen2cor()
 
