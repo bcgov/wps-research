@@ -545,7 +545,7 @@ def find_sen2cor():
 
     if location is not None:
         pathline = 'export PATH=' + location.rstrip(os.path.sep) + ':$PATH'
-        lines = [x.strip() for x in open('~/.bashrc').readlines()]
+        lines = [x.strip() for x in open(bashrc).readlines()]
         bashrc = os.path.expanduser('~') + os.path.sep + '.bashrc'
         if pathline not in lines:
             print('+w ' + bashrc)
