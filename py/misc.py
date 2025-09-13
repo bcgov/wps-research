@@ -537,12 +537,13 @@ def addpath(pathline):  # add path to ~/.bashrc
     if True:
         pathline = 'export PATH=' + pathline.rstrip(os.path.sep) + ':$PATH'
         bash_rc = os.path.expanduser('~') + os.path.sep + '.bashrc'
-        lines = [x.strip() for x in open(bash_rc, 'rb').readlines()]
-        print("bashrc file=", bash_rc)
-        if pathline.strip() not in lines:
-            print(f"+w {bash_rc}")
-            with open(bash_rc, "a", encoding="utf-8") as f:  # append mode
-                f.write(pathline + "\n")
+        with open(bash_rc, "r", encoding="utf-8") as f:
+            lines = [x.rstrip("\n") for x in f]
+            print("bashrc file=", bash_rc)
+            if pathline.strip() not in lines:
+                print(f"+w {bash_rc}")
+                with open(bash_rc, "a", encoding="utf-8") as f:  # append mode
+                    f.write(pathline + "\n")
 
 def find_sen2cor():
     lines = os.popen('find ~/ -name "L2A_Process" -type f -print 2>/dev/null').readlines()
