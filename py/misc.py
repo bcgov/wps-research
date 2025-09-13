@@ -539,7 +539,7 @@ def addpath(pathline):  # add path to ~/.bashrc
         bash_rc = os.path.expanduser('~') + os.path.sep + '.bashrc'
         lines = [x.strip() for x in open(bash_rc, 'rb').readlines()]
         print("bashrc file=", bash_rc)
-        if pathline not in lines:
+        if pathline.strip() not in lines:
             print(f"+w {bash_rc}")
             with open(bash_rc, "a", encoding="utf-8") as f:  # append mode
                 f.write(pathline + "\n")
