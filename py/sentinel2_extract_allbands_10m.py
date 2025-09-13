@@ -35,7 +35,16 @@ def extract(file_name):
     gdal.PushErrorHandler(ignore_warnings)  # suppress warnings
  
     if ext == 'SAFE':
-        file_name = file_name.rstrip(sep) + sep + 'MTD_MSIL1C.xml'
+        file_name = None
+        fn1 = file_name.rstrip(sep) + sep + 'MTD_MSIL1C.xml'
+        fn2 = file_name.rstrip(sep) + sep + 'MTD_MSIL2A.xml'
+        if exist(fn1):
+            file_name = fn1
+        elif exist(fn2):
+            file_name = fn2
+        else:
+            err('found neither: ' + str(fn1) + ' nor ' + str(fn2))
+            
     print(file_name)
     d = gdal.Open(file_name)
     subdatasets =  d.GetSubDatasets()
