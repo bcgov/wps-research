@@ -532,3 +532,11 @@ for file in files_to_process:
     full_url = file['url_base'] + file['filename']
     download_file(full_url, file['filename'])
 '''
+
+def find_sen2cor():
+    lines = os.popen('find / -name "L2A_Process" -type f -print 2>/dev/null').readlines()
+    
+    # add path to .bashrc
+    for line in lines:
+        line = line.strip()
+        print(line)
