@@ -34,8 +34,8 @@ def extract(file_name):
     def ignore_warnings(x, y, z): pass
     gdal.PushErrorHandler(ignore_warnings)  # suppress warnings
  
+    file_name = None
     if ext == 'SAFE':
-        file_name = None
         fn1 = file_name.rstrip(sep) + sep + 'MTD_MSIL1C.xml'
         fn2 = file_name.rstrip(sep) + sep + 'MTD_MSIL2A.xml'
         if exist(fn1):
