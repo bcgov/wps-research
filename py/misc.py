@@ -563,4 +563,5 @@ if __name__ == '__main__':
     addpath(os.path.expanduser('~').rstrip(sep) + sep + 'GitHub' + sep + 'bin' + sep + 'bin')
     addpath(os.path.expanduser('~').rstrip(sep) + sep + 'GitHub' + sep + 'wps-research' + sep + 'py')
     addpath(os.path.expanduser('~').rstrip(sep) + sep + 'GitHub' + sep + 'wps-research' + sep + 'cpp')
-
+    addpath('/usr/local/bin')
+    
