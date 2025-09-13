@@ -545,7 +545,7 @@ def addpath(pathline):  # add path to ~/.bashrc
                 f.write(pathline + "\n")
 
 def find_sen2cor():
-    lines = os.popen('sudo find / -name "L2A_Process" -type f -print 2>/dev/null').readlines()
+    lines = os.popen('find ~/ -name "L2A_Process" -type f -print 2>/dev/null').readlines()
  
     location = None
     # add path to .bashrc
