@@ -546,11 +546,11 @@ def find_sen2cor():
     if location is not None:
         pathline = 'export PATH=' + location.rstrip(os.path.sep) + ':$PATH'
         bash_rc = os.path.expanduser('~') + os.path.sep + '.bashrc'
-        lines = [x.strip() for x in open(bash_rc).readlines()]
+        lines = [x.strip() for x in open(bash_rc, 'rb').readlines()]
         print("bashrc file=", bash_rc)
         if pathline not in lines:
             print('+w ' + bash_rc)
-            open(bash_rc, 'wb').write(open(bash_rc).read() + '\n' + pathline)
+            open(bash_rc, 'wb').write(open(bash_rc, 'rb').read() + '\n' + pathline)
             print('updated PATH variable to find L2A_process')
 if __name__ == '__main__':
     find_sen2cor()
