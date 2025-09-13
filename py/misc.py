@@ -533,6 +533,17 @@ for file in files_to_process:
     download_file(full_url, file['filename'])
 '''
 
+def addpath(pathline):  # add path to ~/.bashrc
+    if True:
+        pathline = 'export PATH=' + pathline.rstrip(os.path.sep) + ':$PATH'
+        bash_rc = os.path.expanduser('~') + os.path.sep + '.bashrc'
+        lines = [x.strip() for x in open(bash_rc, 'rb').readlines()]
+        print("bashrc file=", bash_rc)
+        if pathline not in lines:
+            print(f"+w {bash_rc}")
+            with open(bash_rc, "a", encoding="utf-8") as f:  # append mode
+                f.write(pathline + "\n")
+
 def find_sen2cor():
     lines = os.popen('sudo find / -name "L2A_Process" -type f -print 2>/dev/null').readlines()
  
@@ -544,14 +555,8 @@ def find_sen2cor():
         location = line
 
     if location is not None:
-        pathline = 'export PATH=' + location.rstrip(os.path.sep) + ':$PATH'
-        bash_rc = os.path.expanduser('~') + os.path.sep + '.bashrc'
-        lines = [x.strip() for x in open(bash_rc, 'rb').readlines()]
-        print("bashrc file=", bash_rc)
-        if pathline not in lines:
-            print(f"+w {bash_rc}")
-            with open(bash_rc, "a", encoding="utf-8") as f:  # append mode
-                f.write(pathline + "\n")
+        addpath(location)
+
 if __name__ == '__main__':
     find_sen2cor()
 
