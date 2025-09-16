@@ -72,8 +72,8 @@ int main(int argc, char ** argv){
 
         if(!new_good) continue;  // use the new data
 
-        //red1 = out[j] / red1;  // red as fraction of sum of bands
-        //red2 = dat[j] / red2;  // red as fraction of sum of bands
+        red1 = out[j] / red1;  // red as fraction of sum of bands
+        red2 = dat[j] / red2;  // red as fraction of sum of bands
         if(red2 > 1. * red1 || (!old_good)){
             // empty data is also bad data
           for0(k, nband) out[np * k + j]= dat[np * k + j];
