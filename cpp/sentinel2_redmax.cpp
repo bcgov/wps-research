@@ -64,7 +64,7 @@ int main(int argc, char ** argv){
           if(isnan(out[np*k + j])){
             old_good = false;
           }
-          if(k == 0){
+          if(true){
             red1 += out[np * k + j]; // add up the bands, this pixel ( candidate result so far ) 
             red2 += dat[np * k + j]; // current image being processed, this pixel 
           }
