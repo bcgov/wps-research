@@ -17,10 +17,8 @@ def get_expanded_bbox(geom, src_crs_wkt, tgt_crs_wkt, size_ha):
     transformer = Transformer.from_crs(src_crs_wkt, tgt_crs_wkt, always_xy=True)
     minx_t, miny_t = transformer.transform(minx, miny)
     maxx_t, maxy_t = transformer.transform(maxx, maxy)
-
     fire_length_m = math.sqrt(size_ha * 10000)  # ha → m² → m
     half_len = fire_length_m / 2.0
-
     return minx_t - half_len, miny_t - half_len, maxx_t + half_len, maxy_t + half_len
 
 def clip_raster_by_bbox(raster_path, bbox, output_path):
@@ -29,13 +27,11 @@ def clip_raster_by_bbox(raster_path, bbox, output_path):
         print(f"+r {output_path}")
         return
 
-    gdal.Warp(
-        output_path,
-        raster_path,
-        outputBounds=(minx, miny, maxx, maxy),
-        format="ENVI",  # Output as .bin + .hdr
-        dstNodata=0
-    )
+    gdal.Warp(output_path,
+              raster_path,
+              outputBounds=(minx, miny, maxx, maxy),
+              format="ENVI",  # Output as .bin + .hdr
+              dstNodata=0))
 
 def main():
     fire_number_use = None
@@ -68,6 +64,7 @@ def main():
             elif entry.is_dir():
                 print("Dir:", entry.name)
             '''
+    print(raster_files)
 
     if raster_files == []: # not raster_files:
         print("No .bin raster files found in current directory.")
