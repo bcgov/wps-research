@@ -58,10 +58,10 @@ int main(int argc, char ** argv){
         bool new_good = true;
         bool old_good = true;
         for0(k, nband){
-          if(isnan(dat[np*k + j])){
+          if(isnan(dat[np*k + j]) || dat[np*k + j] == 0.){
               new_good = false;
           }
-          if(isnan(out[np*k + j])){
+          if(isnan(out[np*k + j]) || out[np*k + j] == 0.){
             old_good = false;
           }
           if(true){
