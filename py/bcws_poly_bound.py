@@ -1,9 +1,12 @@
 '''20250704 bcws_poly_bound.py: create bounding boxes for each polygon
+20250915: 
+    bcws_poly_bound.py [FIRE NUMBER] # [optional: output directory path]
 '''
 import os
 import sys
 import math
 import fiona
+from misc import args, err, exist
 from shapely.geometry import shape
 from osgeo import gdal, osr
 from pyproj import Transformer
@@ -36,9 +39,14 @@ def clip_raster_by_bbox(raster_path, bbox, output_path):
 
 def main():
     fire_number_use = None
+    out_path_use = None
 
-    if len(sys.argv) > 1:
-        fire_number_use = sys.argv[1]
+    if len(args) > 1:
+        fire_number_use = args[1]
+        if len(args) > 2:
+            out_path_use = args[2]
+            if not (exist(args[2]) and os.path.isdir(args[2])):
+                err('invalid output path:' + str(args[2]))
 
     # Only include .bin raster files
     raster_files = [f for f in os.listdir('.') if f.lower().endswith('.bin')]
@@ -92,6 +100,11 @@ def main():
 
                 # Output directory and filename
                 output_dir = f"fire_{FIRE_ID}"
+                if out_path_use is not None:
+                    output_dir = os.path.abspath(out_path_use) + os.path.sep + output_dir
+                
+                if not exist(output_dir):
+                    print("mkdir ", output_dir)
                 os.makedirs(output_dir, exist_ok=True)
 
                 raster_base, _ = os.path.splitext(os.path.basename(raster_path))
