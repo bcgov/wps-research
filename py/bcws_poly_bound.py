@@ -31,7 +31,7 @@ def clip_raster_by_bbox(raster_path, bbox, output_path):
               raster_path,
               outputBounds=(minx, miny, maxx, maxy),
               format="ENVI",  # Output as .bin + .hdr
-              dstNodata=0))
+              dstNodata=0)
 
 def main():
     fire_number_use = None
