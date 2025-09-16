@@ -53,7 +53,7 @@ def main():
 
             if exist(entry.name + os.path.sep + entry.name + '.bin'):
                 raster_files += [entry.name + os.path.sep + entry.name + '.bin']
-            elif:
+            else if:
                 if entry.name.lower().endswith('.bin'):
                     raster_files += [entry.name]
             else:
