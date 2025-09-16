@@ -64,15 +64,17 @@ int main(int argc, char ** argv){
           if(isnan(out[np*k + j])){
             old_good = false;
           }
-          red1 += out[np * k + j]; // add up the bands, this pixel ( candidate result so far ) 
-          red2 += dat[np * k + j]; // current image being processed, this pixel 
+          if(k == 0){
+            red1 += out[np * k + j]; // add up the bands, this pixel ( candidate result so far ) 
+            red2 += dat[np * k + j]; // current image being processed, this pixel 
+          }
         }
 
         if(!new_good) continue;  // use the new data
 
-        red1 = out[j] / red1;  // red as fraction of sum of bands
-        red2 = dat[j] / red2;  // red as fraction of sum of bands
-        if(red2 > 1.5 * red1 || (!old_good)){
+        //red1 = out[j] / red1;  // red as fraction of sum of bands
+        //red2 = dat[j] / red2;  // red as fraction of sum of bands
+        if(red2 > 1. * red1 || (!old_good)){
             // empty data is also bad data
           for0(k, nband) out[np * k + j]= dat[np * k + j];
         }
