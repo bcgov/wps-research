@@ -53,6 +53,7 @@ def main():
     raster_files = []
     with os.scandir('.') as it:
         for entry in it:
+            print(entry.name)
             if entry.name.lower().endswith('.bin'):
                 raster_files += [entry.name]
             '''
