@@ -44,6 +44,15 @@ int main(int argc, char ** argv){
     else{
       // for each pixel, find out if the updated version is "more red"
       for0(j, np){
+        bool nodata = true;
+        for0(k, nband){
+          if(dat[np*k + j] != 0.){
+            nodata = false;
+          }
+        }
+        if(nodata) continue;
+
+
         float red1 = 0.;
         float red2 = 0.;
         bool new_good = true;
@@ -64,10 +73,8 @@ int main(int argc, char ** argv){
         red1 = out[j] / red1;  // red as fraction of sum of bands
         red2 = dat[j] / red2;  // red as fraction of sum of bands
         if(red2 > 1.5 * red1 || (!old_good)){
-          if( red1 != 0. && red2 != 0.){
             // empty data is also bad data
-            for0(k, nband) out[np * k + j]= dat[np * k + j];
-          }
+          for0(k, nband) out[np * k + j]= dat[np * k + j];
         }
       }
     }
