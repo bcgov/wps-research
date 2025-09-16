@@ -49,9 +49,22 @@ def main():
                 err('invalid output path:' + str(args[2]))
 
     # Only include .bin raster files
-    raster_files = [f for f in os.listdir('.') if f.lower().endswith('.bin')]
+    # raster_files = [f for f in os.listdir('.') if f.lower().endswith('.bin')]
+    raster_files = []
+    with os.scandir('.') as it:
+        for entry in it:
+            if entry.name.lower().endswith('.bin'):
+                raster_files += [entry.name]
+            '''
+            if entry.is_symlink():
+                print("Symlink:", entry.name)
+            elif entry.is_file():
+                print("File:", entry.name)
+            elif entry.is_dir():
+                print("Dir:", entry.name)
+            '''
 
-    if not raster_files:
+    if raster_files == []: # not raster_files:
         print("No .bin raster files found in current directory.")
         return
 
