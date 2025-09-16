@@ -51,11 +51,8 @@ def main():
         for entry in it:
             print(entry.name)
 
-            if exist(entry.name + os.path.sep + entry.name + '.bin'):
-                # raster_files += [entry.name + os.path.sep + entry.name + '.bin']
-            else:
-                if entry.name.lower().endswith('.bin'):
-                    raster_files += [entry.name]
+            if entry.name.lower().endswith('.bin'):
+                raster_files += [entry.name]
             '''
             if entry.is_symlink():
                 print("Symlink:", entry.name)
