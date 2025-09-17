@@ -6,7 +6,7 @@ from misc import err, run, parfor, hdr_fn, read_hdr
 import multiprocessing
 import os
 
-lines = [x.strip() for x in os.popen('ls -1 S*.bin *mrap*bin').readlines()]
+lines = [x.strip() for x in os.popen('ls -1 20*.bin S2*.bin *mrap*bin').readlines()]
 # add BARC files
 print(lines)
 
@@ -38,7 +38,7 @@ parfor(r, cmds, 16) # min(16, multiprocessing.cpu_count()))
 
 '''Now: prefix the S2.png files by date:
 '''
-lines = os.popen("ls -1 S2*.png *mrap*png *BARC*png").readlines()
+lines = os.popen("ls -1 20*.png S2*.png *mrap*png *BARC*png").readlines()
 lines = [x.strip() for x in lines]
 
 for line in lines:
