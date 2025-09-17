@@ -26,15 +26,15 @@ for line in lines:
 
     if not os.path.exists(out_file):
         if int(bands) < 3:
-            cmds += ["raster_plot.py " + line + " 1 1 1 1 " for line in lines]
+            cmds += ["raster_plot.py " + line + " 1 1 1 1 "] #  for line in lines]
         else:
-            cmds += ["raster_plot.py " + line + " 1 2 3 1 " for line in lines]
+            cmds += ["raster_plot.py " + line + " 1 2 3 1 "] #  for line in lines]
     # plot_1_20230902_mrap.bin_1_2_3_rgb.png
 
 def r(x):
     return os.system(x)
 
-parfor(r, cmds, min(16, multiprocessing.cpu_count()))
+parfor(r, cmds, 16) # min(16, multiprocessing.cpu_count()))
 
 '''Now: prefix the S2.png files by date:
 '''
