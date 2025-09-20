@@ -15,7 +15,7 @@ if len(args) < 3:
 
 # File paths
 raster_path = args[1] # "your_raster_file.bsq"        # ENVI binary file (with .hdr)
-vector_path = args[2] "your_shapefile.shp"          # Shapefile with polygon mask
+vector_path = args[2] # "your_shapefile.shp"          # Shapefile with polygon mask
 output_path = args[1] + "_clipped.bin" # "masked_output.tif"           # Output file path
 
 # 1. Open the raster
