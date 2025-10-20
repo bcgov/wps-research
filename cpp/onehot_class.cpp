@@ -34,7 +34,7 @@ int main(int argc, char ** argv){
     for(size_t i = 0; i < np; i++){
         bool assigned = false;
         for(size_t b = 0; b < nband; b++){
-            float val = dat[i * nband + b];
+            float val = dat[i + b * np];
             if(val != 0.0f && !std::isnan(val)){
                 out[i] = (float)b;  // class index starts at 0
                 assigned = true;
