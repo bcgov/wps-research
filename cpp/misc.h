@@ -315,6 +315,9 @@ void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband);
 void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband, size_t data_type);
 void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband, size_t data_type, vector<string> & bandNames);
 
+// append class_names field to ENVI header file
+void happend_class_names(const string& hfn, const vector<string>& class_names);
+
 float * falloc(size_t nf);
 double * dalloc(size_t nd);
 
