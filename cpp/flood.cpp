@@ -54,7 +54,7 @@ int main(int argc, char **argv) {
     str hfn(hdr_fn(fn));
     str hofn(hdr_fn(ofn, true));
     str ofn_f(fn + "_cc_labels_float.bin");
-    str hofn_f(hdr_fn(ofn_f));
+    str hofn_f(hdr_fn(ofn_f), true);
 
     size_t d_type = hread(hfn, nrow, ncol, nband);
     if (nband != 1)
