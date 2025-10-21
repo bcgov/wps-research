@@ -133,7 +133,7 @@ int main(int argc, char **argv) {
   out_f = falloc(np);
   if (!out_f) err("falloc() failed for out_f");
 
-  i_next = 0;
+  i_next = 1;
 
   for (long int i = 0; i < (long int)nrow; ++i) {
     for (long int j = 0; j < (long int)ncol; ++j) {
