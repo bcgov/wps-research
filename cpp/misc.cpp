@@ -322,6 +322,26 @@ void hwrite(str hfn, size_t nrow, size_t ncol, size_t nband, size_t data_type, v
   hf.close();
 }
 
+void happend_class_names(const string& hfn, const vector<string>& class_names){
+  ofstream hf(hfn, ios::app);  // Open in append mode
+  
+  if(!hf.is_open()) err("Failed to open header file for appending");
+  hf << "class names = {\n";
+
+  for(size_t i = 0; i < class_names.size(); ++i) {
+    hf << "  " << class_names[i];
+    if(i != class_names.size() - 1){
+      hf << ",\n";
+    }
+    else{
+      hf << "\n";
+    }
+  }
+
+  hf << "}" << endl;
+  hf.close();
+}
+
 str hdr_fn(str fn, bool create=false){
   str hfn(fn + str(".hdr"));
   if(exists(hfn)) return hfn;
