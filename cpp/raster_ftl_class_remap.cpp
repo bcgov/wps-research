@@ -40,6 +40,7 @@ C-4	Starts with C	C
 C-6	Starts with C	C
 */
 
+
 #include "misc.h"
 #include <fstream>
 #include <iostream>
@@ -50,7 +51,7 @@ C-6	Starts with C	C
 
 using namespace std;
 
-// Function to parse class names from ENVI header
+// Parse class names from ENVI header
 vector<string> read_class_names(const string& hdr_file) {
     ifstream hf(hdr_file);
     if (!hf.is_open()) err("Failed to open header file");
@@ -78,20 +79,20 @@ vector<string> read_class_names(const string& hdr_file) {
     return class_names;
 }
 
-// Mapping logic
+// Mapping logic: fine class name -> coarse group
 string map_class(const string& name) {
     if (name == "W") return "W";
     if (name.find("D-1/2") != string::npos) return "D";
     if (name.find("M-1/2") != string::npos) return "M";
     if (name.find("O-1") != string::npos) return "O";
     if (name.find("N") != string::npos) return "N";
-    if (name[0] == 'C') return "C";
-    if (name[0] == 'S') return "S";
+    if (name.rfind("C", 0) == 0) return "C"; // starts with 'C'
+    if (name.rfind("S", 0) == 0) return "S"; // starts with 'S'
     return "UNKNOWN";
 }
 
 int main(int argc, char** argv) {
-    if (argc < 2) err("Usage: class_remap [input classification raster]");
+    if (argc < 2) err("Usage: raster_ftl_class_remap [input classification raster]");
 
     string fn(argv[1]);
     string hfn = hdr_fn(fn);
@@ -100,29 +101,29 @@ int main(int argc, char** argv) {
 
     if (nband != 1) err("Input must be single-band classification image");
 
-    // Load data
+    // Load classification data
     float* in = bread(fn, nrow, ncol, nband);
     size_t np = nrow * ncol;
 
-    // Read original class names
+    // Parse class names
     vector<string> class_names = read_class_names(hfn);
-    if (class_names.size() == 0) err("No class names found in header");
+    if (class_names.empty()) err("No class names found in header");
 
-    // Build remapping
-    unordered_map<int, string> class_map;
+    // Build fine -> coarse class ID map
     unordered_map<string, int> coarse_class_ids;
     vector<string> coarse_class_names;
-    int next_class_id = 0;
+    unordered_map<int, int> remap; // fine class ID -> coarse class ID
+    int next_coarse_id = 0;
 
     for (size_t i = 0; i < class_names.size(); ++i) {
         string coarse = map_class(class_names[i]);
 
         if (coarse_class_ids.find(coarse) == coarse_class_ids.end()) {
-            coarse_class_ids[coarse] = next_class_id++;
+            coarse_class_ids[coarse] = next_coarse_id++;
             coarse_class_names.push_back(coarse);
         }
 
-        class_map[i] = coarse_class_ids[coarse];
+        remap[i] = coarse_class_ids[coarse];
     }
 
     // Remap pixels
@@ -130,20 +131,20 @@ int main(int argc, char** argv) {
     if (!out) err("Memory allocation failed");
 
     for (size_t i = 0; i < np; ++i) {
-        int val = (int)in[i];
-        if (val < 0 || val >= (int)class_names.size() || std::isnan(in[i])) {
+        int val = static_cast<int>(in[i]);
+        if (std::isnan(in[i]) || val < 0 || val >= (int)class_names.size()) {
             out[i] = NAN;
         } else {
-            out[i] = (float)class_map[val];
+            out[i] = static_cast<float>(remap[val]);
         }
     }
 
-    // Write output
+    // Write output raster
     string ofn = fn + "_remap.bin";
     string ohfn = fn + "_remap.hdr";
-    hwrite(ohfn, nrow, ncol, 1);
+    hwrite(ohfn, nrow, ncol, 1); // single-band
 
-    // Append new class names
+    // Append coarse class names to header
     ofstream hf(ohfn, ios::app);
     hf << "class names = {\n";
     for (size_t i = 0; i < coarse_class_names.size(); ++i) {
@@ -154,8 +155,9 @@ int main(int argc, char** argv) {
     hf << "}" << endl;
     hf.close();
 
+    // Write binary data
     FILE* f = fopen(ofn.c_str(), "wb");
-    if (!f) err("Failed to open output file");
+    if (!f) err("Failed to open output file for writing");
     fwrite(out, sizeof(float), np, f);
     fclose(f);
 
