@@ -17,7 +17,8 @@ int main(int argc, char ** argv){
     str fn(argv[1]);            // input file name
     str hfn(hdr_fn(fn));        // header file
     size_t nrow, ncol, nband;
-    hread(hfn, nrow, ncol, nband); // read header
+    vector<str> band_names;
+    hread(hfn, nrow, ncol, nband, band_names); // read header
 
     if(nband < 1) err("input must have at least 1 band (one-hot encoding)");
 
@@ -53,13 +54,13 @@ int main(int argc, char ** argv){
     hwrite(ohfn, nrow, ncol, 1);  // single-band output
 
     // Example class names (update these as needed)
-    vector<string> class_names;
+    /*vector<string> class_names;
     for (size_t i = 0; i < nband; ++i) {
         class_names.push_back("class_" + to_string(i));
     }
-
+    */
     // Append class names to header
-    happend_class_names(ohfn, class_names);
+    happend_class_names(ohfn, band_names);
 
     FILE * f = fopen(ofn.c_str(), "wb");
     if(!f) err("Failed to open output file");
