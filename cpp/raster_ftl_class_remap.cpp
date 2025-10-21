@@ -40,8 +40,6 @@ C-4	Starts with C	C
 C-6	Starts with C	C
 */
 
-
-
 #include "misc.h"
 #include <fstream>
 #include <iostream>
@@ -125,30 +123,44 @@ int main(int argc, char** argv) {
     vector<string> class_names = read_class_names(hfn);
     if (class_names.empty()) err("No class names found in header");
 
-    // Build fine class ID -> coarse class ID mapping
-    unordered_map<string, int> coarse_class_ids;
-    vector<string> coarse_class_names;
-    unordered_map<int, int> remap; // fine class ID -> coarse class ID
-    int next_coarse_id = 0;
+    // Fixed order of coarse classes (only these 7 possible groups)
+    vector<string> fixed_order = {"C", "D", "S", "N", "O", "M", "W"};
 
+    // Map fine classes to coarse classes
+    unordered_map<int, string> fine_to_coarse;
     for (size_t i = 0; i < class_names.size(); ++i) {
-        string coarse = map_class(class_names[i]);  // may throw on error
-
-        if (coarse_class_ids.find(coarse) == coarse_class_ids.end()) {
-            coarse_class_ids[coarse] = next_coarse_id++;
-            coarse_class_names.push_back(coarse);
-        }
-
-        remap[i] = coarse_class_ids[coarse];
+        string coarse = map_class(class_names[i]);
+        fine_to_coarse[(int)i] = coarse;
     }
 
-    // Remap pixels
+    // Determine which coarse classes are actually present in the input
+    // We'll only output these, in fixed order
+    unordered_map<string, int> coarse_class_ids; // coarse class -> new id
+    vector<string> output_coarse_classes;
+
+    // Assign new IDs based on fixed order and presence
+    int next_id = 0;
+    for (const string& cclass : fixed_order) {
+        // Check if this coarse class appears in fine_to_coarse
+        bool present = false;
+        for (auto& kv : fine_to_coarse) {
+            if (kv.second == cclass) {
+                present = true;
+                break;
+            }
+        }
+        if (present) {
+            coarse_class_ids[cclass] = next_id++;
+            output_coarse_classes.push_back(cclass);
+        }
+    }
+
+    // Now remap pixels
     float* out = (float*)malloc(np * sizeof(float));
     if (!out) err("Memory allocation failed");
 
     for (size_t i = 0; i < np; ++i) {
         float valf = in[i];
-
         if (std::isnan(valf)) {
             out[i] = NAN;
             continue;
@@ -156,11 +168,11 @@ int main(int argc, char** argv) {
 
         int val = static_cast<int>(valf);
 
-        // Check for valid class index
         if (val < 0 || val >= (int)class_names.size()) {
             out[i] = NAN;
         } else {
-            out[i] = static_cast<float>(remap[val]);
+            const string& coarse = fine_to_coarse[val];
+            out[i] = static_cast<float>(coarse_class_ids[coarse]);
         }
     }
 
@@ -169,12 +181,12 @@ int main(int argc, char** argv) {
     string ohfn = fn + "_remap.hdr";
     hwrite(ohfn, nrow, ncol, 1); // single-band
 
-    // Append new coarse class names to header
+    // Append fixed order coarse class names that are present
     ofstream hf(ohfn, ios::app);
     hf << "class names = {\n";
-    for (size_t i = 0; i < coarse_class_names.size(); ++i) {
-        hf << "  " << coarse_class_names[i];
-        if (i != coarse_class_names.size() - 1) hf << ",\n";
+    for (size_t i = 0; i < output_coarse_classes.size(); ++i) {
+        hf << "  " << output_coarse_classes[i];
+        if (i != output_coarse_classes.size() - 1) hf << ",\n";
         else hf << "\n";
     }
     hf << "}" << endl;
