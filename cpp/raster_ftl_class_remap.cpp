@@ -40,6 +40,8 @@ C-4	Starts with C	C
 C-6	Starts with C	C
 */
 
+
+
 #include "misc.h"
 #include <fstream>
 #include <iostream>
@@ -66,7 +68,6 @@ vector<string> read_class_names(const string& hdr_file) {
         }
         if (in_class_block) {
             if (line.find("}") != string::npos) break;
-            // Remove commas and trim whitespace
             size_t start = line.find_first_not_of(" \t,");
             size_t end = line.find_last_not_of(" \t,\n\r");
             if (start != string::npos && end != string::npos)
@@ -80,17 +81,30 @@ vector<string> read_class_names(const string& hdr_file) {
 
 // Mapping logic: fine class name -> coarse group
 string map_class(const string& name) {
-    if (name == "W") return "W";
-    if (name.find("D-1/2") != string::npos) return "D";
-    if (name.find("M-1/2") != string::npos) return "M";
-    if (name.find("O-1") != string::npos) return "O";
-    if (name.find("N") != string::npos) return "N";
-    if (name.rfind("C", 0) == 0) return "C"; // starts with 'C'
-    if (name.rfind("S", 0) == 0) return "S"; // starts with 'S'
+    vector<string> matched;
 
-    // If no rule matches, throw an error
-    cerr << "Unrecognized class name in header: " << name << endl;
-    exit(1);
+    if (name == "W") matched.push_back("W");
+    if (name.find("D-1/2") != string::npos) matched.push_back("D");
+    if (name.find("M-1/2") != string::npos) matched.push_back("M");
+    if (name.find("O-1") != string::npos) matched.push_back("O");
+    if (name.find("N") != string::npos) matched.push_back("N");
+    if (name.find("C") == 0) matched.push_back("C");
+    if (name.find("S") != string::npos) matched.push_back("S");
+
+    if (matched.empty()) {
+        cerr << "Unrecognized class name in header: " << name << endl;
+        exit(1);
+    }
+
+    if (matched.size() > 1) {
+        cerr << "Ambiguous match for class name: " << name << endl;
+        cerr << "Matched multiple groups: ";
+        for (auto& m : matched) cerr << m << " ";
+        cerr << endl;
+        exit(1);
+    }
+
+    return matched[0];
 }
 
 int main(int argc, char** argv) {
@@ -118,7 +132,7 @@ int main(int argc, char** argv) {
     int next_coarse_id = 0;
 
     for (size_t i = 0; i < class_names.size(); ++i) {
-        string coarse = map_class(class_names[i]);  // will throw error if unmatched
+        string coarse = map_class(class_names[i]);  // may throw on error
 
         if (coarse_class_ids.find(coarse) == coarse_class_ids.end()) {
             coarse_class_ids[coarse] = next_coarse_id++;
