@@ -21,6 +21,11 @@ Outputs:
    (with progress monitor and multithreaded mode computation)
 */
 
+
+/* 20251022: Segment-based central statistics and classification
+   (with progress monitor + dynamic pthread-based multithreaded mode computation)
+*/
+
 #include "misc.h"
 #include <cmath>
 #include <cstdint>
@@ -36,6 +41,7 @@ Outputs:
 #include <thread>
 #include <mutex>
 #include <atomic>
+#include <pthread.h>
 
 using std::size_t;
 
@@ -61,6 +67,61 @@ static inline bool isnan_any(const std::vector<float> &v) {
   for (float f : v)
     if (std::isnan(f)) return true;
   return false;
+}
+
+struct ModeJobContext {
+  const std::vector<int> *seg_ids;
+  const std::unordered_map<int, std::vector<std::vector<float>>> *seg_pixels;
+  std::unordered_map<int, std::vector<float>> *seg_means;
+  std::mutex *mutex_seg;
+  std::mutex *mutex_out;
+  std::atomic<size_t> *progress;
+  size_t total;
+  size_t *job_index;
+  bool verbose;
+};
+
+void *mode_worker(void *arg) {
+  ModeJobContext *ctx = (ModeJobContext *)arg;
+  while (true) {
+    size_t i;
+    {
+      std::lock_guard<std::mutex> lock(*ctx->mutex_seg);
+      i = (*ctx->job_index)++;
+      if (i >= ctx->seg_ids->size()) break;
+    }
+
+    int sid = (*(ctx->seg_ids))[i];
+    const auto &pixlist = ctx->seg_pixels->at(sid);
+    if (pixlist.empty()) continue;
+
+    double best_sum = std::numeric_limits<double>::infinity();
+    size_t best_idx = 0;
+    for (size_t a = 0; a < pixlist.size(); ++a) {
+      double s = 0.0;
+      for (size_t b = 0; b < pixlist.size(); ++b) {
+        if (a == b) continue;
+        s += sqdist(pixlist[a], pixlist[b]);
+      }
+      if (s < best_sum) {
+        best_sum = s;
+        best_idx = a;
+      }
+    }
+
+    {
+      std::lock_guard<std::mutex> lock(*ctx->mutex_out);
+      (*ctx->seg_means)[sid] = pixlist[best_idx];
+    }
+
+    size_t done = ++(*ctx->progress);
+    if (ctx->verbose && (done % 100 == 0 || done == ctx->total)) {
+      double pct = 100.0 * done / ctx->total;
+      std::lock_guard<std::mutex> lock(*ctx->mutex_out);
+      std::cout << "\rProcessed " << done << " / " << ctx->total << " segments (" << (int)pct << "%)" << std::flush;
+    }
+  }
+  return nullptr;
 }
 
 int main(int argc, char **argv) {
@@ -153,10 +214,10 @@ int main(int argc, char **argv) {
   }
 
   // -------------------------------
-  // MODE OPTION: parallel computation
+  // MODE OPTION: dynamic pthread pool
   // -------------------------------
   if (use_mode) {
-    std::cout << "Computing per-segment mode (multi-core)..." << std::endl;
+    std::cout << "Computing per-segment mode (dynamic pthread scheduling)..." << std::endl;
 
     std::unordered_map<int, std::vector<std::vector<float>>> seg_pixels;
     for (size_t i = 0; i < np; ++i) {
@@ -183,58 +244,32 @@ int main(int argc, char **argv) {
     size_t nseg = seg_ids.size();
     unsigned nthreads = std::thread::hardware_concurrency();
     if (nthreads == 0) nthreads = 4;
-
     std::cout << "Using " << nthreads << " threads for mode computation (" << nseg << " segments)." << std::endl;
 
-    std::mutex output_mutex;
-    std::atomic<size_t> progress(0);
+    pthread_t *threads = new pthread_t[nthreads];
+    ModeJobContext ctx;
+    ctx.seg_ids = &seg_ids;
+    ctx.seg_pixels = &seg_pixels;
+    ctx.seg_means = &seg_means;
+    ctx.total = nseg;
+    ctx.job_index = new size_t(0);
+    ctx.mutex_seg = new std::mutex();
+    ctx.mutex_out = new std::mutex();
+    ctx.progress = new std::atomic<size_t>(0);
+    ctx.verbose = true;
 
-    auto worker = [&](size_t start, size_t end) {
-      std::unordered_map<int, std::vector<float>> local_results;
-      for (size_t i = start; i < end; ++i) {
-        int sid = seg_ids[i];
-        auto &pixlist = seg_pixels[sid];
-        if (pixlist.empty()) continue;
-
-        double best_sum = std::numeric_limits<double>::infinity();
-        size_t best_idx = 0;
-        for (size_t a = 0; a < pixlist.size(); ++a) {
-          double s = 0.0;
-          for (size_t b = 0; b < pixlist.size(); ++b) {
-            if (a == b) continue;
-            s += sqdist(pixlist[a], pixlist[b]);
-          }
-          if (s < best_sum) {
-            best_sum = s;
-            best_idx = a;
-          }
-        }
-        local_results[sid] = pixlist[best_idx];
-
-        size_t done = ++progress;
-        if (done % 100 == 0 || done == nseg) {
-          double pct = 100.0 * done / nseg;
-          std::lock_guard<std::mutex> lock(output_mutex);
-          std::cout << "\rProcessed " << done << " / " << nseg << " segments (" << (int)pct << "%)" << std::flush;
-        }
-      }
-      std::lock_guard<std::mutex> lock(output_mutex);
-      for (auto &kv : local_results) {
-        seg_means[kv.first] = std::move(kv.second);
-      }
-    };
-
-    std::vector<std::thread> threads;
-    size_t chunk = (nseg + nthreads - 1) / nthreads;
-    for (unsigned t = 0; t < nthreads; ++t) {
-      size_t start = t * chunk;
-      size_t end = std::min(start + chunk, nseg);
-      if (start < end)
-        threads.emplace_back(worker, start, end);
-    }
-    for (auto &th : threads) th.join();
+    for (unsigned t = 0; t < nthreads; ++t)
+      pthread_create(&threads[t], nullptr, mode_worker, &ctx);
+    for (unsigned t = 0; t < nthreads; ++t)
+      pthread_join(threads[t], nullptr);
 
     std::cout << "\nMode computation complete." << std::endl;
+
+    delete ctx.job_index;
+    delete ctx.mutex_seg;
+    delete ctx.mutex_out;
+    delete ctx.progress;
+    delete[] threads;
   }
 
   // -------------------------------
@@ -324,9 +359,6 @@ int main(int argc, char **argv) {
   bwrite(out_class.data(), out_cls_fn, nrow, ncol, 1);
   hwrite(out_cls_hdr, nrow, ncol, 1, 4, bandNames);
 
-  // -------------------------------
-  // Cleanup
-  // -------------------------------
   free(img);
   free(seg);
   free(cls);
