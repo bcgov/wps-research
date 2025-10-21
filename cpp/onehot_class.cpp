@@ -52,6 +52,15 @@ int main(int argc, char ** argv){
     str ohfn(fn + str("_class.hdr"));
     hwrite(ohfn, nrow, ncol, 1);  // single-band output
 
+    // Example class names (update these as needed)
+    vector<string> class_names;
+    for (size_t i = 0; i < nband; ++i) {
+        class_names.push_back("class_" + to_string(i));
+    }
+
+    // Append class names to header
+    happend_class_names(ohfn, class_names);
+
     FILE * f = fopen(ofn.c_str(), "wb");
     if(!f) err("Failed to open output file");
     fwrite(out, sizeof(float), np, f);
@@ -63,5 +72,3 @@ int main(int argc, char ** argv){
     printf("Done: %s\n", ofn.c_str());
     return 0;
 }
-
-
