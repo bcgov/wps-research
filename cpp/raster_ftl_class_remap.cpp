@@ -40,7 +40,6 @@ C-4	Starts with C	C
 C-6	Starts with C	C
 */
 
-
 #include "misc.h"
 #include <fstream>
 #include <iostream>
@@ -88,7 +87,10 @@ string map_class(const string& name) {
     if (name.find("N") != string::npos) return "N";
     if (name.rfind("C", 0) == 0) return "C"; // starts with 'C'
     if (name.rfind("S", 0) == 0) return "S"; // starts with 'S'
-    return "UNKNOWN";
+
+    // If no rule matches, throw an error
+    cerr << "Unrecognized class name in header: " << name << endl;
+    exit(1);
 }
 
 int main(int argc, char** argv) {
@@ -109,14 +111,14 @@ int main(int argc, char** argv) {
     vector<string> class_names = read_class_names(hfn);
     if (class_names.empty()) err("No class names found in header");
 
-    // Build fine -> coarse class ID map
+    // Build fine class ID -> coarse class ID mapping
     unordered_map<string, int> coarse_class_ids;
     vector<string> coarse_class_names;
     unordered_map<int, int> remap; // fine class ID -> coarse class ID
     int next_coarse_id = 0;
 
     for (size_t i = 0; i < class_names.size(); ++i) {
-        string coarse = map_class(class_names[i]);
+        string coarse = map_class(class_names[i]);  // will throw error if unmatched
 
         if (coarse_class_ids.find(coarse) == coarse_class_ids.end()) {
             coarse_class_ids[coarse] = next_coarse_id++;
@@ -131,8 +133,17 @@ int main(int argc, char** argv) {
     if (!out) err("Memory allocation failed");
 
     for (size_t i = 0; i < np; ++i) {
-        int val = static_cast<int>(in[i]);
-        if (std::isnan(in[i]) || val < 0 || val >= (int)class_names.size()) {
+        float valf = in[i];
+
+        if (std::isnan(valf)) {
+            out[i] = NAN;
+            continue;
+        }
+
+        int val = static_cast<int>(valf);
+
+        // Check for valid class index
+        if (val < 0 || val >= (int)class_names.size()) {
             out[i] = NAN;
         } else {
             out[i] = static_cast<float>(remap[val]);
@@ -144,7 +155,7 @@ int main(int argc, char** argv) {
     string ohfn = fn + "_remap.hdr";
     hwrite(ohfn, nrow, ncol, 1); // single-band
 
-    // Append coarse class names to header
+    // Append new coarse class names to header
     ofstream hf(ohfn, ios::app);
     hf << "class names = {\n";
     for (size_t i = 0; i < coarse_class_names.size(); ++i) {
@@ -155,7 +166,7 @@ int main(int argc, char** argv) {
     hf << "}" << endl;
     hf.close();
 
-    // Write binary data
+    // Write binary output
     FILE* f = fopen(ofn.c_str(), "wb");
     if (!f) err("Failed to open output file for writing");
     fwrite(out, sizeof(float), np, f);
