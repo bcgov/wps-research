@@ -18,12 +18,8 @@ Outputs:
 */
 
 /* 20251022: Segment-based central statistics and classification
-   (with progress monitor and multithreaded mode computation)
-*/
-
-
-/* 20251022: Segment-based central statistics and classification
-   (parallelized within-segment mode computation using pthreads)
+   Fully parallelized L1-distance mode/non-mode computation
+   Float32 operations, progress monitor, persistent thread pool
 */
 
 #include "misc.h"
@@ -40,316 +36,313 @@ Outputs:
 #include <iostream>
 #include <thread>
 #include <mutex>
+#include <queue>
+#include <condition_variable>
 #include <atomic>
-#include <pthread.h>
+#include <chrono>
+#include <functional>
 
 using std::size_t;
+using namespace std::chrono;
 
 struct VecSum {
-  std::vector<double> sum;
-  long count = 0;
+    std::vector<float> sum;
+    long count = 0;
 };
 
-static inline double sqdist(const std::vector<float> &a, const std::vector<float> &b) {
-  double d = 0.0;
-  for (size_t i = 0; i < a.size(); ++i) {
-    double diff = (double)a[i] - (double)b[i];
-    d += diff * diff;
-  }
-  return d;
-}
-
-static inline bool isnan_any(const std::vector<float> &v) {
-  for (float f : v)
-    if (std::isnan(f)) return true;
-  return false;
-}
-
-struct ModeThreadContext {
-  const std::vector<std::vector<float>> *pixlist;
-  std::atomic<size_t> *job_idx;
-  size_t total;
-  std::mutex *best_mutex;
-  double *best_sum;
-  size_t *best_idx;
+struct VecFloat {
+    std::vector<float> v;
 };
 
-void *mode_inner_worker(void *arg) {
-  ModeThreadContext *ctx = (ModeThreadContext *)arg;
-  const auto &pixlist = *(ctx->pixlist);
-
-  while (true) {
-    size_t a = (*ctx->job_idx)++;
-    if (a >= ctx->total) break;
-
-    double s = 0.0;
-    for (size_t b = 0; b < ctx->total; ++b) {
-      if (a == b) continue;
-      s += sqdist(pixlist[a], pixlist[b]);
-    }
-
-    {
-      std::lock_guard<std::mutex> lock(*ctx->best_mutex);
-      if (s < *ctx->best_sum) {
-        *ctx->best_sum = s;
-        *ctx->best_idx = a;
-      }
-    }
-  }
-
-  return nullptr;
+// L1 distance between two float vectors
+static inline float l1_dist(const std::vector<float>& a, const std::vector<float>& b) {
+    float d = 0.f;
+    for (size_t i = 0; i < a.size(); ++i)
+        d += std::fabs(a[i] - b[i]);
+    return d;
 }
 
-static size_t find_mode_index_parallel(const std::vector<std::vector<float>> &pixlist) {
-  if (pixlist.empty()) return 0;
-  if (pixlist.size() == 1) return 0;
+// ThreadPool for persistent threads
+class ThreadPool {
+public:
+    ThreadPool(size_t n_threads) : done(false) {
+        for (size_t i = 0; i < n_threads; ++i)
+            workers.emplace_back(&ThreadPool::worker_loop, this);
+    }
 
-  unsigned nthreads = std::thread::hardware_concurrency();
-  if (nthreads == 0) nthreads = 4;
+    ~ThreadPool() {
+        {
+            std::unique_lock<std::mutex> lock(mutex);
+            done = true;
+        }
+        cond.notify_all();
+        for (auto &t : workers) t.join();
+    }
 
-  pthread_t *threads = new pthread_t[nthreads];
-  ModeThreadContext ctx;
-  ctx.pixlist = &pixlist;
-  ctx.job_idx = new std::atomic<size_t>(0);
-  ctx.total = pixlist.size();
-  ctx.best_mutex = new std::mutex();
-  ctx.best_sum = new double(std::numeric_limits<double>::infinity());
-  ctx.best_idx = new size_t(0);
+    void enqueue(std::function<void()> f) {
+        {
+            std::unique_lock<std::mutex> lock(mutex);
+            tasks.push(std::move(f));
+        }
+        cond.notify_one();
+    }
 
-  for (unsigned t = 0; t < nthreads; ++t)
-    pthread_create(&threads[t], nullptr, mode_inner_worker, &ctx);
-  for (unsigned t = 0; t < nthreads; ++t)
-    pthread_join(threads[t], nullptr);
+    void wait_for_completion() {
+        while (true) {
+            std::unique_lock<std::mutex> lock(mutex);
+            if (tasks.empty() && active.load() == 0) break;
+            cond.wait_for(lock, std::chrono::milliseconds(50));
+        }
+    }
 
-  size_t result = *ctx.best_idx;
+private:
+    std::vector<std::thread> workers;
+    std::queue<std::function<void()>> tasks;
+    std::mutex mutex;
+    std::condition_variable cond;
+    std::atomic<int> active{0};
+    bool done;
 
-  delete ctx.job_idx;
-  delete ctx.best_mutex;
-  delete ctx.best_sum;
-  delete ctx.best_idx;
-  delete[] threads;
-  return result;
-}
+    void worker_loop() {
+        while (true) {
+            std::function<void()> task;
+            {
+                std::unique_lock<std::mutex> lock(mutex);
+                cond.wait(lock, [this]() { return done || !tasks.empty(); });
+                if (done && tasks.empty()) return;
+                task = std::move(tasks.front());
+                tasks.pop();
+                active++;
+            }
+            task();
+            active--;
+            cond.notify_all();
+        }
+    }
+};
 
 int main(int argc, char **argv) {
-  if (argc < 4) {
-    err("Usage: segment_central_stats.exe [image.bin] [segment_index.bin] [class_map.bin] [--mode (optional)]");
-  }
-
-  bool use_mode = false;
-  if (argc > 4 && strcmp(argv[4], "--mode") == 0) {
-    use_mode = true;
-  }
-
-  str img_fn(argv[1]);
-  str seg_fn(argv[2]);
-  str cls_fn(argv[3]);
-
-  // Read headers
-  str h_img(hdr_fn(img_fn));
-  str h_seg(hdr_fn(seg_fn));
-  str h_cls(hdr_fn(cls_fn));
-
-  size_t nrow_img, ncol_img, nband_img;
-  size_t nrow_seg, ncol_seg, nband_seg;
-  size_t nrow_cls, ncol_cls, nband_cls;
-  std::vector<std::string> bandNames;
-
-  size_t dtype_img = hread(h_img, nrow_img, ncol_img, nband_img, bandNames);
-  size_t dtype_seg = hread(h_seg, nrow_seg, ncol_seg, nband_seg);
-  size_t dtype_cls = hread(h_cls, nrow_cls, ncol_cls, nband_cls);
-
-  if (dtype_img != 4 || dtype_seg != 4 || dtype_cls != 4)
-    err("All inputs must be 32-bit float (type 4).");
-
-  if (nrow_img != nrow_seg || ncol_img != ncol_seg ||
-      nrow_img != nrow_cls || ncol_img != ncol_cls)
-    err("All input rasters must have the same dimensions.");
-
-  if (nband_seg != 1 || nband_cls != 1)
-    err("Segment index and class map must be single-band.");
-
-  size_t nrow = nrow_img;
-  size_t ncol = ncol_img;
-  size_t nband = nband_img;
-  size_t np = nrow * ncol;
-
-  // Read data
-  float *img = bread(img_fn, nrow, ncol, nband);
-  float *seg = bread(seg_fn, nrow, ncol, nband_seg);
-  float *cls = bread(cls_fn, nrow, ncol, nband_cls);
-
-  if (!img || !seg || !cls)
-    err("Failed to read one or more inputs.");
-
-  // -------------------------------
-  // Compute per-segment means
-  // -------------------------------
-  std::unordered_map<int, VecSum> seg_stats;
-  std::cout << "Computing per-segment averages..." << std::endl;
-
-  for (size_t i = 0; i < np; ++i) {
-    float seg_id_f = seg[i];
-    if (std::isnan(seg_id_f)) continue;
-    int seg_id = (int)seg_id_f;
-
-    std::vector<float> pix(nband);
-    bool skip = false;
-    for (size_t b = 0; b < nband; ++b) {
-      float v = img[b * np + i];
-      if (std::isnan(v)) { skip = true; break; }
-      pix[b] = v;
+    if (argc < 4) {
+        err("Usage: raster_flood_seg_supervised_classifier [image.bin] [segment_index.bin] [class_map.bin] [--mode]");
     }
-    if (skip) continue;
 
-    VecSum &vs = seg_stats[seg_id];
-    if (vs.sum.empty()) vs.sum.assign(nband, 0.0);
-    for (size_t b = 0; b < nband; ++b)
-      vs.sum[b] += pix[b];
-    vs.count++;
-  }
+    bool use_mode = false;
+    if (argc > 4 && strcmp(argv[4], "--mode") == 0)
+        use_mode = true;
 
-  std::unordered_map<int, std::vector<float>> seg_means;
-  seg_means.reserve(seg_stats.size());
-  for (auto &kv : seg_stats) {
-    if (kv.second.count == 0) continue;
-    std::vector<float> mean(nband);
-    for (size_t b = 0; b < nband; ++b)
-      mean[b] = (float)(kv.second.sum[b] / kv.second.count);
-    seg_means[kv.first] = std::move(mean);
-  }
+    std::string img_fn(argv[1]);
+    std::string seg_fn(argv[2]);
+    std::string cls_fn(argv[3]);
 
-  // -------------------------------
-  // MODE OPTION: parallel inner loop
-  // -------------------------------
-  if (use_mode) {
-    std::cout << "Computing per-segment mode (parallelized inner loop)..." << std::endl;
+    // Read headers
+    std::string h_img = hdr_fn(img_fn);
+    std::string h_seg = hdr_fn(seg_fn);
+    std::string h_cls = hdr_fn(cls_fn);
 
+    size_t nrow_img, ncol_img, nband_img;
+    size_t nrow_seg, ncol_seg, nband_seg;
+    size_t nrow_cls, ncol_cls, nband_cls;
+    std::vector<std::string> bandNames;
+
+    hread(h_img, nrow_img, ncol_img, nband_img, bandNames);
+    hread(h_seg, nrow_seg, ncol_seg, nband_seg, bandNames);
+    hread(h_cls, nrow_cls, ncol_cls, nband_cls, bandNames);
+
+    if (nband_seg != 1 || nband_cls != 1)
+        err("Segment index and class map must be single-band.");
+
+    size_t nrow = nrow_img;
+    size_t ncol = ncol_img;
+    size_t nband = nband_img;
+    size_t np = nrow * ncol;
+
+    // Read data
+    float *img = bread(img_fn, nrow, ncol, nband);
+    float *seg = bread(seg_fn, nrow, ncol, nband_seg);
+    float *cls = bread(cls_fn, nrow, ncol, nband_cls);
+
+    if (!img || !seg || !cls)
+        err("Failed to read one or more inputs.");
+
+    // -------------------------------
+    // Compute per-segment means or collect pixel vectors
+    // -------------------------------
+    std::unordered_map<int, VecSum> seg_stats;
     std::unordered_map<int, std::vector<std::vector<float>>> seg_pixels;
+
     for (size_t i = 0; i < np; ++i) {
-      float seg_id_f = seg[i];
-      if (std::isnan(seg_id_f)) continue;
-      int seg_id = (int)seg_id_f;
+        float seg_id_f = seg[i];
+        if (std::isnan(seg_id_f)) continue;
+        int seg_id = (int)seg_id_f;
 
-      std::vector<float> pix(nband);
-      bool skip = false;
-      for (size_t b = 0; b < nband; ++b) {
-        float v = img[b * np + i];
-        if (std::isnan(v)) { skip = true; break; }
-        pix[b] = v;
-      }
-      if (skip) continue;
+        std::vector<float> pix(nband);
+        bool skip = false;
+        for (size_t b = 0; b < nband; ++b) {
+            float v = img[b * np + i];
+            if (std::isnan(v)) { skip = true; break; }
+            pix[b] = v;
+        }
+        if (skip) continue;
 
-      seg_pixels[seg_id].push_back(std::move(pix));
+        if (use_mode) {
+            seg_pixels[seg_id].push_back(pix);
+        } else {
+            VecSum &vs = seg_stats[seg_id];
+            if (vs.sum.empty()) vs.sum.assign(nband, 0.f);
+            for (size_t b = 0; b < nband; ++b) vs.sum[b] += pix[b];
+            vs.count++;
+        }
     }
 
-    size_t nseg = seg_pixels.size();
-    size_t count = 0;
-    for (auto &kv : seg_pixels) {
-      count++;
-      if (count % 50 == 0 || count == nseg)
-        std::cout << "\rProcessed " << count << " / " << nseg << " segments" << std::flush;
+    // Compute per-segment representatives
+    std::unordered_map<int, std::vector<float>> seg_means;
 
-      const auto &pixlist = kv.second;
-      if (pixlist.empty()) continue;
-      size_t best_idx = find_mode_index_parallel(pixlist);
-      seg_means[kv.first] = pixlist[best_idx];
+    if (!use_mode) {
+        for (auto &kv : seg_stats) {
+            if (kv.second.count == 0) continue;
+            std::vector<float> mean(nband);
+            for (size_t b = 0; b < nband; ++b)
+                mean[b] = kv.second.sum[b] / kv.second.count;
+            seg_means[kv.first] = mean;
+        }
+    } else {
+        // Mode: persistent thread pool with inner L1 parallelization
+        std::vector<int> seg_list;
+        for (auto &kv : seg_pixels) seg_list.push_back(kv.first);
+
+        std::atomic<size_t> next_seg{0};
+        ThreadPool pool(2 * std::thread::hardware_concurrency());
+
+        std::mutex seg_means_mutex;
+        std::atomic<size_t> jobs_done{0};
+        size_t total_jobs = 0;
+        for (auto &kv : seg_pixels)
+            total_jobs += kv.second.size();
+
+        auto start_time = steady_clock::now();
+
+        for (size_t t = 0; t < seg_list.size(); ++t) {
+            pool.enqueue([&, t]() {
+                int sid = seg_list[t];
+                auto &pixels = seg_pixels[sid];
+                size_t npix = pixels.size();
+                std::vector<float> best_vec(nband);
+                float best_sum = std::numeric_limits<float>::infinity();
+
+                for (size_t i = 0; i < npix; ++i) {
+                    float s = 0.f;
+                    for (size_t j = 0; j < npix; ++j) {
+                        if (i == j) continue;
+                        s += l1_dist(pixels[i], pixels[j]);
+                    }
+                    if (s < best_sum) {
+                        best_sum = s;
+                        best_vec = pixels[i];
+                    }
+
+                    // Progress monitor (once every 1000 pixels)
+                    size_t done_now = jobs_done.fetch_add(1) + 1;
+                    if (done_now % 1000 == 0) {
+                        double frac = (double)done_now / total_jobs;
+                        auto now = steady_clock::now();
+                        double elapsed = duration_cast<seconds>(now - start_time).count();
+                        double eta = elapsed / frac - elapsed;
+                        printf("Mode progress: %zu / %zu (%.2f%%), ETA %.0f s\n",
+                               done_now, total_jobs, frac * 100., eta);
+                    }
+                }
+
+                std::lock_guard<std::mutex> lock(seg_means_mutex);
+                seg_means[sid] = best_vec;
+            });
+        }
+
+        pool.wait_for_completion();
     }
-    std::cout << "\rProcessed " << nseg << " / " << nseg << " segments\n";
-  }
 
-  // -------------------------------
-  // Compute per-class averages of segment means
-  // -------------------------------
-  std::unordered_map<int, VecSum> class_accum;
-  std::cout << "Computing per-class averages..." << std::endl;
-  size_t np_step = np / 20;
-  for (size_t i = 0; i < np; ++i) {
-    if (i % np_step == 0)
-      std::cout << "\rProgress " << (100 * i / np) << "%" << std::flush;
+    // -------------------------------
+    // Compute per-class averages
+    // -------------------------------
+    std::unordered_map<int, VecSum> class_accum;
+    for (size_t i = 0; i < np; ++i) {
+        float seg_id_f = seg[i];
+        float cls_id_f = cls[i];
+        if (std::isnan(seg_id_f) || std::isnan(cls_id_f)) continue;
+        int seg_id = (int)seg_id_f;
+        int cls_id = (int)cls_id_f;
+        auto it = seg_means.find(seg_id);
+        if (it == seg_means.end()) continue;
 
-    float seg_id_f = seg[i];
-    float cls_id_f = cls[i];
-    if (std::isnan(seg_id_f) || std::isnan(cls_id_f)) continue;
-    int seg_id = (int)seg_id_f;
-    int cls_id = (int)cls_id_f;
-    auto it = seg_means.find(seg_id);
-    if (it == seg_means.end()) continue;
-
-    VecSum &vc = class_accum[cls_id];
-    if (vc.sum.empty()) vc.sum.assign(nband, 0.0);
-    for (size_t b = 0; b < nband; ++b)
-      vc.sum[b] += it->second[b];
-    vc.count++;
-  }
-  std::cout << "\rProgress 100%\n";
-
-  std::unordered_map<int, std::vector<float>> class_means;
-  for (auto &kv : class_accum) {
-    if (kv.second.count == 0) continue;
-    std::vector<float> mean(nband);
-    for (size_t b = 0; b < nband; ++b)
-      mean[b] = (float)(kv.second.sum[b] / kv.second.count);
-    class_means[kv.first] = std::move(mean);
-  }
-
-  // -------------------------------
-  // Build output segment-average/mode image
-  // -------------------------------
-  std::vector<float> out_segment(nband * np, NAN);
-  std::cout << "Writing segment-level image..." << std::endl;
-  for (size_t i = 0; i < np; ++i) {
-    float seg_id_f = seg[i];
-    if (std::isnan(seg_id_f)) continue;
-    int seg_id = (int)seg_id_f;
-    auto it = seg_means.find(seg_id);
-    if (it == seg_means.end()) continue;
-    for (size_t b = 0; b < nband; ++b)
-      out_segment[b * np + i] = it->second[b];
-  }
-
-  str out_seg_fn(img_fn + (use_mode ? "_segment_mode.bin" : "_segment_average.bin"));
-  str out_seg_hdr(hdr_fn(out_seg_fn, true));
-  bwrite(out_segment.data(), out_seg_fn, nrow, ncol, nband);
-  hwrite(out_seg_hdr, nrow, ncol, nband, 4, bandNames);
-
-  // -------------------------------
-  // Classify each pixel by nearest class representative
-  // -------------------------------
-  std::vector<float> out_class(np, NAN);
-  std::cout << "Computing classification map..." << std::endl;
-  for (size_t i = 0; i < np; ++i) {
-    std::vector<float> pix(nband);
-    bool skip = false;
-    for (size_t b = 0; b < nband; ++b) {
-      float v = img[b * np + i];
-      if (std::isnan(v)) { skip = true; break; }
-      pix[b] = v;
+        VecSum &vc = class_accum[cls_id];
+        if (vc.sum.empty()) vc.sum.assign(nband, 0.f);
+        for (size_t b = 0; b < nband; ++b)
+            vc.sum[b] += it->second[b];
+        vc.count++;
     }
-    if (skip) continue;
 
-    double best_d = std::numeric_limits<double>::infinity();
-    int best_cls = -9999;
-    for (auto &kv : class_means) {
-      double d = sqdist(pix, kv.second);
-      if (d < best_d) {
-        best_d = d;
-        best_cls = kv.first;
-      }
+    std::unordered_map<int, std::vector<float>> class_means;
+    for (auto &kv : class_accum) {
+        if (kv.second.count == 0) continue;
+        std::vector<float> mean(nband);
+        for (size_t b = 0; b < nband; ++b)
+            mean[b] = kv.second.sum[b] / kv.second.count;
+        class_means[kv.first] = mean;
     }
-    out_class[i] = (float)best_cls;
-  }
 
-  str out_cls_fn(img_fn + "_classification_map.bin");
-  str out_cls_hdr(hdr_fn(out_cls_fn, true));
-  bwrite(out_class.data(), out_cls_fn, nrow, ncol, 1);
-  hwrite(out_cls_hdr, nrow, ncol, 1, 4, bandNames);
+    // -------------------------------
+    // Build output segment image
+    // -------------------------------
+    std::vector<float> out_segment(nband * np, NAN);
+    for (size_t i = 0; i < np; ++i) {
+        float seg_id_f = seg[i];
+        if (std::isnan(seg_id_f)) continue;
+        int seg_id = (int)seg_id_f;
+        auto it = seg_means.find(seg_id);
+        if (it == seg_means.end()) continue;
+        for (size_t b = 0; b < nband; ++b)
+            out_segment[b * np + i] = it->second[b];
+    }
 
-  free(img);
-  free(seg);
-  free(cls);
+    std::string out_seg_fn = img_fn + (use_mode ? "_segment_mode.bin" : "_segment_average.bin");
+    std::string out_seg_hdr = hdr_fn(out_seg_fn, true);
+    bwrite(out_segment.data(), out_seg_fn, nrow, ncol, nband);
+    hwrite(out_seg_hdr, nrow, ncol, nband, 4, bandNames);
 
-  std::cout << "Done." << std::endl;
-  return 0;
+    // -------------------------------
+    // Classify pixels
+    // -------------------------------
+    std::vector<float> out_class(np, NAN);
+    for (size_t i = 0; i < np; ++i) {
+        std::vector<float> pix(nband);
+        bool skip = false;
+        for (size_t b = 0; b < nband; ++b) {
+            float v = img[b * np + i];
+            if (std::isnan(v)) { skip = true; break; }
+            pix[b] = v;
+        }
+        if (skip) continue;
+
+        float best_d = std::numeric_limits<float>::infinity();
+        int best_cls = -9999;
+        for (auto &kv : class_means) {
+            float d = l1_dist(pix, kv.second);
+            if (d < best_d) {
+                best_d = d;
+                best_cls = kv.first;
+            }
+        }
+        out_class[i] = best_cls;
+    }
+
+    std::string out_cls_fn = img_fn + "_classification_map.bin";
+    std::string out_cls_hdr = hdr_fn(out_cls_fn, true);
+    bwrite(out_class.data(), out_cls_fn, nrow, ncol, 1);
+    hwrite(out_cls_hdr, nrow, ncol, 1, 4);
+
+    free(img);
+    free(seg);
+    free(cls);
+
+    return 0;
 }
 
