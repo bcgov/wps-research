@@ -7,6 +7,7 @@ Shapefile attrs include coordinates of selected areas, and original image file n
 
 # ============================================================
 # QGIS Annotation Tool – Polygons with Coordinates & Image
+# With Color Coding for Positive/Negative Samples
 # ============================================================
 
 from qgis.PyQt.QtWidgets import QPushButton, QHBoxLayout, QWidget, QGraphicsSimpleTextItem
@@ -14,7 +15,8 @@ from qgis.PyQt.QtGui import QColor
 from PyQt5.QtCore import QPointF, QVariant
 from qgis.core import (
     QgsProject, QgsVectorLayer, QgsField, QgsGeometry, QgsRectangle,
-    QgsWkbTypes, QgsFeature, QgsMapLayer
+    QgsWkbTypes, QgsFeature, QgsMapLayer, QgsSymbol, QgsRendererCategory,
+    QgsCategorizedSymbolRenderer, QgsFillSymbol
 )
 from qgis.gui import QgsMapTool, QgsRubberBand
 import os
@@ -22,7 +24,7 @@ import os
 # ------------------------------------------------------------
 # SETTINGS
 # ------------------------------------------------------------
-OUTPUT_SHP = "/data/fort_nelson/annotation_labels.shp"
+OUTPUT_SHP = "/ram/parker/annotation_labels.shp"
 DEFAULT_CLASS = "NEGATIVE"
 
 # ------------------------------------------------------------
@@ -77,6 +79,38 @@ def ensure_fields(layer):
 ensure_fields(annotation_layer)
 
 # ------------------------------------------------------------
+# APPLY COLOR-CODED SYMBOLOGY
+# ------------------------------------------------------------
+def apply_color_symbology(layer):
+    """Apply categorized symbology based on CLASS field"""
+
+    # Create symbols for each class
+    positive_symbol = QgsFillSymbol.createSimple({
+        'color': '0,255,0,100',  # Green with transparency
+        'outline_color': '0,180,0,255',  # Darker green outline
+        'outline_width': '0.5'
+    })
+
+    negative_symbol = QgsFillSymbol.createSimple({
+        'color': '255,0,0,100',  # Red with transparency
+        'outline_color': '180,0,0,255',  # Darker red outline
+        'outline_width': '0.5'
+    })
+
+    # Create categories
+    categories = []
+    categories.append(QgsRendererCategory('POSITIVE', positive_symbol, 'Positive'))
+    categories.append(QgsRendererCategory('NEGATIVE', negative_symbol, 'Negative'))
+
+    # Create and apply renderer
+    renderer = QgsCategorizedSymbolRenderer('CLASS', categories)
+    layer.setRenderer(renderer)
+    layer.triggerRepaint()
+
+# Apply symbology to the layer
+apply_color_symbology(annotation_layer)
+
+# ------------------------------------------------------------
 # GET TOP RASTER FILENAME
 # ------------------------------------------------------------
 def get_top_raster_filename():
@@ -109,10 +143,10 @@ class AnnotationTool(QgsMapTool):
         self.current_class = cls
         self.set_rubber_color()
         if cls == "POSITIVE":
-            pos_button.setStyleSheet("background-color: green")
+            pos_button.setStyleSheet("background-color: green; color: white; font-weight: bold")
             neg_button.setStyleSheet("")
         else:
-            neg_button.setStyleSheet("background-color: red")
+            neg_button.setStyleSheet("background-color: red; color: white; font-weight: bold")
             pos_button.setStyleSheet("")
 
     def set_rubber_color(self):
@@ -168,6 +202,9 @@ class AnnotationTool(QgsMapTool):
         # Add feature via dataProvider to ensure persistence and visibility
         self.layer.dataProvider().addFeatures([feat])
         self.layer.updateExtents()
+
+        # Reapply symbology and refresh
+        apply_color_symbology(self.layer)
         self.layer.triggerRepaint()
         self.canvas.refresh()
 
@@ -223,5 +260,8 @@ annot_button.clicked.connect(toggle_annotation)
 pos_button.clicked.connect(set_positive)
 neg_button.clicked.connect(set_negative)
 
-print("Annotation tool loaded. Output shapefile:", OUTPUT_SHP)
+# Set default class styling
+annotation_tool.set_class(DEFAULT_CLASS)
 
+print("Annotation tool loaded with color coding. Output shapefile:", OUTPUT_SHP)
+print("POSITIVE = Green, NEGATIVE = Red")
