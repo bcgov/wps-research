@@ -4,7 +4,6 @@ saved/updated to shapefile.
 
 Shapefile attrs include coordinates of selected areas, and original image file name
 '''
-
 # ============================================================
 # QGIS Annotation Tool – Polygons with Coordinates & Image
 # With Color Coding for Positive/Negative Samples
@@ -28,11 +27,19 @@ OUTPUT_SHP = "/ram/parker/annotation_labels.shp"
 DEFAULT_CLASS = "NEGATIVE"
 
 # ------------------------------------------------------------
-# REMOVE EXISTING BUTTONS
+# REMOVE EXISTING BUTTONS  (FIXED)
 # ------------------------------------------------------------
 if hasattr(iface, "annotation_button_widget"):
-    iface.removeToolBarWidget(iface.annotation_button_widget)
-    del iface.annotation_button_widget
+    try:
+        parent_tb = iface.annotation_button_widget.parentWidget()
+        if parent_tb and hasattr(parent_tb, "removeWidget"):
+            parent_tb.removeWidget(iface.annotation_button_widget)
+        iface.annotation_button_widget.setParent(None)
+        iface.annotation_button_widget.deleteLater()
+    except Exception as e:
+        print("Could not remove existing annotation widget:", e)
+    finally:
+        del iface.annotation_button_widget
 
 # ------------------------------------------------------------
 # LOAD OR CREATE SHAPEFILE
@@ -81,77 +88,6 @@ def ensure_fields(layer):
 ensure_fields(annotation_layer)
 
 # ------------------------------------------------------------
-# APPLY COLOR-CODED SYMBOLOGY
-# ------------------------------------------------------------
-def apply_color_symbology(layer):
-    """Apply categorized symbology based on CLASS field"""
-
-    # Create symbols for each class
-    positive_symbol = QgsFillSymbol.createSimple({
-        'color': '0,255,0,100',  # Green with transparency
-        'outline_color': '0,180,0,255',  # Darker green outline
-        'outline_width': '0.5'
-    })
-
-    negative_symbol = QgsFillSymbol.createSimple({
-        'color': '255,0,0,100',  # Red with transparency
-        'outline_color': '180,0,0,255',  # Darker red outline
-        'outline_width': '0.5'
-    })
-
-    # Create categories
-    categories = []
-    categories.append(QgsRendererCategory('POSITIVE', positive_symbol, 'Positive'))
-    categories.append(QgsRendererCategory('NEGATIVE', negative_symbol, 'Negative'))
-
-    # Create and apply renderer
-    renderer = QgsCategorizedSymbolRenderer('CLASS', categories)
-    layer.setRenderer(renderer)
-    layer.triggerRepaint()
-
-# Apply symbology to the layer
-apply_color_symbology(annotation_layer)
-
-# ------------------------------------------------------------
-# BACKFILL COORDS_IMG FOR EXISTING FEATURES
-# ------------------------------------------------------------
-def backfill_coords_img(layer):
-    """Fill in COORDS_IMG for existing features where it's NULL"""
-    raster_layer = get_top_raster_layer()
-    if not raster_layer:
-        print("Warning: No raster layer found for backfilling COORDS_IMG")
-        return
-
-    layer.startEditing()
-    updated_count = 0
-
-    for feat in layer.getFeatures():
-        # Check if COORDS_IMG is NULL or empty
-        coords_img = feat["COORDS_IMG"]
-        if coords_img is None or coords_img == "" or coords_img == "NULL":
-            geom = feat.geometry()
-            if geom and geom.isGeosValid() and not geom.isMultipart():
-                polygon_points = geom.asPolygon()[0]
-                coords_img_str = geo_to_pixel_coords(raster_layer, polygon_points)
-
-                if coords_img_str:
-                    feat["COORDS_IMG"] = coords_img_str
-                    layer.updateFeature(feat)
-                    updated_count += 1
-                    print(f"Backfilled COORDS_IMG for feature {feat.id()}: {coords_img_str}")
-
-    layer.commitChanges()
-    layer.triggerRepaint()
-
-    if updated_count > 0:
-        print(f"✓ Backfilled COORDS_IMG for {updated_count} existing features")
-    else:
-        print("No features needed COORDS_IMG backfilling")
-
-# Run backfill on startup
-backfill_coords_img(annotation_layer)
-
-# ------------------------------------------------------------
 # GET TOP RASTER FILENAME AND LAYER
 # ------------------------------------------------------------
 def get_top_raster_layer():
@@ -163,44 +99,100 @@ def get_top_raster_layer():
     return None
 
 def get_top_raster_filename():
-    """Get the filename of the topmost raster layer"""
     lyr = get_top_raster_layer()
     if lyr:
         return os.path.basename(lyr.source())
     return "UNKNOWN"
 
 def geo_to_pixel_coords(raster_layer, geo_points):
-    """
-    Convert geographic coordinates to pixel (row, col) coordinates
-
-    Args:
-        raster_layer: QgsRasterLayer
-        geo_points: List of QgsPointXY objects
-
-    Returns:
-        String formatted as "col,row;col,row;..." or None if conversion fails
-    """
     if not raster_layer or not raster_layer.isValid():
         return None
-
+    
     extent = raster_layer.extent()
     width = raster_layer.width()
     height = raster_layer.height()
-
+    
     pixel_coords = []
     for point in geo_points:
-        # Calculate pixel coordinates
-        # Note: row 0 is at the top of the image
         col = int((point.x() - extent.xMinimum()) / extent.width() * width)
         row = int((extent.yMaximum() - point.y()) / extent.height() * height)
-
-        # Clamp to valid range
         col = max(0, min(col, width - 1))
         row = max(0, min(row, height - 1))
-
         pixel_coords.append(f"{col},{row}")
-
+    
     return ";".join(pixel_coords)
+
+# ------------------------------------------------------------
+# APPLY COLOR-CODED SYMBOLOGY
+# ------------------------------------------------------------
+def apply_color_symbology(layer):
+    positive_symbol = QgsFillSymbol.createSimple({
+        'color': '0,255,0,100',
+        'outline_color': '0,180,0,255',
+        'outline_width': '0.5'
+    })
+    
+    negative_symbol = QgsFillSymbol.createSimple({
+        'color': '255,0,0,100',
+        'outline_color': '180,0,0,255',
+        'outline_width': '0.5'
+    })
+    
+    categories = [
+        QgsRendererCategory('POSITIVE', positive_symbol, 'Positive'),
+        QgsRendererCategory('NEGATIVE', negative_symbol, 'Negative'),
+    ]
+    
+    renderer = QgsCategorizedSymbolRenderer('CLASS', categories)
+    layer.setRenderer(renderer)
+    layer.triggerRepaint()
+
+apply_color_symbology(annotation_layer)
+
+# ------------------------------------------------------------
+# BACKFILL COORDS_IMG FOR EXISTING FEATURES
+# ------------------------------------------------------------
+def backfill_coords_img(layer):
+    raster_layer = get_top_raster_layer()
+    if not raster_layer:
+        print("Warning: No raster layer found for backfilling COORDS_IMG")
+        return
+    
+    layer.startEditing()
+    updated_count = 0
+    
+    for feat in layer.getFeatures():
+        coords_img = feat["COORDS_IMG"]
+        needs_update = (
+            coords_img is None or 
+            str(coords_img).strip() == "" or 
+            str(coords_img).upper() in ("NULL", "NONE") or
+            coords_img in ("N/A", "NO_RASTER")
+        )
+        
+        if needs_update:
+            geom = feat.geometry()
+            if geom and geom.isGeosValid() and not geom.isMultipart():
+                polygon_points = geom.asPolygon()[0]
+                coords_img_str = geo_to_pixel_coords(raster_layer, polygon_points)
+                
+                if coords_img_str:
+                    idx = layer.fields().indexFromName("COORDS_IMG")
+                    layer.changeAttributeValue(feat.id(), idx, coords_img_str)
+                    updated_count += 1
+                    print(f"Backfilled COORDS_IMG for feature {feat.id()}: {coords_img_str}")
+    
+    if layer.commitChanges():
+        layer.triggerRepaint()
+        if updated_count > 0:
+            print(f"✓ Backfilled COORDS_IMG for {updated_count} existing features")
+        else:
+            print("No features needed COORDS_IMG backfilling")
+    else:
+        print("Error committing changes")
+        layer.rollBack()
+
+backfill_coords_img(annotation_layer)
 
 # ------------------------------------------------------------
 # ANNOTATION TOOL
@@ -272,21 +264,19 @@ class AnnotationTool(QgsMapTool):
 
         src_img = get_top_raster_filename()
         raster_layer = get_top_raster_layer()
-
+        
         feat = QgsFeature(self.layer.fields())
         feat.setGeometry(geom)
         feat["CLASS"] = self.current_class
         feat["SRC_IMAGE"] = src_img
 
-        # Save polygon geographic coordinates as "x,y;x,y;..."
         coords_str = ""
         coords_img_str = ""
         if geom.isGeosValid() and not geom.isMultipart():
             polygon_points = geom.asPolygon()[0]
             coords_str = ";".join([f"{p.x():.6f},{p.y():.6f}" for p in polygon_points])
             feat["COORDS"] = coords_str
-
-            # Convert to image pixel coordinates
+            
             if raster_layer:
                 coords_img_str = geo_to_pixel_coords(raster_layer, polygon_points)
                 if coords_img_str:
@@ -294,16 +284,12 @@ class AnnotationTool(QgsMapTool):
                     print(f"Image coords: {coords_img_str}")
                 else:
                     feat["COORDS_IMG"] = "N/A"
-                    print("Warning: Could not convert to image coordinates")
             else:
                 feat["COORDS_IMG"] = "NO_RASTER"
-                print("Warning: No raster layer found")
 
-        # Add feature via dataProvider to ensure persistence and visibility
         self.layer.dataProvider().addFeatures([feat])
         self.layer.updateExtents()
-
-        # Reapply symbology and refresh
+        
         apply_color_symbology(self.layer)
         self.layer.triggerRepaint()
         self.canvas.refresh()
@@ -365,3 +351,4 @@ annotation_tool.set_class(DEFAULT_CLASS)
 
 print("Annotation tool loaded with color coding. Output shapefile:", OUTPUT_SHP)
 print("POSITIVE = Green, NEGATIVE = Red")
+
