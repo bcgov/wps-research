@@ -43,7 +43,8 @@ if not os.path.exists(OUTPUT_SHP):
     pr.addAttributes([
         QgsField("CLASS", QVariant.String, "string", 10),
         QgsField("SRC_IMAGE", QVariant.String, "string", 200),
-        QgsField("COORDS", QVariant.String, "string", 2000)
+        QgsField("COORDS", QVariant.String, "string", 2000),
+        QgsField("COORDS_IMG", QVariant.String, "string", 2000)
     ])
     vl.updateFields()
     from qgis.core import QgsVectorFileWriter
@@ -69,7 +70,8 @@ def ensure_fields(layer):
     added = False
     for f_name, f_type, f_len in [("CLASS", QVariant.String, 10),
                                   ("SRC_IMAGE", QVariant.String, 200),
-                                  ("COORDS", QVariant.String, 2000)]:
+                                  ("COORDS", QVariant.String, 2000),
+                                  ("COORDS_IMG", QVariant.String, 2000)]:
         if f_name not in fields:
             provider.addAttributes([QgsField(f_name, f_type, "string", f_len)])
             added = True
@@ -83,25 +85,25 @@ ensure_fields(annotation_layer)
 # ------------------------------------------------------------
 def apply_color_symbology(layer):
     """Apply categorized symbology based on CLASS field"""
-
+    
     # Create symbols for each class
     positive_symbol = QgsFillSymbol.createSimple({
         'color': '0,255,0,100',  # Green with transparency
         'outline_color': '0,180,0,255',  # Darker green outline
         'outline_width': '0.5'
     })
-
+    
     negative_symbol = QgsFillSymbol.createSimple({
         'color': '255,0,0,100',  # Red with transparency
         'outline_color': '180,0,0,255',  # Darker red outline
         'outline_width': '0.5'
     })
-
+    
     # Create categories
     categories = []
     categories.append(QgsRendererCategory('POSITIVE', positive_symbol, 'Positive'))
     categories.append(QgsRendererCategory('NEGATIVE', negative_symbol, 'Negative'))
-
+    
     # Create and apply renderer
     renderer = QgsCategorizedSymbolRenderer('CLASS', categories)
     layer.setRenderer(renderer)
@@ -111,14 +113,55 @@ def apply_color_symbology(layer):
 apply_color_symbology(annotation_layer)
 
 # ------------------------------------------------------------
-# GET TOP RASTER FILENAME
+# GET TOP RASTER FILENAME AND LAYER
 # ------------------------------------------------------------
-def get_top_raster_filename():
+def get_top_raster_layer():
+    """Get the topmost raster layer"""
     layers = QgsProject.instance().layerTreeRoot().layerOrder()
     for lyr in layers:
         if lyr.type() == QgsMapLayer.RasterLayer:
-            return os.path.basename(lyr.source())
+            return lyr
+    return None
+
+def get_top_raster_filename():
+    """Get the filename of the topmost raster layer"""
+    lyr = get_top_raster_layer()
+    if lyr:
+        return os.path.basename(lyr.source())
     return "UNKNOWN"
+
+def geo_to_pixel_coords(raster_layer, geo_points):
+    """
+    Convert geographic coordinates to pixel (row, col) coordinates
+    
+    Args:
+        raster_layer: QgsRasterLayer
+        geo_points: List of QgsPointXY objects
+        
+    Returns:
+        String formatted as "col,row;col,row;..." or None if conversion fails
+    """
+    if not raster_layer or not raster_layer.isValid():
+        return None
+    
+    extent = raster_layer.extent()
+    width = raster_layer.width()
+    height = raster_layer.height()
+    
+    pixel_coords = []
+    for point in geo_points:
+        # Calculate pixel coordinates
+        # Note: row 0 is at the top of the image
+        col = int((point.x() - extent.xMinimum()) / extent.width() * width)
+        row = int((extent.yMaximum() - point.y()) / extent.height() * height)
+        
+        # Clamp to valid range
+        col = max(0, min(col, width - 1))
+        row = max(0, min(row, height - 1))
+        
+        pixel_coords.append(f"{col},{row}")
+    
+    return ";".join(pixel_coords)
 
 # ------------------------------------------------------------
 # ANNOTATION TOOL
@@ -189,20 +232,38 @@ class AnnotationTool(QgsMapTool):
             return
 
         src_img = get_top_raster_filename()
+        raster_layer = get_top_raster_layer()
+        
         feat = QgsFeature(self.layer.fields())
         feat.setGeometry(geom)
         feat["CLASS"] = self.current_class
         feat["SRC_IMAGE"] = src_img
 
-        # Save polygon coordinates as "x,y;x,y;..."
+        # Save polygon geographic coordinates as "x,y;x,y;..."
+        coords_str = ""
+        coords_img_str = ""
         if geom.isGeosValid() and not geom.isMultipart():
-            coords_str = ";".join([f"{p.x():.6f},{p.y():.6f}" for p in geom.asPolygon()[0]])
+            polygon_points = geom.asPolygon()[0]
+            coords_str = ";".join([f"{p.x():.6f},{p.y():.6f}" for p in polygon_points])
             feat["COORDS"] = coords_str
+            
+            # Convert to image pixel coordinates
+            if raster_layer:
+                coords_img_str = geo_to_pixel_coords(raster_layer, polygon_points)
+                if coords_img_str:
+                    feat["COORDS_IMG"] = coords_img_str
+                    print(f"Image coords: {coords_img_str}")
+                else:
+                    feat["COORDS_IMG"] = "N/A"
+                    print("Warning: Could not convert to image coordinates")
+            else:
+                feat["COORDS_IMG"] = "NO_RASTER"
+                print("Warning: No raster layer found")
 
         # Add feature via dataProvider to ensure persistence and visibility
         self.layer.dataProvider().addFeatures([feat])
         self.layer.updateExtents()
-
+        
         # Reapply symbology and refresh
         apply_color_symbology(self.layer)
         self.layer.triggerRepaint()
