@@ -1,4 +1,7 @@
-''' 20260107  usage:
+'''
+20260107: note: add difference dataset online.. 
+
+20260107  usage:
      python3 view.py G80223_20230513.bin # your image filename goes here.. '''
 #!/usr/bin/env python3
 import sys
