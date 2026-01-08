@@ -1,7 +1,7 @@
 ENVI
 samples = 1354
-lines   = 1496
-bands   = 4
+lines = 1496
+bands = 4
 header offset = 0
 file type = ENVI Standard
 data type = 4
