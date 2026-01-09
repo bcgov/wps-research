@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 import sys, os
 import warnings 
@@ -128,6 +129,44 @@ def load_image_stack(path):
     assert data.shape == (h, w, b)
     return data, ds
 
+# ---------- Shapefile parsing ----------
+def parse_coords_img_to_rect(coords_img_str):
+    if not coords_img_str or str(coords_img_str).upper() == "NO_RASTER": return None
+    try:
+        xs, ys = [], []
+        for tok in str(coords_img_str).split(';'):
+            tok = tok.strip()
+            if not tok: continue
+            c_str, r_str = tok.split(',')
+            xs.append(int(round(float(c_str))))
+            ys.append(int(round(float(r_str))))
+        if not xs or not ys: return None
+        x0, x1 = min(xs), max(xs); y0, y1 = min(ys), max(ys)
+        if x1 == x0 or y1 == y0: return None
+        return (x0, y0, x1, y1)
+    except Exception:
+        return None
+
+def read_training_from_shapefile(shp_path):
+    ds = ogr.Open(shp_path, 0)
+    if ds is None: raise RuntimeError(f"Failed to open shapefile: {shp_path}")
+    lyr = ds.GetLayer(0)
+    out = {}
+    for f in lyr:
+        cls = f.GetField("CLASS")
+        src = f.GetField("SRC_IMAGE")
+        coords = f.GetField("COORDS_IMG")
+        if not src or not isinstance(cls, str): continue
+        cu = cls.strip().upper()
+        lbl = 1 if cu == "POSITIVE" else 0 if cu == "NEGATIVE" else None
+        if lbl is None: continue
+        rect = parse_coords_img_to_rect(coords)
+        if rect is None: continue
+        out.setdefault(src, {'rectangles': [], 'labels': []})
+        out[src]['rectangles'].append(rect)
+        out[src]['labels'].append(lbl)
+    return out
+
 # ---------- main ----------
 def main():
     if len(sys.argv) < 2:
@@ -140,6 +179,7 @@ def main():
     shp_dir = os.path.dirname(os.path.abspath(shp))
     cwd = os.getcwd()
 
+    # Read training data from shapefile
     training = read_training_from_shapefile(shp)
     if not training:
         print("No training rectangles found.")
@@ -149,63 +189,6 @@ def main():
     S0, S1 = [], []
     for src, d in training.items():
         img_path = locate_image_by_basename(src, [shp_dir, cwd])
-        if img_path is None:
-            continue
-        try:
-            img, _ds = load_image_stack(img_path)
-        except Exception:
-            continue
-
-        pad = 7 // 2
-        padded = np.pad(img, ((pad, pad), (pad, pad), (0, 0)), mode='reflect')
-        h, w, _ = img.shape
-        rects, labels = d['rectangles'], d['labels']
-        for (x0, y0, x1, y1), lbl in zip(rects, labels):
-            x0 = max(0, int(x0)); y0 = max(0, int(y0))
-            x1 = min(w, int(x1)); y1 = min(h, int(y1))
-            if x1 <= x0 or y1 <= y0:
-                continue
-            tgt = S1 if lbl == 1 else S0
-            for y in range(y0, y1):
-                for x in range(x0, x1):
-                    tgt.append(padded[y:y+7, x:x+7, :].reshape(-1))
-
-    mean_covs = {0:(None,None), 1:(None,None)}
-    for lbl, S in ((0, S0), (1, S1)):
-        if S:
-            D = np.vstack(S)
-            mean = D.mean(axis=0)
-            cov = np.cov(D, rowvar=False) + np.eye(D.shape[1]) * 1e-5
-            mean_covs[lbl] = (mean, cov)
-
-    if mean_covs[0][0] is None and mean_covs[1][0] is None:
-        print("No valid samples across images.")
-        sys.exit(1)
-
-    # --- classify exactly ONE image (second CLI arg) ---
-    if target_image:
-        fname = target_image
-        print(f"[START] {fname}", flush=True)
-
-        try:
-            img, ds = load_image_stack(fname)
-        except Exception as e:
-            print(f"[ERROR] {fname}: {e}", flush=True)
-            sys.exit(1)
-
-        cls = classify_by_gaussian_parallel(img, mean_covs, patch_size=7)
-        out = save_envi_classification(ds, cls)
-
-        print(f"[DONE] {fname} -> {out if out else 'save_failed'}")
-    else:
-        # Save the global stats if no target image is provided
-        print("No image provided, regenerating global stats...")
-        with open("global_stats.pkl", "wb") as f:
-            pickle.dump(mean_covs, f)
-        print("[DONE] Global stats saved to global_stats.pkl")
-
-
-if __name__ == "__main__":
-    main()
+       
 
 
