@@ -11,7 +11,7 @@ from qgis.core import (
 from qgis.gui import QgsMapTool, QgsRubberBand
 import os
 
-OUT_SHP="/ram/parker/annotation_labels.shp"
+OUT_SHP="/data/fort_nelson/annotation_labels.shp"
 DEF_CLASS="NEGATIVE"
 
 # Remove existing toolbar widget
