@@ -1,4 +1,5 @@
 '''search imagery within shapefile bounds'''
+
 root_dir = r"/data/urgent_status_imagery/" # directory to search for TIF files
 shapefile = r"circle_100km.shp"  # shapefile they need to intersect 
 
