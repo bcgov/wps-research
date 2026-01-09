@@ -130,12 +130,12 @@ def load_image_stack(path):
 
 # ---------- main ----------
 def main():
-    if len(sys.argv) < 3:
+    if len(sys.argv) < 2:
         print("Usage: python3 classify.py /path/to/annotation_labels.shp image_to_classify.tif")
         sys.exit(1)
 
     shp = sys.argv[1]
-    target_image = sys.argv[2]
+    target_image = sys.argv[2] if len(sys.argv) > 2 else None
 
     shp_dir = os.path.dirname(os.path.abspath(shp))
     cwd = os.getcwd()
@@ -178,17 +178,34 @@ def main():
             cov = np.cov(D, rowvar=False) + np.eye(D.shape[1]) * 1e-5
             mean_covs[lbl] = (mean, cov)
 
-    # Save the global stats as a pickle file for reuse
-    with open("global_stats.pkl", "wb") as f:
-        pickle.dump(mean_covs, f)
+    if mean_covs[0][0] is None and mean_covs[1][0] is None:
+        print("No valid samples across images.")
+        sys.exit(1)
 
-    # Now load the image and apply classification if given
+    # --- classify exactly ONE image (second CLI arg) ---
     if target_image:
-        img, ds = load_image_stack(target_image)
-        classification = classify_by_gaussian_parallel(img, mean_covs, patch_size=7)
-        save_envi_classification(ds, classification)
+        fname = target_image
+        print(f"[START] {fname}", flush=True)
 
-if __name__ == '__main__':
+        try:
+            img, ds = load_image_stack(fname)
+        except Exception as e:
+            print(f"[ERROR] {fname}: {e}", flush=True)
+            sys.exit(1)
+
+        cls = classify_by_gaussian_parallel(img, mean_covs, patch_size=7)
+        out = save_envi_classification(ds, cls)
+
+        print(f"[DONE] {fname} -> {out if out else 'save_failed'}")
+    else:
+        # Save the global stats if no target image is provided
+        print("No image provided, regenerating global stats...")
+        with open("global_stats.pkl", "wb") as f:
+            pickle.dump(mean_covs, f)
+        print("[DONE] Global stats saved to global_stats.pkl")
+
+
+if __name__ == "__main__":
     main()
 
 
