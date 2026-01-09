@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 import sys, os
 import warnings 
@@ -190,5 +189,4 @@ def main():
     for src, d in training.items():
         img_path = locate_image_by_basename(src, [shp_dir, cwd])
        
-
 
