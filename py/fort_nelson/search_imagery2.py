@@ -1,4 +1,7 @@
 '''search imagery within shapefile bounds'''
+root_dir = r"/data/urgent_status_imagery/" # directory to search for TIF files
+shapefile = r"circle_100km.shp"  # shapefile they need to intersect 
+
 import os
 import fnmatch
 from osgeo import ogr, gdal, osr
@@ -83,11 +86,7 @@ def find_intersecting_rasters(root_folder, shapefile_path):
     return matching_rasters
 
 
-# -------- Example usage -------- #
-
-root_dir = r"/data/urgent_status_imagery/"
-shapefile = r"circle_100km.shp"
-
+# go 
 intersecting = find_intersecting_rasters(root_dir, shapefile)
 
 print("\n=== Intersecting Rasters ===")
