@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 import sys, os
 import warnings 
-import pickle
 from osgeo import gdal, ogr
 import numpy as np
 from joblib import Parallel, delayed
+import pickle
 
 gdal.UseExceptions()
 warnings.filterwarnings("ignore")
 gdal.PushErrorHandler('CPLQuietErrorHandler')
 gdal.SetConfigOption('CPL_DEBUG', 'OFF')
 gdal.PushErrorHandler('CPLQuietErrorHandler')
+
+# Define polygon size threshold (in pixels)
+MIN_POLY_DIMENSION = 15
 
 # ---------- classification (from Script 2) ----------
 def print_progress_bar(i, total, prefix='', suffix='', length=40, fill='█'):
@@ -61,13 +64,23 @@ def compute_patch_mean_cov(image, rectangles, labels, patch_size=7):
     padded = np.pad(image, ((pad, pad), (pad, pad), (0, 0)), mode='reflect')
     h, w, _ = image.shape
     S = {0: [], 1: []}
+
     for (x0, y0, x1, y1), lbl in zip(rectangles, labels):
+        # Skip polygons smaller than the defined minimum size
+        width = x1 - x0
+        height = y1 - y0
+        if width < MIN_POLY_DIMENSION or height < MIN_POLY_DIMENSION:
+            print(f"Skipping small polygon: {x0, y0, x1, y1}, Width: {width}, Height: {height}")
+            continue
+
         x0 = max(0, int(x0)); y0 = max(0, int(y0))
         x1 = min(w, int(x1)); y1 = min(h, int(y1))
-        if x1 <= x0 or y1 <= y0: continue
+        if x1 <= x0 or y1 <= y0:
+            continue
         for y in range(y0, y1):
             for x in range(x0, x1):
                 S[lbl].append(padded[y:y+patch_size, x:x+patch_size, :].reshape(-1))
+
     out = {}
     for lbl in (0, 1):
         if S[lbl]:
@@ -98,45 +111,6 @@ def save_envi_classification(dataset, classification):
     print(f"[DONE] Saved: {out_file}", flush=True)
     return out_file
 
-# ---------- Script 1 shapefile parsing ----------
-def parse_coords_img_to_rect(coords_img_str):
-    if not coords_img_str or str(coords_img_str).upper() == "NO_RASTER": return None
-    try:
-        xs, ys = [], []
-        for tok in str(coords_img_str).split(';'):
-            tok = tok.strip()
-            if not tok: continue
-            c_str, r_str = tok.split(',')
-            xs.append(int(round(float(c_str))))
-            ys.append(int(round(float(r_str))))
-        if not xs or not ys: return None
-        x0, x1 = min(xs), max(xs); y0, y1 = min(ys), max(ys)
-        if x1 == x0 or y1 == y0: return None
-        return (x0, y0, x1, y1)
-    except Exception:
-        return None
-
-def read_training_from_shapefile(shp_path):
-    ds = ogr.Open(shp_path, 0)
-    if ds is None: raise RuntimeError(f"Failed to open shapefile: {shp_path}")
-    lyr = ds.GetLayer(0)
-    out = {}
-    for f in lyr:
-        cls = f.GetField("CLASS")
-        src = f.GetField("SRC_IMAGE")
-        coords = f.GetField("COORDS_IMG")
-        if not src or not isinstance(cls, str): continue
-        cu = cls.strip().upper()
-        lbl = 1 if cu == "POSITIVE" else 0 if cu == "NEGATIVE" else None
-        if lbl is None: continue
-        rect = parse_coords_img_to_rect(coords)
-        if rect is None: continue
-        out.setdefault(src, {'rectangles': [], 'labels': []})
-        out[src]['rectangles'].append(rect)
-        out[src]['labels'].append(lbl)
-    return out
-
-# ---------- image I/O ----------
 def locate_image_by_basename(basename, dirs):
     for d in dirs:
         p = os.path.join(d, basename)
@@ -156,112 +130,65 @@ def load_image_stack(path):
 
 # ---------- main ----------
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python3 classify.py /path/to/annotation_labels.shp [image_to_classify.tif]")
+    if len(sys.argv) < 3:
+        print("Usage: python3 classify.py /path/to/annotation_labels.shp image_to_classify.tif")
         sys.exit(1)
 
     shp = sys.argv[1]
-    target_image = sys.argv[2] if len(sys.argv) > 2 else None
-    global_stats_path = 'global_stats.pkl'
+    target_image = sys.argv[2]
 
-    if target_image is None:
-        # No image argument given, calculate and save global stats
-        print("No image argument found. Saving global stats...")
+    shp_dir = os.path.dirname(os.path.abspath(shp))
+    cwd = os.getcwd()
 
-        if os.path.exists(global_stats_path):
-            print("Global stats already exist. Skipping computation.")
-            sys.exit(0)
+    training = read_training_from_shapefile(shp)
+    if not training:
+        print("No training rectangles found.")
+        sys.exit(1)
 
-        shp_dir = os.path.dirname(os.path.abspath(shp))
-        cwd = os.getcwd()
-
-        training = read_training_from_shapefile(shp)
-        if not training:
-            print("No training rectangles found.")
-            sys.exit(1)
-
-        # GLOBAL stats from all training rectangles
-        S0, S1 = [], []
-        total_images = len(training)
-        current_image = 0
-
-        for src, d in training.items():
-            img_path = locate_image_by_basename(src, [shp_dir, cwd])
-            if img_path is None:
-                continue
-            try:
-                img, _ds = load_image_stack(img_path)
-            except Exception:
-                continue
-
-            # Print the filename for which stats are being calculated
-            print(f"Calculating global stats for image: {img_path}")
-
-            pad = 7 // 2
-            padded = np.pad(img, ((pad, pad), (pad, pad), (0, 0)), mode='reflect')
-            h, w, _ = img.shape
-            rects, labels = d['rectangles'], d['labels']
-            for (x0, y0, x1, y1), lbl in zip(rects, labels):
-                x0 = max(0, int(x0)); y0 = max(0, int(y0))
-                x1 = min(w, int(x1)); y1 = min(h, int(y1))
-                if x1 <= x0 or y1 <= y0:
-                    continue
-                tgt = S1 if lbl == 1 else S0
-                for y in range(y0, y1):
-                    for x in range(x0, x1):
-                        tgt.append(padded[y:y+7, x:x+7, :].reshape(-1))
-
-            # Update progress bar
-            current_image += 1
-            print_progress_bar(current_image, total_images, prefix="Computing global stats", suffix="Complete")
-
-        mean_covs = {0:(None,None), 1:(None,None)}
-        for lbl, S in ((0, S0), (1, S1)):
-            if S:
-                D = np.vstack(S)
-                mean = D.mean(axis=0)
-                cov = np.cov(D, rowvar=False) + np.eye(D.shape[1]) * 1e-5
-                mean_covs[lbl] = (mean, cov)
-
-        if mean_covs[0][0] is None and mean_covs[1][0] is None:
-            print("No valid samples across images.")
-            sys.exit(1)
-
-        # Save global stats
-        with open(global_stats_path, 'wb') as f:
-            pickle.dump(mean_covs, f)
-
-        print(f"Global stats saved to {global_stats_path}")
-        sys.exit(0)
-
-    else:
-        # Image exists, load global stats and perform classification
-        print(f"{target_image} found. Loading global stats...")
-
-        if not os.path.exists(global_stats_path):
-            print(f"{global_stats_path} not found. Exiting...")
-            sys.exit(1)
-
-        with open(global_stats_path, 'rb') as f:
-            mean_covs = pickle.load(f)
-
-        print(f"Global stats loaded from {global_stats_path}")
-
-        # --- classify exactly ONE image ---
-        fname = target_image
-        print(f"[START] {fname}", flush=True)
-
+    # GLOBAL stats from all training rectangles
+    S0, S1 = [], []
+    for src, d in training.items():
+        img_path = locate_image_by_basename(src, [shp_dir, cwd])
+        if img_path is None:
+            continue
         try:
-            img, ds = load_image_stack(fname)
-        except Exception as e:
-            print(f"[ERROR] {fname}: {e}", flush=True)
-            sys.exit(1)
+            img, _ds = load_image_stack(img_path)
+        except Exception:
+            continue
 
-        cls = classify_by_gaussian_parallel(img, mean_covs, patch_size=7)
-        out = save_envi_classification(ds, cls)
+        pad = 7 // 2
+        padded = np.pad(img, ((pad, pad), (pad, pad), (0, 0)), mode='reflect')
+        h, w, _ = img.shape
+        rects, labels = d['rectangles'], d['labels']
+        for (x0, y0, x1, y1), lbl in zip(rects, labels):
+            x0 = max(0, int(x0)); y0 = max(0, int(y0))
+            x1 = min(w, int(x1)); y1 = min(h, int(y1))
+            if x1 <= x0 or y1 <= y0:
+                continue
+            tgt = S1 if lbl == 1 else S0
+            for y in range(y0, y1):
+                for x in range(x0, x1):
+                    tgt.append(padded[y:y+7, x:x+7, :].reshape(-1))
 
-        print(f"[DONE] {fname} -> {out if out else 'save_failed'}")
+    mean_covs = {0:(None,None), 1:(None,None)}
+    for lbl, S in ((0, S0), (1, S1)):
+        if S:
+            D = np.vstack(S)
+            mean = D.mean(axis=0)
+            cov = np.cov(D, rowvar=False) + np.eye(D.shape[1]) * 1e-5
+            mean_covs[lbl] = (mean, cov)
 
-if __name__ == "__main__":
+    # Save the global stats as a pickle file for reuse
+    with open("global_stats.pkl", "wb") as f:
+        pickle.dump(mean_covs, f)
+
+    # Now load the image and apply classification if given
+    if target_image:
+        img, ds = load_image_stack(target_image)
+        classification = classify_by_gaussian_parallel(img, mean_covs, patch_size=7)
+        save_envi_classification(ds, classification)
+
+if __name__ == '__main__':
     main()
+
 
