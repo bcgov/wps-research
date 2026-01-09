@@ -164,8 +164,15 @@ def load_image_stack(path):
 # ---------- main ----------
 def main():
     global_stats_path = 'global_stats.pkl'
-    target_image = 'image_to_classify.tif'
+    
+    if len(sys.argv) < 3:
+        print("Usage: python3 classify_one.py /path/to/shapefile /path/to/image_to_classify.tif")
+        sys.exit(1)
 
+    shp = sys.argv[1]  # The shapefile path
+    target_image = sys.argv[2]  # The image to classify
+    
+    # Check if the image exists
     if not os.path.exists(target_image):
         # Image not found, compute and save global stats
         print(f"{target_image} not found. Saving global stats...")
@@ -174,7 +181,6 @@ def main():
             print("Global stats already exist. Skipping computation.")
             sys.exit(1)
 
-        shp = sys.argv[1]
         shp_dir = os.path.dirname(os.path.abspath(shp))
         cwd = os.getcwd()
 
@@ -261,4 +267,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
 
