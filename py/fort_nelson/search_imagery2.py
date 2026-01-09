@@ -7,6 +7,12 @@ import os
 import fnmatch
 from osgeo import ogr, gdal, osr
 
+if not os.path.exists(shapefile):
+    a = os.system("cp /data/fort_nelson/circle* /ram/parker/")
+    if a != 0:
+        print("Error: ")
+        sys.exit(1)
+
 
 def raster_to_polygon(dataset):
     """
