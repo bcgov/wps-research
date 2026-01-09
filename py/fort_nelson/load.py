@@ -1,6 +1,9 @@
 '''20251203 load tif files on ramdisk, into QGIS.
 
-This is run from the python tool inside QGIS''' 
+This is run from the python tool inside QGIS
+
+Plugins --> python console
+'''
 
 import os
 import re
