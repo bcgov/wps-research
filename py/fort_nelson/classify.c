@@ -4,6 +4,7 @@ gcc -O3 -Wall classify.c -o classify \
     -L/usr/lib/x86_64-linux-gnu \
     -llapacke -lopenblas -lpthread -lm -lgdal
 
+
  Gaussian patch classifier (C version)
  Uses:
   - GDAL (C API)
