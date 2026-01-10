@@ -1,6 +1,5 @@
 '''20260109: open a tif file. Write back a new version with NAN instead of 0 vectors.
 '''
-
 #!/usr/bin/env python3
 
 import sys
@@ -31,8 +30,12 @@ def process_tif(path):
     if needs_conversion:
         print("  WARNING: Input is not Float32 — converting to Float32")
 
-    # Create temporary output
-    fd, tmp_path = tempfile.mkstemp(suffix=".tif")
+    # Temp file in SAME directory (avoids cross-device error)
+    src_dir = os.path.dirname(os.path.abspath(path))
+    fd, tmp_path = tempfile.mkstemp(
+        suffix=".tif",
+        dir=src_dir
+    )
     os.close(fd)
 
     driver = gdal.GetDriverByName("GTiff")
@@ -44,21 +47,16 @@ def process_tif(path):
         options=["TILED=YES", "COMPRESS=LZW"]
     )
 
-    src_ds = None  # close input early
+    src_ds = None  # close input
 
     if out_ds is None:
         print("  ERROR: Failed to create temporary copy")
         os.remove(tmp_path)
         return
 
-    # Ensure dataset-level NoData = NaN (single value for all bands)
-    out_ds.SetMetadataItem("TIFFTAG_GDAL_NODATA", "nan")
-
+    # Process bands
     for band_idx in range(1, band_count + 1):
         band = out_ds.GetRasterBand(band_idx)
-
-        # Clear any existing per-band nodata
-        band.DeleteNoDataValue()
 
         arr = band.ReadAsArray()
         if arr is None:
@@ -72,12 +70,16 @@ def process_tif(path):
         arr[arr == 0.0] = np.nan
 
         band.WriteArray(arr)
+
+        # IMPORTANT: this is the ONLY supported way to write GDAL nodata
+        band.SetNoDataValue(np.nan)
+
         band.FlushCache()
 
     out_ds.FlushCache()
     out_ds = None
 
-    # Atomically replace original file
+    # Atomic replace (same filesystem, so this works)
     os.replace(tmp_path, path)
 
     print("  Done.")
@@ -104,4 +106,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
 
