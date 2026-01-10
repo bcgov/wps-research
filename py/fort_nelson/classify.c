@@ -6,80 +6,86 @@
  * Run global_stats_to_txt.py after generating global_stats.pkl using classify_one3.py
  *
  * /
+ /*
+ * classify.c
+ *
+ * Gaussian patch classifier (C version)
+ * Uses:
+ *  - GDAL (C API)
+ *  - BLAS / LAPACK (CBLAS + LAPACKE)
+ *  - pthreads
+ */
 
-#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stddef.h>
 #include <math.h>
 #include <pthread.h>
-#include <glob.h>
+#include <unistd.h>
 
-#include "gdal.h"
-#include "cpl_conv.h"
-#include "cblas.h"
-#include "lapacke.h"
+#include <gdal.h>
+#include <cpl_conv.h>
+
+#include <cblas.h>
+#include <lapacke.h>
 
 /* ---------------- constants ---------------- */
 
-#define PATCH_SIZE 7
 #define MAX_CLASSES 2
+#define PATCH_SIZE 7
 
-/* ---------------- global stats ---------------- */
+/* ---------------- data structures ---------------- */
 
 typedef struct {
     int dim;
     double *mean;
     double *cov;
     double *inv_cov;
-    int valid;
 } ClassStats;
-
-ClassStats stats[MAX_CLASSES];
-
-/* ---------------- threading ---------------- */
 
 typedef struct {
     int y0, y1;
-    int width;
-    int height;
-    int bands;
-    double *image;   /* padded image */
+    int width, height, bands;
+    int pad;
+    double *image;
     unsigned char *out;
-} ThreadJob;
+    ClassStats *stats;
+} Job;
 
-int nthreads = 0;
+/* ---------------- global stats ---------------- */
+
+static ClassStats stats[MAX_CLASSES];
 
 /* ---------------- utilities ---------------- */
 
-static inline int idx3(int y, int x, int b, int w, int bands) {
-    return (y * w + x) * bands + b;
+static void die(const char *msg) {
+    fprintf(stderr, "%s\n", msg);
+    exit(1);
 }
 
-/* ---------------- stats loading ---------------- */
+/* ---------------- load global_stats.txt ---------------- */
 
-void load_global_stats(const char *path) {
+static void load_global_stats(const char *path) {
     FILE *f = fopen(path, "r");
-    if (!f) {
-        fprintf(stderr, "Failed to open %s\n", path);
-        exit(1);
-    }
+    if (!f)
+        die("Failed to open global_stats.txt");
 
-    char line[8192];
+    char line[256];
     int cls = -1;
 
     while (fgets(line, sizeof(line), f)) {
-        if (line[0] == '#') continue;
 
-        if (sscanf(line, "CLASS %d", &cls) == 1) {
-            stats[cls].valid = 1;
+        if (sscanf(line, "CLASS %d", &cls) == 1)
             continue;
-        }
+
+        if (cls < 0 || cls >= MAX_CLASSES)
+            continue;
 
         if (sscanf(line, "DIM %d", &stats[cls].dim) == 1) {
             int d = stats[cls].dim;
             stats[cls].mean = calloc(d, sizeof(double));
-            stats[cls].cov  = calloc(d * d, sizeof(double));
+            stats[cls].cov = calloc(d * d, sizeof(double));
             stats[cls].inv_cov = calloc(d * d, sizeof(double));
             continue;
         }
@@ -95,36 +101,36 @@ void load_global_stats(const char *path) {
             for (int i = 0; i < d * d; i++)
                 fscanf(f, "%lf", &stats[cls].cov[i]);
 
-            /* invert covariance */
             memcpy(stats[cls].inv_cov, stats[cls].cov,
-                   d * d * sizeof(double));
+                   sizeof(double) * d * d);
 
-            int info = LAPACKE_dpotrf(
-                LAPACK_ROW_MAJOR, 'U', d, stats[cls].inv_cov, d
-            );
-            if (info == 0)
-                LAPACKE_dpotri(
-                    LAPACK_ROW_MAJOR, 'U', d, stats[cls].inv_cov, d
-                );
-            else
-                LAPACKE_dgetrf(
-                    LAPACK_ROW_MAJOR, d, d, stats[cls].inv_cov, d, NULL
-                );
-
-            continue;
+            /* Cholesky inverse if possible */
+            int info = LAPACKE_dpotrf(LAPACK_ROW_MAJOR, 'U',
+                                      d, stats[cls].inv_cov, d);
+            if (info == 0) {
+                LAPACKE_dpotri(LAPACK_ROW_MAJOR, 'U',
+                               d, stats[cls].inv_cov, d);
+            } else {
+                /* fallback to LU */
+                int *ipiv = malloc(sizeof(int) * d);
+                LAPACKE_dgetrf(LAPACK_ROW_MAJOR,
+                               d, d, stats[cls].inv_cov, d, ipiv);
+                LAPACKE_dgetri(LAPACK_ROW_MAJOR,
+                               d, stats[cls].inv_cov, d, ipiv);
+                free(ipiv);
+            }
         }
     }
 
     fclose(f);
 }
 
-/* ---------------- classification ---------------- */
+/* ---------------- classification worker ---------------- */
 
-void *classify_rows(void *arg) {
-    ThreadJob *job = (ThreadJob *)arg;
-    int pad = PATCH_SIZE / 2;
-    int d = stats[0].dim;
+static void *classify_rows(void *arg) {
+    Job *job = (Job *)arg;
 
+    int d = PATCH_SIZE * PATCH_SIZE * job->bands;
     double *vec = malloc(sizeof(double) * d);
     double *tmp = malloc(sizeof(double) * d);
 
@@ -132,40 +138,40 @@ void *classify_rows(void *arg) {
         for (int x = 0; x < job->width; x++) {
 
             /* extract patch */
-            int k = 0;
+            int idx = 0;
             for (int dy = 0; dy < PATCH_SIZE; dy++)
                 for (int dx = 0; dx < PATCH_SIZE; dx++)
-                    for (int b = 0; b < job->bands; b++)
-                        vec[k++] = job->image[
-                            idx3(y + dy, x + dx, b,
-                                 job->width + 2*pad, job->bands)
-                        ];
+                    for (int b = 0; b < job->bands; b++) {
+                        int yy = y + dy;
+                        int xx = x + dx;
+                        vec[idx++] =
+                            job->image[(yy * job->width + xx) * job->bands + b];
+                    }
 
+            int best_cls = 0;
             double best = INFINITY;
-            int best_lbl = 0;
 
-            for (int lbl = 0; lbl < MAX_CLASSES; lbl++) {
-                if (!stats[lbl].valid) continue;
+            for (int c = 0; c < MAX_CLASSES; c++) {
+                if (!job->stats[c].mean)
+                    continue;
 
                 for (int i = 0; i < d; i++)
-                    vec[i] -= stats[lbl].mean[i];
+                    vec[i] -= job->stats[c].mean[i];
 
-                cblas_dgemv(
-                    CblasRowMajor, CblasNoTrans,
-                    d, d, 1.0,
-                    stats[lbl].inv_cov, d,
-                    vec, 1,
-                    0.0, tmp, 1
-                );
+                cblas_dgemv(CblasRowMajor, CblasNoTrans,
+                            d, d, 1.0,
+                            job->stats[c].inv_cov, d,
+                            vec, 1, 0.0, tmp, 1);
 
                 double score = cblas_ddot(d, vec, 1, tmp, 1);
+
                 if (score < best) {
                     best = score;
-                    best_lbl = lbl;
+                    best_cls = c;
                 }
             }
 
-            job->out[y * job->width + x] = (unsigned char)best_lbl;
+            job->out[y * job->width + x] = (unsigned char)best_cls;
         }
     }
 
@@ -177,7 +183,8 @@ void *classify_rows(void *arg) {
 /* ---------------- main ---------------- */
 
 int main(int argc, char **argv) {
-    if (argc < 3) {
+
+    if (argc != 3) {
         fprintf(stderr, "Usage: %s global_stats.txt image.tif\n", argv[0]);
         return 1;
     }
@@ -187,16 +194,14 @@ int main(int argc, char **argv) {
     load_global_stats(argv[1]);
 
     GDALDatasetH ds = GDALOpen(argv[2], GA_ReadOnly);
-    if (!ds) {
-        fprintf(stderr, "Failed to open image\n");
-        return 1;
-    }
+    if (!ds)
+        die("Failed to open image");
 
     int w = GDALGetRasterXSize(ds);
     int h = GDALGetRasterYSize(ds);
     int bands = GDALGetRasterCount(ds);
-    int pad = PATCH_SIZE / 2;
 
+    int pad = PATCH_SIZE / 2;
     int pw = w + 2 * pad;
     int ph = h + 2 * pad;
 
@@ -205,12 +210,14 @@ int main(int argc, char **argv) {
     for (int b = 0; b < bands; b++) {
         GDALRasterBandH rb = GDALGetRasterBand(ds, b + 1);
         double *tmp = malloc(sizeof(double) * w * h);
-        GDALRasterIO(rb, GF_Read, 0, 0, w, h,
+
+        GDALRasterIO(rb, GF_Read,
+                     0, 0, w, h,
                      tmp, w, h, GDT_Float64, 0, 0);
 
         for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++)
-                image[idx3(y+pad, x+pad, b, pw, bands)] =
+                image[((y + pad) * pw + (x + pad)) * bands + b] =
                     tmp[y * w + x];
 
         free(tmp);
@@ -218,18 +225,24 @@ int main(int argc, char **argv) {
 
     unsigned char *out = calloc(w * h, 1);
 
-    nthreads = sysconf(_SC_NPROCESSORS_ONLN);
-    pthread_t threads[nthreads];
-    ThreadJob jobs[nthreads];
+    int nthreads = sysconf(_SC_NPROCESSORS_ONLN);
+    pthread_t *threads = malloc(sizeof(pthread_t) * nthreads);
+    Job *jobs = malloc(sizeof(Job) * nthreads);
+
+    int rows = h / nthreads;
 
     for (int t = 0; t < nthreads; t++) {
-        jobs[t].y0 = h * t / nthreads;
-        jobs[t].y1 = h * (t + 1) / nthreads;
-        jobs[t].width = w;
-        jobs[t].height = h;
-        jobs[t].bands = bands;
-        jobs[t].image = image;
-        jobs[t].out = out;
+        jobs[t] = (Job){
+            .y0 = t * rows,
+            .y1 = (t == nthreads - 1) ? h : (t + 1) * rows,
+            .width = pw,
+            .height = ph,
+            .bands = bands,
+            .pad = pad,
+            .image = image,
+            .out = out,
+            .stats = stats
+        };
         pthread_create(&threads[t], NULL, classify_rows, &jobs[t]);
     }
 
@@ -237,26 +250,22 @@ int main(int argc, char **argv) {
         pthread_join(threads[t], NULL);
 
     GDALDriverH drv = GDALGetDriverByName("ENVI");
-    GDALDatasetH ods = GDALCreate(
-        drv, "classification.bin", w, h, 1, GDT_Byte, NULL
-    );
+    GDALDatasetH ods =
+        GDALCreate(drv, "classification.bin", w, h, 1, GDT_Byte, NULL);
 
-    GDALSetGeoTransform(ods, GDALGetGeoTransform(ds, NULL));
-    GDALSetProjection(ods, GDALGetProjectionRef(ds));
-
-    GDALRasterIO(
-        GDALGetRasterBand(ods, 1),
-        GF_Write, 0, 0, w, h,
-        out, w, h, GDT_Byte, 0, 0
-    );
+    GDALRasterBandH ob = GDALGetRasterBand(ods, 1);
+    GDALRasterIO(ob, GF_Write,
+                 0, 0, w, h,
+                 out, w, h, GDT_Byte, 0, 0);
 
     GDALClose(ods);
     GDALClose(ds);
 
     free(image);
     free(out);
+    free(threads);
+    free(jobs);
 
     return 0;
 }
-
 
