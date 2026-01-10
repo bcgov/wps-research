@@ -18,14 +18,14 @@ gcc -O3 -Wall classify.c -o classify \
 #include <math.h>
 #include <pthread.h>
 #include <unistd.h>
-#include <stddef.h>
 
 #include "cblas.h"
 #include "lapacke.h"
 #include "gdal.h"
 #include "cpl_conv.h"
 
-#define PATCH_SIZE 1
+#define PATCH_SIZE 7
+#define MIN_POLY_DIMENSION 15
 
 typedef struct {
     int dim;
@@ -61,17 +61,7 @@ void *pt_worker_fun(void *arg) {
 
         if (my_nxt_j >= pt_end_j) break;
 
-        pthread_mutex_lock(&print_mtx);
-        if (my_nxt_j % 100 == 0)
-            printf("[Thread %zu] Picking up row %zu\n", t_id, my_nxt_j);
-        pthread_mutex_unlock(&print_mtx);
-
         pt_eval(my_nxt_j);
-
-        pthread_mutex_lock(&print_mtx);
-        if (my_nxt_j % 100 == 0)
-            printf("[Thread %zu] Finished row %zu\n", t_id, my_nxt_j);
-        pthread_mutex_unlock(&print_mtx);
     }
     return NULL;
 }
@@ -127,23 +117,46 @@ void load_global_stats(const char *path) {
     fclose(f);
 }
 
+// ---------------- Mahalanobis distance ----------------
+double mahalanobis_distance(const double *v, const ClassStats *cls) {
+    if (!cls || !cls->mean || !cls->inv_cov) return INFINITY;
+    int d = cls->dim;
+    double s = 0.0;
+    for (int i=0; i<d; i++)
+        for (int j=0; j<d; j++)
+            s += (v[i] - cls->mean[i])*cls->inv_cov[i*d+j]*(v[j] - cls->mean[j]);
+    return s;
+}
+
+// ---------------- Global GDAL image access ----------------
+GDALDatasetH g_ds = NULL;
+float **band_buf = NULL; // per-band buffer for row patch
+
 // ---------------- Row evaluation function ----------------
 void eval_row(size_t y) {
-    if (y % 100 == 0) {
-        pthread_mutex_lock(&print_mtx);
-        printf("[Row %zu] starting\n", y);
-        pthread_mutex_unlock(&print_mtx);
-    }
+    int pad = PATCH_SIZE/2;
 
-    for (size_t x = 0; x < width; x++) {
-        size_t idx = y*width + x;
-        out_image[idx] = 0; // keep patch flattening exactly
-    }
+    for (size_t x=0; x<width; x++) {
+        // Flatten patch in row-major order (row, column, band)
+        int patch_len = PATCH_SIZE*PATCH_SIZE*n_bands;
+        double *v = malloc(patch_len*sizeof(double));
+        int k = 0;
+        for (int dy=-pad; dy<=pad; dy++) {
+            size_t yy = (y+dy < 0) ? 0 : (y+dy >= height ? height-1 : y+dy);
+            for (int dx=-pad; dx<=pad; dx++) {
+                size_t xx = (x+dx < 0) ? 0 : (x+dx >= width ? width-1 : x+dx);
+                for (size_t b=0; b<n_bands; b++) {
+                    v[k++] = band_buf[b][yy*width + xx];
+                }
+            }
+        }
 
-    if (y % 100 == 0) {
-        pthread_mutex_lock(&print_mtx);
-        printf("[Row %zu] finished\n", y);
-        pthread_mutex_unlock(&print_mtx);
+        // Compute Mahalanobis distances
+        double s0 = mahalanobis_distance(v, &stats[0]);
+        double s1 = mahalanobis_distance(v, &stats[1]);
+        out_image[y*width + x] = (s1 < s0) ? 1 : 0;
+
+        free(v);
     }
 }
 
@@ -158,14 +171,23 @@ int main(int argc, char **argv) {
     load_global_stats(argv[1]);
 
     GDALAllRegister();
-    GDALDatasetH ds = GDALOpen(argv[2], GA_ReadOnly);
-    if (!ds) { fprintf(stderr,"Failed to open image\n"); exit(1); }
+    g_ds = GDALOpen(argv[2], GA_ReadOnly);
+    if (!g_ds) { fprintf(stderr,"Failed to open image\n"); exit(1); }
 
-    width = GDALGetRasterXSize(ds);
-    height = GDALGetRasterYSize(ds);
-    n_bands = GDALGetRasterCount(ds);
+    width = GDALGetRasterXSize(g_ds);
+    height = GDALGetRasterYSize(g_ds);
+    n_bands = GDALGetRasterCount(g_ds);
 
+    // Allocate output image
     out_image = calloc(width*height, sizeof(unsigned char));
+
+    // Allocate per-band buffers
+    band_buf = malloc(n_bands * sizeof(float*));
+    for (size_t b=0; b<n_bands; b++) {
+        band_buf[b] = malloc(width*height*sizeof(float));
+        GDALRasterIO(GDALGetRasterBand(g_ds,b+1), GF_Read, 0,0,width,height,
+                     band_buf[b], width,height, GDT_Float32, 0,0);
+    }
 
     printf("Starting parallel row classification on %zu rows\n", height);
     parfor_simple(0, height, eval_row);
@@ -176,9 +198,9 @@ int main(int argc, char **argv) {
     GDALDatasetH ods = GDALCreate(drv,"classification.envi",width,height,1,GDT_Float32,NULL);
 
     double geo[6];
-    GDALGetGeoTransform(ds,geo);
+    GDALGetGeoTransform(g_ds,geo);
     GDALSetGeoTransform(ods,geo);
-    const char *proj = GDALGetProjectionRef(ds);
+    const char *proj = GDALGetProjectionRef(g_ds);
     GDALSetProjection(ods,proj);
 
     float *out_float = calloc(width*height, sizeof(float));
@@ -188,12 +210,15 @@ int main(int argc, char **argv) {
     GDALRasterIO(ob,GF_Write,0,0,width,height,out_float,width,height,GDT_Float32,0,0);
 
     GDALClose(ods);
-    GDALClose(ds);
+    GDALClose(g_ds);
 
     free(out_float);
     free(out_image);
 
-    for (int c = 0; c < n_classes; c++) {
+    for (size_t b=0; b<n_bands; b++) free(band_buf[b]);
+    free(band_buf);
+
+    for (int c=0; c<n_classes; c++) {
         free(stats[c].mean);
         free(stats[c].cov);
         free(stats[c].inv_cov);
