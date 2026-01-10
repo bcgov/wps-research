@@ -1,29 +1,33 @@
 '''
+dominant_band.py 
+
 Use this file to quickly see the idea of 'which colour wins'
 
-python3 dominant_band.py file.bin
+Syntax:
+    python3 dominant_band.py file.bin
 '''
+
 from read_raster import Raster
 
 import sys
 
 
-
-def best_channel(
-        img_pixels, 
+def dominant_band(
+        X, 
         channel
     ):
     '''
     This function imposes a threshold, which compares the selected channel with other 3.
 
-    input:
-    
-        1. Pixelized data, of at least 3 channel, 3D array
-        2. Chosen channel to filter
+    Parameters
+    ----------
+    X: the 3 channel dataset
 
-    output:
+    channel: the channel (band) which you want to compare against the others.
 
-        >> 2D bool array (3rd dim is n channel is gone)
+    Returns
+    -------
+    mask: 2D array (3rd dim is n channel is gone)
     '''
     channel_index = {'r': 0, 'g': 1, 'b': 2}
 
@@ -31,24 +35,22 @@ def best_channel(
 
     other_indices = [v for v in channel_index.values() if v != chosen_index]
 
-    _, _, n_chan = img_pixels.shape
+    _, _, n_chan = X.shape
 
     if n_chan > 3:
 
-        img_pixels = img_pixels[:, :, :3]
+        X = X[:, :, :3]
 
     mask = (
-        (img_pixels[:, :, chosen_index] > img_pixels[:, :, other_indices[0]]) & 
+        (X[:, :, chosen_index] > X[:, :, other_indices[0]]) & 
 
-        (img_pixels[:, :, chosen_index] > img_pixels[:, :, other_indices[1]])
+        (X[:, :, chosen_index] > X[:, :, other_indices[1]])
     )
 
     return mask
 
 
-
-
-def plot(
+def plot_dominant_band(
         X,
         *,
         title = 'RAW',
@@ -60,13 +62,27 @@ def plot(
 
     >> White (1): means the chosen channel has the high value at that pixel (dominates)
     >> Black (0): otherwise
+
+    Parameters
+    ---------
+    X: the dataset to be used
+    title: plot title
+    figsize: matplotlib size
+
+    Returns
+    -------
+    A plot of 4 subfigures
+
+    The first one is the input data.
+
+    The other 3 are filtered by rgb channels.
     '''
 
     import matplotlib.pyplot as plt
 
-    r = best_channel(X, 'r')
-    g = best_channel(X, 'g')
-    b = best_channel(X, 'b')
+    r = dominant_band(X, 'r')
+    g = dominant_band(X, 'g')
+    b = dominant_band(X, 'b')
 
     fig, axes = plt.subplots(1, 4, figsize = figsize)
 
@@ -104,12 +120,20 @@ if __name__ == '__main__':
 
     filename = sys.argv[1]
 
+
+    #Title
+    title = 'RAW'
+
+    if len(sys.argv) > 2: title = sys.argv[2]
+
+
     #load raster and read
     raster = Raster(file_name=filename)
 
-    X = raster.read_trim()
+    X = raster.readBands_and_trim(crop = True)
 
-    plot(
-        X
+    plot_dominant_band(
+        X,
+        title=title
     )
 
