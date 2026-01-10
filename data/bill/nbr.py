@@ -2,11 +2,17 @@
 nbr.py
 
 Normalized Burned Ratio
+
+python3 nbr.py file_1.bin file_2.bin
 '''
 
 from exceptions.matrix_exception import Shape_Mismatched_Error
 
 import numpy as np
+
+import sys
+
+from read_raster import Raster
 
 
 def NBR(
@@ -138,7 +144,7 @@ def plot_barc(
 
     plt.figure(figsize=figsize)
     plt.imshow(class_plot, vmin=1, vmax=4, cmap=cmap)
-    plt.title(f'BARC 256 burn severity, start date:{start_date}, end date:{end_date}')
+    plt.title(f'BARC 256 burn severity, start:{start_date}, end:{end_date}')
 
     labels = {
         1: ('Unburned', 'green'),
@@ -154,3 +160,45 @@ def plot_barc(
 
     plt.legend(fontsize=fontsize)
     plt.tight_layout()
+    plt.show()
+
+
+
+
+if __name__ == '__main__':
+
+    #handling argv
+    if len(sys.argv) < 3:
+        print("Needs 2 files")
+        sys.exit(1)
+
+    filename_pre = sys.argv[1]
+    filename_pst = sys.argv[2]
+
+    #load raster and read
+    raster_pre_Instance = Raster(file_name=filename_pre)
+    raster_pst_Instance = Raster(file_name=filename_pst)
+
+    #Plot title
+    title_pre, title_pst = raster_pre_Instance.acquisition_timestamp, raster_pst_Instance.acquisition_timestamp
+
+    #Extract band 8 and 12
+    B8_pre  = raster_pre_Instance.get_band(8)
+    B8_post = raster_pst_Instance.get_band(8)
+
+    B12_pre = raster_pre_Instance.get_band(12)
+    B12_post = raster_pst_Instance.get_band(12)
+
+    nbr_pre, nbr_post, dnbr = dNBR(NIR_1=B8_pre, SWIR_1=B12_pre,
+                                   
+                                   NIR_2=B8_post, SWIR_2=B12_post)
+
+    #plot result
+    plot_barc(
+        dnbr,
+        start_date=title_pre,
+        end_date=title_pst,
+        figsize=(10, 10)
+    )
+
+    
