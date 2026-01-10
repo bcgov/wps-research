@@ -1,20 +1,16 @@
 /*
- * classify.c
- *
- * gcc -O3 -Wall classify.c -o classify -lgdal -lblas -llapack -lpthread -lm
- *
- * Run global_stats_to_txt.py after generating global_stats.pkl using classify_one3.py
- *
- * /
- /*
- * classify.c
- *
- * Gaussian patch classifier (C version)
- * Uses:
- *  - GDAL (C API)
- *  - BLAS / LAPACK (CBLAS + LAPACKE)
- *  - pthreads
- */
+gcc -O3 -Wall classify.c -o classify \
+    -I/usr/local/include \
+    -L/usr/local/lib \
+    -lgdal -llapacke -llapack -lcblas -lblas -lpthread -lm
+
+ 
+ Gaussian patch classifier (C version)
+ Uses:
+  - GDAL (C API)
+  - BLAS / LAPACK (CBLAS + LAPACKE)
+  - pthreads
+*/
 
 #include <stdio.h>
 #include <stdlib.h>
