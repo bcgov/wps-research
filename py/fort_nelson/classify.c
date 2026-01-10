@@ -1,10 +1,6 @@
 /*
-gcc -O3 -Wall classify.c -o classify \
-    -I/usr/local/include \
-    -L/usr/local/lib \
-    -lgdal -llapacke -llapack -lcblas -lblas -lpthread -lm
+gcc -O3 -Wall classify.c -o classify -I/usr/local/include -L/usr/local/lib -lgdal -llapacke -llapack -lcblas -lblas -lpthread -lm
 
- 
  Gaussian patch classifier (C version)
  Uses:
   - GDAL (C API)
