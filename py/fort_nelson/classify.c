@@ -15,13 +15,14 @@ gcc -O3 -Wall classify.c -o classify -I/usr/local/include -L/usr/local/lib -lgda
 #include <pthread.h>
 #include <time.h>
 #include <stddef.h>
+#include <unistd.h>
 
 #include "cblas.h"
 #include "lapacke.h"
 #include "gdal.h"
 #include "cpl_conv.h"
 
-#define PATCH_SIZE 1  // keep patch flattening exactly as before
+#define PATCH_SIZE 1
 
 typedef struct {
     int dim;
@@ -30,161 +31,131 @@ typedef struct {
     double *inv_cov;
 } ClassStats;
 
-typedef struct {
-    size_t y_start;
-    size_t y_end;
-} Job;
-
-typedef struct Node {
-    Job job;
-    struct Node *next;
-} Node;
-
-typedef struct {
-    Node *head;
-    Node *tail;
-    pthread_mutex_t mutex;
-    pthread_cond_t cond;
-    size_t total_jobs;
-    size_t jobs_done;
-} JobQueue;
-
-JobQueue queue;
-size_t width, height, n_bands;
-unsigned char *out_image;
 ClassStats *stats;
 int n_classes;
-pthread_mutex_t print_mutex;
 
-void enqueue(Job job) {
-    Node *node = malloc(sizeof(Node));
-    node->job = job;
-    node->next = NULL;
+size_t width, height, n_bands;
+unsigned char *out_image;
 
-    pthread_mutex_lock(&queue.mutex);
-    if(queue.tail) queue.tail->next = node;
-    else queue.head = node;
-    queue.tail = node;
-    pthread_cond_signal(&queue.cond);
-    pthread_mutex_unlock(&queue.mutex);
+// ---------------- parfor globals ----------------
+pthread_attr_t pt_attr;
+pthread_mutex_t pt_nxt_j_mtx, print_mtx;
+size_t pt_nxt_j, pt_end_j;
+void (*pt_eval)(size_t);
+
+// ---------------- parfor formalism ----------------
+void pt_init_mtx() {
+    pthread_mutex_init(&pt_nxt_j_mtx, NULL);
+    pthread_mutex_init(&print_mtx, NULL);
 }
 
-int dequeue(Job *job) {
-    pthread_mutex_lock(&queue.mutex);
-    while(!queue.head) {
-        pthread_cond_wait(&queue.cond, &queue.mutex);
+void *pt_worker_fun(void *arg) {
+    size_t k = (size_t)arg;
+    while (1) {
+        pthread_mutex_lock(&pt_nxt_j_mtx);
+        size_t my_nxt_j = pt_nxt_j++;
+        pthread_mutex_unlock(&pt_nxt_j_mtx);
+
+        if (my_nxt_j >= pt_end_j) return NULL;
+        pt_eval(my_nxt_j);
     }
-    Node *node = queue.head;
-    *job = node->job;
-    queue.head = node->next;
-    if(!queue.head) queue.tail = NULL;
-    free(node);
-    pthread_mutex_unlock(&queue.mutex);
-    return 1;
 }
 
+void parfor(size_t start_j, size_t end_j, void(*eval)(size_t), int cores_use) {
+    pt_eval = eval;
+    pt_end_j = end_j;
+    pt_nxt_j = start_j;
+
+    int cores_avail = sysconf(_SC_NPROCESSORS_ONLN);
+    size_t n_cores = (cores_use > 0 && cores_use < cores_avail) ? cores_use : cores_avail;
+
+    pthread_attr_init(&pt_attr);
+    pthread_attr_setdetachstate(&pt_attr, PTHREAD_CREATE_JOINABLE);
+    pthread_t *threads = malloc(n_cores * sizeof(pthread_t));
+
+    for (size_t t = 0; t < n_cores; t++)
+        pthread_create(&threads[t], &pt_attr, pt_worker_fun, (void *)t);
+
+    for (size_t t = 0; t < n_cores; t++)
+        pthread_join(threads[t], NULL);
+
+    free(threads);
+}
+
+void parfor_simple(size_t start_j, size_t end_j, void(*eval)(size_t)) {
+    parfor(start_j, end_j, eval, 0);
+}
+
+// ---------------- Global stats loading ----------------
 void load_global_stats(const char *path) {
     FILE *f = fopen(path, "r");
-    if(!f) { perror("Failed to open global stats"); exit(1); }
+    if (!f) { perror("Failed to open global stats"); exit(1); }
 
     fscanf(f, "%d", &n_classes);
     stats = calloc(n_classes, sizeof(ClassStats));
 
-    for(int c = 0; c < n_classes; c++) {
+    for (int c = 0; c < n_classes; c++) {
         fscanf(f, "%d", &stats[c].dim);
         int d = stats[c].dim;
         stats[c].mean = calloc(d, sizeof(double));
         stats[c].cov  = calloc(d*d, sizeof(double));
         stats[c].inv_cov = calloc(d*d, sizeof(double));
-        for(int i = 0; i < d; i++) fscanf(f, "%lf", &stats[c].mean[i]);
-        for(int i = 0; i < d*d; i++) fscanf(f, "%lf", &stats[c].cov[i]);
+
+        for (int i = 0; i < d; i++) fscanf(f, "%lf", &stats[c].mean[i]);
+        for (int i = 0; i < d*d; i++) fscanf(f, "%lf", &stats[c].cov[i]);
         memcpy(stats[c].inv_cov, stats[c].cov, d*d*sizeof(double));
+
         LAPACKE_dpotrf(LAPACK_ROW_MAJOR,'U',d,stats[c].inv_cov,d);
         LAPACKE_dpotri(LAPACK_ROW_MAJOR,'U',d,stats[c].inv_cov,d);
     }
     fclose(f);
 }
 
-void *worker_thread(void *arg) {
-    size_t rows_done = 0;
-    while(1) {
-        Job job;
-        if(!dequeue(&job)) break;
-
-        pthread_mutex_lock(&print_mutex);
-        printf("[Thread %lu] Starting rows %zu -> %zu\n", pthread_self(), job.y_start, job.y_end);
-        pthread_mutex_unlock(&print_mutex);
-
-        for(size_t y = job.y_start; y < job.y_end; y++) {
-            // loop over row
-            for(size_t x = 0; x < width; x++) {
-                // here preserve patch flattening exactly
-                size_t idx = y*width + x;
-                out_image[idx] = 0; // dummy classification logic placeholder
-            }
-            rows_done++;
-
-            if(rows_done % 100 == 0) {
-                pthread_mutex_lock(&print_mutex);
-                double pct = 100.0*queue.jobs_done/queue.total_jobs;
-                printf("[Thread %lu] Progress: %zu/%zu rows (%.2f%%)\n", pthread_self(),
-                       queue.jobs_done, queue.total_jobs, pct);
-                pthread_mutex_unlock(&print_mutex);
-            }
-        }
-
-        pthread_mutex_lock(&queue.mutex);
-        queue.jobs_done += job.y_end - job.y_start;
-        pthread_mutex_unlock(&queue.mutex);
-
-        pthread_mutex_lock(&print_mutex);
-        printf("[Thread %lu] Finished rows %zu -> %zu\n", pthread_self(), job.y_start, job.y_end);
-        pthread_mutex_unlock(&print_mutex);
+// ---------------- Row evaluation function ----------------
+void eval_row(size_t y) {
+    if (y % 100 == 0) {
+        pthread_mutex_lock(&print_mtx);
+        printf("[Row %zu] starting\n", y);
+        pthread_mutex_unlock(&print_mtx);
     }
-    return NULL;
+
+    for (size_t x = 0; x < width; x++) {
+        size_t idx = y*width + x;
+        out_image[idx] = 0; // keep patch flattening exactly
+    }
+
+    if (y % 100 == 0) {
+        pthread_mutex_lock(&print_mtx);
+        printf("[Row %zu] finished\n", y);
+        pthread_mutex_unlock(&print_mtx);
+    }
 }
 
+// ---------------- Main ----------------
 int main(int argc, char **argv) {
-    if(argc < 3) { fprintf(stderr,"Usage: %s global_stats.txt image.tif\n",argv[0]); return 1; }
+    if (argc < 3) {
+        fprintf(stderr,"Usage: %s global_stats.txt image.tif\n",argv[0]);
+        return 1;
+    }
 
-    pthread_mutex_init(&print_mutex,NULL);
-
+    pt_init_mtx();
     load_global_stats(argv[1]);
 
     GDALAllRegister();
     GDALDatasetH ds = GDALOpen(argv[2], GA_ReadOnly);
-    if(!ds) { fprintf(stderr,"Failed to open image\n"); exit(1); }
+    if (!ds) { fprintf(stderr,"Failed to open image\n"); exit(1); }
 
-    width  = GDALGetRasterXSize(ds);
+    width = GDALGetRasterXSize(ds);
     height = GDALGetRasterYSize(ds);
     n_bands = GDALGetRasterCount(ds);
-    out_image = calloc(width*height,sizeof(unsigned char));
 
-    size_t nthreads = sysconf(_SC_NPROCESSORS_ONLN);
-    pthread_t threads[nthreads];
+    out_image = calloc(width*height, sizeof(unsigned char));
 
-    // enqueue jobs
-    queue.total_jobs = height;
-    queue.jobs_done = 0;
-    queue.head = queue.tail = NULL;
-    pthread_mutex_init(&queue.mutex,NULL);
-    pthread_cond_init(&queue.cond,NULL);
+    printf("Starting parallel row classification on %zu rows\n", height);
+    parfor_simple(0, height, eval_row);
+    printf("Finished parallel row classification\n");
 
-    size_t patch = PATCH_SIZE;
-    for(size_t y = 0; y < height; y += patch) {
-        Job j;
-        j.y_start = y;
-        j.y_end = (y+patch < height) ? y+patch : height;
-        enqueue(j);
-    }
-
-    for(size_t t = 0; t < nthreads; t++)
-        pthread_create(&threads[t],NULL,worker_thread,NULL);
-
-    for(size_t t = 0; t < nthreads; t++)
-        pthread_join(threads[t],NULL);
-
-    // write ENVI output float32
+    // ENVI output float32
     GDALDriverH drv = GDALGetDriverByName("ENVI");
     GDALDatasetH ods = GDALCreate(drv,"classification.envi",width,height,1,GDT_Float32,NULL);
 
@@ -194,27 +165,27 @@ int main(int argc, char **argv) {
     const char *proj = GDALGetProjectionRef(ds);
     GDALSetProjection(ods,proj);
 
-    float *out_float = calloc(width*height,sizeof(float));
-    for(size_t i=0;i<width*height;i++) out_float[i]=(float)out_image[i];
+    float *out_float = calloc(width*height, sizeof(float));
+    for (size_t i=0; i<width*height; i++) out_float[i] = (float)out_image[i];
 
     GDALRasterBandH ob = GDALGetRasterBand(ods,1);
     GDALRasterIO(ob,GF_Write,0,0,width,height,out_float,width,height,GDT_Float32,0,0);
 
     GDALClose(ods);
     GDALClose(ds);
+
     free(out_float);
     free(out_image);
 
-    for(int c =0;c<n_classes;c++){
+    for (int c = 0; c < n_classes; c++) {
         free(stats[c].mean);
         free(stats[c].cov);
         free(stats[c].inv_cov);
     }
     free(stats);
 
-    pthread_mutex_destroy(&queue.mutex);
-    pthread_cond_destroy(&queue.cond);
-    pthread_mutex_destroy(&print_mutex);
+    pthread_mutex_destroy(&pt_nxt_j_mtx);
+    pthread_mutex_destroy(&print_mtx);
 
     return 0;
 }
