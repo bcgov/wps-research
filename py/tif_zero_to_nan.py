@@ -16,48 +16,51 @@ gdal.UseExceptions()
 def process_tif(path):
     print(f"Processing: {path}")
 
-    ds = gdal.Open(path, gdal.GA_ReadOnly)
-    if ds is None:
+    src_ds = gdal.Open(path, gdal.GA_ReadOnly)
+    if src_ds is None:
         print("  ERROR: Could not open file")
         return
 
-    raster_count = ds.RasterCount
-    needs_conversion = False
+    band_count = src_ds.RasterCount
 
-    for i in range(1, raster_count + 1):
-        band = ds.GetRasterBand(i)
-        if band.DataType != gdal.GDT_Float32:
-            needs_conversion = True
-            break
+    needs_conversion = any(
+        src_ds.GetRasterBand(i).DataType != gdal.GDT_Float32
+        for i in range(1, band_count + 1)
+    )
 
     if needs_conversion:
         print("  WARNING: Input is not Float32 — converting to Float32")
 
     # Create temporary output
-    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".tif")
-    os.close(tmp_fd)
+    fd, tmp_path = tempfile.mkstemp(suffix=".tif")
+    os.close(fd)
 
     driver = gdal.GetDriverByName("GTiff")
 
     out_ds = driver.CreateCopy(
         tmp_path,
-        ds,
+        src_ds,
         strict=0,
         options=["TILED=YES", "COMPRESS=LZW"]
     )
 
-    ds = None  # close input
+    src_ds = None  # close input early
 
     if out_ds is None:
         print("  ERROR: Failed to create temporary copy")
         os.remove(tmp_path)
         return
 
-    # Process bands (now guaranteed writable Float32)
-    for band_idx in range(1, raster_count + 1):
-        band = out_ds.GetRasterBand(band_idx)
-        arr = band.ReadAsArray()
+    # Ensure dataset-level NoData = NaN (single value for all bands)
+    out_ds.SetMetadataItem("TIFFTAG_GDAL_NODATA", "nan")
 
+    for band_idx in range(1, band_count + 1):
+        band = out_ds.GetRasterBand(band_idx)
+
+        # Clear any existing per-band nodata
+        band.DeleteNoDataValue()
+
+        arr = band.ReadAsArray()
         if arr is None:
             print(f"  WARNING: Could not read band {band_idx}")
             continue
@@ -65,10 +68,10 @@ def process_tif(path):
         if band.DataType != gdal.GDT_Float32:
             arr = arr.astype(np.float32)
 
+        # Replace zeros with NaN
         arr[arr == 0.0] = np.nan
 
         band.WriteArray(arr)
-        band.SetNoDataValue(np.nan)
         band.FlushCache()
 
     out_ds.FlushCache()
