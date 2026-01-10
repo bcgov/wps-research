@@ -76,25 +76,29 @@ Includes A) data integration B) routines applying or implementing supervised and
 Other classifiers that could be used: Minimum Dist; Max Likelihood; Spectral Angle Mapper; Spectral Information Divergence; SVM; neural net
 
 # Collaborators and Contributors:
+* Bill Co, BCWS Co-op student
+* Ashlin Richardson, BCWS/PSU
+* BCWS and BCWS Agile team members
+
+## TRU Comp. Sci Students Co-supervised:
+* Gagan Bajwa
+* Brad Crump
+* Francesca Rammuno
+
+# Past contributors: 
+* Sterling von Dehn, BCWS Co-op student 
+* Sybrand Strauss, BCWS/PSU
 * Dana Hicks, BCWS
 * Joanna Wand, BCWS
 * Brad Martin, BCWS
 * Dr. David Hill, TRU
 * Dr. Musfiq Rahman, TRU
-* Ashlin Richardson, OCIO
-
-## TRU Computing Science ML/AI Students Co-supervised:
-* Gagan Bajwa
-* Brad Crump
-* Francesca Rammuno
-
-# Alumni:
 * Brady Holliday, BCWS
 * Jabed Tomal, TRU
 
 # License
 
-Copyright 2022 Province of British Columbia
+Copyright 202 Province of British Columbia
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use these files except in compliance with the License.
