@@ -144,13 +144,13 @@ void eval_row(size_t y) {
             for (int dx = -pad; dx <= pad; dx++) {
                 int yy = (int)y + dy;
                 int xx = (int)x + dx;
-
+                
                 // Reflect padding
                 if (yy < 0) yy = -yy;
                 if (yy >= (int)height) yy = 2*(int)height - yy - 2;
                 if (xx < 0) xx = -xx;
                 if (xx >= (int)width) xx = 2*(int)width - xx - 2;
-
+                
                 for (size_t b = 0; b < n_bands; b++) {
                     patch_vec[idx++] = image_data[b * width * height + yy * width + xx];
                 }
@@ -160,28 +160,28 @@ void eval_row(size_t y) {
         // Classify: find minimum Mahalanobis distance
         double min_dist = INFINITY;
         int best_class = 0;
-
+        
         for (int c = 0; c < n_classes; c++) {
             if (stats[c].mean == NULL) continue;
-
+            
             // diff = patch_vec - mean
             for (int i = 0; i < patch_dim; i++) {
                 diff[i] = patch_vec[i] - stats[c].mean[i];
             }
-
+            
             // temp = inv_cov @ diff
             cblas_dsymv(CblasRowMajor, CblasUpper, patch_dim, 1.0,
                        stats[c].inv_cov, patch_dim, diff, 1, 0.0, temp, 1);
-
+            
             // dist = diff @ temp
             double dist = cblas_ddot(patch_dim, diff, 1, temp, 1);
-
+            
             if (dist < min_dist) {
                 min_dist = dist;
                 best_class = c;
             }
         }
-
+        
         out_image[y * width + x] = (unsigned char)best_class;
     }
 
