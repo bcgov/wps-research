@@ -13,13 +13,16 @@ gcc -O3 -Wall classify.c -o classify -I/usr/local/include -L/usr/local/lib -lgda
 #include <string.h>
 #include <math.h>
 #include <pthread.h>
-#include <sys/time.h>
 #include <sys/sysinfo.h>
-#include <gdal.h>
-#include <cblas.h>
-#include <lapacke.h>
+#include "gdal.h"
+#include "cpl_conv.h"
+#include "cblas.h"
+#include "lapacke.h"
 
-/* ---------------- Types ---------------- */
+/* ---------------- constants ---------------- */
+#define PATCH_SIZE 7
+#define MIN_POLY_DIMENSION 15
+
 typedef struct {
     int dim;
     double *mean;
@@ -28,254 +31,188 @@ typedef struct {
 } ClassStats;
 
 typedef struct {
-    int job_index;
-    int y_start;
-    int y_end;
-    int w,h,bands,patch_size;
-    double *image;     // image buffer, row-major, flattened
+    int y_start, y_end;
+    int w, h, d;
+    double *padded;
+    float *out;
     ClassStats *stats;
-    int n_classes;
-    unsigned char *out;
 } Job;
 
-typedef struct Node {
-    Job job;
-    struct Node *next;
-} Node;
-
-typedef struct {
-    Node *head;
-    Node *tail;
-    pthread_mutex_t mutex;
-} Queue;
-
-/* ---------------- Globals ---------------- */
-Queue job_queue;
 pthread_mutex_t print_mutex = PTHREAD_MUTEX_INITIALIZER;
-int total_jobs;
-int jobs_done;
-struct timeval start_time;
-
-/* ---------------- Queue ---------------- */
-void queue_init(Queue *q) {
-    q->head = q->tail = NULL;
-    pthread_mutex_init(&q->mutex,NULL);
-}
-
-void queue_push(Queue *q, Job job) {
-    Node *n = malloc(sizeof(Node));
-    n->job = job;
-    n->next = NULL;
-    pthread_mutex_lock(&q->mutex);
-    if(q->tail) q->tail->next = n;
-    else q->head = n;
-    q->tail = n;
-    pthread_mutex_unlock(&q->mutex);
-}
-
-int queue_pop(Queue *q, Job *job) {
-    pthread_mutex_lock(&q->mutex);
-    Node *n = q->head;
-    if(!n) { pthread_mutex_unlock(&q->mutex); return 0; }
-    q->head = n->next;
-    if(!q->head) q->tail=NULL;
-    *job = n->job;
-    free(n);
-    pthread_mutex_unlock(&q->mutex);
-    return 1;
-}
-
-/* ---------------- Time & Progress ---------------- */
-double time_elapsed() {
-    struct timeval now;
-    gettimeofday(&now,NULL);
-    return (now.tv_sec-start_time.tv_sec) + (now.tv_usec-start_time.tv_usec)/1e6;
-}
+int total_jobs = 0;
+int finished_jobs = 0;
 
 void print_progress() {
     pthread_mutex_lock(&print_mutex);
-    double pct = 100.0 * jobs_done / total_jobs;
-    double eta = time_elapsed() * (total_jobs-jobs_done)/jobs_done;
-    int len = 40;
-    int filled = (int)(len * pct / 100.0);
-    printf("\r[");
-    for(int i=0;i<filled;i++) printf("█");
-    for(int i=filled;i<len;i++) printf("-");
-    printf("] %.1f%% ETA %.1fs", pct, eta);
+    double pct = 100.0 * finished_jobs / total_jobs;
+    printf("\rClassifying: %d/%d (%.1f%%) ETA approx %.1fs",
+           finished_jobs, total_jobs, pct,
+           (pct > 0 ? (finished_jobs / pct - finished_jobs / 100.0) : 0.0));
     fflush(stdout);
-    if(jobs_done==total_jobs) printf("\n");
     pthread_mutex_unlock(&print_mutex);
 }
 
-/* ---------------- Global Stats Loading ---------------- */
-ClassStats* load_global_stats(const char *path, int *n_classes) {
-    FILE *f = fopen(path,"r");
-    if(!f) { fprintf(stderr,"Failed to open %s\n",path); exit(1); }
+void *classify_rows(void *arg) {
+    Job *job = (Job*)arg;
+    int pad = PATCH_SIZE/2;
+    for(int y=job->y_start; y<job->y_end; y++) {
+        for(int x=0; x<job->w; x++) {
+            // extract flattened patch
+            double patch[PATCH_SIZE*PATCH_SIZE*job->d];
+            int idx=0;
+            for(int dy=0; dy<PATCH_SIZE; dy++)
+                for(int dx=0; dx<PATCH_SIZE; dx++)
+                    for(int b=0; b<job->d; b++)
+                        patch[idx++] = job->padded[((y+dy)* (job->w+2*pad) + (x+dx))*job->d + b];
 
-    char line[4096];
-    int max_cls=-1;
+            double s0 = INFINITY, s1 = INFINITY;
 
-    // First pass: find max class ID
-    while(fgets(line,sizeof(line),f)) {
-        int cls;
-        if(sscanf(line,"CLASS %d",&cls)==1) {
-            if(cls>max_cls) max_cls=cls;
-        }
-    }
-    if(max_cls<0) { fprintf(stderr,"No classes found\n"); exit(1); }
-    *n_classes = max_cls+1;
-
-    ClassStats *stats = calloc(*n_classes,sizeof(ClassStats));
-    rewind(f);
-
-    int cls;
-    while(fgets(line,sizeof(line),f)) {
-        if(sscanf(line,"CLASS %d",&cls)==1) {
-            int d=-1;
-            if(fgets(line,sizeof(line),f) && sscanf(line,"DIM %d",&d)==1) {
-                stats[cls].dim = d;
-                stats[cls].mean = calloc(d,sizeof(double));
-                stats[cls].cov  = calloc(d*d,sizeof(double));
-                stats[cls].inv_cov = calloc(d*d,sizeof(double));
+            if(job->stats[0].mean) {
+                double tmp[job->d*job->d];
+                cblas_dgemv(CblasRowMajor,CblasNoTrans,job->d,job->d,1.0,
+                            job->stats[0].inv_cov,job->d,patch,1,0.0,tmp,1);
+                s0 = cblas_ddot(job->d,patch,1,tmp,1);
             }
 
-            // Read MEAN
-            if(fgets(line,sizeof(line),f) && strncmp(line,"MEAN",4)==0) {
-                for(int i=0;i<stats[cls].dim;i++)
-                    fscanf(f,"%lf",&stats[cls].mean[i]);
+            if(job->stats[1].mean) {
+                double tmp[job->d*job->d];
+                cblas_dgemv(CblasRowMajor,CblasNoTrans,job->d,job->d,1.0,
+                            job->stats[1].inv_cov,job->d,patch,1,0.0,tmp,1);
+                s1 = cblas_ddot(job->d,patch,1,tmp,1);
             }
 
-            // Read COV
-            if(fgets(line,sizeof(line),f) && strncmp(line,"COV",3)==0) {
-                for(int i=0;i<stats[cls].dim*stats[cls].dim;i++)
-                    fscanf(f,"%lf",&stats[cls].cov[i]);
-            }
-
-            // Invert cov using LAPACK
-            memcpy(stats[cls].inv_cov, stats[cls].cov, sizeof(double)*stats[cls].dim*stats[cls].dim);
-            int info = LAPACKE_dpotrf(LAPACK_ROW_MAJOR,'U',stats[cls].dim,stats[cls].inv_cov,stats[cls].dim);
-            if(info!=0) fprintf(stderr,"Warning: dpotrf info=%d for class %d\n",info,cls);
-            info = LAPACKE_dpotri(LAPACK_ROW_MAJOR,'U',stats[cls].dim,stats[cls].inv_cov,stats[cls].dim);
-            if(info!=0) fprintf(stderr,"Warning: dpotri info=%d for class %d\n",info,cls);
+            job->out[y*job->w+x] = (float)(s1<s0 ? 1 : 0);
         }
-    }
-    fclose(f);
-    return stats;
-}
 
-/* ---------------- Classification ---------------- */
-void classify_vector(Job *job, int y) {
-    int pad = job->patch_size/2;
-    int w=job->w, h=job->h, bands=job->bands;
-    int patch = job->patch_size;
-    int d = patch*patch*bands;
-
-    double *patch_vec = malloc(sizeof(double)*d);
-
-    for(int x=0;x<w;x++) {
-        int idx=0;
-        for(int yy=y-pad;yy<=y+pad;yy++)
-            for(int xx=x-pad;xx<=x+pad;xx++)
-                for(int b=0;b<bands;b++) {
-                    int yy_clamp = yy<0?0:(yy>=h?h-1:yy);
-                    int xx_clamp = xx<0?0:(xx>=w?w-1:xx);
-                    patch_vec[idx++] = job->image[(yy_clamp*w+xx_clamp)*bands+b];
-                }
-
-        double best = INFINITY;
-        int best_cls = 0;
-        for(int cls=0;cls<job->n_classes;cls++) {
-            ClassStats *s = &job->stats[cls];
-            if(!s->mean) continue;
-
-            double *tmp = malloc(d*sizeof(double));
-            for(int i=0;i<d;i++) tmp[i] = patch_vec[i]-s->mean[i];
-            double score = cblas_ddot(d,tmp,1, tmp,1); // Mahalanobis quadratic form
-            free(tmp);
-
-            if(score<best) { best=score; best_cls=cls; }
-        }
-        job->out[y*w+x] = (unsigned char)best_cls;
-    }
-
-    free(patch_vec);
-}
-
-/* ---------------- Worker ---------------- */
-void* worker_thread(void *arg) {
-    Job job;
-    while(queue_pop(&job_queue,&job)) {
-        for(int y=job.y_start;y<job.y_end;y++) {
-            classify_vector(&job,y);
-            __sync_fetch_and_add(&jobs_done,1);
-            if(job.job_index%100==0) print_progress();
-        }
+        pthread_mutex_lock(&print_mutex);
+        finished_jobs++;
+        if(finished_jobs % 100 == 0 || finished_jobs==total_jobs) print_progress();
+        pthread_mutex_unlock(&print_mutex);
     }
     return NULL;
 }
 
-/* ---------------- Main ---------------- */
-int main(int argc,char **argv) {
-    if(argc<3) { fprintf(stderr,"Usage: %s global_stats.txt image.tif\n",argv[0]); return 1; }
+int load_global_stats(const char *path, ClassStats stats[2]) {
+    FILE *f = fopen(path,"r");
+    if(!f) { fprintf(stderr,"Failed to open %s\n",path); exit(1); }
+
+    char line[4096];
+    for(int cls=0; cls<2; cls++) {
+        stats[cls].dim = 0;
+        stats[cls].mean = NULL;
+        stats[cls].cov = NULL;
+        stats[cls].inv_cov = NULL;
+    }
+
+    int cls=-1;
+    while(fgets(line,sizeof(line),f)) {
+        if(sscanf(line,"CLASS %d",&cls)==1) continue;
+        if(cls<0 || cls>1) continue;
+
+        if(strncmp(line,"DIM",3)==0) {
+            int d;
+            if(sscanf(line,"DIM %d",&d)==1) {
+                stats[cls].dim=d;
+                stats[cls].mean = calloc(d,sizeof(double));
+                stats[cls].cov = calloc(d*d,sizeof(double));
+                stats[cls].inv_cov = calloc(d*d,sizeof(double));
+            }
+        }
+        else if(strncmp(line,"MEAN",4)==0) {
+            for(int i=0;i<stats[cls].dim;i++)
+                fscanf(f,"%lf",&stats[cls].mean[i]);
+        }
+        else if(strncmp(line,"COV",3)==0) {
+            for(int i=0;i<stats[cls].dim*stats[cls].dim;i++)
+                fscanf(f,"%lf",&stats[cls].cov[i]);
+            memcpy(stats[cls].inv_cov, stats[cls].cov, stats[cls].dim*stats[cls].dim*sizeof(double));
+            int info = LAPACKE_dpotrf(LAPACK_ROW_MAJOR,'U',stats[cls].dim,stats[cls].inv_cov,stats[cls].dim);
+            if(info==0) LAPACKE_dpotri(LAPACK_ROW_MAJOR,'U',stats[cls].dim,stats[cls].inv_cov,stats[cls].dim);
+        }
+    }
+    fclose(f);
+    return 0;
+}
+
+int main(int argc, char **argv) {
+    if(argc!=3) {
+        fprintf(stderr,"Usage: %s global_stats.txt image.tif\n",argv[0]);
+        return 1;
+    }
 
     GDALAllRegister();
-    int n_classes;
-    ClassStats *stats = load_global_stats(argv[1], &n_classes);
+    ClassStats stats[2];
+    load_global_stats(argv[1],stats);
 
-    GDALDatasetH ds = GDALOpen(argv[2], GA_ReadOnly);
+    GDALDatasetH ds = GDALOpen(argv[2],GA_ReadOnly);
     if(!ds) { fprintf(stderr,"Failed to open image\n"); return 1; }
 
     int w = GDALGetRasterXSize(ds);
     int h = GDALGetRasterYSize(ds);
     int bands = GDALGetRasterCount(ds);
 
-    double *image = calloc(w*h*bands,sizeof(double));
+    int pad = PATCH_SIZE/2;
+    int pw = w + 2*pad;
+    int ph = h + 2*pad;
+
+    double *image = calloc(pw*ph*bands,sizeof(double));
+
     for(int b=0;b<bands;b++) {
         GDALRasterBandH rb = GDALGetRasterBand(ds,b+1);
         double *tmp = malloc(sizeof(double)*w*h);
         GDALRasterIO(rb,GF_Read,0,0,w,h,tmp,w,h,GDT_Float64,0,0);
-        for(int i=0;i<w*h;i++) image[i*bands+b] = tmp[i];
+        for(int y=0;y<h;y++)
+            for(int x=0;x<w;x++)
+                image[((y+pad)*pw + (x+pad))*bands + b] = tmp[y*w+x];
         free(tmp);
     }
 
-    unsigned char *out = calloc(w*h,sizeof(unsigned char));
+    float *out = calloc(w*h,sizeof(float));
 
-    int patch_size=7;
-    int nthreads = get_nprocs();
-    pthread_t *threads = malloc(sizeof(pthread_t)*nthreads);
-
-    jobs_done = 0;
     total_jobs = h;
-    queue_init(&job_queue);
-    gettimeofday(&start_time,NULL);
+    finished_jobs = 0;
 
-    // Enqueue one job per row
-    for(int y=0;y<h;y++) {
-        Job job = {y, y, y+1, w, h, bands, patch_size, image, stats, n_classes, out};
-        job.job_index = y;
-        queue_push(&job_queue,job);
+    int nthreads = get_nprocs();
+    pthread_t *threads = malloc(nthreads*sizeof(pthread_t));
+    Job *jobs = malloc(nthreads*sizeof(Job));
+
+    int rows_per_thread = (h + nthreads -1)/nthreads;
+    for(int t=0;t<nthreads;t++) {
+        jobs[t].y_start = t*rows_per_thread;
+        jobs[t].y_end = (t+1)*rows_per_thread;
+        if(jobs[t].y_end>h) jobs[t].y_end=h;
+        jobs[t].w=w; jobs[t].h=h; jobs[t].d=bands;
+        jobs[t].padded=image;
+        jobs[t].out=out;
+        jobs[t].stats=stats;
+        pthread_create(&threads[t],NULL,classify_rows,&jobs[t]);
     }
 
-    for(int t=0;t<nthreads;t++) pthread_create(&threads[t],NULL,worker_thread,NULL);
     for(int t=0;t<nthreads;t++) pthread_join(threads[t],NULL);
 
-    // Save ENVI
     GDALDriverH drv = GDALGetDriverByName("ENVI");
-    GDALDatasetH ods = GDALCreate(drv,"classification.bin",w,h,1,GDT_Byte,NULL);
-    GDALRasterIO(GDALGetRasterBand(ods,1),GF_Write,0,0,w,h,out,w,h,GDT_Byte,0,0);
+    GDALDatasetH ods = GDALCreate(drv,"classification_float.bin",w,h,1,GDT_Float32,NULL);
+
+    double geoTransform[6];
+    if(GDALGetGeoTransform(ds,geoTransform)==CE_None) GDALSetGeoTransform(ods,geoTransform);
+    const char *proj = GDALGetProjectionRef(ds);
+    if(proj) GDALSetProjection(ods,proj);
+
+    GDALRasterIO(GDALGetRasterBand(ods,1),GF_Write,0,0,w,h,out,w,h,GDT_Float32,0,0);
+
     GDALClose(ods);
     GDALClose(ds);
-
     free(image);
     free(out);
-    for(int i=0;i<n_classes;i++) {
-        free(stats[i].mean);
-        free(stats[i].cov);
-        free(stats[i].inv_cov);
-    }
-    free(stats);
     free(threads);
+    free(jobs);
+    for(int cls=0;cls<2;cls++) {
+        free(stats[cls].mean);
+        free(stats[cls].cov);
+        free(stats[cls].inv_cov);
+    }
 
+    printf("\n[Done] Classification written to classification_float.bin\n");
     return 0;
 }
 
