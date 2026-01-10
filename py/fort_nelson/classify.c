@@ -54,10 +54,14 @@ void print_progress() {
 
 void *classify_rows(void *arg) {
     Job *job = (Job*)arg;
+
+    pthread_mutex_lock(&print_mutex);
+    printf("[Thread %lu] Starting rows %d -> %d\n", pthread_self(), job->y_start, job->y_end-1);
+    pthread_mutex_unlock(&print_mutex);
+
     int pad = PATCH_SIZE/2;
     for(int y=job->y_start; y<job->y_end; y++) {
         for(int x=0; x<job->w; x++) {
-            // extract flattened patch
             double patch[PATCH_SIZE*PATCH_SIZE*job->d];
             int idx=0;
             for(int dy=0; dy<PATCH_SIZE; dy++)
@@ -86,9 +90,17 @@ void *classify_rows(void *arg) {
 
         pthread_mutex_lock(&print_mutex);
         finished_jobs++;
-        if(finished_jobs % 100 == 0 || finished_jobs==total_jobs) print_progress();
+        if(finished_jobs % 100 == 0 || finished_jobs==total_jobs) {
+            print_progress();
+            printf(" [Thread %lu working on row %d]\n", pthread_self(), y);
+        }
         pthread_mutex_unlock(&print_mutex);
     }
+
+    pthread_mutex_lock(&print_mutex);
+    printf("[Thread %lu] Finished rows %d -> %d\n", pthread_self(), job->y_start, job->y_end-1);
+    pthread_mutex_unlock(&print_mutex);
+
     return NULL;
 }
 
@@ -106,7 +118,10 @@ int load_global_stats(const char *path, ClassStats stats[2]) {
 
     int cls=-1;
     while(fgets(line,sizeof(line),f)) {
-        if(sscanf(line,"CLASS %d",&cls)==1) continue;
+        if(sscanf(line,"CLASS %d",&cls)==1) {
+            printf("[Global Stats] Loading CLASS %d\n", cls);
+            continue;
+        }
         if(cls<0 || cls>1) continue;
 
         if(strncmp(line,"DIM",3)==0) {
@@ -116,21 +131,27 @@ int load_global_stats(const char *path, ClassStats stats[2]) {
                 stats[cls].mean = calloc(d,sizeof(double));
                 stats[cls].cov = calloc(d*d,sizeof(double));
                 stats[cls].inv_cov = calloc(d*d,sizeof(double));
+                printf("[Global Stats] CLASS %d DIM %d\n",cls,d);
             }
         }
         else if(strncmp(line,"MEAN",4)==0) {
             for(int i=0;i<stats[cls].dim;i++)
                 fscanf(f,"%lf",&stats[cls].mean[i]);
+            printf("[Global Stats] CLASS %d MEAN loaded\n",cls);
         }
         else if(strncmp(line,"COV",3)==0) {
             for(int i=0;i<stats[cls].dim*stats[cls].dim;i++)
                 fscanf(f,"%lf",&stats[cls].cov[i]);
             memcpy(stats[cls].inv_cov, stats[cls].cov, stats[cls].dim*stats[cls].dim*sizeof(double));
             int info = LAPACKE_dpotrf(LAPACK_ROW_MAJOR,'U',stats[cls].dim,stats[cls].inv_cov,stats[cls].dim);
-            if(info==0) LAPACKE_dpotri(LAPACK_ROW_MAJOR,'U',stats[cls].dim,stats[cls].inv_cov,stats[cls].dim);
+            if(info==0) {
+                LAPACKE_dpotri(LAPACK_ROW_MAJOR,'U',stats[cls].dim,stats[cls].inv_cov,stats[cls].dim);
+                printf("[Global Stats] CLASS %d COV inverted\n",cls);
+            }
         }
     }
     fclose(f);
+    printf("[Global Stats] Finished loading stats from %s\n", path);
     return 0;
 }
 
@@ -144,12 +165,14 @@ int main(int argc, char **argv) {
     ClassStats stats[2];
     load_global_stats(argv[1],stats);
 
+    printf("[GDAL] Opening TIFF %s\n",argv[2]);
     GDALDatasetH ds = GDALOpen(argv[2],GA_ReadOnly);
     if(!ds) { fprintf(stderr,"Failed to open image\n"); return 1; }
 
     int w = GDALGetRasterXSize(ds);
     int h = GDALGetRasterYSize(ds);
     int bands = GDALGetRasterCount(ds);
+    printf("[GDAL] Image size: %dx%d, Bands: %d\n", w,h,bands);
 
     int pad = PATCH_SIZE/2;
     int pw = w + 2*pad;
@@ -158,6 +181,7 @@ int main(int argc, char **argv) {
     double *image = calloc(pw*ph*bands,sizeof(double));
 
     for(int b=0;b<bands;b++) {
+        printf("[GDAL] Reading band %d/%d\n",b+1,bands);
         GDALRasterBandH rb = GDALGetRasterBand(ds,b+1);
         double *tmp = malloc(sizeof(double)*w*h);
         GDALRasterIO(rb,GF_Read,0,0,w,h,tmp,w,h,GDT_Float64,0,0);
@@ -165,14 +189,15 @@ int main(int argc, char **argv) {
             for(int x=0;x<w;x++)
                 image[((y+pad)*pw + (x+pad))*bands + b] = tmp[y*w+x];
         free(tmp);
+        printf("[GDAL] Band %d loaded\n",b+1);
     }
 
     float *out = calloc(w*h,sizeof(float));
-
     total_jobs = h;
     finished_jobs = 0;
 
     int nthreads = get_nprocs();
+    printf("[Threads] Using %d threads\n", nthreads);
     pthread_t *threads = malloc(nthreads*sizeof(pthread_t));
     Job *jobs = malloc(nthreads*sizeof(Job));
 
@@ -190,6 +215,7 @@ int main(int argc, char **argv) {
 
     for(int t=0;t<nthreads;t++) pthread_join(threads[t],NULL);
 
+    printf("\n[GDAL] Writing output ENVI float32 file\n");
     GDALDriverH drv = GDALGetDriverByName("ENVI");
     GDALDatasetH ods = GDALCreate(drv,"classification_float.bin",w,h,1,GDT_Float32,NULL);
 
@@ -212,7 +238,7 @@ int main(int argc, char **argv) {
         free(stats[cls].inv_cov);
     }
 
-    printf("\n[Done] Classification written to classification_float.bin\n");
+    printf("[Done] Classification written to classification_float.bin\n");
     return 0;
 }
 
