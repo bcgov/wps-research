@@ -1,5 +1,8 @@
 /*
-gcc -O3 -Wall classify.c -o classify -I/usr/local/include -L/usr/local/lib -lgdal -llapacke -llapack -lcblas -lblas -lpthread -lm
+gcc -O3 -Wall classify.c -o classify \
+    -I/usr/include \
+    -L/usr/lib/x86_64-linux-gnu \
+    -llapacke -lopenblas -lpthread -lm -lgdal
 
  Gaussian patch classifier (C version)
  Uses:
@@ -13,9 +16,8 @@ gcc -O3 -Wall classify.c -o classify -I/usr/local/include -L/usr/local/lib -lgda
 #include <string.h>
 #include <math.h>
 #include <pthread.h>
-#include <time.h>
-#include <stddef.h>
 #include <unistd.h>
+#include <stddef.h>
 
 #include "cblas.h"
 #include "lapacke.h"
@@ -50,15 +52,27 @@ void pt_init_mtx() {
 }
 
 void *pt_worker_fun(void *arg) {
-    size_t k = (size_t)arg;
+    size_t t_id = (size_t)arg;
     while (1) {
         pthread_mutex_lock(&pt_nxt_j_mtx);
         size_t my_nxt_j = pt_nxt_j++;
         pthread_mutex_unlock(&pt_nxt_j_mtx);
 
-        if (my_nxt_j >= pt_end_j) return NULL;
+        if (my_nxt_j >= pt_end_j) break;
+
+        pthread_mutex_lock(&print_mtx);
+        if (my_nxt_j % 100 == 0)
+            printf("[Thread %zu] Picking up row %zu\n", t_id, my_nxt_j);
+        pthread_mutex_unlock(&print_mtx);
+
         pt_eval(my_nxt_j);
+
+        pthread_mutex_lock(&print_mtx);
+        if (my_nxt_j % 100 == 0)
+            printf("[Thread %zu] Finished row %zu\n", t_id, my_nxt_j);
+        pthread_mutex_unlock(&print_mtx);
     }
+    return NULL;
 }
 
 void parfor(size_t start_j, size_t end_j, void(*eval)(size_t), int cores_use) {
@@ -67,10 +81,11 @@ void parfor(size_t start_j, size_t end_j, void(*eval)(size_t), int cores_use) {
     pt_nxt_j = start_j;
 
     int cores_avail = sysconf(_SC_NPROCESSORS_ONLN);
-    size_t n_cores = (cores_use > 0 && cores_use < cores_avail) ? cores_use : cores_avail;
+    size_t n_cores = (cores_use > 0 && (size_t)cores_use < (size_t)cores_avail) ? cores_use : cores_avail;
 
     pthread_attr_init(&pt_attr);
     pthread_attr_setdetachstate(&pt_attr, PTHREAD_CREATE_JOINABLE);
+
     pthread_t *threads = malloc(n_cores * sizeof(pthread_t));
 
     for (size_t t = 0; t < n_cores; t++)
