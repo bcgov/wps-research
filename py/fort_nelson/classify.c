@@ -1,4 +1,5 @@
-/*
+/* 20250109: translation experiment. Didn't finish this yet..
+ *
 gcc -O3 -Wall classify.c -o classify \
     -I/usr/include \
     -L/usr/lib/x86_64-linux-gnu \
