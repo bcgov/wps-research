@@ -5,6 +5,7 @@ import sys, os, warnings, glob, pickle
 import numpy as np
 from osgeo import gdal, ogr
 from joblib import Parallel, delayed
+import multiprocessing
 
 # ---------------- config ----------------
 MIN_POLY_DIMENSION = 15
@@ -43,28 +44,36 @@ def classify_pixel_nn(padded, y, x, patch, train):
             best_dist = dmin
             best_lbl = lbl
 
-    return best_lbl
+    return y, x, best_lbl
 
 def classify_by_patch_nn(image, train, patch_size=PATCH_SIZE):
     h, w, _ = image.shape
     pad = patch_size // 2
     padded = np.pad(image, ((pad,pad),(pad,pad),(0,0)), mode='reflect')
-    out = np.zeros((h,w), dtype=np.uint8)
+    out = np.zeros((h, w), dtype=np.uint8)
 
-    def classify_row(y):
-        r = np.zeros(w, dtype=np.uint8)
-        for x in range(w):
-            r[x] = classify_pixel_nn(padded, y, x, patch_size, train)
-        return r
+    coords = [(y, x) for y in range(h) for x in range(w)]
+    total = len(coords)
 
-    rows = Parallel(n_jobs=-1, backend="loky")(
-        delayed(classify_row)(y) for y in range(h)
+    n_jobs = multiprocessing.cpu_count()
+    step = n_jobs
+    completed = 0
+
+    def task(y, x):
+        return classify_pixel_nn(padded, y, x, patch_size, train)
+
+    print_progress_bar(0, total, "Classifying (pixels):", "Starting")
+
+    results = Parallel(n_jobs=n_jobs, backend="loky", batch_size=step)(
+        delayed(task)(y, x) for (y, x) in coords
     )
 
-    for y, r in enumerate(rows, 1):
-        out[y-1,:] = r
-        print_progress_bar(y, h, "Classifying (rows):", "Done")
+    for i, (y, x, lbl) in enumerate(results, 1):
+        out[y, x] = lbl
+        if i % step == 0 or i == total:
+            print_progress_bar(i, total, "Classifying (pixels):", "Running")
 
+    print_progress_bar(total, total, "Classifying (pixels):", "Done")
     return out
 
 # ---------- training ----------
@@ -101,7 +110,7 @@ def load_image_stack(path):
 
 def save_envi(dataset, classification):
     drv = gdal.GetDriverByName("ENVI")
-    h,w = classification.shape
+    h, w = classification.shape
     base,_ = os.path.splitext(dataset.GetDescription())
     out = drv.Create(f"{base}_classification.bin", w, h, 1, gdal.GDT_Float32)
     out.SetGeoTransform(dataset.GetGeoTransform())
@@ -155,19 +164,14 @@ def main():
     shp = sys.argv[1]
     target = sys.argv[2] if len(sys.argv)>2 else None
 
-    # --- classification only (WITH NEW PROGRESS BAR) ---
+    # --- classification only ---
     if target:
         with open(TRAINING_FILE,"rb") as f:
             train = pickle.load(f)
 
-        print("Starting classification:")
-        print_progress_bar(0, 1, "Image:", os.path.basename(target))
-
         img, ds = load_image_stack(target)
         cls = classify_by_patch_nn(img, train)
         save_envi(ds, cls)
-
-        print_progress_bar(1, 1, "Image:", "Done")
         return
 
     # --- training ---
