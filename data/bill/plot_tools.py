@@ -23,6 +23,7 @@ def plot(
         Parameters
         ----------
         X: data to plot
+        
 
         Returns
         -------

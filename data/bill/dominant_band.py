@@ -25,6 +25,7 @@ def dominant_band(
 
     channel: the channel (band) which you want to compare against the others.
 
+    
     Returns
     -------
     mask: 2D array (3rd dim is n channel is gone)
@@ -61,14 +62,19 @@ def plot_dominant_band(
     Applies a logic masking, returns a boolean image where:
 
     >> White (1): means the chosen channel has the high value at that pixel (dominates)
+
     >> Black (0): otherwise
 
+    
     Parameters
     ---------
     X: the dataset to be used
+
     title: plot title
+
     figsize: matplotlib size
 
+    
     Returns
     -------
     A plot of 4 subfigures

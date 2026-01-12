@@ -30,17 +30,25 @@ def change_detection(
     '''
     Compare pixel value between post and pre fire, then normalize it so that it stays between -1 and 1
 
+    
     Result: 
+    ------
+
         If the intensity increases in terms of band values (closer to 255), it will be brighter. Otherwise, it will be dark.
+
         If the intensity decreases, it will be dark (darker than no changes)
+
         If the intensity stays the same, it will be approx. 0
 
 
     Parameters
     ----------
     pre_X: pre-fire image of 3 channels
+
     post_X: post_fire image of 3 channels
+
     eps: to prevent divide by zero
+
     allow_matching_shape: to allow reducing dimension to match with the smaller one.
 
     

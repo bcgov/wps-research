@@ -1,9 +1,9 @@
 '''
-nbr.py
+barc.py
 
-Normalized Burned Ratio
+Burned Area Reflectance Classification
 
-python3 nbr.py file_1.bin file_2.bin
+python3 barc.py file_1.bin file_2.bin
 '''
 
 from exceptions.matrix_exception import Shape_Mismatched_Error
@@ -144,7 +144,7 @@ def plot_barc(
 
     plt.figure(figsize=figsize)
     plt.imshow(class_plot, vmin=1, vmax=4, cmap=cmap)
-    plt.title(f'BARC 256 burn severity, start:{start_date}, end:{end_date}')
+    plt.title(f'BARC 256 burn severity, Pre:{start_date}, Post:{end_date}')
 
     labels = {
         1: ('Unburned', 'green'),

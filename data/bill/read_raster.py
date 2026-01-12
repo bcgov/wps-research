@@ -52,6 +52,7 @@ class Raster:
     ):
         '''
         Read and extract
+
         Data + META DATA
         '''
         fname = self.file_name
@@ -100,6 +101,7 @@ class Raster:
         ----------
         band: The specific band to cut from the data.
 
+        
         Returns
         -------
         A 2D array of the chosen band (a single layer)

@@ -1,3 +1,6 @@
-The code is mainly designed to read data format from
+SENTINEL-2 Data Processing
 
-SENTINEL-2
+UPCOMING TASK:
+
+- Module to crop ENVI data so no data is removed.
+
