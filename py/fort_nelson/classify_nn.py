@@ -1,5 +1,5 @@
-'''20250112 first iteration of nn version of classification approach
-'''
+'''20250112 first iteration of nn version of classification approach'''
+
 #!/usr/bin/env python3
 import sys, os, warnings, glob, pickle
 import numpy as np
@@ -9,6 +9,7 @@ from joblib import Parallel, delayed
 # ---------------- config ----------------
 MIN_POLY_DIMENSION = 15
 PATCH_SIZE = 7
+WINDOW_STEP = 5            # <<< NEW: training stride
 TRAINING_FILE = "training_patches.pkl"
 
 gdal.UseExceptions()
@@ -34,7 +35,7 @@ def classify_pixel_nn(padded, y, x, patch, train):
 
     for lbl in (0, 1):
         T = train[lbl]
-        if not T:
+        if T.size == 0:
             continue
         D = np.sum((T - v) ** 2, axis=1)
         dmin = D.min()
@@ -80,8 +81,9 @@ def compute_training_patches(image, rectangles, labels, patch_size=PATCH_SIZE):
         x0 = max(0,int(x0)); y0 = max(0,int(y0))
         x1 = min(w,int(x1)); y1 = min(h,int(y1))
 
-        for y in range(y0,y1):
-            for x in range(x0,x1):
+        # <<< ONLY CHANGE: stepped window sampling >>>
+        for y in range(y0, y1, WINDOW_STEP):
+            for x in range(x0, x1, WINDOW_STEP):
                 S[lbl].append(
                     padded[y:y+patch_size, x:x+patch_size, :].reshape(-1)
                 )
