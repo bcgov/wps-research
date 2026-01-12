@@ -9,7 +9,7 @@ from joblib import Parallel, delayed
 # ---------------- config ----------------
 MIN_POLY_DIMENSION = 15
 PATCH_SIZE = 7
-WINDOW_STEP = 5            # <<< NEW: training stride
+WINDOW_STEP = 5
 TRAINING_FILE = "training_patches.pkl"
 
 gdal.UseExceptions()
@@ -63,7 +63,7 @@ def classify_by_patch_nn(image, train, patch_size=PATCH_SIZE):
 
     for y, r in enumerate(rows, 1):
         out[y-1,:] = r
-        print_progress_bar(y, h, "Classifying:", "Done")
+        print_progress_bar(y, h, "Classifying (rows):", "Done")
 
     return out
 
@@ -81,7 +81,6 @@ def compute_training_patches(image, rectangles, labels, patch_size=PATCH_SIZE):
         x0 = max(0,int(x0)); y0 = max(0,int(y0))
         x1 = min(w,int(x1)); y1 = min(h,int(y1))
 
-        # <<< ONLY CHANGE: stepped window sampling >>>
         for y in range(y0, y1, WINDOW_STEP):
             for x in range(x0, x1, WINDOW_STEP):
                 S[lbl].append(
@@ -144,22 +143,31 @@ def main():
         with open(TRAINING_FILE,"rb") as f:
             train = pickle.load(f)
 
-        for fname in sorted(glob.glob("*.tif")):
+        files = sorted(glob.glob("*.tif"))
+        for i, fname in enumerate(files, 1):
+            print_progress_bar(i-1, len(files), "Images:", "Processing")
             img, ds = load_image_stack(fname)
             cls = classify_by_patch_nn(img, train)
             save_envi(ds, cls)
+        print_progress_bar(len(files), len(files), "Images:", "Done")
         return
 
     shp = sys.argv[1]
     target = sys.argv[2] if len(sys.argv)>2 else None
 
-    # --- classification only ---
+    # --- classification only (WITH NEW PROGRESS BAR) ---
     if target:
         with open(TRAINING_FILE,"rb") as f:
             train = pickle.load(f)
+
+        print("Starting classification:")
+        print_progress_bar(0, 1, "Image:", os.path.basename(target))
+
         img, ds = load_image_stack(target)
         cls = classify_by_patch_nn(img, train)
         save_envi(ds, cls)
+
+        print_progress_bar(1, 1, "Image:", "Done")
         return
 
     # --- training ---
@@ -185,6 +193,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
 
