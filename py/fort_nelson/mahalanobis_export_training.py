@@ -9,6 +9,14 @@ and export in binary format for Mahalanobis CUDA classifier
 Usage: python3 export_mahalanobis_training.py annotations.shp training_mahalanobis.bin
 """
 
+#!/usr/bin/env python3
+"""
+Compute Gaussian statistics (mean, covariance) for each training rectangle
+and export in binary format for Mahalanobis CUDA classifier
+
+Usage: python3 export_mahalanobis_training.py annotations.shp training_mahalanobis.bin
+"""
+
 import sys, os
 import numpy as np
 from osgeo import gdal, ogr
@@ -189,4 +197,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
