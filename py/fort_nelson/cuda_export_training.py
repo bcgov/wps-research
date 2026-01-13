@@ -1,4 +1,5 @@
 
+
 #!/usr/bin/env python3
 """
 Export training data from pickle to binary format for CUDA program
@@ -28,11 +29,19 @@ TRAINING_SKIP = 100
 train_vectors = train_vectors[::TRAINING_SKIP]
 train_labels = train_labels[::TRAINING_SKIP]
 
+print(f"[STATUS] Initial training samples: {len(train_vectors)}")
+
+# Filter out any training samples containing NAN values
+valid_mask = ~np.isnan(train_vectors).any(axis=1)
+train_vectors = train_vectors[valid_mask]
+train_labels = train_labels[valid_mask]
+
+print(f"[STATUS] Training samples after NAN filtering: {len(train_vectors)}")
+
 n_train = len(train_vectors)
 patch_dim = train_vectors.shape[1]
 n_classes = 2
 
-print(f"[STATUS] Training samples: {n_train}")
 print(f"[STATUS] Features per sample: {patch_dim}")
 print(f"[STATUS] Classes: {n_classes}")
 
