@@ -2,6 +2,7 @@
 mahalanobis_classify.py 
 '''
 
+
 #!/usr/bin/env python3
 """
 Compute Gaussian statistics (mean, covariance) for each training rectangle
@@ -190,5 +191,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
