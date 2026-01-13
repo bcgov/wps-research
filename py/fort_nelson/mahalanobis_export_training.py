@@ -19,7 +19,7 @@ gdal.UseExceptions()
 
 MIN_POLY_DIMENSION = 15
 PATCH_SIZE = 7
-MAX_WORKERS = 512
+MAX_WORKERS = 128
 
 print_lock = threading.Lock()
 
