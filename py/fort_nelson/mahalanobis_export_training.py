@@ -10,18 +10,26 @@ and export in binary format for Mahalanobis CUDA classifier
 Usage: python3 export_mahalanobis_training.py annotations.shp training_mahalanobis.bin
 """
 
-import sys, os
+import os
+# Set these BEFORE importing numpy to prevent thread explosion
+os.environ['OMP_NUM_THREADS'] = '1'
+os.environ['OPENBLAS_NUM_THREADS'] = '1'
+os.environ['MKL_NUM_THREADS'] = '1'
+os.environ['VECLIB_MAXIMUM_THREADS'] = '1'
+os.environ['NUMEXPR_NUM_THREADS'] = '1'
+
+import sys
 import numpy as np
 from osgeo import gdal, ogr
 import struct
-from multiprocessing import Pool, Manager, shared_memory
-import threading
+from joblib import Parallel, delayed
 
 gdal.UseExceptions()
 
 MIN_POLY_DIMENSION = 15
 PATCH_SIZE = 7
-MAX_PATCHES_PER_RECTANGLE = 10000  # Limit memory usage
+MAX_PATCHES_PER_RECTANGLE = 10000
+N_THREADS = 16
 
 def parse_coords_img_to_rect(s):
     if not s or str(s).upper() == "NO_RASTER":
@@ -38,7 +46,7 @@ def read_training_from_shapefile(shp):
     ds = ogr.Open(shp, 0)
     lyr = ds.GetLayer(0)
     by_image = {}
-
+    
     for f in lyr:
         cls = f.GetField("CLASS")
         src = f.GetField("SRC_IMAGE")
@@ -46,13 +54,13 @@ def read_training_from_shapefile(shp):
         if not src or rect is None:
             continue
         lbl = 1 if cls.strip().upper() == "POSITIVE" else 0
-
+        
         if src not in by_image:
             by_image[src] = {'rectangles': [], 'labels': []}
-
+        
         by_image[src]['rectangles'].append(rect)
         by_image[src]['labels'].append(lbl)
-
+    
     return by_image
 
 def load_image_stack(path):
@@ -79,248 +87,162 @@ def locate_image_by_basename(basename, dirs):
                 return os.path.join(root, basename)
     return None
 
-# Global variables for sharing with worker threads
-_shm_name = None
-_shm_shape = None
-_shm_dtype = None
-_file_counter = None
-_file_total = None
-_global_counter = None
-_global_total = None
-_print_lock = None
-
-def _init_worker(shm_name, shm_shape, shm_dtype, file_counter, file_total, global_counter, global_total, print_lock):
-    """Initialize worker with shared memory reference and counters"""
-    global _shm_name, _shm_shape, _shm_dtype, _file_counter, _file_total, _global_counter, _global_total, _print_lock
-    _shm_name = shm_name
-    _shm_shape = shm_shape
-    _shm_dtype = shm_dtype
-    _file_counter = file_counter
-    _file_total = file_total
-    _global_counter = global_counter
-    _global_total = global_total
-    _print_lock = print_lock
-
-def _compute_rectangle_stats(args):
-    """Worker function to compute stats for one rectangle"""
-    rectangle, label, patch_size, h, w = args
-
-    # Attach to shared memory
-    shm = shared_memory.SharedMemory(name=_shm_name)
-    padded = np.ndarray(_shm_shape, dtype=_shm_dtype, buffer=shm.buf)
-
+def compute_rectangle_stats(padded_img, rectangle, label, h, w):
+    """Compute mean and covariance for a single training rectangle"""
     x0, y0, x1, y1 = rectangle
-
+    
     # Filter small rectangles
     if (x1 - x0) < MIN_POLY_DIMENSION or (y1 - y0) < MIN_POLY_DIMENSION:
-        with _file_counter.get_lock():
-            _file_counter.value += 1
-            file_done = _file_counter.value
-        with _global_counter.get_lock():
-            _global_counter.value += 1
-            global_done = _global_counter.value
-
-        with _print_lock:
-            print(f"  [RECT] File: {file_done}/{_file_total.value} | Global: {global_done}/{_global_total.value} (too small)")
-
-        shm.close()
         return None
-
+    
     x0 = max(0, int(x0))
     y0 = max(0, int(y0))
     x1 = min(w, int(x1))
     y1 = min(h, int(y1))
-
-    # Extract all patches from this rectangle (sliding window)
-    # Use strided sampling for very large rectangles to limit memory
+    
+    # Calculate stride for large rectangles
     rect_width = x1 - x0
     rect_height = y1 - y0
     total_pixels = rect_width * rect_height
-
-    # Calculate stride to stay under MAX_PATCHES_PER_RECTANGLE
+    
     stride = 1
     if total_pixels > MAX_PATCHES_PER_RECTANGLE:
         stride = int(np.sqrt(total_pixels / MAX_PATCHES_PER_RECTANGLE)) + 1
-
+    
+    # Extract patches
     patches = []
-    pad = patch_size // 2
-
+    pad = PATCH_SIZE // 2
+    
     for y in range(y0, y1, stride):
         for x in range(x0, x1, stride):
             if len(patches) >= MAX_PATCHES_PER_RECTANGLE:
                 break
-            patch = padded[y:y+patch_size, x:x+patch_size, :].reshape(-1)
-            # Skip patches with NAN
+            patch = padded_img[y:y+PATCH_SIZE, x:x+PATCH_SIZE, :].reshape(-1)
             if not np.isnan(patch).any():
                 patches.append(patch)
         if len(patches) >= MAX_PATCHES_PER_RECTANGLE:
             break
-
+    
     if len(patches) == 0:
-        with _file_counter.get_lock():
-            _file_counter.value += 1
-            file_done = _file_counter.value
-        with _global_counter.get_lock():
-            _global_counter.value += 1
-            global_done = _global_counter.value
-
-        with _print_lock:
-            print(f"  [RECT] File: {file_done}/{_file_total.value} | Global: {global_done}/{_global_total.value} (no valid patches)")
-
-        shm.close()
         return None
-
+    
     patches = np.vstack(patches)
-
+    
     # Compute mean and covariance
     mean = patches.mean(axis=0)
     cov = np.cov(patches, rowvar=False) + np.eye(patches.shape[1]) * 1e-5
-
+    
     # Compute inverse covariance
     try:
         inv_cov = np.linalg.inv(cov)
     except np.linalg.LinAlgError:
         inv_cov = np.linalg.pinv(cov)
-
-    # Update counters and print progress
-    with _file_counter.get_lock():
-        _file_counter.value += 1
-        file_done = _file_counter.value
-
-    with _global_counter.get_lock():
-        _global_counter.value += 1
-        global_done = _global_counter.value
-
-    with _print_lock:
-        print(f"  [RECT] File: {file_done}/{_file_total.value} | Global: {global_done}/{_global_total.value}")
-
-    shm.close()
-
+    
     return {
         'label': label,
         'mean': mean.astype(np.float32),
-        'cov': None,
         'inv_cov': inv_cov.astype(np.float32)
     }
+
+def parfor(my_function, my_inputs, n_thread=N_THREADS):
+    """Simple parallel for loop"""
+    if n_thread == 1 or len(my_inputs) == 0:
+        return [my_function(inp) for inp in my_inputs]
+    else:
+        return Parallel(n_jobs=n_thread)(delayed(my_function)(inp) for inp in my_inputs)
 
 def main():
     if len(sys.argv) < 3:
         print("Usage: python3 export_mahalanobis_training.py annotations.shp output.bin")
         sys.exit(1)
-
+    
     shp_file = sys.argv[1]
     output_file = sys.argv[2]
-
+    
     print(f"[STATUS] Reading shapefile: {shp_file}")
     training_by_image = read_training_from_shapefile(shp_file)
-
+    
     shp_dir = os.path.dirname(os.path.abspath(shp_file))
     cwd = os.getcwd()
-
+    
     # Calculate totals
     image_files = list(training_by_image.keys())
     total_images = len(image_files)
     total_rectangles = sum(len(data['rectangles']) for data in training_by_image.values())
-
+    
     print(f"[STATUS] Found {total_images} image files with {total_rectangles} total rectangles")
-
+    print(f"[STATUS] Processing with {N_THREADS} parallel workers\n")
+    
     all_exemplars = []
-    n_processes = 128
-
-    print(f"[STATUS] Processing with {n_processes} parallel workers\n")
-
-    # Create manager for shared counters
-    manager = Manager()
-    global_counter = manager.Value('i', 0)
-    global_total = manager.Value('i', total_rectangles)
-    print_lock = manager.Lock()
-
+    global_processed = 0
+    
     # Outer loop: process each image file
     for img_idx, image_file in enumerate(image_files, 1):
         data = training_by_image[image_file]
         n_rectangles = len(data['rectangles'])
-
+        
         print(f"[IMAGE {img_idx}/{total_images}] Processing: {image_file}")
         print(f"[IMAGE {img_idx}/{total_images}] Rectangles in this file: {n_rectangles}")
-
+        
         # Locate and load image
         img_path = locate_image_by_basename(image_file, [shp_dir, cwd])
         if img_path is None:
             print(f"[WARNING] Could not find image: {image_file}")
-            with global_counter.get_lock():
-                global_counter.value += n_rectangles
+            global_processed += n_rectangles
             continue
-
-        print(f"[IMAGE {img_idx}/{total_images}] Loading image...")
+        
+        print(f"[IMAGE {img_idx}/{total_images}] Loading and padding image...")
         img, _ = load_image_stack(img_path)
         h, w, _ = img.shape
-
-        # Pad image ONCE before parallel processing
-        print(f"[IMAGE {img_idx}/{total_images}] Padding image...")
+        
         pad = PATCH_SIZE // 2
         padded_img = np.pad(img, ((pad, pad), (pad, pad), (0, 0)), mode='reflect')
-
-        # Create shared memory for padded image
-        print(f"[IMAGE {img_idx}/{total_images}] Creating shared memory...")
-        shm = shared_memory.SharedMemory(create=True, size=padded_img.nbytes)
-        shm_array = np.ndarray(padded_img.shape, dtype=padded_img.dtype, buffer=shm.buf)
-        shm_array[:] = padded_img[:]
-
-        # Create file-specific counter
-        file_counter = manager.Value('i', 0)
-        file_total = manager.Value('i', n_rectangles)
-
-        # Prepare arguments for parallel processing
-        args_list = [
-            (rect, label, PATCH_SIZE, h, w)
+        
+        print(f"[IMAGE {img_idx}/{total_images}] Processing {n_rectangles} rectangles in parallel...\n")
+        
+        # Prepare inputs for parallel processing
+        inputs = [
+            (padded_img, rect, label, h, w)
             for rect, label in zip(data['rectangles'], data['labels'])
         ]
-
-        print(f"[IMAGE {img_idx}/{total_images}] Processing rectangles with {n_processes} workers...\n")
-
-        # Process all rectangles for this image in parallel
-        with Pool(n_processes, initializer=_init_worker,
-                 initargs=(shm.name, padded_img.shape, padded_img.dtype,
-                          file_counter, file_total, global_counter, global_total, print_lock)) as pool:
-            results = pool.map(_compute_rectangle_stats, args_list)
-
-        # Cleanup shared memory
-        shm.close()
-        shm.unlink()
-
+        
+        # Process all rectangles in parallel
+        results = parfor(lambda x: compute_rectangle_stats(*x), inputs, N_THREADS)
+        
         # Collect valid exemplars
         valid_exemplars = [r for r in results if r is not None]
         all_exemplars.extend(valid_exemplars)
-
-        print(f"\n[IMAGE {img_idx}/{total_images}] Completed: {len(valid_exemplars)} valid exemplars from {n_rectangles} rectangles")
-        print(f"[TOTAL] Global progress: {global_counter.value}/{total_rectangles} rectangles processed\n")
-
+        global_processed += n_rectangles
+        
+        print(f"\n[IMAGE {img_idx}/{total_images}] Completed: {len(valid_exemplars)}/{n_rectangles} valid exemplars")
+        print(f"[TOTAL] Global progress: {global_processed}/{total_rectangles} rectangles processed\n")
+    
     n_exemplars = len(all_exemplars)
     patch_dim = all_exemplars[0]['mean'].shape[0] if n_exemplars > 0 else PATCH_SIZE * PATCH_SIZE * 3
-
+    
     print(f"\n[STATUS] Total exemplars generated: {n_exemplars}")
     print(f"[STATUS] Patch dimension: {patch_dim}")
-
+    
     # Write binary file
     print(f"[STATUS] Writing to {output_file}...")
     with open(output_file, "wb") as f:
         # Header
         f.write(struct.pack('i', n_exemplars))
         f.write(struct.pack('i', patch_dim))
-
+        
         # Exemplars
         for ex in all_exemplars:
             f.write(struct.pack('B', ex['label']))
             ex['mean'].tofile(f)
-
-            # Write dummy covariance (not used, but keeps format consistent)
+            
+            # Write dummy covariance
             dummy_cov = np.zeros((patch_dim, patch_dim), dtype=np.float32)
             dummy_cov.tofile(f)
-
+            
             ex['inv_cov'].tofile(f)
-
+    
     print(f"[STATUS] Export complete!")
-
+    
     # Report class distribution
     n_positive = sum(1 for ex in all_exemplars if ex['label'] == 1)
     n_negative = sum(1 for ex in all_exemplars if ex['label'] == 0)
@@ -328,3 +250,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
