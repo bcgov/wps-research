@@ -1,7 +1,6 @@
 /*
 Compile:
-nvcc -O3 -arch=sm_80 classify_mahalanobis.cu -o classify_mahalanobis \
-    -I/usr/include/gdal -lgdal -lcublas -lcusolver
+nvcc -O3 -arch=sm_80 mahalanobis_classify.cu -o mahalanobis_classify -I/usr/include/gdal -lgdal -lcublas -lcusolver
 
 Usage:
 ./classify_mahalanobis training.bin input.tif [output.bin]
