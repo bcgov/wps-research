@@ -1,8 +1,6 @@
 '''20260112: this file exports the pkl file used in classify_nn.py to the bin format expected by 
 mahalanobis_classify.py 
 '''
-
-
 #!/usr/bin/env python3
 """
 Compute Gaussian statistics (mean, covariance) for each training rectangle
@@ -76,18 +74,18 @@ def compute_rectangle_stats(img, rectangle, patch_size=PATCH_SIZE):
     pad = patch_size // 2
     padded = np.pad(img, ((pad, pad), (pad, pad), (0, 0)), mode='reflect')
     h, w, _ = img.shape
-
+    
     x0, y0, x1, y1 = rectangle
-
+    
     # Filter small rectangles
     if (x1 - x0) < MIN_POLY_DIMENSION or (y1 - y0) < MIN_POLY_DIMENSION:
         return None, None
-
+    
     x0 = max(0, int(x0))
     y0 = max(0, int(y0))
     x1 = min(w, int(x1))
     y1 = min(h, int(y1))
-
+    
     # Extract all patches from this rectangle
     patches = []
     for y in range(y0, y1):
@@ -96,56 +94,56 @@ def compute_rectangle_stats(img, rectangle, patch_size=PATCH_SIZE):
             # Skip patches with NAN
             if not np.isnan(patch).any():
                 patches.append(patch)
-
+    
     if len(patches) == 0:
         return None, None
-
+    
     patches = np.vstack(patches)
-
+    
     # Compute mean and covariance
     mean = patches.mean(axis=0)
     cov = np.cov(patches, rowvar=False) + np.eye(patches.shape[1]) * 1e-5
-
+    
     # Compute inverse covariance
     try:
         inv_cov = np.linalg.inv(cov)
     except np.linalg.LinAlgError:
         inv_cov = np.linalg.pinv(cov)
-
+    
     return mean, inv_cov
 
 def main():
     if len(sys.argv) < 3:
         print("Usage: python3 export_mahalanobis_training.py annotations.shp output.bin")
         sys.exit(1)
-
+    
     shp_file = sys.argv[1]
     output_file = sys.argv[2]
-
+    
     print(f"[STATUS] Reading shapefile: {shp_file}")
     training = read_training_from_shapefile(shp_file)
-
+    
     shp_dir = os.path.dirname(os.path.abspath(shp_file))
     cwd = os.getcwd()
-
+    
     exemplars = []
-
+    
     print(f"[STATUS] Processing training rectangles...")
     total_rectangles = sum(len(d['rectangles']) for d in training.values())
     processed = 0
-
+    
     for src, data in training.items():
         img_path = locate_image_by_basename(src, [shp_dir, cwd])
         if img_path is None:
             print(f"[WARNING] Could not find image: {src}")
             continue
-
+        
         print(f"[STATUS] Loading image: {src}")
         img, _ = load_image_stack(img_path)
-
+        
         for rect, label in zip(data['rectangles'], data['labels']):
             mean, inv_cov = compute_rectangle_stats(img, rect)
-
+            
             if mean is not None and inv_cov is not None:
                 exemplars.append({
                     'label': label,
@@ -153,37 +151,37 @@ def main():
                     'cov': None,  # Not needed for classification
                     'inv_cov': inv_cov.astype(np.float32)
                 })
-
+            
             processed += 1
             if processed % 10 == 0:
                 print(f"  Processed {processed}/{total_rectangles} rectangles")
-
+    
     n_exemplars = len(exemplars)
     patch_dim = exemplars[0]['mean'].shape[0] if n_exemplars > 0 else PATCH_SIZE * PATCH_SIZE * 3
-
+    
     print(f"\n[STATUS] Total exemplars: {n_exemplars}")
     print(f"[STATUS] Patch dimension: {patch_dim}")
-
+    
     # Write binary file
     print(f"[STATUS] Writing to {output_file}...")
     with open(output_file, "wb") as f:
         # Header
         f.write(struct.pack('i', n_exemplars))
         f.write(struct.pack('i', patch_dim))
-
+        
         # Exemplars
         for ex in exemplars:
             f.write(struct.pack('B', ex['label']))
             ex['mean'].tofile(f)
-
+            
             # Write dummy covariance (not used, but keeps format consistent)
             dummy_cov = np.zeros((patch_dim, patch_dim), dtype=np.float32)
             dummy_cov.tofile(f)
-
+            
             ex['inv_cov'].tofile(f)
-
+    
     print(f"[STATUS] Export complete!")
-
+    
     # Report class distribution
     n_positive = sum(1 for ex in exemplars if ex['label'] == 1)
     n_negative = sum(1 for ex in exemplars if ex['label'] == 0)
@@ -191,3 +189,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
