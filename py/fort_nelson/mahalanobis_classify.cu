@@ -51,6 +51,7 @@ Training file format (binary):
 
 #define PATCH_SIZE 7
 #define BLOCK_SIZE 256
+#define SKIP_FRACTION_EXEMPLARS 11
 
 typedef struct {
     unsigned char label;
