@@ -78,17 +78,17 @@ def locate_image_by_basename(basename, dirs):
     return None
 
 # Global variables for sharing with worker threads
-_img_global = None
+_padded_img_global = None
 _file_counter = None
 _file_total = None
 _global_counter = None
 _global_total = None
 _print_lock = None
 
-def _init_worker(img, file_counter, file_total, global_counter, global_total, print_lock):
-    """Initialize worker with shared image data and counters"""
-    global _img_global, _file_counter, _file_total, _global_counter, _global_total, _print_lock
-    _img_global = img
+def _init_worker(padded_img, file_counter, file_total, global_counter, global_total, print_lock):
+    """Initialize worker with shared padded image data and counters"""
+    global _padded_img_global, _file_counter, _file_total, _global_counter, _global_total, _print_lock
+    _padded_img_global = padded_img
     _file_counter = file_counter
     _file_total = file_total
     _global_counter = global_counter
@@ -97,12 +97,9 @@ def _init_worker(img, file_counter, file_total, global_counter, global_total, pr
 
 def _compute_rectangle_stats(args):
     """Worker function to compute stats for one rectangle"""
-    rectangle, label, patch_size = args
+    rectangle, label, patch_size, h, w = args
     
-    img = _img_global
-    pad = patch_size // 2
-    padded = np.pad(img, ((pad, pad), (pad, pad), (0, 0)), mode='reflect')
-    h, w, _ = img.shape
+    padded = _padded_img_global
     
     x0, y0, x1, y1 = rectangle
     
@@ -116,7 +113,7 @@ def _compute_rectangle_stats(args):
             global_done = _global_counter.value
         
         with _print_lock:
-            print(f"  [RECT] File: {file_done}/{_file_total.value} | Global: {global_done}/{_global_total.value}")
+            print(f"  [RECT] File: {file_done}/{_file_total.value} | Global: {global_done}/{_global_total.value} (too small)")
         return None
     
     x0 = max(0, int(x0))
@@ -126,6 +123,8 @@ def _compute_rectangle_stats(args):
     
     # Extract all patches from this rectangle (sliding window)
     patches = []
+    pad = patch_size // 2
+    
     for y in range(y0, y1):
         for x in range(x0, x1):
             patch = padded[y:y+patch_size, x:x+patch_size, :].reshape(-1)
@@ -142,7 +141,7 @@ def _compute_rectangle_stats(args):
             global_done = _global_counter.value
         
         with _print_lock:
-            print(f"  [RECT] File: {file_done}/{_file_total.value} | Global: {global_done}/{_global_total.value}")
+            print(f"  [RECT] File: {file_done}/{_file_total.value} | Global: {global_done}/{_global_total.value} (no valid patches)")
         return None
     
     patches = np.vstack(patches)
@@ -226,6 +225,12 @@ def main():
         
         print(f"[IMAGE {img_idx}/{total_images}] Loading image...")
         img, _ = load_image_stack(img_path)
+        h, w, _ = img.shape
+        
+        # Pad image ONCE before parallel processing
+        print(f"[IMAGE {img_idx}/{total_images}] Padding image...")
+        pad = PATCH_SIZE // 2
+        padded_img = np.pad(img, ((pad, pad), (pad, pad), (0, 0)), mode='reflect')
         
         # Create file-specific counter
         file_counter = manager.Value('i', 0)
@@ -233,7 +238,7 @@ def main():
         
         # Prepare arguments for parallel processing
         args_list = [
-            (rect, label, PATCH_SIZE)
+            (rect, label, PATCH_SIZE, h, w)
             for rect, label in zip(data['rectangles'], data['labels'])
         ]
         
@@ -241,7 +246,7 @@ def main():
         
         # Process all rectangles for this image in parallel
         with Pool(n_processes, initializer=_init_worker, 
-                 initargs=(img, file_counter, file_total, global_counter, global_total, print_lock)) as pool:
+                 initargs=(padded_img, file_counter, file_total, global_counter, global_total, print_lock)) as pool:
             results = pool.map(_compute_rectangle_stats, args_list)
         
         # Collect valid exemplars
