@@ -1,4 +1,3 @@
-
 /*
 Compile:
 nvcc -O3 -arch=sm_80 classify_mahalanobis.cu -o classify_mahalanobis \
