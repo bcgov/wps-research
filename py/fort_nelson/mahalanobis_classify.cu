@@ -15,8 +15,6 @@ Training file format (binary):
   - float32[patch_dim * patch_dim]: covariance matrix (row-major)
   - float32[patch_dim * patch_dim]: inverse covariance matrix (row-major)
 */
-
-
 /*
 Compile:
 nvcc -O3 -arch=sm_80 classify_mahalanobis.cu -o classify_mahalanobis \
@@ -362,7 +360,7 @@ int main(int argc, char** argv) {
     // Classify
     printf("[STATUS] Classifying...\n");
     long long total_pixels = (long long)h * w;
-    long long batch_size = 10000000;
+    long long batch_size = 1000000;  // 1M pixels per batch for more frequent updates
     long long n_batches = (total_pixels + batch_size - 1) / batch_size;
 
     time_t start_time = time(NULL);
