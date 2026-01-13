@@ -45,19 +45,23 @@ def band_index(
 ):
     '''
     The data opened by gdal is of different layers (rasters),
+
     we might want to know the index of each band.
+
         E.g: Band 8 is of index 2, so let's get it by data[:, :, 2]
 
 
     Parameters
     ----------
     band_info_list: List of bands and information.
+
     band:           Which band we want to find its index.
 
 
     Returns
     -------
     The index of that band.
+    
 
     Notes
     -----

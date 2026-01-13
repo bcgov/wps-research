@@ -10,7 +10,7 @@ from exceptions.matrix_exception import Shape_Mismatched_Error
 
 import sys
 
-from read_raster import Raster
+from raster import Raster
 
 from misc.general import (
     htrim_3d,
@@ -28,7 +28,7 @@ def change_detection(
 ):
     
     '''
-    Compare pixel value between post and pre fire, then normalize it so that it stays between -1 and 1
+    Compare pixel value between post and pre fire, then normalize it so that it stays between -1 and 1 (theoretically if all data > 0)
 
     
     Result: 
@@ -43,9 +43,9 @@ def change_detection(
 
     Parameters
     ----------
-    pre_X: pre-fire image of 3 channels
+    pre_X: pre-fire data
 
-    post_X: post_fire image of 3 channels
+    post_X: post_fire data
 
     eps: to prevent divide by zero
 
@@ -54,7 +54,7 @@ def change_detection(
     
     Returns
     -------
-    A differenced Band Normalization 3D matrix. Can be used to plot directly
+    A differenced Band Normalization.
 
 
     Notes
@@ -68,8 +68,8 @@ def change_detection(
     It's agood practice not to automate the matching process, so we know the data can be mismatched.
     '''
 
-    im1 = pre_X[:,:,:3].astype(np.float32)
-    im2 = post_X[:,:,:3].astype(np.float32)
+    im1 = pre_X.astype(np.float32)
+    im2 = post_X.astype(np.float32)
 
     if (allow_matching_shape):
 
@@ -91,9 +91,13 @@ def change_detection(
 
 if __name__ == '__main__':
 
+    '''
+    Only works if your data has at least 3 channels, will fix.
+    '''
+
     #handling argv
     if len(sys.argv) < 3:
-        print("Needs 2 files")
+        print("Needs 2 files (pre and post)")
         sys.exit(1)
 
     filename_pre = sys.argv[1]
@@ -103,16 +107,23 @@ if __name__ == '__main__':
     raster_pre_Instance = Raster(file_name=filename_pre)
     raster_pst_Instance = Raster(file_name=filename_pst)
 
-    raster_pre = raster_pre_Instance.readBands_and_trim(crop=True)
-    raster_pst = raster_pst_Instance.readBands_and_trim(crop=True)
+    raster_pre = raster_pre_Instance.readBands_and_trim(
+        band_lst=[1,2,3],
+        crop=True
+    )
+    
+    raster_pst = raster_pst_Instance.readBands_and_trim(
+        band_lst=[1,2,3],
+        crop=True
+    )
 
     #Plot title
     title_pre, title_pst = raster_pre_Instance.acquisition_timestamp, raster_pst_Instance.acquisition_timestamp
 
     htrim_nbd = htrim_3d(
         change_detection(pre_X=raster_pre, 
-                                   post_X=raster_pst,
-                                   allow_matching_shape=True)
+                        post_X=raster_pst,
+                        allow_matching_shape=True)
     )
 
     #plot result
@@ -120,6 +131,6 @@ if __name__ == '__main__':
         X_list = [raster_pre, raster_pst, htrim_nbd],
         title_list = [f'Pre: {title_pre}', 
                       f'Post: {title_pst}',
-                      'Normalized Band Difference'],
+                      'Changes - used first 3 bands (contrast streching applied)'],
         max_per_row=3
     )
