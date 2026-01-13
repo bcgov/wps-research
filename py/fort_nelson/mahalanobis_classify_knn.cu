@@ -9,15 +9,6 @@ Usage:
 ./classify_mahalanobis training.bin                # Classify all .tif files in current directory
 
 Output is automatically named input_classification.bin
-
-Training file format (binary):
-- int32: n_exemplars (number of training rectangles)
-- int32: patch_dim (features per patch, e.g., 7*7*3=147)
-- For each exemplar:
-  - uint8: label (0 or 1)
-  - float32[patch_dim]: mean vector
-  - float32[patch_dim * patch_dim]: covariance matrix (row-major)
-  - float32[patch_dim * patch_dim]: inverse covariance matrix (row-major)
 */
 
 #include <stdio.h>
@@ -38,13 +29,7 @@ Training file format (binary):
 #define SKIP_FRACTION_EXEMPLARS 11
 #define K_NEAREST_NEIGHBORS 7
 
-typedef struct {
-    unsigned char label;
-    float* mean;
-    float* inv_cov;
-} Exemplar;
-
-// CUDA kernel: classify pixels using Mahalanobis distance
+// CUDA kernel: classify pixels using K-NN Mahalanobis distance
 __global__ void classify_mahalanobis_kernel(
     const float* __restrict__ padded_img,
     const float* __restrict__ exemplar_means,
@@ -82,27 +67,11 @@ __global__ void classify_mahalanobis_kernel(
     }
     
     if (has_nan) {
-        // Use a special float bit pattern for NAN in output
-        // We'll convert this back to NAN when writing float output
         output[pixel_idx] = 254;  // Special marker for NAN
         return;
     }
     
-    // Compute patch mean
-    float patch_mean = 0.0f;
-    for (int i = 0; i < patch_dim; i++) {
-        patch_mean += patch[i];
-    }
-    patch_mean /= patch_dim;
-    
-    // Center the patch
-    float centered[PATCH_SIZE * PATCH_SIZE * 3];
-    for (int i = 0; i < patch_dim; i++) {
-        centered[i] = patch[i] - patch_mean;
-    }
-    
     // Find K nearest exemplars using Mahalanobis distance
-    // Use a simple fixed-size array as priority queue
     struct Neighbor {
         float dist;
         int idx;
@@ -137,7 +106,6 @@ __global__ void classify_mahalanobis_kernel(
         }
         
         // Insert into K-NN list if better than worst neighbor
-        // Find position of max distance (worst neighbor)
         int max_idx = 0;
         float max_dist = knn[0].dist;
         for (int k = 1; k < K_NEAREST_NEIGHBORS; k++) {
@@ -147,7 +115,6 @@ __global__ void classify_mahalanobis_kernel(
             }
         }
         
-        // Replace worst neighbor if current is better
         if (dist < max_dist) {
             knn[max_idx].dist = dist;
             knn[max_idx].idx = e;
@@ -155,7 +122,7 @@ __global__ void classify_mahalanobis_kernel(
     }
     
     // Vote: count labels among K nearest neighbors
-    int votes[2] = {0, 0};  // votes for class 0 and class 1
+    int votes[2] = {0, 0};
     for (int k = 0; k < K_NEAREST_NEIGHBORS; k++) {
         if (knn[k].idx >= 0) {
             int label = exemplar_labels[knn[k].idx];
@@ -163,7 +130,6 @@ __global__ void classify_mahalanobis_kernel(
         }
     }
     
-    // Assign class with most votes
     output[pixel_idx] = (votes[1] > votes[0]) ? 1 : 0;
 }
 
@@ -188,25 +154,23 @@ void print_progress(long long current, long long total, time_t start_time) {
     if (current == total) printf("\n");
 }
 
-// Helper function to check if a filename ends with .tif
 int ends_with_tif(const char* filename) {
     size_t len = strlen(filename);
     if (len < 4) return 0;
     return (strcmp(filename + len - 4, ".tif") == 0);
 }
 
-// Function to classify a single image
 int classify_single_image(const char* input_file, 
                           float* all_means, float* all_inv_covs, unsigned char* all_labels,
                           int n_exemplars, int patch_dim) {
     
     printf("\n[IMAGE] Processing: %s\n", input_file);
     
-    // Determine if ENVI or TIFF based on extension
+    // Determine if ENVI or TIFF
     const char* ext = strrchr(input_file, '.');
     bool is_envi = (ext && strcmp(ext, ".bin") == 0);
     
-    // Generate output filename: input.tif -> input_classification.bin
+    // Generate output filename
     char output_file[1024];
     const char* last_dot = strrchr(input_file, '.');
     if (last_dot != NULL) {
@@ -216,77 +180,12 @@ int classify_single_image(const char* input_file,
         snprintf(output_file, sizeof(output_file), "%s_classification.bin", input_file);
     }
     
-    // Load training data
-    FILE* f = fopen(train_file, "rb");
-    if (!f) { perror("Failed to open training file"); return 1; }
-    
-    int n_exemplars, patch_dim;
-    fread(&n_exemplars, sizeof(int), 1, f);
-    fread(&patch_dim, sizeof(int), 1, f);
-    
-    printf("[STATUS] Loading training data: %d exemplars, %d features\n", n_exemplars, patch_dim);
-    
-    // Read all exemplars and subsample by class
-    float* temp_means = (float*)malloc(n_exemplars * patch_dim * sizeof(float));
-    float* temp_inv_covs = (float*)malloc(n_exemplars * patch_dim * patch_dim * sizeof(float));
-    unsigned char* temp_labels = (unsigned char*)malloc(n_exemplars);
-    
-    for (int e = 0; e < n_exemplars; e++) {
-        fread(&temp_labels[e], sizeof(unsigned char), 1, f);
-        fread(&temp_means[e * patch_dim], sizeof(float), patch_dim, f);
-        
-        // Skip covariance
-        float* cov = (float*)malloc(patch_dim * patch_dim * sizeof(float));
-        fread(cov, sizeof(float), patch_dim * patch_dim, f);
-        free(cov);
-        
-        fread(&temp_inv_covs[e * patch_dim * patch_dim], sizeof(float), patch_dim * patch_dim, f);
-    }
-    fclose(f);
-    
-    // Subsample: keep every SKIP_FRACTION_EXEMPLARS-th exemplar from each class
-    int* class_counts = (int*)calloc(2, sizeof(int));
-    
-    // Count exemplars per class and subsample
-    float* all_means = (float*)malloc(n_exemplars * patch_dim * sizeof(float));
-    float* all_inv_covs = (float*)malloc(n_exemplars * patch_dim * patch_dim * sizeof(float));
-    unsigned char* all_labels = (unsigned char*)malloc(n_exemplars);
-    
-    int n_kept = 0;
-    for (int e = 0; e < n_exemplars; e++) {
-        int label = temp_labels[e];
-        
-        // Keep every SKIP_FRACTION_EXEMPLARS-th exemplar from this class
-        if (class_counts[label] % SKIP_FRACTION_EXEMPLARS == 0) {
-            all_labels[n_kept] = label;
-            memcpy(&all_means[n_kept * patch_dim], &temp_means[e * patch_dim], patch_dim * sizeof(float));
-            memcpy(&all_inv_covs[n_kept * patch_dim * patch_dim], &temp_inv_covs[e * patch_dim * patch_dim], 
-                   patch_dim * patch_dim * sizeof(float));
-            n_kept++;
-        }
-        class_counts[label]++;
-    }
-    
-    n_exemplars = n_kept;
-    printf("[STATUS] Using %d exemplars after subsampling (every %d-th from each class)\n", 
-           n_exemplars, SKIP_FRACTION_EXEMPLARS);
-    
-    free(temp_means);
-    free(temp_inv_covs);
-    free(temp_labels);
-    free(class_counts);
-    
-    Exemplar* exemplars = (Exemplar*)malloc(n_exemplars * sizeof(Exemplar));
-    
     // Load image
     GDALAllRegister();
     GDALDatasetH ds;
     
     if (is_envi) {
-        // Open ENVI file
-        char envi_path[2048];
-        snprintf(envi_path, sizeof(envi_path), "%s", input_file);
-        ds = GDALOpen(envi_path, GA_ReadOnly);
+        ds = GDALOpen(input_file, GA_ReadOnly);
     } else {
         ds = GDALOpen(input_file, GA_ReadOnly);
     }
@@ -380,7 +279,7 @@ int classify_single_image(const char* input_file,
     // Classify
     printf("[STATUS] Classifying...\n");
     long long total_pixels = (long long)h * w;
-    long long batch_size = 1000000;  // 1M pixels per batch for more frequent updates
+    long long batch_size = 1000000;
     long long n_batches = (total_pixels + batch_size - 1) / batch_size;
     
     time_t start_time = time(NULL);
@@ -433,14 +332,8 @@ int classify_single_image(const char* input_file,
     GDALClose(ods);
     GDALClose(ds);
     
-    printf("[STATUS] Done!\n");
-    
     // Cleanup
     free(padded_img);
-    free(all_means);
-    free(all_inv_covs);
-    free(all_labels);
-    free(exemplars);
     free(output);
     free(out_float);
     
@@ -458,9 +351,8 @@ int main(int argc, char** argv) {
     if (argc < 2) {
         fprintf(stderr, "Usage: %s training.bin [input.{tif|bin}]\n", argv[0]);
         fprintf(stderr, "  Single image: %s training.bin input.tif\n", argv[0]);
-        fprintf(stderr, "  Single ENVI:  %s training.bin input.bin (assumes input.hdr exists)\n", argv[0]);
-        fprintf(stderr, "  Batch mode:   %s training.bin (processes all .tif files in current directory)\n", argv[0]);
-        fprintf(stderr, "\nOutput is automatically named input_classification.bin\n");
+        fprintf(stderr, "  Single ENVI:  %s training.bin input.bin\n", argv[0]);
+        fprintf(stderr, "  Batch mode:   %s training.bin\n", argv[0]);
         return 1;
     }
     
@@ -476,7 +368,7 @@ int main(int argc, char** argv) {
     
     printf("[STATUS] Loading training data: %d exemplars, %d features\n", n_exemplars, patch_dim);
     
-    // Read all exemplars and subsample by class
+    // Read all exemplars
     float* temp_means = (float*)malloc(n_exemplars * patch_dim * sizeof(float));
     float* temp_inv_covs = (float*)malloc(n_exemplars * patch_dim * patch_dim * sizeof(float));
     unsigned char* temp_labels = (unsigned char*)malloc(n_exemplars);
@@ -494,7 +386,7 @@ int main(int argc, char** argv) {
     }
     fclose(f);
     
-    // Subsample: keep every SKIP_FRACTION_EXEMPLARS-th exemplar from each class
+    // Subsample
     int* class_counts = (int*)calloc(2, sizeof(int));
     
     float* all_means = (float*)malloc(n_exemplars * patch_dim * sizeof(float));
@@ -516,50 +408,38 @@ int main(int argc, char** argv) {
     }
     
     n_exemplars = n_kept;
-    printf("[STATUS] Using %d exemplars after subsampling (every %d-th from each class)\n", 
-           n_exemplars, SKIP_FRACTION_EXEMPLARS);
+    printf("[STATUS] Using %d exemplars after subsampling\n", n_exemplars);
     
     free(temp_means);
     free(temp_inv_covs);
     free(temp_labels);
     free(class_counts);
     
-    // Determine mode: single image or batch
+    // Single or batch mode
     if (argc >= 3) {
-        // Single image mode
-        const char* input_file = argv[2];
-        int result = classify_single_image(input_file, all_means, all_inv_covs, all_labels, n_exemplars, patch_dim);
-        
+        // Single image
+        int result = classify_single_image(argv[2], all_means, all_inv_covs, all_labels, n_exemplars, patch_dim);
         free(all_means);
         free(all_inv_covs);
         free(all_labels);
-        
         return result;
     } else {
-        // Batch mode: process all .tif files in current directory
-        printf("\n[BATCH MODE] Processing all .tif files in current directory\n");
+        // Batch mode
+        printf("\n[BATCH MODE] Processing all .tif files\n");
         
         DIR* dir = opendir(".");
-        if (!dir) {
-            perror("Failed to open current directory");
-            return 1;
-        }
+        if (!dir) { perror("Failed to open directory"); return 1; }
         
         struct dirent* entry;
-        int file_count = 0;
-        int processed = 0;
+        int file_count = 0, processed = 0;
         
-        // Count .tif files first
         while ((entry = readdir(dir)) != NULL) {
-            if (ends_with_tif(entry->d_name)) {
-                file_count++;
-            }
+            if (ends_with_tif(entry->d_name)) file_count++;
         }
         rewinddir(dir);
         
         printf("[BATCH MODE] Found %d .tif files\n\n", file_count);
         
-        // Process each .tif file
         while ((entry = readdir(dir)) != NULL) {
             if (ends_with_tif(entry->d_name)) {
                 processed++;
@@ -569,14 +449,11 @@ int main(int argc, char** argv) {
         }
         
         closedir(dir);
-        
-        printf("\n[BATCH MODE] Completed: %d files processed\n", processed);
+        printf("\n[BATCH MODE] Completed: %d files\n", processed);
         
         free(all_means);
         free(all_inv_covs);
         free(all_labels);
-        
         return 0;
     }
 }
-
