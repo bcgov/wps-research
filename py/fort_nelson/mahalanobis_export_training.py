@@ -198,7 +198,7 @@ def main():
     print(f"[STATUS] Found {total_images} image files with {total_rectangles} total rectangles")
     
     all_exemplars = []
-    n_processes = 512
+    n_processes = 128
     
     print(f"[STATUS] Processing with {n_processes} parallel workers\n")
     
