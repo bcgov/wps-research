@@ -50,14 +50,24 @@ __global__ void classify_kernel(
     // Extract patch for this pixel
     float patch[PATCH_SIZE * PATCH_SIZE * 3];  // max 147 features
     int pi = 0;
+    bool has_nan = false;
+
     for (int dy = 0; dy < PATCH_SIZE; dy++) {
         for (int dx = 0; dx < PATCH_SIZE; dx++) {
             for (int b = 0; b < c; b++) {
                 int py = y + dy;
                 int px = x + dx;
-                patch[pi++] = padded_img[b * (h + 2*pad) * padded_w + py * padded_w + px];
+                float val = padded_img[b * (h + 2*pad) * padded_w + py * padded_w + px];
+                patch[pi++] = val;
+                if (isnan(val)) has_nan = true;
             }
         }
+    }
+
+    // If patch contains NAN, set output to 255 (NAN marker) and skip
+    if (has_nan) {
+        output[pixel_idx] = 255;
+        return;
     }
 
     // Find nearest training vector
@@ -244,7 +254,12 @@ int main(int argc, char** argv) {
 
     float* out_float = (float*)malloc((long long)h * w * sizeof(float));
     for (long long i = 0; i < (long long)h * w; i++) {
-        out_float[i] = (float)output[i];
+        // Convert 255 (NAN marker) back to NAN in output
+        if (output[i] == 255) {
+            out_float[i] = NAN;
+        } else {
+            out_float[i] = (float)output[i];
+        }
     }
 
     GDALRasterBandH ob = GDALGetRasterBand(ods, 1);
