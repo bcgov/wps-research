@@ -1,7 +1,6 @@
 '''20260112: this file exports the pkl file used in classify_nn.py to the bin format expected by 
 mahalanobis_classify.py 
 '''
-
 #!/usr/bin/env python3
 """
 Compute Gaussian statistics (mean, covariance) for each training rectangle
@@ -14,7 +13,8 @@ import sys, os
 import numpy as np
 from osgeo import gdal, ogr
 import struct
-from multiprocessing import Pool, Manager
+from multiprocessing import Pool, Manager, shared_memory
+import threading
 
 gdal.UseExceptions()
 
@@ -78,17 +78,21 @@ def locate_image_by_basename(basename, dirs):
     return None
 
 # Global variables for sharing with worker threads
-_padded_img_global = None
+_shm_name = None
+_shm_shape = None
+_shm_dtype = None
 _file_counter = None
 _file_total = None
 _global_counter = None
 _global_total = None
 _print_lock = None
 
-def _init_worker(padded_img, file_counter, file_total, global_counter, global_total, print_lock):
-    """Initialize worker with shared padded image data and counters"""
-    global _padded_img_global, _file_counter, _file_total, _global_counter, _global_total, _print_lock
-    _padded_img_global = padded_img
+def _init_worker(shm_name, shm_shape, shm_dtype, file_counter, file_total, global_counter, global_total, print_lock):
+    """Initialize worker with shared memory reference and counters"""
+    global _shm_name, _shm_shape, _shm_dtype, _file_counter, _file_total, _global_counter, _global_total, _print_lock
+    _shm_name = shm_name
+    _shm_shape = shm_shape
+    _shm_dtype = shm_dtype
     _file_counter = file_counter
     _file_total = file_total
     _global_counter = global_counter
@@ -99,7 +103,9 @@ def _compute_rectangle_stats(args):
     """Worker function to compute stats for one rectangle"""
     rectangle, label, patch_size, h, w = args
     
-    padded = _padded_img_global
+    # Attach to shared memory
+    shm = shared_memory.SharedMemory(name=_shm_name)
+    padded = np.ndarray(_shm_shape, dtype=_shm_dtype, buffer=shm.buf)
     
     x0, y0, x1, y1 = rectangle
     
@@ -114,6 +120,8 @@ def _compute_rectangle_stats(args):
         
         with _print_lock:
             print(f"  [RECT] File: {file_done}/{_file_total.value} | Global: {global_done}/{_global_total.value} (too small)")
+        
+        shm.close()
         return None
     
     x0 = max(0, int(x0))
@@ -142,6 +150,8 @@ def _compute_rectangle_stats(args):
         
         with _print_lock:
             print(f"  [RECT] File: {file_done}/{_file_total.value} | Global: {global_done}/{_global_total.value} (no valid patches)")
+        
+        shm.close()
         return None
     
     patches = np.vstack(patches)
@@ -167,6 +177,8 @@ def _compute_rectangle_stats(args):
     
     with _print_lock:
         print(f"  [RECT] File: {file_done}/{_file_total.value} | Global: {global_done}/{_global_total.value}")
+    
+    shm.close()
     
     return {
         'label': label,
@@ -232,6 +244,12 @@ def main():
         pad = PATCH_SIZE // 2
         padded_img = np.pad(img, ((pad, pad), (pad, pad), (0, 0)), mode='reflect')
         
+        # Create shared memory for padded image
+        print(f"[IMAGE {img_idx}/{total_images}] Creating shared memory...")
+        shm = shared_memory.SharedMemory(create=True, size=padded_img.nbytes)
+        shm_array = np.ndarray(padded_img.shape, dtype=padded_img.dtype, buffer=shm.buf)
+        shm_array[:] = padded_img[:]
+        
         # Create file-specific counter
         file_counter = manager.Value('i', 0)
         file_total = manager.Value('i', n_rectangles)
@@ -246,8 +264,13 @@ def main():
         
         # Process all rectangles for this image in parallel
         with Pool(n_processes, initializer=_init_worker, 
-                 initargs=(padded_img, file_counter, file_total, global_counter, global_total, print_lock)) as pool:
+                 initargs=(shm.name, padded_img.shape, padded_img.dtype, 
+                          file_counter, file_total, global_counter, global_total, print_lock)) as pool:
             results = pool.map(_compute_rectangle_stats, args_list)
+        
+        # Cleanup shared memory
+        shm.close()
+        shm.unlink()
         
         # Collect valid exemplars
         valid_exemplars = [r for r in results if r is not None]
@@ -289,4 +312,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
