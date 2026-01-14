@@ -1,7 +1,7 @@
 '''
 sampling.py
 
-Sampling from the data, that simple.
+Designed specifically for inside and outside of polygon.
 '''
 
 import numpy as np
@@ -19,7 +19,7 @@ def indices_sampling(
     '''
     Description
     -----------
-    Sample n=size values between start and end
+    Sample n=size values between start and end - 1.
 
     If there is nan in the data, using nan mask to see where the nans are
 
@@ -36,7 +36,7 @@ def indices_sampling(
 
     if not replacement and size > len(idx):
 
-        raise ValueError("Not enough valid indices to sample from.")
+        raise ValueError("(Sampling without replacement): Not enough valid indices to sample from.")
 
     return rng.choice(idx, size=size, replace=replacement)
 
@@ -46,6 +46,7 @@ def row_sampling(
         X,
         size,
         *,
+        original_indices = None,
         replacement = False,
         filter_nan = False,
         seed = 42
@@ -62,6 +63,8 @@ def row_sampling(
     
     size: how many rows to sample.
 
+    original_indices: sample from the given indices.
+
     replacement: sampling with replacement or not.
     
     filter nan: To sample without nan values, set to True.
@@ -76,6 +79,7 @@ def row_sampling(
 
     from misc.general import ignore_nan_2D
 
+
     X = X.reshape(-1, X.shape[-1])
 
     nrow, _ = X.shape #Contains rows with nan (if there is nan in the data)
@@ -85,9 +89,9 @@ def row_sampling(
     if ( filter_nan ):
         #Remove all nan related in rows before sampling
 
-        nan_mask, X = ignore_nan_2D(
+        nan_mask, _ = ignore_nan_2D(
             X = X, 
-            axis = 1
+            axis = 1 #row filter
         )
 
 
@@ -95,18 +99,84 @@ def row_sampling(
 
     sampled_indices = indices_sampling(
         start = 0,
-        end   = nrow,
+        end = nrow,
         size  = size,
         nan_mask = nan_mask,
         replacement = replacement,
         seed  = seed
     )
 
+    #masking
+    sampled_original_indices = sampled_indices if ( original_indices is None ) else original_indices[sampled_indices]
 
-    X_sample = X[sampled_indices]
+    X_sample                 = X[sampled_indices]
 
-    return sampled_indices, X_sample
 
+    return sampled_original_indices, X_sample
+
+
+
+def in_out_sampling(
+        raster_filename,
+        polygon_filename,
+        in_sample_size,
+        seed = 42
+):
+    '''
+    Description
+    -----------
+    Sampling data inside and outside of the polygon.
+
+
+    Parameters
+    ----------
+
+
+    Returns
+    -------
+    '''
+    from polygon import split_in_out
+
+
+    #Extract inside and outside matrix (split)
+    inside, in_indices, outside, out_indices = split_in_out(
+        raster_filename = raster_filename,
+        polygon_filename= polygon_filename
+    )
+
+    #Ratio to maintain the true population proportion
+    out_in_ratio = len(outside) / len(inside)
+
+
+    #Sample size (reserves true proportion)
+    out_sample_size = int(in_sample_size * out_in_ratio)
+
+
+    #Sample now
+    in_idx_samples,  inside_samples  = row_sampling(X=inside,  
+                                                 size=in_sample_size, 
+                                                 original_indices=in_indices,
+                                                 filter_nan=True,
+                                                 seed=seed)
+    
+    out_idx_samples, outside_samples = row_sampling(X=outside, 
+                                                 size=out_sample_size, 
+                                                 original_indices=out_indices,
+                                                 filter_nan=True,
+                                                 seed=seed)
+    
+
+    samples = np.vstack([
+        inside_samples,
+        outside_samples
+    ])
+
+
+    original_indices = np.concatenate([in_idx_samples, 
+                                       out_idx_samples])
+    
+
+    return original_indices, samples
 
 
 

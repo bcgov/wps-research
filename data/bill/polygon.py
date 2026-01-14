@@ -7,8 +7,12 @@ import numpy as np
 
 
 def split_in_out(
-        raster_filename,
-        polygon_filename        
+        *,
+        raster_dat=None,
+        polygon_dat=None,
+
+        raster_filename = None,
+        polygon_filename = None       
 ):
     
     '''
@@ -17,6 +21,10 @@ def split_in_out(
     
     Parameters
     ----------
+    raster_dat: 
+
+    poly_dat:
+
     raster_filename: the main data where polygon was drawn onto.
 
     polygon_filename: file name to the polygon, .bin format (use rasterization from shape file).
@@ -25,11 +33,9 @@ def split_in_out(
     
     Returns
     -------
-    4 things:
+    2 sets of data, containing the extracted data, and its corresponding row indices. 
 
-    2 "all" data read from the files
-
-    2 matrices of inside and outside.
+    One for Inside, One for Outside.
 
 
     Notes
@@ -39,18 +45,29 @@ def split_in_out(
 
     from exceptions.matrix_exception import Shape_Mismatched_Error
     
+    if raster_dat is not None:
+        xSize = raster_dat.shape[1]
+        ySize = raster_dat.shape[0]
 
-    raster = Raster(raster_filename)
-    polygon = Raster(polygon_filename)
 
-    raster_dat  = raster.read_bands()
-    polygon_dat = polygon.read_bands(band_lst=[1]) #1 band is enough, we use it to mask raster data
+    if raster_filename is not None:
+        #Override raster data with the one read from file
+        raster = Raster(raster_filename)
+        xSize = raster._xSize
+        ySize = raster._ySize
+        raster_dat = raster.read_bands()
 
-    #The masking we need
-    #boolean casting is essential.
-    polygon_mask = polygon_dat[:, :, 0].astype(np.bool)
+    if polygon_filename is not None:
+        #Override polygon data with the one read from file
+        polygon = Raster(polygon_filename)
+        polygon_dat = polygon.read_bands(band_lst=[1]) #1 band is enough, we use it to mask raster data
+
+    #The masking we need, where boolean casting is essential.
+
+    polygon_mask = polygon_dat[..., 0].astype(np.bool)
 
     #Distinguishing inside and outside
+
     raster_shape = raster_dat.shape
     polygon_shape = polygon_dat.shape
 
@@ -61,5 +78,13 @@ def split_in_out(
     inside  = raster_dat[polygon_mask]
     outside = raster_dat[~polygon_mask]
 
-    return raster_dat, polygon_dat, inside, outside
 
+    #Indices of Inside, and outside
+    indices_all = np.arange(0, xSize * ySize)
+
+    flat_mask = polygon_mask.flatten()
+
+    inside_idx = indices_all[flat_mask]
+    outside_idx = indices_all[~flat_mask]
+
+    return inside, inside_idx, outside, outside_idx
