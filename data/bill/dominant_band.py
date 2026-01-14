@@ -7,7 +7,7 @@ Syntax:
     python3 dominant_band.py file.bin
 '''
 
-from read_raster import Raster
+from raster import Raster
 
 import sys
 

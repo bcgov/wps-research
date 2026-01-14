@@ -12,7 +12,7 @@ import numpy as np
 
 import sys
 
-from read_raster import Raster
+from raster import Raster
 
 
 def NBR(
@@ -101,7 +101,7 @@ def plot_barc(
         fontsize=10
 ):
     '''
-    Plots the BARC 256 burn severity of the provided dNBR and saves it as a png
+    Plots the BARC 256 burn severity of the provided dNBR.
 
     Parameters
     ----------

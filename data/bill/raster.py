@@ -1,0 +1,333 @@
+'''
+Read raster data from .bin file (need .hdr ready as well)
+
+python3 raster.py file.bin
+'''
+
+from osgeo import gdal
+
+from misc.general import (
+    htrim_3d, 
+    crop_no_data
+)
+
+from misc.sen2 import (
+    read_raster_timestamp,
+    band_index
+)
+
+from plot_tools import (
+    plot
+)
+
+import numpy as np
+
+import sys
+
+
+#Handling exception
+gdal.UseExceptions()
+
+
+class Raster:
+
+    def __init__(
+            self, 
+            file_name
+        ):
+
+        '''
+        At the moment a file_name is passed in, gdal will extract all of its information.
+        '''
+
+        self.file_name = file_name
+
+        #Extract dataset from raw raster file
+
+        self.__read_data()
+
+    
+    def __read_data(
+            self
+    ):
+        '''
+        Read and extract
+
+        Data + META DATA
+        '''
+        fname = self.file_name
+
+        #Extract Data
+
+        ds = gdal.Open(fname, gdal.GA_ReadOnly)
+
+        self._dataset = ds
+
+        if self._dataset is None:
+            raise RuntimeError(f"Could not open {fname}")
+        
+
+        #Extract Meta Data
+        
+        self.acquisition_timestamp = read_raster_timestamp(fname) #Acquisition data and time (UTC)
+
+        self._xSize, self._ySize = ds.RasterXSize, ds.RasterYSize
+        self._count = ds.RasterCount
+        self._proj = ds.GetProjection()
+        self._transform = ds.GetGeoTransform()
+
+
+        #Extract band information
+
+        self._n_band = ds.RasterCount
+
+        self.band_info_list = [
+            ds.GetRasterBand(i).GetDescription() for i in range(1, 
+                                                                ds.RasterCount + 1)
+        ]
+
+        #There is case where only 1 band is in the data, and no info is given.
+
+        if (self._n_band == 1) and (self.band_info_list[0] == ''):
+
+            self.band_info_list[0] = 'gray_scale, unknown band'
+
+
+
+    def __read_single_band(
+            self,
+            band
+        ):
+
+        '''
+        Helper function
+
+        Returns a 2D array of the chosen band
+
+        Parameters
+        ----------
+        band: The specific band to cut from the data.
+
+        
+        Returns
+        -------
+        A 2D array of the chosen band (a single layer)
+        '''
+
+        band = self._dataset.GetRasterBand(band)
+
+        xsize = band.XSize
+        ysize = band.YSize
+
+        if not hasattr(self, "xsize"):
+            self.xsize = xsize
+            self.ysize = ysize
+
+        raw = band.ReadRaster(
+            0, 0, xsize, ysize,
+            buf_type=gdal.GDT_Float32
+        ) 
+
+        return np.frombuffer(raw, dtype=np.float32).reshape((ysize, xsize))
+
+
+
+    def __ite_read(
+            self,
+            band_lst
+    ):
+        '''
+        Iteratively reads and saves all band in a stack using __read_single_band
+        '''
+
+        return np.dstack([
+                self.__read_single_band(b) for b in band_lst
+        ])
+
+
+
+    def read_bands(
+            self,
+            band_lst = 'all',
+            crop = False,
+            info = False
+    ):
+        '''
+        Read each band and arrange everything in a 3D matrix.
+
+        Parameters
+        ----------
+        band_lst: In the meta data, each band will be ordered and can be accessed from index 1. Default is 'all' band(s).
+
+        crop: boolean to remove rows and columns that may contain mostly repeated values (no data there).
+
+        info: to print out information of selected bands
+        
+
+        Returns
+        -------
+        A 3D matrix, each layer represents a band.
+
+        Prints information of the selected bands
+
+
+        Note
+        ----
+        band_tup can be any of any length. Will fix.
+
+        Generally if use just the first 3 bands, there is no problem.
+        '''
+
+        #Handle band out of bound here
+
+        from exceptions.sen2_exception import Out_Of_Bound_Band_Index
+
+        from exceptions.method_exception import Dimension_Not_Supported
+
+
+        if band_lst == 'all':
+
+            data = self.__ite_read(band_lst = list(range(1, self._n_band + 1)))
+
+            print(f'Read all {self._n_band} band(s)')
+
+        else:
+
+            if (min(band_lst) < 1 or max(band_lst) > self._n_band):
+
+                raise Out_Of_Bound_Band_Index(f'Some band index is not in the data.')
+
+
+            data = self.__ite_read(band_lst = band_lst)
+
+
+        if crop:
+
+            if len(band_lst) != 3: 
+
+                raise Dimension_Not_Supported(f"This method only works for d = 3. Yours is {len(band_lst)}")
+
+            data = crop_no_data(data)
+
+
+        if info:
+
+            #Print information of the selected bands
+            print("---------------------")
+            print("Your selected bands:")
+            for b in band_lst:
+                print(self.band_info_list[b-1])
+            print("---------------------")
+            print(f'Data Dimension: {data.shape}')
+
+
+        return data
+    
+
+
+    def readBands_and_trim(
+            self,
+            band_lst=None,
+            *,
+            p = 1.,
+            crop = False,
+            info = False
+    ):
+        
+        '''A pipeline
+
+        The same as read -> trim, but you cannot do anything in between, refers to Notes
+
+        The effective matrix is saved as an attribute. Any other changes will override this matrix.
+
+        
+        Parameters
+        ----------
+        band_lst: In the meta data, each band will be ordered and can be accessed from index 1.
+
+        p: percentage used for histogram trimming.
+
+        crop: boolean to remove rows and columns that may contain mostly repeated values (no data there).
+
+        info: to print out information of selected bands
+
+        
+        Returns
+        -------
+        A 3D matrix, each layer represents each band.
+
+
+        Notes
+        -----
+        For now, this version only supports for 3 band list.
+
+        Less flexible if data needs to be preprocessed
+
+        Recommend using read_rgb -> see for changes -> trim
+
+        For cropping, use with caution since it can returns matrix in unwanted shape.
+        '''
+        
+        rgb = self.read_bands(
+            band_lst=band_lst,
+            crop=crop,
+            info=info
+        )
+
+        return htrim_3d(
+            rgb, 
+            p
+        )
+    
+
+
+    def get_band(
+            self,
+            band
+    ):
+        '''
+        Get the layer using the band name (integer).
+
+        Parameters
+        ----------
+        band: The wave to get
+
+
+        Returns
+        -------
+        Band array (2D)
+        '''
+
+        band_id = band_index(self.band_info_list, band)
+
+        band = self.__read_single_band(band_id + 1) #Because gdal read band starts at 1
+
+        return band
+
+
+
+
+if __name__ == "__main__":
+
+    #handling argv
+    if len(sys.argv) < 2:
+        print("Needs a file name")
+        sys.exit(1)
+
+    filename = sys.argv[1]
+
+    #load raster and read
+    raster = Raster(file_name=filename)
+
+    X = raster.readBands_and_trim(crop=True)
+
+    #Plot title
+    title = raster.acquisition_timestamp
+    
+    if len(sys.argv) > 2: title = sys.argv[2]
+
+    #plot result
+    plot(
+        X,
+        title = title
+    )

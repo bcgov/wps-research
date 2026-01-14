@@ -137,6 +137,7 @@ def match_shape(
     Parameters
     ----------
     X1: 1st matrix (multi dim)
+    
     X2: 2nd matrix (multi dim)
 
 
@@ -161,6 +162,37 @@ def match_shape(
     X2_cropped = X2[:r_min, :c_min, :]
 
     return X1_cropped, X2_cropped
+
+
+
+#Nan values
+
+def ignore_nan_2D(
+        X,
+        axis = 1
+):
+    '''
+    Filter out rows / cols with nan
+
+
+    Parameters
+    ----------
+    X: a 2D matrix
+    axis: 0 is column, 1 is row
+
+
+    Returns
+    -------
+    A filtered 2D matrix with no nan on your criterion.
+    '''
+
+    mask = ~np.isnan(X).any(axis=axis)
+
+    filtered = X[mask]
+
+    return filtered
+
+
 
 
 
