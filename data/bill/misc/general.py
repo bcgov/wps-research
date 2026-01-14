@@ -134,6 +134,7 @@ def match_shape(
 
     In this version, it will crop from right to left, bottom to top.
 
+    
     Parameters
     ----------
     X1: 1st matrix (multi dim)
@@ -172,25 +173,30 @@ def ignore_nan_2D(
         axis = 1
 ):
     '''
-    Filter out rows / cols with nan
+    Filters out rows / cols with nan. We also want to know, after filtering, 
+
+    what is the orignal row index that a row in the filtered data correponds to. 
 
 
     Parameters
     ----------
     X: a 2D matrix
+
     axis: 0 is column, 1 is row
 
 
     Returns
     -------
-    A filtered 2D matrix with no nan on your criterion.
+    mask: TRUE means not nan, FALSE means nan
+
+    filtered: A filtered 2D matrix.
     '''
 
     mask = ~np.isnan(X).any(axis=axis)
 
     filtered = X[mask]
 
-    return filtered
+    return mask, filtered
 
 
 

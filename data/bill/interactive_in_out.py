@@ -35,17 +35,23 @@ if __name__ == '__main__':
 
 
     #Sample size determination
-    in_sample_size = 100
+
+    in_sample_size = 10
     out_sample_size = int(in_sample_size * out_in_ratio)
 
     #Sample now
-    inside_samples  = row_sampling(post_inside, size=in_sample_size)
-    outside_samples = row_sampling(post_outside, size=out_sample_size)
+    orig_in_idx,  inside_samples  = row_sampling(post_inside,  size=in_sample_size, filter_nan=True)
+    orig_out_idx, outside_samples = row_sampling(post_outside, size=out_sample_size, filter_nan=True)
 
     samples = np.vstack([
         inside_samples,
         outside_samples
     ])
+
+    original_indices = np.concatenate([orig_in_idx, orig_out_idx])
+
+
+    #TSNE
 
     X_s = StandardScaler().fit_transform(samples)
 
@@ -68,58 +74,61 @@ if __name__ == '__main__':
 
     fig, (ax_tsne, ax_img) = plt.subplots(1, 2, figsize=(12, 5))
 
-    sc = ax_tsne.scatter(
-        Y[:, 0], Y[:, 1],
-        s=8,
-        picker=True  # ← this enables clicking
+    sc_in = ax_tsne.scatter(
+        Y[: in_sample_size, 0], 
+        Y[: in_sample_size, 1],
+        s=10,
+        c='red',
+        label='Inside',
+        picker=3  # ← this enables clicking
+    )
+
+    sc_out = ax_tsne.scatter(
+        Y[in_sample_size:, 0], 
+        Y[in_sample_size:, 1],
+        s=10,
+        c='blue',
+        label='Outside',
+        picker=3  # ← this enables clicking
     )
 
     ax_tsne.set_title("t-SNE space")
 
-    img_plot = ax_img.imshow(htrim_3d(raster_data))
+    ax_tsne.legend()
+
+    
+
+    img_plot = ax_img.imshow(htrim_3d(raster_data[..., :3]))
     
     ax_img.set_title("Map view")
 
-
-    # ---- prepare data FIRST ----
-    H, W, B = raster_data.shape
-    mask = ~np.isnan(raster_data).any(axis=2)
-
-    rr, cc = np.meshgrid(
-        np.arange(H),
-        np.arange(W),
-        indexing="ij"
-    )
-
-    X = raster_data[mask]
-    rows = rr[mask]
-    cols = cc[mask]
-
     ################################################################
 
-    hline = ax_img.axhline(0, color='red', lw=1, visible=False)
-    vline = ax_img.axvline(0, color='red', lw=1, visible=False)
+    marker, = ax_img.plot([], [], "ro", markersize=6, fillstyle="none")
 
+    # ----------------------------
+    # 4. Click logic
+    # ----------------------------
+    hline = ax_img.axhline(0, color="r", linewidth=1, visible=False)
+    vline = ax_img.axvline(0, color="r", linewidth=1, visible=False)
 
     def on_pick(event):
+        k = event.ind[0]
+        flat = original_indices[k]
 
-        ind = event.ind[0]  # index of picked point
+        W = 1354
 
-        print(event.ind)
 
-        r = rows[ind]
-        c = cols[ind]
+        r = flat // W
+        c = flat % W
 
-        print(f"Clicked t-SNE point → row={r}, col={c}")
+        hline.set_ydata([r, r])
+        vline.set_xdata([c, c])
 
-        # move crosshair
-        hline.set_ydata(r)
-        vline.set_xdata(c)
         hline.set_visible(True)
         vline.set_visible(True)
 
         fig.canvas.draw_idle()
-
 
     fig.canvas.mpl_connect("pick_event", on_pick)
     plt.show()

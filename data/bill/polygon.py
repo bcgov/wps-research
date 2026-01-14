@@ -14,6 +14,7 @@ def split_in_out(
     '''
     Extract data from inside and outside of the polygon.
 
+    
     Parameters
     ----------
     raster_filename: the main data where polygon was drawn onto.
