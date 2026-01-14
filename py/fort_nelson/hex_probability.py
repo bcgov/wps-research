@@ -396,6 +396,66 @@ print(f"  Partial coverage: {n_partial}")
 print(f"Nodata:             {n_nodata} ({100*n_nodata/len(hex_centers):.1f}%)")
 print(f"Processing time:    {elapsed:.1f} seconds")
 print(f"\nOutput saved to: {OUTPUT_SHP}")
+
+# Create QML style file for automatic coloring in QGIS
+qml_path = OUTPUT_SHP.replace('.shp', '.qml')
+print(f"Creating style file: {qml_path}")
+
+qml_content = '''<!DOCTYPE qgis PUBLIC 'http://mrcc.com/qgis.dtd' 'SYSTEM'>
+<qgis version="3.0" styleCategories="Symbology">
+  <renderer-v2 type="graduatedSymbol" attr="prob_mean" graduatedMethod="GraduatedColor">
+    <ranges>
+      <range lower="0.0" upper="0.1" symbol="0" label="0.0 - 0.1"/>
+      <range lower="0.1" upper="0.2" symbol="1" label="0.1 - 0.2"/>
+      <range lower="0.2" upper="0.3" symbol="2" label="0.2 - 0.3"/>
+      <range lower="0.3" upper="0.4" symbol="3" label="0.3 - 0.4"/>
+      <range lower="0.4" upper="0.5" symbol="4" label="0.4 - 0.5"/>
+      <range lower="0.5" upper="0.6" symbol="5" label="0.5 - 0.6"/>
+      <range lower="0.6" upper="0.7" symbol="6" label="0.6 - 0.7"/>
+      <range lower="0.7" upper="0.8" symbol="7" label="0.7 - 0.8"/>
+      <range lower="0.8" upper="0.9" symbol="8" label="0.8 - 0.9"/>
+      <range lower="0.9" upper="1.0" symbol="9" label="0.9 - 1.0"/>
+    </ranges>
+    <symbols>
+      <symbol type="fill" name="0"><layer class="SimpleFill">
+        <prop k="color" v="255,255,212,180"/><prop k="outline_color" v="128,128,128,100"/><prop k="outline_width" v="0.1"/>
+      </layer></symbol>
+      <symbol type="fill" name="1"><layer class="SimpleFill">
+        <prop k="color" v="254,235,170,180"/><prop k="outline_color" v="128,128,128,100"/><prop k="outline_width" v="0.1"/>
+      </layer></symbol>
+      <symbol type="fill" name="2"><layer class="SimpleFill">
+        <prop k="color" v="254,212,128,180"/><prop k="outline_color" v="128,128,128,100"/><prop k="outline_width" v="0.1"/>
+      </layer></symbol>
+      <symbol type="fill" name="3"><layer class="SimpleFill">
+        <prop k="color" v="254,180,76,180"/><prop k="outline_color" v="128,128,128,100"/><prop k="outline_width" v="0.1"/>
+      </layer></symbol>
+      <symbol type="fill" name="4"><layer class="SimpleFill">
+        <prop k="color" v="253,141,60,180"/><prop k="outline_color" v="128,128,128,100"/><prop k="outline_width" v="0.1"/>
+      </layer></symbol>
+      <symbol type="fill" name="5"><layer class="SimpleFill">
+        <prop k="color" v="252,90,45,180"/><prop k="outline_color" v="128,128,128,100"/><prop k="outline_width" v="0.1"/>
+      </layer></symbol>
+      <symbol type="fill" name="6"><layer class="SimpleFill">
+        <prop k="color" v="237,47,34,180"/><prop k="outline_color" v="128,128,128,100"/><prop k="outline_width" v="0.1"/>
+      </layer></symbol>
+      <symbol type="fill" name="7"><layer class="SimpleFill">
+        <prop k="color" v="204,24,30,180"/><prop k="outline_color" v="128,128,128,100"/><prop k="outline_width" v="0.1"/>
+      </layer></symbol>
+      <symbol type="fill" name="8"><layer class="SimpleFill">
+        <prop k="color" v="168,0,23,180"/><prop k="outline_color" v="128,128,128,100"/><prop k="outline_width" v="0.1"/>
+      </layer></symbol>
+      <symbol type="fill" name="9"><layer class="SimpleFill">
+        <prop k="color" v="128,0,17,180"/><prop k="outline_color" v="128,128,128,100"/><prop k="outline_width" v="0.1"/>
+      </layer></symbol>
+    </symbols>
+  </renderer-v2>
+</qgis>
+'''
+
+with open(qml_path, 'w') as f:
+    f.write(qml_content)
+
+print("Style file created - QGIS will auto-apply yellow-to-red gradient")
 print("=" * 70)
 
 # Debug: print first raster's info
@@ -416,5 +476,8 @@ if len(rasters) > 0:
     ext_miny = gt[3] + gt[5] * r['ds'].RasterYSize
     print(f"  Raster extent: X({ext_minx:.1f} to {ext_maxx:.1f}), Y({ext_miny:.1f} to {ext_maxy:.1f})")
     print(f"  AOI extent:    X({aoi_extent[0]:.1f} to {aoi_extent[1]:.1f}), Y({aoi_extent[2]:.1f} to {aoi_extent[3]:.1f})")
+
+
+
 
 
