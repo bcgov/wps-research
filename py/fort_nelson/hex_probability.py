@@ -540,3 +540,4 @@ if len(rasters) > 0:
     ext_miny = gt[3] + gt[5] * r['ds'].RasterYSize
     print(f"  Raster extent: X({ext_minx:.1f} to {ext_maxx:.1f}), Y({ext_miny:.1f} to {ext_maxy:.1f})")
     print(f"  AOI extent:    X({aoi_extent[0]:.1f} to {aoi_extent[1]:.1f}), Y({aoi_extent[2]:.1f} to {aoi_extent[3]:.1f})")
+
