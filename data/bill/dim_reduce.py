@@ -26,6 +26,9 @@ def pca(
         X,
         params: dict
 ):
+    '''
+    pca methods go heres
+    '''
     
     pass
 

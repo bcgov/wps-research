@@ -6,6 +6,7 @@ Mostly miscellaneous functions for sentinel-2 data processing
 
 import re
 
+from misc.date_time import date_str2obj
 
 
 def read_raster_date(
@@ -31,15 +32,13 @@ def read_raster_date(
     accuracy depends on the current file naming convention.
     '''
 
-    from datetime import datetime
-
     file_name = re.split(r"[\\/]", path).pop()
 
     #The index can change, check once before using.
 
     date = file_name[11:19]
 
-    return datetime.strptime(date, "%Y%m%d").date()
+    return date_str2obj(date)
 
 
 
@@ -77,6 +76,7 @@ def read_raster_timestamp(
 
 def get_date_dict(
         folder: str,
+        from_date: str,
         descending = False
 ):
     '''
@@ -84,20 +84,40 @@ def get_date_dict(
     -----------
     A dictionary where each date acts as a key to all corresponding file names.
 
-    E.g:     {datetime.date(2025, 4, 20): ['fire_C11659/S2C_MSIL2A_20250420T192931_N0511_R142_T09UYU_20250421T000400_cloudfree.bin_MRAP_C11659.bin'],
+
+    Parameters
+    ----------
+    folder: folder name where the files are to be read.
+
+    from_date: only get date from this date.
+
+    descending: sort date.
+
+
+    Examples
+    -------
+    {datetime.date(2025, 4, 20): ['fire_C11659/S2C_MSIL2A_20250420T192931_N0511_R142_T09UYU_20250421T000400_cloudfree.bin_MRAP_C11659.bin'],
               datetime.date(2025, 4, 22): ['fire_C11659/S2B_MSIL2A_20250422T191909_N0511_R099_T09UYU_20250422T224118_cloudfree.bin_MRAP_C11659.bin'],
-              ...}
+    ...}
     '''
 
     from collections import defaultdict
 
-    from misc.files import iter_binary_files
+    from misc.files import iter_files
+
 
     groups = defaultdict(list)
 
-    for p in iter_binary_files(folder):
+    from_date_obj = date_str2obj(from_date)
+
+    for p in iter_files(folder, '.bin'):
+        
         d = read_raster_date(p)
-        groups[d].append(p)
+        
+        #Only record if at least from start date, if from date is None, record any date
+        if (d >= from_date_obj):
+
+            groups[d].append(p)
 
     sorted_dates = sorted(groups.keys(), reverse=descending)
 
@@ -135,7 +155,7 @@ def band_index(
     In the case there are 2 identical bands in the same data, it returns the first index.
     '''
 
-    from exceptions.sen2_exception import No_Band_Error
+    from exceptions.sen2 import No_Band_Error
 
     pattern = rf"\bB{band}\b"
     

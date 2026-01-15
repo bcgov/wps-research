@@ -180,9 +180,9 @@ class Raster:
 
         #Handle band out of bound here
 
-        from exceptions.sen2_exception import Out_Of_Bound_Band_Index
+        from exceptions.sen2 import Out_Of_Bound_Band_Index
 
-        from exceptions.method_exception import Dimension_Not_Supported
+        from exceptions.dimension import Dimension_Not_Supported
 
 
         if band_lst == 'all':
@@ -343,6 +343,9 @@ def minimum_nan_raster(
 
 
     return best_raster, min_count
+
+
+
 
 
 if __name__ == "__main__":
