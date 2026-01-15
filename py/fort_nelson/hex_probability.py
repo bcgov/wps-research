@@ -387,6 +387,12 @@ out_ds = None
 
 elapsed = time.time() - start_time
 
+# Calculate hex area
+hex_radius = HEX_SPACING / math.sqrt(3)
+hex_area_m2 = (3 * math.sqrt(3) / 2) * hex_radius ** 2
+hex_area_km2 = hex_area_m2 / 1e6
+hex_area_ha = hex_area_m2 / 1e4
+
 print("\n" + "=" * 70)
 print("Summary")
 print("=" * 70)
@@ -397,9 +403,67 @@ print(f"Nodata:             {n_nodata} ({100*n_nodata/len(hex_centers):.1f}%)")
 print(f"Processing time:    {elapsed:.1f} seconds")
 print(f"\nOutput saved to: {OUTPUT_SHP}")
 
+# Area statistics
+print("\n" + "-" * 70)
+print("Area Statistics")
+print("-" * 70)
+print(f"Hex cell area: {hex_area_km2:.4f} km² ({hex_area_ha:.2f} ha)")
+
+total_data_area_km2 = n_with_data * hex_area_km2
+total_data_area_ha = n_with_data * hex_area_ha
+print(f"\nTotal area with probability data:")
+print(f"  {total_data_area_km2:.2f} km²")
+print(f"  {total_data_area_ha:.2f} ha")
+
+# Count hexagons in each probability class and calculate weighted sum
+class_counts = [0] * 10  # 0.0-0.1, 0.1-0.2, ..., 0.9-1.0
+weighted_sum = 0.0
+
+# Re-read the shapefile to get probability values
+out_ds_read = ogr.Open(OUTPUT_SHP, 0)
+out_layer_read = out_ds_read.GetLayer(0)
+
+for feat in out_layer_read:
+    prob = feat.GetField("prob_mean")
+    if prob is not None:
+        weighted_sum += prob
+        # Determine class (0-9)
+        class_idx = min(int(prob * 10), 9)
+        class_counts[class_idx] += 1
+
+out_ds_read = None
+
+print("\nArea by probability class:")
+print(f"  {'Class':<12} {'Hexagons':>10} {'km²':>12} {'ha':>12}")
+print(f"  {'-'*12} {'-'*10} {'-'*12} {'-'*12}")
+
+for i in range(10):
+    lower = i / 10
+    upper = (i + 1) / 10
+    count = class_counts[i]
+    area_km2 = count * hex_area_km2
+    area_ha = count * hex_area_ha
+    print(f"  {lower:.1f} - {upper:.1f}      {count:>10} {area_km2:>12.2f} {area_ha:>12.2f}")
+
+print(f"  {'-'*12} {'-'*10} {'-'*12} {'-'*12}")
+print(f"  {'TOTAL':<12} {n_with_data:>10} {total_data_area_km2:>12.2f} {total_data_area_ha:>12.2f}")
+
+# Equivalent area at 100% detection
+equiv_area_km2 = weighted_sum * hex_area_km2
+equiv_area_ha = weighted_sum * hex_area_ha
+
+print("\n" + "-" * 70)
+print("Equivalent Area at 100% Detection Probability")
+print("-" * 70)
+print(f"Sum of (area × probability) across all cells:")
+print(f"  {equiv_area_km2:.2f} km²")
+print(f"  {equiv_area_ha:.2f} ha")
+print(f"\nThis represents the equivalent area if all detections")
+print(f"were concentrated at 100% probability.")
+
 # Create QML style file for automatic coloring in QGIS
 qml_path = OUTPUT_SHP.replace('.shp', '.qml')
-print(f"Creating style file: {qml_path}")
+print(f"\nCreating style file: {qml_path}")
 
 qml_content = '''<!DOCTYPE qgis PUBLIC 'http://mrcc.com/qgis.dtd' 'SYSTEM'>
 <qgis version="3.0" styleCategories="Symbology">
@@ -418,34 +482,34 @@ qml_content = '''<!DOCTYPE qgis PUBLIC 'http://mrcc.com/qgis.dtd' 'SYSTEM'>
     </ranges>
     <symbols>
       <symbol type="fill" name="0"><layer class="SimpleFill">
-        <prop k="color" v="255,255,212,180"/><prop k="outline_color" v="128,128,128,100"/><prop k="outline_width" v="0.1"/>
+        <prop k="color" v="255,255,255,180"/><prop k="outline_color" v="128,128,128,100"/><prop k="outline_width" v="0.1"/>
       </layer></symbol>
       <symbol type="fill" name="1"><layer class="SimpleFill">
-        <prop k="color" v="254,235,170,180"/><prop k="outline_color" v="128,128,128,100"/><prop k="outline_width" v="0.1"/>
+        <prop k="color" v="229,240,255,180"/><prop k="outline_color" v="128,128,128,100"/><prop k="outline_width" v="0.1"/>
       </layer></symbol>
       <symbol type="fill" name="2"><layer class="SimpleFill">
-        <prop k="color" v="254,212,128,180"/><prop k="outline_color" v="128,128,128,100"/><prop k="outline_width" v="0.1"/>
+        <prop k="color" v="203,225,255,180"/><prop k="outline_color" v="128,128,128,100"/><prop k="outline_width" v="0.1"/>
       </layer></symbol>
       <symbol type="fill" name="3"><layer class="SimpleFill">
-        <prop k="color" v="254,180,76,180"/><prop k="outline_color" v="128,128,128,100"/><prop k="outline_width" v="0.1"/>
+        <prop k="color" v="170,200,255,180"/><prop k="outline_color" v="128,128,128,100"/><prop k="outline_width" v="0.1"/>
       </layer></symbol>
       <symbol type="fill" name="4"><layer class="SimpleFill">
-        <prop k="color" v="253,141,60,180"/><prop k="outline_color" v="128,128,128,100"/><prop k="outline_width" v="0.1"/>
+        <prop k="color" v="135,170,240,180"/><prop k="outline_color" v="128,128,128,100"/><prop k="outline_width" v="0.1"/>
       </layer></symbol>
       <symbol type="fill" name="5"><layer class="SimpleFill">
-        <prop k="color" v="252,90,45,180"/><prop k="outline_color" v="128,128,128,100"/><prop k="outline_width" v="0.1"/>
+        <prop k="color" v="100,140,220,180"/><prop k="outline_color" v="128,128,128,100"/><prop k="outline_width" v="0.1"/>
       </layer></symbol>
       <symbol type="fill" name="6"><layer class="SimpleFill">
-        <prop k="color" v="237,47,34,180"/><prop k="outline_color" v="128,128,128,100"/><prop k="outline_width" v="0.1"/>
+        <prop k="color" v="70,110,200,180"/><prop k="outline_color" v="128,128,128,100"/><prop k="outline_width" v="0.1"/>
       </layer></symbol>
       <symbol type="fill" name="7"><layer class="SimpleFill">
-        <prop k="color" v="204,24,30,180"/><prop k="outline_color" v="128,128,128,100"/><prop k="outline_width" v="0.1"/>
+        <prop k="color" v="45,80,175,180"/><prop k="outline_color" v="128,128,128,100"/><prop k="outline_width" v="0.1"/>
       </layer></symbol>
       <symbol type="fill" name="8"><layer class="SimpleFill">
-        <prop k="color" v="168,0,23,180"/><prop k="outline_color" v="128,128,128,100"/><prop k="outline_width" v="0.1"/>
+        <prop k="color" v="25,55,145,180"/><prop k="outline_color" v="128,128,128,100"/><prop k="outline_width" v="0.1"/>
       </layer></symbol>
       <symbol type="fill" name="9"><layer class="SimpleFill">
-        <prop k="color" v="128,0,17,180"/><prop k="outline_color" v="128,128,128,100"/><prop k="outline_width" v="0.1"/>
+        <prop k="color" v="0,30,120,180"/><prop k="outline_color" v="128,128,128,100"/><prop k="outline_width" v="0.1"/>
       </layer></symbol>
     </symbols>
   </renderer-v2>
@@ -455,7 +519,7 @@ qml_content = '''<!DOCTYPE qgis PUBLIC 'http://mrcc.com/qgis.dtd' 'SYSTEM'>
 with open(qml_path, 'w') as f:
     f.write(qml_content)
 
-print("Style file created - QGIS will auto-apply yellow-to-red gradient")
+print("Style file created - QGIS will auto-apply white-to-blue gradient")
 print("=" * 70)
 
 # Debug: print first raster's info
@@ -476,8 +540,3 @@ if len(rasters) > 0:
     ext_miny = gt[3] + gt[5] * r['ds'].RasterYSize
     print(f"  Raster extent: X({ext_minx:.1f} to {ext_maxx:.1f}), Y({ext_miny:.1f} to {ext_maxy:.1f})")
     print(f"  AOI extent:    X({aoi_extent[0]:.1f} to {aoi_extent[1]:.1f}), Y({aoi_extent[2]:.1f} to {aoi_extent[3]:.1f})")
-
-
-
-
-
