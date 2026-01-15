@@ -1,5 +1,7 @@
 '''
 polygon.py
+
+This method is to work with fire perimeter or other type of polygon.
 '''
 
 from raster import Raster
@@ -21,9 +23,9 @@ def split_in_out(
     
     Parameters
     ----------
-    raster_dat: 
+    raster_dat: data read from raster.
 
-    poly_dat:
+    poly_dat: data read from polygon.
 
     raster_filename: the main data where polygon was drawn onto.
 
@@ -33,13 +35,15 @@ def split_in_out(
     
     Returns
     -------
-    2 sets of data, containing the extracted data, and its corresponding row indices. 
+    2 sets of data, containing the extracted data, and its corresponding row indices from the ORIGNAL DATA. 
 
     One for Inside, One for Outside.
 
 
     Notes
     -----
+    Only works with 1 polygon file.
+    
     Use rasterize_onto.py to have similar matrix shape for raster and polygon.
     '''
 
