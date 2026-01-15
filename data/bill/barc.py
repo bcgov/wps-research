@@ -6,13 +6,15 @@ Burned Area Reflectance Classification
 python3 barc.py file_1.bin file_2.bin
 '''
 
-from exceptions.matrix_exception import Shape_Mismatched_Error
-
 import numpy as np
 
 import sys
 
 from raster import Raster
+
+from exceptions.data import Not_Enough_Information
+
+from exceptions.matrix import Shape_Mismatched_Error
 
 
 def NBR(
@@ -51,8 +53,10 @@ def NBR(
 
 def dNBR(
         *,
-        NIR_1, SWIR_1,
-        NIR_2, SWIR_2,
+        NIR_1 = None, SWIR_1 = None,
+        NIR_2 = None, SWIR_2 = None,
+        raster_pre: Raster = None,
+        raster_post: Raster = None,
         eps = 1e-3
 ):
     '''
@@ -75,6 +79,21 @@ def dNBR(
     -------
     Values of Normalized Burn Ratio within (-1, 1) for pre and post-fire. With dNBR matrix.
     '''
+
+
+    #If rasters are passed in instead of value, read from rasters.
+    if raster_pre is not None:
+        NIR_1 = raster_pre.get_band(8)
+        SWIR_1 = raster_pre.get_band(12)
+    
+    if raster_post is not None:
+        NIR_2 = raster_post.get_band(8)
+        SWIR_2 = raster_post.get_band(12)
+
+    if any(x is None for x in (NIR_1, NIR_2, SWIR_1, SWIR_2)):
+
+        raise Not_Enough_Information("Missed at least one of NIR, SWIR for pre and NIR, SWIR for post.")
+
 
     nbr_1 = NBR(NIR_1, SWIR_1, eps)
 

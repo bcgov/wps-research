@@ -155,7 +155,7 @@ def band_index(
     In the case there are 2 identical bands in the same data, it returns the first index.
     '''
 
-    from exceptions.sen2_exception import No_Band_Error
+    from exceptions.sen2 import No_Band_Error
 
     pattern = rf"\bB{band}\b"
     

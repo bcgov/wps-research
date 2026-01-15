@@ -21,7 +21,7 @@ def dominant_band(
 
     Parameters
     ----------
-    X: the 3 channel dataset
+    X: the 3 channel dataset UPDATE: ANY CHANNEL
 
     channel: the channel (band) which you want to compare against the others.
 

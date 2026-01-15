@@ -41,10 +41,6 @@ if __name__ == '__main__':
 
 
 
-
-
-
-
     raster_file_name_pre = 'S2C_MSIL2A_20250609T192931_N0511_R142_T09UYU_20250610T002612_cloudfree.bin_MRAP_C11659.bin_crop.bin'
 
     raster_file_name_post = 'S2A_MSIL2A_20251009T193831_N0511_R142_T09UYU_20251009T234613_cloudfree.bin_MRAP_C11659.bin_crop.bin'

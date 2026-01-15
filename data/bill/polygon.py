@@ -43,7 +43,7 @@ def split_in_out(
     Use rasterize_onto.py to have similar matrix shape for raster and polygon.
     '''
 
-    from exceptions.matrix_exception import Shape_Mismatched_Error
+    from exceptions.matrix import Shape_Mismatched_Error
     
     if raster_dat is not None:
         xSize = raster_dat.shape[1]
