@@ -189,7 +189,6 @@ class Raster:
 
             data = self.__ite_read(band_lst = list(range(1, self._n_band + 1)))
 
-            print(f'Read all {self._n_band} band(s)')
 
         else:
 
@@ -306,6 +305,45 @@ class Raster:
 
 
 
+def minimum_nan_raster(
+        filename_lst:list
+):
+    '''
+    Description
+    -----------
+    Compare between the rasters to select the one with the least NAN in count.
+    '''
+
+    from misc.general import ignore_nan_2D
+
+    min_nan_count = np.inf
+
+    best_raster = None
+
+    for f in filename_lst:
+
+        raster = Raster(file_name=f)
+
+        raster_data = raster.read_bands()
+
+        X = raster_data.reshape(-1, raster._n_band)
+
+        mask, _ = ignore_nan_2D(
+            X = X,
+            axis=1
+        )
+
+        nan_count = np.sum(~mask)
+
+        if (nan_count < min_nan_count):
+
+            min_count = nan_count
+
+            best_raster = raster
+
+
+    return best_raster, min_count
+
 
 if __name__ == "__main__":
 
@@ -319,7 +357,7 @@ if __name__ == "__main__":
     #load raster and read
     raster = Raster(file_name=filename)
 
-    X = raster.readBands_and_trim(crop=True)
+    X = raster.readBands_and_trim(band_lst=[1,2,3], crop=True)
 
     #Plot title
     title = raster.acquisition_timestamp
