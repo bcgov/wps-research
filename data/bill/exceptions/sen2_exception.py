@@ -4,3 +4,7 @@ class No_Band_Error(Exception):
 
 class Out_Of_Bound_Band_Index(Exception):
     ''' Index Out of Bound ''' 
+
+
+class DateNotFound(Exception):
+    ''' No imagery of this date '''
