@@ -4,13 +4,19 @@ generates a gif to see how the environment changes from a certain date.
 
 from exceptions.data import *
 
-from misc.general import htrim_3d
+from misc.general import (
+    htrim_1d,
+    htrim_3d
+)
 
 from change_detection import change_detection
 
 from dominant_band import dominant_band
 
-from barc import dNBR
+from barc import (
+    NBR,
+    dNBR
+)
 
 from time import time
 
@@ -147,11 +153,11 @@ class GIF():
     ):
         
         '''
-        Plot 3
+        Plot 3 and 6
         '''
 
         #MEthod (choose between barc, change)
-        _, _, dnbr = dNBR(
+        _, nbr_post_1, dnbr = dNBR(
             NIR_1=self.ref_data[..., 3],
             SWIR_1=self.ref_data[..., 0],
 
@@ -163,6 +169,24 @@ class GIF():
             dnbr
         )  
 
+        #Method
+        # _, nbr_post_2, dnbr_next_day = dNBR(
+        #     NIR_1=self.prev_data[..., 3],
+        #     SWIR_1=self.prev_data[..., 0],
+
+        #     NIR_2=new_data[..., 3],
+        #     SWIR_2=new_data[..., 0]
+        # )
+
+
+        #Difference between dNBR today and dNBR the day before
+
+        nbr_post_2 = NBR(NIR = self.prev_data[..., 3],
+                         SWIR= self.prev_data[..., 0])
+
+        self.im6.set_data(
+            (nbr_post_2 - nbr_post_1) / (nbr_post_2 + nbr_post_1 + 1e-3)
+        )  
 
 
     def __update_change_det(
@@ -234,6 +258,9 @@ class GIF():
 
         #Plot 3,4,5: change detection
         self.__update_change_det(new_data)
+
+
+        self.prev_data = new_data
         
 
         if idx % 5 == 0:
@@ -303,12 +330,15 @@ class GIF():
 
         # second row
         ax5 = self.fig.add_subplot(gs[1, 3])
+        ax6 = self.fig.add_subplot(gs[1, 1])
 
 
         #Load Reference image, this will be fixed
         self.ref_data = self.__get_raster_data(
             self.date_list[0]
         )
+
+        self.prev_data = self.ref_data
 
         temp = np.zeros((self.ref_data.shape[0], self.ref_data.shape[1]))
 
@@ -317,7 +347,7 @@ class GIF():
         self.title1 = ax1.set_title(f"date={self.date_list[0]}")
 
         #method 1 on 2 imageries
-        self.im2 = ax2.imshow(temp, vmin=0, vmax=1)
+        self.im2 = ax2.imshow(temp, vmin=0, vmax=1, cmap = 'gray')
         self.title2 = ax2.set_title(f"dNBR")
 
         #method 2 on 2 imageries
@@ -330,6 +360,10 @@ class GIF():
 
         self.im5 = ax5.imshow(temp, vmin=0, vmax=1, cmap = 'gray')
         self.title5 = ax5.set_title(f"Change Detection (NIR wins)")
+
+        #dNBR by date
+        self.im6 = ax6.imshow(temp, vmin=0, vmax=1, cmap = 'gray')
+        self.title6 = ax6.set_title(f"dNBR (between every 2 adjacent images)")
 
 
         #We dont need axisfor ax in self.fig.axes:
