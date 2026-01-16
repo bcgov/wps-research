@@ -41,7 +41,7 @@ if __name__ == '__main__':
 
     if len(sys.argv) > 3:
 
-        band_lst = ast.literal_eval(sys.argv[2])
+        band_lst = ast.literal_eval(sys.argv[3])
 
     method = 'tsne' #Argument as well
 
