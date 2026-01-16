@@ -6,7 +6,7 @@ python3 change_detection.py file_pre.bin file_post.bin
 
 import numpy as np
 
-from exceptions.matrix_exception import Shape_Mismatched_Error
+from exceptions.matrix import Shape_Mismatched_Error
 
 import sys
 
@@ -28,17 +28,15 @@ def change_detection(
 ):
     
     '''
+    Description
+    -----------
     Compare pixel value between post and pre fire, then normalize it so that it stays between -1 and 1 (theoretically if all data > 0)
 
-    
-    Result: 
-    ------
+        + If the intensity increases in terms of band values (closer to 255), it will be brighter. Otherwise, it will be dark.
 
-        If the intensity increases in terms of band values (closer to 255), it will be brighter. Otherwise, it will be dark.
+        + If the intensity decreases, it will be dark (darker than no changes)
 
-        If the intensity decreases, it will be dark (darker than no changes)
-
-        If the intensity stays the same, it will be approx. 0
+        + If the intensity stays the same, it will be approx. 0
 
 
     Parameters

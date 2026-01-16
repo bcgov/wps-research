@@ -15,19 +15,25 @@ def htrim_1d(
         p=1.0
     ):
     '''
-    Trim 'outlier' pixel values for visualization purpose.
-
+    Description
+    -----------
     Percentile-based contrast stretch.
 
     p = lower/upper percentile to clip (e.g. 1.0 -> 1% / 99%)
     
     This is for 1D arrays.
 
+
     Parameters
     ----------
     X: The data to be used.
     
     p: The cumulative percentage for each tail.
+
+
+    Returns
+    -------
+    Still a 1D array but trimmed.
     '''
     
     X = X.astype(np.float32)
@@ -42,15 +48,21 @@ def htrim_3d(
         p=1.0
     ):
     '''
-    Refer to htrim_1d
-    
-    This is for 3D arrays.
+    Description
+    -----------
+    htrim on each of the channels independently.
 
+    
     Parameters
     ----------
     X: The data to be used.
     
     p: The cumulative percentage for each tail.
+
+
+    Returns
+    -------
+    Still a 3D matrix but trimmed.
     '''
 
     X = X.astype(np.float32)
@@ -61,13 +73,16 @@ def htrim_3d(
 
 
 
-##### CROPPING #####
-
 def crop_no_data(
         X,
         tol = 0
 ):
     '''
+    Description
+    -----------
+    Raster data can have the no-data parts. We want to crop them out, automatically.
+
+
     Parameters
     ----------
     X: matrix to crop
@@ -77,11 +92,15 @@ def crop_no_data(
 
     Returns
     -------
-    A cropped matrix
+    A cropped matrix.
 
 
     Notes
     -----
+    Only works for 3D arrays for now.
+
+    This function is pretty tricky. Use with caution.
+
     If applied to each of more than 1 matrix, may want to use match_shape() to balance the shape for arithmetric broadcasting.
     '''
     
@@ -119,6 +138,7 @@ def crop_no_data(
         else:
             break
 
+
     return X[top:bottom, left:right, :]
 
 
@@ -137,9 +157,9 @@ def match_shape(
     
     Parameters
     ----------
-    X1: 1st matrix (multi dim)
+    X1: 1st matrix (3D)
     
-    X2: 2nd matrix (multi dim)
+    X2: 2nd matrix (3D)
 
 
     Returns
@@ -180,7 +200,7 @@ def ignore_nan_2D(
 
     Parameters
     ----------
-    X: a 2D matrix
+    X: a 2D matrix.
 
     axis: 0 is column, 1 is row
 

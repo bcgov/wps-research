@@ -54,7 +54,9 @@ def row_sampling(
     '''
     Description
     -----------
-    Row sampling from a matrix.
+    Row sampling from a matrix. A 3D matrix is given, it will reshape to 2D (so each band is now 1 feature).
+
+    Sample from the rows. Designed specifically for pixel sampling.
 
     
     Parameters
@@ -117,8 +119,11 @@ def row_sampling(
 
 
 def in_out_sampling(
-        raster_filename,
-        polygon_filename,
+        raster_dat=None,
+        polygon_dat=None,
+        *,
+        raster_filename=None,
+        polygon_filename=None,
         in_sample_size,
         seed = 42
 ):
@@ -140,6 +145,8 @@ def in_out_sampling(
 
     #Extract inside and outside matrix (split)
     inside, in_indices, outside, out_indices = split_in_out(
+        raster_dat=raster_dat,
+        polygon_dat=polygon_dat,
         raster_filename = raster_filename,
         polygon_filename= polygon_filename
     )
@@ -176,7 +183,7 @@ def in_out_sampling(
                                        out_idx_samples])
     
 
-    return original_indices, samples
+    return original_indices, samples, out_in_ratio
 
 
 
