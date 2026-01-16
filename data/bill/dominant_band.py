@@ -14,39 +14,35 @@ import sys
 
 def dominant_band(
         X, 
-        channel
+        band_index
     ):
     '''
     This function imposes a threshold, which compares the selected channel with other 3.
 
     Parameters
     ----------
-    X: the 3 channel dataset UPDATE: ANY CHANNEL
+    X: a 3D matrix.
 
-    channel: the channel (band) which you want to compare against the others.
+    band_index: the channel (band) index which you want to compare against the others.
 
     
     Returns
     -------
     mask: 2D array (3rd dim is n channel is gone)
     '''
-    channel_index = {'r': 0, 'g': 1, 'b': 2}
+    import numpy as np
+    from exceptions.sen2 import Out_Of_Bound_Band_Index
 
-    chosen_index = channel_index[channel]
+    if band_index < 1 or band_index > X.shape[2]:
 
-    other_indices = [v for v in channel_index.values() if v != chosen_index]
+        raise Out_Of_Bound_Band_Index("band_index out of range")
+    
+    idx = band_index - 1
 
-    _, _, n_chan = X.shape
+    target = X[:, :, idx]
+    others = np.delete(X, idx, axis=2)
 
-    if n_chan > 3:
-
-        X = X[:, :, :3]
-
-    mask = (
-        (X[:, :, chosen_index] > X[:, :, other_indices[0]]) & 
-
-        (X[:, :, chosen_index] > X[:, :, other_indices[1]])
-    )
+    mask = np.all(target[..., None] > others, axis=2)
 
     return mask
 
@@ -86,9 +82,9 @@ def plot_dominant_band(
 
     import matplotlib.pyplot as plt
 
-    r = dominant_band(X, 'r')
-    g = dominant_band(X, 'g')
-    b = dominant_band(X, 'b')
+    r = dominant_band(X, 1)
+    g = dominant_band(X, 2)
+    b = dominant_band(X, 3)
 
     fig, axes = plt.subplots(1, 4, figsize = figsize)
 
@@ -126,7 +122,6 @@ if __name__ == '__main__':
 
     filename = sys.argv[1]
 
-
     #Title
     title = 'RAW'
 
@@ -136,7 +131,10 @@ if __name__ == '__main__':
     #load raster and read
     raster = Raster(file_name=filename)
 
-    X = raster.readBands_and_trim(crop = True)
+    X = raster.readBands_and_trim(
+        crop = True,
+        band_lst=[1,2,3]
+    )
 
     plot_dominant_band(
         X,

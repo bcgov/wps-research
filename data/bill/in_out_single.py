@@ -23,7 +23,6 @@ import sys
 import ast
 
 
-
 seed = 42
 
 #Sample size inside the perimeter
@@ -32,23 +31,26 @@ in_sample_size = 10
 if __name__ == '__main__':
 
     #handling argv
-    if len(sys.argv) < 2:
-        print("Needs 1 raster file")
+    if len(sys.argv) < 3:
+        print("Needs 1 raster file and 1 polygon file")
         sys.exit(1)
 
     raster_filename = sys.argv[1]
 
-    if len(sys.argv) > 2:
+    polygon_filename = sys.argv[2]
+
+    if len(sys.argv) > 3:
 
         band_lst = ast.literal_eval(sys.argv[2])
 
     method = 'tsne' #Argument as well
 
-    polygon_filename = 'rasterized_0000.bin'
+
+
 
     #Read Raster data for pixel referencing
     raster = Raster(file_name=raster_filename)
-    raster_dat = raster.read_bands() #Read all bands
+    raster_dat = raster.read_bands(band_lst='all')
 
     #Sampling, the sample contains all bands in the data
     original_indices, samples, out_in_ratio = in_out_sampling(
@@ -160,19 +162,19 @@ if __name__ == '__main__':
     hline = ax_img.axhline(0, color="red", linewidth=2, visible=False)
     vline = ax_img.axvline(0, color="red", linewidth=2, visible=False)
 
-
-    print(original_indices)
-
+    W = raster_dat.shape[1]
 
     def on_pick(event):
 
         k = event.ind[0]
 
-        print(k)
+        if (event.artist is sc_in):
+            crosshair_colour = "red"
+            flat = original_indices[:in_sample_size][k]
 
-        flat = original_indices[k]
-
-        W = raster_dat.shape[1]
+        elif (event.artist is sc_out):
+            crosshair_colour = "blue"
+            flat = original_indices[in_sample_size:][k]
 
         r = flat // W
         c = flat %  W
@@ -184,14 +186,6 @@ if __name__ == '__main__':
         vline.set_visible(True)
 
         fig.canvas.draw_idle()
-
-        if (k < in_sample_size):
-            label = "INside"
-            crosshair_colour = "red"
-
-        else:
-            label = "OUTside"
-            crosshair_colour = "blue"
 
         hline.set_color(crosshair_colour)
         vline.set_color(crosshair_colour)

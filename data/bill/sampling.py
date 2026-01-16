@@ -54,7 +54,9 @@ def row_sampling(
     '''
     Description
     -----------
-    Row sampling from a matrix.
+    Row sampling from a matrix. A 3D matrix is given, it will reshape to 2D (so each band is now 1 feature).
+
+    Sample from the rows. Designed specifically for pixel sampling.
 
     
     Parameters

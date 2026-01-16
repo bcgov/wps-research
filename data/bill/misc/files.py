@@ -18,6 +18,7 @@ def iter_files(
     Parameters
     ----------
     folder_name: folder name to iterate through
+
     file_type: e.g .bin, .hdr, .py...
 
 

@@ -226,7 +226,7 @@ class Raster:
 
     def readBands_and_trim(
             self,
-            band_lst=None,
+            band_lst='all',
             *,
             p = 1.,
             crop = False,
