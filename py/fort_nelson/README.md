@@ -4,3 +4,4 @@
 * export_euclidean.py -- pulls patches from TIF imagery with respect to training/annotations.
 * classify_euclidean.cu -- generates classification maps from the reference/training patches ( binary format ) 
 
+* hex_aggregate_cuda_enhanced.cu -- rolls up the probability using a hex grid.
