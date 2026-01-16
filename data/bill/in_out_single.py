@@ -7,7 +7,7 @@ How this works?
 Read all
 '''
 
-
+########### LIBRARIES ##################
 import matplotlib.pyplot as plt
 
 from raster import Raster
@@ -22,15 +22,24 @@ import sys
 
 import ast
 
+from dim_reduce import (
+    tsne,
+    pca,
+    parDimRed
+)
 
-seed = 42
 
-#Sample size inside the perimeter
-in_sample_size = 10
 
 if __name__ == '__main__':
 
-    #handling argv
+    ### SOME DEFAULT VALUE, CAN SET AS INPUT LATER #######
+
+    seed = 42
+    in_sample_size = 200
+
+    ############### handling argv #######################
+
+
     if len(sys.argv) < 3:
         print("Needs 1 raster file and 1 polygon file")
         sys.exit(1)
@@ -41,11 +50,9 @@ if __name__ == '__main__':
 
     if len(sys.argv) > 3:
 
-        band_lst = ast.literal_eval(sys.argv[2])
+        band_lst = ast.literal_eval(sys.argv[3])
 
-    method = 'tsne' #Argument as well
-
-
+    method_name = 'tsne'  #Argument as well
 
 
     #Read Raster data for pixel referencing
@@ -61,11 +68,15 @@ if __name__ == '__main__':
 
     out_sample_size = int( in_sample_size * out_in_ratio )
 
-    #### TSNE dimensionality reduction #####
+    
+    ############ Load data from cache ######################
+
     import os
 
+
+
     #Check if we already have the data stored.
-    CACHE_PATH = f'caching/{method}_{in_sample_size}.npz'
+    CACHE_PATH = f'caching/mt{method_name}_sz{in_sample_size}_rs{seed}.npz'
 
     if os.path.exists(CACHE_PATH):
 
@@ -75,7 +86,9 @@ if __name__ == '__main__':
 
     else:
 
-        from dim_reduce import *
+        '''
+        Write new data.
+        '''
 
         #We will use this param setting
         tsne_params = {
@@ -96,10 +109,12 @@ if __name__ == '__main__':
             [1,2,3,4]
         ]
 
+        method_dict = {'tsne': tsne, 'pca': pca}
+
         #Prepare tasks
         tasks = [
             (
-                b, samples[..., [b - 1 for b in band_lst]], tsne, tsne_params
+                b, samples[..., [bb - 1 for bb in b]], method_dict[method_name], tsne_params
             )
             
             for b in band_combinations
@@ -111,16 +126,11 @@ if __name__ == '__main__':
 
         print(f"Data saved to {CACHE_PATH}.")
 
-
-
+    X = cache[str(band_lst)] #Choose data from cache dict based on band list
 
     ############ Interactive Map ############################
 
     fig, (ax_tsne, ax_img) = plt.subplots(1, 2, figsize=(20, 8))
-
-    #Choose data from tsne_cache based on band list
-
-    X = cache[str(band_lst)]
 
     sc_in = ax_tsne.scatter(
         X[:in_sample_size, 0], 
@@ -140,7 +150,7 @@ if __name__ == '__main__':
         picker=3
     )
 
-    ax_tsne.set_title(f"t-SNE space | Sample Size of {in_sample_size} / {out_sample_size} | Random State: {seed}")
+    ax_tsne.set_title(f"{method_name} space | Sample Size of {in_sample_size} / {out_sample_size} | Random State: {seed}")
 
     ax_tsne.legend()
 
@@ -150,7 +160,7 @@ if __name__ == '__main__':
         htrim_3d( raster_dat[..., [b - 1 for b in band_lst]] ) #Because band convention starts at 1, but index is from 0
     )
     
-    ax_img.set_title(f"{band_lst}")
+    ax_img.set_title(f"Band: {band_lst}")
 
     ################################################################
 
@@ -190,9 +200,44 @@ if __name__ == '__main__':
         hline.set_color(crosshair_colour)
         vline.set_color(crosshair_colour)
 
-
-
     fig.canvas.mpl_connect("pick_event", on_pick)
 
-    plt.tight_layout()
+
+    ############# ADJUST DATA SHOWN #####################
+    from matplotlib.widgets import TextBox
+
+    fig.subplots_adjust(top = 2)
+
+    # add textbox
+    ax_box = fig.add_axes([0.35, 0.9, 0.3, 0.04])
+    textbox = TextBox(ax_box, "Band list..e.g [1,2,3]: ")
+
+    def on_submit(txt):
+
+        band_lst = ast.literal_eval(txt)
+
+        try:
+            #Set TNSE
+            new_X = cache[str(band_lst)]
+
+        except Exception:
+
+            raise KeyError("This band combination is not in cache.")
+
+        img_plot.set_data(
+            htrim_3d(raster_dat[..., [b - 1 for b in band_lst]])
+        )
+
+        ax_img.set_title(f"Band: {txt}")
+
+        # ---- update scatter IN PLACE ----
+        sc_in.set_offsets(new_X[:in_sample_size])
+        sc_out.set_offsets(new_X[in_sample_size:])
+
+        fig.canvas.draw_idle()
+
+    textbox.on_submit(on_submit)
+
+
+    plt.tight_layout(rect=[0, 0, 1, 0.9])
     plt.show()
