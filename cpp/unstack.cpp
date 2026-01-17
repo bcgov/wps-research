@@ -9,6 +9,8 @@
 #include <sys/statvfs.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <limits.h>
+#include <stdlib.h>
 
 // Global variables for parfor
 size_t g_nr, g_nc, g_nb, g_np;
@@ -181,21 +183,35 @@ int benchmark_io_channels(const str& filepath){
 
 // Detect storage type and return optimal number of concurrent I/O operations
 int detect_io_channels(const str& filepath){
+  // Expand to absolute path
+  char abs_path[PATH_MAX];
+  char * result = realpath(filepath.c_str(), abs_path);
+  str absolute_filepath;
+
+  if(result != NULL){
+    absolute_filepath = str(abs_path);
+    cout << "Absolute path: " << absolute_filepath << endl;
+  }
+  else{
+    cout << "Warning: could not resolve absolute path, using relative path" << endl;
+    absolute_filepath = filepath;
+  }
+
   // Check if path starts with /ram/
-  if(filepath.size() >= 5 && filepath.substr(0, 5) == str("/ram/")){
+  if(absolute_filepath.size() >= 5 && absolute_filepath.substr(0, 5) == str("/ram/")){
     cout << "Detected /ram/ path - using 16 threads" << endl;
     return 16;
   }
 
   struct statvfs vfs;
-  if(statvfs(filepath.c_str(), &vfs) != 0){
+  if(statvfs(absolute_filepath.c_str(), &vfs) != 0){
     cout << "Warning: Could not detect filesystem type" << endl;
-    return benchmark_io_channels(filepath);
+    return benchmark_io_channels(absolute_filepath);
   }
 
   // Try to detect if this is a RAM disk or SSD/HDD
   // Check if filesystem is in /dev/shm (RAM disk) or tmpfs
-  str cmd = str("df -T ") + filepath + str(" 2>/dev/null | tail -1");
+  str cmd = str("df -T ") + absolute_filepath + str(" 2>/dev/null | tail -1");
   str df_output = exec(cmd.c_str());
 
   int io_channels = -1; // unknown
@@ -255,7 +271,7 @@ int detect_io_channels(const str& filepath){
   // Fallback to benchmarking if detection failed
   if(io_channels == -1){
     cout << "Could not detect storage type from system info" << endl;
-    io_channels = benchmark_io_channels(filepath);
+    io_channels = benchmark_io_channels(absolute_filepath);
   }
   else{
     cout << "Effective I/O channel capacity: " << io_channels << " concurrent operations" << endl;
