@@ -1,4 +1,9 @@
-/* gpu_benchmark.cu - Benchmark GPU memory, RAM disk, and filesystem I/O
+/*20160116 
+
+   nvcc -O3 gpu_benchmark.cu -o gpu_benchmark -lpthread
+./gpu_benchmark
+   
+   gpu_benchmark.cu - Benchmark GPU memory, RAM disk, and filesystem I/O
    Measures data transfer rates and optimal channel capacity */
 #include <cuda_runtime.h>
 #include <stdio.h>
