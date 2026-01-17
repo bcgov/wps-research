@@ -6,7 +6,6 @@
    gpu_benchmark.cu - Benchmark GPU memory, RAM disk, and filesystem I/O
    Measures data transfer rates and optimal channel capacity */
 
-
 /* gpu_benchmark.cu - Benchmark GPU memory, RAM disk, and filesystem I/O
    Measures data transfer rates and optimal channel capacity */
 
@@ -44,6 +43,10 @@ typedef struct {
     int gpu_read_iterations;
     int gpu_h2d_iterations;
     int gpu_d2h_iterations;
+    int gpu_write_streams;
+    int gpu_read_streams;
+    int gpu_h2d_streams;
+    int gpu_d2h_streams;
 
     // /ram/ results
     double ram_write_speed;
@@ -319,6 +322,72 @@ __global__ void read_kernel(float* data, float* output, size_t n) {
     }
 }
 
+// Benchmark GPU with varying number of streams to find optimal concurrency
+void benchmark_gpu_streams(float** d_arrays, float** d_temp_arrays, size_t chunk_floats,
+                          int max_streams, double* best_bandwidth, int* best_streams,
+                          int* iterations, int is_write) {
+
+    int blockSize = 256;
+    int gridSize = (chunk_floats + blockSize - 1) / blockSize;
+
+    printf("\nTesting GPU %s with varying stream counts:\n", is_write ? "WRITE" : "READ");
+    printf("%-10s %-15s %-15s\n", "Streams", "Time(s)", "Bandwidth(GB/s)");
+    printf("------------------------------------------\n");
+
+    *best_bandwidth = 0;
+    *best_streams = 1;
+    *iterations = 0;
+
+    for(int num_streams = 1; num_streams <= max_streams; num_streams *= 2) {
+        cudaStream_t streams[32];
+        for(int i = 0; i < num_streams; i++) {
+            CUDA_CHECK(cudaStreamCreate(&streams[i]));
+        }
+
+        double start = get_time();
+
+        if(is_write) {
+            for(int i = 0; i < num_streams; i++) {
+                write_kernel<<<gridSize, blockSize, 0, streams[i]>>>(
+                    d_arrays[i], chunk_floats, (float)i);
+            }
+        } else {
+            for(int i = 0; i < num_streams; i++) {
+                read_kernel<<<gridSize, blockSize, 0, streams[i]>>>(
+                    d_arrays[i], d_temp_arrays[i], chunk_floats);
+            }
+        }
+
+        for(int i = 0; i < num_streams; i++) {
+            CUDA_CHECK(cudaStreamSynchronize(streams[i]));
+        }
+
+        double end = get_time();
+        double elapsed = end - start;
+
+        size_t total_bytes = (size_t)num_streams * chunk_floats * sizeof(float);
+        double bandwidth = (total_bytes / (1024.0 * 1024.0 * 1024.0)) / elapsed;
+
+        printf("%-10d %-15.6f %-15.1f\n", num_streams, elapsed, bandwidth);
+
+        (*iterations)++;
+
+        if(bandwidth > *best_bandwidth) {
+            *best_bandwidth = bandwidth;
+            *best_streams = num_streams;
+        }
+
+        for(int i = 0; i < num_streams; i++) {
+            CUDA_CHECK(cudaStreamDestroy(streams[i]));
+        }
+
+        // Stop if performance degrades
+        if(num_streams > 1 && bandwidth < *best_bandwidth * 0.85) {
+            break;
+        }
+    }
+}
+
 void benchmark_gpu_memory() {
     printf("\n========================================\n");
     printf("Benchmarking: GPU Memory\n");
@@ -327,138 +396,174 @@ void benchmark_gpu_memory() {
     size_t num_floats = GPU_TEST_SIZE / sizeof(float);
     size_t bytes = num_floats * sizeof(float);
 
-    float *d_data, *d_temp;
-    CUDA_CHECK(cudaMalloc(&d_data, bytes));
-    CUDA_CHECK(cudaMalloc(&d_temp, bytes));
+    // Get device properties
+    cudaDeviceProp prop;
+    CUDA_CHECK(cudaGetDeviceProperties(&prop, 0));
+    int max_streams = (prop.asyncEngineCount > 0) ? 32 : 1;
 
-    int blockSize = 256;
-    int gridSize = (num_floats + blockSize - 1) / blockSize;
+    printf("GPU supports up to %d concurrent streams\n", max_streams);
 
-    // Warm up
-    write_kernel<<<gridSize, blockSize>>>(d_data, num_floats, 1.0f);
-    CUDA_CHECK(cudaDeviceSynchronize());
+    // Allocate arrays for stream testing
+    size_t chunk_floats = num_floats / max_streams;
+    float* d_arrays[32];
+    float* d_temp_arrays[32];
 
-    printf("\nTesting GPU WRITE (kernel write) performance:\n");
-    printf("%-10s %-15s %-15s\n", "Iteration", "Time(s)", "Bandwidth(GB/s)");
-    printf("------------------------------------------\n");
-
-    double total_write_time = 0;
-    int write_iterations = 0;
-
-    while(total_write_time < MIN_TEST_TIME) {
-        double start = get_time();
-        write_kernel<<<gridSize, blockSize>>>(d_data, num_floats, (float)write_iterations);
-        CUDA_CHECK(cudaDeviceSynchronize());
-        double end = get_time();
-
-        double elapsed = end - start;
-        total_write_time += elapsed;
-        write_iterations++;
-
-        double bandwidth = (bytes / (1024.0 * 1024.0 * 1024.0)) / elapsed;
-        printf("%-10d %-15.6f %-15.1f\n", write_iterations, elapsed, bandwidth);
+    for(int i = 0; i < max_streams; i++) {
+        CUDA_CHECK(cudaMalloc(&d_arrays[i], chunk_floats * sizeof(float)));
+        CUDA_CHECK(cudaMalloc(&d_temp_arrays[i], chunk_floats * sizeof(float)));
     }
 
-    double avg_write_time = total_write_time / write_iterations;
-    double write_bandwidth = (bytes / (1024.0 * 1024.0 * 1024.0)) / avg_write_time;
+    // Test write performance with streams
+    double write_bandwidth;
+    int write_streams, write_iterations;
+    benchmark_gpu_streams(d_arrays, d_temp_arrays, chunk_floats, max_streams,
+                         &write_bandwidth, &write_streams, &write_iterations, 1);
 
-    printf("\nTesting GPU READ (kernel read) performance:\n");
-    printf("%-10s %-15s %-15s\n", "Iteration", "Time(s)", "Bandwidth(GB/s)");
-    printf("------------------------------------------\n");
+    // Test read performance with streams
+    double read_bandwidth;
+    int read_streams, read_iterations;
+    benchmark_gpu_streams(d_arrays, d_temp_arrays, chunk_floats, max_streams,
+                         &read_bandwidth, &read_streams, &read_iterations, 0);
 
-    double total_read_time = 0;
-    int read_iterations = 0;
-
-    while(total_read_time < MIN_TEST_TIME) {
-        double start = get_time();
-        read_kernel<<<gridSize, blockSize>>>(d_data, d_temp, num_floats);
-        CUDA_CHECK(cudaDeviceSynchronize());
-        double end = get_time();
-
-        double elapsed = end - start;
-        total_read_time += elapsed;
-        read_iterations++;
-
-        double bandwidth = (bytes / (1024.0 * 1024.0 * 1024.0)) / elapsed;
-        printf("%-10d %-15.6f %-15.1f\n", read_iterations, elapsed, bandwidth);
-    }
-
-    double avg_read_time = total_read_time / read_iterations;
-    double read_bandwidth = (bytes / (1024.0 * 1024.0 * 1024.0)) / avg_read_time;
-
-    printf("\nTesting GPU Host-to-Device transfer:\n");
-    printf("%-10s %-15s %-15s\n", "Iteration", "Time(s)", "Bandwidth(GB/s)");
+    // Test Host-to-Device with streams
+    printf("\nTesting GPU Host-to-Device transfer with streams:\n");
+    printf("%-10s %-15s %-15s\n", "Streams", "Time(s)", "Bandwidth(GB/s)");
     printf("------------------------------------------\n");
 
     float* h_data = (float*)malloc(bytes);
     memset(h_data, 0, bytes);
 
-    double total_h2d_time = 0;
+    double best_h2d_bandwidth = 0;
+    int best_h2d_streams = 1;
     int h2d_iterations = 0;
 
-    while(total_h2d_time < MIN_TEST_TIME) {
-        double start = get_time();
-        CUDA_CHECK(cudaMemcpy(d_data, h_data, bytes, cudaMemcpyHostToDevice));
-        double end = get_time();
+    for(int num_streams = 1; num_streams <= max_streams; num_streams *= 2) {
+        cudaStream_t streams[32];
+        for(int i = 0; i < num_streams; i++) {
+            CUDA_CHECK(cudaStreamCreate(&streams[i]));
+        }
 
+        double start = get_time();
+
+        for(int i = 0; i < num_streams; i++) {
+            CUDA_CHECK(cudaMemcpyAsync(d_arrays[i],
+                                      &h_data[i * chunk_floats],
+                                      chunk_floats * sizeof(float),
+                                      cudaMemcpyHostToDevice,
+                                      streams[i]));
+        }
+
+        for(int i = 0; i < num_streams; i++) {
+            CUDA_CHECK(cudaStreamSynchronize(streams[i]));
+        }
+
+        double end = get_time();
         double elapsed = end - start;
-        total_h2d_time += elapsed;
+
+        size_t total_bytes = (size_t)num_streams * chunk_floats * sizeof(float);
+        double bandwidth = (total_bytes / (1024.0 * 1024.0 * 1024.0)) / elapsed;
+
+        printf("%-10d %-15.6f %-15.1f\n", num_streams, elapsed, bandwidth);
+
         h2d_iterations++;
 
-        double bandwidth = (bytes / (1024.0 * 1024.0 * 1024.0)) / elapsed;
-        printf("%-10d %-15.6f %-15.1f\n", h2d_iterations, elapsed, bandwidth);
+        if(bandwidth > best_h2d_bandwidth) {
+            best_h2d_bandwidth = bandwidth;
+            best_h2d_streams = num_streams;
+        }
+
+        for(int i = 0; i < num_streams; i++) {
+            CUDA_CHECK(cudaStreamDestroy(streams[i]));
+        }
+
+        if(num_streams > 1 && bandwidth < best_h2d_bandwidth * 0.85) {
+            break;
+        }
     }
 
-    double avg_h2d_time = total_h2d_time / h2d_iterations;
-    double h2d_bandwidth = (bytes / (1024.0 * 1024.0 * 1024.0)) / avg_h2d_time;
-
-    printf("\nTesting GPU Device-to-Host transfer:\n");
-    printf("%-10s %-15s %-15s\n", "Iteration", "Time(s)", "Bandwidth(GB/s)");
+    // Test Device-to-Host with streams
+    printf("\nTesting GPU Device-to-Host transfer with streams:\n");
+    printf("%-10s %-15s %-15s\n", "Streams", "Time(s)", "Bandwidth(GB/s)");
     printf("------------------------------------------\n");
 
-    double total_d2h_time = 0;
+    double best_d2h_bandwidth = 0;
+    int best_d2h_streams = 1;
     int d2h_iterations = 0;
 
-    while(total_d2h_time < MIN_TEST_TIME) {
-        double start = get_time();
-        CUDA_CHECK(cudaMemcpy(h_data, d_data, bytes, cudaMemcpyDeviceToHost));
-        double end = get_time();
+    for(int num_streams = 1; num_streams <= max_streams; num_streams *= 2) {
+        cudaStream_t streams[32];
+        for(int i = 0; i < num_streams; i++) {
+            CUDA_CHECK(cudaStreamCreate(&streams[i]));
+        }
 
+        double start = get_time();
+
+        for(int i = 0; i < num_streams; i++) {
+            CUDA_CHECK(cudaMemcpyAsync(&h_data[i * chunk_floats],
+                                      d_arrays[i],
+                                      chunk_floats * sizeof(float),
+                                      cudaMemcpyDeviceToHost,
+                                      streams[i]));
+        }
+
+        for(int i = 0; i < num_streams; i++) {
+            CUDA_CHECK(cudaStreamSynchronize(streams[i]));
+        }
+
+        double end = get_time();
         double elapsed = end - start;
-        total_d2h_time += elapsed;
+
+        size_t total_bytes = (size_t)num_streams * chunk_floats * sizeof(float);
+        double bandwidth = (total_bytes / (1024.0 * 1024.0 * 1024.0)) / elapsed;
+
+        printf("%-10d %-15.6f %-15.1f\n", num_streams, elapsed, bandwidth);
+
         d2h_iterations++;
 
-        double bandwidth = (bytes / (1024.0 * 1024.0 * 1024.0)) / elapsed;
-        printf("%-10d %-15.6f %-15.1f\n", d2h_iterations, elapsed, bandwidth);
+        if(bandwidth > best_d2h_bandwidth) {
+            best_d2h_bandwidth = bandwidth;
+            best_d2h_streams = num_streams;
+        }
+
+        for(int i = 0; i < num_streams; i++) {
+            CUDA_CHECK(cudaStreamDestroy(streams[i]));
+        }
+
+        if(num_streams > 1 && bandwidth < best_d2h_bandwidth * 0.85) {
+            break;
+        }
     }
 
-    double avg_d2h_time = total_d2h_time / d2h_iterations;
-    double d2h_bandwidth = (bytes / (1024.0 * 1024.0 * 1024.0)) / avg_d2h_time;
-
     printf("\n--- RESULTS for GPU Memory ---\n");
-    printf("GPU Write Bandwidth:  %.1f GB/s (avg over %d iterations)\n",
-           write_bandwidth, write_iterations);
-    printf("GPU Read Bandwidth:   %.1f GB/s (avg over %d iterations)\n",
-           read_bandwidth, read_iterations);
-    printf("Host->Device:         %.1f GB/s (avg over %d iterations)\n",
-           h2d_bandwidth, h2d_iterations);
-    printf("Device->Host:         %.1f GB/s (avg over %d iterations)\n",
-           d2h_bandwidth, d2h_iterations);
-    printf("Note: GPU memory bandwidth is effectively unlimited channels (massively parallel)\n");
+    printf("GPU Write Bandwidth:  %.1f GB/s (optimal: %d streams, %d configs tested)\n",
+           write_bandwidth, write_streams, write_iterations);
+    printf("GPU Read Bandwidth:   %.1f GB/s (optimal: %d streams, %d configs tested)\n",
+           read_bandwidth, read_streams, read_iterations);
+    printf("Host->Device:         %.1f GB/s (optimal: %d streams, %d configs tested)\n",
+           best_h2d_bandwidth, best_h2d_streams, h2d_iterations);
+    printf("Device->Host:         %.1f GB/s (optimal: %d streams, %d configs tested)\n",
+           best_d2h_bandwidth, best_d2h_streams, d2h_iterations);
 
     // Store results
     g_results.gpu_write_bandwidth = write_bandwidth;
     g_results.gpu_read_bandwidth = read_bandwidth;
-    g_results.gpu_h2d_bandwidth = h2d_bandwidth;
-    g_results.gpu_d2h_bandwidth = d2h_bandwidth;
+    g_results.gpu_h2d_bandwidth = best_h2d_bandwidth;
+    g_results.gpu_d2h_bandwidth = best_d2h_bandwidth;
     g_results.gpu_write_iterations = write_iterations;
     g_results.gpu_read_iterations = read_iterations;
     g_results.gpu_h2d_iterations = h2d_iterations;
     g_results.gpu_d2h_iterations = d2h_iterations;
+    g_results.gpu_write_streams = write_streams;
+    g_results.gpu_read_streams = read_streams;
+    g_results.gpu_h2d_streams = best_h2d_streams;
+    g_results.gpu_d2h_streams = best_d2h_streams;
 
+    // Cleanup
     free(h_data);
-    CUDA_CHECK(cudaFree(d_data));
-    CUDA_CHECK(cudaFree(d_temp));
+    for(int i = 0; i < max_streams; i++) {
+        CUDA_CHECK(cudaFree(d_arrays[i]));
+        CUDA_CHECK(cudaFree(d_temp_arrays[i]));
+    }
 }
 
 void print_summary_table() {
@@ -472,14 +577,14 @@ void print_summary_table() {
     printf("├─────────────────────────────────┬───────────────────┬───────────────┬───────────────┤\n");
     printf("│ Operation                       │ Bandwidth         │ Iterations    │ Channels      │\n");
     printf("├─────────────────────────────────┼───────────────────┼───────────────┼───────────────┤\n");
-    printf("│ GPU Kernel Write                │ %8.1f GB/s     │ %5d         │ Massively     │\n",
-           g_results.gpu_write_bandwidth, g_results.gpu_write_iterations);
-    printf("│ GPU Kernel Read                 │ %8.1f GB/s     │ %5d         │ Parallel      │\n",
-           g_results.gpu_read_bandwidth, g_results.gpu_read_iterations);
-    printf("│ Host to Device Transfer         │ %8.1f GB/s     │ %5d         │ (thousands+)  │\n",
-           g_results.gpu_h2d_bandwidth, g_results.gpu_h2d_iterations);
-    printf("│ Device to Host Transfer         │ %8.1f GB/s     │ %5d         │               │\n",
-           g_results.gpu_d2h_bandwidth, g_results.gpu_d2h_iterations);
+    printf("│ GPU Kernel Write                │ %8.1f GB/s     │ %5d         │ %5d streams │\n",
+           g_results.gpu_write_bandwidth, g_results.gpu_write_iterations, g_results.gpu_write_streams);
+    printf("│ GPU Kernel Read                 │ %8.1f GB/s     │ %5d         │ %5d streams │\n",
+           g_results.gpu_read_bandwidth, g_results.gpu_read_iterations, g_results.gpu_read_streams);
+    printf("│ Host to Device Transfer         │ %8.1f GB/s     │ %5d         │ %5d streams │\n",
+           g_results.gpu_h2d_bandwidth, g_results.gpu_h2d_iterations, g_results.gpu_h2d_streams);
+    printf("│ Device to Host Transfer         │ %8.1f GB/s     │ %5d         │ %5d streams │\n",
+           g_results.gpu_d2h_bandwidth, g_results.gpu_d2h_iterations, g_results.gpu_d2h_streams);
     printf("└─────────────────────────────────┴───────────────────┴───────────────┴───────────────┘\n\n");
 
     printf("┌───────────────────────────────────────────────────────────────────────────────────────┐\n");
@@ -536,7 +641,11 @@ void print_summary_table() {
     printf("│ • Use /ram/ for temporary files requiring fast I/O                                    │\n");
     printf("│ • Use /data/ for persistent storage                                                   │\n");
     printf("│                                                                                       │\n");
-    printf("│ Optimal Thread Counts:                                                                │\n");
+    printf("│ Optimal Channel Counts:                                                               │\n");
+    printf("│ • GPU operations: %d streams (write), %d streams (read)                               │\n",
+           g_results.gpu_write_streams, g_results.gpu_read_streams);
+    printf("│ • GPU transfers: %d streams (H2D), %d streams (D2H)                                   │\n",
+           g_results.gpu_h2d_streams, g_results.gpu_d2h_streams);
     printf("│ • /ram/ operations: %d threads (write), %d threads (read)                             │\n",
            g_results.ram_write_threads, g_results.ram_read_threads);
     printf("│ • /data/ operations: %d threads (write), %d threads (read)                            │\n",
@@ -564,7 +673,8 @@ int main(int argc, char** argv) {
     cudaDeviceProp prop;
     CUDA_CHECK(cudaGetDeviceProperties(&prop, 0));
     printf("Using GPU: %s\n", prop.name);
-    printf("GPU Memory: %.1f GB\n\n", prop.totalGlobalMem / (1024.0*1024.0*1024.0));
+    printf("GPU Memory: %.1f GB\n", prop.totalGlobalMem / (1024.0*1024.0*1024.0));
+    printf("Async Engine Count: %d\n\n", prop.asyncEngineCount);
 
     // Run benchmarks
     benchmark_gpu_memory();
