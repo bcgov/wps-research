@@ -13,7 +13,7 @@
 
 // Global variables for parfor
 size_t g_nr, g_nc, g_nb, g_np;
-float * g_d;
+float ** g_bands; // Array of pointers to band data
 str g_ifn;
 str g_hfn;
 vector<str> g_band_names;
@@ -23,10 +23,14 @@ pthread_mutex_t g_progress_mtx;
 size_t g_read_progress = 0;
 size_t g_write_progress = 0;
 
+void allocate_band(size_t i){
+  g_bands[i] = falloc(g_np);
+}
+
 void read_band(size_t i){
   // Seek to the correct position and read the band
   size_t offset = g_np * i * sizeof(float);
-  float * band_data = &g_d[g_np * i];
+  float * band_data = g_bands[i];
 
   // Use a temporary file pointer for thread-safe reading
   FILE * f = ropen(g_ifn);
@@ -83,7 +87,7 @@ void process_band(size_t i){
     size_t pixels_per_chunk = chunk_size / sizeof(float);
     size_t chunks = (g_np + pixels_per_chunk - 1) / pixels_per_chunk;
     size_t pixels_written = 0;
-    float * band_data = &g_d[g_np * i];
+    float * band_data = g_bands[i];
 
     for(size_t c = 0; c < chunks; c++){
       size_t pixels_to_write = (c == chunks - 1) ? (g_np - pixels_written) : pixels_per_chunk;
@@ -197,14 +201,17 @@ int main(int argc, char *argv[]){
   // Detect optimal I/O parallelism
   int io_channels = detect_io_channels(g_ifn);
 
-  // Allocate memory for all bands
-  size_t nf = g_nr * g_nc * g_nb;
-  g_d = falloc(nf);
+  // Allocate array of band pointers
+  g_bands = (float **)alloc(g_nb * sizeof(float *));
 
   // Initialize mutexes for parfor and progress tracking
   pthread_mutex_init(&print_mtx, NULL);
   pthread_mutex_init(&pt_nxt_j_mtx, NULL);
   pthread_mutex_init(&g_progress_mtx, NULL);
+
+  // Allocate memory for each band in parallel
+  cout << "\n=== Allocating memory in parallel ===" << endl;
+  parfor(0, g_nb, allocate_band, io_channels);
 
   // Read input data in parallel with detected I/O channel capacity
   cout << "\n=== Reading input file in parallel ===" << endl;
@@ -234,6 +241,11 @@ int main(int argc, char *argv[]){
 
   cout << "\nTotal time: " << total_time << " seconds" << endl;
 
-  free(g_d);
+  // Free memory
+  for(i = 0; i < g_nb; i++){
+    free(g_bands[i]);
+  }
+  free(g_bands);
+
   return 0;
 }
