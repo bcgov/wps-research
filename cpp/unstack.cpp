@@ -62,11 +62,17 @@ void read_band(size_t i){
 
 void process_band(size_t i){
   if(g_selected.size() < 1 || g_selected.count((int)(i + 1)) > 0){
-    str pre(g_ifn + str("_") + zero_pad(to_string(i + 1), 3));
-    if(g_use_bn) pre += (str("_") + g_band_names[i]);
+    // Extract last component of band name (after splitting on ":")
+    str band_name = g_band_names[i];
+    vector<str> band_parts = split(band_name, ':');
+    str band_suffix = band_parts[band_parts.size() - 1];
+    trim(band_suffix);
+    
+    // Build output filename with 3-digit prefix and band suffix
+    str pre(g_ifn + str("_") + zero_pad(to_string(i + 1), 3) + str("_") + band_suffix);
     str ofn(pre + str(".bin"));
     str ohn(pre + str(".hdr"));
-
+    
     // Chunked writing
     FILE * f = wopen(ofn.c_str());
     size_t chunk_size = 1024 * 1024; // 1MB chunks
@@ -74,7 +80,7 @@ void process_band(size_t i){
     size_t chunks = (g_np + pixels_per_chunk - 1) / pixels_per_chunk;
     size_t pixels_written = 0;
     float * band_data = &g_d[g_np * i];
-
+    
     for(size_t c = 0; c < chunks; c++){
       size_t pixels_to_write = (c == chunks - 1) ? (g_np - pixels_written) : pixels_per_chunk;
       size_t nw = fwrite(&band_data[pixels_written], sizeof(float), pixels_to_write, f);
@@ -86,14 +92,14 @@ void process_band(size_t i){
       pixels_written += nw;
     }
     fclose(f);
-
+    
     // Create band name with original band name appended
     str output_band_name = g_ifn + str(":") + g_band_names[i];
     vector<str> band_names_vec;
     band_names_vec.push_back(output_band_name);
-
+    
     hwrite(ohn, g_nr, g_nc, 1, 4, band_names_vec); // write with custom band name
-
+    
     str cmd(str("python3 ~/GitHub/wps-research/py/envi_header_copy_mapinfo.py ") +
             g_hfn + str(" ") +
             ohn);
@@ -101,7 +107,7 @@ void process_band(size_t i){
     if(ret != 0){
       cprint(str("Warning: mapinfo copy command failed for band ") + to_string(i + 1));
     }
-
+    
     // Update progress
     mtx_lock(&g_progress_mtx);
     g_write_progress++;
