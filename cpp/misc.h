@@ -414,7 +414,7 @@ void cprint(str s);
 // parfor stuff
 void set_thread_affinity(pthread_t thread, int cpuIndex);
 extern pthread_attr_t pt_attr; // specify threads joinable
-extern pthread_mutex_t pt_next_j_mtx;
+extern pthread_mutex_t pt_nxt_j_mtx;
 extern size_t pt_nxt_j;
 extern size_t pt_start_j;
 extern size_t pt_end_j;
