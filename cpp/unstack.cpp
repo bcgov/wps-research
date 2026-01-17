@@ -130,57 +130,6 @@ void process_band(size_t i){
   }
 }
 
-// Benchmark-based I/O channel detection
-int benchmark_io_channels(const str& filepath){
-  cout << "Benchmarking I/O channels..." << endl;
-
-  // Create a test file
-  str test_file = filepath + str(".io_test");
-  size_t test_size = 10 * 1024 * 1024; // 10 MB test
-  float * test_data = falloc(test_size / sizeof(float));
-
-  // Benchmark with different thread counts
-  int best_threads = 1;
-  double best_time = 1e9;
-
-  for(int threads = 1; threads <= 16; threads *= 2){
-    struct timeval start, end;
-    gettimeofday(&start, NULL);
-
-    // Write test
-    FILE * f = wopen(test_file);
-    fwrite(test_data, 1, test_size, f);
-    fclose(f);
-
-    // Read test with multiple threads simulated
-    for(int t = 0; t < threads; t++){
-      FILE * fr = ropen(test_file);
-      fread(test_data, 1, test_size / threads, fr);
-      fclose(fr);
-    }
-
-    gettimeofday(&end, NULL);
-    double elapsed = (end.tv_sec - start.tv_sec) + (end.tv_usec - start.tv_usec) / 1e6;
-
-    cout << "  " << threads << " threads: " << elapsed << " seconds" << endl;
-
-    if(elapsed < best_time){
-      best_time = elapsed;
-      best_threads = threads;
-    }
-    else if(elapsed > best_time * 1.2){
-      // Performance degraded, stop testing
-      break;
-    }
-  }
-
-  free(test_data);
-  remove(test_file.c_str());
-
-  cout << "Benchmark result: optimal I/O channels = " << best_threads << endl;
-  return best_threads;
-}
-
 // Detect storage type and return optimal number of concurrent I/O operations
 int detect_io_channels(const str& filepath){
   // Expand to absolute path
@@ -197,24 +146,24 @@ int detect_io_channels(const str& filepath){
     absolute_filepath = filepath;
   }
 
-  // Check if path starts with /ram/
+  // Check if path starts with /ram/ - if so, skip all other detection
   if(absolute_filepath.size() >= 5 && absolute_filepath.substr(0, 5) == str("/ram/")){
     cout << "Detected /ram/ path - using 16 threads" << endl;
     return 16;
   }
 
+  // Only continue with detection if not /ram/
   struct statvfs vfs;
   if(statvfs(absolute_filepath.c_str(), &vfs) != 0){
-    cout << "Warning: Could not detect filesystem type" << endl;
-    return benchmark_io_channels(absolute_filepath);
+    cout << "Warning: Could not detect filesystem type, defaulting to 2 threads" << endl;
+    return 2;
   }
 
   // Try to detect if this is a RAM disk or SSD/HDD
-  // Check if filesystem is in /dev/shm (RAM disk) or tmpfs
   str cmd = str("df -T ") + absolute_filepath + str(" 2>/dev/null | tail -1");
   str df_output = exec(cmd.c_str());
 
-  int io_channels = -1; // unknown
+  int io_channels = -1;
   str fs_type = "";
 
   if(df_output.size() > 0){
@@ -226,27 +175,21 @@ int detect_io_channels(const str& filepath){
       // RAM-based filesystems
       if(contains(fs_type, "tmpfs") || contains(fs_type, "ramfs") ||
          contains(df_output, "/dev/shm")){
-        io_channels = sysconf(_SC_NPROCESSORS_ONLN); // Use all cores for RAM
+        io_channels = sysconf(_SC_NPROCESSORS_ONLN);
         cout << "Detected RAM-based storage (" << fs_type << ")" << endl;
       }
-      // Check for SSD indicators
       else{
-        // Try to determine if it's SSD or HDD
-        // Extract device name
         str device = "";
         if(fields.size() >= 1){
           device = fields[0];
 
-          // Handle different device naming schemes
           str base_device = device;
           if(contains(device, "/dev/")){
             base_device = device.substr(device.rfind('/') + 1);
-            // Remove partition number to get base device
             size_t i = base_device.size() - 1;
             while(i > 0 && isdigit(base_device[i])) i--;
             if(i < base_device.size() - 1) base_device = base_device.substr(0, i + 1);
 
-            // Check rotational attribute (0 = SSD, 1 = HDD)
             str rot_file = str("/sys/block/") + base_device + str("/queue/rotational");
             if(exists(rot_file)){
               str rot_cmd = str("cat ") + rot_file + str(" 2>/dev/null");
@@ -254,11 +197,11 @@ int detect_io_channels(const str& filepath){
               trim(rotational);
 
               if(rotational == str("0")){
-                io_channels = 8; // SSD can handle more concurrent I/O
+                io_channels = 8;
                 cout << "Detected SSD storage" << endl;
               }
               else if(rotational == str("1")){
-                io_channels = 2; // HDD limited to 2 concurrent reads
+                io_channels = 2;
                 cout << "Detected HDD storage" << endl;
               }
             }
@@ -268,10 +211,9 @@ int detect_io_channels(const str& filepath){
     }
   }
 
-  // Fallback to benchmarking if detection failed
   if(io_channels == -1){
-    cout << "Could not detect storage type from system info" << endl;
-    io_channels = benchmark_io_channels(absolute_filepath);
+    cout << "Could not detect storage type, defaulting to 4 threads" << endl;
+    io_channels = 4;
   }
   else{
     cout << "Effective I/O channel capacity: " << io_channels << " concurrent operations" << endl;
@@ -293,8 +235,9 @@ int main(int argc, char *argv[]){
 
   g_ifn = str(argv[1]);
   g_hfn = hdr_fn(g_ifn);
-  hread(g_hfn, g_nr, g_nc, g_nb);
-  g_band_names = parse_band_names(g_hfn);
+
+  // Read header and band names in one call to avoid redundancy
+  hread(g_hfn, g_nr, g_nc, g_nb, g_band_names);
 
   /* don't include band names in output filenames
       if band names look like folders*/
