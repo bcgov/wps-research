@@ -6,7 +6,6 @@
 /* Band unstacking. Should revise this with band names now
 20220308 revised to accept specific bands only */
 #include"misc.h"
-#include <sys/statvfs.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <limits.h>
@@ -130,7 +129,7 @@ void process_band(size_t i){
   }
 }
 
-// Detect storage type and return optimal number of concurrent I/O operations
+// Simple thread count detection based on path
 int detect_io_channels(const str& filepath){
   // Expand to absolute path
   char abs_path[PATH_MAX];
@@ -146,80 +145,15 @@ int detect_io_channels(const str& filepath){
     absolute_filepath = filepath;
   }
 
-  // Check if path starts with /ram/ - if so, skip all other detection
+  // Check if path starts with /ram/
   if(absolute_filepath.size() >= 5 && absolute_filepath.substr(0, 5) == str("/ram/")){
-    cout << "Detected /ram/ path - using 16 threads" << endl;
-    return 16;
+    cout << "Detected /ram/ path - using 32 threads" << endl;
+    return 32;
   }
 
-  // Only continue with detection if not /ram/
-  struct statvfs vfs;
-  if(statvfs(absolute_filepath.c_str(), &vfs) != 0){
-    cout << "Warning: Could not detect filesystem type, defaulting to 2 threads" << endl;
-    return 2;
-  }
-
-  // Try to detect if this is a RAM disk or SSD/HDD
-  str cmd = str("df -T ") + absolute_filepath + str(" 2>/dev/null | tail -1");
-  str df_output = exec(cmd.c_str());
-
-  int io_channels = -1;
-  str fs_type = "";
-
-  if(df_output.size() > 0){
-    vector<str> fields = split(df_output, ' ');
-    if(fields.size() >= 2){
-      fs_type = fields[1];
-      lower(fs_type);
-
-      // RAM-based filesystems
-      if(contains(fs_type, "tmpfs") || contains(fs_type, "ramfs") ||
-         contains(df_output, "/dev/shm")){
-        io_channels = sysconf(_SC_NPROCESSORS_ONLN);
-        cout << "Detected RAM-based storage (" << fs_type << ")" << endl;
-      }
-      else{
-        str device = "";
-        if(fields.size() >= 1){
-          device = fields[0];
-
-          str base_device = device;
-          if(contains(device, "/dev/")){
-            base_device = device.substr(device.rfind('/') + 1);
-            size_t i = base_device.size() - 1;
-            while(i > 0 && isdigit(base_device[i])) i--;
-            if(i < base_device.size() - 1) base_device = base_device.substr(0, i + 1);
-
-            str rot_file = str("/sys/block/") + base_device + str("/queue/rotational");
-            if(exists(rot_file)){
-              str rot_cmd = str("cat ") + rot_file + str(" 2>/dev/null");
-              str rotational = exec(rot_cmd.c_str());
-              trim(rotational);
-
-              if(rotational == str("0")){
-                io_channels = 8;
-                cout << "Detected SSD storage" << endl;
-              }
-              else if(rotational == str("1")){
-                io_channels = 2;
-                cout << "Detected HDD storage" << endl;
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-
-  if(io_channels == -1){
-    cout << "Could not detect storage type, defaulting to 4 threads" << endl;
-    io_channels = 4;
-  }
-  else{
-    cout << "Effective I/O channel capacity: " << io_channels << " concurrent operations" << endl;
-  }
-
-  return io_channels;
+  // Default to 4 threads for all other cases
+  cout << "Using default 4 threads" << endl;
+  return 4;
 }
 
 int main(int argc, char *argv[]){
