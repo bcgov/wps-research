@@ -8,6 +8,7 @@
 #include"misc.h"
 #include <sys/statvfs.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 
 // Global variables for parfor
 size_t g_nr, g_nc, g_nb, g_np;
@@ -17,7 +18,9 @@ str g_hfn;
 vector<str> g_band_names;
 set<int> g_selected;
 bool g_use_bn;
-FILE * g_input_file;
+pthread_mutex_t g_progress_mtx;
+size_t g_read_progress = 0;
+size_t g_write_progress = 0;
 
 void read_band(size_t i){
   // Seek to the correct position and read the band
@@ -27,13 +30,34 @@ void read_band(size_t i){
   // Use a temporary file pointer for thread-safe reading
   FILE * f = ropen(g_ifn);
   fseek(f, offset, SEEK_SET);
-  size_t nr = fread(band_data, sizeof(float), g_np, f);
+
+  // Chunked reading for progress monitoring and better I/O
+  size_t chunk_size = 1024 * 1024; // 1MB chunks
+  size_t pixels_per_chunk = chunk_size / sizeof(float);
+  size_t chunks = (g_np + pixels_per_chunk - 1) / pixels_per_chunk;
+  size_t pixels_read = 0;
+
+  for(size_t c = 0; c < chunks; c++){
+    size_t pixels_to_read = (c == chunks - 1) ? (g_np - pixels_read) : pixels_per_chunk;
+    size_t nr = fread(&band_data[pixels_read], sizeof(float), pixels_to_read, f);
+    if(nr != pixels_to_read){
+      fclose(f);
+      cprint(str("Error reading band ") + to_string(i + 1) + str(" chunk ") + to_string(c));
+      err("read_band(): failed to read expected number of pixels");
+    }
+    pixels_read += nr;
+  }
+
   fclose(f);
 
-  if(nr != g_np){
-    cprint(str("Error reading band ") + to_string(i + 1));
-    err("read_band(): failed to read expected number of pixels");
+  // Update progress
+  mtx_lock(&g_progress_mtx);
+  g_read_progress++;
+  if(g_read_progress % 10 == 0 || g_read_progress == g_nb){
+    cout << "Read progress: " << g_read_progress << "/" << g_nb << " bands ("
+         << (100 * g_read_progress / g_nb) << "%)" << endl;
   }
+  mtx_unlock(&g_progress_mtx);
 }
 
 void process_band(size_t i){
@@ -42,8 +66,25 @@ void process_band(size_t i){
     if(g_use_bn) pre += (str("_") + g_band_names[i]);
     str ofn(pre + str(".bin"));
     str ohn(pre + str(".hdr"));
+
+    // Chunked writing
     FILE * f = wopen(ofn.c_str());
-    fwrite(&g_d[g_np * i], sizeof(float), g_np, f);
+    size_t chunk_size = 1024 * 1024; // 1MB chunks
+    size_t pixels_per_chunk = chunk_size / sizeof(float);
+    size_t chunks = (g_np + pixels_per_chunk - 1) / pixels_per_chunk;
+    size_t pixels_written = 0;
+    float * band_data = &g_d[g_np * i];
+
+    for(size_t c = 0; c < chunks; c++){
+      size_t pixels_to_write = (c == chunks - 1) ? (g_np - pixels_written) : pixels_per_chunk;
+      size_t nw = fwrite(&band_data[pixels_written], sizeof(float), pixels_to_write, f);
+      if(nw != pixels_to_write){
+        fclose(f);
+        cprint(str("Error writing band ") + to_string(i + 1) + str(" chunk ") + to_string(c));
+        err("process_band(): failed to write expected number of pixels");
+      }
+      pixels_written += nw;
+    }
     fclose(f);
 
     // Create band name with original band name appended
@@ -56,17 +97,85 @@ void process_band(size_t i){
     str cmd(str("python3 ~/GitHub/wps-research/py/envi_header_copy_mapinfo.py ") +
             g_hfn + str(" ") +
             ohn);
-    cout << cmd << endl;
-    system(cmd.c_str());
+    int ret = system(cmd.c_str());
+    if(ret != 0){
+      cprint(str("Warning: mapinfo copy command failed for band ") + to_string(i + 1));
+    }
+
+    // Update progress
+    mtx_lock(&g_progress_mtx);
+    g_write_progress++;
+    if(g_write_progress % 10 == 0 || g_write_progress == g_nb){
+      cout << "Write progress: " << g_write_progress << "/" << g_nb << " bands ("
+           << (100 * g_write_progress / g_nb) << "%)" << endl;
+    }
+    mtx_unlock(&g_progress_mtx);
   }
+  else{
+    // Update progress even for skipped bands
+    mtx_lock(&g_progress_mtx);
+    g_write_progress++;
+    mtx_unlock(&g_progress_mtx);
+  }
+}
+
+// Benchmark-based I/O channel detection
+int benchmark_io_channels(const str& filepath){
+  cout << "Benchmarking I/O channels..." << endl;
+
+  // Create a test file
+  str test_file = filepath + str(".io_test");
+  size_t test_size = 10 * 1024 * 1024; // 10 MB test
+  float * test_data = falloc(test_size / sizeof(float));
+
+  // Benchmark with different thread counts
+  int best_threads = 1;
+  double best_time = 1e9;
+
+  for(int threads = 1; threads <= 16; threads *= 2){
+    struct timeval start, end;
+    gettimeofday(&start, NULL);
+
+    // Write test
+    FILE * f = wopen(test_file);
+    fwrite(test_data, 1, test_size, f);
+    fclose(f);
+
+    // Read test with multiple threads simulated
+    for(int t = 0; t < threads; t++){
+      FILE * fr = ropen(test_file);
+      fread(test_data, 1, test_size / threads, fr);
+      fclose(fr);
+    }
+
+    gettimeofday(&end, NULL);
+    double elapsed = (end.tv_sec - start.tv_sec) + (end.tv_usec - start.tv_usec) / 1e6;
+
+    cout << "  " << threads << " threads: " << elapsed << " seconds" << endl;
+
+    if(elapsed < best_time){
+      best_time = elapsed;
+      best_threads = threads;
+    }
+    else if(elapsed > best_time * 1.2){
+      // Performance degraded, stop testing
+      break;
+    }
+  }
+
+  free(test_data);
+  remove(test_file.c_str());
+
+  cout << "Benchmark result: optimal I/O channels = " << best_threads << endl;
+  return best_threads;
 }
 
 // Detect storage type and return optimal number of concurrent I/O operations
 int detect_io_channels(const str& filepath){
   struct statvfs vfs;
   if(statvfs(filepath.c_str(), &vfs) != 0){
-    cout << "Warning: Could not detect filesystem type, defaulting to 2 I/O channels" << endl;
-    return 2;
+    cout << "Warning: Could not detect filesystem type" << endl;
+    return benchmark_io_channels(filepath);
   }
 
   // Try to detect if this is a RAM disk or SSD/HDD
@@ -74,7 +183,7 @@ int detect_io_channels(const str& filepath){
   str cmd = str("df -T ") + filepath + str(" 2>/dev/null | tail -1");
   str df_output = exec(cmd.c_str());
 
-  int io_channels = 2; // default for HDD
+  int io_channels = -1; // unknown
   str fs_type = "";
 
   if(df_output.size() > 0){
@@ -96,38 +205,47 @@ int detect_io_channels(const str& filepath){
         str device = "";
         if(fields.size() >= 1){
           device = fields[0];
-          // Remove partition number to get base device
-          size_t i = device.size() - 1;
-          while(i > 0 && isdigit(device[i])) i--;
-          device = device.substr(0, i + 1);
 
-          // Check rotational attribute (0 = SSD, 1 = HDD)
-          str rot_file = str("/sys/block/") + device.substr(device.rfind('/') + 1) + str("/queue/rotational");
-          if(exists(rot_file)){
-            str rot_cmd = str("cat ") + rot_file + str(" 2>/dev/null");
-            str rotational = exec(rot_cmd.c_str());
-            trim(rotational);
+          // Handle different device naming schemes
+          str base_device = device;
+          if(contains(device, "/dev/")){
+            base_device = device.substr(device.rfind('/') + 1);
+            // Remove partition number to get base device
+            size_t i = base_device.size() - 1;
+            while(i > 0 && isdigit(base_device[i])) i--;
+            if(i < base_device.size() - 1) base_device = base_device.substr(0, i + 1);
 
-            if(rotational == str("0")){
-              io_channels = 8; // SSD can handle more concurrent I/O
-              cout << "Detected SSD storage" << endl;
+            // Check rotational attribute (0 = SSD, 1 = HDD)
+            str rot_file = str("/sys/block/") + base_device + str("/queue/rotational");
+            if(exists(rot_file)){
+              str rot_cmd = str("cat ") + rot_file + str(" 2>/dev/null");
+              str rotational = exec(rot_cmd.c_str());
+              trim(rotational);
+
+              if(rotational == str("0")){
+                io_channels = 8; // SSD can handle more concurrent I/O
+                cout << "Detected SSD storage" << endl;
+              }
+              else if(rotational == str("1")){
+                io_channels = 2; // HDD limited to 2 concurrent reads
+                cout << "Detected HDD storage" << endl;
+              }
             }
-            else{
-              io_channels = 2; // HDD limited to 2 concurrent reads
-              cout << "Detected HDD storage" << endl;
-            }
-          }
-          else{
-            // Fallback: assume SSD if we can't determine
-            io_channels = 4;
-            cout << "Storage type uncertain, using moderate parallelism" << endl;
           }
         }
       }
     }
   }
 
-  cout << "Effective I/O channel capacity: " << io_channels << " concurrent operations" << endl;
+  // Fallback to benchmarking if detection failed
+  if(io_channels == -1){
+    cout << "Could not detect storage type from system info" << endl;
+    io_channels = benchmark_io_channels(filepath);
+  }
+  else{
+    cout << "Effective I/O channel capacity: " << io_channels << " concurrent operations" << endl;
+  }
+
   return io_channels;
 }
 
@@ -171,17 +289,34 @@ int main(int argc, char *argv[]){
   size_t nf = g_nr * g_nc * g_nb;
   g_d = falloc(nf);
 
-  // Initialize mutexes for parfor
+  // Initialize mutexes for parfor and progress tracking
   pthread_mutex_init(&print_mtx, NULL);
   pthread_mutex_init(&pt_nxt_j_mtx, NULL);
+  pthread_mutex_init(&g_progress_mtx, NULL);
 
   // Read input data in parallel with detected I/O channel capacity
-  cout << "Reading input file in parallel..." << endl;
+  cout << "\n=== Reading input file in parallel ===" << endl;
+  g_read_progress = 0;
+  struct timeval read_start, read_end;
+  gettimeofday(&read_start, NULL);
   parfor(0, g_nb, read_band, io_channels);
+  gettimeofday(&read_end, NULL);
+  double read_time = (read_end.tv_sec - read_start.tv_sec) +
+                     (read_end.tv_usec - read_start.tv_usec) / 1e6;
+  cout << "Read complete: " << g_nb << " bands in " << read_time << " seconds" << endl;
 
   // Write output bands in parallel with detected I/O channel capacity
-  cout << "Writing output files in parallel..." << endl;
+  cout << "\n=== Writing output files in parallel ===" << endl;
+  g_write_progress = 0;
+  struct timeval write_start, write_end;
+  gettimeofday(&write_start, NULL);
   parfor(0, g_nb, process_band, io_channels);
+  gettimeofday(&write_end, NULL);
+  double write_time = (write_end.tv_sec - write_start.tv_sec) +
+                      (write_end.tv_usec - write_start.tv_usec) / 1e6;
+  cout << "Write complete: " << g_nb << " bands in " << write_time << " seconds" << endl;
+
+  cout << "\nTotal time: " << (read_time + write_time) << " seconds" << endl;
 
   free(g_d);
   return 0;
