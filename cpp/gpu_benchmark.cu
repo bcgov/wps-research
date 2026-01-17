@@ -5,6 +5,10 @@
    
    gpu_benchmark.cu - Benchmark GPU memory, RAM disk, and filesystem I/O
    Measures data transfer rates and optimal channel capacity */
+
+/* gpu_benchmark.cu - Benchmark GPU memory, RAM disk, and filesystem I/O
+   Measures data transfer rates and optimal channel capacity */
+
 #include <cuda_runtime.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,6 +31,33 @@
 #define GPU_TEST_SIZE (1024*1024*1024)  // 1GB for GPU
 #define DISK_TEST_SIZE (512*1024*1024)  // 512MB for disk tests
 #define MAX_THREADS 32
+
+// Structure to hold benchmark results
+typedef struct {
+    // GPU results
+    double gpu_write_bandwidth;
+    double gpu_read_bandwidth;
+    double gpu_h2d_bandwidth;
+    double gpu_d2h_bandwidth;
+    int gpu_write_iterations;
+    int gpu_read_iterations;
+    int gpu_h2d_iterations;
+    int gpu_d2h_iterations;
+    
+    // /ram/ results
+    double ram_write_speed;
+    int ram_write_threads;
+    double ram_read_speed;
+    int ram_read_threads;
+    
+    // /data/ results
+    double data_write_speed;
+    int data_write_threads;
+    double data_read_speed;
+    int data_read_threads;
+} benchmark_results;
+
+benchmark_results g_results;
 
 // Global variables for threaded I/O
 typedef struct {
@@ -123,7 +154,7 @@ void* read_thread_func(void* args) {
 }
 
 // Benchmark disk I/O with varying thread counts
-void benchmark_disk_io(const char* path) {
+void benchmark_disk_io(const char* path, int is_ram) {
     printf("\n========================================\n");
     printf("Benchmarking: %s\n", path);
     printf("========================================\n");
@@ -241,6 +272,19 @@ void benchmark_disk_io(const char* path) {
     printf("\n--- RESULTS for %s ---\n", path);
     printf("Optimal WRITE: %d threads @ %.1f MB/s\n", best_write_threads, best_write_speed);
     printf("Optimal READ:  %d threads @ %.1f MB/s\n", best_read_threads, best_read_speed);
+    
+    // Store results
+    if(is_ram) {
+        g_results.ram_write_speed = best_write_speed;
+        g_results.ram_write_threads = best_write_threads;
+        g_results.ram_read_speed = best_read_speed;
+        g_results.ram_read_threads = best_read_threads;
+    } else {
+        g_results.data_write_speed = best_write_speed;
+        g_results.data_write_threads = best_write_threads;
+        g_results.data_read_speed = best_read_speed;
+        g_results.data_read_threads = best_read_threads;
+    }
 }
 
 // GPU memory benchmark kernel
@@ -385,12 +429,109 @@ void benchmark_gpu_memory() {
            d2h_bandwidth, d2h_iterations);
     printf("Note: GPU memory bandwidth is effectively unlimited channels (massively parallel)\n");
     
+    // Store results
+    g_results.gpu_write_bandwidth = write_bandwidth;
+    g_results.gpu_read_bandwidth = read_bandwidth;
+    g_results.gpu_h2d_bandwidth = h2d_bandwidth;
+    g_results.gpu_d2h_bandwidth = d2h_bandwidth;
+    g_results.gpu_write_iterations = write_iterations;
+    g_results.gpu_read_iterations = read_iterations;
+    g_results.gpu_h2d_iterations = h2d_iterations;
+    g_results.gpu_d2h_iterations = d2h_iterations;
+    
     free(h_data);
     CUDA_CHECK(cudaFree(d_data));
     CUDA_CHECK(cudaFree(d_temp));
 }
 
+void print_summary_table() {
+    printf("\n\n");
+    printf("================================================================================\n");
+    printf("                        BENCHMARK SUMMARY TABLE                                 \n");
+    printf("================================================================================\n\n");
+    
+    printf("┌─────────────────────────────────────────────────────────────────────────────┐\n");
+    printf("│ GPU MEMORY PERFORMANCE                                                      │\n");
+    printf("├─────────────────────────────────┬───────────────────┬───────────────────────┤\n");
+    printf("│ Operation                       │ Bandwidth         │ Iterations            │\n");
+    printf("├─────────────────────────────────┼───────────────────┼───────────────────────┤\n");
+    printf("│ GPU Kernel Write                │ %8.1f GB/s     │ %5d                 │\n", 
+           g_results.gpu_write_bandwidth, g_results.gpu_write_iterations);
+    printf("│ GPU Kernel Read                 │ %8.1f GB/s     │ %5d                 │\n", 
+           g_results.gpu_read_bandwidth, g_results.gpu_read_iterations);
+    printf("│ Host to Device Transfer         │ %8.1f GB/s     │ %5d                 │\n", 
+           g_results.gpu_h2d_bandwidth, g_results.gpu_h2d_iterations);
+    printf("│ Device to Host Transfer         │ %8.1f GB/s     │ %5d                 │\n", 
+           g_results.gpu_d2h_bandwidth, g_results.gpu_d2h_iterations);
+    printf("└─────────────────────────────────┴───────────────────┴───────────────────────┘\n");
+    printf("  Note: GPU has massively parallel architecture (thousands of concurrent ops)\n\n");
+    
+    printf("┌─────────────────────────────────────────────────────────────────────────────┐\n");
+    printf("│ RAMDISK PERFORMANCE (/ram/)                                                 │\n");
+    printf("├─────────────────────────────────┬───────────────────┬───────────────────────┤\n");
+    printf("│ Operation                       │ Speed             │ Optimal Channels      │\n");
+    printf("├─────────────────────────────────┼───────────────────┼───────────────────────┤\n");
+    printf("│ Write                           │ %8.1f MB/s     │ %5d threads         │\n", 
+           g_results.ram_write_speed, g_results.ram_write_threads);
+    printf("│ Read                            │ %8.1f MB/s     │ %5d threads         │\n", 
+           g_results.ram_read_speed, g_results.ram_read_threads);
+    printf("└─────────────────────────────────┴───────────────────┴───────────────────────┘\n\n");
+    
+    printf("┌─────────────────────────────────────────────────────────────────────────────┐\n");
+    printf("│ FILESYSTEM PERFORMANCE (/data/)                                             │\n");
+    printf("├─────────────────────────────────┬───────────────────┬───────────────────────┤\n");
+    printf("│ Operation                       │ Speed             │ Optimal Channels      │\n");
+    printf("├─────────────────────────────────┼───────────────────┼───────────────────────┤\n");
+    printf("│ Write                           │ %8.1f MB/s     │ %5d threads         │\n", 
+           g_results.data_write_speed, g_results.data_write_threads);
+    printf("│ Read                            │ %8.1f MB/s     │ %5d threads         │\n", 
+           g_results.data_read_speed, g_results.data_read_threads);
+    printf("└─────────────────────────────────┴───────────────────┴───────────────────────┘\n\n");
+    
+    printf("┌─────────────────────────────────────────────────────────────────────────────┐\n");
+    printf("│ COMPARATIVE ANALYSIS                                                        │\n");
+    printf("├─────────────────────────────────────────────────────────────────────────────┤\n");
+    
+    // Convert to same units (GB/s) for comparison
+    double ram_write_gbs = g_results.ram_write_speed / 1024.0;
+    double ram_read_gbs = g_results.ram_read_speed / 1024.0;
+    double data_write_gbs = g_results.data_write_speed / 1024.0;
+    double data_read_gbs = g_results.data_read_speed / 1024.0;
+    
+    printf("│ GPU vs RAM Write Speed:          GPU is %.1fx faster                        │\n",
+           g_results.gpu_write_bandwidth / ram_write_gbs);
+    printf("│ GPU vs Disk Write Speed:         GPU is %.1fx faster                        │\n",
+           g_results.gpu_write_bandwidth / data_write_gbs);
+    printf("│ RAM vs Disk Write Speed:         RAM is %.1fx faster                        │\n",
+           ram_write_gbs / data_write_gbs);
+    printf("│                                                                             │\n");
+    printf("│ GPU vs RAM Read Speed:           GPU is %.1fx faster                        │\n",
+           g_results.gpu_read_bandwidth / ram_read_gbs);
+    printf("│ GPU vs Disk Read Speed:          GPU is %.1fx faster                        │\n",
+           g_results.gpu_read_bandwidth / data_read_gbs);
+    printf("│ RAM vs Disk Read Speed:          RAM is %.1fx faster                        │\n",
+           ram_read_gbs / data_read_gbs);
+    printf("└─────────────────────────────────────────────────────────────────────────────┘\n\n");
+    
+    printf("┌─────────────────────────────────────────────────────────────────────────────┐\n");
+    printf("│ RECOMMENDATIONS                                                             │\n");
+    printf("├─────────────────────────────────────────────────────────────────────────────┤\n");
+    printf("│ • Use GPU memory for compute-intensive operations (best bandwidth)          │\n");
+    printf("│ • Use /ram/ for temporary files requiring fast I/O                          │\n");
+    printf("│ • Use /data/ for persistent storage                                         │\n");
+    printf("│                                                                             │\n");
+    printf("│ Optimal Thread Counts:                                                      │\n");
+    printf("│ • /ram/ operations: %d threads                                              │\n",
+           (g_results.ram_read_threads + g_results.ram_write_threads) / 2);
+    printf("│ • /data/ operations: %d threads                                             │\n",
+           (g_results.data_read_threads + g_results.data_write_threads) / 2);
+    printf("└─────────────────────────────────────────────────────────────────────────────┘\n");
+}
+
 int main(int argc, char** argv) {
+    // Initialize results structure
+    memset(&g_results, 0, sizeof(benchmark_results));
+    
     printf("GPU and Disk I/O Benchmark\n");
     printf("Test size: GPU=%d MB, Disk=%d MB\n", 
            GPU_TEST_SIZE/(1024*1024), DISK_TEST_SIZE/(1024*1024));
@@ -411,8 +552,11 @@ int main(int argc, char** argv) {
     
     // Run benchmarks
     benchmark_gpu_memory();
-    benchmark_disk_io("/ram");
-    benchmark_disk_io("/data");
+    benchmark_disk_io("/ram", 1);
+    benchmark_disk_io("/data", 0);
+    
+    // Print comprehensive summary table
+    print_summary_table();
     
     printf("\n========================================\n");
     printf("Benchmark Complete\n");
