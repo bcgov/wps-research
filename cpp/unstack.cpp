@@ -67,15 +67,15 @@ void process_band(size_t i){
     vector<str> band_parts = split(band_name, ':');
     str band_suffix = band_parts[band_parts.size() - 1];
     trim(band_suffix);
-    
+
     // Replace spaces with underscores in band suffix
     std::replace(band_suffix.begin(), band_suffix.end(), ' ', '_');
-    
+
     // Build output filename with 3-digit prefix and band suffix
     str pre(g_ifn + str("_") + zero_pad(to_string(i + 1), 3) + str("_") + band_suffix);
     str ofn(pre + str(".bin"));
     str ohn(pre + str(".hdr"));
-    
+
     // Chunked writing
     FILE * f = wopen(ofn.c_str());
     size_t chunk_size = 1024 * 1024; // 1MB chunks
@@ -83,7 +83,7 @@ void process_band(size_t i){
     size_t chunks = (g_np + pixels_per_chunk - 1) / pixels_per_chunk;
     size_t pixels_written = 0;
     float * band_data = &g_d[g_np * i];
-    
+
     for(size_t c = 0; c < chunks; c++){
       size_t pixels_to_write = (c == chunks - 1) ? (g_np - pixels_written) : pixels_per_chunk;
       size_t nw = fwrite(&band_data[pixels_written], sizeof(float), pixels_to_write, f);
@@ -95,14 +95,14 @@ void process_band(size_t i){
       pixels_written += nw;
     }
     fclose(f);
-    
+
     // Create band name with original band name appended
     str output_band_name = g_ifn + str(":") + g_band_names[i];
     vector<str> band_names_vec;
     band_names_vec.push_back(output_band_name);
-    
+
     hwrite(ohn, g_nr, g_nc, 1, 4, band_names_vec); // write with custom band name
-    
+
     str cmd(str("python3 ~/GitHub/wps-research/py/envi_header_copy_mapinfo.py ") +
             g_hfn + str(" ") +
             ohn);
@@ -110,7 +110,7 @@ void process_band(size_t i){
     if(ret != 0){
       cprint(str("Warning: mapinfo copy command failed for band ") + to_string(i + 1));
     }
-    
+
     // Update progress
     mtx_lock(&g_progress_mtx);
     g_write_progress++;
@@ -127,6 +127,7 @@ void process_band(size_t i){
     mtx_unlock(&g_progress_mtx);
   }
 }
+
 // Benchmark-based I/O channel detection
 int benchmark_io_channels(const str& filepath){
   cout << "Benchmarking I/O channels..." << endl;
@@ -180,6 +181,12 @@ int benchmark_io_channels(const str& filepath){
 
 // Detect storage type and return optimal number of concurrent I/O operations
 int detect_io_channels(const str& filepath){
+  // Check if path starts with /ram/
+  if(filepath.size() >= 5 && filepath.substr(0, 5) == str("/ram/")){
+    cout << "Detected /ram/ path - using 16 threads" << endl;
+    return 16;
+  }
+
   struct statvfs vfs;
   if(statvfs(filepath.c_str(), &vfs) != 0){
     cout << "Warning: Could not detect filesystem type" << endl;
@@ -258,6 +265,10 @@ int detect_io_channels(const str& filepath){
 }
 
 int main(int argc, char *argv[]){
+  // Start total time measurement
+  struct timeval total_start, total_end;
+  gettimeofday(&total_start, NULL);
+
   if(argc < 2){
     err("unstack [input data file] [optional arg: band 1-ix] ... [optional: band 1-ix]");
   }
@@ -324,7 +335,11 @@ int main(int argc, char *argv[]){
                       (write_end.tv_usec - write_start.tv_usec) / 1e6;
   cout << "Write complete: " << g_nb << " bands in " << write_time << " seconds" << endl;
 
-  cout << "\nTotal time: " << (read_time + write_time) << " seconds" << endl;
+  gettimeofday(&total_end, NULL);
+  double total_time = (total_end.tv_sec - total_start.tv_sec) +
+                      (total_end.tv_usec - total_start.tv_usec) / 1e6;
+
+  cout << "\nTotal time: " << total_time << " seconds" << endl;
 
   free(g_d);
   return 0;
