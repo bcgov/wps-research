@@ -68,6 +68,9 @@ void process_band(size_t i){
     str band_suffix = band_parts[band_parts.size() - 1];
     trim(band_suffix);
     
+    // Replace spaces with underscores in band suffix
+    std::replace(band_suffix.begin(), band_suffix.end(), ' ', '_');
+    
     // Build output filename with 3-digit prefix and band suffix
     str pre(g_ifn + str("_") + zero_pad(to_string(i + 1), 3) + str("_") + band_suffix);
     str ofn(pre + str(".bin"));
@@ -124,7 +127,6 @@ void process_band(size_t i){
     mtx_unlock(&g_progress_mtx);
   }
 }
-
 // Benchmark-based I/O channel detection
 int benchmark_io_channels(const str& filepath){
   cout << "Benchmarking I/O channels..." << endl;
