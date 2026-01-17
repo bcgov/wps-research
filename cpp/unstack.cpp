@@ -6,6 +6,8 @@
 /* Band unstacking. Should revise this with band names now
 20220308 revised to accept specific bands only */
 #include"misc.h"
+#include <sys/statvfs.h>
+#include <sys/stat.h>
 
 // Global variables for parfor
 size_t g_nr, g_nc, g_nb, g_np;
@@ -15,6 +17,24 @@ str g_hfn;
 vector<str> g_band_names;
 set<int> g_selected;
 bool g_use_bn;
+FILE * g_input_file;
+
+void read_band(size_t i){
+  // Seek to the correct position and read the band
+  size_t offset = g_np * i * sizeof(float);
+  float * band_data = &g_d[g_np * i];
+
+  // Use a temporary file pointer for thread-safe reading
+  FILE * f = ropen(g_ifn);
+  fseek(f, offset, SEEK_SET);
+  size_t nr = fread(band_data, sizeof(float), g_np, f);
+  fclose(f);
+
+  if(nr != g_np){
+    cprint(str("Error reading band ") + to_string(i + 1));
+    err("read_band(): failed to read expected number of pixels");
+  }
+}
 
 void process_band(size_t i){
   if(g_selected.size() < 1 || g_selected.count((int)(i + 1)) > 0){
@@ -39,6 +59,76 @@ void process_band(size_t i){
     cout << cmd << endl;
     system(cmd.c_str());
   }
+}
+
+// Detect storage type and return optimal number of concurrent I/O operations
+int detect_io_channels(const str& filepath){
+  struct statvfs vfs;
+  if(statvfs(filepath.c_str(), &vfs) != 0){
+    cout << "Warning: Could not detect filesystem type, defaulting to 2 I/O channels" << endl;
+    return 2;
+  }
+
+  // Try to detect if this is a RAM disk or SSD/HDD
+  // Check if filesystem is in /dev/shm (RAM disk) or tmpfs
+  str cmd = str("df -T ") + filepath + str(" 2>/dev/null | tail -1");
+  str df_output = exec(cmd.c_str());
+
+  int io_channels = 2; // default for HDD
+  str fs_type = "";
+
+  if(df_output.size() > 0){
+    vector<str> fields = split(df_output, ' ');
+    if(fields.size() >= 2){
+      fs_type = fields[1];
+      lower(fs_type);
+
+      // RAM-based filesystems
+      if(contains(fs_type, "tmpfs") || contains(fs_type, "ramfs") ||
+         contains(df_output, "/dev/shm")){
+        io_channels = sysconf(_SC_NPROCESSORS_ONLN); // Use all cores for RAM
+        cout << "Detected RAM-based storage (" << fs_type << ")" << endl;
+      }
+      // Check for SSD indicators
+      else{
+        // Try to determine if it's SSD or HDD
+        // Extract device name
+        str device = "";
+        if(fields.size() >= 1){
+          device = fields[0];
+          // Remove partition number to get base device
+          size_t i = device.size() - 1;
+          while(i > 0 && isdigit(device[i])) i--;
+          device = device.substr(0, i + 1);
+
+          // Check rotational attribute (0 = SSD, 1 = HDD)
+          str rot_file = str("/sys/block/") + device.substr(device.rfind('/') + 1) + str("/queue/rotational");
+          if(exists(rot_file)){
+            str rot_cmd = str("cat ") + rot_file + str(" 2>/dev/null");
+            str rotational = exec(rot_cmd.c_str());
+            trim(rotational);
+
+            if(rotational == str("0")){
+              io_channels = 8; // SSD can handle more concurrent I/O
+              cout << "Detected SSD storage" << endl;
+            }
+            else{
+              io_channels = 2; // HDD limited to 2 concurrent reads
+              cout << "Detected HDD storage" << endl;
+            }
+          }
+          else{
+            // Fallback: assume SSD if we can't determine
+            io_channels = 4;
+            cout << "Storage type uncertain, using moderate parallelism" << endl;
+          }
+        }
+      }
+    }
+  }
+
+  cout << "Effective I/O channel capacity: " << io_channels << " concurrent operations" << endl;
+  return io_channels;
 }
 
 int main(int argc, char *argv[]){
@@ -74,13 +164,24 @@ int main(int argc, char *argv[]){
     }
   }
 
-  g_d = bread(g_ifn, g_nr, g_nc, g_nb); // read input data
+  // Detect optimal I/O parallelism
+  int io_channels = detect_io_channels(g_ifn);
+
+  // Allocate memory for all bands
+  size_t nf = g_nr * g_nc * g_nb;
+  g_d = falloc(nf);
 
   // Initialize mutexes for parfor
   pthread_mutex_init(&print_mtx, NULL);
   pthread_mutex_init(&pt_nxt_j_mtx, NULL);
 
-  parfor(0, g_nb, process_band);
+  // Read input data in parallel with detected I/O channel capacity
+  cout << "Reading input file in parallel..." << endl;
+  parfor(0, g_nb, read_band, io_channels);
+
+  // Write output bands in parallel with detected I/O channel capacity
+  cout << "Writing output files in parallel..." << endl;
+  parfor(0, g_nb, process_band, io_channels);
 
   free(g_d);
   return 0;
