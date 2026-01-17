@@ -8,6 +8,7 @@
 #include"misc.h"
 #include<glob.h>
 #include<unistd.h>
+#include<sys/stat.h>
 
 // Global variables for parfor
 vector<str> g_files_to_delete;
