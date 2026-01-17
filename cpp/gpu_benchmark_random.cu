@@ -575,7 +575,7 @@ void benchmark_ramdisk() {
     free(random_offsets);
     unlink(filename);
 }
-
+/*
 void print_summary_table() {
     printf("\n\n");
     printf("================================================================================\n");
@@ -642,6 +642,74 @@ void print_summary_table() {
     printf("│   • RAM: Consider larger block sizes for random I/O to reduce overhead               │\n");
     printf("└───────────────────────────────────────────────────────────────────────────────────────┘\n");
 }
+*/
+void print_summary_table() {
+    printf("\n\n");
+    printf("================================================================================\n");
+    printf("                    SEQUENTIAL vs RANDOM ACCESS COMPARISON                     \n");
+    printf("================================================================================\n\n");
+    
+    printf("┌───────────────────────────────────────────────────────────────────────────────────────┐\n");
+    printf("│ GPU MEMORY PERFORMANCE                                                                │\n");
+    printf("├─────────────────────┬─────────────┬─────────────┬──────────────┬───────────────────┤\n");
+    printf("│ Access Pattern      │ Operation   │ Bandwidth   │ Streams      │ Slowdown Factor   │\n");
+    printf("├─────────────────────┼─────────────┼─────────────┼──────────────┼───────────────────┤\n");
+    printf("│ Sequential          │ Write       │ %8.1f GB/s│ %5d        │ baseline          │\n",
+           g_results.gpu_seq_write_bandwidth, g_results.gpu_seq_write_streams);
+    printf("│ Random              │ Write       │ %8.1f GB/s│ %5d        │ %.1fx slower       │\n",
+           g_results.gpu_rand_write_bandwidth, g_results.gpu_rand_write_streams,
+           g_results.gpu_seq_write_bandwidth / g_results.gpu_rand_write_bandwidth);
+    printf("│ Sequential          │ Read        │ %8.1f GB/s│ %5d        │ baseline          │\n",
+           g_results.gpu_seq_read_bandwidth, g_results.gpu_seq_read_streams);
+    printf("│ Random              │ Read        │ %8.1f GB/s│ %5d        │ %.1fx slower       │\n",
+           g_results.gpu_rand_read_bandwidth, g_results.gpu_rand_read_streams,
+           g_results.gpu_seq_read_bandwidth / g_results.gpu_rand_read_bandwidth);
+    printf("└─────────────────────┴─────────────┴─────────────┴──────────────┴───────────────────┘\n\n");
+    
+    printf("┌───────────────────────────────────────────────────────────────────────────────────────┐\n");
+    printf("│ RAMDISK PERFORMANCE (/ram/)                                                           │\n");
+    printf("├─────────────────────┬─────────────┬─────────────┬──────────────┬───────────────────┤\n");
+    printf("│ Access Pattern      │ Operation   │ Bandwidth   │ Threads      │ Slowdown Factor   │\n");
+    printf("├─────────────────────┼─────────────┼─────────────┼──────────────┼───────────────────┤\n");
+    printf("│ Sequential          │ Write       │ %8.2f GB/s│ %5d        │ baseline          │\n",
+           g_results.ram_seq_write_speed / 1024.0, g_results.ram_seq_write_threads);
+    printf("│ Random (4KB)        │ Write       │ %8.2f GB/s│ %5d        │ %.1fx slower       │\n",
+           g_results.ram_rand_write_speed / 1024.0, g_results.ram_rand_write_threads,
+           g_results.ram_seq_write_speed / g_results.ram_rand_write_speed);
+    printf("│ Sequential          │ Read        │ %8.2f GB/s│ %5d        │ baseline          │\n",
+           g_results.ram_seq_read_speed / 1024.0, g_results.ram_seq_read_threads);
+    printf("│ Random (4KB)        │ Read        │ %8.2f GB/s│ %5d        │ %.1fx slower       │\n",
+           g_results.ram_rand_read_speed / 1024.0, g_results.ram_rand_read_threads,
+           g_results.ram_seq_read_speed / g_results.ram_rand_read_speed);
+    printf("└─────────────────────┴─────────────┴─────────────┴──────────────┴───────────────────┘\n\n");
+    
+    printf("┌───────────────────────────────────────────────────────────────────────────────────────┐\n");
+    printf("│ KEY INSIGHTS                                                                          │\n");
+    printf("├───────────────────────────────────────────────────────────────────────────────────────┤\n");
+    printf("│ GPU Memory:                                                                           │\n");
+    printf("│   • Sequential access achieves %.0f%% of peak bandwidth                                │\n",
+           100.0 * g_results.gpu_seq_write_bandwidth / g_results.gpu_seq_write_bandwidth);
+    printf("│   • Random access degradation: ~%.0fx slower                                          │\n",
+           g_results.gpu_seq_write_bandwidth / g_results.gpu_rand_write_bandwidth);
+    printf("│   • Random access may benefit from more streams (%.0fx increase in optimal streams)   │\n",
+           (float)g_results.gpu_rand_write_streams / g_results.gpu_seq_write_streams);
+    printf("│                                                                                       │\n");
+    printf("│ RAM Disk:                                                                             │\n");
+    printf("│   • Sequential access: %.2f GB/s                                                      │\n",
+           (g_results.ram_seq_write_speed + g_results.ram_seq_read_speed) / 2 / 1024.0);
+    printf("│   • Random access (4KB): ~%.0fx slower                                                │\n",
+           (g_results.ram_seq_read_speed / g_results.ram_rand_read_speed +
+            g_results.ram_seq_write_speed / g_results.ram_rand_write_speed) / 2);
+    printf("│   • Random access limited by seek/syscall overhead                                   │\n");
+    printf("│                                                                                       │\n");
+    printf("│ Recommendations:                                                                      │\n");
+    printf("│   • Always try to use sequential access patterns when possible                       │\n");
+    printf("│   • If random access is necessary, increase parallelism (more streams/threads)       │\n");
+    printf("│   • GPU: Random access can benefit from larger stream counts                         │\n");
+    printf("│   • RAM: Consider larger block sizes for random I/O to reduce overhead               │\n");
+    printf("└───────────────────────────────────────────────────────────────────────────────────────┘\n");
+}
+
 
 int main(int argc, char** argv) {
     srand(time(NULL));
