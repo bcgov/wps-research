@@ -211,7 +211,13 @@ int main(int argc, char *argv[]){
 
   // Allocate memory for each band in parallel
   cout << "\n=== Allocating memory in parallel ===" << endl;
+  struct timeval alloc_start, alloc_end;
+  gettimeofday(&alloc_start, NULL);
   parfor(0, g_nb, allocate_band, io_channels);
+  gettimeofday(&alloc_end, NULL);
+  double alloc_time = (alloc_end.tv_sec - alloc_start.tv_sec) +
+                      (alloc_end.tv_usec - alloc_start.tv_usec) / 1e6;
+  cout << "Memory allocation complete: " << g_nb << " bands in " << alloc_time << " seconds" << endl;
 
   // Read input data in parallel with detected I/O channel capacity
   cout << "\n=== Reading input file in parallel ===" << endl;
@@ -239,7 +245,17 @@ int main(int argc, char *argv[]){
   double total_time = (total_end.tv_sec - total_start.tv_sec) +
                       (total_end.tv_usec - total_start.tv_usec) / 1e6;
 
-  cout << "\nTotal time: " << total_time << " seconds" << endl;
+  cout << "\n=== Timing Summary ===" << endl;
+  cout << "Memory allocation: " << alloc_time << " seconds ("
+       << (100 * alloc_time / total_time) << "%)" << endl;
+  cout << "Reading data:      " << read_time << " seconds ("
+       << (100 * read_time / total_time) << "%)" << endl;
+  cout << "Writing data:      " << write_time << " seconds ("
+       << (100 * write_time / total_time) << "%)" << endl;
+  double overhead = total_time - (alloc_time + read_time + write_time);
+  cout << "Overhead:          " << overhead << " seconds ("
+       << (100 * overhead / total_time) << "%)" << endl;
+  cout << "Total time:        " << total_time << " seconds" << endl;
 
   // Free memory
   for(i = 0; i < g_nb; i++){
