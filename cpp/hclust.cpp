@@ -16,7 +16,7 @@ float * dat; // multispectral data
 float * lab; // initial labels
 
 pthread_attr_t attr; // specify threads joinable
-pthread_mutex_t next_j_mtx; // lock for thread synchronization
+pthread_mutex_t nxt_j_mtx; // lock for thread synchronization
 
 size_t d_count; // count of distance calcs
 size_t dst, src; // index of seg to merge into, and from
@@ -62,10 +62,10 @@ void * dmat_j(void * arg){
   // keep picking up jobs
   while(1){
 
-    mtx_lock(&next_j_mtx);
+    mtx_lock(&nxt_j_mtx);
     j = next_j ++;
     d_count ++;
-    mtx_unlock(&next_j_mtx);
+    mtx_unlock(&nxt_j_mtx);
 
     if(j > max_label){
       cprint(str("\texit work ") + to_string(w));
@@ -105,7 +105,7 @@ void deploy_works(void *(*work)(void *)){
 
   // mutex setup
   pthread_mutex_init(&print_mtx, NULL);
-  pthread_mutex_init(&next_j_mtx, NULL);
+  pthread_mutex_init(&nxt_j_mtx, NULL);
 
   // make the threads joinable
   pthread_attr_init(&attr);
@@ -141,10 +141,10 @@ void * dmat_j_update(void * arg){
   // keep picking up jobs
   while(1){
 
-    mtx_lock(&next_j_mtx);
+    mtx_lock(&nxt_j_mtx);
     j = next_j ++;
     d_count += 1;
-    mtx_unlock(&next_j_mtx);
+    mtx_unlock(&nxt_j_mtx);
 
     np_j = pix[j].size();
 
