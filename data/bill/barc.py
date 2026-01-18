@@ -18,8 +18,10 @@ from exceptions.matrix import Shape_Mismatched_Error
 
 
 def NBR(
-        NIR,
-        SWIR,
+        NIR = None,
+        SWIR = None,
+        *,
+        raster: Raster = None,
         eps = 1e-3
 ):
     '''
@@ -31,13 +33,23 @@ def NBR(
 
     SWIR: Short-Wave Infrared band
 
+    raster: raster object
+
     eps: To prevent Divide By Zero Error
 
 
     Returns
     -------
     Values of Normalized Burn Ratio within (-1, 1)
+
+
+    Notes
+    -----
+    Not support cropping, if cropping is needed, pass directly cropped data instead of raster object.
     '''
+    if raster is not None:
+        NIR = raster.get_band(8)
+        SWIR = raster.get_band(12)
 
     try:
 
@@ -72,12 +84,27 @@ def dNBR(
 
     SWIR_2: Short-Wave Infrared band of post-fire
 
+    raster_pre: raster object of pre date
+
+    raster_post: raster object of post date
+
     eps: To prevent Divide By Zero Error
 
 
     Returns
     -------
+    nbr_1
+
+    nbr_2
+
+    dNBR
+
     Values of Normalized Burn Ratio within (-1, 1) for pre and post-fire. With dNBR matrix.
+
+
+    Notes
+    -----
+    Not support cropping, if cropping is needed, pass directly cropped data instead of raster object.
     '''
 
 
@@ -95,9 +122,9 @@ def dNBR(
         raise Not_Enough_Information("Missed at least one of NIR, SWIR for pre and NIR, SWIR for post.")
 
 
-    nbr_1 = NBR(NIR_1, SWIR_1, eps)
+    nbr_1 = NBR(NIR_1, SWIR_1, eps=eps)
 
-    nbr_2 = NBR(NIR_2, SWIR_2, eps)
+    nbr_2 = NBR(NIR_2, SWIR_2, eps=eps)
 
     try:
 
@@ -108,6 +135,38 @@ def dNBR(
         raise Shape_Mismatched_Error(f'NBRs of different shapes, cannot broadcast.')
     
     return nbr_1, nbr_2, dnbr
+
+
+
+def dnbr_256(
+        raw_dnbr,
+        threshold = None
+):
+    '''
+    Description
+    -----------
+    Scale raw dnbr.
+
+
+    Parameters
+    ----------
+    raw_dnbr: the dnbr calculated from dnbr function.
+
+    threshold: with threshold, it returns scaled >= threshold (boolean)
+
+
+    Returns
+    -------
+    Scaled dnbr.
+    '''
+
+    scaled = (raw_dnbr * 1000 + 275) / 5
+
+    if threshold is None:
+        return scaled
+    
+    else:
+        return scaled >= threshold
 
 
 
@@ -144,7 +203,7 @@ def plot_barc(
     from matplotlib.colors import ListedColormap
 
     # scale dNBR
-    scaled = (dNBR*1000+275)/5 #scalling dNBR
+    scaled = dnbr_256(dNBR) #scalling dNBR
 
     class_plot = np.full(scaled.shape, np.nan)
 

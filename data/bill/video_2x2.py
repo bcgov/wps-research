@@ -1,6 +1,7 @@
 '''
-generates a gif to see how the environment changes from a certain date.
+generates a VIDEO to see how the environment changes from a certain date.
 '''
+
 
 from exceptions.data import *
 
@@ -20,18 +21,28 @@ from barc import (
 
 from time import time
 
+import os
+
+import numpy as np
+
+from bayesian_map import *
+
+
 
 class GIF():
     
     def __init__(
             self,
             folder_name:str,
+            video_filename: str,
             ref_date: str
     ):
         '''
         ref day is the date to start tracking on.
         '''
         self.foldername = folder_name
+
+        self.video_filename = video_filename
 
         self.ref_date = ref_date
 
@@ -146,90 +157,78 @@ class GIF():
 
 
 
-
-    def __update_barc(
-            self,
-            new_data
+    def __im1(
+            self
     ):
-        
         '''
-        Plot 3 and 6
+        Raw data of next date
+
+        Caching: no need.
         '''
 
-        #MEthod (choose between barc, change)
-        _, nbr_post_1, dnbr = dNBR(
+        self.im1.set_data(
+            self.__raw2plot(self.current_data)
+        )
+
+        self.title1.set_text(self.current_date)
+
+
+    def __im2(
+            self
+    ):
+        '''
+        dNBR
+        '''
+
+        _, _, dnbr = dNBR(
             NIR_1=self.ref_data[..., 3],
             SWIR_1=self.ref_data[..., 0],
 
-            NIR_2=new_data[..., 3],
-            SWIR_2=new_data[..., 0]
+            NIR_2=self.current_data[..., 3],
+            SWIR_2=self.current_data[..., 0]
         )
+
 
         self.im2.set_data(
             dnbr
         )  
 
-        #Method
-        # _, nbr_post_2, dnbr_next_day = dNBR(
-        #     NIR_1=self.prev_data[..., 3],
-        #     SWIR_1=self.prev_data[..., 0],
+        return dnbr
+    
 
-        #     NIR_2=new_data[..., 3],
-        #     SWIR_2=new_data[..., 0]
-        # )
-
-
-        #Difference between dNBR today and dNBR the day before
-
-        nbr_post_2 = NBR(NIR = self.prev_data[..., 3],
-                         SWIR= self.prev_data[..., 0])
-
-        self.im6.set_data(
-            (nbr_post_2 - nbr_post_1) / (nbr_post_2 + nbr_post_1 + 1e-3)
-        )  
-
-
-    def __update_change_det(
-            self, 
-            new_data
+    def __im3(
+            self,
+            dnbr
     ):
         '''
-        Plot 3,4,5
+        Bayesian Mapping
         '''
-        #Process data for plotting
 
-        #MEthod (choose between barc, change)
-        change = change_detection(
-            pre_X=self.ref_data,
-            post_X=new_data
+        self.alpha, self.beta = bayesian_update_2(
+            alpha=self.alpha,
+            beta=self.beta,
+            new_dnbr=dnbr,
         )
 
-        self.im3.set_data(
-            self.__raw2plot(change)
-        )  
+        expectations = beta_expectation(self.alpha, self.beta)
 
+        # maps = make_prediction(expectations, 0.5)
 
-        #SWIR wins
+        self.im3.set_data(expectations)
 
-        swir_wins = dominant_band(
-            change,
-            band_index=1
-        )
+        return
 
+    def __im4(
+            self,
+            dnbr
+    ):
+        
         self.im4.set_data(
-            swir_wins
-        )  
-
-
-        #NIR wins
-        nir_wins = dominant_band(
-            change,
-            band_index=4
+            is_evidence(dnbr)
         )
+        return
 
-        self.im5.set_data(
-            nir_wins
-        )  
+
     
 
     def __update(
@@ -238,29 +237,28 @@ class GIF():
         '''
         Use this as main function of updates
         '''
-        
-        date = self.date_list[idx]
 
         #Load Reference image, this will be fixed
-        new_data = self.__get_raster_data(
-            self.date_list[idx]
+        self.current_date = self.date_list[idx]
+
+        self.current_data = self.__get_raster_data(
+            date=self.current_date
         )
 
-        #Plot 1: the next date
-        self.im1.set_data(
-            self.__raw2plot(new_data)
-        )
+        #Change data shown in each subfig
 
-        self.title1.set_text(f"index: {idx} | date={date}")
+        self.__im1()
 
-        #Plot 2: barc
-        self.__update_barc(new_data)
+        dnbr = self.__im2()
 
-        #Plot 3,4,5: change detection
-        self.__update_change_det(new_data)
+        self.__im3(dnbr)
 
+        self.__im4(dnbr)
 
-        self.prev_data = new_data
+        #Just in case
+        self.prev_date = self.current_date
+        
+        self.prev_data = self.current_data
         
 
         if idx % 5 == 0:
@@ -284,12 +282,12 @@ class GIF():
         )
 
         writer = FFMpegWriter(
-            fps=1.5,                # control speed here
+            fps=1,                # control speed here
             codec="libx264",
             bitrate=2000
         )
         
-        anim.save("videos/changes.mp4", writer=writer)
+        anim.save(self.video_filename, writer=writer)
 
 
 
@@ -306,65 +304,66 @@ class GIF():
 
         import matplotlib.pyplot as plt
         from matplotlib.gridspec import GridSpec
+        from matplotlib.colors import LinearSegmentedColormap
         import numpy as np
+
+        cmap = LinearSegmentedColormap.from_list(
+            "green_to_red",
+            ["#b7e4c7", "#640002"]  # light green → red
+        )
 
 
         self.fig = plt.figure(
-            figsize=(20, 10),
+            figsize=(20, 20),
             constrained_layout=True
         )
 
         gs = GridSpec(
             nrows=2,
-            ncols=4,
+            ncols=2,
             figure=self.fig,
             height_ratios=[1, 1],   # control row heights
-            width_ratios=[1, 1, 1, 1]
+            width_ratios=[1, 1]
         )
 
         # first row
         ax1 = self.fig.add_subplot(gs[0, 0])
         ax2 = self.fig.add_subplot(gs[0, 1])
-        ax3 = self.fig.add_subplot(gs[0, 2])
-        ax4 = self.fig.add_subplot(gs[0, 3])
 
         # second row
-        ax5 = self.fig.add_subplot(gs[1, 3])
-        ax6 = self.fig.add_subplot(gs[1, 1])
+        ax3 = self.fig.add_subplot(gs[1, 0])
+        ax4 = self.fig.add_subplot(gs[1, 1])
 
 
         #Load Reference image, this will be fixed
+        self.ref_date = self.date_list[0]
+
         self.ref_data = self.__get_raster_data(
-            self.date_list[0]
+            date = self.ref_date
         )
 
         self.prev_data = self.ref_data
 
         temp = np.zeros((self.ref_data.shape[0], self.ref_data.shape[1]))
 
-        #The middle data
+        #The next date data
         self.im1 = ax1.imshow(temp, vmin=0, vmax=1)
         self.title1 = ax1.set_title(f"date={self.date_list[0]}")
 
-        #method 1 on 2 imageries
-        self.im2 = ax2.imshow(temp, vmin=0, vmax=1, cmap = 'gray')
+        #dNBR
+        self.im2 = ax2.imshow(temp, vmin=0, vmax=1, cmap='gray')
         self.title2 = ax2.set_title(f"dNBR")
 
-        #method 2 on 2 imageries
-        self.im3 = ax3.imshow(temp, vmin=0, vmax=1)
-        self.title3 = ax3.set_title(f"Change Detection")
+        #Bayesian Mapping
+        self.im3 = ax3.imshow(temp, vmin=0, vmax=1, cmap = cmap)
+        self.title3 = ax3.set_title(f"Bayesian (redder -> higher prob of Burn)")
 
-        #method 3 on 2 imageries
-        self.im4 = ax4.imshow(temp, vmin=0, vmax=1, cmap = 'gray')
-        self.title4 = ax4.set_title(f"Change Detection (SWIR wins)")
+        self.alpha = np.ones((self.ref_data.shape[0], self.ref_data.shape[1]))
+        self.beta = np.ones((self.ref_data.shape[0], self.ref_data.shape[1]))
 
-        self.im5 = ax5.imshow(temp, vmin=0, vmax=1, cmap = 'gray')
-        self.title5 = ax5.set_title(f"Change Detection (NIR wins)")
 
-        #dNBR by date
-        self.im6 = ax6.imshow(temp, vmin=0, vmax=1, cmap = 'gray')
-        self.title6 = ax6.set_title(f"dNBR (between every 2 adjacent images)")
-
+        self.im4 = ax4.imshow(temp, vmin=0, vmax=1)
+        self.title4 = ax4.set_title(f"scaled dNBR (>= 80)")
 
         #We dont need axisfor ax in self.fig.axes:
         for ax in self.fig.axes:
@@ -414,6 +413,7 @@ if __name__ == "__main__":
 
     g = GIF(
         folder_name=folder,
+        video_filename='./videos/bayesian_4_days.mp4',
         ref_date = ref_date
     )
 
