@@ -486,8 +486,16 @@ def main():
         num_threads = get_optimal_threads(source_dir, dest_base)
         print(f"Optimal thread count: {num_threads}")
 
-    # Ensure destination parent directory exists
-    os.makedirs(dest_base, exist_ok=True)
+    # Ensure destination directory exists (but not the base path)
+    # Only create if base path already exists
+    if not os.path.exists(dest_base):
+        print(f"Error: Destination base path does not exist: {dest_base}", file=sys.stderr)
+        print(f"Please create {dest_base} first or it must be a mounted filesystem", file=sys.stderr)
+        sys.exit(1)
+
+    # Create the specific destination directory
+    os.makedirs(dest_dir, exist_ok=True)
+    print(f"Destination directory created/verified: {dest_dir}")
 
     # Create progress monitor
     monitor = ProgressMonitor(source_size, file_count)
