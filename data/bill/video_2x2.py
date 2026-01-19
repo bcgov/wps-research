@@ -236,7 +236,7 @@ class GIF():
     ):
         
         change = change_detection(
-            pre_X=self.prev_data,
+            pre_X=self.ref_data,
             post_X=self.current_data
         )
 
@@ -355,7 +355,7 @@ class GIF():
 
         gs = GridSpec(
             nrows=2,
-            ncols=2,
+            ncols=3,
             figure=self.fig,
             height_ratios=[1, 1],   # control row heights
             width_ratios=[1, 1, 1]
