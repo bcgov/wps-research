@@ -9,6 +9,9 @@ Usage:
 ./classify_euclidean training.bin                # Classify all stack*.bin files in current directory
 
 Output is automatically named input_classification.bin
+
+Validation: If annotation_labels.shp exists in current directory, computes
+accuracy metrics on training areas after classification.
 */
 
 #include <stdio.h>
@@ -16,6 +19,7 @@ Output is automatically named input_classification.bin
 #include <string.h>
 #include <cuda_runtime.h>
 #include <gdal.h>
+#include <ogr_api.h>
 #include <cpl_conv.h>
 #include <math.h>
 #include <time.h>
@@ -29,7 +33,27 @@ Output is automatically named input_classification.bin
 #define SKIP_PARAMETER 100
 #define K_NEAREST_NEIGHBORS 7
 #define MAX_PATCH_DIM 8192  // Maximum supported patch dimension for kernel
+#define ANNOTATION_SHP "annotation_labels.shp"
+#define MAX_RECTANGLES 100000
 // ===========================================
+
+// Structure to hold a training rectangle
+typedef struct {
+    int x0, y0, x1, y1;
+    int label;  // 0 = negative, 1 = positive
+} TrainingRect;
+
+// Structure to hold validation metrics
+typedef struct {
+    long long tp;  // True positives
+    long long tn;  // True negatives
+    long long fp;  // False positives
+    long long fn;  // False negatives
+    double prob_sum_positive;  // Sum of probabilities for positive samples
+    double prob_sum_negative;  // Sum of probabilities for negative samples
+    long long n_positive_samples;
+    long long n_negative_samples;
+} ValidationMetrics;
 
 // CUDA kernel: classify windows using K-NN Euclidean distance
 __global__ void classify_euclidean_kernel(
@@ -192,12 +216,256 @@ int is_stack_bin(const char* filename) {
     return (fnmatch("stack*.bin", filename, 0) == 0);
 }
 
+// Parse COORDS_IMG field to get rectangle bounds
+int parse_coords_img(const char* s, int* x0, int* y0, int* x1, int* y1) {
+    if (!s || strlen(s) == 0) return 0;
+    
+    // Check for "NO_RASTER"
+    if (strstr(s, "NO_RASTER") != NULL || strstr(s, "no_raster") != NULL) return 0;
+    
+    // Parse format: "x1,y1;x2,y2;x3,y3;x4,y4"
+    int min_x = INT_MAX, min_y = INT_MAX;
+    int max_x = INT_MIN, max_y = INT_MIN;
+    
+    char* copy = strdup(s);
+    char* token = strtok(copy, ";");
+    int found_any = 0;
+    
+    while (token != NULL) {
+        float fx, fy;
+        if (sscanf(token, "%f,%f", &fx, &fy) == 2) {
+            int ix = (int)roundf(fx);
+            int iy = (int)roundf(fy);
+            if (ix < min_x) min_x = ix;
+            if (ix > max_x) max_x = ix;
+            if (iy < min_y) min_y = iy;
+            if (iy > max_y) max_y = iy;
+            found_any = 1;
+        }
+        token = strtok(NULL, ";");
+    }
+    
+    free(copy);
+    
+    if (!found_any || min_x == INT_MAX) return 0;
+    
+    *x0 = min_x;
+    *y0 = min_y;
+    *x1 = max_x;
+    *y1 = max_y;
+    return 1;
+}
+
+// Load training rectangles from shapefile
+int load_training_rectangles(const char* shp_path, TrainingRect* rects, int max_rects) {
+    OGRRegisterAll();
+    
+    OGRDataSourceH ds = OGROpen(shp_path, 0, NULL);
+    if (ds == NULL) {
+        return 0;
+    }
+    
+    OGRLayerH layer = OGR_DS_GetLayer(ds, 0);
+    if (layer == NULL) {
+        OGR_DS_Destroy(ds);
+        return 0;
+    }
+    
+    OGR_L_ResetReading(layer);
+    
+    int n_rects = 0;
+    OGRFeatureH feature;
+    
+    while ((feature = OGR_L_GetNextFeature(layer)) != NULL && n_rects < max_rects) {
+        // Get CLASS field
+        int class_idx = OGR_F_GetFieldIndex(feature, "CLASS");
+        int coords_idx = OGR_F_GetFieldIndex(feature, "COORDS_IMG");
+        
+        if (class_idx < 0 || coords_idx < 0) {
+            OGR_F_Destroy(feature);
+            continue;
+        }
+        
+        const char* class_str = OGR_F_GetFieldAsString(feature, class_idx);
+        const char* coords_str = OGR_F_GetFieldAsString(feature, coords_idx);
+        
+        int x0, y0, x1, y1;
+        if (!parse_coords_img(coords_str, &x0, &y0, &x1, &y1)) {
+            OGR_F_Destroy(feature);
+            continue;
+        }
+        
+        // Determine label
+        int label = 0;
+        if (class_str) {
+            // Check if POSITIVE (case insensitive)
+            char upper[64];
+            strncpy(upper, class_str, sizeof(upper) - 1);
+            upper[sizeof(upper) - 1] = '\0';
+            for (int i = 0; upper[i]; i++) {
+                if (upper[i] >= 'a' && upper[i] <= 'z') {
+                    upper[i] -= 32;
+                }
+            }
+            // Trim whitespace
+            char* p = upper;
+            while (*p == ' ') p++;
+            if (strncmp(p, "POSITIVE", 8) == 0) {
+                label = 1;
+            }
+        }
+        
+        rects[n_rects].x0 = x0;
+        rects[n_rects].y0 = y0;
+        rects[n_rects].x1 = x1;
+        rects[n_rects].y1 = y1;
+        rects[n_rects].label = label;
+        n_rects++;
+        
+        OGR_F_Destroy(feature);
+    }
+    
+    OGR_DS_Destroy(ds);
+    return n_rects;
+}
+
+// Compute validation metrics on training areas
+void compute_validation_metrics(float* output, int w, int h, 
+                                 TrainingRect* rects, int n_rects,
+                                 ValidationMetrics* metrics) {
+    memset(metrics, 0, sizeof(ValidationMetrics));
+    
+    for (int r = 0; r < n_rects; r++) {
+        TrainingRect* rect = &rects[r];
+        
+        // Clamp to image bounds
+        int x0 = rect->x0 < 0 ? 0 : rect->x0;
+        int y0 = rect->y0 < 0 ? 0 : rect->y0;
+        int x1 = rect->x1 > w ? w : rect->x1;
+        int y1 = rect->y1 > h ? h : rect->y1;
+        
+        // Skip if too small
+        if ((x1 - x0) < WINDOW_SIZE || (y1 - y0) < WINDOW_SIZE) {
+            continue;
+        }
+        
+        int true_label = rect->label;
+        
+        // Sample windows within the rectangle (same tiling as training)
+        int n_windows_x = (x1 - x0) / WINDOW_SIZE;
+        int n_windows_y = (y1 - y0) / WINDOW_SIZE;
+        
+        for (int wy = 0; wy < n_windows_y; wy++) {
+            for (int wx = 0; wx < n_windows_x; wx++) {
+                // Get center pixel of window
+                int win_y = y0 + wy * WINDOW_SIZE + WINDOW_SIZE / 2;
+                int win_x = x0 + wx * WINDOW_SIZE + WINDOW_SIZE / 2;
+                
+                if (win_y >= h || win_x >= w) continue;
+                
+                float prob = output[win_y * w + win_x];
+                
+                if (isnan(prob)) continue;
+                
+                int predicted = (prob > 0.5f) ? 1 : 0;
+                
+                if (true_label == 1) {
+                    metrics->prob_sum_positive += prob;
+                    metrics->n_positive_samples++;
+                    if (predicted == 1) {
+                        metrics->tp++;
+                    } else {
+                        metrics->fn++;
+                    }
+                } else {
+                    metrics->prob_sum_negative += prob;
+                    metrics->n_negative_samples++;
+                    if (predicted == 0) {
+                        metrics->tn++;
+                    } else {
+                        metrics->fp++;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Print validation report
+void print_validation_report(ValidationMetrics* m) {
+    printf("\n");
+    printf("  ╔════════════════════════════════════════════════════════════════╗\n");
+    printf("  ║              VALIDATION ON TRAINING AREAS                      ║\n");
+    printf("  ╠════════════════════════════════════════════════════════════════╣\n");
+    
+    long long total = m->tp + m->tn + m->fp + m->fn;
+    
+    if (total == 0) {
+        printf("  ║  No valid samples found in training areas                      ║\n");
+        printf("  ╚════════════════════════════════════════════════════════════════╝\n");
+        return;
+    }
+    
+    // Confusion matrix
+    printf("  ║  CONFUSION MATRIX:                                             ║\n");
+    printf("  ║                        Predicted                               ║\n");
+    printf("  ║                    Negative    Positive                        ║\n");
+    printf("  ║  Actual Negative   %8lld    %8lld   (TN, FP)              ║\n", m->tn, m->fp);
+    printf("  ║  Actual Positive   %8lld    %8lld   (FN, TP)              ║\n", m->fn, m->tp);
+    printf("  ╠════════════════════════════════════════════════════════════════╣\n");
+    
+    // Calculate metrics
+    double accuracy = (double)(m->tp + m->tn) / total;
+    
+    double precision = (m->tp + m->fp > 0) ? (double)m->tp / (m->tp + m->fp) : 0.0;
+    double recall = (m->tp + m->fn > 0) ? (double)m->tp / (m->tp + m->fn) : 0.0;
+    double f1 = (precision + recall > 0) ? 2.0 * precision * recall / (precision + recall) : 0.0;
+    
+    double specificity = (m->tn + m->fp > 0) ? (double)m->tn / (m->tn + m->fp) : 0.0;
+    double npv = (m->tn + m->fn > 0) ? (double)m->tn / (m->tn + m->fn) : 0.0;
+    
+    // Balanced accuracy
+    double balanced_acc = (recall + specificity) / 2.0;
+    
+    // Matthews Correlation Coefficient
+    double mcc_num = (double)m->tp * m->tn - (double)m->fp * m->fn;
+    double mcc_den = sqrt((double)(m->tp + m->fp) * (m->tp + m->fn) * (m->tn + m->fp) * (m->tn + m->fn));
+    double mcc = (mcc_den > 0) ? mcc_num / mcc_den : 0.0;
+    
+    // Average probabilities
+    double avg_prob_pos = (m->n_positive_samples > 0) ? m->prob_sum_positive / m->n_positive_samples : 0.0;
+    double avg_prob_neg = (m->n_negative_samples > 0) ? m->prob_sum_negative / m->n_negative_samples : 0.0;
+    
+    printf("  ║  CLASSIFICATION METRICS:                                       ║\n");
+    printf("  ║    Accuracy:              %6.2f%%                              ║\n", accuracy * 100);
+    printf("  ║    Balanced Accuracy:     %6.2f%%                              ║\n", balanced_acc * 100);
+    printf("  ║    Precision (PPV):       %6.2f%%                              ║\n", precision * 100);
+    printf("  ║    Recall (Sensitivity):  %6.2f%%                              ║\n", recall * 100);
+    printf("  ║    Specificity (TNR):     %6.2f%%                              ║\n", specificity * 100);
+    printf("  ║    F1 Score:              %6.4f                               ║\n", f1);
+    printf("  ║    NPV:                   %6.2f%%                              ║\n", npv * 100);
+    printf("  ║    MCC:                   %+6.4f                               ║\n", mcc);
+    printf("  ╠════════════════════════════════════════════════════════════════╣\n");
+    printf("  ║  PROBABILITY CALIBRATION:                                      ║\n");
+    printf("  ║    Avg prob on POSITIVE:  %6.4f  (ideal: 1.0)                 ║\n", avg_prob_pos);
+    printf("  ║    Avg prob on NEGATIVE:  %6.4f  (ideal: 0.0)                 ║\n", avg_prob_neg);
+    printf("  ║    Separation:            %6.4f  (ideal: 1.0)                 ║\n", avg_prob_pos - avg_prob_neg);
+    printf("  ╠════════════════════════════════════════════════════════════════╣\n");
+    printf("  ║  SAMPLE COUNTS:                                                ║\n");
+    printf("  ║    Total windows:         %8lld                             ║\n", total);
+    printf("  ║    Positive samples:      %8lld                             ║\n", m->n_positive_samples);
+    printf("  ║    Negative samples:      %8lld                             ║\n", m->n_negative_samples);
+    printf("  ╚════════════════════════════════════════════════════════════════╝\n");
+    printf("\n");
+}
+
 int classify_single_image(const char* input_file, 
                           float* all_patches, unsigned char* all_labels,
                           int n_exemplars, int patch_dim, int n_bands_training,
-                          int image_num, int total_images) {
+                          int image_num, int total_images,
+                          TrainingRect* train_rects, int n_train_rects) {
     
-    char status_buf[512];
+    char status_buf[2048];
     
     printf("\n");
     printf("======================================================================\n");
@@ -267,8 +535,14 @@ int classify_single_image(const char* input_file,
     
     for (int b = 0; b < n_bands; b++) {
         GDALRasterBandH band = GDALGetRasterBand(ds, b + 1);
-        GDALRasterIO(band, GF_Read, 0, 0, w, h, 
+        CPLErr err = GDALRasterIO(band, GF_Read, 0, 0, w, h, 
                      img_data + (size_t)b * h * w, w, h, GDT_Float32, 0, 0);
+        if (err != CE_None) {
+            fprintf(stderr, "  ERROR: Failed to read band %d\n", b + 1);
+            free(img_data);
+            GDALClose(ds);
+            return 1;
+        }
         print_progress("Loading", b + 1, n_bands, load_start);
     }
     
@@ -326,9 +600,9 @@ int classify_single_image(const char* input_file,
     cudaMemcpy(d_output, nan_buf, output_size, cudaMemcpyHostToDevice);
     free(nan_buf);
     
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "  ERROR: CUDA error: %s\n", cudaGetErrorString(err));
+    cudaError_t cuda_err = cudaGetLastError();
+    if (cuda_err != cudaSuccess) {
+        fprintf(stderr, "  ERROR: CUDA error: %s\n", cudaGetErrorString(cuda_err));
         free(img_data);
         GDALClose(ds);
         return 1;
@@ -383,6 +657,14 @@ int classify_single_image(const char* input_file,
              n_positive, n_negative, n_nan, avg_prob);
     print_status(status_buf);
     
+    // Compute validation metrics if training rectangles are available
+    if (n_train_rects > 0) {
+        print_status("Computing validation metrics on training areas...");
+        ValidationMetrics metrics;
+        compute_validation_metrics(output, w, h, train_rects, n_train_rects, &metrics);
+        print_validation_report(&metrics);
+    }
+    
     print_status("Saving output file...");
     GDALDriverH drv = GDALGetDriverByName("ENVI");
     GDALDatasetH ods = GDALCreate(drv, output_file, w, h, 1, GDT_Float32, NULL);
@@ -394,7 +676,10 @@ int classify_single_image(const char* input_file,
     GDALSetProjection(ods, proj);
     
     GDALRasterBandH ob = GDALGetRasterBand(ods, 1);
-    GDALRasterIO(ob, GF_Write, 0, 0, w, h, output, w, h, GDT_Float32, 0, 0);
+    CPLErr write_err = GDALRasterIO(ob, GF_Write, 0, 0, w, h, output, w, h, GDT_Float32, 0, 0);
+    if (write_err != CE_None) {
+        fprintf(stderr, "  WARNING: Error writing output raster\n");
+    }
     
     GDALClose(ods);
     GDALClose(ds);
@@ -411,8 +696,8 @@ int classify_single_image(const char* input_file,
     double total_time = difftime(end_time, load_start);
     
     snprintf(status_buf, sizeof(status_buf),
-             "Complete: %s (%.1f sec, %.2f Mpx/s)",
-             output_file, total_time, megapixels/total_time);
+             "Complete: %.1f sec, %.2f Mpx/s",
+             total_time, megapixels/total_time);
     print_status(status_buf);
     
     return 0;
@@ -429,6 +714,7 @@ int main(int argc, char** argv) {
         fprintf(stderr, "  Single ENVI:  %s training.bin input.bin\n", argv[0]);
         fprintf(stderr, "  Batch mode:   %s training.bin\n", argv[0]);
         fprintf(stderr, "\nBatch mode processes all stack*.bin files in current directory\n");
+        fprintf(stderr, "\nIf %s exists, validation metrics are computed.\n", ANNOTATION_SHP);
         return 1;
     }
     
@@ -444,9 +730,13 @@ int main(int argc, char** argv) {
     if (!f) { perror("  ERROR: Failed to open training file"); return 1; }
     
     int n_exemplars, patch_dim, n_bands;
-    fread(&n_exemplars, sizeof(int), 1, f);
-    fread(&patch_dim, sizeof(int), 1, f);
-    fread(&n_bands, sizeof(int), 1, f);
+    if (fread(&n_exemplars, sizeof(int), 1, f) != 1 ||
+        fread(&patch_dim, sizeof(int), 1, f) != 1 ||
+        fread(&n_bands, sizeof(int), 1, f) != 1) {
+        fprintf(stderr, "  ERROR: Failed to read training file header\n");
+        fclose(f);
+        return 1;
+    }
     
     snprintf(status_buf, sizeof(status_buf),
              "Training file: %d exemplars, %d features per patch, %d bands", 
@@ -480,13 +770,19 @@ int main(int argc, char** argv) {
     int n_read = 0;
     for (int e = 0; e < n_exemplars; e++) {
         if (e % SKIP_PARAMETER == 0) {
-            fread(&temp_labels[n_read], sizeof(unsigned char), 1, f);
-            fread(&temp_patches[(size_t)n_read * patch_dim], sizeof(float), patch_dim, f);
+            if (fread(&temp_labels[n_read], sizeof(unsigned char), 1, f) != 1 ||
+                fread(&temp_patches[(size_t)n_read * patch_dim], sizeof(float), patch_dim, f) != (size_t)patch_dim) {
+                fprintf(stderr, "  ERROR: Failed to read exemplar %d\n", e);
+                break;
+            }
             n_read++;
         } else {
             unsigned char dummy_label;
-            fread(&dummy_label, sizeof(unsigned char), 1, f);
-            fread(skip_buf, sizeof(float), patch_dim, f);
+            if (fread(&dummy_label, sizeof(unsigned char), 1, f) != 1 ||
+                fread(skip_buf, sizeof(float), patch_dim, f) != (size_t)patch_dim) {
+                fprintf(stderr, "  ERROR: Failed to skip exemplar %d\n", e);
+                break;
+            }
         }
         
         if ((e + 1) % 10000 == 0 || e == n_exemplars - 1) {
@@ -513,12 +809,42 @@ int main(int argc, char** argv) {
              "Class distribution: %d positive, %d negative", n_pos, n_neg);
     print_status(status_buf);
     
+    // Try to load training rectangles for validation
+    TrainingRect* train_rects = (TrainingRect*)malloc(MAX_RECTANGLES * sizeof(TrainingRect));
+    int n_train_rects = 0;
+    
+    struct stat st;
+    if (stat(ANNOTATION_SHP, &st) == 0) {
+        print_status("Loading annotation shapefile for validation...");
+        n_train_rects = load_training_rectangles(ANNOTATION_SHP, train_rects, MAX_RECTANGLES);
+        
+        if (n_train_rects > 0) {
+            int n_pos_rects = 0, n_neg_rects = 0;
+            for (int i = 0; i < n_train_rects; i++) {
+                if (train_rects[i].label == 1) n_pos_rects++;
+                else n_neg_rects++;
+            }
+            snprintf(status_buf, sizeof(status_buf),
+                     "Loaded %d training rectangles (%d positive, %d negative)",
+                     n_train_rects, n_pos_rects, n_neg_rects);
+            print_status(status_buf);
+        } else {
+            print_status("WARNING: Could not load training rectangles from shapefile");
+        }
+    } else {
+        snprintf(status_buf, sizeof(status_buf),
+                 "No %s found - skipping validation metrics", ANNOTATION_SHP);
+        print_status(status_buf);
+    }
+    
     // Single or batch mode
     if (argc >= 3) {
         int result = classify_single_image(argv[2], temp_patches, temp_labels, 
-                                           n_exemplars, patch_dim, n_bands, 1, 1);
+                                           n_exemplars, patch_dim, n_bands, 1, 1,
+                                           train_rects, n_train_rects);
         free(temp_patches);
         free(temp_labels);
+        free(train_rects);
         
         printf("\n========================================================================\n");
         printf("  DONE\n");
@@ -547,6 +873,7 @@ int main(int argc, char** argv) {
             closedir(dir);
             free(temp_patches);
             free(temp_labels);
+            free(train_rects);
             return 0;
         }
         
@@ -556,7 +883,8 @@ int main(int argc, char** argv) {
             if (is_stack_bin(entry->d_name)) {
                 processed++;
                 classify_single_image(entry->d_name, temp_patches, temp_labels, 
-                                      n_exemplars, patch_dim, n_bands, processed, file_count);
+                                      n_exemplars, patch_dim, n_bands, processed, file_count,
+                                      train_rects, n_train_rects);
             }
         }
         
@@ -576,9 +904,9 @@ int main(int argc, char** argv) {
         
         free(temp_patches);
         free(temp_labels);
+        free(train_rects);
         return 0;
     }
 }
-
 
 
