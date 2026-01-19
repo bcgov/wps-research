@@ -473,8 +473,15 @@ def main():
         num_threads = get_optimal_threads(source_dir, '/ram')
         print(f"Optimal thread count: {num_threads}")
 
-    # Ensure destination parent directory exists
-    os.makedirs('/ram', exist_ok=True)
+    # Ensure /ram/ exists (but don't create it)
+    if not os.path.exists('/ram'):
+        print(f"Error: /ram/ does not exist", file=sys.stderr)
+        print(f"/ram/ must be mounted before staging", file=sys.stderr)
+        sys.exit(1)
+
+    # Create the specific destination directory
+    os.makedirs(dest_dir, exist_ok=True)
+    print(f"Destination directory created/verified: {dest_dir}")
 
     # Create progress monitor
     monitor = ProgressMonitor(source_size, file_count)
@@ -517,3 +524,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
