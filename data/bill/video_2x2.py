@@ -198,7 +198,7 @@ class GIF():
 
     def __im3(
             self,
-            dnbr
+            dnbr, swir_wins
     ):
         '''
         Bayesian Mapping
@@ -208,15 +208,16 @@ class GIF():
             alpha=self.alpha,
             beta=self.beta,
             new_dnbr=dnbr,
+            swir_wins=swir_wins
         )
 
         expectations = beta_expectation(self.alpha, self.beta)
 
-        # maps = make_prediction(expectations, 0.5)
-
         self.im3.set_data(expectations)
 
         return
+    
+
 
     def __im4(
             self,
@@ -226,10 +227,40 @@ class GIF():
         self.im4.set_data(
             is_evidence(dnbr)
         )
+
         return
-
-
     
+
+    def __im5(
+            self
+    ):
+        
+        change = change_detection(
+            pre_X=self.ref_data,
+            post_X=self.current_data
+        )
+
+        self.im5.set_data(
+            self.__raw2plot(change)
+        )
+        
+        return change
+    
+
+    def __im6(
+            self,
+            change
+    ):
+        
+        swir_wins = dominant_band(change, band_index=1)
+        
+        self.im6.set_data(
+            swir_wins
+        )
+        
+        return swir_wins
+
+
 
     def __update(
         self, idx
@@ -251,9 +282,13 @@ class GIF():
 
         dnbr = self.__im2()
 
-        self.__im3(dnbr)
-
         self.__im4(dnbr)
+
+        change = self.__im5()
+
+        swir_wins = self.__im6(change)
+
+        self.__im3(dnbr, swir_wins)
 
         #Just in case
         self.prev_date = self.current_date
@@ -320,19 +355,21 @@ class GIF():
 
         gs = GridSpec(
             nrows=2,
-            ncols=2,
+            ncols=3,
             figure=self.fig,
             height_ratios=[1, 1],   # control row heights
-            width_ratios=[1, 1]
+            width_ratios=[1, 1, 1]
         )
 
         # first row
-        ax1 = self.fig.add_subplot(gs[0, 0])
-        ax2 = self.fig.add_subplot(gs[0, 1])
+        ax1 = self.fig.add_subplot(gs[0, 0]) #raster
+        ax2 = self.fig.add_subplot(gs[0, 1]) #dnbr
+        ax3 = self.fig.add_subplot(gs[0, 2]) #bayesian mapping
 
-        # second row
-        ax3 = self.fig.add_subplot(gs[1, 0])
-        ax4 = self.fig.add_subplot(gs[1, 1])
+
+        ax4 = self.fig.add_subplot(gs[1, 0]) #dnbr evidence
+        ax5 = self.fig.add_subplot(gs[1, 1]) #changes
+        ax6 = self.fig.add_subplot(gs[1, 2]) #changes(swir wins)
 
 
         #Load Reference image, this will be fixed
@@ -351,7 +388,7 @@ class GIF():
         self.title1 = ax1.set_title(f"date={self.date_list[0]}")
 
         #dNBR
-        self.im2 = ax2.imshow(temp, vmin=0, vmax=1, cmap='gray')
+        self.im2 = ax2.imshow(temp, vmin=0, vmax=1)
         self.title2 = ax2.set_title(f"dNBR")
 
         #Bayesian Mapping
@@ -363,7 +400,13 @@ class GIF():
 
 
         self.im4 = ax4.imshow(temp, vmin=0, vmax=1)
-        self.title4 = ax4.set_title(f"scaled dNBR (>= 80)")
+        self.title4 = ax4.set_title(f"scaled dNBR (>= 78)")
+
+        self.im5 = ax5.imshow(temp, vmin=0, vmax=1)
+        self.title5 = ax5.set_title(f"Changes")
+
+        self.im6 = ax6.imshow(temp, vmin=0, vmax=1, cmap='gray')
+        self.title6 = ax6.set_title(f"Changes - SWIR wins")
 
         #We dont need axisfor ax in self.fig.axes:
         for ax in self.fig.axes:
@@ -413,7 +456,7 @@ if __name__ == "__main__":
 
     g = GIF(
         folder_name=folder,
-        video_filename='./videos/bayesian_4_days.mp4',
+        video_filename='./videos/bayesian_3days_level2.mp4',
         ref_date = ref_date
     )
 
