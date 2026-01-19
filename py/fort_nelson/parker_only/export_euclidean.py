@@ -17,8 +17,9 @@ Export individual windows as exemplars for Euclidean NN CUDA classifier
 Usage: python3 export_euclidean_training.py output.bin
 
 Assumes:
-- Input images are stack*.bin ENVI files in present directory
+- Input image is stack.bin ENVI file in present directory
 - Training rectangles in annotation_labels.shp in present directory
+- All rectangles use the same stack.bin image (SRC_IMAGE field is ignored)
 """
 
 import os
@@ -29,7 +30,6 @@ os.environ['VECLIB_MAXIMUM_THREADS'] = '1'
 os.environ['NUMEXPR_NUM_THREADS'] = '1'
 
 import sys
-import glob
 import numpy as np
 from osgeo import gdal, ogr
 import struct
@@ -42,6 +42,7 @@ WINDOW_SIZE = 15
 TARGET_N_EXEMPLARS = 50  # Target number of exemplars per rectangle
 N_THREADS = 16
 ANNOTATION_SHP = "annotation_labels.shp"
+STACK_IMAGE = "stack.bin"
 # ===========================================
 
 def parse_coords_img_to_rect(s):
@@ -55,29 +56,27 @@ def parse_coords_img_to_rect(s):
     return min(xs), min(ys), max(xs), max(ys)
 
 def read_training_from_shapefile(shp):
-    """Read shapefile and group rectangles by source image"""
+    """Read shapefile and extract all rectangles (ignoring SRC_IMAGE)"""
     ds = ogr.Open(shp, 0)
     if ds is None:
         print(f"[ERROR] Could not open shapefile: {shp}")
         sys.exit(1)
     lyr = ds.GetLayer(0)
-    by_image = {}
+    
+    rectangles = []
+    labels = []
     
     for f in lyr:
         cls = f.GetField("CLASS")
-        src = f.GetField("SRC_IMAGE")
         rect = parse_coords_img_to_rect(f.GetField("COORDS_IMG"))
-        if not src or rect is None:
+        if rect is None:
             continue
         lbl = 1 if cls.strip().upper() == "POSITIVE" else 0
         
-        if src not in by_image:
-            by_image[src] = {'rectangles': [], 'labels': []}
-        
-        by_image[src]['rectangles'].append(rect)
-        by_image[src]['labels'].append(lbl)
+        rectangles.append(rect)
+        labels.append(lbl)
     
-    return by_image
+    return rectangles, labels
 
 def load_image_stack(path):
     """Load all bands from ENVI .bin file"""
@@ -92,17 +91,6 @@ def load_image_stack(path):
         axis=-1
     )
     return data, ds, n_bands
-
-def locate_image_by_basename(basename, dirs):
-    for d in dirs:
-        p = os.path.join(d, basename)
-        if os.path.isfile(p):
-            return p
-    for d in dirs:
-        for root, _, files in os.walk(d):
-            if basename in files:
-                return os.path.join(root, basename)
-    return None
 
 def extract_windows_from_rectangle(img, rectangle, label, h, w, n_bands):
     """Extract individual windows from a training rectangle using tiled sampling"""
@@ -171,80 +159,63 @@ def main():
     
     output_file = sys.argv[1]
     
-    # Check for required shapefile
+    # Check for required files
     if not os.path.exists(ANNOTATION_SHP):
         print(f"[ERROR] Required file not found: {ANNOTATION_SHP}")
+        sys.exit(1)
+    
+    if not os.path.exists(STACK_IMAGE):
+        print(f"[ERROR] Required file not found: {STACK_IMAGE}")
         sys.exit(1)
     
     print(f"[STATUS] WINDOW_SIZE = {WINDOW_SIZE}")
     print(f"[STATUS] TARGET_N_EXEMPLARS = {TARGET_N_EXEMPLARS} per rectangle")
     print(f"[STATUS] Reading shapefile: {ANNOTATION_SHP}")
-    training_by_image = read_training_from_shapefile(ANNOTATION_SHP)
     
-    cwd = os.getcwd()
+    rectangles, labels = read_training_from_shapefile(ANNOTATION_SHP)
+    total_rectangles = len(rectangles)
     
-    image_files = list(training_by_image.keys())
-    total_images = len(image_files)
-    total_rectangles = sum(len(data['rectangles']) for data in training_by_image.values())
-    
-    print(f"[STATUS] Found {total_images} image files with {total_rectangles} total rectangles")
+    print(f"[STATUS] Found {total_rectangles} total rectangles")
     print(f"[STATUS] Processing with {N_THREADS} parallel workers")
     print(f"[STATUS] Each window becomes an individual exemplar\n")
     
-    all_exemplars = []
-    global_processed = 0
-    n_bands_global = None
+    # Load the single stack image
+    print(f"[STATUS] Loading image: {STACK_IMAGE}")
+    img, _, n_bands = load_image_stack(STACK_IMAGE)
+    h, w, c = img.shape
+    print(f"[STATUS] Image size: {w} x {h} x {c} bands")
     
-    for img_idx, image_file in enumerate(image_files, 1):
-        data = training_by_image[image_file]
-        n_rectangles = len(data['rectangles'])
-        
-        print(f"[IMAGE {img_idx}/{total_images}] Processing: {image_file}")
-        print(f"[IMAGE {img_idx}/{total_images}] Rectangles in this file: {n_rectangles}")
-        
-        img_path = locate_image_by_basename(image_file, [cwd])
-        if img_path is None:
-            print(f"[WARNING] Could not find image: {image_file}")
-            global_processed += n_rectangles
-            continue
-        
-        print(f"[IMAGE {img_idx}/{total_images}] Loading image...")
-        img, _, n_bands = load_image_stack(img_path)
-        h, w, c = img.shape
-        print(f"[IMAGE {img_idx}/{total_images}] Using all {c} bands")
-        
-        # Track number of bands (should be consistent across all images)
-        if n_bands_global is None:
-            n_bands_global = c
-        elif n_bands_global != c:
-            print(f"[WARNING] Band count mismatch: expected {n_bands_global}, got {c}")
-        
-        print(f"[IMAGE {img_idx}/{total_images}] Extracting windows from {n_rectangles} rectangles...")
-        
-        inputs = [
-            (img, rect, label, h, w, c)
-            for rect, label in zip(data['rectangles'], data['labels'])
-        ]
-        
-        results = parfor(lambda x: extract_windows_from_rectangle(*x), inputs, N_THREADS)
-        
-        rect_exemplar_counts = []
-        for rect_exemplars in results:
-            rect_exemplar_counts.append(len(rect_exemplars))
-            all_exemplars.extend(rect_exemplars)
-        
-        global_processed += n_rectangles
-        
-        total_from_image = sum(rect_exemplar_counts)
-        print(f"[IMAGE {img_idx}/{total_images}] Extracted {total_from_image} exemplars from {n_rectangles} rectangles")
-        print(f"[TOTAL] Running total: {len(all_exemplars)} exemplars\n")
+    print(f"[STATUS] Extracting windows from {total_rectangles} rectangles...")
+    
+    inputs = [
+        (img, rect, label, h, w, c)
+        for rect, label in zip(rectangles, labels)
+    ]
+    
+    results = parfor(lambda x: extract_windows_from_rectangle(*x), inputs, N_THREADS)
+    
+    all_exemplars = []
+    n_skipped = 0
+    for rect_exemplars in results:
+        if len(rect_exemplars) == 0:
+            n_skipped += 1
+        all_exemplars.extend(rect_exemplars)
     
     n_exemplars = len(all_exemplars)
-    patch_dim = all_exemplars[0]['patch'].shape[0] if n_exemplars > 0 else WINDOW_SIZE * WINDOW_SIZE * n_bands_global
+    
+    print(f"[STATUS] Extracted {n_exemplars} exemplars from {total_rectangles - n_skipped} rectangles")
+    print(f"[STATUS] Skipped {n_skipped} rectangles (too small for window size {WINDOW_SIZE}x{WINDOW_SIZE})")
+    
+    if n_exemplars == 0:
+        print(f"\n[ERROR] No exemplars were generated!")
+        print(f"[ERROR] Check that rectangles in {ANNOTATION_SHP} are large enough for {WINDOW_SIZE}x{WINDOW_SIZE} windows")
+        sys.exit(1)
+    
+    patch_dim = all_exemplars[0]['patch'].shape[0]
     
     print(f"\n[STATUS] Total exemplars generated: {n_exemplars}")
     print(f"[STATUS] Patch dimension: {patch_dim}")
-    print(f"[STATUS] Number of bands: {n_bands_global}")
+    print(f"[STATUS] Number of bands: {c}")
     
     # Write binary file (includes n_bands for classifier to use)
     print(f"[STATUS] Writing to {output_file}...")
@@ -252,7 +223,7 @@ def main():
     with open(output_file, "wb") as f:
         f.write(struct.pack('i', n_exemplars))
         f.write(struct.pack('i', patch_dim))
-        f.write(struct.pack('i', n_bands_global if n_bands_global else 0))
+        f.write(struct.pack('i', c))
         
         for i, ex in enumerate(all_exemplars):
             if i % 10000 == 0:
@@ -272,4 +243,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
