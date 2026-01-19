@@ -15,6 +15,7 @@ from barc import (
     dnbr_256
 )
 
+import numpy as np
 
 
 def is_evidence(
@@ -24,9 +25,23 @@ def is_evidence(
     returns booleans.
     '''
     
-    medium_severity = dnbr_256(dnbr, threshold=78)
+    evidence = dnbr_256(dnbr, threshold=78)
 
-    return medium_severity
+    return evidence
+
+
+
+def is_evidence_2(
+        dnbr,
+        swir_wins
+):
+    '''
+    returns booleans.
+    '''
+    
+    evidence_dnbr = is_evidence(dnbr)
+
+    return np.logical_and(evidence_dnbr, swir_wins)
 
 
 
@@ -77,19 +92,20 @@ def bayesian_update_2(
         *,
         alpha,
         beta,
-        new_dnbr
+        new_dnbr,
+        swir_wins
 ):
     '''
 
     '''
     
-    evidence = is_evidence(new_dnbr)
+    evidence = is_evidence_2(new_dnbr, swir_wins)
 
     new_alpha = alpha + evidence
     new_beta  = beta + ~evidence
 
     #Update feature
-    mask = (new_alpha + 4) / (new_alpha + new_beta + 4) < 0.5#Only no evidence can 
+    mask = (new_alpha + 3) / (new_alpha + new_beta + 3) < 0.5#Only no evidence can 
     new_beta = new_beta - (mask) * (~evidence)
 
     return new_alpha, new_beta
