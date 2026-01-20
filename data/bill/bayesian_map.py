@@ -17,6 +17,8 @@ from barc import (
 
 import numpy as np
 
+from scipy.special import betaincinv
+
 
 def is_evidence(
         dnbr    
@@ -53,6 +55,17 @@ def beta_expectation(
     '''
 
     return alpha / (alpha + beta + 1e-3)
+
+
+
+def lower_quantile(
+        alpha, beta
+):
+    '''
+    Returns 0.025 quantile
+    '''
+
+    return betaincinv(alpha, beta, 0.025)
 
 
 
@@ -96,7 +109,7 @@ def bayesian_update_2(
         swir_wins
 ):
     '''
-
+    dnbr evidence + swir wins
     '''
     
     evidence = is_evidence_2(new_dnbr, swir_wins)
@@ -109,6 +122,5 @@ def bayesian_update_2(
     new_beta = new_beta - (mask) * (~evidence)
 
     return new_alpha, new_beta
-
     
 
