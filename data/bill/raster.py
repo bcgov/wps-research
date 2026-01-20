@@ -346,29 +346,44 @@ def minimum_nan_raster(
 
 
 
-
-
 if __name__ == "__main__":
 
     #handling argv
     if len(sys.argv) < 2:
-        print("Needs a file name")
+        print("Needs a raster file name")
         sys.exit(1)
 
-    filename = sys.argv[1]
+    print('Reading Raster...')
+    raster_filename = sys.argv[1]
 
     #load raster and read
-    raster = Raster(file_name=filename)
+    raster = Raster(file_name = raster_filename)
 
-    X = raster.readBands_and_trim(band_lst=[1,2,3], crop=True)
+    raster_dat = raster.readBands_and_trim(band_lst=[1,2,3])
+
+    if len(sys.argv) > 2:
+
+        from misc.general import (
+            extract_border,
+            draw_border
+        )
+
+        print('Reading Polygon...')
+        polygon_filename = sys.argv[2]
+
+        print('Applying polygon onto raster...')
+        polygon_dat = Raster(polygon_filename).read_bands(band_lst=[1])
+        border = extract_border(
+            polygon_dat.squeeze(),
+            thickness=8
+        )
+        raster_dat = draw_border(raster_dat, border)
 
     #Plot title
     title = raster.acquisition_timestamp
-    
-    if len(sys.argv) > 2: title = sys.argv[2]
 
     #plot result
     plot(
-        X,
-        title = title
+        raster_dat,
+        title = f'Raster of band [1,2,3] - {title}'
     )

@@ -12,11 +12,17 @@ import matplotlib.pyplot as plt
 
 from raster import Raster
 
-from misc.general import htrim_3d
+from misc.general import (
+    htrim_3d,
+    extract_border,
+    draw_border
+)
 
 from sampling import in_out_sampling
 
 import numpy as np
+
+import os
 
 import sys
 
@@ -35,7 +41,7 @@ if __name__ == '__main__':
     ### SOME DEFAULT VALUE, CAN SET AS INPUT LATER #######
 
     seed = 42
-    in_sample_size = 200
+    in_sample_size = 100
 
     ############### handling argv #######################
 
@@ -59,7 +65,12 @@ if __name__ == '__main__':
     raster = Raster(file_name=raster_filename)
     raster_dat = raster.read_bands(band_lst='all')
 
-    #Sampling, the sample contains all bands in the data
+    #Read Polygon data for pixel referencing
+    polygon = Raster(file_name=polygon_filename)
+    polygon_dat = polygon.read_bands(band_lst=[1])
+
+    ##############Sampling, the sample contains all bands in the data #############
+
     original_indices, samples, out_in_ratio = in_out_sampling(
         raster_filename=raster_filename,
         polygon_filename=polygon_filename,
@@ -68,15 +79,14 @@ if __name__ == '__main__':
 
     out_sample_size = int( in_sample_size * out_in_ratio )
 
-    
+    ############ Read the border of polygon ###############
+
+    border = extract_border(polygon_dat.squeeze(), thickness=8)
+
     ############ Load data from cache ######################
 
-    import os
-
-
-
     #Check if we already have the data stored.
-    CACHE_PATH = f'caching/mt{method_name}_sz{in_sample_size}_rs{seed}.npz'
+    CACHE_PATH = f'caching/mt={method_name}_sz={in_sample_size}_rs={seed}_timestamp={raster.acquisition_timestamp}.npz'
 
     if os.path.exists(CACHE_PATH):
 
@@ -157,7 +167,12 @@ if __name__ == '__main__':
     #Right side of the plot, the main image (let parameter determine different band combination)
 
     img_plot = ax_img.imshow(
-        htrim_3d( raster_dat[..., [b - 1 for b in band_lst]] ) #Because band convention starts at 1, but index is from 0
+
+        draw_border(
+            htrim_3d( raster_dat[..., [b - 1 for b in band_lst]] ), #Because band convention starts at 1, but index is from 0
+            border
+        )
+
     )
     
     ax_img.set_title(f"Band: {band_lst}")
@@ -225,7 +240,10 @@ if __name__ == '__main__':
             raise KeyError("This band combination is not in cache.")
 
         img_plot.set_data(
-            htrim_3d(raster_dat[..., [b - 1 for b in band_lst]])
+            draw_border(
+                htrim_3d(raster_dat[..., [b - 1 for b in band_lst]]),
+                border
+            )
         )
 
         ax_img.set_title(f"Band: {txt}")
