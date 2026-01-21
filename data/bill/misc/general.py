@@ -220,6 +220,85 @@ def ignore_nan_2D(
 
 
 
+def extract_border(
+        mask: np.ndarray,
+        thickness: int = 1
+):
+    
+    '''
+    Description
+    -----------
+    Extracts the border of a whole polygon area.
+
+
+    Parameters
+    ----------
+    A 2D array of boolean dtype
+
+    E.g: Everything outside of the polygon is False and True otherwise
+
+    
+    Returns
+    -------
+    The same thing but inside will be false. Leaving us just the border.
+    '''
+    from scipy.ndimage import binary_erosion
+
+    if thickness < 1:
+        raise ValueError("thickness must be >= 1")
+
+    mask = mask.astype(bool)
+
+    eroded = binary_erosion(
+        mask,
+        structure=np.ones((3, 3)),
+        iterations=thickness
+    )
+
+    border = mask & (~eroded)
+    return border
+
+
+
+def draw_border(
+    img: np.ndarray,
+    border: np.ndarray,
+    color=(255, 0, 0)
+):
+    """
+    Description
+    -----------
+    Add border and colour it to a raster image.
+
+
+    Parameters
+    ----------
+    img    : (H, W, C)
+
+    border : (H, W) boolean
+
+    color  : length-C tuple - Default is RED.
+
+
+    Returns
+    -------
+    Raster image with coloured polygon applied directly onto it.
+    """
+
+    from exceptions.matrix import Shape_Mismatched_Error
+
+    try:
+        assert border.shape == img.shape[:2]
+
+    except Exception:
+
+        raise Shape_Mismatched_Error("Image and border don't share the same 2D shape.")
+
+    out = img.copy()
+
+    out[border] = color
+
+    return out
 
 
     
