@@ -28,4 +28,4 @@ print(bn_new)
 #  envi_header_modify.py [.hdr file to modify] [nrow] [ncol] [nband] [band 1 name]... [band n name]')
 
 samples, lines, bands = read_hdr('stack.hdr')
-run('envi_header_modify.py ' + (' '.join([str(x) for x in [lines, samples, bands] + bn_new]))
+run('envi_header_modify.py ' + (' '.join([str(x) for x in [lines, samples, bands] + bn_new])))
