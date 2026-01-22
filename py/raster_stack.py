@@ -21,8 +21,6 @@ print('')
 
 if not exists(outf):
     a = os.system(cmd)
-else:
-    err("output file already exists")
 
 ncol, nrow, nb = 0,0,0
 ncols, nrows, nbands = [], [], 0
@@ -30,7 +28,7 @@ bn = []
 for r in rasters:
     ncol, nrow, nb = read_hdr(hdr_fn(r))
     ncols += [ncol]
-    nrols += [nrow]
+    nrows += [nrow]
     nbands += int(nb)
     bn += band_names(hdr_fn(r))
 
