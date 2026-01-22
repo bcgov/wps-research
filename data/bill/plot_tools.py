@@ -32,6 +32,7 @@ def plot(
 
         plt.figure(figsize=figsize) 
         plt.imshow(X)
+        plt.axis('off')
         plt.title(title)
         plt.tight_layout()
         plt.show()
