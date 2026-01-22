@@ -11,6 +11,7 @@ lines = [[line.split('_')[2], line] for line in lines]
 lines.sort()
 lines = [line[1] for line in lines]
 
+samples, lines, bands = 0, 0, 0
 bn_new = []
 for line in lines:
     ds = line.split('_')[2].split('T')[0]
@@ -24,3 +25,7 @@ for line in lines:
 
 print(bn_new)
 # run(' '.join(['raster_stack.py'] + lines + ['stack.bin']))
+#  envi_header_modify.py [.hdr file to modify] [nrow] [ncol] [nband] [band 1 name]... [band n name]')
+
+samples, lines, bands = read_hdr('stack.hdr')
+run('envi_header_modify.py ' + (' '.join([str(x) for x in [lines, samples, bands] + bn_new]))
