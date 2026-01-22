@@ -1,7 +1,7 @@
 '''20240723 stack sentinel2 .bin files in temporal order
 
 one tile only supported'''
-from misc import run
+from misc import run, hdr_fn, band_names
 import os
 
 lines = [x.strip() for x in os.popen('ls -1 S*.bin').readlines()]
@@ -12,6 +12,7 @@ lines.sort()
 lines = [line[1] for line in lines]
 
 for line in lines:
-    print(line)
+    ds = line.split('_')[2].split('T')[0]
+    print(ds, line)
 
 run(' '.join(['raster_stack.py'] + lines + ['stack.bin']))
