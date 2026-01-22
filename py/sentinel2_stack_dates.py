@@ -14,11 +14,11 @@ lines = [line[1] for line in lines]
 ncol, nrow, nb = 0, 0, 0
 bn_new = []
 for line in lines:
-    ds = line.split('_')[2].split('T')[0]
+    ds = line.split('_')[2].split('T')[0].strip()
     print(ds, line)
 
     ncol, nrow, nb = read_hdr(hdr_fn(line))
-    bn = band_names(hdr_fn(line))
+    bn = [x.strip() for x in band_names(hdr_fn(line))]
 
     bn_new += [ds + ': ' + i for i in bn]
 
