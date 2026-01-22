@@ -27,5 +27,5 @@ print(bn_new)
 run(' '.join(['raster_stack.py'] + lines + ['stack.bin']))
 #  envi_header_modify.py [.hdr file to modify] [nrow] [ncol] [nband] [band 1 name]... [band n name]')
 ncol, nrow, nb = read_hdr('stack.hdr')
-bn_new = [x.replace(' ', '_') for x in bn_new]
-run('envi_header_modify.py ' + (' '.join([str(x) for x in [ncol, nrow, nb] + bn_new])))
+# bn_new = [x.replace(' ', '_') for x in bn_new]
+# run('envi_header_modify.py ' + (' '.join([str(x) for x in [ncol, nrow, nb] + bn_new])))
