@@ -1,7 +1,7 @@
 '''20240723 stack sentinel2 .bin files in temporal order
 
 one tile only supported'''
-from misc import run, hdr_fn, band_names, read_hdr
+from misc import run, hdr_fn, band_names, read_hdr, write_hdr
 import os
 
 lines = [x.strip() for x in os.popen('ls -1 S*.bin').readlines()]
@@ -27,5 +27,9 @@ print(bn_new)
 run(' '.join(['raster_stack.py'] + lines + ['stack.bin']))
 #  envi_header_modify.py [.hdr file to modify] [nrow] [ncol] [nband] [band 1 name]... [band n name]')
 ncol, nrow, nb = read_hdr('stack.hdr')
+
+write_hdr('stack.hdr', ncol, nrow, nb, bn_new)
+# def write_hdr(hfn, samples, lines, bands, band_names = None):
+
 # bn_new = [x.replace(' ', '_') for x in bn_new]
 # run('envi_header_modify.py ' + (' '.join([str(x) for x in [ncol, nrow, nb] + bn_new])))
