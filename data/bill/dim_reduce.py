@@ -80,7 +80,7 @@ def parDimRed(
 
     futures = {}
 
-    with ProcessPoolExecutor(max_workers=2) as pool:
+    with ProcessPoolExecutor(max_workers=4) as pool:
 
         for info, X, method, params in tasks:
             f = pool.submit(
