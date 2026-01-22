@@ -33,7 +33,7 @@ for r in rasters:
     bn += band_names(hdr_fn(r))
 
 # def write_hdr(hfn, samples, lines, bands, band_names = None):
-write_hdr(ohfn, ncols[0], nrows[0], nbands, bn)
+write_hdr(ofhn, ncols[0], nrows[0], nbands, bn)
 '''
 for r in rasters:
     print(" ", r)
