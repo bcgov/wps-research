@@ -1,4 +1,4 @@
-/** 20260122
+/** 2026012*
  * Minimum Noise Fraction (MNF) Transform - CPU Implementation
  * Parallelized with OpenMP, using Eigen for linear algebra
  * Designed for large datasets that exceed GPU memory
@@ -11,9 +11,18 @@
  * 
  * Usage: mnf_transform <input_raster> <output_raster> [options]
  * 
- * Compile:
+ * Compile (choose one based on your Eigen installation):
+ *   # If Eigen is in /usr/include/eigen3:
  *   g++ -O3 -march=native -fopenmp -DNDEBUG mnf_transform_cpu.cpp -o mnf_transform \
- *       $(gdal-config --cflags) $(gdal-config --libs) -I/usr/include/eigen3
+ *       $(gdal-config --cflags) $(gdal-config --libs)
+ * 
+ *   # If Eigen is elsewhere, specify the path:
+ *   g++ -O3 -march=native -fopenmp -DNDEBUG mnf_transform_cpu.cpp -o mnf_transform \
+ *       $(gdal-config --cflags) $(gdal-config --libs) -I/path/to/eigen
+ * 
+ *   # On Ubuntu/Debian: sudo apt install libeigen3-dev
+ *   # On RHEL/Fedora:   sudo dnf install eigen3-devel
+ *   # On macOS:         brew install eigen
  */
 
 #include <iostream>
@@ -26,8 +35,8 @@
 #include <chrono>
 #include <omp.h>
 
-#include <Eigen/Dense>
-#include <Eigen/Eigenvalues>
+#include <eigen3/Eigen/Dense>
+#include <eigen3/Eigen/Eigenvalues>
 
 #include <gdal.h>
 #include <gdal_priv.h>
@@ -762,6 +771,3 @@ int main(int argc, char** argv) {
     
     return 0;
 }
-
-
-
