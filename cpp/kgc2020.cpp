@@ -263,8 +263,15 @@ int main(int argc, char ** argv){
     last_number_of_classes = number_of_classes;
   }
 
+  free(ddup_lookup);
+  free(dmat_d);
   free(ddup_i);
   free(dat_0);
+  free(label);
+  free(d_min);
+  free(d_max);
   free(dat);
+  free(rho);
+
   return 0;
 }
