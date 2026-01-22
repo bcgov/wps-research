@@ -74,8 +74,6 @@ def parDimRed(
     #Determine number of workers
     data_size = len(tasks)
 
-    # n_workers = min(data_size, os.cpu_count() // 2)
-
     t0 = time()
 
     futures = {}

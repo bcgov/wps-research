@@ -166,6 +166,8 @@ def band_index(
             return i
         
     raise No_Band_Error(f'Band {band} is not in the data.')
+    
+
 
 
     

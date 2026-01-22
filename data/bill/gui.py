@@ -35,13 +35,97 @@ from dim_reduce import (
 )
 
 
+class GUI:
+
+    def __init__(
+            self,
+            random_state = 123,
+            in_sample_size = 100,
+            method = 'tsne'
+    ):
+        '''
+        Initialized parameters
+        ----------------------
+        in_sample_size: number of points to be sampled from inside the polygon.
+
+        *out_sample_size: will automatically calculate using true ratio of in-out.
+        '''
+        
+        #Default values
+        self.random_state = random_state
+        self.in_sample_size = in_sample_size
+        self.method = method
+
+
+
+    def __load_raster(
+            self,
+            filename: str
+    ):
+        '''
+        Load raster data. Must be ENVI file or tiff file.
+        '''
+        self.raster = Raster(file_name = filename)
+
+        return
+
+
+
+    def __load_polygon(
+            self,
+            filename: str,
+            border_thickness: int = 8
+    ):
+        '''
+        Polygon needs to be rasterized using shapefile_rasterize_onto.py or equivalent.
+        '''
+
+        from exceptions.sen2 import PolygonException
+
+
+        polygon = Raster(file_name=polygon_filename)
+
+        if not polygon.is_polygon(polygon):
+            #Check if this is a polygon.
+            raise PolygonException(f"Not a polygon @ {filename}")
+        
+
+        #If it is a polygon, it has just 1 channel, so squeeze makes it a pretty 2D array.
+        self.polygon = polygon
+
+        #extract border
+        self.border = extract_border(
+            mask=polygon_dat.squeeze(), 
+            thickness=border_thickness
+        )
+
+        return
+    
+
+
+    def __sampling_in_out(
+            self
+    ):
+        '''
+        For visualization of embedding space, sampling is essential.
+        '''
+
+        original_indices, samples, out_in_ratio = in_out_sampling(
+            raster_dat=self.raster.read_bands('all'),
+            polygon_dat=self.polygon.read_bands('all'),
+            in_sample_size = self.in_sample_size
+        )
+
+        self.out_sample_size = int( self.in_sample_size * out_in_ratio )
+
+        return original_indices, samples
+
+
+
 
 if __name__ == '__main__':
 
     ### SOME DEFAULT VALUE, CAN SET AS INPUT LATER #######
-
-    seed = 42
-    in_sample_size = 100
 
     ############### handling argv #######################
 

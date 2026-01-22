@@ -8,3 +8,7 @@ class Out_Of_Bound_Band_Index(Exception):
 
 class DateNotFound(Exception):
     ''' No imagery of this date '''
+
+
+class PolygonException(Exception):
+    ''' Problem with polygon '''

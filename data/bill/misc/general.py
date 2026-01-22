@@ -301,4 +301,31 @@ def draw_border(
     return out
 
 
+
+
+def is_boolean_matrix(
+        A
+):
+    '''
+    Description
+    -----------
+    Checks if data are of boolean dtype.
+    '''
+
+    A = np.asarray(A)
+
+    # Case 1: true boolean dtype
+    if A.dtype == np.bool_:
+        return True
+
+    # Case 2: numeric but only 0/1
+    if np.issubdtype(A.dtype, np.integer):
+        return np.all((A == 0) | (A == 1))
+
+    if np.issubdtype(A.dtype, np.floating):
+        return np.all((A == 0.0) | (A == 1.0))
+
+    return False
+
+
     
