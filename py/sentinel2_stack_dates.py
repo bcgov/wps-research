@@ -24,8 +24,7 @@ for line in lines:
 
 
 print(bn_new)
-# run(' '.join(['raster_stack.py'] + lines + ['stack.bin']))
+run(' '.join(['raster_stack.py'] + lines + ['stack.bin']))
 #  envi_header_modify.py [.hdr file to modify] [nrow] [ncol] [nband] [band 1 name]... [band n name]')
-
 ncol, nrow, nb = read_hdr('stack.hdr')
 run('envi_header_modify.py ' + (' '.join([str(x) for x in [ncol, nrow, nb] + bn_new])))
