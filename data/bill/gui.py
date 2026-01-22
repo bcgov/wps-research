@@ -20,6 +20,11 @@ from misc.general import (
 
 from sampling import in_out_sampling
 
+from dim_reduce import (
+    tsne,
+    parDimRed
+)
+
 import numpy as np
 
 import os
@@ -27,12 +32,6 @@ import os
 import sys
 
 import ast
-
-from dim_reduce import (
-    tsne,
-    pca,
-    parDimRed
-)
 
 
 class GUI:
@@ -56,14 +55,40 @@ class GUI:
         self.in_sample_size = in_sample_size
         self.method = method
 
+        #Embedding
+        self.method_dict = {
+            'tsne': tsne
+        }
+
+        #embedding parameters
+        self.method_params = {
+            'tsne' : {
+            'n_components': 2,
+            'perplexity': 30,
+            'learning_rate': "auto",
+            'init': "pca",
+            'random_state': self.random_state
+            }
+        }
+
+        #Type
+        self.type_dict = {
+            'image': [1],
+            'dnbr': [2]
+        }
+
+        #Initialize tasks
+        self.__load_polygon()
+
 
 
     def __load_raster(
             self,
-            filename: str
+            filename: str,
+
     ):
         '''
-        Load raster data. Must be ENVI file or tiff file.
+        Load raster data. Must be ENVI file.
         '''
         self.raster = Raster(file_name = filename)
 
@@ -74,7 +99,7 @@ class GUI:
     def __load_polygon(
             self,
             filename: str,
-            border_thickness: int = 8
+            border_thickness: int = 7
     ):
         '''
         Polygon needs to be rasterized using shapefile_rasterize_onto.py or equivalent.
@@ -92,6 +117,8 @@ class GUI:
 
         #If it is a polygon, it has just 1 channel, so squeeze makes it a pretty 2D array.
         self.polygon = polygon
+
+        self.current_polygon_filename = filename
 
         #extract border
         self.border = extract_border(
@@ -119,7 +146,115 @@ class GUI:
         self.out_sample_size = int( self.in_sample_size * out_in_ratio )
 
         return original_indices, samples
+    
 
+
+    def __generate_embedding(
+            self,
+            CACHE_PATH: str,
+            data
+    ):
+        '''
+        Only used if data not cached.
+        '''
+        from misc.general import get_combinations
+
+
+        band_combinations = get_combinations(
+            val_lst=np.arange(data.shape[-1]) + 1,
+            least=3
+        )
+
+        #Prepare tasks
+        tasks = [
+            (
+                b, data[..., [bb - 1 for bb in b]], 
+                self.method_dict[method_name], self.method_params[method_name]
+            )
+            
+            for b in band_combinations
+        ]
+
+        data = parDimRed(tasks)
+
+        np.savez(CACHE_PATH, **data)
+
+        return data
+
+
+
+    def __load_cache(
+            self,
+            CACHE_PATH: str
+    ):
+        '''
+        If data is already cached, load it.
+        '''
+
+        return dict(np.load(CACHE_PATH, allow_pickle=True))
+            
+
+
+    def __load_dictionary(
+            self,
+            type_:str,
+            method:str
+    ):
+        '''
+        If user changes embedding method or type, load cache or create if not cached.
+
+        Only use when changing type and method.
+
+        Do not use if changing band list.
+        '''
+        
+        _, samples  = self.__sampling_in_out()
+
+
+        CACHE_PATH = f'image=polygon={self.current_polygon_filename}&type={type_}&method={self.method}&size={self.in_sample_size}&state={self.random_state}npz'
+
+        if os.path.exists(CACHE_PATH):
+            self.band_dictionary = self.__load_cache(CACHE_PATH)
+
+        else:
+            self.band_dictionary = self.__generate_embedding(CACHE_PATH, samples)
+
+
+
+    def __load_band_data(
+            self,
+            band_list: str
+    ):
+        '''
+        This is used after a dictionary is loaded.
+
+        Notice: 
+
+        band_list = [1,2,4] is the same as [1,4,2]. Saved keys are in increasing order.
+        '''
+
+        band_list = ast.literal_eval(band_list)
+
+        try:
+
+            return self.band_dictionary[str(band_list)]
+        
+        except Exception:
+            
+            raise KeyError("This band combination is not in KEYs.")
+        
+
+
+
+    def run(
+            self
+    ):
+        '''
+        Runs GUI
+        '''
+
+
+    
 
 
 
@@ -208,7 +343,8 @@ if __name__ == '__main__':
         #Prepare tasks
         tasks = [
             (
-                b, samples[..., [bb - 1 for bb in b]], method_dict[method_name], tsne_params
+                b, samples[..., [bb - 1 for bb in b]], 
+                self.method_dict[method_name], tsne_params
             )
             
             for b in band_combinations

@@ -328,4 +328,47 @@ def is_boolean_matrix(
     return False
 
 
-    
+
+
+def get_combinations(
+        val_lst: list,
+        least: int = 1,
+        most: int = None
+):
+
+    '''
+    Description
+    -----------
+    Get combination of a list (order doesn't matter)
+
+
+    Parameters
+    ----------
+    val_lst: list of values to find comb
+
+    least: at least how many values in each combination.
+
+    most: at least how many values in each combination.
+
+
+    Returns
+    -------
+    list[list]
+    '''
+
+    from itertools import combinations
+
+
+    n = len(val_lst)
+
+    if most is None:
+        most = n
+
+    if least < 1 or most > n or least > most:
+        raise ValueError("Invalid least/most values")
+
+    return [
+        list(c)
+        for k in range(least, most + 1)
+        for c in combinations(val_lst, k)
+    ]
