@@ -11,7 +11,7 @@ lines = [[line.split('_')[2], line] for line in lines]
 lines.sort()
 lines = [line[1] for line in lines]
 
-new_bn = []
+bn_new = []
 for line in lines:
     ds = line.split('_')[2].split('T')[0]
     print(ds, line)
