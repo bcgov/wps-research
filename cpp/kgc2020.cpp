@@ -59,6 +59,28 @@ void * dmat_threadfun(void * arg){
   }
 }
 
+/* iterative version */
+size_t top(size_t j) {
+    while (label[j] == 0) {
+        float rho_max = rho[j];
+        size_t max_i = j;
+        for (size_t i = 0; i < k_use; i++) {
+            size_t ni = dmat_i[j * kmax + i];
+            if (rho[ni] > rho_max) {
+                rho_max = rho[ni];
+                max_i = ni;
+            }
+        }
+        if (max_i == j) {
+            label[j] = next_label++;
+            top_i.push_back(j);
+            return label[j];
+        }
+        j = max_i;
+    }
+    return label[j];
+}
+/*
 size_t top(size_t j){
   size_t i, ki, ni;
   if(label[j] > 0) return label[j];
@@ -84,7 +106,7 @@ size_t top(size_t j){
     }
   }
 }
-
+*/
 int main(int argc, char ** argv){
   kmax = 2000;
   cout << "dmat.exe" << endl; // shuffle data according to deduplication index
@@ -96,7 +118,7 @@ int main(int argc, char ** argv){
   str hfn(hdr_fn(inf)); // input header
   hread(hfn, nr, nc, nb); // read input hdr
   np = nr * nc; // number of pixels
-  dat = bread(inf, nr, nc, nb); // read bip data
+  // dat = bread(inf, nr, nc, nb); // read bip data
 
   str dpf(argv[2]);
   if(!exists(dpf)) err("failed to open deduplicated data index file");
@@ -263,7 +285,6 @@ int main(int argc, char ** argv){
     last_number_of_classes = number_of_classes;
   }
 
-  delete my_pthread;
   free(ddup_lookup);
   free(dmat_d);
   free(ddup_i);
