@@ -263,6 +263,7 @@ int main(int argc, char ** argv){
     last_number_of_classes = number_of_classes;
   }
 
+  delete my_pthread;
   free(ddup_lookup);
   free(dmat_d);
   free(ddup_i);
