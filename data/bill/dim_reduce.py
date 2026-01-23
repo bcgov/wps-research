@@ -10,54 +10,36 @@ import os
 def tsne(
         X,
         *,
-        band_list,
-        params: dict
+        band_list
 ):
-    '''
-    Just a TSNE implementation.
-    '''
-    from sklearn.manifold import TSNE
-
-    print(f'{band_list}: pid = {os.getpid()} running...') #Write wrapper?
     
-    #TSNE dimensionality reduction
-    X_s = StandardScaler().fit_transform(X)
-
-    tsne = TSNE(
-        **params
-    )
-
-    X_tsne = tsne.fit_transform(X_s)
-
-    print(f'{band_list}: pid = {os.getpid()} ...Done.')
-
-    return X_tsne
-
-
-
-def pca(
-        X,
-        *,
-        band_list,
-        params: dict
-):
-    '''
-    Just a PCA implementation.
-    '''
-    from sklearn.decomposition import PCA
+    from openTSNE import affinity, TSNEEmbedding
+    import numpy as np
     
     print(f'{band_list}: pid = {os.getpid()} running...')
 
-    pipe = Pipeline([
-        ('scale', StandardScaler()),
-        ('pca', PCA(**params))
-    ])
+    aff = affinity.PerplexityBasedNN(
+        X,
+        perplexity=30,
+        metric="euclidean",
+        n_jobs=4,
+        random_state = 123
+    )
 
-    X_pca = pipe.fit_transform(X)
+    init = TSNEEmbedding(
+        np.random.normal(0, 1e-4, (X.shape[0], 2)),
+        aff
+    )
+
+    embedding = init.optimize(
+        n_iter=1000,
+        exaggeration=12,
+        learning_rate=200
+    )
 
     print(f'{band_list}: pid = {os.getpid()} ...Done.')
 
-    return pipe, X_pca
+    return embedding
 
 
 
@@ -92,34 +74,30 @@ def parDimRed(
 
     with ProcessPoolExecutor(max_workers=4) as pool:
 
-        for band_list, X, method, params in tasks:
+        for band_list, X in tasks:
+
             f = pool.submit(
-
-                method,
-
+                tsne,
                 X,
-                band_list=band_list,
-                params=params
-
+                band_list=band_list
             )
+
             futures[f] = band_list
 
 
-        embedding_dict = {}
-        model_dict = {}
+        embed_dict = {}
 
         for f in as_completed(futures):
 
-            model, embedding = f.result()
+            embedding = f.result()
 
             band_lst = futures[f]
 
-            embedding_dict[str(band_lst)] = embedding
-            model_dict[str(band_lst)] = model
+            embed_dict[str(band_lst)] = embedding
 
-    print(f'{method} on {data_size} data took {time() - t0:.2f} s')
+    print(f'OpenTSNE on {data_size} data took {time() - t0:.2f} s')
 
-    return embedding_dict, model_dict
+    return embed_dict
 
 
 

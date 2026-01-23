@@ -15,8 +15,6 @@ from misc.general import (
 from sampling import in_out_sampling
 
 from dim_reduce import (
-    tsne,
-    pca,
     parDimRed
 )
 
@@ -32,43 +30,19 @@ import ast
 class GUI_settings:
 
     def __init__(
-            self,
-            random_state
+            self
     ):
-        
-        self.random_state = random_state
+        self.random_state = 123,
+        self.in_sample_size = 300
 
-        self.method_dict = {
-            'tsne': tsne,
-            'pca': pca
-        }
-
-        #Embedding parameters
-        self.method_params = {
-            'tsne' : {
-                'n_components': 2,
-                'perplexity': 30,
-                'learning_rate': "auto",
-                'init': "pca",
-                'random_state': self.random_state
-            },
-
-            'pca': {
-                'n_components':2,
-                'random_state': self.random_state
-            }
-        }
 
 
 class GUI(GUI_settings):
 
     def __init__(
             self,
-            method: str,
             polygon_filename:str,
-            image_filename: str,
-            random_state = 123,
-            in_sample_size = 100
+            image_filename: str
     ):
         '''
         Initialized parameters
@@ -78,15 +52,11 @@ class GUI(GUI_settings):
         *out_sample_size: will automatically calculate using true ratio of in-out.
         '''
 
-        super().__init__(random_state=random_state)
+        super().__init__()
         
         #Default values
         self.polygon_filename = polygon_filename
         self.image_filename = image_filename
-        self.in_sample_size = in_sample_size
-
-        #Methods
-        self.method = method
 
         #Init tasks
         self.load_image()
@@ -103,7 +73,6 @@ class GUI(GUI_settings):
         self.image = Raster(self.image_filename)
 
         self.image_dat = self.image.read_bands('all')
-
 
 
 
@@ -179,13 +148,10 @@ class GUI(GUI_settings):
         '''
         from joblib import load
 
-        print("Loading Embedding...")
-        embed_dict = dict(np.load(self.CACHE_EMBEDDING_PATH, allow_pickle=True))
+        print("Loading Embeddings...")
+        embed_dict =  load(self.CACHE_EMBEDDING_PATH)
 
-        print("Loading Models...")
-        model_dict =  load(self.CACHE_MODEL_PATH)
-
-        return embed_dict, model_dict
+        return embed_dict
 
     
 
@@ -209,23 +175,18 @@ class GUI(GUI_settings):
         tasks = [
             (
                 b, 
-                sams[..., [bb - 1 for bb in b]], 
-                self.method_dict[self.method], 
-                self.method_params[self.method]
+                sams[..., [bb - 1 for bb in b]]
             )
             
             for b in band_combinations
         ]
 
-        embed_dict, model_dict = parDimRed(tasks)
+        embed_dict = parDimRed(tasks)
 
         print("Saving Embedding...")
-        np.savez(self.CACHE_EMBEDDING_PATH, **embed_dict)
+        dump(embed_dict, self.CACHE_EMBEDDING_PATH)
 
-        print("Saving Models...")
-        dump(model_dict, self.CACHE_MODEL_PATH)
-
-        return embed_dict, model_dict
+        return embed_dict
             
 
 
@@ -242,16 +203,15 @@ class GUI(GUI_settings):
         
         self.sampling_in_out()
 
-        self.CACHE_EMBEDDING_PATH = f'caching/timestamp={self.image.acquisition_timestamp}&method={self.method}&size={self.in_sample_size}&state={self.random_state}.npz'
-        self.CACHE_MODEL_PATH = f'caching/timestamp={self.image.acquisition_timestamp}&method={self.method}&size={self.in_sample_size}&state={self.random_state}.joblib'
+        self.CACHE_EMBEDDING_PATH = f'caching/timestamp={self.image.acquisition_timestamp}&size={self.in_sample_size}&state={self.random_state}.joblib'
 
         if os.path.exists(self.CACHE_EMBEDDING_PATH):
 
-            self.band_dictionary, self.model_dictionary = self.load_cache()
+            self.band_dictionary = self.load_cache()
 
         else:
 
-            self.band_dictionary, self.model_dictionary = self.generate_embedding()
+            self.band_dictionary = self.generate_embedding()
 
 
 
@@ -272,7 +232,7 @@ class GUI(GUI_settings):
         try:
             embedding = self.band_dictionary[str(sorted_band_list)]
 
-            return embedding
+            return np.array(embedding)
         
         except Exception:
             
@@ -328,7 +288,7 @@ class GUI(GUI_settings):
         sc_in = ax_tsne.scatter(
             embed[:self.in_sample_size, 0], 
             embed[:self.in_sample_size, 1],
-            s = 30,
+            s = 20,
             c='red',
             label='Inside',
             picker=3  # ← this enables clicking
@@ -337,13 +297,13 @@ class GUI(GUI_settings):
         sc_out = ax_tsne.scatter(
             embed[self.in_sample_size:, 0], 
             embed[self.in_sample_size:, 1],
-            s=30,
+            s = 20,
             c='blue',
             label='Outside',
             picker=3
         )
 
-        ax_tsne.set_title(f"Method: {self.method} | In/Out sample:{self.in_sample_size} / {self.out_sample_size} | Seed: {self.random_state}")
+        ax_tsne.set_title(f"Method: TSNE | In/Out sample:{self.in_sample_size} / {self.out_sample_size} | Seed: {self.random_state}")
 
         ax_tsne.legend()
 
@@ -365,8 +325,8 @@ class GUI(GUI_settings):
         # ----------------------------
         # 4. Click logic
         # ----------------------------
-        hline = ax_img.axhline(0, color="green", linewidth=1, visible=False)
-        vline = ax_img.axvline(0, color="green", linewidth=1, visible=False)
+        hline = ax_img.axhline(0, color="red", linewidth=1.5, visible=False)
+        vline = ax_img.axvline(0, color="red", linewidth=1.5, visible=False)
 
         W = self.image_dat.shape[1]
 
@@ -452,7 +412,6 @@ if __name__ == '__main__':
     polygon_filename = sys.argv[2]
 
     agent = GUI(
-        method='pca',
         polygon_filename=polygon_filename,
         image_filename=image_filename
     )
