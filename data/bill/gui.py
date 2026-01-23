@@ -98,6 +98,22 @@ class GUI(GUI_settings):
 
 
 
+
+    def get_band_name(
+            self,
+            band_list: list
+    ):
+        '''
+        Display real band name
+
+        E.g: 1 -> B12, 2 -> B11.
+        '''
+        band_names = [self.image.band_name(i) for i in band_list]
+        
+        return band_names
+
+
+
     def load_polygon(
             self,
             border_thickness: int = 7
@@ -113,7 +129,7 @@ class GUI(GUI_settings):
 
         if not polygon.is_polygon():
             #Check if this is a polygon.
-            raise PolygonException(f"Not a polygon @ {filename}")
+            raise PolygonException(f"Not a polygon @ {self.polygon_filename}")
         
 
         #If it is a polygon, it has just 1 channel, so squeeze makes it a pretty 2D array.
@@ -136,7 +152,7 @@ class GUI(GUI_settings):
         main_raster is the focused raster.
         '''
 
-        self.original_indices, samples, out_in_ratio = in_out_sampling(
+        self.original_indices, self.samples, out_in_ratio = in_out_sampling(
             raster_dat=self.image_dat,
             polygon_dat=self.polygon.read_bands('all'),
             in_sample_size = self.in_sample_size,
@@ -144,37 +160,33 @@ class GUI(GUI_settings):
         )
 
         self.out_sample_size = int( self.in_sample_size * out_in_ratio )
-
-        return samples
     
 
 
     def load_cache(
-            self,
-            CACHE_PATH: str
+            self
     ):
         '''
         If data is already cached, load it.
         '''
 
-        return dict(np.load(CACHE_PATH, allow_pickle=True))
+        return dict(np.load(self.CACHE_PATH, allow_pickle=True))
+
     
 
 
     def generate_embedding(
-            self,
-            CACHE_PATH: str,
-            data,
-            method
+            self
     ):
         '''
         Only used if data not cached.
         '''
         from misc.general import get_combinations
 
+        sams = self.samples
 
         band_combinations = get_combinations(
-            val_lst=list(range(1, data.shape[-1] + 1)),
+            val_lst=list(range(1, sams.shape[-1] + 1)),
             least=2
         )
 
@@ -182,7 +194,7 @@ class GUI(GUI_settings):
         tasks = [
             (
                 b, 
-                data[..., [bb - 1 for bb in b]], 
+                sams[..., [bb - 1 for bb in b]], 
                 self.method_dict[self.method], 
                 self.method_params[self.method]
             )
@@ -192,7 +204,7 @@ class GUI(GUI_settings):
 
         embed_dict = parDimRed(tasks)
 
-        np.savez(CACHE_PATH, **embed_dict)
+        np.savez(self.CACHE_PATH, **embed_dict)
 
         return embed_dict
             
@@ -209,43 +221,36 @@ class GUI(GUI_settings):
         Do not use if changing band list.
         '''
         
-        samples  = self.sampling_in_out()
+        self.sampling_in_out()
 
-        # all_file_name = self.raster_filename[0]
+        self.CACHE_PATH = f'caching/timestamp={self.image.acquisition_timestamp}&method={self.method}&size={self.in_sample_size}&state={self.random_state}.npz'
 
-        # CACHE_PATH = f'image={img_name}&polygon={self.polygon_filename}&type={type_}&method={method}&size={self.in_sample_size}&state={self.random_state}npz'
+        if os.path.exists(self.CACHE_PATH):
 
-        CACHE_PATH = f'caching/method={self.method}&size={self.in_sample_size}&state={self.random_state}.npz'
-
-        if os.path.exists(CACHE_PATH):
-
-            self.band_dictionary = self.load_cache(CACHE_PATH)
+            self.band_dictionary = self.load_cache()
 
         else:
 
-            self.band_dictionary = self.generate_embedding(
-                CACHE_PATH, 
-                samples, 
-                self.method
-            )
+            self.band_dictionary = self.generate_embedding()
 
 
 
-    def load_band_embed(
+    def get_band_embed(
             self,
-            band_list: str
+            band_list: list
     ):
         '''
         This is used after a dictionary is loaded.
 
-        Notice: 
+        UPDATE: 
 
         band_list = [1,2,4] is the same as [1,4,2]. Saved keys are in increasing order.
         '''
 
-        try:
+        sorted_band_list = sorted(band_list)
 
-            return self.band_dictionary[band_list]
+        try:
+            return self.band_dictionary[str(sorted_band_list)]
         
         except Exception:
             
@@ -253,17 +258,28 @@ class GUI(GUI_settings):
         
 
     
-    def load_band_image(
+    def get_band_image(
             self,
-            band_list: str
+            band_list: list
     ):
         '''
         Always use 'single' as key.
+
+        Remember: band [1,2,3] looks different from [2,1,3].
+
+        Band list item of 0 will be assumed to be 0.
         '''
 
-        band_list = ast.literal_eval(band_list)
+        capped_band_list = band_list[:3]
 
-        return self.image_dat[..., [b - 1 for b in band_list]]
+        img_title = '  '.join(self.get_band_name(band_list))
+
+        if (len(band_list) > 3):
+
+            img_title += f" | Shows first 3 bands only."
+
+        return img_title, self.image_dat[..., [b - 1 for b in capped_band_list]]
+        
 
 
     def run(
@@ -276,15 +292,18 @@ class GUI(GUI_settings):
 
         self.load_dictionary()
 
-        band_list = '[1, 2, 3]'
+        band_list = [1,2,3]
 
-        embed = self.load_band_embed(band_list)
+        embed = self.get_band_embed(band_list)
 
-        product = self.load_band_image(band_list)
+        img_title, image = self.get_band_image(band_list)
 
         #######
 
         fig, (ax_tsne, ax_img) = plt.subplots(1, 2, figsize=(20, 8))
+
+        ax_tsne.axis("off")
+        ax_img.axis("off")
 
         sc_in = ax_tsne.scatter(
             embed[:self.in_sample_size, 0], 
@@ -313,21 +332,21 @@ class GUI(GUI_settings):
         img_plot = ax_img.imshow(
 
             draw_border(
-                htrim_3d( self.image_dat[..., ast.literal_eval(band_list)] ), #Because band convention starts at 1, but index is from 0
+                htrim_3d( image ), #Because band convention starts at 1, but index is from 0
                 self.border
             )
 
         )
         
-        ax_img.set_title(f"Band: {band_list}")
+        ax_img.set_title(img_title)
 
         marker, = ax_img.plot([], [], "ro", markersize=6, fillstyle="none")
 
         # ----------------------------
         # 4. Click logic
         # ----------------------------
-        hline = ax_img.axhline(0, color="red", linewidth=2, visible=False)
-        vline = ax_img.axvline(0, color="red", linewidth=2, visible=False)
+        hline = ax_img.axhline(0, color="green", linewidth=1, visible=False)
+        vline = ax_img.axvline(0, color="green", linewidth=1, visible=False)
 
         W = self.image_dat.shape[1]
 
@@ -336,12 +355,10 @@ class GUI(GUI_settings):
             k = event.ind[0]
 
             if (event.artist is sc_in):
-                crosshair_colour = "red"
-                flat = self.sample_og_indices[:self.in_sample_size][k]
+                flat = self.original_indices[:self.in_sample_size][k]
 
             elif (event.artist is sc_out):
-                crosshair_colour = "blue"
-                flat = self.sample_og_indices[self.in_sample_size:][k]
+                flat = self.original_indices[self.in_sample_size:][k]
 
             r = flat // W
             c = flat %  W
@@ -353,9 +370,6 @@ class GUI(GUI_settings):
             vline.set_visible(True)
 
             fig.canvas.draw_idle()
-
-            hline.set_color(crosshair_colour)
-            vline.set_color(crosshair_colour)
 
         fig.canvas.mpl_connect("pick_event", on_pick)
 
@@ -373,7 +387,8 @@ class GUI(GUI_settings):
 
             try:
                 #Set TNSE
-                new_X = self.band_dictionary[str(band_lst)]
+                embed = self.get_band_embed(band_lst)
+                title, image = self.get_band_image(band_lst)
 
             except Exception:
 
@@ -381,21 +396,20 @@ class GUI(GUI_settings):
 
             img_plot.set_data(
                 draw_border(
-                    htrim_3d(raster_dat[..., [b - 1 for b in band_lst]]),
+                    htrim_3d(image),
                     self.border
                 )
             )
 
-            ax_img.set_title(f"Band: {txt}")
+            ax_img.set_title(title)
 
             # ---- update scatter IN PLACE ----
-            sc_in.set_offsets(new_X[:in_sample_size])
-            sc_out.set_offsets(new_X[in_sample_size:])
+            sc_in.set_offsets(embed[:self.in_sample_size])
+            sc_out.set_offsets(embed[self.in_sample_size:])
 
             fig.canvas.draw_idle()
 
         textbox.on_submit(on_submit)
-
 
         plt.tight_layout(rect=[0, 0, 1, 0.9])
         plt.show()

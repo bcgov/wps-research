@@ -131,6 +131,8 @@ def band_index(
         band: int
 ):
     '''
+    Description
+    ------------
     The data opened by gdal is of different layers (rasters),
 
     we might want to know the index of each band.
@@ -142,7 +144,7 @@ def band_index(
     ----------
     band_info_list: List of bands and information.
 
-    band:           Which band we want to find its index.
+    band: Which band we want to find its index.
 
 
     Returns
@@ -166,6 +168,31 @@ def band_index(
             return i
         
     raise No_Band_Error(f'Band {band} is not in the data.')
+
+
+
+def band_name(
+        band_info_list: str,
+        band_index: int
+):
+    '''
+    Description
+    -----------
+    Get the band name at the index.
+    '''
+
+    from exceptions.sen2 import Out_Of_Bound_Band_Index
+
+    try:
+        that_band = band_info_list[band_index]
+    
+    except Exception:
+        raise Out_Of_Bound_Band_Index(f"Band index = {band_index} doesn't exist.")
+    
+
+    return that_band.split()[2]
+
+
     
 
 

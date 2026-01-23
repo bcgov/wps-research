@@ -380,6 +380,22 @@ class Raster:
         
         
         return True
+    
+
+
+    def band_name(
+            self,
+            band_index
+    ):
+        '''
+        input band_index starts at 1.
+        '''
+        from misc.sen2 import band_name
+
+        return band_name(
+            band_info_list=self.band_info_list, 
+            band_index=band_index - 1
+        )
 
 
 
