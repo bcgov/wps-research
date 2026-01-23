@@ -326,7 +326,7 @@ int main(int argc, char ** argv){
   label = (size_t *) alloc(n_ddup * sizeof(size_t)); // NEW: allocate for all deduplicated points
 
   f = wopen("n_class.csv"); // record number of classes! Append to file on each run..
-  fprintf(f, "n_classes,k_use"); // first record header line.. "k_use,n_classes");
+  fprintf(f, "n_classes,k_use,label_file,mean_file"); // header line
   fclose(f);
 
   long int last_number_of_classes = -1;
@@ -367,11 +367,6 @@ int main(int argc, char ** argv){
       
       dat = sampled_dat; // restore for next iteration
     }
-   
-    f = fopen("n_class.csv", "ab"); // append number of classes
-    if(!f) err("failed to open file: n_class.csv");
-    fprintf(f, "\n%zu,%zu", number_of_classes, k_use); // (long int)(next_label-1));
-    fclose(f); 
  
     // check output folders
     system("mkdir -p label");  // check output folders
@@ -384,6 +379,8 @@ int main(int argc, char ** argv){
     
     if(number_of_classes != last_number_of_classes){
       str lab_fn(str("label/") + zero_pad(to_string(k_use), 5));
+      str mean_fn(str("mean/") + zero_pad(to_string(k_use), 5));
+      
       f = wopen(lab_fn + str(".bin")); // 1. write class outputs
       float * label_float = falloc(np);
       for0(i, np) label_float[i] = (float)label[ddup_lookup[i]];
@@ -394,6 +391,12 @@ int main(int argc, char ** argv){
 
       // NEW: write mean image
       write_mean_image(k_use, nr, nc, nb, ddup_lookup, dat_backup, n_ddup);
+      
+      // append to CSV with file paths
+      f = fopen("n_class.csv", "ab");
+      if(!f) err("failed to open file: n_class.csv");
+      fprintf(f, "\n%zu,%zu,%s.bin,%s.bin", number_of_classes, k_use, lab_fn.c_str(), mean_fn.c_str());
+      fclose(f);
     }
 
     if(number_of_classes == 1) break;
@@ -407,4 +410,3 @@ int main(int argc, char ** argv){
   free(sampled_dat);
   return 0;
 }
-
