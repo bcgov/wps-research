@@ -32,6 +32,3 @@ def iter_files(
     for p in folder.iterdir():
         if p.is_file() and p.suffix == file_type:
             yield str(p)
-
-
-

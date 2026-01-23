@@ -1,14 +1,8 @@
 '''
 interactive_in_out.py (parallel dimensionality reduction)
-
-
-How this works?
----------------
-Read all
 '''
 
 ########### LIBRARIES ##################
-import matplotlib.pyplot as plt
 
 from raster import Raster
 
@@ -34,33 +28,20 @@ import sys
 import ast
 
 
-class GUI:
+class GUI_settings:
 
     def __init__(
             self,
-            random_state = 123,
-            in_sample_size = 100,
-            method = 'tsne'
+            random_state
     ):
-        '''
-        Initialized parameters
-        ----------------------
-        in_sample_size: number of points to be sampled from inside the polygon.
-
-        *out_sample_size: will automatically calculate using true ratio of in-out.
-        '''
         
-        #Default values
         self.random_state = random_state
-        self.in_sample_size = in_sample_size
-        self.method = method
 
-        #Embedding
         self.method_dict = {
             'tsne': tsne
         }
 
-        #embedding parameters
+        #Embedding parameters
         self.method_params = {
             'tsne' : {
             'n_components': 2,
@@ -71,34 +52,54 @@ class GUI:
             }
         }
 
-        #Type
-        self.type_dict = {
-            'image': [1],
-            'dnbr': [2]
-        }
 
-        #Initialize tasks
-        self.__load_polygon()
+class GUI(GUI_settings):
 
-
-
-    def __load_raster(
+    def __init__(
             self,
-            filename: str,
-
+            method: str,
+            polygon_filename:str,
+            image_filename: str,
+            random_state = 123,
+            in_sample_size = 100
     ):
         '''
-        Load raster data. Must be ENVI file.
+        Initialized parameters
+        ----------------------
+        in_sample_size: number of points to be sampled from inside the polygon.
+
+        *out_sample_size: will automatically calculate using true ratio of in-out.
         '''
-        self.raster = Raster(file_name = filename)
 
-        return
+        super().__init__(random_state=random_state)
+        
+        #Default values
+        self.polygon_filename = polygon_filename
+        self.image_filename = image_filename
+        self.in_sample_size = in_sample_size
+
+        #Methods
+        self.method = method
+
+        #Initialize tasks
+        self.load_image()
+        self.load_polygon()
+
+
+    def load_image(
+            self
+    ):
+        '''
+        Load image data. Must be ENVI file.
+        '''
+        self.image = Raster(self.image_filename)
+
+        self.image_dat = self.image.read_bands('all')
 
 
 
-    def __load_polygon(
+    def load_polygon(
             self,
-            filename: str,
             border_thickness: int = 7
     ):
         '''
@@ -108,9 +109,9 @@ class GUI:
         from exceptions.sen2 import PolygonException
 
 
-        polygon = Raster(file_name=polygon_filename)
+        polygon = Raster(file_name=self.polygon_filename)
 
-        if not polygon.is_polygon(polygon):
+        if not polygon.is_polygon():
             #Check if this is a polygon.
             raise PolygonException(f"Not a polygon @ {filename}")
         
@@ -118,72 +119,37 @@ class GUI:
         #If it is a polygon, it has just 1 channel, so squeeze makes it a pretty 2D array.
         self.polygon = polygon
 
-        self.current_polygon_filename = filename
-
         #extract border
         self.border = extract_border(
-            mask=polygon_dat.squeeze(), 
+            mask=polygon.read_bands('all').squeeze(), 
             thickness=border_thickness
         )
-
-        return
     
 
 
-    def __sampling_in_out(
+    def sampling_in_out(
             self
     ):
         '''
         For visualization of embedding space, sampling is essential.
+
+        main_raster is the focused raster.
         '''
 
-        original_indices, samples, out_in_ratio = in_out_sampling(
-            raster_dat=self.raster.read_bands('all'),
+        self.original_indices, samples, out_in_ratio = in_out_sampling(
+            raster_dat=self.image_dat,
             polygon_dat=self.polygon.read_bands('all'),
-            in_sample_size = self.in_sample_size
+            in_sample_size = self.in_sample_size,
+            seed=self.random_state
         )
 
         self.out_sample_size = int( self.in_sample_size * out_in_ratio )
 
-        return original_indices, samples
+        return samples
     
 
 
-    def __generate_embedding(
-            self,
-            CACHE_PATH: str,
-            data
-    ):
-        '''
-        Only used if data not cached.
-        '''
-        from misc.general import get_combinations
-
-
-        band_combinations = get_combinations(
-            val_lst=np.arange(data.shape[-1]) + 1,
-            least=3
-        )
-
-        #Prepare tasks
-        tasks = [
-            (
-                b, data[..., [bb - 1 for bb in b]], 
-                self.method_dict[method_name], self.method_params[method_name]
-            )
-            
-            for b in band_combinations
-        ]
-
-        data = parDimRed(tasks)
-
-        np.savez(CACHE_PATH, **data)
-
-        return data
-
-
-
-    def __load_cache(
+    def load_cache(
             self,
             CACHE_PATH: str
     ):
@@ -192,13 +158,48 @@ class GUI:
         '''
 
         return dict(np.load(CACHE_PATH, allow_pickle=True))
+    
+
+
+    def generate_embedding(
+            self,
+            CACHE_PATH: str,
+            data,
+            method
+    ):
+        '''
+        Only used if data not cached.
+        '''
+        from misc.general import get_combinations
+
+
+        band_combinations = get_combinations(
+            val_lst=list(range(1, data.shape[-1] + 1)),
+            least=2
+        )
+
+        #Prepare tasks
+        tasks = [
+            (
+                b, 
+                data[..., [bb - 1 for bb in b]], 
+                self.method_dict[self.method], 
+                self.method_params[self.method]
+            )
+            
+            for b in band_combinations
+        ]
+
+        embed_dict = parDimRed(tasks)
+
+        np.savez(CACHE_PATH, **embed_dict)
+
+        return embed_dict
             
 
 
-    def __load_dictionary(
-            self,
-            type_:str,
-            method:str
+    def load_dictionary(
+            self
     ):
         '''
         If user changes embedding method or type, load cache or create if not cached.
@@ -208,20 +209,29 @@ class GUI:
         Do not use if changing band list.
         '''
         
-        _, samples  = self.__sampling_in_out()
+        samples  = self.sampling_in_out()
 
+        # all_file_name = self.raster_filename[0]
 
-        CACHE_PATH = f'image=polygon={self.current_polygon_filename}&type={type_}&method={self.method}&size={self.in_sample_size}&state={self.random_state}npz'
+        # CACHE_PATH = f'image={img_name}&polygon={self.polygon_filename}&type={type_}&method={method}&size={self.in_sample_size}&state={self.random_state}npz'
+
+        CACHE_PATH = f'caching/method={self.method}&size={self.in_sample_size}&state={self.random_state}.npz'
 
         if os.path.exists(CACHE_PATH):
-            self.band_dictionary = self.__load_cache(CACHE_PATH)
+
+            self.band_dictionary = self.load_cache(CACHE_PATH)
 
         else:
-            self.band_dictionary = self.__generate_embedding(CACHE_PATH, samples)
+
+            self.band_dictionary = self.generate_embedding(
+                CACHE_PATH, 
+                samples, 
+                self.method
+            )
 
 
 
-    def __load_band_data(
+    def load_band_embed(
             self,
             band_list: str
     ):
@@ -233,17 +243,27 @@ class GUI:
         band_list = [1,2,4] is the same as [1,4,2]. Saved keys are in increasing order.
         '''
 
-        band_list = ast.literal_eval(band_list)
-
         try:
 
-            return self.band_dictionary[str(band_list)]
+            return self.band_dictionary[band_list]
         
         except Exception:
             
             raise KeyError("This band combination is not in KEYs.")
         
 
+    
+    def load_band_image(
+            self,
+            band_list: str
+    ):
+        '''
+        Always use 'single' as key.
+        '''
+
+        band_list = ast.literal_eval(band_list)
+
+        return self.image_dat[..., [b - 1 for b in band_list]]
 
 
     def run(
@@ -252,9 +272,133 @@ class GUI:
         '''
         Runs GUI
         '''
+        import matplotlib.pyplot as plt
+
+        self.load_dictionary()
+
+        band_list = '[1, 2, 3]'
+
+        embed = self.load_band_embed(band_list)
+
+        product = self.load_band_image(band_list)
+
+        #######
+
+        fig, (ax_tsne, ax_img) = plt.subplots(1, 2, figsize=(20, 8))
+
+        sc_in = ax_tsne.scatter(
+            embed[:self.in_sample_size, 0], 
+            embed[:self.in_sample_size, 1],
+            s = 30,
+            c='red',
+            label='Inside',
+            picker=3  # ← this enables clicking
+        )
+
+        sc_out = ax_tsne.scatter(
+            embed[self.in_sample_size:, 0], 
+            embed[self.in_sample_size:, 1],
+            s=30,
+            c='blue',
+            label='Outside',
+            picker=3
+        )
+
+        ax_tsne.set_title(f"Sample Size of {self.in_sample_size} / {self.out_sample_size} | Random State: {self.random_state}")
+
+        ax_tsne.legend()
+
+        #Right side of the plot, the main image (let parameter determine different band combination)
+
+        img_plot = ax_img.imshow(
+
+            draw_border(
+                htrim_3d( self.image_dat[..., ast.literal_eval(band_list)] ), #Because band convention starts at 1, but index is from 0
+                self.border
+            )
+
+        )
+        
+        ax_img.set_title(f"Band: {band_list}")
+
+        marker, = ax_img.plot([], [], "ro", markersize=6, fillstyle="none")
+
+        # ----------------------------
+        # 4. Click logic
+        # ----------------------------
+        hline = ax_img.axhline(0, color="red", linewidth=2, visible=False)
+        vline = ax_img.axvline(0, color="red", linewidth=2, visible=False)
+
+        W = self.image_dat.shape[1]
+
+        def on_pick(event):
+
+            k = event.ind[0]
+
+            if (event.artist is sc_in):
+                crosshair_colour = "red"
+                flat = self.sample_og_indices[:self.in_sample_size][k]
+
+            elif (event.artist is sc_out):
+                crosshair_colour = "blue"
+                flat = self.sample_og_indices[self.in_sample_size:][k]
+
+            r = flat // W
+            c = flat %  W
+
+            hline.set_ydata([r, r])
+            vline.set_xdata([c, c])
+
+            hline.set_visible(True)
+            vline.set_visible(True)
+
+            fig.canvas.draw_idle()
+
+            hline.set_color(crosshair_colour)
+            vline.set_color(crosshair_colour)
+
+        fig.canvas.mpl_connect("pick_event", on_pick)
+
+        from matplotlib.widgets import TextBox
+
+        fig.subplots_adjust(top = 2)
+
+        # add textbox
+        ax_box = fig.add_axes([0.35, 0.9, 0.3, 0.04])
+        textbox = TextBox(ax_box, "Band list..e.g [1,2,3]: ")
+
+        def on_submit(txt):
+
+            band_lst = ast.literal_eval(txt)
+
+            try:
+                #Set TNSE
+                new_X = self.band_dictionary[str(band_lst)]
+
+            except Exception:
+
+                raise KeyError("This band combination is not in cache.")
+
+            img_plot.set_data(
+                draw_border(
+                    htrim_3d(raster_dat[..., [b - 1 for b in band_lst]]),
+                    self.border
+                )
+            )
+
+            ax_img.set_title(f"Band: {txt}")
+
+            # ---- update scatter IN PLACE ----
+            sc_in.set_offsets(new_X[:in_sample_size])
+            sc_out.set_offsets(new_X[in_sample_size:])
+
+            fig.canvas.draw_idle()
+
+        textbox.on_submit(on_submit)
 
 
-    
+        plt.tight_layout(rect=[0, 0, 1, 0.9])
+        plt.show()
 
 
 
@@ -269,213 +413,17 @@ if __name__ == '__main__':
         print("Needs 1 raster file and 1 polygon file")
         sys.exit(1)
 
-    raster_filename = sys.argv[1]
+    image_filename = sys.argv[1]
 
     polygon_filename = sys.argv[2]
 
-    if len(sys.argv) > 3:
-
-        band_lst = ast.literal_eval(sys.argv[3])
-
-    method_name = 'tsne'  #Argument as well
-
-
-    #Read Raster data for pixel referencing
-    raster = Raster(file_name=raster_filename)
-    raster_dat = raster.read_bands(band_lst='all')
-
-    #Read Polygon data for pixel referencing
-    polygon = Raster(file_name=polygon_filename)
-    polygon_dat = polygon.read_bands(band_lst=[1])
-
-    ##############Sampling, the sample contains all bands in the data #############
-
-    original_indices, samples, out_in_ratio = in_out_sampling(
-        raster_filename=raster_filename,
+    agent = GUI(
+        method='tsne',
         polygon_filename=polygon_filename,
-        in_sample_size = in_sample_size
+        image_filename=image_filename
     )
 
-    out_sample_size = int( in_sample_size * out_in_ratio )
+    agent.run()
 
-    ############ Read the border of polygon ###############
 
-    border = extract_border(polygon_dat.squeeze(), thickness=8)
-
-    ############ Load data from cache ######################
-
-    #Check if we already have the data stored.
-    CACHE_PATH = f'caching/mt={method_name}_sz={in_sample_size}_rs={seed}_timestamp={raster.acquisition_timestamp}.npz'
-
-    if os.path.exists(CACHE_PATH):
-
-        print("Loading cached embeddings...")
-
-        cache = dict(np.load(CACHE_PATH, allow_pickle=True))
-
-    else:
-
-        '''
-        Write new data.
-        '''
-
-        #We will use this param setting
-        tsne_params = {
-            'n_components': 2,
-            'perplexity': 30,
-            'learning_rate': "auto",
-            'init': "pca",
-            'random_state': seed
-        }
-
-        #Find all combinations of bands here. I am quite lazy so let's hardcode it.
-        #At least 3 bands (who projects 2 bands onto 2 bands? right?)
-        band_combinations = [
-            [1,2,3],
-            [1,2,4],
-            [1,3,4],
-            [2,3,4],
-            [1,2,3,4]
-        ]
-
-        method_dict = {'tsne': tsne, 'pca': pca}
-
-        #Prepare tasks
-        tasks = [
-            (
-                b, samples[..., [bb - 1 for bb in b]], 
-                self.method_dict[method_name], tsne_params
-            )
-            
-            for b in band_combinations
-        ]
-
-        cache = parDimRed(tasks)
-
-        np.savez(CACHE_PATH, **cache)
-
-        print(f"Data saved to {CACHE_PATH}.")
-
-    X = cache[str(band_lst)] #Choose data from cache dict based on band list
-
-    ############ Interactive Map ############################
-
-    fig, (ax_tsne, ax_img) = plt.subplots(1, 2, figsize=(20, 8))
-
-    sc_in = ax_tsne.scatter(
-        X[:in_sample_size, 0], 
-        X[:in_sample_size, 1],
-        s = 30,
-        c='red',
-        label='Inside',
-        picker=3  # ← this enables clicking
-    )
-
-    sc_out = ax_tsne.scatter(
-        X[in_sample_size:, 0], 
-        X[in_sample_size:, 1],
-        s=30,
-        c='blue',
-        label='Outside',
-        picker=3
-    )
-
-    ax_tsne.set_title(f"{method_name} space | Sample Size of {in_sample_size} / {out_sample_size} | Random State: {seed}")
-
-    ax_tsne.legend()
-
-    #Right side of the plot, the main image (let parameter determine different band combination)
-
-    img_plot = ax_img.imshow(
-
-        draw_border(
-            htrim_3d( raster_dat[..., [b - 1 for b in band_lst]] ), #Because band convention starts at 1, but index is from 0
-            border
-        )
-
-    )
     
-    ax_img.set_title(f"Band: {band_lst}")
-
-    ################################################################
-
-    marker, = ax_img.plot([], [], "ro", markersize=6, fillstyle="none")
-
-    # ----------------------------
-    # 4. Click logic
-    # ----------------------------
-    hline = ax_img.axhline(0, color="red", linewidth=2, visible=False)
-    vline = ax_img.axvline(0, color="red", linewidth=2, visible=False)
-
-    W = raster_dat.shape[1]
-
-    def on_pick(event):
-
-        k = event.ind[0]
-
-        if (event.artist is sc_in):
-            crosshair_colour = "red"
-            flat = original_indices[:in_sample_size][k]
-
-        elif (event.artist is sc_out):
-            crosshair_colour = "blue"
-            flat = original_indices[in_sample_size:][k]
-
-        r = flat // W
-        c = flat %  W
-
-        hline.set_ydata([r, r])
-        vline.set_xdata([c, c])
-
-        hline.set_visible(True)
-        vline.set_visible(True)
-
-        fig.canvas.draw_idle()
-
-        hline.set_color(crosshair_colour)
-        vline.set_color(crosshair_colour)
-
-    fig.canvas.mpl_connect("pick_event", on_pick)
-
-
-    ############# ADJUST DATA SHOWN #####################
-    from matplotlib.widgets import TextBox
-
-    fig.subplots_adjust(top = 2)
-
-    # add textbox
-    ax_box = fig.add_axes([0.35, 0.9, 0.3, 0.04])
-    textbox = TextBox(ax_box, "Band list..e.g [1,2,3]: ")
-
-    def on_submit(txt):
-
-        band_lst = ast.literal_eval(txt)
-
-        try:
-            #Set TNSE
-            new_X = cache[str(band_lst)]
-
-        except Exception:
-
-            raise KeyError("This band combination is not in cache.")
-
-        img_plot.set_data(
-            draw_border(
-                htrim_3d(raster_dat[..., [b - 1 for b in band_lst]]),
-                border
-            )
-        )
-
-        ax_img.set_title(f"Band: {txt}")
-
-        # ---- update scatter IN PLACE ----
-        sc_in.set_offsets(new_X[:in_sample_size])
-        sc_out.set_offsets(new_X[in_sample_size:])
-
-        fig.canvas.draw_idle()
-
-    textbox.on_submit(on_submit)
-
-
-    plt.tight_layout(rect=[0, 0, 1, 0.9])
-    plt.show()
