@@ -18,6 +18,7 @@ size_t n_sampled = 0;   // NEW: number of sampled points
 size_t * sample_idx;    // NEW: indices of sampled points in deduplicated set
 float * sampled_dat;    // NEW: data for sampled points only
 float * label_out;      // NEW: output labels for all pixels
+time_t start_time;      // NEW: for ETA calculation
 
 void * dmat_threadfun(void * arg){
   float d, df; // do we throw away redundant half of dmat?
@@ -37,8 +38,11 @@ void * dmat_threadfun(void * arg){
       return(NULL);
     }
     if(my_nxt_j % 100 == 0){
-      float pct = 100. * (float)nxt_j / (float) np;
-      cprint(str(" worker: ") + to_string(k) + str(" job: ") + to_string(my_nxt_j) + str(" %") + to_string(pct));
+      float pct = 100. * (float)my_nxt_j / (float) np;
+      time_t now = time(NULL);
+      double elapsed = difftime(now, start_time);
+      double eta = (pct > 0) ? (elapsed / pct) * (100.0 - pct) : 0;
+      cprint(str(" ") + to_string(pct) + str("% ETA: ") + to_string((int)eta) + str("s worker: ") + to_string(k) + str(" job: ") + to_string(my_nxt_j) + str("/") + to_string(np));
     }
 
     size_t ji = my_nxt_j * nb;
@@ -83,7 +87,10 @@ void * assign_label_threadfun(void * arg){
     }
     if(my_nxt_j % 1000 == 0){
       float pct = 100. * (float)my_nxt_j / (float)np;
-      cprint(str(" assign worker: ") + to_string(k) + str(" job: ") + to_string(my_nxt_j) + str(" %") + to_string(pct));
+      time_t now = time(NULL);
+      double elapsed = difftime(now, start_time);
+      double eta = (pct > 0) ? (elapsed / pct) * (100.0 - pct) : 0;
+      cprint(str(" ") + to_string(pct) + str("% ETA: ") + to_string((int)eta) + str("s worker: ") + to_string(k) + str(" job: ") + to_string(my_nxt_j) + str("/") + to_string(np));
     }
 
     // find nearest sampled point
@@ -166,7 +173,7 @@ size_t top(size_t j){
 }
 
 int main(int argc, char ** argv){
-  kmax = 2000;
+  kmax = 1111;
   cout << "dmat.exe" << endl; // shuffle data according to deduplication index
   if(argc < 3) err("dmat.exe [input file bip format] [deduplication index file _dedup] [--nskip skip_factor]");
 
@@ -280,6 +287,7 @@ int main(int argc, char ** argv){
 
   if(fsize(dmatd_fn) != np * kmax * sizeof(float)){
     nxt_j = 0; // this variable is what the mutex (lock) goes on: "take a number"
+    start_time = time(NULL); // NEW: record start time for ETA
 
     size_t numCPU = sysconf(_SC_NPROCESSORS_ONLN);
     printf("number of cores: %zu\n", numCPU);
@@ -348,6 +356,7 @@ int main(int argc, char ** argv){
       dat = dat_backup; // restore full deduplicated data
       nxt_j = 0;
       np = n_ddup;
+      start_time = time(NULL); // NEW: record start time for ETA
 
       size_t numCPU = sysconf(_SC_NPROCESSORS_ONLN);
       pthread_t * assign_pthread = new pthread_t[numCPU];
@@ -398,5 +407,4 @@ int main(int argc, char ** argv){
   free(sampled_dat);
   return 0;
 }
-
 
