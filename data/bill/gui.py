@@ -32,8 +32,8 @@ class GUI_settings:
     def __init__(
             self
     ):
-        self.random_state = 123,
-        self.in_sample_size = 300
+        self.random_state = 123
+        self.in_sample_size = 200
 
 
 
@@ -262,13 +262,26 @@ class GUI(GUI_settings):
     
 
 
-    def embed(
+    def test_embed(
             self      
     ):
         '''
         Use current tsne embedding to embed the whole image
         '''
-        return self.current_embedding
+        from time import time
+
+        test_time = [10000, 20000, 50000, 100000, 300000, 1000000, 5000000]
+
+        for t in test_time:
+            t0 = time()
+
+            self.current_embedding.transform(
+
+                self.image_dat[..., [b-1 for b in self.band_list]].reshape(-1, len(self.band_list))[:t]
+
+            )
+        
+            print(f'Embedding {t} pixels takes {time() - t0} s')
         
 
 
@@ -286,9 +299,11 @@ class GUI(GUI_settings):
 
         img_title, image = self.get_band_image()
 
+        self.test_embed()
+
         #######
 
-        fig, (ax_tsne, ax_img) = plt.subplots(1, 2, figsize=(20, 8))
+        fig, (ax_tsne, ax_img) = plt.subplots(1, 2, figsize=(20, 12))
 
         ax_tsne.axis("off")
         ax_img.axis("off")
@@ -363,10 +378,17 @@ class GUI(GUI_settings):
 
         from matplotlib.widgets import TextBox
 
-        fig.subplots_adjust(top = 2)
+        fig.subplots_adjust(
+            left=0.03,
+            right=0.97,
+            bottom=0.05,
+            top=0.88,
+            wspace=0.05
+        )
+
 
         # add textbox
-        ax_box = fig.add_axes([0.35, 0.9, 0.3, 0.04])
+        ax_box = fig.add_axes([0.35, 0.94, 0.1, 0.03])
         textbox = TextBox(ax_box, "Band list..e.g [1,2,3]: ")
 
         def on_submit(txt):
@@ -398,8 +420,6 @@ class GUI(GUI_settings):
             fig.canvas.draw_idle()
 
         textbox.on_submit(on_submit)
-
-        plt.tight_layout(rect=[0, 0, 1, 0.9])
         plt.show()
 
 
@@ -425,6 +445,5 @@ if __name__ == '__main__':
     )
 
     agent.run()
-
 
     

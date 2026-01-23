@@ -20,7 +20,7 @@ def tsne(
 
     aff = affinity.PerplexityBasedNN(
         X,
-        perplexity=30,
+        perplexity=60,
         metric="euclidean",
         n_jobs=4,
         random_state = 123
@@ -33,7 +33,7 @@ def tsne(
 
     embedding = init.optimize(
         n_iter=1000,
-        exaggeration=12,
+        exaggeration=10,
         learning_rate=200
     )
 
@@ -72,7 +72,7 @@ def parDimRed(
 
     futures = {}
 
-    with ProcessPoolExecutor(max_workers=4) as pool:
+    with ProcessPoolExecutor(max_workers=12) as pool:
 
         for band_list, X in tasks:
 

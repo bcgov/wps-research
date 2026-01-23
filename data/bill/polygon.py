@@ -68,7 +68,7 @@ def split_in_out(
 
     #The masking we need, where boolean casting is essential.
 
-    polygon_mask = polygon_dat[..., 0].astype(np.bool)
+    polygon_mask = polygon_dat[..., 0].astype(np.bool_)
 
     #Distinguishing inside and outside
 
