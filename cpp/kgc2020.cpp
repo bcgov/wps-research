@@ -107,6 +107,35 @@ size_t top(size_t j){
   }
 }
 */
+
+// NEW: write mean image where each pixel gets the vector value of its class exemplar
+void write_mean_image(size_t k_use, size_t nr, size_t nc, size_t nb,
+                      size_t * ddup_lookup, float * dat_full, size_t n_ddup){
+  size_t i, k, np_img = nr * nc;
+
+  str mean_fn(str("mean/") + zero_pad(to_string(k_use), 5));
+  FILE * f = wopen(mean_fn + str(".bin"));
+
+  float * mean_out = falloc(np_img * nb);
+
+  for0(i, np_img){
+    size_t ddup_idx = ddup_lookup[i];         // pixel -> deduplicated index
+    size_t lab = label[ddup_idx];             // deduplicated index -> class label
+    size_t top_idx = top_i[lab];              // class label -> exemplar index (in sampled set)
+    size_t exemplar_ddup = sample_idx[top_idx]; // sampled index -> deduplicated index
+
+    for0(k, nb){
+      mean_out[i * nb + k] = dat_full[exemplar_ddup * nb + k];
+    }
+  }
+
+  fwrite(mean_out, np_img * nb * sizeof(float), 1, f);
+  free(mean_out);
+  fclose(f);
+
+  hwrite((mean_fn + str(".hdr")), nr, nc, nb);
+}
+
 int main(int argc, char ** argv){
   kmax = 2000;
   cout << "dmat.exe" << endl; // shuffle data according to deduplication index
@@ -279,6 +308,9 @@ int main(int argc, char ** argv){
       free(label_float);
       fclose(f);
       hwrite((lab_fn + str(".hdr")), nr, nc, 1);
+    
+      // NEW: write mean image
+      write_mean_image(k_use, nr, nc, nb, ddup_lookup, dat_backup, n_ddup);
     }
 
     if(number_of_classes == 1) break;
