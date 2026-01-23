@@ -16,6 +16,7 @@ from sampling import in_out_sampling
 
 from dim_reduce import (
     tsne,
+    pca,
     parDimRed
 )
 
@@ -38,17 +39,23 @@ class GUI_settings:
         self.random_state = random_state
 
         self.method_dict = {
-            'tsne': tsne
+            'tsne': tsne,
+            'pca': pca
         }
 
         #Embedding parameters
         self.method_params = {
             'tsne' : {
-            'n_components': 2,
-            'perplexity': 30,
-            'learning_rate': "auto",
-            'init': "pca",
-            'random_state': self.random_state
+                'n_components': 2,
+                'perplexity': 30,
+                'learning_rate': "auto",
+                'init': "pca",
+                'random_state': self.random_state
+            },
+
+            'pca': {
+                'n_components':2,
+                'random_state': self.random_state
             }
         }
 
@@ -81,9 +88,10 @@ class GUI(GUI_settings):
         #Methods
         self.method = method
 
-        #Initialize tasks
+        #Init tasks
         self.load_image()
         self.load_polygon()
+        self.load_dictionary()
 
 
     def load_image(
@@ -169,11 +177,17 @@ class GUI(GUI_settings):
         '''
         If data is already cached, load it.
         '''
+        from joblib import load
 
-        return dict(np.load(self.CACHE_PATH, allow_pickle=True))
+        print("Loading Embedding...")
+        embed_dict = dict(np.load(self.CACHE_EMBEDDING_PATH, allow_pickle=True))
+
+        print("Loading Models...")
+        model_dict =  load(self.CACHE_MODEL_PATH)
+
+        return embed_dict, model_dict
 
     
-
 
     def generate_embedding(
             self
@@ -182,6 +196,7 @@ class GUI(GUI_settings):
         Only used if data not cached.
         '''
         from misc.general import get_combinations
+        from joblib import dump
 
         sams = self.samples
 
@@ -202,11 +217,15 @@ class GUI(GUI_settings):
             for b in band_combinations
         ]
 
-        embed_dict = parDimRed(tasks)
+        embed_dict, model_dict = parDimRed(tasks)
 
-        np.savez(self.CACHE_PATH, **embed_dict)
+        print("Saving Embedding...")
+        np.savez(self.CACHE_EMBEDDING_PATH, **embed_dict)
 
-        return embed_dict
+        print("Saving Models...")
+        dump(model_dict, self.CACHE_MODEL_PATH)
+
+        return embed_dict, model_dict
             
 
 
@@ -223,15 +242,16 @@ class GUI(GUI_settings):
         
         self.sampling_in_out()
 
-        self.CACHE_PATH = f'caching/timestamp={self.image.acquisition_timestamp}&method={self.method}&size={self.in_sample_size}&state={self.random_state}.npz'
+        self.CACHE_EMBEDDING_PATH = f'caching/timestamp={self.image.acquisition_timestamp}&method={self.method}&size={self.in_sample_size}&state={self.random_state}.npz'
+        self.CACHE_MODEL_PATH = f'caching/timestamp={self.image.acquisition_timestamp}&method={self.method}&size={self.in_sample_size}&state={self.random_state}.joblib'
 
-        if os.path.exists(self.CACHE_PATH):
+        if os.path.exists(self.CACHE_EMBEDDING_PATH):
 
-            self.band_dictionary = self.load_cache()
+            self.band_dictionary, self.model_dictionary = self.load_cache()
 
         else:
 
-            self.band_dictionary = self.generate_embedding()
+            self.band_dictionary, self.model_dictionary = self.generate_embedding()
 
 
 
@@ -250,7 +270,9 @@ class GUI(GUI_settings):
         sorted_band_list = sorted(band_list)
 
         try:
-            return self.band_dictionary[str(sorted_band_list)]
+            embedding = self.band_dictionary[str(sorted_band_list)]
+
+            return embedding
         
         except Exception:
             
@@ -290,8 +312,6 @@ class GUI(GUI_settings):
         '''
         import matplotlib.pyplot as plt
 
-        self.load_dictionary()
-
         band_list = [1,2,3]
 
         embed = self.get_band_embed(band_list)
@@ -323,7 +343,7 @@ class GUI(GUI_settings):
             picker=3
         )
 
-        ax_tsne.set_title(f"Sample Size of {self.in_sample_size} / {self.out_sample_size} | Random State: {self.random_state}")
+        ax_tsne.set_title(f"Method: {self.method} | In/Out sample:{self.in_sample_size} / {self.out_sample_size} | Seed: {self.random_state}")
 
         ax_tsne.legend()
 
@@ -432,7 +452,7 @@ if __name__ == '__main__':
     polygon_filename = sys.argv[2]
 
     agent = GUI(
-        method='tsne',
+        method='pca',
         polygon_filename=polygon_filename,
         image_filename=image_filename
     )
