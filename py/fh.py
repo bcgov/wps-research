@@ -35,6 +35,10 @@ def parse_hdr_file(hdr_path):
     
     while i < len(lines):
         line = lines[i]
+
+        if line.strip() == '':
+            i += 1
+            continue
         
         # Check if this is the ENVI header marker
         if line.strip() == 'ENVI':
