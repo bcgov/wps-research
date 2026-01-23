@@ -216,8 +216,7 @@ class GUI(GUI_settings):
 
 
     def get_band_embed(
-            self,
-            band_list: list
+            self
     ):
         '''
         This is used after a dictionary is loaded.
@@ -227,12 +226,12 @@ class GUI(GUI_settings):
         band_list = [1,2,4] is the same as [1,4,2]. Saved keys are in increasing order.
         '''
 
-        sorted_band_list = sorted(band_list)
+        sorted_band_list = sorted(self.band_list)
 
         try:
-            embedding = self.band_dictionary[str(sorted_band_list)]
+            self.current_embedding = self.band_dictionary[str(sorted_band_list)]
 
-            return np.array(embedding)
+            return np.array(self.current_embedding)
         
         except Exception:
             
@@ -241,8 +240,7 @@ class GUI(GUI_settings):
 
     
     def get_band_image(
-            self,
-            band_list: list
+            self
     ):
         '''
         Always use 'single' as key.
@@ -252,15 +250,25 @@ class GUI(GUI_settings):
         Band list item of 0 will be assumed to be 0.
         '''
 
-        capped_band_list = band_list[:3]
+        capped_band_list = self.band_list[:3]
 
-        img_title = '  '.join(self.get_band_name(band_list))
+        img_title = '  '.join(self.get_band_name(self.band_list))
 
-        if (len(band_list) > 3):
+        if (len(self.band_list) > 3):
 
             img_title += f" | Shows first 3 bands only."
 
         return img_title, self.image_dat[..., [b - 1 for b in capped_band_list]]
+    
+
+
+    def embed(
+            self      
+    ):
+        '''
+        Use current tsne embedding to embed the whole image
+        '''
+        return self.current_embedding
         
 
 
@@ -272,11 +280,11 @@ class GUI(GUI_settings):
         '''
         import matplotlib.pyplot as plt
 
-        band_list = [1,2,3]
+        self.band_list = [1,2,3]
 
-        embed = self.get_band_embed(band_list)
+        embed = self.get_band_embed()
 
-        img_title, image = self.get_band_image(band_list)
+        img_title, image = self.get_band_image()
 
         #######
 
@@ -363,12 +371,12 @@ class GUI(GUI_settings):
 
         def on_submit(txt):
 
-            band_lst = ast.literal_eval(txt)
+            self.band_list = ast.literal_eval(txt)
 
             try:
                 #Set TNSE
-                embed = self.get_band_embed(band_lst)
-                title, image = self.get_band_image(band_lst)
+                embed = self.get_band_embed()
+                title, image = self.get_band_image()
 
             except Exception:
 

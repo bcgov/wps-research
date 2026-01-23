@@ -111,7 +111,7 @@ def row_sampling(
     #masking
     sampled_original_indices = sampled_indices if ( original_indices is None ) else original_indices[sampled_indices]
 
-    X_sample                 = X[sampled_indices]
+    X_sample = X[sampled_indices]
 
 
     return sampled_original_indices, X_sample
