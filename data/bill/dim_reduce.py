@@ -2,10 +2,9 @@
 Dimensionality reduction and Parallel Execution.
 '''
 
-from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import Pipeline
-
 import os
+from sklearn.preprocessing import StandardScaler
+
 
 def tsne(
         X,
@@ -16,13 +15,15 @@ def tsne(
     from openTSNE import affinity, TSNEEmbedding
     import numpy as np
     
-    print(f'{band_list}: pid = {os.getpid()} running...')
+    print(f'running: {band_list}: pid = {os.getpid()}.')
+
+    X_s = StandardScaler().fit_transform(X)
 
     aff = affinity.PerplexityBasedNN(
-        X,
-        perplexity=60,
-        metric="euclidean",
-        n_jobs=4,
+        X_s,
+        perplexity = 60,
+        metric = "euclidean",
+        n_jobs = 4,
         random_state = 123
     )
 
@@ -37,7 +38,7 @@ def tsne(
         learning_rate=200
     )
 
-    print(f'{band_list}: pid = {os.getpid()} ...Done.')
+    print(f'DONE: {band_list}: pid = {os.getpid()}.')
 
     return embedding
 
@@ -95,7 +96,7 @@ def parDimRed(
 
             embed_dict[str(band_lst)] = embedding
 
-    print(f'OpenTSNE on {data_size} data took {time() - t0:.2f} s')
+    print(f'OpenTSNE on {data_size} band combinations took {time() - t0:.2f} s')
 
     return embed_dict
 

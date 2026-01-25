@@ -27,22 +27,15 @@ import sys
 import ast
 
 
-class GUI_settings:
-
-    def __init__(
-            self
-    ):
-        self.random_state = 123
-        self.in_sample_size = 200
-
-
-
-class GUI(GUI_settings):
+class GUI():
 
     def __init__(
             self,
-            polygon_filename:str,
-            image_filename: str
+            *,
+            polygon_filename: str,
+            image_filename: str,
+            in_sample_size = 500,
+            random_state = 123
     ):
         '''
         Initialized parameters
@@ -57,6 +50,10 @@ class GUI(GUI_settings):
         #Default values
         self.polygon_filename = polygon_filename
         self.image_filename = image_filename
+
+        #Other settings
+        self.in_sample_size = in_sample_size
+        self.random_state = random_state
 
         #Init tasks
         self.load_image()
@@ -108,7 +105,6 @@ class GUI(GUI_settings):
             #Check if this is a polygon.
             raise PolygonException(f"Not a polygon @ {self.polygon_filename}")
         
-
         #If it is a polygon, it has just 1 channel, so squeeze makes it a pretty 2D array.
         self.polygon = polygon
 
@@ -148,8 +144,9 @@ class GUI(GUI_settings):
         '''
         from joblib import load
 
-        print("Loading Embeddings...")
         embed_dict =  load(self.CACHE_EMBEDDING_PATH)
+
+        print("Status: Embeddings loaded.")
 
         return embed_dict
 
@@ -183,8 +180,9 @@ class GUI(GUI_settings):
 
         embed_dict = parDimRed(tasks)
 
-        print("Saving Embedding...")
         dump(embed_dict, self.CACHE_EMBEDDING_PATH)
+
+        print("Status: Embeddings generated and saved.")
 
         return embed_dict
             
@@ -259,29 +257,6 @@ class GUI(GUI_settings):
             img_title += f" | Shows first 3 bands only."
 
         return img_title, self.image_dat[..., [b - 1 for b in capped_band_list]]
-    
-
-
-    def test_embed(
-            self      
-    ):
-        '''
-        Use current tsne embedding to embed the whole image
-        '''
-        from time import time
-
-        test_time = [10000, 20000, 50000, 100000, 300000, 1000000, 5000000]
-
-        for t in test_time:
-            t0 = time()
-
-            self.current_embedding.transform(
-
-                self.image_dat[..., [b-1 for b in self.band_list]].reshape(-1, len(self.band_list))[:t]
-
-            )
-        
-            print(f'Embedding {t} pixels takes {time() - t0} s')
         
 
 
@@ -299,8 +274,6 @@ class GUI(GUI_settings):
 
         img_title, image = self.get_band_image()
 
-        self.test_embed()
-
         #######
 
         fig, (ax_tsne, ax_img) = plt.subplots(1, 2, figsize=(20, 12))
@@ -311,7 +284,7 @@ class GUI(GUI_settings):
         sc_in = ax_tsne.scatter(
             embed[:self.in_sample_size, 0], 
             embed[:self.in_sample_size, 1],
-            s = 20,
+            s = 5,
             c='red',
             label='Inside',
             picker=3  # ← this enables clicking
@@ -320,11 +293,39 @@ class GUI(GUI_settings):
         sc_out = ax_tsne.scatter(
             embed[self.in_sample_size:, 0], 
             embed[self.in_sample_size:, 1],
-            s = 20,
+            s = 5,
             c='blue',
             label='Outside',
             picker=3
         )
+
+        ##Demo
+        mean_in = np.mean(embed[:self.in_sample_size], axis=0)
+        mean_out= np.mean(embed[self.in_sample_size:], axis=0)
+
+        sc_mean_in = ax_tsne.scatter(
+            mean_in[0], mean_in[1],
+            s=50,
+            c='red',
+            marker='X',
+            edgecolor='yellow',
+            linewidths=1.5,
+            label='Mean (Inside)',
+            zorder=5
+        )
+
+        sc_mean_out = ax_tsne.scatter(
+            mean_out[0], mean_out[1],
+            s=50,
+            c='blue',
+            marker='X',
+            edgecolor='green',
+            linewidths=1.5,
+            label='Mean (Outside)',
+            zorder=5
+        )
+        ###
+
 
         ax_tsne.set_title(f"Method: TSNE | In/Out sample:{self.in_sample_size} / {self.out_sample_size} | Seed: {self.random_state}")
 
@@ -417,6 +418,14 @@ class GUI(GUI_settings):
             sc_in.set_offsets(embed[:self.in_sample_size])
             sc_out.set_offsets(embed[self.in_sample_size:])
 
+            # ---- update Means IN PLACE----
+            sc_mean_in.set_offsets(
+                np.mean(embed[:self.in_sample_size], axis=0)
+            )
+            sc_mean_out.set_offsets(
+                np.mean(embed[self.in_sample_size:], axis=0)
+            )
+
             fig.canvas.draw_idle()
 
         textbox.on_submit(on_submit)
@@ -436,7 +445,6 @@ if __name__ == '__main__':
         sys.exit(1)
 
     image_filename = sys.argv[1]
-
     polygon_filename = sys.argv[2]
 
     agent = GUI(
