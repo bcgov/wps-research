@@ -185,12 +185,11 @@ def band_name(
 
     try:
         that_band = band_info_list[band_index]
+
+        return re.search(r"\bB\d{1,2}\b", that_band).group()
     
     except Exception:
         raise Out_Of_Bound_Band_Index(f"Band index = {band_index} doesn't exist.")
-    
-
-    return that_band.split()[2]
 
 
     
