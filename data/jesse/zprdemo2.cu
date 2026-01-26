@@ -908,6 +908,21 @@ void _pick(GLint name) {
                 printf("%s=%s\n", fieldNameY.c_str(), valY.c_str());
                 printf("%s=%s\n", fieldNameZ.c_str(), valZ.c_str());
                 printf("[%d] %s\n", idx, csvLines[idx].c_str());
+                
+                // Update center of rotation from main VBO
+                if (vbo) {
+                    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+                    float4 *pts = (float4*)glMapBuffer(GL_ARRAY_BUFFER, GL_READ_ONLY);
+                    if (pts) {
+                        zprReferencePoint[0] = pts[idx].x;
+                        zprReferencePoint[1] = pts[idx].y;
+                        zprReferencePoint[2] = pts[idx].z;
+                        printf("Center of rotation set to (%.3f, %.3f, %.3f)\n",
+                               zprReferencePoint[0], zprReferencePoint[1], zprReferencePoint[2]);
+                        glUnmapBuffer(GL_ARRAY_BUFFER);
+                    }
+                    glBindBuffer(GL_ARRAY_BUFFER, 0);
+                }
             }
         } else {
             // Special point (idx >= numPoints)
@@ -932,6 +947,21 @@ void _pick(GLint name) {
                 printf("%s=%s\n", fieldNameY.c_str(), valY.c_str());
                 printf("%s=%s\n", fieldNameZ.c_str(), valZ.c_str());
                 printf("[special:%d] %s\n", specialIdx, specialCsvLines[specialIdx].c_str());
+                
+                // Update center of rotation from special VBO
+                if (vboSpecial) {
+                    glBindBuffer(GL_ARRAY_BUFFER, vboSpecial);
+                    float4 *pts = (float4*)glMapBuffer(GL_ARRAY_BUFFER, GL_READ_ONLY);
+                    if (pts) {
+                        zprReferencePoint[0] = pts[specialIdx].x;
+                        zprReferencePoint[1] = pts[specialIdx].y;
+                        zprReferencePoint[2] = pts[specialIdx].z;
+                        printf("Center of rotation set to (%.3f, %.3f, %.3f)\n",
+                               zprReferencePoint[0], zprReferencePoint[1], zprReferencePoint[2]);
+                        glUnmapBuffer(GL_ARRAY_BUFFER);
+                    }
+                    glBindBuffer(GL_ARRAY_BUFFER, 0);
+                }
             }
         }
     }
@@ -1120,6 +1150,8 @@ int main(int argc, char *argv[]) {
     glutMainLoop();
     return 0;
 }
+
+
 
 
 
