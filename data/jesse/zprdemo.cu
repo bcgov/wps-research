@@ -51,6 +51,12 @@ float dataScale = 1.0f;
 std::vector<std::string> csvLines;
 std::string csvHeader;
 
+// Special points data
+GLuint vboSpecial = 0;
+int numSpecialPoints = 0;
+std::vector<std::string> specialCsvLines;
+std::string specialCsvHeader;
+
 // Field names for axis labels
 std::string fieldNameX, fieldNameY, fieldNameZ;
 
@@ -292,10 +298,102 @@ void initVBO(const std::vector<float4> &points) {
     printf("VBO initialized with %d points\n", numPoints);
 }
 
+// Load special.csv if it exists
+bool loadSpecialCSV(const char *field1, const char *field2, const char *field3,
+                    std::vector<float4> &points) {
+    std::ifstream file("special.csv");
+    if (!file.is_open()) {
+        printf("No special.csv found (optional)\n");
+        return false;
+    }
+
+    std::string line;
+    
+    // Read header
+    if (!std::getline(file, line)) {
+        return false;
+    }
+    
+    specialCsvHeader = line;
+    
+    std::vector<std::string> headers = splitCSVLine(line);
+    
+    int idx1 = findColumnIndex(headers, field1);
+    int idx2 = findColumnIndex(headers, field2);
+    int idx3 = findColumnIndex(headers, field3);
+    
+    if (idx1 < 0 || idx2 < 0 || idx3 < 0) {
+        printf("special.csv does not contain required fields, skipping\n");
+        return false;
+    }
+    
+    printf("Loading special.csv with fields: %s(col %d), %s(col %d), %s(col %d)\n", 
+           field1, idx1, field2, idx2, field3, idx3);
+    
+    // Read data
+    while (std::getline(file, line)) {
+        if (line.empty()) continue;
+        
+        std::vector<std::string> values = splitCSVLine(line);
+        
+        int maxIdx = std::max({idx1, idx2, idx3});
+        if ((int)values.size() <= maxIdx) continue;
+        
+        if (values[idx1].empty() || values[idx2].empty() || values[idx3].empty()) continue;
+
+        try {
+            float4 pt;
+            pt.x = std::stof(values[idx1]);
+            pt.y = std::stof(values[idx2]);
+            pt.z = std::stof(values[idx3]);
+            pt.w = 1.0f;
+            
+            points.push_back(pt);
+            specialCsvLines.push_back(line);
+        } catch (...) {
+            continue;
+        }
+    }
+    
+    file.close();
+    printf("Loaded %zu special points from special.csv\n", points.size());
+    
+    return points.size() > 0;
+}
+
+// Transform special points using the same scale as main data
+void transformSpecialPoints(std::vector<float4> &points) {
+    float rangeX = dataMax.x - dataMin.x;
+    float rangeY = dataMax.y - dataMin.y;
+    float rangeZ = dataMax.z - dataMin.z;
+    
+    for (size_t i = 0; i < points.size(); i++) {
+        points[i].x = (rangeX > 0) ? (points[i].x - dataMin.x) / rangeX : 0.5f;
+        points[i].y = (rangeY > 0) ? (points[i].y - dataMin.y) / rangeY : 0.5f;
+        points[i].z = (rangeZ > 0) ? (points[i].z - dataMin.z) / rangeZ : 0.5f;
+    }
+}
+
+void initSpecialVBO(const std::vector<float4> &points) {
+    numSpecialPoints = points.size();
+    if (numSpecialPoints == 0) return;
+    
+    glGenBuffers(1, &vboSpecial);
+    glBindBuffer(GL_ARRAY_BUFFER, vboSpecial);
+    glBufferData(GL_ARRAY_BUFFER, numSpecialPoints * sizeof(float4), points.data(), GL_STATIC_DRAW);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    
+    printf("Special VBO initialized with %d points\n", numSpecialPoints);
+}
+
 void cleanupVBO() {
     if (vbo) {
         glDeleteBuffers(1, &vbo);
         vbo = 0;
+    }
+    if (vboSpecial) {
+        glDeleteBuffers(1, &vboSpecial);
+        vboSpecial = 0;
     }
 }
 
@@ -403,6 +501,73 @@ void drawPoints() {
                 for (std::set<GLint>::iterator it = myPickNames.begin(); it != myPickNames.end(); ++it) {
                     int idx = *it;
                     if (idx >= 0 && idx < numPoints) {
+                        glVertex3f(pts[idx].x, pts[idx].y, pts[idx].z);
+                    }
+                }
+                glEnd();
+                glUnmapBuffer(GL_ARRAY_BUFFER);
+            }
+            glBindBuffer(GL_ARRAY_BUFFER, 0);
+        }
+    }
+    
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glDisableClientState(GL_VERTEX_ARRAY);
+    
+    glEnable(GL_LIGHTING);
+}
+
+// Draw special points (red, 10x larger)
+void drawSpecialPoints() {
+    if (vboSpecial == 0 || numSpecialPoints == 0) return;
+    
+    glDisable(GL_LIGHTING);
+    glEnable(GL_POINT_SMOOTH);
+    glPointSize(6.0f);  // 10x larger than regular points (0.6 * 10)
+    
+    glEnableClientState(GL_VERTEX_ARRAY);
+    glBindBuffer(GL_ARRAY_BUFFER, vboSpecial);
+    glVertexPointer(3, GL_FLOAT, sizeof(float4), 0);
+    
+    // Check if we're in selection mode
+    GLint renderMode;
+    glGetIntegerv(GL_RENDER_MODE, &renderMode);
+    
+    if (renderMode == GL_SELECT) {
+        // In selection mode: draw each special point with name offset by numPoints
+        float4 *pts = NULL;
+        
+        glBindBuffer(GL_ARRAY_BUFFER, vboSpecial);
+        pts = (float4*)glMapBuffer(GL_ARRAY_BUFFER, GL_READ_ONLY);
+        
+        if (pts) {
+            for (int i = 0; i < numSpecialPoints; i++) {
+                glLoadName(numPoints + i);  // Offset names to distinguish from regular points
+                glBegin(GL_POINTS);
+                glVertex3f(pts[i].x, pts[i].y, pts[i].z);
+                glEnd();
+            }
+            glUnmapBuffer(GL_ARRAY_BUFFER);
+        }
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+    } else {
+        // Normal render mode
+        glColor3f(1.0f, 0.0f, 0.0f);  // Red color
+        glDrawArrays(GL_POINTS, 0, numSpecialPoints);
+        
+        // Highlight picked special points
+        if (!myPickNames.empty()) {
+            glPointSize(12.0f);  // Even larger when picked
+            glColor3f(1.0f, 1.0f, 0.0f);  // Yellow highlight
+            
+            float4 *pts = NULL;
+            glBindBuffer(GL_ARRAY_BUFFER, vboSpecial);
+            pts = (float4*)glMapBuffer(GL_ARRAY_BUFFER, GL_READ_ONLY);
+            if (pts) {
+                glBegin(GL_POINTS);
+                for (std::set<GLint>::iterator it = myPickNames.begin(); it != myPickNames.end(); ++it) {
+                    int idx = *it - numPoints;  // Remove offset
+                    if (idx >= 0 && idx < numSpecialPoints) {
                         glVertex3f(pts[idx].x, pts[idx].y, pts[idx].z);
                     }
                 }
@@ -714,24 +879,60 @@ static void zprMotion(int x, int y) {
 void _pick(GLint name) {
     if (myPickNames.empty()) return;
     
-    printf("\n=== Picked %zu of %d total points ===\n", myPickNames.size(), numPoints);
-    printf("Header: %s\n", csvHeader.c_str());
-    printf("---\n");
+    // Count regular and special points picked
+    int regularPicked = 0, specialPicked = 0;
+    for (std::set<GLint>::iterator it = myPickNames.begin(); it != myPickNames.end(); ++it) {
+        if (*it < numPoints) regularPicked++;
+        else specialPicked++;
+    }
+    
+    printf("\n=== Picked %zu points (%d regular of %d, %d special of %d) ===\n", 
+           myPickNames.size(), regularPicked, numPoints, specialPicked, numSpecialPoints);
     
     for (std::set<GLint>::iterator it = myPickNames.begin(); it != myPickNames.end(); ++it) {
         int idx = *it;
-        if (idx >= 0 && idx < (int)csvLines.size()) {
-            // Extract field values from the CSV line
-            std::vector<std::string> values = splitCSVLine(csvLines[idx]);
-            
-            std::string valX = (colIdxX >= 0 && colIdxX < (int)values.size()) ? values[colIdxX] : "N/A";
-            std::string valY = (colIdxY >= 0 && colIdxY < (int)values.size()) ? values[colIdxY] : "N/A";
-            std::string valZ = (colIdxZ >= 0 && colIdxZ < (int)values.size()) ? values[colIdxZ] : "N/A";
-            
-            printf("%s=%s\n", fieldNameX.c_str(), valX.c_str());
-            printf("%s=%s\n", fieldNameY.c_str(), valY.c_str());
-            printf("%s=%s\n", fieldNameZ.c_str(), valZ.c_str());
-            printf("[%d] %s\n", idx, csvLines[idx].c_str());
+        
+        if (idx < numPoints) {
+            // Regular point
+            if (idx >= 0 && idx < (int)csvLines.size()) {
+                printf("Header: %s\n", csvHeader.c_str());
+                printf("---\n");
+                
+                std::vector<std::string> values = splitCSVLine(csvLines[idx]);
+                
+                std::string valX = (colIdxX >= 0 && colIdxX < (int)values.size()) ? values[colIdxX] : "N/A";
+                std::string valY = (colIdxY >= 0 && colIdxY < (int)values.size()) ? values[colIdxY] : "N/A";
+                std::string valZ = (colIdxZ >= 0 && colIdxZ < (int)values.size()) ? values[colIdxZ] : "N/A";
+                
+                printf("%s=%s\n", fieldNameX.c_str(), valX.c_str());
+                printf("%s=%s\n", fieldNameY.c_str(), valY.c_str());
+                printf("%s=%s\n", fieldNameZ.c_str(), valZ.c_str());
+                printf("[%d] %s\n", idx, csvLines[idx].c_str());
+            }
+        } else {
+            // Special point (idx >= numPoints)
+            int specialIdx = idx - numPoints;
+            if (specialIdx >= 0 && specialIdx < (int)specialCsvLines.size()) {
+                printf("Header (special): %s\n", specialCsvHeader.c_str());
+                printf("---\n");
+                
+                std::vector<std::string> values = splitCSVLine(specialCsvLines[specialIdx]);
+                
+                // Find column indices in special.csv header
+                std::vector<std::string> headers = splitCSVLine(specialCsvHeader);
+                int sIdx1 = findColumnIndex(headers, fieldNameX.c_str());
+                int sIdx2 = findColumnIndex(headers, fieldNameY.c_str());
+                int sIdx3 = findColumnIndex(headers, fieldNameZ.c_str());
+                
+                std::string valX = (sIdx1 >= 0 && sIdx1 < (int)values.size()) ? values[sIdx1] : "N/A";
+                std::string valY = (sIdx2 >= 0 && sIdx2 < (int)values.size()) ? values[sIdx2] : "N/A";
+                std::string valZ = (sIdx3 >= 0 && sIdx3 < (int)values.size()) ? values[sIdx3] : "N/A";
+                
+                printf("%s=%s\n", fieldNameX.c_str(), valX.c_str());
+                printf("%s=%s\n", fieldNameY.c_str(), valY.c_str());
+                printf("%s=%s\n", fieldNameZ.c_str(), valZ.c_str());
+                printf("[special:%d] %s\n", specialIdx, specialCsvLines[specialIdx].c_str());
+            }
         }
     }
     printf("===\n\n");
@@ -779,6 +980,7 @@ void drawText() {
 void drawScene() {
     drawAxes();
     drawPoints();
+    drawSpecialPoints();
 }
 
 void display() {
@@ -880,6 +1082,13 @@ int main(int argc, char *argv[]) {
 
     // Initialize VBO with point data
     initVBO(points);
+    
+    // Load and initialize special points if special.csv exists
+    std::vector<float4> specialPoints;
+    if (loadSpecialCSV(field1, field2, field3, specialPoints)) {
+        transformSpecialPoints(specialPoints);
+        initSpecialVBO(specialPoints);
+    }
 
     zprSelectionFunc(drawScene);
     zprPickFunc(pick);
