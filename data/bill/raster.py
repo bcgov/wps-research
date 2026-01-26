@@ -302,6 +302,101 @@ class Raster:
         band = self.__read_single_band(band_id + 1) #Because gdal read band starts at 1
 
         return band
+    
+
+
+    def is_polygon(
+            self
+    ):
+        
+        '''
+        Description
+        -----------
+        Checks whether the loaded data is really a polygon.
+
+        
+        Must pass
+        ---------
+        
+            1. Has only 1 band
+
+            2. Is of boolean dtype
+        '''
+        from misc.general import is_boolean_matrix
+
+
+        if (self._n_band > 1):
+
+            print('This file has more than 1 band. Not a polygon')
+
+            return False
+
+
+        if (
+            not is_boolean_matrix(self.read_bands('all'))
+        ):
+
+            print('dtype of polygon is not boolean. Not a polygon.')
+
+            return False
+        
+        
+        return True
+    
+
+
+    def can_match_with(
+            self,
+            imagery
+    ):
+        '''
+        Description
+        -----------
+        Checks if this imagery is applicable with another one.
+        '''
+
+        #Check shape
+
+        if (self._xSize != imagery._xSize) or (self._ySize != imagery._ySize):
+
+            print('Polygon cant be broadcast with Raster -> Mismatched shape')
+            return False
+        
+
+        #Check projection
+
+        if (self._proj != imagery._proj):
+
+            print(f'{self._proj} doesn not match {imagery._proj}')
+            return False
+        
+
+        #Check transform
+
+        if not np.allclose(self._transform, imagery._transform, atol=0):
+
+            print('Geotransform mismatch.')
+            return False
+        
+        
+        return True
+    
+
+
+    def band_name(
+            self,
+            band_index
+    ):
+        '''
+        input band_index starts at 1.
+        '''
+        from misc.sen2 import band_name
+
+        return band_name(
+            band_info_list=self.band_info_list, 
+            band_index=band_index - 1
+        )
+
 
 
 

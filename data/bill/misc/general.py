@@ -301,4 +301,74 @@ def draw_border(
     return out
 
 
-    
+
+
+def is_boolean_matrix(
+        A
+):
+    '''
+    Description
+    -----------
+    Checks if data are of boolean dtype.
+    '''
+
+    A = np.asarray(A)
+
+    # Case 1: true boolean dtype
+    if A.dtype == np.bool_:
+        return True
+
+    # Case 2: numeric but only 0/1
+    if np.issubdtype(A.dtype, np.integer):
+        return np.all((A == 0) | (A == 1))
+
+    if np.issubdtype(A.dtype, np.floating):
+        return np.all((A == 0.0) | (A == 1.0))
+
+    return False
+
+
+
+
+def get_combinations(
+        val_lst: list,
+        least: int = 1,
+        most: int = None
+):
+
+    '''
+    Description
+    -----------
+    Get combination of a list (order doesn't matter)
+
+
+    Parameters
+    ----------
+    val_lst: list of values to find comb
+
+    least: at least how many values in each combination.
+
+    most: at least how many values in each combination.
+
+
+    Returns
+    -------
+    list[list]
+    '''
+
+    from itertools import combinations
+
+
+    n = len(val_lst)
+
+    if most is None:
+        most = n
+
+    if least < 1 or most > n or least > most:
+        raise ValueError("Invalid least/most values")
+
+    return [
+        list(c)
+        for k in range(least, most + 1)
+        for c in combinations(val_lst, k)
+    ]
