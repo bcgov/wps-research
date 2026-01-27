@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-20260127 ENVI Raster t-SNE Embedding Tool
+20260127: ENVI Raster t-SNE Embedding Tool
 
 This script reads an n-dimensional ENVI format raster (32-bit float, BSQ),
 runs cuML t-SNE dimensionality reduction, and outputs an ENVI format file
@@ -13,6 +13,11 @@ import argparse
 import numpy as np
 from osgeo import gdal
 import sys
+import time
+import matplotlib
+matplotlib.use('Agg')  # Non-interactive backend
+import matplotlib.pyplot as plt
+from scipy.optimize import curve_fit
 
 # Suppress GDAL warnings for cleaner output
 gdal.UseExceptions()
@@ -77,6 +82,18 @@ def parse_args():
         '-v', '--verbose',
         action='store_true',
         help='Enable verbose output'
+    )
+    parser.add_argument(
+        '--benchmark',
+        action='store_true',
+        help='Run benchmark mode: iterate from n_skip=2048 down to n_skip=1, '
+             'timing each run and plotting progress with exponential extrapolation'
+    )
+    parser.add_argument(
+        '--benchmark_plot',
+        type=str,
+        default='benchmark_progress.png',
+        help='Output path for benchmark plot (default: benchmark_progress.png)'
     )
     return parser.parse_args()
 
@@ -327,32 +344,325 @@ def write_envi_raster(output_file, data, src_dataset, verbose=False):
         print("  Output file written successfully")
 
 
+def exponential_model(x, a, b, c):
+    """Exponential model: y = a * exp(b * x) + c"""
+    return a * np.exp(b * x) + c
+
+
+def power_model(x, a, b):
+    """Power model: y = a * (n_samples)^b where n_samples ~ 4^(-log2_skip)"""
+    # x is log2(n_skip), so n_samples proportional to 4^(-x)
+    # y = a * 4^(-b*x) = a * exp(-b * x * ln(4))
+    return a * np.exp(-b * x * np.log(4))
+
+
+def update_benchmark_plot(log2_skips, times, plot_path, total_pixels):
+    """
+    Update the benchmark plot with current data and exponential extrapolation.
+    
+    Args:
+        log2_skips: list of log2(n_skip) values (descending order in time)
+        times: list of elapsed times in seconds
+        plot_path: path to save the plot
+        total_pixels: total number of pixels in the image
+    """
+    fig, ax = plt.subplots(figsize=(12, 8))
+    
+    # Convert to numpy arrays
+    x_data = np.array(log2_skips)
+    y_data = np.array(times)
+    
+    # Plot actual measurements
+    ax.scatter(x_data, y_data, s=100, c='blue', zorder=5, label='Measured times')
+    ax.plot(x_data, y_data, 'b-', linewidth=2, alpha=0.7)
+    
+    # Annotate points with timing info
+    for i, (x, y) in enumerate(zip(x_data, y_data)):
+        n_skip = 2 ** int(x)
+        n_samples = total_pixels // (n_skip * n_skip)
+        label = f'{y:.1f}s\n({n_samples:,} px)'
+        ax.annotate(label, (x, y), textcoords="offset points", 
+                    xytext=(0, 10), ha='center', fontsize=8)
+    
+    estimated_time_at_1 = None
+    
+    # Fit exponential model if we have enough points
+    if len(x_data) >= 3:
+        try:
+            # Use power model: time ~ a * (n_samples)^b
+            # Since n_samples ~ total_pixels / (n_skip^2) = total_pixels * 4^(-log2_skip)
+            # We fit: time = a * exp(-b * log2_skip * ln(4))
+            
+            # Initial guess
+            p0 = [times[-1], 1.5]  # a = latest time, b = ~1.5 (between linear and quadratic)
+            
+            popt, pcov = curve_fit(power_model, x_data, y_data, p0=p0, maxfev=10000)
+            a_fit, b_fit = popt
+            
+            # Generate smooth curve for plotting
+            x_smooth = np.linspace(min(x_data), 0, 100)
+            y_smooth = power_model(x_smooth, *popt)
+            
+            ax.plot(x_smooth, y_smooth, 'r--', linewidth=2, 
+                    label=f'Power fit: t = {a_fit:.2e} × n_samples^{b_fit:.2f}')
+            
+            # Estimate time at log2(n_skip) = 0 (i.e., n_skip = 1)
+            estimated_time_at_1 = power_model(0, *popt)
+            
+            # Plot the extrapolated point
+            ax.scatter([0], [estimated_time_at_1], s=150, c='red', marker='*', 
+                       zorder=6, label=f'Estimated n_skip=1: {format_time(estimated_time_at_1)}')
+            
+            # Add vertical line at n_skip=1
+            ax.axvline(x=0, color='gray', linestyle=':', alpha=0.5)
+            
+        except Exception as e:
+            print(f"  Warning: Could not fit exponential model: {e}")
+    
+    # Labels and formatting
+    ax.set_xlabel('log₂(n_skip)', fontsize=12)
+    ax.set_ylabel('Computation Time (seconds)', fontsize=12)
+    ax.set_title('t-SNE Benchmark: Computation Time vs. Subsampling Rate', fontsize=14)
+    
+    # Create custom x-tick labels showing both log2 and actual n_skip
+    x_ticks = list(range(int(max(x_data)), -1, -1))
+    x_tick_labels = [f'{x}\n(n_skip={2**x})' for x in x_ticks]
+    ax.set_xticks(x_ticks)
+    ax.set_xticklabels(x_tick_labels)
+    
+    # Set y-axis to log scale if range is large
+    if len(y_data) > 1 and max(y_data) / min(y_data) > 10:
+        ax.set_yscale('log')
+        ax.set_ylabel('Computation Time (seconds, log scale)', fontsize=12)
+    
+    ax.legend(loc='upper right', fontsize=10)
+    ax.grid(True, alpha=0.3)
+    
+    # Add info box
+    info_text = f'Total pixels: {total_pixels:,}\nRuns completed: {len(times)}'
+    if estimated_time_at_1 is not None:
+        info_text += f'\nEstimated full run: {format_time(estimated_time_at_1)}'
+    ax.text(0.02, 0.98, info_text, transform=ax.transAxes, fontsize=10,
+            verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+    
+    plt.tight_layout()
+    plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    
+    return estimated_time_at_1
+
+
+def format_time(seconds):
+    """Format seconds into human-readable string."""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    elif seconds < 3600:
+        minutes = seconds / 60
+        return f"{minutes:.1f}m"
+    elif seconds < 86400:
+        hours = seconds / 3600
+        return f"{hours:.1f}h"
+    else:
+        days = seconds / 86400
+        return f"{days:.1f}d"
+
+
+def run_computation(data, sample_rows, sample_cols, nodata_mask, n_rows, n_cols,
+                    n_components, perplexity, n_iter, learning_rate, random_state, 
+                    n_skip, verbose=False):
+    """
+    Run the core computation (t-SNE + interpolation) and return results.
+    
+    Returns:
+        output: the embedded output array
+        elapsed: computation time in seconds
+    """
+    start_time = time.time()
+    
+    n_samples = len(sample_rows)
+    n_bands = data.shape[0]
+    
+    # Extract feature vectors for sampled pixels
+    sample_data = data[:, sample_rows, sample_cols].T  # (n_samples, n_bands)
+    
+    # Handle nodata in sampled pixels
+    sample_nodata_mask = nodata_mask[sample_rows, sample_cols]
+    
+    # Replace nodata with zeros for t-SNE (they'll be masked in output)
+    sample_data_clean = sample_data.copy()
+    sample_data_clean[sample_nodata_mask] = 0
+    
+    # Also replace any remaining NaN/Inf values
+    sample_data_clean = np.nan_to_num(sample_data_clean, nan=0.0, posinf=0.0, neginf=0.0)
+    
+    # Run t-SNE
+    embedded = run_tsne(
+        sample_data_clean,
+        n_components,
+        perplexity,
+        n_iter,
+        learning_rate,
+        random_state,
+        verbose
+    )
+    
+    # Create output array
+    if n_skip == 1:
+        # All pixels were sampled, just reshape
+        if verbose:
+            print("Reshaping output (no interpolation needed)...")
+        
+        output = np.zeros((n_components, n_rows, n_cols), dtype=np.float32)
+        for i, (r, c) in enumerate(zip(sample_rows, sample_cols)):
+            output[:, r, c] = embedded[i]
+        
+        # Set nodata pixels to NaN
+        output[:, nodata_mask] = np.nan
+    else:
+        # Interpolate non-sampled pixels
+        output = interpolate_missing_pixels(
+            data, sample_rows, sample_cols, embedded,
+            n_rows, n_cols, n_components, nodata_mask, verbose
+        )
+        
+        # Set nodata pixels to NaN
+        output[:, nodata_mask] = np.nan
+    
+    elapsed = time.time() - start_time
+    return output, elapsed
+
+
+def run_benchmark(args, data, src_dataset, nodata_mask, n_rows, n_cols):
+    """
+    Run benchmark mode: iterate from n_skip=2048 down, timing each run.
+    """
+    print("=" * 60)
+    print("BENCHMARK MODE")
+    print("=" * 60)
+    
+    total_pixels = n_rows * n_cols
+    print(f"Image dimensions: {n_cols} x {n_rows} = {total_pixels:,} pixels")
+    print(f"Starting benchmark from n_skip=2048, halving each iteration")
+    print("=" * 60)
+    
+    # Track results
+    log2_skips = []
+    times = []
+    last_output = None
+    
+    # Start from n_skip = 2048 and halve each time
+    n_skip = 2048
+    
+    while n_skip >= 1:
+        log2_skip = int(np.log2(n_skip))
+        
+        # Create sample indices for this n_skip
+        sample_rows, sample_cols = create_sample_indices(n_rows, n_cols, n_skip)
+        n_samples = len(sample_rows)
+        
+        # Skip if too few samples for t-SNE
+        valid_samples = ~nodata_mask[sample_rows, sample_cols]
+        n_valid = np.sum(valid_samples)
+        
+        min_samples = max(10, int(args.perplexity * 3) + 1)
+        if n_valid < min_samples:
+            print(f"\nn_skip={n_skip} (log2={log2_skip}): Skipping - only {n_valid} valid samples "
+                  f"(need at least {min_samples} for perplexity={args.perplexity})")
+            n_skip //= 2
+            continue
+        
+        print(f"\n{'='*60}")
+        print(f"Running n_skip={n_skip} (log2={log2_skip})")
+        print(f"  Sampling {n_samples:,} pixels ({100*n_samples/total_pixels:.2f}%)")
+        print(f"  Valid samples: {n_valid:,}")
+        
+        # Run computation with timing
+        output, elapsed = run_computation(
+            data, sample_rows, sample_cols, nodata_mask, n_rows, n_cols,
+            args.n_components, args.perplexity, args.n_iter, args.learning_rate,
+            args.random_state, n_skip, verbose=args.verbose
+        )
+        
+        last_output = output
+        
+        # Record results
+        log2_skips.append(log2_skip)
+        times.append(elapsed)
+        
+        print(f"  Computation time: {format_time(elapsed)}")
+        
+        # Update plot
+        estimated = update_benchmark_plot(log2_skips, times, args.benchmark_plot, total_pixels)
+        print(f"  Plot updated: {args.benchmark_plot}")
+        
+        if estimated is not None:
+            print(f"  Estimated time for n_skip=1: {format_time(estimated)}")
+        
+        # Halve n_skip for next iteration
+        n_skip //= 2
+    
+    print("\n" + "=" * 60)
+    print("BENCHMARK COMPLETE")
+    print("=" * 60)
+    
+    # Print summary table
+    print("\nSummary:")
+    print(f"{'n_skip':>8} {'log2':>6} {'Samples':>12} {'Time':>12}")
+    print("-" * 42)
+    for log2_skip, t in zip(log2_skips, times):
+        n_skip_val = 2 ** log2_skip
+        n_samples = total_pixels // (n_skip_val * n_skip_val)
+        print(f"{n_skip_val:>8} {log2_skip:>6} {n_samples:>12,} {format_time(t):>12}")
+    
+    return last_output
+
+
 def main():
     args = parse_args()
     
-    if args.verbose:
+    if args.verbose or args.benchmark:
         print("=" * 60)
         print("ENVI Raster t-SNE Embedding Tool")
         print("=" * 60)
     
     # Read input raster
-    data, src_dataset = read_envi_raster(args.input_file, args.verbose)
+    data, src_dataset = read_envi_raster(args.input_file, args.verbose or args.benchmark)
     n_bands, n_rows, n_cols = data.shape
     
     # Create nodata mask
     if args.nodata is not None:
         # Pixel is nodata if ANY band has nodata value
         nodata_mask = np.any(data == args.nodata, axis=0)
-        if args.verbose:
+        if args.verbose or args.benchmark:
             nodata_count = np.sum(nodata_mask)
             print(f"NoData pixels: {nodata_count} ({100*nodata_count/(n_rows*n_cols):.1f}%)")
     else:
         # Check for NaN values
         nodata_mask = np.any(np.isnan(data), axis=0)
-        if args.verbose and np.any(nodata_mask):
+        if (args.verbose or args.benchmark) and np.any(nodata_mask):
             nodata_count = np.sum(nodata_mask)
             print(f"NaN pixels detected: {nodata_count}")
     
+    # Benchmark mode
+    if args.benchmark:
+        output = run_benchmark(args, data, src_dataset, nodata_mask, n_rows, n_cols)
+        
+        if output is not None:
+            # Write the last completed output
+            write_envi_raster(args.output_file, output, src_dataset, verbose=True)
+        
+        # Clean up
+        src_dataset = None
+        
+        print("\n" + "=" * 60)
+        print("Benchmark complete!")
+        print(f"Final plot saved to: {args.benchmark_plot}")
+        print(f"Output file (last completed): {args.output_file}")
+        print("=" * 60)
+        
+        return 0
+    
+    # Normal mode (non-benchmark)
     # Create sample indices
     sample_rows, sample_cols = create_sample_indices(n_rows, n_cols, args.n_skip)
     n_samples = len(sample_rows)
@@ -429,5 +739,3 @@ def main():
 
 if __name__ == '__main__':
     sys.exit(main())
-
-
