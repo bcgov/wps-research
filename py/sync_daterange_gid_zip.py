@@ -1,4 +1,6 @@
-'''20230627: sync a date range for selected GID, in Level-2 to zip file format.
+'''20260127: progress monitor added 
+
+20230627: sync a date range for selected GID, in Level-2 to zip file format.
 
 python3 sync_daterange_gid_zip.py [yyyymmdd] [yyyymmdd2] # optional: list of GID 
 '''
@@ -14,10 +16,19 @@ import multiprocessing as mp
 from pathlib import Path
 import datetime
 import argparse
+import shutil
 import time
 import json
 import sys
 import os
+
+# Global status tracking
+download_start_time = None
+files_completed = 0
+total_files = 0
+bytes_completed = 0
+total_bytes = 0
+
 my_path_0 = '/data/'
 my_path_1 = sep.join(os.path.abspath(__file__).split(sep)[:-1]) + sep
 my_path = my_path_1
@@ -37,7 +48,35 @@ product_target = os.getcwd() + sep # put ARD products into present folder
 #                     help="do not refresh aws bucket listing, use most recent list instead")
 no_refresh = True # args.no_refresh
 
+def print_status_update(file_name, file_size, file_download_time):
+    global files_completed, total_files, bytes_completed, total_bytes, download_start_time
+    
+    elapsed_time = time.time() - download_start_time
+    pct_files = (files_completed / total_files * 100) if total_files > 0 else 0
+    pct_bytes = (bytes_completed / total_bytes * 100) if total_bytes > 0 else 0
+    
+    if files_completed > 0:
+        time_per_file = elapsed_time / files_completed
+        files_remaining = total_files - files_completed
+        eta_seconds = time_per_file * files_remaining
+    else:
+        eta_seconds = 0
+    
+    print(f"\n{'='*60}")
+    print(f"DOWNLOAD STATUS UPDATE")
+    print(f"{'='*60}")
+    print(f"File completed: {file_name}")
+    print(f"File size: {file_size / (1024*1024):.2f} MB | File download time: {file_download_time:.1f}s")
+    print(f"{'='*60}")
+    print(f"Files completed:    {files_completed} / {total_files} ({pct_files:.1f}%)")
+    print(f"Bytes completed:    {bytes_completed / (1024*1024*1024):.2f} / {total_bytes / (1024*1024*1024):.2f} GB ({pct_bytes:.1f}%)")
+    print(f"Time elapsed:       {elapsed_time / 60:.1f} min")
+    print(f"Time remaining:     {eta_seconds / 60:.1f} min (ETA)")
+    print(f"{'='*60}\n")
+
 def download_by_gids(gids, yyyymmdd, yyyymmdd2):
+    global files_completed, total_files, bytes_completed, total_bytes, download_start_time
+    
     if len(yyyymmdd) != 8 or len(yyyymmdd2) != 8:
         err('expected date in format yyyymmdd')
     start_d = datetime.datetime(int(yyyymmdd[0:4]),
@@ -89,7 +128,8 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2):
         err('please confirm aws cli: e.g. sudo apt install awscli')
     data = d['Contents']  # extract the data records, one per dataset
     
-    cmds = []
+    # First pass: collect files to download and calculate totals
+    files_to_download = []
     for d in data:
         key, modified, file_size = d['Key'].strip(), d['LastModified'], d['Size']
         w = [x.strip() for x in key.split('/')]
@@ -107,30 +147,67 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2):
             if gids is not None and gid not in gids:  # only level-2 for selected date and gid
                 continue
 
-            if not os.path.exists(out_dir):
-                os.mkdir(out_dir)
-            '''
-            cmd = ' '.join(['aws',
-                            's3',
-                            'cp',
-                            '--no-sign-request',
-                            's3://sentinel-products-ca-mirror/' + key,
-                            f])
-            print([f])'''
             if exists(f) and Path(f).stat().st_size == file_size:
                 print(f, "SKIPPING")
             else:
-                print(f)
-                #cmds += [cmd]
-
-                aws_download('sentinel-products-ca-mirror',
-                             key,
-                             Path(f)) # LOCAL_PATH):
-                # === CONFIGURATION ===
-                # BUCKET = "sentinel-products-ca-mirror"
-                # KEY = "Sentinel-2/S2MSI2A/2025/05/27/S2C_MSIL2A_20250527T191931_N0511_R099_T10VFL_20250528T002013.zip"
-                # LOCAL_PATH = Path("L2_T10VFL") / Path(KEY).name
-
+                files_to_download.append({'key': key, 'file': f, 'size': file_size, 'out_dir': out_dir})
+    
+    # Calculate totals
+    total_files = len(files_to_download)
+    total_bytes = sum(item['size'] for item in files_to_download)
+    
+    print(f"\n{'='*60}")
+    print(f"DOWNLOAD SUMMARY")
+    print(f"{'='*60}")
+    print(f"Total files to download: {total_files}")
+    print(f"Total download size: {total_bytes / (1024*1024*1024):.2f} GB")
+    print(f"{'='*60}\n")
+    
+    # Check available disk space
+    disk_usage = shutil.disk_usage(os.getcwd())
+    available_space = disk_usage.free
+    
+    if available_space < total_bytes:
+        print(f"\n{'='*60}")
+        print(f"ERROR: INSUFFICIENT DISK SPACE")
+        print(f"{'='*60}")
+        print(f"Required: {total_bytes / (1024*1024*1024):.2f} GB")
+        print(f"Available: {available_space / (1024*1024*1024):.2f} GB")
+        print(f"{'='*60}\n")
+        err('Insufficient disk space. Exiting before downloads.')
+    
+    if total_files == 0:
+        print("No files to download.")
+        return
+    
+    # Record start time
+    download_start_time = time.time()
+    
+    # Second pass: download files
+    for item in files_to_download:
+        key = item['key']
+        f = item['file']
+        file_size = item['size']
+        out_dir = item['out_dir']
+        
+        if not os.path.exists(out_dir):
+            os.mkdir(out_dir)
+        
+        print(f)
+        
+        file_start_time = time.time()
+        aws_download('sentinel-products-ca-mirror',
+                     key,
+                     Path(f))
+        file_end_time = time.time()
+        file_download_time = file_end_time - file_start_time
+        
+        # Update global counters
+        files_completed += 1
+        bytes_completed += file_size
+        
+        # Print status update
+        print_status_update(f, file_size, file_download_time)
 
     
     '''
@@ -178,3 +255,4 @@ else:
 if __name__ == "__main__":
     yyyymmdd, yyyymmdd2 = args[1], args[2]
     download_by_gids(gids, yyyymmdd, yyyymmdd2)
+
