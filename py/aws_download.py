@@ -18,7 +18,7 @@ def aws_download(BUCKET, KEY, LOCAL_PATH):
     # LOCAL_PATH = Path("L2_T10VFL") / Path(KEY).name
     CHUNK_SIZE = 2 * 1024 * 1024  # 8 MB
     MAX_RETRIES = 500
-    NUM_THREADS = 10  # <== You can change this value
+    NUM_THREADS = 24  # <== You can change this value
 
     # === SETUP ===
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
