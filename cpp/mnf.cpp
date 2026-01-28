@@ -11,9 +11,7 @@
  * 5. Project data onto eigenvectors sorted by decreasing SNR (eigenvalue)
  *
  * Usage: mnf_transform <input_raster> <output_raster> [options]
-
-g++ -O3 -march=native -fopenmp -DNDEBUG mnf.cpp -o mnf $(gdal-config --cflags) $(gdal-config --libs) -lfftw3 -lfftw3_threads -lm
-
+ *
  * Compile (choose one based on your Eigen installation):
  *   # If Eigen is in /usr/include/eigen3:
  *   g++ -O3 -march=native -fopenmp -DNDEBUG mnf_transform_cpu.cpp -o mnf_transform \
@@ -93,6 +91,121 @@ public:
 // ============================================================================
 // FFT-based Destriping
 // ============================================================================
+
+/**
+ * Row-wise median destriping - directly removes horizontal stripe artifacts
+ * 
+ * For each row, computes the median offset compared to a local vertical window
+ * and subtracts it. This is very effective for pushbroom sensor striping.
+ * 
+ * @param band_data Input/output band data (modified in place)
+ * @param width Image width
+ * @param height Image height
+ * @param window Vertical window size for local reference (default 31)
+ */
+void destripe_band_rowwise(float* band_data, int width, int height, int window = 31) {
+    
+    int half_win = window / 2;
+    
+    // Compute row medians
+    vector<float> row_medians(height);
+    vector<float> row_buffer(width);
+    
+    for (int row = 0; row < height; row++) {
+        memcpy(row_buffer.data(), &band_data[row * width], width * sizeof(float));
+        size_t mid = width / 2;
+        nth_element(row_buffer.begin(), row_buffer.begin() + mid, row_buffer.end());
+        row_medians[row] = row_buffer[mid];
+    }
+    
+    // For each row, compute local reference (median of nearby row medians)
+    // and subtract the difference
+    vector<float> corrections(height);
+    vector<float> local_medians(window);
+    
+    for (int row = 0; row < height; row++) {
+        // Gather local row medians
+        int count = 0;
+        for (int r = row - half_win; r <= row + half_win; r++) {
+            if (r >= 0 && r < height && r != row) {
+                local_medians[count++] = row_medians[r];
+            }
+        }
+        
+        if (count > 0) {
+            // Find median of local medians
+            size_t mid = count / 2;
+            nth_element(local_medians.begin(), local_medians.begin() + mid, local_medians.begin() + count);
+            float local_ref = local_medians[mid];
+            
+            // Correction is the difference between this row's median and local reference
+            corrections[row] = row_medians[row] - local_ref;
+        } else {
+            corrections[row] = 0;
+        }
+    }
+    
+    // Apply corrections
+    #pragma omp parallel for
+    for (int row = 0; row < height; row++) {
+        float corr = corrections[row];
+        for (int col = 0; col < width; col++) {
+            band_data[row * width + col] -= corr;
+        }
+    }
+}
+
+/**
+ * Column-wise median destriping - removes vertical stripe artifacts
+ * (same logic but transposed)
+ */
+void destripe_band_colwise(float* band_data, int width, int height, int window = 31) {
+    
+    int half_win = window / 2;
+    
+    // Compute column medians
+    vector<float> col_medians(width);
+    vector<float> col_buffer(height);
+    
+    for (int col = 0; col < width; col++) {
+        for (int row = 0; row < height; row++) {
+            col_buffer[row] = band_data[row * width + col];
+        }
+        size_t mid = height / 2;
+        nth_element(col_buffer.begin(), col_buffer.begin() + mid, col_buffer.end());
+        col_medians[col] = col_buffer[mid];
+    }
+    
+    // For each column, compute local reference and subtract difference
+    vector<float> corrections(width);
+    vector<float> local_medians(window);
+    
+    for (int col = 0; col < width; col++) {
+        int count = 0;
+        for (int c = col - half_win; c <= col + half_win; c++) {
+            if (c >= 0 && c < width && c != col) {
+                local_medians[count++] = col_medians[c];
+            }
+        }
+        
+        if (count > 0) {
+            size_t mid = count / 2;
+            nth_element(local_medians.begin(), local_medians.begin() + mid, local_medians.begin() + count);
+            float local_ref = local_medians[mid];
+            corrections[col] = col_medians[col] - local_ref;
+        } else {
+            corrections[col] = 0;
+        }
+    }
+    
+    // Apply corrections
+    #pragma omp parallel for
+    for (int row = 0; row < height; row++) {
+        for (int col = 0; col < width; col++) {
+            band_data[row * width + col] -= corrections[col];
+        }
+    }
+}
 
 /**
  * Apply FFT-based notch filter to remove horizontal stripes from a single band
@@ -233,31 +346,54 @@ int destripe_band_fft(float* band_data, int width, int height,
 }
 
 /**
- * Apply FFT-based destriping to all bands
+ * Apply destriping to all bands
+ * Uses row-wise median method first (most effective for horizontal stripes),
+ * then optionally FFT for residual periodic patterns
  */
 void destripe_image(float* data, int bands, int width, int height, 
                     float threshold, bool quiet) {
     
     size_t pixels = (size_t)width * height;
-    int total_notches = 0;
+    
+    if (!quiet) {
+        cout << "  Applying row-wise median destriping..." << endl;
+    }
+    
+    // First pass: row-wise median (horizontal stripes)
+    #pragma omp parallel for
+    for (int b = 0; b < bands; b++) {
+        destripe_band_rowwise(&data[b * pixels], width, height, 31);
+    }
+    
+    if (!quiet) {
+        cout << "  Applying column-wise median destriping..." << endl;
+    }
+    
+    // Second pass: column-wise median (vertical stripes)
+    #pragma omp parallel for
+    for (int b = 0; b < bands; b++) {
+        destripe_band_colwise(&data[b * pixels], width, height, 31);
+    }
+    
+    // Third pass: FFT for any remaining periodic artifacts
+    if (!quiet) {
+        cout << "  Applying FFT notch filter for residual stripes..." << endl;
+    }
     
     // Initialize FFTW threads
     fftw_init_threads();
     fftw_plan_with_nthreads(omp_get_max_threads());
     
+    int total_notches = 0;
     for (int b = 0; b < bands; b++) {
         int notches = destripe_band_fft(&data[b * pixels], width, height, threshold, quiet);
         total_notches += notches;
-        
-        if (!quiet && notches > 0) {
-            cout << "  Band " << (b + 1) << ": notched " << notches << " stripe frequencies" << endl;
-        }
     }
     
     fftw_cleanup_threads();
     
     if (!quiet) {
-        cout << "  Total stripe frequencies removed: " << total_notches << endl;
+        cout << "  FFT notched " << total_notches << " stripe frequencies total" << endl;
     }
 }
 
@@ -1308,5 +1444,6 @@ int main(int argc, char** argv) {
 
     return 0;
 }
+
 
 
