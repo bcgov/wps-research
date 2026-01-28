@@ -1449,7 +1449,9 @@ int main(int argc, char** argv) {
     // Map to track which buffer holds which image
     std::map<int, int> image_to_buffer;
     
-    while (images_processed < (int)g_image_files.size()) {
+    while (images_processed < (int)g_image_files.size() ||
+       !g_reorder_buffer.empty()) {
+
         // Get next image from queue
         /* ImageData img_data;
         {
