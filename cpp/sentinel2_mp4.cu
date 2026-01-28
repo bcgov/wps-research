@@ -1441,6 +1441,8 @@ while (!have_image) {
     }
 }
 
+processing_done:
+
 
         if (!img_data.valid || !img_data.host_data) {
             fprintf(stderr, "Skipping invalid image %d\n", img_data.index);
