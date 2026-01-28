@@ -13,9 +13,7 @@
  *
  * Compile (choose one based on your Eigen installation):
  *   # If Eigen is in /usr/include/eigen3:
-
- g++ -O3 -march=native -fopenmp -DNDEBUG mnf_transform_cpu.cpp -o mnf_transform  $(gdal-config --cflags) $(gdal-config --libs)
- 
+    g++ -O3 -march=native -fopenmp -DNDEBUG mnf_transform_cpu.cpp -o mnf_transform  $(gdal-config --cflags) $(gdal-config --libs)
  *
  *   # If Eigen is elsewhere, specify the path:
  *   g++ -O3 -march=native -fopenmp -DNDEBUG mnf_transform_cpu.cpp -o mnf_transform \
@@ -402,7 +400,8 @@ bool write_envi_header(const string& hdr_filename, const string& src_filename,
 }
 
 /**
- * Write ENVI binary file (.dat or raw) with header
+ * Write ENVI binary file with header
+ * The data file uses the provided filename, header is filename with .hdr extension
  */
 bool write_envi_raster(const string& filename, const string& src_filename,
                        const float* data, int bands, int width, int height,
@@ -410,15 +409,17 @@ bool write_envi_raster(const string& filename, const string& src_filename,
     
     size_t pixels = (size_t)width * height;
     
-    // Determine base name and extensions
-    string base_name = filename;
-    size_t dot_pos = base_name.rfind('.');
-    if (dot_pos != string::npos) {
-        base_name = base_name.substr(0, dot_pos);
-    }
+    // Data file is the provided filename
+    string data_filename = filename;
     
-    string data_filename = base_name + ".dat";
-    string hdr_filename = base_name + ".hdr";
+    // Header file: replace extension with .hdr or append .hdr
+    string hdr_filename;
+    size_t dot_pos = filename.rfind('.');
+    if (dot_pos != string::npos) {
+        hdr_filename = filename.substr(0, dot_pos) + ".hdr";
+    } else {
+        hdr_filename = filename + ".hdr";
+    }
     
     // Write binary data file (BSQ format - band sequential)
     ofstream data_file(data_filename, ios::binary);
@@ -440,6 +441,8 @@ bool write_envi_raster(const string& filename, const string& src_filename,
     if (!quiet) {
         cout << "ENVI data written to: " << data_filename << endl;
         cout << "  Dimensions: " << width << " x " << height << " x " << bands << " bands" << endl;
+        cout << "  File size: " << fixed << setprecision(2) 
+             << (bands * pixels * sizeof(float)) / (1024.0 * 1024.0) << " MB" << endl;
     }
     
     // Write header file
@@ -777,7 +780,7 @@ void print_usage(const char* program) {
     cout << "  " << program << " hyperspectral.img mnf.tif -n 50 -t 32\n";
     cout << "\n";
     cout << "Supported formats: Any GDAL-readable raster (GeoTIFF, ENVI, HDF, etc.)\n";
-    cout << "Output format: GeoTIFF with LZW compression + ENVI .hdr sidecar file\n";
+    cout << "Output format: ENVI binary (BSQ, float32) with .hdr sidecar file\n";
 }
 
 int main(int argc, char** argv) {
@@ -892,14 +895,6 @@ int main(int argc, char** argv) {
         evals[i] = result.eigenvalues(i);
     }
 
-    // Write output (GeoTIFF)
-    if (!write_raster(config.output_file, config.input_file, data,
-                      config.n_components, width, height, evals.data(), config.quiet)) {
-        free(data);
-        if (original_data) free(original_data);
-        return 1;
-    }
-
     // Determine base name for auxiliary files
     string base_name = config.output_file;
     size_t dot_pos = base_name.rfind('.');
@@ -907,10 +902,13 @@ int main(int argc, char** argv) {
         base_name = base_name.substr(0, dot_pos);
     }
 
-    // Write ENVI header file
-    string hdr_filename = base_name + ".hdr";
-    write_envi_header(hdr_filename, config.input_file, config.n_components,
-                      width, height, evals.data(), config.quiet);
+    // Write output as ENVI binary + header
+    if (!write_envi_raster(config.output_file, config.input_file, data,
+                           config.n_components, width, height, evals.data(), config.quiet)) {
+        free(data);
+        if (original_data) free(original_data);
+        return 1;
+    }
 
     // Write eigenvalues
     write_eigenvalues(base_name, result.eigenvalues);
@@ -943,14 +941,9 @@ int main(int argc, char** argv) {
         cout << "Reconstruction RMSE (" << config.n_components << " components): "
              << fixed << setprecision(6) << sqrt(mse) << endl;
 
-        // Write reconstructed image (GeoTIFF)
-        string recon_file = base_name + "_reconstructed.tif";
-        write_raster(recon_file, config.input_file, recon_data, bands, width, height,
-                    nullptr, config.quiet);
-
-        // Write ENVI header for reconstructed image
-        string recon_hdr = base_name + "_reconstructed.hdr";
-        write_envi_header(recon_hdr, config.input_file, bands, width, height,
+        // Write reconstructed image as ENVI binary + header
+        string recon_base = base_name + "_reconstructed";
+        write_envi_raster(recon_base + ".bin", config.input_file, recon_data, bands, width, height,
                           nullptr, config.quiet);
 
         free(recon_data);
@@ -966,3 +959,5 @@ int main(int argc, char** argv) {
 
     return 0;
 }
+
+
