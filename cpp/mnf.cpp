@@ -61,7 +61,7 @@ struct MNFConfig {
     int n_components = 0;      // 0 = all
     bool do_inverse = false;
     bool quiet = false;
-    int num_threads = 512;       // 0 = auto
+    int num_threads = 0;       // 0 = auto
     size_t block_rows = 1024;  // Process this many rows at a time for covariance
     int noise_window = 9;      // Window size for noise estimation (must be odd)
     bool destripe = false;     // Apply FFT-based destriping before MNF
@@ -848,6 +848,45 @@ MatrixXd compute_covariance(const float* data, int bands, size_t pixels) {
 }
 
 /**
+ * Compute stripe noise covariance from row-to-row variations
+ * 
+ * Horizontal stripes manifest as systematic row-to-row differences.
+ * This function estimates the covariance of row means, which captures
+ * the stripe pattern as noise.
+ */
+MatrixXd compute_stripe_noise_covariance(const float* data, int bands, int width, int height) {
+    size_t pixels = (size_t)width * height;
+    
+    // Compute mean for each row in each band
+    MatrixXd row_means(height, bands);
+    
+    #pragma omp parallel for
+    for (int b = 0; b < bands; b++) {
+        for (int row = 0; row < height; row++) {
+            double sum = 0;
+            for (int col = 0; col < width; col++) {
+                sum += data[b * pixels + row * width + col];
+            }
+            row_means(row, b) = sum / width;
+        }
+    }
+    
+    // Compute the overall mean for each band
+    VectorXd band_means = row_means.colwise().mean();
+    
+    // Center the row means
+    for (int row = 0; row < height; row++) {
+        row_means.row(row) -= band_means.transpose();
+    }
+    
+    // Compute covariance of row means
+    // This captures the between-row variance (stripe pattern)
+    MatrixXd cov = (row_means.transpose() * row_means) / (height - 1);
+    
+    return cov;
+}
+
+/**
  * Compute noise covariance using directional max approach
  * 
  * Estimates noise separately from horizontal and vertical differences,
@@ -1015,19 +1054,24 @@ MatrixXd compute_noise_covariance_median(const float* data, int bands, int width
 }
 
 /**
- * Main noise covariance function - combines directional max with median
- * to handle both striping and general noise robustly
+ * Main noise covariance function - combines multiple approaches:
+ * 1. Directional max (random noise)
+ * 2. Median-based (robust to outliers)  
+ * 3. Stripe covariance (systematic row-to-row variations)
  */
 MatrixXd compute_noise_covariance(const float* data, int bands, int width, int height, int window_size) {
-    // Get directional estimate (handles striping)
+    // Get directional estimate (handles random noise)
     MatrixXd cov_dir = compute_noise_covariance_directional_max(data, bands, width, height);
     
     // Get median-based estimate (handles edges/outliers)
     MatrixXd cov_med = compute_noise_covariance_median(data, bands, width, height, window_size);
     
-    // Take element-wise maximum of both approaches
-    // This ensures we capture noise from all sources
-    MatrixXd cov = cov_dir.cwiseMax(cov_med);
+    // Get stripe noise estimate (handles systematic row variations)
+    MatrixXd cov_stripe = compute_stripe_noise_covariance(data, bands, width, height);
+    
+    // Combine: take element-wise maximum of directional and median,
+    // then ADD the stripe covariance (it's a separate noise source)
+    MatrixXd cov = cov_dir.cwiseMax(cov_med) + cov_stripe;
     
     return cov;
 }
