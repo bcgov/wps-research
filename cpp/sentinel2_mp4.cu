@@ -149,6 +149,11 @@ BandStats g_global_bounds[MAX_BANDS_USED];
 // File list
 std::vector<ImageFile> g_image_files;
 
+// Globals for loading 
+std::map<int, ImageData> g_reorder_buffer;
+std::atomic<int> g_next_process_index(0);
+
+
 // ============================================================================
 // ENVI Header Parser
 // ============================================================================
@@ -1402,14 +1407,34 @@ int main(int argc, char** argv) {
 
     while (images_processed < (int)g_image_files.size()) {
         // Get next image from queue
-        ImageData img_data;
-        {
-            std::unique_lock<std::mutex> lock(g_queue_mutex);
-            g_consumer_cv.wait(lock, []{ return !g_image_queue.empty(); });
-            img_data = g_image_queue.front();
+
+ImageData img_data;
+bool have_image = false;
+
+while (!have_image) {
+    {
+        std::unique_lock<std::mutex> lock(g_queue_mutex);
+        g_consumer_cv.wait(lock, []{
+            return !g_image_queue.empty() || g_loading_complete.load();
+        });
+
+        while (!g_image_queue.empty()) {
+            ImageData tmp = g_image_queue.front();
             g_image_queue.pop();
+            g_reorder_buffer[tmp.index] = tmp;
             g_producer_cv.notify_one();
         }
+    }
+
+    auto it = g_reorder_buffer.find(g_next_process_index.load());
+    if (it != g_reorder_buffer.end()) {
+        img_data = it->second;
+        g_reorder_buffer.erase(it);
+        g_next_process_index++;
+        have_image = true;
+    }
+}
+
 
         if (!img_data.valid || !img_data.host_data) {
             fprintf(stderr, "Skipping invalid image %d\n", img_data.index);
