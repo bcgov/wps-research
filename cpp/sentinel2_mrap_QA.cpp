@@ -3,17 +3,17 @@
   g++ -O3 sentinel2_mrap_QA.cpp $(gdal-config --cflags) -o sentinel2_mrap_QA $(gdal-config --libs)
 
  * MRAP Quality Control Program
- * 
+ *
  * Validates MRAP (Most Recent Available Pixel) products by checking:
  * 1. NaN consistency within each file (if one band is NaN, all bands should be NaN)
  * 2. Temporal consistency (non-NaN pixels should never revert to NaN)
  * 3. Duplicate timestamps
- * 
+ *
  * When NaN reversion errors are found, writes an ENVI-format BSQ file marking
  * the affected pixels (1.0 = reversion, 0.0 = no reversion).
- * 
+ *
  * Usage: ./sentinel2_mrap_QA [optional: specific L2_* folder]
- * 
+ *
  * Requires: GDAL library
  * Compile: g++ -O3 sentinel2_mrap_QA.cpp $(gdal-config --cflags) -o sentinel2_mrap_QA $(gdal-config --libs) -lpthread
  */
@@ -83,28 +83,28 @@ void parfor(size_t start_j, size_t end_j, void(*eval)(size_t), int cores_use = 0
     pt_end_j = end_j;
     pt_nxt_j = start_j;
     pt_start_j = start_j;
-    
+
     int cores_avail = sysconf(_SC_NPROCESSORS_ONLN);
     size_t n_cores = (cores_avail > cores_use && cores_use > 0) ? cores_use : cores_avail;
     if (cores_use == 0) n_cores = cores_avail;
-    
+
     // Don't use more cores than jobs
     size_t n_jobs = end_j - start_j;
     if (n_cores > n_jobs) n_cores = n_jobs;
-    
+
     std::cout << "Using " << n_cores << " cores for " << n_jobs << " jobs" << std::endl;
-    
+
     pthread_attr_init(&pt_attr);
     pthread_attr_setdetachstate(&pt_attr, PTHREAD_CREATE_JOINABLE);
     pthread_t* my_pthread = new pthread_t[n_cores];
-    
+
     for0(j, n_cores) {
         pthread_create(&my_pthread[j], &pt_attr, pt_worker_fun, (void*)j);
     }
     for0(j, n_cores) {
         pthread_join(my_pthread[j], NULL);
     }
-    
+
     delete[] my_pthread;
 }
 
@@ -138,7 +138,7 @@ int g_xsize, g_ysize, g_nbands, g_npixels;
 std::string extract_timestamp(const std::string& filename) {
     size_t start = 0;
     int underscore_count = 0;
-    
+
     for (size_t i = 0; i < filename.size(); ++i) {
         if (filename[i] == '_') {
             underscore_count++;
@@ -170,17 +170,17 @@ std::string get_map_info_from_header(const std::string& bin_path) {
             hdr_path = alt_hdr;
         }
     }
-    
+
     std::ifstream hdr(hdr_path);
     if (!hdr.is_open()) return "";
-    
+
     std::string line;
     std::string map_info;
     bool in_map_info = false;
-    
+
     while (std::getline(hdr, line)) {
         // Check for "map info" line
-        if (line.find("map info") != std::string::npos || 
+        if (line.find("map info") != std::string::npos ||
             line.find("map_info") != std::string::npos) {
             size_t eq_pos = line.find('=');
             if (eq_pos != std::string::npos) {
@@ -203,7 +203,7 @@ std::string get_map_info_from_header(const std::string& bin_path) {
             if (line.find('}') != std::string::npos) break;
         }
     }
-    
+
     return map_info;
 }
 
@@ -220,10 +220,10 @@ void write_envi_reversion_mask(const std::string& output_path,
         cprint("ERROR: Could not create " + output_path);
         return;
     }
-    bin_out.write(reinterpret_cast<const char*>(mask_data.data()), 
+    bin_out.write(reinterpret_cast<const char*>(mask_data.data()),
                   mask_data.size() * sizeof(float));
     bin_out.close();
-    
+
     // Write ENVI header
     std::string hdr_path = output_path + ".hdr";
     std::ofstream hdr_out(hdr_path);
@@ -231,10 +231,10 @@ void write_envi_reversion_mask(const std::string& output_path,
         cprint("ERROR: Could not create " + hdr_path);
         return;
     }
-    
+
     // Create band name indicating the comparison
     std::string band_name = "NaN_reversion: " + basename(prev_file) + " -> " + basename(curr_file);
-    
+
     hdr_out << "ENVI" << std::endl;
     hdr_out << "description = {NaN reversion mask: 1.0 = pixel reverted to NaN, 0.0 = no reversion}" << std::endl;
     hdr_out << "samples = " << xsize << std::endl;
@@ -249,9 +249,9 @@ void write_envi_reversion_mask(const std::string& output_path,
         hdr_out << "map info = " << map_info << std::endl;
     }
     hdr_out << "band names = {" << band_name << "}" << std::endl;
-    
+
     hdr_out.close();
-    
+
     cprint("  Wrote reversion mask: " + output_path);
 }
 
@@ -260,7 +260,7 @@ std::vector<std::string> find_l2_folders(const std::string& base_path = ".") {
     std::vector<std::string> folders;
     DIR* dir = opendir(base_path.c_str());
     if (!dir) return folders;
-    
+
     struct dirent* entry;
     while ((entry = readdir(dir)) != nullptr) {
         std::string name = entry->d_name;
@@ -282,7 +282,7 @@ std::vector<MrapFile> find_mrap_files(const std::string& folder) {
     std::vector<MrapFile> files;
     DIR* dir = opendir(folder.c_str());
     if (!dir) return files;
-    
+
     struct dirent* entry;
     while ((entry = readdir(dir)) != nullptr) {
         std::string name = entry->d_name;
@@ -296,26 +296,30 @@ std::vector<MrapFile> find_mrap_files(const std::string& folder) {
         }
     }
     closedir(dir);
-    
+
     std::sort(files.begin(), files.end(),
               [](const MrapFile& a, const MrapFile& b) {
                   return a.timestamp < b.timestamp;
               });
-    
+
     return files;
 }
 
-// Check for duplicate timestamps, return list of duplicates
+// Check for duplicate timestamps, return list of duplicates with filenames
 std::vector<std::string> find_duplicate_timestamps(const std::vector<MrapFile>& files) {
-    std::map<std::string, int> ts_count;
+    std::map<std::string, std::vector<std::string>> ts_files;
     for (const auto& f : files) {
-        ts_count[f.timestamp]++;
+        ts_files[f.timestamp].push_back(f.path);
     }
-    
+
     std::vector<std::string> duplicates;
-    for (const auto& p : ts_count) {
-        if (p.second > 1) {
-            duplicates.push_back(p.first + " (appears " + std::to_string(p.second) + " times)");
+    for (const auto& p : ts_files) {
+        if (p.second.size() > 1) {
+            std::string entry = p.first + " (appears " + std::to_string(p.second.size()) + " times):";
+            duplicates.push_back(entry);
+            for (const auto& fname : p.second) {
+                duplicates.push_back("    " + fname);
+            }
         }
     }
     return duplicates;
@@ -327,32 +331,32 @@ std::vector<bool> create_valid_mask_from_file(const std::string& path, int& vali
     if (!dataset) {
         return std::vector<bool>();
     }
-    
+
     int xsize = GDALGetRasterXSize(dataset);
     int ysize = GDALGetRasterYSize(dataset);
     int nbands = GDALGetRasterCount(dataset);
     int npixels = xsize * ysize;
-    
+
     std::vector<bool> valid_mask(npixels, true);
     std::vector<float> buffer(npixels);
     valid_count = 0;
-    
+
     for (int b = 1; b <= nbands; ++b) {
         GDALRasterBandH band = GDALGetRasterBand(dataset, b);
         GDALRasterIO(band, GF_Read, 0, 0, xsize, ysize,
                      buffer.data(), xsize, ysize, GDT_Float32, 0, 0);
-        
+
         for (int i = 0; i < npixels; ++i) {
             if (std::isnan(buffer[i])) {
                 valid_mask[i] = false;
             }
         }
     }
-    
+
     for (int i = 0; i < npixels; ++i) {
         if (valid_mask[i]) valid_count++;
     }
-    
+
     GDALClose(dataset);
     return valid_mask;
 }
@@ -362,7 +366,7 @@ void compare_pair(size_t idx) {
     // Compare file[idx] with file[idx+1]
     const MrapFile& prev_file = g_mrap_files[idx];
     const MrapFile& curr_file = g_mrap_files[idx + 1];
-    
+
     ComparisonResult res;
     res.index = idx;
     res.prev_file = prev_file.path;
@@ -371,42 +375,42 @@ void compare_pair(size_t idx) {
     res.curr_timestamp = curr_file.timestamp;
     res.has_error = false;
     res.reversion_count = 0;
-    
+
     int prev_valid, curr_valid;
     std::vector<bool> prev_mask = create_valid_mask_from_file(prev_file.path, prev_valid);
     std::vector<bool> curr_mask = create_valid_mask_from_file(curr_file.path, curr_valid);
-    
+
     res.prev_valid_count = prev_valid;
     res.curr_valid_count = curr_valid;
-    
+
     if (prev_mask.empty() || curr_mask.empty()) {
         res.has_error = true;
         res.error_msg = "Failed to open file(s)";
     } else {
         // Create reversion mask and count reversions
         std::vector<float> reversion_mask(prev_mask.size(), 0.0f);
-        
+
         for (size_t i = 0; i < prev_mask.size(); ++i) {
             if (prev_mask[i] && !curr_mask[i]) {
                 res.reversion_count++;
                 reversion_mask[i] = 1.0f;
             }
         }
-        
+
         if (res.reversion_count > 0) {
             res.has_error = true;
             res.error_msg = std::to_string(res.reversion_count) + " pixels reverted to NaN";
-            
+
             // Get dimensions from GDAL
             GDALDatasetH dataset = GDALOpen(curr_file.path.c_str(), GA_ReadOnly);
             if (dataset) {
                 int xsize = GDALGetRasterXSize(dataset);
                 int ysize = GDALGetRasterYSize(dataset);
                 GDALClose(dataset);
-                
+
                 // Get map info from source file
                 std::string map_info = get_map_info_from_header(curr_file.path);
-                
+
                 // Generate output filename: use curr_file path, replace _MRAP.bin with _NAN_reversion.bin
                 std::string out_path = curr_file.path;
                 size_t pos = out_path.rfind("_MRAP.bin");
@@ -415,16 +419,16 @@ void compare_pair(size_t idx) {
                 } else {
                     out_path = curr_file.path + "_NAN_reversion.bin";
                 }
-                
+
                 // Write the ENVI format mask file
                 write_envi_reversion_mask(out_path, reversion_mask, xsize, ysize,
                                           map_info, prev_file.path, curr_file.path);
-                
+
                 res.reversion_mask_file = out_path;
             }
         }
     }
-    
+
     // Print progress
     std::stringstream ss;
     ss << "[" << (idx + 1) << "/" << (g_mrap_files.size() - 1) << "] "
@@ -436,7 +440,7 @@ void compare_pair(size_t idx) {
         ss << " OK (+" << new_valid << " valid pixels)";
     }
     cprint(ss.str());
-    
+
     // Store result
     mtx_lock(&g_results_mtx);
     g_results.push_back(res);
@@ -458,28 +462,28 @@ struct QAResult {
 QAResult run_qa_on_folder(const std::string& folder) {
     QAResult result;
     result.folder = folder;
-    
+
     g_mrap_files = find_mrap_files(folder);
-    
+
     if (g_mrap_files.empty()) {
         std::cout << "\n=== Processing: " << folder << " ===" << std::endl;
         std::cout << "No MRAP files found" << std::endl;
         return result;
     }
-    
+
     std::cout << "\n=== Processing: " << folder << " ===" << std::endl;
     std::cout << "Found " << g_mrap_files.size() << " MRAP files" << std::endl;
-    
+
     // Check for duplicate timestamps
     result.duplicate_timestamps = find_duplicate_timestamps(g_mrap_files);
     if (!result.duplicate_timestamps.empty()) {
         result.passed = false;
         std::cout << "WARNING: Duplicate timestamps detected!" << std::endl;
         for (const auto& d : result.duplicate_timestamps) {
-            std::cout << "  " << d << std::endl;
+            std::cout << d << std::endl;
         }
     }
-    
+
     // Get dimensions from first file
     if (!g_mrap_files.empty()) {
         GDALDatasetH dataset = GDALOpen(g_mrap_files[0].path.c_str(), GA_ReadOnly);
@@ -493,25 +497,25 @@ QAResult run_qa_on_folder(const std::string& folder) {
             GDALClose(dataset);
         }
     }
-    
+
     // Run parallel comparisons (N-1 comparisons for N files)
     size_t n_comparisons = g_mrap_files.size() - 1;
     if (n_comparisons > 0) {
         std::cout << "\nRunning " << n_comparisons << " pairwise comparisons..." << std::endl;
-        
+
         g_results.clear();
         pthread_mutex_init(&g_results_mtx, NULL);
-        
+
         parfor(0, n_comparisons, compare_pair, 32);
-        
+
         // Sort results by index
         std::sort(g_results.begin(), g_results.end(),
                   [](const ComparisonResult& a, const ComparisonResult& b) {
                       return a.index < b.index;
                   });
-        
+
         result.comparisons = g_results;
-        
+
         // Collect errors
         for (const auto& comp : g_results) {
             if (comp.reversion_count > 0) {
@@ -524,7 +528,7 @@ QAResult run_qa_on_folder(const std::string& folder) {
             }
         }
     }
-    
+
     // Write results to mrap_qa.txt in the folder
     std::string qa_file = folder + "/mrap_qa.txt";
     std::ofstream ofs(qa_file);
@@ -534,14 +538,14 @@ QAResult run_qa_on_folder(const std::string& folder) {
         ofs << "Files analyzed: " << g_mrap_files.size() << std::endl;
         ofs << "Comparisons: " << n_comparisons << std::endl;
         ofs << std::string(60, '=') << std::endl;
-        
+
         if (!result.duplicate_timestamps.empty()) {
             ofs << "\nDUPLICATE TIMESTAMPS:" << std::endl;
             for (const auto& d : result.duplicate_timestamps) {
-                ofs << "  " << d << std::endl;
+                ofs << d << std::endl;
             }
         }
-        
+
         ofs << "\nPAIRWISE COMPARISONS (in order):" << std::endl;
         for (const auto& comp : result.comparisons) {
             ofs << "\n[" << (comp.index + 1) << "] " << comp.prev_timestamp
@@ -561,73 +565,73 @@ QAResult run_qa_on_folder(const std::string& folder) {
                 ofs << "  Status: OK" << std::endl;
             }
         }
-        
+
         ofs << "\n" << std::string(60, '=') << std::endl;
         ofs << "SUMMARY" << std::endl;
         ofs << std::string(60, '=') << std::endl;
         ofs << "Total NaN reversion errors: " << result.nan_reversion_errors << std::endl;
-        
+
         if (!result.nan_reversion_files.empty()) {
             ofs << "\nFiles with NaN reversion errors:" << std::endl;
             for (const auto& f : result.nan_reversion_files) {
                 ofs << "  " << f << std::endl;
             }
         }
-        
+
         if (!result.nan_reversion_mask_files.empty()) {
             ofs << "\nReversion mask files created:" << std::endl;
             for (const auto& f : result.nan_reversion_mask_files) {
                 ofs << "  " << f << std::endl;
             }
         }
-        
+
         ofs << "\nResult: " << (result.passed ? "PASSED" : "FAILED") << std::endl;
         ofs.close();
-        
+
         std::cout << "Results written to: " << qa_file << std::endl;
     }
-    
+
     return result;
 }
 
 int main(int argc, char* argv[]) {
     GDALAllRegister();
     pt_init_mtx();
-    
+
     std::cout << "MRAP Quality Control Program" << std::endl;
     std::cout << "============================" << std::endl;
-    
+
     std::vector<std::string> folders;
-    
+
     if (argc > 1) {
         folders.push_back(argv[1]);
     } else {
         folders = find_l2_folders(".");
     }
-    
+
     if (folders.empty()) {
         std::cerr << "No L2_* folders found" << std::endl;
         return 1;
     }
-    
+
     std::cout << "Found " << folders.size() << " L2_* folder(s)" << std::endl;
-    
+
     int total_folders_passed = 0;
     int total_folders_failed = 0;
     int total_nan_reversion_errors = 0;
     std::vector<std::string> all_nan_reversion_files;
     std::vector<std::string> all_nan_reversion_mask_files;
     std::vector<std::string> all_duplicate_timestamps;
-    
+
     for (const auto& folder : folders) {
         QAResult result = run_qa_on_folder(folder);
-        
+
         if (result.passed) {
             total_folders_passed++;
         } else {
             total_folders_failed++;
         }
-        
+
         total_nan_reversion_errors += result.nan_reversion_errors;
         all_nan_reversion_files.insert(all_nan_reversion_files.end(),
                                        result.nan_reversion_files.begin(),
@@ -635,11 +639,11 @@ int main(int argc, char* argv[]) {
         all_nan_reversion_mask_files.insert(all_nan_reversion_mask_files.end(),
                                             result.nan_reversion_mask_files.begin(),
                                             result.nan_reversion_mask_files.end());
-        for (const auto& d : result.duplicate_timestamps) {
-            all_duplicate_timestamps.push_back(folder + ": " + d);
-        }
+        all_duplicate_timestamps.insert(all_duplicate_timestamps.end(),
+                                        result.duplicate_timestamps.begin(),
+                                        result.duplicate_timestamps.end());
     }
-    
+
     // Final Summary
     std::cout << "\n" << std::string(60, '=') << std::endl;
     std::cout << "FINAL SUMMARY" << std::endl;
@@ -649,28 +653,28 @@ int main(int argc, char* argv[]) {
     std::cout << "Folders failed:    " << total_folders_failed << std::endl;
     std::cout << std::endl;
     std::cout << "Total NaN reversion errors: " << total_nan_reversion_errors << std::endl;
-    
+
     if (!all_duplicate_timestamps.empty()) {
         std::cout << "\nDuplicate timestamps detected:" << std::endl;
         for (const auto& d : all_duplicate_timestamps) {
-            std::cout << "  " << d << std::endl;
+            std::cout << d << std::endl;
         }
     }
-    
+
     if (!all_nan_reversion_files.empty()) {
         std::cout << "\nFiles with NaN reversion errors:" << std::endl;
         for (const auto& f : all_nan_reversion_files) {
             std::cout << "  " << f << std::endl;
         }
     }
-    
+
     if (!all_nan_reversion_mask_files.empty()) {
         std::cout << "\nReversion mask files created:" << std::endl;
         for (const auto& f : all_nan_reversion_mask_files) {
             std::cout << "  " << f << std::endl;
         }
     }
-    
+
     if (total_folders_failed == 0) {
         std::cout << "\n*** ALL QA CHECKS PASSED ***" << std::endl;
         return 0;
