@@ -1540,6 +1540,9 @@ while (!have_image) {
     for (int i = 0; i < NUM_LOADER_THREADS; i++) {
         pthread_join(loader_threads[i], NULL);
     }
+    g_loading_complete.store(true);
+    g_consumer_cv.notify_all();
+
 
     // Finalize video
     encoder.finish();
