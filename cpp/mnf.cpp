@@ -23,7 +23,7 @@
  *   # On RHEL/Fedora:   sudo dnf install eigen3-devel
  *   # On macOS:         brew install eigen
  */
-
+#include <numeric>   // for std::iota
 #include <iostream>
 #include <iomanip>
 #include <fstream>
