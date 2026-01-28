@@ -4,24 +4,27 @@
  * Designed for large datasets that exceed GPU memory
  *
  * MNF transform steps:
- * 1. Estimate noise covariance matrix from spatial differences
- * 2. Compute data covariance matrix
- * 3. Solve generalized eigenvalue problem: Σ_data * v = λ * Σ_noise * v
- * 4. Project data onto eigenvectors sorted by decreasing SNR (eigenvalue)
+ * 1. (Optional) FFT-based destriping to remove detector artifacts
+ * 2. Estimate noise covariance matrix from spatial differences
+ * 3. Compute data covariance matrix
+ * 4. Solve generalized eigenvalue problem: Σ_data * v = λ * Σ_noise * v
+ * 5. Project data onto eigenvectors sorted by decreasing SNR (eigenvalue)
  *
  * Usage: mnf_transform <input_raster> <output_raster> [options]
  *
  * Compile (choose one based on your Eigen installation):
  *   # If Eigen is in /usr/include/eigen3:
-    g++ -O3 -march=native -fopenmp -DNDEBUG mnf.cpp -o mnf  $(gdal-config --cflags) $(gdal-config --libs)
+ *   g++ -O3 -march=native -fopenmp -DNDEBUG mnf_transform_cpu.cpp -o mnf_transform \
+ *       $(gdal-config --cflags) $(gdal-config --libs) -lfftw3 -lfftw3_threads -lm
  *
  *   # If Eigen is elsewhere, specify the path:
  *   g++ -O3 -march=native -fopenmp -DNDEBUG mnf_transform_cpu.cpp -o mnf_transform \
- *       $(gdal-config --cflags) $(gdal-config --libs) -I/path/to/eigen
+ *       $(gdal-config --cflags) $(gdal-config --libs) -lfftw3 -lfftw3_threads -lm -I/path/to/eigen
  *
- *   # On Ubuntu/Debian: sudo apt install libeigen3-dev
- *   # On RHEL/Fedora:   sudo dnf install eigen3-devel
- *   # On macOS:         brew install eigen
+ *   # Dependencies:
+ *   # On Ubuntu/Debian: sudo apt install libeigen3-dev libfftw3-dev
+ *   # On RHEL/Fedora:   sudo dnf install eigen3-devel fftw-devel
+ *   # On macOS:         brew install eigen fftw
  */
 
 #include <iostream>
@@ -43,6 +46,8 @@
 #include <cpl_conv.h>
 #include <ogr_spatialref.h>
 
+#include <fftw3.h>
+
 using namespace Eigen;
 using namespace std;
 
@@ -59,6 +64,8 @@ struct MNFConfig {
     int num_threads = 0;       // 0 = auto
     size_t block_rows = 1024;  // Process this many rows at a time for covariance
     int noise_window = 9;      // Window size for noise estimation (must be odd)
+    bool destripe = false;     // Apply FFT-based destriping before MNF
+    float stripe_threshold = 3.0f;  // Threshold for stripe detection (std devs)
 };
 
 // ============================================================================
@@ -80,6 +87,177 @@ public:
         if (!quiet_) cout << "done (" << fixed << setprecision(1) << ms << " ms)" << endl;
     }
 };
+
+// ============================================================================
+// FFT-based Destriping
+// ============================================================================
+
+/**
+ * Apply FFT-based notch filter to remove horizontal stripes from a single band
+ * 
+ * Horizontal stripes appear as high-energy vertical lines in FFT domain
+ * (at fx ≈ 0, various fy). We detect and suppress these.
+ * 
+ * @param band_data Input/output band data (modified in place)
+ * @param width Image width
+ * @param height Image height  
+ * @param threshold Detection threshold in standard deviations
+ * @param quiet Suppress output
+ * @return Number of frequencies notched
+ */
+int destripe_band_fft(float* band_data, int width, int height, 
+                       float threshold, bool quiet) {
+    
+    size_t pixels = (size_t)width * height;
+    
+    // Allocate FFTW arrays
+    double* spatial = fftw_alloc_real(pixels);
+    fftw_complex* freq = fftw_alloc_complex(height * (width/2 + 1));
+    
+    if (!spatial || !freq) {
+        cerr << "Error: Failed to allocate FFT buffers" << endl;
+        if (spatial) fftw_free(spatial);
+        if (freq) fftw_free(freq);
+        return 0;
+    }
+    
+    // Copy to double for FFTW
+    for (size_t i = 0; i < pixels; i++) {
+        spatial[i] = band_data[i];
+    }
+    
+    // Create FFT plans
+    fftw_plan plan_fwd = fftw_plan_dft_r2c_2d(height, width, spatial, freq, FFTW_ESTIMATE);
+    fftw_plan plan_inv = fftw_plan_dft_c2r_2d(height, width, freq, spatial, FFTW_ESTIMATE);
+    
+    // Forward FFT
+    fftw_execute(plan_fwd);
+    
+    int freq_width = width / 2 + 1;
+    int notch_count = 0;
+    
+    // Analyze the DC column (fx = 0) where horizontal stripes appear
+    // Skip DC (fy = 0) and very low frequencies
+    int min_fy = max(3, height / 100);  // Skip lowest frequencies (real features)
+    
+    // Compute statistics of magnitude in the stripe-prone region
+    vector<double> dc_col_mags;
+    dc_col_mags.reserve(height - min_fy);
+    
+    for (int fy = min_fy; fy < height / 2; fy++) {
+        double re = freq[fy * freq_width + 0][0];
+        double im = freq[fy * freq_width + 0][1];
+        double mag = sqrt(re * re + im * im);
+        dc_col_mags.push_back(mag);
+    }
+    
+    // Also check symmetric frequencies
+    for (int fy = height / 2 + 1; fy < height - min_fy; fy++) {
+        double re = freq[fy * freq_width + 0][0];
+        double im = freq[fy * freq_width + 0][1];
+        double mag = sqrt(re * re + im * im);
+        dc_col_mags.push_back(mag);
+    }
+    
+    if (dc_col_mags.empty()) {
+        fftw_destroy_plan(plan_fwd);
+        fftw_destroy_plan(plan_inv);
+        fftw_free(spatial);
+        fftw_free(freq);
+        return 0;
+    }
+    
+    // Compute robust statistics (median and MAD)
+    vector<double> sorted_mags = dc_col_mags;
+    size_t mid = sorted_mags.size() / 2;
+    nth_element(sorted_mags.begin(), sorted_mags.begin() + mid, sorted_mags.end());
+    double median_mag = sorted_mags[mid];
+    
+    // Compute MAD
+    vector<double> abs_devs(dc_col_mags.size());
+    for (size_t i = 0; i < dc_col_mags.size(); i++) {
+        abs_devs[i] = fabs(dc_col_mags[i] - median_mag);
+    }
+    nth_element(abs_devs.begin(), abs_devs.begin() + mid, abs_devs.end());
+    double mad = abs_devs[mid] * 1.4826;  // Scale to approximate std dev
+    
+    if (mad < 1e-10) mad = median_mag * 0.1;  // Fallback if MAD is tiny
+    
+    double thresh_mag = median_mag + threshold * mad;
+    
+    // Notch filter: suppress frequencies in DC column that exceed threshold
+    // Use a soft notch (Gaussian suppression) to avoid ringing
+    for (int fy = min_fy; fy < height - min_fy; fy++) {
+        if (fy >= height / 2 - min_fy && fy <= height / 2 + min_fy) continue;  // Skip Nyquist region
+        
+        double re = freq[fy * freq_width + 0][0];
+        double im = freq[fy * freq_width + 0][1];
+        double mag = sqrt(re * re + im * im);
+        
+        if (mag > thresh_mag) {
+            // Soft suppression: reduce to threshold level rather than zero
+            double suppression = thresh_mag / mag;
+            
+            // Apply to DC column and a few adjacent columns (stripe width in freq domain)
+            int notch_width = max(1, width / 256);
+            for (int fx = 0; fx <= notch_width && fx < freq_width; fx++) {
+                // Gaussian falloff with distance from DC
+                double falloff = exp(-0.5 * (fx * fx) / (notch_width * 0.5 + 0.5));
+                double factor = 1.0 - (1.0 - suppression) * falloff;
+                
+                freq[fy * freq_width + fx][0] *= factor;
+                freq[fy * freq_width + fx][1] *= factor;
+            }
+            notch_count++;
+        }
+    }
+    
+    // Inverse FFT
+    fftw_execute(plan_inv);
+    
+    // Normalize and copy back (FFTW doesn't normalize)
+    double norm = 1.0 / pixels;
+    for (size_t i = 0; i < pixels; i++) {
+        band_data[i] = (float)(spatial[i] * norm);
+    }
+    
+    // Cleanup
+    fftw_destroy_plan(plan_fwd);
+    fftw_destroy_plan(plan_inv);
+    fftw_free(spatial);
+    fftw_free(freq);
+    
+    return notch_count;
+}
+
+/**
+ * Apply FFT-based destriping to all bands
+ */
+void destripe_image(float* data, int bands, int width, int height, 
+                    float threshold, bool quiet) {
+    
+    size_t pixels = (size_t)width * height;
+    int total_notches = 0;
+    
+    // Initialize FFTW threads
+    fftw_init_threads();
+    fftw_plan_with_nthreads(omp_get_max_threads());
+    
+    for (int b = 0; b < bands; b++) {
+        int notches = destripe_band_fft(&data[b * pixels], width, height, threshold, quiet);
+        total_notches += notches;
+        
+        if (!quiet && notches > 0) {
+            cout << "  Band " << (b + 1) << ": notched " << notches << " stripe frequencies" << endl;
+        }
+    }
+    
+    fftw_cleanup_threads();
+    
+    if (!quiet) {
+        cout << "  Total stripe frequencies removed: " << total_notches << endl;
+    }
+}
 
 // ============================================================================
 // GDAL I/O Functions
@@ -912,17 +1090,20 @@ void print_usage(const char* program) {
     cout << "MNF (Minimum Noise Fraction) Transform - CPU Parallel Implementation\n\n";
     cout << "Usage: " << program << " <input_raster> <output_raster> [options]\n\n";
     cout << "Options:\n";
-    cout << "  -n <num>      Number of components to output (default: all)\n";
-    cout << "  -t <threads>  Number of threads (default: auto)\n";
-    cout << "  --nwin <size> Noise estimation window size, must be odd (default: 9)\n";
-    cout << "  -i            Also compute inverse transform (reconstruction)\n";
-    cout << "  -q            Quiet mode (minimal output)\n";
+    cout << "  -n <num>       Number of components to output (default: all)\n";
+    cout << "  -t <threads>   Number of threads (default: auto)\n";
+    cout << "  --nwin <size>  Noise estimation window size, must be odd (default: 9)\n";
+    cout << "  --destripe     Apply FFT-based destriping before MNF transform\n";
+    cout << "  --stripe-thresh <val>  Stripe detection threshold in std devs (default: 3.0)\n";
+    cout << "  -i             Also compute inverse transform (reconstruction)\n";
+    cout << "  -q             Quiet mode (minimal output)\n";
     cout << "\n";
     cout << "Examples:\n";
     cout << "  " << program << " input.tif mnf_output.tif\n";
     cout << "  " << program << " input.tif mnf_output.tif -n 20\n";
     cout << "  " << program << " hyperspectral.img mnf.tif -n 50 -t 32\n";
     cout << "  " << program << " sentinel2.bin mnf.bin --nwin 15\n";
+    cout << "  " << program << " sentinel2.bin mnf.bin --destripe --stripe-thresh 2.5\n";
     cout << "\n";
     cout << "Supported formats: Any GDAL-readable raster (GeoTIFF, ENVI, HDF, etc.)\n";
     cout << "Output format: ENVI binary (BSQ, float32) with .hdr sidecar file\n";
@@ -948,6 +1129,11 @@ int main(int argc, char** argv) {
             config.noise_window = atoi(argv[++i]);
             if (config.noise_window < 3) config.noise_window = 3;
             if (config.noise_window % 2 == 0) config.noise_window++;  // Ensure odd
+        } else if (strcmp(argv[i], "--destripe") == 0) {
+            config.destripe = true;
+        } else if (strcmp(argv[i], "--stripe-thresh") == 0 && i + 1 < argc) {
+            config.stripe_threshold = atof(argv[++i]);
+            if (config.stripe_threshold < 0.5f) config.stripe_threshold = 0.5f;
         } else if (strcmp(argv[i], "-i") == 0) {
             config.do_inverse = true;
         } else if (strcmp(argv[i], "-q") == 0) {
@@ -993,6 +1179,9 @@ int main(int argc, char** argv) {
              << " (" << pixels << " pixels)" << endl;
         cout << "  Noise window: " << config.noise_window << "x" << config.noise_window 
              << " (median-based)" << endl;
+        if (config.destripe) {
+            cout << "  Destriping: enabled (threshold: " << config.stripe_threshold << " std devs)" << endl;
+        }
         cout << endl;
     }
 
@@ -1002,6 +1191,13 @@ int main(int argc, char** argv) {
     if (config.do_inverse) {
         original_data = (float*)aligned_alloc(64, bands * pixels * sizeof(float));
         memcpy(original_data, data, bands * pixels * sizeof(float));
+    }
+
+    // Apply destriping if requested
+    if (config.destripe) {
+        Timer t("Applying FFT destriping", config.quiet);
+        if (!config.quiet) cout << endl;
+        destripe_image(data, bands, width, height, config.stripe_threshold, config.quiet);
     }
 
     // Run MNF transform
