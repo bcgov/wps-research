@@ -1,6 +1,6 @@
 /* 20260120: pcp.cpp - parallel copy
    Copies files in parallel using parfor construct
-   Usage: pcp [-r] <source> <destination>
+   Usage: pcp [-r] <source...> <destination>
 */
 #include"misc.h"
 #include<glob.h>
@@ -84,29 +84,38 @@ void copy_worker(size_t i) {
     str src = g_source_files[i];
     str dst = g_dest_files[i];
     
+    // Get file size before copy (no lock needed - read only)
+    struct stat st;
+    size_t file_size = 0;
+    if(stat(src.c_str(), &st) == 0) {
+        file_size = st.st_size;
+    }
+    
     bool success = copy_file(src, dst);
     
+    // Update counters under lock - minimal critical section
+    size_t total_processed;
     mtx_lock(&g_copy_mtx);
     if(success) {
         g_copied_count++;
-        struct stat st;
-        if(stat(src.c_str(), &st) == 0) {
-            g_total_bytes += st.st_size;
-        }
-        cout << "Copied: " << src << " -> " << dst << endl;
+        g_total_bytes += file_size;
     } else {
         g_failed_count++;
+    }
+    total_processed = g_copied_count + g_failed_count;
+    mtx_unlock(&g_copy_mtx);
+    
+    // Printing outside the lock
+    size_t total_files = g_source_files.size();
+    if(success) {
+        cout << "Copied: " << src << " -> " << dst << endl;
+    } else {
         cout << "Failed: " << src << endl;
     }
-    
-    // Progress update
-    size_t total_processed = g_copied_count + g_failed_count;
-    size_t total_files = g_source_files.size();
     if(total_processed % 10 == 0 || total_processed == total_files) {
         cout << "Progress: " << total_processed << "/" << total_files << " files (" 
              << (100 * total_processed / total_files) << "%)" << endl;
     }
-    mtx_unlock(&g_copy_mtx);
 }
 
 // Recursively collect files from directory
@@ -302,4 +311,5 @@ int main(int argc, char *argv[]) {
     
     return (g_failed_count > 0) ? 1 : 0;
 }
+
 
