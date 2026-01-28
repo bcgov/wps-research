@@ -22,7 +22,10 @@ g++ -O3 sentinel2_mrap_QA.cpp -o sentinel2_mrap_QA $(gdal-config --cflags --libs
 #include <cstring>
 #include <dirent.h>
 #include <sys/stat.h>
+
+extern "C" {
 #include <gdal.h>
+}
 
 struct MrapFile {
     std::string path;
