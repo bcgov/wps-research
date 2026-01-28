@@ -13,8 +13,9 @@
  *
  * Compile (choose one based on your Eigen installation):
  *   # If Eigen is in /usr/include/eigen3:
- *   g++ -O3 -march=native -fopenmp -DNDEBUG mnf_transform_cpu.cpp -o mnf_transform \
- *       $(gdal-config --cflags) $(gdal-config --libs)
+
+ g++ -O3 -march=native -fopenmp -DNDEBUG mnf_transform_cpu.cpp -o mnf_transform  $(gdal-config --cflags) $(gdal-config --libs)
+ 
  *
  *   # If Eigen is elsewhere, specify the path:
  *   g++ -O3 -march=native -fopenmp -DNDEBUG mnf_transform_cpu.cpp -o mnf_transform \
@@ -42,6 +43,7 @@
 #include <gdal.h>
 #include <gdal_priv.h>
 #include <cpl_conv.h>
+#include <ogr_spatialref.h>
 
 using namespace Eigen;
 using namespace std;
@@ -267,6 +269,186 @@ void write_eigenvalues(const string& base_filename, const VectorXd& eigenvalues)
     }
 
     cout << "Eigenvalues written to: " << filename << endl;
+}
+
+/**
+ * Write ENVI .hdr file with georeferencing from source
+ */
+bool write_envi_header(const string& hdr_filename, const string& src_filename,
+                       int bands, int width, int height,
+                       const double* eigenvalues = nullptr, bool quiet = false) {
+    
+    ofstream hdr(hdr_filename);
+    if (!hdr) {
+        cerr << "Error: Cannot create ENVI header " << hdr_filename << endl;
+        return false;
+    }
+
+    // Get georeferencing info from source file
+    double geotransform[6] = {0, 1, 0, 0, 0, -1};
+    string projection_wkt;
+    
+    GDALDataset* src_dataset = nullptr;
+    if (!src_filename.empty()) {
+        src_dataset = (GDALDataset*)GDALOpen(src_filename.c_str(), GA_ReadOnly);
+        if (src_dataset) {
+            if (src_dataset->GetGeoTransform(geotransform) != CE_None) {
+                // Reset to default if failed
+                geotransform[0] = 0; geotransform[1] = 1; geotransform[2] = 0;
+                geotransform[3] = 0; geotransform[4] = 0; geotransform[5] = -1;
+            }
+            
+            const char* proj = src_dataset->GetProjectionRef();
+            if (proj && strlen(proj) > 0) {
+                projection_wkt = proj;
+            }
+            GDALClose(src_dataset);
+        }
+    }
+
+    // Parse projection to determine type
+    OGRSpatialReference srs;
+    string proj_name = "Arbitrary";
+    int utm_zone = 0;
+    int is_north = 1;
+    string datum_name = "Unknown";
+    string units_name = "meters";
+    
+    if (!projection_wkt.empty()) {
+        srs.importFromWkt(projection_wkt.c_str());
+        
+        // Get projection name
+        if (srs.IsGeographic()) {
+            proj_name = "Geographic Lat/Lon";
+            units_name = "degrees";
+        } else if (srs.IsProjected()) {
+            const char* proj_type = srs.GetAttrValue("PROJECTION");
+            utm_zone = srs.GetUTMZone(&is_north);
+            if (utm_zone != 0) {
+                proj_name = "UTM";
+            } else if (proj_type) {
+                proj_name = proj_type;
+            }
+        }
+        
+        // Get datum
+        const char* datum = srs.GetAttrValue("DATUM");
+        if (datum) {
+            datum_name = datum;
+            // Simplify common datum names for ENVI
+            if (strstr(datum, "WGS") && strstr(datum, "84")) {
+                datum_name = "WGS-84";
+            } else if (strstr(datum, "NAD") && strstr(datum, "83")) {
+                datum_name = "North America 1983";
+            } else if (strstr(datum, "NAD") && strstr(datum, "27")) {
+                datum_name = "North America 1927";
+            }
+        }
+    }
+    
+    // Write ENVI header
+    hdr << "ENVI\n";
+    hdr << "description = {MNF Transform Output}\n";
+    hdr << "samples = " << width << "\n";
+    hdr << "lines = " << height << "\n";
+    hdr << "bands = " << bands << "\n";
+    hdr << "header offset = 0\n";
+    hdr << "file type = ENVI Standard\n";
+    hdr << "data type = 4\n";  // 4 = 32-bit float
+    hdr << "interleave = bsq\n";
+    hdr << "byte order = 0\n";  // Little endian
+    
+    // Write map info
+    // ENVI map info format: {projection, ref_x, ref_y, easting, northing, x_size, y_size, zone, North/South, datum, units=...}
+    // ref_x, ref_y are the pixel coordinates (1-based) of the tie point
+    double ulx = geotransform[0];
+    double uly = geotransform[3];
+    double pixel_size_x = fabs(geotransform[1]);
+    double pixel_size_y = fabs(geotransform[5]);
+    
+    hdr << "map info = {" << proj_name << ", 1, 1, "
+        << fixed << setprecision(10) << ulx << ", " << uly << ", "
+        << setprecision(10) << pixel_size_x << ", " << pixel_size_y;
+    
+    if (proj_name == "UTM" && utm_zone != 0) {
+        hdr << ", " << utm_zone << ", " << (is_north ? "North" : "South");
+    }
+    
+    hdr << ", " << datum_name << ", units=" << units_name << "}\n";
+    
+    // Write coordinate system string (full WKT)
+    if (!projection_wkt.empty()) {
+        hdr << "coordinate system string = {" << projection_wkt << "}\n";
+    }
+    
+    // Write band names with eigenvalues if provided
+    hdr << "band names = {";
+    for (int i = 0; i < bands; i++) {
+        if (i > 0) hdr << ", ";
+        hdr << "MNF Band " << (i + 1);
+        if (eigenvalues) {
+            hdr << " (SNR: " << fixed << setprecision(4) << eigenvalues[i] << ")";
+        }
+    }
+    hdr << "}\n";
+    
+    hdr.close();
+    
+    if (!quiet) {
+        cout << "ENVI header written to: " << hdr_filename << endl;
+    }
+    
+    return true;
+}
+
+/**
+ * Write ENVI binary file (.dat or raw) with header
+ */
+bool write_envi_raster(const string& filename, const string& src_filename,
+                       const float* data, int bands, int width, int height,
+                       const double* eigenvalues = nullptr, bool quiet = false) {
+    
+    size_t pixels = (size_t)width * height;
+    
+    // Determine base name and extensions
+    string base_name = filename;
+    size_t dot_pos = base_name.rfind('.');
+    if (dot_pos != string::npos) {
+        base_name = base_name.substr(0, dot_pos);
+    }
+    
+    string data_filename = base_name + ".dat";
+    string hdr_filename = base_name + ".hdr";
+    
+    // Write binary data file (BSQ format - band sequential)
+    ofstream data_file(data_filename, ios::binary);
+    if (!data_file) {
+        cerr << "Error: Cannot create ENVI data file " << data_filename << endl;
+        return false;
+    }
+    
+    // Write data in BSQ format (already in this layout)
+    data_file.write(reinterpret_cast<const char*>(data), 
+                    bands * pixels * sizeof(float));
+    
+    if (!data_file) {
+        cerr << "Error: Failed to write ENVI data to " << data_filename << endl;
+        return false;
+    }
+    data_file.close();
+    
+    if (!quiet) {
+        cout << "ENVI data written to: " << data_filename << endl;
+        cout << "  Dimensions: " << width << " x " << height << " x " << bands << " bands" << endl;
+    }
+    
+    // Write header file
+    if (!write_envi_header(hdr_filename, src_filename, bands, width, height, 
+                           eigenvalues, quiet)) {
+        return false;
+    }
+    
+    return true;
 }
 
 // ============================================================================
@@ -595,7 +777,7 @@ void print_usage(const char* program) {
     cout << "  " << program << " hyperspectral.img mnf.tif -n 50 -t 32\n";
     cout << "\n";
     cout << "Supported formats: Any GDAL-readable raster (GeoTIFF, ENVI, HDF, etc.)\n";
-    cout << "Output format: GeoTIFF with LZW compression\n";
+    cout << "Output format: GeoTIFF with LZW compression + ENVI .hdr sidecar file\n";
 }
 
 int main(int argc, char** argv) {
@@ -710,7 +892,7 @@ int main(int argc, char** argv) {
         evals[i] = result.eigenvalues(i);
     }
 
-    // Write output
+    // Write output (GeoTIFF)
     if (!write_raster(config.output_file, config.input_file, data,
                       config.n_components, width, height, evals.data(), config.quiet)) {
         free(data);
@@ -718,12 +900,19 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // Write eigenvalues
+    // Determine base name for auxiliary files
     string base_name = config.output_file;
     size_t dot_pos = base_name.rfind('.');
     if (dot_pos != string::npos) {
         base_name = base_name.substr(0, dot_pos);
     }
+
+    // Write ENVI header file
+    string hdr_filename = base_name + ".hdr";
+    write_envi_header(hdr_filename, config.input_file, config.n_components,
+                      width, height, evals.data(), config.quiet);
+
+    // Write eigenvalues
     write_eigenvalues(base_name, result.eigenvalues);
 
     // Inverse transform
@@ -754,10 +943,15 @@ int main(int argc, char** argv) {
         cout << "Reconstruction RMSE (" << config.n_components << " components): "
              << fixed << setprecision(6) << sqrt(mse) << endl;
 
-        // Write reconstructed image
+        // Write reconstructed image (GeoTIFF)
         string recon_file = base_name + "_reconstructed.tif";
         write_raster(recon_file, config.input_file, recon_data, bands, width, height,
                     nullptr, config.quiet);
+
+        // Write ENVI header for reconstructed image
+        string recon_hdr = base_name + "_reconstructed.hdr";
+        write_envi_header(recon_hdr, config.input_file, bands, width, height,
+                          nullptr, config.quiet);
 
         free(recon_data);
     }
@@ -772,4 +966,3 @@ int main(int argc, char** argv) {
 
     return 0;
 }
-
