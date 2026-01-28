@@ -804,10 +804,11 @@ VectorXd compute_means(const float* data, int bands, size_t pixels) {
  * Center data in place (subtract means)
  */
 void center_data(float* data, const VectorXd& means, int bands, size_t pixels) {
-    #pragma omp parallel for collapse(2)
+    #pragma omp parallel for
     for (int b = 0; b < bands; b++) {
+        float mean_b = (float)means(b);
         for (size_t p = 0; p < pixels; p++) {
-            data[b * pixels + p] -= (float)means(b);
+            data[b * pixels + p] -= mean_b;
         }
     }
 }
@@ -1036,30 +1037,57 @@ MatrixXd compute_noise_covariance(const float* data, int bands, int width, int h
  * Returns eigenvalues and eigenvectors sorted by descending eigenvalue (SNR)
  */
 bool solve_generalized_eigen(const MatrixXd& cov_data, const MatrixXd& cov_noise,
-                             VectorXd& eigenvalues, MatrixXd& eigenvectors) {
+                             VectorXd& eigenvalues, MatrixXd& eigenvectors,
+                             bool quiet = false) {
     int n = cov_data.rows();
+
+    // Check condition of noise covariance
+    SelfAdjointEigenSolver<MatrixXd> noise_eig(cov_noise);
+    double min_noise_eig = noise_eig.eigenvalues().minCoeff();
+    double max_noise_eig = noise_eig.eigenvalues().maxCoeff();
+    
+    if (!quiet) {
+        cout << "  Noise covariance eigenvalue range: " << min_noise_eig << " to " << max_noise_eig << endl;
+        if (max_noise_eig > 0) {
+            cout << "  Noise covariance condition number: " << max_noise_eig / max(min_noise_eig, 1e-10) << endl;
+        }
+    }
 
     // Use Cholesky decomposition of noise covariance
     // Σ_noise = L * L^T
     // Transform to standard eigenvalue problem: L^-1 * Σ_data * L^-T * y = λ * y
     // Then v = L^-T * y
+    
+    // Add regularization proportional to the trace (more robust than fixed 1e-6)
+    double reg = max(1e-10 * cov_noise.trace() / n, 1e-12);
+    MatrixXd cov_noise_reg = cov_noise + reg * MatrixXd::Identity(n, n);
 
-    LLT<MatrixXd> llt(cov_noise);
+    LLT<MatrixXd> llt(cov_noise_reg);
     if (llt.info() != Success) {
-        // Fall back: add small regularization
-        MatrixXd cov_noise_reg = cov_noise + 1e-6 * MatrixXd::Identity(n, n);
+        // Try stronger regularization
+        reg = 1e-6 * cov_noise.trace() / n;
+        cov_noise_reg = cov_noise + reg * MatrixXd::Identity(n, n);
         llt.compute(cov_noise_reg);
         if (llt.info() != Success) {
             cerr << "Error: Noise covariance matrix is not positive definite" << endl;
             return false;
         }
+        if (!quiet) {
+            cout << "  Warning: Used stronger regularization (" << reg << ")" << endl;
+        }
     }
 
     MatrixXd L = llt.matrixL();
-    MatrixXd L_inv = L.inverse();
+    
+    // Use triangular solve instead of explicit inverse (more stable)
+    MatrixXd L_inv = MatrixXd::Identity(n, n);
+    L.triangularView<Lower>().solveInPlace(L_inv);
 
     // Form the transformed matrix: L^-1 * Σ_data * L^-T
     MatrixXd A = L_inv * cov_data * L_inv.transpose();
+    
+    // Ensure symmetry (numerical errors can break it)
+    A = (A + A.transpose()) / 2.0;
 
     // Solve standard symmetric eigenvalue problem
     SelfAdjointEigenSolver<MatrixXd> solver(A);
@@ -1087,6 +1115,7 @@ bool solve_generalized_eigen(const MatrixXd& cov_data, const MatrixXd& cov_noise
     for (int i = 0; i < n; i++) {
         eigenvalues(i) = evals(indices[i]);
         eigenvectors.col(i) = evecs.col(indices[i]);
+        eigenvectors.col(i).normalize();  // CRITICAL: normalize eigenvectors
     }
 
     return true;
@@ -1200,7 +1229,7 @@ MNFResult mnf_transform(float* data, int bands, int width, int height,
     {
         Timer t("Solving eigenvalue problem", quiet);
         if (!solve_generalized_eigen(cov_data, cov_noise,
-                                     result.eigenvalues, result.eigenvectors)) {
+                                     result.eigenvalues, result.eigenvectors, quiet)) {
             return result;
         }
     }
@@ -1444,6 +1473,5 @@ int main(int argc, char** argv) {
 
     return 0;
 }
-
 
 
