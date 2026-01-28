@@ -66,6 +66,7 @@ struct MNFConfig {
     int noise_window = 9;      // Window size for noise estimation (must be odd)
     bool destripe = false;     // Apply FFT-based destriping before MNF
     float stripe_threshold = 3.0f;  // Threshold for stripe detection (std devs)
+    bool simple_noise = false; // Use simple horizontal diff for noise (debug)
 };
 
 // ============================================================================
@@ -477,13 +478,15 @@ float* read_raster(const string& filename, int& bands, int& width, int& height, 
         return nullptr;
     }
 
-    // Read bands in parallel
-    #pragma omp parallel for schedule(dynamic)
+    // Read bands sequentially (GDAL RasterIO is not always thread-safe)
     for (int b = 0; b < bands; b++) {
         GDALRasterBand* band = dataset->GetRasterBand(b + 1);
-        band->RasterIO(GF_Read, 0, 0, width, height,
+        CPLErr err = band->RasterIO(GF_Read, 0, 0, width, height,
                       &data[b * pixels], width, height,
                       GDT_Float32, 0, 0);
+        if (err != CE_None) {
+            cerr << "Error reading band " << (b + 1) << endl;
+        }
     }
 
     GDALClose(dataset);
@@ -844,6 +847,46 @@ MatrixXd compute_covariance(const float* data, int bands, size_t pixels) {
     }
 
     cov /= (double)pixels;
+    return cov;
+}
+
+/**
+ * Simple noise covariance using only horizontal differences
+ * This is the most basic approach - useful for debugging
+ */
+MatrixXd compute_noise_covariance_simple(const float* data, int bands, int width, int height) {
+    size_t pixels = (size_t)width * height;
+    
+    MatrixXd cov = MatrixXd::Zero(bands, bands);
+    
+    int num_threads = omp_get_max_threads();
+    vector<MatrixXd> local_covs(num_threads, MatrixXd::Zero(bands, bands));
+    
+    #pragma omp parallel
+    {
+        int tid = omp_get_thread_num();
+        MatrixXd& local_cov = local_covs[tid];
+        VectorXd noise_vec(bands);
+        
+        #pragma omp for nowait schedule(static, 256)
+        for (int row = 0; row < height; row++) {
+            for (int col = 0; col < width - 1; col++) {
+                size_t p1 = row * width + col;
+                size_t p2 = p1 + 1;
+                
+                for (int b = 0; b < bands; b++) {
+                    noise_vec(b) = (data[b * pixels + p2] - data[b * pixels + p1]) * 0.5;
+                }
+                local_cov.noalias() += noise_vec * noise_vec.transpose();
+            }
+        }
+    }
+    
+    for (int t = 0; t < num_threads; t++) {
+        cov += local_covs[t];
+    }
+    
+    cov /= (double)((width - 1) * height);
     return cov;
 }
 
@@ -1235,7 +1278,7 @@ struct MNFResult {
 };
 
 MNFResult mnf_transform(float* data, int bands, int width, int height,
-                        int n_components, int noise_window, bool quiet = false) {
+                        int n_components, int noise_window, bool simple_noise, bool quiet = false) {
     MNFResult result;
     size_t pixels = (size_t)width * height;
 
@@ -1257,8 +1300,11 @@ MNFResult mnf_transform(float* data, int bands, int width, int height,
 
     // Step 3: Compute noise covariance
     MatrixXd cov_noise;
-    {
-        Timer t("Computing noise covariance (median, " + to_string(noise_window) + "x" + to_string(noise_window) + ")", quiet);
+    if (simple_noise) {
+        Timer t("Computing noise covariance (simple horizontal diff)", quiet);
+        cov_noise = compute_noise_covariance_simple(data, bands, width, height);
+    } else {
+        Timer t("Computing noise covariance (combined, " + to_string(noise_window) + "x" + to_string(noise_window) + ")", quiet);
         cov_noise = compute_noise_covariance(data, bands, width, height, noise_window);
     }
 
@@ -1342,6 +1388,8 @@ int main(int argc, char** argv) {
             if (config.noise_window % 2 == 0) config.noise_window++;  // Ensure odd
         } else if (strcmp(argv[i], "--destripe") == 0) {
             config.destripe = true;
+        } else if (strcmp(argv[i], "--simple") == 0) {
+            config.simple_noise = true;
         } else if (strcmp(argv[i], "--stripe-thresh") == 0 && i + 1 < argc) {
             config.stripe_threshold = atof(argv[++i]);
             if (config.stripe_threshold < 0.5f) config.stripe_threshold = 0.5f;
@@ -1388,8 +1436,12 @@ int main(int argc, char** argv) {
         cout << "  Output components: " << config.n_components << endl;
         cout << "  Image size: " << width << " x " << height
              << " (" << pixels << " pixels)" << endl;
-        cout << "  Noise window: " << config.noise_window << "x" << config.noise_window 
-             << " (median-based)" << endl;
+        if (config.simple_noise) {
+            cout << "  Noise estimation: simple horizontal differences" << endl;
+        } else {
+            cout << "  Noise window: " << config.noise_window << "x" << config.noise_window 
+                 << " (combined method)" << endl;
+        }
         if (config.destripe) {
             cout << "  Destriping: enabled (threshold: " << config.stripe_threshold << " std devs)" << endl;
         }
@@ -1415,7 +1467,8 @@ int main(int argc, char** argv) {
     auto start_time = chrono::high_resolution_clock::now();
 
     MNFResult result = mnf_transform(data, bands, width, height,
-                                      config.n_components, config.noise_window, config.quiet);
+                                      config.n_components, config.noise_window, 
+                                      config.simple_noise, config.quiet);
 
     auto end_time = chrono::high_resolution_clock::now();
     double total_ms = chrono::duration<double, milli>(end_time - start_time).count();
@@ -1517,5 +1570,4 @@ int main(int argc, char** argv) {
 
     return 0;
 }
-
 
