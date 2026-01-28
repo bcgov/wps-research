@@ -58,6 +58,7 @@ struct MNFConfig {
     bool quiet = false;
     int num_threads = 0;       // 0 = auto
     size_t block_rows = 1024;  // Process this many rows at a time for covariance
+    int noise_window = 9;      // Window size for noise estimation (must be odd)
 };
 
 // ============================================================================
@@ -530,24 +531,37 @@ MatrixXd compute_covariance(const float* data, int bands, size_t pixels) {
 }
 
 /**
- * Compute noise covariance using local residual method
+ * Compute noise covariance using median-based local residual method
  * 
  * For each pixel, noise is estimated as the difference between the pixel value
- * and the mean of its local neighborhood (3x3 window). This is more robust to:
+ * and the median of its local neighborhood. Median is more robust than mean to:
+ * - Outliers and edges
  * - Detector striping
  * - Band misregistration  
- * - Edge effects
- * - Anisotropic noise patterns
+ * - Mixed land cover within window
+ *
+ * Window size should be odd (e.g., 3, 5, 7, 9, 11)
  *
  * Σ_noise = (1/n) * Σ residual_i * residual_i^T
  */
-MatrixXd compute_noise_covariance(const float* data, int bands, int width, int height) {
+MatrixXd compute_noise_covariance(const float* data, int bands, int width, int height, int window_size) {
     size_t pixels = (size_t)width * height;
     
-    // We skip 1-pixel border to have full 3x3 windows
-    int valid_width = width - 2;
-    int valid_height = height - 2;
+    // Ensure window size is odd
+    if (window_size % 2 == 0) window_size++;
+    int half_win = window_size / 2;
+    
+    // We skip border pixels to have full windows
+    int valid_width = width - 2 * half_win;
+    int valid_height = height - 2 * half_win;
+    
+    if (valid_width <= 0 || valid_height <= 0) {
+        cerr << "Error: Image too small for window size " << window_size << endl;
+        return MatrixXd::Identity(bands, bands);
+    }
+    
     size_t valid_count = (size_t)valid_width * valid_height;
+    int win_pixels = window_size * window_size;
 
     MatrixXd cov = MatrixXd::Zero(bands, bands);
 
@@ -559,10 +573,11 @@ MatrixXd compute_noise_covariance(const float* data, int bands, int width, int h
         int tid = omp_get_thread_num();
         MatrixXd& local_cov = local_covs[tid];
         VectorXd residual_vec(bands);
+        vector<float> window_vals(win_pixels);
 
-        #pragma omp for nowait schedule(static, 256)
-        for (int row = 1; row < height - 1; row++) {
-            for (int col = 1; col < width - 1; col++) {
+        #pragma omp for nowait schedule(static, 64)
+        for (int row = half_win; row < height - half_win; row++) {
+            for (int col = half_win; col < width - half_win; col++) {
                 size_t center = row * width + col;
                 
                 // Compute residual for each band
@@ -572,24 +587,22 @@ MatrixXd compute_noise_covariance(const float* data, int bands, int width, int h
                     // Get center pixel value
                     float center_val = data[band_offset + center];
                     
-                    // Compute mean of 3x3 neighborhood (excluding center)
-                    float neighbor_sum = 
-                        data[band_offset + (row-1)*width + (col-1)] +
-                        data[band_offset + (row-1)*width + (col  )] +
-                        data[band_offset + (row-1)*width + (col+1)] +
-                        data[band_offset + (row  )*width + (col-1)] +
-                        // center excluded
-                        data[band_offset + (row  )*width + (col+1)] +
-                        data[band_offset + (row+1)*width + (col-1)] +
-                        data[band_offset + (row+1)*width + (col  )] +
-                        data[band_offset + (row+1)*width + (col+1)];
+                    // Gather window values
+                    int idx = 0;
+                    for (int wy = -half_win; wy <= half_win; wy++) {
+                        for (int wx = -half_win; wx <= half_win; wx++) {
+                            window_vals[idx++] = data[band_offset + (row + wy) * width + (col + wx)];
+                        }
+                    }
                     
-                    float neighbor_mean = neighbor_sum / 8.0f;
+                    // Find median using nth_element (partial sort)
+                    size_t mid = win_pixels / 2;
+                    nth_element(window_vals.begin(), window_vals.begin() + mid, window_vals.end());
+                    float median_val = window_vals[mid];
                     
-                    // Residual is difference from local mean
-                    // Scale factor sqrt(8/9) accounts for the variance inflation
-                    // from using estimated mean rather than true mean
-                    residual_vec(b) = (center_val - neighbor_mean) * 0.942809f; // sqrt(8/9)
+                    // Residual is difference from local median
+                    // Scale by MAD normalization factor (1.4826) to approximate std dev
+                    residual_vec(b) = (center_val - median_val);
                 }
                 
                 local_cov.noalias() += residual_vec * residual_vec.transpose();
@@ -737,7 +750,7 @@ struct MNFResult {
 };
 
 MNFResult mnf_transform(float* data, int bands, int width, int height,
-                        int n_components, bool quiet = false) {
+                        int n_components, int noise_window, bool quiet = false) {
     MNFResult result;
     size_t pixels = (size_t)width * height;
 
@@ -760,8 +773,8 @@ MNFResult mnf_transform(float* data, int bands, int width, int height,
     // Step 3: Compute noise covariance
     MatrixXd cov_noise;
     {
-        Timer t("Computing noise covariance", quiet);
-        cov_noise = compute_noise_covariance(data, bands, width, height);
+        Timer t("Computing noise covariance (median, " + to_string(noise_window) + "x" + to_string(noise_window) + ")", quiet);
+        cov_noise = compute_noise_covariance(data, bands, width, height, noise_window);
     }
 
     // Step 4: Compute data covariance
@@ -805,6 +818,7 @@ void print_usage(const char* program) {
     cout << "Options:\n";
     cout << "  -n <num>      Number of components to output (default: all)\n";
     cout << "  -t <threads>  Number of threads (default: auto)\n";
+    cout << "  --nwin <size> Noise estimation window size, must be odd (default: 9)\n";
     cout << "  -i            Also compute inverse transform (reconstruction)\n";
     cout << "  -q            Quiet mode (minimal output)\n";
     cout << "\n";
@@ -812,6 +826,7 @@ void print_usage(const char* program) {
     cout << "  " << program << " input.tif mnf_output.tif\n";
     cout << "  " << program << " input.tif mnf_output.tif -n 20\n";
     cout << "  " << program << " hyperspectral.img mnf.tif -n 50 -t 32\n";
+    cout << "  " << program << " sentinel2.bin mnf.bin --nwin 15\n";
     cout << "\n";
     cout << "Supported formats: Any GDAL-readable raster (GeoTIFF, ENVI, HDF, etc.)\n";
     cout << "Output format: ENVI binary (BSQ, float32) with .hdr sidecar file\n";
@@ -833,6 +848,10 @@ int main(int argc, char** argv) {
             config.n_components = atoi(argv[++i]);
         } else if (strcmp(argv[i], "-t") == 0 && i + 1 < argc) {
             config.num_threads = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--nwin") == 0 && i + 1 < argc) {
+            config.noise_window = atoi(argv[++i]);
+            if (config.noise_window < 3) config.noise_window = 3;
+            if (config.noise_window % 2 == 0) config.noise_window++;  // Ensure odd
         } else if (strcmp(argv[i], "-i") == 0) {
             config.do_inverse = true;
         } else if (strcmp(argv[i], "-q") == 0) {
@@ -876,6 +895,8 @@ int main(int argc, char** argv) {
         cout << "  Output components: " << config.n_components << endl;
         cout << "  Image size: " << width << " x " << height
              << " (" << pixels << " pixels)" << endl;
+        cout << "  Noise window: " << config.noise_window << "x" << config.noise_window 
+             << " (median-based)" << endl;
         cout << endl;
     }
 
@@ -891,7 +912,7 @@ int main(int argc, char** argv) {
     auto start_time = chrono::high_resolution_clock::now();
 
     MNFResult result = mnf_transform(data, bands, width, height,
-                                      config.n_components, config.quiet);
+                                      config.n_components, config.noise_window, config.quiet);
 
     auto end_time = chrono::high_resolution_clock::now();
     double total_ms = chrono::duration<double, milli>(end_time - start_time).count();
@@ -993,4 +1014,5 @@ int main(int argc, char** argv) {
 
     return 0;
 }
+
 
