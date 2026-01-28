@@ -530,19 +530,28 @@ MatrixXd compute_covariance(const float* data, int bands, size_t pixels) {
 }
 
 /**
- * Compute noise covariance using horizontal spatial differences
- * noise[b, p] = (data[b, p+1] - data[b, p]) * 0.5
- * Σ_noise = (1/n) * Σ noise_i * noise_i^T
+ * Compute noise covariance using both horizontal and vertical spatial differences
+ * This reduces directional artifacts common in pushbroom sensors like Sentinel-2
+ * 
+ * noise_h[b, p] = (data[b, p+1] - data[b, p]) * 0.5        (horizontal)
+ * noise_v[b, p] = (data[b, p+width] - data[b, p]) * 0.5   (vertical)
+ * 
+ * Σ_noise = (1/n) * Σ (noise_h * noise_h^T + noise_v * noise_v^T) / 2
  */
 MatrixXd compute_noise_covariance(const float* data, int bands, int width, int height) {
     size_t pixels = (size_t)width * height;
-    size_t noise_count = (size_t)(width - 1) * height;
+    
+    // Count of valid difference pairs
+    size_t horiz_count = (size_t)(width - 1) * height;
+    size_t vert_count = (size_t)width * (height - 1);
+    size_t total_count = horiz_count + vert_count;
 
     MatrixXd cov = MatrixXd::Zero(bands, bands);
 
     int num_threads = omp_get_max_threads();
     vector<MatrixXd> local_covs(num_threads, MatrixXd::Zero(bands, bands));
 
+    // Horizontal differences
     #pragma omp parallel
     {
         int tid = omp_get_thread_num();
@@ -563,12 +572,33 @@ MatrixXd compute_noise_covariance(const float* data, int bands, int width, int h
         }
     }
 
-    // Combine
+    // Vertical differences
+    #pragma omp parallel
+    {
+        int tid = omp_get_thread_num();
+        MatrixXd& local_cov = local_covs[tid];
+        VectorXd noise_vec(bands);
+
+        #pragma omp for nowait schedule(static, 256)
+        for (int row = 0; row < height - 1; row++) {
+            for (int col = 0; col < width; col++) {
+                size_t p1 = row * width + col;
+                size_t p2 = p1 + width;
+
+                for (int b = 0; b < bands; b++) {
+                    noise_vec(b) = (data[b * pixels + p2] - data[b * pixels + p1]) * 0.5;
+                }
+                local_cov.noalias() += noise_vec * noise_vec.transpose();
+            }
+        }
+    }
+
+    // Combine thread-local results
     for (int t = 0; t < num_threads; t++) {
         cov += local_covs[t];
     }
 
-    cov /= (double)noise_count;
+    cov /= (double)total_count;
     return cov;
 }
 
@@ -959,5 +989,3 @@ int main(int argc, char** argv) {
 
     return 0;
 }
-
-
