@@ -11,7 +11,9 @@
  * 5. Project data onto eigenvectors sorted by decreasing SNR (eigenvalue)
  *
  * Usage: mnf_transform <input_raster> <output_raster> [options]
- *
+
+g++ -O3 -march=native -fopenmp -DNDEBUG mnf.cpp -o mnf $(gdal-config --cflags) $(gdal-config --libs) -lfftw3 -lfftw3_threads -lm
+
  * Compile (choose one based on your Eigen installation):
  *   # If Eigen is in /usr/include/eigen3:
  *   g++ -O3 -march=native -fopenmp -DNDEBUG mnf_transform_cpu.cpp -o mnf_transform \
