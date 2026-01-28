@@ -1,4 +1,7 @@
-/** 2026012*
+/** 2026012-28
+
+  g++ -O3 -march=native -fopenmp -DNDEBUG mnf.cpp -o mnf  $(gdal-config --cflags) $(gdal-config --libs) -lfftw3 -lfftw3_threads -lm
+ 
  * Minimum Noise Fraction (MNF) Transform - CPU Implementation
  * Parallelized with OpenMP, using Eigen for linear algebra
  * Designed for large datasets that exceed GPU memory
