@@ -56,8 +56,8 @@ int main(int argc, char ** argv){
 
   bwrite(out, ofn, nrow, ncol, n_out);
 
-  // Write header with band names
-  hwrite(ohn, nrow, ncol, n_out, H_FLOAT32, bandNames);
+// Write header with band names (float32)
+hwrite(ohn, nrow, ncol, n_out, 1, bandNames);
 
   return 0;
 }
