@@ -1,7 +1,7 @@
-/** 20260128 
-
-  nvcc -O3 -arch=sm_89 -Xcompiler -fopenmp -std=c++17 -o sentinel2_mp4 sentinel2_mp4.cu -lpthread -lavformat -lavcodec -lavutil -lswscale
-
+/** 20260128
+ 
+ nvcc -O3 -arch=sm_89 -Xcompiler -fopenmp -std=c++17 -o sentinel2_mp4 sentinel2_mp4.cu -lpthread -lavformat -lavcodec -lavutil -lswscale
+ 
  * CUDA-accelerated ENVI .bin to MP4 video generator with wipe transitions
  * Optimized for NVIDIA L40S GPU (48GB VRAM, sm_89)
  *
@@ -67,12 +67,12 @@ extern "C" {
 
 // CUDA error checking macro
 #define CUDA_CHECK(call) do { \
-    cudaError_t err = call; \
-    if (err != cudaSuccess) { \
-        fprintf(stderr, "CUDA error at %s:%d: %s\n", __FILE__, __LINE__, \
-                cudaGetErrorString(err)); \
-        exit(EXIT_FAILURE); \
-    } \
+cudaError_t err = call; \
+if (err != cudaSuccess) { \
+fprintf(stderr, "CUDA error at %s:%d: %s\n", __FILE__, __LINE__, \
+cudaGetErrorString(err)); \
+exit(EXIT_FAILURE); \
+} \
 } while(0)
 
 // ============================================================================
@@ -149,7 +149,7 @@ BandStats g_global_bounds[MAX_BANDS_USED];
 // File list
 std::vector<ImageFile> g_image_files;
 
-// Globals for loading 
+// Globals for loading
 std::map<int, ImageData> g_reorder_buffer;
 std::atomic<int> g_next_process_index(0);
 
@@ -161,7 +161,7 @@ std::atomic<int> g_next_process_index(0);
 bool parseENVIHeader(const std::string& hdr_path, ENVIHeader& header) {
     FILE* f = fopen(hdr_path.c_str(), "r");
     if (!f) return false;
-
+    
     // Set defaults
     header.samples = 0;
     header.lines = 0;
@@ -170,25 +170,25 @@ bool parseENVIHeader(const std::string& hdr_path, ENVIHeader& header) {
     header.interleave = "bsq";
     header.header_offset = 0;
     header.byte_order = "0";
-
+    
     char line[1024];
     while (fgets(line, sizeof(line), f)) {
         char* eq = strchr(line, '=');
         if (!eq) continue;
-
+        
         *eq = '\0';
         char* key = line;
         char* value = eq + 1;
-
+        
         // Trim whitespace
         while (*key == ' ' || *key == '\t') key++;
         char* end = key + strlen(key) - 1;
         while (end > key && (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r')) *end-- = '\0';
-
+        
         while (*value == ' ' || *value == '\t') value++;
         end = value + strlen(value) - 1;
         while (end > value && (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r')) *end-- = '\0';
-
+        
         if (strcasecmp(key, "samples") == 0) header.samples = atoi(value);
         else if (strcasecmp(key, "lines") == 0) header.lines = atoi(value);
         else if (strcasecmp(key, "bands") == 0) header.bands = atoi(value);
@@ -197,7 +197,7 @@ bool parseENVIHeader(const std::string& hdr_path, ENVIHeader& header) {
         else if (strcasecmp(key, "header offset") == 0) header.header_offset = atoi(value);
         else if (strcasecmp(key, "byte order") == 0) header.byte_order = value;
     }
-
+    
     fclose(f);
     return (header.samples > 0 && header.lines > 0);
 }
@@ -212,14 +212,14 @@ std::string extractTimestamp(const std::string& filename) {
     std::vector<std::string> fields;
     size_t start = 0;
     size_t end = filename.find('_');
-
+    
     while (end != std::string::npos) {
         fields.push_back(filename.substr(start, end - start));
         start = end + 1;
         end = filename.find('_', start);
     }
     fields.push_back(filename.substr(start));
-
+    
     if (fields.size() >= 3) {
         return fields[2];  // e.g., "20251014T192401"
     }
@@ -229,31 +229,31 @@ std::string extractTimestamp(const std::string& filename) {
 std::vector<ImageFile> findAndSortBinFiles(const std::string& directory) {
     std::vector<ImageFile> files;
     std::set<std::string> seen_timestamps;
-
+    
     DIR* dir = opendir(directory.c_str());
     if (!dir) {
         fprintf(stderr, "Error: Cannot open directory %s\n", directory.c_str());
         return files;
     }
-
+    
     struct dirent* entry;
     while ((entry = readdir(dir)) != NULL) {
         std::string name = entry->d_name;
         if (name.length() > 4 && name.substr(name.length() - 4) == ".bin") {
             std::string timestamp = extractTimestamp(name);
-
+            
             if (timestamp.empty()) {
                 fprintf(stderr, "Warning: Could not extract timestamp from %s, skipping\n", name.c_str());
                 continue;
             }
-
+            
             if (seen_timestamps.count(timestamp)) {
                 fprintf(stderr, "Warning: Duplicate timestamp %s in %s, skipping\n",
                         timestamp.c_str(), name.c_str());
                 continue;
             }
             seen_timestamps.insert(timestamp);
-
+            
             ImageFile img;
             img.filepath = directory + "/" + name;
             img.filename = name;
@@ -262,18 +262,18 @@ std::vector<ImageFile> findAndSortBinFiles(const std::string& directory) {
         }
     }
     closedir(dir);
-
+    
     // Sort by timestamp
     std::sort(files.begin(), files.end(),
-              [](const ImageFile& a, const ImageFile& b) {
-                  return a.timestamp < b.timestamp;
-              });
-
+[](const ImageFile& a, const ImageFile& b) {
+        return a.timestamp < b.timestamp;
+    });
+    
     // Assign sorted indices
     for (size_t i = 0; i < files.size(); i++) {
         files[i].index = (int)i;
     }
-
+    
     return files;
 }
 
@@ -290,7 +290,7 @@ float* readENVIFile(const ImageFile& img, ENVIHeader& header) {
     } else {
         hdr_path += ".hdr";
     }
-
+    
     // Also try .bin.hdr
     if (!parseENVIHeader(hdr_path, header)) {
         hdr_path = img.filepath + ".hdr";
@@ -300,35 +300,35 @@ float* readENVIFile(const ImageFile& img, ENVIHeader& header) {
             return nullptr;
         }
     }
-
+    
     if (header.data_type != 4) {
         fprintf(stderr, "Warning: Expected 32-bit float (type 4), got type %d for %s\n",
                 header.data_type, img.filename.c_str());
     }
-
+    
     int bands_to_use = std::min(header.bands, MAX_BANDS_USED);
     size_t pixels = (size_t)header.samples * header.lines;
     size_t band_size = pixels * sizeof(float);
-
+    
     FILE* f = fopen(img.filepath.c_str(), "rb");
     if (!f) {
         fprintf(stderr, "Error: Cannot open %s\n", img.filepath.c_str());
         return nullptr;
     }
-
+    
     fseek(f, header.header_offset, SEEK_SET);
-
+    
     // Allocate output as interleaved RGB
     float* output = (float*)malloc(pixels * bands_to_use * sizeof(float));
     if (!output) {
         fclose(f);
         return nullptr;
     }
-
+    
     // Read based on interleave format
     std::string interleave = header.interleave;
     std::transform(interleave.begin(), interleave.end(), interleave.begin(), ::tolower);
-
+    
     if (interleave == "bsq") {
         // Band Sequential: all of band 1, then all of band 2, etc.
         float* temp_band = (float*)malloc(band_size);
@@ -389,7 +389,7 @@ float* readENVIFile(const ImageFile& img, ENVIHeader& header) {
         fclose(f);
         return nullptr;
     }
-
+    
     fclose(f);
     return output;
 }
@@ -402,20 +402,20 @@ float* readENVIFile(const ImageFile& img, ENVIHeader& header) {
 
 // Kernel: Find min/max values per band (reduction)
 __global__ void findMinMaxKernel(const float* data, int num_pixels, int bands,
-                                  float* block_mins, float* block_maxs) {
+                                 float* block_mins, float* block_maxs) {
     extern __shared__ float shared[];
     float* s_min = shared;
     float* s_max = shared + blockDim.x * bands;
-
+    
     int tid = threadIdx.x;
     int gid = blockIdx.x * blockDim.x + threadIdx.x;
-
+    
     // Initialize shared memory
     for (int b = 0; b < bands; b++) {
         s_min[tid * bands + b] = INFINITY;
         s_max[tid * bands + b] = -INFINITY;
     }
-
+    
     // Each thread processes multiple pixels (grid-stride loop)
     for (int i = gid; i < num_pixels; i += blockDim.x * gridDim.x) {
         for (int b = 0; b < bands; b++) {
@@ -427,7 +427,7 @@ __global__ void findMinMaxKernel(const float* data, int num_pixels, int bands,
         }
     }
     __syncthreads();
-
+    
     // Reduction within block
     for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
         if (tid < stride) {
@@ -438,7 +438,7 @@ __global__ void findMinMaxKernel(const float* data, int num_pixels, int bands,
         }
         __syncthreads();
     }
-
+    
     // Write block result
     if (tid == 0) {
         for (int b = 0; b < bands; b++) {
@@ -450,12 +450,12 @@ __global__ void findMinMaxKernel(const float* data, int num_pixels, int bands,
 
 // Kernel: Build histogram for each band
 __global__ void buildHistogramKernel(const float* data, int num_pixels, int bands,
-                                      const float* mins, const float* maxs,
-                                      unsigned int* histograms) {
+                                     const float* mins, const float* maxs,
+                                     unsigned int* histograms) {
     int gid = blockIdx.x * blockDim.x + threadIdx.x;
-
+    
     if (gid >= num_pixels) return;
-
+    
     for (int b = 0; b < bands; b++) {
         float val = data[gid * bands + b];
         if (isfinite(val)) {
@@ -473,30 +473,30 @@ __global__ void buildHistogramKernel(const float* data, int num_pixels, int band
 
 // Host function: GPU-accelerated histogram bounds computation
 void computeHistogramBoundsGPU(const float* d_data, int width, int height, int bands,
-                                BandStats* stats, float trim_percent, cudaStream_t stream) {
+                               BandStats* stats, float trim_percent, cudaStream_t stream) {
     int num_pixels = width * height;
-
+    
     // Pass 1: Find global min/max per band
     int block_size = 256;
     int num_blocks = min((num_pixels + block_size - 1) / block_size, 1024);
     size_t shared_mem = 2 * block_size * bands * sizeof(float);
-
+    
     float *d_block_mins, *d_block_maxs;
     CUDA_CHECK(cudaMalloc(&d_block_mins, num_blocks * bands * sizeof(float)));
     CUDA_CHECK(cudaMalloc(&d_block_maxs, num_blocks * bands * sizeof(float)));
-
+    
     findMinMaxKernel<<<num_blocks, block_size, shared_mem, stream>>>(
-        d_data, num_pixels, bands, d_block_mins, d_block_maxs);
-
+                                                                     d_data, num_pixels, bands, d_block_mins, d_block_maxs);
+    
     // Reduce block results on CPU (small array)
     std::vector<float> h_block_mins(num_blocks * bands);
     std::vector<float> h_block_maxs(num_blocks * bands);
     CUDA_CHECK(cudaMemcpyAsync(h_block_mins.data(), d_block_mins,
-                                num_blocks * bands * sizeof(float), cudaMemcpyDeviceToHost, stream));
+                               num_blocks * bands * sizeof(float), cudaMemcpyDeviceToHost, stream));
     CUDA_CHECK(cudaMemcpyAsync(h_block_maxs.data(), d_block_maxs,
-                                num_blocks * bands * sizeof(float), cudaMemcpyDeviceToHost, stream));
+                               num_blocks * bands * sizeof(float), cudaMemcpyDeviceToHost, stream));
     CUDA_CHECK(cudaStreamSynchronize(stream));
-
+    
     float h_mins[MAX_BANDS_USED], h_maxs[MAX_BANDS_USED];
     for (int b = 0; b < bands; b++) {
         h_mins[b] = INFINITY;
@@ -510,10 +510,10 @@ void computeHistogramBoundsGPU(const float* d_data, int width, int height, int b
         if (!std::isfinite(h_maxs[b])) h_maxs[b] = 1.0f;
         if (h_maxs[b] <= h_mins[b]) h_maxs[b] = h_mins[b] + 1.0f;
     }
-
+    
     CUDA_CHECK(cudaFree(d_block_mins));
     CUDA_CHECK(cudaFree(d_block_maxs));
-
+    
     // Pass 2: Build histograms
     float *d_mins, *d_maxs;
     unsigned int* d_histograms;
@@ -523,40 +523,40 @@ void computeHistogramBoundsGPU(const float* d_data, int width, int height, int b
     CUDA_CHECK(cudaMemsetAsync(d_histograms, 0, bands * HISTOGRAM_BINS * sizeof(unsigned int), stream));
     CUDA_CHECK(cudaMemcpyAsync(d_mins, h_mins, bands * sizeof(float), cudaMemcpyHostToDevice, stream));
     CUDA_CHECK(cudaMemcpyAsync(d_maxs, h_maxs, bands * sizeof(float), cudaMemcpyHostToDevice, stream));
-
+    
     int hist_blocks = (num_pixels + block_size - 1) / block_size;
     buildHistogramKernel<<<hist_blocks, block_size, 0, stream>>>(
-        d_data, num_pixels, bands, d_mins, d_maxs, d_histograms);
-
+                                                                 d_data, num_pixels, bands, d_mins, d_maxs, d_histograms);
+    
     // Copy histograms back to CPU for percentile computation
     std::vector<unsigned int> h_histograms(bands * HISTOGRAM_BINS);
     CUDA_CHECK(cudaMemcpyAsync(h_histograms.data(), d_histograms,
-                                bands * HISTOGRAM_BINS * sizeof(unsigned int), cudaMemcpyDeviceToHost, stream));
+                               bands * HISTOGRAM_BINS * sizeof(unsigned int), cudaMemcpyDeviceToHost, stream));
     CUDA_CHECK(cudaStreamSynchronize(stream));
-
+    
     CUDA_CHECK(cudaFree(d_mins));
     CUDA_CHECK(cudaFree(d_maxs));
     CUDA_CHECK(cudaFree(d_histograms));
-
+    
     // Find percentile bounds from histograms
     for (int b = 0; b < bands; b++) {
         unsigned int* hist = &h_histograms[b * HISTOGRAM_BINS];
-
+        
         // Count total valid pixels
         unsigned long total = 0;
         for (int i = 0; i < HISTOGRAM_BINS; i++) {
             total += hist[i];
         }
-
+        
         if (total == 0) {
             stats[b].min_val = h_mins[b];
             stats[b].max_val = h_maxs[b];
             continue;
         }
-
+        
         unsigned long trim_count = (unsigned long)(total * trim_percent / 100.0f);
         float range = h_maxs[b] - h_mins[b];
-
+        
         // Find lower percentile
         unsigned long cumsum = 0;
         int lower_bin = 0;
@@ -567,7 +567,7 @@ void computeHistogramBoundsGPU(const float* d_data, int width, int height, int b
                 break;
             }
         }
-
+        
         // Find upper percentile
         cumsum = 0;
         int upper_bin = HISTOGRAM_BINS - 1;
@@ -578,11 +578,11 @@ void computeHistogramBoundsGPU(const float* d_data, int width, int height, int b
                 break;
             }
         }
-
+        
         // Convert bins back to values
         stats[b].min_val = h_mins[b] + (lower_bin / (float)(HISTOGRAM_BINS - 1)) * range;
         stats[b].max_val = h_mins[b] + (upper_bin / (float)(HISTOGRAM_BINS - 1)) * range;
-
+        
         // Ensure valid range
         if (stats[b].max_val <= stats[b].min_val) {
             stats[b].max_val = stats[b].min_val + 0.001f;
@@ -595,41 +595,41 @@ void computeHistogramBoundsGPU(const float* d_data, int width, int height, int b
 // ============================================================================
 
 void computeHistogramBounds(const float* data, int width, int height, int bands,
-                           BandStats* stats, float trim_percent) {
+                            BandStats* stats, float trim_percent) {
     size_t pixels = (size_t)width * height;
-
+    
     for (int b = 0; b < bands; b++) {
         // Extract band values
         std::vector<float> values;
         values.reserve(pixels);
-
+        
         for (size_t p = 0; p < pixels; p++) {
             float val = data[p * bands + b];
             if (std::isfinite(val)) {
                 values.push_back(val);
             }
         }
-
+        
         if (values.empty()) {
             stats[b].min_val = 0.0f;
             stats[b].max_val = 1.0f;
             continue;
         }
-
+        
         std::sort(values.begin(), values.end());
-
+        
         size_t trim_count = (size_t)(values.size() * trim_percent / 100.0f);
         size_t min_idx = trim_count;
         size_t max_idx = values.size() - 1 - trim_count;
-
+        
         if (min_idx >= max_idx) {
             min_idx = 0;
             max_idx = values.size() - 1;
         }
-
+        
         stats[b].min_val = values[min_idx];
         stats[b].max_val = values[max_idx];
-
+        
         // Avoid division by zero
         if (stats[b].max_val <= stats[b].min_val) {
             stats[b].max_val = stats[b].min_val + 1.0f;
@@ -643,28 +643,28 @@ void computeHistogramBounds(const float* data, int width, int height, int bands,
 
 // Kernel: Apply scaling and convert float RGB to uint8 RGB
 __global__ void scaleAndConvertKernel(const float* input, uint8_t* output,
-                                       int width, int height, int bands,
-                                       float min_r, float max_r,
-                                       float min_g, float max_g,
-                                       float min_b, float max_b) {
+                                      int width, int height, int bands,
+                                      float min_r, float max_r,
+                                      float min_g, float max_g,
+                                      float min_b, float max_b) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int total_pixels = width * height;
-
+    
     if (idx >= total_pixels) return;
-
+    
     float scale_r = 255.0f / (max_r - min_r);
     float scale_g = 255.0f / (max_g - min_g);
     float scale_b = 255.0f / (max_b - min_b);
-
+    
     float r = input[idx * bands + 0];
     float g = (bands >= 2) ? input[idx * bands + 1] : r;
     float b = (bands >= 3) ? input[idx * bands + 2] : r;
-
+    
     // Scale to 0-255
     r = (r - min_r) * scale_r;
     g = (g - min_g) * scale_g;
     b = (b - min_b) * scale_b;
-
+    
     // Clamp
     output[idx * 3 + 0] = (uint8_t)fminf(fmaxf(r, 0.0f), 255.0f);
     output[idx * 3 + 1] = (uint8_t)fminf(fmaxf(g, 0.0f), 255.0f);
@@ -673,19 +673,19 @@ __global__ void scaleAndConvertKernel(const float* input, uint8_t* output,
 
 // Kernel: Horizontal wipe transition between two images
 __global__ void wipeTransitionKernel(const uint8_t* img1, const uint8_t* img2,
-                                      uint8_t* output, int width, int height,
-                                      float progress) {
+                                     uint8_t* output, int width, int height,
+                                     float progress) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
-
+    
     if (x >= width || y >= height) return;
-
+    
     int idx = (y * width + x) * 3;
-
+    
     // Wipe position with slight feathering
     float wipe_x = progress * (width + 50) - 25;  // Add 50px transition zone
     float blend = 0.0f;
-
+    
     if ((float)x < wipe_x - 25.0f) {
         blend = 1.0f;  // Fully img2
     } else if ((float)x > wipe_x + 25.0f) {
@@ -697,7 +697,7 @@ __global__ void wipeTransitionKernel(const uint8_t* img1, const uint8_t* img2,
         blend = blend * blend * (3.0f - 2.0f * blend);  // Smoothstep
         blend = 1.0f - blend;
     }
-
+    
     output[idx + 0] = (uint8_t)(img1[idx + 0] * (1.0f - blend) + img2[idx + 0] * blend);
     output[idx + 1] = (uint8_t)(img1[idx + 1] * (1.0f - blend) + img2[idx + 1] * blend);
     output[idx + 2] = (uint8_t)(img1[idx + 2] * (1.0f - blend) + img2[idx + 2] * blend);
@@ -705,36 +705,36 @@ __global__ void wipeTransitionKernel(const uint8_t* img1, const uint8_t* img2,
 
 // Kernel: Resize image using bilinear interpolation
 __global__ void resizeKernel(const uint8_t* input, uint8_t* output,
-                              int in_width, int in_height,
-                              int out_width, int out_height) {
+                             int in_width, int in_height,
+                             int out_width, int out_height) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
-
+    
     if (x >= out_width || y >= out_height) return;
-
+    
     float scale_x = (float)in_width / out_width;
     float scale_y = (float)in_height / out_height;
-
+    
     float src_x = x * scale_x;
     float src_y = y * scale_y;
-
+    
     int x0 = (int)src_x;
     int y0 = (int)src_y;
     int x1 = min(x0 + 1, in_width - 1);
     int y1 = min(y0 + 1, in_height - 1);
-
+    
     float fx = src_x - x0;
     float fy = src_y - y0;
-
+    
     for (int c = 0; c < 3; c++) {
         float v00 = input[(y0 * in_width + x0) * 3 + c];
         float v10 = input[(y0 * in_width + x1) * 3 + c];
         float v01 = input[(y1 * in_width + x0) * 3 + c];
         float v11 = input[(y1 * in_width + x1) * 3 + c];
-
+        
         float v = v00 * (1-fx) * (1-fy) + v10 * fx * (1-fy) +
-                  v01 * (1-fx) * fy + v11 * fx * fy;
-
+        v01 * (1-fx) * fy + v11 * fx * fy;
+        
         output[(y * out_width + x) * 3 + c] = (uint8_t)fminf(fmaxf(v, 0.0f), 255.0f);
     }
 }
@@ -845,19 +845,19 @@ __constant__ unsigned char d_font_8x16[95][16] = {
 
 // Kernel: Render text overlay on image (with shadow for visibility)
 __global__ void renderTextKernel(uint8_t* image, int img_width, int img_height,
-                                  const char* text, int text_len,
-                                  int start_x, int start_y, int scale) {
+                                 const char* text, int text_len,
+                                 int start_x, int start_y, int scale) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
-
+    
     // Each thread handles one character
     if (tid >= text_len) return;
-
+    
     char c = text[tid];
     if (c < 32 || c > 126) return;  // Skip non-printable
-
+    
     int char_idx = c - 32;
     int char_x = start_x + tid * FONT_CHAR_WIDTH * scale;
-
+    
     // Render each pixel of the character
     for (int row = 0; row < FONT_CHAR_HEIGHT; row++) {
         unsigned char font_row = d_font_8x16[char_idx][row];
@@ -868,10 +868,10 @@ __global__ void renderTextKernel(uint8_t* image, int img_width, int img_height,
                     for (int sx = 0; sx < scale; sx++) {
                         int px = char_x + col * scale + sx;
                         int py = start_y + row * scale + sy;
-
+                        
                         if (px >= 0 && px < img_width && py >= 0 && py < img_height) {
                             int idx = (py * img_width + px) * 3;
-
+                            
                             // Draw shadow (offset by 2 pixels)
                             int shadow_px = px + 2;
                             int shadow_py = py + 2;
@@ -887,7 +887,7 @@ __global__ void renderTextKernel(uint8_t* image, int img_width, int img_height,
             }
         }
     }
-
+    
     // Second pass: draw white text on top
     for (int row = 0; row < FONT_CHAR_HEIGHT; row++) {
         unsigned char font_row = d_font_8x16[char_idx][row];
@@ -897,7 +897,7 @@ __global__ void renderTextKernel(uint8_t* image, int img_width, int img_height,
                     for (int sx = 0; sx < scale; sx++) {
                         int px = char_x + col * scale + sx;
                         int py = start_y + row * scale + sy;
-
+                        
                         if (px >= 0 && px < img_width && py >= 0 && py < img_height) {
                             int idx = (py * img_width + px) * 3;
                             image[idx + 0] = 255;  // White text
@@ -917,22 +917,22 @@ void renderFilenameOverlay(uint8_t* d_image, int width, int height,
     // Copy filename to device
     int text_len = strlen(filename);
     if (text_len > 256) text_len = 256;  // Limit length
-
+    
     char* d_text;
     CUDA_CHECK(cudaMalloc(&d_text, text_len + 1));
     CUDA_CHECK(cudaMemcpyAsync(d_text, filename, text_len + 1, cudaMemcpyHostToDevice, stream));
-
+    
     // Position: lower-left corner with margin
     int text_y = height - TEXT_MARGIN - FONT_CHAR_HEIGHT * FONT_SCALE;
     int text_x = TEXT_MARGIN;
-
+    
     // Launch kernel (one thread per character)
     int block_size = 128;
     int num_blocks = (text_len + block_size - 1) / block_size;
-
+    
     renderTextKernel<<<num_blocks, block_size, 0, stream>>>(
-        d_image, width, height, d_text, text_len, text_x, text_y, FONT_SCALE);
-
+                                                            d_image, width, height, d_text, text_len, text_x, text_y, FONT_SCALE);
+    
     CUDA_CHECK(cudaFree(d_text));
 }
 
@@ -946,32 +946,32 @@ struct LoaderThreadData {
 
 void* loaderThreadFunc(void* arg) {
     LoaderThreadData* data = (LoaderThreadData*)arg;
-
+    
     while (true) {
         int load_index = g_next_load_index.fetch_add(1);
-
+        
         if (load_index >= (int)g_image_files.size()) {
             break;
         }
-
+        
         const ImageFile& img = g_image_files[load_index];
         ENVIHeader header;
-
+        
         printf("[Thread %2d] Loading image %d: %s\n", data->thread_id, load_index, img.filename.c_str());
-
+        
         float* raw_data = readENVIFile(img, header);
-
+        
         ImageData img_data;
         img_data.index = load_index;
         img_data.valid = (raw_data != nullptr);
-
+        
         if (raw_data) {
             img_data.host_data = raw_data;
             img_data.width = header.samples;
             img_data.height = header.lines;
             img_data.data_size = (size_t)header.samples * header.lines *
-                                 std::min(header.bands, MAX_BANDS_USED) * sizeof(float);
-
+            std::min(header.bands, MAX_BANDS_USED) * sizeof(float);
+            
             // Set global dimensions from first image
             if (load_index == 0) {
                 g_image_width = header.samples;
@@ -986,21 +986,21 @@ void* loaderThreadFunc(void* arg) {
             img_data.height = 0;
             img_data.data_size = 0;
         }
-
+        
         // Add to queue with flow control
         {
             std::unique_lock<std::mutex> lock(g_queue_mutex);
-
+            
             // Wait if queue is full
             g_producer_cv.wait(lock, []{
                 return g_image_queue.size() < MAX_QUEUE_SIZE;
             });
-
+            
             g_image_queue.push(img_data);
             g_consumer_cv.notify_one();
         }
     }
-
+    
     return nullptr;
 }
 
@@ -1016,17 +1016,17 @@ struct VideoEncoder {
     AVPacket* packet;
     struct SwsContext* sws_ctx;
     int64_t pts;
-
+    
     bool init(const char* filename, int width, int height, int fps) {
         pts = 0;
-
+        
         // Allocate format context
         avformat_alloc_output_context2(&format_ctx, NULL, NULL, filename);
         if (!format_ctx) {
             fprintf(stderr, "Could not create output context\n");
             return false;
         }
-
+        
         // Find encoder - try NVENC first, fall back to libx264
         const AVCodec* codec = avcodec_find_encoder_by_name("h264_nvenc");
         if (!codec) {
@@ -1041,21 +1041,21 @@ struct VideoEncoder {
             return false;
         }
         printf("Using encoder: %s\n", codec->name);
-
+        
         // Create stream
         stream = avformat_new_stream(format_ctx, NULL);
         if (!stream) {
             fprintf(stderr, "Could not create stream\n");
             return false;
         }
-
+        
         // Allocate codec context
         codec_ctx = avcodec_alloc_context3(codec);
         if (!codec_ctx) {
             fprintf(stderr, "Could not allocate codec context\n");
             return false;
         }
-
+        
         // Configure codec
         codec_ctx->width = width;
         codec_ctx->height = height;
@@ -1064,7 +1064,7 @@ struct VideoEncoder {
         codec_ctx->pix_fmt = AV_PIX_FMT_YUV420P;
         codec_ctx->gop_size = 12;
         codec_ctx->max_b_frames = 2;
-
+        
         // NVENC specific options
         if (strcmp(codec->name, "h264_nvenc") == 0) {
             av_opt_set(codec_ctx->priv_data, "preset", "p4", 0);  // Balanced preset
@@ -1075,21 +1075,21 @@ struct VideoEncoder {
             av_opt_set(codec_ctx->priv_data, "preset", "medium", 0);
             av_opt_set(codec_ctx->priv_data, "crf", "18", 0);  // Higher quality (lower CRF)
         }
-
+        
         if (format_ctx->oformat->flags & AVFMT_GLOBALHEADER) {
             codec_ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
         }
-
+        
         // Open codec
         if (avcodec_open2(codec_ctx, codec, NULL) < 0) {
             fprintf(stderr, "Could not open codec\n");
             return false;
         }
-
+        
         // Copy codec params to stream
         avcodec_parameters_from_context(stream->codecpar, codec_ctx);
         stream->time_base = codec_ctx->time_base;
-
+        
         // Open output file
         if (!(format_ctx->oformat->flags & AVFMT_NOFILE)) {
             if (avio_open(&format_ctx->pb, filename, AVIO_FLAG_WRITE) < 0) {
@@ -1097,48 +1097,48 @@ struct VideoEncoder {
                 return false;
             }
         }
-
+        
         // Write header
         if (avformat_write_header(format_ctx, NULL) < 0) {
             fprintf(stderr, "Could not write header\n");
             return false;
         }
-
+        
         // Allocate frame
         frame = av_frame_alloc();
         frame->format = codec_ctx->pix_fmt;
         frame->width = width;
         frame->height = height;
         av_frame_get_buffer(frame, 0);
-
+        
         // Allocate packet
         packet = av_packet_alloc();
-
+        
         // Create scaler for RGB to YUV conversion
         sws_ctx = sws_getContext(width, height, AV_PIX_FMT_RGB24,
-                                  width, height, AV_PIX_FMT_YUV420P,
-                                  SWS_BILINEAR, NULL, NULL, NULL);
-
+                                 width, height, AV_PIX_FMT_YUV420P,
+                                 SWS_BILINEAR, NULL, NULL, NULL);
+        
         return true;
     }
-
+    
     bool writeFrame(uint8_t* rgb_data) {
         av_frame_make_writable(frame);
-
+        
         // Convert RGB to YUV
         uint8_t* src_data[1] = { rgb_data };
         int src_linesize[1] = { codec_ctx->width * 3 };
         sws_scale(sws_ctx, src_data, src_linesize, 0, codec_ctx->height,
                   frame->data, frame->linesize);
-
+        
         frame->pts = pts++;
-
+        
         // Encode frame
         if (avcodec_send_frame(codec_ctx, frame) < 0) {
             fprintf(stderr, "Error sending frame\n");
             return false;
         }
-
+        
         while (true) {
             int ret = avcodec_receive_packet(codec_ctx, packet);
             if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) break;
@@ -1146,17 +1146,17 @@ struct VideoEncoder {
                 fprintf(stderr, "Error receiving packet\n");
                 return false;
             }
-
+            
             av_packet_rescale_ts(packet, codec_ctx->time_base, stream->time_base);
             packet->stream_index = stream->index;
-
+            
             av_interleaved_write_frame(format_ctx, packet);
             av_packet_unref(packet);
         }
-
+        
         return true;
     }
-
+    
     void finish() {
         // Flush encoder
         avcodec_send_frame(codec_ctx, NULL);
@@ -1164,15 +1164,15 @@ struct VideoEncoder {
             int ret = avcodec_receive_packet(codec_ctx, packet);
             if (ret == AVERROR_EOF) break;
             if (ret < 0) break;
-
+            
             av_packet_rescale_ts(packet, codec_ctx->time_base, stream->time_base);
             packet->stream_index = stream->index;
             av_interleaved_write_frame(format_ctx, packet);
             av_packet_unref(packet);
         }
-
+        
         av_write_trailer(format_ctx);
-
+        
         // Cleanup
         sws_freeContext(sws_ctx);
         av_frame_free(&frame);
@@ -1192,40 +1192,40 @@ struct VideoEncoder {
 int main(int argc, char** argv) {
     const char* input_dir = ".";
     const char* output_file = "output.mp4";
-
+    
     if (argc >= 2) input_dir = argv[1];
     if (argc >= 3) output_file = argv[2];
-
+    
     printf("=== CUDA ENVI to Video Converter ===\n");
     printf("Input directory: %s\n", input_dir);
     printf("Output file: %s\n\n", output_file);
-
+    
     // Find and sort .bin files
     g_image_files = findAndSortBinFiles(input_dir);
-
+    
     if (g_image_files.empty()) {
         fprintf(stderr, "No valid .bin files found in %s\n", input_dir);
         return 1;
     }
-
+    
     printf("Found %zu images:\n", g_image_files.size());
     for (const auto& img : g_image_files) {
         printf("  [%d] %s (timestamp: %s)\n", img.index, img.filename.c_str(), img.timestamp.c_str());
     }
     printf("\n");
-
+    
     // ========================================================================
     // Phase 1: Setup GPU and compute histogram bounds (GPU-accelerated)
     // ========================================================================
     printf("=== Phase 1: Initializing GPU ===\n");
-
+    
     int device;
     cudaDeviceProp prop;
     CUDA_CHECK(cudaGetDevice(&device));
     CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
     printf("Using GPU: %s\n", prop.name);
     printf("Total VRAM: %.2f GB\n", prop.totalGlobalMem / (1024.0*1024.0*1024.0));
-
+    
     // Read first image to get dimensions
     {
         ENVIHeader header;
@@ -1239,85 +1239,85 @@ int main(int argc, char** argv) {
         g_image_bands = std::min(header.bands, MAX_BANDS_USED);
         free(data);
     }
-
+    
     printf("Image dimensions: %d x %d, %d bands\n", g_image_width, g_image_height, g_image_bands);
-
+    
     // Calculate memory requirements
     size_t pixels = (size_t)g_image_width * g_image_height;
     size_t float_image_size = pixels * g_image_bands * sizeof(float);
     size_t rgb_image_size = pixels * 3;
     size_t output_rgb_size = OUTPUT_WIDTH * OUTPUT_HEIGHT * 3;
-
+    
     printf("Per-image GPU memory: %.2f MB (float) + %.2f MB (RGB8)\n",
            float_image_size / (1024.0*1024.0), rgb_image_size / (1024.0*1024.0));
-
+    
     // Create CUDA streams for histogram computation
     // (Double-buffered allocation happens in Phase 2)
-
+    
     printf("\n=== Phase 2: Computing histogram bounds (GPU-accelerated) ===\n");
-
+    
     std::vector<BandStats> all_stats(g_image_files.size() * MAX_BANDS_USED);
-
+    
     // Use double-buffering with async loading for better throughput
     float* d_hist_buffers[2];
     CUDA_CHECK(cudaMalloc(&d_hist_buffers[0], float_image_size));
     CUDA_CHECK(cudaMalloc(&d_hist_buffers[1], float_image_size));
-
+    
     cudaStream_t hist_streams[2];
     CUDA_CHECK(cudaStreamCreate(&hist_streams[0]));
     CUDA_CHECK(cudaStreamCreate(&hist_streams[1]));
-
+    
     // Pre-load first image
     float* host_buffers[2] = {nullptr, nullptr};
     ENVIHeader headers[2];
-
+    
     host_buffers[0] = readENVIFile(g_image_files[0], headers[0]);
     if (host_buffers[0]) {
         CUDA_CHECK(cudaMemcpyAsync(d_hist_buffers[0], host_buffers[0], float_image_size,
-                                    cudaMemcpyHostToDevice, hist_streams[0]));
+                                   cudaMemcpyHostToDevice, hist_streams[0]));
     }
-
+    
     for (size_t i = 0; i < g_image_files.size(); i++) {
         int curr = i % 2;
         int next = (i + 1) % 2;
-
+        
         // Start loading next image while processing current
         if (i + 1 < g_image_files.size()) {
             host_buffers[next] = readENVIFile(g_image_files[i + 1], headers[next]);
             if (host_buffers[next]) {
                 CUDA_CHECK(cudaMemcpyAsync(d_hist_buffers[next], host_buffers[next], float_image_size,
-                                            cudaMemcpyHostToDevice, hist_streams[next]));
+                                           cudaMemcpyHostToDevice, hist_streams[next]));
             }
         }
-
+        
         // Process current image if valid
         if (host_buffers[curr]) {
             int bands = std::min(headers[curr].bands, MAX_BANDS_USED);
-
+            
             // Wait for upload to complete
             CUDA_CHECK(cudaStreamSynchronize(hist_streams[curr]));
-
+            
             // Compute histogram bounds on GPU
             computeHistogramBoundsGPU(d_hist_buffers[curr], headers[curr].samples, headers[curr].lines, bands,
                                       &all_stats[i * MAX_BANDS_USED], HISTOGRAM_TRIM_PERCENT, hist_streams[curr]);
-
+            
             printf("  Image %zu bounds: R[%.4f, %.4f] G[%.4f, %.4f] B[%.4f, %.4f]\n",
                    i, all_stats[i*MAX_BANDS_USED].min_val, all_stats[i*MAX_BANDS_USED].max_val,
                    bands >= 2 ? all_stats[i*MAX_BANDS_USED+1].min_val : 0,
                    bands >= 2 ? all_stats[i*MAX_BANDS_USED+1].max_val : 0,
                    bands >= 3 ? all_stats[i*MAX_BANDS_USED+2].min_val : 0,
                    bands >= 3 ? all_stats[i*MAX_BANDS_USED+2].max_val : 0);
-
+            
             free(host_buffers[curr]);
             host_buffers[curr] = nullptr;
         }
     }
-
+    
     CUDA_CHECK(cudaFree(d_hist_buffers[0]));
     CUDA_CHECK(cudaFree(d_hist_buffers[1]));
     CUDA_CHECK(cudaStreamDestroy(hist_streams[0]));
     CUDA_CHECK(cudaStreamDestroy(hist_streams[1]));
-
+    
     // Average the bounds
     for (int b = 0; b < MAX_BANDS_USED; b++) {
         float sum_min = 0, sum_max = 0;
@@ -1330,17 +1330,17 @@ int main(int argc, char** argv) {
         g_global_bounds[b].min_val = sum_min / count;
         g_global_bounds[b].max_val = sum_max / count;
     }
-
+    
     printf("\nAveraged global bounds:\n");
     printf("  R: [%.4f, %.4f]\n", g_global_bounds[0].min_val, g_global_bounds[0].max_val);
     printf("  G: [%.4f, %.4f]\n", g_global_bounds[1].min_val, g_global_bounds[1].max_val);
     printf("  B: [%.4f, %.4f]\n\n", g_global_bounds[2].min_val, g_global_bounds[2].max_val);
-
+    
     // ========================================================================
     // Phase 3: Allocate GPU resources for video generation
     // ========================================================================
     printf("=== Phase 3: Allocating GPU resources ===\n");
-
+    
     // Allocate GPU buffers for ring buffer
     std::vector<GPUBufferEntry> gpu_buffers(GPU_PREFETCH_BUFFER);
     for (int i = 0; i < GPU_PREFETCH_BUFFER; i++) {
@@ -1350,32 +1350,32 @@ int main(int argc, char** argv) {
         gpu_buffers[i].ready = false;
         gpu_buffers[i].processed = false;
     }
-
+    
     // Allocate output buffers
     uint8_t *d_resized1, *d_resized2, *d_output;
     CUDA_CHECK(cudaMalloc(&d_resized1, output_rgb_size));
     CUDA_CHECK(cudaMalloc(&d_resized2, output_rgb_size));
     CUDA_CHECK(cudaMalloc(&d_output, output_rgb_size));
-
+    
     uint8_t* h_output = (uint8_t*)malloc(output_rgb_size);
-
+    
     // Create CUDA stream for async operations
     cudaStream_t stream;
     CUDA_CHECK(cudaStreamCreate(&stream));
-
+    
     // ========================================================================
     // Phase 4: Start loader threads
     // ========================================================================
     printf("\n=== Phase 4: Starting video generation ===\n");
-
+    
     pthread_t loader_threads[NUM_LOADER_THREADS];
     LoaderThreadData thread_data[NUM_LOADER_THREADS];
-
+    
     for (int i = 0; i < NUM_LOADER_THREADS; i++) {
         thread_data[i].thread_id = i;
         pthread_create(&loader_threads[i], NULL, loaderThreadFunc, &thread_data[i]);
     }
-
+    
     // ========================================================================
     // Phase 5: Initialize video encoder
     // ========================================================================
@@ -1384,177 +1384,179 @@ int main(int argc, char** argv) {
         fprintf(stderr, "Failed to initialize video encoder\n");
         return 1;
     }
-
+    
     // ========================================================================
     // Phase 6: Main processing loop
     // ========================================================================
-
+    
     // CUDA kernel configuration
     dim3 block_1d(256);
     dim3 grid_1d((pixels + block_1d.x - 1) / block_1d.x);
-
+    
     dim3 block_2d(16, 16);
     dim3 grid_2d_input((g_image_width + 15) / 16, (g_image_height + 15) / 16);
     dim3 grid_2d_output((OUTPUT_WIDTH + 15) / 16, (OUTPUT_HEIGHT + 15) / 16);
-
+    
     int current_buffer_idx = 0;
     int prev_buffer_idx = -1;
     int images_processed = 0;
     int total_frames_written = 0;
-
+    
     // Map to track which buffer holds which image
     std::map<int, int> image_to_buffer;
-
+    
     while (images_processed < (int)g_image_files.size()) {
         // Get next image from queue
-
-ImageData img_data;
-bool have_image = false;
-
-while (!have_image) {
-    if (g_loading_complete.load() &&
-        g_reorder_buffer.empty() &&
-        g_image_queue.empty()) {
-        goto processing_done;
-    }
-
-    {
-        std::unique_lock<std::mutex> lock(g_queue_mutex);
-        g_consumer_cv.wait(lock, []{
-            return !g_image_queue.empty() || g_loading_complete.load();
-        });
-
-        while (!g_image_queue.empty()) {
-            ImageData tmp = g_image_queue.front();
-            g_image_queue.pop();
-            g_reorder_buffer[tmp.index] = tmp;
-            g_producer_cv.notify_one();
+        
+        ImageData img_data;
+        bool have_image = false;
+        
+        while (!have_image) {
+            if (g_loading_complete.load() &&
+                g_reorder_buffer.empty() &&
+                g_image_queue.empty()) {
+                goto processing_done;
+            }
+            
+            {
+                std::unique_lock<std::mutex> lock(g_queue_mutex);
+                g_consumer_cv.wait(lock, []{
+                    return !g_image_queue.empty() || g_loading_complete.load();
+                });
+                
+                while (!g_image_queue.empty()) {
+                    ImageData tmp = g_image_queue.front();
+                    g_image_queue.pop();
+                    g_reorder_buffer[tmp.index] = tmp;
+                    g_producer_cv.notify_one();
+                }
+            }
+            
+            auto it = g_reorder_buffer.find(g_next_process_index.load());
+            if (it != g_reorder_buffer.end()) {
+                img_data = it->second;
+                g_reorder_buffer.erase(it);
+                g_next_process_index++;
+                have_image = true;
+            }
         }
-    }
-
-    auto it = g_reorder_buffer.find(g_next_process_index.load());
-    if (it != g_reorder_buffer.end()) {
-        img_data = it->second;
-        g_reorder_buffer.erase(it);
-        g_next_process_index++;
-        have_image = true;
-    }
-}
-
-processing_done:
-
-
+        
+        
+        
         if (!img_data.valid || !img_data.host_data) {
             fprintf(stderr, "Skipping invalid image %d\n", img_data.index);
             images_processed++;
             continue;
         }
-
+        
         printf("Processing image %d/%zu: %s\n",
                img_data.index + 1, g_image_files.size(),
                g_image_files[img_data.index].filename.c_str());
-
+        
         // Find a free buffer slot
         int buf_idx = current_buffer_idx % GPU_PREFETCH_BUFFER;
-
+        
         // Upload float data to GPU
         CUDA_CHECK(cudaMemcpyAsync(gpu_buffers[buf_idx].d_float_data, img_data.host_data,
-                                    float_image_size, cudaMemcpyHostToDevice, stream));
-
+                                   float_image_size, cudaMemcpyHostToDevice, stream));
+        
         // Scale and convert to RGB8
         scaleAndConvertKernel<<<grid_1d, block_1d, 0, stream>>>(
-            gpu_buffers[buf_idx].d_float_data,
-            gpu_buffers[buf_idx].d_rgb_data,
-            g_image_width, g_image_height, g_image_bands,
-            g_global_bounds[0].min_val, g_global_bounds[0].max_val,
-            g_global_bounds[1].min_val, g_global_bounds[1].max_val,
-            g_global_bounds[2].min_val, g_global_bounds[2].max_val
-        );
-
+                                                                gpu_buffers[buf_idx].d_float_data,
+                                                                gpu_buffers[buf_idx].d_rgb_data,
+                                                                g_image_width, g_image_height, g_image_bands,
+                                                                g_global_bounds[0].min_val, g_global_bounds[0].max_val,
+                                                                g_global_bounds[1].min_val, g_global_bounds[1].max_val,
+                                                                g_global_bounds[2].min_val, g_global_bounds[2].max_val
+                                                                );
+        
         // Resize to output resolution
         resizeKernel<<<grid_2d_output, block_2d, 0, stream>>>(
-            gpu_buffers[buf_idx].d_rgb_data, d_resized2,
-            g_image_width, g_image_height,
-            OUTPUT_WIDTH, OUTPUT_HEIGHT
-        );
-
+                                                              gpu_buffers[buf_idx].d_rgb_data, d_resized2,
+                                                              g_image_width, g_image_height,
+                                                              OUTPUT_WIDTH, OUTPUT_HEIGHT
+                                                              );
+        
         CUDA_CHECK(cudaStreamSynchronize(stream));
-
+        
         gpu_buffers[buf_idx].image_index = img_data.index;
         gpu_buffers[buf_idx].ready = true;
         image_to_buffer[img_data.index] = buf_idx;
-
+        
         // Generate transition frames if we have a previous image
         if (prev_buffer_idx >= 0) {
             printf("  Generating %d transition frames...\n", FRAMES_PER_TRANSITION);
-
+            
             // Get current filename for overlay
             const char* current_filename = g_image_files[img_data.index].filename.c_str();
-
+            
             for (int f = 0; f < FRAMES_PER_TRANSITION; f++) {
                 float progress = (float)(f + 1) / FRAMES_PER_TRANSITION;
-
+                
                 // Wipe transition
                 wipeTransitionKernel<<<grid_2d_output, block_2d, 0, stream>>>(
-                    d_resized1, d_resized2, d_output,
-                    OUTPUT_WIDTH, OUTPUT_HEIGHT, progress
-                );
-
+                                                                              d_resized1, d_resized2, d_output,
+                                                                              OUTPUT_WIDTH, OUTPUT_HEIGHT, progress
+                                                                              );
+                
                 // Render filename overlay on the output frame
                 renderFilenameOverlay(d_output, OUTPUT_WIDTH, OUTPUT_HEIGHT,
-                                     current_filename, stream);
-
+                                      current_filename, stream);
+                
                 // Download and encode
                 CUDA_CHECK(cudaMemcpyAsync(h_output, d_output, output_rgb_size,
                                            cudaMemcpyDeviceToHost, stream));
                 CUDA_CHECK(cudaStreamSynchronize(stream));
-
+                
                 encoder.writeFrame(h_output);
                 total_frames_written++;
             }
         } else {
             // First image - render with filename overlay
             const char* first_filename = g_image_files[img_data.index].filename.c_str();
-
+            
             // Copy to output buffer for overlay
             CUDA_CHECK(cudaMemcpy(d_output, d_resized2, output_rgb_size, cudaMemcpyDeviceToDevice));
             renderFilenameOverlay(d_output, OUTPUT_WIDTH, OUTPUT_HEIGHT,
-                                 first_filename, stream);
-
+                                  first_filename, stream);
+            
             CUDA_CHECK(cudaMemcpy(h_output, d_output, output_rgb_size, cudaMemcpyDeviceToHost));
             encoder.writeFrame(h_output);
             total_frames_written++;
         }
-
+        
         // Swap buffers: current becomes previous
         std::swap(d_resized1, d_resized2);
         prev_buffer_idx = buf_idx;
         current_buffer_idx++;
         images_processed++;
-
+        
         // Free host memory
         free(img_data.host_data);
-
+        
         printf("  Total frames written: %d (%.1f seconds)\n",
                total_frames_written, (float)total_frames_written / OUTPUT_FPS);
     }
+    
+    processing_done:
 
+    
     // ========================================================================
     // Phase 7: Cleanup
     // ========================================================================
     printf("\n=== Phase 6: Finalizing ===\n");
-
+    
     // Wait for loader threads
     for (int i = 0; i < NUM_LOADER_THREADS; i++) {
         pthread_join(loader_threads[i], NULL);
     }
     g_loading_complete.store(true);
     g_consumer_cv.notify_all();
-
-
+    
+    
     // Finalize video
     encoder.finish();
-
+    
     // Free GPU memory
     for (int i = 0; i < GPU_PREFETCH_BUFFER; i++) {
         CUDA_CHECK(cudaFree(gpu_buffers[i].d_float_data));
@@ -1565,13 +1567,13 @@ processing_done:
     CUDA_CHECK(cudaFree(d_output));
     CUDA_CHECK(cudaStreamDestroy(stream));
     free(h_output);
-
+    
     printf("\n=== Complete ===\n");
     printf("Output: %s\n", output_file);
     printf("Total frames: %d\n", total_frames_written);
     printf("Duration: %.2f seconds\n", (float)total_frames_written / OUTPUT_FPS);
     printf("Images processed: %zu\n", g_image_files.size());
-
+    
     return 0;
 }
 
