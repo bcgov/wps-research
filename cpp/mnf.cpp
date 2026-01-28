@@ -23,7 +23,7 @@
  *   # On RHEL/Fedora:   sudo dnf install eigen3-devel
  *   # On macOS:         brew install eigen
  */
-#include <numeric>   // for std::iota
+
 #include <iostream>
 #include <iomanip>
 #include <fstream>
@@ -531,6 +531,85 @@ MatrixXd compute_covariance(const float* data, int bands, size_t pixels) {
 }
 
 /**
+ * Compute noise covariance using directional max approach
+ * 
+ * Estimates noise separately from horizontal and vertical differences,
+ * then takes the element-wise maximum. This ensures that:
+ * - Horizontal stripes are captured by vertical differences
+ * - Vertical stripes are captured by horizontal differences
+ * 
+ * This is more robust to detector striping common in pushbroom sensors.
+ */
+MatrixXd compute_noise_covariance_directional_max(const float* data, 
+                                                   int bands, int width, int height) {
+    size_t pixels = (size_t)width * height;
+    
+    MatrixXd cov_h = MatrixXd::Zero(bands, bands);
+    MatrixXd cov_v = MatrixXd::Zero(bands, bands);
+    
+    int num_threads = omp_get_max_threads();
+    vector<MatrixXd> local_covs_h(num_threads, MatrixXd::Zero(bands, bands));
+    vector<MatrixXd> local_covs_v(num_threads, MatrixXd::Zero(bands, bands));
+    
+    // Horizontal differences (captures vertical stripes)
+    #pragma omp parallel
+    {
+        int tid = omp_get_thread_num();
+        MatrixXd& local_cov = local_covs_h[tid];
+        VectorXd noise_vec(bands);
+        
+        #pragma omp for nowait schedule(static, 256)
+        for (int row = 0; row < height; row++) {
+            for (int col = 0; col < width - 1; col++) {
+                size_t p1 = row * width + col;
+                size_t p2 = p1 + 1;
+                
+                for (int b = 0; b < bands; b++) {
+                    noise_vec(b) = (data[b * pixels + p2] - data[b * pixels + p1]) * 0.5;
+                }
+                local_cov.noalias() += noise_vec * noise_vec.transpose();
+            }
+        }
+    }
+    
+    // Vertical differences (captures horizontal stripes)
+    #pragma omp parallel
+    {
+        int tid = omp_get_thread_num();
+        MatrixXd& local_cov = local_covs_v[tid];
+        VectorXd noise_vec(bands);
+        
+        #pragma omp for nowait schedule(static, 256)
+        for (int row = 0; row < height - 1; row++) {
+            for (int col = 0; col < width; col++) {
+                size_t p1 = row * width + col;
+                size_t p2 = p1 + width;
+                
+                for (int b = 0; b < bands; b++) {
+                    noise_vec(b) = (data[b * pixels + p2] - data[b * pixels + p1]) * 0.5;
+                }
+                local_cov.noalias() += noise_vec * noise_vec.transpose();
+            }
+        }
+    }
+    
+    // Combine thread-local results
+    for (int t = 0; t < num_threads; t++) {
+        cov_h += local_covs_h[t];
+        cov_v += local_covs_v[t];
+    }
+    
+    cov_h /= (double)((width - 1) * height);
+    cov_v /= (double)(width * (height - 1));
+    
+    // Take element-wise maximum - this ensures stripes in either direction
+    // contribute to the noise estimate
+    MatrixXd cov = cov_h.cwiseMax(cov_v);
+    
+    return cov;
+}
+
+/**
  * Compute noise covariance using median-based local residual method
  * 
  * For each pixel, noise is estimated as the difference between the pixel value
@@ -544,15 +623,25 @@ MatrixXd compute_covariance(const float* data, int bands, size_t pixels) {
  *
  * Σ_noise = (1/n) * Σ residual_i * residual_i^T
  */
-/**
- * ENVI-style noise covariance using along-track (row) first differences
- *
- * noise(i,j) = x(i,j) - x(i,j-1)
- */
-MatrixXd compute_noise_covariance_envi(const float* data,
-                                       int bands, int width, int height)
-{
+MatrixXd compute_noise_covariance_median(const float* data, int bands, int width, int height, int window_size) {
     size_t pixels = (size_t)width * height;
+    
+    // Ensure window size is odd
+    if (window_size % 2 == 0) window_size++;
+    int half_win = window_size / 2;
+    
+    // We skip border pixels to have full windows
+    int valid_width = width - 2 * half_win;
+    int valid_height = height - 2 * half_win;
+    
+    if (valid_width <= 0 || valid_height <= 0) {
+        cerr << "Error: Image too small for window size " << window_size << endl;
+        return MatrixXd::Identity(bands, bands);
+    }
+    
+    size_t valid_count = (size_t)valid_width * valid_height;
+    int win_pixels = window_size * window_size;
+
     MatrixXd cov = MatrixXd::Zero(bands, bands);
 
     int num_threads = omp_get_max_threads();
@@ -562,94 +651,130 @@ MatrixXd compute_noise_covariance_envi(const float* data,
     {
         int tid = omp_get_thread_num();
         MatrixXd& local_cov = local_covs[tid];
-        VectorXd noise_vec(bands);
+        VectorXd residual_vec(bands);
+        vector<float> window_vals(win_pixels);
 
-        #pragma omp for schedule(static)
-        for (int row = 1; row < height; row++) {
-            for (int col = 0; col < width; col++) {
-                size_t idx  = row * width + col;
-                size_t idxp = (row - 1) * width + col;
-
+        #pragma omp for nowait schedule(static, 64)
+        for (int row = half_win; row < height - half_win; row++) {
+            for (int col = half_win; col < width - half_win; col++) {
+                size_t center = row * width + col;
+                
+                // Compute residual for each band
                 for (int b = 0; b < bands; b++) {
-                    noise_vec(b) =
-                        data[b * pixels + idx] -
-                        data[b * pixels + idxp];
+                    size_t band_offset = b * pixels;
+                    
+                    // Get center pixel value
+                    float center_val = data[band_offset + center];
+                    
+                    // Gather window values
+                    int idx = 0;
+                    for (int wy = -half_win; wy <= half_win; wy++) {
+                        for (int wx = -half_win; wx <= half_win; wx++) {
+                            window_vals[idx++] = data[band_offset + (row + wy) * width + (col + wx)];
+                        }
+                    }
+                    
+                    // Find median using nth_element (partial sort)
+                    size_t mid = win_pixels / 2;
+                    nth_element(window_vals.begin(), window_vals.begin() + mid, window_vals.end());
+                    float median_val = window_vals[mid];
+                    
+                    // Residual is difference from local median
+                    residual_vec(b) = (center_val - median_val);
                 }
-
-                local_cov.noalias() += noise_vec * noise_vec.transpose();
+                
+                local_cov.noalias() += residual_vec * residual_vec.transpose();
             }
         }
     }
 
-    for (auto& lc : local_covs)
-        cov += lc;
+    // Combine thread-local results
+    for (int t = 0; t < num_threads; t++) {
+        cov += local_covs[t];
+    }
 
-    cov /= double((height - 1) * width);
+    cov /= (double)valid_count;
     return cov;
 }
 
+/**
+ * Main noise covariance function - combines directional max with median
+ * to handle both striping and general noise robustly
+ */
+MatrixXd compute_noise_covariance(const float* data, int bands, int width, int height, int window_size) {
+    // Get directional estimate (handles striping)
+    MatrixXd cov_dir = compute_noise_covariance_directional_max(data, bands, width, height);
+    
+    // Get median-based estimate (handles edges/outliers)
+    MatrixXd cov_med = compute_noise_covariance_median(data, bands, width, height, window_size);
+    
+    // Take element-wise maximum of both approaches
+    // This ensures we capture noise from all sources
+    MatrixXd cov = cov_dir.cwiseMax(cov_med);
+    
+    return cov;
+}
 
 /**
  * Solve generalized eigenvalue problem: Σ_data * v = λ * Σ_noise * v
  * Returns eigenvalues and eigenvectors sorted by descending eigenvalue (SNR)
  */
-/**
- * ENVI-style MNF solve using explicit noise whitening
- *
- * Steps:
- * 1. Cholesky Σn = L Lᵀ
- * 2. Whiten data covariance: Cw = L⁻¹ Σd L⁻ᵀ
- * 3. PCA on Cw
- * 4. Unwhiten eigenvectors
- */
-bool solve_mnf_envi(const MatrixXd& cov_data,
-                    const MatrixXd& cov_noise,
-                    VectorXd& eigenvalues,
-                    MatrixXd& eigenvectors)
-{
+bool solve_generalized_eigen(const MatrixXd& cov_data, const MatrixXd& cov_noise,
+                             VectorXd& eigenvalues, MatrixXd& eigenvectors) {
     int n = cov_data.rows();
+
+    // Use Cholesky decomposition of noise covariance
+    // Σ_noise = L * L^T
+    // Transform to standard eigenvalue problem: L^-1 * Σ_data * L^-T * y = λ * y
+    // Then v = L^-T * y
 
     LLT<MatrixXd> llt(cov_noise);
     if (llt.info() != Success) {
-        MatrixXd reg = cov_noise + 1e-6 * MatrixXd::Identity(n, n);
-        llt.compute(reg);
+        // Fall back: add small regularization
+        MatrixXd cov_noise_reg = cov_noise + 1e-6 * MatrixXd::Identity(n, n);
+        llt.compute(cov_noise_reg);
         if (llt.info() != Success) {
-            cerr << "Noise covariance not positive definite\n";
+            cerr << "Error: Noise covariance matrix is not positive definite" << endl;
             return false;
         }
     }
 
     MatrixXd L = llt.matrixL();
-    MatrixXd Linv = L.inverse();
+    MatrixXd L_inv = L.inverse();
 
-    // Whitened covariance
-    MatrixXd Cw = Linv * cov_data * Linv.transpose();
+    // Form the transformed matrix: L^-1 * Σ_data * L^-T
+    MatrixXd A = L_inv * cov_data * L_inv.transpose();
 
-    SelfAdjointEigenSolver<MatrixXd> es(Cw);
-    if (es.info() != Success)
+    // Solve standard symmetric eigenvalue problem
+    SelfAdjointEigenSolver<MatrixXd> solver(A);
+    if (solver.info() != Success) {
+        cerr << "Error: Eigenvalue decomposition failed" << endl;
         return false;
+    }
 
-    // Sort descending
-    VectorXd evals = es.eigenvalues();
-    MatrixXd evecs = es.eigenvectors();
+    // Get eigenvalues and eigenvectors
+    VectorXd evals = solver.eigenvalues();
+    MatrixXd evecs = solver.eigenvectors();
 
-    vector<int> idx(n);
-    iota(idx.begin(), idx.end(), 0);
-    sort(idx.begin(), idx.end(),
-         [&](int a, int b){ return evals(a) > evals(b); });
+    // Transform eigenvectors back: v = L^-T * y
+    evecs = L_inv.transpose() * evecs;
+
+    // Sort by descending eigenvalue
+    vector<int> indices(n);
+    for (int i = 0; i < n; i++) indices[i] = i;
+    sort(indices.begin(), indices.end(), [&evals](int a, int b) {
+        return evals(a) > evals(b);
+    });
 
     eigenvalues.resize(n);
     eigenvectors.resize(n, n);
-
     for (int i = 0; i < n; i++) {
-        eigenvalues(i) = evals(idx[i]);
-        eigenvectors.col(i) = Linv.transpose() * evecs.col(idx[i]);
-        eigenvectors.col(i).normalize();   // CRITICAL
+        eigenvalues(i) = evals(indices[i]);
+        eigenvectors.col(i) = evecs.col(indices[i]);
     }
 
     return true;
 }
-
 
 /**
  * Project data onto MNF components
@@ -745,7 +870,7 @@ MNFResult mnf_transform(float* data, int bands, int width, int height,
     MatrixXd cov_noise;
     {
         Timer t("Computing noise covariance (median, " + to_string(noise_window) + "x" + to_string(noise_window) + ")", quiet);
-        cov_noise = compute_noise_covariance_envi(data, bands, width, height);
+        cov_noise = compute_noise_covariance(data, bands, width, height, noise_window);
     }
 
     // Step 4: Compute data covariance
@@ -758,11 +883,8 @@ MNFResult mnf_transform(float* data, int bands, int width, int height,
     // Step 5: Solve generalized eigenvalue problem
     {
         Timer t("Solving eigenvalue problem", quiet);
-
-        if (!solve_mnf_envi(cov_data, cov_noise,
-                            result.eigenvalues,
-                            result.eigenvectors))
-        {
+        if (!solve_generalized_eigen(cov_data, cov_noise,
+                                     result.eigenvalues, result.eigenvectors)) {
             return result;
         }
     }
