@@ -530,65 +530,69 @@ MatrixXd compute_covariance(const float* data, int bands, size_t pixels) {
 }
 
 /**
- * Compute noise covariance using both horizontal and vertical spatial differences
- * This reduces directional artifacts common in pushbroom sensors like Sentinel-2
+ * Compute noise covariance using local residual method
  * 
- * noise_h[b, p] = (data[b, p+1] - data[b, p]) * 0.5        (horizontal)
- * noise_v[b, p] = (data[b, p+width] - data[b, p]) * 0.5   (vertical)
- * 
- * Σ_noise = (1/n) * Σ (noise_h * noise_h^T + noise_v * noise_v^T) / 2
+ * For each pixel, noise is estimated as the difference between the pixel value
+ * and the mean of its local neighborhood (3x3 window). This is more robust to:
+ * - Detector striping
+ * - Band misregistration  
+ * - Edge effects
+ * - Anisotropic noise patterns
+ *
+ * Σ_noise = (1/n) * Σ residual_i * residual_i^T
  */
 MatrixXd compute_noise_covariance(const float* data, int bands, int width, int height) {
     size_t pixels = (size_t)width * height;
     
-    // Count of valid difference pairs
-    size_t horiz_count = (size_t)(width - 1) * height;
-    size_t vert_count = (size_t)width * (height - 1);
-    size_t total_count = horiz_count + vert_count;
+    // We skip 1-pixel border to have full 3x3 windows
+    int valid_width = width - 2;
+    int valid_height = height - 2;
+    size_t valid_count = (size_t)valid_width * valid_height;
 
     MatrixXd cov = MatrixXd::Zero(bands, bands);
 
     int num_threads = omp_get_max_threads();
     vector<MatrixXd> local_covs(num_threads, MatrixXd::Zero(bands, bands));
 
-    // Horizontal differences
     #pragma omp parallel
     {
         int tid = omp_get_thread_num();
         MatrixXd& local_cov = local_covs[tid];
-        VectorXd noise_vec(bands);
+        VectorXd residual_vec(bands);
 
         #pragma omp for nowait schedule(static, 256)
-        for (int row = 0; row < height; row++) {
-            for (int col = 0; col < width - 1; col++) {
-                size_t p1 = row * width + col;
-                size_t p2 = p1 + 1;
-
+        for (int row = 1; row < height - 1; row++) {
+            for (int col = 1; col < width - 1; col++) {
+                size_t center = row * width + col;
+                
+                // Compute residual for each band
                 for (int b = 0; b < bands; b++) {
-                    noise_vec(b) = (data[b * pixels + p2] - data[b * pixels + p1]) * 0.5;
+                    size_t band_offset = b * pixels;
+                    
+                    // Get center pixel value
+                    float center_val = data[band_offset + center];
+                    
+                    // Compute mean of 3x3 neighborhood (excluding center)
+                    float neighbor_sum = 
+                        data[band_offset + (row-1)*width + (col-1)] +
+                        data[band_offset + (row-1)*width + (col  )] +
+                        data[band_offset + (row-1)*width + (col+1)] +
+                        data[band_offset + (row  )*width + (col-1)] +
+                        // center excluded
+                        data[band_offset + (row  )*width + (col+1)] +
+                        data[band_offset + (row+1)*width + (col-1)] +
+                        data[band_offset + (row+1)*width + (col  )] +
+                        data[band_offset + (row+1)*width + (col+1)];
+                    
+                    float neighbor_mean = neighbor_sum / 8.0f;
+                    
+                    // Residual is difference from local mean
+                    // Scale factor sqrt(8/9) accounts for the variance inflation
+                    // from using estimated mean rather than true mean
+                    residual_vec(b) = (center_val - neighbor_mean) * 0.942809f; // sqrt(8/9)
                 }
-                local_cov.noalias() += noise_vec * noise_vec.transpose();
-            }
-        }
-    }
-
-    // Vertical differences
-    #pragma omp parallel
-    {
-        int tid = omp_get_thread_num();
-        MatrixXd& local_cov = local_covs[tid];
-        VectorXd noise_vec(bands);
-
-        #pragma omp for nowait schedule(static, 256)
-        for (int row = 0; row < height - 1; row++) {
-            for (int col = 0; col < width; col++) {
-                size_t p1 = row * width + col;
-                size_t p2 = p1 + width;
-
-                for (int b = 0; b < bands; b++) {
-                    noise_vec(b) = (data[b * pixels + p2] - data[b * pixels + p1]) * 0.5;
-                }
-                local_cov.noalias() += noise_vec * noise_vec.transpose();
+                
+                local_cov.noalias() += residual_vec * residual_vec.transpose();
             }
         }
     }
@@ -598,7 +602,7 @@ MatrixXd compute_noise_covariance(const float* data, int bands, int width, int h
         cov += local_covs[t];
     }
 
-    cov /= (double)total_count;
+    cov /= (double)valid_count;
     return cov;
 }
 
