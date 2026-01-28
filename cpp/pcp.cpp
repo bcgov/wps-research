@@ -146,6 +146,63 @@ void collect_files_recursive(const str& src_dir, const str& dst_dir,
     closedir(dir);
 }
 
+// Process a single source path (file or directory)
+void process_source(const str& src_path_orig, const str& destination, bool recursive, bool dest_is_dir) {
+    str src_path = src_path_orig;
+    
+    // Remove trailing slash if present
+    if(src_path.size() > 0 && src_path[src_path.size()-1] == '/') {
+        src_path = src_path.substr(0, src_path.size()-1);
+    }
+    
+    struct stat st;
+    if(stat(src_path.c_str(), &st) != 0) {
+        cerr << "Cannot stat: " << src_path << endl;
+        return;
+    }
+    
+    if(S_ISDIR(st.st_mode)) {
+        if(!recursive) {
+            cerr << "Skipping directory (use -r): " << src_path << endl;
+            return;
+        }
+        
+        // Determine destination directory name
+        str dst_dir;
+        if(dest_is_dir) {
+            // Extract basename of source directory
+            char* src_copy = strdup(src_path.c_str());
+            str base = basename(src_copy);
+            free(src_copy);
+            dst_dir = destination + "/" + base;
+        } else {
+            dst_dir = destination;
+        }
+        
+        // Create destination directory
+        mkdir(dst_dir.c_str(), 0755);
+        
+        // Collect all files recursively
+        collect_files_recursive(src_path, dst_dir, g_source_files, g_dest_files);
+        
+    } else if(S_ISREG(st.st_mode)) {
+        // Regular file
+        str dst_path;
+        if(dest_is_dir) {
+            // Extract basename
+            char* src_copy = strdup(src_path.c_str());
+            str base = basename(src_copy);
+            free(src_copy);
+            dst_path = destination + "/" + base;
+        } else {
+            dst_path = destination;
+        }
+        
+        g_source_files.push_back(src_path);
+        g_dest_files.push_back(dst_path);
+    }
+}
+
 int main(int argc, char *argv[]) {
     bool recursive = false;
     int arg_offset = 1;
@@ -156,13 +213,14 @@ int main(int argc, char *argv[]) {
         arg_offset = 2;
     }
     
+    // Need at least one source and one destination
     if(argc < arg_offset + 2) {
-        err("Usage: pcp [-r] <source> <destination>\n"
+        err("Usage: pcp [-r] <source...> <destination>\n"
             "  -r    recursive copy (like cp -r)");
     }
     
-    str source_pattern(argv[arg_offset]);
-    str destination(argv[arg_offset + 1]);
+    // Last argument is destination, all others are sources
+    str destination(argv[argc - 1]);
     
     // Check if destination exists and is a directory
     struct stat dst_stat;
@@ -171,78 +229,45 @@ int main(int argc, char *argv[]) {
         dest_is_dir = S_ISDIR(dst_stat.st_mode);
     }
     
-    // Expand source pattern with glob
-    glob_t glob_result;
-    memset(&glob_result, 0, sizeof(glob_result));
-    
-    int ret = glob(source_pattern.c_str(), GLOB_TILDE | GLOB_MARK, NULL, &glob_result);
-    
-    if(ret == GLOB_NOMATCH) {
-        cerr << "No matches found for: " << source_pattern << endl;
-        return 1;
-    } else if(ret != 0) {
-        cerr << "Error processing pattern: " << source_pattern << endl;
-        return 1;
+    // If multiple sources, destination must be a directory
+    int num_sources = argc - 1 - arg_offset;
+    if(num_sources > 1 && !dest_is_dir) {
+        err("When copying multiple sources, destination must be a directory");
     }
     
-    // Process matched files
-    for(size_t i = 0; i < glob_result.gl_pathc; i++) {
-        str src_path(glob_result.gl_pathv[i]);
+    // Process each source argument
+    for(int i = arg_offset; i < argc - 1; i++) {
+        str source_pattern(argv[i]);
         
-        // Remove trailing slash if present
-        if(src_path.size() > 0 && src_path[src_path.size()-1] == '/') {
-            src_path = src_path.substr(0, src_path.size()-1);
-        }
+        // Check if pattern contains glob characters
+        bool has_glob = (source_pattern.find('*') != str::npos ||
+                         source_pattern.find('?') != str::npos ||
+                         source_pattern.find('[') != str::npos);
         
-        struct stat st;
-        if(stat(src_path.c_str(), &st) != 0) {
-            cerr << "Cannot stat: " << src_path << endl;
-            continue;
-        }
-        
-        if(S_ISDIR(st.st_mode)) {
-            if(!recursive) {
-                cerr << "Skipping directory (use -r): " << src_path << endl;
-                continue;
-            }
+        if(has_glob) {
+            // Expand source pattern with glob
+            glob_t glob_result;
+            memset(&glob_result, 0, sizeof(glob_result));
             
-            // Determine destination directory name
-            str dst_dir;
-            if(dest_is_dir) {
-                // Extract basename of source directory
-                char* src_copy = strdup(src_path.c_str());
-                str base = basename(src_copy);
-                free(src_copy);
-                dst_dir = destination + "/" + base;
+            int ret = glob(source_pattern.c_str(), GLOB_TILDE | GLOB_MARK, NULL, &glob_result);
+            
+            if(ret == GLOB_NOMATCH) {
+                cerr << "No matches found for: " << source_pattern << endl;
+            } else if(ret != 0) {
+                cerr << "Error processing pattern: " << source_pattern << endl;
             } else {
-                dst_dir = destination;
+                // Process matched files
+                for(size_t j = 0; j < glob_result.gl_pathc; j++) {
+                    process_source(str(glob_result.gl_pathv[j]), destination, recursive, dest_is_dir);
+                }
             }
             
-            // Create destination directory
-            mkdir(dst_dir.c_str(), 0755);
-            
-            // Collect all files recursively
-            collect_files_recursive(src_path, dst_dir, g_source_files, g_dest_files);
-            
-        } else if(S_ISREG(st.st_mode)) {
-            // Regular file
-            str dst_path;
-            if(dest_is_dir) {
-                // Extract basename
-                char* src_copy = strdup(src_path.c_str());
-                str base = basename(src_copy);
-                free(src_copy);
-                dst_path = destination + "/" + base;
-            } else {
-                dst_path = destination;
-            }
-            
-            g_source_files.push_back(src_path);
-            g_dest_files.push_back(dst_path);
+            globfree(&glob_result);
+        } else {
+            // No glob characters - treat as literal path (shell already expanded)
+            process_source(source_pattern, destination, recursive, dest_is_dir);
         }
     }
-    
-    globfree(&glob_result);
     
     if(g_source_files.size() == 0) {
         cout << "No files to copy." << endl;
@@ -277,5 +302,4 @@ int main(int argc, char *argv[]) {
     
     return (g_failed_count > 0) ? 1 : 0;
 }
-
-
+/
