@@ -1,6 +1,6 @@
 /** 20260128 
- 
-g++ -O3 sentinel2_mrap_QA.cpp -o sentinel2_mrap_QA $(gdal-config --cflags --libs)
+
+  g++ -O3 sentinel2_mrap_QA.cpp $(gdal-config --cflags) -o sentinel2_mrap_QA $(gdal-config --libs)
 
  * MRAP Quality Control Program
  *
