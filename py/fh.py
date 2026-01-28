@@ -12,6 +12,7 @@ Finds all .hdr files in the present directory that have corresponding .bin files
 import os
 import re
 import shutil
+from misc import hdr_fn
 from pathlib import Path
 
 
@@ -256,8 +257,14 @@ def process_hdr_file(hdr_path, bin_path):
 
 def main():
     """Main function to process all .hdr files in current directory."""
-    cwd = Path('.')
-    hdr_files = list(cwd.glob('*.hdr'))
+    
+    hdr_files = None
+    args = sys.argv
+    if os.path.exists(args[1]) and args[1].endswith('.hdr'):
+        hdr_files = [args[1]]
+    else:
+        cwd = Path('.')
+        hdr_files = list(cwd.glob('*.hdr'))
     
     if not hdr_files:
         print("No .hdr files found in current directory.")
