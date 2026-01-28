@@ -1,5 +1,5 @@
 /*
-nvcc -arch=sm_89 -O3 --use_fast_math -Xcompiler -O3 -std=c++17 -o dmat_cuda.exe dmat_cuda.cu -lcudart
+nvcc -arch=sm_89 -O3 --use_fast_math -Xcompiler -O3 -std=c++17 -o kgc2020 kgc2020.cu -lcudart
 CUDA translation of dmat clustering program
 Optimized for NVIDIA L40s (Ada Lovelace architecture)
 Original: kgc2020. 20201101
