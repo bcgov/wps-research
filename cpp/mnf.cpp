@@ -1097,24 +1097,76 @@ MatrixXd compute_noise_covariance_median(const float* data, int bands, int width
 }
 
 /**
- * Main noise covariance function - combines multiple approaches:
- * 1. Directional max (random noise)
- * 2. Median-based (robust to outliers)  
- * 3. Stripe covariance (systematic row-to-row variations)
+ * Main noise covariance function
+ * 
+ * Uses average of horizontal and vertical differences (standard approach).
+ * The --simple flag uses horizontal only, this uses both directions averaged.
  */
 MatrixXd compute_noise_covariance(const float* data, int bands, int width, int height, int window_size) {
-    // Get directional estimate (handles random noise)
-    MatrixXd cov_dir = compute_noise_covariance_directional_max(data, bands, width, height);
+    (void)window_size;  // Not used in this version
     
-    // Get median-based estimate (handles edges/outliers)
-    MatrixXd cov_med = compute_noise_covariance_median(data, bands, width, height, window_size);
+    size_t pixels = (size_t)width * height;
     
-    // Get stripe noise estimate (handles systematic row variations)
-    MatrixXd cov_stripe = compute_stripe_noise_covariance(data, bands, width, height);
+    MatrixXd cov_h = MatrixXd::Zero(bands, bands);
+    MatrixXd cov_v = MatrixXd::Zero(bands, bands);
     
-    // Combine: take element-wise maximum of directional and median,
-    // then ADD the stripe covariance (it's a separate noise source)
-    MatrixXd cov = cov_dir.cwiseMax(cov_med) + cov_stripe;
+    int num_threads = omp_get_max_threads();
+    vector<MatrixXd> local_covs_h(num_threads, MatrixXd::Zero(bands, bands));
+    vector<MatrixXd> local_covs_v(num_threads, MatrixXd::Zero(bands, bands));
+    
+    // Horizontal differences
+    #pragma omp parallel
+    {
+        int tid = omp_get_thread_num();
+        MatrixXd& local_cov = local_covs_h[tid];
+        VectorXd noise_vec(bands);
+        
+        #pragma omp for nowait schedule(static, 256)
+        for (int row = 0; row < height; row++) {
+            for (int col = 0; col < width - 1; col++) {
+                size_t p1 = row * width + col;
+                size_t p2 = p1 + 1;
+                
+                for (int b = 0; b < bands; b++) {
+                    noise_vec(b) = (data[b * pixels + p2] - data[b * pixels + p1]) * 0.5;
+                }
+                local_cov.noalias() += noise_vec * noise_vec.transpose();
+            }
+        }
+    }
+    
+    // Vertical differences
+    #pragma omp parallel
+    {
+        int tid = omp_get_thread_num();
+        MatrixXd& local_cov = local_covs_v[tid];
+        VectorXd noise_vec(bands);
+        
+        #pragma omp for nowait schedule(static, 256)
+        for (int row = 0; row < height - 1; row++) {
+            for (int col = 0; col < width; col++) {
+                size_t p1 = row * width + col;
+                size_t p2 = p1 + width;
+                
+                for (int b = 0; b < bands; b++) {
+                    noise_vec(b) = (data[b * pixels + p2] - data[b * pixels + p1]) * 0.5;
+                }
+                local_cov.noalias() += noise_vec * noise_vec.transpose();
+            }
+        }
+    }
+    
+    // Combine thread-local results
+    for (int t = 0; t < num_threads; t++) {
+        cov_h += local_covs_h[t];
+        cov_v += local_covs_v[t];
+    }
+    
+    cov_h /= (double)((width - 1) * height);
+    cov_v /= (double)(width * (height - 1));
+    
+    // Average both directions (standard ENVI-like approach)
+    MatrixXd cov = (cov_h + cov_v) / 2.0;
     
     return cov;
 }
@@ -1570,4 +1622,6 @@ int main(int argc, char** argv) {
 
     return 0;
 }
+
+
 
