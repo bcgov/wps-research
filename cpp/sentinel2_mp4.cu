@@ -1,6 +1,6 @@
 /** 20260128 
 
-  nvcc -O3 -arch=sm_89 sentinel2_mp4.cu -o sentinel2_mp4 -lpthread -lavformat -lavcodec -lavutil -lswscale
+  nvcc -O3 -arch=sm_89 -Xcompiler -fopenmp -std=c++17 -o sentinel2_mp4 sentinel2_mp4.cu -lpthread -lavformat -lavcodec -lavutil -lswscale
 
  * CUDA-accelerated ENVI .bin to MP4 video generator with wipe transitions
  * Optimized for NVIDIA L40S GPU (48GB VRAM, sm_89)
