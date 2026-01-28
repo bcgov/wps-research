@@ -61,7 +61,7 @@ struct MNFConfig {
     int n_components = 0;      // 0 = all
     bool do_inverse = false;
     bool quiet = false;
-    int num_threads = 0;       // 0 = auto
+    int num_threads = 512;       // 0 = auto
     size_t block_rows = 1024;  // Process this many rows at a time for covariance
     int noise_window = 9;      // Window size for noise estimation (must be odd)
     bool destripe = false;     // Apply FFT-based destriping before MNF
