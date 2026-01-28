@@ -1412,6 +1412,12 @@ ImageData img_data;
 bool have_image = false;
 
 while (!have_image) {
+    if (g_loading_complete.load() &&
+        g_reorder_buffer.empty() &&
+        g_image_queue.empty()) {
+        goto processing_done;
+    }
+
     {
         std::unique_lock<std::mutex> lock(g_queue_mutex);
         g_consumer_cv.wait(lock, []{
