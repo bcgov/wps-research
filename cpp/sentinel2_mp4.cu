@@ -35,6 +35,7 @@
 #include <set>
 #include <cmath>
 #include <thread>
+#include <chrono>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -146,13 +147,6 @@ BandStats g_global_bounds[MAX_BANDS_USED];
 
 // File list
 std::vector<ImageFile> g_image_files;
-
-// Globals
-
-std::map<int, ImageData> g_reorder_buffer;
-std::atomic<int> g_next_process_index(0);
-
-
 
 // ============================================================================
 // ENVI Header Parser
@@ -1385,20 +1379,8 @@ int main(int argc, char** argv) {
     // ========================================================================
     printf("=== Phase 3: Allocating GPU resources ===\n");
     
-    // Allocate GPU buffers for ring buffer
-    std::vector<GPUBufferEntry> gpu_buffers(GPU_PREFETCH_BUFFER);
-    for (int i = 0; i < GPU_PREFETCH_BUFFER; i++) {
-        CUDA_CHECK(cudaMalloc(&gpu_buffers[i].d_float_data, float_image_size));
-        CUDA_CHECK(cudaMalloc(&gpu_buffers[i].d_rgb_data, rgb_image_size));
-        gpu_buffers[i].image_index = -1;
-        gpu_buffers[i].ready = false;
-        gpu_buffers[i].processed = false;
-    }
-    
-    // Allocate output buffers
-    uint8_t *d_resized1, *d_resized2, *d_output;
-    CUDA_CHECK(cudaMalloc(&d_resized1, output_rgb_size));
-    CUDA_CHECK(cudaMalloc(&d_resized2, output_rgb_size));
+    // Allocate output buffer for transitions
+    uint8_t *d_output;
     CUDA_CHECK(cudaMalloc(&d_output, output_rgb_size));
     
     uint8_t* h_output = (uint8_t*)malloc(output_rgb_size);
@@ -1430,7 +1412,7 @@ int main(int argc, char** argv) {
     }
     
     // ========================================================================
-    // Phase 6: Main processing loop
+    // Phase 6: Main processing loop (with reorder buffer for correct sequence)
     // ========================================================================
     
     // CUDA kernel configuration
@@ -1441,58 +1423,81 @@ int main(int argc, char** argv) {
     dim3 grid_2d_input((g_image_width + 15) / 16, (g_image_height + 15) / 16);
     dim3 grid_2d_output((OUTPUT_WIDTH + 15) / 16, (OUTPUT_HEIGHT + 15) / 16);
     
-    int current_buffer_idx = 0;
-    int prev_buffer_idx = -1;
-    int images_processed = 0;
     int total_frames_written = 0;
     
-    // Map to track which buffer holds which image
-    std::map<int, int> image_to_buffer;
+    // Reorder buffer: holds loaded images until they can be processed in order
+    std::map<int, ImageData> reorder_buffer;
+    std::mutex reorder_mutex;
+    int next_process_index = 0;  // Next image index we need to process
+    int images_received = 0;
     
-    while (images_processed < (int)g_image_files.size() ||
-       !g_reorder_buffer.empty()) {
-
-        // Get next image from queue
-        /* ImageData img_data;
-        {
-            std::unique_lock<std::mutex> lock(g_queue_mutex);
-            g_consumer_cv.wait(lock, []{ return !g_image_queue.empty(); });
-            img_data = g_image_queue.front();
-            g_image_queue.pop();
-            g_producer_cv.notify_one();
-        } */
-
-        ImageData img_data;
-bool have_image = false;
-
-while (!have_image) {
-    {
-        std::unique_lock<std::mutex> lock(g_queue_mutex);
-        g_consumer_cv.wait(lock, []{
-            return !g_image_queue.empty() || g_loading_complete.load();
-        });
-
-        while (!g_image_queue.empty()) {
-            ImageData tmp = g_image_queue.front();
-            g_image_queue.pop();
-            g_reorder_buffer[tmp.index] = tmp;
-            g_producer_cv.notify_one();
+    // Processed image buffers for transitions
+    uint8_t* d_prev_resized = nullptr;  // Previous frame (resized RGB)
+    uint8_t* d_curr_resized = nullptr;  // Current frame (resized RGB)
+    CUDA_CHECK(cudaMalloc(&d_prev_resized, output_rgb_size));
+    CUDA_CHECK(cudaMalloc(&d_curr_resized, output_rgb_size));
+    
+    bool have_previous = false;
+    
+    while (next_process_index < (int)g_image_files.size()) {
+        // Collect images from queue into reorder buffer
+        while (images_received < (int)g_image_files.size()) {
+            ImageData img_data;
+            bool got_image = false;
+            
+            {
+                std::unique_lock<std::mutex> lock(g_queue_mutex);
+                // Non-blocking check if we already have next needed image
+                if (reorder_buffer.count(next_process_index) > 0) {
+                    break;  // We have what we need, go process it
+                }
+                // Wait for any image
+                if (g_image_queue.empty()) {
+                    // Brief wait with timeout to check reorder buffer
+                    g_consumer_cv.wait_for(lock, std::chrono::milliseconds(10));
+                }
+                if (!g_image_queue.empty()) {
+                    img_data = g_image_queue.front();
+                    g_image_queue.pop();
+                    g_producer_cv.notify_one();
+                    got_image = true;
+                }
+            }
+            
+            if (got_image) {
+                images_received++;
+                // Store in reorder buffer
+                std::lock_guard<std::mutex> lock(reorder_mutex);
+                reorder_buffer[img_data.index] = img_data;
+                
+                // If we now have the next needed image, break to process
+                if (img_data.index == next_process_index) {
+                    break;
+                }
+            }
         }
-    }
-
-    auto it = g_reorder_buffer.find(g_next_process_index.load());
-    if (it != g_reorder_buffer.end()) {
-        img_data = it->second;
-        g_reorder_buffer.erase(it);
-        g_next_process_index++;
-        have_image = true;
-    }
-}
-
         
+        // Check if next image is ready in reorder buffer
+        ImageData img_data;
+        bool found = false;
+        {
+            std::lock_guard<std::mutex> lock(reorder_mutex);
+            auto it = reorder_buffer.find(next_process_index);
+            if (it != reorder_buffer.end()) {
+                img_data = it->second;
+                reorder_buffer.erase(it);
+                found = true;
+            }
+        }
+        
+        if (!found) {
+            continue;  // Keep waiting for more images
+        }
+        
+        // Process this image (now guaranteed to be in correct order)
         if (!img_data.valid || !img_data.host_data) {
             fprintf(stderr, "Skipping invalid image %d\n", img_data.index);
-            images_processed++;
+            next_process_index++;
             continue;
         }
         
@@ -1500,17 +1505,20 @@ while (!have_image) {
                img_data.index + 1, g_image_files.size(), 
                g_image_files[img_data.index].filename.c_str());
         
-        // Find a free buffer slot
-        int buf_idx = current_buffer_idx % GPU_PREFETCH_BUFFER;
-        
         // Upload float data to GPU
-        CUDA_CHECK(cudaMemcpyAsync(gpu_buffers[buf_idx].d_float_data, img_data.host_data,
+        float* d_float_temp;
+        CUDA_CHECK(cudaMalloc(&d_float_temp, float_image_size));
+        CUDA_CHECK(cudaMemcpyAsync(d_float_temp, img_data.host_data,
                                     float_image_size, cudaMemcpyHostToDevice, stream));
+        
+        // Allocate temp RGB buffer
+        uint8_t* d_rgb_temp;
+        CUDA_CHECK(cudaMalloc(&d_rgb_temp, rgb_image_size));
         
         // Scale and convert to RGB8
         scaleAndConvertKernel<<<grid_1d, block_1d, 0, stream>>>(
-            gpu_buffers[buf_idx].d_float_data,
-            gpu_buffers[buf_idx].d_rgb_data,
+            d_float_temp,
+            d_rgb_temp,
             g_image_width, g_image_height, g_image_bands,
             g_global_bounds[0].min_val, g_global_bounds[0].max_val,
             g_global_bounds[1].min_val, g_global_bounds[1].max_val,
@@ -1519,19 +1527,19 @@ while (!have_image) {
         
         // Resize to output resolution
         resizeKernel<<<grid_2d_output, block_2d, 0, stream>>>(
-            gpu_buffers[buf_idx].d_rgb_data, d_resized2,
+            d_rgb_temp, d_curr_resized,
             g_image_width, g_image_height,
             OUTPUT_WIDTH, OUTPUT_HEIGHT
         );
         
         CUDA_CHECK(cudaStreamSynchronize(stream));
         
-        gpu_buffers[buf_idx].image_index = img_data.index;
-        gpu_buffers[buf_idx].ready = true;
-        image_to_buffer[img_data.index] = buf_idx;
+        // Free temp buffers
+        CUDA_CHECK(cudaFree(d_float_temp));
+        CUDA_CHECK(cudaFree(d_rgb_temp));
         
         // Generate transition frames if we have a previous image
-        if (prev_buffer_idx >= 0) {
+        if (have_previous) {
             printf("  Generating %d transition frames...\n", FRAMES_PER_TRANSITION);
             
             // Get current filename for overlay
@@ -1542,7 +1550,7 @@ while (!have_image) {
                 
                 // Wipe transition
                 wipeTransitionKernel<<<grid_2d_output, block_2d, 0, stream>>>(
-                    d_resized1, d_resized2, d_output,
+                    d_prev_resized, d_curr_resized, d_output,
                     OUTPUT_WIDTH, OUTPUT_HEIGHT, progress
                 );
                 
@@ -1563,7 +1571,7 @@ while (!have_image) {
             const char* first_filename = g_image_files[img_data.index].filename.c_str();
             
             // Copy to output buffer for overlay
-            CUDA_CHECK(cudaMemcpy(d_output, d_resized2, output_rgb_size, cudaMemcpyDeviceToDevice));
+            CUDA_CHECK(cudaMemcpy(d_output, d_curr_resized, output_rgb_size, cudaMemcpyDeviceToDevice));
             renderFilenameOverlay(d_output, OUTPUT_WIDTH, OUTPUT_HEIGHT,
                                  first_filename, stream);
             
@@ -1573,10 +1581,9 @@ while (!have_image) {
         }
         
         // Swap buffers: current becomes previous
-        std::swap(d_resized1, d_resized2);
-        prev_buffer_idx = buf_idx;
-        current_buffer_idx++;
-        images_processed++;
+        std::swap(d_prev_resized, d_curr_resized);
+        have_previous = true;
+        next_process_index++;
         
         // Free host memory
         free(img_data.host_data);
@@ -1585,30 +1592,24 @@ while (!have_image) {
                total_frames_written, (float)total_frames_written / OUTPUT_FPS);
     }
     
+    // Cleanup reorder buffers
+    CUDA_CHECK(cudaFree(d_prev_resized));
+    CUDA_CHECK(cudaFree(d_curr_resized));
+    
     // ========================================================================
     // Phase 7: Cleanup
     // ========================================================================
-    printf("\n=== Phase 6: Finalizing ===\n");
+    printf("\n=== Phase 7: Finalizing ===\n");
     
     // Wait for loader threads
     for (int i = 0; i < NUM_LOADER_THREADS; i++) {
         pthread_join(loader_threads[i], NULL);
     }
     
-    g_loading_complete.store(true);
-    g_consumer_cv.notify_all();
-
-
     // Finalize video
     encoder.finish();
     
     // Free GPU memory
-    for (int i = 0; i < GPU_PREFETCH_BUFFER; i++) {
-        CUDA_CHECK(cudaFree(gpu_buffers[i].d_float_data));
-        CUDA_CHECK(cudaFree(gpu_buffers[i].d_rgb_data));
-    }
-    CUDA_CHECK(cudaFree(d_resized1));
-    CUDA_CHECK(cudaFree(d_resized2));
     CUDA_CHECK(cudaFree(d_output));
     CUDA_CHECK(cudaStreamDestroy(stream));
     free(h_output);
@@ -1621,4 +1622,6 @@ while (!have_image) {
     
     return 0;
 }
+
+
 
