@@ -5,7 +5,7 @@ Mostly miscellaneous functions for sentinel-2 data processing
 '''
 
 import re
-
+import numpy as np
 from misc.date_time import date_str2obj
 
 
@@ -190,15 +190,117 @@ def band_name(
     
     except Exception:
         raise Out_Of_Bound_Band_Index(f"Band index = {band_index} doesn't exist.")
-
-
-    
-
-
-
     
 
 
 
 
-    
+def writeENVI(
+    output_filename: str,
+    data: np.ndarray,
+    *,
+    mode: str = "new",                 # "new" or "add"
+    ref_filename: str | None = None,
+    band_names: list[str] | None = None,
+    copy_geo: bool = True
+):
+    """
+    mode="new":
+        - creates a brand-new ENVI file
+        - ignores pixel values in ref_filename
+        - optionally copies georeferencing
+
+    mode="add":
+        - appends band(s) to ref_filename
+        - creates a NEW file (ENVI limitation)
+    """
+
+    from osgeo import gdal
+    import numpy as np
+
+    if data.ndim == 2:
+        data = data[..., None]
+
+    H, W, K = data.shape
+
+    if band_names is not None and len(band_names) != K:
+        raise ValueError("band_names length mismatch")
+
+    driver = gdal.GetDriverByName("ENVI")
+
+    # -------------------------------
+    # MODE: NEW FILE
+    # -------------------------------
+    if mode == "new":
+        if ref_filename is None:
+            raise ValueError("ref_filename required to define geometry")
+
+        ref = gdal.Open(ref_filename)
+        if ref is None:
+            raise RuntimeError("Failed to open reference file")
+
+        out = driver.Create(
+            output_filename,
+            W, H,
+            K,
+            ref.GetRasterBand(1).DataType
+        )
+
+        if copy_geo:
+            out.SetGeoTransform(ref.GetGeoTransform())
+            out.SetProjection(ref.GetProjection())
+
+        for i in range(K):
+            band = out.GetRasterBand(i + 1)
+            band.WriteArray(data[..., i])
+            if band_names:
+                band.SetDescription(band_names[i])
+
+        out.FlushCache()
+        out = ref = None
+        return
+
+    # -------------------------------
+    # MODE: ADD BANDS
+    # -------------------------------
+    if mode == "add":
+        if ref_filename is None:
+            raise ValueError("ref_filename required for add mode")
+
+        ref = gdal.Open(ref_filename)
+        if ref is None:
+            raise RuntimeError("Failed to open reference file")
+
+        H0, W0, B0 = ref.RasterYSize, ref.RasterXSize, ref.RasterCount
+
+        if (H, W) != (H0, W0):
+            raise ValueError("New band shape mismatch with reference")
+
+        out = driver.Create(
+            output_filename,
+            W0, H0,
+            B0 + K,
+            ref.GetRasterBand(1).DataType
+        )
+
+        out.SetGeoTransform(ref.GetGeoTransform())
+        out.SetProjection(ref.GetProjection())
+
+        # copy existing bands
+        for i in range(B0):
+            band = out.GetRasterBand(i + 1)
+            band.WriteArray(ref.GetRasterBand(i + 1).ReadAsArray())
+            band.SetDescription(ref.GetRasterBand(i + 1).GetDescription())
+
+        # append new bands
+        for j in range(K):
+            band = out.GetRasterBand(B0 + j + 1)
+            band.WriteArray(data[..., j])
+            if band_names:
+                band.SetDescription(band_names[j])
+
+        out.FlushCache()
+        out = ref = None
+        return
+
+    raise ValueError("mode must be 'new' or 'add'")

@@ -65,8 +65,8 @@ def NBR(
 
 def dNBR(
         *,
-        NIR_1 = None, SWIR_1 = None,
-        NIR_2 = None, SWIR_2 = None,
+        NIR_pre = None, SWIR_pre = None,
+        NIR_post = None, SWIR_post = None,
         raster_pre: Raster = None,
         raster_post: Raster = None,
         eps = 1e-3
@@ -76,13 +76,13 @@ def dNBR(
 
     Parameters
     ----------
-    NIR_1: Near Infrared band of pre-fire
+    NIR_pre: Near Infrared band of pre-fire
 
-    SWIR_1: Short-Wave Infrared band of pre-fire
+    SWIR_pre: Short-Wave Infrared band of pre-fire
 
-    NIR_2: Near Infrared band of post-fire
+    NIR_post: Near Infrared band of post-fire
 
-    SWIR_2: Short-Wave Infrared band of post-fire
+    SWIR_post: Short-Wave Infrared band of post-fire
 
     raster_pre: raster object of pre date
 
@@ -93,9 +93,9 @@ def dNBR(
 
     Returns
     -------
-    nbr_1
+    nbr_pre
 
-    nbr_2
+    nbr_post
 
     dNBR
 
@@ -110,35 +110,35 @@ def dNBR(
 
     #If rasters are passed in instead of value, read from rasters.
     if raster_pre is not None:
-        NIR_1 = raster_pre.get_band(8)
-        SWIR_1 = raster_pre.get_band(12)
+        NIR_pre = raster_pre.get_band(8)
+        SWIR_pre = raster_pre.get_band(12)
     
     if raster_post is not None:
-        NIR_2 = raster_post.get_band(8)
-        SWIR_2 = raster_post.get_band(12)
+        NIR_post = raster_post.get_band(8)
+        SWIR_post = raster_post.get_band(12)
 
-    if any(x is None for x in (NIR_1, NIR_2, SWIR_1, SWIR_2)):
+    if any(x is None for x in (NIR_pre, NIR_post, SWIR_pre, SWIR_post)):
 
         raise Not_Enough_Information("Missed at least one of NIR, SWIR for pre and NIR, SWIR for post.")
 
 
-    nbr_1 = NBR(NIR_1, SWIR_1, eps=eps)
+    nbr_pre = NBR(NIR_pre, SWIR_pre, eps=eps)
 
-    nbr_2 = NBR(NIR_2, SWIR_2, eps=eps)
+    nbr_post = NBR(NIR_post, SWIR_post, eps=eps)
 
     try:
 
-        dnbr = nbr_1 - nbr_2
+        dnbr = nbr_pre - nbr_post
 
     except Exception:
 
         raise Shape_Mismatched_Error(f'NBRs of different shapes, cannot broadcast.')
     
-    return nbr_1, nbr_2, dnbr
+    return nbr_pre, nbr_post, dnbr
 
 
 
-def dnbr_256(
+def dnbr_post56(
         raw_dnbr,
         threshold = None
 ):
@@ -203,7 +203,7 @@ def plot_barc(
     from matplotlib.colors import ListedColormap
 
     # scale dNBR
-    scaled = dnbr_256(dNBR) #scalling dNBR
+    scaled = dnbr_post56(dNBR) #scalling dNBR
 
     class_plot = np.full(scaled.shape, np.nan)
 
@@ -267,9 +267,9 @@ if __name__ == '__main__':
     B12_pre = raster_pre_Instance.get_band(12)
     B12_post = raster_pst_Instance.get_band(12)
 
-    nbr_pre, nbr_post, dnbr = dNBR(NIR_1=B8_pre, SWIR_1=B12_pre,
+    nbr_pre, nbr_post, dnbr = dNBR(NIR_pre=B8_pre, SWIR_pre=B12_pre,
                                    
-                                   NIR_2=B8_post, SWIR_2=B12_post)
+                                   NIR_post=B8_post, SWIR_post=B12_post)
 
     #plot result
     plot_barc(
