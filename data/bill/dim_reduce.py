@@ -12,35 +12,55 @@ def tsne(
         band_list
 ):
     
-    from openTSNE import affinity, TSNEEmbedding
-    import numpy as np
+    # from cuml.manifold import TSNE
+    
+    # print(f'running: {band_list}: pid = {os.getpid()}.')
+
+    # X_s = StandardScaler().fit_transform(
+    #     X[..., [b-1 for b in band_list]]
+    # )
+
+    # tsne = TSNE(
+    #     n_components=2,
+    #     perplexity=30,
+    #     learning_rate=200,
+    #     n_iter=1000,
+    #     verbose=1
+    # )
+
+    # embedding = tsne.fit_transform(X_s)
+
+    # print(f'DONE: {band_list}: pid = {os.getpid()}.')
+
+    # return embedding
+
+
+    from cuml.manifold import TSNE
+    import cupy as cp
     
     print(f'running: {band_list}: pid = {os.getpid()}.')
 
-    X_s = StandardScaler().fit_transform(X)
-
-    aff = affinity.PerplexityBasedNN(
-        X_s,
-        perplexity = 60,
-        metric = "euclidean",
-        n_jobs = 4,
-        random_state = 123
+    X_s = StandardScaler().fit_transform(
+        X[..., [b-1 for b in band_list]]
     )
 
-    init = TSNEEmbedding(
-        np.random.normal(0, 1e-4, (X.shape[0], 2)),
-        aff
-    )
+    X_gpu = cp.asarray(X_s)
 
-    embedding = init.optimize(
+    tsne_gpu = TSNE(
+        n_components=2,
+        perplexity=30,
+        learning_rate=200,
         n_iter=1000,
-        exaggeration=10,
-        learning_rate=200
+        init="random",
+        verbose=1
     )
+
+    embedding = tsne_gpu.fit_transform(X_gpu)
+    cp.cuda.Stream.null.synchronize()
 
     print(f'DONE: {band_list}: pid = {os.getpid()}.')
 
-    return embedding
+    return cp.asnumpy( embedding )
 
 
 

@@ -84,8 +84,10 @@ def row_sampling(
 
     X = X.reshape(-1, X.shape[-1])
 
-    nrow, _ = X.shape #Contains rows with nan (if there is nan in the data)
-
+    #Contains rows with nan (if there is nan in the data)
+    nrow, _ = X.shape
+    
+    #nan mask is the list of original indices that contain NAN data.
     nan_mask = None
 
     if ( filter_nan ):
@@ -93,12 +95,13 @@ def row_sampling(
 
         nan_mask, _ = ignore_nan_2D(
             X = X, 
-            axis = 1 #row filter
+
+            #axis = 1 is row filter, axis = 0 is column filter.
+            axis = 1
         )
 
 
     #If filter_nan is applied, we want to sample non-nan rows to get up to the size we need.
-
     sampled_indices = indices_sampling(
         start = 0,
         end = nrow,
@@ -108,14 +111,56 @@ def row_sampling(
         seed  = seed
     )
 
-    #masking
     sampled_original_indices = sampled_indices if ( original_indices is None ) else original_indices[sampled_indices]
 
     X_sample = X[sampled_indices]
 
-
     return sampled_original_indices, X_sample
 
+
+
+def regular_sampling(
+        raster_dat = None,
+        *,
+        raster_filename: str = None,
+        sample_size: int,
+        replacement: bool = False,
+        seed: int = 42
+):
+    '''
+    Description
+    -----------
+    Sampling data.
+
+    Notes
+    -----
+    NO RATIO of any kind is considered.
+    '''
+    from raster import Raster
+
+    if raster_dat is None and raster_filename is None:
+
+        raise ValueError('You need at least raster data or its filename to process.')
+    
+    #Assume raster data is always passed in, but raster file_name is always of higher priority.
+    if raster_filename is not None:
+        
+        raster_dat = Raster(raster_filename).read_bands('all')
+
+
+    #All data have been ready. Now sample.
+
+    org_idx, samples  = row_sampling(
+                            X=raster_dat,  
+                            size=sample_size,
+                            filter_nan=True,
+                            replacement=replacement,
+                            seed=seed
+                        )
+    
+
+    return org_idx, samples
+    
 
 
 def in_out_sampling(
@@ -133,18 +178,25 @@ def in_out_sampling(
     Sampling data inside and outside of the polygon.
 
 
-    Parameters
-    ----------
-
-
     Returns
     -------
+    original_indices: sampled indices from the original data.
+    
+    samples: The samples indexed by 'original indices' from the original data.
+    
+    out_in_ratio: ratio between original data from outside and inside of the polygon.
+
+    
+    Notes
+    -----
+    The sampling will guarantee the ratio of in-out.
     '''
+
     from polygon import split_in_out
 
 
     #Extract inside and outside matrix (split)
-    inside, in_indices, outside, out_indices = split_in_out(
+    inside_dat, in_indices, outside_dat, out_indices = split_in_out(
         raster_dat=raster_dat,
         polygon_dat=polygon_dat,
         raster_filename = raster_filename,
@@ -152,7 +204,7 @@ def in_out_sampling(
     )
 
     #Ratio to maintain the true population proportion
-    out_in_ratio = len(outside) / len(inside)
+    out_in_ratio = len(inside_dat) / len(outside_dat)
 
 
     #Sample size (reserves true proportion)
@@ -160,13 +212,13 @@ def in_out_sampling(
 
 
     #Sample now
-    in_idx_samples,  inside_samples  = row_sampling(X=inside,  
+    org_in_idx, inside_samples  = row_sampling(X=inside_dat,  
                                                  size=in_sample_size, 
                                                  original_indices=in_indices,
                                                  filter_nan=True,
                                                  seed=seed)
     
-    out_idx_samples, outside_samples = row_sampling(X=outside, 
+    org_out_idx, outside_samples = row_sampling(X=outside_dat, 
                                                  size=out_sample_size, 
                                                  original_indices=out_indices,
                                                  filter_nan=True,
@@ -179,8 +231,8 @@ def in_out_sampling(
     ])
 
 
-    original_indices = np.concatenate([in_idx_samples, 
-                                       out_idx_samples])
+    original_indices = np.concatenate([org_in_idx, 
+                                       org_out_idx])
     
 
     return original_indices, samples, out_in_ratio

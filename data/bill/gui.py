@@ -1,5 +1,7 @@
 '''
 interactive_in_out.py (parallel dimensionality reduction)
+
+version2: utilizes HPC
 '''
 
 ########### LIBRARIES ##################
@@ -12,15 +14,12 @@ from misc.general import (
     draw_border
 )
 
-from sampling import in_out_sampling
-
-from dim_reduce import (
-    parDimRed
+from sampling import (
+    in_out_sampling,
+    regular_sampling
 )
 
 import numpy as np
-
-import os
 
 import sys
 
@@ -34,7 +33,7 @@ class GUI():
             *,
             polygon_filename: str,
             image_filename: str,
-            in_sample_size = 500,
+            sample_size = 10000,
             random_state = 123
     ):
         '''
@@ -52,13 +51,13 @@ class GUI():
         self.image_filename = image_filename
 
         #Other settings
-        self.in_sample_size = in_sample_size
+        self.sample_size = sample_size
         self.random_state = random_state
 
         #Init tasks
         self.load_image()
         self.load_polygon()
-        self.load_dictionary()
+        self.sample_data()# self.sample_in_out()
 
 
     def load_image(
@@ -70,7 +69,6 @@ class GUI():
         self.image = Raster(self.image_filename)
 
         self.image_dat = self.image.read_bands('all')
-
 
 
     def get_band_name(
@@ -116,7 +114,25 @@ class GUI():
     
 
 
-    def sampling_in_out(
+
+    def sample_data(
+            self
+    ):
+        '''
+        For visualization of embedding space, sampling is essential.
+
+        main_raster is the focused raster.
+        '''
+
+        self.original_indices, self.samples = regular_sampling(
+            raster_dat=self.image_dat,
+            sample_size=self.sample_size,
+            seed=self.random_state
+        )
+
+
+
+    def sample_in_out(
             self
     ):
         '''
@@ -136,109 +152,41 @@ class GUI():
     
 
 
-    def load_cache(
-            self
+    def get_band_embed(
+            self,
+            X = None
     ):
         '''
-        If data is already cached, load it.
+        Uses TSNE algorithm to downsize n dim to just 2D
+
+        Returns
+        -------
+        2D Embeddings
         '''
-        from joblib import load
 
-        embed_dict =  load(self.CACHE_EMBEDDING_PATH)
+        from dim_reduce import tsne
 
-        print("Status: Embeddings loaded.")
+        if X is None:
+            X = self.samples
 
-        return embed_dict
-
-    
-
-    def generate_embedding(
-            self
-    ):
-        '''
-        Only used if data not cached.
-        '''
-        from misc.general import get_combinations
-        from joblib import dump
-
-        sams = self.samples
-
-        band_combinations = get_combinations(
-            val_lst=list(range(1, sams.shape[-1] + 1)),
-            least=2
+        embed = tsne(
+            X, band_list=self.band_list
         )
 
-        #Prepare tasks
-        tasks = [
-            (
-                b, 
-                sams[..., [bb - 1 for bb in b]]
-            )
-            
-            for b in band_combinations
-        ]
-
-        embed_dict = parDimRed(tasks)
-
-        dump(embed_dict, self.CACHE_EMBEDDING_PATH)
-
-        print("Status: Embeddings generated and saved.")
-
-        return embed_dict
-            
-
-
-    def load_dictionary(
-            self
-    ):
-        '''
-        If user changes embedding method or type, load cache or create if not cached.
-
-        Only use when changing type and method.
-
-        Do not use if changing band list.
-        '''
-        
-        self.sampling_in_out()
-
-        self.CACHE_EMBEDDING_PATH = f'caching/timestamp={self.image.acquisition_timestamp}&size={self.in_sample_size}&state={self.random_state}.joblib'
-
-        if os.path.exists(self.CACHE_EMBEDDING_PATH):
-
-            self.band_dictionary = self.load_cache()
-
-        else:
-
-            self.band_dictionary = self.generate_embedding()
-
-
-
-    def get_band_embed(
-            self
-    ):
-        '''
-        This is used after a dictionary is loaded.
-
-        UPDATE: 
-
-        band_list = [1,2,4] is the same as [1,4,2]. Saved keys are in increasing order.
-        '''
-
-        sorted_band_list = sorted(self.band_list)
-
-        try:
-            self.current_embedding = self.band_dictionary[str(sorted_band_list)]
-
-            return np.array(self.current_embedding)
-        
-        except Exception:
-            
-            raise KeyError("This band combination is not in KEYs.")
-        
-
+        return embed
     
+
     def get_band_image(
             self
+    ):
+        
+        return self.image_dat[..., [b-1 for b in self.band_list]]
+    
+
+    
+    def get_shown_image(
+            self,
+            band_list = None
     ):
         '''
         Always use 'single' as key.
@@ -248,7 +196,7 @@ class GUI():
         Band list item of 0 will be assumed to be 0.
         '''
 
-        capped_band_list = self.band_list[:3]
+        capped_band_list = self.band_list[:3] if band_list is None else band_list[:3]
 
         img_title = '  '.join(self.get_band_name(self.band_list))
 
@@ -256,7 +204,7 @@ class GUI():
 
             img_title += f" | Shows first 3 bands only."
 
-        return img_title, self.image_dat[..., [b - 1 for b in capped_band_list]]
+        return img_title, htrim_3d( self.image_dat[..., [b - 1 for b in capped_band_list]] )
         
 
 
@@ -272,7 +220,7 @@ class GUI():
 
         embed = self.get_band_embed()
 
-        img_title, image = self.get_band_image()
+        img_title, image = self.get_shown_image()
 
         #######
 
@@ -281,65 +229,22 @@ class GUI():
         ax_tsne.axis("off")
         ax_img.axis("off")
 
-        sc_in = ax_tsne.scatter(
-            embed[:self.in_sample_size, 0], 
-            embed[:self.in_sample_size, 1],
+        sc = ax_tsne.scatter(
+            embed[:, 0], 
+            embed[:, 1],
             s = 5,
-            c='red',
-            label='Inside',
             picker=3  # ← this enables clicking
         )
 
-        sc_out = ax_tsne.scatter(
-            embed[self.in_sample_size:, 0], 
-            embed[self.in_sample_size:, 1],
-            s = 5,
-            c='blue',
-            label='Outside',
-            picker=3
-        )
-
-        ##Demo
-        mean_in = np.mean(embed[:self.in_sample_size], axis=0)
-        mean_out= np.mean(embed[self.in_sample_size:], axis=0)
-
-        sc_mean_in = ax_tsne.scatter(
-            mean_in[0], mean_in[1],
-            s=50,
-            c='red',
-            marker='X',
-            edgecolor='yellow',
-            linewidths=1.5,
-            label='Mean (Inside)',
-            zorder=5
-        )
-
-        sc_mean_out = ax_tsne.scatter(
-            mean_out[0], mean_out[1],
-            s=50,
-            c='blue',
-            marker='X',
-            edgecolor='green',
-            linewidths=1.5,
-            label='Mean (Outside)',
-            zorder=5
-        )
-        ###
-
-
-        ax_tsne.set_title(f"Method: TSNE | In/Out sample:{self.in_sample_size} / {self.out_sample_size} | Seed: {self.random_state}")
-
-        ax_tsne.legend()
+        ax_tsne.set_title(f"T-sne embedding | Sample Size: {self.sample_size} | Seed: {self.random_state}")
 
         #Right side of the plot, the main image (let parameter determine different band combination)
 
         img_plot = ax_img.imshow(
-
             draw_border(
-                htrim_3d( image ), #Because band convention starts at 1, but index is from 0
+                image, #Because band convention starts at 1, but index is from 0
                 self.border
             )
-
         )
         
         ax_img.set_title(img_title)
@@ -358,11 +263,7 @@ class GUI():
 
             k = event.ind[0]
 
-            if (event.artist is sc_in):
-                flat = self.original_indices[:self.in_sample_size][k]
-
-            elif (event.artist is sc_out):
-                flat = self.original_indices[self.in_sample_size:][k]
+            flat = self.original_indices[k]
 
             r = flat // W
             c = flat %  W
@@ -399,7 +300,7 @@ class GUI():
             try:
                 #Set TNSE
                 embed = self.get_band_embed()
-                title, image = self.get_band_image()
+                title, image = self.get_shown_image()
 
             except Exception:
 
@@ -407,7 +308,7 @@ class GUI():
 
             img_plot.set_data(
                 draw_border(
-                    htrim_3d(image),
+                    image,
                     self.border
                 )
             )
@@ -415,16 +316,7 @@ class GUI():
             ax_img.set_title(title)
 
             # ---- update scatter IN PLACE ----
-            sc_in.set_offsets(embed[:self.in_sample_size])
-            sc_out.set_offsets(embed[self.in_sample_size:])
-
-            # ---- update Means IN PLACE----
-            sc_mean_in.set_offsets(
-                np.mean(embed[:self.in_sample_size], axis=0)
-            )
-            sc_mean_out.set_offsets(
-                np.mean(embed[self.in_sample_size:], axis=0)
-            )
+            sc.set_offsets( embed )
 
             fig.canvas.draw_idle()
 
