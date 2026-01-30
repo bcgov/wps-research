@@ -1,0 +1,55 @@
+ACHIEVED:
+
+    TSNE to embed to 2D for visualization.
+    
+    HDBSCAN for clustering
+
+    dNBR is definitely important.
+
+
+NOT YET:
+
+    HDBSCAN cannot tell which cluster is burn.
+
+    HDBSCAN hyperparameter is not great if staying the same, needs to change.
+
+
+WHAT's NEXT?
+
+    FIND a method to select hyperparameter for HDBSCAN automatically.
+
+
+WHAT IS IN ACTION:
+
+    WE DONT KNOW ABOUT THE RATIO of burn-unburn. WE SAMPLE A NUMBER OF POINTS and CLUSTER.
+
+    ASSIGNING BURN-unburn -> Simple use dnbr (means of all in cluster) which higher -> burned!
+
+    BUT to have it accurate, we need an accurate mapping (no label) first.
+
+    1. Needs to know which band combination to use (features).
+
+
+BALANCING ISSUE;
+
+    No in/out balancing is needed. Since it just makes sense for when most pixels inside the polygon
+is filled. But before that, if using polygon as criteria of inside, most of them are not even burned yet.
+
+-> Decision: Remove it from GUI Visualization, colour can later be coded from 'true classification'
+
+UPDATE GUI:
+
+    From band list, select 3 bands for visualization (3 slot to enter number, default of 0)
+
+    On top of TSNE: Selection of turning colour on.
+
+
+GIT REVERT (once in a while): GO BACK TO 'up notebook' HASH and git pull to pull all updates.
+
+
+
+
+TODAY:
+
+    1. put red blue back
+    2. add 3rd plot
