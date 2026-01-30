@@ -24,6 +24,8 @@ import numpy as np
 
 import ast
 
+import time
+
 
 class GUI_Settings:
 
@@ -35,6 +37,13 @@ class GUI_Settings:
             'algorithm': "brute",
             'metric': "minkowski",
             'p': 2
+        }
+
+        self.rf_params = {
+            'n_estimators': 100,    
+            'max_depth': 12,
+            'max_features': "sqrt", 
+            'random_state': 42
         }
 
         self.hdbscan_params = {
@@ -171,7 +180,7 @@ class GUI(GUI_Settings):
         2D Embeddings
         '''
 
-        from dim_reduce import tsne
+        from machine_learning.dim_reduce import tsne
 
         self.current_embed = tsne(
             self.samples, band_list=self.embed_band_list
@@ -239,7 +248,7 @@ class GUI(GUI_Settings):
     CLASSIFICATION: THIS IS THE CORE of THE GUI.
     --------------
     '''
-    def load_image_embed(
+    def load_image_embed_KNN(
             self
     ):
         '''
@@ -253,7 +262,7 @@ class GUI(GUI_Settings):
         Embeddings of the who image derived from sampled embeddings.
         '''
 
-        from neighbours import knn_regressor
+        from machine_learning.neighbours import knn_regressor
 
         X = self.samples[..., [b-1 for b in self.embed_band_list]]
         y1 = self.current_embed[:, 0] #tsne1 from sample
@@ -265,6 +274,50 @@ class GUI(GUI_Settings):
 
         embed_2 = knn_regressor(
             X, y2, **self.knn_params
+        )
+
+        input_img = self.get_band_image(
+            as_2D = True, 
+            filter_nan_with = 0.0
+        )
+
+        #Inference time
+        img_embed_1 = embed_1.predict(input_img)
+        img_embed_2 = embed_2.predict(input_img)
+
+        #transformed image uses sampled embedding to transform the big picture
+        transformed_img = np.column_stack((img_embed_1, img_embed_2))
+
+        return transformed_img
+    
+
+
+    def load_image_embed_RF(
+            self
+    ):
+        '''
+        Description
+        -----------
+        Use embedding of samples to transform all image.
+
+
+        Returns
+        -------
+        Embeddings of the who image derived from sampled embeddings.
+        '''
+
+        from machine_learning.trees import rf_regressor
+
+        X = self.samples[..., [b-1 for b in self.embed_band_list]]
+        y1 = self.current_embed[:, 0] #tsne1 from sample
+        y2 = self.current_embed[:, 1] #tsne2 from sample
+
+        embed_1 = rf_regressor(
+            X, y1, **self.rf_params
+        )
+
+        embed_2 = rf_regressor(
+            X, y2, **self.rf_params
         )
 
         input_img = self.get_band_image(
@@ -292,12 +345,14 @@ class GUI(GUI_Settings):
         Uses current T-sne embedding to find the mapping.
         '''
         
-        from cluster import (
+        from machine_learning.cluster import (
             hdbscan_fit,
             hdbscan_approximate
         )
 
-        transformed_img = self.load_image_embed()
+        t0 = time.time()
+
+        transformed_img = self.load_image_embed_RF()
 
         cluster, _ = hdbscan_fit(
             self.current_embed, 
@@ -308,6 +363,8 @@ class GUI(GUI_Settings):
             transformed_img,
             cluster
         )
+
+        print(f'Mapping cost {time.time() - t0:.3f}s')
 
         return img_cluster
     
