@@ -51,7 +51,7 @@ class GUI(GUI_Settings):
             *,
             polygon_filename: str,
             image_filename: str,
-            sample_size = 10000,
+            sample_size = 10_000,
             random_state = 123
     ):
         '''
@@ -177,8 +177,10 @@ class GUI(GUI_Settings):
             self.samples, band_list=self.embed_band_list
         )
 
+        self.current_band_name = ' | '.join(self.get_band_name(self.embed_band_list))
+
         embed_title = f"T-sne embedding | Samp. Sz: {self.sample_size} | Seed: {self.random_state}\n\n"
-        embed_title += ' | '.join(self.get_band_name(self.embed_band_list))
+        embed_title += self.current_band_name
 
         return embed_title, self.current_embed
     
@@ -234,7 +236,8 @@ class GUI(GUI_Settings):
 
 
     '''
-    CLASSIFICATION
+    CLASSIFICATION: THIS IS THE CORE of THE GUI.
+    --------------
     '''
     def load_image_embed(
             self
@@ -307,7 +310,39 @@ class GUI(GUI_Settings):
         )
 
         return img_cluster
+    
+
+
+    def classify_cluster(
+            self,
+            cluster
+    ):
+        '''
+        Clusters from HDBSCAN don't have names.
+
+        We will use dNBR based to get name.
+
+        Higher dNBR -> Burn. 
+
+        Noise: -1 will be assign to Unburned.
+
+        CAUTION: ONLY APPLICABLE IF THERE ARE 2 CLUSTERS
+        '''
+
+        dnbr12 = self.image_dat[..., 12]
+
+        classification = np.full(dnbr12.shape, False)
         
+        if np.nanmean(dnbr12[cluster == 0]) > np.nanmean(dnbr12[cluster == 1]):
+            #Means cluster 0 is likely burned
+            classification[cluster == 0] = True
+
+        else:
+            #Means cluster 1 is likely burned
+            classification[cluster == 1] = True
+
+        return classification
+
 
 
     def main(self):
@@ -371,7 +406,7 @@ class GUI(GUI_Settings):
 
             k = event.ind[0]
 
-            flat = [k]
+            flat = self.sample_indices[k]
 
             r = flat // W
             c = flat %  W
@@ -400,7 +435,7 @@ class GUI(GUI_Settings):
         '''
         Text box: T-sne
         '''
-        ax_embed_box = fig.add_axes([0.22, 0.94, 0.1, 0.03])
+        ax_embed_box = fig.add_axes([0.15, 0.94, 0.1, 0.03])
         embed_textbox = TextBox(ax_embed_box, "TSNE Band list..e.g [1,2,3]: ")
 
         def on_submit_embed(txt):
@@ -448,17 +483,52 @@ class GUI(GUI_Settings):
         img_textbox.on_submit(on_submit_img)
 
 
+        '''
+        Text box: Mapping
+        '''
+        from matplotlib.widgets import Button
+
+        ax_mapping = fig.add_axes([0.3, 0.94, 0.1, 0.03])
+        mapping_btn = Button(ax_mapping, "Classify")
+
+        def on_submit_mapping(event):
+
+            print(f'RUNNING ... Mapping on band list: {self.embed_band_list}')
+
+            #Get clusters
+            img_cluster = self.map_burn()
+
+            img_cluster = img_cluster.reshape(self.image._ySize, self.image._xSize)
+
+            #Get true classification
+            classification = self.classify_cluster(img_cluster)
+
+            fig2 = plt.figure(figsize=(12, 12))
+
+            ax2 = fig2.add_subplot(111)
+    
+            ax2.imshow(
+                classification, cmap = 'gray'
+            )
+
+            ax2.set_title(f'Burn Mapping on {len(self.embed_band_list)} bands\n{self.current_band_name}')
+
+            ax2.axis("off")
+
+            print(f'DONE! Mapping on band list: {self.embed_band_list}')
+
+            plt.tight_layout()
+
+            fig2.show()
+
+        mapping_btn.on_clicked(on_submit_mapping)
+
 
         plt.show()
 
 
 
 if __name__ == '__main__':
-
-    ### SOME DEFAULT VALUE, CAN SET AS INPUT LATER #######
-
-    ############### handling argv #######################
-
 
     if len(sys.argv) < 3:
         print("Needs 1 raster file and 1 polygon file")
