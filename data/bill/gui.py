@@ -15,18 +15,36 @@ from misc.general import (
 )
 
 from sampling import (
-    in_out_sampling,
     regular_sampling
 )
 
-import numpy as np
-
 import sys
+
+import numpy as np
 
 import ast
 
 
-class GUI():
+class GUI_Settings:
+
+    def __init__(self):
+
+        self.knn_params = {
+            'n_neighbors': 1,
+            'weights': "uniform",
+            'algorithm': "brute",
+            'metric': "minkowski",
+            'p': 2
+        }
+
+        self.hdbscan_params = {
+            'min_cluster_size': 1000,
+            'min_samples': 10, # controls conservativeness
+            'metric': 'euclidean'
+        }
+
+
+class GUI(GUI_Settings):
 
     def __init__(
             self,
@@ -50,6 +68,10 @@ class GUI():
         self.polygon_filename = polygon_filename
         self.image_filename = image_filename
 
+        #First plots
+        self.embed_band_list = [1,2,4,5,6,8,9,10,12,13]
+        self.img_band_list = [9,10,13]
+
         #Other settings
         self.sample_size = sample_size
         self.random_state = random_state
@@ -57,7 +79,8 @@ class GUI():
         #Init tasks
         self.load_image()
         self.load_polygon()
-        self.sample_data()# self.sample_in_out()
+        self.sample_data()
+
 
 
     def load_image(
@@ -69,6 +92,7 @@ class GUI():
         self.image = Raster(self.image_filename)
 
         self.image_dat = self.image.read_bands('all')
+
 
 
     def get_band_name(
@@ -106,13 +130,14 @@ class GUI():
         #If it is a polygon, it has just 1 channel, so squeeze makes it a pretty 2D array.
         self.polygon = polygon
 
+        self.polygon_dat = polygon.read_bands('all').squeeze()
+
         #extract border
         self.border = extract_border(
-            mask=polygon.read_bands('all').squeeze(), 
-            thickness=border_thickness
+            mask = self.polygon_dat, 
+            thickness = border_thickness
         )
     
-
 
 
     def sample_data(
@@ -121,40 +146,22 @@ class GUI():
         '''
         For visualization of embedding space, sampling is essential.
 
-        main_raster is the focused raster.
+        Use the original indices to determine which pixel is inside the polygon.
         '''
 
-        self.original_indices, self.samples = regular_sampling(
+        self.sample_indices, self.samples = regular_sampling(
             raster_dat=self.image_dat,
             sample_size=self.sample_size,
             seed=self.random_state
         )
 
-
-
-    def sample_in_out(
-            self
-    ):
-        '''
-        For visualization of embedding space, sampling is essential.
-
-        main_raster is the focused raster.
-        '''
-
-        self.original_indices, self.samples, out_in_ratio = in_out_sampling(
-            raster_dat=self.image_dat,
-            polygon_dat=self.polygon.read_bands('all'),
-            in_sample_size = self.in_sample_size,
-            seed=self.random_state
-        )
-
-        self.out_sample_size = int( self.in_sample_size * out_in_ratio )
+        #Which indices will be inside
+        self.sample_in_polygon = ( self.polygon_dat.ravel() )[self.sample_indices].astype(np.bool_)
     
 
 
     def get_band_embed(
-            self,
-            X = None
+            self
     ):
         '''
         Uses TSNE algorithm to downsize n dim to just 2D
@@ -166,21 +173,39 @@ class GUI():
 
         from dim_reduce import tsne
 
-        if X is None:
-            X = self.samples
-
-        embed = tsne(
-            X, band_list=self.band_list
+        self.current_embed = tsne(
+            self.samples, band_list=self.embed_band_list
         )
 
-        return embed
+        embed_title = f"T-sne embedding | Samp. Sz: {self.sample_size} | Seed: {self.random_state}\n\n"
+        embed_title += ' | '.join(self.get_band_name(self.embed_band_list))
+
+        return embed_title, self.current_embed
     
 
+
     def get_band_image(
-            self
+            self,
+            *,
+            as_2D = False,
+            filter_nan_with = None
     ):
+        '''
+        Image data but in all selected bands
+        '''
         
-        return self.image_dat[..., [b-1 for b in self.band_list]]
+        IMAGE = self.image_dat[..., [b-1 for b in self.embed_band_list]]
+
+        if ( as_2D ):
+            #Make it type row, nband
+            n_bands = len( self.embed_band_list )
+            IMAGE = IMAGE.reshape(-1, n_bands)
+
+        if ( filter_nan_with is not None):
+            #Pad NAN as another number 
+            IMAGE = np.nan_to_num(IMAGE, nan=filter_nan_with)
+
+        return IMAGE
     
 
     
@@ -196,49 +221,132 @@ class GUI():
         Band list item of 0 will be assumed to be 0.
         '''
 
-        capped_band_list = self.band_list[:3] if band_list is None else band_list[:3]
+        capped_band_list = self.img_band_list[:3] if band_list is None else band_list[:3]
 
-        img_title = '  '.join(self.get_band_name(self.band_list))
+        img_title = ' | '.join(self.get_band_name(self.img_band_list))
 
-        if (len(self.band_list) > 3):
+        if (len(self.img_band_list) > 3):
 
-            img_title += f" | Shows first 3 bands only."
+            img_title += f" | Warning! Showing first 3 bands (rgb) only."
 
         return img_title, htrim_3d( self.image_dat[..., [b - 1 for b in capped_band_list]] )
-        
+    
 
 
-    def run(
+    '''
+    CLASSIFICATION
+    '''
+    def load_image_embed(
             self
     ):
         '''
-        Runs GUI
+        Description
+        -----------
+        Use embedding of samples to transform all image.
+
+
+        Returns
+        -------
+        Embeddings of the who image derived from sampled embeddings.
         '''
+
+        from neighbours import knn_regressor
+
+        X = self.samples[..., [b-1 for b in self.embed_band_list]]
+        y1 = self.current_embed[:, 0] #tsne1 from sample
+        y2 = self.current_embed[:, 1] #tsne2 from sample
+
+        embed_1 = knn_regressor(
+            X, y1, **self.knn_params
+        )
+
+        embed_2 = knn_regressor(
+            X, y2, **self.knn_params
+        )
+
+        input_img = self.get_band_image(
+            as_2D = True, 
+            filter_nan_with = 0.0
+        )
+
+        #Inference time
+        img_embed_1 = embed_1.predict(input_img)
+        img_embed_2 = embed_2.predict(input_img)
+
+        #transformed image uses sampled embedding to transform the big picture
+        transformed_img = np.column_stack((img_embed_1, img_embed_2))
+
+        return transformed_img
+
+
+
+    def map_burn(
+            self
+    ):
+        '''
+        Description
+        -----------
+        Uses current T-sne embedding to find the mapping.
+        '''
+        
+        from cluster import (
+            hdbscan_fit,
+            hdbscan_approximate
+        )
+
+        transformed_img = self.load_image_embed()
+
+        cluster, _ = hdbscan_fit(
+            self.current_embed, 
+            **self.hdbscan_params
+        )
+
+        img_cluster, _ = hdbscan_approximate(
+            transformed_img,
+            cluster
+        )
+
+        return img_cluster
+        
+
+
+    def main(self):
+        
+        import matplotlib
+        matplotlib.use("TkAgg")
         import matplotlib.pyplot as plt
+        import matplotlib.patches as mpatches
 
-        self.band_list = [1,2,3]
-
-        embed = self.get_band_embed()
+        embed_title, embed = self.get_band_embed()
 
         img_title, image = self.get_shown_image()
 
-        #######
+        ####### PLOT
 
         fig, (ax_tsne, ax_img) = plt.subplots(1, 2, figsize=(20, 12))
 
         ax_tsne.axis("off")
         ax_img.axis("off")
 
-        sc = ax_tsne.scatter(
+        tsne_colors = np.where(self.sample_in_polygon == 1, "red", "blue")
+
+        tsne_plot = ax_tsne.scatter(
             embed[:, 0], 
             embed[:, 1],
             s = 5,
-            picker=3  # ← this enables clicking
+            c = tsne_colors,
+            picker = 3 #enables clicking
         )
 
-        ax_tsne.set_title(f"T-sne embedding | Sample Size: {self.sample_size} | Seed: {self.random_state}")
+        ax_tsne.set_title( embed_title )
 
-        #Right side of the plot, the main image (let parameter determine different band combination)
+        ax_tsne.legend(
+            handles = [
+            mpatches.Patch(color="blue", label="Outside"),
+            mpatches.Patch(color="red",  label="Inside"),
+        ])
+
+
 
         img_plot = ax_img.imshow(
             draw_border(
@@ -263,7 +371,7 @@ class GUI():
 
             k = event.ind[0]
 
-            flat = self.original_indices[k]
+            flat = [k]
 
             r = flat // W
             c = flat %  W
@@ -289,22 +397,40 @@ class GUI():
         )
 
 
-        # add textbox
-        ax_box = fig.add_axes([0.35, 0.94, 0.1, 0.03])
-        textbox = TextBox(ax_box, "Band list..e.g [1,2,3]: ")
+        '''
+        Text box: T-sne
+        '''
+        ax_embed_box = fig.add_axes([0.22, 0.94, 0.1, 0.03])
+        embed_textbox = TextBox(ax_embed_box, "TSNE Band list..e.g [1,2,3]: ")
 
-        def on_submit(txt):
+        def on_submit_embed(txt):
 
-            self.band_list = ast.literal_eval(txt)
+            self.embed_band_list = ast.literal_eval(txt)
 
-            try:
-                #Set TNSE
-                embed = self.get_band_embed()
-                title, image = self.get_shown_image()
+            #Set embed
+            embed_title, embed = self.get_band_embed()
 
-            except Exception:
+            # ---- update scatter IN PLACE ----
+            tsne_plot.set_offsets( embed )
+            ax_tsne.set_title( embed_title )
 
-                raise KeyError("This band combination is not in cache.")
+            fig.canvas.draw_idle()
+
+        embed_textbox.on_submit(on_submit_embed)
+
+
+        '''
+        Text box: image
+        '''
+        ax_img_box = fig.add_axes([0.7, 0.94, 0.1, 0.03])
+        img_textbox = TextBox(ax_img_box, "Image Band list..e.g [1,2,3]: ")
+
+        def on_submit_img(txt):
+
+            #Shows first 3 only
+            self.img_band_list = ast.literal_eval(txt)
+
+            img_title, image = self.get_shown_image()
 
             img_plot.set_data(
                 draw_border(
@@ -313,14 +439,16 @@ class GUI():
                 )
             )
 
-            ax_img.set_title(title)
+            ax_img.set_title( img_title )
 
-            # ---- update scatter IN PLACE ----
-            sc.set_offsets( embed )
+            # ---- update image IN PLACE ----
 
             fig.canvas.draw_idle()
 
-        textbox.on_submit(on_submit)
+        img_textbox.on_submit(on_submit_img)
+
+
+
         plt.show()
 
 
@@ -344,6 +472,6 @@ if __name__ == '__main__':
         image_filename=image_filename
     )
 
-    agent.run()
+    agent.main()
 
     
