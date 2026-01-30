@@ -1,5 +1,5 @@
 **__pycache__/
 *C11659*
-*txt
 videos/
 caching/
+*.DS_Store*

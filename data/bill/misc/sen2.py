@@ -181,15 +181,15 @@ def band_name(
     Get the band name at the index.
     '''
 
-    from exceptions.sen2 import Out_Of_Bound_Band_Index
-
     try:
         that_band = band_info_list[band_index]
 
         return re.search(r"\bB\d{1,2}\b", that_band).group()
     
     except Exception:
-        raise Out_Of_Bound_Band_Index(f"Band index = {band_index} doesn't exist.")
+        
+        return that_band
+
     
 
 
@@ -301,6 +301,8 @@ def writeENVI(
 
         out.FlushCache()
         out = ref = None
+
+        print("Saved new data !")
         return
 
     raise ValueError("mode must be 'new' or 'add'")
