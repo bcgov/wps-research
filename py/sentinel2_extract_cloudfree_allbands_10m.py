@@ -36,9 +36,8 @@ def extract(file_name):
     w = file_name.split('_')  # split filename on '_'
     ds = w[2].split('T')[0]  # date string
     
-    # Output filename includes mode indicator
-    suffix = '_cloudfree_rgb_10m.bin' if RGB_ONLY else '_cloudfree_allbands_10m.bin'
-    stack_fn = '.'.join(file_name.split('.')[:-1]) + suffix
+    # Output filename
+    stack_fn = '.'.join(file_name.split('.')[:-1]) + '.bin'
     
     if exist(stack_fn):
         print("Exists:", stack_fn, "skipping..")
@@ -294,6 +293,3 @@ SCL Classification (L2A only):
 Masked values (set to NaN):
 0, 1, 2, 3, 8, 9, 10
 '''
-
-
-
