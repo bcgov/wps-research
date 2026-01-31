@@ -37,7 +37,7 @@ def extract(file_name):
     ds = w[2].split('T')[0]  # date string
     
     # Output filename
-    stack_fn = '.'.join(file_name.split('.')[:-1]) + '.bin'
+    stack_fn = '.'.join(file_name.split('.')[:-1]) + '_cloudfree.bin'
     
     if exist(stack_fn):
         print("Exists:", stack_fn, "skipping..")
