@@ -138,7 +138,7 @@ def dNBR(
 
 
 
-def dnbr_post56(
+def dnbr_post256(
         raw_dnbr,
         threshold = None
 ):
@@ -203,7 +203,7 @@ def plot_barc(
     from matplotlib.colors import ListedColormap
 
     # scale dNBR
-    scaled = dnbr_post56(dNBR) #scalling dNBR
+    scaled = dnbr_post256(dNBR) #scalling dNBR
 
     class_plot = np.full(scaled.shape, np.nan)
 
@@ -246,37 +246,55 @@ def plot_barc(
 if __name__ == '__main__':
 
     #handling argv
-    if len(sys.argv) < 3:
-        print("Needs 2 files")
-        sys.exit(1)
+    if len(sys.argv) == 2:
+        
+        import matplotlib.pyplot as plt
 
-    filename_pre = sys.argv[1]
-    filename_pst = sys.argv[2]
+        filename = sys.argv[1]
 
-    #load raster and read
-    raster_pre_Instance = Raster(file_name=filename_pre)
-    raster_pst_Instance = Raster(file_name=filename_pst)
+        raster_Instance = Raster(file_name=filename)
+        title = raster_Instance.acquisition_timestamp
 
-    #Plot title
-    title_pre, title_pst = raster_pre_Instance.acquisition_timestamp, raster_pst_Instance.acquisition_timestamp
+        nbr = NBR(raster=raster_Instance)
 
-    #Extract band 8 and 12
-    B8_pre  = raster_pre_Instance.get_band(8)
-    B8_post = raster_pst_Instance.get_band(8)
+        plt.figure(figsize=(10,10))
+        plt.imshow(nbr, cmap = 'gray')
+        plt.axis('off')
+        plt.title(title)
+        plt.tight_layout()
+        plt.show()
 
-    B12_pre = raster_pre_Instance.get_band(12)
-    B12_post = raster_pst_Instance.get_band(12)
 
-    nbr_pre, nbr_post, dnbr = dNBR(NIR_pre=B8_pre, SWIR_pre=B12_pre,
-                                   
-                                   NIR_post=B8_post, SWIR_post=B12_post)
 
-    #plot result
-    plot_barc(
-        dnbr,
-        start_date=title_pre,
-        end_date=title_pst,
-        figsize=(10, 10)
-    )
+    if len(sys.argv) == 3:
+
+        filename_pre = sys.argv[1]
+        filename_pst = sys.argv[2]
+
+        #load raster and read
+        raster_pre_Instance = Raster(file_name=filename_pre)
+        raster_pst_Instance = Raster(file_name=filename_pst)
+
+        #Plot title
+        title_pre, title_pst = raster_pre_Instance.acquisition_timestamp, raster_pst_Instance.acquisition_timestamp
+
+        #Extract band 8 and 12
+        B8_pre  = raster_pre_Instance.get_band(8)
+        B8_post = raster_pst_Instance.get_band(8)
+
+        B12_pre = raster_pre_Instance.get_band(12)
+        B12_post = raster_pst_Instance.get_band(12)
+
+        nbr_pre, nbr_post, dnbr = dNBR(NIR_pre=B8_pre, SWIR_pre=B12_pre,
+                                    
+                                    NIR_post=B8_post, SWIR_post=B12_post)
+
+        #plot result
+        plot_barc(
+            dnbr,
+            start_date=title_pre,
+            end_date=title_pst,
+            figsize=(10, 10)
+        )
 
     

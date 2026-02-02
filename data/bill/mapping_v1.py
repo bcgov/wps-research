@@ -1,7 +1,16 @@
 '''
-interactive_in_out.py (parallel dimensionality reduction)
+Description
+-----------
+mapping_v1.py
 
-version2: utilizes HPC
+    Burn-mapping using parallel computing.
+
+    Requires NVidia GPU(s) for rendering.
+
+
+Syntax
+------
+python3 mapping_v1.py [Raster filename.bin] [rasterized Polygon filename.bin]
 '''
 
 ########### LIBRARIES ##################
@@ -26,8 +35,15 @@ import ast
 
 import time
 
+########################################
+
+
 
 class GUI_Settings:
+
+    '''
+    This setting contains parameters for model fitting.
+    '''
 
     def __init__(self):
 
@@ -48,9 +64,10 @@ class GUI_Settings:
 
         self.hdbscan_params = {
             'min_cluster_size': 1000,
-            'min_samples': 10, # controls conservativeness
+            'min_samples': 20, # controls conservativeness
             'metric': 'euclidean'
         }
+
 
 
 class GUI(GUI_Settings):
@@ -66,9 +83,7 @@ class GUI(GUI_Settings):
         '''
         Initialized parameters
         ----------------------
-        in_sample_size: number of points to be sampled from inside the polygon.
-
-        *out_sample_size: will automatically calculate using true ratio of in-out.
+        sample_size: number of points to be sampled from inside the polygon.
         '''
 
         super().__init__()
@@ -248,49 +263,6 @@ class GUI(GUI_Settings):
     CLASSIFICATION: THIS IS THE CORE of THE GUI.
     --------------
     '''
-    def load_image_embed_KNN(
-            self
-    ):
-        '''
-        Description
-        -----------
-        Use embedding of samples to transform all image.
-
-
-        Returns
-        -------
-        Embeddings of the who image derived from sampled embeddings.
-        '''
-
-        from machine_learning.neighbours import knn_regressor
-
-        X = self.samples[..., [b-1 for b in self.embed_band_list]]
-        y1 = self.current_embed[:, 0] #tsne1 from sample
-        y2 = self.current_embed[:, 1] #tsne2 from sample
-
-        embed_1 = knn_regressor(
-            X, y1, **self.knn_params
-        )
-
-        embed_2 = knn_regressor(
-            X, y2, **self.knn_params
-        )
-
-        input_img = self.get_band_image(
-            as_2D = True, 
-            filter_nan_with = 0.0
-        )
-
-        #Inference time
-        img_embed_1 = embed_1.predict(input_img)
-        img_embed_2 = embed_2.predict(input_img)
-
-        #transformed image uses sampled embedding to transform the big picture
-        transformed_img = np.column_stack((img_embed_1, img_embed_2))
-
-        return transformed_img
-    
-
 
     def load_image_embed_RF(
             self
@@ -303,7 +275,7 @@ class GUI(GUI_Settings):
 
         Returns
         -------
-        Embeddings of the who image derived from sampled embeddings.
+        Embeddings of the whole image derived from sampled embeddings.
         '''
 
         from machine_learning.trees import rf_regressor
@@ -493,7 +465,7 @@ class GUI(GUI_Settings):
         Text box: T-sne
         '''
         ax_embed_box = fig.add_axes([0.15, 0.94, 0.1, 0.03])
-        embed_textbox = TextBox(ax_embed_box, "TSNE Band list..e.g [1,2,3]: ")
+        embed_textbox = TextBox(ax_embed_box, "TSNE Band list E.g 1,2,3 ")
 
         def on_submit_embed(txt):
 
@@ -515,7 +487,7 @@ class GUI(GUI_Settings):
         Text box: image
         '''
         ax_img_box = fig.add_axes([0.7, 0.94, 0.1, 0.03])
-        img_textbox = TextBox(ax_img_box, "Image Band list..e.g [1,2,3]: ")
+        img_textbox = TextBox(ax_img_box, "Image Band list E.g 1,2,3 ")
 
         def on_submit_img(txt):
 
@@ -600,5 +572,3 @@ if __name__ == '__main__':
     )
 
     agent.main()
-
-    

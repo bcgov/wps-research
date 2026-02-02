@@ -302,7 +302,6 @@ def draw_border(
 
 
 
-
 def is_boolean_matrix(
         A
 ):

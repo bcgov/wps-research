@@ -24,7 +24,7 @@ def hdbscan_approximate(
         fitted_cluster
 ):
     '''
-    fitted cluster are fitted from hdbscan fit
+    fitted clusters are fitted from hdbscan fit.
     '''
 
     from cuml.cluster.hdbscan import approximate_predict
