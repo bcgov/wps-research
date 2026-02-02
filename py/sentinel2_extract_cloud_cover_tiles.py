@@ -11,14 +11,18 @@ Usage:
     python sentinel2_cloud_tiles.py <yyyymmdd_start> <yyyymmdd_end> <TILE_ID> [TILE_ID ...]
 
 Options:
+    --L1             Query L1C data only
+    --L2             Query L2A data only
+                     (default: query both L1C and L2A)
     --no-cache       Skip all caching (force fresh discovery and extraction)
     --workers=N      Set number of parallel workers (default: 8)
     --single-thread  Run single-threaded (for debugging)
-    --output=FILE    Output plot filename (default: cloud_cover_by_tile.png)
+    --output=PREFIX  Output filename prefix (default: cloud_cover_by_tile)
+                     Will generate PREFIX_L1C.png/csv and/or PREFIX_L2A.png/csv
 
 Example:
     python sentinel2_cloud_tiles.py 20240501 20240505 T10UFB T10UFA
-    python sentinel2_cloud_tiles.py 20240501 20240505 T10UFB --workers=16
+    python sentinel2_cloud_tiles.py 20240501 20240505 T10UFB --L2 --workers=16
 """
 
 import sys
@@ -55,10 +59,15 @@ except ImportError:
     print("WARNING: osgeo.gdal not available, will try alternative method")
 
 BUCKET = "sentinel-products-ca-mirror"
-PREFIX_ROOT = "Sentinel-2/S2MSI2A"
 S3_BASE_URL = f"https://{BUCKET}.s3.amazonaws.com"
 CACHE_DIR = ".sentinel2_cache"
 RESULTS_CACHE_DIR = os.path.join(CACHE_DIR, "results")
+
+# Level prefixes
+LEVEL_PREFIXES = {
+    "L1C": "Sentinel-2/S2MSI1C",
+    "L2A": "Sentinel-2/S2MSI2A",
+}
 
 # Global settings
 N_WORKERS = 8
@@ -105,11 +114,18 @@ def extract_tile_id(product_path: str) -> str:
     return "UNKNOWN"
 
 
+def extract_level(product_path: str) -> str:
+    """Extract processing level (L1C or L2A) from product path."""
+    name = product_path.split("/")[-1]
+    if "MSIL1C" in name:
+        return "L1C"
+    elif "MSIL2A" in name:
+        return "L2A"
+    return "UNKNOWN"
+
+
 def extract_date_from_product(product_id: str) -> Optional[datetime]:
-    """
-    Extract sensing date from product filename.
-    Format: S2A_MSIL2A_20240503T202851_N0510_R114_T09WWQ_20240504T013252.zip
-    """
+    """Extract sensing date from product filename."""
     parts = product_id.split("_")
     for p in parts:
         if len(p) == 15 and p[8] == "T":
@@ -130,7 +146,7 @@ def get_safe_folder_name(zip_filename: str) -> str:
 # ------------------------------------------------------------
 # Discovery Cache
 # ------------------------------------------------------------
-def get_discovery_cache_filename(start_date: date, end_date: date, tiles: List[str]) -> str:
+def get_discovery_cache_filename(start_date: date, end_date: date, tiles: List[str], level: str) -> str:
     tiles_sorted = sorted(tiles)
     tiles_str = "_".join(tiles_sorted)
 
@@ -140,7 +156,7 @@ def get_discovery_cache_filename(start_date: date, end_date: date, tiles: List[s
     else:
         tiles_part = tiles_str
 
-    filename = f"discovery_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}_{tiles_part}.pkl"
+    filename = f"discovery_{level}_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}_{tiles_part}.pkl"
     return os.path.join(CACHE_DIR, filename)
 
 
@@ -238,11 +254,6 @@ def debug_xml_structure(root: ET.Element, xml_text: str):
     for tag, text in cloud_elements[:20]:
         print(f"      [DEBUG]   {tag}: {text}")
 
-    cloudy_matches = re.findall(r'<([^>]*[Cc]loudy[^>]*)>([^<]*)<', xml_text)
-    print(f"      [DEBUG] Raw regex matches for 'cloudy': {len(cloudy_matches)}")
-    for tag, value in cloudy_matches[:10]:
-        print(f"      [DEBUG]   <{tag}>: {value[:50]}")
-
 
 def extract_cloud_from_xml(xml_text: str) -> float:
     root = ET.fromstring(xml_text)
@@ -262,14 +273,24 @@ def extract_cloud_from_xml(xml_text: str) -> float:
     return float(cloud.text)
 
 
+def get_metadata_filename(level: str) -> str:
+    """Get the metadata XML filename for the given level."""
+    if level == "L1C":
+        return "MTD_MSIL1C.xml"
+    else:
+        return "MTD_MSIL2A.xml"
+
+
 def extract_cloud_percentage_gdal(s3_path: str) -> float:
     zip_filename = s3_path.split("/")[-1]
     safe_folder = get_safe_folder_name(zip_filename)
+    level = extract_level(s3_path)
+    metadata_file = get_metadata_filename(level)
 
     path_without_bucket = s3_path[len(BUCKET) + 1:]
 
     http_url = f"{S3_BASE_URL}/{path_without_bucket}"
-    vsi_url = f"/vsizip//vsicurl/{http_url}/{safe_folder}/MTD_MSIL2A.xml"
+    vsi_url = f"/vsizip//vsicurl/{http_url}/{safe_folder}/{metadata_file}"
 
     xml_bytes = read_vsi_file(vsi_url)
     xml_text = xml_bytes.decode("utf-8")
@@ -281,6 +302,9 @@ def extract_cloud_percentage_s3fs(s3_path: str) -> float:
     import zipfile
     import io
 
+    level = extract_level(s3_path)
+    metadata_file = get_metadata_filename(level)
+
     fs = s3fs.S3FileSystem(anon=True)
 
     with fs.open(f"s3://{s3_path}", 'rb') as f:
@@ -289,12 +313,12 @@ def extract_cloud_percentage_s3fs(s3_path: str) -> float:
     with zipfile.ZipFile(zip_data, 'r') as zf:
         xml_content = None
         for name in zf.namelist():
-            if name.endswith('MTD_MSIL2A.xml'):
+            if name.endswith(metadata_file):
                 xml_content = zf.read(name).decode('utf-8')
                 break
 
         if xml_content is None:
-            raise RuntimeError(f"MTD_MSIL2A.xml not found in ZIP")
+            raise RuntimeError(f"{metadata_file} not found in ZIP")
 
     return extract_cloud_from_xml(xml_content)
 
@@ -309,14 +333,15 @@ def extract_cloud_percentage(s3_path: str) -> float:
 # ------------------------------------------------------------
 # Discovery worker function
 # ------------------------------------------------------------
-def discover_single_date(current_date: date, tiles: List[str], progress: ProgressTracker) -> List[str]:
+def discover_single_date(current_date: date, tiles: List[str], level: str, progress: ProgressTracker) -> List[str]:
     fs = s3fs.S3FileSystem(anon=True)
 
     yyyy = current_date.strftime("%Y")
     mm = current_date.strftime("%m")
     dd = current_date.strftime("%d")
 
-    prefix = f"{PREFIX_ROOT}/{yyyy}/{mm}/{dd}/"
+    prefix_root = LEVEL_PREFIXES[level]
+    prefix = f"{prefix_root}/{yyyy}/{mm}/{dd}/"
     s3_path = f"{BUCKET}/{prefix}"
 
     matches = []
@@ -332,20 +357,20 @@ def discover_single_date(current_date: date, tiles: List[str], progress: Progres
     except Exception:
         pass
 
-    progress.update(f"Date: {current_date} - Entries: {entries_found}, Matches: {len(matches)}")
+    progress.update(f"{level} Date: {current_date} - Entries: {entries_found}, Matches: {len(matches)}")
 
     return matches
 
 
-def discover_products_parallel(start_date: date, end_date: date, tiles: List[str], use_cache: bool = True) -> List[str]:
-    cache_file = get_discovery_cache_filename(start_date, end_date, tiles)
+def discover_products_parallel(start_date: date, end_date: date, tiles: List[str], level: str, use_cache: bool = True) -> List[str]:
+    cache_file = get_discovery_cache_filename(start_date, end_date, tiles, level)
 
     if use_cache:
         cached = load_discovery_cache(cache_file)
         if cached is not None:
             return cached
 
-    print(f"  Running fresh discovery in parallel with {N_WORKERS} workers...")
+    print(f"  Running fresh {level} discovery in parallel with {N_WORKERS} workers...")
 
     dates = []
     current = start_date
@@ -353,17 +378,17 @@ def discover_products_parallel(start_date: date, end_date: date, tiles: List[str
         dates.append(current)
         current += timedelta(days=1)
 
-    progress = ProgressTracker("Discovery", len(dates))
+    progress = ProgressTracker(f"Discovery {level}", len(dates))
 
     products = []
 
     if SINGLE_THREAD:
         for d in dates:
-            matches = discover_single_date(d, tiles, progress)
+            matches = discover_single_date(d, tiles, level, progress)
             products.extend(matches)
     else:
         with ThreadPoolExecutor(max_workers=N_WORKERS) as executor:
-            futures = {executor.submit(discover_single_date, d, tiles, progress): d for d in dates}
+            futures = {executor.submit(discover_single_date, d, tiles, level, progress): d for d in dates}
 
             for future in as_completed(futures):
                 try:
@@ -384,27 +409,28 @@ def discover_products_parallel(start_date: date, end_date: date, tiles: List[str
 # ------------------------------------------------------------
 def extract_single_product(s3_path: str, progress: ProgressTracker) -> Tuple[str, Optional[float], Optional[str]]:
     pid = s3_path.split("/")[-1]
+    level = extract_level(s3_path)
 
     try:
         cloud = extract_cloud_percentage(s3_path)
         save_result_cache(pid, cloud)
         result = (pid, cloud, None)
-        status = f"{pid[:50]}... Cloud: {cloud:.2f}%"
+        status = f"[{level}] {pid[:45]}... Cloud: {cloud:.2f}%"
     except Exception as e:
         result = (pid, None, str(e))
-        status = f"{pid[:50]}... FAILED: {str(e)[:30]}"
+        status = f"[{level}] {pid[:45]}... FAILED: {str(e)[:25]}"
 
     progress.update(status)
 
     return result
 
 
-def extract_cloud_percentages_parallel(products: List[str], use_cache: bool = True) -> Tuple[List[Tuple[str, float]], List[Tuple[str, str]]]:
+def extract_cloud_percentages_parallel(products: List[str], level: str, use_cache: bool = True) -> Tuple[List[Tuple[str, float]], List[Tuple[str, str]]]:
     product_ids = [p.split("/")[-1] for p in products]
 
     cached_results = {}
     if use_cache:
-        print(f"  Checking cache for {len(products)} products...")
+        print(f"  Checking cache for {len(products)} {level} products...")
         for pid in product_ids:
             result = load_result_cache(pid)
             if result is not None:
@@ -417,15 +443,15 @@ def extract_cloud_percentages_parallel(products: List[str], use_cache: bool = Tr
         if pid not in cached_results:
             products_to_process.append(s3_path)
 
-    print(f"  Need to process {len(products_to_process)} new products")
+    print(f"  Need to process {len(products_to_process)} new {level} products")
 
     new_results = []
     new_failures = []
 
     if products_to_process:
-        progress = ProgressTracker("Extraction", len(products_to_process))
+        progress = ProgressTracker(f"Extraction {level}", len(products_to_process))
 
-        print(f"  Starting parallel extraction with {N_WORKERS} workers...")
+        print(f"  Starting parallel {level} extraction with {N_WORKERS} workers...")
 
         if SINGLE_THREAD:
             for s3_path in products_to_process:
@@ -513,10 +539,10 @@ def find_best_days(daily_totals: Dict[date, Tuple[float, int]], n: int = 5) -> L
     return [(day, total, count) for day, (total, count) in sorted_days[:n]]
 
 
-def print_best_days(best_days: List[Tuple[date, float, int]], data_by_tile: Dict[str, List[Tuple[datetime, float]]]):
+def print_best_days(best_days: List[Tuple[date, float, int]], data_by_tile: Dict[str, List[Tuple[datetime, float]]], level: str):
     """Print details about the best days."""
-    print("\n" + "=" * 70)
-    print("BEST 5 DAYS (Lowest Total Cloud Coverage Across All Tiles)")
+    print(f"\n" + "=" * 70)
+    print(f"BEST 5 DAYS - {level} (Lowest Total Cloud Coverage Across All Tiles)")
     print("=" * 70)
 
     for rank, (day, total_cloud, num_obs) in enumerate(best_days, 1):
@@ -536,14 +562,15 @@ def print_best_days(best_days: List[Tuple[date, float, int]], data_by_tile: Dict
 
 def plot_cloud_cover(data_by_tile: Dict[str, List[Tuple[datetime, float]]],
                      best_days: List[Tuple[date, float, int]],
-                     output_file: str = "cloud_cover_by_tile.png"):
+                     level: str,
+                     output_file: str):
     """Create a line plot of cloud cover over time, one line per tile."""
     if not HAS_MATPLOTLIB:
         print("Skipping plot generation (matplotlib not available)")
         return
 
     if not data_by_tile:
-        print("ERROR: No data to plot")
+        print(f"No data to plot for {level}")
         return
 
     fig, ax = plt.subplots(figsize=(14, 8))
@@ -579,7 +606,7 @@ def plot_cloud_cover(data_by_tile: Dict[str, List[Tuple[datetime, float]]],
 
     ax.set_xlabel("Date", fontsize=12)
     ax.set_ylabel("Cloud Cover (%)", fontsize=12)
-    ax.set_title("Sentinel-2 Cloud Cover by Tile Over Time", fontsize=14)
+    ax.set_title(f"Sentinel-2 {level} Cloud Cover by Tile Over Time", fontsize=14)
 
     ax.set_ylim(0, 100)
 
@@ -603,91 +630,55 @@ def plot_cloud_cover(data_by_tile: Dict[str, List[Tuple[datetime, float]]],
     plt.close()
 
 
-# ------------------------------------------------------------
-# Main
-# ------------------------------------------------------------
-def main():
-    global N_WORKERS, SINGLE_THREAD
-
-    if len(sys.argv) < 4:
-        print(__doc__)
-        sys.exit(1)
-
-    # Parse arguments
-    use_cache = True
-    output_file = "cloud_cover_by_tile.png"
-    args = []
-    for arg in sys.argv[1:]:
-        if arg == "--no-cache":
-            use_cache = False
-        elif arg == "--single-thread":
-            SINGLE_THREAD = True
-        elif arg.startswith("--workers="):
-            N_WORKERS = int(arg.split("=")[1])
-        elif arg.startswith("--output="):
-            output_file = arg.split("=")[1]
-        else:
-            args.append(arg)
-
-    if len(args) < 3:
-        print("Error: Need at least start_date, end_date, and one tile ID")
-        sys.exit(1)
-
-    start_date = parse_yyyymmdd(args[0])
-    end_date = parse_yyyymmdd(args[1])
-    requested_tiles = args[2:]
-
-    if start_date > end_date:
-        raise ValueError("Start date must be <= end date")
-
-    print(f"\n{'='*70}")
-    print(f"Sentinel-2 Cloud Cover Extraction")
-    print(f"{'='*70}")
-    print(f"Requested tiles: {', '.join(requested_tiles)}")
-    print(f"Date range: {start_date} → {end_date}")
-    print(f"GDAL available: {HAS_GDAL}")
-    print(f"Matplotlib available: {HAS_MATPLOTLIB}")
-    print(f"Workers: {N_WORKERS}")
-    print(f"Single-thread mode: {SINGLE_THREAD}")
-    print(f"Cache: {'enabled' if use_cache else 'disabled'}")
-    print(f"{'='*70}\n")
+def process_level(level: str, start_date: date, end_date: date, requested_tiles: List[str],
+                  use_cache: bool, output_prefix: str) -> Tuple[int, int, int]:
+    """
+    Process a single level (L1C or L2A): discovery, extraction, summary, CSV, and plot.
+    Returns (num_products, num_success, num_failed)
+    """
+    print(f"\n{'#'*70}")
+    print(f"# Processing {level}")
+    print(f"{'#'*70}")
 
     # Phase 1: Discovery
-    print(f"{'='*70}")
-    print("Phase 1: Discovering products...")
+    print(f"\n{'='*70}")
+    print(f"Phase 1: Discovering {level} products...")
     print(f"{'='*70}\n")
 
     t_discovery_start = time.time()
-    products = discover_products_parallel(start_date, end_date, requested_tiles, use_cache)
+    products = discover_products_parallel(start_date, end_date, requested_tiles, level, use_cache)
     t_discovery_end = time.time()
 
-    print(f"\n  Discovery complete: {len(products)} products found in {t_discovery_end - t_discovery_start:.1f}s")
+    print(f"\n  {level} Discovery complete: {len(products)} products found in {t_discovery_end - t_discovery_start:.1f}s")
+
+    if not products:
+        print(f"  No {level} products found.")
+        return 0, 0, 0
 
     # Phase 2: Extraction
     print(f"\n{'='*70}")
-    print(f"Phase 2: Extracting cloud percentages from {len(products)} products...")
+    print(f"Phase 2: Extracting {level} cloud percentages from {len(products)} products...")
     print(f"{'='*70}\n")
 
     t_extraction_start = time.time()
-    results, failures = extract_cloud_percentages_parallel(products, use_cache)
+    results, failures = extract_cloud_percentages_parallel(products, level, use_cache)
     t_extraction_end = time.time()
 
-    print(f"\n  Extraction complete in {t_extraction_end - t_extraction_start:.1f}s")
+    print(f"\n  {level} Extraction complete in {t_extraction_end - t_extraction_start:.1f}s")
 
     # Summary
     print(f"\n{'='*70}")
-    print("Summary:")
+    print(f"{level} Summary:")
     print(f"{'='*70}\n")
 
-    print(f"Total products discovered: {len(products)}")
+    print(f"Total {level} products discovered: {len(products)}")
     print(f"Successfully processed: {len(results)}")
     print(f"Failed: {len(failures)}")
-    print(f"Total time: {t_extraction_end - t_discovery_start:.1f}s")
 
     if results:
         results_sorted = sorted(results, key=lambda x: x[0])
 
-        print(f"\nResults (sorted by product name):")
+        print(f"\n{level} Results (sorted by product name):")
         print("-" * 90)
         for pid, cloud in results_sorted[:20]:
             print(f"{pid:80s} {cloud:6.2f}%")
@@ -695,8 +686,8 @@ def main():
             print(f"  ... and {len(results_sorted) - 20} more")
 
         # Write to CSV
-        csv_filename = "_".join(args) + ".csv"
-        print(f"\nWriting {len(results_sorted)} results to CSV: {csv_filename}")
+        csv_filename = f"{output_prefix}_{level}.csv"
+        print(f"\nWriting {len(results_sorted)} {level} results to CSV: {csv_filename}")
         with open(csv_filename, "w", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(["Product", "CloudPercentage"])
@@ -710,21 +701,21 @@ def main():
         avg_cloud = sum(cloud_values) / len(cloud_values)
         min_cloud = min(cloud_values)
         max_cloud = max(cloud_values)
-        print(f"\nCloud cover statistics:")
+        print(f"\n{level} Cloud cover statistics:")
         print(f"  Min: {min_cloud:.2f}%")
         print(f"  Max: {max_cloud:.2f}%")
         print(f"  Avg: {avg_cloud:.2f}%")
 
         # Phase 3: Plotting
         print(f"\n{'='*70}")
-        print("Phase 3: Generating plot...")
+        print(f"Phase 3: Generating {level} plot...")
         print(f"{'='*70}\n")
 
         data_by_tile = organize_by_tile_and_date(results)
         print(f"Organized data for {len(data_by_tile)} tiles")
 
         # Print per-tile summary
-        print("\nSummary by Tile:")
+        print(f"\n{level} Summary by Tile:")
         print("-" * 70)
         print(f"{'Tile':<10} {'Obs':>6} {'Min':>8} {'Max':>8} {'Avg':>8} {'Date Range'}")
         print("-" * 70)
@@ -744,18 +735,113 @@ def main():
         # Find and print best days
         daily_totals = compute_daily_totals(data_by_tile)
         best_days = find_best_days(daily_totals, n=5)
-        print_best_days(best_days, data_by_tile)
+        print_best_days(best_days, data_by_tile, level)
 
         # Generate plot
-        plot_cloud_cover(data_by_tile, best_days, output_file)
+        plot_filename = f"{output_prefix}_{level}.png"
+        plot_cloud_cover(data_by_tile, best_days, level, plot_filename)
 
     if failures:
-        print(f"\nFailed products ({len(failures)}):")
+        print(f"\n{level} Failed products ({len(failures)}):")
         print("-" * 90)
         for pid, error in failures[:10]:
             print(f"{pid}: {error[:70]}...")
         if len(failures) > 10:
             print(f"  ... and {len(failures) - 10} more failures")
+
+    return len(products), len(results), len(failures)
+
+
+# ------------------------------------------------------------
+# Main
+# ------------------------------------------------------------
+def main():
+    global N_WORKERS, SINGLE_THREAD
+
+    if len(sys.argv) < 4:
+        print(__doc__)
+        sys.exit(1)
+
+    # Parse arguments
+    use_cache = True
+    output_prefix = "cloud_cover_by_tile"
+    query_l1 = False
+    query_l2 = False
+    args = []
+
+    for arg in sys.argv[1:]:
+        if arg == "--no-cache":
+            use_cache = False
+        elif arg == "--single-thread":
+            SINGLE_THREAD = True
+        elif arg == "--L1":
+            query_l1 = True
+        elif arg == "--L2":
+            query_l2 = True
+        elif arg.startswith("--workers="):
+            N_WORKERS = int(arg.split("=")[1])
+        elif arg.startswith("--output="):
+            output_prefix = arg.split("=")[1]
+        else:
+            args.append(arg)
+
+    # Default: query both if neither specified
+    if not query_l1 and not query_l2:
+        query_l1 = True
+        query_l2 = True
+
+    if len(args) < 3:
+        print("Error: Need at least start_date, end_date, and one tile ID")
+        sys.exit(1)
+
+    start_date = parse_yyyymmdd(args[0])
+    end_date = parse_yyyymmdd(args[1])
+    requested_tiles = args[2:]
+
+    if start_date > end_date:
+        raise ValueError("Start date must be <= end date")
+
+    levels_to_query = []
+    if query_l1:
+        levels_to_query.append("L1C")
+    if query_l2:
+        levels_to_query.append("L2A")
+
+    print(f"\n{'='*70}")
+    print(f"Sentinel-2 Cloud Cover Extraction")
+    print(f"{'='*70}")
+    print(f"Requested tiles: {', '.join(requested_tiles)}")
+    print(f"Date range: {start_date} → {end_date}")
+    print(f"Levels: {', '.join(levels_to_query)}")
+    print(f"GDAL available: {HAS_GDAL}")
+    print(f"Matplotlib available: {HAS_MATPLOTLIB}")
+    print(f"Workers: {N_WORKERS}")
+    print(f"Single-thread mode: {SINGLE_THREAD}")
+    print(f"Cache: {'enabled' if use_cache else 'disabled'}")
+    print(f"Output prefix: {output_prefix}")
+    print(f"{'='*70}")
+
+    t_total_start = time.time()
+
+    # Process each level
+    total_stats = {}
+    for level in levels_to_query:
+        num_products, num_success, num_failed = process_level(
+            level, start_date, end_date, requested_tiles, use_cache, output_prefix
+        )
+        total_stats[level] = (num_products, num_success, num_failed)
+
+    t_total_end = time.time()
+
+    # Final summary
+    print(f"\n{'='*70}")
+    print(f"FINAL SUMMARY")
+    print(f"{'='*70}\n")
+
+    for level, (num_products, num_success, num_failed) in total_stats.items():
+        print(f"{level}: {num_products} discovered, {num_success} successful, {num_failed} failed")
+
+    print(f"\nTotal time: {t_total_end - t_total_start:.1f}s")
 
 
 if __name__ == "__main__":
