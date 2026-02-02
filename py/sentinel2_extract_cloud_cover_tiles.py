@@ -7,6 +7,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, date
 from typing import List
 import csv
+import time
 
 BUCKET = "sentinel-products-ca-mirror"
 PREFIX_ROOT = "Sentinel-2/S2MSI2A"
@@ -23,9 +24,6 @@ def parse_yyyymmdd(s: str) -> date:
 
 
 def extract_tile_id(product_path: str) -> str:
-    """
-    Extract tile ID (e.g. T10UFB) from Sentinel-2 product filename.
-    """
     name = product_path.split("/")[-1]
     parts = name.split("_")
     for p in parts:
@@ -35,20 +33,13 @@ def extract_tile_id(product_path: str) -> str:
 
 
 def extract_cloud_percentage(zip_url: str) -> float:
-    """
-    Reads CLOUDY_PIXEL_PERCENTAGE from MTD_MSIL2A.xml inside a ZIP on S3.
-    """
     xml_path = f"/vsizip//vsis3/{zip_url}/MTD_MSIL2A.xml"
-
     with rasterio.open(xml_path) as ds:
         xml_text = ds.read().decode("utf-8")
-
     root = ET.fromstring(xml_text)
     cloud = root.find(".//CLOUDY_PIXEL_PERCENTAGE")
-
     if cloud is None:
         raise RuntimeError("CLOUDY_PIXEL_PERCENTAGE not found")
-
     return float(cloud.text)
 
 
@@ -56,9 +47,6 @@ def extract_cloud_percentage(zip_url: str) -> float:
 # S3 discovery by date
 # ------------------------------------------------------------
 def iterate_products_by_date(fs, start: date, end: date, tiles: List[str]):
-    """
-    Yield product ZIP paths for the requested tile IDs in the date range.
-    """
     current = start
     one_day = date.fromordinal(start.toordinal() + 1) - start
 
@@ -82,7 +70,11 @@ def iterate_products_by_date(fs, start: date, end: date, tiles: List[str]):
                     yield obj
 
         except Exception as e:
-            print(f"### DEBUG: fs.ls failed for {s3_path}: {e}")
+            # Suppress AWS credential errors, just report as "not found"
+            if "AccessDenied" in str(e) or "NoCredentialsError" in str(e):
+                print(f"### DEBUG: Skipping {s3_path} (anonymous access)")
+            else:
+                print(f"### DEBUG: fs.ls failed for {s3_path}: {e}")
 
         current += one_day
 
@@ -112,20 +104,40 @@ def main():
     print(f"\nRequested tiles: {', '.join(requested_tiles)}")
     print(f"Date range: {start_date} → {end_date}")
 
-    # --------------------------------------------------------
-    # Process requested tiles
-    # --------------------------------------------------------
+    # Collect all products first to estimate progress
+    products = list(iterate_products_by_date(fs, start_date, end_date, requested_tiles))
+    total_products = len(products)
+    print(f"\nTotal products to process: {total_products}")
+
     results = []
-    for product in iterate_products_by_date(fs, start_date, end_date, requested_tiles):
-        tile = extract_tile_id(product)
+    start_time = time.time()
+
+    for idx, product in enumerate(products, start=1):
         pid = product.split("/")[-1]
+        tile = extract_tile_id(product)
         try:
             cloud = extract_cloud_percentage(product)
             results.append((pid, cloud))
-            print(f"{pid} → {cloud:.2f}%")
         except Exception as e:
             print(f"FAILED {pid}: {e}")
 
+        # --------------------------------------------------------
+        # Progress / ETA
+        # --------------------------------------------------------
+        elapsed = time.time() - start_time
+        progress = idx / total_products * 100
+        if idx > 0:
+            remaining = (elapsed / idx) * (total_products - idx)
+        else:
+            remaining = 0
+        print(
+            f"Progress: {idx}/{total_products} "
+            f"({progress:.1f}%) - Elapsed: {elapsed:.1f}s, ETA: {remaining:.1f}s"
+        )
+
+    # --------------------------------------------------------
+    # Print summary
+    # --------------------------------------------------------
     if results:
         print("\nSummary:")
         for pid, cloud in results:
