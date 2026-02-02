@@ -4,23 +4,15 @@ import sys
 import s3fs
 import xml.etree.ElementTree as ET
 from datetime import datetime, date, timedelta
-from typing import List, Dict, Tuple, Optional, Any
+from typing import List, Dict, Tuple, Optional
 import csv
 import time
 import pickle
 import hashlib
 import os
 import re
-import multiprocessing as mp
 import threading
-
-# Try to import joblib for parallel processing
-try:
-    from joblib import Parallel, delayed
-    HAS_JOBLIB = True
-except ImportError:
-    HAS_JOBLIB = False
-    print("WARNING: joblib not available, will run single-threaded")
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Try to import GDAL - needed for VSI file access
 try:
@@ -41,7 +33,10 @@ RESULTS_CACHE_DIR = os.path.join(CACHE_DIR, "results")
 N_WORKERS = 8
 SINGLE_THREAD = False
 
+
+# ------------------------------------------------------------
 # Thread-safe progress tracking
+# ------------------------------------------------------------
 class ProgressTracker:
     def __init__(self, name: str, total: int):
         self.name = name
@@ -58,31 +53,6 @@ class ProgressTracker:
             eta = (elapsed / self.count) * (self.total - self.count) if self.count > 0 else 0
             print(f"  {self.name}: {self.count}/{self.total} ({pct:.1f}%) - "
                   f"Elapsed: {elapsed:.1f}s, ETA: {eta:.1f}s - {message}")
-
-# Global progress trackers (set in main before parallel execution)
-discovery_progress: Optional[ProgressTracker] = None
-extraction_progress: Optional[ProgressTracker] = None
-
-
-# ------------------------------------------------------------
-# Parallel execution helper
-# ------------------------------------------------------------
-def parfor(my_function, my_inputs, n_thread=None):
-    """
-    Parallel for loop using joblib, with fallback to sequential execution.
-    """
-    if n_thread is None:
-        n_thread = min(32, N_WORKERS)
-
-    print(f"PARFOR n_thread={n_thread}, inputs={len(my_inputs)}")
-
-    if n_thread == 1 or SINGLE_THREAD or not HAS_JOBLIB:
-        return [my_function(my_inputs[i]) for i in range(len(my_inputs))]
-    else:
-        n_thread = mp.cpu_count() if n_thread is None else n_thread
-        if my_inputs is None or (type(my_inputs) == list and len(my_inputs) == 0):
-            return []
-        return Parallel(n_jobs=n_thread)(delayed(my_function)(inp) for inp in my_inputs)
 
 
 # ------------------------------------------------------------
@@ -189,16 +159,6 @@ def save_result_cache(product_id: str, cloud_pct: float):
             pickle.dump((product_id, cloud_pct), f)
     except Exception:
         pass
-
-
-def load_all_cached_results(product_ids: List[str]) -> Dict[str, float]:
-    """Load all cached results for given product IDs."""
-    cached = {}
-    for pid in product_ids:
-        result = load_result_cache(pid)
-        if result is not None:
-            cached[result[0]] = result[1]
-    return cached
 
 
 # ------------------------------------------------------------
@@ -334,14 +294,10 @@ def extract_cloud_percentage(s3_path: str) -> float:
 # ------------------------------------------------------------
 # Discovery worker function
 # ------------------------------------------------------------
-def discover_single_date(args: Tuple[date, List[str]]) -> List[str]:
+def discover_single_date(current_date: date, tiles: List[str], progress: ProgressTracker) -> List[str]:
     """
     Worker function to discover products for a single date.
     """
-    global discovery_progress
-
-    current_date, tiles = args
-
     fs = s3fs.S3FileSystem(anon=True)
 
     yyyy = current_date.strftime("%Y")
@@ -365,18 +321,15 @@ def discover_single_date(args: Tuple[date, List[str]]) -> List[str]:
         pass
 
     # Thread-safe progress update
-    if discovery_progress:
-        discovery_progress.update(f"Date: {current_date} - Entries: {entries_found}, Matches: {len(matches)}")
+    progress.update(f"Date: {current_date} - Entries: {entries_found}, Matches: {len(matches)}")
 
     return matches
 
 
 def discover_products_parallel(start_date: date, end_date: date, tiles: List[str], use_cache: bool = True) -> List[str]:
     """
-    Discover products in parallel, using cache if available.
+    Discover products in parallel using ThreadPoolExecutor.
     """
-    global discovery_progress
-
     cache_file = get_discovery_cache_filename(start_date, end_date, tiles)
 
     if use_cache:
@@ -384,7 +337,7 @@ def discover_products_parallel(start_date: date, end_date: date, tiles: List[str
         if cached is not None:
             return cached
 
-    print(f"  Running fresh discovery in parallel...")
+    print(f"  Running fresh discovery in parallel with {N_WORKERS} workers...")
 
     # Generate list of dates
     dates = []
@@ -393,19 +346,29 @@ def discover_products_parallel(start_date: date, end_date: date, tiles: List[str
         dates.append(current)
         current += timedelta(days=1)
 
-    # Prepare inputs as (date, tiles) tuples
-    inputs = [(d, tiles) for d in dates]
-
     # Initialize progress tracker
-    discovery_progress = ProgressTracker("Discovery", len(inputs))
+    progress = ProgressTracker("Discovery", len(dates))
 
-    # Run in parallel
-    results = parfor(discover_single_date, inputs, n_thread=N_WORKERS)
-
-    # Flatten results
+    # Run in parallel using ThreadPoolExecutor
     products = []
-    for match_list in results:
-        products.extend(match_list)
+
+    if SINGLE_THREAD:
+        for d in dates:
+            matches = discover_single_date(d, tiles, progress)
+            products.extend(matches)
+    else:
+        with ThreadPoolExecutor(max_workers=N_WORKERS) as executor:
+            # Submit all tasks
+            futures = {executor.submit(discover_single_date, d, tiles, progress): d for d in dates}
+
+            # Collect results as they complete (workers pick up new jobs immediately)
+            for future in as_completed(futures):
+                try:
+                    matches = future.result()
+                    products.extend(matches)
+                except Exception as e:
+                    d = futures[future]
+                    print(f"  ERROR processing date {d}: {e}")
 
     # Save to cache
     if use_cache:
@@ -417,13 +380,11 @@ def discover_products_parallel(start_date: date, end_date: date, tiles: List[str
 # ------------------------------------------------------------
 # Extraction worker function
 # ------------------------------------------------------------
-def extract_single_product(s3_path: str) -> Tuple[str, Optional[float], Optional[str]]:
+def extract_single_product(s3_path: str, progress: ProgressTracker) -> Tuple[str, Optional[float], Optional[str]]:
     """
     Worker function to extract cloud percentage for a single product.
     Returns (product_id, cloud_pct, error_msg)
     """
-    global extraction_progress
-
     pid = s3_path.split("/")[-1]
 
     try:
@@ -437,19 +398,16 @@ def extract_single_product(s3_path: str) -> Tuple[str, Optional[float], Optional
         status = f"{pid[:50]}... FAILED: {str(e)[:30]}"
 
     # Thread-safe progress update
-    if extraction_progress:
-        extraction_progress.update(status)
+    progress.update(status)
 
     return result
 
 
 def extract_cloud_percentages_parallel(products: List[str], use_cache: bool = True) -> Tuple[List[Tuple[str, float]], List[Tuple[str, str]]]:
     """
-    Extract cloud percentages in parallel, using cache for already-processed products.
+    Extract cloud percentages in parallel using ThreadPoolExecutor.
     Returns (results, failures)
     """
-    global extraction_progress
-
     # Get product IDs
     product_ids = [p.split("/")[-1] for p in products]
 
@@ -457,7 +415,7 @@ def extract_cloud_percentages_parallel(products: List[str], use_cache: bool = Tr
     cached_results = {}
     if use_cache:
         print(f"  Checking cache for {len(products)} products...")
-        for i, pid in enumerate(product_ids):
+        for pid in product_ids:
             result = load_result_cache(pid)
             if result is not None:
                 cached_results[pid] = result[1]
@@ -478,15 +436,35 @@ def extract_cloud_percentages_parallel(products: List[str], use_cache: bool = Tr
 
     if products_to_process:
         # Initialize progress tracker
-        extraction_progress = ProgressTracker("Extraction", len(products_to_process))
+        progress = ProgressTracker("Extraction", len(products_to_process))
 
-        raw_results = parfor(extract_single_product, products_to_process, n_thread=N_WORKERS)
+        print(f"  Starting parallel extraction with {N_WORKERS} workers...")
 
-        for pid, cloud, error in raw_results:
-            if cloud is not None:
-                new_results.append((pid, cloud))
-            else:
-                new_failures.append((pid, error))
+        if SINGLE_THREAD:
+            for s3_path in products_to_process:
+                pid, cloud, error = extract_single_product(s3_path, progress)
+                if cloud is not None:
+                    new_results.append((pid, cloud))
+                else:
+                    new_failures.append((pid, error))
+        else:
+            with ThreadPoolExecutor(max_workers=N_WORKERS) as executor:
+                # Submit all tasks
+                futures = {executor.submit(extract_single_product, s3_path, progress): s3_path
+                          for s3_path in products_to_process}
+
+                # Collect results as they complete (workers pick up new jobs immediately)
+                for future in as_completed(futures):
+                    try:
+                        pid, cloud, error = future.result()
+                        if cloud is not None:
+                            new_results.append((pid, cloud))
+                        else:
+                            new_failures.append((pid, error))
+                    except Exception as e:
+                        s3_path = futures[future]
+                        pid = s3_path.split("/")[-1]
+                        new_failures.append((pid, str(e)))
 
     # Combine cached + new results
     all_results = [(pid, cloud) for pid, cloud in cached_results.items()]
@@ -545,8 +523,8 @@ def main():
     print(f"Requested tiles: {', '.join(requested_tiles)}")
     print(f"Date range: {start_date} → {end_date}")
     print(f"GDAL available: {HAS_GDAL}")
-    print(f"Joblib available: {HAS_JOBLIB}")
     print(f"Workers: {N_WORKERS}")
+    print(f"Single-thread mode: {SINGLE_THREAD}")
     print(f"Cache: {'enabled' if use_cache else 'disabled'}")
     print(f"{'='*70}\n")
 
