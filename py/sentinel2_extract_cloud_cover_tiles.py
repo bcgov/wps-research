@@ -2,12 +2,20 @@
 
 import sys
 import s3fs
-import rasterio
 import xml.etree.ElementTree as ET
 from datetime import datetime, date, timedelta
 from typing import List
 import csv
 import time
+
+# Try to import GDAL - needed for VSI file access
+try:
+    from osgeo import gdal
+    gdal.UseExceptions()
+    HAS_GDAL = True
+except ImportError:
+    HAS_GDAL = False
+    print("WARNING: osgeo.gdal not available, will try alternative method")
 
 BUCKET = "sentinel-products-ca-mirror"
 PREFIX_ROOT = "Sentinel-2/S2MSI2A"
@@ -33,39 +41,63 @@ def extract_tile_id(product_path: str) -> str:
     return "UNKNOWN"
 
 
-def extract_cloud_percentage(s3_path: str) -> float:
+def get_safe_folder_name(zip_filename: str) -> str:
     """
-    Extract cloud percentage from the MTD_MSIL2A.xml file inside the ZIP.
-    Uses GDAL's /vsizip//vsicurl/ for efficient HTTP range requests.
+    Convert ZIP filename to the SAFE folder name inside the ZIP.
+    S2A_MSIL2A_20240503T202851_N0510_R114_T09WWQ_20240504T013252.zip
+    -> S2A_MSIL2A_20240503T202851_N0510_R114_T09WWQ_20240504T013252.SAFE
+    """
+    if zip_filename.endswith(".zip"):
+        return zip_filename[:-4] + ".SAFE"
+    return zip_filename + ".SAFE"
 
-    s3_path format: sentinel-products-ca-mirror/Sentinel-2/S2MSI2A/2025/07/26/file.zip
+
+def read_vsi_file(vsi_path: str) -> bytes:
+    """
+    Read a file using GDAL's virtual file system.
+    This allows reading files from /vsizip//vsicurl/ paths.
+    """
+    f = gdal.VSIFOpenL(vsi_path, 'rb')
+    if f is None:
+        raise RuntimeError(f"Failed to open: {vsi_path}")
+
+    try:
+        # Get file size
+        gdal.VSIFSeekL(f, 0, 2)  # Seek to end
+        size = gdal.VSIFTellL(f)
+        gdal.VSIFSeekL(f, 0, 0)  # Seek to start
+
+        # Read contents
+        data = gdal.VSIFReadL(1, size, f)
+        return data
+    finally:
+        gdal.VSIFCloseL(f)
+
+
+def extract_cloud_percentage_gdal(s3_path: str) -> float:
+    """
+    Extract cloud percentage using GDAL's VSI file system.
+    This reads only the metadata XML, not the entire ZIP.
     """
     zip_filename = s3_path.split("/")[-1]
+    safe_folder = get_safe_folder_name(zip_filename)
 
     # Remove bucket name to get the path portion
     path_without_bucket = s3_path[len(BUCKET) + 1:]
 
-    # Build the vsicurl URL
-    # Format: /vsizip//vsicurl/https://<bucket>.s3.amazonaws.com/<path>/MTD_MSIL2A.xml
+    # Build the vsicurl URL with correct SAFE folder path
+    # Format: /vsizip//vsicurl/https://<bucket>.s3.amazonaws.com/<path>/<name>.SAFE/MTD_MSIL2A.xml
     http_url = f"{S3_BASE_URL}/{path_without_bucket}"
-    vsi_url = f"/vsizip//vsicurl/{http_url}/MTD_MSIL2A.xml"
+    vsi_url = f"/vsizip//vsicurl/{http_url}/{safe_folder}/MTD_MSIL2A.xml"
 
-    print(f"      [DEBUG] Opening: {vsi_url}")
+    print(f"      [DEBUG] VSI path: {vsi_url}")
 
-    t_open_start = time.time()
-    with rasterio.open(vsi_url) as ds:
-        t_open_end = time.time()
-        print(f"      [DEBUG] rasterio.open() took {t_open_end - t_open_start:.2f}s")
+    t_read_start = time.time()
+    xml_bytes = read_vsi_file(vsi_url)
+    t_read_end = time.time()
+    print(f"      [DEBUG] VSI read took {t_read_end - t_read_start:.2f}s, got {len(xml_bytes)} bytes")
 
-        t_read_start = time.time()
-        xml_bytes = ds.read()
-        t_read_end = time.time()
-        print(f"      [DEBUG] ds.read() took {t_read_end - t_read_start:.2f}s, got {len(xml_bytes)} bytes")
-
-    t_decode_start = time.time()
     xml_text = xml_bytes.decode("utf-8")
-    t_decode_end = time.time()
-    print(f"      [DEBUG] decode() took {t_decode_end - t_decode_start:.4f}s")
 
     t_parse_start = time.time()
     root = ET.fromstring(xml_text)
@@ -77,6 +109,66 @@ def extract_cloud_percentage(s3_path: str) -> float:
         raise RuntimeError("CLOUDY_PIXEL_PERCENTAGE not found in XML")
 
     return float(cloud.text)
+
+
+def extract_cloud_percentage_s3fs(fs: s3fs.S3FileSystem, s3_path: str) -> float:
+    """
+    Fallback method using s3fs + zipfile.
+    This downloads more data but works without GDAL.
+    """
+    import zipfile
+    import io
+
+    zip_filename = s3_path.split("/")[-1]
+
+    print(f"      [DEBUG] Using s3fs fallback method")
+    print(f"      [DEBUG] Opening s3://{s3_path}")
+
+    t_download_start = time.time()
+
+    # We'll try to read just the central directory and XML
+    # Unfortunately s3fs doesn't support range requests easily,
+    # so we may need to download the whole file
+    with fs.open(f"s3://{s3_path}", 'rb') as f:
+        zip_data = io.BytesIO(f.read())
+
+    t_download_end = time.time()
+    print(f"      [DEBUG] Download took {t_download_end - t_download_start:.2f}s")
+
+    t_extract_start = time.time()
+    with zipfile.ZipFile(zip_data, 'r') as zf:
+        # Find the MTD_MSIL2A.xml file
+        xml_content = None
+        for name in zf.namelist():
+            if name.endswith('MTD_MSIL2A.xml'):
+                xml_content = zf.read(name).decode('utf-8')
+                print(f"      [DEBUG] Found XML at: {name}")
+                break
+
+        if xml_content is None:
+            raise RuntimeError(f"MTD_MSIL2A.xml not found in {zip_filename}")
+
+    t_extract_end = time.time()
+    print(f"      [DEBUG] Extract took {t_extract_end - t_extract_start:.2f}s")
+
+    root = ET.fromstring(xml_content)
+    cloud = root.find(".//CLOUDY_PIXEL_PERCENTAGE")
+    if cloud is None:
+        raise RuntimeError("CLOUDY_PIXEL_PERCENTAGE not found in XML")
+
+    return float(cloud.text)
+
+
+def extract_cloud_percentage(s3_path: str, fs: s3fs.S3FileSystem = None) -> float:
+    """
+    Extract cloud percentage, using GDAL if available, otherwise s3fs fallback.
+    """
+    if HAS_GDAL:
+        return extract_cloud_percentage_gdal(s3_path)
+    elif fs is not None:
+        return extract_cloud_percentage_s3fs(fs, s3_path)
+    else:
+        raise RuntimeError("No method available to read ZIP files (need GDAL or s3fs)")
 
 
 # ------------------------------------------------------------
@@ -114,13 +206,11 @@ def iterate_products_by_date(fs, start: date, end: date, tiles: List[str]):
                     yield obj
 
         except Exception as e:
-            # Suppress AWS credential errors, just report as "not found"
             if "AccessDenied" in str(e) or "NoCredentialsError" in str(e):
-                pass  # Skip silently
+                pass
             else:
-                pass  # Skip other errors silently during discovery
+                pass
 
-        # Print progress for the discovery phase
         print(
             f"Discovery: {day_count}/{total_days} days "
             f"({day_count/total_days*100:.1f}%) - "
@@ -154,11 +244,11 @@ def main():
 
     print(f"\nRequested tiles: {', '.join(requested_tiles)}")
     print(f"Date range: {start_date} → {end_date}")
+    print(f"GDAL available: {HAS_GDAL}")
     print(f"\n{'='*60}")
     print("Phase 1: Discovering products...")
     print(f"{'='*60}\n")
 
-    # Collect all products first to estimate progress
     products = list(iterate_products_by_date(fs, start_date, end_date, requested_tiles))
     total_products = len(products)
 
@@ -180,19 +270,18 @@ def main():
 
         t_start = time.time()
         try:
-            cloud = extract_cloud_percentage(product)
+            cloud = extract_cloud_percentage(product, fs)
             results.append((pid, cloud))
             status = f"OK - Cloud: {cloud:.2f}%"
         except Exception as e:
             failed.append((pid, str(e)))
             status = f"FAILED: {e}"
             print(f"    [DEBUG] Exception type: {type(e).__name__}")
+            import traceback
+            print(f"    [DEBUG] Traceback: {traceback.format_exc()}")
 
         t_end = time.time()
 
-        # --------------------------------------------------------
-        # Progress / ETA
-        # --------------------------------------------------------
         elapsed = time.time() - start_time
         progress = idx / total_products * 100
         if idx > 0:
@@ -207,9 +296,7 @@ def main():
             f"({progress:.1f}%) - Elapsed: {elapsed:.1f}s, ETA: {remaining:.1f}s - {status}"
         )
 
-    # --------------------------------------------------------
-    # Print summary
-    # --------------------------------------------------------
+    # Summary
     print(f"\n{'='*60}")
     print("Summary:")
     print(f"{'='*60}\n")
@@ -223,9 +310,6 @@ def main():
         for pid, cloud in results:
             print(f"{pid:80s} {cloud:6.2f}%")
 
-        # --------------------------------------------------------
-        # Output to CSV
-        # --------------------------------------------------------
         csv_filename = "_".join(sys.argv[1:]) + ".csv"
         print(f"\nWriting results to CSV: {csv_filename}")
         with open(csv_filename, "w", newline="") as f:
@@ -239,8 +323,8 @@ def main():
     if failed:
         print(f"\nFailed products:")
         print("-" * 90)
-        for pid, error in failed[:10]:  # Show first 10 failures
-            print(f"{pid}: {error[:60]}...")
+        for pid, error in failed[:10]:
+            print(f"{pid}: {error[:80]}...")
         if len(failed) > 10:
             print(f"  ... and {len(failed) - 10} more failures")
 
