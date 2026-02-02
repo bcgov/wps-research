@@ -1,4 +1,6 @@
-'''20260127: progress monitor added 
+'''20260202: added single-date option!
+
+20260127: progress monitor added 
 
 20230627: sync a date range for selected GID, in Level-2 to zip file format.
 
@@ -218,6 +220,10 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2):
     parfor(runc, cmds, 2) # min(int(2), 2 * int(mp.cpu_count())))
     '''
 
+def is_date_format(s):
+    """Check if string is in yyyymmdd format (8 digits)"""
+    return len(s) == 8 and s.isdigit()
+
 # check if L2 mode is desired ( L1 mode default )
 use_L2 = '--L2' in args
 
@@ -238,9 +244,21 @@ for arg in args:
 args = new_args
 
 
+# Parse dates and GIDs from arguments
+# args[0] is script name, args[1] is first date, args[2] may be second date or GID
+yyyymmdd = args[1]
+
+# Check if args[2] exists and is a date (8 digits), otherwise use same date for both
+if len(args) > 2 and is_date_format(args[2]):
+    yyyymmdd2 = args[2]
+    gid_start_index = 3
+else:
+    yyyymmdd2 = yyyymmdd  # Single date: use same for start and end
+    gid_start_index = 2
+
 gids = []  # get gids from command line
-if len(args) > 3:
-    gids = set(args[3:])
+if len(args) > gid_start_index:
+    gids = set(args[gid_start_index:])
 
 if len(gids) == 0:  # if no gids provided, default to all gids for BC
     from gid import bc
@@ -253,5 +271,4 @@ else:
 
 
 if __name__ == "__main__":
-    yyyymmdd, yyyymmdd2 = args[1], args[2]
     download_by_gids(gids, yyyymmdd, yyyymmdd2)
