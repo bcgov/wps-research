@@ -12,6 +12,7 @@ import hashlib
 import os
 import re
 import multiprocessing as mp
+import threading
 
 # Try to import joblib for parallel processing
 try:
@@ -40,10 +41,27 @@ RESULTS_CACHE_DIR = os.path.join(CACHE_DIR, "results")
 N_WORKERS = 8
 SINGLE_THREAD = False
 
-# Global counters for progress tracking (not thread-safe, but good enough for status)
-progress_counter = {"discovery": 0, "extraction": 0}
-progress_totals = {"discovery": 0, "extraction": 0}
-progress_start_times = {"discovery": 0, "extraction": 0}
+# Thread-safe progress tracking
+class ProgressTracker:
+    def __init__(self, name: str, total: int):
+        self.name = name
+        self.total = total
+        self.count = 0
+        self.start_time = time.time()
+        self.lock = threading.Lock()
+
+    def update(self, message: str = ""):
+        with self.lock:
+            self.count += 1
+            elapsed = time.time() - self.start_time
+            pct = self.count / self.total * 100 if self.total > 0 else 0
+            eta = (elapsed / self.count) * (self.total - self.count) if self.count > 0 else 0
+            print(f"  {self.name}: {self.count}/{self.total} ({pct:.1f}%) - "
+                  f"Elapsed: {elapsed:.1f}s, ETA: {eta:.1f}s - {message}")
+
+# Global progress trackers (set in main before parallel execution)
+discovery_progress: Optional[ProgressTracker] = None
+extraction_progress: Optional[ProgressTracker] = None
 
 
 # ------------------------------------------------------------
@@ -146,7 +164,6 @@ def get_result_cache_filename(product_id: str) -> str:
     """
     Generate a cache filename for a single product result.
     """
-    # Use product ID as filename (sanitize if needed)
     safe_name = product_id.replace("/", "_").replace("\\", "_")
     return os.path.join(RESULTS_CACHE_DIR, f"{safe_name}.pkl")
 
@@ -321,7 +338,7 @@ def discover_single_date(args: Tuple[date, List[str]]) -> List[str]:
     """
     Worker function to discover products for a single date.
     """
-    global progress_counter, progress_totals, progress_start_times
+    global discovery_progress
 
     current_date, tiles = args
 
@@ -347,18 +364,9 @@ def discover_single_date(args: Tuple[date, List[str]]) -> List[str]:
     except Exception:
         pass
 
-    # Progress update (not thread-safe but good enough)
-    progress_counter["discovery"] += 1
-    idx = progress_counter["discovery"]
-    total = progress_totals["discovery"]
-
-    if idx % N_WORKERS == 0 or idx == total:
-        elapsed = time.time() - progress_start_times["discovery"]
-        pct = idx / total * 100 if total > 0 else 0
-        eta = (elapsed / idx) * (total - idx) if idx > 0 else 0
-        print(f"  Discovery: {idx}/{total} ({pct:.1f}%) - "
-              f"Date: {current_date} - Entries: {entries_found}, Matches: {len(matches)} - "
-              f"Elapsed: {elapsed:.1f}s, ETA: {eta:.1f}s")
+    # Thread-safe progress update
+    if discovery_progress:
+        discovery_progress.update(f"Date: {current_date} - Entries: {entries_found}, Matches: {len(matches)}")
 
     return matches
 
@@ -367,7 +375,7 @@ def discover_products_parallel(start_date: date, end_date: date, tiles: List[str
     """
     Discover products in parallel, using cache if available.
     """
-    global progress_counter, progress_totals, progress_start_times
+    global discovery_progress
 
     cache_file = get_discovery_cache_filename(start_date, end_date, tiles)
 
@@ -388,10 +396,8 @@ def discover_products_parallel(start_date: date, end_date: date, tiles: List[str
     # Prepare inputs as (date, tiles) tuples
     inputs = [(d, tiles) for d in dates]
 
-    # Initialize progress tracking
-    progress_counter["discovery"] = 0
-    progress_totals["discovery"] = len(inputs)
-    progress_start_times["discovery"] = time.time()
+    # Initialize progress tracker
+    discovery_progress = ProgressTracker("Discovery", len(inputs))
 
     # Run in parallel
     results = parfor(discover_single_date, inputs, n_thread=N_WORKERS)
@@ -416,7 +422,7 @@ def extract_single_product(s3_path: str) -> Tuple[str, Optional[float], Optional
     Worker function to extract cloud percentage for a single product.
     Returns (product_id, cloud_pct, error_msg)
     """
-    global progress_counter, progress_totals, progress_start_times
+    global extraction_progress
 
     pid = s3_path.split("/")[-1]
 
@@ -425,22 +431,14 @@ def extract_single_product(s3_path: str) -> Tuple[str, Optional[float], Optional
         # Save to cache
         save_result_cache(pid, cloud)
         result = (pid, cloud, None)
+        status = f"{pid[:50]}... Cloud: {cloud:.2f}%"
     except Exception as e:
         result = (pid, None, str(e))
+        status = f"{pid[:50]}... FAILED: {str(e)[:30]}"
 
-    # Progress update (not thread-safe but good enough)
-    progress_counter["extraction"] += 1
-    idx = progress_counter["extraction"]
-    total = progress_totals["extraction"]
-
-    if idx % N_WORKERS == 0 or idx == total:
-        elapsed = time.time() - progress_start_times["extraction"]
-        pct = idx / total * 100 if total > 0 else 0
-        eta = (elapsed / idx) * (total - idx) if idx > 0 else 0
-        status = f"Cloud: {result[1]:.2f}%" if result[1] is not None else f"FAILED"
-        print(f"  Extraction: {idx}/{total} ({pct:.1f}%) - "
-              f"{pid[:60]}... - {status} - "
-              f"Elapsed: {elapsed:.1f}s, ETA: {eta:.1f}s")
+    # Thread-safe progress update
+    if extraction_progress:
+        extraction_progress.update(status)
 
     return result
 
@@ -450,7 +448,7 @@ def extract_cloud_percentages_parallel(products: List[str], use_cache: bool = Tr
     Extract cloud percentages in parallel, using cache for already-processed products.
     Returns (results, failures)
     """
-    global progress_counter, progress_totals, progress_start_times
+    global extraction_progress
 
     # Get product IDs
     product_ids = [p.split("/")[-1] for p in products]
@@ -474,16 +472,14 @@ def extract_cloud_percentages_parallel(products: List[str], use_cache: bool = Tr
 
     print(f"  Need to process {len(products_to_process)} new products")
 
-    # Initialize progress tracking
-    progress_counter["extraction"] = 0
-    progress_totals["extraction"] = len(products_to_process)
-    progress_start_times["extraction"] = time.time()
-
     # Process new products in parallel
     new_results = []
     new_failures = []
 
     if products_to_process:
+        # Initialize progress tracker
+        extraction_progress = ProgressTracker("Extraction", len(products_to_process))
+
         raw_results = parfor(extract_single_product, products_to_process, n_thread=N_WORKERS)
 
         for pid, cloud, error in raw_results:
