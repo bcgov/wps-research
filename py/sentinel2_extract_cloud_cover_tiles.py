@@ -6,7 +6,7 @@ import s3fs
 import rasterio
 import xml.etree.ElementTree as ET
 from datetime import datetime, date
-from typing import List
+from typing import List, Set
 
 BUCKET = "sentinel-products-ca-mirror"
 PREFIX_ROOT = "Sentinel-2/S2MSI2A"
@@ -37,14 +37,9 @@ def extract_cloud_percentage(zip_url: str) -> float:
     return float(cloud.text)
 
 
-def list_products_for_tiles(
-    fs,
-    tiles: List[str],
-    start: date,
-    end: date,
-):
+def iterate_products_by_date(fs, start: date, end: date):
     """
-    Generator yielding product ZIP paths matching tile IDs and date range.
+    Yield all product ZIP paths in the date range.
     """
     current = start
     one_day = date.fromordinal(start.toordinal() + 1) - start
@@ -58,14 +53,24 @@ def list_products_for_tiles(
 
         try:
             for obj in fs.ls(prefix):
-                if not obj.endswith(".zip"):
-                    continue
-                if any(tile in obj for tile in tiles):
+                if obj.endswith(".zip"):
                     yield obj
         except FileNotFoundError:
             pass
 
         current += one_day
+
+
+def extract_tile_id(product_path: str) -> str:
+    """
+    Extract tile ID (e.g. T10UFB) from Sentinel-2 product filename.
+    """
+    name = product_path.split("/")[-1]
+    parts = name.split("_")
+    for p in parts:
+        if p.startswith("T") and len(p) == 6:
+            return p
+    return "UNKNOWN"
 
 
 def main():
@@ -80,33 +85,48 @@ def main():
 
     start_date = parse_yyyymmdd(sys.argv[1])
     end_date = parse_yyyymmdd(sys.argv[2])
-    tiles = sys.argv[3:]
+    requested_tiles = sys.argv[3:]
 
     if start_date > end_date:
         raise ValueError("Start date must be <= end date")
 
     fs = s3fs.S3FileSystem(anon=True)
 
-    print(f"Date range : {start_date} → {end_date}")
-    print(f"Tiles      : {', '.join(tiles)}\n")
+    # --------------------------------------------------
+    # 1. Discover available tiles
+    # --------------------------------------------------
+    available_tiles: Set[str] = set()
+    products = []
 
-    results = []
+    for product in iterate_products_by_date(fs, start_date, end_date):
+        tile = extract_tile_id(product)
+        available_tiles.add(tile)
+        products.append(product)
 
-    for product in list_products_for_tiles(
-        fs, tiles, start_date, end_date
-    ):
+    print("\nAvailable tiles in date range:")
+    for t in sorted(available_tiles):
+        print(f"  {t}")
+
+    print("\nRequested tiles:")
+    print("  " + ", ".join(requested_tiles))
+    print()
+
+    # --------------------------------------------------
+    # 2. Process requested tiles only
+    # --------------------------------------------------
+    for product in products:
+        tile = extract_tile_id(product)
+        if tile not in requested_tiles:
+            continue
+
         pid = product.split("/")[-1]
         try:
             cloud = extract_cloud_percentage(product)
-            results.append((pid, cloud))
             print(f"{pid} → {cloud:.2f}%")
         except Exception as e:
             print(f"FAILED {pid}: {e}")
 
-    print("\nSummary")
-    for pid, cloud in results:
-        print(f"{pid:85s} {cloud:6.2f}%")
-
 
 if __name__ == "__main__":
     main()
+
