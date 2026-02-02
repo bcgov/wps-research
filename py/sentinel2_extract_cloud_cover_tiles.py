@@ -1,10 +1,12 @@
 '''20260202 extract cloud cover percentage for given tiles for specified date range..using Canada AWS sentinel-2 products mirror '''
+
 import sys
 import s3fs
 import rasterio
 import xml.etree.ElementTree as ET
 from datetime import datetime, date
-from typing import Set
+from typing import List
+import csv
 
 BUCKET = "sentinel-products-ca-mirror"
 PREFIX_ROOT = "Sentinel-2/S2MSI2A"
@@ -51,21 +53,12 @@ def extract_cloud_percentage(zip_url: str) -> float:
 
 
 # ------------------------------------------------------------
-# S3 discovery (with debug)
+# S3 discovery by date
 # ------------------------------------------------------------
-def iterate_products_by_date(fs, start: date, end: date):
+def iterate_products_by_date(fs, start: date, end: date, tiles: List[str]):
     """
-    Yield all product ZIP paths in the date range.
-    Includes debug output for prefix and bucket issues.
+    Yield product ZIP paths for the requested tile IDs in the date range.
     """
-    print(f"\n### DEBUG: Checking bucket access: {BUCKET}")
-    try:
-        fs.ls(BUCKET)
-        print("### DEBUG: Bucket access OK")
-    except Exception as e:
-        print(f"### DEBUG: Bucket access FAILED: {e}")
-        return
-
     current = start
     one_day = date.fromordinal(start.toordinal() + 1) - start
 
@@ -84,8 +77,8 @@ def iterate_products_by_date(fs, start: date, end: date):
             print(f"### DEBUG: {len(objs)} entries found")
 
             for obj in objs:
-                print(f"### DEBUG: raw entry -> {obj}")
-                if obj.endswith(".zip"):
+                if obj.endswith(".zip") and any(tile in obj for tile in tiles):
+                    print(f"### DEBUG: Found ZIP for requested tile -> {obj}")
                     yield obj
 
         except Exception as e:
@@ -101,9 +94,9 @@ def main():
     if len(sys.argv) < 4:
         print(
             "Usage:\n"
-            "  python sentinel2_cloud_debug.py <yyyymmdd_start> <yyyymmdd_end> <TILE_ID> [TILE_ID ...]\n\n"
+            "  python sentinel2_cloud_tiles.py <yyyymmdd_start> <yyyymmdd_end> <TILE_ID> [TILE_ID ...]\n\n"
             "Example:\n"
-            "  python sentinel2_cloud_debug.py 20240501 20240505 T10UFB T10UFA"
+            "  python sentinel2_cloud_tiles.py 20240501 20240505 T10UFB T10UFA"
         )
         sys.exit(1)
 
@@ -116,45 +109,42 @@ def main():
 
     fs = s3fs.S3FileSystem(anon=True)
 
-    available_tiles: Set[str] = set()
-    products = []
-
-    print("\n### DEBUG: Starting tile discovery")
-
-    for product in iterate_products_by_date(fs, start_date, end_date):
-        print(f"### DEBUG: Found ZIP: {product}")
-        tile = extract_tile_id(product)
-        print(f"### DEBUG: Extracted tile: {tile}")
-
-        available_tiles.add(tile)
-        products.append(product)
-
-    print("\nAvailable tiles in date range:")
-    if not available_tiles:
-        print("  (NONE FOUND)")
-    else:
-        for t in sorted(available_tiles):
-            print(f"  {t}")
-
-    print("\nRequested tiles:")
-    print("  " + ", ".join(requested_tiles))
-    print()
+    print(f"\nRequested tiles: {', '.join(requested_tiles)}")
+    print(f"Date range: {start_date} → {end_date}")
 
     # --------------------------------------------------------
     # Process requested tiles
     # --------------------------------------------------------
-    for product in products:
+    results = []
+    for product in iterate_products_by_date(fs, start_date, end_date, requested_tiles):
         tile = extract_tile_id(product)
-        if tile not in requested_tiles:
-            continue
-
         pid = product.split("/")[-1]
         try:
             cloud = extract_cloud_percentage(product)
+            results.append((pid, cloud))
             print(f"{pid} → {cloud:.2f}%")
         except Exception as e:
             print(f"FAILED {pid}: {e}")
 
+    if results:
+        print("\nSummary:")
+        for pid, cloud in results:
+            print(f"{pid:80s} {cloud:6.2f}%")
+
+        # --------------------------------------------------------
+        # Output to CSV
+        # --------------------------------------------------------
+        csv_filename = "_".join(sys.argv[1:]) + ".csv"
+        print(f"\nWriting results to CSV: {csv_filename}")
+        with open(csv_filename, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["Product", "CloudPercentage"])
+            for pid, cloud in results:
+                writer.writerow([pid, cloud])
+    else:
+        print("\nNo products found for the requested tiles and date range.")
+
 
 if __name__ == "__main__":
     main()
+
