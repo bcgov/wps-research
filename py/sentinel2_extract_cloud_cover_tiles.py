@@ -2,9 +2,8 @@
 
 import sys
 import s3fs
-import rasterio
 import xml.etree.ElementTree as ET
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import List
 import csv
 import time
@@ -32,14 +31,59 @@ def extract_tile_id(product_path: str) -> str:
     return "UNKNOWN"
 
 
-def extract_cloud_percentage(zip_url: str) -> float:
-    xml_path = f"/vsizip//vsis3/{zip_url}/MTD_MSIL2A.xml"
-    with rasterio.open(xml_path) as ds:
-        xml_text = ds.read().decode("utf-8")
-    root = ET.fromstring(xml_text)
+def get_safe_folder_name(zip_filename: str) -> str:
+    """
+    Convert ZIP filename to the SAFE folder name inside the ZIP.
+    Example: S2C_MSIL2A_20250726T191931_N0511_R099_T09UYS_20250727T000316.zip
+          -> S2C_MSIL2A_20250726T191931_N0511_R099_T09UYS_20250727T000316.SAFE
+    """
+    if zip_filename.endswith(".zip"):
+        return zip_filename[:-4] + ".SAFE"
+    return zip_filename + ".SAFE"
+
+
+def extract_cloud_percentage(fs: s3fs.S3FileSystem, s3_path: str) -> float:
+    """
+    Extract cloud percentage from the MTD_MSIL2A.xml file inside the ZIP.
+
+    The ZIP structure is:
+    <product_name>.zip/
+        <product_name>.SAFE/
+            MTD_MSIL2A.xml
+    """
+    zip_filename = s3_path.split("/")[-1]
+    safe_folder = get_safe_folder_name(zip_filename)
+
+    # Path to the XML file inside the ZIP on S3
+    xml_internal_path = f"{safe_folder}/MTD_MSIL2A.xml"
+
+    # Use s3fs to open the ZIP and read the XML
+    # We need to read from s3://<bucket>/<path>.zip/<internal_path>
+    full_zip_path = f"s3://{s3_path}"
+
+    # Open the ZIP file and read the XML content
+    with fs.open(full_zip_path, 'rb') as f:
+        import zipfile
+        import io
+
+        # Read the ZIP into memory (or stream it)
+        zip_data = io.BytesIO(f.read())
+
+        with zipfile.ZipFile(zip_data, 'r') as zf:
+            # Try to find the MTD_MSIL2A.xml file
+            xml_content = None
+            for name in zf.namelist():
+                if name.endswith('MTD_MSIL2A.xml'):
+                    xml_content = zf.read(name).decode('utf-8')
+                    break
+
+            if xml_content is None:
+                raise RuntimeError(f"MTD_MSIL2A.xml not found in {zip_filename}")
+
+    root = ET.fromstring(xml_content)
     cloud = root.find(".//CLOUDY_PIXEL_PERCENTAGE")
     if cloud is None:
-        raise RuntimeError("CLOUDY_PIXEL_PERCENTAGE not found")
+        raise RuntimeError("CLOUDY_PIXEL_PERCENTAGE not found in XML")
     return float(cloud.text)
 
 
@@ -47,10 +91,19 @@ def extract_cloud_percentage(zip_url: str) -> float:
 # S3 discovery by date
 # ------------------------------------------------------------
 def iterate_products_by_date(fs, start: date, end: date, tiles: List[str]):
+    """
+    Iterate through S3 bucket by date, yielding matching product paths.
+    Returns a tuple of (product_path, current_date, entries_found, matches_found)
+    for progress tracking.
+    """
     current = start
-    one_day = date.fromordinal(start.toordinal() + 1) - start
+    one_day = timedelta(days=1)
+
+    total_days = (end - start).days + 1
+    day_count = 0
 
     while current <= end:
+        day_count += 1
         yyyy = current.strftime("%Y")
         mm = current.strftime("%m")
         dd = current.strftime("%d")
@@ -58,23 +111,31 @@ def iterate_products_by_date(fs, start: date, end: date, tiles: List[str]):
         prefix = f"{PREFIX_ROOT}/{yyyy}/{mm}/{dd}/"
         s3_path = f"{BUCKET}/{prefix}"
 
-        print(f"\n### DEBUG: Listing S3 path: {s3_path}")
+        entries_found = 0
+        matches_found = 0
 
         try:
             objs = fs.ls(s3_path)
-            print(f"### DEBUG: {len(objs)} entries found")
+            entries_found = len(objs)
 
             for obj in objs:
                 if obj.endswith(".zip") and any(tile in obj for tile in tiles):
-                    print(f"### DEBUG: Found ZIP for requested tile -> {obj}")
+                    matches_found += 1
                     yield obj
 
         except Exception as e:
             # Suppress AWS credential errors, just report as "not found"
             if "AccessDenied" in str(e) or "NoCredentialsError" in str(e):
-                print(f"### DEBUG: Skipping {s3_path} (anonymous access)")
+                pass  # Skip silently
             else:
-                print(f"### DEBUG: fs.ls failed for {s3_path}: {e}")
+                pass  # Skip other errors silently during discovery
+
+        # Print progress for the discovery phase
+        print(
+            f"Discovery: {day_count}/{total_days} days "
+            f"({day_count/total_days*100:.1f}%) - "
+            f"Date: {current} - Entries: {entries_found}, Matches: {matches_found}"
+        )
 
         current += one_day
 
@@ -103,11 +164,17 @@ def main():
 
     print(f"\nRequested tiles: {', '.join(requested_tiles)}")
     print(f"Date range: {start_date} → {end_date}")
+    print(f"\n{'='*60}")
+    print("Phase 1: Discovering products...")
+    print(f"{'='*60}\n")
 
     # Collect all products first to estimate progress
     products = list(iterate_products_by_date(fs, start_date, end_date, requested_tiles))
     total_products = len(products)
-    print(f"\nTotal products to process: {total_products}")
+
+    print(f"\n{'='*60}")
+    print(f"Phase 2: Extracting cloud percentages from {total_products} products...")
+    print(f"{'='*60}\n")
 
     results = []
     start_time = time.time()
@@ -116,10 +183,12 @@ def main():
         pid = product.split("/")[-1]
         tile = extract_tile_id(product)
         try:
-            cloud = extract_cloud_percentage(product)
+            cloud = extract_cloud_percentage(fs, product)
             results.append((pid, cloud))
+            status = f"{cloud:.2f}%"
         except Exception as e:
             print(f"FAILED {pid}: {e}")
+            status = "FAILED"
 
         # --------------------------------------------------------
         # Progress / ETA
@@ -132,14 +201,16 @@ def main():
             remaining = 0
         print(
             f"Progress: {idx}/{total_products} "
-            f"({progress:.1f}%) - Elapsed: {elapsed:.1f}s, ETA: {remaining:.1f}s"
+            f"({progress:.1f}%) - Elapsed: {elapsed:.1f}s, ETA: {remaining:.1f}s - {status}"
         )
 
     # --------------------------------------------------------
     # Print summary
     # --------------------------------------------------------
     if results:
-        print("\nSummary:")
+        print(f"\n{'='*60}")
+        print("Summary:")
+        print(f"{'='*60}\n")
         for pid, cloud in results:
             print(f"{pid:80s} {cloud:6.2f}%")
 
@@ -153,10 +224,11 @@ def main():
             writer.writerow(["Product", "CloudPercentage"])
             for pid, cloud in results:
                 writer.writerow([pid, cloud])
+
+        print(f"Successfully processed {len(results)}/{total_products} products.")
     else:
         print("\nNo products found for the requested tiles and date range.")
 
 
 if __name__ == "__main__":
     main()
-
