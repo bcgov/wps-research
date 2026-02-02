@@ -7,849 +7,275 @@
 python3 sync_daterange_gid_zip.py [yyyymmdd] [yyyymmdd2] # optional: list of GID
 '''
 
-#!/usr/bin/env python3
-"""
-Sentinel-2 Cloud Cover Extraction and Visualization
+'''20260127: progress monitor added
 
-Discovers Sentinel-2 products, extracts cloud cover percentages, and generates
-a plot showing cloud cover over time by tile with the best 5 days highlighted.
+20230627: sync a date range for selected GID, in Level-2 to zip file format.
 
-Usage:
-    python sentinel2_cloud_tiles.py <yyyymmdd_start> <yyyymmdd_end> <TILE_ID> [TILE_ID ...]
-
-Options:
-    --L1             Query L1C data only
-    --L2             Query L2A data only
-                     (default: query both L1C and L2A)
-    --no-cache       Skip all caching (force fresh discovery and extraction)
-    --workers=N      Set number of parallel workers (default: 8)
-    --single-thread  Run single-threaded (for debugging)
-    --output=PREFIX  Output filename prefix (default: cloud_cover_by_tile)
-                     Will generate PREFIX_L1C.png/csv and/or PREFIX_L2A.png/csv
-
-Example:
-    python sentinel2_cloud_tiles.py 20240501 20240505 T10UFB T10UFA
-    python sentinel2_cloud_tiles.py 20240501 20240505 T10UFB --L2 --workers=16
-"""
-
-import sys
-import s3fs
-import xml.etree.ElementTree as ET
-from datetime import datetime, date, timedelta
-from typing import List, Dict, Tuple, Optional
-import csv
+python3 sync_daterange_gid_zip.py [yyyymmdd] [yyyymmdd2] # optional: list of GID
+'''
+use_L2 = False
+data_type = None
+''''MSIL2A'
+if not use_L2:
+    data_type = 'MSIL1C'
+'''
+from misc import args, sep, exists, parfor, run, timestamp, err
+from aws_download import aws_download
+import multiprocessing as mp
+from pathlib import Path
+import datetime
+import argparse
+import shutil
 import time
-import pickle
-import hashlib
+import json
+import sys
 import os
-import re
-import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from collections import defaultdict
 
-# Try to import matplotlib
-try:
-    import matplotlib.pyplot as plt
-    import matplotlib.dates as mdates
-    HAS_MATPLOTLIB = True
-except ImportError:
-    HAS_MATPLOTLIB = False
-    print("WARNING: matplotlib not available, plotting disabled")
+# Global status tracking
+download_start_time = None
+files_completed = 0
+total_files = 0
+bytes_completed = 0
+total_bytes = 0
 
-# Try to import GDAL - needed for VSI file access
-try:
-    from osgeo import gdal
-    gdal.UseExceptions()
-    HAS_GDAL = True
-except ImportError:
-    HAS_GDAL = False
-    print("WARNING: osgeo.gdal not available, will try alternative method")
+my_path_0 = '/data/'
+my_path_1 = sep.join(os.path.abspath(__file__).split(sep)[:-1]) + sep
+my_path = my_path_1
+try:  # json backup
+    if not exists(my_path_0):
+        print('mkdir', my_path_0)
+        os.mkdir(my_path_0)
+    my_path = my_path_0
+except:
+    if not exists(my_path_1 + '.listing'):
+        os.mkdir(my_path_1 + '.listing')
 
-BUCKET = "sentinel-products-ca-mirror"
-S3_BASE_URL = f"https://{BUCKET}.s3.amazonaws.com"
-CACHE_DIR = ".sentinel2_cache"
-RESULTS_CACHE_DIR = os.path.join(CACHE_DIR, "results")
+product_target = os.getcwd() + sep # put ARD products into present folder
 
-# Level prefixes
-LEVEL_PREFIXES = {
-    "L1C": "Sentinel-2/S2MSI1C",
-    "L2A": "Sentinel-2/S2MSI2A",
-}
+# parser = argparse.ArgumentParser()
+# parser.add_argument("-n", "--no_refresh", action="store_true",
+#                     help="do not refresh aws bucket listing, use most recent list instead")
+no_refresh = True # args.no_refresh
 
-# Global settings
-N_WORKERS = 8
-SINGLE_THREAD = False
+def print_status_update(file_name, file_size, file_download_time):
+    global files_completed, total_files, bytes_completed, total_bytes, download_start_time
 
+    elapsed_time = time.time() - download_start_time
+    pct_files = (files_completed / total_files * 100) if total_files > 0 else 0
+    pct_bytes = (bytes_completed / total_bytes * 100) if total_bytes > 0 else 0
 
-# ------------------------------------------------------------
-# Thread-safe progress tracking
-# ------------------------------------------------------------
-class ProgressTracker:
-    def __init__(self, name: str, total: int):
-        self.name = name
-        self.total = total
-        self.count = 0
-        self.start_time = time.time()
-        self.lock = threading.Lock()
+    if files_completed > 0:
+        time_per_file = elapsed_time / files_completed
+        files_remaining = total_files - files_completed
+        eta_seconds = time_per_file * files_remaining
+    else:
+        eta_seconds = 0
 
-    def update(self, message: str = ""):
-        with self.lock:
-            self.count += 1
-            elapsed = time.time() - self.start_time
-            pct = self.count / self.total * 100 if self.total > 0 else 0
-            eta = (elapsed / self.count) * (self.total - self.count) if self.count > 0 else 0
-            print(f"  {self.name}: {self.count}/{self.total} ({pct:.1f}%) - "
-                  f"Elapsed: {elapsed:.1f}s, ETA: {eta:.1f}s - {message}")
+    print(f"\n{'='*60}")
+    print(f"DOWNLOAD STATUS UPDATE")
+    print(f"{'='*60}")
+    print(f"File completed: {file_name}")
+    print(f"File size: {file_size / (1024*1024):.2f} MB | File download time: {file_download_time:.1f}s")
+    print(f"{'='*60}")
+    print(f"Files completed:    {files_completed} / {total_files} ({pct_files:.1f}%)")
+    print(f"Bytes completed:    {bytes_completed / (1024*1024*1024):.2f} / {total_bytes / (1024*1024*1024):.2f} GB ({pct_bytes:.1f}%)")
+    print(f"Time elapsed:       {elapsed_time / 60:.1f} min")
+    print(f"Time remaining:     {eta_seconds / 60:.1f} min | {eta_seconds / 3600:.2f} hrs | {eta_seconds / 86400:.3f} days (ETA)")
+    print(f"{'='*60}\n")
 
+def download_by_gids(gids, yyyymmdd, yyyymmdd2):
+    global files_completed, total_files, bytes_completed, total_bytes, download_start_time
 
-# ------------------------------------------------------------
-# Utilities
-# ------------------------------------------------------------
-def parse_yyyymmdd(s: str) -> date:
+    if len(yyyymmdd) != 8 or len(yyyymmdd2) != 8:
+        err('expected date in format yyyymmdd')
+    start_d = datetime.datetime(int(yyyymmdd[0:4]),
+                                int(yyyymmdd[4:6]),
+                                int(yyyymmdd[6:8]))
+    end_d = datetime.datetime(int(yyyymmdd2[0:4]),
+                              int(yyyymmdd2[4:6]),
+                              int(yyyymmdd2[6:8]))
+    print("start", start_d, "end", end_d)
+    date_range = []
+    while start_d <= end_d:
+        print(start_d)
+        date_range += [str(start_d.year).zfill(4) + str(start_d.month).zfill(2) + str(start_d.day).zfill(2)]
+        start_d += datetime.timedelta(days=1)
+
+    print(date_range)
+
+    ts = timestamp()
+    cmd = ' '.join(['aws',  # read data from aws
+                    's3api',
+                    'list-objects',
+                    '--no-sign-request',
+                    '--bucket sentinel-products-ca-mirror'])
+    print(cmd)
+    list_dir = my_path + '.listing' + sep
+    if not no_refresh:
+        data = os.popen(cmd).read()
+    else:
+        data_files = [x.strip() for x in os.popen('ls -1 ' + list_dir).readlines()]
+        data_files.sort(reverse=True)
+        for d in data_files:
+            print('  ', d)
+        print('+r', list_dir + data_files[0])
+        data = open(list_dir + data_files[0]).read() # .decode()
+
+    if not no_refresh:
+        print('caching at', list_dir)
+        if not exists(list_dir):  # json backup for analysis
+            os.mkdir(list_dir)
+        df = list_dir + ts + '_objects.txt'  # file to write
+        open(df, 'wb').write(data.encode())  # record json to file
+    else:
+        print('Skip caching listing at', list_dir)
+
+    jobs, d = [], None
     try:
-        return datetime.strptime(s, "%Y%m%d").date()
-    except ValueError:
-        raise ValueError(f"Invalid date format (expected yyyymmdd): {s}")
+        d = json.loads(data)  # parse json data
+    except:
+        err('please confirm aws cli: e.g. sudo apt install awscli')
+    data = d['Contents']  # extract the data records, one per dataset
 
+    # First pass: collect files to download and calculate totals
+    files_to_download = []
+    for d in data:
+        key, modified, file_size = d['Key'].strip(), d['LastModified'], d['Size']
+        w = [x.strip() for x in key.split('/')]
+        if w[0] == 'Sentinel-2':
+            f = w[-1]
+            fw = f.split('_')
+            gid = fw[5]   # e.g. T10UGU
 
-def extract_tile_id(product_path: str) -> str:
-    name = product_path.split("/")[-1]
-    parts = name.split("_")
-    for p in parts:
-        if p.startswith("T") and len(p) == 6:
-            return p
-    return "UNKNOWN"
+            out_dir = ("L2_" if use_L2 else "L1_") + gid
+            f = out_dir + os.path.sep + f
 
-
-def extract_level(product_path: str) -> str:
-    """Extract processing level (L1C or L2A) from product path."""
-    name = product_path.split("/")[-1]
-    if "MSIL1C" in name:
-        return "L1C"
-    elif "MSIL2A" in name:
-        return "L2A"
-    return "UNKNOWN"
-
-
-def extract_date_from_product(product_id: str) -> Optional[datetime]:
-    """Extract sensing date from product filename."""
-    parts = product_id.split("_")
-    for p in parts:
-        if len(p) == 15 and p[8] == "T":
-            try:
-                return datetime.strptime(p[:8], "%Y%m%d")
-            except ValueError:
+            ts = fw[2].split('T')[0]  # e.g. 20230525
+            if fw[1] != data_type or ts not in date_range:  # wrong product or outside date range
                 continue
-    return None
-
-
-def get_safe_folder_name(zip_filename: str) -> str:
-    """Convert ZIP filename to the SAFE folder name inside the ZIP."""
-    if zip_filename.endswith(".zip"):
-        return zip_filename[:-4] + ".SAFE"
-    return zip_filename + ".SAFE"
-
-
-# ------------------------------------------------------------
-# Discovery Cache
-# ------------------------------------------------------------
-def get_discovery_cache_filename(start_date: date, end_date: date, tiles: List[str], level: str) -> str:
-    tiles_sorted = sorted(tiles)
-    tiles_str = "_".join(tiles_sorted)
-
-    if len(tiles_str) > 50:
-        tiles_hash = hashlib.md5(tiles_str.encode()).hexdigest()[:8]
-        tiles_part = f"{len(tiles)}tiles_{tiles_hash}"
-    else:
-        tiles_part = tiles_str
-
-    filename = f"discovery_{level}_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}_{tiles_part}.pkl"
-    return os.path.join(CACHE_DIR, filename)
-
-
-def load_discovery_cache(cache_file: str) -> Optional[List[str]]:
-    if os.path.exists(cache_file):
-        try:
-            with open(cache_file, 'rb') as f:
-                data = pickle.load(f)
-            print(f"  Loaded {len(data)} products from cache: {cache_file}")
-            return data
-        except Exception as e:
-            print(f"  Cache load failed: {e}")
-    return None
-
-
-def save_discovery_cache(cache_file: str, products: List[str]):
-    os.makedirs(CACHE_DIR, exist_ok=True)
-    try:
-        with open(cache_file, 'wb') as f:
-            pickle.dump(products, f)
-        print(f"  Saved {len(products)} products to cache: {cache_file}")
-    except Exception as e:
-        print(f"  Cache save failed: {e}")
-
-
-# ------------------------------------------------------------
-# Results Cache (per-product)
-# ------------------------------------------------------------
-def get_result_cache_filename(product_id: str) -> str:
-    safe_name = product_id.replace("/", "_").replace("\\", "_")
-    return os.path.join(RESULTS_CACHE_DIR, f"{safe_name}.pkl")
-
-
-def load_result_cache(product_id: str) -> Optional[Tuple[str, float]]:
-    cache_file = get_result_cache_filename(product_id)
-    if os.path.exists(cache_file):
-        try:
-            with open(cache_file, 'rb') as f:
-                return pickle.load(f)
-        except Exception:
-            pass
-    return None
-
-
-def save_result_cache(product_id: str, cloud_pct: float):
-    os.makedirs(RESULTS_CACHE_DIR, exist_ok=True)
-    cache_file = get_result_cache_filename(product_id)
-    try:
-        with open(cache_file, 'wb') as f:
-            pickle.dump((product_id, cloud_pct), f)
-    except Exception:
-        pass
-
-
-# ------------------------------------------------------------
-# GDAL VSI file reading
-# ------------------------------------------------------------
-def read_vsi_file(vsi_path: str) -> bytes:
-    f = gdal.VSIFOpenL(vsi_path, 'rb')
-    if f is None:
-        raise RuntimeError(f"Failed to open: {vsi_path}")
-
-    try:
-        gdal.VSIFSeekL(f, 0, 2)
-        size = gdal.VSIFTellL(f)
-        gdal.VSIFSeekL(f, 0, 0)
-        data = gdal.VSIFReadL(1, size, f)
-        return data
-    finally:
-        gdal.VSIFCloseL(f)
-
-
-def debug_xml_structure(root: ET.Element, xml_text: str):
-    print(f"      [DEBUG] XML root tag: {root.tag}")
-
-    ns_match = re.match(r'\{(.+?)\}', root.tag)
-    ns = ns_match.group(1) if ns_match else None
-    print(f"      [DEBUG] XML namespace: {ns}")
-
-    all_tags = set()
-    for elem in root.iter():
-        tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
-        all_tags.add(tag)
-
-    print(f"      [DEBUG] Total unique tags: {len(all_tags)}")
-    print(f"      [DEBUG] All tags: {sorted(all_tags)[:50]}")
-
-    cloud_elements = []
-    for elem in root.iter():
-        tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
-        if 'cloud' in tag.lower():
-            cloud_elements.append((tag, elem.text[:100] if elem.text else None))
-
-    print(f"      [DEBUG] Elements containing 'cloud': {len(cloud_elements)}")
-    for tag, text in cloud_elements[:20]:
-        print(f"      [DEBUG]   {tag}: {text}")
-
-
-def extract_cloud_from_xml(xml_text: str) -> float:
-    root = ET.fromstring(xml_text)
-
-    cloud = root.find(".//CLOUDY_PIXEL_PERCENTAGE")
-    if cloud is None:
-        cloud = root.find(".//{*}CLOUDY_PIXEL_PERCENTAGE")
-    if cloud is None:
-        cloud = root.find(".//Cloud_Coverage_Assessment")
-    if cloud is None:
-        cloud = root.find(".//{*}Cloud_Coverage_Assessment")
-
-    if cloud is None:
-        debug_xml_structure(root, xml_text)
-        raise RuntimeError("CLOUDY_PIXEL_PERCENTAGE not found in XML")
-
-    return float(cloud.text)
-
-
-def get_metadata_filename(level: str) -> str:
-    """Get the metadata XML filename for the given level."""
-    if level == "L1C":
-        return "MTD_MSIL1C.xml"
-    else:
-        return "MTD_MSIL2A.xml"
-
-
-def extract_cloud_percentage_gdal(s3_path: str) -> float:
-    zip_filename = s3_path.split("/")[-1]
-    safe_folder = get_safe_folder_name(zip_filename)
-    level = extract_level(s3_path)
-    metadata_file = get_metadata_filename(level)
-
-    path_without_bucket = s3_path[len(BUCKET) + 1:]
-
-    http_url = f"{S3_BASE_URL}/{path_without_bucket}"
-    vsi_url = f"/vsizip//vsicurl/{http_url}/{safe_folder}/{metadata_file}"
-
-    xml_bytes = read_vsi_file(vsi_url)
-    xml_text = xml_bytes.decode("utf-8")
-
-    return extract_cloud_from_xml(xml_text)
-
-
-def extract_cloud_percentage_s3fs(s3_path: str) -> float:
-    import zipfile
-    import io
-
-    level = extract_level(s3_path)
-    metadata_file = get_metadata_filename(level)
-
-    fs = s3fs.S3FileSystem(anon=True)
-
-    with fs.open(f"s3://{s3_path}", 'rb') as f:
-        zip_data = io.BytesIO(f.read())
-
-    with zipfile.ZipFile(zip_data, 'r') as zf:
-        xml_content = None
-        for name in zf.namelist():
-            if name.endswith(metadata_file):
-                xml_content = zf.read(name).decode('utf-8')
-                break
-
-        if xml_content is None:
-            raise RuntimeError(f"{metadata_file} not found in ZIP")
-
-    return extract_cloud_from_xml(xml_content)
-
-
-def extract_cloud_percentage(s3_path: str) -> float:
-    if HAS_GDAL:
-        return extract_cloud_percentage_gdal(s3_path)
-    else:
-        return extract_cloud_percentage_s3fs(s3_path)
-
-
-# ------------------------------------------------------------
-# Discovery worker function
-# ------------------------------------------------------------
-def discover_single_date(current_date: date, tiles: List[str], level: str, progress: ProgressTracker) -> List[str]:
-    fs = s3fs.S3FileSystem(anon=True)
-
-    yyyy = current_date.strftime("%Y")
-    mm = current_date.strftime("%m")
-    dd = current_date.strftime("%d")
-
-    prefix_root = LEVEL_PREFIXES[level]
-    prefix = f"{prefix_root}/{yyyy}/{mm}/{dd}/"
-    s3_path = f"{BUCKET}/{prefix}"
-
-    matches = []
-    entries_found = 0
-
-    try:
-        objs = fs.ls(s3_path)
-        entries_found = len(objs)
-
-        for obj in objs:
-            if obj.endswith(".zip") and any(tile in obj for tile in tiles):
-                matches.append(obj)
-    except Exception:
-        pass
-
-    progress.update(f"{level} Date: {current_date} - Entries: {entries_found}, Matches: {len(matches)}")
-
-    return matches
-
-
-def discover_products_parallel(start_date: date, end_date: date, tiles: List[str], level: str, use_cache: bool = True) -> List[str]:
-    cache_file = get_discovery_cache_filename(start_date, end_date, tiles, level)
-
-    if use_cache:
-        cached = load_discovery_cache(cache_file)
-        if cached is not None:
-            return cached
-
-    print(f"  Running fresh {level} discovery in parallel with {N_WORKERS} workers...")
-
-    dates = []
-    current = start_date
-    while current <= end_date:
-        dates.append(current)
-        current += timedelta(days=1)
-
-    progress = ProgressTracker(f"Discovery {level}", len(dates))
-
-    products = []
-
-    if SINGLE_THREAD:
-        for d in dates:
-            matches = discover_single_date(d, tiles, level, progress)
-            products.extend(matches)
-    else:
-        with ThreadPoolExecutor(max_workers=N_WORKERS) as executor:
-            futures = {executor.submit(discover_single_date, d, tiles, level, progress): d for d in dates}
-
-            for future in as_completed(futures):
-                try:
-                    matches = future.result()
-                    products.extend(matches)
-                except Exception as e:
-                    d = futures[future]
-                    print(f"  ERROR processing date {d}: {e}")
-
-    if use_cache:
-        save_discovery_cache(cache_file, products)
-
-    return products
-
-
-# ------------------------------------------------------------
-# Extraction worker function
-# ------------------------------------------------------------
-def extract_single_product(s3_path: str, progress: ProgressTracker) -> Tuple[str, Optional[float], Optional[str]]:
-    pid = s3_path.split("/")[-1]
-    level = extract_level(s3_path)
-
-    try:
-        cloud = extract_cloud_percentage(s3_path)
-        save_result_cache(pid, cloud)
-        result = (pid, cloud, None)
-        status = f"[{level}] {pid[:45]}... Cloud: {cloud:.2f}%"
-    except Exception as e:
-        result = (pid, None, str(e))
-        status = f"[{level}] {pid[:45]}... FAILED: {str(e)[:25]}"
-
-    progress.update(status)
-
-    return result
-
-
-def extract_cloud_percentages_parallel(products: List[str], level: str, use_cache: bool = True) -> Tuple[List[Tuple[str, float]], List[Tuple[str, str]]]:
-    product_ids = [p.split("/")[-1] for p in products]
-
-    cached_results = {}
-    if use_cache:
-        print(f"  Checking cache for {len(products)} {level} products...")
-        for pid in product_ids:
-            result = load_result_cache(pid)
-            if result is not None:
-                cached_results[pid] = result[1]
-        print(f"  Found {len(cached_results)} cached results")
-
-    products_to_process = []
-    for s3_path in products:
-        pid = s3_path.split("/")[-1]
-        if pid not in cached_results:
-            products_to_process.append(s3_path)
-
-    print(f"  Need to process {len(products_to_process)} new {level} products")
-
-    new_results = []
-    new_failures = []
-
-    if products_to_process:
-        progress = ProgressTracker(f"Extraction {level}", len(products_to_process))
-
-        print(f"  Starting parallel {level} extraction with {N_WORKERS} workers...")
-
-        if SINGLE_THREAD:
-            for s3_path in products_to_process:
-                pid, cloud, error = extract_single_product(s3_path, progress)
-                if cloud is not None:
-                    new_results.append((pid, cloud))
-                else:
-                    new_failures.append((pid, error))
-        else:
-            with ThreadPoolExecutor(max_workers=N_WORKERS) as executor:
-                futures = {executor.submit(extract_single_product, s3_path, progress): s3_path
-                          for s3_path in products_to_process}
-
-                for future in as_completed(futures):
-                    try:
-                        pid, cloud, error = future.result()
-                        if cloud is not None:
-                            new_results.append((pid, cloud))
-                        else:
-                            new_failures.append((pid, error))
-                    except Exception as e:
-                        s3_path = futures[future]
-                        pid = s3_path.split("/")[-1]
-                        new_failures.append((pid, str(e)))
-
-    all_results = [(pid, cloud) for pid, cloud in cached_results.items()]
-    all_results.extend(new_results)
-
-    return all_results, new_failures
-
-
-# ------------------------------------------------------------
-# Plotting functions
-# ------------------------------------------------------------
-def organize_by_tile_and_date(results: List[Tuple[str, float]]) -> Dict[str, List[Tuple[datetime, float]]]:
-    """Organize results by tile ID, with date and cloud percentage."""
-    by_tile = defaultdict(list)
-
-    for product_id, cloud_pct in results:
-        tile_id = extract_tile_id(product_id)
-        sensing_date = extract_date_from_product(product_id)
-
-        if sensing_date is None:
-            continue
-
-        by_tile[tile_id].append((sensing_date, cloud_pct))
-
-    for tile_id in by_tile:
-        by_tile[tile_id].sort(key=lambda x: x[0])
-
-    return dict(by_tile)
-
-
-def aggregate_by_day(tile_data: List[Tuple[datetime, float]]) -> Tuple[List[datetime], List[float]]:
-    """Aggregate multiple observations on the same day by averaging."""
-    by_day = defaultdict(list)
-
-    for dt, cloud_pct in tile_data:
-        day = dt.date()
-        by_day[day].append(cloud_pct)
-
-    days = sorted(by_day.keys())
-    dates = [datetime.combine(d, datetime.min.time()) for d in days]
-    averages = [sum(by_day[d]) / len(by_day[d]) for d in days]
-
-    return dates, averages
-
-
-def compute_daily_totals(data_by_tile: Dict[str, List[Tuple[datetime, float]]]) -> Dict[date, Tuple[float, int]]:
-    """Compute total cloud coverage across all tiles for each day."""
-    daily_totals = defaultdict(lambda: [0.0, 0])
-
-    for tile_id, tile_data in data_by_tile.items():
-        for dt, cloud_pct in tile_data:
-            day = dt.date()
-            daily_totals[day][0] += cloud_pct
-            daily_totals[day][1] += 1
-
-    return {day: (vals[0], vals[1]) for day, vals in daily_totals.items()}
-
-
-def find_best_days(daily_totals: Dict[date, Tuple[float, int]], n: int = 5) -> List[Tuple[date, float, int]]:
-    """Find the N days with lowest total cloud coverage."""
-    sorted_days = sorted(daily_totals.items(), key=lambda x: x[1][0])
-    return [(day, total, count) for day, (total, count) in sorted_days[:n]]
-
-
-def print_best_days(best_days: List[Tuple[date, float, int]], data_by_tile: Dict[str, List[Tuple[datetime, float]]], level: str):
-    """Print details about the best days."""
-    print(f"\n" + "=" * 70)
-    print(f"BEST 5 DAYS - {level} (Lowest Total Cloud Coverage Across All Tiles)")
-    print("=" * 70)
-
-    for rank, (day, total_cloud, num_obs) in enumerate(best_days, 1):
-        avg_cloud = total_cloud / num_obs if num_obs > 0 else 0
-        print(f"\n#{rank}: {day.strftime('%Y-%m-%d')}")
-        print(f"    Total cloud sum: {total_cloud:.2f}%")
-        print(f"    Number of observations: {num_obs}")
-        print(f"    Average cloud per tile: {avg_cloud:.2f}%")
-
-        print(f"    Per-tile breakdown:")
-        for tile_id in sorted(data_by_tile.keys()):
-            tile_data = data_by_tile[tile_id]
-            for dt, cloud_pct in tile_data:
-                if dt.date() == day:
-                    print(f"      {tile_id}: {cloud_pct:.2f}%")
-
-
-def plot_cloud_cover(data_by_tile: Dict[str, List[Tuple[datetime, float]]],
-                     best_days: List[Tuple[date, float, int]],
-                     level: str,
-                     output_file: str):
-    """Create a line plot of cloud cover over time, one line per tile."""
-    if not HAS_MATPLOTLIB:
-        print("Skipping plot generation (matplotlib not available)")
+            if gids is not None and gid not in gids:  # only level-2 for selected date and gid
+                continue
+
+            if exists(f) and Path(f).stat().st_size == file_size:
+                print(f, "SKIPPING")
+            else:
+                files_to_download.append({'key': key, 'file': f, 'size': file_size, 'out_dir': out_dir})
+
+    # Calculate totals
+    total_files = len(files_to_download)
+    total_bytes = sum(item['size'] for item in files_to_download)
+
+    print(f"\n{'='*60}")
+    print(f"DOWNLOAD SUMMARY")
+    print(f"{'='*60}")
+    print(f"Total files to download: {total_files}")
+    print(f"Total download size: {total_bytes / (1024*1024*1024):.2f} GB")
+    print(f"{'='*60}\n")
+
+    # Check available disk space
+    disk_usage = shutil.disk_usage(os.getcwd())
+    available_space = disk_usage.free
+
+    if available_space < total_bytes:
+        print(f"\n{'='*60}")
+        print(f"ERROR: INSUFFICIENT DISK SPACE")
+        print(f"{'='*60}")
+        print(f"Required: {total_bytes / (1024*1024*1024):.2f} GB")
+        print(f"Available: {available_space / (1024*1024*1024):.2f} GB")
+        print(f"{'='*60}\n")
+        err('Insufficient disk space. Exiting before downloads.')
+
+    if total_files == 0:
+        print("No files to download.")
         return
 
-    if not data_by_tile:
-        print(f"No data to plot for {level}")
-        return
+    # Record start time
+    download_start_time = time.time()
 
-    fig, ax = plt.subplots(figsize=(14, 8))
+    # Second pass: download files
+    for item in files_to_download:
+        key = item['key']
+        f = item['file']
+        file_size = item['size']
+        out_dir = item['out_dir']
 
-    colors = plt.cm.tab20(range(len(data_by_tile)))
+        if not os.path.exists(out_dir):
+            os.mkdir(out_dir)
 
-    for i, (tile_id, tile_data) in enumerate(sorted(data_by_tile.items())):
-        dates, cloud_pcts = aggregate_by_day(tile_data)
+        print(f)
 
-        ax.plot(dates, cloud_pcts,
-                marker='o',
-                markersize=3,
-                linewidth=1,
-                alpha=0.8,
-                color=colors[i],
-                label=f"{tile_id} ({len(tile_data)} obs)")
+        file_start_time = time.time()
+        aws_download('sentinel-products-ca-mirror',
+                     key,
+                     Path(f))
+        file_end_time = time.time()
+        file_download_time = file_end_time - file_start_time
 
-    best_day_dates = [d for d, _, _ in best_days]
+        # Update global counters
+        files_completed += 1
+        bytes_completed += file_size
 
-    for tile_id, tile_data in data_by_tile.items():
-        for dt, cloud_pct in tile_data:
-            if dt.date() in best_day_dates:
-                ax.scatter([dt], [cloud_pct],
-                          marker='X',
-                          s=150,
-                          c='red',
-                          zorder=10,
-                          edgecolors='darkred',
-                          linewidths=1)
-
-    ax.scatter([], [], marker='X', s=150, c='red', edgecolors='darkred',
-               linewidths=1, label=f'Best 5 days (lowest total cloud)')
-
-    ax.set_xlabel("Date", fontsize=12)
-    ax.set_ylabel("Cloud Cover (%)", fontsize=12)
-    ax.set_title(f"Sentinel-2 {level} Cloud Cover by Tile Over Time", fontsize=14)
-
-    ax.set_ylim(0, 100)
-
-    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
-    ax.xaxis.set_major_locator(mdates.AutoDateLocator())
-    plt.xticks(rotation=45, ha='right')
-
-    ax.grid(True, alpha=0.3)
-
-    if len(data_by_tile) > 10:
-        ax.legend(loc='center left', bbox_to_anchor=(1.02, 0.5),
-                  fontsize=8, ncol=1)
-    else:
-        ax.legend(loc='upper right', fontsize=9)
-
-    plt.tight_layout()
-
-    plt.savefig(output_file, dpi=150, bbox_inches='tight')
-    print(f"Plot saved to: {output_file}")
-
-    plt.close()
+        # Print status update
+        print_status_update(f, file_size, file_download_time)
 
 
-def process_level(level: str, start_date: date, end_date: date, requested_tiles: List[str],
-                  use_cache: bool, output_prefix: str) -> Tuple[int, int, int]:
-    """
-    Process a single level (L1C or L2A): discovery, extraction, summary, CSV, and plot.
-    Returns (num_products, num_success, num_failed)
-    """
-    print(f"\n{'#'*70}")
-    print(f"# Processing {level}")
-    print(f"{'#'*70}")
+    '''
+    print(cmds)
+    def runc(c):
+        print([c])
+        return os.system(c)
+    parfor(runc, cmds, 2) # min(int(2), 2 * int(mp.cpu_count())))
+    '''
 
-    # Phase 1: Discovery
-    print(f"\n{'='*70}")
-    print(f"Phase 1: Discovering {level} products...")
-    print(f"{'='*70}\n")
+def is_date_format(s):
+    """Check if string is in yyyymmdd format (8 digits)"""
+    return len(s) == 8 and s.isdigit()
 
-    t_discovery_start = time.time()
-    products = discover_products_parallel(start_date, end_date, requested_tiles, level, use_cache)
-    t_discovery_end = time.time()
+# check if L2 mode is desired ( L1 mode default )
+use_L2 = '--L2' in args
 
-    print(f"\n  {level} Discovery complete: {len(products)} products found in {t_discovery_end - t_discovery_start:.1f}s")
+if '--L2' in args and '--L1' in args:
+    err("Must select L2 or L1")
 
-    if not products:
-        print(f"  No {level} products found.")
-        return 0, 0, 0
+if '--L1' in args:
+    use_L2 = False
 
-    # Phase 2: Extraction
-    print(f"\n{'='*70}")
-    print(f"Phase 2: Extracting {level} cloud percentages from {len(products)} products...")
-    print(f"{'='*70}\n")
+data_type = 'MSIL2A'
+if not use_L2:
+    data_type = 'MSIL1C'
 
-    t_extraction_start = time.time()
-    results, failures = extract_cloud_percentages_parallel(products, level, use_cache)
-    t_extraction_end = time.time()
-
-    print(f"\n  {level} Extraction complete in {t_extraction_end - t_extraction_start:.1f}s")
-
-    # Summary
-    print(f"\n{'='*70}")
-    print(f"{level} Summary:")
-    print(f"{'='*70}\n")
-
-    print(f"Total {level} products discovered: {len(products)}")
-    print(f"Successfully processed: {len(results)}")
-    print(f"Failed: {len(failures)}")
-
-    if results:
-        results_sorted = sorted(results, key=lambda x: x[0])
-
-        print(f"\n{level} Results (sorted by product name):")
-        print("-" * 90)
-        for pid, cloud in results_sorted[:20]:
-            print(f"{pid:80s} {cloud:6.2f}%")
-        if len(results_sorted) > 20:
-            print(f"  ... and {len(results_sorted) - 20} more")
-
-        # Write to CSV
-        csv_filename = f"{output_prefix}_{level}.csv"
-        print(f"\nWriting {len(results_sorted)} {level} results to CSV: {csv_filename}")
-        with open(csv_filename, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(["Product", "CloudPercentage"])
-            for pid, cloud in results_sorted:
-                writer.writerow([pid, cloud])
-
-        print(f"CSV written successfully.")
-
-        # Stats
-        cloud_values = [c for _, c in results]
-        avg_cloud = sum(cloud_values) / len(cloud_values)
-        min_cloud = min(cloud_values)
-        max_cloud = max(cloud_values)
-        print(f"\n{level} Cloud cover statistics:")
-        print(f"  Min: {min_cloud:.2f}%")
-        print(f"  Max: {max_cloud:.2f}%")
-        print(f"  Avg: {avg_cloud:.2f}%")
-
-        # Phase 3: Plotting
-        print(f"\n{'='*70}")
-        print(f"Phase 3: Generating {level} plot...")
-        print(f"{'='*70}\n")
-
-        data_by_tile = organize_by_tile_and_date(results)
-        print(f"Organized data for {len(data_by_tile)} tiles")
-
-        # Print per-tile summary
-        print(f"\n{level} Summary by Tile:")
-        print("-" * 70)
-        print(f"{'Tile':<10} {'Obs':>6} {'Min':>8} {'Max':>8} {'Avg':>8} {'Date Range'}")
-        print("-" * 70)
-
-        for tile_id in sorted(data_by_tile.keys()):
-            tile_data = data_by_tile[tile_id]
-            tile_cloud_values = [c for _, c in tile_data]
-            tile_dates = [d for d, _ in tile_data]
-
-            tile_min = min(tile_cloud_values)
-            tile_max = max(tile_cloud_values)
-            tile_avg = sum(tile_cloud_values) / len(tile_cloud_values)
-            date_range = f"{min(tile_dates).strftime('%Y-%m-%d')} to {max(tile_dates).strftime('%Y-%m-%d')}"
-
-            print(f"{tile_id:<10} {len(tile_data):>6} {tile_min:>7.2f}% {tile_max:>7.2f}% {tile_avg:>7.2f}% {date_range}")
-
-        # Find and print best days
-        daily_totals = compute_daily_totals(data_by_tile)
-        best_days = find_best_days(daily_totals, n=5)
-        print_best_days(best_days, data_by_tile, level)
-
-        # Generate plot
-        plot_filename = f"{output_prefix}_{level}.png"
-        plot_cloud_cover(data_by_tile, best_days, level, plot_filename)
-
-    if failures:
-        print(f"\n{level} Failed products ({len(failures)}):")
-        print("-" * 90)
-        for pid, error in failures[:10]:
-            print(f"{pid}: {error[:70]}...")
-        if len(failures) > 10:
-            print(f"  ... and {len(failures) - 10} more failures")
-
-    return len(products), len(results), len(failures)
+new_args = []
+for arg in args:
+    if arg[:2] != '--':
+        new_args += [arg]
+args = new_args
 
 
-# ------------------------------------------------------------
-# Main
-# ------------------------------------------------------------
-def main():
-    global N_WORKERS, SINGLE_THREAD
+# Parse dates and GIDs from arguments
+# args[0] is script name, args[1] is first date, args[2] may be second date or GID
+yyyymmdd = args[1]
 
-    if len(sys.argv) < 4:
-        print(__doc__)
-        sys.exit(1)
+# Check if args[2] exists and is a date (8 digits), otherwise use same date for both
+if len(args) > 2 and is_date_format(args[2]):
+    yyyymmdd2 = args[2]
+    gid_start_index = 3
+else:
+    yyyymmdd2 = yyyymmdd  # Single date: use same for start and end
+    gid_start_index = 2
 
-    # Parse arguments
-    use_cache = True
-    output_prefix = "cloud_cover_by_tile"
-    query_l1 = False
-    query_l2 = False
-    args = []
+gids = []  # get gids from command line
+if len(args) > gid_start_index:
+    gids = set(args[gid_start_index:])
 
-    for arg in sys.argv[1:]:
-        if arg == "--no-cache":
-            use_cache = False
-        elif arg == "--single-thread":
-            SINGLE_THREAD = True
-        elif arg == "--L1":
-            query_l1 = True
-        elif arg == "--L2":
-            query_l2 = True
-        elif arg.startswith("--workers="):
-            N_WORKERS = int(arg.split("=")[1])
-        elif arg.startswith("--output="):
-            output_prefix = arg.split("=")[1]
-        else:
-            args.append(arg)
-
-    # Default: query both if neither specified
-    if not query_l1 and not query_l2:
-        query_l1 = True
-        query_l2 = True
-
-    if len(args) < 3:
-        print("Error: Need at least start_date, end_date, and one tile ID")
-        sys.exit(1)
-
-    start_date = parse_yyyymmdd(args[0])
-    end_date = parse_yyyymmdd(args[1])
-    requested_tiles = args[2:]
-
-    if start_date > end_date:
-        raise ValueError("Start date must be <= end date")
-
-    levels_to_query = []
-    if query_l1:
-        levels_to_query.append("L1C")
-    if query_l2:
-        levels_to_query.append("L2A")
-
-    print(f"\n{'='*70}")
-    print(f"Sentinel-2 Cloud Cover Extraction")
-    print(f"{'='*70}")
-    print(f"Requested tiles: {', '.join(requested_tiles)}")
-    print(f"Date range: {start_date} → {end_date}")
-    print(f"Levels: {', '.join(levels_to_query)}")
-    print(f"GDAL available: {HAS_GDAL}")
-    print(f"Matplotlib available: {HAS_MATPLOTLIB}")
-    print(f"Workers: {N_WORKERS}")
-    print(f"Single-thread mode: {SINGLE_THREAD}")
-    print(f"Cache: {'enabled' if use_cache else 'disabled'}")
-    print(f"Output prefix: {output_prefix}")
-    print(f"{'='*70}")
-
-    t_total_start = time.time()
-
-    # Process each level
-    total_stats = {}
-    for level in levels_to_query:
-        num_products, num_success, num_failed = process_level(
-            level, start_date, end_date, requested_tiles, use_cache, output_prefix
-        )
-        total_stats[level] = (num_products, num_success, num_failed)
-
-    t_total_end = time.time()
-
-    # Final summary
-    print(f"\n{'='*70}")
-    print(f"FINAL SUMMARY")
-    print(f"{'='*70}\n")
-
-    for level, (num_products, num_success, num_failed) in total_stats.items():
-        print(f"{level}: {num_products} discovered, {num_success} successful, {num_failed} failed")
-
-    print(f"\nTotal time: {t_total_end - t_total_start:.1f}s")
+if len(gids) == 0:  # if no gids provided, default to all gids for BC
+    from gid import bc
+    gids = bc()
+    print('pulling BC data..')
+else:
+    if 'all' in gids:
+        gids = None
+        print('pulling Canada data..')
 
 
 if __name__ == "__main__":
-    main()
+    download_by_gids(gids, yyyymmdd, yyyymmdd2)
