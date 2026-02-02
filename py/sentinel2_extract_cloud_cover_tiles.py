@@ -4,13 +4,22 @@ import sys
 import s3fs
 import xml.etree.ElementTree as ET
 from datetime import datetime, date, timedelta
-from typing import List
+from typing import List, Dict, Tuple, Optional, Any
 import csv
 import time
 import pickle
 import hashlib
 import os
 import re
+import multiprocessing as mp
+
+# Try to import joblib for parallel processing
+try:
+    from joblib import Parallel, delayed
+    HAS_JOBLIB = True
+except ImportError:
+    HAS_JOBLIB = False
+    print("WARNING: joblib not available, will run single-threaded")
 
 # Try to import GDAL - needed for VSI file access
 try:
@@ -25,6 +34,37 @@ BUCKET = "sentinel-products-ca-mirror"
 PREFIX_ROOT = "Sentinel-2/S2MSI2A"
 S3_BASE_URL = f"https://{BUCKET}.s3.amazonaws.com"
 CACHE_DIR = ".sentinel2_cache"
+RESULTS_CACHE_DIR = os.path.join(CACHE_DIR, "results")
+
+# Global settings
+N_WORKERS = 8
+SINGLE_THREAD = False
+
+# Global counters for progress tracking (not thread-safe, but good enough for status)
+progress_counter = {"discovery": 0, "extraction": 0}
+progress_totals = {"discovery": 0, "extraction": 0}
+progress_start_times = {"discovery": 0, "extraction": 0}
+
+
+# ------------------------------------------------------------
+# Parallel execution helper
+# ------------------------------------------------------------
+def parfor(my_function, my_inputs, n_thread=None):
+    """
+    Parallel for loop using joblib, with fallback to sequential execution.
+    """
+    if n_thread is None:
+        n_thread = min(32, N_WORKERS)
+
+    print(f"PARFOR n_thread={n_thread}, inputs={len(my_inputs)}")
+
+    if n_thread == 1 or SINGLE_THREAD or not HAS_JOBLIB:
+        return [my_function(my_inputs[i]) for i in range(len(my_inputs))]
+    else:
+        n_thread = mp.cpu_count() if n_thread is None else n_thread
+        if my_inputs is None or (type(my_inputs) == list and len(my_inputs) == 0):
+            return []
+        return Parallel(n_jobs=n_thread)(delayed(my_function)(inp) for inp in my_inputs)
 
 
 # ------------------------------------------------------------
@@ -55,7 +95,10 @@ def get_safe_folder_name(zip_filename: str) -> str:
     return zip_filename + ".SAFE"
 
 
-def get_cache_filename(start_date: date, end_date: date, tiles: List[str]) -> str:
+# ------------------------------------------------------------
+# Discovery Cache
+# ------------------------------------------------------------
+def get_discovery_cache_filename(start_date: date, end_date: date, tiles: List[str]) -> str:
     """
     Generate a cache filename based on query parameters.
     """
@@ -72,7 +115,7 @@ def get_cache_filename(start_date: date, end_date: date, tiles: List[str]) -> st
     return os.path.join(CACHE_DIR, filename)
 
 
-def load_discovery_cache(cache_file: str) -> List[str]:
+def load_discovery_cache(cache_file: str) -> Optional[List[str]]:
     """Load cached discovery results if available."""
     if os.path.exists(cache_file):
         try:
@@ -94,6 +137,51 @@ def save_discovery_cache(cache_file: str, products: List[str]):
         print(f"  Saved {len(products)} products to cache: {cache_file}")
     except Exception as e:
         print(f"  Cache save failed: {e}")
+
+
+# ------------------------------------------------------------
+# Results Cache (per-product)
+# ------------------------------------------------------------
+def get_result_cache_filename(product_id: str) -> str:
+    """
+    Generate a cache filename for a single product result.
+    """
+    # Use product ID as filename (sanitize if needed)
+    safe_name = product_id.replace("/", "_").replace("\\", "_")
+    return os.path.join(RESULTS_CACHE_DIR, f"{safe_name}.pkl")
+
+
+def load_result_cache(product_id: str) -> Optional[Tuple[str, float]]:
+    """Load cached result for a single product."""
+    cache_file = get_result_cache_filename(product_id)
+    if os.path.exists(cache_file):
+        try:
+            with open(cache_file, 'rb') as f:
+                return pickle.load(f)
+        except Exception:
+            pass
+    return None
+
+
+def save_result_cache(product_id: str, cloud_pct: float):
+    """Save result for a single product."""
+    os.makedirs(RESULTS_CACHE_DIR, exist_ok=True)
+    cache_file = get_result_cache_filename(product_id)
+    try:
+        with open(cache_file, 'wb') as f:
+            pickle.dump((product_id, cloud_pct), f)
+    except Exception:
+        pass
+
+
+def load_all_cached_results(product_ids: List[str]) -> Dict[str, float]:
+    """Load all cached results for given product IDs."""
+    cached = {}
+    for pid in product_ids:
+        result = load_result_cache(pid)
+        if result is not None:
+            cached[result[0]] = result[1]
+    return cached
 
 
 # ------------------------------------------------------------
@@ -123,24 +211,18 @@ def debug_xml_structure(root: ET.Element, xml_text: str):
     """
     print(f"      [DEBUG] XML root tag: {root.tag}")
 
-    # Strip namespace for easier searching
     ns_match = re.match(r'\{(.+?)\}', root.tag)
     ns = ns_match.group(1) if ns_match else None
     print(f"      [DEBUG] XML namespace: {ns}")
 
-    # List all unique element tags (first 50)
     all_tags = set()
     for elem in root.iter():
-        # Remove namespace prefix for readability
         tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
         all_tags.add(tag)
 
     print(f"      [DEBUG] Total unique tags: {len(all_tags)}")
     print(f"      [DEBUG] All tags: {sorted(all_tags)[:50]}")
-    if len(all_tags) > 50:
-        print(f"      [DEBUG]   ... and {len(all_tags) - 50} more")
 
-    # Search for anything containing "cloud" (case insensitive)
     cloud_elements = []
     for elem in root.iter():
         tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
@@ -151,43 +233,32 @@ def debug_xml_structure(root: ET.Element, xml_text: str):
     for tag, text in cloud_elements[:20]:
         print(f"      [DEBUG]   {tag}: {text}")
 
-    # Search for anything containing "percent" (case insensitive)
-    percent_elements = []
-    for elem in root.iter():
-        tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
-        if 'percent' in tag.lower():
-            percent_elements.append((tag, elem.text[:100] if elem.text else None))
-
-    print(f"      [DEBUG] Elements containing 'percent': {len(percent_elements)}")
-    for tag, text in percent_elements[:20]:
-        print(f"      [DEBUG]   {tag}: {text}")
-
-    # Also search in raw text for CLOUDY
     cloudy_matches = re.findall(r'<([^>]*[Cc]loudy[^>]*)>([^<]*)<', xml_text)
     print(f"      [DEBUG] Raw regex matches for 'cloudy': {len(cloudy_matches)}")
     for tag, value in cloudy_matches[:10]:
         print(f"      [DEBUG]   <{tag}>: {value[:50]}")
 
-    # Try different XPath patterns
-    test_patterns = [
-        ".//CLOUDY_PIXEL_PERCENTAGE",
-        ".//{*}CLOUDY_PIXEL_PERCENTAGE",
-        ".//Cloud_Coverage_Assessment",
-        ".//{*}Cloud_Coverage_Assessment",
-        ".//CLOUDY_PIXEL_OVER_LAND_PERCENTAGE",
-        ".//{*}CLOUDY_PIXEL_OVER_LAND_PERCENTAGE",
-    ]
 
-    print(f"      [DEBUG] Testing XPath patterns:")
-    for pattern in test_patterns:
-        try:
-            result = root.find(pattern)
-            if result is not None:
-                print(f"      [DEBUG]   {pattern}: FOUND -> {result.text}")
-            else:
-                print(f"      [DEBUG]   {pattern}: not found")
-        except Exception as e:
-            print(f"      [DEBUG]   {pattern}: error - {e}")
+def extract_cloud_from_xml(xml_text: str) -> float:
+    """
+    Parse XML and extract cloud percentage.
+    """
+    root = ET.fromstring(xml_text)
+
+    # Try various patterns
+    cloud = root.find(".//CLOUDY_PIXEL_PERCENTAGE")
+    if cloud is None:
+        cloud = root.find(".//{*}CLOUDY_PIXEL_PERCENTAGE")
+    if cloud is None:
+        cloud = root.find(".//Cloud_Coverage_Assessment")
+    if cloud is None:
+        cloud = root.find(".//{*}Cloud_Coverage_Assessment")
+
+    if cloud is None:
+        debug_xml_structure(root, xml_text)
+        raise RuntimeError("CLOUDY_PIXEL_PERCENTAGE not found in XML")
+
+    return float(cloud.text)
 
 
 def extract_cloud_percentage_gdal(s3_path: str) -> float:
@@ -202,170 +273,135 @@ def extract_cloud_percentage_gdal(s3_path: str) -> float:
     http_url = f"{S3_BASE_URL}/{path_without_bucket}"
     vsi_url = f"/vsizip//vsicurl/{http_url}/{safe_folder}/MTD_MSIL2A.xml"
 
-    print(f"      [DEBUG] VSI path: {vsi_url}")
-
-    t_read_start = time.time()
     xml_bytes = read_vsi_file(vsi_url)
-    t_read_end = time.time()
-    print(f"      [DEBUG] VSI read took {t_read_end - t_read_start:.2f}s, got {len(xml_bytes)} bytes")
-
     xml_text = xml_bytes.decode("utf-8")
 
-    t_parse_start = time.time()
-    root = ET.fromstring(xml_text)
-    t_parse_end = time.time()
-    print(f"      [DEBUG] XML parse took {t_parse_end - t_parse_start:.4f}s")
-
-    # Try to find cloud percentage with various patterns
-    cloud = root.find(".//CLOUDY_PIXEL_PERCENTAGE")
-
-    # If not found, try with namespace wildcard
-    if cloud is None:
-        cloud = root.find(".//{*}CLOUDY_PIXEL_PERCENTAGE")
-
-    # If still not found, try Cloud_Coverage_Assessment
-    if cloud is None:
-        cloud = root.find(".//Cloud_Coverage_Assessment")
-
-    if cloud is None:
-        cloud = root.find(".//{*}Cloud_Coverage_Assessment")
-
-    if cloud is None:
-        # Debug the XML structure
-        print(f"      [DEBUG] Cloud element not found, debugging XML structure...")
-        debug_xml_structure(root, xml_text)
-        raise RuntimeError("CLOUDY_PIXEL_PERCENTAGE not found in XML")
-
-    return float(cloud.text)
+    return extract_cloud_from_xml(xml_text)
 
 
-def extract_cloud_percentage_s3fs(fs: s3fs.S3FileSystem, s3_path: str) -> float:
+def extract_cloud_percentage_s3fs(s3_path: str) -> float:
     """
     Fallback method using s3fs + zipfile.
     """
     import zipfile
     import io
 
-    zip_filename = s3_path.split("/")[-1]
-
-    print(f"      [DEBUG] Using s3fs fallback method")
-    print(f"      [DEBUG] Opening s3://{s3_path}")
-
-    t_download_start = time.time()
+    fs = s3fs.S3FileSystem(anon=True)
 
     with fs.open(f"s3://{s3_path}", 'rb') as f:
         zip_data = io.BytesIO(f.read())
 
-    t_download_end = time.time()
-    print(f"      [DEBUG] Download took {t_download_end - t_download_start:.2f}s")
-
-    t_extract_start = time.time()
     with zipfile.ZipFile(zip_data, 'r') as zf:
         xml_content = None
         for name in zf.namelist():
             if name.endswith('MTD_MSIL2A.xml'):
                 xml_content = zf.read(name).decode('utf-8')
-                print(f"      [DEBUG] Found XML at: {name}")
                 break
 
         if xml_content is None:
-            raise RuntimeError(f"MTD_MSIL2A.xml not found in {zip_filename}")
+            raise RuntimeError(f"MTD_MSIL2A.xml not found in ZIP")
 
-    t_extract_end = time.time()
-    print(f"      [DEBUG] Extract took {t_extract_end - t_extract_start:.2f}s")
-
-    root = ET.fromstring(xml_content)
-
-    cloud = root.find(".//CLOUDY_PIXEL_PERCENTAGE")
-    if cloud is None:
-        cloud = root.find(".//{*}CLOUDY_PIXEL_PERCENTAGE")
-    if cloud is None:
-        cloud = root.find(".//Cloud_Coverage_Assessment")
-    if cloud is None:
-        cloud = root.find(".//{*}Cloud_Coverage_Assessment")
-
-    if cloud is None:
-        debug_xml_structure(root, xml_content)
-        raise RuntimeError("CLOUDY_PIXEL_PERCENTAGE not found in XML")
-
-    return float(cloud.text)
+    return extract_cloud_from_xml(xml_content)
 
 
-def extract_cloud_percentage(s3_path: str, fs: s3fs.S3FileSystem = None) -> float:
+def extract_cloud_percentage(s3_path: str) -> float:
     """
     Extract cloud percentage, using GDAL if available, otherwise s3fs fallback.
     """
     if HAS_GDAL:
         return extract_cloud_percentage_gdal(s3_path)
-    elif fs is not None:
-        return extract_cloud_percentage_s3fs(fs, s3_path)
     else:
-        raise RuntimeError("No method available to read ZIP files (need GDAL or s3fs)")
+        return extract_cloud_percentage_s3fs(s3_path)
 
 
 # ------------------------------------------------------------
-# S3 discovery by date
+# Discovery worker function
 # ------------------------------------------------------------
-def iterate_products_by_date(fs, start: date, end: date, tiles: List[str]):
+def discover_single_date(args: Tuple[date, List[str]]) -> List[str]:
     """
-    Iterate through S3 bucket by date, yielding matching product paths.
+    Worker function to discover products for a single date.
     """
-    current = start
-    one_day = timedelta(days=1)
+    global progress_counter, progress_totals, progress_start_times
 
-    total_days = (end - start).days + 1
-    day_count = 0
+    current_date, tiles = args
 
-    while current <= end:
-        day_count += 1
-        yyyy = current.strftime("%Y")
-        mm = current.strftime("%m")
-        dd = current.strftime("%d")
+    fs = s3fs.S3FileSystem(anon=True)
 
-        prefix = f"{PREFIX_ROOT}/{yyyy}/{mm}/{dd}/"
-        s3_path = f"{BUCKET}/{prefix}"
+    yyyy = current_date.strftime("%Y")
+    mm = current_date.strftime("%m")
+    dd = current_date.strftime("%d")
 
-        entries_found = 0
-        matches_found = 0
+    prefix = f"{PREFIX_ROOT}/{yyyy}/{mm}/{dd}/"
+    s3_path = f"{BUCKET}/{prefix}"
 
-        try:
-            objs = fs.ls(s3_path)
-            entries_found = len(objs)
+    matches = []
+    entries_found = 0
 
-            for obj in objs:
-                if obj.endswith(".zip") and any(tile in obj for tile in tiles):
-                    matches_found += 1
-                    yield obj
+    try:
+        objs = fs.ls(s3_path)
+        entries_found = len(objs)
 
-        except Exception as e:
-            if "AccessDenied" in str(e) or "NoCredentialsError" in str(e):
-                pass
-            else:
-                pass
+        for obj in objs:
+            if obj.endswith(".zip") and any(tile in obj for tile in tiles):
+                matches.append(obj)
+    except Exception:
+        pass
 
-        print(
-            f"Discovery: {day_count}/{total_days} days "
-            f"({day_count/total_days*100:.1f}%) - "
-            f"Date: {current} - Entries: {entries_found}, Matches: {matches_found}"
-        )
+    # Progress update (not thread-safe but good enough)
+    progress_counter["discovery"] += 1
+    idx = progress_counter["discovery"]
+    total = progress_totals["discovery"]
 
-        current += one_day
+    if idx % N_WORKERS == 0 or idx == total:
+        elapsed = time.time() - progress_start_times["discovery"]
+        pct = idx / total * 100 if total > 0 else 0
+        eta = (elapsed / idx) * (total - idx) if idx > 0 else 0
+        print(f"  Discovery: {idx}/{total} ({pct:.1f}%) - "
+              f"Date: {current_date} - Entries: {entries_found}, Matches: {len(matches)} - "
+              f"Elapsed: {elapsed:.1f}s, ETA: {eta:.1f}s")
+
+    return matches
 
 
-def discover_products(fs, start_date: date, end_date: date, tiles: List[str], use_cache: bool = True) -> List[str]:
+def discover_products_parallel(start_date: date, end_date: date, tiles: List[str], use_cache: bool = True) -> List[str]:
     """
-    Discover products, using cache if available.
+    Discover products in parallel, using cache if available.
     """
-    cache_file = get_cache_filename(start_date, end_date, tiles)
+    global progress_counter, progress_totals, progress_start_times
+
+    cache_file = get_discovery_cache_filename(start_date, end_date, tiles)
 
     if use_cache:
         cached = load_discovery_cache(cache_file)
         if cached is not None:
             return cached
 
-    print(f"  Running fresh discovery...")
-    products = list(iterate_products_by_date(fs, start_date, end_date, tiles))
+    print(f"  Running fresh discovery in parallel...")
 
+    # Generate list of dates
+    dates = []
+    current = start_date
+    while current <= end_date:
+        dates.append(current)
+        current += timedelta(days=1)
+
+    # Prepare inputs as (date, tiles) tuples
+    inputs = [(d, tiles) for d in dates]
+
+    # Initialize progress tracking
+    progress_counter["discovery"] = 0
+    progress_totals["discovery"] = len(inputs)
+    progress_start_times["discovery"] = time.time()
+
+    # Run in parallel
+    results = parfor(discover_single_date, inputs, n_thread=N_WORKERS)
+
+    # Flatten results
+    products = []
+    for match_list in results:
+        products.extend(match_list)
+
+    # Save to cache
     if use_cache:
         save_discovery_cache(cache_file, products)
 
@@ -373,25 +409,126 @@ def discover_products(fs, start_date: date, end_date: date, tiles: List[str], us
 
 
 # ------------------------------------------------------------
+# Extraction worker function
+# ------------------------------------------------------------
+def extract_single_product(s3_path: str) -> Tuple[str, Optional[float], Optional[str]]:
+    """
+    Worker function to extract cloud percentage for a single product.
+    Returns (product_id, cloud_pct, error_msg)
+    """
+    global progress_counter, progress_totals, progress_start_times
+
+    pid = s3_path.split("/")[-1]
+
+    try:
+        cloud = extract_cloud_percentage(s3_path)
+        # Save to cache
+        save_result_cache(pid, cloud)
+        result = (pid, cloud, None)
+    except Exception as e:
+        result = (pid, None, str(e))
+
+    # Progress update (not thread-safe but good enough)
+    progress_counter["extraction"] += 1
+    idx = progress_counter["extraction"]
+    total = progress_totals["extraction"]
+
+    if idx % N_WORKERS == 0 or idx == total:
+        elapsed = time.time() - progress_start_times["extraction"]
+        pct = idx / total * 100 if total > 0 else 0
+        eta = (elapsed / idx) * (total - idx) if idx > 0 else 0
+        status = f"Cloud: {result[1]:.2f}%" if result[1] is not None else f"FAILED"
+        print(f"  Extraction: {idx}/{total} ({pct:.1f}%) - "
+              f"{pid[:60]}... - {status} - "
+              f"Elapsed: {elapsed:.1f}s, ETA: {eta:.1f}s")
+
+    return result
+
+
+def extract_cloud_percentages_parallel(products: List[str], use_cache: bool = True) -> Tuple[List[Tuple[str, float]], List[Tuple[str, str]]]:
+    """
+    Extract cloud percentages in parallel, using cache for already-processed products.
+    Returns (results, failures)
+    """
+    global progress_counter, progress_totals, progress_start_times
+
+    # Get product IDs
+    product_ids = [p.split("/")[-1] for p in products]
+
+    # Load cached results
+    cached_results = {}
+    if use_cache:
+        print(f"  Checking cache for {len(products)} products...")
+        for i, pid in enumerate(product_ids):
+            result = load_result_cache(pid)
+            if result is not None:
+                cached_results[pid] = result[1]
+        print(f"  Found {len(cached_results)} cached results")
+
+    # Filter out already-cached products
+    products_to_process = []
+    for s3_path in products:
+        pid = s3_path.split("/")[-1]
+        if pid not in cached_results:
+            products_to_process.append(s3_path)
+
+    print(f"  Need to process {len(products_to_process)} new products")
+
+    # Initialize progress tracking
+    progress_counter["extraction"] = 0
+    progress_totals["extraction"] = len(products_to_process)
+    progress_start_times["extraction"] = time.time()
+
+    # Process new products in parallel
+    new_results = []
+    new_failures = []
+
+    if products_to_process:
+        raw_results = parfor(extract_single_product, products_to_process, n_thread=N_WORKERS)
+
+        for pid, cloud, error in raw_results:
+            if cloud is not None:
+                new_results.append((pid, cloud))
+            else:
+                new_failures.append((pid, error))
+
+    # Combine cached + new results
+    all_results = [(pid, cloud) for pid, cloud in cached_results.items()]
+    all_results.extend(new_results)
+
+    return all_results, new_failures
+
+
+# ------------------------------------------------------------
 # Main
 # ------------------------------------------------------------
 def main():
+    global N_WORKERS, SINGLE_THREAD
+
     if len(sys.argv) < 4:
         print(
             "Usage:\n"
             "  python sentinel2_cloud_tiles.py <yyyymmdd_start> <yyyymmdd_end> <TILE_ID> [TILE_ID ...]\n\n"
             "Options:\n"
-            "  --no-cache    Skip discovery cache (force fresh discovery)\n\n"
+            "  --no-cache       Skip all caching (force fresh discovery and extraction)\n"
+            "  --workers=N      Set number of parallel workers (default: 8)\n"
+            "  --single-thread  Run single-threaded (for debugging)\n\n"
             "Example:\n"
-            "  python sentinel2_cloud_tiles.py 20240501 20240505 T10UFB T10UFA"
+            "  python sentinel2_cloud_tiles.py 20240501 20240505 T10UFB T10UFA\n"
+            "  python sentinel2_cloud_tiles.py 20240501 20240505 T10UFB --workers=16"
         )
         sys.exit(1)
 
+    # Parse arguments
     use_cache = True
     args = []
     for arg in sys.argv[1:]:
         if arg == "--no-cache":
             use_cache = False
+        elif arg == "--single-thread":
+            SINGLE_THREAD = True
+        elif arg.startswith("--workers="):
+            N_WORKERS = int(arg.split("=")[1])
         else:
             args.append(arg)
 
@@ -406,92 +543,88 @@ def main():
     if start_date > end_date:
         raise ValueError("Start date must be <= end date")
 
-    fs = s3fs.S3FileSystem(anon=True)
-
-    print(f"\nRequested tiles: {', '.join(requested_tiles)}")
+    print(f"\n{'='*70}")
+    print(f"Sentinel-2 Cloud Cover Extraction")
+    print(f"{'='*70}")
+    print(f"Requested tiles: {', '.join(requested_tiles)}")
     print(f"Date range: {start_date} → {end_date}")
     print(f"GDAL available: {HAS_GDAL}")
-    print(f"Discovery cache: {'enabled' if use_cache else 'disabled'}")
-    print(f"\n{'='*60}")
+    print(f"Joblib available: {HAS_JOBLIB}")
+    print(f"Workers: {N_WORKERS}")
+    print(f"Cache: {'enabled' if use_cache else 'disabled'}")
+    print(f"{'='*70}\n")
+
+    # Phase 1: Discovery
+    print(f"{'='*70}")
     print("Phase 1: Discovering products...")
-    print(f"{'='*60}\n")
+    print(f"{'='*70}\n")
 
-    products = discover_products(fs, start_date, end_date, requested_tiles, use_cache)
-    total_products = len(products)
+    t_discovery_start = time.time()
+    products = discover_products_parallel(start_date, end_date, requested_tiles, use_cache)
+    t_discovery_end = time.time()
 
-    print(f"\n{'='*60}")
-    print(f"Phase 2: Extracting cloud percentages from {total_products} products...")
-    print(f"{'='*60}\n")
+    print(f"\n  Discovery complete: {len(products)} products found in {t_discovery_end - t_discovery_start:.1f}s")
 
-    results = []
-    failed = []
-    start_time = time.time()
+    # Phase 2: Extraction
+    print(f"\n{'='*70}")
+    print(f"Phase 2: Extracting cloud percentages from {len(products)} products...")
+    print(f"{'='*70}\n")
 
-    for idx, product in enumerate(products, start=1):
-        pid = product.split("/")[-1]
-        tile = extract_tile_id(product)
+    t_extraction_start = time.time()
+    results, failures = extract_cloud_percentages_parallel(products, use_cache)
+    t_extraction_end = time.time()
 
-        print(f"\n  [{idx}/{total_products}] Processing: {pid}")
-        print(f"    [DEBUG] Tile: {tile}")
-        print(f"    [DEBUG] Full S3 path: {product}")
-
-        t_start = time.time()
-        try:
-            cloud = extract_cloud_percentage(product, fs)
-            results.append((pid, cloud))
-            status = f"OK - Cloud: {cloud:.2f}%"
-        except Exception as e:
-            failed.append((pid, str(e)))
-            status = f"FAILED: {e}"
-            print(f"    [DEBUG] Exception type: {type(e).__name__}")
-
-        t_end = time.time()
-
-        elapsed = time.time() - start_time
-        progress = idx / total_products * 100
-        if idx > 0:
-            avg_per_item = elapsed / idx
-            remaining = avg_per_item * (total_products - idx)
-        else:
-            remaining = 0
-
-        print(f"    [DEBUG] This product took: {t_end - t_start:.2f}s")
-        print(
-            f"  Progress: {idx}/{total_products} "
-            f"({progress:.1f}%) - Elapsed: {elapsed:.1f}s, ETA: {remaining:.1f}s - {status}"
-        )
+    print(f"\n  Extraction complete in {t_extraction_end - t_extraction_start:.1f}s")
 
     # Summary
-    print(f"\n{'='*60}")
+    print(f"\n{'='*70}")
     print("Summary:")
-    print(f"{'='*60}\n")
+    print(f"{'='*70}\n")
 
-    print(f"Successfully processed: {len(results)}/{total_products}")
-    print(f"Failed: {len(failed)}/{total_products}")
+    print(f"Total products discovered: {len(products)}")
+    print(f"Successfully processed: {len(results)}")
+    print(f"Failed: {len(failures)}")
+    print(f"Total time: {t_extraction_end - t_discovery_start:.1f}s")
 
     if results:
-        print(f"\nResults:")
-        print("-" * 90)
-        for pid, cloud in results:
-            print(f"{pid:80s} {cloud:6.2f}%")
+        # Sort results by product name for consistent output
+        results_sorted = sorted(results, key=lambda x: x[0])
 
+        print(f"\nResults (sorted by product name):")
+        print("-" * 90)
+        for pid, cloud in results_sorted[:20]:
+            print(f"{pid:80s} {cloud:6.2f}%")
+        if len(results_sorted) > 20:
+            print(f"  ... and {len(results_sorted) - 20} more")
+
+        # Write to CSV
         csv_filename = "_".join(args) + ".csv"
-        print(f"\nWriting results to CSV: {csv_filename}")
+        print(f"\nWriting {len(results_sorted)} results to CSV: {csv_filename}")
         with open(csv_filename, "w", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(["Product", "CloudPercentage"])
-            for pid, cloud in results:
+            for pid, cloud in results_sorted:
                 writer.writerow([pid, cloud])
 
         print(f"CSV written successfully.")
 
-    if failed:
-        print(f"\nFailed products:")
+        # Stats
+        cloud_values = [c for _, c in results]
+        avg_cloud = sum(cloud_values) / len(cloud_values)
+        min_cloud = min(cloud_values)
+        max_cloud = max(cloud_values)
+        print(f"\nCloud cover statistics:")
+        print(f"  Min: {min_cloud:.2f}%")
+        print(f"  Max: {max_cloud:.2f}%")
+        print(f"  Avg: {avg_cloud:.2f}%")
+
+    if failures:
+        print(f"\nFailed products ({len(failures)}):")
         print("-" * 90)
-        for pid, error in failed[:10]:
-            print(f"{pid}: {error[:80]}...")
-        if len(failed) > 10:
-            print(f"  ... and {len(failed) - 10} more failures")
+        for pid, error in failures[:10]:
+            print(f"{pid}: {error[:70]}...")
+        if len(failures) > 10:
+            print(f"  ... and {len(failures) - 10} more failures")
 
 
 if __name__ == "__main__":
