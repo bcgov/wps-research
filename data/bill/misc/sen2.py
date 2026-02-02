@@ -243,7 +243,7 @@ def writeENVI(
             output_filename,
             W, H,
             K,
-            ref.GetRasterBand(1).DataType
+            gdal.GDT_Float32
         )
 
         if copy_geo:

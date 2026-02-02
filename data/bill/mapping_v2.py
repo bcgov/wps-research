@@ -38,6 +38,8 @@ python3 mapping_v2.py [Raster filename.bin] [Mask filename.bin] <- (could be a p
 
 from raster import Raster
 
+from misc.sen2 import writeENVI
+
 from misc.general import (
     htrim_3d,
     extract_border,
@@ -47,6 +49,8 @@ from misc.general import (
 from sampling import regular_sampling
 
 import sys
+
+import os
 
 import numpy as np
 
@@ -66,9 +70,13 @@ class GUI_Settings:
 
     def __init__(self):
 
+        #for file saving
+        self.save_dir = './mapped_burn'
+
+        #For TSNE embedding.
         self.rf_params = {
             'n_estimators': 100,    
-            'max_depth': 15,
+            'max_depth': 20,
             'max_features': "sqrt", 
             'random_state': 42
         }
@@ -78,7 +86,7 @@ class GUI_Settings:
         controled_ratio means we are not sure with our guess of the burn, so there might be more or less than
         what is actually sampled, currenly used for HDBSCAN min cluster size control. A positive value > 0.
         '''
-        self.controlled_ratio = .8
+        self.controlled_ratio = .4
 
         self.hdbscan_params = {
             'min_cluster_size': None,
@@ -204,6 +212,8 @@ class GUI(GUI_Settings):
         '''
         The next part will be new, we will 
         '''
+
+    
         self.guessed_burn_p = np.nanmean( self.polygon_dat )
 
         #We will later use this guess as a criteria for HDBSCAN
@@ -404,6 +414,27 @@ class GUI(GUI_Settings):
 
 
 
+    def save_classification(
+            self,
+            classification
+    ):
+        
+        os.makedirs(self.save_dir, exist_ok=True)
+
+        base_filename = os.path.basename(self.image_filename)
+
+        writeENVI(
+            output_filename=f'{self.save_dir}/{base_filename}_classified.bin',
+            data = classification,
+            mode='new',
+            ref_filename=self.image_filename,
+            band_names=['burned(bool)']
+        )
+
+        print('classification saved (ENVI).')
+
+
+
     def main(self):
         
         import matplotlib
@@ -561,6 +592,10 @@ class GUI(GUI_Settings):
             #Get true classification
             classification = self.classify_cluster(img_cluster)
 
+            #Save to ENVI file.
+            self.save_classification(classification)
+
+            #Plot product.
             fig2 = plt.figure(figsize=(12, 12))
 
             ax2 = fig2.add_subplot(111)
