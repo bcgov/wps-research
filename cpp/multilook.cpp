@@ -1,82 +1,124 @@
-/* multilook a multispectral image or radar stack, square or rectangular window, input
-assumed ENVI type-4 32-bit IEEE standard floating-point format, BSQ
-interleave
-20230524 band by band processing to support larger file
-20220506 consider all-zero (if nbands > 1) equivalent to NAN / no-data */
+/* multilook a multispectral image or radar stack, square or rectangular window
+   input assumed ENVI type-4 32-bit IEEE standard floating-point format, BSQ interleave
+   20230524 band by band processing to support larger file
+   20220506 consider all-zero (if nbands > 1) equivalent to NAN / no-data
+   20250203 parallel version using parfor */
+
 #include"misc.h"
 
-int main(int argc, char ** argv){
-  if(argc < 3) err("multilook [input binary file name] [vertical or square multilook factor] # [optional: horiz multilook factor]");
+// global state for parallel processing
+size_t g_nrow, g_ncol, g_nband, g_np;
+size_t g_nrow2, g_ncol2, g_np2;
+size_t g_n, g_m;  // multilook factors (row, col)
+float *g_dat;     // input data [nband][nrow][ncol]
+float *g_dat2;    // output data [nband][nrow2][ncol2]
+str g_fn;
 
-  str fn(argv[1]); // input file name
-  str hfn(hdr_fn(fn)); // auto-detect header file name
-  str ofn(fn + str("_mlk.bin")); // write output file
-  str ohfn(fn + str("_mlk.hdr"));
+// parallel band read: each worker reads one band
+void read_band(size_t k){
+    FILE *f = fopen(g_fn.c_str(), "rb");
+    fseek(f, k * g_np * sizeof(float), SEEK_SET);
+    fread(&g_dat[k * g_np], sizeof(float), g_np, f);
+    fclose(f);
+}
 
-  int zero;
-  float d, *dat, *dat2, *count;
-  size_t nrow, ncol, nband, np, i, j, k, n, m, ix1;
-  size_t nrow2, ncol2, np2, ip, jp, ix2, ix_i, ix_ip, nf2;
+// parallel processing: each worker handles one output row (all bands)
+// accumulates and normalizes in one pass - no synchronization needed
+void process_output_row(size_t ip){
+    size_t i_start = ip * g_n;
+    size_t i_end = min(i_start + g_n, g_nrow);
 
-  vector<str> band_names(parse_band_names(hfn));
-  hread(hfn, nrow, ncol, nband); // read header
-  np = nrow * ncol; // number of input pix
-  n = (size_t) atol(argv[2]); // multilook factor
-  m = n; // assume proportional unless specified
-  if(argc > 3) m = (size_t)atol(argv[3]);
-  printf("multilook factor (row): %zu\n", n);
-  printf("multilook factor (col): %zu\n", m);
+    for(size_t k = 0; k < g_nband; k++){
+        float *dat_k = &g_dat[k * g_np];
+        float *dat2_k = &g_dat2[k * g_np2];
 
-  FILE * f = fopen(fn.c_str(), "rb");
-  FILE * g = fopen(ofn.c_str(), "wb");
-  dat = falloc(np);
-  (nrow2 = nrow / n), (ncol2 = ncol / m);
-  np2 = nrow2 * ncol2;
-  nf2 = np2;
+        for(size_t jp = 0; jp < g_ncol2; jp++){
+            size_t j_start = jp * g_m;
+            size_t j_end = min(j_start + g_m, g_ncol);
 
-  zero = true;
-  dat2 = (float *) falloc(nf2);
-  count = (float *) falloc(nf2);
-  for0(i, nf2) count[i] = dat2[i] = 0.;
+            float sum = 0.f;
+            float count = 0.f;
 
-  // add up elements
-  for0(k, nband){
-    printf("processing band %zu of %zu\n", k + 1, nband);
-		printf("fread\n");
-    size_t nr = fread(dat, np, sizeof(float), f);
-    for0(i, nrow){
-			if(i % 1000 == 0) printf("  row %zu of %zu\n", i, nrow);
-      ip = i / n;
-      for0(j, ncol){
-        (jp = j / m), (ix_i = (i * ncol) + j), zero = true;
-        ix_ip = (ip * ncol2) + jp;
-        d = dat[ix_i];
-        if(ix_ip < nf2 && !isnan(d) && !isinf(d)){
-          dat2[ix_ip] += d;
-          count[ix_ip]++;
+            for(size_t i = i_start; i < i_end; i++){
+                for(size_t j = j_start; j < j_end; j++){
+                    float d = dat_k[i * g_ncol + j];
+                    if(!isnan(d) && !isinf(d)){
+                        sum += d;
+                        count += 1.f;
+                    }
+                }
+            }
+
+            size_t ix2 = ip * g_ncol2 + jp;
+            dat2_k[ix2] = (count > 0.f) ? (sum / count) : NAN;
         }
-      }
     }
+}
 
-    // divide by n
-    for0(ip, nrow2){
-      for0(jp, ncol2){
-        ix2 = (ip * ncol2) + jp; // divide by n
-        dat2[ix2] = (count[ix2] > 0.)? (dat2[ix2] / count[ix2]): NAN;
-      }
-    }
+// parallel band write: each worker writes one band
+void write_band(size_t k){
+    str ofn(g_fn + str("_mlk.bin"));
+    FILE *g = fopen(ofn.c_str(), "r+b");
+    fseek(g, k * g_np2 * sizeof(float), SEEK_SET);
+    fwrite(&g_dat2[k * g_np2], sizeof(float), g_np2, g);
+    fclose(g);
+}
 
-    // write output band
-		printf("fwrite\n");
-    size_t nw = fwrite(dat2, np2, sizeof(float), g);
-  }
-  printf("nr2 %zu nc2 %zu nband %zu\n", nrow2, ncol2, nband);
-  hwrite(ohfn, nrow2, ncol2, nband, 4, band_names); // write header
+int main(int argc, char ** argv){
+    if(argc < 3)
+        err("multilook [input binary file name] [vertical or square multilook factor] "
+            "# [optional: horiz multilook factor]");
 
-  fclose(f);
-  fclose(g);
-  free(dat);
-  free(dat2);
-  free(count);
-  return 0;
+    g_fn = str(argv[1]);
+    str hfn(hdr_fn(g_fn));
+    str ofn(g_fn + str("_mlk.bin"));
+    str ohfn(g_fn + str("_mlk.hdr"));
+
+    vector<str> band_names(parse_band_names(hfn));
+    hread(hfn, g_nrow, g_ncol, g_nband);
+
+    g_np = g_nrow * g_ncol;
+    g_n = (size_t)atol(argv[2]);
+    g_m = (argc > 3) ? (size_t)atol(argv[3]) : g_n;
+
+    printf("multilook factor (row): %zu\n", g_n);
+    printf("multilook factor (col): %zu\n", g_m);
+    printf("input: %zu rows x %zu cols x %zu bands\n", g_nrow, g_ncol, g_nband);
+
+    g_nrow2 = g_nrow / g_n;
+    g_ncol2 = g_ncol / g_m;
+    g_np2 = g_nrow2 * g_ncol2;
+
+    printf("output: %zu rows x %zu cols x %zu bands\n", g_nrow2, g_ncol2, g_nband);
+
+    // allocate memory for all bands
+    g_dat = falloc(g_nband * g_np);
+    g_dat2 = falloc(g_nband * g_np2);
+
+    // parallel read: one worker per band
+    printf("reading %zu bands in parallel...\n", g_nband);
+    parfor(0, g_nband - 1, read_band, g_nband);
+
+    // parallel processing: one worker per output row, max cores
+    printf("processing...\n");
+    parfor(0, g_nrow2 - 1, process_output_row);
+
+    // create output file (pre-allocate for parallel writes)
+    FILE *g = fopen(ofn.c_str(), "wb");
+    fseek(g, g_nband * g_np2 * sizeof(float) - 1, SEEK_SET);
+    fputc(0, g);
+    fclose(g);
+
+    // parallel write: one worker per band
+    printf("writing %zu bands in parallel...\n", g_nband);
+    parfor(0, g_nband - 1, write_band, g_nband);
+
+    // write header
+    hwrite(ohfn, g_nrow2, g_ncol2, g_nband, 4, band_names);
+    printf("done: %zu x %zu x %zu\n", g_nrow2, g_ncol2, g_nband);
+
+    free(g_dat);
+    free(g_dat2);
+
+    return 0;
 }
