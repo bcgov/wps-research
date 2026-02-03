@@ -1,13 +1,17 @@
+
+
 /* multilook a multispectral image or radar stack, square or rectangular window
    input assumed ENVI type-4 32-bit IEEE standard floating-point format, BSQ interleave
    20230524 band by band processing to support larger file
    20220506 consider all-zero (if nbands > 1) equivalent to NAN / no-data
    20250203 parallel version using parfor
-   20250203 per-band arrays, parallel alloc, directory batch mode */
+   20250203 per-band arrays, parallel alloc, directory batch mode
+   20250203 32-thread chunked reading, timing measurements */
 
 #include"misc.h"
 #include<glob.h>
 #include<sys/stat.h>
+#include<sys/time.h>
 
 // global state for parallel processing
 size_t g_nrow, g_ncol, g_nband, g_np;
@@ -18,12 +22,31 @@ float **g_dat2;   // output data pointers [nband] -> [nrow2 * ncol2]
 str g_fn;
 pthread_mutex_t g_alloc_mtx = PTHREAD_MUTEX_INITIALIZER;
 
+// chunked reading parameters
+size_t g_lines_per_chunk = 50;
+size_t g_num_chunks;  // total chunks = nband * ceil(nrow / lines_per_chunk)
+
+// timing helper
+double get_time_sec(){
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return tv.tv_sec + tv.tv_usec / 1e6;
+}
+
 // parallel memory allocation for input bands
 void alloc_input_band(size_t k){
     size_t nbytes = g_np * sizeof(float);
-    float *ptr = (float*)calloc(g_np, sizeof(float));
+    float *ptr = NULL;
+    int attempts = 0;
+    while(!ptr && attempts < 100){
+        ptr = (float*)calloc(g_np, sizeof(float));
+        if(!ptr){
+            attempts++;
+            usleep(10000 * attempts);  // back off: 10ms, 20ms, 30ms...
+        }
+    }
     if(!ptr){
-        fprintf(stderr, "error: failed to allocate input band %zu (%zu bytes)\n", k, nbytes);
+        fprintf(stderr, "error: failed to allocate input band %zu (%zu bytes) after %d attempts\n", k, nbytes, attempts);
     }
     pthread_mutex_lock(&g_alloc_mtx);
     g_dat[k] = ptr;
@@ -33,25 +56,53 @@ void alloc_input_band(size_t k){
 // parallel memory allocation for output bands
 void alloc_output_band(size_t k){
     size_t nbytes = g_np2 * sizeof(float);
-    float *ptr = (float*)calloc(g_np2, sizeof(float));
+    float *ptr = NULL;
+    int attempts = 0;
+    while(!ptr && attempts < 100){
+        ptr = (float*)calloc(g_np2, sizeof(float));
+        if(!ptr){
+            attempts++;
+            usleep(10000 * attempts);  // back off: 10ms, 20ms, 30ms...
+        }
+    }
     if(!ptr){
-        fprintf(stderr, "error: failed to allocate output band %zu (%zu bytes)\n", k, nbytes);
+        fprintf(stderr, "error: failed to allocate output band %zu (%zu bytes) after %d attempts\n", k, nbytes, attempts);
     }
     pthread_mutex_lock(&g_alloc_mtx);
     g_dat2[k] = ptr;
     pthread_mutex_unlock(&g_alloc_mtx);
 }
 
-// parallel band read: each worker reads one band
-void read_band(size_t k){
+// parallel chunked read: each job reads up to 50 lines of one band
+void read_chunk(size_t chunk_id){
+    size_t chunks_per_band = (g_nrow + g_lines_per_chunk - 1) / g_lines_per_chunk;
+    size_t k = chunk_id / chunks_per_band;  // which band
+    size_t chunk_in_band = chunk_id % chunks_per_band;  // which chunk within band
+
+    size_t row_start = chunk_in_band * g_lines_per_chunk;
+    size_t row_end = row_start + g_lines_per_chunk;
+    if(row_end > g_nrow) row_end = g_nrow;
+    size_t nlines = row_end - row_start;
+
+    // calculate file offset and read position
+    size_t band_offset = k * g_np * sizeof(float);
+    size_t row_offset = row_start * g_ncol * sizeof(float);
+    size_t file_offset = band_offset + row_offset;
+    size_t npix_to_read = nlines * g_ncol;
+
     FILE *f = fopen(g_fn.c_str(), "rb");
     if(!f){
-        fprintf(stderr, "error: failed to open %s for band %zu\n", g_fn.c_str(), k);
+        fprintf(stderr, "error: failed to open %s for chunk %zu\n", g_fn.c_str(), chunk_id);
         return;
     }
-    fseek(f, k * g_np * sizeof(float), SEEK_SET);
-    size_t nr = fread(g_dat[k], sizeof(float), g_np, f);
-    if(nr != g_np) fprintf(stderr, "warning: band %zu read %zu of %zu\n", k, nr, g_np);
+    fseek(f, file_offset, SEEK_SET);
+
+    float *dest = g_dat[k] + (row_start * g_ncol);
+    size_t nr = fread(dest, sizeof(float), npix_to_read, f);
+    if(nr != npix_to_read){
+        fprintf(stderr, "warning: chunk %zu (band %zu, rows %zu-%zu) read %zu of %zu\n",
+                chunk_id, k, row_start, row_end - 1, nr, npix_to_read);
+    }
     fclose(f);
 }
 
@@ -93,20 +144,6 @@ void process_output_row(size_t ip){
     }
 }
 
-// parallel band write: each worker writes one band
-void write_band(size_t k){
-    str ofn(g_fn + str("_mlk.bin"));
-    FILE *g = fopen(ofn.c_str(), "r+b");
-    if(!g){
-        fprintf(stderr, "error: failed to open %s for writing band %zu\n", ofn.c_str(), k);
-        return;
-    }
-    fseek(g, k * g_np2 * sizeof(float), SEEK_SET);
-    size_t nw = fwrite(g_dat2[k], sizeof(float), g_np2, g);
-    if(nw != g_np2) fprintf(stderr, "warning: band %zu wrote %zu of %zu\n", k, nw, g_np2);
-    fclose(g);
-}
-
 // parallel memory free for input bands
 void free_input_band(size_t k){
     if(g_dat[k]){ free(g_dat[k]); g_dat[k] = NULL; }
@@ -129,28 +166,40 @@ void process_file(const str &fn){
     printf("processing: %s\n", fn.c_str());
     fflush(stdout);
 
-    // parallel read: one worker per band
-    printf("  reading...\n"); fflush(stdout);
-    parfor(0, g_nband - 1, read_band, g_nband);
+    double t0, t1;
+
+    // parallel chunked read: 32 threads, each chunk is 50 lines of one band
+    size_t chunks_per_band = (g_nrow + g_lines_per_chunk - 1) / g_lines_per_chunk;
+    g_num_chunks = g_nband * chunks_per_band;
+
+    printf("  reading (%zu chunks, %zu lines/chunk, 32 threads)...\n", g_num_chunks, g_lines_per_chunk);
+    fflush(stdout);
+    t0 = get_time_sec();
+    parfor(0, g_num_chunks - 1, read_chunk, 32);
+    t1 = get_time_sec();
+    printf("  reading complete: %.2f sec\n", t1 - t0); fflush(stdout);
 
     // parallel processing: one worker per output row, max cores
     printf("  processing %zu output rows...\n", g_nrow2); fflush(stdout);
+    t0 = get_time_sec();
     parfor(0, g_nrow2 - 1, process_output_row);
+    t1 = get_time_sec();
+    printf("  processing complete: %.2f sec\n", t1 - t0); fflush(stdout);
 
-    // create output file (pre-allocate for parallel writes)
-    printf("  creating output file...\n"); fflush(stdout);
+    // sequential write (output is much smaller)
+    printf("  writing output...\n"); fflush(stdout);
+    t0 = get_time_sec();
     FILE *g = fopen(ofn.c_str(), "wb");
     if(!g){
         fprintf(stderr, "error: failed to create %s\n", ofn.c_str());
         return;
     }
-    fseek(g, g_nband * g_np2 * sizeof(float) - 1, SEEK_SET);
-    fputc(0, g);
+    for(size_t k = 0; k < g_nband; k++){
+        fwrite(g_dat2[k], sizeof(float), g_np2, g);
+    }
     fclose(g);
-
-    // parallel write: one worker per band
-    printf("  writing...\n"); fflush(stdout);
-    parfor(0, g_nband - 1, write_band, g_nband);
+    t1 = get_time_sec();
+    printf("  writing complete: %.2f sec\n", t1 - t0); fflush(stdout);
 
     // write header
     hwrite(ohfn, g_nrow2, g_ncol2, g_nband, 4, band_names);
@@ -227,6 +276,8 @@ int main(int argc, char ** argv){
            input_bytes / 1e9, output_bytes / 1e9, (input_bytes + output_bytes) / 1e9);
     fflush(stdout);
 
+    double t0, t1;
+
     // allocate band pointer arrays
     g_dat = new float*[g_nband];
     g_dat2 = new float*[g_nband];
@@ -235,43 +286,51 @@ int main(int argc, char ** argv){
         g_dat2[k] = NULL;
     }
 
-    // sequential allocation of input bands
+    // parallel allocation of input bands (with retry)
     printf("allocating input memory...\n"); fflush(stdout);
-    for(size_t k = 0; k < g_nband; k++){
-        alloc_input_band(k);
-    }
+    t0 = get_time_sec();
+    parfor(0, g_nband - 1, alloc_input_band, g_nband);
+    t1 = get_time_sec();
+    printf("input allocation complete: %.2f sec\n", t1 - t0); fflush(stdout);
 
-    // sequential allocation of output bands
+    // parallel allocation of output bands (with retry)
     printf("allocating output memory...\n"); fflush(stdout);
-    for(size_t k = 0; k < g_nband; k++){
-        alloc_output_band(k);
-    }
+    t0 = get_time_sec();
+    parfor(0, g_nband - 1, alloc_output_band, g_nband);
+    t1 = get_time_sec();
+    printf("output allocation complete: %.2f sec\n", t1 - t0); fflush(stdout);
 
     // verify allocations
     for(size_t k = 0; k < g_nband; k++){
         if(!g_dat[k]) err(str("failed to allocate input band ") + to_string(k));
         if(!g_dat2[k]) err(str("failed to allocate output band ") + to_string(k));
     }
-    printf("memory allocation complete\n"); fflush(stdout);
+    printf("memory allocation verified\n"); fflush(stdout);
 
     // process all files
+    double total_t0 = get_time_sec();
     for(size_t i = 0; i < files.size(); i++){
         printf("\n[%zu/%zu] ", i + 1, files.size());
         fflush(stdout);
         process_file(files[i]);
     }
+    double total_t1 = get_time_sec();
+    printf("\ntotal processing time: %.2f sec for %zu files (%.2f sec/file)\n",
+           total_t1 - total_t0, files.size(), (total_t1 - total_t0) / files.size());
 
-    // sequential free of input bands
+    // parallel free of input bands
     printf("\nfreeing input memory...\n"); fflush(stdout);
-    for(size_t k = 0; k < g_nband; k++){
-        free_input_band(k);
-    }
+    t0 = get_time_sec();
+    parfor(0, g_nband - 1, free_input_band, g_nband);
+    t1 = get_time_sec();
+    printf("input free complete: %.2f sec\n", t1 - t0); fflush(stdout);
 
-    // sequential free of output bands
+    // parallel free of output bands
     printf("freeing output memory...\n"); fflush(stdout);
-    for(size_t k = 0; k < g_nband; k++){
-        free_output_band(k);
-    }
+    t0 = get_time_sec();
+    parfor(0, g_nband - 1, free_output_band, g_nband);
+    t1 = get_time_sec();
+    printf("output free complete: %.2f sec\n", t1 - t0); fflush(stdout);
 
     delete[] g_dat;
     delete[] g_dat2;
@@ -279,3 +338,4 @@ int main(int argc, char ** argv){
     printf("done.\n");
     return 0;
 }
+
