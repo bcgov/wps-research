@@ -454,7 +454,11 @@ if __name__ == "__main__":
     #load raster and read
     raster = Raster(file_name = raster_filename)
 
-    raster_dat = raster.readBands_and_trim(band_lst=[1,2,3])
+    if raster._n_band == 1:
+        raster_dat = raster.read_bands('all').squeeze()
+
+    else:
+        raster_dat = raster.readBands_and_trim(band_lst=[1,2,3])
 
     if len(sys.argv) > 2:
 
@@ -474,11 +478,7 @@ if __name__ == "__main__":
         )
         raster_dat = draw_border(raster_dat, border)
 
-    #Plot title
-    title = raster.acquisition_timestamp
-
     #plot result
     plot(
-        raster_dat,
-        title = f'Raster of band [1,2,3] - {title}'
+        raster_dat
     )
