@@ -19,14 +19,16 @@ str g_fn;
 
 // parallel memory allocation for input bands
 void alloc_input_band(size_t k){
-    g_dat[k] = falloc(g_np);
-    if(!g_dat[k]) fprintf(stderr, "error: failed to allocate input band %zu\n", k);
+    size_t nbytes = g_np * sizeof(float);
+    g_dat[k] = (float*)calloc(g_np, sizeof(float));
+    if(!g_dat[k]) fprintf(stderr, "error: failed to allocate input band %zu (%zu bytes)\n", k, nbytes);
 }
 
 // parallel memory allocation for output bands
 void alloc_output_band(size_t k){
-    g_dat2[k] = falloc(g_np2);
-    if(!g_dat2[k]) fprintf(stderr, "error: failed to allocate output band %zu\n", k);
+    size_t nbytes = g_np2 * sizeof(float);
+    g_dat2[k] = (float*)calloc(g_np2, sizeof(float));
+    if(!g_dat2[k]) fprintf(stderr, "error: failed to allocate output band %zu (%zu bytes)\n", k, nbytes);
 }
 
 // parallel band read: each worker reads one band
