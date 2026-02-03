@@ -58,25 +58,25 @@ void read_band(size_t k){
 // parallel processing: each worker handles one output row (all bands)
 void process_output_row(size_t ip){
     if(ip >= g_nrow2) return;  // bounds check
-    
+
     size_t i_start = ip * g_n;
     size_t i_end = i_start + g_n;
     if(i_end > g_nrow) i_end = g_nrow;
-    
+
     for(size_t k = 0; k < g_nband; k++){
         float *dat_k = g_dat[k];
         float *dat2_k = g_dat2[k];
-        
+
         if(!dat_k || !dat2_k) continue;  // safety check
-        
+
         for(size_t jp = 0; jp < g_ncol2; jp++){
             size_t j_start = jp * g_m;
             size_t j_end = j_start + g_m;
             if(j_end > g_ncol) j_end = g_ncol;
-            
+
             float sum = 0.f;
             float count = 0.f;
-            
+
             for(size_t i = i_start; i < i_end; i++){
                 for(size_t j = j_start; j < j_end; j++){
                     float d = dat_k[i * g_ncol + j];
@@ -86,7 +86,7 @@ void process_output_row(size_t ip){
                     }
                 }
             }
-            
+
             size_t out_idx = ip * g_ncol2 + jp;
             dat2_k[out_idx] = (count > 0.f) ? (sum / count) : NAN;
         }
@@ -123,9 +123,9 @@ void process_file(const str &fn){
     str hfn(hdr_fn(g_fn));
     str ofn(g_fn + str("_mlk.bin"));
     str ohfn(g_fn + str("_mlk.hdr"));
-    
+
     vector<str> band_names(parse_band_names(hfn));
-    
+
     printf("processing: %s\n", fn.c_str());
     fflush(stdout);
 
@@ -154,7 +154,7 @@ void process_file(const str &fn){
 
     // write header
     hwrite(ohfn, g_nrow2, g_ncol2, g_nband, 4, band_names);
-    
+
     printf("  -> %s\n", ofn.c_str());
     fflush(stdout);
 }
@@ -167,7 +167,7 @@ int main(int argc, char ** argv){
     str input_path(argv[1]);
     g_n = (size_t)atol(argv[2]);
     g_m = (argc > 3) ? (size_t)atol(argv[3]) : g_n;
-    
+
     printf("multilook factor (row): %zu\n", g_n);
     printf("multilook factor (col): %zu\n", g_m);
 
@@ -175,21 +175,21 @@ int main(int argc, char ** argv){
     vector<str> files;
     struct stat st;
     stat(input_path.c_str(), &st);
-    
+
     if(S_ISDIR(st.st_mode)){
         // glob for *.bin files in directory
         str pattern = input_path + str("/*.bin");
         glob_t globbuf;
         glob(pattern.c_str(), 0, NULL, &globbuf);
-        
+
         for(size_t i = 0; i < globbuf.gl_pathc; i++)
             files.push_back(str(globbuf.gl_pathv[i]));
-        
+
         globfree(&globbuf);
-        
+
         if(files.size() == 0)
             err("no .bin files found in directory");
-        
+
         printf("found %zu .bin files in directory\n", files.size());
     }
     else{
@@ -199,28 +199,28 @@ int main(int argc, char ** argv){
     // read first header to establish dimensions
     str first_hfn(hdr_fn(files[0]));
     hread(first_hfn, g_nrow, g_ncol, g_nband);
-    
+
     // verify all files have same dimensions
     for(size_t i = 1; i < files.size(); i++){
         size_t nrow_i, ncol_i, nband_i;
         str hfn_i(hdr_fn(files[i]));
         hread(hfn_i, nrow_i, ncol_i, nband_i);
-        
+
         if(nrow_i != g_nrow || ncol_i != g_ncol || nband_i != g_nband)
-            err(str("dimension mismatch: ") + files[i] + 
+            err(str("dimension mismatch: ") + files[i] +
                 str(" (") + to_string(nrow_i) + str("x") + to_string(ncol_i) + str("x") + to_string(nband_i) +
                 str(") != ") + files[0] +
                 str(" (") + to_string(g_nrow) + str("x") + to_string(g_ncol) + str("x") + to_string(g_nband) + str(")"));
     }
-    
+
     g_np = g_nrow * g_ncol;
     g_nrow2 = g_nrow / g_n;
     g_ncol2 = g_ncol / g_m;
     g_np2 = g_nrow2 * g_ncol2;
-    
+
     printf("input dims: %zu rows x %zu cols x %zu bands\n", g_nrow, g_ncol, g_nband);
     printf("output dims: %zu rows x %zu cols x %zu bands\n", g_nrow2, g_ncol2, g_nband);
-    
+
     size_t input_bytes = g_nband * g_np * sizeof(float);
     size_t output_bytes = g_nband * g_np2 * sizeof(float);
     printf("memory required: %.2f GB input + %.2f GB output = %.2f GB total\n",
@@ -235,14 +235,18 @@ int main(int argc, char ** argv){
         g_dat2[k] = NULL;
     }
 
-    // parallel allocation of input bands
+    // sequential allocation of input bands
     printf("allocating input memory...\n"); fflush(stdout);
-    parfor(0, g_nband - 1, alloc_input_band, g_nband);
+    for(size_t k = 0; k < g_nband; k++){
+        alloc_input_band(k);
+    }
 
-    // parallel allocation of output bands
+    // sequential allocation of output bands
     printf("allocating output memory...\n"); fflush(stdout);
-    parfor(0, g_nband - 1, alloc_output_band, g_nband);
-    
+    for(size_t k = 0; k < g_nband; k++){
+        alloc_output_band(k);
+    }
+
     // verify allocations
     for(size_t k = 0; k < g_nband; k++){
         if(!g_dat[k]) err(str("failed to allocate input band ") + to_string(k));
@@ -257,18 +261,21 @@ int main(int argc, char ** argv){
         process_file(files[i]);
     }
 
-    // parallel free of input bands
+    // sequential free of input bands
     printf("\nfreeing input memory...\n"); fflush(stdout);
-    parfor(0, g_nband - 1, free_input_band, g_nband);
+    for(size_t k = 0; k < g_nband; k++){
+        free_input_band(k);
+    }
 
-    // parallel free of output bands
+    // sequential free of output bands
     printf("freeing output memory...\n"); fflush(stdout);
-    parfor(0, g_nband - 1, free_output_band, g_nband);
+    for(size_t k = 0; k < g_nband; k++){
+        free_output_band(k);
+    }
 
     delete[] g_dat;
     delete[] g_dat2;
-    
+
     printf("done.\n");
     return 0;
 }
-
