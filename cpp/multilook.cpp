@@ -7,6 +7,7 @@
 
 #include"misc.h"
 #include<glob.h>
+#include<sys/stat.h>
 
 // global state for parallel processing
 size_t g_nrow, g_ncol, g_nband, g_np;
@@ -30,7 +31,8 @@ void alloc_output_band(size_t k){
 void read_band(size_t k){
     FILE *f = fopen(g_fn.c_str(), "rb");
     fseek(f, k * g_np * sizeof(float), SEEK_SET);
-    fread(g_dat[k], sizeof(float), g_np, f);
+    size_t nr = fread(g_dat[k], sizeof(float), g_np, f);
+    if(nr != g_np) fprintf(stderr, "warning: band %zu read %zu of %zu\n", k, nr, g_np);
     fclose(f);
 }
 
@@ -210,5 +212,3 @@ int main(int argc, char ** argv){
     printf("done.\n");
     return 0;
 }
-
-
