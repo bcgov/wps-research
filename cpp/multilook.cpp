@@ -16,19 +16,30 @@ size_t g_n, g_m;  // multilook factors (row, col)
 float **g_dat;    // input data pointers [nband] -> [nrow * ncol]
 float **g_dat2;   // output data pointers [nband] -> [nrow2 * ncol2]
 str g_fn;
+pthread_mutex_t g_alloc_mtx = PTHREAD_MUTEX_INITIALIZER;
 
 // parallel memory allocation for input bands
 void alloc_input_band(size_t k){
     size_t nbytes = g_np * sizeof(float);
-    g_dat[k] = (float*)calloc(g_np, sizeof(float));
-    if(!g_dat[k]) fprintf(stderr, "error: failed to allocate input band %zu (%zu bytes)\n", k, nbytes);
+    float *ptr = (float*)calloc(g_np, sizeof(float));
+    if(!ptr){
+        fprintf(stderr, "error: failed to allocate input band %zu (%zu bytes)\n", k, nbytes);
+    }
+    pthread_mutex_lock(&g_alloc_mtx);
+    g_dat[k] = ptr;
+    pthread_mutex_unlock(&g_alloc_mtx);
 }
 
 // parallel memory allocation for output bands
 void alloc_output_band(size_t k){
     size_t nbytes = g_np2 * sizeof(float);
-    g_dat2[k] = (float*)calloc(g_np2, sizeof(float));
-    if(!g_dat2[k]) fprintf(stderr, "error: failed to allocate output band %zu (%zu bytes)\n", k, nbytes);
+    float *ptr = (float*)calloc(g_np2, sizeof(float));
+    if(!ptr){
+        fprintf(stderr, "error: failed to allocate output band %zu (%zu bytes)\n", k, nbytes);
+    }
+    pthread_mutex_lock(&g_alloc_mtx);
+    g_dat2[k] = ptr;
+    pthread_mutex_unlock(&g_alloc_mtx);
 }
 
 // parallel band read: each worker reads one band
@@ -260,3 +271,4 @@ int main(int argc, char ** argv){
     printf("done.\n");
     return 0;
 }
+
