@@ -1,5 +1,5 @@
 '''
-Misc to handle datetime for faster and easier use.
+Misc file to handle datetime for faster and easier use.
 '''
 
 

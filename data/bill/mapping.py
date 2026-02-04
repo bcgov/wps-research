@@ -34,7 +34,7 @@ Syntax
 python3 mapping_v2.py [Raster filename.bin] [Mask filename.bin] <- (could be a polygon mask)
 '''
 
-########### LIBRARIES ##################
+########### My LIBRARIES ##################
 
 from raster import Raster
 
@@ -48,15 +48,17 @@ from misc.general import (
 
 from sampling import regular_sampling
 
+########### Built-in LIBRARIES ###########
+
 import sys
 
 import os
 
-import numpy as np
-
 import ast
 
 import time
+
+import numpy as np
 
 ########################################
 

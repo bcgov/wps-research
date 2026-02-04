@@ -1,6 +1,4 @@
 '''
-polygon.py
-
 This method is to work with fire perimeter or other type of polygon.
 '''
 
@@ -46,8 +44,6 @@ def split_in_out(
     
     Use rasterize_onto.py to have similar matrix shape for raster and polygon.
     '''
-
-    from exceptions.matrix import Shape_Mismatched_Error
     
     if raster_dat is not None:
         xSize = raster_dat.shape[1]
@@ -77,7 +73,7 @@ def split_in_out(
 
     if (raster_shape[0] != polygon_shape[0]) or (raster_shape[1] != polygon_shape[1]):
 
-        raise Shape_Mismatched_Error(f"Masking of size {polygon_shape} can't work with object of shape {raster_shape}")
+        raise ValueError(f"Masking of size {polygon_shape} can't work with object of shape {raster_shape}")
 
     inside  = raster_dat[polygon_mask]
     outside = raster_dat[~polygon_mask]

@@ -1,21 +1,15 @@
 '''
-change_detection.py
-
-python3 change_detection.py file_pre.bin file_post.bin
+Syntax for quick plot:
+  >> python3 change_detection.py file_pre.bin file_post.bin
 '''
 
 import numpy as np
-
-from exceptions.matrix import Shape_Mismatched_Error
 
 import sys
 
 from raster import Raster
 
-from misc.general import (
-    htrim_3d,
-    match_shape
-)
+from misc.general import htrim_3d
 
 from plot_tools import plot_multiple
 
@@ -23,8 +17,7 @@ from plot_tools import plot_multiple
 def change_detection(
         pre_X, 
         post_X,
-        eps = 1e-3,
-        allow_matching_shape = False
+        eps = 1e-3
 ):
     
     '''
@@ -47,8 +40,6 @@ def change_detection(
 
     eps: to prevent divide by zero
 
-    allow_matching_shape: to allow reducing dimension to match with the smaller one.
-
     
     Returns
     -------
@@ -58,20 +49,10 @@ def change_detection(
     Notes
     -----
     Order of images matters.
-
-    There will be cases were the shape is mismatched, data cannot be generated, but cropping is easy.
-
-    Use allow_matching_shape = True to do it, use with CAUTION, should be used for visualization purpose only.
-
-    It's agood practice not to automate the matching process, so we know the data can be mismatched.
     '''
 
     im1 = pre_X.astype(np.float32)
     im2 = post_X.astype(np.float32)
-
-    if (allow_matching_shape):
-
-        im1, im2 = match_shape(im1, im2)
 
     try:
 
@@ -80,11 +61,12 @@ def change_detection(
 
     except Exception:
 
-        raise Shape_Mismatched_Error(f'Receiving shape {im1.shape} & {im2.shape}')
+        raise ValueError(f'Receiving shape {im1.shape} & {im2.shape}')
     
     norm_diff = d / (n + eps)
 
     return norm_diff
+
 
 
 if __name__ == '__main__':
@@ -106,13 +88,11 @@ if __name__ == '__main__':
     raster_pst_Instance = Raster(file_name=filename_pst)
 
     raster_pre = raster_pre_Instance.readBands_and_trim(
-        band_lst=[1,2,3],
-        crop=True
+        band_lst=[1,2,3]
     )
     
     raster_pst = raster_pst_Instance.readBands_and_trim(
-        band_lst=[1,2,3],
-        crop=True
+        band_lst=[1,2,3]
     )
 
     #Plot title
@@ -120,8 +100,7 @@ if __name__ == '__main__':
 
     htrim_nbd = htrim_3d(
         change_detection(pre_X=raster_pre, 
-                        post_X=raster_pst,
-                        allow_matching_shape=True)
+                        post_X=raster_pst)
     )
 
     #plot result
