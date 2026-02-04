@@ -1,5 +1,7 @@
 **__pycache__/
 *C11659*
 videos/
+*.mp4
 caching/
+mapped_burn/
 *.DS_Store*

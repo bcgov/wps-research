@@ -1,21 +1,44 @@
 '''
 Description
 -----------
-mapping_v1.py
+mapping_v2.py
 
     Burn-mapping using parallel computing.
 
     Requires NVidia GPU(s) for rendering.
 
 
+What's new
+----------
+In this version, it's designed to take imagery of a single date with:
+
+    Raw spectral bands.
+
+    A mask as the hint. 
+    
+The algorithm will attempt to find the best mapping of burned areas.
+
+
+Tradeoff
+--------
+In pre-post version (ver. 1), raster file with combination of pre and post as input, so changes are more detectable.
+
+
+Strength
+--------
+This method is robust if we have access to just 1 most relevant date, not a date before the fire.
+
+
 Syntax
 ------
-python3 mapping_v1.py [Raster filename.bin] [rasterized Polygon filename.bin]
+python3 mapping_v2.py [Raster filename.bin] [Mask filename.bin] <- (could be a polygon mask)
 '''
 
-########### LIBRARIES ##################
+########### My LIBRARIES ##################
 
 from raster import Raster
+
+from misc.sen2 import writeENVI
 
 from misc.general import (
     htrim_3d,
@@ -23,17 +46,19 @@ from misc.general import (
     draw_border
 )
 
-from sampling import (
-    regular_sampling
-)
+from sampling import regular_sampling
+
+########### Built-in LIBRARIES ###########
 
 import sys
 
-import numpy as np
+import os
 
 import ast
 
 import time
+
+import numpy as np
 
 ########################################
 
@@ -47,23 +72,26 @@ class GUI_Settings:
 
     def __init__(self):
 
-        self.knn_params = {
-            'n_neighbors': 1,
-            'weights': "uniform",
-            'algorithm': "brute",
-            'metric': "minkowski",
-            'p': 2
-        }
+        #for file saving
+        self.save_dir = './mapped_burn'
 
+        #For TSNE embedding.
         self.rf_params = {
             'n_estimators': 100,    
-            'max_depth': 12,
+            'max_depth': 20,
             'max_features': "sqrt", 
             'random_state': 42
         }
 
+        #For clustering
+        '''
+        controled_ratio means we are not sure with our guess of the burn, so there might be more or less than
+        what is actually sampled, currenly used for HDBSCAN min cluster size control. A positive value > 0.
+        '''
+        self.controlled_ratio = .4
+
         self.hdbscan_params = {
-            'min_cluster_size': 1000,
+            'min_cluster_size': None,
             'min_samples': 20, # controls conservativeness
             'metric': 'euclidean'
         }
@@ -93,8 +121,8 @@ class GUI(GUI_Settings):
         self.image_filename = image_filename
 
         #First plots
-        self.embed_band_list = [1,2,4,5,6,8,9,10,12,13]
-        self.img_band_list = [9,10,13]
+        self.embed_band_list = [1,2,4]
+        self.img_band_list = [1,2,4]
 
         #Other settings
         self.sample_size = sample_size
@@ -136,7 +164,7 @@ class GUI(GUI_Settings):
 
     def load_polygon(
             self,
-            border_thickness: int = 7
+            border_thickness: int = 5
     ):
         '''
         Polygon needs to be rasterized using shapefile_rasterize_onto.py or equivalent.
@@ -154,9 +182,10 @@ class GUI(GUI_Settings):
         #If it is a polygon, it has just 1 channel, so squeeze makes it a pretty 2D array.
         self.polygon = polygon
 
-        self.polygon_dat = polygon.read_bands('all').squeeze()
+        #We use this to make a guess of the ratio.
+        self.polygon_dat = polygon.read_bands('all').squeeze().astype(np.bool_)
 
-        #extract border
+        #extract border from the rasterized polygon.
         self.border = extract_border(
             mask = self.polygon_dat, 
             thickness = border_thickness
@@ -181,6 +210,15 @@ class GUI(GUI_Settings):
 
         #Which indices will be inside
         self.sample_in_polygon = ( self.polygon_dat.ravel() )[self.sample_indices].astype(np.bool_)
+
+        '''
+        The next part will be new, we will 
+        '''
+
+    
+        self.guessed_burn_p = np.nanmean( self.polygon_dat )
+
+        #We will later use this guess as a criteria for HDBSCAN
     
 
 
@@ -322,6 +360,12 @@ class GUI(GUI_Settings):
             hdbscan_approximate
         )
 
+        #Step 1: prepare criteria for clustering.
+        self.hdbscan_params['min_cluster_size'] = min(
+            self.sample_size * self.guessed_burn_p * self.controlled_ratio,
+            self.sample_size * ( 1-self.guessed_burn_p ) * self.controlled_ratio
+        )
+
         t0 = time.time()
 
         transformed_img = self.load_image_embed_RF()
@@ -336,6 +380,8 @@ class GUI(GUI_Settings):
             cluster
         )
 
+        print(f'Unique clusters: {np.unique(img_cluster)}')
+
         print(f'Mapping cost {time.time() - t0:.3f}s')
 
         return img_cluster
@@ -349,28 +395,45 @@ class GUI(GUI_Settings):
         '''
         Clusters from HDBSCAN don't have names.
 
-        We will use dNBR based to get name.
+        Since we have mask as hint, we use it as information for the final labelling.
 
-        Higher dNBR -> Burn. 
-
-        Noise: -1 will be assign to Unburned.
-
-        CAUTION: ONLY APPLICABLE IF THERE ARE 2 CLUSTERS
+        Determines if cluster of 1 is burn or unburned. If most of the masked burn is closer to 1, then 
+        
+        we have some evidence that cluster 1 is burned.
         '''
 
-        dnbr12 = self.image_dat[..., 12]
+        classification = np.full(self.polygon_dat.shape, False)
 
-        classification = np.full(dnbr12.shape, False)
-        
-        if np.nanmean(dnbr12[cluster == 0]) > np.nanmean(dnbr12[cluster == 1]):
-            #Means cluster 0 is likely burned
-            classification[cluster == 0] = True
+        masked_cluster = cluster[self.polygon_dat]
 
-        else:
-            #Means cluster 1 is likely burned
+        if masked_cluster[masked_cluster != -1].mean() > 0.5:
             classification[cluster == 1] = True
 
+        else:
+            classification[cluster == 0] = True
+
         return classification
+
+
+
+    def save_classification(
+            self,
+            classification
+    ):
+        
+        os.makedirs(self.save_dir, exist_ok=True)
+
+        base_filename = os.path.basename(self.image_filename)
+
+        writeENVI(
+            output_filename=f'{self.save_dir}/{base_filename}_classified.bin',
+            data = classification,
+            mode='new',
+            ref_filename=self.image_filename,
+            band_names=['burned(bool)']
+        )
+
+        print('classification saved (ENVI).')
 
 
 
@@ -409,7 +472,6 @@ class GUI(GUI_Settings):
             mpatches.Patch(color="blue", label="Outside"),
             mpatches.Patch(color="red",  label="Inside"),
         ])
-
 
 
         img_plot = ax_img.imshow(
@@ -532,6 +594,10 @@ class GUI(GUI_Settings):
             #Get true classification
             classification = self.classify_cluster(img_cluster)
 
+            #Save to ENVI file.
+            self.save_classification(classification)
+
+            #Plot product.
             fig2 = plt.figure(figsize=(12, 12))
 
             ax2 = fig2.add_subplot(111)
@@ -560,7 +626,12 @@ class GUI(GUI_Settings):
 if __name__ == '__main__':
 
     if len(sys.argv) < 3:
-        print("Needs 1 raster file and 1 polygon file")
+        print("""python3 mapping_v2.py [raster input file (.bin)] [raster binary mask file (.bin)]
+            [raster input file (.bin)] -- input raster file, ENVI format ( .bin and .hdr)  
+            [raster mask file (.bin)] -- input raster mask file, 0/1 values, (.bin and .hdr) same dimensions as raster input file. This is an initial guess that guides the classification of the input file. This could be a rasterization of a polygon created by "heads-up" digitization, or a classification result generated by the "red wins" rule 
+        
+            Example:
+            python3 mapping_v2.py 1009.bin polygon_0000.bin""")
         sys.exit(1)
 
     image_filename = sys.argv[1]

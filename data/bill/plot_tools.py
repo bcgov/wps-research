@@ -29,9 +29,12 @@ def plot(
         -------
         A plot of the data:)
         '''
+        cmap = None
+        if X.ndim == 2:
+            cmap = 'gray'
 
         plt.figure(figsize=figsize) 
-        plt.imshow(X)
+        plt.imshow(X, cmap = cmap)
         plt.axis('off')
         plt.title(title)
         plt.tight_layout()

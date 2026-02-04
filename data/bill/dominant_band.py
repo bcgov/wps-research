@@ -1,10 +1,8 @@
 '''
-dominant_band.py 
-
 Use this file to quickly see the idea of 'which colour wins'
 
 Syntax:
-    python3 dominant_band.py file.bin
+  >> python3 dominant_band.py file.bin
 '''
 
 from raster import Raster
@@ -31,11 +29,10 @@ def dominant_band(
     mask: 2D array (3rd dim is n channel is gone)
     '''
     import numpy as np
-    from exceptions.sen2 import Out_Of_Bound_Band_Index
 
     if band_index < 1 or band_index > X.shape[2]:
 
-        raise Out_Of_Bound_Band_Index("band_index out of range")
+        raise IndexError("band_index out of range")
     
     idx = band_index - 1
 
@@ -109,6 +106,8 @@ def plot_dominant_band(
     plt.show()
     
 
+
+
 if __name__ == '__main__':
 
     '''
@@ -132,7 +131,6 @@ if __name__ == '__main__':
     raster = Raster(file_name=filename)
 
     X = raster.readBands_and_trim(
-        crop = True,
         band_lst=[1,2,3]
     )
 

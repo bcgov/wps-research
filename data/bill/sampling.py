@@ -1,7 +1,5 @@
 '''
-sampling.py
-
-Designed specifically for inside and outside of polygon.
+Sampling data.
 '''
 
 import numpy as np

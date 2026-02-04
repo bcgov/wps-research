@@ -1,24 +1,20 @@
 '''
-Read raster data from .bin file (need .hdr ready as well)
+Read raster data from .bin file (ENVI format)
 
-python3 raster.py file.bin
+Syntax for quick plot
+  >> python3 raster.py file.bin
 '''
 
 from osgeo import gdal
 
-from misc.general import (
-    htrim_3d, 
-    crop_no_data
-)
+from misc.general import htrim_3d
 
 from misc.sen2 import (
     read_raster_timestamp,
     band_index
 )
 
-from plot_tools import (
-    plot
-)
+from plot_tools import plot
 
 import numpy as np
 
@@ -96,23 +92,39 @@ class Raster:
 
     def __read_single_band(
             self,
-            band
+            band: int
         ):
 
         '''
-        Helper function
+        Description 
+        -----------
+        This function is used internally to read a single band. 
 
-        Returns a 2D array of the chosen band
-
+        
         Parameters
         ----------
-        band: The specific band to cut from the data.
+        band: A specific band index.
 
         
         Returns
         -------
         A 2D array of the chosen band (a single layer)
         '''
+
+        if not isinstance(band, int):
+
+            raise TypeError("band must be an integer.")
+
+        if ( band < 1 or band > self._n_band ): 
+            '''
+            My convention is that band number starts at 1.
+
+            The max is number of bands.
+            '''
+
+            raise ValueError(
+                f"band must be between 1 and {self._n_band}, got {band}"
+            )
 
         band = self._dataset.GetRasterBand(band)
 
@@ -137,7 +149,9 @@ class Raster:
             band_lst
     ):
         '''
-        Iteratively reads and saves all band in a stack using __read_single_band
+        Description
+        -----------
+        Iteratively reads and saves all band in a stack using __read_single_band(band)
         '''
 
         return np.dstack([
@@ -149,17 +163,17 @@ class Raster:
     def read_bands(
             self,
             band_lst = 'all',
-            crop = False,
             info = False
     ):
         '''
+        Description
+        -----------
         Read each band and arrange everything in a 3D matrix.
+
 
         Parameters
         ----------
         band_lst: In the meta data, each band will be ordered and can be accessed from index 1. Default is 'all' band(s).
-
-        crop: boolean to remove rows and columns that may contain mostly repeated values (no data there).
 
         info: to print out information of selected bands
         
@@ -180,10 +194,6 @@ class Raster:
 
         #Handle band out of bound here
 
-        from exceptions.sen2 import Out_Of_Bound_Band_Index
-
-        from exceptions.dimension import Dimension_Not_Supported
-
 
         if band_lst == 'all':
 
@@ -194,19 +204,10 @@ class Raster:
 
             if (min(band_lst) < 1 or max(band_lst) > self._n_band):
 
-                raise Out_Of_Bound_Band_Index(f'Some band index is not in the data.')
+                raise IndexError(f'Some band index is not in the data.')
 
 
             data = self.__ite_read(band_lst = band_lst)
-
-
-        if crop:
-
-            if len(band_lst) != 3: 
-
-                raise Dimension_Not_Supported(f"This method only works for d = 3. Yours is {len(band_lst)}")
-
-            data = crop_no_data(data)
 
 
         if info:
@@ -229,11 +230,13 @@ class Raster:
             band_lst='all',
             *,
             p = 1.,
-            crop = False,
             info = False
     ):
         
-        '''A pipeline
+        '''
+        Description
+        -----------
+        A pipeline style
 
         The same as read -> trim, but you cannot do anything in between, refers to Notes
 
@@ -245,8 +248,6 @@ class Raster:
         band_lst: In the meta data, each band will be ordered and can be accessed from index 1.
 
         p: percentage used for histogram trimming.
-
-        crop: boolean to remove rows and columns that may contain mostly repeated values (no data there).
 
         info: to print out information of selected bands
 
@@ -269,13 +270,11 @@ class Raster:
         
         rgb = self.read_bands(
             band_lst=band_lst,
-            crop=crop,
             info=info
         )
 
         return htrim_3d(
-            rgb, 
-            p
+            rgb, p
         )
     
 
@@ -332,9 +331,7 @@ class Raster:
             return False
 
 
-        if (
-            not is_boolean_matrix(self.read_bands('all'))
-        ):
+        if ( not is_boolean_matrix(self.read_bands('all')) ):
 
             print('dtype of polygon is not boolean. Not a polygon.')
 
@@ -406,7 +403,7 @@ def minimum_nan_raster(
     '''
     Description
     -----------
-    Compare between the rasters to select the one with the least NAN in count.
+    Compares between the rasters to select the one with the least No Data in count.
     '''
 
     from misc.general import ignore_nan_2D
@@ -441,6 +438,7 @@ def minimum_nan_raster(
 
 
 
+
 if __name__ == "__main__":
 
     #handling argv
@@ -454,7 +452,11 @@ if __name__ == "__main__":
     #load raster and read
     raster = Raster(file_name = raster_filename)
 
-    raster_dat = raster.readBands_and_trim(band_lst=[1,2,3])
+    if raster._n_band == 1:
+        raster_dat = raster.read_bands('all').squeeze()
+
+    else:
+        raster_dat = raster.readBands_and_trim(band_lst=[1,2,3])
 
     if len(sys.argv) > 2:
 
@@ -470,15 +472,9 @@ if __name__ == "__main__":
         polygon_dat = Raster(polygon_filename).read_bands(band_lst=[1])
         border = extract_border(
             polygon_dat.squeeze(),
-            thickness=8
+            thickness=5
         )
         raster_dat = draw_border(raster_dat, border)
 
-    #Plot title
-    title = raster.acquisition_timestamp
-
     #plot result
-    plot(
-        raster_dat,
-        title = f'Raster of band [1,2,3] - {title}'
-    )
+    plot(raster_dat)

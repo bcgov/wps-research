@@ -1,7 +1,5 @@
 '''
-misc/sen2.py
-
-Mostly miscellaneous functions for sentinel-2 data processing
+Miscellaneous file for sentinel-2 data processing.
 '''
 
 import re
@@ -157,8 +155,6 @@ def band_index(
     In the case there are 2 identical bands in the same data, it returns the first index.
     '''
 
-    from exceptions.sen2 import No_Band_Error
-
     pattern = rf"\bB{band}\b"
     
     for i, I in enumerate(band_info_list):
@@ -167,7 +163,7 @@ def band_index(
 
             return i
         
-    raise No_Band_Error(f'Band {band} is not in the data.')
+    raise LookupError(f'Band {band} is not in the data.')
 
 
 
@@ -190,16 +186,13 @@ def band_name(
         
         return that_band
 
-    
-
-
 
 
 def writeENVI(
     output_filename: str,
     data: np.ndarray,
     *,
-    mode: str = "new",                 # "new" or "add"
+    mode: str = "new",
     ref_filename: str | None = None,
     band_names: list[str] | None = None,
     copy_geo: bool = True
