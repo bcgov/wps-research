@@ -83,7 +83,7 @@ class GUI_Settings:
         self.rf_params = {
             'n_estimators': 100,    
             'max_depth': 15,
-            'max_features': "sqrt", 
+            'max_features': "sqrt",
             'random_state': 42
         }
 
@@ -128,8 +128,8 @@ class GUI(GUI_Settings):
         self.polygon_methods = ['swir wins', 'dNBR 12']
 
         #First plots
-        self.embed_band_list = [1,2,4,5,6,8,9,10,12,13,14]
-        self.img_band_list = [9,10,13]
+        self.embed_band_list = [1,2,4,5,6,8,9,10,12,14]
+        self.img_band_list = [9, 10, 13]
 
         #Other settings
         self.sample_size = sample_size
@@ -418,6 +418,10 @@ class GUI(GUI_Settings):
 
         transformed_img = self.load_image_embed_RF()
 
+        t1 = time.time()
+
+        print(f'Forest mapping done, cost {t1 - t0:.2f} s')
+
         cluster, _ = hdbscan_fit(
             self.current_embed, 
             **self.hdbscan_params
@@ -430,7 +434,7 @@ class GUI(GUI_Settings):
 
         print(f'Unique clusters: {np.unique(img_cluster)}')
 
-        print(f'Mapping cost {time.time() - t0:.3f}s')
+        print(f'HDBSCAN done, cost {time.time() - t1:.3f}s')
 
         return img_cluster
 

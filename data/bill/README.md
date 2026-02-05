@@ -1,10 +1,12 @@
 <h1>SENTINEL-2 Data Processing</h1>
 
-Currently working on: 
+Ongoing work: 
 
-+ Exploring new burn-mapping methods
++ Cloud masking and imagery enhancement
 
-+ Fire progression
+Past work:
+
++ Burn mapping
 
 
 Requirements:
