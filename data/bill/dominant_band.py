@@ -1,10 +1,8 @@
 '''
-dominant_band.py 
-
 Use this file to quickly see the idea of 'which colour wins'
 
 Syntax:
-    python3 dominant_band.py file.bin
+  >> python3 dominant_band.py file.bin
 '''
 
 from raster import Raster
@@ -14,37 +12,41 @@ import sys
 
 def dominant_band(
         X, 
-        band_index
+        band_index: int
     ):
     '''
-    This function imposes a threshold, which compares the selected channel with other 3.
+    Description
+    -----------
+    This function imposes a threshold, which compares the selected channel with others.
 
+    
     Parameters
     ----------
-    X: a 3D matrix.
+    X: a 3d matrix.
 
     band_index: the channel (band) index which you want to compare against the others.
 
     
     Returns
     -------
-    mask: 2D array (3rd dim is n channel is gone)
+    mask: 2D array of the dominant pixels only.
     '''
     import numpy as np
-    from exceptions.sen2 import Out_Of_Bound_Band_Index
 
-    if band_index < 1 or band_index > X.shape[2]:
+    if ( band_index < 1 or band_index > X.shape[2] ):
 
-        raise Out_Of_Bound_Band_Index("band_index out of range")
+        raise IndexError("band_index out of range")
     
     idx = band_index - 1
 
     target = X[:, :, idx]
+
     others = np.delete(X, idx, axis=2)
 
     mask = np.all(target[..., None] > others, axis=2)
 
     return mask
+
 
 
 def plot_dominant_band(
@@ -109,6 +111,8 @@ def plot_dominant_band(
     plt.show()
     
 
+
+
 if __name__ == '__main__':
 
     '''
@@ -132,7 +136,6 @@ if __name__ == '__main__':
     raster = Raster(file_name=filename)
 
     X = raster.readBands_and_trim(
-        crop = True,
         band_lst=[1,2,3]
     )
 

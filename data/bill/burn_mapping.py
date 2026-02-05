@@ -1,21 +1,41 @@
 '''
+UPDATE
+------
+Polygon is not required as the hint anymore.
+
+There will be list of options for criterion you can choose as the hint.
+
+Once you are happy with the hint, click 'Apply Hint' and let the model works the mapping out.
+
+
 Description
 -----------
-mapping_v1.py
+Burn-mapping using parallel computing.
 
-    Burn-mapping using parallel computing.
+Requires NVidia GPU(s) for rendering.
 
-    Requires NVidia GPU(s) for rendering.
+
+Inputs
+------
+In this version, it's designed to take imagery of a single date with:
+
+    Raw spectral bands.
+
+    A mask as the hint. [optional]
+    
+The algorithm will attempt to find the best mapping of burned areas.
 
 
 Syntax
 ------
-python3 mapping_v1.py [Raster filename.bin] [rasterized Polygon filename.bin]
+>> python3 mapping.py [Raster filename.bin] [Mask filename.bin] <- (could be a polygon mask)
 '''
 
-########### LIBRARIES ##################
+########### My LIBRARIES ##################
 
 from raster import Raster
+
+from misc.sen2 import writeENVI
 
 from misc.general import (
     htrim_3d,
@@ -23,17 +43,26 @@ from misc.general import (
     draw_border
 )
 
-from sampling import (
-    regular_sampling
-)
+from sampling import regular_sampling
+
+########### Built-in LIBRARIES ###########
 
 import sys
 
-import numpy as np
+import os
 
 import ast
 
 import time
+
+import numpy as np
+
+########### Matplotlib ###################
+
+import matplotlib
+matplotlib.use("TkAgg")
+import matplotlib.pyplot as plt
+from matplotlib.gridspec import GridSpec
 
 ########################################
 
@@ -47,23 +76,26 @@ class GUI_Settings:
 
     def __init__(self):
 
-        self.knn_params = {
-            'n_neighbors': 1,
-            'weights': "uniform",
-            'algorithm': "brute",
-            'metric': "minkowski",
-            'p': 2
-        }
+        #for file saving
+        self.save_dir = './mapped_burn'
 
+        #For TSNE embedding.
         self.rf_params = {
             'n_estimators': 100,    
-            'max_depth': 12,
-            'max_features': "sqrt", 
+            'max_depth': 15,
+            'max_features': "sqrt",
             'random_state': 42
         }
 
+        #For clustering
+        '''
+        controled_ratio means we are not sure with our guess of the burn, so there might be more or less than
+        what is actually sampled, currenly used for HDBSCAN min cluster size control. A positive value > 0.
+        '''
+        self.controlled_ratio = .5
+
         self.hdbscan_params = {
-            'min_cluster_size': 1000,
+            'min_cluster_size': None,
             'min_samples': 20, # controls conservativeness
             'metric': 'euclidean'
         }
@@ -75,7 +107,8 @@ class GUI(GUI_Settings):
     def __init__(
             self,
             *,
-            polygon_filename: str,
+            polygon_filename: str = None,
+
             image_filename: str,
             sample_size = 10_000,
             random_state = 123
@@ -91,10 +124,12 @@ class GUI(GUI_Settings):
         #Default values
         self.polygon_filename = polygon_filename
         self.image_filename = image_filename
+        self.border_thickness = 5 #polygon border
+        self.polygon_methods = ['swir wins', 'dNBR 12']
 
         #First plots
-        self.embed_band_list = [1,2,4,5,6,8,9,10,12,13]
-        self.img_band_list = [9,10,13]
+        self.embed_band_list = [1,2,4,5,6,8,9,10,12,14]
+        self.img_band_list = [9, 10, 13]
 
         #Other settings
         self.sample_size = sample_size
@@ -102,8 +137,8 @@ class GUI(GUI_Settings):
 
         #Init tasks
         self.load_image()
-        self.load_polygon()
-        self.sample_data()
+
+        self.config_popup()
 
 
 
@@ -134,33 +169,83 @@ class GUI(GUI_Settings):
 
 
 
+    def __polygon_swir_wins(
+        self
+    ):
+        '''
+        A polygon method to get the initial hint.
+
+        Using swir wins
+        '''
+
+        from dominant_band import dominant_band
+
+        x = dominant_band(X = self.image_dat, band_index=1)
+
+        return x
+    
+
+
+    def __polygon_dNBR12(
+            self
+    ):
+        '''
+        A polygon method to get the initial hint.
+
+        Using dNBR12
+
+        Notes
+        -----
+        Currently in test, use data in test file
+        '''
+
+        from barc import dnbr_post256
+
+        x = dnbr_post256(raw_dnbr = self.image_dat[..., 12], threshold=100)
+
+        return x
+
+
+
     def load_polygon(
-            self,
-            border_thickness: int = 7
+            self
     ):
         '''
         Polygon needs to be rasterized using shapefile_rasterize_onto.py or equivalent.
         '''
+        self.polygon_dat = None
 
-        from exceptions.sen2 import PolygonException
+        if (self.selected_polygon_method == 'polygon file'):
 
+            polygon = Raster(file_name=self.polygon_filename)
 
-        polygon = Raster(file_name=self.polygon_filename)
+            if not polygon.is_polygon():
+                #Check if this is a polygon.
+                raise ValueError(f"Not a polygon @ {self.polygon_filename}")
+            
+            #If it is a polygon, it has just 1 channel, so squeeze makes it a pretty 2D array.
+            self.polygon = polygon
 
-        if not polygon.is_polygon():
-            #Check if this is a polygon.
-            raise PolygonException(f"Not a polygon @ {self.polygon_filename}")
+            #We use this to make a guess of the ratio.
+            self.polygon_dat = polygon.read_bands('all').squeeze().astype(np.bool_)
+
         
-        #If it is a polygon, it has just 1 channel, so squeeze makes it a pretty 2D array.
-        self.polygon = polygon
+        if (self.selected_polygon_method == 'swir wins'): 
+            
+            self.polygon_dat = self.__polygon_swir_wins()
 
-        self.polygon_dat = polygon.read_bands('all').squeeze()
+        if (self.selected_polygon_method == 'dNBR 12'):
 
-        #extract border
+            self.polygon_dat = self.__polygon_dNBR12()
+
+        #extract border from the rasterized polygon.
         self.border = extract_border(
             mask = self.polygon_dat, 
-            thickness = border_thickness
+            thickness = self.border_thickness
         )
+
+        #Just a guess of actual burn ratio
+        self.guessed_burn_p = np.nanmean( self.polygon_dat )
     
 
 
@@ -322,9 +407,20 @@ class GUI(GUI_Settings):
             hdbscan_approximate
         )
 
+        #Step 1: prepare criteria for clustering.
+
+        self.hdbscan_params['min_cluster_size'] = min(
+            self.sample_size * self.guessed_burn_p * self.controlled_ratio,
+            self.sample_size * ( 1-self.guessed_burn_p ) * self.controlled_ratio
+        )
+
         t0 = time.time()
 
         transformed_img = self.load_image_embed_RF()
+
+        t1 = time.time()
+
+        print(f'Forest mapping done, cost {t1 - t0:.2f} s')
 
         cluster, _ = hdbscan_fit(
             self.current_embed, 
@@ -336,10 +432,12 @@ class GUI(GUI_Settings):
             cluster
         )
 
-        print(f'Mapping cost {time.time() - t0:.3f}s')
+        print(f'Unique clusters: {np.unique(img_cluster)}')
+
+        print(f'HDBSCAN done, cost {time.time() - t1:.3f}s')
 
         return img_cluster
-    
+
 
 
     def classify_cluster(
@@ -349,37 +447,53 @@ class GUI(GUI_Settings):
         '''
         Clusters from HDBSCAN don't have names.
 
-        We will use dNBR based to get name.
+        Since we have mask as hint, we use it as information for the final labelling.
 
-        Higher dNBR -> Burn. 
-
-        Noise: -1 will be assign to Unburned.
-
-        CAUTION: ONLY APPLICABLE IF THERE ARE 2 CLUSTERS
+        Determines if cluster of 1 is burn or unburned. If most of the masked burn is closer to 1, then 
+        
+        we have some evidence that cluster 1 is burned.
         '''
 
-        dnbr12 = self.image_dat[..., 12]
+        classification = np.full(self.polygon_dat.shape, False)
 
-        classification = np.full(dnbr12.shape, False)
-        
-        if np.nanmean(dnbr12[cluster == 0]) > np.nanmean(dnbr12[cluster == 1]):
-            #Means cluster 0 is likely burned
-            classification[cluster == 0] = True
+        masked_cluster = cluster[self.polygon_dat]
+
+        if masked_cluster[masked_cluster != -1].mean() > 0.5:
+            classification[cluster == 1] = True
 
         else:
-            #Means cluster 1 is likely burned
-            classification[cluster == 1] = True
+            classification[cluster == 0] = True
 
         return classification
 
 
 
+    def save_classification(
+            self,
+            classification
+    ):
+        
+        os.makedirs(self.save_dir, exist_ok=True)
+
+        base_filename = os.path.basename(self.image_filename)
+
+        writeENVI(
+            output_filename=f'{self.save_dir}/{base_filename}_classified.bin',
+            data = classification,
+            mode='new',
+            ref_filename=self.image_filename,
+            band_names=['burned(bool)']
+        )
+
+        print('classification saved (ENVI).')
+
+
+
     def main(self):
         
-        import matplotlib
-        matplotlib.use("TkAgg")
-        import matplotlib.pyplot as plt
         import matplotlib.patches as mpatches
+
+        self.sample_data() 
 
         embed_title, embed = self.get_band_embed()
 
@@ -409,7 +523,6 @@ class GUI(GUI_Settings):
             mpatches.Patch(color="blue", label="Outside"),
             mpatches.Patch(color="red",  label="Inside"),
         ])
-
 
 
         img_plot = ax_img.imshow(
@@ -459,7 +572,6 @@ class GUI(GUI_Settings):
             top=0.88,
             wspace=0.05
         )
-
 
         '''
         Text box: T-sne
@@ -532,17 +644,41 @@ class GUI(GUI_Settings):
             #Get true classification
             classification = self.classify_cluster(img_cluster)
 
+            #Plot product.
             fig2 = plt.figure(figsize=(12, 12))
 
-            ax2 = fig2.add_subplot(111)
+            gs = GridSpec(
+                2, 1,
+                height_ratios=[12, 1],   # image big, button small
+                figure=fig2
+            )
+
+            ax_img = fig2.add_subplot(gs[0])
     
-            ax2.imshow(
+            ax_img.imshow(
                 classification, cmap = 'gray'
             )
 
-            ax2.set_title(f'Burn Mapping on {len(self.embed_band_list)} bands\n{self.current_band_name}')
+            ax_img.set_title(f'Burn Mapping on {len(self.embed_band_list)} bands\n{self.current_band_name}')
 
-            ax2.axis("off")
+            ax_img.set_xticks([])
+            ax_img.set_yticks([])
+
+            ########## Save classification buttion #########
+            ax_btn = fig2.add_subplot(gs[1])
+            ax_btn.set_xticks([])
+            ax_btn.set_yticks([])
+            for spine in ax_btn.spines.values():
+                spine.set_visible(False)
+
+            self.__save_clf_btn = Button(ax_btn, 'Save Classification')
+
+            def save_clf(event):
+
+                #Save to ENVI file.
+                self.save_classification(classification)
+            
+            self.__save_clf_btn.on_clicked(save_clf)
 
             print(f'DONE! Mapping on band list: {self.embed_band_list}')
 
@@ -552,23 +688,122 @@ class GUI(GUI_Settings):
 
         mapping_btn.on_clicked(on_submit_mapping)
 
-
         plt.show()
+
+
+
+    def config_popup(
+            self
+    ):
+        from matplotlib.widgets import RadioButtons, Button
+
+        # Options with descriptions
+        
+        self._run_requested = False
+
+        options = {}
+
+        if (self.polygon_filename is not None):
+            self.polygon_methods.insert(0, 'polygon file')
+            
+        for i, m in enumerate(self.polygon_methods):
+            options[f'Option {i+1}'] = m
+
+        self.selected_polygon_method = options['Option 1']
+
+        # Create popup
+        fig = plt.figure(figsize=(6, 4))
+
+        # Radio buttons
+        ax_radio = plt.axes([0.1, 0.3, 0.35, 0.5])
+        radio = RadioButtons(ax_radio, list(options.keys()))
+
+        # Description box
+        ax_desc = plt.axes([0.5, 0.3, 0.4, 0.5])
+        ax_desc.axis('off')
+        desc_text = ax_desc.text(
+            0.1, 0.9, 
+            self.selected_polygon_method,
+            va='top',
+            wrap=True
+        )
+
+        # Preview button
+        ax_btn = plt.axes([0.35, 0.1, 0.3, 0.1])
+        preview_btn = Button(ax_btn, 'Preview Polygon')
+
+        def update(label):
+            self.selected_polygon_method = options[label]
+            desc_text.set_text(self.selected_polygon_method)
+            fig.canvas.draw_idle()
+
+        #Buttons on radio
+        radio.on_clicked(update)
+
+
+        def preview_hint(event):
+
+            fig2 = plt.figure(figsize=(6, 6))
+
+            gs = GridSpec(
+                2, 1,
+                height_ratios=[12, 1],   # image big, button small
+                figure=fig2
+            )
+
+            ax_img = fig2.add_subplot(gs[0])
+
+            self.load_polygon()
+    
+            ax_img.imshow(
+                self.polygon_dat, 
+                cmap='gray'
+            )
+            ax_img.set_xticks([])
+            ax_img.set_yticks([])
+
+            ax_btn = fig2.add_subplot(gs[1])
+            ax_btn.set_xticks([])
+            ax_btn.set_yticks([])
+            for spine in ax_btn.spines.values():
+                spine.set_visible(False)
+
+            self.__run_main_btn = Button(ax_btn, 'Apply and Run')
+
+            def run(event):
+                self._run_requested = True
+                plt.close('all')
+            
+            self.__run_main_btn.on_clicked(run)
+
+            fig2.tight_layout()
+            fig2.show()
+
+        #Preview
+        preview_btn.on_clicked(preview_hint)
+        plt.show()
+
+        if self._run_requested:
+            self.main()
 
 
 
 if __name__ == '__main__':
 
-    if len(sys.argv) < 3:
-        print("Needs 1 raster file and 1 polygon file")
+    if len(sys.argv) < 2:
+        print("""python3 mapping_v2.py [raster input file (.bin)] [raster binary mask file (.bin)]
+            [raster input file (.bin)] -- input raster file, ENVI format ( .bin and .hdr)  
+            [raster mask file (.bin)] -- input raster mask file, 0/1 values, (.bin and .hdr) same dimensions as raster input file. This is an initial guess that guides the classification of the input file. This could be a rasterization of a polygon created by "heads-up" digitization, or a classification result generated by the "red wins" rule 
+        
+            Example:
+            python3 mapping.py 1009.bin polygon_0000.bin""")
         sys.exit(1)
 
     image_filename = sys.argv[1]
-    polygon_filename = sys.argv[2]
+
+    polygon_filename = sys.argv[2] if len(sys.argv) > 2 else None
 
     agent = GUI(
         polygon_filename=polygon_filename,
         image_filename=image_filename
     )
-
-    agent.main()

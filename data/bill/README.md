@@ -1,17 +1,17 @@
 <h1>SENTINEL-2 Data Processing</h1>
 
-Currently working on: 
+Ongoing work: 
 
-+ Exploring new burn-mapping methods
++ Cloud masking and imagery enhancement
 
-+ Fire progression
+Past work:
+
++ Burn mapping
 
 
 Requirements:
 
-+ For burn-mapping, Nvidia GPU is a required (switched from CPU due to slow processing).
-
-+ 
++ For burn-mapping, Nvidia GPU(s) are required (switched from CPU due to slow processing).
 
 
 Important libraries:
@@ -23,3 +23,25 @@ Important libraries:
 + GPU tasks:
 
     - cuML (rapids)
+
+
+Mapping Guidelines:
+
++ W/  polygon file: python3  burn_mapping.py  test_C11659/small3/1009.bin
+
++ W/o polygon file: python3  burn_mapping.py  test_C11659/small3/1009.bin  test_C11659/small3/polygon_0000.bin
+
+
+**How to Raster plot**
+
+For help, type
+
+>> python3 raster.py -h (or --help)
+
+E.g 
+>> python3 raster.py raster.bin --band_list=2,3,4
+
+>> python3 raster.py raster.bin --band_list=2,3,4 --mask_file=polygon.bin
+
+
+

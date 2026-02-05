@@ -1,10 +1,8 @@
 '''
-This misc file focuses on working with file management.
+Miscellaneous file focuses on working with file management.
 '''
 
 from pathlib import Path
-
-import numpy as np
 
 
 def iter_files(

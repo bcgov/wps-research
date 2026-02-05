@@ -1,9 +1,11 @@
 '''
-barc.py
-
 Burned Area Reflectance Classification
 
-python3 barc.py file_1.bin file_2.bin
+Syntax for dNBR
+  >> python3 barc.py file_1.bin file_2.bin 
+
+Syntax for NBR
+  >> python3 barc.py file.bin
 '''
 
 import numpy as np
@@ -11,10 +13,6 @@ import numpy as np
 import sys
 
 from raster import Raster
-
-from exceptions.data import Not_Enough_Information
-
-from exceptions.matrix import Shape_Mismatched_Error
 
 
 def NBR(
@@ -57,7 +55,7 @@ def NBR(
 
     except Exception:
 
-        raise Shape_Mismatched_Error(f"Shape Mismatched, received {NIR.shape} and {SWIR.shape}")
+        raise ValueError(f"Shape Mismatched, received {NIR.shape} and {SWIR.shape}")
     
     return np.clip(nbr, -1, 1)
 
@@ -119,7 +117,7 @@ def dNBR(
 
     if any(x is None for x in (NIR_pre, NIR_post, SWIR_pre, SWIR_post)):
 
-        raise Not_Enough_Information("Missed at least one of NIR, SWIR for pre and NIR, SWIR for post.")
+        raise ValueError("Missed at least one of NIR, SWIR for pre and NIR, SWIR for post.")
 
 
     nbr_pre = NBR(NIR_pre, SWIR_pre, eps=eps)
@@ -132,7 +130,7 @@ def dNBR(
 
     except Exception:
 
-        raise Shape_Mismatched_Error(f'NBRs of different shapes, cannot broadcast.')
+        raise ValueError(f'NBRs of different shapes, cannot broadcast.')
     
     return nbr_pre, nbr_post, dnbr
 

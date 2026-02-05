@@ -2,22 +2,13 @@
 generates a VIDEO to see how the environment changes from a certain date.
 '''
 
-
-from exceptions.data import *
-
-from misc.general import (
-    htrim_1d,
-    htrim_3d
-)
+from misc.general import htrim_3d
 
 from change_detection import change_detection
 
 from dominant_band import dominant_band
 
-from barc import (
-    NBR,
-    dNBR
-)
+from barc import dNBR
 
 from time import time
 
@@ -58,7 +49,6 @@ class GIF():
         from raster import (
             minimum_nan_raster
         )
-        from exceptions.data import Load_Data_Error
 
 
         #Get the unique dates in ascending order, just dates
@@ -87,7 +77,7 @@ class GIF():
 
         except Exception:
 
-            raise Load_Data_Error("Cannot load raster data.")
+            raise ValueError("Cannot load raster data.")
         
 
         self.raster_by_date_dict = raster_by_date_dict
@@ -111,7 +101,7 @@ class GIF():
         #Needs at least 2 files
         if ( len(self.date_list) < 2 ):
 
-            raise Not_Enough_Information("Need at least 2 different dates to work.")
+            raise ValueError("Need at least 2 different dates to work.")
 
 
         #Reference data means which date to fix on the left plot, so that we can see after than.

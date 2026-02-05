@@ -1,21 +1,28 @@
-ACHIEVED:
+Tasks: Cloud masking
 
-    TSNE to embed to 2D for visualization.
+1. use QGIS to see what cloud probability really looks like.
+
+2. Write algo to extract cloud probability.
+
+3. Cloud Analysis.
+
+    For close dates, see:
     
-    HDBSCAN for clustering
+    + At non-cloud mask: would signal fluctuates a lot?
+    + At cloud-mask: how would signal changes.
 
-    dNBR is definitely important
+Compare across different cloud probability, can we learn an enhancement rule?
 
-
-WHAT's NEXT?
-
-    Find a method to select hyperparameter for HDBSCAN automatically.
+E.g: At this cloud probability = 0.7, snow prob = 0.1, ... SWIR = 5000 (high) -> model -> 2340.
 
 
-CURRENT TASKS:
+Idea:
 
-    Hint images should always come in as everything but not the border.
+Sometimes cloud masking is too much, where thin cloud, haze, fog, ... we can actually still see through but the masking
+marks it as no Data. 
 
-    That is good. 
+Unless we cannot see nothing anymore (complete white), that part can be marked as no data. 
 
-    Sampling done? Use mask to infer 
+Otherwise, if it's blurred, but visible, we can use spatial reasoning to enhance data at that location,
+so that part that has been marked as cloud, still visible will get the quality enhanced, which Level 2 data should have
+less no data and masked with enhanced pixel quality.
