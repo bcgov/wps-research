@@ -1,6 +1,4 @@
 '''
-plot_tools.py
-
 A collection of plot tools, can be useful
 '''
 

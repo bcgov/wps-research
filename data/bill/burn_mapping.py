@@ -773,7 +773,7 @@ class GUI(GUI_Settings):
             self.__run_main_btn.on_clicked(run)
 
             fig2.tight_layout()
-            plt.show()
+            fig2.show()
 
         #Preview
         preview_btn.on_clicked(preview_hint)
