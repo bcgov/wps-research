@@ -18,8 +18,6 @@ from plot_tools import plot
 
 import numpy as np
 
-import sys
-
 
 #Handling exception
 gdal.UseExceptions()
@@ -441,24 +439,55 @@ def minimum_nan_raster(
 
 if __name__ == "__main__":
 
-    #handling argv
-    if len(sys.argv) < 2:
-        print("Needs a raster file name")
-        sys.exit(1)
+    import argparse
+    import ast
 
+    parser = argparse.ArgumentParser()
+
+    #Read image
+    parser.add_argument(
+        "raster_file",
+        type=str,
+        help="Input raster.bin file"
+    )   
+
+    #Read band list (optional)
+    parser.add_argument(
+        "--band_list",
+        type=str,
+        help="Comma-separated list of band numbers, e.g. 1,2,3"
+    )
+
+    #Read mask (optional)
+    parser.add_argument(
+        "--mask_file",
+        type=str,
+        help="Boolean mask to apply border on imagery."
+    )
+
+    args = parser.parse_args()
+
+
+    #Read args
     print('Reading Raster...')
-    raster_filename = sys.argv[1]
 
-    #load raster and read
+    raster_filename = args.raster_file
     raster = Raster(file_name = raster_filename)
 
+    #Check if there is requested band_list
+    if args.band_list:
+        band_list = ast.literal_eval(args.band_list)
+    else:
+        band_list = [1,2,3]
+
+    #Read band data
     if raster._n_band == 1:
         raster_dat = raster.read_bands('all').squeeze()
 
     else:
-        raster_dat = raster.readBands_and_trim(band_lst=[1,2,3])
+        raster_dat = raster.readBands_and_trim(band_lst=band_list)
 
-    if len(sys.argv) > 2:
+    if args.mask_file:
 
         from misc.general import (
             extract_border,
@@ -466,7 +495,7 @@ if __name__ == "__main__":
         )
 
         print('Reading Polygon...')
-        polygon_filename = sys.argv[2]
+        polygon_filename = args.mask_file
 
         print('Applying polygon onto raster...')
         polygon_dat = Raster(polygon_filename).read_bands(band_lst=[1])

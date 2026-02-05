@@ -31,3 +31,17 @@ Mapping Guidelines:
 
 + W/o polygon file: python3  burn_mapping.py  test_C11659/small3/1009.bin  test_C11659/small3/polygon_0000.bin
 
+
+**How to Raster plot**
+
+For help, type
+
+>> python3 raster.py -h (or --help)
+
+E.g 
+>> python3 raster.py raster.bin --band_list=2,3,4
+
+>> python3 raster.py raster.bin --band_list=2,3,4 --mask_file=polygon.bin
+
+
+
