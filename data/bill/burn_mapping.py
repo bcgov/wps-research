@@ -82,7 +82,7 @@ class GUI_Settings:
         #For TSNE embedding.
         self.rf_params = {
             'n_estimators': 100,    
-            'max_depth': 20,
+            'max_depth': 15,
             'max_features': "sqrt", 
             'random_state': 42
         }
@@ -92,7 +92,7 @@ class GUI_Settings:
         controled_ratio means we are not sure with our guess of the burn, so there might be more or less than
         what is actually sampled, currenly used for HDBSCAN min cluster size control. A positive value > 0.
         '''
-        self.controlled_ratio = .4
+        self.controlled_ratio = .5
 
         self.hdbscan_params = {
             'min_cluster_size': None,
@@ -128,8 +128,8 @@ class GUI(GUI_Settings):
         self.polygon_methods = ['swir wins', 'dNBR 12']
 
         #First plots
-        self.embed_band_list = [1,2,3]
-        self.img_band_list = [1,2,3]
+        self.embed_band_list = [1,2,4,5,6,8,9,10,12,13,14]
+        self.img_band_list = [9,10,13]
 
         #Other settings
         self.sample_size = sample_size
@@ -180,7 +180,7 @@ class GUI(GUI_Settings):
 
         from dominant_band import dominant_band
 
-        x = dominant_band(X = self.image_dat, band_index=5)
+        x = dominant_band(X = self.image_dat, band_index=1)
 
         return x
     
