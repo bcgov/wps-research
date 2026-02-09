@@ -3,10 +3,6 @@
 paths:
   main: /home/bill/GitHub/wps-research/data/bill
 
-  working_fire: ${main}/C11659 #Can use different fire code if data is ready.
-
-  l1c_dir: ${working_fire}/L1
-  l2a_dir: ${working_fire}/L2
-  cropped_dir: ${working_fire}/cropped
-  test_dir: ${working_fire}/test
+names:
+  fire: C11659 #Can use different fire code if data is ready.
 

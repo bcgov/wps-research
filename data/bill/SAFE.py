@@ -7,6 +7,12 @@ import xml.etree.ElementTree as ET
 from osgeo import gdal
 
 
+#------------------------------------------
+#
+#               FOR LEVEL 2 data
+#
+#------------------------------------------
+
 S2_L2_BANDS = {
     10: {"B02", "B03", "B04", "B08"},
     20: {"B01", "B02", "B03", "B04", "B05", "B06", "B07", "B8A", "B11", "B12", "SCL"},
@@ -16,7 +22,7 @@ S2_L2_BANDS = {
 
 def _get_ENVI_paths_L2(
         safe_path: str,
-        spatial_res: int
+        resolution: int
 ):
     '''
     Resolve IMG_DATA and optional QI_DATA mask paths
@@ -26,13 +32,13 @@ def _get_ENVI_paths_L2(
     ----------
     safe_dir : str
         Path to .SAFE directory
-    spatial_res : int
+    resolution : int
         10, 20, or 60
 
     Returns
     -------
     img_dir : Path
-        IMG_DATA/R{spatial_res}m
+        IMG_DATA/R{resolution}m
     mask_paths : dict[str, Path] | None
         Mapping of mask name -> file path
     '''
@@ -40,7 +46,7 @@ def _get_ENVI_paths_L2(
     granule_root = safe_path / "GRANULE"
     granule = next(granule_root.iterdir())
 
-    img_dir = granule / "IMG_DATA" / f"R{spatial_res}m"
+    img_dir = granule / "IMG_DATA" / f"R{resolution}m"
 
     return img_dir
     
@@ -72,22 +78,16 @@ def _read_acquisition_time(safe_path: Path) -> str:
 
     return elem.text
 
-
-
-def _get_out_path(safe_dir: str) -> str:
-    '''
-    File name to save.
-    '''
-    
-    return safe_dir.replace('.SAFE', '.bin')
-
     
 
-def ENVI_stack_L2(
+#EXTRACTS SPECTRAL BANDS (CLOUD IS OPTIONAL)
+def ENVI_band_stack_L2(
         safe_dir: str,
         band_list: list[str] = None,
+        *,
         cloud_prob = False,
-        spatial_res: int = 20
+        resolution: int = 20,
+        out_dir: str = None
 ):
     '''
     Description
@@ -106,7 +106,7 @@ def ENVI_stack_L2(
 
     scl: Scence Classification Layer, if True and band_list = None, will get this only.
 
-    spatial_res: spatial resolution (defaul is 60m -> lowest quality)
+    resolution: spatial resolution (defaul is 60m -> lowest quality)
         e.g: 10, 20 or 60m
     
 
@@ -118,18 +118,25 @@ def ENVI_stack_L2(
 
     img_dir = _get_ENVI_paths_L2(
         safe_path, 
-        spatial_res
+        resolution
     )
 
-    out_path = _get_out_path(safe_dir)
+    out_path = safe_path.name.replace(
+        '.SAFE', 
+        '.bin'
+    )
+
+    if (out_dir is not None):
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = Path(out_dir) / out_path
 
     # ------------------------------------------------------------------
     # Validate IMG bands
     # ------------------------------------------------------------------
-    allowed = S2_L2_BANDS[spatial_res]
+    allowed = S2_L2_BANDS[resolution]
     missing = [b for b in band_list if b not in allowed]
     if missing:
-        raise ValueError(f"Bands {missing} not available at {spatial_res} m")
+        raise ValueError(f"Bands {missing} not available at {resolution} m")
     
     band_files = [_find_band_file(img_dir, b) for b in band_list]
 
@@ -139,13 +146,13 @@ def ENVI_stack_L2(
     # ------------------------------------------------------------------
     cloud_file = None
     if cloud_prob:
-        if spatial_res == 10:
+        if resolution == 10:
             cloud_file = None  # Sentinel-2 has no 10 m cloud prob
         else:
             granule = next((safe_path / "GRANULE").iterdir())
             qi_dir = granule / "QI_DATA"
 
-            candidate = qi_dir / f"MSK_CLDPRB_{spatial_res}m.jp2"
+            candidate = qi_dir / f"MSK_CLDPRB_{resolution}m.jp2"
             if candidate.exists():
                 cloud_file = candidate
 
@@ -195,7 +202,7 @@ def ENVI_stack_L2(
 
         b = len(band_list) + 1
         ds.GetRasterBand(b).WriteArray(data)
-        ds.GetRasterBand(b).SetDescription(f"CLDPRB_{spatial_res}m")
+        ds.GetRasterBand(b).SetDescription(f"CLDPRB_{resolution}m")
 
 
     # ------------------------------------------------------------------
@@ -205,7 +212,7 @@ def ENVI_stack_L2(
 
     band_names = band_list.copy()
     if cloud_file:
-        band_names.append(f"CLDPRB_{spatial_res}m")
+        band_names.append(f"CLDPRB_{resolution}m")
 
     ds.SetMetadata({
         "band names": ", ".join(band_names),
@@ -220,6 +227,108 @@ def ENVI_stack_L2(
 
     return out_path
     
+
+
+#EXTRACTS CLOUD ONLY
+def ENVI_cloud_L2(
+        safe_dir: str,
+        resolution: int = 20,
+        out_dir: str = None
+        
+):
+    '''
+    Extract Sentinel-2 L2A cloud probability (CLDPRB) only.
+
+    Parameters
+    ----------
+    safe_dir : str
+        Path to .SAFE directory
+    resolution : int
+        20 or 60 only
+
+    Returns
+    -------
+    out_path : str
+        Output ENVI .bin path
+    '''
+
+    if resolution not in (20, 60):
+        raise ValueError("Cloud probability only available at 20 m or 60 m")
+
+    safe_path = Path(safe_dir)
+
+    # --------------------------------------------------
+    # Locate CLDPRB
+    # --------------------------------------------------
+    granule_root = safe_path / "GRANULE"
+    granule = next(granule_root.iterdir())
+
+    qi_dir = granule / "QI_DATA"
+    cloud_file = qi_dir / f"MSK_CLDPRB_{resolution}m.jp2"
+
+    if not cloud_file.exists():
+        raise FileNotFoundError(
+            f"Cloud probability file not found: {cloud_file}"
+        )
+
+    # --------------------------------------------------
+    # Open source
+    # --------------------------------------------------
+    src = gdal.Open(str(cloud_file))
+    xsize, ysize = src.RasterXSize, src.RasterYSize
+    gt = src.GetGeoTransform()
+    proj = src.GetProjection()
+
+    data = src.GetRasterBand(1).ReadAsArray()
+
+    # --------------------------------------------------
+    # Output path
+    # --------------------------------------------------
+    out_path = safe_path.name.replace(
+        ".SAFE",
+        f"_CLDPRB_{resolution}m.bin"
+    )
+
+    if (out_dir is not None):
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = Path(out_dir) / out_path
+
+    # --------------------------------------------------
+    # Create ENVI dataset
+    # --------------------------------------------------
+    driver = gdal.GetDriverByName("ENVI")
+    ds = driver.Create(
+        out_path,
+        xsize,
+        ysize,
+        1,
+        gdal.GDT_Float32,
+        options=["INTERLEAVE=BSQ"]
+    )
+
+    ds.SetGeoTransform(gt)
+    ds.SetProjection(proj)
+
+    ds.GetRasterBand(1).WriteArray(data)
+    ds.GetRasterBand(1).SetDescription(f"CLDPRB_{resolution}m")
+
+    # --------------------------------------------------
+    # Metadata
+    # --------------------------------------------------
+    acq_time = _read_acquisition_time(safe_path)
+
+    ds.SetMetadata({
+        "band names": f"CLDPRB_{resolution}m",
+        "acquisition_time": acq_time,
+        "sensor": "Sentinel-2 MSI",
+        "processing_level": "L2A",
+        "interleave": "bsq"
+    }, "ENVI")
+
+    ds.FlushCache()
+    ds = None
+
+    return out_path
 
 
 

@@ -12,7 +12,6 @@ from osgeo import gdal
 from misc.general import htrim_3d
 
 from misc.sen2 import (
-    read_raster_timestamp,
     band_index
 )
 
@@ -479,7 +478,7 @@ if __name__ == "__main__":
     if args.band_list:
         band_list = ast.literal_eval(args.band_list)
     else:
-        band_list = [1,2,3]
+        band_list = [1]
 
     #Read band data
     if raster._n_band == 1:
@@ -507,4 +506,13 @@ if __name__ == "__main__":
         raster_dat = draw_border(raster_dat, border)
 
     #plot result
-    plot(raster_dat)
+    try:
+        acquisition_time = raster.meta['acquisition_time']
+
+    except KeyError:
+        acquisition_time = None
+
+    band_names = ' | '.join(raster.band_name(i) for i in band_list)
+    title = f'Acquision time: {acquisition_time} \n Band: {band_names}'
+
+    plot(raster_dat, title=title)
