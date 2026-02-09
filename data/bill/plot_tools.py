@@ -31,6 +31,13 @@ def plot(
         if X.ndim == 2:
             cmap = 'gray'
 
+        if X.ndim == 3 and X.shape[2] < 3:
+                import numpy as np
+               
+                addition_layer = np.zeros((X.shape[0], X.shape[1]))
+
+                X = np.dstack([X, addition_layer])
+
         plt.figure(figsize=figsize) 
         plt.imshow(X, cmap = cmap)
         plt.axis('off')
