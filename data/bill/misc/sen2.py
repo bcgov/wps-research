@@ -299,3 +299,32 @@ def writeENVI(
         return
 
     raise ValueError("mode must be 'new' or 'add'")
+
+    
+
+
+
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+
+
+
+    
+
+
+
+    
+
