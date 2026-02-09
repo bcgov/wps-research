@@ -65,7 +65,6 @@ class Raster:
 
         #Extract Meta Data
         self.meta = ds.GetMetadata("ENVI")
-        self.acquisition_timestamp = self.meta['acquisition_time']
 
         self._xSize, self._ySize = ds.RasterXSize, ds.RasterYSize
         self._count = ds.RasterCount
