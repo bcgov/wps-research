@@ -26,3 +26,8 @@ Unless we cannot see nothing anymore (complete white), that part can be marked a
 Otherwise, if it's blurred, but visible, we can use spatial reasoning to enhance data at that location,
 so that part that has been marked as cloud, still visible will get the quality enhanced, which Level 2 data should have
 less no data and masked with enhanced pixel quality.
+
+
+TASKS:
+
+- Write module to retrieve stack of bands (write to ENVI), use 

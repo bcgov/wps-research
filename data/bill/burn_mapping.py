@@ -92,7 +92,7 @@ class GUI_Settings:
         controled_ratio means we are not sure with our guess of the burn, so there might be more or less than
         what is actually sampled, currenly used for HDBSCAN min cluster size control. A positive value > 0.
         '''
-        self.controlled_ratio = .5
+        self.controlled_ratio = .4
 
         self.hdbscan_params = {
             'min_cluster_size': None,

@@ -1,8 +1,10 @@
 '''
-Read raster data from .bin file (ENVI format)
+Read raster data.
 
 Syntax for quick plot
-  >> python3 raster.py file.bin
+  >> python3 raster.py  imagery_file  (positional)
+                        --band_list=1,2,3 (optional)
+                        --mask_file=mask_file (optional)
 '''
 
 from osgeo import gdal
@@ -62,8 +64,8 @@ class Raster:
         
 
         #Extract Meta Data
-        
-        self.acquisition_timestamp = read_raster_timestamp(fname) #Acquisition data and time (UTC)
+        self.meta = ds.GetMetadata("ENVI")
+        self.acquisition_timestamp = self.meta['acquisition_time']
 
         self._xSize, self._ySize = ds.RasterXSize, ds.RasterYSize
         self._count = ds.RasterCount
