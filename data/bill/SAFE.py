@@ -15,11 +15,10 @@ import shutil
 #------------------------------------------
 
 S2_L2_BANDS = {
-    10: {"B02", "B03", "B04", "B08"},
-    20: {"B01", "B02", "B03", "B04", "B05", "B06", "B07", "B8A", "B11", "B12", "SCL"},
-    60: {"B01", "B02", "B03", "B04", "B05", "B06", "B07", "B8A", "B09", "B11", "B12", "SCL"},
+    10: ["B02", "B03", "B04", "B08"],
+    20: ["B01", "B02", "B03", "B04", "B05", "B06", "B07", "B8A", "B11", "B12", "SCL"],
+    60: ["B01", "B02", "B03", "B04", "B05", "B06", "B07", "B8A", "B09", "B11", "B12", "SCL"],
 }
-
 
 
 
@@ -104,7 +103,7 @@ def _read_acquisition_time(safe_path: Path) -> str:
 #EXTRACTS SPECTRAL BANDS (CLOUD IS OPTIONAL)
 def ENVI_band_stack_L2(
         safe_dir: str,
-        band_list: list[str] = None,
+        band_list: list[str] = 'all',
         *,
         cloud_prob = False,
         resolution: int = 20,
@@ -154,10 +153,15 @@ def ENVI_band_stack_L2(
     # ------------------------------------------------------------------
     # Validate IMG bands
     # ------------------------------------------------------------------
-    allowed = S2_L2_BANDS[resolution]
-    missing = [b for b in band_list if b not in allowed]
-    if missing:
-        raise ValueError(f"Bands {missing} not available at {resolution} m")
+    if band_list == 'all':
+        band_list = list(S2_L2_BANDS[resolution])
+        
+    else:
+        allowed = S2_L2_BANDS[resolution]
+        missing = [b for b in band_list if b not in allowed]
+
+        if missing:
+            raise ValueError(f"Bands {missing} not available at {resolution} m")
     
     band_files = [_find_band_file(img_dir, b) for b in band_list]
 
@@ -360,6 +364,14 @@ def ENVI_cloud_L2_from_zip_root(
 ):
     '''
     Read whole root, extracts zip and write ENVI files for cloud.
+
+    Example
+    -------
+    ENVI_cloud_L2_from_zip_root(
+        zip_root="/data/bill/mrap/Level2", #this root contains zip files.
+        resolution=60, #60m of spatial resolution
+        out_root=paths['l2a_dir'] #If none, will save to zip root, with extra root of 'cloud_{resolution}_m'
+    )
     '''
     
     ZIP_ROOT = Path(zip_root)

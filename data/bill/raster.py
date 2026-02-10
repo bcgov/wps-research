@@ -478,7 +478,7 @@ if __name__ == "__main__":
     if args.band_list:
         band_list = ast.literal_eval(args.band_list)
     else:
-        band_list = [1]
+        band_list = [1,2,3]
 
     #Read band data
     if raster._n_band == 1:
