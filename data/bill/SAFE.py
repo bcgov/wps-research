@@ -5,6 +5,7 @@ Dedicated functions to read data from SAFE file.
 from pathlib import Path
 import xml.etree.ElementTree as ET
 from osgeo import gdal
+import shutil
 
 
 #------------------------------------------
@@ -14,10 +15,29 @@ from osgeo import gdal
 #------------------------------------------
 
 S2_L2_BANDS = {
-    10: {"B02", "B03", "B04", "B08"},
-    20: {"B01", "B02", "B03", "B04", "B05", "B06", "B07", "B8A", "B11", "B12", "SCL"},
-    60: {"B01", "B02", "B03", "B04", "B05", "B06", "B07", "B8A", "B09", "B11", "B12", "SCL"},
+    10: ["B02", "B03", "B04", "B08"],
+    20: ["B01", "B02", "B03", "B04", "B05", "B06", "B07", "B8A", "B11", "B12", "SCL"],
+    60: ["B01", "B02", "B03", "B04", "B05", "B06", "B07", "B8A", "B09", "B11", "B12", "SCL"],
 }
+
+
+
+def unzip_safe(zip_path: Path) -> Path:
+
+    import zipfile
+
+    safe_name = zip_path.stem + ".SAFE"
+    safe_path = zip_path.parent / safe_name
+
+    if safe_path.exists():
+        return safe_path
+
+    print(f"Unzipping {zip_path.name}")
+    with zipfile.ZipFile(zip_path, "r") as z:
+        z.extractall(zip_path.parent)
+
+    return safe_path
+
 
 
 def _get_ENVI_paths_L2(
@@ -83,7 +103,7 @@ def _read_acquisition_time(safe_path: Path) -> str:
 #EXTRACTS SPECTRAL BANDS (CLOUD IS OPTIONAL)
 def ENVI_band_stack_L2(
         safe_dir: str,
-        band_list: list[str] = None,
+        band_list: list[str] = 'all',
         *,
         cloud_prob = False,
         resolution: int = 20,
@@ -133,10 +153,15 @@ def ENVI_band_stack_L2(
     # ------------------------------------------------------------------
     # Validate IMG bands
     # ------------------------------------------------------------------
-    allowed = S2_L2_BANDS[resolution]
-    missing = [b for b in band_list if b not in allowed]
-    if missing:
-        raise ValueError(f"Bands {missing} not available at {resolution} m")
+    if band_list == 'all':
+        band_list = list(S2_L2_BANDS[resolution])
+        
+    else:
+        allowed = S2_L2_BANDS[resolution]
+        missing = [b for b in band_list if b not in allowed]
+
+        if missing:
+            raise ValueError(f"Bands {missing} not available at {resolution} m")
     
     band_files = [_find_band_file(img_dir, b) for b in band_list]
 
@@ -329,6 +354,71 @@ def ENVI_cloud_L2(
     ds = None
 
     return out_path
+
+
+
+def ENVI_cloud_L2_from_zip_root(
+        zip_root: str,
+        resolution: int = 20,
+        out_root: str = None
+):
+    '''
+    Read whole root, extracts zip and write ENVI files for cloud.
+
+    Example
+    -------
+    ENVI_cloud_L2_from_zip_root(
+        zip_root="/data/bill/mrap/Level2", #this root contains zip files.
+        resolution=60, #60m of spatial resolution
+        out_root=paths['l2a_dir'] #If none, will save to zip root, with extra root of 'cloud_{resolution}_m'
+    )
+    '''
+    
+    ZIP_ROOT = Path(zip_root)
+
+    if out_root is None:
+
+        out_root = zip_root
+
+    OUT_DIR = Path(out_root) / f'cloud_{resolution}m'
+
+    for zip_file in sorted(ZIP_ROOT.glob("*.zip")):
+
+        safe_path = None
+
+        try:
+            safe_path = unzip_safe(zip_file)
+
+            out_file = OUT_DIR / safe_path.name.replace(
+                ".SAFE",
+                f"_CLDPRB_{resolution}m.bin"
+            )
+
+            if out_file.exists():
+                print(f"Skipping (exists): {out_file.name}")
+                continue
+
+            ENVI_cloud_L2(
+                safe_dir=str(safe_path),
+                resolution=resolution,
+                out_dir=OUT_DIR
+            )
+
+            print(f"✓ Extracted cloud: {out_file.name}")
+
+            # -----------------------------------------
+            # SAFE cleanup (after success)
+            # -----------------------------------------
+            if safe_path.exists():
+                shutil.rmtree(safe_path)
+                print(f"Removed SAFE: {safe_path.name}")
+
+        except Exception as e:
+            print(f"✗ Failed on {zip_file.name}: {e}")
+
+            # Optional: keep SAFE for debugging
+            if safe_path and safe_path.exists():
+                print(f"Keeping SAFE for inspection: {safe_path.name}")
 
 
 

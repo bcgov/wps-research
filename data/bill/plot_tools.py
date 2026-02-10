@@ -6,6 +6,24 @@ A collection of plot tools, can be useful
 import matplotlib.pyplot as plt
 
 
+def _prepare_img(X):
+
+        cmap = None
+
+        if X.ndim == 2:
+            X = X.squeeze()
+            cmap = 'gray'
+
+        if X.ndim == 3 and X.shape[2] == 2:
+            import numpy as np
+                
+            addition_layer = np.zeros((X.shape[0], X.shape[1]))
+
+            X = np.dstack([X, addition_layer])
+
+        return X, cmap
+
+
 def plot(
         X,
         *,
@@ -27,16 +45,7 @@ def plot(
         -------
         A plot of the data:)
         '''
-        cmap = None
-        if X.ndim == 2:
-            cmap = 'gray'
-
-        if X.ndim == 3 and X.shape[2] < 3:
-                import numpy as np
-               
-                addition_layer = np.zeros((X.shape[0], X.shape[1]))
-
-                X = np.dstack([X, addition_layer])
+        X, cmap = _prepare_img(X)
 
         plt.figure(figsize=figsize) 
         plt.imshow(X, cmap = cmap)
@@ -90,6 +99,7 @@ def plot_multiple(
                 raise ValueError("max_per_row must be > 0")
 
         n_imgs = len(X_list)
+
         nrow = math.ceil(n_imgs / max_per_row)
 
         fig, axes = plt.subplots(
@@ -103,7 +113,9 @@ def plot_multiple(
                 r = i // max_per_row
                 c = i % max_per_row
 
-                axes[r, c].imshow(X_list[i])
+                X, cmap = _prepare_img(X_list[i])
+
+                axes[r, c].imshow(X, cmap=cmap)
 
                 if title_list is not None and i < len(title_list):
                     axes[r, c].set_title(title_list[i])
