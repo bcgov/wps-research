@@ -13,6 +13,12 @@ import shutil
 #               FOR LEVEL 2 data
 #
 #------------------------------------------
+S2_L1_BANDS = [
+    "B01", "B02", "B03", "B04",
+    "B05", "B06", "B07",
+    "B08", "B8A",
+    "B09", "B10", "B11", "B12"
+]
 
 S2_L2_BANDS = {
     10: ["B02", "B03", "B04", "B08"],
@@ -40,10 +46,25 @@ def unzip_safe(zip_path: Path) -> Path:
 
 
 
+def _get_ENVI_paths_L1(
+        safe_path: Path
+) -> Path:
+    """
+    Resolve IMG_DATA directory for Sentinel-2 L1C SAFE.
+    """
+    granule_root = safe_path / "GRANULE"
+
+    granule = next(granule_root.iterdir())
+
+    return granule / "IMG_DATA"
+
+
+
+
 def _get_ENVI_paths_L2(
         safe_path: str,
         resolution: int
-):
+) -> Path:
     '''
     Resolve IMG_DATA and optional QI_DATA mask paths
     for a Sentinel-2 L2A SAFE product.
@@ -72,7 +93,18 @@ def _get_ENVI_paths_L2(
     
 
 
-def _find_band_file(img_path: Path, band: str) -> Path:
+def _find_band_file_L1(img_path: Path, band: str) -> Path:
+    '''
+    Checks if band is in img_dir
+    '''
+    matches = list(img_path.glob(f"*_{band}.jp2"))
+    if len(matches) != 1:
+        raise FileNotFoundError(f"Band {band} not found in {img_path}")
+    return matches[0]
+
+
+
+def _find_band_file_L2(img_path: Path, band: str) -> Path:
     '''
     Checks if band is in img_dir
     '''
@@ -83,11 +115,14 @@ def _find_band_file(img_path: Path, band: str) -> Path:
 
 
 
-def _read_acquisition_time(safe_path: Path) -> str:
-    '''
-    Acquisition time, very useful.
-    '''
-    xml_file = safe_path / "MTD_MSIL2A.xml"
+def _read_acquisition_time(
+        safe_path: Path,
+        level: int
+) -> str:
+    
+    xml_main = "MTD_MSIL2A.xml" if level == 2 else "MTD_MSIL1C.xml"
+
+    xml_file = safe_path / xml_main
     tree = ET.parse(xml_file)
     root = tree.getroot()
 
@@ -97,6 +132,99 @@ def _read_acquisition_time(safe_path: Path) -> str:
         raise RuntimeError("PRODUCT_START_TIME not found in metadata XML")
 
     return elem.text
+
+
+
+
+def ENVI_band_stack_L1(
+    safe_dir: str,
+    band_list: list[str] = "all",
+    *,
+    out_dir: Path | None = None
+):
+    """
+    Read Sentinel-2 L1C bands from SAFE and write ENVI BSQ stack.
+
+    Parameters
+    ----------
+    safe_dir : str
+        Path to L1C .SAFE directory
+    band_list : list[str] or 'all'
+        Bands to extract (e.g. ['B04', 'B08'])
+    out_dir : Path | None
+        Output directory
+    """
+
+    safe_path = Path(safe_dir)
+    img_dir = _get_ENVI_paths_L1(safe_path)
+
+    if band_list == "all":
+        band_list = S2_L1_BANDS
+    else:
+        missing = [b for b in band_list if b not in S2_L1_BANDS]
+        if missing:
+            raise ValueError(f"Invalid L1 bands: {missing}")
+
+    band_files = [_find_band_file_L1(img_dir, b) for b in band_list]
+
+    # --------------------------------------------------
+    # Reference band
+    # --------------------------------------------------
+    ref = gdal.Open(str(band_files[0]))
+    xsize, ysize = ref.RasterXSize, ref.RasterYSize
+    gt = ref.GetGeoTransform()
+    proj = ref.GetProjection()
+
+    # --------------------------------------------------
+    # Output path
+    # --------------------------------------------------
+    out_path = safe_path.name.replace(".SAFE", ".bin")
+    if out_dir is not None:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / out_path
+
+    # --------------------------------------------------
+    # Create ENVI dataset
+    # --------------------------------------------------
+    driver = gdal.GetDriverByName("ENVI")
+    ds = driver.Create(
+        out_path,
+        xsize,
+        ysize,
+        len(band_files),
+        gdal.GDT_Float32,
+        options=["INTERLEAVE=BSQ"]
+    )
+    ds.SetGeoTransform(gt)
+    ds.SetProjection(proj)
+
+    # --------------------------------------------------
+    # Write bands
+    # --------------------------------------------------
+    for i, (band, jp2) in enumerate(zip(band_list, band_files), start=1):
+        src = gdal.Open(str(jp2))
+        data = src.GetRasterBand(1).ReadAsArray()
+        ds.GetRasterBand(i).WriteArray(data)
+        ds.GetRasterBand(i).SetDescription(band)
+
+    # --------------------------------------------------
+    # Metadata
+    # --------------------------------------------------
+    acq_time = _read_acquisition_time(safe_path, level=1)
+
+    ds.SetMetadata({
+        "band names": ", ".join(band_list),
+        "acquisition_time": acq_time,
+        "sensor": "Sentinel-2 MSI",
+        "processing_level": "L1C",
+        "interleave": "bsq"
+    }, "ENVI")
+
+    ds.FlushCache()
+    ds = None
+
+    return out_path
+
 
     
 
@@ -163,7 +291,7 @@ def ENVI_band_stack_L2(
         if missing:
             raise ValueError(f"Bands {missing} not available at {resolution} m")
     
-    band_files = [_find_band_file(img_dir, b) for b in band_list]
+    band_files = [_find_band_file_L2(img_dir, b) for b in band_list]
 
 
     # ------------------------------------------------------------------
@@ -233,7 +361,7 @@ def ENVI_band_stack_L2(
     # ------------------------------------------------------------------
     # ENVI metadata
     # ------------------------------------------------------------------
-    acq_time = _read_acquisition_time(safe_path)
+    acq_time = _read_acquisition_time(safe_path, level=2)
 
     band_names = band_list.copy()
     if cloud_file:
@@ -254,12 +382,12 @@ def ENVI_band_stack_L2(
     
 
 
+
 #EXTRACTS CLOUD ONLY
 def ENVI_cloud_L2(
         safe_dir: str,
         resolution: int = 20,
         out_dir: str = None
-        
 ):
     '''
     Extract Sentinel-2 L2A cloud probability (CLDPRB) only.
