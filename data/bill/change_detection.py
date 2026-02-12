@@ -9,7 +9,7 @@ import sys
 
 from raster import Raster
 
-from misc.general import htrim_3d
+from misc import htrim_3d
 
 from plot_tools import plot_multiple
 

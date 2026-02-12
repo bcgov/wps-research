@@ -77,7 +77,7 @@ def row_sampling(
     X_sample: sampled data
     '''
 
-    from misc.general import ignore_nan_2D
+    from misc import ignore_nan_2D
 
 
     X = X.reshape(-1, X.shape[-1])

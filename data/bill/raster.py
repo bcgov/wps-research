@@ -9,9 +9,8 @@ Syntax for quick plot
 
 from osgeo import gdal
 
-from misc.general import htrim_3d
-
-from misc.sen2 import (
+from misc import (
+    htrim_3d,
     band_index
 )
 
@@ -319,7 +318,7 @@ class Raster:
 
             2. Is of boolean dtype
         '''
-        from misc.general import is_boolean_matrix
+        from misc import is_boolean_matrix
 
 
         if (self._n_band > 1):
@@ -385,7 +384,7 @@ class Raster:
         '''
         input band_index starts at 1.
         '''
-        from misc.sen2 import band_name
+        from misc import band_name
 
         return band_name(
             band_info_list=self.band_info_list, 
@@ -404,7 +403,7 @@ def minimum_nan_raster(
     Compares between the rasters to select the one with the least No Data in count.
     '''
 
-    from misc.general import ignore_nan_2D
+    from misc import ignore_nan_2D
 
     min_nan_count = np.inf
 
@@ -489,7 +488,7 @@ if __name__ == "__main__":
 
     if args.mask_file:
 
-        from misc.general import (
+        from misc import (
             extract_border,
             draw_border
         )
