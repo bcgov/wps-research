@@ -35,9 +35,8 @@ Syntax
 
 from raster import Raster
 
-from misc.sen2 import writeENVI
-
-from misc.general import (
+from misc import (
+    writeENVI,
     htrim_3d,
     extract_border,
     draw_border
