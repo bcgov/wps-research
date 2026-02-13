@@ -15,20 +15,19 @@ from .info import (
 
 from .misc import (
     _get_ENVI_paths_L1,
-    _read_acquisition_time
+    _read_acquisition_time,
+    _find_band_file_L1
 )
-
-from .extract import _find_band_file_L1
 
 ##########################
 
 
 
 def _resample_to_match(
-    src_ds: gdal.Dataset,
-    ref_ds: gdal.Dataset,
-    *,
-    resample_alg: int
+        src_ds: gdal.Dataset,
+        ref_ds: gdal.Dataset,
+        *,
+        resample_alg: int
 ) -> gdal.Dataset:
     """
     Resample src_ds onto ref_ds grid (extent, transform, size).
@@ -55,11 +54,11 @@ def _resample_to_match(
 
 
 def ENVI_band_stack_L1_resampled(
-    safe_dir: str,
-    band_list: list[str] = "all",
-    *,
-    target_resolution: int = 20,
-    out_dir: Path | None = None
+        safe_dir: str,
+        band_list: list[str] = "all",
+        *,
+        target_resolution: int = 20,
+        out_dir: Path | None = None
 ):
     """
     Read Sentinel-2 L1C bands and resample all bands to a common resolution
@@ -91,7 +90,7 @@ def ENVI_band_stack_L1_resampled(
     else:
         missing = [b for b in band_list if b not in S2_L1_BANDS]
         if missing:
-            raise ValueError(f"Invalid L1 bands: {missing}")
+            raise ValueError(f"Invalid L1 bands: {missing}, choose from\n{S2_L1_BANDS}")
 
     band_files = [_find_band_file_L1(img_dir, b) for b in band_list]
 
@@ -141,6 +140,8 @@ def ENVI_band_stack_L1_resampled(
     # --------------------------------------------------
     # Create ENVI dataset
     # --------------------------------------------------
+    print(f"Resampling {band_list} to {resolution} m")
+    
     driver = gdal.GetDriverByName("ENVI")
     ds = driver.Create(
         out_path,
@@ -191,4 +192,58 @@ def ENVI_band_stack_L1_resampled(
     ds.FlushCache()
     ds = None
 
-    return out_path
+    print(f"Done resampling, find file at {out_path}")
+
+
+
+if __name__ == "__main__":
+
+    import argparse
+
+    parser = argparse.ArgumentParser()
+
+    #Read directory
+
+    parser.add_argument(
+        "safe_dir",
+        type=str,
+        help="Input SAFE dir"
+    )   
+
+    parser.add_argument(
+        "--res",
+        type=int,
+        default=20,
+        help="Spatial resolution, default is 20m"
+    )   
+
+    def comma_separated_list(s: str):
+        return [x.strip().upper() for x in s.split(",") if x.strip()]
+    
+    parser.add_argument(
+        "--band_list",
+        help='The band info you want. Eg: B01,B02,B04',
+        type=comma_separated_list,
+        default='all'
+    )
+
+    parser.add_argument(
+        "--outdir",
+        type=str,
+        help="Directory to save files to."
+    )
+
+    args = parser.parse_args()
+
+    safe_dir = args.safe_dir
+    resolution = args.res
+    band_list = args.band_list
+    out_dir = args.outdir
+
+
+    ENVI_band_stack_L1_resampled(
+        safe_dir = safe_dir,
+        target_resolution = resolution,
+        band_list=band_list,
+        out_dir = out_dir
+    )
