@@ -9,7 +9,7 @@ We are a team at Predictive Services Unit (PSU) working on Data Science projects
 
 + **Bill Co** is a Co-op student, he has been working on this repository and he is very excited for many challenges ahead.
 
-+ Supports and Ideas from many others in the unit (e.g Neal Mcloughlin, ...).
++ Supports and Ideas from many others in the unit (e.g Neal Mcloughlin, Superintendent of the PSU).
 
 
 

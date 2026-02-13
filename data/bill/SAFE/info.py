@@ -14,7 +14,9 @@ S2_L1_NATIVE_RES = {
     "B12": 20,
 }
 
-S2_L1_BANDS = list(S2_L1_NATIVE_RES.keys())
+S2_L1_BANDS = list(
+    S2_L1_NATIVE_RES.keys()
+)
 
 S2_L2_BANDS = {
     10: ["B02", "B03", "B04", "B08"],
