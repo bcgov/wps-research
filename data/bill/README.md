@@ -1,20 +1,36 @@
-<h1>SENTINEL-2 Data Processing</h1>
+<h1>Sentinel 2 Researches</h1>
 
-Ongoing work: 
+About Us
+---
+We are a team at Predictive Services Unit (PSU) working on Data Science projects at BC Wildfire Service. 
 
-+ Cloud masking and imagery enhancement
++ **Ashlin Richardson** is the Senior Data Scientist, his experiments drive and revitalize these projects.
 
-Past work:
++ **Bill Co** is a Co-op student, he has been working on this repository and he is very excited for many challenges ahead.
 
-+ Burn mapping
-
-
-Requirements:
-
-+ For burn-mapping, Nvidia GPU(s) are required (switched from CPU due to slow processing).
+Some projects are very practical, we hope to get them done very early.
 
 
-Important libraries:
+Current Work
+---
+
+**Burn mapping**
+
+<p align="center"> <img src="images/burn_mapping.png" width="900"> </p>
+
+**Cloud masking,reduction and imagery enhancement**
+
+<p align="center"> <img src="images/cloud_reduction.png" width="900"> </p>
+
+
+Requirements
+---
+
++ Nvidia GPU(s) are required (switched from CPU due to slow processing).
+
+
+Important Libraries:
+---
 
 + Regular tasks:
 
@@ -23,25 +39,6 @@ Important libraries:
 + GPU tasks:
 
     - cuML (rapids)
-
-
-Mapping Guidelines:
-
-+ W/  polygon file: python3  burn_mapping.py  test_C11659/small3/1009.bin
-
-+ W/o polygon file: python3  burn_mapping.py  test_C11659/small3/1009.bin  test_C11659/small3/polygon_0000.bin
-
-
-**How to Raster plot**
-
-For help, type
-
->> python3 raster.py -h (or --help)
-
-E.g 
->> python3 raster.py raster.bin --band_list=2,3,4
-
->> python3 raster.py raster.bin --band_list=2,3,4 --mask_file=polygon.bin
 
 
 
