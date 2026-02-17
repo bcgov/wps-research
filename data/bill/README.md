@@ -31,24 +31,3 @@ Current Work
 **Cloud masking/reduction and imagery enhancement**
 
 <p align="center"> <img src="images/cloud_reduction.png" width="900"> </p>
-
-
-Requirements
----
-
-+ Nvidia GPU(s) are required (switched from CPU due to slow processing).
-
-
-Important Libraries:
----
-
-+ Regular tasks:
-
-    - gdal
-
-+ GPU tasks:
-
-    - cuML (rapids)
-
-
-

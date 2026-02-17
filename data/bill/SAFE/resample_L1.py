@@ -218,7 +218,10 @@ if __name__ == "__main__":
     )   
 
     def comma_separated_list(s: str):
-        return [x.strip().upper() for x in s.split(",") if x.strip()]
+        s = s.strip().lower()
+        if s == "all":
+            return "all"   # sentinel, handled later
+        return [b.strip().upper() for b in s.split(",") if b.strip()]
     
     parser.add_argument(
         "--band_list",
@@ -245,5 +248,5 @@ if __name__ == "__main__":
         safe_dir = safe_dir,
         target_resolution = resolution,
         band_list=band_list,
-        out_dir = out_dir
+        out_dir = Path(out_dir)
     )
