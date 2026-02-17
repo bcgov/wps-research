@@ -1,4 +1,5 @@
 '''20260217 burn_mapping.py adapted from ../data/bill/burn_mapping.py
+
 UPDATE
 ------
 Polygon is not required as the hint anymore.
@@ -22,7 +23,7 @@ In this version, it's designed to take imagery of a single date with:
     Raw spectral bands.
 
     A mask as the hint. [optional]
-    
+
 The algorithm will attempt to find the best mapping of burned areas.
 
 
@@ -78,51 +79,51 @@ class BandListPicker:
         self.band_names = band_names
         self.selected_indices = set(initially_selected_indices)
         self.title = title
-        
+
         # Visual properties
         self.item_height = 0.8 / len(band_names) if len(band_names) > 0 else 0.1
         self.bg_color_selected = 'lightblue'
         self.bg_color_unselected = 'white'
         self.text_color = 'black'
-        
+
         # Setup axes
         self.ax.set_xlim(0, 1)
         self.ax.set_ylim(0, 1)
         self.ax.axis('off')
-        
+
         # Title
-        self.title_obj = self.ax.text(0.5, 0.95, title, 
-                                       va='top', ha='center', 
+        self.title_obj = self.ax.text(0.5, 0.95, title,
+                                       va='top', ha='center',
                                        fontsize=10, weight='bold')
-        
+
         # Create list items
         self.items = []  # List of (rectangle, text, index)
         for i, band_name in enumerate(band_names):
             y_bottom = 0.9 - (i + 1) * self.item_height
-            
+
             # Background rectangle
             is_selected = i in self.selected_indices
             rect = Rectangle((0.05, y_bottom), 0.9, self.item_height * 0.95,
                             facecolor=self.bg_color_selected if is_selected else self.bg_color_unselected,
                             edgecolor='gray', linewidth=1)
             self.ax.add_patch(rect)
-            
+
             # Text label
-            text = self.ax.text(0.1, y_bottom + self.item_height * 0.5, 
+            text = self.ax.text(0.1, y_bottom + self.item_height * 0.5,
                                band_name,
                                va='center', ha='left', fontsize=9,
                                color=self.text_color)
-            
+
             self.items.append((rect, text, i))
-        
+
         # Connect click event
         self.cid = self.ax.figure.canvas.mpl_connect('button_press_event', self._on_click)
-    
+
     def _on_click(self, event):
         """Toggle selection on click"""
         if event.inaxes != self.ax:
             return
-        
+
         # Find which item was clicked
         for rect, text, idx in self.items:
             # Check if click is within rectangle bounds
@@ -134,14 +135,14 @@ class BandListPicker:
                 else:
                     self.selected_indices.add(idx)
                     rect.set_facecolor(self.bg_color_selected)
-                
+
                 self.ax.figure.canvas.draw_idle()
                 break
-    
+
     def get_selected_indices(self):
         """Return list of selected band indices (0-based)"""
         return sorted(list(self.selected_indices))
-    
+
     def get_selected_band_indices(self):
         """Return list of selected band indices (1-based for the actual band numbers)"""
         return [i + 1 for i in self.get_selected_indices()]
@@ -156,11 +157,11 @@ class GUI_Settings:
     def __init__(self):
 
         #for file saving
-        self.save_dir = './mapped_burn'
+        self.save_dir = '.'  # Save to current directory
 
         #For TSNE embedding.
         self.rf_params = {
-            'n_estimators': 100,    
+            'n_estimators': 100,
             'max_depth': 15,
             'max_features': "sqrt",
             'random_state': 42
@@ -199,27 +200,36 @@ class GUI(GUI_Settings):
         '''
 
         super().__init__()
-        
+
         #Default values
         self.polygon_filename = polygon_filename
         self.image_filename = image_filename
         self.border_thickness = 5 #polygon border
 
-        #First plots
-        self.embed_band_list = [5,6,7]
-        self.img_band_list = [5,6,7]
+        # Cache for border image to avoid redrawing
+        self._cached_border_image = None
+        self._cached_border_bands = None
 
         #Other settings
         self.sample_size = sample_size
         self.random_state = random_state
 
-        # Cache for border image to avoid redrawing
-        self._cached_border_image = None
-        self._cached_border_bands = None
-
-        #Init tasks
+        #Init tasks - load image first
         self.load_image()
-        self.load_polygon()  # Load mask immediately (from file or generate from RGB)
+
+        # Set default bands based on image data
+        # TSNE: all bands
+        n_bands = self.image_dat.shape[2] if len(self.image_dat.shape) > 2 else 1
+        self.embed_band_list = list(range(1, n_bands + 1))
+
+        # RGB: intelligent search for B12, B11, B9
+        self.img_band_list = self.find_default_rgb_bands()
+
+        print(f"Default TSNE bands: all {n_bands} bands")
+        print(f"Default RGB bands: {self.img_band_list} ({self.get_band_name(self.img_band_list)})")
+
+        # Load polygon/mask
+        self.load_polygon()
 
 
 
@@ -245,16 +255,126 @@ class GUI(GUI_Settings):
         E.g: 1 -> B12, 2 -> B11.
         '''
         band_names = [self.image.band_name(i) for i in band_list]
-        
+
         return band_names
-    
-    
+
+
+    def get_band_name_cleaned(
+            self,
+            band_list: list
+    ):
+        '''
+        Get band names with common prefix removed for cleaner plot labels.
+
+        E.g: ['1009.bin_001_B12_pre', '1009.bin_002_B11_pre']
+             -> ['B12_pre', 'B11_pre'] (if '1009.bin_001_' is common prefix)
+        '''
+        band_names = self.get_band_name(band_list)
+
+        if len(band_names) == 0:
+            return band_names
+
+        # Find common prefix
+        if len(band_names) == 1:
+            return band_names
+
+        # Find shortest string to limit comparison
+        min_len = min(len(name) for name in band_names)
+
+        # Find common prefix length
+        prefix_len = 0
+        for i in range(min_len):
+            if all(name[i] == band_names[0][i] for name in band_names):
+                prefix_len = i + 1
+            else:
+                break
+
+        # Remove common prefix if found
+        if prefix_len > 0:
+            cleaned = [name[prefix_len:] for name in band_names]
+            return cleaned
+
+        return band_names
+
+
     def get_all_band_names(self):
         '''
         Get all band names from the image header
         '''
         n_bands = self.image_dat.shape[2] if len(self.image_dat.shape) > 2 else 1
         return [self.image.band_name(i+1) for i in range(n_bands)]
+
+
+    def find_default_rgb_bands(self):
+        '''
+        Find default RGB bands by searching for B12, B11, B9 patterns.
+
+        Returns
+        -------
+        List of 3 band indices (1-based) in order [B12, B11, B9]
+
+        Algorithm:
+        1. Search all band names for B12, B11, B9 substrings
+        2. Find groups where B12, B11, B9 appear consecutively (in order)
+        3. Verify ordering is correct (indices should increase: B12 < B11 < B9)
+        4. Use second group if multiple groups exist, otherwise first group
+        '''
+        all_band_names = self.get_all_band_names()
+
+        # Find consecutive groups by scanning through bands
+        groups = []
+
+        i = 0
+        while i < len(all_band_names):
+            # Look for B12 starting at position i
+            if 'B12' in all_band_names[i]:
+                b12_idx = i + 1  # 1-based
+
+                # Check if next 1-2 positions have B11
+                b11_idx = None
+                for j in range(i + 1, min(i + 3, len(all_band_names))):
+                    if 'B11' in all_band_names[j]:
+                        b11_idx = j + 1  # 1-based
+
+                        # Check if next 1-2 positions after B11 have B9
+                        b9_idx = None
+                        for k in range(j + 1, min(j + 3, len(all_band_names))):
+                            if 'B9' in all_band_names[k]:
+                                b9_idx = k + 1  # 1-based
+
+                                # Found a valid group!
+                                # Verify ordering: B12 < B11 < B9
+                                if b12_idx < b11_idx < b9_idx:
+                                    groups.append([b12_idx, b11_idx, b9_idx])
+                                    print(f"Found group: [{b12_idx}, {b11_idx}, {b9_idx}] = "
+                                          f"[{all_band_names[b12_idx-1]}, {all_band_names[b11_idx-1]}, {all_band_names[b9_idx-1]}]")
+                                else:
+                                    raise ValueError(
+                                        f"Bands with B12, B11, B9 substrings need to be ordered "
+                                        f"highest-wavelength first (indices increasing). "
+                                        f"Found ordering: "
+                                        f"{all_band_names[b12_idx-1]} (idx {b12_idx}), "
+                                        f"{all_band_names[b11_idx-1]} (idx {b11_idx}), "
+                                        f"{all_band_names[b9_idx-1]} (idx {b9_idx})"
+                                    )
+                                break
+                        break
+            i += 1
+
+        if len(groups) == 0:
+            print("Warning: Could not find B12, B11, B9 pattern. Using bands 1, 2, 3 as default.")
+            # Use first 3 bands as fallback
+            n_bands = self.image_dat.shape[2] if len(self.image_dat.shape) > 2 else 3
+            return [1, 2, 3] if n_bands >= 3 else [1, 1, 1]
+        elif len(groups) == 1:
+            print(f"Found 1 group with B12, B11, B9. Using: {groups[0]}")
+            return groups[0]
+        else:
+            print(f"Found {len(groups)} groups with B12, B11, B9. Using second group: {groups[1]}")
+            return groups[1]
+
+
+
 
 
 
@@ -264,22 +384,22 @@ class GUI(GUI_Settings):
         Uses the first band from img_band_list to compare against the other two.
         '''
         from dominant_band import dominant_band
-        
+
         # Get the three RGB bands
         if len(self.img_band_list) < 3:
             print("Warning: Need at least 3 bands selected for mask generation")
             return None
-        
+
         # Extract just the three RGB bands
         rgb_bands = self.img_band_list[:3]
         rgb_data = self.image_dat[..., [b-1 for b in rgb_bands]]
-        
+
         # Use first band (R) as the dominant band to compare
         # band_index=1 means compare the first channel against others
         mask = dominant_band(X=rgb_data, band_index=1)
-        
+
         return mask
-    
+
 
 
     def load_polygon(self):
@@ -296,7 +416,7 @@ class GUI(GUI_Settings):
 
             if not polygon.is_polygon():
                 raise ValueError(f"Not a polygon @ {self.polygon_filename}")
-            
+
             self.polygon = polygon
             self.polygon_dat = polygon.read_bands('all').squeeze().astype(np.bool_)
             self.mask_from_file = True
@@ -309,13 +429,13 @@ class GUI(GUI_Settings):
 
         #extract border from the rasterized polygon.
         self.border = extract_border(
-            mask = self.polygon_dat, 
+            mask = self.polygon_dat,
             thickness = self.border_thickness
         )
 
         #Just a guess of actual burn ratio
         self.guessed_burn_p = np.nanmean( self.polygon_dat )
-    
+
 
 
     def sample_data(
@@ -335,7 +455,7 @@ class GUI(GUI_Settings):
 
         #Which indices will be inside
         self.sample_in_polygon = ( self.polygon_dat.ravel() )[self.sample_indices].astype(np.bool_)
-    
+
 
 
     def get_band_embed(
@@ -355,13 +475,14 @@ class GUI(GUI_Settings):
             self.samples, band_list=self.embed_band_list
         )
 
-        self.current_band_name = ' | '.join(self.get_band_name(self.embed_band_list))
+        # Use cleaned band names (common prefix removed)
+        self.current_band_name = ' | '.join(self.get_band_name_cleaned(self.embed_band_list))
 
         embed_title = f"T-sne embedding | Samp. Sz: {self.sample_size} | Seed: {self.random_state}\n\n"
         embed_title += self.current_band_name
 
         return embed_title, self.current_embed
-    
+
 
 
     def get_band_image(
@@ -373,7 +494,7 @@ class GUI(GUI_Settings):
         '''
         Image data but in all selected bands
         '''
-        
+
         IMAGE = self.image_dat[..., [b-1 for b in self.embed_band_list]]
 
         if ( as_2D ):
@@ -382,13 +503,13 @@ class GUI(GUI_Settings):
             IMAGE = IMAGE.reshape(-1, n_bands)
 
         if ( filter_nan_with is not None):
-            #Pad NAN as another number 
+            #Pad NAN as another number
             IMAGE = np.nan_to_num(IMAGE, nan=filter_nan_with)
 
         return IMAGE
-    
 
-    
+
+
     def get_shown_image(
             self,
             band_list = None
@@ -403,35 +524,36 @@ class GUI(GUI_Settings):
 
         capped_band_list = self.img_band_list[:3] if band_list is None else band_list[:3]
 
-        img_title = ' | '.join(self.get_band_name(self.img_band_list))
+        # Use cleaned band names (common prefix removed)
+        img_title = ' | '.join(self.get_band_name_cleaned(self.img_band_list))
 
         if (len(self.img_band_list) > 3):
 
             img_title += f" | Warning! Showing first 3 bands (rgb) only."
 
         return img_title, htrim_3d( self.image_dat[..., [b - 1 for b in capped_band_list]] )
-    
 
-    
+
+
     def get_border_image(self, band_list=None):
         '''
         Get image with border overlay, using cache to avoid repeated border drawing
         '''
         capped_band_list = self.img_band_list[:3] if band_list is None else band_list[:3]
-        
+
         # Check if we can use cached version
-        if (self._cached_border_image is not None and 
+        if (self._cached_border_image is not None and
             self._cached_border_bands == capped_band_list):
             return self._cached_border_image
-        
+
         # Generate new border image
         img_title, image = self.get_shown_image(band_list)
         border_image = draw_border(image, self.border)
-        
+
         # Cache it
         self._cached_border_image = border_image
         self._cached_border_bands = capped_band_list
-        
+
         return border_image
 
 
@@ -469,7 +591,7 @@ class GUI(GUI_Settings):
         )
 
         input_img = self.get_band_image(
-            as_2D = True, 
+            as_2D = True,
             filter_nan_with = 0.0
         )
 
@@ -492,7 +614,7 @@ class GUI(GUI_Settings):
         -----------
         Uses current T-sne embedding to find the mapping.
         '''
-        
+
         from machine_learning.cluster import (
             hdbscan_fit,
             hdbscan_approximate
@@ -514,7 +636,7 @@ class GUI(GUI_Settings):
         print(f'Forest mapping done, cost {t1 - t0:.2f} s')
 
         cluster, _ = hdbscan_fit(
-            self.current_embed, 
+            self.current_embed,
             **self.hdbscan_params
         )
 
@@ -540,8 +662,8 @@ class GUI(GUI_Settings):
 
         Since we have mask as hint, we use it as information for the final labelling.
 
-        Determines if cluster of 1 is burn or unburned. If most of the masked burn is closer to 1, then 
-        
+        Determines if cluster of 1 is burn or unburned. If most of the masked burn is closer to 1, then
+
         we have some evidence that cluster 1 is burned.
         '''
 
@@ -563,56 +685,62 @@ class GUI(GUI_Settings):
             self,
             classification
     ):
-        
+
         os.makedirs(self.save_dir, exist_ok=True)
 
         base_filename = os.path.basename(self.image_filename)
 
+        output_filename = f'{self.save_dir}/{base_filename}_classified.bin'
+
+        # Get absolute path for display
+        abs_output_path = os.path.abspath(output_filename)
+
         writeENVI(
-            output_filename=f'{self.save_dir}/{base_filename}_classified.bin',
+            output_filename=output_filename,
             data = classification,
             mode='new',
             ref_filename=self.image_filename,
             band_names=['burned(bool)']
         )
 
-        print('classification saved (ENVI).')
+        print(f'Classification saved to: {abs_output_path}')
+        print(f'  Header file: {abs_output_path.replace(".bin", ".hdr")}')
 
 
 
     def main(self):
-        
+
         import matplotlib.patches as mpatches
         from matplotlib.widgets import Button
 
-        self.sample_data() 
+        self.sample_data()
 
         embed_title, embed = self.get_band_embed()
 
         img_title, image = self.get_shown_image()
-        
+
         # Get all band names from header
         all_band_names = self.get_all_band_names()
 
         ####### PLOT
 
         fig = plt.figure(figsize=(24, 12))
-        
+
         # Create grid: left pane for pickers, right pane for plots
         # 3 columns total: [pickers | TSNE | Image]
-        gs = GridSpec(20, 6, figure=fig, left=0.02, right=0.98, 
+        gs = GridSpec(20, 6, figure=fig, left=0.02, right=0.98,
                      bottom=0.05, top=0.95, wspace=0.3, hspace=0.4)
-        
+
         # Left pane - Band pickers (column 0)
         ax_embed_picker = fig.add_subplot(gs[0:8, 0])
         ax_embed_btn = fig.add_subplot(gs[8, 0])
-        
+
         ax_img_picker = fig.add_subplot(gs[10:18, 0])
         ax_img_btn = fig.add_subplot(gs[18, 0])
-        
+
         # Classify button (spanning middle columns)
         ax_classify_btn = fig.add_subplot(gs[19, 2:4])
-        
+
         # Main plot areas - TSNE and Image side by side (columns 1-5)
         ax_tsne = fig.add_subplot(gs[0:19, 1:3])
         ax_img = fig.add_subplot(gs[0:19, 3:6])
@@ -623,7 +751,7 @@ class GUI(GUI_Settings):
         tsne_colors = np.where(self.sample_in_polygon == 1, "red", "blue")
 
         tsne_plot = ax_tsne.scatter(
-            embed[:, 0], 
+            embed[:, 0],
             embed[:, 1],
             s = 5,
             c = tsne_colors,
@@ -641,7 +769,7 @@ class GUI(GUI_Settings):
 
         # Use cached border image
         img_plot = ax_img.imshow(self.get_border_image())
-        
+
         ax_img.set_title(img_title)
 
         marker, = ax_img.plot([], [], "ro", markersize=6, fillstyle="none")
@@ -683,22 +811,22 @@ class GUI(GUI_Settings):
             [b-1 for b in self.embed_band_list],
             title="TSNE Bands"
         )
-        
+
         img_picker = BandListPicker(
             ax_img_picker,
             all_band_names,
             [b-1 for b in self.img_band_list],
             title="Image Bands (RGB)"
         )
-        
+
         # Recalculate buttons
         def on_recalc_embed(event):
             new_band_list = embed_picker.get_selected_band_indices()
-            
+
             if len(new_band_list) == 0:
                 print("Please select at least one band for TSNE")
                 return
-            
+
             print(f"Updating TSNE bands to: {new_band_list}")
             self.embed_band_list = new_band_list
 
@@ -710,47 +838,47 @@ class GUI(GUI_Settings):
             ax_tsne.set_title(embed_title)
 
             fig.canvas.draw_idle()
-        
+
         def on_recalc_img(event):
             new_band_list = img_picker.get_selected_band_indices()
-            
+
             if len(new_band_list) != 3:
                 # Show popup message
                 popup_fig = plt.figure(figsize=(4, 2))
                 popup_ax = popup_fig.add_subplot(111)
                 popup_ax.axis('off')
-                popup_ax.text(0.5, 0.5, 
+                popup_ax.text(0.5, 0.5,
                              f"Please select exactly 3 bands\n(Currently selected: {len(new_band_list)})",
                              ha='center', va='center', fontsize=12, weight='bold')
                 plt.show()
                 return
-            
+
             print(f"Updating image bands to: {new_band_list}")
             self.img_band_list = new_band_list
-            
+
             # Regenerate mask if it wasn't from a file
             if not self.mask_from_file:
                 print("Regenerating mask from new RGB bands...")
                 old_polygon = self.polygon_dat
                 self.polygon_dat = self.generate_mask_from_rgb()
-                
+
                 # Update border
                 self.border = extract_border(
-                    mask = self.polygon_dat, 
+                    mask = self.polygon_dat,
                     thickness = self.border_thickness
                 )
-                
+
                 # Update burn ratio guess
                 self.guessed_burn_p = np.nanmean(self.polygon_dat)
-                
+
                 # Need to resample if polygon changed
                 if old_polygon is not None:
                     self.sample_in_polygon = (self.polygon_dat.ravel())[self.sample_indices].astype(np.bool_)
-                    
+
                     # Update scatter plot colors
                     tsne_colors = np.where(self.sample_in_polygon == 1, "red", "blue")
                     tsne_plot.set_color(tsne_colors)
-            
+
             # Clear cache since bands changed
             self._cached_border_image = None
 
@@ -762,19 +890,19 @@ class GUI(GUI_Settings):
             ax_img.set_title(img_title)
 
             fig.canvas.draw_idle()
-        
-        embed_recalc_btn = Button(ax_embed_btn, "Recalculate TSNE", 
+
+        embed_recalc_btn = Button(ax_embed_btn, "Recalculate TSNE",
                                    color='lightgreen', hovercolor='green')
         embed_recalc_btn.on_clicked(on_recalc_embed)
-        
-        img_recalc_btn = Button(ax_img_btn, "Update Image", 
+
+        img_recalc_btn = Button(ax_img_btn, "Update Image",
                                 color='lightgreen', hovercolor='green')
         img_recalc_btn.on_clicked(on_recalc_img)
 
         '''
         Classify Button with border
         '''
-        classify_btn = Button(ax_classify_btn, "Classify", 
+        classify_btn = Button(ax_classify_btn, "Classify",
                              color='lightblue', hovercolor='skyblue')
 
         def on_submit_mapping(event):
@@ -789,6 +917,9 @@ class GUI(GUI_Settings):
             #Get true classification
             classification = self.classify_cluster(img_cluster)
 
+            # Auto-save classification immediately
+            self.save_classification(classification)
+
             #Plot product.
             fig2 = plt.figure(figsize=(12, 12))
 
@@ -799,7 +930,7 @@ class GUI(GUI_Settings):
             )
 
             ax_img = fig2.add_subplot(gs[0])
-    
+
             ax_img.imshow(
                 classification, cmap = 'gray'
             )
@@ -821,9 +952,9 @@ class GUI(GUI_Settings):
 
             def save_clf(event):
 
-                #Save to ENVI file.
+                #Save to ENVI file again.
                 self.save_classification(classification)
-            
+
             self.__save_clf_btn.on_clicked(save_clf)
 
             print(f'DONE! Mapping on band list: {self.embed_band_list}')
@@ -831,6 +962,10 @@ class GUI(GUI_Settings):
             plt.show()
 
         classify_btn.on_clicked(on_submit_mapping)
+
+        # Auto-run classification on startup
+        print("Auto-running classification on startup...")
+        on_submit_mapping(None)
 
         plt.show()
 
@@ -840,9 +975,9 @@ if __name__ == '__main__':
 
     if len(sys.argv) < 2:
         print("""python3 mapping_v2.py [raster input file (.bin)] [raster binary mask file (.bin)]
-            [raster input file (.bin)] -- input raster file, ENVI format ( .bin and .hdr)  
-            [raster mask file (.bin)] -- input raster mask file, 0/1 values, (.bin and .hdr) same dimensions as raster input file. This is an initial guess that guides the classification of the input file. This could be a rasterization of a polygon created by "heads-up" digitization, or a classification result generated by the "red wins" rule 
-        
+            [raster input file (.bin)] -- input raster file, ENVI format ( .bin and .hdr)
+            [raster mask file (.bin)] -- input raster mask file, 0/1 values, (.bin and .hdr) same dimensions as raster input file. This is an initial guess that guides the classification of the input file. This could be a rasterization of a polygon created by "heads-up" digitization, or a classification result generated by the "red wins" rule
+
             Example:
             python3 mapping.py 1009.bin polygon_0000.bin""")
         sys.exit(1)
@@ -855,8 +990,7 @@ if __name__ == '__main__':
         polygon_filename=polygon_filename,
         image_filename=image_filename
     )
-    
+
     # Start the main GUI
     agent.main()
-
 
