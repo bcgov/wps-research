@@ -4,6 +4,8 @@ Miscellaneous file for sentinel-2 data processing.
 
 import re
 import numpy as np
+from pathlib import Path
+import shutil
 
 
 def band_index(
@@ -77,7 +79,8 @@ def writeENVI(
     mode: str = "new",
     ref_filename: str | None = None,
     band_names: list[str] | None = None,
-    copy_geo: bool = True
+    copy_geo: bool = True,
+    same_hdr: bool = False
 ):
     """
     mode="new":
@@ -133,6 +136,16 @@ def writeENVI(
 
         out.FlushCache()
         out = ref = None
+
+        if same_hdr:
+            ref_hdr = Path(ref_filename).with_suffix(".hdr")
+            out_hdr = Path(output_filename).with_suffix(".hdr")
+            if ref_hdr.exists():
+                shutil.copy(ref_hdr, out_hdr)
+
+            else:
+                print(ref_hdr)
+                
         return
 
     # -------------------------------

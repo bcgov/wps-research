@@ -1,8 +1,0 @@
-#Currently working with C11659 in HPC.
-
-paths:
-  main: /home/bill/GitHub/wps-research/data/bill
-
-names:
-  fire: C11659 #Can use different fire code if data is ready.
-

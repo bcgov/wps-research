@@ -7,7 +7,8 @@ from pathlib import Path
 
 def iter_files(
         folder_name,
-        file_type
+        file_type,
+        full_path = True
     ):
     '''
     Description
@@ -31,4 +32,7 @@ def iter_files(
 
     for p in folder.iterdir():
         if p.is_file() and p.suffix == file_type:
-            yield str(p)
+            if full_path:
+                yield str(p)
+            else:
+                yield p.name
