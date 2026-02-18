@@ -160,6 +160,6 @@ if __name__ == "__main__":
     ENVI_band_stack_L1(
         safe_dir = safe_dir,
         band_list = band_list,
-        out_dir = out_dir
+        out_dir = Path(out_dir)
     )
 

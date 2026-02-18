@@ -239,7 +239,7 @@ if __name__ == "__main__":
         band_list = band_list,
         resolution = resolution,
         cloud_prob=cloud,
-        out_dir = out_dir
+        out_dir = Path(out_dir)
     )
 
 
