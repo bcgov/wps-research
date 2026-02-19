@@ -140,7 +140,7 @@ def ENVI_band_stack_L1_resampled(
     # --------------------------------------------------
     # Create ENVI dataset
     # --------------------------------------------------
-    print(f"Resampling {band_list} to {resolution} m")
+    print(f"Resampling {band_list} to {target_resolution} m")
     
     driver = gdal.GetDriverByName("ENVI")
     ds = driver.Create(

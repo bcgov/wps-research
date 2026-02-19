@@ -18,5 +18,3 @@ from .sen2 import (
     band_name,
     writeENVI
 )
-
-from .photos import save_png_same_dir

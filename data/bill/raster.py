@@ -137,7 +137,9 @@ class Raster:
             buf_type=gdal.GDT_Float32
         ) 
 
-        return np.frombuffer(raw, dtype=np.float32).reshape((ysize, xsize))
+        arr = np.frombuffer(raw, dtype=np.float32).reshape((ysize, xsize))
+
+        return arr
 
 
 

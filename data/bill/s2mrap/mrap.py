@@ -25,13 +25,16 @@ class MRAP:
                 *,
 
                 #General
-                cloud_threshold: float = 0.005,
+                cloud_threshold: float = 0.01,
                 min_cloud_prop_trigger: float = 0.01,
-                max_mrap_days: int = 7,
+                max_mrap_days: int = 9,
                 
                 #For Ajusting only
                 adjust_lighting: bool = False,
-                sample_prop: float = 0.1
+                sample_prop: float = 0.1,
+
+                #Generate png
+                png: bool = False
         ):
 
         self.image_dir = image_dir
@@ -44,7 +47,9 @@ class MRAP:
         self.adjust_lighting = adjust_lighting
         self.sample_prop = sample_prop
 
-        self.mrap_dir = 'mrap'
+        self.mrap_dir = 'C11659/L1C/mrap'
+
+        self.png = png
 
 
 
@@ -123,6 +128,10 @@ class MRAP:
         Main heart of MRAP.
 
         Fill cloud pixels with pixels from the previous dates
+
+        * Current version: No data in main will not be filled. 
+
+        * Cloudy pixel will not be filled with previous 'no data'.
         '''
         if len(previous_dates_list) < 1:
 
@@ -130,14 +139,18 @@ class MRAP:
 
         for prev_date in previous_dates_list:
             
-            #1. Prepare data for mrap
+            #1. Prepare data and mask for mrap
             image_dat_prev = self.read_image(prev_date)
+            nodata_prev = np.all(image_dat_prev == 0, axis=-1)
 
             cloud_prob_prev = self.read_cloud(prev_date)
             cloud_mask_prev, _ = self.get_cloud_mask(cloud_prob_prev)
 
-            #2. Mask where it is cloudy in main but not cloudy in prev
-            fill_mask = np.logical_and(cloud_mask_main, ~cloud_mask_prev)
+            #2. Mask where it is cloudy in main but not cloudy and not 'no data' in prev
+            fill_mask = np.logical_and(
+                cloud_mask_main, 
+                np.logical_and(~cloud_mask_prev, ~nodata_prev)
+            )
 
             #3. Fill
             image_dat_main[fill_mask] = image_dat_prev[fill_mask]
@@ -175,7 +188,7 @@ class MRAP:
         if not os.path.exists(self.mrap_dir):
             os.mkdir(self.mrap_dir)
 
-        for i, cur_date in enumerate(date_list[1:]):
+        for i, cur_date in enumerate(date_list):
 
             #1. Check if this date should be mrapped
             cloud_prob_main = self.read_cloud(cur_date)
@@ -183,14 +196,15 @@ class MRAP:
 
             cloud_mask_main, coverage = self.get_cloud_mask(cloud_prob_main)
 
+            print('-' * 50)
+
             if coverage >= self.min_cloud_prop_trigger:
 
                 #If true, it means mrap is necessary
-                print('-' * 50)
                 print(f"{i+1}. Filling {cur_date} ...")
                 
                 previous_dates_list = get_dates_within(
-                    datetime_list=date_list[:i:-1], 
+                    datetime_list=date_list[:i][::-1], 
                     current_datetime=cur_date, 
                     N_days=self.max_mrap_days
                 )
@@ -204,26 +218,38 @@ class MRAP:
                 print(f"Completed, coverage changed from {coverage:.3f} to {post_fill_coverage:.3f}")
 
             else:
-                print(f"Skipped, current cloud coverage {coverage:.3f} is less than preset {self.min_cloud_prop_trigger}")
+                print(f"{i+1}. Skipped.\n>> Current cloud coverage {coverage:.3f} is less than preset {self.min_cloud_prop_trigger}")
 
 
             #Finally, write file.
             image_path = Path(self.file_dict[cur_date]['image_path'])
 
             writeENVI(
-                output_filename=f'{self.mrap_dir}/{image_path.stem}_mrap.bin',
+                output_filename=f'{self.mrap_dir}/{image_path.stem}_MRAP.bin',
                 data = image_dat_main,
                 ref_filename = image_path,
                 mode = 'new',
                 same_hdr = True
             )
 
+        if (self.png):
+
+            from photos import save_png_same_dir
+            
+            print('' * 50)
+            print('Saving png... may take some time')
+
+            save_png_same_dir(
+                dir = self.mrap_dir
+            )
+
 
 if __name__ == "__main__":
 
     mrap = MRAP(
-        image_dir='C11659/L1C/extracted',
-        cloud_dir='C11659/cloud_20m'
+        image_dir='C11659/L1C/resampled',
+        cloud_dir='C11659/cloud_20m',
+        png = True
     )
 
     mrap.fill()

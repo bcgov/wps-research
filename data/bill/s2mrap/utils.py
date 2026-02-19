@@ -65,12 +65,26 @@ def get_ordered_file_dict(
     print(f'Iterating completed | ommited {ommited_cloud_f} cloud files in total.')
     
     #3. Last inspection 
-    if all('cloud_path' in file_dict for file_dict in dictionary.values()):
-        print(f'Dictionary completed | it stores {len(dictionary)} timestamps in total.')
-        return dictionary
-    
-    else:
-        raise ValueError("Fail: Dictionary build is unsuccessful, some dates don't have cloud file")
+
+    missing_dates = [
+        date for date, file_dict in dictionary.items()
+        if 'cloud_path' not in file_dict
+    ]
+
+    if missing_dates:
+        print("Removing entries without cloud_path:")
+        for d in missing_dates:
+            print(f" - {d}")
+
+    dictionary = {
+        date: file_dict
+        for date, file_dict in dictionary.items()
+        if 'cloud_path' in file_dict
+    }
+
+    print(f"Dictionary completed | it stores {len(dictionary)} timestamps in total.")
+
+    return dictionary
     
 
 
