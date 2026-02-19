@@ -5,12 +5,6 @@ About Us
 ---
 We are a team at Predictive Services Unit (PSU) working on Data Science projects at BC Wildfire Service. Some projects are very practical, we hope to get them done very early.
 
-+ **Ashlin Richardson** is the Senior Data Scientist, his experiments drive and revitalize these projects.
-
-+ **Bill Co** is a Co-op student, he has been working on this repository and he is very excited for many challenges ahead.
-
-+ Supports and Ideas from many others in the unit (e.g Neal Mcloughlin, Superintendent of the PSU).
-
 
 
 High Performance Computing

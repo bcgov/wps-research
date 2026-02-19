@@ -55,4 +55,4 @@ def save_png_same_dir(
 
 if __name__ == "__main__":
 
-    save_png_same_dir('/data/bill/mrap/Level2/mrap')
+    save_png_same_dir('.')
