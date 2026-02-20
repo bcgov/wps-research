@@ -8,6 +8,30 @@ from pathlib import Path
 import shutil
 
 
+def read_timestamp_filename(
+        filename: str
+):
+    '''
+    Description
+    -----------
+    If sen2 data don't have meta['acquisition_time'], we will extract it from name.
+
+    This requires sen2 filename to be a consistent pattern at least until the first timestamp.
+
+    
+    Example
+    -------
+    S2A_MSIL2A_20250502T193831_N0511_R142_T09UYU_20250503T030713_CLDPRB_60m.bin
+
+    >> [11:26] (excluding index 26) is "20250502T193831"
+    '''
+
+    filename = Path(filename).name
+
+    return filename[11:26]
+
+
+
 def band_index(
         band_info_list: str,
         band: int
@@ -194,6 +218,10 @@ def writeENVI(
         return
 
     raise ValueError("mode must be 'new' or 'add'")
+
+
+
+
 
     
 

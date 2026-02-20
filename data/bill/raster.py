@@ -49,21 +49,29 @@ class Raster:
 
         Data + META DATA
         '''
-        fname = self.file_name
 
         #Extract Data
-
-        ds = gdal.Open(fname, gdal.GA_ReadOnly)
+        ds = gdal.Open(self.file_name, gdal.GA_ReadOnly)
 
         self._dataset = ds
 
         if self._dataset is None:
-            raise RuntimeError(f"Could not open {fname}")
+            raise RuntimeError(f"Could not open {self.file_name}")
         
 
         #Extract Meta Data
         self.meta = ds.GetMetadata("ENVI")
 
+
+        #Check for timestamp, if None, read from filename
+        if "acquisition_time" not in self.meta:
+
+            from misc import read_timestamp_filename
+
+            self.meta["acquisition_time"] = read_timestamp_filename(self.file_name)
+
+
+        #Extract geoinfo
         self._xSize, self._ySize = ds.RasterXSize, ds.RasterYSize
         self._count = ds.RasterCount
         self._proj = ds.GetProjection()
@@ -71,7 +79,6 @@ class Raster:
 
 
         #Extract band information
-
         self._n_band = ds.RasterCount
 
         self.band_info_list = [
@@ -80,7 +87,6 @@ class Raster:
         ]
 
         #There is case where only 1 band is in the data, and no info is given.
-
         if (self._n_band == 1) and (self.band_info_list[0] == ''):
 
             self.band_info_list[0] = 'gray_scale, unknown band'

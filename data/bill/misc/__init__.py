@@ -14,6 +14,7 @@ from .date_time import date_str2obj
 from .files import iter_files
 
 from .sen2 import (
+    read_timestamp_filename,
     band_index,
     band_name,
     writeENVI
