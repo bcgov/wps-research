@@ -24,7 +24,6 @@ from dataclasses import dataclass
 
 from cuml.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report
-from cuml.model_selection import train_test_split
 
 @dataclass
 class MASK(LookBack):
@@ -55,8 +54,8 @@ class MASK(LookBack):
         Helper for prepare samples
         '''
 
-        img_dat_main = self.read_image(cur_date)
-        nodata_cur = np.all(img_dat_main == 0, axis=-1)
+        img_dat_cur = self.read_image(cur_date)
+        nodata_cur = np.all(img_dat_cur == 0, axis=-1)
 
         img_dat_prev = self.read_image(prev_date)
         nodata_prev = np.all(img_dat_prev == 0, axis=-1)
@@ -67,9 +66,9 @@ class MASK(LookBack):
 
         #Data Engineering
 
-        DIFF = (img_dat_main - img_dat_prev) / (img_dat_main + img_dat_prev + 1e-3)
+        DIFF = (img_dat_cur - img_dat_prev) / (img_dat_cur + img_dat_prev + 1e-3)
 
-        IMG_DAT = np.dstack([DIFF, img_dat_main / 10000, img_dat_prev / 10000])
+        IMG_DAT = np.dstack([DIFF, img_dat_cur / 10_000, img_dat_prev / 10_000])
 
         VALID_IMG_DAT = IMG_DAT[~ALL_NODATA_MASK]
 
@@ -86,48 +85,55 @@ class MASK(LookBack):
             cur_date: datetime,
             previous_dates_list: list[datetime]
     ):
-        all_X = None
-        all_y = None
-
-        for i, prev_date in enumerate(previous_dates_list):
-
-            print(f'>>> Co-sampling with {prev_date} ({i+1} before)')
-
-            X, y = self.prepare_samples_single(
-                cur_date, prev_date
-            )
-
-            if all_X is None: 
-                all_X = X
-                all_y = y
-
-            else:
-                all_X = np.vstack([all_X, X])
-                all_y = np.concatenate([all_y, y])
         
-        return all_X, all_y
+
+        #Sample for train data
+        prev_, cur_ = previous_dates_list[0], previous_dates_list[1]
+
+        print(f'\n***\n > Sampling TRAIN data: d1 = {prev_} & d2 = {cur_}.')
+
+        X_train, y_train = self.prepare_samples_single(
+            cur_, prev_
+        )
+
+        if self.X_train is None: 
+            self.X_train = X_train
+            self.y_train = y_train
+
+        else:
+            self.X_train = np.vstack([self.X_train, X_train])
+            self.y_train = np.concatenate([self.y_train, y_train])
+
+        #Sample for test data
+        print(f'\n***\n > Sampling TEST data: d1 = {previous_dates_list[1]} & d2 = {cur_date}.')
+        X_test, y_test = self.prepare_samples_single(
+                cur_date, previous_dates_list[1]
+        )
+        
+        return X_test, y_test
         
 
 
 
     def train_and_report(
             self,
-            X, y
+            X_test, y_test
     ):
         '''
         Use classification models.
         '''
-        print('\n>>> Training model...')
 
-        #Prepare train and test data.
-        X_train, X_test, y_train, y_test = train_test_split(X, y, stratify = y,
-                                                            test_size=0.2, shuffle=True, random_state=42)
-
-        pd = {'max_depth': 15, 'n_estimators': 200}
+        pd = {'max_depth': 20, 'n_estimators': 200}
 
         rf = RandomForestClassifier(**pd)
 
-        rf.fit(X_train, y_train)
+        print('\n~~~\n > Training model...')
+
+        print(f' ... on {len(self.y_train)} data.')
+
+        rf.fit(self.X_train, self.y_train)
+
+        print('\n~~~\n > Evaluating model...')
 
         predictions = rf.predict(X_test)
 
@@ -144,11 +150,11 @@ class MASK(LookBack):
         if not os.path.exists(self.output_dir):
             os.mkdir(self.output_dir)
 
-        print("<<< Saving model.")
-
-        model_path = Path(self.output_dir) / f'model_{date}.joblib'
+        model_path = Path(self.output_dir) / f'mod_{date}.joblib'
 
         joblib.dump(model, model_path)
+
+        print(f"\n+++\n < Model Saved @ {model_path}.")
 
 
 
@@ -172,31 +178,38 @@ class MASK(LookBack):
         if not os.path.exists(self.output_dir):
             os.mkdir(self.output_dir)
 
+        self.X_train, self.y_train = None, None
+
         for i, cur_date in enumerate(date_list):
 
-            print('-' * 50)
+            print('-' * 70)
 
             #If true, it means mrap is necessary
-            print(f"{i+1}. Getting ready for {cur_date} ...")
+            print(f"\n{i+1}. Getting ready for {cur_date} ...")
             
             previous_dates_list = get_dates_within(
-                datetime_list=date_list[:i][::-1], 
+                datetime_list=date_list[i-2 : i], 
                 current_datetime=cur_date, 
                 N_days=self.max_lookback_days
             )
 
-            if len(previous_dates_list) == 0:
+            if len(previous_dates_list) < 2:
+                '''
+                We need at least 2 days, 
+                    >= 2 for training
+                    the last date and cur for testing.
+                '''
 
-                print("Skipped.., no previous dates.")
+                print("Skipped.., no enough dates.")
 
                 continue
 
-            all_X, all_y = self.prepare_samples(
+            X_test, y_test = self.prepare_samples(
                 cur_date,
                 previous_dates_list
             )
 
-            model = self.train_and_report(all_X, all_y)
+            model = self.train_and_report(X_test, y_test)
 
             self.save_model(model, cur_date)
 

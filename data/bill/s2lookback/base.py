@@ -30,7 +30,7 @@ class LookBack:
 
     #Random sampling using mask
     sample_size: int = None
-    sample_between_prop: dict[str, float] = field(default_factory=lambda: {'mask': 0.5, 'non_mask': 0.5})
+    sample_between_prop: dict[str, float] = field(default_factory=lambda: {'mask': 0.7, 'non_mask': 0.3})
     sample_within_prop: dict[str, float] = field(default_factory=lambda: {'mask': 0.75, 'non_mask': 0.75})
 
     #Miscellaneous
@@ -122,7 +122,7 @@ class LookBack:
         mask_samples = d[sampled_idx]
         mask_labels = np.full(size, 1)
 
-        print(f"+ {size} samples of mask | Label = 1")
+        print(f"  + {size} samples of mask | Label = 1")
 
 
         #Sample non-masked pixels
@@ -140,15 +140,12 @@ class LookBack:
         non_mask_samples = d[sampled_idx]
         non_mask_labels = np.full(size, 0)
 
-        print(f"+ {size} samples of non_mask | Label = 0")
+        print(f"  + {size} samples of non_mask | Label = 0")
 
         #Concatenate date
 
         X = np.vstack([mask_samples, non_mask_samples])
         y = np.concatenate([mask_labels, non_mask_labels])
-
-        print(X[:2])
-        print(y[:2])
         
         return X, y
         
