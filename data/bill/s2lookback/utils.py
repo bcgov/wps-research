@@ -112,17 +112,6 @@ def get_dates_within(
 
 
 
-# if __name__ == "__main__":
-
-#     dictionary = get_ordered_file_dict(
-#         image_dir='C11659/L1C/extracted',
-#         mask_dir='C11659/mask_60m'
-#     )
-    
-#     print(dictionary)
-
-
-
 
 
 

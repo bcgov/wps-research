@@ -30,8 +30,8 @@ class LookBack:
 
     #Random sampling using mask
     sample_size: int = None
-    sample_between_prop: dict[str, float]= field(default_factory=lambda: {'mask': 0.7, 'non-mask': 0.3})
-    sample_within_prop: dict[str, float] = field(default_factory=lambda: {'mask': 0.75, 'non-mask': 0.75})
+    sample_between_prop: dict[str, float] = field(default_factory=lambda: {'mask': 0.5, 'non_mask': 0.5})
+    sample_within_prop: dict[str, float] = field(default_factory=lambda: {'mask': 0.75, 'non_mask': 0.75})
 
     #Miscellaneous
     png: bool = True
@@ -52,13 +52,13 @@ class LookBack:
 
         if len(self.file_dict) == 0:
 
-            raise ValueError('\nEmpty satisfying files, cannot process\nCheck start and end dates.')
+            raise ValueError('\nEmpty satisfying files, cannot process\nCheck start and end dates inputs.')
         
 
 
     def read_image(
             self,
-            date
+            date: datetime
     ):
         '''
         Read data from image.
@@ -96,10 +96,61 @@ class LookBack:
     
 
 
-    def sample(
-            self
+    def sample_datasets(
+            self,
+            img_dat: np.ndarray,
+            mask: np.ndarray[np.bool_]
     ):
-        pass
+        '''
+        Samples from the data.
+
+        There are 2 labels only (binary).
+        '''
+
+        #Sample masked pixels
+        d = img_dat[mask]
+        size = int( min(
+            self.sample_size * self.sample_between_prop['mask'], 
+            d.shape[0] * self.sample_within_prop['mask']
+        ) )
+
+        sampled_idx = np.random.choice(
+            d.shape[0], size, 
+            replace=False
+        )
+
+        mask_samples = d[sampled_idx]
+        mask_labels = np.full(size, 1)
+
+        print(f"+ {size} samples of mask | Label = 1")
+
+
+        #Sample non-masked pixels
+        d = img_dat[~mask]
+        size = int( min(
+            self.sample_size * self.sample_between_prop['non_mask'], 
+            d.shape[0] * self.sample_within_prop['non_mask']
+        ) )
+
+        sampled_idx = np.random.choice(
+            d.shape[0], size, 
+            replace=False
+        )
+
+        non_mask_samples = d[sampled_idx]
+        non_mask_labels = np.full(size, 0)
+
+        print(f"+ {size} samples of non_mask | Label = 0")
+
+        #Concatenate date
+
+        X = np.vstack([mask_samples, non_mask_samples])
+        y = np.concatenate([mask_labels, non_mask_labels])
+
+        print(X[:2])
+        print(y[:2])
+        
+        return X, y
         
 
 
