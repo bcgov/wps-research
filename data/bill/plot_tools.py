@@ -61,8 +61,9 @@ def plot_multiple(
         X_list: list,
         *,
         title_list: list,
-        max_per_row = 4,
-        figsize = (15, 6),
+        suptitle: str = None,
+        max_per_row = 2,
+        figsize = (15, 8),
         axis_off = True
 ):
         '''
@@ -128,6 +129,7 @@ def plot_multiple(
                 c = i % max_per_row
                 axes[r, c].axis("off")
 
+        plt.suptitle(suptitle)
         plt.tight_layout()
         plt.show()
 

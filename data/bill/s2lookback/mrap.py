@@ -22,7 +22,6 @@ from dataclasses import dataclass
 class MRAP(LookBack):
 
     # adjust_lighting: bool = False
-    min_mask_prop_trigger: str = 0.01
 
 
     def fill_engine(

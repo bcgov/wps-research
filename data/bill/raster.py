@@ -472,6 +472,13 @@ if __name__ == "__main__":
         help="Boolean mask to apply border on imagery."
     )
 
+    parser.add_argument(
+        "--p",
+        type=float,
+        help="htrim p",
+        default=1.0
+    )
+
     args = parser.parse_args()
 
 
@@ -492,7 +499,7 @@ if __name__ == "__main__":
         raster_dat = raster.read_bands('all').squeeze()
 
     else:
-        raster_dat = raster.readBands_and_trim(band_lst=band_list)
+        raster_dat = raster.readBands_and_trim(band_lst=band_list, p=args.p)
 
     if args.mask_file:
 
