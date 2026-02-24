@@ -9,6 +9,9 @@ Supports two download methods:
   1. Sentinel Hub Process API (tiled 2500x2500 px, merged into one GeoTIFF)
   2. STAC + COG direct access (reads COGs remotely, clips & merges to shapefile extent)
 
+All intermediate tile files and the final merged product are written to the
+current working directory and are preserved after the run completes.
+
 Requirements:
     pip install sentinelhub geopandas rasterio shapely pystac-client numpy
 
@@ -51,7 +54,6 @@ import logging
 import math
 import os
 import sys
-import tempfile
 import time
 import threading
 from pathlib import Path
@@ -75,19 +77,16 @@ log = logging.getLogger(__name__)
 
 # ─── Product Configuration ───────────────────────────────────────────────────
 
-# Sentinel-2 Level 3 Quarterly Cloudless Mosaics (10m resolution, BYOC collection)
 S2_MOSAIC_COLLECTION_ID = "5460de54-082e-473a-b6ea-d5cbe3c17cca"
 S2_MOSAIC_STAC_COLLECTION = "sentinel-2-global-mosaics"
 S2_MOSAIC_DEFAULT_BANDS = ["B04", "B03", "B02"]
-S2_MOSAIC_RESOLUTION = 10  # metres
+S2_MOSAIC_RESOLUTION = 10
 
-# Sentinel-1 IW Monthly Mosaics (BYOC collection)
 S1_MOSAIC_COLLECTION_ID = "3c662330-108b-4378-8899-525fd5a225cb"
 S1_MOSAIC_STAC_COLLECTION = "sentinel-1-global-mosaics"
 S1_MOSAIC_DEFAULT_BANDS = ["VV", "VH"]
-S1_MOSAIC_RESOLUTION = 10  # metres
+S1_MOSAIC_RESOLUTION = 10
 
-# CDSE endpoints
 CDSE_SH_BASE_URL = "https://sh.dataspace.copernicus.eu"
 CDSE_TOKEN_URL = (
     "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/"
@@ -95,14 +94,12 @@ CDSE_TOKEN_URL = (
 )
 CDSE_STAC_URL = "https://stac.dataspace.copernicus.eu/v1"
 
-# Sentinel Hub limits
-MAX_TILE_PX = 2500  # max pixels per dimension for Process API
+MAX_TILE_PX = 2500
 
 
 # ─── Progress Tracking ───────────────────────────────────────────────────────
 
 def _fmt_duration(seconds: float) -> str:
-    """Format seconds into human-readable string."""
     if seconds < 0:
         return "--:--"
     seconds = int(seconds)
@@ -117,8 +114,50 @@ def _fmt_duration(seconds: float) -> str:
         return f"{h}h {m:02d}m {s:02d}s"
 
 
+def _fmt_bytes(nbytes: float) -> str:
+    if nbytes < 1024:
+        return f"{nbytes:.0f} B"
+    elif nbytes < 1024 ** 2:
+        return f"{nbytes / 1024:.1f} KB"
+    elif nbytes < 1024 ** 3:
+        return f"{nbytes / 1024 ** 2:.1f} MB"
+    else:
+        return f"{nbytes / 1024 ** 3:.2f} GB"
+
+
+def _fmt_rate(bytes_per_sec: float) -> str:
+    if bytes_per_sec <= 0:
+        return "-- MB/s"
+    elif bytes_per_sec < 1024:
+        return f"{bytes_per_sec:.0f} B/s"
+    elif bytes_per_sec < 1024 ** 2:
+        return f"{bytes_per_sec / 1024:.1f} KB/s"
+    else:
+        return f"{bytes_per_sec / 1024 ** 2:.2f} MB/s"
+
+
+def _read_rx_bytes() -> int:
+    """
+    Read total received bytes across all non-loopback network interfaces
+    from /sys/class/net/*/statistics/rx_bytes.  Returns 0 on failure.
+    """
+    total = 0
+    try:
+        net_dir = Path("/sys/class/net")
+        if not net_dir.exists():
+            return 0
+        for iface in net_dir.iterdir():
+            if iface.name == "lo":
+                continue
+            rx_file = iface / "statistics" / "rx_bytes"
+            if rx_file.exists():
+                total += int(rx_file.read_text().strip())
+    except (OSError, ValueError):
+        pass
+    return total
+
+
 def _progress_bar(fraction: float, width: int = 30) -> str:
-    """Render a text progress bar."""
     fraction = max(0.0, min(1.0, fraction))
     filled = int(width * fraction)
     bar = "█" * filled + "░" * (width - filled)
@@ -127,14 +166,12 @@ def _progress_bar(fraction: float, width: int = 30) -> str:
 
 class ProgressTracker:
     """
-    Tracks overall download progress across multiple tiles/items.
+    Tracks download progress with live network throughput and global ETA.
 
-    A background thread refreshes the console every ~1.5 seconds showing:
-      - Which step we're on (e.g. tile 3/12)
-      - A per-tile progress bar (time-estimated from rolling average)
-      - Overall progress bar
-      - Wall-clock elapsed time
-      - Projected ETA for the remaining steps (rolling average of step durations)
+    - Background thread refreshes every ~1.5 s
+    - Live download rate: sampled from network interface rx_bytes counters
+    - Global average rate: computed from actual completed tile file sizes
+    - ETA: projected from rolling average of step durations
     """
 
     def __init__(self, total_steps: int, step_label: str = "tile"):
@@ -143,12 +180,18 @@ class ProgressTracker:
         self.completed_steps = 0
         self.start_time = time.time()
         self.step_durations: list[float] = []
+        self.step_bytes: list[int] = []
+        self.total_bytes: int = 0
         self._current_step_start: float = 0.0
         self._spinner_idx = 0
         self._spinner_chars = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
         self._monitor_thread: Optional[threading.Thread] = None
         self._monitoring = False
         self._lock = threading.Lock()
+        # Network sampling state
+        self._last_rx_bytes: int = _read_rx_bytes()
+        self._last_rx_time: float = time.time()
+        self._live_rate: float = 0.0  # bytes/sec from NIC sampling
 
     # ── internal helpers ──
 
@@ -156,6 +199,23 @@ class ProgressTracker:
         if not self.step_durations:
             return 0.0
         return sum(self.step_durations) / len(self.step_durations)
+
+    def _global_rate(self) -> float:
+        """Average download rate (bytes/sec) from completed tile sizes."""
+        total_time = sum(self.step_durations)
+        if total_time <= 0:
+            return 0.0
+        return self.total_bytes / total_time
+
+    def _sample_network_rate(self):
+        """Sample rx_bytes from NIC counters to get live throughput."""
+        now = time.time()
+        rx = _read_rx_bytes()
+        dt = now - self._last_rx_time
+        if dt > 0 and rx >= self._last_rx_bytes:
+            self._live_rate = (rx - self._last_rx_bytes) / dt
+        self._last_rx_bytes = rx
+        self._last_rx_time = now
 
     def _eta_remaining(self) -> float:
         remaining = self.total_steps - self.completed_steps
@@ -165,11 +225,12 @@ class ProgressTracker:
         return remaining * avg
 
     def _print_status(self):
+        self._sample_network_rate()
         elapsed = time.time() - self.start_time
         spinner = self._spinner_chars[self._spinner_idx % len(self._spinner_chars)]
         self._spinner_idx += 1
 
-        # ── per-tile progress (estimated from rolling avg) ──
+        # Per-tile progress (time-estimated from rolling avg)
         avg = self._avg_step_time()
         if self._current_step_start > 0 and avg > 0:
             tile_elapsed = time.time() - self._current_step_start
@@ -182,7 +243,12 @@ class ProgressTracker:
         else:
             tile_str = ""
 
-        # ── global progress ──
+        # Live NIC rate vs global average
+        live_str = _fmt_rate(self._live_rate)
+        global_r = self._global_rate()
+        avg_str = _fmt_rate(global_r) if global_r > 0 else "---"
+
+        # Global progress
         global_frac = (
             self.completed_steps / self.total_steps if self.total_steps > 0 else 0
         )
@@ -194,51 +260,68 @@ class ProgressTracker:
             f"\r{spinner} {self.step_label.capitalize()} "
             f"{self.completed_steps + 1}/{self.total_steps}  "
             f"{tile_str}  │  "
+            f"Net: {live_str}  Avg: {avg_str}  │  "
             f"Overall: {global_bar}  "
+            f"{_fmt_bytes(self.total_bytes)}  "
             f"Elapsed: {_fmt_duration(elapsed)}  "
             f"ETA: {eta_str}"
         )
-        sys.stderr.write(f"{line:<160}")
+        sys.stderr.write(f"{line:<180}")
         sys.stderr.flush()
 
     # ── public interface ──
 
     def start_step(self, label: str = ""):
-        """Call when beginning a new tile / band download."""
         with self._lock:
             self._current_step_start = time.time()
+            # Reset NIC baseline so first sample of new tile is clean
+            self._last_rx_bytes = _read_rx_bytes()
+            self._last_rx_time = time.time()
         self._start_monitor()
 
-    def finish_step(self):
-        """Call when a tile / band download completes successfully."""
+    def finish_step(self, nbytes: int = 0):
+        """
+        Call when a tile/band download completes.
+        Pass nbytes = file size on disk for accurate global rate tracking.
+        """
         self._stop_monitor()
         with self._lock:
+            duration = 0.0
             if self._current_step_start > 0:
-                self.step_durations.append(time.time() - self._current_step_start)
+                duration = time.time() - self._current_step_start
+                self.step_durations.append(duration)
+            if nbytes > 0:
+                self.step_bytes.append(nbytes)
+                self.total_bytes += nbytes
             self.completed_steps += 1
             self._current_step_start = 0.0
 
         elapsed = time.time() - self.start_time
-        avg = self._avg_step_time()
         eta = self._eta_remaining()
         global_frac = (
             self.completed_steps / self.total_steps if self.total_steps > 0 else 0
         )
 
+        # Per-tile rate from actual bytes and duration
+        tile_rate = nbytes / duration if duration > 0 and nbytes > 0 else 0
+        tile_info = f" {_fmt_bytes(nbytes)} @ {_fmt_rate(tile_rate)}" if tile_rate > 0 else ""
+        # Rolling global rate
+        global_r = self._global_rate()
+        avg_info = f"  Avg: {_fmt_rate(global_r)}" if global_r > 0 else ""
+
         sys.stderr.write(
             f"\r✓ {self.step_label.capitalize()} "
             f"{self.completed_steps}/{self.total_steps} done "
-            f"({_fmt_duration(self.step_durations[-1])})  │  "
+            f"({_fmt_duration(duration)}{tile_info})  │  "
             f"Overall: {_progress_bar(global_frac, 25)}  "
+            f"{_fmt_bytes(self.total_bytes)}{avg_info}  "
             f"Elapsed: {_fmt_duration(elapsed)}  "
-            f"ETA: {_fmt_duration(eta) if eta > 0 else 'done'}  "
-            f"Avg: {_fmt_duration(avg)}/{self.step_label}"
+            f"ETA: {_fmt_duration(eta) if eta > 0 else 'done'}"
             f"{'':20}\n"
         )
         sys.stderr.flush()
 
     def skip_step(self, reason: str = "skipped"):
-        """Call when a tile / band is skipped."""
         self._stop_monitor()
         with self._lock:
             self.completed_steps += 1
@@ -247,31 +330,30 @@ class ProgressTracker:
         sys.stderr.write(
             f"\r⊘ {self.step_label.capitalize()} "
             f"{self.completed_steps}/{self.total_steps} {reason}"
-            f"{'':80}\n"
+            f"{'':100}\n"
         )
         sys.stderr.flush()
 
     def finish_all(self):
-        """Print the final summary banner."""
         self._stop_monitor()
         total_elapsed = time.time() - self.start_time
         ok = len(self.step_durations)
         skipped = self.completed_steps - ok
+        global_r = self._global_rate()
 
-        sys.stderr.write(f"\n{'─' * 72}\n")
-        sys.stderr.write(
-            f"  Download complete: {ok} succeeded"
-        )
+        sys.stderr.write(f"\n{'─' * 78}\n")
+        sys.stderr.write(f"  Download complete: {ok} succeeded")
         if skipped:
             sys.stderr.write(f", {skipped} skipped")
-        sys.stderr.write(
-            f"  —  total time {_fmt_duration(total_elapsed)}"
-        )
+        sys.stderr.write(f"  —  {_fmt_bytes(self.total_bytes)}")
+        sys.stderr.write(f" in {_fmt_duration(total_elapsed)}")
+        if global_r > 0:
+            sys.stderr.write(f"  ({_fmt_rate(global_r)} avg)")
         if self.step_durations:
             sys.stderr.write(
-                f"  (avg {_fmt_duration(self._avg_step_time())}/{self.step_label})"
+                f"  —  {_fmt_duration(self._avg_step_time())}/{self.step_label}"
             )
-        sys.stderr.write(f"\n{'─' * 72}\n\n")
+        sys.stderr.write(f"\n{'─' * 78}\n\n")
         sys.stderr.flush()
 
     # ── background refresh thread ──
@@ -325,22 +407,19 @@ def download_sentinelhub(
         MimeType,
     )
 
-    # ── Configure credentials ──
     config = SHConfig()
     config.sh_client_id = client_id
     config.sh_client_secret = client_secret
     config.sh_token_url = CDSE_TOKEN_URL
     config.sh_base_url = CDSE_SH_BASE_URL
 
-    # ── Read shapefile and get bounding box in EPSG:4326 ──
     gdf = gpd.read_file(shapefile)
     gdf_4326 = gdf.to_crs(epsg=4326)
-    total_bounds = gdf_4326.total_bounds  # (minx, miny, maxx, maxy)
+    total_bounds = gdf_4326.total_bounds
     minx, miny, maxx, maxy = total_bounds
 
     log.info(f"Shapefile bounding box (EPSG:4326): {total_bounds}")
 
-    # ── Select product collection ──
     if product == "s2-mosaic":
         collection_id = S2_MOSAIC_COLLECTION_ID
         default_res = S2_MOSAIC_RESOLUTION
@@ -353,7 +432,6 @@ def download_sentinelhub(
     res = resolution or default_res
     data_collection = DataCollection.define_byoc(collection_id)
 
-    # ── Build evalscript ──
     band_input = ", ".join(f'"{b}"' for b in bands)
     band_return = ", ".join(f"sample.{b}" for b in bands)
     n_bands = len(bands)
@@ -371,7 +449,7 @@ function evaluatePixel(sample) {{
     return [{band_return}];
 }}
 """
-    else:  # s1-mosaic
+    else:
         evalscript = f"""
 //VERSION=3
 function setup() {{
@@ -385,7 +463,6 @@ function evaluatePixel(sample) {{
 }}
 """
 
-    # ── Calculate tile grid ──
     centre_lat = (miny + maxy) / 2
     deg_per_m_lat = 1.0 / 111_320
     deg_per_m_lon = 1.0 / (111_320 * math.cos(math.radians(centre_lat)))
@@ -407,7 +484,6 @@ function evaluatePixel(sample) {{
         f"({tile_size_px}px @ {res}m resolution)"
     )
 
-    # ── Estimate PU cost ──
     pixels_per_tile = tile_size_px * tile_size_px
     pu_per_tile = (pixels_per_tile / 262_144) * (n_bands / 3)
     total_pu = pu_per_tile * total_tiles
@@ -422,12 +498,11 @@ function evaluatePixel(sample) {{
             "Consider using --method stac instead, or reduce the area."
         )
 
-    # ── Download tiles ──
-    tmpdir = tempfile.mkdtemp(prefix="cdse_tiles_")
+    # ── Download tiles (saved to current working directory) ──
     tile_files = []
 
     progress = ProgressTracker(total_tiles, step_label="tile")
-    log.info("")  # blank line before progress output
+    log.info("")
 
     for iy in range(n_tiles_y):
         for ix in range(n_tiles_x):
@@ -441,7 +516,6 @@ function evaluatePixel(sample) {{
                 crs=CRS.WGS84,
             )
 
-            # Calculate pixel dimensions for this tile
             tile_w_m = (tile_maxx - tile_minx) / deg_per_m_lon
             tile_h_m = (tile_maxy - tile_miny) / deg_per_m_lat
             px_w = min(int(round(tile_w_m / res)), MAX_TILE_PX)
@@ -480,10 +554,9 @@ function evaluatePixel(sample) {{
                 progress.skip_step("no data")
                 continue
 
-            img = data[0]  # numpy array (height, width, bands)
+            img = data[0]
 
-            # Save as GeoTIFF
-            tile_path = os.path.join(tmpdir, f"tile_{iy:03d}_{ix:03d}.tif")
+            tile_path = f"tile_{iy:03d}_{ix:03d}.tif"
             transform = from_bounds(
                 tile_minx, tile_miny, tile_maxx, tile_maxy, px_w, px_h
             )
@@ -493,24 +566,19 @@ function evaluatePixel(sample) {{
                 write_data = img[np.newaxis, :, :]
             else:
                 count = img.shape[2]
-                write_data = np.moveaxis(img, -1, 0)  # (B, H, W)
+                write_data = np.moveaxis(img, -1, 0)
 
             with rasterio.open(
-                tile_path,
-                "w",
-                driver="GTiff",
-                height=px_h,
-                width=px_w,
-                count=count,
-                dtype=write_data.dtype,
-                crs="EPSG:4326",
-                transform=transform,
-                compress="deflate",
+                tile_path, "w", driver="GTiff",
+                height=px_h, width=px_w, count=count,
+                dtype=write_data.dtype, crs="EPSG:4326",
+                transform=transform, compress="deflate",
             ) as dst:
                 dst.write(write_data)
 
+            tile_bytes = os.path.getsize(tile_path)
             tile_files.append(tile_path)
-            progress.finish_step()
+            progress.finish_step(nbytes=tile_bytes)
 
     progress.finish_all()
 
@@ -519,14 +587,8 @@ function evaluatePixel(sample) {{
         sys.exit(1)
 
     log.info(f"Downloaded {len(tile_files)} tiles. Merging ...")
+    log.info(f"Tile files kept in: {os.getcwd()}")
     _merge_and_clip(tile_files, gdf_4326, output, n_bands=len(bands), bands=bands)
-
-    for f in tile_files:
-        os.remove(f)
-    try:
-        os.rmdir(tmpdir)
-    except OSError:
-        pass
 
     log.info(f"Done! Output saved to: {output}")
 
@@ -553,7 +615,6 @@ def download_stac(
     """
     import pystac_client
 
-    # ── Read shapefile ──
     gdf = gpd.read_file(shapefile)
     gdf_4326 = gdf.to_crs(epsg=4326)
     total_bounds = gdf_4326.total_bounds
@@ -561,7 +622,6 @@ def download_stac(
 
     log.info(f"Shapefile bounding box (EPSG:4326): {total_bounds}")
 
-    # ── Select product ──
     if product == "s2-mosaic":
         stac_collection = S2_MOSAIC_STAC_COLLECTION
         default_res = S2_MOSAIC_RESOLUTION
@@ -573,7 +633,6 @@ def download_stac(
 
     res = resolution or default_res
 
-    # ── Search STAC catalog ──
     log.info(f"Searching STAC catalog for collection '{stac_collection}' ...")
     client = pystac_client.Client.open(CDSE_STAC_URL)
 
@@ -609,17 +668,14 @@ def download_stac(
         )
         sys.exit(1)
 
-    # ── Get CDSE access token ──
     token = _get_cdse_token(client_id, client_secret)
 
-    # ── Count total work units ──
     total_work = sum(
         1 for item in items for band in bands if band in item.assets
     )
     log.info(f"Downloading {total_work} band file(s) across {len(items)} item(s) ...")
 
-    tmpdir = tempfile.mkdtemp(prefix="cdse_stac_")
-    tile_files = []
+    tile_files = []  # list of (band_name, filepath)
 
     gdal_env = {
         "GDAL_HTTP_RETRY_COUNT": "5",
@@ -633,7 +689,7 @@ def download_stac(
         gdal_env["GDAL_HTTP_HEADERS"] = f"Authorization: Bearer {token}"
 
     progress = ProgressTracker(total_work, step_label="band")
-    log.info("")  # blank line before progress output
+    log.info("")
 
     for i, item in enumerate(items):
         available_assets = list(item.assets.keys())
@@ -653,7 +709,7 @@ def download_stac(
                     "https://eodata.dataspace.copernicus.eu/",
                 )
 
-            tile_path = os.path.join(tmpdir, f"item_{i:03d}_{band}.tif")
+            tile_path = f"item_{i:03d}_{band}.tif"
 
             try:
                 with rasterio.Env(**gdal_env):
@@ -695,8 +751,9 @@ def download_stac(
                         ) as dst:
                             dst.write(data, 1)
 
+                        tile_bytes = os.path.getsize(tile_path)
                         tile_files.append((band, tile_path))
-                        progress.finish_step()
+                        progress.finish_step(nbytes=tile_bytes)
 
             except Exception as e:
                 progress.skip_step(f"error: {e}")
@@ -708,15 +765,8 @@ def download_stac(
         log.error("No data downloaded. Exiting.")
         sys.exit(1)
 
+    log.info(f"Tile files kept in: {os.getcwd()}")
     _merge_stac_tiles(tile_files, gdf_4326, bands, output)
-
-    for _, f in tile_files:
-        if os.path.exists(f):
-            os.remove(f)
-    try:
-        os.rmdir(tmpdir)
-    except OSError:
-        pass
 
     log.info(f"Done! Output saved to: {output}")
 
@@ -724,7 +774,6 @@ def download_stac(
 # ─── Shared helpers ──────────────────────────────────────────────────────────
 
 def _get_cdse_token(client_id: str, client_secret: str) -> Optional[str]:
-    """Get an OAuth2 access token from CDSE."""
     try:
         import requests
 
@@ -763,7 +812,6 @@ def _merge_stac_tiles(
     for band, path in tile_files:
         band_files[band].append(path)
 
-    tmpdir = tempfile.mkdtemp(prefix="cdse_merge_")
     merged_band_files = []
 
     for band in bands:
@@ -781,7 +829,7 @@ def _merge_stac_tiles(
         for ds in datasets:
             ds.close()
 
-        merged_path = os.path.join(tmpdir, f"merged_{band}.tif")
+        merged_path = f"merged_{band}.tif"
         with rasterio.open(
             merged_path, "w", driver="GTiff",
             height=merged.shape[1], width=merged.shape[2], count=1,
@@ -809,7 +857,7 @@ def _merge_stac_tiles(
         with rasterio.open(path) as src:
             stacked[idx] = src.read(1)
 
-    stacked_path = os.path.join(tmpdir, "stacked.tif")
+    stacked_path = "stacked.tif"
     ref_profile.update(count=n_bands, dtype="float32", compress="deflate")
 
     with rasterio.open(stacked_path, "w", **ref_profile) as dst:
@@ -818,16 +866,6 @@ def _merge_stac_tiles(
             dst.set_band_description(idx + 1, band)
 
     _clip_to_shapefile(stacked_path, gdf_4326, output, ref_crs)
-
-    for band, path in merged_band_files:
-        if path.startswith(tmpdir) and os.path.exists(path):
-            os.remove(path)
-    if os.path.exists(stacked_path):
-        os.remove(stacked_path)
-    try:
-        os.rmdir(tmpdir)
-    except OSError:
-        pass
 
 
 def _merge_and_clip(
@@ -846,8 +884,7 @@ def _merge_and_clip(
     for ds in datasets:
         ds.close()
 
-    tmpdir = tempfile.mkdtemp(prefix="cdse_merged_")
-    merged_path = os.path.join(tmpdir, "merged.tif")
+    merged_path = "merged.tif"
 
     with rasterio.open(
         merged_path, "w", driver="GTiff",
@@ -861,12 +898,6 @@ def _merge_and_clip(
 
     log.info("Clipping to shapefile boundary ...")
     _clip_to_shapefile(merged_path, gdf_4326, output, src_crs)
-
-    os.remove(merged_path)
-    try:
-        os.rmdir(tmpdir)
-    except OSError:
-        pass
 
 
 def _clip_to_shapefile(
@@ -972,7 +1003,6 @@ Examples:
 
     args = parser.parse_args()
 
-    # Resolve credentials
     cid = args.client_id or os.environ.get("CDSE_CLIENT_ID", "")
     csecret = args.client_secret or os.environ.get("CDSE_CLIENT_SECRET", "")
 
@@ -984,7 +1014,6 @@ Examples:
         )
         sys.exit(1)
 
-    # Resolve default bands
     if args.bands is None:
         if args.product == "s2-mosaic":
             args.bands = S2_MOSAIC_DEFAULT_BANDS
