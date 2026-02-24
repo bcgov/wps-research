@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """
+e.g. 
+python cdse_mosaic_downloader.py -s sefc.shp -p s2-mosaic -d 2025-07-01 -b B02 B03 B04 B08 -r 10 -o sefc_s2_mosaic_2025Q3.tif # download 2025 mosaic over SEFC shapefile
+
 CDSE Mosaic Downloader
 ======================
 Automated tiled download of Sentinel-1 Monthly Mosaics and Sentinel-2 Quarterly
