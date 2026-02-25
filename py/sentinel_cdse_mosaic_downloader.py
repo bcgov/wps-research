@@ -919,6 +919,7 @@ def _clip_to_shapefile(
             src, geometries, crop=True, nodata=0
         )
         profile = src.profile.copy()
+        band_descriptions = [src.descriptions[i] for i in range(src.count)]
 
     profile.update(
         height=clipped.shape[1],
@@ -931,6 +932,9 @@ def _clip_to_shapefile(
     os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
     with rasterio.open(output, "w", **profile) as dst:
         dst.write(clipped)
+        for i, desc in enumerate(band_descriptions):
+            if desc:
+                dst.set_band_description(i + 1, desc)
 
     log.info(
         f"Clipped output: {clipped.shape[2]}x{clipped.shape[1]} px, "
