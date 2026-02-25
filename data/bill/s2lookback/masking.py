@@ -28,6 +28,8 @@ from sklearn.metrics import classification_report
 
 from plot_tools import plot_multiple 
 
+from misc import writeENVI
+
 
 
 @dataclass
@@ -302,7 +304,7 @@ class MASK(LookBack):
         from matplotlib.figure import Figure
         from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
-        predicted_mask_dir = Path(self.output_dir) / "merged_predictions"
+        predicted_mask_dir = Path(self.output_dir) / "merged_mask"
         predicted_mask_dir.mkdir(exist_ok=True)
 
         for i in range(len(date_list) - 1):
@@ -326,9 +328,7 @@ class MASK(LookBack):
             predictions = predictions.reshape(mask_cur.shape)
 
             #Merge predictions
-            merged_predictions = np.logical_or(mask_cur, predictions > .5)
-
-            save_path = predicted_mask_dir / f"{cur_date}.png"
+            merged_predictions = np.logical_or(mask_cur, predictions > .7)
 
             fig = Figure(figsize=(19, 10))
             canvas = FigureCanvas(fig)
@@ -343,7 +343,22 @@ class MASK(LookBack):
             axes[1].axis("off")
 
             fig.tight_layout()
-            fig.savefig(save_path)
+
+            '''
+            Save data, combining S2 file with tails.
+            '''
+            file_path = Path(self.get_file_path(cur_date, 'image_path'))
+
+            #Save fig
+            fig.savefig(predicted_mask_dir / f"{file_path.stem}.png")
+
+            #Save ENVI
+            writeENVI(
+                output_filename = predicted_mask_dir / f"{file_path.stem}.bin",
+                data = merged_predictions,
+                ref_filename = file_path,
+                mode = 'new'
+            )
 
 
 
@@ -448,15 +463,13 @@ if __name__ == "__main__":
     masker = MASK(
         image_dir='C11659/L1C/resampled_20m',
         mask_dir='C11659/cloud_20m',
-        output_dir='C11659/wps_cloud',
+        output_dir='C11659/wps_cloud_2',
         sample_size=100_000,
-        # start = datetime(2025, 6, 1),
-        end = datetime(2025, 10, 30),
         only_test_last_date = True,
         mask_all_final = True
     )
 
-    masker.mask('C11659/wps_cloud/models/2025-10-29 19:38:41.024000.joblib')
+    masker.mask('C11659/wps_cloud/models/cloud_model.joblib')
 
 
 
