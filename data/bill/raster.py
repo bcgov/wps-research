@@ -402,48 +402,6 @@ class Raster:
 
 
 
-def minimum_nan_raster(
-        filename_lst:list
-):
-    '''
-    Description
-    -----------
-    Compares between the rasters to select the one with the least No Data in count.
-    '''
-
-    from misc import ignore_nan_2D
-
-    min_nan_count = np.inf
-
-    best_raster = None
-
-    for f in filename_lst:
-
-        raster = Raster(file_name=f)
-
-        raster_data = raster.read_bands()
-
-        X = raster_data.reshape(-1, raster._n_band)
-
-        mask, _ = ignore_nan_2D(
-            X = X,
-            axis=1
-        )
-
-        nan_count = np.sum(~mask)
-
-        if (nan_count < min_nan_count):
-
-            min_count = nan_count
-
-            best_raster = raster
-
-
-    return best_raster, min_count
-
-
-
-
 if __name__ == "__main__":
 
     import argparse
@@ -496,7 +454,8 @@ if __name__ == "__main__":
 
     #Read band data
     if raster._n_band == 1:
-        raster_dat = raster.read_bands('all').squeeze()
+
+        raster_dat = raster.read_bands(band_lst=[1]).squeeze()
 
     else:
         raster_dat = raster.readBands_and_trim(band_lst=band_list, p=args.p)
@@ -526,7 +485,12 @@ if __name__ == "__main__":
     except KeyError:
         acquisition_time = None
 
-    band_names = ' | '.join(raster.band_name(i) for i in band_list)
+    try:
+        band_names = ' | '.join(raster.band_name(i) for i in band_list)
+
+    except Exception:
+        band_names = 'Not Available.'
+        
     title = f'Acquision time: {acquisition_time} \n Band: {band_names}'
 
     plot(raster_dat, title=title)
