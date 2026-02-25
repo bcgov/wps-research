@@ -22,9 +22,9 @@ class LookBack:
     output_dir: str = 's2lookback_temp'
 
     #Basic settings
-    mask_threshold: float = 1e-4
+    mask_threshold: float = 1e-6
     min_mask_prop_trigger: str = 0.0
-    max_mask_prop_usable: str = 0.7
+    max_mask_prop_usable: str = 0.6
     max_lookback_days: int = 7
 
     #Date selections

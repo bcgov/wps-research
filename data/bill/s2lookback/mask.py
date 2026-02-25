@@ -34,6 +34,10 @@ class MASK(LookBack):
 
     mask_all_final: bool = False
 
+    final_mask_threshold: float = 0.5
+
+    merge_mask: bool = False
+
     n_feature: int = 12
 
 
@@ -41,8 +45,7 @@ class MASK(LookBack):
         
         self.validate_method()
 
-        if not os.path.exists(self.output_dir):
-            os.mkdir(self.output_dir)
+        Path(self.output_dir).mkdir(exist_ok=True)
 
         self.file_dict = self.get_file_dictionary()
 
@@ -85,10 +88,10 @@ class MASK(LookBack):
         '''
 
         img_dat_cur = self.read_image(cur_date)
-        nodata_cur = np.all(img_dat_cur == 0, axis=-1)
+        nodata_cur = self.get_nodata_mask(img_dat_cur)
 
         img_dat_prev = self.read_image(prev_date)
-        nodata_prev = np.all(img_dat_prev == 0, axis=-1)
+        nodata_prev = self.get_nodata_mask(img_dat_prev)
 
         mask_cur, mask_coverage = self.read_mask(cur_date)
 
@@ -184,7 +187,7 @@ class MASK(LookBack):
 
         predictions = clf.predict_proba(X_test)
 
-        print(classification_report(y_test, predictions[:, 1] > .5))
+        print(classification_report(y_test, predictions[:, 1] > self.final_mask_threshold))
 
         return clf
     
@@ -299,9 +302,6 @@ class MASK(LookBack):
         from matplotlib.figure import Figure
         from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
-        predicted_mask_dir = Path(self.output_dir) / "merged_mask"
-        predicted_mask_dir.mkdir(exist_ok=True)
-
         for i in range(len(date_list) - 1):
 
             prev_date = date_list[i]
@@ -323,7 +323,7 @@ class MASK(LookBack):
             predictions = predictions.reshape(mask_cur.shape)
 
             #Merge predictions
-            merged_predictions = np.logical_or(mask_cur, predictions > .3)
+            merged_predictions = (mask_cur * self.merge_mask) | (predictions >= self.final_mask_threshold)
 
             fig = Figure(figsize=(19, 10))
             canvas = FigureCanvas(fig)
@@ -333,8 +333,8 @@ class MASK(LookBack):
             axes[0].set_title("Sen2Cor (ESA)")
             axes[0].axis("off")
 
-            axes[1].imshow(merged_predictions, cmap="gray")
-            axes[1].set_title("s2lookback (BC Wildfire Service) and Sen2Cor")
+            axes[1].imshow(predictions >= self.final_mask_threshold, cmap="gray")
+            axes[1].set_title("s2lookback (BC Wildfire Service)")
             axes[1].axis("off")
 
             fig.tight_layout()
@@ -345,11 +345,11 @@ class MASK(LookBack):
             file_path = Path(self.get_file_path(cur_date, 'image_path'))
 
             #Save fig
-            fig.savefig(predicted_mask_dir / f"{file_path.stem}.png")
+            fig.savefig(Path(self.output_dir) / f"{file_path.stem}.png")
 
             #Save ENVI
             writeENVI(
-                output_filename = predicted_mask_dir / f"{file_path.stem}.bin",
+                output_filename = Path(self.output_dir) / f"{file_path.stem}.bin",
                 data = merged_predictions,
                 ref_filename = file_path,
                 mode = 'new'
@@ -431,7 +431,7 @@ class MASK(LookBack):
 
 
     
-    def mask(
+    def transform(
             self,
             model_path: str
     ):
@@ -458,13 +458,15 @@ if __name__ == "__main__":
     masker = MASK(
         image_dir='C11659/L1C/resampled_20m',
         mask_dir='C11659/cloud_20m',
-        output_dir='C11659/wps_cloud_2',
+        output_dir='C11659/wps_cloud/merged_cloud_2',
+        merge_mask=True,
         sample_size=100_000,
         only_test_last_date = True,
-        mask_all_final = True
+        mask_all_final = True,
+        final_mask_threshold=0.7
     )
 
-    masker.mask('C11659/wps_cloud/models/cloud_model.joblib')
+    masker.fit()
 
 
 
