@@ -85,27 +85,67 @@ def extract_cloud(file_name):
     ref_proj = ref_sub_ds.GetProjection()
     ref_xsize = ref_sub_ds.RasterXSize
     ref_ysize = ref_sub_ds.RasterYSize
-    target_xs = ref_geo[1]
-    target_ys = ref_geo[5]
 
-    # If SCL is at a different resolution, resample to match CLD (both should be 20m, but just in case)
-    scl_sub_ds = selected_bands['SCL'][2]
-    scl_geo = scl_sub_ds.GetGeoTransform()
-    if scl_geo[1] != target_xs or scl_geo[5] != target_ys:
-        print("Resampling SCL to match CLD resolution...")
-        mem_driver = gdal.GetDriverByName('MEM')
-        scl_band = selected_bands['SCL'][0]
-        input_ds = mem_driver.Create('', scl_band.XSize, scl_band.YSize, 1, gdal.GDT_Float32)
+    # --------------- Resample both bands to 20m if needed ---------------
+    target_res = 20.0  # target 20m resolution
+    mem_driver = gdal.GetDriverByName('MEM')
+
+    for band_name in ['CLD', 'SCL']:
+        src_sub_ds = selected_bands[band_name][2]
+        src_geo = src_sub_ds.GetGeoTransform()
+        src_xs, src_ys = abs(src_geo[1]), abs(src_geo[5])
+
+        if abs(src_xs - target_res) > 0.5 or abs(src_ys - target_res) > 0.5:
+            print("Resampling", band_name, "from", src_xs, "m to", target_res, "m ...")
+            src_band = selected_bands[band_name][0]
+            input_ds = mem_driver.Create('', src_band.XSize, src_band.YSize, 1, gdal.GDT_Float32)
+            input_ds.SetGeoTransform(src_sub_ds.GetGeoTransform())
+            input_ds.SetProjection(src_sub_ds.GetProjection())
+            input_ds.GetRasterBand(1).WriteArray(arrays[band_name])
+
+            # Compute output dimensions for 20m
+            extent_x = src_band.XSize * abs(src_geo[1])
+            extent_y = src_band.YSize * abs(src_geo[5])
+            out_xsize = int(round(extent_x / target_res))
+            out_ysize = int(round(extent_y / target_res))
+
+            resampled_geo = list(src_geo)
+            resampled_geo[1] = target_res
+            resampled_geo[5] = -target_res
+
+            resample_alg = 'near' if band_name == 'SCL' else 'bilinear'
+
+            resampled_ds = mem_driver.Create('', out_xsize, out_ysize, 1, gdal.GDT_Float32)
+            resampled_ds.SetGeoTransform(resampled_geo)
+            resampled_ds.SetProjection(src_sub_ds.GetProjection())
+
+            gdal.Warp(resampled_ds, input_ds, xRes=target_res, yRes=target_res, resampleAlg=resample_alg)
+            arrays[band_name] = resampled_ds.GetRasterBand(1).ReadAsArray()
+
+            # Update reference geometry if this is the first band processed
+            if band_name == ref_band_name:
+                ref_xsize = out_xsize
+                ref_ysize = out_ysize
+                ref_geo = tuple(resampled_geo)
+                ref_proj = src_sub_ds.GetProjection()
+
+            resampled_ds = None
+            input_ds = None
+
+    # Ensure SCL matches CLD dimensions (in case they came from different subdatasets)
+    if arrays['SCL'].shape != arrays['CLD'].shape:
+        print("Resampling SCL to match CLD grid dimensions...")
+        scl_sub_ds = selected_bands['SCL'][2]
+        input_ds = mem_driver.Create('', arrays['SCL'].shape[1], arrays['SCL'].shape[0], 1, gdal.GDT_Float32)
         input_ds.SetGeoTransform(scl_sub_ds.GetGeoTransform())
         input_ds.SetProjection(scl_sub_ds.GetProjection())
         input_ds.GetRasterBand(1).WriteArray(arrays['SCL'])
 
-        resampled_geo = list(ref_geo)
         resampled_ds = mem_driver.Create('', ref_xsize, ref_ysize, 1, gdal.GDT_Float32)
-        resampled_ds.SetGeoTransform(resampled_geo)
+        resampled_ds.SetGeoTransform(ref_geo)
         resampled_ds.SetProjection(ref_proj)
 
-        gdal.Warp(resampled_ds, input_ds, xRes=target_xs, yRes=target_ys, resampleAlg='near')
+        gdal.Warp(resampled_ds, input_ds, xRes=target_res, yRes=target_res, resampleAlg='near')
         arrays['SCL'] = resampled_ds.GetRasterBand(1).ReadAsArray()
         resampled_ds = None
         input_ds = None
@@ -121,7 +161,7 @@ def extract_cloud(file_name):
 
         rb = cloudp_ds.GetRasterBand(1)
         rb.WriteArray(arrays['CLD'])
-        rb.SetDescription(' '.join([ds, str(int(target_xs)) + 'm:', 'CLD', 'cloud_probability']))
+        rb.SetDescription(' '.join([ds, '20m:', 'CLD', 'cloud_probability']))
         cloudp_ds = None
 
         # Clean up header
@@ -147,7 +187,7 @@ def extract_cloud(file_name):
 
         rb = cloudshadow_ds.GetRasterBand(1)
         rb.WriteArray(shadow_mask)
-        rb.SetDescription(' '.join([ds, str(int(target_xs)) + 'm:', 'SCL_class3', 'cloud_shadow_mask']))
+        rb.SetDescription(' '.join([ds, '20m:', 'SCL_class3', 'cloud_shadow_mask']))
         cloudshadow_ds = None
 
         # Clean up header
