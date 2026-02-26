@@ -109,15 +109,11 @@ def abcd_rf(path_a, path_b, path_c, skip_f, offset=0, write_output=False):
         if skip_f < 1 or skip_f >= np_ab:
             sys.exit("Error: illegal skip_f")
 
-        # Bad pixels in A, B (vectorized)
-        print("Flagging bad pixels in A, B ...")
-        bad_a = np.any(np.isnan(A) | np.isinf(A), axis=0)
-        bad_b = np.any(np.isnan(B) | np.isinf(B), axis=0)
+        # Bad pixels in A (vectorized) — only check A, not B
+        print("Flagging bad pixels in A ...")
+        bp_ab = np.any(np.isnan(A) | np.isinf(A), axis=0)
         if A.shape[0] > 1:
-            bad_a |= np.all(A == 0, axis=0)
-        if B.shape[0] > 1:
-            bad_b |= np.all(B == 0, axis=0)
-        bp_ab = bad_a | bad_b
+            bp_ab |= np.all(A == 0, axis=0)
         if bp_ab.all():
             sys.exit("Error: no good pixels in A x B")
 
