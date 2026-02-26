@@ -83,7 +83,8 @@ class LookBack:
 
     def read_image(
             self, 
-            date: datetime
+            date: datetime,
+            band_list: list[int] = [1,2,4]
     ):
         
         '''
@@ -94,41 +95,70 @@ class LookBack:
 
         if isinstance(image_paths, str):
 
-            return Raster(image_paths).read_bands()
+            return Raster(image_paths).read_bands(band_list)
 
-        return [Raster(img_f).read_bands() for img_f in image_paths]
+        return [Raster(img_f).read_bands(band_list) for img_f in image_paths]
     
     
 
     def read_mask(
             self,
-            date: datetime
+            date: datetime,
+            as_prob: bool = False
     ):
+        
         '''
         Read mask on that date.
         Combines multiple masks if mask_path is a list.
         Also returns coverage of the mask.
+
+        If as_prob=True:
+            - Returns list of arrays if multiple masks, single array if one mask
+            - Binary masks (0/1) are returned as bool even with as_prob=True
+            - Probabilistic masks are returned as float in [0, 1]
+            - Coverage is returned as None when returning a list
+        If as_prob=False:
+            - All masks are combined via logical OR into a single bool mask
+            - Returns (mask, coverage)
         '''
         mask_paths = self.get_file_path(date, 'mask_path')
-
-        # Normalize to list
-        if isinstance(mask_paths, str):
+        single = isinstance(mask_paths, str)
+        if single:
             mask_paths = [mask_paths]
 
-        masks = []
+        processed = []
         for mask_f in mask_paths:
-            mask_prob = Raster(mask_f).read_bands().squeeze() / 100.
-            if self.mask_threshold is None:
-                mask = mask_prob.astype(np.bool_)
-            else:
-                mask = (mask_prob >= self.mask_threshold)
-            masks.append(mask)
+            raw = Raster(mask_f).read_bands().squeeze()
 
-        # Combine: a pixel is masked if masked in ANY source
-        mask = np.logical_or.reduce(masks)
+            # If data is binary (only 0s and 1s), treat as boolean mask regardless
+            unique_vals = np.unique(raw)
+            is_binary = np.all(np.isin(unique_vals, [0, 1]))
+
+            if is_binary:
+                processed.append(raw.astype(np.bool_))
+            else:
+                # Probabilistic — normalize to [0, 1]
+                processed.append(raw / 100.)
+
+        if as_prob:
+            if single:
+                return processed[0], processed[0].mean()
+            return processed, None
+
+        # Combine into a single boolean mask
+        bool_masks = []
+        for data in processed:
+            if data.dtype == np.bool_:
+                bool_masks.append(data)
+            elif self.mask_threshold is None:
+                bool_masks.append(data.astype(np.bool_))
+            else:
+                bool_masks.append(data >= self.mask_threshold)
+
+        mask = np.logical_or.reduce(bool_masks)
         coverage = mask.mean()
         return mask, coverage
-    
+        
 
 
     def get_nodata_mask(

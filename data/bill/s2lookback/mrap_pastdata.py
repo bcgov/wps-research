@@ -115,35 +115,6 @@ class MRAP(LookBack):
 
 
 
-    # def save_old_new(
-    #         self, 
-    #         raw, 
-    #         mrap, 
-    #         date, 
-    #         filepath
-    # ):
-
-    #     fig = Figure(figsize=(19, 10))
-    #     FigureCanvas(fig)
-    #     axes = fig.subplots(1, 2)
-
-    #     if (self.lo is None and self.hi is None):
-    #         lo, hi = np.nanpercentile(raw, 1, axis=(0, 1)), np.nanpercentile(raw, 99, axis=(0, 1))
-
-    #     else:
-    #         lo, hi = self.lo, self.hi
-
-    #     axes[0].imshow((raw - lo) / (hi - lo))
-    #     axes[0].set_title(f"Raw: {date}")
-    #     axes[0].axis("off")
-
-    #     axes[1].imshow((mrap - lo) / (hi - lo))
-    #     axes[1].set_title(f"Composite: {date}")
-    #     axes[1].axis("off")
-
-    #     fig.tight_layout()
-    #     fig.savefig(filepath)
-
     def save_old_new(self, mrap, date, filepath):
 
         fig = Figure(figsize=(10, 10))
