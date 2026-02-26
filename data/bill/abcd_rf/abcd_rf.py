@@ -196,8 +196,9 @@ def abcd_rf(path_a, path_b, path_c, skip_f, offset=0, write_output=False):
         print(f"Writing {out_bin} ...")
         write_envi(out_bin, D, ds_c, nb_b)
 
+        plot_bands = "1 2 3" if nb_b >= 3 else "1 1 1"
         print("Plotting ...")
-        os.system(f"raster_plot.py {out_bin} 1 2 3 1")
+        os.system(f"raster_plot.py {out_bin} {plot_bands} 1")
 
     print("Done.")
     return D
@@ -210,4 +211,3 @@ if __name__ == "__main__":
             int(sys.argv[4]),
             int(sys.argv[5]) if len(sys.argv) > 5 else 0,
             write_output=True)
-
