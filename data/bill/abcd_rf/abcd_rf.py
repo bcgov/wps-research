@@ -131,26 +131,22 @@ def abcd_rf(path_a, path_b, path_c, skip_f, offset=0, write_output=False):
         try:
             from cuml.ensemble import RandomForestRegressor
             print("  (using cuML GPU implementation)")
+            rf = RandomForestRegressor(
+                n_estimators=100,
+                max_depth=16,
+                random_state=42,
+            )
         except ImportError:
             from sklearn.ensemble import RandomForestRegressor
             print("  (cuML not available — falling back to sklearn)")
-
-        rf = RandomForestRegressor(
-            n_estimators=100,
-            max_depth=None,
-            random_state=42,
-            n_jobs=-1 if hasattr(RandomForestRegressor, 'n_jobs') else None,
-        )
-        # cuML RF doesn't have n_jobs; remove if it errors
-        try:
-            rf.fit(X_train, Y_train)
-        except TypeError:
             rf = RandomForestRegressor(
                 n_estimators=100,
                 max_depth=None,
                 random_state=42,
+                n_jobs=-1,
             )
-            rf.fit(X_train, Y_train)
+
+        rf.fit(X_train, Y_train)
 
         print(f"Saving model to {pkl_name}")
         with open(pkl_name, 'wb') as f:
