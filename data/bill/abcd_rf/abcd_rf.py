@@ -116,6 +116,7 @@ def abcd_rf(path_a, path_b, path_c, skip_f, offset=0, write_output=False):
             bp_ab |= np.all(A == 0, axis=0)
         if bp_ab.all():
             sys.exit("Error: no good pixels in A x B")
+        print(f"  {np.sum(bp_ab)} bad pixels, {np.sum(~bp_ab)} good pixels in A")
 
         # Sample training set
         sample_idx = np.arange(offset, np_ab, skip_f)
@@ -128,6 +129,7 @@ def abcd_rf(path_a, path_b, path_c, skip_f, offset=0, write_output=False):
 
         X_train = A[:, sample_idx].T   # (n_train, nb_a)
         Y_train = B[:, sample_idx].T   # (n_train, nb_b)
+        np.nan_to_num(Y_train, copy=False, nan=0.0)
 
         print("Fitting RandomForestRegressor ...")
         try:
