@@ -1,4 +1,7 @@
-'''20230727 extract most recent available pixel (MRAP) from sentinel2 series.. assume tile based
+'''
+20250226: Added --L1 flag to optionally process L1_ folders instead of L2_ folders.
+
+20230727 extract most recent available pixel (MRAP) from sentinel2 series.. assume tile based
 (*) Difference from sentinel2_extract_swir.py:
     can't process in parallel (By tile, at least)
 NOTE: assumes sentinel2_extract_cloudfree.py has been run.
@@ -28,6 +31,12 @@ import numpy as np
 import copy
 import sys
 import os
+
+# Parse --L1 flag
+L1_mode = '--L1' in sys.argv
+if L1_mode:
+    sys.argv.remove('--L1')
+L_prefix = 'L1_' if L1_mode else 'L2_'
 
 
 def run_mrap(gid):  # run MRAP on one tile
@@ -131,8 +140,8 @@ def run_mrap(gid):  # run MRAP on one tile
 
         return result
 
-    data_lines = get_filename_lines("ls -1r L2_" + gid + os.path.sep + "S2*_cloudfree.bin")
-    mrap_lines = get_filename_lines("ls -1r L2_" + gid + os.path.sep + "S2*_cloudfree.bin_MRAP.bin")
+    data_lines = get_filename_lines("ls -1r " + L_prefix + gid + os.path.sep + "S2*_cloudfree.bin")
+    mrap_lines = get_filename_lines("ls -1r " + L_prefix + gid + os.path.sep + "S2*_cloudfree.bin_MRAP.bin")
 
     # Deduplicate data_lines - keep only files with latest processing timestamp for each acquisition timestamp
     original_count = len(data_lines)
@@ -155,13 +164,13 @@ def run_mrap(gid):  # run MRAP on one tile
     for [line_date, line] in data_lines:
         if gid != line.split("_")[5]:
             err('gid sanity check failed')
-        extract_path = "L2_" +  gid + os.path.sep + line
+        extract_path = L_prefix +  gid + os.path.sep + line
         print('**' + line_date + " " + extract_path)
 
     print("MRAP lines", len(mrap_lines))
     for [mrap_date, line] in mrap_lines: # check for latest MRAP file and "seed" with that
         gid = line.split("_")[5]
-        extract_path = "L2_" +  gid + os.path.sep + line
+        extract_path = L_prefix +  gid + os.path.sep + line
         print('**' + mrap_date + " " + extract_path)
 
     # find the last mrap date ( if applicable ) that's still good ( before first data file without MRAP file )
@@ -181,7 +190,7 @@ def run_mrap(gid):  # run MRAP on one tile
     print("last_good_mrap_date", last_good_mrap_date)
 
     last_mrap_date = mrap_lines[-1][0] if len(mrap_lines) > 0 else None
-    last_mrap_file = "L2_" + gid + os.path.sep + mrap_lines[-1][1] if len(mrap_lines) > 0 else None
+    last_mrap_file = L_prefix + gid + os.path.sep + mrap_lines[-1][1] if len(mrap_lines) > 0 else None
     print("last_mrap_date", last_mrap_date)
     last_data_date = data_lines[-1][0] if len(data_lines) > 0 else None
 
@@ -189,8 +198,8 @@ def run_mrap(gid):  # run MRAP on one tile
     # load a SEED if there are MRAP files, but data files without corresponding MRAP file
     if last_mrap_date is not None and last_data_date is not None and last_data_date > last_good_mrap_date:
         print("load SEED")
-        print("+r", "L2_" +  gid + os.path.sep + last_good_mrap_file)  # load / seed from "most recent" MRAP file
-        d = gdal.Open("L2_" +  gid + os.path.sep + last_good_mrap_file)  # open the file brought in for this update step
+        print("+r", L_prefix +  gid + os.path.sep + last_good_mrap_file)  # load / seed from "most recent" MRAP file
+        d = gdal.Open(L_prefix +  gid + os.path.sep + last_good_mrap_file)  # open the file brought in for this update step
         my_bands = {i: d.GetRasterBand(i).ReadAsArray().astype(np.float32) for i in range(1, d.RasterCount + 1)}
         my_proj, my_geo = d.GetProjection(), d.GetGeoTransform()
         my_xsize, my_ysize, nbands = d.RasterXSize, d.RasterYSize, d.RasterCount
@@ -199,7 +208,7 @@ def run_mrap(gid):  # run MRAP on one tile
     print("run extract:")  # run extract() on data files later than the last MRAP date
     for [line_date, line] in data_lines:
         gid = line.split("_")[5]
-        extract_path = "L2_" +  gid + os.path.sep + line
+        extract_path = L_prefix +  gid + os.path.sep + line
         if last_good_mrap_date is None or ( last_good_mrap_date is not None and line_date > last_good_mrap_date):
             print('extract(' + extract_path + ')')
             extract(extract_path)
@@ -216,7 +225,7 @@ def run_mrap(gid):  # run MRAP on one tile
 if __name__ == "__main__":
     if len(args) < 2:
         gids = []
-        dirs = [x.strip() for x in os.popen('ls -1d L2_*').readlines()]
+        dirs = [x.strip() for x in os.popen('ls -1d ' + L_prefix + '*').readlines()]
         for d in dirs:
             print(d)
             w = d.split('_')
@@ -233,4 +242,3 @@ if __name__ == "__main__":
         parfor(f, gids, 1) #  int(mp.cpu_count()))
     else:
         run_mrap(args[1])  # single tile mode: no mosaicing
-
