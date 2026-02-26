@@ -109,9 +109,15 @@ def abcd_rf(path_a, path_b, path_c, skip_f, offset=0, write_output=False):
         if skip_f < 1 or skip_f >= np_ab:
             sys.exit("Error: illegal skip_f")
 
-        # Bad pixels in A, B
+        # Bad pixels in A, B (vectorized)
         print("Flagging bad pixels in A, B ...")
-        bp_ab = np.array([is_bad(A, i) or is_bad(B, i) for i in range(np_ab)], dtype=bool)
+        bad_a = np.any(np.isnan(A) | np.isinf(A), axis=0)
+        bad_b = np.any(np.isnan(B) | np.isinf(B), axis=0)
+        if A.shape[0] > 1:
+            bad_a |= np.all(A == 0, axis=0)
+        if B.shape[0] > 1:
+            bad_b |= np.all(B == 0, axis=0)
+        bp_ab = bad_a | bad_b
         if bp_ab.all():
             sys.exit("Error: no good pixels in A x B")
 
@@ -157,9 +163,11 @@ def abcd_rf(path_a, path_b, path_c, skip_f, offset=0, write_output=False):
     C, ds_c = read_raster(path_c)
     nb_c, np_c = C.shape
 
-    # Bad pixels in C
+    # Bad pixels in C (vectorized)
     print("Flagging bad pixels in C ...")
-    bp_c = np.array([is_bad(C, i) for i in range(np_c)], dtype=bool)
+    bp_c = np.any(np.isnan(C) | np.isinf(C), axis=0)
+    if C.shape[0] > 1:
+        bp_c |= np.all(C == 0, axis=0)
     if bp_c.all():
         sys.exit("Error: no good pixels in C")
 
