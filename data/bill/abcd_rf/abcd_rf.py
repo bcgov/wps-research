@@ -84,7 +84,7 @@ def cache_key(path_a, path_b, skip_f, offset):
     return f"{a_base}_{b_base}_{skip_f}_{offset}.pkl"
 
 
-def abcd_rf(path_a, path_b, path_c, skip_f, offset=0):
+def abcd_rf(path_a, path_b, path_c, skip_f, offset=0, write_output=False):
 
     # ------------------------------------------ train or load cached model
     pkl_name = cache_key(path_a, path_b, skip_f, offset)
@@ -181,21 +181,22 @@ def abcd_rf(path_a, path_b, path_c, skip_f, offset=0):
         D[b, good_c] = preds[:, b].astype(np.float32)
     print(f"  predicted {len(good_c)} pixels")
 
-    # ------------------------------------------------------------- write
-    a_base = os.path.splitext(os.path.basename(path_a))[0]
-    b_base = os.path.splitext(os.path.basename(path_b))[0]
-    c_base = os.path.splitext(os.path.basename(path_c))[0]
-    out_prefix = f"abcd_{a_base}_{b_base}_{c_base}_{skip_f}_{offset}"
-    out_bin = out_prefix + ".bin"
+    # ------------------------------------------------------------- output
+    if write_output:
+        a_base = os.path.splitext(os.path.basename(path_a))[0]
+        b_base = os.path.splitext(os.path.basename(path_b))[0]
+        c_base = os.path.splitext(os.path.basename(path_c))[0]
+        out_prefix = f"abcd_{a_base}_{b_base}_{c_base}_{skip_f}_{offset}"
+        out_bin = out_prefix + ".bin"
 
-    print(f"Writing {out_bin} ...")
-    write_envi(out_bin, D, ds_c, nb_b)
+        print(f"Writing {out_bin} ...")
+        write_envi(out_bin, D, ds_c, nb_b)
 
-    # --------------------------------------------------------- plot
-    print("Plotting ...")
-    os.system(f"raster_plot.py {out_bin} 1 2 3 1")
+        print("Plotting ...")
+        os.system(f"raster_plot.py {out_bin} 1 2 3 1")
 
     print("Done.")
+    return D
 
 
 if __name__ == "__main__":
@@ -203,4 +204,6 @@ if __name__ == "__main__":
         sys.exit("Usage: abcd_rf.py A B C skip_f [offset]")
     abcd_rf(sys.argv[1], sys.argv[2], sys.argv[3],
             int(sys.argv[4]),
-            int(sys.argv[5]) if len(sys.argv) > 5 else 0)
+            int(sys.argv[5]) if len(sys.argv) > 5 else 0,
+            write_output=True)
+
