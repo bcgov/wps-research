@@ -51,11 +51,11 @@ class MRAP(LookBack):
 
                 print('filling', prev_date)
 
-                nodata_main = self.get_nodata_mask(image_dat_main)
+                nodata_main = self.get_nodata_mask(image_dat_main, nodata_val=0.0)
             
                 image_dat_prev = self.read_image(prev_date)
 
-                nodata_prev = self.get_nodata_mask(image_dat_prev)
+                nodata_prev = self.get_nodata_mask(image_dat_prev, nodata_val=0.0)
 
                 mask_dat_prev, _ = self.read_mask(prev_date)
 
@@ -108,38 +108,28 @@ class MRAP(LookBack):
 
         # After all filling: any pixel still masked or all-zero → force to nodata
         current_coverage = mask_dat_main.mean()
-        remaining_nodata = np.logical_or(mask_dat_main, self.get_nodata_mask(image_dat_main))
+        remaining_nodata = np.logical_or(mask_dat_main, self.get_nodata_mask(image_dat_main, nodata_val=0.0))
         image_dat_main[remaining_nodata] = 0   # ensure truly zeroed
 
         return image_dat_main, current_coverage
 
 
 
-    def save_old_new(
-            self, 
-            raw, 
-            mrap, 
-            date, 
-            filepath
-    ):
+    def save_old_new(self, mrap, date, filepath):
 
-        fig = Figure(figsize=(19, 10))
+        fig = Figure(figsize=(10, 10))
         FigureCanvas(fig)
-        axes = fig.subplots(1, 2)
+        ax = fig.subplots(1, 1)
 
-        if (self.lo is None and self.hi is None):
-            lo, hi = np.nanpercentile(raw, 1, axis=(0, 1)), np.nanpercentile(raw, 99, axis=(0, 1))
-
+        if self.lo is None and self.hi is None:
+            lo = np.nanpercentile(mrap, 1, axis=(0, 1))
+            hi = np.nanpercentile(mrap, 99, axis=(0, 1))
         else:
             lo, hi = self.lo, self.hi
 
-        axes[0].imshow((raw - lo) / (hi - lo))
-        axes[0].set_title(f"Raw: {date}")
-        axes[0].axis("off")
-
-        axes[1].imshow((mrap - lo) / (hi - lo))
-        axes[1].set_title(f"Composite: {date}")
-        axes[1].axis("off")
+        ax.imshow(np.clip((mrap - lo) / (hi - lo), 0, 1))
+        ax.set_title(f"Final Composite: {date}")
+        ax.axis("off")
 
         fig.tight_layout()
         fig.savefig(filepath)
@@ -185,7 +175,7 @@ class MRAP(LookBack):
         )
 
         self.save_old_new(
-            image_dat_main[..., :3],
+            # image_dat_main[..., :3],
             mrap_dat[..., :3],
             cur_date,
             f'{self.output_dir}/{cur_date}_MRAP.png'
@@ -223,10 +213,10 @@ if __name__ == "__main__":
 
     mrap = MRAP(
         image_dir='C11659/L1C/resampled_20m',
-        mask_dir=['C11659/wps_cloud/merged_mask','C11659/wps_shadow'],
-        output_dir='C11659/wps_cloud/mrap_adjusted_2',
-        max_lookback_days=30,
-        n_workers=8,
+        mask_dir='C11659/wps_inference/abcd_cloud',
+        output_dir='C11659/wps_inference/abcd_mrap',
+        max_lookback_days=45,
+        n_workers=12,
         adjust_lighting=True
     )
 

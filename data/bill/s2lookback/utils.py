@@ -34,14 +34,11 @@ def get_ordered_file_dict(
         start: datetime = None,
         end: datetime = None
 ):
-    
     from misc import iter_files
-
     dictionary = {}
 
     # Normalize to list
     image_dirs = [image_dir] if isinstance(image_dir, str) else list(image_dir)
-    
     # Collect image files
     for i_dir in image_dirs:
         for img_f in iter_files(i_dir, '.bin'):
@@ -86,6 +83,13 @@ def get_ordered_file_dict(
         for date, file_dict in dictionary.items()
         if len(file_dict.get('mask_path', [])) == len(mask_dirs)
     }
+
+    # Unwrap single-item lists back to plain strings
+    for file_dict in dictionary.values():
+        if isinstance(image_dir, str):
+            file_dict['image_path'] = file_dict['image_path'][0]
+        if isinstance(mask_dir, str):
+            file_dict['mask_path'] = file_dict['mask_path'][0]
 
     print(f"Dictionary completed | it stores {len(dictionary)} timestamps.")
     return dictionary

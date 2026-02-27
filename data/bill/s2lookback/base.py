@@ -22,10 +22,11 @@ class LookBack:
     output_dir: str = 's2lookback_temp'
 
     #Basic settings
-    mask_threshold: float = 1e-4
+    mask_threshold: float = 0.01
     min_mask_prop_trigger: str = 0.0
-    max_mask_prop_usable: str = 0.7
+    max_mask_prop_usable: str = 0.8
     max_lookback_days: int = 7
+    nodata_val = np.nan
 
     #Date selections
     start: datetime = None
@@ -83,7 +84,8 @@ class LookBack:
 
     def read_image(
             self, 
-            date: datetime
+            date: datetime,
+            band_list: list[int] = [1,2,3]
     ):
         
         '''
@@ -92,50 +94,80 @@ class LookBack:
         '''
         image_paths = self.get_file_path(date, 'image_path')
 
+        if band_list is None: band_list = 'all'
+
         if isinstance(image_paths, str):
 
-            return Raster(image_paths).read_bands()
+            return Raster(image_paths).read_bands(band_list)
 
-        return [Raster(img_f).read_bands() for img_f in image_paths]
+        return [Raster(img_f).read_bands(band_list) for img_f in image_paths]
     
     
 
     def read_mask(
             self,
-            date: datetime
+            date: datetime,
+            as_prob: bool = False
     ):
         '''
         Read mask on that date.
         Combines multiple masks if mask_path is a list.
         Also returns coverage of the mask.
+
+        If as_prob=True:
+            - Returns list of arrays if multiple masks, single array if one mask
+            - Binary masks (0/1) are returned as bool even with as_prob=True
+            - Probabilistic masks are returned as float in [0, 1]
+            - Coverage is returned as None when returning a list
+        If as_prob=False:
+            - All masks are combined via logical OR into a single bool mask
+            - Returns (mask, coverage)
         '''
         mask_paths = self.get_file_path(date, 'mask_path')
-
-        # Normalize to list
-        if isinstance(mask_paths, str):
+        single     = isinstance(mask_paths, str)
+        if single:
             mask_paths = [mask_paths]
 
-        masks = []
+        processed = []
         for mask_f in mask_paths:
-            mask_prob = Raster(mask_f).read_bands().squeeze() / 100.
-            if self.mask_threshold is None:
-                mask = mask_prob.astype(np.bool_)
-            else:
-                mask = (mask_prob >= self.mask_threshold)
-            masks.append(mask)
+            raw = Raster(mask_f).read_bands().squeeze()
 
-        # Combine: a pixel is masked if masked in ANY source
-        mask = np.logical_or.reduce(masks)
-        coverage = mask.mean()
+            max_val = raw.max()
+
+            if max_val <= 1.0:
+                # Already in [0, 1] or binary — no scaling needed
+                processed.append(raw.astype(np.float32))
+            else:
+                # Assumed to be in [0, 100] — scale down
+                processed.append((raw / 100.).astype(np.float32))
+
+        if as_prob:
+            if single:
+                return processed[0], float(processed[0].mean())
+            return processed, None
+
+        # Combine into a single boolean mask
+        bool_masks = []
+        for data in processed:
+            if self.mask_threshold is None:
+                bool_masks.append(data.astype(np.bool_))
+            else:
+                bool_masks.append(data >= self.mask_threshold)
+
+        mask     = np.logical_or.reduce(bool_masks)
+        coverage = float(mask.mean())
         return mask, coverage
-    
+        
 
 
     def get_nodata_mask(
             self,
             img_dat: np.ndarray,
-            nodata_val = 0
+            nodata_val: None = None
     ):
+
+        if (nodata_val is None):
+            nodata_val = self.nodata_val
         
         return np.all(
             img_dat == nodata_val, 
