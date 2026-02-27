@@ -22,10 +22,11 @@ class LookBack:
     output_dir: str = 's2lookback_temp'
 
     #Basic settings
-    mask_threshold: float = 1e-6
+    mask_threshold: float = 0.01
     min_mask_prop_trigger: str = 0.0
-    max_mask_prop_usable: str = 0.6
+    max_mask_prop_usable: str = 0.8
     max_lookback_days: int = 7
+    nodata_val = np.nan
 
     #Date selections
     start: datetime = None
@@ -84,7 +85,7 @@ class LookBack:
     def read_image(
             self, 
             date: datetime,
-            band_list: list[int] = [1,2,4]
+            band_list: list[int] = [1,2,3]
     ):
         
         '''
@@ -92,6 +93,8 @@ class LookBack:
         Combines multiple images if image_path is a list.
         '''
         image_paths = self.get_file_path(date, 'image_path')
+
+        if band_list is None: band_list = 'all'
 
         if isinstance(image_paths, str):
 
@@ -106,7 +109,6 @@ class LookBack:
             date: datetime,
             as_prob: bool = False
     ):
-        
         '''
         Read mask on that date.
         Combines multiple masks if mask_path is a list.
@@ -122,7 +124,7 @@ class LookBack:
             - Returns (mask, coverage)
         '''
         mask_paths = self.get_file_path(date, 'mask_path')
-        single = isinstance(mask_paths, str)
+        single     = isinstance(mask_paths, str)
         if single:
             mask_paths = [mask_paths]
 
@@ -130,33 +132,30 @@ class LookBack:
         for mask_f in mask_paths:
             raw = Raster(mask_f).read_bands().squeeze()
 
-            # If data is binary (only 0s and 1s), treat as boolean mask regardless
-            unique_vals = np.unique(raw)
-            is_binary = np.all(np.isin(unique_vals, [0, 1]))
+            max_val = raw.max()
 
-            if is_binary:
-                processed.append(raw.astype(np.bool_))
+            if max_val <= 1.0:
+                # Already in [0, 1] or binary — no scaling needed
+                processed.append(raw.astype(np.float32))
             else:
-                # Probabilistic — normalize to [0, 1]
-                processed.append(raw / 100.)
+                # Assumed to be in [0, 100] — scale down
+                processed.append((raw / 100.).astype(np.float32))
 
         if as_prob:
             if single:
-                return processed[0], processed[0].mean()
+                return processed[0], float(processed[0].mean())
             return processed, None
 
         # Combine into a single boolean mask
         bool_masks = []
         for data in processed:
-            if data.dtype == np.bool_:
-                bool_masks.append(data)
-            elif self.mask_threshold is None:
+            if self.mask_threshold is None:
                 bool_masks.append(data.astype(np.bool_))
             else:
                 bool_masks.append(data >= self.mask_threshold)
 
-        mask = np.logical_or.reduce(bool_masks)
-        coverage = mask.mean()
+        mask     = np.logical_or.reduce(bool_masks)
+        coverage = float(mask.mean())
         return mask, coverage
         
 
@@ -164,8 +163,11 @@ class LookBack:
     def get_nodata_mask(
             self,
             img_dat: np.ndarray,
-            nodata_val = 0
+            nodata_val: None = None
     ):
+
+        if (nodata_val is None):
+            nodata_val = self.nodata_val
         
         return np.all(
             img_dat == nodata_val, 

@@ -39,7 +39,6 @@ def get_ordered_file_dict(
 
     # Normalize to list
     image_dirs = [image_dir] if isinstance(image_dir, str) else list(image_dir)
-
     # Collect image files
     for i_dir in image_dirs:
         for img_f in iter_files(i_dir, '.bin'):
@@ -76,7 +75,6 @@ def get_ordered_file_dict(
                 dictionary[acquisition_time].setdefault('mask_path', []).append(mask_f)
             else:
                 omitted_mask_f += 1
-
     print(f'Iterating completed | omitted {omitted_mask_f} mask files.')
 
     # Remove entries without all mask dirs represented

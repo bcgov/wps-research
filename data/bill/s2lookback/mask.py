@@ -26,7 +26,7 @@ from misc import writeENVI
 
 #Machine Learning**
 from cuml.ensemble import RandomForestClassifier
-from cuml.linear_model import LinearRegression, LogisticRegression
+from cuml.linear_model import LinearRegression
 from sklearn.metrics import classification_report
 from sklearn.model_selection import train_test_split
 
@@ -37,9 +37,8 @@ class MASK(LookBack):
     progressive_testing: bool = True
     prediction_threshold: float = 0.5
     merge_mask: bool = False
-    sample_size: int = 100_000
-    min_lighting_samples = 10_000
-    save_model: bool = True
+    sample_size: int = 5_000
+    min_lighting_samples = 5_000
     n_feature: int = 3
 
     # Lighting normalization — single slot, overwritten per date
@@ -205,7 +204,7 @@ class MASK(LookBack):
     
 
 
-    def prepare_train_test(self, date: datetime):
+    def prepare_train_test(self, date: datetime, test_data=False):
 
         print(f'\n***\n > Sampling Data: {date}')
 
@@ -213,7 +212,7 @@ class MASK(LookBack):
 
         X_test, y_test = None, None
 
-        if self.progressive_testing:
+        if self.progressive_testing or test_data:
             X_train, X_test, y_train, y_test = train_test_split(X_train, y_train, test_size=0.1, shuffle=True)
 
         if self.X_train is None:
@@ -349,7 +348,7 @@ class MASK(LookBack):
             print(f"\n{i+1}. Processing {date} ...")
             
             try:
-                X_test, y_test = self.prepare_train_test(date)
+                X_test, y_test = self.prepare_train_test(date, i == len(date_list) - 1)
 
             except Exception:
 
@@ -364,7 +363,7 @@ class MASK(LookBack):
                 self.train_and_report(X_test, y_test)
 
                 #Save the model.
-                if (self.save_model): self.save_model(date)
+                self.save_model(date)
 
                 #Temp test.
                 self.plot_classification()
@@ -374,8 +373,6 @@ class MASK(LookBack):
     def transform(
             self
     ):
-
-        print("\n > Masking on all dates ...")
         
         self.mask_and_save()
         
@@ -386,11 +383,17 @@ if __name__ == "__main__":
     masker = MASK(
         image_dir='C11659/L1C/resampled_20m',
         mask_dir='C11659/cloud_20m',
+        model_path='C11659/wps_inference/cloud_2/models/2025-09-09 19:19:09.joblib',
         output_dir='C11659/wps_inference/cloud_2',
-        save_model=False
+        progressive_testing=False,
+        lighting_ref_date=datetime(2025,8,23,19,29,9),
+        start=datetime(2025,8,20),
+        end=datetime(2025,9,10)
     )
 
-    masker.fit()
+    # masker.fit()
+
+    masker.transform()
 
 
 
