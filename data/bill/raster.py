@@ -36,7 +36,7 @@ class Raster:
 
         self.file_name = file_name
 
-        #Extract dataset from raw raster file
+        self.NODATA_VALUE = np.nan
 
         self.__read_data()
 

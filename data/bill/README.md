@@ -68,9 +68,20 @@ The model will be stored, it can be used to predict for other tiles (it just nee
 
 
 
+<<<<<<< HEAD
 Work Examples
+=======
+Current Work
+>>>>>>> origin/master
 ---
 
 **Burn mapping**
 
 <p align="center"> <img src="images/burn_mapping.png" width="900"> </p>
+<<<<<<< HEAD
+=======
+
+**Cloud masking/reduction and imagery enhancement**
+
+<p align="center"> <img src="images/cloud_reduction.png" width="900"> </p>
+>>>>>>> origin/master

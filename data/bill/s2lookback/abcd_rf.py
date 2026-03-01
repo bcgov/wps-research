@@ -108,9 +108,10 @@ def fit_rf(X_train: np.ndarray, Y_train: np.ndarray):
         print("  (using cuML GPU implementation)")
         rf = RandomForestRegressor(
             n_estimators=100,
-            max_depth=16,
-            random_state=42,
+            max_depth=20,
+            random_state=42
         )
+
     except ImportError:
         from sklearn.ensemble import RandomForestRegressor
         print("  (cuML not available — falling back to sklearn)")
@@ -280,7 +281,7 @@ def abcd_rf(path_a, path_b, path_c, skip_f, offset=0, write_output=False):
         print("Fitting RandomForestRegressor ...")
         try:
             from cuml.ensemble import RandomForestRegressor
-            print("  (using cuML GPU implementation)")
+            print("  (using cuML GPU implementationssss)")
             rf = RandomForestRegressor(n_estimators=100, max_depth=16, random_state=42)
         except ImportError:
             from sklearn.ensemble import RandomForestRegressor

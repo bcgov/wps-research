@@ -43,12 +43,13 @@ def save_png_same_dir(
     for filename in filenames:
         raster = Raster(filename)
         raster_dat = raster.read_bands(band_list)
+        raster_dat = np.nan_to_num(raster_dat, nan=0.0)
         if lo is None:
             lo = np.nanpercentile(raster_dat, p_trim, axis=(0, 1))
             hi = np.nanpercentile(raster_dat, 100 - p_trim, axis=(0, 1))
 
     # Second pass: save in parallel
-    with ThreadPoolExecutor() as executor:
+    with ThreadPoolExecutor(max_workers=8) as executor:
         executor.map(lambda f: _process_and_save(f, band_list, lo, hi), filenames)
 
 

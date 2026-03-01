@@ -3,10 +3,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from SAFE import extract_and_resample_L1
 
 
-root_dir = Path("C11659/L1C/safe")
-out_dir = Path("C11659/L1C/resampled")
+root_dir = Path("/data/bill/mrap/Level1")
+out_dir = Path("/home/bill/GitHub/wps-research/data/bill/C11659/L1C")
 out_dir.mkdir(parents=True, exist_ok=True)
-
 safe_dirs = list(root_dir.glob("*.SAFE"))
 
 def process_safe(safe_dir):
@@ -22,7 +21,7 @@ def process_safe(safe_dir):
 
 
 # Adjust max_workers depending on CPU & disk
-with ThreadPoolExecutor() as executor:
+with ThreadPoolExecutor(max_workers=8) as executor:
     futures = [executor.submit(process_safe, d) for d in safe_dirs]
 
     for future in as_completed(futures):

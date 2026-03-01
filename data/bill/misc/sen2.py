@@ -23,12 +23,12 @@ def read_timestamp_filename(
     -------
     S2A_MSIL2A_20250502T193831_N0511_R142_T09UYU_20250503T030713_CLDPRB_60m.bin
 
-    >> [11:26] (excluding index 26) is "20250502T193831"
+    >> "20250502T193831"
     '''
 
     filename = Path(filename).name
 
-    return filename[11:26]
+    return filename.split('_')[2]
 
 
 
@@ -104,7 +104,8 @@ def writeENVI(
     ref_filename: str | None = None,
     band_names: list[str] | None = None,
     copy_geo: bool = True,
-    same_hdr: bool = False
+    same_hdr: bool = False,
+    nodata_val: float | None = np.nan
 ):
     """
     mode="new":
@@ -155,6 +156,10 @@ def writeENVI(
         for i in range(K):
             band = out.GetRasterBand(i + 1)
             band.WriteArray(data[..., i])
+
+            if nodata_val is not None:
+                band.SetNoDataValue(float(nodata_val))
+                
             if band_names:
                 band.SetDescription(band_names[i])
 
