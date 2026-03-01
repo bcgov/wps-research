@@ -41,7 +41,7 @@ except ImportError:
     import gdal
 
 from s2lookback.base import LookBack
-from s2lookback.abcd_rf import abcd_rf_arrays       # <-- all RF logic lives here
+from machine_learning.abcd_rf import abcd_rf_arrays       # <-- all RF logic lives here
 
 gdal.AllRegister()
 gdal.UseExceptions()
