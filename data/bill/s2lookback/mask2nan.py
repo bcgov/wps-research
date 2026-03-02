@@ -116,7 +116,7 @@ if __name__ == "__main__":
         mask_dir=['C11659/wps_inference/abcd_cloud_100', 'C11659/shadow', 'C11659/nodata'],
         output_dir='C11659/wps_inference/mask_removed',
         n_workers=12,
-        mask_threshold=0.0005
+        mask_threshold=0.0001
     )
 
     cleaner.run()

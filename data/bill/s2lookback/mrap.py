@@ -230,11 +230,11 @@ class MRAP(LookBack):
 if __name__ == "__main__":
 
     mrap = MRAP(
-        image_dir='C11659/L1C',
-        mask_dir=['C11659/wps_inference/abcd_cloud_100', 'C11659/shadow', 'C11659/nodata'],
-        output_dir='C11659/wps_inference/mrap_with_correction',
+        image_dir='/ram/L2',
+        mask_dir=['C11659/wps_inference/abcd_cloud_100', 'C11659/shadow', 'C11659/scl_012'],
+        output_dir='C11659/wps_inference/adjusted_mrap_L2',
         max_lookback_days=60,
-        n_workers=8,
+        n_workers=12,
         adjust_lighting=True,
         mask_threshold=0.0001
     )
