@@ -73,15 +73,19 @@ def get_ordered_file_dict(
     mask_dirs = [mask_dir] if isinstance(mask_dir, str) else list(mask_dir)
 
     # Collect mask files
-    omitted_mask_f = 0
     for m_dir in mask_dirs:
+        omitted_mask_f = 0
         for mask_f in iter_files(m_dir, '.bin'):
             acquisition_time = extract_datetime(mask_f)
             if acquisition_time in dictionary:
                 dictionary[acquisition_time].setdefault('mask_path', []).append(mask_f)
+
             else:
-                print(f'Date = {acquisition_time} not in {m_dir}')
+                print(f'Date = {acquisition_time} from image_dir not in {m_dir}')
                 omitted_mask_f += 1
+        
+        print(f'\n -> Ommited {omitted_mask_f} masks in {m_dir}')
+        print('-' * 30)
                 
     print(f'Iterating completed | omitted {omitted_mask_f} mask files.')
 
@@ -884,9 +888,20 @@ class MASK_TO_NODATA(LookBack):
 
     def __post_init__(self):
 
-        os.makedirs(self.output_dir, exist_ok=True)
-
         self.file_dict = self.get_file_dictionary()
+
+        # Extract level and grid from first image
+        first_image = list(self.file_dict.values())[0]['image_path']
+
+        if isinstance(first_image, list):
+            first_image = first_image[0]
+
+        file_fields  = Path(first_image).name.split('_')
+        self.level   = file_fields[1][3:5]   # e.g. 'MSIL2A' -> 'L2'
+        self.grid    = file_fields[5]      # e.g. 'T09UYU'
+        self.output_dir = f"{self.level}_{self.grid}"
+
+        os.makedirs(self.output_dir, exist_ok=True)
 
 
     def save_png(
@@ -971,6 +986,7 @@ if __name__ == "__main__":
 
     import argparse
     import os
+    import subprocess
 
     parser = argparse.ArgumentParser(
         description="Run cloud masking and then mask-to-nodata cleaning."
@@ -995,8 +1011,6 @@ if __name__ == "__main__":
                     help="If set, run MASK_TO_NODATA after cloud masking. Default: False (stop after masking).")
     parser.add_argument("--output_dir_mask",  type=str,   default=None,
                         help="Output dir for cloud mask. Defaults to ./cloud_mask_{skip_f}.")
-    parser.add_argument("--output_dir_clean", type=str,   default=None,
-                        help="Output dir for cleaned data. Defaults to ./mask_removed_skip={skip_f}.")
     parser.add_argument("--predicted_cloud",  type=str,   default=None,
                         help="Path to a pre-computed cloud mask directory. If provided, ABCD_MASK is skipped entirely.")
     parser.add_argument("--n_workers",        type=int,   default=8,
@@ -1009,7 +1023,6 @@ if __name__ == "__main__":
 
     # Resolve output dirs
     output_dir_mask  = args.output_dir_mask  or f"./cloud_mask_{args.skip_f}"
-    output_dir_clean = args.output_dir_clean or f"./mask_removed_skip={args.skip_f}"
 
     # ------------------------------------------------------------------ #
     #  Step 1 – Cloud masking (skip if predicted_cloud is supplied)       #
@@ -1036,7 +1049,7 @@ if __name__ == "__main__":
     #  Step 2 – User review                                               #
     # ------------------------------------------------------------------ #
     if args.run_mask2nan:
-        print(f"\n\n\n[REVIEW] Please check the cloud mask at: {os.path.abspath(predicted_cloud_dir)}")
+        print(f"\n\n[REVIEW] Please check the cloud mask at: {os.path.abspath(predicted_cloud_dir)}")
         answer = input("Are you satisfied with the mask? Continue to mask2nodata? [Y/n]: ").strip()
         if answer.lower() == "n":
             print("[ABORT] Exiting. Re-run with --predicted_cloud to skip masking.")
@@ -1045,17 +1058,52 @@ if __name__ == "__main__":
     # ------------------------------------------------------------------ #
     #  Step 3 – Mask to nodata                                            #
     # ------------------------------------------------------------------ #
-        print('\n\n\n')
+        print('\n\n')
         print("[INFO] Running MASK_TO_NODATA ...")
         cleaner = MASK_TO_NODATA(
             image_dir      = args.image_dir,
             mask_dir       = [predicted_cloud_dir] + extra_mask_dirs,
-            output_dir     = output_dir_clean,
             n_workers      = args.n_workers,
-            mask_threshold = args.mask_threshold,
+            mask_threshold = args.mask_threshold
         )
+        output_dir_clean = cleaner.output_dir
+
         cleaner.run()
+
         print(f"[INFO] Cleaned data written to: {os.path.abspath(output_dir_clean)}")
+
+        try:
+            # ---------------------------------------------------------------- #
+            #  Step 4 – MRAP                                                   #
+            # ---------------------------------------------------------------- #
+
+            mrap_cmd = ["sentinel2_mrap.py", cleaner.grid]
+
+            print(cleaner.level)
+            if cleaner.level == 'L1':
+                mrap_cmd.append("--L1")
+                
+            mrap_cwd = os.path.dirname(os.path.abspath(output_dir_clean)) or "."
+            print(f"\n\n[INFO] Running MRAP: {' '.join(mrap_cmd)} (cwd={mrap_cwd})")
+            subprocess.run(mrap_cmd, cwd=mrap_cwd, check=True)
+
+        except Exception:
+
+            print('Cannot mrap.')
+
+        
+        try:
+
+            # ---------------------------------------------------------------- #
+            #  Step 5 – MP4                                                    #
+            # ---------------------------------------------------------------- #
+            print(f"\n\n[INFO] Running sentinel2_mp4 in {os.path.abspath(output_dir_clean)} ...")
+            subprocess.run(["sentinel2_mp4"], cwd=os.path.abspath(output_dir_clean), check=True)
+            print("[INFO] All done.")
+
+        except Exception:
+            
+            print('Cannot generate mp4.')
 
     else:
         print(f"\n[INFO] Cloud masking complete. Masks saved to: {os.path.abspath(predicted_cloud_dir)}")
