@@ -2,6 +2,7 @@ from osgeo import gdal
 
 import numpy as np
 
+from pathlib import Path
 
 #Handling exception
 gdal.UseExceptions()
@@ -42,20 +43,14 @@ class Raster:
         if self._dataset is None:
             raise RuntimeError(f"Could not open {self.file_name}")
         
+        #Information from filename
+        filename = Path(filename).name
 
-        #Extract Meta Data
-        meta = ds.GetMetadata("ENVI")
+        file_fields = filename.split('_')
 
-        #Check for timestamp, if None, read from filename
-        if "acquisition_time" not in meta:
-
-            from misc import read_timestamp_filename
-
-            self.acquisition_time = read_timestamp_filename(self.file_name)
-
-        else:
-
-            self.acquisition_time = meta["acquisition_time"]
+        self.level = file_fields[1][4]
+        self.acquisition_time = file_fields[2]
+        self.grid = file_fields[5]
 
         #Extract geoinfo
         self._xSize, self._ySize = ds.RasterXSize, ds.RasterYSize
