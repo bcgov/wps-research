@@ -22,11 +22,10 @@ class LookBack:
     output_dir: str = 's2lookback_temp'
 
     #Basic settings
-    mask_threshold: float = 0.01
+    mask_threshold: float = 1e-5
     min_mask_prop_trigger: str = 0.0
-    max_mask_prop_usable: str = 0.8
     max_lookback_days: int = 7
-    nodata_val = np.nan
+    nodata_val = 0.0
 
     #Date selections
     start: datetime = None
@@ -85,7 +84,7 @@ class LookBack:
     def read_image(
             self, 
             date: datetime,
-            band_list: list[int] = [1,2,3]
+            band_list: list[int] = 'all'
     ):
         
         '''
@@ -163,16 +162,17 @@ class LookBack:
     def get_nodata_mask(
             self,
             img_dat: np.ndarray,
-            nodata_val: None = None
-    ):
-
-        if (nodata_val is None):
-            nodata_val = self.nodata_val
+            nodata_val: float = np.nan
+    ) -> np.ndarray:
         
-        return np.all(
-            img_dat == nodata_val, 
-            axis=-1
-        )
+        '''
+        not recommended, not matches true no data mask 100%
+        '''
+        
+        if np.isnan(nodata_val):
+            return np.all(np.isnan(img_dat), axis=-1)
+        else:
+            return np.all(img_dat == nodata_val, axis=-1)
 
 
 

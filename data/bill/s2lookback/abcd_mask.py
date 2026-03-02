@@ -41,7 +41,7 @@ except ImportError:
     import gdal
 
 from s2lookback.base import LookBack
-from s2lookback.abcd_rf import abcd_rf_arrays       # <-- all RF logic lives here
+from machine_learning.abcd_rf import abcd_rf_arrays       # <-- all RF logic lives here
 
 gdal.AllRegister()
 gdal.UseExceptions()
@@ -246,11 +246,11 @@ if __name__ == '__main__':
     # )
 
     masker = ABCD_MASK(
-        image_dir  = 'C11659/L1C/resampled_20m',
-        mask_dir   = 'C11659/cloud_20m',
-        output_dir = 'C11659/wps_inference/abcd_cloud',
+        image_dir  = 'C11659/L1C',
+        mask_dir   = 'C11659/cloud',
+        output_dir = 'C11659/wps_inference/abcd_cloud_100',
         save_model = False,
-        skip_f = 5_000
+        skip_f = 100
     )
 
     masker.mask()

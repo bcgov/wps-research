@@ -1,26 +1,23 @@
 '''
 Resample Level 1 data.
 '''
-
 ##########################
-
 from pathlib import Path
-
 from osgeo import gdal
-
+import numpy as np
 from .info import (
-    S2_L1_NATIVE_RES, 
+    S2_L1_NATIVE_RES,
     S2_L1_BANDS
 )
-
 from .misc import (
     _get_ENVI_paths_L1,
     _read_acquisition_time,
     _find_band_file_L1
 )
-
+import numpy as np
 ##########################
 
+NODATA = np.nan
 
 
 def _resample_to_match(
@@ -33,13 +30,11 @@ def _resample_to_match(
     Resample src_ds onto ref_ds grid (extent, transform, size).
     Returns an in-memory GDAL dataset.
     """
-
     gt = ref_ds.GetGeoTransform()
     xmin = gt[0]
     ymax = gt[3]
     xmax = xmin + gt[1] * ref_ds.RasterXSize
     ymin = ymax + gt[5] * ref_ds.RasterYSize  # gt[5] is negative
-
     return gdal.Warp(
         "",
         src_ds,
@@ -50,7 +45,6 @@ def _resample_to_match(
         dstSRS=ref_ds.GetProjection(),
         resampleAlg=resample_alg
     )
-
 
 
 def ENVI_band_stack_L1_resampled(
@@ -75,7 +69,6 @@ def ENVI_band_stack_L1_resampled(
     out_dir : Path | None
         Output directory
     """
-
     if target_resolution not in (10, 20, 60):
         raise ValueError("target_resolution must be 10, 20, or 60")
 
@@ -102,7 +95,6 @@ def ENVI_band_stack_L1_resampled(
         if S2_L1_NATIVE_RES[b] == target_resolution:
             ref_idx = i
             break
-
     if ref_idx is None:
         ref_idx = 0  # fallback
 
@@ -124,10 +116,16 @@ def ENVI_band_stack_L1_resampled(
             resampleAlg=gdal.GRA_Average
         )
 
-
     xsize, ysize = ref_ds.RasterXSize, ref_ds.RasterYSize
     gt = ref_ds.GetGeoTransform()
     proj = ref_ds.GetProjection()
+
+    # --------------------------------------------------
+    # Extract nodata mask from reference band ONCE
+    # (True where nodata, based on target resolution grid)
+    # --------------------------------------------------
+    ref_raw = ref_ds.GetRasterBand(1).ReadAsArray().astype(np.float32)
+    nodata_mask = (ref_raw == 0.0) | (ref_raw == NODATA)
 
     # --------------------------------------------------
     # Output path
@@ -141,10 +139,9 @@ def ENVI_band_stack_L1_resampled(
     # Create ENVI dataset
     # --------------------------------------------------
     print(f"Resampling {band_list} to {target_resolution} m")
-    
     driver = gdal.GetDriverByName("ENVI")
     ds = driver.Create(
-        out_path,
+        str(out_path),
         xsize,
         ysize,
         len(band_list),
@@ -157,29 +154,30 @@ def ENVI_band_stack_L1_resampled(
     # --------------------------------------------------
     # Write bands (with resolution-aware resampling)
     # --------------------------------------------------
+    mem_drv = gdal.GetDriverByName("MEM")
+
     for i, (band, jp2) in enumerate(zip(band_list, band_files), start=1):
         src = gdal.Open(str(jp2))
+
         native_res = S2_L1_NATIVE_RES[band]
-
         if native_res == target_resolution:
-            data = src.GetRasterBand(1).ReadAsArray()
+            data = src.GetRasterBand(1).ReadAsArray().astype(np.float32)
         else:
-            if native_res < target_resolution:
-                alg = gdal.GRA_Average      # downsample
-            else:
-                alg = gdal.GRA_Bilinear    # upsample
-
+            alg = gdal.GRA_Average if native_res < target_resolution else gdal.GRA_Bilinear
             warped = _resample_to_match(src, ref_ds, resample_alg=alg)
-            data = warped.GetRasterBand(1).ReadAsArray()
+            data = warped.GetRasterBand(1).ReadAsArray().astype(np.float32)
+
+        # Apply the reference nodata mask cleanly AFTER resampling
+        data[nodata_mask] = NODATA
 
         ds.GetRasterBand(i).WriteArray(data)
+        ds.GetRasterBand(i).SetNoDataValue(NODATA)
         ds.GetRasterBand(i).SetDescription(band)
 
     # --------------------------------------------------
     # Metadata
     # --------------------------------------------------
     acq_time = _read_acquisition_time(safe_path, level=1)
-
     ds.SetMetadata({
         "band names": ", ".join(band_list),
         "acquisition_time": acq_time,
@@ -188,48 +186,40 @@ def ENVI_band_stack_L1_resampled(
         "target_resolution_m": str(target_resolution),
         "interleave": "bsq"
     }, "ENVI")
-
     ds.FlushCache()
     ds = None
-
     print(f"Done resampling, find file at {out_path}")
 
 
-
 if __name__ == "__main__":
-
     import argparse
 
     parser = argparse.ArgumentParser()
-
-    #Read directory
 
     parser.add_argument(
         "safe_dir",
         type=str,
         help="Input SAFE dir"
-    )   
-
+    )
     parser.add_argument(
         "--res",
         type=int,
         default=20,
         help="Spatial resolution, default is 20m"
-    )   
+    )
 
     def comma_separated_list(s: str):
         s = s.strip().lower()
         if s == "all":
-            return "all"   # sentinel, handled later
+            return "all"
         return [b.strip().upper() for b in s.split(",") if b.strip()]
-    
+
     parser.add_argument(
         "--band_list",
         help='The band info you want. Eg: B01,B02,B04',
         type=comma_separated_list,
         default='all'
     )
-
     parser.add_argument(
         "--outdir",
         type=str,
@@ -238,15 +228,9 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    safe_dir = args.safe_dir
-    resolution = args.res
-    band_list = args.band_list
-    out_dir = args.outdir
-
-
     ENVI_band_stack_L1_resampled(
-        safe_dir = safe_dir,
-        target_resolution = resolution,
-        band_list=band_list,
-        out_dir = Path(out_dir)
+        safe_dir=args.safe_dir,
+        target_resolution=args.res,
+        band_list=args.band_list,
+        out_dir=Path(args.outdir)
     )
