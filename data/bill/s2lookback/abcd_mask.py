@@ -231,26 +231,12 @@ class ABCD_MASK(LookBack):
 
 if __name__ == '__main__':
 
-    # if len(sys.argv) < 5:
-    #     print(__doc__)
-    #     sys.exit(
-    #         'Usage: python3 abcd_mask.py <image_dir> <mask_dir> <output_dir> <skip_f> [offset]'
-    #     )
-
-    # masker = ABCD_MASK(
-    #     image_dir  = sys.argv[1],
-    #     mask_dir   = sys.argv[2],
-    #     output_dir = sys.argv[3],
-    #     skip_f     = int(sys.argv[4]),
-    #     offset     = int(sys.argv[5]) if len(sys.argv) > 5 else 0,
-    # )
-
     masker = ABCD_MASK(
         image_dir  = 'C11659/L1C',
         mask_dir   = 'C11659/cloud',
-        output_dir = 'C11659/wps_inference/abcd_cloud_100',
+        output_dir = 'C11659/wps_inference/abcd_cloud_10000',
         save_model = False,
-        skip_f = 100
+        skip_f = 10_000
     )
 
     masker.mask()

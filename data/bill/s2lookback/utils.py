@@ -74,7 +74,9 @@ def get_ordered_file_dict(
             if acquisition_time in dictionary:
                 dictionary[acquisition_time].setdefault('mask_path', []).append(mask_f)
             else:
+                print(f'Date = {acquisition_time} not in {m_dir}')
                 omitted_mask_f += 1
+                
     print(f'Iterating completed | omitted {omitted_mask_f} mask files.')
 
     # Remove entries without all mask dirs represented

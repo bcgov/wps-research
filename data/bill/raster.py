@@ -60,16 +60,18 @@ class Raster:
         
 
         #Extract Meta Data
-        self.meta = ds.GetMetadata("ENVI")
-
+        meta = ds.GetMetadata("ENVI")
 
         #Check for timestamp, if None, read from filename
-        if "acquisition_time" not in self.meta:
+        if "acquisition_time" not in meta:
 
             from misc import read_timestamp_filename
 
-            self.meta["acquisition_time"] = read_timestamp_filename(self.file_name)
+            self.acquisition_time = read_timestamp_filename(self.file_name)
 
+        else:
+
+            self.acquisition_time = meta["acquisition_time"]
 
         #Extract geoinfo
         self._xSize, self._ySize = ds.RasterXSize, ds.RasterYSize
