@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
 Convert netCDF file with multiple subdatasets to a single ENVI format file.
-All subdatasets are resampled to the finest resolution present.
+Handles non-georeferenced data (like VIIRS swath data).
 """
 
 from osgeo import gdal, osr
 import numpy as np
 import sys
 import os
+
+gdal.UseExceptions()
 
 def get_subdatasets(nc_file):
     """Get all subdatasets from a netCDF file."""
@@ -25,69 +27,46 @@ def get_dataset_info(subdataset_name):
     if ds is None:
         return None
     
-    geotransform = ds.GetGeoTransform()
-    pixel_width = abs(geotransform[1])
-    pixel_height = abs(geotransform[5])
-    resolution = min(pixel_width, pixel_height)
-    
     info = {
         'name': subdataset_name,
-        'resolution': resolution,
         'width': ds.RasterXSize,
         'height': ds.RasterYSize,
-        'geotransform': geotransform,
-        'projection': ds.GetProjection(),
-        'bands': ds.RasterCount
+        'bands': ds.RasterCount,
+        'geotransform': ds.GetGeoTransform(),
+        'projection': ds.GetProjection()
     }
     
     ds = None
     return info
 
-def find_finest_resolution(subdatasets):
-    """Find the subdataset with the finest (smallest) resolution."""
-    finest = None
-    finest_res = float('inf')
+def find_largest_dimensions(subdatasets):
+    """Find the subdataset with the largest dimensions (finest resolution)."""
+    largest = None
+    max_pixels = 0
     
     for sd_name, sd_desc in subdatasets:
         info = get_dataset_info(sd_name)
         if info is None:
             continue
         
-        if info['resolution'] < finest_res:
-            finest_res = info['resolution']
-            finest = info
+        pixels = info['width'] * info['height']
+        if pixels > max_pixels:
+            max_pixels = pixels
+            largest = info
     
-    return finest
+    return largest
 
-def resample_to_reference(subdataset_name, reference_info):
-    """Resample a subdataset to match reference resolution and extent."""
-    # Create in-memory VRT for resampling
-    src_ds = gdal.Open(subdataset_name)
-    if src_ds is None:
-        return None
+def resample_array(data, target_height, target_width):
+    """Resample array using nearest neighbor to target dimensions."""
+    from scipy.ndimage import zoom
     
-    # Use gdal.Warp to resample
-    warp_options = gdal.WarpOptions(
-        format='MEM',
-        width=reference_info['width'],
-        height=reference_info['height'],
-        outputBounds=(
-            reference_info['geotransform'][0],  # min_x
-            reference_info['geotransform'][3] + reference_info['height'] * reference_info['geotransform'][5],  # min_y
-            reference_info['geotransform'][0] + reference_info['width'] * reference_info['geotransform'][1],  # max_x
-            reference_info['geotransform'][3]  # max_y
-        ),
-        dstSRS=reference_info['projection'],
-        resampleAlg=gdal.GRA_Bilinear,
-        outputType=gdal.GDT_Float32
-    )
+    if data.shape == (target_height, target_width):
+        return data
     
-    resampled = gdal.Warp('', src_ds, options=warp_options)
-    src_ds = None
-    
-    return resampled
+    zoom_factors = (target_height / data.shape[0], target_width / data.shape[1])
+    return zoom(data, zoom_factors, order=1)  # order=1 for bilinear
 
-def netcdf_to_envi(nc_file, output_file):
+def netcdf_to_envi(nc_file, output_file, use_geolocation=False):
     """
     Convert netCDF with multiple subdatasets to single ENVI file.
     
@@ -97,6 +76,8 @@ def netcdf_to_envi(nc_file, output_file):
         Path to input netCDF file
     output_file : str
         Path to output ENVI .bin file (will also create .hdr)
+    use_geolocation : bool
+        If True, try to find and use geolocation arrays for georeferencing
     """
     print(f"Processing: {nc_file}")
     
@@ -108,14 +89,28 @@ def netcdf_to_envi(nc_file, output_file):
         print("No subdatasets found!")
         return
     
-    # Find finest resolution
-    reference = find_finest_resolution(subdatasets)
+    # Print available subdatasets
+    print("\nAvailable subdatasets:")
+    for idx, (sd_name, sd_desc) in enumerate(subdatasets, 1):
+        print(f"  {idx}. {sd_desc}")
+    
+    # Find largest dimensions (finest resolution)
+    reference = find_largest_dimensions(subdatasets)
     if reference is None:
-        print("Could not determine reference resolution!")
+        print("Could not determine reference dimensions!")
         return
     
-    print(f"Reference resolution: {reference['resolution']} units")
-    print(f"Reference dimensions: {reference['width']} x {reference['height']}")
+    print(f"\nReference dimensions: {reference['width']} x {reference['height']}")
+    target_width = reference['width']
+    target_height = reference['height']
+    
+    # Check if scipy is available for resampling
+    try:
+        import scipy.ndimage
+        has_scipy = True
+    except ImportError:
+        print("Warning: scipy not available, will skip resampling of different sized bands")
+        has_scipy = False
     
     # Prepare to collect all bands
     all_bands = []
@@ -123,30 +118,47 @@ def netcdf_to_envi(nc_file, output_file):
     
     # Process each subdataset
     for sd_name, sd_desc in subdatasets:
-        print(f"Processing: {sd_desc}")
+        print(f"\nProcessing: {sd_desc}")
         
-        # Resample to reference
-        resampled = resample_to_reference(sd_name, reference)
-        if resampled is None:
-            print(f"  Skipping (could not resample)")
-            continue
-        
-        # Extract bands
-        for band_idx in range(1, resampled.RasterCount + 1):
-            band = resampled.GetRasterBand(band_idx)
-            data = band.ReadAsArray()
-            all_bands.append(data)
+        try:
+            ds = gdal.Open(sd_name)
+            if ds is None:
+                print(f"  Skipping (could not open)")
+                continue
             
-            # Create band name from subdataset description
-            var_name = sd_name.split(':')[-1]
-            if resampled.RasterCount > 1:
-                band_names.append(f"{var_name}_band{band_idx}")
-            else:
-                band_names.append(var_name)
-        
-        resampled = None
+            width = ds.RasterXSize
+            height = ds.RasterYSize
+            
+            # Extract bands
+            for band_idx in range(1, ds.RasterCount + 1):
+                band = ds.GetRasterBand(band_idx)
+                data = band.ReadAsArray()
+                
+                # Resample if needed
+                if (height != target_height or width != target_width):
+                    if has_scipy:
+                        print(f"  Resampling from {width}x{height} to {target_width}x{target_height}")
+                        data = resample_array(data, target_height, target_width)
+                    else:
+                        print(f"  Skipping (size mismatch: {width}x{height})")
+                        continue
+                
+                all_bands.append(data.astype(np.float32))
+                
+                # Create band name from subdataset description
+                var_name = sd_name.split(':')[-1].replace('/', '_')
+                if ds.RasterCount > 1:
+                    band_names.append(f"{var_name}_band{band_idx}")
+                else:
+                    band_names.append(var_name)
+            
+            ds = None
+            
+        except Exception as e:
+            print(f"  Error processing: {e}")
+            continue
     
-    print(f"Total bands collected: {len(all_bands)}")
+    print(f"\nTotal bands collected: {len(all_bands)}")
     
     if not all_bands:
         print("No bands to write!")
@@ -157,15 +169,22 @@ def netcdf_to_envi(nc_file, output_file):
     
     out_ds = driver.Create(
         output_file,
-        reference['width'],
-        reference['height'],
+        target_width,
+        target_height,
         len(all_bands),
         gdal.GDT_Float32
     )
     
-    # Set geotransform and projection
-    out_ds.SetGeoTransform(reference['geotransform'])
-    out_ds.SetProjection(reference['projection'])
+    # Set basic geotransform (pixel coordinates if no georeferencing)
+    if reference['geotransform'] and reference['geotransform'] != (0, 1, 0, 0, 0, 1):
+        out_ds.SetGeoTransform(reference['geotransform'])
+    else:
+        # Default pixel-based geotransform
+        out_ds.SetGeoTransform((0, 1, 0, 0, 0, -1))
+    
+    # Set projection if available
+    if reference['projection']:
+        out_ds.SetProjection(reference['projection'])
     
     # Write bands
     for idx, (data, name) in enumerate(zip(all_bands, band_names), start=1):
@@ -173,16 +192,28 @@ def netcdf_to_envi(nc_file, output_file):
         band = out_ds.GetRasterBand(idx)
         band.WriteArray(data)
         band.SetDescription(name)
+        
+        # Set nodata value if there are fill values
+        nodata = np.nan
+        band.SetNoDataValue(nodata)
+        
         band.FlushCache()
     
     # Close dataset
     out_ds = None
     
-    print(f"Successfully created: {output_file}")
-    print(f"Header file: {output_file.rsplit('.', 1)[0]}.hdr")
+    print(f"\nSuccessfully created: {output_file}")
+    hdr_file = output_file.rsplit('.', 1)[0] + '.hdr'
+    print(f"Header file: {hdr_file}")
+    
+    # Try to find and report geolocation info
+    print("\nChecking for geolocation data...")
+    for sd_name, sd_desc in subdatasets:
+        if 'longitude' in sd_desc.lower() or 'latitude' in sd_desc.lower():
+            print(f"  Found: {sd_desc}")
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
+    if len(sys.argv) < 3:
         print("Usage: python netcdf_to_envi.py <input.nc> <output.bin>")
         sys.exit(1)
     
@@ -194,5 +225,3 @@ if __name__ == "__main__":
         sys.exit(1)
     
     netcdf_to_envi(nc_file, output_file)
-
-
