@@ -299,7 +299,7 @@ def geturl(url, token=None, out=None):
     if token:
         headers['Authorization'] = 'Bearer ' + token
     try:
-        CTX = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
+        CTX = ssl.create_default_context()
         from urllib.request import urlopen, Request
         from urllib.error import URLError, HTTPError
         try:
@@ -309,7 +309,14 @@ def geturl(url, token=None, out=None):
             else:
                 shutil.copyfileobj(fh, out)
         except HTTPError as e:
-            print(f'  HTTP error {e.code}', file=sys.stderr)
+            print(f'  HTTP error {e.code} for: {url}', file=sys.stderr)
+            # Try to read the error body for diagnostics
+            try:
+                err_body = e.read().decode('utf-8')[:500]
+                if err_body:
+                    print(f'  Response: {err_body}', file=sys.stderr)
+            except Exception:
+                pass
             return _getcurl(url, headers, out)
         except URLError as e:
             print(f'  URL error: {e.reason}', file=sys.stderr)
@@ -349,12 +356,29 @@ def verify_netcdf(path):
 
 def sync_download(src_url, dest_dir, token):
     """Download files from a LAADS DAAC V2 API URL. Returns list of paths."""
-    response = geturl(src_url + '.json', token)
+    # The details endpoint returns JSON by default.
+    # The old archives-style URLs needed .json appended, but details URLs
+    # with query params already return JSON. Handle both cases.
+    if '?' in src_url:
+        # Has query params (e.g. details?products=...&regions=...) — already JSON
+        fetch_url = src_url
+    else:
+        # Legacy path-style URL (e.g. from recursive directory listing)
+        fetch_url = src_url + '.json'
+
+    response = geturl(fetch_url, token)
     if not response:
-        print(f'[download] Failed to fetch listing from {src_url}')
+        print(f'[download] Failed to fetch listing')
+        print(f'[download]   URL: {fetch_url}')
         return []
 
-    files = json.loads(response)
+    try:
+        files = json.loads(response)
+    except json.JSONDecodeError as e:
+        print(f'[download] Invalid JSON response: {e}')
+        print(f'[download]   First 200 chars: {response[:200]}')
+        return []
+
     downloaded = []
 
     for f in files.get('content', []):
@@ -398,9 +422,9 @@ def build_laads_url(product, year, doy, regions_str=None):
     url = (f"https://ladsweb.modaps.eosdis.nasa.gov/api/v2/content/details?"
            f"products={product}&temporalRanges={year}-{doy}")
     if regions_str:
-        # URL-encode the region parameter
-        from urllib.parse import quote
-        url += f"&regions={quote(regions_str)}"
+        # URL-encode: LAADS needs brackets encoded but spaces as +
+        from urllib.parse import quote_plus
+        url += f"&regions={quote_plus(regions_str)}"
     return url
 
 
@@ -413,7 +437,7 @@ def download_day(product, dt, base_dir, token, regions_str=None):
 
     url = build_laads_url(product, year, doy, regions_str)
     print(f'\n[download] {product} {year}/{doy:03d} → {dest}')
-    print(f'[download] URL: {url}')
+    print(f'[download] API URL: {url}')
     return sync_download(url, dest, token)
 
 
