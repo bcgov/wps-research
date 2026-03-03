@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
 Convert netCDF file with multiple subdatasets to a single ENVI format file.
-Handles non-georeferenced data (like VIIRS swath data).
+Handles non-georeferenced data (like VIIRS swath data) with optional geolocation.
 """
 
 from osgeo import gdal, osr
 import numpy as np
 import sys
 import os
+import argparse
+import re
 
 gdal.UseExceptions()
 
@@ -66,7 +68,69 @@ def resample_array(data, target_height, target_width):
     zoom_factors = (target_height / data.shape[0], target_width / data.shape[1])
     return zoom(data, zoom_factors, order=1)  # order=1 for bilinear
 
-def netcdf_to_envi(nc_file, output_file, use_geolocation=False):
+def get_geolocation_arrays(geo_file):
+    """Extract latitude and longitude arrays from geolocation file."""
+    print(f"\nReading geolocation from: {geo_file}")
+    
+    subdatasets = get_subdatasets(geo_file)
+    
+    lat_array = None
+    lon_array = None
+    
+    for sd_name, sd_desc in subdatasets:
+        if 'latitude' in sd_desc.lower():
+            print(f"  Found latitude: {sd_desc}")
+            ds = gdal.Open(sd_name)
+            if ds:
+                lat_array = ds.GetRasterBand(1).ReadAsArray()
+                ds = None
+        elif 'longitude' in sd_desc.lower():
+            print(f"  Found longitude: {sd_desc}")
+            ds = gdal.Open(sd_name)
+            if ds:
+                lon_array = ds.GetRasterBand(1).ReadAsArray()
+                ds = None
+    
+    if lat_array is not None and lon_array is not None:
+        print(f"  Geolocation arrays shape: {lat_array.shape}")
+        return lat_array, lon_array
+    else:
+        print("  Warning: Could not find both lat/lon arrays")
+        return None, None
+
+def create_geotransform_from_corners(lat_array, lon_array):
+    """Create approximate geotransform from lat/lon corner points."""
+    # Get corner coordinates
+    ul_lat = lat_array[0, 0]
+    ul_lon = lon_array[0, 0]
+    ur_lat = lat_array[0, -1]
+    ur_lon = lon_array[0, -1]
+    ll_lat = lat_array[-1, 0]
+    ll_lon = lon_array[-1, 0]
+    lr_lat = lat_array[-1, -1]
+    lr_lon = lon_array[-1, -1]
+    
+    height, width = lat_array.shape
+    
+    # Calculate pixel size (approximate, assuming regular grid)
+    pixel_width = (ur_lon - ul_lon) / width
+    pixel_height = (ll_lat - ul_lat) / height  # Will be negative
+    
+    # Upper-left corner coordinates
+    geotransform = (ul_lon, pixel_width, 0, ul_lat, 0, pixel_height)
+    
+    # Report bounding box
+    min_lon = min(ul_lon, ll_lon)
+    max_lon = max(ur_lon, lr_lon)
+    min_lat = min(ll_lat, lr_lat)
+    max_lat = max(ul_lat, ur_lat)
+    
+    print(f"\n  Bounding box: ({min_lon:.4f}, {min_lat:.4f}, {max_lon:.4f}, {max_lat:.4f})")
+    print(f"  Pixel size: {abs(pixel_width):.6f}° x {abs(pixel_height):.6f}°")
+    
+    return geotransform
+
+def netcdf_to_envi(nc_file, output_file, geo_file=None, bands_only=False, pattern=None):
     """
     Convert netCDF with multiple subdatasets to single ENVI file.
     
@@ -76,8 +140,12 @@ def netcdf_to_envi(nc_file, output_file, use_geolocation=False):
         Path to input netCDF file
     output_file : str
         Path to output ENVI .bin file (will also create .hdr)
-    use_geolocation : bool
-        If True, try to find and use geolocation arrays for georeferencing
+    geo_file : str, optional
+        Path to geolocation netCDF file (e.g., VNP03IMG)
+    bands_only : bool
+        If True, exclude quality_flags and uncert_index bands
+    pattern : str
+        Regex pattern to filter subdatasets
     """
     print(f"Processing: {nc_file}")
     
@@ -104,6 +172,35 @@ def netcdf_to_envi(nc_file, output_file, use_geolocation=False):
     target_width = reference['width']
     target_height = reference['height']
     
+    # Get geolocation if provided
+    lat_array = None
+    lon_array = None
+    geotransform = None
+    projection = None
+    
+    if geo_file and os.path.exists(geo_file):
+        lat_array, lon_array = get_geolocation_arrays(geo_file)
+        
+        if lat_array is not None and lon_array is not None:
+            # Resample geolocation to match target dimensions if needed
+            if lat_array.shape != (target_height, target_width):
+                print(f"  Resampling geolocation from {lat_array.shape} to ({target_height}, {target_width})")
+                try:
+                    lat_array = resample_array(lat_array, target_height, target_width)
+                    lon_array = resample_array(lon_array, target_height, target_width)
+                except ImportError:
+                    print("  Warning: scipy not available for geolocation resampling")
+                    lat_array = None
+                    lon_array = None
+            
+            if lat_array is not None:
+                geotransform = create_geotransform_from_corners(lat_array, lon_array)
+                
+                # Create WGS84 projection
+                srs = osr.SpatialReference()
+                srs.ImportFromEPSG(4326)
+                projection = srs.ExportToWkt()
+    
     # Check if scipy is available for resampling
     try:
         import scipy.ndimage
@@ -118,6 +215,15 @@ def netcdf_to_envi(nc_file, output_file, use_geolocation=False):
     
     # Process each subdataset
     for sd_name, sd_desc in subdatasets:
+        # Apply filters
+        if bands_only and ('quality_flags' in sd_desc or 'uncert_index' in sd_desc):
+            print(f"\nSkipping: {sd_desc} (quality/uncertainty band)")
+            continue
+        
+        if pattern and not re.search(pattern, sd_desc):
+            print(f"\nSkipping: {sd_desc} (doesn't match pattern '{pattern}')")
+            continue
+        
         print(f"\nProcessing: {sd_desc}")
         
         try:
@@ -175,16 +281,18 @@ def netcdf_to_envi(nc_file, output_file, use_geolocation=False):
         gdal.GDT_Float32
     )
     
-    # Set basic geotransform (pixel coordinates if no georeferencing)
-    if reference['geotransform'] and reference['geotransform'] != (0, 1, 0, 0, 0, 1):
-        out_ds.SetGeoTransform(reference['geotransform'])
+    # Set geotransform
+    if geotransform:
+        out_ds.SetGeoTransform(geotransform)
+        print(f"\nSet geotransform: {geotransform}")
     else:
         # Default pixel-based geotransform
         out_ds.SetGeoTransform((0, 1, 0, 0, 0, -1))
     
-    # Set projection if available
-    if reference['projection']:
-        out_ds.SetProjection(reference['projection'])
+    # Set projection
+    if projection:
+        out_ds.SetProjection(projection)
+        print(f"Set projection: WGS84")
     
     # Write bands
     for idx, (data, name) in enumerate(zip(all_bands, band_names), start=1):
@@ -205,23 +313,35 @@ def netcdf_to_envi(nc_file, output_file, use_geolocation=False):
     print(f"\nSuccessfully created: {output_file}")
     hdr_file = output_file.rsplit('.', 1)[0] + '.hdr'
     print(f"Header file: {hdr_file}")
-    
-    # Try to find and report geolocation info
-    print("\nChecking for geolocation data...")
-    for sd_name, sd_desc in subdatasets:
-        if 'longitude' in sd_desc.lower() or 'latitude' in sd_desc.lower():
-            print(f"  Found: {sd_desc}")
 
 if __name__ == "__main__":
-    if len(sys.argv) < 3:
-        print("Usage: python netcdf_to_envi.py <input.nc> <output.bin>")
+    parser = argparse.ArgumentParser(
+        description='Convert netCDF to ENVI format with optional geolocation'
+    )
+    parser.add_argument('input', help='Input netCDF file')
+    parser.add_argument('output', help='Output ENVI .bin file')
+    parser.add_argument('--geo', type=str, help='Geolocation file (e.g., VNP03IMG*.nc)')
+    parser.add_argument('--bands-only', action='store_true',
+                       help='Extract only main bands (exclude quality_flags and uncert_index)')
+    parser.add_argument('--pattern', type=str,
+                       help='Only include subdatasets matching this regex pattern')
+    
+    args = parser.parse_args()
+    
+    if not os.path.exists(args.input):
+        print(f"Error: Input file not found: {args.input}")
         sys.exit(1)
     
-    nc_file = sys.argv[1]
-    output_file = sys.argv[2]
-    
-    if not os.path.exists(nc_file):
-        print(f"Error: Input file not found: {nc_file}")
+    if args.geo and not os.path.exists(args.geo):
+        print(f"Error: Geolocation file not found: {args.geo}")
         sys.exit(1)
     
-    netcdf_to_envi(nc_file, output_file)
+    netcdf_to_envi(
+        args.input, 
+        args.output, 
+        geo_file=args.geo,
+        bands_only=args.bands_only,
+        pattern=args.pattern
+    )
+
+
