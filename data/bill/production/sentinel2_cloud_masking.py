@@ -1038,8 +1038,7 @@ if __name__ == "__main__":
             mask_dir   = args.cloud_mask_dir,
             output_dir = output_dir_mask,
             save_model = args.save_model,
-            skip_f     = args.skip_f,
-            end=datetime(2025,5,10)
+            skip_f     = args.skip_f
         )
         masker.mask()
         predicted_cloud_dir = output_dir_mask
