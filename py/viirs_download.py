@@ -3,16 +3,20 @@
 viirs_download_convert.py — Download VIIRS data from LAADS DAAC and convert to
 georeferenced ENVI Type-4 (Float32).
 
-Combines:
-  1. LAADS DAAC V2 API download (with netCDF integrity checking)
-  2. netCDF → ENVI conversion with proper georeferencing via VNP03IMG
+Spatial filtering via:
+  --hdr  FILE.hdr     Extract bounding box from an existing ENVI header's
+                       map info + coordinate system string, reproject to
+                       WGS84 lat/lon, and use as LAADS DAAC BBOX filter.
+  --bbox N S E W      Explicit bounding box in WGS84 degrees.
+  --region NAME       Administrative area (e.g. "Canada").
 
-Workflow:
-  - Downloads VNP02IMG (radiance) + VNP03IMG (geolocation) for each granule
-  - Converts each VNP02IMG to ENVI using the matching VNP03IMG for georeferencing
-  - Warps swath data onto a regular WGS84 grid via GDAL geolocation arrays
+Georeferencing strategies (in order):
+  1. Native GeoTransform already in the netCDF
+  2. CF-convention 1-D coordinate arrays
+  3. GDAL geolocation-array warp via VNP03IMG → regular WGS84 grid
+  4. Corner-based approximate geotransform (--no-warp fallback)
 
-Requires: GDAL >= 3.0, numpy, scipy, netCDF4
+Requires: GDAL >= 3.0, numpy, scipy, netCDF4 (for integrity checks)
 """
 
 from osgeo import gdal, osr
@@ -29,16 +33,264 @@ import tempfile
 import datetime
 from multiprocessing import Pool
 
-# Suppress noisy GDAL warnings for swath netCDF
 gdal.UseExceptions()
 gdal.SetConfigOption('CPL_LOG', '/dev/null')
 os.environ['CPL_LOG'] = '/dev/null'
 
-USERAGENT = 'viirs_download_convert/2.0--' + sys.version.replace('\n', '').replace('\r', '')
+USERAGENT = 'viirs_download_convert/3.0--' + sys.version.replace('\n', '').replace('\r', '')
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# SECTION 1: LAADS DAAC DOWNLOAD
+# ENVI HEADER PARSING → BOUNDING BOX
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def parse_envi_header(hdr_path):
+    """
+    Parse an ENVI .hdr file and return a dict of key/value pairs.
+    Handles multi-line values enclosed in { }.
+    """
+    with open(hdr_path, 'r') as f:
+        text = f.read()
+
+    hdr = {}
+    # Merge continuation lines (values in { } that span multiple lines)
+    text = re.sub(r'\{\s*\n', '{', text)
+    text = re.sub(r'\n\s*\}', '}', text)
+
+    for line in text.split('\n'):
+        line = line.strip()
+        if '=' not in line or line.startswith(';'):
+            continue
+        key, _, val = line.partition('=')
+        key = key.strip().lower()
+        val = val.strip()
+        # Strip outer braces
+        if val.startswith('{') and val.endswith('}'):
+            val = val[1:-1].strip()
+        hdr[key] = val
+
+    return hdr
+
+
+def bbox_from_envi_hdr(hdr_path):
+    """
+    Extract a WGS84 bounding box (north, south, east, west) from an ENVI .hdr.
+
+    Reads 'map info' for the tie point, pixel size, and image dimensions.
+    Reads 'coordinate system string' for the CRS (to reproject if needed).
+    Falls back to reading the matching .bin/.dat/.img via GDAL if header
+    parsing is insufficient.
+
+    Returns (north, south, east, west) in WGS84 degrees.
+    """
+    print(f'\n[hdr] Parsing: {hdr_path}')
+    hdr = parse_envi_header(hdr_path)
+
+    # Try GDAL first — most reliable
+    # Find the data file companion
+    base = os.path.splitext(hdr_path)[0]
+    data_file = None
+    for ext in ('.bin', '.dat', '.img', '.bsq', '.bil', '.bip', ''):
+        candidate = base + ext
+        if os.path.exists(candidate) and candidate != hdr_path:
+            data_file = candidate
+            break
+
+    if data_file:
+        bbox = _bbox_from_gdal(data_file)
+        if bbox:
+            return bbox
+
+    # Also try opening the .hdr directly (GDAL can sometimes handle it)
+    bbox = _bbox_from_gdal(hdr_path)
+    if bbox:
+        return bbox
+
+    # Manual fallback: parse map info
+    return _bbox_from_map_info(hdr)
+
+
+def _bbox_from_gdal(filepath):
+    """Try to get WGS84 bbox via GDAL from a raster file."""
+    try:
+        ds = gdal.Open(filepath)
+        if ds is None:
+            return None
+
+        gt = ds.GetGeoTransform()
+        proj = ds.GetProjection()
+        w = ds.RasterXSize
+        h = ds.RasterYSize
+        ds = None
+
+        if gt is None or gt == (0, 1, 0, 0, 0, 1):
+            return None
+        if not proj:
+            return None
+
+        # Compute corners in native CRS
+        ulx = gt[0]
+        uly = gt[3]
+        lrx = gt[0] + gt[1] * w + gt[2] * h
+        lry = gt[3] + gt[4] * w + gt[5] * h
+        urx = gt[0] + gt[1] * w
+        ury = gt[3] + gt[4] * w
+        llx = gt[0] + gt[2] * h
+        lly = gt[3] + gt[5] * h
+
+        corners = [(ulx, uly), (urx, ury), (lrx, lry), (llx, lly)]
+
+        # Transform to WGS84
+        src_srs = osr.SpatialReference()
+        src_srs.ImportFromWkt(proj)
+        dst_srs = osr.SpatialReference()
+        dst_srs.ImportFromEPSG(4326)
+        # Handle axis order for GDAL >= 3
+        try:
+            src_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+            dst_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+        except AttributeError:
+            pass
+
+        if src_srs.IsSame(dst_srs):
+            xs = [c[0] for c in corners]
+            ys = [c[1] for c in corners]
+        else:
+            transform = osr.CoordinateTransformation(src_srs, dst_srs)
+            transformed = [transform.TransformPoint(x, y) for x, y in corners]
+            xs = [p[0] for p in transformed]
+            ys = [p[1] for p in transformed]
+
+        north = max(ys)
+        south = min(ys)
+        east = max(xs)
+        west = min(xs)
+
+        print(f'[hdr] GDAL bbox (WGS84): N={north:.6f} S={south:.6f} E={east:.6f} W={west:.6f}')
+        print(f'[hdr] Source CRS: {src_srs.GetName()}')
+        return (north, south, east, west)
+
+    except Exception as e:
+        print(f'[hdr] GDAL parse failed: {e}')
+        return None
+
+
+def _bbox_from_map_info(hdr):
+    """
+    Fallback: manually parse ENVI map info string.
+
+    Format: map info = {proj_name, ref_x, ref_y, easting, northing, x_size, y_size, ...}
+    """
+    mi = hdr.get('map info')
+    if not mi:
+        print('[hdr] No "map info" found in header!')
+        return None
+
+    parts = [p.strip() for p in mi.split(',')]
+    if len(parts) < 7:
+        print(f'[hdr] map info has too few fields: {mi}')
+        return None
+
+    try:
+        proj_name = parts[0]
+        ref_px_x = float(parts[1])   # reference pixel x (1-based)
+        ref_px_y = float(parts[2])   # reference pixel y (1-based)
+        easting = float(parts[3])    # easting/longitude of reference pixel
+        northing = float(parts[4])   # northing/latitude of reference pixel
+        x_size = float(parts[5])     # pixel width
+        y_size = float(parts[6])     # pixel height
+    except (ValueError, IndexError) as e:
+        print(f'[hdr] Cannot parse map info: {e}')
+        return None
+
+    # Get image dimensions from header
+    samples = int(hdr.get('samples', 0))
+    lines = int(hdr.get('lines', 0))
+    if samples == 0 or lines == 0:
+        print('[hdr] Missing samples/lines in header')
+        return None
+
+    # Compute corners (upper-left of pixel 1,1 to lower-right of last pixel)
+    # ref pixel is 1-based, refers to pixel center
+    ulx = easting - (ref_px_x - 1) * x_size
+    uly = northing + (ref_px_y - 1) * y_size
+    lrx = ulx + samples * x_size
+    lry = uly - lines * y_size
+
+    # Determine CRS and reproject if needed
+    crs_str = hdr.get('coordinate system string', '')
+    src_srs = osr.SpatialReference()
+
+    if crs_str:
+        src_srs.ImportFromWkt(crs_str)
+    elif 'geographic lat/lon' in proj_name.lower() or 'wgs' in proj_name.lower():
+        src_srs.ImportFromEPSG(4326)
+    elif 'utm' in proj_name.lower():
+        # Try to extract zone from map info
+        zone_match = re.search(r'zone\s*=?\s*(\d+)', mi, re.IGNORECASE)
+        if not zone_match and len(parts) > 7:
+            # Zone is sometimes in position 8
+            try:
+                zone = int(parts[7])
+                if 1 <= zone <= 60:
+                    epsg = 32600 + zone if northing > 0 else 32700 + zone
+                    src_srs.ImportFromEPSG(epsg)
+            except ValueError:
+                pass
+        if zone_match:
+            zone = int(zone_match.group(1))
+            epsg = 32600 + zone if northing > 0 else 32700 + zone
+            src_srs.ImportFromEPSG(epsg)
+    else:
+        print(f'[hdr] Unknown projection "{proj_name}", assuming WGS84')
+        src_srs.ImportFromEPSG(4326)
+
+    dst_srs = osr.SpatialReference()
+    dst_srs.ImportFromEPSG(4326)
+    try:
+        src_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+        dst_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+    except AttributeError:
+        pass
+
+    corners = [(ulx, uly), (lrx, uly), (lrx, lry), (ulx, lry)]
+
+    if src_srs.IsSame(dst_srs):
+        xs = [c[0] for c in corners]
+        ys = [c[1] for c in corners]
+    else:
+        transform = osr.CoordinateTransformation(src_srs, dst_srs)
+        transformed = [transform.TransformPoint(x, y) for x, y in corners]
+        xs = [p[0] for p in transformed]
+        ys = [p[1] for p in transformed]
+
+    north, south = max(ys), min(ys)
+    east, west = max(xs), min(xs)
+
+    print(f'[hdr] Parsed bbox (WGS84): N={north:.6f} S={south:.6f} E={east:.6f} W={west:.6f}')
+    print(f'[hdr] Projection: {proj_name}')
+    print(f'[hdr] Image: {samples} x {lines}, pixel: {x_size} x {y_size}')
+    return (north, south, east, west)
+
+
+def bbox_to_laads_region(north, south, east, west, pad=0.0):
+    """
+    Convert a WGS84 bounding box to LAADS DAAC [BBOX] region string.
+    Optionally pad the box by `pad` degrees on each side.
+
+    LAADS format: [BBOX]N{n} S{s} E{e} W{w}
+    """
+    n = min(90.0, north + pad)
+    s = max(-90.0, south - pad)
+    e = min(180.0, east + pad)
+    w = max(-180.0, west - pad)
+    region = f"[BBOX]N{n:.4f} S{s:.4f} E{e:.4f} W{w:.4f}"
+    print(f'[bbox] LAADS region: {region}')
+    return region
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# LAADS DAAC DOWNLOAD
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def geturl(url, token=None, out=None):
@@ -46,7 +298,6 @@ def geturl(url, token=None, out=None):
     headers = {'user-agent': USERAGENT}
     if token:
         headers['Authorization'] = 'Bearer ' + token
-
     try:
         CTX = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
         from urllib.request import urlopen, Request
@@ -69,7 +320,7 @@ def geturl(url, token=None, out=None):
 
 
 def _getcurl(url, headers, out=None):
-    """Fallback to cURL for systems with broken TLS."""
+    """Fallback to cURL."""
     import subprocess
     try:
         args = ['curl', '--fail', '-sS', '-L', '-b', 'session', '--get', url]
@@ -86,7 +337,7 @@ def _getcurl(url, headers, out=None):
 
 
 def verify_netcdf(path):
-    """Verify a netCDF file can be opened. Returns True if valid."""
+    """Verify a netCDF file can be opened."""
     try:
         import netCDF4 as nC
         ds = nC.Dataset(path, 'r')
@@ -97,10 +348,7 @@ def verify_netcdf(path):
 
 
 def sync_download(src_url, dest_dir, token):
-    """
-    Download all files from a LAADS DAAC V2 API URL to dest_dir.
-    Skips existing valid files. Re-downloads corrupt ones.
-    """
+    """Download files from a LAADS DAAC V2 API URL. Returns list of paths."""
     response = geturl(src_url + '.json', token)
     if not response:
         print(f'[download] Failed to fetch listing from {src_url}')
@@ -115,76 +363,76 @@ def sync_download(src_url, dest_dir, token):
         url = f['downloadsLink']
 
         if filesize == 0:
-            # Directory entry
             os.makedirs(path, exist_ok=True)
             downloaded.extend(sync_download(src_url + '/' + f['name'], path, token))
             continue
 
-        # Check existing file integrity
         if os.path.exists(path) and os.path.getsize(path) > 0:
             if path.endswith('.nc') and not verify_netcdf(path):
-                print(f'[download] Corrupt file, re-downloading: {f["name"]}')
+                print(f'[download] Corrupt, re-downloading: {f["name"]}')
                 os.remove(path)
             else:
-                print(f'[download] Valid, skipping: {f["name"]}')
+                print(f'[download] Skipping (exists): {f["name"]}')
                 downloaded.append(path)
                 continue
 
-        # Download
         print(f'[download] Downloading: {f["name"]}')
         try:
             with open(path, 'w+b') as fh:
                 geturl(url, token, fh)
             downloaded.append(path)
         except IOError as e:
-            print(f'[download] Error writing {path}: {e}', file=sys.stderr)
+            print(f'[download] Error: {e}', file=sys.stderr)
 
     return downloaded
 
 
-def build_laads_url(product, year, doy, regions=None):
-    """Build LAADS DAAC V2 API URL for a given product/date/region."""
+def build_laads_url(product, year, doy, regions_str=None):
+    """
+    Build LAADS DAAC V2 API details URL.
+
+    regions_str can be:
+      - "[BBOX]N49.5 S48.0 E-122.0 W-124.0"   (bbox)
+      - "[AA]Canada"                             (admin area)
+    """
     url = (f"https://ladsweb.modaps.eosdis.nasa.gov/api/v2/content/details?"
            f"products={product}&temporalRanges={year}-{doy}")
-    if regions:
-        url += f"&regions=%5BAA%5D{regions}"
+    if regions_str:
+        # URL-encode the region parameter
+        from urllib.parse import quote
+        url += f"&regions={quote(regions_str)}"
     return url
 
 
-def download_day(product, dt, base_dir, token, regions=None):
-    """
-    Download a single day of VIIRS data for a given product.
-    Returns list of downloaded file paths.
-    """
+def download_day(product, dt, base_dir, token, regions_str=None):
+    """Download a single day of VIIRS data. Returns list of file paths."""
     year = dt.year
     doy = dt.timetuple().tm_yday
     dest = os.path.join(base_dir, product, f"{year:04d}", f"{doy:03d}")
     os.makedirs(dest, exist_ok=True)
 
-    url = build_laads_url(product, year, doy, regions)
+    url = build_laads_url(product, year, doy, regions_str)
     print(f'\n[download] {product} {year}/{doy:03d} → {dest}')
     print(f'[download] URL: {url}')
-
     return sync_download(url, dest, token)
 
 
-def download_viirs_pair(dt, base_dir, token, regions=None,
+def download_viirs_pair(dt, base_dir, token, regions_str=None,
                          img_product='VNP02IMG', geo_product='VNP03IMG'):
     """
-    Download both radiance (VNP02IMG) and geolocation (VNP03IMG) for a day.
-    Returns list of (img_path, geo_path) tuples matched by time.
+    Download both radiance + geolocation for a day.
+    Returns list of (img_path, geo_path) tuples matched by acquisition time.
     """
-    img_files = download_day(img_product, dt, base_dir, token, regions)
-    geo_files = download_day(geo_product, dt, base_dir, token, regions)
+    img_files = download_day(img_product, dt, base_dir, token, regions_str)
+    geo_files = download_day(geo_product, dt, base_dir, token, regions_str)
 
-    # Match files by date.time pattern
-    pairs = []
     geo_by_key = {}
     for gf in geo_files:
         m = parse_viirs_filename(gf)
         if m:
             geo_by_key[f"{m['date']}.{m['time']}"] = gf
 
+    pairs = []
     for imf in img_files:
         m = parse_viirs_filename(imf)
         if m:
@@ -200,35 +448,28 @@ def download_viirs_pair(dt, base_dir, token, regions=None,
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# SECTION 2: VIIRS FILENAME PARSING
+# VIIRS FILENAME PARSING
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def parse_viirs_filename(filename):
-    """Parse VIIRS filename: VNP02IMG.A2025245.0000.002.2025245091212.nc"""
     parts = os.path.basename(filename).split('.')
     if len(parts) < 5:
         return None
-    return {
-        'product': parts[0], 'date': parts[1], 'time': parts[2],
-        'collection': parts[3],
-    }
+    return {'product': parts[0], 'date': parts[1], 'time': parts[2],
+            'collection': parts[3]}
 
 
 def find_local_geo_file(img_file):
-    """Find matching VNP03IMG in same directory."""
     m = parse_viirs_filename(img_file)
     if not m:
         return None
     d = os.path.dirname(img_file) or '.'
-    pat = f"VNP03IMG.{m['date']}.{m['time']}.{m['collection']}.*.nc"
-    hits = glob.glob(os.path.join(d, pat))
-    if hits:
-        return hits[0]
-    return None
+    hits = glob.glob(os.path.join(d, f"VNP03IMG.{m['date']}.{m['time']}.{m['collection']}.*.nc"))
+    return hits[0] if hits else None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# SECTION 3: NETCDF → ENVI CONVERSION
+# NETCDF → ENVI CONVERSION
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def get_subdatasets(nc_file):
@@ -246,13 +487,10 @@ def sd_info(sd_name):
         return None
     gt = ds.GetGeoTransform()
     pr = ds.GetProjection()
-    i = {
-        'w': ds.RasterXSize, 'h': ds.RasterYSize,
-        'bands': ds.RasterCount,
-        'gt': gt, 'proj': pr,
-        'has_gt': gt is not None and gt != (0, 1, 0, 0, 0, 1),
-        'has_proj': pr is not None and pr != '',
-    }
+    i = {'w': ds.RasterXSize, 'h': ds.RasterYSize, 'bands': ds.RasterCount,
+         'gt': gt, 'proj': pr,
+         'has_gt': gt is not None and gt != (0, 1, 0, 0, 0, 1),
+         'has_proj': pr is not None and pr != ''}
     ds = None
     return i
 
@@ -271,7 +509,6 @@ def finest_dims(subdatasets):
 
 
 def try_native_gt(subdatasets):
-    """Strategy 1: check if any subdataset has a real GeoTransform."""
     for n, d in subdatasets:
         info = sd_info(n)
         if info and info['has_gt'] and info['has_proj']:
@@ -281,33 +518,27 @@ def try_native_gt(subdatasets):
 
 
 def try_cf_coords(subdatasets):
-    """Strategy 2: CF-convention 1-D coordinate arrays."""
     coord_sds = {}
     for n, d in subdatasets:
         short = n.split(':')[-1].strip().lower()
         if short in ('x', 'y', 'lat', 'lon', 'latitude', 'longitude'):
             coord_sds[short] = n
-
     xn = coord_sds.get('x') or coord_sds.get('lon') or coord_sds.get('longitude')
     yn = coord_sds.get('y') or coord_sds.get('lat') or coord_sds.get('latitude')
     if not (xn and yn):
         return None, None
-
     xds, yds = gdal.Open(xn), gdal.Open(yn)
     if not (xds and yds):
         return None, None
     xa = xds.GetRasterBand(1).ReadAsArray().flatten()
     ya = yds.GetRasterBand(1).ReadAsArray().flatten()
     xds = yds = None
-
     if len(xa) < 2 or len(ya) < 2:
         return None, None
-
     dx = (xa[-1] - xa[0]) / (len(xa) - 1)
     dy = (ya[-1] - ya[0]) / (len(ya) - 1)
     gt = (float(xa[0] - dx / 2), float(dx), 0.0,
           float(ya[0] - dy / 2), 0.0, float(dy))
-
     if abs(xa[0]) <= 360 and abs(ya[0]) <= 90:
         srs = osr.SpatialReference()
         srs.ImportFromEPSG(4326)
@@ -317,7 +548,6 @@ def try_cf_coords(subdatasets):
 
 
 def read_latlon(geo_file):
-    """Read lat/lon arrays from VNP03IMG."""
     sds = get_subdatasets(geo_file)
     lat = lon = None
     for n, d in sds:
@@ -359,10 +589,7 @@ def _write_tif(arr, path):
 
 def warp_bands_via_geolocation(all_bands, lat, lon, target_h, target_w,
                                 target_res=None):
-    """
-    Strategy 3: Warp all bands from swath → regular WGS84 grid using
-    GDAL's geolocation-array-aware warper. All bands warped in one pass.
-    """
+    """Warp all bands from swath → regular WGS84 grid via GDAL geolocation."""
     valid = (np.abs(lat) <= 90) & (np.abs(lon) <= 360) & np.isfinite(lat) & np.isfinite(lon)
     if not np.any(valid):
         print('[warp] No valid lat/lon!')
@@ -372,7 +599,6 @@ def warp_bands_via_geolocation(all_bands, lat, lon, target_h, target_w,
     min_lat, max_lat = float(np.min(lat[valid])), float(np.max(lat[valid]))
     print(f'[warp] Bounds: lon [{min_lon:.4f}, {max_lon:.4f}]  lat [{min_lat:.4f}, {max_lat:.4f}]')
 
-    # Antimeridian crossing
     if max_lon - min_lon > 350:
         print('[warp] Antimeridian crossing — adjusting')
         lon = lon.copy()
@@ -380,7 +606,6 @@ def warp_bands_via_geolocation(all_bands, lat, lon, target_h, target_w,
         v2 = np.isfinite(lon) & (np.abs(lat) <= 90)
         min_lon, max_lon = float(np.min(lon[v2])), float(np.max(lon[v2]))
 
-    # Estimate pixel size
     if target_res:
         res = target_res
     else:
@@ -402,7 +627,6 @@ def warp_bands_via_geolocation(all_bands, lat, lon, target_h, target_w,
         _write_tif(lat, os.path.join(tmpdir, 'lat.tif'))
         _write_tif(lon, os.path.join(tmpdir, 'lon.tif'))
 
-        # Stack all bands into one multi-band GeoTIFF
         data_tif = os.path.join(tmpdir, 'data.tif')
         drv = gdal.GetDriverByName('GTiff')
         ds = drv.Create(data_tif, w, h, nbands, gdal.GDT_Float32)
@@ -413,7 +637,6 @@ def warp_bands_via_geolocation(all_bands, lat, lon, target_h, target_w,
         ds.FlushCache()
         ds = None
 
-        # Build VRT with GEOLOCATION metadata
         wgs84_wkt = ('GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",'
                      '6378137,298.257223563,AUTHORITY["EPSG","7030"]],'
                      'AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0,'
@@ -460,7 +683,6 @@ def warp_bands_via_geolocation(all_bands, lat, lon, target_h, target_w,
         with open(vrt_path, 'w') as f:
             f.write(vrt_xml)
 
-        # Warp
         warped_tif = os.path.join(tmpdir, 'warped.tif')
         print(f'[warp] gdal.Warp ({nbands} bands)...')
         result = gdal.Warp(warped_tif, vrt_path, options=gdal.WarpOptions(
@@ -494,7 +716,6 @@ def warp_bands_via_geolocation(all_bands, lat, lon, target_h, target_w,
 
 
 def corner_based_gt(lat, lon, th, tw):
-    """Strategy 4: approximate geotransform from lat/lon extent."""
     valid = (np.abs(lat) <= 90) & (np.abs(lon) <= 360) & np.isfinite(lat) & np.isfinite(lon)
     if not np.any(valid):
         return None, None
@@ -512,11 +733,9 @@ def patch_envi_header(hdr_path, gt, proj_wkt):
     """Ensure ENVI .hdr has map info + coordinate system string."""
     if gt is None or gt == (0, 1, 0, 0, 0, 1):
         return
-
     ref_x = gt[0] + gt[1] / 2.0
     ref_y = gt[3] + gt[5] / 2.0
-    x_size = abs(gt[1])
-    y_size = abs(gt[5])
+    x_size, y_size = abs(gt[1]), abs(gt[5])
 
     map_info = (f"map info = {{Geographic Lat/Lon, 1, 1, "
                 f"{ref_x:.10f}, {ref_y:.10f}, "
@@ -551,10 +770,8 @@ def patch_envi_header(hdr_path, gt, proj_wkt):
 
 def netcdf_to_envi(nc_file, output_file, geo_file=None, bands_only=False,
                     pattern=None, target_res=None, no_warp=False):
-    """
-    Convert a single netCDF file to georeferenced ENVI Type-4 (Float32).
-    Returns True if georeferencing succeeded.
-    """
+    """Convert a single netCDF to georeferenced ENVI Type-4 (Float32)."""
+
     print(f'\n{"="*70}')
     print(f'  Input:  {nc_file}')
     print(f'  Output: {output_file}')
@@ -578,14 +795,10 @@ def netcdf_to_envi(nc_file, output_file, geo_file=None, bands_only=False,
         return False
     print(f'\n[info] Target: {tw} x {th}')
 
-    # Strategy 1: native geotransform
     gt, proj = try_native_gt(subdatasets)
-
-    # Strategy 2: CF-convention
     if gt is None:
         gt, proj = try_cf_coords(subdatasets)
 
-    # Read bands
     print('\n[info] Reading bands...')
     all_bands = []
     band_names = []
@@ -595,7 +808,6 @@ def netcdf_to_envi(nc_file, output_file, geo_file=None, bands_only=False,
         has_scipy = True
     except ImportError:
         has_scipy = False
-        print('[warn] scipy missing — mismatched bands skipped')
 
     for sd_name, sd_desc in subdatasets:
         if bands_only and ('quality_flags' in sd_desc.lower() or 'uncert_index' in sd_desc.lower()):
@@ -623,7 +835,6 @@ def netcdf_to_envi(nc_file, output_file, geo_file=None, bands_only=False,
             if fill is not None:
                 try: data[data == float(fill)] = np.nan
                 except (ValueError, TypeError): pass
-
             scale = md.get('scale_factor') or md.get('Scale')
             offset = md.get('add_offset') or md.get('Offset')
             if scale is not None:
@@ -650,13 +861,11 @@ def netcdf_to_envi(nc_file, output_file, geo_file=None, bands_only=False,
         print('[error] No bands!')
         return False
 
-    # Strategy 3: geolocation warp
     if gt is None and geo_file and not no_warp:
         print(f'\n[crs:3] Warping via {os.path.basename(geo_file)}')
         lat, lon = read_latlon(geo_file)
         if lat is not None:
             if lat.shape != (th, tw):
-                print(f'[geo] Resampling lat/lon {lat.shape} → ({th},{tw})')
                 lat = resample_2d(lat, th, tw)
                 lon = resample_2d(lon, th, tw)
             warped, gt_w, proj_w = warp_bands_via_geolocation(
@@ -666,7 +875,6 @@ def netcdf_to_envi(nc_file, output_file, geo_file=None, bands_only=False,
                 th, tw = all_bands[0].shape
                 print(f'[crs:3] Warp OK → {tw} x {th}')
 
-    # Strategy 4: corner fallback
     if gt is None and geo_file:
         print(f'\n[crs:4] Corner-based fallback')
         lat, lon = read_latlon(geo_file)
@@ -676,7 +884,6 @@ def netcdf_to_envi(nc_file, output_file, geo_file=None, bands_only=False,
                 lon = resample_2d(lon, th, tw)
             gt, proj = corner_based_gt(lat, lon, th, tw)
 
-    # Write ENVI
     print(f'\n[write] {tw} x {th}, {len(all_bands)} bands, Float32')
     driver = gdal.GetDriverByName('ENVI')
     out = driver.Create(output_file, tw, th, len(all_bands), gdal.GDT_Float32)
@@ -695,7 +902,6 @@ def netcdf_to_envi(nc_file, output_file, geo_file=None, bands_only=False,
     out.FlushCache()
     out = None
 
-    # Patch header
     hdr_path = output_file.rsplit('.', 1)[0] + '.hdr'
     if os.path.exists(hdr_path) and gt:
         patch_envi_header(hdr_path, gt, proj)
@@ -740,98 +946,102 @@ def netcdf_to_envi(nc_file, output_file, geo_file=None, bands_only=False,
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# SECTION 4: CLI — UNIFIED INTERFACE
+# CLI
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def main():
     p = argparse.ArgumentParser(
-        description='Download VIIRS data from LAADS DAAC and convert to georeferenced ENVI',
+        description='Download VIIRS from LAADS DAAC and convert to georeferenced ENVI',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-MODE 1: DOWNLOAD + CONVERT
-  Download VNP02IMG + VNP03IMG for a date range, convert each to ENVI:
+SPATIAL FILTERING (for download mode):
+  Exactly one of --hdr, --bbox, or --region may be used.
 
+  --hdr   Extract bounding box from an ENVI header file. Works with any
+          CRS (UTM, Albers, Lambert, Geographic, etc.) — automatically
+          reprojects corners to WGS84 for the LAADS query.
+
+  --bbox  Explicit N S E W in WGS84 degrees.
+
+  --region  Administrative area name (e.g. "Canada", "USA").
+
+  --pad   Add N degrees padding around the bbox (default: 1.0).
+          Useful because VIIRS swaths rarely align exactly to your AOI.
+
+DOWNLOAD + CONVERT:
   python3 %(prog)s download \\
       --start 20250901 --end 20250903 \\
-      --token YOUR_EARTHDATA_TOKEN \\
+      --token YOUR_TOKEN \\
       --dir /data/viirs \\
-      --region Canada \\
+      --hdr /data/reference_scene.hdr \\
       --bands-only
 
-MODE 2: CONVERT ONLY
-  Convert an existing netCDF to ENVI (geo file auto-detected or specified):
+  python3 %(prog)s download \\
+      --start 20250901 --end 20250902 \\
+      --token YOUR_TOKEN \\
+      --dir /data/viirs \\
+      --bbox 50 48 -122 -125 \\
+      --pad 2.0
 
-  python3 %(prog)s convert \\
-      --input VNP02IMG.A2025245.0000.002.*.nc \\
-      --output output.bin \\
-      --geo VNP03IMG.A2025245.0000.002.*.nc \\
-      --bands-only
-
+CONVERT ONLY:
   python3 %(prog)s convert \\
       --input VNP02IMG.nc --output out.bin \\
-      --pattern "I0[1-3]" --resolution 0.004
+      --geo VNP03IMG.nc --bands-only
 """)
 
     sub = p.add_subparsers(dest='mode', help='Operating mode')
 
-    # ── download subcommand ──
+    # ── download ──
     dl = sub.add_parser('download', help='Download from LAADS DAAC + convert')
-    dl.add_argument('--start', required=True,
-                    help='Start date YYYYMMDD (inclusive)')
-    dl.add_argument('--end', required=True,
-                    help='End date YYYYMMDD (exclusive)')
-    dl.add_argument('--token', required=True,
-                    help='LAADS DAAC / Earthdata Bearer token')
-    dl.add_argument('--dir', required=True,
-                    help='Base directory for downloads and output')
-    dl.add_argument('--region', default=None,
-                    help='Administrative area name (e.g. "Canada")')
-    dl.add_argument('--img-product', default='VNP02IMG',
-                    help='Radiance product (default: VNP02IMG)')
-    dl.add_argument('--geo-product', default='VNP03IMG',
-                    help='Geolocation product (default: VNP03IMG)')
-    dl.add_argument('--bands-only', action='store_true',
-                    help='Exclude quality_flags / uncert_index')
-    dl.add_argument('--pattern', help='Regex filter for subdataset names')
-    dl.add_argument('--resolution', type=float,
-                    help='Force output pixel size in degrees')
-    dl.add_argument('--no-warp', action='store_true',
-                    help='Skip geolocation warp')
-    dl.add_argument('--no-convert', action='store_true',
-                    help='Download only, skip ENVI conversion')
-    dl.add_argument('--workers', type=int, default=1,
-                    help='Parallel download workers (default: 1)')
+    dl.add_argument('--start', required=True, help='Start date YYYYMMDD (inclusive)')
+    dl.add_argument('--end', required=True, help='End date YYYYMMDD (exclusive)')
+    dl.add_argument('--token', required=True, help='LAADS DAAC Bearer token')
+    dl.add_argument('--dir', required=True, help='Base directory for data')
 
-    # ── convert subcommand ──
+    # Spatial filtering (mutually exclusive)
+    spatial = dl.add_mutually_exclusive_group()
+    spatial.add_argument('--hdr', help='ENVI .hdr file to extract bounding box from')
+    spatial.add_argument('--bbox', nargs=4, type=float, metavar=('N', 'S', 'E', 'W'),
+                         help='Bounding box in WGS84: north south east west')
+    spatial.add_argument('--region', help='Administrative area name (e.g. "Canada")')
+
+    dl.add_argument('--pad', type=float, default=1.0,
+                    help='Padding in degrees around bbox (default: 1.0)')
+    dl.add_argument('--img-product', default='VNP02IMG')
+    dl.add_argument('--geo-product', default='VNP03IMG')
+    dl.add_argument('--bands-only', action='store_true')
+    dl.add_argument('--pattern', help='Regex filter for subdataset names')
+    dl.add_argument('--resolution', type=float, help='Force output pixel size (degrees)')
+    dl.add_argument('--no-warp', action='store_true')
+    dl.add_argument('--no-convert', action='store_true', help='Download only')
+    dl.add_argument('--workers', type=int, default=1, help='Parallel workers')
+
+    # ── convert ──
     cv = sub.add_parser('convert', help='Convert existing netCDF to ENVI')
-    cv.add_argument('--input', required=True, help='Input netCDF file')
-    cv.add_argument('--output', required=True, help='Output ENVI .bin file')
+    cv.add_argument('--input', required=True)
+    cv.add_argument('--output', required=True)
     cv.add_argument('--geo', help='Geolocation file (VNP03IMG*.nc)')
     cv.add_argument('--bands-only', action='store_true')
-    cv.add_argument('--pattern', help='Regex filter for subdataset names')
-    cv.add_argument('--resolution', type=float,
-                    help='Force output pixel size in degrees')
+    cv.add_argument('--pattern', help='Regex filter')
+    cv.add_argument('--resolution', type=float)
     cv.add_argument('--no-warp', action='store_true')
 
     args = p.parse_args()
-
     if args.mode is None:
         p.print_help()
         sys.exit(1)
 
-    # Check scipy
     try:
         import scipy
     except ImportError:
         print('[error] scipy required: pip install scipy')
         sys.exit(1)
 
+    # ── CONVERT MODE ──
     if args.mode == 'convert':
-        # ── Convert mode ──
         if not os.path.exists(args.input):
             print(f'[error] Not found: {args.input}')
             sys.exit(1)
-
         geo = args.geo
         if geo and not os.path.exists(geo):
             print(f'[error] Geo file not found: {geo}')
@@ -842,25 +1052,18 @@ MODE 2: CONVERT ONLY
             print('\n' + '!' * 70)
             print('  WARNING: No geolocation file!')
             print('  VNP02IMG has NO embedded lat/lon — you need VNP03IMG.')
-            print('  Use --geo VNP03IMG.nc or place it in the same directory.')
             print('!' * 70 + '\n')
 
-        ok = netcdf_to_envi(
-            args.input, args.output,
-            geo_file=geo,
-            bands_only=args.bands_only,
-            pattern=args.pattern,
-            target_res=args.resolution,
-            no_warp=args.no_warp,
-        )
+        ok = netcdf_to_envi(args.input, args.output, geo_file=geo,
+                             bands_only=args.bands_only, pattern=args.pattern,
+                             target_res=args.resolution, no_warp=args.no_warp)
         sys.exit(0 if ok else 1)
 
+    # ── DOWNLOAD MODE ──
     elif args.mode == 'download':
-        # ── Download mode ──
         start = datetime.datetime.strptime(args.start, '%Y%m%d')
         end = datetime.datetime.strptime(args.end, '%Y%m%d')
         if end <= start:
-            # Single day: make end = start + 1
             end = start + datetime.timedelta(days=1)
 
         days = []
@@ -869,21 +1072,41 @@ MODE 2: CONVERT ONLY
             days.append(dt)
             dt += datetime.timedelta(days=1)
 
+        # ── Resolve spatial filter → LAADS region string ──
+        regions_str = None
+
+        if args.hdr:
+            if not os.path.exists(args.hdr):
+                print(f'[error] HDR file not found: {args.hdr}')
+                sys.exit(1)
+            bbox = bbox_from_envi_hdr(args.hdr)
+            if bbox is None:
+                print('[error] Could not extract bounding box from HDR!')
+                sys.exit(1)
+            north, south, east, west = bbox
+            regions_str = bbox_to_laads_region(north, south, east, west, pad=args.pad)
+
+        elif args.bbox:
+            north, south, east, west = args.bbox
+            regions_str = bbox_to_laads_region(north, south, east, west, pad=args.pad)
+
+        elif args.region:
+            regions_str = f"[AA]{args.region}"
+            print(f'[bbox] Region: {regions_str}')
+
         print(f'\n[plan] {len(days)} day(s): {start.strftime("%Y-%m-%d")} → {end.strftime("%Y-%m-%d")}')
         print(f'[plan] Products: {args.img_product} + {args.geo_product}')
-        print(f'[plan] Region: {args.region or "global"}')
+        print(f'[plan] Spatial filter: {regions_str or "none (global)"}')
         print(f'[plan] Dir: {args.dir}')
 
         total_pairs = []
 
         def process_day(dt):
-            pairs = download_viirs_pair(
+            return download_viirs_pair(
                 dt, args.dir, args.token,
-                regions=args.region,
+                regions_str=regions_str,
                 img_product=args.img_product,
-                geo_product=args.geo_product,
-            )
-            return pairs
+                geo_product=args.geo_product)
 
         if args.workers > 1 and len(days) > 1:
             with Pool(args.workers) as pool:
@@ -894,25 +1117,18 @@ MODE 2: CONVERT ONLY
             for dt in days:
                 total_pairs.extend(process_day(dt))
 
-        print(f'\n[download] Total: {len(total_pairs)} granule pairs downloaded')
+        print(f'\n[download] Total: {len(total_pairs)} granule pairs')
 
         if args.no_convert:
             print('[done] Skipping conversion (--no-convert)')
             sys.exit(0)
 
-        # Convert each pair
-        success = 0
-        fail = 0
+        success = fail = 0
         for img_path, geo_path in total_pairs:
             out_bin = img_path.rsplit('.', 1)[0] + '.bin'
-            ok = netcdf_to_envi(
-                img_path, out_bin,
-                geo_file=geo_path,
-                bands_only=args.bands_only,
-                pattern=args.pattern,
-                target_res=args.resolution,
-                no_warp=args.no_warp,
-            )
+            ok = netcdf_to_envi(img_path, out_bin, geo_file=geo_path,
+                                 bands_only=args.bands_only, pattern=args.pattern,
+                                 target_res=args.resolution, no_warp=args.no_warp)
             if ok:
                 success += 1
             else:
@@ -926,3 +1142,4 @@ MODE 2: CONVERT ONLY
 
 if __name__ == '__main__':
     main()
+
