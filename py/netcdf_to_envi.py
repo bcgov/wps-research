@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Convert netCDF file with multiple subdatasets to a single ENVI format file.
-Handles non-georeferenced data (like VIIRS swath data) with optional geolocation.
+Convert VIIRS netCDF file to ENVI format with automatic geolocation.
+Automatically downloads matching VNP03IMG geolocation file if needed.
 """
 
 from osgeo import gdal, osr
@@ -10,8 +10,165 @@ import sys
 import os
 import argparse
 import re
+import requests
+from urllib.parse import urlparse
+import glob
 
 gdal.UseExceptions()
+
+def parse_viirs_filename(filename):
+    """
+    Parse VIIRS filename to extract metadata.
+    Format: VNP02IMG.A2025245.0000.002.2025245091212.nc
+    Returns: dict with product, date, time, collection, processing_time
+    """
+    basename = os.path.basename(filename)
+    parts = basename.split('.')
+    
+    if len(parts) < 5:
+        return None
+    
+    return {
+        'product': parts[0],  # VNP02IMG
+        'date': parts[1],     # A2025245
+        'time': parts[2],     # 0000
+        'collection': parts[3],  # 002
+        'processing': parts[4].replace('.nc', '')  # 2025245091212
+    }
+
+def find_local_geolocation_file(img_file):
+    """
+    Look for matching VNP03IMG file in the same directory.
+    """
+    metadata = parse_viirs_filename(img_file)
+    if not metadata:
+        return None
+    
+    directory = os.path.dirname(img_file) or '.'
+    
+    # Build search pattern for matching geolocation file
+    pattern = f"VNP03IMG.{metadata['date']}.{metadata['time']}.{metadata['collection']}.*.nc"
+    search_path = os.path.join(directory, pattern)
+    
+    matches = glob.glob(search_path)
+    
+    if matches:
+        print(f"Found local geolocation file: {matches[0]}")
+        return matches[0]
+    
+    return None
+
+def download_geolocation_file(img_file):
+    """
+    Download matching VNP03IMG geolocation file from LAADS DAAC.
+    Requires EARTHDATA_TOKEN environment variable.
+    """
+    metadata = parse_viirs_filename(img_file)
+    if not metadata:
+        print("Error: Could not parse VIIRS filename")
+        return None
+    
+    # Check for authentication token
+    token = os.environ.get('EARTHDATA_TOKEN')
+    if not token:
+        print("\nError: EARTHDATA_TOKEN environment variable not set")
+        print("To download geolocation files, you need a NASA Earthdata token:")
+        print("1. Register at https://urs.earthdata.nasa.gov/")
+        print("2. Generate an app token at https://ladsweb.modaps.eosdis.nasa.gov/tools-and-services/data-download-scripts/#tokens")
+        print("3. Set environment variable: export EARTHDATA_TOKEN='your_token_here'")
+        return None
+    
+    # Build URL for geolocation file
+    # Extract year and day of year from date field (A2025245)
+    year = metadata['date'][1:5]
+    doy = metadata['date'][5:8]
+    
+    # LAADS DAAC URL structure
+    base_url = "https://ladsweb.modaps.eosdis.nasa.gov/archive/allData"
+    collection = "5000"  # VIIRS collection number
+    product = "VNP03IMG"
+    
+    # Construct directory URL
+    dir_url = f"{base_url}/{collection}/{product}/{year}/{doy}/"
+    
+    print(f"\nSearching for geolocation file at LAADS DAAC...")
+    print(f"URL: {dir_url}")
+    
+    # List files in directory
+    headers = {'Authorization': f'Bearer {token}'}
+    
+    try:
+        response = requests.get(dir_url, headers=headers)
+        response.raise_for_status()
+        
+        # Parse HTML to find matching file
+        # Look for file matching our date/time/collection
+        pattern = f"VNP03IMG.{metadata['date']}.{metadata['time']}.{metadata['collection']}"
+        
+        matching_files = []
+        for line in response.text.split('\n'):
+            if pattern in line and '.nc' in line:
+                # Extract filename from HTML
+                match = re.search(r'href="([^"]*\.nc)"', line)
+                if match:
+                    matching_files.append(match.group(1))
+        
+        if not matching_files:
+            print(f"Error: No matching geolocation file found")
+            return None
+        
+        geo_filename = matching_files[0]
+        geo_url = dir_url + geo_filename
+        
+        print(f"Found: {geo_filename}")
+        print(f"Downloading from: {geo_url}")
+        
+        # Download file
+        output_path = os.path.join(os.path.dirname(img_file) or '.', geo_filename)
+        
+        response = requests.get(geo_url, headers=headers, stream=True)
+        response.raise_for_status()
+        
+        total_size = int(response.headers.get('content-length', 0))
+        block_size = 8192
+        downloaded = 0
+        
+        with open(output_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=block_size):
+                f.write(chunk)
+                downloaded += len(chunk)
+                if total_size > 0:
+                    percent = (downloaded / total_size) * 100
+                    print(f"\rProgress: {percent:.1f}%", end='', flush=True)
+        
+        print(f"\nDownloaded to: {output_path}")
+        return output_path
+        
+    except requests.exceptions.RequestException as e:
+        print(f"Error downloading file: {e}")
+        return None
+
+def get_geolocation_file(img_file):
+    """
+    Get geolocation file - first check locally, then download if needed.
+    """
+    # First, try to find local file
+    geo_file = find_local_geolocation_file(img_file)
+    
+    if geo_file:
+        return geo_file
+    
+    print("\nNo local geolocation file found.")
+    
+    # Ask user if they want to download
+    response = input("Download geolocation file from NASA LAADS DAAC? (y/n): ")
+    
+    if response.lower() == 'y':
+        return download_geolocation_file(img_file)
+    else:
+        print("\nYou can manually download the matching VNP03IMG file from:")
+        print("https://ladsweb.modaps.eosdis.nasa.gov/search/")
+        return None
 
 def get_subdatasets(nc_file):
     """Get all subdatasets from a netCDF file."""
@@ -59,7 +216,7 @@ def find_largest_dimensions(subdatasets):
     return largest
 
 def resample_array(data, target_height, target_width):
-    """Resample array using nearest neighbor to target dimensions."""
+    """Resample array using bilinear interpolation to target dimensions."""
     from scipy.ndimage import zoom
     
     if data.shape == (target_height, target_width):
@@ -70,7 +227,7 @@ def resample_array(data, target_height, target_width):
 
 def get_geolocation_arrays(geo_file):
     """Extract latitude and longitude arrays from geolocation file."""
-    print(f"\nReading geolocation from: {geo_file}")
+    print(f"\nReading geolocation from: {os.path.basename(geo_file)}")
     
     subdatasets = get_subdatasets(geo_file)
     
@@ -78,13 +235,13 @@ def get_geolocation_arrays(geo_file):
     lon_array = None
     
     for sd_name, sd_desc in subdatasets:
-        if 'latitude' in sd_desc.lower():
+        if 'latitude' in sd_desc.lower() and 'latitude' == sd_name.split(':')[-1].lower():
             print(f"  Found latitude: {sd_desc}")
             ds = gdal.Open(sd_name)
             if ds:
                 lat_array = ds.GetRasterBand(1).ReadAsArray()
                 ds = None
-        elif 'longitude' in sd_desc.lower():
+        elif 'longitude' in sd_desc.lower() and 'longitude' == sd_name.split(':')[-1].lower():
             print(f"  Found longitude: {sd_desc}")
             ds = gdal.Open(sd_name)
             if ds:
@@ -130,7 +287,7 @@ def create_geotransform_from_corners(lat_array, lon_array):
     
     return geotransform
 
-def netcdf_to_envi(nc_file, output_file, geo_file=None, bands_only=False, pattern=None):
+def netcdf_to_envi(nc_file, output_file, geo_file, bands_only=False, pattern=None):
     """
     Convert netCDF with multiple subdatasets to single ENVI file.
     
@@ -140,8 +297,8 @@ def netcdf_to_envi(nc_file, output_file, geo_file=None, bands_only=False, patter
         Path to input netCDF file
     output_file : str
         Path to output ENVI .bin file (will also create .hdr)
-    geo_file : str, optional
-        Path to geolocation netCDF file (e.g., VNP03IMG)
+    geo_file : str
+        Path to geolocation netCDF file (VNP03IMG) - REQUIRED
     bands_only : bool
         If True, exclude quality_flags and uncert_index bands
     pattern : str
@@ -149,13 +306,18 @@ def netcdf_to_envi(nc_file, output_file, geo_file=None, bands_only=False, patter
     """
     print(f"Processing: {nc_file}")
     
+    if not geo_file:
+        print("\nError: Geolocation file is required!")
+        print("Geolocation provides the lat/lon coordinates for proper georeferencing.")
+        return False
+    
     # Get all subdatasets
     subdatasets = get_subdatasets(nc_file)
     print(f"Found {len(subdatasets)} subdatasets")
     
     if not subdatasets:
         print("No subdatasets found!")
-        return
+        return False
     
     # Print available subdatasets
     print("\nAvailable subdatasets:")
@@ -166,40 +328,36 @@ def netcdf_to_envi(nc_file, output_file, geo_file=None, bands_only=False, patter
     reference = find_largest_dimensions(subdatasets)
     if reference is None:
         print("Could not determine reference dimensions!")
-        return
+        return False
     
     print(f"\nReference dimensions: {reference['width']} x {reference['height']}")
     target_width = reference['width']
     target_height = reference['height']
     
-    # Get geolocation if provided
-    lat_array = None
-    lon_array = None
-    geotransform = None
-    projection = None
+    # Get geolocation arrays
+    lat_array, lon_array = get_geolocation_arrays(geo_file)
     
-    if geo_file and os.path.exists(geo_file):
-        lat_array, lon_array = get_geolocation_arrays(geo_file)
-        
-        if lat_array is not None and lon_array is not None:
-            # Resample geolocation to match target dimensions if needed
-            if lat_array.shape != (target_height, target_width):
-                print(f"  Resampling geolocation from {lat_array.shape} to ({target_height}, {target_width})")
-                try:
-                    lat_array = resample_array(lat_array, target_height, target_width)
-                    lon_array = resample_array(lon_array, target_height, target_width)
-                except ImportError:
-                    print("  Warning: scipy not available for geolocation resampling")
-                    lat_array = None
-                    lon_array = None
-            
-            if lat_array is not None:
-                geotransform = create_geotransform_from_corners(lat_array, lon_array)
-                
-                # Create WGS84 projection
-                srs = osr.SpatialReference()
-                srs.ImportFromEPSG(4326)
-                projection = srs.ExportToWkt()
+    if lat_array is None or lon_array is None:
+        print("\nError: Could not read geolocation arrays!")
+        return False
+    
+    # Resample geolocation to match target dimensions if needed
+    if lat_array.shape != (target_height, target_width):
+        print(f"Resampling geolocation from {lat_array.shape} to ({target_height}, {target_width})")
+        try:
+            lat_array = resample_array(lat_array, target_height, target_width)
+            lon_array = resample_array(lon_array, target_height, target_width)
+        except ImportError:
+            print("Error: scipy is required for geolocation resampling")
+            print("Install with: pip install scipy")
+            return False
+    
+    geotransform = create_geotransform_from_corners(lat_array, lon_array)
+    
+    # Create WGS84 projection
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(4326)
+    projection = srs.ExportToWkt()
     
     # Check if scipy is available for resampling
     try:
@@ -268,7 +426,7 @@ def netcdf_to_envi(nc_file, output_file, geo_file=None, bands_only=False, patter
     
     if not all_bands:
         print("No bands to write!")
-        return
+        return False
     
     # Create output ENVI file
     driver = gdal.GetDriverByName('ENVI')
@@ -281,18 +439,12 @@ def netcdf_to_envi(nc_file, output_file, geo_file=None, bands_only=False, patter
         gdal.GDT_Float32
     )
     
-    # Set geotransform
-    if geotransform:
-        out_ds.SetGeoTransform(geotransform)
-        print(f"\nSet geotransform: {geotransform}")
-    else:
-        # Default pixel-based geotransform
-        out_ds.SetGeoTransform((0, 1, 0, 0, 0, -1))
+    # Set geotransform and projection
+    out_ds.SetGeoTransform(geotransform)
+    out_ds.SetProjection(projection)
     
-    # Set projection
-    if projection:
-        out_ds.SetProjection(projection)
-        print(f"Set projection: WGS84")
+    print(f"\nGeotransform: {geotransform}")
+    print(f"Projection: WGS84 (EPSG:4326)")
     
     # Write bands
     for idx, (data, name) in enumerate(zip(all_bands, band_names), start=1):
@@ -301,28 +453,48 @@ def netcdf_to_envi(nc_file, output_file, geo_file=None, bands_only=False, patter
         band.WriteArray(data)
         band.SetDescription(name)
         
-        # Set nodata value if there are fill values
-        nodata = np.nan
-        band.SetNoDataValue(nodata)
+        # Set nodata value
+        band.SetNoDataValue(np.nan)
         
         band.FlushCache()
     
     # Close dataset
     out_ds = None
     
-    print(f"\nSuccessfully created: {output_file}")
+    print(f"\n✓ Successfully created: {output_file}")
     hdr_file = output_file.rsplit('.', 1)[0] + '.hdr'
-    print(f"Header file: {hdr_file}")
+    print(f"✓ Header file: {hdr_file}")
+    
+    return True
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description='Convert netCDF to ENVI format with optional geolocation'
+        description='Convert VIIRS netCDF to georeferenced ENVI format',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Auto-find local geolocation file
+  python3 netcdf_to_envi.py VNP02IMG.nc output.bin
+  
+  # Specify geolocation file
+  python3 netcdf_to_envi.py VNP02IMG.nc output.bin --geo VNP03IMG.nc
+  
+  # Only imagery bands (exclude quality flags)
+  python3 netcdf_to_envi.py VNP02IMG.nc output.bin --bands-only
+  
+  # Only specific bands
+  python3 netcdf_to_envi.py VNP02IMG.nc output.bin --pattern "I0[1-3]"
+
+Note: Geolocation file (VNP03IMG) is required for proper georeferencing.
+      The script will search locally first, then offer to download if needed.
+        """
     )
-    parser.add_argument('input', help='Input netCDF file')
+    parser.add_argument('input', help='Input VIIRS netCDF file (VNP02IMG)')
     parser.add_argument('output', help='Output ENVI .bin file')
-    parser.add_argument('--geo', type=str, help='Geolocation file (e.g., VNP03IMG*.nc)')
+    parser.add_argument('--geo', type=str, 
+                       help='Geolocation file (VNP03IMG*.nc) - auto-detected if not specified')
     parser.add_argument('--bands-only', action='store_true',
-                       help='Extract only main bands (exclude quality_flags and uncert_index)')
+                       help='Extract only imagery bands (exclude quality_flags and uncert_index)')
     parser.add_argument('--pattern', type=str,
                        help='Only include subdatasets matching this regex pattern')
     
@@ -332,16 +504,32 @@ if __name__ == "__main__":
         print(f"Error: Input file not found: {args.input}")
         sys.exit(1)
     
-    if args.geo and not os.path.exists(args.geo):
-        print(f"Error: Geolocation file not found: {args.geo}")
+    # Get geolocation file
+    geo_file = args.geo
+    
+    if not geo_file:
+        geo_file = get_geolocation_file(args.input)
+    
+    if not geo_file or not os.path.exists(geo_file):
+        print("\nError: Geolocation file is required but not found.")
+        print("Please download the matching VNP03IMG file or provide it with --geo")
         sys.exit(1)
     
-    netcdf_to_envi(
+    # Require scipy
+    try:
+        import scipy
+    except ImportError:
+        print("\nError: scipy is required for this script")
+        print("Install with: pip install scipy")
+        sys.exit(1)
+    
+    success = netcdf_to_envi(
         args.input, 
         args.output, 
-        geo_file=args.geo,
+        geo_file=geo_file,
         bands_only=args.bands_only,
         pattern=args.pattern
     )
-
+    
+    sys.exit(0 if success else 1)
 
