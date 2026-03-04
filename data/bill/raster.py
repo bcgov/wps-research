@@ -59,19 +59,15 @@ class Raster:
             raise RuntimeError(f"Could not open {self.file_name}")
         
 
-        #Extract Meta Data
-        meta = ds.GetMetadata("ENVI")
-
         #Check for timestamp, if None, read from filename
-        if "acquisition_time" not in meta:
+        try:
 
             from misc import read_timestamp_filename
 
             self.acquisition_time = read_timestamp_filename(self.file_name)
 
-        else:
-
-            self.acquisition_time = meta["acquisition_time"]
+        except Exception:
+            self.acquisition_time = None
 
         #Extract geoinfo
         self._xSize, self._ySize = ds.RasterXSize, ds.RasterYSize
@@ -482,7 +478,7 @@ if __name__ == "__main__":
 
     #plot result
     try:
-        acquisition_time = raster.meta['acquisition_time']
+        acquisition_time = raster.acquisition_time
 
     except KeyError:
         acquisition_time = None
