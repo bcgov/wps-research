@@ -46,8 +46,10 @@ def getcURL(url, headers=None, out=None):
             return result.decode('utf-8') if isinstance(result, bytes) else result
         else:
             subprocess.call(args, stdout=out)
+
     except subprocess.CalledProcessError as e:
-        print('curl GET error message: %' + (e.message if hasattr(e, 'message') else e.output), file=sys.stderr)
+        output = e.output.decode('utf-8') if isinstance(e.output, bytes) else e.output
+        print('curl GET error message: %' + (e.message if hasattr(e, 'message') else output), file=sys.stderr)
     return None
     
 # read the specified URL and output to a file
@@ -109,7 +111,7 @@ def sync(src, dest, tok):
     #except ImportError:
     #    print(f"USING JSON")
     import json
-    files = json.loads(geturl(src + '.json', tok))
+    files = json.loads(geturl(src, tok))
     
     # use os.path since python 2/3 both support it while pathlib is 3.4+
     for f in files['content']:

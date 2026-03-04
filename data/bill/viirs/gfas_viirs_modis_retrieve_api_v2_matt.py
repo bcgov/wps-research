@@ -78,8 +78,8 @@ global downloadStartDay, downloadEndDay
 # These integer variables define the date ranges for the downloads, in YYYYMMDD format.
 # NOTE: downloadEndDay is EXCLUSIVE.
 # These variables are used for VIIRS LAADS DAAC downloads.
-downloadStartDay  = 20250902
-downloadEndDay    = 20250905
+downloadStartDay  = 20230101
+downloadEndDay    = 20260101
 
 # This string variable specifies the LAADS DAAC authentication token to use for the download.
 # Used for VIIRS data from LAADS DAAC.
@@ -106,7 +106,7 @@ regions = "Canada"
 
 # This string specifies the VIIRS product name to download (such as VNP02IMG, VNP02MOD, VNP03IMG or
 # VNP14IMG).
-product = "VNP02IMG"
+product = "VNP14IMG"
 
 # These string variables specify temporal ranges.
 # Used for VIIRS L2 Earthdata downloads.
@@ -119,7 +119,6 @@ product = "VNP02IMG"
 # upper_right_lon, upper_right_lat). Used for VIIRS L2 Earthdata downloads.
 # Let's define one for Canada.
 # Used for VIIRS L2 Earthdata downloads.
-bounding_box = (-129.0, 52.31, -127.1, 53.25)
 
 # This Boolean specifies whether to use cloud-hosted data or not.
 # Used for VIIRS L2 Earthdata downloads.
@@ -164,11 +163,13 @@ def loop_through_download(downloadDay):
     
     print("loop_through_download(): Retrieving data for %s on %s . . ." % (product, downloadDay.strftime("%m/%d/%Y")))
     
-    downloadUrl  = (f"https://ladsweb.modaps.eosdis.nasa.gov/api/v2/content/details?"
-                    f"products={product}&"
-                    f"temporalRanges={downloadDay.year}-{downloadDay.timetuple().tm_yday}&"
-                    f"regions=%5BAA%5D{regions}"
-                    )
+
+    downloadUrl = (
+        f"https://ladsweb.modaps.eosdis.nasa.gov/api/v2/content/details?"
+        f"products={product}&"
+        f"temporalRanges={downloadDay.year}-{downloadDay.timetuple().tm_yday}&"
+        f"regions=%5BBBOX%5DN53.2120%20S52.1755%20E-124.3658%20W-126.0722"
+    )
     
     downloadPath = (dirGFAS +
                     product +
@@ -187,6 +188,8 @@ def loop_through_download(downloadDay):
     
     if not os.path.exists(downloadPath):
         os.makedirs(downloadPath)
+
+    print(f"DEBUG URL: {downloadUrl}")
     sync(downloadUrl, downloadPath, laadsToken)
 
 if __name__ == "__main__":
@@ -200,7 +203,7 @@ if __name__ == "__main__":
     # p.close()
     # p.join()
 
-    with Pool(processes=min(Nday, 4)) as p:   # cap workers; adjust 4 as needed
+    with Pool(processes=min(Nday, 64)) as p:   # cap workers; adjust 4 as needed
         list(p.map(loop_through_download, downloadDayList))
     
     # This code was used to experiment with trying to download VNP14IMG C002 data from
