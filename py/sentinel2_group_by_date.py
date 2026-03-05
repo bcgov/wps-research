@@ -1,20 +1,15 @@
 '''20230628 group sentinel2 frames by date:
 create a separate folder by date. '''
-
-from misc import run, err, exists
 import os
+import glob
 
-lines = [x.strip() for x in os.popen("ls -1 S2*").readlines()]
+def group_by_date(pattern):
+    dirs_created = set()
+    for line in glob.glob(pattern):
+        d = line.split("_")[2].split('T')[0]
+        if d not in dirs_created:
+            os.makedirs(d, exist_ok=True)
+            dirs_created.add(d)
+        os.rename(line, os.path.join(d, line))
 
-for line in lines:
-    w = line.split("_")
-    d = w[2].split('T')[0]
-    
-    if not exists(d):
-        os.mkdir(d)
-   
-    run('mv -v ' + line + ' ' + d)
-
-
-
-
+group_by_date("S2*")
