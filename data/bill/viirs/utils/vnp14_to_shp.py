@@ -4,20 +4,17 @@ Convert VNP14IMG NetCDF fire pixel data to a Shapefile in UTM projection
 matching Sentinel-2 imagery.
 
 Usage:
-    # Current directory (finds all .nc recursively)
-    python vnp14_to_shp.py --utm-zone 9 --hemisphere N
-
-    # A directory (finds all .nc recursively)
-    python vnp14_to_shp.py /data/viirs/2025 --utm-zone 9 --hemisphere N
-
     # Single file
+    python vnp14_to_shp.py <VNP14IMG.nc> [--utm-zone ZONE] [--hemisphere N|S] [--bbox W S E N]
+
+    # Batch (parallel) — pass a glob pattern or multiple files
+    python vnp14_to_shp.py /data/viirs/2025/282/*.nc --bbox -126.07 52.18 -124.37 53.21 --utm-zone 9 --hemisphere N --workers 4
+
+Examples:
+    python vnp14_to_shp.py VNP14IMG.A2025245.1012.002.nc
     python vnp14_to_shp.py VNP14IMG.A2025245.1012.002.nc --utm-zone 9 --hemisphere N
-
-    # Glob pattern
-    python vnp14_to_shp.py /data/viirs/2025/282/*.nc --utm-zone 9 --hemisphere N
-
-    # With bbox and parallel workers
-    python vnp14_to_shp.py /data/viirs --bbox -126.07 52.18 -124.37 53.21 --utm-zone 9 --hemisphere N -w 8
+    python vnp14_to_shp.py VNP14IMG.A2025245.1012.002.nc --bbox -126.1 52.2 -124.5 53.2 --utm-zone 9 --hemisphere N
+    python vnp14_to_shp.py /data/viirs/2025/282/*.nc --bbox -126.07 52.18 -124.37 53.21 --workers 8
 """
 
 import argparse
@@ -35,59 +32,9 @@ from multiprocessing import Pool
 from functools import partial
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def find_nc_files(input_paths):
-    """
-    Resolve input path(s) to a list of .nc files.
-
-    Rules:
-        - No paths given          → recursively scan cwd
-        - Path is a directory     → recursively scan it
-        - Path is a .nc file      → use it directly
-        - Path is a glob pattern  → expand it
-    """
-    # Default to current directory if nothing provided
-    if not input_paths:
-        input_paths = ['.']
-
-    nc_files = []
-
-    for p in input_paths:
-        if os.path.isdir(p):
-            # Recursively find all .nc in this directory
-            found = sorted(glob.glob(os.path.join(p, '**', '*.nc'), recursive=True))
-            nc_files.extend(found)
-
-        elif os.path.isfile(p) and p.lower().endswith('.nc'):
-            # Single .nc file
-            nc_files.append(p)
-
-        else:
-            # Try as a glob pattern
-            expanded = sorted(glob.glob(p))
-            # Keep only .nc files from the expansion
-            expanded_nc = [f for f in expanded if f.lower().endswith('.nc')]
-            if expanded_nc:
-                nc_files.extend(expanded_nc)
-            elif os.path.isfile(p):
-                # It's a file but not .nc — warn and skip
-                print(f"[WARN] Not a .nc file, skipping: {p}")
-            else:
-                print(f"[WARN] No .nc files matched: {p}")
-
-    # Deduplicate while preserving order
-    seen = set()
-    unique = []
-    for f in nc_files:
-        af = os.path.abspath(f)
-        if af not in seen:
-            seen.add(af)
-            unique.append(f)
-
-    return unique
+def lon_to_utm_zone(lon):
+    """Determine UTM zone number from longitude."""
+    return int(np.floor((lon + 180) / 6) + 1)
 
 
 def get_epsg(zone, hemisphere):
@@ -121,28 +68,21 @@ def extract_datetime(ds):
     year = int(parts[1][1:5])
     jday = int(parts[1][5:])
     hhmm = parts[2]
-
     return datetime(year, 1, 1) + pd.Timedelta(days=jday - 1,
                                                  hours=int(hhmm[:2]),
                                                  minutes=int(hhmm[2:]))
 
 
-# ---------------------------------------------------------------------------
-# Core processing
-# ---------------------------------------------------------------------------
-
 def process_file(nc_path, utm_zone=None, hemisphere=None, bbox=None, output=None):
     """Process a single VNP14IMG NetCDF file. Returns output path or None."""
-
     if not os.path.exists(nc_path):
         print(f"Error: File not found: {nc_path}")
         return None
 
     print(f"Reading {nc_path} ...")
-
     ds = nc.Dataset(nc_path, 'r')
-    granule_dt = extract_datetime(ds)
 
+    granule_dt = extract_datetime(ds)
     print(f"  Granule datetime (UTC): {granule_dt.strftime('%Y-%m-%d %H:%M')}")
 
     lat = np.array(ds['FP_latitude'][:])
@@ -169,12 +109,10 @@ def process_file(nc_path, utm_zone=None, hemisphere=None, bbox=None, output=None
         west, south, east, north = bbox
         print(f"  Applying bbox filter: W={west} S={south} E={east} N={north}")
         mask = (lon >= west) & (lon <= east) & (lat >= south) & (lat <= north)
-
         lat = lat[mask]
         lon = lon[mask]
         frp = frp[mask]
         conf = conf[mask]
-
         for var_name in extra_vars:
             extra_vars[var_name] = extra_vars[var_name][mask]
 
@@ -190,10 +128,23 @@ def process_file(nc_path, utm_zone=None, hemisphere=None, bbox=None, output=None
     print(f"  Lon range:  {np.nanmin(lon):.4f} to {np.nanmax(lon):.4f}")
     print(f"  FRP range:  {np.nanmin(frp):.2f} to {np.nanmax(frp):.2f} MW")
 
-    # --- UTM zone and hemisphere ---
-    _utm_zone = utm_zone
-    _hemisphere = hemisphere
-    print(f"  Using UTM zone: {_utm_zone}{_hemisphere}")
+    # --- Determine UTM zone and hemisphere ---
+    centroid_lon = float(np.nanmean(lon))
+    centroid_lat = float(np.nanmean(lat))
+
+    if utm_zone is None:
+        _utm_zone = lon_to_utm_zone(centroid_lon)
+        print(f"  Auto-detected UTM zone: {_utm_zone} (from centroid lon {centroid_lon:.2f})")
+    else:
+        _utm_zone = utm_zone
+        print(f"  Using specified UTM zone: {_utm_zone}")
+
+    if hemisphere is None:
+        _hemisphere = 'N' if centroid_lat >= 0 else 'S'
+        print(f"  Auto-detected hemisphere: {_hemisphere} (from centroid lat {centroid_lat:.2f})")
+    else:
+        _hemisphere = hemisphere
+        print(f"  Using specified hemisphere: {_hemisphere}")
 
     epsg = get_epsg(_utm_zone, _hemisphere)
     print(f"  Target CRS: EPSG:{epsg}")
@@ -211,7 +162,6 @@ def process_file(nc_path, utm_zone=None, hemisphere=None, bbox=None, output=None
         'FRP_MW': frp,
         'confidence': conf
     }
-
     for var_name, var_data in extra_vars.items():
         col_name = var_name.replace('FP_', '')
         data[col_name] = var_data
@@ -243,36 +193,16 @@ def _worker(nc_path, utm_zone, hemisphere, bbox):
         return None
 
 
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
-
 def main():
     parser = argparse.ArgumentParser(
-        description='Convert VNP14IMG fire pixels to Shapefile in Sentinel-2 UTM projection.',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Current directory (finds all .nc recursively)
-  python vnp14_to_shp.py --utm-zone 9 --hemisphere N
-
-  # A directory
-  python vnp14_to_shp.py /data/viirs/2025 --utm-zone 9 --hemisphere N
-
-  # Single file
-  python vnp14_to_shp.py VNP14IMG.A2025245.1012.002.nc --utm-zone 9 --hemisphere N
-
-  # Glob + bbox + parallel
-  python vnp14_to_shp.py /data/viirs/2025/282/*.nc --bbox -126.07 52.18 -124.37 53.21 --utm-zone 9 --hemisphere N -w 8
-        """,
+        description='Convert VNP14IMG fire pixels to Shapefile in Sentinel-2 UTM projection.'
     )
-    parser.add_argument('nc_paths', nargs='*', default=[],
-                        help='Path(s) to .nc file(s), directory, or glob pattern. '
-                             'Default: current directory (recursive).')
+    parser.add_argument('nc_paths', nargs='+',
+                        help='Path(s) to VNP14IMG NetCDF file(s). Supports shell globs.')
     parser.add_argument('--utm-zone', type=int, default=None,
-                        help='UTM zone number')
+                        help='UTM zone number (auto-detected from fire pixel centroid if not set)')
     parser.add_argument('--hemisphere', type=str, default=None, choices=['N', 'S'],
-                        help='Hemisphere N or S')
+                        help='Hemisphere N or S (auto-detected from fire pixel centroid if not set)')
     parser.add_argument('--bbox', type=float, nargs=4, metavar=('WEST', 'SOUTH', 'EAST', 'NORTH'),
                         default=None,
                         help='Bounding box to clip fire pixels (lon_min lat_min lon_max lat_max)')
@@ -282,15 +212,17 @@ Examples:
                         help='Number of parallel workers (default: 1)')
     args = parser.parse_args()
 
-    # Resolve inputs to a list of .nc files
-    nc_files = find_nc_files(args.nc_paths)
-
-    if not nc_files:
-        print("No .nc files found.")
-        sys.exit(0)
+    # Expand any remaining globs (in case shell didn't expand them)
+    nc_files = []
+    for p in args.nc_paths:
+        expanded = sorted(glob.glob(p))
+        if expanded:
+            nc_files.extend(expanded)
+        else:
+            nc_files.append(p)
 
     n_files = len(nc_files)
-    print(f"Found {n_files} .nc file(s). Workers: {args.workers}\n")
+    print(f"Processing {n_files} file(s) with {args.workers} worker(s).\n")
 
     if args.output and n_files > 1:
         print("Warning: -o/--output ignored for batch mode (multiple files). "
@@ -298,12 +230,14 @@ Examples:
         args.output = None
 
     if n_files == 1 or args.workers <= 1:
+        # Sequential
         results = []
         for f in nc_files:
             r = process_file(f, utm_zone=args.utm_zone, hemisphere=args.hemisphere,
                              bbox=args.bbox, output=args.output)
             results.append(r)
     else:
+        # Parallel
         worker_fn = partial(_worker,
                             utm_zone=args.utm_zone,
                             hemisphere=args.hemisphere,

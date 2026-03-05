@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 """
+viirs/utils/rasterize_batch.py
+
 Batch rasterize shapefiles onto a reference Sentinel-2 ENVI image.
 
 Walks a directory tree recursively to find ALL .shp files, buffers each

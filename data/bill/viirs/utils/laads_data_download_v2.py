@@ -9,6 +9,10 @@
 # Will download csv or json depending on which python module is available
 #
 
+'''
+viirs/utils/laads_data_download_v2.py
+'''
+
 from __future__ import (division, print_function, absolute_import, unicode_literals)
 
 import argparse

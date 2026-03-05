@@ -11,6 +11,8 @@
 ###################################################################################################
 
 """
+viirs/utils/download_vnp14.py
+
 This Python script automatically downloads VIIRS data from the LAADS DAAC portal using the
 portal's V2 API.
 
@@ -54,7 +56,7 @@ import os
 import datetime
 import numpy as np
 from multiprocessing import Pool
-from laads_data_download_v2 import sync
+from viirs.utils.laads_data_download_v2 import sync
 # import earthaccess
 
 

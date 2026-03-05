@@ -1,4 +1,6 @@
 """
+viirs/fp_gui/fire_gui.py
+
 FireAccumulationGUI: the main tkinter application window.
 """
 

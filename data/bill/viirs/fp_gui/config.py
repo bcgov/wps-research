@@ -1,4 +1,6 @@
 """
+viirs/fp_gui/config.py
+
 Configuration and constants for the Fire Accumulation Viewer.
 """
 

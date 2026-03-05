@@ -1,4 +1,6 @@
 """
+viirs/fp_gui/raster_loader.py
+
 RasterLoader: reads an ENVI (or any GDAL-compatible) raster file
 using the gdal-based Raster class, and provides the image
 array + geographic extent for matplotlib display.

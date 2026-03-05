@@ -1,4 +1,6 @@
 """
+viirs/fp_gui/fire_data_manager.py
+
 FireDataManager: loads shapefiles, parses dates from filenames,
 maintains numpy arrays for fast animation and a GeoDataFrame for lookups.
 
