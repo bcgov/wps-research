@@ -26,7 +26,7 @@ class FireAccumulationGUI:
     def __init__(self):
         self._root = tk.Tk()
         self._root.title("VIIRS Fire Pixel Accumulation Viewer")
-        self._root.geometry("1600x1000")
+        self._root.geometry("1800x1000")
         try:
             self._root.state("zoomed")
         except tk.TclError:
@@ -272,6 +272,7 @@ class FireAccumulationGUI:
             self._root.update_idletasks()
 
         gdf = self._data_mgr.load_all(progress_cb=_lp)
+
         if gdf.empty:
             messagebox.showwarning("Warning", "All shapefiles were empty.")
             self._status_var.set("No data loaded.")
@@ -323,6 +324,7 @@ class FireAccumulationGUI:
             f"Loaded {n_kept} pixels{raster_note} "
             f"from {len(file_dict)} files.  {min_d} → {max_d}"
         )
+
 
     def _apply_date_filter(self):
         start_str = self._start_date_var.get().strip()
