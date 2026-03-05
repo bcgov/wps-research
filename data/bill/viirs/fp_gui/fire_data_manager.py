@@ -1,6 +1,4 @@
 """
-viirs/fp_gui/fire_data_manager.py
-
 FireDataManager: loads shapefiles, parses dates from filenames,
 maintains numpy arrays for fast animation and a GeoDataFrame for lookups.
 
@@ -48,6 +46,7 @@ class FireDataManager:
         self._master_gdf: Optional[gpd.GeoDataFrame] = None
         self._date_range: List[date] = []
         self._max_workers = max_workers
+        self._target_crs = None  # stored from load_all for reuse
 
         # Pre-extracted numpy arrays (set once after load + clip)
         self._all_x: Optional[np.ndarray] = None
@@ -116,9 +115,20 @@ class FireDataManager:
         return self._file_dict
 
     def load_all(
-        self, progress_cb: Optional[Callable[[int, int], None]] = None
+        self,
+        progress_cb: Optional[Callable[[int, int], None]] = None,
+        target_crs=None,
     ) -> gpd.GeoDataFrame:
-        """Parallel shapefile loading."""
+        """
+        Parallel shapefile loading.
+
+        Parameters
+        ----------
+        progress_cb : callable, optional
+        target_crs : optional
+            Reproject all shapefiles to this CRS (e.g. from the raster).
+            If None, uses the first shapefile's CRS.
+        """
         items = list(self._file_dict.items())
         total = len(items)
         frames: List = [None] * total
@@ -151,6 +161,26 @@ class FireDataManager:
         if not frames:
             self._master_gdf = gpd.GeoDataFrame()
             return self._master_gdf
+
+        # Reproject everything to a common CRS so concat works.
+        # Priority: target_crs (from raster) > previously stored > first file's CRS.
+        if target_crs is not None:
+            self._target_crs = target_crs
+        if self._target_crs is not None:
+            common_crs = self._target_crs
+            print(f"[INFO] Reprojecting all shapefiles to target CRS: {common_crs}")
+        else:
+            common_crs = frames[0].crs
+
+        for i in range(len(frames)):
+            if frames[i].crs is not None and frames[i].crs != common_crs:
+                print(f"[INFO] Reprojecting {frames[i]['source_file'].iloc[0]} "
+                      f"from {frames[i].crs} → {common_crs}")
+                frames[i] = frames[i].to_crs(common_crs)
+                # Update utm_x/utm_y to match the new projection
+                if "utm_x" in frames[i].columns and "utm_y" in frames[i].columns:
+                    frames[i]["utm_x"] = frames[i].geometry.x
+                    frames[i]["utm_y"] = frames[i].geometry.y
 
         self._master_gdf = gpd.GeoDataFrame(
             pd.concat(frames, ignore_index=True)

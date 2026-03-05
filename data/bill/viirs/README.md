@@ -1,6 +1,8 @@
-# viirs VNP14 — VIIRS Fire Pixel Processing Toolkit
+# viirs — VIIRS Fire Pixel Processing Toolkit
 
 End-to-end pipeline: download → convert → (optionally rasterize / accumulate) → visualise.
+
+This package is designed specifically for `VNP14IMG data`
 
 ---
 
@@ -112,13 +114,31 @@ viirs/
 │   └── raster_loader.py             # Wraps raster.py for display
 │
 └── utils/                           # CLI tools (also importable)
-    ├── download_vnp14.py            # Pull VNP14IMG from LAADS DAAC
-    ├── vnp14_to_shp.py              # .nc → .shp (UTM projected)
-    ├── rasterize_batch.py           # .shp → binary raster on Sentinel-2 grid
-    ├── accumulate_fp.py             # Merge shapefiles + age tracking
+    ├── download.py                  # Pull VNP14IMG from LAADS DAAC
+    ├── shapify.py                   # .nc → .shp (UTM projected)
+    ├── rasterize.py                 # .shp → binary raster on Sentinel-2 grid
+    ├── accumulate.py                # Merge shapefiles + age tracking
     └── utm_to_latlon.py             # UTM bbox → lat/lon for LAADS URL
 ```
 
+---
+
+## Last run example
+
+Pull data to `/data/bill/viirs_temp` (I specified the download dir in the download file)
+```bash
+python3 -m viirs.utils.download
+```
+
+Convert .nc to shape files
+```bash
+python3 -m viirs.utils.shapify /data/bill/viirs_temp
+```
+
+Use GUI to view the fire
+```bash
+python3 -m viirs.fp_gui
+```
 ---
 
 ## Using utils as Python functions
