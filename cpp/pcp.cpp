@@ -1,6 +1,8 @@
 /* 20260120: pcp.cpp - parallel copy
    Copies files in parallel using parfor construct
-   Usage: pcp [-r] <source...> <destination>
+   Usage: pcp [-r] [-t <threads>] <source...> <destination>
+   20260305: fix partial file cleanup, timestamp preservation,
+             thread count flag, usage message, print race
 */
 #include"misc.h"
 #include<glob.h>
@@ -10,7 +12,7 @@
 #include<libgen.h>
 #include<sys/time.h>
 
-#define THREADS 48
+#define DEFAULT_THREADS 48
 #define CHUNK_SIZE (4*1024*1024)  // 4MB chunks
 
 // Global variables for file copy
@@ -20,296 +22,268 @@ pthread_mutex_t g_copy_mtx;
 size_t g_copied_count = 0;
 size_t g_failed_count = 0;
 size_t g_total_bytes = 0;
+int g_threads = DEFAULT_THREADS;
 
 // Copy a single file with chunked I/O
-bool copy_file(const str& src, const str& dst) {
-    // Get source file size
+bool copy_file(const str& src, const str& dst, size_t& bytes_out) {
     struct stat st;
-    if(stat(src.c_str(), &st) != 0) {
-        return false;
-    }
-    
+    if(stat(src.c_str(), &st) != 0) return false;
+
     size_t file_size = st.st_size;
-    
-    // Open source and destination
+
     FILE* src_file = fopen(src.c_str(), "rb");
-    if(!src_file) {
-        return false;
-    }
-    
+    if(!src_file) return false;
+
     FILE* dst_file = fopen(dst.c_str(), "wb");
-    if(!dst_file) {
+    if(!dst_file){
         fclose(src_file);
         return false;
     }
-    
-    // Copy in chunks
+
     char* buffer = (char*)malloc(CHUNK_SIZE);
     size_t bytes_copied = 0;
     bool success = true;
-    
-    while(bytes_copied < file_size) {
-        size_t to_read = (file_size - bytes_copied < CHUNK_SIZE) ? 
-                         (file_size - bytes_copied) : CHUNK_SIZE;
-        
+
+    while(bytes_copied < file_size){
+        size_t to_read = min((size_t)CHUNK_SIZE, file_size - bytes_copied);
         size_t read_bytes = fread(buffer, 1, to_read, src_file);
-        if(read_bytes != to_read) {
-            success = false;
-            break;
-        }
-        
+        if(read_bytes != to_read){ success = false; break; }
         size_t written = fwrite(buffer, 1, read_bytes, dst_file);
-        if(written != read_bytes) {
-            success = false;
-            break;
-        }
-        
+        if(written != read_bytes){ success = false; break; }
         bytes_copied += read_bytes;
     }
-    
+
     free(buffer);
     fclose(src_file);
     fclose(dst_file);
-    
-    // Preserve permissions
-    if(success) {
+
+    if(success){
+        bytes_out = bytes_copied;
+        // Preserve permissions
         chmod(dst.c_str(), st.st_mode);
+        // Preserve timestamps
+        struct timeval times[2];
+        times[0].tv_sec  = st.st_atim.tv_sec;
+        times[0].tv_usec = st.st_atim.tv_nsec / 1000;
+        times[1].tv_sec  = st.st_mtim.tv_sec;
+        times[1].tv_usec = st.st_mtim.tv_nsec / 1000;
+        utimes(dst.c_str(), times);
+    } else {
+        // Remove partial file
+        unlink(dst.c_str());
     }
-    
+
     return success;
 }
 
 // Worker function for parallel copy
-void copy_worker(size_t i) {
+void copy_worker(size_t i){
     str src = g_source_files[i];
     str dst = g_dest_files[i];
-    
-    // Get file size before copy (no lock needed - read only)
-    struct stat st;
+
     size_t file_size = 0;
-    if(stat(src.c_str(), &st) == 0) {
-        file_size = st.st_size;
-    }
-    
-    bool success = copy_file(src, dst);
-    
-    // Update counters under lock - minimal critical section
-    size_t total_processed;
+    bool success = copy_file(src, dst, file_size);
+
     mtx_lock(&g_copy_mtx);
-    if(success) {
+    if(success){
         g_copied_count++;
         g_total_bytes += file_size;
     } else {
         g_failed_count++;
     }
-    total_processed = g_copied_count + g_failed_count;
-    mtx_unlock(&g_copy_mtx);
-    
-    // Printing outside the lock
+    size_t total_processed = g_copied_count + g_failed_count;
     size_t total_files = g_source_files.size();
-    if(success) {
+
+    // Print inside lock to avoid interleaved output
+    if(success){
         cout << "Copied: " << src << " -> " << dst << endl;
     } else {
         cout << "Failed: " << src << endl;
     }
-    if(total_processed % 10 == 0 || total_processed == total_files) {
-        cout << "Progress: " << total_processed << "/" << total_files << " files (" 
+    if(total_processed % 10 == 0 || total_processed == total_files){
+        cout << "Progress: " << total_processed << "/" << total_files << " files ("
              << (100 * total_processed / total_files) << "%)" << endl;
     }
+    mtx_unlock(&g_copy_mtx);
 }
 
 // Recursively collect files from directory
-void collect_files_recursive(const str& src_dir, const str& dst_dir, 
-                             vector<str>& src_files, vector<str>& dst_files) {
+void collect_files_recursive(const str& src_dir, const str& dst_dir){
     DIR* dir = opendir(src_dir.c_str());
-    if(!dir) {
+    if(!dir){
         cerr << "Cannot open directory: " << src_dir << endl;
         return;
     }
-    
+
     struct dirent* entry;
-    while((entry = readdir(dir)) != NULL) {
+    while((entry = readdir(dir)) != NULL){
         str name(entry->d_name);
-        
-        // Skip . and ..
         if(name == "." || name == "..") continue;
-        
+
         str src_path = src_dir + "/" + name;
         str dst_path = dst_dir + "/" + name;
-        
+
         struct stat st;
-        if(stat(src_path.c_str(), &st) == 0) {
-            if(S_ISDIR(st.st_mode)) {
-                // Create destination directory
+        if(stat(src_path.c_str(), &st) == 0){
+            if(S_ISDIR(st.st_mode)){
                 mkdir(dst_path.c_str(), 0755);
-                // Recurse
-                collect_files_recursive(src_path, dst_path, src_files, dst_files);
-            } else if(S_ISREG(st.st_mode)) {
-                // Regular file
-                src_files.push_back(src_path);
-                dst_files.push_back(dst_path);
+                collect_files_recursive(src_path, dst_path);
+            } else if(S_ISREG(st.st_mode)){
+                g_source_files.push_back(src_path);
+                g_dest_files.push_back(dst_path);
             }
         }
     }
-    
+
     closedir(dir);
 }
 
-// Process a single source path (file or directory)
-void process_source(const str& src_path_orig, const str& destination, bool recursive, bool dest_is_dir) {
+void process_source(const str& src_path_orig, const str& destination, bool recursive, bool dest_is_dir){
     str src_path = src_path_orig;
-    
-    // Remove trailing slash if present
-    if(src_path.size() > 0 && src_path[src_path.size()-1] == '/') {
+    if(!src_path.empty() && src_path.back() == '/')
         src_path = src_path.substr(0, src_path.size()-1);
-    }
-    
+
     struct stat st;
-    if(stat(src_path.c_str(), &st) != 0) {
+    if(stat(src_path.c_str(), &st) != 0){
         cerr << "Cannot stat: " << src_path << endl;
         return;
     }
-    
-    if(S_ISDIR(st.st_mode)) {
-        if(!recursive) {
+
+    if(S_ISDIR(st.st_mode)){
+        if(!recursive){
             cerr << "Skipping directory (use -r): " << src_path << endl;
             return;
         }
-        
-        // Determine destination directory name
+
         str dst_dir;
-        if(dest_is_dir) {
-            // Extract basename of source directory
+        if(dest_is_dir){
             char* src_copy = strdup(src_path.c_str());
-            str base = basename(src_copy);
+            dst_dir = destination + "/" + str(basename(src_copy));
             free(src_copy);
-            dst_dir = destination + "/" + base;
         } else {
             dst_dir = destination;
         }
-        
-        // Create destination directory
+
         mkdir(dst_dir.c_str(), 0755);
-        
-        // Collect all files recursively
-        collect_files_recursive(src_path, dst_dir, g_source_files, g_dest_files);
-        
-    } else if(S_ISREG(st.st_mode)) {
-        // Regular file
+        collect_files_recursive(src_path, dst_dir);
+
+    } else if(S_ISREG(st.st_mode)){
         str dst_path;
-        if(dest_is_dir) {
-            // Extract basename
+        if(dest_is_dir){
             char* src_copy = strdup(src_path.c_str());
-            str base = basename(src_copy);
+            dst_path = destination + "/" + str(basename(src_copy));
             free(src_copy);
-            dst_path = destination + "/" + base;
         } else {
             dst_path = destination;
         }
-        
+
         g_source_files.push_back(src_path);
         g_dest_files.push_back(dst_path);
     }
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[]){
+    if(argc < 2){
+        err("Usage: pcp [-r] [-t <threads>] <source...> <destination>\n"
+            "\n"
+            "Options:\n"
+            "  -r            Recursive copy (like cp -r)\n"
+            "  -t <threads>  Number of parallel threads (default: 48)\n"
+            "\n"
+            "Examples:\n"
+            "  pcp file.txt /backup/\n"
+            "  pcp *.log /archive/\n"
+            "  pcp -r my_folder /backup/\n"
+            "  pcp -t 16 -r src/ dst/\n"
+            "  pcp file1.txt file2.txt /dest/\n");
+    }
+
     bool recursive = false;
-    int arg_offset = 1;
-    
-    // Check for -r flag
-    if(argc > 1 && str(argv[1]) == "-r") {
-        recursive = true;
-        arg_offset = 2;
+    vector<str> args;
+
+    for(int i = 1; i < argc; i++){
+        str a(argv[i]);
+        if(a == "-r"){
+            recursive = true;
+        } else if(a == "-t" && i + 1 < argc){
+            g_threads = atoi(argv[++i]);
+            if(g_threads < 1) g_threads = 1;
+        } else {
+            args.push_back(a);
+        }
     }
-    
-    // Need at least one source and one destination
-    if(argc < arg_offset + 2) {
-        err("Usage: pcp [-r] <source...> <destination>\n"
-            "  -r    recursive copy (like cp -r)");
+
+    if(args.size() < 2){
+        err("Error: need at least one source and one destination");
     }
-    
-    // Last argument is destination, all others are sources
-    str destination(argv[argc - 1]);
-    
-    // Check if destination exists and is a directory
+
+    str destination = args.back();
+    args.pop_back();
+
+    // Create destination if it doesn't exist and multiple sources
     struct stat dst_stat;
     bool dest_is_dir = false;
-    if(stat(destination.c_str(), &dst_stat) == 0) {
+    if(stat(destination.c_str(), &dst_stat) == 0){
         dest_is_dir = S_ISDIR(dst_stat.st_mode);
+    } else if(args.size() > 1){
+        // Multiple sources — create destination dir
+        mkdir(destination.c_str(), 0755);
+        dest_is_dir = true;
     }
-    
-    // If multiple sources, destination must be a directory
-    int num_sources = argc - 1 - arg_offset;
-    if(num_sources > 1 && !dest_is_dir) {
+
+    if(args.size() > 1 && !dest_is_dir){
         err("When copying multiple sources, destination must be a directory");
     }
-    
-    // Process each source argument
-    for(int i = arg_offset; i < argc - 1; i++) {
-        str source_pattern(argv[i]);
-        
-        // Check if pattern contains glob characters
+
+    for(auto& source_pattern : args){
         bool has_glob = (source_pattern.find('*') != str::npos ||
                          source_pattern.find('?') != str::npos ||
                          source_pattern.find('[') != str::npos);
-        
-        if(has_glob) {
-            // Expand source pattern with glob
+
+        if(has_glob){
             glob_t glob_result;
             memset(&glob_result, 0, sizeof(glob_result));
-            
             int ret = glob(source_pattern.c_str(), GLOB_TILDE | GLOB_MARK, NULL, &glob_result);
-            
-            if(ret == GLOB_NOMATCH) {
+            if(ret == GLOB_NOMATCH){
                 cerr << "No matches found for: " << source_pattern << endl;
-            } else if(ret != 0) {
+            } else if(ret != 0){
                 cerr << "Error processing pattern: " << source_pattern << endl;
             } else {
-                // Process matched files
-                for(size_t j = 0; j < glob_result.gl_pathc; j++) {
+                for(size_t j = 0; j < glob_result.gl_pathc; j++)
                     process_source(str(glob_result.gl_pathv[j]), destination, recursive, dest_is_dir);
-                }
             }
-            
             globfree(&glob_result);
         } else {
-            // No glob characters - treat as literal path (shell already expanded)
             process_source(source_pattern, destination, recursive, dest_is_dir);
         }
     }
-    
-    if(g_source_files.size() == 0) {
+
+    if(g_source_files.empty()){
         cout << "No files to copy." << endl;
         return 0;
     }
-    
-    cout << "Copying " << g_source_files.size() << " files with " << THREADS << " threads..." << endl;
-    
-    // Initialize mutexes
+
+    cout << "Copying " << g_source_files.size() << " files with " << g_threads << " threads..." << endl;
+
     pthread_mutex_init(&print_mtx, NULL);
     pthread_mutex_init(&pt_nxt_j_mtx, NULL);
     pthread_mutex_init(&g_copy_mtx, NULL);
-    
-    // Perform parallel copy
+
     struct timeval start, end;
     gettimeofday(&start, NULL);
-    
-    parfor(0, g_source_files.size(), copy_worker, THREADS);
-    
+
+    parfor(0, g_source_files.size(), copy_worker, g_threads);
+
     gettimeofday(&end, NULL);
     double elapsed = (end.tv_sec - start.tv_sec) + (end.tv_usec - start.tv_usec) / 1e6;
-    
-    // Summary
+
     cout << "\n=== Copy Summary ===" << endl;
     cout << "Successfully copied: " << g_copied_count << " files" << endl;
-    cout << "Failed: " << g_failed_count << " files" << endl;
-    cout << "Total bytes: " << (g_total_bytes / (1024.0 * 1024.0)) << " MB" << endl;
-    cout << "Time: " << elapsed << " seconds" << endl;
-    if(elapsed > 0) {
-        cout << "Speed: " << (g_total_bytes / (1024.0 * 1024.0)) / elapsed << " MB/s" << endl;
-    }
-    
+    cout << "Failed:              " << g_failed_count << " files" << endl;
+    cout << "Total data:          " << (g_total_bytes / (1024.0 * 1024.0)) << " MB" << endl;
+    cout << "Time:                " << elapsed << " seconds" << endl;
+    if(elapsed > 0)
+        cout << "Speed:               " << (g_total_bytes / (1024.0 * 1024.0)) / elapsed << " MB/s" << endl;
+
     return (g_failed_count > 0) ? 1 : 0;
 }
-
-
