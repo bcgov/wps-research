@@ -18,11 +18,7 @@ import shutil
 import sys
 import time
 import netCDF4 as nC
-
-try:
-    from StringIO import StringIO   # python2
-except ImportError:
-    from io import StringIO         # python3
+from io import StringIO         # python3
 
 
 ################################################################################
@@ -104,12 +100,7 @@ DESC = "This script will recursively download all files if they don't exist from
 
 def sync(src, dest, tok):
     '''synchronize src url with dest directory'''
-    #try:
-    #    import csv
-    #    files = {}
-    #    files['content'] = [ f for f in csv.DictReader(StringIO(geturl('%s.csv' % src, tok)), skipinitialspace=True) ]
-    #except ImportError:
-    #    print(f"USING JSON")
+
     import json
     files = json.loads(geturl(src, tok))
     
