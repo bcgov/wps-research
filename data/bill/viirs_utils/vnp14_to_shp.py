@@ -5,16 +5,14 @@ matching Sentinel-2 imagery.
 
 Usage:
     # Single file
-    python vnp14_to_shp.py <VNP14IMG.nc> [--utm-zone ZONE] [--hemisphere N|S] [--bbox W S E N]
+    python vnp14_to_shp.py <VNP14IMG.nc> utm-zone ZONE hemisphere N|S [--bbox W S E N]
 
     # Batch (parallel) — pass a glob pattern or multiple files
     python vnp14_to_shp.py /data/viirs/2025/282/*.nc --bbox -126.07 52.18 -124.37 53.21 --utm-zone 9 --hemisphere N --workers 4
 
 Examples:
-    python vnp14_to_shp.py VNP14IMG.A2025245.1012.002.nc
     python vnp14_to_shp.py VNP14IMG.A2025245.1012.002.nc --utm-zone 9 --hemisphere N
-    python vnp14_to_shp.py VNP14IMG.A2025245.1012.002.nc --bbox -126.1 52.2 -124.5 53.2 --utm-zone 9 --hemisphere N
-    python vnp14_to_shp.py /data/viirs/2025/282/*.nc --bbox -126.07 52.18 -124.37 53.21 --workers 8
+    python vnp14_to_shp.py VNP14IMG.A2025245.1012.002.nc --bbox -126.1 52.2 -124.5 53.2 --utm-zone 9 --hemisphere N --workers 8
 """
 
 import argparse
@@ -32,17 +30,17 @@ from multiprocessing import Pool
 from functools import partial
 
 
-def lon_to_utm_zone(lon):
-    """Determine UTM zone number from longitude."""
-    return int((lon + 180) / 6) + 1
 
-
-def get_epsg(zone, hemisphere):
+def get_epsg(
+        zone: int,
+        hemisphere: str
+):
     """Get EPSG code for a given UTM zone and hemisphere."""
     if hemisphere.upper() == 'N':
         return 32600 + zone
     else:
         return 32700 + zone
+
 
 
 def extract_datetime(ds):
@@ -58,6 +56,7 @@ def extract_datetime(ds):
     if 'RangeBeginningDate' in ds.ncattrs() and 'RangeBeginningTime' in ds.ncattrs():
         date_str = ds.getncattr('RangeBeginningDate').strip()
         time_str = ds.getncattr('RangeBeginningTime').strip()
+
         try:
             return datetime.strptime(f"{date_str} {time_str}", '%Y-%m-%d %H:%M:%S.%f')
         except ValueError:
@@ -68,21 +67,33 @@ def extract_datetime(ds):
     year = int(parts[1][1:5])
     jday = int(parts[1][5:])
     hhmm = parts[2]
+
     return datetime(year, 1, 1) + pd.Timedelta(days=jday - 1,
                                                  hours=int(hhmm[:2]),
                                                  minutes=int(hhmm[2:]))
 
 
-def process_file(nc_path, utm_zone=None, hemisphere=None, bbox=None, output=None):
+
+def process_file(
+        nc_path, 
+        utm_zone=None, 
+        hemisphere=None, 
+        bbox=None, 
+        output=None
+):
+    
     """Process a single VNP14IMG NetCDF file. Returns output path or None."""
+
     if not os.path.exists(nc_path):
         print(f"Error: File not found: {nc_path}")
         return None
 
     print(f"Reading {nc_path} ...")
+
     ds = nc.Dataset(nc_path, 'r')
 
     granule_dt = extract_datetime(ds)
+
     print(f"  Granule datetime (UTC): {granule_dt.strftime('%Y-%m-%d %H:%M')}")
 
     lat = np.array(ds['FP_latitude'][:])
@@ -91,6 +102,7 @@ def process_file(nc_path, utm_zone=None, hemisphere=None, bbox=None, output=None
     conf = np.array(ds['FP_confidence'][:])
 
     extra_vars = {}
+    
     for var_name in ['FP_T4', 'FP_T5', 'FP_day', 'FP_line', 'FP_sample']:
         if var_name in ds.variables:
             extra_vars[var_name] = np.array(ds[var_name][:])
@@ -106,21 +118,26 @@ def process_file(nc_path, utm_zone=None, hemisphere=None, bbox=None, output=None
 
     # --- Apply bounding box filter ---
     if bbox is not None:
+
         west, south, east, north = bbox
         print(f"  Applying bbox filter: W={west} S={south} E={east} N={north}")
         mask = (lon >= west) & (lon <= east) & (lat >= south) & (lat <= north)
+
         lat = lat[mask]
         lon = lon[mask]
         frp = frp[mask]
         conf = conf[mask]
+
         for var_name in extra_vars:
             extra_vars[var_name] = extra_vars[var_name][mask]
 
         n_fires = len(lat)
+
         print(f"  Fire pixels after bbox filter: {n_fires} (dropped {n_total - n_fires})")
         if n_fires == 0:
             print("  No fire pixels within bounding box. Skipping.")
             return None
+    
     else:
         n_fires = n_total
 
@@ -128,23 +145,13 @@ def process_file(nc_path, utm_zone=None, hemisphere=None, bbox=None, output=None
     print(f"  Lon range:  {np.nanmin(lon):.4f} to {np.nanmax(lon):.4f}")
     print(f"  FRP range:  {np.nanmin(frp):.2f} to {np.nanmax(frp):.2f} MW")
 
-    # --- Determine UTM zone and hemisphere ---
-    centroid_lon = float(np.nanmean(lon))
-    centroid_lat = float(np.nanmean(lat))
+    # --- UTM zone and hemisphere ---
 
-    if utm_zone is None:
-        _utm_zone = lon_to_utm_zone(centroid_lon)
-        print(f"  Auto-detected UTM zone: {_utm_zone} (from centroid lon {centroid_lon:.2f})")
-    else:
-        _utm_zone = utm_zone
-        print(f"  Using specified UTM zone: {_utm_zone}")
+    _utm_zone = utm_zone
+    print(f"  Using specified UTM zone: {_utm_zone}")
 
-    if hemisphere is None:
-        _hemisphere = 'N' if centroid_lat >= 0 else 'S'
-        print(f"  Auto-detected hemisphere: {_hemisphere} (from centroid lat {centroid_lat:.2f})")
-    else:
-        _hemisphere = hemisphere
-        print(f"  Using specified hemisphere: {_hemisphere}")
+    _hemisphere = hemisphere
+    print(f"  Using specified hemisphere: {_hemisphere}")
 
     epsg = get_epsg(_utm_zone, _hemisphere)
     print(f"  Target CRS: EPSG:{epsg}")
@@ -162,6 +169,7 @@ def process_file(nc_path, utm_zone=None, hemisphere=None, bbox=None, output=None
         'FRP_MW': frp,
         'confidence': conf
     }
+
     for var_name, var_data in extra_vars.items():
         col_name = var_name.replace('FP_', '')
         data[col_name] = var_data
@@ -182,6 +190,7 @@ def process_file(nc_path, utm_zone=None, hemisphere=None, bbox=None, output=None
     print(f"  CRS: EPSG:{epsg} (UTM Zone {_utm_zone}{_hemisphere})")
     print(f"  Features: {len(gdf)}\n")
     return out_path
+
 
 
 def _worker(nc_path, utm_zone, hemisphere, bbox):
