@@ -2,7 +2,8 @@
    Copies files in parallel using parfor construct
    Usage: pcp [-r] [-t <threads>] <source...> <destination>
    20260305: fix partial file cleanup, timestamp preservation,
-             thread count flag, usage message, print race
+             thread count flag, usage message, print race,
+             auto-create destination for multi-file glob match
 */
 #include"misc.h"
 #include<glob.h>
@@ -25,7 +26,7 @@ size_t g_total_bytes = 0;
 int g_threads = DEFAULT_THREADS;
 
 // Copy a single file with chunked I/O
-bool copy_file(const str& src, const str& dst, size_t& bytes_out) {
+bool copy_file(const str& src, const str& dst, size_t& bytes_out){
     struct stat st;
     if(stat(src.c_str(), &st) != 0) return false;
 
@@ -220,13 +221,13 @@ int main(int argc, char *argv[]){
     str destination = args.back();
     args.pop_back();
 
-    // Create destination if it doesn't exist and multiple sources
+    // Check if destination exists and is a directory
     struct stat dst_stat;
     bool dest_is_dir = false;
     if(stat(destination.c_str(), &dst_stat) == 0){
         dest_is_dir = S_ISDIR(dst_stat.st_mode);
     } else if(args.size() > 1){
-        // Multiple sources — create destination dir
+        // Multiple source arguments — create destination dir
         mkdir(destination.c_str(), 0755);
         dest_is_dir = true;
     }
@@ -249,6 +250,11 @@ int main(int argc, char *argv[]){
             } else if(ret != 0){
                 cerr << "Error processing pattern: " << source_pattern << endl;
             } else {
+                // If multiple files matched and destination doesn't exist yet, create it
+                if(glob_result.gl_pathc > 1 && !dest_is_dir){
+                    mkdir(destination.c_str(), 0755);
+                    dest_is_dir = true;
+                }
                 for(size_t j = 0; j < glob_result.gl_pathc; j++)
                     process_source(str(glob_result.gl_pathv[j]), destination, recursive, dest_is_dir);
             }
