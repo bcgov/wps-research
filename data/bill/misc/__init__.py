@@ -9,7 +9,10 @@ from .general import (
     get_combinations
 )
 
-from .date_time import date_str2obj
+from .date_time import (
+    date_str2obj,
+    julian_to_date
+)
 
 from .files import iter_files
 

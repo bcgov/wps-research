@@ -18,11 +18,7 @@ import shutil
 import sys
 import time
 import netCDF4 as nC
-
-try:
-    from StringIO import StringIO   # python2
-except ImportError:
-    from io import StringIO         # python3
+from io import StringIO         # python3
 
 
 ################################################################################
@@ -46,8 +42,10 @@ def getcURL(url, headers=None, out=None):
             return result.decode('utf-8') if isinstance(result, bytes) else result
         else:
             subprocess.call(args, stdout=out)
+
     except subprocess.CalledProcessError as e:
-        print('curl GET error message: %' + (e.message if hasattr(e, 'message') else e.output), file=sys.stderr)
+        output = e.output.decode('utf-8') if isinstance(e.output, bytes) else e.output
+        print('curl GET error message: %' + (e.message if hasattr(e, 'message') else output), file=sys.stderr)
     return None
     
 # read the specified URL and output to a file
@@ -102,14 +100,9 @@ DESC = "This script will recursively download all files if they don't exist from
 
 def sync(src, dest, tok):
     '''synchronize src url with dest directory'''
-    #try:
-    #    import csv
-    #    files = {}
-    #    files['content'] = [ f for f in csv.DictReader(StringIO(geturl('%s.csv' % src, tok)), skipinitialspace=True) ]
-    #except ImportError:
-    #    print(f"USING JSON")
+
     import json
-    files = json.loads(geturl(src + '.json', tok))
+    files = json.loads(geturl(src, tok))
     
     # use os.path since python 2/3 both support it while pathlib is 3.4+
     for f in files['content']:
