@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """
+viirs/fp_gui/__main__.py
+
 VIIRS Fire Pixel Accumulation Viewer
 =====================================
 Entry point.  Run with:

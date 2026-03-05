@@ -1,3 +1,7 @@
+'''
+viirs/fp_gui/raster.py
+'''
+
 from osgeo import gdal
 
 import numpy as np

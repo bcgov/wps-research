@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """
+viirs/utils/utm_to_latlon.py
+
 Convert a UTM bounding box to lat/lon and print the LAADS DAAC URL regions parameter.
 Usage: python utm_bbox_to_url.py
 """

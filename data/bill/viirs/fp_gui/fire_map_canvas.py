@@ -1,4 +1,6 @@
 """
+viirs/fp_gui/fire_map_canvas.py
+
 FireMapCanvas: matplotlib figure embedded in a tkinter frame.
 Renders using pure numpy arrays — no pandas during animation.
 """

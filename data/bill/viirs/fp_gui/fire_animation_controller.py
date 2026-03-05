@@ -1,4 +1,6 @@
 """
+viirs/fp_gui/fire_animation_controller.py
+
 FireAnimationController: drives the date-by-date animation loop
 using tkinter's after() mechanism for play/pause control.
 """

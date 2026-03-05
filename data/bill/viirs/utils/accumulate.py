@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-accumulate_fire_pixels.py
+viirs/utils/accumulate_fp.py
 =========================
 Standalone tool to accumulate VIIRS VNP14IMG fire pixel shapefiles
 into a single output shapefile with age tracking.
