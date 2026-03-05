@@ -5,16 +5,6 @@
 # Last Modified by: Matthew Ansell
 # Date: 2023-10-20
 
-                                  #########
-                                 ##       ###
-                        #########      ######
-                    ####             ##
-                  ###                 ##
-               ###              ########
-            ####    #######    ##
-       #####   #####     ##  ###
-       ########          ########
-
 
 ###################################################################################################
 # Description
@@ -78,14 +68,13 @@ global downloadStartDay, downloadEndDay
 # These integer variables define the date ranges for the downloads, in YYYYMMDD format.
 # NOTE: downloadEndDay is EXCLUSIVE.
 # These variables are used for VIIRS LAADS DAAC downloads.
-downloadStartDay  = 20230101
-downloadEndDay    = 20260101
+downloadStartDay  = 20250820
+downloadEndDay    = 20250910
 
 # This string variable specifies the LAADS DAAC authentication token to use for the download.
 # Used for VIIRS data from LAADS DAAC.
 # TODO: Add LAADS DAAC token here.
 with open('/data/.tokens/laads', 'r') as fh:
-
     laadsToken = fh.read().strip()
 # This string variable specifies the path to the folder to use for the downloaded VIIRS data.
 # Subdirectories will be created within this folder using the following structure:\
@@ -96,7 +85,7 @@ with open('/data/.tokens/laads', 'r') as fh:
 #            YYYY is the string formatted four-digit year of the current download day; and
 #            DDD is the string formatted three-digit Julian day of the year.
 # Used for VIIRS L1B data from LAADS DAAC.
-dirGFAS = '/data/bill/viirs/'
+dirGFAS = '/data/bill/viirs_temp/'
 
 # This string specifies the Administrative Area region name (such as "Canada") to restrict
 # the downloaded VIIRS data to.
@@ -107,30 +96,6 @@ regions = "Canada"
 # This string specifies the VIIRS product name to download (such as VNP02IMG, VNP02MOD, VNP03IMG or
 # VNP14IMG).
 product = "VNP14IMG"
-
-# These string variables specify temporal ranges.
-# Used for VIIRS L2 Earthdata downloads.
-#start_date_l2 = '2021-04'
-#end_date_l2 = '2021-10'
-#start_date_l2 = '2021-07-14'
-#end_date_l2 = '2021-07-14'
-
-# This tuple defines a spatial boundary in the form (lower_left_lon, lower_left_lat,
-# upper_right_lon, upper_right_lat). Used for VIIRS L2 Earthdata downloads.
-# Let's define one for Canada.
-# Used for VIIRS L2 Earthdata downloads.
-
-# This Boolean specifies whether to use cloud-hosted data or not.
-# Used for VIIRS L2 Earthdata downloads.
-# cloud_hosted = True
-
-# This string specifies an identifier for the VIIRS data type to be downloaded.
-# Used for VIIRS L2 Earthdata downloads.
-# doi = '10.5067/VIIRS/VNP14IMG.002'
-
-# This int specifies the number of download threads to use to download the data.
-# Used for VIIRS L2 Earthdata downloads.
-# threads = 1
 
 
 ###################################################################################################
@@ -168,8 +133,9 @@ def loop_through_download(downloadDay):
         f"https://ladsweb.modaps.eosdis.nasa.gov/api/v2/content/details?"
         f"products={product}&"
         f"temporalRanges={downloadDay.year}-{downloadDay.timetuple().tm_yday}&"
-        f"regions=%5BBBOX%5DN53.2120%20S52.1755%20E-124.3658%20W-126.0722"
+        "regions=%5BBBOX%5DN53.159422%20S52.226225%20E-124.365817%20W-126.072180"
     )
+
     
     downloadPath = (dirGFAS +
                     product +
@@ -188,68 +154,12 @@ def loop_through_download(downloadDay):
     
     if not os.path.exists(downloadPath):
         os.makedirs(downloadPath)
-
-    print(f"DEBUG URL: {downloadUrl}")
     sync(downloadUrl, downloadPath, laadsToken)
 
 if __name__ == "__main__":
-    
-    # Use the old LAADS DAAC way if we are not downloading VIIRS L1B Collection 2 data.
-    #if product != 'VNP14IMG':
+
     downloadDayList = get_download_day_list()
     Nday = len(downloadDayList)
-    # p = Pool()
-    # p.imap(loop_through_download, downloadDayList)
-    # p.close()
-    # p.join()
 
-    with Pool(processes=min(Nday, 64)) as p:   # cap workers; adjust 4 as needed
+    with Pool(processes=min(Nday, 16)) as p:   # cap workers; adjust 4 as needed
         list(p.map(loop_through_download, downloadDayList))
-    
-    # This code was used to experiment with trying to download VNP14IMG C002 data from
-    # the NASA Earthdata portal.
-    #else:
-    #    earthaccess_download(bounding_box=bounding_box,
-    #                         cloud_hosted=cloud_hosted,
-    #                         doi=doi,
-    #                         threads=threads
-    #                         )
-
-
-
-"""
-def earthaccess_download(bounding_box: tuple,
-                         cloud_hosted: bool,
-                         doi: str,
-                         threads: int
-                         ):
-    # This method handles downloading of data from the NASA Earthdata portal.
-    
-    # Log in to the Earthdata portal interactively; do not persist login information.
-    
-    print('Logging in to the Earthdata portal . . .')
-    auth = earthaccess.login(persist=False,
-                             strategy='interactive'
-                             )
-    
-    # Let's grab some search results based on our parameters.
-    print('Grabbing search results based on our parameters . . .')
-    results = earthaccess.search_data(
-        bounding_box=bounding_box,
-        cloud_hosted=cloud_hosted,
-        doi=doi,
-        temporal=(start_date_l2,
-                  end_date_l2
-                  ),
-        threads=threads
-    )
-    
-    # Let's download the search results to a local folder.
-    print(f'Downloading data to {dirGFAS} . . .')
-    files = earthaccess.download(granules=results,
-                                 local_path=dirGFAS
-                                 )
-    
-    # Print the files to the console and exit.
-    print(files)
-"""
