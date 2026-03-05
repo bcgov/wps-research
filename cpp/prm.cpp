@@ -1,14 +1,16 @@
 /* 20260116: prm.cpp: parallel remove ( non-recursive ) with pattern matching
+   20260305: added -r flag for recursive directory deletion
 */
 
 /* prm.cpp - parallel remove
    Removes files in parallel using parfor construct
-   Does not support recursive deletion (-r option)
+   Supports recursive deletion (-r option)
 */
 #include"misc.h"
 #include<glob.h>
 #include<unistd.h>
 #include<sys/stat.h>
+#include<dirent.h>
 
 // Global variables for parfor
 vector<str> g_files_to_delete;
@@ -17,10 +19,34 @@ size_t g_deleted_count = 0;
 size_t g_failed_count = 0;
 size_t g_total_files = 0;
 
+void collect_recursive(const str& path){
+  struct stat st;
+  if(stat(path.c_str(), &st) != 0) return;
+
+  if(S_ISREG(st.st_mode)){
+    g_files_to_delete.push_back(path);
+    return;
+  }
+
+  if(S_ISDIR(st.st_mode)){
+    DIR* dir = opendir(path.c_str());
+    if(!dir){
+      cout << "Cannot open directory: " << path << endl;
+      return;
+    }
+    struct dirent* entry;
+    while((entry = readdir(dir)) != NULL){
+      str name(entry->d_name);
+      if(name == "." || name == "..") continue;
+      collect_recursive(path + "/" + name);
+    }
+    closedir(dir);
+  }
+}
+
 void delete_file(size_t i){
   str filename = g_files_to_delete[i];
 
-  // Attempt to delete the file
   int result = unlink(filename.c_str());
 
   mtx_lock(&g_delete_mtx);
@@ -32,7 +58,6 @@ void delete_file(size_t i){
     cout << "Failed to delete: " << filename << " (error: " << strerror(errno) << ")" << endl;
   }
 
-  // Update progress
   size_t total_processed = g_deleted_count + g_failed_count;
   if(total_processed % 100 == 0 || total_processed == g_total_files){
     cout << "Progress: " << total_processed << "/" << g_total_files << " files ("
@@ -42,36 +67,76 @@ void delete_file(size_t i){
   mtx_unlock(&g_delete_mtx);
 }
 
+void delete_empty_dirs(const str& path){
+  struct stat st;
+  if(stat(path.c_str(), &st) != 0) return;
+  if(!S_ISDIR(st.st_mode)) return;
+
+  DIR* dir = opendir(path.c_str());
+  if(!dir) return;
+  struct dirent* entry;
+  while((entry = readdir(dir)) != NULL){
+    str name(entry->d_name);
+    if(name == "." || name == "..") continue;
+    delete_empty_dirs(path + "/" + name);
+  }
+  closedir(dir);
+
+  if(rmdir(path.c_str()) != 0){
+    cout << "Failed to remove directory: " << path << " (error: " << strerror(errno) << ")" << endl;
+  }
+  else{
+    cout << "Removed directory: " << path << endl;
+  }
+}
+
 int main(int argc, char *argv[]){
   if(argc < 2){
-    err("Usage: prm <file1> [file2] ... [fileN]\n"
-        "       prm <pattern>\n"
-        "Removes files in parallel. Does not support recursive deletion.");
+    err("Usage: prm [options] <file1> [file2] ... [fileN]\n"
+        "       prm [options] <pattern>\n"
+        "       prm -r <directory>\n"
+        "\n"
+        "Options:\n"
+        "  -r    Recursively delete all files and folders in a directory\n"
+        "\n"
+        "Examples:\n"
+        "  prm file.txt\n"
+        "  prm *.log\n"
+        "  prm -r my_folder\n"
+        "  prm file1.txt file2.txt *.tmp\n");
+  }
+
+  bool recursive = false;
+  vector<str> args;
+  for(int i = 1; i < argc; i++){
+    str a(argv[i]);
+    if(a == "-r") recursive = true;
+    else args.push_back(a);
   }
 
   // Collect all files to delete
-  for(int i = 1; i < argc; i++){
-    str pattern(argv[i]);
+  for(auto& pattern : args){
+    struct stat st;
 
-    // Use glob to expand patterns (e.g., *.txt)
+    if(recursive && stat(pattern.c_str(), &st) == 0 && S_ISDIR(st.st_mode)){
+      cout << "Collecting files recursively from: " << pattern << endl;
+      collect_recursive(pattern);
+      continue;
+    }
+
     glob_t glob_result;
     memset(&glob_result, 0, sizeof(glob_result));
-
     int ret = glob(pattern.c_str(), GLOB_TILDE, NULL, &glob_result);
 
     if(ret == 0){
-      // Pattern matched files
       for(size_t j = 0; j < glob_result.gl_pathc; j++){
         str filepath(glob_result.gl_pathv[j]);
-
-        // Check if it's a regular file (not a directory)
-        struct stat st;
         if(stat(filepath.c_str(), &st) == 0){
           if(S_ISREG(st.st_mode)){
             g_files_to_delete.push_back(filepath);
           }
           else if(S_ISDIR(st.st_mode)){
-            cout << "Skipping directory: " << filepath << " (use rm -r for directories)" << endl;
+            cout << "Skipping directory: " << filepath << " (use -r for directories)" << endl;
           }
           else{
             cout << "Skipping non-regular file: " << filepath << endl;
@@ -81,14 +146,12 @@ int main(int argc, char *argv[]){
       globfree(&glob_result);
     }
     else if(ret == GLOB_NOMATCH){
-      // No matches - check if it's a specific file
-      struct stat st;
       if(stat(pattern.c_str(), &st) == 0){
         if(S_ISREG(st.st_mode)){
           g_files_to_delete.push_back(pattern);
         }
         else if(S_ISDIR(st.st_mode)){
-          cout << "Cannot remove directory: " << pattern << " (use rm -r for directories)" << endl;
+          cout << "Cannot remove directory: " << pattern << " (use -r for directories)" << endl;
         }
       }
       else{
@@ -108,7 +171,6 @@ int main(int argc, char *argv[]){
   g_total_files = g_files_to_delete.size();
   cout << "Found " << g_total_files << " files to delete." << endl;
 
-  // Ask for confirmation if deleting many files
   if(g_total_files > 10){
     cout << "Delete " << g_total_files << " files? (y/n): ";
     str response;
@@ -121,16 +183,24 @@ int main(int argc, char *argv[]){
     }
   }
 
-  // Initialize mutexes
   pthread_mutex_init(&print_mtx, NULL);
   pthread_mutex_init(&pt_nxt_j_mtx, NULL);
   pthread_mutex_init(&g_delete_mtx, NULL);
 
-  // Delete files in parallel
   cout << "\nDeleting files in parallel..." << endl;
   parfor(0, g_total_files, delete_file);
 
-  // Final progress update
+  // After files are deleted, remove empty directories
+  if(recursive){
+    cout << "\nRemoving empty directories..." << endl;
+    for(auto& pattern : args){
+      struct stat st;
+      if(stat(pattern.c_str(), &st) == 0 && S_ISDIR(st.st_mode)){
+        delete_empty_dirs(pattern);
+      }
+    }
+  }
+
   cout << "\n=== Deletion Summary ===" << endl;
   cout << "Total files processed: " << (g_deleted_count + g_failed_count) << "/" << g_total_files << endl;
   cout << "Successfully deleted: " << g_deleted_count << " files" << endl;
