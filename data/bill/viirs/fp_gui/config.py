@@ -8,10 +8,10 @@ Configuration and constants for the Fire Accumulation Viewer.
 DEFAULT_SCATTER_SIZE = 5
 
 # Animation interval in milliseconds
-DEFAULT_ANIMATION_INTERVAL_MS = 500
+DEFAULT_ANIMATION_INTERVAL_MS = 100
 
 # Max parallel threads for shapefile I/O
-MAX_WORKERS = 64
+MAX_WORKERS = 32
 
 # ---- Colour levels ----
 # Number of discrete colour levels from newest (red) to oldest (pale yellow).
@@ -36,5 +36,5 @@ FILENAME_DATETIME_PATTERN = r"(\d{8}T\d{4})"
 FILENAME_DATETIME_FORMAT = "%Y%m%dT%H%M"
 
 # Raster display defaults
-RASTER_ALPHA = 0.8
+RASTER_ALPHA = 1
 RASTER_CMAP = "gray"

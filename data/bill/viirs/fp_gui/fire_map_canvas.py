@@ -69,7 +69,11 @@ class FireMapCanvas:
 
         # Matplotlib figure — fixed axes positions
         self._fig = plt.figure(figsize=figsize, dpi=dpi)
-        self._ax = self._fig.add_axes([0.05, 0.05, 0.82, 0.90])
+        self._ax = self._fig.add_axes([0.01, 0.01, 0.86, 0.98])
+        self._ax.set_xticks([])
+        self._ax.set_yticks([])
+        for spine in self._ax.spines.values():
+            spine.set_visible(False)
         self._cbar_ax = self._fig.add_axes([0.90, 0.05, 0.02, 0.90])
         self._cbar_ax.set_visible(False)
 
@@ -105,6 +109,15 @@ class FireMapCanvas:
 
         # Click handling
         self._fig.canvas.mpl_connect("button_press_event", self._on_click)
+
+        # Zoom / pan detection — invalidate blit cache when user changes viewport
+        self._ignore_limits_change = False  # guard for our own set_xlim/set_ylim calls
+        self._ax.callbacks.connect("xlim_changed", self._on_limits_changed)
+        self._ax.callbacks.connect("ylim_changed", self._on_limits_changed)
+
+        # Resize detection — invalidate blit cache when canvas size changes
+        self._fig.canvas.mpl_connect("resize_event", self._on_resize)
+
         self._popup_window: Optional[tk.Toplevel] = None
         self._popup_tree = None
 
@@ -141,6 +154,13 @@ class FireMapCanvas:
         """Set a callable(pixel_index) -> pd.Series for popup details."""
         self._row_lookup_fn = fn
 
+    def reset_view(self):
+        """Reset viewport to the full raster/data extent."""
+        if self._raster_extent is not None:
+            self._set_extent_limits(self._raster_extent)
+            self._needs_full_redraw = True
+            self._canvas.draw_idle()
+
     # ------------------------------------------------------------------
     # Raster display — add / remove artist (not just set_visible)
     # ------------------------------------------------------------------
@@ -163,8 +183,7 @@ class FireMapCanvas:
         self._ax.set_facecolor("black")
         self._add_raster_artist()
 
-        self._ax.set_xlim(extent[0], extent[1])
-        self._ax.set_ylim(extent[2], extent[3])
+        self._set_extent_limits(extent)
         self._needs_full_redraw = True
         self._canvas.draw_idle()
 
@@ -223,8 +242,7 @@ class FireMapCanvas:
         """
         self._raster_extent = extent
         self._ax.set_facecolor("black")
-        self._ax.set_xlim(extent[0], extent[1])
-        self._ax.set_ylim(extent[2], extent[3])
+        self._set_extent_limits(extent)
         self._needs_full_redraw = True
         self._canvas.draw_idle()
 
@@ -240,7 +258,7 @@ class FireMapCanvas:
             self._needs_full_redraw = True
             self._canvas.draw_idle()
 
-    def update_scatter(self, x, y, ages, indices, n_levels=None):
+    def update_scatter(self, x, y, ages, indices, n_levels=None, max_points=None):
         """
         Redraw fire-pixel scatter from pure numpy arrays.
 
@@ -253,7 +271,11 @@ class FireMapCanvas:
         ages : np.ndarray — age in days per pixel
         indices : np.ndarray — master row indices (for click lookup)
         n_levels : int, optional — override N_COLOUR_LEVELS
+        max_points : int, optional — if set, subsample to at most this
+            many points (uniform stride).  Used during slider drag for
+            responsive scrubbing.  Pass None for full resolution.
         """
+        # Always store full data for click lookups
         self._frame_x = x
         self._frame_y = y
         self._frame_indices = indices
@@ -270,6 +292,14 @@ class FireMapCanvas:
             self._blit_background = None
             return
 
+        # ── Decimation: uniform stride to keep at most max_points ──
+        draw_x, draw_y, draw_ages = x, y, ages
+        if max_points is not None and len(x) > max_points:
+            stride = max(1, len(x) // max_points)
+            draw_x = x[::stride]
+            draw_y = y[::stride]
+            draw_ages = ages[::stride]
+
         # Map age → colour index (0 = newest, n-1 = oldest, clamped)
         n = n_levels or self._n_levels
         if n != self._n_levels:
@@ -277,23 +307,23 @@ class FireMapCanvas:
             self._colour_table = _build_colour_table(
                 n, COLOUR_NEWEST, COLOUR_OLDEST
             )
-        colour_idx = np.clip(ages, 0, n - 1).astype(int)
+            # Rebuild colorbar to match new levels
+            if self._colorbar is not None:
+                self._cbar_ax.clear()
+                self._colorbar = None
+            self._needs_full_redraw = True
+        colour_idx = np.clip(draw_ages, 0, n - 1).astype(int)
         colours = self._colour_table[colour_idx]
 
         self._scatter = self._ax.scatter(
-            x, y, c=colours, s=self._scatter_size,
+            draw_x, draw_y, c=colours, s=self._scatter_size,
             edgecolors="none", zorder=5,
         )
         self._scatter.set_visible(self._scatter_visible)
 
-        # Create colourbar once
+        # Create or recreate colourbar
         if self._colorbar is None:
             self._create_colorbar()
-
-        # Lock viewport to raster / data extent
-        if self._raster_extent is not None:
-            self._ax.set_xlim(self._raster_extent[0], self._raster_extent[1])
-            self._ax.set_ylim(self._raster_extent[2], self._raster_extent[3])
 
         # ── Blitting path ──
         # Full draw only when background has changed (raster toggled,
@@ -343,6 +373,31 @@ class FireMapCanvas:
         tick_positions = np.linspace(0, self._n_levels, 6)
         self._colorbar.set_ticks(tick_positions)
         self._colorbar.set_ticklabels([str(int(t)) for t in tick_positions])
+
+    # ------------------------------------------------------------------
+    # Zoom / pan detection
+    # ------------------------------------------------------------------
+
+    def _on_limits_changed(self, _ax):
+        """
+        Called when axes xlim or ylim change (user zoom/pan via toolbar).
+        Invalidates the blit cache so the next frame does a full redraw
+        with the new viewport.
+        """
+        if not self._ignore_limits_change:
+            self._needs_full_redraw = True
+
+    def _set_extent_limits(self, extent):
+        """Set axis limits from extent without triggering blit invalidation."""
+        self._ignore_limits_change = True
+        self._ax.set_xlim(extent[0], extent[1])
+        self._ax.set_ylim(extent[2], extent[3])
+        self._ignore_limits_change = False
+
+    def _on_resize(self, _event):
+        """Canvas resized (e.g. controls collapsed/expanded). Invalidate blit cache."""
+        self._blit_background = None
+        self._needs_full_redraw = True
 
     # ------------------------------------------------------------------
     # Click → popup

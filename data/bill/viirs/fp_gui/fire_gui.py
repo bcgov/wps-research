@@ -109,6 +109,15 @@ class FireAccumulationGUI:
         self._pixel_count_var = tk.StringVar(value="Pixels: 0")
         self._updating_slider = False  # guard against slider ↔ frame loop
 
+        # Slider throttle / decimate state
+        self._slider_throttle_id = None   # after() id for deferred render
+        self._slider_release_id = None    # after() id for full-res render on "release"
+        self._slider_dragging = False     # True while slider is being dragged
+        self._slider_pending_val = None   # latest slider value not yet rendered
+        self._SLIDER_THROTTLE_MS = 30     # min ms between renders during drag
+        self._SLIDER_RELEASE_MS = 150     # ms of silence before full-res render
+        self._SLIDER_MAX_POINTS = 5000    # max points during drag (decimation)
+
         self._build_ui()
 
         self._animator = FireAnimationController(
@@ -125,21 +134,52 @@ class FireAccumulationGUI:
         ctrl = ttk.LabelFrame(self._root, text="Controls", padding=8)
         ctrl.pack(side=tk.TOP, fill=tk.X, padx=6, pady=4)
 
-        self._build_file_controls(ctrl)
-        self._build_date_controls(ctrl)
+        # Collapsible container for file + date rows
+        self._setup_frame = ttk.Frame(ctrl)
+        self._setup_frame.pack(fill=tk.X)
+        self._setup_visible = True
+
+        self._build_file_controls(self._setup_frame)
+        self._build_date_controls(self._setup_frame)
+
         self._build_playback_controls(ctrl)
         self._build_display_controls(ctrl)
 
-        canvas_frame = ttk.Frame(self._root)
-        canvas_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-        self._canvas = FireMapCanvas(canvas_frame, figsize=(11, 7), dpi=100)
+        # ── Collapse handle: small centered bar at bottom of controls ──
+        handle_container = ttk.Frame(ctrl)
+        handle_container.pack(fill=tk.X, pady=(2, 0))
 
+        self._collapse_btn = tk.Button(
+            handle_container,
+            text="▲",
+            command=self._toggle_setup,
+            relief=tk.FLAT,
+            bd=0,
+            padx=20, pady=0,
+            font=("TkDefaultFont", 7),
+            fg="#888888",
+            activeforeground="#444444",
+            cursor="hand2",
+        )
+        self._collapse_btn.pack(anchor=tk.CENTER)
+        # Match button background to parent
+        try:
+            _bg = handle_container.winfo_toplevel().cget("background")
+            self._collapse_btn.configure(bg=_bg, activebackground=_bg)
+        except Exception:
+            pass
+
+        # Status bar — pack BEFORE canvas so it always claims space at the bottom
         status = ttk.Frame(self._root, padding=4)
         status.pack(side=tk.BOTTOM, fill=tk.X)
         ttk.Label(status, textvariable=self._status_var).pack(side=tk.LEFT)
         ttk.Label(status, textvariable=self._pixel_count_var).pack(side=tk.RIGHT, padx=15)
         ttk.Label(status, textvariable=self._frame_label_var).pack(side=tk.RIGHT, padx=15)
         ttk.Label(status, textvariable=self._date_label_var).pack(side=tk.RIGHT, padx=15)
+
+        canvas_frame = ttk.Frame(self._root)
+        canvas_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        self._canvas = FireMapCanvas(canvas_frame, figsize=(11, 7), dpi=100)
 
     def _build_file_controls(self, parent):
         row = ttk.Frame(parent)
@@ -183,25 +223,25 @@ class FireAccumulationGUI:
 
     def _build_playback_controls(self, parent):
         # Row 1: core playback
-        row1 = ttk.Frame(parent)
-        row1.pack(fill=tk.X, pady=2)
+        self._playback_row = ttk.Frame(parent)
+        self._playback_row.pack(fill=tk.X, pady=2)
 
-        self._play_btn = ttk.Button(row1, text="▶  Play", command=self._toggle_play, width=10)
+        self._play_btn = ttk.Button(self._playback_row, text="▶  Play", command=self._toggle_play, width=10)
         self._play_btn.pack(side=tk.LEFT, padx=2)
-        ttk.Button(row1, text="← −1 Day", command=self._step_back, width=10).pack(side=tk.LEFT, padx=2)
-        ttk.Button(row1, text="+1 Day →", command=self._step_fwd, width=10).pack(side=tk.LEFT, padx=2)
-        ttk.Button(row1, text="⏹  Reset", command=self._reset_animation, width=9).pack(side=tk.LEFT, padx=2)
+        ttk.Button(self._playback_row, text="← −1 Day", command=self._step_back, width=10).pack(side=tk.LEFT, padx=2)
+        ttk.Button(self._playback_row, text="+1 Day →", command=self._step_fwd, width=10).pack(side=tk.LEFT, padx=2)
+        ttk.Button(self._playback_row, text="⏹  Reset", command=self._reset_animation, width=9).pack(side=tk.LEFT, padx=2)
 
-        ttk.Separator(row1, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=8, fill=tk.Y)
+        ttk.Separator(self._playback_row, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=8, fill=tk.Y)
 
-        ttk.Label(row1, text="Speed (ms):").pack(side=tk.LEFT)
-        ttk.Spinbox(row1, from_=50, to=5000, increment=50,
+        ttk.Label(self._playback_row, text="Speed (ms):").pack(side=tk.LEFT)
+        ttk.Spinbox(self._playback_row, from_=50, to=5000, increment=50,
                      textvariable=self._interval_var, width=6,
                      command=self._update_speed).pack(side=tk.LEFT, padx=4)
 
-        ttk.Separator(row1, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=8, fill=tk.Y)
-        ttk.Label(row1, text="Frame:").pack(side=tk.LEFT)
-        self._frame_slider = ttk.Scale(row1, from_=0, to=1, orient=tk.HORIZONTAL,
+        ttk.Separator(self._playback_row, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=8, fill=tk.Y)
+        ttk.Label(self._playback_row, text="Frame:").pack(side=tk.LEFT)
+        self._frame_slider = ttk.Scale(self._playback_row, from_=0, to=1, orient=tk.HORIZONTAL,
                                         command=self._on_slider)
         self._frame_slider.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
 
@@ -277,8 +317,9 @@ class FireAccumulationGUI:
         f = filedialog.askopenfilename(
             title="Select raster file",
             filetypes=[
+                ("ENVI binary", "*.bin"),
                 ("ENVI header", "*.hdr"),
-                ("ENVI data", "*.bin *.dat *.img *.bsq *.bil *.bip"),
+                ("ENVI data", "*.dat *.img *.bsq *.bil *.bip"),
                 ("GeoTIFF", "*.tif *.tiff"),
                 ("All files", "*.*"),
             ],
@@ -513,6 +554,19 @@ class FireAccumulationGUI:
         self._date_label_var.set(f"Date: {start}")
         self._on_animation_frame(start)
 
+    # ---- Setup collapse ----
+
+    def _toggle_setup(self):
+        """Show/hide the file + date rows to give more space to the map."""
+        if self._setup_visible:
+            self._setup_frame.pack_forget()
+            self._collapse_btn.config(text="▼")
+            self._setup_visible = False
+        else:
+            self._setup_frame.pack(fill=tk.X, before=self._playback_row)
+            self._collapse_btn.config(text="▲")
+            self._setup_visible = True
+
     # ---- Playback ----
 
     def _toggle_play(self):
@@ -549,6 +603,7 @@ class FireAccumulationGUI:
             self._animator.stop()
             self._play_btn.config(text="▶  Play")
             self._canvas.clear()
+            self._canvas.reset_view()
             self._frame_slider.set(0)
             self._date_label_var.set("Date: —")
 
@@ -571,10 +626,86 @@ class FireAccumulationGUI:
             self._canvas.set_scatter_visible(self._show_fire_var.get())
 
     def _on_slider(self, val):
+        """
+        Throttled slider handler.
+
+        Instead of rendering on every mouse-pixel of slider movement,
+        we defer the render by _SLIDER_THROTTLE_MS.  If a new slider
+        event arrives before the timer fires, the old one is cancelled.
+        During drag we render with decimation (max _SLIDER_MAX_POINTS).
+        After the slider stops moving for _SLIDER_RELEASE_MS, we do
+        one final full-resolution render.
+        """
         if self._updating_slider:
             return
-        if self._animator and not self._animator.is_playing:
-            self._animator.jump_to(int(float(val)))
+        if not self._animator or self._animator.is_playing:
+            return
+
+        self._slider_pending_val = int(float(val))
+        self._slider_dragging = True
+
+        # Cancel previous deferred render
+        if self._slider_throttle_id is not None:
+            self._root.after_cancel(self._slider_throttle_id)
+        # Cancel previous release timer
+        if self._slider_release_id is not None:
+            self._root.after_cancel(self._slider_release_id)
+
+        # Schedule throttled decimated render
+        self._slider_throttle_id = self._root.after(
+            self._SLIDER_THROTTLE_MS, self._slider_deferred_render
+        )
+
+    def _slider_deferred_render(self):
+        """Render current slider position with decimation for speed."""
+        self._slider_throttle_id = None
+        val = self._slider_pending_val
+        if val is None:
+            return
+
+        self._animator.jump_to(val)
+        current_date = self._animator.current_date
+        if current_date is None:
+            return
+
+        fd = self._data_mgr.get_frame(current_date)
+
+        # Update labels immediately (cheap)
+        self._date_label_var.set(f"Date: {current_date}")
+        idx = self._animator.current_index
+        total = self._animator.total_frames
+        self._frame_label_var.set(f"Frame: {idx + 1} / {total}")
+        self._pixel_count_var.set(f"Pixels: {fd.n_pixels}")
+
+        # Render with decimation
+        self._canvas.scatter_size = self._scatter_size_var.get()
+        self._canvas.update_scatter(
+            fd.x, fd.y, fd.ages, fd.indices,
+            n_levels=self._n_levels_var.get(),
+            max_points=self._SLIDER_MAX_POINTS,
+        )
+
+        # Schedule full-res render on "release" (no new slider events)
+        self._slider_release_id = self._root.after(
+            self._SLIDER_RELEASE_MS, self._slider_full_render
+        )
+
+    def _slider_full_render(self):
+        """Render at full resolution once the slider stops moving."""
+        self._slider_release_id = None
+        self._slider_dragging = False
+
+        if not self._animator or self._animator.current_date is None:
+            return
+
+        current_date = self._animator.current_date
+        fd = self._data_mgr.get_frame(current_date)
+
+        self._canvas.scatter_size = self._scatter_size_var.get()
+        self._canvas.update_scatter(
+            fd.x, fd.y, fd.ages, fd.indices,
+            n_levels=self._n_levels_var.get(),
+        )
 
     # ---- Animation frame ----
 
