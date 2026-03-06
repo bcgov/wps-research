@@ -70,8 +70,8 @@ global downloadStartDay, downloadEndDay
 # These integer variables define the date ranges for the downloads, in YYYYMMDD format.
 # NOTE: downloadEndDay is EXCLUSIVE.
 # These variables are used for VIIRS LAADS DAAC downloads.
-downloadStartDay  = 20250820
-downloadEndDay    = 20250910
+downloadStartDay  = 20230301
+downloadEndDay    = 20251031
 
 # This string variable specifies the LAADS DAAC authentication token to use for the download.
 # Used for VIIRS data from LAADS DAAC.
@@ -87,7 +87,7 @@ with open('/data/.tokens/laads', 'r') as fh:
 #            YYYY is the string formatted four-digit year of the current download day; and
 #            DDD is the string formatted three-digit Julian day of the year.
 # Used for VIIRS L1B data from LAADS DAAC.
-dirGFAS = '/data/bill/viirs_temp/'
+dirGFAS = '/data/bill/viirs_aoi/'
 
 # This string specifies the Administrative Area region name (such as "Canada") to restrict
 # the downloaded VIIRS data to.
@@ -135,7 +135,7 @@ def loop_through_download(downloadDay):
         f"https://ladsweb.modaps.eosdis.nasa.gov/api/v2/content/details?"
         f"products={product}&"
         f"temporalRanges={downloadDay.year}-{downloadDay.timetuple().tm_yday}&"
-        "regions=%5BBBOX%5DN53.159422%20S52.226225%20E-124.365817%20W-126.072180"
+        "regions=%5BBBOX%5DN59.944776%20S51.666160%20E-113.803377%20W-130.518259"
     )
 
     

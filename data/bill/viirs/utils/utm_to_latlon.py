@@ -9,10 +9,10 @@ Usage: python utm_bbox_to_url.py
 from pyproj import Transformer
 
 # ── Edit these values ────────────────────────────────────────────────
-min_easting  = 699960
-min_northing = 5790240
-max_easting  = 809760
-max_northing = 5900040
+min_easting  =  721260.5140773350140080
+min_northing =  718554.7843868315685540
+max_easting  =  1633945.1592894759960473,
+max_northing =  1737034.4664664799347520
 utm_zone     = 9
 northern     = True
 # ─────────────────────────────────────────────────────────────────────

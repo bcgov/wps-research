@@ -11,7 +11,7 @@ DEFAULT_SCATTER_SIZE = 10
 DEFAULT_ANIMATION_INTERVAL_MS = 500
 
 # Max parallel threads for shapefile I/O
-MAX_WORKERS = 64
+MAX_WORKERS = 32
 
 # ---- Colour levels ----
 # Number of discrete colour levels from newest (red) to oldest (pale yellow).

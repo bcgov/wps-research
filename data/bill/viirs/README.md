@@ -12,14 +12,7 @@ The idea: you start with nothing, pull raw VIIRS NetCDF data from NASA, convert 
 
 ### 1. Figure out your bounding box
 
-You have a Sentinel-2 scene in UTM. You need lat/lon for the LAADS DAAC download URL.
-
-```bash
-python -m viirs.utils.utm_to_latlon
-```
-`current version`: specify utm coordinates in file.
-
-This prints `W`, `S`, `E`, `N` in lat/lon and a ready-to-paste `regions=` URL parameter for LAADS DAAC.
+You have a Sentinel-2 scene. You need lat/lon for the LAADS DAAC download URL. (Convert coordinates to `EPSG:4326` )
 
 ### 2. Download VIIRS VNP14IMG data
 
@@ -29,7 +22,7 @@ Edit `download_vnp14.py` — set your LAADS token, date range (`downloadStartDay
 python -m viirs.utils.download
 ```
 
-You get a directory tree: `VNP14IMG/YYYY/DDD/*.nc` — one NetCDF per granule.
+You get a directory tree: `VNP14IMG/YYYY/Julian date/*.nc` — one NetCDF per granule.
 
 ### 3. Convert NetCDF → shapefiles
 
@@ -50,7 +43,7 @@ python -m viirs.utils.shapify VNP14IMG.A2025245.1012.002.nc
 python -m viirs.utils.shapify (same as python -m viirs.utils.shapify .)
 ```
 
-**Recommendation for multiple zone usage**: flags of `utm-zone` and `hemisphere` are optional, if data span across multiple zones, this should not be used (it might distort the points).
+**Recommendation for multiple zone usage**: flags of `utm-zone` and `hemisphere` are optional, if data span across multiple zones, let shapify calculates it for you (it might distort the points).
 
 Output: `VIIRS_VNP14IMG_<YYYYMMDD>T<HHMM>.shp` next to each `.nc`.  
 The datetime in the filename is what the GUI uses for temporal ordering.
@@ -117,8 +110,7 @@ viirs/
     ├── download.py                  # Pull VNP14IMG from LAADS DAAC
     ├── shapify.py                   # .nc → .shp (UTM projected)
     ├── rasterize.py                 # .shp → binary raster on Sentinel-2 grid
-    ├── accumulate.py                # Merge shapefiles + age tracking
-    └── utm_to_latlon.py             # UTM bbox → lat/lon for LAADS URL
+    └── accumulate.py                # Merge shapefiles + age tracking
 ```
 
 ---
@@ -151,9 +143,6 @@ process_file("file.nc", utm_zone=9, hemisphere="N", bbox=[-126, 52, -124, 53])
 
 from viirs.utils.accumulate import accumulate
 gdf = accumulate("/data/shp", "20250401", "20250930")
-
-from viirs.utils.utm_to_latlon import utm_bbox_to_latlon
-w, s, e, n = utm_bbox_to_latlon(699960, 5790240, 809760, 5900040, zone=9)
 ```
 
 ---
