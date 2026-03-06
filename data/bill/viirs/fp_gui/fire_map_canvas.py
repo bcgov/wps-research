@@ -4,25 +4,42 @@ viirs/fp_gui/fire_map_canvas.py
 FireMapCanvas: matplotlib figure embedded in a tkinter frame.
 Renders using pure numpy arrays — no pandas during animation.
 
+Navigation (QGIS-style):
+    ZOOM_IN  — left-drag green rectangle → zoom to that area
+    ZOOM_OUT — left-drag red rectangle → zoom out (current view shrinks into rect)
+    PAN      — left-drag to pan the viewport
+
+    Scroll-wheel zoom works in every mode (up = in, down = out).
+    Right-click shows pixel detail popup in every mode.
+
 Performance:
-    - Blitting: the static background (raster + axes) is cached as a bitmap.
-      Each animation frame only redraws the scatter artist on top.
-    - Raster independence: toggling the raster off *removes* the imshow
-      artist entirely (not just set_visible), so matplotlib never touches
-      it during animation frames.  Toggling it back on recreates the artist
-      from cached image data.
+    - Raster is downsampled at load time (see raster_loader.py).
+    - Blitting: the static background (raster + axes) is cached.
+      Only the scatter artist is redrawn per frame.
+    - Pan draws are time-throttled to ~50 fps.
 """
 
+import time
 import tkinter as tk
 from tkinter import ttk
-from typing import Optional, List
+from typing import Optional, List, Callable, Tuple
 
 import numpy as np
 import pandas as pd
 import matplotlib
 matplotlib.use("TkAgg")
+
+# Disable ALL default matplotlib key bindings
+for _key in list(matplotlib.rcParams):
+    if _key.startswith("keymap."):
+        try:
+            matplotlib.rcParams[_key] = []
+        except (ValueError, TypeError):
+            pass
+
 import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.patches import Rectangle as MplRectangle
 from matplotlib.cm import ScalarMappable
 from matplotlib.colors import Normalize, LinearSegmentedColormap
 
@@ -36,14 +53,19 @@ from config import (
     DEFAULT_POPUP_COLUMNS,
 )
 
+# Navigation modes
+NAV_ZOOM_IN = "zoom_in"
+NAV_ZOOM_OUT = "zoom_out"
+NAV_PAN = "pan"
+
+_CURSORS = {
+    NAV_ZOOM_IN: "cross",
+    NAV_ZOOM_OUT: "cross",
+    NAV_PAN: "fleur",
+}
+
 
 def _build_colour_table(n_levels, newest_rgba, oldest_rgba):
-    """
-    Build an (n_levels, 4) RGBA lookup table.
-
-    Index 0 = newest (red), index n_levels-1 = oldest (pale yellow).
-    Each day ages the pixel by one index position.
-    """
     table = np.zeros((n_levels, 4), dtype=np.float32)
     for c in range(4):
         table[:, c] = np.linspace(newest_rgba[c], oldest_rgba[c], n_levels)
@@ -52,83 +74,112 @@ def _build_colour_table(n_levels, newest_rgba, oldest_rgba):
 
 class FireMapCanvas:
     """
-    Embeds a matplotlib figure inside a tkinter parent widget.
+    Embeds a matplotlib figure in a tkinter parent.
     Accepts pure numpy arrays for rendering — zero pandas per frame.
     """
 
-    def __init__(self, parent: tk.Widget, figsize=(10, 8), dpi=100):
+    def __init__(self, parent: tk.Widget, figsize=(11, 7), dpi=100):
         self._parent = parent
         self._scatter_size = DEFAULT_SCATTER_SIZE
         self._popup_columns: List[str] = list(DEFAULT_POPUP_COLUMNS)
 
-        # Build discrete colour lookup table
+        # Colour table
         self._n_levels = N_COLOUR_LEVELS
         self._colour_table = _build_colour_table(
             self._n_levels, COLOUR_NEWEST, COLOUR_OLDEST
         )
 
-        # Matplotlib figure — fixed axes positions
+        # ── Figure: white background, maximum space for the map ──
         self._fig = plt.figure(figsize=figsize, dpi=dpi)
-        self._ax = self._fig.add_axes([0.01, 0.01, 0.86, 0.98])
+        self._fig.patch.set_facecolor("white")
+
+        # Main axes: 93 % of figure width so the colorbar + labels fit in the rest
+        self._ax = self._fig.add_axes([0.0, 0.0, 0.93, 1.0])
+        self._ax.set_facecolor("white")
         self._ax.set_xticks([])
         self._ax.set_yticks([])
         for spine in self._ax.spines.values():
             spine.set_visible(False)
-        self._cbar_ax = self._fig.add_axes([0.90, 0.05, 0.02, 0.90])
+
+        # Thin colourbar axis
+        self._cbar_ax = self._fig.add_axes([0.935, 0.05, 0.014, 0.90])
         self._cbar_ax.set_visible(False)
 
+        # Embed — NO toolbar
         self._canvas = FigureCanvasTkAgg(self._fig, master=parent)
         self._canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        self._toolbar = NavigationToolbar2Tk(self._canvas, parent)
-        self._toolbar.update()
 
-        # ---- Raster state (stored independently of the matplotlib artist) ----
-        self._raster_im = None              # current imshow artist (or None)
-        self._raster_image = None           # numpy image array (cached for re-add)
-        self._raster_extent = None          # (left, right, bottom, top)
+        # ── Raster state ──
+        self._raster_im = None
+        self._raster_image = None          # display (downsampled) copy
+        self._raster_extent = None
         self._raster_cmap = RASTER_CMAP
         self._raster_alpha = RASTER_ALPHA
-        self._raster_visible = True         # user's toggle state
-        self._has_raster_data = False       # True once display_raster() succeeds
+        self._raster_visible = True
+        self._has_raster_data = False
 
-        # ---- Scatter state ----
+        # ── Scatter state ──
         self._scatter = None
         self._scatter_visible = True
         self._colorbar = None
 
-        # ---- Blitting ----
-        self._blit_background = None        # cached bitmap of axes background
-        self._needs_full_redraw = True      # force full draw on next frame
+        # ── Blitting ──
+        self._blit_background = None
+        self._needs_full_redraw = True
 
-        # Current frame data for click lookups
+        # ── Frame data (click / viewport count) ──
         self._frame_x: Optional[np.ndarray] = None
         self._frame_y: Optional[np.ndarray] = None
-        self._frame_indices: Optional[np.ndarray] = None  # master row indices
-        self._frame_ages: Optional[np.ndarray] = None     # current age per pixel
-        self._row_lookup_fn = None  # callable(int) -> pd.Series
+        self._frame_indices: Optional[np.ndarray] = None
+        self._frame_ages: Optional[np.ndarray] = None
+        self._row_lookup_fn = None
 
-        # Click handling
-        self._fig.canvas.mpl_connect("button_press_event", self._on_click)
+        # ── Navigation ──
+        self._nav_mode: str = NAV_PAN
 
-        # Zoom / pan detection — invalidate blit cache when user changes viewport
-        self._ignore_limits_change = False  # guard for our own set_xlim/set_ylim calls
+        # Zoom rectangle rubber-band
+        self._rect_start: Optional[Tuple[float, float]] = None
+        self._rect_patch: Optional[MplRectangle] = None
+        self._rect_bg = None            # canvas snapshot for rubber-band
+
+        # Pan drag
+        self._pan_start_px: Optional[Tuple[float, float]] = None
+        self._pan_xlim0 = None
+        self._pan_ylim0 = None
+        self._last_pan_draw: float = 0.0
+        self._PAN_MIN_DT: float = 0.020   # ≈ 50 fps cap
+
+        # View history
+        self._view_stack: List[Tuple[Tuple, Tuple]] = []
+        self._view_index: int = -1
+        self._home_extent: Optional[Tuple[float, float, float, float]] = None
+
+        # Viewport-change callback
+        self._on_viewport_changed_cb: Optional[Callable[[], None]] = None
+
+        # ── Mouse events ──
+        cid = self._fig.canvas.mpl_connect
+        cid("button_press_event",   self._on_mouse_press)
+        cid("button_release_event", self._on_mouse_release)
+        cid("motion_notify_event",  self._on_mouse_move)
+        cid("scroll_event",         self._on_scroll)
+        cid("resize_event",         self._on_resize)
+
+        # Limit-change detection (blit invalidation)
+        self._ignore_limits_change = False
         self._ax.callbacks.connect("xlim_changed", self._on_limits_changed)
         self._ax.callbacks.connect("ylim_changed", self._on_limits_changed)
 
-        # Resize detection — invalidate blit cache when canvas size changes
-        self._fig.canvas.mpl_connect("resize_event", self._on_resize)
-
+        # Popup
         self._popup_window: Optional[tk.Toplevel] = None
         self._popup_tree = None
+        self._popup_geometry: Optional[str] = None
+        self._popup_attr_width: Optional[int] = None
+        self._popup_val_width: Optional[int] = None
 
-        # Saved popup layout (persists across popup opens)
-        self._popup_geometry: Optional[str] = None       # e.g. "750x580+100+200"
-        self._popup_attr_width: Optional[int] = None     # attribute column px
-        self._popup_val_width: Optional[int] = None      # value column px
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
+    # ==================================================================
+    # Properties
+    # ==================================================================
 
     @property
     def scatter_size(self):
@@ -150,29 +201,107 @@ class FireMapCanvas:
     def raster_extent(self):
         return self._raster_extent
 
+    @property
+    def nav_mode(self) -> str:
+        return self._nav_mode
+
     def set_row_lookup(self, fn):
-        """Set a callable(pixel_index) -> pd.Series for popup details."""
         self._row_lookup_fn = fn
 
+    def set_on_viewport_changed(self, cb: Callable[[], None]):
+        self._on_viewport_changed_cb = cb
+
+    # ==================================================================
+    # Navigation mode
+    # ==================================================================
+
+    def set_nav_mode(self, mode: str):
+        self._nav_mode = mode
+        cursor = _CURSORS.get(mode, "arrow")
+        try:
+            self._canvas.get_tk_widget().config(cursor=cursor)
+        except tk.TclError:
+            pass
+
+    # ==================================================================
+    # View history / reset
+    # ==================================================================
+
+    def _push_view(self):
+        xlim = tuple(self._ax.get_xlim())
+        ylim = tuple(self._ax.get_ylim())
+        if (self._view_stack
+                and 0 <= self._view_index < len(self._view_stack)
+                and self._view_stack[self._view_index] == (xlim, ylim)):
+            return
+        self._view_stack = self._view_stack[: self._view_index + 1]
+        self._view_stack.append((xlim, ylim))
+        self._view_index = len(self._view_stack) - 1
+
+    def view_back(self):
+        if self._view_index > 0:
+            self._view_index -= 1
+            xlim, ylim = self._view_stack[self._view_index]
+            self._apply_view(xlim, ylim)
+
+    def view_forward(self):
+        if self._view_index < len(self._view_stack) - 1:
+            self._view_index += 1
+            xlim, ylim = self._view_stack[self._view_index]
+            self._apply_view(xlim, ylim)
+
+    def view_home(self):
+        self.reset_view()
+
     def reset_view(self):
-        """Reset viewport to the full raster/data extent."""
-        if self._raster_extent is not None:
-            self._set_extent_limits(self._raster_extent)
+        ext = self._home_extent or self._raster_extent
+        if ext is not None:
+            self._push_view()
+            self._set_extent_limits(ext)
+            self._push_view()
             self._needs_full_redraw = True
             self._canvas.draw_idle()
+            self._notify_viewport_changed()
 
-    # ------------------------------------------------------------------
-    # Raster display — add / remove artist (not just set_visible)
-    # ------------------------------------------------------------------
+    def _apply_view(self, xlim, ylim):
+        self._set_extent_limits((xlim[0], xlim[1], ylim[0], ylim[1]))
+        self._needs_full_redraw = True
+        self._canvas.draw_idle()
+        self._notify_viewport_changed()
+
+    # ==================================================================
+    # Viewport pixel count
+    # ==================================================================
+
+    def count_visible_pixels(self) -> int:
+        if self._frame_x is None or len(self._frame_x) == 0:
+            return 0
+        xlim = self._ax.get_xlim()
+        ylim = self._ax.get_ylim()
+        x_lo, x_hi = min(xlim), max(xlim)
+        y_lo, y_hi = min(ylim), max(ylim)
+        mask = (
+            (self._frame_x >= x_lo) & (self._frame_x <= x_hi)
+            & (self._frame_y >= y_lo) & (self._frame_y <= y_hi)
+        )
+        return int(mask.sum())
+
+    def _notify_viewport_changed(self):
+        if self._on_viewport_changed_cb:
+            try:
+                self._on_viewport_changed_cb()
+            except Exception:
+                pass
+
+    # ==================================================================
+    # Raster display
+    # ==================================================================
 
     def display_raster(self, image, extent, cmap=None, alpha=None):
-        """Load and display a raster background image."""
-        # Remove old artist if present
         if self._raster_im is not None:
             self._raster_im.remove()
             self._raster_im = None
 
-        # Cache the data so we can re-add the artist on toggle
         self._raster_extent = extent
         self._raster_image = image
         self._raster_cmap = cmap or RASTER_CMAP
@@ -180,78 +309,70 @@ class FireMapCanvas:
         self._has_raster_data = True
         self._raster_visible = True
 
-        self._ax.set_facecolor("black")
+        self._ax.set_facecolor("white")
         self._add_raster_artist()
-
         self._set_extent_limits(extent)
+        self._home_extent = extent
+
         self._needs_full_redraw = True
-        self._canvas.draw_idle()
+        self._canvas.draw()
+        self._push_view()
+        self._notify_viewport_changed()
 
     def _add_raster_artist(self):
-        """Create the imshow artist from cached data."""
         if self._raster_image is None or self._raster_extent is None:
             return
+        img, ext = self._raster_image, self._raster_extent
 
-        image = self._raster_image
-        extent = self._raster_extent
-
-        if image.ndim == 2:
+        if img.ndim == 2:
+            # Build cmap copy with NoData → white
+            cmap = plt.cm.get_cmap(self._raster_cmap).copy()
+            cmap.set_bad(color="white", alpha=1.0)
             self._raster_im = self._ax.imshow(
-                image, extent=extent, cmap=self._raster_cmap,
-                alpha=self._raster_alpha, aspect="equal", origin="upper",
+                np.ma.masked_invalid(img),
+                extent=ext, cmap=cmap,
+                alpha=self._raster_alpha, aspect="equal",
+                origin="upper", interpolation="nearest",
             )
         else:
             self._raster_im = self._ax.imshow(
-                image, extent=extent, alpha=self._raster_alpha,
-                aspect="equal", origin="upper",
+                img, extent=ext,
+                alpha=self._raster_alpha, aspect="equal",
+                origin="upper", interpolation="nearest",
             )
 
     def _remove_raster_artist(self):
-        """Remove the imshow artist entirely so matplotlib never touches it."""
         if self._raster_im is not None:
             self._raster_im.remove()
             self._raster_im = None
 
     def set_raster_visible(self, visible: bool):
-        """
-        Toggle the background raster on/off.
-
-        When off, the imshow artist is fully *removed* from the axes —
-        matplotlib will not process it at all during draw().
-        When turned back on, the artist is recreated from cached data.
-        This makes raster and scatter rendering truly independent.
-        """
         self._raster_visible = visible
-
         if not self._has_raster_data:
             return
-
         if visible:
             if self._raster_im is None:
                 self._add_raster_artist()
         else:
             self._remove_raster_artist()
-
         self._needs_full_redraw = True
         self._canvas.draw_idle()
 
     def set_black_background(self, extent):
-        """
-        Set a pure black background with the given extent.
-        Used when no raster is loaded.
-        """
+        """Set extent for data-only mode (no raster). Background is white now."""
         self._raster_extent = extent
-        self._ax.set_facecolor("black")
+        self._ax.set_facecolor("white")
         self._set_extent_limits(extent)
+        self._home_extent = extent
         self._needs_full_redraw = True
-        self._canvas.draw_idle()
+        self._canvas.draw()
+        self._push_view()
 
-    # ------------------------------------------------------------------
+    # ==================================================================
     # Scatter display
-    # ------------------------------------------------------------------
+    # ==================================================================
 
     def set_scatter_visible(self, visible: bool):
-        """Toggle fire pixel scatter on/off."""
         self._scatter_visible = visible
         if self._scatter is not None:
             self._scatter.set_visible(visible)
@@ -259,29 +380,12 @@ class FireMapCanvas:
             self._canvas.draw_idle()
 
     def update_scatter(self, x, y, ages, indices, n_levels=None, max_points=None):
-        """
-        Redraw fire-pixel scatter from pure numpy arrays.
-
-        Uses blitting: the static background (raster + axes chrome) is
-        cached as a bitmap.  Only the scatter artist is redrawn per frame.
-
-        Parameters
-        ----------
-        x, y : np.ndarray — coordinates
-        ages : np.ndarray — age in days per pixel
-        indices : np.ndarray — master row indices (for click lookup)
-        n_levels : int, optional — override N_COLOUR_LEVELS
-        max_points : int, optional — if set, subsample to at most this
-            many points (uniform stride).  Used during slider drag for
-            responsive scrubbing.  Pass None for full resolution.
-        """
-        # Always store full data for click lookups
+        """Redraw fire-pixel scatter from pure numpy arrays."""
         self._frame_x = x
         self._frame_y = y
         self._frame_indices = indices
         self._frame_ages = ages
 
-        # Remove old scatter
         if self._scatter is not None:
             self._scatter.remove()
             self._scatter = None
@@ -292,7 +396,7 @@ class FireMapCanvas:
             self._blit_background = None
             return
 
-        # ── Decimation: uniform stride to keep at most max_points ──
+        # Decimation for slider drag
         draw_x, draw_y, draw_ages = x, y, ages
         if max_points is not None and len(x) > max_points:
             stride = max(1, len(x) // max_points)
@@ -300,18 +404,16 @@ class FireMapCanvas:
             draw_y = y[::stride]
             draw_ages = ages[::stride]
 
-        # Map age → colour index (0 = newest, n-1 = oldest, clamped)
+        # Colour lookup
         n = n_levels or self._n_levels
         if n != self._n_levels:
             self._n_levels = n
-            self._colour_table = _build_colour_table(
-                n, COLOUR_NEWEST, COLOUR_OLDEST
-            )
-            # Rebuild colorbar to match new levels
+            self._colour_table = _build_colour_table(n, COLOUR_NEWEST, COLOUR_OLDEST)
             if self._colorbar is not None:
                 self._cbar_ax.clear()
                 self._colorbar = None
             self._needs_full_redraw = True
+
         colour_idx = np.clip(draw_ages, 0, n - 1).astype(int)
         colours = self._colour_table[colour_idx]
 
@@ -321,14 +423,10 @@ class FireMapCanvas:
         )
         self._scatter.set_visible(self._scatter_visible)
 
-        # Create or recreate colourbar
         if self._colorbar is None:
             self._create_colorbar()
 
-        # ── Blitting path ──
-        # Full draw only when background has changed (raster toggled,
-        # first frame, resize, etc).  Otherwise restore cached background
-        # and redraw only the scatter artist.
+        # Blitting
         if self._needs_full_redraw or self._blit_background is None:
             self._canvas.draw()
             self._blit_background = self._canvas.copy_from_bbox(self._ax.bbox)
@@ -349,18 +447,14 @@ class FireMapCanvas:
         self._needs_full_redraw = True
         self._canvas.draw_idle()
 
-    # ------------------------------------------------------------------
-    # Colourbar — created once
-    # ------------------------------------------------------------------
+    # ==================================================================
+    # Colourbar
+    # ==================================================================
 
     def _create_colorbar(self):
         self._cbar_ax.set_visible(True)
-
-        # Build a colourmap from our table
         cmap = LinearSegmentedColormap.from_list(
-            "fire_age",
-            [COLOUR_NEWEST, COLOUR_OLDEST],
-            N=self._n_levels,
+            "fire_age", [COLOUR_NEWEST, COLOUR_OLDEST], N=self._n_levels,
         )
         norm = Normalize(vmin=0, vmax=self._n_levels)
         sm = ScalarMappable(cmap=cmap, norm=norm)
@@ -368,52 +462,235 @@ class FireMapCanvas:
         self._colorbar = self._fig.colorbar(
             sm, cax=self._cbar_ax, orientation="vertical",
         )
-        # Label ticks
         self._cbar_ax.set_ylabel("Age (days)")
-        tick_positions = np.linspace(0, self._n_levels, 6)
-        self._colorbar.set_ticks(tick_positions)
-        self._colorbar.set_ticklabels([str(int(t)) for t in tick_positions])
+        ticks = np.linspace(0, self._n_levels, 6)
+        self._colorbar.set_ticks(ticks)
+        self._colorbar.set_ticklabels([str(int(t)) for t in ticks])
 
-    # ------------------------------------------------------------------
-    # Zoom / pan detection
-    # ------------------------------------------------------------------
+    # ==================================================================
+    # Mouse routing
+    # ==================================================================
 
-    def _on_limits_changed(self, _ax):
-        """
-        Called when axes xlim or ylim change (user zoom/pan via toolbar).
-        Invalidates the blit cache so the next frame does a full redraw
-        with the new viewport.
-        """
-        if not self._ignore_limits_change:
+    def _on_mouse_press(self, event):
+        if event.inaxes != self._ax:
+            return
+
+        # Right-click → popup (in any mode)
+        if event.button == 3:
+            self._try_popup(event)
+            return
+
+        if event.button != 1:
+            return
+
+        if self._nav_mode in (NAV_ZOOM_IN, NAV_ZOOM_OUT):
+            self._rect_press(event)
+        elif self._nav_mode == NAV_PAN:
+            self._pan_press(event)
+
+    def _on_mouse_release(self, event):
+        if self._nav_mode in (NAV_ZOOM_IN, NAV_ZOOM_OUT):
+            self._rect_release(event)
+        elif self._nav_mode == NAV_PAN:
+            self._pan_release(event)
+
+    def _on_mouse_move(self, event):
+        if self._nav_mode in (NAV_ZOOM_IN, NAV_ZOOM_OUT):
+            self._rect_move(event)
+        elif self._nav_mode == NAV_PAN:
+            self._pan_move(event)
+
+    def _on_scroll(self, event):
+        if event.inaxes != self._ax:
+            return
+        if event.xdata is None or event.ydata is None:
+            return
+        factor = 0.75 if event.button == "up" else 1.333
+        self._zoom_at(event.xdata, event.ydata, factor)
+
+    # ==================================================================
+    # Rectangle zoom (shared for ZOOM_IN and ZOOM_OUT)
+    # ==================================================================
+
+    def _rect_press(self, event):
+        if event.xdata is None or event.ydata is None:
+            return
+        self._rect_start = (event.xdata, event.ydata)
+
+        # Colour depends on mode
+        if self._nav_mode == NAV_ZOOM_IN:
+            fc = (0.0, 0.7, 0.0, 0.15)
+            ec = (0.0, 0.7, 0.0, 0.80)
+        else:
+            fc = (0.8, 0.0, 0.0, 0.15)
+            ec = (0.8, 0.0, 0.0, 0.80)
+
+        self._rect_patch = MplRectangle(
+            (event.xdata, event.ydata), 0, 0,
+            fill=True, facecolor=fc, edgecolor=ec,
+            linewidth=1.5, linestyle="--", zorder=100,
+        )
+        self._ax.add_patch(self._rect_patch)
+        self._canvas.draw()
+        self._rect_bg = self._canvas.copy_from_bbox(self._ax.bbox)
+
+    def _rect_move(self, event):
+        if self._rect_start is None or self._rect_patch is None:
+            return
+        if event.inaxes != self._ax or event.xdata is None:
+            return
+        x0, y0 = self._rect_start
+        x1, y1 = event.xdata, event.ydata
+        self._rect_patch.set_xy((min(x0, x1), min(y0, y1)))
+        self._rect_patch.set_width(abs(x1 - x0))
+        self._rect_patch.set_height(abs(y1 - y0))
+
+        if self._rect_bg is not None:
+            self._canvas.restore_region(self._rect_bg)
+            self._ax.draw_artist(self._rect_patch)
+            self._canvas.blit(self._ax.bbox)
+
+    def _rect_release(self, event):
+        if self._rect_start is None:
+            return
+
+        # Clean up patch
+        if self._rect_patch is not None:
+            self._rect_patch.remove()
+            self._rect_patch = None
+        self._rect_bg = None
+
+        x0, y0 = self._rect_start
+        self._rect_start = None
+
+        if event.inaxes != self._ax or event.xdata is None:
             self._needs_full_redraw = True
+            self._canvas.draw_idle()
+            return
 
-    def _set_extent_limits(self, extent):
-        """Set axis limits from extent without triggering blit invalidation."""
+        x1, y1 = event.xdata, event.ydata
+        rw = abs(x1 - x0)
+        rh = abs(y1 - y0)
+
+        xlim = self._ax.get_xlim()
+        ylim = self._ax.get_ylim()
+        vw = xlim[1] - xlim[0]
+        vh = ylim[1] - ylim[0]
+
+        # Ignore tiny accidental clicks (< 1 % of view)
+        if rw < vw * 0.01 or rh < vh * 0.01:
+            self._needs_full_redraw = True
+            self._canvas.draw_idle()
+            return
+
+        self._push_view()
+
+        if self._nav_mode == NAV_ZOOM_IN:
+            # Zoom to rectangle
+            new_ext = (min(x0, x1), max(x0, x1), min(y0, y1), max(y0, y1))
+            self._set_extent_limits(new_ext)
+        else:
+            # Zoom OUT: current view shrinks into the drawn rectangle.
+            # The drawn rect center becomes the new view center.
+            # Scale = view_size / rect_size  (>1, so we zoom out).
+            cx = (x0 + x1) * 0.5
+            cy = (y0 + y1) * 0.5
+            sx = vw / rw
+            sy = vh / rh
+            s = max(sx, sy)
+            new_hw = vw * s * 0.5
+            new_hh = vh * s * 0.5
+            new_ext = (cx - new_hw, cx + new_hw, cy - new_hh, cy + new_hh)
+            self._set_extent_limits(new_ext)
+
+        self._push_view()
+        self._needs_full_redraw = True
+        self._canvas.draw_idle()
+        self._notify_viewport_changed()
+
+    # ==================================================================
+    # Pan
+    # ==================================================================
+
+    def _pan_press(self, event):
+        if event.xdata is None:
+            return
+        self._pan_start_px = (event.x, event.y)
+        self._pan_xlim0 = self._ax.get_xlim()
+        self._pan_ylim0 = self._ax.get_ylim()
+
+    def _pan_move(self, event):
+        if self._pan_start_px is None:
+            return
+        if event.x is None or event.y is None:
+            return
+
+        dx_px = event.x - self._pan_start_px[0]
+        dy_px = event.y - self._pan_start_px[1]
+
+        bbox = self._ax.get_window_extent()
+        if bbox.width == 0 or bbox.height == 0:
+            return
+
+        xlim = self._pan_xlim0
+        ylim = self._pan_ylim0
+        dx = -(dx_px / bbox.width)  * (xlim[1] - xlim[0])
+        dy = -(dy_px / bbox.height) * (ylim[1] - ylim[0])
+
         self._ignore_limits_change = True
-        self._ax.set_xlim(extent[0], extent[1])
-        self._ax.set_ylim(extent[2], extent[3])
+        self._ax.set_xlim(xlim[0] + dx, xlim[1] + dx)
+        self._ax.set_ylim(ylim[0] + dy, ylim[1] + dy)
         self._ignore_limits_change = False
 
-    def _on_resize(self, _event):
-        """Canvas resized (e.g. controls collapsed/expanded). Invalidate blit cache."""
-        self._blit_background = None
-        self._needs_full_redraw = True
+        # Throttled draw
+        now = time.monotonic()
+        if now - self._last_pan_draw >= self._PAN_MIN_DT:
+            self._needs_full_redraw = True
+            self._canvas.draw()
+            self._last_pan_draw = now
 
-    # ------------------------------------------------------------------
-    # Click → popup
-    # ------------------------------------------------------------------
-
-    def _on_click(self, event):
-        if event.inaxes != self._ax or event.button != 1:
+    def _pan_release(self, event):
+        if self._pan_start_px is None:
             return
+        self._pan_start_px = None
+        # Final draw at release (full quality)
+        self._needs_full_redraw = True
+        self._canvas.draw()
+        self._push_view()
+        self._notify_viewport_changed()
+
+    # ==================================================================
+    # Scroll-wheel zoom helper
+    # ==================================================================
+
+    def _zoom_at(self, cx, cy, factor):
+        """Zoom centred on (cx, cy).  factor < 1 = zoom in."""
+        xlim = self._ax.get_xlim()
+        ylim = self._ax.get_ylim()
+        hw = (xlim[1] - xlim[0]) * 0.5 * factor
+        hh = (ylim[1] - ylim[0]) * 0.5 * factor
+
+        self._push_view()
+        self._set_extent_limits((cx - hw, cx + hw, cy - hh, cy + hh))
+        self._push_view()
+        self._needs_full_redraw = True
+        self._canvas.draw()
+        self._notify_viewport_changed()
+
+    # ==================================================================
+    # Right-click popup
+    # ==================================================================
+
+    def _try_popup(self, event):
         if self._frame_x is None or len(self._frame_x) == 0:
+            return
+        if event.xdata is None:
             return
 
         dists = (self._frame_x - event.xdata) ** 2 + \
                 (self._frame_y - event.ydata) ** 2
         idx = int(np.argmin(dists))
 
-        # Threshold: within 1.5% of axis range
         xlim = self._ax.get_xlim()
         threshold = (0.015 * (xlim[1] - xlim[0])) ** 2
         if dists[idx] > threshold:
@@ -426,8 +703,29 @@ class FireMapCanvas:
             if row is not None:
                 self._show_popup(row, current_age)
 
+    # ==================================================================
+    # Axis-limit helpers
+    # ==================================================================
+
+    def _on_limits_changed(self, _ax):
+        if not self._ignore_limits_change:
+            self._needs_full_redraw = True
+
+    def _set_extent_limits(self, extent):
+        self._ignore_limits_change = True
+        self._ax.set_xlim(extent[0], extent[1])
+        self._ax.set_ylim(extent[2], extent[3])
+        self._ignore_limits_change = False
+
+    def _on_resize(self, _event):
+        self._blit_background = None
+        self._needs_full_redraw = True
+
+    # ==================================================================
+    # Popup window
+    # ==================================================================
+
     def _show_popup(self, row: pd.Series, current_age: int):
-        # Save settings from previous popup before destroying
         if self._popup_window is not None:
             self._save_popup_settings()
             try:
@@ -437,13 +735,10 @@ class FireMapCanvas:
 
         self._popup_window = tk.Toplevel(self._parent)
         self._popup_window.title("Fire Pixel Details")
-
-        # Restore saved geometry or use default
         if self._popup_geometry:
             self._popup_window.geometry(self._popup_geometry)
         else:
             self._popup_window.geometry("750x580")
-
         self._popup_window.attributes("-topmost", True)
         self._popup_window.resizable(True, True)
         self._popup_window.protocol("WM_DELETE_WINDOW", self._close_popup)
@@ -456,12 +751,10 @@ class FireMapCanvas:
         frame.columnconfigure(0, weight=1)
         frame.rowconfigure(0, weight=1)
 
-        # Style
         style = ttk.Style()
         style.configure("Popup.Treeview", rowheight=28, font=("Consolas", 11))
         style.configure("Popup.Treeview.Heading", font=("Consolas", 11, "bold"))
 
-        # Collect all rows first
         def _fmt(val):
             if isinstance(val, float):
                 return f"{val:.8f}"
@@ -473,56 +766,50 @@ class FireMapCanvas:
                 rows_data.append(("age_days", str(current_age)))
             elif col in row.index:
                 rows_data.append((col, _fmt(row[col])))
-
         for col in row.index:
             if col not in self._popup_columns and col not in ("geometry", "age_days"):
                 rows_data.append((col, _fmt(row[col])))
 
-        # Column widths: use saved or auto-compute
         max_attr_len = max((len(r[0]) for r in rows_data), default=10)
-        attr_width = self._popup_attr_width or max(max_attr_len * 11, 180)
-        val_width = self._popup_val_width or 450
+        attr_w = self._popup_attr_width or max(max_attr_len * 11, 180)
+        val_w = self._popup_val_width or 450
 
         self._popup_tree = ttk.Treeview(
             frame, columns=("attribute", "value"), show="headings",
-            style="Popup.Treeview"
+            style="Popup.Treeview",
         )
         self._popup_tree["displaycolumns"] = ("attribute", "value")
         self._popup_tree.heading("attribute", text="Attribute", anchor="w")
         self._popup_tree.heading("value", text="Value", anchor="w")
         self._popup_tree.column("#0", width=0, stretch=False)
-        self._popup_tree.column("attribute", width=attr_width, minwidth=120, anchor="w", stretch=False)
-        self._popup_tree.column("value", width=val_width, minwidth=200, anchor="w", stretch=True)
+        self._popup_tree.column("attribute", width=attr_w, minwidth=120, anchor="w", stretch=False)
+        self._popup_tree.column("value", width=val_w, minwidth=200, anchor="w", stretch=True)
 
-        scrollbar_y = ttk.Scrollbar(frame, orient="vertical", command=self._popup_tree.yview)
-        scrollbar_x = ttk.Scrollbar(frame, orient="horizontal", command=self._popup_tree.xview)
-        self._popup_tree.configure(yscrollcommand=scrollbar_y.set, xscrollcommand=scrollbar_x.set)
-
+        sy = ttk.Scrollbar(frame, orient="vertical", command=self._popup_tree.yview)
+        sx = ttk.Scrollbar(frame, orient="horizontal", command=self._popup_tree.xview)
+        self._popup_tree.configure(yscrollcommand=sy.set, xscrollcommand=sx.set)
         self._popup_tree.grid(row=0, column=0, sticky="nsew")
-        scrollbar_y.grid(row=0, column=1, sticky="ns")
-        scrollbar_x.grid(row=1, column=0, sticky="ew")
+        sy.grid(row=0, column=1, sticky="ns")
+        sx.grid(row=1, column=0, sticky="ew")
 
         for attr, val in rows_data:
             self._popup_tree.insert("", tk.END, values=(attr, val))
 
         btn_frame = ttk.Frame(self._popup_window)
         btn_frame.grid(row=1, column=0, pady=8)
-        ttk.Button(btn_frame, text="Close",
-                   command=self._close_popup).pack()
+        ttk.Button(btn_frame, text="Close", command=self._close_popup).pack()
 
     def _save_popup_settings(self):
-        """Capture current popup geometry and column widths."""
         try:
             if self._popup_window and self._popup_window.winfo_exists():
                 self._popup_geometry = self._popup_window.geometry()
-            if hasattr(self, "_popup_tree") and self._popup_tree:
+            if self._popup_tree:
                 self._popup_attr_width = self._popup_tree.column("attribute", "width")
                 self._popup_val_width = self._popup_tree.column("value", "width")
         except (tk.TclError, Exception):
             pass
 
     def _close_popup(self):
-        """Save settings then destroy."""
         self._save_popup_settings()
         if self._popup_window:
             try:
