@@ -201,25 +201,25 @@ class FireAccumulationGUI:
         row = ttk.Frame(parent)
         row.pack(fill=tk.X, pady=2)
 
-        ttk.Label(row, text="Start Date (YYYY-MM-DD):").pack(side=tk.LEFT)
+        ttk.Label(row, text="Start Date (YYYY-MM-DD)").pack(side=tk.LEFT)
         ttk.Entry(row, textvariable=self._start_date_var, width=12).pack(side=tk.LEFT, padx=4)
 
-        ttk.Label(row, text="End Date (YYYY-MM-DD):").pack(side=tk.LEFT, padx=(12, 0))
+        ttk.Label(row, text="End Date (YYYY-MM-DD)").pack(side=tk.LEFT, padx=(12, 0))
         ttk.Entry(row, textvariable=self._end_date_var, width=12).pack(side=tk.LEFT, padx=4)
 
-        ttk.Button(row, text="Apply Date Filter", command=self._apply_date_filter).pack(side=tk.LEFT, padx=8)
+        ttk.Button(row, text="Apply Filter", command=self._apply_date_filter).pack(side=tk.LEFT, padx=8)
 
         # ── Scatter size & colour levels, packed to the far right ──
         ttk.Spinbox(row, from_=10, to=500, increment=10,
                      textvariable=self._n_levels_var, width=5).pack(side=tk.RIGHT, padx=(4, 0))
-        ttk.Label(row, text="Colour Levels:").pack(side=tk.RIGHT)
+        ttk.Label(row, text="Colour Levels").pack(side=tk.RIGHT)
 
         ttk.Separator(row, orient=tk.VERTICAL).pack(side=tk.RIGHT, padx=8, fill=tk.Y)
 
         ttk.Spinbox(row, from_=1, to=200, increment=1,
                      textvariable=self._scatter_size_var, width=5,
                      command=self._update_scatter_size).pack(side=tk.RIGHT, padx=(4, 0))
-        ttk.Label(row, text="Scatter Size:").pack(side=tk.RIGHT)
+        ttk.Label(row, text="Scatter Size").pack(side=tk.RIGHT)
 
     def _build_playback_controls(self, parent):
         # Row 1: core playback
@@ -240,7 +240,7 @@ class FireAccumulationGUI:
                      command=self._update_speed).pack(side=tk.LEFT, padx=4)
 
         ttk.Separator(self._playback_row, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=8, fill=tk.Y)
-        ttk.Label(self._playback_row, text="Frame:").pack(side=tk.LEFT)
+        ttk.Label(self._playback_row, text="Frame").pack(side=tk.LEFT)
         self._frame_slider = ttk.Scale(self._playback_row, from_=0, to=1, orient=tk.HORIZONTAL,
                                         command=self._on_slider)
         self._frame_slider.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)

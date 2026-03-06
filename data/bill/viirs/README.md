@@ -16,7 +16,7 @@ You have a Sentinel-2 scene. You need lat/lon for the LAADS DAAC download URL. (
 
 ### 2. Download VIIRS VNP14IMG data
 
-Edit `download_vnp14.py` — set your LAADS token, date range (`downloadStartDay` / `downloadEndDay`), output directory, and paste the `regions=` bbox from step 1 into the download URL. Then run:
+Edit `downloadpy` — set your LAADS token, date range (`downloadStartDay` / `downloadEndDay`), output directory, and paste the `regions=` bbox from step 1 into the download URL. Then run:
 
 ```bash
 python -m viirs.utils.download
@@ -130,19 +130,6 @@ python3 -m viirs.utils.shapify /data/bill/viirs_temp
 Use GUI to view the fire
 ```bash
 python3 -m viirs.fp_gui
-```
----
-
-## Using utils as Python functions
-
-Every util works both from the command line and as an import:
-
-```python
-from viirs.utils.shapify import process_file
-process_file("file.nc", utm_zone=9, hemisphere="N", bbox=[-126, 52, -124, 53])
-
-from viirs.utils.accumulate import accumulate
-gdf = accumulate("/data/shp", "20250401", "20250930")
 ```
 
 ---
