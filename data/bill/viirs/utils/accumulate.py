@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 """
-viirs/utils/accumulate.py
+viirs/utils/accumulate_fp.py
 =========================
 Standalone tool to accumulate VIIRS VNP14IMG fire pixel shapefiles
 into a single output shapefile with age tracking.
 
 Usage (CLI):
     # Basic — reprojects everything to EPSG:4326 (WGS84 lat/lon)
-    python accumulate.py /path/to/shapefiles 20250401 20250930
+    python accumulate_fp.py /path/to/shapefiles 20250401 20250930
 
     # With reference raster — reprojects to match the raster's CRS
-    python accumulate.py /path/to/shapefiles 20250401 20250930 -r sentinel2.bin
+    python accumulate_fp.py /path/to/shapefiles 20250401 20250930 -r sentinel2.bin
 
     # Custom output path
-    python accumulate.py /path/to/shapefiles 20250401 20250930 -r sentinel2.bin -o output.shp
+    python accumulate_fp.py /path/to/shapefiles 20250401 20250930 -r sentinel2.bin -o output.shp
 
 Usage (as a function):
-    from accumulate import accumulate
+    from accumulate_fp import accumulate
     gdf = accumulate(
         shp_dir="/path/to/shapefiles",
         start_str="20250401",
@@ -193,21 +193,37 @@ def accumulate(
     # ---- Step 1: Determine target CRS ----
     if target_crs is not None:
         common_crs = target_crs
-        print(f"[INFO] Target CRS (explicit): {common_crs}")
     elif reference_raster is not None:
         if not os.path.exists(reference_raster):
             raise FileNotFoundError(f"Reference raster not found: {reference_raster}")
         common_crs = get_crs_from_raster(reference_raster)
-        print(f"[INFO] Target CRS (from raster): {os.path.basename(reference_raster)}")
-        # Print a friendlier summary
-        if "EPSG" in common_crs:
-            import re as _re
-            epsg_match = _re.search(r'AUTHORITY\["EPSG","(\d+)"\]\]$', common_crs)
-            if epsg_match:
-                print(f"[INFO] EPSG:{epsg_match.group(1)}")
     else:
         common_crs = FALLBACK_CRS
-        print(f"[INFO] No reference raster provided, using fallback CRS: {common_crs}")
+
+    # Build a human-readable label like "EPSG:3005 (NAD83 / BC Albers)"
+    crs_label = str(common_crs)
+    try:
+        from pyproj import CRS as ProjCRS
+        _crs = ProjCRS.from_user_input(common_crs)
+        epsg = _crs.to_epsg()
+        name = _crs.name
+        if epsg:
+            crs_label = f"EPSG:{epsg} ({name})"
+        else:
+            crs_label = name or str(common_crs)[:80]
+    except Exception:
+        # pyproj not available or CRS unrecognised — try regex fallback
+        import re as _re
+        epsg_match = _re.search(r'AUTHORITY\["EPSG","(\d+)"\]', str(common_crs))
+        if epsg_match:
+            crs_label = f"EPSG:{epsg_match.group(1)}"
+
+    if target_crs is not None:
+        print(f"[INFO] Target CRS (explicit): {crs_label}")
+    elif reference_raster is not None:
+        print(f"[INFO] Target CRS (from {os.path.basename(reference_raster)}): {crs_label}")
+    else:
+        print(f"[INFO] No reference raster provided, using fallback: {crs_label}")
 
     # ---- Step 2: Parse the requested date range ----
     start_dt = parse_datetime(start_str)
@@ -265,11 +281,17 @@ def accumulate(
             src_crs = gdf.crs
             gdf = gdf.to_crs(common_crs)
             # Update UTM columns if they exist (they're now in the new CRS)
-            if "utm_x" in gdf.columns and "utm_y" in gdf.columns:
+            if "x" in gdf.columns and "y" in gdf.columns:
+                gdf["x"] = gdf.geometry.x
+                gdf["y"] = gdf.geometry.y
+            elif "easting" in gdf.columns and "northing" in gdf.columns:
+                gdf["easting"] = gdf.geometry.x
+                gdf["northing"] = gdf.geometry.y
+            elif "utm_x" in gdf.columns and "utm_y" in gdf.columns:
                 gdf["utm_x"] = gdf.geometry.x
                 gdf["utm_y"] = gdf.geometry.y
             print(f"  Loaded {len(gdf):>6} features from {os.path.basename(fpath)}  "
-                  f"(reprojected {src_crs} → target)")
+                  f"(reprojected {src_crs} → {crs_label})")
         else:
             print(f"  Loaded {len(gdf):>6} features from {os.path.basename(fpath)}")
 
@@ -331,7 +353,7 @@ def accumulate(
     print(f"  Source files:      {len(matched)}")
     print(f"  Date range:        {start_dt.strftime('%Y-%m-%d %H:%M')} → "
           f"{end_dt.strftime('%Y-%m-%d %H:%M')}")
-    print(f"  Target CRS:        {common_crs if len(str(common_crs)) < 60 else str(common_crs)[:57] + '…'}")
+    print(f"  Target CRS:        {crs_label}")
     print(f"  Youngest pixel:    {youngest:.2f} days")
     print(f"  Oldest pixel:      {oldest:.2f} days")
     print(f"  Mean age:          {mean_age:.2f} days")
