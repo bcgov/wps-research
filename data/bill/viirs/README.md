@@ -16,7 +16,7 @@ You have a Sentinel-2 scene. You need lat/lon for the LAADS DAAC download URL. (
 
 ### 2. Download VIIRS VNP14IMG data
 
-Edit `downloadpy` — set your LAADS token, date range (`downloadStartDay` / `downloadEndDay`), output directory, and paste the `regions=` bbox from step 1 into the download URL. Then run:
+Edit `download.py` — set your LAADS token, date range (`downloadStartDay` / `downloadEndDay`), output directory, and paste the `regions=` bbox from step 1 into the download URL. Then run:
 
 ```bash
 python -m viirs.utils.download

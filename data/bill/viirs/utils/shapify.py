@@ -5,6 +5,9 @@ viirs.utils.shapify
 Convert VNP14IMG NetCDF fire pixel data to a Shapefile in UTM projection
 matching Sentinel-2 imagery. Auto-detects UTM zone if not specified.
 
+Notice: 
+    shapify converts to UTM, but raster images can come in different projections, the gui does match automatically.
+
 Usage:
     python -m viirs.utils.shapify /data/viirs/2025
     python -m viirs.utils.shapify /data/viirs/2025 --utm-zone 9 --hemisphere N

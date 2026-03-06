@@ -356,6 +356,8 @@ class FireAccumulationGUI:
             self._status_var.set("Raster load failed.")
             return
 
+        print(f"[INFO] Raster CRS: {self._raster_loader.crs}")
+
         # If shapefiles are already loaded, re-clip to the new raster extent
         if self._data_mgr.master_gdf is not None and not self._data_mgr.master_gdf.empty:
             self._reclip_and_refresh()

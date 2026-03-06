@@ -1,21 +1,27 @@
 #!/usr/bin/env python3
 """
-viirs/utils/accumulate_fp.py
+viirs/utils/accumulate.py
 =========================
 Standalone tool to accumulate VIIRS VNP14IMG fire pixel shapefiles
 into a single output shapefile with age tracking.
 
 Usage (CLI):
-    python accumulate_fire_pixels.py /path/to/shapefiles 20250401T0000 20250930T2359
-    python accumulate_fire_pixels.py /path/to/shapefiles 20250401 20250930
-    python accumulate_fire_pixels.py /path/to/shapefiles 20250401 20250930 -o output.shp
+    # Basic — reprojects everything to EPSG:4326 (WGS84 lat/lon)
+    python accumulate.py /path/to/shapefiles 20250401 20250930
+
+    # With reference raster — reprojects to match the raster's CRS
+    python accumulate.py /path/to/shapefiles 20250401 20250930 -r sentinel2.bin
+
+    # Custom output path
+    python accumulate.py /path/to/shapefiles 20250401 20250930 -r sentinel2.bin -o output.shp
 
 Usage (as a function):
-    from accumulate_fire_pixels import accumulate
+    from accumulate import accumulate
     gdf = accumulate(
         shp_dir="/path/to/shapefiles",
         start_str="20250401",
         end_str="20250930",
+        reference_raster="/path/to/sentinel2.bin",
         output_path="my_output.shp",
     )
 """
@@ -45,6 +51,9 @@ DATETIME_PATTERN = re.compile(r"(\d{8}T\d{4}|\d{8})")
 # For parsing
 FMT_WITH_TIME = "%Y%m%dT%H%M"
 FMT_DATE_ONLY = "%Y%m%d"
+
+# Default CRS when no reference raster is provided
+FALLBACK_CRS = "EPSG:4326"
 
 
 # ---------------------------------------------------------------------------
@@ -109,6 +118,37 @@ def build_output_filename(
     return f"{prefix}_{start_str}_{end_str}.shp"
 
 
+def get_crs_from_raster(raster_path: str) -> str:
+    """
+    Read the CRS from a raster file (ENVI .bin/.hdr or GeoTIFF) using GDAL.
+
+    Parameters
+    ----------
+    raster_path : str
+        Path to the raster file (.bin, .hdr, .tif, etc.)
+
+    Returns
+    -------
+    str — WKT projection string
+    """
+    from osgeo import gdal
+    gdal.UseExceptions()
+
+    ds = gdal.Open(raster_path, gdal.GA_ReadOnly)
+    if ds is None:
+        raise RuntimeError(f"Could not open raster: {raster_path}")
+
+    crs = ds.GetProjection()
+    if not crs:
+        raise RuntimeError(
+            f"Raster has no projection metadata: {raster_path}\n"
+            f"Make sure the .hdr file contains projection info."
+        )
+
+    ds = None  # close
+    return crs
+
+
 # ---------------------------------------------------------------------------
 # Core function
 # ---------------------------------------------------------------------------
@@ -117,12 +157,14 @@ def accumulate(
     shp_dir: str,
     start_str: str,
     end_str: str,
+    reference_raster: Optional[str] = None,
+    target_crs: Optional[str] = None,
     output_path: Optional[str] = None,
 ) -> gpd.GeoDataFrame:
     """
     Scan a directory for VIIRS fire shapefiles, filter by date range,
-    accumulate into a single GeoDataFrame with age tracking, and
-    optionally write to a shapefile.
+    reproject to a common CRS, accumulate into a single GeoDataFrame
+    with age tracking, and optionally write to a shapefile.
 
     Parameters
     ----------
@@ -132,6 +174,13 @@ def accumulate(
         Start datetime as YYYYMMDD or YYYYMMDDTHHMM.
     end_str : str
         End datetime as YYYYMMDD or YYYYMMDDTHHMM.
+    reference_raster : str, optional
+        Path to a raster file whose CRS will be used as the target
+        projection. This is the recommended approach — ensures the
+        accumulated output matches your analysis raster exactly.
+    target_crs : str, optional
+        Explicit CRS string (e.g. "EPSG:3005"). Overrides reference_raster
+        if both are provided. If neither is given, falls back to EPSG:4326.
     output_path : str, optional
         Path to write the output shapefile. If None, an auto-generated
         name is used in shp_dir.
@@ -141,14 +190,33 @@ def accumulate(
     gpd.GeoDataFrame — the accumulated fire pixels with age_days column.
     """
 
-    # ---- Step 1: Parse the requested date range ----
+    # ---- Step 1: Determine target CRS ----
+    if target_crs is not None:
+        common_crs = target_crs
+        print(f"[INFO] Target CRS (explicit): {common_crs}")
+    elif reference_raster is not None:
+        if not os.path.exists(reference_raster):
+            raise FileNotFoundError(f"Reference raster not found: {reference_raster}")
+        common_crs = get_crs_from_raster(reference_raster)
+        print(f"[INFO] Target CRS (from raster): {os.path.basename(reference_raster)}")
+        # Print a friendlier summary
+        if "EPSG" in common_crs:
+            import re as _re
+            epsg_match = _re.search(r'AUTHORITY\["EPSG","(\d+)"\]\]$', common_crs)
+            if epsg_match:
+                print(f"[INFO] EPSG:{epsg_match.group(1)}")
+    else:
+        common_crs = FALLBACK_CRS
+        print(f"[INFO] No reference raster provided, using fallback CRS: {common_crs}")
+
+    # ---- Step 2: Parse the requested date range ----
     start_dt = parse_datetime(start_str)
     end_dt = parse_datetime(end_str)
 
     print(f"[INFO] Requested range: {start_dt} → {end_dt}")
     print(f"[INFO] Scanning directory: {shp_dir}")
 
-    # ---- Step 2: Find all shapefiles recursively ----
+    # ---- Step 3: Find all shapefiles recursively ----
     shp_files = glob.glob(os.path.join(shp_dir, "**", "*.shp"), recursive=True)
     print(f"[INFO] Found {len(shp_files)} .shp files total")
 
@@ -156,9 +224,7 @@ def accumulate(
         print("[WARN] No shapefiles found. Exiting.")
         return gpd.GeoDataFrame()
 
-    # ---- Step 3: Parse datetime from each filename, filter by range ----
-    #   We only keep files whose detection datetime falls within
-    #   [start_dt, end_dt].  Files without a parseable datetime are skipped.
+    # ---- Step 4: Parse datetime from each filename, filter by range ----
     matched: Dict[datetime, str] = {}
     skipped = 0
 
@@ -184,8 +250,7 @@ def accumulate(
         print("[WARN] No files in the requested date range. Exiting.")
         return gpd.GeoDataFrame()
 
-    # ---- Step 4: Load and concatenate all matching shapefiles ----
-    #   Each file gets a 'detection_datetime' column stamped from its filename.
+    # ---- Step 5: Load, reproject, and concatenate ----
     frames: List[gpd.GeoDataFrame] = []
 
     for dt, fpath in matched.items():
@@ -195,10 +260,22 @@ def accumulate(
             print(f"  [WARN] Could not read {fpath}: {exc}")
             continue
 
+        # Reproject to common CRS
+        if gdf.crs is not None and gdf.crs != common_crs:
+            src_crs = gdf.crs
+            gdf = gdf.to_crs(common_crs)
+            # Update UTM columns if they exist (they're now in the new CRS)
+            if "utm_x" in gdf.columns and "utm_y" in gdf.columns:
+                gdf["utm_x"] = gdf.geometry.x
+                gdf["utm_y"] = gdf.geometry.y
+            print(f"  Loaded {len(gdf):>6} features from {os.path.basename(fpath)}  "
+                  f"(reprojected {src_crs} → target)")
+        else:
+            print(f"  Loaded {len(gdf):>6} features from {os.path.basename(fpath)}")
+
         gdf["detection_datetime"] = dt
         gdf["source_file"] = os.path.basename(fpath)
         frames.append(gdf)
-        print(f"  Loaded {len(gdf):>6} features from {os.path.basename(fpath)}")
 
     if not frames:
         print("[WARN] All files failed to load. Exiting.")
@@ -206,48 +283,42 @@ def accumulate(
 
     combined = gpd.GeoDataFrame(pd.concat(frames, ignore_index=True))
 
-    # ---- Step 5: Compute age_days as decimal days ----
-    #   age = (requested end_dt − detection_datetime) in fractional days.
-    #   Rounded to 2 decimal places.  E.g. 1 day = 1.00, 1 day 1.5h = 1.06
+    # ---- Step 6: Compute age_days as decimal days ----
     combined["age_days"] = combined["detection_datetime"].apply(
         lambda det: round((end_dt - det).total_seconds() / 86400.0, 2)
     )
 
-    # ---- Step 6: Build output path if not provided ----
+    # ---- Step 7: Build output path if not provided ----
     if output_path is None:
         sample_stem = Path(list(matched.values())[0]).stem
         out_name = build_output_filename(sample_stem, start_dt, end_dt)
         output_path = os.path.join(shp_dir, out_name)
 
-    # ---- Step 7: Prepare columns for shapefile ----
-    #   Shapefile DBF format has a 10-character column name limit.
-    #   Convert datetime to string and shorten long column names.
+    # ---- Step 8: Prepare columns for shapefile ----
     combined["det_dt"] = combined["detection_datetime"].apply(
         lambda dt: dt.strftime("%Y-%m-%d %H:%M")
     )
     combined.drop(columns=["detection_datetime"], inplace=True)
 
-    # Rename columns that exceed 10 chars
+    # Rename columns that exceed 10 chars (shapefile DBF limit)
     shp_rename = {
         "source_file": "src_file",
         "confidence": "confidence",  # 10 chars, fine
     }
-    # Auto-shorten anything else over 10 chars
     for c in combined.columns:
         if len(c) > 10 and c not in shp_rename:
             shp_rename[c] = c[:10]
 
-    # Only rename columns that actually exist and need shortening
     rename_map = {k: v for k, v in shp_rename.items()
                   if k in combined.columns and k != v}
     if rename_map:
         print(f"[INFO] Shortened column names for shapefile: {rename_map}")
         combined.rename(columns=rename_map, inplace=True)
 
-    # ---- Step 8: Write output ----
+    # ---- Step 9: Write output ----
     combined.to_file(output_path)
 
-    # ---- Step 9: Print summary ----
+    # ---- Step 10: Print summary ----
     youngest = combined["age_days"].min()
     oldest = combined["age_days"].max()
     mean_age = combined["age_days"].mean()
@@ -260,6 +331,7 @@ def accumulate(
     print(f"  Source files:      {len(matched)}")
     print(f"  Date range:        {start_dt.strftime('%Y-%m-%d %H:%M')} → "
           f"{end_dt.strftime('%Y-%m-%d %H:%M')}")
+    print(f"  Target CRS:        {common_crs if len(str(common_crs)) < 60 else str(common_crs)[:57] + '…'}")
     print(f"  Youngest pixel:    {youngest:.2f} days")
     print(f"  Oldest pixel:      {oldest:.2f} days")
     print(f"  Mean age:          {mean_age:.2f} days")
@@ -279,14 +351,17 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # With time specified
-  python accumulate_fire_pixels.py ./shapefiles 20250401T0000 20250930T2359
+  # With reference raster (recommended — matches your analysis CRS)
+  python accumulate_fp.py ./shapefiles 20250401 20250930 -r sentinel2.bin
 
-  # Date only (assumes T0000 for both)
-  python accumulate_fire_pixels.py ./shapefiles 20250401 20250930
+  # With explicit CRS
+  python accumulate_fp.py ./shapefiles 20250401 20250930 --crs EPSG:3005
+
+  # No reference — falls back to EPSG:4326 (WGS84 lat/lon)
+  python accumulate_fp.py ./shapefiles 20250401 20250930
 
   # Custom output path
-  python accumulate_fire_pixels.py ./shapefiles 20250401 20250930 -o accumulated.shp
+  python accumulate_fp.py ./shapefiles 20250401 20250930 -r sentinel2.bin -o accumulated.shp
         """,
     )
 
@@ -296,13 +371,24 @@ Examples:
     )
     parser.add_argument(
         "start",
-        help="Start datetime: YYYYMMDD or YYYYMMDDTHHMM. "
-             "If no time, assumes T0000.",
+        help="Start datetime: YYYYMMDD or YYYYMMDDTHHMM.",
     )
     parser.add_argument(
         "end",
-        help="End datetime: YYYYMMDD or YYYYMMDDTHHMM. "
-             "If no time, assumes T0000.",
+        help="End datetime: YYYYMMDD or YYYYMMDDTHHMM.",
+    )
+    parser.add_argument(
+        "-r", "--reference",
+        default=None,
+        help="Reference raster file (.bin, .hdr, .tif). "
+             "All shapefiles will be reprojected to match its CRS. "
+             "This is the recommended approach.",
+    )
+    parser.add_argument(
+        "--crs",
+        default=None,
+        help="Explicit target CRS (e.g. EPSG:3005). "
+             "Overrides --reference if both are given.",
     )
     parser.add_argument(
         "-o", "--output",
@@ -316,6 +402,8 @@ Examples:
         shp_dir=args.shp_dir,
         start_str=args.start,
         end_str=args.end,
+        reference_raster=args.reference,
+        target_crs=args.crs,
         output_path=args.output,
     )
 
