@@ -134,7 +134,7 @@ class FireAnimationController:
         self._emit_frame()
 
     def jump_by(self, n: int):
-        """Jump forward (+) or backward (−) by n frames."""
+        """Jump forward (+) or backward (-) by n frames."""
         new_idx = self._index + n
         new_idx = max(0, min(new_idx, len(self._dates) - 1))
         if new_idx != self._index:

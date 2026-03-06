@@ -1,15 +1,11 @@
 #!/usr/bin/env python3
 """
 viirs/fp_gui/__main__.py
-
 VIIRS Fire Pixel Accumulation Viewer
 =====================================
 Entry point.  Run with:
-
     python main.py
-
 Or import and use programmatically:
-
     from fire_gui import FireAccumulationGUI
     app = FireAccumulationGUI()
     app.run()

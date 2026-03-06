@@ -3,16 +3,6 @@ viirs/fp_gui/fire_data_manager.py
 
 FireDataManager: loads shapefiles, parses dates from filenames,
 maintains numpy arrays for fast animation and a GeoDataFrame for lookups.
-
-Design:
-    - GeoDataFrame is used ONLY at load time and for popup detail lookups.
-    - During animation, all data flows through pre-extracted numpy arrays.
-    - No .loc[], .copy(), or pandas ops happen per frame.
-
-Performance notes:
-    - ProcessPoolExecutor for true parallel shapefile I/O (bypasses GIL).
-    - np.searchsorted precompute: O(N log N) total instead of O(N*D) brute force.
-    - numba-jitted get_frame fallback for cache misses at C speed.
 """
 
 import os
@@ -32,12 +22,7 @@ from numba import njit
 from config import FILENAME_DATETIME_PATTERN, FILENAME_DATETIME_FORMAT, MAX_WORKERS
 
 
-# ======================================================================
-# Top-level functions (must be picklable for ProcessPoolExecutor / numba)
-# ======================================================================
-
 def _read_one_file(args):
-    """Standalone shapefile reader for ProcessPoolExecutor (must be picklable)."""
     idx, dt, fpath = args
     try:
         gdf = gpd.read_file(fpath)
@@ -52,10 +37,6 @@ def _read_one_file(args):
 
 @njit(cache=True)
 def _compute_frame_numba(all_ordinals, cur_ord):
-    """
-    Return (indices, ages, max_age) for all pixels detected on or before cur_ord.
-    Runs at compiled C speed after first call.
-    """
     n = len(all_ordinals)
     buf_idx = np.empty(n, dtype=np.int64)
     buf_age = np.empty(n, dtype=np.int64)
@@ -72,54 +53,34 @@ def _compute_frame_numba(all_ordinals, cur_ord):
     return buf_idx[:count], buf_age[:count], max_age
 
 
-# ======================================================================
-# Data containers
-# ======================================================================
-
 class FrameData:
-    """Lightweight container for one animation frame — pure numpy."""
     __slots__ = ("indices", "x", "y", "ages", "max_age", "n_pixels")
 
     def __init__(self, indices, x, y, ages, max_age):
-        self.indices = indices      # int array — row indices into master arrays
-        self.x = x                  # float array — plot x coords
-        self.y = y                  # float array — plot y coords
-        self.ages = ages            # int array — age in days
-        self.max_age = max_age      # int
+        self.indices = indices
+        self.x = x
+        self.y = y
+        self.ages = ages
+        self.max_age = max_age
         self.n_pixels = len(indices)
 
 
-# ======================================================================
-# Main manager
-# ======================================================================
-
 class FireDataManager:
-    """
-    Manages fire pixel data from VIIRS VNP14IMG shapefiles.
-    """
-
     def __init__(self, max_workers: int = MAX_WORKERS):
         self._file_dict: Dict[datetime, str] = {}
         self._master_gdf: Optional[gpd.GeoDataFrame] = None
         self._date_range: List[date] = []
         self._max_workers = max_workers
-        self._target_crs = None  # stored from load_all for reuse
+        self._target_crs = None
 
-        # Pre-extracted numpy arrays (set once after load + clip)
         self._all_x: Optional[np.ndarray] = None
         self._all_y: Optional[np.ndarray] = None
         self._all_ordinals: Optional[np.ndarray] = None
 
-        # Precomputed sort order for searchsorted (set in precompute_frames)
         self._sort_order: Optional[np.ndarray] = None
         self._sorted_ords: Optional[np.ndarray] = None
 
-        # Frame cache: {date: FrameData}
         self._frame_cache: Dict[date, FrameData] = {}
-
-    # ------------------------------------------------------------------
-    # Properties
-    # ------------------------------------------------------------------
 
     @property
     def file_dict(self):
@@ -133,16 +94,7 @@ class FireDataManager:
     def date_range(self):
         return self._date_range
 
-    # ------------------------------------------------------------------
-    # Loading
-    # ------------------------------------------------------------------
-
     def scan_directory(self, directory: str) -> Dict[datetime, str]:
-        """
-        Scan *directory* recursively for ALL .shp files.
-        Parses datetime from filename if possible; assigns a fallback
-        datetime for files that don't match the naming convention.
-        """
         shp_files = glob.glob(
             os.path.join(directory, "**", "*.shp"), recursive=True
         )
@@ -152,15 +104,12 @@ class FireDataManager:
         for fpath in shp_files:
             dt = self._parse_datetime_from_stem(Path(fpath).stem)
             if dt is not None:
-                # Handle duplicate datetimes by adding seconds offset
                 while dt in parsed:
                     dt = dt + timedelta(seconds=1)
                 parsed[dt] = fpath
             else:
                 no_dt_files.append(fpath)
 
-        # Assign fallback datetimes for files without a parseable date.
-        # Use file modification time so they sort reasonably.
         for fpath in no_dt_files:
             try:
                 mtime = os.path.getmtime(fpath)
@@ -170,7 +119,7 @@ class FireDataManager:
             while dt in parsed:
                 dt = dt + timedelta(seconds=1)
             parsed[dt] = fpath
-            print(f"[INFO] No datetime in filename, using mtime: {fpath} → {dt}")
+            print(f"[INFO] No datetime in filename, using mtime: {fpath} -> {dt}")
 
         self._file_dict = dict(sorted(parsed.items()))
         return self._file_dict
@@ -180,17 +129,6 @@ class FireDataManager:
         progress_cb: Optional[Callable[[int, int], None]] = None,
         target_crs=None,
     ) -> gpd.GeoDataFrame:
-        """
-        Parallel shapefile loading using ProcessPoolExecutor
-        (bypasses the GIL — real multicore parallelism).
-
-        Parameters
-        ----------
-        progress_cb : callable, optional
-        target_crs : optional
-            Reproject all shapefiles to this CRS (e.g. from the raster).
-            If None, uses the first shapefile's CRS.
-        """
         items = list(self._file_dict.items())
         total = len(items)
         frames: List = [None] * total
@@ -212,8 +150,6 @@ class FireDataManager:
             self._master_gdf = gpd.GeoDataFrame()
             return self._master_gdf
 
-        # Reproject everything to a common CRS so concat works.
-        # Priority: target_crs (from raster) > previously stored > first file's CRS.
         if target_crs is not None:
             self._target_crs = target_crs
         if self._target_crs is not None:
@@ -225,9 +161,8 @@ class FireDataManager:
         for i in range(len(frames)):
             if frames[i].crs is not None and frames[i].crs != common_crs:
                 print(f"[INFO] Reprojecting {frames[i]['source_file'].iloc[0]} "
-                      f"from {frames[i].crs} → {common_crs}")
+                      f"from {frames[i].crs} -> {common_crs}")
                 frames[i] = frames[i].to_crs(common_crs)
-                # Update utm_x/utm_y to match the new projection
                 if "utm_x" in frames[i].columns and "utm_y" in frames[i].columns:
                     frames[i]["utm_x"] = frames[i].geometry.x
                     frames[i]["utm_y"] = frames[i].geometry.y
@@ -253,12 +188,7 @@ class FireDataManager:
         self._file_dict = orig
         return gdf
 
-    # ------------------------------------------------------------------
-    # Numpy extraction (called once after load, once after clip)
-    # ------------------------------------------------------------------
-
     def _extract_numpy_arrays(self):
-        """Pull coordinates and ordinals into pure numpy arrays."""
         gdf = self._master_gdf
         if gdf is None or gdf.empty:
             self._all_x = np.array([], dtype=np.float64)
@@ -280,22 +210,11 @@ class FireDataManager:
             dtype=np.int64,
         )
 
-        # Pre-sort for searchsorted-based precompute
         self._sort_order = np.argsort(self._all_ordinals)
         self._sorted_ords = self._all_ordinals[self._sort_order]
-
         self._frame_cache.clear()
 
-    # ------------------------------------------------------------------
-    # Frame access — numba-jitted, no pandas
-    # ------------------------------------------------------------------
-
     def get_frame(self, current_date: date) -> FrameData:
-        """
-        Get the animation frame for a given date.
-        Returns a FrameData with numpy arrays only — no pandas.
-        Uses numba-compiled loop for cache misses.
-        """
         if current_date in self._frame_cache:
             return self._frame_cache[current_date]
 
@@ -324,27 +243,15 @@ class FireDataManager:
         return fd
 
     def get_row_data(self, pixel_index: int) -> Optional[pd.Series]:
-        """Get full attribute row for a pixel (for popup). Uses GeoDataFrame."""
         if self._master_gdf is None or pixel_index >= len(self._master_gdf):
             return None
         return self._master_gdf.iloc[pixel_index]
-
-    # ------------------------------------------------------------------
-    # Precompute — searchsorted O(N log N) instead of O(N * D)
-    # ------------------------------------------------------------------
 
     def precompute_frames(
         self,
         dates: Optional[List[date]] = None,
         progress_cb: Optional[Callable[[int, int], None]] = None,
     ):
-        """
-        Pre-compute all frame data using searchsorted.
-
-        Instead of scanning all ordinals per date (O(N) × D dates = O(N*D)),
-        we sort once O(N log N) then binary-search each date O(D log N).
-        The per-date slicing is just sort_order[:cutoff].
-        """
         if self._all_ordinals is None or len(self._all_ordinals) == 0:
             return
 
@@ -353,16 +260,13 @@ class FireDataManager:
         if total == 0:
             return
 
-        # Use pre-computed sort order from _extract_numpy_arrays
         sort_order = self._sort_order
         sorted_ords = self._sorted_ords
 
         if sort_order is None or sorted_ords is None:
-            # Fallback: compute now (shouldn't happen in normal flow)
             sort_order = np.argsort(self._all_ordinals)
             sorted_ords = self._all_ordinals[sort_order]
 
-        # Binary search: for each date, how many pixels have been detected
         date_ordinals = np.array([d.toordinal() for d in dates], dtype=np.int64)
         cutoffs = np.searchsorted(sorted_ords, date_ordinals, side='right')
 
@@ -394,10 +298,6 @@ class FireDataManager:
     def clear_cache(self):
         self._frame_cache.clear()
 
-    # ------------------------------------------------------------------
-    # Clipping
-    # ------------------------------------------------------------------
-
     def clip_to_extent(self, left, right, bottom, top) -> int:
         if self._master_gdf is None or self._master_gdf.empty:
             return 0
@@ -413,15 +313,7 @@ class FireDataManager:
         self._build_full_date_range()
         return n_before - len(self._master_gdf)
 
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
-
     def get_data_extent(self, padding_frac: float = 0.05):
-        """
-        Compute bounding box (left, right, bottom, top) from the fire pixel
-        coordinates, with optional padding.  Returns None if no data.
-        """
         if self._all_x is None or len(self._all_x) == 0:
             return None
         x_min, x_max = float(self._all_x.min()), float(self._all_x.max())

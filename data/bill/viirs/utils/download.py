@@ -11,41 +11,10 @@
 ###################################################################################################
 
 """
-viirs/utils/download_vnp14.py
+viirs/utils/download.py
 
 This Python script automatically downloads VIIRS data from the LAADS DAAC portal using the
 portal's V2 API.
-
-A multiprocessing approach is used to download the files; this means that if multiple
-days are specified by the user, the script will launch multiple processes for simultaneous
-downloading of days' worth of VIIRS data.
-
-The primary advantage of using the V2 API is that it gives the user more control and
-flexibility over the filtering criteria that can be applied to the desired VIIRS data; in
-particular, restricting downloaded data by geographical region.
-
-The RESTful API used in this code ("details") returns a JSON object given a query provided
-through the URL that is built from user-provided variables. These variables are defined and
-described in the "Variables" section of this script.
-
-Currently, the code supports regions specified by Administrative Area name (such as "Canada").
-Although the V2 API also supports specifying regions in other ways, such as by bounding box
-(lat/lon) or closed convex polygon (cartesian coordinate pairs), these other ways are NOT
-currently implemented.
-
-The script uses a slightly modified version of the original VIIRS Python data download
-script, "laads_data_download.py". This version has been modified to always assume that the
-URL will return a JSON object, and that this JSON object will specify the download URL
-of each VIIRS data file using the "downloadsLink" field.
-
-Since this script uses the "sync()" method in "laads_data_download.py" to do the actual
-downloading of the VIIRS data, any data files that already exist in the download path
-specified by the "dirGFAS" folder will be skipped.
-
-NOTE: In rare occasions the script will fail to download a file due to network errors, but will
-still write a 0 KB size file to the download folder. A workaround for this is to delete the
-0 KB files after the script has finished executing, and then re-run the script. Existing data
-files will be skipped, and the deleted 0 KB files will be re-downloaded.
 """
 
 ###################################################################################################
@@ -57,13 +26,11 @@ import datetime
 import numpy as np
 from multiprocessing import Pool
 from viirs.utils.laads_data_download_v2 import sync
-# import earthaccess
 
 
 ###################################################################################################
 # Variables
 ###################################################################################################
-
 
 global downloadStartDay, downloadEndDay
 

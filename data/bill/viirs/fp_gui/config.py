@@ -3,7 +3,7 @@ viirs/fp_gui/config.py
 Configuration and constants for the Fire Accumulation Viewer.
 """
 
-# Default scatter size
+# Default scatter size (base multiplier — actual pixel size scales with zoom)
 DEFAULT_SCATTER_SIZE = 5
 
 # Animation interval in milliseconds
@@ -36,7 +36,6 @@ RASTER_ALPHA = 1
 RASTER_CMAP = "gray"
 
 # ---- Performance: raster downsampling ----
-# Longest edge limit for the *display* copy of the raster.
-# Full-res is kept; matplotlib only renders the downsampled copy.
-# 2000 px is sharp on 1080p–1440p yet fast to pan/zoom.
-MAX_RASTER_DISPLAY_DIM = 2000
+# Set to 99999 so NO downsampling by default.
+# Lower in Config dialog to speed up rendering on large rasters.
+MAX_RASTER_DISPLAY_DIM = 99999

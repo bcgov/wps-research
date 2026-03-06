@@ -1,17 +1,11 @@
 """
-FireAccumulationGUI: the main tkinter application window.
+viirs/fp_gui/fire_gui.py
 
 RENDERING RESOURCE KNOBS
 =========================
-1. config.py — MAX_WORKERS (parallel shapefile loading)
-2. config.py — DEFAULT_ANIMATION_INTERVAL_MS
-3. config.py — N_COLOUR_LEVELS
-4. config.py — DEFAULT_SCATTER_SIZE
-5. config.py — MAX_RASTER_DISPLAY_DIM  (raster downsampling for speed)
-6. fire_map_canvas.py — figsize / dpi
-7. fire_map_canvas.py — blitting
-8. fire_data_manager.py — precompute_frames  (comment out to save RAM)
-9. fire_data_manager.py — numba cache
+1. config.py -- all tuneable constants (edit via Config dialog)
+2. fire_map_canvas.py -- figsize / dpi / blitting
+3. fire_data_manager.py -- precompute_frames / numba cache
 """
 
 import os
@@ -24,6 +18,8 @@ from fire_data_manager import FireDataManager
 from raster_loader import RasterLoader
 from fire_map_canvas import FireMapCanvas, NAV_ZOOM_IN, NAV_ZOOM_OUT, NAV_PAN
 from fire_animation_controller import FireAnimationController
+from config_dialog import ConfigDialog
+from download_dialog import DownloadDialog
 
 
 class FireAccumulationGUI:
@@ -31,11 +27,12 @@ class FireAccumulationGUI:
     Top-level GUI for the VIIRS fire pixel accumulation viewer.
 
     Navigation:
-        Pan        — drag to move the map
-        Zoom +     — draw green rectangle to zoom in
-        Zoom −     — draw red rectangle to zoom out
-        Scroll     — zoom in / out at cursor (any mode)
-        Right-click — pixel detail popup (any mode)
+        Pan        -- drag to move the map
+        Zoom +     -- draw green rectangle to zoom in
+        Zoom -     -- draw red rectangle to zoom out
+        Scroll     -- zoom in / out at cursor (any mode)
+        Left-click -- pixel detail popup (any mode, if not a drag)
+        Right-click-- pixel detail popup (any mode)
     """
 
     def __init__(self):
@@ -59,6 +56,7 @@ class FireAccumulationGUI:
 
         # State
         self._raster_loaded = False
+        self._crs_string = ""         # EPSG string for status bar
 
         # tk variables
         self._shapefile_dir_var = tk.StringVar()
@@ -69,10 +67,11 @@ class FireAccumulationGUI:
         self._interval_var = tk.IntVar(value=DEFAULT_ANIMATION_INTERVAL_MS)
         self._n_levels_var = tk.IntVar(value=N_COLOUR_LEVELS)
         self._status_var = tk.StringVar(value="Ready")
-        self._date_label_var = tk.StringVar(value="Date: —")
+        self._date_label_var = tk.StringVar(value="Date: \u2014")
         self._frame_label_var = tk.StringVar(value="Frame: 0 / 0")
         self._pixel_count_var = tk.StringVar(value="Pixels: 0")
         self._viewport_pixel_var = tk.StringVar(value="In view: 0")
+        self._crs_var = tk.StringVar(value="EPSG: \u2014")
         self._updating_slider = False
 
         # Slider throttle
@@ -103,113 +102,128 @@ class FireAccumulationGUI:
     # ==================================================================
 
     def _build_ui(self):
-        # Controls frame (no border — plain ttk.Frame, not LabelFrame)
         ctrl = ttk.Frame(self._root, padding=8)
         ctrl.pack(side=tk.TOP, fill=tk.X, padx=6, pady=4)
 
-        # Collapsible file + date rows
-        self._setup_frame = ttk.Frame(ctrl)
-        self._setup_frame.pack(fill=tk.X)
-        self._setup_visible = True
-
-        self._build_file_controls(self._setup_frame)
-        self._build_date_controls(self._setup_frame)
+        self._build_file_controls(ctrl)
+        self._build_date_controls(ctrl)
         self._build_playback_controls(ctrl)
         self._build_nav_and_display_controls(ctrl)
-
-        # Collapse handle
-        handle = ttk.Frame(ctrl)
-        handle.pack(fill=tk.X, pady=(2, 0))
-        self._collapse_btn = tk.Button(
-            handle, text="▲", command=self._toggle_setup,
-            relief=tk.FLAT, bd=0, padx=20, pady=0,
-            font=("TkDefaultFont", 7), fg="#888888",
-            activeforeground="#444444", cursor="hand2",
-        )
-        self._collapse_btn.pack(anchor=tk.CENTER)
-        try:
-            _bg = handle.winfo_toplevel().cget("background")
-            self._collapse_btn.configure(bg=_bg, activebackground=_bg)
-        except Exception:
-            pass
 
         # Status bar (before canvas so it always claims space)
         status = ttk.Frame(self._root, padding=4)
         status.pack(side=tk.BOTTOM, fill=tk.X)
         ttk.Label(status, textvariable=self._status_var).pack(side=tk.LEFT)
-        ttk.Label(status, textvariable=self._viewport_pixel_var).pack(side=tk.RIGHT, padx=15)
-        ttk.Label(status, textvariable=self._pixel_count_var).pack(side=tk.RIGHT, padx=15)
-        ttk.Label(status, textvariable=self._frame_label_var).pack(side=tk.RIGHT, padx=15)
-        ttk.Label(status, textvariable=self._date_label_var).pack(side=tk.RIGHT, padx=15)
+        ttk.Label(status, textvariable=self._viewport_pixel_var).pack(
+            side=tk.RIGHT, padx=15)
+        ttk.Label(status, textvariable=self._pixel_count_var).pack(
+            side=tk.RIGHT, padx=15)
+        ttk.Label(status, textvariable=self._frame_label_var).pack(
+            side=tk.RIGHT, padx=15)
+        ttk.Label(status, textvariable=self._date_label_var).pack(
+            side=tk.RIGHT, padx=15)
+        # CRS label at the far left of the right-side group
+        ttk.Label(status, textvariable=self._crs_var,
+                  font=("TkDefaultFont", 9, "bold")).pack(
+            side=tk.RIGHT, padx=15)
 
         # Canvas (fills everything remaining)
         canvas_frame = ttk.Frame(self._root)
         canvas_frame.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
         self._canvas = FireMapCanvas(canvas_frame, figsize=(12, 7), dpi=100)
 
-    # ── File row ──
+    # -- File row --
 
     def _build_file_controls(self, parent):
         row = ttk.Frame(parent)
         row.pack(fill=tk.X, pady=2)
 
-        ttk.Label(row, text="Raster:").pack(side=tk.LEFT)
-        ttk.Entry(row, textvariable=self._raster_path_var, width=32).pack(side=tk.LEFT, padx=4)
-        ttk.Button(row, text="Browse…", command=self._browse_raster).pack(side=tk.LEFT)
-        ttk.Button(row, text="Load Raster", command=self._load_raster).pack(side=tk.LEFT, padx=4)
+        # Config button (far left)
+        ttk.Button(row, text="\u2699 Config", command=self._open_config,
+                   width=10).pack(side=tk.LEFT, padx=(0, 8))
 
-        ttk.Separator(row, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=8, fill=tk.Y)
+        ttk.Label(row, text="Raster:").pack(side=tk.LEFT)
+        ttk.Entry(row, textvariable=self._raster_path_var, width=32).pack(
+            side=tk.LEFT, padx=4)
+        ttk.Button(row, text="Browse\u2026",
+                   command=self._browse_raster).pack(side=tk.LEFT)
+        ttk.Button(row, text="Load Raster",
+                   command=self._load_raster).pack(side=tk.LEFT, padx=4)
+
+        ttk.Separator(row, orient=tk.VERTICAL).pack(
+            side=tk.LEFT, padx=8, fill=tk.Y)
 
         ttk.Label(row, text="Shapefiles:").pack(side=tk.LEFT)
-        ttk.Entry(row, textvariable=self._shapefile_dir_var, width=32).pack(side=tk.LEFT, padx=4)
-        ttk.Button(row, text="Browse…", command=self._browse_shapefile_dir).pack(side=tk.LEFT)
-        ttk.Button(row, text="Load Shapefiles", command=self._load_shapefiles).pack(side=tk.LEFT, padx=4)
+        ttk.Entry(row, textvariable=self._shapefile_dir_var, width=32).pack(
+            side=tk.LEFT, padx=4)
+        ttk.Button(row, text="Browse\u2026",
+                   command=self._browse_shapefile_dir).pack(side=tk.LEFT)
+        ttk.Button(row, text="Load Shapefiles",
+                   command=self._load_shapefiles).pack(side=tk.LEFT, padx=4)
 
-    # ── Date row ──
+        # Download button (far right)
+        ttk.Button(row, text="\u2b07 Download",
+                   command=self._open_download, width=12).pack(
+            side=tk.RIGHT, padx=(8, 0))
+
+    # -- Date row --
 
     def _build_date_controls(self, parent):
         row = ttk.Frame(parent)
         row.pack(fill=tk.X, pady=2)
 
         ttk.Label(row, text="Start Date (YYYY-MM-DD)").pack(side=tk.LEFT)
-        ttk.Entry(row, textvariable=self._start_date_var, width=12).pack(side=tk.LEFT, padx=4)
-        ttk.Label(row, text="End Date (YYYY-MM-DD)").pack(side=tk.LEFT, padx=(12, 0))
-        ttk.Entry(row, textvariable=self._end_date_var, width=12).pack(side=tk.LEFT, padx=4)
-        ttk.Button(row, text="Apply Filter", command=self._apply_date_filter).pack(side=tk.LEFT, padx=8)
+        ttk.Entry(row, textvariable=self._start_date_var, width=12).pack(
+            side=tk.LEFT, padx=4)
+        ttk.Label(row, text="End Date (YYYY-MM-DD)").pack(
+            side=tk.LEFT, padx=(12, 0))
+        ttk.Entry(row, textvariable=self._end_date_var, width=12).pack(
+            side=tk.LEFT, padx=4)
+        ttk.Button(row, text="Apply Filter",
+                   command=self._apply_date_filter).pack(
+            side=tk.LEFT, padx=8)
 
         # Right side: scatter size & colour levels
         ttk.Spinbox(row, from_=10, to=500, increment=10,
-                     textvariable=self._n_levels_var, width=5).pack(side=tk.RIGHT, padx=(4, 0))
+                     textvariable=self._n_levels_var, width=5).pack(
+            side=tk.RIGHT, padx=(4, 0))
         ttk.Label(row, text="Colour Levels").pack(side=tk.RIGHT)
-        ttk.Separator(row, orient=tk.VERTICAL).pack(side=tk.RIGHT, padx=8, fill=tk.Y)
+        ttk.Separator(row, orient=tk.VERTICAL).pack(
+            side=tk.RIGHT, padx=8, fill=tk.Y)
         ttk.Spinbox(row, from_=1, to=200, increment=1,
                      textvariable=self._scatter_size_var, width=5,
-                     command=self._update_scatter_size).pack(side=tk.RIGHT, padx=(4, 0))
+                     command=self._update_scatter_size).pack(
+            side=tk.RIGHT, padx=(4, 0))
         ttk.Label(row, text="Scatter Size").pack(side=tk.RIGHT)
 
-    # ── Playback rows ──
+    # -- Playback rows --
 
     def _build_playback_controls(self, parent):
         self._playback_row = ttk.Frame(parent)
         self._playback_row.pack(fill=tk.X, pady=2)
 
-        self._play_btn = ttk.Button(self._playback_row, text="▶  Play",
+        self._play_btn = ttk.Button(self._playback_row, text="\u25b6  Play",
                                      command=self._toggle_play, width=10)
         self._play_btn.pack(side=tk.LEFT, padx=2)
-        ttk.Button(self._playback_row, text="← −1 Day",
-                   command=self._step_back, width=10).pack(side=tk.LEFT, padx=2)
-        ttk.Button(self._playback_row, text="+1 Day →",
-                   command=self._step_fwd, width=10).pack(side=tk.LEFT, padx=2)
-        ttk.Button(self._playback_row, text="⏹  Reset",
-                   command=self._reset_animation, width=9).pack(side=tk.LEFT, padx=2)
+        ttk.Button(self._playback_row, text="\u2190 -1 Day",
+                   command=self._step_back, width=10).pack(
+            side=tk.LEFT, padx=2)
+        ttk.Button(self._playback_row, text="+1 Day \u2192",
+                   command=self._step_fwd, width=10).pack(
+            side=tk.LEFT, padx=2)
+        ttk.Button(self._playback_row, text="\u23f9  Reset",
+                   command=self._reset_animation, width=9).pack(
+            side=tk.LEFT, padx=2)
 
-        ttk.Separator(self._playback_row, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=8, fill=tk.Y)
+        ttk.Separator(self._playback_row, orient=tk.VERTICAL).pack(
+            side=tk.LEFT, padx=8, fill=tk.Y)
         ttk.Label(self._playback_row, text="Speed (ms):").pack(side=tk.LEFT)
         ttk.Spinbox(self._playback_row, from_=50, to=5000, increment=50,
                      textvariable=self._interval_var, width=6,
                      command=self._update_speed).pack(side=tk.LEFT, padx=4)
 
-        ttk.Separator(self._playback_row, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=8, fill=tk.Y)
+        ttk.Separator(self._playback_row, orient=tk.VERTICAL).pack(
+            side=tk.LEFT, padx=8, fill=tk.Y)
         ttk.Label(self._playback_row, text="Frame").pack(side=tk.LEFT)
         self._frame_slider = ttk.Scale(
             self._playback_row, from_=0, to=1, orient=tk.HORIZONTAL,
@@ -219,16 +233,20 @@ class FireAccumulationGUI:
         # Row 2: skip N days
         row2 = ttk.Frame(parent)
         row2.pack(fill=tk.X, pady=2)
-        ttk.Button(row2, text="← Skip N Days", command=self._skip_back_n,
-                   width=14).pack(side=tk.LEFT, padx=2)
+        ttk.Button(row2, text="\u2190 Skip N Days",
+                   command=self._skip_back_n, width=14).pack(
+            side=tk.LEFT, padx=2)
         self._skip_n_var = tk.IntVar(value=7)
         ttk.Spinbox(row2, from_=1, to=365, increment=1,
-                     textvariable=self._skip_n_var, width=5).pack(side=tk.LEFT, padx=4)
-        ttk.Button(row2, text="Skip N Days →", command=self._skip_fwd_n,
-                   width=14).pack(side=tk.LEFT, padx=2)
-        ttk.Label(row2, text="(days)", font=("TkDefaultFont", 9)).pack(side=tk.LEFT, padx=4)
+                     textvariable=self._skip_n_var, width=5).pack(
+            side=tk.LEFT, padx=4)
+        ttk.Button(row2, text="Skip N Days \u2192",
+                   command=self._skip_fwd_n, width=14).pack(
+            side=tk.LEFT, padx=2)
+        ttk.Label(row2, text="(days)",
+                  font=("TkDefaultFont", 9)).pack(side=tk.LEFT, padx=4)
 
-    # ── Nav tools + layer toggles (single row) ──
+    # -- Nav tools + layer toggles (single row) --
 
     def _build_nav_and_display_controls(self, parent):
         row = ttk.Frame(parent)
@@ -255,25 +273,25 @@ class FireAccumulationGUI:
 
         _nav_btn("Pan",    NAV_PAN)
         _nav_btn("Zoom +", NAV_ZOOM_IN)
-        _nav_btn("Zoom −", NAV_ZOOM_OUT)
+        _nav_btn("Zoom \u2212", NAV_ZOOM_OUT)
 
-        ttk.Separator(row, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=6, fill=tk.Y)
+        ttk.Separator(row, orient=tk.VERTICAL).pack(
+            side=tk.LEFT, padx=6, fill=tk.Y)
 
-        # View history
-        for text, cmd in [("⌂", self._nav_home),
-                          ("◀", self._nav_back),
-                          ("▶", self._nav_forward)]:
-            tk.Button(
-                row, text=text, relief=tk.RAISED, bd=1,
-                padx=6, pady=1, font=_font, bg=_bg, cursor="hand2",
-                command=cmd,
-            ).pack(side=tk.LEFT, padx=1)
+        # Home button only (no back/forward)
+        tk.Button(
+            row, text="\u2302", relief=tk.RAISED, bd=1,
+            padx=6, pady=1, font=_font, bg=_bg, cursor="hand2",
+            command=self._nav_home,
+        ).pack(side=tk.LEFT, padx=1)
 
-        ttk.Separator(row, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=6, fill=tk.Y)
+        ttk.Separator(row, orient=tk.VERTICAL).pack(
+            side=tk.LEFT, padx=6, fill=tk.Y)
 
         # Hint label
-        ttk.Label(row, text="Right-click a pixel for details",
-                  font=("TkDefaultFont", 8), foreground="#888888").pack(side=tk.LEFT, padx=6)
+        ttk.Label(row, text="Click a pixel for details",
+                  font=("TkDefaultFont", 8),
+                  foreground="#888888").pack(side=tk.LEFT, padx=6)
 
         # Layer toggles (far right)
         self._show_raster_var = tk.BooleanVar(value=True)
@@ -306,8 +324,17 @@ class FireAccumulationGUI:
         self._show_raster_var.trace_add("write", _rc)
         self._show_fire_var.trace_add("write", _fc)
 
-        # Default nav = Pan (highlighted)
         self._highlight_nav_button(NAV_PAN)
+
+    # ==================================================================
+    # Config / Download dialogs
+    # ==================================================================
+
+    def _open_config(self):
+        ConfigDialog(self._root)
+
+    def _open_download(self):
+        DownloadDialog(self._root)
 
     # ==================================================================
     # Nav tool switching
@@ -334,14 +361,6 @@ class FireAccumulationGUI:
     def _nav_home(self):
         if self._canvas:
             self._canvas.view_home()
-
-    def _nav_back(self):
-        if self._canvas:
-            self._canvas.view_back()
-
-    def _nav_forward(self):
-        if self._canvas:
-            self._canvas.view_forward()
 
     # ==================================================================
     # Viewport callback
@@ -384,7 +403,7 @@ class FireAccumulationGUI:
             messagebox.showerror("Error", "Please select a valid raster file.")
             return
 
-        self._status_var.set("Loading raster…")
+        self._status_var.set("Loading raster\u2026")
         self._root.update_idletasks()
 
         try:
@@ -394,26 +413,53 @@ class FireAccumulationGUI:
             self._raster_loaded = True
             self._status_var.set(
                 f"Raster loaded: {os.path.basename(raster_path)}  "
-                f"({self._raster_loader._raster._xSize}×{self._raster_loader._raster._ySize})"
+                f"({self._raster_loader._raster._xSize}"
+                f"\u00d7{self._raster_loader._raster._ySize})"
             )
         except Exception as exc:
             self._raster_loaded = False
-            messagebox.showerror("Raster Error", f"Could not load raster:\n{exc}")
+            messagebox.showerror("Raster Error",
+                                 f"Could not load raster:\n{exc}")
             self._status_var.set("Raster load failed.")
             return
 
+        # Extract and display CRS EPSG
+        self._update_crs_display()
+
         print(f"[INFO] Raster CRS: {self._raster_loader.crs}")
 
-        if self._data_mgr.master_gdf is not None and not self._data_mgr.master_gdf.empty:
+        if (self._data_mgr.master_gdf is not None
+                and not self._data_mgr.master_gdf.empty):
             self._reclip_and_refresh()
+
+    def _update_crs_display(self):
+        """Extract EPSG from raster CRS and update the status bar."""
+        crs_str = self._raster_loader.crs
+        if crs_str:
+            try:
+                from osgeo import osr
+                srs = osr.SpatialReference()
+                srs.ImportFromWkt(crs_str)
+                srs.AutoIdentifyEPSG()
+                code = srs.GetAuthorityCode(None)
+                if code:
+                    self._crs_string = f"EPSG: {code}"
+                else:
+                    self._crs_string = "EPSG: Unknown"
+            except Exception:
+                self._crs_string = "EPSG: Unknown"
+        else:
+            self._crs_string = "EPSG: \u2014"
+        self._crs_var.set(self._crs_string)
 
     def _load_shapefiles(self):
         shp_dir = self._shapefile_dir_var.get().strip()
         if not shp_dir or not os.path.isdir(shp_dir):
-            messagebox.showerror("Error", "Please select a valid shapefile directory.")
+            messagebox.showerror("Error",
+                                 "Please select a valid shapefile directory.")
             return
 
-        self._status_var.set("Scanning shapefiles…")
+        self._status_var.set("Scanning shapefiles\u2026")
         self._root.update_idletasks()
 
         file_dict = self._data_mgr.scan_directory(shp_dir)
@@ -423,7 +469,7 @@ class FireAccumulationGUI:
             return
 
         def _lp(loaded, total):
-            self._status_var.set(f"Loading shapefiles… {loaded}/{total}")
+            self._status_var.set(f"Loading shapefiles\u2026 {loaded}/{total}")
             self._root.update_idletasks()
 
         raster_crs = self._raster_loader.crs if self._raster_loaded else None
@@ -442,7 +488,8 @@ class FireAccumulationGUI:
             n_removed = self._data_mgr.clip_to_extent(*ext)
             n_kept = n_total - n_removed
             if n_kept == 0:
-                messagebox.showwarning("Warning", "All pixels fell outside the raster.")
+                messagebox.showwarning("Warning",
+                                       "All pixels fell outside the raster.")
                 self._status_var.set("No pixels within raster extent.")
                 return
         else:
@@ -457,11 +504,11 @@ class FireAccumulationGUI:
         self._start_date_var.set(str(min_d))
         self._end_date_var.set(str(max_d))
 
-        self._status_var.set("Pre-computing frames…")
+        self._status_var.set("Pre-computing frames\u2026")
         self._root.update_idletasks()
 
         def _pp(done, total):
-            self._status_var.set(f"Pre-computing frames… {done}/{total}")
+            self._status_var.set(f"Pre-computing frames\u2026 {done}/{total}")
             self._root.update_idletasks()
 
         self._data_mgr.precompute_frames(progress_cb=_pp)
@@ -471,21 +518,33 @@ class FireAccumulationGUI:
                        if self._raster_loaded else " (no raster)")
         self._status_var.set(
             f"Loaded {n_kept} pixels{raster_note} "
-            f"from {len(file_dict)} files.  {min_d} → {max_d}"
+            f"from {len(file_dict)} files.  {min_d} \u2192 {max_d}"
         )
+
+        # Update CRS from shapefile data if no raster loaded
+        if not self._raster_loaded and gdf.crs is not None:
+            try:
+                epsg = gdf.crs.to_epsg()
+                if epsg:
+                    self._crs_var.set(f"EPSG: {epsg}")
+                else:
+                    self._crs_var.set(f"EPSG: {gdf.crs.name}")
+            except Exception:
+                pass
 
     def _reclip_and_refresh(self):
         ext = self._raster_loader.extent
         if ext is None:
             return
 
-        self._status_var.set("Clipping to raster extent…")
+        self._status_var.set("Clipping to raster extent\u2026")
         self._root.update_idletasks()
 
         raster_crs = self._raster_loader.crs
 
         def _lp(loaded, total):
-            self._status_var.set(f"Reloading shapefiles… {loaded}/{total}")
+            self._status_var.set(
+                f"Reloading shapefiles\u2026 {loaded}/{total}")
             self._root.update_idletasks()
 
         gdf = self._data_mgr.load_all(progress_cb=_lp, target_crs=raster_crs)
@@ -497,7 +556,8 @@ class FireAccumulationGUI:
         n_kept = n_total - n_removed
 
         if n_kept == 0:
-            messagebox.showwarning("Warning", "All pixels fell outside the new raster.")
+            messagebox.showwarning("Warning",
+                                   "All pixels fell outside the new raster.")
             self._status_var.set("No pixels within raster extent.")
             return
 
@@ -506,13 +566,14 @@ class FireAccumulationGUI:
         self._start_date_var.set(str(min_d))
         self._end_date_var.set(str(max_d))
 
-        self._status_var.set("Pre-computing frames…")
+        self._status_var.set("Pre-computing frames\u2026")
         self._root.update_idletasks()
         self._data_mgr.precompute_frames()
 
         self._setup_animator()
         self._status_var.set(
-            f"Re-clipped: {n_kept} pixels ({n_removed} outside raster).  {min_d} → {max_d}"
+            f"Re-clipped: {n_kept} pixels ({n_removed} outside raster)."
+            f"  {min_d} \u2192 {max_d}"
         )
 
     def _apply_date_filter(self):
@@ -525,10 +586,11 @@ class FireAccumulationGUI:
             messagebox.showerror("Error", "Dates must be YYYY-MM-DD format.")
             return
         if start > end:
-            messagebox.showerror("Error", "Start date must be before end date.")
+            messagebox.showerror("Error",
+                                 "Start date must be before end date.")
             return
 
-        self._status_var.set("Filtering by date…")
+        self._status_var.set("Filtering by date\u2026")
         self._root.update_idletasks()
         gdf = self._data_mgr.load_filtered(start, end)
 
@@ -548,13 +610,15 @@ class FireAccumulationGUI:
         self._canvas.set_row_lookup(self._data_mgr.get_row_data)
         self._canvas.clear()
 
-        self._status_var.set("Pre-computing frames…")
+        self._status_var.set("Pre-computing frames\u2026")
         self._root.update_idletasks()
         self._data_mgr.precompute_frames()
 
         self._setup_animator()
-        n = len(self._data_mgr.master_gdf) if self._data_mgr.master_gdf is not None else 0
-        self._status_var.set(f"Filtered: {n} pixels,  {start} → {end}")
+        n = (len(self._data_mgr.master_gdf)
+             if self._data_mgr.master_gdf is not None else 0)
+        self._status_var.set(
+            f"Filtered: {n} pixels,  {start} \u2192 {end}")
 
     def _setup_animator(self):
         start_str = self._start_date_var.get().strip()
@@ -565,35 +629,28 @@ class FireAccumulationGUI:
         except ValueError:
             return
         self._animator.set_date_range(start, end)
-        self._frame_slider.configure(to=max(self._animator.total_frames - 1, 1))
-        self._frame_label_var.set(f"Frame: 0 / {self._animator.total_frames}")
+        self._frame_slider.configure(
+            to=max(self._animator.total_frames - 1, 1))
+        self._frame_label_var.set(
+            f"Frame: 0 / {self._animator.total_frames}")
         self._date_label_var.set(f"Date: {start}")
         self._on_animation_frame(start)
 
-    # ── Collapse ──
-
-    def _toggle_setup(self):
-        if self._setup_visible:
-            self._setup_frame.pack_forget()
-            self._collapse_btn.config(text="▼")
-            self._setup_visible = False
-        else:
-            self._setup_frame.pack(fill=tk.X, before=self._playback_row)
-            self._collapse_btn.config(text="▲")
-            self._setup_visible = True
-
-    # ── Playback ──
+    # -- Playback --
 
     def _toggle_play(self):
         if self._animator is None:
             return
+
         if self._animator.is_playing:
             self._animator.pause()
-            self._play_btn.config(text="▶  Play")
+            self._play_btn.config(text="\u25b6  Play")
         else:
             self._animator.interval_ms = self._interval_var.get()
             self._animator.play()
-            self._play_btn.config(text="⏸  Pause")
+            # Only show Pause if animation actually started
+            if self._animator.is_playing:
+                self._play_btn.config(text="\u23f8  Pause")
 
     def _step_fwd(self):
         if self._animator:
@@ -614,11 +671,11 @@ class FireAccumulationGUI:
     def _reset_animation(self):
         if self._animator:
             self._animator.stop()
-            self._play_btn.config(text="▶  Play")
+            self._play_btn.config(text="\u25b6  Play")
             self._canvas.clear()
             self._canvas.reset_view()
             self._frame_slider.set(0)
-            self._date_label_var.set("Date: —")
+            self._date_label_var.set("Date: \u2014")
 
     def _update_speed(self):
         if self._animator:
@@ -638,7 +695,7 @@ class FireAccumulationGUI:
         if self._canvas:
             self._canvas.set_scatter_visible(self._show_fire_var.get())
 
-    # ── Slider ──
+    # -- Slider --
 
     def _on_slider(self, val):
         if self._updating_slider:
@@ -702,7 +759,7 @@ class FireAccumulationGUI:
         )
         self._update_viewport_pixel_count()
 
-    # ── Animation frame ──
+    # -- Animation frame --
 
     def _on_animation_frame(self, current_date: date):
         fd = self._data_mgr.get_frame(current_date)
@@ -725,10 +782,10 @@ class FireAccumulationGUI:
         self._updating_slider = False
 
     def _on_animation_finished(self):
-        self._play_btn.config(text="▶  Play")
+        self._play_btn.config(text="\u25b6  Play")
         self._status_var.set("Animation complete.")
 
-    # ── Lifecycle ──
+    # -- Lifecycle --
 
     def _on_close(self):
         if self._animator:
