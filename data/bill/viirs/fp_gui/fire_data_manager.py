@@ -1,4 +1,6 @@
 """
+viirs/fp_gui/fire_data_manager.py
+
 FireDataManager: loads shapefiles, parses dates from filenames,
 maintains numpy arrays for fast animation and a GeoDataFrame for lookups.
 
@@ -6,6 +8,11 @@ Design:
     - GeoDataFrame is used ONLY at load time and for popup detail lookups.
     - During animation, all data flows through pre-extracted numpy arrays.
     - No .loc[], .copy(), or pandas ops happen per frame.
+
+Performance notes:
+    - ProcessPoolExecutor for true parallel shapefile I/O (bypasses GIL).
+    - np.searchsorted precompute: O(N log N) total instead of O(N*D) brute force.
+    - numba-jitted get_frame fallback for cache misses at C speed.
 """
 
 import os
@@ -14,14 +21,60 @@ import glob
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple, Callable
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import geopandas as gpd
 import pandas as pd
 import numpy as np
 
+from numba import njit
+
 from config import FILENAME_DATETIME_PATTERN, FILENAME_DATETIME_FORMAT, MAX_WORKERS
 
+
+# ======================================================================
+# Top-level functions (must be picklable for ProcessPoolExecutor / numba)
+# ======================================================================
+
+def _read_one_file(args):
+    """Standalone shapefile reader for ProcessPoolExecutor (must be picklable)."""
+    idx, dt, fpath = args
+    try:
+        gdf = gpd.read_file(fpath)
+        gdf["detection_datetime"] = dt
+        gdf["detection_date"] = dt.date()
+        gdf["source_file"] = os.path.basename(fpath)
+        return idx, gdf
+    except Exception as exc:
+        print(f"[WARN] Could not read {fpath}: {exc}")
+        return idx, None
+
+
+@njit(cache=True)
+def _compute_frame_numba(all_ordinals, cur_ord):
+    """
+    Return (indices, ages, max_age) for all pixels detected on or before cur_ord.
+    Runs at compiled C speed after first call.
+    """
+    n = len(all_ordinals)
+    buf_idx = np.empty(n, dtype=np.int64)
+    buf_age = np.empty(n, dtype=np.int64)
+    count = 0
+    max_age = 0
+    for i in range(n):
+        if all_ordinals[i] <= cur_ord:
+            buf_idx[count] = i
+            age = cur_ord - all_ordinals[i]
+            buf_age[count] = age
+            if age > max_age:
+                max_age = age
+            count += 1
+    return buf_idx[:count], buf_age[:count], max_age
+
+
+# ======================================================================
+# Data containers
+# ======================================================================
 
 class FrameData:
     """Lightweight container for one animation frame — pure numpy."""
@@ -35,6 +88,10 @@ class FrameData:
         self.max_age = max_age      # int
         self.n_pixels = len(indices)
 
+
+# ======================================================================
+# Main manager
+# ======================================================================
 
 class FireDataManager:
     """
@@ -52,6 +109,10 @@ class FireDataManager:
         self._all_x: Optional[np.ndarray] = None
         self._all_y: Optional[np.ndarray] = None
         self._all_ordinals: Optional[np.ndarray] = None
+
+        # Precomputed sort order for searchsorted (set in precompute_frames)
+        self._sort_order: Optional[np.ndarray] = None
+        self._sorted_ords: Optional[np.ndarray] = None
 
         # Frame cache: {date: FrameData}
         self._frame_cache: Dict[date, FrameData] = {}
@@ -120,7 +181,8 @@ class FireDataManager:
         target_crs=None,
     ) -> gpd.GeoDataFrame:
         """
-        Parallel shapefile loading.
+        Parallel shapefile loading using ProcessPoolExecutor
+        (bypasses the GIL — real multicore parallelism).
 
         Parameters
         ----------
@@ -133,23 +195,11 @@ class FireDataManager:
         total = len(items)
         frames: List = [None] * total
 
-        def _read_one(args):
-            idx, dt, fpath = args
-            try:
-                gdf = gpd.read_file(fpath)
-                gdf["detection_datetime"] = dt
-                gdf["detection_date"] = dt.date()
-                gdf["source_file"] = os.path.basename(fpath)
-                return idx, gdf
-            except Exception as exc:
-                print(f"[WARN] Could not read {fpath}: {exc}")
-                return idx, None
-
         work = [(i, dt, fp) for i, (dt, fp) in enumerate(items)]
         loaded = 0
 
-        with ThreadPoolExecutor(max_workers=self._max_workers) as pool:
-            futs = {pool.submit(_read_one, w): w for w in work}
+        with ProcessPoolExecutor(max_workers=self._max_workers) as pool:
+            futs = {pool.submit(_read_one_file, w): w for w in work}
             for fut in as_completed(futs):
                 idx, gdf = fut.result()
                 frames[idx] = gdf
@@ -214,6 +264,8 @@ class FireDataManager:
             self._all_x = np.array([], dtype=np.float64)
             self._all_y = np.array([], dtype=np.float64)
             self._all_ordinals = np.array([], dtype=np.int64)
+            self._sort_order = None
+            self._sorted_ords = None
             return
 
         if "utm_x" in gdf.columns and "utm_y" in gdf.columns:
@@ -227,16 +279,22 @@ class FireDataManager:
             [d.toordinal() for d in gdf["detection_date"]],
             dtype=np.int64,
         )
+
+        # Pre-sort for searchsorted-based precompute
+        self._sort_order = np.argsort(self._all_ordinals)
+        self._sorted_ords = self._all_ordinals[self._sort_order]
+
         self._frame_cache.clear()
 
     # ------------------------------------------------------------------
-    # Frame access — pure numpy, no pandas
+    # Frame access — numba-jitted, no pandas
     # ------------------------------------------------------------------
 
     def get_frame(self, current_date: date) -> FrameData:
         """
         Get the animation frame for a given date.
         Returns a FrameData with numpy arrays only — no pandas.
+        Uses numba-compiled loop for cache misses.
         """
         if current_date in self._frame_cache:
             return self._frame_cache[current_date]
@@ -253,17 +311,14 @@ class FireDataManager:
             return fd
 
         cur_ord = current_date.toordinal()
-        mask = self._all_ordinals <= cur_ord
-        indices = np.where(mask)[0]
-        ages = cur_ord - self._all_ordinals[indices]
-        max_age = int(ages.max()) if len(ages) > 0 else 0
+        indices, ages, max_age = _compute_frame_numba(self._all_ordinals, cur_ord)
 
         fd = FrameData(
             indices,
             self._all_x[indices],
             self._all_y[indices],
             ages,
-            max_age,
+            int(max_age),
         )
         self._frame_cache[current_date] = fd
         return fd
@@ -274,31 +329,64 @@ class FireDataManager:
             return None
         return self._master_gdf.iloc[pixel_index]
 
+    # ------------------------------------------------------------------
+    # Precompute — searchsorted O(N log N) instead of O(N * D)
+    # ------------------------------------------------------------------
+
     def precompute_frames(
         self,
         dates: Optional[List[date]] = None,
         progress_cb: Optional[Callable[[int, int], None]] = None,
     ):
-        """Pre-compute all frame data. Pure numpy, very fast."""
+        """
+        Pre-compute all frame data using searchsorted.
+
+        Instead of scanning all ordinals per date (O(N) × D dates = O(N*D)),
+        we sort once O(N log N) then binary-search each date O(D log N).
+        The per-date slicing is just sort_order[:cutoff].
+        """
         if self._all_ordinals is None or len(self._all_ordinals) == 0:
             return
 
         dates = dates or self._date_range
         total = len(dates)
-        ordinals = self._all_ordinals
+        if total == 0:
+            return
+
+        # Use pre-computed sort order from _extract_numpy_arrays
+        sort_order = self._sort_order
+        sorted_ords = self._sorted_ords
+
+        if sort_order is None or sorted_ords is None:
+            # Fallback: compute now (shouldn't happen in normal flow)
+            sort_order = np.argsort(self._all_ordinals)
+            sorted_ords = self._all_ordinals[sort_order]
+
+        # Binary search: for each date, how many pixels have been detected
+        date_ordinals = np.array([d.toordinal() for d in dates], dtype=np.int64)
+        cutoffs = np.searchsorted(sorted_ords, date_ordinals, side='right')
+
         all_x = self._all_x
         all_y = self._all_y
+        all_ordinals = self._all_ordinals
 
         for i, d in enumerate(dates):
-            cur_ord = d.toordinal()
-            mask = ordinals <= cur_ord
-            indices = np.where(mask)[0]
-            ages = cur_ord - ordinals[indices]
-            max_age = int(ages.max()) if len(ages) > 0 else 0
-
-            self._frame_cache[d] = FrameData(
-                indices, all_x[indices], all_y[indices], ages, max_age
-            )
+            n = cutoffs[i]
+            if n == 0:
+                self._frame_cache[d] = FrameData(
+                    np.array([], dtype=np.int64),
+                    np.array([], dtype=np.float64),
+                    np.array([], dtype=np.float64),
+                    np.array([], dtype=np.int64),
+                    0,
+                )
+            else:
+                indices = sort_order[:n]
+                ages = date_ordinals[i] - all_ordinals[indices]
+                max_age = int(ages.max())
+                self._frame_cache[d] = FrameData(
+                    indices, all_x[indices], all_y[indices], ages, max_age
+                )
 
             if progress_cb and (i % 50 == 0 or i == total - 1):
                 progress_cb(i + 1, total)

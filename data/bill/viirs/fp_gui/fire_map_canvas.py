@@ -3,6 +3,14 @@ viirs/fp_gui/fire_map_canvas.py
 
 FireMapCanvas: matplotlib figure embedded in a tkinter frame.
 Renders using pure numpy arrays — no pandas during animation.
+
+Performance:
+    - Blitting: the static background (raster + axes) is cached as a bitmap.
+      Each animation frame only redraws the scatter artist on top.
+    - Raster independence: toggling the raster off *removes* the imshow
+      artist entirely (not just set_visible), so matplotlib never touches
+      it during animation frames.  Toggling it back on recreates the artist
+      from cached image data.
 """
 
 import tkinter as tk
@@ -70,13 +78,23 @@ class FireMapCanvas:
         self._toolbar = NavigationToolbar2Tk(self._canvas, parent)
         self._toolbar.update()
 
-        # State
-        self._raster_im = None
+        # ---- Raster state (stored independently of the matplotlib artist) ----
+        self._raster_im = None              # current imshow artist (or None)
+        self._raster_image = None           # numpy image array (cached for re-add)
+        self._raster_extent = None          # (left, right, bottom, top)
+        self._raster_cmap = RASTER_CMAP
+        self._raster_alpha = RASTER_ALPHA
+        self._raster_visible = True         # user's toggle state
+        self._has_raster_data = False       # True once display_raster() succeeds
+
+        # ---- Scatter state ----
         self._scatter = None
         self._scatter_visible = True
         self._colorbar = None
-        self._raster_extent = None
-        self._cmap = plt.get_cmap(RASTER_CMAP)
+
+        # ---- Blitting ----
+        self._blit_background = None        # cached bitmap of axes background
+        self._needs_full_redraw = True      # force full draw on next frame
 
         # Current frame data for click lookups
         self._frame_x: Optional[np.ndarray] = None
@@ -123,18 +141,40 @@ class FireMapCanvas:
         """Set a callable(pixel_index) -> pd.Series for popup details."""
         self._row_lookup_fn = fn
 
+    # ------------------------------------------------------------------
+    # Raster display — add / remove artist (not just set_visible)
+    # ------------------------------------------------------------------
+
     def display_raster(self, image, extent, cmap=None, alpha=None):
+        """Load and display a raster background image."""
+        # Remove old artist if present
         if self._raster_im is not None:
             self._raster_im.remove()
             self._raster_im = None
 
+        # Cache the data so we can re-add the artist on toggle
         self._raster_extent = extent
         self._raster_image = image
         self._raster_cmap = cmap or RASTER_CMAP
         self._raster_alpha = alpha if alpha is not None else RASTER_ALPHA
+        self._has_raster_data = True
+        self._raster_visible = True
 
-        # Black background (always present behind everything)
         self._ax.set_facecolor("black")
+        self._add_raster_artist()
+
+        self._ax.set_xlim(extent[0], extent[1])
+        self._ax.set_ylim(extent[2], extent[3])
+        self._needs_full_redraw = True
+        self._canvas.draw_idle()
+
+    def _add_raster_artist(self):
+        """Create the imshow artist from cached data."""
+        if self._raster_image is None or self._raster_extent is None:
+            return
+
+        image = self._raster_image
+        extent = self._raster_extent
 
         if image.ndim == 2:
             self._raster_im = self._ax.imshow(
@@ -147,41 +187,65 @@ class FireMapCanvas:
                 aspect="equal", origin="upper",
             )
 
-        self._ax.set_xlim(extent[0], extent[1])
-        self._ax.set_ylim(extent[2], extent[3])
-        self._canvas.draw_idle()
+    def _remove_raster_artist(self):
+        """Remove the imshow artist entirely so matplotlib never touches it."""
+        if self._raster_im is not None:
+            self._raster_im.remove()
+            self._raster_im = None
 
     def set_raster_visible(self, visible: bool):
-        """Toggle the background raster on/off. Black background when off."""
-        if self._raster_im is not None:
-            self._raster_im.set_visible(visible)
-            self._canvas.draw_idle()
+        """
+        Toggle the background raster on/off.
+
+        When off, the imshow artist is fully *removed* from the axes —
+        matplotlib will not process it at all during draw().
+        When turned back on, the artist is recreated from cached data.
+        This makes raster and scatter rendering truly independent.
+        """
+        self._raster_visible = visible
+
+        if not self._has_raster_data:
+            return
+
+        if visible:
+            if self._raster_im is None:
+                self._add_raster_artist()
+        else:
+            self._remove_raster_artist()
+
+        self._needs_full_redraw = True
+        self._canvas.draw_idle()
 
     def set_black_background(self, extent):
         """
         Set a pure black background with the given extent.
         Used when no raster is loaded.
-
-        Parameters
-        ----------
-        extent : tuple (left, right, bottom, top)
         """
         self._raster_extent = extent
         self._ax.set_facecolor("black")
         self._ax.set_xlim(extent[0], extent[1])
         self._ax.set_ylim(extent[2], extent[3])
+        self._needs_full_redraw = True
         self._canvas.draw_idle()
+
+    # ------------------------------------------------------------------
+    # Scatter display
+    # ------------------------------------------------------------------
 
     def set_scatter_visible(self, visible: bool):
         """Toggle fire pixel scatter on/off."""
         self._scatter_visible = visible
         if self._scatter is not None:
             self._scatter.set_visible(visible)
+            self._needs_full_redraw = True
             self._canvas.draw_idle()
 
     def update_scatter(self, x, y, ages, indices, n_levels=None):
         """
         Redraw fire-pixel scatter from pure numpy arrays.
+
+        Uses blitting: the static background (raster + axes chrome) is
+        cached as a bitmap.  Only the scatter artist is redrawn per frame.
 
         Parameters
         ----------
@@ -201,7 +265,9 @@ class FireMapCanvas:
             self._scatter = None
 
         if len(x) == 0:
-            self._canvas.draw_idle()
+            self._needs_full_redraw = True
+            self._canvas.draw()
+            self._blit_background = None
             return
 
         # Map age → colour index (0 = newest, n-1 = oldest, clamped)
@@ -224,12 +290,23 @@ class FireMapCanvas:
         if self._colorbar is None:
             self._create_colorbar()
 
-        # Lock viewport to raster
+        # Lock viewport to raster / data extent
         if self._raster_extent is not None:
             self._ax.set_xlim(self._raster_extent[0], self._raster_extent[1])
             self._ax.set_ylim(self._raster_extent[2], self._raster_extent[3])
 
-        self._canvas.draw_idle()
+        # ── Blitting path ──
+        # Full draw only when background has changed (raster toggled,
+        # first frame, resize, etc).  Otherwise restore cached background
+        # and redraw only the scatter artist.
+        if self._needs_full_redraw or self._blit_background is None:
+            self._canvas.draw()
+            self._blit_background = self._canvas.copy_from_bbox(self._ax.bbox)
+            self._needs_full_redraw = False
+        else:
+            self._canvas.restore_region(self._blit_background)
+            self._ax.draw_artist(self._scatter)
+            self._canvas.blit(self._ax.bbox)
 
     def clear(self):
         if self._scatter is not None:
@@ -239,6 +316,7 @@ class FireMapCanvas:
         self._frame_y = None
         self._frame_indices = None
         self._frame_ages = None
+        self._needs_full_redraw = True
         self._canvas.draw_idle()
 
     # ------------------------------------------------------------------

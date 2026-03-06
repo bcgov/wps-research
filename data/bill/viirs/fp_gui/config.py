@@ -5,13 +5,13 @@ Configuration and constants for the Fire Accumulation Viewer.
 """
 
 # Default scatter size
-DEFAULT_SCATTER_SIZE = 10
+DEFAULT_SCATTER_SIZE = 5
 
 # Animation interval in milliseconds
 DEFAULT_ANIMATION_INTERVAL_MS = 500
 
 # Max parallel threads for shapefile I/O
-MAX_WORKERS = 32
+MAX_WORKERS = 64
 
 # ---- Colour levels ----
 # Number of discrete colour levels from newest (red) to oldest (pale yellow).
