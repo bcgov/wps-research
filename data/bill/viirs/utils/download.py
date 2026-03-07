@@ -24,7 +24,7 @@ portal's V2 API.
 import os
 import datetime
 import numpy as np
-from multiprocessing import Pool
+from multiprocessing import get_context
 from viirs.utils.laads_data_download_v2 import sync
 
 
@@ -130,5 +130,5 @@ if __name__ == "__main__":
     downloadDayList = get_download_day_list()
     Nday = len(downloadDayList)
 
-    with Pool(processes=min(Nday, 16)) as p:   # cap workers; adjust 4 as needed
+    with get_context('spawn').Pool(processes=min(Nday, 16)) as p:
         list(p.map(loop_through_download, downloadDayList))

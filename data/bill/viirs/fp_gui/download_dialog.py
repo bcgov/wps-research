@@ -17,7 +17,7 @@ import datetime
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from typing import Optional
-
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import numpy as np
 
 
@@ -371,7 +371,7 @@ class DownloadDialog:
     # ==================================================================
 
     def _download_worker(self, token, start_dt, end_dt, save_dir, ref_path,
-                         west, south, east, north):
+                     west, south, east, north):
         product = "VNP14IMG"
         interval = datetime.timedelta(days=1)
         day = start_dt
@@ -382,14 +382,13 @@ class DownloadDialog:
 
         total_days = len(days)
 
-        # Try importing the sync function
+        # --- Import sync (unchanged) ---
         sync_fn = None
         try:
             from viirs.utils.laads_data_download_v2 import sync
             sync_fn = sync
         except ImportError:
             try:
-                # Maybe we're running from a directory where it's accessible
                 sys.path.insert(0, os.path.join(
                     os.path.dirname(os.path.abspath(__file__)), "..", "utils"))
                 from laads_data_download_v2 import sync
@@ -404,11 +403,13 @@ class DownloadDialog:
             self._finish_reset()
             return
 
-        # Download loop
-        for i, download_day in enumerate(days):
+        # --- Parallel download ---
+        completed = 0
+        lock = threading.Lock()
+
+        def download_one(download_day):
+            nonlocal completed
             if self._cancel_event.is_set():
-                self._update_status("Download cancelled by user.")
-                self._finish_reset()
                 return
 
             jday = download_day.timetuple().tm_yday
@@ -421,15 +422,11 @@ class DownloadDialog:
                 f"regions=%5BBBOX%5DN{north:.6f}%20S{south:.6f}"
                 f"%20E{east:.6f}%20W{west:.6f}"
             )
-
             download_path = os.path.join(
                 save_dir, product, f"{year:04d}", f"{jday:03d}")
             os.makedirs(download_path, exist_ok=True)
 
-            msg = (f"Downloading day {i+1}/{total_days}: "
-                   f"{download_day.strftime('%Y-%m-%d')} \u2026")
-            self._update_status(msg)
-            print(f"\n[DOWNLOAD] {msg}")
+            print(f"\n[DOWNLOAD] {download_day.strftime('%Y-%m-%d')}")
             print(f"  URL: {download_url}")
             print(f"  Dir: {download_path}")
 
@@ -438,23 +435,53 @@ class DownloadDialog:
             except Exception as exc:
                 print(f"[WARN] Download error for {download_day}: {exc}")
 
-            new_count = self._count_nc_files(save_dir)
-            self._nc_count = new_count
+            with lock:
+                nonlocal completed          # needed because we reassign
+                completed += 1
+                done = completed            # snapshot for the lambda below
+                new_count = self._count_nc_files(save_dir)
+                self._nc_count = new_count
+
             self._update_nc_count(new_count)
+            self._update_status(
+                f"Completed {done}/{total_days} days  "
+                f"({download_day.strftime('%Y-%m-%d')} done)…")
+
+        max_workers = 16
+        self._update_status(
+            f"Starting parallel download: {total_days} days, "
+            f"{max_workers} workers…")
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_day = {
+                executor.submit(download_one, d): d for d in days
+            }
+            for future in as_completed(future_to_day):
+                if self._cancel_event.is_set():
+                    # Signal remaining futures; executor will drain cleanly
+                    for f in future_to_day:
+                        f.cancel()
+                    break
+                try:
+                    future.result()   # re-raises any exception from download_one
+                except Exception as exc:
+                    d = future_to_day[future]
+                    print(f"[WARN] Unhandled error for {d}: {exc}")
 
         if self._cancel_event.is_set():
-            self._update_status("Download cancelled.")
+            self._update_status("Download cancelled by user.")
             self._finish_reset()
             return
 
         total_nc = self._count_nc_files(save_dir)
         self._update_status(
-            f"Download complete: {total_nc} .nc files. Running shapify\u2026")
+            f"Download complete: {total_nc} .nc files. Running shapify…")
         print(f"\n[INFO] Download finished. {total_nc} .nc files total.")
 
-        self._run_shapify(save_dir, ref_path)
+        self._run_shapify(save_dir, ref_path, west, south, east, north)
 
-    def _run_shapify(self, save_dir, ref_path):
+
+    def _run_shapify(self, save_dir, ref_path, west, south, east, north):
         if self._cancel_event.is_set():
             self._finish_reset()
             return
@@ -466,7 +493,9 @@ class DownloadDialog:
             sys.executable, "-m", "viirs.utils.shapify",
             save_dir,
             "-r", ref_path,
-            "-w", "32",
+            "-w", "16",
+            "--bbox",
+            f"{west:.6f}", f"{south:.6f}", f"{east:.6f}", f"{north:.6f}",
         ]
         print(f"[INFO] Command: {' '.join(cmd)}")
 

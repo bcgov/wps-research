@@ -43,13 +43,27 @@ import pandas as pd
 from shapely.geometry import Point
 from pyproj import Transformer, CRS
 from datetime import datetime
-from multiprocessing import Pool
+from multiprocessing import get_context, Pool
 from functools import partial
 
 
 # ---------------------------------------------------------------------------
 # File discovery
 # ---------------------------------------------------------------------------
+def _remove_shapefile(shp_path: str):
+    """Delete all sidecar files belonging to a shapefile."""
+    base = os.path.splitext(shp_path)[0]
+    for ext in (
+        '.shp', '.shx', '.dbf', '.prj', '.cpg',
+        '.sbn', '.sbx', '.fbn', '.fbx',
+        '.ain', '.aih', '.ixs', '.mxs',
+        '.atx', '.shp.xml', '.qpj',
+    ):
+        candidate = base + ext
+        if os.path.exists(candidate):
+            os.remove(candidate)
+            print(f"  Removed existing: {candidate}")
+
 
 def find_nc_files(input_paths):
     if not input_paths:
@@ -273,6 +287,11 @@ def process_file(nc_path, utm_zone=None, hemisphere=None, bbox=None,
     else:
         out_path = output
 
+    # ---- Replace existing shapefile (all sidecar files) if present ----
+    if os.path.exists(out_path):
+        print(f"  Output exists — replacing: {out_path}")
+        _remove_shapefile(out_path)
+
     gdf.to_file(out_path, driver='ESRI Shapefile')
     print(f"\n  Shapefile written to: {out_path}")
     print(f"  CRS: {crs_label(out_crs)}")
@@ -372,7 +391,7 @@ Examples:
         worker_fn = partial(_worker, utm_zone=args.utm_zone,
                             hemisphere=args.hemisphere, bbox=args.bbox,
                             target_crs=target_crs)
-        with Pool(processes=min(args.workers, n_files)) as pool:
+        with get_context('spawn').Pool(processes=min(args.workers, n_files)) as pool:
             results = pool.map(worker_fn, nc_files)
 
     written = [r for r in results if r is not None]

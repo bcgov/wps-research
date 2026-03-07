@@ -148,15 +148,17 @@ def sync(src, dest, tok):
                     os.remove(path)
                     
             try:
-                if not os.path.exists(path) or os.path.getsize(path) == 0:    # filesize FROM OS
-                    print('\ndownloading: ' , path)
-                    with open(path, 'w+b') as fh:
-                        geturl(url, tok, fh)
+                if os.path.exists(path):
+                    print(f'\nreplacing: {path}')
+                    os.remove(path)
                 else:
-                    print('\nskipping: ', path)
+                    print(f'\ndownloading: {path}')
+                with open(path, 'w+b') as fh:
+                    geturl(url, tok, fh)
             except IOError as e:
                 print("open `%s': %s" % (e.filename, e.strerror), file=sys.stderr)
                 sys.exit(-1)
+
     return 0
 
 
