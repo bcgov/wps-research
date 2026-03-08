@@ -110,7 +110,7 @@ class DownloadDialog:
         self._win.transient(parent)
         self._win.grab_set()
 
-        w, h = 720, 540
+        w, h = 900, 540
         sx = parent.winfo_screenwidth()
         sy = parent.winfo_screenheight()
         self._win.geometry(f"{w}x{h}+{(sx-w)//2}+{(sy-h)//2}")
@@ -362,9 +362,7 @@ class DownloadDialog:
         self._download_thread.start()
 
     def _cancel_download(self):
-        self._cancel_event.set()
-        self._status_var.set("Cancelling\u2026")
-        self._cancel_btn.configure(state=tk.DISABLED)
+        self._on_close()
 
     # ==================================================================
     # Background worker

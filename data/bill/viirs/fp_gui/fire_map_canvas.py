@@ -280,12 +280,14 @@ class FireMapCanvas:
             self._set_extent_limits(ext)
             self._push_view()
             self._needs_full_redraw = True
+            self._update_scatter_size_for_zoom()
             self._canvas.draw_idle()
             self._notify_viewport_changed()
 
     def _apply_view(self, xlim, ylim):
         self._set_extent_limits((xlim[0], xlim[1], ylim[0], ylim[1]))
         self._needs_full_redraw = True
+        self._update_scatter_size_for_zoom()
         self._canvas.draw_idle()
         self._notify_viewport_changed()
 
@@ -417,6 +419,14 @@ class FireMapCanvas:
             self._blit_background = None
             return
 
+        # If no raster was loaded, derive _home_view_width from the current
+        # axis limits (which were set to the data extent by set_black_background).
+        if self._home_view_width is None:
+            xlim = self._ax.get_xlim()
+            w = abs(xlim[1] - xlim[0])
+            if w > 0:
+                self._home_view_width = w
+
         draw_x, draw_y, draw_ages = x, y, ages
         if max_points is not None and len(x) > max_points:
             stride = max(1, len(x) // max_points)
@@ -448,14 +458,8 @@ class FireMapCanvas:
         if self._colorbar is None:
             self._create_colorbar()
 
-        if self._needs_full_redraw or self._blit_background is None:
-            self._canvas.draw()
-            self._blit_background = self._canvas.copy_from_bbox(self._ax.bbox)
-            self._needs_full_redraw = False
-        else:
-            self._canvas.restore_region(self._blit_background)
-            self._ax.draw_artist(self._scatter)
-            self._canvas.blit(self._ax.bbox)
+        self._canvas.draw()
+        self._blit_background = None
 
     def clear(self):
         if self._scatter is not None:
@@ -634,6 +638,7 @@ class FireMapCanvas:
 
         self._push_view()
         self._needs_full_redraw = True
+        self._update_scatter_size_for_zoom()
         self._canvas.draw_idle()
         self._notify_viewport_changed()
 
@@ -700,6 +705,7 @@ class FireMapCanvas:
         self._set_extent_limits((cx - hw, cx + hw, cy - hh, cy + hh))
         self._push_view()
         self._needs_full_redraw = True
+        self._update_scatter_size_for_zoom()
         self._canvas.draw()
         self._notify_viewport_changed()
 
@@ -736,6 +742,13 @@ class FireMapCanvas:
     def _on_limits_changed(self, _ax):
         if not self._ignore_limits_change:
             self._needs_full_redraw = True
+
+    def _update_scatter_size_for_zoom(self):
+        """Rescale existing scatter marker sizes to match the new zoom level."""
+        if self._scatter is None:
+            return
+        s = self._effective_scatter_s()
+        self._scatter.set_sizes([s] * len(self._scatter.get_offsets()))
 
     def _set_extent_limits(self, extent):
         self._ignore_limits_change = True

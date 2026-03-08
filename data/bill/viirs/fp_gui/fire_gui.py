@@ -13,7 +13,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from datetime import date
 
-from config import DEFAULT_SCATTER_SIZE, DEFAULT_ANIMATION_INTERVAL_MS, N_COLOUR_LEVELS
+import config as cfg
 from fire_data_manager import FireDataManager
 from raster_loader import RasterLoader
 from fire_map_canvas import FireMapCanvas, NAV_ZOOM_IN, NAV_ZOOM_OUT, NAV_PAN
@@ -56,16 +56,14 @@ class FireAccumulationGUI:
 
         # State
         self._raster_loaded = False
-        self._crs_string = ""         # EPSG string for status bar
+        self._crs_string = ""
 
         # tk variables
         self._shapefile_dir_var = tk.StringVar()
         self._raster_path_var = tk.StringVar()
         self._start_date_var = tk.StringVar()
         self._end_date_var = tk.StringVar()
-        self._scatter_size_var = tk.IntVar(value=DEFAULT_SCATTER_SIZE)
-        self._interval_var = tk.IntVar(value=DEFAULT_ANIMATION_INTERVAL_MS)
-        self._n_levels_var = tk.IntVar(value=N_COLOUR_LEVELS)
+        self._interval_var = tk.IntVar(value=cfg.DEFAULT_ANIMATION_INTERVAL_MS)
         self._status_var = tk.StringVar(value="Ready")
         self._date_label_var = tk.StringVar(value="Date: \u2014")
         self._frame_label_var = tk.StringVar(value="Frame: 0 / 0")
@@ -110,7 +108,7 @@ class FireAccumulationGUI:
         self._build_playback_controls(ctrl)
         self._build_nav_and_display_controls(ctrl)
 
-        # Status bar (before canvas so it always claims space)
+        # Status bar
         status = ttk.Frame(self._root, padding=4)
         status.pack(side=tk.BOTTOM, fill=tk.X)
         ttk.Label(status, textvariable=self._status_var).pack(side=tk.LEFT)
@@ -122,12 +120,11 @@ class FireAccumulationGUI:
             side=tk.RIGHT, padx=15)
         ttk.Label(status, textvariable=self._date_label_var).pack(
             side=tk.RIGHT, padx=15)
-        # CRS label at the far left of the right-side group
         ttk.Label(status, textvariable=self._crs_var,
                   font=("TkDefaultFont", 9, "bold")).pack(
             side=tk.RIGHT, padx=15)
 
-        # Canvas (fills everything remaining)
+        # Canvas
         canvas_frame = ttk.Frame(self._root)
         canvas_frame.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
         self._canvas = FireMapCanvas(canvas_frame, figsize=(12, 7), dpi=100)
@@ -138,7 +135,6 @@ class FireAccumulationGUI:
         row = ttk.Frame(parent)
         row.pack(fill=tk.X, pady=2)
 
-        # Config button (far left)
         ttk.Button(row, text="\u2699 Config", command=self._open_config,
                    width=10).pack(side=tk.LEFT, padx=(0, 8))
 
@@ -161,7 +157,6 @@ class FireAccumulationGUI:
         ttk.Button(row, text="Load Shapefiles",
                    command=self._load_shapefiles).pack(side=tk.LEFT, padx=4)
 
-        # Download button (far right)
         ttk.Button(row, text="\u2b07 Download",
                    command=self._open_download, width=12).pack(
             side=tk.RIGHT, padx=(8, 0))
@@ -182,19 +177,6 @@ class FireAccumulationGUI:
         ttk.Button(row, text="Apply Filter",
                    command=self._apply_date_filter).pack(
             side=tk.LEFT, padx=8)
-
-        # Right side: scatter size & colour levels
-        ttk.Spinbox(row, from_=10, to=500, increment=10,
-                     textvariable=self._n_levels_var, width=5).pack(
-            side=tk.RIGHT, padx=(4, 0))
-        ttk.Label(row, text="Colour Levels").pack(side=tk.RIGHT)
-        ttk.Separator(row, orient=tk.VERTICAL).pack(
-            side=tk.RIGHT, padx=8, fill=tk.Y)
-        ttk.Spinbox(row, from_=1, to=200, increment=1,
-                     textvariable=self._scatter_size_var, width=5,
-                     command=self._update_scatter_size).pack(
-            side=tk.RIGHT, padx=(4, 0))
-        ttk.Label(row, text="Scatter Size").pack(side=tk.RIGHT)
 
     # -- Playback rows --
 
@@ -246,7 +228,7 @@ class FireAccumulationGUI:
         ttk.Label(row2, text="(days)",
                   font=("TkDefaultFont", 9)).pack(side=tk.LEFT, padx=4)
 
-    # -- Nav tools + layer toggles (single row) --
+    # -- Nav tools + layer toggles --
 
     def _build_nav_and_display_controls(self, parent):
         row = ttk.Frame(parent)
@@ -278,7 +260,6 @@ class FireAccumulationGUI:
         ttk.Separator(row, orient=tk.VERTICAL).pack(
             side=tk.LEFT, padx=6, fill=tk.Y)
 
-        # Home button only (no back/forward)
         tk.Button(
             row, text="\u2302", relief=tk.RAISED, bd=1,
             padx=6, pady=1, font=_font, bg=_bg, cursor="hand2",
@@ -288,12 +269,11 @@ class FireAccumulationGUI:
         ttk.Separator(row, orient=tk.VERTICAL).pack(
             side=tk.LEFT, padx=6, fill=tk.Y)
 
-        # Hint label
         ttk.Label(row, text="Click a pixel for details",
                   font=("TkDefaultFont", 8),
                   foreground="#888888").pack(side=tk.LEFT, padx=6)
 
-        # Layer toggles (far right)
+        # Layer toggles
         self._show_raster_var = tk.BooleanVar(value=True)
         self._raster_chk = tk.Checkbutton(
             row, text="Show Background",
@@ -314,7 +294,6 @@ class FireAccumulationGUI:
         )
         self._fire_chk.pack(side=tk.RIGHT, padx=4)
 
-        # Indicator colour traces
         def _rc(*_):
             c = "#22cc22" if self._show_raster_var.get() else "#111111"
             self._raster_chk.configure(selectcolor=c)
@@ -331,7 +310,22 @@ class FireAccumulationGUI:
     # ==================================================================
 
     def _open_config(self):
-        ConfigDialog(self._root)
+        dialog = ConfigDialog(self._root)
+        if not dialog.applied:
+            return
+
+        # Sync interval spinbox (still has its own UI control)
+        self._interval_var.set(cfg.DEFAULT_ANIMATION_INTERVAL_MS)
+
+        # Propagate to live components
+        if self._animator:
+            self._animator.interval_ms = cfg.DEFAULT_ANIMATION_INTERVAL_MS
+        if self._canvas:
+            self._canvas.scatter_size = cfg.DEFAULT_SCATTER_SIZE
+
+        # Re-render current frame so scatter size + colour levels apply immediately
+        if self._animator and self._animator.current_date:
+            self._on_animation_frame(self._animator.current_date)
 
     def _open_download(self):
         DownloadDialog(self._root)
@@ -423,17 +417,13 @@ class FireAccumulationGUI:
             self._status_var.set("Raster load failed.")
             return
 
-        # Extract and display CRS EPSG
         self._update_crs_display()
-
-        print(f"[INFO] Raster CRS: {self._raster_loader.crs}")
 
         if (self._data_mgr.master_gdf is not None
                 and not self._data_mgr.master_gdf.empty):
             self._reclip_and_refresh()
 
     def _update_crs_display(self):
-        """Extract EPSG from raster CRS and update the status bar."""
         crs_str = self._raster_loader.crs
         if crs_str:
             try:
@@ -521,7 +511,6 @@ class FireAccumulationGUI:
             f"from {len(file_dict)} files.  {min_d} \u2192 {max_d}"
         )
 
-        # Update CRS from shapefile data if no raster loaded
         if not self._raster_loaded and gdf.crs is not None:
             try:
                 epsg = gdf.crs.to_epsg()
@@ -648,7 +637,6 @@ class FireAccumulationGUI:
         else:
             self._animator.interval_ms = self._interval_var.get()
             self._animator.play()
-            # Only show Pause if animation actually started
             if self._animator.is_playing:
                 self._play_btn.config(text="\u23f8  Pause")
 
@@ -680,12 +668,6 @@ class FireAccumulationGUI:
     def _update_speed(self):
         if self._animator:
             self._animator.interval_ms = self._interval_var.get()
-
-    def _update_scatter_size(self):
-        if self._canvas:
-            self._canvas.scatter_size = self._scatter_size_var.get()
-            if self._animator and self._animator.current_date:
-                self._on_animation_frame(self._animator.current_date)
 
     def _toggle_raster(self):
         if self._canvas:
@@ -733,10 +715,10 @@ class FireAccumulationGUI:
         self._frame_label_var.set(f"Frame: {idx + 1} / {total}")
         self._pixel_count_var.set(f"Pixels: {fd.n_pixels}")
 
-        self._canvas.scatter_size = self._scatter_size_var.get()
+        self._canvas.scatter_size = cfg.DEFAULT_SCATTER_SIZE
         self._canvas.update_scatter(
             fd.x, fd.y, fd.ages, fd.indices,
-            n_levels=self._n_levels_var.get(),
+            n_levels=cfg.N_COLOUR_LEVELS,
             max_points=self._SLIDER_MAX_POINTS,
         )
         self._update_viewport_pixel_count()
@@ -752,10 +734,10 @@ class FireAccumulationGUI:
             return
 
         fd = self._data_mgr.get_frame(self._animator.current_date)
-        self._canvas.scatter_size = self._scatter_size_var.get()
+        self._canvas.scatter_size = cfg.DEFAULT_SCATTER_SIZE
         self._canvas.update_scatter(
             fd.x, fd.y, fd.ages, fd.indices,
-            n_levels=self._n_levels_var.get(),
+            n_levels=cfg.N_COLOUR_LEVELS,
         )
         self._update_viewport_pixel_count()
 
@@ -764,10 +746,10 @@ class FireAccumulationGUI:
     def _on_animation_frame(self, current_date: date):
         fd = self._data_mgr.get_frame(current_date)
 
-        self._canvas.scatter_size = self._scatter_size_var.get()
+        self._canvas.scatter_size = cfg.DEFAULT_SCATTER_SIZE
         self._canvas.update_scatter(
             fd.x, fd.y, fd.ages, fd.indices,
-            n_levels=self._n_levels_var.get(),
+            n_levels=cfg.N_COLOUR_LEVELS,
         )
 
         self._date_label_var.set(f"Date: {current_date}")

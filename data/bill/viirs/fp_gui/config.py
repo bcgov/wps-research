@@ -4,7 +4,7 @@ Configuration and constants for the Fire Accumulation Viewer.
 """
 
 # Default scatter size (base multiplier — actual pixel size scales with zoom)
-DEFAULT_SCATTER_SIZE = 5
+DEFAULT_SCATTER_SIZE = 1
 
 # Animation interval in milliseconds
 DEFAULT_ANIMATION_INTERVAL_MS = 100
@@ -21,7 +21,7 @@ COLOUR_OLDEST = (0.55, 0.27, 0.07, 1.0)        # warm brown — visible on white
 
 # Default popup columns
 DEFAULT_POPUP_COLUMNS = [
-    "latitude", "longitude", "utm_x", "utm_y",
+    "latitude", "longitude", "x", "y",
     "FRP_MW", "confidence", "T4", "T5",
     "day", "line", "sample",
     "detection_datetime", "age_days",
@@ -38,4 +38,4 @@ RASTER_CMAP = "gray"
 # ---- Performance: raster downsampling ----
 # Set to 99999 so NO downsampling by default.
 # Lower in Config dialog to speed up rendering on large rasters.
-MAX_RASTER_DISPLAY_DIM = 99999
+MAX_RASTER_DISPLAY_DIM = 3000
