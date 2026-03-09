@@ -7,6 +7,8 @@ DownloadDialog: modal popup that manages the full pipeline -
   3. Download VNP14IMG data from LAADS DAAC (background thread)
   4. Run shapify to convert .nc -> .shp
   5. Report completion
+
+Closing the window (X) immediately cancels all running workers.
 """
 
 import os
@@ -94,6 +96,7 @@ def _ymd_to_datetime(ymd_str: str):
 class DownloadDialog:
     """
     Modal download-pipeline dialog.
+    Closing the window (X) immediately cancels all background work.
     """
 
     def __init__(self, parent: tk.Tk):
@@ -101,6 +104,7 @@ class DownloadDialog:
         self._cancel_event = threading.Event()
         self._download_thread: Optional[threading.Thread] = None
         self._nc_count = 0
+        self._executor: Optional[ThreadPoolExecutor] = None
 
         self._ref_wkt: Optional[str] = None
         self._ref_epsg: Optional[int] = None
@@ -204,7 +208,7 @@ class DownloadDialog:
         ttk.Button(r3, text="Browse\u2026", command=self._browse_save_dir).grid(
             row=0, column=2, padx=4)
 
-        # -- Row 4: Action buttons --
+        # -- Row 4: Action button (Download only, no Cancel) --
         r4 = ttk.Frame(self._win)
         r4.grid(row=4, column=0, sticky="ew", **pad)
 
@@ -214,13 +218,6 @@ class DownloadDialog:
             command=self._start_download,
         )
         self._download_btn.pack(side=tk.LEFT, padx=8)
-
-        self._cancel_btn = tk.Button(
-            r4, text="  \u2716  Cancel  ", bg="#F44336", fg="white",
-            font=("TkDefaultFont", 10, "bold"), activebackground="#C62828",
-            command=self._cancel_download, state=tk.DISABLED,
-        )
-        self._cancel_btn.pack(side=tk.LEFT, padx=8)
 
         # -- Row 5: Status --
         r5 = ttk.LabelFrame(self._win, text="Status", padding=6)
@@ -349,7 +346,6 @@ class DownloadDialog:
         )
 
         self._download_btn.configure(state=tk.DISABLED)
-        self._cancel_btn.configure(state=tk.NORMAL)
         self._cancel_event.clear()
         self._nc_count = 0
 
@@ -361,15 +357,12 @@ class DownloadDialog:
         )
         self._download_thread.start()
 
-    def _cancel_download(self):
-        self._on_close()
-
     # ==================================================================
     # Background worker
     # ==================================================================
 
     def _download_worker(self, token, start_dt, end_dt, save_dir, ref_path,
-                     west, south, east, north):
+                         west, south, east, north):
         product = "VNP14IMG"
         interval = datetime.timedelta(days=1)
         day = start_dt
@@ -380,19 +373,10 @@ class DownloadDialog:
 
         total_days = len(days)
 
-        # --- Import sync (unchanged) ---
-        sync_fn = None
-        try:
-            from viirs.utils.laads_data_download_v2 import sync
-            sync_fn = sync
-        except ImportError:
-            try:
-                sys.path.insert(0, os.path.join(
-                    os.path.dirname(os.path.abspath(__file__)), "..", "utils"))
-                from laads_data_download_v2 import sync
-                sync_fn = sync
-            except ImportError:
-                pass
+        # --- Import sync ---
+
+        from viirs.utils.laads_data_download_v2 import sync
+        sync_fn = sync
 
         if sync_fn is None:
             self._update_status(
@@ -434,50 +418,52 @@ class DownloadDialog:
                 print(f"[WARN] Download error for {download_day}: {exc}")
 
             with lock:
-                nonlocal completed          # needed because we reassign
+                nonlocal completed
                 completed += 1
-                done = completed            # snapshot for the lambda below
+                done = completed
                 new_count = self._count_nc_files(save_dir)
                 self._nc_count = new_count
 
             self._update_nc_count(new_count)
             self._update_status(
                 f"Completed {done}/{total_days} days  "
-                f"({download_day.strftime('%Y-%m-%d')} done)…")
+                f"({download_day.strftime('%Y-%m-%d')} done)\u2026")
 
         max_workers = 16
         self._update_status(
             f"Starting parallel download: {total_days} days, "
-            f"{max_workers} workers…")
+            f"{max_workers} workers\u2026")
 
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        executor = ThreadPoolExecutor(max_workers=max_workers)
+        self._executor = executor
+        try:
             future_to_day = {
                 executor.submit(download_one, d): d for d in days
             }
             for future in as_completed(future_to_day):
                 if self._cancel_event.is_set():
-                    # Signal remaining futures; executor will drain cleanly
-                    for f in future_to_day:
-                        f.cancel()
+                    executor.shutdown(wait=False, cancel_futures=True)
                     break
                 try:
-                    future.result()   # re-raises any exception from download_one
+                    future.result()
                 except Exception as exc:
                     d = future_to_day[future]
                     print(f"[WARN] Unhandled error for {d}: {exc}")
+        finally:
+            self._executor = None
+            executor.shutdown(wait=False)
 
         if self._cancel_event.is_set():
-            self._update_status("Download cancelled by user.")
+            self._update_status("Download cancelled.")
             self._finish_reset()
             return
 
         total_nc = self._count_nc_files(save_dir)
         self._update_status(
-            f"Download complete: {total_nc} .nc files. Running shapify…")
+            f"Download complete: {total_nc} .nc files. Running shapify\u2026")
         print(f"\n[INFO] Download finished. {total_nc} .nc files total.")
 
         self._run_shapify(save_dir, ref_path, west, south, east, north)
-
 
     def _run_shapify(self, save_dir, ref_path, west, south, east, north):
         if self._cancel_event.is_set():
@@ -487,6 +473,7 @@ class DownloadDialog:
         self._update_status("Running shapify (converting .nc \u2192 .shp)\u2026")
         print("\n[INFO] Starting shapify\u2026")
 
+        # --force flag tells shapify to replace existing .shp files
         cmd = [
             sys.executable, "-m", "viirs.utils.shapify",
             save_dir,
@@ -502,17 +489,23 @@ class DownloadDialog:
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, bufsize=1,
             )
+            self._shapify_proc = proc
             for line in proc.stdout:
                 line = line.rstrip()
                 if line:
                     print(f"  [shapify] {line}")
                 if self._cancel_event.is_set():
                     proc.terminate()
+                    try:
+                        proc.wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
                     self._update_status("Shapify cancelled.")
                     self._finish_reset()
                     return
 
             proc.wait()
+            self._shapify_proc = None
             if proc.returncode == 0:
                 self._update_status("Shapify complete!")
                 print("[INFO] Shapify finished successfully.")
@@ -557,7 +550,6 @@ class DownloadDialog:
 
     def _reset_buttons(self):
         self._download_btn.configure(state=tk.NORMAL)
-        self._cancel_btn.configure(state=tk.DISABLED)
 
     def _show_done(self, save_dir):
         def _popup():
@@ -586,11 +578,23 @@ class DownloadDialog:
         return count
 
     def _on_close(self):
-        if self._download_thread and self._download_thread.is_alive():
-            if not messagebox.askyesno(
-                "Confirm", "Download is running. Cancel and close?",
-                parent=self._win,
-            ):
-                return
-            self._cancel_event.set()
+        """Close immediately -- signal cancel and kill everything."""
+        self._cancel_event.set()
+
+        # Shut down the thread pool executor immediately
+        if self._executor is not None:
+            try:
+                self._executor.shutdown(wait=False, cancel_futures=True)
+            except TypeError:
+                # Python < 3.9 doesn't have cancel_futures
+                self._executor.shutdown(wait=False)
+
+        # Kill shapify subprocess if running
+        if hasattr(self, "_shapify_proc") and self._shapify_proc is not None:
+            try:
+                self._shapify_proc.terminate()
+                self._shapify_proc.kill()
+            except Exception:
+                pass
+
         self._win.destroy()
