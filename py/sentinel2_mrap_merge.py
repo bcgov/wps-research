@@ -4,10 +4,19 @@
 2) create a new mosaic for every date there's new data
 
 20250605: nb, should have sentinel2_mrap.py pass in the dates that need to be (re) generated.
+20260309 added feature to only generate product every N-th days
 '''
 from misc import sep, args, exists, run, err, parfor, hdr_fn 
 import multiprocessing as mp
 import os
+
+# Extract --N [value] before other argument processing
+N = 1
+if '--N' in args:
+    idx = args.index('--N')
+    N = int(args[idx + 1])
+    args.pop(idx)      # remove '--N'
+    args.pop(idx)      # remove the value
 
 EPSG = 3005 if len(args) < 2 else 3347  # BC Albers / Canada LCC
 
@@ -89,7 +98,7 @@ date_mrap = [[d, dic[d]] for d in dic]
 date_mrap.sort() # list of MRAP files available on each date.
 cmds, most_recent_by_gid = [], {}  # list the most recent MRAP file observed for this GID, for a given date yyyymmdd
 
-for d, df in date_mrap:  # for each date ( and associated list of MRAP files observed that date yyyymmdd ) 
+for date_idx, (d, df) in enumerate(date_mrap):  # for each date ( and associated list of MRAP files observed that date yyyymmdd ) 
     # print(d)
 
     for f in df:
@@ -160,6 +169,10 @@ for d, df in date_mrap:  # for each date ( and associated list of MRAP files obs
     if (merge_dates is not None) and (d not in merge_dates):
             # MRAP mosaic product not to be created for this date.
             continue
+    elif date_idx % N != 0:
+            # MRAP mosaic product skipped due to --N stride.
+            print('SKIPPING (--N stride)', d)
+            continue
     else:
         # create MRAP mosaic product for this date. Thought this was every date?
         mrap_product_file = str(d) + '_mrap.bin'
@@ -175,3 +188,4 @@ for d, df in date_mrap:  # for each date ( and associated list of MRAP files obs
         merge(resampled_files,
               d,
               mrap_product_file)  # merge step can't be performed in parallel as easily, however techincally we should be able to add an ampersand here and continue over the loop since the MRAP files are cumulative in time ( on a per-time / gid basis ) that is the MRAP merge files aren't defined in terms of previous MRAP merge files.. only MRAP files ( on a per-tile/ gid basis)
+
