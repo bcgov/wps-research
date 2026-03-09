@@ -9,6 +9,8 @@ RENDERING RESOURCE KNOBS
 """
 
 import os
+import sys
+import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from datetime import date
@@ -57,6 +59,7 @@ class FireAccumulationGUI:
         # State
         self._raster_loaded = False
         self._crs_string = ""
+        self._acc_thread = None
 
         # tk variables
         self._shapefile_dir_var = tk.StringVar()
@@ -71,6 +74,13 @@ class FireAccumulationGUI:
         self._viewport_pixel_var = tk.StringVar(value="In view: 0")
         self._crs_var = tk.StringVar(value="EPSG: \u2014")
         self._updating_slider = False
+
+        # Accumulate + Rasterize variables
+        self._base_raster_var = tk.StringVar()
+        self._acc_output_dir_var = tk.StringVar()
+
+        # Sync: when raster_path changes, default base_raster if empty
+        self._raster_path_var.trace_add("write", self._sync_base_raster)
 
         # Slider throttle
         self._slider_throttle_id = None
@@ -106,7 +116,7 @@ class FireAccumulationGUI:
         self._build_file_controls(ctrl)
         self._build_date_controls(ctrl)
         self._build_playback_controls(ctrl)
-        self._build_nav_and_display_controls(ctrl)
+        self._build_nav_and_acc_controls(ctrl)
 
         # Status bar
         status = ttk.Frame(self._root, padding=4)
@@ -144,7 +154,10 @@ class FireAccumulationGUI:
         ttk.Button(row, text="Browse\u2026",
                    command=self._browse_raster).pack(side=tk.LEFT)
         ttk.Button(row, text="Load Raster",
-                   command=self._load_raster).pack(side=tk.LEFT, padx=4)
+                   command=self._load_raster).pack(side=tk.LEFT, padx=2)
+        ttk.Button(row, text="\u2715", width=2,
+                   command=lambda: self._raster_path_var.set("")).pack(
+            side=tk.LEFT, padx=(0, 4))
 
         ttk.Separator(row, orient=tk.VERTICAL).pack(
             side=tk.LEFT, padx=8, fill=tk.Y)
@@ -155,7 +168,10 @@ class FireAccumulationGUI:
         ttk.Button(row, text="Browse\u2026",
                    command=self._browse_shapefile_dir).pack(side=tk.LEFT)
         ttk.Button(row, text="Load Shapefiles",
-                   command=self._load_shapefiles).pack(side=tk.LEFT, padx=4)
+                   command=self._load_shapefiles).pack(side=tk.LEFT, padx=2)
+        ttk.Button(row, text="\u2715", width=2,
+                   command=lambda: self._shapefile_dir_var.set("")).pack(
+            side=tk.LEFT, padx=(0, 4))
 
         ttk.Button(row, text="\u2b07 Download",
                    command=self._open_download, width=12).pack(
@@ -167,70 +183,87 @@ class FireAccumulationGUI:
         row = ttk.Frame(parent)
         row.pack(fill=tk.X, pady=2)
 
-        ttk.Label(row, text="Start Date (YYYY-MM-DD)").pack(side=tk.LEFT)
-        ttk.Entry(row, textvariable=self._start_date_var, width=12).pack(
+        ttk.Label(row, text="Start (YYYY-MM-DD)").pack(side=tk.LEFT)
+        ttk.Entry(row, textvariable=self._start_date_var, width=11).pack(
             side=tk.LEFT, padx=4)
-        ttk.Label(row, text="End Date (YYYY-MM-DD)").pack(
+        ttk.Label(row, text="End (YYYY-MM-DD)").pack(
             side=tk.LEFT, padx=(12, 0))
-        ttk.Entry(row, textvariable=self._end_date_var, width=12).pack(
+        ttk.Entry(row, textvariable=self._end_date_var, width=11).pack(
             side=tk.LEFT, padx=4)
         ttk.Button(row, text="Apply Filter",
                    command=self._apply_date_filter).pack(
             side=tk.LEFT, padx=8)
 
-    # -- Playback rows --
+    # -- Playback row (merged: play, reset, skip N, speed, slider) --
 
     def _build_playback_controls(self, parent):
-        self._playback_row = ttk.Frame(parent)
-        self._playback_row.pack(fill=tk.X, pady=2)
+        row = ttk.Frame(parent)
+        row.pack(fill=tk.X, pady=2)
 
-        self._play_btn = ttk.Button(self._playback_row, text="\u25b6  Play",
-                                     command=self._toggle_play, width=10)
+        self._play_btn = ttk.Button(row, text="\u25b6  Play",
+                                    command=self._toggle_play, width=10)
         self._play_btn.pack(side=tk.LEFT, padx=2)
-        ttk.Button(self._playback_row, text="\u2190 -1 Day",
-                   command=self._step_back, width=10).pack(
+
+        ttk.Button(row, text="\u23ee", command=self._reset_animation,
+                   width=3).pack(side=tk.LEFT, padx=2)
+
+        ttk.Separator(row, orient=tk.VERTICAL).pack(
+            side=tk.LEFT, padx=4, fill=tk.Y)
+
+        ttk.Button(row, text="\u2190 Skip",
+                   command=self._skip_back_n, width=7).pack(
             side=tk.LEFT, padx=2)
-        ttk.Button(self._playback_row, text="+1 Day \u2192",
-                   command=self._step_fwd, width=10).pack(
+        self._skip_n_var = tk.IntVar(value=1)
+        ttk.Spinbox(row, from_=1, to=999, increment=1,
+                     textvariable=self._skip_n_var, width=4).pack(
             side=tk.LEFT, padx=2)
-        ttk.Button(self._playback_row, text="\u23f9  Reset",
-                   command=self._reset_animation, width=9).pack(
+        ttk.Button(row, text="Skip \u2192",
+                   command=self._skip_fwd_n, width=7).pack(
             side=tk.LEFT, padx=2)
 
-        ttk.Separator(self._playback_row, orient=tk.VERTICAL).pack(
-            side=tk.LEFT, padx=8, fill=tk.Y)
-        ttk.Label(self._playback_row, text="Speed (ms):").pack(side=tk.LEFT)
-        ttk.Spinbox(self._playback_row, from_=50, to=5000, increment=50,
+        ttk.Separator(row, orient=tk.VERTICAL).pack(
+            side=tk.LEFT, padx=4, fill=tk.Y)
+        ttk.Label(row, text="Speed (ms):").pack(side=tk.LEFT)
+        ttk.Spinbox(row, from_=50, to=5000, increment=50,
                      textvariable=self._interval_var, width=6,
                      command=self._update_speed).pack(side=tk.LEFT, padx=4)
 
-        ttk.Separator(self._playback_row, orient=tk.VERTICAL).pack(
-            side=tk.LEFT, padx=8, fill=tk.Y)
-        ttk.Label(self._playback_row, text="Frame").pack(side=tk.LEFT)
+        ttk.Separator(row, orient=tk.VERTICAL).pack(
+            side=tk.LEFT, padx=4, fill=tk.Y)
+        ttk.Label(row, text="Frame").pack(side=tk.LEFT)
         self._frame_slider = ttk.Scale(
-            self._playback_row, from_=0, to=1, orient=tk.HORIZONTAL,
+            row, from_=0, to=1, orient=tk.HORIZONTAL,
             command=self._on_slider)
         self._frame_slider.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
 
-        # Row 2: skip N days
-        row2 = ttk.Frame(parent)
-        row2.pack(fill=tk.X, pady=2)
-        ttk.Button(row2, text="\u2190 Skip N Days",
-                   command=self._skip_back_n, width=14).pack(
-            side=tk.LEFT, padx=2)
-        self._skip_n_var = tk.IntVar(value=7)
-        ttk.Spinbox(row2, from_=1, to=365, increment=1,
-                     textvariable=self._skip_n_var, width=5).pack(
-            side=tk.LEFT, padx=4)
-        ttk.Button(row2, text="Skip N Days \u2192",
-                   command=self._skip_fwd_n, width=14).pack(
-            side=tk.LEFT, padx=2)
-        ttk.Label(row2, text="(days)",
-                  font=("TkDefaultFont", 9)).pack(side=tk.LEFT, padx=4)
+        # Snap-on-click: override default ttk.Scale behavior so a click
+        # immediately jumps the thumb to the clicked position.
+        self._frame_slider.bind("<Button-1>", self._slider_snap_click)
 
-    # -- Nav tools + layer toggles --
+    def _slider_snap_click(self, event):
+        """Jump the slider thumb directly to the clicked position."""
+        slider = self._frame_slider
+        # Compute value from x-pixel position
+        # ttk.Scale doesn't expose trough geometry easily, so we use
+        # the widget width and the from/to range.
+        width = slider.winfo_width()
+        if width <= 0:
+            return
+        x = event.x
+        from_val = float(slider.cget("from"))
+        to_val = float(slider.cget("to"))
+        # Clamp x into [0, width]
+        x = max(0, min(x, width))
+        fraction = x / width
+        value = from_val + fraction * (to_val - from_val)
+        slider.set(value)
+        # Now let the normal _on_slider callback handle the rendering.
+        # Return "break" to suppress the default slow-scroll behavior.
+        return "break"
 
-    def _build_nav_and_display_controls(self, parent):
+    # -- Nav tools + layer toggles + accumulate/rasterize controls --
+
+    def _build_nav_and_acc_controls(self, parent):
         row = ttk.Frame(parent)
         row.pack(fill=tk.X, pady=2)
 
@@ -239,10 +272,41 @@ class FireAccumulationGUI:
             _bg = row.winfo_toplevel().cget("background")
         except Exception:
             pass
-
         _active_bg = "#b0c4ff"
         _font = ("TkDefaultFont", 9)
 
+        # ---- LEFT SIDE: Accumulate & Rasterize ----
+        ttk.Label(row, text="Base:", font=_font).pack(side=tk.LEFT)
+        ttk.Entry(row, textvariable=self._base_raster_var, width=18).pack(
+            side=tk.LEFT, padx=2)
+        ttk.Button(row, text="\u2026", width=2,
+                   command=self._browse_base_raster).pack(side=tk.LEFT)
+        ttk.Button(row, text="\u2715", width=2,
+                   command=lambda: self._base_raster_var.set("")).pack(
+            side=tk.LEFT, padx=(0, 4))
+
+        ttk.Label(row, text="Out:", font=_font).pack(side=tk.LEFT)
+        ttk.Entry(row, textvariable=self._acc_output_dir_var, width=18).pack(
+            side=tk.LEFT, padx=2)
+        ttk.Button(row, text="\u2026", width=2,
+                   command=self._browse_acc_output_dir).pack(side=tk.LEFT)
+        ttk.Button(row, text="\u2715", width=2,
+                   command=lambda: self._acc_output_dir_var.set("")).pack(
+            side=tk.LEFT, padx=(0, 4))
+
+        self._acc_btn = tk.Button(
+            row, text="Accumulate & Rasterize",
+            bg="#4CAF50", fg="white",
+            font=("TkDefaultFont", 9, "bold"),
+            activebackground="#388E3C",
+            command=self._confirm_accumulate_rasterize,
+        )
+        self._acc_btn.pack(side=tk.LEFT, padx=4)
+
+        ttk.Separator(row, orient=tk.VERTICAL).pack(
+            side=tk.LEFT, padx=6, fill=tk.Y)
+
+        # ---- NAV BUTTONS ----
         def _nav_btn(text, mode):
             btn = tk.Button(
                 row, text=text, relief=tk.RAISED, bd=1,
@@ -269,11 +333,7 @@ class FireAccumulationGUI:
         ttk.Separator(row, orient=tk.VERTICAL).pack(
             side=tk.LEFT, padx=6, fill=tk.Y)
 
-        ttk.Label(row, text="Click a pixel for details",
-                  font=("TkDefaultFont", 8),
-                  foreground="#888888").pack(side=tk.LEFT, padx=6)
-
-        # Layer toggles
+        # ---- RIGHT SIDE: layer toggles ----
         self._show_raster_var = tk.BooleanVar(value=True)
         self._raster_chk = tk.Checkbutton(
             row, text="Show Background",
@@ -313,17 +373,11 @@ class FireAccumulationGUI:
         dialog = ConfigDialog(self._root)
         if not dialog.applied:
             return
-
-        # Sync interval spinbox (still has its own UI control)
         self._interval_var.set(cfg.DEFAULT_ANIMATION_INTERVAL_MS)
-
-        # Propagate to live components
         if self._animator:
             self._animator.interval_ms = cfg.DEFAULT_ANIMATION_INTERVAL_MS
         if self._canvas:
             self._canvas.scatter_size = cfg.DEFAULT_SCATTER_SIZE
-
-        # Re-render current frame so scatter size + colour levels apply immediately
         if self._animator and self._animator.current_date:
             self._on_animation_frame(self._animator.current_date)
 
@@ -369,7 +423,16 @@ class FireAccumulationGUI:
             self._viewport_pixel_var.set(f"In view: {n}")
 
     # ==================================================================
-    # Loading
+    # Base raster sync
+    # ==================================================================
+
+    def _sync_base_raster(self, *_):
+        """If base raster field is empty, mirror the visualization raster."""
+        if not self._base_raster_var.get().strip():
+            self._base_raster_var.set(self._raster_path_var.get())
+
+    # ==================================================================
+    # Browse helpers
     # ==================================================================
 
     def _browse_shapefile_dir(self):
@@ -390,6 +453,28 @@ class FireAccumulationGUI:
         )
         if f:
             self._raster_path_var.set(f)
+
+    def _browse_base_raster(self):
+        f = filedialog.askopenfilename(
+            title="Select base raster for rasterization",
+            filetypes=[
+                ("ENVI binary", "*.bin"),
+                ("ENVI header", "*.hdr"),
+                ("GeoTIFF", "*.tif *.tiff"),
+                ("All files", "*.*"),
+            ],
+        )
+        if f:
+            self._base_raster_var.set(f)
+
+    def _browse_acc_output_dir(self):
+        d = filedialog.askdirectory(title="Select output directory")
+        if d:
+            self._acc_output_dir_var.set(d)
+
+    # ==================================================================
+    # Loading
+    # ==================================================================
 
     def _load_raster(self):
         raster_path = self._raster_path_var.get().strip()
@@ -416,6 +501,10 @@ class FireAccumulationGUI:
                                  f"Could not load raster:\n{exc}")
             self._status_var.set("Raster load failed.")
             return
+
+        # Sync base raster field
+        if not self._base_raster_var.get().strip():
+            self._base_raster_var.set(raster_path)
 
         self._update_crs_display()
 
@@ -625,12 +714,13 @@ class FireAccumulationGUI:
         self._date_label_var.set(f"Date: {start}")
         self._on_animation_frame(start)
 
-    # -- Playback --
+    # ==================================================================
+    # Playback
+    # ==================================================================
 
     def _toggle_play(self):
         if self._animator is None:
             return
-
         if self._animator.is_playing:
             self._animator.pause()
             self._play_btn.config(text="\u25b6  Play")
@@ -639,14 +729,6 @@ class FireAccumulationGUI:
             self._animator.play()
             if self._animator.is_playing:
                 self._play_btn.config(text="\u23f8  Pause")
-
-    def _step_fwd(self):
-        if self._animator:
-            self._animator.step_forward()
-
-    def _step_back(self):
-        if self._animator:
-            self._animator.step_backward()
 
     def _skip_fwd_n(self):
         if self._animator:
@@ -767,7 +849,194 @@ class FireAccumulationGUI:
         self._play_btn.config(text="\u25b6  Play")
         self._status_var.set("Animation complete.")
 
-    # -- Lifecycle --
+    # ==================================================================
+    # Accumulate + Rasterize
+    # ==================================================================
+
+    def _confirm_accumulate_rasterize(self):
+        """Show a confirmation popup, then run in a background thread."""
+        shp_dir = self._shapefile_dir_var.get().strip()
+        if not shp_dir or not os.path.isdir(shp_dir):
+            messagebox.showerror("Error",
+                                 "Load shapefiles first (set shapefile dir).")
+            return
+
+        base_raster = self._base_raster_var.get().strip()
+        if not base_raster or not os.path.exists(base_raster):
+            messagebox.showerror("Error",
+                                 "Set a valid base raster for rasterization.")
+            return
+
+        out_dir = self._acc_output_dir_var.get().strip()
+        if not out_dir:
+            messagebox.showerror("Error", "Set an output directory.")
+            return
+
+        start_str = self._start_date_var.get().strip()
+        end_str = self._end_date_var.get().strip()
+        try:
+            date.fromisoformat(start_str)
+            date.fromisoformat(end_str)
+        except ValueError:
+            messagebox.showerror("Error", "Dates must be YYYY-MM-DD.")
+            return
+
+        if self._acc_thread and self._acc_thread.is_alive():
+            messagebox.showwarning("Busy",
+                                   "Accumulate & Rasterize is already running.")
+            return
+
+        # Confirmation popup
+        popup = tk.Toplevel(self._root)
+        popup.title("Confirm Accumulate & Rasterize")
+        popup.transient(self._root)
+        popup.grab_set()
+
+        w, h = 520, 220
+        sx = self._root.winfo_screenwidth()
+        sy = self._root.winfo_screenheight()
+        popup.geometry(f"{w}x{h}+{(sx-w)//2}+{(sy-h)//2}")
+        popup.resizable(False, False)
+
+        pad = dict(padx=12, pady=4)
+        ttk.Label(popup, text="Accumulate & Rasterize",
+                  font=("TkDefaultFont", 12, "bold")).pack(pady=(12, 6))
+
+        info = ttk.Frame(popup)
+        info.pack(fill=tk.X, **pad)
+
+        def _row(label, value):
+            f = ttk.Frame(info)
+            f.pack(fill=tk.X, pady=1)
+            ttk.Label(f, text=label, width=18, anchor="e",
+                      font=("TkDefaultFont", 9, "bold")).pack(side=tk.LEFT)
+            ttk.Label(f, text=value, anchor="w",
+                      font=("TkDefaultFont", 9)).pack(
+                side=tk.LEFT, padx=6)
+
+        _row("Shapefile dir:", shp_dir)
+        _row("Base raster:", os.path.basename(base_raster))
+        _row("Date range:", f"{start_str}  \u2192  {end_str}")
+        _row("Output dir:", out_dir)
+
+        btn_frame = ttk.Frame(popup)
+        btn_frame.pack(pady=12)
+
+        def _go():
+            popup.destroy()
+            self._run_accumulate_rasterize(
+                shp_dir, base_raster, out_dir, start_str, end_str)
+
+        tk.Button(
+            btn_frame, text="  \u2714  Confirm  ", bg="#4CAF50", fg="white",
+            font=("TkDefaultFont", 10, "bold"), activebackground="#388E3C",
+            command=_go,
+        ).pack()
+
+    def _run_accumulate_rasterize(self, shp_dir, base_raster, out_dir,
+                                  start_str, end_str):
+        self._acc_btn.configure(state=tk.DISABLED)
+        self._acc_thread = threading.Thread(
+            target=self._acc_worker,
+            args=(shp_dir, base_raster, out_dir, start_str, end_str),
+            daemon=True,
+        )
+        self._acc_thread.start()
+
+    def _acc_worker(self, shp_dir, base_raster, out_dir, start_str, end_str):
+        def _status(msg):
+            try:
+                self._root.after(0, lambda: self._status_var.set(msg))
+            except Exception:
+                pass
+
+        # ---- Import accumulate ----
+        from viirs.utils.accumulate import accumulate
+        accumulate_fn = accumulate
+       
+        if accumulate_fn is None:
+            _status("ERROR: Could not import accumulate_fp.accumulate")
+            self._acc_finish()
+            return
+
+        # ---- Import rasterize ----
+        from viirs.utils.rasterize import rasterize_shapefile
+        rasterize_fn = rasterize_shapefile
+
+        if rasterize_fn is None:
+            _status("ERROR: Could not import rasterize_batch.rasterize_shapefile")
+            self._acc_finish()
+            return
+
+        # ---- Step 1: Accumulate ----
+        start_compact = start_str.replace("-", "")
+        end_compact = end_str.replace("-", "")
+
+        _status("Accumulating shapefiles\u2026")
+
+        try:
+            shp_paths = accumulate_fn(
+                shp_dir=shp_dir,
+                start_str=start_compact,
+                end_str=end_compact,
+                reference_raster=base_raster,
+                output_dir=out_dir,
+                progress_cb=_status,
+            )
+        except Exception as exc:
+            _status(f"Accumulation error: {exc}")
+            self._acc_finish()
+            return
+
+        if not shp_paths:
+            _status("Accumulation produced no files.")
+            self._acc_finish()
+            return
+
+        n_shp = len(shp_paths)
+        _status(f"Accumulated {n_shp} shapefiles. Rasterizing\u2026")
+
+        # ---- Step 2: Rasterize in parallel ----
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        raster_out_dir = out_dir
+        rasterized = 0
+        errors = 0
+
+        def _rast_one(shp_path):
+            try:
+                return rasterize_fn(shp_path, base_raster, raster_out_dir)
+            except Exception as exc:
+                print(f"[WARN] Rasterize error {shp_path}: {exc}")
+                return None
+
+        max_w = min(16, n_shp)
+        with ThreadPoolExecutor(max_workers=max_w) as pool:
+            futs = {pool.submit(_rast_one, p): p for p in shp_paths}
+            for fut in as_completed(futs):
+                result = fut.result()
+                if result:
+                    rasterized += 1
+                else:
+                    errors += 1
+                _status(f"Rasterizing\u2026 {rasterized + errors}/{n_shp}")
+
+        _status(
+            f"Done: {n_shp} shapefiles + {rasterized} rasters "
+            f"saved to {out_dir}"
+        )
+        self._acc_finish()
+
+    def _acc_finish(self):
+        try:
+            self._root.after(0, lambda: self._acc_btn.configure(
+                state=tk.NORMAL))
+        except Exception:
+            pass
+
+    # ==================================================================
+    # Lifecycle
+    # ==================================================================
 
     def _on_close(self):
         if self._animator:

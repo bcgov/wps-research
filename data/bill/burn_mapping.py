@@ -127,8 +127,8 @@ class GUI(GUI_Settings):
         self.polygon_methods = ['swir wins', 'dNBR 12']
 
         #First plots
-        self.embed_band_list = [1,2,4,5,6,8,9,10,12,14]
-        self.img_band_list = [9, 10, 13]
+        self.embed_band_list = [1,2,3,4]
+        self.img_band_list = [1,2,3]
 
         #Other settings
         self.sample_size = sample_size

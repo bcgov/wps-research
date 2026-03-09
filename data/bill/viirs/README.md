@@ -8,7 +8,7 @@ An end-to-end pipeline for downloading, converting, and visualising VIIRS fire p
 
 ## Overview
 
-This toolkit provides a complete workflow for working with VIIRS active fire data: pulling raw NetCDF files from NASA, converting them to shapefiles in a Sentinel-2 UTM projection, and optionally rasterizing or accumulating the results for burn mapping. A graphical interface is included for interactive exploration and visualisation.
+This toolkit provides a complete workflow for working with VIIRS active fire data: pulling raw NetCDF files from NASA, converting them to shapefiles in an appropriate Sentinel-2 projection, and optionally rasterizing or accumulating the results for burn mapping. A graphical interface is included for interactive exploration and visualisation.
 
 ---
 
@@ -35,7 +35,7 @@ A reference raster file (`.bin` format; additional extensions may be supported i
 2. A LAADS DAAC authentication token is required. Store it at `/data/.tokens/laads` for automatic loading (displayed as `***...`), or paste it in directly.
 3. Select the date range of interest (`YYYY-MM-DD` format).
 4. Specify a save directory (e.g. `/data/users/viirs_T09UYU`). A new directory is recommended for each download session — writing to an existing directory may cause errors.
-5. Click **Download**. A summary is displayed in the GUI panel; full output is printed to the originating terminal.
+5. Click **Download**. A summary is displayed in the GUI panel; full output is printed to the originating terminal. Closing the download window (X) immediately cancels all running workers.
 
 **What the download does:**
 
@@ -59,6 +59,40 @@ In the **Config** tab:
 
 - **Fire pixel size** — adjust the display size of fire pixels (integer, minimum 1).
 - **Colour levels** — configure up to 500 colour levels. Pixel colour shifts along the colour bar to reflect the age of detection (in days), with older detections displayed in progressively distinct colours.
+
+### 5. Accumulate & Rasterize
+
+The **Accumulate & Rasterize** button (on the navigation/tools row) runs the full accumulation and rasterization pipeline directly from the GUI.
+
+**Setup:**
+
+1. **Base raster** — set the raster image to use as the grid template for rasterized outputs. This field automatically mirrors the visualization raster loaded in step 3; it can be changed independently if a different base grid is needed.
+2. **Output directory** — browse or type the directory where all output shapefiles and rasterized `.bin`/`.hdr` files will be saved (flat, no subdirectories).
+3. **Date range** — the start and end dates from the GUI date fields are used. Apply a date filter first if the range needs to be narrowed.
+
+**Running:**
+
+1. Click **Accumulate & Rasterize**. A confirmation popup summarises the shapefile directory, base raster, date range, and output directory.
+2. Click the green **Confirm** button to start (or close the popup to cancel).
+3. Progress is reported in the bottom-left status panel.
+
+**What it does:**
+
+- **Accumulate:** scans the loaded shapefile directory, filters by the GUI date range, sorts all files chronologically by detection datetime, and writes one cumulative shapefile per unique detection date into the output directory. Output filenames use the actual detection timestamps from the source files: `VIIRS_VNP14IMG_{first_dt}_{batch_end_dt}.shp`. The first output file has identical start and end timestamps. Each cumulative file includes an `age_days` column (fractional days relative to that batch's end datetime).
+- **Rasterize:** after accumulation completes, each accumulated shapefile is rasterized in parallel onto the base raster grid, producing a binary fire mask (`.bin`/`.hdr`) for each file in the same output directory.
+
+**Output example** (for data spanning 2025-09-20 to 2025-09-25):
+
+```
+output_dir/
+    VIIRS_VNP14IMG_20250920T0840_20250920T0840.shp   (+ .dbf .prj .shx)
+    VIIRS_VNP14IMG_20250920T0840_20250920T0840.bin    (+ .hdr)
+    VIIRS_VNP14IMG_20250920T0840_20250921T1430.shp
+    VIIRS_VNP14IMG_20250920T0840_20250921T1430.bin
+    ...
+    VIIRS_VNP14IMG_20250920T0840_20250925T2010.shp
+    VIIRS_VNP14IMG_20250920T0840_20250925T2010.bin
+```
 
 ---
 
