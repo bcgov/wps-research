@@ -15,15 +15,12 @@ import config as cfg
 _CONFIG_FIELDS = [
     ("DEFAULT_SCATTER_SIZE",         "Scatter Size (base)",         int,   1,     200),
     ("DEFAULT_ANIMATION_INTERVAL_MS","Animation Interval (ms)",     int,   50,    5000),
-    ("MAX_WORKERS",                  "Max Parallel Workers",        int,   1,     128),
     ("N_COLOUR_LEVELS",              "Colour Levels",               int,   10,    500),
     ("COLOUR_NEWEST",                "Colour Newest (R,G,B,A)",     str,   None,  None),
     ("COLOUR_OLDEST",                "Colour Oldest (R,G,B,A)",     str,   None,  None),
     ("RASTER_ALPHA",                 "Raster Alpha (0-1)",          float, 0.0,   1.0),
     ("RASTER_CMAP",                  "Raster Colourmap",            str,   None,  None),
-    ("MAX_RASTER_DISPLAY_DIM",       "Max Raster Display Dim (px)", int,   100,   999999),
-    ("FILENAME_DATETIME_PATTERN",    "Filename Datetime Regex",     str,   None,  None),
-    ("FILENAME_DATETIME_FORMAT",     "Filename Datetime Format",    str,   None,  None),
+    ("MAX_RASTER_DISPLAY_DIM",       "Max Raster Display Dim (px)", int,   100,   99999)
 ]
 
 
@@ -45,7 +42,7 @@ class ConfigDialog:
         self._win.grab_set()
 
         # Centre on screen
-        w, h = 560, 440
+        w, h = 560, 308
         sx = parent.winfo_screenwidth()
         sy = parent.winfo_screenheight()
         x = (sx - w) // 2

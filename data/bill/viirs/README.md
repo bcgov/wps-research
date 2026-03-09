@@ -1,105 +1,90 @@
-# viirs — VIIRS Fire Pixel Processing Toolkit 
+# viirs — VIIRS Fire Pixel Processing Toolkit
 
-<--- Last Update March 9, 2026 --->
+*Last updated: March 9, 2026*
 
-End-to-end pipeline: download → convert → (optionally rasterize / accumulate) → visualise.
+An end-to-end pipeline for downloading, converting, and visualising VIIRS fire pixel data. Designed specifically for **VNP14IMG** products.
 
-This package is designed specifically for `VNP14IMG data`
+---
+
+## Overview
+
+This toolkit provides a complete workflow for working with VIIRS active fire data: pulling raw NetCDF files from NASA, converting them to shapefiles in a Sentinel-2 UTM projection, and optionally rasterizing or accumulating the results for burn mapping. A graphical interface is included for interactive exploration and visualisation.
+
+---
 
 ## Workflow
 
-The idea: you start with nothing, pull raw VIIRS NetCDF data from NASA, convert it to shapefiles in your Sentinel-2 UTM projection, and then either view the fire pixel accumulation in the GUI or rasterize them for burn mapping.
-
-If you don't need further conversion, you can handle everything in the GUI with ease.
-
-### 1. Run the GUI
-
-Launch:
+### 1. Launch the GUI
 
 ```bash
 python -m viirs.fp_gui
 ```
 
-### 2. Download VIIRS VNP14IMG data (Can skip if you had the data downloaded in the previous run)
+### 2. Download VIIRS VNP14IMG Data
 
-Use the `download` button to download the data, the reference file (.bin but can add more extension later) is needed for:
+> This step can be skipped if data was already downloaded in a previous session.
 
-+ Extracting the projection (e.g EPSG 32609).
+A reference raster file (`.bin` format; additional extensions may be supported in future releases) is required for:
 
-+ The bounding box of the raster image.
+- Extracting the spatial projection (e.g. EPSG:32609)
+- Defining the bounding box of the raster image
 
-Steps:
+**Steps:**
 
-1. After browsing (or pasting) the raster path in, click `Load Reference` for extraction, you will see the projection, bounding box in its projection.
+1. Browse to or paste in the raster file path, then click **Load Reference**. The detected projection and bounding box will be displayed. These values can be edited manually if needed (e.g. using QGIS to verify correct extents).
+2. A LAADS DAAC authentication token is required. Store it at `/data/.tokens/laads` for automatic loading (displayed as `***...`), or paste it in directly.
+3. Select the date range of interest (`YYYY-MM-DD` format).
+4. Specify a save directory (e.g. `/data/users/viirs_T09UYU`). A new directory is recommended for each download session — writing to an existing directory may cause errors.
+5. Click **Download**. A summary is displayed in the GUI panel; full output is printed to the originating terminal.
 
-    You can edit the bounding box (by using QGIS to see the correct values.)
+**What the download does:**
 
-2. `LAADS token` should be store in <u>/data/.tokens/laads</u>, it will be autoloaded as '***...' (or paste it in if you have your own.)
+- Retrieves VNP14IMG data from the NASA LAADS DAAC using the provided authentication token.
+- Fire pixel data are sourced in EPSG:4326 (geographic coordinates).
+- During the *shapify* process, `.nc` files are extracted and converted to `.shp` files, retaining only fire pixels within the specified bounding box. Coordinates are automatically reprojected from EPSG:4326 to match the reference raster's projection, ensuring correct spatial alignment in the GUI.
 
-3. Select your date range of interest (standard format YYYY-MM-DD)
+### 3. Load Data
 
-4. Your save directory (e.g /data/users/viirs_T09UYU). I recommend to have new dir for each download (don't overwrite on the existing data, may show `core dump` error)
+**Raster image:** The reference raster can be used here, or a raster from a different timestamp. To improve pan and zoom performance, navigate to the **Config** tab and reduce the **Max Raster Display** value (default is full resolution).
 
-5. Click download (The summary will be shown in the panel, the full prints are in the same terminal as the GUI.)
+**Shapefiles:** Select a directory — the engine will discover all shapefiles within it and load them ordered by detection datetime (extracted from the third field of each filename, in UTC). Some processing is performed on load to optimise rendering; progress is shown in the bottom-left panel.
 
-What does the download do:
+> **Note:** For correct visualisation, always load the raster before loading fire pixel data. Loading shapefiles first may result in distorted display scaling.
 
-+ It will pull the data from NASA portal using your LAADS tokens.
+### 4. Explore the GUI
 
-+ The fire pixel data are in EPSG 4326 (basically logitude/lattitude).
+Once raster and fire pixel data are loaded, the GUI is ready for interactive use.
 
-+ In shapify process, `.nc` files will be extracted and converted to `.shp` files, with only fire pixels in the `Bounding Box`. Most importantly, it will automatically transform the projection from 4326 to whatever the reference raster image is in, so that the fire scatters in the GUI will align with the raster image.
+In the **Config** tab:
 
-### 3. Load Data.
+- **Fire pixel size** — adjust the display size of fire pixels (integer, minimum 1).
+- **Colour levels** — configure up to 500 colour levels. Pixel colour shifts along the colour bar to reflect the age of detection (in days), with older detections displayed in progressively distinct colours.
 
-Raster Image:
+---
 
-+ It could be the same as the reference file (or at different timestamp).
+## Additional Utilities
 
-+ A tip, if you want a lighter load (pan and zoom will be much faster), go into `config` and change `Max Raster Display` (default is full resolution, or 99999).
+### Rasterize Shapefiles for Burn Mapping
 
-Shapefiles:
-
-+ You need to load a directory, the engine will find all shapefiles and load by date time (datetime is in 3rd field of the file name (in UTC)).
-
-+ As you load, it will perform some calculation so that your visualization will be more efficient (displayed in the bottom left panel).
-
-+ If you load fire pixels before the raster, it will still work but it will be stretched too much. For the best visualization, always add a raster.
-
-### 4. Play around with the GUI.
-
-After raster and fire pixels are loaded. You can play around to get familiar with the GUI.
-
-In the `config` tab, 
-
-+ You can change the fire pixel size (Integer minimum 1).
-
-+ You can config your colour level to max of 500 (the older the fire pixels from detection (in days), the colour will shift accordingly to the colour bar).
-
-
-## Extra offers in the package.
-
-### 1. Rasterize shapefiles for burn mapping
-
-If you need binary fire masks on the Sentinel-2 grid (e.g. as hints for burn severity mapping):
+Generate binary fire masks on the Sentinel-2 grid (e.g. as inputs for burn severity mapping):
 
 ```bash
-# All shapefiles in a directory
+# Process all shapefiles in a directory
 python -m viirs.utils.rasterize /data/viirs/shapefiles sentinel2.bin /output/rasters --buffer 375 -w 8
 
-# Single shapefile
+# Process a single shapefile
 python -m viirs.utils.rasterize fire.shp sentinel2.bin /output/rasters
 ```
 
-### 2. Accumulate into a single shapefile
+### Accumulate into a Single Shapefile
 
-If you want one merged shapefile with all fire pixels and an `age_days` column (decimal days, e.g. `34.06`):
+Merge all fire pixels from a date range into one shapefile, including an `age_days` column (fractional days, e.g. `34.06`):
 
 ```bash
-python -m viirs.utils.accumulate /data/viirs/shapefiles 20250401 20250930 -r <reference file>
+python -m viirs.utils.accumulate /data/viirs/shapefiles 20250401 20250930 -r <reference_file>
 ```
 
-Age is computed as `(end_date − detection_datetime)` in fractional days.
+Pixel age is computed as `(end_date − detection_datetime)` in fractional days.
 
 ---
 
@@ -111,23 +96,23 @@ viirs/
 ├── README.md
 │
 ├── fp_gui/                            # GUI viewer
-│   ├── __main__.py                    # python -m viirs.fp_gui
-│   ├── config_dialog.py               # Settings/config dialog
+│   ├── __main__.py                    # Entry point: python -m viirs.fp_gui
+│   ├── config_dialog.py               # Settings/configuration dialog
 │   ├── config.py                      # Tuneable constants
 │   ├── fire_animation_controller.py   # Play/pause/step timing
-│   ├── fire_data_manager.py           # Shapefile loading + numpy frame cache
+│   ├── fire_data_manager.py           # Shapefile loading and NumPy frame cache
 │   ├── fire_gui.py                    # Main window (orchestrator)
-│   ├── fire_map_canvas.py             # matplotlib rendering + click popups
+│   ├── fire_map_canvas.py             # Matplotlib rendering and click popups
 │   ├── download_dialog.py             # Download UI dialog
 │   ├── raster.py                      # GDAL raster reader
-│   └── raster_loader.py               # Wraps raster.py for display
+│   └── raster_loader.py               # Raster display wrapper
 │
-└── utils/                             # CLI tools (also importable)
-    ├── accumulate.py                  # Merge shapefiles + age tracking
-    ├── bc_alber_to_latlon.py          # BC Albers projection → lat/lon
+└── utils/                             # CLI tools (also importable as modules)
+    ├── accumulate.py                  # Merge shapefiles with age tracking
+    ├── bc_alber_to_latlon.py          # BC Albers projection → lat/lon conversion
     ├── download.py                    # Pull VNP14IMG from LAADS DAAC
-    ├── laads_data_download_v2.py      # LAADS DAAC download v2
-    ├── rasterize.py                   # .shp → binary raster on Sentinel-2 grid
-    ├── shapify.py                     # .nc → .shp (UTM projected)
-    └── utm_to_latlon.py               # UTM coordinates → lat/lon
+    ├── laads_data_download_v2.py      # LAADS DAAC download helper (v2)
+    ├── rasterize.py                   # Convert .shp to binary raster on Sentinel-2 grid
+    ├── shapify.py                     # Convert .nc to UTM-projected .shp
+    └── utm_to_latlon.py               # UTM coordinates → lat/lon conversion
 ```

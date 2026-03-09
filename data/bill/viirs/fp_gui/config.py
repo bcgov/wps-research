@@ -38,4 +38,4 @@ RASTER_CMAP = "gray"
 # ---- Performance: raster downsampling ----
 # Set to 99999 so NO downsampling by default.
 # Lower in Config dialog to speed up rendering on large rasters.
-MAX_RASTER_DISPLAY_DIM = 3000
+MAX_RASTER_DISPLAY_DIM = 99999
