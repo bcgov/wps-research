@@ -64,7 +64,7 @@ void move_worker(size_t i){
                 size_t copied = 0;
                 bool ok = true;
                 while(copied < file_sz){
-                    size_t to_read = min(CHUNK_SIZE, file_sz - copied);
+                    size_t to_read = min((size_t)CHUNK_SIZE, file_sz - copied);
                     size_t r = fread(buf, 1, to_read, src_file);
                     if(r != to_read){ ok = false; break; }
                     size_t w = fwrite(buf, 1, r, dst_file);
@@ -224,7 +224,7 @@ int main(int argc, char *argv[]){
     g_total_files = g_source_files.size();
     cout << "Found " << g_total_files << " files to move." << endl;
 
-    // Confirmation prompt for large operations (from prm)
+    // Confirmation prompt for large operations
     if(g_total_files > 10){
         cout << "Move " << g_total_files << " files to " << destination << "? (y/n): ";
         str response;
@@ -260,5 +260,3 @@ int main(int argc, char *argv[]){
 
     return (g_failed_count > 0) ? 1 : 0;
 }
-
-
