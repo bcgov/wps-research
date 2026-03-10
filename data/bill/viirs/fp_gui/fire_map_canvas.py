@@ -49,6 +49,7 @@ from config import (
     RASTER_ALPHA,
     RASTER_CMAP,
     DEFAULT_POPUP_COLUMNS,
+    PAN_PREVIEW_MAX_DIM,
 )
 
 # Navigation modes
@@ -142,8 +143,9 @@ class FireMapCanvas:
         self._pan_start_px: Optional[Tuple[float, float]] = None
         self._pan_xlim0 = None
         self._pan_ylim0 = None
-        self._last_pan_draw: float = 0.0
-        self._PAN_MIN_DT: float = 0.020
+        self._pan_bg = None
+        self._pan_preview_image = None
+        self._pan_is_active = False
 
         # Click detection
         self._press_xy_px: Optional[Tuple[float, float]] = None
@@ -643,7 +645,7 @@ class FireMapCanvas:
         self._notify_viewport_changed()
 
     # ==================================================================
-    # Pan
+    # Pan  (preview downsample ONLY when raster is visible)
     # ==================================================================
 
     def _pan_press(self, event):
@@ -652,6 +654,33 @@ class FireMapCanvas:
         self._pan_start_px = (event.x, event.y)
         self._pan_xlim0 = self._ax.get_xlim()
         self._pan_ylim0 = self._ax.get_ylim()
+        self._pan_is_active = True
+
+        # Only swap to low-res preview when the raster layer is active.
+        # When raster is hidden, fire pixels are unaffected.
+        if (self._raster_visible
+                and self._raster_image is not None
+                and self._raster_im is not None):
+            import config as _cfg  # re-read at runtime
+            pan_max = _cfg.PAN_PREVIEW_MAX_DIM
+            h, w = self._raster_image.shape[:2]
+            max_dim = max(h, w)
+            if max_dim > pan_max:
+                scale = max_dim / pan_max
+                step = max(1, int(round(scale)))
+                if self._raster_image.ndim == 2:
+                    self._pan_preview_image = self._raster_image[::step, ::step].copy()
+                else:
+                    self._pan_preview_image = self._raster_image[::step, ::step, :].copy()
+                self._raster_im.set_data(self._pan_preview_image)
+            else:
+                self._pan_preview_image = None
+        else:
+            self._pan_preview_image = None
+
+        # Save background for blitting
+        self._canvas.draw()
+        self._pan_bg = self._canvas.copy_from_bbox(self._ax.bbox)
 
     def _pan_move(self, event):
         if self._pan_start_px is None:
@@ -668,7 +697,7 @@ class FireMapCanvas:
 
         xlim = self._pan_xlim0
         ylim = self._pan_ylim0
-        dx = -(dx_px / bbox.width)  * (xlim[1] - xlim[0])
+        dx = -(dx_px / bbox.width) * (xlim[1] - xlim[0])
         dy = -(dy_px / bbox.height) * (ylim[1] - ylim[0])
 
         self._ignore_limits_change = True
@@ -676,16 +705,26 @@ class FireMapCanvas:
         self._ax.set_ylim(ylim[0] + dy, ylim[1] + dy)
         self._ignore_limits_change = False
 
-        now = time.monotonic()
-        if now - self._last_pan_draw >= self._PAN_MIN_DT:
-            self._needs_full_redraw = True
-            self._canvas.draw()
-            self._last_pan_draw = now
+        if self._pan_bg is not None:
+            self._canvas.restore_region(self._pan_bg)
+            if self._raster_im is not None and self._raster_visible:
+                self._ax.draw_artist(self._raster_im)
+            if self._scatter is not None and self._scatter_visible:
+                self._ax.draw_artist(self._scatter)
+            self._canvas.blit(self._ax.bbox)
 
     def _pan_release(self, event):
         if self._pan_start_px is None:
             return
         self._pan_start_px = None
+        self._pan_bg = None
+        self._pan_is_active = False
+
+        # Restore full-resolution image if we were using preview
+        if self._pan_preview_image is not None and self._raster_im is not None:
+            self._raster_im.set_data(self._raster_image)
+            self._pan_preview_image = None
+
         self._needs_full_redraw = True
         self._canvas.draw()
         self._push_view()
@@ -865,4 +904,4 @@ class FireMapCanvas:
                 self._popup_window.destroy()
             except tk.TclError:
                 pass
-            self._popup_window = None
+        self._popup_window = None

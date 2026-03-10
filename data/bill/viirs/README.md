@@ -1,6 +1,6 @@
 # viirs — VIIRS Fire Pixel Processing Toolkit
 
-*Last updated: March 9, 2026*
+*Last updated: March 10, 2026*
 
 An end-to-end pipeline for downloading, converting, and visualising VIIRS fire pixel data. Designed specifically for **VNP14IMG** products.
 
@@ -20,6 +20,8 @@ This toolkit provides a complete workflow for working with VIIRS active fire dat
 python -m viirs.fp_gui
 ```
 
+**Load Raster image:** The reference raster is needed for everything. To improve pan and zoom performance, navigate to the **Config** tab and reduce the **Max Raster Display** value (default is full resolution).
+
 ### 2. Download VIIRS VNP14IMG Data
 
 > This step can be skipped if data was already downloaded in a previous session.
@@ -31,11 +33,10 @@ A reference raster file (`.bin` format; additional extensions may be supported i
 
 **Steps:**
 
-1. Browse to or paste in the raster file path, then click **Load Reference**. The detected projection and bounding box will be displayed. These values can be edited manually if needed (e.g. using QGIS to verify correct extents).
-2. A LAADS DAAC authentication token is required. Store it at `/data/.tokens/laads` for automatic loading (displayed as `***...`), or paste it in directly.
+1. A LAADS DAAC authentication token is required. Store it at `/data/.tokens/laads` for automatic loading (displayed as `***...`), or paste it in the key box.
 3. Select the date range of interest (`YYYY-MM-DD` format).
-4. Specify a save directory (e.g. `/data/users/viirs_T09UYU`). A new directory is recommended for each download session — writing to an existing directory may cause errors.
-5. Click **Download**. A summary is displayed in the GUI panel; full output is printed to the originating terminal. Closing the download window (X) immediately cancels all running workers.
+4. The save directory will be in `VNP14IMG` in the same folder as the raster image. Removal of downloaded data is recommended for each download session (bug is not fixed) — writing to an existing directory may cause errors.
+5. Click **Download**. A summary is displayed in the GUI panel; full output is printed to the originating terminal.
 
 **What the download does:**
 
@@ -45,11 +46,9 @@ A reference raster file (`.bin` format; additional extensions may be supported i
 
 ### 3. Load Data
 
-**Raster image:** The reference raster can be used here, or a raster from a different timestamp. To improve pan and zoom performance, navigate to the **Config** tab and reduce the **Max Raster Display** value (default is full resolution).
+**Shapefiles:** Select a directory (if you just download, the dir will be auto-pasted) — the engine will discover all shapefiles within it and load them ordered by detection datetime (extracted from the third field of each filename, in UTC). Some processing is performed on load to optimise rendering; progress is shown in the bottom-left panel.
 
-**Shapefiles:** Select a directory — the engine will discover all shapefiles within it and load them ordered by detection datetime (extracted from the third field of each filename, in UTC). Some processing is performed on load to optimise rendering; progress is shown in the bottom-left panel.
-
-> **Note:** For correct visualisation, always load the raster before loading fire pixel data. Loading shapefiles first may result in distorted display scaling.
+> **Note:** In this version, you cannot load shapefiles before the raster image. It needs an image to project onto.
 
 ### 4. Explore the GUI
 
@@ -66,13 +65,13 @@ The **Accumulate & Rasterize** button (on the navigation/tools row) runs the ful
 
 **Setup:**
 
-1. **Base raster** — set the raster image to use as the grid template for rasterized outputs. This field automatically mirrors the visualization raster loaded in step 3; it can be changed independently if a different base grid is needed.
+1. **Reference raster** — set the raster image to use as the grid template for rasterized outputs. This field automatically mirrors the visualization raster loaded in step 3; it can be changed independently if a different base grid is needed.
 2. **Output directory** — browse or type the directory where all output shapefiles and rasterized `.bin`/`.hdr` files will be saved (flat, no subdirectories).
 3. **Date range** — the start and end dates from the GUI date fields are used. Apply a date filter first if the range needs to be narrowed.
 
 **Running:**
 
-1. Click **Accumulate & Rasterize**. A confirmation popup summarises the shapefile directory, base raster, date range, and output directory.
+1. Click **Accumulate & Rasterize**. A confirmation popup summarises the shapefile directory, reference raster, date range, and output directory.
 2. Click the green **Confirm** button to start (or close the popup to cancel).
 3. Progress is reported in the bottom-left status panel.
 
@@ -119,34 +118,3 @@ python -m viirs.utils.accumulate /data/viirs/shapefiles 20250401 20250930 -r <re
 ```
 
 Pixel age is computed as `(end_date − detection_datetime)` in fractional days.
-
----
-
-## Package Structure
-
-```
-viirs/
-├── __init__.py
-├── README.md
-│
-├── fp_gui/                            # GUI viewer
-│   ├── __main__.py                    # Entry point: python -m viirs.fp_gui
-│   ├── config_dialog.py               # Settings/configuration dialog
-│   ├── config.py                      # Tuneable constants
-│   ├── fire_animation_controller.py   # Play/pause/step timing
-│   ├── fire_data_manager.py           # Shapefile loading and NumPy frame cache
-│   ├── fire_gui.py                    # Main window (orchestrator)
-│   ├── fire_map_canvas.py             # Matplotlib rendering and click popups
-│   ├── download_dialog.py             # Download UI dialog
-│   ├── raster.py                      # GDAL raster reader
-│   └── raster_loader.py               # Raster display wrapper
-│
-└── utils/                             # CLI tools (also importable as modules)
-    ├── accumulate.py                  # Merge shapefiles with age tracking
-    ├── bc_alber_to_latlon.py          # BC Albers projection → lat/lon conversion
-    ├── download.py                    # Pull VNP14IMG from LAADS DAAC
-    ├── laads_data_download_v2.py      # LAADS DAAC download helper (v2)
-    ├── rasterize.py                   # Convert .shp to binary raster on Sentinel-2 grid
-    ├── shapify.py                     # Convert .nc to UTM-projected .shp
-    └── utm_to_latlon.py               # UTM coordinates → lat/lon conversion
-```

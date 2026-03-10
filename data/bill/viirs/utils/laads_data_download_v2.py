@@ -21,8 +21,14 @@ import os.path
 import shutil
 import sys
 import time
-import netCDF4 as nC
 from io import StringIO         # python3
+
+# Try to import netCDF4 for file validation; not fatal if missing
+try:
+    import netCDF4 as nC
+    _HAS_NETCDF4 = True
+except ImportError:
+    _HAS_NETCDF4 = False
 
 
 ################################################################################
@@ -106,8 +112,22 @@ def sync(src, dest, tok):
     '''synchronize src url with dest directory'''
 
     import json
-    files = json.loads(geturl(src, tok))
-    
+
+    raw = geturl(src, tok)
+    if raw is None:
+        print('[WARN] sync(): No response from server for: %s' % src, file=sys.stderr)
+        return 0
+
+    try:
+        files = json.loads(raw)
+    except (json.JSONDecodeError, TypeError) as e:
+        print('[WARN] sync(): Could not parse JSON response: %s' % e, file=sys.stderr)
+        return 0
+
+    if 'content' not in files:
+        print('[WARN] sync(): No "content" key in response for: %s' % src, file=sys.stderr)
+        return 0
+
     # use os.path since python 2/3 both support it while pathlib is 3.4+
     for f in files['content']:
         
@@ -116,48 +136,46 @@ def sync(src, dest, tok):
         path = os.path.join(dest, f['name'])
         url = f['downloadsLink']  # MATT: Modified to use the downloadsLink field from the JSON response.
         if filesize == 0:                 # size FROM RESPONSE
+            # FIX: use makedirs with exist_ok=True to handle re-downloads
+            # without crashing.  The original os.mkdir() raised
+            # FileExistsError -> caught as IOError -> sys.exit(-1).
             try:
-                print('creating dir:', path)
-                os.mkdir(path)
+                os.makedirs(path, exist_ok=True)
                 sync(src + '/' + f['name'], path, tok)
-            except IOError as e:
-                print("mkdir `%s': %s" % (e.filename, e.strerror), file=sys.stderr)
-                sys.exit(-1)
+            except Exception as e:
+                print("mkdir/sync `%s': %s" % (path, e), file=sys.stderr)
         else:
-            # MATT: Let's add a check here to see if the NetCDF file exists. If it does, let's try to open it.
-            # If we get an error when trying to open it, then we will delete it (path variable); fall through to
-            # the next try block. The if statement in the try block will then see that the file does not exist, and
-            # re-download it.
-            # The purpose of this check is to verify integrity of files that have already been downloaded but may
-            # not have downloaded properly. If the integrity is bad (in other words, cannot be opened using the
-            # NetCDF library), we can re-download it.
-            if os.path.exists(path):
-                
+            # Validate existing files if netCDF4 is available
+            if os.path.exists(path) and _HAS_NETCDF4:
                 try:
                     verification_nc = nC.Dataset(path, 'r')
                     verification_nc.close()
-                    print()
-                    print(f"laads_data_download.sync(): File {f['name']} validated successfully.")
-                    
+                    print(f"  validated: {f['name']}")
+                    continue  # File is good, skip re-download
                 except Exception as e:
-                    print()
-                    print(e)
-                    print()
-                    print(f"laads_data_download.sync(): Exception caught when trying to open existing "
-                          f"file {f['name']}, deleting and re-downloading . . .")
+                    print(f"  corrupt, re-downloading: {f['name']} ({e})")
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
+            elif os.path.exists(path) and not _HAS_NETCDF4:
+                # Can't validate but file exists — replace it
+                print(f'  replacing: {path}')
+                try:
                     os.remove(path)
-                    
+                except OSError:
+                    pass
+
+            # Download (or re-download)
             try:
-                if os.path.exists(path):
-                    print(f'\nreplacing: {path}')
-                    os.remove(path)
-                else:
-                    print(f'\ndownloading: {path}')
+                if not os.path.exists(path):
+                    print(f'  downloading: {f["name"]}')
                 with open(path, 'w+b') as fh:
                     geturl(url, tok, fh)
             except IOError as e:
                 print("open `%s': %s" % (e.filename, e.strerror), file=sys.stderr)
-                sys.exit(-1)
+                # Don't sys.exit — just skip this file and continue
+                continue
 
     return 0
 

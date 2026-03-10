@@ -8,15 +8,18 @@ array + geographic extent for matplotlib display.
 Performance:
     Large rasters are downsampled to at most MAX_RASTER_DISPLAY_DIM
     on their longest edge for the display copy.
-
 NoData handling:
     Non-finite values are replaced with white (1.0) so that background
     areas match the GUI's white canvas.
+Pixel resolution:
+    After loading, .pixel_size_m exposes the average ground-sampling
+    distance in map-unit metres.  .compute_scatter_size() returns the
+    rounded ratio VNP14IMG_PIXEL_SIZE_M / pixel_size for use as
+    DEFAULT_SCATTER_SIZE.
 """
 
 import numpy as np
 from typing import Tuple, Optional, List
-
 from raster import Raster
 import config as cfg          # read at call time, not import time
 
@@ -27,6 +30,7 @@ class RasterLoader:
         - image array  (HxW or HxWx3)  -- downsampled for display
         - geographic extent [left, right, bottom, top]
         - CRS / projection string
+        - pixel_size_m  -- spatial resolution in map units
     """
 
     def __init__(self):
@@ -35,6 +39,7 @@ class RasterLoader:
         self._extent: Optional[Tuple[float, float, float, float]] = None
         self._crs: Optional[str] = None
         self._raster: Optional[Raster] = None
+        self._pixel_size_m: Optional[float] = None
 
     @property
     def image(self) -> Optional[np.ndarray]:
@@ -51,6 +56,11 @@ class RasterLoader:
     @property
     def raster(self) -> Optional[Raster]:
         return self._raster
+
+    @property
+    def pixel_size_m(self) -> Optional[float]:
+        """Average ground-sampling distance in the raster's map units."""
+        return self._pixel_size_m
 
     # ------------------------------------------------------------------
     # Loading
@@ -71,6 +81,11 @@ class RasterLoader:
         top    = gt[3]
         bottom = gt[3] + gt[5] * y_size
         self._extent = (left, right, bottom, top)
+
+        # Compute spatial resolution from the GeoTransform
+        pixel_w = abs(gt[1])
+        pixel_h = abs(gt[5])
+        self._pixel_size_m = (pixel_w + pixel_h) / 2.0
 
         if bands is not None:
             data = self._raster.read_bands(band_lst=bands)
@@ -101,12 +116,25 @@ class RasterLoader:
             img = np.where(finite_mask, img, 1.0)
 
         self._image_full = img
-
-        # Read MAX_RASTER_DISPLAY_DIM from config at call time
-        # so that Config dialog changes take effect before loading
         self._image = self._downsample(img, max_dim=cfg.MAX_RASTER_DISPLAY_DIM)
-
         return self._image
+
+    # ------------------------------------------------------------------
+    # Scatter size from resolution
+    # ------------------------------------------------------------------
+
+    def compute_scatter_size(self) -> int:
+        """
+        Return the scatter marker base size so that a VNP14IMG fire pixel
+        (375 m) is drawn proportional to one raster pixel.
+
+        Returns max(1, round(VNP14IMG_PIXEL_SIZE_M / raster_pixel_size)).
+        Falls back to DEFAULT_SCATTER_SIZE if no raster is loaded.
+        """
+        if self._pixel_size_m is None or self._pixel_size_m <= 0:
+            return cfg.DEFAULT_SCATTER_SIZE
+        ratio = cfg.VNP14IMG_PIXEL_SIZE_M / self._pixel_size_m
+        return max(1, round(ratio))
 
     # ------------------------------------------------------------------
     # Downsampling
@@ -121,10 +149,8 @@ class RasterLoader:
         longest = max(h, w)
         if longest <= max_dim:
             return image
-
         scale = longest / max_dim
         step = max(1, int(round(scale)))
-
         if image.ndim == 2:
             return image[::step, ::step].copy()
         return image[::step, ::step, :].copy()

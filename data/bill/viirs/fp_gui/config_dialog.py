@@ -13,14 +13,11 @@ import config as cfg
 
 # All editable config keys with (label, type, min, max) metadata
 _CONFIG_FIELDS = [
-    ("DEFAULT_SCATTER_SIZE",         "Scatter Size (base)",         int,   1,     200),
+    ("DEFAULT_SCATTER_SIZE",         "Fire Pixel Scatter Size",     int,   1,     2000),
     ("DEFAULT_ANIMATION_INTERVAL_MS","Animation Interval (ms)",     int,   50,    5000),
     ("N_COLOUR_LEVELS",              "Colour Levels",               int,   10,    500),
-    ("COLOUR_NEWEST",                "Colour Newest (R,G,B,A)",     str,   None,  None),
-    ("COLOUR_OLDEST",                "Colour Oldest (R,G,B,A)",     str,   None,  None),
-    ("RASTER_ALPHA",                 "Raster Alpha (0-1)",          float, 0.0,   1.0),
-    ("RASTER_CMAP",                  "Raster Colourmap",            str,   None,  None),
-    ("MAX_RASTER_DISPLAY_DIM",       "Max Raster Display Dim (px)", int,   100,   99999)
+    ("MAX_RASTER_DISPLAY_DIM",       "Max Raster Display Dim (px)", int,   500,   99999),
+    ("PAN_PREVIEW_MAX_DIM",          "Pan Preview Max Dim (px)",    int,   200,   10000),
 ]
 
 
@@ -41,71 +38,41 @@ class ConfigDialog:
         self._win.transient(parent)
         self._win.grab_set()
 
-        # Centre on screen
-        w, h = 560, 308
+        # Size to fit all fields — no scrollbar needed
+        n_fields = len(_CONFIG_FIELDS)
+        row_h = 36
+        h = n_fields * row_h + 80  # fields + button bar + padding
+        w = 520
+
         sx = parent.winfo_screenwidth()
         sy = parent.winfo_screenheight()
         x = (sx - w) // 2
         y = (sy - h) // 2
         self._win.geometry(f"{w}x{h}+{x}+{y}")
-        self._win.resizable(True, True)
+        self._win.resizable(False, False)
 
         self._win.columnconfigure(0, weight=1)
         self._win.rowconfigure(0, weight=1)
 
-        # Scrollable area
-        outer = ttk.Frame(self._win)
-        outer.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
-        outer.columnconfigure(0, weight=1)
-        outer.rowconfigure(0, weight=1)
-
-        canvas = tk.Canvas(outer, highlightthickness=0)
-        vsb = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
-        canvas.configure(yscrollcommand=vsb.set)
-
-        vsb.grid(row=0, column=1, sticky="ns")
-        canvas.grid(row=0, column=0, sticky="nsew")
-
-        inner = ttk.Frame(canvas)
+        # Fields grid — no scrollbar
+        inner = ttk.Frame(self._win, padding=12)
+        inner.grid(row=0, column=0, sticky="nsew")
         inner.columnconfigure(1, weight=1)
-        canvas.create_window((0, 0), window=inner, anchor="nw")
 
-        def _on_configure(_e):
-            canvas.configure(scrollregion=canvas.bbox("all"))
-        inner.bind("<Configure>", _on_configure)
-
-        # Mouse-wheel scroll
-        def _on_mousewheel(event):
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-
-        def _bind_wheel(_e):
-            canvas.bind_all("<MouseWheel>", _on_mousewheel)
-            canvas.bind_all("<Button-4>", lambda e: canvas.yview_scroll(-3, "units"))
-            canvas.bind_all("<Button-5>", lambda e: canvas.yview_scroll(3, "units"))
-
-        def _unbind_wheel(_e):
-            canvas.unbind_all("<MouseWheel>")
-            canvas.unbind_all("<Button-4>")
-            canvas.unbind_all("<Button-5>")
-
-        canvas.bind("<Enter>", _bind_wheel)
-        canvas.bind("<Leave>", _unbind_wheel)
-
-        # Populate fields
         for row_idx, (key, label, typ, lo, hi) in enumerate(_CONFIG_FIELDS):
             ttk.Label(inner, text=label, anchor="w").grid(
-                row=row_idx, column=0, sticky="w", padx=(4, 12), pady=4)
+                row=row_idx, column=0, sticky="w", padx=(4, 16), pady=5)
 
             current_val = getattr(cfg, key)
             sv = tk.StringVar(value=str(current_val))
             self._entries[key] = (sv, typ, lo, hi)
 
-            entry = ttk.Entry(inner, textvariable=sv, width=36)
-            entry.grid(row=row_idx, column=1, sticky="ew", padx=4, pady=4)
+            entry = ttk.Entry(inner, textvariable=sv, width=28)
+            entry.grid(row=row_idx, column=1, sticky="ew", padx=4, pady=5)
 
         # Button bar
         btn_frame = ttk.Frame(self._win)
-        btn_frame.grid(row=1, column=0, pady=(0, 10))
+        btn_frame.grid(row=1, column=0, pady=(4, 12))
 
         apply_btn = tk.Button(
             btn_frame, text="  \u2714  Apply  ", bg="#4CAF50", fg="white",
@@ -135,23 +102,17 @@ class ConfigDialog:
             try:
                 if typ == int:
                     val = int(raw)
-                    if lo is not None:
-                        val = max(lo, val)
-                    if hi is not None:
-                        val = min(hi, val)
                 elif typ == float:
                     val = float(raw)
+                else:
+                    val = raw
+
+                # Clamp to [lo, hi]
+                if isinstance(val, (int, float)):
                     if lo is not None:
                         val = max(lo, val)
                     if hi is not None:
                         val = min(hi, val)
-                elif typ == str:
-                    if raw.startswith("(") and raw.endswith(")"):
-                        val = tuple(float(x.strip()) for x in raw[1:-1].split(","))
-                    else:
-                        val = raw
-                else:
-                    val = raw
 
                 setattr(cfg, key, val)
             except Exception as exc:
