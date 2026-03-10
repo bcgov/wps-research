@@ -3,10 +3,11 @@ viirs/fp_gui/config.py
 Configuration and constants for the Fire Accumulation Viewer.
 """
 
-# Default scatter size (base multiplier — actual pixel size scales with zoom)
-# When a raster is loaded this is auto-computed from VNP14IMG_PIXEL_SIZE_M
-# divided by the raster's spatial resolution.
-DEFAULT_SCATTER_SIZE = 1
+# Default scatter size (base multiplier — actual pixel size scales with zoom).
+# When a raster is loaded, this is auto-computed as
+# VNP14IMG_PIXEL_SIZE_M / raster_pixel_size.
+# Editable from the Config dialog; the value persists until next raster load.
+DEFAULT_SCATTER_SIZE = 375
 
 # Animation interval in milliseconds
 DEFAULT_ANIMATION_INTERVAL_MS = 100
@@ -38,13 +39,9 @@ RASTER_ALPHA = 1
 RASTER_CMAP = "gray"
 
 # ---- Performance: raster downsampling ----
-# Set to 99999 so NO downsampling by default.
-# Lower in Config dialog to speed up rendering on large rasters.
 MAX_RASTER_DISPLAY_DIM = 99999
 
 # ---- Performance: pan preview downsampling ----
-# Max pixel dimension for the low-res raster preview shown during panning.
-# Lower = faster pan, coarser preview.  Only affects raster, not fire pixels.
 PAN_PREVIEW_MAX_DIM = 800
 
 # ---- VNP14IMG fire pixel ground size (metres) ----

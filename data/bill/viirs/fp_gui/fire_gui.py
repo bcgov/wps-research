@@ -338,7 +338,7 @@ class FireAccumulationGUI:
 
         self._show_fire_var = tk.BooleanVar(value=True)
         self._fire_chk = tk.Checkbutton(
-            nav_frame, text="Fire",
+            nav_frame, text="Fire Pixels",
             variable=self._show_fire_var,
             command=self._toggle_fire,
             indicatoron=True, selectcolor="#22cc22",
@@ -348,7 +348,7 @@ class FireAccumulationGUI:
 
         self._show_raster_var = tk.BooleanVar(value=True)
         self._raster_chk = tk.Checkbutton(
-            nav_frame, text="Bg",
+            nav_frame, text="Background Image",
             variable=self._show_raster_var,
             command=self._toggle_raster,
             indicatoron=True, selectcolor="#22cc22",
@@ -496,12 +496,7 @@ class FireAccumulationGUI:
         if self._animator:
             self._animator.interval_ms = cfg.DEFAULT_ANIMATION_INTERVAL_MS
         if self._canvas:
-            # Re-compute scatter size if raster is loaded
-            if self._raster_loaded:
-                scatter_sz = self._raster_loader.compute_scatter_size()
-                self._canvas.scatter_size = scatter_sz
-            else:
-                self._canvas.scatter_size = cfg.DEFAULT_SCATTER_SIZE
+            self._canvas.scatter_size = cfg.DEFAULT_SCATTER_SIZE
         if self._animator and self._animator.current_date:
             self._on_animation_frame(self._animator.current_date)
 
@@ -542,6 +537,59 @@ class FireAccumulationGUI:
         if self._canvas:
             n = self._canvas.count_visible_pixels()
             self._viewport_pixel_var.set(f"In view: {n}")
+
+    # ==================================================================
+    # Date validation helper (specific error messages)
+    # ==================================================================
+
+    def _validate_dates(self) -> tuple:
+        """
+        Validate start/end date fields.
+        Returns (start_str, end_str, start_date_or_dt, end_date_or_dt) on success.
+        Returns None on failure (after showing a messagebox).
+        """
+        start_str = self._start_date_var.get().strip()
+        end_str = self._end_date_var.get().strip()
+
+        if not start_str and not end_str:
+            messagebox.showerror("Missing Dates",
+                                 "Both Start and End dates are empty.\n"
+                                 "Please enter dates in YYYY-MM-DD format.")
+            return None
+        if not start_str:
+            messagebox.showerror("Missing Start Date",
+                                 "Start date is empty.\n"
+                                 "Please enter a start date (YYYY-MM-DD).")
+            return None
+        if not end_str:
+            messagebox.showerror("Missing End Date",
+                                 "End date is empty.\n"
+                                 "Please enter an end date (YYYY-MM-DD).")
+            return None
+
+        try:
+            start = date.fromisoformat(start_str)
+        except ValueError:
+            messagebox.showerror("Invalid Start Date",
+                                 f"Start date '{start_str}' is not valid.\n"
+                                 "Use YYYY-MM-DD format (e.g. 2025-09-01).")
+            return None
+
+        try:
+            end = date.fromisoformat(end_str)
+        except ValueError:
+            messagebox.showerror("Invalid End Date",
+                                 f"End date '{end_str}' is not valid.\n"
+                                 "Use YYYY-MM-DD format (e.g. 2025-09-30).")
+            return None
+
+        if start > end:
+            messagebox.showerror("Invalid Date Range",
+                                 f"Start date ({start_str}) is after "
+                                 f"end date ({end_str}).")
+            return None
+
+        return start_str, end_str, start, end
 
     # ==================================================================
     # Working directory & base raster sync
@@ -652,17 +700,16 @@ class FireAccumulationGUI:
             # Set working directory
             self._set_working_dir(raster_path)
 
-            # Compute scatter size from raster resolution
+            # Compute scatter size from raster resolution (VNP14IMG 375m / pixel_size)
             scatter_sz = self._raster_loader.compute_scatter_size()
             cfg.DEFAULT_SCATTER_SIZE = scatter_sz
             self._canvas.scatter_size = scatter_sz
 
-            pixel_m = self._raster_loader.pixel_size_m
             self._status_var.set(
                 f"Raster loaded: {os.path.basename(raster_path)}  "
                 f"({self._raster_loader._raster._xSize}"
                 f"\u00d7{self._raster_loader._raster._ySize})  "
-                f"Pixel: {pixel_m:.1f}m  Scatter: {scatter_sz}"
+                f"Fire pixel scatter size: {scatter_sz}"
             )
         except Exception as exc:
             self._raster_loaded = False
@@ -848,18 +895,10 @@ class FireAccumulationGUI:
 
     def _apply_date_filter(self):
         """Apply date filter -- works even without shapefiles loaded."""
-        start_str = self._start_date_var.get().strip()
-        end_str = self._end_date_var.get().strip()
-        try:
-            start = date.fromisoformat(start_str)
-            end = date.fromisoformat(end_str)
-        except ValueError:
-            messagebox.showerror("Error", "Dates must be YYYY-MM-DD format.")
+        result = self._validate_dates()
+        if result is None:
             return
-        if start > end:
-            messagebox.showerror("Error",
-                                 "Start date must be before end date.")
-            return
+        start_str, end_str, start, end = result
 
         # If no shapefiles loaded yet, just store the dates (for download)
         if (self._data_mgr.master_gdf is None
@@ -1037,8 +1076,7 @@ class FireAccumulationGUI:
         self._frame_label_var.set(f"Frame: {idx + 1} / {total}")
         self._pixel_count_var.set(f"Pixels: {fd.n_pixels}")
 
-        scatter_sz = (self._raster_loader.compute_scatter_size()
-                      if self._raster_loaded else cfg.DEFAULT_SCATTER_SIZE)
+        scatter_sz = cfg.DEFAULT_SCATTER_SIZE
         self._canvas.scatter_size = scatter_sz
         self._canvas.update_scatter(
             fd.x, fd.y, fd.ages, fd.indices,
@@ -1058,9 +1096,7 @@ class FireAccumulationGUI:
             return
 
         fd = self._data_mgr.get_frame(self._animator.current_date)
-        scatter_sz = (self._raster_loader.compute_scatter_size()
-                      if self._raster_loaded else cfg.DEFAULT_SCATTER_SIZE)
-        self._canvas.scatter_size = scatter_sz
+        self._canvas.scatter_size = cfg.DEFAULT_SCATTER_SIZE
         self._canvas.update_scatter(
             fd.x, fd.y, fd.ages, fd.indices,
             n_levels=cfg.N_COLOUR_LEVELS,
@@ -1072,9 +1108,7 @@ class FireAccumulationGUI:
     def _on_animation_frame(self, current_date: date):
         fd = self._data_mgr.get_frame(current_date)
 
-        scatter_sz = (self._raster_loader.compute_scatter_size()
-                      if self._raster_loaded else cfg.DEFAULT_SCATTER_SIZE)
-        self._canvas.scatter_size = scatter_sz
+        self._canvas.scatter_size = cfg.DEFAULT_SCATTER_SIZE
         self._canvas.update_scatter(
             fd.x, fd.y, fd.ages, fd.indices,
             n_levels=cfg.N_COLOUR_LEVELS,
@@ -1114,17 +1148,12 @@ class FireAccumulationGUI:
                 "Set a LAADS DAAC token first (click the key icon).")
             return
 
-        start_str = self._start_date_var.get().strip()
-        end_str = self._end_date_var.get().strip()
-        try:
-            start_dt = datetime.datetime.strptime(start_str, "%Y-%m-%d")
-            end_dt = datetime.datetime.strptime(end_str, "%Y-%m-%d")
-        except ValueError:
-            messagebox.showerror("Error", "Dates must be YYYY-MM-DD format.")
+        result = self._validate_dates()
+        if result is None:
             return
-        if start_dt > end_dt:
-            messagebox.showerror("Error", "Start must be before End.")
-            return
+        start_str, end_str, start_d, end_d = result
+        start_dt = datetime.datetime.combine(start_d, datetime.time())
+        end_dt = datetime.datetime.combine(end_d, datetime.time())
 
         if self._ref_wkt is None:
             messagebox.showerror("Error",
@@ -1427,14 +1456,10 @@ class FireAccumulationGUI:
             messagebox.showerror("Error", "Set an output directory.")
             return
 
-        start_str = self._start_date_var.get().strip()
-        end_str = self._end_date_var.get().strip()
-        try:
-            date.fromisoformat(start_str)
-            date.fromisoformat(end_str)
-        except ValueError:
-            messagebox.showerror("Error", "Dates must be YYYY-MM-DD.")
+        result = self._validate_dates()
+        if result is None:
             return
+        start_str, end_str, _, _ = result
 
         if self._acc_thread and self._acc_thread.is_alive():
             messagebox.showwarning("Busy",
