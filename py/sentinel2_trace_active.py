@@ -35,9 +35,10 @@ for i in [BRUSH_SIZE]: # [10, 20, 60]: # 90   # 150
              str(i)]) # 40')
 
     if not exists(fn + '_flood4.bin_link.bin_recode.bin'):
-        run([cd + 'class_recode.exe',
-             fn + '_flood4.bin_link.bin',
-             '1'])
+        cmd = ['class_recode', fn + '_flood4.bin_link.bin', '1']
+        cmd = " ".join(cmd)
+        a = os.system(cmd)
+    sys.exit(1)
 
     if not exists(fn + '_flood4.bin_link.bin_recode.bin_wheel.bin'):
         run([cd + 'class_wheel.exe',
