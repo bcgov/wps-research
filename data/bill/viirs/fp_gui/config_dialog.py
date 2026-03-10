@@ -13,14 +13,11 @@ import config as cfg
 
 # All editable config keys with (label, type, min, max) metadata
 _CONFIG_FIELDS = [
-    ("DEFAULT_SCATTER_SIZE",         "Scatter Size (base)",         int,   1,     200),
-    ("DEFAULT_ANIMATION_INTERVAL_MS","Animation Interval (ms)",     int,   50,    5000),
-    ("N_COLOUR_LEVELS",              "Colour Levels",               int,   10,    500),
-    ("COLOUR_NEWEST",                "Colour Newest (R,G,B,A)",     str,   None,  None),
-    ("COLOUR_OLDEST",                "Colour Oldest (R,G,B,A)",     str,   None,  None),
-    ("RASTER_ALPHA",                 "Raster Alpha (0-1)",          float, 0.0,   1.0),
-    ("RASTER_CMAP",                  "Raster Colourmap",            str,   None,  None),
-    ("MAX_RASTER_DISPLAY_DIM",       "Max Raster Display Dim (px)", int,   100,   99999)
+    ("DEFAULT_SCATTER_SIZE",         "Scatter Size (base)",         int,   1,     200),  # Fire pixel size
+    ("DEFAULT_ANIMATION_INTERVAL_MS","Animation Interval (ms)",     int,   50,    5000), # Video playback speed
+    ("N_COLOUR_LEVELS",              "Colour Levels",               int,   10,    500),  # Max days of colour shifting
+    ("MAX_RASTER_DISPLAY_DIM",       "Max Raster Display Dim (px)", int,   500,   99999),# Raster downsampling
+    ("PAN_PREVIEW_MAX_DIM",          "Pan Preview Max Dim (px)",    int,   200,   10000),# Low-res preview during pan
 ]
 
 
@@ -42,7 +39,7 @@ class ConfigDialog:
         self._win.grab_set()
 
         # Centre on screen
-        w, h = 560, 308
+        w, h = 560, 240
         sx = parent.winfo_screenwidth()
         sy = parent.winfo_screenheight()
         x = (sx - w) // 2

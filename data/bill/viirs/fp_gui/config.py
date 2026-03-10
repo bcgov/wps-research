@@ -4,13 +4,15 @@ Configuration and constants for the Fire Accumulation Viewer.
 """
 
 # Default scatter size (base multiplier — actual pixel size scales with zoom)
+# When a raster is loaded this is auto-computed from VNP14IMG_PIXEL_SIZE_M
+# divided by the raster's spatial resolution.
 DEFAULT_SCATTER_SIZE = 1
 
 # Animation interval in milliseconds
 DEFAULT_ANIMATION_INTERVAL_MS = 100
 
 # Max parallel threads for shapefile I/O
-MAX_WORKERS = 32
+MAX_WORKERS = 16
 
 # ---- Colour levels ----
 N_COLOUR_LEVELS = 100
@@ -39,3 +41,11 @@ RASTER_CMAP = "gray"
 # Set to 99999 so NO downsampling by default.
 # Lower in Config dialog to speed up rendering on large rasters.
 MAX_RASTER_DISPLAY_DIM = 99999
+
+# ---- Performance: pan preview downsampling ----
+# Max pixel dimension for the low-res raster preview shown during panning.
+# Lower = faster pan, coarser preview.  Only affects raster, not fire pixels.
+PAN_PREVIEW_MAX_DIM = 800
+
+# ---- VNP14IMG fire pixel ground size (metres) ----
+VNP14IMG_PIXEL_SIZE_M = 375
