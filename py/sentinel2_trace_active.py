@@ -23,7 +23,7 @@ if not exists(fn):
 if not exists(src_data):
     err('please check input file:' + src_data)
 
-run('rm -f -v *crop*')
+# run('rm -f -v *crop*')
 
 for i in [BRUSH_SIZE]: # [10, 20, 60]: # 90   # 150
     if not exists(fn + '_flood4.bin'):
@@ -71,11 +71,11 @@ for i in [BRUSH_SIZE]: # [10, 20, 60]: # 90   # 150
 
                 N = int(f.split('.')[-2].split('_')[-1]) # print(N)
 
-                run('crop ' + f)
-                run('pad ' + f + '_crop.bin ' + str(BRUSH_SIZE))
-                f_0 = f
-                f = f_0 + '_crop.bin_pad.bin'
-                hfn = f_0 + '_crop.bin_pad.hdr'
+                # run('crop ' + f)
+                # run('pad ' + f + '_crop.bin ' + str(BRUSH_SIZE))
+                # f_0 = f
+                # f = f_0 + '_crop.bin_pad.bin'
+                # hfn = f_0 + '_crop.bin_pad.hdr'
 
                 print('run(' + cd + 'class_count.exe ' + f + ')')  # skip if under threshold
                 c = ''.join(os.popen(cd + 'class_count.exe ' + f).read().split())
