@@ -1240,40 +1240,41 @@ def process_scene_mrap(
     print(f'  Cloud : L2A (ABCD-RF{"" if use_rf else " disabled"})')
 
     # ------------------------------------------------------------------
-    # 1. Extract cloud masks from L2A
+    # 1. Extract cloud masks (and L2A SWIR if no L1C supplied)
     # ------------------------------------------------------------------
     print('  Extracting L2A cloud masks ...')
-    l2a_data = extract_l2a_data(l2a_path)
+    l2a_data = extract_l2a_masks_and_swir(l2a_path, extract_swir=(l1c_path is None))
     if l2a_data is None:
-        print('  [FAIL] L2A extraction failed.')
+        print(f'  [FAIL] Could not extract from {l2a_path}')
         return False, prev_mrap
 
     cld_raw  = l2a_data['cld']
     scl_arr  = l2a_data['scl']
     cld_geo  = l2a_data['cld_geo']
     cld_proj = l2a_data['cld_proj']
-    H20, W20 = l2a_data['cld_ysize'], l2a_data['cld_xsize']
+    H20, W20 = cld_raw.shape
 
     # ------------------------------------------------------------------
-    # 2. Extract SWIR bands
+    # 2. Extract SWIR bands (L1C or L2A)
     # ------------------------------------------------------------------
-    swir_data = None
     if l1c_path:
-        print('  Extracting L1C SWIR bands ...')
+        print(f'  Extracting L1C SWIR from {Path(l1c_path).name} ...')
         swir_data = extract_l1c_swir(l1c_path)
         if swir_data is None:
-            print('  [WARN] L1C SWIR extraction failed; falling back to L2A.')
-    if swir_data is None:
+            print('  [WARN] L1C SWIR extraction failed; falling back to L2A SWIR.')
+            l2a_swir = extract_l2a_masks_and_swir(l2a_path, extract_swir=True)
+            if l2a_swir is None:
+                print('  [FAIL] L2A SWIR fallback also failed.')
+                return False, prev_mrap
+            l2a_data.update(l2a_swir)
+    if not l1c_path or swir_data is None:
         print('  Using L2A SWIR bands ...')
         swir_data = {
             'b12': l2a_data['b12'], 'b11': l2a_data['b11'], 'b9': l2a_data['b9'],
-            'swir_geo': l2a_data['swir_geo'], 'swir_proj': l2a_data['swir_proj'],
+            'swir_geo':   l2a_data['swir_geo'],  'swir_proj':  l2a_data['swir_proj'],
             'swir_xsize': l2a_data['swir_xsize'], 'swir_ysize': l2a_data['swir_ysize'],
-            'swir_res': l2a_data['swir_res'],
+            'swir_res':   l2a_data['swir_res'],
         }
-    if swir_data is None:
-        print('  [FAIL] SWIR extraction failed.')
-        return False, prev_mrap
 
     b12 = swir_data['b12']; b11 = swir_data['b11']; b9 = swir_data['b9']
     swir_geo  = swir_data['swir_geo'];  swir_proj  = swir_data['swir_proj']
@@ -2084,4 +2085,5 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
+
 
