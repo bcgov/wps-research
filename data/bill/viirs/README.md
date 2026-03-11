@@ -3,9 +3,7 @@
 *Last updated: March 10, 2026*
 
 An end-to-end pipeline for downloading, converting, and visualising VIIRS fire pixel data. Designed specifically for 
-[VNP14IMG](https://ladsweb.modaps.eosdis.nasa.gov/missions-and-measurements/products/VNP14IMG/#product-information)
-
- products.
+[VNP14IMG](https://ladsweb.modaps.eosdis.nasa.gov/missions-and-measurements/products/VNP14IMG/#product-information) products.
 ---
 
 ## Overview
