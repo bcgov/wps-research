@@ -632,20 +632,41 @@ def _save_png(
 
     fig, axes = plt.subplots(1, n_panels, figsize=(6 * n_panels, 6))
 
-    def _display_rgb(arr):
-        """Percentile-stretch to [0,1], NaN becomes 0 for display."""
-        arr = np.nan_to_num(arr, nan=0.0)
-        lo = np.percentile(arr[arr > 0], 1) if np.any(arr > 0) else 0.0
-        hi = np.percentile(arr[arr > 0], 99) if np.any(arr > 0) else 1.0
-        return np.clip((arr - lo) / np.maximum(hi - lo, 1e-6), 0, 1)
+    # ------------------------------------------------------------------
+    # Compute per-band stretch coefficients from the OUTPUT PRODUCT only
+    # (valid/non-NaN pixels).  The same lo/hi are then applied to both
+    # the output panel and the input panel so they share a consistent
+    # radiometric scale — differences are purely due to masking, not
+    # independent re-stretching.
+    # ------------------------------------------------------------------
+    n_bands = output_product.shape[2] if output_product.ndim == 3 else 1
+    lo = np.zeros(n_bands, dtype=np.float32)
+    hi = np.ones(n_bands,  dtype=np.float32)
+    for b in range(n_bands):
+        band = output_product[..., b] if output_product.ndim == 3 else output_product
+        valid = band[np.isfinite(band) & (band != 0)]
+        if valid.size > 0:
+            lo[b] = np.percentile(valid, 1)
+            hi[b] = np.percentile(valid, 99)
+
+    def _apply_stretch(arr):
+        """Apply the shared lo/hi stretch; NaN → 0 (black) for display."""
+        arr = arr.astype(np.float32)
+        out = np.zeros_like(arr)
+        nb  = arr.shape[2] if arr.ndim == 3 else 1
+        for b in range(nb):
+            layer = arr[..., b] if arr.ndim == 3 else arr
+            scaled = (layer - lo[b]) / np.maximum(hi[b] - lo[b], 1e-6)
+            out[..., b] = np.where(np.isfinite(layer), np.clip(scaled, 0, 1), 0.0)
+        return out
 
     cld_norm = raw_cld.astype(np.float32)
     if cld_norm.max() > 1.0:
         cld_norm = cld_norm / 100.0
 
     if full_mode:
-        # Panel 0: Input SWIR (unmasked)
-        axes[0].imshow(_display_rgb(input_swir))
+        # Panel 0: Input SWIR — same stretch as output product
+        axes[0].imshow(_apply_stretch(input_swir))
         axes[0].set_title('Input SWIR (B12/B11/B9)')
         axes[0].axis('off')
         # Panel 1: Sen2Cor raw CLD probability
@@ -656,21 +677,21 @@ def _save_png(
         axes[2].imshow(refined_cld, cmap='gray', vmin=0, vmax=1)
         axes[2].set_title(f'ABCD-RF refined — {refined_cloud_pct:.1f}% cloud')
         axes[2].axis('off')
-        # Panel 3: Output product — NaN regions show as black
-        axes[3].imshow(_display_rgb(output_product))
+        # Panel 3: Output product — same stretch, NaN → black
+        axes[3].imshow(_apply_stretch(output_product))
         axes[3].set_title('Output product (black = masked)')
         axes[3].axis('off')
     else:
-        # Panel 0: Input SWIR (loaded from .bin, NaN=0 for display)
-        axes[0].imshow(_display_rgb(input_swir))
+        # Panel 0: Input SWIR — same stretch as output product
+        axes[0].imshow(_apply_stretch(input_swir))
         axes[0].set_title('Input SWIR (B12/B11/B9)')
         axes[0].axis('off')
         # Panel 1: Sen2Cor raw CLD
         axes[1].imshow(cld_norm, cmap='gray', vmin=0, vmax=1)
         axes[1].set_title(f'Sen2Cor CLD — {raw_cloud_pct:.1f}% cloud')
         axes[1].axis('off')
-        # Panel 2: Output product
-        axes[2].imshow(_display_rgb(output_product))
+        # Panel 2: Output product — same stretch, NaN → black
+        axes[2].imshow(_apply_stretch(output_product))
         axes[2].set_title('Output product (black = masked)')
         axes[2].axis('off')
 
@@ -1135,7 +1156,7 @@ def main() -> None:
         '--overwrite', action='store_true',
         help='Re-process scenes whose output .bin already exists.')
     parser.add_argument(
-        '--N_workers', type=int, default=32,
+        '--N_workers', type=int, default=16,
         help='Number of parallel worker processes (default: 16). '
              'Set to 1 to run serially.')
 
