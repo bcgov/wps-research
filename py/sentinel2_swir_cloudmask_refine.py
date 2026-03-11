@@ -897,7 +897,12 @@ def process_scene(
     """
     stem     = Path(l2a_path).stem
     out_bin  = Path(l2a_path).parent / (stem + '.bin')
-    out_png  = Path(l2a_path).parent / (stem + '.png')
+    # PNG filename is prefixed with the acquisition datetime stamp
+    # (3rd field when split on '_', e.g. '20250502T193831') so PNGs
+    # sort chronologically and are easy to find alongside the .bin.
+    _stem_parts  = stem.split('_')
+    _dt_prefix   = _stem_parts[2] if len(_stem_parts) > 2 else stem
+    out_png  = Path(l2a_path).parent / f'{_dt_prefix}_{stem}.png'
 
     print(f'\n{"="*60}')
     print(f'  Scene : {stem}')
@@ -1236,19 +1241,20 @@ def calculate_n_workers(
 
 
 # ===========================================================================
-# Worker wrapper — captures stdout, returns (bool, log_str)
+# Worker wrapper — captures stdout + own PID, returns (pid, bool, log_str)
 # ===========================================================================
 
-def _worker(task: tuple) -> Tuple[bool, str]:
+def _worker(task: tuple) -> Tuple[int, bool, str]:
     """
-    Top-level picklable worker function.
-    Runs process_scene with all stdout captured into a string buffer,
-    returning (success, log) so the main process can print under a lock.
+    Top-level picklable worker.  Captures all stdout and returns
+    (os.getpid(), success, log) so the dispatcher can:
+      - track which PID is handling which task (for GPU memory accounting)
+      - print the log under a lock after the task completes
     """
-    import io
-    import contextlib
+    import io, contextlib, os as _os
     buf    = io.StringIO()
     result = False
+    pid    = _os.getpid()
     try:
         with contextlib.redirect_stdout(buf):
             result = process_scene(*task)
@@ -1256,7 +1262,248 @@ def _worker(task: tuple) -> Tuple[bool, str]:
         import traceback
         buf.write(f'  [EXCEPTION] {exc}\n')
         buf.write(traceback.format_exc())
-    return result, buf.getvalue()
+    return pid, result, buf.getvalue()
+
+
+# ===========================================================================
+# GPU monitor — queries per-PID VRAM via nvidia-smi, runs in a thread
+# ===========================================================================
+
+def _query_per_pid_gpu_mb() -> Dict[int, float]:
+    """
+    Return {pid: used_gpu_mb} for all processes currently using the GPU,
+    via nvidia-smi --query-compute-apps.  Returns {} on any failure.
+    """
+    try:
+        import subprocess
+        out = subprocess.check_output(
+            ['nvidia-smi',
+             '--query-compute-apps=pid,used_gpu_memory',
+             '--format=csv,noheader,nounits'],
+            timeout=10
+        ).decode().strip()
+        result = {}
+        for line in out.splitlines():
+            parts = line.strip().split(',')
+            if len(parts) == 2:
+                try:
+                    result[int(parts[0].strip())] = float(parts[1].strip())
+                except ValueError:
+                    pass
+        return result
+    except Exception:
+        return {}
+
+
+def _gpu_monitor_thread(
+    active_pids:       'set',           # set of currently running worker PIDs (shared, guarded by lock)
+    pid_lock:          'threading.Lock',
+    concurrency_limit: 'list',          # [int] — mutable box so thread can increment it
+    limit_lock:        'threading.Lock',
+    per_worker_mb_est: float,
+    probe_interval:    float,
+    stop_event:        'threading.Event',
+    max_concurrency:   int,
+    print_lock:        'threading.Lock',
+):
+    """
+    Background thread that periodically:
+      1. Queries actual per-PID GPU memory for all active workers.
+      2. Computes the observed average memory per worker.
+      3. If average is < 70% of estimate AND total GPU free > 1.5× estimate,
+         increments concurrency_limit by 1 (up to max_concurrency).
+      4. Logs any changes under print_lock.
+    """
+    import threading, time
+    while not stop_event.wait(timeout=probe_interval):
+        # Snapshot active PIDs
+        with pid_lock:
+            pids = set(active_pids)
+        if not pids:
+            continue
+
+        per_pid = _query_per_pid_gpu_mb()
+        worker_usage = [per_pid[p] for p in pids if p in per_pid]
+
+        gpu_info = _query_free_gpu_mb()
+        if gpu_info is None:
+            continue
+        free_mb, total_mb, used_mb = gpu_info
+
+        if not worker_usage:
+            continue
+
+        avg_mb = sum(worker_usage) / len(worker_usage)
+        n_active = len(worker_usage)
+
+        with limit_lock:
+            current_limit = concurrency_limit[0]
+
+        # Only consider increasing if we have a meaningful sample
+        # (at least half the current limit is active and measured)
+        if n_active < max(1, current_limit // 2):
+            continue
+
+        # Safety check: enough free memory for one more worker?
+        # Use observed average rather than estimate when we have real data.
+        effective_per_worker = avg_mb if avg_mb > 0 else per_worker_mb_est
+        headroom_needed = effective_per_worker * 1.5   # buffer for spikes
+
+        if (avg_mb < per_worker_mb_est * 0.70
+                and free_mb > headroom_needed
+                and current_limit < max_concurrency):
+            with limit_lock:
+                if concurrency_limit[0] < max_concurrency:
+                    concurrency_limit[0] += 1
+                    new_limit = concurrency_limit[0]
+            with print_lock:
+                print(
+                    f'[MONITOR] Observed {avg_mb:.0f} MiB/worker avg '
+                    f'(estimate was {per_worker_mb_est:.0f} MiB), '
+                    f'{free_mb:.0f} MiB free — increasing concurrency to {new_limit}',
+                    flush=True)
+        else:
+            # Just log current state periodically
+            with print_lock:
+                print(
+                    f'[MONITOR] {n_active} workers | '
+                    f'avg {avg_mb:.0f} MiB/worker | '
+                    f'{free_mb:.0f} MiB GPU free | '
+                    f'concurrency limit: {current_limit}',
+                    flush=True)
+
+
+# ===========================================================================
+# Adaptive parallel dispatcher
+# ===========================================================================
+
+def _run_adaptive_parallel(
+    tasks:             list,
+    initial_workers:   int,
+    max_workers:       int,
+    per_worker_mb_est: float,
+    probe_interval:    float = 6.0,
+    print_lock:        Optional['threading.Lock'] = None,
+) -> Tuple[int, int, list]:
+    """
+    Submit tasks to a ProcessPoolExecutor with an adaptive concurrency limit.
+
+    - Starts with `initial_workers` concurrent tasks.
+    - A GPU monitor thread watches actual per-PID VRAM and increments the
+      concurrency limit (up to `max_workers`) when there is headroom.
+    - Failed tasks (exception or [EXCEPTION] in log) are collected and
+      returned as `retry_list` for a subsequent serial retry pass.
+
+    Returns (n_ok, n_skipped, retry_list).
+    """
+    import threading
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+    from collections import deque
+
+    if print_lock is None:
+        import threading as _th
+        print_lock = _th.Lock()
+
+    pending    = deque(tasks)
+    n_ok       = 0
+    n_skip     = 0
+    retry_list = []
+
+    # Shared mutable state for the monitor thread
+    active_pids       = set()
+    pid_lock          = threading.Lock()
+    concurrency_limit = [initial_workers]   # mutable box
+    limit_lock        = threading.Lock()
+    stop_monitor      = threading.Event()
+
+    # Map from future → task so we can resubmit on failure
+    futures: Dict = {}
+
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+
+        # Start GPU monitor thread
+        monitor = threading.Thread(
+            target=_gpu_monitor_thread,
+            args=(active_pids, pid_lock, concurrency_limit, limit_lock,
+                  per_worker_mb_est, probe_interval, stop_monitor,
+                  max_workers, print_lock),
+            daemon=True,
+        )
+        monitor.start()
+
+        def _submit_up_to_limit():
+            """Submit new tasks while running < concurrency_limit."""
+            with limit_lock:
+                limit = concurrency_limit[0]
+            while pending and len(futures) < limit:
+                task = pending.popleft()
+                f = executor.submit(_worker, task)
+                futures[f] = task
+
+        # Initial fill
+        _submit_up_to_limit()
+
+        while futures:
+            # Wait for the next future to complete
+            done_futures = set()
+            for f in list(futures):
+                if f.done():
+                    done_futures.add(f)
+            if not done_futures:
+                # Brief sleep to avoid busy-wait; then re-check limit
+                # in case monitor raised it since last iteration.
+                import time
+                time.sleep(0.5)
+                _submit_up_to_limit()
+                continue
+
+            for f in done_futures:
+                task = futures.pop(f)
+                try:
+                    pid, ok, log = f.result()
+                except Exception as exc:
+                    ok  = False
+                    log = f'  [EXCEPTION in future] {exc}\n'
+                    pid = -1
+
+                # Remove PID from active set
+                with pid_lock:
+                    active_pids.discard(pid)
+
+                # Print log under lock
+                with print_lock:
+                    sys.stdout.write(log)
+                    sys.stdout.flush()
+
+                crashed = (not ok) and ('[EXCEPTION' in log)
+                if ok:
+                    n_ok += 1
+                elif crashed:
+                    retry_list.append(task)
+                else:
+                    n_skip += 1
+
+                # Register PID of any newly submitted tasks
+                _submit_up_to_limit()
+                # (New futures don't have PIDs yet — they'll appear in
+                #  per_pid query once the process starts.)
+
+            # After processing done futures, register PIDs for running ones.
+            # We do this by sampling the GPU query and cross-referencing with
+            # known worker process IDs from the executor's process pool.
+            try:
+                pool_pids = {p.pid for p in executor._processes.values()
+                             if p is not None and p.pid is not None}
+                with pid_lock:
+                    active_pids.clear()
+                    active_pids.update(pool_pids)
+            except Exception:
+                pass
+
+        stop_monitor.set()
+        monitor.join(timeout=5)
+
+    return n_ok, n_skip, retry_list
 
 
 # ===========================================================================
@@ -1299,7 +1546,7 @@ def main() -> None:
         '--png', action='store_true',
         help='Write diagnostic PNG alongside each output .bin. '
              '4-panel when running the full pipeline; '
-             '3-panel (CLD | mask | product) when .bin already exists.')
+             '3-panel (CLD | product) when .bin already exists.')
     parser.add_argument(
         '--overwrite', action='store_true',
         help='Re-process scenes whose output .bin already exists.')
@@ -1309,6 +1556,10 @@ def main() -> None:
              'Default: auto-calculated from available GPU memory. '
              'Set to 1 to run serially.')
     parser.add_argument(
+        '--max_workers', type=int, default=10,
+        help='Hard ceiling on the number of concurrent workers the GPU '
+             'monitor is allowed to ramp up to (default: 32).')
+    parser.add_argument(
         '--gpu_headroom', type=float, default=0.15,
         help='Fraction of free GPU memory to keep as safety headroom '
              'when auto-calculating workers (default: 0.15 = 15%%).')
@@ -1316,6 +1567,9 @@ def main() -> None:
         '--per_worker_mb', type=float, default=None,
         help='Override the per-worker GPU memory estimate (MiB). '
              'If not set, it is calculated from scene size and RF parameters.')
+    parser.add_argument(
+        '--probe_interval', type=float, default=6.0,
+        help='Seconds between GPU memory probe/scaling checks (default: 30).')
 
     args = parser.parse_args()
 
@@ -1361,117 +1615,103 @@ def main() -> None:
         ))
 
     n_total = len(tasks)
-    n_ok    = 0
-    n_skip  = 0
 
     # ------------------------------------------------------------------ #
-    # Resolve worker count
+    # Resolve initial worker count and per-worker memory estimate
     # ------------------------------------------------------------------ #
-    if args.N_workers is not None:
-        # Explicit override from command line
-        n_workers_final = max(1, args.N_workers)
-        print(f'Workers: {n_workers_final} (explicit --N_workers)')
+    try:
+        _ds_probe = gdal.Open(
+            f'/vsizip/{l2a_files[0]}' if l2a_files[0].endswith('.zip')
+            else l2a_files[0])
+        _px_est = (_ds_probe.RasterXSize * _ds_probe.RasterYSize
+                   if _ds_probe else 30_140_100)
+        _ds_probe = None
+    except Exception:
+        _px_est = 30_140_100
+
+    if args.per_worker_mb is not None:
+        per_worker_mb_est = args.per_worker_mb
     else:
-        # Auto-calculate from available GPU memory.
-        # Use the pixel count from the first L2A file as the size estimate;
-        # all scenes in a tile are the same size.
-        try:
-            _ds_probe = gdal.Open(
-                f'/vsizip/{l2a_files[0]}' if l2a_files[0].endswith('.zip')
-                else l2a_files[0])
-            _px_est = (_ds_probe.RasterXSize * _ds_probe.RasterYSize
-                       if _ds_probe else 30_140_100)
-            _ds_probe = None
-        except Exception:
-            _px_est = 30_140_100   # fallback: typical S2 20m scene
+        per_worker_mb_est = _estimate_per_worker_gpu_mb(
+            _px_est, n_bands=3, n_trees=100, max_depth=20)
 
-        _per_mb = args.per_worker_mb  # None = calculate from scene size
-        if _per_mb is not None:
-            # Manual override of per-worker cost: just divide free memory
-            _result = _query_free_gpu_mb()
-            if _result:
-                _free_mb, _total_mb, _used_mb = _result
-                _usable = _free_mb * (1.0 - args.gpu_headroom)
-                n_workers_final = max(1, int(_usable / _per_mb))
-                n_workers_final = min(n_workers_final, 32)
-                print(
-                    f'GPU memory: {_total_mb:.0f} MiB total, '
-                    f'{_used_mb:.0f} MiB used, {_free_mb:.0f} MiB free | '
-                    f'manual {_per_mb:.0f} MiB/worker → {n_workers_final} worker(s)')
-            else:
-                n_workers_final = 4
-                print(f'GPU info unavailable with --per_worker_mb; defaulting to {n_workers_final}')
-        else:
-            n_workers_final, gpu_msg = calculate_n_workers(
-                n_pixels_estimate=_px_est,
-                n_trees=100,
-                max_depth=20,
-                headroom_fraction=args.gpu_headroom,
-                use_rf=use_rf,
-            )
-            print(f'Workers (auto): {gpu_msg}')
+    if args.N_workers is not None:
+        initial_workers = max(1, args.N_workers)
+        print(f'Initial workers: {initial_workers} (explicit --N_workers)')
+    else:
+        initial_workers, gpu_msg = calculate_n_workers(
+            n_pixels_estimate=_px_est,
+            n_trees=100,
+            max_depth=20,
+            headroom_fraction=args.gpu_headroom,
+            max_workers_cap=args.max_workers,
+            use_rf=use_rf,
+        )
+        # Also cap at 32 as a hard starting floor
+        initial_workers = min(initial_workers, 32)
+        print(f'Initial workers (auto): {gpu_msg}')
 
-    n_workers_final = min(n_workers_final, n_total)
+    initial_workers = min(initial_workers, n_total)
+    max_workers_cap = min(args.max_workers, n_total)
 
-    if n_workers_final == 1:
+    print(f'Per-worker GPU estimate: {per_worker_mb_est:.0f} MiB | '
+          f'starting with {initial_workers} workers, '
+          f'ceiling {max_workers_cap}')
+
+    n_ok   = 0
+    n_skip = 0
+
+    if initial_workers == 1 and max_workers_cap == 1:
         # ---------------------------------------------------------------- #
-        # Serial execution — print directly, no lock needed
+        # Serial path — no pool, no monitor thread needed
         # ---------------------------------------------------------------- #
+        retry_list = []
         for task in tasks:
-            ok, log = _worker(task)
+            _, ok, log = _worker(task)
             sys.stdout.write(log)
             sys.stdout.flush()
             if ok:
                 n_ok += 1
+            elif '[EXCEPTION' in log:
+                retry_list.append(task)
             else:
                 n_skip += 1
     else:
         # ---------------------------------------------------------------- #
-        # Parallel execution via a process pool work queue.
-        # Workers pick up the next task as soon as they finish their current
-        # one (imap_unordered).  A multiprocessing Lock serialises printing
-        # so output from concurrent workers never interleaves.
+        # Adaptive parallel path
         # ---------------------------------------------------------------- #
-        import multiprocessing as mp
-        from multiprocessing.pool import Pool
+        import threading
+        print_lock = threading.Lock()
 
-        n_workers = n_workers_final
-        print(f'Dispatching {n_total} scene(s) across {n_workers} worker(s) ...')
+        n_ok, n_skip, retry_list = _run_adaptive_parallel(
+            tasks            = tasks,
+            initial_workers  = initial_workers,
+            max_workers      = max_workers_cap,
+            per_worker_mb_est= per_worker_mb_est,
+            probe_interval   = args.probe_interval,
+            print_lock       = print_lock,
+        )
 
-        # Manager lock so child processes can acquire it
-        with mp.Manager() as manager:
-            print_lock = manager.Lock()
+    # ------------------------------------------------------------------ #
+    # Retry crashed jobs serially
+    # ------------------------------------------------------------------ #
+    if retry_list:
+        print(f'\n[RETRY] {len(retry_list)} crashed job(s) — retrying serially ...')
+        for task in retry_list:
+            stem = Path(task[0]).stem
+            print(f'  Retrying: {stem}')
+            _, ok, log = _worker(task)
+            sys.stdout.write(log)
+            sys.stdout.flush()
+            if ok:
+                n_ok   += 1
+            else:
+                n_skip += 1
 
-            def _print_result(result_pair):
-                ok, log = result_pair
-                with print_lock:
-                    sys.stdout.write(log)
-                    sys.stdout.flush()
-                return ok
-
-            with Pool(processes=n_workers) as pool:
-                # imap_unordered: each worker picks up a new task the moment
-                # it completes its previous one — true work-queue behaviour.
-                for ok in pool.imap_unordered(_worker, tasks):
-                    # _worker returns (bool, log); we get the pair here
-                    # but imap_unordered returns whatever _worker returns,
-                    # so unpack properly:
-                    if isinstance(ok, tuple):
-                        ok, log = ok
-                        with print_lock:
-                            sys.stdout.write(log)
-                            sys.stdout.flush()
-                    if ok:
-                        n_ok += 1
-                    else:
-                        n_skip += 1
-
-    print(f'\n[DONE] {n_ok} scene(s) processed, {n_skip} skipped/failed '
-          f'(total {n_total}).')
+    print(f'\n[DONE] {n_ok} succeeded, {n_skip} skipped/failed, '
+          f'{len(retry_list)} retried (total {n_total}).')
 
 
 if __name__ == '__main__':
     main()
-
-
 
