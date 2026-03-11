@@ -1629,26 +1629,36 @@ def main() -> None:
     except Exception:
         _px_est = 30_140_100
 
+    # Per-worker GPU cost: use 500 MiB as the empirically observed ceiling
+    # (workers do not exceed ~500 MiB in practice per nvidia-smi).
+    # --per_worker_mb overrides this if needed.
+    OBSERVED_PER_WORKER_MB = 500.0
     if args.per_worker_mb is not None:
         per_worker_mb_est = args.per_worker_mb
     else:
-        per_worker_mb_est = _estimate_per_worker_gpu_mb(
-            _px_est, n_bands=3, n_trees=100, max_depth=20)
+        per_worker_mb_est = OBSERVED_PER_WORKER_MB
 
     if args.N_workers is not None:
         initial_workers = max(1, args.N_workers)
         print(f'Initial workers: {initial_workers} (explicit --N_workers)')
     else:
-        initial_workers, gpu_msg = calculate_n_workers(
-            n_pixels_estimate=_px_est,
-            n_trees=100,
-            max_depth=20,
-            headroom_fraction=args.gpu_headroom,
-            max_workers_cap=args.max_workers,
-            use_rf=use_rf,
-        )
-        # Also cap at 32 as a hard starting floor
-        initial_workers = min(initial_workers, 32)
+        # Calculate from free GPU memory using the 500 MiB/worker empirical cost.
+        # Floor at 32 — we know from observation that 32 workers is safe.
+        gpu_result = _query_free_gpu_mb()
+        if gpu_result is not None:
+            _free_mb, _total_mb, _used_mb = gpu_result
+            _usable_mb = _free_mb * (1.0 - args.gpu_headroom)
+            _calc = max(32, int(_usable_mb / per_worker_mb_est))
+            gpu_msg = (
+                f'GPU: {_total_mb:.0f} MiB total, {_used_mb:.0f} MiB used, '
+                f'{_free_mb:.0f} MiB free '
+                f'({args.gpu_headroom*100:.0f}% headroom → {_usable_mb:.0f} MiB usable) | '
+                f'{per_worker_mb_est:.0f} MiB/worker → {_calc} workers (min 32)'
+            )
+        else:
+            _calc = 32
+            gpu_msg = 'GPU info unavailable — defaulting to 32 workers'
+        initial_workers = _calc
         print(f'Initial workers (auto): {gpu_msg}')
 
     initial_workers = min(initial_workers, n_total)
@@ -1714,4 +1724,5 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
+
 
