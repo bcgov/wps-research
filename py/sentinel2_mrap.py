@@ -141,6 +141,12 @@ def run_mrap(gid):  # run MRAP on one tile
         return result
 
     data_lines = get_filename_lines("ls -1r " + L_prefix + gid + os.path.sep + "S2*_cloudfree.bin")
+    if not data_lines:
+        # No _cloudfree.bin files found; fall back to plain S2*.bin files (excluding MRAP outputs)
+        all_bin_lines = get_filename_lines("ls -1r " + L_prefix + gid + os.path.sep + "S2*.bin")
+        data_lines = [x for x in all_bin_lines if 'MRAP' not in x[1]]
+        if data_lines:
+            print(f"  No _cloudfree.bin files found; falling back to {len(data_lines)} plain S2*.bin file(s)")
     mrap_lines = get_filename_lines("ls -1r " + L_prefix + gid + os.path.sep + "S2*_cloudfree.bin_MRAP.bin")
 
     # Deduplicate data_lines - keep only files with latest processing timestamp for each acquisition timestamp
@@ -242,3 +248,5 @@ if __name__ == "__main__":
         parfor(f, gids, 1) #  int(mp.cpu_count()))
     else:
         run_mrap(args[1])  # single tile mode: no mosaicing
+
+
