@@ -1338,33 +1338,44 @@ def _mrap_compute(task: tuple) -> Tuple[int, dict]:
 def _mrap_composite_and_write(
     res: dict,
     prev_mrap: Optional[np.ndarray],
+    write_threads: list,
 ) -> Tuple[bool, Optional[np.ndarray]]:
     """
-    Serial part of MRAP processing (steps 8-10):
-    composite with prev_mrap, write ENVI, write PNG.
+    Serial part of MRAP processing:
 
-    Called in the main thread in datetime order.
+    Step 8  (blocking, in main thread): composite prev_mrap + out_stack
+             into new_mrap.  This is the only step that must complete
+             before the next timestep can start.
+
+    Step 9  (background thread): write new_mrap to *_MRAP.bin.
+    Step 10 (background thread): render and write the 2x2 PNG.
+
+    Both write threads are appended to write_threads so the caller can
+    join them after the loop.  The arrays they reference stay alive
+    because the thread closures hold references; GC will not collect them.
+
     Returns (success, new_mrap).
     """
+    import threading
+
     if not res['ok']:
         return False, prev_mrap
 
     if res.get('skip'):
-        # Output already exists — load it as seed for the next timestep
         existing = _load_envi_stack(res['out_mrap_bin'])
         return False, existing
 
-    out_stack  = res['out_stack']
-    swir_geo   = res['swir_geo']; swir_proj = res['swir_proj']; swir_res = res['swir_res']
-    Hs, Ws     = res['Hs'], res['Ws']
-    cld_geo    = res['cld_geo']; cld_proj = res['cld_proj']
-    H20, W20   = res['H20'], res['W20']
-    stem       = res['stem']
+    out_stack    = res['out_stack']
+    swir_geo     = res['swir_geo'];  swir_proj = res['swir_proj'];  swir_res = res['swir_res']
+    Hs, Ws       = res['Hs'], res['Ws']
+    cld_geo      = res['cld_geo'];   cld_proj  = res['cld_proj']
+    H20, W20     = res['H20'], res['W20']
+    stem         = res['stem']
     out_mrap_bin = res['out_mrap_bin']
     out_png      = res['out_png']
     write_png    = res['write_png']
 
-    # Step 8: Composite
+    # Step 8 (blocking): composite
     prev_for_composite = prev_mrap
     if prev_mrap is not None and prev_mrap.shape[:2] != (Hs, Ws):
         prev_for_composite = np.dstack([
@@ -1376,33 +1387,52 @@ def _mrap_composite_and_write(
         ])
     new_mrap = _composite_mrap(prev_for_composite, out_stack)
 
-    # Step 9: Write ENVI
+    # Step 9 (background thread): write ENVI .bin
     date_str   = stem.split('_')[2][:8] if len(stem.split('_')) > 2 else stem
     band_names = [
         f'{date_str} {int(swir_res)}m: B12 2190nm MRAP',
         f'{date_str} {int(swir_res)}m: B11 1610nm MRAP',
         f'{date_str} {int(swir_res)}m: B9  945nm  MRAP',
     ]
-    write_envi(out_mrap_bin, new_mrap, swir_geo, swir_proj, band_names)
-    print(f'  Written (MRAP) → {out_mrap_bin}')
 
-    # Step 10: PNG
+    def _write_bin(_arr, _path, _geo, _proj, _names):
+        write_envi(_path, _arr, _geo, _proj, _names)
+        print(f'  Written (MRAP) → {_path}')
+
+    t_bin = threading.Thread(
+        target=_write_bin,
+        args=(new_mrap, out_mrap_bin, swir_geo, swir_proj, band_names),
+        daemon=True,
+    )
+    t_bin.start()
+    write_threads.append(t_bin)
+
+    # Step 10 (background thread): PNG
     if write_png:
-        def _to_20m(stack):
-            if stack is None: return None
-            if stack.shape[:2] == (H20, W20): return stack
-            return np.dstack([
-                _resample_to_target(
-                    stack[..., i], _make_mem_ds(stack[..., i], swir_geo, swir_proj),
-                    W20, H20, cld_geo, cld_proj, 'bilinear')
-                for i in range(stack.shape[2])
-            ])
-        _save_png_mrap(
-            out_png, res['cld_raw'], res['refined_cld'],
-            _to_20m(prev_mrap), _to_20m(new_mrap),
-            raw_cloud_pct=res['raw_cloud_pct'],
-            refined_cloud_pct=res['refined_cloud_pct'],
+        def _write_png_thread(_prev, _curr):
+            def _to_20m(stack):
+                if stack is None: return None
+                if stack.shape[:2] == (H20, W20): return stack
+                return np.dstack([
+                    _resample_to_target(
+                        stack[..., i], _make_mem_ds(stack[..., i], swir_geo, swir_proj),
+                        W20, H20, cld_geo, cld_proj, 'bilinear')
+                    for i in range(stack.shape[2])
+                ])
+            _save_png_mrap(
+                out_png, res['cld_raw'], res['refined_cld'],
+                _to_20m(_prev), _to_20m(_curr),
+                raw_cloud_pct=res['raw_cloud_pct'],
+                refined_cloud_pct=res['refined_cloud_pct'],
+            )
+
+        t_png = threading.Thread(
+            target=_write_png_thread,
+            args=(prev_mrap, new_mrap),
+            daemon=True,
         )
+        t_png.start()
+        write_threads.append(t_png)
 
     return True, new_mrap
 
@@ -1431,7 +1461,10 @@ def process_scene_mrap(
              use_rf, save_model, model_dir, write_png, overwrite)
     _pid, res = _mrap_compute(task)
     sys.stdout.write(res['log'])
-    return _mrap_composite_and_write(res, prev_mrap)
+    _wt: list = []
+    result = _mrap_composite_and_write(res, prev_mrap, _wt)
+    for t in _wt: t.join()   # serial wrapper: wait for all writes
+    return result
 
 # ===========================================================================
 # Scene discovery
@@ -2042,8 +2075,10 @@ def main() -> None:
             for task in tasks_mrap:
                 ordered_futures.append(executor.submit(_mrap_compute, task))
 
-            # Consume in strict datetime order — composite is serial
-            prev_mrap : Optional[np.ndarray] = None
+            # Consume in strict datetime order — composite (step 8) is
+            # serial; bin + PNG writes run in background threads.
+            prev_mrap  : Optional[np.ndarray] = None
+            write_threads: list = []   # all background write threads
             n_ok  = 0
             n_skip = 0
             for future in ordered_futures:
@@ -2059,11 +2094,20 @@ def main() -> None:
                 sys.stdout.write(res['log'])
                 sys.stdout.flush()
 
-                ok, prev_mrap = _mrap_composite_and_write(res, prev_mrap)
+                ok, prev_mrap = _mrap_composite_and_write(
+                    res, prev_mrap, write_threads)
                 if ok:
                     n_ok += 1
                 else:
                     n_skip += 1
+
+        # All compositing done; wait for any background bin/PNG writes
+        # still in flight before exiting.
+        pending = [t for t in write_threads if t.is_alive()]
+        if pending:
+            print(f'  Waiting for {len(pending)} background write(s) to finish ...')
+            for t in pending:
+                t.join()
 
         print(f'\n[DONE] {n_ok} MRAP timestep(s) written, {n_skip} skipped '
               f'(total {n_mrap}).')
@@ -2178,4 +2222,5 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
+
 
