@@ -14,7 +14,7 @@ from misc import (
     band_index
 )
 
-from plot_tools import plot
+from fire_mapping.plot_tools import plot
 
 import numpy as np
 
