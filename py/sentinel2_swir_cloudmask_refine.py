@@ -592,7 +592,7 @@ def write_envi(
 def _save_png(
     png_path: str,
     raw_cld: np.ndarray,
-    final_mask: np.ndarray,
+    input_swir: np.ndarray,
     output_product: np.ndarray,
     raw_cloud_pct: float = 0.0,
     refined_cld: Optional[np.ndarray] = None,
@@ -601,20 +601,23 @@ def _save_png(
     """
     Save a diagnostic PNG.
 
-    mode is determined automatically:
-      - 4-panel (full run): raw_cld | refined_cld | final_mask | output_product
-        Used when refined_cld is provided (full pipeline was run).
-      - 3-panel (bin exists, no RF): raw_cld | final_mask | output_product
-        Used when refined_cld is None (.bin existed, RF was skipped).
+    4-panel (full pipeline, refined_cld provided):
+      input SWIR | Sen2Cor CLD | ABCD-RF refined | output product (masked)
+
+    3-panel (bin already existed, RF not re-run, refined_cld=None):
+      input SWIR | Sen2Cor CLD | output product (masked)
+
+    The final mask is not shown explicitly — its effect is visible by
+    comparing the input SWIR panel against the output product panel.
 
     Parameters
     ----------
-    raw_cld          : (H, W) Sen2Cor cloud probability (0-100 or 0-1)
-    final_mask       : (H, W) bool/float combined invalid mask at 20m
-    output_product   : (H, W, 3) masked SWIR stack (NaN = invalid), at 20m for display
-    raw_cloud_pct    : Sen2Cor cloud coverage %
-    refined_cld      : (H, W) ABCD-RF refined probability in [0,1], or None
-    refined_cloud_pct: ABCD-RF cloud coverage %
+    raw_cld        : (H, W) Sen2Cor cloud probability (0-100 or 0-1)
+    input_swir     : (H, W, 3) raw SWIR stack at 20m (no masking applied)
+    output_product : (H, W, 3) masked SWIR at 20m (NaN where invalid)
+    raw_cloud_pct  : Sen2Cor cloud coverage %
+    refined_cld    : (H, W) ABCD-RF refined probability in [0,1], or None
+    refined_cloud_pct : ABCD-RF cloud coverage %
     """
     try:
         import matplotlib
@@ -629,10 +632,11 @@ def _save_png(
 
     fig, axes = plt.subplots(1, n_panels, figsize=(6 * n_panels, 6))
 
-    # --- helpers ---
     def _display_rgb(arr):
-        lo = np.nanpercentile(arr, 1, axis=(0, 1))
-        hi = np.nanpercentile(arr, 99, axis=(0, 1))
+        """Percentile-stretch to [0,1], NaN becomes 0 for display."""
+        arr = np.nan_to_num(arr, nan=0.0)
+        lo = np.percentile(arr[arr > 0], 1) if np.any(arr > 0) else 0.0
+        hi = np.percentile(arr[arr > 0], 99) if np.any(arr > 0) else 1.0
         return np.clip((arr - lo) / np.maximum(hi - lo, 1e-6), 0, 1)
 
     cld_norm = raw_cld.astype(np.float32)
@@ -640,36 +644,34 @@ def _save_png(
         cld_norm = cld_norm / 100.0
 
     if full_mode:
-        # Panel 0: Sen2Cor raw CLD
-        axes[0].imshow(cld_norm, cmap='gray', vmin=0, vmax=1)
-        axes[0].set_title(f'Sen2Cor CLD (raw) — {raw_cloud_pct:.1f}% cloud')
+        # Panel 0: Input SWIR (unmasked)
+        axes[0].imshow(_display_rgb(input_swir))
+        axes[0].set_title('Input SWIR (B12/B11/B9)')
         axes[0].axis('off')
-        # Panel 1: ABCD-RF refined CLD
-        axes[1].imshow(refined_cld, cmap='gray', vmin=0, vmax=1)
-        axes[1].set_title(f'ABCD-RF (refined) — {refined_cloud_pct:.1f}% cloud')
+        # Panel 1: Sen2Cor raw CLD probability
+        axes[1].imshow(cld_norm, cmap='gray', vmin=0, vmax=1)
+        axes[1].set_title(f'Sen2Cor CLD — {raw_cloud_pct:.1f}% cloud')
         axes[1].axis('off')
-        # Panel 2: Final combined mask
-        axes[2].imshow(final_mask, cmap='Reds', vmin=0, vmax=1)
-        axes[2].set_title('Final mask (cloud + SCL)')
+        # Panel 2: ABCD-RF refined CLD probability
+        axes[2].imshow(refined_cld, cmap='gray', vmin=0, vmax=1)
+        axes[2].set_title(f'ABCD-RF refined — {refined_cloud_pct:.1f}% cloud')
         axes[2].axis('off')
-        # Panel 3: Output product (NaN = transparent via masked array)
-        out_disp = _display_rgb(output_product)
-        axes[3].imshow(out_disp)
-        axes[3].set_title('Output product (NaN = masked)')
+        # Panel 3: Output product — NaN regions show as black
+        axes[3].imshow(_display_rgb(output_product))
+        axes[3].set_title('Output product (black = masked)')
         axes[3].axis('off')
     else:
-        # Panel 0: Sen2Cor raw CLD
-        axes[0].imshow(cld_norm, cmap='gray', vmin=0, vmax=1)
-        axes[0].set_title(f'Sen2Cor CLD (raw) — {raw_cloud_pct:.1f}% cloud')
+        # Panel 0: Input SWIR (loaded from .bin, NaN=0 for display)
+        axes[0].imshow(_display_rgb(input_swir))
+        axes[0].set_title('Input SWIR (B12/B11/B9)')
         axes[0].axis('off')
-        # Panel 1: Final combined mask
-        axes[1].imshow(final_mask, cmap='Reds', vmin=0, vmax=1)
-        axes[1].set_title('Final mask (cloud + SCL)')
+        # Panel 1: Sen2Cor raw CLD
+        axes[1].imshow(cld_norm, cmap='gray', vmin=0, vmax=1)
+        axes[1].set_title(f'Sen2Cor CLD — {raw_cloud_pct:.1f}% cloud')
         axes[1].axis('off')
         # Panel 2: Output product
-        out_disp = _display_rgb(output_product)
-        axes[2].imshow(out_disp)
-        axes[2].set_title('Output product (NaN = masked)')
+        axes[2].imshow(_display_rgb(output_product))
+        axes[2].set_title('Output product (black = masked)')
         axes[2].axis('off')
 
     fig.tight_layout()
@@ -837,12 +839,15 @@ def _png_from_existing(
     else:
         swir_20m = swir_out[..., :3] if swir_out.shape[2] >= 3 else swir_out
 
-    # 3-panel PNG — refined_cld=None triggers the 3-panel branch in _save_png
+    # 3-panel PNG — refined_cld=None triggers the 3-panel branch in _save_png.
+    # For the "input" panel we show the output .bin with NaN filled as 0
+    # (gives a fair sense of the scene content). The "output product" panel
+    # shows the same data with NaN kept (black = masked regions).
     _save_png(
         str(out_png),
         cld_raw,
-        invalid_20m.astype(np.float32),
-        swir_20m,
+        np.nan_to_num(swir_20m, nan=0.0),   # input panel: NaN → 0 for context
+        swir_20m,                             # output panel: NaN kept (black)
         raw_cloud_pct=raw_cloud_pct,
         refined_cld=None,
     )
@@ -1009,11 +1014,25 @@ def process_scene(
     # 7. Optional PNG
     # ------------------------------------------------------------------ #
     if write_png:
+        # Bring the masked output stack to 20m for the display panel.
+        # out_stack is at native SWIR resolution; swir_stack_20m is already
+        # at 20m and serves as the unmasked input panel.
+        if out_stack.shape[:2] != (H20, W20):
+            out_stack_20m = np.dstack([
+                _resample_to_target(
+                    out_stack[..., i],
+                    _make_mem_ds(out_stack[..., i], swir_geo, swir_proj),
+                    W20, H20, cld_geo, cld_proj, 'bilinear')
+                for i in range(out_stack.shape[2])
+            ])
+        else:
+            out_stack_20m = out_stack
+
         _save_png(
             str(out_png),
             cld_raw,
-            invalid_20m.astype(np.float32),
-            swir_stack_20m,
+            swir_stack_20m,        # unmasked input
+            out_stack_20m,         # masked output product
             raw_cloud_pct=raw_cloud_pct,
             refined_cld=refined_cld,
             refined_cloud_pct=refined_cloud_pct,
@@ -1226,5 +1245,4 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
-
 
