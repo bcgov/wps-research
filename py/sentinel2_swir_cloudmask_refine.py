@@ -1088,6 +1088,154 @@ def find_l2a_files(l2a_dir: str) -> list[str]:
 
 
 # ===========================================================================
+# GPU memory → worker count calculation
+# ===========================================================================
+
+def _query_free_gpu_mb() -> Optional[float]:
+    """
+    Return free GPU memory in MiB for GPU 0, or None if unavailable.
+    Tries pynvml first (cleanest), falls back to parsing nvidia-smi output.
+    """
+    # --- pynvml ---
+    try:
+        import pynvml
+        pynvml.nvmlInit()
+        handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+        info   = pynvml.nvmlDeviceGetMemoryInfo(handle)
+        free_mb = info.free / (1024 ** 2)
+        total_mb = info.total / (1024 ** 2)
+        used_mb  = info.used  / (1024 ** 2)
+        pynvml.nvmlShutdown()
+        return free_mb, total_mb, used_mb
+    except Exception:
+        pass
+
+    # --- nvidia-smi fallback ---
+    try:
+        import subprocess
+        out = subprocess.check_output(
+            ['nvidia-smi',
+             '--query-gpu=memory.free,memory.total,memory.used',
+             '--format=csv,noheader,nounits'],
+            timeout=10
+        ).decode().strip().splitlines()[0]
+        free_mb, total_mb, used_mb = [float(x.strip()) for x in out.split(',')]
+        return free_mb, total_mb, used_mb
+    except Exception:
+        pass
+
+    return None
+
+
+def _estimate_per_worker_gpu_mb(
+    n_pixels_estimate: int,
+    n_bands: int = 3,
+    n_trees: int = 100,
+    max_depth: int = 20,
+) -> float:
+    """
+    Estimate GPU memory (MiB) consumed by one cuML RF worker for a scene.
+
+    Accounts for:
+      - Input feature array A  (n_bands × n_pixels × float32)
+      - Cloud prob target B    (1 × n_pixels × float32)
+      - Prediction output D    (1 × n_pixels × float32)
+      - cuML RF model          (empirical: ~4 bytes × n_leaves × n_trees,
+                                 where n_leaves ≈ 2^min(max_depth,18))
+      - cuML working buffers   (1.5× model size, conservative)
+
+    Returns MiB as a float.
+    """
+    bytes_per_float = 4
+
+    # Raw data arrays
+    data_bytes = (n_bands + 1 + 1) * n_pixels_estimate * bytes_per_float
+
+    # cuML RF model: each tree has at most 2^max_depth leaves; each node
+    # stores ~8 floats of metadata.  Cap depth at 18 to avoid explosion.
+    effective_depth = min(max_depth, 18)
+    nodes_per_tree  = 2 ** (effective_depth + 1)           # full binary tree
+    model_bytes     = n_trees * nodes_per_tree * 8 * bytes_per_float
+
+    # Working buffers during fit/predict (cuML allocates temporaries)
+    buffer_bytes = model_bytes * 1.5
+
+    total_bytes = data_bytes + model_bytes + buffer_bytes
+    return total_bytes / (1024 ** 2)
+
+
+def calculate_n_workers(
+    n_pixels_estimate: int = 30_140_100,   # typical S2 20m scene
+    n_bands: int = 3,
+    n_trees: int = 100,
+    max_depth: int = 20,
+    headroom_fraction: float = 0.15,       # keep 15% free as safety margin
+    min_workers: int = 1,
+    max_workers_cap: int = 32,
+    use_rf: bool = True,
+) -> Tuple[int, str]:
+    """
+    Query available GPU memory and compute how many parallel workers can
+    safely run simultaneously.
+
+    If cuML (GPU RF) is not in use, or GPU info is unavailable, falls back
+    to a CPU-core-based heuristic.
+
+    Returns (n_workers, explanation_string).
+    """
+    import multiprocessing as _mp
+
+    if not use_rf:
+        # No GPU involvement — use half the CPU cores
+        n_cpu = _mp.cpu_count()
+        n     = max(min_workers, n_cpu // 2)
+        return min(n, max_workers_cap), (
+            f'RF disabled — using {n} workers '
+            f'(half of {n_cpu} CPU cores)')
+
+    # Check whether cuML is actually available
+    try:
+        import cuml  # noqa: F401
+        cuml_available = True
+    except ImportError:
+        cuml_available = False
+
+    if not cuml_available:
+        n_cpu = _mp.cpu_count()
+        n     = max(min_workers, n_cpu // 2)
+        return min(n, max_workers_cap), (
+            f'cuML not available (sklearn fallback) — using {n} workers '
+            f'(half of {n_cpu} CPU cores)')
+
+    result = _query_free_gpu_mb()
+    if result is None:
+        n = 4   # conservative default when GPU info unavailable
+        return min(n, max_workers_cap), (
+            f'GPU info unavailable — defaulting to {n} workers')
+
+    free_mb, total_mb, used_mb = result
+
+    per_worker_mb = _estimate_per_worker_gpu_mb(
+        n_pixels_estimate, n_bands, n_trees, max_depth)
+
+    # Usable memory after reserving headroom
+    usable_mb = free_mb * (1.0 - headroom_fraction)
+    n = max(min_workers, int(usable_mb / per_worker_mb))
+    n = min(n, max_workers_cap)
+
+    explanation = (
+        f'GPU memory: {total_mb:.0f} MiB total, '
+        f'{used_mb:.0f} MiB used, '
+        f'{free_mb:.0f} MiB free '
+        f'({headroom_fraction*100:.0f}% headroom reserved → '
+        f'{usable_mb:.0f} MiB usable) | '
+        f'estimated {per_worker_mb:.0f} MiB/worker → '
+        f'{n} worker(s)'
+    )
+    return n, explanation
+
+
+# ===========================================================================
 # Worker wrapper — captures stdout, returns (bool, log_str)
 # ===========================================================================
 
@@ -1156,9 +1304,18 @@ def main() -> None:
         '--overwrite', action='store_true',
         help='Re-process scenes whose output .bin already exists.')
     parser.add_argument(
-        '--N_workers', type=int, default=32,
-        help='Number of parallel worker processes (default: 32). '
+        '--N_workers', type=int, default=None,
+        help='Number of parallel worker processes. '
+             'Default: auto-calculated from available GPU memory. '
              'Set to 1 to run serially.')
+    parser.add_argument(
+        '--gpu_headroom', type=float, default=0.15,
+        help='Fraction of free GPU memory to keep as safety headroom '
+             'when auto-calculating workers (default: 0.15 = 15%%).')
+    parser.add_argument(
+        '--per_worker_mb', type=float, default=None,
+        help='Override the per-worker GPU memory estimate (MiB). '
+             'If not set, it is calculated from scene size and RF parameters.')
 
     args = parser.parse_args()
 
@@ -1207,7 +1364,56 @@ def main() -> None:
     n_ok    = 0
     n_skip  = 0
 
-    if args.N_workers == 1:
+    # ------------------------------------------------------------------ #
+    # Resolve worker count
+    # ------------------------------------------------------------------ #
+    if args.N_workers is not None:
+        # Explicit override from command line
+        n_workers_final = max(1, args.N_workers)
+        print(f'Workers: {n_workers_final} (explicit --N_workers)')
+    else:
+        # Auto-calculate from available GPU memory.
+        # Use the pixel count from the first L2A file as the size estimate;
+        # all scenes in a tile are the same size.
+        try:
+            _ds_probe = gdal.Open(
+                f'/vsizip/{l2a_files[0]}' if l2a_files[0].endswith('.zip')
+                else l2a_files[0])
+            _px_est = (_ds_probe.RasterXSize * _ds_probe.RasterYSize
+                       if _ds_probe else 30_140_100)
+            _ds_probe = None
+        except Exception:
+            _px_est = 30_140_100   # fallback: typical S2 20m scene
+
+        _per_mb = args.per_worker_mb  # None = calculate from scene size
+        if _per_mb is not None:
+            # Manual override of per-worker cost: just divide free memory
+            _result = _query_free_gpu_mb()
+            if _result:
+                _free_mb, _total_mb, _used_mb = _result
+                _usable = _free_mb * (1.0 - args.gpu_headroom)
+                n_workers_final = max(1, int(_usable / _per_mb))
+                n_workers_final = min(n_workers_final, 32)
+                print(
+                    f'GPU memory: {_total_mb:.0f} MiB total, '
+                    f'{_used_mb:.0f} MiB used, {_free_mb:.0f} MiB free | '
+                    f'manual {_per_mb:.0f} MiB/worker → {n_workers_final} worker(s)')
+            else:
+                n_workers_final = 4
+                print(f'GPU info unavailable with --per_worker_mb; defaulting to {n_workers_final}')
+        else:
+            n_workers_final, gpu_msg = calculate_n_workers(
+                n_pixels_estimate=_px_est,
+                n_trees=100,
+                max_depth=20,
+                headroom_fraction=args.gpu_headroom,
+                use_rf=use_rf,
+            )
+            print(f'Workers (auto): {gpu_msg}')
+
+    n_workers_final = min(n_workers_final, n_total)
+
+    if n_workers_final == 1:
         # ---------------------------------------------------------------- #
         # Serial execution — print directly, no lock needed
         # ---------------------------------------------------------------- #
@@ -1229,7 +1435,7 @@ def main() -> None:
         import multiprocessing as mp
         from multiprocessing.pool import Pool
 
-        n_workers = min(args.N_workers, n_total)
+        n_workers = n_workers_final
         print(f'Dispatching {n_total} scene(s) across {n_workers} worker(s) ...')
 
         # Manager lock so child processes can acquire it
@@ -1266,4 +1472,6 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
+
+
 
