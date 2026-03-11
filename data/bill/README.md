@@ -12,7 +12,7 @@ An end-to-end pipeline for downloading, converting, and visualising VIIRS active
 
 ---
 
-## [Sentinel-2 Fire Mapping](https://github.com/bcgov/wps-research/blob/master/data/bill/fire_mapping/README.md)
+## [Sentinel-2 Fire Mapping](https://github.com/bcgov/wps-research/blob/master/data/bill/fire_mapping)
 
 <img src="images/fire_mapping.png" alt="Sentinel-2 Fire Mapping" width="50%">
 
