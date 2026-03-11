@@ -677,6 +677,133 @@ def _build_l1c_lookup(l1c_dir: str) -> Dict[Tuple[str, str], str]:
 # Per-scene processing
 # ===========================================================================
 
+def _load_envi_bands(bin_path: str) -> Optional[np.ndarray]:
+    """
+    Load all bands from an ENVI .bin file into a (H, W, K) float32 array.
+    Returns None on failure.
+    """
+    try:
+        ds = gdal.Open(str(bin_path), gdal.GA_ReadOnly)
+    except RuntimeError:
+        return None
+    if ds is None:
+        return None
+    K  = ds.RasterCount
+    H  = ds.RasterYSize
+    W  = ds.RasterXSize
+    out = np.empty((H, W, K), dtype=np.float32)
+    for i in range(K):
+        out[..., i] = ds.GetRasterBand(i + 1).ReadAsArray()
+    ds = None
+    return out
+
+
+def _build_masks_from_cld_scl(
+    cld_raw: np.ndarray,
+    scl_arr: np.ndarray,
+    cloud_threshold: float,
+    refined_cld: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, float, float]:
+    """
+    Given raw CLD, SCL, threshold, and already-refined cloud probability,
+    return (cloud_mask_20m, invalid_20m, raw_cloud_pct, refined_cloud_pct).
+    """
+    H20, W20 = cld_raw.shape
+
+    cld_raw_norm = cld_raw.astype(np.float32)
+    if cld_raw_norm.max() > 1.0:
+        cld_raw_norm = cld_raw_norm / 100.0
+    raw_cloud_pct = (cld_raw_norm >= cloud_threshold).mean() * 100
+
+    cloud_mask_20m    = refined_cld >= cloud_threshold
+    refined_cloud_pct = cloud_mask_20m.mean() * 100
+
+    scl_nodata_20m = np.zeros((H20, W20), dtype=bool)
+    for cls in SCL_NODATA_CLASSES:
+        scl_nodata_20m |= (scl_arr == cls)
+    invalid_20m = cloud_mask_20m | scl_nodata_20m
+
+    print(f'  Cloud coverage (Sen2Cor raw)  : {raw_cloud_pct:.1f}%')
+    print(f'  Cloud coverage (ABCD refined) : {refined_cloud_pct:.1f}%')
+    print(f'  SCL nodata                    : {scl_nodata_20m.mean()*100:.1f}%')
+    print(f'  Total invalid                 : {invalid_20m.mean()*100:.1f}%')
+
+    return cloud_mask_20m, invalid_20m, raw_cloud_pct, refined_cloud_pct
+
+
+def _png_from_existing(
+    out_bin: Path,
+    out_png: Path,
+    l2a_path: str,
+    cloud_threshold: float,
+) -> bool:
+    """
+    Fast path: output .bin already exists — re-extract only CLD+SCL from the
+    L2A zip (no SWIR extraction, no RF), reconstruct the masks at 20m, load
+    the saved SWIR stack from out_bin for the RGB panel, then write the PNG.
+    Returns True on success.
+    """
+    print('  Output .bin found — re-extracting CLD/SCL only (no RF) ...')
+
+    # Extract masks only (no SWIR bands needed from zip)
+    l2a_data = extract_l2a_masks_and_swir(l2a_path, extract_swir=False)
+    if l2a_data is None:
+        print('  [FAIL] Could not re-extract cloud masks for PNG.')
+        return False
+
+    cld_raw  = l2a_data['cld']
+    scl_arr  = l2a_data['scl']
+    H20, W20 = cld_raw.shape
+
+    # Use raw CLD as a stand-in for "refined" since we skipped RF.
+    # This is only for the PNG comparison panels — it correctly shows
+    # Sen2Cor vs Sen2Cor (identical) when RF wasn't re-run, which is
+    # honest about what was re-computed.
+    cld_raw_norm = cld_raw.astype(np.float32)
+    if cld_raw_norm.max() > 1.0:
+        cld_raw_norm = cld_raw_norm / 100.0
+
+    _, invalid_20m, raw_cloud_pct, refined_cloud_pct = _build_masks_from_cld_scl(
+        cld_raw, scl_arr, cloud_threshold, refined_cld=cld_raw_norm)
+
+    # Load the already-written SWIR output as the RGB display source.
+    # Resample it to 20m for the PNG panel if needed.
+    swir_out = _load_envi_bands(out_bin)
+    if swir_out is None:
+        print(f'  [FAIL] Could not load {out_bin} for PNG.')
+        return False
+
+    Hs, Ws = swir_out.shape[:2]
+    if (Hs, Ws) != (H20, W20):
+        # Downsample saved SWIR to 20m grid for the display panel
+        ds_tmp = gdal.Open(str(out_bin), gdal.GA_ReadOnly)
+        swir_geo_out = ds_tmp.GetGeoTransform()
+        swir_proj_out = ds_tmp.GetProjection()
+        ds_tmp = None
+        tmp = _resample_to_target(
+            swir_out[..., 0], _make_mem_ds(swir_out[..., 0], swir_geo_out, swir_proj_out),
+            W20, H20, l2a_data['cld_geo'], l2a_data['cld_proj'], 'bilinear')
+        swir_20m = np.zeros((H20, W20, 3), dtype=np.float32)
+        for band_i in range(min(3, swir_out.shape[2])):
+            swir_20m[..., band_i] = _resample_to_target(
+                swir_out[..., band_i],
+                _make_mem_ds(swir_out[..., band_i], swir_geo_out, swir_proj_out),
+                W20, H20, l2a_data['cld_geo'], l2a_data['cld_proj'], 'bilinear')
+    else:
+        swir_20m = swir_out
+
+    _save_png(
+        str(out_png),
+        cld_raw,
+        cld_raw_norm,   # refined == raw since RF was not re-run
+        invalid_20m.astype(np.float32),
+        swir_20m,
+        raw_cloud_pct=raw_cloud_pct,
+        refined_cloud_pct=refined_cloud_pct,
+    )
+    return True
+
+
 def process_scene(
     l2a_path: str,
     l1c_path: Optional[str],
@@ -691,19 +818,34 @@ def process_scene(
 ) -> bool:
     """
     Process one L2A scene (with optional L1C SWIR source).
+
+    If write_png is True and the output .bin already exists (and not
+    overwrite), skip the full pipeline and regenerate the PNG cheaply by
+    re-extracting only CLD+SCL from the zip (no SWIR, no RF).
+
     Returns True on success, False on skip/failure.
     """
     stem     = Path(l2a_path).stem
     out_bin  = Path(l2a_path).parent / (stem + '.bin')
     out_png  = Path(l2a_path).parent / (stem + '.png')
 
+    print(f'\n{"="*60}')
+    print(f'  Scene : {stem}')
+
+    # ------------------------------------------------------------------ #
+    # Fast path: PNG-only regeneration when output .bin already exists
+    # ------------------------------------------------------------------ #
+    if write_png and out_bin.exists() and not overwrite:
+        return _png_from_existing(out_bin, out_png, l2a_path, cloud_threshold)
+
+    # ------------------------------------------------------------------ #
+    # Skip entirely if no PNG requested and output already exists
+    # ------------------------------------------------------------------ #
     if out_bin.exists() and not overwrite:
         print(f'  [SKIP] Output exists: {out_bin}')
         return False
 
     source_label = 'L1C' if l1c_path else 'L2A'
-    print(f'\n{"="*60}')
-    print(f'  Scene : {stem}')
     print(f'  SWIR  : {source_label}')
     print(f'  Cloud : L2A (ABCD-RF{"" if use_rf else " disabled"})')
 
@@ -716,8 +858,8 @@ def process_scene(
         print(f'  [FAIL] Could not extract from {l2a_path}')
         return False
 
-    cld_raw  = l2a_data['cld']    # (H20, W20), values 0-100
-    scl_arr  = l2a_data['scl']    # (H20, W20)
+    cld_raw  = l2a_data['cld']
+    scl_arr  = l2a_data['scl']
     cld_geo  = l2a_data['cld_geo']
     cld_proj = l2a_data['cld_proj']
     H20, W20 = cld_raw.shape
@@ -753,29 +895,18 @@ def process_scene(
     Hs, Ws    = swir_data['swir_ysize'], swir_data['swir_xsize']
     swir_res  = swir_data['swir_res']
 
-    # Stack for RF: (H, W, 3)
-    swir_stack_20m = np.dstack([b12, b11, b9])  # native SWIR grid initially
-    # We need SWIR at 20m for RF (same grid as CLD).
-    # Resample if SWIR resolution != 20m:
-    if abs(swir_res - 20.0) > 0.5:
-        print(f'  Resampling SWIR stack from {swir_res:.1f}m → 20m for RF ...')
-        mem = gdal.GetDriverByName('MEM')
-        tmp_b12 = _resample_to_target(b12, _make_mem_ds(b12, swir_geo, swir_proj),
-                                      W20, H20, cld_geo, cld_proj, 'bilinear')
-        tmp_b11 = _resample_to_target(b11, _make_mem_ds(b11, swir_geo, swir_proj),
-                                      W20, H20, cld_geo, cld_proj, 'bilinear')
-        tmp_b9  = _resample_to_target(b9,  _make_mem_ds(b9,  swir_geo, swir_proj),
-                                      W20, H20, cld_geo, cld_proj, 'bilinear')
-        swir_stack_20m = np.dstack([tmp_b12, tmp_b11, tmp_b9])
-    elif swir_stack_20m.shape[:2] != (H20, W20):
-        # Shape mismatch even if resolution matches — force resample
-        tmp_b12 = _resample_to_target(b12, _make_mem_ds(b12, swir_geo, swir_proj),
-                                      W20, H20, cld_geo, cld_proj, 'bilinear')
-        tmp_b11 = _resample_to_target(b11, _make_mem_ds(b11, swir_geo, swir_proj),
-                                      W20, H20, cld_geo, cld_proj, 'bilinear')
-        tmp_b9  = _resample_to_target(b9,  _make_mem_ds(b9,  swir_geo, swir_proj),
-                                      W20, H20, cld_geo, cld_proj, 'bilinear')
-        swir_stack_20m = np.dstack([tmp_b12, tmp_b11, tmp_b9])
+    # Build 20m SWIR stack for RF input
+    swir_stack_20m = np.dstack([b12, b11, b9])
+    if abs(swir_res - 20.0) > 0.5 or swir_stack_20m.shape[:2] != (H20, W20):
+        print(f'  Resampling SWIR stack → 20m for RF ...')
+        swir_stack_20m = np.dstack([
+            _resample_to_target(b12, _make_mem_ds(b12, swir_geo, swir_proj),
+                                W20, H20, cld_geo, cld_proj, 'bilinear'),
+            _resample_to_target(b11, _make_mem_ds(b11, swir_geo, swir_proj),
+                                W20, H20, cld_geo, cld_proj, 'bilinear'),
+            _resample_to_target(b9,  _make_mem_ds(b9,  swir_geo, swir_proj),
+                                W20, H20, cld_geo, cld_proj, 'bilinear'),
+        ])
 
     # ------------------------------------------------------------------ #
     # 3. Build / refine cloud probability at 20 m
@@ -796,25 +927,9 @@ def process_scene(
 
     # ------------------------------------------------------------------ #
     # 4. Build final invalid-pixel mask at 20m
-    #    (cloud by threshold OR SCL nodata classes)
     # ------------------------------------------------------------------ #
-    cloud_mask_20m = refined_cld >= cloud_threshold
-    scl_nodata_20m = np.zeros((H20, W20), dtype=bool)
-    for cls in SCL_NODATA_CLASSES:
-        scl_nodata_20m |= (scl_arr == cls)
-    invalid_20m = cloud_mask_20m | scl_nodata_20m
-
-    # Compute raw Sen2Cor cloud % for comparison
-    cld_raw_norm = cld_raw.astype(np.float32)
-    if cld_raw_norm.max() > 1.0:
-        cld_raw_norm = cld_raw_norm / 100.0
-    raw_cloud_pct     = (cld_raw_norm >= cloud_threshold).mean() * 100
-    refined_cloud_pct = cloud_mask_20m.mean() * 100
-
-    print(f'  Cloud coverage (Sen2Cor raw)  : {raw_cloud_pct:.1f}%')
-    print(f'  Cloud coverage (ABCD refined) : {refined_cloud_pct:.1f}%')
-    print(f'  SCL nodata                    : {scl_nodata_20m.mean()*100:.1f}%')
-    print(f'  Total invalid                 : {invalid_20m.mean()*100:.1f}%')
+    cloud_mask_20m, invalid_20m, raw_cloud_pct, refined_cloud_pct = (
+        _build_masks_from_cld_scl(cld_raw, scl_arr, cloud_threshold, refined_cld))
 
     # ------------------------------------------------------------------ #
     # 5. Upsample the invalid mask to the native SWIR grid
@@ -822,9 +937,9 @@ def process_scene(
     if invalid_20m.shape != (Hs, Ws):
         print(f'  Resampling mask from 20m → {swir_res:.1f}m SWIR grid ...')
         invalid_float = invalid_20m.astype(np.float32)
-        mem_inv = _make_mem_ds(invalid_float, cld_geo, cld_proj)
-        invalid_swir = _resample_to_target(
-            invalid_float, mem_inv, Ws, Hs, swir_geo, swir_proj, 'near')
+        invalid_swir  = _resample_to_target(
+            invalid_float, _make_mem_ds(invalid_float, cld_geo, cld_proj),
+            Ws, Hs, swir_geo, swir_proj, 'near')
         invalid_swir_bool = invalid_swir >= 0.5
     else:
         invalid_swir_bool = invalid_20m
@@ -834,18 +949,14 @@ def process_scene(
     # ------------------------------------------------------------------ #
     out_stack = np.dstack([b12, b11, b9]).astype(np.float32)
     out_stack[invalid_swir_bool] = np.nan
+    out_stack[np.all(out_stack == 0.0, axis=-1)] = np.nan
 
-    # Also NaN-out pixels that are zero across all bands (nodata sentinel)
-    all_zero = np.all(out_stack == 0.0, axis=-1)
-    out_stack[all_zero] = np.nan
-
-    date_str = stem.split('_')[2][:8] if len(stem.split('_')) > 2 else stem
+    date_str   = stem.split('_')[2][:8] if len(stem.split('_')) > 2 else stem
     band_names = [
         f'{date_str} {int(swir_res)}m: B12 2190nm',
         f'{date_str} {int(swir_res)}m: B11 1610nm',
         f'{date_str} {int(swir_res)}m: B9  945nm',
     ]
-
     write_envi(str(out_bin), out_stack, swir_geo, swir_proj, band_names)
 
     # ------------------------------------------------------------------ #
@@ -995,3 +1106,5 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
+
+
