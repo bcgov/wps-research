@@ -592,13 +592,30 @@ def write_envi(
 def _save_png(
     png_path: str,
     raw_cld: np.ndarray,
-    refined_cld: np.ndarray,
     final_mask: np.ndarray,
-    swir_rgb: np.ndarray,
+    output_product: np.ndarray,
     raw_cloud_pct: float = 0.0,
+    refined_cld: Optional[np.ndarray] = None,
     refined_cloud_pct: float = 0.0,
 ) -> None:
-    """Save a 4-panel diagnostic PNG."""
+    """
+    Save a diagnostic PNG.
+
+    mode is determined automatically:
+      - 4-panel (full run): raw_cld | refined_cld | final_mask | output_product
+        Used when refined_cld is provided (full pipeline was run).
+      - 3-panel (bin exists, no RF): raw_cld | final_mask | output_product
+        Used when refined_cld is None (.bin existed, RF was skipped).
+
+    Parameters
+    ----------
+    raw_cld          : (H, W) Sen2Cor cloud probability (0-100 or 0-1)
+    final_mask       : (H, W) bool/float combined invalid mask at 20m
+    output_product   : (H, W, 3) masked SWIR stack (NaN = invalid), at 20m for display
+    raw_cloud_pct    : Sen2Cor cloud coverage %
+    refined_cld      : (H, W) ABCD-RF refined probability in [0,1], or None
+    refined_cloud_pct: ABCD-RF cloud coverage %
+    """
     try:
         import matplotlib
         matplotlib.use('Agg')
@@ -607,29 +624,53 @@ def _save_png(
         print('  [WARN] matplotlib not available — skipping PNG')
         return
 
-    H, W = raw_cld.shape
-    fig, axes = plt.subplots(1, 4, figsize=(24, 6))
+    full_mode = refined_cld is not None
+    n_panels  = 4 if full_mode else 3
 
-    lo = np.nanpercentile(swir_rgb, 1, axis=(0, 1))
-    hi = np.nanpercentile(swir_rgb, 99, axis=(0, 1))
-    rgb_disp = np.clip((swir_rgb - lo) / np.maximum(hi - lo, 1e-6), 0, 1)
+    fig, axes = plt.subplots(1, n_panels, figsize=(6 * n_panels, 6))
 
-    axes[0].imshow(rgb_disp)
-    axes[0].set_title('SWIR (B12/B11/B9)')
-    axes[0].axis('off')
+    # --- helpers ---
+    def _display_rgb(arr):
+        lo = np.nanpercentile(arr, 1, axis=(0, 1))
+        hi = np.nanpercentile(arr, 99, axis=(0, 1))
+        return np.clip((arr - lo) / np.maximum(hi - lo, 1e-6), 0, 1)
 
-    axes[1].imshow(raw_cld / (raw_cld.max() if raw_cld.max() > 0 else 1),
-                   cmap='gray', vmin=0, vmax=1)
-    axes[1].set_title(f'Sen2Cor CLD (raw) — {raw_cloud_pct:.1f}% cloud')
-    axes[1].axis('off')
+    cld_norm = raw_cld.astype(np.float32)
+    if cld_norm.max() > 1.0:
+        cld_norm = cld_norm / 100.0
 
-    axes[2].imshow(refined_cld, cmap='gray', vmin=0, vmax=1)
-    axes[2].set_title(f'ABCD-RF (refined) — {refined_cloud_pct:.1f}% cloud')
-    axes[2].axis('off')
-
-    axes[3].imshow(final_mask, cmap='Reds', vmin=0, vmax=1)
-    axes[3].set_title('Final mask (cloud + SCL)')
-    axes[3].axis('off')
+    if full_mode:
+        # Panel 0: Sen2Cor raw CLD
+        axes[0].imshow(cld_norm, cmap='gray', vmin=0, vmax=1)
+        axes[0].set_title(f'Sen2Cor CLD (raw) — {raw_cloud_pct:.1f}% cloud')
+        axes[0].axis('off')
+        # Panel 1: ABCD-RF refined CLD
+        axes[1].imshow(refined_cld, cmap='gray', vmin=0, vmax=1)
+        axes[1].set_title(f'ABCD-RF (refined) — {refined_cloud_pct:.1f}% cloud')
+        axes[1].axis('off')
+        # Panel 2: Final combined mask
+        axes[2].imshow(final_mask, cmap='Reds', vmin=0, vmax=1)
+        axes[2].set_title('Final mask (cloud + SCL)')
+        axes[2].axis('off')
+        # Panel 3: Output product (NaN = transparent via masked array)
+        out_disp = _display_rgb(output_product)
+        axes[3].imshow(out_disp)
+        axes[3].set_title('Output product (NaN = masked)')
+        axes[3].axis('off')
+    else:
+        # Panel 0: Sen2Cor raw CLD
+        axes[0].imshow(cld_norm, cmap='gray', vmin=0, vmax=1)
+        axes[0].set_title(f'Sen2Cor CLD (raw) — {raw_cloud_pct:.1f}% cloud')
+        axes[0].axis('off')
+        # Panel 1: Final combined mask
+        axes[1].imshow(final_mask, cmap='Reds', vmin=0, vmax=1)
+        axes[1].set_title('Final mask (cloud + SCL)')
+        axes[1].axis('off')
+        # Panel 2: Output product
+        out_disp = _display_rgb(output_product)
+        axes[2].imshow(out_disp)
+        axes[2].set_title('Output product (NaN = masked)')
+        axes[2].axis('off')
 
     fig.tight_layout()
     fig.savefig(png_path, dpi=120, bbox_inches='tight')
@@ -738,14 +779,15 @@ def _png_from_existing(
     cloud_threshold: float,
 ) -> bool:
     """
-    Fast path: output .bin already exists — re-extract only CLD+SCL from the
-    L2A zip (no SWIR extraction, no RF), reconstruct the masks at 20m, load
-    the saved SWIR stack from out_bin for the RGB panel, then write the PNG.
+    Fast path: .bin exists but .png does not.
+
+    Re-extracts only CLD+SCL from the L2A zip (no SWIR bands, no RF).
+    Loads the saved output .bin as the display product.
+    Writes a 3-panel PNG: Sen2Cor CLD | final mask | output product.
     Returns True on success.
     """
-    print('  Output .bin found — re-extracting CLD/SCL only (no RF) ...')
+    print('  .bin exists, .png missing — re-extracting CLD/SCL only (no RF) ...')
 
-    # Extract masks only (no SWIR bands needed from zip)
     l2a_data = extract_l2a_masks_and_swir(l2a_path, extract_swir=False)
     if l2a_data is None:
         print('  [FAIL] Could not re-extract cloud masks for PNG.')
@@ -753,21 +795,28 @@ def _png_from_existing(
 
     cld_raw  = l2a_data['cld']
     scl_arr  = l2a_data['scl']
+    cld_geo  = l2a_data['cld_geo']
+    cld_proj = l2a_data['cld_proj']
     H20, W20 = cld_raw.shape
 
-    # Use raw CLD as a stand-in for "refined" since we skipped RF.
-    # This is only for the PNG comparison panels — it correctly shows
-    # Sen2Cor vs Sen2Cor (identical) when RF wasn't re-run, which is
-    # honest about what was re-computed.
     cld_raw_norm = cld_raw.astype(np.float32)
     if cld_raw_norm.max() > 1.0:
         cld_raw_norm = cld_raw_norm / 100.0
+    raw_cloud_pct = (cld_raw_norm >= cloud_threshold).mean() * 100
 
-    _, invalid_20m, raw_cloud_pct, refined_cloud_pct = _build_masks_from_cld_scl(
-        cld_raw, scl_arr, cloud_threshold, refined_cld=cld_raw_norm)
+    # Build SCL-based nodata mask and combined invalid mask using raw CLD
+    scl_nodata_20m = np.zeros((H20, W20), dtype=bool)
+    for cls in SCL_NODATA_CLASSES:
+        scl_nodata_20m |= (scl_arr == cls)
+    cloud_mask_20m = cld_raw_norm >= cloud_threshold
+    invalid_20m    = cloud_mask_20m | scl_nodata_20m
 
-    # Load the already-written SWIR output as the RGB display source.
-    # Resample it to 20m for the PNG panel if needed.
+    print(f'  Cloud coverage (Sen2Cor raw) : {raw_cloud_pct:.1f}%')
+    print(f'  SCL nodata                   : {scl_nodata_20m.mean()*100:.1f}%')
+    print(f'  Total invalid                : {invalid_20m.mean()*100:.1f}%')
+
+    # Load the already-written output product for the display panel.
+    # Resample to 20m if the native SWIR grid differs.
     swir_out = _load_envi_bands(out_bin)
     if swir_out is None:
         print(f'  [FAIL] Could not load {out_bin} for PNG.')
@@ -775,31 +824,27 @@ def _png_from_existing(
 
     Hs, Ws = swir_out.shape[:2]
     if (Hs, Ws) != (H20, W20):
-        # Downsample saved SWIR to 20m grid for the display panel
-        ds_tmp = gdal.Open(str(out_bin), gdal.GA_ReadOnly)
-        swir_geo_out = ds_tmp.GetGeoTransform()
+        ds_tmp        = gdal.Open(str(out_bin), gdal.GA_ReadOnly)
+        swir_geo_out  = ds_tmp.GetGeoTransform()
         swir_proj_out = ds_tmp.GetProjection()
-        ds_tmp = None
-        tmp = _resample_to_target(
-            swir_out[..., 0], _make_mem_ds(swir_out[..., 0], swir_geo_out, swir_proj_out),
-            W20, H20, l2a_data['cld_geo'], l2a_data['cld_proj'], 'bilinear')
-        swir_20m = np.zeros((H20, W20, 3), dtype=np.float32)
-        for band_i in range(min(3, swir_out.shape[2])):
+        ds_tmp        = None
+        swir_20m      = np.zeros((H20, W20, min(3, swir_out.shape[2])), dtype=np.float32)
+        for band_i in range(swir_20m.shape[2]):
             swir_20m[..., band_i] = _resample_to_target(
                 swir_out[..., band_i],
                 _make_mem_ds(swir_out[..., band_i], swir_geo_out, swir_proj_out),
-                W20, H20, l2a_data['cld_geo'], l2a_data['cld_proj'], 'bilinear')
+                W20, H20, cld_geo, cld_proj, 'bilinear')
     else:
-        swir_20m = swir_out
+        swir_20m = swir_out[..., :3] if swir_out.shape[2] >= 3 else swir_out
 
+    # 3-panel PNG — refined_cld=None triggers the 3-panel branch in _save_png
     _save_png(
         str(out_png),
         cld_raw,
-        cld_raw_norm,   # refined == raw since RF was not re-run
         invalid_20m.astype(np.float32),
         swir_20m,
         raw_cloud_pct=raw_cloud_pct,
-        refined_cloud_pct=refined_cloud_pct,
+        refined_cld=None,
     )
     return True
 
@@ -819,9 +864,8 @@ def process_scene(
     """
     Process one L2A scene (with optional L1C SWIR source).
 
-    If write_png is True and the output .bin already exists (and not
-    overwrite), skip the full pipeline and regenerate the PNG cheaply by
-    re-extracting only CLD+SCL from the zip (no SWIR, no RF).
+    stdout is captured externally by _worker() so parallel output
+    never interleaves. This function just uses plain print().
 
     Returns True on success, False on skip/failure.
     """
@@ -833,16 +877,18 @@ def process_scene(
     print(f'  Scene : {stem}')
 
     # ------------------------------------------------------------------ #
-    # Fast path: PNG-only regeneration when output .bin already exists
+    # Fast path: .bin exists and .png is missing — write 3-panel PNG only
     # ------------------------------------------------------------------ #
-    if write_png and out_bin.exists() and not overwrite:
+    if write_png and out_bin.exists() and not out_png.exists() and not overwrite:
         return _png_from_existing(out_bin, out_png, l2a_path, cloud_threshold)
 
     # ------------------------------------------------------------------ #
-    # Skip entirely if no PNG requested and output already exists
+    # Skip entirely if outputs are already present and overwrite not set
     # ------------------------------------------------------------------ #
-    if out_bin.exists() and not overwrite:
-        print(f'  [SKIP] Output exists: {out_bin}')
+    bin_done = out_bin.exists() and not overwrite
+    png_done = (not write_png) or (out_png.exists() and not overwrite)
+    if bin_done and png_done:
+        print(f'  [SKIP] Output(s) already exist.')
         return False
 
     source_label = 'L1C' if l1c_path else 'L2A'
@@ -966,10 +1012,10 @@ def process_scene(
         _save_png(
             str(out_png),
             cld_raw,
-            refined_cld,
             invalid_20m.astype(np.float32),
             swir_stack_20m,
             raw_cloud_pct=raw_cloud_pct,
+            refined_cld=refined_cld,
             refined_cloud_pct=refined_cloud_pct,
         )
 
@@ -999,6 +1045,30 @@ def find_l2a_files(l2a_dir: str) -> list[str]:
                 name.endswith('.zip') or name.endswith('.SAFE')):
             files.append(str(entry))
     return files
+
+
+# ===========================================================================
+# Worker wrapper — captures stdout, returns (bool, log_str)
+# ===========================================================================
+
+def _worker(task: tuple) -> Tuple[bool, str]:
+    """
+    Top-level picklable worker function.
+    Runs process_scene with all stdout captured into a string buffer,
+    returning (success, log) so the main process can print under a lock.
+    """
+    import io
+    import contextlib
+    buf    = io.StringIO()
+    result = False
+    try:
+        with contextlib.redirect_stdout(buf):
+            result = process_scene(*task)
+    except Exception as exc:
+        import traceback
+        buf.write(f'  [EXCEPTION] {exc}\n')
+        buf.write(traceback.format_exc())
+    return result, buf.getvalue()
 
 
 # ===========================================================================
@@ -1039,19 +1109,21 @@ def main() -> None:
         help='Directory for saved RF models (default: ./models).')
     parser.add_argument(
         '--png', action='store_true',
-        help='Write a 4-panel diagnostic PNG alongside each output .bin.')
+        help='Write diagnostic PNG alongside each output .bin. '
+             '4-panel when running the full pipeline; '
+             '3-panel (CLD | mask | product) when .bin already exists.')
     parser.add_argument(
         '--overwrite', action='store_true',
         help='Re-process scenes whose output .bin already exists.')
     parser.add_argument(
-        '--workers', type=int, default=1,
-        help='Number of parallel worker processes (default: 1).')
+        '--N_workers', type=int, default=16,
+        help='Number of parallel worker processes (default: 16). '
+             'Set to 1 to run serially.')
 
     args = parser.parse_args()
 
-    l2a_dir  = args.l2_dir or os.getcwd()
-    l2a_dir  = os.path.abspath(l2a_dir)
-    use_rf   = not args.no_rf
+    l2a_dir = os.path.abspath(args.l2_dir or os.getcwd())
+    use_rf  = not args.no_rf
 
     if not os.path.isdir(l2a_dir):
         sys.exit(f'[ERROR] l2_dir not found: {l2a_dir}')
@@ -1091,17 +1163,65 @@ def main() -> None:
             args.png, args.overwrite,
         ))
 
-    # Execute
-    if args.workers > 1:
-        from multiprocessing import Pool
-        with Pool(processes=args.workers) as pool:
-            results = pool.starmap(process_scene, tasks)
-    else:
-        results = [process_scene(*t) for t in tasks]
+    n_total = len(tasks)
+    n_ok    = 0
+    n_skip  = 0
 
-    n_ok   = sum(bool(r) for r in results)
-    n_skip = len(results) - n_ok
-    print(f'\n[DONE] {n_ok} scene(s) processed, {n_skip} skipped/failed.')
+    if args.N_workers == 1:
+        # ---------------------------------------------------------------- #
+        # Serial execution — print directly, no lock needed
+        # ---------------------------------------------------------------- #
+        for task in tasks:
+            ok, log = _worker(task)
+            sys.stdout.write(log)
+            sys.stdout.flush()
+            if ok:
+                n_ok += 1
+            else:
+                n_skip += 1
+    else:
+        # ---------------------------------------------------------------- #
+        # Parallel execution via a process pool work queue.
+        # Workers pick up the next task as soon as they finish their current
+        # one (imap_unordered).  A multiprocessing Lock serialises printing
+        # so output from concurrent workers never interleaves.
+        # ---------------------------------------------------------------- #
+        import multiprocessing as mp
+        from multiprocessing.pool import Pool
+
+        n_workers = min(args.N_workers, n_total)
+        print(f'Dispatching {n_total} scene(s) across {n_workers} worker(s) ...')
+
+        # Manager lock so child processes can acquire it
+        with mp.Manager() as manager:
+            print_lock = manager.Lock()
+
+            def _print_result(result_pair):
+                ok, log = result_pair
+                with print_lock:
+                    sys.stdout.write(log)
+                    sys.stdout.flush()
+                return ok
+
+            with Pool(processes=n_workers) as pool:
+                # imap_unordered: each worker picks up a new task the moment
+                # it completes its previous one — true work-queue behaviour.
+                for ok in pool.imap_unordered(_worker, tasks):
+                    # _worker returns (bool, log); we get the pair here
+                    # but imap_unordered returns whatever _worker returns,
+                    # so unpack properly:
+                    if isinstance(ok, tuple):
+                        ok, log = ok
+                        with print_lock:
+                            sys.stdout.write(log)
+                            sys.stdout.flush()
+                    if ok:
+                        n_ok += 1
+                    else:
+                        n_skip += 1
+
+    print(f'\n[DONE] {n_ok} scene(s) processed, {n_skip} skipped/failed '
+          f'(total {n_total}).')
 
 
 if __name__ == '__main__':
