@@ -1628,7 +1628,7 @@ def main() -> None:
     # Per-worker GPU cost: use 500 MiB as the empirically observed maximum
     # (workers do not exceed ~500 MiB in practice per nvidia-smi).
     # --per_worker_mb overrides this if needed.
-    OBSERVED_PER_WORKER_MB = 500.0
+    OBSERVED_PER_WORKER_MB = 768.0
     if args.per_worker_mb is not None:
         per_worker_mb_est = args.per_worker_mb
     else:
