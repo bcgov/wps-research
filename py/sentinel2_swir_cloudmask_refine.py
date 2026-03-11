@@ -1556,10 +1556,6 @@ def main() -> None:
              'Default: auto-calculated from available GPU memory. '
              'Set to 1 to run serially.')
     parser.add_argument(
-        '--max_workers', type=int, default=10,
-        help='Hard ceiling on the number of concurrent workers the GPU '
-             'monitor is allowed to ramp up to (default: 32).')
-    parser.add_argument(
         '--gpu_headroom', type=float, default=0.15,
         help='Fraction of free GPU memory to keep as safety headroom '
              'when auto-calculating workers (default: 0.15 = 15%%).')
@@ -1629,7 +1625,7 @@ def main() -> None:
     except Exception:
         _px_est = 30_140_100
 
-    # Per-worker GPU cost: use 500 MiB as the empirically observed ceiling
+    # Per-worker GPU cost: use 500 MiB as the empirically observed maximum
     # (workers do not exceed ~500 MiB in practice per nvidia-smi).
     # --per_worker_mb overrides this if needed.
     OBSERVED_PER_WORKER_MB = 500.0
@@ -1662,11 +1658,12 @@ def main() -> None:
         print(f'Initial workers (auto): {gpu_msg}')
 
     initial_workers = min(initial_workers, n_total)
-    max_workers_cap = min(args.max_workers, n_total)
+    # No upper limit — the monitor may add workers beyond the starting
+    # count if GPU memory allows.  Use n_total as the only upper bound.
+    max_workers_cap = n_total
 
     print(f'Per-worker GPU estimate: {per_worker_mb_est:.0f} MiB | '
-          f'starting with {initial_workers} workers, '
-          f'ceiling {max_workers_cap}')
+          f'starting with {initial_workers} workers')
 
     n_ok   = 0
     n_skip = 0
@@ -1724,5 +1721,4 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
-
 
