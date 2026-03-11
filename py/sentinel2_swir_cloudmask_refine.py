@@ -1156,8 +1156,8 @@ def main() -> None:
         '--overwrite', action='store_true',
         help='Re-process scenes whose output .bin already exists.')
     parser.add_argument(
-        '--N_workers', type=int, default=64,
-        help='Number of parallel worker processes (default: 64). '
+        '--N_workers', type=int, default=32,
+        help='Number of parallel worker processes (default: 32). '
              'Set to 1 to run serially.')
 
     args = parser.parse_args()
