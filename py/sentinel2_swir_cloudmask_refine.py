@@ -1196,6 +1196,217 @@ def _save_png_mrap(
     print(f'  PNG → {png_path}')
 
 
+def _mrap_compute(task: tuple) -> Tuple[int, dict]:
+    """
+    Parallelisable part of MRAP processing (steps 1-7):
+    I/O, resampling, RF cloud refinement, mask building, masked SWIR stack.
+
+    Returns (os.getpid(), result_dict).
+    result_dict keys:
+      ok, log, stem, out_mrap_bin, out_png, write_png,
+      out_stack, cld_raw, refined_cld, raw_cloud_pct, refined_cloud_pct,
+      swir_geo, swir_proj, swir_res, Hs, Ws,
+      cld_geo, cld_proj, H20, W20
+    On failure: ok=False, all array keys absent.
+    """
+    import io, contextlib, os as _os
+    buf = io.StringIO()
+    pid = _os.getpid()
+    res: dict = {'ok': False, 'log': ''}
+
+    (l2a_path, l1c_path, skip_f, offset, cloud_threshold,
+     use_rf, save_model, model_dir, write_png, overwrite) = task
+
+    with contextlib.redirect_stdout(buf):
+        stem        = Path(l2a_path).stem
+        _stem_parts = stem.split('_')
+        _dt_prefix  = _stem_parts[2] if len(_stem_parts) > 2 else stem
+        out_mrap_bin = Path(l2a_path).parent / f'{stem}_MRAP.bin'
+        out_png      = Path(l2a_path).parent / f'{_dt_prefix}_{stem}_MRAP.png'
+
+        res.update(dict(stem=stem, out_mrap_bin=str(out_mrap_bin),
+                        out_png=str(out_png), write_png=write_png,
+                        l2a_path=l2a_path))
+
+        print(f'\n{"="*60}')
+        print(f'  Scene (MRAP compute) : {stem}')
+
+        if out_mrap_bin.exists() and not overwrite:
+            print(f'  [SKIP] {out_mrap_bin.name} already exists — will seed from it.')
+            res['skip'] = True
+            res['ok']   = True
+            res['log']  = buf.getvalue()
+            return pid, res
+
+        res['skip'] = False
+
+        # Step 1
+        print('  Extracting L2A cloud masks ...')
+        l2a_data = extract_l2a_masks_and_swir(l2a_path, extract_swir=(l1c_path is None))
+        if l2a_data is None:
+            print(f'  [FAIL] Could not extract from {l2a_path}')
+            res['log'] = buf.getvalue(); return pid, res
+
+        cld_raw  = l2a_data['cld']
+        scl_arr  = l2a_data['scl']
+        cld_geo  = l2a_data['cld_geo']
+        cld_proj = l2a_data['cld_proj']
+        H20, W20 = cld_raw.shape
+
+        # Step 2
+        if l1c_path:
+            print(f'  Extracting L1C SWIR from {Path(l1c_path).name} ...')
+            swir_data = extract_l1c_swir(l1c_path)
+            if swir_data is None:
+                print('  [WARN] L1C SWIR failed; falling back to L2A SWIR.')
+                l2a_swir = extract_l2a_masks_and_swir(l2a_path, extract_swir=True)
+                if l2a_swir is None:
+                    print('  [FAIL] L2A SWIR fallback also failed.')
+                    res['log'] = buf.getvalue(); return pid, res
+                l2a_data.update(l2a_swir)
+                swir_data = None
+        if not l1c_path or swir_data is None:
+            print('  Using L2A SWIR bands ...')
+            swir_data = {
+                'b12': l2a_data['b12'], 'b11': l2a_data['b11'], 'b9': l2a_data['b9'],
+                'swir_geo':   l2a_data['swir_geo'],  'swir_proj':  l2a_data['swir_proj'],
+                'swir_xsize': l2a_data['swir_xsize'], 'swir_ysize': l2a_data['swir_ysize'],
+                'swir_res':   l2a_data['swir_res'],
+            }
+
+        b12 = swir_data['b12']; b11 = swir_data['b11']; b9 = swir_data['b9']
+        swir_geo  = swir_data['swir_geo']; swir_proj = swir_data['swir_proj']
+        Hs, Ws    = swir_data['swir_ysize'], swir_data['swir_xsize']
+        swir_res  = swir_data['swir_res']
+
+        # Step 3: 20m SWIR stack
+        swir_stack_20m = np.dstack([b12, b11, b9])
+        if abs(swir_res - 20.0) > 0.5 or swir_stack_20m.shape[:2] != (H20, W20):
+            swir_stack_20m = np.dstack([
+                _resample_to_target(b12, _make_mem_ds(b12, swir_geo, swir_proj),
+                                    W20, H20, cld_geo, cld_proj, 'bilinear'),
+                _resample_to_target(b11, _make_mem_ds(b11, swir_geo, swir_proj),
+                                    W20, H20, cld_geo, cld_proj, 'bilinear'),
+                _resample_to_target(b9,  _make_mem_ds(b9,  swir_geo, swir_proj),
+                                    W20, H20, cld_geo, cld_proj, 'bilinear'),
+            ])
+
+        # Step 4: RF cloud refinement
+        if use_rf:
+            print('  Running ABCD-RF cloud refinement ...')
+            pkl_path: Optional[str] = None
+            if save_model:
+                safe_stem = stem.replace(' ', '_')
+                pkl_path  = str(Path(model_dir) / f'{safe_stem}_{skip_f}_{offset}.pkl')
+            refined_cld = refine_cloud_mask(cld_raw, swir_stack_20m, skip_f, offset, pkl_path)
+        else:
+            refined_cld = cld_raw.astype(np.float32)
+            if refined_cld.max() > 1.0:
+                refined_cld /= 100.0
+
+        # Step 5: Final mask
+        cloud_mask_20m, invalid_20m, raw_cloud_pct, refined_cloud_pct = (
+            _build_masks_from_cld_scl(cld_raw, scl_arr, cloud_threshold, refined_cld))
+
+        # Step 6: Upsample mask
+        if invalid_20m.shape != (Hs, Ws):
+            invalid_float = invalid_20m.astype(np.float32)
+            invalid_swir_bool = _resample_to_target(
+                invalid_float, _make_mem_ds(invalid_float, cld_geo, cld_proj),
+                Ws, Hs, swir_geo, swir_proj, 'near') >= 0.5
+        else:
+            invalid_swir_bool = invalid_20m
+
+        # Step 7: Apply mask
+        out_stack = np.dstack([b12, b11, b9]).astype(np.float32)
+        out_stack[invalid_swir_bool] = np.nan
+        out_stack[np.all(out_stack == 0.0, axis=-1)] = np.nan
+
+        res.update(dict(
+            ok=True, skip=False,
+            out_stack=out_stack,
+            cld_raw=cld_raw, refined_cld=refined_cld,
+            raw_cloud_pct=raw_cloud_pct, refined_cloud_pct=refined_cloud_pct,
+            swir_geo=swir_geo, swir_proj=swir_proj, swir_res=swir_res,
+            Hs=Hs, Ws=Ws, cld_geo=cld_geo, cld_proj=cld_proj, H20=H20, W20=W20,
+        ))
+
+    res['log'] = buf.getvalue()
+    return pid, res
+
+
+def _mrap_composite_and_write(
+    res: dict,
+    prev_mrap: Optional[np.ndarray],
+) -> Tuple[bool, Optional[np.ndarray]]:
+    """
+    Serial part of MRAP processing (steps 8-10):
+    composite with prev_mrap, write ENVI, write PNG.
+
+    Called in the main thread in datetime order.
+    Returns (success, new_mrap).
+    """
+    if not res['ok']:
+        return False, prev_mrap
+
+    if res.get('skip'):
+        # Output already exists — load it as seed for the next timestep
+        existing = _load_envi_stack(res['out_mrap_bin'])
+        return False, existing
+
+    out_stack  = res['out_stack']
+    swir_geo   = res['swir_geo']; swir_proj = res['swir_proj']; swir_res = res['swir_res']
+    Hs, Ws     = res['Hs'], res['Ws']
+    cld_geo    = res['cld_geo']; cld_proj = res['cld_proj']
+    H20, W20   = res['H20'], res['W20']
+    stem       = res['stem']
+    out_mrap_bin = res['out_mrap_bin']
+    out_png      = res['out_png']
+    write_png    = res['write_png']
+
+    # Step 8: Composite
+    prev_for_composite = prev_mrap
+    if prev_mrap is not None and prev_mrap.shape[:2] != (Hs, Ws):
+        prev_for_composite = np.dstack([
+            _resample_to_target(
+                prev_mrap[..., i],
+                _make_mem_ds(prev_mrap[..., i], swir_geo, swir_proj),
+                Ws, Hs, swir_geo, swir_proj, 'near')
+            for i in range(prev_mrap.shape[2])
+        ])
+    new_mrap = _composite_mrap(prev_for_composite, out_stack)
+
+    # Step 9: Write ENVI
+    date_str   = stem.split('_')[2][:8] if len(stem.split('_')) > 2 else stem
+    band_names = [
+        f'{date_str} {int(swir_res)}m: B12 2190nm MRAP',
+        f'{date_str} {int(swir_res)}m: B11 1610nm MRAP',
+        f'{date_str} {int(swir_res)}m: B9  945nm  MRAP',
+    ]
+    write_envi(out_mrap_bin, new_mrap, swir_geo, swir_proj, band_names)
+    print(f'  Written (MRAP) → {out_mrap_bin}')
+
+    # Step 10: PNG
+    if write_png:
+        def _to_20m(stack):
+            if stack is None: return None
+            if stack.shape[:2] == (H20, W20): return stack
+            return np.dstack([
+                _resample_to_target(
+                    stack[..., i], _make_mem_ds(stack[..., i], swir_geo, swir_proj),
+                    W20, H20, cld_geo, cld_proj, 'bilinear')
+                for i in range(stack.shape[2])
+            ])
+        _save_png_mrap(
+            out_png, res['cld_raw'], res['refined_cld'],
+            _to_20m(prev_mrap), _to_20m(new_mrap),
+            raw_cloud_pct=res['raw_cloud_pct'],
+            refined_cloud_pct=res['refined_cloud_pct'],
+        )
+
+    return True, new_mrap
+
+
 def process_scene_mrap(
     l2a_path: str,
     l1c_path: Optional[str],
@@ -1210,188 +1421,17 @@ def process_scene_mrap(
     prev_mrap: Optional[np.ndarray],      # MRAP composite from previous timestep
 ) -> Tuple[bool, Optional[np.ndarray]]:
     """
-    MRAP variant of process_scene.
-
-    Produces a *_MRAP.bin ENVI file (and optional 2×2 PNG) instead of the
-    normal per-scene output.  The cloud-masking pipeline is identical; only
-    the output step changes.
+    Thin serial wrapper: compute then composite+write in one call.
+    Used by the serial fallback path only; the parallel path calls
+    _mrap_compute and _mrap_composite_and_write separately.
 
     Returns (success, new_mrap_array).  new_mrap_array is None on failure.
     """
-    stem        = Path(l2a_path).stem
-    _stem_parts = stem.split('_')
-    _dt_prefix  = _stem_parts[2] if len(_stem_parts) > 2 else stem
-
-    out_mrap_bin = Path(l2a_path).parent / f'{stem}_MRAP.bin'
-    out_mrap_hdr = Path(l2a_path).parent / f'{stem}_MRAP.hdr'
-    out_png      = Path(l2a_path).parent / f'{_dt_prefix}_{stem}_MRAP.png'
-
-    print(f'\n{"="*60}')
-    print(f'  Scene (MRAP) : {stem}')
-
-    if out_mrap_bin.exists() and not overwrite:
-        print(f'  [SKIP] {out_mrap_bin.name} already exists.')
-        # Load existing MRAP to pass forward as seed for next timestep
-        existing = _load_envi_stack(str(out_mrap_bin))
-        return False, existing
-
-    source_label = 'L1C' if l1c_path else 'L2A'
-    print(f'  SWIR  : {source_label}')
-    print(f'  Cloud : L2A (ABCD-RF{"" if use_rf else " disabled"})')
-
-    # ------------------------------------------------------------------
-    # 1. Extract cloud masks (and L2A SWIR if no L1C supplied)
-    # ------------------------------------------------------------------
-    print('  Extracting L2A cloud masks ...')
-    l2a_data = extract_l2a_masks_and_swir(l2a_path, extract_swir=(l1c_path is None))
-    if l2a_data is None:
-        print(f'  [FAIL] Could not extract from {l2a_path}')
-        return False, prev_mrap
-
-    cld_raw  = l2a_data['cld']
-    scl_arr  = l2a_data['scl']
-    cld_geo  = l2a_data['cld_geo']
-    cld_proj = l2a_data['cld_proj']
-    H20, W20 = cld_raw.shape
-
-    # ------------------------------------------------------------------
-    # 2. Extract SWIR bands (L1C or L2A)
-    # ------------------------------------------------------------------
-    if l1c_path:
-        print(f'  Extracting L1C SWIR from {Path(l1c_path).name} ...')
-        swir_data = extract_l1c_swir(l1c_path)
-        if swir_data is None:
-            print('  [WARN] L1C SWIR extraction failed; falling back to L2A SWIR.')
-            l2a_swir = extract_l2a_masks_and_swir(l2a_path, extract_swir=True)
-            if l2a_swir is None:
-                print('  [FAIL] L2A SWIR fallback also failed.')
-                return False, prev_mrap
-            l2a_data.update(l2a_swir)
-    if not l1c_path or swir_data is None:
-        print('  Using L2A SWIR bands ...')
-        swir_data = {
-            'b12': l2a_data['b12'], 'b11': l2a_data['b11'], 'b9': l2a_data['b9'],
-            'swir_geo':   l2a_data['swir_geo'],  'swir_proj':  l2a_data['swir_proj'],
-            'swir_xsize': l2a_data['swir_xsize'], 'swir_ysize': l2a_data['swir_ysize'],
-            'swir_res':   l2a_data['swir_res'],
-        }
-
-    b12 = swir_data['b12']; b11 = swir_data['b11']; b9 = swir_data['b9']
-    swir_geo  = swir_data['swir_geo'];  swir_proj  = swir_data['swir_proj']
-    Hs, Ws    = swir_data['swir_ysize'], swir_data['swir_xsize']
-    swir_res  = swir_data['swir_res']
-
-    # ------------------------------------------------------------------
-    # 3. Build 20m SWIR stack for RF
-    # ------------------------------------------------------------------
-    swir_stack_20m = np.dstack([b12, b11, b9])
-    if abs(swir_res - 20.0) > 0.5 or swir_stack_20m.shape[:2] != (H20, W20):
-        swir_stack_20m = np.dstack([
-            _resample_to_target(b12, _make_mem_ds(b12, swir_geo, swir_proj),
-                                W20, H20, cld_geo, cld_proj, 'bilinear'),
-            _resample_to_target(b11, _make_mem_ds(b11, swir_geo, swir_proj),
-                                W20, H20, cld_geo, cld_proj, 'bilinear'),
-            _resample_to_target(b9,  _make_mem_ds(b9,  swir_geo, swir_proj),
-                                W20, H20, cld_geo, cld_proj, 'bilinear'),
-        ])
-
-    # ------------------------------------------------------------------
-    # 4. Cloud refinement
-    # ------------------------------------------------------------------
-    if use_rf:
-        print('  Running ABCD-RF cloud refinement ...')
-        pkl_path: Optional[str] = None
-        if save_model:
-            safe_stem = stem.replace(' ', '_')
-            pkl_path  = str(Path(model_dir) / f'{safe_stem}_{skip_f}_{offset}.pkl')
-        refined_cld = refine_cloud_mask(cld_raw, swir_stack_20m, skip_f, offset, pkl_path)
-    else:
-        refined_cld = cld_raw.astype(np.float32)
-        if refined_cld.max() > 1.0:
-            refined_cld /= 100.0
-
-    # ------------------------------------------------------------------
-    # 5. Final invalid-pixel mask
-    # ------------------------------------------------------------------
-    cloud_mask_20m, invalid_20m, raw_cloud_pct, refined_cloud_pct = (
-        _build_masks_from_cld_scl(cld_raw, scl_arr, cloud_threshold, refined_cld))
-
-    # ------------------------------------------------------------------
-    # 6. Upsample mask to native SWIR grid if needed
-    # ------------------------------------------------------------------
-    if invalid_20m.shape != (Hs, Ws):
-        invalid_float = invalid_20m.astype(np.float32)
-        invalid_swir_bool = _resample_to_target(
-            invalid_float, _make_mem_ds(invalid_float, cld_geo, cld_proj),
-            Ws, Hs, swir_geo, swir_proj, 'near') >= 0.5
-    else:
-        invalid_swir_bool = invalid_20m
-
-    # ------------------------------------------------------------------
-    # 7. Build masked current-timestep output
-    # ------------------------------------------------------------------
-    out_stack = np.dstack([b12, b11, b9]).astype(np.float32)
-    out_stack[invalid_swir_bool] = np.nan
-    out_stack[np.all(out_stack == 0.0, axis=-1)] = np.nan
-
-    # ------------------------------------------------------------------
-    # 8. MRAP compositing
-    # ------------------------------------------------------------------
-    # Resample prev_mrap to current SWIR grid if shapes differ
-    prev_for_composite = prev_mrap
-    if prev_mrap is not None and prev_mrap.shape[:2] != (Hs, Ws):
-        # Simple nearest-neighbour resize via GDAL
-        prev_for_composite = np.dstack([
-            _resample_to_target(
-                prev_mrap[..., i],
-                _make_mem_ds(prev_mrap[..., i], swir_geo, swir_proj),
-                Ws, Hs, swir_geo, swir_proj, 'near')
-            for i in range(prev_mrap.shape[2])
-        ])
-
-    new_mrap = _composite_mrap(prev_for_composite, out_stack)
-
-    # ------------------------------------------------------------------
-    # 9. Write MRAP ENVI output
-    # ------------------------------------------------------------------
-    date_str   = stem.split('_')[2][:8] if len(stem.split('_')) > 2 else stem
-    band_names = [
-        f'{date_str} {int(swir_res)}m: B12 2190nm MRAP',
-        f'{date_str} {int(swir_res)}m: B11 1610nm MRAP',
-        f'{date_str} {int(swir_res)}m: B9  945nm  MRAP',
-    ]
-    write_envi(str(out_mrap_bin), new_mrap, swir_geo, swir_proj, band_names)
-    print(f'  Written (MRAP) → {out_mrap_bin}')
-
-    # ------------------------------------------------------------------
-    # 10. Optional 2×2 MRAP PNG
-    # ------------------------------------------------------------------
-    if write_png:
-        # Bring prev/curr MRAP to 20m for display
-        def _to_20m(stack):
-            if stack is None:
-                return None
-            if stack.shape[:2] == (H20, W20):
-                return stack
-            return np.dstack([
-                _resample_to_target(
-                    stack[..., i],
-                    _make_mem_ds(stack[..., i], swir_geo, swir_proj),
-                    W20, H20, cld_geo, cld_proj, 'bilinear')
-                for i in range(stack.shape[2])
-            ])
-
-        _save_png_mrap(
-            str(out_png),
-            cld_raw,
-            refined_cld,
-            _to_20m(prev_mrap),
-            _to_20m(new_mrap),
-            raw_cloud_pct=raw_cloud_pct,
-            refined_cloud_pct=refined_cloud_pct,
-        )
-
-    return True, new_mrap
+    task = (l2a_path, l1c_path, skip_f, offset, cloud_threshold,
+             use_rf, save_model, model_dir, write_png, overwrite)
+    _pid, res = _mrap_compute(task)
+    sys.stdout.write(res['log'])
+    return _mrap_composite_and_write(res, prev_mrap)
 
 # ===========================================================================
 # Scene discovery
@@ -1960,20 +2000,73 @@ def main() -> None:
         tasks_mrap.sort(key=_dt_key)
         print(f'MRAP mode: {len(tasks_mrap)} timestep(s) (sorted by acquisition datetime)')
 
-        prev_mrap : Optional[np.ndarray] = None
-        n_ok  = 0
-        n_skip = 0
-        for task in tasks_mrap:
-            (l2a_p, l1c_p, skip_f_, offset_, ct, urf, sm, md, wpng, ow) = task
-            ok, prev_mrap = process_scene_mrap(
-                l2a_p, l1c_p, skip_f_, offset_, ct,
-                urf, sm, md, wpng, ow, prev_mrap)
-            if ok:
-                n_ok += 1
-            else:
-                n_skip += 1
+        # ---------------------------------------------------------------- #
+        # Pipelined MRAP execution:
+        #   - A ProcessPoolExecutor runs _mrap_compute on all timesteps
+        #     in parallel (I/O + RF refinement).
+        #   - The main thread consumes futures IN DATETIME ORDER, so the
+        #     compositing step always sees the correct prev_mrap.
+        #   - Workers for the compute phase use the same GPU-aware sizing
+        #     as normal mode.
+        # ---------------------------------------------------------------- #
+        from concurrent.futures import ProcessPoolExecutor
+
+        n_mrap = len(tasks_mrap)
+        # Worker count: same GPU-aware calculation as normal mode
+        try:
+            _ds_probe = gdal.Open(
+                f'/vsizip/{l2a_files[0]}' if l2a_files[0].endswith('.zip')
+                else l2a_files[0])
+            _px_est = (_ds_probe.RasterXSize * _ds_probe.RasterYSize
+                       if _ds_probe else 30_140_100)
+            _ds_probe = None
+        except Exception:
+            _px_est = 30_140_100
+        OBSERVED_PER_WORKER_MB = 768.0
+        per_worker_mb_est = args.per_worker_mb or OBSERVED_PER_WORKER_MB
+        gpu_result = _query_free_gpu_mb()
+        if gpu_result:
+            _free_mb, _total_mb, _used_mb = gpu_result
+            _usable_mb = _free_mb * (1.0 - args.gpu_headroom)
+            _n_compute = max(32, int(_usable_mb / per_worker_mb_est))
+            print(f'MRAP compute workers: {_n_compute} '
+                  f'({_free_mb:.0f} MiB free / {per_worker_mb_est:.0f} MiB each, min 32)')
+        else:
+            _n_compute = 32
+            print(f'MRAP compute workers: {_n_compute} (GPU info unavailable)')
+        _n_compute = min(_n_compute, n_mrap)
+
+        # Submit all compute tasks; store futures in datetime order
+        ordered_futures = []
+        with ProcessPoolExecutor(max_workers=_n_compute) as executor:
+            for task in tasks_mrap:
+                ordered_futures.append(executor.submit(_mrap_compute, task))
+
+            # Consume in strict datetime order — composite is serial
+            prev_mrap : Optional[np.ndarray] = None
+            n_ok  = 0
+            n_skip = 0
+            for future in ordered_futures:
+                try:
+                    _pid, res = future.result()
+                except Exception as exc:
+                    import traceback
+                    print(f'  [EXCEPTION in MRAP compute] {exc}')
+                    traceback.print_exc()
+                    n_skip += 1
+                    continue
+
+                sys.stdout.write(res['log'])
+                sys.stdout.flush()
+
+                ok, prev_mrap = _mrap_composite_and_write(res, prev_mrap)
+                if ok:
+                    n_ok += 1
+                else:
+                    n_skip += 1
+
         print(f'\n[DONE] {n_ok} MRAP timestep(s) written, {n_skip} skipped '
-              f'(total {len(tasks_mrap)}).')
+              f'(total {n_mrap}).')
         return
 
     # ------------------------------------------------------------------ #
@@ -2085,5 +2178,4 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
-
 
