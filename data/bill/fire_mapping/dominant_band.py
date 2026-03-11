@@ -5,7 +5,7 @@ Syntax:
   >> python3 dominant_band.py file.bin
 '''
 
-from raster import Raster
+from fire_mapping.raster import Raster
 
 import sys
 

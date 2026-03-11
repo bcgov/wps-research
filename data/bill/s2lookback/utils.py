@@ -4,7 +4,7 @@ Date ordering
 
 from datetime import datetime, timedelta
 
-from raster import Raster
+from fire_mapping.raster import Raster
 
 
 def extract_datetime(

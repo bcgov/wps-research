@@ -2,7 +2,7 @@
 Misc file to work with photos and videos
 '''
 
-from raster import Raster
+from fire_mapping.raster import Raster
 from .files import iter_files
 import numpy as np
 import matplotlib.pyplot as plt

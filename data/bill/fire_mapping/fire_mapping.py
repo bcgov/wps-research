@@ -33,7 +33,7 @@ Syntax
 
 ########### My LIBRARIES ##################
 
-from raster import Raster
+from fire_mapping.raster import Raster
 
 from misc import (
     writeENVI,
@@ -42,7 +42,7 @@ from misc import (
     draw_border
 )
 
-from sampling import regular_sampling
+from fire_mapping.sampling import regular_sampling
 
 ########### Built-in LIBRARIES ###########
 

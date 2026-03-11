@@ -12,7 +12,7 @@ import numpy as np
 
 import sys
 
-from raster import Raster
+from fire_mapping.raster import Raster
 
 
 def NBR(

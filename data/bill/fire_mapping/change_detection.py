@@ -7,7 +7,7 @@ import numpy as np
 
 import sys
 
-from raster import Raster
+from fire_mapping.raster import Raster
 
 from misc import htrim_3d
 
