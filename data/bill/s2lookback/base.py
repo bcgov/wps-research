@@ -5,7 +5,7 @@ Base class for Look Back methods.
 
 from dataclasses import dataclass, field
 
-from raster import Raster
+from fire_mapping.raster import Raster
 
 import numpy as np
 

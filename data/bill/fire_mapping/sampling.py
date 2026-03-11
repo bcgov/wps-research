@@ -134,7 +134,7 @@ def regular_sampling(
     -----
     NO RATIO of any kind is considered.
     '''
-    from raster import Raster
+    from fire_mapping.raster import Raster
 
     if raster_dat is None and raster_filename is None:
 

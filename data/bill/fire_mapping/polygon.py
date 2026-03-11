@@ -2,7 +2,7 @@
 This method is to work with fire perimeter or other type of polygon.
 '''
 
-from raster import Raster
+from fire_mapping.raster import Raster
 
 import numpy as np
 
