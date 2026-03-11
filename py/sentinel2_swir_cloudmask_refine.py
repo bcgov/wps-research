@@ -2,7 +2,7 @@
 """
 sentinel2_swir_cloudmask.py
 ===========================
-Extract cloud-masked SWIR (B12, B11, B9) from Sentinel-2 zip files. This should merge the functions in ../data/bill/production
+Extract cloud-masked SWIR (B12, B11, B9) from Sentinel-2 zip files.
 
 For each L2A zip file the script:
   1. Extracts CLD (cloud probability) and SCL (scene classification) to RAM.
@@ -108,27 +108,37 @@ def _open_zip_or_safe(path: str) -> Optional[gdal.Dataset]:
     gdal.PushErrorHandler(_suppress_gdal_warnings)
     if path.endswith('.zip'):
         vsi = f'/vsizip/{path}'
-        # Try opening directly; GDAL can sometimes open zipped SAFE/xml
-        ds = gdal.Open(vsi)
+        ds = None
+        # Try opening vsi path directly — may raise RuntimeError if not a
+        # self-describing dataset (most Sentinel-2 zips are not), so catch it.
+        try:
+            ds = gdal.Open(vsi)
+        except RuntimeError:
+            ds = None
         if ds is None:
-            # Find the MTD xml inside the zip
-            files = gdal.ReadDir(vsi)
-            if files:
-                for f in files:
-                    if f.endswith('.SAFE'):
-                        xml = f'{vsi}/{f}/MTD_MSIL2A.xml'
-                        ds = gdal.Open(xml)
-                        if ds is None:
-                            xml = f'{vsi}/{f}/MTD_MSIL1C.xml'
+            # Walk the zip contents and open the MTD XML inside the .SAFE folder
+            files = gdal.ReadDir(vsi) or []
+            for f in files:
+                if f.endswith('.SAFE'):
+                    for xml_name in ('MTD_MSIL2A.xml', 'MTD_MSIL1C.xml'):
+                        xml = f'{vsi}/{f}/{xml_name}'
+                        try:
                             ds = gdal.Open(xml)
+                        except RuntimeError:
+                            ds = None
                         if ds is not None:
                             break
+                if ds is not None:
+                    break
         gdal.PopErrorHandler()
         return ds
     elif path.endswith('.SAFE'):
-        level = 'L2A' if 'MSIL2A' in path else 'L1C'
+        level    = 'L2A' if 'MSIL2A' in path else 'L1C'
         xml_name = 'MTD_MSIL2A.xml' if level == 'L2A' else 'MTD_MSIL1C.xml'
-        ds = gdal.Open(os.path.join(path, xml_name))
+        try:
+            ds = gdal.Open(os.path.join(path, xml_name))
+        except RuntimeError:
+            ds = None
         gdal.PopErrorHandler()
         return ds
     gdal.PopErrorHandler()
@@ -331,18 +341,24 @@ def extract_l1c_swir(l1c_path: str) -> Optional[Dict]:
     Returns None on failure.
     """
     gdal.PushErrorHandler(_suppress_gdal_warnings)
+    ds = None
     if l1c_path.endswith('.zip'):
         vsi = f'/vsizip/{l1c_path}'
         files = gdal.ReadDir(vsi) or []
-        ds = None
         for f in files:
             if f.endswith('.SAFE'):
                 xml = f'{vsi}/{f}/MTD_MSIL1C.xml'
-                ds = gdal.Open(xml)
+                try:
+                    ds = gdal.Open(xml)
+                except RuntimeError:
+                    ds = None
                 if ds is not None:
                     break
     else:
-        ds = gdal.Open(os.path.join(l1c_path, 'MTD_MSIL1C.xml'))
+        try:
+            ds = gdal.Open(os.path.join(l1c_path, 'MTD_MSIL1C.xml'))
+        except RuntimeError:
+            ds = None
     gdal.PopErrorHandler()
 
     if ds is None:
@@ -579,6 +595,8 @@ def _save_png(
     refined_cld: np.ndarray,
     final_mask: np.ndarray,
     swir_rgb: np.ndarray,
+    raw_cloud_pct: float = 0.0,
+    refined_cloud_pct: float = 0.0,
 ) -> None:
     """Save a 4-panel diagnostic PNG."""
     try:
@@ -602,11 +620,11 @@ def _save_png(
 
     axes[1].imshow(raw_cld / (raw_cld.max() if raw_cld.max() > 0 else 1),
                    cmap='gray', vmin=0, vmax=1)
-    axes[1].set_title('CLD raw (Sen2Cor)')
+    axes[1].set_title(f'Sen2Cor CLD (raw) — {raw_cloud_pct:.1f}% cloud')
     axes[1].axis('off')
 
     axes[2].imshow(refined_cld, cmap='gray', vmin=0, vmax=1)
-    axes[2].set_title('CLD refined (ABCD-RF)')
+    axes[2].set_title(f'ABCD-RF (refined) — {refined_cloud_pct:.1f}% cloud')
     axes[2].axis('off')
 
     axes[3].imshow(final_mask, cmap='Reds', vmin=0, vmax=1)
@@ -786,9 +804,17 @@ def process_scene(
         scl_nodata_20m |= (scl_arr == cls)
     invalid_20m = cloud_mask_20m | scl_nodata_20m
 
-    print(f'  Cloud coverage  : {cloud_mask_20m.mean()*100:.1f}%')
-    print(f'  SCL nodata      : {scl_nodata_20m.mean()*100:.1f}%')
-    print(f'  Total invalid   : {invalid_20m.mean()*100:.1f}%')
+    # Compute raw Sen2Cor cloud % for comparison
+    cld_raw_norm = cld_raw.astype(np.float32)
+    if cld_raw_norm.max() > 1.0:
+        cld_raw_norm = cld_raw_norm / 100.0
+    raw_cloud_pct     = (cld_raw_norm >= cloud_threshold).mean() * 100
+    refined_cloud_pct = cloud_mask_20m.mean() * 100
+
+    print(f'  Cloud coverage (Sen2Cor raw)  : {raw_cloud_pct:.1f}%')
+    print(f'  Cloud coverage (ABCD refined) : {refined_cloud_pct:.1f}%')
+    print(f'  SCL nodata                    : {scl_nodata_20m.mean()*100:.1f}%')
+    print(f'  Total invalid                 : {invalid_20m.mean()*100:.1f}%')
 
     # ------------------------------------------------------------------ #
     # 5. Upsample the invalid mask to the native SWIR grid
@@ -832,6 +858,8 @@ def process_scene(
             refined_cld,
             invalid_20m.astype(np.float32),
             swir_stack_20m,
+            raw_cloud_pct=raw_cloud_pct,
+            refined_cloud_pct=refined_cloud_pct,
         )
 
     return True
