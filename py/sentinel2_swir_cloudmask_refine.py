@@ -1154,6 +1154,14 @@ def _save_png_mrap(
         [1,0] ABCD-RF refined CLD probability
         [1,1] RF MRAP — previous timestep  (threshold reported in title)
         [1,2] RF MRAP — current timestep   (threshold reported in title)
+
+    Stretch policy
+    --------------
+    Per-band lo/hi are derived once from curr_mrap_rf (2%–98% histogram
+    trim on valid, non-zero pixels).  Those same limits are then applied
+    identically to every raster image panel (prev_mrap_dep, curr_mrap_dep,
+    prev_mrap_rf, curr_mrap_rf).  Cloud/probability panels keep their own
+    fixed [0, 1] greyscale scale and are not affected.
     """
     try:
         import matplotlib
@@ -1164,42 +1172,59 @@ def _save_png_mrap(
         return
 
     # ------------------------------------------------------------------
-    # Determine a common display size for all image panels so that every
-    # cell contains the same number of pixels (use the CLD grid as ref).
+    # Reference grid: use CLD array dimensions so every panel has the
+    # same pixel count.  All raster stacks are resampled to this grid
+    # for display only (nearest-neighbour; no GDAL required).
     # ------------------------------------------------------------------
     ref_h, ref_w = raw_cld.shape[:2]
-    # Physical size of each panel in inches at the chosen DPI.
-    # We target ~800 px per panel at dpi=100 → 8 inches per panel.
-    panel_inches = 8.0
-    dpi = 100
+    panel_inches  = 8.0
+    dpi           = 100
 
-    fig, axes = plt.subplots(2, 3, figsize=(panel_inches * 3, panel_inches * 2))
+    n_bands = curr_mrap_rf.shape[2] if curr_mrap_rf.ndim == 3 else 1
 
-    def _stretch_rgb(stack: np.ndarray) -> np.ndarray:
-        """Per-band 1–99% stretch; NaN → 0.  Returns (H,W,3) float in [0,1]."""
-        out = np.zeros((*stack.shape[:2], min(3, stack.shape[2])), dtype=np.float32)
-        for b in range(out.shape[2]):
-            layer = stack[..., b].astype(np.float32)
-            valid = layer[np.isfinite(layer) & (layer != 0)]
-            if valid.size > 0:
-                lo = np.percentile(valid, 1)
-                hi = np.percentile(valid, 99)
-                scaled = (np.nan_to_num(layer, nan=0.0) - lo) / np.maximum(hi - lo, 1e-6)
-                out[..., b] = np.clip(scaled, 0, 1)
-        return out
+    # ------------------------------------------------------------------
+    # Derive shared per-band stretch from curr_mrap_rf (2%–98% trim).
+    # Fall back to [0, 1] for any band with no valid data.
+    # ------------------------------------------------------------------
+    lo = np.zeros(n_bands, dtype=np.float32)
+    hi = np.ones(n_bands,  dtype=np.float32)
+    for b in range(n_bands):
+        layer = (curr_mrap_rf[..., b] if curr_mrap_rf.ndim == 3
+                 else curr_mrap_rf).astype(np.float32)
+        valid = layer[np.isfinite(layer) & (layer != 0)]
+        if valid.size > 0:
+            lo[b] = np.percentile(valid, 2)
+            hi[b] = np.percentile(valid, 98)
 
-    def _resample_arr_to(arr2d: np.ndarray, tgt_h: int, tgt_w: int) -> np.ndarray:
-        """
-        Nearest-neighbour resample a 2-D array to (tgt_h, tgt_w) using
-        integer index mapping (no GDAL needed here — display only).
-        """
-        src_h, src_w = arr2d.shape[:2]
+    # ------------------------------------------------------------------
+    # Helper: nearest-neighbour display resample (pure numpy, display only)
+    # ------------------------------------------------------------------
+    def _resample_arr_to(arr: np.ndarray, tgt_h: int, tgt_w: int) -> np.ndarray:
+        src_h, src_w = arr.shape[:2]
         row_idx = (np.arange(tgt_h) * src_h / tgt_h).astype(int)
         col_idx = (np.arange(tgt_w) * src_w / tgt_w).astype(int)
-        return arr2d[np.ix_(row_idx, col_idx)]
+        if arr.ndim == 2:
+            return arr[np.ix_(row_idx, col_idx)]
+        return arr[np.ix_(row_idx, col_idx)]   # works for (H,W) and (H,W,K)
 
+    # ------------------------------------------------------------------
+    # Helper: apply shared stretch to a raster stack → (H,W,3) uint8-range
+    # NaN / masked pixels → 0 (black).
+    # ------------------------------------------------------------------
+    def _apply_stretch(stack: np.ndarray) -> np.ndarray:
+        nb  = stack.shape[2] if stack.ndim == 3 else 1
+        out = np.zeros((*stack.shape[:2], nb), dtype=np.float32)
+        for b in range(nb):
+            layer = (stack[..., b] if stack.ndim == 3 else stack).astype(np.float32)
+            scaled = (np.nan_to_num(layer, nan=0.0) - lo[b]) / np.maximum(hi[b] - lo[b], 1e-6)
+            out[..., b] = np.clip(scaled, 0.0, 1.0)
+        return out
+
+    # ------------------------------------------------------------------
+    # Panel renderers
+    # ------------------------------------------------------------------
     def _show_cld(ax, cld_arr, title):
-        """Greyscale cloud probability panel, resampled to ref grid."""
+        """Greyscale cloud / probability panel — fixed [0, 1] scale."""
         norm = cld_arr.astype(np.float32)
         if norm.max() > 1.0:
             norm = norm / 100.0
@@ -1211,7 +1236,7 @@ def _save_png_mrap(
         ax.axis('off')
 
     def _show_rgb(ax, stack, title):
-        """RGB MRAP panel; grey placeholder when stack is None."""
+        """Raster RGB panel using the shared stretch; grey box when None."""
         if stack is None:
             ax.set_facecolor('#404040')
             ax.text(0.5, 0.5, 'No previous MRAP',
@@ -1220,7 +1245,7 @@ def _save_png_mrap(
             ax.axis('off')
             ax.set_title(title, fontsize=12)
             return
-        rgb = _stretch_rgb(stack)
+        rgb = _apply_stretch(stack)           # (H, W, nb) in [0, 1]
         if rgb.shape[:2] != (ref_h, ref_w):
             rgb = np.dstack([_resample_arr_to(rgb[..., b], ref_h, ref_w)
                              for b in range(rgb.shape[2])])
@@ -1228,7 +1253,12 @@ def _save_png_mrap(
         ax.set_title(title, fontsize=12)
         ax.axis('off')
 
-    # --- Row 0: deprecated SCL-only product ---
+    # ------------------------------------------------------------------
+    # Draw figure
+    # ------------------------------------------------------------------
+    fig, axes = plt.subplots(2, 3, figsize=(panel_inches * 3, panel_inches * 2))
+
+    # Row 0 — deprecated SCL-only product
     _show_cld(axes[0, 0], raw_cld,
               f'Sen2Cor CLD  ({raw_cloud_pct:.1f}% cloud)')
     _show_rgb(axes[0, 1], prev_mrap_dep,
@@ -1236,7 +1266,7 @@ def _save_png_mrap(
     _show_rgb(axes[0, 2], curr_mrap_dep,
               'Deprecated MRAP — current timestep')
 
-    # --- Row 1: RF-refined product ---
+    # Row 1 — RF-refined product
     _show_cld(axes[1, 0], refined_cld,
               f'ABCD-RF refined  ({refined_cloud_pct:.1f}% cloud)')
     _show_rgb(axes[1, 1], prev_mrap_rf,
@@ -1887,3 +1917,4 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
+
