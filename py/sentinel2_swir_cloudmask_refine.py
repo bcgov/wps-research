@@ -1077,6 +1077,395 @@ def _make_mem_ds(arr: np.ndarray, geo: tuple, proj: str) -> gdal.Dataset:
     return ds
 
 
+
+# ===========================================================================
+# MRAP helpers
+# ===========================================================================
+
+def _load_envi_stack(bin_path: str) -> Optional[np.ndarray]:
+    """
+    Load an ENVI .bin stack → (H, W, K) float32, or None on failure.
+    """
+    try:
+        ds = gdal.Open(bin_path)
+        if ds is None:
+            return None
+        K = ds.RasterCount
+        H, W = ds.RasterYSize, ds.RasterXSize
+        out = np.empty((H, W, K), dtype=np.float32)
+        for i in range(K):
+            out[..., i] = ds.GetRasterBand(i + 1).ReadAsArray().astype(np.float32)
+        ds = None
+        return out
+    except Exception:
+        return None
+
+
+def _composite_mrap(
+    prev: Optional[np.ndarray],
+    current: np.ndarray,
+) -> np.ndarray:
+    """
+    MRAP compositing: start from prev (or a blank slate), then paint in
+    every pixel from current that is not NaN.
+
+    prev    : (H, W, K) float32 MRAP at previous timestep, or None
+    current : (H, W, K) float32 cloud-masked output for this timestep
+
+    Returns the new MRAP composite (H, W, K) float32.
+    """
+    if prev is None:
+        # First timestep — MRAP == current output
+        return current.copy()
+    composite = prev.copy()
+    valid = ~np.all(np.isnan(current), axis=-1)   # (H, W) True where current has data
+    composite[valid] = current[valid]
+    return composite
+
+
+def _save_png_mrap(
+    png_path: str,
+    raw_cld: np.ndarray,
+    refined_cld: np.ndarray,
+    prev_mrap: Optional[np.ndarray],
+    curr_mrap: np.ndarray,
+    raw_cloud_pct: float = 0.0,
+    refined_cloud_pct: float = 0.0,
+) -> None:
+    """
+    Save a 2×2 diagnostic PNG at 1600×1600 px for MRAP mode.
+
+    Layout:
+      [0,0] Sen2Cor CLD probability (raw)
+      [0,1] ABCD-RF refined CLD probability
+      [1,0] MRAP at previous timestep  (blank/grey if first timestep)
+      [1,1] MRAP at current timestep
+    """
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print('  [WARN] matplotlib not available — skipping PNG')
+        return
+
+    fig, axes = plt.subplots(2, 2, figsize=(16, 16))
+
+    def _stretch(arr: np.ndarray) -> np.ndarray:
+        """Percentile stretch (1–99%) on valid pixels; NaN → 0."""
+        a = arr.astype(np.float32)
+        valid = a[np.isfinite(a) & (a != 0)]
+        if valid.size == 0:
+            return np.zeros_like(a)
+        lo = np.percentile(valid, 1)
+        hi = np.percentile(valid, 99)
+        return np.clip((np.nan_to_num(a, nan=0.0) - lo) / np.maximum(hi - lo, 1e-6), 0, 1)
+
+    def _show_rgb(ax, stack, title):
+        if stack is None:
+            ax.set_facecolor('#404040')
+            ax.text(0.5, 0.5, 'No previous MRAP',
+                    ha='center', va='center', color='white',
+                    transform=ax.transAxes, fontsize=14)
+        else:
+            rgb = np.dstack([_stretch(stack[..., i]) for i in range(min(3, stack.shape[2]))])
+            ax.imshow(rgb)
+        ax.set_title(title, fontsize=13)
+        ax.axis('off')
+
+    cld_norm = raw_cld.astype(np.float32)
+    if cld_norm.max() > 1.0:
+        cld_norm = cld_norm / 100.0
+
+    ref_norm = refined_cld.astype(np.float32)
+
+    axes[0, 0].imshow(cld_norm, cmap='gray', vmin=0, vmax=1)
+    axes[0, 0].set_title(f'Sen2Cor CLD — {raw_cloud_pct:.1f}% cloud', fontsize=13)
+    axes[0, 0].axis('off')
+
+    axes[0, 1].imshow(ref_norm, cmap='gray', vmin=0, vmax=1)
+    axes[0, 1].set_title(f'ABCD-RF refined — {refined_cloud_pct:.1f}% cloud', fontsize=13)
+    axes[0, 1].axis('off')
+
+    _show_rgb(axes[1, 0], prev_mrap, 'MRAP — previous timestep')
+    _show_rgb(axes[1, 1], curr_mrap, 'MRAP — current timestep')
+
+    fig.tight_layout()
+    fig.savefig(png_path, dpi=100, bbox_inches='tight')
+    plt.close(fig)
+    print(f'  PNG → {png_path}')
+
+
+def _mrap_compute(task: tuple) -> Tuple[int, dict]:
+    """
+    Parallelisable part of MRAP processing (steps 1-7):
+    I/O, resampling, RF cloud refinement, mask building, masked SWIR stack.
+
+    Returns (os.getpid(), result_dict).
+    result_dict keys:
+      ok, log, stem, out_mrap_bin, out_png, write_png,
+      out_stack, cld_raw, refined_cld, raw_cloud_pct, refined_cloud_pct,
+      swir_geo, swir_proj, swir_res, Hs, Ws,
+      cld_geo, cld_proj, H20, W20
+    On failure: ok=False, all array keys absent.
+    """
+    import io, contextlib, os as _os
+    buf = io.StringIO()
+    pid = _os.getpid()
+    res: dict = {'ok': False, 'log': ''}
+
+    (l2a_path, l1c_path, skip_f, offset, cloud_threshold,
+     use_rf, save_model, model_dir, write_png, overwrite) = task
+
+    with contextlib.redirect_stdout(buf):
+        stem        = Path(l2a_path).stem
+        _stem_parts = stem.split('_')
+        _dt_prefix  = _stem_parts[2] if len(_stem_parts) > 2 else stem
+        out_mrap_bin = Path(l2a_path).parent / f'{stem}_MRAP.bin'
+        out_png      = Path(l2a_path).parent / f'{_dt_prefix}_{stem}_MRAP.png'
+
+        res.update(dict(stem=stem, out_mrap_bin=str(out_mrap_bin),
+                        out_png=str(out_png), write_png=write_png,
+                        l2a_path=l2a_path))
+
+        print(f'\n{"="*60}')
+        print(f'  Scene (MRAP compute) : {stem}')
+
+        if out_mrap_bin.exists() and not overwrite:
+            print(f'  [SKIP] {out_mrap_bin.name} already exists — will seed from it.')
+            res['skip'] = True
+            res['ok']   = True
+            res['log']  = buf.getvalue()
+            return pid, res
+
+        res['skip'] = False
+
+        # Step 1
+        print('  Extracting L2A cloud masks ...')
+        l2a_data = extract_l2a_masks_and_swir(l2a_path, extract_swir=(l1c_path is None))
+        if l2a_data is None:
+            print(f'  [FAIL] Could not extract from {l2a_path}')
+            res['log'] = buf.getvalue(); return pid, res
+
+        cld_raw  = l2a_data['cld']
+        scl_arr  = l2a_data['scl']
+        cld_geo  = l2a_data['cld_geo']
+        cld_proj = l2a_data['cld_proj']
+        H20, W20 = cld_raw.shape
+
+        # Step 2
+        if l1c_path:
+            print(f'  Extracting L1C SWIR from {Path(l1c_path).name} ...')
+            swir_data = extract_l1c_swir(l1c_path)
+            if swir_data is None:
+                print('  [WARN] L1C SWIR failed; falling back to L2A SWIR.')
+                l2a_swir = extract_l2a_masks_and_swir(l2a_path, extract_swir=True)
+                if l2a_swir is None:
+                    print('  [FAIL] L2A SWIR fallback also failed.')
+                    res['log'] = buf.getvalue(); return pid, res
+                l2a_data.update(l2a_swir)
+                swir_data = None
+        if not l1c_path or swir_data is None:
+            print('  Using L2A SWIR bands ...')
+            swir_data = {
+                'b12': l2a_data['b12'], 'b11': l2a_data['b11'], 'b9': l2a_data['b9'],
+                'swir_geo':   l2a_data['swir_geo'],  'swir_proj':  l2a_data['swir_proj'],
+                'swir_xsize': l2a_data['swir_xsize'], 'swir_ysize': l2a_data['swir_ysize'],
+                'swir_res':   l2a_data['swir_res'],
+            }
+
+        b12 = swir_data['b12']; b11 = swir_data['b11']; b9 = swir_data['b9']
+        swir_geo  = swir_data['swir_geo']; swir_proj = swir_data['swir_proj']
+        Hs, Ws    = swir_data['swir_ysize'], swir_data['swir_xsize']
+        swir_res  = swir_data['swir_res']
+
+        # Step 3: 20m SWIR stack
+        swir_stack_20m = np.dstack([b12, b11, b9])
+        if abs(swir_res - 20.0) > 0.5 or swir_stack_20m.shape[:2] != (H20, W20):
+            swir_stack_20m = np.dstack([
+                _resample_to_target(b12, _make_mem_ds(b12, swir_geo, swir_proj),
+                                    W20, H20, cld_geo, cld_proj, 'bilinear'),
+                _resample_to_target(b11, _make_mem_ds(b11, swir_geo, swir_proj),
+                                    W20, H20, cld_geo, cld_proj, 'bilinear'),
+                _resample_to_target(b9,  _make_mem_ds(b9,  swir_geo, swir_proj),
+                                    W20, H20, cld_geo, cld_proj, 'bilinear'),
+            ])
+
+        # Step 4: RF cloud refinement
+        if use_rf:
+            print('  Running ABCD-RF cloud refinement ...')
+            pkl_path: Optional[str] = None
+            if save_model:
+                safe_stem = stem.replace(' ', '_')
+                pkl_path  = str(Path(model_dir) / f'{safe_stem}_{skip_f}_{offset}.pkl')
+            refined_cld = refine_cloud_mask(cld_raw, swir_stack_20m, skip_f, offset, pkl_path)
+        else:
+            refined_cld = cld_raw.astype(np.float32)
+            if refined_cld.max() > 1.0:
+                refined_cld /= 100.0
+
+        # Step 5: Final mask
+        cloud_mask_20m, invalid_20m, raw_cloud_pct, refined_cloud_pct = (
+            _build_masks_from_cld_scl(cld_raw, scl_arr, cloud_threshold, refined_cld))
+
+        # Step 6: Upsample mask
+        if invalid_20m.shape != (Hs, Ws):
+            invalid_float = invalid_20m.astype(np.float32)
+            invalid_swir_bool = _resample_to_target(
+                invalid_float, _make_mem_ds(invalid_float, cld_geo, cld_proj),
+                Ws, Hs, swir_geo, swir_proj, 'near') >= 0.5
+        else:
+            invalid_swir_bool = invalid_20m
+
+        # Step 7: Apply mask
+        out_stack = np.dstack([b12, b11, b9]).astype(np.float32)
+        out_stack[invalid_swir_bool] = np.nan
+        out_stack[np.all(out_stack == 0.0, axis=-1)] = np.nan
+
+        res.update(dict(
+            ok=True, skip=False,
+            out_stack=out_stack,
+            cld_raw=cld_raw, refined_cld=refined_cld,
+            raw_cloud_pct=raw_cloud_pct, refined_cloud_pct=refined_cloud_pct,
+            swir_geo=swir_geo, swir_proj=swir_proj, swir_res=swir_res,
+            Hs=Hs, Ws=Ws, cld_geo=cld_geo, cld_proj=cld_proj, H20=H20, W20=W20,
+        ))
+
+    res['log'] = buf.getvalue()
+    return pid, res
+
+
+def _mrap_composite_and_write(
+    res: dict,
+    prev_mrap: Optional[np.ndarray],
+    write_threads: list,
+) -> Tuple[bool, Optional[np.ndarray]]:
+    """
+    Serial part of MRAP processing:
+
+    Step 8  (blocking, in main thread): composite prev_mrap + out_stack
+             into new_mrap.  This is the only step that must complete
+             before the next timestep can start.
+
+    Step 9  (background thread): write new_mrap to *_MRAP.bin.
+    Step 10 (background thread): render and write the 2x2 PNG.
+
+    Both write threads are appended to write_threads so the caller can
+    join them after the loop.  The arrays they reference stay alive
+    because the thread closures hold references; GC will not collect them.
+
+    Returns (success, new_mrap).
+    """
+    import threading
+
+    if not res['ok']:
+        return False, prev_mrap
+
+    if res.get('skip'):
+        existing = _load_envi_stack(res['out_mrap_bin'])
+        return False, existing
+
+    out_stack    = res['out_stack']
+    swir_geo     = res['swir_geo'];  swir_proj = res['swir_proj'];  swir_res = res['swir_res']
+    Hs, Ws       = res['Hs'], res['Ws']
+    cld_geo      = res['cld_geo'];   cld_proj  = res['cld_proj']
+    H20, W20     = res['H20'], res['W20']
+    stem         = res['stem']
+    out_mrap_bin = res['out_mrap_bin']
+    out_png      = res['out_png']
+    write_png    = res['write_png']
+
+    # Step 8 (blocking): composite
+    prev_for_composite = prev_mrap
+    if prev_mrap is not None and prev_mrap.shape[:2] != (Hs, Ws):
+        prev_for_composite = np.dstack([
+            _resample_to_target(
+                prev_mrap[..., i],
+                _make_mem_ds(prev_mrap[..., i], swir_geo, swir_proj),
+                Ws, Hs, swir_geo, swir_proj, 'near')
+            for i in range(prev_mrap.shape[2])
+        ])
+    new_mrap = _composite_mrap(prev_for_composite, out_stack)
+
+    # Step 9 (background thread): write ENVI .bin
+    date_str   = stem.split('_')[2][:8] if len(stem.split('_')) > 2 else stem
+    band_names = [
+        f'{date_str} {int(swir_res)}m: B12 2190nm MRAP',
+        f'{date_str} {int(swir_res)}m: B11 1610nm MRAP',
+        f'{date_str} {int(swir_res)}m: B9  945nm  MRAP',
+    ]
+
+    def _write_bin(_arr, _path, _geo, _proj, _names):
+        write_envi(_path, _arr, _geo, _proj, _names)
+        print(f'  Written (MRAP) → {_path}')
+
+    t_bin = threading.Thread(
+        target=_write_bin,
+        args=(new_mrap, out_mrap_bin, swir_geo, swir_proj, band_names),
+        daemon=True,
+    )
+    t_bin.start()
+    write_threads.append(t_bin)
+
+    # Step 10 (background thread): PNG
+    if write_png:
+        def _write_png_thread(_prev, _curr):
+            def _to_20m(stack):
+                if stack is None: return None
+                if stack.shape[:2] == (H20, W20): return stack
+                return np.dstack([
+                    _resample_to_target(
+                        stack[..., i], _make_mem_ds(stack[..., i], swir_geo, swir_proj),
+                        W20, H20, cld_geo, cld_proj, 'bilinear')
+                    for i in range(stack.shape[2])
+                ])
+            _save_png_mrap(
+                out_png, res['cld_raw'], res['refined_cld'],
+                _to_20m(_prev), _to_20m(_curr),
+                raw_cloud_pct=res['raw_cloud_pct'],
+                refined_cloud_pct=res['refined_cloud_pct'],
+            )
+
+        t_png = threading.Thread(
+            target=_write_png_thread,
+            args=(prev_mrap, new_mrap),
+            daemon=True,
+        )
+        t_png.start()
+        write_threads.append(t_png)
+
+    return True, new_mrap
+
+
+def process_scene_mrap(
+    l2a_path: str,
+    l1c_path: Optional[str],
+    skip_f: int,
+    offset: int,
+    cloud_threshold: float,
+    use_rf: bool,
+    save_model: bool,
+    model_dir: str,
+    write_png: bool,
+    overwrite: bool,
+    prev_mrap: Optional[np.ndarray],      # MRAP composite from previous timestep
+) -> Tuple[bool, Optional[np.ndarray]]:
+    """
+    Thin serial wrapper: compute then composite+write in one call.
+    Used by the serial fallback path only; the parallel path calls
+    _mrap_compute and _mrap_composite_and_write separately.
+
+    Returns (success, new_mrap_array).  new_mrap_array is None on failure.
+    """
+    task = (l2a_path, l1c_path, skip_f, offset, cloud_threshold,
+             use_rf, save_model, model_dir, write_png, overwrite)
+    _pid, res = _mrap_compute(task)
+    sys.stdout.write(res['log'])
+    _wt: list = []
+    result = _mrap_composite_and_write(res, prev_mrap, _wt)
+    for t in _wt: t.join()   # serial wrapper: wait for all writes
+    return result
+
 # ===========================================================================
 # Scene discovery
 # ===========================================================================
@@ -1305,6 +1694,7 @@ def _gpu_monitor_thread(
     stop_event:        'threading.Event',
     max_concurrency:   int,
     print_lock:        'threading.Lock',
+    crashed_flag:      'list',          # [bool] — set True when any worker crashes
 ):
     """
     Background thread that periodically:
@@ -1312,6 +1702,7 @@ def _gpu_monitor_thread(
       2. Computes the observed average memory per worker.
       3. If average is < 70% of estimate AND total GPU free > 1.5× estimate,
          increments concurrency_limit by 1 (up to max_concurrency).
+         Does NOT scale up if a crash has been recorded.
       4. Logs any changes under print_lock.
     """
     import threading, time
@@ -1351,7 +1742,8 @@ def _gpu_monitor_thread(
 
         if (avg_mb < per_worker_mb_est * 0.70
                 and free_mb > headroom_needed
-                and current_limit < max_concurrency):
+                and current_limit < max_concurrency
+                and not crashed_flag[0]):
             with limit_lock:
                 if concurrency_limit[0] < max_concurrency:
                     concurrency_limit[0] += 1
@@ -1415,6 +1807,7 @@ def _run_adaptive_parallel(
     concurrency_limit = [initial_workers]   # mutable box
     limit_lock        = threading.Lock()
     stop_monitor      = threading.Event()
+    crashed_flag      = [False]             # set True on first crash; freezes scaling
 
     # Map from future → task so we can resubmit on failure
     futures: Dict = {}
@@ -1426,7 +1819,7 @@ def _run_adaptive_parallel(
             target=_gpu_monitor_thread,
             args=(active_pids, pid_lock, concurrency_limit, limit_lock,
                   per_worker_mb_est, probe_interval, stop_monitor,
-                  max_workers, print_lock),
+                  max_workers, print_lock, crashed_flag),
             daemon=True,
         )
         monitor.start()
@@ -1479,6 +1872,7 @@ def _run_adaptive_parallel(
                 if ok:
                     n_ok += 1
                 elif crashed:
+                    crashed_flag[0] = True   # freeze monitor scaling
                     retry_list.append(task)
                 else:
                     n_skip += 1
@@ -1551,6 +1945,12 @@ def main() -> None:
         '--overwrite', action='store_true',
         help='Re-process scenes whose output .bin already exists.')
     parser.add_argument(
+        '--mrap', action='store_true',
+        help='Write MRAP (most-recent-available-pixel) composites instead of '
+             'per-scene outputs. Tasks are sorted by datetime stamp (field 2 '
+             'of filename) and run serially so each step can seed the next. '
+             'Output files are named *_MRAP.bin + *_MRAP.hdr.')
+    parser.add_argument(
         '--N_workers', type=int, default=None,
         help='Number of parallel worker processes. '
              'Default: auto-calculated from available GPU memory. '
@@ -1611,6 +2011,107 @@ def main() -> None:
         ))
 
     n_total = len(tasks)
+
+    # ------------------------------------------------------------------ #
+    # MRAP mode: sort tasks by acquisition datetime, run serially
+    # ------------------------------------------------------------------ #
+    if args.mrap:
+        def _dt_key(task):
+            parts = Path(task[0]).stem.split('_')
+            return parts[2] if len(parts) > 2 else ''
+
+        # Deduplicate by datetime (keep latest processing timestamp, field 6)
+        by_dt: Dict[str, tuple] = {}
+        for task in tasks:
+            parts = Path(task[0]).stem.split('_')
+            dt    = parts[2] if len(parts) > 2 else ''
+            proc  = parts[6] if len(parts) > 6 else ''
+            if dt not in by_dt or proc > by_dt[dt][1]:
+                by_dt[dt] = (task, proc)
+        tasks_mrap = [v[0] for v in sorted(by_dt.values(), key=lambda x: x[1])]
+        # Sort by datetime stamp
+        tasks_mrap.sort(key=_dt_key)
+        print(f'MRAP mode: {len(tasks_mrap)} timestep(s) (sorted by acquisition datetime)')
+
+        # ---------------------------------------------------------------- #
+        # Pipelined MRAP execution:
+        #   - A ProcessPoolExecutor runs _mrap_compute on all timesteps
+        #     in parallel (I/O + RF refinement).
+        #   - The main thread consumes futures IN DATETIME ORDER, so the
+        #     compositing step always sees the correct prev_mrap.
+        #   - Workers for the compute phase use the same GPU-aware sizing
+        #     as normal mode.
+        # ---------------------------------------------------------------- #
+        from concurrent.futures import ProcessPoolExecutor
+
+        n_mrap = len(tasks_mrap)
+        # Worker count: same GPU-aware calculation as normal mode
+        try:
+            _ds_probe = gdal.Open(
+                f'/vsizip/{l2a_files[0]}' if l2a_files[0].endswith('.zip')
+                else l2a_files[0])
+            _px_est = (_ds_probe.RasterXSize * _ds_probe.RasterYSize
+                       if _ds_probe else 30_140_100)
+            _ds_probe = None
+        except Exception:
+            _px_est = 30_140_100
+        OBSERVED_PER_WORKER_MB = 768.0
+        per_worker_mb_est = args.per_worker_mb or OBSERVED_PER_WORKER_MB
+        gpu_result = _query_free_gpu_mb()
+        if gpu_result:
+            _free_mb, _total_mb, _used_mb = gpu_result
+            _usable_mb = _free_mb * (1.0 - args.gpu_headroom)
+            _n_compute = max(32, int(_usable_mb / per_worker_mb_est))
+            print(f'MRAP compute workers: {_n_compute} '
+                  f'({_free_mb:.0f} MiB free / {per_worker_mb_est:.0f} MiB each, min 32)')
+        else:
+            _n_compute = 32
+            print(f'MRAP compute workers: {_n_compute} (GPU info unavailable)')
+        _n_compute = min(_n_compute, n_mrap)
+
+        # Submit all compute tasks; store futures in datetime order
+        ordered_futures = []
+        with ProcessPoolExecutor(max_workers=_n_compute) as executor:
+            for task in tasks_mrap:
+                ordered_futures.append(executor.submit(_mrap_compute, task))
+
+            # Consume in strict datetime order — composite (step 8) is
+            # serial; bin + PNG writes run in background threads.
+            prev_mrap  : Optional[np.ndarray] = None
+            write_threads: list = []   # all background write threads
+            n_ok  = 0
+            n_skip = 0
+            for future in ordered_futures:
+                try:
+                    _pid, res = future.result()
+                except Exception as exc:
+                    import traceback
+                    print(f'  [EXCEPTION in MRAP compute] {exc}')
+                    traceback.print_exc()
+                    n_skip += 1
+                    continue
+
+                sys.stdout.write(res['log'])
+                sys.stdout.flush()
+
+                ok, prev_mrap = _mrap_composite_and_write(
+                    res, prev_mrap, write_threads)
+                if ok:
+                    n_ok += 1
+                else:
+                    n_skip += 1
+
+        # All compositing done; wait for any background bin/PNG writes
+        # still in flight before exiting.
+        pending = [t for t in write_threads if t.is_alive()]
+        if pending:
+            print(f'  Waiting for {len(pending)} background write(s) to finish ...')
+            for t in pending:
+                t.join()
+
+        print(f'\n[DONE] {n_ok} MRAP timestep(s) written, {n_skip} skipped '
+              f'(total {n_mrap}).')
+        return
 
     # ------------------------------------------------------------------ #
     # Resolve initial worker count and per-worker memory estimate
@@ -1721,4 +2222,5 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
+
 
