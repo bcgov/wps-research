@@ -1553,37 +1553,6 @@ def _mrap_composite_and_write(
     return True, new_mrap_rf, new_mrap_dep
 
 
-def process_scene_mrap(
-    l2a_path: str,
-    l1c_path: Optional[str],
-    skip_f: int,
-    offset: int,
-    cloud_threshold: float,
-    use_rf: bool,
-    save_model: bool,
-    model_dir: str,
-    write_png: bool,
-    overwrite: bool,
-    prev_mrap_rf: Optional[np.ndarray],
-    prev_mrap_dep: Optional[np.ndarray],
-    write_dep: bool,
-) -> Tuple[bool, Optional[np.ndarray], Optional[np.ndarray]]:
-    """
-    Thin serial wrapper: compute then composite+write in one call.
-    Used by the serial fallback path only; the parallel path calls
-    _mrap_compute and _mrap_composite_and_write separately.
-
-    Returns (success, new_mrap_rf, new_mrap_dep).
-    """
-    task = (l2a_path, l1c_path, skip_f, offset, cloud_threshold,
-             use_rf, save_model, model_dir, write_png, overwrite, write_dep)
-    _pid, res = _mrap_compute(task)
-    sys.stdout.write(res['log'])
-    _wt: list = []
-    result = _mrap_composite_and_write(res, prev_mrap_rf, prev_mrap_dep, _wt, cloud_threshold)
-    for t in _wt: t.join()
-    return result
-
 # ===========================================================================
 # Scene discovery
 # ===========================================================================
@@ -1917,4 +1886,3 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
-
