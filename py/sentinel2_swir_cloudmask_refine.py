@@ -61,13 +61,13 @@ Flags
 --l1_dir          DIR   Directory containing L1C zip/SAFE files  [optional]
 --skip_f          INT   RF training pixel stride                  [default: 5000]
 --offset          INT   RF training pixel offset                  [default: 0]
---cloud_threshold FLOAT Probability threshold for cloud masking   [default: 0.5]
+--cloud_threshold FLOAT Probability threshold for cloud masking   [default: 0.0001]
 --save_model            Save trained RF model (.pkl) per scene
 --model_dir       DIR   Directory for saved models                [default: ./models]
 --no_rf                 Skip RF refinement; use raw CLD directly
 --png                   Write diagnostic PNG alongside each output
 --overwrite             Re-process scenes whose output .bin already exists
---workers         INT   Number of parallel worker processes       [default: 1]
+--N_workers       INT   Number of parallel worker processes       [default: 32]
 """
 
 from __future__ import annotations
@@ -93,6 +93,10 @@ gdal.UseExceptions()
 # SCL classes treated as nodata / always-masked
 # ---------------------------------------------------------------------------
 SCL_NODATA_CLASSES = {0, 1, 2, 3}   # NO_DATA, SATURATED, DARK_AREA, CLOUD_SHADOW
+
+# SCL cloud classes used by the deprecated (SCL-only) masking product.
+# These are combined with SCL_NODATA_CLASSES; no RF-refined probability is used.
+SCL_CLOUD_CLASSES  = {8, 9, 10}    # CLOUD_MEDIUM_PROB, CLOUD_HIGH_PROB, THIN_CIRRUS
 
 
 # ===========================================================================
@@ -1127,19 +1131,29 @@ def _save_png_mrap(
     png_path: str,
     raw_cld: np.ndarray,
     refined_cld: np.ndarray,
-    prev_mrap: Optional[np.ndarray],
-    curr_mrap: np.ndarray,
+    # Deprecated (SCL-only) MRAP composites — for comparison row only
+    prev_mrap_dep: Optional[np.ndarray],
+    curr_mrap_dep: np.ndarray,
+    # RF-refined MRAP composites — written to file and shown in row 1
+    prev_mrap_rf: Optional[np.ndarray],
+    curr_mrap_rf: np.ndarray,
     raw_cloud_pct: float = 0.0,
     refined_cloud_pct: float = 0.0,
+    cloud_threshold: float = 0.0001,
 ) -> None:
     """
-    Save a 2×2 diagnostic PNG at 1600×1600 px for MRAP mode.
+    Save a 2×3 diagnostic PNG for MRAP mode.
 
-    Layout:
-      [0,0] Sen2Cor CLD probability (raw)
-      [0,1] ABCD-RF refined CLD probability
-      [1,0] MRAP at previous timestep  (blank/grey if first timestep)
-      [1,1] MRAP at current timestep
+    Layout (each cell shows the same number of image pixels):
+      Row 0 — Deprecated SCL-only product (for comparison):
+        [0,0] Sen2Cor CLD probability (raw %)
+        [0,1] Deprecated MRAP — previous timestep
+        [0,2] Deprecated MRAP — current timestep
+
+      Row 1 — RF-refined product (written to file):
+        [1,0] ABCD-RF refined CLD probability
+        [1,1] RF MRAP — previous timestep  (threshold reported in title)
+        [1,2] RF MRAP — current timestep   (threshold reported in title)
     """
     try:
         import matplotlib
@@ -1149,49 +1163,89 @@ def _save_png_mrap(
         print('  [WARN] matplotlib not available — skipping PNG')
         return
 
-    fig, axes = plt.subplots(2, 2, figsize=(16, 16))
+    # ------------------------------------------------------------------
+    # Determine a common display size for all image panels so that every
+    # cell contains the same number of pixels (use the CLD grid as ref).
+    # ------------------------------------------------------------------
+    ref_h, ref_w = raw_cld.shape[:2]
+    # Physical size of each panel in inches at the chosen DPI.
+    # We target ~800 px per panel at dpi=100 → 8 inches per panel.
+    panel_inches = 8.0
+    dpi = 100
 
-    def _stretch(arr: np.ndarray) -> np.ndarray:
-        """Percentile stretch (1–99%) on valid pixels; NaN → 0."""
-        a = arr.astype(np.float32)
-        valid = a[np.isfinite(a) & (a != 0)]
-        if valid.size == 0:
-            return np.zeros_like(a)
-        lo = np.percentile(valid, 1)
-        hi = np.percentile(valid, 99)
-        return np.clip((np.nan_to_num(a, nan=0.0) - lo) / np.maximum(hi - lo, 1e-6), 0, 1)
+    fig, axes = plt.subplots(2, 3, figsize=(panel_inches * 3, panel_inches * 2))
+
+    def _stretch_rgb(stack: np.ndarray) -> np.ndarray:
+        """Per-band 1–99% stretch; NaN → 0.  Returns (H,W,3) float in [0,1]."""
+        out = np.zeros((*stack.shape[:2], min(3, stack.shape[2])), dtype=np.float32)
+        for b in range(out.shape[2]):
+            layer = stack[..., b].astype(np.float32)
+            valid = layer[np.isfinite(layer) & (layer != 0)]
+            if valid.size > 0:
+                lo = np.percentile(valid, 1)
+                hi = np.percentile(valid, 99)
+                scaled = (np.nan_to_num(layer, nan=0.0) - lo) / np.maximum(hi - lo, 1e-6)
+                out[..., b] = np.clip(scaled, 0, 1)
+        return out
+
+    def _resample_arr_to(arr2d: np.ndarray, tgt_h: int, tgt_w: int) -> np.ndarray:
+        """
+        Nearest-neighbour resample a 2-D array to (tgt_h, tgt_w) using
+        integer index mapping (no GDAL needed here — display only).
+        """
+        src_h, src_w = arr2d.shape[:2]
+        row_idx = (np.arange(tgt_h) * src_h / tgt_h).astype(int)
+        col_idx = (np.arange(tgt_w) * src_w / tgt_w).astype(int)
+        return arr2d[np.ix_(row_idx, col_idx)]
+
+    def _show_cld(ax, cld_arr, title):
+        """Greyscale cloud probability panel, resampled to ref grid."""
+        norm = cld_arr.astype(np.float32)
+        if norm.max() > 1.0:
+            norm = norm / 100.0
+        if norm.shape[:2] != (ref_h, ref_w):
+            norm = _resample_arr_to(norm, ref_h, ref_w)
+        ax.imshow(norm, cmap='gray', vmin=0, vmax=1,
+                  aspect='auto', interpolation='nearest')
+        ax.set_title(title, fontsize=12)
+        ax.axis('off')
 
     def _show_rgb(ax, stack, title):
+        """RGB MRAP panel; grey placeholder when stack is None."""
         if stack is None:
             ax.set_facecolor('#404040')
             ax.text(0.5, 0.5, 'No previous MRAP',
                     ha='center', va='center', color='white',
-                    transform=ax.transAxes, fontsize=14)
-        else:
-            rgb = np.dstack([_stretch(stack[..., i]) for i in range(min(3, stack.shape[2]))])
-            ax.imshow(rgb)
-        ax.set_title(title, fontsize=13)
+                    transform=ax.transAxes, fontsize=12)
+            ax.axis('off')
+            ax.set_title(title, fontsize=12)
+            return
+        rgb = _stretch_rgb(stack)
+        if rgb.shape[:2] != (ref_h, ref_w):
+            rgb = np.dstack([_resample_arr_to(rgb[..., b], ref_h, ref_w)
+                             for b in range(rgb.shape[2])])
+        ax.imshow(rgb, aspect='auto', interpolation='nearest')
+        ax.set_title(title, fontsize=12)
         ax.axis('off')
 
-    cld_norm = raw_cld.astype(np.float32)
-    if cld_norm.max() > 1.0:
-        cld_norm = cld_norm / 100.0
+    # --- Row 0: deprecated SCL-only product ---
+    _show_cld(axes[0, 0], raw_cld,
+              f'Sen2Cor CLD  ({raw_cloud_pct:.1f}% cloud)')
+    _show_rgb(axes[0, 1], prev_mrap_dep,
+              'Deprecated MRAP — previous timestep')
+    _show_rgb(axes[0, 2], curr_mrap_dep,
+              'Deprecated MRAP — current timestep')
 
-    ref_norm = refined_cld.astype(np.float32)
-
-    axes[0, 0].imshow(cld_norm, cmap='gray', vmin=0, vmax=1)
-    axes[0, 0].set_title(f'Sen2Cor CLD — {raw_cloud_pct:.1f}% cloud', fontsize=13)
-    axes[0, 0].axis('off')
-
-    axes[0, 1].imshow(ref_norm, cmap='gray', vmin=0, vmax=1)
-    axes[0, 1].set_title(f'ABCD-RF refined — {refined_cloud_pct:.1f}% cloud', fontsize=13)
-    axes[0, 1].axis('off')
-
-    _show_rgb(axes[1, 0], prev_mrap, 'MRAP — previous timestep')
-    _show_rgb(axes[1, 1], curr_mrap, 'MRAP — current timestep')
+    # --- Row 1: RF-refined product ---
+    _show_cld(axes[1, 0], refined_cld,
+              f'ABCD-RF refined  ({refined_cloud_pct:.1f}% cloud)')
+    _show_rgb(axes[1, 1], prev_mrap_rf,
+              f'RF MRAP — previous timestep\n(threshold={cloud_threshold:.4g})')
+    _show_rgb(axes[1, 2], curr_mrap_rf,
+              f'RF MRAP — current timestep\n(threshold={cloud_threshold:.4g})')
 
     fig.tight_layout()
-    fig.savefig(png_path, dpi=100, bbox_inches='tight')
+    fig.savefig(png_path, dpi=dpi, bbox_inches='tight')
     plt.close(fig)
     print(f'  PNG → {png_path}')
 
@@ -1203,8 +1257,9 @@ def _mrap_compute(task: tuple) -> Tuple[int, dict]:
 
     Returns (os.getpid(), result_dict).
     result_dict keys:
-      ok, log, stem, out_mrap_bin, out_png, write_png,
-      out_stack, cld_raw, refined_cld, raw_cloud_pct, refined_cloud_pct,
+      ok, log, stem, out_mrap_bin, out_png, write_png, write_dep,
+      out_stack, dep_stack (or None when write_dep=False),
+      cld_raw, refined_cld, raw_cloud_pct, refined_cloud_pct,
       swir_geo, swir_proj, swir_res, Hs, Ws,
       cld_geo, cld_proj, H20, W20
     On failure: ok=False, all array keys absent.
@@ -1215,7 +1270,7 @@ def _mrap_compute(task: tuple) -> Tuple[int, dict]:
     res: dict = {'ok': False, 'log': ''}
 
     (l2a_path, l1c_path, skip_f, offset, cloud_threshold,
-     use_rf, save_model, model_dir, write_png, overwrite) = task
+     use_rf, save_model, model_dir, write_png, overwrite, write_dep) = task
 
     with contextlib.redirect_stdout(buf):
         stem        = Path(l2a_path).stem
@@ -1226,7 +1281,7 @@ def _mrap_compute(task: tuple) -> Tuple[int, dict]:
 
         res.update(dict(stem=stem, out_mrap_bin=str(out_mrap_bin),
                         out_png=str(out_png), write_png=write_png,
-                        l2a_path=l2a_path))
+                        write_dep=write_dep, l2a_path=l2a_path))
 
         print(f'\n{"="*60}')
         print(f'  Scene (MRAP compute) : {stem}')
@@ -1317,14 +1372,34 @@ def _mrap_compute(task: tuple) -> Tuple[int, dict]:
         else:
             invalid_swir_bool = invalid_20m
 
-        # Step 7: Apply mask
+        # Step 7: Apply mask (RF-refined product)
         out_stack = np.dstack([b12, b11, b9]).astype(np.float32)
         out_stack[invalid_swir_bool] = np.nan
         out_stack[np.all(out_stack == 0.0, axis=-1)] = np.nan
 
+        # Step 7b: Deprecated SCL-only stack (only built when --mrap --png).
+        # Masks the same SCL_NODATA_CLASSES plus SCL classes 8/9/10 (cloud),
+        # but does NOT use the RF-refined probability at all.
+        dep_stack: Optional[np.ndarray] = None
+        if write_dep:
+            dep_invalid_20m = np.zeros((H20, W20), dtype=bool)
+            for _cls in SCL_NODATA_CLASSES | SCL_CLOUD_CLASSES:
+                dep_invalid_20m |= (scl_arr == _cls)
+            if dep_invalid_20m.shape != (Hs, Ws):
+                dep_inv_float = dep_invalid_20m.astype(np.float32)
+                dep_invalid_swir = _resample_to_target(
+                    dep_inv_float, _make_mem_ds(dep_inv_float, cld_geo, cld_proj),
+                    Ws, Hs, swir_geo, swir_proj, 'near') >= 0.5
+            else:
+                dep_invalid_swir = dep_invalid_20m
+            dep_stack = np.dstack([b12, b11, b9]).astype(np.float32)
+            dep_stack[dep_invalid_swir] = np.nan
+            dep_stack[np.all(dep_stack == 0.0, axis=-1)] = np.nan
+
         res.update(dict(
             ok=True, skip=False,
             out_stack=out_stack,
+            dep_stack=dep_stack,
             cld_raw=cld_raw, refined_cld=refined_cld,
             raw_cloud_pct=raw_cloud_pct, refined_cloud_pct=refined_cloud_pct,
             swir_geo=swir_geo, swir_proj=swir_proj, swir_res=swir_res,
@@ -1337,35 +1412,37 @@ def _mrap_compute(task: tuple) -> Tuple[int, dict]:
 
 def _mrap_composite_and_write(
     res: dict,
-    prev_mrap: Optional[np.ndarray],
+    prev_mrap_rf: Optional[np.ndarray],
+    prev_mrap_dep: Optional[np.ndarray],
     write_threads: list,
-) -> Tuple[bool, Optional[np.ndarray]]:
+    cloud_threshold: float,
+) -> Tuple[bool, Optional[np.ndarray], Optional[np.ndarray]]:
     """
-    Serial part of MRAP processing:
+    Serial part of MRAP processing.
 
-    Step 8  (blocking, in main thread): composite prev_mrap + out_stack
-             into new_mrap.  This is the only step that must complete
-             before the next timestep can start.
+    Step 8  (blocking): composite prev_mrap_rf + out_stack → new_mrap_rf.
+             If write_dep, also composite prev_mrap_dep + dep_stack → new_mrap_dep.
+             These must complete before the next timestep can start.
 
-    Step 9  (background thread): write new_mrap to *_MRAP.bin.
-    Step 10 (background thread): render and write the 2x2 PNG.
+    Step 9  (background thread): write new_mrap_rf to *_MRAP.bin.
+    Step 10 (background thread): render and write the 2×3 PNG (if write_png).
 
-    Both write threads are appended to write_threads so the caller can
-    join them after the loop.  The arrays they reference stay alive
-    because the thread closures hold references; GC will not collect them.
+    dep_mrap is never written to disk — it is PNG-only.
 
-    Returns (success, new_mrap).
+    Returns (success, new_mrap_rf, new_mrap_dep).
     """
     import threading
 
     if not res['ok']:
-        return False, prev_mrap
+        return False, prev_mrap_rf, prev_mrap_dep
 
     if res.get('skip'):
         existing = _load_envi_stack(res['out_mrap_bin'])
-        return False, existing
+        return False, existing, prev_mrap_dep
 
     out_stack    = res['out_stack']
+    dep_stack    = res.get('dep_stack')          # None unless write_dep=True
+    write_dep    = res.get('write_dep', False)
     swir_geo     = res['swir_geo'];  swir_proj = res['swir_proj'];  swir_res = res['swir_res']
     Hs, Ws       = res['Hs'], res['Ws']
     cld_geo      = res['cld_geo'];   cld_proj  = res['cld_proj']
@@ -1375,19 +1452,25 @@ def _mrap_composite_and_write(
     out_png      = res['out_png']
     write_png    = res['write_png']
 
-    # Step 8 (blocking): composite
-    prev_for_composite = prev_mrap
-    if prev_mrap is not None and prev_mrap.shape[:2] != (Hs, Ws):
-        prev_for_composite = np.dstack([
+    # --- Step 8 (blocking): composite RF product ---
+    def _resample_prev(stack):
+        if stack is None:
+            return None
+        if stack.shape[:2] == (Hs, Ws):
+            return stack
+        return np.dstack([
             _resample_to_target(
-                prev_mrap[..., i],
-                _make_mem_ds(prev_mrap[..., i], swir_geo, swir_proj),
+                stack[..., i],
+                _make_mem_ds(stack[..., i], swir_geo, swir_proj),
                 Ws, Hs, swir_geo, swir_proj, 'near')
-            for i in range(prev_mrap.shape[2])
+            for i in range(stack.shape[2])
         ])
-    new_mrap = _composite_mrap(prev_for_composite, out_stack)
 
-    # Step 9 (background thread): write ENVI .bin
+    new_mrap_rf  = _composite_mrap(_resample_prev(prev_mrap_rf),  out_stack)
+    new_mrap_dep = (_composite_mrap(_resample_prev(prev_mrap_dep), dep_stack)
+                    if write_dep and dep_stack is not None else prev_mrap_dep)
+
+    # --- Step 9 (background thread): write ENVI .bin for RF product ---
     date_str   = stem.split('_')[2][:8] if len(stem.split('_')) > 2 else stem
     band_names = [
         f'{date_str} {int(swir_res)}m: B12 2190nm MRAP',
@@ -1401,15 +1484,15 @@ def _mrap_composite_and_write(
 
     t_bin = threading.Thread(
         target=_write_bin,
-        args=(new_mrap, out_mrap_bin, swir_geo, swir_proj, band_names),
+        args=(new_mrap_rf, out_mrap_bin, swir_geo, swir_proj, band_names),
         daemon=True,
     )
     t_bin.start()
     write_threads.append(t_bin)
 
-    # Step 10 (background thread): PNG
+    # --- Step 10 (background thread): PNG ---
     if write_png:
-        def _write_png_thread(_prev, _curr):
+        def _write_png_thread(_prev_rf, _curr_rf, _prev_dep, _curr_dep):
             def _to_20m(stack):
                 if stack is None: return None
                 if stack.shape[:2] == (H20, W20): return stack
@@ -1420,21 +1503,24 @@ def _mrap_composite_and_write(
                     for i in range(stack.shape[2])
                 ])
             _save_png_mrap(
-                out_png, res['cld_raw'], res['refined_cld'],
-                _to_20m(_prev), _to_20m(_curr),
+                out_png,
+                res['cld_raw'], res['refined_cld'],
+                _to_20m(_prev_dep), _to_20m(_curr_dep),
+                _to_20m(_prev_rf),  _to_20m(_curr_rf),
                 raw_cloud_pct=res['raw_cloud_pct'],
                 refined_cloud_pct=res['refined_cloud_pct'],
+                cloud_threshold=cloud_threshold,
             )
 
         t_png = threading.Thread(
             target=_write_png_thread,
-            args=(prev_mrap, new_mrap),
+            args=(prev_mrap_rf, new_mrap_rf, prev_mrap_dep, new_mrap_dep),
             daemon=True,
         )
         t_png.start()
         write_threads.append(t_png)
 
-    return True, new_mrap
+    return True, new_mrap_rf, new_mrap_dep
 
 
 def process_scene_mrap(
@@ -1448,22 +1534,24 @@ def process_scene_mrap(
     model_dir: str,
     write_png: bool,
     overwrite: bool,
-    prev_mrap: Optional[np.ndarray],      # MRAP composite from previous timestep
-) -> Tuple[bool, Optional[np.ndarray]]:
+    prev_mrap_rf: Optional[np.ndarray],
+    prev_mrap_dep: Optional[np.ndarray],
+    write_dep: bool,
+) -> Tuple[bool, Optional[np.ndarray], Optional[np.ndarray]]:
     """
     Thin serial wrapper: compute then composite+write in one call.
     Used by the serial fallback path only; the parallel path calls
     _mrap_compute and _mrap_composite_and_write separately.
 
-    Returns (success, new_mrap_array).  new_mrap_array is None on failure.
+    Returns (success, new_mrap_rf, new_mrap_dep).
     """
     task = (l2a_path, l1c_path, skip_f, offset, cloud_threshold,
-             use_rf, save_model, model_dir, write_png, overwrite)
+             use_rf, save_model, model_dir, write_png, overwrite, write_dep)
     _pid, res = _mrap_compute(task)
     sys.stdout.write(res['log'])
     _wt: list = []
-    result = _mrap_composite_and_write(res, prev_mrap, _wt)
-    for t in _wt: t.join()   # serial wrapper: wait for all writes
+    result = _mrap_composite_and_write(res, prev_mrap_rf, prev_mrap_dep, _wt, cloud_threshold)
+    for t in _wt: t.join()
     return result
 
 # ===========================================================================
@@ -1482,163 +1570,58 @@ def find_l2a_files(l2a_dir: str) -> list[str]:
 
 
 # ===========================================================================
-# GPU memory → worker count calculation
+# Simple parallel dispatcher — fixed worker count, serial retry on failure
 # ===========================================================================
 
-def _query_free_gpu_mb() -> Optional[float]:
+def _run_parallel(
+    tasks: list,
+    n_workers: int,
+) -> Tuple[int, int, list]:
     """
-    Return free GPU memory in MiB for GPU 0, or None if unavailable.
-    Tries pynvml first (cleanest), falls back to parsing nvidia-smi output.
+    Submit tasks to a ProcessPoolExecutor with a fixed concurrency limit.
+
+    Failed tasks (exception raised or '[EXCEPTION' in log) are collected
+    and returned as retry_list for a subsequent serial retry pass.
+
+    Returns (n_ok, n_skipped, retry_list).
     """
-    # --- pynvml ---
-    try:
-        import pynvml
-        pynvml.nvmlInit()
-        handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-        info   = pynvml.nvmlDeviceGetMemoryInfo(handle)
-        free_mb = info.free / (1024 ** 2)
-        total_mb = info.total / (1024 ** 2)
-        used_mb  = info.used  / (1024 ** 2)
-        pynvml.nvmlShutdown()
-        return free_mb, total_mb, used_mb
-    except Exception:
-        pass
+    from concurrent.futures import ProcessPoolExecutor, as_completed
 
-    # --- nvidia-smi fallback ---
-    try:
-        import subprocess
-        out = subprocess.check_output(
-            ['nvidia-smi',
-             '--query-gpu=memory.free,memory.total,memory.used',
-             '--format=csv,noheader,nounits'],
-            timeout=10
-        ).decode().strip().splitlines()[0]
-        free_mb, total_mb, used_mb = [float(x.strip()) for x in out.split(',')]
-        return free_mb, total_mb, used_mb
-    except Exception:
-        pass
+    n_ok       = 0
+    n_skip     = 0
+    retry_list = []
 
-    return None
+    with ProcessPoolExecutor(max_workers=n_workers) as executor:
+        future_to_task = {executor.submit(_worker, t): t for t in tasks}
+        for f in as_completed(future_to_task):
+            task = future_to_task[f]
+            try:
+                pid, ok, log = f.result()
+            except Exception as exc:
+                ok  = False
+                log = f'  [EXCEPTION in future] {exc}\n'
 
+            sys.stdout.write(log)
+            sys.stdout.flush()
 
-def _estimate_per_worker_gpu_mb(
-    n_pixels_estimate: int,
-    n_bands: int = 3,
-    n_trees: int = 100,
-    max_depth: int = 20,
-) -> float:
-    """
-    Estimate GPU memory (MiB) consumed by one cuML RF worker for a scene.
+            if ok:
+                n_ok += 1
+            elif '[EXCEPTION' in log:
+                retry_list.append(task)
+            else:
+                n_skip += 1
 
-    Accounts for:
-      - Input feature array A  (n_bands × n_pixels × float32)
-      - Cloud prob target B    (1 × n_pixels × float32)
-      - Prediction output D    (1 × n_pixels × float32)
-      - cuML RF model          (empirical: ~4 bytes × n_leaves × n_trees,
-                                 where n_leaves ≈ 2^min(max_depth,18))
-      - cuML working buffers   (1.5× model size, conservative)
-
-    Returns MiB as a float.
-    """
-    bytes_per_float = 4
-
-    # Raw data arrays
-    data_bytes = (n_bands + 1 + 1) * n_pixels_estimate * bytes_per_float
-
-    # cuML RF model: each tree has at most 2^max_depth leaves; each node
-    # stores ~8 floats of metadata.  Cap depth at 18 to avoid explosion.
-    effective_depth = min(max_depth, 18)
-    nodes_per_tree  = 2 ** (effective_depth + 1)           # full binary tree
-    model_bytes     = n_trees * nodes_per_tree * 8 * bytes_per_float
-
-    # Working buffers during fit/predict (cuML allocates temporaries)
-    buffer_bytes = model_bytes * 1.5
-
-    total_bytes = data_bytes + model_bytes + buffer_bytes
-    return total_bytes / (1024 ** 2)
-
-
-def calculate_n_workers(
-    n_pixels_estimate: int = 30_140_100,   # typical S2 20m scene
-    n_bands: int = 3,
-    n_trees: int = 100,
-    max_depth: int = 20,
-    headroom_fraction: float = 0.15,       # keep 15% free as safety margin
-    min_workers: int = 1,
-    max_workers_cap: int = 32,
-    use_rf: bool = True,
-) -> Tuple[int, str]:
-    """
-    Query available GPU memory and compute how many parallel workers can
-    safely run simultaneously.
-
-    If cuML (GPU RF) is not in use, or GPU info is unavailable, falls back
-    to a CPU-core-based heuristic.
-
-    Returns (n_workers, explanation_string).
-    """
-    import multiprocessing as _mp
-
-    if not use_rf:
-        # No GPU involvement — use half the CPU cores
-        n_cpu = _mp.cpu_count()
-        n     = max(min_workers, n_cpu // 2)
-        return min(n, max_workers_cap), (
-            f'RF disabled — using {n} workers '
-            f'(half of {n_cpu} CPU cores)')
-
-    # Check whether cuML is actually available
-    try:
-        import cuml  # noqa: F401
-        cuml_available = True
-    except ImportError:
-        cuml_available = False
-
-    if not cuml_available:
-        n_cpu = _mp.cpu_count()
-        n     = max(min_workers, n_cpu // 2)
-        return min(n, max_workers_cap), (
-            f'cuML not available (sklearn fallback) — using {n} workers '
-            f'(half of {n_cpu} CPU cores)')
-
-    result = _query_free_gpu_mb()
-    if result is None:
-        n = 4   # conservative default when GPU info unavailable
-        return min(n, max_workers_cap), (
-            f'GPU info unavailable — defaulting to {n} workers')
-
-    free_mb, total_mb, used_mb = result
-
-    per_worker_mb = _estimate_per_worker_gpu_mb(
-        n_pixels_estimate, n_bands, n_trees, max_depth)
-
-    # Usable memory after reserving headroom
-    usable_mb = free_mb * (1.0 - headroom_fraction)
-    n = max(min_workers, int(usable_mb / per_worker_mb))
-    n = min(n, max_workers_cap)
-
-    explanation = (
-        f'GPU memory: {total_mb:.0f} MiB total, '
-        f'{used_mb:.0f} MiB used, '
-        f'{free_mb:.0f} MiB free '
-        f'({headroom_fraction*100:.0f}% headroom reserved → '
-        f'{usable_mb:.0f} MiB usable) | '
-        f'estimated {per_worker_mb:.0f} MiB/worker → '
-        f'{n} worker(s)'
-    )
-    return n, explanation
+    return n_ok, n_skip, retry_list
 
 
 # ===========================================================================
-# Worker wrapper — captures stdout + own PID, returns (pid, bool, log_str)
+# Worker wrapper — captures stdout, returns (pid, bool, log_str)
 # ===========================================================================
 
 def _worker(task: tuple) -> Tuple[int, bool, str]:
     """
     Top-level picklable worker.  Captures all stdout and returns
-    (os.getpid(), success, log) so the dispatcher can:
-      - track which PID is handling which task (for GPU memory accounting)
-      - print the log under a lock after the task completes
+    (os.getpid(), success, log_str).
     """
     import io, contextlib, os as _os
     buf    = io.StringIO()
@@ -1655,256 +1638,13 @@ def _worker(task: tuple) -> Tuple[int, bool, str]:
 
 
 # ===========================================================================
-# GPU monitor — queries per-PID VRAM via nvidia-smi, runs in a thread
-# ===========================================================================
-
-def _query_per_pid_gpu_mb() -> Dict[int, float]:
-    """
-    Return {pid: used_gpu_mb} for all processes currently using the GPU,
-    via nvidia-smi --query-compute-apps.  Returns {} on any failure.
-    """
-    try:
-        import subprocess
-        out = subprocess.check_output(
-            ['nvidia-smi',
-             '--query-compute-apps=pid,used_gpu_memory',
-             '--format=csv,noheader,nounits'],
-            timeout=10
-        ).decode().strip()
-        result = {}
-        for line in out.splitlines():
-            parts = line.strip().split(',')
-            if len(parts) == 2:
-                try:
-                    result[int(parts[0].strip())] = float(parts[1].strip())
-                except ValueError:
-                    pass
-        return result
-    except Exception:
-        return {}
-
-
-def _gpu_monitor_thread(
-    active_pids:       'set',           # set of currently running worker PIDs (shared, guarded by lock)
-    pid_lock:          'threading.Lock',
-    concurrency_limit: 'list',          # [int] — mutable box so thread can increment it
-    limit_lock:        'threading.Lock',
-    per_worker_mb_est: float,
-    probe_interval:    float,
-    stop_event:        'threading.Event',
-    max_concurrency:   int,
-    print_lock:        'threading.Lock',
-    crashed_flag:      'list',          # [bool] — set True when any worker crashes
-):
-    """
-    Background thread that periodically:
-      1. Queries actual per-PID GPU memory for all active workers.
-      2. Computes the observed average memory per worker.
-      3. If average is < 70% of estimate AND total GPU free > 1.5× estimate,
-         increments concurrency_limit by 1 (up to max_concurrency).
-         Does NOT scale up if a crash has been recorded.
-      4. Logs any changes under print_lock.
-    """
-    import threading, time
-    while not stop_event.wait(timeout=probe_interval):
-        # Snapshot active PIDs
-        with pid_lock:
-            pids = set(active_pids)
-        if not pids:
-            continue
-
-        per_pid = _query_per_pid_gpu_mb()
-        worker_usage = [per_pid[p] for p in pids if p in per_pid]
-
-        gpu_info = _query_free_gpu_mb()
-        if gpu_info is None:
-            continue
-        free_mb, total_mb, used_mb = gpu_info
-
-        if not worker_usage:
-            continue
-
-        avg_mb = sum(worker_usage) / len(worker_usage)
-        n_active = len(worker_usage)
-
-        with limit_lock:
-            current_limit = concurrency_limit[0]
-
-        # Only consider increasing if we have a meaningful sample
-        # (at least half the current limit is active and measured)
-        if n_active < max(1, current_limit // 2):
-            continue
-
-        # Safety check: enough free memory for one more worker?
-        # Use observed average rather than estimate when we have real data.
-        effective_per_worker = avg_mb if avg_mb > 0 else per_worker_mb_est
-        headroom_needed = effective_per_worker * 1.5   # buffer for spikes
-
-        if (avg_mb < per_worker_mb_est * 0.70
-                and free_mb > headroom_needed
-                and current_limit < max_concurrency
-                and not crashed_flag[0]):
-            with limit_lock:
-                if concurrency_limit[0] < max_concurrency:
-                    concurrency_limit[0] += 1
-                    new_limit = concurrency_limit[0]
-            with print_lock:
-                print(
-                    f'[MONITOR] Observed {avg_mb:.0f} MiB/worker avg '
-                    f'(estimate was {per_worker_mb_est:.0f} MiB), '
-                    f'{free_mb:.0f} MiB free — increasing concurrency to {new_limit}',
-                    flush=True)
-        else:
-            # Just log current state periodically
-            with print_lock:
-                print(
-                    f'[MONITOR] {n_active} workers | '
-                    f'avg {avg_mb:.0f} MiB/worker | '
-                    f'{free_mb:.0f} MiB GPU free | '
-                    f'concurrency limit: {current_limit}',
-                    flush=True)
-
-
-# ===========================================================================
-# Adaptive parallel dispatcher
-# ===========================================================================
-
-def _run_adaptive_parallel(
-    tasks:             list,
-    initial_workers:   int,
-    max_workers:       int,
-    per_worker_mb_est: float,
-    probe_interval:    float = 6.0,
-    print_lock:        Optional['threading.Lock'] = None,
-) -> Tuple[int, int, list]:
-    """
-    Submit tasks to a ProcessPoolExecutor with an adaptive concurrency limit.
-
-    - Starts with `initial_workers` concurrent tasks.
-    - A GPU monitor thread watches actual per-PID VRAM and increments the
-      concurrency limit (up to `max_workers`) when there is headroom.
-    - Failed tasks (exception or [EXCEPTION] in log) are collected and
-      returned as `retry_list` for a subsequent serial retry pass.
-
-    Returns (n_ok, n_skipped, retry_list).
-    """
-    import threading
-    from concurrent.futures import ProcessPoolExecutor, as_completed
-    from collections import deque
-
-    if print_lock is None:
-        import threading as _th
-        print_lock = _th.Lock()
-
-    pending    = deque(tasks)
-    n_ok       = 0
-    n_skip     = 0
-    retry_list = []
-
-    # Shared mutable state for the monitor thread
-    active_pids       = set()
-    pid_lock          = threading.Lock()
-    concurrency_limit = [initial_workers]   # mutable box
-    limit_lock        = threading.Lock()
-    stop_monitor      = threading.Event()
-    crashed_flag      = [False]             # set True on first crash; freezes scaling
-
-    # Map from future → task so we can resubmit on failure
-    futures: Dict = {}
-
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
-
-        # Start GPU monitor thread
-        monitor = threading.Thread(
-            target=_gpu_monitor_thread,
-            args=(active_pids, pid_lock, concurrency_limit, limit_lock,
-                  per_worker_mb_est, probe_interval, stop_monitor,
-                  max_workers, print_lock, crashed_flag),
-            daemon=True,
-        )
-        monitor.start()
-
-        def _submit_up_to_limit():
-            """Submit new tasks while running < concurrency_limit."""
-            with limit_lock:
-                limit = concurrency_limit[0]
-            while pending and len(futures) < limit:
-                task = pending.popleft()
-                f = executor.submit(_worker, task)
-                futures[f] = task
-
-        # Initial fill
-        _submit_up_to_limit()
-
-        while futures:
-            # Wait for the next future to complete
-            done_futures = set()
-            for f in list(futures):
-                if f.done():
-                    done_futures.add(f)
-            if not done_futures:
-                # Brief sleep to avoid busy-wait; then re-check limit
-                # in case monitor raised it since last iteration.
-                import time
-                time.sleep(0.5)
-                _submit_up_to_limit()
-                continue
-
-            for f in done_futures:
-                task = futures.pop(f)
-                try:
-                    pid, ok, log = f.result()
-                except Exception as exc:
-                    ok  = False
-                    log = f'  [EXCEPTION in future] {exc}\n'
-                    pid = -1
-
-                # Remove PID from active set
-                with pid_lock:
-                    active_pids.discard(pid)
-
-                # Print log under lock
-                with print_lock:
-                    sys.stdout.write(log)
-                    sys.stdout.flush()
-
-                crashed = (not ok) and ('[EXCEPTION' in log)
-                if ok:
-                    n_ok += 1
-                elif crashed:
-                    crashed_flag[0] = True   # freeze monitor scaling
-                    retry_list.append(task)
-                else:
-                    n_skip += 1
-
-                # Register PID of any newly submitted tasks
-                _submit_up_to_limit()
-                # (New futures don't have PIDs yet — they'll appear in
-                #  per_pid query once the process starts.)
-
-            # After processing done futures, register PIDs for running ones.
-            # We do this by sampling the GPU query and cross-referencing with
-            # known worker process IDs from the executor's process pool.
-            try:
-                pool_pids = {p.pid for p in executor._processes.values()
-                             if p is not None and p.pid is not None}
-                with pid_lock:
-                    active_pids.clear()
-                    active_pids.update(pool_pids)
-            except Exception:
-                pass
-
-        stop_monitor.set()
-        monitor.join(timeout=5)
-
-    return n_ok, n_skip, retry_list
-
-
-# ===========================================================================
 # Main
 # ===========================================================================
 
 def main() -> None:
+    import time as _time
+    _t_main_start = _time.monotonic()
+
     parser = argparse.ArgumentParser(
         description='Extract cloud-masked SWIR (B12, B11, B9) from Sentinel-2 zips.',
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1925,8 +1665,8 @@ def main() -> None:
         '--offset', type=int, default=0,
         help='RF training pixel offset (default: 0).')
     parser.add_argument(
-        '--cloud_threshold', type=float, default=0.5,
-        help='Probability threshold for cloud masking (default: 0.5).')
+        '--cloud_threshold', type=float, default=0.0001,
+        help='Probability threshold for cloud masking (default: 0.0001).')
     parser.add_argument(
         '--no_rf', action='store_true',
         help='Skip RF refinement and use raw CLD probability directly.')
@@ -1951,21 +1691,9 @@ def main() -> None:
              'of filename) and run serially so each step can seed the next. '
              'Output files are named *_MRAP.bin + *_MRAP.hdr.')
     parser.add_argument(
-        '--N_workers', type=int, default=None,
-        help='Number of parallel worker processes. '
-             'Default: auto-calculated from available GPU memory. '
+        '--N_workers', type=int, default=32,
+        help='Number of parallel worker processes (default: 32). '
              'Set to 1 to run serially.')
-    parser.add_argument(
-        '--gpu_headroom', type=float, default=0.15,
-        help='Fraction of free GPU memory to keep as safety headroom '
-             'when auto-calculating workers (default: 0.15 = 15%%).')
-    parser.add_argument(
-        '--per_worker_mb', type=float, default=None,
-        help='Override the per-worker GPU memory estimate (MiB). '
-             'If not set, it is calculated from scene size and RF parameters.')
-    parser.add_argument(
-        '--probe_interval', type=float, default=6.0,
-        help='Seconds between GPU memory probe/scaling checks (default: 30).')
 
     args = parser.parse_args()
 
@@ -1992,6 +1720,9 @@ def main() -> None:
     if args.save_model:
         os.makedirs(args.model_dir, exist_ok=True)
 
+    # write_dep: deprecated SCL-only stack needed only when --mrap --png
+    write_dep = args.mrap and args.png
+
     # Build per-scene task list
     tasks = []
     for l2a_path in l2a_files:
@@ -2007,7 +1738,7 @@ def main() -> None:
             l2a_path, l1c_path,
             args.skip_f, args.offset, args.cloud_threshold,
             use_rf, args.save_model, args.model_dir,
-            args.png, args.overwrite,
+            args.png, args.overwrite, write_dep,
         ))
 
     n_total = len(tasks)
@@ -2044,43 +1775,24 @@ def main() -> None:
         # ---------------------------------------------------------------- #
         from concurrent.futures import ProcessPoolExecutor
 
-        n_mrap = len(tasks_mrap)
-        # Worker count: same GPU-aware calculation as normal mode
-        try:
-            _ds_probe = gdal.Open(
-                f'/vsizip/{l2a_files[0]}' if l2a_files[0].endswith('.zip')
-                else l2a_files[0])
-            _px_est = (_ds_probe.RasterXSize * _ds_probe.RasterYSize
-                       if _ds_probe else 30_140_100)
-            _ds_probe = None
-        except Exception:
-            _px_est = 30_140_100
-        OBSERVED_PER_WORKER_MB = 768.0
-        per_worker_mb_est = args.per_worker_mb or OBSERVED_PER_WORKER_MB
-        gpu_result = _query_free_gpu_mb()
-        if gpu_result:
-            _free_mb, _total_mb, _used_mb = gpu_result
-            _usable_mb = _free_mb * (1.0 - args.gpu_headroom)
-            _n_compute = max(32, int(_usable_mb / per_worker_mb_est))
-            print(f'MRAP compute workers: {_n_compute} '
-                  f'({_free_mb:.0f} MiB free / {per_worker_mb_est:.0f} MiB each, min 32)')
-        else:
-            _n_compute = 32
-            print(f'MRAP compute workers: {_n_compute} (GPU info unavailable)')
-        _n_compute = min(_n_compute, n_mrap)
+        n_mrap     = len(tasks_mrap)
+        n_workers  = min(args.N_workers, n_mrap)
+        print(f'MRAP compute workers: {n_workers}')
 
         # Submit all compute tasks; store futures in datetime order
         ordered_futures = []
-        with ProcessPoolExecutor(max_workers=_n_compute) as executor:
+        with ProcessPoolExecutor(max_workers=n_workers) as executor:
             for task in tasks_mrap:
                 ordered_futures.append(executor.submit(_mrap_compute, task))
 
             # Consume in strict datetime order — composite (step 8) is
             # serial; bin + PNG writes run in background threads.
-            prev_mrap  : Optional[np.ndarray] = None
-            write_threads: list = []   # all background write threads
+            prev_mrap_rf:  Optional[np.ndarray] = None
+            prev_mrap_dep: Optional[np.ndarray] = None
+            write_threads: list = []
             n_ok  = 0
             n_skip = 0
+            _t_mrap_loop_start = _time.monotonic()
             for future in ordered_futures:
                 try:
                     _pid, res = future.result()
@@ -2094,12 +1806,26 @@ def main() -> None:
                 sys.stdout.write(res['log'])
                 sys.stdout.flush()
 
-                ok, prev_mrap = _mrap_composite_and_write(
-                    res, prev_mrap, write_threads)
+                ok, prev_mrap_rf, prev_mrap_dep = _mrap_composite_and_write(
+                    res, prev_mrap_rf, prev_mrap_dep, write_threads,
+                    args.cloud_threshold)
                 if ok:
                     n_ok += 1
                 else:
                     n_skip += 1
+
+                # ETA
+                _done     = n_ok + n_skip
+                _remain   = n_mrap - _done
+                _elapsed  = _time.monotonic() - _t_mrap_loop_start
+                _avg_iter = _elapsed / _done
+                _eta_s    = _avg_iter * _remain
+                print(
+                    f'  [PROGRESS] {_done}/{n_mrap} steps done | '
+                    f'{_remain} remaining | '
+                    f'avg {_avg_iter:.1f}s/step | '
+                    f'ETA {_eta_s:.1f}s',
+                    flush=True)
 
         # All compositing done; wait for any background bin/PNG writes
         # still in flight before exiting.
@@ -2109,70 +1835,21 @@ def main() -> None:
             for t in pending:
                 t.join()
 
+        _total_s = _time.monotonic() - _t_main_start
         print(f'\n[DONE] {n_ok} MRAP timestep(s) written, {n_skip} skipped '
-              f'(total {n_mrap}).')
+              f'(total {n_mrap}) | wall time {_total_s:.1f}s')
         return
 
     # ------------------------------------------------------------------ #
-    # Resolve initial worker count and per-worker memory estimate
+    # Normal mode: fixed worker count, serial retry on crash
     # ------------------------------------------------------------------ #
-    try:
-        _ds_probe = gdal.Open(
-            f'/vsizip/{l2a_files[0]}' if l2a_files[0].endswith('.zip')
-            else l2a_files[0])
-        _px_est = (_ds_probe.RasterXSize * _ds_probe.RasterYSize
-                   if _ds_probe else 30_140_100)
-        _ds_probe = None
-    except Exception:
-        _px_est = 30_140_100
-
-    # Per-worker GPU cost: use 500 MiB as the empirically observed maximum
-    # (workers do not exceed ~500 MiB in practice per nvidia-smi).
-    # --per_worker_mb overrides this if needed.
-    OBSERVED_PER_WORKER_MB = 768.0
-    if args.per_worker_mb is not None:
-        per_worker_mb_est = args.per_worker_mb
-    else:
-        per_worker_mb_est = OBSERVED_PER_WORKER_MB
-
-    if args.N_workers is not None:
-        initial_workers = max(1, args.N_workers)
-        print(f'Initial workers: {initial_workers} (explicit --N_workers)')
-    else:
-        # Calculate from free GPU memory using the 500 MiB/worker empirical cost.
-        # Floor at 32 — we know from observation that 32 workers is safe.
-        gpu_result = _query_free_gpu_mb()
-        if gpu_result is not None:
-            _free_mb, _total_mb, _used_mb = gpu_result
-            _usable_mb = _free_mb * (1.0 - args.gpu_headroom)
-            _calc = max(32, int(_usable_mb / per_worker_mb_est))
-            gpu_msg = (
-                f'GPU: {_total_mb:.0f} MiB total, {_used_mb:.0f} MiB used, '
-                f'{_free_mb:.0f} MiB free '
-                f'({args.gpu_headroom*100:.0f}% headroom → {_usable_mb:.0f} MiB usable) | '
-                f'{per_worker_mb_est:.0f} MiB/worker → {_calc} workers (min 32)'
-            )
-        else:
-            _calc = 32
-            gpu_msg = 'GPU info unavailable — defaulting to 32 workers'
-        initial_workers = _calc
-        print(f'Initial workers (auto): {gpu_msg}')
-
-    initial_workers = min(initial_workers, n_total)
-    # No upper limit — the monitor may add workers beyond the starting
-    # count if GPU memory allows.  Use n_total as the only upper bound.
-    max_workers_cap = n_total
-
-    print(f'Per-worker GPU estimate: {per_worker_mb_est:.0f} MiB | '
-          f'starting with {initial_workers} workers')
+    n_workers = min(args.N_workers, n_total)
+    print(f'Workers: {n_workers}')
 
     n_ok   = 0
     n_skip = 0
 
-    if initial_workers == 1 and max_workers_cap == 1:
-        # ---------------------------------------------------------------- #
-        # Serial path — no pool, no monitor thread needed
-        # ---------------------------------------------------------------- #
+    if n_workers == 1:
         retry_list = []
         for task in tasks:
             _, ok, log = _worker(task)
@@ -2185,20 +1862,7 @@ def main() -> None:
             else:
                 n_skip += 1
     else:
-        # ---------------------------------------------------------------- #
-        # Adaptive parallel path
-        # ---------------------------------------------------------------- #
-        import threading
-        print_lock = threading.Lock()
-
-        n_ok, n_skip, retry_list = _run_adaptive_parallel(
-            tasks            = tasks,
-            initial_workers  = initial_workers,
-            max_workers      = max_workers_cap,
-            per_worker_mb_est= per_worker_mb_est,
-            probe_interval   = args.probe_interval,
-            print_lock       = print_lock,
-        )
+        n_ok, n_skip, retry_list = _run_parallel(tasks, n_workers)
 
     # ------------------------------------------------------------------ #
     # Retry crashed jobs serially
@@ -2216,11 +1880,10 @@ def main() -> None:
             else:
                 n_skip += 1
 
+    _total_s = _time.monotonic() - _t_main_start
     print(f'\n[DONE] {n_ok} succeeded, {n_skip} skipped/failed, '
-          f'{len(retry_list)} retried (total {n_total}).')
+          f'{len(retry_list)} retried (total {n_total}) | wall time {_total_s:.1f}s')
 
 
 if __name__ == '__main__':
     main()
-
-
