@@ -1,7 +1,7 @@
-'''20260202 extract cloud cover percentage for given tiles for specified date range..using Canada AWS sentinel-2 products mirror '''
-
 #!/usr/bin/env python3
 """
+20260202 extract cloud cover percentage for given tiles for specified date range..using Canada AWS sentinel-2 products mirror
+
 Sentinel-2 Cloud Cover Extraction and Visualization
 
 Discovers Sentinel-2 products, extracts cloud cover percentages, and generates
