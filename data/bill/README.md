@@ -1,25 +1,39 @@
-# WPS Research — Bill's Toolkit
+# WPS Research — Remote Sensing Toolkit
 
-A collection of remote sensing tools for wildfire analysis using Sentinel-2 and VIIRS satellite data.
-
----
-
-## [VIIRS Hotspot Processing](https://github.com/bcgov/wps-research/tree/master/data/bill/viirs)
-
-<img src="images/viirs.png" alt="VIIRS Hotspot Processing" width="50%">
-
-An end-to-end pipeline for downloading, converting, and visualising VIIRS active fire pixel data (VNP14IMG). Downloads raw NetCDF files from NASA LAADS DAAC, reprojects fire pixels to match a Sentinel-2 reference raster, and loads them into an interactive GUI. Supports accumulation of fire pixels over a date range and rasterization onto the Sentinel-2 grid to produce binary fire masks for burn severity mapping.
+A collection of satellite image processing tools developed for wildfire analysis at the BC Wildfire Service, built around Sentinel-2 and VIIRS data.
 
 ---
 
-## [Sentinel-2 Fire Mapping](https://github.com/bcgov/wps-research/blob/master/data/bill/fire_mapping)
+## VIIRS Hotspot Processing
 
-<img src="images/fire_mapping.png" alt="Sentinel-2 Fire Mapping" width="50%">
+[`viirs/`](https://github.com/bcgov/wps-research/tree/master/data/bill/viirs)
 
-A lightweight toolkit for fire-mapping workflows using Sentinel-2 raster data. Provides utilities for reading and extracting raster bands, masking pixels inside/outside fire perimeters, sampling strategies (random, in/out polygon, regular), band dominance analysis, and generating PNG thumbnails. Modules are self-contained and can be imported directly into scripts.
+<img src="images/viirs.png" width="60%">
+
+End-to-end pipeline for VIIRS active fire pixel data (VNP14IMG). Downloads raw NetCDF files from NASA LAADS DAAC, reprojects fire detections onto a Sentinel-2 reference grid, and surfaces them in an interactive GUI. Supports multi-date accumulation and rasterization into binary fire masks for burn severity analysis.
 
 ---
 
-## [Sentinel-2 Cloud Masking](https://github.com/bcgov/wps-research/tree/master/data/bill/cloud_masking)
+## Sentinel-2 Fire Mapping
 
-A multi-stage pipeline for per-date Sentinel-2 cloud masking using Random Forest regression. Trains an RF model on image/cloud-probability-mask pairs to predict cloud probability maps, then optionally sets masked pixels to NaN, runs MRAP compositing, and generates an MP4. Includes an interactive review step so results can be inspected before committing to the full pipeline.
+[`fire_mapping/`](https://github.com/bcgov/wps-research/blob/master/data/bill/fire_mapping)
+
+<img src="images/fire_mapping.png" width="60%">
+
+Lightweight toolkit for fire-mapping workflows on Sentinel-2 imagery. Provides band reading, fire perimeter masking, flexible sampling strategies (random, in/out polygon, regular grid), band dominance analysis, and PNG thumbnail generation. Modules are self-contained and designed for direct use in analysis scripts.
+
+---
+
+## Sentinel-2 Cloud Masking
+
+[`cloud_masking/`](https://github.com/bcgov/wps-research/tree/master/data/bill/cloud_masking)
+
+Multi-stage pipeline for per-date cloud masking using Random Forest regression. Trains on image/cloud-probability-mask pairs, predicts cloud probability maps, and feeds results into MRAP compositing. Includes an interactive review step before the full pipeline commits, and exports final outputs as MP4.
+
+---
+
+## s2lookback
+
+[`s2lookback/`](https://github.com/bcgov/wps-research/tree/master/data/bill/s2lookback)
+
+Shared library underpinning the cloud masking and compositing workflows. Handles date-ordered file discovery, image and mask I/O, pixel sampling, and parallel processing. Exposes four ready-to-use classes — `MRAP`, `MASK`, `MASK_TO_NODATA`, and `ABCD_MASK` — each built on a common `LookBack` base.

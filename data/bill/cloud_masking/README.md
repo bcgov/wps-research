@@ -1,4 +1,4 @@
-# sentinel2_cloud_masking
+# Sentinel-2 Cloud Masking
 
 Per-date Sentinel-2 cloud masking via Random Forest regression (A:B::C:D), followed by optional mask-to-nodata cleaning, MRAP compositing, and MP4 generation.
 
