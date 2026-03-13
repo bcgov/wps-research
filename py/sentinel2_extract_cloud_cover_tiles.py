@@ -21,6 +21,15 @@ Options:
                      Will generate PREFIX_L1C.png/csv and/or PREFIX_L2A.png/csv
     --average        Overlay a thick dashed black line showing the average of all
                      tiles' cloud cover curves on the plot
+    --utm_zone=ZONE  Filter tiles to only those whose tile ID starts with the
+                     given UTM zone prefix (e.g. --utm_zone=T10 keeps T10UFB,
+                     T10UFA, etc. and drops T09VXE, T11VLE, ...).
+                     The prefix is matched case-insensitively against the leading
+                     characters of each tile ID (e.g. "T10", "t10", "T09" all
+                     work).  Can be combined with an explicit tile-ID list and/or
+                     a date-range filter; tiles that fail either check are omitted.
+                     In normal (download) mode the filtered tile list is also used
+                     for S3 discovery, so no unnecessary data is fetched.
     --restore_csv=FILE
                      Generate the plot from an existing CSV file (from a previous
                      run) instead of downloading data. The FILE argument is the
@@ -37,6 +46,9 @@ Example:
     python sentinel2_cloud_tiles.py 20240501 20240505 T10UFB --L2 --workers=16 --average
     python sentinel2_cloud_tiles.py --restore_csv=cloud_cover_by_tile_L2A.csv --average
     python sentinel2_cloud_tiles.py 20240601 20240901 T10UFB T10UFA --restore_csv=cloud_cover_by_tile_L2A.csv
+    python sentinel2_cloud_tiles.py --restore_csv=cloud_cover_by_tile_L2A.csv --utm_zone=T10 --average
+    python sentinel2_cloud_tiles.py 20240601 20240901 --restore_csv=cloud_cover_by_tile_L2A.csv --utm_zone=T09
+    python sentinel2_cloud_tiles.py 20240501 20240901 T10UFB T10UFA T09VXE --utm_zone=T10 --L2
 
 python3 sentinel2_extract_cloud_cover_tiles.py 20230420 20251111 T10VDJ T09VXE T10UDD T10UEF T10VEH T10UCD T10UDG T10UFE T10UFG T10UEE T10VCH T10VDH T11VLE T11VLC T09UYU T10VCM T10VEM T09VXC T09VXG T10UDE T10VCJ T10VFM T10UFF T10VCL T10VEJ T10VFL T10UGE T11ULT T11UMU T10UDF T10VDM T09VXF T10UFD T09VWC T10VEL T09VVE T09VWE T10VDL T10VFK T09VWG T11UMT T10UGC T10UCE T11ULA T10VFJ T10UEG T09VVF T10UED T10VFH T10UGD T11ULU T09VWF T11ULB T09VWD T09UXB T10UCG T10VCK T11ULV T11VLD T10UCF T11VLF T10VDK T10VEK T09UYV T09VXD T11VLG --L2 --workers=16
 """
@@ -150,6 +162,14 @@ def extract_date_from_product(product_id: str) -> Optional[datetime]:
             except ValueError:
                 continue
     return None
+
+
+def tile_matches_utm_zone(tile_id: str, utm_zone: Optional[str]) -> bool:
+    """Return True if tile_id starts with utm_zone prefix (case-insensitive),
+    or if utm_zone is None/empty (no filter applied)."""
+    if not utm_zone:
+        return True
+    return tile_id.upper().startswith(utm_zone.upper())
 
 
 def get_safe_folder_name(zip_filename: str) -> str:
@@ -505,10 +525,12 @@ def extract_cloud_percentages_parallel(products: List[str], level: str, use_cach
 def load_results_from_csv(csv_file: str,
                           filter_start: Optional[date] = None,
                           filter_end: Optional[date] = None,
-                          filter_tiles: Optional[List[str]] = None) -> List[Tuple[str, float]]:
+                          filter_tiles: Optional[List[str]] = None,
+                          utm_zone: Optional[str] = None) -> List[Tuple[str, float]]:
     """
     Load (product_id, cloud_pct) pairs from a previously written CSV file.
-    Optionally filter by date range and/or tile IDs.
+    Optionally filter by date range, explicit tile IDs, and/or UTM zone prefix.
+    All active filters are ANDed together.
     """
     if not os.path.exists(csv_file):
         raise FileNotFoundError(f"CSV file not found: {csv_file}")
@@ -540,10 +562,17 @@ def load_results_from_csv(csv_file: str,
                     skipped += 1
                     continue
 
-            # Tile filter
+            # Tile ID filter
             if filter_tiles:
                 tile_id = extract_tile_id(pid)
                 if tile_id not in filter_tiles:
+                    skipped += 1
+                    continue
+
+            # UTM zone prefix filter
+            if utm_zone:
+                tile_id = extract_tile_id(pid)
+                if not tile_matches_utm_zone(tile_id, utm_zone):
                     skipped += 1
                     continue
 
@@ -764,7 +793,8 @@ def plot_cloud_cover(data_by_tile: Dict[str, List[Tuple[datetime, float]]],
 
 def process_level(level: str, start_date: date, end_date: date, requested_tiles: List[str],
                   use_cache: bool, output_prefix: str,
-                  plot_average: bool = False) -> Tuple[int, int, int]:
+                  plot_average: bool = False,
+                  utm_zone: Optional[str] = None) -> Tuple[int, int, int]:
     """
     Process a single level (L1C or L2A): discovery, extraction, summary, CSV, and plot.
     Returns (num_products, num_success, num_failed)
@@ -772,6 +802,18 @@ def process_level(level: str, start_date: date, end_date: date, requested_tiles:
     print(f"\n{'#'*70}")
     print(f"# Processing {level}")
     print(f"{'#'*70}")
+
+    # Apply UTM zone filter to the requested tile list up-front so that
+    # discovery only searches for matching tiles and doesn't fetch extras.
+    if utm_zone:
+        filtered_tiles = [t for t in requested_tiles if tile_matches_utm_zone(t, utm_zone)]
+        omitted = [t for t in requested_tiles if not tile_matches_utm_zone(t, utm_zone)]
+        if omitted:
+            print(f"\n  UTM zone filter '{utm_zone}': omitting {len(omitted)} tile(s): {', '.join(omitted)}")
+        if not filtered_tiles:
+            print(f"  No tiles remain after UTM zone filter '{utm_zone}'. Skipping {level}.")
+            return 0, 0, 0
+        requested_tiles = filtered_tiles
 
     # Phase 1: Discovery
     print(f"\n{'='*70}")
@@ -893,7 +935,8 @@ def process_restore_csv(csv_file: str,
                         filter_end: Optional[date],
                         filter_tiles: Optional[List[str]],
                         output_prefix: str,
-                        plot_average: bool = False):
+                        plot_average: bool = False,
+                        utm_zone: Optional[str] = None):
     """
     Load results from a previously written CSV file, apply optional filters,
     then regenerate the plot (and print summary statistics).
@@ -904,6 +947,7 @@ def process_restore_csv(csv_file: str,
     print(f"  CSV file   : {csv_file}")
     print(f"  Date filter: {filter_start} → {filter_end if filter_end else '(all)'}")
     print(f"  Tile filter: {', '.join(filter_tiles) if filter_tiles else '(all)'}")
+    print(f"  UTM zone   : {utm_zone if utm_zone else '(all)'}")
 
     level = infer_level_from_csv_filename(csv_file)
     print(f"  Inferred level: {level}")
@@ -911,7 +955,8 @@ def process_restore_csv(csv_file: str,
     results = load_results_from_csv(csv_file,
                                     filter_start=filter_start,
                                     filter_end=filter_end,
-                                    filter_tiles=filter_tiles or None)
+                                    filter_tiles=filter_tiles or None,
+                                    utm_zone=utm_zone or None)
 
     if not results:
         print("  No matching records found after filtering. Nothing to plot.")
@@ -975,6 +1020,7 @@ def main():
     query_l2 = False
     plot_average = False
     restore_csv = None          # path to CSV file for --restore_csv
+    utm_zone: Optional[str] = None
     args = []                   # positional args: dates + tile IDs
 
     for arg in sys.argv[1:]:
@@ -994,6 +1040,8 @@ def main():
             plot_average = True
         elif arg.startswith("--restore_csv="):
             restore_csv = arg.split("=", 1)[1]
+        elif arg.startswith("--utm_zone="):
+            utm_zone = arg.split("=", 1)[1].strip()
         else:
             args.append(arg)
 
@@ -1041,6 +1089,7 @@ def main():
         print(f"CSV file       : {restore_csv}")
         print(f"Date filter    : {filter_start} → {filter_end}")
         print(f"Tile filter    : {filter_tiles if filter_tiles else '(all)'}")
+        print(f"UTM zone       : {utm_zone if utm_zone else '(all)'}")
         print(f"Plot average   : {plot_average}")
         print(f"Output prefix  : {output_prefix}")
         print(f"{'='*70}")
@@ -1052,6 +1101,7 @@ def main():
             filter_tiles=filter_tiles if filter_tiles else None,
             output_prefix=output_prefix,
             plot_average=plot_average,
+            utm_zone=utm_zone or None,
         )
         return
 
@@ -1094,6 +1144,7 @@ def main():
     print(f"Cache: {'enabled' if use_cache else 'disabled'}")
     print(f"Output prefix: {output_prefix}")
     print(f"Plot average: {plot_average}")
+    print(f"UTM zone filter: {utm_zone if utm_zone else '(none)'}")
     print(f"{'='*70}")
 
     t_total_start = time.time()
@@ -1104,6 +1155,7 @@ def main():
         num_products, num_success, num_failed = process_level(
             level, start_date, end_date, requested_tiles, use_cache, output_prefix,
             plot_average=plot_average,
+            utm_zone=utm_zone or None,
         )
         total_stats[level] = (num_products, num_success, num_failed)
 
@@ -1122,3 +1174,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
