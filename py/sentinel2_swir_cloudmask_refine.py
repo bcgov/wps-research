@@ -548,8 +548,95 @@ def refine_cloud_mask(
 
 
 # ===========================================================================
-# ENVI output writer (uses GDAL directly — no file-based reference needed)
+# Cloud shadow mask refinement via ABCD RF
 # ===========================================================================
+
+def refine_shadow_mask(
+    scl_arr: np.ndarray,
+    swir_stack: np.ndarray,
+    skip_f: int,
+    offset: int,
+    pkl_path: Optional[str] = None,
+) -> np.ndarray:
+    """
+    Refine the SCL cloud-shadow mask using the ABCD RF method.
+
+    The SCL shadow class (3) binary indicator is used as the training target B.
+    Water pixels (SCL class 6) are excluded from training so the RF is not
+    confused by the spectrally similar water signature.  All pixels receive
+    a prediction at inference time regardless.
+
+    scl_arr    : (H, W) SCL classification array (integer classes)
+    swir_stack : (H, W, 3) float32 B12/B11/B9 stack at 20m (same grid as SCL)
+    skip_f     : RF stride
+    offset     : RF offset
+    pkl_path   : optional path to cache / load trained model
+
+    Returns refined shadow probability array (H, W) in [0, 1].
+    A value >= 0.5 indicates likely shadow.
+    """
+    H, W  = scl_arr.shape
+    n_px  = H * W
+
+    # Binary shadow target: 1 where SCL == 3 (CLOUD_SHADOWS), else 0
+    shadow_binary = (scl_arr == 3).astype(np.float32).ravel()   # (n_px,)
+
+    # Water mask: SCL == 6 — exclude from training
+    water_mask = (scl_arr == 6).ravel()                          # (n_px,) bool
+
+    # Features A: normalised SWIR bands (3, n_px)
+    A = (swir_stack.astype(np.float32) / 10_000.0).reshape(n_px, 3).T
+
+    # Target B: shadow binary (1, n_px)
+    B = shadow_binary[np.newaxis, :]
+    np.nan_to_num(B, copy=False, nan=0.0)
+
+    # -----------------------------------------------------------------------
+    # Custom training-index selection: stride sample, then drop water pixels
+    # and bad (NaN / all-zero) pixels.
+    # -----------------------------------------------------------------------
+    if pkl_path and os.path.isfile(pkl_path):
+        print(f'  [shadow] Loading cached model: {pkl_path}')
+        with open(pkl_path, 'rb') as fh:
+            rf = pickle.load(fh)
+    else:
+        bp   = _bad_pixel_mask(A)                              # (n_px,) bool
+        idx  = np.arange(offset, n_px, skip_f)
+        # Exclude bad pixels and water pixels from training
+        good = idx[~bp[idx] & ~water_mask[idx]]
+        n_train = len(good)
+        print(f'  [shadow] Training samples: {n_train:,} '
+              f'(skip_f={skip_f}, water-excluded)')
+        if n_train == 0:
+            print('  [shadow] No valid training pixels — returning raw SCL shadow.')
+            return shadow_binary.reshape(H, W)
+
+        X_train = A[:, good].T                 # (n_train, 3)
+        Y_train = B[0, good]                   # (n_train,)
+        np.nan_to_num(Y_train, copy=False, nan=0.0)
+
+        rf = _fit_rf(X_train, Y_train)
+
+        if pkl_path:
+            os.makedirs(os.path.dirname(pkl_path) or '.', exist_ok=True)
+            with open(pkl_path, 'wb') as fh:
+                pickle.dump(rf, fh)
+            print(f'  [shadow] Model saved → {pkl_path}')
+
+    # Inference on all non-bad pixels
+    bp_c   = _bad_pixel_mask(A)
+    good_c = np.where(~bp_c)[0]
+    D      = np.full(n_px, np.nan, dtype=np.float32)
+    if len(good_c):
+        preds = rf.predict(A[:, good_c].T)
+        if preds.ndim > 1:
+            preds = preds[:, 0]
+        D[good_c] = preds.astype(np.float32)
+        print(f'  [shadow] Predicted {len(good_c):,} pixels')
+
+    refined = np.clip(np.nan_to_num(D, nan=0.0).reshape(H, W), 0.0, 1.0)
+    return refined
+
 
 def write_envi(
     out_path: str,
@@ -771,10 +858,16 @@ def _build_masks_from_cld_scl(
     scl_arr: np.ndarray,
     cloud_threshold: float,
     refined_cld: np.ndarray,
+    refined_shadow: Optional[np.ndarray] = None,
+    shadow_threshold: float = 0.5,
 ) -> Tuple[np.ndarray, np.ndarray, float, float]:
     """
     Given raw CLD, SCL, threshold, and already-refined cloud probability,
     return (cloud_mask_20m, invalid_20m, raw_cloud_pct, refined_cloud_pct).
+
+    If refined_shadow is provided, pixels where refined_shadow >= shadow_threshold
+    are also included in invalid_20m (in addition to the SCL class-3 pixels that
+    are already captured by SCL_NODATA_CLASSES).
     """
     H20, W20 = cld_raw.shape
 
@@ -789,7 +882,13 @@ def _build_masks_from_cld_scl(
     scl_nodata_20m = np.zeros((H20, W20), dtype=bool)
     for cls in SCL_NODATA_CLASSES:
         scl_nodata_20m |= (scl_arr == cls)
+
     invalid_20m = cloud_mask_20m | scl_nodata_20m
+
+    if refined_shadow is not None:
+        shadow_mask_20m = refined_shadow >= shadow_threshold
+        invalid_20m = invalid_20m | shadow_mask_20m
+        print(f'  Shadow coverage (RF refined)  : {shadow_mask_20m.mean()*100:.1f}%')
 
     print(f'  Cloud coverage (Sen2Cor raw)  : {raw_cloud_pct:.1f}%')
     print(f'  Cloud coverage (ABCD refined) : {refined_cloud_pct:.1f}%')
@@ -1131,10 +1230,12 @@ def _save_png_mrap(
     png_path: str,
     raw_cld: np.ndarray,
     refined_cld: np.ndarray,
-    # Deprecated (SCL-only) MRAP composites — for comparison row only
+    scl_shadow_raw: np.ndarray,
+    refined_shadow: Optional[np.ndarray],
+    # Deprecated (SCL-only) MRAP composites — comparison row
     prev_mrap_dep: Optional[np.ndarray],
     curr_mrap_dep: np.ndarray,
-    # RF-refined MRAP composites — written to file and shown in row 1
+    # RF-refined MRAP composites — written to file
     prev_mrap_rf: Optional[np.ndarray],
     curr_mrap_rf: np.ndarray,
     raw_cloud_pct: float = 0.0,
@@ -1142,26 +1243,21 @@ def _save_png_mrap(
     cloud_threshold: float = 0.0001,
 ) -> None:
     """
-    Save a 2×3 diagnostic PNG for MRAP mode.
+    Save a 2×4 diagnostic PNG for MRAP mode.
 
-    Layout (each cell shows the same number of image pixels):
-      Row 0 — Deprecated SCL-only product (for comparison):
-        [0,0] Sen2Cor CLD probability (raw %)
-        [0,1] Deprecated MRAP — previous timestep
-        [0,2] Deprecated MRAP — current timestep
+    Layout (each cell contains the same number of image pixels):
 
-      Row 1 — RF-refined product (written to file):
-        [1,0] ABCD-RF refined CLD probability
-        [1,1] RF MRAP — previous timestep  (threshold reported in title)
-        [1,2] RF MRAP — current timestep   (threshold reported in title)
+      Col 0          Col 1               Col 2                  Col 3
+      ─────────────  ──────────────────  ─────────────────────  ──────────────────────
+      Sen2Cor CLD    SCL shadow (raw)    Deprecated MRAP prev   Deprecated MRAP curr
+      ABCD-RF CLD    RF refined shadow   RF MRAP prev           RF MRAP curr
 
     Stretch policy
-    --------------
-    Per-band lo/hi are derived once from curr_mrap_rf (2%–98% histogram
-    trim on valid, non-zero pixels).  Those same limits are then applied
-    identically to every raster image panel (prev_mrap_dep, curr_mrap_dep,
-    prev_mrap_rf, curr_mrap_rf).  Cloud/probability panels keep their own
-    fixed [0, 1] greyscale scale and are not affected.
+    ──────────────
+    Per-band lo/hi are derived once from curr_mrap_rf (2%–98% histogram trim
+    on valid, non-zero pixels) and applied identically to every raster image
+    panel (columns 2–3).  Probability/mask panels (columns 0–1) use their
+    own fixed [0, 1] greyscale scale.
     """
     try:
         import matplotlib
@@ -1171,20 +1267,13 @@ def _save_png_mrap(
         print('  [WARN] matplotlib not available — skipping PNG')
         return
 
-    # ------------------------------------------------------------------
-    # Reference grid: use CLD array dimensions so every panel has the
-    # same pixel count.  All raster stacks are resampled to this grid
-    # for display only (nearest-neighbour; no GDAL required).
-    # ------------------------------------------------------------------
     ref_h, ref_w = raw_cld.shape[:2]
     panel_inches  = 8.0
     dpi           = 100
-
-    n_bands = curr_mrap_rf.shape[2] if curr_mrap_rf.ndim == 3 else 1
+    n_bands       = curr_mrap_rf.shape[2] if curr_mrap_rf.ndim == 3 else 1
 
     # ------------------------------------------------------------------
-    # Derive shared per-band stretch from curr_mrap_rf (2%–98% trim).
-    # Fall back to [0, 1] for any band with no valid data.
+    # Shared per-band stretch: 2%–98% trim on curr_mrap_rf valid pixels
     # ------------------------------------------------------------------
     lo = np.zeros(n_bands, dtype=np.float32)
     hi = np.ones(n_bands,  dtype=np.float32)
@@ -1197,19 +1286,16 @@ def _save_png_mrap(
             hi[b] = np.percentile(valid, 98)
 
     # ------------------------------------------------------------------
-    # Helper: nearest-neighbour display resample (pure numpy, display only)
+    # Nearest-neighbour display resample (numpy only, display only)
     # ------------------------------------------------------------------
     def _resample_arr_to(arr: np.ndarray, tgt_h: int, tgt_w: int) -> np.ndarray:
         src_h, src_w = arr.shape[:2]
         row_idx = (np.arange(tgt_h) * src_h / tgt_h).astype(int)
         col_idx = (np.arange(tgt_w) * src_w / tgt_w).astype(int)
-        if arr.ndim == 2:
-            return arr[np.ix_(row_idx, col_idx)]
-        return arr[np.ix_(row_idx, col_idx)]   # works for (H,W) and (H,W,K)
+        return arr[np.ix_(row_idx, col_idx)]
 
     # ------------------------------------------------------------------
-    # Helper: apply shared stretch to a raster stack → (H,W,3) uint8-range
-    # NaN / masked pixels → 0 (black).
+    # Apply shared stretch to a raster stack → (H, W, nb) in [0, 1]
     # ------------------------------------------------------------------
     def _apply_stretch(stack: np.ndarray) -> np.ndarray:
         nb  = stack.shape[2] if stack.ndim == 3 else 1
@@ -1223,55 +1309,64 @@ def _save_png_mrap(
     # ------------------------------------------------------------------
     # Panel renderers
     # ------------------------------------------------------------------
-    def _show_cld(ax, cld_arr, title):
-        """Greyscale cloud / probability panel — fixed [0, 1] scale."""
-        norm = cld_arr.astype(np.float32)
-        if norm.max() > 1.0:
-            norm = norm / 100.0
-        if norm.shape[:2] != (ref_h, ref_w):
-            norm = _resample_arr_to(norm, ref_h, ref_w)
-        ax.imshow(norm, cmap='gray', vmin=0, vmax=1,
+    def _show_mask(ax, arr, title, cmap='gray', vmin=0, vmax=1):
+        """Greyscale probability / binary mask panel — its own fixed scale."""
+        a = arr.astype(np.float32)
+        if a.max() > 1.0:
+            a = a / 100.0
+        if a.shape[:2] != (ref_h, ref_w):
+            a = _resample_arr_to(a, ref_h, ref_w)
+        ax.imshow(a, cmap=cmap, vmin=vmin, vmax=vmax,
                   aspect='auto', interpolation='nearest')
-        ax.set_title(title, fontsize=12)
+        ax.set_title(title, fontsize=11)
         ax.axis('off')
 
     def _show_rgb(ax, stack, title):
-        """Raster RGB panel using the shared stretch; grey box when None."""
+        """Raster RGB panel using shared stretch; grey box when None."""
         if stack is None:
             ax.set_facecolor('#404040')
             ax.text(0.5, 0.5, 'No previous MRAP',
                     ha='center', va='center', color='white',
-                    transform=ax.transAxes, fontsize=12)
+                    transform=ax.transAxes, fontsize=11)
             ax.axis('off')
-            ax.set_title(title, fontsize=12)
+            ax.set_title(title, fontsize=11)
             return
-        rgb = _apply_stretch(stack)           # (H, W, nb) in [0, 1]
+        rgb = _apply_stretch(stack)
         if rgb.shape[:2] != (ref_h, ref_w):
             rgb = np.dstack([_resample_arr_to(rgb[..., b], ref_h, ref_w)
                              for b in range(rgb.shape[2])])
         ax.imshow(rgb, aspect='auto', interpolation='nearest')
-        ax.set_title(title, fontsize=12)
+        ax.set_title(title, fontsize=11)
         ax.axis('off')
 
     # ------------------------------------------------------------------
-    # Draw figure
+    # Draw 2 × 4 figure
     # ------------------------------------------------------------------
-    fig, axes = plt.subplots(2, 3, figsize=(panel_inches * 3, panel_inches * 2))
+    fig, axes = plt.subplots(2, 4, figsize=(panel_inches * 4, panel_inches * 2))
 
     # Row 0 — deprecated SCL-only product
-    _show_cld(axes[0, 0], raw_cld,
-              f'Sen2Cor CLD  ({raw_cloud_pct:.1f}% cloud)')
-    _show_rgb(axes[0, 1], prev_mrap_dep,
+    _show_mask(axes[0, 0], raw_cld,
+               f'Sen2Cor CLD  ({raw_cloud_pct:.1f}% cloud)')
+    _show_mask(axes[0, 1], scl_shadow_raw,
+               'SCL shadow (raw, class 3)')
+    _show_rgb(axes[0, 2], prev_mrap_dep,
               'Deprecated MRAP — previous timestep')
-    _show_rgb(axes[0, 2], curr_mrap_dep,
+    _show_rgb(axes[0, 3], curr_mrap_dep,
               'Deprecated MRAP — current timestep')
 
     # Row 1 — RF-refined product
-    _show_cld(axes[1, 0], refined_cld,
-              f'ABCD-RF refined  ({refined_cloud_pct:.1f}% cloud)')
-    _show_rgb(axes[1, 1], prev_mrap_rf,
+    _show_mask(axes[1, 0], refined_cld,
+               f'ABCD-RF refined CLD  ({refined_cloud_pct:.1f}% cloud)')
+    if refined_shadow is not None:
+        _show_mask(axes[1, 1], refined_shadow,
+                   'RF refined shadow prob')
+    else:
+        # No RF shadow available (--no_rf path): show raw SCL shadow
+        _show_mask(axes[1, 1], scl_shadow_raw,
+                   'SCL shadow (raw, class 3)\n[RF not run]')
+    _show_rgb(axes[1, 2], prev_mrap_rf,
               f'RF MRAP — previous timestep\n(threshold={cloud_threshold:.4g})')
-    _show_rgb(axes[1, 2], curr_mrap_rf,
+    _show_rgb(axes[1, 3], curr_mrap_rf,
               f'RF MRAP — current timestep\n(threshold={cloud_threshold:.4g})')
 
     fig.tight_layout()
@@ -1382,16 +1477,30 @@ def _mrap_compute(task: tuple) -> Tuple[int, dict]:
             pkl_path: Optional[str] = None
             if save_model:
                 safe_stem = stem.replace(' ', '_')
-                pkl_path  = str(Path(model_dir) / f'{safe_stem}_{skip_f}_{offset}.pkl')
+                pkl_path  = str(Path(model_dir) / f'{safe_stem}_{skip_f}_{offset}_cloud.pkl')
             refined_cld = refine_cloud_mask(cld_raw, swir_stack_20m, skip_f, offset, pkl_path)
         else:
             refined_cld = cld_raw.astype(np.float32)
             if refined_cld.max() > 1.0:
                 refined_cld /= 100.0
 
+        # Step 4b: RF shadow refinement (only in RF mode; uses SCL class 3 as
+        # training target with water pixels excluded from training)
+        scl_shadow_raw: np.ndarray = (scl_arr == 3).astype(np.float32)
+        if use_rf:
+            print('  Running ABCD-RF shadow refinement ...')
+            shadow_pkl: Optional[str] = None
+            if save_model:
+                shadow_pkl = str(Path(model_dir) / f'{safe_stem}_{skip_f}_{offset}_shadow.pkl')
+            refined_shadow: Optional[np.ndarray] = refine_shadow_mask(
+                scl_arr, swir_stack_20m, skip_f, offset, shadow_pkl)
+        else:
+            refined_shadow = None
+
         # Step 5: Final mask
         cloud_mask_20m, invalid_20m, raw_cloud_pct, refined_cloud_pct = (
-            _build_masks_from_cld_scl(cld_raw, scl_arr, cloud_threshold, refined_cld))
+            _build_masks_from_cld_scl(cld_raw, scl_arr, cloud_threshold,
+                                      refined_cld, refined_shadow))
 
         # Step 6: Upsample mask
         if invalid_20m.shape != (Hs, Ws):
@@ -1431,6 +1540,7 @@ def _mrap_compute(task: tuple) -> Tuple[int, dict]:
             out_stack=out_stack,
             dep_stack=dep_stack,
             cld_raw=cld_raw, refined_cld=refined_cld,
+            scl_shadow_raw=scl_shadow_raw, refined_shadow=refined_shadow,
             raw_cloud_pct=raw_cloud_pct, refined_cloud_pct=refined_cloud_pct,
             swir_geo=swir_geo, swir_proj=swir_proj, swir_res=swir_res,
             Hs=Hs, Ws=Ws, cld_geo=cld_geo, cld_proj=cld_proj, H20=H20, W20=W20,
@@ -1535,6 +1645,7 @@ def _mrap_composite_and_write(
             _save_png_mrap(
                 out_png,
                 res['cld_raw'], res['refined_cld'],
+                res['scl_shadow_raw'], res.get('refined_shadow'),
                 _to_20m(_prev_dep), _to_20m(_curr_dep),
                 _to_20m(_prev_rf),  _to_20m(_curr_rf),
                 raw_cloud_pct=res['raw_cloud_pct'],
@@ -1886,3 +1997,5 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
+
+
