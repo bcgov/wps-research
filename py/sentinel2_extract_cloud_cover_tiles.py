@@ -8,7 +8,7 @@ Discovers Sentinel-2 products, extracts cloud cover percentages, and generates
 a plot showing cloud cover over time by tile with the best 5 days highlighted.
 
 Usage:
-    python sentinel2_cloud_tiles.py <yyyymmdd_start> <yyyymmdd_end> <TILE_ID> [TILE_ID ...]
+    sentinel2_extract_cloud_cover_tiles.py <yyyymmdd_start> <yyyymmdd_end> <TILE_ID> [TILE_ID ...]
 
 Options:
     --L1             Query L1C data only
@@ -42,13 +42,13 @@ Options:
                      'UNKNOWN'.
 
 Example:
-    python sentinel2_cloud_tiles.py 20240501 20240505 T10UFB T10UFA
-    python sentinel2_cloud_tiles.py 20240501 20240505 T10UFB --L2 --workers=16 --average
-    python sentinel2_cloud_tiles.py --restore_csv=cloud_cover_by_tile_L2A.csv --average
-    python sentinel2_cloud_tiles.py 20240601 20240901 T10UFB T10UFA --restore_csv=cloud_cover_by_tile_L2A.csv
-    python sentinel2_cloud_tiles.py --restore_csv=cloud_cover_by_tile_L2A.csv --utm_zone=T10 --average
-    python sentinel2_cloud_tiles.py 20240601 20240901 --restore_csv=cloud_cover_by_tile_L2A.csv --utm_zone=T09
-    python sentinel2_cloud_tiles.py 20240501 20240901 T10UFB T10UFA T09VXE --utm_zone=T10 --L2
+    sentinel2_extract_cloud_cover_tiles.py 20240501 20240505 T10UFB T10UFA
+    sentinel2_extract_cloud_cover_tiles.py 20240501 20240505 T10UFB --L2 --workers=16 --average
+    sentinel2_extract_cloud_cover_tiles.py --restore_csv=cloud_cover_by_tile_L2A.csv --average
+    sentinel2_extract_cloud_cover_tiles.py 20240601 20240901 T10UFB T10UFA --restore_csv=cloud_cover_by_tile_L2A.csv
+    sentinel2_extract_cloud_cover_tiles.py --restore_csv=cloud_cover_by_tile_L2A.csv --utm_zone=T10 --average
+    sentinel2_extract_cloud_cover_tiles.py 20240601 20240901 --restore_csv=cloud_cover_by_tile_L2A.csv --utm_zone=T09
+    sentinel2_extract_cloud_cover_tiles.py 20240501 20240901 T10UFB T10UFA T09VXE --utm_zone=T10 --L2
 
 python3 sentinel2_extract_cloud_cover_tiles.py 20230420 20251111 T10VDJ T09VXE T10UDD T10UEF T10VEH T10UCD T10UDG T10UFE T10UFG T10UEE T10VCH T10VDH T11VLE T11VLC T09UYU T10VCM T10VEM T09VXC T09VXG T10UDE T10VCJ T10VFM T10UFF T10VCL T10VEJ T10VFL T10UGE T11ULT T11UMU T10UDF T10VDM T09VXF T10UFD T09VWC T10VEL T09VVE T09VWE T10VDL T10VFK T09VWG T11UMT T10UGC T10UCE T11ULA T10VFJ T10UEG T09VVF T10UED T10VFH T10UGD T11ULU T09VWF T11ULB T09VWD T09UXB T10UCG T10VCK T11ULV T11VLD T10UCF T11VLF T10VDK T10VEK T09UYV T09VXD T11VLG --L2 --workers=16
 """
@@ -1174,4 +1174,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
