@@ -19,10 +19,24 @@ Options:
     --single-thread  Run single-threaded (for debugging)
     --output=PREFIX  Output filename prefix (default: cloud_cover_by_tile)
                      Will generate PREFIX_L1C.png/csv and/or PREFIX_L2A.png/csv
+    --average        Overlay a thick dashed black line showing the average of all
+                     tiles' cloud cover curves on the plot
+    --restore_csv=FILE
+                     Generate the plot from an existing CSV file (from a previous
+                     run) instead of downloading data. The FILE argument is the
+                     CSV path to restore from.
+                     Optionally filter by date range and/or tile IDs provided at
+                     the command line. If no date range is given, all dates in the
+                     CSV are used. If no tile IDs are given, all tiles are plotted.
+                     The level (L1C/L2A) is inferred from the CSV filename if it
+                     ends with _L1C.csv or _L2A.csv, otherwise defaults to
+                     'UNKNOWN'.
 
 Example:
     python sentinel2_cloud_tiles.py 20240501 20240505 T10UFB T10UFA
-    python sentinel2_cloud_tiles.py 20240501 20240505 T10UFB --L2 --workers=16
+    python sentinel2_cloud_tiles.py 20240501 20240505 T10UFB --L2 --workers=16 --average
+    python sentinel2_cloud_tiles.py --restore_csv=cloud_cover_by_tile_L2A.csv --average
+    python sentinel2_cloud_tiles.py 20240601 20240901 T10UFB T10UFA --restore_csv=cloud_cover_by_tile_L2A.csv
 
 python3 sentinel2_extract_cloud_cover_tiles.py 20230420 20251111 T10VDJ T09VXE T10UDD T10UEF T10VEH T10UCD T10UDG T10UFE T10UFG T10UEE T10VCH T10VDH T11VLE T11VLC T09UYU T10VCM T10VEM T09VXC T09VXG T10UDE T10VCJ T10VFM T10UFF T10VCL T10VEJ T10VFL T10UGE T11ULT T11UMU T10UDF T10VDM T09VXF T10UFD T09VWC T10VEL T09VVE T09VWE T10VDL T10VFK T09VWG T11UMT T10UGC T10UCE T11ULA T10VFJ T10UEG T09VVF T10UED T10VFH T10UGD T11ULU T09VWF T11ULB T09VWD T09UXB T10UCG T10VCK T11ULV T11VLD T10UCF T11VLF T10VDK T10VEK T09UYV T09VXD T11VLG --L2 --workers=16
 """
@@ -486,6 +500,70 @@ def extract_cloud_percentages_parallel(products: List[str], level: str, use_cach
 
 
 # ------------------------------------------------------------
+# CSV restore
+# ------------------------------------------------------------
+def load_results_from_csv(csv_file: str,
+                          filter_start: Optional[date] = None,
+                          filter_end: Optional[date] = None,
+                          filter_tiles: Optional[List[str]] = None) -> List[Tuple[str, float]]:
+    """
+    Load (product_id, cloud_pct) pairs from a previously written CSV file.
+    Optionally filter by date range and/or tile IDs.
+    """
+    if not os.path.exists(csv_file):
+        raise FileNotFoundError(f"CSV file not found: {csv_file}")
+
+    results = []
+    skipped = 0
+
+    with open(csv_file, newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            pid = row["Product"]
+            try:
+                cloud_pct = float(row["CloudPercentage"])
+            except (KeyError, ValueError) as e:
+                print(f"  WARNING: skipping row {row}: {e}")
+                skipped += 1
+                continue
+
+            # Date filter
+            if filter_start is not None or filter_end is not None:
+                sensing_date = extract_date_from_product(pid)
+                if sensing_date is None:
+                    skipped += 1
+                    continue
+                if filter_start is not None and sensing_date.date() < filter_start:
+                    skipped += 1
+                    continue
+                if filter_end is not None and sensing_date.date() > filter_end:
+                    skipped += 1
+                    continue
+
+            # Tile filter
+            if filter_tiles:
+                tile_id = extract_tile_id(pid)
+                if tile_id not in filter_tiles:
+                    skipped += 1
+                    continue
+
+            results.append((pid, cloud_pct))
+
+    print(f"  Loaded {len(results)} records from {csv_file} (skipped {skipped})")
+    return results
+
+
+def infer_level_from_csv_filename(csv_file: str) -> str:
+    """Infer L1C/L2A from CSV filename suffix, e.g. *_L1C.csv or *_L2A.csv."""
+    base = os.path.basename(csv_file)
+    if base.endswith("_L1C.csv"):
+        return "L1C"
+    if base.endswith("_L2A.csv"):
+        return "L2A"
+    return "UNKNOWN"
+
+
+# ------------------------------------------------------------
 # Plotting functions
 # ------------------------------------------------------------
 def organize_by_tile_and_date(results: List[Tuple[str, float]]) -> Dict[str, List[Tuple[datetime, float]]]:
@@ -518,6 +596,30 @@ def aggregate_by_day(tile_data: List[Tuple[datetime, float]]) -> Tuple[List[date
     days = sorted(by_day.keys())
     dates = [datetime.combine(d, datetime.min.time()) for d in days]
     averages = [sum(by_day[d]) / len(by_day[d]) for d in days]
+
+    return dates, averages
+
+
+def compute_average_curve(data_by_tile: Dict[str, List[Tuple[datetime, float]]]) -> Tuple[List[datetime], List[float]]:
+    """
+    Compute the per-day average cloud cover across all tiles.
+    For each day, average the per-tile daily averages (so each tile contributes
+    equally regardless of how many observations it has on that day).
+    Returns (sorted_dates, avg_cloud_pct_per_date).
+    """
+    # First aggregate each tile to daily averages
+    daily_per_tile: Dict[date, List[float]] = defaultdict(list)
+
+    for tile_id, tile_data in data_by_tile.items():
+        by_day: Dict[date, List[float]] = defaultdict(list)
+        for dt, cloud_pct in tile_data:
+            by_day[dt.date()].append(cloud_pct)
+        for day, values in by_day.items():
+            daily_per_tile[day].append(sum(values) / len(values))
+
+    days = sorted(daily_per_tile.keys())
+    dates = [datetime.combine(d, datetime.min.time()) for d in days]
+    averages = [sum(daily_per_tile[d]) / len(daily_per_tile[d]) for d in days]
 
     return dates, averages
 
@@ -565,8 +667,24 @@ def print_best_days(best_days: List[Tuple[date, float, int]], data_by_tile: Dict
 def plot_cloud_cover(data_by_tile: Dict[str, List[Tuple[datetime, float]]],
                      best_days: List[Tuple[date, float, int]],
                      level: str,
-                     output_file: str):
-    """Create a line plot of cloud cover over time, one line per tile."""
+                     output_file: str,
+                     plot_average: bool = False):
+    """Create a line plot of cloud cover over time, one line per tile.
+
+    Parameters
+    ----------
+    data_by_tile : dict
+        Mapping of tile_id -> list of (datetime, cloud_pct).
+    best_days : list
+        Output of find_best_days(), used to highlight best-day markers.
+    level : str
+        Level string used in plot title (e.g. 'L1C' or 'L2A').
+    output_file : str
+        Path to write the PNG to.
+    plot_average : bool
+        When True, overlays a thick dashed black line showing the average of
+        all tiles' per-day cloud cover curves.
+    """
     if not HAS_MATPLOTLIB:
         print("Skipping plot generation (matplotlib not available)")
         return
@@ -589,6 +707,18 @@ def plot_cloud_cover(data_by_tile: Dict[str, List[Tuple[datetime, float]]],
                 alpha=0.8,
                 color=colors[i],
                 label=f"{tile_id} ({len(tile_data)} obs)")
+
+    # ------------------------------------------------------------------
+    # Average curve overlay
+    # ------------------------------------------------------------------
+    if plot_average and len(data_by_tile) > 0:
+        avg_dates, avg_values = compute_average_curve(data_by_tile)
+        ax.plot(avg_dates, avg_values,
+                linestyle='--',
+                linewidth=3,
+                color='black',
+                zorder=9,
+                label='Average (all tiles)')
 
     best_day_dates = [d for d, _, _ in best_days]
 
@@ -633,7 +763,8 @@ def plot_cloud_cover(data_by_tile: Dict[str, List[Tuple[datetime, float]]],
 
 
 def process_level(level: str, start_date: date, end_date: date, requested_tiles: List[str],
-                  use_cache: bool, output_prefix: str) -> Tuple[int, int, int]:
+                  use_cache: bool, output_prefix: str,
+                  plot_average: bool = False) -> Tuple[int, int, int]:
     """
     Process a single level (L1C or L2A): discovery, extraction, summary, CSV, and plot.
     Returns (num_products, num_success, num_failed)
@@ -741,7 +872,7 @@ def process_level(level: str, start_date: date, end_date: date, requested_tiles:
 
         # Generate plot
         plot_filename = f"{output_prefix}_{level}.png"
-        plot_cloud_cover(data_by_tile, best_days, level, plot_filename)
+        plot_cloud_cover(data_by_tile, best_days, level, plot_filename, plot_average=plot_average)
 
     if failures:
         print(f"\n{level} Failed products ({len(failures)}):")
@@ -755,12 +886,85 @@ def process_level(level: str, start_date: date, end_date: date, requested_tiles:
 
 
 # ------------------------------------------------------------
+# Restore-from-CSV mode
+# ------------------------------------------------------------
+def process_restore_csv(csv_file: str,
+                        filter_start: Optional[date],
+                        filter_end: Optional[date],
+                        filter_tiles: Optional[List[str]],
+                        output_prefix: str,
+                        plot_average: bool = False):
+    """
+    Load results from a previously written CSV file, apply optional filters,
+    then regenerate the plot (and print summary statistics).
+    """
+    print(f"\n{'='*70}")
+    print(f"Restore-from-CSV mode")
+    print(f"{'='*70}")
+    print(f"  CSV file   : {csv_file}")
+    print(f"  Date filter: {filter_start} → {filter_end if filter_end else '(all)'}")
+    print(f"  Tile filter: {', '.join(filter_tiles) if filter_tiles else '(all)'}")
+
+    level = infer_level_from_csv_filename(csv_file)
+    print(f"  Inferred level: {level}")
+
+    results = load_results_from_csv(csv_file,
+                                    filter_start=filter_start,
+                                    filter_end=filter_end,
+                                    filter_tiles=filter_tiles or None)
+
+    if not results:
+        print("  No matching records found after filtering. Nothing to plot.")
+        return
+
+    # Stats
+    cloud_values = [c for _, c in results]
+    print(f"\n{level} Cloud cover statistics (filtered):")
+    print(f"  Records  : {len(results)}")
+    print(f"  Min      : {min(cloud_values):.2f}%")
+    print(f"  Max      : {max(cloud_values):.2f}%")
+    print(f"  Avg      : {sum(cloud_values)/len(cloud_values):.2f}%")
+
+    data_by_tile = organize_by_tile_and_date(results)
+    print(f"\nOrganized data for {len(data_by_tile)} tiles")
+
+    # Per-tile summary
+    print(f"\n{level} Summary by Tile (filtered):")
+    print("-" * 70)
+    print(f"{'Tile':<10} {'Obs':>6} {'Min':>8} {'Max':>8} {'Avg':>8} {'Date Range'}")
+    print("-" * 70)
+
+    for tile_id in sorted(data_by_tile.keys()):
+        tile_data = data_by_tile[tile_id]
+        tile_cloud_values = [c for _, c in tile_data]
+        tile_dates = [d for d, _ in tile_data]
+
+        tile_min = min(tile_cloud_values)
+        tile_max = max(tile_cloud_values)
+        tile_avg = sum(tile_cloud_values) / len(tile_cloud_values)
+        date_range = (f"{min(tile_dates).strftime('%Y-%m-%d')} to "
+                      f"{max(tile_dates).strftime('%Y-%m-%d')}")
+
+        print(f"{tile_id:<10} {len(tile_data):>6} {tile_min:>7.2f}% {tile_max:>7.2f}% {tile_avg:>7.2f}% {date_range}")
+
+    # Best days
+    daily_totals = compute_daily_totals(data_by_tile)
+    best_days = find_best_days(daily_totals, n=5)
+    print_best_days(best_days, data_by_tile, level)
+
+    # Plot
+    plot_filename = f"{output_prefix}_{level}.png"
+    print(f"\nGenerating plot → {plot_filename}")
+    plot_cloud_cover(data_by_tile, best_days, level, plot_filename, plot_average=plot_average)
+
+
+# ------------------------------------------------------------
 # Main
 # ------------------------------------------------------------
 def main():
     global N_WORKERS, SINGLE_THREAD
 
-    if len(sys.argv) < 4:
+    if len(sys.argv) < 2:
         print(__doc__)
         sys.exit(1)
 
@@ -769,7 +973,9 @@ def main():
     output_prefix = "cloud_cover_by_tile"
     query_l1 = False
     query_l2 = False
-    args = []
+    plot_average = False
+    restore_csv = None          # path to CSV file for --restore_csv
+    args = []                   # positional args: dates + tile IDs
 
     for arg in sys.argv[1:]:
         if arg == "--no-cache":
@@ -784,17 +990,83 @@ def main():
             N_WORKERS = int(arg.split("=")[1])
         elif arg.startswith("--output="):
             output_prefix = arg.split("=")[1]
+        elif arg == "--average":
+            plot_average = True
+        elif arg.startswith("--restore_csv="):
+            restore_csv = arg.split("=", 1)[1]
         else:
             args.append(arg)
+
+    # ------------------------------------------------------------------
+    # Restore-from-CSV mode
+    # ------------------------------------------------------------------
+    if restore_csv is not None:
+        # Positional args in restore mode are all optional:
+        #   [yyyymmdd_start] [yyyymmdd_end] [TILE_ID ...]
+        # We try to parse the first two positional args as dates; anything
+        # that doesn't look like a date is treated as a tile ID.
+        filter_start: Optional[date] = None
+        filter_end: Optional[date] = None
+        filter_tiles: List[str] = []
+
+        remaining = list(args)
+
+        # Try to parse up to two leading dates
+        parsed_dates: List[date] = []
+        while remaining and len(parsed_dates) < 2:
+            candidate = remaining[0]
+            if re.match(r'^\d{8}$', candidate):
+                try:
+                    parsed_dates.append(parse_yyyymmdd(candidate))
+                    remaining.pop(0)
+                    continue
+                except ValueError:
+                    pass
+            break
+
+        if len(parsed_dates) == 2:
+            filter_start, filter_end = parsed_dates[0], parsed_dates[1]
+            if filter_start > filter_end:
+                raise ValueError("Start date must be <= end date")
+        elif len(parsed_dates) == 1:
+            # Single date means start == end (one specific day)
+            filter_start = filter_end = parsed_dates[0]
+
+        # Anything left is tile IDs
+        filter_tiles = remaining
+
+        print(f"\n{'='*70}")
+        print(f"Sentinel-2 Cloud Cover - Restore from CSV")
+        print(f"{'='*70}")
+        print(f"CSV file       : {restore_csv}")
+        print(f"Date filter    : {filter_start} → {filter_end}")
+        print(f"Tile filter    : {filter_tiles if filter_tiles else '(all)'}")
+        print(f"Plot average   : {plot_average}")
+        print(f"Output prefix  : {output_prefix}")
+        print(f"{'='*70}")
+
+        process_restore_csv(
+            csv_file=restore_csv,
+            filter_start=filter_start,
+            filter_end=filter_end if filter_end else None,
+            filter_tiles=filter_tiles if filter_tiles else None,
+            output_prefix=output_prefix,
+            plot_average=plot_average,
+        )
+        return
+
+    # ------------------------------------------------------------------
+    # Normal (download) mode
+    # ------------------------------------------------------------------
+    if len(args) < 3:
+        print("Error: Need at least start_date, end_date, and one tile ID")
+        print(__doc__)
+        sys.exit(1)
 
     # Default: query both if neither specified
     if not query_l1 and not query_l2:
         query_l1 = True
         query_l2 = True
-
-    if len(args) < 3:
-        print("Error: Need at least start_date, end_date, and one tile ID")
-        sys.exit(1)
 
     start_date = parse_yyyymmdd(args[0])
     end_date = parse_yyyymmdd(args[1])
@@ -821,6 +1093,7 @@ def main():
     print(f"Single-thread mode: {SINGLE_THREAD}")
     print(f"Cache: {'enabled' if use_cache else 'disabled'}")
     print(f"Output prefix: {output_prefix}")
+    print(f"Plot average: {plot_average}")
     print(f"{'='*70}")
 
     t_total_start = time.time()
@@ -829,7 +1102,8 @@ def main():
     total_stats = {}
     for level in levels_to_query:
         num_products, num_success, num_failed = process_level(
-            level, start_date, end_date, requested_tiles, use_cache, output_prefix
+            level, start_date, end_date, requested_tiles, use_cache, output_prefix,
+            plot_average=plot_average,
         )
         total_stats[level] = (num_products, num_success, num_failed)
 
