@@ -4,7 +4,7 @@ Date ordering
 
 from datetime import datetime, timedelta
 
-from fire_mapping.raster import Raster
+from s2lookback.raster import Raster
 
 
 def extract_datetime(
