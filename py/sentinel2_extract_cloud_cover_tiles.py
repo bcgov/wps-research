@@ -716,9 +716,19 @@ def compute_daily_totals(data_by_tile: Dict[str, List[Tuple[datetime, float]]]) 
     }
 
 
-def find_best_days(daily_totals: Dict[date, Tuple[float, int]], n: int = 5) -> List[Tuple[date, float, int]]:
-    """Find the N days with lowest mosaic-total cloud coverage."""
-    sorted_days = sorted(daily_totals.items(), key=lambda x: x[1][0])
+def find_best_days(daily_totals: Dict[date, Tuple[float, int]], n: int = 5,
+                   use_average: bool = False) -> List[Tuple[date, float, int]]:
+    """Find the N days with lowest mosaic cloud coverage.
+
+    When use_average=True, ranks by mean cloud across tiles (sum/count) so
+    the ranking matches what the average curve shows.  Otherwise ranks by
+    raw sum (default, consistent with non-average mode).
+    """
+    def sort_key(item):
+        total, count = item[1]
+        return (total / count) if (use_average and count > 0) else total
+
+    sorted_days = sorted(daily_totals.items(), key=sort_key)
     return [(day, total, count) for day, (total, count) in sorted_days[:n]]
 
 
@@ -805,34 +815,28 @@ def plot_cloud_cover(data_by_tile: Dict[str, List[Tuple[datetime, float]]],
                 label='Average (all tiles, mosaic)')
 
     # ------------------------------------------------------------------
-    # Best-day markers — placed at each tile's mosaic cloud value on that
-    # day (most recent observation on or before the best day), so markers
-    # appear even for tiles that didn't acquire on that exact date.
+    # Best-day markers — exactly one X per best day, placed on the average
+    # curve value for that day (mosaic mean across all tiles).  This keeps
+    # the marker count to exactly 5 and pins them to the curve being ranked.
     # ------------------------------------------------------------------
     best_day_dates = {d for d, _, _ in best_days}
     mosaic = build_mosaic_state(data_by_tile)
 
-    # Build a lookup: tile_id -> sorted list of (date, cloud_pct) for step-plotting
-    tile_sorted: Dict[str, List[Tuple[date, float]]] = {
-        tile_id: sorted(
-            {dt.date(): cloud for dt, cloud in tile_data}.items()
-        )
-        for tile_id, tile_data in data_by_tile.items()
-    }
-
-    for best_date in best_day_dates:
+    for best_date in sorted(best_day_dates):
         day_mosaic = mosaic.get(best_date, {})
-        for tile_id, mosaic_cloud in day_mosaic.items():
-            ax.scatter(
-                [datetime.combine(best_date, datetime.min.time())],
-                [mosaic_cloud],
-                marker='X',
-                s=150,
-                c='red',
-                zorder=10,
-                edgecolors='darkred',
-                linewidths=1,
-            )
+        if not day_mosaic:
+            continue
+        mosaic_mean = sum(day_mosaic.values()) / len(day_mosaic)
+        ax.scatter(
+            [datetime.combine(best_date, datetime.min.time())],
+            [mosaic_mean],
+            marker='X',
+            s=200,
+            c='red',
+            zorder=10,
+            edgecolors='darkred',
+            linewidths=1,
+        )
 
     ax.scatter([], [], marker='X', s=150, c='red', edgecolors='darkred',
                linewidths=1, label='Best 5 days (lowest mosaic cloud)')
@@ -981,7 +985,7 @@ def process_level(level: str, start_date: date, end_date: date, requested_tiles:
 
         # Find and print best days
         daily_totals = compute_daily_totals(data_by_tile)
-        best_days = find_best_days(daily_totals, n=5)
+        best_days = find_best_days(daily_totals, n=5, use_average=plot_average)
         print_best_days(best_days, data_by_tile, level)
 
         # Generate plot
@@ -1066,7 +1070,7 @@ def process_restore_csv(csv_file: str,
 
     # Best days
     daily_totals = compute_daily_totals(data_by_tile)
-    best_days = find_best_days(daily_totals, n=5)
+    best_days = find_best_days(daily_totals, n=5, use_average=plot_average)
     print_best_days(best_days, data_by_tile, level)
 
     # Plot
@@ -1246,3 +1250,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
