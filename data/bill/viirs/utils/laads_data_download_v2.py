@@ -159,12 +159,8 @@ def sync(src, dest, tok):
                     except OSError:
                         pass
             elif os.path.exists(path) and not _HAS_NETCDF4:
-                # Can't validate but file exists — replace it
-                print(f'  replacing: {path}')
-                try:
-                    os.remove(path)
-                except OSError:
-                    pass
+                print(f'  skipping (exists): {f["name"]}')
+                continue
 
             # Download (or re-download)
             try:

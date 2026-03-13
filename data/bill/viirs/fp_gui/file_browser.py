@@ -42,6 +42,7 @@ class FileBrowserDialog:
         filetypes: Optional[List[Tuple[str, str]]] = None,
         allow_create_folder: bool = False,
         current_value: str = "",
+        select_label: str = "Select",
     ):
         self._parent = parent
         self._mode = mode
@@ -49,6 +50,7 @@ class FileBrowserDialog:
         self._allow_create_folder = allow_create_folder
         self._result: Optional[str] = None
         self._initial_selected: str = current_value or ""
+        self._select_label = select_label
 
         self._history: List[str] = []
 
@@ -168,7 +170,8 @@ class FileBrowserDialog:
         btn_frame.grid(row=0, column=2, padx=(8, 0))
 
         tk.Button(
-            btn_frame, text="  Select  ", bg="#4CAF50", fg="white",
+            btn_frame, text=f"  {self._select_label}  ",
+            bg="#4CAF50", fg="white",
             font=("TkDefaultFont", 9, "bold"), activebackground="#388E3C",
             command=self._on_select,
         ).pack(side=tk.LEFT, padx=4)
@@ -435,11 +438,13 @@ def browse_file(
     filetypes: Optional[List[Tuple[str, str]]] = None,
     allow_create_folder: bool = False,
     current_value: str = "",
+    select_label: str = "Select",
 ) -> Optional[str]:
     dlg = FileBrowserDialog(
         parent, title=title, initial_dir=initial_dir,
         mode="file", filetypes=filetypes,
         allow_create_folder=allow_create_folder,
         current_value=current_value,
+        select_label=select_label,
     )
     return dlg.result

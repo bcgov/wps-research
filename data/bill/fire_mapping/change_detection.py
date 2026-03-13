@@ -11,7 +11,7 @@ from fire_mapping.raster import Raster
 
 from misc import htrim_3d
 
-from plot_tools import plot_multiple
+from fire_mapping.plot_tools import plot_multiple
 
 
 def change_detection(
