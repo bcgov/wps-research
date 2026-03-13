@@ -72,12 +72,18 @@ def _print_global_status():
 
 
 def resample(fn, target_label):
-    """Resample fn -> /ram/, return output path."""
+    """Resample fn -> /ram/, return (cmd_or_None, output_path).
+
+    If the resampled intermediate already exists on /ram/ it is reused and
+    no command is returned (caller should not re-run it).  The caller still
+    removes the file after use, so stale intermediates don't accumulate.
+    """
     basename = os.path.basename(fn)
     ofn = os.path.join('/ram', basename[:-4] + '_resample.bin')
 
     if exists(ofn):
-        os.remove(ofn)
+        print(f'[RESAMPLE skip] {ofn} already exists', flush=True)
+        return [None, ofn]
 
     cmd = ' '.join(['gdalwarp',
                     '-wo NUM_THREADS=4',
@@ -135,15 +141,20 @@ def process_job(job):
     cmds, resampled_files = [], []
     for m in to_merge:
         cmd, resampled_file = resample(m, target_label)
-        cmds.append(cmd)
+        if cmd is not None:
+            cmds.append(cmd)
         resampled_files.append(resampled_file)
 
-    parfor(run, cmds, int(mp.cpu_count()))
+    if cmds:
+        parfor(run, cmds, int(mp.cpu_count()))
+    else:
+        print(f'[RESAMPLE skip all] all intermediates already exist for {target_label}', flush=True)
+
     rs_elapsed = time.time() - t0
 
     with stats_lock:
         resample_times.append(rs_elapsed)
-    print(f'[RESAMPLE done] target={target_label} | files={len(cmds)} | elapsed={rs_elapsed:.1f}s', flush=True)
+    print(f'[RESAMPLE done] target={target_label} | files={len(cmds)} run, {len(resampled_files) - len(cmds)} skipped | elapsed={rs_elapsed:.1f}s', flush=True)
     _print_global_status()
 
     # --- merge / assembly phase ---
@@ -316,4 +327,5 @@ for t in threads:
     t.join()
 
 print('[DONE] all jobs complete.', flush=True)
+
 
