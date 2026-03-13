@@ -50,7 +50,7 @@ Example:
     sentinel2_extract_cloud_cover_tiles.py 20240601 20240901 --restore_csv=cloud_cover_by_tile_L2A.csv --utm_zone=T09
     sentinel2_extract_cloud_cover_tiles.py 20240501 20240901 T10UFB T10UFA T09VXE --utm_zone=T10 --L2
 
-python3 sentinel2_extract_cloud_cover_tiles.py 20230420 20251111 T10VDJ T09VXE T10UDD T10UEF T10VEH T10UCD T10UDG T10UFE T10UFG T10UEE T10VCH T10VDH T11VLE T11VLC T09UYU T10VCM T10VEM T09VXC T09VXG T10UDE T10VCJ T10VFM T10UFF T10VCL T10VEJ T10VFL T10UGE T11ULT T11UMU T10UDF T10VDM T09VXF T10UFD T09VWC T10VEL T09VVE T09VWE T10VDL T10VFK T09VWG T11UMT T10UGC T10UCE T11ULA T10VFJ T10UEG T09VVF T10UED T10VFH T10UGD T11ULU T09VWF T11ULB T09VWD T09UXB T10UCG T10VCK T11ULV T11VLD T10UCF T11VLF T10VDK T10VEK T09UYV T09VXD T11VLG --L2 --workers=16
+sentinel2_extract_cloud_cover_tiles.py 20230420 20251111 T10VDJ T09VXE T10UDD T10UEF T10VEH T10UCD T10UDG T10UFE T10UFG T10UEE T10VCH T10VDH T11VLE T11VLC T09UYU T10VCM T10VEM T09VXC T09VXG T10UDE T10VCJ T10VFM T10UFF T10VCL T10VEJ T10VFL T10UGE T11ULT T11UMU T10UDF T10VDM T09VXF T10UFD T09VWC T10VEL T09VVE T09VWE T10VDL T10VFK T09VWG T11UMT T10UGC T10UCE T11ULA T10VFJ T10UEG T09VVF T10UED T10VFH T10UGD T11ULU T09VWF T11ULB T09VWD T09UXB T10UCG T10VCK T11ULV T11VLD T10UCF T11VLF T10VDK T10VEK T09UYV T09VXD T11VLG --L2 --workers=16
 """
 
 import sys
@@ -629,68 +629,123 @@ def aggregate_by_day(tile_data: List[Tuple[datetime, float]]) -> Tuple[List[date
     return dates, averages
 
 
-def compute_average_curve(data_by_tile: Dict[str, List[Tuple[datetime, float]]]) -> Tuple[List[datetime], List[float]]:
+def build_mosaic_state(data_by_tile: Dict[str, List[Tuple[datetime, float]]]) -> Dict[date, Dict[str, float]]:
     """
-    Compute the per-day average cloud cover across all tiles.
-    For each day, average the per-tile daily averages (so each tile contributes
-    equally regardless of how many observations it has on that day).
-    Returns (sorted_dates, avg_cloud_pct_per_date).
-    """
-    # First aggregate each tile to daily averages
-    daily_per_tile: Dict[date, List[float]] = defaultdict(list)
+    Build a "rolling mosaic" state: for every calendar day that has at least
+    one new acquisition across any tile, return a snapshot of the most recent
+    cloud cover value for *every* tile as of that day.
 
+    Algorithm
+    ---------
+    1. Collect every unique observation date across all tiles.
+    2. Walk those dates in order, maintaining a per-tile "last known" value.
+    3. On each date where at least one tile has a new observation, update that
+       tile's last-known value (using the mean if multiple acquisitions landed
+       on the same day), then record the full mosaic state for that date.
+
+    Only dates that actually carry at least one new observation are stored, so
+    the returned dict has exactly as many keys as there are unique observation
+    dates in the dataset.  Tiles that have never yet been observed by a given
+    date are simply absent from that date's snapshot.
+
+    Returns
+    -------
+    Dict mapping date -> {tile_id: most_recent_cloud_pct}
+    """
+    # Per-tile sorted observation lists (date -> mean cloud for that day)
+    tile_daily: Dict[str, Dict[date, float]] = {}
     for tile_id, tile_data in data_by_tile.items():
         by_day: Dict[date, List[float]] = defaultdict(list)
         for dt, cloud_pct in tile_data:
             by_day[dt.date()].append(cloud_pct)
-        for day, values in by_day.items():
-            daily_per_tile[day].append(sum(values) / len(values))
+        tile_daily[tile_id] = {d: sum(v) / len(v) for d, v in by_day.items()}
 
-    days = sorted(daily_per_tile.keys())
+    # All unique observation dates across all tiles, sorted
+    all_obs_dates = sorted({d for td in tile_daily.values() for d in td})
+
+    mosaic: Dict[date, Dict[str, float]] = {}
+    last_known: Dict[str, float] = {}
+
+    for obs_date in all_obs_dates:
+        # Update last-known values for tiles that have data on this date
+        for tile_id, daily in tile_daily.items():
+            if obs_date in daily:
+                last_known[tile_id] = daily[obs_date]
+        # Snapshot the full mosaic (copy so later updates don't mutate it)
+        mosaic[obs_date] = dict(last_known)
+
+    return mosaic
+
+
+def compute_average_curve(data_by_tile: Dict[str, List[Tuple[datetime, float]]]) -> Tuple[List[datetime], List[float]]:
+    """
+    Compute the per-day average cloud cover across all tiles using the rolling
+    mosaic state: for each observation date, average the most-recent cloud
+    cover for every tile that has been seen at least once by that date.
+    Returns (sorted_dates, avg_cloud_pct_per_date).
+    """
+    mosaic = build_mosaic_state(data_by_tile)
+
+    days = sorted(mosaic.keys())
     dates = [datetime.combine(d, datetime.min.time()) for d in days]
-    averages = [sum(daily_per_tile[d]) / len(daily_per_tile[d]) for d in days]
+    averages = [
+        sum(mosaic[d].values()) / len(mosaic[d])
+        for d in days
+    ]
 
     return dates, averages
 
 
 def compute_daily_totals(data_by_tile: Dict[str, List[Tuple[datetime, float]]]) -> Dict[date, Tuple[float, int]]:
-    """Compute total cloud coverage across all tiles for each day."""
-    daily_totals = defaultdict(lambda: [0.0, 0])
+    """
+    Compute the mosaic-based total cloud score for each observation date.
 
-    for tile_id, tile_data in data_by_tile.items():
-        for dt, cloud_pct in tile_data:
-            day = dt.date()
-            daily_totals[day][0] += cloud_pct
-            daily_totals[day][1] += 1
+    For every date that has at least one new acquisition, the score is the
+    *sum* of the most-recent cloud cover across all tiles seen so far
+    (not just tiles that acquired on that exact day).  This means every day
+    is scored on equal footing — a day with only one new acquisition still
+    contributes the full mosaic state for ranking purposes.
 
-    return {day: (vals[0], vals[1]) for day, vals in daily_totals.items()}
+    Returns dict mapping date -> (sum_of_mosaic_cloud, num_tiles_in_mosaic).
+    """
+    mosaic = build_mosaic_state(data_by_tile)
+
+    return {
+        day: (sum(tile_vals.values()), len(tile_vals))
+        for day, tile_vals in mosaic.items()
+    }
 
 
 def find_best_days(daily_totals: Dict[date, Tuple[float, int]], n: int = 5) -> List[Tuple[date, float, int]]:
-    """Find the N days with lowest total cloud coverage."""
+    """Find the N days with lowest mosaic-total cloud coverage."""
     sorted_days = sorted(daily_totals.items(), key=lambda x: x[1][0])
     return [(day, total, count) for day, (total, count) in sorted_days[:n]]
 
 
-def print_best_days(best_days: List[Tuple[date, float, int]], data_by_tile: Dict[str, List[Tuple[datetime, float]]], level: str):
-    """Print details about the best days."""
+def print_best_days(best_days: List[Tuple[date, float, int]],
+                    data_by_tile: Dict[str, List[Tuple[datetime, float]]],
+                    level: str):
+    """Print details about the best days using the mosaic state."""
+    mosaic = build_mosaic_state(data_by_tile)
+
     print(f"\n" + "=" * 70)
-    print(f"BEST 5 DAYS - {level} (Lowest Total Cloud Coverage Across All Tiles)")
+    print(f"BEST 5 DAYS - {level} (Lowest Mosaic Cloud Coverage Across All Tiles)")
+    print(f"  (Each tile contributes its most recent observation on or before that date)")
     print("=" * 70)
 
-    for rank, (day, total_cloud, num_obs) in enumerate(best_days, 1):
-        avg_cloud = total_cloud / num_obs if num_obs > 0 else 0
+    for rank, (day, total_cloud, num_tiles) in enumerate(best_days, 1):
+        avg_cloud = total_cloud / num_tiles if num_tiles > 0 else 0
         print(f"\n#{rank}: {day.strftime('%Y-%m-%d')}")
-        print(f"    Total cloud sum: {total_cloud:.2f}%")
-        print(f"    Number of observations: {num_obs}")
-        print(f"    Average cloud per tile: {avg_cloud:.2f}%")
+        print(f"    Mosaic cloud sum : {total_cloud:.2f}%  ({num_tiles} tiles)")
+        print(f"    Average per tile : {avg_cloud:.2f}%")
 
-        print(f"    Per-tile breakdown:")
-        for tile_id in sorted(data_by_tile.keys()):
-            tile_data = data_by_tile[tile_id]
-            for dt, cloud_pct in tile_data:
-                if dt.date() == day:
-                    print(f"      {tile_id}: {cloud_pct:.2f}%")
+        day_mosaic = mosaic.get(day, {})
+        print(f"    Per-tile mosaic breakdown (most recent value as of this date):")
+        for tile_id in sorted(day_mosaic.keys()):
+            # Flag tiles that actually acquired on this exact day
+            tile_daily = {dt.date(): cloud for dt, cloud in data_by_tile.get(tile_id, [])}
+            tag = " ← new acquisition" if day in tile_daily else " (carried forward)"
+            print(f"      {tile_id}: {day_mosaic[tile_id]:.2f}%{tag}")
 
 
 def plot_cloud_cover(data_by_tile: Dict[str, List[Tuple[datetime, float]]],
@@ -711,8 +766,8 @@ def plot_cloud_cover(data_by_tile: Dict[str, List[Tuple[datetime, float]]],
     output_file : str
         Path to write the PNG to.
     plot_average : bool
-        When True, overlays a thick dashed black line showing the average of
-        all tiles' per-day cloud cover curves.
+        When True, overlays a thick dashed black line showing the rolling-mosaic
+        average cloud cover across all tiles (most recent value per tile per day).
     """
     if not HAS_MATPLOTLIB:
         print("Skipping plot generation (matplotlib not available)")
@@ -738,7 +793,7 @@ def plot_cloud_cover(data_by_tile: Dict[str, List[Tuple[datetime, float]]],
                 label=f"{tile_id} ({len(tile_data)} obs)")
 
     # ------------------------------------------------------------------
-    # Average curve overlay
+    # Average curve overlay — uses rolling mosaic (most recent per tile)
     # ------------------------------------------------------------------
     if plot_average and len(data_by_tile) > 0:
         avg_dates, avg_values = compute_average_curve(data_by_tile)
@@ -747,23 +802,40 @@ def plot_cloud_cover(data_by_tile: Dict[str, List[Tuple[datetime, float]]],
                 linewidth=3,
                 color='black',
                 zorder=9,
-                label='Average (all tiles)')
+                label='Average (all tiles, mosaic)')
 
-    best_day_dates = [d for d, _, _ in best_days]
+    # ------------------------------------------------------------------
+    # Best-day markers — placed at each tile's mosaic cloud value on that
+    # day (most recent observation on or before the best day), so markers
+    # appear even for tiles that didn't acquire on that exact date.
+    # ------------------------------------------------------------------
+    best_day_dates = {d for d, _, _ in best_days}
+    mosaic = build_mosaic_state(data_by_tile)
 
-    for tile_id, tile_data in data_by_tile.items():
-        for dt, cloud_pct in tile_data:
-            if dt.date() in best_day_dates:
-                ax.scatter([dt], [cloud_pct],
-                          marker='X',
-                          s=150,
-                          c='red',
-                          zorder=10,
-                          edgecolors='darkred',
-                          linewidths=1)
+    # Build a lookup: tile_id -> sorted list of (date, cloud_pct) for step-plotting
+    tile_sorted: Dict[str, List[Tuple[date, float]]] = {
+        tile_id: sorted(
+            {dt.date(): cloud for dt, cloud in tile_data}.items()
+        )
+        for tile_id, tile_data in data_by_tile.items()
+    }
+
+    for best_date in best_day_dates:
+        day_mosaic = mosaic.get(best_date, {})
+        for tile_id, mosaic_cloud in day_mosaic.items():
+            ax.scatter(
+                [datetime.combine(best_date, datetime.min.time())],
+                [mosaic_cloud],
+                marker='X',
+                s=150,
+                c='red',
+                zorder=10,
+                edgecolors='darkred',
+                linewidths=1,
+            )
 
     ax.scatter([], [], marker='X', s=150, c='red', edgecolors='darkred',
-               linewidths=1, label=f'Best 5 days (lowest total cloud)')
+               linewidths=1, label='Best 5 days (lowest mosaic cloud)')
 
     ax.set_xlabel("Date", fontsize=12)
     ax.set_ylabel("Cloud Cover (%)", fontsize=12)
