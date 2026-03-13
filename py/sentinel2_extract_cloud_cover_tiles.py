@@ -716,45 +716,55 @@ def compute_daily_totals(data_by_tile: Dict[str, List[Tuple[datetime, float]]]) 
     }
 
 
-def find_best_days(daily_totals: Dict[date, Tuple[float, int]], n: int = 5,
-                   use_average: bool = False) -> List[Tuple[date, float, int]]:
-    """Find the N days with lowest mosaic cloud coverage.
+def find_best_day_per_month(daily_totals: Dict[date, Tuple[float, int]],
+                            use_average: bool = False) -> List[Tuple[date, float, int]]:
+    """Return the single best observation day for each calendar month present
+    in daily_totals.
 
-    When use_average=True, ranks by mean cloud across tiles (sum/count) so
-    the ranking matches what the average curve shows.  Otherwise ranks by
-    raw sum (default, consistent with non-average mode).
+    'Best' means lowest mosaic mean (sum/count) when use_average=True, or
+    lowest mosaic sum otherwise — consistent with the quantity being plotted.
+
+    Returns a list of (day, total, count) sorted chronologically by month.
     """
-    def sort_key(item):
-        total, count = item[1]
+    def score(total, count):
         return (total / count) if (use_average and count > 0) else total
 
-    sorted_days = sorted(daily_totals.items(), key=sort_key)
-    return [(day, total, count) for day, (total, count) in sorted_days[:n]]
+    # Group by (year, month)
+    by_month: Dict[Tuple[int, int], List[Tuple[date, float, int]]] = defaultdict(list)
+    for day, (total, count) in daily_totals.items():
+        by_month[(day.year, day.month)].append((day, total, count))
+
+    best = []
+    for ym in sorted(by_month.keys()):
+        month_days = by_month[ym]
+        best_day = min(month_days, key=lambda x: score(x[1], x[2]))
+        best.append(best_day)
+
+    return best
 
 
 def print_best_days(best_days: List[Tuple[date, float, int]],
                     data_by_tile: Dict[str, List[Tuple[datetime, float]]],
                     level: str):
-    """Print details about the best days using the mosaic state."""
+    """Print details about the best day per calendar month using the mosaic state."""
     mosaic = build_mosaic_state(data_by_tile)
 
     print(f"\n" + "=" * 70)
-    print(f"BEST 5 DAYS - {level} (Lowest Mosaic Cloud Coverage Across All Tiles)")
+    print(f"BEST DAY PER MONTH - {level} (Lowest Mosaic Cloud Coverage)")
     print(f"  (Each tile contributes its most recent observation on or before that date)")
     print("=" * 70)
 
-    for rank, (day, total_cloud, num_tiles) in enumerate(best_days, 1):
+    for day, total_cloud, num_tiles in best_days:
         avg_cloud = total_cloud / num_tiles if num_tiles > 0 else 0
-        print(f"\n#{rank}: {day.strftime('%Y-%m-%d')}")
+        print(f"\n{day.strftime('%Y-%m')}  ->  best day: {day.strftime('%Y-%m-%d')}")
         print(f"    Mosaic cloud sum : {total_cloud:.2f}%  ({num_tiles} tiles)")
         print(f"    Average per tile : {avg_cloud:.2f}%")
 
         day_mosaic = mosaic.get(day, {})
         print(f"    Per-tile mosaic breakdown (most recent value as of this date):")
         for tile_id in sorted(day_mosaic.keys()):
-            # Flag tiles that actually acquired on this exact day
             tile_daily = {dt.date(): cloud for dt, cloud in data_by_tile.get(tile_id, [])}
-            tag = " ← new acquisition" if day in tile_daily else " (carried forward)"
+            tag = " <- new acquisition" if day in tile_daily else " (carried forward)"
             print(f"      {tile_id}: {day_mosaic[tile_id]:.2f}%{tag}")
 
 
@@ -770,7 +780,7 @@ def plot_cloud_cover(data_by_tile: Dict[str, List[Tuple[datetime, float]]],
     data_by_tile : dict
         Mapping of tile_id -> list of (datetime, cloud_pct).
     best_days : list
-        Output of find_best_days(), used to highlight best-day markers.
+        Output of find_best_day_per_month(), used to highlight best-day markers.
     level : str
         Level string used in plot title (e.g. 'L1C' or 'L2A').
     output_file : str
@@ -815,9 +825,8 @@ def plot_cloud_cover(data_by_tile: Dict[str, List[Tuple[datetime, float]]],
                 label='Average (all tiles, mosaic)')
 
     # ------------------------------------------------------------------
-    # Best-day markers — exactly one X per best day, placed on the average
-    # curve value for that day (mosaic mean across all tiles).  This keeps
-    # the marker count to exactly 5 and pins them to the curve being ranked.
+    # Best-day markers — one X per calendar month (best day of that month),
+    # placed on the mosaic mean for that day so it sits on the average curve.
     # ------------------------------------------------------------------
     best_day_dates = {d for d, _, _ in best_days}
     mosaic = build_mosaic_state(data_by_tile)
@@ -839,7 +848,7 @@ def plot_cloud_cover(data_by_tile: Dict[str, List[Tuple[datetime, float]]],
         )
 
     ax.scatter([], [], marker='X', s=150, c='red', edgecolors='darkred',
-               linewidths=1, label='Best 5 days (lowest mosaic cloud)')
+               linewidths=1, label='Best day per month (lowest mosaic cloud)')
 
     ax.set_xlabel("Date", fontsize=12)
     ax.set_ylabel("Cloud Cover (%)", fontsize=12)
@@ -985,7 +994,7 @@ def process_level(level: str, start_date: date, end_date: date, requested_tiles:
 
         # Find and print best days
         daily_totals = compute_daily_totals(data_by_tile)
-        best_days = find_best_days(daily_totals, n=5, use_average=plot_average)
+        best_days = find_best_day_per_month(daily_totals, use_average=plot_average)
         print_best_days(best_days, data_by_tile, level)
 
         # Generate plot
@@ -1070,7 +1079,7 @@ def process_restore_csv(csv_file: str,
 
     # Best days
     daily_totals = compute_daily_totals(data_by_tile)
-    best_days = find_best_days(daily_totals, n=5, use_average=plot_average)
+    best_days = find_best_day_per_month(daily_totals, use_average=plot_average)
     print_best_days(best_days, data_by_tile, level)
 
     # Plot
@@ -1250,5 +1259,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
