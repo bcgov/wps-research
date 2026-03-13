@@ -33,18 +33,10 @@ class FireAccumulationGUI:
     Top-level GUI for the VIIRS fire pixel accumulation viewer.
 
     Layout (vertical, top-to-bottom):
-        1. Data Loader    -- raster + shapefile paths
-        2. Date & Download -- date range, apply filter, token, download
-        3. Playback       -- play/pause, skip, speed, frame slider
-        4. Tools          -- accumulate/rasterize, nav, layer toggles
-
-    Navigation:
-        Pan        -- drag to move the map
-        Zoom +     -- draw green rectangle to zoom in
-        Zoom -     -- draw red rectangle to zoom out
-        Scroll     -- zoom in / out at cursor (any mode)
-        Left-click -- pixel detail popup (any mode, if not a drag)
-        Right-click-- pixel detail popup (any mode)
+        1. Data Loader    -- raster load + shapefile status
+        2. Date & Download -- date range, apply filter, download
+        3. Ref & Output   -- reference raster, auto-computed output
+        4. Navigation     -- pan/zoom, layer toggles
     """
 
     def __init__(self):
@@ -78,6 +70,12 @@ class FireAccumulationGUI:
         # Working directory (set when raster is loaded)
         self._working_dir: Optional[str] = None
 
+        # Full paths (UI shows basenames only)
+        self._raster_full_path: str = ""
+        self._base_raster_full_path: str = ""
+        self._viirs_dir: str = ""
+        self._acc_output_full_path: str = ""
+
         # Token
         self._token: str = ""
         self._token_loaded = False
@@ -110,9 +108,6 @@ class FireAccumulationGUI:
         self._base_raster_var = tk.StringVar()
         self._acc_output_dir_var = tk.StringVar()
 
-        # Sync: when raster_path changes, default base_raster if empty
-        self._raster_path_var.trace_add("write", self._sync_base_raster)
-
         # Slider throttle
         self._slider_throttle_id = None
         self._slider_release_id = None
@@ -143,9 +138,9 @@ class FireAccumulationGUI:
     # ==================================================================
     # UI construction — compact 3-row layout for maximum canvas space
     #
-    #   Row 1: [Config] Raster:[___][Browse][Load] | Shapefiles:[___][Browse][Load]
-    #   Row 2: Start[__] End[__] [Apply] 🔑 [⬇Download] | ▶⏮ ←Skip[n]Skip→ Speed[__] Frame[===slider===]
-    #   Row 3: LEFT: Ref:[___][Browse] Out:[___][Browse] [Accum&Rast]  |  RIGHT: Pan Zoom+ Zoom- ⌂ ☑Fire ☑Bg
+    #   Row 1: [Config] Raster:[name][Load] | Shapefiles: [status]
+    #   Row 2: Start[__] End[__] [Apply] [Download] | Playback controls
+    #   Row 3: LEFT: Ref:[name][Browse]  |  RIGHT: Pan Zoom+ Zoom- Home Fire Bg
     # ==================================================================
 
     def _build_ui(self):
@@ -170,29 +165,20 @@ class FireAccumulationGUI:
                    width=3).pack(side=tk.LEFT, padx=(0, 4))
 
         ttk.Label(row1, text="Raster:", font=_font).pack(side=tk.LEFT)
-        ttk.Entry(row1, textvariable=self._raster_path_var, width=28).pack(
-            side=tk.LEFT, padx=2)
+        raster_entry = ttk.Entry(row1, textvariable=self._raster_path_var,
+                                 width=28)
+        raster_entry.pack(side=tk.LEFT, padx=2)
+        raster_entry.bind("<Return>", lambda _: self._load_raster_from_entry())
         ttk.Button(row1, text="Browse",
                    command=self._browse_raster).pack(side=tk.LEFT)
-        ttk.Button(row1, text="Load",
-                   command=self._load_raster).pack(side=tk.LEFT, padx=(2, 0))
-        ttk.Button(row1, text="\u2715", width=2,
-                   command=lambda: self._raster_path_var.set("")).pack(
-            side=tk.LEFT, padx=(0, 2))
 
         ttk.Separator(row1, orient=tk.VERTICAL).pack(
             side=tk.LEFT, padx=6, fill=tk.Y, pady=1)
 
         ttk.Label(row1, text="Shapefiles:", font=_font).pack(side=tk.LEFT)
-        ttk.Entry(row1, textvariable=self._shapefile_dir_var, width=28).pack(
-            side=tk.LEFT, padx=2)
-        ttk.Button(row1, text="Browse",
-                   command=self._browse_shapefile_dir).pack(side=tk.LEFT)
-        ttk.Button(row1, text="Load",
-                   command=self._load_shapefiles).pack(side=tk.LEFT, padx=(2, 0))
-        ttk.Button(row1, text="\u2715", width=2,
-                   command=lambda: self._shapefile_dir_var.set("")).pack(
-            side=tk.LEFT, padx=(0, 2))
+        self._shp_status_label = tk.Label(
+            row1, text="not loaded", fg="gray", font=_font)
+        self._shp_status_label.pack(side=tk.LEFT, padx=4)
 
         # ==============================================================
         # ROW 2 — Date / Download  |  Playback (all one line)
@@ -209,14 +195,6 @@ class FireAccumulationGUI:
             side=tk.LEFT, padx=2)
         ttk.Button(row2, text="Apply",
                    command=self._apply_date_filter).pack(side=tk.LEFT, padx=2)
-
-        self._token_btn = tk.Button(
-            row2, text="\U0001f511", font=("TkDefaultFont", 10),
-            width=2, relief=tk.RAISED, cursor="hand2",
-            command=self._manage_token,
-        )
-        self._token_btn.pack(side=tk.LEFT, padx=(4, 0))
-        self._update_token_indicator()
 
         self._download_btn = tk.Button(
             row2, text="\u2b07 Download", bg="#2196F3", fg="white",
@@ -283,28 +261,8 @@ class FireAccumulationGUI:
         ttk.Entry(acc_frame, textvariable=self._base_raster_var,
                   width=20).pack(side=tk.LEFT, padx=2)
         ttk.Button(acc_frame, text="Browse",
-                   command=self._browse_base_raster).pack(side=tk.LEFT)
-        ttk.Button(acc_frame, text="\u2715", width=2,
-                   command=lambda: self._base_raster_var.set("")).pack(
+                   command=self._browse_base_raster).pack(
             side=tk.LEFT, padx=(0, 4))
-
-        ttk.Label(acc_frame, text="Out:", font=_font).pack(side=tk.LEFT)
-        ttk.Entry(acc_frame, textvariable=self._acc_output_dir_var,
-                  width=20).pack(side=tk.LEFT, padx=2)
-        ttk.Button(acc_frame, text="Browse",
-                   command=self._browse_acc_output_dir).pack(side=tk.LEFT)
-        ttk.Button(acc_frame, text="\u2715", width=2,
-                   command=lambda: self._acc_output_dir_var.set("")).pack(
-            side=tk.LEFT, padx=(0, 4))
-
-        self._acc_btn = tk.Button(
-            acc_frame, text="Accumulate & Rasterize",
-            bg="#4CAF50", fg="white",
-            font=_font + ("bold",),
-            activebackground="#388E3C",
-            command=self._confirm_accumulate_rasterize,
-        )
-        self._acc_btn.pack(side=tk.LEFT, padx=4)
 
         ttk.Separator(acc_frame, orient=tk.VERTICAL).pack(
             side=tk.LEFT, padx=6, fill=tk.Y, pady=1)
@@ -409,66 +367,50 @@ class FireAccumulationGUI:
     # Token management
     # ==================================================================
 
-    def _manage_token(self):
-        """Popup to browse for / set the LAADS DAAC token."""
+    def _prompt_token(self) -> bool:
+        """Show popup to get LAADS DAAC token. Returns True if token was set."""
         popup = tk.Toplevel(self._root)
-        popup.title("LAADS DAAC Token")
+        popup.title("LAADS DAAC Token Required")
         popup.transient(self._root)
         popup.grab_set()
 
-        w, h = 500, 180
+        w, h = 500, 200
         sx = self._root.winfo_screenwidth()
         sy = self._root.winfo_screenheight()
         popup.geometry(f"{w}x{h}+{(sx-w)//2}+{(sy-h)//2}")
         popup.resizable(False, False)
 
-        ttk.Label(popup, text="LAADS DAAC Authentication Token",
-                  font=("TkDefaultFont", 11, "bold")).pack(pady=(12, 6))
+        result = [False]
 
-        f1 = ttk.Frame(popup)
-        f1.pack(fill=tk.X, padx=12, pady=4)
-        ttk.Label(f1, text="Token file:").pack(side=tk.LEFT)
-        token_path_var = tk.StringVar()
-        ttk.Entry(f1, textvariable=token_path_var, width=36).pack(
-            side=tk.LEFT, padx=4)
+        ttk.Label(popup, text="Token not loaded",
+                  font=("TkDefaultFont", 11, "bold")).pack(pady=(12, 4))
+        ttk.Label(popup, text=(
+            "Paste your LAADS DAAC token below, or place it at:\n"
+            "/data/.tokens/laads\n\n"
+            "To get a token, see README.md."
+        ), justify=tk.CENTER).pack(padx=12, pady=4)
 
-        def _browse_token():
-            f = filedialog.askopenfilename(
-                parent=popup, title="Select token file",
-                filetypes=[("All files", "*.*")])
-            if f:
-                token_path_var.set(f)
-                try:
-                    with open(f, "r") as fh:
-                        self._token = fh.read().strip()
-                        self._token_loaded = bool(self._token)
-                except Exception:
-                    self._token_loaded = False
-
-        ttk.Button(f1, text="Browse", command=_browse_token).pack(
-            side=tk.LEFT, padx=4)
-
-        f2 = ttk.Frame(popup)
-        f2.pack(fill=tk.X, padx=12, pady=4)
-        ttk.Label(f2, text="Or paste:").pack(side=tk.LEFT)
-        paste_var = tk.StringVar(value=self._token if self._token else "")
-        ttk.Entry(f2, textvariable=paste_var, width=40, show="*").pack(
+        f = ttk.Frame(popup)
+        f.pack(fill=tk.X, padx=12, pady=4)
+        ttk.Label(f, text="Token:").pack(side=tk.LEFT)
+        paste_var = tk.StringVar()
+        ttk.Entry(f, textvariable=paste_var, width=40, show="*").pack(
             side=tk.LEFT, padx=4, fill=tk.X, expand=True)
 
-        def _apply_token():
-            pasted = paste_var.get().strip()
-            if pasted:
-                self._token = pasted
+        def _apply():
+            val = paste_var.get().strip()
+            if val:
+                self._token = val
                 self._token_loaded = True
-            self._update_token_indicator()
+                result[0] = True
             popup.destroy()
 
         btn_f = ttk.Frame(popup)
         btn_f.pack(pady=8)
         tk.Button(
-            btn_f, text="  \u2714 Set Token  ", bg="#4CAF50", fg="white",
+            btn_f, text="  Set Token  ", bg="#4CAF50", fg="white",
             font=("TkDefaultFont", 9, "bold"), activebackground="#388E3C",
-            command=_apply_token,
+            command=_apply,
         ).pack(side=tk.LEFT, padx=8)
         tk.Button(
             btn_f, text="  Cancel  ", bg="#F44336", fg="white",
@@ -476,13 +418,8 @@ class FireAccumulationGUI:
             command=popup.destroy,
         ).pack(side=tk.LEFT, padx=8)
 
-    def _update_token_indicator(self):
-        if self._token_loaded and self._token:
-            self._token_btn.configure(bg="#4CAF50", fg="white",
-                                      activebackground="#388E3C")
-        else:
-            self._token_btn.configure(bg="#F44336", fg="white",
-                                      activebackground="#C62828")
+        popup.wait_window()
+        return result[0]
 
     # ==================================================================
     # Config dialog
@@ -599,16 +536,11 @@ class FireAccumulationGUI:
         """Set the working directory to the parent of the raster file."""
         self._working_dir = os.path.dirname(os.path.abspath(raster_path))
 
-        # Auto-fill shapefile dir to working_dir/VNP14IMG if it exists
-        vnp_dir = os.path.join(self._working_dir, "VNP14IMG")
-        if os.path.isdir(vnp_dir) and not self._shapefile_dir_var.get().strip():
-            self._shapefile_dir_var.set(vnp_dir)
-
-    def _sync_base_raster(self, *_):
+    def _sync_base_raster(self):
         """One-way: mirror the visualization raster to Reference Raster."""
-        rp = self._raster_path_var.get().strip()
-        if rp:
-            self._base_raster_var.set(rp)
+        if self._raster_full_path:
+            self._base_raster_full_path = self._raster_full_path
+            self._base_raster_var.set(os.path.basename(self._raster_full_path))
 
     def _get_initial_browse_dir(self) -> str:
         """Return working dir for browse dialogs, or home."""
@@ -616,15 +548,96 @@ class FireAccumulationGUI:
             return self._working_dir
         return os.path.expanduser("~")
 
+    def _compute_viirs_dir(self):
+        """Compute the _VIIRS download folder path from the raster path."""
+        if not self._raster_full_path:
+            self._viirs_dir = ""
+            return
+        raster_dir = os.path.dirname(self._raster_full_path)
+        raster_base = os.path.splitext(os.path.basename(
+            self._raster_full_path))[0]
+        self._viirs_dir = os.path.join(raster_dir, f"{raster_base}_VIIRS")
+
+    def _check_viirs_folder(self):
+        """Check for _VIIRS folder and auto-load shapefiles if found."""
+        if not self._viirs_dir:
+            self._update_shp_status(False)
+            return
+
+        if os.path.isdir(self._viirs_dir):
+            self._shapefile_dir_var.set(self._viirs_dir)
+            self._load_shapefiles()
+            # load_shapefiles updates status on success; if it failed
+            # (empty dir), the status will be set there
+        else:
+            self._update_shp_status(False)
+
+    def _update_shp_status(self, loaded: bool):
+        """Update the shapefile status indicator."""
+        if loaded:
+            self._shp_status_label.configure(text="Shapefile loaded",
+                                             fg="#22cc22")
+        else:
+            self._shp_status_label.configure(text="Shapefile not found",
+                                             fg="gray")
+
+    def _update_acc_output_name(self):
+        """Auto-compute accumulation output directory name from ref + dates."""
+        ref_path = self._base_raster_full_path
+        start = self._start_date_var.get().strip()
+        end = self._end_date_var.get().strip()
+
+        if not ref_path or not start or not end:
+            self._acc_output_dir_var.set("")
+            self._acc_output_full_path = ""
+            return
+
+        try:
+            # Validate dates before computing
+            date.fromisoformat(start)
+            date.fromisoformat(end)
+        except ValueError:
+            return
+
+        ref_base = os.path.splitext(os.path.basename(ref_path))[0]
+        ref_dir = os.path.dirname(ref_path)
+        start_compact = start.replace("-", "")
+        end_compact = end.replace("-", "")
+        folder_name = f"{ref_base}_{start_compact}_{end_compact}_ACCUMULATED"
+        self._acc_output_full_path = os.path.join(ref_dir, folder_name)
+        self._acc_output_dir_var.set(folder_name)
+
+    def _find_accumulated_folders(self, ref_dir, ref_base):
+        """
+        Find existing _ACCUMULATED folders for a given reference basename.
+        Returns list of (folder_name, start_compact, end_compact).
+        """
+        import re as _re
+        results = []
+        pattern = _re.compile(
+            rf'^{_re.escape(ref_base)}_(\d{{8}})_(\d{{8}})_ACCUMULATED$')
+        if not os.path.isdir(ref_dir):
+            return results
+        for name in os.listdir(ref_dir):
+            full = os.path.join(ref_dir, name)
+            if os.path.isdir(full):
+                m = pattern.match(name)
+                if m:
+                    results.append((name, m.group(1), m.group(2)))
+        return results
+
     # ==================================================================
-    # Browse helpers (all use custom browser, pass current_value)
+    # Browse helpers
     # ==================================================================
 
     def _browse_raster(self):
+        """Open file browser (with 'Load' button) and load on selection."""
         f = browse_file(
             self._root,
-            title="Select raster file",
-            initial_dir=self._get_initial_browse_dir(),
+            title="Load raster file",
+            initial_dir=(os.path.dirname(self._raster_full_path)
+                         if self._raster_full_path
+                         else self._get_initial_browse_dir()),
             filetypes=[
                 ("ENVI binary", "*.bin"),
                 ("ENVI header", "*.hdr"),
@@ -632,57 +645,73 @@ class FireAccumulationGUI:
                 ("GeoTIFF", "*.tif *.tiff"),
                 ("All files", "*.*"),
             ],
-            current_value=self._raster_path_var.get().strip(),
+            current_value=self._raster_full_path,
+            select_label="Load",
         )
         if f:
-            self._raster_path_var.set(f)
+            self._raster_full_path = f
+            self._raster_path_var.set(os.path.basename(f))
+            self._load_raster()
 
-    def _browse_shapefile_dir(self):
-        d = browse_directory(
-            self._root,
-            title="Select shapefile directory",
-            initial_dir=self._get_initial_browse_dir(),
-            current_value=self._shapefile_dir_var.get().strip(),
-        )
-        if d:
-            self._shapefile_dir_var.set(d)
+    def _load_raster_from_entry(self):
+        """Load raster from a path typed/pasted into the entry box."""
+        val = self._raster_path_var.get().strip()
+        if not val:
+            return
+
+        # If it's already just the basename of the loaded file, nothing to do
+        if (self._raster_full_path
+                and val == os.path.basename(self._raster_full_path)):
+            return
+
+        # Try as an absolute path
+        if os.path.isfile(val):
+            self._raster_full_path = os.path.abspath(val)
+            self._raster_path_var.set(os.path.basename(val))
+            self._load_raster()
+            return
+
+        # Try relative to working directory
+        if self._working_dir:
+            candidate = os.path.join(self._working_dir, val)
+            if os.path.isfile(candidate):
+                self._raster_full_path = os.path.abspath(candidate)
+                self._raster_path_var.set(os.path.basename(candidate))
+                self._load_raster()
+                return
+
+        messagebox.showwarning("Warning",
+                               f"File not found: {val}")
 
     def _browse_base_raster(self):
         f = browse_file(
             self._root,
             title="Select reference raster for rasterization",
-            initial_dir=self._get_initial_browse_dir(),
+            initial_dir=(os.path.dirname(self._base_raster_full_path)
+                         if self._base_raster_full_path
+                         else self._get_initial_browse_dir()),
             filetypes=[
                 ("ENVI binary", "*.bin"),
                 ("ENVI header", "*.hdr"),
                 ("GeoTIFF", "*.tif *.tiff"),
                 ("All files", "*.*"),
             ],
-            allow_create_folder=True,
-            current_value=self._base_raster_var.get().strip(),
+            current_value=self._base_raster_full_path,
         )
         if f:
-            self._base_raster_var.set(f)
-
-    def _browse_acc_output_dir(self):
-        d = browse_directory(
-            self._root,
-            title="Select output directory",
-            initial_dir=self._get_initial_browse_dir(),
-            allow_create_folder=True,
-            current_value=self._acc_output_dir_var.get().strip(),
-        )
-        if d:
-            self._acc_output_dir_var.set(d)
+            self._base_raster_full_path = f
+            self._base_raster_var.set(os.path.basename(f))
+            self._update_acc_output_name()
 
     # ==================================================================
     # Loading (raster must be loaded first)
     # ==================================================================
 
     def _load_raster(self):
-        raster_path = self._raster_path_var.get().strip()
+        raster_path = self._raster_full_path
         if not raster_path or not os.path.exists(raster_path):
-            messagebox.showerror("Error", "Please select a valid raster file.")
+            messagebox.showwarning("Warning",
+                                   "Could not read the selected raster file.")
             return
 
         # Preserve current animation position
@@ -713,8 +742,8 @@ class FireAccumulationGUI:
             )
         except Exception as exc:
             self._raster_loaded = False
-            messagebox.showerror("Raster Error",
-                                 f"Could not load raster:\n{exc}")
+            messagebox.showwarning("Warning",
+                                   f"Could not read raster image:\n{exc}")
             self._status_var.set("Raster load failed.")
             return
 
@@ -723,12 +752,19 @@ class FireAccumulationGUI:
 
         self._update_crs_display()
 
+        # Sync ref raster and compute VIIRS dir
+        self._sync_base_raster()
+        self._compute_viirs_dir()
+
         if (self._data_mgr.master_gdf is not None
                 and not self._data_mgr.master_gdf.empty):
             self._reclip_and_refresh()
 
         # Restore slider position
         self._restore_slider_position()
+
+        # Auto-load shapefiles from _VIIRS folder if it exists
+        self._check_viirs_folder()
 
     def _store_raster_crs_info(self, raster_path: str):
         """Read and cache WKT/EPSG from the raster for download bbox conversion."""
@@ -792,8 +828,8 @@ class FireAccumulationGUI:
 
         file_dict = self._data_mgr.scan_directory(shp_dir)
         if not file_dict:
-            messagebox.showwarning("Warning", "No matching shapefiles found.")
-            self._status_var.set("No shapefiles found.")
+            self._update_shp_status(False)
+            self._status_var.set("No shapefiles found in directory.")
             return
 
         def _lp(loaded, total):
@@ -804,8 +840,8 @@ class FireAccumulationGUI:
         gdf = self._data_mgr.load_all(progress_cb=_lp, target_crs=raster_crs)
 
         if gdf.empty:
-            messagebox.showwarning("Warning", "All shapefiles were empty.")
-            self._status_var.set("No data loaded.")
+            self._update_shp_status(False)
+            self._status_var.set("No data loaded (shapefiles empty).")
             return
 
         n_total = len(gdf)
@@ -848,6 +884,8 @@ class FireAccumulationGUI:
             f"Loaded {n_kept} pixels{raster_note} "
             f"from {len(file_dict)} files.  {min_d} \u2192 {max_d}"
         )
+        self._update_shp_status(True)
+        self._update_acc_output_name()
 
     def _reclip_and_refresh(self):
         ext = self._raster_loader.extent
@@ -938,6 +976,7 @@ class FireAccumulationGUI:
              if self._data_mgr.master_gdf is not None else 0)
         self._status_var.set(
             f"Filtered: {n} pixels,  {start} \u2192 {end}")
+        self._update_acc_output_name()
 
     # ==================================================================
     # Slider position preservation
@@ -1142,11 +1181,10 @@ class FireAccumulationGUI:
                 "The raster provides the reference CRS and bounding box.")
             return
 
+        # Handle token — prompt if not loaded
         if not self._token:
-            messagebox.showerror(
-                "Token Required",
-                "Set a LAADS DAAC token first (click the key icon).")
-            return
+            if not self._prompt_token():
+                return
 
         result = self._validate_dates()
         if result is None:
@@ -1165,7 +1203,7 @@ class FireAccumulationGUI:
             return
 
         # Compute bbox
-        raster_path = self._raster_path_var.get().strip()
+        raster_path = self._raster_full_path
         try:
             from download_dialog import _read_raster_info, _bbox_to_4326
             wkt, epsg, x_min, x_max, y_min, y_max = _read_raster_info(
@@ -1177,7 +1215,13 @@ class FireAccumulationGUI:
                                  f"Could not compute bbox:\n{exc}")
             return
 
-        save_dir = self._working_dir or os.path.dirname(raster_path)
+        # Compute VIIRS dir
+        if not self._viirs_dir:
+            self._compute_viirs_dir()
+        viirs_dir = self._viirs_dir
+
+        # Update acc output name
+        self._update_acc_output_name()
 
         # Confirmation popup
         popup = tk.Toplevel(self._root)
@@ -1185,7 +1229,7 @@ class FireAccumulationGUI:
         popup.transient(self._root)
         popup.grab_set()
 
-        w, h = 480, 200
+        w, h = 480, 240
         sx = self._root.winfo_screenwidth()
         sy = self._root.winfo_screenheight()
         popup.geometry(f"{w}x{h}+{(sx-w)//2}+{(sy-h)//2}")
@@ -1208,7 +1252,9 @@ class FireAccumulationGUI:
         epsg_str = f"EPSG:{self._ref_epsg}" if self._ref_epsg else "Unknown"
         _row("CRS:", epsg_str)
         _row("Date range:", f"{start_str}  \u2192  {end_str}")
-        _row("Save to:", save_dir)
+        _row("Save to:", os.path.basename(viirs_dir))
+        if self._acc_output_full_path:
+            _row("Accumulation:", os.path.basename(self._acc_output_full_path))
 
         btn_f = ttk.Frame(popup)
         btn_f.pack(pady=10)
@@ -1216,7 +1262,7 @@ class FireAccumulationGUI:
         def _go():
             popup.destroy()
             self._run_download(
-                self._token, start_dt, end_dt, save_dir, raster_path,
+                self._token, start_dt, end_dt, viirs_dir, raster_path,
                 west, south, east, north)
 
         tk.Button(
@@ -1230,20 +1276,20 @@ class FireAccumulationGUI:
             command=popup.destroy,
         ).pack(side=tk.LEFT, padx=8)
 
-    def _run_download(self, token, start_dt, end_dt, save_dir, ref_path,
+    def _run_download(self, token, start_dt, end_dt, viirs_dir, ref_path,
                       west, south, east, north):
         self._download_btn.configure(state=tk.DISABLED)
         self._download_cancel.clear()
 
         self._download_thread = threading.Thread(
             target=self._download_worker,
-            args=(token, start_dt, end_dt, save_dir, ref_path,
+            args=(token, start_dt, end_dt, viirs_dir, ref_path,
                   west, south, east, north),
             daemon=True,
         )
         self._download_thread.start()
 
-    def _download_worker(self, token, start_dt, end_dt, save_dir, ref_path,
+    def _download_worker(self, token, start_dt, end_dt, viirs_dir, ref_path,
                          west, south, east, north):
         product = "VNP14IMG"
         interval = datetime.timedelta(days=1)
@@ -1270,10 +1316,11 @@ class FireAccumulationGUI:
             return
 
         completed = 0
+        skipped = 0
         lock = threading.Lock()
 
         def download_one(download_day):
-            nonlocal completed
+            nonlocal completed, skipped
             if self._download_cancel.is_set():
                 return
 
@@ -1288,7 +1335,23 @@ class FireAccumulationGUI:
                 f"%20E{east:.6f}%20W{west:.6f}"
             )
             download_path = os.path.join(
-                save_dir, product, f"{year:04d}", f"{jday:03d}")
+                viirs_dir, f"{year:04d}", f"{jday:03d}")
+
+            # Check if already downloaded (has .nc files)
+            if os.path.isdir(download_path):
+                nc_files = [f for f in os.listdir(download_path)
+                            if f.lower().endswith('.nc')]
+                if nc_files:
+                    print(f"[SKIP] {download_day.strftime('%Y-%m-%d')} "
+                          f"— {len(nc_files)} .nc file(s) already exist")
+                    with lock:
+                        skipped += 1
+                        completed += 1
+                        done = completed
+                    _status(f"Downloaded {done}/{total_days} days  "
+                            f"({download_day.strftime('%Y-%m-%d')} skipped)")
+                    return
+
             os.makedirs(download_path, exist_ok=True)
 
             print(f"\n[DOWNLOAD] {download_day.strftime('%Y-%m-%d')}")
@@ -1301,7 +1364,6 @@ class FireAccumulationGUI:
                 print(f"[WARN] Download error for {download_day}: {exc}")
 
             with lock:
-                nonlocal completed
                 completed += 1
                 done = completed
 
@@ -1334,13 +1396,16 @@ class FireAccumulationGUI:
             self._download_finish()
             return
 
+        if skipped > 0:
+            print(f"\n[INFO] Download finished. "
+                  f"{skipped}/{total_days} days skipped (already exist).")
         _status("Download complete. Running shapify\u2026")
         print(f"\n[INFO] Download finished.")
 
-        self._run_shapify(save_dir, ref_path, west, south, east, north,
+        self._run_shapify(viirs_dir, ref_path, west, south, east, north,
                           _status)
 
-    def _run_shapify(self, save_dir, ref_path, west, south, east, north,
+    def _run_shapify(self, viirs_dir, ref_path, west, south, east, north,
                      _status):
         if self._download_cancel.is_set():
             self._download_finish()
@@ -1351,7 +1416,7 @@ class FireAccumulationGUI:
 
         cmd = [
             sys.executable, "-m", "viirs.utils.shapify",
-            save_dir,
+            viirs_dir,
             "-r", ref_path,
             "-w", "16",
             "--bbox",
@@ -1382,34 +1447,21 @@ class FireAccumulationGUI:
             self._shapify_proc = None
             if proc.returncode == 0:
                 # Count created shapefiles
-                vnp_dir = os.path.join(save_dir, "VNP14IMG")
                 n_shp = 0
-                if os.path.isdir(vnp_dir):
-                    for root, dirs, files in os.walk(vnp_dir):
+                if os.path.isdir(viirs_dir):
+                    for root, dirs, files in os.walk(viirs_dir):
                         for fn in files:
                             if fn.lower().endswith(".shp"):
                                 n_shp += 1
 
-                _status(f"Download & shapify complete! {n_shp} shapefiles created.")
+                _status(f"Shapify complete! {n_shp} shapefiles. "
+                        f"Starting accumulation\u2026")
                 print("[INFO] Shapify finished successfully.")
 
-                # Auto-fill shapefile dir
-                if os.path.isdir(vnp_dir):
-                    try:
-                        self._root.after(0, lambda: self._shapefile_dir_var.set(
-                            vnp_dir))
-                    except Exception:
-                        pass
-
-                # Show completion popup
-                start_str = self._start_date_var.get().strip()
-                end_str = self._end_date_var.get().strip()
-                self._show_done_popup(
-                    "Download Complete  \u2714",
-                    f"Data downloaded and converted successfully.\n\n"
-                    f"Shapefiles created: {n_shp}\n"
-                    f"Date range: {start_str}  \u2192  {end_str}\n\n"
-                    f"Save directory:\n{save_dir}")
+                # Auto-run accumulation + rasterize
+                self._run_accumulation_after_download(
+                    viirs_dir, ref_path, _status)
+                return  # _run_accumulation handles finish
             else:
                 _status(f"Shapify exited with code {proc.returncode}.")
                 print(f"[WARN] Shapify exit code: {proc.returncode}")
@@ -1421,122 +1473,98 @@ class FireAccumulationGUI:
         self._download_finish()
 
     def _download_finish(self):
+        def _on_main_thread():
+            self._download_btn.configure(state=tk.NORMAL)
+            # Reload shapefiles so new data appears in the viewer
+            if (self._viirs_dir and os.path.isdir(self._viirs_dir)
+                    and self._raster_loaded):
+                self._shapefile_dir_var.set(self._viirs_dir)
+                self._load_shapefiles()
+                self._update_shp_status(True)
         try:
-            self._root.after(0, lambda: self._download_btn.configure(
-                state=tk.NORMAL))
+            self._root.after(0, _on_main_thread)
         except Exception:
             pass
 
     # ==================================================================
-    # Accumulate + Rasterize
+    # Accumulate + Rasterize (integrated into download pipeline)
     # ==================================================================
 
-    def _confirm_accumulate_rasterize(self):
-        """Show a confirmation popup, then run in a background thread."""
-        if not self._raster_loaded:
-            messagebox.showwarning(
-                "Raster Required",
-                "Load a raster image first.")
+    def _run_accumulation_after_download(self, viirs_dir, ref_path, _status):
+        """
+        Run accumulation + rasterize after download completes.
+        Handles smart accumulation: checks for existing folders,
+        extends if same start date, skips if exact match.
+        """
+        start_str = self._start_date_var.get().strip()
+        end_str = self._end_date_var.get().strip()
+
+        if not start_str or not end_str:
+            _status("Download complete (no dates set for accumulation).")
+            self._download_finish()
             return
 
-        shp_dir = self._shapefile_dir_var.get().strip()
-        if not shp_dir or not os.path.isdir(shp_dir):
-            messagebox.showerror("Error",
-                                 "Load shapefiles first (set shapefile dir).")
-            return
+        ref_base = os.path.splitext(os.path.basename(ref_path))[0]
+        ref_dir = os.path.dirname(ref_path)
+        start_compact = start_str.replace("-", "")
+        end_compact = end_str.replace("-", "")
 
-        base_raster = self._base_raster_var.get().strip()
-        if not base_raster or not os.path.exists(base_raster):
-            messagebox.showerror("Error",
-                                 "Set a valid reference raster for rasterization.")
-            return
+        out_folder_name = f"{ref_base}_{start_compact}_{end_compact}_ACCUMULATED"
+        out_dir = os.path.join(ref_dir, out_folder_name)
 
-        out_dir = self._acc_output_dir_var.get().strip()
-        if not out_dir:
-            messagebox.showerror("Error", "Set an output directory.")
-            return
+        # Smart accumulation: check for existing folders
+        existing = self._find_accumulated_folders(ref_dir, ref_base)
 
-        result = self._validate_dates()
-        if result is None:
-            return
-        start_str, end_str, _, _ = result
+        # Check for exact match
+        for folder_name, f_start, f_end in existing:
+            if f_start == start_compact and f_end == end_compact:
+                _status(f"Accumulation already exists: {folder_name}")
+                self._show_done_popup(
+                    "Already Exists",
+                    f"Accumulation already exists:\n{folder_name}\n\n"
+                    f"No new accumulation needed.")
+                # Update the output dir display
+                self._acc_output_full_path = os.path.join(
+                    ref_dir, folder_name)
+                try:
+                    self._root.after(
+                        0, lambda fn=folder_name:
+                        self._acc_output_dir_var.set(fn))
+                except Exception:
+                    pass
+                self._download_finish()
+                return
 
-        if self._acc_thread and self._acc_thread.is_alive():
-            messagebox.showwarning("Busy",
-                                   "Accumulate & Rasterize is already running.")
-            return
+        # Check for same start, different end (extend)
+        old_folder_path = None
+        for folder_name, f_start, f_end in existing:
+            if f_start == start_compact:
+                old_folder_path = os.path.join(ref_dir, folder_name)
+                _status(f"Extending accumulation from {f_end} to "
+                        f"{end_compact}\u2026")
+                # Rename old folder to new name
+                try:
+                    os.rename(old_folder_path, out_dir)
+                    print(f"[INFO] Renamed {folder_name} -> {out_folder_name}")
+                except Exception as exc:
+                    print(f"[WARN] Could not rename old folder: {exc}")
+                    # Continue anyway — will create new folder
+                break
 
-        # Confirmation popup
-        popup = tk.Toplevel(self._root)
-        popup.title("Confirm Accumulate & Rasterize")
-        popup.transient(self._root)
-        popup.grab_set()
+        # Run accumulation
+        self._do_accumulate_rasterize(
+            viirs_dir, ref_path, out_dir, start_str, end_str, _status)
 
-        w, h = 520, 220
-        sx = self._root.winfo_screenwidth()
-        sy = self._root.winfo_screenheight()
-        popup.geometry(f"{w}x{h}+{(sx-w)//2}+{(sy-h)//2}")
-        popup.resizable(False, False)
-
-        pad = dict(padx=12, pady=4)
-        ttk.Label(popup, text="Accumulate & Rasterize",
-                  font=("TkDefaultFont", 12, "bold")).pack(pady=(12, 6))
-
-        info = ttk.Frame(popup)
-        info.pack(fill=tk.X, **pad)
-
-        def _row(label, value):
-            f = ttk.Frame(info)
-            f.pack(fill=tk.X, pady=1)
-            ttk.Label(f, text=label, width=18, anchor="e",
-                      font=("TkDefaultFont", 9, "bold")).pack(side=tk.LEFT)
-            ttk.Label(f, text=value, anchor="w",
-                      font=("TkDefaultFont", 9)).pack(
-                side=tk.LEFT, padx=6)
-
-        _row("Shapefile dir:", shp_dir)
-        _row("Reference raster:", os.path.basename(base_raster))
-        _row("Date range:", f"{start_str}  \u2192  {end_str}")
-        _row("Output dir:", out_dir)
-
-        btn_frame = ttk.Frame(popup)
-        btn_frame.pack(pady=12)
-
-        def _go():
-            popup.destroy()
-            self._run_accumulate_rasterize(
-                shp_dir, base_raster, out_dir, start_str, end_str)
-
-        tk.Button(
-            btn_frame, text="  \u2714  Confirm  ", bg="#4CAF50", fg="white",
-            font=("TkDefaultFont", 10, "bold"), activebackground="#388E3C",
-            command=_go,
-        ).pack()
-
-    def _run_accumulate_rasterize(self, shp_dir, base_raster, out_dir,
-                                  start_str, end_str):
-        self._acc_btn.configure(state=tk.DISABLED)
-        self._acc_thread = threading.Thread(
-            target=self._acc_worker,
-            args=(shp_dir, base_raster, out_dir, start_str, end_str),
-            daemon=True,
-        )
-        self._acc_thread.start()
-
-    def _acc_worker(self, shp_dir, base_raster, out_dir, start_str, end_str):
-        def _status(msg):
-            try:
-                self._root.after(0, lambda: self._status_var.set(msg))
-            except Exception:
-                pass
-
+    def _do_accumulate_rasterize(self, shp_dir, base_raster, out_dir,
+                                 start_str, end_str, _status):
+        """Run the actual accumulation and rasterization pipeline."""
         # Import accumulate
         try:
             from viirs.utils.accumulate import accumulate
             accumulate_fn = accumulate
         except ImportError:
             _status("ERROR: Could not import accumulate.accumulate")
-            self._acc_finish()
+            self._download_finish()
             return
 
         # Import rasterize
@@ -1545,7 +1573,7 @@ class FireAccumulationGUI:
             rasterize_fn = rasterize_shapefile
         except ImportError:
             _status("ERROR: Could not import rasterize.rasterize_shapefile")
-            self._acc_finish()
+            self._download_finish()
             return
 
         # Step 1: Accumulate
@@ -1565,25 +1593,24 @@ class FireAccumulationGUI:
             )
         except Exception as exc:
             _status(f"Accumulation error: {exc}")
-            self._acc_finish()
+            self._download_finish()
             return
 
         if not shp_paths:
             _status("Accumulation produced no files.")
-            self._acc_finish()
+            self._download_finish()
             return
 
         n_shp = len(shp_paths)
         _status(f"Accumulated {n_shp} shapefiles. Rasterizing\u2026")
 
         # Step 2: Rasterize in parallel
-        raster_out_dir = out_dir
         rasterized = 0
         errors = 0
 
         def _rast_one(shp_path):
             try:
-                return rasterize_fn(shp_path, base_raster, raster_out_dir)
+                return rasterize_fn(shp_path, base_raster, out_dir)
             except Exception as exc:
                 print(f"[WARN] Rasterize error {shp_path}: {exc}")
                 return None
@@ -1599,26 +1626,29 @@ class FireAccumulationGUI:
                     errors += 1
                 _status(f"Rasterizing\u2026 {rasterized + errors}/{n_shp}")
 
+        out_name = os.path.basename(out_dir)
         _status(
             f"Done: {n_shp} shapefiles + {rasterized} rasters "
-            f"saved to {out_dir}"
+            f"saved to {out_name}"
         )
         print(f"[ACCUM & RASTERIZE] DONE")
+
+        # Update output dir display
+        self._acc_output_full_path = out_dir
+        try:
+            self._root.after(
+                0, lambda n=out_name: self._acc_output_dir_var.set(n))
+        except Exception:
+            pass
+
         self._show_done_popup(
-            "Accumulate & Rasterize Complete  \u2714",
-            f"Pipeline finished successfully.\n\n"
+            "Pipeline Complete  \u2714",
+            f"Download, shapify, accumulate & rasterize finished.\n\n"
             f"Shapefiles: {n_shp}\n"
             f"Rasters: {rasterized}\n"
             f"Date range: {start_str}  \u2192  {end_str}\n\n"
             f"Output directory:\n{out_dir}")
-        self._acc_finish()
-
-    def _acc_finish(self):
-        try:
-            self._root.after(0, lambda: self._acc_btn.configure(
-                state=tk.NORMAL))
-        except Exception:
-            pass
+        self._download_finish()
 
     # ==================================================================
     # Completion popup (thread-safe)
