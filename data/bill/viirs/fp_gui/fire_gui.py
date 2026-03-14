@@ -177,7 +177,7 @@ class FireAccumulationGUI:
 
         ttk.Label(row1, text="Shapefiles:", font=_font).pack(side=tk.LEFT)
         self._shp_status_label = tk.Label(
-            row1, text="not loaded", fg="gray", font=_font)
+            row1, text="not found", fg="gray", font=_font)
         self._shp_status_label.pack(side=tk.LEFT, padx=4)
 
         # ==============================================================
@@ -258,8 +258,10 @@ class FireAccumulationGUI:
         acc_frame.grid(row=0, column=0, sticky="ew")
 
         ttk.Label(acc_frame, text="Ref:", font=_font).pack(side=tk.LEFT)
-        ttk.Entry(acc_frame, textvariable=self._base_raster_var,
-                  width=20).pack(side=tk.LEFT, padx=2)
+        ref_entry = ttk.Entry(acc_frame, textvariable=self._base_raster_var,
+                              width=20)
+        ref_entry.pack(side=tk.LEFT, padx=2)
+        ref_entry.bind("<Return>", lambda _: self._load_ref_from_entry())
         ttk.Button(acc_frame, text="Browse",
                    command=self._browse_base_raster).pack(
             side=tk.LEFT, padx=(0, 4))
@@ -575,11 +577,9 @@ class FireAccumulationGUI:
     def _update_shp_status(self, loaded: bool):
         """Update the shapefile status indicator."""
         if loaded:
-            self._shp_status_label.configure(text="Shapefile loaded",
-                                             fg="#22cc22")
+            self._shp_status_label.configure(text="loaded", fg="#22cc22")
         else:
-            self._shp_status_label.configure(text="Shapefile not found",
-                                             fg="gray")
+            self._shp_status_label.configure(text="not found", fg="gray")
 
     def _update_acc_output_name(self):
         """Auto-compute accumulation output directory name from ref + dates."""
@@ -702,6 +702,35 @@ class FireAccumulationGUI:
             self._base_raster_full_path = f
             self._base_raster_var.set(os.path.basename(f))
             self._update_acc_output_name()
+
+    def _load_ref_from_entry(self):
+        """Resolve a path typed/pasted into the Ref entry box."""
+        val = self._base_raster_var.get().strip()
+        if not val:
+            return
+
+        # If it's just the basename of the already-loaded ref, nothing to do
+        if (self._base_raster_full_path
+                and val == os.path.basename(self._base_raster_full_path)):
+            return
+
+        # Try as an absolute path
+        if os.path.isfile(val):
+            self._base_raster_full_path = os.path.abspath(val)
+            self._base_raster_var.set(os.path.basename(val))
+            self._update_acc_output_name()
+            return
+
+        # Try relative to working directory
+        if self._working_dir:
+            candidate = os.path.join(self._working_dir, val)
+            if os.path.isfile(candidate):
+                self._base_raster_full_path = os.path.abspath(candidate)
+                self._base_raster_var.set(os.path.basename(candidate))
+                self._update_acc_output_name()
+                return
+
+        messagebox.showwarning("Warning", f"File not found: {val}")
 
     # ==================================================================
     # Loading (raster must be loaded first)
@@ -1202,8 +1231,10 @@ class FireAccumulationGUI:
             messagebox.showwarning("Busy", "Download already in progress.")
             return
 
-        # Compute bbox
+        # Compute bbox (always from the main raster for CRS/extent)
         raster_path = self._raster_full_path
+        # Ref raster drives accumulation output dir
+        ref_path = self._base_raster_full_path or self._raster_full_path
         try:
             from download_dialog import _read_raster_info, _bbox_to_4326
             wkt, epsg, x_min, x_max, y_min, y_max = _read_raster_info(
@@ -1262,7 +1293,7 @@ class FireAccumulationGUI:
         def _go():
             popup.destroy()
             self._run_download(
-                self._token, start_dt, end_dt, viirs_dir, raster_path,
+                self._token, start_dt, end_dt, viirs_dir, ref_path,
                 west, south, east, north)
 
         tk.Button(
@@ -1535,21 +1566,49 @@ class FireAccumulationGUI:
                 self._download_finish()
                 return
 
-        # Check for same start, different end (extend)
-        old_folder_path = None
+        # Check for same start, different end
         for folder_name, f_start, f_end in existing:
             if f_start == start_compact:
                 old_folder_path = os.path.join(ref_dir, folder_name)
-                _status(f"Extending accumulation from {f_end} to "
-                        f"{end_compact}\u2026")
-                # Rename old folder to new name
-                try:
-                    os.rename(old_folder_path, out_dir)
-                    print(f"[INFO] Renamed {folder_name} -> {out_folder_name}")
-                except Exception as exc:
-                    print(f"[WARN] Could not rename old folder: {exc}")
-                    # Continue anyway — will create new folder
-                break
+
+                if end_compact > f_end:
+                    # New end is further out — extend by renaming
+                    _status(f"Extending accumulation from {f_end} to "
+                            f"{end_compact}\u2026")
+                    try:
+                        os.rename(old_folder_path, out_dir)
+                        print(f"[INFO] Renamed {folder_name} -> "
+                              f"{out_folder_name}")
+                    except Exception as exc:
+                        print(f"[WARN] Could not rename old folder: {exc}")
+                    break
+
+                else:
+                    # New end is shorter — ask user whether to create new
+                    import queue as _queue
+                    q = _queue.Queue()
+
+                    def _ask():
+                        ans = messagebox.askyesno(
+                            "Accumulation Exists",
+                            f"An accumulation with the same start date and "
+                            f"a further end date already exists:\n\n"
+                            f"  {folder_name}\n\n"
+                            f"Do you want to create a new folder for end "
+                            f"date {end_compact}?",
+                            parent=self._root,
+                        )
+                        q.put(ans)
+
+                    self._root.after(0, _ask)
+                    # Block worker thread until user answers
+                    user_ok = q.get()
+                    if not user_ok:
+                        _status("Accumulation cancelled.")
+                        self._download_finish()
+                        return
+                    # User confirmed — create a brand new folder
+                    break
 
         # Run accumulation
         self._do_accumulate_rasterize(
