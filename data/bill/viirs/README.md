@@ -1,6 +1,6 @@
 # viirs — VIIRS Fire Pixel Processing Toolkit
 
-*Last updated: March 2026*
+*Last updated: March 14, 2026*
 
 An end-to-end pipeline for downloading, converting, accumulating, and visualising VIIRS active fire pixel data from NASA. Designed specifically for [VNP14IMG](https://ladsweb.modaps.eosdis.nasa.gov/missions-and-measurements/products/VNP14IMG/#product-information) — the VIIRS/NPP Active Fires 6-Min L2 Swath 375m product.
 
