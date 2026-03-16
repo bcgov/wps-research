@@ -95,10 +95,11 @@ class RasterLoader:
         n_bands = data.shape[2]
         if n_bands == 1:
             img = data[:, :, 0]
+        elif n_bands == 2:
+            # Display 2-band data as RGB by duplicating the first band
+            img = np.dstack([data[:, :, 0], data[:, :, 1], data[:, :, 0]])
         elif n_bands >= 3:
             img = data[:, :, :3]
-        else:
-            img = data[:, :, 0]
 
         img = img.astype(np.float32)
         finite_mask = np.isfinite(img)
