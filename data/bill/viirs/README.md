@@ -1,6 +1,6 @@
 # viirs — VIIRS Fire Pixel Processing Toolkit
 
-*Last updated: March 14, 2026*
+*Last updated: March 16, 2026*
 
 An end-to-end pipeline for downloading, converting, accumulating, and visualising VIIRS active fire pixel data from NASA. Designed specifically for [VNP14IMG](https://ladsweb.modaps.eosdis.nasa.gov/missions-and-measurements/products/VNP14IMG/#product-information) — the VIIRS/NPP Active Fires 6-Min L2 Swath 375m product.
 
@@ -17,6 +17,7 @@ An end-to-end pipeline for downloading, converting, accumulating, and visualisin
    - [Step 2 — Download VIIRS Data](#step-2--download-viirs-data)
    - [Step 3 — Explore Loaded Data](#step-3--explore-loaded-data)
    - [Step 4 — Accumulate & Rasterize](#step-4--accumulate--rasterize)
+   - [Step 5 — Sentinel-2 Fire Mapping](#step-5--sentinel-2-fire-mapping)
 6. [Folder Naming Conventions](#folder-naming-conventions)
 7. [Command-Line Utilities](#command-line-utilities)
 8. [GUI Reference](#gui-reference)
@@ -236,6 +237,38 @@ Each shapefile contains all fire pixels from the start date up to that snapshot'
 
 ---
 
+### Step 5 — Sentinel-2 Fire Mapping
+
+The **Sentinel-2 Fire Mapping** button (bright red, top-right of row 1) launches an external fire mapping tool that uses the loaded raster and accumulated VIIRS fire mask as inputs.
+
+**Prerequisites — the button is only enabled when both conditions are met:**
+
+1. A raster image is loaded.
+2. Shapefiles are detected and loaded (green **loaded** status).
+
+**How it works:**
+
+1. Click **Sentinel-2 Fire Mapping**.
+2. The GUI reads the **Start** and **End** dates from the date boxes in row 2.
+3. It searches the **main raster's directory** (not the Ref directory) for an `_ACCUMULATED` folder whose:
+   - Start date matches the Start date in the box.
+   - End date is at least as far as the End date in the box (i.e. the folder's date range covers the requested range).
+4. Inside that folder, it selects the `.bin` file whose end date is **closest to but not exceeding** the End date in the box. This is necessary because `.bin` files are only created for dates with actual fire detections, so the last `.bin` may be earlier than the folder's end date.
+5. The GUI launches `fire_mapping.py` (located at `wps-research/py/fire_mapping/fire_mapping.py`) with two arguments:
+   - **arg1** — full path to the main raster image.
+   - **arg2** — full path to the selected `.bin` fire mask.
+
+**Error cases:**
+
+- If no matching `_ACCUMULATED` folder is found, a popup reports the missing directory along with the expected start/end dates and the raster directory path.
+- If the folder exists but contains no `.bin` file with an end date within the requested range, a popup reports the issue and shows the folder path.
+
+**Why the main raster directory (not Ref)?**
+
+When using fire mapping, the user typically wants to view the raster before launching — so the accumulated data should be in the same directory as the main raster. If no separate Ref was set, the main raster and Ref are the same and the `_ACCUMULATED` folder is already there. If a different Ref was used for accumulation, the user should ensure a copy or re-accumulation exists alongside the main raster.
+
+---
+
 ## Folder Naming Conventions
 
 | Folder | Contents |
@@ -307,7 +340,7 @@ python -m viirs.utils.rasterize fire.shp my_raster.bin /output/rasters
 ### Toolbar layout
 
 ```
-Row 1:  [⚙]  Raster: [____________] [Browse]  |  Shapefiles: loaded
+Row 1:  [⚙]  Raster: [____________] [Browse]  |  Shapefiles: loaded          [Sentinel-2 Fire Mapping]
 Row 2:  Start: [__________]  End: [__________]  [Apply]  [⬇ Download]  |  [▶ Play] [⏮] [←] [N] [→]  ms:[___]  [slider]
 Row 3:  Ref: [____________] [Browse]  |  [Pan] [Zoom+] [Zoom−] [⌂]  |  ☑ Fire Pixels  ☑ Background Image
 ```

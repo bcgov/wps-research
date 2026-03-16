@@ -9,13 +9,14 @@ RENDERING RESOURCE KNOBS
 """
 
 import os
+import re as _re
 import sys
 import threading
 import datetime
 import subprocess
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-from datetime import date
+from datetime import date, datetime as _datetime
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -179,6 +180,14 @@ class FireAccumulationGUI:
         self._shp_status_label = tk.Label(
             row1, text="not found", fg="gray", font=_font)
         self._shp_status_label.pack(side=tk.LEFT, padx=4)
+
+        # -- Sentinel-2 Fire Mapping (right side of row 1) --
+        self._fire_mapping_btn = tk.Button(
+            row1, text="Sentinel-2 Fire Mapping", bg="#E53935", fg="white",
+            font=_font + ("bold",), activebackground="#B71C1C",
+            cursor="hand2", command=self._launch_fire_mapping,
+        )
+        self._fire_mapping_btn.pack(side=tk.RIGHT, padx=(8, 0))
 
         # ==============================================================
         # ROW 2 — Date / Download  |  Playback (all one line)
@@ -438,6 +447,140 @@ class FireAccumulationGUI:
             self._canvas.scatter_size = cfg.DEFAULT_SCATTER_SIZE
         if self._animator and self._animator.current_date:
             self._on_animation_frame(self._animator.current_date)
+
+    # ==================================================================
+    # Sentinel-2 Fire Mapping
+    # ==================================================================
+
+    def _launch_fire_mapping(self):
+        """Launch fire_mapping with the main raster and the best-match .bin."""
+        # 1. Check raster is loaded
+        if not self._raster_loaded or not self._raster_full_path:
+            messagebox.showerror(
+                "Fire Mapping", "Please load a raster image first.")
+            return
+
+        # 2. Check shapefiles are loaded (green status)
+        if self._shp_status_label.cget("text") != "loaded":
+            messagebox.showerror(
+                "Fire Mapping",
+                "Shapefiles must be detected and loaded (green status) "
+                "before launching fire mapping.")
+            return
+
+        # 3. Read start/end dates from the boxes
+        start_str = self._start_date_var.get().strip()
+        end_str = self._end_date_var.get().strip()
+        if not start_str or not end_str:
+            messagebox.showerror(
+                "Fire Mapping",
+                "Start and End dates must be set before launching fire mapping.")
+            return
+
+        try:
+            box_start = date.fromisoformat(start_str)
+            box_end = date.fromisoformat(end_str)
+        except ValueError:
+            messagebox.showerror(
+                "Fire Mapping",
+                "Invalid date format. Use YYYY-MM-DD.")
+            return
+
+        # 4. Search for _ACCUMULATED folder in the main raster's directory
+        raster_dir = os.path.dirname(self._raster_full_path)
+        raster_base = os.path.splitext(
+            os.path.basename(self._raster_full_path))[0]
+
+        start_compact = start_str.replace("-", "")
+        pattern = _re.compile(
+            rf'^{_re.escape(raster_base)}_(\d{{8}})_(\d{{8}})_ACCUMULATED$')
+
+        candidates = []
+        if os.path.isdir(raster_dir):
+            for name in os.listdir(raster_dir):
+                full = os.path.join(raster_dir, name)
+                if os.path.isdir(full):
+                    m = pattern.match(name)
+                    if m:
+                        folder_start = m.group(1)
+                        folder_end = m.group(2)
+                        # Start must match, end must be >= box end
+                        if folder_start == start_compact:
+                            try:
+                                f_end = date(
+                                    int(folder_end[:4]),
+                                    int(folder_end[4:6]),
+                                    int(folder_end[6:8]))
+                                if f_end >= box_end:
+                                    candidates.append((name, f_end, full))
+                            except ValueError:
+                                continue
+
+        if not candidates:
+            messagebox.showerror(
+                "Fire Mapping",
+                f"Directory not found: no ACCUMULATION with "
+                f"start = {start_str} and end >= {end_str}\n\n"
+                f"Raster directory: {raster_dir}")
+            return
+
+        # Pick the folder with the smallest end date that still covers box_end
+        candidates.sort(key=lambda c: c[1])
+        acc_folder_path = candidates[0][2]
+
+        # 5. Find best .bin file: end date closest to box_end but not exceeding
+        #    File pattern: VIIRS_VNP14IMG_{YYYYMMDDTHHMM}_{YYYYMMDDTHHMM}.bin
+        bin_pattern = _re.compile(
+            r'^VIIRS_VNP14IMG_(\d{8}T\d{4})_(\d{8}T\d{4})\.bin$')
+
+        bin_candidates = []
+        for fname in os.listdir(acc_folder_path):
+            bm = bin_pattern.match(fname)
+            if bm:
+                end_tag = bm.group(2)  # e.g. "20250902T1430"
+                try:
+                    bin_end_dt = _datetime.strptime(end_tag, "%Y%m%dT%H%M")
+                    bin_end_date = bin_end_dt.date()
+                    if bin_end_date <= box_end:
+                        bin_candidates.append(
+                            (fname, bin_end_dt,
+                             os.path.join(acc_folder_path, fname)))
+                except ValueError:
+                    continue
+
+        if not bin_candidates:
+            messagebox.showerror(
+                "Fire Mapping",
+                f"No rasterized .bin file found with end date <= {end_str} "
+                f"in:\n{acc_folder_path}")
+            return
+
+        # Pick the .bin with end datetime closest to box_end
+        bin_candidates.sort(key=lambda c: c[1], reverse=True)
+        best_bin_path = bin_candidates[0][2]
+
+        # 6. Launch fire_mapping
+        #    Derive repo root from this file: fp_gui/ -> viirs/ -> bill/ -> data/ -> wps-research/
+        repo_root = os.path.normpath(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            os.pardir, os.pardir, os.pardir, os.pardir))
+        fire_mapping_script = os.path.join(
+            repo_root, "py", "fire_mapping", "fire_mapping.py")
+
+        if not os.path.isfile(fire_mapping_script):
+            messagebox.showerror(
+                "Fire Mapping",
+                f"fire_mapping.py not found at:\n{fire_mapping_script}")
+            return
+
+        try:
+            subprocess.Popen(
+                ["python3", fire_mapping_script,
+                 self._raster_full_path, best_bin_path])
+            self._status_var.set(
+                f"Launched fire_mapping with {os.path.basename(best_bin_path)}")
+        except Exception as e:
+            messagebox.showerror("Fire Mapping", f"Failed to launch: {e}")
 
     # ==================================================================
     # Nav tool switching
