@@ -122,6 +122,9 @@ class FireAccumulationGUI:
         self._nav_buttons = {}
         self._active_nav = NAV_PAN
 
+        # Band selection (1-based indices, in user-chosen order)
+        self._selected_bands: list = []
+
         # Preserved slider position (survives reload)
         self._preserved_slider_index: Optional[int] = None
         self._preserved_slider_date: Optional[date] = None
@@ -293,6 +296,21 @@ class FireAccumulationGUI:
             self._nav_buttons[mode] = btn
 
         _nav_btn("Pan",    NAV_PAN)
+
+        ttk.Separator(nav_frame, orient=tk.VERTICAL).pack(
+            side=tk.LEFT, padx=4, fill=tk.Y, pady=1)
+
+        self._band_btn = tk.Button(
+            nav_frame, text="Band", relief=tk.RAISED, bd=1,
+            padx=5, pady=0, font=_font, bg=_bg,
+            activebackground=_active_bg, cursor="hand2",
+            command=self._show_band_selector,
+        )
+        self._band_btn.pack(side=tk.LEFT, padx=1)
+
+        ttk.Separator(nav_frame, orient=tk.VERTICAL).pack(
+            side=tk.LEFT, padx=4, fill=tk.Y, pady=1)
+
         _nav_btn("Zoom+",  NAV_ZOOM_IN)
         _nav_btn("Zoom\u2212", NAV_ZOOM_OUT)
 
@@ -893,7 +911,8 @@ class FireAccumulationGUI:
         self._root.update_idletasks()
 
         try:
-            img = self._raster_loader.load(raster_path)
+            bands = self._selected_bands if self._selected_bands else None
+            img = self._raster_loader.load(raster_path, bands=bands)
             ext = self._raster_loader.extent
             self._canvas.display_raster(img, ext)
             self._raster_loaded = True
@@ -937,6 +956,163 @@ class FireAccumulationGUI:
 
         # Auto-load shapefiles from _VIIRS folder if it exists
         self._check_viirs_folder()
+
+    # ==================================================================
+    # Band Selector Popup
+    # ==================================================================
+
+    def _show_band_selector(self):
+        """Open a popup to choose up to 3 bands for RGB display."""
+        raster = self._raster_loader.raster
+        if raster is None:
+            messagebox.showinfo("Band Selector",
+                                "Load a raster first.")
+            return
+
+        band_names = raster.band_info_list          # list of str, len == n_bands
+        n_bands = len(band_names)
+
+        # ----------------------------------------------------------
+        # Popup window
+        # ----------------------------------------------------------
+        popup = tk.Toplevel(self._root)
+        popup.title("Select Bands (max 3)")
+        popup.resizable(False, False)
+        popup.grab_set()                             # modal
+
+        CELL_W = 260
+        CELL_H = 32
+        MAX_VISIBLE = 10                             # rows before scrolling
+        visible_rows = min(n_bands, MAX_VISIBLE)
+        list_h = visible_rows * CELL_H
+
+        # ----------------------------------------------------------
+        # Scrollable list area
+        # ----------------------------------------------------------
+        outer = tk.Frame(popup, bd=1, relief=tk.SUNKEN)
+        outer.pack(padx=8, pady=(8, 4))
+
+        canvas = tk.Canvas(outer, width=CELL_W, height=list_h,
+                           highlightthickness=0)
+        scrollbar = ttk.Scrollbar(outer, orient=tk.VERTICAL,
+                                  command=canvas.yview)
+        inner = tk.Frame(canvas)
+
+        inner.bind("<Configure>",
+                   lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=inner, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Mouse-wheel scrolling
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)       # Windows / macOS
+        canvas.bind_all("<Button-4>",                          # Linux scroll up
+                        lambda e: canvas.yview_scroll(-1, "units"))
+        canvas.bind_all("<Button-5>",                          # Linux scroll down
+                        lambda e: canvas.yview_scroll(1, "units"))
+
+        # ----------------------------------------------------------
+        # State: selection_order[i] = 0 means unselected,
+        #        otherwise the 1-based pick order.
+        # ----------------------------------------------------------
+        selection_order = [0] * n_bands
+        labels: list[tk.Label] = []
+
+        # Pre-fill with current selection (if any)
+        for order, band_idx in enumerate(self._selected_bands, start=1):
+            if 1 <= band_idx <= n_bands:
+                selection_order[band_idx - 1] = order
+
+        def _next_order():
+            return max(selection_order) + 1 if any(selection_order) else 1
+
+        def _compact_order():
+            """Re-number so orders are consecutive 1, 2, 3 …"""
+            ordered = sorted(
+                [(sel, i) for i, sel in enumerate(selection_order) if sel > 0]
+            )
+            for new_ord, (_, idx) in enumerate(ordered, start=1):
+                selection_order[idx] = new_ord
+
+        def _refresh_cells():
+            for i, lbl in enumerate(labels):
+                if selection_order[i] > 0:
+                    lbl.configure(bg="#ADD8E6",                  # light blue
+                                  text=f" {selection_order[i]}  {band_names[i]}")
+                else:
+                    lbl.configure(bg="white",
+                                  text=f"      {band_names[i]}")
+
+        def _toggle(idx):
+            if selection_order[idx] > 0:
+                # Deselect
+                selection_order[idx] = 0
+                _compact_order()
+            else:
+                # Select (max 3)
+                chosen = sum(1 for s in selection_order if s > 0)
+                if chosen >= 3:
+                    return                                       # silently ignore
+                selection_order[idx] = _next_order()
+            _refresh_cells()
+
+        # Build cells
+        for i in range(n_bands):
+            lbl = tk.Label(
+                inner, text="", anchor="w", width=CELL_W // 8,
+                height=1, relief=tk.RIDGE, bd=1, bg="white",
+                font=("TkDefaultFont", 10), padx=4, pady=2,
+            )
+            lbl.pack(fill=tk.X)
+            lbl.bind("<Button-1>", lambda e, idx=i: _toggle(idx))
+            labels.append(lbl)
+
+        _refresh_cells()
+
+        # ----------------------------------------------------------
+        # Buttons
+        # ----------------------------------------------------------
+        btn_frame = tk.Frame(popup)
+        btn_frame.pack(pady=(4, 8))
+
+        def _apply():
+            ordered = sorted(
+                [(sel, i) for i, sel in enumerate(selection_order) if sel > 0]
+            )
+            if not ordered:
+                messagebox.showwarning("Band Selector",
+                                       "Select at least 1 band.",
+                                       parent=popup)
+                return
+            self._selected_bands = [i + 1 for _, i in ordered]  # 1-based
+            # Unbind mousewheel before closing
+            canvas.unbind_all("<MouseWheel>")
+            canvas.unbind_all("<Button-4>")
+            canvas.unbind_all("<Button-5>")
+            popup.destroy()
+            self._load_raster()
+
+        def _cancel():
+            canvas.unbind_all("<MouseWheel>")
+            canvas.unbind_all("<Button-4>")
+            canvas.unbind_all("<Button-5>")
+            popup.destroy()
+
+        tk.Button(btn_frame, text="Apply", width=8,
+                  command=_apply).pack(side=tk.LEFT, padx=4)
+        tk.Button(btn_frame, text="Cancel", width=8,
+                  command=_cancel).pack(side=tk.LEFT, padx=4)
+
+        # Center the popup over the main window
+        popup.update_idletasks()
+        pw, ph = popup.winfo_width(), popup.winfo_height()
+        rx = self._root.winfo_x() + (self._root.winfo_width() - pw) // 2
+        ry = self._root.winfo_y() + (self._root.winfo_height() - ph) // 2
+        popup.geometry(f"+{rx}+{ry}")
 
     def _store_raster_crs_info(self, raster_path: str):
         """Read and cache WKT/EPSG from the raster for download bbox conversion."""
