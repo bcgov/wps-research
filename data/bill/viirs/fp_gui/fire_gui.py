@@ -295,11 +295,6 @@ class FireAccumulationGUI:
             btn.pack(side=tk.LEFT, padx=1)
             self._nav_buttons[mode] = btn
 
-        _nav_btn("Pan",    NAV_PAN)
-
-        ttk.Separator(nav_frame, orient=tk.VERTICAL).pack(
-            side=tk.LEFT, padx=4, fill=tk.Y, pady=1)
-
         self._band_btn = tk.Button(
             nav_frame, text="Band", relief=tk.RAISED, bd=1,
             padx=5, pady=0, font=_font, bg=_bg,
@@ -307,6 +302,11 @@ class FireAccumulationGUI:
             command=self._show_band_selector,
         )
         self._band_btn.pack(side=tk.LEFT, padx=1)
+
+        ttk.Separator(nav_frame, orient=tk.VERTICAL).pack(
+            side=tk.LEFT, padx=4, fill=tk.Y, pady=1)
+
+        _nav_btn("Pan",    NAV_PAN)
 
         ttk.Separator(nav_frame, orient=tk.VERTICAL).pack(
             side=tk.LEFT, padx=4, fill=tk.Y, pady=1)
@@ -911,8 +911,11 @@ class FireAccumulationGUI:
         self._root.update_idletasks()
 
         try:
-            bands = self._selected_bands if self._selected_bands else None
-            img = self._raster_loader.load(raster_path, bands=bands)
+            # Reset band selection -- the new raster may have a different
+            # number of bands, so stale indices would cause an IndexError.
+            self._selected_bands = []
+
+            img = self._raster_loader.load(raster_path, bands=None)
             ext = self._raster_loader.extent
             self._canvas.display_raster(img, ext)
             self._raster_loaded = True
