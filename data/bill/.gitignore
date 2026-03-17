@@ -5,3 +5,4 @@ videos/
 caching/
 mapped_burn/
 *.DS_Store*
+*test*
