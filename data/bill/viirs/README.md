@@ -23,7 +23,7 @@ python -m viirs.fp_gui
 
 ## Requirements
 
-Python 3.9+, `gdal`/`osgeo`, `netCDF4`, `geopandas`, `shapely`, `pyproj`, `numpy`, `matplotlib`, `tkinter`.
+`gdal`/`osgeo`, `netCDF4`, `geopandas`, `shapely`, `pyproj`, `numpy`, `matplotlib`, `tkinter`.
 
 ---
 
@@ -36,8 +36,6 @@ Downloads require a free Earthdata Login account and application token.
 3. Provide the token to the GUI via one of:
    - **Token file (recommended):** `echo -n "YOUR_TOKEN" > /data/.tokens/laads` — auto-loaded on startup.
    - **Paste in GUI:** clicking **Download** without a token file prompts for manual entry (session only).
-
-> Tokens expire after ~1 year of inactivity. Regenerate if downloads fail with auth errors.
 
 ---
 
