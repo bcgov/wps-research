@@ -67,6 +67,7 @@ class FireAccumulationGUI:
         self._download_cancel = threading.Event()
         self._download_executor: Optional[ThreadPoolExecutor] = None
         self._shapify_proc = None
+        self._post_download_callback = None  # callable run after download finishes
 
         # Working directory (set when raster is loaded)
         self._working_dir: Optional[str] = None
@@ -470,6 +471,47 @@ class FireAccumulationGUI:
     # Sentinel-2 Fire Mapping
     # ==================================================================
 
+    def _ask_download_and_launch(self, message: str) -> bool:
+        """Show a dialog with the message and a 'Download and Launch Again'
+        button.  Returns True if the user clicks the button, False on Cancel."""
+        result = [False]
+        popup = tk.Toplevel(self._root)
+        popup.title("Fire Mapping")
+        popup.transient(self._root)
+        popup.grab_set()
+
+        w, h = 460, 200
+        sx = self._root.winfo_screenwidth()
+        sy = self._root.winfo_screenheight()
+        popup.geometry(f"{w}x{h}+{(sx - w) // 2}+{(sy - h) // 2}")
+        popup.resizable(False, False)
+
+        ttk.Label(popup, text=message, wraplength=420,
+                  justify=tk.LEFT).pack(padx=16, pady=(16, 10))
+
+        btn_f = ttk.Frame(popup)
+        btn_f.pack(pady=10)
+
+        def _go():
+            result[0] = True
+            popup.destroy()
+
+        tk.Button(
+            btn_f, text="  Download and Launch Again  ",
+            bg="#4CAF50", fg="white",
+            font=("TkDefaultFont", 10, "bold"),
+            activebackground="#388E3C", command=_go,
+        ).pack(side=tk.LEFT, padx=8)
+        tk.Button(
+            btn_f, text="  Cancel  ",
+            bg="#F44336", fg="white",
+            font=("TkDefaultFont", 9, "bold"),
+            activebackground="#C62828", command=popup.destroy,
+        ).pack(side=tk.LEFT, padx=8)
+
+        popup.wait_window()
+        return result[0]
+
     def _launch_fire_mapping(self):
         """Launch fire_mapping with the main raster and the best-match .bin."""
         # 1. Check raster is loaded
@@ -535,11 +577,12 @@ class FireAccumulationGUI:
                                 continue
 
         if not candidates:
-            messagebox.showerror(
-                "Fire Mapping",
+            if self._ask_download_and_launch(
                 f"Directory not found: no ACCUMULATION with "
                 f"start = {start_str} and end >= {end_str}\n\n"
-                f"Raster directory: {raster_dir}")
+                f"Raster directory: {raster_dir}"):
+                self._post_download_callback = self._launch_fire_mapping
+                self._start_download()
             return
 
         # Pick the folder with the smallest end date that still covers box_end
@@ -567,10 +610,11 @@ class FireAccumulationGUI:
                     continue
 
         if not bin_candidates:
-            messagebox.showerror(
-                "Fire Mapping",
+            if self._ask_download_and_launch(
                 f"No rasterized .bin file found with end date <= {end_str} "
-                f"in:\n{acc_folder_path}")
+                f"in:\n{acc_folder_path}"):
+                self._post_download_callback = self._launch_fire_mapping
+                self._start_download()
             return
 
         # Pick the .bin with end datetime closest to box_end
@@ -736,11 +780,24 @@ class FireAccumulationGUI:
             self._update_shp_status(False)
 
     def _update_shp_status(self, loaded: bool):
-        """Update the shapefile status indicator."""
+        """Update the shapefile status indicator and clear fire-pixel info
+        when shapefiles are not loaded."""
         if loaded:
             self._shp_status_label.configure(text="loaded", fg="#22cc22")
         else:
             self._shp_status_label.configure(text="not found", fg="gray")
+            # Clear all fire-pixel-related display info
+            self._start_date_var.set("")
+            self._end_date_var.set("")
+            self._date_label_var.set("Date: \u2014")
+            self._frame_label_var.set("Frame: 0 / 0")
+            self._pixel_count_var.set("Pixels: 0")
+            self._viewport_pixel_var.set("In view: 0")
+            self._frame_slider.set(0)
+            self._frame_slider.configure(to=0)
+            if self._animator:
+                self._animator.stop()
+                self._play_btn.config(text="\u25b6  Play")
 
     def _update_acc_output_name(self):
         """Auto-compute accumulation output directory name from ref + dates."""
@@ -897,7 +954,19 @@ class FireAccumulationGUI:
     # Loading (raster must be loaded first)
     # ==================================================================
 
-    def _load_raster(self):
+    def _load_raster(self, bands=None):
+        """Load (or reload) the raster.
+
+        Parameters
+        ----------
+        bands : list[int] | None
+            1-based band indices to display.  When *None* (default, used for
+            new-file loads) the band selection is reset and all bands (up to 3)
+            are shown.  Pass an explicit list when reloading for a band change
+            (skips shapefile reload / precompute since fire data is unchanged).
+        """
+        band_change_only = bands is not None
+
         raster_path = self._raster_full_path
         if not raster_path or not os.path.exists(raster_path):
             messagebox.showwarning("Warning",
@@ -911,14 +980,24 @@ class FireAccumulationGUI:
         self._root.update_idletasks()
 
         try:
-            # Reset band selection -- the new raster may have a different
-            # number of bands, so stale indices would cause an IndexError.
-            self._selected_bands = []
+            if band_change_only:
+                # Explicit band selection (e.g. from band selector popup)
+                self._selected_bands = list(bands)
+            else:
+                # New raster — reset so stale indices don't cause IndexError
+                self._selected_bands = []
 
-            img = self._raster_loader.load(raster_path, bands=None)
+            load_bands = self._selected_bands if self._selected_bands else None
+            img = self._raster_loader.load(raster_path, bands=load_bands)
             ext = self._raster_loader.extent
             self._canvas.display_raster(img, ext)
             self._raster_loaded = True
+
+            # If no explicit bands were requested, record what was actually
+            # loaded so the band selector popup shows the current state.
+            if not self._selected_bands:
+                n = self._raster_loader.raster._n_band
+                self._selected_bands = list(range(1, min(n, 3) + 1))
 
             # Set working directory
             self._set_working_dir(raster_path)
@@ -941,6 +1020,15 @@ class FireAccumulationGUI:
             self._status_var.set("Raster load failed.")
             return
 
+        # Restore slider position
+        self._restore_slider_position()
+
+        # Band-only change: image updated, fire data unchanged — done.
+        if band_change_only:
+            return
+
+        # --- Below only runs for a genuinely new raster file ---
+
         # Store CRS info for download
         self._store_raster_crs_info(raster_path)
 
@@ -953,9 +1041,6 @@ class FireAccumulationGUI:
         if (self._data_mgr.master_gdf is not None
                 and not self._data_mgr.master_gdf.empty):
             self._reclip_and_refresh()
-
-        # Restore slider position
-        self._restore_slider_position()
 
         # Auto-load shapefiles from _VIIRS folder if it exists
         self._check_viirs_folder()
@@ -1091,13 +1176,13 @@ class FireAccumulationGUI:
                                        "Select at least 1 band.",
                                        parent=popup)
                 return
-            self._selected_bands = [i + 1 for _, i in ordered]  # 1-based
+            chosen_bands = [i + 1 for _, i in ordered]  # 1-based
             # Unbind mousewheel before closing
             canvas.unbind_all("<MouseWheel>")
             canvas.unbind_all("<Button-4>")
             canvas.unbind_all("<Button-5>")
             popup.destroy()
-            self._load_raster()
+            self._load_raster(bands=chosen_bands)
 
         def _cancel():
             canvas.unbind_all("<MouseWheel>")
@@ -1834,6 +1919,11 @@ class FireAccumulationGUI:
                 self._shapefile_dir_var.set(self._viirs_dir)
                 self._load_shapefiles()
                 self._update_shp_status(True)
+            # Run post-download callback if set (e.g. re-launch fire mapping)
+            cb = self._post_download_callback
+            self._post_download_callback = None
+            if cb is not None:
+                cb()
         try:
             self._root.after(0, _on_main_thread)
         except Exception:

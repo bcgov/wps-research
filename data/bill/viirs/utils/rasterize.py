@@ -95,7 +95,7 @@ def rasterize_shapefile(shp_path, ref_image, output_dir, buffer_m=375.0):
         return None
 
     # Create buffered version in memory
-    mem_driver = ogr.GetDriverByName('Memory')
+    mem_driver = ogr.GetDriverByName('MEM')
     mem_ds = mem_driver.CreateDataSource('')
     mem_layer = mem_ds.CreateLayer('buffered', layer.GetSpatialRef(), ogr.wkbPolygon)
 
