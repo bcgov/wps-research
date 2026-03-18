@@ -4,6 +4,16 @@
 2) create a new mosaic for every date there's new data ( option to do this on every N-th date) 
 
 20250605: nb, should have sentinel2_mrap.py pass in the dates that need to be (re) generated.
+
+Command line options:
+  --N <int>         Only process every N-th date (default: 1, i.e. every date).
+  --N_threads <int> Number of worker threads for parallel job execution (default: 1).
+  [second arg]      If a second positional argument is present, EPSG is set to
+                    3347 (Canada LCC); otherwise defaults to 3005 (BC Albers).
+
+Side-channel inputs:
+  .mrap_merge_dates  Optional file; if present, only dates listed (one per line)
+                     will be processed. All others are skipped.
 '''
 from misc import sep, args, exists, run, err, parfor, hdr_fn
 import multiprocessing as mp
@@ -11,12 +21,15 @@ import os
 import threading
 import queue
 import time
+from collections import Counter
 
 # Extract --N [value] before other argument processing
 N = 1
+N_explicit = False
 if '--N' in args:
     idx = args.index('--N')
     N = int(args[idx + 1])
+    N_explicit = True
     args.pop(idx)
     args.pop(idx)
 
@@ -33,6 +46,21 @@ EPSG = 3005 if len(args) < 2 else 3347  # BC Albers / Canada LCC
 merge_dates = None
 if exists('.mrap_merge_dates'):
     merge_dates = [x.strip() for x in open('.mrap_merge_dates').readlines()]
+
+# ---------------------------------------------------------------------------
+# detect existing output files in cwd
+# ---------------------------------------------------------------------------
+existing_outputs = sorted(
+    f for f in os.listdir('.')
+    if f.endswith('_mrap.bin') and len(f) == 17  # YYYYMMDD_mrap.bin = 17 chars
+)
+
+if existing_outputs:
+    print(f'[DETECT] {len(existing_outputs)} existing output file(s) found in current directory:', flush=True)
+    for f in existing_outputs:
+        print(f'  {f}', flush=True)
+else:
+    print('[DETECT] No existing output files found in current directory.', flush=True)
 
 # --- timing stats shared across threads ---
 stats_lock = threading.Lock()
@@ -252,6 +280,27 @@ for date_idx, (d, df) in enumerate(date_mrap):
         print(r)
 
 # ---------------------------------------------------------------------------
+# infer N from existing outputs vs full input date list (if not explicit)
+# ---------------------------------------------------------------------------
+all_input_dates = [d for d, _ in date_mrap]  # full sorted list of input dates
+
+if existing_outputs and not N_explicit:
+    existing_date_strs = [f.split('_')[0] for f in existing_outputs]
+    indices = [all_input_dates.index(d) for d in existing_date_strs if d in all_input_dates]
+    if len(indices) >= 2:
+        index_gaps = [indices[i+1] - indices[i] for i in range(len(indices) - 1)]
+        inferred_N = Counter(index_gaps).most_common(1)[0][0]
+        N = inferred_N
+        print(f'[DETECT] Inferred N={N} from stride of {len(indices)} existing output(s) '
+              f'within the {len(all_input_dates)}-date input list.', flush=True)
+    else:
+        print(f'[DETECT] Could not infer N from existing outputs (too few matched); using N={N}.', flush=True)
+elif N_explicit:
+    print(f'[DETECT] N={N} (explicit, from --N).', flush=True)
+else:
+    print(f'[DETECT] N={N} (default).', flush=True)
+
+# ---------------------------------------------------------------------------
 # build job list (all filtering done up front so we know the total count)
 # ---------------------------------------------------------------------------
 job_list = []
@@ -307,8 +356,23 @@ for date_idx, (d, df) in enumerate(date_mrap):
     to_merge = [rs[1] for rs in results_sort]
     job_list.append((d, to_merge, mrap_product_file))
 
+# ---------------------------------------------------------------------------
+# display plan and prompt before proceeding
+# ---------------------------------------------------------------------------
 jobs_total[0] = len(job_list)
-print(f'[PLAN] {len(job_list)} jobs to run across {N_threads} thread(s), N={N}', flush=True)
+print(f'\n[PLAN] {len(job_list)} output file(s) to generate | N={N} | threads={N_threads}:', flush=True)
+for _, _, mrap_product_file in job_list:
+    print(f'  {mrap_product_file}', flush=True)
+
+if not job_list:
+    print('[PLAN] Nothing to do.', flush=True)
+    raise SystemExit(0)
+
+print(flush=True)
+answer = input(f'Proceed to generate {len(job_list)} file(s)? [y/n] ').strip().lower()
+if answer != 'y':
+    print('Aborted.', flush=True)
+    raise SystemExit(0)
 
 # ---------------------------------------------------------------------------
 # populate work queue and launch worker threads
@@ -327,5 +391,3 @@ for t in threads:
     t.join()
 
 print('[DONE] all jobs complete.', flush=True)
-
-
