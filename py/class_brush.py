@@ -1,4 +1,4 @@
-"""20260318
+"""
 class_brush.py — Fire boundary tracing from Sentinel-2 binary mask
 
 Usage:
