@@ -4,6 +4,16 @@
 2) create a new mosaic for every date there's new data ( option to do this on every N-th date) 
 
 20250605: nb, should have sentinel2_mrap.py pass in the dates that need to be (re) generated.
+
+Command line options:
+  --N <int>         Only process every N-th date (default: 1, i.e. every date).
+  --N_threads <int> Number of worker threads for parallel job execution (default: 1).
+  [second arg]      If a second positional argument is present, EPSG is set to
+                    3347 (Canada LCC); otherwise defaults to 3005 (BC Albers).
+
+Side-channel inputs:
+  .mrap_merge_dates  Optional file; if present, only dates listed (one per line)
+                     will be processed. All others are skipped.
 '''
 from misc import sep, args, exists, run, err, parfor, hdr_fn
 import multiprocessing as mp
