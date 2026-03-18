@@ -7,7 +7,7 @@ Usage:
 Parameters (command-line):
   argv[1]  : input file — binary mask, ENVI type-4 (float32), single band
   argv[2]  : source data file — Sentinel-2 scene (used for clipping and naming)
-  argv[3]  : brush_size — linking window width in pixels (optional, default 111)
+  argv[3]  : brush_size — linking window width in pixels (optional, default 15)
   argv[4]  : point_threshold — minimum pixel count to process a component
                (optional, default 10)
 
@@ -17,6 +17,16 @@ Constants (edit at top of file):
 Outputs (per detected boundary component):
   23_<ID>_<date>_<HHMM>_detection_sentinel2.kml   — polygon boundary
   23_<ID>_<date>_<HHMM>_detection_sentinel2.tif   — clipped GeoTIFF
+
+Additional outputs for the largest (assumed fire) component:
+  23_<date>_<HHMM>_detection_sentinel2.kml         — polygon boundary
+  23_<date>_<HHMM>_detection_sentinel2.tif         — clipped GeoTIFF
+
+Band selection for TIF output:
+  Reads band names from the source .hdr. Finds all consecutive runs of bands
+  whose names contain B12, B11, or B9. Selects the second such run (e.g.
+  B12_post, B11_post, B9_post). Falls back to all bands if fewer than two
+  runs are found.
 
 Dependencies:
   class_brush      (compiled from class_brush.cpp, must be on PATH or in ../cpp/)
@@ -31,7 +41,7 @@ Dependencies:
 WRITE_PNG = False
 
 # ── defaults (used when optional CLI args are absent) ────────────────────────
-DEFAULT_BRUSH_SIZE  = 111
+DEFAULT_BRUSH_SIZE  = 15
 DEFAULT_POINT_THRES = 10
 
 import os
@@ -46,7 +56,7 @@ BRUSH_EXE = cd + 'class_brush.exe'
 # ── argument validation ──────────────────────────────────────────────────────
 if len(args) < 3:
     err('class_brush.py [input mask .bin] [source scene .bin] '
-        '[brush_size, default 111] [point_threshold, default 10]')
+        '[brush_size, default 15] [point_threshold, default 10]')
 
 fn, src_data = args[1], args[2]
 
@@ -120,6 +130,68 @@ except Exception:
 local_hh = utc_hh + local_offset_hours
 local_mm = utc_mm
 
+# ── parse band names from source HDR and select plotting bands ───────────────
+# Reads band names from the source .hdr file. Finds consecutive runs of bands
+# whose names contain B12, B11, or B9. Selects the second such run.
+# Returns a space-separated string of 1-based band indices, or '' for all bands.
+def select_plot_bands(hdr_path):
+    try:
+        with open(hdr_path, 'r') as f:
+            text = f.read()
+        # Extract the band names block: band names = { ... }
+        start = text.find('band names')
+        if start < 0:
+            return ''
+        brace_open = text.find('{', start)
+        brace_close = text.find('}', brace_open)
+        if brace_open < 0 or brace_close < 0:
+            return ''
+        names_raw = text[brace_open + 1 : brace_close]
+        names = [n.strip() for n in names_raw.split(',') if n.strip()]
+
+        MATCH = ('B12', 'B11', 'B9')
+
+        def matches(name):
+            return any(sub in name for sub in MATCH)
+
+        # Build list of 1-based indices of matching bands
+        matching = [i + 1 for i, n in enumerate(names) if matches(n)]
+
+        if not matching:
+            return ''
+
+        # Split into consecutive runs (gaps > 1 start a new run)
+        runs = []
+        run = [matching[0]]
+        for idx in matching[1:]:
+            if idx == run[-1] + 1:
+                run.append(idx)
+            else:
+                runs.append(run)
+                run = [idx]
+        runs.append(run)
+
+        if len(runs) < 2:
+            print('WARNING: fewer than 2 consecutive band runs found; using first run')
+            chosen = runs[0]
+        else:
+            chosen = runs[1]   # second run, e.g. _post bands
+
+        band_str = ' '.join(str(b) for b in chosen)
+        print('Selected plot bands (1-based): %s  -> %s'
+              % (band_str, [names[b - 1] for b in chosen]))
+        return band_str
+
+    except Exception as e:
+        print('WARNING: band name parsing failed (%s); using all bands' % e)
+        return ''
+
+src_hdr = os.path.splitext(src_data)[0] + '.hdr'
+if not exists(src_hdr):
+    # Try appending .hdr directly (handles foo.bin → foo.bin.hdr convention)
+    src_hdr = src_data + '.hdr'
+plot_bands = select_plot_bands(src_hdr)
+
 # ── run the combined C++ processing pipeline ────────────────────────────────
 cmd = (
     BRUSH_EXE
@@ -132,19 +204,30 @@ lines = os.popen(cmd).read().split('\n')
 for line in lines:
     print(line)
 
-# ── parse per-component output lines and post-process ───────────────────────
+# ── collect component pixel counts from C++ output ───────────────────────────
 # class_brush.exe emits one line per accepted component:
 #   +component <N> <pixel_count>
+components = []   # list of (N, n_px) in emission order
 for line in lines:
     w = line.strip().split()
-    if len(w) != 3 or w[0] != '+component':
-        continue
+    if len(w) == 3 and w[0] == '+component':
+        components.append((int(w[1]), int(w[2])))
 
-    N    = int(w[1])
-    n_px = int(w[2])
-    f_i  = str(N).zfill(3)
+if not components:
+    print('No components found above threshold.')
+    run('clean')
+    sys.exit(0)
 
-    # Binary mask written by class_brush.exe for this component
+# Identify the largest component by pixel count
+largest_N = max(components, key=lambda x: x[1])[0]
+print('Largest component: %03d' % largest_N)
+
+# ── per-component post-processing ────────────────────────────────────────────
+ts_str = str(local_hh).zfill(2) + str(local_mm).zfill(2)
+
+for N, n_px in components:
+    f_i = str(N).zfill(3)
+
     comp_bin = fn + '_comp_' + f_i + '.bin'
 
     if not exists(comp_bin):
@@ -170,19 +253,13 @@ for line in lines:
     if WRITE_PNG:
         run(['python3', pd + 'raster_plot.py', comp_bin, '1 2 3 1 1 &'])
 
-    FIRE_NUM  = f_i
     src_clip  = f_i + '.bin'
     src_cliph = f_i + '.hdr'
 
     # project source data onto component extent
     run('po ' + src_data + ' ' + comp_bin + ' ' + src_clip)
 
-    string = (
-        '23_' + FIRE_NUM
-        + '_' + ds
-        + '_' + str(local_hh).zfill(2) + str(local_mm).zfill(2)
-        + '_detection_sentinel2'
-    )
+    string = '23_' + f_i + '_' + ds + '_' + ts_str + '_detection_sentinel2'
     print('Output label:', string)
 
     run('mv ' + comp_kml + ' ' + string + '.kml')
@@ -190,8 +267,18 @@ for line in lines:
     run('mv ' + src_cliph + ' ' + string + '.hdr')
 
     binfile = string + '.bin'
-    run('envi2tif.py ' + binfile)
+    envi_cmd = 'envi2tif.py ' + binfile
+    if plot_bands:
+        envi_cmd += ' ' + plot_bands
+    run(envi_cmd)
     run('mv ' + binfile + '_ht.bin_smult.tif ' + string + '.tif')
+
+    # ── largest component: also write the no-index output pair ───────────────
+    if N == largest_N:
+        fire_base = '23_' + ds + '_' + ts_str + '_detection_sentinel2'
+        run('cp ' + string + '.kml ' + fire_base + '.kml')
+        run('cp ' + string + '.tif ' + fire_base + '.tif')
+        print('Fire output:', fire_base + '.kml', fire_base + '.tif')
 
 # ── final permissions and cleanup ────────────────────────────────────────────
 run('chmod 755 23_*.tif')
