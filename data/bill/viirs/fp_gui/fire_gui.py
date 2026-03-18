@@ -1141,10 +1141,14 @@ class FireAccumulationGUI:
                 selection_order[idx] = 0
                 _compact_order()
             else:
-                # Select (max 3)
+                # If already at 3, evict the one with order == 1 (oldest pick)
                 chosen = sum(1 for s in selection_order if s > 0)
                 if chosen >= 3:
-                    return                                       # silently ignore
+                    for j in range(n_bands):
+                        if selection_order[j] == 1:
+                            selection_order[j] = 0
+                            break
+                    _compact_order()
                 selection_order[idx] = _next_order()
             _refresh_cells()
 

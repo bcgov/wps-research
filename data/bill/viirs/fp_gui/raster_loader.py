@@ -105,11 +105,20 @@ class RasterLoader:
         finite_mask = np.isfinite(img)
 
         if finite_mask.any():
-            vmin, vmax = np.nanpercentile(img, [1, 99])
-            if vmax > vmin:
-                img = np.clip((img - vmin) / (vmax - vmin), 0.0, 1.0)
+            if img.ndim == 2:
+                vmin, vmax = np.nanpercentile(img, [2, 99])
+                if vmax > vmin:
+                    img = np.clip((img - vmin) / (vmax - vmin), 0.0, 1.0)
+                else:
+                    img = np.zeros_like(img)
             else:
-                img = np.zeros_like(img)
+                for b in range(img.shape[2]):
+                    band = img[:, :, b]
+                    vmin, vmax = np.nanpercentile(band, [2, 99])
+                    if vmax > vmin:
+                        img[:, :, b] = np.clip((band - vmin) / (vmax - vmin), 0.0, 1.0)
+                    else:
+                        img[:, :, b] = 0.0
 
         if img.ndim == 2:
             img = np.where(finite_mask, img, 1.0)
