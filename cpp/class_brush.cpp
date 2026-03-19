@@ -450,22 +450,62 @@ static long int stage_count_onehot(float *dat, size_t np) {
 // ═══════════════════════════════════════════════════════════════════════════
 // Stage 6: One-hot split + per-component output
 // ═══════════════════════════════════════════════════════════════════════════
-// Iterates over recoded labels. For each label >= 1:
-//   - builds binary mask
-//   - counts pixels
-//   - if >= point_threshold: writes .bin/.hdr and emits "+component N count"
-// Background (0) and label 1 (first/empty class from flood fill background)
-// are skipped.
+// Pre-scans recoded array to find pixel counts per label and identify the
+// largest component above threshold (the "main" segment).
+//
+// If all_segments is false (default), only the main segment is written and
+// emitted. If all_segments is true, all components above threshold are
+// written (original behaviour, useful for debugging).
 
 static void stage_onehot_output(float *recode, size_t nrow, size_t ncol,
                                  size_t n_classes,
                                  long int point_threshold,
+                                 bool all_segments,
                                  const str &base_fn,
                                  const str &base_hfn)
 {
     size_t np = nrow * ncol;
 
+    // Pre-scan: count pixels per label (no mask allocation needed here)
+    map<size_t, long int> label_counts;
+    for (size_t i = 0; i < np; ++i) {
+        float d = recode[i];
+        if (std::isnan(d) || d == 0.f) continue;
+        label_counts[(size_t)d]++;
+    }
+
+    // Find the largest label above threshold
+    size_t main_label = 0;
+    long int main_count = 0;
+    for (auto &kv : label_counts) {
+        if (kv.second >= point_threshold && kv.second > main_count) {
+            main_count = kv.second;
+            main_label = kv.first;
+        }
+    }
+
+    if (main_label == 0) {
+        printf("No components found above threshold %ld.\n", point_threshold);
+        return;
+    }
+    printf("  main segment: label %zu (%ld pixels)\n", main_label, main_count);
+    fflush(stdout);
+
     for (size_t N = 1; N <= n_classes; ++N) {
+        long int n_px = label_counts.count(N) ? label_counts[N] : 0;
+
+        if (n_px < point_threshold) {
+            printf("SKIP component %zu (%ld pixels, threshold %ld)\n",
+                   N, n_px, point_threshold);
+            continue;
+        }
+
+        // Skip non-main segments unless --all_segments requested
+        if (!all_segments && N != main_label) {
+            printf("SKIP component %zu (%ld pixels, not main segment)\n", N, n_px);
+            continue;
+        }
+
         float label = (float)N;
 
         // Build one-hot mask
@@ -479,13 +519,10 @@ static void stage_onehot_output(float *recode, size_t nrow, size_t ncol,
             }
         }
 
-        long int n_px = stage_count_onehot(mask, np);
-
-        if (n_px < point_threshold) {
-            printf("SKIP component %zu (%ld pixels, threshold %ld)\n",
-                   N, n_px, point_threshold);
-            free(mask);
-            continue;
+        long int n_px_check = stage_count_onehot(mask, np);
+        if (n_px_check != n_px) {
+            fprintf(stderr, "WARNING: pre-scan count %ld != mask count %ld for label %zu\n",
+                    n_px, n_px_check, N);
         }
 
         // Write component mask
@@ -512,12 +549,27 @@ static void stage_onehot_output(float *recode, size_t nrow, size_t ncol,
 
 int main(int argc, char **argv) {
     if (argc < 4) {
-        err("Usage: class_brush.exe <input_mask.bin> <brush_size> <point_threshold>");
+        err("Usage: class_brush.exe [--all_segments] <input_mask.bin> <brush_size> <point_threshold>");
     }
 
-    str fn(argv[1]);
-    long int brush_size      = atol(argv[2]);
-    long int point_threshold = atol(argv[3]);
+    // Optional flag: --all_segments (must appear before positional args)
+    bool all_segments = false;
+    int arg_offset = 0;
+    if (argc >= 2 && std::string(argv[1]) == "--all_segments") {
+        all_segments = true;
+        arg_offset = 1;
+    }
+
+    if (argc < 4 + arg_offset) {
+        err("Usage: class_brush.exe [--all_segments] <input_mask.bin> <brush_size> <point_threshold>");
+    }
+
+    str fn(argv[1 + arg_offset]);
+    long int brush_size      = atol(argv[2 + arg_offset]);
+    long int point_threshold = atol(argv[3 + arg_offset]);
+
+    if (all_segments) printf("Mode: all_segments\n");
+    else              printf("Mode: main segment only\n");
 
     if (brush_size <= 0)      err("brush_size must be > 0");
     if (point_threshold <= 0) err("point_threshold must be > 0");
@@ -582,11 +634,9 @@ int main(int argc, char **argv) {
     printf("Stage 5/6: one-hot component output (threshold=%ld)...\n",
            point_threshold); fflush(stdout);
     stage_onehot_output(recoded, nrow, ncol, n_classes,
-                        point_threshold, fn, str(hfn));
+                        point_threshold, all_segments, fn, str(hfn));
 
     free(recoded);
     printf("class_brush: done.\n");
     return 0;
 }
-
-

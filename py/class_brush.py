@@ -2,7 +2,7 @@
 class_brush.py — Fire boundary tracing from Sentinel-2 binary mask
 
 Usage:
-  python3 class_brush.py <mask.bin> <source_scene.bin> [brush_size] [point_threshold]
+  python3 class_brush.py <mask.bin> <source_scene.bin> [brush_size] [point_threshold] [--all_segments]
 
 Parameters (command-line):
   argv[1]  : input file — binary mask, ENVI type-4 (float32), single band
@@ -10,6 +10,8 @@ Parameters (command-line):
   argv[3]  : brush_size — linking window width in pixels (optional, default 15)
   argv[4]  : point_threshold — minimum pixel count to process a component
                (optional, default 10)
+  --all_segments : if present (anywhere in args), write all components above
+               threshold, not just the largest (useful for debugging)
 
 Constants (edit at top of file):
   WRITE_PNG   : write debug PNG visualisations (default False)
@@ -81,7 +83,9 @@ if BRUSH_SIZE <= 0:
 if POINT_THRES <= 0:
     err('point_threshold must be > 0, got: ' + str(POINT_THRES))
 
-print('brush_size=%d  point_threshold=%d' % (BRUSH_SIZE, POINT_THRES))
+ALL_SEGMENTS = '--all_segments' in args
+
+print('brush_size=%d  point_threshold=%d  all_segments=%s' % (BRUSH_SIZE, POINT_THRES, ALL_SEGMENTS))
 
 # ── parse timestamp from Sentinel-2 filename ────────────────────────────────
 # Expected pattern: ..._YYYYMMDDTHHMMSS_...
@@ -195,6 +199,7 @@ plot_bands = select_plot_bands(src_hdr)
 # ── run the combined C++ processing pipeline ────────────────────────────────
 cmd = (
     BRUSH_EXE
+    + (' --all_segments' if ALL_SEGMENTS else '')
     + ' ' + fn
     + ' ' + str(BRUSH_SIZE)
     + ' ' + str(POINT_THRES)
@@ -285,4 +290,3 @@ run('chmod 755 23_*.tif')
 run('chmod 755 23_*.kml')
 run('rm -f *smult*')
 run('rm -f *bin_ht*')
-run('clean')
