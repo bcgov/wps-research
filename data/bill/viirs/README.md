@@ -1,6 +1,6 @@
 # viirs — VIIRS Fire Pixel Processing Toolkit
 
-*Last updated: March 17, 2026*
+*Last updated: March 19, 2026*
 
 Pipeline for downloading, converting, accumulating, and visualising [VNP14IMG](https://ladsweb.modaps.eosdis.nasa.gov/missions-and-measurements/products/VNP14IMG/#product-information) (VIIRS/NPP Active Fires 375m) data from NASA LAADS DAAC.
 
@@ -16,7 +16,13 @@ Pipeline for downloading, converting, accumulating, and visualising [VNP14IMG](h
 All four steps run automatically from a single **Download** button in the GUI. Command-line utilities are also available.
 
 ```bash
-python -m viirs.fp_gui
+# From anywhere — pass an optional raster file to load on startup
+python3 /path/to/viirs/fp_gui
+python3 /path/to/viirs/fp_gui  path/to/raster.bin
+
+# Or with -m (requires viirs parent dir on PYTHONPATH)
+python3 -m viirs.fp_gui
+python3 -m viirs.fp_gui path/to/raster.bin
 ```
 
 ---
@@ -48,7 +54,8 @@ The reference raster defines the projection and bounding box. Load it first via 
 After loading:
 - **Ref** (row 3) is set to the same raster. It controls the accumulation output grid/directory — change it independently if needed.
 - If `<raster_name>_VIIRS/` already exists, shapefiles are auto-loaded (green **loaded** status).
-- Band selection is reset. Use the **Band** button to pick up to 3 bands for RGB display.
+- **Band auto-selection:** the GUI peeks at band descriptions and prefers bands with a `_post` suffix (e.g. `B12_post`, `B11_post`, `B9_post`) over `_pre` or other groups. Falls back to the first 3 bands if no grouping is detected. Use the **Band** button to change the selection.
+- **Sentinel-2 auto-fill:** if the filename starts with `S2` and no shapefiles exist, the acquisition date (3rd `_`-separated field, e.g. `20251009T192229`) is parsed as the **End** date and **Start** is set to March 1 of the same year. If both dates are populated, the Download dialog opens automatically.
 
 > Reduce **Max Raster Display Dim** in the **Config** dialog if panning feels slow (display only, does not affect outputs).
 
@@ -70,7 +77,7 @@ The pipeline runs automatically: Download (16 concurrent workers, skips existing
 
 | Control | Function |
 |---|---|
-| **Start/End + Apply** | Filter animation to a date sub-range |
+| **Start/End** | Filter animation to a date sub-range — applied automatically on focus-out or Enter |
 | **Play/Pause, Step, Slider** | Animate fire pixel detections over time |
 | **Band** | Select up to 3 bands for RGB display |
 | **Pan / Zoom+ / Zoom− / Home** | Map navigation |
@@ -147,7 +154,7 @@ python -m viirs.utils.rasterize /data/viirs/accumulated my_raster.bin /output/ra
 
 ```
 Row 1:  [Config]  Raster: [____] [Browse]  |  Shapefiles: loaded          [Sentinel-2 Fire Mapping]
-Row 2:  Start: [____]  End: [____]  [Apply]  [Download]  |  [Play] [Reset] [Step] ms:[__] [slider]
+Row 2:  Start: [____]  End: [____]  [Download]  |  [Play] [Reset] [Step] ms:[__] [slider]
 Row 3:  Ref: [____] [Browse]  |  [Band] [Pan] [Zoom+] [Zoom-] [Home]  |  Fire Pixels  Background Image
 ```
 
