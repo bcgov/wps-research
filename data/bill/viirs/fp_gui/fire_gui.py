@@ -1030,13 +1030,7 @@ class FireAccumulationGUI:
         return None
 
     def _load_startup_raster(self, path: str):
-        """Load a raster supplied on the command line.
-
-        After loading, if the filename is a Sentinel-2 file, parse its
-        acquisition date and populate the date boxes.  If no shapefiles
-        were found (meaning no data has been downloaded yet) and both date
-        boxes are filled, automatically prompt the Download dialog.
-        """
+        """Load a raster supplied on the command line."""
         path = os.path.expanduser(path)
         if not os.path.isfile(path):
             print(f"[ERROR] Raster file not found: {path}", file=sys.stderr)
@@ -1048,15 +1042,20 @@ class FireAccumulationGUI:
             self._load_raster()
         except Exception as exc:
             print(f"[ERROR] Failed to load raster: {exc}", file=sys.stderr)
-            return
 
-        # If shapefiles were auto-loaded the date boxes are already set;
-        # the data exists — nothing more to do.
+    def _check_s2_dates_and_download(self):
+        """Called after every new raster load.
+
+        If no shapefiles were found (no existing data) and the loaded file is
+        a Sentinel-2 image, parse the acquisition date from the filename,
+        populate the date boxes, and — when both boxes are filled —
+        automatically show the Download confirmation dialog.
+        """
+        # Shapefiles already loaded means data exists; nothing to do.
         if self._shp_status_label.cget("text") == "loaded":
             return
 
-        # No shapefiles: try to derive dates from an S2 filename.
-        s2_date = self._parse_s2_date_from_path(path)
+        s2_date = self._parse_s2_date_from_path(self._raster_full_path)
         if s2_date is None:
             return
 
@@ -1066,11 +1065,9 @@ class FireAccumulationGUI:
         if s2_date >= march_1:
             self._start_date_var.set(str(march_1))
         else:
-            # Acquisition is before March 1 — only fill end date.
             print(f"[INFO] S2 date {s2_date} is before March 1; "
                   "only end date populated.", file=sys.stderr)
 
-        # Auto-trigger download if both dates are set (confirmation still shown).
         if self._start_date_var.get().strip() and self._end_date_var.get().strip():
             self._root.after(100, self._start_download)
 
@@ -1178,6 +1175,9 @@ class FireAccumulationGUI:
 
         # Auto-load shapefiles from _VIIRS folder if it exists
         self._check_viirs_folder()
+
+        # After shapefile check: if none found, try S2 date auto-fill + download
+        self._check_s2_dates_and_download()
 
     # ==================================================================
     # Band Selector Popup
