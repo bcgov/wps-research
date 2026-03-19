@@ -53,6 +53,12 @@ import os
 
 import ast
 
+import subprocess
+
+import glob
+
+import threading
+
 import time
 
 import numpy as np
@@ -729,6 +735,8 @@ class GUI(GUI_Settings):
         print(f'Classification saved to: {abs_output_path}')
         print(f'  Header file: {abs_output_path.replace(".bin", ".hdr")}')
 
+        return output_filename
+
 
 
     def main(self):
@@ -1045,7 +1053,29 @@ class GUI(GUI_Settings):
             self.latest_classification = classification
 
             # Auto-save classification immediately
-            self.save_classification(classification)
+            output_filename = self.save_classification(classification)
+
+            # Run class_brush post-processing, then open QGIS in a background thread
+            class_brush_path = os.path.join(os.path.dirname(__file__), '..', 'class_brush.py')
+            _out = output_filename
+            _img = self.image_filename
+
+            def run_brush_then_qgis(out, img):
+                print(f'Running class_brush: {class_brush_path}')
+                subprocess.run([sys.executable, class_brush_path, out, img])
+
+                tif_files = sorted(glob.glob('23_*.tif'))
+                kml_files = sorted(glob.glob('23_*.kml'))
+
+                if not tif_files:
+                    print('class_brush finished but no 23_*.tif files found.')
+                    return
+
+                first_tif = tif_files[0]
+                print(f'Opening QGIS with: {first_tif} and KMLs: {kml_files}')
+                subprocess.Popen(['qgis', first_tif] + kml_files)
+
+            threading.Thread(target=run_brush_then_qgis, args=(_out, _img), daemon=True).start()
 
             # Display in third pane
             ax_classification.clear()
