@@ -356,3 +356,4 @@ if not DEBUG:
         if os.path.exists(pat):
             os.remove(pat)
 
+os.system("rm *.bak")
