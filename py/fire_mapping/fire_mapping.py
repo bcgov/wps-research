@@ -1064,11 +1064,11 @@ class GUI(GUI_Settings):
                 print(f'Running class_brush: {class_brush_path}')
                 subprocess.run([sys.executable, class_brush_path, out, img])
 
-                tif_files = sorted(glob.glob('23_*.tif'))
-                kml_files = sorted(glob.glob('23_*.kml'))
+                tif_files = sorted(glob.glob('*.tif'))
+                kml_files = sorted(glob.glob('*.kml'))
 
                 if not tif_files:
-                    print('class_brush finished but no 23_*.tif files found.')
+                    print('class_brush finished but no .tif files found.')
                     return
 
                 first_tif = tif_files[0]
