@@ -53,7 +53,7 @@ from misc import err, run, pd, sep, exists, args
 
 # ── locate compiled tools ────────────────────────────────────────────────────
 cd = pd + '..' + sep + 'cpp' + sep
-BRUSH_EXE = cd + 'class_brush.exe'
+BRUSH_EXE = cd + 'class_brush'
 
 # ── argument validation ──────────────────────────────────────────────────────
 if len(args) < 3:
