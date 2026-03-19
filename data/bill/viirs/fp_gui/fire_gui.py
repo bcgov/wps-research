@@ -29,6 +29,54 @@ from config_dialog import ConfigDialog
 from file_browser import browse_directory, browse_file
 
 
+def _auto_select_bands(band_names: list) -> list:
+    """Choose up to 3 bands to display for a new raster load.
+
+    Strategy (evaluated in order):
+    1. If bands share an underscore-based suffix and any group uses a known
+       "post" keyword (post, after, later, new), return the first 3 of that group.
+    2. If multiple suffix groups exist, return the first 3 of the first group
+       that is NOT a known "pre" keyword (pre, before, prior, old, prev).
+    3. Fallback: first min(n, 3) bands (1-based).
+
+    This handles names like B12_pre / B12_post / B12_diff as well as
+    Band12_before / Band12_after, etc.  When no consistent grouping is
+    detected the function degrades to the plain default.
+    """
+    n = len(band_names)
+    if n == 0:
+        return []
+
+    _POST = {'post', 'after', 'later', 'new'}
+    _PRE  = {'pre', 'before', 'prior', 'old', 'prev', 'previous'}
+
+    # Build an ordered list of unique suffixes and their 1-based band indices.
+    suffix_order: list = []
+    suffix_indices: dict = {}
+    has_suffix = False
+
+    for i, name in enumerate(band_names):
+        if '_' in name:
+            suffix = name.rsplit('_', 1)[1].lower()
+            has_suffix = True
+            if suffix not in suffix_indices:
+                suffix_order.append(suffix)
+                suffix_indices[suffix] = []
+            suffix_indices[suffix].append(i + 1)
+
+    # Only use suffix logic when there are at least two distinct groups,
+    # meaning the bands really are "paired" (pre/post/diff/…).
+    if has_suffix and len(suffix_indices) > 1:
+        for kw in _POST:
+            if kw in suffix_indices:
+                return suffix_indices[kw][:3]
+        for suffix in suffix_order:
+            if suffix not in _PRE:
+                return suffix_indices[suffix][:3]
+
+    return list(range(1, min(n, 3) + 1))
+
+
 class FireAccumulationGUI:
     """
     Top-level GUI for the VIIRS fire pixel accumulation viewer.
@@ -40,7 +88,7 @@ class FireAccumulationGUI:
         4. Navigation     -- pan/zoom, layer toggles
     """
 
-    def __init__(self):
+    def __init__(self, raster_path: Optional[str] = None):
         self._root = tk.Tk()
         self._root.title("VIIRS Fire Pixel Accumulation Viewer")
         self._root.geometry("1600x1000")
@@ -140,6 +188,9 @@ class FireAccumulationGUI:
 
         self._canvas.set_on_viewport_changed(self._on_viewport_changed)
 
+        if raster_path:
+            self._root.after(0, lambda p=raster_path: self._load_startup_raster(p))
+
     # ==================================================================
     # UI construction — compact 3-row layout for maximum canvas space
     #
@@ -201,13 +252,15 @@ class FireAccumulationGUI:
 
         # -- Date / Download cluster --
         ttk.Label(row2, text="Start:", font=_font).pack(side=tk.LEFT)
-        ttk.Entry(row2, textvariable=self._start_date_var, width=11).pack(
-            side=tk.LEFT, padx=2)
+        _start_entry = ttk.Entry(row2, textvariable=self._start_date_var, width=11)
+        _start_entry.pack(side=tk.LEFT, padx=2)
+        _start_entry.bind("<FocusOut>", self._apply_date_filter_silent)
+        _start_entry.bind("<Return>", lambda _: self._apply_date_filter())
         ttk.Label(row2, text="End:", font=_font).pack(side=tk.LEFT, padx=(4, 0))
-        ttk.Entry(row2, textvariable=self._end_date_var, width=11).pack(
-            side=tk.LEFT, padx=2)
-        ttk.Button(row2, text="Apply",
-                   command=self._apply_date_filter).pack(side=tk.LEFT, padx=2)
+        _end_entry = ttk.Entry(row2, textvariable=self._end_date_var, width=11)
+        _end_entry.pack(side=tk.LEFT, padx=2)
+        _end_entry.bind("<FocusOut>", self._apply_date_filter_silent)
+        _end_entry.bind("<Return>", lambda _: self._apply_date_filter())
 
         self._download_btn = tk.Button(
             row2, text="\u2b07 Download", bg="#2196F3", fg="white",
@@ -951,6 +1004,77 @@ class FireAccumulationGUI:
         messagebox.showwarning("Warning", f"File not found: {val}")
 
     # ==================================================================
+    # Startup raster loading (CLI argument)
+    # ==================================================================
+
+    def _parse_s2_date_from_path(self, path: str) -> Optional[date]:
+        """If the filename starts with S2, parse the date from the 3rd field.
+
+        E.g. S2B_MSIL1C_20251009T192229_... -> 2025-10-09
+        Returns None if not an S2 file or the timestamp field is missing/invalid.
+        """
+        fname = os.path.basename(path)
+        if not fname.upper().startswith("S2"):
+            return None
+        parts = fname.split("_")
+        if len(parts) < 3:
+            return None
+        ts = parts[2]  # e.g. "20251009T192229"
+        for fmt in ("%Y%m%dT%H%M%S", "%Y%m%dT%H%M"):
+            try:
+                return _datetime.strptime(ts, fmt).date()
+            except ValueError:
+                continue
+        print(f"[WARN] S2 filename: could not parse timestamp from 3rd field: {ts!r}",
+              file=sys.stderr)
+        return None
+
+    def _load_startup_raster(self, path: str):
+        """Load a raster supplied on the command line.
+
+        After loading, if the filename is a Sentinel-2 file, parse its
+        acquisition date and populate the date boxes.  If no shapefiles
+        were found (meaning no data has been downloaded yet) and both date
+        boxes are filled, automatically prompt the Download dialog.
+        """
+        path = os.path.expanduser(path)
+        if not os.path.isfile(path):
+            print(f"[ERROR] Raster file not found: {path}", file=sys.stderr)
+            return
+
+        self._raster_full_path = os.path.abspath(path)
+        self._raster_path_var.set(os.path.basename(path))
+        try:
+            self._load_raster()
+        except Exception as exc:
+            print(f"[ERROR] Failed to load raster: {exc}", file=sys.stderr)
+            return
+
+        # If shapefiles were auto-loaded the date boxes are already set;
+        # the data exists — nothing more to do.
+        if self._shp_status_label.cget("text") == "loaded":
+            return
+
+        # No shapefiles: try to derive dates from an S2 filename.
+        s2_date = self._parse_s2_date_from_path(path)
+        if s2_date is None:
+            return
+
+        self._end_date_var.set(str(s2_date))
+
+        march_1 = date(s2_date.year, 3, 1)
+        if s2_date >= march_1:
+            self._start_date_var.set(str(march_1))
+        else:
+            # Acquisition is before March 1 — only fill end date.
+            print(f"[INFO] S2 date {s2_date} is before March 1; "
+                  "only end date populated.", file=sys.stderr)
+
+        # Auto-trigger download if both dates are set (confirmation still shown).
+        if self._start_date_var.get().strip() and self._end_date_var.get().strip():
+            self._root.after(100, self._start_download)
+
+    # ==================================================================
     # Loading (raster must be loaded first)
     # ==================================================================
 
@@ -984,8 +1108,19 @@ class FireAccumulationGUI:
                 # Explicit band selection (e.g. from band selector popup)
                 self._selected_bands = list(bands)
             else:
-                # New raster — reset so stale indices don't cause IndexError
+                # New raster — peek at band names via cheap gdal metadata read
+                # so we can auto-select the best 3 bands in a single load pass.
                 self._selected_bands = []
+                try:
+                    from osgeo import gdal as _gdal
+                    _ds = _gdal.Open(raster_path, _gdal.GA_ReadOnly)
+                    if _ds is not None:
+                        _names = [_ds.GetRasterBand(i).GetDescription()
+                                  for i in range(1, _ds.RasterCount + 1)]
+                        _ds = None
+                        self._selected_bands = _auto_select_bands(_names)
+                except Exception:
+                    pass
 
             load_bands = self._selected_bands if self._selected_bands else None
             img = self._raster_loader.load(raster_path, bands=load_bands)
@@ -993,8 +1128,7 @@ class FireAccumulationGUI:
             self._canvas.display_raster(img, ext)
             self._raster_loaded = True
 
-            # If no explicit bands were requested, record what was actually
-            # loaded so the band selector popup shows the current state.
+            # If auto-selection produced nothing, fall back to first 3.
             if not self._selected_bands:
                 n = self._raster_loader.raster._n_band
                 self._selected_bands = list(range(1, min(n, 3) + 1))
@@ -1370,6 +1504,19 @@ class FireAccumulationGUI:
             f"Re-clipped: {n_kept} pixels ({n_removed} outside raster)."
             f"  {min_d} \u2192 {max_d}"
         )
+
+    def _apply_date_filter_silent(self, event=None):
+        """Apply date filter on focus-out — no error popups for empty/invalid."""
+        start_str = self._start_date_var.get().strip()
+        end_str = self._end_date_var.get().strip()
+        if not start_str or not end_str:
+            return
+        try:
+            date.fromisoformat(start_str)
+            date.fromisoformat(end_str)
+        except ValueError:
+            return
+        self._apply_date_filter()
 
     def _apply_date_filter(self):
         """Apply date filter -- works even without shapefiles loaded."""
