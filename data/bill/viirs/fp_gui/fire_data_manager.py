@@ -295,6 +295,19 @@ class FireDataManager:
             if progress_cb and (i % 50 == 0 or i == total - 1):
                 progress_cb(i + 1, total)
 
+    def clear(self):
+        """Reset all fire-pixel state (called when shapefiles are not loaded)."""
+        self._file_dict = {}
+        self._master_gdf = None
+        self._date_range = []
+        self._target_crs = None
+        self._all_x = None
+        self._all_y = None
+        self._all_ordinals = None
+        self._sort_order = None
+        self._sorted_ords = None
+        self._frame_cache.clear()
+
     def clear_cache(self):
         self._frame_cache.clear()
 

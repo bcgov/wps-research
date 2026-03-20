@@ -179,6 +179,7 @@ class FireAccumulationGUI:
         self._preserved_slider_date: Optional[date] = None
 
         self._build_ui()
+        self._set_playback_enabled(False)
 
         self._animator = FireAnimationController(
             self._root,
@@ -279,28 +280,32 @@ class FireAccumulationGUI:
         self._play_btn = ttk.Button(row2, text="\u25b6 Play",
                                     command=self._toggle_play, width=7)
         self._play_btn.pack(side=tk.LEFT, padx=1)
-        ttk.Button(row2, text="\u23ee", command=self._reset_animation,
-                   width=2).pack(side=tk.LEFT, padx=1)
+        self._reset_btn = ttk.Button(row2, text="\u23ee",
+                                     command=self._reset_animation, width=2)
+        self._reset_btn.pack(side=tk.LEFT, padx=1)
 
         ttk.Separator(row2, orient=tk.VERTICAL).pack(
             side=tk.LEFT, padx=3, fill=tk.Y, pady=1)
 
-        ttk.Button(row2, text="\u2190",
-                   command=self._skip_back_n, width=2).pack(side=tk.LEFT, padx=1)
+        self._skip_back_btn = ttk.Button(row2, text="\u2190",
+                                         command=self._skip_back_n, width=2)
+        self._skip_back_btn.pack(side=tk.LEFT, padx=1)
         self._skip_n_var = tk.IntVar(value=1)
-        ttk.Spinbox(row2, from_=1, to=999, increment=1,
-                     textvariable=self._skip_n_var, width=3).pack(
-            side=tk.LEFT, padx=1)
-        ttk.Button(row2, text="\u2192",
-                   command=self._skip_fwd_n, width=2).pack(side=tk.LEFT, padx=1)
+        self._skip_n_spinbox = ttk.Spinbox(row2, from_=1, to=999, increment=1,
+                                           textvariable=self._skip_n_var, width=3)
+        self._skip_n_spinbox.pack(side=tk.LEFT, padx=1)
+        self._skip_fwd_btn = ttk.Button(row2, text="\u2192",
+                                        command=self._skip_fwd_n, width=2)
+        self._skip_fwd_btn.pack(side=tk.LEFT, padx=1)
 
         ttk.Separator(row2, orient=tk.VERTICAL).pack(
             side=tk.LEFT, padx=3, fill=tk.Y, pady=1)
 
         ttk.Label(row2, text="ms:", font=_font).pack(side=tk.LEFT)
-        ttk.Spinbox(row2, from_=50, to=5000, increment=50,
-                     textvariable=self._interval_var, width=5,
-                     command=self._update_speed).pack(side=tk.LEFT, padx=2)
+        self._speed_spinbox = ttk.Spinbox(row2, from_=50, to=5000, increment=50,
+                                          textvariable=self._interval_var, width=5,
+                                          command=self._update_speed)
+        self._speed_spinbox.pack(side=tk.LEFT, padx=2)
 
         ttk.Separator(row2, orient=tk.VERTICAL).pack(
             side=tk.LEFT, padx=3, fill=tk.Y, pady=1)
@@ -832,22 +837,38 @@ class FireAccumulationGUI:
         else:
             self._update_shp_status(False)
 
+    def _set_playback_enabled(self, enabled: bool):
+        """Enable or disable all playback controls."""
+        state = ["!disabled"] if enabled else ["disabled"]
+        for w in (self._play_btn, self._reset_btn,
+                  self._skip_back_btn, self._skip_fwd_btn,
+                  self._skip_n_spinbox, self._speed_spinbox,
+                  self._frame_slider):
+            w.state(state)
+
     def _update_shp_status(self, loaded: bool):
         """Update the shapefile status indicator and clear fire-pixel info
         when shapefiles are not loaded."""
         if loaded:
             self._shp_status_label.configure(text="loaded", fg="#22cc22")
+            self._set_playback_enabled(True)
         else:
             self._shp_status_label.configure(text="not found", fg="gray")
+            # Clear canvas scatter and stored fire-pixel data
+            self._canvas.clear()
+            self._data_mgr.clear()
             # Clear all fire-pixel-related display info
             self._start_date_var.set("")
             self._end_date_var.set("")
-            self._date_label_var.set("Date: \u2014")
-            self._frame_label_var.set("Frame: 0 / 0")
-            self._pixel_count_var.set("Pixels: 0")
-            self._viewport_pixel_var.set("In view: 0")
+            self._date_label_var.set("")
+            self._frame_label_var.set("")
+            self._pixel_count_var.set("")
+            self._viewport_pixel_var.set("")
             self._frame_slider.set(0)
             self._frame_slider.configure(to=0)
+            self._shapefile_dir_var.set("")
+            self._status_var.set("No shapefiles found for this raster.")
+            self._set_playback_enabled(False)
             if self._animator:
                 self._animator.stop()
                 self._play_btn.config(text="\u25b6  Play")
@@ -1159,6 +1180,10 @@ class FireAccumulationGUI:
             return
 
         # --- Below only runs for a genuinely new raster file ---
+
+        # Clear all previous shapefile state immediately so no stale info
+        # is visible while the new raster is being set up.
+        self._update_shp_status(False)
 
         # Store CRS info for download
         self._store_raster_crs_info(raster_path)
@@ -1608,14 +1633,14 @@ class FireAccumulationGUI:
             current = self._animator.current_date or start
             self._frame_slider.set(idx)
             self._frame_label_var.set(
-                f"Frame: {idx + 1} / {self._animator.total_frames}")
+                f"Frame: {idx + 1}")
             self._date_label_var.set(f"Date: {current}")
             self._on_animation_frame(current)
             self._preserved_slider_date = None
             self._preserved_slider_index = None
         else:
             self._frame_label_var.set(
-                f"Frame: 0 / {self._animator.total_frames}")
+                f"Frame: 1")
             self._date_label_var.set(f"Date: {start}")
             self._on_animation_frame(start)
 
@@ -1699,7 +1724,7 @@ class FireAccumulationGUI:
         self._date_label_var.set(f"Date: {current_date}")
         idx = self._animator.current_index
         total = self._animator.total_frames
-        self._frame_label_var.set(f"Frame: {idx + 1} / {total}")
+        self._frame_label_var.set(f"Frame: {idx + 1}")
         self._pixel_count_var.set(f"Pixels: {fd.n_pixels}")
 
         scatter_sz = cfg.DEFAULT_SCATTER_SIZE
@@ -1743,7 +1768,7 @@ class FireAccumulationGUI:
         self._date_label_var.set(f"Date: {current_date}")
         idx = self._animator.current_index
         total = self._animator.total_frames
-        self._frame_label_var.set(f"Frame: {idx + 1} / {total}")
+        self._frame_label_var.set(f"Frame: {idx + 1}")
         self._pixel_count_var.set(f"Pixels: {fd.n_pixels}")
         self._update_viewport_pixel_count()
 

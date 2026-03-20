@@ -133,6 +133,26 @@ def get_crs_from_raster(raster_path: str) -> str:
     return wkt
 
 
+def get_extent_from_raster(raster_path: str):
+    """Return (x_min, x_max, y_min, y_max) of a raster in its native CRS."""
+    from osgeo import gdal
+    gdal.UseExceptions()
+
+    ds = gdal.Open(raster_path, gdal.GA_ReadOnly)
+    if ds is None:
+        raise RuntimeError(f"Could not open raster: {raster_path}")
+
+    gt = ds.GetGeoTransform()
+    cols, rows = ds.RasterXSize, ds.RasterYSize
+    ds = None
+
+    x_min = gt[0]
+    x_max = gt[0] + cols * gt[1]
+    y_max = gt[3]
+    y_min = gt[3] + rows * gt[5]  # gt[5] is negative
+    return min(x_min, x_max), max(x_min, x_max), min(y_min, y_max), max(y_min, y_max)
+
+
 def crs_label(crs_input) -> str:
     """Return a human-readable label like 'EPSG:3005 (NAD83 / BC Albers)'."""
     try:
@@ -180,7 +200,7 @@ def extract_datetime(ds):
 # ---------------------------------------------------------------------------
 
 def process_file(nc_path, utm_zone=None, hemisphere=None, bbox=None,
-                 output=None, target_crs=None):
+                 output=None, target_crs=None, raster_extent=None):
     """
     Convert one .nc file to a shapefile.
 
@@ -193,6 +213,9 @@ def process_file(nc_path, utm_zone=None, hemisphere=None, bbox=None,
     output : str, optional — output path
     target_crs : str, optional — WKT or EPSG string to project into.
         If set, overrides utm_zone/hemisphere entirely.
+    raster_extent : tuple, optional — (x_min, x_max, y_min, y_max) in the
+        target CRS.  Pixels outside this extent are dropped; the file is
+        skipped entirely if no pixels remain.
     """
     if not os.path.exists(nc_path):
         print(f"Error: File not found: {nc_path}")
@@ -267,6 +290,22 @@ def process_file(nc_path, utm_zone=None, hemisphere=None, bbox=None,
     transformer = Transformer.from_crs("EPSG:4326", out_crs, always_xy=True)
     proj_x, proj_y = transformer.transform(lon, lat)
 
+    # ---- Clip to raster extent (projected) ----
+    if raster_extent is not None:
+        rx_min, rx_max, ry_min, ry_max = raster_extent
+        mask = ((proj_x >= rx_min) & (proj_x <= rx_max) &
+                (proj_y >= ry_min) & (proj_y <= ry_max))
+        n_before = len(proj_x)
+        proj_x, proj_y = proj_x[mask], proj_y[mask]
+        lat, lon, frp, conf = lat[mask], lon[mask], frp[mask], conf[mask]
+        for var_name in extra_vars:
+            extra_vars[var_name] = extra_vars[var_name][mask]
+        n_clipped = n_before - len(proj_x)
+        print(f"  Pixels after raster extent clip: {len(proj_x)} (dropped {n_clipped})")
+        if len(proj_x) == 0:
+            print("  No fire pixels within raster extent. Skipping.")
+            return None
+
     # ---- Build GeoDataFrame ----
     data = {
         'latitude': lat, 'longitude': lon,
@@ -299,10 +338,11 @@ def process_file(nc_path, utm_zone=None, hemisphere=None, bbox=None,
     return out_path
 
 
-def _worker(nc_path, utm_zone, hemisphere, bbox, target_crs):
+def _worker(nc_path, utm_zone, hemisphere, bbox, target_crs, raster_extent):
     try:
         return process_file(nc_path, utm_zone=utm_zone, hemisphere=hemisphere,
-                            bbox=bbox, target_crs=target_crs)
+                            bbox=bbox, target_crs=target_crs,
+                            raster_extent=raster_extent)
     except Exception as e:
         print(f"Error processing {nc_path}: {e}")
         return None
@@ -355,8 +395,9 @@ Examples:
 
     args = parser.parse_args()
 
-    # ---- Resolve target CRS ----
+    # ---- Resolve target CRS and raster extent ----
     target_crs = None
+    raster_extent = None
     if args.crs is not None:
         target_crs = args.crs
         print(f"[INFO] Using explicit CRS: {crs_label(target_crs)}")
@@ -365,7 +406,10 @@ Examples:
             print(f"Error: Reference raster not found: {args.reference}")
             sys.exit(1)
         target_crs = get_crs_from_raster(args.reference)
+        raster_extent = get_extent_from_raster(args.reference)
         print(f"[INFO] Using CRS from {os.path.basename(args.reference)}: {crs_label(target_crs)}")
+        print(f"[INFO] Raster extent (projected): x=[{raster_extent[0]:.1f}, {raster_extent[1]:.1f}] "
+              f"y=[{raster_extent[2]:.1f}, {raster_extent[3]:.1f}]")
 
     # ---- Find files ----
     nc_files = find_nc_files(args.nc_paths)
@@ -384,13 +428,14 @@ Examples:
     if n_files == 1 or args.workers <= 1:
         results = [
             process_file(f, utm_zone=args.utm_zone, hemisphere=args.hemisphere,
-                         bbox=args.bbox, output=args.output, target_crs=target_crs)
+                         bbox=args.bbox, output=args.output, target_crs=target_crs,
+                         raster_extent=raster_extent)
             for f in nc_files
         ]
     else:
         worker_fn = partial(_worker, utm_zone=args.utm_zone,
                             hemisphere=args.hemisphere, bbox=args.bbox,
-                            target_crs=target_crs)
+                            target_crs=target_crs, raster_extent=raster_extent)
         with get_context('spawn').Pool(processes=min(args.workers, n_files)) as pool:
             results = pool.map(worker_fn, nc_files)
 

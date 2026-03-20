@@ -104,7 +104,11 @@ class RasterLoader:
         img = img.astype(np.float32)
         finite_mask = np.isfinite(img)
 
-        if finite_mask.any():
+        # Binary rasters (only 0s and 1s) are already in display range — skip stretch.
+        finite_vals = img[finite_mask]
+        is_binary = finite_vals.size > 0 and np.all(np.isin(finite_vals, [0.0, 1.0]))
+
+        if not is_binary and finite_mask.any():
             if img.ndim == 2:
                 vmin, vmax = np.nanpercentile(img, [2, 99])
                 if vmax > vmin:
