@@ -1,6 +1,6 @@
 # viirs — VIIRS Fire Pixel Processing Toolkit
 
-*Last updated: March 19, 2026*
+*Last updated: March 20, 2026*
 
 Pipeline for downloading, converting, accumulating, and visualising [VNP14IMG](https://ladsweb.modaps.eosdis.nasa.gov/missions-and-measurements/products/VNP14IMG/#product-information) (VIIRS/NPP Active Fires 375m) data from NASA LAADS DAAC.
 
@@ -67,6 +67,10 @@ After loading:
 2. Click **Download**, review the confirmation popup, and click **Confirm**.
 
 The pipeline runs automatically: Download (16 concurrent workers, skips existing days) → Shapify → Accumulate → Rasterize. Progress is shown in the status bar.
+
+> **Date boxes vs. accumulation range:** the Start/End dates control which days are *downloaded*. The `_ACCUMULATED` folder name and the accumulation itself are based on the **actual earliest and latest fire detections found in the shapefiles** — not the box dates. There is no guarantee fire pixels exist from March 1 or right up to the image date, so the folder will reflect what the data actually contains. The date boxes are updated automatically after download to match.
+
+**If a download is interrupted** (e.g. stopped at 222/223 days): all already-downloaded `.nc` files are kept. On the next run, the GUI auto-loads existing shapefiles when the raster is loaded, populates the date boxes from them, and you can go straight to fire mapping — no re-download needed. If you do click Download again, completed days are skipped automatically.
 
 **Smart accumulation** when re-downloading:
 - **Exact match** → skipped.

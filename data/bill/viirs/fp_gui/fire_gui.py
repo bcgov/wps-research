@@ -2084,6 +2084,31 @@ class FireAccumulationGUI:
     # Accumulate + Rasterize (integrated into download pipeline)
     # ==================================================================
 
+    @staticmethod
+    def _scan_shapefile_date_range(shp_dir):
+        """Scan *shp_dir* recursively for .shp files and return
+        (min_date, max_date) parsed from filenames (YYYYMMDDTHHMM pattern).
+        Returns (None, None) if no parseable filenames are found.
+        """
+        import glob as _glob
+        import re as _re
+        _pat = _re.compile(r"(\d{8}T\d{4})")
+        _fmt = "%Y%m%dT%H%M"
+        dates = []
+        for fpath in _glob.glob(
+                os.path.join(shp_dir, "**", "*.shp"), recursive=True):
+            stem = os.path.splitext(os.path.basename(fpath))[0]
+            m = _pat.search(stem)
+            if m:
+                try:
+                    from datetime import datetime as _dt
+                    dates.append(_dt.strptime(m.group(1), _fmt).date())
+                except ValueError:
+                    pass
+        if not dates:
+            return None, None
+        return min(dates), max(dates)
+
     def _run_accumulation_after_download(self, viirs_dir, ref_path, _status):
         """
         Run accumulation + rasterize after download completes.
@@ -2097,6 +2122,23 @@ class FireAccumulationGUI:
             _status("Download complete (no dates set for accumulation).")
             self._download_finish()
             return
+
+        # Use the actual fire detection date range from the shapefiles, not the
+        # (potentially wider) user-supplied box dates.  There is no guarantee
+        # that fire pixels exist from March 1 or all the way to the S2 date.
+        actual_start, actual_end = self._scan_shapefile_date_range(viirs_dir)
+        if actual_start and actual_end:
+            _status(f"Actual fire data: {actual_start}  \u2192  {actual_end}")
+            start_str = str(actual_start)
+            end_str   = str(actual_end)
+            try:
+                self._root.after(0, lambda s=start_str, e=end_str: (
+                    self._start_date_var.set(s),
+                    self._end_date_var.set(e),
+                    self._update_acc_output_name(),
+                ))
+            except Exception:
+                pass
 
         ref_base = os.path.splitext(os.path.basename(ref_path))[0]
         ref_dir = os.path.dirname(ref_path)
