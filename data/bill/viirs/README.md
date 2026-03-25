@@ -1,6 +1,6 @@
 # viirs — VIIRS Fire Pixel Processing Toolkit
 
-*Last updated: March 20, 2026*
+*Last updated: March 25, 2026*
 
 Pipeline for downloading, converting, accumulating, and visualising [VNP14IMG](https://ladsweb.modaps.eosdis.nasa.gov/missions-and-measurements/products/VNP14IMG/#product-information) (VIIRS/NPP Active Fires 375m) data from NASA LAADS DAAC.
 
@@ -110,6 +110,14 @@ Launches `fire_mapping.py` with the loaded raster and a matching `.bin` fire mas
 The GUI searches the **main raster's directory** for an `_ACCUMULATED` folder whose start date matches and end date covers the requested range, then selects the `.bin` with end date closest to (but not exceeding) the End date in the box.
 
 If no matching folder or `.bin` is found, a dialog offers **Download and Launch Again** — this triggers the full download pipeline and automatically re-launches fire mapping on completion.
+
+#### QGIS Auto-Load
+
+After classification, QGIS opens automatically with these layers (in order):
+
+1. **Classified TIF** — the fire mapping output + any `.kml` files.
+2. **GIS perimeters** — if a `GIS_perimeters/` folder exists next to the raster image containing a `.shp` file, it is reprojected to the raster's CRS, clipped to the raster bounding box, and loaded at **0.7 opacity**.
+3. **ACCUMULATED shapefile** — the `.shp` version of the `.bin` fire mask used for classification (same folder, same basename).
 
 ---
 
