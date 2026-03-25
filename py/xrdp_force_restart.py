@@ -13,4 +13,4 @@ cmds = ['sudo systemctl stop xrdp',
         'sudo systemctl start xrdp-sesman']
 
 for c in cmds:
-    run(c)
+    a = run(c)
