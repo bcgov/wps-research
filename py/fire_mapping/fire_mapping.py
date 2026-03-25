@@ -1060,7 +1060,13 @@ class GUI(GUI_Settings):
             _out = output_filename
             _img = self.image_filename
 
-            def run_brush_then_qgis(out, img):
+            _polygon = self.polygon_filename
+            _img_proj = self.image._proj
+            _img_transform = self.image._transform
+            _img_xsize = self.image._xSize
+            _img_ysize = self.image._ySize
+
+            def run_brush_then_qgis(out, img, polygon_bin, img_proj, img_transform, img_xsize, img_ysize):
                 print(f'Running class_brush: {class_brush_path}')
                 subprocess.run([sys.executable, class_brush_path, out, img])
 
@@ -1072,10 +1078,80 @@ class GUI(GUI_Settings):
                     return
 
                 first_tif = tif_files[0]
-                print(f'Opening QGIS with: {first_tif} and KMLs: {kml_files}')
-                subprocess.Popen(['qgis', first_tif] + kml_files)
 
-            threading.Thread(target=run_brush_then_qgis, args=(_out, _img), daemon=True).start()
+                # Build QGIS layer list in load order:
+                # 1. Classified TIF (first_tif) + KMLs
+                # 2. GIS_perimeters shapefile (reprojected & clipped to raster bbox)
+                # 3. ACCUMULATED shapefile (shapefile version of the .bin passed to fire mapping)
+                qgis_layers = [first_tif] + kml_files
+
+                # Compute raster bounding box from geotransform
+                gt = img_transform
+                x_min = gt[0]
+                x_max = gt[0] + img_xsize * gt[1]
+                y_max = gt[3]
+                y_min = gt[3] + img_ysize * gt[5]  # gt[5] is negative
+
+                # Look for GIS_perimeters shapefile next to the image
+                img_dir = os.path.dirname(os.path.abspath(img))
+                perimeters_dir = os.path.join(img_dir, 'GIS_perimeters')
+                if os.path.isdir(perimeters_dir):
+                    shp_files = glob.glob(os.path.join(perimeters_dir, '*.shp'))
+                    if shp_files:
+                        try:
+                            import geopandas as gpd
+                            from shapely.geometry import box
+
+                            gdf = gpd.read_file(shp_files[0])
+
+                            # Reproject to raster CRS if needed
+                            if gdf.crs is not None and img_proj:
+                                from pyproj import CRS
+                                raster_crs = CRS.from_wkt(img_proj)
+                                if gdf.crs != raster_crs:
+                                    gdf = gdf.to_crs(raster_crs)
+                                    print(f'Reprojected GIS_perimeters to {raster_crs}')
+
+                            # Clip to raster bounding box
+                            bbox_geom = box(min(x_min, x_max), min(y_min, y_max),
+                                            max(x_min, x_max), max(y_min, y_max))
+                            gdf = gdf.clip(bbox_geom)
+
+                            if not gdf.empty:
+                                # Write processed shapefile to a temp location
+                                processed_shp = os.path.join(perimeters_dir, '_perimeter_processed.shp')
+                                gdf.to_file(processed_shp)
+
+                                # Write a QML style file so QGIS applies 0.7 opacity automatically
+                                qml_path = os.path.join(perimeters_dir, '_perimeter_processed.qml')
+                                with open(qml_path, 'w') as qf:
+                                    qf.write('<!DOCTYPE qgis PUBLIC "http://mrcc.com/qgis.dtd" "SYSTEM">\n')
+                                    qf.write('<qgis version="3" styleCategories="Rendering">\n')
+                                    qf.write('  <layerOpacity>0.7</layerOpacity>\n')
+                                    qf.write('</qgis>\n')
+
+                                qgis_layers.append(processed_shp)
+                                print(f'Adding GIS_perimeters shapefile (reprojected & clipped, opacity 0.7): {processed_shp}')
+                            else:
+                                print('GIS_perimeters shapefile is empty after clipping to raster bbox.')
+                        except Exception as e:
+                            print(f'Error processing GIS_perimeters: {e}')
+                            # Fall back to loading the raw shapefile
+                            qgis_layers.append(shp_files[0])
+
+                # Look for the ACCUMULATED shapefile (same name as .bin but with .shp)
+                if polygon_bin and os.path.isfile(polygon_bin):
+                    accum_shp = os.path.splitext(polygon_bin)[0] + '.shp'
+                    if os.path.isfile(accum_shp):
+                        qgis_layers.append(accum_shp)
+                        print(f'Adding ACCUMULATED shapefile: {accum_shp}')
+
+                print(f'Opening QGIS with layers: {qgis_layers}')
+                subprocess.Popen(['qgis'] + qgis_layers)
+
+            threading.Thread(target=run_brush_then_qgis,
+                             args=(_out, _img, _polygon, _img_proj, _img_transform, _img_xsize, _img_ysize),
+                             daemon=True).start()
 
             # Display in third pane
             ax_classification.clear()
