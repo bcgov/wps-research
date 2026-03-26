@@ -1,6 +1,6 @@
 /* raster_medoid.cu
 
-nvcc -O3 -arch=sm_89 -std=c++17 raster_medoid.cu -o raster_medoid -lpthread
+nvcc -O3 -arch=sm_89 -std=c++17 raster_medoid.cu misc.cpp -o raster_medoid -lpthread
 
  *
  * GPU-accelerated median/medoid computation for a stack of rasters.
