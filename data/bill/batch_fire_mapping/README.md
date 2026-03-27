@@ -61,17 +61,24 @@ python batch_fire_mapping/run_fire_mapping.py  POLYGONS.shp  RASTER.bin  [option
 | Flag | Default | Description |
 |---|---|---|
 | `--year` | (all years) | Only process fires from this `FIRE_YEAR`. |
-| `--output_dir` | same directory as `RASTER` | Root directory for all outputs. |
-| `--crop_buffer_px` | `100` | Pixels added to each edge of the fire bounding box when cropping the raster. |
+| `--out_dir` | same directory as `RASTER` | Root directory for all outputs. |
+| `--padding` | `0.1` | Fractional padding on each side of the fire bounding box. `0.1` = 10% of fire width added left and right, 10% of fire height added top and bottom. |
 | `--skip_download` | off | Skip VIIRS download and shapify — go straight to mapping. |
 | `--shapify_workers` | `8` | Parallel shapify processes. |
+
+**Sampling** (computed per fire, then forwarded to `fire_mapping_cli.py`):
+
+| Flag | Default | Description |
+|---|---|---|
+| `--sample_rate` | `0.05` | Fraction of crop pixels to sample. `0.05` = 5% of the cropped raster area. The actual count is `clip(crop_w × crop_h × sample_rate, min_samples, max_samples)`, so small fires automatically get fewer samples and large fires are capped to stay fast. |
+| `--min_samples` | `500` | Floor on sample count — ensures T-SNE has enough points even for tiny fires. |
+| `--max_samples` | `30000` | Ceiling on sample count — prevents T-SNE from being slow on very large crops. |
+| `--seed` | `123` | Sampling random seed. |
 
 **Model hyperparameters** (forwarded to `fire_mapping_cli.py`):
 
 | Flag | Default | Description |
 |---|---|---|
-| `--sample_size` | `10000` | Random pixels sampled per fire. |
-| `--seed` | `123` | Sampling random seed. |
 | `--embed_bands` | (all bands) | 1-indexed comma-separated band list for T-SNE embedding. |
 | `--rf_n_estimators` | `100` | RF number of trees. |
 | `--rf_max_depth` | `15` | RF max tree depth. |
@@ -96,7 +103,7 @@ python batch_fire_mapping/run_fire_mapping.py \
     data/IN_HISTORICAL_FIRE_POLYGONS_SVW.shp \
     data/S2C_MSIL1C_20251014T192401_20m.bin \
     --year 2025 \
-    --crop_buffer_px 100
+    --padding 0.1
 ```
 
 Outputs will be written to `data/fire_mapping_results/` (next to the raster).

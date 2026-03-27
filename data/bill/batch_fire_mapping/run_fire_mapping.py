@@ -12,8 +12,8 @@ Sentinel-2 raster, this script:
   2.  Converts downloaded .nc files to shapefiles via viirs.utils.shapify
       (skips granules whose .shp already exists).
   3.  For each fire polygon:
-        a.  Crops the main raster to a box that is at most <crop_buffer_px>
-            pixels wider than the polygon on each side.
+        a.  Crops the main raster to a box padded by a fraction of the
+            polygon size on each side (see --padding).
         b.  Finds all VIIRS pixels that fall inside the fire polygon and
             determines the actual accumulation end date (= latest detection
             inside the polygon).
@@ -48,7 +48,7 @@ Example
     python batch_fire_mapping/run_fire_mapping.py         \\
         IN_HISTORICAL_FIRE_POLYGONS_SVW.shp               \\
         C11659/S2C_MSIL1C_20251014T192401_...20m.bin      \\
-        --year 2025 --crop_buffer_px 100 --output_dir results/
+        --year 2025 --padding 0.1 --out_dir results/
 """
 
 # ---------------------------------------------------------------------------
@@ -133,15 +133,68 @@ def _skip(fire_numbe: str, reason: str):
 # Raster helpers
 # ===========================================================================
 
+def _read_crs_from_envi_hdr(raster_path: str) -> str:
+    """Read the CRS WKT from an ENVI .hdr 'coordinate system string' field.
+
+    GDAL's ENVI driver sometimes builds a malformed CRS from the abbreviated
+    'map info' line instead of the full WKT in 'coordinate system string'.
+    Reading the HDR directly avoids that bug.
+
+    Returns the WKT string, or '' if the field is not present.
+    """
+    for hdr in (os.path.splitext(raster_path)[0] + '.hdr',
+                raster_path + '.hdr'):
+        if not os.path.exists(hdr):
+            continue
+        with open(hdr, 'r') as f:
+            content = f.read()
+        m = re.search(r'coordinate system string\s*=\s*\{(.+?)\}',
+                      content, re.DOTALL | re.IGNORECASE)
+        if m:
+            return m.group(1).strip()
+    return ''
+
+
+def _wkt_to_pyproj_crs(wkt: str):
+    """Create a pyproj.CRS from a WKT string (OGC or ESRI dialect).
+
+    Passes the WKT through OSR first so that ESRI-dialect names are
+    normalised before pyproj sees them.  Returns a pyproj.CRS object
+    that geopandas to_crs() accepts reliably.
+    """
+    from pyproj import CRS as _ProjCRS
+    srs = osr.SpatialReference()
+    srs.ImportFromWkt(wkt)
+    srs.MorphFromESRI()
+    return _ProjCRS.from_wkt(srs.ExportToWkt())
+
+
 def get_raster_info(raster_path: str):
-    """Return (crs_wkt, geotransform, width, height)."""
+    """Return (crs_wkt, geotransform, width, height).
+
+    crs_wkt is the projection WKT string.  For ENVI rasters the HDR
+    'coordinate system string' field is preferred over GetProjection()
+    because GDAL can return a malformed EngineeringCRS from the truncated
+    'map info' line.
+    """
     ds = gdal.Open(raster_path, gdal.GA_ReadOnly)
     if ds is None:
         raise RuntimeError(f'Cannot open raster: {raster_path}')
-    crs = ds.GetProjection()
-    gt  = ds.GetGeoTransform()
+    gt   = ds.GetGeoTransform()
     w, h = ds.RasterXSize, ds.RasterYSize
-    ds = None
+    crs  = ds.GetProjection()
+    ds   = None
+
+    # Prefer the full WKT from the ENVI header when available
+    hdr_crs = _read_crs_from_envi_hdr(raster_path)
+    if hdr_crs:
+        crs = hdr_crs
+
+    if not crs:
+        raise RuntimeError(
+            f'Cannot determine CRS for {raster_path}. '
+            f'No embedded projection and no ENVI header CRS found.')
+
     return crs, gt, w, h
 
 
@@ -159,8 +212,10 @@ def raster_extent_to_wgs84(crs_wkt: str, xmin, ymin, xmax, ymax):
     """
     src = osr.SpatialReference()
     src.ImportFromWkt(crs_wkt)
+    src.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
     dst = osr.SpatialReference()
     dst.ImportFromEPSG(4326)
+    dst.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
     ct = osr.CoordinateTransformation(src, dst)
 
     corners = [(xmin, ymin), (xmin, ymax), (xmax, ymin), (xmax, ymax)]
@@ -432,9 +487,8 @@ def load_all_viirs(shp_root: str, raster_crs: str) -> gpd.GeoDataFrame:
 
     result = gpd.GeoDataFrame(pd.concat(frames, ignore_index=True))
 
-    # Reproject to raster CRS if needed
-    if result.crs is not None and str(result.crs) != raster_crs:
-        result = result.to_crs(raster_crs)
+    if result.crs is not None:
+        result = result.to_crs(_wkt_to_pyproj_crs(raster_crs))
 
     _info(f'VIIRS GeoDataFrame: {len(result):,} points in total.')
     return result
@@ -444,7 +498,7 @@ def load_all_viirs(shp_root: str, raster_crs: str) -> gpd.GeoDataFrame:
 # Rasterize a polygon (fire perimeter)
 # ===========================================================================
 
-def rasterize_polygon(polygon_geom, crs, ref_raster_path: str,
+def rasterize_polygon(polygon_geom, crs_wkt: str, ref_raster_path: str,
                       dst_path: str):
     """
     Rasterize a single polygon geometry onto the grid of *ref_raster_path*
@@ -452,7 +506,8 @@ def rasterize_polygon(polygon_geom, crs, ref_raster_path: str,
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_shp = os.path.join(tmpdir, 'perim.shp')
-        gdf = gpd.GeoDataFrame(geometry=[polygon_geom], crs=crs)
+        gdf = gpd.GeoDataFrame(geometry=[polygon_geom],
+                               crs=_wkt_to_pyproj_crs(crs_wkt))
         gdf.to_file(tmp_shp, driver='ESRI Shapefile')
 
         ref    = gdal.Open(ref_raster_path, gdal.GA_ReadOnly)
@@ -493,7 +548,10 @@ def process_fire(
     raster_W:        int,
     raster_H:        int,
     output_root:     str,
-    crop_buffer_px:       int,
+    padding:         float,
+    sample_rate:     float,
+    min_samples:     int,
+    max_samples:     int,
     cli_script:      str,
     cli_pass_args:   list,
     viirs_shp_dir:   str,
@@ -548,11 +606,13 @@ def process_fire(
     py_lo = int((bounds[3] - gt[3]) / gt[5])   # maxy → top row
     py_hi = int((bounds[1] - gt[3]) / gt[5])   # miny → bottom row
 
-    # Add buffer, clip to raster extent
-    px_lo = max(0, px_lo - crop_buffer_px)
-    px_hi = min(raster_W - 1, px_hi + crop_buffer_px)
-    py_lo = max(0, py_lo - crop_buffer_px)
-    py_hi = min(raster_H - 1, py_hi + crop_buffer_px)
+    # Add percentage-based padding: each side grows by (padding * fire dimension)
+    x_pad = max(1, int(round(padding * (px_hi - px_lo))))
+    y_pad = max(1, int(round(padding * (py_hi - py_lo))))
+    px_lo = max(0, px_lo - x_pad)
+    px_hi = min(raster_W - 1, px_hi + x_pad)
+    py_lo = max(0, py_lo - y_pad)
+    py_hi = min(raster_H - 1, py_hi + y_pad)
 
     if px_lo >= px_hi or py_lo >= py_hi:
         _skip(fire_numbe, 'Polygon bbox is entirely outside the raster.')
@@ -564,8 +624,14 @@ def process_fire(
     crop_ymax = gt[3] + py_lo * gt[5]   # row py_lo = top = ymax
     crop_ymin = gt[3] + py_hi * gt[5]   # row py_hi = bottom = ymin
 
+    crop_w = px_hi - px_lo
+    crop_h = py_hi - py_lo
+    sample_size = int(round(crop_w * crop_h * sample_rate))
+    sample_size = max(min_samples, min(max_samples, sample_size))
+
     _info(f'Crop window: px [{px_lo}:{px_hi}] × py [{py_lo}:{py_hi}]  '
-          f'({px_hi - px_lo} × {py_hi - py_lo} px)')
+          f'({crop_w} × {crop_h} px = {crop_w * crop_h:,} total)  '
+          f'→ sample_size={sample_size:,}')
 
     # -----------------------------------------------------------------------
     # 3. Create fire output directory
@@ -696,6 +762,7 @@ def process_fire(
     # -----------------------------------------------------------------------
     cmd = [
         sys.executable, cli_script,
+        '--sample_size', str(sample_size),
         crop_bin, viirs_bin,
         '--fire_numbe',  fire_numbe,
         '--start_date',  str(plot_start),
@@ -748,7 +815,7 @@ def load_and_filter_polygons(
 
     # Reproject to raster CRS
     crs_wkt, gt, W, H = get_raster_info(raster_path)
-    gdf = gdf.to_crs(crs_wkt)
+    gdf = gdf.to_crs(_wkt_to_pyproj_crs(crs_wkt))
 
     # Spatial filter: keep only polygons overlapping the raster extent
     from shapely.geometry import box as shapely_box
@@ -793,11 +860,13 @@ Example
                         '(default: all years in the shapefile)')
 
     # ---- Output ----
-    p.add_argument('--output_dir', default=None,
+    p.add_argument('--out_dir', default=None,
                    help='Root output directory (default: same directory as RASTER)')
-    p.add_argument('--crop_buffer_px', type=int, default=100,
-                   help='Extra pixels added on each side of the fire bounding '
-                        'box when cropping the raster (default: 100)')
+    p.add_argument('--padding', type=float, default=0.1,
+                   help='Fractional padding added to each side of the fire '
+                        'bounding box. 0.1 = 10%% of fire width on left and '
+                        'right, 10%% of fire height on top and bottom '
+                        '(default: 0.1)')
 
     # ---- VIIRS ----
     p.add_argument('--skip_download', action='store_true',
@@ -806,7 +875,15 @@ Example
                    help='Workers for shapify step (default: 8)')
 
     # ---- Pass-through to fire_mapping_cli.py ----
-    p.add_argument('--sample_size',         type=int,   default=10_000)
+    p.add_argument('--sample_rate',   type=float, default=0.05,
+                   help='Fraction of crop pixels to sample for T-SNE/RF '
+                        '(default: 0.05).  Actual count = '
+                        'clip(crop_w × crop_h × sample_rate, '
+                        'min_samples, max_samples).')
+    p.add_argument('--min_samples',   type=int,   default=500,
+                   help='Minimum sample size (default: 500)')
+    p.add_argument('--max_samples',   type=int,   default=30_000,
+                   help='Maximum sample size (default: 30000)')
     p.add_argument('--seed',                type=int,   default=123)
     p.add_argument('--embed_bands',         default=None,
                    help='1-indexed comma-separated band list for T-SNE '
@@ -839,7 +916,7 @@ def main(argv=None):
     raster_path  = os.path.abspath(args.raster_file)
     polygon_file = os.path.abspath(args.polygon_file)
     raster_dir   = os.path.dirname(raster_path)
-    output_root  = os.path.abspath(args.output_dir) if args.output_dir else raster_dir
+    output_root  = os.path.abspath(args.out_dir) if args.out_dir else raster_dir
 
     if not os.path.exists(raster_path):
         sys.exit(f'ERROR: Raster not found: {raster_path}')
@@ -853,7 +930,7 @@ def main(argv=None):
         [
             f'Raster   : {raster_path}',
             f'Polygons : {polygon_file}',
-            f'Buffer   : {args.crop_buffer_px} px',
+            f'Padding  : {args.padding * 100:.0f}%',
             f'Output   : {output_root}',
         ],
     )
@@ -938,7 +1015,6 @@ def main(argv=None):
     # Build pass-through CLI args list
     # -----------------------------------------------------------------------
     cli_pass_args = [
-        '--sample_size',         str(args.sample_size),
         '--seed',                str(args.seed),
         '--rf_n_estimators',     str(args.rf_n_estimators),
         '--rf_max_depth',        str(args.rf_max_depth),
@@ -982,7 +1058,10 @@ def main(argv=None):
             raster_W       = W,
             raster_H       = H,
             output_root    = output_root,
-            crop_buffer_px      = args.crop_buffer_px,
+            padding        = args.padding,
+            sample_rate    = args.sample_rate,
+            min_samples    = args.min_samples,
+            max_samples    = args.max_samples,
             cli_script     = cli_script,
             cli_pass_args  = cli_pass_args,
             viirs_shp_dir  = viirs_shp_dir,
