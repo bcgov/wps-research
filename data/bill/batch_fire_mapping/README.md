@@ -128,6 +128,8 @@ Outputs will be written to `data/fire_mapping_results/` (next to the raster).
             <FIRE_NUMBE>_comparison.png         # Comparison figure (after class-brush)
             <FIRE_NUMBE>_brush_comparison.png   # Before vs after class-brush figure
             <FIRE_NUMBE>_params.yaml            # Full run parameters (see below)
+            # --- only when VIIRS data is unavailable ---
+            <FIRE_NUMBE>_no_viirs.png           # Cropped image + traditional perimeter only
 ```
 
 Re-running the script **replaces** existing fire folders — each fire is always processed fresh.
@@ -236,6 +238,7 @@ December 31 of the latest `FIRE_YEAR` in the shapefile (filtered by `--year` if 
 - Processing is sequential (one fire at a time) because the GPU is used by `fire_mapping_cli.py`.
 - VIIRS download uses multi-threaded `ThreadPoolExecutor`; shapify runs in parallel via `ProcessPoolExecutor` (GDAL is not thread-safe).
 - If a fire polygon lies entirely outside the raster, or the cropped region has no raster data, that fire is skipped with a status message.
+- If VIIRS data is unavailable for a fire (no detections in the date range, or rasterization failure), the fire is **not skipped**. Instead a `_no_viirs.png` is generated showing the cropped false-colour image with only the traditional perimeter outline, so every fire always produces at least one visual output.
 - Already-downloaded granules and already-shapified files are detected and skipped; only the fire output folders are always recreated from scratch.
 
 ---
