@@ -559,7 +559,7 @@ def process_fire(
     """
     Process one fire polygon end-to-end.
 
-    Returns the path to the fire output directory on success, or None.
+    Returns (fire_dir, None) on success, or (None, reason_str) on failure.
     """
     fire_numbe = str(row.get('FIRE_NUMBE', row.name))
     fire_date_str = str(row.get('FIRE_DATE', ''))
@@ -589,8 +589,9 @@ def process_fire(
             fire_date = datetime.datetime.strptime(
                 str(raw).split()[0], '%Y-%m-%d')
     except (ValueError, AttributeError):
-        _skip(fire_numbe, f'Cannot parse FIRE_DATE: {fire_date_str!r}')
-        return None
+        reason = f'Cannot parse FIRE_DATE: {fire_date_str!r}'
+        _skip(fire_numbe, reason)
+        return None, reason
 
     acc_start = fire_date - datetime.timedelta(days=5)
 
@@ -615,8 +616,9 @@ def process_fire(
     py_hi = min(raster_H - 1, py_hi + y_pad)
 
     if px_lo >= px_hi or py_lo >= py_hi:
-        _skip(fire_numbe, 'Polygon bbox is entirely outside the raster.')
-        return None
+        reason = 'Polygon bounding box is entirely outside the raster extent.'
+        _skip(fire_numbe, reason)
+        return None, reason
 
     # Back to projected coordinates for GDAL Translate
     crop_xmin = gt[0] + px_lo * gt[1]
@@ -651,8 +653,11 @@ def process_fire(
     _info(f'Writing cropped raster → {os.path.basename(crop_bin)}')
     if not crop_raster(raster_path, crop_bin, crop_xmin, crop_ymin,
                        crop_xmax, crop_ymax):
-        _skip(fire_numbe, 'GDAL Translate failed — no overlap with raster?')
-        return None
+        reason = ('GDAL Translate failed when cropping the raster. '
+                  'The polygon may not overlap the raster, or the raster '
+                  'file could not be read.')
+        _skip(fire_numbe, reason)
+        return None, reason
 
     # -----------------------------------------------------------------------
     # 5. Find VIIRS pixels inside the fire polygon
@@ -711,8 +716,12 @@ def process_fire(
         _warn('No accumulated shapefiles produced.')
         shutil.rmtree(tmp_acc_dir, ignore_errors=True)
         # Cannot run without a VIIRS hint — skip this fire
-        _skip(fire_numbe, 'Accumulation produced no output.')
-        return None
+        reason = ('VIIRS accumulation produced no shapefile output. '
+                  'There may be no VIIRS detections within the date range '
+                  f'({acc_start.date()} → {acc_end.date()}) '
+                  'overlapping this fire polygon.')
+        _skip(fire_numbe, reason)
+        return None, reason
 
     # Keep only the final (most complete) accumulated shapefile
     final_acc_shp = sorted(acc_paths)[-1]
@@ -742,8 +751,10 @@ def process_fire(
     )
 
     if viirs_bin is None:
-        _skip(fire_numbe, 'VIIRS rasterization failed.')
-        return None
+        reason = ('VIIRS rasterization failed. Could not burn the accumulated '
+                  'VIIRS shapefile onto the cropped raster grid.')
+        _skip(fire_numbe, reason)
+        return None, reason
 
     _info(f'VIIRS binary → {os.path.basename(viirs_bin)}')
 
@@ -782,7 +793,94 @@ def process_fire(
     else:
         _info('fire_mapping_cli.py completed successfully.')
 
-    return fire_dir
+    # -----------------------------------------------------------------------
+    # 10. Save run parameters to YAML
+    # -----------------------------------------------------------------------
+    import datetime as _dt
+    params = {
+        'fire': {
+            'fire_numbe':  fire_numbe,
+            'fire_date':   str(fire_date.date()),
+        },
+        'run': {
+            'timestamp': _dt.datetime.now().isoformat(timespec='seconds'),
+        },
+        'inputs': {
+            'raster':        raster_path,
+            'polygon_file':  str(row.name),   # shapefile row index / source
+            'viirs_bin':     viirs_bin,
+            'perimeter_bin': perim_bin if perim_bin else None,
+        },
+        'crop': {
+            'padding':       padding,
+            'width_px':      crop_w,
+            'height_px':     crop_h,
+            'total_px':      crop_w * crop_h,
+            'crop_bin':      crop_bin,
+        },
+        'sampling': {
+            'sample_rate':        sample_rate,
+            'min_samples':        min_samples,
+            'max_samples':        max_samples,
+            'actual_sample_size': sample_size,
+            'seed':               next(v for v in cli_pass_args[cli_pass_args.index('--seed') + 1:cli_pass_args.index('--seed') + 2]),
+        },
+        'accumulation': {
+            'start_date': str(acc_start.date()),
+            'end_date':   str(acc_end.date()),
+        },
+        'tsne': {
+            'perplexity':     float(cli_pass_args[cli_pass_args.index('--tsne_perplexity')     + 1]),
+            'learning_rate':  float(cli_pass_args[cli_pass_args.index('--tsne_learning_rate')  + 1]),
+            'max_iter':       int(  cli_pass_args[cli_pass_args.index('--tsne_max_iter')        + 1]),
+            'init':                 cli_pass_args[cli_pass_args.index('--tsne_init')            + 1],
+            'n_components':   int(  cli_pass_args[cli_pass_args.index('--tsne_n_components')   + 1]),
+            'random_state':   int(  cli_pass_args[cli_pass_args.index('--tsne_random_state')   + 1]),
+            'embed_bands':    (cli_pass_args[cli_pass_args.index('--embed_bands') + 1]
+                               if '--embed_bands' in cli_pass_args else 'all'),
+        },
+        'hdbscan': {
+            'min_samples':     int(  cli_pass_args[cli_pass_args.index('--hdbscan_min_samples') + 1]),
+            'controlled_ratio': float(cli_pass_args[cli_pass_args.index('--controlled_ratio')  + 1]),
+        },
+        'random_forest': {
+            'n_estimators': int(cli_pass_args[cli_pass_args.index('--rf_n_estimators') + 1]),
+            'max_depth':    int(cli_pass_args[cli_pass_args.index('--rf_max_depth')    + 1]),
+            'max_features':     cli_pass_args[cli_pass_args.index('--rf_max_features') + 1],
+            'random_state': int(cli_pass_args[cli_pass_args.index('--rf_random_state') + 1]),
+        },
+        'class_brush': {
+            'brush_size':      15,
+            'point_threshold': 10,
+        },
+        'output': {
+            'fire_dir':        fire_dir,
+            'plot_downsample': int(cli_pass_args[cli_pass_args.index('--plot_downsample') + 1]),
+        },
+    }
+
+    try:
+        import yaml
+        params_path = os.path.join(fire_dir, f'{fire_numbe}_params.yaml')
+        with open(params_path, 'w') as f:
+            yaml.dump(params, f, default_flow_style=False, sort_keys=False,
+                      allow_unicode=True)
+        _info(f'Run parameters → {os.path.basename(params_path)}')
+    except ImportError:
+        _warn('PyYAML not installed — skipping parameter save (pip install pyyaml).')
+    except Exception as exc:
+        _warn(f'Could not save parameters: {exc}')
+
+    # -----------------------------------------------------------------------
+    # 11. Remove XML files produced by class_brush / binary_polygonize
+    # -----------------------------------------------------------------------
+    for xml_file in glob.glob(os.path.join(fire_dir, '*.xml')):
+        try:
+            os.remove(xml_file)
+        except Exception:
+            pass
+
+    return fire_dir, None
 
 
 # ===========================================================================
@@ -858,6 +956,10 @@ Example
     p.add_argument('--year', type=int, default=None,
                    help='Only process fires from this FIRE_YEAR '
                         '(default: all years in the shapefile)')
+    p.add_argument('--fire_number', nargs='+', default=None,
+                   metavar='ID',
+                   help='Only process these fire numbers (FIRE_NUMBE). '
+                        'Space-separated, e.g. --fire_number C11659 C11660')
 
     # ---- Output ----
     p.add_argument('--out_dir', default=None,
@@ -953,6 +1055,12 @@ def main(argv=None):
         year=args.year,
     )
 
+    if args.fire_number:
+        wanted = set(args.fire_number)
+        gdf = gdf[gdf['FIRE_NUMBE'].astype(str).isin(wanted)].copy()
+        _info(f'After --fire_number filter: {len(gdf)} feature(s)  '
+              f'(requested: {sorted(wanted)})')
+
     if gdf.empty:
         _warn('No matching polygons found.  Exiting.')
         sys.exit(0)
@@ -1046,10 +1154,11 @@ def main(argv=None):
     # -----------------------------------------------------------------------
     _box(f'Step 5 — Processing {len(gdf)} fire(s)  (sequential)')
 
+    # results maps fire_numbe → (fire_dir_or_None, reason_or_None)
     results = {}
     for idx, row in gdf.iterrows():
         fire_numbe = str(row.get('FIRE_NUMBE', idx))
-        out = process_fire(
+        fire_dir, reason = process_fire(
             row            = row,
             viirs_gdf      = viirs_gdf,
             raster_path    = raster_path,
@@ -1066,13 +1175,17 @@ def main(argv=None):
             cli_pass_args  = cli_pass_args,
             viirs_shp_dir  = viirs_shp_dir,
         )
-        results[fire_numbe] = out
+        results[fire_numbe] = (fire_dir, reason)
 
     # -----------------------------------------------------------------------
     # Summary
     # -----------------------------------------------------------------------
-    n_ok   = sum(1 for v in results.values() if v is not None)
-    n_fail = len(results) - n_ok
+    ok_fires   = {k: v for k, (v, r) in results.items() if v is not None}
+    fail_fires = {k: r  for k, (v, r) in results.items() if v is None}
+
+    n_ok   = len(ok_fires)
+    n_fail = len(fail_fires)
+
     _box(
         'BATCH COMPLETE',
         [
@@ -1082,10 +1195,56 @@ def main(argv=None):
         ],
     )
 
-    if n_fail:
-        for fire_numbe, v in results.items():
-            if v is None:
-                _warn(f'Failed: {fire_numbe}')
+    # -----------------------------------------------------------------------
+    # Write run summary log
+    # -----------------------------------------------------------------------
+    import datetime as _dt
+    results_root = os.path.join(output_root, 'fire_mapping_results')
+    os.makedirs(results_root, exist_ok=True)
+    log_path = os.path.join(results_root, 'run_summary.txt')
+
+    sep  = '=' * 70
+    thin = '-' * 70
+
+    lines = [
+        sep,
+        'BATCH FIRE MAPPING  —  RUN SUMMARY',
+        sep,
+        f'  Timestamp  : {_dt.datetime.now().strftime("%Y-%m-%d  %H:%M:%S")}',
+        f'  Raster     : {raster_path}',
+        f'  Polygons   : {polygon_file}',
+        f'  Output     : {results_root}',
+        '',
+        f'  Total fires attempted : {len(results)}',
+        f'  Succeeded             : {n_ok}',
+        f'  Failed                : {n_fail}',
+        '',
+    ]
+
+    if ok_fires:
+        lines += [sep, 'SUCCEEDED', thin, '']
+        for name in sorted(ok_fires):
+            lines.append(f'  ✓  {name}')
+        lines.append('')
+
+    if fail_fires:
+        lines += [sep, 'FAILED', thin, '']
+        for name, reason in sorted(fail_fires.items()):
+            lines.append(f'  ✗  {name}')
+            lines.append(f'     Reason : {reason}')
+            lines.append('')
+
+    lines += [sep, '']
+
+    with open(log_path, 'w') as f:
+        f.write('\n'.join(lines))
+
+    _info(f'Run summary → {log_path}')
+
+    if fail_fires:
+        print()
+        for name, reason in sorted(fail_fires.items()):
+            _warn(f'FAILED  {name}  —  {reason}')
 
 
 if __name__ == '__main__':
