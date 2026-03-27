@@ -129,6 +129,77 @@ def _skip(fire_numbe: str, reason: str):
     _box(f'SKIP  {fire_numbe}', [reason], char='-', width=68)
 
 
+def _make_perimeter_only_figure(fire_numbe: str, crop_bin: str,
+                                 perimeter_geom, fire_dir: str) -> str:
+    """Generate a PNG with only the traditional fire perimeter outline.
+
+    Used when VIIRS data is unavailable so we still produce a visual for
+    every fire rather than silently skipping it.
+
+    Returns the path to the saved PNG.
+    """
+    import numpy as np
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    # ------------------------------------------------------------------
+    # Read the cropped raster and build a false-colour background
+    # ------------------------------------------------------------------
+    ds = gdal.Open(crop_bin, gdal.GA_ReadOnly)
+    if ds is None:
+        raise RuntimeError(f'Cannot open crop raster: {crop_bin}')
+
+    crop_gt = ds.GetGeoTransform()
+    n_bands  = ds.RasterCount
+
+    # Use first 3 bands for RGB; stretch to [0, 1] via 2–98 percentile
+    def _read_norm(band_idx):
+        arr = ds.GetRasterBand(band_idx).ReadAsArray().astype(np.float32)
+        lo, hi = np.nanpercentile(arr, [2, 98])
+        return np.clip((arr - lo) / max(hi - lo, 1e-6), 0, 1)
+
+    rgb = np.stack([_read_norm(min(i, n_bands)) for i in (1, 2, 3)], axis=2)
+    ds = None
+
+    # ------------------------------------------------------------------
+    # Convert perimeter polygon vertices to pixel coordinates
+    # ------------------------------------------------------------------
+    def _proj_to_px(x, y):
+        col = (x - crop_gt[0]) / crop_gt[1]
+        row_ = (y - crop_gt[3]) / crop_gt[5]
+        return col, row_
+
+    fig, ax = plt.subplots(figsize=(8, 8))
+    ax.imshow(rgb, interpolation='bilinear')
+
+    # Draw the exterior ring; handle MultiPolygon gracefully
+    from shapely.geometry import MultiPolygon
+    geoms = (list(perimeter_geom.geoms)
+             if isinstance(perimeter_geom, MultiPolygon)
+             else [perimeter_geom])
+
+    for geom in geoms:
+        xs, ys = zip(*[_proj_to_px(x, y)
+                       for x, y in geom.exterior.coords])
+        ax.plot(xs, ys, color='cyan', linewidth=1.5)
+
+    from matplotlib.lines import Line2D
+    ax.legend(
+        handles=[Line2D([0], [0], color='cyan', linewidth=1.5,
+                        label='Traditional perimeter')],
+        loc='lower right', fontsize=9, framealpha=0.7, edgecolor='white',
+    )
+    ax.set_title(f'{fire_numbe}  —  No VIIRS data available\n'
+                 f'Traditional perimeter only', fontsize=10)
+    ax.axis('off')
+
+    fig_path = os.path.join(fire_dir, f'{fire_numbe}_no_viirs.png')
+    fig.savefig(fig_path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    return fig_path
+
+
 # ===========================================================================
 # Raster helpers
 # ===========================================================================
@@ -559,7 +630,11 @@ def process_fire(
     """
     Process one fire polygon end-to-end.
 
-    Returns (fire_dir, None) on success, or (None, reason_str) on failure.
+    Returns:
+      (fire_dir, None)         — full success: classification complete.
+      (fire_dir, reason_str)   — partial: output folder created but no VIIRS
+                                 data available; only perimeter-only PNG produced.
+      (None, reason_str)       — failed: no usable output produced at all.
     """
     fire_numbe = str(row.get('FIRE_NUMBE', row.name))
     fire_date_str = str(row.get('FIRE_DATE', ''))
@@ -715,13 +790,18 @@ def process_fire(
     if not acc_paths:
         _warn('No accumulated shapefiles produced.')
         shutil.rmtree(tmp_acc_dir, ignore_errors=True)
-        # Cannot run without a VIIRS hint — skip this fire
-        reason = ('VIIRS accumulation produced no shapefile output. '
-                  'There may be no VIIRS detections within the date range '
-                  f'({acc_start.date()} → {acc_end.date()}) '
-                  'overlapping this fire polygon.')
-        _skip(fire_numbe, reason)
-        return None, reason
+        no_viirs_reason = (
+            f'No VIIRS shapefiles produced for accumulation period '
+            f'{acc_start.date()} \u2192 {acc_end.date()}. '
+            f'Perimeter-only figure generated.')
+        _warn('No VIIRS hint available — generating perimeter-only figure.')
+        try:
+            fig_path = _make_perimeter_only_figure(
+                fire_numbe, crop_bin, row.geometry, fire_dir)
+            _info(f'Perimeter-only figure → {os.path.basename(fig_path)}')
+        except Exception as exc:
+            _warn(f'Could not generate perimeter-only figure: {exc}')
+        return fire_dir, no_viirs_reason
 
     # Keep only the final (most complete) accumulated shapefile
     final_acc_shp = sorted(acc_paths)[-1]
@@ -751,10 +831,17 @@ def process_fire(
     )
 
     if viirs_bin is None:
-        reason = ('VIIRS rasterization failed. Could not burn the accumulated '
-                  'VIIRS shapefile onto the cropped raster grid.')
-        _skip(fire_numbe, reason)
-        return None, reason
+        no_viirs_reason = (
+            'VIIRS rasterization failed — could not produce a binary hint raster. '
+            'Perimeter-only figure generated.')
+        _warn('VIIRS rasterization failed — generating perimeter-only figure.')
+        try:
+            fig_path = _make_perimeter_only_figure(
+                fire_numbe, crop_bin, row.geometry, fire_dir)
+            _info(f'Perimeter-only figure → {os.path.basename(fig_path)}')
+        except Exception as exc:
+            _warn(f'Could not generate perimeter-only figure: {exc}')
+        return fire_dir, no_viirs_reason
 
     _info(f'VIIRS binary → {os.path.basename(viirs_bin)}')
 
@@ -1178,73 +1265,174 @@ def main(argv=None):
         results[fire_numbe] = (fire_dir, reason)
 
     # -----------------------------------------------------------------------
-    # Summary
+    # Summary — three states
+    #   success  : fire_dir set, reason is None
+    #   partial  : fire_dir set, reason is not None  (no VIIRS, perimeter only)
+    #   failed   : fire_dir is None
     # -----------------------------------------------------------------------
-    ok_fires   = {k: v for k, (v, r) in results.items() if v is not None}
-    fail_fires = {k: r  for k, (v, r) in results.items() if v is None}
+    ok_fires      = {k: v for k, (v, r) in results.items()
+                     if v is not None and r is None}
+    partial_fires = {k: r for k, (v, r) in results.items()
+                     if v is not None and r is not None}
+    fail_fires    = {k: r for k, (v, r) in results.items()
+                     if v is None}
 
-    n_ok   = len(ok_fires)
-    n_fail = len(fail_fires)
+    n_ok      = len(ok_fires)
+    n_partial = len(partial_fires)
+    n_fail    = len(fail_fires)
 
     _box(
         'BATCH COMPLETE',
         [
-            f'Processed : {n_ok} / {len(results)} fire(s)',
-            f'Failed    : {n_fail}',
-            f'Results   : {os.path.join(output_root, "fire_mapping_results")}',
+            f'Succeeded (full)  : {n_ok}',
+            f'Partial (no VIIRS): {n_partial}',
+            f'Failed            : {n_fail}',
+            f'Total attempted   : {len(results)}',
+            f'Results           : {os.path.join(output_root, "fire_mapping_results")}',
         ],
     )
 
     # -----------------------------------------------------------------------
-    # Write run summary log
+    # Persistent status index  (fire_status.yaml)
+    # Load existing index, merge this run's results, save updated index.
+    # This means re-running --fire_number X only updates X's entry.
     # -----------------------------------------------------------------------
     import datetime as _dt
     results_root = os.path.join(output_root, 'fire_mapping_results')
     os.makedirs(results_root, exist_ok=True)
+
+    status_path = os.path.join(results_root, 'fire_status.yaml')
+    now_str = _dt.datetime.now().isoformat(timespec='seconds')
+
+    # Load existing status (if any)
+    try:
+        import yaml as _yaml
+        _have_yaml = True
+    except ImportError:
+        _have_yaml = False
+        _warn('PyYAML not installed — fire_status.yaml will not be maintained '
+              '(pip install pyyaml).')
+
+    status_index = {}
+    if _have_yaml and os.path.exists(status_path):
+        try:
+            with open(status_path, 'r') as _f:
+                loaded = _yaml.safe_load(_f) or {}
+            if isinstance(loaded, dict):
+                status_index = loaded
+        except Exception as exc:
+            _warn(f'Could not read existing fire_status.yaml: {exc}')
+
+    # Merge this run's results into the index
+    for name in ok_fires:
+        v, _ = results[name]
+        status_index[name] = {
+            'status':    'success',
+            'reason':    None,
+            'timestamp': now_str,
+            'fire_dir':  v,
+        }
+    for name, reason in partial_fires.items():
+        v, _ = results[name]
+        status_index[name] = {
+            'status':    'partial_no_viirs',
+            'reason':    reason,
+            'timestamp': now_str,
+            'fire_dir':  v,
+        }
+    for name, reason in fail_fires.items():
+        status_index[name] = {
+            'status':    'failed',
+            'reason':    reason,
+            'timestamp': now_str,
+            'fire_dir':  None,
+        }
+
+    if _have_yaml:
+        try:
+            with open(status_path, 'w') as _f:
+                _yaml.dump(status_index, _f,
+                           default_flow_style=False, sort_keys=True,
+                           allow_unicode=True)
+            _info(f'Status index → {status_path}')
+        except Exception as exc:
+            _warn(f'Could not save fire_status.yaml: {exc}')
+
+    # -----------------------------------------------------------------------
+    # Regenerate run_summary.txt from the full merged index
+    # -----------------------------------------------------------------------
     log_path = os.path.join(results_root, 'run_summary.txt')
 
-    sep  = '=' * 70
-    thin = '-' * 70
+    sep_line  = '=' * 70
+    thin_line = '-' * 70
 
-    lines = [
-        sep,
+    all_success  = {k: v for k, v in status_index.items()
+                    if v.get('status') == 'success'}
+    all_partial  = {k: v for k, v in status_index.items()
+                    if v.get('status') == 'partial_no_viirs'}
+    all_failed   = {k: v for k, v in status_index.items()
+                    if v.get('status') == 'failed'}
+
+    summary_lines = [
+        sep_line,
         'BATCH FIRE MAPPING  —  RUN SUMMARY',
-        sep,
-        f'  Timestamp  : {_dt.datetime.now().strftime("%Y-%m-%d  %H:%M:%S")}',
-        f'  Raster     : {raster_path}',
-        f'  Polygons   : {polygon_file}',
-        f'  Output     : {results_root}',
+        sep_line,
+        f'  Last updated : {_dt.datetime.now().strftime("%Y-%m-%d  %H:%M:%S")}',
+        f'  Raster       : {raster_path}',
+        f'  Polygons     : {polygon_file}',
+        f'  Output       : {results_root}',
         '',
-        f'  Total fires attempted : {len(results)}',
-        f'  Succeeded             : {n_ok}',
-        f'  Failed                : {n_fail}',
+        f'  Fires tracked in index  : {len(status_index)}',
+        f'  Succeeded (full)        : {len(all_success)}',
+        f'  Partial (no VIIRS data) : {len(all_partial)}',
+        f'  Failed                  : {len(all_failed)}',
+        '',
+        '  NOTE: "Partial" fires produced a perimeter-only PNG but were NOT',
+        '  classified. They do not count as successful runs.',
         '',
     ]
 
-    if ok_fires:
-        lines += [sep, 'SUCCEEDED', thin, '']
-        for name in sorted(ok_fires):
-            lines.append(f'  ✓  {name}')
-        lines.append('')
+    if all_success:
+        summary_lines += [sep_line, 'SUCCEEDED', thin_line, '']
+        for name in sorted(all_success):
+            entry = all_success[name]
+            summary_lines.append(f'  \u2713  {name}')
+            summary_lines.append(f'       Last run  : {entry.get("timestamp", "?")}')
+            summary_lines.append(f'       Directory : {entry.get("fire_dir", "?")}')
+            summary_lines.append('')
 
-    if fail_fires:
-        lines += [sep, 'FAILED', thin, '']
-        for name, reason in sorted(fail_fires.items()):
-            lines.append(f'  ✗  {name}')
-            lines.append(f'     Reason : {reason}')
-            lines.append('')
+    if all_partial:
+        summary_lines += [sep_line, 'PARTIAL  (no VIIRS — perimeter only)', thin_line, '']
+        for name in sorted(all_partial):
+            entry = all_partial[name]
+            summary_lines.append(f'  \u25b3  {name}')
+            summary_lines.append(f'       Last run  : {entry.get("timestamp", "?")}')
+            summary_lines.append(f'       Reason    : {entry.get("reason", "?")}')
+            summary_lines.append(f'       Directory : {entry.get("fire_dir", "?")}')
+            summary_lines.append('')
 
-    lines += [sep, '']
+    if all_failed:
+        summary_lines += [sep_line, 'FAILED', thin_line, '']
+        for name in sorted(all_failed):
+            entry = all_failed[name]
+            summary_lines.append(f'  \u2717  {name}')
+            summary_lines.append(f'       Last run  : {entry.get("timestamp", "?")}')
+            summary_lines.append(f'       Reason    : {entry.get("reason", "?")}')
+            summary_lines.append('')
+
+    summary_lines += [sep_line, '']
 
     with open(log_path, 'w') as f:
-        f.write('\n'.join(lines))
+        f.write('\n'.join(summary_lines))
 
     _info(f'Run summary → {log_path}')
 
-    if fail_fires:
+    if partial_fires or fail_fires:
         print()
+        for name, reason in sorted(partial_fires.items()):
+            _warn(f'PARTIAL  {name}  —  {reason}')
         for name, reason in sorted(fail_fires.items()):
-            _warn(f'FAILED  {name}  —  {reason}')
+            _warn(f'FAILED   {name}  —  {reason}')
 
 
 if __name__ == '__main__':
