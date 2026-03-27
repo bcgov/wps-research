@@ -1,5 +1,7 @@
 # batch_fire_mapping
 
+*Last updated: March 27, 2026*
+
 Batch fire-mapping pipeline for Sentinel-2 imagery using VIIRS active fire detections.
 
 Given a shapefile of fire perimeters and a Sentinel-2 raster, this package:
