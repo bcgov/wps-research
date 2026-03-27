@@ -61,6 +61,7 @@ python batch_fire_mapping/run_fire_mapping.py  POLYGONS.shp  RASTER.bin  [option
 | Flag | Default | Description |
 |---|---|---|
 | `--year` | (all years) | Only process fires from this `FIRE_YEAR`. |
+| `--fire_number` | (all fires) | Only process these specific fire numbers (space-separated). E.g. `--fire_number C11659 C11660`. Applied after `--year`. |
 | `--out_dir` | same directory as `RASTER` | Root directory for all outputs. |
 | `--padding` | `0.1` | Fractional padding on each side of the fire bounding box. `0.1` = 10% of fire width added left and right, 10% of fire height added top and bottom. |
 | `--skip_download` | off | Skip VIIRS download and shapify — go straight to mapping. |
@@ -113,7 +114,7 @@ Outputs will be written to `data/fire_mapping_results/` (next to the raster).
 ## Output structure
 
 ```
-<raster_dir>/                              # or --output_dir if specified
+<raster_dir>/                              # or --out_dir if specified
     fire_mapping_results/
         <FIRE_NUMBE>/
             <FIRE_NUMBE>_crop.bin               # Cropped Sentinel-2 subscene (ENVI)
@@ -124,9 +125,73 @@ Outputs will be written to `data/fire_mapping_results/` (next to the raster).
             <FIRE_NUMBE>_crop_classified.bin    # Raw fire-mapping classification output
             <FIRE_NUMBE>_comparison.png         # Comparison figure (after class-brush)
             <FIRE_NUMBE>_brush_comparison.png   # Before vs after class-brush figure
+            <FIRE_NUMBE>_params.yaml            # Full run parameters (see below)
 ```
 
 Re-running the script **replaces** existing fire folders — each fire is always processed fresh.
+
+### Run parameter file (`_params.yaml`)
+
+A YAML file is saved per fire after each successful run. It captures every parameter relevant to the mapping result so runs can be compared directly.
+
+```yaml
+fire:
+  fire_numbe: C11659
+  fire_date: "2025-08-25"
+
+run:
+  timestamp: "2026-03-27T14:30:00"
+
+inputs:
+  raster: /ram/pgfc_2023.bin
+  viirs_bin: /ram/fire_mapping_results/C11659/VIIRS_VNP14IMG_20250820_20251014.bin
+  perimeter_bin: /ram/fire_mapping_results/C11659/C11659_perimeter.bin
+
+crop:
+  padding: 0.1
+  width_px: 420
+  height_px: 380
+  total_px: 159600
+  crop_bin: /ram/fire_mapping_results/C11659/C11659_crop.bin
+
+sampling:
+  sample_rate: 0.05
+  min_samples: 500
+  max_samples: 30000
+  actual_sample_size: 7980
+  seed: 123
+
+accumulation:
+  start_date: "2025-08-20"
+  end_date: "2025-10-14"
+
+tsne:
+  perplexity: 60.0
+  learning_rate: 200.0
+  max_iter: 2000
+  init: pca
+  n_components: 2
+  random_state: 42
+  embed_bands: all
+
+hdbscan:
+  min_samples: 20
+  controlled_ratio: 0.5
+
+random_forest:
+  n_estimators: 100
+  max_depth: 15
+  max_features: sqrt
+  random_state: 42
+
+class_brush:
+  brush_size: 15
+  point_threshold: 10
+
+output:
+  fire_dir: /ram/fire_mapping_results/C11659
+  plot_downsample: 2
+```
 
 ---
 
