@@ -140,11 +140,23 @@ def accumulate(
     target_crs: Optional[str] = None,
     output_dir: Optional[str] = None,
     progress_cb: Optional[Callable[[str], None]] = None,
+    final_only: bool = False,
+    bbox: Optional[tuple] = None,
 ) -> List[str]:
     """
     Scan *shp_dir* for VIIRS fire shapefiles, filter by [start, end],
     sort explicitly by detection datetime, and write one cumulative
     shapefile per unique detection date into *output_dir*.
+
+    If *final_only* is True, only the last (most complete) cumulative
+    shapefile is written — intermediate per-date outputs are skipped.
+    This is much faster when only the final accumulation is needed.
+
+    If *bbox* is provided as (minx, miny, maxx, maxy) **in the source
+    shapefile CRS**, only features intersecting this box are loaded.
+    This dramatically speeds up accumulation when only a small crop
+    area is needed (avoids reading/reprojecting thousands of distant
+    detections).
 
     Output filenames use actual detection datetimes from source files:
         VIIRS_VNP14IMG_{first_dt}_{last_dt_in_batch}.shp
@@ -239,7 +251,7 @@ def accumulate(
         day_frames = []
         for dt, fpath in group_sorted:
             try:
-                gdf = gpd.read_file(fpath)
+                gdf = gpd.read_file(fpath, bbox=bbox)
             except Exception as exc:
                 print(f"  [WARN] Could not read {fpath}: {exc}")
                 continue
@@ -262,6 +274,13 @@ def accumulate(
 
         day_gdf = gpd.GeoDataFrame(pd.concat(day_frames, ignore_index=True))
         running_frames.append(day_gdf)
+
+        # Skip intermediate writes when only the final output is needed
+        is_last = (date_idx == total_dates - 1)
+        if final_only and not is_last:
+            _log(f"  [{date_idx + 1}/{total_dates}] {cur_date}  "
+                 f"({len(day_gdf)} new features)  [skip write]")
+            continue
 
         # The end datetime for the filename:
         #   - First batch: must equal fixed_start_dt exactly (start == end)

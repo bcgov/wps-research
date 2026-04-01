@@ -682,29 +682,25 @@ class GUI(GUI_Settings):
 
 
 
-    def classify_cluster(
-            self,
-            cluster
-    ):
-        '''
-        Clusters from HDBSCAN don't have names.
+    def classify_cluster(self, cluster):
+        """Use the hint mask to determine which HDBSCAN cluster(s) = burned.
 
-        Since we have mask as hint, we use it as information for the final labelling.
-
-        Determines if cluster of 1 is burn or unburned. If most of the masked burn is closer to 1, then 
-        
-        we have some evidence that cluster 1 is burned.
-        '''
-
+        For each cluster label, compute the fraction of that cluster's pixels
+        that fall inside the hint mask.  Any cluster where the majority
+        (> 50%) of its pixels are inside the hint is classified as burned.
+        This correctly handles HDBSCAN producing more than 2 clusters.
+        """
         classification = np.full(self.polygon_dat.shape, False)
 
-        masked_cluster = cluster[self.polygon_dat]
+        unique_labels = np.unique(cluster)
 
-        if masked_cluster[masked_cluster != -1].mean() > 0.5:
-            classification[cluster == 1] = True
-
-        else:
-            classification[cluster == 0] = True
+        for label in unique_labels:
+            if label == -1:
+                continue
+            cluster_mask = (cluster == label)
+            overlap = np.mean(self.polygon_dat[cluster_mask])
+            if overlap > 0.5:
+                classification[cluster_mask] = True
 
         return classification
 
