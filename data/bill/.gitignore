@@ -6,3 +6,6 @@ caching/
 mapped_burn/
 *.DS_Store*
 *test*
+.config/
+.ollama/
+inspection_files/

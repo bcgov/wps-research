@@ -68,6 +68,7 @@ python batch_fire_mapping/run_fire_mapping.py  POLYGONS.shp  RASTER.bin  [option
 | `--padding` | `0.1` | Fractional padding on each side of the fire bounding box. `0.1` = 10% of fire width added left and right, 10% of fire height added top and bottom. |
 | `--skip_download` | off | Skip VIIRS download and shapify — go straight to mapping. |
 | `--shapify_workers` | `8` | Parallel shapify processes. |
+| `--report` | off | Generate a PDF report after all fires are processed (requires `pdflatex`). |
 
 **Sampling** (computed per fire, then forwarded to `fire_mapping_cli.py`):
 
@@ -118,6 +119,7 @@ Outputs will be written to `data/fire_mapping_results/` (next to the raster).
 ```
 <raster_dir>/                              # or --out_dir if specified
     fire_mapping_results/
+        report.pdf                              # PDF report (when --report is used)
         <FIRE_NUMBE>/
             <FIRE_NUMBE>_crop.bin               # Cropped Sentinel-2 subscene (ENVI)
             <FIRE_NUMBE>_crop.hdr
@@ -127,9 +129,11 @@ Outputs will be written to `data/fire_mapping_results/` (next to the raster).
             <FIRE_NUMBE>_crop_classified.bin    # Raw fire-mapping classification output
             <FIRE_NUMBE>_comparison.png         # Comparison figure (after class-brush)
             <FIRE_NUMBE>_brush_comparison.png   # Before vs after class-brush figure
+            <FIRE_NUMBE>_pre.png                # Diagnostic: pre-fire false-colour RGB
+            <FIRE_NUMBE>_post.png               # Diagnostic: post-fire false-colour RGB
+            <FIRE_NUMBE>_diff1.png              # Diagnostic: normalised difference RGB
+            <FIRE_NUMBE>_diff2.png              # Diagnostic: ratio RGB
             <FIRE_NUMBE>_params.yaml            # Full run parameters (see below)
-            # --- only when VIIRS data is unavailable ---
-            <FIRE_NUMBE>_no_viirs.png           # Cropped image + traditional perimeter only
 ```
 
 Re-running the script **replaces** existing fire folders — each fire is always processed fresh.
@@ -243,11 +247,48 @@ December 31 of the latest `FIRE_YEAR` in the shapefile (filtered by `--year` if 
 
 ---
 
+## PDF report
+
+A slide-style PDF report can be generated after a run, with one landscape page per fire.
+
+### Via the batch script
+
+```bash
+python batch_fire_mapping/run_fire_mapping.py  polygons.shp  raster.bin  --report
+```
+
+The report is written to `fire_mapping_results/report.pdf`.
+
+### Standalone
+
+```bash
+python batch_fire_mapping/generate_report.py  /path/to/output_dir
+# or with a custom output path:
+python batch_fire_mapping/generate_report.py  /path/to/output_dir  -o my_report.pdf
+```
+
+`output_dir` is the directory containing `fire_mapping_results/` (or the `fire_mapping_results/` folder itself).
+
+### Page layout (per fire)
+
+| Row | Content |
+|---|---|
+| **Row 1** | `_comparison.png` and `_brush_comparison.png` (side by side) |
+| **Row 2** | `_pre.png`, `_post.png`, `_diff1.png`, `_diff2.png` (4-up, whichever exist) |
+
+### Requirements
+
+- `pdflatex` (from TeX Live, MiKTeX, or equivalent)
+- PNG files must already exist in each fire's output folder
+
+---
+
 ## Related files
 
 | File | Location | Description |
 |---|---|---|
 | `run_fire_mapping.py` | `batch_fire_mapping/` | This script (entry point) |
+| `generate_report.py` | `batch_fire_mapping/` | PDF report generator (standalone or via `--report`) |
 | `fire_mapping_cli.py` | `py/fire_mapping/` | Non-GUI fire-mapping pipeline |
 | `fire_mapping.py` | `py/fire_mapping/` | Interactive GUI version |
 | `class_brush.exe` | `cpp/` | Connected-component brush binary |

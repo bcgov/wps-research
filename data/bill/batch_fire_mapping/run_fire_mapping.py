@@ -73,7 +73,6 @@ import glob
 import re
 import shutil
 import subprocess
-import tempfile
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 
@@ -128,76 +127,6 @@ def _warn(msg: str):
 def _skip(fire_numbe: str, reason: str):
     _box(f'SKIP  {fire_numbe}', [reason], char='-', width=68)
 
-
-def _make_perimeter_only_figure(fire_numbe: str, crop_bin: str,
-                                 perimeter_geom, fire_dir: str) -> str:
-    """Generate a PNG with only the traditional fire perimeter outline.
-
-    Used when VIIRS data is unavailable so we still produce a visual for
-    every fire rather than silently skipping it.
-
-    Returns the path to the saved PNG.
-    """
-    import numpy as np
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-
-    # ------------------------------------------------------------------
-    # Read the cropped raster and build a false-colour background
-    # ------------------------------------------------------------------
-    ds = gdal.Open(crop_bin, gdal.GA_ReadOnly)
-    if ds is None:
-        raise RuntimeError(f'Cannot open crop raster: {crop_bin}')
-
-    crop_gt = ds.GetGeoTransform()
-    n_bands  = ds.RasterCount
-
-    # Use first 3 bands for RGB; stretch to [0, 1] via 2–98 percentile
-    def _read_norm(band_idx):
-        arr = ds.GetRasterBand(band_idx).ReadAsArray().astype(np.float32)
-        lo, hi = np.nanpercentile(arr, [2, 98])
-        return np.clip((arr - lo) / max(hi - lo, 1e-6), 0, 1)
-
-    rgb = np.stack([_read_norm(min(i, n_bands)) for i in (1, 2, 3)], axis=2)
-    ds = None
-
-    # ------------------------------------------------------------------
-    # Convert perimeter polygon vertices to pixel coordinates
-    # ------------------------------------------------------------------
-    def _proj_to_px(x, y):
-        col = (x - crop_gt[0]) / crop_gt[1]
-        row_ = (y - crop_gt[3]) / crop_gt[5]
-        return col, row_
-
-    fig, ax = plt.subplots(figsize=(8, 8))
-    ax.imshow(rgb, interpolation='bilinear')
-
-    # Draw the exterior ring; handle MultiPolygon gracefully
-    from shapely.geometry import MultiPolygon
-    geoms = (list(perimeter_geom.geoms)
-             if isinstance(perimeter_geom, MultiPolygon)
-             else [perimeter_geom])
-
-    for geom in geoms:
-        xs, ys = zip(*[_proj_to_px(x, y)
-                       for x, y in geom.exterior.coords])
-        ax.plot(xs, ys, color='cyan', linewidth=1.5)
-
-    from matplotlib.lines import Line2D
-    ax.legend(
-        handles=[Line2D([0], [0], color='cyan', linewidth=1.5,
-                        label='Traditional perimeter')],
-        loc='lower right', fontsize=9, framealpha=0.7, edgecolor='white',
-    )
-    ax.set_title(f'{fire_numbe}  —  No VIIRS data available\n'
-                 f'Traditional perimeter only', fontsize=10)
-    ax.axis('off')
-
-    fig_path = os.path.join(fire_dir, f'{fire_numbe}_no_viirs.png')
-    fig.savefig(fig_path, dpi=150, bbox_inches='tight')
-    plt.close(fig)
-    return fig_path
 
 
 # ===========================================================================
@@ -569,41 +498,251 @@ def load_all_viirs(shp_root: str, raster_crs: str) -> gpd.GeoDataFrame:
 # Rasterize a polygon (fire perimeter)
 # ===========================================================================
 
-def rasterize_polygon(polygon_geom, crs_wkt: str, ref_raster_path: str,
-                      dst_path: str):
+def rasterize_polygon(polygon_file: str, fire_numbe: str, crs_wkt: str,
+                      ref_raster_path: str, dst_path: str,
+                      geometry=None, crop_gt=None,
+                      crop_w: int = None, crop_h: int = None):
     """
-    Rasterize a single polygon geometry onto the grid of *ref_raster_path*
-    and write ENVI .bin to *dst_path*.
+    Rasterize the perimeter polygon for *fire_numbe* onto the grid defined
+    by *ref_raster_path* (or by explicit *crop_gt*/*crop_w*/*crop_h*) and
+    write ENVI .bin to *dst_path*.
+
+    Preferred path (geometry + crop_gt + crop_w/h)
+    -----------------------------------------------
+    When *geometry* (a Shapely geometry already in the raster CRS) AND
+    *crop_gt* / *crop_w* / *crop_h* are provided, the function bypasses
+    both the OGR Memory driver and reading the crop raster header.  The
+    polygon is rasterized directly with numpy, using the caller-supplied
+    geotransform — which is guaranteed to be correct because it was
+    computed from the same raster geotransform and pixel indices used to
+    produce the crop.  This avoids two known failure modes:
+
+      1. GDAL writing a crop ENVI header whose 'map info' doesn't round-
+         trip correctly (malformed CRS → missing or shifted tie point).
+      2. CRS-interpretation differences between pyproj (geopandas crop
+         bounds) and OGR (polygon reprojection) when the ENVI WKT is
+         ESRI-dialect (MorphFromESRI changes datum lookup → shifted coords).
+
+    Fallback path (polygon_file + fire_numbe)
+    ------------------------------------------
+    When *geometry* is None the function reads and reprojects from the
+    original shapefile via OGR, as before.
     """
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmp_shp = os.path.join(tmpdir, 'perim.shp')
-        gdf = gpd.GeoDataFrame(geometry=[polygon_geom],
-                               crs=_wkt_to_pyproj_crs(crs_wkt))
-        gdf.to_file(tmp_shp, driver='ESRI Shapefile')
+    # ------------------------------------------------------------------
+    # Determine output grid (geotransform + dimensions)
+    # ------------------------------------------------------------------
+    if crop_gt is not None and crop_w is not None and crop_h is not None:
+        gt_out = crop_gt
+        w_out  = crop_w
+        h_out  = crop_h
+    else:
+        ref = gdal.Open(ref_raster_path, gdal.GA_ReadOnly)
+        if ref is None:
+            raise RuntimeError(
+                f'Cannot open reference raster: {ref_raster_path}')
+        gt_out = ref.GetGeoTransform()
+        w_out  = ref.RasterXSize
+        h_out  = ref.RasterYSize
+        ref    = None
 
-        ref    = gdal.Open(ref_raster_path, gdal.GA_ReadOnly)
-        shp_ds = ogr.Open(tmp_shp)
-        layer  = shp_ds.GetLayer()
+    # ------------------------------------------------------------------
+    # Build the burn mask
+    # ------------------------------------------------------------------
+    if geometry is not None:
+        # ---- numpy rasterization (no GDAL vector layer needed) ----
+        arr = _rasterize_geometry_numpy(geometry, gt_out, w_out, h_out)
+    else:
+        # ---- OGR fallback: read from shapefile & reproject --------
+        arr = _rasterize_from_shapefile_ogr(
+            polygon_file, fire_numbe, crs_wkt, gt_out, w_out, h_out)
 
-        out = gdal.GetDriverByName('ENVI').Create(
-            dst_path,
-            ref.RasterXSize, ref.RasterYSize, 1, gdal.GDT_Float32,
-        )
-        out.SetGeoTransform(ref.GetGeoTransform())
-        out.SetProjection(ref.GetProjection())
+    n_burned = int(np.sum(arr > 0))
 
-        band = out.GetRasterBand(1)
-        band.Fill(0.0)
-        band.SetNoDataValue(0.0)
+    # ------------------------------------------------------------------
+    # Write ENVI .bin
+    # ------------------------------------------------------------------
+    dst_srs = osr.SpatialReference()
+    dst_srs.ImportFromWkt(crs_wkt)
+    dst_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
 
-        gdal.RasterizeLayer(
-            out, [1], layer,
-            burn_values=[1.0],
-            options=['ALL_TOUCHED=TRUE'],
-        )
-        band = out = ref = shp_ds = None
+    out = gdal.GetDriverByName('ENVI').Create(
+        dst_path, w_out, h_out, 1, gdal.GDT_Float32)
+    out.SetGeoTransform(gt_out)
+    out.SetProjection(dst_srs.ExportToWkt())
 
-    _info(f'Perimeter rasterized → {os.path.basename(dst_path)}')
+    band = out.GetRasterBand(1)
+    band.SetNoDataValue(0.0)
+    band.WriteArray(arr)
+    out.FlushCache()
+    band = out = None
+
+    if n_burned == 0:
+        _warn(f'Perimeter rasterization produced an all-zero raster '
+              f'for {os.path.basename(dst_path)}. '
+              f'The polygon may not overlap the crop grid.')
+    else:
+        _info(f'Perimeter rasterized → {os.path.basename(dst_path)}  '
+              f'({n_burned} burned px)')
+
+
+def _rasterize_geometry_numpy(geometry, gt, w, h):
+    """
+    Rasterize a Shapely geometry onto a (h, w) grid using GDAL's
+    RasterizeLayer via an in-memory OGR dataset.
+
+    Handles Polygon and MultiPolygon with ALL_TOUCHED=TRUE.
+    """
+    dst_srs = osr.SpatialReference()
+    dst_srs.ImportFromWkt('LOCAL_CS["pixel"]')
+
+    drv_name = 'MEM' if ogr.GetDriverByName('MEM') else 'Memory'
+    mem_ds = ogr.GetDriverByName(drv_name).CreateDataSource('')
+    mem_layer = mem_ds.CreateLayer('geom', srs=dst_srs, geom_type=ogr.wkbPolygon)
+
+    ogr_geom = ogr.CreateGeometryFromWkt(geometry.wkt)
+    feat = ogr.Feature(mem_layer.GetLayerDefn())
+    feat.SetGeometry(ogr_geom)
+    mem_layer.CreateFeature(feat)
+
+    rast = gdal.GetDriverByName('MEM').Create('', w, h, 1, gdal.GDT_Float32)
+    rast.SetGeoTransform(gt)
+    rast.GetRasterBand(1).Fill(0.0)
+
+    gdal.RasterizeLayer(rast, [1], mem_layer,
+                        burn_values=[1.0],
+                        options=['ALL_TOUCHED=TRUE'])
+
+    arr = rast.GetRasterBand(1).ReadAsArray()
+    rast = mem_ds = None
+    return arr
+
+
+def _rasterize_from_shapefile_ogr(polygon_file, fire_numbe, crs_wkt,
+                                  gt_out, w_out, h_out):
+    """
+    OGR-based fallback: read *fire_numbe* from *polygon_file*, reproject
+    to *crs_wkt*, and rasterize onto the output grid.
+    """
+    vec_ds = ogr.Open(polygon_file)
+    if vec_ds is None:
+        raise RuntimeError(f'Cannot open polygon file: {polygon_file}')
+
+    layer = vec_ds.GetLayer()
+    layer.SetAttributeFilter(f"FIRE_NUMBE = '{fire_numbe}'")
+    if layer.GetFeatureCount() == 0:
+        raise RuntimeError(
+            f'No feature with FIRE_NUMBE={fire_numbe!r} in {polygon_file}')
+
+    dst_srs = osr.SpatialReference()
+    dst_srs.ImportFromWkt(crs_wkt)
+    dst_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+
+    drv_name = 'MEM' if ogr.GetDriverByName('MEM') else 'Memory'
+    mem_ds    = ogr.GetDriverByName(drv_name).CreateDataSource('')
+    mem_layer = mem_ds.CreateLayer(
+        'perim', srs=dst_srs, geom_type=ogr.wkbPolygon)
+
+    src_srs = layer.GetSpatialRef()
+    if src_srs is not None:
+        src_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+        transform = osr.CoordinateTransformation(src_srs, dst_srs)
+        for feat in layer:
+            geom = feat.GetGeometryRef().Clone()
+            geom.Transform(transform)
+            out_feat = ogr.Feature(mem_layer.GetLayerDefn())
+            out_feat.SetGeometry(geom)
+            mem_layer.CreateFeature(out_feat)
+    else:
+        for feat in layer:
+            out_feat = ogr.Feature(mem_layer.GetLayerDefn())
+            out_feat.SetGeometry(feat.GetGeometryRef().Clone())
+            mem_layer.CreateFeature(out_feat)
+
+    vec_ds = None
+
+    # Rasterize using a temporary in-memory GDAL raster
+    out = gdal.GetDriverByName('MEM').Create('', w_out, h_out, 1,
+                                             gdal.GDT_Float32)
+    out.SetGeoTransform(gt_out)
+    out.SetProjection(dst_srs.ExportToWkt())
+    out.GetRasterBand(1).Fill(0.0)
+
+    gdal.RasterizeLayer(out, [1], mem_layer,
+                        burn_values=[1.0],
+                        options=['ALL_TOUCHED=TRUE'])
+
+    arr = out.GetRasterBand(1).ReadAsArray()
+    out = mem_ds = None
+    return arr
+
+
+# ===========================================================================
+# Build CLI args from a previous _params.yaml
+# ===========================================================================
+
+def _cli_args_from_yaml(yaml_path: str) -> list[str] | None:
+    """Read a fire's _params.yaml and return cli_pass_args list.
+
+    Returns None if the file doesn't exist or can't be parsed.
+    """
+    if not os.path.isfile(yaml_path):
+        return None
+    try:
+        import yaml
+        with open(yaml_path) as f:
+            p = yaml.safe_load(f)
+    except Exception:
+        return None
+    if not p:
+        return None
+
+    args = []
+    # sampling
+    s = p.get('sampling', {})
+    if 'seed' in s:
+        args += ['--seed', str(s['seed'])]
+
+    # random forest
+    rf = p.get('random_forest', {})
+    if 'n_estimators' in rf:
+        args += ['--rf_n_estimators', str(rf['n_estimators'])]
+    if 'max_depth' in rf:
+        args += ['--rf_max_depth', str(rf['max_depth'])]
+    if 'max_features' in rf:
+        args += ['--rf_max_features', str(rf['max_features'])]
+    if 'random_state' in rf:
+        args += ['--rf_random_state', str(rf['random_state'])]
+
+    # hdbscan
+    h = p.get('hdbscan', {})
+    if 'controlled_ratio' in h:
+        args += ['--controlled_ratio', str(h['controlled_ratio'])]
+    if 'min_samples' in h:
+        args += ['--hdbscan_min_samples', str(h['min_samples'])]
+
+    # tsne
+    t = p.get('tsne', {})
+    if 'perplexity' in t:
+        args += ['--tsne_perplexity', str(t['perplexity'])]
+    if 'learning_rate' in t:
+        args += ['--tsne_learning_rate', str(t['learning_rate'])]
+    if 'max_iter' in t:
+        args += ['--tsne_max_iter', str(t['max_iter'])]
+    if 'init' in t:
+        args += ['--tsne_init', str(t['init'])]
+    if 'n_components' in t:
+        args += ['--tsne_n_components', str(t['n_components'])]
+    if 'random_state' in t:
+        args += ['--tsne_random_state', str(t['random_state'])]
+    if 'embed_bands' in t and t['embed_bands'] != 'all':
+        args += ['--embed_bands', str(t['embed_bands'])]
+
+    # output
+    o = p.get('output', {})
+    if 'plot_downsample' in o:
+        args += ['--plot_downsample', str(o['plot_downsample'])]
+
+    return args
 
 
 # ===========================================================================
@@ -626,6 +765,8 @@ def process_fire(
     cli_script:      str,
     cli_pass_args:   list,
     viirs_shp_dir:   str,
+    polygon_file:    str,
+    perimeter_mode:  str = 'viirs',
 ):
     """
     Process one fire polygon end-to-end.
@@ -671,27 +812,43 @@ def process_fire(
     acc_start = fire_date - datetime.timedelta(days=5)
 
     # -----------------------------------------------------------------------
-    # 2. Compute pixel bounding box of the fire polygon
+    # 2. Clip the polygon to the raster extent and compute the crop box
     # -----------------------------------------------------------------------
-    bounds = row.geometry.bounds   # (minx, miny, maxx, maxy) in raster CRS
+    from shapely.geometry import box as shapely_box
 
     gt = raster_gt
+    raster_xmin, raster_ymin, raster_xmax, raster_ymax = raster_native_extent(
+        gt, raster_W, raster_H)
+    raster_box = shapely_box(raster_xmin, raster_ymin, raster_xmax, raster_ymax)
+
+    # Clip the fire polygon to the raster footprint so that the portion
+    # outside the raster doesn't inflate the fire dimensions and padding.
+    clipped_geom = row.geometry.intersection(raster_box)
+    if clipped_geom.is_empty:
+        reason = 'Fire polygon does not overlap the raster extent.'
+        _skip(fire_numbe, reason)
+        return None, reason
+
+    bounds = clipped_geom.bounds   # (minx, miny, maxx, maxy) — only the visible part
+
     # Convert geographic bounds to pixel indices
     px_lo = int((bounds[0] - gt[0]) / gt[1])
     px_hi = int((bounds[2] - gt[0]) / gt[1])
     py_lo = int((bounds[3] - gt[3]) / gt[5])   # maxy → top row
     py_hi = int((bounds[1] - gt[3]) / gt[5])   # miny → bottom row
 
-    # Add percentage-based padding: each side grows by (padding * fire dimension)
-    x_pad = max(1, int(round(padding * (px_hi - px_lo))))
-    y_pad = max(1, int(round(padding * (py_hi - py_lo))))
+    # Add percentage-based padding.  Use the larger (clipped) fire dimension
+    # for both axes so the crop stays roughly square.
+    fire_max_dim = max(px_hi - px_lo, py_hi - py_lo)
+    x_pad = max(1, int(round(padding * fire_max_dim)))
+    y_pad = max(1, int(round(padding * fire_max_dim)))
     px_lo = max(0, px_lo - x_pad)
     px_hi = min(raster_W - 1, px_hi + x_pad)
     py_lo = max(0, py_lo - y_pad)
     py_hi = min(raster_H - 1, py_hi + y_pad)
 
     if px_lo >= px_hi or py_lo >= py_hi:
-        reason = 'Polygon bounding box is entirely outside the raster extent.'
+        reason = 'Clipped polygon bounding box has zero area.'
         _skip(fire_numbe, reason)
         return None, reason
 
@@ -769,103 +926,115 @@ def process_fire(
             _info(f'Plot dates  : {plot_start} → {plot_end}')
 
     # -----------------------------------------------------------------------
-    # 6. Accumulate VIIRS for this fire's date range
+    # 6. Build hint raster based on --perimeter_mode
     # -----------------------------------------------------------------------
-    _info('Running VIIRS accumulation ...')
-    tmp_acc_dir = tempfile.mkdtemp(prefix=f'acc_{fire_numbe}_')
+    crop_gt = (crop_xmin, gt[1], gt[2], crop_ymax, gt[4], gt[5])
+    viirs_bin = None
+    perim_bin = None
+    hint_bin  = None
+    perimeter_type = None   # 'viirs', 'traditional', or None (fail)
 
-    try:
-        acc_paths = accumulate(
-            shp_dir          = viirs_shp_dir,
-            start_str        = acc_start.strftime('%Y%m%d'),
-            end_str          = acc_end.strftime('%Y%m%d'),
-            reference_raster = crop_bin,
-            output_dir       = tmp_acc_dir,
-        )
-    except Exception as exc:
-        _warn(f'Accumulation failed: {exc}')
-        shutil.rmtree(tmp_acc_dir, ignore_errors=True)
-        acc_paths = []
-
-    if not acc_paths:
-        _warn('No accumulated shapefiles produced.')
-        shutil.rmtree(tmp_acc_dir, ignore_errors=True)
-        no_viirs_reason = (
-            f'No VIIRS shapefiles produced for accumulation period '
-            f'{acc_start.date()} \u2192 {acc_end.date()}. '
-            f'Perimeter-only figure generated.')
-        _warn('No VIIRS hint available — generating perimeter-only figure.')
-        try:
-            fig_path = _make_perimeter_only_figure(
-                fire_numbe, crop_bin, row.geometry, fire_dir)
-            _info(f'Perimeter-only figure → {os.path.basename(fig_path)}')
-        except Exception as exc:
-            _warn(f'Could not generate perimeter-only figure: {exc}')
-        return fire_dir, no_viirs_reason
-
-    # Keep only the final (most complete) accumulated shapefile
-    final_acc_shp = sorted(acc_paths)[-1]
-    final_stem    = Path(final_acc_shp).stem
-
-    _info(f'Final accumulated shapefile: {final_stem}')
-
-    # Copy the shapefile sidecar bundle to the fire output dir
-    for ext in ('.shp', '.shx', '.dbf', '.prj', '.cpg'):
-        src = Path(final_acc_shp).with_suffix(ext)
-        if src.exists():
-            shutil.copy2(src, os.path.join(fire_dir, src.name))
-
-    shutil.rmtree(tmp_acc_dir, ignore_errors=True)
-
-    acc_shp_in_fire_dir = os.path.join(fire_dir, Path(final_acc_shp).name)
-
-    # -----------------------------------------------------------------------
-    # 7. Rasterize accumulated VIIRS onto the cropped raster
-    # -----------------------------------------------------------------------
-    _info('Rasterizing accumulated VIIRS ...')
-    viirs_bin = rasterize_shapefile(
-        shp_path   = acc_shp_in_fire_dir,
-        ref_image  = crop_bin,
-        output_dir = fire_dir,
-        buffer_m   = 375.0,
-    )
-
-    if viirs_bin is None:
-        no_viirs_reason = (
-            'VIIRS rasterization failed — could not produce a binary hint raster. '
-            'Perimeter-only figure generated.')
-        _warn('VIIRS rasterization failed — generating perimeter-only figure.')
-        try:
-            fig_path = _make_perimeter_only_figure(
-                fire_numbe, crop_bin, row.geometry, fire_dir)
-            _info(f'Perimeter-only figure → {os.path.basename(fig_path)}')
-        except Exception as exc:
-            _warn(f'Could not generate perimeter-only figure: {exc}')
-        return fire_dir, no_viirs_reason
-
-    _info(f'VIIRS binary → {os.path.basename(viirs_bin)}')
-
-    # -----------------------------------------------------------------------
-    # 8. Rasterize the traditional fire perimeter
-    # -----------------------------------------------------------------------
+    # ---- 6a. Traditional perimeter (always rasterized for the comparison
+    #          overlay, and used as the hint when mode is 'traditional') ----
     perim_bin = os.path.join(fire_dir, f'{fire_numbe}_perimeter.bin')
     try:
-        rasterize_polygon(row.geometry, raster_crs, crop_bin, perim_bin)
+        rasterize_polygon(polygon_file, fire_numbe, raster_crs, crop_bin, perim_bin,
+                          geometry=clipped_geom,
+                          crop_gt=crop_gt, crop_w=crop_w, crop_h=crop_h)
     except Exception as exc:
         _warn(f'Perimeter rasterization failed: {exc}')
         perim_bin = None
 
+    # ---- 6b. VIIRS accumulation (only when mode is 'viirs') ----
+    if perimeter_mode == 'viirs':
+        _info('Running VIIRS accumulation ...')
+        try:
+            acc_paths = accumulate(
+                shp_dir          = viirs_shp_dir,
+                start_str        = acc_start.strftime('%Y%m%d'),
+                end_str          = acc_end.strftime('%Y%m%d'),
+                reference_raster = crop_bin,
+                output_dir       = fire_dir,
+                final_only       = True,
+                bbox             = (crop_xmin, crop_ymin, crop_xmax, crop_ymax),
+            )
+        except Exception as exc:
+            _warn(f'Accumulation failed: {exc}')
+            acc_paths = []
+
+        if not acc_paths:
+            _warn('No accumulated shapefiles produced.')
+        else:
+            final_acc_shp = acc_paths[-1]
+            _info(f'Final accumulated shapefile: {Path(final_acc_shp).stem}')
+
+            acc_shp_in_fire_dir = final_acc_shp   # already in fire_dir
+
+            _info('Rasterizing accumulated VIIRS ...')
+            viirs_bin = rasterize_shapefile(
+                shp_path   = acc_shp_in_fire_dir,
+                ref_image  = crop_bin,
+                output_dir = fire_dir,
+                buffer_m   = 375.0,
+            )
+
+        # Verify the VIIRS raster has actual burned pixels
+        if viirs_bin is not None:
+            try:
+                _vds = gdal.Open(viirs_bin, gdal.GA_ReadOnly)
+                _varr = _vds.GetRasterBand(1).ReadAsArray()
+                _vds = None
+                if np.nansum(_varr) == 0:
+                    _warn('VIIRS raster is all zeros — no detections inside crop.')
+                    viirs_bin = None
+                else:
+                    _info(f'VIIRS binary → {os.path.basename(viirs_bin)}  '
+                          f'({int(np.nansum(_varr > 0))} burned px)')
+            except Exception as exc:
+                _warn(f'Could not verify VIIRS raster: {exc}')
+                viirs_bin = None
+
+    # ---- 6c. Select the hint raster ----
+    if perimeter_mode == 'traditional':
+        # User explicitly requested traditional perimeter
+        if perim_bin and os.path.exists(perim_bin):
+            hint_bin = perim_bin
+            perimeter_type = 'traditional'
+        else:
+            reason = 'Traditional perimeter could not be rasterized.'
+            _skip(fire_numbe, reason)
+            return None, reason
+    else:
+        # Mode is 'viirs': prefer VIIRS, fall back to traditional
+        if viirs_bin is not None:
+            hint_bin = viirs_bin
+            perimeter_type = 'viirs'
+        elif perim_bin and os.path.exists(perim_bin):
+            _warn('No VIIRS hint available — falling back to traditional '
+                  'perimeter as classification hint.')
+            hint_bin = perim_bin
+            perimeter_type = 'traditional'
+        else:
+            reason = ('Neither VIIRS data nor traditional perimeter could be '
+                      'rasterized — cannot classify this fire.')
+            _skip(fire_numbe, reason)
+            return None, reason
+
+    _info(f'Classification hint: {perimeter_type} '
+          f'({os.path.basename(hint_bin)})')
+
     # -----------------------------------------------------------------------
-    # 9. Call fire_mapping_cli.py
+    # 7. Call fire_mapping_cli.py
     # -----------------------------------------------------------------------
     cmd = [
         sys.executable, cli_script,
         '--sample_size', str(sample_size),
-        crop_bin, viirs_bin,
+        crop_bin, hint_bin,
         '--fire_numbe',  fire_numbe,
         '--start_date',  str(plot_start),
         '--end_date',    str(plot_end),
     ]
+    # Always pass the traditional perimeter for the comparison overlay
     if perim_bin and os.path.exists(perim_bin):
         cmd += ['--perimeter', perim_bin]
     cmd += cli_pass_args
@@ -888,15 +1057,18 @@ def process_fire(
         'fire': {
             'fire_numbe':  fire_numbe,
             'fire_date':   str(fire_date.date()),
+            'fire_size_ha': float(row.get('FIRE_SIZE_', 0)) if row.get('FIRE_SIZE_') is not None else None,
         },
         'run': {
             'timestamp': _dt.datetime.now().isoformat(timespec='seconds'),
         },
         'inputs': {
-            'raster':        raster_path,
-            'polygon_file':  str(row.name),   # shapefile row index / source
-            'viirs_bin':     viirs_bin,
-            'perimeter_bin': perim_bin if perim_bin else None,
+            'raster':         raster_path,
+            'polygon_file':   str(row.name),   # shapefile row index / source
+            'hint_bin':       hint_bin,
+            'viirs_bin':      viirs_bin,
+            'perimeter_bin':  perim_bin if perim_bin else None,
+            'perimeter_type': perimeter_type,
         },
         'crop': {
             'padding':       padding,
@@ -1057,11 +1229,32 @@ Example
                         'right, 10%% of fire height on top and bottom '
                         '(default: 0.1)')
 
+    # ---- Perimeter / hint mode ----
+    p.add_argument('--perimeter_mode', default='viirs',
+                   choices=['viirs', 'traditional'],
+                   help='Which perimeter source to use as the classification '
+                        'hint.  "viirs" (default): prefer VIIRS accumulated '
+                        'detections, fall back to traditional perimeter if '
+                        'VIIRS is unavailable.  "traditional": always use '
+                        'the traditional fire polygon perimeter.')
+
     # ---- VIIRS ----
     p.add_argument('--skip_download', action='store_true',
                    help='Skip downloading and shapifying VIIRS — go straight to mapping')
     p.add_argument('--shapify_workers', type=int, default=8,
                    help='Workers for shapify step (default: 8)')
+
+    # ---- Rerun ----
+    p.add_argument('--rerun_from_yaml', action='store_true',
+                   help='Re-run each fire using the classification parameters '
+                        'saved in its _params.yaml from a previous run. '
+                        'This preserves per-fire tuned parameters (t-SNE bands, '
+                        'HDBSCAN, RF, etc.) while regenerating outputs and '
+                        'updating the YAML with new fields.')
+
+    # ---- Report ----
+    p.add_argument('--report', action='store_true',
+                   help='Generate a PDF report after all fires are processed')
 
     # ---- Pass-through to fire_mapping_cli.py ----
     p.add_argument('--sample_rate',   type=float, default=0.05,
@@ -1120,6 +1313,7 @@ def main(argv=None):
             f'Raster   : {raster_path}',
             f'Polygons : {polygon_file}',
             f'Padding  : {args.padding * 100:.0f}%',
+            f'Perimeter: {args.perimeter_mode}',
             f'Output   : {output_root}',
         ],
     )
@@ -1177,9 +1371,13 @@ def main(argv=None):
     _info(f'Download range: {dl_start.date()} → {dl_end.date()}')
 
     # -----------------------------------------------------------------------
-    # Download and shapify VIIRS
+    # Download and shapify VIIRS (skipped entirely in traditional mode)
     # -----------------------------------------------------------------------
-    if not args.skip_download:
+    if args.perimeter_mode == 'traditional':
+        _info('--perimeter_mode=traditional: skipping VIIRS download, '
+              'shapify, and spatial-query steps.')
+        viirs_gdf = gpd.GeoDataFrame()
+    elif not args.skip_download:
         _box('Step 2 — Download VIIRS VNP14IMG')
         token = load_token()
         download_viirs(
@@ -1202,9 +1400,11 @@ def main(argv=None):
     # -----------------------------------------------------------------------
     # Load all VIIRS shapified data once (for spatial queries per fire)
     # -----------------------------------------------------------------------
-    _box('Step 4 — Load VIIRS shapefiles for spatial queries')
+    if args.perimeter_mode != 'traditional':
+        _box('Step 4 — Load VIIRS shapefiles for spatial queries')
     crs_wkt, gt, W, H = get_raster_info(raster_path)
-    viirs_gdf = load_all_viirs(viirs_shp_dir, crs_wkt)
+    if args.perimeter_mode != 'traditional':
+        viirs_gdf = load_all_viirs(viirs_shp_dir, crs_wkt)
 
     # -----------------------------------------------------------------------
     # Build pass-through CLI args list
@@ -1242,9 +1442,24 @@ def main(argv=None):
     _box(f'Step 5 — Processing {len(gdf)} fire(s)  (sequential)')
 
     # results maps fire_numbe → (fire_dir_or_None, reason_or_None)
+    results_root = os.path.join(output_root, 'fire_mapping_results')
     results = {}
     for idx, row in gdf.iterrows():
         fire_numbe = str(row.get('FIRE_NUMBE', idx))
+
+        # When --rerun_from_yaml, read per-fire params from the previous YAML
+        per_fire_cli_args = cli_pass_args
+        if args.rerun_from_yaml:
+            yaml_path = os.path.join(
+                results_root, fire_numbe, f'{fire_numbe}_params.yaml')
+            loaded = _cli_args_from_yaml(yaml_path)
+            if loaded is not None:
+                _info(f'Using saved params from {os.path.basename(yaml_path)}')
+                per_fire_cli_args = loaded
+            else:
+                _warn(f'No _params.yaml for {fire_numbe} — '
+                      f'falling back to command-line defaults.')
+
         fire_dir, reason = process_fire(
             row            = row,
             viirs_gdf      = viirs_gdf,
@@ -1259,8 +1474,10 @@ def main(argv=None):
             min_samples    = args.min_samples,
             max_samples    = args.max_samples,
             cli_script     = cli_script,
-            cli_pass_args  = cli_pass_args,
+            cli_pass_args  = per_fire_cli_args,
             viirs_shp_dir  = viirs_shp_dir,
+            polygon_file   = polygon_file,
+            perimeter_mode = args.perimeter_mode,
         )
         results[fire_numbe] = (fire_dir, reason)
 
@@ -1433,6 +1650,14 @@ def main(argv=None):
             _warn(f'PARTIAL  {name}  —  {reason}')
         for name, reason in sorted(fail_fires.items()):
             _warn(f'FAILED   {name}  —  {reason}')
+
+    # -----------------------------------------------------------------------
+    # PDF report
+    # -----------------------------------------------------------------------
+    if args.report:
+        _box('Generating PDF report')
+        from generate_report import generate_report
+        generate_report(output_root)
 
 
 if __name__ == '__main__':

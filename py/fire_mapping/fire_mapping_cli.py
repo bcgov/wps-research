@@ -318,6 +318,15 @@ class FireMappingCLI:
     # -----------------------------------------------------------------------
 
     def sample_data(self):
+        # Clamp sample_size to the number of valid (non-NaN) pixels so
+        # small crops or crops with large nodata regions don't crash.
+        flat = self.image_dat.reshape(-1, self.image_dat.shape[-1])
+        n_valid = int(np.isfinite(flat).all(axis=1).sum())
+        if self.sample_size > n_valid:
+            print(f'[CLI] Warning: sample_size ({self.sample_size}) > '
+                  f'valid pixels ({n_valid}). Clamping to {n_valid}.')
+            self.sample_size = n_valid
+
         self.sample_indices, self.samples = regular_sampling(
             raster_dat=self.image_dat,
             sample_size=self.sample_size,
@@ -414,15 +423,38 @@ class FireMappingCLI:
     # -----------------------------------------------------------------------
 
     def classify_cluster(self, cluster):
-        """Use the hint mask to determine which HDBSCAN cluster = burned."""
-        classification = np.full(self.polygon_dat.shape, False)
-        masked_cluster = cluster[self.polygon_dat]
-        valid          = masked_cluster[masked_cluster != -1]
+        """Use the hint mask to determine which HDBSCAN cluster(s) = burned.
 
-        if len(valid) == 0 or valid.mean() > 0.5:
-            classification[cluster == 1] = True
-        else:
-            classification[cluster == 0] = True
+        For each cluster label, compute the fraction of that cluster's pixels
+        that fall inside the hint mask.  Any cluster where the majority
+        (> 50%) of its pixels are inside the hint is classified as burned.
+        This correctly handles HDBSCAN producing more than 2 clusters.
+        """
+        classification = np.full(self.polygon_dat.shape, False)
+        hint_flat = self.polygon_dat.ravel()
+        cluster_flat = cluster.ravel()
+
+        unique_labels = np.unique(cluster_flat)
+        burned_labels = []
+
+        for label in unique_labels:
+            if label == -1:
+                continue
+            mask = cluster_flat == label
+            n_total = int(mask.sum())
+            if n_total == 0:
+                continue
+            n_inside = int((mask & hint_flat).sum())
+            overlap = n_inside / n_total
+            print(f'[CLI]   cluster {label}: {n_total} px, '
+                  f'{n_inside} inside hint ({overlap:.2%})')
+            if overlap > 0.5:
+                burned_labels.append(label)
+
+        print(f'[CLI] Burned clusters: {burned_labels}')
+
+        for label in burned_labels:
+            classification[cluster == label] = True
 
         return classification
 
@@ -603,11 +635,12 @@ class FireMappingCLI:
 
     def make_comparison_figure(self, classification: np.ndarray) -> str:
         """
-        Single-panel figure with three polygon outlines (no fill) overlaid on
-        the false-colour background:
-          • Our mapping   — red
-          • VIIRS hint    — orange
-          • Traditional perimeter — cyan  (only when perimeter_filename given)
+        Single-panel figure with up to three polygon outlines (no fill)
+        overlaid on the false-colour background:
+          - Our mapping              — red
+          - Classification hint      — orange  (VIIRS or traditional perimeter)
+          - Traditional perimeter    — cyan    (only when --perimeter given
+                                                and different from the hint)
 
         Polygon outlines are derived from the binary rasters using the same
         GDAL Polygonize approach as binary_polygonize.py.
@@ -618,54 +651,64 @@ class FireMappingCLI:
         gt  = self.image._transform
         prj = self.image._proj
 
-        # ---- polygonize VIIRS and perimeter (already polygon-sourced) ----
-        viirs_shapes = self._mask_to_outlines(self.polygon_dat.astype(np.uint8),
-                                              gt, prj)
+        # Determine whether the hint came from a file or was auto-generated,
+        # and whether the hint and the perimeter are the same file.
+        hint_label = 'Hint'
+        hint_is_perimeter = False
+        if self.mask_from_file and self.polygon_filename:
+            if self.perimeter_filename and os.path.abspath(
+                    self.polygon_filename) == os.path.abspath(
+                    self.perimeter_filename):
+                hint_label = 'Traditional perimeter (hint)'
+                hint_is_perimeter = True
+            else:
+                hint_label = 'VIIRS hint'
 
-        perim_shapes = []
-        perim_dat    = None
-        if self.perimeter_filename and os.path.exists(self.perimeter_filename):
+        # ---- load perimeter data (only if different from hint) ----
+        perim_dat = None
+        if (not hint_is_perimeter
+                and self.perimeter_filename
+                and os.path.exists(self.perimeter_filename)):
             try:
-                perim_r      = Raster(self.perimeter_filename)
-                perim_dat    = perim_r.read_bands('all').squeeze().astype(bool)
-                perim_shapes = self._mask_to_outlines(
-                    perim_dat.astype(np.uint8), gt, prj)
+                perim_r   = Raster(self.perimeter_filename)
+                perim_dat = perim_r.read_bands('all').squeeze().astype(bool)
             except Exception as exc:
                 print(f'[CLI] Warning — could not load perimeter: {exc}')
 
         # ---- metrics ----
         iou_cv  = self._iou(classification, self.polygon_dat)
         acc_cv  = self._accuracy(classification, self.polygon_dat)
-        metrics = (f'IoU(ours/VIIRS)={iou_cv:.3f}  '
-                   f'Acc(ours/VIIRS)={acc_cv:.3f}')
+        metrics = (f'IoU(ours/{hint_label})={iou_cv:.3f}  '
+                   f'Acc(ours/{hint_label})={acc_cv:.3f}')
         if perim_dat is not None:
             iou_cp  = self._iou(classification, perim_dat)
             iou_vp  = self._iou(self.polygon_dat, perim_dat)
             metrics += (f'\nIoU(ours/perim)={iou_cp:.3f}  '
-                        f'IoU(VIIRS/perim)={iou_vp:.3f}')
+                        f'IoU({hint_label}/perim)={iou_vp:.3f}')
 
         # ---- figure ----
         fig, ax = plt.subplots(figsize=(10, 10))
         ax.imshow(bg, interpolation='bilinear')
         ax.axis('off')
 
-        # Our mapping: keep pixel-level — draw outline via contour (no polygonize)
-        clf_ds = classification[::d, ::d].astype(float)
-        ax.contour(clf_ds, levels=[0.5], colors=['red'], linewidths=1.5)
+        # All outlines drawn via contour in downsampled pixel space
+        clf_ds  = classification[::d, ::d].astype(float)
+        hint_ds = self.polygon_dat[::d, ::d].astype(float)
 
-        # VIIRS and perimeter: polygonized outlines
-        self._add_outlines(ax, viirs_shapes, gt, d, color='orange', label='VIIRS hint')
-        if perim_shapes:
-            self._add_outlines(ax, perim_shapes, gt, d, color='cyan',
-                               label='Traditional perimeter')
+        ax.contour(clf_ds,  levels=[0.5], colors=['red'],    linewidths=1.5)
+        ax.contour(hint_ds, levels=[0.5], colors=['orange'], linewidths=1.5)
 
-        # Build legend with explicit proxy handles so contour gets a coloured swatch
+        if perim_dat is not None:
+            perim_ds = perim_dat[::d, ::d].astype(float)
+            ax.contour(perim_ds, levels=[0.5], colors=['cyan'], linewidths=1.5)
+
+        # Build legend
         from matplotlib.lines import Line2D
         handles = [
             Line2D([0], [0], color='red',    linewidth=1.5, label='Our mapping'),
-            Line2D([0], [0], color='orange', linewidth=1.5, label='VIIRS hint'),
+            Line2D([0], [0], color='orange', linewidth=1.5, label=hint_label),
         ]
-        if perim_shapes:
+        if perim_dat is not None:
             handles.append(
                 Line2D([0], [0], color='cyan', linewidth=1.5,
                        label='Traditional perimeter'))
@@ -773,6 +816,131 @@ class FireMappingCLI:
         return brushed_mask
 
     # -----------------------------------------------------------------------
+    # Diagnostic PNGs  (pre / post / difference bands)
+    # -----------------------------------------------------------------------
+
+    def _find_band_groups(self):
+        """Detect pre, post, and difference band groups from band names.
+
+        Scans the ENVI band descriptions for keywords:
+          - 'pre'      → pre-fire group
+          - 'pst'/'post' → post-fire group
+          - 'anomaly1' / 'diff' with '(post-pre)/(post+pre)' → difference-1
+          - 'anomaly2' / 'ratio' with 'post/pre'             → difference-2
+
+        If no keywords are found, falls back to positional B12/B11/B9 groups
+        (first = pre, second = post).
+
+        Returns dict: {'pre': [...], 'post': [...], 'diff1': [...], 'diff2': [...]}
+        Each value is a list of 1-based band indices (up to 3 bands).
+        """
+        n_bands = self.image_dat.shape[2]
+        raw_names = [self.image.band_info_list[i] for i in range(n_bands)]
+
+        groups = {'pre': [], 'post': [], 'diff1': [], 'diff2': []}
+
+        for i, name in enumerate(raw_names):
+            low = name.lower()
+            idx = i + 1  # 1-based
+            if 'anomaly2' in low or ('post/pre' in low and 'anomaly' not in low):
+                groups['diff2'].append(idx)
+            elif 'anomaly1' in low or '(post-pre)/(post+pre)' in low:
+                groups['diff1'].append(idx)
+            elif low.startswith('pst') or low.startswith('post'):
+                groups['post'].append(idx)
+            elif low.startswith('pre'):
+                groups['pre'].append(idx)
+
+        # If keyword-based detection found something, trim each to first 3
+        has_keywords = any(len(v) > 0 for v in groups.values())
+        if has_keywords:
+            for k in groups:
+                groups[k] = groups[k][:3]
+            print(f'[CLI] Band groups (keyword): '
+                  f'pre={groups["pre"]} post={groups["post"]} '
+                  f'diff1={groups["diff1"]} diff2={groups["diff2"]}')
+            return groups
+
+        # Fallback: use positional B12/B11/B9 groups
+        all_band_names = [self.image.band_name(i + 1) for i in range(n_bands)]
+        positional = []
+        i = 0
+        while i < len(all_band_names):
+            if 'B12' in all_band_names[i]:
+                for j in range(i + 1, min(i + 3, len(all_band_names))):
+                    if 'B11' in all_band_names[j]:
+                        for k in range(j + 1, min(j + 3, len(all_band_names))):
+                            if 'B9' in all_band_names[k]:
+                                positional.append([i + 1, j + 1, k + 1])
+                                break
+                        break
+            i += 1
+
+        if len(positional) >= 2:
+            groups['pre'] = positional[0]
+            groups['post'] = positional[1]
+        elif len(positional) == 1:
+            groups['post'] = positional[0]
+        else:
+            # Last resort: first 3 bands
+            groups['post'] = list(range(1, min(4, n_bands + 1)))
+
+        print(f'[CLI] Band groups (positional fallback): '
+              f'pre={groups["pre"]} post={groups["post"]} '
+              f'diff1={groups["diff1"]} diff2={groups["diff2"]}')
+        return groups
+
+    def make_diagnostic_pngs(self):
+        """Generate RGB PNGs for each detected band group (pre, post, diff1, diff2)."""
+        groups = self._find_band_groups()
+
+        labels = {
+            'pre':   'Pre-fire',
+            'post':  'Post-fire',
+            'diff1': 'Difference (post-pre)/(post+pre)',
+            'diff2': 'Difference post/pre',
+        }
+
+        paths = []
+        for key in ('pre', 'post', 'diff1', 'diff2'):
+            band_indices = groups[key]
+            if not band_indices:
+                continue
+
+            dat = self.image_dat[..., [b - 1 for b in band_indices]]
+
+            # Normalise each channel independently to [0, 1] via 2-98 percentile
+            channels = []
+            for c in range(dat.shape[2]):
+                ch = dat[..., c].astype(np.float32)
+                lo, hi = np.nanpercentile(ch, [2, 98])
+                channels.append(np.clip((ch - lo) / max(hi - lo, 1e-6), 0, 1))
+            rgb = np.stack(channels, axis=2)
+
+            # Build band label string
+            n_bands_total = self.image_dat.shape[2]
+            band_labels = []
+            for b in band_indices:
+                raw = self.image.band_info_list[b - 1] if b <= n_bands_total else f'band {b}'
+                band_labels.append(raw)
+
+            fig, ax = plt.subplots(figsize=(8, 8))
+            ax.imshow(rgb, interpolation='bilinear')
+            ax.set_title(f'{self.fire_numbe}  —  {labels[key]}\n'
+                         f'Bands: {", ".join(band_labels)}',
+                         fontsize=9)
+            ax.axis('off')
+
+            fig_path = os.path.join(
+                self.save_dir, f'{self.fire_numbe}_{key}.png')
+            fig.savefig(fig_path, dpi=150, bbox_inches='tight')
+            plt.close(fig)
+            print(f'[CLI] Diagnostic PNG → {os.path.basename(fig_path)}')
+            paths.append(fig_path)
+
+        return paths
+
+    # -----------------------------------------------------------------------
     # Full pipeline
     # -----------------------------------------------------------------------
 
@@ -788,21 +956,24 @@ class FireMappingCLI:
             ]
         )
 
-        print('[1/6] Loading image ...')
+        print('[1/7] Loading image ...')
         self.load_image()
 
-        print('\n[2/6] Loading hint ...')
+        print('\nGenerating diagnostic PNGs (pre/post/diff) ...')
+        self.make_diagnostic_pngs()
+
+        print('\n[2/7] Loading hint ...')
         self.load_polygon()
 
-        print(f'\n[3/6] Sampling {self.sample_size} pixels '
+        print(f'\n[3/7] Sampling {self.sample_size} pixels '
               f'(seed={self.random_state}) ...')
         self.sample_data()
 
-        print(f'\n[4/6] T-SNE embedding on bands '
+        print(f'\n[4/7] T-SNE embedding on bands '
               f'{self.embed_band_list} ...')
         self.get_band_embed()
 
-        print('\n[5/6] Mapping burn  (RF + HDBSCAN) ...')
+        print('\n[5/7] Mapping burn  (RF + HDBSCAN) ...')
         img_cluster    = self.map_burn()
         img_cluster    = img_cluster.reshape(
             self.image._ySize, self.image._xSize)
@@ -900,8 +1071,8 @@ Examples
 
     # ---- HDBSCAN ----
     p.add_argument('--controlled_ratio',    type=float, default=0.5,
-                   help='Scales HDBSCAN min_cluster_size relative to burn proportion '
-                        '(default: 0.5)')
+                   help='Scales HDBSCAN min_cluster_size relative to the '
+                        'minority class proportion (default: 0.5)')
     p.add_argument('--hdbscan_min_samples', type=int,   default=20,
                    help='HDBSCAN min_samples — controls cluster conservativeness '
                         '(default: 20)')
