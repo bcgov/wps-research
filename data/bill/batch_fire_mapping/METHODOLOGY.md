@@ -1,6 +1,6 @@
 # Methodology — batch_fire_mapping
 
-*Last updated: March 30, 2026*
+*Last updated: April 1, 2026*
 
 This document describes the classification methodology used by `batch_fire_mapping`, with emphasis on the unsupervised burn-mapping pipeline and the changes made to improve its robustness.
 
@@ -66,14 +66,19 @@ HDBSCAN is fitted on the real T-SNE embedding (samples only), then `approximate_
 
 #### `min_cluster_size`
 
-| | Old | New |
-|---|---|---|
-| **Formula** | `min(sample_size * burn_p * ratio, sample_size * (1 - burn_p) * ratio)` | `sample_size * controlled_ratio` |
-| **Depends on hint quality** | Yes — `burn_p` comes from the VIIRS raster | No — purely a function of sample size |
-| **Default ratio** | 0.5 | 0.05 |
-| **Typical value** (10 000 samples) | Varies with burn fraction (e.g. 1 500 at 30% burn) | 500 (fixed) |
+```
+min_cluster_size = min(sample_size * burn_p * controlled_ratio,
+                       sample_size * (1 - burn_p) * controlled_ratio)
+```
 
-**Why the change.** The old formula created a circular dependency: the VIIRS hint quality directly controlled the clustering granularity. If VIIRS overestimated the burn area (common with 375 m pixels), `min_cluster_size` was pushed higher, causing HDBSCAN to merge distinct spectral clusters. If VIIRS underestimated, `min_cluster_size` dropped, fragmenting real clusters. Decoupling removes this feedback loop.
+where `burn_p` is the fraction of hint pixels in the crop, and `controlled_ratio` defaults to **0.5**.
+
+| Parameter | Default |
+|---|---|
+| `controlled_ratio` | 0.5 |
+| **Typical value** (10 000 samples, 30% burn) | ~1 500 |
+
+The formula uses the smaller of the burned and unburned class sizes (scaled by `controlled_ratio`) so that the minority class is not forced into a single cluster.
 
 ### Cluster → burned/unburned classification
 
@@ -144,7 +149,7 @@ Each fire now produces diagnostic PNGs to aid visual inspection of the input dat
 | **Pre-fire** | Band name starts with `pre` | `pre MSIL2A 20m: B12 2190nm` |
 | **Post-fire** | Band name starts with `pst` or `post` | `pst MSIL2A 20m: B12 2190nm` |
 | **Difference 1** | Contains `anomaly1` or `(post-pre)/(post+pre)` | `anomaly1: B12 2190nm (post-pre)/(post+pre)` |
-| **Difference 2** | Contains `anomaly2` or `post/pre` | `anomaly2: B12 2190nm post/pre` |
+| **Difference 2** | Contains `anomaly2`, or `post/pre` but not `anomaly` | `anomaly2: B12 2190nm post/pre` |
 
 If no keywords are found, the code falls back to positional B12/B11/B9 group detection (first group = pre, second = post).
 

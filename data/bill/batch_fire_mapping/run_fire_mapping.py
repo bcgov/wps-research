@@ -37,7 +37,7 @@ Output structure
             VIIRS_VNP14IMG_<s>_<e>.bin    # rasterized VIIRS hint
             <FIRE_NUMBE>_perimeter.bin     # rasterized fire polygon
             <crop_name>_classified.bin     # fire_mapping_cli.py output
-            <FIRE_NUMBE>_comparison.png    # 3-panel comparison figure
+            <FIRE_NUMBE>_comparison.png    # single-panel comparison figure
 
 Usage
 -----
