@@ -56,6 +56,54 @@ def _load_params(fire_dir: str) -> dict | None:
         return None
 
 
+def _fire_size_ha(params: dict | None) -> float:
+    """Extract fire_size_ha from params, returning 0.0 if unavailable."""
+    if params is None:
+        return 0.0
+    return float(params.get('fire', {}).get('fire_size_ha', 0) or 0)
+
+
+def _build_subtitle_tex(params: dict | None, fire_numbe: str) -> str:
+    r"""Build LaTeX subtitle lines (joined by \\\\).
+
+    Line 1: fire number | date range
+    Line 2: Traditional estimation: X ha (Y m²)
+    Line 3: Machine Learning estimation: X ha (Y m²)
+    """
+    # Line 1: fire number | dates
+    parts = [_escape_tex(fire_numbe)]
+    if params:
+        acc = params.get('accumulation', {})
+        start = acc.get('start_date')
+        end = acc.get('end_date')
+        if start and end:
+            parts.append(f'{_escape_tex(str(start))} -- {_escape_tex(str(end))}')
+    line1 = r' \quad|\quad '.join(parts)
+
+    lines = [line1]
+
+    if params:
+        fire = params.get('fire', {})
+
+        # Line 2: traditional estimation
+        size_ha = float(fire.get('fire_size_ha', 0) or 0)
+        if size_ha > 0:
+            size_m2 = size_ha * 10000
+            lines.append(
+                f'Traditional estimation: {size_ha:,.1f} ha '
+                f'({size_m2:,.0f} m$^2$)')
+
+        # Line 3: ML estimation
+        ml_ha = fire.get('ml_area_ha')
+        ml_m2 = fire.get('ml_area_m2')
+        if ml_ha is not None and ml_m2 is not None:
+            lines.append(
+                f'Machine Learning estimation: {ml_ha:,.1f} ha '
+                f'({ml_m2:,.0f} m$^2$)')
+
+    return r'\\[0.05cm]'.join(lines)
+
+
 def _params_to_table_rows(params: dict) -> list[tuple[str, str, str]]:
     """Flatten params dict into (section, key, value) rows for the table."""
     rows = []
@@ -111,14 +159,12 @@ def _build_param_table_tex(params: dict) -> str:
 
 def generate_report(results_root: str, output_path: str = None) -> str | None:
     """
-    Scan *results_root*/fire_mapping_results/ for fire folders, collect
-    PNGs and params, and build a PDF report.
+    Scan *results_root* for fire folders, collect PNGs and params,
+    and build a PDF report.
 
     Returns path to the generated PDF, or None if generation failed.
     """
-    fm_root = os.path.join(results_root, 'fire_mapping_results')
-    if not os.path.isdir(fm_root):
-        fm_root = results_root
+    fm_root = results_root
 
     if output_path is None:
         output_path = os.path.join(fm_root, 'report.pdf')
@@ -158,6 +204,9 @@ def generate_report(results_root: str, output_path: str = None) -> str | None:
         print('[report] No fires with usable PNGs.')
         return None
 
+    # Sort by fire size descending (largest first)
+    fires.sort(key=lambda f: _fire_size_ha(f['params']), reverse=True)
+
     # Build LaTeX document
     lines = [
         r'\documentclass[landscape]{article}',
@@ -173,13 +222,15 @@ def generate_report(results_root: str, output_path: str = None) -> str | None:
         if i > 0:
             lines.append(r'\newpage')
         fire_label = _escape_tex(fire['fire_numbe'])
+        subtitle = _build_subtitle_tex(fire['params'], fire['fire_numbe'])
         img_path = os.path.abspath(fire['hero_png']).replace('\\', '/')
 
         lines.append(r'\begin{center}')
-        lines.append(r'{\Large\bfseries ' + fire_label + r'}\\[0.2cm]')
+        lines.append(r'{\Large\bfseries ' + fire_label + r'}\\[0.1cm]')
+        lines.append(r'{\small ' + subtitle + r'}\\[0.2cm]')
         lines.append(
             r'\includegraphics[width=0.98\textwidth,'
-            r'height=0.90\textheight,keepaspectratio]{'
+            r'height=0.85\textheight,keepaspectratio]{'
             + img_path + r'}'
         )
         lines.append(r'\end{center}')
@@ -188,10 +239,12 @@ def generate_report(results_root: str, output_path: str = None) -> str | None:
     for fire in fires:
         lines.append(r'\newpage')
         fire_label = _escape_tex(fire['fire_numbe'])
+        subtitle = _build_subtitle_tex(fire['params'], fire['fire_numbe'])
 
         # Title
         lines.append(r'\noindent')
-        lines.append(r'{\Large\bfseries Fire: ' + fire_label + r'}\\[0.3cm]')
+        lines.append(r'{\Large\bfseries Fire: ' + fire_label + r'}\\[0.1cm]')
+        lines.append(r'{\small ' + subtitle + r'}\\[0.3cm]')
 
         # Two-column layout
         lines.append(r'\noindent')
@@ -275,10 +328,9 @@ def main(argv=None):
         description='Generate a PDF report from fire mapping results.',
     )
     p.add_argument('results_dir',
-                   help='Directory containing fire_mapping_results/ '
-                        '(or the fire_mapping_results/ folder itself)')
+                   help='Directory containing fire output folders')
     p.add_argument('--output', '-o', default=None,
-                   help='Output PDF path (default: <results_dir>/fire_mapping_results/report.pdf)')
+                   help='Output PDF path (default: <results_dir>/report.pdf)')
 
     args = p.parse_args(argv)
     pdf = generate_report(args.results_dir, args.output)

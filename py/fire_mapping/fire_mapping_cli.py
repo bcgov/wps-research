@@ -142,7 +142,8 @@ class FireMappingCLI:
         tsne_random_state:   int   = 42,
 
         # Figure
-        plot_downsample:     int   = 2,
+        plot_downsample:     int   = 1,
+        contour_width:       float = 0.8,
     ):
         self.image_filename     = image_filename
         self.polygon_filename   = polygon_filename
@@ -195,6 +196,7 @@ class FireMappingCLI:
 
         # Figure
         self.plot_downsample = plot_downsample
+        self.contour_width   = contour_width
 
     # -----------------------------------------------------------------------
     # Band selection  (mirrors GUI.find_default_rgb_bands)
@@ -425,14 +427,19 @@ class FireMappingCLI:
     def classify_cluster(self, cluster):
         """Use the hint mask to determine which HDBSCAN cluster(s) = burned.
 
-        For each cluster label, compute the fraction of that cluster's pixels
-        that fall inside the hint mask.  Any cluster where the majority
-        (> 50%) of its pixels are inside the hint is classified as burned.
-        This correctly handles HDBSCAN producing more than 2 clusters.
+        For each cluster label, compute two overlap ratios:
+          - precision: fraction of the cluster's pixels inside the hint
+          - recall:    fraction of the hint's pixels belonging to this cluster
+
+        A cluster is burned if EITHER ratio exceeds 50%.  This handles both
+        small fires (high precision, low recall) and large fires where the
+        burned cluster spills beyond the hint boundary (low precision, high
+        recall — e.g. 42% precision but the cluster covers most of the hint).
         """
         classification = np.full(self.polygon_dat.shape, False)
         hint_flat = self.polygon_dat.ravel()
         cluster_flat = cluster.ravel()
+        n_hint = int(hint_flat.sum())
 
         unique_labels = np.unique(cluster_flat)
         burned_labels = []
@@ -445,10 +452,12 @@ class FireMappingCLI:
             if n_total == 0:
                 continue
             n_inside = int((mask & hint_flat).sum())
-            overlap = n_inside / n_total
+            precision = n_inside / n_total
+            recall    = n_inside / n_hint if n_hint > 0 else 0.0
             print(f'[CLI]   cluster {label}: {n_total} px, '
-                  f'{n_inside} inside hint ({overlap:.2%})')
-            if overlap > 0.5:
+                  f'{n_inside} inside hint '
+                  f'(precision={precision:.2%}, recall={recall:.2%})')
+            if precision > 0.5 or recall > 0.5:
                 burned_labels.append(label)
 
         print(f'[CLI] Burned clusters: {burned_labels}')
@@ -581,7 +590,7 @@ class FireMappingCLI:
                     Path(xy, codes),
                     facecolor='none',
                     edgecolor=color,
-                    linewidth=1.5,
+                    linewidth=self.contour_width,
                     label=label if first_patch else '_nolegend_',
                 )
                 ax.add_patch(patch)
@@ -619,7 +628,7 @@ class FireMappingCLI:
         ]:
             ax.imshow(bg, interpolation='bilinear')
             cs = ax.contour(_ds(mask), levels=[0.5],
-                            colors=['red'], linewidths=1.5)
+                            colors=['red'], linewidths=self.contour_width)
             if cs.collections:
                 cs.collections[0].set_label('Mapping')
             ax.set_title(title, fontsize=9)
@@ -695,22 +704,22 @@ class FireMappingCLI:
         clf_ds  = classification[::d, ::d].astype(float)
         hint_ds = self.polygon_dat[::d, ::d].astype(float)
 
-        ax.contour(clf_ds,  levels=[0.5], colors=['red'],    linewidths=1.5)
-        ax.contour(hint_ds, levels=[0.5], colors=['orange'], linewidths=1.5)
+        ax.contour(clf_ds,  levels=[0.5], colors=['red'],    linewidths=self.contour_width)
+        ax.contour(hint_ds, levels=[0.5], colors=['orange'], linewidths=self.contour_width)
 
         if perim_dat is not None:
             perim_ds = perim_dat[::d, ::d].astype(float)
-            ax.contour(perim_ds, levels=[0.5], colors=['cyan'], linewidths=1.5)
+            ax.contour(perim_ds, levels=[0.5], colors=['cyan'], linewidths=self.contour_width)
 
         # Build legend
         from matplotlib.lines import Line2D
         handles = [
-            Line2D([0], [0], color='red',    linewidth=1.5, label='Our mapping'),
-            Line2D([0], [0], color='orange', linewidth=1.5, label=hint_label),
+            Line2D([0], [0], color='red',    linewidth=self.contour_width, label='Our mapping'),
+            Line2D([0], [0], color='orange', linewidth=self.contour_width, label=hint_label),
         ]
         if perim_dat is not None:
             handles.append(
-                Line2D([0], [0], color='cyan', linewidth=1.5,
+                Line2D([0], [0], color='cyan', linewidth=self.contour_width,
                        label='Traditional perimeter'))
         ax.legend(handles=handles, loc='lower right', fontsize=9,
                   framealpha=0.7, edgecolor='white')
@@ -1087,9 +1096,11 @@ Examples
     p.add_argument('--tsne_random_state',  type=int,   default=42)
 
     # ---- Figure ----
-    p.add_argument('--plot_downsample', type=int, default=2,
+    p.add_argument('--plot_downsample', type=int, default=1,
                    help='Spatial downsampling factor when saving PNG '
-                        '(1 = no downsampling; default: 2)')
+                        '(1 = no downsampling; default: 1)')
+    p.add_argument('--contour_width', type=float, default=0.8,
+                   help='Contour line width in figures (default: 0.8)')
 
 
     return p
@@ -1126,6 +1137,7 @@ def main(argv=None):
         tsne_n_components   = args.tsne_n_components,
         tsne_random_state   = args.tsne_random_state,
         plot_downsample     = args.plot_downsample,
+        contour_width       = args.contour_width,
     )
 
     cli.run()

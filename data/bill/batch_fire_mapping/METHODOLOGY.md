@@ -1,6 +1,6 @@
 # Methodology — batch_fire_mapping
 
-*Last updated: April 1, 2026*
+*Last updated: April 2, 2026*
 
 This document describes the classification methodology used by `batch_fire_mapping`, with emphasis on the unsupervised burn-mapping pipeline and the changes made to improve its robustness.
 
@@ -169,7 +169,7 @@ Each channel is independently stretched to [0, 1] via the 2nd–98th percentile.
 ## Output per fire
 
 ```
-fire_mapping_results/<FIRE_NUMBE>/
+<out_dir>/<FIRE_NUMBE>/
     <FIRE_NUMBE>_crop.bin/.hdr           # Cropped Sentinel-2 subscene
     <FIRE_NUMBE>_perimeter.bin/.hdr      # Filled traditional perimeter (always)
     VIIRS_VNP14IMG_<s>_<e>.shp           # Accumulated VIIRS (when available)
@@ -186,15 +186,50 @@ fire_mapping_results/<FIRE_NUMBE>/
 
 ---
 
+## ML area computation
+
+After classification and class_brush post-processing, the burned area is computed from the full-resolution classified raster:
+
+```
+ml_area_m2 = burned_pixel_count × |pixel_width × pixel_height|
+ml_area_ha = ml_area_m2 / 10 000
+```
+
+The pixel dimensions come from the raster geotransform (e.g., 20 m × 20 m = 400 m² per pixel for 20 m Sentinel-2 data). Every pixel with a value > 0 in the classified raster is counted as burned.
+
+This calculation reads the raster at full resolution and is **not affected** by `--plot_downsample` or `--contour_width`, which are purely visual parameters for the PNG figures.
+
+Both values are saved in `_params.yaml` under `fire.ml_area_ha` and `fire.ml_area_m2`, alongside the traditional `fire.fire_size_ha` from the shapefile.
+
+---
+
+## Figure parameters
+
+| Parameter | Default | Effect |
+|---|---|---|
+| `--plot_downsample` | 1 | Spatial downsampling of PNG figures (1 = full resolution) |
+| `--contour_width` | 0.8 | Line width of contour outlines in figures |
+
+These are visual-only parameters. They do not affect the classification, the classified raster, or the ML area computation.
+
+---
+
 ## Parameters YAML
 
-The `_params.yaml` file now includes a `perimeter_type` field:
+The `_params.yaml` file includes `perimeter_type`, ML area, and figure parameters:
 
 ```yaml
+fire:
+  fire_size_ha: 1234.5           # from shapefile FIRE_SIZE_ column
+  ml_area_ha: 1087.2             # counted from classified raster
+  ml_area_m2: 10872000.0         # = ml_area_ha × 10 000
+
 inputs:
-  raster: /path/to/raster.bin
-  hint_bin: /path/to/hint_used.bin       # whichever was actually used
-  viirs_bin: /path/to/viirs.bin          # null if unavailable
-  perimeter_bin: /path/to/perimeter.bin
-  perimeter_type: viirs                  # or 'traditional'
+  perimeter_type: viirs          # or 'traditional'
+
+output:
+  plot_downsample: 1
+  contour_width: 0.8
 ```
+
+When `--rerun_from_yaml` is used, all parameters (including padding, sample rate, perimeter mode, contour width, and all model hyperparameters) are restored per-fire. The ML area is recomputed from the new classification output.
