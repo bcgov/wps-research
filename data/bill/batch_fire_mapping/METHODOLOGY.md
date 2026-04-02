@@ -197,7 +197,7 @@ ml_area_ha = ml_area_m2 / 10 000
 
 The pixel dimensions come from the raster geotransform (e.g., 20 m × 20 m = 400 m² per pixel for 20 m Sentinel-2 data). Every pixel with a value > 0 in the classified raster is counted as burned.
 
-This calculation reads the raster at full resolution and is **not affected** by `--plot_downsample` or `--contour_width`, which are purely visual parameters for the PNG figures.
+This calculation reads the raster at full resolution and is **not affected** by `--contour_width`, which is a purely visual parameter for the PNG figures.
 
 Both values are saved in `_params.yaml` under `fire.ml_area_ha` and `fire.ml_area_m2`, alongside the traditional `fire.fire_size_ha` from the shapefile.
 
@@ -207,10 +207,9 @@ Both values are saved in `_params.yaml` under `fire.ml_area_ha` and `fire.ml_are
 
 | Parameter | Default | Effect |
 |---|---|---|
-| `--plot_downsample` | 1 | Spatial downsampling of PNG figures (1 = full resolution) |
 | `--contour_width` | 0.8 | Line width of contour outlines in figures |
 
-These are visual-only parameters. They do not affect the classification, the classified raster, or the ML area computation.
+All figures are rendered at full resolution with pixel-coordinate axes (origin at upper-left, X = column, Y = row). `--contour_width` is a visual-only parameter — it does not affect the classification, the classified raster, or the ML area computation.
 
 ---
 
@@ -228,7 +227,6 @@ inputs:
   perimeter_type: viirs          # or 'traditional'
 
 output:
-  plot_downsample: 1
   contour_width: 0.8
 ```
 

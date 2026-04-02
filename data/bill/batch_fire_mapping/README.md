@@ -97,7 +97,6 @@ python batch_fire_mapping/run_fire_mapping.py  POLYGONS.shp  RASTER.bin  [option
 | `--tsne_init` | `pca` | T-SNE initialisation (`pca` or `random`). |
 | `--tsne_n_components` | `2` | T-SNE output dimensions. |
 | `--tsne_random_state` | `42` | T-SNE random seed. |
-| `--plot_downsample` | `1` | Downsample factor for the comparison PNG. Only affects figures, not area calculations. |
 | `--contour_width` | `0.8` | Contour line width in figures. Only affects figures, not area calculations. |
 
 ---
@@ -206,7 +205,6 @@ class_brush:
 
 output:
   fire_dir: /ram/C11659
-  plot_downsample: 1
   contour_width: 0.8
 ```
 
@@ -225,7 +223,7 @@ Single panel with three polygon outlines (no fill) on a false-colour background 
 The figure title includes the fire number and the accumulation date range.
 The start date is the earliest VIIRS detection inside the polygon (or `FIRE_DATE − 5 days` if none found).
 
-**Note:** `--plot_downsample` and `--contour_width` only affect the visual rendering of PNG figures. The ML area calculation (`ml_area_ha`, `ml_area_m2`) always reads the full-resolution classified raster and is not affected by either setting.
+All figures are rendered at full resolution with pixel-coordinate axes (origin at upper-left). `--contour_width` only affects the visual line thickness and does not influence the ML area calculation, which always counts every pixel in the full-resolution classified raster.
 
 ---
 
