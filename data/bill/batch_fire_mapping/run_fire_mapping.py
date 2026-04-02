@@ -746,8 +746,6 @@ def _params_from_yaml(yaml_path: str) -> dict | None:
 
     # output
     o = p.get('output', {})
-    if 'plot_downsample' in o:
-        args += ['--plot_downsample', str(o['plot_downsample'])]
     if 'contour_width' in o:
         args += ['--contour_width', str(o['contour_width'])]
 
@@ -1171,7 +1169,6 @@ def process_fire(
         },
         'output': {
             'fire_dir':        fire_dir,
-            'plot_downsample': _arg('--plot_downsample', 1, int),
             'contour_width':  _arg('--contour_width', 0.8, float),
         },
     }
@@ -1341,7 +1338,6 @@ Example
                    choices=['pca', 'random'])
     p.add_argument('--tsne_n_components',   type=int,   default=2)
     p.add_argument('--tsne_random_state',   type=int,   default=42)
-    p.add_argument('--plot_downsample',     type=int,   default=1)
     p.add_argument('--contour_width',      type=float, default=0.8,
                    help='Contour line width in figures (default: 0.8)')
 
@@ -1483,7 +1479,6 @@ def main(argv=None):
         '--tsne_init',           args.tsne_init,
         '--tsne_n_components',   str(args.tsne_n_components),
         '--tsne_random_state',   str(args.tsne_random_state),
-        '--plot_downsample',     str(args.plot_downsample),
         '--contour_width',       str(args.contour_width),
     ]
     # Only forward --embed_bands if the user explicitly specified it;

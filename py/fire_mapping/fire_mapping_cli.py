@@ -142,7 +142,6 @@ class FireMappingCLI:
         tsne_random_state:   int   = 42,
 
         # Figure
-        plot_downsample:     int   = 1,
         contour_width:       float = 0.8,
     ):
         self.image_filename     = image_filename
@@ -195,7 +194,6 @@ class FireMappingCLI:
         }
 
         # Figure
-        self.plot_downsample = plot_downsample
         self.contour_width   = contour_width
 
     # -----------------------------------------------------------------------
@@ -501,15 +499,12 @@ class FireMappingCLI:
 
     def _background(self):
         """
-        Return display-band composite (histogram-stretched, optionally
-        downsampled) using the B12/B11/B9 post bands found by
-        find_default_rgb_bands().
+        Return display-band composite (histogram-stretched) using the
+        B12/B11/B9 post bands found by find_default_rgb_bands().
         """
         bands = self.img_band_list[:3]
         dat   = self.image_dat[..., [b - 1 for b in bands]]
-        bg    = np.clip(htrim_3d(dat), 0.0, 1.0)
-        d     = self.plot_downsample
-        return bg[::d, ::d, :] if d > 1 else bg
+        return np.clip(htrim_3d(dat), 0.0, 1.0)
 
     @staticmethod
     def _mask_to_outlines(mask: np.ndarray, geotransform, projection) -> list:
@@ -561,16 +556,15 @@ class FireMappingCLI:
         return shapes
 
     @staticmethod
-    def _add_outlines(ax, shapes, geotransform, downsample, color, label):
+    def _add_outlines(ax, shapes, geotransform, color, label):
         """
-        Plot polygon outlines (no fill) on *ax* in downsampled pixel space.
+        Plot polygon outlines (no fill) on *ax* in pixel space.
         Converts projected coordinates → pixel coordinates using geotransform.
         """
         from matplotlib.patches import PathPatch
         from matplotlib.path import Path
 
         gt          = geotransform
-        d           = downsample
         first_patch = True
 
         for geom in shapes:
@@ -579,9 +573,9 @@ class FireMappingCLI:
                 if poly.is_empty:
                     continue
                 coords = np.array(poly.exterior.coords)
-                # projected CRS → full-res pixel → downsampled pixel
-                px = (coords[:, 0] - gt[0]) / gt[1] / d
-                py = (coords[:, 1] - gt[3]) / gt[5] / d
+                # projected CRS → pixel coordinates
+                px = (coords[:, 0] - gt[0]) / gt[1]
+                py = (coords[:, 1] - gt[3]) / gt[5]
                 xy    = np.column_stack([px, py])
                 codes = ([Path.MOVETO]
                          + [Path.LINETO] * (len(xy) - 2)
@@ -604,11 +598,8 @@ class FireMappingCLI:
         Both shown as contour outlines on the false-colour background so the
         difference from class_brush is immediately visible.
         """
-        d   = self.plot_downsample
         bg  = self._background()
-
-        def _ds(arr):
-            return arr[::d, ::d].astype(float)
+        h, w = bg.shape[:2]
 
         fig, axes = plt.subplots(1, 2, figsize=(14, 7))
         fig.suptitle(
@@ -626,13 +617,17 @@ class FireMappingCLI:
             (axes[0], raw,        'Before class_brush\n(raw classification)'),
             (axes[1], after_mask, after_title),
         ]:
-            ax.imshow(bg, interpolation='bilinear')
-            cs = ax.contour(_ds(mask), levels=[0.5],
+            ax.imshow(bg, interpolation='nearest', origin='upper')
+            cs = ax.contour(mask.astype(float), levels=[0.5],
                             colors=['red'], linewidths=self.contour_width)
             if cs.collections:
                 cs.collections[0].set_label('Mapping')
             ax.set_title(title, fontsize=9)
-            ax.axis('off')
+            ax.set_xlim(0, w)
+            ax.set_ylim(h, 0)
+            ax.set_xlabel('Column (px)', fontsize=8)
+            ax.set_ylabel('Row (px)', fontsize=8)
+            ax.tick_params(labelsize=7)
 
         plt.tight_layout()
         fig_path = os.path.join(
@@ -655,8 +650,8 @@ class FireMappingCLI:
         GDAL Polygonize approach as binary_polygonize.py.
         Legend and IoU / accuracy metrics are included in the title.
         """
-        d   = self.plot_downsample
         bg  = self._background()
+        h, w = bg.shape[:2]
         gt  = self.image._transform
         prj = self.image._proj
 
@@ -697,19 +692,20 @@ class FireMappingCLI:
 
         # ---- figure ----
         fig, ax = plt.subplots(figsize=(10, 10))
-        ax.imshow(bg, interpolation='bilinear')
-        ax.axis('off')
+        ax.imshow(bg, interpolation='nearest', origin='upper')
 
-        # All outlines drawn via contour in downsampled pixel space
-        clf_ds  = classification[::d, ::d].astype(float)
-        hint_ds = self.polygon_dat[::d, ::d].astype(float)
-
-        ax.contour(clf_ds,  levels=[0.5], colors=['red'],    linewidths=self.contour_width)
-        ax.contour(hint_ds, levels=[0.5], colors=['orange'], linewidths=self.contour_width)
+        # All outlines drawn via contour in pixel space
+        ax.contour(classification.astype(float),  levels=[0.5], colors=['red'],    linewidths=self.contour_width)
+        ax.contour(self.polygon_dat.astype(float), levels=[0.5], colors=['orange'], linewidths=self.contour_width)
 
         if perim_dat is not None:
-            perim_ds = perim_dat[::d, ::d].astype(float)
-            ax.contour(perim_ds, levels=[0.5], colors=['cyan'], linewidths=self.contour_width)
+            ax.contour(perim_dat.astype(float), levels=[0.5], colors=['cyan'], linewidths=self.contour_width)
+
+        ax.set_xlim(0, w)
+        ax.set_ylim(h, 0)
+        ax.set_xlabel('Column (px)', fontsize=8)
+        ax.set_ylabel('Row (px)', fontsize=8)
+        ax.tick_params(labelsize=7)
 
         # Build legend
         from matplotlib.lines import Line2D
@@ -934,11 +930,16 @@ class FireMappingCLI:
                 band_labels.append(raw)
 
             fig, ax = plt.subplots(figsize=(8, 8))
-            ax.imshow(rgb, interpolation='bilinear')
+            ax.imshow(rgb, interpolation='nearest', origin='upper')
             ax.set_title(f'{self.fire_numbe}  —  {labels[key]}\n'
                          f'Bands: {", ".join(band_labels)}',
                          fontsize=9)
-            ax.axis('off')
+            dh, dw = rgb.shape[:2]
+            ax.set_xlim(0, dw)
+            ax.set_ylim(dh, 0)
+            ax.set_xlabel('Column (px)', fontsize=8)
+            ax.set_ylabel('Row (px)', fontsize=8)
+            ax.tick_params(labelsize=7)
 
             fig_path = os.path.join(
                 self.save_dir, f'{self.fire_numbe}_{key}.png')
@@ -1096,9 +1097,6 @@ Examples
     p.add_argument('--tsne_random_state',  type=int,   default=42)
 
     # ---- Figure ----
-    p.add_argument('--plot_downsample', type=int, default=1,
-                   help='Spatial downsampling factor when saving PNG '
-                        '(1 = no downsampling; default: 1)')
     p.add_argument('--contour_width', type=float, default=0.8,
                    help='Contour line width in figures (default: 0.8)')
 
@@ -1136,7 +1134,6 @@ def main(argv=None):
         tsne_init           = args.tsne_init,
         tsne_n_components   = args.tsne_n_components,
         tsne_random_state   = args.tsne_random_state,
-        plot_downsample     = args.plot_downsample,
         contour_width       = args.contour_width,
     )
 
