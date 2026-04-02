@@ -1,6 +1,6 @@
 # batch_fire_mapping
 
-*Last updated: March 27, 2026*
+*Last updated: April 2, 2026*
 
 Batch fire-mapping pipeline for Sentinel-2 imagery using VIIRS active fire detections.
 
@@ -55,7 +55,7 @@ python batch_fire_mapping/run_fire_mapping.py  POLYGONS.shp  RASTER.bin  [option
 
 | Argument | Description |
 |---|---|
-| `POLYGONS.shp` | BC historical fire perimeters shapefile. Must contain columns `FIRE_NUMBE`, `FIRE_DATE` (YYYY-MM-DD), and `FIRE_YEAR`. |
+| `POLYGONS.shp` | BC historical fire perimeters shapefile. Must contain columns `FIRE_NUMBE`, `FIRE_DATE` (YYYY-MM-DD), `FIRE_YEAR`, and `FIRE_SIZE_` (hectares). |
 | `RASTER.bin` | Sentinel-2 ENVI `.bin` raster (with accompanying `.hdr`). |
 
 ### Optional arguments
@@ -68,6 +68,7 @@ python batch_fire_mapping/run_fire_mapping.py  POLYGONS.shp  RASTER.bin  [option
 | `--padding` | `0.1` | Fractional padding on each side of the fire bounding box. `0.1` = 10% of fire width added left and right, 10% of fire height added top and bottom. |
 | `--skip_download` | off | Skip VIIRS download and shapify — go straight to mapping. |
 | `--shapify_workers` | `8` | Parallel shapify processes. |
+| `--rerun_from_yaml` | off | Re-run each fire using the parameters saved in its `_params.yaml` from a previous run. Restores all per-fire parameters (model hyperparameters, padding, sample rate, perimeter mode) so tuned fires reproduce faithfully. |
 | `--report` | off | Generate a PDF report after all fires are processed (requires `pdflatex`). |
 
 **Sampling** (computed per fire, then forwarded to `fire_mapping_cli.py`):
@@ -96,7 +97,8 @@ python batch_fire_mapping/run_fire_mapping.py  POLYGONS.shp  RASTER.bin  [option
 | `--tsne_init` | `pca` | T-SNE initialisation (`pca` or `random`). |
 | `--tsne_n_components` | `2` | T-SNE output dimensions. |
 | `--tsne_random_state` | `42` | T-SNE random seed. |
-| `--plot_downsample` | `2` | Downsample factor for the comparison PNG. |
+| `--plot_downsample` | `1` | Downsample factor for the comparison PNG. Only affects figures, not area calculations. |
+| `--contour_width` | `0.8` | Contour line width in figures. Only affects figures, not area calculations. |
 
 ---
 
@@ -110,30 +112,31 @@ python batch_fire_mapping/run_fire_mapping.py \
     --padding 0.1
 ```
 
-Outputs will be written to `data/fire_mapping_results/` (next to the raster).
+Outputs will be written to `data/` (next to the raster), or to `--out_dir` if specified.
 
 ---
 
 ## Output structure
 
 ```
-<raster_dir>/                              # or --out_dir if specified
-    fire_mapping_results/
-        report.pdf                              # PDF report (when --report is used)
-        <FIRE_NUMBE>/
-            <FIRE_NUMBE>_crop.bin               # Cropped Sentinel-2 subscene (ENVI)
-            <FIRE_NUMBE>_crop.hdr
-            VIIRS_VNP14IMG_<start>_<end>.shp    # Final accumulated VIIRS shapefile
-            VIIRS_VNP14IMG_<start>_<end>.bin    # Rasterized VIIRS hint (0/1)
-            <FIRE_NUMBE>_perimeter.bin          # Rasterized traditional perimeter (0/1)
-            <FIRE_NUMBE>_crop_classified.bin    # Raw fire-mapping classification output
-            <FIRE_NUMBE>_comparison.png         # Comparison figure (after class-brush)
-            <FIRE_NUMBE>_brush_comparison.png   # Before vs after class-brush figure
-            <FIRE_NUMBE>_pre.png                # Diagnostic: pre-fire false-colour RGB
-            <FIRE_NUMBE>_post.png               # Diagnostic: post-fire false-colour RGB
-            <FIRE_NUMBE>_diff1.png              # Diagnostic: normalised difference RGB
-            <FIRE_NUMBE>_diff2.png              # Diagnostic: ratio RGB
-            <FIRE_NUMBE>_params.yaml            # Full run parameters (see below)
+<out_dir>/                                     # raster_dir or --out_dir
+    report.pdf                                 # PDF report (when --report is used)
+    fire_status.yaml                           # Persistent status index
+    run_summary.txt                            # Human-readable run summary
+    <FIRE_NUMBE>/
+        <FIRE_NUMBE>_crop.bin                  # Cropped Sentinel-2 subscene (ENVI)
+        <FIRE_NUMBE>_crop.hdr
+        VIIRS_VNP14IMG_<start>_<end>.shp       # Final accumulated VIIRS shapefile
+        VIIRS_VNP14IMG_<start>_<end>.bin       # Rasterized VIIRS hint (0/1)
+        <FIRE_NUMBE>_perimeter.bin             # Rasterized traditional perimeter (0/1)
+        <FIRE_NUMBE>_crop_classified.bin       # Raw fire-mapping classification output
+        <FIRE_NUMBE>_comparison.png            # Comparison figure (after class-brush)
+        <FIRE_NUMBE>_brush_comparison.png      # Before vs after class-brush figure
+        <FIRE_NUMBE>_pre.png                   # Diagnostic: pre-fire false-colour RGB
+        <FIRE_NUMBE>_post.png                  # Diagnostic: post-fire false-colour RGB
+        <FIRE_NUMBE>_diff1.png                 # Diagnostic: normalised difference RGB
+        <FIRE_NUMBE>_diff2.png                 # Diagnostic: ratio RGB
+        <FIRE_NUMBE>_params.yaml               # Full run parameters (see below)
 ```
 
 Re-running the script **replaces** existing fire folders — each fire is always processed fresh.
@@ -146,21 +149,26 @@ A YAML file is saved per fire after each successful run. It captures every param
 fire:
   fire_numbe: C11659
   fire_date: "2025-08-25"
+  fire_size_ha: 1234.5
+  ml_area_ha: 1087.2           # burned area from ML classification
+  ml_area_m2: 10872000.0       # same in square metres
 
 run:
-  timestamp: "2026-03-27T14:30:00"
+  timestamp: "2026-04-02T14:30:00"
 
 inputs:
   raster: /ram/pgfc_2023.bin
-  viirs_bin: /ram/fire_mapping_results/C11659/VIIRS_VNP14IMG_20250820_20251014.bin
-  perimeter_bin: /ram/fire_mapping_results/C11659/C11659_perimeter.bin
+  hint_bin: /ram/C11659/VIIRS_VNP14IMG_20250820_20251014.bin
+  viirs_bin: /ram/C11659/VIIRS_VNP14IMG_20250820_20251014.bin
+  perimeter_bin: /ram/C11659/C11659_perimeter.bin
+  perimeter_type: viirs        # or 'traditional'
 
 crop:
   padding: 0.1
   width_px: 420
   height_px: 380
   total_px: 159600
-  crop_bin: /ram/fire_mapping_results/C11659/C11659_crop.bin
+  crop_bin: /ram/C11659/C11659_crop.bin
 
 sampling:
   sample_rate: 0.05
@@ -197,15 +205,16 @@ class_brush:
   point_threshold: 10
 
 output:
-  fire_dir: /ram/fire_mapping_results/C11659
-  plot_downsample: 2
+  fire_dir: /ram/C11659
+  plot_downsample: 1
+  contour_width: 0.8
 ```
 
 ---
 
 ### Comparison figure
 
-Single panel with three polygon outlines (no fill) on a false-colour background (B12/B11/B9 post-fire bands):
+Single panel with three polygon outlines (no fill) on a false-colour background (B12/B11/B9 post-fire bands). Contour line width is controlled by `--contour_width` (default 0.8).
 
 | Outline | Colour | Metric |
 |---|---|---|
@@ -215,6 +224,8 @@ Single panel with three polygon outlines (no fill) on a false-colour background 
 
 The figure title includes the fire number and the accumulation date range.
 The start date is the earliest VIIRS detection inside the polygon (or `FIRE_DATE − 5 days` if none found).
+
+**Note:** `--plot_downsample` and `--contour_width` only affect the visual rendering of PNG figures. The ML area calculation (`ml_area_ha`, `ml_area_m2`) always reads the full-resolution classified raster and is not affected by either setting.
 
 ---
 
@@ -242,7 +253,7 @@ December 31 of the latest `FIRE_YEAR` in the shapefile (filtered by `--year` if 
 - Processing is sequential (one fire at a time) because the GPU is used by `fire_mapping_cli.py`.
 - VIIRS download uses multi-threaded `ThreadPoolExecutor`; shapify runs in parallel via `ProcessPoolExecutor` (GDAL is not thread-safe).
 - If a fire polygon lies entirely outside the raster, or the cropped region has no raster data, that fire is skipped with a status message.
-- If VIIRS data is unavailable for a fire (no detections in the date range, or rasterization failure), the fire is **not skipped**. Instead a `_no_viirs.png` is generated showing the cropped false-colour image with only the traditional perimeter outline, so every fire always produces at least one visual output.
+- If VIIRS data is unavailable for a fire (no detections in the date range, or rasterization failure), the traditional fire perimeter is used as the classification hint instead — the fire is still fully classified. If neither VIIRS nor the traditional perimeter can be rasterized, the fire is skipped entirely.
 - Already-downloaded granules and already-shapified files are detected and skipped; only the fire output folders are always recreated from scratch.
 
 ---
@@ -257,7 +268,7 @@ A slide-style PDF report can be generated after a run, with one landscape page p
 python batch_fire_mapping/run_fire_mapping.py  polygons.shp  raster.bin  --report
 ```
 
-The report is written to `fire_mapping_results/report.pdf`.
+The report is written to `<out_dir>/report.pdf`.
 
 ### Standalone
 
@@ -267,9 +278,17 @@ python batch_fire_mapping/generate_report.py  /path/to/output_dir
 python batch_fire_mapping/generate_report.py  /path/to/output_dir  -o my_report.pdf
 ```
 
-`output_dir` is the directory containing `fire_mapping_results/` (or the `fire_mapping_results/` folder itself).
+`output_dir` is the directory containing the fire output folders.
+
+Fires are ordered by decreasing fire size (largest first).
 
 ### Page layout (per fire)
+
+Each page shows the fire number as a bold title, followed by three subtitle lines:
+
+1. Fire number and accumulation date range
+2. **Traditional estimation** — fire size from the shapefile (ha and m²)
+3. **Machine Learning estimation** — burned area from the classification raster (ha and m²)
 
 | Row | Content |
 |---|---|

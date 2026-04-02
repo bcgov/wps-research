@@ -680,10 +680,15 @@ def _rasterize_from_shapefile_ogr(polygon_file, fire_numbe, crs_wkt,
 # Build CLI args from a previous _params.yaml
 # ===========================================================================
 
-def _cli_args_from_yaml(yaml_path: str) -> list[str] | None:
-    """Read a fire's _params.yaml and return cli_pass_args list.
+def _params_from_yaml(yaml_path: str) -> dict | None:
+    """Read a fire's _params.yaml and return a dict of ALL rerun parameters.
 
     Returns None if the file doesn't exist or can't be parsed.
+    The returned dict has two keys:
+      'cli_args'  — list[str] of flags forwarded to fire_mapping_cli.py
+      'overrides' — dict of process_fire kwargs to override
+                     (padding, sample_rate, min_samples, max_samples,
+                      perimeter_mode)
     """
     if not os.path.isfile(yaml_path):
         return None
@@ -696,7 +701,9 @@ def _cli_args_from_yaml(yaml_path: str) -> list[str] | None:
     if not p:
         return None
 
+    # ---- Build cli_pass_args list ----
     args = []
+
     # sampling
     s = p.get('sampling', {})
     if 'seed' in s:
@@ -741,8 +748,28 @@ def _cli_args_from_yaml(yaml_path: str) -> list[str] | None:
     o = p.get('output', {})
     if 'plot_downsample' in o:
         args += ['--plot_downsample', str(o['plot_downsample'])]
+    if 'contour_width' in o:
+        args += ['--contour_width', str(o['contour_width'])]
 
-    return args
+    # ---- Build overrides for process_fire kwargs ----
+    overrides = {}
+
+    crop = p.get('crop', {})
+    if 'padding' in crop:
+        overrides['padding'] = float(crop['padding'])
+
+    if 'sample_rate' in s:
+        overrides['sample_rate'] = float(s['sample_rate'])
+    if 'min_samples' in s:
+        overrides['min_samples'] = int(s['min_samples'])
+    if 'max_samples' in s:
+        overrides['max_samples'] = int(s['max_samples'])
+
+    inputs = p.get('inputs', {})
+    if 'perimeter_type' in inputs and inputs['perimeter_type']:
+        overrides['perimeter_mode'] = str(inputs['perimeter_type'])
+
+    return {'cli_args': args, 'overrides': overrides}
 
 
 # ===========================================================================
@@ -870,7 +897,7 @@ def process_fire(
     # -----------------------------------------------------------------------
     # 3. Create fire output directory
     # -----------------------------------------------------------------------
-    fire_dir = os.path.join(output_root, 'fire_mapping_results', fire_numbe)
+    fire_dir = os.path.join(output_root, fire_numbe)
     if os.path.isdir(fire_dir):
         _info(f'Removing existing output folder: {fire_dir}')
         shutil.rmtree(fire_dir)
@@ -1050,21 +1077,52 @@ def process_fire(
         _info('fire_mapping_cli.py completed successfully.')
 
     # -----------------------------------------------------------------------
-    # 10. Save run parameters to YAML
+    # 10. Compute ML classification area from the brushed raster
+    # -----------------------------------------------------------------------
+    pixel_area_m2 = abs(gt[1] * gt[5])  # |pixel_width * pixel_height|
+    ml_area_ha = None
+    ml_area_m2 = None
+    clf_bin = os.path.join(fire_dir, f'{crop_name}.bin_classified.bin')
+    if os.path.isfile(clf_bin):
+        try:
+            clf_ds = gdal.Open(clf_bin, gdal.GA_ReadOnly)
+            clf_arr = clf_ds.GetRasterBand(1).ReadAsArray()
+            clf_ds = None
+            burned_px = int(np.nansum(clf_arr > 0))
+            ml_area_m2 = burned_px * pixel_area_m2
+            ml_area_ha = ml_area_m2 / 10000.0
+            _info(f'ML classification area: {burned_px} px = '
+                  f'{ml_area_ha:,.1f} ha ({ml_area_m2:,.0f} m²)')
+        except Exception as exc:
+            _warn(f'Could not compute ML area: {exc}')
+
+    # -----------------------------------------------------------------------
+    # 11. Save run parameters to YAML
     # -----------------------------------------------------------------------
     import datetime as _dt
+
+    # Safe extractor: look up a flag's value in cli_pass_args without
+    # crashing if the flag is missing (returns *default* instead).
+    def _arg(flag, default=None, typ=str):
+        try:
+            return typ(cli_pass_args[cli_pass_args.index(flag) + 1])
+        except (ValueError, IndexError):
+            return default
+
     params = {
         'fire': {
             'fire_numbe':  fire_numbe,
             'fire_date':   str(fire_date.date()),
             'fire_size_ha': float(row.get('FIRE_SIZE_', 0)) if row.get('FIRE_SIZE_') is not None else None,
+            'ml_area_ha':  ml_area_ha,
+            'ml_area_m2':  ml_area_m2,
         },
         'run': {
             'timestamp': _dt.datetime.now().isoformat(timespec='seconds'),
         },
         'inputs': {
             'raster':         raster_path,
-            'polygon_file':   str(row.name),   # shapefile row index / source
+            'polygon_file':   str(row.name),
             'hint_bin':       hint_bin,
             'viirs_bin':      viirs_bin,
             'perimeter_bin':  perim_bin if perim_bin else None,
@@ -1082,31 +1140,30 @@ def process_fire(
             'min_samples':        min_samples,
             'max_samples':        max_samples,
             'actual_sample_size': sample_size,
-            'seed':               next(v for v in cli_pass_args[cli_pass_args.index('--seed') + 1:cli_pass_args.index('--seed') + 2]),
+            'seed':               _arg('--seed', 123, int),
         },
         'accumulation': {
             'start_date': str(acc_start.date()),
             'end_date':   str(acc_end.date()),
         },
         'tsne': {
-            'perplexity':     float(cli_pass_args[cli_pass_args.index('--tsne_perplexity')     + 1]),
-            'learning_rate':  float(cli_pass_args[cli_pass_args.index('--tsne_learning_rate')  + 1]),
-            'max_iter':       int(  cli_pass_args[cli_pass_args.index('--tsne_max_iter')        + 1]),
-            'init':                 cli_pass_args[cli_pass_args.index('--tsne_init')            + 1],
-            'n_components':   int(  cli_pass_args[cli_pass_args.index('--tsne_n_components')   + 1]),
-            'random_state':   int(  cli_pass_args[cli_pass_args.index('--tsne_random_state')   + 1]),
-            'embed_bands':    (cli_pass_args[cli_pass_args.index('--embed_bands') + 1]
-                               if '--embed_bands' in cli_pass_args else 'all'),
+            'perplexity':     _arg('--tsne_perplexity',    60.0,  float),
+            'learning_rate':  _arg('--tsne_learning_rate', 200.0, float),
+            'max_iter':       _arg('--tsne_max_iter',      2000,  int),
+            'init':           _arg('--tsne_init',          'pca'),
+            'n_components':   _arg('--tsne_n_components',  2,     int),
+            'random_state':   _arg('--tsne_random_state',  42,    int),
+            'embed_bands':    _arg('--embed_bands',        'all'),
         },
         'hdbscan': {
-            'min_samples':     int(  cli_pass_args[cli_pass_args.index('--hdbscan_min_samples') + 1]),
-            'controlled_ratio': float(cli_pass_args[cli_pass_args.index('--controlled_ratio')  + 1]),
+            'min_samples':      _arg('--hdbscan_min_samples', 20,  int),
+            'controlled_ratio': _arg('--controlled_ratio',    0.5, float),
         },
         'random_forest': {
-            'n_estimators': int(cli_pass_args[cli_pass_args.index('--rf_n_estimators') + 1]),
-            'max_depth':    int(cli_pass_args[cli_pass_args.index('--rf_max_depth')    + 1]),
-            'max_features':     cli_pass_args[cli_pass_args.index('--rf_max_features') + 1],
-            'random_state': int(cli_pass_args[cli_pass_args.index('--rf_random_state') + 1]),
+            'n_estimators': _arg('--rf_n_estimators', 100,    int),
+            'max_depth':    _arg('--rf_max_depth',    15,     int),
+            'max_features': _arg('--rf_max_features', 'sqrt'),
+            'random_state': _arg('--rf_random_state', 42,     int),
         },
         'class_brush': {
             'brush_size':      15,
@@ -1114,7 +1171,8 @@ def process_fire(
         },
         'output': {
             'fire_dir':        fire_dir,
-            'plot_downsample': int(cli_pass_args[cli_pass_args.index('--plot_downsample') + 1]),
+            'plot_downsample': _arg('--plot_downsample', 1, int),
+            'contour_width':  _arg('--contour_width', 0.8, float),
         },
     }
 
@@ -1283,7 +1341,9 @@ Example
                    choices=['pca', 'random'])
     p.add_argument('--tsne_n_components',   type=int,   default=2)
     p.add_argument('--tsne_random_state',   type=int,   default=42)
-    p.add_argument('--plot_downsample',     type=int,   default=2)
+    p.add_argument('--plot_downsample',     type=int,   default=1)
+    p.add_argument('--contour_width',      type=float, default=0.8,
+                   help='Contour line width in figures (default: 0.8)')
 
     return p
 
@@ -1424,6 +1484,7 @@ def main(argv=None):
         '--tsne_n_components',   str(args.tsne_n_components),
         '--tsne_random_state',   str(args.tsne_random_state),
         '--plot_downsample',     str(args.plot_downsample),
+        '--contour_width',       str(args.contour_width),
     ]
     # Only forward --embed_bands if the user explicitly specified it;
     # otherwise the CLI defaults to all bands automatically.
@@ -1442,20 +1503,31 @@ def main(argv=None):
     _box(f'Step 5 — Processing {len(gdf)} fire(s)  (sequential)')
 
     # results maps fire_numbe → (fire_dir_or_None, reason_or_None)
-    results_root = os.path.join(output_root, 'fire_mapping_results')
     results = {}
     for idx, row in gdf.iterrows():
         fire_numbe = str(row.get('FIRE_NUMBE', idx))
 
-        # When --rerun_from_yaml, read per-fire params from the previous YAML
-        per_fire_cli_args = cli_pass_args
+        # Per-fire defaults (may be overridden by --rerun_from_yaml)
+        per_fire_cli_args  = cli_pass_args
+        per_fire_padding   = args.padding
+        per_fire_srate     = args.sample_rate
+        per_fire_min_s     = args.min_samples
+        per_fire_max_s     = args.max_samples
+        per_fire_perim     = args.perimeter_mode
+
         if args.rerun_from_yaml:
             yaml_path = os.path.join(
-                results_root, fire_numbe, f'{fire_numbe}_params.yaml')
-            loaded = _cli_args_from_yaml(yaml_path)
+                output_root, fire_numbe, f'{fire_numbe}_params.yaml')
+            loaded = _params_from_yaml(yaml_path)
             if loaded is not None:
                 _info(f'Using saved params from {os.path.basename(yaml_path)}')
-                per_fire_cli_args = loaded
+                per_fire_cli_args = loaded['cli_args']
+                ov = loaded['overrides']
+                per_fire_padding = ov.get('padding',        per_fire_padding)
+                per_fire_srate   = ov.get('sample_rate',    per_fire_srate)
+                per_fire_min_s   = ov.get('min_samples',    per_fire_min_s)
+                per_fire_max_s   = ov.get('max_samples',    per_fire_max_s)
+                per_fire_perim   = ov.get('perimeter_mode', per_fire_perim)
             else:
                 _warn(f'No _params.yaml for {fire_numbe} — '
                       f'falling back to command-line defaults.')
@@ -1469,15 +1541,15 @@ def main(argv=None):
             raster_W       = W,
             raster_H       = H,
             output_root    = output_root,
-            padding        = args.padding,
-            sample_rate    = args.sample_rate,
-            min_samples    = args.min_samples,
-            max_samples    = args.max_samples,
+            padding        = per_fire_padding,
+            sample_rate    = per_fire_srate,
+            min_samples    = per_fire_min_s,
+            max_samples    = per_fire_max_s,
             cli_script     = cli_script,
             cli_pass_args  = per_fire_cli_args,
             viirs_shp_dir  = viirs_shp_dir,
             polygon_file   = polygon_file,
-            perimeter_mode = args.perimeter_mode,
+            perimeter_mode = per_fire_perim,
         )
         results[fire_numbe] = (fire_dir, reason)
 
@@ -1505,7 +1577,7 @@ def main(argv=None):
             f'Partial (no VIIRS): {n_partial}',
             f'Failed            : {n_fail}',
             f'Total attempted   : {len(results)}',
-            f'Results           : {os.path.join(output_root, "fire_mapping_results")}',
+            f'Results           : {output_root}',
         ],
     )
 
@@ -1515,10 +1587,8 @@ def main(argv=None):
     # This means re-running --fire_number X only updates X's entry.
     # -----------------------------------------------------------------------
     import datetime as _dt
-    results_root = os.path.join(output_root, 'fire_mapping_results')
-    os.makedirs(results_root, exist_ok=True)
 
-    status_path = os.path.join(results_root, 'fire_status.yaml')
+    status_path = os.path.join(output_root, 'fire_status.yaml')
     now_str = _dt.datetime.now().isoformat(timespec='seconds')
 
     # Load existing status (if any)
@@ -1578,7 +1648,7 @@ def main(argv=None):
     # -----------------------------------------------------------------------
     # Regenerate run_summary.txt from the full merged index
     # -----------------------------------------------------------------------
-    log_path = os.path.join(results_root, 'run_summary.txt')
+    log_path = os.path.join(output_root, 'run_summary.txt')
 
     sep_line  = '=' * 70
     thin_line = '-' * 70
@@ -1597,7 +1667,7 @@ def main(argv=None):
         f'  Last updated : {_dt.datetime.now().strftime("%Y-%m-%d  %H:%M:%S")}',
         f'  Raster       : {raster_path}',
         f'  Polygons     : {polygon_file}',
-        f'  Output       : {results_root}',
+        f'  Output       : {output_root}',
         '',
         f'  Fires tracked in index  : {len(status_index)}',
         f'  Succeeded (full)        : {len(all_success)}',

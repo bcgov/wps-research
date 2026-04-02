@@ -685,22 +685,31 @@ class GUI(GUI_Settings):
     def classify_cluster(self, cluster):
         """Use the hint mask to determine which HDBSCAN cluster(s) = burned.
 
-        For each cluster label, compute the fraction of that cluster's pixels
-        that fall inside the hint mask.  Any cluster where the majority
-        (> 50%) of its pixels are inside the hint is classified as burned.
-        This correctly handles HDBSCAN producing more than 2 clusters.
+        For each cluster label, compute two overlap ratios:
+          - precision: fraction of the cluster's pixels inside the hint
+          - recall:    fraction of the hint's pixels belonging to this cluster
+
+        A cluster is burned if EITHER ratio exceeds 50%.
         """
         classification = np.full(self.polygon_dat.shape, False)
+        hint_flat = self.polygon_dat.ravel()
+        cluster_flat = cluster.ravel()
+        n_hint = int(hint_flat.sum())
 
-        unique_labels = np.unique(cluster)
+        unique_labels = np.unique(cluster_flat)
 
         for label in unique_labels:
             if label == -1:
                 continue
-            cluster_mask = (cluster == label)
-            overlap = np.mean(self.polygon_dat[cluster_mask])
-            if overlap > 0.5:
-                classification[cluster_mask] = True
+            mask = cluster_flat == label
+            n_total = int(mask.sum())
+            if n_total == 0:
+                continue
+            n_inside = int((mask & hint_flat).sum())
+            precision = n_inside / n_total
+            recall    = n_inside / n_hint if n_hint > 0 else 0.0
+            if precision > 0.5 or recall > 0.5:
+                classification[cluster == label] = True
 
         return classification
 
