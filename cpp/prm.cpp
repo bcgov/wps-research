@@ -17,6 +17,21 @@ prm.cpp - parallel remove
    Supports recursive deletion (-r option)
    Supports bulk directory contents deletion (-d option)
 */
+
+
+
+/* 20260116: prm.cpp: parallel remove ( non-recursive ) with pattern matching
+   20260305: added -r flag for recursive directory deletion
+   20260408: handle directories with too many files for shell expansion
+             added -d flag: delete all files inside a directory (non-recursive)
+             plain directory arg without -r now treated as -d
+*/
+
+/* prm.cpp - parallel remove
+   Removes files in parallel using parfor construct
+   Supports recursive deletion (-r option)
+   Supports bulk directory contents deletion (-d option)
+*/
 #include"misc.h"
 #include<glob.h>
 #include<unistd.h>
@@ -263,5 +278,3 @@ int main(int argc, char *argv[]){
 
   return (g_failed_count > 0) ? 1 : 0;
 }
-
-
