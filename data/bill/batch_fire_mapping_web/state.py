@@ -93,9 +93,29 @@ class AppState:
         self.max_samples: int = 30000
         self.perimeter_mode: str = "viirs"
 
-        # Authentication (None = no auth required)
-        self.auth_user: Optional[str] = None
-        self.auth_password: Optional[str] = None
+        # Authentication — two roles
+        self.admin_password: Optional[str] = None
+        self.user_password: Optional[str] = None
+
+        # Sessions (cookie-based)
+        self.sessions: dict = {}        # token → {role, username, ip, created_at}
+        self.session_file: str = ""     # path for persistence
+
+        # IP access control
+        self.approved_ips: dict = {}    # {ip: {approved_by, timestamp}}
+        self.blocked_ips: dict = {}     # {ip: {blocked_by, timestamp}}
+        self.pending_ips: dict = {}     # {ip: {first_seen, last_seen}}
+        self.ip_file: str = ""          # path to persistent YAML
+
+        # Recommended settings (list of {min_ha, max_ha, params})
+        self.recommended_settings: list = []
+
+        # Queue tracking
+        self.current_job: Optional[dict] = None   # {fire_numbe, client_ip, started_at}
+        self.waiting_jobs: list = []               # [{fire_numbe, client_ip, queued_at}]
+
+        # Batch mapping
+        self.batch_status: Optional[dict] = None   # {running, total, completed, current_fire, errors}
 
     def init_fires_from_gdf(self):
         """Populate fires dict from the loaded GeoDataFrame."""

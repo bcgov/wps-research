@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Admin - Batch Fire Mapping</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header>
+    <h1>Admin Dashboard</h1>
+    <a href="/" class="back-link">Back to fire list</a>
+    <a href="/logout" class="btn btn-secondary" style="font-size:11px;padding:3px 10px">Logout</a>
+    <img src="/static/BC-Wildfire-Service-logo.png" alt="BC Wildfire Service" class="header-logo">
+</header>
+
+<div style="padding:16px 24px;display:flex;flex-direction:column;gap:20px">
+
+    <!-- Pending IPs -->
+    <div class="admin-card">
+        <h3>Pending IPs</h3>
+        <p class="admin-desc">Users waiting for approval</p>
+        <table class="admin-table">
+            <thead><tr>
+                <th>IP Address</th><th>Username</th><th>First Seen</th><th>Last Seen</th><th>Actions</th>
+            </tr></thead>
+            <tbody id="pending-body"></tbody>
+        </table>
+        <p class="empty-msg" id="pending-empty">No pending requests</p>
+    </div>
+
+    <!-- Approved IPs -->
+    <div class="admin-card">
+        <h3>Approved IPs</h3>
+        <p class="admin-desc">Users with access</p>
+        <table class="admin-table">
+            <thead><tr>
+                <th>IP Address</th><th>Username</th><th>Role</th><th>Approved By</th><th>Since</th><th>Actions</th>
+            </tr></thead>
+            <tbody id="approved-body"></tbody>
+        </table>
+        <p class="empty-msg" id="approved-empty">No approved IPs</p>
+    </div>
+
+    <!-- Blocked IPs -->
+    <div class="admin-card">
+        <h3>Blocked IPs</h3>
+        <p class="admin-desc">Denied access</p>
+        <table class="admin-table">
+            <thead><tr>
+                <th>IP Address</th><th>Username</th><th>Blocked By</th><th>Since</th><th>Actions</th>
+            </tr></thead>
+            <tbody id="blocked-body"></tbody>
+        </table>
+        <p class="empty-msg" id="blocked-empty">No blocked IPs</p>
+    </div>
+
+    <!-- GPU Queue -->
+    <div class="admin-card">
+        <h3>GPU Queue</h3>
+        <p class="admin-desc">Current and waiting mapping jobs</p>
+        <div id="queue-content">
+            <p class="empty-msg">No active jobs</p>
+        </div>
+    </div>
+
+</div>
+
+<script>
+function esc(s) {
+    if (!s) return '';
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+}
+
+async function ipAction(action, ip) {
+    await fetch(`/api/admin/ip/${action}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+        body: JSON.stringify({ip}),
+    });
+    loadData();
+}
+
+async function loadData() {
+    try {
+        const r = await fetch('/api/admin/ips');
+        const data = await r.json();
+
+        // Pending
+        const pb = document.getElementById('pending-body');
+        const pe = document.getElementById('pending-empty');
+        const pending = Object.entries(data.pending || {});
+        pb.innerHTML = '';
+        pe.style.display = pending.length ? 'none' : 'block';
+        for (const [ip, info] of pending) {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><strong>${esc(ip)}</strong></td>
+                <td>${esc(info.username)}</td>
+                <td>${esc(info.first_seen)}</td>
+                <td>${esc(info.last_seen)}</td>
+                <td>
+                    <button class="btn btn-success" style="font-size:11px;padding:2px 8px"
+                        onclick="ipAction('approve','${esc(ip)}')">Approve</button>
+                    <button class="btn btn-danger" style="font-size:11px;padding:2px 8px"
+                        onclick="ipAction('block','${esc(ip)}')">Block</button>
+                </td>`;
+            pb.appendChild(tr);
+        }
+
+        // Approved
+        const ab = document.getElementById('approved-body');
+        const ae = document.getElementById('approved-empty');
+        const approved = Object.entries(data.approved || {});
+        ab.innerHTML = '';
+        ae.style.display = approved.length ? 'none' : 'block';
+        for (const [ip, info] of approved) {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><strong>${esc(ip)}</strong></td>
+                <td>${esc(info.username)}</td>
+                <td>${esc(info.role)}</td>
+                <td>${esc(info.approved_by)}</td>
+                <td>${esc(info.timestamp)}</td>
+                <td>
+                    <button class="btn btn-danger" style="font-size:11px;padding:2px 8px"
+                        onclick="ipAction('revoke','${esc(ip)}')">Revoke</button>
+                </td>`;
+            ab.appendChild(tr);
+        }
+
+        // Blocked
+        const bb = document.getElementById('blocked-body');
+        const be = document.getElementById('blocked-empty');
+        const blocked = Object.entries(data.blocked || {});
+        bb.innerHTML = '';
+        be.style.display = blocked.length ? 'none' : 'block';
+        for (const [ip, info] of blocked) {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><strong>${esc(ip)}</strong></td>
+                <td>${esc(info.username)}</td>
+                <td>${esc(info.blocked_by)}</td>
+                <td>${esc(info.timestamp)}</td>
+                <td>
+                    <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px"
+                        onclick="ipAction('unblock','${esc(ip)}')">Unblock</button>
+                </td>`;
+            bb.appendChild(tr);
+        }
+    } catch {}
+
+    // Load queue
+    try {
+        const r = await fetch('/api/admin/queue');
+        const q = await r.json();
+        const div = document.getElementById('queue-content');
+        let html = '';
+        if (q.current) {
+            html += `<div class="queue-item running">
+                <strong>Running:</strong> ${esc(q.current.fire_numbe)}
+                <span class="queue-meta">${esc(q.current.client_ip)} &middot; started ${esc(q.current.started_at)}</span>
+            </div>`;
+        }
+        for (const w of (q.waiting || [])) {
+            html += `<div class="queue-item waiting">
+                <strong>Waiting:</strong> ${esc(w.fire_numbe)}
+                <span class="queue-meta">${esc(w.client_ip)} &middot; queued ${esc(w.queued_at)}</span>
+            </div>`;
+        }
+        if (!html) html = '<p class="empty-msg">No active jobs</p>';
+        div.innerHTML = html;
+    } catch {}
+}
+
+loadData();
+setInterval(loadData, 5000);
+</script>
+</body>
+</html>

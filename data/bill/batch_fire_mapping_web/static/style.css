@@ -151,6 +151,46 @@ a:hover { text-decoration: underline; }
     font-weight: 600;
 }
 
+/* -- Settings rows ---------------------------------------------------- */
+
+.settings-row {
+    border: 1px solid #e0e0e5;
+    border-radius: 6px;
+    margin-bottom: 10px;
+    overflow: hidden;
+}
+
+.settings-row-header {
+    padding: 6px 12px;
+    background: #f0f2f5;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+}
+
+.settings-row-params {
+    padding: 8px 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+}
+
+.sp-label {
+    font-size: 10px;
+    color: #666;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.sp-label input {
+    padding: 2px 4px;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    font-size: 11px;
+}
+
 .filter-group label.title {
     display: block;
     font-size: 11px;
@@ -181,6 +221,33 @@ a:hover { text-decoration: underline; }
     align-items: center;
     gap: 3px;
     cursor: pointer;
+}
+
+/* -- Batch action bar -------------------------------------------------- */
+
+.batch-bar {
+    display: none;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 24px;
+    background: #e8ecf1;
+    border-bottom: 1px solid #d0d0d5;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.batch-bar #selected-count {
+    font-size: 13px;
+    font-weight: 600;
+    color: #333;
+    min-width: 80px;
+}
+
+.batch-progress {
+    font-size: 12px;
+    color: #555;
+    margin-left: auto;
 }
 
 /* -- Table ------------------------------------------------------------- */
@@ -498,6 +565,79 @@ tbody tr:hover { background: #f5f8fc; }
 #console-output .line-success { color: #3fb950; }
 #console-output .line-error { color: #f85149; }
 #console-output .line-dim { color: #6e7681; }
+
+/* =====================================================================
+   ADMIN PAGE
+   ===================================================================== */
+
+.admin-card {
+    width: 100%;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    padding: 16px 20px;
+}
+
+.admin-card h3 {
+    font-size: 15px;
+    margin-bottom: 4px;
+}
+
+.admin-desc {
+    font-size: 12px;
+    color: #888;
+    margin-bottom: 12px;
+}
+
+.admin-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.admin-table th {
+    text-align: left;
+    padding: 6px 8px;
+    border-bottom: 2px solid #e0e0e5;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: #666;
+}
+
+.admin-table td {
+    padding: 6px 8px;
+    border-bottom: 1px solid #eee;
+}
+
+.empty-msg {
+    font-size: 13px;
+    color: #999;
+    font-style: italic;
+    padding: 8px 0;
+}
+
+.queue-item {
+    padding: 8px 10px;
+    border-radius: 6px;
+    margin-bottom: 6px;
+    font-size: 13px;
+}
+
+.queue-item.running {
+    background: #e0cffc;
+}
+
+.queue-item.waiting {
+    background: #f0f2f5;
+}
+
+.queue-meta {
+    display: block;
+    font-size: 11px;
+    color: #888;
+    margin-top: 2px;
+}
 
 /* =====================================================================
    Responsive
