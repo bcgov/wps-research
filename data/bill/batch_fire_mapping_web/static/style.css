@@ -1,0 +1,510 @@
+/* =========================================================================
+   Batch Fire Mapping — Web UI
+   ========================================================================= */
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: #f0f2f5;
+    color: #1a1a1a;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+/* -- Header ------------------------------------------------------------ */
+
+header {
+    background: #fff;
+    border-bottom: 1px solid #d0d0d5;
+    padding: 14px 24px;
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+header .header-logo {
+    height: 40px;
+    width: auto;
+    flex-shrink: 0;
+    margin-left: auto;
+}
+
+header h1 {
+    font-size: 18px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+header .subtitle {
+    font-size: 13px;
+    color: #6b6b73;
+}
+
+header .back-link {
+    margin-left: auto;
+    font-size: 13px;
+}
+
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* -- Buttons ----------------------------------------------------------- */
+
+.btn {
+    display: inline-block;
+    padding: 5px 14px;
+    background: #0066cc;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    text-decoration: none;
+    line-height: 1.4;
+}
+.btn:hover { background: #0055aa; text-decoration: none; }
+.btn:disabled { background: #999; cursor: not-allowed; }
+
+.btn-success { background: #2d8a4e; }
+.btn-success:hover { background: #257040; }
+
+.btn-secondary { background: #555; }
+.btn-secondary:hover { background: #444; }
+
+.btn-danger { background: #cc3333; }
+.btn-danger:hover { background: #aa2222; }
+
+/* =====================================================================
+   FIRE LIST PAGE
+   ===================================================================== */
+
+.fire-list-header {
+    padding: 16px 24px 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.fire-list-header .count {
+    font-size: 13px;
+    color: #6b6b73;
+}
+
+/* -- Filter panel ------------------------------------------------------ */
+
+.filter-panel {
+    margin: 12px 24px;
+    background: #fff;
+    border: 1px solid #d0d0d5;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+
+.filter-panel-header {
+    padding: 10px 16px;
+    background: #f7f7fa;
+    border-bottom: 1px solid #e0e0e5;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.filter-toggle-arrow::after { content: "▸"; font-size: 11px; }
+.filter-panel.open .filter-toggle-arrow::after { content: "▾"; }
+
+.filter-panel-body {
+    display: none;
+    padding: 14px 16px;
+}
+
+.filter-panel.open .filter-panel-body {
+    display: block;
+}
+
+.filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    align-items: flex-end;
+}
+
+.filter-actions {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid #eee;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.filter-preview-count {
+    margin-left: 12px;
+    font-size: 13px;
+    color: #555;
+    font-weight: 600;
+}
+
+.filter-group label.title {
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: #6b6b73;
+    margin-bottom: 4px;
+}
+
+.filter-group input[type="text"],
+.filter-group input[type="number"] {
+    padding: 5px 8px;
+    border: 1px solid #c0c0c5;
+    border-radius: 4px;
+    font-size: 13px;
+    width: 140px;
+}
+
+.filter-group .checkboxes {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.filter-group .checkboxes label {
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    cursor: pointer;
+}
+
+/* -- Table ------------------------------------------------------------- */
+
+.table-wrap {
+    padding: 0 24px 24px;
+    overflow-x: auto;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #fff;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+
+thead th {
+    text-align: left;
+    padding: 8px 10px;
+    background: #f7f7fa;
+    border-bottom: 2px solid #e0e0e5;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: #555;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+}
+
+thead th:hover { background: #eeeef2; }
+thead th .sort-arrow { margin-left: 4px; font-size: 10px; }
+
+tbody td {
+    padding: 6px 10px;
+    border-bottom: 1px solid #eee;
+    font-size: 13px;
+    white-space: nowrap;
+}
+
+tbody tr:hover { background: #f5f8fc; }
+
+/* Status badges */
+.status-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+}
+.status-accepted { background: #d4edda; color: #155724; }
+.status-mapped   { background: #cce5ff; color: #004085; }
+.status-pending  { background: #f0f0f3; color: #555; }
+.status-ready    { background: #fff3cd; color: #856404; }
+.status-error    { background: #f8d7da; color: #721c24; }
+.status-mapping  { background: #e0cffc; color: #4a148c; }
+
+.prev-accepted-badge {
+    display: inline-block;
+    background: #2d8a4e;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    width: 16px;
+    height: 16px;
+    line-height: 16px;
+    text-align: center;
+    border-radius: 50%;
+    vertical-align: middle;
+    margin-left: 4px;
+    cursor: help;
+}
+
+/* =====================================================================
+   FIRE MAPPING PAGE
+   ===================================================================== */
+
+.fire-info-bar {
+    padding: 8px 24px;
+    background: #fff;
+    border-bottom: 1px solid #e0e0e5;
+    font-size: 13px;
+    color: #555;
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+}
+
+.fire-info-bar span { white-space: nowrap; }
+.fire-info-bar strong { color: #1a1a1a; }
+
+/* Main two-column layout */
+.main-content {
+    display: flex;
+    gap: 0;
+    height: calc(100vh - 110px);
+    /* header ~52px + info bar ~38px ≈ 90px, plus padding */
+}
+
+/* -- Image panel (left) ------------------------------------------------ */
+
+.image-panel {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid #d0d0d5;
+}
+
+.image-controls {
+    padding: 8px 16px;
+    background: #f7f7fa;
+    border-bottom: 1px solid #e0e0e5;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+}
+
+.image-controls select {
+    padding: 4px 8px;
+    border: 1px solid #c0c0c5;
+    border-radius: 4px;
+    font-size: 13px;
+}
+
+.image-controls .info {
+    font-size: 12px;
+    color: #6b6b73;
+}
+
+.image-area {
+    flex: 1;
+    overflow: hidden;
+    background: #2a2a2a;
+    position: relative;
+    cursor: grab;
+}
+
+.image-area.dragging {
+    cursor: grabbing;
+}
+
+.image-area img {
+    position: absolute;
+    transform-origin: 0 0;
+    image-rendering: pixelated;
+    user-select: none;
+    -webkit-user-drag: none;
+}
+
+.image-area .loading {
+    color: #aaa;
+    font-size: 14px;
+}
+
+/* -- Control panel (right) --------------------------------------------- */
+
+.control-panel {
+    width: 340px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    background: #fff;
+    overflow: hidden;
+}
+
+.params-scroll {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 80px;
+}
+
+.resize-handle {
+    height: 6px;
+    background: #d0d0d5;
+    cursor: row-resize;
+    flex-shrink: 0;
+}
+
+.resize-handle:hover,
+.resize-handle.active {
+    background: #0066cc;
+}
+
+.param-section {
+    border-bottom: 1px solid #eee;
+    padding: 10px 16px;
+}
+
+.param-section h3 {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: #6b6b73;
+    margin-bottom: 8px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.param-section h3::before {
+    content: "▸ ";
+    font-size: 10px;
+}
+
+.param-section.open h3::before {
+    content: "▾ ";
+}
+
+.param-section .params-body {
+    display: none;
+}
+
+.param-section.open .params-body {
+    display: block;
+}
+
+.param-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 5px;
+    gap: 8px;
+}
+
+.param-row label {
+    width: 110px;
+    font-size: 12px;
+    color: #444;
+    flex-shrink: 0;
+    text-align: right;
+}
+
+.param-row input,
+.param-row select {
+    flex: 1;
+    padding: 3px 6px;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    font-size: 12px;
+    min-width: 0;
+}
+
+.param-row .computed {
+    font-size: 11px;
+    color: #888;
+    margin-left: 4px;
+}
+
+/* Action buttons */
+.action-buttons {
+    padding: 12px 16px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    border-top: 1px solid #eee;
+}
+
+.action-buttons .btn {
+    flex: 1;
+    text-align: center;
+    padding: 8px 12px;
+    font-size: 14px;
+}
+
+/* -- Console panel (bottom of control panel) --------------------------- */
+
+.console-section {
+    height: 250px;
+    min-height: 80px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.console-header {
+    padding: 6px 16px;
+    background: #1a1a2e;
+    color: #aaa;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.console-header h4 {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.console-header button {
+    background: none;
+    border: none;
+    color: #777;
+    font-size: 11px;
+    cursor: pointer;
+}
+.console-header button:hover { color: #ccc; }
+
+#console-output {
+    flex: 1;
+    overflow-y: auto;
+    background: #0d1117;
+    padding: 8px 12px;
+    font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+    font-size: 11px;
+    line-height: 1.6;
+    color: #c9d1d9;
+}
+
+#console-output .line { white-space: pre-wrap; word-break: break-all; }
+#console-output .line-success { color: #3fb950; }
+#console-output .line-error { color: #f85149; }
+#console-output .line-dim { color: #6e7681; }
+
+/* =====================================================================
+   Responsive
+   ===================================================================== */
+
+@media (max-width: 900px) {
+    .main-content { flex-direction: column; height: auto; }
+    .image-panel { border-right: none; border-bottom: 1px solid #d0d0d5; min-height: 400px; }
+    .control-panel { width: 100%; }
+}

@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Batch Fire Mapping</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header>
+    <h1>Batch Fire Mapping</h1>
+    <span class="subtitle">
+        {{ raster_name }} &middot; {{ polygon_name }} &middot;
+        <span id="fire-count">{{ n_fires }} fires</span>
+    </span>
+    <img src="/static/BC-Wildfire-Service-logo.png" alt="BC Wildfire Service" class="header-logo">
+</header>
+
+<!-- Filter panel -->
+<div class="filter-panel">
+    <div class="filter-panel-header" onclick="document.querySelector('.filter-panel').classList.toggle('open')">
+        <span>Filters</span>
+        <span class="filter-toggle-arrow"></span>
+    </div>
+    <div class="filter-panel-body">
+        <div class="filter-row">
+            <div class="filter-group">
+                <label class="title">Year</label>
+                <div class="checkboxes" id="year-filters"></div>
+            </div>
+            <div class="filter-group">
+                <label class="title">Fire Number</label>
+                <input type="text" id="filter-number" placeholder="regex, e.g. C11.*">
+            </div>
+            <div class="filter-group">
+                <label class="title">Min Size (ha)</label>
+                <input type="number" id="filter-min-size" step="any" min="0">
+            </div>
+            <div class="filter-group">
+                <label class="title">Status</label>
+                <div class="checkboxes" id="status-filters"></div>
+            </div>
+        </div>
+        <div class="filter-actions">
+            <button class="btn" onclick="applyFilters()">Apply</button>
+            <button class="btn btn-secondary" onclick="resetFilters()">Reset</button>
+            <span class="filter-preview-count" id="filter-preview-count"></span>
+        </div>
+    </div>
+</div>
+
+<!-- Table -->
+<div class="table-wrap">
+<table>
+    <thead>
+        <tr>
+            <th data-key="fire_numbe">Fire Number <span class="sort-arrow"></span></th>
+            <th data-key="fire_date">Fire Date <span class="sort-arrow"></span></th>
+            <th data-key="fire_year">Year <span class="sort-arrow"></span></th>
+            <th data-key="fire_size_ha">Size (ha) <span class="sort-arrow"></span></th>
+            <th data-key="status">Status <span class="sort-arrow"></span></th>
+            <th>Action</th>
+        </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+</table>
+</div>
+
+<script>
+// -----------------------------------------------------------------------
+// State
+// -----------------------------------------------------------------------
+let allFires = [];
+let sortKey = 'fire_size_ha';
+let sortAsc = false;
+let yearSet = new Set();
+let statusSet = new Set();
+
+const STATUS_ORDER = [
+    'pending', 'preparing', 'ready', 'mapping', 'mapped', 'accepted', 'error'
+];
+
+// -----------------------------------------------------------------------
+// Fetch fire list
+// -----------------------------------------------------------------------
+async function loadFires() {
+    const r = await fetch('/api/fires');
+    allFires = await r.json();
+    buildFilterUI();
+    render();
+}
+
+// -----------------------------------------------------------------------
+// Build dynamic filter checkboxes
+// -----------------------------------------------------------------------
+function buildFilterUI() {
+    // Years
+    const years = [...new Set(allFires.map(f => f.fire_year))].filter(Boolean).sort();
+    const yDiv = document.getElementById('year-filters');
+    yDiv.innerHTML = '';
+    for (const y of years) {
+        yearSet.add(y);
+        const lbl = document.createElement('label');
+        lbl.innerHTML = `<input type="checkbox" checked value="${y}"> ${y}`;
+        yDiv.appendChild(lbl);
+    }
+
+    // Statuses
+    const statuses = [...new Set(allFires.map(f => f.status))].sort(
+        (a, b) => STATUS_ORDER.indexOf(a) - STATUS_ORDER.indexOf(b));
+    const sDiv = document.getElementById('status-filters');
+    sDiv.innerHTML = '';
+    for (const s of statuses) {
+        statusSet.add(s);
+        const lbl = document.createElement('label');
+        lbl.innerHTML = `<input type="checkbox" checked value="${s}"> ${s}`;
+        sDiv.appendChild(lbl);
+    }
+}
+
+function applyFilters() {
+    // Read checkbox states
+    yearSet.clear();
+    document.querySelectorAll('#year-filters input:checked').forEach(cb => {
+        yearSet.add(parseInt(cb.value) || cb.value);
+    });
+    statusSet.clear();
+    document.querySelectorAll('#status-filters input:checked').forEach(cb => {
+        statusSet.add(cb.value);
+    });
+    render();
+}
+
+function previewFilterCount() {
+    // Count how many fires would match current filter state (before Apply)
+    const tmpYears = new Set();
+    document.querySelectorAll('#year-filters input:checked').forEach(cb => {
+        tmpYears.add(parseInt(cb.value) || cb.value);
+    });
+    const tmpStatuses = new Set();
+    document.querySelectorAll('#status-filters input:checked').forEach(cb => {
+        tmpStatuses.add(cb.value);
+    });
+    const numPat = document.getElementById('filter-number').value.trim();
+    const minSize = parseFloat(document.getElementById('filter-min-size').value) || 0;
+    let re = null;
+    if (numPat) { try { re = new RegExp(numPat, 'i'); } catch {} }
+
+    const count = allFires.filter(f => {
+        if (f.fire_year && !tmpYears.has(f.fire_year)) return false;
+        if (!tmpStatuses.has(f.status)) return false;
+        if (f.fire_size_ha < minSize) return false;
+        if (re && !re.test(f.fire_numbe)) return false;
+        return true;
+    }).length;
+
+    document.getElementById('filter-preview-count').textContent =
+        `${count} / ${allFires.length} matches`;
+}
+
+function resetFilters() {
+    document.getElementById('filter-number').value = '';
+    document.getElementById('filter-min-size').value = '';
+    document.querySelectorAll('#year-filters input, #status-filters input').forEach(cb => {
+        cb.checked = true;
+    });
+    yearSet.clear();
+    document.querySelectorAll('#year-filters input').forEach(cb => {
+        yearSet.add(parseInt(cb.value) || cb.value);
+    });
+    statusSet.clear();
+    document.querySelectorAll('#status-filters input').forEach(cb => {
+        statusSet.add(cb.value);
+    });
+    render();
+}
+
+// -----------------------------------------------------------------------
+// Render table
+// -----------------------------------------------------------------------
+function render() {
+    const numPat = document.getElementById('filter-number').value.trim();
+    const minSize = parseFloat(document.getElementById('filter-min-size').value) || 0;
+
+    let re = null;
+    if (numPat) {
+        try { re = new RegExp(numPat, 'i'); } catch {}
+    }
+
+    let filtered = allFires.filter(f => {
+        if (f.fire_year && !yearSet.has(f.fire_year)) return false;
+        if (!statusSet.has(f.status)) return false;
+        if (f.fire_size_ha < minSize) return false;
+        if (re && !re.test(f.fire_numbe)) return false;
+        return true;
+    });
+
+    // Sort
+    filtered.sort((a, b) => {
+        let va = a[sortKey], vb = b[sortKey];
+        if (va == null) va = '';
+        if (vb == null) vb = '';
+        let cmp;
+        if (typeof va === 'number' && typeof vb === 'number') {
+            cmp = va - vb;
+        } else {
+            cmp = String(va).localeCompare(String(vb));
+        }
+        return sortAsc ? cmp : -cmp;
+    });
+
+    // Update header count
+    document.getElementById('fire-count').textContent =
+        `${filtered.length} / ${allFires.length} fires`;
+
+    // Build rows
+    const tbody = document.getElementById('tbody');
+    tbody.innerHTML = '';
+    for (const f of filtered) {
+        const tr = document.createElement('tr');
+        const badge = `<span class="status-badge status-${f.status}">${f.status}</span>`;
+        const prevBadge = f.previously_accepted
+            ? ' <span class="prev-accepted-badge" title="Previously accepted">&#10003;</span>'
+            : '';
+        tr.innerHTML = `
+            <td><strong>${esc(f.fire_numbe)}</strong></td>
+            <td>${esc(f.fire_date)}</td>
+            <td>${f.fire_year || ''}</td>
+            <td>${f.fire_size_ha != null ? f.fire_size_ha.toLocaleString() : ''}</td>
+            <td>${badge}${prevBadge}</td>
+            <td>
+                <a href="/fire/${encodeURIComponent(f.fire_numbe)}" class="btn">Open</a>
+                <button class="btn btn-danger" style="font-size:11px;padding:3px 8px;margin-left:4px"
+                    data-fire="${encodeURIComponent(f.fire_numbe)}"
+                    onclick="removeFire(decodeURIComponent(this.dataset.fire))">Remove</button>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    }
+
+    // Update sort arrows
+    document.querySelectorAll('thead th[data-key]').forEach(th => {
+        const arrow = th.querySelector('.sort-arrow');
+        if (th.dataset.key === sortKey) {
+            arrow.textContent = sortAsc ? ' ▲' : ' ▼';
+        } else {
+            arrow.textContent = '';
+        }
+    });
+}
+
+function esc(s) {
+    if (!s) return '';
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+}
+
+// -----------------------------------------------------------------------
+// Event listeners
+// -----------------------------------------------------------------------
+document.querySelectorAll('thead th[data-key]').forEach(th => {
+    th.addEventListener('click', () => {
+        const key = th.dataset.key;
+        if (sortKey === key) { sortAsc = !sortAsc; }
+        else { sortKey = key; sortAsc = true; }
+        render();
+    });
+});
+
+// Live preview count on any filter change
+document.getElementById('filter-number').addEventListener('input', previewFilterCount);
+document.getElementById('filter-min-size').addEventListener('input', previewFilterCount);
+document.querySelector('.filter-panel-body').addEventListener('change', previewFilterCount);
+
+// Apply filters on Enter key
+document.getElementById('filter-number').addEventListener('keydown', e => {
+    if (e.key === 'Enter') applyFilters();
+});
+document.getElementById('filter-min-size').addEventListener('keydown', e => {
+    if (e.key === 'Enter') applyFilters();
+});
+
+// -----------------------------------------------------------------------
+// Remove fire
+// -----------------------------------------------------------------------
+async function removeFire(fireNumbe) {
+    if (!confirm(`Remove fire "${fireNumbe}" from the list?`)) return;
+    try {
+        await fetch(`/api/fire/${encodeURIComponent(fireNumbe)}/remove`, {method: 'POST'});
+        allFires = allFires.filter(f => f.fire_numbe !== fireNumbe);
+        render();
+    } catch (err) {
+        alert('Failed to remove: ' + err.message);
+    }
+}
+
+// -----------------------------------------------------------------------
+// Init
+// -----------------------------------------------------------------------
+loadFires();
+</script>
+</body>
+</html>
