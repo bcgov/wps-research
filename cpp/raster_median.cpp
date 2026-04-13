@@ -29,7 +29,7 @@ void medoid(size_t j){
     valid_values.clear();
     for0(t, T){
       d = dat[t][np * k + j];
-      if(!std::isnan(d)){ 
+      if(!std::isnan(d)){
         //data[t][b])){
         valid_values.push_back(d); //data[t][b]);
       }
@@ -106,6 +106,21 @@ int main(int argc, char ** argv){
   }
 
   T = argc - 2;
+
+  // Filter input files: skip any where .bin or .hdr doesn't exist
+  int valid_count = 0;
+  for(i = 0; i < T; i++){
+    str hfn(hdr_fn(str(argv[i + 1])));
+    if(!exists(hfn) || !exists(str(argv[i + 1]))){
+      printf("skipping %s (missing .bin or .hdr)\n", argv[i + 1]);
+      continue;
+    }
+    argv[valid_count + 1] = argv[i + 1]; // compact valid entries
+    valid_count++;
+  }
+  T = valid_count;
+  if(T < 1) err("no valid input files");
+
   FILE * outfile = wopen(argv[argc-1]);
   
   infiles = (FILE **)(void *)malloc(sizeof(FILE *) * T);
@@ -116,14 +131,10 @@ int main(int argc, char ** argv){
   memset(dat, 0, sizeof(float *) * T);
 
   for(i = 0; i < T; i++){
-    // infiles[i] = ropen(argv[i + 1]);
-    //printf("+r %s\n", argv[i + 1]);
-    //if(infiles[i]==NULL) err("failed to open input file");
-
-    str hfn(hdr_fn(str(argv[i + 1])));  // input header file name
+    str hfn(hdr_fn(str(argv[i + 1])));
     if(i==0){
       hread(hfn, nrow, ncol, nband);
-      np = nrow * ncol; // number of pixels
+      np = nrow * ncol;
     }
     else{
       hread(hfn, nrow2, ncol2, nband2);
@@ -131,8 +142,8 @@ int main(int argc, char ** argv){
         err(str("file: ") + str(argv[i + 1]) + str(" has different shape than ") + str(argv[1]));
       }
     }
-    np = nrow * ncol;
   }
+  np = nrow * ncol;
 
   for0(i, T){
     printf("+r %s\n", argv[i + 1]);
@@ -140,7 +151,7 @@ int main(int argc, char ** argv){
   }
 
   
-  // allocate output product area 
+  // allocate output product area
   out = falloc(np * nband);
   if(false){
     for0(j, np) medoid(j);
@@ -163,5 +174,3 @@ int main(int argc, char ** argv){
   free(dat);
   return 0;
 }
-
-
