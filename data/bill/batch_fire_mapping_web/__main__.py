@@ -66,8 +66,6 @@ Example
     # Output
     p.add_argument('--out_dir', default=None,
                    help='Output root directory (default: same as raster)')
-    p.add_argument('--padding', type=float, default=0.2,
-                   help='Default crop padding (default: 0.2 = 20%%)')
 
     # Perimeter mode
     p.add_argument('--perimeter_mode', default='viirs',
@@ -92,11 +90,11 @@ Example
     p.add_argument('--port', type=int, default=8765,
                    help='Server port (default: 8765)')
 
-    # Authentication (env vars FIRE_AUTH_USER / FIRE_AUTH_PASSWORD also work)
-    p.add_argument('--user', default=None,
-                   help='Username for HTTP Basic Auth (or env FIRE_AUTH_USER)')
-    p.add_argument('--password', default=None,
-                   help='Password for HTTP Basic Auth (or env FIRE_AUTH_PASSWORD)')
+    # Authentication
+    p.add_argument('--admin_password', default=None,
+                   help='Admin password (or env FIRE_ADMIN_PASSWORD)')
+    p.add_argument('--user_password', default=None,
+                   help='Generic user password (or env FIRE_USER_PASSWORD)')
 
     return p
 
@@ -123,7 +121,6 @@ def main():
     print(f'  Raster     : {raster_path}')
     print(f'  Polygons   : {polygon_file}')
     print(f'  Output     : {output_root}')
-    print(f'  Padding    : {args.padding * 100:.0f}%')
     print(f'  Perimeter  : {args.perimeter_mode}')
     print(sep)
 
@@ -206,17 +203,76 @@ def main():
     app_state.project_root   = _PROJECT_ROOT
     app_state.cli_script     = os.path.join(
         _REPO_ROOT, 'py', 'fire_mapping', 'fire_mapping_cli.py')
-    app_state.padding        = args.padding
+    app_state.padding        = 0.1
     app_state.sample_rate    = args.sample_rate
     app_state.min_samples    = args.min_samples
     app_state.max_samples    = args.max_samples
     app_state.perimeter_mode = args.perimeter_mode
-    app_state.auth_user      = args.user or os.environ.get('FIRE_AUTH_USER')
-    app_state.auth_password  = args.password or os.environ.get('FIRE_AUTH_PASSWORD')
+    app_state.admin_password = (args.admin_password
+                                or os.environ.get('FIRE_ADMIN_PASSWORD'))
+    app_state.user_password  = (args.user_password
+                                or os.environ.get('FIRE_USER_PASSWORD'))
+
+    # Validate password configuration
+    if app_state.user_password and not app_state.admin_password:
+        sys.exit('ERROR: --user_password requires --admin_password. '
+                 'Without an admin, no one can approve user IPs.')
+    if (app_state.admin_password and app_state.user_password
+            and app_state.admin_password == app_state.user_password):
+        sys.exit('ERROR: --admin_password and --user_password must be '
+                 'different. Otherwise all users become admin.')
 
     if not os.path.isfile(app_state.cli_script):
         sys.exit(f'ERROR: fire_mapping_cli.py not found at '
                  f'{app_state.cli_script}')
+
+    # Load recommended settings from package directory
+    _settings_path = os.path.join(_HERE, 'recommended_settings.yaml')
+    if os.path.isfile(_settings_path):
+        try:
+            import yaml
+            with open(_settings_path) as _f:
+                app_state.recommended_settings = yaml.safe_load(_f) or []
+            print(f'      Loaded {len(app_state.recommended_settings)} '
+                  f'recommended setting(s).')
+        except Exception as _e:
+            print(f'      WARNING: Failed to load settings: {_e}')
+
+    # Load persistent IP access list
+    app_state.ip_file = os.path.join(output_root, 'access_control.yaml')
+    if os.path.isfile(app_state.ip_file):
+        try:
+            import yaml
+            with open(app_state.ip_file) as _f:
+                _ip_data = yaml.safe_load(_f) or {}
+            app_state.approved_ips = _ip_data.get('approved', {})
+            app_state.blocked_ips = _ip_data.get('blocked', {})
+            print(f'      Loaded {len(app_state.approved_ips)} approved, '
+                  f'{len(app_state.blocked_ips)} blocked IP(s).')
+        except Exception as _e:
+            print(f'      WARNING: Failed to load IP list: {_e}')
+
+    # Load persistent sessions
+    app_state.session_file = os.path.join(output_root, 'sessions.yaml')
+    if os.path.isfile(app_state.session_file):
+        try:
+            import yaml
+            with open(app_state.session_file) as _f:
+                _sess = yaml.safe_load(_f) or {}
+            # Filter out expired sessions (30 days)
+            _now = datetime.datetime.now()
+            for _tok, _info in list(_sess.items()):
+                try:
+                    _created = datetime.datetime.fromisoformat(
+                        _info['created_at'])
+                    if (_now - _created).total_seconds() > 30 * 86400:
+                        del _sess[_tok]
+                except (KeyError, ValueError):
+                    del _sess[_tok]
+            app_state.sessions = _sess
+            print(f'      Loaded {len(app_state.sessions)} active session(s).')
+        except Exception as _e:
+            print(f'      WARNING: Failed to load sessions: {_e}')
 
     app_state.init_fires_from_gdf()
 
@@ -229,8 +285,6 @@ def main():
     print(f'  Local:   http://localhost:{args.port}')
     import socket
     try:
-        # Get actual LAN IP by connecting to an external address
-        # (no data is sent — just determines which interface would be used)
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(('8.8.8.8', 80))
         lan_ip = s.getsockname()[0]
@@ -240,10 +294,11 @@ def main():
         print(f'           http://{hostname}:{args.port}')
     except Exception:
         pass
-    if args.user:
-        print(f'  Auth:    user={args.user}')
+    if app_state.admin_password:
+        print(f'  Auth:    admin + user passwords configured')
+        print(f'  IP ctrl: {app_state.ip_file}')
     else:
-        print(f'  Auth:    none (use --user/--password to enable)')
+        print(f'  Auth:    none (use --admin_password/--user_password)')
     print(f'  {len(app_state.fires)} fire(s) available')
     print(f'{sep}\n')
 

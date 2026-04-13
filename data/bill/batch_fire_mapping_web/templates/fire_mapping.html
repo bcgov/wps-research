@@ -9,9 +9,12 @@
 <body>
 
 <header>
+    <a id="btn-prev" class="btn btn-secondary" style="font-size:11px;padding:3px 10px;display:none" href="#">Prev</a>
     <h1>{{ fire_numbe }}</h1>
+    <a id="btn-next" class="btn btn-secondary" style="font-size:11px;padding:3px 10px;display:none" href="#">Next</a>
     <button class="btn btn-danger" style="font-size:11px;padding:3px 10px" onclick="removeFire()">Remove</button>
     <a href="/" class="back-link">Back to fire list</a>
+    <a href="/logout" class="btn btn-secondary" style="font-size:11px;padding:3px 10px">Logout</a>
 </header>
 
 <div class="fire-info-bar">
@@ -175,11 +178,12 @@
                 <button class="btn" id="btn-map" disabled onclick="startMapping()">
                     Map Fire
                 </button>
+                <button class="btn" id="btn-map-settings" disabled onclick="mapWithSettings()"
+                    style="background:#555;font-size:12px;line-height:1.2">
+                    Map Fire<br><small>with settings</small>
+                </button>
                 <button class="btn btn-success" id="btn-accept" style="display:none" onclick="acceptResult()">
                     Accept
-                </button>
-                <button class="btn btn-secondary" id="btn-retry" style="display:none" onclick="retryMapping()">
-                    Retry
                 </button>
             </div>
 
@@ -249,7 +253,7 @@ async function prepareFire(padding) {
     try {
         const r = await fetch(`/api/fire/${FIRE}/prepare`, {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
             body: body,
         });
         const data = await r.json();
@@ -301,7 +305,6 @@ async function prepareFire(padding) {
         // Show accept/retry buttons for mapped fires
         if (data.status === 'mapped') {
             document.getElementById('btn-accept').style.display = '';
-            document.getElementById('btn-retry').style.display = '';
         }
 
         // Status text with previously_accepted indicator
@@ -320,6 +323,7 @@ async function prepareFire(padding) {
         switchView();
 
         document.getElementById('btn-map').disabled = false;
+        document.getElementById('btn-map-settings').disabled = false;
         log('Fire prepared. Ready to map.', 'success');
 
     } catch (err) {
@@ -513,8 +517,8 @@ async function startMapping() {
     isMapping = true;
 
     document.getElementById('btn-map').disabled = true;
+    document.getElementById('btn-map-settings').disabled = true;
     document.getElementById('btn-accept').style.display = 'none';
-    document.getElementById('btn-retry').style.display = 'none';
     document.getElementById('status-text').textContent = 'mapping';
 
     log('Starting mapping...', 'dim');
@@ -522,7 +526,7 @@ async function startMapping() {
     try {
         const response = await fetch(`/api/fire/${FIRE}/map`, {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
             body: JSON.stringify({params: getParams()}),
         });
 
@@ -531,6 +535,7 @@ async function startMapping() {
             log('ERROR: ' + (err.error || response.statusText), 'error');
             isMapping = false;
             document.getElementById('btn-map').disabled = false;
+            document.getElementById('btn-map-settings').disabled = false;
             document.getElementById('status-text').textContent = 'ready';
             return;
         }
@@ -579,14 +584,15 @@ async function startMapping() {
                     switchView();
 
                     document.getElementById('btn-map').disabled = false;
+                    document.getElementById('btn-map-settings').disabled = false;
                     document.getElementById('btn-accept').style.display = '';
-                    document.getElementById('btn-retry').style.display = '';
-                    document.getElementById('status-text').textContent = 'mapped';
+                            document.getElementById('status-text').textContent = 'mapped';
 
                 } else if (data.type === 'error') {
                     log('ERROR: ' + data.message, 'error');
                     isMapping = false;
                     document.getElementById('btn-map').disabled = false;
+                    document.getElementById('btn-map-settings').disabled = false;
                     document.getElementById('status-text').textContent = 'ready';
                 }
             }
@@ -596,12 +602,14 @@ async function startMapping() {
             log('Connection lost during mapping.', 'error');
             isMapping = false;
             document.getElementById('btn-map').disabled = false;
+            document.getElementById('btn-map-settings').disabled = false;
         }
 
     } catch (err) {
         log('Mapping error: ' + err.message, 'error');
         isMapping = false;
         document.getElementById('btn-map').disabled = false;
+        document.getElementById('btn-map-settings').disabled = false;
         document.getElementById('status-text').textContent = 'ready';
     }
 }
@@ -614,14 +622,13 @@ async function acceptResult() {
     document.getElementById('btn-accept').disabled = true;
 
     try {
-        const r = await fetch(`/api/fire/${FIRE}/accept`, { method: 'POST' });
+        const r = await fetch(`/api/fire/${FIRE}/accept`, { method: 'POST', headers: {'X-Requested-With': 'fetch'} });
         const data = await r.json();
         if (data.status === 'accepted') {
             log('Results saved successfully.', 'success');
             document.getElementById('status-text').textContent = 'accepted';
             document.getElementById('btn-accept').style.display = 'none';
-            document.getElementById('btn-retry').style.display = 'none';
-        } else {
+                } else {
             log('Accept error: ' + (data.error || 'unknown'), 'error');
         }
     } catch (err) {
@@ -631,13 +638,106 @@ async function acceptResult() {
 }
 
 // -----------------------------------------------------------------------
-// Retry
+// Map Fire with recommended settings
 // -----------------------------------------------------------------------
-function retryMapping() {
-    document.getElementById('btn-accept').style.display = 'none';
-    document.getElementById('btn-retry').style.display = 'none';
-    log('--- Adjust parameters above and click Map Fire to retry ---', 'dim');
+async function mapWithSettings() {
+    const fireSize = parseFloat('{{ fire_size_ha }}') || 0;
+    try {
+        const r = await fetch('/api/settings');
+        const settings = await r.json();
+        if (!Array.isArray(settings) || settings.length === 0) {
+            log('No recommended settings configured. Use the Settings panel on the fire list page.', 'error');
+            return;
+        }
+        // Find matching row for this fire size
+        const row = settings.find(s =>
+            fireSize >= s.min_ha && (s.max_ha == null || fireSize < s.max_ha));
+        if (!row) {
+            log('No matching settings row for fire size ' + fireSize + ' ha.', 'error');
+            return;
+        }
+        const p = row.params;
+        // Apply settings to form
+        const setVal = (id, val) => {
+            const el = document.getElementById(id);
+            if (el && val != null) el.value = val;
+        };
+        // Apply settings to form
+        setVal('p-padding', p.padding);
+        setVal('p-sample_rate', p.sample_rate);
+        setVal('p-min_samples', p.min_samples);
+        setVal('p-max_samples', p.max_samples);
+        setVal('p-seed', p.seed);
+        setVal('p-embed_bands', p.embed_bands);
+        setVal('p-tsne_perplexity', p.tsne_perplexity);
+        setVal('p-tsne_learning_rate', p.tsne_learning_rate);
+        setVal('p-tsne_max_iter', p.tsne_max_iter);
+        setVal('p-tsne_n_components', p.tsne_n_components);
+        setVal('p-tsne_random_state', p.tsne_random_state);
+        setVal('p-rf_n_estimators', p.rf_n_estimators);
+        setVal('p-rf_max_depth', p.rf_max_depth);
+        setVal('p-rf_max_features', p.rf_max_features);
+        setVal('p-rf_random_state', p.rf_random_state);
+        setVal('p-controlled_ratio', p.controlled_ratio);
+        setVal('p-hdbscan_min_samples', p.hdbscan_min_samples);
+        setVal('p-contour_width', p.contour_width);
+        if (p.tsne_init) {
+            const initEl = document.getElementById('p-tsne_init');
+            if (initEl) initEl.value = p.tsne_init;
+        }
+        updateSampleSize();
+        log(`Applied recommended settings for ${row.min_ha} ha → ${row.max_ha != null ? row.max_ha + ' ha' : '∞'}`, 'success');
+
+        // Re-crop if padding changed, then map
+        const newPad = parseFloat(p.padding);
+        const curPad = parseFloat(document.getElementById('p-padding').value);
+        if (!isNaN(newPad) && newPad !== curPad) {
+            log(`Re-cropping with padding=${newPad}...`);
+            document.getElementById('btn-map').disabled = true;
+            document.getElementById('btn-map-settings').disabled = true;
+            await prepareFire(newPad);
+        }
+        startMapping();
+    } catch (err) {
+        log('Failed to load settings: ' + err.message, 'error');
+    }
 }
+
+// -----------------------------------------------------------------------
+// Auto-refresh status every 5s (detect changes from other users)
+// -----------------------------------------------------------------------
+let lastKnownStatus = '{{ fire_status }}';
+
+async function refreshStatus() {
+    if (isMapping) return; // don't interfere with active mapping
+    try {
+        const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/status`);
+        const data = await r.json();
+        if (data.status !== lastKnownStatus) {
+            lastKnownStatus = data.status;
+            document.getElementById('status-text').textContent = data.status;
+            if (data.status === 'mapped' && !hasComparison) {
+                hasComparison = true;
+                const sel = document.getElementById('view-select');
+                if (!sel.querySelector('option[value="comparison"]')) {
+                    const opt = document.createElement('option');
+                    opt.value = 'comparison';
+                    opt.textContent = 'Comparison (result)';
+                    sel.appendChild(opt);
+                }
+                sel.value = 'comparison';
+                switchView();
+                document.getElementById('btn-accept').style.display = '';
+                    log('Fire was mapped (by another session).', 'success');
+            } else if (data.status === 'accepted') {
+                document.getElementById('btn-accept').style.display = 'none';
+                            log('Fire was accepted (by another session).', 'success');
+            }
+        }
+    } catch {}
+}
+
+setInterval(refreshStatus, 5000);
 
 // -----------------------------------------------------------------------
 // Remove fire
@@ -645,7 +745,7 @@ function retryMapping() {
 async function removeFire() {
     if (!confirm(`Remove fire "${FIRE}" from the list?\nThis hides it from the fire list. Accepted results are not deleted.`)) return;
     try {
-        await fetch(`/api/fire/${encodeURIComponent(FIRE)}/remove`, {method: 'POST'});
+        await fetch(`/api/fire/${encodeURIComponent(FIRE)}/remove`, {method: 'POST', headers: {'X-Requested-With': 'fetch'}});
         window.location.href = '/';
     } catch (err) {
         log('Remove failed: ' + err.message, 'error');
@@ -686,6 +786,30 @@ async function removeFire() {
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
     });
+})();
+
+// -----------------------------------------------------------------------
+// Prev / Next navigation from fire list order
+// -----------------------------------------------------------------------
+(function() {
+    try {
+        const order = JSON.parse(sessionStorage.getItem('fireOrder') || '[]');
+        if (order.length < 2) return;
+        const idx = order.indexOf(FIRE);
+        if (idx < 0) return;
+        if (idx > 0) {
+            const prev = document.getElementById('btn-prev');
+            prev.href = '/fire/' + encodeURIComponent(order[idx - 1]);
+            prev.title = order[idx - 1];
+            prev.style.display = '';
+        }
+        if (idx < order.length - 1) {
+            const next = document.getElementById('btn-next');
+            next.href = '/fire/' + encodeURIComponent(order[idx + 1]);
+            next.title = order[idx + 1];
+            next.style.display = '';
+        }
+    } catch {}
 })();
 
 // -----------------------------------------------------------------------

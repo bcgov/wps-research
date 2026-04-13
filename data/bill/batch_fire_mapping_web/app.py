@@ -42,6 +42,174 @@ def init_app(app_state: AppState):
     state = app_state
 
 
+_SESSION_MAX_AGE = 30 * 24 * 3600  # 30 days in seconds
+
+
+def _save_sessions():
+    """Persist sessions to disk."""
+    if not state.session_file:
+        return
+    try:
+        import yaml
+        with open(state.session_file, 'w') as f:
+            yaml.dump(dict(state.sessions), f,
+                      default_flow_style=False, sort_keys=False)
+    except Exception:
+        pass
+
+
+def _get_recommended_params(fire_size_ha: float) -> dict:
+    """Find recommended params for a fire of given size."""
+    for row in state.recommended_settings:
+        if (fire_size_ha >= row.get('min_ha', 0)
+                and (row.get('max_ha') is None
+                     or fire_size_ha < row['max_ha'])):
+            return row.get('params', {})
+    return {}
+
+
+_batch_thread = None
+
+
+def _batch_map_worker(fire_numbes: list[str]):
+    """Process fires sequentially with recommended settings."""
+    import traceback
+
+    state.batch_status = {
+        'running': True,
+        'total': len(fire_numbes),
+        'completed': 0,
+        'current_fire': '',
+        'errors': [],
+    }
+
+    sys.stderr.write(
+        f'[batch] Starting batch: {len(fire_numbes)} fire(s)\n')
+    sys.stderr.flush()
+
+    for fire_numbe in fire_numbes:
+        fire = state.fires.get(fire_numbe)
+        if not fire or fire.status in (
+                FireStatus.ACCEPTED, FireStatus.MAPPING):
+            state.batch_status['completed'] += 1
+            continue
+
+        state.batch_status['current_fire'] = fire_numbe
+        sys.stderr.write(f'[batch] [{fire_numbe}] Starting...\n')
+        sys.stderr.flush()
+
+        params = _get_recommended_params(fire.fire_size_ha)
+        if not params:
+            params = {}
+
+        padding = params.get('padding', state.padding)
+
+        try:
+            with _gpu_lock:
+                # Prepare
+                sys.stderr.write(
+                    f'[batch] [{fire_numbe}] Preparing '
+                    f'(padding={padding})...\n')
+                sys.stderr.flush()
+                _prepare_fire_sync(fire_numbe, padding)
+                fire = state.fires[fire_numbe]
+                if fire.status == FireStatus.ERROR:
+                    sys.stderr.write(
+                        f'[batch] [{fire_numbe}] Prepare FAILED: '
+                        f'{fire.error_msg}\n')
+                    sys.stderr.flush()
+                    state.batch_status['errors'].append(fire_numbe)
+                    state.batch_status['completed'] += 1
+                    continue
+
+                # Map
+                fire.status = FireStatus.MAPPING
+                state.current_job = {
+                    'fire_numbe': fire_numbe,
+                    'client_ip': 'batch',
+                    'started_at': datetime.datetime.now().isoformat(
+                        timespec='seconds'),
+                }
+
+                cmd = _build_mapping_cmd(fire, params)
+                sys.stderr.write(
+                    f'[batch] [{fire_numbe}] Running CLI: '
+                    f'{" ".join(os.path.basename(c) for c in cmd[:3])} '
+                    f'...\n')
+                sys.stderr.flush()
+
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    cwd=state.project_root,
+                )
+
+                for line in iter(proc.stdout.readline, b''):
+                    text = line.decode(errors='replace').rstrip()
+                    if text:
+                        sys.stderr.write(
+                            f'[batch] [{fire_numbe}] {text}\n')
+                        sys.stderr.flush()
+
+                rc = proc.wait()
+                state.current_job = None
+
+                if rc == 0:
+                    comp = os.path.join(
+                        fire.cache_dir,
+                        f'{fire_numbe}_comparison.png')
+                    fire.last_comparison = (
+                        comp if os.path.exists(comp) else '')
+                    fire.last_params = params
+                    fire.status = FireStatus.MAPPED
+                    sys.stderr.write(
+                        f'[batch] [{fire_numbe}] MAPPED OK\n')
+                else:
+                    fire.status = FireStatus.ERROR
+                    fire.error_msg = f'Exited with code {rc}'
+                    state.batch_status['errors'].append(fire_numbe)
+                    sys.stderr.write(
+                        f'[batch] [{fire_numbe}] FAILED (rc={rc})\n')
+                sys.stderr.flush()
+
+        except Exception as exc:
+            fire.status = FireStatus.ERROR
+            fire.error_msg = str(exc)
+            state.batch_status['errors'].append(fire_numbe)
+            state.current_job = None
+            sys.stderr.write(
+                f'[batch] [{fire_numbe}] EXCEPTION:\n'
+                f'{traceback.format_exc()}\n')
+            sys.stderr.flush()
+
+        state.batch_status['completed'] += 1
+
+    state.batch_status['running'] = False
+    state.batch_status['current_fire'] = ''
+    sys.stderr.write(
+        f'[batch] Complete: {state.batch_status["completed"]}'
+        f'/{state.batch_status["total"]} fires, '
+        f'{len(state.batch_status["errors"])} error(s)\n')
+    sys.stderr.flush()
+
+
+def _save_ip_list():
+    """Persist approved and blocked IPs to disk."""
+    if not state.ip_file:
+        return
+    try:
+        import yaml
+        data = {
+            'approved': dict(state.approved_ips),
+            'blocked': dict(state.blocked_ips),
+        }
+        with open(state.ip_file, 'w') as f:
+            yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+    except Exception:
+        pass
+
+
 # =========================================================================
 # Simple template rendering  (replaces Jinja2)
 # =========================================================================
@@ -444,8 +612,16 @@ class FireHandler(BaseHTTPRequestHandler):
     # -- Routing tables (compiled once) --
     ROUTES_GET = [
         (re.compile(r'^/$'), 'handle_fire_list'),
+        (re.compile(r'^/login$'), 'handle_login_page'),
+        (re.compile(r'^/logout$'), 'handle_logout'),
+        (re.compile(r'^/admin$'), 'handle_admin_page'),
         (re.compile(r'^/fire/(?P<fire_numbe>[^/]+)$'), 'handle_fire_page'),
         (re.compile(r'^/api/fires$'), 'handle_api_fires'),
+        (re.compile(r'^/api/settings$'), 'handle_api_settings_get'),
+        (re.compile(r'^/api/access/status$'), 'handle_api_access_status'),
+        (re.compile(r'^/api/batch/status$'), 'handle_api_batch_status'),
+        (re.compile(r'^/api/admin/ips$'), 'handle_api_admin_ips'),
+        (re.compile(r'^/api/admin/queue$'), 'handle_api_admin_queue'),
         (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/preview/(?P<view>[^/]+)$'),
          'handle_api_preview'),
@@ -461,6 +637,7 @@ class FireHandler(BaseHTTPRequestHandler):
         (re.compile(r'^/static/(?P<path>.+)$'), 'handle_static'),
     ]
     ROUTES_POST = [
+        (re.compile(r'^/login$'), 'handle_login_post'),
         (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/prepare$'),
          'handle_api_prepare'),
@@ -473,7 +650,18 @@ class FireHandler(BaseHTTPRequestHandler):
         (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/remove$'),
          'handle_api_remove'),
+        (re.compile(r'^/api/settings$'), 'handle_api_settings_post'),
+        (re.compile(r'^/api/batch/map$'), 'handle_api_batch_map'),
+        (re.compile(r'^/api/admin/ip/(?P<action>approve|block|revoke|unblock)$'),
+         'handle_api_admin_ip_action'),
     ]
+
+    # Paths that bypass IP checks (pending page needs CSS/logo + status poll)
+    _IP_EXEMPT = {'/api/access/status', '/static/style.css',
+                  '/static/BC-Wildfire-Service-logo.png'}
+    # Paths that bypass ALL auth (login page, static assets for login)
+    _NO_SESSION = {'/login', '/static/style.css',
+                   '/static/BC-Wildfire-Service-logo.png'}
 
     def _route(self, routes):
         parsed = urlparse(self.path)
@@ -485,52 +673,169 @@ class FireHandler(BaseHTTPRequestHandler):
                 return True
         return False
 
-    def _check_auth(self) -> bool:
-        """Return True if auth passes (or no auth configured)."""
-        if not state.auth_user:
-            return True
-        import base64
-        import hmac
-        auth = self.headers.get('Authorization', '')
-        if not auth.startswith('Basic '):
-            self._send_401()
-            return False
+    # ================================================================
+    # Authentication & IP access control (cookie-based sessions)
+    # ================================================================
+
+    def _get_cookie(self, name: str) -> str:
+        """Extract a cookie value from the Cookie header."""
+        raw = self.headers.get('Cookie', '')
+        for part in raw.split(';'):
+            part = part.strip()
+            if part.startswith(name + '='):
+                return part[len(name) + 1:]
+        return ''
+
+    def _check_session(self) -> str | None:
+        """Check session cookie. Returns role or None."""
+        self._username = ''
+        self._role = ''
+
+        # No passwords configured → everyone is admin
+        if not state.admin_password and not state.user_password:
+            self._role = 'admin'
+            return 'admin'
+
+        token = self._get_cookie('session')
+        if not token or token not in state.sessions:
+            return None
+
+        session = state.sessions[token]
+
+        # Check expiry
         try:
-            decoded = base64.b64decode(auth[6:]).decode()
-            user, password = decoded.split(':', 1)
-        except Exception:
-            self._send_401()
-            return False
-        if (hmac.compare_digest(user, state.auth_user)
-                and hmac.compare_digest(password, state.auth_password)):
+            created = datetime.datetime.fromisoformat(session['created_at'])
+            age = (datetime.datetime.now() - created).total_seconds()
+            if age > _SESSION_MAX_AGE:
+                del state.sessions[token]
+                _save_sessions()
+                return None
+        except (KeyError, ValueError):
+            del state.sessions[token]
+            return None
+
+        self._username = session.get('username', '')
+        self._role = session.get('role', 'user')
+        return self._role
+
+    def _check_ip(self, role: str) -> bool:
+        """Check IP access. Admins auto-approve. Returns True if allowed."""
+        ip = self.client_address[0]
+        username = getattr(self, '_username', '')
+
+        if role == 'admin':
+            # Auto-approve admin IPs
+            if ip not in state.approved_ips:
+                state.approved_ips[ip] = {
+                    'username': username,
+                    'role': 'admin',
+                    'approved_by': 'auto (admin)',
+                    'timestamp': datetime.datetime.now().isoformat(
+                        timespec='seconds'),
+                }
+                _save_ip_list()
+            else:
+                # Update username on each visit
+                state.approved_ips[ip]['username'] = username
+                state.approved_ips[ip]['role'] = 'admin'
+            # Remove from pending if was there
+            state.pending_ips.pop(ip, None)
             return True
-        self._send_401()
+
+        # Regular user — check IP
+        if ip in state.blocked_ips:
+            self._send_html(render_template('pending.html', {
+                'ip': ip,
+                'title': 'Access Denied',
+                'message': 'Your IP address has been blocked by an '
+                           'administrator.',
+                'auto_refresh': 'false',
+            }), 403)
+            return False
+
+        if ip in state.approved_ips:
+            # Update username on each visit
+            state.approved_ips[ip]['username'] = username
+            state.approved_ips[ip]['role'] = 'user'
+            return True
+
+        # Unknown IP → pending
+        now = datetime.datetime.now().isoformat(timespec='seconds')
+        if ip not in state.pending_ips:
+            state.pending_ips[ip] = {
+                'username': username,
+                'first_seen': now,
+                'last_seen': now,
+            }
+        else:
+            state.pending_ips[ip]['last_seen'] = now
+            state.pending_ips[ip]['username'] = username
+
+        self._send_html(render_template('pending.html', {
+            'ip': ip,
+            'title': 'Access Pending',
+            'message': 'Your IP address has been registered. '
+                       'An administrator will review your access request.',
+            'auto_refresh': 'true',
+        }))
         return False
 
-    def _send_401(self):
-        self.send_response(401)
-        self.send_header('WWW-Authenticate',
-                         'Basic realm="Fire Mapping"')
-        self.send_header('Content-Type', 'text/plain')
+    def _redirect(self, url, status=302):
+        self.send_response(status)
+        self.send_header('Location', url)
+        self.send_header('Cache-Control', 'no-store')
         self.end_headers()
-        self.wfile.write(b'Authentication required')
+
+    def _gate(self) -> str | None:
+        """Full auth + IP gate. Returns role or None."""
+        parsed = urlparse(self.path)
+        path = unquote(parsed.path)
+
+        # Login page and static assets — no session needed
+        if path in self._NO_SESSION or path.startswith('/static/'):
+            self._role = ''
+            self._username = ''
+            return 'none'
+
+        # Check session cookie
+        role = self._check_session()
+        if role is None:
+            self._redirect('/login')
+            return None
+
+        # IP-exempt paths (access-status polling)
+        if path in self._IP_EXEMPT:
+            return role
+
+        # IP access control
+        if not self._check_ip(role):
+            return None
+
+        return role
 
     def do_GET(self):
-        if not self._check_auth():
+        if self._gate() is None:
             return
         if not self._route(self.ROUTES_GET):
             self.send_error(404)
 
     def do_POST(self):
-        if not self._check_auth():
+        if self._gate() is None:
             return
-        # CSRF protection: reject cross-origin POST requests
-        origin = self.headers.get('Origin', '')
-        if origin:
-            host = self.headers.get('Host', '')
-            allowed = {f'http://{host}', f'https://{host}'}
-            if origin not in allowed:
-                self.send_error(403, 'Cross-origin request blocked')
+        # CSRF protection — exempt login form, require header on API calls
+        parsed = urlparse(self.path)
+        path = unquote(parsed.path)
+        if path != '/login':
+            origin = self.headers.get('Origin', '')
+            x_req = self.headers.get('X-Requested-With', '')
+            if origin:
+                host = self.headers.get('Host', '')
+                allowed = {f'http://{host}', f'https://{host}'}
+                if origin not in allowed:
+                    self.send_error(403, 'Cross-origin request blocked')
+                    return
+            elif not x_req:
+                self.send_error(403, 'Missing origin header')
                 return
         if not self._route(self.ROUTES_POST):
             self.send_error(404)
@@ -550,6 +855,7 @@ class FireHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header('Content-Type', 'text/html; charset=utf-8')
         self.send_header('Content-Length', str(len(body)))
+        self.send_header('Cache-Control', 'no-store')
         self.end_headers()
         self.wfile.write(body)
 
@@ -585,11 +891,97 @@ class FireHandler(BaseHTTPRequestHandler):
     # -- Page handlers --
 
     def handle_fire_list(self):
+        admin_link = ('<a href="/admin" class="btn" '
+                      'style="font-size:11px;padding:3px 10px">'
+                      'Admin</a>'
+                      if getattr(self, '_role', '') == 'admin' else '')
         html = render_template('fire_list.html', {
             'raster_name': os.path.basename(state.raster_path),
             'polygon_name': os.path.basename(state.polygon_file),
             'n_fires': str(len(state.fires)),
+            'admin_link': admin_link,
         })
+        self._send_html(html)
+
+    def handle_login_page(self):
+        # Already logged in? Redirect to home.
+        token = self._get_cookie('session')
+        if token and token in state.sessions:
+            self._redirect('/')
+            return
+        html = render_template('login.html', {'error_msg': ''})
+        self._send_html(html)
+
+    def handle_login_post(self):
+        import hmac
+        import secrets
+        # Parse form body (application/x-www-form-urlencoded)
+        length = int(self.headers.get('Content-Length', 0))
+        if length > 10000:
+            self.send_error(400)
+            return
+        raw = self.rfile.read(length).decode(errors='replace')
+        from urllib.parse import parse_qs
+        form = parse_qs(raw)
+        username = form.get('username', [''])[0].strip()
+        password = form.get('password', [''])[0]
+
+        role = None
+        if (state.admin_password
+                and hmac.compare_digest(password, state.admin_password)):
+            role = 'admin'
+        elif (state.user_password
+              and hmac.compare_digest(password, state.user_password)):
+            role = 'user'
+
+        if role is None:
+            html = render_template('login.html', {
+                'error_msg': '<div class="error-msg" style="display:block">'
+                             'Invalid password.</div>',
+            })
+            self._send_html(html, 401)
+            return
+
+        # Create session
+        token = secrets.token_hex(32)
+        state.sessions[token] = {
+            'role': role,
+            'username': username,
+            'ip': self.client_address[0],
+            'created_at': datetime.datetime.now().isoformat(
+                timespec='seconds'),
+        }
+        _save_sessions()
+
+        # Set cookie and redirect to home
+        cookie = (f'session={token}; HttpOnly; SameSite=Strict; '
+                  f'Path=/; Max-Age={_SESSION_MAX_AGE}')
+        self.send_response(302)
+        self.send_header('Location', '/')
+        self.send_header('Set-Cookie', cookie)
+        self.send_header('Cache-Control', 'no-store')
+        self.end_headers()
+
+    def handle_logout(self):
+        # Clear session
+        token = self._get_cookie('session')
+        if token and token in state.sessions:
+            del state.sessions[token]
+            _save_sessions()
+        # Clear cookie and redirect to login
+        self.send_response(302)
+        self.send_header('Location', '/login')
+        self.send_header('Set-Cookie',
+                         'session=; HttpOnly; SameSite=Strict; '
+                         'Path=/; Max-Age=0')
+        self.send_header('Cache-Control', 'no-store')
+        self.end_headers()
+
+    def handle_admin_page(self):
+        if getattr(self, '_role', '') != 'admin':
+            self.send_error(403, 'Admin access required')
+            return
+        html = render_template('admin.html', {})
         self._send_html(html)
 
     def handle_fire_page(self, fire_numbe):
@@ -636,6 +1028,130 @@ class FireHandler(BaseHTTPRequestHandler):
             if not f.hidden
         ]
         self._send_json(fires)
+
+    def handle_api_settings_get(self):
+        self._send_json(state.recommended_settings)
+
+    def handle_api_settings_post(self):
+        if getattr(self, '_role', '') != 'admin':
+            self._send_json({'error': 'Admin only'}, 403)
+            return
+        body = self._read_body()
+        settings = body.get('settings', [])
+        state.recommended_settings = settings
+        self._send_json({'status': 'saved'})
+
+    # -- Batch mapping API --
+
+    def handle_api_batch_map(self):
+        global _batch_thread
+        if (state.batch_status
+                and state.batch_status.get('running')):
+            self._send_json(
+                {'error': 'A batch is already running'}, 400)
+            return
+        body = self._read_body()
+        fire_numbes = body.get('fire_numbes', [])
+        # Filter out accepted fires
+        fire_numbes = [
+            fn for fn in fire_numbes
+            if fn in state.fires
+            and state.fires[fn].status != FireStatus.ACCEPTED
+        ]
+        if not fire_numbes:
+            self._send_json({'error': 'No eligible fires selected'}, 400)
+            return
+        _batch_thread = threading.Thread(
+            target=_batch_map_worker,
+            args=(fire_numbes,),
+            daemon=True)
+        _batch_thread.start()
+        self._send_json({
+            'status': 'started',
+            'total': len(fire_numbes),
+        })
+
+    def handle_api_batch_status(self):
+        self._send_json(
+            state.batch_status or {'running': False})
+
+    # -- Access control & admin API --
+
+    def handle_api_access_status(self):
+        """Called by the pending page to check if IP was approved."""
+        ip = self.client_address[0]
+        if ip in state.approved_ips:
+            self._send_json({'status': 'approved'})
+        elif ip in state.blocked_ips:
+            self._send_json({'status': 'blocked'})
+        else:
+            self._send_json({'status': 'pending'})
+
+    def handle_api_admin_ips(self):
+        if getattr(self, '_role', '') != 'admin':
+            self._send_json({'error': 'Admin only'}, 403)
+            return
+        self._send_json({
+            'approved': state.approved_ips,
+            'blocked': state.blocked_ips,
+            'pending': state.pending_ips,
+        })
+
+    def handle_api_admin_queue(self):
+        if getattr(self, '_role', '') != 'admin':
+            self._send_json({'error': 'Admin only'}, 403)
+            return
+        self._send_json({
+            'current': state.current_job,
+            'waiting': list(state.waiting_jobs),
+        })
+
+    def handle_api_admin_ip_action(self, action):
+        if getattr(self, '_role', '') != 'admin':
+            self._send_json({'error': 'Admin only'}, 403)
+            return
+        body = self._read_body()
+        ip = body.get('ip', '').strip()
+        if not ip:
+            self._send_json({'error': 'No IP provided'}, 400)
+            return
+
+        now = datetime.datetime.now().isoformat(timespec='seconds')
+
+        if action == 'approve':
+            # Preserve username from pending entry
+            pending_info = state.pending_ips.get(ip, {})
+            state.approved_ips[ip] = {
+                'username': pending_info.get('username', ''),
+                'role': 'user',
+                'approved_by': self.client_address[0],
+                'timestamp': now,
+            }
+            state.pending_ips.pop(ip, None)
+            state.blocked_ips.pop(ip, None)
+
+        elif action == 'block':
+            pending_info = state.pending_ips.get(ip, {})
+            approved_info = state.approved_ips.get(ip, {})
+            state.blocked_ips[ip] = {
+                'username': (pending_info.get('username', '')
+                             or approved_info.get('username', '')),
+                'blocked_by': self.client_address[0],
+                'timestamp': now,
+            }
+            state.approved_ips.pop(ip, None)
+            state.pending_ips.pop(ip, None)
+
+        elif action == 'revoke':
+            state.approved_ips.pop(ip, None)
+
+        elif action == 'unblock':
+            state.blocked_ips.pop(ip, None)
+
+        _save_ip_list()
+        self._send_json({'status': 'ok'})
+
+    # -- Fire API --
 
     def handle_api_prepare(self, fire_numbe):
         fire_numbe = unquote(fire_numbe)
@@ -854,10 +1370,19 @@ class FireHandler(BaseHTTPRequestHandler):
             except BrokenPipeError:
                 pass
 
-        # GPU serialisation with queue feedback
+        # GPU serialisation with queue tracking
+        client_ip = self.client_address[0]
+        job_entry = {
+            'fire_numbe': fire_numbe,
+            'client_ip': client_ip,
+            'queued_at': datetime.datetime.now().isoformat(
+                timespec='seconds'),
+        }
+
         with _gpu_queue_lock:
             queue_pos = _gpu_queue
             globals()['_gpu_queue'] = _gpu_queue + 1
+            state.waiting_jobs.append(job_entry)
 
         if _gpu_lock.locked():
             sse('log', {
@@ -867,6 +1392,14 @@ class FireHandler(BaseHTTPRequestHandler):
 
         try:
             with _gpu_lock:
+                # Move from waiting to current
+                if job_entry in state.waiting_jobs:
+                    state.waiting_jobs.remove(job_entry)
+                state.current_job = {
+                    **job_entry,
+                    'started_at': datetime.datetime.now().isoformat(
+                        timespec='seconds'),
+                }
                 fire.status = FireStatus.MAPPING
                 cmd = _build_mapping_cmd(fire, params)
                 short_cmd = ' '.join(
@@ -917,6 +1450,9 @@ class FireHandler(BaseHTTPRequestHandler):
         finally:
             with _gpu_queue_lock:
                 globals()['_gpu_queue'] = max(0, _gpu_queue - 1)
+            state.current_job = None
+            if job_entry in state.waiting_jobs:
+                state.waiting_jobs.remove(job_entry)
 
     # -- Logging --
 

@@ -14,6 +14,8 @@
         {{ raster_name }} &middot; {{ polygon_name }} &middot;
         <span id="fire-count">{{ n_fires }} fires</span>
     </span>
+    {{{ admin_link }}}
+    <a href="/logout" class="btn btn-secondary" style="font-size:11px;padding:3px 10px">Logout</a>
     <img src="/static/BC-Wildfire-Service-logo.png" alt="BC Wildfire Service" class="header-logo">
 </header>
 
@@ -50,11 +52,36 @@
     </div>
 </div>
 
+<!-- Recommended Settings -->
+<div class="filter-panel" id="settings-panel">
+    <div class="filter-panel-header" onclick="this.parentElement.classList.toggle('open')">
+        <span>Recommended Settings</span>
+        <span class="filter-toggle-arrow"></span>
+    </div>
+    <div class="filter-panel-body">
+        <div id="settings-rows"></div>
+        <div class="filter-actions">
+            <button class="btn" onclick="addSettingsRow()">Add Threshold</button>
+            <button class="btn btn-success" onclick="saveSettings()">Save</button>
+            <span class="filter-preview-count" id="settings-status"></span>
+        </div>
+    </div>
+</div>
+
+<!-- Batch action bar (appears when fires are selected) -->
+<div class="batch-bar" id="batch-bar" style="display:none">
+    <span id="selected-count">0 selected</span>
+    <button class="btn" id="btn-batch-map" onclick="batchMap()">Map Selected (with settings)</button>
+    <button class="btn btn-danger" onclick="batchRemove()">Remove Selected</button>
+    <span class="batch-progress" id="batch-progress"></span>
+</div>
+
 <!-- Table -->
 <div class="table-wrap">
 <table>
     <thead>
         <tr>
+            <th style="width:30px"><input type="checkbox" id="select-all" onchange="toggleSelectAll(this)"></th>
             <th data-key="fire_numbe">Fire Number <span class="sort-arrow"></span></th>
             <th data-key="fire_date">Fire Date <span class="sort-arrow"></span></th>
             <th data-key="fire_year">Year <span class="sort-arrow"></span></th>
@@ -76,6 +103,7 @@ let sortKey = 'fire_size_ha';
 let sortAsc = false;
 let yearSet = new Set();
 let statusSet = new Set();
+let selectedFires = new Set();
 
 const STATUS_ORDER = [
     'pending', 'preparing', 'ready', 'mapping', 'mapped', 'accepted', 'error'
@@ -88,6 +116,7 @@ async function loadFires() {
     const r = await fetch('/api/fires');
     allFires = await r.json();
     buildFilterUI();
+    restoreFilterState();
     render();
 }
 
@@ -119,6 +148,44 @@ function buildFilterUI() {
     }
 }
 
+function saveFilterState() {
+    const state = {
+        years: [...yearSet],
+        statuses: [...statusSet],
+        number: document.getElementById('filter-number').value,
+        minSize: document.getElementById('filter-min-size').value,
+        sortKey, sortAsc,
+    };
+    sessionStorage.setItem('fireFilters', JSON.stringify(state));
+}
+
+function restoreFilterState() {
+    const raw = sessionStorage.getItem('fireFilters');
+    if (!raw) return false;
+    try {
+        const s = JSON.parse(raw);
+        if (s.number) document.getElementById('filter-number').value = s.number;
+        if (s.minSize) document.getElementById('filter-min-size').value = s.minSize;
+        if (s.sortKey) { sortKey = s.sortKey; sortAsc = !!s.sortAsc; }
+        if (s.years) {
+            yearSet.clear();
+            s.years.forEach(y => yearSet.add(y));
+            document.querySelectorAll('#year-filters input').forEach(cb => {
+                const v = parseInt(cb.value) || cb.value;
+                cb.checked = yearSet.has(v);
+            });
+        }
+        if (s.statuses) {
+            statusSet.clear();
+            s.statuses.forEach(st => statusSet.add(st));
+            document.querySelectorAll('#status-filters input').forEach(cb => {
+                cb.checked = statusSet.has(cb.value);
+            });
+        }
+        return true;
+    } catch { return false; }
+}
+
 function applyFilters() {
     // Read checkbox states
     yearSet.clear();
@@ -129,6 +196,7 @@ function applyFilters() {
     document.querySelectorAll('#status-filters input:checked').forEach(cb => {
         statusSet.add(cb.value);
     });
+    saveFilterState();
     render();
 }
 
@@ -173,6 +241,7 @@ function resetFilters() {
     document.querySelectorAll('#status-filters input').forEach(cb => {
         statusSet.add(cb.value);
     });
+    sessionStorage.removeItem('fireFilters');
     render();
 }
 
@@ -223,21 +292,23 @@ function render() {
         const prevBadge = f.previously_accepted
             ? ' <span class="prev-accepted-badge" title="Previously accepted">&#10003;</span>'
             : '';
+        const checked = selectedFires.has(f.fire_numbe) ? 'checked' : '';
         tr.innerHTML = `
+            <td><input type="checkbox" class="fire-check" value="${encodeURIComponent(f.fire_numbe)}" ${checked} onchange="updateSelection()"></td>
             <td><strong>${esc(f.fire_numbe)}</strong></td>
             <td>${esc(f.fire_date)}</td>
             <td>${f.fire_year || ''}</td>
             <td>${f.fire_size_ha != null ? f.fire_size_ha.toLocaleString() : ''}</td>
             <td>${badge}${prevBadge}</td>
-            <td>
-                <a href="/fire/${encodeURIComponent(f.fire_numbe)}" class="btn">Open</a>
-                <button class="btn btn-danger" style="font-size:11px;padding:3px 8px;margin-left:4px"
-                    data-fire="${encodeURIComponent(f.fire_numbe)}"
-                    onclick="removeFire(decodeURIComponent(this.dataset.fire))">Remove</button>
-            </td>
+            <td><a href="/fire/${encodeURIComponent(f.fire_numbe)}" class="btn">Open</a></td>
         `;
         tbody.appendChild(tr);
     }
+    updateSelection();
+
+    // Save filtered+sorted order for Next/Prev navigation on mapping page
+    sessionStorage.setItem('fireOrder',
+        JSON.stringify(filtered.map(f => f.fire_numbe)));
 
     // Update sort arrows
     document.querySelectorAll('thead th[data-key]').forEach(th => {
@@ -265,6 +336,7 @@ document.querySelectorAll('thead th[data-key]').forEach(th => {
         const key = th.dataset.key;
         if (sortKey === key) { sortAsc = !sortAsc; }
         else { sortKey = key; sortAsc = true; }
+        saveFilterState();
         render();
     });
 });
@@ -283,23 +355,279 @@ document.getElementById('filter-min-size').addEventListener('keydown', e => {
 });
 
 // -----------------------------------------------------------------------
-// Remove fire
+// Checkbox selection
 // -----------------------------------------------------------------------
-async function removeFire(fireNumbe) {
-    if (!confirm(`Remove fire "${fireNumbe}" from the list?`)) return;
-    try {
-        await fetch(`/api/fire/${encodeURIComponent(fireNumbe)}/remove`, {method: 'POST'});
-        allFires = allFires.filter(f => f.fire_numbe !== fireNumbe);
-        render();
-    } catch (err) {
-        alert('Failed to remove: ' + err.message);
+function updateSelection() {
+    selectedFires.clear();
+    document.querySelectorAll('.fire-check:checked').forEach(cb => {
+        selectedFires.add(decodeURIComponent(cb.value));
+    });
+    const bar = document.getElementById('batch-bar');
+    const count = selectedFires.size;
+    if (count > 0) {
+        bar.style.display = 'flex';
+        document.getElementById('selected-count').textContent =
+            `${count} selected`;
+    } else {
+        bar.style.display = 'none';
     }
+}
+
+function toggleSelectAll(master) {
+    document.querySelectorAll('.fire-check').forEach(cb => {
+        cb.checked = master.checked;
+    });
+    updateSelection();
+}
+
+// -----------------------------------------------------------------------
+// Batch remove
+// -----------------------------------------------------------------------
+async function batchRemove() {
+    const fires = [...selectedFires];
+    if (!confirm(`Remove ${fires.length} fire(s) from the list?`)) return;
+    for (const fn of fires) {
+        try {
+            await fetch(`/api/fire/${encodeURIComponent(fn)}/remove`,
+                {method: 'POST', headers: {'X-Requested-With': 'fetch'}});
+            allFires = allFires.filter(f => f.fire_numbe !== fn);
+        } catch {}
+    }
+    selectedFires.clear();
+    render();
+}
+
+// -----------------------------------------------------------------------
+// Batch map with recommended settings
+// -----------------------------------------------------------------------
+async function batchMap() {
+    const fires = [...selectedFires].filter(fn => {
+        const f = allFires.find(x => x.fire_numbe === fn);
+        return f && f.status !== 'accepted';
+    });
+    if (fires.length === 0) {
+        alert('No eligible fires selected (accepted fires are skipped).');
+        return;
+    }
+    if (!confirm(`Map ${fires.length} fire(s) with recommended settings?\n\nAccepted fires will be skipped.`)) return;
+
+    document.getElementById('btn-batch-map').disabled = true;
+
+    try {
+        const r = await fetch('/api/batch/map', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+            body: JSON.stringify({fire_numbes: fires}),
+        });
+        const data = await r.json();
+        if (data.error) {
+            alert(data.error);
+            document.getElementById('btn-batch-map').disabled = false;
+            return;
+        }
+        pollBatchStatus();
+    } catch (err) {
+        alert('Failed to start batch: ' + err.message);
+        document.getElementById('btn-batch-map').disabled = false;
+    }
+}
+
+async function pollBatchStatus() {
+    const prog = document.getElementById('batch-progress');
+    try {
+        const r = await fetch('/api/batch/status');
+        const s = await r.json();
+        if (s.running) {
+            const current = s.current_fire ? ` (${s.current_fire})` : '';
+            prog.textContent =
+                `${s.completed}/${s.total} done${current}`;
+            setTimeout(pollBatchStatus, 3000);
+        } else {
+            const errors = (s.errors || []).length;
+            prog.textContent = errors > 0
+                ? `Batch complete. ${errors} error(s).`
+                : 'Batch complete.';
+            document.getElementById('btn-batch-map').disabled = false;
+            setTimeout(() => prog.textContent = '', 8000);
+        }
+    } catch {
+        prog.textContent = '';
+        document.getElementById('btn-batch-map').disabled = false;
+    }
+}
+
+// -----------------------------------------------------------------------
+// Recommended settings
+// -----------------------------------------------------------------------
+const DEFAULT_PARAMS = {
+    padding: 0.1, sample_rate: 0.05, min_samples: 500, max_samples: 30000, seed: 123,
+    embed_bands: '', tsne_perplexity: 60, tsne_learning_rate: 200,
+    tsne_max_iter: 2000, tsne_init: 'pca', tsne_n_components: 2,
+    tsne_random_state: 42, rf_n_estimators: 100, rf_max_depth: 15,
+    rf_max_features: 'sqrt', rf_random_state: 42,
+    controlled_ratio: 0.5, hdbscan_min_samples: 20, contour_width: 1,
+};
+
+let settings = [];
+
+function paramInput(name, val, type, width) {
+    const w = width || 55;
+    return `<label class="sp-label">${name}<input type="${type||'number'}" ` +
+           `data-param="${name}" value="${val}" style="width:${w}px"></label>`;
+}
+
+function renderSettings() {
+    const container = document.getElementById('settings-rows');
+    container.innerHTML = '';
+    settings.forEach((row, i) => {
+        const maxLabel = row.max_ha != null ? row.max_ha + ' ha' : '∞';
+        const p = row.params;
+        const div = document.createElement('div');
+        div.className = 'settings-row';
+        div.dataset.index = i;
+        div.innerHTML = `
+            <div class="settings-row-header">
+                <strong>${row.min_ha} ha → ${maxLabel}</strong>
+                ${settings.length > 1 ? `<button class="btn btn-danger" style="font-size:10px;padding:1px 6px" onclick="removeSettingsRow(${i})">Remove</button>` : ''}
+            </div>
+            <div class="settings-row-params">
+                ${paramInput('padding', p.padding, 'number', 45)}
+                ${paramInput('sample_rate', p.sample_rate, 'number', 55)}
+                ${paramInput('min_samples', p.min_samples, 'number', 55)}
+                ${paramInput('max_samples', p.max_samples, 'number', 60)}
+                ${paramInput('seed', p.seed, 'number', 45)}
+                ${paramInput('embed_bands', p.embed_bands || '', 'text', 65)}
+                ${paramInput('tsne_perplexity', p.tsne_perplexity, 'number', 45)}
+                ${paramInput('tsne_learning_rate', p.tsne_learning_rate, 'number', 50)}
+                ${paramInput('tsne_max_iter', p.tsne_max_iter, 'number', 50)}
+                ${paramInput('controlled_ratio', p.controlled_ratio, 'number', 45)}
+                ${paramInput('hdbscan_min_samples', p.hdbscan_min_samples, 'number', 40)}
+                ${paramInput('rf_n_estimators', p.rf_n_estimators, 'number', 45)}
+                ${paramInput('rf_max_depth', p.rf_max_depth, 'number', 40)}
+                ${paramInput('rf_max_features', p.rf_max_features || 'sqrt', 'text', 50)}
+                ${paramInput('contour_width', p.contour_width, 'number', 35)}
+            </div>
+        `;
+        container.appendChild(div);
+    });
+}
+
+function addSettingsRow() {
+    if (settings.length === 0) {
+        settings.push({min_ha: 0, max_ha: null, params: {...DEFAULT_PARAMS}});
+    } else {
+        const threshStr = prompt('Enter fire size threshold (ha) to split at:');
+        if (!threshStr) return;
+        const thresh = parseFloat(threshStr);
+        if (isNaN(thresh) || thresh <= 0) return;
+        // Find which row this threshold falls into
+        let idx = settings.findIndex(r =>
+            thresh > r.min_ha && (r.max_ha == null || thresh < r.max_ha));
+        if (idx < 0) { alert('Threshold out of range'); return; }
+        const old = settings[idx];
+        const newRow = {min_ha: thresh, max_ha: old.max_ha,
+                        params: {...old.params}};
+        old.max_ha = thresh;
+        settings.splice(idx + 1, 0, newRow);
+    }
+    renderSettings();
+}
+
+function removeSettingsRow(i) {
+    if (settings.length <= 1) return;
+    if (i === 0) {
+        settings[1].min_ha = 0;
+    } else if (i === settings.length - 1) {
+        settings[i - 1].max_ha = null;
+    } else {
+        settings[i + 1].min_ha = settings[i].min_ha;
+    }
+    settings.splice(i, 1);
+    renderSettings();
+}
+
+function readSettingsFromDOM() {
+    document.querySelectorAll('.settings-row').forEach(div => {
+        const i = parseInt(div.dataset.index);
+        div.querySelectorAll('[data-param]').forEach(inp => {
+            const key = inp.dataset.param;
+            let val = inp.value.trim();
+            if (inp.type === 'number' && val !== '') val = parseFloat(val);
+            settings[i].params[key] = val;
+        });
+    });
+}
+
+async function saveSettings() {
+    readSettingsFromDOM();
+    const statusEl = document.getElementById('settings-status');
+    try {
+        await fetch('/api/settings', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+            body: JSON.stringify({settings}),
+        });
+        statusEl.textContent = 'Saved!';
+        setTimeout(() => statusEl.textContent = '', 2000);
+    } catch (err) {
+        statusEl.textContent = 'Save failed';
+    }
+}
+
+async function loadSettings() {
+    try {
+        const r = await fetch('/api/settings');
+        const data = await r.json();
+        if (Array.isArray(data) && data.length > 0) {
+            settings = data;
+        } else {
+            settings = [{min_ha: 0, max_ha: null, params: {...DEFAULT_PARAMS}}];
+        }
+    } catch {
+        settings = [{min_ha: 0, max_ha: null, params: {...DEFAULT_PARAMS}}];
+    }
+    renderSettings();
+}
+
+// -----------------------------------------------------------------------
+// Auto-refresh fire list every 5 seconds
+// -----------------------------------------------------------------------
+async function refreshFires() {
+    try {
+        const r = await fetch('/api/fires');
+        const newFires = await r.json();
+        // Update statuses without disrupting filters
+        const statusMap = {};
+        newFires.forEach(f => statusMap[f.fire_numbe] = f);
+        allFires = newFires;
+        render();
+    } catch {}
+}
+
+setInterval(refreshFires, 5000);
+
+// -----------------------------------------------------------------------
+// Check if batch is already running on page load
+// -----------------------------------------------------------------------
+async function checkBatchOnLoad() {
+    try {
+        const r = await fetch('/api/batch/status');
+        const s = await r.json();
+        if (s.running) {
+            document.getElementById('batch-bar').style.display = 'flex';
+            document.getElementById('selected-count').textContent = 'Batch running';
+            document.getElementById('btn-batch-map').disabled = true;
+            pollBatchStatus();
+        }
+    } catch {}
 }
 
 // -----------------------------------------------------------------------
 // Init
 // -----------------------------------------------------------------------
 loadFires();
+loadSettings();
+checkBatchOnLoad();
 </script>
 </body>
 </html>
