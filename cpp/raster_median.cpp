@@ -110,12 +110,17 @@ int main(int argc, char ** argv){
   // Filter input files: skip any where .bin or .hdr doesn't exist
   int valid_count = 0;
   for(i = 0; i < T; i++){
-    str hfn(hdr_fn(str(argv[i + 1])));
-    if(!exists(hfn) || !exists(str(argv[i + 1]))){
-      printf("skipping %s (missing .bin or .hdr)\n", argv[i + 1]);
+    str bfn(argv[i + 1]);
+    if(!exists(bfn)){
+      printf("skipping %s (missing .bin)\n", argv[i + 1]);
       continue;
     }
-    argv[valid_count + 1] = argv[i + 1]; // compact valid entries
+    str hfn(hdr_fn(bfn));
+    if(!exists(hfn)){
+      printf("skipping %s (missing .hdr)\n", argv[i + 1]);
+      continue;
+    }
+    argv[valid_count + 1] = argv[i + 1];
     valid_count++;
   }
   T = valid_count;
