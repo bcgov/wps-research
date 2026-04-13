@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Fire {{ fire_numbe }}</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header>
+    <h1>{{ fire_numbe }}</h1>
+    <button class="btn btn-danger" style="font-size:11px;padding:3px 10px" onclick="removeFire()">Remove</button>
+    <a href="/" class="back-link">Back to fire list</a>
+</header>
+
+<div class="fire-info-bar">
+    <span>Date: <strong>{{ fire_date }}</strong></span>
+    <span>Year: <strong>{{ fire_year }}</strong></span>
+    <span>Size: <strong>{{ fire_size_ha }} ha</strong></span>
+    <span>Status: <strong id="status-text">{{ fire_status }}</strong></span>
+    <span id="crop-info"></span>
+</div>
+
+<div class="main-content">
+
+    <!-- =============================================================== -->
+    <!-- LEFT: Image viewer                                              -->
+    <!-- =============================================================== -->
+    <div class="image-panel">
+        <div class="image-controls">
+            <select id="view-select" disabled>
+                <option value="">Loading...</option>
+            </select>
+            <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="zoomIn()">+</button>
+            <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="zoomOut()">-</button>
+            <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="zoomReset()">Fit</button>
+            <span class="info" id="zoom-info"></span>
+            <span class="info" id="image-info"></span>
+        </div>
+        <div class="image-area" id="image-area">
+            <span class="loading" id="loading-msg">Preparing fire data...</span>
+            <img id="main-img" style="display:none" alt="Fire view">
+        </div>
+    </div>
+
+    <!-- =============================================================== -->
+    <!-- RIGHT: Parameters + controls + console                          -->
+    <!-- =============================================================== -->
+    <div class="control-panel">
+
+        <div class="params-scroll" id="params-scroll">
+
+            <!-- Crop & Sampling -->
+            <div class="param-section open">
+                <h3 onclick="this.parentElement.classList.toggle('open')">Crop &amp; Sampling</h3>
+                <div class="params-body">
+                    <div class="param-row">
+                        <label>Padding:</label>
+                        <input type="number" id="p-padding" value="{{ padding }}" step="0.05" min="0" max="1">
+                        <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="recrop()">Re-crop</button>
+                    </div>
+                    <div class="param-row">
+                        <label>Sample rate:</label>
+                        <input type="number" id="p-sample_rate" value="{{ sample_rate }}" step="0.01" min="0.001" max="1" oninput="updateSampleSize()">
+                    </div>
+                    <div class="param-row">
+                        <label>Min samples:</label>
+                        <input type="number" id="p-min_samples" value="{{ min_samples }}" oninput="updateSampleSize()">
+                    </div>
+                    <div class="param-row">
+                        <label>Max samples:</label>
+                        <input type="number" id="p-max_samples" value="{{ max_samples }}" oninput="updateSampleSize()">
+                    </div>
+                    <div class="param-row">
+                        <label>Sample size:</label>
+                        <span id="computed-sample-size" style="font-size:12px;color:#333;font-weight:600">—</span>
+                    </div>
+                    <div class="param-row">
+                        <label>Seed:</label>
+                        <input type="number" id="p-seed" value="123">
+                    </div>
+                </div>
+            </div>
+
+            <!-- T-SNE -->
+            <div class="param-section">
+                <h3 onclick="this.parentElement.classList.toggle('open')">T-SNE</h3>
+                <div class="params-body">
+                    <div class="param-row">
+                        <label>Perplexity:</label>
+                        <input type="number" id="p-tsne_perplexity" value="60" step="5">
+                    </div>
+                    <div class="param-row">
+                        <label>Learning rate:</label>
+                        <input type="number" id="p-tsne_learning_rate" value="200" step="50">
+                    </div>
+                    <div class="param-row">
+                        <label>Max iter:</label>
+                        <input type="number" id="p-tsne_max_iter" value="2000" step="100">
+                    </div>
+                    <div class="param-row">
+                        <label>Init:</label>
+                        <select id="p-tsne_init">
+                            <option value="pca" selected>pca</option>
+                            <option value="random">random</option>
+                        </select>
+                    </div>
+                    <div class="param-row">
+                        <label>Components:</label>
+                        <input type="number" id="p-tsne_n_components" value="2" min="2" max="3">
+                    </div>
+                    <div class="param-row">
+                        <label>Random state:</label>
+                        <input type="number" id="p-tsne_random_state" value="42">
+                    </div>
+                    <div class="param-row">
+                        <label>Embed bands:</label>
+                        <input type="text" id="p-embed_bands" placeholder="all  (e.g. 1,2,3)">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Random Forest -->
+            <div class="param-section">
+                <h3 onclick="this.parentElement.classList.toggle('open')">Random Forest</h3>
+                <div class="params-body">
+                    <div class="param-row">
+                        <label>Estimators:</label>
+                        <input type="number" id="p-rf_n_estimators" value="100">
+                    </div>
+                    <div class="param-row">
+                        <label>Max depth:</label>
+                        <input type="number" id="p-rf_max_depth" value="15">
+                    </div>
+                    <div class="param-row">
+                        <label>Max features:</label>
+                        <input type="text" id="p-rf_max_features" value="sqrt">
+                    </div>
+                    <div class="param-row">
+                        <label>Random state:</label>
+                        <input type="number" id="p-rf_random_state" value="42">
+                    </div>
+                </div>
+            </div>
+
+            <!-- HDBSCAN -->
+            <div class="param-section">
+                <h3 onclick="this.parentElement.classList.toggle('open')">HDBSCAN</h3>
+                <div class="params-body">
+                    <div class="param-row">
+                        <label>Ctrl ratio:</label>
+                        <input type="number" id="p-controlled_ratio" value="0.5" step="0.05" min="0.05" max="2">
+                    </div>
+                    <div class="param-row">
+                        <label>Min samples:</label>
+                        <input type="number" id="p-hdbscan_min_samples" value="20">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Display -->
+            <div class="param-section">
+                <h3 onclick="this.parentElement.classList.toggle('open')">Display</h3>
+                <div class="params-body">
+                    <div class="param-row">
+                        <label>Contour width:</label>
+                        <input type="number" id="p-contour_width" value="1" min="1" max="5">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Action buttons -->
+            <div class="action-buttons">
+                <button class="btn" id="btn-map" disabled onclick="startMapping()">
+                    Map Fire
+                </button>
+                <button class="btn btn-success" id="btn-accept" style="display:none" onclick="acceptResult()">
+                    Accept
+                </button>
+                <button class="btn btn-secondary" id="btn-retry" style="display:none" onclick="retryMapping()">
+                    Retry
+                </button>
+            </div>
+
+        </div><!-- /params-scroll -->
+
+        <!-- Drag handle to resize console vs parameters -->
+        <div class="resize-handle" id="resize-handle"></div>
+
+        <!-- Console -->
+        <div class="console-section" id="console-section">
+            <div class="console-header">
+                <h4>Console</h4>
+                <button onclick="document.getElementById('console-output').innerHTML=''">clear</button>
+            </div>
+            <div id="console-output"></div>
+        </div>
+
+    </div><!-- /control-panel -->
+</div><!-- /main-content -->
+
+<script>
+// -----------------------------------------------------------------------
+// Constants
+// -----------------------------------------------------------------------
+const FIRE = {{{ fire_numbe_json }}};
+let cropW = 0, cropH = 0;
+let isMapping = false;
+let hasComparison = false;
+
+// -----------------------------------------------------------------------
+// Console logging
+// -----------------------------------------------------------------------
+function log(msg, cls) {
+    const out = document.getElementById('console-output');
+    const div = document.createElement('div');
+    div.className = 'line' + (cls ? ' line-' + cls : '');
+    div.textContent = msg;
+    out.appendChild(div);
+    out.scrollTop = out.scrollHeight;
+}
+
+// -----------------------------------------------------------------------
+// Sample size computation
+// -----------------------------------------------------------------------
+function updateSampleSize() {
+    if (!cropW || !cropH) return;
+    const rate = parseFloat(document.getElementById('p-sample_rate').value) || 0.05;
+    const mn = parseInt(document.getElementById('p-min_samples').value) || 500;
+    const mx = parseInt(document.getElementById('p-max_samples').value) || 30000;
+    let s = Math.round(cropW * cropH * rate);
+    s = Math.max(mn, Math.min(mx, s));
+    document.getElementById('computed-sample-size').textContent = s.toLocaleString();
+}
+
+// -----------------------------------------------------------------------
+// Prepare fire on page load
+// -----------------------------------------------------------------------
+async function prepareFire(padding) {
+    const loadMsg = document.getElementById('loading-msg');
+    const img = document.getElementById('main-img');
+    loadMsg.style.display = 'block';
+    loadMsg.textContent = 'Preparing fire data...';
+    img.style.display = 'none';
+
+    const body = padding != null ? JSON.stringify({padding}) : '{}';
+
+    try {
+        const r = await fetch(`/api/fire/${FIRE}/prepare`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: body,
+        });
+        const data = await r.json();
+
+        if (data.status === 'error') {
+            loadMsg.textContent = 'Error: ' + (data.error || 'unknown');
+            log('Prepare error: ' + (data.error || 'unknown'), 'error');
+            return;
+        }
+
+        cropW = data.crop_w || 0;
+        cropH = data.crop_h || 0;
+
+        // Populate view dropdown with preview images
+        const sel = document.getElementById('view-select');
+        sel.innerHTML = '';
+        for (const v of (data.views || [])) {
+            const opt = document.createElement('option');
+            opt.value = v;
+            const labels = {pre:'Pre-fire', post:'Post-fire', diff1:'Diff (norm)', diff2:'Diff (ratio)'};
+            opt.textContent = labels[v] || v;
+            sel.appendChild(opt);
+        }
+
+        // Add comparison views if results exist
+        if (data.has_comparison) {
+            const opt = document.createElement('option');
+            opt.value = 'comparison';
+            opt.textContent = 'Comparison (result)';
+            sel.appendChild(opt);
+            hasComparison = true;
+        }
+        if (data.has_brush_comparison) {
+            const opt = document.createElement('option');
+            opt.value = 'brush_comparison';
+            opt.textContent = 'Brush comparison';
+            sel.appendChild(opt);
+        }
+
+        sel.disabled = false;
+
+        // Default view: comparison for accepted/mapped, otherwise post
+        if (data.has_comparison && (data.status === 'accepted' || data.status === 'mapped')) {
+            sel.value = 'comparison';
+        } else if (data.views && data.views.includes('post')) {
+            sel.value = 'post';
+        }
+
+        // Show accept/retry buttons for mapped fires
+        if (data.status === 'mapped') {
+            document.getElementById('btn-accept').style.display = '';
+            document.getElementById('btn-retry').style.display = '';
+        }
+
+        // Status text with previously_accepted indicator
+        const statusEl = document.getElementById('status-text');
+        statusEl.textContent = data.status;
+        if (data.previously_accepted) {
+            statusEl.innerHTML += ' <span class="prev-accepted-badge" title="Previously accepted">&#10003;</span>';
+        }
+
+        document.getElementById('crop-info').innerHTML =
+            `Crop: <strong>${cropW}&times;${cropH} px</strong> &middot; ` +
+            `Hint: <strong>${data.perimeter_type || '?'}</strong> &middot; ` +
+            `Accum: <strong>${data.acc_start || '?'} &rarr; ${data.acc_end || '?'}</strong>`;
+
+        updateSampleSize();
+        switchView();
+
+        document.getElementById('btn-map').disabled = false;
+        log('Fire prepared. Ready to map.', 'success');
+
+    } catch (err) {
+        loadMsg.textContent = 'Error: ' + err.message;
+        log('Prepare failed: ' + err.message, 'error');
+    }
+}
+
+// -----------------------------------------------------------------------
+// Re-crop with new padding
+// -----------------------------------------------------------------------
+async function recrop() {
+    const pad = parseFloat(document.getElementById('p-padding').value);
+    if (isNaN(pad)) return;
+    log(`Re-cropping with padding=${pad}...`);
+    document.getElementById('btn-map').disabled = true;
+    hasComparison = false;
+    const sel = document.getElementById('view-select');
+    const compOpt = sel.querySelector('option[value="comparison"]');
+    if (compOpt) compOpt.remove();
+    const brushOpt = sel.querySelector('option[value="brush_comparison"]');
+    if (brushOpt) brushOpt.remove();
+    await prepareFire(pad);
+}
+
+// -----------------------------------------------------------------------
+// Zoom & Pan state
+// -----------------------------------------------------------------------
+let zoomScale = 1;
+let panX = 0, panY = 0;
+let isDragging = false;
+let dragStartX = 0, dragStartY = 0;
+let dragStartPanX = 0, dragStartPanY = 0;
+
+function updateTransform() {
+    const img = document.getElementById('main-img');
+    img.style.transform = `translate(${panX}px, ${panY}px) scale(${zoomScale})`;
+    document.getElementById('zoom-info').textContent = `${Math.round(zoomScale * 100)}%`;
+}
+
+function zoomFit() {
+    const img = document.getElementById('main-img');
+    const area = document.getElementById('image-area');
+    if (!img.naturalWidth || !img.naturalHeight) return;
+
+    const aW = area.clientWidth;
+    const aH = area.clientHeight;
+    const iW = img.naturalWidth;
+    const iH = img.naturalHeight;
+
+    zoomScale = Math.min(aW / iW, aH / iH);
+    panX = (aW - iW * zoomScale) / 2;
+    panY = (aH - iH * zoomScale) / 2;
+    updateTransform();
+}
+
+function zoomReset() { zoomFit(); }
+
+function zoomIn() {
+    const area = document.getElementById('image-area');
+    const cx = area.clientWidth / 2;
+    const cy = area.clientHeight / 2;
+    applyZoom(cx, cy, 1.3);
+}
+
+function zoomOut() {
+    const area = document.getElementById('image-area');
+    const cx = area.clientWidth / 2;
+    const cy = area.clientHeight / 2;
+    applyZoom(cx, cy, 1 / 1.3);
+}
+
+function applyZoom(cx, cy, factor) {
+    // Zoom towards the point (cx, cy) in container coords
+    const newScale = Math.max(0.1, Math.min(200, zoomScale * factor));
+    const ratio = newScale / zoomScale;
+    panX = cx - ratio * (cx - panX);
+    panY = cy - ratio * (cy - panY);
+    zoomScale = newScale;
+    updateTransform();
+}
+
+// Scroll wheel zoom
+(function() {
+    const area = document.getElementById('image-area');
+
+    area.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const rect = area.getBoundingClientRect();
+        const cx = e.clientX - rect.left;
+        const cy = e.clientY - rect.top;
+        const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+        applyZoom(cx, cy, factor);
+    }, {passive: false});
+
+    // Pan via mouse drag
+    area.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        isDragging = true;
+        dragStartX = e.clientX;
+        dragStartY = e.clientY;
+        dragStartPanX = panX;
+        dragStartPanY = panY;
+        area.classList.add('dragging');
+        e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        panX = dragStartPanX + (e.clientX - dragStartX);
+        panY = dragStartPanY + (e.clientY - dragStartY);
+        updateTransform();
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (!isDragging) return;
+        isDragging = false;
+        area.classList.remove('dragging');
+    });
+})();
+
+// -----------------------------------------------------------------------
+// Switch preview view
+// -----------------------------------------------------------------------
+function switchView() {
+    const view = document.getElementById('view-select').value;
+    if (!view) return;
+
+    const img = document.getElementById('main-img');
+    const loadMsg = document.getElementById('loading-msg');
+
+    if (view === 'comparison') {
+        img.src = `/api/fire/${FIRE}/comparison?t=${Date.now()}`;
+    } else if (view === 'brush_comparison') {
+        img.src = `/api/fire/${FIRE}/brush_comparison?t=${Date.now()}`;
+    } else {
+        img.src = `/api/fire/${FIRE}/preview/${view}?t=${Date.now()}`;
+    }
+
+    img.onload = () => {
+        loadMsg.style.display = 'none';
+        img.style.display = 'block';
+        zoomFit();
+    };
+    img.onerror = () => {
+        loadMsg.style.display = 'block';
+        loadMsg.textContent = `View "${view}" not available`;
+        img.style.display = 'none';
+    };
+}
+
+document.getElementById('view-select').addEventListener('change', switchView);
+
+// -----------------------------------------------------------------------
+// Collect params from the form
+// -----------------------------------------------------------------------
+function getParams() {
+    const v = id => {
+        const el = document.getElementById(id);
+        if (!el) return null;
+        const val = el.value.trim();
+        return val === '' ? null : val;
+    };
+    return {
+        sample_rate:          parseFloat(v('p-sample_rate')) || 0.05,
+        min_samples:          parseInt(v('p-min_samples')) || 500,
+        max_samples:          parseInt(v('p-max_samples')) || 30000,
+        seed:                 parseInt(v('p-seed')) || 123,
+        tsne_perplexity:      parseFloat(v('p-tsne_perplexity')) || 60,
+        tsne_learning_rate:   parseFloat(v('p-tsne_learning_rate')) || 200,
+        tsne_max_iter:        parseInt(v('p-tsne_max_iter')) || 2000,
+        tsne_init:            v('p-tsne_init') || 'pca',
+        tsne_n_components:    parseInt(v('p-tsne_n_components')) || 2,
+        tsne_random_state:    parseInt(v('p-tsne_random_state')) || 42,
+        embed_bands:          v('p-embed_bands'),
+        rf_n_estimators:      parseInt(v('p-rf_n_estimators')) || 100,
+        rf_max_depth:         parseInt(v('p-rf_max_depth')) || 15,
+        rf_max_features:      v('p-rf_max_features') || 'sqrt',
+        rf_random_state:      parseInt(v('p-rf_random_state')) || 42,
+        controlled_ratio:     parseFloat(v('p-controlled_ratio')) || 0.5,
+        hdbscan_min_samples:  parseInt(v('p-hdbscan_min_samples')) || 20,
+        contour_width:        parseInt(v('p-contour_width')) || 1,
+    };
+}
+
+// -----------------------------------------------------------------------
+// Start mapping via fetch + SSE streaming
+// -----------------------------------------------------------------------
+async function startMapping() {
+    if (isMapping) return;
+    isMapping = true;
+
+    document.getElementById('btn-map').disabled = true;
+    document.getElementById('btn-accept').style.display = 'none';
+    document.getElementById('btn-retry').style.display = 'none';
+    document.getElementById('status-text').textContent = 'mapping';
+
+    log('Starting mapping...', 'dim');
+
+    try {
+        const response = await fetch(`/api/fire/${FIRE}/map`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({params: getParams()}),
+        });
+
+        if (!response.ok) {
+            const err = await response.json();
+            log('ERROR: ' + (err.error || response.statusText), 'error');
+            isMapping = false;
+            document.getElementById('btn-map').disabled = false;
+            document.getElementById('status-text').textContent = 'ready';
+            return;
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const {done, value} = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, {stream: true});
+
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                let data;
+                try {
+                    data = JSON.parse(line.slice(6));
+                } catch { continue; }
+
+                if (data.type === 'log') {
+                    log(data.message);
+
+                } else if (data.type === 'complete') {
+                    log('Mapping complete!', 'success');
+                    isMapping = false;
+                    hasComparison = true;
+
+                    const sel = document.getElementById('view-select');
+                    if (!sel.querySelector('option[value="comparison"]')) {
+                        const opt = document.createElement('option');
+                        opt.value = 'comparison';
+                        opt.textContent = 'Comparison (result)';
+                        sel.appendChild(opt);
+                    }
+                    if (!sel.querySelector('option[value="brush_comparison"]')) {
+                        const opt = document.createElement('option');
+                        opt.value = 'brush_comparison';
+                        opt.textContent = 'Brush comparison';
+                        sel.appendChild(opt);
+                    }
+                    sel.value = 'comparison';
+                    switchView();
+
+                    document.getElementById('btn-map').disabled = false;
+                    document.getElementById('btn-accept').style.display = '';
+                    document.getElementById('btn-retry').style.display = '';
+                    document.getElementById('status-text').textContent = 'mapped';
+
+                } else if (data.type === 'error') {
+                    log('ERROR: ' + data.message, 'error');
+                    isMapping = false;
+                    document.getElementById('btn-map').disabled = false;
+                    document.getElementById('status-text').textContent = 'ready';
+                }
+            }
+        }
+
+        if (isMapping) {
+            log('Connection lost during mapping.', 'error');
+            isMapping = false;
+            document.getElementById('btn-map').disabled = false;
+        }
+
+    } catch (err) {
+        log('Mapping error: ' + err.message, 'error');
+        isMapping = false;
+        document.getElementById('btn-map').disabled = false;
+        document.getElementById('status-text').textContent = 'ready';
+    }
+}
+
+// -----------------------------------------------------------------------
+// Accept result
+// -----------------------------------------------------------------------
+async function acceptResult() {
+    log('Saving results to output directory...');
+    document.getElementById('btn-accept').disabled = true;
+
+    try {
+        const r = await fetch(`/api/fire/${FIRE}/accept`, { method: 'POST' });
+        const data = await r.json();
+        if (data.status === 'accepted') {
+            log('Results saved successfully.', 'success');
+            document.getElementById('status-text').textContent = 'accepted';
+            document.getElementById('btn-accept').style.display = 'none';
+            document.getElementById('btn-retry').style.display = 'none';
+        } else {
+            log('Accept error: ' + (data.error || 'unknown'), 'error');
+        }
+    } catch (err) {
+        log('Accept failed: ' + err.message, 'error');
+    }
+    document.getElementById('btn-accept').disabled = false;
+}
+
+// -----------------------------------------------------------------------
+// Retry
+// -----------------------------------------------------------------------
+function retryMapping() {
+    document.getElementById('btn-accept').style.display = 'none';
+    document.getElementById('btn-retry').style.display = 'none';
+    log('--- Adjust parameters above and click Map Fire to retry ---', 'dim');
+}
+
+// -----------------------------------------------------------------------
+// Remove fire
+// -----------------------------------------------------------------------
+async function removeFire() {
+    if (!confirm(`Remove fire "${FIRE}" from the list?\nThis hides it from the fire list. Accepted results are not deleted.`)) return;
+    try {
+        await fetch(`/api/fire/${encodeURIComponent(FIRE)}/remove`, {method: 'POST'});
+        window.location.href = '/';
+    } catch (err) {
+        log('Remove failed: ' + err.message, 'error');
+    }
+}
+
+// -----------------------------------------------------------------------
+// Resizable console / parameter split
+// -----------------------------------------------------------------------
+(function() {
+    const handle = document.getElementById('resize-handle');
+    const console = document.getElementById('console-section');
+    let dragging = false;
+    let startY = 0;
+    let startH = 0;
+
+    handle.addEventListener('mousedown', (e) => {
+        dragging = true;
+        startY = e.clientY;
+        startH = console.offsetHeight;
+        handle.classList.add('active');
+        document.body.style.cursor = 'row-resize';
+        document.body.style.userSelect = 'none';
+        e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!dragging) return;
+        // Dragging up = larger console, dragging down = smaller console
+        const newH = Math.max(80, startH + (startY - e.clientY));
+        console.style.height = newH + 'px';
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (!dragging) return;
+        dragging = false;
+        handle.classList.remove('active');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+    });
+})();
+
+// -----------------------------------------------------------------------
+// Init
+// -----------------------------------------------------------------------
+prepareFire(null);
+</script>
+</body>
+</html>

@@ -1169,7 +1169,7 @@ def process_fire(
         },
         'output': {
             'fire_dir':        fire_dir,
-            'contour_width':  _arg('--contour_width', 0.8, float),
+            'contour_width':  _arg('--contour_width', 1, int),
         },
     }
 
@@ -1273,7 +1273,12 @@ Example
     p.add_argument('--fire_number', nargs='+', default=None,
                    metavar='ID',
                    help='Only process these fire numbers (FIRE_NUMBE). '
-                        'Space-separated, e.g. --fire_number C11659 C11660')
+                        'Supports shell-style globs: * ? [seq]. '
+                        'E.g. --fire_number "G*" C11659 "R10??"')
+    p.add_argument('--min_fire_size', type=float, default=None,
+                   metavar='HA',
+                   help='Only process fires with FIRE_SIZE_ >= this value '
+                        'in hectares (default: no minimum)')
 
     # ---- Output ----
     p.add_argument('--out_dir', default=None,
@@ -1338,8 +1343,8 @@ Example
                    choices=['pca', 'random'])
     p.add_argument('--tsne_n_components',   type=int,   default=2)
     p.add_argument('--tsne_random_state',   type=int,   default=42)
-    p.add_argument('--contour_width',      type=float, default=0.8,
-                   help='Contour line width in figures (default: 0.8)')
+    p.add_argument('--contour_width',      type=int, default=1,
+                   help='Contour line width in pixels (default: 1)')
 
     return p
 
@@ -1393,10 +1398,19 @@ def main(argv=None):
     )
 
     if args.fire_number:
-        wanted = set(args.fire_number)
-        gdf = gdf[gdf['FIRE_NUMBE'].astype(str).isin(wanted)].copy()
+        import fnmatch
+        patterns = args.fire_number
+        mask = gdf['FIRE_NUMBE'].astype(str).apply(
+            lambda name: any(fnmatch.fnmatchcase(name, p) for p in patterns))
+        gdf = gdf[mask].copy()
         _info(f'After --fire_number filter: {len(gdf)} feature(s)  '
-              f'(requested: {sorted(wanted)})')
+              f'(patterns: {patterns})')
+
+    if args.min_fire_size is not None and 'FIRE_SIZE_' in gdf.columns:
+        gdf = gdf[pd.to_numeric(gdf['FIRE_SIZE_'], errors='coerce').fillna(0)
+                  >= args.min_fire_size].copy()
+        _info(f'After --min_fire_size={args.min_fire_size} ha filter: '
+              f'{len(gdf)} feature(s)')
 
     if gdf.empty:
         _warn('No matching polygons found.  Exiting.')
