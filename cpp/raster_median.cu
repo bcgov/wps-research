@@ -49,13 +49,13 @@ nvcc -O3 -arch=sm_89 -std=c++17 raster_medoid.cu misc.cpp -o raster_medoid -lpth
     }                                                                          \
   } while (0)
 
-// ── globals shared with reader threads ────────────────────────────────────── 
+// ── globals shared with reader threads ──────────────────────────────────────
 
 static size_t  g_nrow, g_ncol, g_nband, g_np, g_T;
 static float **g_dat;        // [T][np * nband]  (host, fully loaded)
 static char  **g_fnames;     // input file names
 
-// ── parallel reader thread ────────────────────────────────────────────────── 
+// ── parallel reader thread ──────────────────────────────────────────────────
 
 struct ReadArg { size_t idx; };
 
@@ -71,7 +71,7 @@ static void *reader_thread(void *arg)
   return nullptr;
 }
 
-// ── CUDA kernel ───────────────────────────────────────────────────────────── 
+// ── CUDA kernel ─────────────────────────────────────────────────────────────
 //
 // Layout of d_dat:  d_dat[t * nband * chunk + band * chunk + local_j]
 //   where local_j = j - chunk_start
@@ -130,7 +130,29 @@ int main(int argc, char **argv)
     err("raster_medoid [raster file 1] .. [raster file N] [output file]");
 
   g_T      = (size_t)(argc - 2);
-  g_fnames = argv + 1;          // argv[1..T] are input files
+
+  // ── filter input files: skip any where .bin or .hdr doesn't exist ─────────
+  {
+    int valid_count = 0;
+    for (size_t i = 0; i < g_T; i++) {
+      str bfn(argv[i + 1]);
+      if (!exists(bfn)) {
+        printf("skipping %s (missing .bin)\n", argv[i + 1]);
+        continue;
+      }
+      str hfn(hdr_fn(bfn));
+      if (!exists(hfn)) {
+        printf("skipping %s (missing .hdr)\n", argv[i + 1]);
+        continue;
+      }
+      argv[valid_count + 1] = argv[i + 1];
+      valid_count++;
+    }
+    g_T = valid_count;
+    if (g_T < 1) err("no valid input files");
+  }
+
+  g_fnames = argv + 1;          // argv[1..T] are now valid input files
 
   // ── read headers ──────────────────────────────────────────────────────────
   {
