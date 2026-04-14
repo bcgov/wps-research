@@ -1,6 +1,6 @@
 /* raster_medoid.cu
 
-nvcc -O3 -arch=sm_89 -std=c++17 raster_medoid.cu misc.cpp -o raster_medoid -lpthread
+nvcc -O3 -arch=sm_89 -std=c++17 raster_median.cu misc.cpp -o raster_median -lpthread
 
  *
  * GPU-accelerated median/medoid computation for a stack of rasters.
@@ -65,7 +65,7 @@ static double now_sec() {
 
 static size_t g_nrow, g_ncol, g_nband, g_np, g_T;
 static char **g_fnames;
-static bool   g_use_medoid = false;   // false=median, true=medoid
+static bool   g_use_medoid = false;
 
 static const int CHUNK_ROWS = 256;
 
@@ -136,7 +136,20 @@ static size_t prog_write_rows   = 0;
 static double prog_start_time   = 0;
 static size_t prog_total_chunks = 0;
 static size_t prog_total_rows   = 0;
-static double prog_total_bytes  = 0;
+static double prog_total_mb_read  = 0;  // total input MB
+static double prog_total_mb_write = 0;  // total output MB
+
+// per-chunk MB constants (set once after headers are read)
+static double prog_mb_per_read_row  = 0;
+static double prog_mb_per_write_row = 0;
+
+// per-stage timing for rate calculation
+static double prog_read_elapsed  = 0;
+static double prog_comp_elapsed  = 0;
+static double prog_write_elapsed = 0;
+static double prog_read_last     = 0;
+static double prog_comp_last     = 0;
+static double prog_write_last    = 0;
 
 static void print_progress(const char *stage, size_t stage_chunks,
                            size_t furthest_rows) {
@@ -147,28 +160,30 @@ static void print_progress(const char *stage, size_t stage_chunks,
               ? (double)prog_comp_rows / (double)prog_total_rows : 0;
   double eta = (frac > 0.001) ? elapsed / frac - elapsed : 0;
 
-  double mb_read = (double)prog_read_rows * g_ncol * g_nband * g_T
-                   * sizeof(float) / (1024.0 * 1024.0);
-  double mb_written = (double)prog_write_rows * g_ncol * g_nband
-                      * sizeof(float) / (1024.0 * 1024.0);
-  double rate = (elapsed > 0.1) ? mb_read / elapsed : 0;
+  double mb_read    = (double)prog_read_rows  * prog_mb_per_read_row;
+  double mb_written = (double)prog_write_rows * prog_mb_per_write_row;
+
+  double read_rate  = (prog_read_elapsed  > 0.01) ? mb_read    / prog_read_elapsed  : 0;
+  double comp_rate  = (prog_comp_elapsed  > 0.01) ? mb_read    / prog_comp_elapsed  : 0;  // throughput in input MB/s
+  double write_rate = (prog_write_elapsed > 0.01) ? mb_written / prog_write_elapsed : 0;
 
   int eta_m = (int)(eta / 60);
   int eta_s = (int)(eta) % 60;
 
   printf("\r\033[K"
-         "R %zu/%zu  |  C %zu/%zu  |  W %zu/%zu  "
+         "R %zu/%zu %.0fMB/s  "
+         "C %zu/%zu %.0fMB/s  "
+         "W %zu/%zu %.0fMB/s  "
          "│  rows %zu/%zu (%.1f%%)  "
-         "│  %.0f MB read  %.0f MB written  %.0f MB/s  "
-         "│  ETA %dm%02ds   [%s]",
-         prog_read_chunks, prog_total_chunks,
-         prog_comp_chunks, prog_total_chunks,
-         prog_write_chunks, prog_total_chunks,
-         furthest_rows, prog_total_rows,
-         100.0 * frac,
-         mb_read, mb_written, rate,
-         eta_m, eta_s,
-         stage);
+         "│  R %.0f/%.0fMB  W %.0f/%.0fMB  "
+         "│  ETA %dm%02ds",
+         prog_read_chunks,  prog_total_chunks, read_rate,
+         prog_comp_chunks,  prog_total_chunks, comp_rate,
+         prog_write_chunks, prog_total_chunks, write_rate,
+         furthest_rows, prog_total_rows, 100.0 * frac,
+         mb_read,    prog_total_mb_read,
+         mb_written, prog_total_mb_write,
+         eta_m, eta_s);
 
   fflush(stdout);
   pthread_mutex_unlock(&progress_mtx);
@@ -217,6 +232,7 @@ static void *reader_stage(void *arg)
 {
   ReaderCtx *ctx = (ReaderCtx *)arg;
   size_t total_chunks = (g_nrow + CHUNK_ROWS - 1) / CHUNK_ROWS;
+  double stage_start = now_sec();
 
   for (size_t ci = 0; ci < total_chunks; ++ci) {
     size_t row_start = ci * CHUNK_ROWS;
@@ -260,6 +276,7 @@ static void *reader_stage(void *arg)
     pthread_mutex_lock(&progress_mtx);
     prog_read_chunks++;
     prog_read_rows += nrows;
+    prog_read_elapsed = now_sec() - stage_start;
     pthread_mutex_unlock(&progress_mtx);
     print_progress("read", prog_read_chunks, prog_comp_rows);
 
@@ -284,9 +301,6 @@ __device__ static float device_median(float *vals, int n)
   return (n % 2 == 0) ? (vals[n / 2 - 1] + vals[n / 2]) * 0.5f
                        : vals[n / 2];
 }
-
-// d_dat layout: [t * nband * chunk_pixels + band * chunk_pixels + local_j]
-// d_out layout: [band * chunk_pixels + local_j]
 
 __global__ void median_kernel(
     const float * __restrict__ d_dat,
@@ -321,7 +335,6 @@ __global__ void medoid_kernel(
 
   float *scratch = d_workspace + local_j * T;
 
-  // Step 1: compute per-band median into d_out (temporary)
   for (int k = 0; k < nband; ++k) {
     int valid = 0;
     for (int t = 0; t < T; ++t) {
@@ -332,7 +345,6 @@ __global__ void medoid_kernel(
     d_out[(size_t)k * chunk_pixels + local_j] = device_median(scratch, valid);
   }
 
-  // Step 2: find the timestep whose vector is closest to the median
   int   medoid_idx = -1;
   float min_dist   = 1e30f;
 
@@ -356,7 +368,6 @@ __global__ void medoid_kernel(
     }
   }
 
-  // Step 3: output the medoid vector (or NaN if none found)
   if (medoid_idx >= 0) {
     for (int k = 0; k < nband; ++k) {
       d_out[(size_t)k * chunk_pixels + local_j] =
@@ -387,6 +398,7 @@ static void *compute_stage(void * /*arg*/)
 
   const int THREADS = 256;
   ChunkDesc cd;
+  double stage_start = now_sec();
 
   while (read_to_compute.pop(cd)) {
     size_t h2d_bytes = chunk_max * g_nband * g_T * sizeof(float);
@@ -426,6 +438,7 @@ static void *compute_stage(void * /*arg*/)
     pthread_mutex_lock(&progress_mtx);
     prog_comp_chunks++;
     prog_comp_rows += cd.nrows;
+    prog_comp_elapsed = now_sec() - stage_start;
     pthread_mutex_unlock(&progress_mtx);
     print_progress("compute", prog_comp_chunks, prog_comp_rows);
 
@@ -446,6 +459,7 @@ static void *writer_stage(void *arg)
 {
   FILE *outfp = (FILE *)arg;
   ChunkDesc wd;
+  double stage_start = now_sec();
 
   while (compute_to_write.pop(wd)) {
     for (size_t k = 0; k < g_nband; ++k) {
@@ -465,6 +479,7 @@ static void *writer_stage(void *arg)
     pthread_mutex_lock(&progress_mtx);
     prog_write_chunks++;
     prog_write_rows += wd.nrows;
+    prog_write_elapsed = now_sec() - stage_start;
     pthread_mutex_unlock(&progress_mtx);
     print_progress("write", prog_write_chunks, prog_write_rows);
   }
@@ -509,7 +524,7 @@ int main(int argc, char **argv)
   }
 
   g_T = (size_t)(n_positional - 1);
-  char **pos_argv = argv + arg_start;  // pos_argv[0..g_T-1] = inputs, [g_T] = output
+  char **pos_argv = argv + arg_start;
   char *output_path = pos_argv[g_T];
 
   // ── filter input files ────────────────────────────────────────────────────
@@ -533,7 +548,7 @@ int main(int argc, char **argv)
     if (g_T < 1) err("no valid input files");
   }
 
-  g_fnames = pos_argv;  // pos_argv[0..g_T-1] are now valid inputs
+  g_fnames = pos_argv;
 
   // ── read headers ──────────────────────────────────────────────────────────
   {
@@ -556,15 +571,18 @@ int main(int argc, char **argv)
          g_nrow, g_ncol, g_nband, g_T);
 
   // ── progress init ─────────────────────────────────────────────────────────
-  prog_total_chunks = (g_nrow + CHUNK_ROWS - 1) / CHUNK_ROWS;
-  prog_total_rows   = g_nrow;
-  prog_total_bytes  = (double)g_nrow * g_ncol * g_nband * g_T * sizeof(float);
-  prog_start_time   = now_sec();
+  prog_total_chunks  = (g_nrow + CHUNK_ROWS - 1) / CHUNK_ROWS;
+  prog_total_rows    = g_nrow;
+  prog_mb_per_read_row  = (double)g_ncol * g_nband * g_T * sizeof(float) / (1024.0 * 1024.0);
+  prog_mb_per_write_row = (double)g_ncol * g_nband       * sizeof(float) / (1024.0 * 1024.0);
+  prog_total_mb_read    = (double)g_nrow * prog_mb_per_read_row;
+  prog_total_mb_write   = (double)g_nrow * prog_mb_per_write_row;
+  prog_start_time    = now_sec();
 
   printf("Total: %zu chunks of %d rows, %.2f GiB input, %.2f GiB output\n",
          prog_total_chunks, CHUNK_ROWS,
-         prog_total_bytes / (1024.0*1024.0*1024.0),
-         (double)g_np * g_nband * sizeof(float) / (1024.0*1024.0*1024.0));
+         prog_total_mb_read / 1024.0,
+         prog_total_mb_write / 1024.0);
 
   // ── open output file (truncate if exists) ─────────────────────────────────
   FILE *outfp = fopen(output_path, "w+b");
@@ -576,10 +594,6 @@ int main(int argc, char **argv)
     fwrite(&zero, 1, 1, outfp);
     fflush(outfp);
   }
-
-  // ── start writer thread ───────────────────────────────────────────────────
-  pthread_t writer_tid;
-  pthread_create(&writer_tid, nullptr, writer_stage, outfp);
 
   // ── allocate pinned buffer pool (3 buffers for triple-buffering) ──────────
   const int NUM_BUFS = 3;
@@ -604,7 +618,8 @@ int main(int argc, char **argv)
   rctx.pinned_bufs = pinned_bufs;
   rctx.chunk_max   = chunk_max;
 
-  pthread_t reader_tid, compute_tid;
+  pthread_t reader_tid, compute_tid, writer_tid;
+  pthread_create(&writer_tid,  nullptr, writer_stage,  outfp);
   pthread_create(&reader_tid,  nullptr, reader_stage,  &rctx);
   pthread_create(&compute_tid, nullptr, compute_stage, nullptr);
 
