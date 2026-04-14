@@ -22,6 +22,8 @@ nvcc -O3 -arch=sm_89 -std=c++17 raster_medoid.cu misc.cpp -o raster_medoid -lpth
  *      Stage 3 (WRITE):   Random-access fwrite into pre-allocated output.
  *    Each stage runs in its own thread(s) with producer/consumer queues
  *    so read, compute, and write all overlap.
+ *  • posix_fadvise(DONTNEED) is used after each chunk read/write to evict
+ *    pages from the kernel page cache, preventing unbounded RAM growth.
  *
  * Compile
  * -------
@@ -38,6 +40,7 @@ nvcc -O3 -arch=sm_89 -std=c++17 raster_medoid.cu misc.cpp -o raster_medoid -lpth
 #include <pthread.h>
 #include <queue>
 #include <sys/time.h>
+#include <fcntl.h>
 
 #include <cuda_runtime.h>
 #include <thrust/device_vector.h>
@@ -142,46 +145,37 @@ static double prog_total_mb_write = 0;
 static double prog_mb_per_read_row  = 0;
 static double prog_mb_per_write_row = 0;
 
-// last-chunk rates (MB/s) — updated each time a stage completes a chunk
 static double prog_read_last_rate  = 0;
 static double prog_comp_last_rate  = 0;
 static double prog_write_last_rate = 0;
 
 static void make_progress_bar(char *buf, int width, double frac) {
-  // ▕████████░░░░░░▏
   if (frac < 0) frac = 0;
   if (frac > 1) frac = 1;
   int filled = (int)(frac * width + 0.5);
   if (filled > width) filled = width;
 
   int pos = 0;
-  // U+2595 ▕ (right one-eighth block) — 3 bytes
   buf[pos++] = '\xe2'; buf[pos++] = '\x96'; buf[pos++] = '\x95';
 
   for (int i = 0; i < width; ++i) {
     if (i < filled) {
-      // U+2588 █ (full block) — 3 bytes
       buf[pos++] = '\xe2'; buf[pos++] = '\x96'; buf[pos++] = '\x88';
     } else {
-      // U+2591 ░ (light shade) — 3 bytes
       buf[pos++] = '\xe2'; buf[pos++] = '\x96'; buf[pos++] = '\x91';
     }
   }
-  // U+258F ▏ (left one-eighth block) — 3 bytes
   buf[pos++] = '\xe2'; buf[pos++] = '\x95'; buf[pos++] = '\x8f';
   buf[pos] = '\0';
 }
 
 static void print_progress() {
-  // must be called with progress_mtx held
-
   double frac = (prog_total_rows > 0)
               ? (double)prog_comp_rows / (double)prog_total_rows : 0;
 
   double mb_read    = (double)prog_read_rows  * prog_mb_per_read_row;
   double mb_written = (double)prog_write_rows * prog_mb_per_write_row;
 
-  // ETA based on slowest current stage rate applied to remaining work
   double remaining_mb_read  = prog_total_mb_read  - mb_read;
   double remaining_mb_write = prog_total_mb_write - mb_written;
   double remaining_mb_comp  = prog_total_mb_read  - (double)prog_comp_rows * prog_mb_per_read_row;
@@ -232,19 +226,25 @@ static void *chunk_reader_thread(void *arg)
   ChunkReadArg *a = (ChunkReadArg *)arg;
   size_t offset_floats = a->band * g_nrow * g_ncol + a->row_start * g_ncol;
   size_t count = a->nrows * g_ncol;
+  size_t offset_bytes = offset_floats * sizeof(float);
+  size_t count_bytes  = count * sizeof(float);
 
   FILE *f = fopen(g_fnames[a->file_idx], "rb");
   if (!f) {
     fprintf(stderr, "\nchunk_reader: cannot open %s\n", g_fnames[a->file_idx]);
     exit(1);
   }
-  fseek(f, (long)(offset_floats * sizeof(float)), SEEK_SET);
+  fseek(f, (long)offset_bytes, SEEK_SET);
   size_t got = fread(a->dst, sizeof(float), count, f);
   if (got != count) {
     fprintf(stderr, "\nchunk_reader: short read %s band=%zu row=%zu\n",
             g_fnames[a->file_idx], a->band, a->row_start);
     exit(1);
   }
+
+  // Evict these pages from the kernel page cache
+  posix_fadvise(fileno(f), offset_bytes, count_bytes, POSIX_FADV_DONTNEED);
+
   fclose(f);
   return nullptr;
 }
@@ -501,7 +501,10 @@ static void *writer_stage(void *arg)
 
     for (size_t k = 0; k < g_nband; ++k) {
       size_t offset_floats = k * g_np + wd.row_start * g_ncol;
-      fseek(outfp, (long)(offset_floats * sizeof(float)), SEEK_SET);
+      size_t offset_bytes  = offset_floats * sizeof(float);
+      size_t count_bytes   = wd.chunk_pixels * sizeof(float);
+
+      fseek(outfp, (long)offset_bytes, SEEK_SET);
       size_t written = fwrite(wd.buf + k * wd.chunk_pixels,
                               sizeof(float), wd.chunk_pixels, outfp);
       if (written != wd.chunk_pixels) {
@@ -509,6 +512,9 @@ static void *writer_stage(void *arg)
                 k, wd.row_start);
         exit(1);
       }
+
+      // Evict written pages from the kernel page cache
+      posix_fadvise(fileno(outfp), offset_bytes, count_bytes, POSIX_FADV_DONTNEED);
     }
 
     free(wd.buf);
