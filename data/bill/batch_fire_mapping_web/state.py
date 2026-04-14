@@ -62,6 +62,7 @@ class FireInfo:
     hidden: bool = False
     notes: str = ""
     agreement_pct: float = -1.0   # -1 = not computed
+    console_log: list = field(default_factory=list)  # buffered output lines
 
 
 class AppState:
@@ -157,9 +158,30 @@ class AppState:
 
             # Check if already accepted (canonical dir has comparison PNG)
             status = FireStatus.PENDING
+            notes = ''
+            agreement = -1.0
+            last_params = {}
             canon_dir = os.path.join(self.output_root, fn)
             if os.path.exists(os.path.join(canon_dir, f'{fn}_comparison.png')):
                 status = FireStatus.ACCEPTED
+                # Restore notes, agreement, params from saved YAML
+                params_path = os.path.join(canon_dir, f'{fn}_params.yaml')
+                if os.path.isfile(params_path):
+                    try:
+                        import yaml
+                        with open(params_path) as _pf:
+                            _pd = yaml.safe_load(_pf) or {}
+                        fire_info = _pd.get('fire', {})
+                        notes = fire_info.get('notes', '')
+                        agreement = float(
+                            fire_info.get('agreement_pct', -1) or -1)
+                        # Restore mapping params
+                        for section in ('tsne', 'hdbscan', 'random_forest',
+                                        'sampling', 'crop'):
+                            if section in _pd:
+                                last_params[section] = _pd[section]
+                    except Exception:
+                        pass
 
             self.fires[fn] = FireInfo(
                 fire_numbe=fn,
@@ -167,4 +189,7 @@ class AppState:
                 fire_year=fire_year,
                 fire_size_ha=round(fire_size, 1),
                 status=status,
+                notes=notes,
+                agreement_pct=agreement,
+                last_params=last_params,
             )

@@ -222,6 +222,8 @@ def _batch_map_worker(fire_numbes: list[str]):
 
                 # Map
                 fire.status = FireStatus.MAPPING
+                fire.console_log = []
+                fire.last_params = params
                 state.current_job = {
                     'fire_numbe': fire_numbe,
                     'client_ip': 'batch',
@@ -246,6 +248,7 @@ def _batch_map_worker(fire_numbes: list[str]):
                 for line in iter(proc.stdout.readline, b''):
                     text = line.decode(errors='replace').rstrip()
                     if text:
+                        fire.console_log.append(text)
                         sys.stderr.write(
                             f'[batch] [{fire_numbe}] {text}\n')
                         sys.stderr.flush()
@@ -529,13 +532,21 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
     views = generate_all_previews(crop_bin, cache_dir, fire_numbe)
     fire.available_views = views
 
-    # -- Generate overlay previews if classified raster exists --
+    # -- Copy classified raster from canonical dir if this fire was
+    #    previously accepted (so overlays can be regenerated) --
     clf_path = os.path.join(cache_dir,
                             f'{fire_numbe}_crop.bin_classified.bin')
+    if not os.path.isfile(clf_path):
+        canon_clf = os.path.join(
+            state.output_root, fire_numbe,
+            f'{fire_numbe}_crop.bin_classified.bin')
+        if os.path.isfile(canon_clf):
+            shutil.copy2(canon_clf, clf_path)
+
+    # -- Generate overlay previews --
     if os.path.isfile(clf_path):
         _generate_result_preview(fire)
     elif fire.hint_bin and os.path.isfile(fire.hint_bin):
-        # At least generate the hint overlay
         _overlay_mask_on_post(fire, fire.hint_bin, 'hint', (0.0, 0.8, 0.2))
 
     fire.status = FireStatus.READY
@@ -770,6 +781,9 @@ class FireHandler(BaseHTTPRequestHandler):
         (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/status$'),
          'handle_api_status'),
+        (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/console$'),
+         'handle_api_console'),
         (re.compile(r'^/api/report$'), 'handle_api_report'),
         (re.compile(r'^/static/(?P<path>.+)$'), 'handle_static'),
     ]
@@ -1469,6 +1483,19 @@ class FireHandler(BaseHTTPRequestHandler):
         f = state.fires[fire_numbe]
         self._send_json({'status': f.status.value, 'error': f.error_msg})
 
+    def handle_api_console(self, fire_numbe):
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        f = state.fires[fire_numbe]
+        self._send_json({
+            'status': f.status.value,
+            'lines': f.console_log,
+            'last_params': f.last_params,
+            'agreement_pct': f.agreement_pct,
+        })
+
     def handle_api_notes(self, fire_numbe):
         fire_numbe = unquote(fire_numbe)
         if fire_numbe not in state.fires:
@@ -1538,8 +1565,14 @@ class FireHandler(BaseHTTPRequestHandler):
         self.send_header('X-Accel-Buffering', 'no')
         self.end_headers()
 
+        # Clear console log for fresh mapping
+        fire.console_log = []
+
         def sse(event_type, data):
             payload = json.dumps({'type': event_type, **data})
+            # Buffer for reconnection
+            if event_type == 'log':
+                fire.console_log.append(data.get('message', ''))
             try:
                 self.wfile.write(f'data: {payload}\n\n'.encode())
                 self.wfile.flush()

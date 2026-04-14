@@ -57,10 +57,13 @@
         </div>
     </div>
 
+    <!-- Toggle for control panel -->
+    <button class="panel-toggle" id="panel-toggle" onclick="toggleControlPanel()" title="Toggle panel">&#9654;</button>
+
     <!-- =============================================================== -->
     <!-- RIGHT: Parameters + controls + console                          -->
     <!-- =============================================================== -->
-    <div class="control-panel">
+    <div class="control-panel" id="control-panel">
 
         <div class="params-scroll" id="params-scroll">
 
@@ -362,6 +365,9 @@ async function prepareFire(padding) {
         document.getElementById('btn-map').disabled = false;
         document.getElementById('btn-map-settings').disabled = false;
         log('Fire prepared. Ready to map.', 'success');
+
+        // Restore console and params if fire is mapping or was mapped
+        restoreFireState();
 
     } catch (err) {
         loadMsg.textContent = 'Error: ' + err.message;
@@ -838,6 +844,135 @@ async function removeFire() {
 })();
 
 // -----------------------------------------------------------------------
+// Restore fire state (console, params) on page load
+// -----------------------------------------------------------------------
+async function restoreFireState() {
+    try {
+        const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/console`);
+        const data = await r.json();
+
+        // Restore console output
+        if (data.lines && data.lines.length > 0) {
+            for (const line of data.lines) {
+                log(line);
+            }
+        }
+
+        // Restore last params to form
+        if (data.last_params && Object.keys(data.last_params).length > 0) {
+            const p = data.last_params;
+            const setVal = (id, val) => {
+                const el = document.getElementById(id);
+                if (el && val != null && val !== '') el.value = val;
+            };
+            setVal('p-sample_rate', p.sample_rate);
+            setVal('p-min_samples', p.min_samples);
+            setVal('p-max_samples', p.max_samples);
+            setVal('p-seed', p.seed);
+            setVal('p-embed_bands', p.embed_bands);
+            setVal('p-tsne_perplexity', p.tsne_perplexity);
+            setVal('p-tsne_learning_rate', p.tsne_learning_rate);
+            setVal('p-tsne_max_iter', p.tsne_max_iter);
+            setVal('p-tsne_n_components', p.tsne_n_components);
+            setVal('p-tsne_random_state', p.tsne_random_state);
+            setVal('p-rf_n_estimators', p.rf_n_estimators);
+            setVal('p-rf_max_depth', p.rf_max_depth);
+            setVal('p-rf_max_features', p.rf_max_features);
+            setVal('p-rf_random_state', p.rf_random_state);
+            setVal('p-controlled_ratio', p.controlled_ratio);
+            setVal('p-hdbscan_min_samples', p.hdbscan_min_samples);
+            setVal('p-contour_width', p.contour_width);
+            if (p.tsne_init) {
+                const el = document.getElementById('p-tsne_init');
+                if (el) el.value = p.tsne_init;
+            }
+            updateSampleSize();
+        }
+
+        // Show agreement if available
+        if (data.agreement_pct >= 0) {
+            document.getElementById('agreement-info').innerHTML =
+                `Agreement: <strong>${data.agreement_pct}%</strong>`;
+        }
+
+        // If fire is currently mapping, poll for completion
+        if (data.status === 'mapping') {
+            isMapping = true;
+            document.getElementById('btn-map').disabled = true;
+            document.getElementById('btn-map-settings').disabled = true;
+            document.getElementById('status-text').textContent = 'mapping';
+            log('--- Mapping in progress (reconnected) ---', 'dim');
+            pollMappingStatus();
+        }
+    } catch {}
+}
+
+async function pollMappingStatus() {
+    try {
+        const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/console`);
+        const data = await r.json();
+
+        // Show any new lines since last poll
+        const out = document.getElementById('console-output');
+        const shown = out.querySelectorAll('.line').length;
+        if (data.lines && data.lines.length > shown) {
+            for (let i = shown; i < data.lines.length; i++) {
+                log(data.lines[i]);
+            }
+        }
+
+        if (data.status === 'mapping') {
+            setTimeout(pollMappingStatus, 2000);
+        } else if (data.status === 'mapped') {
+            isMapping = false;
+            hasComparison = true;
+            log('Mapping complete!', 'success');
+
+            // Add result views to dropdowns
+            const newViews = [
+                ['result', 'ML classification'],
+                ['hint', 'Hint perimeter'],
+                ['comparison', 'Comparison (figure)'],
+                ['brush_comparison', 'Brush comparison'],
+            ];
+            for (const selId of ['view-select', 'view-select-right']) {
+                const s = document.getElementById(selId);
+                for (const [val, label] of newViews) {
+                    if (!s.querySelector(`option[value="${val}"]`)) {
+                        const opt = document.createElement('option');
+                        opt.value = val;
+                        opt.textContent = label;
+                        s.appendChild(opt);
+                    }
+                }
+            }
+            document.getElementById('view-select').value = 'post';
+            document.getElementById('view-select-right').value = 'result';
+            switchView();
+            if (splitActive) switchViewRight();
+
+            document.getElementById('btn-map').disabled = false;
+            document.getElementById('btn-map-settings').disabled = false;
+            document.getElementById('btn-accept').style.display = '';
+            document.getElementById('status-text').textContent = 'mapped';
+
+            if (data.agreement_pct >= 0) {
+                document.getElementById('agreement-info').innerHTML =
+                    `Agreement: <strong>${data.agreement_pct}%</strong>`;
+            }
+        } else {
+            // Error or other status
+            isMapping = false;
+            document.getElementById('btn-map').disabled = false;
+            document.getElementById('btn-map-settings').disabled = false;
+            document.getElementById('status-text').textContent = data.status;
+        }
+    } catch {
+        setTimeout(pollMappingStatus, 3000);
+    }
+}
+
+// -----------------------------------------------------------------------
 // Notes
 // -----------------------------------------------------------------------
 async function saveNotes() {
@@ -969,6 +1104,26 @@ function syncRightPane() {
 // -----------------------------------------------------------------------
 // Init
 // -----------------------------------------------------------------------
+// -----------------------------------------------------------------------
+// Collapsible control panel
+// -----------------------------------------------------------------------
+function toggleControlPanel() {
+    const panel = document.getElementById('control-panel');
+    const btn = document.getElementById('panel-toggle');
+    const hidden = panel.style.display === 'none';
+    panel.style.display = hidden ? '' : 'none';
+    btn.innerHTML = hidden ? '&#9654;' : '&#9664;';
+    sessionStorage.setItem('panelHidden', hidden ? '' : '1');
+    // Re-fit images after layout change
+    setTimeout(() => { zoomFit(); if (splitActive) zoomFitRight(); }, 50);
+}
+
+// Restore panel state
+if (sessionStorage.getItem('panelHidden') === '1') {
+    document.getElementById('control-panel').style.display = 'none';
+    document.getElementById('panel-toggle').innerHTML = '&#9664;';
+}
+
 prepareFire(null);
 loadNotes();
 </script>
