@@ -1,6 +1,6 @@
 /* raster_medoid.cu
 
-nvcc -O3 -arch=sm_89 -std=c++17 raster_median.cu misc.cpp -o raster_median -lpthread
+nvcc -O3 -arch=sm_89 -std=c++17 raster_medoid.cu misc.cpp -o raster_medoid -lpthread
 
  *
  * GPU-accelerated median/medoid computation for a stack of rasters.
@@ -136,57 +136,85 @@ static size_t prog_write_rows   = 0;
 static double prog_start_time   = 0;
 static size_t prog_total_chunks = 0;
 static size_t prog_total_rows   = 0;
-static double prog_total_mb_read  = 0;  // total input MB
-static double prog_total_mb_write = 0;  // total output MB
+static double prog_total_mb_read  = 0;
+static double prog_total_mb_write = 0;
 
-// per-chunk MB constants (set once after headers are read)
 static double prog_mb_per_read_row  = 0;
 static double prog_mb_per_write_row = 0;
 
-// per-stage timing for rate calculation
-static double prog_read_elapsed  = 0;
-static double prog_comp_elapsed  = 0;
-static double prog_write_elapsed = 0;
-static double prog_read_last     = 0;
-static double prog_comp_last     = 0;
-static double prog_write_last    = 0;
+// last-chunk rates (MB/s) — updated each time a stage completes a chunk
+static double prog_read_last_rate  = 0;
+static double prog_comp_last_rate  = 0;
+static double prog_write_last_rate = 0;
 
-static void print_progress(const char *stage, size_t stage_chunks,
-                           size_t furthest_rows) {
-  pthread_mutex_lock(&progress_mtx);
+static void make_progress_bar(char *buf, int width, double frac) {
+  // ▕████████░░░░░░▏
+  if (frac < 0) frac = 0;
+  if (frac > 1) frac = 1;
+  int filled = (int)(frac * width + 0.5);
+  if (filled > width) filled = width;
 
-  double elapsed = now_sec() - prog_start_time;
+  int pos = 0;
+  // U+2595 ▕ (right one-eighth block) — 3 bytes
+  buf[pos++] = '\xe2'; buf[pos++] = '\x96'; buf[pos++] = '\x95';
+
+  for (int i = 0; i < width; ++i) {
+    if (i < filled) {
+      // U+2588 █ (full block) — 3 bytes
+      buf[pos++] = '\xe2'; buf[pos++] = '\x96'; buf[pos++] = '\x88';
+    } else {
+      // U+2591 ░ (light shade) — 3 bytes
+      buf[pos++] = '\xe2'; buf[pos++] = '\x96'; buf[pos++] = '\x91';
+    }
+  }
+  // U+258F ▏ (left one-eighth block) — 3 bytes
+  buf[pos++] = '\xe2'; buf[pos++] = '\x95'; buf[pos++] = '\x8f';
+  buf[pos] = '\0';
+}
+
+static void print_progress() {
+  // must be called with progress_mtx held
+
   double frac = (prog_total_rows > 0)
               ? (double)prog_comp_rows / (double)prog_total_rows : 0;
-  double eta = (frac > 0.001) ? elapsed / frac - elapsed : 0;
 
   double mb_read    = (double)prog_read_rows  * prog_mb_per_read_row;
   double mb_written = (double)prog_write_rows * prog_mb_per_write_row;
 
-  double read_rate  = (prog_read_elapsed  > 0.01) ? mb_read    / prog_read_elapsed  : 0;
-  double comp_rate  = (prog_comp_elapsed  > 0.01) ? mb_read    / prog_comp_elapsed  : 0;  // throughput in input MB/s
-  double write_rate = (prog_write_elapsed > 0.01) ? mb_written / prog_write_elapsed : 0;
+  // ETA based on slowest current stage rate applied to remaining work
+  double remaining_mb_read  = prog_total_mb_read  - mb_read;
+  double remaining_mb_write = prog_total_mb_write - mb_written;
+  double remaining_mb_comp  = prog_total_mb_read  - (double)prog_comp_rows * prog_mb_per_read_row;
+
+  double eta_read  = (prog_read_last_rate  > 0.1) ? remaining_mb_read  / prog_read_last_rate  : 9999;
+  double eta_comp  = (prog_comp_last_rate  > 0.1) ? remaining_mb_comp  / prog_comp_last_rate  : 9999;
+  double eta_write = (prog_write_last_rate > 0.1) ? remaining_mb_write / prog_write_last_rate : 9999;
+  double eta = std::max({eta_read, eta_comp, eta_write});
+  if (eta > 9998) eta = 0;
 
   int eta_m = (int)(eta / 60);
   int eta_s = (int)(eta) % 60;
 
-  printf("\r\033[K"
-         "R %zu/%zu %.0fMB/s  "
-         "C %zu/%zu %.0fMB/s  "
-         "W %zu/%zu %.0fMB/s  "
+  char bar[128];
+  make_progress_bar(bar, 15, frac);
+
+  printf("%s  "
+         "R %zu/%zu %4.0fMB/s  "
+         "C %zu/%zu %4.0fMB/s  "
+         "W %zu/%zu %4.0fMB/s  "
          "│  rows %zu/%zu (%.1f%%)  "
          "│  R %.0f/%.0fMB  W %.0f/%.0fMB  "
-         "│  ETA %dm%02ds",
-         prog_read_chunks,  prog_total_chunks, read_rate,
-         prog_comp_chunks,  prog_total_chunks, comp_rate,
-         prog_write_chunks, prog_total_chunks, write_rate,
-         furthest_rows, prog_total_rows, 100.0 * frac,
+         "│  ETA %dm%02ds\n",
+         bar,
+         prog_read_chunks,  prog_total_chunks, prog_read_last_rate,
+         prog_comp_chunks,  prog_total_chunks, prog_comp_last_rate,
+         prog_write_chunks, prog_total_chunks, prog_write_last_rate,
+         prog_comp_rows, prog_total_rows, 100.0 * frac,
          mb_read,    prog_total_mb_read,
          mb_written, prog_total_mb_write,
          eta_m, eta_s);
 
   fflush(stdout);
-  pthread_mutex_unlock(&progress_mtx);
 }
 
 // ── chunk reader thread arg ─────────────────────────────────────────────────
@@ -232,12 +260,13 @@ static void *reader_stage(void *arg)
 {
   ReaderCtx *ctx = (ReaderCtx *)arg;
   size_t total_chunks = (g_nrow + CHUNK_ROWS - 1) / CHUNK_ROWS;
-  double stage_start = now_sec();
 
   for (size_t ci = 0; ci < total_chunks; ++ci) {
     size_t row_start = ci * CHUNK_ROWS;
     size_t nrows = std::min((size_t)CHUNK_ROWS, g_nrow - row_start);
     size_t this_pixels = nrows * g_ncol;
+
+    double t0 = now_sec();
 
     int buf_idx;
     free_buf_pool.pop(buf_idx);
@@ -265,6 +294,9 @@ static void *reader_stage(void *arg)
     free(rtids);
     free(rargs);
 
+    double dt = now_sec() - t0;
+    double chunk_mb = (double)nrows * prog_mb_per_read_row;
+
     ChunkDesc cd;
     cd.buf          = stage;
     cd.row_start    = row_start;
@@ -276,9 +308,9 @@ static void *reader_stage(void *arg)
     pthread_mutex_lock(&progress_mtx);
     prog_read_chunks++;
     prog_read_rows += nrows;
-    prog_read_elapsed = now_sec() - stage_start;
+    prog_read_last_rate = (dt > 0.001) ? chunk_mb / dt : 0;
+    print_progress();
     pthread_mutex_unlock(&progress_mtx);
-    print_progress("read", prog_read_chunks, prog_comp_rows);
 
     read_to_compute.push(cd);
   }
@@ -398,9 +430,10 @@ static void *compute_stage(void * /*arg*/)
 
   const int THREADS = 256;
   ChunkDesc cd;
-  double stage_start = now_sec();
 
   while (read_to_compute.pop(cd)) {
+    double t0 = now_sec();
+
     size_t h2d_bytes = chunk_max * g_nband * g_T * sizeof(float);
     CUDA_CHECK(cudaMemcpy(d_dat, cd.buf, h2d_bytes, cudaMemcpyHostToDevice));
 
@@ -432,15 +465,18 @@ static void *compute_stage(void * /*arg*/)
           cudaMemcpyDeviceToHost));
     }
 
+    double dt = now_sec() - t0;
+    double chunk_mb = (double)cd.nrows * prog_mb_per_read_row;
+
     ChunkDesc wd = cd;
     wd.buf = wbuf;
 
     pthread_mutex_lock(&progress_mtx);
     prog_comp_chunks++;
     prog_comp_rows += cd.nrows;
-    prog_comp_elapsed = now_sec() - stage_start;
+    prog_comp_last_rate = (dt > 0.001) ? chunk_mb / dt : 0;
+    print_progress();
     pthread_mutex_unlock(&progress_mtx);
-    print_progress("compute", prog_comp_chunks, prog_comp_rows);
 
     compute_to_write.push(wd);
   }
@@ -459,9 +495,10 @@ static void *writer_stage(void *arg)
 {
   FILE *outfp = (FILE *)arg;
   ChunkDesc wd;
-  double stage_start = now_sec();
 
   while (compute_to_write.pop(wd)) {
+    double t0 = now_sec();
+
     for (size_t k = 0; k < g_nband; ++k) {
       size_t offset_floats = k * g_np + wd.row_start * g_ncol;
       fseek(outfp, (long)(offset_floats * sizeof(float)), SEEK_SET);
@@ -476,12 +513,15 @@ static void *writer_stage(void *arg)
 
     free(wd.buf);
 
+    double dt = now_sec() - t0;
+    double chunk_mb = (double)wd.nrows * prog_mb_per_write_row;
+
     pthread_mutex_lock(&progress_mtx);
     prog_write_chunks++;
     prog_write_rows += wd.nrows;
-    prog_write_elapsed = now_sec() - stage_start;
+    prog_write_last_rate = (dt > 0.001) ? chunk_mb / dt : 0;
+    print_progress();
     pthread_mutex_unlock(&progress_mtx);
-    print_progress("write", prog_write_chunks, prog_write_rows);
   }
 
   fflush(outfp);
@@ -627,7 +667,7 @@ int main(int argc, char **argv)
   pthread_join(compute_tid, nullptr);
   pthread_join(writer_tid,  nullptr);
 
-  printf("\n\n");
+  printf("\n");
 
   fclose(outfp);
 
