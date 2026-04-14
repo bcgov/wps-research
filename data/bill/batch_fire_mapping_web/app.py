@@ -58,6 +58,104 @@ def _save_sessions():
         pass
 
 
+def _overlay_mask_on_post(fire: 'FireInfo', raster_path: str,
+                          out_name: str, color: tuple):
+    """Overlay a binary raster on the post-fire preview.
+
+    *color* is (r, g, b) floats 0-1 for the tint.
+    Produces a pixel-aligned PNG at the same dimensions as post.png.
+    """
+    try:
+        post_path = os.path.join(fire.cache_dir, 'previews', 'post.png')
+        if not os.path.isfile(post_path) or not os.path.isfile(raster_path):
+            return
+
+        import matplotlib
+        matplotlib.use('Agg')
+        from matplotlib.image import imread, imsave
+        from scipy.ndimage import zoom as scipy_zoom
+
+        post = imread(post_path)
+        if post.ndim == 2:
+            post = np.stack([post] * 3, axis=2)
+
+        ds = gdal.Open(raster_path, gdal.GA_ReadOnly)
+        arr = ds.GetRasterBand(1).ReadAsArray()
+        ds = None
+
+        ph, pw = post.shape[:2]
+        ah, aw = arr.shape
+        if ah != ph or aw != pw:
+            arr = scipy_zoom(
+                arr.astype(np.float32),
+                (ph / ah, pw / aw), order=0)
+
+        mask = arr > 0
+        result = post[:, :, :3].copy()
+        r, g, b = color
+        result[mask, 0] = np.clip(result[mask, 0] * 0.3 + r * 0.7, 0, 1)
+        result[mask, 1] = np.clip(result[mask, 1] * 0.3 + g * 0.7, 0, 1)
+        result[mask, 2] = np.clip(result[mask, 2] * 0.3 + b * 0.7, 0, 1)
+
+        out_path = os.path.join(fire.cache_dir, 'previews', f'{out_name}.png')
+        imsave(out_path, np.clip(result, 0, 1))
+
+        if out_name not in fire.available_views:
+            fire.available_views.append(out_name)
+    except Exception:
+        pass
+
+
+def _generate_result_preview(fire: 'FireInfo'):
+    """Generate pixel-aligned overlay previews after mapping."""
+    clf_path = os.path.join(
+        fire.cache_dir,
+        f'{fire.fire_numbe}_crop.bin_classified.bin')
+    _overlay_mask_on_post(fire, clf_path, 'result', (0.9, 0.1, 0.0))
+
+    # Also generate hint overlay if hint raster exists
+    if fire.hint_bin and os.path.isfile(fire.hint_bin):
+        _overlay_mask_on_post(fire, fire.hint_bin, 'hint', (0.0, 0.8, 0.2))
+
+
+def _compute_agreement(fire: 'FireInfo') -> float:
+    """Compute overlap % between ML classification and hint perimeter.
+
+    Returns percentage (0-100) or -1 if computation fails.
+    """
+    try:
+        clf_path = os.path.join(
+            fire.cache_dir,
+            f'{fire.fire_numbe}_crop.bin_classified.bin')
+        hint_path = fire.hint_bin
+        if not clf_path or not hint_path:
+            return -1.0
+        if not os.path.isfile(clf_path) or not os.path.isfile(hint_path):
+            return -1.0
+
+        ds_clf = gdal.Open(clf_path, gdal.GA_ReadOnly)
+        ds_hint = gdal.Open(hint_path, gdal.GA_ReadOnly)
+        if ds_clf is None or ds_hint is None:
+            return -1.0
+
+        clf = ds_clf.GetRasterBand(1).ReadAsArray()
+        hint = ds_hint.GetRasterBand(1).ReadAsArray()
+        ds_clf = ds_hint = None
+
+        if clf.shape != hint.shape:
+            return -1.0
+
+        clf_mask = clf > 0
+        hint_mask = hint > 0
+        union = np.sum(clf_mask | hint_mask)
+        if union == 0:
+            return 0.0
+        intersection = np.sum(clf_mask & hint_mask)
+        return round(float(intersection / union) * 100, 1)
+    except Exception:
+        return -1.0
+
+
 def _get_recommended_params(fire_size_ha: float) -> dict:
     """Find recommended params for a fire of given size."""
     for row in state.recommended_settings:
@@ -162,9 +260,12 @@ def _batch_map_worker(fire_numbes: list[str]):
                     fire.last_comparison = (
                         comp if os.path.exists(comp) else '')
                     fire.last_params = params
+                    fire.agreement_pct = _compute_agreement(fire)
+                    _generate_result_preview(fire)
                     fire.status = FireStatus.MAPPED
                     sys.stderr.write(
-                        f'[batch] [{fire_numbe}] MAPPED OK\n')
+                        f'[batch] [{fire_numbe}] MAPPED OK '
+                        f'(agreement={fire.agreement_pct}%)\n')
                 else:
                     fire.status = FireStatus.ERROR
                     fire.error_msg = f'Exited with code {rc}'
@@ -428,6 +529,15 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
     views = generate_all_previews(crop_bin, cache_dir, fire_numbe)
     fire.available_views = views
 
+    # -- Generate overlay previews if classified raster exists --
+    clf_path = os.path.join(cache_dir,
+                            f'{fire_numbe}_crop.bin_classified.bin')
+    if os.path.isfile(clf_path):
+        _generate_result_preview(fire)
+    elif fire.hint_bin and os.path.isfile(fire.hint_bin):
+        # At least generate the hint overlay
+        _overlay_mask_on_post(fire, fire.hint_bin, 'hint', (0.0, 0.8, 0.2))
+
     fire.status = FireStatus.READY
 
 
@@ -478,6 +588,8 @@ def _accept_fire_sync(fire_numbe: str) -> str:
                 'fire_size_ha': fire.fire_size_ha,
                 'ml_area_ha': ml_area_ha,
                 'ml_area_m2': ml_area_m2,
+                'agreement_pct': fire.agreement_pct,
+                'notes': fire.notes or '',
             },
             'run': {
                 'timestamp': datetime.datetime.now().isoformat(
@@ -541,6 +653,30 @@ def _accept_fire_sync(fire_numbe: str) -> str:
             os.remove(xml)
         except Exception:
             pass
+
+    # Append to accepted_params.csv for parameter learning
+    try:
+        import csv
+        csv_path = os.path.join(state.output_root, 'accepted_params.csv')
+        write_header = not os.path.isfile(csv_path)
+        row_data = {
+            'fire_numbe': fire_numbe,
+            'fire_size_ha': fire.fire_size_ha,
+            'agreement_pct': fire.agreement_pct,
+            'padding': fire.padding_used,
+            'timestamp': datetime.datetime.now().isoformat(
+                timespec='seconds'),
+        }
+        if fire.last_params:
+            for k, v in fire.last_params.items():
+                row_data[k] = v
+        with open(csv_path, 'a', newline='') as cf:
+            writer = csv.DictWriter(cf, fieldnames=row_data.keys())
+            if write_header:
+                writer.writeheader()
+            writer.writerow(row_data)
+    except Exception:
+        pass
 
     fire.status = FireStatus.ACCEPTED
     fire.previously_accepted = False
@@ -634,6 +770,7 @@ class FireHandler(BaseHTTPRequestHandler):
         (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/status$'),
          'handle_api_status'),
+        (re.compile(r'^/api/report$'), 'handle_api_report'),
         (re.compile(r'^/static/(?P<path>.+)$'), 'handle_static'),
     ]
     ROUTES_POST = [
@@ -652,6 +789,9 @@ class FireHandler(BaseHTTPRequestHandler):
          'handle_api_remove'),
         (re.compile(r'^/api/settings$'), 'handle_api_settings_post'),
         (re.compile(r'^/api/batch/map$'), 'handle_api_batch_map'),
+        (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/notes$'),
+         'handle_api_notes'),
         (re.compile(r'^/api/admin/ip/(?P<action>approve|block|revoke|unblock)$'),
          'handle_api_admin_ip_action'),
     ]
@@ -1023,6 +1163,8 @@ class FireHandler(BaseHTTPRequestHandler):
                 'fire_size_ha': f.fire_size_ha,
                 'status': f.status.value,
                 'previously_accepted': f.previously_accepted,
+                'agreement_pct': f.agreement_pct,
+                'notes': f.notes,
             }
             for f in state.fires.values()
             if not f.hidden
@@ -1327,6 +1469,40 @@ class FireHandler(BaseHTTPRequestHandler):
         f = state.fires[fire_numbe]
         self._send_json({'status': f.status.value, 'error': f.error_msg})
 
+    def handle_api_notes(self, fire_numbe):
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        body = self._read_body()
+        state.fires[fire_numbe].notes = body.get('notes', '')
+        self._send_json({'status': 'saved'})
+
+    def handle_api_report(self):
+        """Generate PDF report of accepted fires and send as download."""
+        from batch_fire_mapping.generate_report import generate_report
+        import tempfile
+        tmp = tempfile.mktemp(suffix='.pdf')
+        pdf = generate_report(state.output_root, tmp)
+        if pdf is None or not os.path.isfile(pdf):
+            self._send_json({'error': 'Report generation failed'}, 500)
+            return
+        try:
+            with open(pdf, 'rb') as f:
+                data = f.read()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/pdf')
+            self.send_header('Content-Length', str(len(data)))
+            self.send_header('Content-Disposition',
+                             'attachment; filename="fire_report.pdf"')
+            self.end_headers()
+            self.wfile.write(data)
+        finally:
+            try:
+                os.remove(pdf)
+            except Exception:
+                pass
+
     def handle_api_remove(self, fire_numbe):
         fire_numbe = unquote(fire_numbe)
         if fire_numbe not in state.fires:
@@ -1435,11 +1611,14 @@ class FireHandler(BaseHTTPRequestHandler):
                     fire.last_comparison = (
                         comp if os.path.exists(comp) else '')
                     fire.last_params = params
+                    fire.agreement_pct = _compute_agreement(fire)
+                    _generate_result_preview(fire)
                     fire.status = FireStatus.MAPPED
                     sse('complete', {
                         'comparison_url': (
                             f'/api/fire/{fire_numbe}/comparison'
                             f'?t={int(time.time())}'),
+                        'agreement_pct': fire.agreement_pct,
                     })
                 else:
                     fire.status = FireStatus.READY

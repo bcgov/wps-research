@@ -60,6 +60,8 @@ class FireInfo:
     # Tracking
     previously_accepted: bool = False
     hidden: bool = False
+    notes: str = ""
+    agreement_pct: float = -1.0   # -1 = not computed
 
 
 class AppState:
@@ -131,10 +133,15 @@ class AppState:
 
             # Parse fire date
             raw = row.get('FIRE_DATE', '')
-            if hasattr(raw, 'strftime'):
-                fire_date = raw.strftime('%Y-%m-%d')
-            else:
-                fire_date = str(raw).split()[0] if raw else ''
+            try:
+                if hasattr(raw, 'strftime') and pd.notna(raw):
+                    fire_date = raw.strftime('%Y-%m-%d')
+                elif raw and pd.notna(raw):
+                    fire_date = str(raw).split()[0]
+                else:
+                    fire_date = ''
+            except (ValueError, TypeError):
+                fire_date = ''
 
             # Parse fire year
             try:

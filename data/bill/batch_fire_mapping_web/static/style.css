@@ -381,6 +381,21 @@ tbody tr:hover { background: #f5f8fc; }
     color: #6b6b73;
 }
 
+.image-viewer-container {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+}
+
+.image-viewer-container.split .image-area {
+    flex: 1;
+    border-right: 2px solid #555;
+}
+
+.image-viewer-container.split .image-area:last-child {
+    border-right: none;
+}
+
 .image-area {
     flex: 1;
     overflow: hidden;
