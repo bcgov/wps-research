@@ -15,6 +15,7 @@
         <span id="fire-count">{{ n_fires }} fires</span>
     </span>
     {{{ admin_link }}}
+    <button class="btn btn-success" style="font-size:11px;padding:3px 10px" onclick="downloadReport()">PDF Report</button>
     <a href="/logout" class="btn btn-secondary" style="font-size:11px;padding:3px 10px">Logout</a>
     <img src="/static/BC-Wildfire-Service-logo.png" alt="BC Wildfire Service" class="header-logo">
 </header>
@@ -86,6 +87,7 @@
             <th data-key="fire_date">Fire Date <span class="sort-arrow"></span></th>
             <th data-key="fire_year">Year <span class="sort-arrow"></span></th>
             <th data-key="fire_size_ha">Size (ha) <span class="sort-arrow"></span></th>
+            <th data-key="agreement_pct">Agreement <span class="sort-arrow"></span></th>
             <th data-key="status">Status <span class="sort-arrow"></span></th>
             <th>Action</th>
         </tr>
@@ -293,12 +295,15 @@ function render() {
             ? ' <span class="prev-accepted-badge" title="Previously accepted">&#10003;</span>'
             : '';
         const checked = selectedFires.has(f.fire_numbe) ? 'checked' : '';
+        const agr = f.agreement_pct >= 0 ? f.agreement_pct + '%' : '';
+        const noteIcon = f.notes ? ` <span title="${esc(f.notes)}" style="cursor:help;color:#888">&#9998;</span>` : '';
         tr.innerHTML = `
             <td><input type="checkbox" class="fire-check" value="${encodeURIComponent(f.fire_numbe)}" ${checked} onchange="updateSelection()"></td>
-            <td><strong>${esc(f.fire_numbe)}</strong></td>
+            <td><strong>${esc(f.fire_numbe)}</strong>${noteIcon}</td>
             <td>${esc(f.fire_date)}</td>
             <td>${f.fire_year || ''}</td>
             <td>${f.fire_size_ha != null ? f.fire_size_ha.toLocaleString() : ''}</td>
+            <td>${agr}</td>
             <td>${badge}${prevBadge}</td>
             <td><a href="/fire/${encodeURIComponent(f.fire_numbe)}" class="btn">Open</a></td>
         `;
@@ -605,6 +610,13 @@ async function refreshFires() {
 }
 
 setInterval(refreshFires, 5000);
+
+// -----------------------------------------------------------------------
+// Download PDF report of accepted fires
+// -----------------------------------------------------------------------
+function downloadReport() {
+    window.location.href = '/api/report';
+}
 
 // -----------------------------------------------------------------------
 // Check if batch is already running on page load

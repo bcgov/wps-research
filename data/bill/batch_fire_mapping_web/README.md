@@ -241,7 +241,9 @@ The file `recommended_settings.yaml` in the package directory defines parameter 
 
 **Table**:
 - Sortable table of all fires from the shapefile. Click any column header to sort.
+- Columns: checkbox, fire number, fire date, year, size (ha), **agreement %** (IoU between ML classification and hint perimeter), status, action.
 - Each row has a **checkbox** for batch selection and an **Open** button for individual fire mapping.
+- A pencil icon appears next to the fire number if the fire has notes.
 
 **Checkbox selection and batch actions**:
 - Select individual fires with checkboxes, or use the header checkbox to select/deselect all visible fires.
@@ -263,6 +265,7 @@ The file `recommended_settings.yaml` in the package directory defines parameter 
 - Save updates in-memory for the current server session (not written to disk).
 
 **Other features**:
+- **PDF Report** button: generates a PDF report of all accepted fires and downloads it to your local device.
 - **Admin** button (admin only): opens the admin dashboard.
 - **Logout** button: clears session, returns to login page.
 - Status badges: green = accepted, blue = mapped, yellow = ready, gray = pending, red = error.
@@ -285,7 +288,8 @@ The file `recommended_settings.yaml` in the package directory defines parameter 
 - Dropdown to switch between preview images (post, pre, diff) and result images (comparison, brush comparison).
 - Scroll wheel to zoom in/out (zooms towards cursor position).
 - Click and drag to pan.
-- Toolbar buttons: **+** (zoom in), **-** (zoom out), **Fit** (reset to fit window).
+- Toolbar buttons: **+** (zoom in), **-** (zoom out), **Fit** (reset to fit window), **Split** (toggle side-by-side view).
+- **Split view**: shows the selected preview on the left and the comparison result on the right, with synchronized zoom and pan. Useful for evaluating results against the original imagery.
 - `image-rendering: pixelated` for crisp pixels at all zoom levels -- important for small fires.
 
 **Parameters** (right panel, collapsible sections):
@@ -294,6 +298,7 @@ The file `recommended_settings.yaml` in the package directory defines parameter 
 - **Random Forest**: number of estimators, max depth, max features, random state.
 - **HDBSCAN**: controlled ratio, min samples.
 - **Display**: contour width (integer pixels).
+- **Notes**: free-text field for annotations (e.g., "cloud contamination", "re-check in spring"). Auto-saved, persisted to params YAML on Accept, visible as a pencil icon in the fire list.
 
 **Action buttons**:
 - **Map Fire**: maps using the parameters currently shown in the form.
@@ -345,6 +350,7 @@ All outputs are written under `--out_dir` (or the raster directory if not set).
     fire_status.yaml                        # Status index for all fires
     access_control.yaml                     # Persistent approved/blocked IP list
     sessions.yaml                           # Active login sessions (survives restarts)
+    accepted_params.csv                     # Parameter learning log (appended on Accept)
     .web_cache/                             # Temporary working files (safe to delete)
         <FIRE_NUMBE>/
             *_crop.bin / .hdr               # Cropped raster
@@ -370,6 +376,7 @@ All outputs are written under `--out_dir` (or the raster directory if not set).
 | Accepted results | `<FIRE_NUMBE>/` | Accept button is clicked. Includes `_params.yaml` with ML area estimate. |
 | Access control | `access_control.yaml` | First admin login. Updated on every IP approve/block/revoke. |
 | Sessions | `sessions.yaml` | Each login. Cleaned up on startup (expired sessions removed). |
+| Parameter log | `accepted_params.csv` | Each Accept. Appends fire size + all parameters used, for tuning recommended settings over time. |
 | VIIRS downloads | `<raster_dir>/<raster_name>_VIIRS/` | VIIRS download step. Stored next to the raster, shared with `batch_fire_mapping`. |
 
 Accepted fire folders have the same structure and file names as the `batch_fire_mapping` CLI output and are fully compatible. The `fire_status.yaml` index is also compatible -- web entries include `source: web`.

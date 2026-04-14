@@ -22,6 +22,7 @@
     <span>Year: <strong>{{ fire_year }}</strong></span>
     <span>Size: <strong>{{ fire_size_ha }} ha</strong></span>
     <span>Status: <strong id="status-text">{{ fire_status }}</strong></span>
+    <span id="agreement-info"></span>
     <span id="crop-info"></span>
 </div>
 
@@ -35,15 +36,24 @@
             <select id="view-select" disabled>
                 <option value="">Loading...</option>
             </select>
+            <select id="view-select-right" disabled style="display:none" onchange="switchViewRight()">
+                <option value="">Right pane...</option>
+            </select>
             <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="zoomIn()">+</button>
             <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="zoomOut()">-</button>
             <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="zoomReset()">Fit</button>
+            <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" id="btn-split" onclick="toggleSplit()">Split</button>
             <span class="info" id="zoom-info"></span>
             <span class="info" id="image-info"></span>
         </div>
-        <div class="image-area" id="image-area">
-            <span class="loading" id="loading-msg">Preparing fire data...</span>
-            <img id="main-img" style="display:none" alt="Fire view">
+        <div class="image-viewer-container" id="image-viewer-container">
+            <div class="image-area" id="image-area">
+                <span class="loading" id="loading-msg">Preparing fire data...</span>
+                <img id="main-img" style="display:none" alt="Fire view">
+            </div>
+            <div class="image-area" id="image-area-right" style="display:none">
+                <img id="right-img" style="display:none" alt="Comparison view">
+            </div>
         </div>
     </div>
 
@@ -173,6 +183,17 @@
                 </div>
             </div>
 
+            <!-- Notes -->
+            <div class="param-section open">
+                <h3 onclick="this.parentElement.classList.toggle('open')">Notes</h3>
+                <div class="params-body">
+                    <textarea id="fire-notes" rows="2"
+                        style="width:100%;font-size:12px;padding:4px 6px;border:1px solid #ccc;border-radius:3px;resize:vertical"
+                        placeholder="Add notes about this fire..."
+                        onchange="saveNotes()"></textarea>
+                </div>
+            </div>
+
             <!-- Action buttons -->
             <div class="action-buttons">
                 <button class="btn" id="btn-map" disabled onclick="startMapping()">
@@ -273,7 +294,7 @@ async function prepareFire(padding) {
         for (const v of (data.views || [])) {
             const opt = document.createElement('option');
             opt.value = v;
-            const labels = {pre:'Pre-fire', post:'Post-fire', diff1:'Diff (norm)', diff2:'Diff (ratio)'};
+            const labels = {pre:'Pre-fire', post:'Post-fire', diff1:'Diff (norm)', diff2:'Diff (ratio)', result:'ML classification', hint:'Hint perimeter'};
             opt.textContent = labels[v] || v;
             sel.appendChild(opt);
         }
@@ -295,11 +316,27 @@ async function prepareFire(padding) {
 
         sel.disabled = false;
 
-        // Default view: comparison for accepted/mapped, otherwise post
-        if (data.has_comparison && (data.status === 'accepted' || data.status === 'mapped')) {
-            sel.value = 'comparison';
-        } else if (data.views && data.views.includes('post')) {
+        // Mirror options to right-pane dropdown
+        const selR = document.getElementById('view-select-right');
+        selR.innerHTML = '';
+        for (const opt of sel.options) {
+            const o2 = document.createElement('option');
+            o2.value = opt.value;
+            o2.textContent = opt.textContent;
+            selR.appendChild(o2);
+        }
+        selR.disabled = false;
+
+        // Default views: left=post, right=result overlay (or comparison)
+        if (data.views && data.views.includes('post')) {
             sel.value = 'post';
+        }
+        if (data.views && data.views.includes('result')) {
+            selR.value = 'result';
+        } else if (data.has_comparison) {
+            selR.value = 'comparison';
+        } else if (data.views && data.views.includes('pre')) {
+            selR.value = 'pre';
         }
 
         // Show accept/retry buttons for mapped fires
@@ -362,6 +399,7 @@ function updateTransform() {
     const img = document.getElementById('main-img');
     img.style.transform = `translate(${panX}px, ${panY}px) scale(${zoomScale})`;
     document.getElementById('zoom-info').textContent = `${Math.round(zoomScale * 100)}%`;
+    syncRightPane();
 }
 
 function zoomFit() {
@@ -567,26 +605,37 @@ async function startMapping() {
                     isMapping = false;
                     hasComparison = true;
 
-                    const sel = document.getElementById('view-select');
-                    if (!sel.querySelector('option[value="comparison"]')) {
-                        const opt = document.createElement('option');
-                        opt.value = 'comparison';
-                        opt.textContent = 'Comparison (result)';
-                        sel.appendChild(opt);
+                    // Add result options to both dropdowns
+                    const newViews = [
+                        ['result', 'Result overlay'],
+                        ['comparison', 'Comparison (figure)'],
+                        ['brush_comparison', 'Brush comparison'],
+                    ];
+                    for (const selId of ['view-select', 'view-select-right']) {
+                        const s = document.getElementById(selId);
+                        for (const [val, label] of newViews) {
+                            if (!s.querySelector(`option[value="${val}"]`)) {
+                                const opt = document.createElement('option');
+                                opt.value = val;
+                                opt.textContent = label;
+                                s.appendChild(opt);
+                            }
+                        }
                     }
-                    if (!sel.querySelector('option[value="brush_comparison"]')) {
-                        const opt = document.createElement('option');
-                        opt.value = 'brush_comparison';
-                        opt.textContent = 'Brush comparison';
-                        sel.appendChild(opt);
-                    }
-                    sel.value = 'comparison';
+                    document.getElementById('view-select').value = 'post';
+                    document.getElementById('view-select-right').value = 'result';
                     switchView();
+                    if (splitActive) switchViewRight();
 
                     document.getElementById('btn-map').disabled = false;
                     document.getElementById('btn-map-settings').disabled = false;
                     document.getElementById('btn-accept').style.display = '';
-                            document.getElementById('status-text').textContent = 'mapped';
+                    document.getElementById('status-text').textContent = 'mapped';
+                    if (data.agreement_pct >= 0) {
+                        document.getElementById('agreement-info').innerHTML =
+                            `Agreement: <strong>${data.agreement_pct}%</strong>`;
+                    }
+                    updateRightImage();
 
                 } else if (data.type === 'error') {
                     log('ERROR: ' + data.message, 'error');
@@ -789,6 +838,111 @@ async function removeFire() {
 })();
 
 // -----------------------------------------------------------------------
+// Notes
+// -----------------------------------------------------------------------
+async function saveNotes() {
+    const notes = document.getElementById('fire-notes').value;
+    try {
+        await fetch(`/api/fire/${encodeURIComponent(FIRE)}/notes`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+            body: JSON.stringify({notes}),
+        });
+    } catch {}
+}
+
+async function loadNotes() {
+    // Notes come with the fire list API; fetch status endpoint for this fire
+    try {
+        const r = await fetch(`/api/fires`);
+        const fires = await r.json();
+        const f = fires.find(x => x.fire_numbe === FIRE);
+        if (f && f.notes) {
+            document.getElementById('fire-notes').value = f.notes;
+        }
+        if (f && f.agreement_pct >= 0) {
+            document.getElementById('agreement-info').innerHTML =
+                `Agreement: <strong>${f.agreement_pct}%</strong>`;
+        }
+    } catch {}
+}
+
+// -----------------------------------------------------------------------
+// Split view (side-by-side)
+// -----------------------------------------------------------------------
+let splitActive = false;
+let rightZoomScale = 1, rightPanX = 0, rightPanY = 0;
+
+function toggleSplit() {
+    splitActive = !splitActive;
+    const container = document.getElementById('image-viewer-container');
+    const rightArea = document.getElementById('image-area-right');
+    const rightSel = document.getElementById('view-select-right');
+    const btn = document.getElementById('btn-split');
+
+    if (splitActive) {
+        container.classList.add('split');
+        rightArea.style.display = '';
+        rightSel.style.display = '';
+        btn.style.background = '#0066cc';
+        btn.style.color = '#fff';
+        switchViewRight();
+    } else {
+        container.classList.remove('split');
+        rightArea.style.display = 'none';
+        rightSel.style.display = 'none';
+        btn.style.background = '';
+        btn.style.color = '';
+    }
+}
+
+function switchViewRight() {
+    if (!splitActive) return;
+    const view = document.getElementById('view-select-right').value;
+    if (!view) return;
+    const rightImg = document.getElementById('right-img');
+
+    if (view === 'comparison') {
+        rightImg.src = `/api/fire/${FIRE}/comparison?t=${Date.now()}`;
+    } else if (view === 'brush_comparison') {
+        rightImg.src = `/api/fire/${FIRE}/brush_comparison?t=${Date.now()}`;
+    } else {
+        rightImg.src = `/api/fire/${FIRE}/preview/${view}?t=${Date.now()}`;
+    }
+
+    rightImg.onload = () => {
+        rightImg.style.display = 'block';
+        zoomFitRight();
+    };
+    rightImg.onerror = () => {
+        rightImg.style.display = 'none';
+    };
+}
+
+function updateRightImage() {
+    switchViewRight();
+}
+
+function zoomFitRight() {
+    const img = document.getElementById('right-img');
+    const area = document.getElementById('image-area-right');
+    if (!img.naturalWidth || !img.naturalHeight) return;
+    rightZoomScale = Math.min(
+        area.clientWidth / img.naturalWidth,
+        area.clientHeight / img.naturalHeight);
+    rightPanX = (area.clientWidth - img.naturalWidth * rightZoomScale) / 2;
+    rightPanY = (area.clientHeight - img.naturalHeight * rightZoomScale) / 2;
+    img.style.transform = `translate(${rightPanX}px, ${rightPanY}px) scale(${rightZoomScale})`;
+}
+
+// Sync zoom/pan: when left pane zooms, match in right pane
+function syncRightPane() {
+    if (!splitActive) return;
+    const rightImg = document.getElementById('right-img');
+    rightImg.style.transform = `translate(${panX}px, ${panY}px) scale(${zoomScale})`;
+}
+
+// -----------------------------------------------------------------------
 // Prev / Next navigation from fire list order
 // -----------------------------------------------------------------------
 (function() {
@@ -816,6 +970,7 @@ async function removeFire() {
 // Init
 // -----------------------------------------------------------------------
 prepareFire(null);
+loadNotes();
 </script>
 </body>
 </html>
