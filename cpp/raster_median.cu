@@ -5,8 +5,16 @@ nvcc -O3 -arch=sm_89 -std=c++17 raster_medoid.cu misc.cpp -o raster_medoid -lpth
  *
  * GPU-accelerated median/medoid computation for a stack of rasters.
  *
- * Strategy (revised – triple-buffered pipeline, low RAM)
- * -------------------------------------------------------
+ * Usage
+ * -----
+ *  raster_medoid [options] [raster1.bin] .. [rasterN.bin] [output.bin]
+ *
+ *  Options:
+ *    -medoid    Compute medoid (vector closest to median) instead of
+ *               per-band median.  Default is median.
+ *
+ * Strategy (triple-buffered pipeline, low RAM)
+ * ---------------------------------------------
  *  • The image is divided into chunks of CHUNK_ROWS rows.
  *  • A 3-stage asynchronous pipeline runs concurrently:
  *      Stage 1 (READ):    Parallel threaded reads via fseek into staging buf.
@@ -57,18 +65,19 @@ static double now_sec() {
 
 static size_t g_nrow, g_ncol, g_nband, g_np, g_T;
 static char **g_fnames;
+static bool   g_use_medoid = false;   // false=median, true=medoid
 
 static const int CHUNK_ROWS = 256;
 
 // ── chunk descriptor ────────────────────────────────────────────────────────
 
 struct ChunkDesc {
-  float *buf;           // pinned staging buffer (owned by buffer pool)
+  float *buf;
   size_t row_start;
   size_t nrows;
-  size_t chunk_pixels;  // nrows * ncol
-  size_t chunk_max;     // CHUNK_ROWS * ncol (stride in staging buf)
-  int    buf_idx;       // which pinned buffer this uses (for recycling)
+  size_t chunk_pixels;
+  size_t chunk_max;
+  int    buf_idx;
 };
 
 // ── generic thread-safe queue ───────────────────────────────────────────────
@@ -111,12 +120,8 @@ struct TSQueue {
   }
 };
 
-// ── queues between pipeline stages ──────────────────────────────────────────
-
-static TSQueue<ChunkDesc> read_to_compute;   // reader  -> compute
-static TSQueue<ChunkDesc> compute_to_write;  // compute -> writer
-
-// buffer pool: recycle pinned staging buffers
+static TSQueue<ChunkDesc> read_to_compute;
+static TSQueue<ChunkDesc> compute_to_write;
 static TSQueue<int> free_buf_pool;
 
 // ── progress tracking ───────────────────────────────────────────────────────
@@ -131,7 +136,7 @@ static size_t prog_write_rows   = 0;
 static double prog_start_time   = 0;
 static size_t prog_total_chunks = 0;
 static size_t prog_total_rows   = 0;
-static double prog_total_bytes  = 0;  // total input bytes to read
+static double prog_total_bytes  = 0;
 
 static void print_progress(const char *stage, size_t stage_chunks,
                            size_t furthest_rows) {
@@ -204,8 +209,8 @@ static void *chunk_reader_thread(void *arg)
 // ── reader stage thread ─────────────────────────────────────────────────────
 
 struct ReaderCtx {
-  float **pinned_bufs;  // array of pinned staging buffers
-  size_t chunk_max;     // CHUNK_ROWS * ncol
+  float **pinned_bufs;
+  size_t chunk_max;
 };
 
 static void *reader_stage(void *arg)
@@ -218,12 +223,10 @@ static void *reader_stage(void *arg)
     size_t nrows = std::min((size_t)CHUNK_ROWS, g_nrow - row_start);
     size_t this_pixels = nrows * g_ncol;
 
-    // get a free pinned buffer
     int buf_idx;
     free_buf_pool.pop(buf_idx);
     float *stage = ctx->pinned_bufs[buf_idx];
 
-    // parallel read: one thread per (file, band)
     size_t n_rt = g_T * g_nband;
     pthread_t *rtids = (pthread_t *)malloc(sizeof(pthread_t) * n_rt);
     ChunkReadArg *rargs = (ChunkReadArg *)malloc(sizeof(ChunkReadArg) * n_rt);
@@ -267,9 +270,8 @@ static void *reader_stage(void *arg)
   return nullptr;
 }
 
-// ── compute stage thread ────────────────────────────────────────────────────
+// ── CUDA kernels ────────────────────────────────────────────────────────────
 
-// CUDA kernel (unchanged)
 __device__ static float device_median(float *vals, int n)
 {
   for (int i = 1; i < n; ++i) {
@@ -282,6 +284,9 @@ __device__ static float device_median(float *vals, int n)
   return (n % 2 == 0) ? (vals[n / 2 - 1] + vals[n / 2]) * 0.5f
                        : vals[n / 2];
 }
+
+// d_dat layout: [t * nband * chunk_pixels + band * chunk_pixels + local_j]
+// d_out layout: [band * chunk_pixels + local_j]
 
 __global__ void median_kernel(
     const float * __restrict__ d_dat,
@@ -305,11 +310,72 @@ __global__ void median_kernel(
   }
 }
 
+__global__ void medoid_kernel(
+    const float * __restrict__ d_dat,
+    float       * __restrict__ d_out,
+    int T, int nband, int chunk_pixels,
+    float *d_workspace)
+{
+  int local_j = blockIdx.x * blockDim.x + threadIdx.x;
+  if (local_j >= chunk_pixels) return;
+
+  float *scratch = d_workspace + local_j * T;
+
+  // Step 1: compute per-band median into d_out (temporary)
+  for (int k = 0; k < nband; ++k) {
+    int valid = 0;
+    for (int t = 0; t < T; ++t) {
+      float v = d_dat[(size_t)t * nband * chunk_pixels
+                     + (size_t)k * chunk_pixels + local_j];
+      if (!isnan(v)) scratch[valid++] = v;
+    }
+    d_out[(size_t)k * chunk_pixels + local_j] = device_median(scratch, valid);
+  }
+
+  // Step 2: find the timestep whose vector is closest to the median
+  int   medoid_idx = -1;
+  float min_dist   = 1e30f;
+
+  for (int t = 0; t < T; ++t) {
+    float sum = 0.0f;
+    int   valid_count = 0;
+    for (int k = 0; k < nband; ++k) {
+      float v = d_dat[(size_t)t * nband * chunk_pixels
+                     + (size_t)k * chunk_pixels + local_j];
+      float m = d_out[(size_t)k * chunk_pixels + local_j];
+      if (!isnan(v) && !isnan(m)) {
+        float dd = v - m;
+        sum += dd * dd;
+        ++valid_count;
+      }
+    }
+    float dist = (valid_count > 0) ? sum / valid_count : 1e30f;
+    if (dist < min_dist) {
+      min_dist = dist;
+      medoid_idx = t;
+    }
+  }
+
+  // Step 3: output the medoid vector (or NaN if none found)
+  if (medoid_idx >= 0) {
+    for (int k = 0; k < nband; ++k) {
+      d_out[(size_t)k * chunk_pixels + local_j] =
+          d_dat[(size_t)medoid_idx * nband * chunk_pixels
+               + (size_t)k * chunk_pixels + local_j];
+    }
+  } else {
+    for (int k = 0; k < nband; ++k) {
+      d_out[(size_t)k * chunk_pixels + local_j] = NAN;
+    }
+  }
+}
+
+// ── compute stage thread ────────────────────────────────────────────────────
+
 static void *compute_stage(void * /*arg*/)
 {
   size_t chunk_max = (size_t)CHUNK_ROWS * g_ncol;
 
-  // GPU allocations
   float *d_dat, *d_out, *d_workspace;
   size_t d_dat_bytes = chunk_max * g_nband * g_T * sizeof(float);
   size_t d_out_bytes = chunk_max * g_nband       * sizeof(float);
@@ -323,23 +389,26 @@ static void *compute_stage(void * /*arg*/)
   ChunkDesc cd;
 
   while (read_to_compute.pop(cd)) {
-    // H2D — full staging buffer (stride = chunk_max, kernel uses chunk_pixels)
     size_t h2d_bytes = chunk_max * g_nband * g_T * sizeof(float);
     CUDA_CHECK(cudaMemcpy(d_dat, cd.buf, h2d_bytes, cudaMemcpyHostToDevice));
 
-    // release pinned buffer back to pool now that it's on GPU
     free_buf_pool.push(cd.buf_idx);
 
-    // kernel
     int blocks = (int)((cd.chunk_pixels + THREADS - 1) / THREADS);
-    median_kernel<<<blocks, THREADS>>>(
-        d_dat, d_out,
-        (int)g_T, (int)g_nband, (int)cd.chunk_pixels,
-        d_workspace);
+    if (g_use_medoid) {
+      medoid_kernel<<<blocks, THREADS>>>(
+          d_dat, d_out,
+          (int)g_T, (int)g_nband, (int)cd.chunk_pixels,
+          d_workspace);
+    } else {
+      median_kernel<<<blocks, THREADS>>>(
+          d_dat, d_out,
+          (int)g_T, (int)g_nband, (int)cd.chunk_pixels,
+          d_workspace);
+    }
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
 
-    // D2H — band by band into a write buffer
     float *wbuf = (float *)malloc(cd.chunk_pixels * g_nband * sizeof(float));
     if (!wbuf) { fprintf(stderr, "\nmalloc failed for wbuf\n"); exit(1); }
 
@@ -351,7 +420,6 @@ static void *compute_stage(void * /*arg*/)
           cudaMemcpyDeviceToHost));
     }
 
-    // build write descriptor (reuse cd fields, swap buffer pointer)
     ChunkDesc wd = cd;
     wd.buf = wbuf;
 
@@ -409,50 +477,81 @@ static void *writer_stage(void *arg)
 
 int main(int argc, char **argv)
 {
-  if (argc < 4)
-    err("raster_medoid [raster file 1] .. [raster file N] [output file]");
+  if (argc < 4) {
+    fprintf(stderr,
+      "Usage: raster_medoid [-medoid] [raster1.bin] .. [rasterN.bin] [output.bin]\n"
+      "\n"
+      "Computes per-band median (default) or medoid across a stack of rasters.\n"
+      "\n"
+      "Options:\n"
+      "  -medoid   Output the actual observed vector (timestep) closest to the\n"
+      "            per-band median, rather than the median itself.  This preserves\n"
+      "            inter-band relationships from a real observation.\n");
+    exit(1);
+  }
 
-  g_T = (size_t)(argc - 2);
+  // ── parse options ─────────────────────────────────────────────────────────
+  int arg_start = 1;
+  while (arg_start < argc && argv[arg_start][0] == '-') {
+    if (strcmp(argv[arg_start], "-medoid") == 0) {
+      g_use_medoid = true;
+      arg_start++;
+    } else {
+      fprintf(stderr, "Unknown option: %s\n", argv[arg_start]);
+      exit(1);
+    }
+  }
+
+  int n_positional = argc - arg_start;
+  if (n_positional < 3) {
+    fprintf(stderr, "Need at least 2 input files and 1 output file.\n");
+    exit(1);
+  }
+
+  g_T = (size_t)(n_positional - 1);
+  char **pos_argv = argv + arg_start;  // pos_argv[0..g_T-1] = inputs, [g_T] = output
+  char *output_path = pos_argv[g_T];
 
   // ── filter input files ────────────────────────────────────────────────────
   {
     int valid_count = 0;
     for (size_t i = 0; i < g_T; i++) {
-      str bfn(argv[i + 1]);
+      str bfn(pos_argv[i]);
       if (!exists(bfn)) {
-        printf("skipping %s (missing .bin)\n", argv[i + 1]);
+        printf("skipping %s (missing .bin)\n", pos_argv[i]);
         continue;
       }
       str hfn(hdr_fn(bfn));
       if (!exists(hfn)) {
-        printf("skipping %s (missing .hdr)\n", argv[i + 1]);
+        printf("skipping %s (missing .hdr)\n", pos_argv[i]);
         continue;
       }
-      argv[valid_count + 1] = argv[i + 1];
+      pos_argv[valid_count] = pos_argv[i];
       valid_count++;
     }
     g_T = valid_count;
     if (g_T < 1) err("no valid input files");
   }
 
-  g_fnames = argv + 1;
+  g_fnames = pos_argv;  // pos_argv[0..g_T-1] are now valid inputs
 
   // ── read headers ──────────────────────────────────────────────────────────
   {
     size_t nrow2, ncol2, nband2;
-    str hfn0(hdr_fn(str(argv[1])));
+    str hfn0(hdr_fn(str(g_fnames[0])));
     hread(hfn0, g_nrow, g_ncol, g_nband);
     g_np = g_nrow * g_ncol;
 
     for (size_t i = 1; i < g_T; ++i) {
-      str hfni(hdr_fn(str(argv[i + 1])));
+      str hfni(hdr_fn(str(g_fnames[i])));
       hread(hfni, nrow2, ncol2, nband2);
       if (g_nrow != nrow2 || g_ncol != ncol2 || g_nband != nband2)
-        err(str("file: ") + str(argv[i + 1]) +
-            str(" has different shape than ") + str(argv[1]));
+        err(str("file: ") + str(g_fnames[i]) +
+            str(" has different shape than ") + str(g_fnames[0]));
     }
   }
 
+  printf("Mode: %s\n", g_use_medoid ? "medoid" : "median");
   printf("Image: %zu rows x %zu cols x %zu bands, %zu timesteps\n",
          g_nrow, g_ncol, g_nband, g_T);
 
@@ -467,8 +566,8 @@ int main(int argc, char **argv)
          prog_total_bytes / (1024.0*1024.0*1024.0),
          (double)g_np * g_nband * sizeof(float) / (1024.0*1024.0*1024.0));
 
-  // ── pre-allocate output file ──────────────────────────────────────────────
-  FILE *outfp = fopen(argv[argc - 1], "wb");
+  // ── open output file (truncate if exists) ─────────────────────────────────
+  FILE *outfp = fopen(output_path, "w+b");
   if (!outfp) err("cannot open output file for writing");
   {
     size_t total_bytes = g_np * g_nband * sizeof(float);
@@ -477,6 +576,10 @@ int main(int argc, char **argv)
     fwrite(&zero, 1, 1, outfp);
     fflush(outfp);
   }
+
+  // ── start writer thread ───────────────────────────────────────────────────
+  pthread_t writer_tid;
+  pthread_create(&writer_tid, nullptr, writer_stage, outfp);
 
   // ── allocate pinned buffer pool (3 buffers for triple-buffering) ──────────
   const int NUM_BUFS = 3;
@@ -495,34 +598,33 @@ int main(int argc, char **argv)
   }
 
   // ── launch pipeline stages ────────────────────────────────────────────────
-  printf("\n");  // blank line before progress
+  printf("\n");
 
   ReaderCtx rctx;
   rctx.pinned_bufs = pinned_bufs;
   rctx.chunk_max   = chunk_max;
 
-  pthread_t reader_tid, compute_tid, writer_tid;
+  pthread_t reader_tid, compute_tid;
   pthread_create(&reader_tid,  nullptr, reader_stage,  &rctx);
   pthread_create(&compute_tid, nullptr, compute_stage, nullptr);
-  pthread_create(&writer_tid,  nullptr, writer_stage,  outfp);
 
   pthread_join(reader_tid,  nullptr);
   pthread_join(compute_tid, nullptr);
   pthread_join(writer_tid,  nullptr);
 
-  printf("\n\n");  // newline after progress line
+  printf("\n\n");
 
   fclose(outfp);
 
   // ── write header ──────────────────────────────────────────────────────────
-  str ofn(argv[argc - 1]);
+  str ofn(output_path);
   str ohfn(hdr_fn(ofn, true));
-  run((str("cp -v ") + hdr_fn(str(argv[1])) + str(" ") + ohfn).c_str());
+  run((str("cp -v ") + hdr_fn(str(g_fnames[0])) + str(" ") + ohfn).c_str());
 
   double elapsed = now_sec() - prog_start_time;
   int em = (int)(elapsed / 60);
   int es = (int)(elapsed) % 60;
-  printf("Done in %dm%02ds — %s\n", em, es, argv[argc - 1]);
+  printf("Done in %dm%02ds — %s\n", em, es, output_path);
 
   // ── cleanup ───────────────────────────────────────────────────────────────
   for (int b = 0; b < NUM_BUFS; ++b)
