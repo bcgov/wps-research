@@ -2,11 +2,11 @@
   max_ha: 500
   params:
     padding: 0.1
-    sample_rate: 0.05
+    sample_rate: 0.5
     min_samples: 500
     max_samples: 30000
     seed: 123
-    embed_bands: '5,6,7,9,10,11,13,14,15'
+    embed_bands: '4,5,6,7,8,9,10,11,12'
     tsne_perplexity: 60
     tsne_learning_rate: 200
     tsne_max_iter: 2000
@@ -25,11 +25,11 @@
   max_ha: null
   params:
     padding: 0.1
-    sample_rate: 0.05
+    sample_rate: 0.1
     min_samples: 500
     max_samples: 30000
     seed: 123
-    embed_bands: '1,2,3,5,6,7,9,10,11,13,14,15'
+    embed_bands: '1,2,3,4,5,6,7,8,9,10,11,12'
     tsne_perplexity: 60
     tsne_learning_rate: 200
     tsne_max_iter: 2000

@@ -207,7 +207,7 @@ class GUI_Settings:
         self.hdbscan_params = {
             'min_cluster_size': None,
             'min_samples': 20, # controls conservativeness
-            'metric': 'euclidean'
+            'metric': 'euclidean',
         }
 
 

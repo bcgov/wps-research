@@ -63,6 +63,7 @@ class FireInfo:
     notes: str = ""
     agreement_pct: float = -1.0   # -1 = not computed
     console_log: list = field(default_factory=list)  # buffered output lines
+    serial_results: list = field(default_factory=list)  # [{params, agreement, run_id}]
 
 
 class AppState:

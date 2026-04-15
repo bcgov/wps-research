@@ -142,7 +142,7 @@ class FireMappingCLI:
         tsne_random_state:   int   = 42,
 
         # Figure
-        contour_width:       float = 0.8,
+        contour_width:       int   = 1,
     ):
         self.image_filename     = image_filename
         self.polygon_filename   = polygon_filename
@@ -555,8 +555,25 @@ class FireMappingCLI:
         data_ds = mask_ds = mem_vec = None
         return shapes
 
+    def _contour_overlay(self, mask: np.ndarray, color: str) -> np.ndarray:
+        """Return an RGBA image with the boundary of *mask* drawn in *color*,
+        exactly ``self.contour_width`` pixels wide.  Transparent elsewhere."""
+        from scipy.ndimage import binary_dilation, binary_erosion
+        import matplotlib.colors as mcolors
+
+        mask = np.asarray(mask, dtype=bool)
+        eroded = binary_erosion(mask)
+        boundary = mask & ~eroded
+        if self.contour_width > 1:
+            boundary = binary_dilation(boundary, iterations=self.contour_width - 1)
+
+        rgba = mcolors.to_rgba(color)
+        overlay = np.zeros((*mask.shape, 4), dtype=np.float32)
+        overlay[boundary] = rgba
+        return overlay
+
     @staticmethod
-    def _add_outlines(ax, shapes, geotransform, color, label):
+    def _add_outlines(ax, shapes, geotransform, color, label, linewidth=1.0):
         """
         Plot polygon outlines (no fill) on *ax* in pixel space.
         Converts projected coordinates → pixel coordinates using geotransform.
@@ -584,7 +601,7 @@ class FireMappingCLI:
                     Path(xy, codes),
                     facecolor='none',
                     edgecolor=color,
-                    linewidth=self.contour_width,
+                    linewidth=linewidth,
                     label=label if first_patch else '_nolegend_',
                 )
                 ax.add_patch(patch)
@@ -618,10 +635,8 @@ class FireMappingCLI:
             (axes[1], after_mask, after_title),
         ]:
             ax.imshow(bg, interpolation='nearest', origin='upper')
-            cs = ax.contour(mask.astype(float), levels=[0.5],
-                            colors=['red'], linewidths=self.contour_width)
-            if cs.collections:
-                cs.collections[0].set_label('Mapping')
+            ax.imshow(self._contour_overlay(mask, 'red'),
+                      interpolation='nearest', origin='upper')
             ax.set_title(title, fontsize=9)
             ax.set_xlim(0, w)
             ax.set_ylim(h, 0)
@@ -642,7 +657,7 @@ class FireMappingCLI:
         Single-panel figure with up to three polygon outlines (no fill)
         overlaid on the false-colour background:
           - Our mapping              — red
-          - Classification hint      — orange  (VIIRS or traditional perimeter)
+          - Classification hint      — lime    (VIIRS or traditional perimeter)
           - Traditional perimeter    — cyan    (only when --perimeter given
                                                 and different from the hint)
 
@@ -694,12 +709,15 @@ class FireMappingCLI:
         fig, ax = plt.subplots(figsize=(10, 10))
         ax.imshow(bg, interpolation='nearest', origin='upper')
 
-        # All outlines drawn via contour in pixel space
-        ax.contour(classification.astype(float),  levels=[0.5], colors=['red'],    linewidths=self.contour_width)
-        ax.contour(self.polygon_dat.astype(float), levels=[0.5], colors=['orange'], linewidths=self.contour_width)
+        # All outlines drawn as pixel-exact RGBA overlays
+        ax.imshow(self._contour_overlay(classification, 'red'),
+                  interpolation='nearest', origin='upper')
+        ax.imshow(self._contour_overlay(self.polygon_dat, 'lime'),
+                  interpolation='nearest', origin='upper')
 
         if perim_dat is not None:
-            ax.contour(perim_dat.astype(float), levels=[0.5], colors=['cyan'], linewidths=self.contour_width)
+            ax.imshow(self._contour_overlay(perim_dat, 'cyan'),
+                      interpolation='nearest', origin='upper')
 
         ax.set_xlim(0, w)
         ax.set_ylim(h, 0)
@@ -710,12 +728,12 @@ class FireMappingCLI:
         # Build legend
         from matplotlib.lines import Line2D
         handles = [
-            Line2D([0], [0], color='red',    linewidth=self.contour_width, label='Our mapping'),
-            Line2D([0], [0], color='orange', linewidth=self.contour_width, label=hint_label),
+            Line2D([0], [0], color='red',  linewidth=2, label='Our mapping'),
+            Line2D([0], [0], color='lime', linewidth=2, label=hint_label),
         ]
         if perim_dat is not None:
             handles.append(
-                Line2D([0], [0], color='cyan', linewidth=self.contour_width,
+                Line2D([0], [0], color='cyan', linewidth=2,
                        label='Traditional perimeter'))
         ax.legend(handles=handles, loc='lower right', fontsize=9,
                   framealpha=0.7, edgecolor='white')
@@ -1097,8 +1115,8 @@ Examples
     p.add_argument('--tsne_random_state',  type=int,   default=42)
 
     # ---- Figure ----
-    p.add_argument('--contour_width', type=float, default=0.8,
-                   help='Contour line width in figures (default: 0.8)')
+    p.add_argument('--contour_width', type=int, default=1,
+                   help='Contour line width in pixels (default: 1)')
 
 
     return p
