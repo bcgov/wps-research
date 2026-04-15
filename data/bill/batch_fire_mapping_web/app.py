@@ -170,9 +170,11 @@ _RANKABLE_PARAMS = [
     'sample_rate', 'min_samples', 'max_samples', 'seed',
     'embed_bands', 'tsne_perplexity', 'tsne_learning_rate',
     'tsne_max_iter', 'tsne_init', 'tsne_n_components',
+    'tsne_random_state',
     'controlled_ratio', 'hdbscan_min_samples',
     'rf_n_estimators', 'rf_max_depth', 'rf_max_features',
-    'padding',
+    'rf_random_state',
+    'padding', 'contour_width',
 ]
 
 
@@ -224,9 +226,30 @@ def _rank_params_for_fire(fire_numbe: str, fire_size_ha: float,
     """
     all_rows = _load_accepted_params()
     if not all_rows:
-        # Cold start — use recommended settings
-        params = _get_recommended_params(fire_size_ha)
-        return [params] if params else []
+        # Cold start — use all recommended settings tiers
+        seen = set()
+        ranked = []
+        # Size-matched tier first
+        rec = _get_recommended_params(fire_size_ha)
+        if rec:
+            key = tuple(sorted(
+                (k, str(v)) for k, v in rec.items() if v is not None))
+            seen.add(key)
+            ranked.append(rec)
+        # Then remaining tiers
+        for row in state.recommended_settings:
+            if len(ranked) >= n:
+                break
+            tier_params = row.get('params', {})
+            if not tier_params:
+                continue
+            key = tuple(sorted(
+                (k, str(v)) for k, v in tier_params.items()
+                if v is not None))
+            if key not in seen:
+                seen.add(key)
+                ranked.append(dict(tier_params))
+        return ranked[:n]
 
     region, zone = _parse_fire_context(fire_numbe)
     bucket = _size_bucket(fire_size_ha)
@@ -250,7 +273,11 @@ def _rank_params_for_fire(fire_numbe: str, fire_size_ha: float,
             return -1.0
 
     def extract_params(row):
-        """Extract a clean params dict from a CSV row."""
+        """Extract a clean params dict from a CSV row.
+
+        Only includes keys that have actual values — omits None/empty
+        so that downstream .get(key, default) falls back correctly.
+        """
         params = {}
         for key in _RANKABLE_PARAMS:
             val = row.get(key)
@@ -263,8 +290,6 @@ def _rank_params_for_fire(fire_numbe: str, fire_size_ha: float,
                         params[key] = int(val)
                 except (ValueError, TypeError):
                     params[key] = val
-            else:
-                params[key] = val
         return params
 
     # Hierarchical matching
@@ -316,25 +341,45 @@ def _rank_params_for_fire(fire_numbe: str, fire_size_ha: float,
         if len(ranked) >= n:
             break
 
-    # If we don't have enough, pad with recommended settings
+    # If we don't have enough, pad with recommended settings.
+    # Try the size-matched tier first, then all other tiers.
     if len(ranked) < n:
+        # Size-matched tier first
         rec = _get_recommended_params(fire_size_ha)
         if rec:
             key = tuple(sorted(
                 (k, str(v)) for k, v in rec.items() if v is not None))
             if key not in seen:
+                seen.add(key)
                 ranked.append(rec)
+        # Then remaining tiers
+        for row in state.recommended_settings:
+            if len(ranked) >= n:
+                break
+            tier_params = row.get('params', {})
+            if not tier_params:
+                continue
+            key = tuple(sorted(
+                (k, str(v)) for k, v in tier_params.items()
+                if v is not None))
+            if key not in seen:
+                seen.add(key)
+                ranked.append(dict(tier_params))
 
     return ranked[:n]
 
 
 def _get_recommended_params(fire_size_ha: float) -> dict:
-    """Find recommended params for a fire of given size."""
+    """Find recommended params for a fire of given size.
+
+    Always returns a fresh copy so callers can never mutate the
+    canonical settings stored in ``state.recommended_settings``.
+    """
     for row in state.recommended_settings:
         if (fire_size_ha >= row.get('min_ha', 0)
                 and (row.get('max_ha') is None
                      or fire_size_ha < row['max_ha'])):
-            return row.get('params', {})
+            return dict(row.get('params', {}))
     return {}
 
 
@@ -372,7 +417,10 @@ def _batch_map_worker(fire_numbes: list[str]):
         if not params:
             params = {}
 
-        padding = params.get('padding', state.padding)
+        padding = params.get('padding')
+        if padding is None:
+            padding = state.padding
+        padding = float(padding)
 
         try:
             with _gpu_lock:
@@ -471,7 +519,12 @@ def _batch_map_worker(fire_numbes: list[str]):
 
 
 def _serial_map_worker(fire_numbe: str, param_sets: list[dict]):
-    """Run N mappings with different param sets for the same fire."""
+    """Run N mappings for the same fire.
+
+    Optimisation: the expensive deterministic part (t-SNE + RF) runs once
+    on the first invocation and is cached.  Runs 2-N load the cached state
+    and only re-run HDBSCAN, which is much faster.
+    """
     import traceback
 
     fire = state.fires[fire_numbe]
@@ -479,42 +532,74 @@ def _serial_map_worker(fire_numbe: str, param_sets: list[dict]):
     fire.console_log = []
     n_total = len(param_sets)
 
+    # Path for the shared intermediate state (.npz)
+    state_file = os.path.join(
+        fire.cache_dir, f'{fire_numbe}_serial_state.npz')
+
     sys.stderr.write(
         f'[serial] Starting {n_total} run(s) for {fire_numbe}\n')
     sys.stderr.flush()
+
+    # Use the first param set's padding for any prepare needed
+    base_params = param_sets[0]
+    padding = base_params.get('padding')
+    if padding is None:
+        padding = state.padding
+    padding = float(padding)
 
     for i, params in enumerate(param_sets):
         run_id = i + 1
         fire.console_log.append(
             f'=== Serial run {run_id}/{n_total} ===')
 
-        # Log key params for this run
+        # Log key params for this run (only the ones that vary)
         key_params = []
-        for k in ('embed_bands', 'tsne_perplexity', 'sample_rate',
-                   'controlled_ratio', 'hdbscan_min_samples', 'padding'):
+        for k in ('hdbscan_min_samples', 'controlled_ratio'):
             v = params.get(k)
             if v is not None and v != '':
                 key_params.append(f'{k}={v}')
         if key_params:
             fire.console_log.append(
-                f'  Params: {", ".join(key_params)}')
-
-        padding = params.get('padding', state.padding)
+                f'  HDBSCAN params: {", ".join(key_params)}')
+        if run_id == 1:
+            # Log full params for the first (full pipeline) run
+            full_keys = []
+            for k in ('embed_bands', 'tsne_perplexity', 'sample_rate',
+                       'padding'):
+                v = params.get(k)
+                if v is not None and v != '':
+                    full_keys.append(f'{k}={v}')
+            if full_keys:
+                fire.console_log.append(
+                    f'  Base params: {", ".join(full_keys)}')
 
         try:
             with _gpu_lock:
-                # Prepare (only on first run or if padding changed)
-                if run_id == 1 or fire.padding_used != padding:
-                    _prepare_fire_sync(fire_numbe, padding)
-                    fire = state.fires[fire_numbe]
-                    if fire.status == FireStatus.ERROR:
-                        fire.serial_results.append({
-                            'run_id': run_id,
-                            'params': params,
-                            'agreement_pct': -1,
-                            'error': fire.error_msg,
-                        })
-                        continue
+                # Re-prepare only when padding changed or files missing
+                if run_id == 1:
+                    needs_prepare = (
+                        fire.padding_used != padding
+                        or not fire.cache_dir
+                        or not os.path.isdir(fire.cache_dir)
+                        or not fire.crop_bin
+                        or not os.path.isfile(fire.crop_bin)
+                        or not fire.hint_bin
+                        or not os.path.isfile(fire.hint_bin)
+                    )
+                    if needs_prepare:
+                        fire.console_log.append(
+                            f'  Re-preparing (padding '
+                            f'{fire.padding_used} → {padding}) ...')
+                        _prepare_fire_sync(fire_numbe, padding)
+                        fire = state.fires[fire_numbe]
+                        if fire.status == FireStatus.ERROR:
+                            fire.serial_results.append({
+                                'run_id': run_id,
+                                'params': params,
+                                'agreement_pct': -1,
+                                'error': fire.error_msg,
+                            })
+                            break  # all runs share same prep — stop
 
                 fire.status = FireStatus.MAPPING
                 fire.last_params = params
@@ -525,7 +610,19 @@ def _serial_map_worker(fire_numbe: str, param_sets: list[dict]):
                         timespec='seconds'),
                 }
 
-                cmd = _build_mapping_cmd(fire, params)
+                # Run 1: full pipeline + save state
+                # Runs 2-N: load cached state (HDBSCAN only)
+                is_first = (run_id == 1)
+                cmd = _build_mapping_cmd(
+                    fire, params,
+                    save_state=state_file if is_first else None,
+                    load_state=state_file if not is_first else None,
+                )
+
+                if not is_first:
+                    fire.console_log.append(
+                        '  (resuming from cached t-SNE + RF)')
+
                 proc = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE,
@@ -592,6 +689,11 @@ def _serial_map_worker(fire_numbe: str, param_sets: list[dict]):
                     })
                     fire.console_log.append(
                         f'Run {run_id} FAILED (exit code {rc})')
+                    # If run 1 fails, no state to resume from
+                    if is_first:
+                        fire.console_log.append(
+                            'Stopping serial — no cached state.')
+                        break
 
         except Exception as exc:
             state.current_job = None
@@ -605,6 +707,8 @@ def _serial_map_worker(fire_numbe: str, param_sets: list[dict]):
                 f'[serial] [{fire_numbe}#{run_id}] EXCEPTION:\n'
                 f'{traceback.format_exc()}\n')
             sys.stderr.flush()
+            if run_id == 1:
+                break  # no cached state to resume from
 
     # Pick best result as the "current" mapping
     successful = [r for r in fire.serial_results if r.get('agreement_pct', -1) >= 0]
@@ -1072,11 +1176,16 @@ def _accept_fire_sync(fire_numbe: str) -> str:
 # Build fire_mapping_cli.py command
 # =========================================================================
 
-def _build_mapping_cmd(fire: FireInfo, params: dict) -> list[str]:
+def _build_mapping_cmd(fire: FireInfo, params: dict,
+                       save_state: str = None,
+                       load_state: str = None) -> list[str]:
     """Build the subprocess command for fire_mapping_cli.py."""
-    rate = float(params.get('sample_rate', state.sample_rate))
-    min_s = int(params.get('min_samples', state.min_samples))
-    max_s = int(params.get('max_samples', state.max_samples))
+    rate = params.get('sample_rate')
+    rate = float(rate) if rate is not None else state.sample_rate
+    min_s = params.get('min_samples')
+    min_s = int(min_s) if min_s is not None else state.min_samples
+    max_s = params.get('max_samples')
+    max_s = int(max_s) if max_s is not None else state.max_samples
     sample_size = int(round(fire.crop_w * fire.crop_h * rate))
     sample_size = max(min_s, min(max_s, sample_size))
 
@@ -1093,6 +1202,11 @@ def _build_mapping_cmd(fire: FireInfo, params: dict) -> list[str]:
 
     if fire.perim_bin and os.path.exists(fire.perim_bin):
         cmd += ['--perimeter', fire.perim_bin]
+
+    if save_state:
+        cmd += ['--save_state', save_state]
+    if load_state:
+        cmd += ['--load_state', load_state]
 
     flag_map = {
         'seed': '--seed',
@@ -1114,6 +1228,9 @@ def _build_mapping_cmd(fire: FireInfo, params: dict) -> list[str]:
     for key, flag in flag_map.items():
         val = params.get(key)
         if val is not None and str(val).strip():
+            # Argparse int args choke on "15.0" — normalise whole floats
+            if isinstance(val, float) and val == int(val):
+                val = int(val)
             cmd += [flag, str(val)]
 
     eb = params.get('embed_bands')
@@ -1583,6 +1700,15 @@ class FireHandler(BaseHTTPRequestHandler):
             return
         body = self._read_body()
         settings = body.get('settings', [])
+        # Sanity-check: embed_bands must be a string, not numeric
+        for row in settings:
+            p = row.get('params', {})
+            eb = p.get('embed_bands')
+            if eb is not None and isinstance(eb, (int, float)):
+                sys.stderr.write(
+                    f'[settings] WARNING: embed_bands was numeric '
+                    f'({eb!r}) — converting to empty string\n')
+                p['embed_bands'] = ''
         state.recommended_settings = settings
         self._send_json({'status': 'saved'})
 
@@ -1878,11 +2004,49 @@ class FireHandler(BaseHTTPRequestHandler):
             self._send_json({'error': 'Fire not found'}, 404)
             return
         f = state.fires[fire_numbe]
+
+        # Check for comparison images
+        has_comparison = bool(
+            f.last_comparison and os.path.isfile(f.last_comparison))
+        has_brush = False
+        if not has_comparison:
+            canonical = os.path.join(state.output_root, fire_numbe)
+            for d in (f.cache_dir, canonical):
+                if not d:
+                    continue
+                if os.path.isfile(
+                        os.path.join(d, f'{fire_numbe}_comparison.png')):
+                    has_comparison = True
+                    break
+        for d in (f.cache_dir,
+                  os.path.join(state.output_root, fire_numbe)):
+            if not d:
+                continue
+            if os.path.isfile(
+                    os.path.join(
+                        d, f'{fire_numbe}_brush_comparison.png')):
+                has_brush = True
+                break
+
+        # Clean serial results for JSON
+        serial_results = []
+        for r in f.serial_results:
+            serial_results.append({
+                'run_id': r.get('run_id'),
+                'agreement_pct': r.get('agreement_pct', -1),
+                'error': r.get('error', ''),
+                'params': r.get('params', {}),
+            })
+
         self._send_json({
             'status': f.status.value,
             'lines': f.console_log,
             'last_params': f.last_params,
             'agreement_pct': f.agreement_pct,
+            'available_views': list(f.available_views),
+            'serial_results': serial_results,
+            'has_comparison': has_comparison,
+            'has_brush_comparison': has_brush,
         })
 
     # -- Serial mapping & parameter ranking API --
@@ -1931,12 +2095,56 @@ class FireHandler(BaseHTTPRequestHandler):
         n = int(body.get('n', 3))
         n = max(1, min(10, n))
 
-        param_sets = _rank_params_for_fire(
-            fire_numbe, fire.fire_size_ha, n)
-        if not param_sets:
+        # Get best base params (run 1 uses full pipeline)
+        ranked = _rank_params_for_fire(
+            fire_numbe, fire.fire_size_ha, 1)
+        if not ranked:
             self._send_json(
                 {'error': 'No parameter sets available'}, 400)
             return
+
+        # Validate key params to catch corruption early
+        base_check = ranked[0]
+        eb = base_check.get('embed_bands')
+        tp = base_check.get('tsne_perplexity')
+        if eb is not None and isinstance(eb, (int, float)):
+            sys.stderr.write(
+                f'[serial] WARNING: embed_bands is numeric ({eb!r}), '
+                f'expected comma-separated string — reloading from YAML\n')
+            sys.stderr.flush()
+            fresh = _get_recommended_params(fire.fire_size_ha)
+            if fresh:
+                ranked = [fresh]
+        if tp is not None and isinstance(tp, str) and ',' in str(tp):
+            sys.stderr.write(
+                f'[serial] WARNING: tsne_perplexity is string ({tp!r}), '
+                f'expected number — reloading from YAML\n')
+            sys.stderr.flush()
+            fresh = _get_recommended_params(fire.fire_size_ha)
+            if fresh:
+                ranked = [fresh]
+
+        # Generate N param sets: same base, vary HDBSCAN params.
+        # Run 1 = base params.  Runs 2-N get varied
+        # hdbscan_min_samples values.
+        base = dict(ranked[0])
+        base_hms = int(base.get('hdbscan_min_samples', 20))
+        param_sets = [base]
+
+        # Generate hdbscan_min_samples variations around base
+        variations = [5, 10, 15, 20, 25, 30, 40, 50, 75, 100]
+        # Put base value first, then others sorted by distance
+        variations = sorted(
+            [v for v in variations if v != base_hms],
+            key=lambda v: abs(v - base_hms))
+        for v in variations:
+            if len(param_sets) >= n:
+                break
+            variant = dict(base)
+            variant['hdbscan_min_samples'] = v
+            param_sets.append(variant)
+
+        param_sets = param_sets[:n]
 
         # Set status BEFORE starting thread to avoid race
         fire.status = FireStatus.MAPPING
