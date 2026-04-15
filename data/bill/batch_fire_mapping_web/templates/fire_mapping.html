@@ -1192,17 +1192,36 @@ function showSerialGallery(results) {
     gallery.style.display = '';
     items.innerHTML = '';
 
-    const sorted = [...results].sort(
+    // Separate previous (Run 0) from new runs
+    const previous = results.filter(r => r.is_previous);
+    const newRuns = results.filter(r => !r.is_previous);
+
+    // Sort new runs by agreement (best first)
+    const sorted = [...newRuns].sort(
         (a, b) => (b.agreement_pct || -1) - (a.agreement_pct || -1));
 
-    for (const r of sorted) {
-        const isBest = r === sorted[0] && r.agreement_pct >= 0;
+    // Show previous accepted first, then new runs
+    const ordered = [...previous, ...sorted];
+
+    for (const r of ordered) {
+        const isPrevious = r.is_previous;
+        const isBest = !isPrevious && r === sorted[0] && r.agreement_pct >= 0;
         const div = document.createElement('div');
         div.className = 'serial-run-card';
         div.id = 'serial-card-' + r.run_id;
+
+        let borderColor = '#ddd';
+        let bgColor = '#fff';
+        if (isPrevious) {
+            borderColor = '#8b6914';
+            bgColor = '#fdf8ec';
+        } else if (isBest) {
+            borderColor = '#2d8a4e';
+            bgColor = '#f0fff4';
+        }
         div.style.cssText = 'padding:8px;cursor:pointer;' +
-            'border:2px solid ' + (isBest ? '#2d8a4e' : '#ddd') + ';border-radius:6px;' +
-            'background:' + (isBest ? '#f0fff4' : '#fff');
+            'border:2px solid ' + borderColor + ';border-radius:6px;' +
+            'background:' + bgColor;
         div.onclick = function(e) {
             if (e.target.tagName === 'BUTTON' || e.target.tagName === 'A') return;
             viewSerialRun(r.run_id);
@@ -1210,9 +1229,19 @@ function showSerialGallery(results) {
 
         const agr = r.agreement_pct >= 0 ? r.agreement_pct + '%' : 'failed';
         const mlArea = r.ml_area_ha >= 0 ? r.ml_area_ha.toLocaleString() + ' ha' : '--';
+        const label = isPrevious
+            ? '<span style="color:#8b6914;font-weight:600">Previously accepted</span>'
+            : `<strong>Run ${r.run_id}</strong>`;
         const badge = isBest ? ' <span style="color:#2d8a4e;font-weight:600">(best)</span>' : '';
         const errMsg = r.error ? `<span style="color:#cc3333;font-size:11px"> ${r.error}</span>` : '';
         const detailsId = `serial-details-${r.run_id}`;
+        const detailsTitle = isPrevious ? 'Previously Accepted' : `Serial Run #${r.run_id}`;
+
+        // No Accept button for Run 0 (previous)
+        const acceptBtn = (!isPrevious && r.agreement_pct >= 0)
+            ? `<button class="btn btn-success" style="font-size:11px;padding:2px 8px"
+                onclick="acceptSerialRun(${r.run_id})">Accept</button>`
+            : '';
 
         div.innerHTML = `
             <div style="display:flex;align-items:center;gap:8px">
@@ -1220,17 +1249,16 @@ function showSerialGallery(results) {
                      style="width:80px;height:60px;object-fit:cover;border-radius:4px;cursor:pointer;image-rendering:pixelated"
                      onclick="viewSerialRun(${r.run_id})" onerror="this.style.display='none'">
                 <div style="flex:1;font-size:12px">
-                    <strong>Run ${r.run_id}</strong>${badge}${errMsg}<br>
+                    ${label}${badge}${errMsg}<br>
                     <span style="color:#555">Agreement: ${agr} &middot; ML: ${mlArea}</span><br>
                     <a href="#" class="serial-info-toggle" onclick="event.preventDefault();event.stopPropagation();
                         var el=document.getElementById('${detailsId}');
                         el.style.display=el.style.display==='none'?'block':'none'">Info</a>
                 </div>
-                ${r.agreement_pct >= 0 ? `<button class="btn btn-success" style="font-size:11px;padding:2px 8px"
-                    onclick="acceptSerialRun(${r.run_id})">Accept</button>` : ''}
+                ${acceptBtn}
             </div>
             <div id="${detailsId}" class="serial-details-panel" style="display:none">
-                <div class="serial-details-title">Serial Run #${r.run_id}</div>
+                <div class="serial-details-title">${detailsTitle}</div>
                 <div class="serial-details-row"><span>Agreement</span><strong>${agr}</strong></div>
                 <div class="serial-details-row"><span>ML Fire Size</span><strong>${mlArea}</strong></div>
                 <div class="serial-details-section">
@@ -1247,10 +1275,16 @@ function showSerialGallery(results) {
 }
 
 function viewSerialRun(runId) {
-    // Highlight selected card
+    // Highlight selected card, restore default style for others
     document.querySelectorAll('.serial-run-card').forEach(el => {
-        el.style.borderColor = '#ddd';
-        el.style.background = '#fff';
+        if (el.id === 'serial-card-0') {
+            // Restore gold style for "Previously accepted"
+            el.style.borderColor = '#8b6914';
+            el.style.background = '#fdf8ec';
+        } else {
+            el.style.borderColor = '#ddd';
+            el.style.background = '#fff';
+        }
     });
     const card = document.getElementById('serial-card-' + runId);
     if (card) {

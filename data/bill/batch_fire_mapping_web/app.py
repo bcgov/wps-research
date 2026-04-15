@@ -585,6 +585,102 @@ def _serial_map_worker(fire_numbe: str, param_sets: list[dict]):
         f'[serial] Starting {n_total} run(s) for {fire_numbe}\n')
     sys.stderr.flush()
 
+    # Snapshot previously accepted results as Run 0
+    if fire.previously_accepted:
+        try:
+            old_agreement = fire.agreement_pct
+            old_ml_area = fire.ml_area_ha
+            old_params = dict(fire.last_params) if fire.last_params else {}
+
+            # Search both cache_dir and canonical output dir
+            canon_dir = os.path.join(state.output_root, fire_numbe)
+            search_dirs = [fire.cache_dir]
+            if os.path.isdir(canon_dir):
+                search_dirs.append(canon_dir)
+
+            # Find existing classified raster
+            old_clf = None
+            for _dir in search_dirs:
+                for _pat in (f'{fire_numbe}_crop.bin_classified.bin',
+                             f'{fire_numbe}_crop_classified.bin',
+                             f'{fire_numbe}_classified.bin'):
+                    _cand = os.path.join(_dir, _pat)
+                    if os.path.isfile(_cand):
+                        old_clf = _cand
+                        break
+                if old_clf:
+                    break
+            if old_clf is None:
+                for _dir in search_dirs:
+                    for _cand in glob.glob(os.path.join(
+                            _dir, '*classified*.bin')):
+                        if 'serial_' not in os.path.basename(_cand):
+                            old_clf = _cand
+                            break
+                    if old_clf:
+                        break
+
+            # Copy classified raster as serial_0
+            s0_clf = os.path.join(
+                fire.cache_dir,
+                f'{fire_numbe}_serial_0_classified.bin')
+            if old_clf and os.path.isfile(old_clf):
+                shutil.copy2(old_clf, s0_clf)
+                old_hdr = os.path.splitext(old_clf)[0] + '.hdr'
+                if not os.path.isfile(old_hdr):
+                    old_hdr = old_clf + '.hdr'
+                if os.path.isfile(old_hdr):
+                    shutil.copy2(
+                        old_hdr,
+                        os.path.splitext(s0_clf)[0] + '.hdr')
+
+            # Copy comparison PNG as serial_0
+            s0_comp = os.path.join(
+                fire.cache_dir,
+                f'{fire_numbe}_serial_0.png')
+            for _dir in search_dirs:
+                old_comp = os.path.join(
+                    _dir, f'{fire_numbe}_comparison.png')
+                if os.path.isfile(old_comp):
+                    shutil.copy2(old_comp, s0_comp)
+                    break
+
+            # Copy brush comparison as serial_0
+            s0_brush = os.path.join(
+                fire.cache_dir,
+                f'{fire_numbe}_serial_0_brush.png')
+            for _dir in search_dirs:
+                old_brush = os.path.join(
+                    _dir, f'{fire_numbe}_brush_comparison.png')
+                if os.path.isfile(old_brush):
+                    shutil.copy2(old_brush, s0_brush)
+                    break
+
+            # Generate overlay for Run 0
+            if os.path.isfile(s0_clf):
+                _overlay_mask_on_post(
+                    fire, s0_clf, 'serial_0', (0.9, 0.1, 0.0))
+
+            fire.serial_results.append({
+                'run_id': 0,
+                'params': old_params,
+                'agreement_pct': old_agreement,
+                'ml_area_ha': old_ml_area,
+                'comparison': s0_comp,
+                'classified': s0_clf,
+                'is_previous': True,
+            })
+            fire.console_log.append(
+                '=== Run 0: Previously accepted result ===')
+            fire.console_log.append(
+                f'  Agreement: {old_agreement}%'
+                f', ML area: {old_ml_area} ha')
+        except Exception:
+            sys.stderr.write(
+                f'[serial] Warning: could not snapshot previous '
+                f'result for {fire_numbe}\n')
+            sys.stderr.flush()
+
     # Use the first param set's padding for any prepare needed
     base_params = param_sets[0]
     padding = base_params.get('padding')
@@ -812,8 +908,10 @@ def _serial_map_worker(fire_numbe: str, param_sets: list[dict]):
             if run_id == 1:
                 break  # no cached state to resume from
 
-    # Pick best result as the "current" mapping
-    successful = [r for r in fire.serial_results if r.get('agreement_pct', -1) >= 0]
+    # Pick best result as the "current" mapping (exclude Run 0 / previous)
+    successful = [r for r in fire.serial_results
+                  if r.get('agreement_pct', -1) >= 0
+                  and not r.get('is_previous')]
     if successful:
         best = max(successful, key=lambda r: r['agreement_pct'])
         fire.agreement_pct = best['agreement_pct']
@@ -2156,6 +2254,7 @@ class FireHandler(BaseHTTPRequestHandler):
                 'ml_area_ha': r.get('ml_area_ha', -1),
                 'error': r.get('error', ''),
                 'params': r.get('params', {}),
+                'is_previous': r.get('is_previous', False),
             })
 
         self._send_json({
@@ -2305,8 +2404,10 @@ class FireHandler(BaseHTTPRequestHandler):
             results.append({
                 'run_id': r.get('run_id'),
                 'agreement_pct': r.get('agreement_pct', -1),
+                'ml_area_ha': r.get('ml_area_ha', -1),
                 'error': r.get('error', ''),
                 'params': r.get('params', {}),
+                'is_previous': r.get('is_previous', False),
             })
         self._send_json({
             'status': fire.status.value,
