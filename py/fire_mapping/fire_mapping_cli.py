@@ -143,6 +143,10 @@ class FireMappingCLI:
 
         # Figure
         contour_width:       int   = 1,
+
+        # Intermediate state caching (serial mapping optimisation)
+        save_state_path:     str   = None,
+        load_state_path:     str   = None,
     ):
         self.image_filename     = image_filename
         self.polygon_filename   = polygon_filename
@@ -195,6 +199,10 @@ class FireMappingCLI:
 
         # Figure
         self.contour_width   = contour_width
+
+        # Intermediate state caching
+        self.save_state_path = save_state_path
+        self.load_state_path = load_state_path
 
     # -----------------------------------------------------------------------
     # Band selection  (mirrors GUI.find_default_rgb_bands)
@@ -396,7 +404,36 @@ class FireMappingCLI:
     # HDBSCAN clustering  (mirrors GUI.map_burn)
     # -----------------------------------------------------------------------
 
-    def map_burn(self):
+    # -----------------------------------------------------------------------
+    # Intermediate state caching (for serial mapping optimisation)
+    # -----------------------------------------------------------------------
+
+    def _save_intermediate(self, transformed_img):
+        """Save t-SNE embedding + RF-transformed image for reuse."""
+        np.savez_compressed(
+            self.save_state_path,
+            current_embed=self.current_embed,
+            transformed_img=transformed_img,
+            guessed_burn_p=np.float64(self.guessed_burn_p),
+            sample_size=np.int64(self.sample_size),
+        )
+        print(f'[CLI] Intermediate state saved → {self.save_state_path}')
+
+    def _load_intermediate(self):
+        """Load cached t-SNE + RF state; returns transformed_img."""
+        data = np.load(self.load_state_path)
+        self.current_embed  = data['current_embed']
+        self.guessed_burn_p = float(data['guessed_burn_p'])
+        self.sample_size    = int(data['sample_size'])
+        print(f'[CLI] Loaded intermediate state ({self.current_embed.shape[0]}'
+              f' samples, burn_p={self.guessed_burn_p:.4f})')
+        return data['transformed_img']
+
+    # -----------------------------------------------------------------------
+    # HDBSCAN clustering  (mirrors GUI.map_burn)
+    # -----------------------------------------------------------------------
+
+    def map_burn(self, transformed_img=None):
         from machine_learning.cluster import hdbscan_fit, hdbscan_approximate
 
         self.hdbscan_params['min_cluster_size'] = max(5, int(min(
@@ -406,9 +443,10 @@ class FireMappingCLI:
         print(f'[CLI] HDBSCAN min_cluster_size = '
               f'{self.hdbscan_params["min_cluster_size"]}')
 
-        t0 = time.time()
-        transformed_img = self.load_image_embed_RF()
-        print(f'[CLI] Forest mapping done, cost {time.time() - t0:.2f}s')
+        if transformed_img is None:
+            t0 = time.time()
+            transformed_img = self.load_image_embed_RF()
+            print(f'[CLI] Forest mapping done, cost {time.time() - t0:.2f}s')
 
         t1 = time.time()
         cluster, _     = hdbscan_fit(self.current_embed, **self.hdbscan_params)
@@ -416,7 +454,7 @@ class FireMappingCLI:
         print(f'[CLI] Unique clusters: {np.unique(img_cluster)}')
         print(f'[CLI] HDBSCAN done, cost {time.time() - t1:.3f}s')
 
-        return img_cluster
+        return img_cluster, transformed_img
 
     # -----------------------------------------------------------------------
     # Classification  (mirrors GUI.classify_cluster)
@@ -975,34 +1013,63 @@ class FireMappingCLI:
     def run(self):
         hint_name = (os.path.basename(self.polygon_filename)
                      if self.polygon_filename else '(dominant band fallback)')
-        _status_box(
-            f'FIRE MAPPING CLI  |  {self.fire_numbe}',
-            [
-                f'Image   : {os.path.basename(self.image_filename)}',
-                f'Hint    : {hint_name}',
-                f'Output  : {self.save_dir}',
-            ]
-        )
+        resume = self.load_state_path is not None
 
-        print('[1/7] Loading image ...')
-        self.load_image()
+        if resume:
+            _status_box(
+                f'FIRE MAPPING CLI (resume)  |  {self.fire_numbe}',
+                [
+                    f'Image   : {os.path.basename(self.image_filename)}',
+                    f'Hint    : {hint_name}',
+                    f'State   : {os.path.basename(self.load_state_path)}',
+                    f'Output  : {self.save_dir}',
+                ]
+            )
+            print('[1/4] Loading image ...')
+            self.load_image()
 
-        print('\nGenerating diagnostic PNGs (pre/post/diff) ...')
-        self.make_diagnostic_pngs()
+            print('\n[2/4] Loading hint ...')
+            self.load_polygon()
 
-        print('\n[2/7] Loading hint ...')
-        self.load_polygon()
+            print('\n[3/4] Loading cached t-SNE + RF state ...')
+            transformed_img = self._load_intermediate()
+        else:
+            _status_box(
+                f'FIRE MAPPING CLI  |  {self.fire_numbe}',
+                [
+                    f'Image   : {os.path.basename(self.image_filename)}',
+                    f'Hint    : {hint_name}',
+                    f'Output  : {self.save_dir}',
+                ]
+            )
+            print('[1/7] Loading image ...')
+            self.load_image()
 
-        print(f'\n[3/7] Sampling {self.sample_size} pixels '
-              f'(seed={self.random_state}) ...')
-        self.sample_data()
+            print('\nGenerating diagnostic PNGs (pre/post/diff) ...')
+            self.make_diagnostic_pngs()
 
-        print(f'\n[4/7] T-SNE embedding on bands '
-              f'{self.embed_band_list} ...')
-        self.get_band_embed()
+            print('\n[2/7] Loading hint ...')
+            self.load_polygon()
 
-        print('\n[5/7] Mapping burn  (RF + HDBSCAN) ...')
-        img_cluster    = self.map_burn()
+            print(f'\n[3/7] Sampling {self.sample_size} pixels '
+                  f'(seed={self.random_state}) ...')
+            self.sample_data()
+
+            print(f'\n[4/7] T-SNE embedding on bands '
+                  f'{self.embed_band_list} ...')
+            self.get_band_embed()
+            transformed_img = None   # map_burn will compute RF
+
+        step = '4/4' if resume else '5/7'
+        print(f'\n[{step}] Mapping burn  '
+              f'{"(HDBSCAN only)" if resume else "(RF + HDBSCAN)"} ...')
+        img_cluster, transformed_img = self.map_burn(
+            transformed_img=transformed_img)
+
+        # Save intermediate state after first full run
+        if self.save_state_path and not resume:
+            self._save_intermediate(transformed_img)
+
         img_cluster    = img_cluster.reshape(
             self.image._ySize, self.image._xSize)
 
@@ -1012,10 +1079,10 @@ class FireMappingCLI:
         print(f'[CLI] Burned pixels: {burned:,} / {total:,}  '
               f'({100.0 * burned / total:.2f} %)')
 
-        print('\n[6/7] Saving classification ...')
+        print(f'\nSaving classification ...')
         clf_path = self.save_classification(classification)
 
-        print('\n[7/7] Running class_brush post-processing ...')
+        print(f'\nRunning class_brush post-processing ...')
         brushed = self.run_class_brush(clf_path)
 
         print('\nGenerating figures ...')
@@ -1118,6 +1185,13 @@ Examples
     p.add_argument('--contour_width', type=int, default=1,
                    help='Contour line width in pixels (default: 1)')
 
+    # ---- Intermediate state caching (serial mapping optimisation) ----
+    p.add_argument('--save_state', default=None,
+                   help='Save t-SNE + RF state to .npz after embedding '
+                        '(for reuse by subsequent --load_state runs)')
+    p.add_argument('--load_state', default=None,
+                   help='Load cached t-SNE + RF state from .npz, '
+                        'skip straight to HDBSCAN')
 
     return p
 
@@ -1153,6 +1227,8 @@ def main(argv=None):
         tsne_n_components   = args.tsne_n_components,
         tsne_random_state   = args.tsne_random_state,
         contour_width       = args.contour_width,
+        save_state_path     = args.save_state,
+        load_state_path     = args.load_state,
     )
 
     cli.run()

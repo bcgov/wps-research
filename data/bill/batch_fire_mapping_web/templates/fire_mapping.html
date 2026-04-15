@@ -253,6 +253,9 @@ const FIRE = {{{ fire_numbe_json }}};
 let cropW = 0, cropH = 0;
 let isMapping = false;
 let hasComparison = false;
+let sseActive = false;
+let serverLineCount = 0;
+let lastSerialCount = 0;
 
 // -----------------------------------------------------------------------
 // Console logging
@@ -416,7 +419,6 @@ async function recrop() {
 let zoomScale = 1;
 let panX = 0, panY = 0;
 let isDragging = false;
-let serverLineCount = 0;  // tracks how many server console lines we've shown
 let dragStartX = 0, dragStartY = 0;
 let dragStartPanX = 0, dragStartPanY = 0;
 
@@ -581,6 +583,8 @@ function getParams() {
 async function startMapping() {
     if (isMapping) return;
     isMapping = true;
+    sseActive = true;
+    let sseLogCount = 0;
 
     document.getElementById('btn-map').disabled = true;
     document.getElementById('btn-map-settings').disabled = true;
@@ -630,6 +634,7 @@ async function startMapping() {
 
                 if (data.type === 'log') {
                     log(data.message);
+                    sseLogCount++;
 
                 } else if (data.type === 'complete') {
                     log('Mapping complete!', 'success');
@@ -695,6 +700,9 @@ async function startMapping() {
         document.getElementById('btn-map-settings').disabled = false;
                     document.getElementById('btn-serial').disabled = false;
         document.getElementById('status-text').textContent = 'ready';
+    } finally {
+        sseActive = false;
+        serverLineCount = sseLogCount;
     }
 }
 
@@ -789,69 +797,144 @@ async function mapWithSettings() {
 }
 
 // -----------------------------------------------------------------------
-// Auto-refresh status every 5s (detect changes from other users)
+// Unified state poller — replaces refreshStatus, pollSerialResults,
+// pollMappingStatus with a single loop that handles all live updates.
 // -----------------------------------------------------------------------
 let lastKnownStatus = '{{ fire_status }}';
 
-async function refreshStatus() {
-    if (isMapping) return; // don't interfere with active mapping
+const VIEW_LABELS = {
+    pre: 'Pre-fire', post: 'Post-fire',
+    diff1: 'Diff (norm)', diff2: 'Diff (ratio)',
+    result: 'ML classification', hint: 'Hint perimeter',
+};
+
+async function pollFireState() {
+    // SSE streaming (startMapping) handles its own updates — skip
+    if (sseActive) {
+        setTimeout(pollFireState, 2000);
+        return;
+    }
+
     try {
         const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/console`);
         const data = await r.json();
+
+        // 1. Append new console lines incrementally
+        if (data.lines && data.lines.length > serverLineCount) {
+            for (let i = serverLineCount; i < data.lines.length; i++) {
+                log(data.lines[i]);
+            }
+            serverLineCount = data.lines.length;
+        }
+
+        // 2. Update agreement
+        if (data.agreement_pct >= 0) {
+            document.getElementById('agreement-info').innerHTML =
+                `Agreement: <strong>${data.agreement_pct}%</strong>`;
+        }
+
+        // 3. Add new views to dropdowns as they become available
+        for (const selId of ['view-select', 'view-select-right']) {
+            const sel = document.getElementById(selId);
+            for (const v of (data.available_views || [])) {
+                if (!sel.querySelector(`option[value="${v}"]`)) {
+                    const opt = document.createElement('option');
+                    opt.value = v;
+                    opt.textContent = VIEW_LABELS[v] || v;
+                    sel.appendChild(opt);
+                }
+            }
+            if (data.has_comparison && !sel.querySelector('option[value="comparison"]')) {
+                const opt = document.createElement('option');
+                opt.value = 'comparison';
+                opt.textContent = 'Comparison (figure)';
+                sel.appendChild(opt);
+            }
+            if (data.has_brush_comparison && !sel.querySelector('option[value="brush_comparison"]')) {
+                const opt = document.createElement('option');
+                opt.value = 'brush_comparison';
+                opt.textContent = 'Brush comparison';
+                sel.appendChild(opt);
+            }
+        }
+        if (data.has_comparison) hasComparison = true;
+
+        // 4. Update serial results gallery as they arrive
+        const serialResults = data.serial_results || [];
+        if (serialResults.length > 0 && serialResults.length !== lastSerialCount) {
+            showSerialGallery(serialResults);
+            lastSerialCount = serialResults.length;
+        }
+
+        // 5. Handle status transitions
         if (data.status !== lastKnownStatus) {
+            const oldStatus = lastKnownStatus;
             lastKnownStatus = data.status;
             document.getElementById('status-text').textContent = data.status;
 
-            if (data.status === 'mapped' && !hasComparison) {
-                hasComparison = true;
-                // Add new view options
-                const newViews = [
-                    ['result', 'ML classification'],
-                    ['hint', 'Hint perimeter'],
-                    ['comparison', 'Comparison (figure)'],
-                ];
-                for (const selId of ['view-select', 'view-select-right']) {
-                    const s = document.getElementById(selId);
-                    for (const [val, label] of newViews) {
-                        if (!s.querySelector(`option[value="${val}"]`)) {
-                            const opt = document.createElement('option');
-                            opt.value = val;
-                            opt.textContent = label;
-                            s.appendChild(opt);
-                        }
-                    }
-                }
-                document.getElementById('view-select').value = 'post';
-                document.getElementById('view-select-right').value = 'result';
-                switchView();
-                if (splitActive) switchViewRight();
+            if (data.status === 'mapped' && (oldStatus === 'mapping' || isMapping)) {
+                // Mapping just finished (this user or another session)
+                isMapping = false;
+                document.getElementById('btn-map').disabled = false;
+                document.getElementById('btn-map-settings').disabled = false;
+                document.getElementById('btn-serial').disabled = false;
                 document.getElementById('btn-accept').style.display = '';
-                log('Fire was mapped (by another session).', 'success');
 
-                // Check for serial results
-                try {
-                    const sr = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/serial_results`);
-                    const sd = await sr.json();
-                    if (sd.results && sd.results.length > 0) {
-                        showSerialGallery(sd.results);
-                    }
-                } catch {}
+                // Switch to result view
+                const sel = document.getElementById('view-select');
+                if (sel.querySelector('option[value="post"]')) sel.value = 'post';
+                switchView();
+                const selR = document.getElementById('view-select-right');
+                if (selR.querySelector('option[value="result"]')) selR.value = 'result';
+                else if (selR.querySelector('option[value="comparison"]')) selR.value = 'comparison';
+                if (splitActive) switchViewRight();
+
+                if (oldStatus === 'mapping' && !sseActive) {
+                    log('Mapping complete!', 'success');
+                }
+
             } else if (data.status === 'accepted') {
+                isMapping = false;
                 document.getElementById('btn-accept').style.display = 'none';
                 document.getElementById('serial-gallery').style.display = 'none';
-                log('Fire was accepted (by another session).', 'success');
-            }
+                document.getElementById('btn-map').disabled = false;
+                document.getElementById('btn-map-settings').disabled = false;
+                document.getElementById('btn-serial').disabled = false;
+                if (oldStatus !== lastKnownStatus) {
+                    log('Fire accepted.', 'success');
+                }
 
-            // Update agreement
-            if (data.agreement_pct >= 0) {
-                document.getElementById('agreement-info').innerHTML =
-                    `Agreement: <strong>${data.agreement_pct}%</strong>`;
+            } else if (data.status === 'error' && isMapping) {
+                isMapping = false;
+                document.getElementById('btn-map').disabled = false;
+                document.getElementById('btn-map-settings').disabled = false;
+                document.getElementById('btn-serial').disabled = false;
+                log('Mapping failed.', 'error');
+
+            } else if (data.status === 'mapping') {
+                isMapping = true;
+                document.getElementById('btn-map').disabled = true;
+                document.getElementById('btn-map-settings').disabled = true;
+                document.getElementById('btn-serial').disabled = true;
+                document.getElementById('btn-accept').style.display = 'none';
             }
         }
-    } catch {}
-}
 
-setInterval(refreshStatus, 5000);
+        // Keep buttons in sync even without status change
+        if (data.status === 'ready' || data.status === 'mapped') {
+            document.getElementById('btn-map').disabled = false;
+            document.getElementById('btn-map-settings').disabled = false;
+            document.getElementById('btn-serial').disabled = false;
+        }
+        if (data.status === 'mapped') {
+            document.getElementById('btn-accept').style.display = '';
+        }
+
+    } catch {}
+
+    // Poll faster when mapping, slower when idle
+    setTimeout(pollFireState, isMapping ? 2000 : 5000);
+}
 
 // -----------------------------------------------------------------------
 // Remove fire
@@ -965,8 +1048,9 @@ async function startSerialMap() {
             document.getElementById('btn-serial').disabled = false;
             return;
         }
-        log(`Queued ${data.n} serial run(s). Polling for results...`);
-        pollSerialResults();
+        log(`Queued ${data.n} serial run(s). Watching for results...`);
+        serverLineCount = 0;
+        lastSerialCount = 0;
     } catch (err) {
         log('Serial map failed: ' + err.message, 'error');
         isMapping = false;
@@ -974,32 +1058,6 @@ async function startSerialMap() {
         document.getElementById('btn-map-settings').disabled = false;
                     document.getElementById('btn-serial').disabled = false;
         document.getElementById('btn-serial').disabled = false;
-    }
-}
-
-async function pollSerialResults() {
-    try {
-        // Get console updates using tracked offset
-        const cr = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/console`);
-        const cd = await cr.json();
-        if (cd.lines && cd.lines.length > serverLineCount) {
-            for (let i = serverLineCount; i < cd.lines.length; i++) {
-                log(cd.lines[i]);
-            }
-            serverLineCount = cd.lines.length;
-        }
-
-        if (cd.status === 'mapping') {
-            setTimeout(pollSerialResults, 2000);
-            return;
-        }
-
-        // Serial mapping complete — reload to show results cleanly
-        log('Serial mapping complete. Reloading...', 'success');
-        setTimeout(() => window.location.reload(), 1000);
-
-    } catch {
-        setTimeout(pollSerialResults, 3000);
     }
 }
 
@@ -1120,11 +1178,12 @@ async function restoreFireState() {
         const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/console`);
         const data = await r.json();
 
-        // Restore console output
+        // Restore console output and sync line count
         if (data.lines && data.lines.length > 0) {
             for (const line of data.lines) {
                 log(line);
             }
+            serverLineCount = data.lines.length;
         }
 
         // Restore last params to form
@@ -1164,7 +1223,7 @@ async function restoreFireState() {
                 `Agreement: <strong>${data.agreement_pct}%</strong>`;
         }
 
-        // If fire is currently mapping, poll for completion
+        // If fire is currently mapping, set flag — unified poller handles the rest
         if (data.status === 'mapping') {
             isMapping = true;
             document.getElementById('btn-map').disabled = true;
@@ -1172,86 +1231,15 @@ async function restoreFireState() {
             document.getElementById('btn-serial').disabled = true;
             document.getElementById('status-text').textContent = 'mapping';
             log('--- Mapping in progress (reconnected) ---', 'dim');
-            pollMappingStatus();
         }
 
         // Restore serial gallery if results exist
-        if (data.status !== 'mapping') {
-            try {
-                const sr = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/serial_results`);
-                const sd = await sr.json();
-                if (sd.results && sd.results.length > 0) {
-                    showSerialGallery(sd.results);
-                }
-            } catch {}
+        const serialResults = data.serial_results || [];
+        if (serialResults.length > 0) {
+            showSerialGallery(serialResults);
+            lastSerialCount = serialResults.length;
         }
     } catch {}
-}
-
-async function pollMappingStatus() {
-    try {
-        const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/console`);
-        const data = await r.json();
-
-        // Show any new lines using tracked offset
-        if (data.lines && data.lines.length > serverLineCount) {
-            for (let i = serverLineCount; i < data.lines.length; i++) {
-                log(data.lines[i]);
-            }
-            serverLineCount = data.lines.length;
-        }
-
-        if (data.status === 'mapping') {
-            setTimeout(pollMappingStatus, 2000);
-        } else if (data.status === 'mapped') {
-            isMapping = false;
-            hasComparison = true;
-            log('Mapping complete!', 'success');
-
-            // Add result views to dropdowns
-            const newViews = [
-                ['result', 'ML classification'],
-                ['hint', 'Hint perimeter'],
-                ['comparison', 'Comparison (figure)'],
-                ['brush_comparison', 'Brush comparison'],
-            ];
-            for (const selId of ['view-select', 'view-select-right']) {
-                const s = document.getElementById(selId);
-                for (const [val, label] of newViews) {
-                    if (!s.querySelector(`option[value="${val}"]`)) {
-                        const opt = document.createElement('option');
-                        opt.value = val;
-                        opt.textContent = label;
-                        s.appendChild(opt);
-                    }
-                }
-            }
-            document.getElementById('view-select').value = 'post';
-            document.getElementById('view-select-right').value = 'result';
-            switchView();
-            if (splitActive) switchViewRight();
-
-            document.getElementById('btn-map').disabled = false;
-            document.getElementById('btn-map-settings').disabled = false;
-                    document.getElementById('btn-serial').disabled = false;
-            document.getElementById('btn-accept').style.display = '';
-            document.getElementById('status-text').textContent = 'mapped';
-
-            if (data.agreement_pct >= 0) {
-                document.getElementById('agreement-info').innerHTML =
-                    `Agreement: <strong>${data.agreement_pct}%</strong>`;
-            }
-        } else {
-            // Error or other status
-            isMapping = false;
-            document.getElementById('btn-map').disabled = false;
-            document.getElementById('btn-map-settings').disabled = false;
-                    document.getElementById('btn-serial').disabled = false;
-            document.getElementById('status-text').textContent = data.status;
-        }
-    } catch {
-        setTimeout(pollMappingStatus, 3000);
-    }
 }
 
 // -----------------------------------------------------------------------
@@ -1409,6 +1397,8 @@ if (sessionStorage.getItem('panelHidden') === '1') {
 
 prepareFire(null);
 loadNotes();
+// Start the unified state poller (handles all live updates)
+setTimeout(pollFireState, 3000);
 </script>
 </body>
 </html>
