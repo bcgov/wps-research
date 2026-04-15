@@ -257,6 +257,7 @@ let hasComparison = false;
 let sseActive = false;
 let serverLineCount = 0;
 let lastSerialCount = 0;
+let previouslyAccepted = false;
 
 // Active pane tracking
 let activePane = 'left';  // 'left' or 'right'
@@ -374,7 +375,8 @@ async function prepareFire(padding) {
         }
 
         // Status text with dual badge for previously_accepted
-        updateStatusDisplay(data.status, data.previously_accepted);
+        previouslyAccepted = !!data.previously_accepted;
+        updateStatusDisplay(data.status, previouslyAccepted);
 
         // ML size
         updateMlSize(data.ml_area_ha);
@@ -586,11 +588,7 @@ function getViewLabel(viewKey) {
 function updateSubtitle(pane, viewKey) {
     const elId = pane === 'left' ? 'subtitle-left' : 'subtitle-right';
     const el = document.getElementById(elId);
-    let label = getViewLabel(viewKey);
-    if (selectedRun !== null && RUN_VIEWS.has(viewKey)) {
-        label += ` #${selectedRun}`;
-    }
-    el.textContent = label;
+    el.textContent = getViewLabel(viewKey);
 }
 
 // -----------------------------------------------------------------------
@@ -739,8 +737,9 @@ async function startSerialRun(baseParams, n) {
     lastSerialCount = 0;
     selectedRun = null;
 
+    if (lastKnownStatus === 'accepted') previouslyAccepted = true;
     disableMapButtons();
-    updateStatusDisplay('mapping', false);
+    updateStatusDisplay('mapping', previouslyAccepted);
     log(`Starting ${n} run(s)...`, 'dim');
 
     const body = {n};
@@ -784,8 +783,9 @@ async function startMapping() {
     selectedRun = null;
     let sseLogCount = 0;
 
+    if (lastKnownStatus === 'accepted') previouslyAccepted = true;
     disableMapButtons();
-    updateStatusDisplay('mapping', false);
+    updateStatusDisplay('mapping', previouslyAccepted);
 
     serverLineCount = 0;
     log('Starting mapping...', 'dim');
@@ -855,7 +855,7 @@ async function startMapping() {
 
                     enableMapButtons();
                     document.getElementById('btn-accept').style.display = '';
-                    updateStatusDisplay('mapped', false);
+                    updateStatusDisplay('mapped', previouslyAccepted);
                     if (data.agreement_pct >= 0) {
                         document.getElementById('agreement-info').innerHTML =
                             `Agreement: <strong>${data.agreement_pct}%</strong>`;
@@ -900,6 +900,7 @@ async function acceptResult() {
         const data = await r.json();
         if (data.status === 'accepted') {
             log('Results saved successfully.', 'success');
+            previouslyAccepted = false;
             updateStatusDisplay('accepted', false);
             document.getElementById('btn-accept').style.display = 'none';
         } else {
@@ -1051,7 +1052,8 @@ async function pollFireState() {
         if (data.status !== lastKnownStatus) {
             const oldStatus = lastKnownStatus;
             lastKnownStatus = data.status;
-            updateStatusDisplay(data.status, false);
+            previouslyAccepted = !!data.previously_accepted;
+            updateStatusDisplay(data.status, previouslyAccepted);
 
             if (data.status === 'mapped' && (oldStatus === 'mapping' || isMapping)) {
                 isMapping = false;
@@ -1282,6 +1284,7 @@ async function acceptSerialRun(runId) {
         const data = await r.json();
         if (data.status === 'accepted') {
             log(`Run ${runId} accepted!`, 'success');
+            previouslyAccepted = false;
             updateStatusDisplay('accepted', false);
             document.getElementById('serial-gallery').style.display = 'none';
             document.getElementById('btn-accept').style.display = 'none';
@@ -1350,8 +1353,9 @@ async function restoreFireState() {
         // If fire is currently mapping, set flag
         if (data.status === 'mapping') {
             isMapping = true;
+            previouslyAccepted = !!data.previously_accepted;
             disableMapButtons();
-            updateStatusDisplay('mapping', false);
+            updateStatusDisplay('mapping', previouslyAccepted);
             log('--- Mapping in progress (reconnected) ---', 'dim');
         }
 

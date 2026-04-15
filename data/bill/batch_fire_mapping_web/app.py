@@ -143,7 +143,8 @@ def _overlay_mask_on_post(fire: 'FireInfo', raster_path: str,
         out_path = os.path.join(fire.cache_dir, 'previews', f'{out_name}.png')
         imsave(out_path, np.clip(result, 0, 1))
 
-        if out_name not in fire.available_views:
+        if (out_name not in fire.available_views
+                and not out_name.startswith('serial_')):
             fire.available_views.append(out_name)
     except Exception:
         pass
@@ -724,12 +725,21 @@ def _serial_map_worker(fire_numbe: str, param_sets: list[dict]):
                             src_clf = _cand
                             break
 
-                    # Save serial classified raster
+                    # Save serial classified raster + ENVI header
                     serial_clf = os.path.join(
                         fire.cache_dir,
                         f'{fire_numbe}_serial_{run_id}_classified.bin')
                     if src_clf and os.path.isfile(src_clf):
                         shutil.copy2(src_clf, serial_clf)
+                        src_hdr = (
+                            os.path.splitext(src_clf)[0] + '.hdr')
+                        if not os.path.isfile(src_hdr):
+                            src_hdr = src_clf + '.hdr'
+                        if os.path.isfile(src_hdr):
+                            shutil.copy2(
+                                src_hdr,
+                                os.path.splitext(serial_clf)[0]
+                                + '.hdr')
 
                     # Use whichever classified raster exists
                     clf_for_run = serial_clf if os.path.isfile(
@@ -824,6 +834,14 @@ def _serial_map_worker(fire_numbe: str, param_sets: list[dict]):
                 fire.cache_dir,
                 f'{fire_numbe}_crop.bin_classified.bin')
             shutil.copy2(best_clf, main_clf)
+            best_hdr = (
+                os.path.splitext(best_clf)[0] + '.hdr')
+            if not os.path.isfile(best_hdr):
+                best_hdr = best_clf + '.hdr'
+            if os.path.isfile(best_hdr):
+                shutil.copy2(
+                    best_hdr,
+                    os.path.splitext(main_clf)[0] + '.hdr')
             _generate_result_preview(fire)
 
         fire.status = FireStatus.MAPPED
@@ -2022,7 +2040,8 @@ class FireHandler(BaseHTTPRequestHandler):
                     if os.path.isfile(_cand):
                         _overlay_mask_on_post(
                             fire, _cand, view, (0.9, 0.1, 0.0))
-                        break
+                        if os.path.exists(png):
+                            break
 
         if not os.path.exists(png):
             self._send_json(
@@ -2141,6 +2160,7 @@ class FireHandler(BaseHTTPRequestHandler):
 
         self._send_json({
             'status': f.status.value,
+            'previously_accepted': f.previously_accepted,
             'lines': f.console_log,
             'last_params': f.last_params,
             'agreement_pct': f.agreement_pct,
@@ -2257,6 +2277,8 @@ class FireHandler(BaseHTTPRequestHandler):
         param_sets = param_sets[:n]
 
         # Set status BEFORE starting thread to avoid race
+        if fire.status == FireStatus.ACCEPTED:
+            fire.previously_accepted = True
         fire.status = FireStatus.MAPPING
         fire.serial_results = []
         fire.console_log = []
@@ -2369,6 +2391,14 @@ class FireHandler(BaseHTTPRequestHandler):
                 fire.cache_dir,
                 f'{fire_numbe}_crop.bin_classified.bin')
             shutil.copy2(serial_clf, main_clf)
+            ser_hdr = (
+                os.path.splitext(serial_clf)[0] + '.hdr')
+            if not os.path.isfile(ser_hdr):
+                ser_hdr = serial_clf + '.hdr'
+            if os.path.isfile(ser_hdr):
+                shutil.copy2(
+                    ser_hdr,
+                    os.path.splitext(main_clf)[0] + '.hdr')
         if serial_comp and os.path.isfile(serial_comp):
             main_comp = os.path.join(
                 fire.cache_dir, f'{fire_numbe}_comparison.png')
@@ -2516,6 +2546,8 @@ class FireHandler(BaseHTTPRequestHandler):
                     'started_at': datetime.datetime.now().isoformat(
                         timespec='seconds'),
                 }
+                if fire.status == FireStatus.ACCEPTED:
+                    fire.previously_accepted = True
                 fire.status = FireStatus.MAPPING
                 cmd = _build_mapping_cmd(fire, params)
                 short_cmd = ' '.join(
