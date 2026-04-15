@@ -86,7 +86,8 @@
             <th data-key="fire_numbe">Fire Number <span class="sort-arrow"></span></th>
             <th data-key="fire_date">Fire Date <span class="sort-arrow"></span></th>
             <th data-key="fire_year">Year <span class="sort-arrow"></span></th>
-            <th data-key="fire_size_ha">Size (ha) <span class="sort-arrow"></span></th>
+            <th data-key="fire_size_ha">Hint Size (ha) <span class="sort-arrow"></span></th>
+            <th data-key="ml_area_ha">ML Size (ha) <span class="sort-arrow"></span></th>
             <th data-key="agreement_pct">Agreement <span class="sort-arrow"></span></th>
             <th data-key="status">Status <span class="sort-arrow"></span></th>
             <th>Action</th>
@@ -292,10 +293,11 @@ function render() {
         const tr = document.createElement('tr');
         const badge = `<span class="status-badge status-${f.status}">${f.status}</span>`;
         const prevBadge = f.previously_accepted
-            ? ' <span class="prev-accepted-badge" title="Previously accepted">&#10003;</span>'
+            ? '<span class="status-badge status-accepted status-badge-muted">accepted</span> '
             : '';
         const checked = selectedFires.has(f.fire_numbe) ? 'checked' : '';
         const agr = f.agreement_pct >= 0 ? f.agreement_pct + '%' : '';
+        const mlSize = f.ml_area_ha >= 0 ? f.ml_area_ha.toLocaleString() : '';
         const noteIcon = f.notes ? ` <span title="${esc(f.notes)}" style="cursor:help;color:#888">&#9998;</span>` : '';
         tr.innerHTML = `
             <td><input type="checkbox" class="fire-check" value="${encodeURIComponent(f.fire_numbe)}" ${checked} onchange="updateSelection()"></td>
@@ -303,8 +305,9 @@ function render() {
             <td>${esc(f.fire_date)}</td>
             <td>${f.fire_year || ''}</td>
             <td>${f.fire_size_ha != null ? f.fire_size_ha.toLocaleString() : ''}</td>
+            <td>${mlSize}</td>
             <td>${agr}</td>
-            <td>${badge}${prevBadge}</td>
+            <td>${prevBadge}${badge}</td>
             <td><a href="/fire/${encodeURIComponent(f.fire_numbe)}" class="btn">Open</a></td>
         `;
         tbody.appendChild(tr);

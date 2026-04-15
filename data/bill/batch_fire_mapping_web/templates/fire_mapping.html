@@ -20,8 +20,9 @@
 <div class="fire-info-bar">
     <span>Date: <strong>{{ fire_date }}</strong></span>
     <span>Year: <strong>{{ fire_year }}</strong></span>
-    <span>Size: <strong>{{ fire_size_ha }} ha</strong></span>
-    <span>Status: <strong id="status-text">{{ fire_status }}</strong></span>
+    <span>Hint Size: <strong>{{ fire_size_ha }} ha</strong></span>
+    <span>ML Size: <strong id="ml-size-text">--</strong></span>
+    <span>Status: <span id="status-badges"><strong id="status-text">{{ fire_status }}</strong></span></span>
     <span id="agreement-info"></span>
     <span id="crop-info"></span>
 </div>
@@ -33,25 +34,25 @@
     <!-- =============================================================== -->
     <div class="image-panel">
         <div class="image-controls">
-            <select id="view-select" disabled>
+            <select id="view-select" disabled onchange="onViewDropdownChange()">
                 <option value="">Loading...</option>
-            </select>
-            <select id="view-select-right" disabled style="display:none" onchange="switchViewRight()">
-                <option value="">Right pane...</option>
             </select>
             <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="zoomIn()">+</button>
             <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="zoomOut()">-</button>
             <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="zoomReset()">Fit</button>
             <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" id="btn-split" onclick="toggleSplit()">Split</button>
+            <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;display:none" id="btn-sync" onclick="toggleSync()" title="Sync pan/zoom between panes">Sync</button>
             <span class="info" id="zoom-info"></span>
             <span class="info" id="image-info"></span>
         </div>
         <div class="image-viewer-container" id="image-viewer-container">
-            <div class="image-area" id="image-area">
+            <div class="image-area pane-active" id="image-area" onclick="setActivePane('left')" data-pane="left">
+                <span class="pane-subtitle" id="subtitle-left"></span>
                 <span class="loading" id="loading-msg">Preparing fire data...</span>
                 <img id="main-img" style="display:none" alt="Fire view">
             </div>
-            <div class="image-area" id="image-area-right" style="display:none">
+            <div class="image-area" id="image-area-right" style="display:none" onclick="setActivePane('right')" data-pane="right">
+                <span class="pane-subtitle" id="subtitle-right"></span>
                 <img id="right-img" style="display:none" alt="Comparison view">
             </div>
         </div>
@@ -197,7 +198,13 @@
                 </div>
             </div>
 
-            <!-- Action buttons -->
+            <!-- Run config + Action buttons -->
+            <div class="run-config">
+                <label>Runs:</label>
+                <input type="number" id="run-count" value="1" min="1" max="10"
+                    style="width:42px;font-size:12px;padding:2px 4px;border:1px solid #ccc;border-radius:3px;text-align:center">
+                <span id="run-hint" class="run-hint"></span>
+            </div>
             <div class="action-buttons">
                 <button class="btn" id="btn-map" disabled onclick="startMapping()">
                     Map Fire
@@ -205,12 +212,6 @@
                 <button class="btn" id="btn-map-settings" disabled onclick="mapWithSettings()"
                     style="background:#555;font-size:12px;line-height:1.2">
                     Map Fire<br><small>with settings</small>
-                </button>
-                <button class="btn" id="btn-serial" disabled onclick="startSerialMap()"
-                    style="background:#6a0dad;font-size:12px;line-height:1.2">
-                    Serial Map<br><small>N=<input type="number" id="serial-n" value="3" min="1" max="10"
-                        style="width:30px;font-size:11px;padding:0 2px;border:1px solid #999;border-radius:2px;text-align:center"
-                        onclick="event.stopPropagation()"></small>
                 </button>
                 <button class="btn btn-success" id="btn-accept" style="display:none" onclick="acceptResult()">
                     Accept
@@ -256,6 +257,20 @@ let hasComparison = false;
 let sseActive = false;
 let serverLineCount = 0;
 let lastSerialCount = 0;
+
+// Active pane tracking
+let activePane = 'left';  // 'left' or 'right'
+let leftView = '';   // current view key for left pane
+let rightView = '';  // current view key for right pane
+let selectedRun = null;  // currently selected serial run (null or run_id)
+const RUN_VIEWS = new Set(['result', 'comparison', 'brush_comparison']);
+
+const VIEW_LABELS = {
+    pre: 'Pre-fire', post: 'Post-fire',
+    diff1: 'Diff (norm)', diff2: 'Diff (ratio)',
+    result: 'ML classification', hint: 'Hint perimeter',
+    comparison: 'Comparison (figure)', brush_comparison: 'Brush comparison',
+};
 
 // -----------------------------------------------------------------------
 // Console logging
@@ -317,8 +332,7 @@ async function prepareFire(padding) {
         for (const v of (data.views || [])) {
             const opt = document.createElement('option');
             opt.value = v;
-            const labels = {pre:'Pre-fire', post:'Post-fire', diff1:'Diff (norm)', diff2:'Diff (ratio)', result:'ML classification', hint:'Hint perimeter'};
-            opt.textContent = labels[v] || v;
+            opt.textContent = VIEW_LABELS[v] || v;
             sel.appendChild(opt);
         }
 
@@ -339,40 +353,31 @@ async function prepareFire(padding) {
 
         sel.disabled = false;
 
-        // Mirror options to right-pane dropdown
-        const selR = document.getElementById('view-select-right');
-        selR.innerHTML = '';
-        for (const opt of sel.options) {
-            const o2 = document.createElement('option');
-            o2.value = opt.value;
-            o2.textContent = opt.textContent;
-            selR.appendChild(o2);
-        }
-        selR.disabled = false;
-
         // Default views: left=post, right=result overlay (or comparison)
         if (data.views && data.views.includes('post')) {
-            sel.value = 'post';
+            leftView = 'post';
         }
         if (data.views && data.views.includes('result')) {
-            selR.value = 'result';
+            rightView = 'result';
         } else if (data.has_comparison) {
-            selR.value = 'comparison';
+            rightView = 'comparison';
         } else if (data.views && data.views.includes('pre')) {
-            selR.value = 'pre';
+            rightView = 'pre';
         }
+
+        // Set dropdown to show active pane's view
+        sel.value = (activePane === 'left') ? leftView : rightView;
 
         // Show accept/retry buttons for mapped fires
         if (data.status === 'mapped') {
             document.getElementById('btn-accept').style.display = '';
         }
 
-        // Status text with previously_accepted indicator
-        const statusEl = document.getElementById('status-text');
-        statusEl.textContent = data.status;
-        if (data.previously_accepted) {
-            statusEl.innerHTML += ' <span class="prev-accepted-badge" title="Previously accepted">&#10003;</span>';
-        }
+        // Status text with dual badge for previously_accepted
+        updateStatusDisplay(data.status, data.previously_accepted);
+
+        // ML size
+        updateMlSize(data.ml_area_ha);
 
         document.getElementById('crop-info').innerHTML =
             `Crop: <strong>${cropW}&times;${cropH} px</strong> &middot; ` +
@@ -380,11 +385,14 @@ async function prepareFire(padding) {
             `Accum: <strong>${data.acc_start || '?'} &rarr; ${data.acc_end || '?'}</strong>`;
 
         updateSampleSize();
-        switchView();
+        loadPaneImage('left', leftView);
+        updateSubtitle('left', leftView);
+        if (splitActive) {
+            loadPaneImage('right', rightView);
+            updateSubtitle('right', rightView);
+        }
 
-        document.getElementById('btn-map').disabled = false;
-        document.getElementById('btn-map-settings').disabled = false;
-                    document.getElementById('btn-serial').disabled = false;
+        enableMapButtons();
         log('Fire prepared. Ready to map.', 'success');
 
         // Restore console and params if fire is mapping or was mapped
@@ -414,136 +422,254 @@ async function recrop() {
 }
 
 // -----------------------------------------------------------------------
-// Zoom & Pan state
+// Zoom & Pan state — per-pane
 // -----------------------------------------------------------------------
-let zoomScale = 1;
-let panX = 0, panY = 0;
+const paneState = {
+    left:  { scale: 1, panX: 0, panY: 0 },
+    right: { scale: 1, panX: 0, panY: 0 },
+};
+let syncPanes = false;
 let isDragging = false;
+let dragPane = null;
 let dragStartX = 0, dragStartY = 0;
 let dragStartPanX = 0, dragStartPanY = 0;
 
-function updateTransform() {
-    const img = document.getElementById('main-img');
-    img.style.transform = `translate(${panX}px, ${panY}px) scale(${zoomScale})`;
-    document.getElementById('zoom-info').textContent = `${Math.round(zoomScale * 100)}%`;
-    syncRightPane();
+function getPaneElements(pane) {
+    if (pane === 'right') {
+        return { area: document.getElementById('image-area-right'),
+                 img: document.getElementById('right-img') };
+    }
+    return { area: document.getElementById('image-area'),
+             img: document.getElementById('main-img') };
 }
 
-function zoomFit() {
-    const img = document.getElementById('main-img');
-    const area = document.getElementById('image-area');
+function updateTransformForPane(pane) {
+    const s = paneState[pane];
+    const { img } = getPaneElements(pane);
+    img.style.transform = `translate(${s.panX}px, ${s.panY}px) scale(${s.scale})`;
+    if (pane === activePane) {
+        document.getElementById('zoom-info').textContent = `${Math.round(s.scale * 100)}%`;
+    }
+    if (syncPanes && splitActive) {
+        const other = pane === 'left' ? 'right' : 'left';
+        const os = paneState[other];
+        os.scale = s.scale; os.panX = s.panX; os.panY = s.panY;
+        const { img: oImg } = getPaneElements(other);
+        oImg.style.transform = `translate(${os.panX}px, ${os.panY}px) scale(${os.scale})`;
+    }
+}
+
+function zoomFitPane(pane) {
+    const { area, img } = getPaneElements(pane);
     if (!img.naturalWidth || !img.naturalHeight) return;
-
-    const aW = area.clientWidth;
-    const aH = area.clientHeight;
-    const iW = img.naturalWidth;
-    const iH = img.naturalHeight;
-
-    zoomScale = Math.min(aW / iW, aH / iH);
-    panX = (aW - iW * zoomScale) / 2;
-    panY = (aH - iH * zoomScale) / 2;
-    updateTransform();
+    const s = paneState[pane];
+    s.scale = Math.min(area.clientWidth / img.naturalWidth, area.clientHeight / img.naturalHeight);
+    s.panX = (area.clientWidth - img.naturalWidth * s.scale) / 2;
+    s.panY = (area.clientHeight - img.naturalHeight * s.scale) / 2;
+    updateTransformForPane(pane);
 }
 
-function zoomReset() { zoomFit(); }
+function zoomFit() { zoomFitPane('left'); }
+function zoomReset() { zoomFitPane(activePane); }
 
 function zoomIn() {
-    const area = document.getElementById('image-area');
-    const cx = area.clientWidth / 2;
-    const cy = area.clientHeight / 2;
-    applyZoom(cx, cy, 1.3);
+    const { area } = getPaneElements(activePane);
+    applyZoomToPane(activePane, area.clientWidth / 2, area.clientHeight / 2, 1.3);
 }
 
 function zoomOut() {
-    const area = document.getElementById('image-area');
-    const cx = area.clientWidth / 2;
-    const cy = area.clientHeight / 2;
-    applyZoom(cx, cy, 1 / 1.3);
+    const { area } = getPaneElements(activePane);
+    applyZoomToPane(activePane, area.clientWidth / 2, area.clientHeight / 2, 1 / 1.3);
 }
 
-function applyZoom(cx, cy, factor) {
-    // Zoom towards the point (cx, cy) in container coords
-    const newScale = Math.max(0.1, Math.min(200, zoomScale * factor));
-    const ratio = newScale / zoomScale;
-    panX = cx - ratio * (cx - panX);
-    panY = cy - ratio * (cy - panY);
-    zoomScale = newScale;
-    updateTransform();
+function applyZoomToPane(pane, cx, cy, factor) {
+    const s = paneState[pane];
+    const newScale = Math.max(0.1, Math.min(200, s.scale * factor));
+    const ratio = newScale / s.scale;
+    s.panX = cx - ratio * (cx - s.panX);
+    s.panY = cy - ratio * (cy - s.panY);
+    s.scale = newScale;
+    updateTransformForPane(pane);
 }
 
-// Scroll wheel zoom
-(function() {
-    const area = document.getElementById('image-area');
+const _paneInitialized = {};
+function initPaneInteraction(pane) {
+    if (_paneInitialized[pane]) return;
+    _paneInitialized[pane] = true;
+    const { area } = getPaneElements(pane);
 
     area.addEventListener('wheel', (e) => {
         e.preventDefault();
         const rect = area.getBoundingClientRect();
-        const cx = e.clientX - rect.left;
-        const cy = e.clientY - rect.top;
-        const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-        applyZoom(cx, cy, factor);
+        applyZoomToPane(pane, e.clientX - rect.left, e.clientY - rect.top,
+                        e.deltaY < 0 ? 1.15 : 1 / 1.15);
     }, {passive: false});
 
-    // Pan via mouse drag
     area.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return;
+        setActivePane(pane);
         isDragging = true;
+        dragPane = pane;
         dragStartX = e.clientX;
         dragStartY = e.clientY;
-        dragStartPanX = panX;
-        dragStartPanY = panY;
+        dragStartPanX = paneState[pane].panX;
+        dragStartPanY = paneState[pane].panY;
         area.classList.add('dragging');
         e.preventDefault();
     });
+}
 
-    document.addEventListener('mousemove', (e) => {
-        if (!isDragging) return;
-        panX = dragStartPanX + (e.clientX - dragStartX);
-        panY = dragStartPanY + (e.clientY - dragStartY);
-        updateTransform();
-    });
+// Initialize left pane
+initPaneInteraction('left');
 
-    document.addEventListener('mouseup', () => {
-        if (!isDragging) return;
-        isDragging = false;
-        area.classList.remove('dragging');
-    });
-})();
+document.addEventListener('mousemove', (e) => {
+    if (!isDragging || !dragPane) return;
+    const s = paneState[dragPane];
+    s.panX = dragStartPanX + (e.clientX - dragStartX);
+    s.panY = dragStartPanY + (e.clientY - dragStartY);
+    updateTransformForPane(dragPane);
+});
+
+document.addEventListener('mouseup', () => {
+    if (!isDragging) return;
+    if (dragPane) {
+        getPaneElements(dragPane).area.classList.remove('dragging');
+    }
+    isDragging = false;
+    dragPane = null;
+});
 
 // -----------------------------------------------------------------------
-// Switch preview view
+// Active pane management
+// -----------------------------------------------------------------------
+function setActivePane(pane) {
+    if (activePane === pane) return;
+    activePane = pane;
+    document.getElementById('image-area').classList.toggle('pane-active', pane === 'left');
+    document.getElementById('image-area-right').classList.toggle('pane-active', pane === 'right');
+    // Update dropdown to show active pane's current view
+    const sel = document.getElementById('view-select');
+    const curView = (pane === 'left') ? leftView : rightView;
+    if (curView && sel.querySelector(`option[value="${curView}"]`)) {
+        sel.value = curView;
+    }
+    // Update zoom info
+    document.getElementById('zoom-info').textContent =
+        `${Math.round(paneState[pane].scale * 100)}%`;
+}
+
+function toggleSync() {
+    syncPanes = !syncPanes;
+    const btn = document.getElementById('btn-sync');
+    btn.style.background = syncPanes ? '#0066cc' : '';
+    btn.style.color = syncPanes ? '#fff' : '';
+    if (syncPanes) {
+        // Sync right pane to left
+        const ls = paneState.left;
+        const rs = paneState.right;
+        rs.scale = ls.scale; rs.panX = ls.panX; rs.panY = ls.panY;
+        updateTransformForPane('right');
+    }
+}
+
+// -----------------------------------------------------------------------
+// View label helper
+// -----------------------------------------------------------------------
+function getViewLabel(viewKey) {
+    if (!viewKey) return '';
+    return VIEW_LABELS[viewKey] || viewKey;
+}
+
+// -----------------------------------------------------------------------
+// Subtitle on each pane
+// -----------------------------------------------------------------------
+function updateSubtitle(pane, viewKey) {
+    const elId = pane === 'left' ? 'subtitle-left' : 'subtitle-right';
+    const el = document.getElementById(elId);
+    let label = getViewLabel(viewKey);
+    if (selectedRun !== null && RUN_VIEWS.has(viewKey)) {
+        label += ` #${selectedRun}`;
+    }
+    el.textContent = label;
+}
+
+// -----------------------------------------------------------------------
+// Load image into a specific pane
 // -----------------------------------------------------------------------
 let firstLoad = true;
 
-function switchView() {
-    const view = document.getElementById('view-select').value;
-    if (!view) return;
-
-    const img = document.getElementById('main-img');
+function loadPaneImage(pane, viewKey) {
+    if (!viewKey) return;
+    const { img } = getPaneElements(pane);
     const loadMsg = document.getElementById('loading-msg');
 
-    if (view === 'comparison') {
-        img.src = `/api/fire/${FIRE}/comparison?t=${Date.now()}`;
-    } else if (view === 'brush_comparison') {
-        img.src = `/api/fire/${FIRE}/brush_comparison?t=${Date.now()}`;
+    let url;
+    const runActive = selectedRun !== null && RUN_VIEWS.has(viewKey);
+
+    if (runActive && viewKey === 'result') {
+        url = `/api/fire/${encodeURIComponent(FIRE)}/preview/serial_${selectedRun}?t=${Date.now()}`;
+    } else if (runActive && viewKey === 'comparison') {
+        url = `/api/fire/${encodeURIComponent(FIRE)}/serial/${selectedRun}/image?type=comparison&t=${Date.now()}`;
+    } else if (runActive && viewKey === 'brush_comparison') {
+        url = `/api/fire/${encodeURIComponent(FIRE)}/serial/${selectedRun}/image?type=brush&t=${Date.now()}`;
+    } else if (viewKey === 'comparison') {
+        url = `/api/fire/${FIRE}/comparison?t=${Date.now()}`;
+    } else if (viewKey === 'brush_comparison') {
+        url = `/api/fire/${FIRE}/brush_comparison?t=${Date.now()}`;
     } else {
-        img.src = `/api/fire/${FIRE}/preview/${view}?t=${Date.now()}`;
+        url = `/api/fire/${FIRE}/preview/${viewKey}?t=${Date.now()}`;
     }
+    img.src = url;
 
     img.onload = () => {
-        loadMsg.style.display = 'none';
+        if (pane === 'left') loadMsg.style.display = 'none';
         img.style.display = 'block';
-        if (firstLoad) { zoomFit(); firstLoad = false; }
-        else { updateTransform(); }
+        if (firstLoad) { zoomFitPane(pane); firstLoad = false; }
+        else { updateTransformForPane(pane); }
     };
     img.onerror = () => {
-        loadMsg.style.display = 'block';
-        loadMsg.textContent = `View "${view}" not available`;
+        if (pane === 'left') {
+            loadMsg.style.display = 'block';
+            loadMsg.textContent = `View "${getViewLabel(viewKey)}" not available`;
+        }
         img.style.display = 'none';
     };
+
+    // Update tracking
+    if (pane === 'left') leftView = viewKey;
+    else rightView = viewKey;
+    updateSubtitle(pane, viewKey);
 }
 
-document.getElementById('view-select').addEventListener('change', switchView);
+// -----------------------------------------------------------------------
+// Dropdown change handler (controls active pane)
+// -----------------------------------------------------------------------
+function onViewDropdownChange() {
+    const viewKey = document.getElementById('view-select').value;
+    if (!viewKey) return;
+    loadPaneImage(activePane, viewKey);
+}
+
+// Status display with dual badges
+function updateStatusDisplay(status, prevAccepted) {
+    const container = document.getElementById('status-badges');
+    let html = '';
+    if (prevAccepted) {
+        html += '<span class="status-badge status-accepted status-badge-muted">accepted</span> ';
+    }
+    html += `<span class="status-badge status-${status}">${status}</span>`;
+    container.innerHTML = html;
+}
+
+// ML size display
+function updateMlSize(mlAreaHa) {
+    const el = document.getElementById('ml-size-text');
+    if (mlAreaHa >= 0) {
+        el.textContent = mlAreaHa.toLocaleString() + ' ha';
+    } else {
+        el.textContent = '--';
+    }
+}
 
 // -----------------------------------------------------------------------
 // Collect params from the form
@@ -578,19 +704,88 @@ function getParams() {
 }
 
 // -----------------------------------------------------------------------
-// Start mapping via fetch + SSE streaming
+// Shared helpers for enabling/disabling mapping buttons
+// -----------------------------------------------------------------------
+function disableMapButtons() {
+    document.getElementById('btn-map').disabled = true;
+    document.getElementById('btn-map-settings').disabled = true;
+    document.getElementById('btn-accept').style.display = 'none';
+}
+
+function enableMapButtons() {
+    document.getElementById('btn-map').disabled = false;
+    document.getElementById('btn-map-settings').disabled = false;
+}
+
+function getRunCount() {
+    return Math.max(1, Math.min(10,
+        parseInt(document.getElementById('run-count').value) || 1));
+}
+
+// Live hint for run count
+document.getElementById('run-count').addEventListener('input', () => {
+    const n = getRunCount();
+    const hint = document.getElementById('run-hint');
+    hint.textContent = n > 1 ? `Varies HDBSCAN across ${n} runs` : '';
+});
+
+// -----------------------------------------------------------------------
+// Serial run (N > 1) — shared by Map Fire and Map Fire with Settings
+// -----------------------------------------------------------------------
+async function startSerialRun(baseParams, n) {
+    if (isMapping) return;
+    isMapping = true;
+    serverLineCount = 0;
+    lastSerialCount = 0;
+    selectedRun = null;
+
+    disableMapButtons();
+    updateStatusDisplay('mapping', false);
+    log(`Starting ${n} run(s)...`, 'dim');
+
+    const body = {n};
+    if (baseParams) body.base_params = baseParams;
+
+    try {
+        const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/serial_map`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+            body: JSON.stringify(body),
+        });
+        const data = await r.json();
+        if (data.error) {
+            log('ERROR: ' + data.error, 'error');
+            isMapping = false;
+            enableMapButtons();
+            return;
+        }
+        log(`Queued ${data.n} run(s). Watching for results...`);
+        serverLineCount = 0;
+    } catch (err) {
+        log('Failed to start runs: ' + err.message, 'error');
+        isMapping = false;
+        enableMapButtons();
+    }
+}
+
+// -----------------------------------------------------------------------
+// Start mapping via fetch + SSE streaming (single run)
 // -----------------------------------------------------------------------
 async function startMapping() {
     if (isMapping) return;
+
+    const nRuns = getRunCount();
+    if (nRuns > 1) {
+        return startSerialRun(getParams(), nRuns);
+    }
+
     isMapping = true;
     sseActive = true;
+    selectedRun = null;
     let sseLogCount = 0;
 
-    document.getElementById('btn-map').disabled = true;
-    document.getElementById('btn-map-settings').disabled = true;
-                    document.getElementById('btn-serial').disabled = true;
-    document.getElementById('btn-accept').style.display = 'none';
-    document.getElementById('status-text').textContent = 'mapping';
+    disableMapButtons();
+    updateStatusDisplay('mapping', false);
 
     serverLineCount = 0;
     log('Starting mapping...', 'dim');
@@ -606,10 +801,8 @@ async function startMapping() {
             const err = await response.json();
             log('ERROR: ' + (err.error || response.statusText), 'error');
             isMapping = false;
-            document.getElementById('btn-map').disabled = false;
-            document.getElementById('btn-map-settings').disabled = false;
-                    document.getElementById('btn-serial').disabled = false;
-            document.getElementById('status-text').textContent = 'ready';
+            enableMapButtons();
+            updateStatusDisplay('ready', false);
             return;
         }
 
@@ -641,46 +834,39 @@ async function startMapping() {
                     isMapping = false;
                     hasComparison = true;
 
-                    // Add result options to both dropdowns
-                    const newViews = [
+                    const s = document.getElementById('view-select');
+                    for (const [val, label] of [
                         ['result', 'ML classification'],
                         ['comparison', 'Comparison (figure)'],
                         ['brush_comparison', 'Brush comparison'],
-                    ];
-                    for (const selId of ['view-select', 'view-select-right']) {
-                        const s = document.getElementById(selId);
-                        for (const [val, label] of newViews) {
-                            if (!s.querySelector(`option[value="${val}"]`)) {
-                                const opt = document.createElement('option');
-                                opt.value = val;
-                                opt.textContent = label;
-                                s.appendChild(opt);
-                            }
+                    ]) {
+                        if (!s.querySelector(`option[value="${val}"]`)) {
+                            const opt = document.createElement('option');
+                            opt.value = val;
+                            opt.textContent = label;
+                            s.appendChild(opt);
                         }
                     }
-                    document.getElementById('view-select').value = 'post';
-                    document.getElementById('view-select-right').value = 'result';
-                    switchView();
-                    if (splitActive) switchViewRight();
 
-                    document.getElementById('btn-map').disabled = false;
-                    document.getElementById('btn-map-settings').disabled = false;
-                    document.getElementById('btn-serial').disabled = false;
+                    leftView = 'post'; rightView = 'result';
+                    loadPaneImage('left', leftView);
+                    if (splitActive) loadPaneImage('right', rightView);
+                    s.value = (activePane === 'left') ? leftView : rightView;
+
+                    enableMapButtons();
                     document.getElementById('btn-accept').style.display = '';
-                    document.getElementById('status-text').textContent = 'mapped';
+                    updateStatusDisplay('mapped', false);
                     if (data.agreement_pct >= 0) {
                         document.getElementById('agreement-info').innerHTML =
                             `Agreement: <strong>${data.agreement_pct}%</strong>`;
                     }
-                    updateRightImage();
+                    updateMlSize(data.ml_area_ha);
 
                 } else if (data.type === 'error') {
                     log('ERROR: ' + data.message, 'error');
                     isMapping = false;
-                    document.getElementById('btn-map').disabled = false;
-                    document.getElementById('btn-map-settings').disabled = false;
-                    document.getElementById('btn-serial').disabled = false;
-                    document.getElementById('status-text').textContent = 'ready';
+                    enableMapButtons();
+                    updateStatusDisplay('ready', false);
                 }
             }
         }
@@ -688,18 +874,14 @@ async function startMapping() {
         if (isMapping) {
             log('Connection lost during mapping.', 'error');
             isMapping = false;
-            document.getElementById('btn-map').disabled = false;
-            document.getElementById('btn-map-settings').disabled = false;
-                    document.getElementById('btn-serial').disabled = false;
+            enableMapButtons();
         }
 
     } catch (err) {
         log('Mapping error: ' + err.message, 'error');
         isMapping = false;
-        document.getElementById('btn-map').disabled = false;
-        document.getElementById('btn-map-settings').disabled = false;
-                    document.getElementById('btn-serial').disabled = false;
-        document.getElementById('status-text').textContent = 'ready';
+        enableMapButtons();
+        updateStatusDisplay('ready', false);
     } finally {
         sseActive = false;
         serverLineCount = sseLogCount;
@@ -718,9 +900,9 @@ async function acceptResult() {
         const data = await r.json();
         if (data.status === 'accepted') {
             log('Results saved successfully.', 'success');
-            document.getElementById('status-text').textContent = 'accepted';
+            updateStatusDisplay('accepted', false);
             document.getElementById('btn-accept').style.display = 'none';
-                } else {
+        } else {
             log('Accept error: ' + (data.error || 'unknown'), 'error');
         }
     } catch (err) {
@@ -732,8 +914,40 @@ async function acceptResult() {
 // -----------------------------------------------------------------------
 // Map Fire with recommended settings
 // -----------------------------------------------------------------------
+function applySettingsToForm(p) {
+    const setVal = (id, val) => {
+        const el = document.getElementById(id);
+        if (el && val != null) el.value = val;
+    };
+    setVal('p-padding', p.padding);
+    setVal('p-sample_rate', p.sample_rate);
+    setVal('p-min_samples', p.min_samples);
+    setVal('p-max_samples', p.max_samples);
+    setVal('p-seed', p.seed);
+    setVal('p-embed_bands', p.embed_bands);
+    setVal('p-tsne_perplexity', p.tsne_perplexity);
+    setVal('p-tsne_learning_rate', p.tsne_learning_rate);
+    setVal('p-tsne_max_iter', p.tsne_max_iter);
+    setVal('p-tsne_n_components', p.tsne_n_components);
+    setVal('p-tsne_random_state', p.tsne_random_state);
+    setVal('p-rf_n_estimators', p.rf_n_estimators);
+    setVal('p-rf_max_depth', p.rf_max_depth);
+    setVal('p-rf_max_features', p.rf_max_features);
+    setVal('p-rf_random_state', p.rf_random_state);
+    setVal('p-controlled_ratio', p.controlled_ratio);
+    setVal('p-hdbscan_min_samples', p.hdbscan_min_samples);
+    setVal('p-contour_width', p.contour_width);
+    if (p.tsne_init) {
+        const initEl = document.getElementById('p-tsne_init');
+        if (initEl) initEl.value = p.tsne_init;
+    }
+    updateSampleSize();
+}
+
 async function mapWithSettings() {
     const fireSize = parseFloat('{{ fire_size_ha }}') || 0;
+    const nRuns = getRunCount();
+
     try {
         const r = await fetch('/api/settings');
         const settings = await r.json();
@@ -741,7 +955,6 @@ async function mapWithSettings() {
             log('No recommended settings configured. Use the Settings panel on the fire list page.', 'error');
             return;
         }
-        // Find matching row for this fire size
         const row = settings.find(s =>
             fireSize >= s.min_ha && (s.max_ha == null || fireSize < s.max_ha));
         if (!row) {
@@ -749,48 +962,24 @@ async function mapWithSettings() {
             return;
         }
         const p = row.params;
-        // Apply settings to form
-        const setVal = (id, val) => {
-            const el = document.getElementById(id);
-            if (el && val != null) el.value = val;
-        };
-        // Apply settings to form
-        setVal('p-padding', p.padding);
-        setVal('p-sample_rate', p.sample_rate);
-        setVal('p-min_samples', p.min_samples);
-        setVal('p-max_samples', p.max_samples);
-        setVal('p-seed', p.seed);
-        setVal('p-embed_bands', p.embed_bands);
-        setVal('p-tsne_perplexity', p.tsne_perplexity);
-        setVal('p-tsne_learning_rate', p.tsne_learning_rate);
-        setVal('p-tsne_max_iter', p.tsne_max_iter);
-        setVal('p-tsne_n_components', p.tsne_n_components);
-        setVal('p-tsne_random_state', p.tsne_random_state);
-        setVal('p-rf_n_estimators', p.rf_n_estimators);
-        setVal('p-rf_max_depth', p.rf_max_depth);
-        setVal('p-rf_max_features', p.rf_max_features);
-        setVal('p-rf_random_state', p.rf_random_state);
-        setVal('p-controlled_ratio', p.controlled_ratio);
-        setVal('p-hdbscan_min_samples', p.hdbscan_min_samples);
-        setVal('p-contour_width', p.contour_width);
-        if (p.tsne_init) {
-            const initEl = document.getElementById('p-tsne_init');
-            if (initEl) initEl.value = p.tsne_init;
-        }
-        updateSampleSize();
+        applySettingsToForm(p);
         log(`Applied recommended settings for ${row.min_ha} ha → ${row.max_ha != null ? row.max_ha + ' ha' : '∞'}`, 'success');
 
-        // Re-crop if padding changed, then map
+        // Re-crop if padding changed
         const newPad = parseFloat(p.padding);
         const curPad = parseFloat(document.getElementById('p-padding').value);
         if (!isNaN(newPad) && newPad !== curPad) {
             log(`Re-cropping with padding=${newPad}...`);
-            document.getElementById('btn-map').disabled = true;
-            document.getElementById('btn-map-settings').disabled = true;
-                    document.getElementById('btn-serial').disabled = true;
+            disableMapButtons();
             await prepareFire(newPad);
         }
-        startMapping();
+
+        if (nRuns > 1) {
+            // N>1 with settings: let the server pick N ranked param sets
+            startSerialRun(null, nRuns);
+        } else {
+            startMapping();
+        }
     } catch (err) {
         log('Failed to load settings: ' + err.message, 'error');
     }
@@ -802,14 +991,7 @@ async function mapWithSettings() {
 // -----------------------------------------------------------------------
 let lastKnownStatus = '{{ fire_status }}';
 
-const VIEW_LABELS = {
-    pre: 'Pre-fire', post: 'Post-fire',
-    diff1: 'Diff (norm)', diff2: 'Diff (ratio)',
-    result: 'ML classification', hint: 'Hint perimeter',
-};
-
 async function pollFireState() {
-    // SSE streaming (startMapping) handles its own updates — skip
     if (sseActive) {
         setTimeout(pollFireState, 2000);
         return;
@@ -827,35 +1009,34 @@ async function pollFireState() {
             serverLineCount = data.lines.length;
         }
 
-        // 2. Update agreement
+        // 2. Update agreement + ML size
         if (data.agreement_pct >= 0) {
             document.getElementById('agreement-info').innerHTML =
                 `Agreement: <strong>${data.agreement_pct}%</strong>`;
         }
+        updateMlSize(data.ml_area_ha);
 
-        // 3. Add new views to dropdowns as they become available
-        for (const selId of ['view-select', 'view-select-right']) {
-            const sel = document.getElementById(selId);
-            for (const v of (data.available_views || [])) {
-                if (!sel.querySelector(`option[value="${v}"]`)) {
-                    const opt = document.createElement('option');
-                    opt.value = v;
-                    opt.textContent = VIEW_LABELS[v] || v;
-                    sel.appendChild(opt);
-                }
-            }
-            if (data.has_comparison && !sel.querySelector('option[value="comparison"]')) {
+        // 3. Add new views to dropdown as they become available
+        const sel = document.getElementById('view-select');
+        for (const v of (data.available_views || [])) {
+            if (!sel.querySelector(`option[value="${v}"]`)) {
                 const opt = document.createElement('option');
-                opt.value = 'comparison';
-                opt.textContent = 'Comparison (figure)';
+                opt.value = v;
+                opt.textContent = VIEW_LABELS[v] || v;
                 sel.appendChild(opt);
             }
-            if (data.has_brush_comparison && !sel.querySelector('option[value="brush_comparison"]')) {
-                const opt = document.createElement('option');
-                opt.value = 'brush_comparison';
-                opt.textContent = 'Brush comparison';
-                sel.appendChild(opt);
-            }
+        }
+        if (data.has_comparison && !sel.querySelector('option[value="comparison"]')) {
+            const opt = document.createElement('option');
+            opt.value = 'comparison';
+            opt.textContent = 'Comparison (figure)';
+            sel.appendChild(opt);
+        }
+        if (data.has_brush_comparison && !sel.querySelector('option[value="brush_comparison"]')) {
+            const opt = document.createElement('option');
+            opt.value = 'brush_comparison';
+            opt.textContent = 'Brush comparison';
+            sel.appendChild(opt);
         }
         if (data.has_comparison) hasComparison = true;
 
@@ -870,24 +1051,17 @@ async function pollFireState() {
         if (data.status !== lastKnownStatus) {
             const oldStatus = lastKnownStatus;
             lastKnownStatus = data.status;
-            document.getElementById('status-text').textContent = data.status;
+            updateStatusDisplay(data.status, false);
 
             if (data.status === 'mapped' && (oldStatus === 'mapping' || isMapping)) {
-                // Mapping just finished (this user or another session)
                 isMapping = false;
-                document.getElementById('btn-map').disabled = false;
-                document.getElementById('btn-map-settings').disabled = false;
-                document.getElementById('btn-serial').disabled = false;
+                enableMapButtons();
                 document.getElementById('btn-accept').style.display = '';
 
-                // Switch to result view
-                const sel = document.getElementById('view-select');
-                if (sel.querySelector('option[value="post"]')) sel.value = 'post';
-                switchView();
-                const selR = document.getElementById('view-select-right');
-                if (selR.querySelector('option[value="result"]')) selR.value = 'result';
-                else if (selR.querySelector('option[value="comparison"]')) selR.value = 'comparison';
-                if (splitActive) switchViewRight();
+                leftView = 'post'; rightView = 'result';
+                loadPaneImage('left', leftView);
+                if (splitActive) loadPaneImage('right', rightView);
+                sel.value = (activePane === 'left') ? leftView : rightView;
 
                 if (oldStatus === 'mapping' && !sseActive) {
                     log('Mapping complete!', 'success');
@@ -897,34 +1071,21 @@ async function pollFireState() {
                 isMapping = false;
                 document.getElementById('btn-accept').style.display = 'none';
                 document.getElementById('serial-gallery').style.display = 'none';
-                document.getElementById('btn-map').disabled = false;
-                document.getElementById('btn-map-settings').disabled = false;
-                document.getElementById('btn-serial').disabled = false;
-                if (oldStatus !== lastKnownStatus) {
-                    log('Fire accepted.', 'success');
-                }
+                enableMapButtons();
 
             } else if (data.status === 'error' && isMapping) {
                 isMapping = false;
-                document.getElementById('btn-map').disabled = false;
-                document.getElementById('btn-map-settings').disabled = false;
-                document.getElementById('btn-serial').disabled = false;
+                enableMapButtons();
                 log('Mapping failed.', 'error');
 
             } else if (data.status === 'mapping') {
                 isMapping = true;
-                document.getElementById('btn-map').disabled = true;
-                document.getElementById('btn-map-settings').disabled = true;
-                document.getElementById('btn-serial').disabled = true;
-                document.getElementById('btn-accept').style.display = 'none';
+                disableMapButtons();
             }
         }
 
-        // Keep buttons in sync even without status change
         if (data.status === 'ready' || data.status === 'mapped') {
-            document.getElementById('btn-map').disabled = false;
-            document.getElementById('btn-map-settings').disabled = false;
-            document.getElementById('btn-serial').disabled = false;
+            enableMapButtons();
         }
         if (data.status === 'mapped') {
             document.getElementById('btn-accept').style.display = '';
@@ -932,7 +1093,6 @@ async function pollFireState() {
 
     } catch {}
 
-    // Poll faster when mapping, slower when idle
     setTimeout(pollFireState, isMapping ? 2000 : 5000);
 }
 
@@ -1015,52 +1175,6 @@ function toggleConsole() {
     });
 })();
 
-// -----------------------------------------------------------------------
-// Serial mapping
-// -----------------------------------------------------------------------
-async function startSerialMap() {
-    if (isMapping) return;
-    const n = parseInt(document.getElementById('serial-n').value) || 3;
-
-    serverLineCount = 0;
-    log(`Starting serial mapping with N=${n}...`, 'dim');
-    isMapping = true;
-    document.getElementById('btn-map').disabled = true;
-    document.getElementById('btn-map-settings').disabled = true;
-                    document.getElementById('btn-serial').disabled = true;
-    document.getElementById('btn-serial').disabled = true;
-    document.getElementById('btn-accept').style.display = 'none';
-    document.getElementById('status-text').textContent = 'mapping';
-
-    try {
-        const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/serial_map`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
-            body: JSON.stringify({n}),
-        });
-        const data = await r.json();
-        if (data.error) {
-            log('ERROR: ' + data.error, 'error');
-            isMapping = false;
-            document.getElementById('btn-map').disabled = false;
-            document.getElementById('btn-map-settings').disabled = false;
-                    document.getElementById('btn-serial').disabled = false;
-            document.getElementById('btn-serial').disabled = false;
-            return;
-        }
-        log(`Queued ${data.n} serial run(s). Watching for results...`);
-        serverLineCount = 0;
-        lastSerialCount = 0;
-    } catch (err) {
-        log('Serial map failed: ' + err.message, 'error');
-        isMapping = false;
-        document.getElementById('btn-map').disabled = false;
-        document.getElementById('btn-map-settings').disabled = false;
-                    document.getElementById('btn-serial').disabled = false;
-        document.getElementById('btn-serial').disabled = false;
-    }
-}
-
 function formatParams(params) {
     if (!params || typeof params !== 'object') return '';
     const keys = Object.keys(params).filter(k => params[k] != null && params[k] !== '');
@@ -1076,7 +1190,6 @@ function showSerialGallery(results) {
     gallery.style.display = '';
     items.innerHTML = '';
 
-    // Sort by agreement descending
     const sorted = [...results].sort(
         (a, b) => (b.agreement_pct || -1) - (a.agreement_pct || -1));
 
@@ -1094,9 +1207,10 @@ function showSerialGallery(results) {
         };
 
         const agr = r.agreement_pct >= 0 ? r.agreement_pct + '%' : 'failed';
+        const mlArea = r.ml_area_ha >= 0 ? r.ml_area_ha.toLocaleString() + ' ha' : '--';
         const badge = isBest ? ' <span style="color:#2d8a4e;font-weight:600">(best)</span>' : '';
         const errMsg = r.error ? `<span style="color:#cc3333;font-size:11px"> ${r.error}</span>` : '';
-        const paramsId = `serial-params-${r.run_id}`;
+        const detailsId = `serial-details-${r.run_id}`;
 
         div.innerHTML = `
             <div style="display:flex;align-items:center;gap:8px">
@@ -1104,17 +1218,26 @@ function showSerialGallery(results) {
                      style="width:80px;height:60px;object-fit:cover;border-radius:4px;cursor:pointer;image-rendering:pixelated"
                      onclick="viewSerialRun(${r.run_id})" onerror="this.style.display='none'">
                 <div style="flex:1;font-size:12px">
-                    <strong>Run ${r.run_id}</strong>${badge} — Agreement: ${agr}${errMsg}<br>
-                    <a href="#" style="font-size:10px;color:#0066cc" onclick="event.preventDefault();
-                        var el=document.getElementById('${paramsId}');
-                        el.style.display=el.style.display==='none'?'block':'none'">
-                        Show/hide parameters</a>
+                    <strong>Run ${r.run_id}</strong>${badge}${errMsg}<br>
+                    <span style="color:#555">Agreement: ${agr} &middot; ML: ${mlArea}</span><br>
+                    <a href="#" class="serial-info-toggle" onclick="event.preventDefault();event.stopPropagation();
+                        var el=document.getElementById('${detailsId}');
+                        el.style.display=el.style.display==='none'?'block':'none'">Info</a>
                 </div>
                 ${r.agreement_pct >= 0 ? `<button class="btn btn-success" style="font-size:11px;padding:2px 8px"
                     onclick="acceptSerialRun(${r.run_id})">Accept</button>` : ''}
             </div>
-            <div id="${paramsId}" style="display:none;margin-top:6px;padding:4px 8px;background:#f7f7fa;border-radius:4px">
-                ${formatParams(r.params)}
+            <div id="${detailsId}" class="serial-details-panel" style="display:none">
+                <div class="serial-details-title">Serial Run #${r.run_id}</div>
+                <div class="serial-details-row"><span>Agreement</span><strong>${agr}</strong></div>
+                <div class="serial-details-row"><span>ML Fire Size</span><strong>${mlArea}</strong></div>
+                <div class="serial-details-section">
+                    <a href="#" onclick="event.preventDefault();
+                        var el=this.nextElementSibling;
+                        el.style.display=el.style.display==='none'?'block':'none';
+                        this.textContent=el.style.display==='none'?'Show parameters':'Hide parameters'">Show parameters</a>
+                    <div style="display:none;margin-top:4px">${formatParams(r.params)}</div>
+                </div>
             </div>
         `;
         items.appendChild(div);
@@ -1122,7 +1245,7 @@ function showSerialGallery(results) {
 }
 
 function viewSerialRun(runId) {
-    // Highlight selected run in gallery
+    // Highlight selected card
     document.querySelectorAll('.serial-run-card').forEach(el => {
         el.style.borderColor = '#ddd';
         el.style.background = '#fff';
@@ -1133,20 +1256,20 @@ function viewSerialRun(runId) {
         card.style.background = '#f0fff4';
     }
 
-    // Load this run's overlay directly into the left image pane
-    const img = document.getElementById('main-img');
-    const loadMsg = document.getElementById('loading-msg');
-    img.src = `/api/fire/${encodeURIComponent(FIRE)}/serial/${runId}/image?t=${Date.now()}`;
-    img.onload = () => {
-        loadMsg.style.display = 'none';
-        img.style.display = 'block';
-        updateTransform();  // keep current zoom/pan
-    };
-    img.onerror = () => {
-        loadMsg.style.display = 'block';
-        loadMsg.textContent = `Run ${runId} image not available`;
-        img.style.display = 'none';
-    };
+    // Set selected run and reload current view for the active pane
+    selectedRun = runId;
+    const currentView = activePane === 'left' ? leftView : rightView;
+    if (currentView) {
+        loadPaneImage(activePane, currentView);
+    }
+    // Also update the other pane if split is open and its view has per-run variant
+    const otherPane = activePane === 'left' ? 'right' : 'left';
+    const otherView = activePane === 'left' ? rightView : leftView;
+    const rightEl = document.getElementById('pane-right');
+    if (rightEl && rightEl.style.display !== 'none' &&
+        otherView && RUN_VIEWS.has(otherView)) {
+        loadPaneImage(otherPane, otherView);
+    }
 }
 
 async function acceptSerialRun(runId) {
@@ -1159,7 +1282,7 @@ async function acceptSerialRun(runId) {
         const data = await r.json();
         if (data.status === 'accepted') {
             log(`Run ${runId} accepted!`, 'success');
-            document.getElementById('status-text').textContent = 'accepted';
+            updateStatusDisplay('accepted', false);
             document.getElementById('serial-gallery').style.display = 'none';
             document.getElementById('btn-accept').style.display = 'none';
         } else {
@@ -1217,19 +1340,18 @@ async function restoreFireState() {
             updateSampleSize();
         }
 
-        // Show agreement if available
+        // Show agreement + ML size if available
         if (data.agreement_pct >= 0) {
             document.getElementById('agreement-info').innerHTML =
                 `Agreement: <strong>${data.agreement_pct}%</strong>`;
         }
+        updateMlSize(data.ml_area_ha);
 
-        // If fire is currently mapping, set flag — unified poller handles the rest
+        // If fire is currently mapping, set flag
         if (data.status === 'mapping') {
             isMapping = true;
-            document.getElementById('btn-map').disabled = true;
-            document.getElementById('btn-map-settings').disabled = true;
-            document.getElementById('btn-serial').disabled = true;
-            document.getElementById('status-text').textContent = 'mapping';
+            disableMapButtons();
+            updateStatusDisplay('mapping', false);
             log('--- Mapping in progress (reconnected) ---', 'dim');
         }
 
@@ -1276,76 +1398,31 @@ async function loadNotes() {
 // Split view (side-by-side)
 // -----------------------------------------------------------------------
 let splitActive = false;
-let rightZoomScale = 1, rightPanX = 0, rightPanY = 0;
 
 function toggleSplit() {
     splitActive = !splitActive;
     const container = document.getElementById('image-viewer-container');
     const rightArea = document.getElementById('image-area-right');
-    const rightSel = document.getElementById('view-select-right');
-    const btn = document.getElementById('btn-split');
+    const btnSplit = document.getElementById('btn-split');
+    const btnSync = document.getElementById('btn-sync');
 
     if (splitActive) {
         container.classList.add('split');
         rightArea.style.display = '';
-        rightSel.style.display = '';
-        btn.style.background = '#0066cc';
-        btn.style.color = '#fff';
-        switchViewRight();
+        btnSplit.style.background = '#0066cc';
+        btnSplit.style.color = '#fff';
+        btnSync.style.display = '';
+        initPaneInteraction('right');
+        loadPaneImage('right', rightView);
+        setTimeout(() => zoomFitPane('right'), 50);
     } else {
         container.classList.remove('split');
         rightArea.style.display = 'none';
-        rightSel.style.display = 'none';
-        btn.style.background = '';
-        btn.style.color = '';
+        btnSplit.style.background = '';
+        btnSplit.style.color = '';
+        btnSync.style.display = 'none';
+        if (activePane === 'right') setActivePane('left');
     }
-}
-
-function switchViewRight() {
-    if (!splitActive) return;
-    const view = document.getElementById('view-select-right').value;
-    if (!view) return;
-    const rightImg = document.getElementById('right-img');
-
-    if (view === 'comparison') {
-        rightImg.src = `/api/fire/${FIRE}/comparison?t=${Date.now()}`;
-    } else if (view === 'brush_comparison') {
-        rightImg.src = `/api/fire/${FIRE}/brush_comparison?t=${Date.now()}`;
-    } else {
-        rightImg.src = `/api/fire/${FIRE}/preview/${view}?t=${Date.now()}`;
-    }
-
-    rightImg.onload = () => {
-        rightImg.style.display = 'block';
-        if (firstLoad) { zoomFitRight(); }
-        else { syncRightPane(); }
-    };
-    rightImg.onerror = () => {
-        rightImg.style.display = 'none';
-    };
-}
-
-function updateRightImage() {
-    switchViewRight();
-}
-
-function zoomFitRight() {
-    const img = document.getElementById('right-img');
-    const area = document.getElementById('image-area-right');
-    if (!img.naturalWidth || !img.naturalHeight) return;
-    rightZoomScale = Math.min(
-        area.clientWidth / img.naturalWidth,
-        area.clientHeight / img.naturalHeight);
-    rightPanX = (area.clientWidth - img.naturalWidth * rightZoomScale) / 2;
-    rightPanY = (area.clientHeight - img.naturalHeight * rightZoomScale) / 2;
-    img.style.transform = `translate(${rightPanX}px, ${rightPanY}px) scale(${rightZoomScale})`;
-}
-
-// Sync zoom/pan: when left pane zooms, match in right pane
-function syncRightPane() {
-    if (!splitActive) return;
-    const rightImg = document.getElementById('right-img');
-    rightImg.style.transform = `translate(${panX}px, ${panY}px) scale(${zoomScale})`;
 }
 
 // -----------------------------------------------------------------------
@@ -1386,7 +1463,7 @@ function toggleControlPanel() {
     btn.innerHTML = hidden ? '&#9654;' : '&#9664;';
     sessionStorage.setItem('panelHidden', hidden ? '' : '1');
     // Re-fit images after layout change
-    setTimeout(() => { zoomFit(); if (splitActive) zoomFitRight(); }, 50);
+    setTimeout(() => { zoomFitPane('left'); if (splitActive) zoomFitPane('right'); }, 50);
 }
 
 // Restore panel state

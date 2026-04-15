@@ -56,6 +56,7 @@ class FireInfo:
     # Mapping results
     last_comparison: str = ""
     last_params: dict = field(default_factory=dict)
+    ml_area_ha: float = -1.0  # -1 = not computed
 
     # Tracking
     previously_accepted: bool = False
@@ -161,6 +162,7 @@ class AppState:
             status = FireStatus.PENDING
             notes = ''
             agreement = -1.0
+            ml_area = -1.0
             last_params = {}
             canon_dir = os.path.join(self.output_root, fn)
             if os.path.exists(os.path.join(canon_dir, f'{fn}_comparison.png')):
@@ -176,6 +178,8 @@ class AppState:
                         notes = fire_info.get('notes', '')
                         agreement = float(
                             fire_info.get('agreement_pct', -1) or -1)
+                        ml_area = float(
+                            fire_info.get('ml_area_ha', -1) or -1)
                         # Restore mapping params
                         for section in ('tsne', 'hdbscan', 'random_forest',
                                         'sampling', 'crop'):
@@ -192,5 +196,19 @@ class AppState:
                 status=status,
                 notes=notes,
                 agreement_pct=agreement,
+                ml_area_ha=ml_area,
                 last_params=last_params,
             )
+
+        # Load persistent notes from notes.yaml (overrides _params.yaml)
+        notes_path = os.path.join(self.output_root, 'notes.yaml')
+        if os.path.isfile(notes_path):
+            try:
+                import yaml
+                with open(notes_path) as _nf:
+                    _notes_data = yaml.safe_load(_nf) or {}
+                for fn, note_text in _notes_data.items():
+                    if fn in self.fires and note_text:
+                        self.fires[fn].notes = str(note_text)
+            except Exception:
+                pass

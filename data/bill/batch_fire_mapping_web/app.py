@@ -16,7 +16,7 @@ import sys
 import threading
 import time
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, unquote
+from urllib.parse import urlparse, unquote, parse_qs
 
 import numpy as np
 from osgeo import gdal
@@ -56,6 +56,49 @@ def _save_sessions():
                       default_flow_style=False, sort_keys=False)
     except Exception:
         pass
+
+
+def _save_notes():
+    """Persist all fire notes to notes.yaml."""
+    try:
+        import yaml
+        notes_path = os.path.join(state.output_root, 'notes.yaml')
+        notes_data = {}
+        for fn, fire in state.fires.items():
+            if fire.notes:
+                notes_data[fn] = fire.notes
+        tmp_path = notes_path + '.tmp'
+        with open(tmp_path, 'w') as f:
+            yaml.dump(notes_data, f,
+                      default_flow_style=False, sort_keys=True)
+        os.replace(tmp_path, notes_path)
+    except Exception:
+        pass
+
+
+def _compute_ml_area(fire: 'FireInfo',
+                     clf_path: str = None) -> float:
+    """Compute ML burned area in hectares from a classified raster.
+
+    Returns area in ha or -1 if computation fails.
+    """
+    if clf_path is None:
+        clf_path = os.path.join(
+            fire.cache_dir,
+            f'{fire.fire_numbe}_crop.bin_classified.bin')
+    if not os.path.isfile(clf_path):
+        return -1.0
+    try:
+        gt = state.raster_gt
+        pixel_area_m2 = abs(gt[1] * gt[5])
+        ds = gdal.Open(clf_path, gdal.GA_ReadOnly)
+        arr = ds.GetRasterBand(1).ReadAsArray()
+        ds = None
+        burned_px = int(np.nansum(arr > 0))
+        ml_area_ha = burned_px * pixel_area_m2 / 10000.0
+        return round(ml_area_ha, 2)
+    except Exception:
+        return -1.0
 
 
 def _overlay_mask_on_post(fire: 'FireInfo', raster_path: str,
@@ -484,6 +527,7 @@ def _batch_map_worker(fire_numbes: list[str]):
                         comp if os.path.exists(comp) else '')
                     fire.last_params = params
                     fire.agreement_pct = _compute_agreement(fire)
+                    fire.ml_area_ha = _compute_ml_area(fire)
                     _generate_result_preview(fire)
                     fire.status = FireStatus.MAPPED
                     sys.stderr.write(
@@ -655,31 +699,79 @@ def _serial_map_worker(fire_numbe: str, param_sets: list[dict]):
                     if os.path.isfile(src_comp):
                         shutil.copy2(src_comp, serial_comp)
 
-                    # Save serial classified raster
-                    src_clf = os.path.join(
+                    # Save serial brush comparison
+                    src_brush = os.path.join(
                         fire.cache_dir,
-                        f'{fire_numbe}_crop.bin_classified.bin')
+                        f'{fire_numbe}_brush_comparison.png')
+                    serial_brush = os.path.join(
+                        fire.cache_dir,
+                        f'{fire_numbe}_serial_{run_id}_brush.png')
+                    if os.path.isfile(src_brush):
+                        shutil.copy2(src_brush, serial_brush)
+
+                    # Find the classified raster the CLI just wrote
+                    src_clf = None
+                    for _pat in (f'{fire_numbe}_crop.bin_classified.bin',
+                                 f'{fire_numbe}_crop_classified.bin',
+                                 f'{fire_numbe}_classified.bin'):
+                        _cand = os.path.join(fire.cache_dir, _pat)
+                        if os.path.isfile(_cand):
+                            src_clf = _cand
+                            break
+                    if src_clf is None:
+                        for _cand in glob.glob(os.path.join(
+                                fire.cache_dir, '*classified*.bin')):
+                            src_clf = _cand
+                            break
+
+                    # Save serial classified raster
                     serial_clf = os.path.join(
                         fire.cache_dir,
                         f'{fire_numbe}_serial_{run_id}_classified.bin')
-                    if os.path.isfile(src_clf):
+                    if src_clf and os.path.isfile(src_clf):
                         shutil.copy2(src_clf, serial_clf)
 
+                    # Use whichever classified raster exists
+                    clf_for_run = serial_clf if os.path.isfile(
+                        serial_clf) else src_clf
+
+                    # Compute ML area for this run
+                    run_ml_area = _compute_ml_area(
+                        fire, clf_for_run) if clf_for_run else -1.0
+
                     # Generate pixel-aligned overlay for this run
-                    _overlay_mask_on_post(
-                        fire, serial_clf, f'serial_{run_id}',
-                        (0.9, 0.1, 0.0))
+                    if clf_for_run:
+                        _overlay_mask_on_post(
+                            fire, clf_for_run, f'serial_{run_id}',
+                            (0.9, 0.1, 0.0))
+
+                    # Update the main 'result' overlay so the dropdown
+                    # shows "ML classification" immediately — just copy
+                    # the per-run overlay instead of re-rendering
+                    serial_overlay = os.path.join(
+                        fire.cache_dir, 'previews',
+                        f'serial_{run_id}.png')
+                    result_overlay = os.path.join(
+                        fire.cache_dir, 'previews', 'result.png')
+                    if os.path.isfile(serial_overlay):
+                        shutil.copy2(serial_overlay, result_overlay)
+                        if 'result' not in fire.available_views:
+                            fire.available_views.append('result')
+                    else:
+                        _generate_result_preview(fire)
 
                     fire.serial_results.append({
                         'run_id': run_id,
                         'params': params,
                         'agreement_pct': agr,
+                        'ml_area_ha': run_ml_area,
                         'comparison': serial_comp,
                         'classified': serial_clf,
                     })
 
                     fire.console_log.append(
-                        f'Run {run_id} complete (agreement={agr}%)')
+                        f'Run {run_id} complete (agreement={agr}%'
+                        f', ML area={run_ml_area} ha)')
                 else:
                     fire.serial_results.append({
                         'run_id': run_id,
@@ -715,6 +807,7 @@ def _serial_map_worker(fire_numbe: str, param_sets: list[dict]):
     if successful:
         best = max(successful, key=lambda r: r['agreement_pct'])
         fire.agreement_pct = best['agreement_pct']
+        fire.ml_area_ha = best.get('ml_area_ha', -1.0)
         fire.last_params = best['params']
 
         # Copy best result as the "main" comparison
@@ -1049,23 +1142,13 @@ def _accept_fire_sync(fire_numbe: str) -> str:
         for f in glob.glob(os.path.join(cache_dir, pattern)):
             shutil.copy2(f, fire_dir)
 
-    # Compute ML area
-    gt = state.raster_gt
-    pixel_area_m2 = abs(gt[1] * gt[5])
-    ml_area_ha = None
-    ml_area_m2 = None
-    crop_name = f'{fire_numbe}_crop'
-    clf_bin = os.path.join(fire_dir, f'{crop_name}.bin_classified.bin')
-    if os.path.isfile(clf_bin):
-        try:
-            ds = gdal.Open(clf_bin, gdal.GA_ReadOnly)
-            arr = ds.GetRasterBand(1).ReadAsArray()
-            ds = None
-            burned_px = int(np.nansum(arr > 0))
-            ml_area_m2 = burned_px * pixel_area_m2
-            ml_area_ha = ml_area_m2 / 10000.0
-        except Exception:
-            pass
+    # Compute ML area from the accepted dir
+    clf_bin = os.path.join(
+        fire_dir, f'{fire_numbe}_crop.bin_classified.bin')
+    ml_area_val = _compute_ml_area(fire, clf_bin)
+    ml_area_ha = ml_area_val if ml_area_val >= 0 else None
+    ml_area_m2 = (ml_area_ha * 10000.0) if ml_area_ha is not None else None
+    fire.ml_area_ha = ml_area_val
 
     # Write params YAML
     try:
@@ -1684,6 +1767,7 @@ class FireHandler(BaseHTTPRequestHandler):
                 'status': f.status.value,
                 'previously_accepted': f.previously_accepted,
                 'agreement_pct': f.agreement_pct,
+                'ml_area_ha': f.ml_area_ha,
                 'notes': f.notes,
             }
             for f in state.fires.values()
@@ -1911,6 +1995,7 @@ class FireHandler(BaseHTTPRequestHandler):
             'has_comparison': has_comparison,
             'has_brush_comparison': has_brush,
             'previously_accepted': fire.previously_accepted,
+            'ml_area_ha': fire.ml_area_ha,
         })
 
     def handle_api_preview(self, fire_numbe, view):
@@ -1924,6 +2009,21 @@ class FireHandler(BaseHTTPRequestHandler):
             return
         fire = state.fires[fire_numbe]
         png = os.path.join(fire.cache_dir, 'previews', f'{view}.png')
+
+        # On-the-fly generation for serial overlays
+        if not os.path.exists(png):
+            m = re.match(r'^serial_(\d+)$', view)
+            if m:
+                rid = m.group(1)
+                # Try multiple naming patterns for the classified raster
+                for _pat in (f'{fire_numbe}_serial_{rid}_classified.bin',
+                             f'{fire_numbe}_crop.bin_classified.bin'):
+                    _cand = os.path.join(fire.cache_dir, _pat)
+                    if os.path.isfile(_cand):
+                        _overlay_mask_on_post(
+                            fire, _cand, view, (0.9, 0.1, 0.0))
+                        break
+
         if not os.path.exists(png):
             self._send_json(
                 {'error': f"Preview '{view}' not available"}, 404)
@@ -2034,6 +2134,7 @@ class FireHandler(BaseHTTPRequestHandler):
             serial_results.append({
                 'run_id': r.get('run_id'),
                 'agreement_pct': r.get('agreement_pct', -1),
+                'ml_area_ha': r.get('ml_area_ha', -1),
                 'error': r.get('error', ''),
                 'params': r.get('params', {}),
             })
@@ -2043,6 +2144,7 @@ class FireHandler(BaseHTTPRequestHandler):
             'lines': f.console_log,
             'last_params': f.last_params,
             'agreement_pct': f.agreement_pct,
+            'ml_area_ha': f.ml_area_ha,
             'available_views': list(f.available_views),
             'serial_results': serial_results,
             'has_comparison': has_comparison,
@@ -2094,46 +2196,54 @@ class FireHandler(BaseHTTPRequestHandler):
         body = self._read_body()
         n = int(body.get('n', 3))
         n = max(1, min(10, n))
+        user_base = body.get('base_params')  # from "Map Fire" with N>1
 
-        # Get best base params (run 1 uses full pipeline)
-        ranked = _rank_params_for_fire(
-            fire_numbe, fire.fire_size_ha, 1)
-        if not ranked:
-            self._send_json(
-                {'error': 'No parameter sets available'}, 400)
-            return
+        if user_base:
+            # User supplied explicit params — use as run 1,
+            # vary HDBSCAN for runs 2-N
+            base = dict(user_base)
+        else:
+            # No explicit params — use ranked/recommended as base
+            ranked = _rank_params_for_fire(
+                fire_numbe, fire.fire_size_ha, 1)
+            if not ranked:
+                self._send_json(
+                    {'error': 'No parameter sets available'}, 400)
+                return
 
-        # Validate key params to catch corruption early
-        base_check = ranked[0]
-        eb = base_check.get('embed_bands')
-        tp = base_check.get('tsne_perplexity')
-        if eb is not None and isinstance(eb, (int, float)):
-            sys.stderr.write(
-                f'[serial] WARNING: embed_bands is numeric ({eb!r}), '
-                f'expected comma-separated string — reloading from YAML\n')
-            sys.stderr.flush()
-            fresh = _get_recommended_params(fire.fire_size_ha)
-            if fresh:
-                ranked = [fresh]
-        if tp is not None and isinstance(tp, str) and ',' in str(tp):
-            sys.stderr.write(
-                f'[serial] WARNING: tsne_perplexity is string ({tp!r}), '
-                f'expected number — reloading from YAML\n')
-            sys.stderr.flush()
-            fresh = _get_recommended_params(fire.fire_size_ha)
-            if fresh:
-                ranked = [fresh]
+            # Validate key params to catch corruption early
+            base_check = ranked[0]
+            eb = base_check.get('embed_bands')
+            tp = base_check.get('tsne_perplexity')
+            if eb is not None and isinstance(eb, (int, float)):
+                sys.stderr.write(
+                    f'[serial] WARNING: embed_bands is numeric '
+                    f'({eb!r}), expected comma-separated string '
+                    f'— reloading from YAML\n')
+                sys.stderr.flush()
+                fresh = _get_recommended_params(fire.fire_size_ha)
+                if fresh:
+                    ranked = [fresh]
+            if (tp is not None and isinstance(tp, str)
+                    and ',' in str(tp)):
+                sys.stderr.write(
+                    f'[serial] WARNING: tsne_perplexity is string '
+                    f'({tp!r}), expected number '
+                    f'— reloading from YAML\n')
+                sys.stderr.flush()
+                fresh = _get_recommended_params(fire.fire_size_ha)
+                if fresh:
+                    ranked = [fresh]
+            base = dict(ranked[0])
 
         # Generate N param sets: same base, vary HDBSCAN params.
         # Run 1 = base params.  Runs 2-N get varied
         # hdbscan_min_samples values.
-        base = dict(ranked[0])
         base_hms = int(base.get('hdbscan_min_samples', 20))
         param_sets = [base]
 
         # Generate hdbscan_min_samples variations around base
         variations = [5, 10, 15, 20, 25, 30, 40, 50, 75, 100]
-        # Put base value first, then others sorted by distance
         variations = sorted(
             [v for v in variations if v != base_hms],
             key=lambda v: abs(v - base_hms))
@@ -2187,11 +2297,38 @@ class FireHandler(BaseHTTPRequestHandler):
             self._send_json({'error': 'Fire not found'}, 404)
             return
         fire = state.fires[fire_numbe]
-        # Serve the pixel-aligned overlay for this serial run
+
+        # Check requested image type
+        qs = parse_qs(urlparse(self.path).query)
+        img_type = (qs.get('type', ['']) or [''])[0]
+
+        if img_type == 'comparison':
+            comp_path = os.path.join(
+                fire.cache_dir,
+                f'{fire_numbe}_serial_{run_id}.png')
+            if os.path.isfile(comp_path):
+                self._send_file(comp_path, 'image/png')
+                return
+            self._send_json(
+                {'error': 'Comparison not found for this run'}, 404)
+            return
+
+        if img_type == 'brush':
+            brush_path = os.path.join(
+                fire.cache_dir,
+                f'{fire_numbe}_serial_{run_id}_brush.png')
+            if os.path.isfile(brush_path):
+                self._send_file(brush_path, 'image/png')
+                return
+            self._send_json(
+                {'error': 'Brush comparison not found for this run'},
+                404)
+            return
+
+        # Default: serve pixel-aligned overlay
         overlay_path = os.path.join(
             fire.cache_dir, 'previews', f'serial_{run_id}.png')
         if not os.path.isfile(overlay_path):
-            # Try to generate it on the fly
             serial_clf = os.path.join(
                 fire.cache_dir,
                 f'{fire_numbe}_serial_{run_id}_classified.bin')
@@ -2253,6 +2390,7 @@ class FireHandler(BaseHTTPRequestHandler):
             return
         body = self._read_body()
         state.fires[fire_numbe].notes = body.get('notes', '')
+        _save_notes()
         self._send_json({'status': 'saved'})
 
     def handle_api_report(self):
@@ -2414,6 +2552,7 @@ class FireHandler(BaseHTTPRequestHandler):
                         comp if os.path.exists(comp) else '')
                     fire.last_params = params
                     fire.agreement_pct = _compute_agreement(fire)
+                    fire.ml_area_ha = _compute_ml_area(fire)
                     _generate_result_preview(fire)
                     fire.status = FireStatus.MAPPED
                     sse('complete', {
@@ -2421,6 +2560,7 @@ class FireHandler(BaseHTTPRequestHandler):
                             f'/api/fire/{fire_numbe}/comparison'
                             f'?t={int(time.time())}'),
                         'agreement_pct': fire.agreement_pct,
+                        'ml_area_ha': fire.ml_area_ha,
                     })
                 else:
                     fire.status = FireStatus.READY
