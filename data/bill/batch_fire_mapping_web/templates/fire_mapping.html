@@ -206,9 +206,23 @@
                     style="background:#555;font-size:12px;line-height:1.2">
                     Map Fire<br><small>with settings</small>
                 </button>
+                <button class="btn" id="btn-serial" disabled onclick="startSerialMap()"
+                    style="background:#6a0dad;font-size:12px;line-height:1.2">
+                    Serial Map<br><small>N=<input type="number" id="serial-n" value="3" min="1" max="10"
+                        style="width:30px;font-size:11px;padding:0 2px;border:1px solid #999;border-radius:2px;text-align:center"
+                        onclick="event.stopPropagation()"></small>
+                </button>
                 <button class="btn btn-success" id="btn-accept" style="display:none" onclick="acceptResult()">
                     Accept
                 </button>
+            </div>
+
+            <!-- Serial results gallery -->
+            <div id="serial-gallery" style="display:none">
+                <div style="padding:8px 16px;border-top:1px solid #eee">
+                    <h4 style="font-size:12px;color:#6b6b73;text-transform:uppercase;margin-bottom:8px">Serial Results</h4>
+                    <div id="serial-gallery-items" style="display:flex;flex-direction:column;gap:6px"></div>
+                </div>
             </div>
 
         </div><!-- /params-scroll -->
@@ -220,7 +234,10 @@
         <div class="console-section" id="console-section">
             <div class="console-header">
                 <h4>Console</h4>
-                <button onclick="document.getElementById('console-output').innerHTML=''">clear</button>
+                <div style="display:flex;gap:6px">
+                    <button onclick="document.getElementById('console-output').innerHTML=''">clear</button>
+                    <button id="console-toggle" onclick="toggleConsole()">&#9660;</button>
+                </div>
             </div>
             <div id="console-output"></div>
         </div>
@@ -306,7 +323,7 @@ async function prepareFire(padding) {
         if (data.has_comparison) {
             const opt = document.createElement('option');
             opt.value = 'comparison';
-            opt.textContent = 'Comparison (result)';
+            opt.textContent = 'Comparison (figure)';
             sel.appendChild(opt);
             hasComparison = true;
         }
@@ -364,6 +381,7 @@ async function prepareFire(padding) {
 
         document.getElementById('btn-map').disabled = false;
         document.getElementById('btn-map-settings').disabled = false;
+                    document.getElementById('btn-serial').disabled = false;
         log('Fire prepared. Ready to map.', 'success');
 
         // Restore console and params if fire is mapping or was mapped
@@ -398,6 +416,7 @@ async function recrop() {
 let zoomScale = 1;
 let panX = 0, panY = 0;
 let isDragging = false;
+let serverLineCount = 0;  // tracks how many server console lines we've shown
 let dragStartX = 0, dragStartY = 0;
 let dragStartPanX = 0, dragStartPanY = 0;
 
@@ -492,6 +511,8 @@ function applyZoom(cx, cy, factor) {
 // -----------------------------------------------------------------------
 // Switch preview view
 // -----------------------------------------------------------------------
+let firstLoad = true;
+
 function switchView() {
     const view = document.getElementById('view-select').value;
     if (!view) return;
@@ -510,7 +531,8 @@ function switchView() {
     img.onload = () => {
         loadMsg.style.display = 'none';
         img.style.display = 'block';
-        zoomFit();
+        if (firstLoad) { zoomFit(); firstLoad = false; }
+        else { updateTransform(); }
     };
     img.onerror = () => {
         loadMsg.style.display = 'block';
@@ -562,9 +584,11 @@ async function startMapping() {
 
     document.getElementById('btn-map').disabled = true;
     document.getElementById('btn-map-settings').disabled = true;
+                    document.getElementById('btn-serial').disabled = true;
     document.getElementById('btn-accept').style.display = 'none';
     document.getElementById('status-text').textContent = 'mapping';
 
+    serverLineCount = 0;
     log('Starting mapping...', 'dim');
 
     try {
@@ -580,6 +604,7 @@ async function startMapping() {
             isMapping = false;
             document.getElementById('btn-map').disabled = false;
             document.getElementById('btn-map-settings').disabled = false;
+                    document.getElementById('btn-serial').disabled = false;
             document.getElementById('status-text').textContent = 'ready';
             return;
         }
@@ -613,7 +638,7 @@ async function startMapping() {
 
                     // Add result options to both dropdowns
                     const newViews = [
-                        ['result', 'Result overlay'],
+                        ['result', 'ML classification'],
                         ['comparison', 'Comparison (figure)'],
                         ['brush_comparison', 'Brush comparison'],
                     ];
@@ -635,6 +660,7 @@ async function startMapping() {
 
                     document.getElementById('btn-map').disabled = false;
                     document.getElementById('btn-map-settings').disabled = false;
+                    document.getElementById('btn-serial').disabled = false;
                     document.getElementById('btn-accept').style.display = '';
                     document.getElementById('status-text').textContent = 'mapped';
                     if (data.agreement_pct >= 0) {
@@ -648,6 +674,7 @@ async function startMapping() {
                     isMapping = false;
                     document.getElementById('btn-map').disabled = false;
                     document.getElementById('btn-map-settings').disabled = false;
+                    document.getElementById('btn-serial').disabled = false;
                     document.getElementById('status-text').textContent = 'ready';
                 }
             }
@@ -658,6 +685,7 @@ async function startMapping() {
             isMapping = false;
             document.getElementById('btn-map').disabled = false;
             document.getElementById('btn-map-settings').disabled = false;
+                    document.getElementById('btn-serial').disabled = false;
         }
 
     } catch (err) {
@@ -665,6 +693,7 @@ async function startMapping() {
         isMapping = false;
         document.getElementById('btn-map').disabled = false;
         document.getElementById('btn-map-settings').disabled = false;
+                    document.getElementById('btn-serial').disabled = false;
         document.getElementById('status-text').textContent = 'ready';
     }
 }
@@ -750,6 +779,7 @@ async function mapWithSettings() {
             log(`Re-cropping with padding=${newPad}...`);
             document.getElementById('btn-map').disabled = true;
             document.getElementById('btn-map-settings').disabled = true;
+                    document.getElementById('btn-serial').disabled = true;
             await prepareFire(newPad);
         }
         startMapping();
@@ -766,27 +796,56 @@ let lastKnownStatus = '{{ fire_status }}';
 async function refreshStatus() {
     if (isMapping) return; // don't interfere with active mapping
     try {
-        const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/status`);
+        const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/console`);
         const data = await r.json();
         if (data.status !== lastKnownStatus) {
             lastKnownStatus = data.status;
             document.getElementById('status-text').textContent = data.status;
+
             if (data.status === 'mapped' && !hasComparison) {
                 hasComparison = true;
-                const sel = document.getElementById('view-select');
-                if (!sel.querySelector('option[value="comparison"]')) {
-                    const opt = document.createElement('option');
-                    opt.value = 'comparison';
-                    opt.textContent = 'Comparison (result)';
-                    sel.appendChild(opt);
+                // Add new view options
+                const newViews = [
+                    ['result', 'ML classification'],
+                    ['hint', 'Hint perimeter'],
+                    ['comparison', 'Comparison (figure)'],
+                ];
+                for (const selId of ['view-select', 'view-select-right']) {
+                    const s = document.getElementById(selId);
+                    for (const [val, label] of newViews) {
+                        if (!s.querySelector(`option[value="${val}"]`)) {
+                            const opt = document.createElement('option');
+                            opt.value = val;
+                            opt.textContent = label;
+                            s.appendChild(opt);
+                        }
+                    }
                 }
-                sel.value = 'comparison';
+                document.getElementById('view-select').value = 'post';
+                document.getElementById('view-select-right').value = 'result';
                 switchView();
+                if (splitActive) switchViewRight();
                 document.getElementById('btn-accept').style.display = '';
-                    log('Fire was mapped (by another session).', 'success');
+                log('Fire was mapped (by another session).', 'success');
+
+                // Check for serial results
+                try {
+                    const sr = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/serial_results`);
+                    const sd = await sr.json();
+                    if (sd.results && sd.results.length > 0) {
+                        showSerialGallery(sd.results);
+                    }
+                } catch {}
             } else if (data.status === 'accepted') {
                 document.getElementById('btn-accept').style.display = 'none';
-                            log('Fire was accepted (by another session).', 'success');
+                document.getElementById('serial-gallery').style.display = 'none';
+                log('Fire was accepted (by another session).', 'success');
+            }
+
+            // Update agreement
+            if (data.agreement_pct >= 0) {
+                document.getElementById('agreement-info').innerHTML =
+                    `Agreement: <strong>${data.agreement_pct}%</strong>`;
             }
         }
     } catch {}
@@ -808,11 +867,31 @@ async function removeFire() {
 }
 
 // -----------------------------------------------------------------------
-// Resizable console / parameter split
+// Console toggle & resize
 // -----------------------------------------------------------------------
+let consoleCollapsed = false;
+
+function toggleConsole() {
+    const sec = document.getElementById('console-section');
+    const out = document.getElementById('console-output');
+    const btn = document.getElementById('console-toggle');
+    consoleCollapsed = !consoleCollapsed;
+    if (consoleCollapsed) {
+        out.style.display = 'none';
+        sec.style.height = 'auto';
+        sec.style.minHeight = '0';
+        btn.innerHTML = '&#9650;';
+    } else {
+        out.style.display = '';
+        sec.style.height = '250px';
+        sec.style.minHeight = '30px';
+        btn.innerHTML = '&#9660;';
+    }
+}
+
 (function() {
     const handle = document.getElementById('resize-handle');
-    const console = document.getElementById('console-section');
+    const consoleSec = document.getElementById('console-section');
     let dragging = false;
     let startY = 0;
     let startH = 0;
@@ -820,7 +899,7 @@ async function removeFire() {
     handle.addEventListener('mousedown', (e) => {
         dragging = true;
         startY = e.clientY;
-        startH = console.offsetHeight;
+        startH = consoleSec.offsetHeight;
         handle.classList.add('active');
         document.body.style.cursor = 'row-resize';
         document.body.style.userSelect = 'none';
@@ -829,9 +908,19 @@ async function removeFire() {
 
     document.addEventListener('mousemove', (e) => {
         if (!dragging) return;
-        // Dragging up = larger console, dragging down = smaller console
-        const newH = Math.max(80, startH + (startY - e.clientY));
-        console.style.height = newH + 'px';
+        const newH = Math.max(30, startH + (startY - e.clientY));
+        consoleSec.style.height = newH + 'px';
+        // Auto-hide output if dragged very small
+        const out = document.getElementById('console-output');
+        if (newH <= 35) {
+            out.style.display = 'none';
+            consoleCollapsed = true;
+            document.getElementById('console-toggle').innerHTML = '&#9650;';
+        } else if (consoleCollapsed) {
+            out.style.display = '';
+            consoleCollapsed = false;
+            document.getElementById('console-toggle').innerHTML = '&#9660;';
+        }
     });
 
     document.addEventListener('mouseup', () => {
@@ -842,6 +931,186 @@ async function removeFire() {
         document.body.style.userSelect = '';
     });
 })();
+
+// -----------------------------------------------------------------------
+// Serial mapping
+// -----------------------------------------------------------------------
+async function startSerialMap() {
+    if (isMapping) return;
+    const n = parseInt(document.getElementById('serial-n').value) || 3;
+
+    serverLineCount = 0;
+    log(`Starting serial mapping with N=${n}...`, 'dim');
+    isMapping = true;
+    document.getElementById('btn-map').disabled = true;
+    document.getElementById('btn-map-settings').disabled = true;
+                    document.getElementById('btn-serial').disabled = true;
+    document.getElementById('btn-serial').disabled = true;
+    document.getElementById('btn-accept').style.display = 'none';
+    document.getElementById('status-text').textContent = 'mapping';
+
+    try {
+        const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/serial_map`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+            body: JSON.stringify({n}),
+        });
+        const data = await r.json();
+        if (data.error) {
+            log('ERROR: ' + data.error, 'error');
+            isMapping = false;
+            document.getElementById('btn-map').disabled = false;
+            document.getElementById('btn-map-settings').disabled = false;
+                    document.getElementById('btn-serial').disabled = false;
+            document.getElementById('btn-serial').disabled = false;
+            return;
+        }
+        log(`Queued ${data.n} serial run(s). Polling for results...`);
+        pollSerialResults();
+    } catch (err) {
+        log('Serial map failed: ' + err.message, 'error');
+        isMapping = false;
+        document.getElementById('btn-map').disabled = false;
+        document.getElementById('btn-map-settings').disabled = false;
+                    document.getElementById('btn-serial').disabled = false;
+        document.getElementById('btn-serial').disabled = false;
+    }
+}
+
+async function pollSerialResults() {
+    try {
+        // Get console updates using tracked offset
+        const cr = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/console`);
+        const cd = await cr.json();
+        if (cd.lines && cd.lines.length > serverLineCount) {
+            for (let i = serverLineCount; i < cd.lines.length; i++) {
+                log(cd.lines[i]);
+            }
+            serverLineCount = cd.lines.length;
+        }
+
+        if (cd.status === 'mapping') {
+            setTimeout(pollSerialResults, 2000);
+            return;
+        }
+
+        // Serial mapping complete — reload to show results cleanly
+        log('Serial mapping complete. Reloading...', 'success');
+        setTimeout(() => window.location.reload(), 1000);
+
+    } catch {
+        setTimeout(pollSerialResults, 3000);
+    }
+}
+
+function formatParams(params) {
+    if (!params || typeof params !== 'object') return '';
+    const keys = Object.keys(params).filter(k => params[k] != null && params[k] !== '');
+    if (keys.length === 0) return '<em>No parameters</em>';
+    return '<table style="font-size:10px;border-collapse:collapse;width:100%">' +
+        keys.map(k => `<tr><td style="padding:1px 6px 1px 0;color:#888">${k}</td><td style="padding:1px 0">${params[k]}</td></tr>`).join('') +
+        '</table>';
+}
+
+function showSerialGallery(results) {
+    const gallery = document.getElementById('serial-gallery');
+    const items = document.getElementById('serial-gallery-items');
+    gallery.style.display = '';
+    items.innerHTML = '';
+
+    // Sort by agreement descending
+    const sorted = [...results].sort(
+        (a, b) => (b.agreement_pct || -1) - (a.agreement_pct || -1));
+
+    for (const r of sorted) {
+        const isBest = r === sorted[0] && r.agreement_pct >= 0;
+        const div = document.createElement('div');
+        div.className = 'serial-run-card';
+        div.id = 'serial-card-' + r.run_id;
+        div.style.cssText = 'padding:8px;cursor:pointer;' +
+            'border:2px solid ' + (isBest ? '#2d8a4e' : '#ddd') + ';border-radius:6px;' +
+            'background:' + (isBest ? '#f0fff4' : '#fff');
+        div.onclick = function(e) {
+            if (e.target.tagName === 'BUTTON' || e.target.tagName === 'A') return;
+            viewSerialRun(r.run_id);
+        };
+
+        const agr = r.agreement_pct >= 0 ? r.agreement_pct + '%' : 'failed';
+        const badge = isBest ? ' <span style="color:#2d8a4e;font-weight:600">(best)</span>' : '';
+        const errMsg = r.error ? `<span style="color:#cc3333;font-size:11px"> ${r.error}</span>` : '';
+        const paramsId = `serial-params-${r.run_id}`;
+
+        div.innerHTML = `
+            <div style="display:flex;align-items:center;gap:8px">
+                <img src="/api/fire/${encodeURIComponent(FIRE)}/serial/${r.run_id}/image?t=${Date.now()}"
+                     style="width:80px;height:60px;object-fit:cover;border-radius:4px;cursor:pointer;image-rendering:pixelated"
+                     onclick="viewSerialRun(${r.run_id})" onerror="this.style.display='none'">
+                <div style="flex:1;font-size:12px">
+                    <strong>Run ${r.run_id}</strong>${badge} — Agreement: ${agr}${errMsg}<br>
+                    <a href="#" style="font-size:10px;color:#0066cc" onclick="event.preventDefault();
+                        var el=document.getElementById('${paramsId}');
+                        el.style.display=el.style.display==='none'?'block':'none'">
+                        Show/hide parameters</a>
+                </div>
+                ${r.agreement_pct >= 0 ? `<button class="btn btn-success" style="font-size:11px;padding:2px 8px"
+                    onclick="acceptSerialRun(${r.run_id})">Accept</button>` : ''}
+            </div>
+            <div id="${paramsId}" style="display:none;margin-top:6px;padding:4px 8px;background:#f7f7fa;border-radius:4px">
+                ${formatParams(r.params)}
+            </div>
+        `;
+        items.appendChild(div);
+    }
+}
+
+function viewSerialRun(runId) {
+    // Highlight selected run in gallery
+    document.querySelectorAll('.serial-run-card').forEach(el => {
+        el.style.borderColor = '#ddd';
+        el.style.background = '#fff';
+    });
+    const card = document.getElementById('serial-card-' + runId);
+    if (card) {
+        card.style.borderColor = '#2d8a4e';
+        card.style.background = '#f0fff4';
+    }
+
+    // Load this run's overlay directly into the left image pane
+    const img = document.getElementById('main-img');
+    const loadMsg = document.getElementById('loading-msg');
+    img.src = `/api/fire/${encodeURIComponent(FIRE)}/serial/${runId}/image?t=${Date.now()}`;
+    img.onload = () => {
+        loadMsg.style.display = 'none';
+        img.style.display = 'block';
+        updateTransform();  // keep current zoom/pan
+    };
+    img.onerror = () => {
+        loadMsg.style.display = 'block';
+        loadMsg.textContent = `Run ${runId} image not available`;
+        img.style.display = 'none';
+    };
+}
+
+async function acceptSerialRun(runId) {
+    if (!confirm(`Accept run ${runId} as the final result?`)) return;
+    try {
+        const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/serial/${runId}/accept`, {
+            method: 'POST',
+            headers: {'X-Requested-With': 'fetch'},
+        });
+        const data = await r.json();
+        if (data.status === 'accepted') {
+            log(`Run ${runId} accepted!`, 'success');
+            document.getElementById('status-text').textContent = 'accepted';
+            document.getElementById('serial-gallery').style.display = 'none';
+            document.getElementById('btn-accept').style.display = 'none';
+        } else {
+            log('Accept error: ' + (data.error || 'unknown'), 'error');
+        }
+    } catch (err) {
+        log('Accept failed: ' + err.message, 'error');
+    }
+}
 
 // -----------------------------------------------------------------------
 // Restore fire state (console, params) on page load
@@ -900,9 +1169,21 @@ async function restoreFireState() {
             isMapping = true;
             document.getElementById('btn-map').disabled = true;
             document.getElementById('btn-map-settings').disabled = true;
+            document.getElementById('btn-serial').disabled = true;
             document.getElementById('status-text').textContent = 'mapping';
             log('--- Mapping in progress (reconnected) ---', 'dim');
             pollMappingStatus();
+        }
+
+        // Restore serial gallery if results exist
+        if (data.status !== 'mapping') {
+            try {
+                const sr = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/serial_results`);
+                const sd = await sr.json();
+                if (sd.results && sd.results.length > 0) {
+                    showSerialGallery(sd.results);
+                }
+            } catch {}
         }
     } catch {}
 }
@@ -912,13 +1193,12 @@ async function pollMappingStatus() {
         const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/console`);
         const data = await r.json();
 
-        // Show any new lines since last poll
-        const out = document.getElementById('console-output');
-        const shown = out.querySelectorAll('.line').length;
-        if (data.lines && data.lines.length > shown) {
-            for (let i = shown; i < data.lines.length; i++) {
+        // Show any new lines using tracked offset
+        if (data.lines && data.lines.length > serverLineCount) {
+            for (let i = serverLineCount; i < data.lines.length; i++) {
                 log(data.lines[i]);
             }
+            serverLineCount = data.lines.length;
         }
 
         if (data.status === 'mapping') {
@@ -953,6 +1233,7 @@ async function pollMappingStatus() {
 
             document.getElementById('btn-map').disabled = false;
             document.getElementById('btn-map-settings').disabled = false;
+                    document.getElementById('btn-serial').disabled = false;
             document.getElementById('btn-accept').style.display = '';
             document.getElementById('status-text').textContent = 'mapped';
 
@@ -965,6 +1246,7 @@ async function pollMappingStatus() {
             isMapping = false;
             document.getElementById('btn-map').disabled = false;
             document.getElementById('btn-map-settings').disabled = false;
+                    document.getElementById('btn-serial').disabled = false;
             document.getElementById('status-text').textContent = data.status;
         }
     } catch {
@@ -1047,7 +1329,8 @@ function switchViewRight() {
 
     rightImg.onload = () => {
         rightImg.style.display = 'block';
-        zoomFitRight();
+        if (firstLoad) { zoomFitRight(); }
+        else { syncRightPane(); }
     };
     rightImg.onerror = () => {
         rightImg.style.display = 'none';

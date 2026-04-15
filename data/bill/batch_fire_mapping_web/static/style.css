@@ -550,7 +550,7 @@ tbody tr:hover { background: #f5f8fc; }
 
 .console-section {
     height: 250px;
-    min-height: 80px;
+    min-height: 30px;
     flex-shrink: 0;
     display: flex;
     flex-direction: column;

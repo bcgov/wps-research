@@ -15,7 +15,6 @@
         <span id="fire-count">{{ n_fires }} fires</span>
     </span>
     {{{ admin_link }}}
-    <button class="btn btn-success" style="font-size:11px;padding:3px 10px" onclick="downloadReport()">PDF Report</button>
     <a href="/logout" class="btn btn-secondary" style="font-size:11px;padding:3px 10px">Logout</a>
     <img src="/static/BC-Wildfire-Service-logo.png" alt="BC Wildfire Service" class="header-logo">
 </header>
@@ -74,6 +73,7 @@
     <span id="selected-count">0 selected</span>
     <button class="btn" id="btn-batch-map" onclick="batchMap()">Map Selected (with settings)</button>
     <button class="btn btn-danger" onclick="batchRemove()">Remove Selected</button>
+    <button class="btn btn-success" onclick="downloadReport()">PDF Report (accepted)</button>
     <span class="batch-progress" id="batch-progress"></span>
 </div>
 
@@ -362,6 +362,8 @@ document.getElementById('filter-min-size').addEventListener('keydown', e => {
 // -----------------------------------------------------------------------
 // Checkbox selection
 // -----------------------------------------------------------------------
+let batchRunning = false;
+
 function updateSelection() {
     selectedFires.clear();
     document.querySelectorAll('.fire-check:checked').forEach(cb => {
@@ -369,10 +371,12 @@ function updateSelection() {
     });
     const bar = document.getElementById('batch-bar');
     const count = selectedFires.size;
-    if (count > 0) {
+    if (count > 0 || batchRunning) {
         bar.style.display = 'flex';
-        document.getElementById('selected-count').textContent =
-            `${count} selected`;
+        if (!batchRunning) {
+            document.getElementById('selected-count').textContent =
+                `${count} selected`;
+        }
     } else {
         bar.style.display = 'none';
     }
@@ -417,6 +421,7 @@ async function batchMap() {
     if (!confirm(`Map ${fires.length} fire(s) with recommended settings?\n\nAccepted fires will be skipped.`)) return;
 
     document.getElementById('btn-batch-map').disabled = true;
+    batchRunning = true;
 
     try {
         const r = await fetch('/api/batch/map', {
@@ -443,19 +448,24 @@ async function pollBatchStatus() {
         const r = await fetch('/api/batch/status');
         const s = await r.json();
         if (s.running) {
+            batchRunning = true;
             const current = s.current_fire ? ` (${s.current_fire})` : '';
+            document.getElementById('selected-count').textContent = 'Batch running';
             prog.textContent =
                 `${s.completed}/${s.total} done${current}`;
+            document.getElementById('batch-bar').style.display = 'flex';
             setTimeout(pollBatchStatus, 3000);
         } else {
+            batchRunning = false;
             const errors = (s.errors || []).length;
             prog.textContent = errors > 0
                 ? `Batch complete. ${errors} error(s).`
                 : 'Batch complete.';
             document.getElementById('btn-batch-map').disabled = false;
-            setTimeout(() => prog.textContent = '', 8000);
+            setTimeout(() => { prog.textContent = ''; updateSelection(); }, 8000);
         }
     } catch {
+        batchRunning = false;
         prog.textContent = '';
         document.getElementById('btn-batch-map').disabled = false;
     }
@@ -615,7 +625,17 @@ setInterval(refreshFires, 5000);
 // Download PDF report of accepted fires
 // -----------------------------------------------------------------------
 function downloadReport() {
-    window.location.href = '/api/report';
+    // Only accepted fires from the selection
+    const accepted = [...selectedFires].filter(fn => {
+        const f = allFires.find(x => x.fire_numbe === fn);
+        return f && f.status === 'accepted';
+    });
+    if (accepted.length === 0) {
+        alert('No accepted fires selected. Select accepted fires to generate a report.');
+        return;
+    }
+    const params = accepted.map(fn => `fire=${encodeURIComponent(fn)}`).join('&');
+    window.location.href = `/api/report?${params}`;
 }
 
 // -----------------------------------------------------------------------
@@ -626,6 +646,7 @@ async function checkBatchOnLoad() {
         const r = await fetch('/api/batch/status');
         const s = await r.json();
         if (s.running) {
+            batchRunning = true;
             document.getElementById('batch-bar').style.display = 'flex';
             document.getElementById('selected-count').textContent = 'Batch running';
             document.getElementById('btn-batch-map').disabled = true;

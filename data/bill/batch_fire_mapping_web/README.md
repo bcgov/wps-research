@@ -303,15 +303,19 @@ The file `recommended_settings.yaml` in the package directory defines parameter 
 **Action buttons**:
 - **Map Fire**: maps using the parameters currently shown in the form.
 - **Map Fire / with settings**: looks up the recommended settings for this fire's size, applies them to the form (including re-cropping if padding differs), and starts mapping.
+- **Serial Map (N)**: runs N mappings using the top-N historically best parameter sets for this fire's context (see [Serial Mapping](#serial-mapping) below). Shows a gallery of results ranked by agreement score.
 - **Accept**: saves the mapped result to the canonical output directory. Only appears after a successful mapping.
 
 **Console** (bottom of right panel):
 - Streams every line of `fire_mapping_cli.py` output in real time via Server-Sent Events.
+- Console output is buffered per-fire — navigating away and back restores the full log.
 - Resizable by dragging the handle between parameters and console.
+
+**Control panel**: can be collapsed via the arrow toggle to give the image viewer full width.
 
 **Mapping workflow**:
 1. Adjust parameters manually, or let recommended settings handle it.
-2. Click **Map Fire** or **Map Fire / with settings**.
+2. Click **Map Fire**, **Map Fire / with settings**, or **Serial Map**.
 3. Console shows real-time progress (loading image, T-SNE, HDBSCAN clusters, Random Forest, class_brush, figure generation).
 4. When complete, the comparison figure appears in the image viewer.
 5. Review the result. If satisfactory, click **Accept**. Otherwise, adjust parameters and map again.
@@ -338,6 +342,59 @@ The intended workflow for processing a set of fires:
 7. Review the comparison image. If acceptable, click **Accept**. If not, adjust parameters and re-map.
 8. Click **Next** to move to the next mapped fire. Repeat until all are reviewed.
 9. Accepted results are in `<out_dir>/<FIRE_NUMBE>/` with full parameter records.
+
+---
+
+## Serial Mapping
+
+Serial mapping produces multiple mapping results for a single fire using different parameter sets, ranked by historical performance. This is the system's core learning mechanism.
+
+### How it works
+
+1. Click **Serial Map** on the fire mapping page and set N (default 3, max 10).
+2. The system reads `accepted_params.csv` and finds the top N parameter sets using hierarchical context matching:
+   - **Level 1**: same fire zone (e.g., C1) + same size bucket — if >= 3 accepted fires exist
+   - **Level 2**: same fire region (e.g., all C fires) + same size bucket — fallback
+   - **Level 3**: same size bucket, any region — broader fallback
+   - **Level 4**: `recommended_settings.yaml` defaults — cold start
+3. The N parameter sets are sorted by agreement score (IoU between ML classification and hint perimeter) from the best historically performing fires in that context.
+4. The system runs all N mappings sequentially through the GPU queue.
+5. After all runs complete, a **gallery** shows all N results:
+   - Thumbnail of each result's ML classification overlay
+   - Agreement score for each run
+   - The best result (highest agreement) is highlighted
+   - Click a thumbnail to view it full-size in the image viewer
+   - Click **Accept** next to the run you want to keep
+6. The accepted result is saved to the canonical output directory and its parameters are logged to `accepted_params.csv`, further improving future rankings.
+
+### Size buckets
+
+Fires are grouped into these size ranges for parameter matching:
+
+| Bucket | Range |
+|---|---|
+| 1 | 0 - 10 ha |
+| 2 | 10 - 50 ha |
+| 3 | 50 - 100 ha |
+| 4 | 100 - 500 ha |
+| 5 | 500 - 1,000 ha |
+| 6 | 1,000 - 5,000 ha |
+| 7 | 5,000+ ha |
+
+### Fire context
+
+Context is extracted from the fire number:
+- **Region**: first letter (e.g., `C` from `C11659`)
+- **Zone**: first letter + first digit (e.g., `C1` from `C11659`)
+
+### The learning loop
+
+```
+Accept fire → params logged to CSV → next serial map reads CSV → 
+better rankings → better results → more accepts → ...
+```
+
+Over time, the system converges on optimal parameters for each region/size combination. Early on (cold start), it uses the defaults from `recommended_settings.yaml`. After 3+ accepted fires in a context, it starts using real data.
 
 ---
 

@@ -156,6 +156,178 @@ def _compute_agreement(fire: 'FireInfo') -> float:
         return -1.0
 
 
+# =========================================================================
+# Parameter ranking — learns from accepted_params.csv
+# =========================================================================
+
+_SIZE_BUCKETS = [
+    (0, 10), (10, 50), (50, 100), (100, 500),
+    (500, 1000), (1000, 5000), (5000, float('inf')),
+]
+
+# Parameters that matter for ranking (exclude metadata/display)
+_RANKABLE_PARAMS = [
+    'sample_rate', 'min_samples', 'max_samples', 'seed',
+    'embed_bands', 'tsne_perplexity', 'tsne_learning_rate',
+    'tsne_max_iter', 'tsne_init', 'tsne_n_components',
+    'controlled_ratio', 'hdbscan_min_samples',
+    'rf_n_estimators', 'rf_max_depth', 'rf_max_features',
+    'padding',
+]
+
+
+def _parse_fire_context(fire_numbe: str) -> tuple:
+    """Extract (region, zone) from fire number.
+
+    E.g., 'C11659' → ('C', 'C1'), 'G80123' → ('G', 'G8').
+    """
+    if not fire_numbe:
+        return ('', '')
+    region = fire_numbe[0].upper() if fire_numbe[0].isalpha() else ''
+    zone = ''
+    if len(fire_numbe) >= 2 and region:
+        zone = region + fire_numbe[1]
+    return (region, zone)
+
+
+def _size_bucket(ha: float) -> tuple:
+    """Return (lo, hi) bucket for a fire size."""
+    for lo, hi in _SIZE_BUCKETS:
+        if lo <= ha < hi:
+            return (lo, hi)
+    return _SIZE_BUCKETS[-1]
+
+
+def _load_accepted_params() -> list[dict]:
+    """Load accepted_params.csv into a list of dicts."""
+    csv_path = os.path.join(state.output_root, 'accepted_params.csv')
+    if not os.path.isfile(csv_path):
+        return []
+    try:
+        import csv
+        with open(csv_path, newline='') as f:
+            reader = csv.DictReader(f)
+            return list(reader)
+    except Exception:
+        return []
+
+
+def _rank_params_for_fire(fire_numbe: str, fire_size_ha: float,
+                          n: int = 3) -> list[dict]:
+    """Return top-N parameter sets for a fire, ranked by agreement_pct.
+
+    Uses hierarchical context matching:
+      1. Same zone + same size bucket (e.g., C1 fires 100-500 ha)
+      2. Same region + same size bucket (e.g., all C fires 100-500 ha)
+      3. Same size bucket, any region
+      4. Fall back to recommended_settings.yaml
+    """
+    all_rows = _load_accepted_params()
+    if not all_rows:
+        # Cold start — use recommended settings
+        params = _get_recommended_params(fire_size_ha)
+        return [params] if params else []
+
+    region, zone = _parse_fire_context(fire_numbe)
+    bucket = _size_bucket(fire_size_ha)
+
+    def in_bucket(row):
+        try:
+            sz = float(row.get('fire_size_ha', 0))
+            return bucket[0] <= sz < bucket[1]
+        except (ValueError, TypeError):
+            return False
+
+    def row_context(row):
+        fn = row.get('fire_numbe', '')
+        r, z = _parse_fire_context(fn)
+        return (r, z)
+
+    def row_agreement(row):
+        try:
+            return float(row.get('agreement_pct', -1))
+        except (ValueError, TypeError):
+            return -1.0
+
+    def extract_params(row):
+        """Extract a clean params dict from a CSV row."""
+        params = {}
+        for key in _RANKABLE_PARAMS:
+            val = row.get(key)
+            if val is not None and val != '':
+                # Try to convert to number
+                try:
+                    if '.' in str(val):
+                        params[key] = float(val)
+                    else:
+                        params[key] = int(val)
+                except (ValueError, TypeError):
+                    params[key] = val
+            else:
+                params[key] = val
+        return params
+
+    # Hierarchical matching
+    candidates = None
+    min_required = 3
+
+    # Level 1: same zone + same size bucket
+    if zone:
+        level1 = [r for r in all_rows
+                   if in_bucket(r) and row_context(r)[1] == zone]
+        if len(level1) >= min_required:
+            candidates = level1
+
+    # Level 2: same region + same size bucket
+    if candidates is None and region:
+        level2 = [r for r in all_rows
+                   if in_bucket(r) and row_context(r)[0] == region]
+        if len(level2) >= min_required:
+            candidates = level2
+
+    # Level 3: same size bucket, any region
+    if candidates is None:
+        level3 = [r for r in all_rows if in_bucket(r)]
+        if len(level3) >= 1:
+            candidates = level3
+
+    # Level 4: all accepted fires
+    if candidates is None:
+        candidates = all_rows
+
+    if not candidates:
+        params = _get_recommended_params(fire_size_ha)
+        return [params] if params else []
+
+    # Sort by agreement_pct descending
+    candidates.sort(key=row_agreement, reverse=True)
+
+    # Extract unique parameter sets (deduplicate)
+    seen = set()
+    ranked = []
+    for row in candidates:
+        params = extract_params(row)
+        # Create a hashable key for deduplication
+        key = tuple(sorted(
+            (k, str(v)) for k, v in params.items() if v is not None))
+        if key not in seen:
+            seen.add(key)
+            ranked.append(params)
+        if len(ranked) >= n:
+            break
+
+    # If we don't have enough, pad with recommended settings
+    if len(ranked) < n:
+        rec = _get_recommended_params(fire_size_ha)
+        if rec:
+            key = tuple(sorted(
+                (k, str(v)) for k, v in rec.items() if v is not None))
+            if key not in seen:
+                ranked.append(rec)
+
+    return ranked[:n]
+
+
 def _get_recommended_params(fire_size_ha: float) -> dict:
     """Find recommended params for a fire of given size."""
     for row in state.recommended_settings:
@@ -295,6 +467,180 @@ def _batch_map_worker(fire_numbes: list[str]):
         f'[batch] Complete: {state.batch_status["completed"]}'
         f'/{state.batch_status["total"]} fires, '
         f'{len(state.batch_status["errors"])} error(s)\n')
+    sys.stderr.flush()
+
+
+def _serial_map_worker(fire_numbe: str, param_sets: list[dict]):
+    """Run N mappings with different param sets for the same fire."""
+    import traceback
+
+    fire = state.fires[fire_numbe]
+    fire.serial_results = []
+    fire.console_log = []
+    n_total = len(param_sets)
+
+    sys.stderr.write(
+        f'[serial] Starting {n_total} run(s) for {fire_numbe}\n')
+    sys.stderr.flush()
+
+    for i, params in enumerate(param_sets):
+        run_id = i + 1
+        fire.console_log.append(
+            f'=== Serial run {run_id}/{n_total} ===')
+
+        # Log key params for this run
+        key_params = []
+        for k in ('embed_bands', 'tsne_perplexity', 'sample_rate',
+                   'controlled_ratio', 'hdbscan_min_samples', 'padding'):
+            v = params.get(k)
+            if v is not None and v != '':
+                key_params.append(f'{k}={v}')
+        if key_params:
+            fire.console_log.append(
+                f'  Params: {", ".join(key_params)}')
+
+        padding = params.get('padding', state.padding)
+
+        try:
+            with _gpu_lock:
+                # Prepare (only on first run or if padding changed)
+                if run_id == 1 or fire.padding_used != padding:
+                    _prepare_fire_sync(fire_numbe, padding)
+                    fire = state.fires[fire_numbe]
+                    if fire.status == FireStatus.ERROR:
+                        fire.serial_results.append({
+                            'run_id': run_id,
+                            'params': params,
+                            'agreement_pct': -1,
+                            'error': fire.error_msg,
+                        })
+                        continue
+
+                fire.status = FireStatus.MAPPING
+                fire.last_params = params
+                state.current_job = {
+                    'fire_numbe': f'{fire_numbe} (run {run_id}/{n_total})',
+                    'client_ip': 'serial',
+                    'started_at': datetime.datetime.now().isoformat(
+                        timespec='seconds'),
+                }
+
+                cmd = _build_mapping_cmd(fire, params)
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    cwd=state.project_root,
+                )
+
+                for line in iter(proc.stdout.readline, b''):
+                    text = line.decode(errors='replace').rstrip()
+                    if text:
+                        fire.console_log.append(text)
+                        sys.stderr.write(
+                            f'[serial] [{fire_numbe}#{run_id}] {text}\n')
+
+                rc = proc.wait()
+                state.current_job = None
+                sys.stderr.flush()
+
+                if rc == 0:
+                    # Compute agreement
+                    agr = _compute_agreement(fire)
+
+                    # Save serial comparison image
+                    src_comp = os.path.join(
+                        fire.cache_dir,
+                        f'{fire_numbe}_comparison.png')
+                    serial_comp = os.path.join(
+                        fire.cache_dir,
+                        f'{fire_numbe}_serial_{run_id}.png')
+                    if os.path.isfile(src_comp):
+                        shutil.copy2(src_comp, serial_comp)
+
+                    # Save serial classified raster
+                    src_clf = os.path.join(
+                        fire.cache_dir,
+                        f'{fire_numbe}_crop.bin_classified.bin')
+                    serial_clf = os.path.join(
+                        fire.cache_dir,
+                        f'{fire_numbe}_serial_{run_id}_classified.bin')
+                    if os.path.isfile(src_clf):
+                        shutil.copy2(src_clf, serial_clf)
+
+                    # Generate pixel-aligned overlay for this run
+                    _overlay_mask_on_post(
+                        fire, serial_clf, f'serial_{run_id}',
+                        (0.9, 0.1, 0.0))
+
+                    fire.serial_results.append({
+                        'run_id': run_id,
+                        'params': params,
+                        'agreement_pct': agr,
+                        'comparison': serial_comp,
+                        'classified': serial_clf,
+                    })
+
+                    fire.console_log.append(
+                        f'Run {run_id} complete (agreement={agr}%)')
+                else:
+                    fire.serial_results.append({
+                        'run_id': run_id,
+                        'params': params,
+                        'agreement_pct': -1,
+                        'error': f'Exited with code {rc}',
+                    })
+                    fire.console_log.append(
+                        f'Run {run_id} FAILED (exit code {rc})')
+
+        except Exception as exc:
+            state.current_job = None
+            fire.serial_results.append({
+                'run_id': run_id,
+                'params': params,
+                'agreement_pct': -1,
+                'error': str(exc),
+            })
+            sys.stderr.write(
+                f'[serial] [{fire_numbe}#{run_id}] EXCEPTION:\n'
+                f'{traceback.format_exc()}\n')
+            sys.stderr.flush()
+
+    # Pick best result as the "current" mapping
+    successful = [r for r in fire.serial_results if r.get('agreement_pct', -1) >= 0]
+    if successful:
+        best = max(successful, key=lambda r: r['agreement_pct'])
+        fire.agreement_pct = best['agreement_pct']
+        fire.last_params = best['params']
+
+        # Copy best result as the "main" comparison
+        best_comp = best.get('comparison', '')
+        if best_comp and os.path.isfile(best_comp):
+            main_comp = os.path.join(
+                fire.cache_dir, f'{fire_numbe}_comparison.png')
+            shutil.copy2(best_comp, main_comp)
+            fire.last_comparison = main_comp
+
+        best_clf = best.get('classified', '')
+        if best_clf and os.path.isfile(best_clf):
+            main_clf = os.path.join(
+                fire.cache_dir,
+                f'{fire_numbe}_crop.bin_classified.bin')
+            shutil.copy2(best_clf, main_clf)
+            _generate_result_preview(fire)
+
+        fire.status = FireStatus.MAPPED
+        fire.console_log.append(
+            f'Serial mapping complete. Best: run {best["run_id"]} '
+            f'(agreement={best["agreement_pct"]}%)')
+    else:
+        fire.status = FireStatus.ERROR
+        fire.error_msg = 'All serial runs failed'
+        fire.console_log.append('All serial runs failed.')
+
+    sys.stderr.write(
+        f'[serial] {fire_numbe} done: {len(successful)}/{n_total} '
+        f'successful\n')
     sys.stderr.flush()
 
 
@@ -532,21 +878,49 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
     views = generate_all_previews(crop_bin, cache_dir, fire_numbe)
     fire.available_views = views
 
-    # -- Copy classified raster from canonical dir if this fire was
-    #    previously accepted (so overlays can be regenerated) --
-    clf_path = os.path.join(cache_dir,
-                            f'{fire_numbe}_crop.bin_classified.bin')
-    if not os.path.isfile(clf_path):
-        canon_clf = os.path.join(
-            state.output_root, fire_numbe,
-            f'{fire_numbe}_crop.bin_classified.bin')
-        if os.path.isfile(canon_clf):
-            shutil.copy2(canon_clf, clf_path)
+    # -- Copy results from canonical dir for previously accepted fires --
+    canon_dir = os.path.join(state.output_root, fire_numbe)
+    if os.path.isdir(canon_dir):
+        copied = []
+        for fname in os.listdir(canon_dir):
+            src = os.path.join(canon_dir, fname)
+            dst = os.path.join(cache_dir, fname)
+            if os.path.isfile(src) and not os.path.exists(dst):
+                shutil.copy2(src, dst)
+                copied.append(fname)
+        if copied:
+            sys.stderr.write(
+                f'[prepare] [{fire_numbe}] Restored {len(copied)} '
+                f'file(s) from accepted dir\n')
+            sys.stderr.flush()
 
-    # -- Generate overlay previews --
-    if os.path.isfile(clf_path):
-        _generate_result_preview(fire)
-    elif fire.hint_bin and os.path.isfile(fire.hint_bin):
+    # -- Find classified raster (try multiple naming patterns) --
+    clf_path = None
+    for pattern in (f'{fire_numbe}_crop.bin_classified.bin',
+                    f'{fire_numbe}_crop_classified.bin',
+                    f'{fire_numbe}_classified.bin'):
+        candidate = os.path.join(cache_dir, pattern)
+        if os.path.isfile(candidate):
+            clf_path = candidate
+            break
+    if clf_path is None:
+        # Last resort: any *classified*.bin
+        for candidate in glob.glob(
+                os.path.join(cache_dir, '*classified*.bin')):
+            clf_path = candidate
+            break
+
+    # -- Generate overlay previews (always try both) --
+    if clf_path and os.path.isfile(clf_path):
+        # Point fire at the classified raster for overlay generation
+        _overlay_mask_on_post(fire, clf_path, 'result', (0.9, 0.1, 0.0))
+        if 'result' not in fire.available_views:
+            fire.available_views.append('result')
+        sys.stderr.write(
+            f'[prepare] [{fire_numbe}] Generated ML classification '
+            f'overlay from {os.path.basename(clf_path)}\n')
+        sys.stderr.flush()
+    if fire.hint_bin and os.path.isfile(fire.hint_bin):
         _overlay_mask_on_post(fire, fire.hint_bin, 'hint', (0.0, 0.8, 0.2))
 
     fire.status = FireStatus.READY
@@ -784,6 +1158,15 @@ class FireHandler(BaseHTTPRequestHandler):
         (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/console$'),
          'handle_api_console'),
+        (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/ranked_params$'),
+         'handle_api_ranked_params'),
+        (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/serial_results$'),
+         'handle_api_serial_results'),
+        (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/serial/(?P<run_id>[0-9]+)/image$'),
+         'handle_api_serial_image'),
         (re.compile(r'^/api/report$'), 'handle_api_report'),
         (re.compile(r'^/static/(?P<path>.+)$'), 'handle_static'),
     ]
@@ -806,6 +1189,12 @@ class FireHandler(BaseHTTPRequestHandler):
         (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/notes$'),
          'handle_api_notes'),
+        (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/serial_map$'),
+         'handle_api_serial_map'),
+        (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/serial/(?P<run_id>[0-9]+)/accept$'),
+         'handle_api_serial_accept'),
         (re.compile(r'^/api/admin/ip/(?P<action>approve|block|revoke|unblock)$'),
          'handle_api_admin_ip_action'),
     ]
@@ -1496,6 +1885,159 @@ class FireHandler(BaseHTTPRequestHandler):
             'agreement_pct': f.agreement_pct,
         })
 
+    # -- Serial mapping & parameter ranking API --
+
+    def handle_api_ranked_params(self, fire_numbe):
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        parsed = urlparse(self.path)
+        from urllib.parse import parse_qs
+        qs = parse_qs(parsed.query)
+        n = int(qs.get('n', ['3'])[0])
+        n = max(1, min(10, n))
+
+        ranked = _rank_params_for_fire(
+            fire_numbe, fire.fire_size_ha, n)
+
+        region, zone = _parse_fire_context(fire_numbe)
+        bucket = _size_bucket(fire.fire_size_ha)
+        csv_rows = _load_accepted_params()
+        total_accepted = len(csv_rows)
+
+        self._send_json({
+            'ranked': ranked,
+            'context': {
+                'region': region,
+                'zone': zone,
+                'size_bucket': list(bucket),
+                'total_accepted': total_accepted,
+            },
+        })
+
+    def handle_api_serial_map(self, fire_numbe):
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        if fire.status == FireStatus.MAPPING:
+            self._send_json({'error': 'Already mapping'}, 400)
+            return
+
+        body = self._read_body()
+        n = int(body.get('n', 3))
+        n = max(1, min(10, n))
+
+        param_sets = _rank_params_for_fire(
+            fire_numbe, fire.fire_size_ha, n)
+        if not param_sets:
+            self._send_json(
+                {'error': 'No parameter sets available'}, 400)
+            return
+
+        # Set status BEFORE starting thread to avoid race
+        fire.status = FireStatus.MAPPING
+        fire.serial_results = []
+        fire.console_log = []
+
+        thread = threading.Thread(
+            target=_serial_map_worker,
+            args=(fire_numbe, param_sets),
+            daemon=True)
+        thread.start()
+
+        self._send_json({
+            'status': 'started',
+            'n': len(param_sets),
+        })
+
+    def handle_api_serial_results(self, fire_numbe):
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        results = []
+        for r in fire.serial_results:
+            results.append({
+                'run_id': r.get('run_id'),
+                'agreement_pct': r.get('agreement_pct', -1),
+                'error': r.get('error', ''),
+                'params': r.get('params', {}),
+            })
+        self._send_json({
+            'status': fire.status.value,
+            'results': results,
+        })
+
+    def handle_api_serial_image(self, fire_numbe, run_id):
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        # Serve the pixel-aligned overlay for this serial run
+        overlay_path = os.path.join(
+            fire.cache_dir, 'previews', f'serial_{run_id}.png')
+        if not os.path.isfile(overlay_path):
+            # Try to generate it on the fly
+            serial_clf = os.path.join(
+                fire.cache_dir,
+                f'{fire_numbe}_serial_{run_id}_classified.bin')
+            if os.path.isfile(serial_clf):
+                _overlay_mask_on_post(
+                    fire, serial_clf, f'serial_{run_id}',
+                    (0.9, 0.1, 0.0))
+        if os.path.isfile(overlay_path):
+            self._send_file(overlay_path, 'image/png')
+            return
+        # Fall back to comparison figure
+        comp_path = os.path.join(
+            fire.cache_dir, f'{fire_numbe}_serial_{run_id}.png')
+        if os.path.isfile(comp_path):
+            self._send_file(comp_path, 'image/png')
+            return
+        self._send_json({'error': 'Image not found'}, 404)
+
+    def handle_api_serial_accept(self, fire_numbe, run_id):
+        fire_numbe = unquote(fire_numbe)
+        run_id = int(run_id)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        result = next(
+            (r for r in fire.serial_results
+             if r.get('run_id') == run_id), None)
+        if not result:
+            self._send_json({'error': 'Run not found'}, 404)
+            return
+
+        # Copy the selected run's results as the main results
+        serial_clf = result.get('classified', '')
+        serial_comp = result.get('comparison', '')
+        if serial_clf and os.path.isfile(serial_clf):
+            main_clf = os.path.join(
+                fire.cache_dir,
+                f'{fire_numbe}_crop.bin_classified.bin')
+            shutil.copy2(serial_clf, main_clf)
+        if serial_comp and os.path.isfile(serial_comp):
+            main_comp = os.path.join(
+                fire.cache_dir, f'{fire_numbe}_comparison.png')
+            shutil.copy2(serial_comp, main_comp)
+            fire.last_comparison = main_comp
+
+        fire.agreement_pct = result.get('agreement_pct', -1)
+        fire.last_params = result.get('params', {})
+        fire.status = FireStatus.MAPPED
+
+        # Now accept via the normal flow
+        _accept_fire_sync(fire_numbe)
+        self._send_json({'status': 'accepted'})
+
     def handle_api_notes(self, fire_numbe):
         fire_numbe = unquote(fire_numbe)
         if fire_numbe not in state.fires:
@@ -1506,15 +2048,37 @@ class FireHandler(BaseHTTPRequestHandler):
         self._send_json({'status': 'saved'})
 
     def handle_api_report(self):
-        """Generate PDF report of accepted fires and send as download."""
+        """Generate PDF report of selected accepted fires."""
         from batch_fire_mapping.generate_report import generate_report
         import tempfile
-        tmp = tempfile.mktemp(suffix='.pdf')
-        pdf = generate_report(state.output_root, tmp)
-        if pdf is None or not os.path.isfile(pdf):
-            self._send_json({'error': 'Report generation failed'}, 500)
+
+        # Get selected fire numbers from query params
+        parsed = urlparse(self.path)
+        from urllib.parse import parse_qs
+        qs = parse_qs(parsed.query)
+        fire_list = qs.get('fire', [])
+
+        if not fire_list:
+            self._send_json(
+                {'error': 'No fires specified'}, 400)
             return
+
+        # Create temp dir with symlinks to selected fire dirs
+        tmp_dir = tempfile.mkdtemp(prefix='fire_report_sel_')
         try:
+            for fn in fire_list:
+                src = os.path.join(state.output_root, fn)
+                if os.path.isdir(src):
+                    dst = os.path.join(tmp_dir, fn)
+                    os.symlink(os.path.abspath(src), dst)
+
+            tmp_pdf = os.path.join(tmp_dir, 'report.pdf')
+            pdf = generate_report(tmp_dir, tmp_pdf)
+            if pdf is None or not os.path.isfile(pdf):
+                self._send_json(
+                    {'error': 'Report generation failed'}, 500)
+                return
+
             with open(pdf, 'rb') as f:
                 data = f.read()
             self.send_response(200)
@@ -1525,10 +2089,7 @@ class FireHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
         finally:
-            try:
-                os.remove(pdf)
-            except Exception:
-                pass
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
     def handle_api_remove(self, fire_numbe):
         fire_numbe = unquote(fire_numbe)
