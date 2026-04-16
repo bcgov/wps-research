@@ -686,7 +686,7 @@ tbody tr:hover { background: #f5f8fc; }
 /* -- Active pane highlight --------------------------------------------- */
 
 .image-area.pane-active {
-    box-shadow: inset 0 0 0 2px #0066cc;
+    /* no border — active pane shown via gold subtitle */
 }
 
 /* -- Pane subtitle ---------------------------------------------------- */
@@ -706,6 +706,14 @@ tbody tr:hover { background: #f5f8fc; }
     letter-spacing: 0.3px;
     pointer-events: none;
     white-space: nowrap;
+    transition: background 0.2s, color 0.2s;
+}
+
+.pane-active .pane-subtitle {
+    background: linear-gradient(135deg, #b8860b, #daa520, #cfb53b);
+    color: #fff;
+    font-weight: 600;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
 /* -- Serial run info panel ------------------------------------------- */

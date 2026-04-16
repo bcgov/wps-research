@@ -213,15 +213,12 @@
                     style="background:#555;font-size:12px;line-height:1.2">
                     Map Fire<br><small>with settings</small>
                 </button>
-                <button class="btn btn-success" id="btn-accept" style="display:none" onclick="acceptResult()">
-                    Accept
-                </button>
             </div>
 
             <!-- Serial results gallery -->
             <div id="serial-gallery" style="display:none">
                 <div style="padding:8px 16px;border-top:1px solid #eee">
-                    <h4 style="font-size:12px;color:#6b6b73;text-transform:uppercase;margin-bottom:8px">Serial Results</h4>
+                    <h4 id="serial-gallery-title" style="font-size:12px;color:#6b6b73;text-transform:uppercase;margin-bottom:8px">Results</h4>
                     <div id="serial-gallery-items" style="display:flex;flex-direction:column;gap:6px"></div>
                 </div>
             </div>
@@ -369,10 +366,7 @@ async function prepareFire(padding) {
         // Set dropdown to show active pane's view
         sel.value = (activePane === 'left') ? leftView : rightView;
 
-        // Show accept/retry buttons for mapped fires
-        if (data.status === 'mapped') {
-            document.getElementById('btn-accept').style.display = '';
-        }
+        // Show serial gallery for mapped fires (accept via per-run buttons)
 
         // Status text with dual badge for previously_accepted
         previouslyAccepted = !!data.previously_accepted;
@@ -389,7 +383,11 @@ async function prepareFire(padding) {
         updateSampleSize();
         loadPaneImage('left', leftView);
         updateSubtitle('left', leftView);
-        if (splitActive) {
+
+        // Auto-open split if ML classification is available
+        if (!splitActive && rightView === 'result') {
+            toggleSplit();
+        } else if (splitActive) {
             loadPaneImage('right', rightView);
             updateSubtitle('right', rightView);
         }
@@ -430,7 +428,7 @@ const paneState = {
     left:  { scale: 1, panX: 0, panY: 0 },
     right: { scale: 1, panX: 0, panY: 0 },
 };
-let syncPanes = false;
+let syncPanes = true;
 let isDragging = false;
 let dragPane = null;
 let dragStartX = 0, dragStartY = 0;
@@ -707,7 +705,6 @@ function getParams() {
 function disableMapButtons() {
     document.getElementById('btn-map').disabled = true;
     document.getElementById('btn-map-settings').disabled = true;
-    document.getElementById('btn-accept').style.display = 'none';
 }
 
 function enableMapButtons() {
@@ -768,148 +765,12 @@ async function startSerialRun(baseParams, n) {
 }
 
 // -----------------------------------------------------------------------
-// Start mapping via fetch + SSE streaming (single run)
+// Start mapping — always routes through serial path for consistent UX
 // -----------------------------------------------------------------------
 async function startMapping() {
     if (isMapping) return;
-
     const nRuns = getRunCount();
-    if (nRuns > 1) {
-        return startSerialRun(getParams(), nRuns);
-    }
-
-    isMapping = true;
-    sseActive = true;
-    selectedRun = null;
-    let sseLogCount = 0;
-
-    if (lastKnownStatus === 'accepted') previouslyAccepted = true;
-    disableMapButtons();
-    updateStatusDisplay('mapping', previouslyAccepted);
-
-    serverLineCount = 0;
-    log('Starting mapping...', 'dim');
-
-    try {
-        const response = await fetch(`/api/fire/${FIRE}/map`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
-            body: JSON.stringify({params: getParams()}),
-        });
-
-        if (!response.ok) {
-            const err = await response.json();
-            log('ERROR: ' + (err.error || response.statusText), 'error');
-            isMapping = false;
-            enableMapButtons();
-            updateStatusDisplay('ready', false);
-            return;
-        }
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        while (true) {
-            const {done, value} = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, {stream: true});
-
-            const lines = buffer.split('\n');
-            buffer = lines.pop();
-
-            for (const line of lines) {
-                if (!line.startsWith('data: ')) continue;
-                let data;
-                try {
-                    data = JSON.parse(line.slice(6));
-                } catch { continue; }
-
-                if (data.type === 'log') {
-                    log(data.message);
-                    sseLogCount++;
-
-                } else if (data.type === 'complete') {
-                    log('Mapping complete!', 'success');
-                    isMapping = false;
-                    hasComparison = true;
-
-                    const s = document.getElementById('view-select');
-                    for (const [val, label] of [
-                        ['result', 'ML classification'],
-                        ['comparison', 'Comparison (figure)'],
-                        ['brush_comparison', 'Brush comparison'],
-                    ]) {
-                        if (!s.querySelector(`option[value="${val}"]`)) {
-                            const opt = document.createElement('option');
-                            opt.value = val;
-                            opt.textContent = label;
-                            s.appendChild(opt);
-                        }
-                    }
-
-                    leftView = 'post'; rightView = 'result';
-                    loadPaneImage('left', leftView);
-                    if (splitActive) loadPaneImage('right', rightView);
-                    s.value = (activePane === 'left') ? leftView : rightView;
-
-                    enableMapButtons();
-                    document.getElementById('btn-accept').style.display = '';
-                    updateStatusDisplay('mapped', previouslyAccepted);
-                    if (data.agreement_pct >= 0) {
-                        document.getElementById('agreement-info').innerHTML =
-                            `Agreement: <strong>${data.agreement_pct}%</strong>`;
-                    }
-                    updateMlSize(data.ml_area_ha);
-
-                } else if (data.type === 'error') {
-                    log('ERROR: ' + data.message, 'error');
-                    isMapping = false;
-                    enableMapButtons();
-                    updateStatusDisplay('ready', false);
-                }
-            }
-        }
-
-        if (isMapping) {
-            log('Connection lost during mapping.', 'error');
-            isMapping = false;
-            enableMapButtons();
-        }
-
-    } catch (err) {
-        log('Mapping error: ' + err.message, 'error');
-        isMapping = false;
-        enableMapButtons();
-        updateStatusDisplay('ready', false);
-    } finally {
-        sseActive = false;
-        serverLineCount = sseLogCount;
-    }
-}
-
-// -----------------------------------------------------------------------
-// Accept result
-// -----------------------------------------------------------------------
-async function acceptResult() {
-    log('Saving results to output directory...');
-    document.getElementById('btn-accept').disabled = true;
-
-    try {
-        const r = await fetch(`/api/fire/${FIRE}/accept`, { method: 'POST', headers: {'X-Requested-With': 'fetch'} });
-        const data = await r.json();
-        if (data.status === 'accepted') {
-            log('Results saved successfully.', 'success');
-            previouslyAccepted = false;
-            updateStatusDisplay('accepted', false);
-            document.getElementById('btn-accept').style.display = 'none';
-        } else {
-            log('Accept error: ' + (data.error || 'unknown'), 'error');
-        }
-    } catch (err) {
-        log('Accept failed: ' + err.message, 'error');
-    }
-    document.getElementById('btn-accept').disabled = false;
+    return startSerialRun(getParams(), nRuns);
 }
 
 // -----------------------------------------------------------------------
@@ -975,12 +836,7 @@ async function mapWithSettings() {
             await prepareFire(newPad);
         }
 
-        if (nRuns > 1) {
-            // N>1 with settings: let the server pick N ranked param sets
-            startSerialRun(null, nRuns);
-        } else {
-            startMapping();
-        }
+        startSerialRun(nRuns > 1 ? null : getParams(), nRuns);
     } catch (err) {
         log('Failed to load settings: ' + err.message, 'error');
     }
@@ -1058,11 +914,14 @@ async function pollFireState() {
             if (data.status === 'mapped' && (oldStatus === 'mapping' || isMapping)) {
                 isMapping = false;
                 enableMapButtons();
-                document.getElementById('btn-accept').style.display = '';
 
                 leftView = 'post'; rightView = 'result';
                 loadPaneImage('left', leftView);
-                if (splitActive) loadPaneImage('right', rightView);
+                if (splitActive) {
+                    loadPaneImage('right', rightView);
+                } else {
+                    toggleSplit();
+                }
                 sel.value = (activePane === 'left') ? leftView : rightView;
 
                 if (oldStatus === 'mapping' && !sseActive) {
@@ -1071,7 +930,6 @@ async function pollFireState() {
 
             } else if (data.status === 'accepted') {
                 isMapping = false;
-                document.getElementById('btn-accept').style.display = 'none';
                 document.getElementById('serial-gallery').style.display = 'none';
                 enableMapButtons();
 
@@ -1089,10 +947,6 @@ async function pollFireState() {
         if (data.status === 'ready' || data.status === 'mapped') {
             enableMapButtons();
         }
-        if (data.status === 'mapped') {
-            document.getElementById('btn-accept').style.display = '';
-        }
-
     } catch {}
 
     setTimeout(pollFireState, isMapping ? 2000 : 5000);
@@ -1195,6 +1049,10 @@ function showSerialGallery(results) {
     // Separate previous (Run 0) from new runs
     const previous = results.filter(r => r.is_previous);
     const newRuns = results.filter(r => !r.is_previous);
+
+    // Update gallery title
+    const titleEl = document.getElementById('serial-gallery-title');
+    if (titleEl) titleEl.textContent = newRuns.length > 1 ? 'Serial Results' : 'Results';
 
     // Sort new runs by agreement (best first)
     const sorted = [...newRuns].sort(
@@ -1309,7 +1167,10 @@ function viewSerialRun(runId) {
 }
 
 async function acceptSerialRun(runId) {
-    if (!confirm(`Accept run ${runId} as the final result?`)) return;
+    const msg = previouslyAccepted
+        ? `This will overwrite the previously accepted result with run ${runId}. Continue?`
+        : `Accept run ${runId} as the final result?`;
+    if (!confirm(msg)) return;
     try {
         const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/serial/${runId}/accept`, {
             method: 'POST',
@@ -1319,9 +1180,10 @@ async function acceptSerialRun(runId) {
         if (data.status === 'accepted') {
             log(`Run ${runId} accepted!`, 'success');
             previouslyAccepted = false;
+            lastSerialCount = 0;
             updateStatusDisplay('accepted', false);
             document.getElementById('serial-gallery').style.display = 'none';
-            document.getElementById('btn-accept').style.display = 'none';
+            document.getElementById('serial-gallery-items').innerHTML = '';
         } else {
             log('Accept error: ' + (data.error || 'unknown'), 'error');
         }
@@ -1440,6 +1302,7 @@ let splitActive = false;
 function toggleSplit() {
     splitActive = !splitActive;
     const container = document.getElementById('image-viewer-container');
+    const leftArea = document.getElementById('image-area');
     const rightArea = document.getElementById('image-area-right');
     const btnSplit = document.getElementById('btn-split');
     const btnSync = document.getElementById('btn-sync');
@@ -1450,16 +1313,46 @@ function toggleSplit() {
         btnSplit.style.background = '#0066cc';
         btnSplit.style.color = '#fff';
         btnSync.style.display = '';
+        btnSync.style.background = syncPanes ? '#0066cc' : '';
+        btnSync.style.color = syncPanes ? '#fff' : '';
         initPaneInteraction('right');
+
+        if (syncPanes) {
+            // Inherit left pane's zoom/pan — don't reset either pane
+            const ls = paneState.left;
+            paneState.right.scale = ls.scale;
+            paneState.right.panX = ls.panX;
+            paneState.right.panY = ls.panY;
+        }
         loadPaneImage('right', rightView);
-        setTimeout(() => zoomFitPane('right'), 50);
+        // Re-apply transforms after layout settles (no fit — preserve position)
+        setTimeout(() => {
+            updateTransformForPane('left');
+            if (!syncPanes) zoomFitPane('right');
+            else updateTransformForPane('right');
+        }, 50);
     } else {
         container.classList.remove('split');
+        // Close the pane the user is NOT focused on
+        if (activePane === 'right') {
+            // Keep right, close left — swap right content into left pane
+            leftView = rightView;
+            loadPaneImage('left', leftView);
+            updateSubtitle('left', leftView);
+            paneState.left.scale = paneState.right.scale;
+            paneState.left.panX = paneState.right.panX;
+            paneState.left.panY = paneState.right.panY;
+            updateTransformForPane('left');
+        }
+        // Either way, hide right area and focus left
         rightArea.style.display = 'none';
         btnSplit.style.background = '';
         btnSplit.style.color = '';
         btnSync.style.display = 'none';
-        if (activePane === 'right') setActivePane('left');
+        setActivePane('left');
+        // Update dropdown to reflect the surviving view
+        const sel = document.getElementById('view-select');
+        if (sel.querySelector(`option[value="${leftView}"]`)) sel.value = leftView;
     }
 }
 
@@ -1500,8 +1393,8 @@ function toggleControlPanel() {
     panel.style.display = hidden ? '' : 'none';
     btn.innerHTML = hidden ? '&#9654;' : '&#9664;';
     sessionStorage.setItem('panelHidden', hidden ? '' : '1');
-    // Re-fit images after layout change
-    setTimeout(() => { zoomFitPane('left'); if (splitActive) zoomFitPane('right'); }, 50);
+    // Re-apply transforms after layout change (preserve zoom position)
+    setTimeout(() => { updateTransformForPane('left'); if (splitActive) updateTransformForPane('right'); }, 50);
 }
 
 // Restore panel state

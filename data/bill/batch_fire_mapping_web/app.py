@@ -2507,11 +2507,40 @@ class FireHandler(BaseHTTPRequestHandler):
             fire.last_comparison = main_comp
 
         fire.agreement_pct = result.get('agreement_pct', -1)
+        fire.ml_area_ha = result.get('ml_area_ha', -1.0)
         fire.last_params = result.get('params', {})
         fire.status = FireStatus.MAPPED
 
         # Now accept via the normal flow
         _accept_fire_sync(fire_numbe)
+
+        # Clean up serial cache files and clear results
+        for sr in fire.serial_results:
+            rid = sr.get('run_id')
+            if rid is None:
+                continue
+            for pat in (
+                f'{fire_numbe}_serial_{rid}_classified.bin',
+                f'{fire_numbe}_serial_{rid}_classified.hdr',
+                f'{fire_numbe}_serial_{rid}.png',
+                f'{fire_numbe}_serial_{rid}_brush.png',
+            ):
+                p = os.path.join(fire.cache_dir, pat)
+                if os.path.isfile(p):
+                    try:
+                        os.remove(p)
+                    except OSError:
+                        pass
+            overlay = os.path.join(
+                fire.cache_dir, 'previews', f'serial_{rid}.png')
+            if os.path.isfile(overlay):
+                try:
+                    os.remove(overlay)
+                except OSError:
+                    pass
+        fire.serial_results = []
+        fire.previously_accepted = False
+
         self._send_json({'status': 'accepted'})
 
     def handle_api_notes(self, fire_numbe):
