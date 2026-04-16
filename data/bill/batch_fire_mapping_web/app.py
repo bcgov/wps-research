@@ -85,18 +85,20 @@ _LOGIN_WINDOW_SECONDS = 300  # 5 minutes
 def _check_login_rate(ip: str) -> bool:
     """Return True if the IP is under the rate limit."""
     now = time.time()
-    attempts = state.login_attempts.get(ip, [])
-    attempts = [t for t in attempts if now - t < _LOGIN_WINDOW_SECONDS]
-    state.login_attempts[ip] = attempts
-    return len(attempts) < _LOGIN_MAX_ATTEMPTS
+    with state.lock:
+        attempts = state.login_attempts.get(ip, [])
+        attempts = [t for t in attempts if now - t < _LOGIN_WINDOW_SECONDS]
+        state.login_attempts[ip] = attempts
+        return len(attempts) < _LOGIN_MAX_ATTEMPTS
 
 
 def _record_failed_login(ip: str):
     """Record a failed login attempt for rate limiting."""
     now = time.time()
-    attempts = state.login_attempts.get(ip, [])
-    attempts.append(now)
-    state.login_attempts[ip] = attempts
+    with state.lock:
+        attempts = state.login_attempts.get(ip, [])
+        attempts.append(now)
+        state.login_attempts[ip] = attempts
 
 
 # =========================================================================
@@ -143,7 +145,7 @@ def _validate_param(key: str, raw):
             raise ValueError(f'{key}={raw} out of range [{lo}, {hi}]')
         return v
     if kind == 'choice':
-        _, allowed = spec[0], spec[1]
+        _, allowed = spec
         s = str(raw)
         if s not in allowed:
             raise ValueError(
@@ -181,6 +183,17 @@ def _save_sessions():
         return
     try:
         _atomic_yaml_dump(state.session_file, dict(state.sessions))
+    except Exception:
+        pass
+
+
+def _save_settings():
+    """Persist recommended settings to recommended_settings.yaml."""
+    try:
+        import yaml
+        settings_path = os.path.join(_HERE, 'recommended_settings.yaml')
+        _atomic_yaml_dump(settings_path, list(state.recommended_settings),
+                          mode=0o644)
     except Exception:
         pass
 
@@ -234,6 +247,11 @@ def _overlay_mask_on_post(fire: 'FireInfo', raster_path: str,
 
     *color* is (r, g, b) floats 0-1 for the tint.
     Produces a pixel-aligned PNG at the same dimensions as post.png.
+
+    When the overlay raster has different dimensions from the current
+    crop (e.g. a previously accepted classification after re-cropping
+    with different padding), uses GDAL geotransforms to place it at
+    the correct geographic position rather than naively stretching.
     """
     try:
         post_path = os.path.join(fire.cache_dir, 'previews', 'post.png')
@@ -251,14 +269,69 @@ def _overlay_mask_on_post(fire: 'FireInfo', raster_path: str,
 
         ds = gdal.Open(raster_path, gdal.GA_ReadOnly)
         arr = ds.GetRasterBand(1).ReadAsArray()
+        old_gt = ds.GetGeoTransform()
         ds = None
 
         ph, pw = post.shape[:2]
         ah, aw = arr.shape
+
         if ah != ph or aw != pw:
-            arr = scipy_zoom(
-                arr.astype(np.float32),
-                (ph / ah, pw / aw), order=0)
+            aligned = False
+            # Try geospatial alignment using crop geotransform.
+            # Both rasters are crops of the same source, so pixel
+            # sizes match — we just need to compute the offset.
+            if fire.crop_bin and os.path.isfile(fire.crop_bin):
+                try:
+                    ds_crop = gdal.Open(fire.crop_bin, gdal.GA_ReadOnly)
+                    new_gt = ds_crop.GetGeoTransform()
+                    new_w = ds_crop.RasterXSize
+                    new_h = ds_crop.RasterYSize
+                    ds_crop = None
+
+                    if (old_gt and new_gt
+                            and abs(old_gt[1] - new_gt[1]) < 1e-6
+                            and abs(old_gt[5] - new_gt[5]) < 1e-6):
+                        # Pixel sizes match — compute offset
+                        off_x = round(
+                            (old_gt[0] - new_gt[0]) / new_gt[1])
+                        off_y = round(
+                            (old_gt[3] - new_gt[3]) / new_gt[5])
+
+                        # Place old raster in crop-sized array
+                        arr_aligned = np.zeros(
+                            (new_h, new_w), dtype=arr.dtype)
+                        src_y0 = max(0, -off_y)
+                        src_x0 = max(0, -off_x)
+                        dst_y0 = max(0, off_y)
+                        dst_x0 = max(0, off_x)
+                        copy_h = min(ah - src_y0, new_h - dst_y0)
+                        copy_w = min(aw - src_x0, new_w - dst_x0)
+                        if copy_h > 0 and copy_w > 0:
+                            arr_aligned[
+                                dst_y0:dst_y0 + copy_h,
+                                dst_x0:dst_x0 + copy_w,
+                            ] = arr[
+                                src_y0:src_y0 + copy_h,
+                                src_x0:src_x0 + copy_w,
+                            ]
+
+                        # Scale to match preview PNG dimensions
+                        # (preview may be downsampled from crop)
+                        if new_h != ph or new_w != pw:
+                            arr_aligned = scipy_zoom(
+                                arr_aligned.astype(np.float32),
+                                (ph / new_h, pw / new_w), order=0)
+
+                        arr = arr_aligned
+                        aligned = True
+                except Exception:
+                    pass
+
+            if not aligned:
+                # Fallback: naive resize (same-extent rasters)
+                arr = scipy_zoom(
+                    arr.astype(np.float32),
+                    (ph / ah, pw / aw), order=0)
 
         mask = arr > 0
         result = post[:, :, :3].copy()
@@ -1766,17 +1839,7 @@ class FireHandler(BaseHTTPRequestHandler):
             state.pending_ips.pop(ip, None)
             return True
 
-        # Regular user — check IP
-        if ip in state.blocked_ips:
-            self._send_html(render_template('pending.html', {
-                'ip': ip,
-                'title': 'Access Denied',
-                'message': 'Your IP address has been blocked by an '
-                           'administrator.',
-                'auto_refresh': 'false',
-            }), 403)
-            return False
-
+        # Regular user — check IP (blocked already handled above)
         if ip in state.approved_ips:
             # Update username on each visit
             state.approved_ips[ip]['username'] = username
@@ -2004,8 +2067,10 @@ class FireHandler(BaseHTTPRequestHandler):
         _save_sessions()
 
         # Set cookie and redirect to home
+        # Add Secure flag when not on localhost (browser ignores
+        # Secure on localhost anyway, so always including it is safe)
         cookie = (f'session={raw_token}; HttpOnly; SameSite=Lax; '
-                  f'Path=/; Max-Age={_SESSION_MAX_AGE}')
+                  f'Secure; Path=/; Max-Age={_SESSION_MAX_AGE}')
         self.send_response(302)
         self.send_header('Location', '/')
         self.send_header('Set-Cookie', cookie)
@@ -2107,6 +2172,7 @@ class FireHandler(BaseHTTPRequestHandler):
                     f'({eb!r}) — converting to empty string\n')
                 p['embed_bands'] = ''
         state.recommended_settings = settings
+        _save_settings()
         self._send_json({'status': 'saved'})
 
     # -- Batch mapping API --

@@ -255,6 +255,7 @@ let sseActive = false;
 let serverLineCount = 0;
 let lastSerialCount = 0;
 let previouslyAccepted = false;
+let lastPreparedPadding = null;  // tracks what padding was last prepared
 
 // Active pane tracking
 let activePane = 'left';  // 'left' or 'right'
@@ -391,6 +392,11 @@ async function prepareFire(padding) {
             loadPaneImage('right', rightView);
             updateSubtitle('right', rightView);
         }
+
+        // Track which padding was actually prepared
+        lastPreparedPadding = (padding != null)
+            ? parseFloat(padding)
+            : parseFloat('{{ padding }}');
 
         enableMapButtons();
         log('Fire prepared. Ready to map.', 'success');
@@ -678,6 +684,7 @@ function getParams() {
         return val === '' ? null : val;
     };
     return {
+        padding:              parseFloat(v('p-padding')) || 0.1,
         sample_rate:          parseFloat(v('p-sample_rate')) || 0.05,
         min_samples:          parseInt(v('p-min_samples')) || 500,
         max_samples:          parseInt(v('p-max_samples')) || 30000,
@@ -770,7 +777,15 @@ async function startSerialRun(baseParams, n) {
 async function startMapping() {
     if (isMapping) return;
     const nRuns = getRunCount();
-    return startSerialRun(getParams(), nRuns);
+    const params = getParams();
+
+    // Re-crop first if padding changed so images update before mapping starts
+    if (lastPreparedPadding !== null && params.padding !== lastPreparedPadding) {
+        log(`Re-cropping with padding=${params.padding}...`);
+        await prepareFire(params.padding);
+    }
+
+    return startSerialRun(params, nRuns);
 }
 
 // -----------------------------------------------------------------------
@@ -827,10 +842,9 @@ async function mapWithSettings() {
         applySettingsToForm(p);
         log(`Applied recommended settings for ${row.min_ha} ha → ${row.max_ha != null ? row.max_ha + ' ha' : '∞'}`, 'success');
 
-        // Re-crop if padding changed
+        // Re-crop if padding differs from what was last prepared
         const newPad = parseFloat(p.padding);
-        const curPad = parseFloat(document.getElementById('p-padding').value);
-        if (!isNaN(newPad) && newPad !== curPad) {
+        if (!isNaN(newPad) && lastPreparedPadding !== null && newPad !== lastPreparedPadding) {
             log(`Re-cropping with padding=${newPad}...`);
             disableMapButtons();
             await prepareFire(newPad);
@@ -1159,7 +1173,7 @@ function viewSerialRun(runId) {
     // Also update the other pane if split is open and its view has per-run variant
     const otherPane = activePane === 'left' ? 'right' : 'left';
     const otherView = activePane === 'left' ? rightView : leftView;
-    const rightEl = document.getElementById('pane-right');
+    const rightEl = document.getElementById('image-area-right');
     if (rightEl && rightEl.style.display !== 'none' &&
         otherView && RUN_VIEWS.has(otherView)) {
         loadPaneImage(otherPane, otherView);

@@ -1,5 +1,7 @@
 # batch_fire_mapping_web
 
+*Last updated: April 16, 2026*
+
 Interactive web interface for mapping wildfire burn areas from Sentinel-2 satellite imagery. Uses a machine learning pipeline (T-SNE dimensionality reduction, Random Forest classification, HDBSCAN clustering) accelerated on GPU to classify burned vs. unburned pixels, then lets users visually review and accept results through a browser.
 
 This is the web companion to the `batch_fire_mapping` CLI. It wraps the same underlying pipeline but replaces the sequential batch workflow with an interactive one: users can inspect each fire, tune parameters, compare results side-by-side, and build up a parameter knowledge base over time.
@@ -143,7 +145,8 @@ Opening a fire takes you to the mapping page. On load, the server automatically:
 - **Split view**: side-by-side comparison. Post-fire on the left, ML classification on the right (opens automatically when results are available).
 - **Synced zoom/pan**: both panes move together by default. Zoom preserves your position when toggling split or collapsing the control panel -- you won't lose your place on large fires.
 - **Pixel-perfect rendering**: `image-rendering: pixelated` at all zoom levels.
-- **View dropdown**: switch between post-fire, pre-fire, difference, ML classification, comparison figure, brush comparison.
+- **View dropdown**: switch between post-fire, pre-fire, difference, ML classification, hint perimeter, comparison figure, brush comparison.
+- **Geospatial overlay alignment**: when re-cropping with different padding, previously accepted ML classification overlays are placed at the correct geographic position within the new crop using GDAL geotransforms, rather than being stretched to fit.
 
 #### Parameters (right side)
 
@@ -158,8 +161,9 @@ Collapsible sections for every pipeline parameter:
 
 #### Mapping
 
-- **Map Fire**: runs the pipeline with the parameters currently in the form.
-- **Map Fire / with settings**: applies the recommended settings for the fire's size range, then maps.
+- **Map Fire**: runs the pipeline with the parameters currently in the form. If the padding value has changed since the last crop, the fire is automatically re-cropped first and all preview images update immediately before mapping begins.
+- **Map Fire / with settings**: applies the recommended settings for the fire's size range, re-crops if padding changed, then maps.
+- **Re-crop**: manually re-crops the fire with the current padding value and updates all preview images, without running the ML pipeline.
 - **Runs (N)**: set N > 1 to run multiple mappings with varied HDBSCAN parameters. All runs appear as cards in a results gallery, ranked by agreement score.
 - **Console**: streams pipeline output in real time. Persists across page navigation.
 
@@ -177,12 +181,14 @@ When re-mapping a previously accepted fire, the old result appears as a "Previou
 
 #### Accepting
 
-Clicking Accept on a result card:
-- Copies all outputs to the canonical output directory.
+All mapping results live in `.web_cache/` until explicitly accepted. Nothing is written to the canonical output directory until you click Accept. Clicking Accept on a result card:
+- Copies all outputs to the canonical output directory (`<out_dir>/<FIRE_NUMBER>/`).
 - Writes a `_params.yaml` file with the full parameter record and ML area estimate.
 - Logs parameters to `accepted_params.csv` (feeds the learning system).
 - Clears the results gallery and serial cache files.
 - Shows a confirmation dialog if overwriting a previously accepted result.
+
+Re-cropping or re-mapping a previously accepted fire does not affect the accepted results on disk. You can freely change padding and re-run with different parameters -- the accepted output is only overwritten when you accept a new result.
 
 ### Navigation
 
@@ -256,7 +262,7 @@ The file `recommended_settings.yaml` defines parameter presets by fire size rang
     # ... different bands for larger fires
 ```
 
-Admins can view and temporarily edit settings in the web UI. **Edits are in-memory only** -- to make permanent changes, edit the YAML file directly.
+Admins can view and edit settings in the web UI. Changes are persisted to `recommended_settings.yaml` on save.
 
 ---
 
@@ -321,7 +327,7 @@ Or place the server behind a TLS-terminating reverse proxy.
 
 The following security measures are built into the server:
 
-- **Session tokens** are hashed (SHA-256) before storage on disk. Raw tokens exist only in browser cookies.
+- **Session tokens** are hashed (SHA-256) before storage on disk. Raw tokens exist only in browser cookies. Cookies are set with `HttpOnly`, `SameSite=Lax`, and `Secure` flags.
 - **CSRF protection** on all POST endpoints via Origin header validation and `X-Requested-With` header requirement.
 - **Login rate limiting**: 5 failed attempts per IP per 5-minute window.
 - **IP normalization**: IPv6-mapped IPv4 addresses (e.g. `::ffff:10.0.0.1`) are normalized to plain IPv4, preventing bypass via address format tricks.
@@ -341,7 +347,6 @@ The following security measures are built into the server:
 
 - **HDBSCAN non-determinism**: cuML's GPU HDBSCAN does not support a random seed. Identical runs may produce slightly different results due to GPU parallelism. All other stages are seeded and deterministic.
 - **Single GPU queue**: one fire maps at a time. Additional requests queue automatically.
-- **In-memory settings edits**: changes to recommended settings in the web UI are lost on restart. Edit the YAML file for permanent changes.
 - **No TLS**: the server uses plaintext HTTP. Use an SSH tunnel or reverse proxy for encrypted access.
 
 ---
