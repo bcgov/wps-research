@@ -86,7 +86,8 @@ Example
 
     # Server
     p.add_argument('--host', default='0.0.0.0',
-                   help='Server bind address (default: 0.0.0.0)')
+                   help='Server bind address (default: 0.0.0.0). '
+                        'Use 127.0.0.1 to restrict to localhost only.')
     p.add_argument('--port', type=int, default=8765,
                    help='Server port (default: 8765)')
 
@@ -95,6 +96,11 @@ Example
                    help='Admin password (or env FIRE_ADMIN_PASSWORD)')
     p.add_argument('--user_password', default=None,
                    help='Generic user password (or env FIRE_USER_PASSWORD)')
+    p.add_argument('--insecure_no_auth', action='store_true',
+                   help='Allow running without passwords (opt-in)')
+    p.add_argument('--trust_proxy', action='store_true',
+                   help='Trust X-Forwarded-For header for client IP '
+                        '(use only behind a trusted reverse proxy)')
 
     return p
 
@@ -213,7 +219,17 @@ def main():
     app_state.user_password  = (args.user_password
                                 or os.environ.get('FIRE_USER_PASSWORD'))
 
+    app_state.trust_proxy = args.trust_proxy
+    app_state.insecure_no_auth = args.insecure_no_auth
+
     # Validate password configuration
+    if (not app_state.admin_password and not app_state.user_password
+            and not app_state.insecure_no_auth):
+        sys.exit(
+            'ERROR: No passwords configured. Pass --admin_password / '
+            '--user_password (or set FIRE_ADMIN_PASSWORD / '
+            'FIRE_USER_PASSWORD), or pass --insecure_no_auth to '
+            'run without authentication. See README.')
     if app_state.user_password and not app_state.admin_password:
         sys.exit('ERROR: --user_password requires --admin_password. '
                  'Without an admin, no one can approve user IPs.')
@@ -221,6 +237,14 @@ def main():
             and app_state.admin_password == app_state.user_password):
         sys.exit('ERROR: --admin_password and --user_password must be '
                  'different. Otherwise all users become admin.')
+
+    # Compute allowed origins for CSRF checks
+    app_state.allowed_origins = {
+        f'http://localhost:{args.port}',
+        f'http://127.0.0.1:{args.port}',
+    }
+    if args.host not in ('127.0.0.1', 'localhost'):
+        app_state.allowed_origins.add(f'http://{args.host}:{args.port}')
 
     if not os.path.isfile(app_state.cli_script):
         sys.exit(f'ERROR: fire_mapping_cli.py not found at '
@@ -292,13 +316,17 @@ def main():
         hostname = socket.gethostname()
         print(f'  Network: http://{lan_ip}:{args.port}')
         print(f'           http://{hostname}:{args.port}')
+        # Add discovered network addresses to allowed origins
+        app_state.allowed_origins.add(f'http://{lan_ip}:{args.port}')
+        app_state.allowed_origins.add(f'http://{hostname}:{args.port}')
     except Exception:
         pass
     if app_state.admin_password:
         print(f'  Auth:    admin + user passwords configured')
         print(f'  IP ctrl: {app_state.ip_file}')
     else:
-        print(f'  Auth:    none (use --admin_password/--user_password)')
+        print(f'  Auth:    NONE (--insecure_no_auth)')
+        print(f'  WARNING: All users have full admin access!')
     print(f'  {len(app_state.fires)} fire(s) available')
     print(f'{sep}\n')
 

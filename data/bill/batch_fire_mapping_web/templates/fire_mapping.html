@@ -308,7 +308,7 @@ async function prepareFire(padding) {
     const body = padding != null ? JSON.stringify({padding}) : '{}';
 
     try {
-        const r = await fetch(`/api/fire/${FIRE}/prepare`, {
+        const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/prepare`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
             body: body,
@@ -609,11 +609,11 @@ function loadPaneImage(pane, viewKey) {
     } else if (runActive && viewKey === 'brush_comparison') {
         url = `/api/fire/${encodeURIComponent(FIRE)}/serial/${selectedRun}/image?type=brush&t=${Date.now()}`;
     } else if (viewKey === 'comparison') {
-        url = `/api/fire/${FIRE}/comparison?t=${Date.now()}`;
+        url = `/api/fire/${encodeURIComponent(FIRE)}/comparison?t=${Date.now()}`;
     } else if (viewKey === 'brush_comparison') {
-        url = `/api/fire/${FIRE}/brush_comparison?t=${Date.now()}`;
+        url = `/api/fire/${encodeURIComponent(FIRE)}/brush_comparison?t=${Date.now()}`;
     } else {
-        url = `/api/fire/${FIRE}/preview/${viewKey}?t=${Date.now()}`;
+        url = `/api/fire/${encodeURIComponent(FIRE)}/preview/${viewKey}?t=${Date.now()}`;
     }
     img.src = url;
 

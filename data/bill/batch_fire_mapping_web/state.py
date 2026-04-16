@@ -1,6 +1,7 @@
 """Per-fire state management for the web interface."""
 
 import os
+import threading
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
@@ -71,6 +72,7 @@ class AppState:
     """Global application state shared across all routes."""
 
     def __init__(self):
+        self.lock = threading.RLock()
         self.fires: dict[str, FireInfo] = {}
 
         # Loaded data
@@ -102,8 +104,8 @@ class AppState:
         self.admin_password: Optional[str] = None
         self.user_password: Optional[str] = None
 
-        # Sessions (cookie-based)
-        self.sessions: dict = {}        # token → {role, username, ip, created_at}
+        # Sessions (cookie-based, keys are SHA-256 hashes of tokens)
+        self.sessions: dict = {}        # hash(token) → {role, username, ip, created_at}
         self.session_file: str = ""     # path for persistence
 
         # IP access control
@@ -122,6 +124,14 @@ class AppState:
         # Batch mapping
         self.batch_status: Optional[dict] = None   # {running, total, completed, current_fire, errors}
 
+        # Deployment options
+        self.trust_proxy: bool = False
+        self.insecure_no_auth: bool = False
+        self.allowed_origins: set = set()
+
+        # Login rate limiting  {ip: [timestamp, ...]}
+        self.login_attempts: dict = {}
+
     def init_fires_from_gdf(self):
         """Populate fires dict from the loaded GeoDataFrame."""
         import re as _re
@@ -131,7 +141,7 @@ class AppState:
                 continue
             # Reject fire numbers that could cause path traversal
             if '..' in fn or '/' in fn or '\\' in fn or not _re.fullmatch(
-                    r'[A-Za-z0-9_. -]+', fn):
+                    r'[A-Za-z0-9][A-Za-z0-9_. -]*', fn):
                 continue
 
             # Parse fire date

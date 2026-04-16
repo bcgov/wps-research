@@ -42,7 +42,7 @@ python -m batch_fire_mapping_web \
 
 Then open `http://localhost:8765` in your browser.
 
-Authentication is optional. To enable it, set passwords via environment variables:
+Authentication is required by default. Set passwords via environment variables or CLI flags:
 
 ```bash
 export FIRE_ADMIN_PASSWORD=<your-admin-password>
@@ -51,6 +51,14 @@ export FIRE_USER_PASSWORD=<your-user-password>
 python -m batch_fire_mapping_web \
     fire_perimeters.shp sentinel2_stack.bin \
     --skip_download --out_dir ./results
+```
+
+To run without authentication (e.g. localhost-only testing), pass `--insecure_no_auth`:
+
+```bash
+python -m batch_fire_mapping_web \
+    fire_perimeters.shp sentinel2_stack.bin \
+    --skip_download --out_dir ./results --insecure_no_auth
 ```
 
 > **Tip**: Use environment variables instead of CLI flags on shared systems, since CLI arguments are visible in process listings.
@@ -85,19 +93,28 @@ python -m batch_fire_mapping_web  POLYGON_FILE  RASTER_FILE  [options]
 | `--port N` | `8765` | Server port. |
 | `--admin_password` | none | Admin password (or env `FIRE_ADMIN_PASSWORD`). |
 | `--user_password` | none | User password (or env `FIRE_USER_PASSWORD`). Requires admin password to also be set. |
+| `--insecure_no_auth` | off | Run without any authentication. All users get full admin access. |
+| `--trust_proxy` | off | Trust `X-Forwarded-For` header for client IP (use only behind a trusted reverse proxy). |
 
 ---
 
 ## Authentication and access control
 
-Authentication is **off by default**. When both an admin and user password are configured, the server enables a two-role system:
+Authentication is **required by default**. The server will refuse to start without passwords unless `--insecure_no_auth` is explicitly passed. When both an admin and user password are configured, the server enables a two-role system:
 
-- **Admin**: full access. Can approve or block other users' IP addresses via the admin dashboard (`/admin`). Can edit recommended settings.
+- **Admin**: full access. Can approve or block other users' IP addresses via the admin dashboard (`/admin`). Can edit recommended settings. Can trigger batch mapping.
 - **User**: fire mapping access. Must have their IP approved by an admin before they can see any content.
 
-New user IPs appear as "pending" on the admin dashboard. The admin approves or blocks them. Approved/blocked state persists across server restarts.
+New user IPs appear as "pending" on the admin dashboard. The admin approves or blocks them. Approved/blocked state persists across server restarts (stored in `access_control.yaml`). Sessions are cookie-based and persist across restarts (stored in `sessions.yaml`).
 
-When no passwords are set, everyone has full access with no login required.
+Password rules:
+- `--admin_password` alone enables admin-only mode (no user role).
+- `--user_password` requires `--admin_password` to also be set (otherwise no one can approve IPs).
+- Admin and user passwords must be different.
+
+Login is rate-limited to 5 attempts per IP per 5-minute window.
+
+With `--insecure_no_auth`, all authentication is bypassed and every user has full admin access. Use only for localhost-only testing.
 
 ---
 
@@ -263,6 +280,8 @@ Admins can view and temporarily edit settings in the web UI. **Edits are in-memo
     fire_status.yaml              # Status index for all fires
     accepted_params.csv           # Parameter log (appended on each Accept)
     notes.yaml                    # Per-fire notes
+    access_control.yaml           # Approved/blocked IP addresses
+    sessions.yaml                 # Persistent login sessions (hashed tokens)
     .web_cache/                   # Temporary working files (safe to delete)
         <FIRE_NUMBER>/
             *_crop.bin / .hdr     # Cropped raster
@@ -295,6 +314,26 @@ ssh -L 8765:localhost:8765 user@remote-host
 ```
 
 Or place the server behind a TLS-terminating reverse proxy.
+
+---
+
+## Security hardening
+
+The following security measures are built into the server:
+
+- **Session tokens** are hashed (SHA-256) before storage on disk. Raw tokens exist only in browser cookies.
+- **CSRF protection** on all POST endpoints via Origin header validation and `X-Requested-With` header requirement.
+- **Login rate limiting**: 5 failed attempts per IP per 5-minute window.
+- **IP normalization**: IPv6-mapped IPv4 addresses (e.g. `::ffff:10.0.0.1`) are normalized to plain IPv4, preventing bypass via address format tricks.
+- **Path traversal prevention**: static file serving, report generation, and fire name handling all validate paths with `os.path.realpath` containment checks.
+- **Parameter validation**: all pipeline parameters are validated against typed bounds before being passed to subprocesses, preventing resource exhaustion via extreme values.
+- **Atomic file writes**: YAML persistence files (sessions, IP access lists, fire status) are written atomically (write to temp file, then `os.replace`) with `0600` permissions to prevent data loss on crash and limit read access.
+- **Request body limits**: POST bodies are capped at 1 MB; oversized requests receive a 413 response.
+- **Blocked IP enforcement**: blocked IPs are checked before any role-based auto-approve logic, so a blocked IP cannot bypass the block by logging in as admin.
+- **Batch mapping** requires admin role.
+- **Thread safety**: mutable shared state (sessions, console logs, serial results, GPU queue, batch status) is protected by locks to prevent race conditions.
+- **Fixed CSV headers**: `accepted_params.csv` uses a fixed fieldname list, preventing header drift across appends.
+- **URL encoding**: all client-side API URLs encode fire names with `encodeURIComponent` to handle special characters safely.
 
 ---
 

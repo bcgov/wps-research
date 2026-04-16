@@ -6,6 +6,8 @@ SSE (Server-Sent Events) via fetch() for real-time console streaming.
 
 import datetime
 import glob
+import hashlib
+import ipaddress
 import json
 import mimetypes
 import os
@@ -45,15 +47,140 @@ def init_app(app_state: AppState):
 _SESSION_MAX_AGE = 30 * 24 * 3600  # 30 days in seconds
 
 
+# =========================================================================
+# Security helpers
+# =========================================================================
+
+def _hash_token(token: str) -> str:
+    """SHA-256 hash a session token for storage (never persist raw tokens)."""
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _normalize_ip(ip_str: str) -> str:
+    """Normalize IP address. Maps IPv6-mapped IPv4 (::ffff:x.x.x.x) to IPv4."""
+    try:
+        addr = ipaddress.ip_address(ip_str)
+        if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped:
+            return str(addr.ipv4_mapped)
+        return str(addr)
+    except ValueError:
+        return ip_str
+
+
+def _atomic_yaml_dump(path: str, data, mode: int = 0o600):
+    """Write YAML atomically via tmp + rename. Sets restrictive permissions."""
+    import yaml
+    tmp = path + '.tmp'
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+    with os.fdopen(fd, 'w') as f:
+        yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+    os.replace(tmp, path)
+
+
+# Login rate limiting
+_LOGIN_MAX_ATTEMPTS = 5
+_LOGIN_WINDOW_SECONDS = 300  # 5 minutes
+
+
+def _check_login_rate(ip: str) -> bool:
+    """Return True if the IP is under the rate limit."""
+    now = time.time()
+    attempts = state.login_attempts.get(ip, [])
+    attempts = [t for t in attempts if now - t < _LOGIN_WINDOW_SECONDS]
+    state.login_attempts[ip] = attempts
+    return len(attempts) < _LOGIN_MAX_ATTEMPTS
+
+
+def _record_failed_login(ip: str):
+    """Record a failed login attempt for rate limiting."""
+    now = time.time()
+    attempts = state.login_attempts.get(ip, [])
+    attempts.append(now)
+    state.login_attempts[ip] = attempts
+
+
+# =========================================================================
+# Parameter validation — typed bounds for subprocess arguments
+# =========================================================================
+
+_PARAM_SPEC = {
+    'seed':                 ('int',   0, 2**31 - 1),
+    'rf_n_estimators':      ('int',   1, 2000),
+    'rf_max_depth':         ('int',   1, 100),
+    'rf_max_features':      ('choice', {'sqrt', 'log2', 'auto'}),
+    'rf_random_state':      ('int',   0, 2**31 - 1),
+    'controlled_ratio':     ('float', 0.01, 2.0),
+    'hdbscan_min_samples':  ('int',   1, 10000),
+    'tsne_perplexity':      ('float', 1.0, 1000.0),
+    'tsne_learning_rate':   ('float', 1.0, 10000.0),
+    'tsne_max_iter':        ('int',   100, 10000),
+    'tsne_init':            ('choice', {'random', 'pca'}),
+    'tsne_n_components':    ('int',   2, 3),
+    'tsne_random_state':    ('int',   0, 2**31 - 1),
+    'contour_width':        ('float', 0.0, 10.0),
+    'sample_rate':          ('float', 0.001, 1.0),
+    'min_samples':          ('int',   1, 1000000),
+    'max_samples':          ('int',   1, 1000000),
+}
+
+
+def _validate_param(key: str, raw):
+    """Validate and coerce a single parameter. Raises ValueError on bad input."""
+    if key not in _PARAM_SPEC:
+        return raw
+    spec = _PARAM_SPEC[key]
+    kind = spec[0]
+    if kind == 'int':
+        _, lo, hi = spec
+        v = int(float(raw))
+        if not (lo <= v <= hi):
+            raise ValueError(f'{key}={raw} out of range [{lo}, {hi}]')
+        return v
+    if kind == 'float':
+        _, lo, hi = spec
+        v = float(raw)
+        if not (lo <= v <= hi):
+            raise ValueError(f'{key}={raw} out of range [{lo}, {hi}]')
+        return v
+    if kind == 'choice':
+        _, allowed = spec[0], spec[1]
+        s = str(raw)
+        if s not in allowed:
+            raise ValueError(
+                f'{key}={raw} must be one of {sorted(allowed)}')
+        return s
+    return raw
+
+
+def _validate_embed_bands(eb) -> str | None:
+    """Validate embed_bands (comma-separated positive ints). Returns cleaned string."""
+    if not eb or not str(eb).strip():
+        return None
+    parts = [p.strip() for p in str(eb).split(',') if p.strip()]
+    if not all(p.isdigit() and 1 <= int(p) <= 999 for p in parts):
+        raise ValueError(f'Invalid embed_bands: {eb!r}')
+    return ','.join(parts)
+
+
+# Fixed CSV fieldnames for accepted_params.csv (prevents header drift)
+_CSV_FIELDNAMES = [
+    'fire_numbe', 'fire_size_ha', 'agreement_pct', 'padding', 'timestamp',
+    'sample_rate', 'min_samples', 'max_samples', 'seed',
+    'embed_bands', 'tsne_perplexity', 'tsne_learning_rate',
+    'tsne_max_iter', 'tsne_init', 'tsne_n_components',
+    'tsne_random_state',
+    'controlled_ratio', 'hdbscan_min_samples',
+    'rf_n_estimators', 'rf_max_depth', 'rf_max_features',
+    'rf_random_state', 'contour_width',
+]
+
+
 def _save_sessions():
-    """Persist sessions to disk."""
+    """Persist sessions to disk (tokens are already hashed in memory)."""
     if not state.session_file:
         return
     try:
-        import yaml
-        with open(state.session_file, 'w') as f:
-            yaml.dump(dict(state.sessions), f,
-                      default_flow_style=False, sort_keys=False)
+        _atomic_yaml_dump(state.session_file, dict(state.sessions))
     except Exception:
         pass
 
@@ -962,13 +1089,11 @@ def _save_ip_list():
     if not state.ip_file:
         return
     try:
-        import yaml
         data = {
             'approved': dict(state.approved_ips),
             'blocked': dict(state.blocked_ips),
         }
-        with open(state.ip_file, 'w') as f:
-            yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+        _atomic_yaml_dump(state.ip_file, data)
     except Exception:
         pass
 
@@ -1011,6 +1136,14 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
     from shapely.geometry import box as shapely_box
 
     fire = state.fires[fire_numbe]
+
+    # Refuse to prepare while a mapping is in progress on this fire
+    if fire.status in (FireStatus.MAPPING, FireStatus.PREPARING):
+        fire.error_msg = (
+            'Cannot prepare: fire is currently '
+            + fire.status.value)
+        return
+
     fire.status = FireStatus.PREPARING
     fire.error_msg = ""
 
@@ -1315,7 +1448,7 @@ def _accept_fire_sync(fire_numbe: str) -> str:
     except ImportError:
         pass
 
-    # Update fire_status.yaml
+    # Update fire_status.yaml (atomic write)
     try:
         import yaml
         status_path = os.path.join(state.output_root, 'fire_status.yaml')
@@ -1330,8 +1463,7 @@ def _accept_fire_sync(fire_numbe: str) -> str:
             'fire_dir': fire_dir,
             'source': 'web',
         }
-        with open(status_path, 'w') as f:
-            yaml.dump(idx, f, default_flow_style=False, sort_keys=True)
+        _atomic_yaml_dump(status_path, idx)
     except Exception:
         pass
 
@@ -1359,7 +1491,9 @@ def _accept_fire_sync(fire_numbe: str) -> str:
             for k, v in fire.last_params.items():
                 row_data[k] = v
         with open(csv_path, 'a', newline='') as cf:
-            writer = csv.DictWriter(cf, fieldnames=row_data.keys())
+            writer = csv.DictWriter(
+                cf, fieldnames=_CSV_FIELDNAMES,
+                extrasaction='ignore')
             if write_header:
                 writer.writeheader()
             writer.writerow(row_data)
@@ -1378,7 +1512,10 @@ def _accept_fire_sync(fire_numbe: str) -> str:
 def _build_mapping_cmd(fire: FireInfo, params: dict,
                        save_state: str = None,
                        load_state: str = None) -> list[str]:
-    """Build the subprocess command for fire_mapping_cli.py."""
+    """Build the subprocess command for fire_mapping_cli.py.
+
+    Raises ValueError if any parameter fails validation.
+    """
     rate = params.get('sample_rate')
     rate = float(rate) if rate is not None else state.sample_rate
     min_s = params.get('min_samples')
@@ -1427,6 +1564,7 @@ def _build_mapping_cmd(fire: FireInfo, params: dict,
     for key, flag in flag_map.items():
         val = params.get(key)
         if val is not None and str(val).strip():
+            val = _validate_param(key, val)
             # Argparse int args choke on "15.0" — normalise whole floats
             if isinstance(val, float) and val == int(val):
                 val = int(val)
@@ -1434,7 +1572,9 @@ def _build_mapping_cmd(fire: FireInfo, params: dict,
 
     eb = params.get('embed_bands')
     if eb and str(eb).strip():
-        cmd += ['--embed_bands', str(eb)]
+        eb = _validate_embed_bands(eb)
+        if eb:
+            cmd += ['--embed_bands', eb]
 
     return cmd
 
@@ -1545,6 +1685,15 @@ class FireHandler(BaseHTTPRequestHandler):
                 return part[len(name) + 1:]
         return ''
 
+    def _client_ip(self) -> str:
+        """Get the client IP, respecting --trust_proxy."""
+        raw = self.client_address[0]
+        if getattr(state, 'trust_proxy', False):
+            xff = self.headers.get('X-Forwarded-For', '')
+            if xff:
+                raw = xff.split(',')[-1].strip()
+        return _normalize_ip(raw)
+
     def _check_session(self) -> str | None:
         """Check session cookie. Returns role or None."""
         self._username = ''
@@ -1555,23 +1704,28 @@ class FireHandler(BaseHTTPRequestHandler):
             self._role = 'admin'
             return 'admin'
 
-        token = self._get_cookie('session')
-        if not token or token not in state.sessions:
+        raw_token = self._get_cookie('session')
+        if not raw_token:
             return None
+        token = _hash_token(raw_token)
 
-        session = state.sessions[token]
-
-        # Check expiry
-        try:
-            created = datetime.datetime.fromisoformat(session['created_at'])
-            age = (datetime.datetime.now() - created).total_seconds()
-            if age > _SESSION_MAX_AGE:
-                del state.sessions[token]
-                _save_sessions()
+        with state.lock:
+            if token not in state.sessions:
                 return None
-        except (KeyError, ValueError):
-            del state.sessions[token]
-            return None
+            session = state.sessions[token]
+
+            # Check expiry
+            try:
+                created = datetime.datetime.fromisoformat(
+                    session['created_at'])
+                age = (datetime.datetime.now() - created).total_seconds()
+                if age > _SESSION_MAX_AGE:
+                    del state.sessions[token]
+                    _save_sessions()
+                    return None
+            except (KeyError, ValueError):
+                del state.sessions[token]
+                return None
 
         self._username = session.get('username', '')
         self._role = session.get('role', 'user')
@@ -1579,8 +1733,19 @@ class FireHandler(BaseHTTPRequestHandler):
 
     def _check_ip(self, role: str) -> bool:
         """Check IP access. Admins auto-approve. Returns True if allowed."""
-        ip = self.client_address[0]
+        ip = self._client_ip()
         username = getattr(self, '_username', '')
+
+        # Blocked IPs are blocked even for admins (must unblock explicitly)
+        if ip in state.blocked_ips:
+            self._send_html(render_template('pending.html', {
+                'ip': ip,
+                'title': 'Access Denied',
+                'message': 'Your IP address has been blocked by an '
+                           'administrator.',
+                'auto_refresh': 'false',
+            }), 403)
+            return False
 
         if role == 'admin':
             # Auto-approve admin IPs
@@ -1688,12 +1853,20 @@ class FireHandler(BaseHTTPRequestHandler):
             origin = self.headers.get('Origin', '')
             x_req = self.headers.get('X-Requested-With', '')
             if origin:
-                host = self.headers.get('Host', '')
-                allowed = {f'http://{host}', f'https://{host}'}
+                # Accept if origin matches startup-computed set OR
+                # the Host header the client actually connected to
+                # (same-origin: browser sets Origin = scheme://host)
+                allowed = set(state.allowed_origins)
+                host_hdr = self.headers.get('Host', '')
+                if host_hdr:
+                    allowed.add(f'http://{host_hdr}')
                 if origin not in allowed:
                     self.send_error(403, 'Cross-origin request blocked')
                     return
             elif not x_req:
+                # X-Requested-With triggers CORS preflight, so
+                # cross-origin requests with this header are blocked
+                # by the browser (server sends no CORS headers).
                 self.send_error(403, 'Missing origin header')
                 return
         if not self._route(self.ROUTES_POST):
@@ -1735,12 +1908,14 @@ class FireHandler(BaseHTTPRequestHandler):
 
     _MAX_BODY = 1_000_000  # 1 MB
 
-    def _read_body(self) -> dict:
+    def _read_body(self) -> dict | None:
+        """Read and parse JSON body. Returns None (and sends 413/400) on error."""
         length = int(self.headers.get('Content-Length', 0))
         if length == 0:
             return {}
         if length > self._MAX_BODY:
-            return {}
+            self.send_error(413, 'Request body too large')
+            return None
         raw = self.rfile.read(length)
         try:
             return json.loads(raw)
@@ -1765,7 +1940,7 @@ class FireHandler(BaseHTTPRequestHandler):
     def handle_login_page(self):
         # Already logged in? Redirect to home.
         token = self._get_cookie('session')
-        if token and token in state.sessions:
+        if token and _hash_token(token) in state.sessions:
             self._redirect('/')
             return
         html = render_template('login.html', {'error_msg': ''})
@@ -1774,6 +1949,19 @@ class FireHandler(BaseHTTPRequestHandler):
     def handle_login_post(self):
         import hmac
         import secrets
+
+        ip = self._client_ip()
+
+        # Rate limit login attempts
+        if not _check_login_rate(ip):
+            html = render_template('login.html', {
+                'error_msg': '<div class="error-msg" style="display:block">'
+                             'Too many login attempts. '
+                             'Please try again later.</div>',
+            })
+            self._send_html(html, 429)
+            return
+
         # Parse form body (application/x-www-form-urlencoded)
         length = int(self.headers.get('Content-Length', 0))
         if length > 10000:
@@ -1794,6 +1982,7 @@ class FireHandler(BaseHTTPRequestHandler):
             role = 'user'
 
         if role is None:
+            _record_failed_login(ip)
             html = render_template('login.html', {
                 'error_msg': '<div class="error-msg" style="display:block">'
                              'Invalid password.</div>',
@@ -1801,19 +1990,21 @@ class FireHandler(BaseHTTPRequestHandler):
             self._send_html(html, 401)
             return
 
-        # Create session
-        token = secrets.token_hex(32)
-        state.sessions[token] = {
-            'role': role,
-            'username': username,
-            'ip': self.client_address[0],
-            'created_at': datetime.datetime.now().isoformat(
-                timespec='seconds'),
-        }
+        # Create session — store hashed token, cookie gets raw token
+        raw_token = secrets.token_hex(32)
+        hashed = _hash_token(raw_token)
+        with state.lock:
+            state.sessions[hashed] = {
+                'role': role,
+                'username': username,
+                'ip': self._client_ip(),
+                'created_at': datetime.datetime.now().isoformat(
+                    timespec='seconds'),
+            }
         _save_sessions()
 
         # Set cookie and redirect to home
-        cookie = (f'session={token}; HttpOnly; SameSite=Strict; '
+        cookie = (f'session={raw_token}; HttpOnly; SameSite=Lax; '
                   f'Path=/; Max-Age={_SESSION_MAX_AGE}')
         self.send_response(302)
         self.send_header('Location', '/')
@@ -1823,15 +2014,18 @@ class FireHandler(BaseHTTPRequestHandler):
 
     def handle_logout(self):
         # Clear session
-        token = self._get_cookie('session')
-        if token and token in state.sessions:
-            del state.sessions[token]
+        raw_token = self._get_cookie('session')
+        if raw_token:
+            hashed = _hash_token(raw_token)
+            with state.lock:
+                if hashed in state.sessions:
+                    del state.sessions[hashed]
             _save_sessions()
         # Clear cookie and redirect to login
         self.send_response(302)
         self.send_header('Location', '/login')
         self.send_header('Set-Cookie',
-                         'session=; HttpOnly; SameSite=Strict; '
+                         'session=; HttpOnly; SameSite=Lax; '
                          'Path=/; Max-Age=0')
         self.send_header('Cache-Control', 'no-store')
         self.end_headers()
@@ -1864,9 +2058,10 @@ class FireHandler(BaseHTTPRequestHandler):
         self._send_html(html)
 
     def handle_static(self, path):
-        filepath = os.path.join(_HERE, 'static', path)
-        if not os.path.abspath(filepath).startswith(
-                os.path.join(_HERE, 'static')):
+        static_root = os.path.realpath(os.path.join(_HERE, 'static'))
+        filepath = os.path.realpath(os.path.join(_HERE, 'static', path))
+        if filepath != static_root and not filepath.startswith(
+                static_root + os.sep):
             self.send_error(403)
             return
         self._send_file(filepath)
@@ -1899,6 +2094,8 @@ class FireHandler(BaseHTTPRequestHandler):
             self._send_json({'error': 'Admin only'}, 403)
             return
         body = self._read_body()
+        if body is None:
+            return
         settings = body.get('settings', [])
         # Sanity-check: embed_bands must be a string, not numeric
         for row in settings:
@@ -1916,12 +2113,27 @@ class FireHandler(BaseHTTPRequestHandler):
 
     def handle_api_batch_map(self):
         global _batch_thread
-        if (state.batch_status
-                and state.batch_status.get('running')):
-            self._send_json(
-                {'error': 'A batch is already running'}, 400)
+        # Batch mapping requires admin role (blocks GPU for everyone)
+        if (getattr(self, '_role', '') != 'admin'
+                and state.admin_password):
+            self._send_json({'error': 'Admin only'}, 403)
             return
+        # Atomic check-and-set to prevent duplicate batches
+        with state.lock:
+            if (state.batch_status
+                    and state.batch_status.get('running')):
+                self._send_json(
+                    {'error': 'A batch is already running'}, 400)
+                return
+            # Mark as starting inside the lock
+            state.batch_status = {'running': True, 'total': 0,
+                                  'completed': 0, 'current_fire': '',
+                                  'errors': []}
         body = self._read_body()
+        if body is None:
+            with state.lock:
+                state.batch_status = None
+            return
         fire_numbes = body.get('fire_numbes', [])
         # Filter out accepted fires
         fire_numbes = [
@@ -1930,8 +2142,12 @@ class FireHandler(BaseHTTPRequestHandler):
             and state.fires[fn].status != FireStatus.ACCEPTED
         ]
         if not fire_numbes:
+            with state.lock:
+                state.batch_status = None
             self._send_json({'error': 'No eligible fires selected'}, 400)
             return
+        with state.lock:
+            state.batch_status['total'] = len(fire_numbes)
         _batch_thread = threading.Thread(
             target=_batch_map_worker,
             args=(fire_numbes,),
@@ -1950,7 +2166,7 @@ class FireHandler(BaseHTTPRequestHandler):
 
     def handle_api_access_status(self):
         """Called by the pending page to check if IP was approved."""
-        ip = self.client_address[0]
+        ip = self._client_ip()
         if ip in state.approved_ips:
             self._send_json({'status': 'approved'})
         elif ip in state.blocked_ips:
@@ -1982,6 +2198,8 @@ class FireHandler(BaseHTTPRequestHandler):
             self._send_json({'error': 'Admin only'}, 403)
             return
         body = self._read_body()
+        if body is None:
+            return
         ip = body.get('ip', '').strip()
         if not ip:
             self._send_json({'error': 'No IP provided'}, 400)
@@ -1995,7 +2213,7 @@ class FireHandler(BaseHTTPRequestHandler):
             state.approved_ips[ip] = {
                 'username': pending_info.get('username', ''),
                 'role': 'user',
-                'approved_by': self.client_address[0],
+                'approved_by': self._client_ip(),
                 'timestamp': now,
             }
             state.pending_ips.pop(ip, None)
@@ -2007,7 +2225,7 @@ class FireHandler(BaseHTTPRequestHandler):
             state.blocked_ips[ip] = {
                 'username': (pending_info.get('username', '')
                              or approved_info.get('username', '')),
-                'blocked_by': self.client_address[0],
+                'blocked_by': self._client_ip(),
                 'timestamp': now,
             }
             state.approved_ips.pop(ip, None)
@@ -2032,6 +2250,8 @@ class FireHandler(BaseHTTPRequestHandler):
 
         fire = state.fires[fire_numbe]
         body = self._read_body()
+        if body is None:
+            return
         padding = body.get('padding')
 
         prev_status = fire.status
@@ -2245,9 +2465,14 @@ class FireHandler(BaseHTTPRequestHandler):
                 has_brush = True
                 break
 
+        # Snapshot mutable lists under lock to avoid iteration-during-mutation
+        with state.lock:
+            console_lines = list(f.console_log)
+            raw_serial = list(f.serial_results)
+
         # Clean serial results for JSON
         serial_results = []
-        for r in f.serial_results:
+        for r in raw_serial:
             serial_results.append({
                 'run_id': r.get('run_id'),
                 'agreement_pct': r.get('agreement_pct', -1),
@@ -2260,7 +2485,7 @@ class FireHandler(BaseHTTPRequestHandler):
         self._send_json({
             'status': f.status.value,
             'previously_accepted': f.previously_accepted,
-            'lines': f.console_log,
+            'lines': console_lines,
             'last_params': f.last_params,
             'agreement_pct': f.agreement_pct,
             'ml_area_ha': f.ml_area_ha,
@@ -2313,6 +2538,8 @@ class FireHandler(BaseHTTPRequestHandler):
             return
 
         body = self._read_body()
+        if body is None:
+            return
         n = int(body.get('n', 3))
         n = max(1, min(10, n))
         user_base = body.get('base_params')  # from "Map Fire" with N>1
@@ -2549,9 +2776,13 @@ class FireHandler(BaseHTTPRequestHandler):
             self._send_json({'error': 'Fire not found'}, 404)
             return
         body = self._read_body()
+        if body is None:
+            return
         state.fires[fire_numbe].notes = body.get('notes', '')
         _save_notes()
         self._send_json({'status': 'saved'})
+
+    _VALID_FN = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_. -]*$')
 
     def handle_api_report(self):
         """Generate PDF report of selected accepted fires."""
@@ -2570,13 +2801,25 @@ class FireHandler(BaseHTTPRequestHandler):
             return
 
         # Create temp dir with symlinks to selected fire dirs
+        # Validate each fire number to prevent path traversal
+        root = os.path.realpath(state.output_root)
         tmp_dir = tempfile.mkdtemp(prefix='fire_report_sel_')
         try:
             for fn in fire_list:
-                src = os.path.join(state.output_root, fn)
-                if os.path.isdir(src):
-                    dst = os.path.join(tmp_dir, fn)
-                    os.symlink(os.path.abspath(src), dst)
+                # Must be a known fire with valid characters
+                if fn not in state.fires:
+                    continue
+                if not self._VALID_FN.fullmatch(fn):
+                    continue
+                src = os.path.realpath(
+                    os.path.join(state.output_root, fn))
+                # Must resolve inside output_root
+                if src != root and not src.startswith(root + os.sep):
+                    continue
+                if not os.path.isdir(src):
+                    continue
+                dst = os.path.join(tmp_dir, fn)
+                os.symlink(src, dst)
 
             tmp_pdf = os.path.join(tmp_dir, 'report.pdf')
             pdf = generate_report(tmp_dir, tmp_pdf)
@@ -2609,6 +2852,7 @@ class FireHandler(BaseHTTPRequestHandler):
 
     def handle_api_map(self, fire_numbe):
         """Run fire_mapping_cli.py and stream output as SSE."""
+        global _gpu_queue
         fire_numbe = unquote(fire_numbe)
         if fire_numbe not in state.fires:
             self._send_json({'error': 'Fire not found'}, 404)
@@ -2616,6 +2860,8 @@ class FireHandler(BaseHTTPRequestHandler):
 
         fire = state.fires[fire_numbe]
         body = self._read_body()
+        if body is None:
+            return
         params = body.get('params', {})
 
         if fire.status not in (
@@ -2647,7 +2893,7 @@ class FireHandler(BaseHTTPRequestHandler):
                 pass
 
         # GPU serialisation with queue tracking
-        client_ip = self.client_address[0]
+        client_ip = self._client_ip()
         job_entry = {
             'fire_numbe': fire_numbe,
             'client_ip': client_ip,
@@ -2657,7 +2903,7 @@ class FireHandler(BaseHTTPRequestHandler):
 
         with _gpu_queue_lock:
             queue_pos = _gpu_queue
-            globals()['_gpu_queue'] = _gpu_queue + 1
+            _gpu_queue += 1
             state.waiting_jobs.append(job_entry)
 
         if _gpu_lock.locked():
@@ -2732,7 +2978,7 @@ class FireHandler(BaseHTTPRequestHandler):
                     })
         finally:
             with _gpu_queue_lock:
-                globals()['_gpu_queue'] = max(0, _gpu_queue - 1)
+                _gpu_queue = max(0, _gpu_queue - 1)
             state.current_job = None
             if job_entry in state.waiting_jobs:
                 state.waiting_jobs.remove(job_entry)
