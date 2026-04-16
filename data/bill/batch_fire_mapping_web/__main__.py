@@ -250,17 +250,30 @@ def main():
         sys.exit(f'ERROR: fire_mapping_cli.py not found at '
                  f'{app_state.cli_script}')
 
-    # Load recommended settings from package directory
-    _settings_path = os.path.join(_HERE, 'recommended_settings.yaml')
-    if os.path.isfile(_settings_path):
+    # Load recommended settings (output_root first, fallback to package dir)
+    _settings_loaded = False
+    _user_settings = os.path.join(output_root, 'recommended_settings.yaml')
+    if os.path.isfile(_user_settings):
         try:
             import yaml
-            with open(_settings_path) as _f:
+            with open(_user_settings) as _f:
                 app_state.recommended_settings = yaml.safe_load(_f) or []
             print(f'      Loaded {len(app_state.recommended_settings)} '
-                  f'recommended setting(s).')
+                  f'recommended setting(s) from output dir.')
+            _settings_loaded = True
         except Exception as _e:
             print(f'      WARNING: Failed to load settings: {_e}')
+    if not _settings_loaded:
+        _pkg_settings = os.path.join(_HERE, 'recommended_settings.yaml')
+        if os.path.isfile(_pkg_settings):
+            try:
+                import yaml
+                with open(_pkg_settings) as _f:
+                    app_state.recommended_settings = yaml.safe_load(_f) or []
+                print(f'      Loaded {len(app_state.recommended_settings)} '
+                      f'recommended setting(s) from package.')
+            except Exception as _e:
+                print(f'      WARNING: Failed to load settings: {_e}')
 
     # Load persistent IP access list
     app_state.ip_file = os.path.join(output_root, 'access_control.yaml')
@@ -271,8 +284,10 @@ def main():
                 _ip_data = yaml.safe_load(_f) or {}
             app_state.approved_ips = _ip_data.get('approved', {})
             app_state.blocked_ips = _ip_data.get('blocked', {})
+            app_state.pending_ips = _ip_data.get('pending', {})
             print(f'      Loaded {len(app_state.approved_ips)} approved, '
-                  f'{len(app_state.blocked_ips)} blocked IP(s).')
+                  f'{len(app_state.blocked_ips)} blocked, '
+                  f'{len(app_state.pending_ips)} pending IP(s).')
         except Exception as _e:
             print(f'      WARNING: Failed to load IP list: {_e}')
 
@@ -301,6 +316,10 @@ def main():
     app_state.init_fires_from_gdf()
 
     init_app(app_state)
+
+    # Restore per-fire state from previous session
+    from .app import _load_fire_state
+    _load_fire_state()
 
     server = create_server(args.host, args.port)
 

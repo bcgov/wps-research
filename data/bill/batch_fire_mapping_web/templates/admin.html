@@ -65,6 +65,19 @@
         </div>
     </div>
 
+    <!-- Hidden Fires -->
+    <div class="admin-card">
+        <h3>Hidden Fires</h3>
+        <p class="admin-desc">Fires removed from the list — restore them here</p>
+        <table class="admin-table">
+            <thead><tr>
+                <th>Fire Number</th><th>Date</th><th>Year</th><th>Size (ha)</th><th>Status</th><th>Actions</th>
+            </tr></thead>
+            <tbody id="hidden-body"></tbody>
+        </table>
+        <p class="empty-msg" id="hidden-empty">No hidden fires</p>
+    </div>
+
 </div>
 
 <script>
@@ -73,6 +86,14 @@ function esc(s) {
     const d = document.createElement('div');
     d.textContent = s;
     return d.innerHTML;
+}
+
+async function unhideFire(fn) {
+    await fetch(`/api/fire/${encodeURIComponent(fn)}/unhide`, {
+        method: 'POST',
+        headers: {'X-Requested-With': 'fetch'},
+    });
+    loadData();
 }
 
 async function ipAction(action, ip) {
@@ -150,6 +171,30 @@ async function loadData() {
                         onclick="ipAction('unblock','${esc(ip)}')">Unblock</button>
                 </td>`;
             bb.appendChild(tr);
+        }
+    } catch {}
+
+    // Load hidden fires
+    try {
+        const r2 = await fetch('/api/fires/hidden');
+        const hidden = await r2.json();
+        const hb = document.getElementById('hidden-body');
+        const he = document.getElementById('hidden-empty');
+        hb.innerHTML = '';
+        he.style.display = hidden.length ? 'none' : 'block';
+        for (const f of hidden) {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><strong>${esc(f.fire_numbe)}</strong></td>
+                <td>${esc(f.fire_date)}</td>
+                <td>${f.fire_year || ''}</td>
+                <td>${f.fire_size_ha}</td>
+                <td>${esc(f.status)}</td>
+                <td>
+                    <button class="btn btn-success" style="font-size:11px;padding:2px 8px"
+                        onclick="unhideFire('${esc(f.fire_numbe)}')">Restore</button>
+                </td>`;
+            hb.appendChild(tr);
         }
     } catch {}
 

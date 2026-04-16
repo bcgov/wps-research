@@ -38,6 +38,9 @@ _gpu_lock = threading.Lock()
 _gpu_queue = 0            # number of tasks waiting or running
 _gpu_queue_lock = threading.Lock()   # protects the counter
 
+# Batch cancellation flag
+_batch_cancel = threading.Event()
+
 
 def init_app(app_state: AppState):
     global state
@@ -183,19 +186,21 @@ def _save_sessions():
         return
     try:
         _atomic_yaml_dump(state.session_file, dict(state.sessions))
-    except Exception:
-        pass
+    except Exception as exc:
+        sys.stderr.write(f'[save] WARNING: Failed to save sessions: {exc}\n')
+        sys.stderr.flush()
 
 
 def _save_settings():
-    """Persist recommended settings to recommended_settings.yaml."""
+    """Persist recommended settings to output_root (not the package dir)."""
     try:
-        import yaml
-        settings_path = os.path.join(_HERE, 'recommended_settings.yaml')
+        settings_path = os.path.join(state.output_root, 'recommended_settings.yaml')
         _atomic_yaml_dump(settings_path, list(state.recommended_settings),
                           mode=0o644)
-    except Exception:
-        pass
+    except Exception as exc:
+        sys.stderr.write(
+            f'[save] WARNING: Failed to save settings: {exc}\n')
+        sys.stderr.flush()
 
 
 def _save_notes():
@@ -212,8 +217,160 @@ def _save_notes():
             yaml.dump(notes_data, f,
                       default_flow_style=False, sort_keys=True)
         os.replace(tmp_path, notes_path)
-    except Exception:
-        pass
+    except Exception as exc:
+        sys.stderr.write(
+            f'[save] WARNING: Failed to save notes: {exc}\n')
+        sys.stderr.flush()
+
+
+def _save_fire_state():
+    """Persist per-fire state to fire_state.yaml so mapped fires survive restart."""
+    try:
+        data = {}
+        for fn, fire in state.fires.items():
+            # Only persist fires with meaningful state beyond PENDING
+            if (fire.status == FireStatus.PENDING and not fire.hidden
+                    and not fire.cache_dir):
+                continue
+            entry = {
+                'status': fire.status.value,
+                'hidden': fire.hidden,
+            }
+            if fire.cache_dir:
+                entry['cache_dir'] = fire.cache_dir
+            if fire.crop_bin:
+                entry['crop_bin'] = fire.crop_bin
+            if fire.hint_bin:
+                entry['hint_bin'] = fire.hint_bin
+            if fire.perim_bin:
+                entry['perim_bin'] = fire.perim_bin
+            if fire.viirs_bin:
+                entry['viirs_bin'] = fire.viirs_bin
+            if fire.crop_w:
+                entry['crop_w'] = fire.crop_w
+                entry['crop_h'] = fire.crop_h
+            if fire.padding_used:
+                entry['padding_used'] = fire.padding_used
+            if fire.acc_start:
+                entry['acc_start'] = fire.acc_start
+                entry['acc_end'] = fire.acc_end
+            if fire.perimeter_type:
+                entry['perimeter_type'] = fire.perimeter_type
+            if fire.sample_size:
+                entry['sample_size'] = fire.sample_size
+            if fire.available_views:
+                entry['available_views'] = list(fire.available_views)
+            if fire.last_comparison:
+                entry['last_comparison'] = fire.last_comparison
+            if fire.last_params:
+                entry['last_params'] = dict(fire.last_params)
+            if fire.ml_area_ha >= 0:
+                entry['ml_area_ha'] = fire.ml_area_ha
+            if fire.agreement_pct >= 0:
+                entry['agreement_pct'] = fire.agreement_pct
+            if fire.previously_accepted:
+                entry['previously_accepted'] = True
+            data[fn] = entry
+
+        state_path = os.path.join(state.output_root, 'fire_state.yaml')
+        _atomic_yaml_dump(state_path, data, mode=0o644)
+    except Exception as exc:
+        sys.stderr.write(
+            f'[save] WARNING: Failed to save fire state: {exc}\n')
+        sys.stderr.flush()
+
+
+def _load_fire_state():
+    """Restore per-fire state from fire_state.yaml after init_fires_from_gdf."""
+    state_path = os.path.join(state.output_root, 'fire_state.yaml')
+    if not os.path.isfile(state_path):
+        return
+
+    try:
+        import yaml
+        with open(state_path) as f:
+            data = yaml.safe_load(f) or {}
+    except Exception as exc:
+        sys.stderr.write(
+            f'[load] WARNING: Failed to load fire state: {exc}\n')
+        sys.stderr.flush()
+        return
+
+    restored = 0
+    for fn, entry in data.items():
+        if fn not in state.fires:
+            continue
+        fire = state.fires[fn]
+
+        # Restore hidden flag
+        if entry.get('hidden'):
+            fire.hidden = True
+
+        saved_status = entry.get('status', 'pending')
+
+        # Don't downgrade: if init_fires_from_gdf already found ACCEPTED,
+        # only restore supplementary fields, not status
+        if fire.status == FireStatus.ACCEPTED and saved_status != 'accepted':
+            # Just restore hidden and skip — the accepted state from disk
+            # is authoritative
+            continue
+
+        # Restore cache paths — but only if they still exist on disk
+        cache_dir = entry.get('cache_dir', '')
+        if cache_dir and os.path.isdir(cache_dir):
+            fire.cache_dir = cache_dir
+            fire.crop_bin = entry.get('crop_bin', '')
+            fire.hint_bin = entry.get('hint_bin', '')
+            fire.perim_bin = entry.get('perim_bin', '')
+            fire.viirs_bin = entry.get('viirs_bin', '')
+            fire.crop_w = entry.get('crop_w', 0)
+            fire.crop_h = entry.get('crop_h', 0)
+            fire.padding_used = entry.get('padding_used', 0.0)
+            fire.acc_start = entry.get('acc_start', '')
+            fire.acc_end = entry.get('acc_end', '')
+            fire.perimeter_type = entry.get('perimeter_type', '')
+            fire.sample_size = entry.get('sample_size', 0)
+            fire.available_views = entry.get('available_views', [])
+            fire.last_comparison = entry.get('last_comparison', '')
+            fire.last_params = entry.get('last_params', {})
+            fire.ml_area_ha = entry.get('ml_area_ha', -1.0)
+            fire.agreement_pct = entry.get('agreement_pct', -1.0)
+            fire.previously_accepted = entry.get(
+                'previously_accepted', False)
+
+            # Validate critical files exist before restoring status
+            if saved_status in ('ready', 'mapped'):
+                crop_ok = (fire.crop_bin
+                           and os.path.isfile(fire.crop_bin))
+                hint_ok = (fire.hint_bin
+                           and os.path.isfile(fire.hint_bin))
+                if crop_ok and hint_ok:
+                    fire.status = FireStatus(saved_status)
+                    restored += 1
+                else:
+                    fire.status = FireStatus.PENDING
+            elif saved_status == 'accepted':
+                fire.status = FireStatus.ACCEPTED
+                restored += 1
+            # MAPPING/PREPARING on disk means crashed mid-work — reset
+            elif saved_status in ('mapping', 'preparing'):
+                # Check if a mapped result exists in cache
+                comp = os.path.join(
+                    cache_dir, f'{fn}_comparison.png')
+                if os.path.isfile(comp):
+                    fire.status = FireStatus.MAPPED
+                    fire.last_comparison = comp
+                    restored += 1
+                else:
+                    fire.status = FireStatus.READY
+        elif saved_status == 'accepted':
+            fire.status = FireStatus.ACCEPTED
+
+    if restored:
+        sys.stderr.write(
+            f'[load] Restored state for {restored} fire(s) '
+            f'from fire_state.yaml\n')
+        sys.stderr.flush()
 
 
 def _compute_ml_area(fire: 'FireInfo',
@@ -237,7 +394,9 @@ def _compute_ml_area(fire: 'FireInfo',
         burned_px = int(np.nansum(arr > 0))
         ml_area_ha = burned_px * pixel_area_m2 / 10000.0
         return round(ml_area_ha, 2)
-    except Exception:
+    except Exception as exc:
+        sys.stderr.write(
+            f'[ml_area] WARNING: Failed to compute ML area: {exc}\n')
         return -1.0
 
 
@@ -346,8 +505,10 @@ def _overlay_mask_on_post(fire: 'FireInfo', raster_path: str,
         if (out_name not in fire.available_views
                 and not out_name.startswith('serial_')):
             fire.available_views.append(out_name)
-    except Exception:
-        pass
+    except Exception as exc:
+        sys.stderr.write(
+            f'[overlay] WARNING: Failed to generate {out_name} '
+            f'overlay: {exc}\n')
 
 
 def _generate_result_preview(fire: 'FireInfo'):
@@ -396,7 +557,9 @@ def _compute_agreement(fire: 'FireInfo') -> float:
             return 0.0
         intersection = np.sum(clf_mask & hint_mask)
         return round(float(intersection / union) * 100, 1)
-    except Exception:
+    except Exception as exc:
+        sys.stderr.write(
+            f'[agreement] WARNING: Failed to compute agreement: {exc}\n')
         return -1.0
 
 
@@ -647,6 +810,12 @@ def _batch_map_worker(fire_numbes: list[str]):
     sys.stderr.flush()
 
     for fire_numbe in fire_numbes:
+        # Check cancellation
+        if _batch_cancel.is_set():
+            sys.stderr.write('[batch] Cancelled by user.\n')
+            sys.stderr.flush()
+            break
+
         fire = state.fires.get(fire_numbe)
         if not fire or fire.status in (
                 FireStatus.ACCEPTED, FireStatus.MAPPING):
@@ -753,6 +922,7 @@ def _batch_map_worker(fire_numbes: list[str]):
             sys.stderr.flush()
 
         state.batch_status['completed'] += 1
+        _save_fire_state()
 
     state.batch_status['running'] = False
     state.batch_status['current_fire'] = ''
@@ -1151,6 +1321,7 @@ def _serial_map_worker(fire_numbe: str, param_sets: list[dict]):
         fire.error_msg = 'All serial runs failed'
         fire.console_log.append('All serial runs failed.')
 
+    _save_fire_state()
     sys.stderr.write(
         f'[serial] {fire_numbe} done: {len(successful)}/{n_total} '
         f'successful\n')
@@ -1158,17 +1329,19 @@ def _serial_map_worker(fire_numbe: str, param_sets: list[dict]):
 
 
 def _save_ip_list():
-    """Persist approved and blocked IPs to disk."""
+    """Persist approved, blocked, and pending IPs to disk."""
     if not state.ip_file:
         return
     try:
         data = {
             'approved': dict(state.approved_ips),
             'blocked': dict(state.blocked_ips),
+            'pending': dict(state.pending_ips),
         }
         _atomic_yaml_dump(state.ip_file, data)
-    except Exception:
-        pass
+    except Exception as exc:
+        sys.stderr.write(
+            f'[save] WARNING: Failed to save IP list: {exc}\n')
 
 
 # =========================================================================
@@ -1292,8 +1465,12 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
     fire.sample_size = sample_size
 
     # -- Create / clear cache directory --
+    # Only wipe when padding actually changed; preserve existing results
     cache_dir = os.path.join(state.output_root, '.web_cache', fire_numbe)
-    if os.path.isdir(cache_dir):
+    padding_changed = (fire.padding_used != 0
+                       and fire.padding_used != pad
+                       and os.path.isdir(cache_dir))
+    if padding_changed:
         shutil.rmtree(cache_dir)
     os.makedirs(cache_dir, exist_ok=True)
     fire.cache_dir = cache_dir
@@ -1443,6 +1620,7 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
         _overlay_mask_on_post(fire, fire.hint_bin, 'hint', (0.0, 0.8, 0.2))
 
     fire.status = FireStatus.READY
+    _save_fire_state()
 
 
 # =========================================================================
@@ -1547,11 +1725,27 @@ def _accept_fire_sync(fire_numbe: str) -> str:
         except Exception:
             pass
 
-    # Append to accepted_params.csv for parameter learning
+    # Append to accepted_params.csv for parameter learning (deduplicate)
     try:
         import csv
         csv_path = os.path.join(state.output_root, 'accepted_params.csv')
         write_header = not os.path.isfile(csv_path)
+
+        # Remove existing entry for this fire to avoid duplicates
+        if not write_header:
+            existing = []
+            with open(csv_path, newline='') as cf:
+                reader = csv.DictReader(cf)
+                existing = [r for r in reader
+                            if r.get('fire_numbe') != fire_numbe]
+            with open(csv_path, 'w', newline='') as cf:
+                writer = csv.DictWriter(
+                    cf, fieldnames=_CSV_FIELDNAMES,
+                    extrasaction='ignore')
+                writer.writeheader()
+                writer.writerows(existing)
+            write_header = False
+
         row_data = {
             'fire_numbe': fire_numbe,
             'fire_size_ha': fire.fire_size_ha,
@@ -1570,11 +1764,14 @@ def _accept_fire_sync(fire_numbe: str) -> str:
             if write_header:
                 writer.writeheader()
             writer.writerow(row_data)
-    except Exception:
-        pass
+    except Exception as exc:
+        sys.stderr.write(
+            f'[save] WARNING: Failed to update accepted_params.csv: '
+            f'{exc}\n')
 
     fire.status = FireStatus.ACCEPTED
     fire.previously_accepted = False
+    _save_fire_state()
     return fire_dir
 
 
@@ -1697,6 +1894,7 @@ class FireHandler(BaseHTTPRequestHandler):
             r'^/api/fire/(?P<fire_numbe>[^/]+)/serial/(?P<run_id>[0-9]+)/image$'),
          'handle_api_serial_image'),
         (re.compile(r'^/api/report$'), 'handle_api_report'),
+        (re.compile(r'^/api/fires/hidden$'), 'handle_api_fires_hidden'),
         (re.compile(r'^/static/(?P<path>.+)$'), 'handle_static'),
     ]
     ROUTES_POST = [
@@ -1726,6 +1924,10 @@ class FireHandler(BaseHTTPRequestHandler):
          'handle_api_serial_accept'),
         (re.compile(r'^/api/admin/ip/(?P<action>approve|block|revoke|unblock)$'),
          'handle_api_admin_ip_action'),
+        (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/unhide$'),
+         'handle_api_unhide'),
+        (re.compile(r'^/api/batch/cancel$'), 'handle_api_batch_cancel'),
     ]
 
     # Paths that bypass IP checks (pending page needs CSS/logo + status poll)
@@ -2214,6 +2416,7 @@ class FireHandler(BaseHTTPRequestHandler):
             return
         with state.lock:
             state.batch_status['total'] = len(fire_numbes)
+        _batch_cancel.clear()
         _batch_thread = threading.Thread(
             target=_batch_map_worker,
             args=(fire_numbes,),
@@ -2912,7 +3115,40 @@ class FireHandler(BaseHTTPRequestHandler):
             self._send_json({'error': 'Fire not found'}, 404)
             return
         state.fires[fire_numbe].hidden = True
+        _save_fire_state()
         self._send_json({'status': 'removed'})
+
+    def handle_api_unhide(self, fire_numbe):
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        state.fires[fire_numbe].hidden = False
+        _save_fire_state()
+        self._send_json({'status': 'restored'})
+
+    def handle_api_fires_hidden(self):
+        """Return list of hidden fires (for admin restore UI)."""
+        fires = [
+            {
+                'fire_numbe': f.fire_numbe,
+                'fire_date': f.fire_date,
+                'fire_year': f.fire_year,
+                'fire_size_ha': f.fire_size_ha,
+                'status': f.status.value,
+            }
+            for f in state.fires.values()
+            if f.hidden
+        ]
+        self._send_json(fires)
+
+    def handle_api_batch_cancel(self):
+        """Cancel a running batch mapping."""
+        if not state.batch_status or not state.batch_status.get('running'):
+            self._send_json({'error': 'No batch running'}, 400)
+            return
+        _batch_cancel.set()
+        self._send_json({'status': 'cancelling'})
 
     # -- Mapping with SSE streaming --
 
@@ -3029,6 +3265,7 @@ class FireHandler(BaseHTTPRequestHandler):
                     fire.ml_area_ha = _compute_ml_area(fire)
                     _generate_result_preview(fire)
                     fire.status = FireStatus.MAPPED
+                    _save_fire_state()
                     sse('complete', {
                         'comparison_url': (
                             f'/api/fire/{fire_numbe}/comparison'

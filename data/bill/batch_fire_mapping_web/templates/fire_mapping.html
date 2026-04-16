@@ -1283,13 +1283,31 @@ async function restoreFireState() {
 // -----------------------------------------------------------------------
 async function saveNotes() {
     const notes = document.getElementById('fire-notes').value;
+    const textarea = document.getElementById('fire-notes');
     try {
-        await fetch(`/api/fire/${encodeURIComponent(FIRE)}/notes`, {
+        const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/notes`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
             body: JSON.stringify({notes}),
         });
-    } catch {}
+        if (r.ok) {
+            textarea.style.borderColor = '#2d8a4e';
+            const origPlaceholder = textarea.placeholder;
+            textarea.placeholder = 'Saved!';
+            setTimeout(() => {
+                textarea.style.borderColor = '#ccc';
+                textarea.placeholder = origPlaceholder;
+            }, 1500);
+        } else {
+            textarea.style.borderColor = '#cc3333';
+            log('Failed to save notes', 'error');
+            setTimeout(() => textarea.style.borderColor = '#ccc', 2000);
+        }
+    } catch (err) {
+        textarea.style.borderColor = '#cc3333';
+        log('Failed to save notes: ' + err.message, 'error');
+        setTimeout(() => textarea.style.borderColor = '#ccc', 2000);
+    }
 }
 
 async function loadNotes() {
@@ -1375,7 +1393,7 @@ function toggleSplit() {
 // -----------------------------------------------------------------------
 (function() {
     try {
-        const order = JSON.parse(sessionStorage.getItem('fireOrder') || '[]');
+        const order = JSON.parse(localStorage.getItem('fireOrder') || '[]');
         if (order.length < 2) return;
         const idx = order.indexOf(FIRE);
         if (idx < 0) return;
@@ -1406,13 +1424,13 @@ function toggleControlPanel() {
     const hidden = panel.style.display === 'none';
     panel.style.display = hidden ? '' : 'none';
     btn.innerHTML = hidden ? '&#9654;' : '&#9664;';
-    sessionStorage.setItem('panelHidden', hidden ? '' : '1');
+    localStorage.setItem('panelHidden', hidden ? '' : '1');
     // Re-apply transforms after layout change (preserve zoom position)
     setTimeout(() => { updateTransformForPane('left'); if (splitActive) updateTransformForPane('right'); }, 50);
 }
 
 // Restore panel state
-if (sessionStorage.getItem('panelHidden') === '1') {
+if (localStorage.getItem('panelHidden') === '1') {
     document.getElementById('control-panel').style.display = 'none';
     document.getElementById('panel-toggle').innerHTML = '&#9664;';
 }

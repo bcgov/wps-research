@@ -72,6 +72,7 @@
 <div class="batch-bar" id="batch-bar" style="display:none">
     <span id="selected-count">0 selected</span>
     <button class="btn" id="btn-batch-map" onclick="batchMap()">Map Selected (with settings)</button>
+    <button class="btn btn-danger" id="btn-batch-cancel" onclick="batchCancel()" style="display:none">Cancel Batch</button>
     <button class="btn btn-danger" onclick="batchRemove()">Remove Selected</button>
     <button class="btn btn-success" onclick="downloadReport()">PDF Report (accepted)</button>
     <span class="batch-progress" id="batch-progress"></span>
@@ -118,6 +119,7 @@ const STATUS_ORDER = [
 async function loadFires() {
     const r = await fetch('/api/fires');
     allFires = await r.json();
+    lastFiresJSON = JSON.stringify(allFires);
     buildFilterUI();
     restoreFilterState();
     render();
@@ -159,11 +161,11 @@ function saveFilterState() {
         minSize: document.getElementById('filter-min-size').value,
         sortKey, sortAsc,
     };
-    sessionStorage.setItem('fireFilters', JSON.stringify(state));
+    localStorage.setItem('fireFilters', JSON.stringify(state));
 }
 
 function restoreFilterState() {
-    const raw = sessionStorage.getItem('fireFilters');
+    const raw = localStorage.getItem('fireFilters');
     if (!raw) return false;
     try {
         const s = JSON.parse(raw);
@@ -244,7 +246,7 @@ function resetFilters() {
     document.querySelectorAll('#status-filters input').forEach(cb => {
         statusSet.add(cb.value);
     });
-    sessionStorage.removeItem('fireFilters');
+    localStorage.removeItem('fireFilters');
     render();
 }
 
@@ -315,7 +317,7 @@ function render() {
     updateSelection();
 
     // Save filtered+sorted order for Next/Prev navigation on mapping page
-    sessionStorage.setItem('fireOrder',
+    localStorage.setItem('fireOrder',
         JSON.stringify(filtered.map(f => f.fire_numbe)));
 
     // Update sort arrows
@@ -457,6 +459,8 @@ async function pollBatchStatus() {
             prog.textContent =
                 `${s.completed}/${s.total} done${current}`;
             document.getElementById('batch-bar').style.display = 'flex';
+            document.getElementById('btn-batch-cancel').style.display = '';
+            document.getElementById('btn-batch-map').disabled = true;
             setTimeout(pollBatchStatus, 3000);
         } else {
             batchRunning = false;
@@ -465,12 +469,28 @@ async function pollBatchStatus() {
                 ? `Batch complete. ${errors} error(s).`
                 : 'Batch complete.';
             document.getElementById('btn-batch-map').disabled = false;
+            document.getElementById('btn-batch-cancel').style.display = 'none';
             setTimeout(() => { prog.textContent = ''; updateSelection(); }, 8000);
         }
     } catch {
         batchRunning = false;
         prog.textContent = '';
         document.getElementById('btn-batch-map').disabled = false;
+        document.getElementById('btn-batch-cancel').style.display = 'none';
+    }
+}
+
+async function batchCancel() {
+    if (!confirm('Cancel the running batch?')) return;
+    try {
+        await fetch('/api/batch/cancel', {
+            method: 'POST',
+            headers: {'X-Requested-With': 'fetch'},
+        });
+        document.getElementById('batch-progress').textContent = 'Cancelling...';
+        document.getElementById('btn-batch-cancel').disabled = true;
+    } catch (err) {
+        alert('Failed to cancel: ' + err.message);
     }
 }
 
@@ -608,17 +628,24 @@ async function loadSettings() {
 }
 
 // -----------------------------------------------------------------------
-// Auto-refresh fire list every 5 seconds
+// Auto-refresh fire list every 5 seconds (skip re-render if unchanged)
 // -----------------------------------------------------------------------
+let lastFiresJSON = '';
+
 async function refreshFires() {
     try {
         const r = await fetch('/api/fires');
         const newFires = await r.json();
-        // Update statuses without disrupting filters
-        const statusMap = {};
-        newFires.forEach(f => statusMap[f.fire_numbe] = f);
-        allFires = newFires;
-        render();
+        const newJSON = JSON.stringify(newFires);
+        if (newJSON !== lastFiresJSON) {
+            lastFiresJSON = newJSON;
+            // Preserve scroll position across re-renders
+            const wrap = document.querySelector('.table-wrap');
+            const scrollTop = wrap ? wrap.scrollTop : 0;
+            allFires = newFires;
+            render();
+            if (wrap) wrap.scrollTop = scrollTop;
+        }
     } catch {}
 }
 
@@ -653,6 +680,7 @@ async function checkBatchOnLoad() {
             document.getElementById('batch-bar').style.display = 'flex';
             document.getElementById('selected-count').textContent = 'Batch running';
             document.getElementById('btn-batch-map').disabled = true;
+            document.getElementById('btn-batch-cancel').style.display = '';
             pollBatchStatus();
         }
     } catch {}
