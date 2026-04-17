@@ -18,9 +18,11 @@ Side-channel inputs:
 from misc import sep, args, exists, run, err, parfor, hdr_fn
 import multiprocessing as mp
 import os
+import shutil
 import threading
 import queue
 import time
+import glob
 from collections import Counter
 
 # Extract --N [value] before other argument processing
@@ -46,6 +48,50 @@ EPSG = 3005 if len(args) < 2 else 3347  # BC Albers / Canada LCC
 merge_dates = None
 if exists('.mrap_merge_dates'):
     merge_dates = [x.strip() for x in open('.mrap_merge_dates').readlines()]
+
+
+# ---------------------------------------------------------------------------
+# cleanup helper – remove all intermediate files from /ram/
+# ---------------------------------------------------------------------------
+def cleanup_intermediates():
+    """Remove all resampled intermediates, VRTs, and resample/ folders from /ram/."""
+    removed = 0
+
+    # _resample.bin, _resample.hdr, _resample.bin.aux.xml
+    for pattern in ['*_resample.bin', '*_resample.hdr', '*_resample.bin.aux.xml']:
+        for f in glob.glob(os.path.join('/ram', pattern)):
+            try:
+                os.remove(f)
+                removed += 1
+            except OSError as e:
+                print(f'[CLEANUP] warning: could not remove {f}: {e}', flush=True)
+
+    # .vrt files
+    for f in glob.glob(os.path.join('/ram', '*.vrt')):
+        try:
+            os.remove(f)
+            removed += 1
+        except OSError as e:
+            print(f'[CLEANUP] warning: could not remove {f}: {e}', flush=True)
+
+    # resample/ folder(s)
+    for d in glob.glob(os.path.join('/ram', 'resample')):
+        if os.path.isdir(d):
+            try:
+                shutil.rmtree(d)
+                removed += 1
+            except OSError as e:
+                print(f'[CLEANUP] warning: could not remove {d}: {e}', flush=True)
+
+    return removed
+
+
+# ---------------------------------------------------------------------------
+# startup cleanup – purge stale intermediates before anything else
+# ---------------------------------------------------------------------------
+print('[CLEANUP] removing stale intermediates from /ram/ ...', flush=True)
+n_removed = cleanup_intermediates()
+print(f'[CLEANUP] removed {n_removed} item(s).', flush=True)
 
 # ---------------------------------------------------------------------------
 # detect existing output files in cwd
@@ -200,6 +246,11 @@ def process_job(job):
     for rf in resampled_files:
         if exists(rf):
             os.remove(rf)
+
+    # full sweep of any remaining intermediates (aux.xml, .hdr, .vrt, etc.)
+    n_removed = cleanup_intermediates()
+    if n_removed:
+        print(f'[CLEANUP] post-job sweep for {target_label}: removed {n_removed} item(s)', flush=True)
 
 
 def worker(work_queue):
@@ -389,5 +440,12 @@ for _ in range(N_threads):
 
 for t in threads:
     t.join()
+
+# ---------------------------------------------------------------------------
+# final cleanup – remove any remaining intermediates from /ram/
+# ---------------------------------------------------------------------------
+print('[CLEANUP] final sweep of intermediates from /ram/ ...', flush=True)
+n_removed = cleanup_intermediates()
+print(f'[CLEANUP] removed {n_removed} item(s).', flush=True)
 
 print('[DONE] all jobs complete.', flush=True)
