@@ -1,6 +1,6 @@
 # batch_fire_mapping_web
 
-*Last updated: April 16, 2026*
+*Last updated: April 16, 2026 (v2)*
 
 Interactive web interface for mapping wildfire burn areas from Sentinel-2 satellite imagery. Uses a machine learning pipeline (T-SNE dimensionality reduction, Random Forest classification, HDBSCAN clustering) accelerated on GPU to classify burned vs. unburned pixels, then lets users visually review and accept results through a browser.
 
@@ -104,10 +104,10 @@ python -m batch_fire_mapping_web  POLYGON_FILE  RASTER_FILE  [options]
 
 Authentication is **required by default**. The server will refuse to start without passwords unless `--insecure_no_auth` is explicitly passed. When both an admin and user password are configured, the server enables a two-role system:
 
-- **Admin**: full access. Can approve or block other users' IP addresses via the admin dashboard (`/admin`). Can edit recommended settings. Can trigger batch mapping.
+- **Admin**: full access. Can approve or block other users' IP addresses via the admin dashboard (`/admin`). Can edit recommended settings. Can trigger and cancel batch mapping. Can restore hidden fires.
 - **User**: fire mapping access. Must have their IP approved by an admin before they can see any content.
 
-New user IPs appear as "pending" on the admin dashboard. The admin approves or blocks them. Approved/blocked state persists across server restarts (stored in `access_control.yaml`). Sessions are cookie-based and persist across restarts (stored in `sessions.yaml`).
+New user IPs appear as "pending" on the admin dashboard. The admin approves or blocks them. Approved, blocked, and pending IP state all persist across server restarts (stored in `access_control.yaml`). Sessions are cookie-based and persist across restarts (stored in `sessions.yaml`).
 
 Password rules:
 - `--admin_password` alone enables admin-only mode (no user role).
@@ -127,10 +127,12 @@ With `--insecure_no_auth`, all authentication is bypassed and every user has ful
 A sortable, filterable table of every fire in the shapefile.
 
 - **Columns**: fire number, date, year, size (ha), agreement %, ML area, status.
-- **Filters**: year, fire number (regex), minimum size, status. Filter state persists across page navigation.
-- **Batch actions**: select fires with checkboxes, then "Map Selected (with settings)" to batch-process them, or "Remove Selected" to hide them from the list.
+- **Filters**: year, fire number (regex), minimum size, status. Filter state persists across page navigation, browser tabs, and browser restarts (stored in `localStorage`).
+- **Batch actions**: select fires with checkboxes, then "Map Selected (with settings)" to batch-process them, or "Remove Selected" to hide them from the list. Running batches can be **cancelled** via the Cancel button.
+- **Removing / restoring fires**: removed fires are hidden from the list and persist across restarts. Admins can restore hidden fires from the admin dashboard.
 - **PDF report**: generates a downloadable PDF of all accepted fires.
 - **Status badges**: pending (gray), ready (yellow), mapping (blue), mapped (blue), accepted (green), error (red).
+- **Smart refresh**: the table auto-refreshes every 5 seconds but only re-renders when data has actually changed, preserving scroll position and avoiding visual flicker.
 
 ### Fire mapping page
 
@@ -157,7 +159,7 @@ Collapsible sections for every pipeline parameter:
 - **Random Forest**: estimators, max depth, max features, random state.
 - **HDBSCAN**: controlled ratio, min samples.
 - **Display**: contour width.
-- **Notes**: free-text annotations per fire (e.g., "cloud contamination"). Persisted on accept.
+- **Notes**: free-text annotations per fire (e.g., "cloud contamination"). Persisted immediately on change with visual save confirmation (green border flash).
 
 #### Mapping
 
@@ -184,7 +186,7 @@ When re-mapping a previously accepted fire, the old result appears as a "Previou
 All mapping results live in `.web_cache/` until explicitly accepted. Nothing is written to the canonical output directory until you click Accept. Clicking Accept on a result card:
 - Copies all outputs to the canonical output directory (`<out_dir>/<FIRE_NUMBER>/`).
 - Writes a `_params.yaml` file with the full parameter record and ML area estimate.
-- Logs parameters to `accepted_params.csv` (feeds the learning system).
+- Logs parameters to `accepted_params.csv` (feeds the learning system). Re-accepting a fire replaces its previous CSV entry rather than appending a duplicate.
 - Clears the results gallery and serial cache files.
 - Shows a confirmation dialog if overwriting a previously accepted result.
 
@@ -192,7 +194,7 @@ Re-cropping or re-mapping a previously accepted fire does not affect the accepte
 
 ### Navigation
 
-- **Prev / Next** buttons move through fires in the current filtered/sorted order without returning to the list.
+- **Prev / Next** buttons move through fires in the current filtered/sorted order without returning to the list. Works across browser tabs and bookmarked URLs (navigation order is stored in `localStorage`).
 - **Back to fire list** preserves your filters.
 
 ### GPU queue
@@ -242,7 +244,7 @@ Early on, the system uses defaults from `recommended_settings.yaml`. After enoug
 
 ## Recommended settings
 
-The file `recommended_settings.yaml` defines parameter presets by fire size range. Loaded automatically on startup.
+The file `recommended_settings.yaml` defines parameter presets by fire size range. Loaded automatically on startup from the output directory first, falling back to the package directory for defaults.
 
 ```yaml
 - min_ha: 0
@@ -262,7 +264,7 @@ The file `recommended_settings.yaml` defines parameter presets by fire size rang
     # ... different bands for larger fires
 ```
 
-Admins can view and edit settings in the web UI. Changes are persisted to `recommended_settings.yaml` on save.
+Admins can view and edit settings in the web UI. Changes are persisted to `<out_dir>/recommended_settings.yaml` on save, keeping the package-bundled defaults intact as a fallback.
 
 ---
 
@@ -283,12 +285,14 @@ Admins can view and edit settings in the web UI. Changes are persisted to `recom
 
 ```
 <out_dir>/
+    fire_state.yaml               # Per-fire state (survives restart)
     fire_status.yaml              # Status index for all fires
-    accepted_params.csv           # Parameter log (appended on each Accept)
+    accepted_params.csv           # Parameter log (one row per accepted fire)
     notes.yaml                    # Per-fire notes
-    access_control.yaml           # Approved/blocked IP addresses
+    recommended_settings.yaml     # User-edited settings (overrides package defaults)
+    access_control.yaml           # Approved/blocked/pending IP addresses
     sessions.yaml                 # Persistent login sessions (hashed tokens)
-    .web_cache/                   # Temporary working files (safe to delete)
+    .web_cache/                   # Working files (preserved across re-prepares)
         <FIRE_NUMBER>/
             *_crop.bin / .hdr     # Cropped raster
             *_perimeter.bin       # Rasterized perimeter
@@ -333,13 +337,36 @@ The following security measures are built into the server:
 - **IP normalization**: IPv6-mapped IPv4 addresses (e.g. `::ffff:10.0.0.1`) are normalized to plain IPv4, preventing bypass via address format tricks.
 - **Path traversal prevention**: static file serving, report generation, and fire name handling all validate paths with `os.path.realpath` containment checks.
 - **Parameter validation**: all pipeline parameters are validated against typed bounds before being passed to subprocesses, preventing resource exhaustion via extreme values.
-- **Atomic file writes**: YAML persistence files (sessions, IP access lists, fire status) are written atomically (write to temp file, then `os.replace`) with `0600` permissions to prevent data loss on crash and limit read access.
+- **Atomic file writes**: YAML persistence files (sessions, IP access lists, fire state) are written atomically (write to temp file, then `os.replace`) with `0600` permissions to prevent data loss on crash and limit read access.
 - **Request body limits**: POST bodies are capped at 1 MB; oversized requests receive a 413 response.
 - **Blocked IP enforcement**: blocked IPs are checked before any role-based auto-approve logic, so a blocked IP cannot bypass the block by logging in as admin.
 - **Batch mapping** requires admin role.
 - **Thread safety**: mutable shared state (sessions, console logs, serial results, GPU queue, batch status) is protected by locks to prevent race conditions.
-- **Fixed CSV headers**: `accepted_params.csv` uses a fixed fieldname list, preventing header drift across appends.
+- **Fixed CSV headers**: `accepted_params.csv` uses a fixed fieldname list, preventing header drift across appends. Re-accepting a fire replaces its previous entry rather than appending duplicates.
+- **Structured error logging**: persistence failures (sessions, notes, fire state, settings) are logged to stderr with context rather than silently swallowed.
 - **URL encoding**: all client-side API URLs encode fire names with `encodeURIComponent` to handle special characters safely.
+
+---
+
+## Persistence and crash recovery
+
+The server persists all important state to disk so that work survives restarts and crashes:
+
+| File | What it stores | When it's written |
+|---|---|---|
+| `fire_state.yaml` | Per-fire status, cache paths, parameters, agreement, hidden flags | After every prepare, mapping, accept, and remove/restore |
+| `notes.yaml` | Per-fire text annotations | On every note edit |
+| `accepted_params.csv` | One row per accepted fire (deduplicated on re-accept) | On accept |
+| `access_control.yaml` | Approved, blocked, and pending IPs | On every IP action |
+| `sessions.yaml` | Hashed session tokens | On login/logout |
+| `recommended_settings.yaml` | User-edited parameter presets (in output dir) | On admin save |
+
+On startup, the server:
+1. Loads fires from the shapefile and detects accepted fires by checking for `_comparison.png` on disk.
+2. Restores fire state from `fire_state.yaml` — mapped fires, cache paths, hidden flags, parameters, and agreement scores are all recovered.
+3. Validates that cached files still exist before restoring status. If a fire was mid-mapping when the server crashed, it recovers to MAPPED (if results exist in cache) or READY (if not), rather than being stuck in MAPPING.
+
+The `.web_cache/` directory is no longer wiped on every re-prepare. Cache is only cleared when padding actually changes (which invalidates the crop dimensions). This means un-accepted mapping results survive across page reloads and re-prepares with the same padding.
 
 ---
 
@@ -348,6 +375,7 @@ The following security measures are built into the server:
 - **HDBSCAN non-determinism**: cuML's GPU HDBSCAN does not support a random seed. Identical runs may produce slightly different results due to GPU parallelism. All other stages are seeded and deterministic.
 - **Single GPU queue**: one fire maps at a time. Additional requests queue automatically.
 - **No TLS**: the server uses plaintext HTTP. Use an SSH tunnel or reverse proxy for encrypted access.
+- **Login rate limiting is in-memory**: the 5-attempt rate limit resets on restart. All other security state persists.
 
 ---
 
