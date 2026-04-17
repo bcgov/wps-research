@@ -17,6 +17,19 @@
 
 <div style="padding:16px 24px;display:flex;flex-direction:column;gap:20px">
 
+    <!-- Parameter Analyzer entry point (admin-only tool) -->
+    <div class="admin-card" style="background:#eef5fb;border-color:#93c5fd">
+        <h3>Parameter Analyzer</h3>
+        <p class="admin-desc">
+            Run N parameter sets &times; M HDBSCAN runs on selected fires,
+            review the gallery, and accept multiple results per fire to
+            build a parameter knowledge base. All outputs live under
+            <code>analyzing_parameters/</code> and never touch the
+            user-facing accepted fire directories.
+        </p>
+        <a href="/analyzer" class="btn" style="font-size:12px;padding:6px 14px">Open params_analyzer</a>
+    </div>
+
     <!-- Pending IPs -->
     <div class="admin-card">
         <h3>Pending IPs</h3>

@@ -1,6 +1,6 @@
 # batch_fire_mapping_web
 
-*Last updated: April 16, 2026 (v2)*
+*Last updated: April 17, 2026*
 
 Interactive web interface for mapping wildfire burn areas from Sentinel-2 satellite imagery. Uses a machine learning pipeline (T-SNE dimensionality reduction, Random Forest classification, HDBSCAN clustering) accelerated on GPU to classify burned vs. unburned pixels, then lets users visually review and accept results through a browser.
 
@@ -20,6 +20,7 @@ This is the web companion to the `batch_fire_mapping` CLI. It wraps the same und
    - Accept the best result, which saves it to disk and logs the parameters for future use.
    - Batch-map many fires at once using recommended settings.
 4. **Learns over time**: accepted parameters are logged. Future serial mappings rank parameter sets by how well they performed on similar fires (same region, similar size), so results improve as more fires are processed.
+5. **Parameter Analyzer (admin-only)**: a dedicated high-throughput tool for exploring N parameter sets × M HDBSCAN replicates across selected fires. Admins accept one or more runs per fire; accepted parameters and fire characteristics are logged to a master CSV for offline analysis. All outputs live in a separate `analyzing_parameters/` directory and never touch the user-facing accepted fires.
 
 ---
 
@@ -242,6 +243,149 @@ Early on, the system uses defaults from `recommended_settings.yaml`. After enoug
 
 ---
 
+## Parameter Analyzer (admin-only)
+
+The Parameter Analyzer is a dedicated high-throughput tool for systematically exploring how different parameter combinations perform across many fires. Where the user-facing serial mapping runs one fire at a time and accepts a single best result, the analyzer runs **N parameter sets × M HDBSCAN replicates** across many fires and lets the admin accept **multiple** runs per fire. The accepted parameters plus fire characteristics (region, zone, year, size bucket, crop dimensions, perimeter type) are logged to `analyzer_accepted.csv` for offline statistical analysis.
+
+**Entry point**: admin dashboard → *Open params_analyzer*, or `/analyzer`.
+
+### Why it exists
+
+There is no unique best parameter set. The user-facing workflow accepts one parameter set per fire, so the learning loop ranks by agreement on a per-fire basis. The analyzer is the dataset-building counterpart: for a given fire, several parameter sets may produce acceptable results (e.g. 68% and 69% agreement), and both may be worth keeping. By recording every accept across many fires, the admin can analyze offline which parameter sets tend to work for which kinds of fires (region, size bucket, hint quality, …) rather than relying on the ranker's inference.
+
+### Configuration
+
+The `/analyzer` page lets the admin define:
+
+- **Parameter sets (N)**: any number of sets. Each set contains a full set of pipeline parameters (padding, sample_rate, embed_bands, t-SNE and Random Forest settings, HDBSCAN controlled_ratio/min_samples). Leave a field blank to fall back to the pipeline default. Sets can be seeded from the recommended tiers for a quick start, then tweaked field-by-field.
+- **HDBSCAN runs per set (M)**: how many replicate runs per set, 1-20.
+- **HDBSCAN jitter step**: how much to vary `hdbscan_min_samples` across the M replicates (see below).
+- **Fires to analyze**: multi-select via a rich filter panel (year, region, zone, size bucket, user status, analyzer status, accepted-runs toggle, fire-number regex) with live count preview. Filter state is persisted in `localStorage`.
+- **Description**: free-text label for the config.
+
+Config is persisted to `analyzing_parameters/analyzer_config.yaml` on save.
+
+### HDBSCAN jitter (why replicates need it)
+
+cuML's GPU HDBSCAN has no random seed. For some inputs it is effectively deterministic, which means M replicate runs with byte-identical HDBSCAN parameters produce byte-identical clusters and agreement scores -- useless for statistics. The jitter step automatically perturbs `hdbscan_min_samples` across replicates in a fan-out pattern:
+
+| r | value |
+|---|-------|
+| 0 | base |
+| 1 | base + 1×step |
+| 2 | base − 1×step |
+| 3 | base + 2×step |
+| 4 | base − 2×step |
+| … | … |
+
+Because `hdbscan_min_samples` is **not** part of the t-SNE+RF cache signature, all M jittered replicates share one cached `.npz` and the full pipeline only runs once per (padding, signature) group. Jitter gives you statistical variation at zero speed cost. Set jitter to 0 to run true replicates (may yield identical scores on some GPUs).
+
+### Grouping and caching
+
+The worker plans the grid so runs sharing a padding and a t-SNE+RF signature execute contiguously:
+
+```
+For each (padding, tsne_rf_signature) group:
+  Run 1 of the group: full pipeline (T-SNE + RF + HDBSCAN), --save_state -> cache.npz
+  Runs 2..k of the group: --load_state cache.npz, HDBSCAN only
+```
+
+Example: 4 parameter sets × 3 replicates with jitter=1, where sets A and B share all non-HDBSCAN params (perplexity, bands, …):
+
+- 4 sets × 3 = 12 runs total
+- 3 unique (padding, tsne_rf_signature) groups → **only 3 full pipelines** + 9 HDBSCAN-only re-runs (≈ 10-20× faster than running the grid naively)
+
+### Snapshots and isolation
+
+Each distinct padding gets its own snapshot directory under `.analyzer_cache/<FIRE>/p_<padding>/`. The snapshot is produced by calling the user's `_prepare_fire_sync` under the GPU lock and immediately copying the crop, hint rasters, and preview PNGs into the snapshot. This means a user re-cropping the same fire at a different padding in the main UI cannot disturb analyzer work in progress -- the analyzer runs against its own crop, and writes its classification outputs into its own run subdir.
+
+### Gallery and accepting
+
+Open any fire (via the fires table or the "Currently analyzing" link in the status section) to see its runs gallery:
+
+- Runs are grouped by parameter set, each card showing thumbnail, agreement %, ML area, actual params used (including the jittered `hdbscan_min_samples`).
+- Click a thumbnail to open the full comparison figure in a modal viewer.
+- **Accept** on any card moves that run's outputs into `analyzing_parameters/<FIRE>/run_XXXX/`, appends a row to `analyzer_accepted.csv`, and updates the composite-overlay backdrop if the accepted run has a larger padding than any previously accepted run.
+- **Unaccept** reverses the accept, removes the row, and wipes the canonical fire directory if no accepts remain.
+- Admins can accept multiple runs per fire, or zero. There is no "best run" constraint.
+
+### Composite overlay viewer
+
+Once at least one run is accepted, the per-fire page shows a composite overlay: the biggest-padded accepted crop rendered as the backdrop, with every accepted run's 1-pixel perimeter outline drawn in a distinct color. Outlines are aligned via geotransforms, so a run accepted at padding 0.1 correctly lines up with a backdrop that was saved at padding 0.3. The legend below the image maps colors to `run_XXXX` IDs, agreement scores, and padding values. The backdrop only ever grows -- unaccepting a run never shrinks it, because a bigger backdrop is harmless.
+
+### CSV preview and download
+
+The main analyzer page has two CSV outputs:
+
+- **Accepted runs table**: the full CSV rendered as a sortable table on the page. Click any column header to sort. Toggle columns via the 35-box column picker. Summary chips above the table break down accepts by region / year / size bucket, plus agreement stats (min, median, mean, max). Auto-refreshes every 7 seconds.
+- **Download full CSV**: link in the action bar returns `analyzer_accepted.csv` verbatim for offline pandas / Excel / BigQuery use.
+
+The CSV schema is a superset of the user-facing `accepted_params.csv` -- overlapping parameter column names are identical, so the two files can be unioned offline for combined analysis. Extra analyzer columns: `accept_id`, `set_idx`, `run_idx`, `fire_region`, `fire_zone`, `size_bucket_lo`, `size_bucket_hi`, `perimeter_type`, `crop_w`, `crop_h`, `accepted_at`.
+
+### Resumability and cancel
+
+- Every completed run writes an `agreement.json` sidecar in its run subdir. On re-run, the worker skips any `(set_idx, run_idx)` whose sidecar exists.
+- Grid cells with an accepted twin are also skipped (unaccept to re-run).
+- **Cancel** sets an event flag; the worker finishes its current run, records any partial results, and stops. The fire's status becomes PARTIAL. Re-starting picks up where it left off.
+- The analyzer releases the GPU lock **between** runs (not per-fire), so a regular user can squeeze in a normal mapping while the analyzer is running.
+- Only one analyzer session can be running at a time (enforced in the start endpoint).
+
+### Output directory
+
+The analyzer writes everything under `<out_dir>/analyzing_parameters/`. You can delete the whole directory to start fresh without touching user-accepted fires in `<out_dir>/<FIRE_NUMBER>/` or the user-facing `accepted_params.csv`.
+
+```
+<out_dir>/analyzing_parameters/
+    analyzer_config.yaml              # admin's current config (N sets, M, jitter, fires)
+    analyzer_accepted.csv             # master CSV, one row per accepted run
+    <FIRE>/                           # only exists after at least one accept
+        <FIRE>_crop_max.bin / .hdr    # biggest-padded accepted crop (overlay backdrop)
+        <FIRE>_post_max.png           # post-fire preview at max padding
+        <FIRE>_overlay.png            # composite overlay (rebuilt on demand)
+        <FIRE>_overlay_legend.json    # color -> accept_id legend sidecar
+        manifest.yaml                 # {saved_padding, saved_crop, accepts: [run_0001, ...]}
+        run_0001/                     # one accepted run
+            classified.bin / .hdr
+            comparison.png
+            brush_comparison.png
+            thumb.png
+            params.yaml               # full provenance (fire + grid + params + outcome)
+        run_0002/
+            ...
+    .analyzer_cache/<FIRE>/           # working cache (all N*M runs, accepted or not)
+        p_0.2000/                     # snapshot per padding
+            <FIRE>_crop.bin / .hdr
+            <FIRE>_perimeter.bin
+            VIIRS_*.bin               # only if viirs mode
+            snapshot.json             # crop metadata
+            previews/                 # post.png etc., for thumbnail generation
+            tsne_rf_<sig>.npz         # cached T-SNE + RF intermediate state
+            set_00_run_00/            # per-run outputs
+                classified.bin / .hdr
+                comparison.png
+                thumb.png
+                params.yaml
+                agreement.json        # sidecar (resume marker)
+            set_00_run_01/
+                ...
+        runs.yaml                     # fast-reload cache of in-memory AnalyzerRun list
+```
+
+### Differences from the user-facing workflow
+
+| Aspect | User workflow | Analyzer |
+|---|---|---|
+| Who | any authenticated user | admin only |
+| Accept semantics | one best result replaces prior accept | multiple accepts per fire coexist |
+| Output dir | `<FIRE>/` alongside `.web_cache/<FIRE>/` | `analyzing_parameters/<FIRE>/` + `.analyzer_cache/<FIRE>/` |
+| Param log | `accepted_params.csv` (deduplicated on re-accept) | `analyzer_accepted.csv` (append-only, keyed by `accept_id`) |
+| Parameter selection | one set per run, recommended or learned | N×M grid with automatic HDBSCAN jitter |
+| Purpose | map fires for production output | build parameter-performance dataset for offline analysis |
+
+The two workflows are strictly isolated -- nothing the analyzer does affects the user-accepted `<FIRE>/` directories or `accepted_params.csv`, and vice versa.
+
+---
+
 ## Recommended settings
 
 The file `recommended_settings.yaml` defines parameter presets by fire size range. Loaded automatically on startup from the output directory first, falling back to the package directory for defaults.
@@ -306,9 +450,24 @@ Admins can view and edit settings in the web UI. Changes are persisted to `<out_
         *_comparison.png
         *_brush_comparison.png
         *_params.yaml             # Full parameter record + ML area
+    analyzing_parameters/         # Parameter Analyzer outputs (admin only)
+        analyzer_config.yaml
+        analyzer_accepted.csv
+        <FIRE_NUMBER>/            # Only exists after at least one analyzer accept
+            <FIRE>_crop_max.bin   # Biggest-padded accepted crop (overlay backdrop)
+            <FIRE>_post_max.png
+            <FIRE>_overlay.png    # Composite overlay (rebuilt on demand)
+            manifest.yaml
+            run_0001/             # One accepted run
+            run_0002/
+        .analyzer_cache/          # Working cache, delete-safe
+            <FIRE_NUMBER>/
+                p_<padding>/      # One snapshot per padding
+                    tsne_rf_<sig>.npz    # Cached intermediate state
+                    set_<S>_run_<R>/     # Per-run outputs + sidecar
 ```
 
-Accepted fire directories are compatible with `batch_fire_mapping` CLI output.
+Accepted fire directories are compatible with `batch_fire_mapping` CLI output. The `analyzing_parameters/` tree is self-contained and can be deleted independently -- see the Parameter Analyzer section for full details.
 
 ---
 
@@ -331,7 +490,7 @@ Or place the server behind a TLS-terminating reverse proxy.
 
 The following security measures are built into the server:
 
-- **Session tokens** are hashed (SHA-256) before storage on disk. Raw tokens exist only in browser cookies. Cookies are set with `HttpOnly`, `SameSite=Lax`, and `Secure` flags.
+- **Session tokens** are hashed (SHA-256) before storage on disk. Raw tokens exist only in browser cookies. Cookies are always set with `HttpOnly` and `SameSite=Lax`. The `Secure` flag is added only when the request came in over HTTPS (detected via `X-Forwarded-Proto: https` when `--trust_proxy` is enabled). Over plain HTTP, `Secure` is omitted so cookies survive on non-localhost addresses (e.g. a LAN IP reached over a VPN) -- browsers silently drop `Secure` cookies on plain-HTTP non-localhost hosts, which would otherwise cause an endless redirect back to `/login`.
 - **CSRF protection** on all POST endpoints via Origin header validation and `X-Requested-With` header requirement.
 - **Login rate limiting**: 5 failed attempts per IP per 5-minute window.
 - **IP normalization**: IPv6-mapped IPv4 addresses (e.g. `::ffff:10.0.0.1`) are normalized to plain IPv4, preventing bypass via address format tricks.
@@ -360,22 +519,31 @@ The server persists all important state to disk so that work survives restarts a
 | `access_control.yaml` | Approved, blocked, and pending IPs | On every IP action |
 | `sessions.yaml` | Hashed session tokens | On login/logout |
 | `recommended_settings.yaml` | User-edited parameter presets (in output dir) | On admin save |
+| `analyzing_parameters/analyzer_config.yaml` | Analyzer config (N sets, M, jitter, fires) | On analyzer save |
+| `analyzing_parameters/analyzer_accepted.csv` | One row per accepted analyzer run (append-only) | On analyzer accept |
+| `analyzing_parameters/<FIRE>/manifest.yaml` | Per-fire accept list + max-crop tracking | On analyzer accept/unaccept |
+| `.analyzer_cache/<FIRE>/runs.yaml` | Fast-reload cache of the in-memory runs list | After every run completes |
 
 On startup, the server:
 1. Loads fires from the shapefile and detects accepted fires by checking for `_comparison.png` on disk.
 2. Restores fire state from `fire_state.yaml` — mapped fires, cache paths, hidden flags, parameters, and agreement scores are all recovered.
 3. Validates that cached files still exist before restoring status. If a fire was mid-mapping when the server crashed, it recovers to MAPPED (if results exist in cache) or READY (if not), rather than being stuck in MAPPING.
+4. Initializes the Parameter Analyzer: loads `analyzer_config.yaml`, scans `analyzing_parameters/<FIRE>/` directories to reconstruct accepted-run state, and scans `.analyzer_cache/<FIRE>/` for un-accepted (pending or partial) run sidecars. Fires that had analyzer data on disk return to ANALYZED or PARTIAL status accordingly.
 
 The `.web_cache/` directory is no longer wiped on every re-prepare. Cache is only cleared when padding actually changes (which invalidates the crop dimensions). This means un-accepted mapping results survive across page reloads and re-prepares with the same padding.
+
+The `.analyzer_cache/` directory is never wiped automatically — un-accepted analyzer runs survive across restarts so the admin can resume or reaccept without re-running the grid. Delete the whole `analyzing_parameters/` tree to start fresh; nothing in the user workflow depends on it.
 
 ---
 
 ## Known limitations
 
-- **HDBSCAN non-determinism**: cuML's GPU HDBSCAN does not support a random seed. Identical runs may produce slightly different results due to GPU parallelism. All other stages are seeded and deterministic.
-- **Single GPU queue**: one fire maps at a time. Additional requests queue automatically.
-- **No TLS**: the server uses plaintext HTTP. Use an SSH tunnel or reverse proxy for encrypted access.
+- **HDBSCAN non-determinism**: cuML's GPU HDBSCAN does not support a random seed. Identical runs *may* produce slightly different results due to GPU parallelism, but for some inputs the GPU is effectively deterministic. All other pipeline stages are seeded and deterministic. The Parameter Analyzer works around this by jittering `hdbscan_min_samples` across replicates (see the jitter section above).
+- **Single GPU queue**: one fire maps at a time. Additional requests queue automatically. The analyzer releases the GPU lock between runs so user mappings can interleave.
+- **No TLS**: the server uses plaintext HTTP. Use an SSH tunnel or reverse proxy for encrypted access. Cookies omit the `Secure` flag on plain HTTP so that login works over VPN / LAN IPs (see the security section); `Secure` is added back automatically when running behind an HTTPS-terminating proxy with `--trust_proxy`.
 - **Login rate limiting is in-memory**: the 5-attempt rate limit resets on restart. All other security state persists.
+- **Analyzer disk usage grows with grid size**: every completed run stores a classification `.bin`, comparison PNG, and thumbnail (typically ~5-50 MB per run). A grid of 2500 runs can consume many GB. Delete the `.analyzer_cache/<FIRE>/` tree for a fire once you have accepted everything you want; the accepted results live in `analyzing_parameters/<FIRE>/run_XXXX/` and are unaffected.
+- **Analyzer concurrency**: only one analyzer session runs at a time (enforced server-side). Only admins can start one.
 
 ---
 
@@ -383,14 +551,20 @@ The `.web_cache/` directory is no longer wiped on every re-prepare. Cache is onl
 
 | File | Purpose |
 |---|---|
-| `__main__.py` | Entry point. Parses arguments, loads data, initializes state, starts server. |
+| `__main__.py` | Entry point. Parses arguments, loads data, initializes state, starts server, registers analyzer routes. |
 | `app.py` | Web server, all route handlers, mapping orchestration, template rendering. |
 | `state.py` | Data classes for per-fire state (`FireInfo`) and global app state (`AppState`). |
 | `preview.py` | ENVI header parsing, band detection, preview PNG generation. |
+| `analyzer_state.py` | Analyzer data classes (`AnalyzerRun`, `AnalyzerFireInfo`, `AnalyzerConfig`, `AnalyzerState`), the 35-column CSV schema, and the list of parameter keys that invalidate the t-SNE+RF cache. |
+| `analyzer_app.py` | Analyzer route handlers and admin gate. Registers its routes on `FireHandler` via monkey-patching so `app.py` stays untouched. Config read/write, fires list, status, per-fire gallery, run images, accept/unaccept, CSV preview/download, composite overlay. |
+| `analyzer_worker.py` | Grid planner (padding-grouped → signature-grouped → run_idx), HDBSCAN jitter, snapshot preparer, per-run subprocess launcher, sidecar-based resume, cancel event, startup cache scan. |
+| `analyzer_accept.py` | Accept/unaccept logic: promote a cached run to `analyzing_parameters/<FIRE>/run_XXXX/`, append / remove CSV row, maintain `manifest.yaml`, grow `<FIRE>_crop_max.bin` backdrop only when accepted padding exceeds saved padding. |
 | `templates/fire_list.html` | Fire list page template. |
 | `templates/fire_mapping.html` | Fire mapping page template (image viewer, parameters, console, results gallery). |
 | `templates/login.html` | Login page template. |
-| `templates/admin.html` | Admin dashboard template. |
+| `templates/admin.html` | Admin dashboard template. Entry point to the analyzer. |
 | `templates/pending.html` | IP approval waiting page template. |
+| `templates/analyzer.html` | Analyzer main page: status, param-set editor, fire selector with rich filters, accepted-runs CSV preview table. |
+| `templates/analyzer_fire.html` | Per-fire analyzer gallery: composite overlay viewer, worker console, runs grouped by set with accept/unaccept. |
 | `static/style.css` | All CSS styles. |
 | `recommended_settings.yaml` | Default parameter presets by fire size range. |

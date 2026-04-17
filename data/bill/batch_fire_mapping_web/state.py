@@ -132,6 +132,11 @@ class AppState:
         # Login rate limiting  {ip: [timestamp, ...]}
         self.login_attempts: dict = {}
 
+        # Parameter analyzer (admin-only). Populated by analyzer_app.init_analyzer().
+        # Kept as a generic attribute so analyzer_state.py does not need to be
+        # imported here — keeps state.py free of analyzer dependencies.
+        self.analyzer = None
+
     def init_fires_from_gdf(self):
         """Populate fires dict from the loaded GeoDataFrame."""
         import re as _re

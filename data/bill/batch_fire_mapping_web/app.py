@@ -2268,11 +2268,18 @@ class FireHandler(BaseHTTPRequestHandler):
             }
         _save_sessions()
 
-        # Set cookie and redirect to home
-        # Add Secure flag when not on localhost (browser ignores
-        # Secure on localhost anyway, so always including it is safe)
+        # Set cookie and redirect to home. The Secure flag is only
+        # valid over HTTPS — browsers silently drop Secure cookies on
+        # plain-HTTP non-localhost connections (e.g. LAN IPs reached
+        # over a VPN), which manifests as an endless bounce back to
+        # /login despite a correct password. Detect HTTPS via proxy
+        # header when --trust_proxy is set; otherwise omit Secure.
+        secure_flag = ''
+        xfp = self.headers.get('X-Forwarded-Proto', '').lower()
+        if state.trust_proxy and xfp == 'https':
+            secure_flag = 'Secure; '
         cookie = (f'session={raw_token}; HttpOnly; SameSite=Lax; '
-                  f'Secure; Path=/; Max-Age={_SESSION_MAX_AGE}')
+                  f'{secure_flag}Path=/; Max-Age={_SESSION_MAX_AGE}')
         self.send_response(302)
         self.send_header('Location', '/')
         self.send_header('Set-Cookie', cookie)

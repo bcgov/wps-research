@@ -1,0 +1,1265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Parameter Analyzer — Admin</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .analyzer-header {
+            padding: 14px 24px;
+            background: #eef5fb;
+            border-bottom: 1px solid #cbd5e1;
+        }
+        .analyzer-header h2 {
+            margin: 0 0 4px 0;
+            font-size: 18px;
+        }
+        .analyzer-header .meta {
+            font-size: 12px;
+            color: #475569;
+        }
+        .analyzer-section {
+            margin: 14px 24px;
+            padding: 12px 14px;
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-radius: 4px;
+        }
+        .analyzer-section h3 {
+            margin: 0 0 8px 0;
+            font-size: 14px;
+            text-transform: uppercase;
+            color: #334155;
+        }
+        .analyzer-kv {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 4px 14px;
+            font-size: 12px;
+        }
+        .analyzer-kv .k { color: #64748b; }
+        .analyzer-kv .v { color: #0f172a; font-family: monospace; }
+        .param-set {
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            background: #fafafa;
+        }
+        .param-set-header {
+            padding: 8px 12px;
+            background: #f1f5f9;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .param-set-header .caret { font-family: monospace; color: #64748b; }
+        .param-set.open .caret::before { content: '▼ '; }
+        .param-set:not(.open) .caret::before { content: '▶ '; }
+        .param-set:not(.open) .param-set-body { display: none; }
+        .param-set-title { font-weight: 600; font-size: 13px; flex: 1; }
+        .param-set-digest {
+            font-family: monospace;
+            font-size: 11px;
+            color: #475569;
+            max-width: 60%;
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+        }
+        .param-set-body {
+            padding: 12px;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+            gap: 8px 14px;
+        }
+        .param-field { display: flex; flex-direction: column; font-size: 11px; }
+        .param-field label { color: #475569; margin-bottom: 2px; }
+        .param-field input, .param-field select {
+            font-size: 12px;
+            padding: 3px 6px;
+            border: 1px solid #cbd5e1;
+            border-radius: 2px;
+            font-family: monospace;
+        }
+        .seed-bar { margin-bottom: 8px; font-size: 11px; color: #475569; }
+        .seed-bar button {
+            font-size: 11px;
+            padding: 2px 8px;
+            margin: 0 4px 4px 0;
+        }
+        /* Rich filter panel */
+        .ffp {
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            background: #fafafa;
+        }
+        .ffp-header {
+            padding: 6px 12px;
+            background: #eef2f7;
+            border-bottom: 1px solid #cbd5e1;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 12px;
+        }
+        .ffp-header .count { font-weight: 600; color: #1e40af; }
+        .ffp-body {
+            padding: 10px 12px;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 10px 14px;
+        }
+        .ff-group { display: flex; flex-direction: column; font-size: 11px; gap: 4px; }
+        .ff-group > label.title {
+            font-weight: 600;
+            color: #334155;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            font-size: 10px;
+        }
+        .ff-group input[type="text"],
+        .ff-group input[type="number"] {
+            font-size: 12px;
+            padding: 3px 6px;
+            border: 1px solid #cbd5e1;
+            border-radius: 2px;
+            font-family: monospace;
+        }
+        .ff-checks {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 3px 8px;
+        }
+        .ff-checks label {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            font-family: monospace;
+            font-size: 11px;
+            padding: 1px 6px;
+            border: 1px solid transparent;
+            border-radius: 2px;
+            cursor: pointer;
+        }
+        .ff-checks label:hover { background: #eef2f7; }
+        .ff-checks input[type="checkbox"] {
+            margin: 0;
+            transform: scale(0.9);
+        }
+        .ff-range { display: flex; gap: 4px; align-items: center; }
+        .ff-range input { width: 80px; }
+        .ff-bucket-row { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 2px; }
+        .ff-bucket {
+            font-size: 10px;
+            padding: 1px 7px;
+            border: 1px solid #cbd5e1;
+            background: #fff;
+            border-radius: 2px;
+            cursor: pointer;
+            font-family: monospace;
+        }
+        .ff-bucket:hover { background: #eef2f7; }
+        .ff-bucket.active {
+            background: #1e40af;
+            color: #fff;
+            border-color: #1e40af;
+        }
+        .ff-actions {
+            padding: 6px 12px;
+            border-top: 1px solid #e2e8f0;
+            background: #f8fafc;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            font-size: 11px;
+            color: #64748b;
+        }
+        .ff-mini-btn {
+            font-size: 11px;
+            padding: 2px 8px;
+        }
+        .ff-sort select {
+            font-size: 11px;
+            padding: 2px 6px;
+            border: 1px solid #cbd5e1;
+        }
+        .fire-table-wrap {
+            max-height: 360px;
+            overflow-y: auto;
+            border: 1px solid #e2e8f0;
+        }
+        .fire-table-wrap table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+        .fire-table-wrap th, .fire-table-wrap td {
+            padding: 4px 8px;
+            border-bottom: 1px solid #f1f5f9;
+            text-align: left;
+        }
+        .fire-table-wrap thead th {
+            background: #f8fafc;
+            position: sticky;
+            top: 0;
+        }
+        .action-bar {
+            margin-top: 10px;
+            padding: 10px 14px;
+            background: #fff7ed;
+            border: 1px solid #fdba74;
+            border-radius: 4px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .save-msg {
+            font-size: 12px;
+            color: #15803d;
+            margin-left: 8px;
+        }
+        .error-msg-inline {
+            font-size: 12px;
+            color: #b91c1c;
+            margin-left: 8px;
+        }
+        .m-runs-input {
+            font-size: 13px;
+            padding: 3px 8px;
+            border: 1px solid #cbd5e1;
+            width: 70px;
+        }
+        .a-status-badge {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            padding: 2px 7px;
+            border-radius: 2px;
+            font-family: monospace;
+        }
+        .a-status-pending    { background: #e5e7eb; color: #475569; }
+        .a-status-analyzing  { background: #dbeafe; color: #1d4ed8; }
+        .a-status-analyzed   { background: #dcfce7; color: #166534; }
+        .a-status-partial    { background: #fef9c3; color: #854d0e; }
+        .a-status-error      { background: #fee2e2; color: #b91c1c; }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>Parameter Analyzer</h1>
+    <span class="subtitle">
+        {{ raster_name }} &middot; {{ polygon_name }}
+    </span>
+    <a href="/" class="back-link">Back to fire list</a>
+    <a href="/admin" class="btn" style="font-size:11px;padding:3px 10px">Admin</a>
+    <a href="/logout" class="btn btn-secondary" style="font-size:11px;padding:3px 10px">Logout</a>
+    <img src="/static/BC-Wildfire-Service-logo.png" alt="BC Wildfire Service" class="header-logo">
+</header>
+
+<div class="analyzer-header">
+    <h2>Parameter grid exploration</h2>
+    <div class="meta">
+        Runs <strong>N parameter sets &times; M HDBSCAN runs</strong> on selected fires.
+        All outputs live under <code>{{ analyzer_root }}</code> — the user-facing accepted
+        fires are never touched by this tool.
+    </div>
+</div>
+
+<!-- Status bar -->
+<div class="analyzer-section">
+    <h3>Status</h3>
+    <div class="analyzer-kv" id="status-kv">
+        <span class="k">Loading...</span><span class="v"></span>
+    </div>
+</div>
+
+<!-- Global settings -->
+<div class="analyzer-section">
+    <h3>Global settings</h3>
+    <div style="display:flex;gap:20px;align-items:end;flex-wrap:wrap">
+        <div style="display:flex;flex-direction:column">
+            <label style="font-size:11px;color:#475569">HDBSCAN runs per set (M)</label>
+            <input type="number" id="m-runs" class="m-runs-input" min="1" max="20" value="3">
+        </div>
+        <div style="display:flex;flex-direction:column">
+            <label style="font-size:11px;color:#475569">HDBSCAN jitter step</label>
+            <input type="number" id="m-run-jitter" class="m-runs-input" min="0" max="50" value="1">
+        </div>
+        <div style="display:flex;flex-direction:column;flex:1;min-width:240px">
+            <label style="font-size:11px;color:#475569">Description (optional)</label>
+            <input type="text" id="description" style="font-size:12px;padding:3px 8px;border:1px solid #cbd5e1"
+                placeholder="e.g. 'varying perplexity on large C-region fires'">
+        </div>
+    </div>
+    <div style="font-size:11px;color:#64748b;margin-top:6px;line-height:1.4">
+        <strong>Jitter</strong> varies <code>hdbscan_min_samples</code> slightly across the M replicates
+        so they produce different agreement scores (cuML HDBSCAN on GPU has no random seed — identical
+        inputs can yield identical clusters). For base=20 with M=3 and jitter=1, runs use [20, 21, 19].
+        Set jitter=0 to run true replicates (may yield identical scores).
+        Jitter keeps the t-SNE+RF cache valid, so all M runs still share one cached embedding.
+    </div>
+</div>
+
+<!-- Param sets -->
+<div class="analyzer-section">
+    <h3>Parameter sets (N) <span id="set-count" style="font-size:11px;color:#64748b"></span></h3>
+    <div class="seed-bar">
+        Seed a new set from a recommended tier:
+        <span id="seed-buttons"></span>
+        <button class="btn" onclick="addParamSet(null)">+ Blank</button>
+    </div>
+    <div id="param-sets-container"></div>
+    <div style="margin-top:8px;font-size:11px;color:#64748b">
+        Leave any field blank to fall back to the pipeline default.
+        Runs that share the same non-HDBSCAN params reuse one cached t-SNE+RF
+        computation — vary HDBSCAN params freely without a speed penalty.
+    </div>
+</div>
+
+<!-- Fire selection -->
+<div class="analyzer-section">
+    <h3>Fires <span id="fire-count" style="font-size:11px;color:#64748b"></span></h3>
+
+    <!-- Rich filter panel (auto-applies on change) -->
+    <div class="ffp">
+        <div class="ffp-header">
+            <span>Filters</span>
+            <span>—</span>
+            <span class="count" id="filter-count">0 visible</span>
+            <span style="flex:1"></span>
+            <button class="btn btn-secondary ff-mini-btn" onclick="resetFireFilter()">Reset</button>
+        </div>
+        <div class="ffp-body">
+            <!-- Year -->
+            <div class="ff-group">
+                <label class="title">Year</label>
+                <div class="ff-checks" id="ff-year-checks"></div>
+            </div>
+
+            <!-- Region (first letter of fire_numbe) -->
+            <div class="ff-group">
+                <label class="title">Region</label>
+                <div class="ff-checks" id="ff-region-checks"></div>
+            </div>
+
+            <!-- Zone (first 2 chars) -->
+            <div class="ff-group">
+                <label class="title">Zone</label>
+                <div class="ff-checks" id="ff-zone-checks"></div>
+            </div>
+
+            <!-- Size range -->
+            <div class="ff-group">
+                <label class="title">Size (ha)</label>
+                <div class="ff-range">
+                    <input type="number" id="ff-min-size" step="any" min="0" placeholder="min" oninput="applyFireFilter()">
+                    <span>–</span>
+                    <input type="number" id="ff-max-size" step="any" min="0" placeholder="max" oninput="applyFireFilter()">
+                </div>
+                <div class="ff-bucket-row" id="ff-bucket-row"></div>
+            </div>
+
+            <!-- User status (from main fire workflow) -->
+            <div class="ff-group">
+                <label class="title">User status</label>
+                <div class="ff-checks" id="ff-user-status-checks"></div>
+            </div>
+
+            <!-- Analyzer status (separate from user status) -->
+            <div class="ff-group">
+                <label class="title">Analyzer status</label>
+                <div class="ff-checks" id="ff-ana-status-checks"></div>
+            </div>
+
+            <!-- Accepted runs -->
+            <div class="ff-group">
+                <label class="title">Accepted runs</label>
+                <div class="ff-checks">
+                    <label><input type="checkbox" id="ff-only-has-accepts" onchange="applyFireFilter()"> has accepts (≥1)</label>
+                    <label><input type="checkbox" id="ff-only-no-accepts" onchange="applyFireFilter()"> no accepts (0)</label>
+                </div>
+            </div>
+
+            <!-- Fire number regex -->
+            <div class="ff-group">
+                <label class="title">Fire number (regex)</label>
+                <input type="text" id="ff-number" placeholder="e.g. ^C11 or C1[12]\d+" oninput="applyFireFilter()">
+            </div>
+
+            <!-- Sort -->
+            <div class="ff-group ff-sort">
+                <label class="title">Sort by</label>
+                <select id="ff-sort" onchange="applyFireFilter()">
+                    <option value="size_desc">Size (largest first)</option>
+                    <option value="size_asc">Size (smallest first)</option>
+                    <option value="year_desc">Year (newest first)</option>
+                    <option value="year_asc">Year (oldest first)</option>
+                    <option value="numbe_asc">Fire number (A→Z)</option>
+                    <option value="numbe_desc">Fire number (Z→A)</option>
+                    <option value="accepts_desc">Accepted runs (most first)</option>
+                </select>
+            </div>
+        </div>
+        <div class="ff-actions">
+            <button class="btn ff-mini-btn" onclick="selectAllFiltered()">Select all filtered</button>
+            <button class="btn btn-secondary ff-mini-btn" onclick="invertSelection()">Invert selection</button>
+            <button class="btn btn-secondary ff-mini-btn" onclick="clearSelection()">Clear selection</button>
+            <span style="flex:1"></span>
+            <span id="selection-count"></span>
+        </div>
+    </div>
+    <div class="fire-table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th style="width:30px"></th>
+                    <th>Fire #</th>
+                    <th>Year</th>
+                    <th>Size (ha)</th>
+                    <th>User status</th>
+                    <th>Analyzer status</th>
+                    <th>Runs accepted</th>
+                    <th>Open gallery</th>
+                </tr>
+            </thead>
+            <tbody id="fires-tbody"></tbody>
+        </table>
+    </div>
+    <div style="font-size:11px;color:#64748b;margin-top:6px">
+        Click <strong>Open</strong> on any fire to review its gallery and accept/unaccept individual runs.
+        Gallery populates as the worker progresses — no need to wait for the full grid to finish.
+    </div>
+</div>
+
+<!-- Action bar -->
+<div class="action-bar">
+    <button class="btn btn-success" onclick="saveConfig()">Save Config</button>
+    <button class="btn" onclick="startAnalyzer()" id="btn-start">Run Analyzing</button>
+    <button class="btn btn-danger" onclick="cancelAnalyzer()" id="btn-cancel" style="display:none">Cancel</button>
+    <a class="btn btn-secondary" href="/api/analyzer/csv" download>Download full CSV</a>
+    <span id="save-msg"></span>
+</div>
+
+<!-- Accepted runs preview (table + summary) -->
+<div class="analyzer-section">
+    <h3>
+        Accepted runs
+        <span id="accepted-summary" style="font-size:11px;color:#475569;font-weight:normal;margin-left:8px"></span>
+    </h3>
+
+    <!-- Per-dimension summary chips -->
+    <div id="accepted-chips" style="margin-bottom:10px;font-size:11px;display:flex;gap:14px;flex-wrap:wrap"></div>
+
+    <!-- Column picker -->
+    <div style="font-size:11px;color:#475569;margin-bottom:6px">
+        Columns:
+        <span id="csv-col-picker" style="display:inline-flex;flex-wrap:wrap;gap:4px 10px;vertical-align:middle"></span>
+    </div>
+
+    <!-- Preview table -->
+    <div class="fire-table-wrap" style="max-height:360px">
+        <table id="csv-preview-table">
+            <thead><tr id="csv-preview-thead-row"></tr></thead>
+            <tbody id="csv-preview-tbody"></tbody>
+        </table>
+    </div>
+    <div id="csv-preview-empty" style="display:none;font-size:12px;color:#64748b;padding:10px">
+        No accepted runs yet. Open a fire's gallery and click <strong>Accept</strong> on any run to populate this table.
+    </div>
+</div>
+
+<script>
+// ------------------------------------------------------------------
+// State
+// ------------------------------------------------------------------
+let PARAM_KEYS = [];
+let SEEDS = [];
+let allFires = [];
+let selectedFires = new Set();
+let paramSets = [];
+
+// Parameter field metadata: type, choices, placeholder.
+const PARAM_META = {
+    'padding':               {type: 'number', step: '0.01', min: '0', placeholder: '0.1'},
+    'sample_rate':           {type: 'number', step: '0.01', min: '0', max: '1', placeholder: '0.5'},
+    'min_samples':           {type: 'number', step: '1', min: '1', placeholder: '500'},
+    'max_samples':           {type: 'number', step: '1', min: '1', placeholder: '30000'},
+    'seed':                  {type: 'number', step: '1', min: '0', placeholder: '123'},
+    'embed_bands':           {type: 'text', placeholder: 'e.g. 4,5,6,7,8,9,10,11,12'},
+    'tsne_perplexity':       {type: 'number', step: '0.1', min: '1', placeholder: '60'},
+    'tsne_learning_rate':    {type: 'number', step: '1', min: '1', placeholder: '200'},
+    'tsne_max_iter':         {type: 'number', step: '1', min: '100', placeholder: '2000'},
+    'tsne_init':             {type: 'select', choices: ['', 'pca', 'random'], placeholder: 'pca'},
+    'tsne_n_components':     {type: 'number', step: '1', min: '2', max: '3', placeholder: '2'},
+    'tsne_random_state':     {type: 'number', step: '1', min: '0', placeholder: '42'},
+    'rf_n_estimators':       {type: 'number', step: '1', min: '1', placeholder: '100'},
+    'rf_max_depth':          {type: 'number', step: '1', min: '1', placeholder: '15'},
+    'rf_max_features':       {type: 'select', choices: ['', 'sqrt', 'log2', 'auto'], placeholder: 'sqrt'},
+    'rf_random_state':       {type: 'number', step: '1', min: '0', placeholder: '42'},
+    'controlled_ratio':      {type: 'number', step: '0.01', min: '0.01', placeholder: '0.5'},
+    'hdbscan_min_samples':   {type: 'number', step: '1', min: '1', placeholder: '20'},
+    'contour_width':         {type: 'number', step: '0.1', min: '0', placeholder: '1'},
+};
+
+// Which param keys qualify as "HDBSCAN varies only" markers — used for
+// a friendly "digest" summary on the collapsed header.
+const HDBSCAN_KEYS = new Set(['controlled_ratio', 'hdbscan_min_samples']);
+
+// ------------------------------------------------------------------
+// Init
+// ------------------------------------------------------------------
+async function init() {
+    await loadConfig();
+    await loadFires();
+    await loadStatus();
+    await loadCsvPreview();
+    renderSeedButtons();
+    renderParamSets();
+    renderFires();
+    setInterval(loadStatus, 5000);
+    setInterval(loadCsvPreview, 7000);
+}
+
+// ------------------------------------------------------------------
+// CSV preview (accepted runs table)
+// ------------------------------------------------------------------
+let csvRows = [];
+let csvFieldnames = [];
+let csvSummary = {};
+// Default visible columns — chosen for at-a-glance review. Admin can
+// toggle more via the picker.
+const CSV_DEFAULT_COLS = [
+    'fire_numbe', 'accept_id', 'set_idx', 'run_idx',
+    'agreement_pct', 'ml_area_ha',
+    'padding', 'hdbscan_min_samples', 'controlled_ratio',
+    'tsne_perplexity', 'embed_bands',
+    'fire_year', 'fire_size_ha', 'fire_region',
+    'accepted_at',
+];
+let csvVisibleCols = new Set(CSV_DEFAULT_COLS);
+let csvSortCol = 'accepted_at';
+let csvSortAsc = false;
+
+async function loadCsvPreview() {
+    try {
+        const r = await fetch('/api/analyzer/csv/preview');
+        if (!r.ok) return;
+        const data = await r.json();
+        csvRows = data.rows || [];
+        csvFieldnames = data.fieldnames || [];
+        csvSummary = data.summary || {};
+        renderAcceptedSummary();
+        renderCsvColumnPicker();
+        renderCsvTable();
+    } catch (e) {}
+}
+
+function renderAcceptedSummary() {
+    const s = csvSummary;
+    const total = s.total_accepted || 0;
+    const uf = s.unique_fires || 0;
+    const fwar = s.fires_with_any_run || 0;
+    const fa = s.fires_analyzed || 0;
+
+    const parts = [];
+    parts.push(`<strong>${total}</strong> accepted perimeter${total === 1 ? '' : 's'}`);
+    parts.push(`across <strong>${uf}</strong> fire${uf === 1 ? '' : 's'}`);
+    if (fa || fwar) {
+        parts.push(`(${fa} fully analyzed, ${fwar} with runs on disk)`);
+    }
+    if (s.agreement_stats && s.agreement_stats.mean !== undefined) {
+        parts.push(`· agreement mean <strong>${s.agreement_stats.mean}%</strong>, median ${s.agreement_stats.median}%, range ${s.agreement_stats.min}–${s.agreement_stats.max}%`);
+    }
+    document.getElementById('accepted-summary').innerHTML = parts.join(' ');
+
+    // Breakdown chips (region / year / bucket)
+    const chips = [];
+    const mkChip = (label, obj) => {
+        if (!obj || !Object.keys(obj).length) return '';
+        const parts = Object.entries(obj)
+            .sort((a, b) => b[1] - a[1])
+            .map(([k, v]) => `<code>${escapeHTML(k)}</code>&nbsp;${v}`).join(' &middot; ');
+        return `<div><span style="color:#64748b;text-transform:uppercase;letter-spacing:.04em;font-size:10px">${label}</span><br>${parts}</div>`;
+    };
+    chips.push(mkChip('By region', s.per_region));
+    chips.push(mkChip('By year', s.per_year));
+    chips.push(mkChip('By size bucket', s.per_size_bucket));
+    document.getElementById('accepted-chips').innerHTML = chips.filter(Boolean).join('');
+}
+
+function renderCsvColumnPicker() {
+    const box = document.getElementById('csv-col-picker');
+    if (!csvFieldnames.length) { box.innerHTML = ''; return; }
+    box.innerHTML = csvFieldnames.map(col =>
+        `<label style="font-size:11px;font-family:monospace">
+            <input type="checkbox" value="${escapeAttr(col)}"
+                ${csvVisibleCols.has(col) ? 'checked' : ''}
+                onchange="toggleCsvCol('${escapeAttr(col)}')">${escapeHTML(col)}
+         </label>`
+    ).join('');
+}
+
+function toggleCsvCol(col) {
+    if (csvVisibleCols.has(col)) csvVisibleCols.delete(col);
+    else csvVisibleCols.add(col);
+    renderCsvTable();
+}
+
+function setCsvSort(col) {
+    if (csvSortCol === col) csvSortAsc = !csvSortAsc;
+    else { csvSortCol = col; csvSortAsc = false; }
+    renderCsvTable();
+}
+
+function renderCsvTable() {
+    const thead = document.getElementById('csv-preview-thead-row');
+    const tbody = document.getElementById('csv-preview-tbody');
+    const empty = document.getElementById('csv-preview-empty');
+    const table = document.getElementById('csv-preview-table');
+
+    if (!csvRows.length) {
+        thead.innerHTML = '';
+        tbody.innerHTML = '';
+        empty.style.display = '';
+        table.style.display = 'none';
+        return;
+    }
+    empty.style.display = 'none';
+    table.style.display = '';
+
+    // Preserve configured order; filter to visible set.
+    const cols = csvFieldnames.filter(c => csvVisibleCols.has(c));
+
+    thead.innerHTML = cols.map(c => {
+        const arrow = csvSortCol === c ? (csvSortAsc ? ' ▲' : ' ▼') : '';
+        return `<th style="white-space:nowrap;cursor:pointer;user-select:none"
+                    onclick="setCsvSort('${escapeAttr(c)}')">${escapeHTML(c)}${arrow}</th>`;
+    }).join('');
+
+    // Sort rows
+    const numericCols = new Set([
+        'set_idx', 'run_idx', 'agreement_pct', 'ml_area_ha',
+        'padding', 'sample_rate', 'min_samples', 'max_samples',
+        'fire_year', 'fire_size_ha', 'size_bucket_lo', 'size_bucket_hi',
+        'crop_w', 'crop_h',
+        'tsne_perplexity', 'tsne_learning_rate', 'tsne_max_iter',
+        'tsne_n_components', 'tsne_random_state',
+        'controlled_ratio', 'hdbscan_min_samples',
+        'rf_n_estimators', 'rf_max_depth', 'rf_random_state',
+        'contour_width', 'seed',
+    ]);
+    const sorted = [...csvRows].sort((a, b) => {
+        let va = a[csvSortCol];
+        let vb = b[csvSortCol];
+        if (numericCols.has(csvSortCol)) {
+            va = parseFloat(va); vb = parseFloat(vb);
+            if (isNaN(va)) va = -Infinity;
+            if (isNaN(vb)) vb = -Infinity;
+        } else {
+            va = (va ?? '').toString();
+            vb = (vb ?? '').toString();
+        }
+        if (va < vb) return csvSortAsc ? -1 : 1;
+        if (va > vb) return csvSortAsc ? 1 : -1;
+        return 0;
+    });
+
+    tbody.innerHTML = sorted.map(row => {
+        const cells = cols.map(c => {
+            let v = row[c] || '';
+            if (c === 'fire_numbe' && v) {
+                v = `<a href="/analyzer/fire/${encodeURIComponent(v)}">${escapeHTML(v)}</a>`;
+                return `<td style="font-family:monospace;white-space:nowrap">${v}</td>`;
+            }
+            if (c === 'agreement_pct' && v) {
+                const n = parseFloat(v);
+                let color = '#1e40af';
+                if (n >= 70) color = '#15803d';
+                else if (n < 30) color = '#b91c1c';
+                return `<td style="font-family:monospace;color:${color};font-weight:600">${escapeHTML(String(v))}</td>`;
+            }
+            return `<td style="font-family:monospace;white-space:nowrap">${escapeHTML(String(v))}</td>`;
+        }).join('');
+        return `<tr>${cells}</tr>`;
+    }).join('');
+}
+
+async function loadConfig() {
+    const r = await fetch('/api/analyzer/config');
+    const data = await r.json();
+    PARAM_KEYS = data.param_keys || [];
+    SEEDS = data.seeds || [];
+    paramSets = data.config.param_sets || [];
+    document.getElementById('m-runs').value = data.config.m_runs_per_set || 3;
+    document.getElementById('m-run-jitter').value =
+        data.config.m_run_jitter !== undefined ? data.config.m_run_jitter : 1;
+    document.getElementById('description').value = data.config.description || '';
+    selectedFires = new Set(data.config.selected_fires || []);
+}
+
+async function loadFires() {
+    const r = await fetch('/api/analyzer/fires');
+    allFires = await r.json();
+    buildFilterChecks();
+    applyFilterStateToUI(loadFilterState());
+}
+
+async function loadStatus() {
+    try {
+        const r = await fetch('/api/analyzer/status');
+        if (!r.ok) return;
+        const s = await r.json();
+        const rows = [
+            ['Running', s.running ? 'yes' : 'no'],
+            ['Parameter sets configured', s.n_param_sets],
+            ['HDBSCAN runs per set (M)', s.m_runs_per_set],
+            ['Fires selected', s.n_selected_fires],
+            ['Fires with analyzer data on disk', s.n_fires_with_data],
+            ['Perimeters accepted',
+                (csvSummary.total_accepted || 0) +
+                ' (across ' + (csvSummary.unique_fires || 0) + ' fire' +
+                ((csvSummary.unique_fires || 0) === 1 ? '' : 's') + ')'],
+            ['Output root', s.root],
+        ];
+        // If worker is running, show progress + a direct open link
+        // for the currently-analyzing fire.
+        if (s.running && s.batch) {
+            const b = s.batch;
+            rows.push(['Progress',
+                `${b.completed_fires}/${b.total_fires} fires, ` +
+                `${b.completed_runs}/${b.total_runs} runs, ` +
+                `${(b.errors || []).length} error(s)`]);
+            if (b.current_fire) {
+                const href = `/analyzer/fire/${encodeURIComponent(b.current_fire)}`;
+                rows.push(['Currently analyzing',
+                    `<a href="${href}">${escapeHTML(b.current_fire)}</a> ` +
+                    `&mdash; open this fire's gallery to watch runs land live`]);
+            }
+        } else if (s.batch && s.batch.finished_at) {
+            rows.push(['Last run finished',
+                escapeHTML(s.batch.finished_at) +
+                (s.batch.cancelled ? ' (cancelled)' : '')]);
+        }
+        // Render: values carrying HTML (e.g. links) go in verbatim.
+        document.getElementById('status-kv').innerHTML =
+            rows.map(([k, v]) => {
+                const str = String(v);
+                const hasHtml = /<[a-z]|&[a-z#]/i.test(str);
+                return `<span class="k">${k}</span>` +
+                       `<span class="v">${hasHtml ? str : escapeHTML(str)}</span>`;
+            }).join('');
+        document.getElementById('btn-start').style.display =
+            s.running ? 'none' : '';
+        document.getElementById('btn-cancel').style.display =
+            s.running ? '' : 'none';
+    } catch (e) {}
+}
+
+// ------------------------------------------------------------------
+// Param sets rendering
+// ------------------------------------------------------------------
+function renderSeedButtons() {
+    const container = document.getElementById('seed-buttons');
+    container.innerHTML = '';
+    SEEDS.forEach((seed, idx) => {
+        const btn = document.createElement('button');
+        btn.className = 'btn btn-secondary';
+        btn.textContent = '+ ' + seed.label;
+        btn.onclick = () => addParamSet(seed.params);
+        container.appendChild(btn);
+    });
+}
+
+function addParamSet(seedParams) {
+    const row = seedParams ? Object.assign({}, seedParams) : {};
+    row.name = row.name || `Set ${paramSets.length + 1}`;
+    paramSets.push(row);
+    renderParamSets();
+}
+
+function removeParamSet(idx) {
+    paramSets.splice(idx, 1);
+    renderParamSets();
+}
+
+function duplicateParamSet(idx) {
+    const copy = Object.assign({}, paramSets[idx]);
+    copy.name = (copy.name || 'Set') + ' (copy)';
+    paramSets.splice(idx + 1, 0, copy);
+    renderParamSets();
+}
+
+function paramSetDigest(ps) {
+    // Concise summary of this set's distinctive fields (HDBSCAN-leaning first).
+    const parts = [];
+    for (const k of ['hdbscan_min_samples', 'controlled_ratio',
+                     'tsne_perplexity', 'padding', 'embed_bands']) {
+        if (ps[k] !== undefined && ps[k] !== '') parts.push(`${k}=${ps[k]}`);
+    }
+    return parts.join(', ');
+}
+
+function renderParamSets() {
+    const container = document.getElementById('param-sets-container');
+    container.innerHTML = '';
+    document.getElementById('set-count').textContent = paramSets.length
+        ? `(${paramSets.length})` : '(none — add at least one)';
+    paramSets.forEach((ps, idx) => {
+        const div = document.createElement('div');
+        div.className = 'param-set';
+        if (idx === paramSets.length - 1) div.classList.add('open');
+        div.innerHTML = `
+            <div class="param-set-header" onclick="this.parentElement.classList.toggle('open')">
+                <span class="caret"></span>
+                <span class="param-set-title">${escapeHTML(ps.name || `Set ${idx + 1}`)}</span>
+                <span class="param-set-digest">${escapeHTML(paramSetDigest(ps))}</span>
+                <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px"
+                    onclick="event.stopPropagation();duplicateParamSet(${idx})">Duplicate</button>
+                <button class="btn btn-danger" style="font-size:11px;padding:2px 8px"
+                    onclick="event.stopPropagation();removeParamSet(${idx})">Remove</button>
+            </div>
+            <div class="param-set-body" id="ps-body-${idx}"></div>
+        `;
+        container.appendChild(div);
+        renderParamSetFields(idx);
+    });
+}
+
+function renderParamSetFields(idx) {
+    const body = document.getElementById(`ps-body-${idx}`);
+    body.innerHTML = '';
+    // Name field at top
+    const nameDiv = document.createElement('div');
+    nameDiv.className = 'param-field';
+    nameDiv.style.gridColumn = '1 / -1';
+    nameDiv.innerHTML =
+        `<label>Name (label only)</label>
+         <input type="text" value="${escapeAttr(paramSets[idx].name || '')}"
+             onchange="paramSets[${idx}].name = this.value;
+                       document.querySelectorAll('.param-set')[${idx}]
+                         .querySelector('.param-set-title').textContent = this.value;">`;
+    body.appendChild(nameDiv);
+
+    for (const key of PARAM_KEYS) {
+        const meta = PARAM_META[key] || {type: 'text'};
+        const val = paramSets[idx][key];
+        const display = (val === undefined || val === null) ? '' : val;
+        const fdiv = document.createElement('div');
+        fdiv.className = 'param-field';
+
+        if (meta.type === 'select') {
+            const options = meta.choices.map(c =>
+                `<option value="${escapeAttr(c)}" ${String(display) === c ? 'selected' : ''}>${c || '(default)'}</option>`
+            ).join('');
+            fdiv.innerHTML =
+                `<label>${key}</label>
+                 <select onchange="setParam(${idx}, '${key}', this.value)">${options}</select>`;
+        } else {
+            const attrs = [];
+            if (meta.step) attrs.push(`step="${meta.step}"`);
+            if (meta.min !== undefined) attrs.push(`min="${meta.min}"`);
+            if (meta.max !== undefined) attrs.push(`max="${meta.max}"`);
+            if (meta.placeholder) attrs.push(`placeholder="${meta.placeholder}"`);
+            fdiv.innerHTML =
+                `<label>${key}</label>
+                 <input type="${meta.type || 'text'}" value="${escapeAttr(display)}" ${attrs.join(' ')}
+                     onchange="setParam(${idx}, '${key}', this.value)">`;
+        }
+        body.appendChild(fdiv);
+    }
+}
+
+function setParam(idx, key, value) {
+    if (value === '' || value === null || value === undefined) {
+        delete paramSets[idx][key];
+    } else {
+        paramSets[idx][key] = value;
+    }
+    // Refresh the header digest
+    const headers = document.querySelectorAll('.param-set');
+    if (headers[idx]) {
+        const digest = headers[idx].querySelector('.param-set-digest');
+        if (digest) digest.textContent = paramSetDigest(paramSets[idx]);
+    }
+}
+
+// ------------------------------------------------------------------
+// Fire selection
+// ------------------------------------------------------------------
+const SIZE_BUCKETS = [
+    [0, 10, '0–10'],
+    [10, 50, '10–50'],
+    [50, 100, '50–100'],
+    [100, 500, '100–500'],
+    [500, 1000, '500–1k'],
+    [1000, 5000, '1k–5k'],
+    [5000, Infinity, '5k+'],
+];
+
+const USER_STATUSES = [
+    'pending', 'preparing', 'ready', 'mapping',
+    'mapped', 'accepted', 'error',
+];
+const ANA_STATUSES = [
+    'pending', 'analyzing', 'analyzed', 'partial', 'error',
+];
+
+// Persist filter state across page loads (scoped to this host+raster)
+const FILTER_KEY = 'analyzer-filter-v2';
+
+function getFilterState() {
+    return {
+        years:        new Set(_checkedValues('ff-year-checks')),
+        regions:      new Set(_checkedValues('ff-region-checks')),
+        zones:        new Set(_checkedValues('ff-zone-checks')),
+        userStatuses: new Set(_checkedValues('ff-user-status-checks')),
+        anaStatuses:  new Set(_checkedValues('ff-ana-status-checks')),
+        minSize:      parseFloat(document.getElementById('ff-min-size').value) || null,
+        maxSize:      parseFloat(document.getElementById('ff-max-size').value) || null,
+        regex:        document.getElementById('ff-number').value.trim(),
+        onlyHas:      document.getElementById('ff-only-has-accepts').checked,
+        onlyNo:       document.getElementById('ff-only-no-accepts').checked,
+        sort:         document.getElementById('ff-sort').value,
+    };
+}
+
+function _checkedValues(id) {
+    return [...document.querySelectorAll(`#${id} input[type=checkbox]:checked`)]
+        .map(el => el.value);
+}
+
+function saveFilterState() {
+    try {
+        const s = getFilterState();
+        localStorage.setItem(FILTER_KEY, JSON.stringify({
+            years:        [...s.years],
+            regions:      [...s.regions],
+            zones:        [...s.zones],
+            userStatuses: [...s.userStatuses],
+            anaStatuses:  [...s.anaStatuses],
+            minSize:      s.minSize,
+            maxSize:      s.maxSize,
+            regex:        s.regex,
+            onlyHas:      s.onlyHas,
+            onlyNo:       s.onlyNo,
+            sort:         s.sort,
+        }));
+    } catch (e) {}
+}
+
+function loadFilterState() {
+    try {
+        const raw = localStorage.getItem(FILTER_KEY);
+        if (!raw) return null;
+        const s = JSON.parse(raw);
+        return {
+            years:        new Set(s.years || []),
+            regions:      new Set(s.regions || []),
+            zones:        new Set(s.zones || []),
+            userStatuses: new Set(s.userStatuses || []),
+            anaStatuses:  new Set(s.anaStatuses || []),
+            minSize:      s.minSize,
+            maxSize:      s.maxSize,
+            regex:        s.regex || '',
+            onlyHas:      !!s.onlyHas,
+            onlyNo:       !!s.onlyNo,
+            sort:         s.sort || 'size_desc',
+        };
+    } catch (e) { return null; }
+}
+
+function regionOf(fn) { return fn && /^[A-Za-z]/.test(fn) ? fn[0].toUpperCase() : ''; }
+function zoneOf(fn)   { return fn && fn.length >= 2 ? (regionOf(fn) + fn[1]).toUpperCase() : ''; }
+
+function buildFilterChecks() {
+    // Years
+    const years = [...new Set(allFires.map(f => f.fire_year).filter(Boolean))].sort();
+    _renderChecks('ff-year-checks', years.map(y => [String(y), String(y)]));
+
+    // Regions
+    const regions = [...new Set(allFires.map(f => regionOf(f.fire_numbe)).filter(Boolean))].sort();
+    _renderChecks('ff-region-checks', regions.map(r => [r, r]));
+
+    // Zones — potentially many; show only those with ≥1 fire
+    const zones = [...new Set(allFires.map(f => zoneOf(f.fire_numbe)).filter(Boolean))].sort();
+    _renderChecks('ff-zone-checks', zones.map(z => [z, z]));
+
+    // User status — derived from fire.status
+    const userStats = [...new Set(allFires.map(f => f.status).filter(Boolean))]
+        .sort((a, b) => USER_STATUSES.indexOf(a) - USER_STATUSES.indexOf(b));
+    _renderChecks('ff-user-status-checks',
+        userStats.map(s => [s, s]));
+
+    // Analyzer status
+    const anaStats = [...new Set(allFires.map(f => f.analyzer_status).filter(Boolean))]
+        .sort((a, b) => ANA_STATUSES.indexOf(a) - ANA_STATUSES.indexOf(b));
+    _renderChecks('ff-ana-status-checks',
+        anaStats.map(s => [s, s]));
+
+    // Size buckets
+    const br = document.getElementById('ff-bucket-row');
+    br.innerHTML = SIZE_BUCKETS.map(([lo, hi, label], i) =>
+        `<span class="ff-bucket" data-lo="${lo}" data-hi="${isFinite(hi) ? hi : ''}"
+             onclick="pickSizeBucket(this)">${label}</span>`
+    ).join('');
+}
+
+function _renderChecks(containerId, items) {
+    const div = document.getElementById(containerId);
+    div.innerHTML = items.map(([val, label]) =>
+        `<label><input type="checkbox" value="${escapeAttr(val)}"
+             onchange="applyFireFilter()">${escapeHTML(label)}</label>`
+    ).join('');
+}
+
+function pickSizeBucket(el) {
+    const wasActive = el.classList.contains('active');
+    document.querySelectorAll('#ff-bucket-row .ff-bucket').forEach(b =>
+        b.classList.remove('active'));
+    if (wasActive) {
+        document.getElementById('ff-min-size').value = '';
+        document.getElementById('ff-max-size').value = '';
+    } else {
+        el.classList.add('active');
+        document.getElementById('ff-min-size').value = el.dataset.lo;
+        document.getElementById('ff-max-size').value = el.dataset.hi;
+    }
+    applyFireFilter();
+}
+
+function applyFilterStateToUI(s) {
+    if (!s) return;
+    document.querySelectorAll('#ff-year-checks input').forEach(el => {
+        el.checked = s.years.has(el.value);
+    });
+    document.querySelectorAll('#ff-region-checks input').forEach(el => {
+        el.checked = s.regions.has(el.value);
+    });
+    document.querySelectorAll('#ff-zone-checks input').forEach(el => {
+        el.checked = s.zones.has(el.value);
+    });
+    document.querySelectorAll('#ff-user-status-checks input').forEach(el => {
+        el.checked = s.userStatuses.has(el.value);
+    });
+    document.querySelectorAll('#ff-ana-status-checks input').forEach(el => {
+        el.checked = s.anaStatuses.has(el.value);
+    });
+    document.getElementById('ff-min-size').value = s.minSize ?? '';
+    document.getElementById('ff-max-size').value = s.maxSize ?? '';
+    document.getElementById('ff-number').value   = s.regex;
+    document.getElementById('ff-only-has-accepts').checked = s.onlyHas;
+    document.getElementById('ff-only-no-accepts').checked  = s.onlyNo;
+    document.getElementById('ff-sort').value = s.sort;
+}
+
+function applyFireFilter() {
+    saveFilterState();
+    renderFires();
+}
+
+function resetFireFilter() {
+    document.querySelectorAll('.ffp input[type=checkbox]').forEach(el => el.checked = false);
+    document.getElementById('ff-min-size').value = '';
+    document.getElementById('ff-max-size').value = '';
+    document.getElementById('ff-number').value = '';
+    document.getElementById('ff-sort').value = 'size_desc';
+    document.querySelectorAll('#ff-bucket-row .ff-bucket').forEach(b =>
+        b.classList.remove('active'));
+    applyFireFilter();
+}
+
+function filteredFires() {
+    const s = getFilterState();
+    let re = null;
+    if (s.regex) {
+        try { re = new RegExp(s.regex, 'i'); } catch (e) { re = null; }
+    }
+
+    const result = allFires.filter(f => {
+        if (s.years.size        && !s.years.has(String(f.fire_year))) return false;
+        if (s.regions.size      && !s.regions.has(regionOf(f.fire_numbe))) return false;
+        if (s.zones.size        && !s.zones.has(zoneOf(f.fire_numbe))) return false;
+        if (s.userStatuses.size && !s.userStatuses.has(f.status)) return false;
+        if (s.anaStatuses.size  && !s.anaStatuses.has(f.analyzer_status)) return false;
+        if (s.minSize !== null  && f.fire_size_ha < s.minSize) return false;
+        if (s.maxSize !== null  && f.fire_size_ha > s.maxSize) return false;
+        if (re && !re.test(f.fire_numbe)) return false;
+        if (s.onlyHas && (f.n_accepted_runs || 0) === 0) return false;
+        if (s.onlyNo  && (f.n_accepted_runs || 0) !== 0) return false;
+        return true;
+    });
+
+    const cmp = {
+        size_desc:    (a, b) => b.fire_size_ha - a.fire_size_ha,
+        size_asc:     (a, b) => a.fire_size_ha - b.fire_size_ha,
+        year_desc:    (a, b) => (b.fire_year || 0) - (a.fire_year || 0),
+        year_asc:     (a, b) => (a.fire_year || 0) - (b.fire_year || 0),
+        numbe_asc:    (a, b) => a.fire_numbe.localeCompare(b.fire_numbe),
+        numbe_desc:   (a, b) => b.fire_numbe.localeCompare(a.fire_numbe),
+        accepts_desc: (a, b) => (b.n_accepted_runs || 0) - (a.n_accepted_runs || 0),
+    }[s.sort] || ((a, b) => b.fire_size_ha - a.fire_size_ha);
+    result.sort(cmp);
+    return result;
+}
+
+function selectAllFiltered() {
+    for (const f of filteredFires()) selectedFires.add(f.fire_numbe);
+    renderFires();
+}
+
+function invertSelection() {
+    const shown = filteredFires().map(f => f.fire_numbe);
+    for (const fn of shown) {
+        if (selectedFires.has(fn)) selectedFires.delete(fn);
+        else selectedFires.add(fn);
+    }
+    renderFires();
+}
+
+function clearSelection() {
+    selectedFires.clear();
+    renderFires();
+}
+
+function toggleFire(fn) {
+    if (selectedFires.has(fn)) selectedFires.delete(fn);
+    else selectedFires.add(fn);
+    // Update counts without re-rendering the whole table (fast path)
+    document.getElementById('selection-count').textContent =
+        `${selectedFires.size} fire(s) selected`;
+}
+
+function renderFires() {
+    const tbody = document.getElementById('fires-tbody');
+    tbody.innerHTML = '';
+    const shown = filteredFires();
+    // Update filter + selection counts
+    document.getElementById('filter-count').textContent =
+        `${shown.length}/${allFires.length} fires visible`;
+    document.getElementById('selection-count').textContent =
+        `${selectedFires.size} fire(s) selected`;
+    for (const f of shown) {
+        const tr = document.createElement('tr');
+        const galleryHref = `/analyzer/fire/${encodeURIComponent(f.fire_numbe)}`;
+        // Analyzer status badge
+        const astatus = f.analyzer_status || 'pending';
+        const badgeClass = 'a-status-' + astatus;
+        const aBadge = `<span class="a-status-badge ${badgeClass}">${escapeHTML(astatus)}</span>`;
+        tr.innerHTML = `
+            <td><input type="checkbox" ${selectedFires.has(f.fire_numbe) ? 'checked' : ''}
+                onchange="toggleFire('${escapeAttr(f.fire_numbe)}')"></td>
+            <td><strong><a href="${galleryHref}">${escapeHTML(f.fire_numbe)}</a></strong></td>
+            <td>${f.fire_year || ''}</td>
+            <td>${f.fire_size_ha}</td>
+            <td>${escapeHTML(f.status)}</td>
+            <td>${aBadge}</td>
+            <td>${f.n_accepted_runs}</td>
+            <td><a class="btn btn-secondary" style="font-size:11px;padding:2px 10px"
+                href="${galleryHref}">Open</a></td>`;
+        tbody.appendChild(tr);
+    }
+    document.getElementById('fire-count').textContent =
+        selectedFires.size ? `(${selectedFires.size} selected, ${shown.length} visible)` : `(${shown.length} visible)`;
+}
+
+function buildYearFilter() {
+    // Legacy shim — superseded by buildFilterChecks(). Kept as a no-op
+    // for safety if any old call site sneaks through.
+}
+
+// ------------------------------------------------------------------
+// Save / Run
+// ------------------------------------------------------------------
+async function saveConfig() {
+    const msg = document.getElementById('save-msg');
+    msg.className = 'save-msg';
+    msg.textContent = 'Saving...';
+    try {
+        const body = {
+            m_runs_per_set: parseInt(document.getElementById('m-runs').value) || 3,
+            m_run_jitter: parseInt(document.getElementById('m-run-jitter').value) || 0,
+            description: document.getElementById('description').value,
+            param_sets: paramSets,
+            selected_fires: [...selectedFires],
+        };
+        const r = await fetch('/api/analyzer/config', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'fetch',
+            },
+            body: JSON.stringify(body),
+        });
+        const data = await r.json();
+        if (!r.ok) {
+            msg.className = 'error-msg-inline';
+            msg.textContent = data.error || `HTTP ${r.status}`;
+            return;
+        }
+        msg.className = 'save-msg';
+        msg.textContent = `Saved. ${data.n_param_sets} set(s), M=${data.m_runs_per_set}, ${data.n_selected_fires} fire(s).`;
+        loadStatus();
+    } catch (e) {
+        msg.className = 'error-msg-inline';
+        msg.textContent = 'Save failed: ' + e;
+    }
+}
+
+async function startAnalyzer() {
+    const msg = document.getElementById('save-msg');
+    msg.className = 'save-msg';
+    msg.textContent = 'Starting...';
+    // Persist latest config first
+    await saveConfig();
+    try {
+        const r = await fetch('/api/analyzer/start', {
+            method: 'POST',
+            headers: {'X-Requested-With': 'fetch'},
+        });
+        const data = await r.json();
+        if (!r.ok) {
+            msg.className = 'error-msg-inline';
+            msg.textContent = data.error || `HTTP ${r.status}`;
+            return;
+        }
+        msg.className = 'save-msg';
+        msg.textContent = data.message || data.status;
+        loadStatus();
+    } catch (e) {
+        msg.className = 'error-msg-inline';
+        msg.textContent = 'Start failed: ' + e;
+    }
+}
+
+async function cancelAnalyzer() {
+    try {
+        await fetch('/api/analyzer/cancel', {
+            method: 'POST',
+            headers: {'X-Requested-With': 'fetch'},
+        });
+        loadStatus();
+    } catch (e) {}
+}
+
+// ------------------------------------------------------------------
+// Escaping helpers
+// ------------------------------------------------------------------
+function escapeHTML(s) {
+    if (s === null || s === undefined) return '';
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function escapeAttr(s) {
+    if (s === null || s === undefined) return '';
+    return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+init();
+</script>
+</body>
+</html>
