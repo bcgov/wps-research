@@ -20,8 +20,9 @@
 <div class="fire-info-bar">
     <span>Date: <strong>{{ fire_date }}</strong></span>
     <span>Year: <strong>{{ fire_year }}</strong></span>
-    <span>Size: <strong>{{ fire_size_ha }} ha</strong></span>
-    <span>Status: <strong id="status-text">{{ fire_status }}</strong></span>
+    <span>Hint Size: <strong>{{ fire_size_ha }} ha</strong></span>
+    <span>ML Size: <strong id="ml-size-text">--</strong></span>
+    <span>Status: <span id="status-badges"><strong id="status-text">{{ fire_status }}</strong></span></span>
     <span id="agreement-info"></span>
     <span id="crop-info"></span>
 </div>
@@ -33,25 +34,25 @@
     <!-- =============================================================== -->
     <div class="image-panel">
         <div class="image-controls">
-            <select id="view-select" disabled>
+            <select id="view-select" disabled onchange="onViewDropdownChange()">
                 <option value="">Loading...</option>
-            </select>
-            <select id="view-select-right" disabled style="display:none" onchange="switchViewRight()">
-                <option value="">Right pane...</option>
             </select>
             <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="zoomIn()">+</button>
             <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="zoomOut()">-</button>
             <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="zoomReset()">Fit</button>
             <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" id="btn-split" onclick="toggleSplit()">Split</button>
+            <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;display:none" id="btn-sync" onclick="toggleSync()" title="Sync pan/zoom between panes">Sync</button>
             <span class="info" id="zoom-info"></span>
             <span class="info" id="image-info"></span>
         </div>
         <div class="image-viewer-container" id="image-viewer-container">
-            <div class="image-area" id="image-area">
+            <div class="image-area pane-active" id="image-area" onclick="setActivePane('left')" data-pane="left">
+                <span class="pane-subtitle" id="subtitle-left"></span>
                 <span class="loading" id="loading-msg">Preparing fire data...</span>
                 <img id="main-img" style="display:none" alt="Fire view">
             </div>
-            <div class="image-area" id="image-area-right" style="display:none">
+            <div class="image-area" id="image-area-right" style="display:none" onclick="setActivePane('right')" data-pane="right">
+                <span class="pane-subtitle" id="subtitle-right"></span>
                 <img id="right-img" style="display:none" alt="Comparison view">
             </div>
         </div>
@@ -197,7 +198,13 @@
                 </div>
             </div>
 
-            <!-- Action buttons -->
+            <!-- Run config + Action buttons -->
+            <div class="run-config">
+                <label>Runs:</label>
+                <input type="number" id="run-count" value="1" min="1" max="10"
+                    style="width:42px;font-size:12px;padding:2px 4px;border:1px solid #ccc;border-radius:3px;text-align:center">
+                <span id="run-hint" class="run-hint"></span>
+            </div>
             <div class="action-buttons">
                 <button class="btn" id="btn-map" disabled onclick="startMapping()">
                     Map Fire
@@ -206,9 +213,14 @@
                     style="background:#555;font-size:12px;line-height:1.2">
                     Map Fire<br><small>with settings</small>
                 </button>
-                <button class="btn btn-success" id="btn-accept" style="display:none" onclick="acceptResult()">
-                    Accept
-                </button>
+            </div>
+
+            <!-- Serial results gallery -->
+            <div id="serial-gallery" style="display:none">
+                <div style="padding:8px 16px;border-top:1px solid #eee">
+                    <h4 id="serial-gallery-title" style="font-size:12px;color:#6b6b73;text-transform:uppercase;margin-bottom:8px">Results</h4>
+                    <div id="serial-gallery-items" style="display:flex;flex-direction:column;gap:6px"></div>
+                </div>
             </div>
 
         </div><!-- /params-scroll -->
@@ -220,7 +232,10 @@
         <div class="console-section" id="console-section">
             <div class="console-header">
                 <h4>Console</h4>
-                <button onclick="document.getElementById('console-output').innerHTML=''">clear</button>
+                <div style="display:flex;gap:6px">
+                    <button onclick="document.getElementById('console-output').innerHTML=''">clear</button>
+                    <button id="console-toggle" onclick="toggleConsole()">&#9660;</button>
+                </div>
             </div>
             <div id="console-output"></div>
         </div>
@@ -236,6 +251,25 @@ const FIRE = {{{ fire_numbe_json }}};
 let cropW = 0, cropH = 0;
 let isMapping = false;
 let hasComparison = false;
+let sseActive = false;
+let serverLineCount = 0;
+let lastSerialCount = 0;
+let previouslyAccepted = false;
+let lastPreparedPadding = null;  // tracks what padding was last prepared
+
+// Active pane tracking
+let activePane = 'left';  // 'left' or 'right'
+let leftView = '';   // current view key for left pane
+let rightView = '';  // current view key for right pane
+let selectedRun = null;  // currently selected serial run (null or run_id)
+const RUN_VIEWS = new Set(['result', 'comparison', 'brush_comparison']);
+
+const VIEW_LABELS = {
+    pre: 'Pre-fire', post: 'Post-fire',
+    diff1: 'Diff (norm)', diff2: 'Diff (ratio)',
+    result: 'ML classification', hint: 'Hint perimeter',
+    comparison: 'Comparison (figure)', brush_comparison: 'Brush comparison',
+};
 
 // -----------------------------------------------------------------------
 // Console logging
@@ -275,7 +309,7 @@ async function prepareFire(padding) {
     const body = padding != null ? JSON.stringify({padding}) : '{}';
 
     try {
-        const r = await fetch(`/api/fire/${FIRE}/prepare`, {
+        const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/prepare`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
             body: body,
@@ -297,8 +331,7 @@ async function prepareFire(padding) {
         for (const v of (data.views || [])) {
             const opt = document.createElement('option');
             opt.value = v;
-            const labels = {pre:'Pre-fire', post:'Post-fire', diff1:'Diff (norm)', diff2:'Diff (ratio)', result:'ML classification', hint:'Hint perimeter'};
-            opt.textContent = labels[v] || v;
+            opt.textContent = VIEW_LABELS[v] || v;
             sel.appendChild(opt);
         }
 
@@ -306,7 +339,7 @@ async function prepareFire(padding) {
         if (data.has_comparison) {
             const opt = document.createElement('option');
             opt.value = 'comparison';
-            opt.textContent = 'Comparison (result)';
+            opt.textContent = 'Comparison (figure)';
             sel.appendChild(opt);
             hasComparison = true;
         }
@@ -319,40 +352,29 @@ async function prepareFire(padding) {
 
         sel.disabled = false;
 
-        // Mirror options to right-pane dropdown
-        const selR = document.getElementById('view-select-right');
-        selR.innerHTML = '';
-        for (const opt of sel.options) {
-            const o2 = document.createElement('option');
-            o2.value = opt.value;
-            o2.textContent = opt.textContent;
-            selR.appendChild(o2);
-        }
-        selR.disabled = false;
-
         // Default views: left=post, right=result overlay (or comparison)
         if (data.views && data.views.includes('post')) {
-            sel.value = 'post';
+            leftView = 'post';
         }
         if (data.views && data.views.includes('result')) {
-            selR.value = 'result';
+            rightView = 'result';
         } else if (data.has_comparison) {
-            selR.value = 'comparison';
+            rightView = 'comparison';
         } else if (data.views && data.views.includes('pre')) {
-            selR.value = 'pre';
+            rightView = 'pre';
         }
 
-        // Show accept/retry buttons for mapped fires
-        if (data.status === 'mapped') {
-            document.getElementById('btn-accept').style.display = '';
-        }
+        // Set dropdown to show active pane's view
+        sel.value = (activePane === 'left') ? leftView : rightView;
 
-        // Status text with previously_accepted indicator
-        const statusEl = document.getElementById('status-text');
-        statusEl.textContent = data.status;
-        if (data.previously_accepted) {
-            statusEl.innerHTML += ' <span class="prev-accepted-badge" title="Previously accepted">&#10003;</span>';
-        }
+        // Show serial gallery for mapped fires (accept via per-run buttons)
+
+        // Status text with dual badge for previously_accepted
+        previouslyAccepted = !!data.previously_accepted;
+        updateStatusDisplay(data.status, previouslyAccepted);
+
+        // ML size
+        updateMlSize(data.ml_area_ha);
 
         document.getElementById('crop-info').innerHTML =
             `Crop: <strong>${cropW}&times;${cropH} px</strong> &middot; ` +
@@ -360,10 +382,23 @@ async function prepareFire(padding) {
             `Accum: <strong>${data.acc_start || '?'} &rarr; ${data.acc_end || '?'}</strong>`;
 
         updateSampleSize();
-        switchView();
+        loadPaneImage('left', leftView);
+        updateSubtitle('left', leftView);
 
-        document.getElementById('btn-map').disabled = false;
-        document.getElementById('btn-map-settings').disabled = false;
+        // Auto-open split if ML classification is available
+        if (!splitActive && rightView === 'result') {
+            toggleSplit();
+        } else if (splitActive) {
+            loadPaneImage('right', rightView);
+            updateSubtitle('right', rightView);
+        }
+
+        // Track which padding was actually prepared
+        lastPreparedPadding = (padding != null)
+            ? parseFloat(padding)
+            : parseFloat('{{ padding }}');
+
+        enableMapButtons();
         log('Fire prepared. Ready to map.', 'success');
 
         // Restore console and params if fire is mapping or was mapped
@@ -393,133 +428,250 @@ async function recrop() {
 }
 
 // -----------------------------------------------------------------------
-// Zoom & Pan state
+// Zoom & Pan state — per-pane
 // -----------------------------------------------------------------------
-let zoomScale = 1;
-let panX = 0, panY = 0;
+const paneState = {
+    left:  { scale: 1, panX: 0, panY: 0 },
+    right: { scale: 1, panX: 0, panY: 0 },
+};
+let syncPanes = true;
 let isDragging = false;
+let dragPane = null;
 let dragStartX = 0, dragStartY = 0;
 let dragStartPanX = 0, dragStartPanY = 0;
 
-function updateTransform() {
-    const img = document.getElementById('main-img');
-    img.style.transform = `translate(${panX}px, ${panY}px) scale(${zoomScale})`;
-    document.getElementById('zoom-info').textContent = `${Math.round(zoomScale * 100)}%`;
-    syncRightPane();
+function getPaneElements(pane) {
+    if (pane === 'right') {
+        return { area: document.getElementById('image-area-right'),
+                 img: document.getElementById('right-img') };
+    }
+    return { area: document.getElementById('image-area'),
+             img: document.getElementById('main-img') };
 }
 
-function zoomFit() {
-    const img = document.getElementById('main-img');
-    const area = document.getElementById('image-area');
+function updateTransformForPane(pane) {
+    const s = paneState[pane];
+    const { img } = getPaneElements(pane);
+    img.style.transform = `translate(${s.panX}px, ${s.panY}px) scale(${s.scale})`;
+    if (pane === activePane) {
+        document.getElementById('zoom-info').textContent = `${Math.round(s.scale * 100)}%`;
+    }
+    if (syncPanes && splitActive) {
+        const other = pane === 'left' ? 'right' : 'left';
+        const os = paneState[other];
+        os.scale = s.scale; os.panX = s.panX; os.panY = s.panY;
+        const { img: oImg } = getPaneElements(other);
+        oImg.style.transform = `translate(${os.panX}px, ${os.panY}px) scale(${os.scale})`;
+    }
+}
+
+function zoomFitPane(pane) {
+    const { area, img } = getPaneElements(pane);
     if (!img.naturalWidth || !img.naturalHeight) return;
-
-    const aW = area.clientWidth;
-    const aH = area.clientHeight;
-    const iW = img.naturalWidth;
-    const iH = img.naturalHeight;
-
-    zoomScale = Math.min(aW / iW, aH / iH);
-    panX = (aW - iW * zoomScale) / 2;
-    panY = (aH - iH * zoomScale) / 2;
-    updateTransform();
+    const s = paneState[pane];
+    s.scale = Math.min(area.clientWidth / img.naturalWidth, area.clientHeight / img.naturalHeight);
+    s.panX = (area.clientWidth - img.naturalWidth * s.scale) / 2;
+    s.panY = (area.clientHeight - img.naturalHeight * s.scale) / 2;
+    updateTransformForPane(pane);
 }
 
-function zoomReset() { zoomFit(); }
+function zoomFit() { zoomFitPane('left'); }
+function zoomReset() { zoomFitPane(activePane); }
 
 function zoomIn() {
-    const area = document.getElementById('image-area');
-    const cx = area.clientWidth / 2;
-    const cy = area.clientHeight / 2;
-    applyZoom(cx, cy, 1.3);
+    const { area } = getPaneElements(activePane);
+    applyZoomToPane(activePane, area.clientWidth / 2, area.clientHeight / 2, 1.3);
 }
 
 function zoomOut() {
-    const area = document.getElementById('image-area');
-    const cx = area.clientWidth / 2;
-    const cy = area.clientHeight / 2;
-    applyZoom(cx, cy, 1 / 1.3);
+    const { area } = getPaneElements(activePane);
+    applyZoomToPane(activePane, area.clientWidth / 2, area.clientHeight / 2, 1 / 1.3);
 }
 
-function applyZoom(cx, cy, factor) {
-    // Zoom towards the point (cx, cy) in container coords
-    const newScale = Math.max(0.1, Math.min(200, zoomScale * factor));
-    const ratio = newScale / zoomScale;
-    panX = cx - ratio * (cx - panX);
-    panY = cy - ratio * (cy - panY);
-    zoomScale = newScale;
-    updateTransform();
+function applyZoomToPane(pane, cx, cy, factor) {
+    const s = paneState[pane];
+    const newScale = Math.max(0.1, Math.min(200, s.scale * factor));
+    const ratio = newScale / s.scale;
+    s.panX = cx - ratio * (cx - s.panX);
+    s.panY = cy - ratio * (cy - s.panY);
+    s.scale = newScale;
+    updateTransformForPane(pane);
 }
 
-// Scroll wheel zoom
-(function() {
-    const area = document.getElementById('image-area');
+const _paneInitialized = {};
+function initPaneInteraction(pane) {
+    if (_paneInitialized[pane]) return;
+    _paneInitialized[pane] = true;
+    const { area } = getPaneElements(pane);
 
     area.addEventListener('wheel', (e) => {
         e.preventDefault();
         const rect = area.getBoundingClientRect();
-        const cx = e.clientX - rect.left;
-        const cy = e.clientY - rect.top;
-        const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-        applyZoom(cx, cy, factor);
+        applyZoomToPane(pane, e.clientX - rect.left, e.clientY - rect.top,
+                        e.deltaY < 0 ? 1.15 : 1 / 1.15);
     }, {passive: false});
 
-    // Pan via mouse drag
     area.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return;
+        setActivePane(pane);
         isDragging = true;
+        dragPane = pane;
         dragStartX = e.clientX;
         dragStartY = e.clientY;
-        dragStartPanX = panX;
-        dragStartPanY = panY;
+        dragStartPanX = paneState[pane].panX;
+        dragStartPanY = paneState[pane].panY;
         area.classList.add('dragging');
         e.preventDefault();
     });
-
-    document.addEventListener('mousemove', (e) => {
-        if (!isDragging) return;
-        panX = dragStartPanX + (e.clientX - dragStartX);
-        panY = dragStartPanY + (e.clientY - dragStartY);
-        updateTransform();
-    });
-
-    document.addEventListener('mouseup', () => {
-        if (!isDragging) return;
-        isDragging = false;
-        area.classList.remove('dragging');
-    });
-})();
-
-// -----------------------------------------------------------------------
-// Switch preview view
-// -----------------------------------------------------------------------
-function switchView() {
-    const view = document.getElementById('view-select').value;
-    if (!view) return;
-
-    const img = document.getElementById('main-img');
-    const loadMsg = document.getElementById('loading-msg');
-
-    if (view === 'comparison') {
-        img.src = `/api/fire/${FIRE}/comparison?t=${Date.now()}`;
-    } else if (view === 'brush_comparison') {
-        img.src = `/api/fire/${FIRE}/brush_comparison?t=${Date.now()}`;
-    } else {
-        img.src = `/api/fire/${FIRE}/preview/${view}?t=${Date.now()}`;
-    }
-
-    img.onload = () => {
-        loadMsg.style.display = 'none';
-        img.style.display = 'block';
-        zoomFit();
-    };
-    img.onerror = () => {
-        loadMsg.style.display = 'block';
-        loadMsg.textContent = `View "${view}" not available`;
-        img.style.display = 'none';
-    };
 }
 
-document.getElementById('view-select').addEventListener('change', switchView);
+// Initialize left pane
+initPaneInteraction('left');
+
+document.addEventListener('mousemove', (e) => {
+    if (!isDragging || !dragPane) return;
+    const s = paneState[dragPane];
+    s.panX = dragStartPanX + (e.clientX - dragStartX);
+    s.panY = dragStartPanY + (e.clientY - dragStartY);
+    updateTransformForPane(dragPane);
+});
+
+document.addEventListener('mouseup', () => {
+    if (!isDragging) return;
+    if (dragPane) {
+        getPaneElements(dragPane).area.classList.remove('dragging');
+    }
+    isDragging = false;
+    dragPane = null;
+});
+
+// -----------------------------------------------------------------------
+// Active pane management
+// -----------------------------------------------------------------------
+function setActivePane(pane) {
+    if (activePane === pane) return;
+    activePane = pane;
+    document.getElementById('image-area').classList.toggle('pane-active', pane === 'left');
+    document.getElementById('image-area-right').classList.toggle('pane-active', pane === 'right');
+    // Update dropdown to show active pane's current view
+    const sel = document.getElementById('view-select');
+    const curView = (pane === 'left') ? leftView : rightView;
+    if (curView && sel.querySelector(`option[value="${curView}"]`)) {
+        sel.value = curView;
+    }
+    // Update zoom info
+    document.getElementById('zoom-info').textContent =
+        `${Math.round(paneState[pane].scale * 100)}%`;
+}
+
+function toggleSync() {
+    syncPanes = !syncPanes;
+    const btn = document.getElementById('btn-sync');
+    btn.style.background = syncPanes ? '#0066cc' : '';
+    btn.style.color = syncPanes ? '#fff' : '';
+    if (syncPanes) {
+        // Sync right pane to left
+        const ls = paneState.left;
+        const rs = paneState.right;
+        rs.scale = ls.scale; rs.panX = ls.panX; rs.panY = ls.panY;
+        updateTransformForPane('right');
+    }
+}
+
+// -----------------------------------------------------------------------
+// View label helper
+// -----------------------------------------------------------------------
+function getViewLabel(viewKey) {
+    if (!viewKey) return '';
+    return VIEW_LABELS[viewKey] || viewKey;
+}
+
+// -----------------------------------------------------------------------
+// Subtitle on each pane
+// -----------------------------------------------------------------------
+function updateSubtitle(pane, viewKey) {
+    const elId = pane === 'left' ? 'subtitle-left' : 'subtitle-right';
+    const el = document.getElementById(elId);
+    el.textContent = getViewLabel(viewKey);
+}
+
+// -----------------------------------------------------------------------
+// Load image into a specific pane
+// -----------------------------------------------------------------------
+let firstLoad = true;
+
+function loadPaneImage(pane, viewKey) {
+    if (!viewKey) return;
+    const { img } = getPaneElements(pane);
+    const loadMsg = document.getElementById('loading-msg');
+
+    let url;
+    const runActive = selectedRun !== null && RUN_VIEWS.has(viewKey);
+
+    if (runActive && viewKey === 'result') {
+        url = `/api/fire/${encodeURIComponent(FIRE)}/preview/serial_${selectedRun}?t=${Date.now()}`;
+    } else if (runActive && viewKey === 'comparison') {
+        url = `/api/fire/${encodeURIComponent(FIRE)}/serial/${selectedRun}/image?type=comparison&t=${Date.now()}`;
+    } else if (runActive && viewKey === 'brush_comparison') {
+        url = `/api/fire/${encodeURIComponent(FIRE)}/serial/${selectedRun}/image?type=brush&t=${Date.now()}`;
+    } else if (viewKey === 'comparison') {
+        url = `/api/fire/${encodeURIComponent(FIRE)}/comparison?t=${Date.now()}`;
+    } else if (viewKey === 'brush_comparison') {
+        url = `/api/fire/${encodeURIComponent(FIRE)}/brush_comparison?t=${Date.now()}`;
+    } else {
+        url = `/api/fire/${encodeURIComponent(FIRE)}/preview/${viewKey}?t=${Date.now()}`;
+    }
+    img.src = url;
+
+    img.onload = () => {
+        if (pane === 'left') loadMsg.style.display = 'none';
+        img.style.display = 'block';
+        if (firstLoad) { zoomFitPane(pane); firstLoad = false; }
+        else { updateTransformForPane(pane); }
+    };
+    img.onerror = () => {
+        if (pane === 'left') {
+            loadMsg.style.display = 'block';
+            loadMsg.textContent = `View "${getViewLabel(viewKey)}" not available`;
+        }
+        img.style.display = 'none';
+    };
+
+    // Update tracking
+    if (pane === 'left') leftView = viewKey;
+    else rightView = viewKey;
+    updateSubtitle(pane, viewKey);
+}
+
+// -----------------------------------------------------------------------
+// Dropdown change handler (controls active pane)
+// -----------------------------------------------------------------------
+function onViewDropdownChange() {
+    const viewKey = document.getElementById('view-select').value;
+    if (!viewKey) return;
+    loadPaneImage(activePane, viewKey);
+}
+
+// Status display with dual badges
+function updateStatusDisplay(status, prevAccepted) {
+    const container = document.getElementById('status-badges');
+    let html = '';
+    if (prevAccepted) {
+        html += '<span class="status-badge status-accepted status-badge-muted">accepted</span> ';
+    }
+    html += `<span class="status-badge status-${status}">${status}</span>`;
+    container.innerHTML = html;
+}
+
+// ML size display
+function updateMlSize(mlAreaHa) {
+    const el = document.getElementById('ml-size-text');
+    if (mlAreaHa >= 0) {
+        el.textContent = mlAreaHa.toLocaleString() + ' ha';
+    } else {
+        el.textContent = '--';
+    }
+}
 
 // -----------------------------------------------------------------------
 // Collect params from the form
@@ -532,6 +684,7 @@ function getParams() {
         return val === '' ? null : val;
     };
     return {
+        padding:              parseFloat(v('p-padding')) || 0.1,
         sample_rate:          parseFloat(v('p-sample_rate')) || 0.05,
         min_samples:          parseInt(v('p-min_samples')) || 500,
         max_samples:          parseInt(v('p-max_samples')) || 30000,
@@ -554,149 +707,124 @@ function getParams() {
 }
 
 // -----------------------------------------------------------------------
-// Start mapping via fetch + SSE streaming
+// Shared helpers for enabling/disabling mapping buttons
 // -----------------------------------------------------------------------
-async function startMapping() {
-    if (isMapping) return;
-    isMapping = true;
-
+function disableMapButtons() {
     document.getElementById('btn-map').disabled = true;
     document.getElementById('btn-map-settings').disabled = true;
-    document.getElementById('btn-accept').style.display = 'none';
-    document.getElementById('status-text').textContent = 'mapping';
+}
 
-    log('Starting mapping...', 'dim');
+function enableMapButtons() {
+    document.getElementById('btn-map').disabled = false;
+    document.getElementById('btn-map-settings').disabled = false;
+}
+
+function getRunCount() {
+    return Math.max(1, Math.min(10,
+        parseInt(document.getElementById('run-count').value) || 1));
+}
+
+// Live hint for run count
+document.getElementById('run-count').addEventListener('input', () => {
+    const n = getRunCount();
+    const hint = document.getElementById('run-hint');
+    hint.textContent = n > 1 ? `Varies HDBSCAN across ${n} runs` : '';
+});
+
+// -----------------------------------------------------------------------
+// Serial run (N > 1) — shared by Map Fire and Map Fire with Settings
+// -----------------------------------------------------------------------
+async function startSerialRun(baseParams, n) {
+    if (isMapping) return;
+    isMapping = true;
+    serverLineCount = 0;
+    lastSerialCount = 0;
+    selectedRun = null;
+
+    if (lastKnownStatus === 'accepted') previouslyAccepted = true;
+    disableMapButtons();
+    updateStatusDisplay('mapping', previouslyAccepted);
+    log(`Starting ${n} run(s)...`, 'dim');
+
+    const body = {n};
+    if (baseParams) body.base_params = baseParams;
 
     try {
-        const response = await fetch(`/api/fire/${FIRE}/map`, {
+        const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/serial_map`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
-            body: JSON.stringify({params: getParams()}),
+            body: JSON.stringify(body),
         });
-
-        if (!response.ok) {
-            const err = await response.json();
-            log('ERROR: ' + (err.error || response.statusText), 'error');
+        const data = await r.json();
+        if (data.error) {
+            log('ERROR: ' + data.error, 'error');
             isMapping = false;
-            document.getElementById('btn-map').disabled = false;
-            document.getElementById('btn-map-settings').disabled = false;
-            document.getElementById('status-text').textContent = 'ready';
+            enableMapButtons();
             return;
         }
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        while (true) {
-            const {done, value} = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, {stream: true});
-
-            const lines = buffer.split('\n');
-            buffer = lines.pop();
-
-            for (const line of lines) {
-                if (!line.startsWith('data: ')) continue;
-                let data;
-                try {
-                    data = JSON.parse(line.slice(6));
-                } catch { continue; }
-
-                if (data.type === 'log') {
-                    log(data.message);
-
-                } else if (data.type === 'complete') {
-                    log('Mapping complete!', 'success');
-                    isMapping = false;
-                    hasComparison = true;
-
-                    // Add result options to both dropdowns
-                    const newViews = [
-                        ['result', 'Result overlay'],
-                        ['comparison', 'Comparison (figure)'],
-                        ['brush_comparison', 'Brush comparison'],
-                    ];
-                    for (const selId of ['view-select', 'view-select-right']) {
-                        const s = document.getElementById(selId);
-                        for (const [val, label] of newViews) {
-                            if (!s.querySelector(`option[value="${val}"]`)) {
-                                const opt = document.createElement('option');
-                                opt.value = val;
-                                opt.textContent = label;
-                                s.appendChild(opt);
-                            }
-                        }
-                    }
-                    document.getElementById('view-select').value = 'post';
-                    document.getElementById('view-select-right').value = 'result';
-                    switchView();
-                    if (splitActive) switchViewRight();
-
-                    document.getElementById('btn-map').disabled = false;
-                    document.getElementById('btn-map-settings').disabled = false;
-                    document.getElementById('btn-accept').style.display = '';
-                    document.getElementById('status-text').textContent = 'mapped';
-                    if (data.agreement_pct >= 0) {
-                        document.getElementById('agreement-info').innerHTML =
-                            `Agreement: <strong>${data.agreement_pct}%</strong>`;
-                    }
-                    updateRightImage();
-
-                } else if (data.type === 'error') {
-                    log('ERROR: ' + data.message, 'error');
-                    isMapping = false;
-                    document.getElementById('btn-map').disabled = false;
-                    document.getElementById('btn-map-settings').disabled = false;
-                    document.getElementById('status-text').textContent = 'ready';
-                }
-            }
-        }
-
-        if (isMapping) {
-            log('Connection lost during mapping.', 'error');
-            isMapping = false;
-            document.getElementById('btn-map').disabled = false;
-            document.getElementById('btn-map-settings').disabled = false;
-        }
-
+        log(`Queued ${data.n} run(s). Watching for results...`);
+        serverLineCount = 0;
     } catch (err) {
-        log('Mapping error: ' + err.message, 'error');
+        log('Failed to start runs: ' + err.message, 'error');
         isMapping = false;
-        document.getElementById('btn-map').disabled = false;
-        document.getElementById('btn-map-settings').disabled = false;
-        document.getElementById('status-text').textContent = 'ready';
+        enableMapButtons();
     }
 }
 
 // -----------------------------------------------------------------------
-// Accept result
+// Start mapping — always routes through serial path for consistent UX
 // -----------------------------------------------------------------------
-async function acceptResult() {
-    log('Saving results to output directory...');
-    document.getElementById('btn-accept').disabled = true;
+async function startMapping() {
+    if (isMapping) return;
+    const nRuns = getRunCount();
+    const params = getParams();
 
-    try {
-        const r = await fetch(`/api/fire/${FIRE}/accept`, { method: 'POST', headers: {'X-Requested-With': 'fetch'} });
-        const data = await r.json();
-        if (data.status === 'accepted') {
-            log('Results saved successfully.', 'success');
-            document.getElementById('status-text').textContent = 'accepted';
-            document.getElementById('btn-accept').style.display = 'none';
-                } else {
-            log('Accept error: ' + (data.error || 'unknown'), 'error');
-        }
-    } catch (err) {
-        log('Accept failed: ' + err.message, 'error');
+    // Re-crop first if padding changed so images update before mapping starts
+    if (lastPreparedPadding !== null && params.padding !== lastPreparedPadding) {
+        log(`Re-cropping with padding=${params.padding}...`);
+        await prepareFire(params.padding);
     }
-    document.getElementById('btn-accept').disabled = false;
+
+    return startSerialRun(params, nRuns);
 }
 
 // -----------------------------------------------------------------------
 // Map Fire with recommended settings
 // -----------------------------------------------------------------------
+function applySettingsToForm(p) {
+    const setVal = (id, val) => {
+        const el = document.getElementById(id);
+        if (el && val != null) el.value = val;
+    };
+    setVal('p-padding', p.padding);
+    setVal('p-sample_rate', p.sample_rate);
+    setVal('p-min_samples', p.min_samples);
+    setVal('p-max_samples', p.max_samples);
+    setVal('p-seed', p.seed);
+    setVal('p-embed_bands', p.embed_bands);
+    setVal('p-tsne_perplexity', p.tsne_perplexity);
+    setVal('p-tsne_learning_rate', p.tsne_learning_rate);
+    setVal('p-tsne_max_iter', p.tsne_max_iter);
+    setVal('p-tsne_n_components', p.tsne_n_components);
+    setVal('p-tsne_random_state', p.tsne_random_state);
+    setVal('p-rf_n_estimators', p.rf_n_estimators);
+    setVal('p-rf_max_depth', p.rf_max_depth);
+    setVal('p-rf_max_features', p.rf_max_features);
+    setVal('p-rf_random_state', p.rf_random_state);
+    setVal('p-controlled_ratio', p.controlled_ratio);
+    setVal('p-hdbscan_min_samples', p.hdbscan_min_samples);
+    setVal('p-contour_width', p.contour_width);
+    if (p.tsne_init) {
+        const initEl = document.getElementById('p-tsne_init');
+        if (initEl) initEl.value = p.tsne_init;
+    }
+    updateSampleSize();
+}
+
 async function mapWithSettings() {
     const fireSize = parseFloat('{{ fire_size_ha }}') || 0;
+    const nRuns = getRunCount();
+
     try {
         const r = await fetch('/api/settings');
         const settings = await r.json();
@@ -704,7 +832,6 @@ async function mapWithSettings() {
             log('No recommended settings configured. Use the Settings panel on the fire list page.', 'error');
             return;
         }
-        // Find matching row for this fire size
         const row = settings.find(s =>
             fireSize >= s.min_ha && (s.max_ha == null || fireSize < s.max_ha));
         if (!row) {
@@ -712,87 +839,132 @@ async function mapWithSettings() {
             return;
         }
         const p = row.params;
-        // Apply settings to form
-        const setVal = (id, val) => {
-            const el = document.getElementById(id);
-            if (el && val != null) el.value = val;
-        };
-        // Apply settings to form
-        setVal('p-padding', p.padding);
-        setVal('p-sample_rate', p.sample_rate);
-        setVal('p-min_samples', p.min_samples);
-        setVal('p-max_samples', p.max_samples);
-        setVal('p-seed', p.seed);
-        setVal('p-embed_bands', p.embed_bands);
-        setVal('p-tsne_perplexity', p.tsne_perplexity);
-        setVal('p-tsne_learning_rate', p.tsne_learning_rate);
-        setVal('p-tsne_max_iter', p.tsne_max_iter);
-        setVal('p-tsne_n_components', p.tsne_n_components);
-        setVal('p-tsne_random_state', p.tsne_random_state);
-        setVal('p-rf_n_estimators', p.rf_n_estimators);
-        setVal('p-rf_max_depth', p.rf_max_depth);
-        setVal('p-rf_max_features', p.rf_max_features);
-        setVal('p-rf_random_state', p.rf_random_state);
-        setVal('p-controlled_ratio', p.controlled_ratio);
-        setVal('p-hdbscan_min_samples', p.hdbscan_min_samples);
-        setVal('p-contour_width', p.contour_width);
-        if (p.tsne_init) {
-            const initEl = document.getElementById('p-tsne_init');
-            if (initEl) initEl.value = p.tsne_init;
-        }
-        updateSampleSize();
+        applySettingsToForm(p);
         log(`Applied recommended settings for ${row.min_ha} ha → ${row.max_ha != null ? row.max_ha + ' ha' : '∞'}`, 'success');
 
-        // Re-crop if padding changed, then map
+        // Re-crop if padding differs from what was last prepared
         const newPad = parseFloat(p.padding);
-        const curPad = parseFloat(document.getElementById('p-padding').value);
-        if (!isNaN(newPad) && newPad !== curPad) {
+        if (!isNaN(newPad) && lastPreparedPadding !== null && newPad !== lastPreparedPadding) {
             log(`Re-cropping with padding=${newPad}...`);
-            document.getElementById('btn-map').disabled = true;
-            document.getElementById('btn-map-settings').disabled = true;
+            disableMapButtons();
             await prepareFire(newPad);
         }
-        startMapping();
+
+        startSerialRun(nRuns > 1 ? null : getParams(), nRuns);
     } catch (err) {
         log('Failed to load settings: ' + err.message, 'error');
     }
 }
 
 // -----------------------------------------------------------------------
-// Auto-refresh status every 5s (detect changes from other users)
+// Unified state poller — replaces refreshStatus, pollSerialResults,
+// pollMappingStatus with a single loop that handles all live updates.
 // -----------------------------------------------------------------------
 let lastKnownStatus = '{{ fire_status }}';
 
-async function refreshStatus() {
-    if (isMapping) return; // don't interfere with active mapping
+async function pollFireState() {
+    if (sseActive) {
+        setTimeout(pollFireState, 2000);
+        return;
+    }
+
     try {
-        const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/status`);
+        const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/console`);
         const data = await r.json();
-        if (data.status !== lastKnownStatus) {
-            lastKnownStatus = data.status;
-            document.getElementById('status-text').textContent = data.status;
-            if (data.status === 'mapped' && !hasComparison) {
-                hasComparison = true;
-                const sel = document.getElementById('view-select');
-                if (!sel.querySelector('option[value="comparison"]')) {
-                    const opt = document.createElement('option');
-                    opt.value = 'comparison';
-                    opt.textContent = 'Comparison (result)';
-                    sel.appendChild(opt);
-                }
-                sel.value = 'comparison';
-                switchView();
-                document.getElementById('btn-accept').style.display = '';
-                    log('Fire was mapped (by another session).', 'success');
-            } else if (data.status === 'accepted') {
-                document.getElementById('btn-accept').style.display = 'none';
-                            log('Fire was accepted (by another session).', 'success');
+
+        // 1. Append new console lines incrementally
+        if (data.lines && data.lines.length > serverLineCount) {
+            for (let i = serverLineCount; i < data.lines.length; i++) {
+                log(data.lines[i]);
+            }
+            serverLineCount = data.lines.length;
+        }
+
+        // 2. Update agreement + ML size
+        if (data.agreement_pct >= 0) {
+            document.getElementById('agreement-info').innerHTML =
+                `Agreement: <strong>${data.agreement_pct}%</strong>`;
+        }
+        updateMlSize(data.ml_area_ha);
+
+        // 3. Add new views to dropdown as they become available
+        const sel = document.getElementById('view-select');
+        for (const v of (data.available_views || [])) {
+            if (!sel.querySelector(`option[value="${v}"]`)) {
+                const opt = document.createElement('option');
+                opt.value = v;
+                opt.textContent = VIEW_LABELS[v] || v;
+                sel.appendChild(opt);
             }
         }
-    } catch {}
-}
+        if (data.has_comparison && !sel.querySelector('option[value="comparison"]')) {
+            const opt = document.createElement('option');
+            opt.value = 'comparison';
+            opt.textContent = 'Comparison (figure)';
+            sel.appendChild(opt);
+        }
+        if (data.has_brush_comparison && !sel.querySelector('option[value="brush_comparison"]')) {
+            const opt = document.createElement('option');
+            opt.value = 'brush_comparison';
+            opt.textContent = 'Brush comparison';
+            sel.appendChild(opt);
+        }
+        if (data.has_comparison) hasComparison = true;
 
-setInterval(refreshStatus, 5000);
+        // 4. Update serial results gallery as they arrive
+        const serialResults = data.serial_results || [];
+        if (serialResults.length > 0 && serialResults.length !== lastSerialCount) {
+            showSerialGallery(serialResults);
+            lastSerialCount = serialResults.length;
+        }
+
+        // 5. Handle status transitions
+        if (data.status !== lastKnownStatus) {
+            const oldStatus = lastKnownStatus;
+            lastKnownStatus = data.status;
+            previouslyAccepted = !!data.previously_accepted;
+            updateStatusDisplay(data.status, previouslyAccepted);
+
+            if (data.status === 'mapped' && (oldStatus === 'mapping' || isMapping)) {
+                isMapping = false;
+                enableMapButtons();
+
+                leftView = 'post'; rightView = 'result';
+                loadPaneImage('left', leftView);
+                if (splitActive) {
+                    loadPaneImage('right', rightView);
+                } else {
+                    toggleSplit();
+                }
+                sel.value = (activePane === 'left') ? leftView : rightView;
+
+                if (oldStatus === 'mapping' && !sseActive) {
+                    log('Mapping complete!', 'success');
+                }
+
+            } else if (data.status === 'accepted') {
+                isMapping = false;
+                document.getElementById('serial-gallery').style.display = 'none';
+                enableMapButtons();
+
+            } else if (data.status === 'error' && isMapping) {
+                isMapping = false;
+                enableMapButtons();
+                log('Mapping failed.', 'error');
+
+            } else if (data.status === 'mapping') {
+                isMapping = true;
+                disableMapButtons();
+            }
+        }
+
+        if (data.status === 'ready' || data.status === 'mapped') {
+            enableMapButtons();
+        }
+    } catch {}
+
+    setTimeout(pollFireState, isMapping ? 2000 : 5000);
+}
 
 // -----------------------------------------------------------------------
 // Remove fire
@@ -808,11 +980,31 @@ async function removeFire() {
 }
 
 // -----------------------------------------------------------------------
-// Resizable console / parameter split
+// Console toggle & resize
 // -----------------------------------------------------------------------
+let consoleCollapsed = false;
+
+function toggleConsole() {
+    const sec = document.getElementById('console-section');
+    const out = document.getElementById('console-output');
+    const btn = document.getElementById('console-toggle');
+    consoleCollapsed = !consoleCollapsed;
+    if (consoleCollapsed) {
+        out.style.display = 'none';
+        sec.style.height = 'auto';
+        sec.style.minHeight = '0';
+        btn.innerHTML = '&#9650;';
+    } else {
+        out.style.display = '';
+        sec.style.height = '250px';
+        sec.style.minHeight = '30px';
+        btn.innerHTML = '&#9660;';
+    }
+}
+
 (function() {
     const handle = document.getElementById('resize-handle');
-    const console = document.getElementById('console-section');
+    const consoleSec = document.getElementById('console-section');
     let dragging = false;
     let startY = 0;
     let startH = 0;
@@ -820,7 +1012,7 @@ async function removeFire() {
     handle.addEventListener('mousedown', (e) => {
         dragging = true;
         startY = e.clientY;
-        startH = console.offsetHeight;
+        startH = consoleSec.offsetHeight;
         handle.classList.add('active');
         document.body.style.cursor = 'row-resize';
         document.body.style.userSelect = 'none';
@@ -829,9 +1021,19 @@ async function removeFire() {
 
     document.addEventListener('mousemove', (e) => {
         if (!dragging) return;
-        // Dragging up = larger console, dragging down = smaller console
-        const newH = Math.max(80, startH + (startY - e.clientY));
-        console.style.height = newH + 'px';
+        const newH = Math.max(30, startH + (startY - e.clientY));
+        consoleSec.style.height = newH + 'px';
+        // Auto-hide output if dragged very small
+        const out = document.getElementById('console-output');
+        if (newH <= 35) {
+            out.style.display = 'none';
+            consoleCollapsed = true;
+            document.getElementById('console-toggle').innerHTML = '&#9650;';
+        } else if (consoleCollapsed) {
+            out.style.display = '';
+            consoleCollapsed = false;
+            document.getElementById('console-toggle').innerHTML = '&#9660;';
+        }
     });
 
     document.addEventListener('mouseup', () => {
@@ -843,6 +1045,167 @@ async function removeFire() {
     });
 })();
 
+function formatParams(params) {
+    if (!params || typeof params !== 'object') return '';
+    const keys = Object.keys(params).filter(k => params[k] != null && params[k] !== '');
+    if (keys.length === 0) return '<em>No parameters</em>';
+    return '<table style="font-size:10px;border-collapse:collapse;width:100%">' +
+        keys.map(k => `<tr><td style="padding:1px 6px 1px 0;color:#888">${k}</td><td style="padding:1px 0">${params[k]}</td></tr>`).join('') +
+        '</table>';
+}
+
+function showSerialGallery(results) {
+    const gallery = document.getElementById('serial-gallery');
+    const items = document.getElementById('serial-gallery-items');
+    gallery.style.display = '';
+    items.innerHTML = '';
+
+    // Separate previous (Run 0) from new runs
+    const previous = results.filter(r => r.is_previous);
+    const newRuns = results.filter(r => !r.is_previous);
+
+    // Update gallery title
+    const titleEl = document.getElementById('serial-gallery-title');
+    if (titleEl) titleEl.textContent = newRuns.length > 1 ? 'Serial Results' : 'Results';
+
+    // Sort new runs by agreement (best first)
+    const sorted = [...newRuns].sort(
+        (a, b) => (b.agreement_pct || -1) - (a.agreement_pct || -1));
+
+    // Show previous accepted first, then new runs
+    const ordered = [...previous, ...sorted];
+
+    for (const r of ordered) {
+        const isPrevious = r.is_previous;
+        const isBest = !isPrevious && r === sorted[0] && r.agreement_pct >= 0;
+        const div = document.createElement('div');
+        div.className = 'serial-run-card';
+        div.id = 'serial-card-' + r.run_id;
+
+        let borderColor = '#ddd';
+        let bgColor = '#fff';
+        if (isPrevious) {
+            borderColor = '#8b6914';
+            bgColor = '#fdf8ec';
+        } else if (isBest) {
+            borderColor = '#2d8a4e';
+            bgColor = '#f0fff4';
+        }
+        div.style.cssText = 'padding:8px;cursor:pointer;' +
+            'border:2px solid ' + borderColor + ';border-radius:6px;' +
+            'background:' + bgColor;
+        div.onclick = function(e) {
+            if (e.target.tagName === 'BUTTON' || e.target.tagName === 'A') return;
+            viewSerialRun(r.run_id);
+        };
+
+        const agr = r.agreement_pct >= 0 ? r.agreement_pct + '%' : 'failed';
+        const mlArea = r.ml_area_ha >= 0 ? r.ml_area_ha.toLocaleString() + ' ha' : '--';
+        const label = isPrevious
+            ? '<span style="color:#8b6914;font-weight:600">Previously accepted</span>'
+            : `<strong>Run ${r.run_id}</strong>`;
+        const badge = isBest ? ' <span style="color:#2d8a4e;font-weight:600">(best)</span>' : '';
+        const errMsg = r.error ? `<span style="color:#cc3333;font-size:11px"> ${r.error}</span>` : '';
+        const detailsId = `serial-details-${r.run_id}`;
+        const detailsTitle = isPrevious ? 'Previously Accepted' : `Serial Run #${r.run_id}`;
+
+        // No Accept button for Run 0 (previous)
+        const acceptBtn = (!isPrevious && r.agreement_pct >= 0)
+            ? `<button class="btn btn-success" style="font-size:11px;padding:2px 8px"
+                onclick="acceptSerialRun(${r.run_id})">Accept</button>`
+            : '';
+
+        div.innerHTML = `
+            <div style="display:flex;align-items:center;gap:8px">
+                <img src="/api/fire/${encodeURIComponent(FIRE)}/serial/${r.run_id}/image?t=${Date.now()}"
+                     style="width:80px;height:60px;object-fit:cover;border-radius:4px;cursor:pointer;image-rendering:pixelated"
+                     onclick="viewSerialRun(${r.run_id})" onerror="this.style.display='none'">
+                <div style="flex:1;font-size:12px">
+                    ${label}${badge}${errMsg}<br>
+                    <span style="color:#555">Agreement: ${agr} &middot; ML: ${mlArea}</span><br>
+                    <a href="#" class="serial-info-toggle" onclick="event.preventDefault();event.stopPropagation();
+                        var el=document.getElementById('${detailsId}');
+                        el.style.display=el.style.display==='none'?'block':'none'">Info</a>
+                </div>
+                ${acceptBtn}
+            </div>
+            <div id="${detailsId}" class="serial-details-panel" style="display:none">
+                <div class="serial-details-title">${detailsTitle}</div>
+                <div class="serial-details-row"><span>Agreement</span><strong>${agr}</strong></div>
+                <div class="serial-details-row"><span>ML Fire Size</span><strong>${mlArea}</strong></div>
+                <div class="serial-details-section">
+                    <a href="#" onclick="event.preventDefault();
+                        var el=this.nextElementSibling;
+                        el.style.display=el.style.display==='none'?'block':'none';
+                        this.textContent=el.style.display==='none'?'Show parameters':'Hide parameters'">Show parameters</a>
+                    <div style="display:none;margin-top:4px">${formatParams(r.params)}</div>
+                </div>
+            </div>
+        `;
+        items.appendChild(div);
+    }
+}
+
+function viewSerialRun(runId) {
+    // Highlight selected card, restore default style for others
+    document.querySelectorAll('.serial-run-card').forEach(el => {
+        if (el.id === 'serial-card-0') {
+            // Restore gold style for "Previously accepted"
+            el.style.borderColor = '#8b6914';
+            el.style.background = '#fdf8ec';
+        } else {
+            el.style.borderColor = '#ddd';
+            el.style.background = '#fff';
+        }
+    });
+    const card = document.getElementById('serial-card-' + runId);
+    if (card) {
+        card.style.borderColor = '#2d8a4e';
+        card.style.background = '#f0fff4';
+    }
+
+    // Set selected run and reload current view for the active pane
+    selectedRun = runId;
+    const currentView = activePane === 'left' ? leftView : rightView;
+    if (currentView) {
+        loadPaneImage(activePane, currentView);
+    }
+    // Also update the other pane if split is open and its view has per-run variant
+    const otherPane = activePane === 'left' ? 'right' : 'left';
+    const otherView = activePane === 'left' ? rightView : leftView;
+    const rightEl = document.getElementById('image-area-right');
+    if (rightEl && rightEl.style.display !== 'none' &&
+        otherView && RUN_VIEWS.has(otherView)) {
+        loadPaneImage(otherPane, otherView);
+    }
+}
+
+async function acceptSerialRun(runId) {
+    const msg = previouslyAccepted
+        ? `This will overwrite the previously accepted result with run ${runId}. Continue?`
+        : `Accept run ${runId} as the final result?`;
+    if (!confirm(msg)) return;
+    try {
+        const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/serial/${runId}/accept`, {
+            method: 'POST',
+            headers: {'X-Requested-With': 'fetch'},
+        });
+        const data = await r.json();
+        if (data.status === 'accepted') {
+            log(`Run ${runId} accepted!`, 'success');
+            previouslyAccepted = false;
+            lastSerialCount = 0;
+            updateStatusDisplay('accepted', false);
+            document.getElementById('serial-gallery').style.display = 'none';
+            document.getElementById('serial-gallery-items').innerHTML = '';
+        } else {
+            log('Accept error: ' + (data.error || 'unknown'), 'error');
+        }
+    } catch (err) {
+        log('Accept failed: ' + err.message, 'error');
+    }
+}
+
 // -----------------------------------------------------------------------
 // Restore fire state (console, params) on page load
 // -----------------------------------------------------------------------
@@ -851,11 +1214,12 @@ async function restoreFireState() {
         const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/console`);
         const data = await r.json();
 
-        // Restore console output
+        // Restore console output and sync line count
         if (data.lines && data.lines.length > 0) {
             for (const line of data.lines) {
                 log(line);
             }
+            serverLineCount = data.lines.length;
         }
 
         // Restore last params to form
@@ -889,87 +1253,29 @@ async function restoreFireState() {
             updateSampleSize();
         }
 
-        // Show agreement if available
+        // Show agreement + ML size if available
         if (data.agreement_pct >= 0) {
             document.getElementById('agreement-info').innerHTML =
                 `Agreement: <strong>${data.agreement_pct}%</strong>`;
         }
+        updateMlSize(data.ml_area_ha);
 
-        // If fire is currently mapping, poll for completion
+        // If fire is currently mapping, set flag
         if (data.status === 'mapping') {
             isMapping = true;
-            document.getElementById('btn-map').disabled = true;
-            document.getElementById('btn-map-settings').disabled = true;
-            document.getElementById('status-text').textContent = 'mapping';
+            previouslyAccepted = !!data.previously_accepted;
+            disableMapButtons();
+            updateStatusDisplay('mapping', previouslyAccepted);
             log('--- Mapping in progress (reconnected) ---', 'dim');
-            pollMappingStatus();
+        }
+
+        // Restore serial gallery if results exist
+        const serialResults = data.serial_results || [];
+        if (serialResults.length > 0) {
+            showSerialGallery(serialResults);
+            lastSerialCount = serialResults.length;
         }
     } catch {}
-}
-
-async function pollMappingStatus() {
-    try {
-        const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/console`);
-        const data = await r.json();
-
-        // Show any new lines since last poll
-        const out = document.getElementById('console-output');
-        const shown = out.querySelectorAll('.line').length;
-        if (data.lines && data.lines.length > shown) {
-            for (let i = shown; i < data.lines.length; i++) {
-                log(data.lines[i]);
-            }
-        }
-
-        if (data.status === 'mapping') {
-            setTimeout(pollMappingStatus, 2000);
-        } else if (data.status === 'mapped') {
-            isMapping = false;
-            hasComparison = true;
-            log('Mapping complete!', 'success');
-
-            // Add result views to dropdowns
-            const newViews = [
-                ['result', 'ML classification'],
-                ['hint', 'Hint perimeter'],
-                ['comparison', 'Comparison (figure)'],
-                ['brush_comparison', 'Brush comparison'],
-            ];
-            for (const selId of ['view-select', 'view-select-right']) {
-                const s = document.getElementById(selId);
-                for (const [val, label] of newViews) {
-                    if (!s.querySelector(`option[value="${val}"]`)) {
-                        const opt = document.createElement('option');
-                        opt.value = val;
-                        opt.textContent = label;
-                        s.appendChild(opt);
-                    }
-                }
-            }
-            document.getElementById('view-select').value = 'post';
-            document.getElementById('view-select-right').value = 'result';
-            switchView();
-            if (splitActive) switchViewRight();
-
-            document.getElementById('btn-map').disabled = false;
-            document.getElementById('btn-map-settings').disabled = false;
-            document.getElementById('btn-accept').style.display = '';
-            document.getElementById('status-text').textContent = 'mapped';
-
-            if (data.agreement_pct >= 0) {
-                document.getElementById('agreement-info').innerHTML =
-                    `Agreement: <strong>${data.agreement_pct}%</strong>`;
-            }
-        } else {
-            // Error or other status
-            isMapping = false;
-            document.getElementById('btn-map').disabled = false;
-            document.getElementById('btn-map-settings').disabled = false;
-            document.getElementById('status-text').textContent = data.status;
-        }
-    } catch {
-        setTimeout(pollMappingStatus, 3000);
-    }
 }
 
 // -----------------------------------------------------------------------
@@ -977,13 +1283,31 @@ async function pollMappingStatus() {
 // -----------------------------------------------------------------------
 async function saveNotes() {
     const notes = document.getElementById('fire-notes').value;
+    const textarea = document.getElementById('fire-notes');
     try {
-        await fetch(`/api/fire/${encodeURIComponent(FIRE)}/notes`, {
+        const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/notes`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
             body: JSON.stringify({notes}),
         });
-    } catch {}
+        if (r.ok) {
+            textarea.style.borderColor = '#2d8a4e';
+            const origPlaceholder = textarea.placeholder;
+            textarea.placeholder = 'Saved!';
+            setTimeout(() => {
+                textarea.style.borderColor = '#ccc';
+                textarea.placeholder = origPlaceholder;
+            }, 1500);
+        } else {
+            textarea.style.borderColor = '#cc3333';
+            log('Failed to save notes', 'error');
+            setTimeout(() => textarea.style.borderColor = '#ccc', 2000);
+        }
+    } catch (err) {
+        textarea.style.borderColor = '#cc3333';
+        log('Failed to save notes: ' + err.message, 'error');
+        setTimeout(() => textarea.style.borderColor = '#ccc', 2000);
+    }
 }
 
 async function loadNotes() {
@@ -1006,75 +1330,62 @@ async function loadNotes() {
 // Split view (side-by-side)
 // -----------------------------------------------------------------------
 let splitActive = false;
-let rightZoomScale = 1, rightPanX = 0, rightPanY = 0;
 
 function toggleSplit() {
     splitActive = !splitActive;
     const container = document.getElementById('image-viewer-container');
+    const leftArea = document.getElementById('image-area');
     const rightArea = document.getElementById('image-area-right');
-    const rightSel = document.getElementById('view-select-right');
-    const btn = document.getElementById('btn-split');
+    const btnSplit = document.getElementById('btn-split');
+    const btnSync = document.getElementById('btn-sync');
 
     if (splitActive) {
         container.classList.add('split');
         rightArea.style.display = '';
-        rightSel.style.display = '';
-        btn.style.background = '#0066cc';
-        btn.style.color = '#fff';
-        switchViewRight();
+        btnSplit.style.background = '#0066cc';
+        btnSplit.style.color = '#fff';
+        btnSync.style.display = '';
+        btnSync.style.background = syncPanes ? '#0066cc' : '';
+        btnSync.style.color = syncPanes ? '#fff' : '';
+        initPaneInteraction('right');
+
+        if (syncPanes) {
+            // Inherit left pane's zoom/pan — don't reset either pane
+            const ls = paneState.left;
+            paneState.right.scale = ls.scale;
+            paneState.right.panX = ls.panX;
+            paneState.right.panY = ls.panY;
+        }
+        loadPaneImage('right', rightView);
+        // Re-apply transforms after layout settles (no fit — preserve position)
+        setTimeout(() => {
+            updateTransformForPane('left');
+            if (!syncPanes) zoomFitPane('right');
+            else updateTransformForPane('right');
+        }, 50);
     } else {
         container.classList.remove('split');
+        // Close the pane the user is NOT focused on
+        if (activePane === 'right') {
+            // Keep right, close left — swap right content into left pane
+            leftView = rightView;
+            loadPaneImage('left', leftView);
+            updateSubtitle('left', leftView);
+            paneState.left.scale = paneState.right.scale;
+            paneState.left.panX = paneState.right.panX;
+            paneState.left.panY = paneState.right.panY;
+            updateTransformForPane('left');
+        }
+        // Either way, hide right area and focus left
         rightArea.style.display = 'none';
-        rightSel.style.display = 'none';
-        btn.style.background = '';
-        btn.style.color = '';
+        btnSplit.style.background = '';
+        btnSplit.style.color = '';
+        btnSync.style.display = 'none';
+        setActivePane('left');
+        // Update dropdown to reflect the surviving view
+        const sel = document.getElementById('view-select');
+        if (sel.querySelector(`option[value="${leftView}"]`)) sel.value = leftView;
     }
-}
-
-function switchViewRight() {
-    if (!splitActive) return;
-    const view = document.getElementById('view-select-right').value;
-    if (!view) return;
-    const rightImg = document.getElementById('right-img');
-
-    if (view === 'comparison') {
-        rightImg.src = `/api/fire/${FIRE}/comparison?t=${Date.now()}`;
-    } else if (view === 'brush_comparison') {
-        rightImg.src = `/api/fire/${FIRE}/brush_comparison?t=${Date.now()}`;
-    } else {
-        rightImg.src = `/api/fire/${FIRE}/preview/${view}?t=${Date.now()}`;
-    }
-
-    rightImg.onload = () => {
-        rightImg.style.display = 'block';
-        zoomFitRight();
-    };
-    rightImg.onerror = () => {
-        rightImg.style.display = 'none';
-    };
-}
-
-function updateRightImage() {
-    switchViewRight();
-}
-
-function zoomFitRight() {
-    const img = document.getElementById('right-img');
-    const area = document.getElementById('image-area-right');
-    if (!img.naturalWidth || !img.naturalHeight) return;
-    rightZoomScale = Math.min(
-        area.clientWidth / img.naturalWidth,
-        area.clientHeight / img.naturalHeight);
-    rightPanX = (area.clientWidth - img.naturalWidth * rightZoomScale) / 2;
-    rightPanY = (area.clientHeight - img.naturalHeight * rightZoomScale) / 2;
-    img.style.transform = `translate(${rightPanX}px, ${rightPanY}px) scale(${rightZoomScale})`;
-}
-
-// Sync zoom/pan: when left pane zooms, match in right pane
-function syncRightPane() {
-    if (!splitActive) return;
-    const rightImg = document.getElementById('right-img');
-    rightImg.style.transform = `translate(${panX}px, ${panY}px) scale(${zoomScale})`;
 }
 
 // -----------------------------------------------------------------------
@@ -1082,7 +1393,7 @@ function syncRightPane() {
 // -----------------------------------------------------------------------
 (function() {
     try {
-        const order = JSON.parse(sessionStorage.getItem('fireOrder') || '[]');
+        const order = JSON.parse(localStorage.getItem('fireOrder') || '[]');
         if (order.length < 2) return;
         const idx = order.indexOf(FIRE);
         if (idx < 0) return;
@@ -1113,19 +1424,21 @@ function toggleControlPanel() {
     const hidden = panel.style.display === 'none';
     panel.style.display = hidden ? '' : 'none';
     btn.innerHTML = hidden ? '&#9654;' : '&#9664;';
-    sessionStorage.setItem('panelHidden', hidden ? '' : '1');
-    // Re-fit images after layout change
-    setTimeout(() => { zoomFit(); if (splitActive) zoomFitRight(); }, 50);
+    localStorage.setItem('panelHidden', hidden ? '' : '1');
+    // Re-apply transforms after layout change (preserve zoom position)
+    setTimeout(() => { updateTransformForPane('left'); if (splitActive) updateTransformForPane('right'); }, 50);
 }
 
 // Restore panel state
-if (sessionStorage.getItem('panelHidden') === '1') {
+if (localStorage.getItem('panelHidden') === '1') {
     document.getElementById('control-panel').style.display = 'none';
     document.getElementById('panel-toggle').innerHTML = '&#9664;';
 }
 
 prepareFire(null);
 loadNotes();
+// Start the unified state poller (handles all live updates)
+setTimeout(pollFireState, 3000);
 </script>
 </body>
 </html>

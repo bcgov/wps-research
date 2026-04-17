@@ -1,6 +1,7 @@
 """Per-fire state management for the web interface."""
 
 import os
+import threading
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
@@ -56,6 +57,7 @@ class FireInfo:
     # Mapping results
     last_comparison: str = ""
     last_params: dict = field(default_factory=dict)
+    ml_area_ha: float = -1.0  # -1 = not computed
 
     # Tracking
     previously_accepted: bool = False
@@ -63,12 +65,14 @@ class FireInfo:
     notes: str = ""
     agreement_pct: float = -1.0   # -1 = not computed
     console_log: list = field(default_factory=list)  # buffered output lines
+    serial_results: list = field(default_factory=list)  # [{params, agreement, run_id}]
 
 
 class AppState:
     """Global application state shared across all routes."""
 
     def __init__(self):
+        self.lock = threading.RLock()
         self.fires: dict[str, FireInfo] = {}
 
         # Loaded data
@@ -100,8 +104,8 @@ class AppState:
         self.admin_password: Optional[str] = None
         self.user_password: Optional[str] = None
 
-        # Sessions (cookie-based)
-        self.sessions: dict = {}        # token → {role, username, ip, created_at}
+        # Sessions (cookie-based, keys are SHA-256 hashes of tokens)
+        self.sessions: dict = {}        # hash(token) → {role, username, ip, created_at}
         self.session_file: str = ""     # path for persistence
 
         # IP access control
@@ -120,6 +124,19 @@ class AppState:
         # Batch mapping
         self.batch_status: Optional[dict] = None   # {running, total, completed, current_fire, errors}
 
+        # Deployment options
+        self.trust_proxy: bool = False
+        self.insecure_no_auth: bool = False
+        self.allowed_origins: set = set()
+
+        # Login rate limiting  {ip: [timestamp, ...]}
+        self.login_attempts: dict = {}
+
+        # Parameter analyzer (admin-only). Populated by analyzer_app.init_analyzer().
+        # Kept as a generic attribute so analyzer_state.py does not need to be
+        # imported here — keeps state.py free of analyzer dependencies.
+        self.analyzer = None
+
     def init_fires_from_gdf(self):
         """Populate fires dict from the loaded GeoDataFrame."""
         import re as _re
@@ -129,7 +146,7 @@ class AppState:
                 continue
             # Reject fire numbers that could cause path traversal
             if '..' in fn or '/' in fn or '\\' in fn or not _re.fullmatch(
-                    r'[A-Za-z0-9_. -]+', fn):
+                    r'[A-Za-z0-9][A-Za-z0-9_. -]*', fn):
                 continue
 
             # Parse fire date
@@ -160,6 +177,7 @@ class AppState:
             status = FireStatus.PENDING
             notes = ''
             agreement = -1.0
+            ml_area = -1.0
             last_params = {}
             canon_dir = os.path.join(self.output_root, fn)
             if os.path.exists(os.path.join(canon_dir, f'{fn}_comparison.png')):
@@ -175,6 +193,8 @@ class AppState:
                         notes = fire_info.get('notes', '')
                         agreement = float(
                             fire_info.get('agreement_pct', -1) or -1)
+                        ml_area = float(
+                            fire_info.get('ml_area_ha', -1) or -1)
                         # Restore mapping params
                         for section in ('tsne', 'hdbscan', 'random_forest',
                                         'sampling', 'crop'):
@@ -191,5 +211,19 @@ class AppState:
                 status=status,
                 notes=notes,
                 agreement_pct=agreement,
+                ml_area_ha=ml_area,
                 last_params=last_params,
             )
+
+        # Load persistent notes from notes.yaml (overrides _params.yaml)
+        notes_path = os.path.join(self.output_root, 'notes.yaml')
+        if os.path.isfile(notes_path):
+            try:
+                import yaml
+                with open(notes_path) as _nf:
+                    _notes_data = yaml.safe_load(_nf) or {}
+                for fn, note_text in _notes_data.items():
+                    if fn in self.fires and note_text:
+                        self.fires[fn].notes = str(note_text)
+            except Exception:
+                pass

@@ -15,7 +15,6 @@
         <span id="fire-count">{{ n_fires }} fires</span>
     </span>
     {{{ admin_link }}}
-    <button class="btn btn-success" style="font-size:11px;padding:3px 10px" onclick="downloadReport()">PDF Report</button>
     <a href="/logout" class="btn btn-secondary" style="font-size:11px;padding:3px 10px">Logout</a>
     <img src="/static/BC-Wildfire-Service-logo.png" alt="BC Wildfire Service" class="header-logo">
 </header>
@@ -73,7 +72,9 @@
 <div class="batch-bar" id="batch-bar" style="display:none">
     <span id="selected-count">0 selected</span>
     <button class="btn" id="btn-batch-map" onclick="batchMap()">Map Selected (with settings)</button>
+    <button class="btn btn-danger" id="btn-batch-cancel" onclick="batchCancel()" style="display:none">Cancel Batch</button>
     <button class="btn btn-danger" onclick="batchRemove()">Remove Selected</button>
+    <button class="btn btn-success" onclick="downloadReport()">PDF Report (accepted)</button>
     <span class="batch-progress" id="batch-progress"></span>
 </div>
 
@@ -86,7 +87,8 @@
             <th data-key="fire_numbe">Fire Number <span class="sort-arrow"></span></th>
             <th data-key="fire_date">Fire Date <span class="sort-arrow"></span></th>
             <th data-key="fire_year">Year <span class="sort-arrow"></span></th>
-            <th data-key="fire_size_ha">Size (ha) <span class="sort-arrow"></span></th>
+            <th data-key="fire_size_ha">Hint Size (ha) <span class="sort-arrow"></span></th>
+            <th data-key="ml_area_ha">ML Size (ha) <span class="sort-arrow"></span></th>
             <th data-key="agreement_pct">Agreement <span class="sort-arrow"></span></th>
             <th data-key="status">Status <span class="sort-arrow"></span></th>
             <th>Action</th>
@@ -117,6 +119,7 @@ const STATUS_ORDER = [
 async function loadFires() {
     const r = await fetch('/api/fires');
     allFires = await r.json();
+    lastFiresJSON = JSON.stringify(allFires);
     buildFilterUI();
     restoreFilterState();
     render();
@@ -158,11 +161,11 @@ function saveFilterState() {
         minSize: document.getElementById('filter-min-size').value,
         sortKey, sortAsc,
     };
-    sessionStorage.setItem('fireFilters', JSON.stringify(state));
+    localStorage.setItem('fireFilters', JSON.stringify(state));
 }
 
 function restoreFilterState() {
-    const raw = sessionStorage.getItem('fireFilters');
+    const raw = localStorage.getItem('fireFilters');
     if (!raw) return false;
     try {
         const s = JSON.parse(raw);
@@ -243,7 +246,7 @@ function resetFilters() {
     document.querySelectorAll('#status-filters input').forEach(cb => {
         statusSet.add(cb.value);
     });
-    sessionStorage.removeItem('fireFilters');
+    localStorage.removeItem('fireFilters');
     render();
 }
 
@@ -292,10 +295,11 @@ function render() {
         const tr = document.createElement('tr');
         const badge = `<span class="status-badge status-${f.status}">${f.status}</span>`;
         const prevBadge = f.previously_accepted
-            ? ' <span class="prev-accepted-badge" title="Previously accepted">&#10003;</span>'
+            ? '<span class="status-badge status-accepted status-badge-muted">accepted</span> '
             : '';
         const checked = selectedFires.has(f.fire_numbe) ? 'checked' : '';
         const agr = f.agreement_pct >= 0 ? f.agreement_pct + '%' : '';
+        const mlSize = f.ml_area_ha >= 0 ? f.ml_area_ha.toLocaleString() : '';
         const noteIcon = f.notes ? ` <span title="${esc(f.notes)}" style="cursor:help;color:#888">&#9998;</span>` : '';
         tr.innerHTML = `
             <td><input type="checkbox" class="fire-check" value="${encodeURIComponent(f.fire_numbe)}" ${checked} onchange="updateSelection()"></td>
@@ -303,8 +307,9 @@ function render() {
             <td>${esc(f.fire_date)}</td>
             <td>${f.fire_year || ''}</td>
             <td>${f.fire_size_ha != null ? f.fire_size_ha.toLocaleString() : ''}</td>
+            <td>${mlSize}</td>
             <td>${agr}</td>
-            <td>${badge}${prevBadge}</td>
+            <td>${prevBadge}${badge}</td>
             <td><a href="/fire/${encodeURIComponent(f.fire_numbe)}" class="btn">Open</a></td>
         `;
         tbody.appendChild(tr);
@@ -312,7 +317,7 @@ function render() {
     updateSelection();
 
     // Save filtered+sorted order for Next/Prev navigation on mapping page
-    sessionStorage.setItem('fireOrder',
+    localStorage.setItem('fireOrder',
         JSON.stringify(filtered.map(f => f.fire_numbe)));
 
     // Update sort arrows
@@ -362,6 +367,8 @@ document.getElementById('filter-min-size').addEventListener('keydown', e => {
 // -----------------------------------------------------------------------
 // Checkbox selection
 // -----------------------------------------------------------------------
+let batchRunning = false;
+
 function updateSelection() {
     selectedFires.clear();
     document.querySelectorAll('.fire-check:checked').forEach(cb => {
@@ -369,10 +376,12 @@ function updateSelection() {
     });
     const bar = document.getElementById('batch-bar');
     const count = selectedFires.size;
-    if (count > 0) {
+    if (count > 0 || batchRunning) {
         bar.style.display = 'flex';
-        document.getElementById('selected-count').textContent =
-            `${count} selected`;
+        if (!batchRunning) {
+            document.getElementById('selected-count').textContent =
+                `${count} selected`;
+        }
     } else {
         bar.style.display = 'none';
     }
@@ -417,6 +426,7 @@ async function batchMap() {
     if (!confirm(`Map ${fires.length} fire(s) with recommended settings?\n\nAccepted fires will be skipped.`)) return;
 
     document.getElementById('btn-batch-map').disabled = true;
+    batchRunning = true;
 
     try {
         const r = await fetch('/api/batch/map', {
@@ -443,21 +453,44 @@ async function pollBatchStatus() {
         const r = await fetch('/api/batch/status');
         const s = await r.json();
         if (s.running) {
+            batchRunning = true;
             const current = s.current_fire ? ` (${s.current_fire})` : '';
+            document.getElementById('selected-count').textContent = 'Batch running';
             prog.textContent =
                 `${s.completed}/${s.total} done${current}`;
+            document.getElementById('batch-bar').style.display = 'flex';
+            document.getElementById('btn-batch-cancel').style.display = '';
+            document.getElementById('btn-batch-map').disabled = true;
             setTimeout(pollBatchStatus, 3000);
         } else {
+            batchRunning = false;
             const errors = (s.errors || []).length;
             prog.textContent = errors > 0
                 ? `Batch complete. ${errors} error(s).`
                 : 'Batch complete.';
             document.getElementById('btn-batch-map').disabled = false;
-            setTimeout(() => prog.textContent = '', 8000);
+            document.getElementById('btn-batch-cancel').style.display = 'none';
+            setTimeout(() => { prog.textContent = ''; updateSelection(); }, 8000);
         }
     } catch {
+        batchRunning = false;
         prog.textContent = '';
         document.getElementById('btn-batch-map').disabled = false;
+        document.getElementById('btn-batch-cancel').style.display = 'none';
+    }
+}
+
+async function batchCancel() {
+    if (!confirm('Cancel the running batch?')) return;
+    try {
+        await fetch('/api/batch/cancel', {
+            method: 'POST',
+            headers: {'X-Requested-With': 'fetch'},
+        });
+        document.getElementById('batch-progress').textContent = 'Cancelling...';
+        document.getElementById('btn-batch-cancel').disabled = true;
+    } catch (err) {
+        alert('Failed to cancel: ' + err.message);
     }
 }
 
@@ -595,17 +628,24 @@ async function loadSettings() {
 }
 
 // -----------------------------------------------------------------------
-// Auto-refresh fire list every 5 seconds
+// Auto-refresh fire list every 5 seconds (skip re-render if unchanged)
 // -----------------------------------------------------------------------
+let lastFiresJSON = '';
+
 async function refreshFires() {
     try {
         const r = await fetch('/api/fires');
         const newFires = await r.json();
-        // Update statuses without disrupting filters
-        const statusMap = {};
-        newFires.forEach(f => statusMap[f.fire_numbe] = f);
-        allFires = newFires;
-        render();
+        const newJSON = JSON.stringify(newFires);
+        if (newJSON !== lastFiresJSON) {
+            lastFiresJSON = newJSON;
+            // Preserve scroll position across re-renders
+            const wrap = document.querySelector('.table-wrap');
+            const scrollTop = wrap ? wrap.scrollTop : 0;
+            allFires = newFires;
+            render();
+            if (wrap) wrap.scrollTop = scrollTop;
+        }
     } catch {}
 }
 
@@ -615,7 +655,17 @@ setInterval(refreshFires, 5000);
 // Download PDF report of accepted fires
 // -----------------------------------------------------------------------
 function downloadReport() {
-    window.location.href = '/api/report';
+    // Only accepted fires from the selection
+    const accepted = [...selectedFires].filter(fn => {
+        const f = allFires.find(x => x.fire_numbe === fn);
+        return f && f.status === 'accepted';
+    });
+    if (accepted.length === 0) {
+        alert('No accepted fires selected. Select accepted fires to generate a report.');
+        return;
+    }
+    const params = accepted.map(fn => `fire=${encodeURIComponent(fn)}`).join('&');
+    window.location.href = `/api/report?${params}`;
 }
 
 // -----------------------------------------------------------------------
@@ -626,9 +676,11 @@ async function checkBatchOnLoad() {
         const r = await fetch('/api/batch/status');
         const s = await r.json();
         if (s.running) {
+            batchRunning = true;
             document.getElementById('batch-bar').style.display = 'flex';
             document.getElementById('selected-count').textContent = 'Batch running';
             document.getElementById('btn-batch-map').disabled = true;
+            document.getElementById('btn-batch-cancel').style.display = '';
             pollBatchStatus();
         }
     } catch {}

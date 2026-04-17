@@ -6,6 +6,8 @@ SSE (Server-Sent Events) via fetch() for real-time console streaming.
 
 import datetime
 import glob
+import hashlib
+import ipaddress
 import json
 import mimetypes
 import os
@@ -16,7 +18,7 @@ import sys
 import threading
 import time
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, unquote
+from urllib.parse import urlparse, unquote, parse_qs
 
 import numpy as np
 from osgeo import gdal
@@ -36,6 +38,9 @@ _gpu_lock = threading.Lock()
 _gpu_queue = 0            # number of tasks waiting or running
 _gpu_queue_lock = threading.Lock()   # protects the counter
 
+# Batch cancellation flag
+_batch_cancel = threading.Event()
+
 
 def init_app(app_state: AppState):
     global state
@@ -45,17 +50,354 @@ def init_app(app_state: AppState):
 _SESSION_MAX_AGE = 30 * 24 * 3600  # 30 days in seconds
 
 
+# =========================================================================
+# Security helpers
+# =========================================================================
+
+def _hash_token(token: str) -> str:
+    """SHA-256 hash a session token for storage (never persist raw tokens)."""
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _normalize_ip(ip_str: str) -> str:
+    """Normalize IP address. Maps IPv6-mapped IPv4 (::ffff:x.x.x.x) to IPv4."""
+    try:
+        addr = ipaddress.ip_address(ip_str)
+        if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped:
+            return str(addr.ipv4_mapped)
+        return str(addr)
+    except ValueError:
+        return ip_str
+
+
+def _atomic_yaml_dump(path: str, data, mode: int = 0o600):
+    """Write YAML atomically via tmp + rename. Sets restrictive permissions."""
+    import yaml
+    tmp = path + '.tmp'
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+    with os.fdopen(fd, 'w') as f:
+        yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+    os.replace(tmp, path)
+
+
+# Login rate limiting
+_LOGIN_MAX_ATTEMPTS = 5
+_LOGIN_WINDOW_SECONDS = 300  # 5 minutes
+
+
+def _check_login_rate(ip: str) -> bool:
+    """Return True if the IP is under the rate limit."""
+    now = time.time()
+    with state.lock:
+        attempts = state.login_attempts.get(ip, [])
+        attempts = [t for t in attempts if now - t < _LOGIN_WINDOW_SECONDS]
+        state.login_attempts[ip] = attempts
+        return len(attempts) < _LOGIN_MAX_ATTEMPTS
+
+
+def _record_failed_login(ip: str):
+    """Record a failed login attempt for rate limiting."""
+    now = time.time()
+    with state.lock:
+        attempts = state.login_attempts.get(ip, [])
+        attempts.append(now)
+        state.login_attempts[ip] = attempts
+
+
+# =========================================================================
+# Parameter validation — typed bounds for subprocess arguments
+# =========================================================================
+
+_PARAM_SPEC = {
+    'seed':                 ('int',   0, 2**31 - 1),
+    'rf_n_estimators':      ('int',   1, 2000),
+    'rf_max_depth':         ('int',   1, 100),
+    'rf_max_features':      ('choice', {'sqrt', 'log2', 'auto'}),
+    'rf_random_state':      ('int',   0, 2**31 - 1),
+    'controlled_ratio':     ('float', 0.01, 2.0),
+    'hdbscan_min_samples':  ('int',   1, 10000),
+    'tsne_perplexity':      ('float', 1.0, 1000.0),
+    'tsne_learning_rate':   ('float', 1.0, 10000.0),
+    'tsne_max_iter':        ('int',   100, 10000),
+    'tsne_init':            ('choice', {'random', 'pca'}),
+    'tsne_n_components':    ('int',   2, 3),
+    'tsne_random_state':    ('int',   0, 2**31 - 1),
+    'contour_width':        ('float', 0.0, 10.0),
+    'sample_rate':          ('float', 0.001, 1.0),
+    'min_samples':          ('int',   1, 1000000),
+    'max_samples':          ('int',   1, 1000000),
+}
+
+
+def _validate_param(key: str, raw):
+    """Validate and coerce a single parameter. Raises ValueError on bad input."""
+    if key not in _PARAM_SPEC:
+        return raw
+    spec = _PARAM_SPEC[key]
+    kind = spec[0]
+    if kind == 'int':
+        _, lo, hi = spec
+        v = int(float(raw))
+        if not (lo <= v <= hi):
+            raise ValueError(f'{key}={raw} out of range [{lo}, {hi}]')
+        return v
+    if kind == 'float':
+        _, lo, hi = spec
+        v = float(raw)
+        if not (lo <= v <= hi):
+            raise ValueError(f'{key}={raw} out of range [{lo}, {hi}]')
+        return v
+    if kind == 'choice':
+        _, allowed = spec
+        s = str(raw)
+        if s not in allowed:
+            raise ValueError(
+                f'{key}={raw} must be one of {sorted(allowed)}')
+        return s
+    return raw
+
+
+def _validate_embed_bands(eb) -> str | None:
+    """Validate embed_bands (comma-separated positive ints). Returns cleaned string."""
+    if not eb or not str(eb).strip():
+        return None
+    parts = [p.strip() for p in str(eb).split(',') if p.strip()]
+    if not all(p.isdigit() and 1 <= int(p) <= 999 for p in parts):
+        raise ValueError(f'Invalid embed_bands: {eb!r}')
+    return ','.join(parts)
+
+
+# Fixed CSV fieldnames for accepted_params.csv (prevents header drift)
+_CSV_FIELDNAMES = [
+    'fire_numbe', 'fire_size_ha', 'agreement_pct', 'padding', 'timestamp',
+    'sample_rate', 'min_samples', 'max_samples', 'seed',
+    'embed_bands', 'tsne_perplexity', 'tsne_learning_rate',
+    'tsne_max_iter', 'tsne_init', 'tsne_n_components',
+    'tsne_random_state',
+    'controlled_ratio', 'hdbscan_min_samples',
+    'rf_n_estimators', 'rf_max_depth', 'rf_max_features',
+    'rf_random_state', 'contour_width',
+]
+
+
 def _save_sessions():
-    """Persist sessions to disk."""
+    """Persist sessions to disk (tokens are already hashed in memory)."""
     if not state.session_file:
         return
     try:
+        _atomic_yaml_dump(state.session_file, dict(state.sessions))
+    except Exception as exc:
+        sys.stderr.write(f'[save] WARNING: Failed to save sessions: {exc}\n')
+        sys.stderr.flush()
+
+
+def _save_settings():
+    """Persist recommended settings to output_root (not the package dir)."""
+    try:
+        settings_path = os.path.join(state.output_root, 'recommended_settings.yaml')
+        _atomic_yaml_dump(settings_path, list(state.recommended_settings),
+                          mode=0o644)
+    except Exception as exc:
+        sys.stderr.write(
+            f'[save] WARNING: Failed to save settings: {exc}\n')
+        sys.stderr.flush()
+
+
+def _save_notes():
+    """Persist all fire notes to notes.yaml."""
+    try:
         import yaml
-        with open(state.session_file, 'w') as f:
-            yaml.dump(dict(state.sessions), f,
-                      default_flow_style=False, sort_keys=False)
-    except Exception:
-        pass
+        notes_path = os.path.join(state.output_root, 'notes.yaml')
+        notes_data = {}
+        for fn, fire in state.fires.items():
+            if fire.notes:
+                notes_data[fn] = fire.notes
+        tmp_path = notes_path + '.tmp'
+        with open(tmp_path, 'w') as f:
+            yaml.dump(notes_data, f,
+                      default_flow_style=False, sort_keys=True)
+        os.replace(tmp_path, notes_path)
+    except Exception as exc:
+        sys.stderr.write(
+            f'[save] WARNING: Failed to save notes: {exc}\n')
+        sys.stderr.flush()
+
+
+def _save_fire_state():
+    """Persist per-fire state to fire_state.yaml so mapped fires survive restart."""
+    try:
+        data = {}
+        for fn, fire in state.fires.items():
+            # Only persist fires with meaningful state beyond PENDING
+            if (fire.status == FireStatus.PENDING and not fire.hidden
+                    and not fire.cache_dir):
+                continue
+            entry = {
+                'status': fire.status.value,
+                'hidden': fire.hidden,
+            }
+            if fire.cache_dir:
+                entry['cache_dir'] = fire.cache_dir
+            if fire.crop_bin:
+                entry['crop_bin'] = fire.crop_bin
+            if fire.hint_bin:
+                entry['hint_bin'] = fire.hint_bin
+            if fire.perim_bin:
+                entry['perim_bin'] = fire.perim_bin
+            if fire.viirs_bin:
+                entry['viirs_bin'] = fire.viirs_bin
+            if fire.crop_w:
+                entry['crop_w'] = fire.crop_w
+                entry['crop_h'] = fire.crop_h
+            if fire.padding_used:
+                entry['padding_used'] = fire.padding_used
+            if fire.acc_start:
+                entry['acc_start'] = fire.acc_start
+                entry['acc_end'] = fire.acc_end
+            if fire.perimeter_type:
+                entry['perimeter_type'] = fire.perimeter_type
+            if fire.sample_size:
+                entry['sample_size'] = fire.sample_size
+            if fire.available_views:
+                entry['available_views'] = list(fire.available_views)
+            if fire.last_comparison:
+                entry['last_comparison'] = fire.last_comparison
+            if fire.last_params:
+                entry['last_params'] = dict(fire.last_params)
+            if fire.ml_area_ha >= 0:
+                entry['ml_area_ha'] = fire.ml_area_ha
+            if fire.agreement_pct >= 0:
+                entry['agreement_pct'] = fire.agreement_pct
+            if fire.previously_accepted:
+                entry['previously_accepted'] = True
+            data[fn] = entry
+
+        state_path = os.path.join(state.output_root, 'fire_state.yaml')
+        _atomic_yaml_dump(state_path, data, mode=0o644)
+    except Exception as exc:
+        sys.stderr.write(
+            f'[save] WARNING: Failed to save fire state: {exc}\n')
+        sys.stderr.flush()
+
+
+def _load_fire_state():
+    """Restore per-fire state from fire_state.yaml after init_fires_from_gdf."""
+    state_path = os.path.join(state.output_root, 'fire_state.yaml')
+    if not os.path.isfile(state_path):
+        return
+
+    try:
+        import yaml
+        with open(state_path) as f:
+            data = yaml.safe_load(f) or {}
+    except Exception as exc:
+        sys.stderr.write(
+            f'[load] WARNING: Failed to load fire state: {exc}\n')
+        sys.stderr.flush()
+        return
+
+    restored = 0
+    for fn, entry in data.items():
+        if fn not in state.fires:
+            continue
+        fire = state.fires[fn]
+
+        # Restore hidden flag
+        if entry.get('hidden'):
+            fire.hidden = True
+
+        saved_status = entry.get('status', 'pending')
+
+        # Don't downgrade: if init_fires_from_gdf already found ACCEPTED,
+        # only restore supplementary fields, not status
+        if fire.status == FireStatus.ACCEPTED and saved_status != 'accepted':
+            # Just restore hidden and skip — the accepted state from disk
+            # is authoritative
+            continue
+
+        # Restore cache paths — but only if they still exist on disk
+        cache_dir = entry.get('cache_dir', '')
+        if cache_dir and os.path.isdir(cache_dir):
+            fire.cache_dir = cache_dir
+            fire.crop_bin = entry.get('crop_bin', '')
+            fire.hint_bin = entry.get('hint_bin', '')
+            fire.perim_bin = entry.get('perim_bin', '')
+            fire.viirs_bin = entry.get('viirs_bin', '')
+            fire.crop_w = entry.get('crop_w', 0)
+            fire.crop_h = entry.get('crop_h', 0)
+            fire.padding_used = entry.get('padding_used', 0.0)
+            fire.acc_start = entry.get('acc_start', '')
+            fire.acc_end = entry.get('acc_end', '')
+            fire.perimeter_type = entry.get('perimeter_type', '')
+            fire.sample_size = entry.get('sample_size', 0)
+            fire.available_views = entry.get('available_views', [])
+            fire.last_comparison = entry.get('last_comparison', '')
+            fire.last_params = entry.get('last_params', {})
+            fire.ml_area_ha = entry.get('ml_area_ha', -1.0)
+            fire.agreement_pct = entry.get('agreement_pct', -1.0)
+            fire.previously_accepted = entry.get(
+                'previously_accepted', False)
+
+            # Validate critical files exist before restoring status
+            if saved_status in ('ready', 'mapped'):
+                crop_ok = (fire.crop_bin
+                           and os.path.isfile(fire.crop_bin))
+                hint_ok = (fire.hint_bin
+                           and os.path.isfile(fire.hint_bin))
+                if crop_ok and hint_ok:
+                    fire.status = FireStatus(saved_status)
+                    restored += 1
+                else:
+                    fire.status = FireStatus.PENDING
+            elif saved_status == 'accepted':
+                fire.status = FireStatus.ACCEPTED
+                restored += 1
+            # MAPPING/PREPARING on disk means crashed mid-work — reset
+            elif saved_status in ('mapping', 'preparing'):
+                # Check if a mapped result exists in cache
+                comp = os.path.join(
+                    cache_dir, f'{fn}_comparison.png')
+                if os.path.isfile(comp):
+                    fire.status = FireStatus.MAPPED
+                    fire.last_comparison = comp
+                    restored += 1
+                else:
+                    fire.status = FireStatus.READY
+        elif saved_status == 'accepted':
+            fire.status = FireStatus.ACCEPTED
+
+    if restored:
+        sys.stderr.write(
+            f'[load] Restored state for {restored} fire(s) '
+            f'from fire_state.yaml\n')
+        sys.stderr.flush()
+
+
+def _compute_ml_area(fire: 'FireInfo',
+                     clf_path: str = None) -> float:
+    """Compute ML burned area in hectares from a classified raster.
+
+    Returns area in ha or -1 if computation fails.
+    """
+    if clf_path is None:
+        clf_path = os.path.join(
+            fire.cache_dir,
+            f'{fire.fire_numbe}_crop.bin_classified.bin')
+    if not os.path.isfile(clf_path):
+        return -1.0
+    try:
+        gt = state.raster_gt
+        pixel_area_m2 = abs(gt[1] * gt[5])
+        ds = gdal.Open(clf_path, gdal.GA_ReadOnly)
+        arr = ds.GetRasterBand(1).ReadAsArray()
+        ds = None
+        burned_px = int(np.nansum(arr > 0))
+        ml_area_ha = burned_px * pixel_area_m2 / 10000.0
+        return round(ml_area_ha, 2)
+    except Exception as exc:
+        sys.stderr.write(
+            f'[ml_area] WARNING: Failed to compute ML area: {exc}\n')
+        return -1.0
 
 
 def _overlay_mask_on_post(fire: 'FireInfo', raster_path: str,
@@ -64,6 +406,11 @@ def _overlay_mask_on_post(fire: 'FireInfo', raster_path: str,
 
     *color* is (r, g, b) floats 0-1 for the tint.
     Produces a pixel-aligned PNG at the same dimensions as post.png.
+
+    When the overlay raster has different dimensions from the current
+    crop (e.g. a previously accepted classification after re-cropping
+    with different padding), uses GDAL geotransforms to place it at
+    the correct geographic position rather than naively stretching.
     """
     try:
         post_path = os.path.join(fire.cache_dir, 'previews', 'post.png')
@@ -81,14 +428,69 @@ def _overlay_mask_on_post(fire: 'FireInfo', raster_path: str,
 
         ds = gdal.Open(raster_path, gdal.GA_ReadOnly)
         arr = ds.GetRasterBand(1).ReadAsArray()
+        old_gt = ds.GetGeoTransform()
         ds = None
 
         ph, pw = post.shape[:2]
         ah, aw = arr.shape
+
         if ah != ph or aw != pw:
-            arr = scipy_zoom(
-                arr.astype(np.float32),
-                (ph / ah, pw / aw), order=0)
+            aligned = False
+            # Try geospatial alignment using crop geotransform.
+            # Both rasters are crops of the same source, so pixel
+            # sizes match — we just need to compute the offset.
+            if fire.crop_bin and os.path.isfile(fire.crop_bin):
+                try:
+                    ds_crop = gdal.Open(fire.crop_bin, gdal.GA_ReadOnly)
+                    new_gt = ds_crop.GetGeoTransform()
+                    new_w = ds_crop.RasterXSize
+                    new_h = ds_crop.RasterYSize
+                    ds_crop = None
+
+                    if (old_gt and new_gt
+                            and abs(old_gt[1] - new_gt[1]) < 1e-6
+                            and abs(old_gt[5] - new_gt[5]) < 1e-6):
+                        # Pixel sizes match — compute offset
+                        off_x = round(
+                            (old_gt[0] - new_gt[0]) / new_gt[1])
+                        off_y = round(
+                            (old_gt[3] - new_gt[3]) / new_gt[5])
+
+                        # Place old raster in crop-sized array
+                        arr_aligned = np.zeros(
+                            (new_h, new_w), dtype=arr.dtype)
+                        src_y0 = max(0, -off_y)
+                        src_x0 = max(0, -off_x)
+                        dst_y0 = max(0, off_y)
+                        dst_x0 = max(0, off_x)
+                        copy_h = min(ah - src_y0, new_h - dst_y0)
+                        copy_w = min(aw - src_x0, new_w - dst_x0)
+                        if copy_h > 0 and copy_w > 0:
+                            arr_aligned[
+                                dst_y0:dst_y0 + copy_h,
+                                dst_x0:dst_x0 + copy_w,
+                            ] = arr[
+                                src_y0:src_y0 + copy_h,
+                                src_x0:src_x0 + copy_w,
+                            ]
+
+                        # Scale to match preview PNG dimensions
+                        # (preview may be downsampled from crop)
+                        if new_h != ph or new_w != pw:
+                            arr_aligned = scipy_zoom(
+                                arr_aligned.astype(np.float32),
+                                (ph / new_h, pw / new_w), order=0)
+
+                        arr = arr_aligned
+                        aligned = True
+                except Exception:
+                    pass
+
+            if not aligned:
+                # Fallback: naive resize (same-extent rasters)
+                arr = scipy_zoom(
+                    arr.astype(np.float32),
+                    (ph / ah, pw / aw), order=0)
 
         mask = arr > 0
         result = post[:, :, :3].copy()
@@ -100,10 +502,13 @@ def _overlay_mask_on_post(fire: 'FireInfo', raster_path: str,
         out_path = os.path.join(fire.cache_dir, 'previews', f'{out_name}.png')
         imsave(out_path, np.clip(result, 0, 1))
 
-        if out_name not in fire.available_views:
+        if (out_name not in fire.available_views
+                and not out_name.startswith('serial_')):
             fire.available_views.append(out_name)
-    except Exception:
-        pass
+    except Exception as exc:
+        sys.stderr.write(
+            f'[overlay] WARNING: Failed to generate {out_name} '
+            f'overlay: {exc}\n')
 
 
 def _generate_result_preview(fire: 'FireInfo'):
@@ -152,17 +557,236 @@ def _compute_agreement(fire: 'FireInfo') -> float:
             return 0.0
         intersection = np.sum(clf_mask & hint_mask)
         return round(float(intersection / union) * 100, 1)
-    except Exception:
+    except Exception as exc:
+        sys.stderr.write(
+            f'[agreement] WARNING: Failed to compute agreement: {exc}\n')
         return -1.0
 
 
+# =========================================================================
+# Parameter ranking — learns from accepted_params.csv
+# =========================================================================
+
+_SIZE_BUCKETS = [
+    (0, 10), (10, 50), (50, 100), (100, 500),
+    (500, 1000), (1000, 5000), (5000, float('inf')),
+]
+
+# Parameters that matter for ranking (exclude metadata/display)
+_RANKABLE_PARAMS = [
+    'sample_rate', 'min_samples', 'max_samples', 'seed',
+    'embed_bands', 'tsne_perplexity', 'tsne_learning_rate',
+    'tsne_max_iter', 'tsne_init', 'tsne_n_components',
+    'tsne_random_state',
+    'controlled_ratio', 'hdbscan_min_samples',
+    'rf_n_estimators', 'rf_max_depth', 'rf_max_features',
+    'rf_random_state',
+    'padding', 'contour_width',
+]
+
+
+def _parse_fire_context(fire_numbe: str) -> tuple:
+    """Extract (region, zone) from fire number.
+
+    E.g., 'C11659' → ('C', 'C1'), 'G80123' → ('G', 'G8').
+    """
+    if not fire_numbe:
+        return ('', '')
+    region = fire_numbe[0].upper() if fire_numbe[0].isalpha() else ''
+    zone = ''
+    if len(fire_numbe) >= 2 and region:
+        zone = region + fire_numbe[1]
+    return (region, zone)
+
+
+def _size_bucket(ha: float) -> tuple:
+    """Return (lo, hi) bucket for a fire size."""
+    for lo, hi in _SIZE_BUCKETS:
+        if lo <= ha < hi:
+            return (lo, hi)
+    return _SIZE_BUCKETS[-1]
+
+
+def _load_accepted_params() -> list[dict]:
+    """Load accepted_params.csv into a list of dicts."""
+    csv_path = os.path.join(state.output_root, 'accepted_params.csv')
+    if not os.path.isfile(csv_path):
+        return []
+    try:
+        import csv
+        with open(csv_path, newline='') as f:
+            reader = csv.DictReader(f)
+            return list(reader)
+    except Exception:
+        return []
+
+
+def _rank_params_for_fire(fire_numbe: str, fire_size_ha: float,
+                          n: int = 3) -> list[dict]:
+    """Return top-N parameter sets for a fire, ranked by agreement_pct.
+
+    Uses hierarchical context matching:
+      1. Same zone + same size bucket (e.g., C1 fires 100-500 ha)
+      2. Same region + same size bucket (e.g., all C fires 100-500 ha)
+      3. Same size bucket, any region
+      4. Fall back to recommended_settings.yaml
+    """
+    all_rows = _load_accepted_params()
+    if not all_rows:
+        # Cold start — use all recommended settings tiers
+        seen = set()
+        ranked = []
+        # Size-matched tier first
+        rec = _get_recommended_params(fire_size_ha)
+        if rec:
+            key = tuple(sorted(
+                (k, str(v)) for k, v in rec.items() if v is not None))
+            seen.add(key)
+            ranked.append(rec)
+        # Then remaining tiers
+        for row in state.recommended_settings:
+            if len(ranked) >= n:
+                break
+            tier_params = row.get('params', {})
+            if not tier_params:
+                continue
+            key = tuple(sorted(
+                (k, str(v)) for k, v in tier_params.items()
+                if v is not None))
+            if key not in seen:
+                seen.add(key)
+                ranked.append(dict(tier_params))
+        return ranked[:n]
+
+    region, zone = _parse_fire_context(fire_numbe)
+    bucket = _size_bucket(fire_size_ha)
+
+    def in_bucket(row):
+        try:
+            sz = float(row.get('fire_size_ha', 0))
+            return bucket[0] <= sz < bucket[1]
+        except (ValueError, TypeError):
+            return False
+
+    def row_context(row):
+        fn = row.get('fire_numbe', '')
+        r, z = _parse_fire_context(fn)
+        return (r, z)
+
+    def row_agreement(row):
+        try:
+            return float(row.get('agreement_pct', -1))
+        except (ValueError, TypeError):
+            return -1.0
+
+    def extract_params(row):
+        """Extract a clean params dict from a CSV row.
+
+        Only includes keys that have actual values — omits None/empty
+        so that downstream .get(key, default) falls back correctly.
+        """
+        params = {}
+        for key in _RANKABLE_PARAMS:
+            val = row.get(key)
+            if val is not None and val != '':
+                # Try to convert to number
+                try:
+                    if '.' in str(val):
+                        params[key] = float(val)
+                    else:
+                        params[key] = int(val)
+                except (ValueError, TypeError):
+                    params[key] = val
+        return params
+
+    # Hierarchical matching
+    candidates = None
+    min_required = 3
+
+    # Level 1: same zone + same size bucket
+    if zone:
+        level1 = [r for r in all_rows
+                   if in_bucket(r) and row_context(r)[1] == zone]
+        if len(level1) >= min_required:
+            candidates = level1
+
+    # Level 2: same region + same size bucket
+    if candidates is None and region:
+        level2 = [r for r in all_rows
+                   if in_bucket(r) and row_context(r)[0] == region]
+        if len(level2) >= min_required:
+            candidates = level2
+
+    # Level 3: same size bucket, any region
+    if candidates is None:
+        level3 = [r for r in all_rows if in_bucket(r)]
+        if len(level3) >= 1:
+            candidates = level3
+
+    # Level 4: all accepted fires
+    if candidates is None:
+        candidates = all_rows
+
+    if not candidates:
+        params = _get_recommended_params(fire_size_ha)
+        return [params] if params else []
+
+    # Sort by agreement_pct descending
+    candidates.sort(key=row_agreement, reverse=True)
+
+    # Extract unique parameter sets (deduplicate)
+    seen = set()
+    ranked = []
+    for row in candidates:
+        params = extract_params(row)
+        # Create a hashable key for deduplication
+        key = tuple(sorted(
+            (k, str(v)) for k, v in params.items() if v is not None))
+        if key not in seen:
+            seen.add(key)
+            ranked.append(params)
+        if len(ranked) >= n:
+            break
+
+    # If we don't have enough, pad with recommended settings.
+    # Try the size-matched tier first, then all other tiers.
+    if len(ranked) < n:
+        # Size-matched tier first
+        rec = _get_recommended_params(fire_size_ha)
+        if rec:
+            key = tuple(sorted(
+                (k, str(v)) for k, v in rec.items() if v is not None))
+            if key not in seen:
+                seen.add(key)
+                ranked.append(rec)
+        # Then remaining tiers
+        for row in state.recommended_settings:
+            if len(ranked) >= n:
+                break
+            tier_params = row.get('params', {})
+            if not tier_params:
+                continue
+            key = tuple(sorted(
+                (k, str(v)) for k, v in tier_params.items()
+                if v is not None))
+            if key not in seen:
+                seen.add(key)
+                ranked.append(dict(tier_params))
+
+    return ranked[:n]
+
+
 def _get_recommended_params(fire_size_ha: float) -> dict:
-    """Find recommended params for a fire of given size."""
+    """Find recommended params for a fire of given size.
+
+    Always returns a fresh copy so callers can never mutate the
+    canonical settings stored in ``state.recommended_settings``.
+    """
     for row in state.recommended_settings:
         if (fire_size_ha >= row.get('min_ha', 0)
                 and (row.get('max_ha') is None
                      or fire_size_ha < row['max_ha'])):
-            return row.get('params', {})
+            return dict(row.get('params', {}))
     return {}
 
 
@@ -186,6 +810,12 @@ def _batch_map_worker(fire_numbes: list[str]):
     sys.stderr.flush()
 
     for fire_numbe in fire_numbes:
+        # Check cancellation
+        if _batch_cancel.is_set():
+            sys.stderr.write('[batch] Cancelled by user.\n')
+            sys.stderr.flush()
+            break
+
         fire = state.fires.get(fire_numbe)
         if not fire or fire.status in (
                 FireStatus.ACCEPTED, FireStatus.MAPPING):
@@ -200,7 +830,10 @@ def _batch_map_worker(fire_numbes: list[str]):
         if not params:
             params = {}
 
-        padding = params.get('padding', state.padding)
+        padding = params.get('padding')
+        if padding is None:
+            padding = state.padding
+        padding = float(padding)
 
         try:
             with _gpu_lock:
@@ -264,6 +897,7 @@ def _batch_map_worker(fire_numbes: list[str]):
                         comp if os.path.exists(comp) else '')
                     fire.last_params = params
                     fire.agreement_pct = _compute_agreement(fire)
+                    fire.ml_area_ha = _compute_ml_area(fire)
                     _generate_result_preview(fire)
                     fire.status = FireStatus.MAPPED
                     sys.stderr.write(
@@ -288,6 +922,7 @@ def _batch_map_worker(fire_numbes: list[str]):
             sys.stderr.flush()
 
         state.batch_status['completed'] += 1
+        _save_fire_state()
 
     state.batch_status['running'] = False
     state.batch_status['current_fire'] = ''
@@ -298,20 +933,415 @@ def _batch_map_worker(fire_numbes: list[str]):
     sys.stderr.flush()
 
 
+def _serial_map_worker(fire_numbe: str, param_sets: list[dict]):
+    """Run N mappings for the same fire.
+
+    Optimisation: the expensive deterministic part (t-SNE + RF) runs once
+    on the first invocation and is cached.  Runs 2-N load the cached state
+    and only re-run HDBSCAN, which is much faster.
+    """
+    import traceback
+
+    fire = state.fires[fire_numbe]
+    fire.serial_results = []
+    fire.console_log = []
+    n_total = len(param_sets)
+
+    # Path for the shared intermediate state (.npz)
+    state_file = os.path.join(
+        fire.cache_dir, f'{fire_numbe}_serial_state.npz')
+
+    sys.stderr.write(
+        f'[serial] Starting {n_total} run(s) for {fire_numbe}\n')
+    sys.stderr.flush()
+
+    # Snapshot previously accepted results as Run 0
+    if fire.previously_accepted:
+        try:
+            old_agreement = fire.agreement_pct
+            old_ml_area = fire.ml_area_ha
+            old_params = dict(fire.last_params) if fire.last_params else {}
+
+            # Search both cache_dir and canonical output dir
+            canon_dir = os.path.join(state.output_root, fire_numbe)
+            search_dirs = [fire.cache_dir]
+            if os.path.isdir(canon_dir):
+                search_dirs.append(canon_dir)
+
+            # Find existing classified raster
+            old_clf = None
+            for _dir in search_dirs:
+                for _pat in (f'{fire_numbe}_crop.bin_classified.bin',
+                             f'{fire_numbe}_crop_classified.bin',
+                             f'{fire_numbe}_classified.bin'):
+                    _cand = os.path.join(_dir, _pat)
+                    if os.path.isfile(_cand):
+                        old_clf = _cand
+                        break
+                if old_clf:
+                    break
+            if old_clf is None:
+                for _dir in search_dirs:
+                    for _cand in glob.glob(os.path.join(
+                            _dir, '*classified*.bin')):
+                        if 'serial_' not in os.path.basename(_cand):
+                            old_clf = _cand
+                            break
+                    if old_clf:
+                        break
+
+            # Copy classified raster as serial_0
+            s0_clf = os.path.join(
+                fire.cache_dir,
+                f'{fire_numbe}_serial_0_classified.bin')
+            if old_clf and os.path.isfile(old_clf):
+                shutil.copy2(old_clf, s0_clf)
+                old_hdr = os.path.splitext(old_clf)[0] + '.hdr'
+                if not os.path.isfile(old_hdr):
+                    old_hdr = old_clf + '.hdr'
+                if os.path.isfile(old_hdr):
+                    shutil.copy2(
+                        old_hdr,
+                        os.path.splitext(s0_clf)[0] + '.hdr')
+
+            # Copy comparison PNG as serial_0
+            s0_comp = os.path.join(
+                fire.cache_dir,
+                f'{fire_numbe}_serial_0.png')
+            for _dir in search_dirs:
+                old_comp = os.path.join(
+                    _dir, f'{fire_numbe}_comparison.png')
+                if os.path.isfile(old_comp):
+                    shutil.copy2(old_comp, s0_comp)
+                    break
+
+            # Copy brush comparison as serial_0
+            s0_brush = os.path.join(
+                fire.cache_dir,
+                f'{fire_numbe}_serial_0_brush.png')
+            for _dir in search_dirs:
+                old_brush = os.path.join(
+                    _dir, f'{fire_numbe}_brush_comparison.png')
+                if os.path.isfile(old_brush):
+                    shutil.copy2(old_brush, s0_brush)
+                    break
+
+            # Generate overlay for Run 0
+            if os.path.isfile(s0_clf):
+                _overlay_mask_on_post(
+                    fire, s0_clf, 'serial_0', (0.9, 0.1, 0.0))
+
+            fire.serial_results.append({
+                'run_id': 0,
+                'params': old_params,
+                'agreement_pct': old_agreement,
+                'ml_area_ha': old_ml_area,
+                'comparison': s0_comp,
+                'classified': s0_clf,
+                'is_previous': True,
+            })
+            fire.console_log.append(
+                '=== Run 0: Previously accepted result ===')
+            fire.console_log.append(
+                f'  Agreement: {old_agreement}%'
+                f', ML area: {old_ml_area} ha')
+        except Exception:
+            sys.stderr.write(
+                f'[serial] Warning: could not snapshot previous '
+                f'result for {fire_numbe}\n')
+            sys.stderr.flush()
+
+    # Use the first param set's padding for any prepare needed
+    base_params = param_sets[0]
+    padding = base_params.get('padding')
+    if padding is None:
+        padding = state.padding
+    padding = float(padding)
+
+    for i, params in enumerate(param_sets):
+        run_id = i + 1
+        fire.console_log.append(
+            f'=== Serial run {run_id}/{n_total} ===')
+
+        # Log key params for this run (only the ones that vary)
+        key_params = []
+        for k in ('hdbscan_min_samples', 'controlled_ratio'):
+            v = params.get(k)
+            if v is not None and v != '':
+                key_params.append(f'{k}={v}')
+        if key_params:
+            fire.console_log.append(
+                f'  HDBSCAN params: {", ".join(key_params)}')
+        if run_id == 1:
+            # Log full params for the first (full pipeline) run
+            full_keys = []
+            for k in ('embed_bands', 'tsne_perplexity', 'sample_rate',
+                       'padding'):
+                v = params.get(k)
+                if v is not None and v != '':
+                    full_keys.append(f'{k}={v}')
+            if full_keys:
+                fire.console_log.append(
+                    f'  Base params: {", ".join(full_keys)}')
+
+        try:
+            with _gpu_lock:
+                # Re-prepare only when padding changed or files missing
+                if run_id == 1:
+                    needs_prepare = (
+                        fire.padding_used != padding
+                        or not fire.cache_dir
+                        or not os.path.isdir(fire.cache_dir)
+                        or not fire.crop_bin
+                        or not os.path.isfile(fire.crop_bin)
+                        or not fire.hint_bin
+                        or not os.path.isfile(fire.hint_bin)
+                    )
+                    if needs_prepare:
+                        fire.console_log.append(
+                            f'  Re-preparing (padding '
+                            f'{fire.padding_used} → {padding}) ...')
+                        _prepare_fire_sync(fire_numbe, padding)
+                        fire = state.fires[fire_numbe]
+                        if fire.status == FireStatus.ERROR:
+                            fire.serial_results.append({
+                                'run_id': run_id,
+                                'params': params,
+                                'agreement_pct': -1,
+                                'error': fire.error_msg,
+                            })
+                            break  # all runs share same prep — stop
+
+                fire.status = FireStatus.MAPPING
+                fire.last_params = params
+                state.current_job = {
+                    'fire_numbe': f'{fire_numbe} (run {run_id}/{n_total})',
+                    'client_ip': 'serial',
+                    'started_at': datetime.datetime.now().isoformat(
+                        timespec='seconds'),
+                }
+
+                # Run 1: full pipeline + save state
+                # Runs 2-N: load cached state (HDBSCAN only)
+                is_first = (run_id == 1)
+                cmd = _build_mapping_cmd(
+                    fire, params,
+                    save_state=state_file if is_first else None,
+                    load_state=state_file if not is_first else None,
+                )
+
+                if not is_first:
+                    fire.console_log.append(
+                        '  (resuming from cached t-SNE + RF)')
+
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    cwd=state.project_root,
+                )
+
+                for line in iter(proc.stdout.readline, b''):
+                    text = line.decode(errors='replace').rstrip()
+                    if text:
+                        fire.console_log.append(text)
+                        sys.stderr.write(
+                            f'[serial] [{fire_numbe}#{run_id}] {text}\n')
+
+                rc = proc.wait()
+                state.current_job = None
+                sys.stderr.flush()
+
+                if rc == 0:
+                    # Compute agreement
+                    agr = _compute_agreement(fire)
+
+                    # Save serial comparison image
+                    src_comp = os.path.join(
+                        fire.cache_dir,
+                        f'{fire_numbe}_comparison.png')
+                    serial_comp = os.path.join(
+                        fire.cache_dir,
+                        f'{fire_numbe}_serial_{run_id}.png')
+                    if os.path.isfile(src_comp):
+                        shutil.copy2(src_comp, serial_comp)
+
+                    # Save serial brush comparison
+                    src_brush = os.path.join(
+                        fire.cache_dir,
+                        f'{fire_numbe}_brush_comparison.png')
+                    serial_brush = os.path.join(
+                        fire.cache_dir,
+                        f'{fire_numbe}_serial_{run_id}_brush.png')
+                    if os.path.isfile(src_brush):
+                        shutil.copy2(src_brush, serial_brush)
+
+                    # Find the classified raster the CLI just wrote
+                    src_clf = None
+                    for _pat in (f'{fire_numbe}_crop.bin_classified.bin',
+                                 f'{fire_numbe}_crop_classified.bin',
+                                 f'{fire_numbe}_classified.bin'):
+                        _cand = os.path.join(fire.cache_dir, _pat)
+                        if os.path.isfile(_cand):
+                            src_clf = _cand
+                            break
+                    if src_clf is None:
+                        for _cand in glob.glob(os.path.join(
+                                fire.cache_dir, '*classified*.bin')):
+                            src_clf = _cand
+                            break
+
+                    # Save serial classified raster + ENVI header
+                    serial_clf = os.path.join(
+                        fire.cache_dir,
+                        f'{fire_numbe}_serial_{run_id}_classified.bin')
+                    if src_clf and os.path.isfile(src_clf):
+                        shutil.copy2(src_clf, serial_clf)
+                        src_hdr = (
+                            os.path.splitext(src_clf)[0] + '.hdr')
+                        if not os.path.isfile(src_hdr):
+                            src_hdr = src_clf + '.hdr'
+                        if os.path.isfile(src_hdr):
+                            shutil.copy2(
+                                src_hdr,
+                                os.path.splitext(serial_clf)[0]
+                                + '.hdr')
+
+                    # Use whichever classified raster exists
+                    clf_for_run = serial_clf if os.path.isfile(
+                        serial_clf) else src_clf
+
+                    # Compute ML area for this run
+                    run_ml_area = _compute_ml_area(
+                        fire, clf_for_run) if clf_for_run else -1.0
+
+                    # Generate pixel-aligned overlay for this run
+                    if clf_for_run:
+                        _overlay_mask_on_post(
+                            fire, clf_for_run, f'serial_{run_id}',
+                            (0.9, 0.1, 0.0))
+
+                    # Update the main 'result' overlay so the dropdown
+                    # shows "ML classification" immediately — just copy
+                    # the per-run overlay instead of re-rendering
+                    serial_overlay = os.path.join(
+                        fire.cache_dir, 'previews',
+                        f'serial_{run_id}.png')
+                    result_overlay = os.path.join(
+                        fire.cache_dir, 'previews', 'result.png')
+                    if os.path.isfile(serial_overlay):
+                        shutil.copy2(serial_overlay, result_overlay)
+                        if 'result' not in fire.available_views:
+                            fire.available_views.append('result')
+                    else:
+                        _generate_result_preview(fire)
+
+                    fire.serial_results.append({
+                        'run_id': run_id,
+                        'params': params,
+                        'agreement_pct': agr,
+                        'ml_area_ha': run_ml_area,
+                        'comparison': serial_comp,
+                        'classified': serial_clf,
+                    })
+
+                    fire.console_log.append(
+                        f'Run {run_id} complete (agreement={agr}%'
+                        f', ML area={run_ml_area} ha)')
+                else:
+                    fire.serial_results.append({
+                        'run_id': run_id,
+                        'params': params,
+                        'agreement_pct': -1,
+                        'error': f'Exited with code {rc}',
+                    })
+                    fire.console_log.append(
+                        f'Run {run_id} FAILED (exit code {rc})')
+                    # If run 1 fails, no state to resume from
+                    if is_first:
+                        fire.console_log.append(
+                            'Stopping serial — no cached state.')
+                        break
+
+        except Exception as exc:
+            state.current_job = None
+            fire.serial_results.append({
+                'run_id': run_id,
+                'params': params,
+                'agreement_pct': -1,
+                'error': str(exc),
+            })
+            sys.stderr.write(
+                f'[serial] [{fire_numbe}#{run_id}] EXCEPTION:\n'
+                f'{traceback.format_exc()}\n')
+            sys.stderr.flush()
+            if run_id == 1:
+                break  # no cached state to resume from
+
+    # Pick best result as the "current" mapping (exclude Run 0 / previous)
+    successful = [r for r in fire.serial_results
+                  if r.get('agreement_pct', -1) >= 0
+                  and not r.get('is_previous')]
+    if successful:
+        best = max(successful, key=lambda r: r['agreement_pct'])
+        fire.agreement_pct = best['agreement_pct']
+        fire.ml_area_ha = best.get('ml_area_ha', -1.0)
+        fire.last_params = best['params']
+
+        # Copy best result as the "main" comparison
+        best_comp = best.get('comparison', '')
+        if best_comp and os.path.isfile(best_comp):
+            main_comp = os.path.join(
+                fire.cache_dir, f'{fire_numbe}_comparison.png')
+            shutil.copy2(best_comp, main_comp)
+            fire.last_comparison = main_comp
+
+        best_clf = best.get('classified', '')
+        if best_clf and os.path.isfile(best_clf):
+            main_clf = os.path.join(
+                fire.cache_dir,
+                f'{fire_numbe}_crop.bin_classified.bin')
+            shutil.copy2(best_clf, main_clf)
+            best_hdr = (
+                os.path.splitext(best_clf)[0] + '.hdr')
+            if not os.path.isfile(best_hdr):
+                best_hdr = best_clf + '.hdr'
+            if os.path.isfile(best_hdr):
+                shutil.copy2(
+                    best_hdr,
+                    os.path.splitext(main_clf)[0] + '.hdr')
+            _generate_result_preview(fire)
+
+        fire.status = FireStatus.MAPPED
+        fire.console_log.append(
+            f'Serial mapping complete. Best: run {best["run_id"]} '
+            f'(agreement={best["agreement_pct"]}%)')
+    else:
+        fire.status = FireStatus.ERROR
+        fire.error_msg = 'All serial runs failed'
+        fire.console_log.append('All serial runs failed.')
+
+    _save_fire_state()
+    sys.stderr.write(
+        f'[serial] {fire_numbe} done: {len(successful)}/{n_total} '
+        f'successful\n')
+    sys.stderr.flush()
+
+
 def _save_ip_list():
-    """Persist approved and blocked IPs to disk."""
+    """Persist approved, blocked, and pending IPs to disk."""
     if not state.ip_file:
         return
     try:
-        import yaml
         data = {
             'approved': dict(state.approved_ips),
             'blocked': dict(state.blocked_ips),
+            'pending': dict(state.pending_ips),
         }
-        with open(state.ip_file, 'w') as f:
-            yaml.dump(data, f, default_flow_style=False, sort_keys=False)
-    except Exception:
-        pass
+        _atomic_yaml_dump(state.ip_file, data)
+    except Exception as exc:
+        sys.stderr.write(
+            f'[save] WARNING: Failed to save IP list: {exc}\n')
 
 
 # =========================================================================
@@ -352,6 +1382,14 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
     from shapely.geometry import box as shapely_box
 
     fire = state.fires[fire_numbe]
+
+    # Refuse to prepare while a mapping is in progress on this fire
+    if fire.status in (FireStatus.MAPPING, FireStatus.PREPARING):
+        fire.error_msg = (
+            'Cannot prepare: fire is currently '
+            + fire.status.value)
+        return
+
     fire.status = FireStatus.PREPARING
     fire.error_msg = ""
 
@@ -427,8 +1465,12 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
     fire.sample_size = sample_size
 
     # -- Create / clear cache directory --
+    # Only wipe when padding actually changed; preserve existing results
     cache_dir = os.path.join(state.output_root, '.web_cache', fire_numbe)
-    if os.path.isdir(cache_dir):
+    padding_changed = (fire.padding_used != 0
+                       and fire.padding_used != pad
+                       and os.path.isdir(cache_dir))
+    if padding_changed:
         shutil.rmtree(cache_dir)
     os.makedirs(cache_dir, exist_ok=True)
     fire.cache_dir = cache_dir
@@ -532,24 +1574,53 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
     views = generate_all_previews(crop_bin, cache_dir, fire_numbe)
     fire.available_views = views
 
-    # -- Copy classified raster from canonical dir if this fire was
-    #    previously accepted (so overlays can be regenerated) --
-    clf_path = os.path.join(cache_dir,
-                            f'{fire_numbe}_crop.bin_classified.bin')
-    if not os.path.isfile(clf_path):
-        canon_clf = os.path.join(
-            state.output_root, fire_numbe,
-            f'{fire_numbe}_crop.bin_classified.bin')
-        if os.path.isfile(canon_clf):
-            shutil.copy2(canon_clf, clf_path)
+    # -- Copy results from canonical dir for previously accepted fires --
+    canon_dir = os.path.join(state.output_root, fire_numbe)
+    if os.path.isdir(canon_dir):
+        copied = []
+        for fname in os.listdir(canon_dir):
+            src = os.path.join(canon_dir, fname)
+            dst = os.path.join(cache_dir, fname)
+            if os.path.isfile(src) and not os.path.exists(dst):
+                shutil.copy2(src, dst)
+                copied.append(fname)
+        if copied:
+            sys.stderr.write(
+                f'[prepare] [{fire_numbe}] Restored {len(copied)} '
+                f'file(s) from accepted dir\n')
+            sys.stderr.flush()
 
-    # -- Generate overlay previews --
-    if os.path.isfile(clf_path):
-        _generate_result_preview(fire)
-    elif fire.hint_bin and os.path.isfile(fire.hint_bin):
+    # -- Find classified raster (try multiple naming patterns) --
+    clf_path = None
+    for pattern in (f'{fire_numbe}_crop.bin_classified.bin',
+                    f'{fire_numbe}_crop_classified.bin',
+                    f'{fire_numbe}_classified.bin'):
+        candidate = os.path.join(cache_dir, pattern)
+        if os.path.isfile(candidate):
+            clf_path = candidate
+            break
+    if clf_path is None:
+        # Last resort: any *classified*.bin
+        for candidate in glob.glob(
+                os.path.join(cache_dir, '*classified*.bin')):
+            clf_path = candidate
+            break
+
+    # -- Generate overlay previews (always try both) --
+    if clf_path and os.path.isfile(clf_path):
+        # Point fire at the classified raster for overlay generation
+        _overlay_mask_on_post(fire, clf_path, 'result', (0.9, 0.1, 0.0))
+        if 'result' not in fire.available_views:
+            fire.available_views.append('result')
+        sys.stderr.write(
+            f'[prepare] [{fire_numbe}] Generated ML classification '
+            f'overlay from {os.path.basename(clf_path)}\n')
+        sys.stderr.flush()
+    if fire.hint_bin and os.path.isfile(fire.hint_bin):
         _overlay_mask_on_post(fire, fire.hint_bin, 'hint', (0.0, 0.8, 0.2))
 
     fire.status = FireStatus.READY
+    _save_fire_state()
 
 
 # =========================================================================
@@ -571,23 +1642,13 @@ def _accept_fire_sync(fire_numbe: str) -> str:
         for f in glob.glob(os.path.join(cache_dir, pattern)):
             shutil.copy2(f, fire_dir)
 
-    # Compute ML area
-    gt = state.raster_gt
-    pixel_area_m2 = abs(gt[1] * gt[5])
-    ml_area_ha = None
-    ml_area_m2 = None
-    crop_name = f'{fire_numbe}_crop'
-    clf_bin = os.path.join(fire_dir, f'{crop_name}.bin_classified.bin')
-    if os.path.isfile(clf_bin):
-        try:
-            ds = gdal.Open(clf_bin, gdal.GA_ReadOnly)
-            arr = ds.GetRasterBand(1).ReadAsArray()
-            ds = None
-            burned_px = int(np.nansum(arr > 0))
-            ml_area_m2 = burned_px * pixel_area_m2
-            ml_area_ha = ml_area_m2 / 10000.0
-        except Exception:
-            pass
+    # Compute ML area from the accepted dir
+    clf_bin = os.path.join(
+        fire_dir, f'{fire_numbe}_crop.bin_classified.bin')
+    ml_area_val = _compute_ml_area(fire, clf_bin)
+    ml_area_ha = ml_area_val if ml_area_val >= 0 else None
+    ml_area_m2 = (ml_area_ha * 10000.0) if ml_area_ha is not None else None
+    fire.ml_area_ha = ml_area_val
 
     # Write params YAML
     try:
@@ -638,7 +1699,7 @@ def _accept_fire_sync(fire_numbe: str) -> str:
     except ImportError:
         pass
 
-    # Update fire_status.yaml
+    # Update fire_status.yaml (atomic write)
     try:
         import yaml
         status_path = os.path.join(state.output_root, 'fire_status.yaml')
@@ -653,8 +1714,7 @@ def _accept_fire_sync(fire_numbe: str) -> str:
             'fire_dir': fire_dir,
             'source': 'web',
         }
-        with open(status_path, 'w') as f:
-            yaml.dump(idx, f, default_flow_style=False, sort_keys=True)
+        _atomic_yaml_dump(status_path, idx)
     except Exception:
         pass
 
@@ -665,11 +1725,27 @@ def _accept_fire_sync(fire_numbe: str) -> str:
         except Exception:
             pass
 
-    # Append to accepted_params.csv for parameter learning
+    # Append to accepted_params.csv for parameter learning (deduplicate)
     try:
         import csv
         csv_path = os.path.join(state.output_root, 'accepted_params.csv')
         write_header = not os.path.isfile(csv_path)
+
+        # Remove existing entry for this fire to avoid duplicates
+        if not write_header:
+            existing = []
+            with open(csv_path, newline='') as cf:
+                reader = csv.DictReader(cf)
+                existing = [r for r in reader
+                            if r.get('fire_numbe') != fire_numbe]
+            with open(csv_path, 'w', newline='') as cf:
+                writer = csv.DictWriter(
+                    cf, fieldnames=_CSV_FIELDNAMES,
+                    extrasaction='ignore')
+                writer.writeheader()
+                writer.writerows(existing)
+            write_header = False
+
         row_data = {
             'fire_numbe': fire_numbe,
             'fire_size_ha': fire.fire_size_ha,
@@ -682,15 +1758,20 @@ def _accept_fire_sync(fire_numbe: str) -> str:
             for k, v in fire.last_params.items():
                 row_data[k] = v
         with open(csv_path, 'a', newline='') as cf:
-            writer = csv.DictWriter(cf, fieldnames=row_data.keys())
+            writer = csv.DictWriter(
+                cf, fieldnames=_CSV_FIELDNAMES,
+                extrasaction='ignore')
             if write_header:
                 writer.writeheader()
             writer.writerow(row_data)
-    except Exception:
-        pass
+    except Exception as exc:
+        sys.stderr.write(
+            f'[save] WARNING: Failed to update accepted_params.csv: '
+            f'{exc}\n')
 
     fire.status = FireStatus.ACCEPTED
     fire.previously_accepted = False
+    _save_fire_state()
     return fire_dir
 
 
@@ -698,11 +1779,19 @@ def _accept_fire_sync(fire_numbe: str) -> str:
 # Build fire_mapping_cli.py command
 # =========================================================================
 
-def _build_mapping_cmd(fire: FireInfo, params: dict) -> list[str]:
-    """Build the subprocess command for fire_mapping_cli.py."""
-    rate = float(params.get('sample_rate', state.sample_rate))
-    min_s = int(params.get('min_samples', state.min_samples))
-    max_s = int(params.get('max_samples', state.max_samples))
+def _build_mapping_cmd(fire: FireInfo, params: dict,
+                       save_state: str = None,
+                       load_state: str = None) -> list[str]:
+    """Build the subprocess command for fire_mapping_cli.py.
+
+    Raises ValueError if any parameter fails validation.
+    """
+    rate = params.get('sample_rate')
+    rate = float(rate) if rate is not None else state.sample_rate
+    min_s = params.get('min_samples')
+    min_s = int(min_s) if min_s is not None else state.min_samples
+    max_s = params.get('max_samples')
+    max_s = int(max_s) if max_s is not None else state.max_samples
     sample_size = int(round(fire.crop_w * fire.crop_h * rate))
     sample_size = max(min_s, min(max_s, sample_size))
 
@@ -719,6 +1808,11 @@ def _build_mapping_cmd(fire: FireInfo, params: dict) -> list[str]:
 
     if fire.perim_bin and os.path.exists(fire.perim_bin):
         cmd += ['--perimeter', fire.perim_bin]
+
+    if save_state:
+        cmd += ['--save_state', save_state]
+    if load_state:
+        cmd += ['--load_state', load_state]
 
     flag_map = {
         'seed': '--seed',
@@ -740,11 +1834,17 @@ def _build_mapping_cmd(fire: FireInfo, params: dict) -> list[str]:
     for key, flag in flag_map.items():
         val = params.get(key)
         if val is not None and str(val).strip():
+            val = _validate_param(key, val)
+            # Argparse int args choke on "15.0" — normalise whole floats
+            if isinstance(val, float) and val == int(val):
+                val = int(val)
             cmd += [flag, str(val)]
 
     eb = params.get('embed_bands')
     if eb and str(eb).strip():
-        cmd += ['--embed_bands', str(eb)]
+        eb = _validate_embed_bands(eb)
+        if eb:
+            cmd += ['--embed_bands', eb]
 
     return cmd
 
@@ -784,7 +1884,17 @@ class FireHandler(BaseHTTPRequestHandler):
         (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/console$'),
          'handle_api_console'),
+        (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/ranked_params$'),
+         'handle_api_ranked_params'),
+        (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/serial_results$'),
+         'handle_api_serial_results'),
+        (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/serial/(?P<run_id>[0-9]+)/image$'),
+         'handle_api_serial_image'),
         (re.compile(r'^/api/report$'), 'handle_api_report'),
+        (re.compile(r'^/api/fires/hidden$'), 'handle_api_fires_hidden'),
         (re.compile(r'^/static/(?P<path>.+)$'), 'handle_static'),
     ]
     ROUTES_POST = [
@@ -806,8 +1916,18 @@ class FireHandler(BaseHTTPRequestHandler):
         (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/notes$'),
          'handle_api_notes'),
+        (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/serial_map$'),
+         'handle_api_serial_map'),
+        (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/serial/(?P<run_id>[0-9]+)/accept$'),
+         'handle_api_serial_accept'),
         (re.compile(r'^/api/admin/ip/(?P<action>approve|block|revoke|unblock)$'),
          'handle_api_admin_ip_action'),
+        (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/unhide$'),
+         'handle_api_unhide'),
+        (re.compile(r'^/api/batch/cancel$'), 'handle_api_batch_cancel'),
     ]
 
     # Paths that bypass IP checks (pending page needs CSS/logo + status poll)
@@ -840,6 +1960,15 @@ class FireHandler(BaseHTTPRequestHandler):
                 return part[len(name) + 1:]
         return ''
 
+    def _client_ip(self) -> str:
+        """Get the client IP, respecting --trust_proxy."""
+        raw = self.client_address[0]
+        if getattr(state, 'trust_proxy', False):
+            xff = self.headers.get('X-Forwarded-For', '')
+            if xff:
+                raw = xff.split(',')[-1].strip()
+        return _normalize_ip(raw)
+
     def _check_session(self) -> str | None:
         """Check session cookie. Returns role or None."""
         self._username = ''
@@ -850,23 +1979,28 @@ class FireHandler(BaseHTTPRequestHandler):
             self._role = 'admin'
             return 'admin'
 
-        token = self._get_cookie('session')
-        if not token or token not in state.sessions:
+        raw_token = self._get_cookie('session')
+        if not raw_token:
             return None
+        token = _hash_token(raw_token)
 
-        session = state.sessions[token]
-
-        # Check expiry
-        try:
-            created = datetime.datetime.fromisoformat(session['created_at'])
-            age = (datetime.datetime.now() - created).total_seconds()
-            if age > _SESSION_MAX_AGE:
-                del state.sessions[token]
-                _save_sessions()
+        with state.lock:
+            if token not in state.sessions:
                 return None
-        except (KeyError, ValueError):
-            del state.sessions[token]
-            return None
+            session = state.sessions[token]
+
+            # Check expiry
+            try:
+                created = datetime.datetime.fromisoformat(
+                    session['created_at'])
+                age = (datetime.datetime.now() - created).total_seconds()
+                if age > _SESSION_MAX_AGE:
+                    del state.sessions[token]
+                    _save_sessions()
+                    return None
+            except (KeyError, ValueError):
+                del state.sessions[token]
+                return None
 
         self._username = session.get('username', '')
         self._role = session.get('role', 'user')
@@ -874,8 +2008,19 @@ class FireHandler(BaseHTTPRequestHandler):
 
     def _check_ip(self, role: str) -> bool:
         """Check IP access. Admins auto-approve. Returns True if allowed."""
-        ip = self.client_address[0]
+        ip = self._client_ip()
         username = getattr(self, '_username', '')
+
+        # Blocked IPs are blocked even for admins (must unblock explicitly)
+        if ip in state.blocked_ips:
+            self._send_html(render_template('pending.html', {
+                'ip': ip,
+                'title': 'Access Denied',
+                'message': 'Your IP address has been blocked by an '
+                           'administrator.',
+                'auto_refresh': 'false',
+            }), 403)
+            return False
 
         if role == 'admin':
             # Auto-approve admin IPs
@@ -896,17 +2041,7 @@ class FireHandler(BaseHTTPRequestHandler):
             state.pending_ips.pop(ip, None)
             return True
 
-        # Regular user — check IP
-        if ip in state.blocked_ips:
-            self._send_html(render_template('pending.html', {
-                'ip': ip,
-                'title': 'Access Denied',
-                'message': 'Your IP address has been blocked by an '
-                           'administrator.',
-                'auto_refresh': 'false',
-            }), 403)
-            return False
-
+        # Regular user — check IP (blocked already handled above)
         if ip in state.approved_ips:
             # Update username on each visit
             state.approved_ips[ip]['username'] = username
@@ -983,12 +2118,20 @@ class FireHandler(BaseHTTPRequestHandler):
             origin = self.headers.get('Origin', '')
             x_req = self.headers.get('X-Requested-With', '')
             if origin:
-                host = self.headers.get('Host', '')
-                allowed = {f'http://{host}', f'https://{host}'}
+                # Accept if origin matches startup-computed set OR
+                # the Host header the client actually connected to
+                # (same-origin: browser sets Origin = scheme://host)
+                allowed = set(state.allowed_origins)
+                host_hdr = self.headers.get('Host', '')
+                if host_hdr:
+                    allowed.add(f'http://{host_hdr}')
                 if origin not in allowed:
                     self.send_error(403, 'Cross-origin request blocked')
                     return
             elif not x_req:
+                # X-Requested-With triggers CORS preflight, so
+                # cross-origin requests with this header are blocked
+                # by the browser (server sends no CORS headers).
                 self.send_error(403, 'Missing origin header')
                 return
         if not self._route(self.ROUTES_POST):
@@ -1030,12 +2173,14 @@ class FireHandler(BaseHTTPRequestHandler):
 
     _MAX_BODY = 1_000_000  # 1 MB
 
-    def _read_body(self) -> dict:
+    def _read_body(self) -> dict | None:
+        """Read and parse JSON body. Returns None (and sends 413/400) on error."""
         length = int(self.headers.get('Content-Length', 0))
         if length == 0:
             return {}
         if length > self._MAX_BODY:
-            return {}
+            self.send_error(413, 'Request body too large')
+            return None
         raw = self.rfile.read(length)
         try:
             return json.loads(raw)
@@ -1060,7 +2205,7 @@ class FireHandler(BaseHTTPRequestHandler):
     def handle_login_page(self):
         # Already logged in? Redirect to home.
         token = self._get_cookie('session')
-        if token and token in state.sessions:
+        if token and _hash_token(token) in state.sessions:
             self._redirect('/')
             return
         html = render_template('login.html', {'error_msg': ''})
@@ -1069,6 +2214,19 @@ class FireHandler(BaseHTTPRequestHandler):
     def handle_login_post(self):
         import hmac
         import secrets
+
+        ip = self._client_ip()
+
+        # Rate limit login attempts
+        if not _check_login_rate(ip):
+            html = render_template('login.html', {
+                'error_msg': '<div class="error-msg" style="display:block">'
+                             'Too many login attempts. '
+                             'Please try again later.</div>',
+            })
+            self._send_html(html, 429)
+            return
+
         # Parse form body (application/x-www-form-urlencoded)
         length = int(self.headers.get('Content-Length', 0))
         if length > 10000:
@@ -1089,6 +2247,7 @@ class FireHandler(BaseHTTPRequestHandler):
             role = 'user'
 
         if role is None:
+            _record_failed_login(ip)
             html = render_template('login.html', {
                 'error_msg': '<div class="error-msg" style="display:block">'
                              'Invalid password.</div>',
@@ -1096,20 +2255,31 @@ class FireHandler(BaseHTTPRequestHandler):
             self._send_html(html, 401)
             return
 
-        # Create session
-        token = secrets.token_hex(32)
-        state.sessions[token] = {
-            'role': role,
-            'username': username,
-            'ip': self.client_address[0],
-            'created_at': datetime.datetime.now().isoformat(
-                timespec='seconds'),
-        }
+        # Create session — store hashed token, cookie gets raw token
+        raw_token = secrets.token_hex(32)
+        hashed = _hash_token(raw_token)
+        with state.lock:
+            state.sessions[hashed] = {
+                'role': role,
+                'username': username,
+                'ip': self._client_ip(),
+                'created_at': datetime.datetime.now().isoformat(
+                    timespec='seconds'),
+            }
         _save_sessions()
 
-        # Set cookie and redirect to home
-        cookie = (f'session={token}; HttpOnly; SameSite=Strict; '
-                  f'Path=/; Max-Age={_SESSION_MAX_AGE}')
+        # Set cookie and redirect to home. The Secure flag is only
+        # valid over HTTPS — browsers silently drop Secure cookies on
+        # plain-HTTP non-localhost connections (e.g. LAN IPs reached
+        # over a VPN), which manifests as an endless bounce back to
+        # /login despite a correct password. Detect HTTPS via proxy
+        # header when --trust_proxy is set; otherwise omit Secure.
+        secure_flag = ''
+        xfp = self.headers.get('X-Forwarded-Proto', '').lower()
+        if state.trust_proxy and xfp == 'https':
+            secure_flag = 'Secure; '
+        cookie = (f'session={raw_token}; HttpOnly; SameSite=Lax; '
+                  f'{secure_flag}Path=/; Max-Age={_SESSION_MAX_AGE}')
         self.send_response(302)
         self.send_header('Location', '/')
         self.send_header('Set-Cookie', cookie)
@@ -1118,15 +2288,18 @@ class FireHandler(BaseHTTPRequestHandler):
 
     def handle_logout(self):
         # Clear session
-        token = self._get_cookie('session')
-        if token and token in state.sessions:
-            del state.sessions[token]
+        raw_token = self._get_cookie('session')
+        if raw_token:
+            hashed = _hash_token(raw_token)
+            with state.lock:
+                if hashed in state.sessions:
+                    del state.sessions[hashed]
             _save_sessions()
         # Clear cookie and redirect to login
         self.send_response(302)
         self.send_header('Location', '/login')
         self.send_header('Set-Cookie',
-                         'session=; HttpOnly; SameSite=Strict; '
+                         'session=; HttpOnly; SameSite=Lax; '
                          'Path=/; Max-Age=0')
         self.send_header('Cache-Control', 'no-store')
         self.end_headers()
@@ -1159,9 +2332,10 @@ class FireHandler(BaseHTTPRequestHandler):
         self._send_html(html)
 
     def handle_static(self, path):
-        filepath = os.path.join(_HERE, 'static', path)
-        if not os.path.abspath(filepath).startswith(
-                os.path.join(_HERE, 'static')):
+        static_root = os.path.realpath(os.path.join(_HERE, 'static'))
+        filepath = os.path.realpath(os.path.join(_HERE, 'static', path))
+        if filepath != static_root and not filepath.startswith(
+                static_root + os.sep):
             self.send_error(403)
             return
         self._send_file(filepath)
@@ -1178,6 +2352,7 @@ class FireHandler(BaseHTTPRequestHandler):
                 'status': f.status.value,
                 'previously_accepted': f.previously_accepted,
                 'agreement_pct': f.agreement_pct,
+                'ml_area_ha': f.ml_area_ha,
                 'notes': f.notes,
             }
             for f in state.fires.values()
@@ -1193,20 +2368,47 @@ class FireHandler(BaseHTTPRequestHandler):
             self._send_json({'error': 'Admin only'}, 403)
             return
         body = self._read_body()
+        if body is None:
+            return
         settings = body.get('settings', [])
+        # Sanity-check: embed_bands must be a string, not numeric
+        for row in settings:
+            p = row.get('params', {})
+            eb = p.get('embed_bands')
+            if eb is not None and isinstance(eb, (int, float)):
+                sys.stderr.write(
+                    f'[settings] WARNING: embed_bands was numeric '
+                    f'({eb!r}) — converting to empty string\n')
+                p['embed_bands'] = ''
         state.recommended_settings = settings
+        _save_settings()
         self._send_json({'status': 'saved'})
 
     # -- Batch mapping API --
 
     def handle_api_batch_map(self):
         global _batch_thread
-        if (state.batch_status
-                and state.batch_status.get('running')):
-            self._send_json(
-                {'error': 'A batch is already running'}, 400)
+        # Batch mapping requires admin role (blocks GPU for everyone)
+        if (getattr(self, '_role', '') != 'admin'
+                and state.admin_password):
+            self._send_json({'error': 'Admin only'}, 403)
             return
+        # Atomic check-and-set to prevent duplicate batches
+        with state.lock:
+            if (state.batch_status
+                    and state.batch_status.get('running')):
+                self._send_json(
+                    {'error': 'A batch is already running'}, 400)
+                return
+            # Mark as starting inside the lock
+            state.batch_status = {'running': True, 'total': 0,
+                                  'completed': 0, 'current_fire': '',
+                                  'errors': []}
         body = self._read_body()
+        if body is None:
+            with state.lock:
+                state.batch_status = None
+            return
         fire_numbes = body.get('fire_numbes', [])
         # Filter out accepted fires
         fire_numbes = [
@@ -1215,8 +2417,13 @@ class FireHandler(BaseHTTPRequestHandler):
             and state.fires[fn].status != FireStatus.ACCEPTED
         ]
         if not fire_numbes:
+            with state.lock:
+                state.batch_status = None
             self._send_json({'error': 'No eligible fires selected'}, 400)
             return
+        with state.lock:
+            state.batch_status['total'] = len(fire_numbes)
+        _batch_cancel.clear()
         _batch_thread = threading.Thread(
             target=_batch_map_worker,
             args=(fire_numbes,),
@@ -1235,7 +2442,7 @@ class FireHandler(BaseHTTPRequestHandler):
 
     def handle_api_access_status(self):
         """Called by the pending page to check if IP was approved."""
-        ip = self.client_address[0]
+        ip = self._client_ip()
         if ip in state.approved_ips:
             self._send_json({'status': 'approved'})
         elif ip in state.blocked_ips:
@@ -1267,6 +2474,8 @@ class FireHandler(BaseHTTPRequestHandler):
             self._send_json({'error': 'Admin only'}, 403)
             return
         body = self._read_body()
+        if body is None:
+            return
         ip = body.get('ip', '').strip()
         if not ip:
             self._send_json({'error': 'No IP provided'}, 400)
@@ -1280,7 +2489,7 @@ class FireHandler(BaseHTTPRequestHandler):
             state.approved_ips[ip] = {
                 'username': pending_info.get('username', ''),
                 'role': 'user',
-                'approved_by': self.client_address[0],
+                'approved_by': self._client_ip(),
                 'timestamp': now,
             }
             state.pending_ips.pop(ip, None)
@@ -1292,7 +2501,7 @@ class FireHandler(BaseHTTPRequestHandler):
             state.blocked_ips[ip] = {
                 'username': (pending_info.get('username', '')
                              or approved_info.get('username', '')),
-                'blocked_by': self.client_address[0],
+                'blocked_by': self._client_ip(),
                 'timestamp': now,
             }
             state.approved_ips.pop(ip, None)
@@ -1317,6 +2526,8 @@ class FireHandler(BaseHTTPRequestHandler):
 
         fire = state.fires[fire_numbe]
         body = self._read_body()
+        if body is None:
+            return
         padding = body.get('padding')
 
         prev_status = fire.status
@@ -1396,6 +2607,7 @@ class FireHandler(BaseHTTPRequestHandler):
             'has_comparison': has_comparison,
             'has_brush_comparison': has_brush,
             'previously_accepted': fire.previously_accepted,
+            'ml_area_ha': fire.ml_area_ha,
         })
 
     def handle_api_preview(self, fire_numbe, view):
@@ -1409,6 +2621,22 @@ class FireHandler(BaseHTTPRequestHandler):
             return
         fire = state.fires[fire_numbe]
         png = os.path.join(fire.cache_dir, 'previews', f'{view}.png')
+
+        # On-the-fly generation for serial overlays
+        if not os.path.exists(png):
+            m = re.match(r'^serial_(\d+)$', view)
+            if m:
+                rid = m.group(1)
+                # Try multiple naming patterns for the classified raster
+                for _pat in (f'{fire_numbe}_serial_{rid}_classified.bin',
+                             f'{fire_numbe}_crop.bin_classified.bin'):
+                    _cand = os.path.join(fire.cache_dir, _pat)
+                    if os.path.isfile(_cand):
+                        _overlay_mask_on_post(
+                            fire, _cand, view, (0.9, 0.1, 0.0))
+                        if os.path.exists(png):
+                            break
+
         if not os.path.exists(png):
             self._send_json(
                 {'error': f"Preview '{view}' not available"}, 404)
@@ -1489,12 +2717,334 @@ class FireHandler(BaseHTTPRequestHandler):
             self._send_json({'error': 'Fire not found'}, 404)
             return
         f = state.fires[fire_numbe]
+
+        # Check for comparison images
+        has_comparison = bool(
+            f.last_comparison and os.path.isfile(f.last_comparison))
+        has_brush = False
+        if not has_comparison:
+            canonical = os.path.join(state.output_root, fire_numbe)
+            for d in (f.cache_dir, canonical):
+                if not d:
+                    continue
+                if os.path.isfile(
+                        os.path.join(d, f'{fire_numbe}_comparison.png')):
+                    has_comparison = True
+                    break
+        for d in (f.cache_dir,
+                  os.path.join(state.output_root, fire_numbe)):
+            if not d:
+                continue
+            if os.path.isfile(
+                    os.path.join(
+                        d, f'{fire_numbe}_brush_comparison.png')):
+                has_brush = True
+                break
+
+        # Snapshot mutable lists under lock to avoid iteration-during-mutation
+        with state.lock:
+            console_lines = list(f.console_log)
+            raw_serial = list(f.serial_results)
+
+        # Clean serial results for JSON
+        serial_results = []
+        for r in raw_serial:
+            serial_results.append({
+                'run_id': r.get('run_id'),
+                'agreement_pct': r.get('agreement_pct', -1),
+                'ml_area_ha': r.get('ml_area_ha', -1),
+                'error': r.get('error', ''),
+                'params': r.get('params', {}),
+                'is_previous': r.get('is_previous', False),
+            })
+
         self._send_json({
             'status': f.status.value,
-            'lines': f.console_log,
+            'previously_accepted': f.previously_accepted,
+            'lines': console_lines,
             'last_params': f.last_params,
             'agreement_pct': f.agreement_pct,
+            'ml_area_ha': f.ml_area_ha,
+            'available_views': list(f.available_views),
+            'serial_results': serial_results,
+            'has_comparison': has_comparison,
+            'has_brush_comparison': has_brush,
         })
+
+    # -- Serial mapping & parameter ranking API --
+
+    def handle_api_ranked_params(self, fire_numbe):
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        parsed = urlparse(self.path)
+        from urllib.parse import parse_qs
+        qs = parse_qs(parsed.query)
+        n = int(qs.get('n', ['3'])[0])
+        n = max(1, min(10, n))
+
+        ranked = _rank_params_for_fire(
+            fire_numbe, fire.fire_size_ha, n)
+
+        region, zone = _parse_fire_context(fire_numbe)
+        bucket = _size_bucket(fire.fire_size_ha)
+        csv_rows = _load_accepted_params()
+        total_accepted = len(csv_rows)
+
+        self._send_json({
+            'ranked': ranked,
+            'context': {
+                'region': region,
+                'zone': zone,
+                'size_bucket': list(bucket),
+                'total_accepted': total_accepted,
+            },
+        })
+
+    def handle_api_serial_map(self, fire_numbe):
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        if fire.status == FireStatus.MAPPING:
+            self._send_json({'error': 'Already mapping'}, 400)
+            return
+
+        body = self._read_body()
+        if body is None:
+            return
+        n = int(body.get('n', 3))
+        n = max(1, min(10, n))
+        user_base = body.get('base_params')  # from "Map Fire" with N>1
+
+        if user_base:
+            # User supplied explicit params — use as run 1,
+            # vary HDBSCAN for runs 2-N
+            base = dict(user_base)
+        else:
+            # No explicit params — use ranked/recommended as base
+            ranked = _rank_params_for_fire(
+                fire_numbe, fire.fire_size_ha, 1)
+            if not ranked:
+                self._send_json(
+                    {'error': 'No parameter sets available'}, 400)
+                return
+
+            # Validate key params to catch corruption early
+            base_check = ranked[0]
+            eb = base_check.get('embed_bands')
+            tp = base_check.get('tsne_perplexity')
+            if eb is not None and isinstance(eb, (int, float)):
+                sys.stderr.write(
+                    f'[serial] WARNING: embed_bands is numeric '
+                    f'({eb!r}), expected comma-separated string '
+                    f'— reloading from YAML\n')
+                sys.stderr.flush()
+                fresh = _get_recommended_params(fire.fire_size_ha)
+                if fresh:
+                    ranked = [fresh]
+            if (tp is not None and isinstance(tp, str)
+                    and ',' in str(tp)):
+                sys.stderr.write(
+                    f'[serial] WARNING: tsne_perplexity is string '
+                    f'({tp!r}), expected number '
+                    f'— reloading from YAML\n')
+                sys.stderr.flush()
+                fresh = _get_recommended_params(fire.fire_size_ha)
+                if fresh:
+                    ranked = [fresh]
+            base = dict(ranked[0])
+
+        # Generate N param sets: same base, vary HDBSCAN params.
+        # Run 1 = base params.  Runs 2-N get varied
+        # hdbscan_min_samples values.
+        base_hms = int(base.get('hdbscan_min_samples', 20))
+        param_sets = [base]
+
+        # Generate hdbscan_min_samples variations around base
+        variations = [5, 10, 15, 20, 25, 30, 40, 50, 75, 100]
+        variations = sorted(
+            [v for v in variations if v != base_hms],
+            key=lambda v: abs(v - base_hms))
+        for v in variations:
+            if len(param_sets) >= n:
+                break
+            variant = dict(base)
+            variant['hdbscan_min_samples'] = v
+            param_sets.append(variant)
+
+        param_sets = param_sets[:n]
+
+        # Set status BEFORE starting thread to avoid race
+        if fire.status == FireStatus.ACCEPTED:
+            fire.previously_accepted = True
+        fire.status = FireStatus.MAPPING
+        fire.serial_results = []
+        fire.console_log = []
+
+        thread = threading.Thread(
+            target=_serial_map_worker,
+            args=(fire_numbe, param_sets),
+            daemon=True)
+        thread.start()
+
+        self._send_json({
+            'status': 'started',
+            'n': len(param_sets),
+        })
+
+    def handle_api_serial_results(self, fire_numbe):
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        results = []
+        for r in fire.serial_results:
+            results.append({
+                'run_id': r.get('run_id'),
+                'agreement_pct': r.get('agreement_pct', -1),
+                'ml_area_ha': r.get('ml_area_ha', -1),
+                'error': r.get('error', ''),
+                'params': r.get('params', {}),
+                'is_previous': r.get('is_previous', False),
+            })
+        self._send_json({
+            'status': fire.status.value,
+            'results': results,
+        })
+
+    def handle_api_serial_image(self, fire_numbe, run_id):
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+
+        # Check requested image type
+        qs = parse_qs(urlparse(self.path).query)
+        img_type = (qs.get('type', ['']) or [''])[0]
+
+        if img_type == 'comparison':
+            comp_path = os.path.join(
+                fire.cache_dir,
+                f'{fire_numbe}_serial_{run_id}.png')
+            if os.path.isfile(comp_path):
+                self._send_file(comp_path, 'image/png')
+                return
+            self._send_json(
+                {'error': 'Comparison not found for this run'}, 404)
+            return
+
+        if img_type == 'brush':
+            brush_path = os.path.join(
+                fire.cache_dir,
+                f'{fire_numbe}_serial_{run_id}_brush.png')
+            if os.path.isfile(brush_path):
+                self._send_file(brush_path, 'image/png')
+                return
+            self._send_json(
+                {'error': 'Brush comparison not found for this run'},
+                404)
+            return
+
+        # Default: serve pixel-aligned overlay
+        overlay_path = os.path.join(
+            fire.cache_dir, 'previews', f'serial_{run_id}.png')
+        if not os.path.isfile(overlay_path):
+            serial_clf = os.path.join(
+                fire.cache_dir,
+                f'{fire_numbe}_serial_{run_id}_classified.bin')
+            if os.path.isfile(serial_clf):
+                _overlay_mask_on_post(
+                    fire, serial_clf, f'serial_{run_id}',
+                    (0.9, 0.1, 0.0))
+        if os.path.isfile(overlay_path):
+            self._send_file(overlay_path, 'image/png')
+            return
+        # Fall back to comparison figure
+        comp_path = os.path.join(
+            fire.cache_dir, f'{fire_numbe}_serial_{run_id}.png')
+        if os.path.isfile(comp_path):
+            self._send_file(comp_path, 'image/png')
+            return
+        self._send_json({'error': 'Image not found'}, 404)
+
+    def handle_api_serial_accept(self, fire_numbe, run_id):
+        fire_numbe = unquote(fire_numbe)
+        run_id = int(run_id)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        result = next(
+            (r for r in fire.serial_results
+             if r.get('run_id') == run_id), None)
+        if not result:
+            self._send_json({'error': 'Run not found'}, 404)
+            return
+
+        # Copy the selected run's results as the main results
+        serial_clf = result.get('classified', '')
+        serial_comp = result.get('comparison', '')
+        if serial_clf and os.path.isfile(serial_clf):
+            main_clf = os.path.join(
+                fire.cache_dir,
+                f'{fire_numbe}_crop.bin_classified.bin')
+            shutil.copy2(serial_clf, main_clf)
+            ser_hdr = (
+                os.path.splitext(serial_clf)[0] + '.hdr')
+            if not os.path.isfile(ser_hdr):
+                ser_hdr = serial_clf + '.hdr'
+            if os.path.isfile(ser_hdr):
+                shutil.copy2(
+                    ser_hdr,
+                    os.path.splitext(main_clf)[0] + '.hdr')
+        if serial_comp and os.path.isfile(serial_comp):
+            main_comp = os.path.join(
+                fire.cache_dir, f'{fire_numbe}_comparison.png')
+            shutil.copy2(serial_comp, main_comp)
+            fire.last_comparison = main_comp
+
+        fire.agreement_pct = result.get('agreement_pct', -1)
+        fire.ml_area_ha = result.get('ml_area_ha', -1.0)
+        fire.last_params = result.get('params', {})
+        fire.status = FireStatus.MAPPED
+
+        # Now accept via the normal flow
+        _accept_fire_sync(fire_numbe)
+
+        # Clean up serial cache files and clear results
+        for sr in fire.serial_results:
+            rid = sr.get('run_id')
+            if rid is None:
+                continue
+            for pat in (
+                f'{fire_numbe}_serial_{rid}_classified.bin',
+                f'{fire_numbe}_serial_{rid}_classified.hdr',
+                f'{fire_numbe}_serial_{rid}.png',
+                f'{fire_numbe}_serial_{rid}_brush.png',
+            ):
+                p = os.path.join(fire.cache_dir, pat)
+                if os.path.isfile(p):
+                    try:
+                        os.remove(p)
+                    except OSError:
+                        pass
+            overlay = os.path.join(
+                fire.cache_dir, 'previews', f'serial_{rid}.png')
+            if os.path.isfile(overlay):
+                try:
+                    os.remove(overlay)
+                except OSError:
+                    pass
+        fire.serial_results = []
+        fire.previously_accepted = False
+
+        self._send_json({'status': 'accepted'})
 
     def handle_api_notes(self, fire_numbe):
         fire_numbe = unquote(fire_numbe)
@@ -1502,19 +3052,58 @@ class FireHandler(BaseHTTPRequestHandler):
             self._send_json({'error': 'Fire not found'}, 404)
             return
         body = self._read_body()
+        if body is None:
+            return
         state.fires[fire_numbe].notes = body.get('notes', '')
+        _save_notes()
         self._send_json({'status': 'saved'})
 
+    _VALID_FN = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_. -]*$')
+
     def handle_api_report(self):
-        """Generate PDF report of accepted fires and send as download."""
+        """Generate PDF report of selected accepted fires."""
         from batch_fire_mapping.generate_report import generate_report
         import tempfile
-        tmp = tempfile.mktemp(suffix='.pdf')
-        pdf = generate_report(state.output_root, tmp)
-        if pdf is None or not os.path.isfile(pdf):
-            self._send_json({'error': 'Report generation failed'}, 500)
+
+        # Get selected fire numbers from query params
+        parsed = urlparse(self.path)
+        from urllib.parse import parse_qs
+        qs = parse_qs(parsed.query)
+        fire_list = qs.get('fire', [])
+
+        if not fire_list:
+            self._send_json(
+                {'error': 'No fires specified'}, 400)
             return
+
+        # Create temp dir with symlinks to selected fire dirs
+        # Validate each fire number to prevent path traversal
+        root = os.path.realpath(state.output_root)
+        tmp_dir = tempfile.mkdtemp(prefix='fire_report_sel_')
         try:
+            for fn in fire_list:
+                # Must be a known fire with valid characters
+                if fn not in state.fires:
+                    continue
+                if not self._VALID_FN.fullmatch(fn):
+                    continue
+                src = os.path.realpath(
+                    os.path.join(state.output_root, fn))
+                # Must resolve inside output_root
+                if src != root and not src.startswith(root + os.sep):
+                    continue
+                if not os.path.isdir(src):
+                    continue
+                dst = os.path.join(tmp_dir, fn)
+                os.symlink(src, dst)
+
+            tmp_pdf = os.path.join(tmp_dir, 'report.pdf')
+            pdf = generate_report(tmp_dir, tmp_pdf)
+            if pdf is None or not os.path.isfile(pdf):
+                self._send_json(
+                    {'error': 'Report generation failed'}, 500)
+                return
+
             with open(pdf, 'rb') as f:
                 data = f.read()
             self.send_response(200)
@@ -1525,10 +3114,7 @@ class FireHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
         finally:
-            try:
-                os.remove(pdf)
-            except Exception:
-                pass
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
     def handle_api_remove(self, fire_numbe):
         fire_numbe = unquote(fire_numbe)
@@ -1536,12 +3122,46 @@ class FireHandler(BaseHTTPRequestHandler):
             self._send_json({'error': 'Fire not found'}, 404)
             return
         state.fires[fire_numbe].hidden = True
+        _save_fire_state()
         self._send_json({'status': 'removed'})
+
+    def handle_api_unhide(self, fire_numbe):
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        state.fires[fire_numbe].hidden = False
+        _save_fire_state()
+        self._send_json({'status': 'restored'})
+
+    def handle_api_fires_hidden(self):
+        """Return list of hidden fires (for admin restore UI)."""
+        fires = [
+            {
+                'fire_numbe': f.fire_numbe,
+                'fire_date': f.fire_date,
+                'fire_year': f.fire_year,
+                'fire_size_ha': f.fire_size_ha,
+                'status': f.status.value,
+            }
+            for f in state.fires.values()
+            if f.hidden
+        ]
+        self._send_json(fires)
+
+    def handle_api_batch_cancel(self):
+        """Cancel a running batch mapping."""
+        if not state.batch_status or not state.batch_status.get('running'):
+            self._send_json({'error': 'No batch running'}, 400)
+            return
+        _batch_cancel.set()
+        self._send_json({'status': 'cancelling'})
 
     # -- Mapping with SSE streaming --
 
     def handle_api_map(self, fire_numbe):
         """Run fire_mapping_cli.py and stream output as SSE."""
+        global _gpu_queue
         fire_numbe = unquote(fire_numbe)
         if fire_numbe not in state.fires:
             self._send_json({'error': 'Fire not found'}, 404)
@@ -1549,6 +3169,8 @@ class FireHandler(BaseHTTPRequestHandler):
 
         fire = state.fires[fire_numbe]
         body = self._read_body()
+        if body is None:
+            return
         params = body.get('params', {})
 
         if fire.status not in (
@@ -1580,7 +3202,7 @@ class FireHandler(BaseHTTPRequestHandler):
                 pass
 
         # GPU serialisation with queue tracking
-        client_ip = self.client_address[0]
+        client_ip = self._client_ip()
         job_entry = {
             'fire_numbe': fire_numbe,
             'client_ip': client_ip,
@@ -1590,7 +3212,7 @@ class FireHandler(BaseHTTPRequestHandler):
 
         with _gpu_queue_lock:
             queue_pos = _gpu_queue
-            globals()['_gpu_queue'] = _gpu_queue + 1
+            _gpu_queue += 1
             state.waiting_jobs.append(job_entry)
 
         if _gpu_lock.locked():
@@ -1609,6 +3231,8 @@ class FireHandler(BaseHTTPRequestHandler):
                     'started_at': datetime.datetime.now().isoformat(
                         timespec='seconds'),
                 }
+                if fire.status == FireStatus.ACCEPTED:
+                    fire.previously_accepted = True
                 fire.status = FireStatus.MAPPING
                 cmd = _build_mapping_cmd(fire, params)
                 short_cmd = ' '.join(
@@ -1645,13 +3269,16 @@ class FireHandler(BaseHTTPRequestHandler):
                         comp if os.path.exists(comp) else '')
                     fire.last_params = params
                     fire.agreement_pct = _compute_agreement(fire)
+                    fire.ml_area_ha = _compute_ml_area(fire)
                     _generate_result_preview(fire)
                     fire.status = FireStatus.MAPPED
+                    _save_fire_state()
                     sse('complete', {
                         'comparison_url': (
                             f'/api/fire/{fire_numbe}/comparison'
                             f'?t={int(time.time())}'),
                         'agreement_pct': fire.agreement_pct,
+                        'ml_area_ha': fire.ml_area_ha,
                     })
                 else:
                     fire.status = FireStatus.READY
@@ -1661,7 +3288,7 @@ class FireHandler(BaseHTTPRequestHandler):
                     })
         finally:
             with _gpu_queue_lock:
-                globals()['_gpu_queue'] = max(0, _gpu_queue - 1)
+                _gpu_queue = max(0, _gpu_queue - 1)
             state.current_job = None
             if job_entry in state.waiting_jobs:
                 state.waiting_jobs.remove(job_entry)
