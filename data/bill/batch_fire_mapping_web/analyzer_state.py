@@ -6,9 +6,12 @@ self-contained and trivially removable. Persisted independently to
 """
 
 import threading
+from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
+
+from .state import CONSOLE_LOG_MAX_LINES
 
 
 class AnalyzerStatus(str, Enum):
@@ -60,7 +63,8 @@ class AnalyzerFireInfo:
     runs: list = field(default_factory=list)  # list[AnalyzerRun]
 
     # Live console buffer for UI
-    console_log: list = field(default_factory=list)
+    console_log: deque = field(
+        default_factory=lambda: deque(maxlen=CONSOLE_LOG_MAX_LINES))
 
     # Backdrop: the biggest-padding crop we have saved (for overlaying
     # all accepted perimeters on a common canvas).

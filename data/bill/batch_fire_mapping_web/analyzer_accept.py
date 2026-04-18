@@ -14,6 +14,10 @@ import os
 import re
 import shutil
 import sys
+import threading
+
+
+_csv_lock = threading.Lock()
 
 from .analyzer_state import (
     AnalyzerFireInfo, AnalyzerRun, AnalyzerStatus,
@@ -207,36 +211,38 @@ def _csv_row(info: AnalyzerFireInfo, run: AnalyzerRun,
 
 def _append_csv_row(astate, row: dict):
     csv_path = astate.csv_file
-    write_header = not os.path.isfile(csv_path)
-    with open(csv_path, 'a', newline='') as f:
-        writer = csv.DictWriter(
-            f, fieldnames=ANALYZER_CSV_FIELDNAMES,
-            extrasaction='ignore')
-        if write_header:
-            writer.writeheader()
-        writer.writerow(row)
+    with _csv_lock:
+        write_header = not os.path.isfile(csv_path)
+        with open(csv_path, 'a', newline='') as f:
+            writer = csv.DictWriter(
+                f, fieldnames=ANALYZER_CSV_FIELDNAMES,
+                extrasaction='ignore')
+            if write_header:
+                writer.writeheader()
+            writer.writerow(row)
 
 
 def _remove_csv_row(astate, fire_numbe: str, accept_id: str):
     """Rewrite analyzer_accepted.csv without the matching row."""
     csv_path = astate.csv_file
-    if not os.path.isfile(csv_path):
-        return
-    with open(csv_path, newline='') as f:
-        reader = csv.DictReader(f)
-        rows = [
-            r for r in reader
-            if not (r.get('fire_numbe') == fire_numbe
-                    and r.get('accept_id') == accept_id)
-        ]
-    tmp = csv_path + '.tmp'
-    with open(tmp, 'w', newline='') as f:
-        writer = csv.DictWriter(
-            f, fieldnames=ANALYZER_CSV_FIELDNAMES,
-            extrasaction='ignore')
-        writer.writeheader()
-        writer.writerows(rows)
-    os.replace(tmp, csv_path)
+    with _csv_lock:
+        if not os.path.isfile(csv_path):
+            return
+        with open(csv_path, newline='') as f:
+            reader = csv.DictReader(f)
+            rows = [
+                r for r in reader
+                if not (r.get('fire_numbe') == fire_numbe
+                        and r.get('accept_id') == accept_id)
+            ]
+        tmp = csv_path + '.tmp'
+        with open(tmp, 'w', newline='') as f:
+            writer = csv.DictWriter(
+                f, fieldnames=ANALYZER_CSV_FIELDNAMES,
+                extrasaction='ignore')
+            writer.writeheader()
+            writer.writerows(rows)
+        os.replace(tmp, csv_path)
 
 
 # =========================================================================

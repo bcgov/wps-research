@@ -317,7 +317,8 @@ def _execute_run(item: dict, snapshot_dir: str, meta: dict,
                  app_state, astate) -> AnalyzerRun:
     """Run one grid cell: subprocess, move outputs, compute metrics."""
     from .app import (_build_mapping_cmd, _compute_agreement,
-                      _compute_ml_area, _overlay_mask_on_post, _gpu_lock)
+                      _compute_ml_area, _overlay_mask_on_post, _gpu_lock,
+                      _stream_subprocess)
 
     s_idx = item['set_idx']
     r_idx = item['run_idx']
@@ -392,18 +393,23 @@ def _execute_run(item: dict, snapshot_dir: str, meta: dict,
                     padding_used=shadow.padding_used,
                     status='skipped', error_msg='cancelled')
 
-            proc = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                cwd=app_state.project_root)
-            for line in iter(proc.stdout.readline, b''):
-                text = line.decode(errors='replace').rstrip()
-                if text:
-                    _log(info, f'    | {text}')
-            rc = proc.wait()
+            def _on_line(text):
+                _log(info, f'    | {text}')
+            rc, killed = _stream_subprocess(
+                cmd, app_state.project_root, _on_line)
     finally:
         app_state.current_job = None
 
     elapsed = time.time() - t0
+
+    if killed:
+        _log(info, f'  set {s_idx} run {r_idx}: KILLED by watchdog '
+                   f'(no output for 1800s, {elapsed:.1f}s)')
+        return AnalyzerRun(
+            set_idx=s_idx, run_idx=r_idx, params=dict(params),
+            padding_used=shadow.padding_used,
+            status='error',
+            error_msg='watchdog: no CLI output for 1800s')
 
     if rc != 0:
         _log(info, f'  set {s_idx} run {r_idx}: FAILED (rc={rc}, '
@@ -534,7 +540,7 @@ def _process_fire(fire_numbe: str, config, app_state, astate):
             astate.fires[fire_numbe] = info
         info.status = AnalyzerStatus.ANALYZING
         info.error_msg = ''
-        info.console_log = []
+        info.console_log.clear()
         # Drop any previous pending/error runs; keep accepted ones.
         info.runs = [r for r in info.runs if r.accepted]
 

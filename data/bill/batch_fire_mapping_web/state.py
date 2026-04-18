@@ -2,9 +2,12 @@
 
 import os
 import threading
+from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
+
+CONSOLE_LOG_MAX_LINES = 2000
 
 import geopandas as gpd
 import pandas as pd
@@ -64,7 +67,8 @@ class FireInfo:
     hidden: bool = False
     notes: str = ""
     agreement_pct: float = -1.0   # -1 = not computed
-    console_log: list = field(default_factory=list)  # buffered output lines
+    console_log: deque = field(
+        default_factory=lambda: deque(maxlen=CONSOLE_LOG_MAX_LINES))
     serial_results: list = field(default_factory=list)  # [{params, agreement, run_id}]
 
 
