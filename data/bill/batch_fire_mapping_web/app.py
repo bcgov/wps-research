@@ -41,10 +41,94 @@ _gpu_queue_lock = threading.Lock()   # protects the counter
 # Batch cancellation flag
 _batch_cancel = threading.Event()
 
+# Serialises read-modify-write of shared on-disk records
+# (accepted_params.csv, fire_status.yaml). Prevents concurrent accepts
+# from corrupting these files or losing rows.
+_accept_file_lock = threading.Lock()
+
+# Kill fire_mapping_cli.py if stdout goes silent this long. Without this,
+# a hung CLI would hold _gpu_lock forever and brick every mapping until
+# the server is restarted.
+_SUBPROCESS_SILENCE_TIMEOUT = 1800  # 30 minutes
+
+
+def _stream_subprocess(cmd, cwd, on_line):
+    """Run *cmd*, pass each non-empty stdout line to ``on_line(text)``.
+
+    Arms a watchdog timer that kills the process if stdout is silent
+    for more than ``_SUBPROCESS_SILENCE_TIMEOUT`` seconds. The process
+    is always reaped before this function returns, so the caller never
+    has to worry about leaking PIDs.
+
+    Returns ``(rc, killed)``. When the watchdog fires, ``rc`` is None
+    and ``killed`` is True.
+    """
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        cwd=cwd,
+    )
+
+    killed = [False]
+    timer_box = [None]
+
+    def _watchdog_fire():
+        killed[0] = True
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+    def _arm():
+        t_old = timer_box[0]
+        if t_old is not None:
+            t_old.cancel()
+        t = threading.Timer(
+            _SUBPROCESS_SILENCE_TIMEOUT, _watchdog_fire)
+        t.daemon = True
+        t.start()
+        timer_box[0] = t
+
+    try:
+        _arm()
+        for raw_line in iter(proc.stdout.readline, b''):
+            _arm()
+            text = raw_line.decode(errors='replace').rstrip()
+            if text:
+                on_line(text)
+        rc = proc.wait()
+    finally:
+        t_last = timer_box[0]
+        if t_last is not None:
+            t_last.cancel()
+        if proc.poll() is None:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                pass
+    return (None if killed[0] else rc), killed[0]
+
 
 def init_app(app_state: AppState):
     global state
     state = app_state
+
+
+def _set_fire_status(fire, new_status, error_msg=None):
+    """Atomically update fire.status (and error_msg) under state.lock.
+
+    Prevents readers like handle_api_status from observing a newly-ERROR
+    status paired with a stale error_msg from the previous failure.
+    """
+    with state.lock:
+        fire.status = new_status
+        if error_msg is not None:
+            fire.error_msg = error_msg
 
 
 _SESSION_MAX_AGE = 30 * 24 * 3600  # 30 days in seconds
@@ -91,7 +175,16 @@ def _check_login_rate(ip: str) -> bool:
     with state.lock:
         attempts = state.login_attempts.get(ip, [])
         attempts = [t for t in attempts if now - t < _LOGIN_WINDOW_SECONDS]
-        state.login_attempts[ip] = attempts
+        if attempts:
+            state.login_attempts[ip] = attempts
+        else:
+            state.login_attempts.pop(ip, None)
+        # Opportunistic global sweep: bound memory under IP-spray attacks.
+        if len(state.login_attempts) > 1024:
+            stale = [k for k, v in state.login_attempts.items()
+                     if not v or now - v[-1] >= _LOGIN_WINDOW_SECONDS]
+            for k in stale:
+                state.login_attempts.pop(k, None)
         return len(attempts) < _LOGIN_MAX_ATTEMPTS
 
 
@@ -102,6 +195,22 @@ def _record_failed_login(ip: str):
         attempts = state.login_attempts.get(ip, [])
         attempts.append(now)
         state.login_attempts[ip] = attempts
+
+
+def _sweep_expired_sessions():
+    """Drop sessions past _SESSION_MAX_AGE. Call under state.lock."""
+    now = datetime.datetime.now()
+    stale = []
+    for tok, sess in state.sessions.items():
+        try:
+            created = datetime.datetime.fromisoformat(sess['created_at'])
+            if (now - created).total_seconds() > _SESSION_MAX_AGE:
+                stale.append(tok)
+        except (KeyError, ValueError, TypeError):
+            stale.append(tok)
+    for tok in stale:
+        state.sessions.pop(tok, None)
+    return len(stale)
 
 
 # =========================================================================
@@ -185,7 +294,9 @@ def _save_sessions():
     if not state.session_file:
         return
     try:
-        _atomic_yaml_dump(state.session_file, dict(state.sessions))
+        with state.lock:
+            snap = dict(state.sessions)
+        _atomic_yaml_dump(state.session_file, snap)
     except Exception as exc:
         sys.stderr.write(f'[save] WARNING: Failed to save sessions: {exc}\n')
         sys.stderr.flush()
@@ -206,17 +317,12 @@ def _save_settings():
 def _save_notes():
     """Persist all fire notes to notes.yaml."""
     try:
-        import yaml
         notes_path = os.path.join(state.output_root, 'notes.yaml')
-        notes_data = {}
-        for fn, fire in state.fires.items():
-            if fire.notes:
-                notes_data[fn] = fire.notes
-        tmp_path = notes_path + '.tmp'
-        with open(tmp_path, 'w') as f:
-            yaml.dump(notes_data, f,
-                      default_flow_style=False, sort_keys=True)
-        os.replace(tmp_path, notes_path)
+        with state.lock:
+            notes_data = {fn: fire.notes
+                          for fn, fire in state.fires.items()
+                          if fire.notes}
+        _atomic_yaml_dump(notes_path, notes_data, mode=0o644)
     except Exception as exc:
         sys.stderr.write(
             f'[save] WARNING: Failed to save notes: {exc}\n')
@@ -227,7 +333,9 @@ def _save_fire_state():
     """Persist per-fire state to fire_state.yaml so mapped fires survive restart."""
     try:
         data = {}
-        for fn, fire in state.fires.items():
+        with state.lock:
+            fires_snapshot = list(state.fires.items())
+        for fn, fire in fires_snapshot:
             # Only persist fires with meaningful state beyond PENDING
             if (fire.status == FireStatus.PENDING and not fire.hidden
                     and not fire.cache_dir):
@@ -614,9 +722,12 @@ def _load_accepted_params() -> list[dict]:
         return []
     try:
         import csv
-        with open(csv_path, newline='') as f:
-            reader = csv.DictReader(f)
-            return list(reader)
+        # Read under the same lock that guards writers so a reader never
+        # sees a half-rewritten file during dedupe.
+        with _accept_file_lock:
+            with open(csv_path, newline='') as f:
+                reader = csv.DictReader(f)
+                return list(reader)
     except Exception:
         return []
 
@@ -797,13 +908,14 @@ def _batch_map_worker(fire_numbes: list[str]):
     """Process fires sequentially with recommended settings."""
     import traceback
 
-    state.batch_status = {
-        'running': True,
-        'total': len(fire_numbes),
-        'completed': 0,
-        'current_fire': '',
-        'errors': [],
-    }
+    with state.lock:
+        state.batch_status = {
+            'running': True,
+            'total': len(fire_numbes),
+            'completed': 0,
+            'current_fire': '',
+            'errors': [],
+        }
 
     sys.stderr.write(
         f'[batch] Starting batch: {len(fire_numbes)} fire(s)\n')
@@ -819,10 +931,12 @@ def _batch_map_worker(fire_numbes: list[str]):
         fire = state.fires.get(fire_numbe)
         if not fire or fire.status in (
                 FireStatus.ACCEPTED, FireStatus.MAPPING):
-            state.batch_status['completed'] += 1
+            with state.lock:
+                state.batch_status['completed'] += 1
             continue
 
-        state.batch_status['current_fire'] = fire_numbe
+        with state.lock:
+            state.batch_status['current_fire'] = fire_numbe
         sys.stderr.write(f'[batch] [{fire_numbe}] Starting...\n')
         sys.stderr.flush()
 
@@ -849,20 +963,22 @@ def _batch_map_worker(fire_numbes: list[str]):
                         f'[batch] [{fire_numbe}] Prepare FAILED: '
                         f'{fire.error_msg}\n')
                     sys.stderr.flush()
-                    state.batch_status['errors'].append(fire_numbe)
-                    state.batch_status['completed'] += 1
+                    with state.lock:
+                        state.batch_status['errors'].append(fire_numbe)
+                        state.batch_status['completed'] += 1
                     continue
 
                 # Map
-                fire.status = FireStatus.MAPPING
-                fire.console_log = []
-                fire.last_params = params
-                state.current_job = {
-                    'fire_numbe': fire_numbe,
-                    'client_ip': 'batch',
-                    'started_at': datetime.datetime.now().isoformat(
-                        timespec='seconds'),
-                }
+                with state.lock:
+                    fire.status = FireStatus.MAPPING
+                    fire.console_log.clear()
+                    fire.last_params = params
+                    state.current_job = {
+                        'fire_numbe': fire_numbe,
+                        'client_ip': 'batch',
+                        'started_at': datetime.datetime.now().isoformat(
+                            timespec='seconds'),
+                    }
 
                 cmd = _build_mapping_cmd(fire, params)
                 sys.stderr.write(
@@ -871,23 +987,20 @@ def _batch_map_worker(fire_numbes: list[str]):
                     f'...\n')
                 sys.stderr.flush()
 
-                proc = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    cwd=state.project_root,
-                )
+                def _on_line(text, _fn=fire_numbe, _fire=fire):
+                    _fire.console_log.append(text)
+                    sys.stderr.write(f'[batch] [{_fn}] {text}\n')
+                    sys.stderr.flush()
 
-                for line in iter(proc.stdout.readline, b''):
-                    text = line.decode(errors='replace').rstrip()
-                    if text:
-                        fire.console_log.append(text)
-                        sys.stderr.write(
-                            f'[batch] [{fire_numbe}] {text}\n')
-                        sys.stderr.flush()
+                rc, killed = _stream_subprocess(
+                    cmd, state.project_root, _on_line)
+                with state.lock:
+                    state.current_job = None
 
-                rc = proc.wait()
-                state.current_job = None
+                if killed:
+                    fire.console_log.append(
+                        f'[watchdog] killed after '
+                        f'{_SUBPROCESS_SILENCE_TIMEOUT}s of silence')
 
                 if rc == 0:
                     comp = os.path.join(
@@ -904,28 +1017,32 @@ def _batch_map_worker(fire_numbes: list[str]):
                         f'[batch] [{fire_numbe}] MAPPED OK '
                         f'(agreement={fire.agreement_pct}%)\n')
                 else:
-                    fire.status = FireStatus.ERROR
-                    fire.error_msg = f'Exited with code {rc}'
-                    state.batch_status['errors'].append(fire_numbe)
+                    _set_fire_status(
+                        fire, FireStatus.ERROR,
+                        f'Exited with code {rc}')
+                    with state.lock:
+                        state.batch_status['errors'].append(fire_numbe)
                     sys.stderr.write(
                         f'[batch] [{fire_numbe}] FAILED (rc={rc})\n')
                 sys.stderr.flush()
 
         except Exception as exc:
-            fire.status = FireStatus.ERROR
-            fire.error_msg = str(exc)
-            state.batch_status['errors'].append(fire_numbe)
-            state.current_job = None
+            _set_fire_status(fire, FireStatus.ERROR, str(exc))
+            with state.lock:
+                state.batch_status['errors'].append(fire_numbe)
+                state.current_job = None
             sys.stderr.write(
                 f'[batch] [{fire_numbe}] EXCEPTION:\n'
                 f'{traceback.format_exc()}\n')
             sys.stderr.flush()
 
-        state.batch_status['completed'] += 1
+        with state.lock:
+            state.batch_status['completed'] += 1
         _save_fire_state()
 
-    state.batch_status['running'] = False
-    state.batch_status['current_fire'] = ''
+    with state.lock:
+        state.batch_status['running'] = False
+        state.batch_status['current_fire'] = ''
     sys.stderr.write(
         f'[batch] Complete: {state.batch_status["completed"]}'
         f'/{state.batch_status["total"]} fires, '
@@ -944,7 +1061,7 @@ def _serial_map_worker(fire_numbe: str, param_sets: list[dict]):
 
     fire = state.fires[fire_numbe]
     fire.serial_results = []
-    fire.console_log = []
+    fire.console_log.clear()
     n_total = len(param_sets)
 
     # Path for the shared intermediate state (.npz)
@@ -1112,14 +1229,15 @@ def _serial_map_worker(fire_numbe: str, param_sets: list[dict]):
                             })
                             break  # all runs share same prep — stop
 
-                fire.status = FireStatus.MAPPING
-                fire.last_params = params
-                state.current_job = {
-                    'fire_numbe': f'{fire_numbe} (run {run_id}/{n_total})',
-                    'client_ip': 'serial',
-                    'started_at': datetime.datetime.now().isoformat(
-                        timespec='seconds'),
-                }
+                with state.lock:
+                    fire.status = FireStatus.MAPPING
+                    fire.last_params = params
+                    state.current_job = {
+                        'fire_numbe': f'{fire_numbe} (run {run_id}/{n_total})',
+                        'client_ip': 'serial',
+                        'started_at': datetime.datetime.now().isoformat(
+                            timespec='seconds'),
+                    }
 
                 # Run 1: full pipeline + save state
                 # Runs 2-N: load cached state (HDBSCAN only)
@@ -1134,23 +1252,22 @@ def _serial_map_worker(fire_numbe: str, param_sets: list[dict]):
                     fire.console_log.append(
                         '  (resuming from cached t-SNE + RF)')
 
-                proc = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    cwd=state.project_root,
-                )
+                def _on_line(text, _fn=fire_numbe, _rid=run_id,
+                             _fire=fire):
+                    _fire.console_log.append(text)
+                    sys.stderr.write(
+                        f'[serial] [{_fn}#{_rid}] {text}\n')
 
-                for line in iter(proc.stdout.readline, b''):
-                    text = line.decode(errors='replace').rstrip()
-                    if text:
-                        fire.console_log.append(text)
-                        sys.stderr.write(
-                            f'[serial] [{fire_numbe}#{run_id}] {text}\n')
-
-                rc = proc.wait()
-                state.current_job = None
+                rc, killed = _stream_subprocess(
+                    cmd, state.project_root, _on_line)
+                with state.lock:
+                    state.current_job = None
                 sys.stderr.flush()
+
+                if killed:
+                    fire.console_log.append(
+                        f'[watchdog] killed after '
+                        f'{_SUBPROCESS_SILENCE_TIMEOUT}s of silence')
 
                 if rc == 0:
                     # Compute agreement
@@ -1264,7 +1381,8 @@ def _serial_map_worker(fire_numbe: str, param_sets: list[dict]):
                         break
 
         except Exception as exc:
-            state.current_job = None
+            with state.lock:
+                state.current_job = None
             fire.serial_results.append({
                 'run_id': run_id,
                 'params': params,
@@ -1317,8 +1435,8 @@ def _serial_map_worker(fire_numbe: str, param_sets: list[dict]):
             f'Serial mapping complete. Best: run {best["run_id"]} '
             f'(agreement={best["agreement_pct"]}%)')
     else:
-        fire.status = FireStatus.ERROR
-        fire.error_msg = 'All serial runs failed'
+        _set_fire_status(
+            fire, FireStatus.ERROR, 'All serial runs failed')
         fire.console_log.append('All serial runs failed.')
 
     _save_fire_state()
@@ -1333,11 +1451,12 @@ def _save_ip_list():
     if not state.ip_file:
         return
     try:
-        data = {
-            'approved': dict(state.approved_ips),
-            'blocked': dict(state.blocked_ips),
-            'pending': dict(state.pending_ips),
-        }
+        with state.lock:
+            data = {
+                'approved': dict(state.approved_ips),
+                'blocked': dict(state.blocked_ips),
+                'pending': dict(state.pending_ips),
+            }
         _atomic_yaml_dump(state.ip_file, data)
     except Exception as exc:
         sys.stderr.write(
@@ -1400,8 +1519,8 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
             state.gdf['FIRE_NUMBE'].astype(str) == fire_numbe
         ].iloc[0]
     except (IndexError, KeyError):
-        fire.status = FireStatus.ERROR
-        fire.error_msg = f"Fire {fire_numbe} not found in shapefile"
+        _set_fire_status(fire, FireStatus.ERROR,
+                         f"Fire {fire_numbe} not found in shapefile")
         return
 
     # -- Parse FIRE_DATE --
@@ -1413,8 +1532,8 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
             fire_date = datetime.datetime.strptime(
                 str(raw).split()[0], '%Y-%m-%d')
     except (ValueError, AttributeError):
-        fire.status = FireStatus.ERROR
-        fire.error_msg = f"Cannot parse FIRE_DATE: {raw!r}"
+        _set_fire_status(fire, FireStatus.ERROR,
+                         f"Cannot parse FIRE_DATE: {raw!r}")
         return
 
     acc_start = fire_date - datetime.timedelta(days=5)
@@ -1427,8 +1546,8 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
 
     clipped = row.geometry.intersection(raster_box)
     if clipped.is_empty:
-        fire.status = FireStatus.ERROR
-        fire.error_msg = "Fire polygon does not overlap the raster"
+        _set_fire_status(fire, FireStatus.ERROR,
+                         "Fire polygon does not overlap the raster")
         return
 
     bounds = clipped.bounds  # (minx, miny, maxx, maxy)
@@ -1445,8 +1564,8 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
     py_hi = min(H - 1, py_hi + p)
 
     if px_lo >= px_hi or py_lo >= py_hi:
-        fire.status = FireStatus.ERROR
-        fire.error_msg = "Crop box has zero area after clipping"
+        _set_fire_status(fire, FireStatus.ERROR,
+                         "Crop box has zero area after clipping")
         return
 
     crop_xmin = gt[0] + px_lo * gt[1]
@@ -1479,8 +1598,7 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
     crop_bin = os.path.join(cache_dir, f'{fire_numbe}_crop.bin')
     if not crop_raster(state.raster_path, crop_bin,
                        crop_xmin, crop_ymin, crop_xmax, crop_ymax):
-        fire.status = FireStatus.ERROR
-        fire.error_msg = "GDAL crop failed"
+        _set_fire_status(fire, FireStatus.ERROR, "GDAL crop failed")
         return
     fire.crop_bin = crop_bin
 
@@ -1563,8 +1681,8 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
         fire.hint_bin = perim_bin
         fire.perimeter_type = 'traditional'
     else:
-        fire.status = FireStatus.ERROR
-        fire.error_msg = "No classification hint available"
+        _set_fire_status(fire, FireStatus.ERROR,
+                         "No classification hint available")
         return
 
     fire.acc_start = str(plot_start)
@@ -1699,22 +1817,25 @@ def _accept_fire_sync(fire_numbe: str) -> str:
     except ImportError:
         pass
 
-    # Update fire_status.yaml (atomic write)
+    # Update fire_status.yaml (atomic write). Hold the file lock across
+    # the read-modify-write so concurrent accepts of different fires
+    # don't lose each other's entries.
     try:
         import yaml
         status_path = os.path.join(state.output_root, 'fire_status.yaml')
-        idx = {}
-        if os.path.exists(status_path):
-            with open(status_path) as f:
-                idx = yaml.safe_load(f) or {}
-        idx[fire_numbe] = {
-            'status': 'accepted',
-            'timestamp': datetime.datetime.now().isoformat(
-                timespec='seconds'),
-            'fire_dir': fire_dir,
-            'source': 'web',
-        }
-        _atomic_yaml_dump(status_path, idx)
+        with _accept_file_lock:
+            idx = {}
+            if os.path.exists(status_path):
+                with open(status_path) as f:
+                    idx = yaml.safe_load(f) or {}
+            idx[fire_numbe] = {
+                'status': 'accepted',
+                'timestamp': datetime.datetime.now().isoformat(
+                    timespec='seconds'),
+                'fire_dir': fire_dir,
+                'source': 'web',
+            }
+            _atomic_yaml_dump(status_path, idx)
     except Exception:
         pass
 
@@ -1725,45 +1846,48 @@ def _accept_fire_sync(fire_numbe: str) -> str:
         except Exception:
             pass
 
-    # Append to accepted_params.csv for parameter learning (deduplicate)
+    # Append to accepted_params.csv for parameter learning (deduplicate).
+    # The full read-dedupe-rewrite-append sequence runs under the file
+    # lock so concurrent accepts cannot interleave and corrupt the file.
     try:
         import csv
         csv_path = os.path.join(state.output_root, 'accepted_params.csv')
-        write_header = not os.path.isfile(csv_path)
+        with _accept_file_lock:
+            write_header = not os.path.isfile(csv_path)
 
-        # Remove existing entry for this fire to avoid duplicates
-        if not write_header:
-            existing = []
-            with open(csv_path, newline='') as cf:
-                reader = csv.DictReader(cf)
-                existing = [r for r in reader
-                            if r.get('fire_numbe') != fire_numbe]
-            with open(csv_path, 'w', newline='') as cf:
+            # Remove existing entry for this fire to avoid duplicates
+            if not write_header:
+                existing = []
+                with open(csv_path, newline='') as cf:
+                    reader = csv.DictReader(cf)
+                    existing = [r for r in reader
+                                if r.get('fire_numbe') != fire_numbe]
+                with open(csv_path, 'w', newline='') as cf:
+                    writer = csv.DictWriter(
+                        cf, fieldnames=_CSV_FIELDNAMES,
+                        extrasaction='ignore')
+                    writer.writeheader()
+                    writer.writerows(existing)
+                write_header = False
+
+            row_data = {
+                'fire_numbe': fire_numbe,
+                'fire_size_ha': fire.fire_size_ha,
+                'agreement_pct': fire.agreement_pct,
+                'padding': fire.padding_used,
+                'timestamp': datetime.datetime.now().isoformat(
+                    timespec='seconds'),
+            }
+            if fire.last_params:
+                for k, v in fire.last_params.items():
+                    row_data[k] = v
+            with open(csv_path, 'a', newline='') as cf:
                 writer = csv.DictWriter(
                     cf, fieldnames=_CSV_FIELDNAMES,
                     extrasaction='ignore')
-                writer.writeheader()
-                writer.writerows(existing)
-            write_header = False
-
-        row_data = {
-            'fire_numbe': fire_numbe,
-            'fire_size_ha': fire.fire_size_ha,
-            'agreement_pct': fire.agreement_pct,
-            'padding': fire.padding_used,
-            'timestamp': datetime.datetime.now().isoformat(
-                timespec='seconds'),
-        }
-        if fire.last_params:
-            for k, v in fire.last_params.items():
-                row_data[k] = v
-        with open(csv_path, 'a', newline='') as cf:
-            writer = csv.DictWriter(
-                cf, fieldnames=_CSV_FIELDNAMES,
-                extrasaction='ignore')
-            if write_header:
-                writer.writeheader()
-            writer.writerow(row_data)
+                if write_header:
+                    writer.writeheader()
+                writer.writerow(row_data)
     except Exception as exc:
         sys.stderr.write(
             f'[save] WARNING: Failed to update accepted_params.csv: '
@@ -2011,8 +2135,53 @@ class FireHandler(BaseHTTPRequestHandler):
         ip = self._client_ip()
         username = getattr(self, '_username', '')
 
-        # Blocked IPs are blocked even for admins (must unblock explicitly)
-        if ip in state.blocked_ips:
+        save_needed = False
+        with state.lock:
+            # Blocked IPs are blocked even for admins
+            if ip in state.blocked_ips:
+                blocked = True
+            else:
+                blocked = False
+
+            if not blocked:
+                if role == 'admin':
+                    if ip not in state.approved_ips:
+                        state.approved_ips[ip] = {
+                            'username': username,
+                            'role': 'admin',
+                            'approved_by': 'auto (admin)',
+                            'timestamp': datetime.datetime.now().isoformat(
+                                timespec='seconds'),
+                        }
+                        save_needed = True
+                    else:
+                        state.approved_ips[ip]['username'] = username
+                        state.approved_ips[ip]['role'] = 'admin'
+                    state.pending_ips.pop(ip, None)
+                    approved_admin = True
+                    approved_user = False
+                elif ip in state.approved_ips:
+                    state.approved_ips[ip]['username'] = username
+                    state.approved_ips[ip]['role'] = 'user'
+                    approved_admin = False
+                    approved_user = True
+                else:
+                    # Unknown IP → pending
+                    now = datetime.datetime.now().isoformat(
+                        timespec='seconds')
+                    if ip not in state.pending_ips:
+                        state.pending_ips[ip] = {
+                            'username': username,
+                            'first_seen': now,
+                            'last_seen': now,
+                        }
+                    else:
+                        state.pending_ips[ip]['last_seen'] = now
+                        state.pending_ips[ip]['username'] = username
+                    approved_admin = False
+                    approved_user = False
+
+        if blocked:
             self._send_html(render_template('pending.html', {
                 'ip': ip,
                 'title': 'Access Denied',
@@ -2022,43 +2191,10 @@ class FireHandler(BaseHTTPRequestHandler):
             }), 403)
             return False
 
-        if role == 'admin':
-            # Auto-approve admin IPs
-            if ip not in state.approved_ips:
-                state.approved_ips[ip] = {
-                    'username': username,
-                    'role': 'admin',
-                    'approved_by': 'auto (admin)',
-                    'timestamp': datetime.datetime.now().isoformat(
-                        timespec='seconds'),
-                }
-                _save_ip_list()
-            else:
-                # Update username on each visit
-                state.approved_ips[ip]['username'] = username
-                state.approved_ips[ip]['role'] = 'admin'
-            # Remove from pending if was there
-            state.pending_ips.pop(ip, None)
+        if save_needed:
+            _save_ip_list()
+        if approved_admin or approved_user:
             return True
-
-        # Regular user — check IP (blocked already handled above)
-        if ip in state.approved_ips:
-            # Update username on each visit
-            state.approved_ips[ip]['username'] = username
-            state.approved_ips[ip]['role'] = 'user'
-            return True
-
-        # Unknown IP → pending
-        now = datetime.datetime.now().isoformat(timespec='seconds')
-        if ip not in state.pending_ips:
-            state.pending_ips[ip] = {
-                'username': username,
-                'first_seen': now,
-                'last_seen': now,
-            }
-        else:
-            state.pending_ips[ip]['last_seen'] = now
-            state.pending_ips[ip]['username'] = username
 
         self._send_html(render_template('pending.html', {
             'ip': ip,
@@ -2175,7 +2311,14 @@ class FireHandler(BaseHTTPRequestHandler):
 
     def _read_body(self) -> dict | None:
         """Read and parse JSON body. Returns None (and sends 413/400) on error."""
-        length = int(self.headers.get('Content-Length', 0))
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+        except (TypeError, ValueError):
+            self.send_error(400, 'Malformed Content-Length')
+            return None
+        if length < 0:
+            self.send_error(400, 'Malformed Content-Length')
+            return None
         if length == 0:
             return {}
         if length > self._MAX_BODY:
@@ -2228,8 +2371,12 @@ class FireHandler(BaseHTTPRequestHandler):
             return
 
         # Parse form body (application/x-www-form-urlencoded)
-        length = int(self.headers.get('Content-Length', 0))
-        if length > 10000:
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+        except (TypeError, ValueError):
+            self.send_error(400, 'Malformed Content-Length')
+            return
+        if length < 0 or length > 10000:
             self.send_error(400)
             return
         raw = self.rfile.read(length).decode(errors='replace')
@@ -2259,6 +2406,7 @@ class FireHandler(BaseHTTPRequestHandler):
         raw_token = secrets.token_hex(32)
         hashed = _hash_token(raw_token)
         with state.lock:
+            swept = _sweep_expired_sessions()
             state.sessions[hashed] = {
                 'role': role,
                 'username': username,
@@ -2266,6 +2414,9 @@ class FireHandler(BaseHTTPRequestHandler):
                 'created_at': datetime.datetime.now().isoformat(
                     timespec='seconds'),
             }
+        if swept:
+            sys.stderr.write(
+                f'[auth] swept {swept} expired session(s)\n')
         _save_sessions()
 
         # Set cookie and redirect to home. The Secure flag is only
@@ -2343,21 +2494,22 @@ class FireHandler(BaseHTTPRequestHandler):
     # -- API handlers --
 
     def handle_api_fires(self):
-        fires = [
-            {
-                'fire_numbe': f.fire_numbe,
-                'fire_date': f.fire_date,
-                'fire_year': f.fire_year,
-                'fire_size_ha': f.fire_size_ha,
-                'status': f.status.value,
-                'previously_accepted': f.previously_accepted,
-                'agreement_pct': f.agreement_pct,
-                'ml_area_ha': f.ml_area_ha,
-                'notes': f.notes,
-            }
-            for f in state.fires.values()
-            if not f.hidden
-        ]
+        with state.lock:
+            fires = [
+                {
+                    'fire_numbe': f.fire_numbe,
+                    'fire_date': f.fire_date,
+                    'fire_year': f.fire_year,
+                    'fire_size_ha': f.fire_size_ha,
+                    'status': f.status.value,
+                    'previously_accepted': f.previously_accepted,
+                    'agreement_pct': f.agreement_pct,
+                    'ml_area_ha': f.ml_area_ha,
+                    'notes': f.notes,
+                }
+                for f in state.fires.values()
+                if not f.hidden
+            ]
         self._send_json(fires)
 
     def handle_api_settings_get(self):
@@ -2435,8 +2587,11 @@ class FireHandler(BaseHTTPRequestHandler):
         })
 
     def handle_api_batch_status(self):
-        self._send_json(
-            state.batch_status or {'running': False})
+        with state.lock:
+            snap = dict(state.batch_status) if state.batch_status else None
+            if snap is not None and isinstance(snap.get('errors'), list):
+                snap['errors'] = list(snap['errors'])
+        self._send_json(snap or {'running': False})
 
     # -- Access control & admin API --
 
@@ -2454,19 +2609,28 @@ class FireHandler(BaseHTTPRequestHandler):
         if getattr(self, '_role', '') != 'admin':
             self._send_json({'error': 'Admin only'}, 403)
             return
-        self._send_json({
-            'approved': state.approved_ips,
-            'blocked': state.blocked_ips,
-            'pending': state.pending_ips,
-        })
+        with state.lock:
+            payload = {
+                'approved': {k: dict(v)
+                             for k, v in state.approved_ips.items()},
+                'blocked': {k: dict(v)
+                            for k, v in state.blocked_ips.items()},
+                'pending': {k: dict(v)
+                            for k, v in state.pending_ips.items()},
+            }
+        self._send_json(payload)
 
     def handle_api_admin_queue(self):
         if getattr(self, '_role', '') != 'admin':
             self._send_json({'error': 'Admin only'}, 403)
             return
+        with state.lock:
+            current = (dict(state.current_job)
+                       if state.current_job else None)
+            waiting = [dict(w) for w in state.waiting_jobs]
         self._send_json({
-            'current': state.current_job,
-            'waiting': list(state.waiting_jobs),
+            'current': current,
+            'waiting': waiting,
         })
 
     def handle_api_admin_ip_action(self, action):
@@ -2483,35 +2647,36 @@ class FireHandler(BaseHTTPRequestHandler):
 
         now = datetime.datetime.now().isoformat(timespec='seconds')
 
-        if action == 'approve':
-            # Preserve username from pending entry
-            pending_info = state.pending_ips.get(ip, {})
-            state.approved_ips[ip] = {
-                'username': pending_info.get('username', ''),
-                'role': 'user',
-                'approved_by': self._client_ip(),
-                'timestamp': now,
-            }
-            state.pending_ips.pop(ip, None)
-            state.blocked_ips.pop(ip, None)
+        with state.lock:
+            if action == 'approve':
+                # Preserve username from pending entry
+                pending_info = state.pending_ips.get(ip, {})
+                state.approved_ips[ip] = {
+                    'username': pending_info.get('username', ''),
+                    'role': 'user',
+                    'approved_by': self._client_ip(),
+                    'timestamp': now,
+                }
+                state.pending_ips.pop(ip, None)
+                state.blocked_ips.pop(ip, None)
 
-        elif action == 'block':
-            pending_info = state.pending_ips.get(ip, {})
-            approved_info = state.approved_ips.get(ip, {})
-            state.blocked_ips[ip] = {
-                'username': (pending_info.get('username', '')
-                             or approved_info.get('username', '')),
-                'blocked_by': self._client_ip(),
-                'timestamp': now,
-            }
-            state.approved_ips.pop(ip, None)
-            state.pending_ips.pop(ip, None)
+            elif action == 'block':
+                pending_info = state.pending_ips.get(ip, {})
+                approved_info = state.approved_ips.get(ip, {})
+                state.blocked_ips[ip] = {
+                    'username': (pending_info.get('username', '')
+                                 or approved_info.get('username', '')),
+                    'blocked_by': self._client_ip(),
+                    'timestamp': now,
+                }
+                state.approved_ips.pop(ip, None)
+                state.pending_ips.pop(ip, None)
 
-        elif action == 'revoke':
-            state.approved_ips.pop(ip, None)
+            elif action == 'revoke':
+                state.approved_ips.pop(ip, None)
 
-        elif action == 'unblock':
-            state.blocked_ips.pop(ip, None)
+            elif action == 'unblock':
+                state.blocked_ips.pop(ip, None)
 
         _save_ip_list()
         self._send_json({'status': 'ok'})
@@ -2709,7 +2874,9 @@ class FireHandler(BaseHTTPRequestHandler):
             self._send_json({'error': 'Fire not found'}, 404)
             return
         f = state.fires[fire_numbe]
-        self._send_json({'status': f.status.value, 'error': f.error_msg})
+        with state.lock:
+            payload = {'status': f.status.value, 'error': f.error_msg}
+        self._send_json(payload)
 
     def handle_api_console(self, fire_numbe):
         fire_numbe = unquote(fire_numbe)
@@ -2883,7 +3050,7 @@ class FireHandler(BaseHTTPRequestHandler):
             fire.previously_accepted = True
         fire.status = FireStatus.MAPPING
         fire.serial_results = []
-        fire.console_log = []
+        fire.console_log.clear()
 
         thread = threading.Thread(
             target=_serial_map_worker,
@@ -3117,6 +3284,9 @@ class FireHandler(BaseHTTPRequestHandler):
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
     def handle_api_remove(self, fire_numbe):
+        if getattr(self, '_role', '') != 'admin':
+            self._send_json({'error': 'Admin only'}, 403)
+            return
         fire_numbe = unquote(fire_numbe)
         if fire_numbe not in state.fires:
             self._send_json({'error': 'Fire not found'}, 404)
@@ -3126,6 +3296,9 @@ class FireHandler(BaseHTTPRequestHandler):
         self._send_json({'status': 'removed'})
 
     def handle_api_unhide(self, fire_numbe):
+        if getattr(self, '_role', '') != 'admin':
+            self._send_json({'error': 'Admin only'}, 403)
+            return
         fire_numbe = unquote(fire_numbe)
         if fire_numbe not in state.fires:
             self._send_json({'error': 'Fire not found'}, 404)
@@ -3136,6 +3309,9 @@ class FireHandler(BaseHTTPRequestHandler):
 
     def handle_api_fires_hidden(self):
         """Return list of hidden fires (for admin restore UI)."""
+        if getattr(self, '_role', '') != 'admin':
+            self._send_json({'error': 'Admin only'}, 403)
+            return
         fires = [
             {
                 'fire_numbe': f.fire_numbe,
@@ -3151,6 +3327,9 @@ class FireHandler(BaseHTTPRequestHandler):
 
     def handle_api_batch_cancel(self):
         """Cancel a running batch mapping."""
+        if getattr(self, '_role', '') != 'admin':
+            self._send_json({'error': 'Admin only'}, 403)
+            return
         if not state.batch_status or not state.batch_status.get('running'):
             self._send_json({'error': 'No batch running'}, 400)
             return
@@ -3188,7 +3367,7 @@ class FireHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
         # Clear console log for fresh mapping
-        fire.console_log = []
+        fire.console_log.clear()
 
         def sse(event_type, data):
             payload = json.dumps({'type': event_type, **data})
@@ -3198,8 +3377,12 @@ class FireHandler(BaseHTTPRequestHandler):
             try:
                 self.wfile.write(f'data: {payload}\n\n'.encode())
                 self.wfile.flush()
-            except BrokenPipeError:
-                pass
+            except (BrokenPipeError, ConnectionResetError):
+                # Client disconnected. Propagate so _stream_subprocess's
+                # finally block kills the running CLI instead of orphaning
+                # it. Any outer sse('error', ...) will re-raise here too,
+                # which is fine — the finally blocks still clean up.
+                raise
 
         # GPU serialisation with queue tracking
         client_ip = self._client_ip()
@@ -3223,17 +3406,18 @@ class FireHandler(BaseHTTPRequestHandler):
 
         try:
             with _gpu_lock:
-                # Move from waiting to current
-                if job_entry in state.waiting_jobs:
-                    state.waiting_jobs.remove(job_entry)
-                state.current_job = {
-                    **job_entry,
-                    'started_at': datetime.datetime.now().isoformat(
-                        timespec='seconds'),
-                }
-                if fire.status == FireStatus.ACCEPTED:
-                    fire.previously_accepted = True
-                fire.status = FireStatus.MAPPING
+                with state.lock:
+                    # Move from waiting to current
+                    if job_entry in state.waiting_jobs:
+                        state.waiting_jobs.remove(job_entry)
+                    state.current_job = {
+                        **job_entry,
+                        'started_at': datetime.datetime.now().isoformat(
+                            timespec='seconds'),
+                    }
+                    if fire.status == FireStatus.ACCEPTED:
+                        fire.previously_accepted = True
+                    fire.status = FireStatus.MAPPING
                 cmd = _build_mapping_cmd(fire, params)
                 short_cmd = ' '.join(
                     os.path.basename(c) if i < 3 else c
@@ -3241,24 +3425,26 @@ class FireHandler(BaseHTTPRequestHandler):
                 sse('log', {'message': f'$ {short_cmd}'})
 
                 try:
-                    proc = subprocess.Popen(
-                        cmd,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        cwd=state.project_root,
-                    )
+                    def _on_line(text):
+                        sse('log', {'message': text})
 
-                    for raw_line in iter(proc.stdout.readline, b''):
-                        text = raw_line.decode(errors='replace').rstrip()
-                        if text:
-                            sse('log', {'message': text})
-
-                    rc = proc.wait()
+                    rc, killed = _stream_subprocess(
+                        cmd, state.project_root, _on_line)
 
                 except Exception as exc:
                     fire.status = FireStatus.READY
                     sse('error', {
                         'message': f'Failed to start subprocess: {exc}',
+                    })
+                    return
+
+                if killed:
+                    fire.status = FireStatus.READY
+                    sse('error', {
+                        'message': (
+                            f'Mapping killed after '
+                            f'{_SUBPROCESS_SILENCE_TIMEOUT}s of '
+                            f'silent CLI output (watchdog).'),
                     })
                     return
 
@@ -3289,9 +3475,15 @@ class FireHandler(BaseHTTPRequestHandler):
         finally:
             with _gpu_queue_lock:
                 _gpu_queue = max(0, _gpu_queue - 1)
-            state.current_job = None
-            if job_entry in state.waiting_jobs:
-                state.waiting_jobs.remove(job_entry)
+            with state.lock:
+                state.current_job = None
+                if job_entry in state.waiting_jobs:
+                    state.waiting_jobs.remove(job_entry)
+                # If we exited via client-disconnect before rc was
+                # evaluated, fire.status is still MAPPING. Unstick it so
+                # the next request can run.
+                if fire.status == FireStatus.MAPPING:
+                    fire.status = FireStatus.READY
 
     # -- Logging --
 

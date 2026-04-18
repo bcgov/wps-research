@@ -1,6 +1,6 @@
 # batch_fire_mapping_web
 
-*Last updated: April 17, 2026*
+*Last updated: April 18, 2026*
 
 Interactive web interface for mapping wildfire burn areas from Sentinel-2 satellite imagery. Uses a machine learning pipeline (T-SNE dimensionality reduction, Random Forest classification, HDBSCAN clustering) accelerated on GPU to classify burned vs. unburned pixels, then lets users visually review and accept results through a browser.
 
@@ -500,10 +500,21 @@ The following security measures are built into the server:
 - **Request body limits**: POST bodies are capped at 1 MB; oversized requests receive a 413 response.
 - **Blocked IP enforcement**: blocked IPs are checked before any role-based auto-approve logic, so a blocked IP cannot bypass the block by logging in as admin.
 - **Batch mapping** requires admin role.
-- **Thread safety**: mutable shared state (sessions, console logs, serial results, GPU queue, batch status) is protected by locks to prevent race conditions.
+- **Thread safety**: mutable shared state (sessions, console logs, serial results, GPU queue, batch status, IP access lists) is protected by locks to prevent race conditions. Mutations and reads are performed under `state.lock`; persistence save-paths (`_save_sessions`, `_save_ip_list`, `_save_notes`, `_save_fire_state`) snapshot state under the lock before writing to disk.
+- **Atomic fire-status updates**: status and `error_msg` are updated together via `_set_fire_status()` under the lock, so readers never observe an ERROR status paired with a stale error message.
+- **Analyzer CSV serialization**: appends and removals to `analyzer_accepted.csv` are serialized via a dedicated module-level lock to prevent read-modify-write races.
 - **Fixed CSV headers**: `accepted_params.csv` uses a fixed fieldname list, preventing header drift across appends. Re-accepting a fire replaces its previous entry rather than appending duplicates.
 - **Structured error logging**: persistence failures (sessions, notes, fire state, settings) are logged to stderr with context rather than silently swallowed.
 - **URL encoding**: all client-side API URLs encode fire names with `encodeURIComponent` to handle special characters safely.
+- **Template escaping**: the client-side `esc()` helper escapes `<`, `>`, `&`, `"`, and `'`, making interpolated values safe in both text and attribute contexts.
+- **Bounded memory**:
+  - Per-fire console log buffers are capped at 2000 lines via `collections.deque(maxlen=...)`, preventing unbounded memory growth on long-running mappings.
+  - The in-memory login-attempt rate-limit table is bounded: empty entries are popped on access and a sweep removes stale entries when the dict exceeds 1024 IPs.
+- **Subprocess watchdog**: mapping and analyzer CLI subprocesses are killed after 30 minutes of silent stdout to prevent a hung run from wedging the GPU lock indefinitely.
+- **SSE disconnect kills CLI**: when a client disconnects from a mapping stream, the broken-pipe exception propagates through the SSE writer to terminate the running subprocess rather than orphaning it. A guard in the mapping handler's `finally` also resets any fire stuck in `MAPPING` back to `READY`.
+- **Session expiry sweep**: stale (expired) sessions are swept opportunistically on each successful login, in addition to the per-request lazy check.
+- **Input hardening**: malformed or negative `Content-Length` headers are rejected with a 400 response instead of crashing or hanging the request. The same guard is applied to the login form parser.
+- **Admin-only endpoints**: `/remove`, `/unhide`, `/fires/hidden`, and `/batch/cancel` require the admin role, in addition to the existing admin gates on batch mapping and the analyzer.
 
 ---
 
@@ -541,7 +552,7 @@ The `.analyzer_cache/` directory is never wiped automatically — un-accepted an
 - **HDBSCAN non-determinism**: cuML's GPU HDBSCAN does not support a random seed. Identical runs *may* produce slightly different results due to GPU parallelism, but for some inputs the GPU is effectively deterministic. All other pipeline stages are seeded and deterministic. The Parameter Analyzer works around this by jittering `hdbscan_min_samples` across replicates (see the jitter section above).
 - **Single GPU queue**: one fire maps at a time. Additional requests queue automatically. The analyzer releases the GPU lock between runs so user mappings can interleave.
 - **No TLS**: the server uses plaintext HTTP. Use an SSH tunnel or reverse proxy for encrypted access. Cookies omit the `Secure` flag on plain HTTP so that login works over VPN / LAN IPs (see the security section); `Secure` is added back automatically when running behind an HTTPS-terminating proxy with `--trust_proxy`.
-- **Login rate limiting is in-memory**: the 5-attempt rate limit resets on restart. All other security state persists.
+- **Login rate limiting is in-memory**: the 5-attempt rate limit resets on restart. The table is size-bounded (see Security hardening) but not persisted. All other security state persists.
 - **Analyzer disk usage grows with grid size**: every completed run stores a classification `.bin`, comparison PNG, and thumbnail (typically ~5-50 MB per run). A grid of 2500 runs can consume many GB. Delete the `.analyzer_cache/<FIRE>/` tree for a fire once you have accepted everything you want; the accepted results live in `analyzing_parameters/<FIRE>/run_XXXX/` and are unaffected.
 - **Analyzer concurrency**: only one analyzer session runs at a time (enforced server-side). Only admins can start one.
 
