@@ -250,30 +250,64 @@ def main():
         sys.exit(f'ERROR: fire_mapping_cli.py not found at '
                  f'{app_state.cli_script}')
 
-    # Load recommended settings (output_root first, fallback to package dir)
-    _settings_loaded = False
+    # Load recommended settings (output_root first, fallback to package dir).
+    # Schema: {k_runs_per_setting, k_jitter, settings: [{label, params}, ...]}
+    # The old schema (list with min_ha/max_ha) is rejected explicitly so
+    # stale configs cause a clean failure instead of silent misbehavior.
+    import yaml
+    _settings_path = None
     _user_settings = os.path.join(output_root, 'recommended_settings.yaml')
+    _pkg_settings  = os.path.join(_HERE, 'recommended_settings.yaml')
     if os.path.isfile(_user_settings):
-        try:
-            import yaml
-            with open(_user_settings) as _f:
-                app_state.recommended_settings = yaml.safe_load(_f) or []
-            print(f'      Loaded {len(app_state.recommended_settings)} '
-                  f'recommended setting(s) from output dir.')
-            _settings_loaded = True
-        except Exception as _e:
-            print(f'      WARNING: Failed to load settings: {_e}')
-    if not _settings_loaded:
-        _pkg_settings = os.path.join(_HERE, 'recommended_settings.yaml')
-        if os.path.isfile(_pkg_settings):
-            try:
-                import yaml
-                with open(_pkg_settings) as _f:
-                    app_state.recommended_settings = yaml.safe_load(_f) or []
-                print(f'      Loaded {len(app_state.recommended_settings)} '
-                      f'recommended setting(s) from package.')
-            except Exception as _e:
-                print(f'      WARNING: Failed to load settings: {_e}')
+        _settings_path = _user_settings
+    elif os.path.isfile(_pkg_settings):
+        _settings_path = _pkg_settings
+    if _settings_path is None:
+        sys.exit('ERROR: recommended_settings.yaml not found in output dir '
+                 'or package dir.')
+    try:
+        with open(_settings_path) as _f:
+            _cfg = yaml.safe_load(_f)
+    except Exception as _e:
+        sys.exit(f'ERROR: Failed to read {_settings_path}: {_e}')
+
+    if isinstance(_cfg, list):
+        sys.exit(
+            f'ERROR: {_settings_path} uses the legacy size-bucket schema '
+            '(list with min_ha/max_ha). The new schema is a dict with '
+            'keys k_runs_per_setting, k_jitter, and settings. Regenerate '
+            'the file; see package default for a template.')
+    if not isinstance(_cfg, dict) or 'settings' not in _cfg:
+        sys.exit(
+            f'ERROR: {_settings_path} missing required key "settings". '
+            'Expected: {k_runs_per_setting, k_jitter, settings: [...]}.')
+
+    _settings_list = _cfg.get('settings') or []
+    if not isinstance(_settings_list, list) or len(_settings_list) == 0:
+        sys.exit(f'ERROR: {_settings_path} has empty "settings" list.')
+    for _i, _s in enumerate(_settings_list):
+        if not isinstance(_s, dict) or 'params' not in _s:
+            sys.exit(f'ERROR: {_settings_path} settings[{_i}] missing '
+                     '"params".')
+        if 'label' not in _s or not str(_s['label']).strip():
+            _s['label'] = f'setting_{_i}'
+
+    app_state.recommended_settings = _settings_list
+    try:
+        app_state.k_runs_per_setting = int(_cfg.get('k_runs_per_setting', 3))
+    except (TypeError, ValueError):
+        app_state.k_runs_per_setting = 3
+    app_state.k_runs_per_setting = max(1, min(10, app_state.k_runs_per_setting))
+    try:
+        app_state.k_jitter = int(_cfg.get('k_jitter', 1))
+    except (TypeError, ValueError):
+        app_state.k_jitter = 1
+    app_state.k_jitter = max(0, app_state.k_jitter)
+
+    print(f'      Loaded {len(app_state.recommended_settings)} '
+          f'recommended setting(s) from '
+          f'{"output dir" if _settings_path == _user_settings else "package"}.'
+          f' K={app_state.k_runs_per_setting}, jitter={app_state.k_jitter}')
 
     # Load persistent IP access list
     app_state.ip_file = os.path.join(output_root, 'access_control.yaml')

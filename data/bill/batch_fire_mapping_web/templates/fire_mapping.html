@@ -198,13 +198,8 @@
                 </div>
             </div>
 
-            <!-- Run config + Action buttons -->
-            <div class="run-config">
-                <label>Runs:</label>
-                <input type="number" id="run-count" value="1" min="1" max="10"
-                    style="width:42px;font-size:12px;padding:2px 4px;border:1px solid #ccc;border-radius:3px;text-align:center">
-                <span id="run-hint" class="run-hint"></span>
-            </div>
+            <!-- Action buttons. K replicates per setting is a global
+                 (from recommended_settings.yaml). -->
             <div class="action-buttons">
                 <button class="btn" id="btn-map" disabled onclick="startMapping()">
                     Map Fire
@@ -609,11 +604,14 @@ function loadPaneImage(pane, viewKey) {
     const runActive = selectedRun !== null && RUN_VIEWS.has(viewKey);
 
     if (runActive && viewKey === 'result') {
-        url = `/api/fire/${encodeURIComponent(FIRE)}/preview/serial_${selectedRun}?t=${Date.now()}`;
+        // Use the same URL as the gallery thumbnail so the main-pane load
+        // hits the browser cache (the thumbnail already fetched this PNG).
+        // Both endpoints serve the same `previews/serial_<rid>.png` file.
+        url = `/api/fire/${encodeURIComponent(FIRE)}/serial/${selectedRun}/image`;
     } else if (runActive && viewKey === 'comparison') {
-        url = `/api/fire/${encodeURIComponent(FIRE)}/serial/${selectedRun}/image?type=comparison&t=${Date.now()}`;
+        url = `/api/fire/${encodeURIComponent(FIRE)}/serial/${selectedRun}/image?type=comparison`;
     } else if (runActive && viewKey === 'brush_comparison') {
-        url = `/api/fire/${encodeURIComponent(FIRE)}/serial/${selectedRun}/image?type=brush&t=${Date.now()}`;
+        url = `/api/fire/${encodeURIComponent(FIRE)}/serial/${selectedRun}/image?type=brush`;
     } else if (viewKey === 'comparison') {
         url = `/api/fire/${encodeURIComponent(FIRE)}/comparison?t=${Date.now()}`;
     } else if (viewKey === 'brush_comparison') {
@@ -719,22 +717,11 @@ function enableMapButtons() {
     document.getElementById('btn-map-settings').disabled = false;
 }
 
-function getRunCount() {
-    return Math.max(1, Math.min(10,
-        parseInt(document.getElementById('run-count').value) || 1));
-}
-
-// Live hint for run count
-document.getElementById('run-count').addEventListener('input', () => {
-    const n = getRunCount();
-    const hint = document.getElementById('run-hint');
-    hint.textContent = n > 1 ? `Varies HDBSCAN across ${n} runs` : '';
-});
-
 // -----------------------------------------------------------------------
-// Serial run (N > 1) — shared by Map Fire and Map Fire with Settings
+// Serial run — N settings × K HDBSCAN replicates.
+// Body: {mode: 'primary'|'all', settings?: [...]}
 // -----------------------------------------------------------------------
-async function startSerialRun(baseParams, n) {
+async function startSerialRun(body) {
     if (isMapping) return;
     isMapping = true;
     serverLineCount = 0;
@@ -744,16 +731,12 @@ async function startSerialRun(baseParams, n) {
     if (lastKnownStatus === 'accepted') previouslyAccepted = true;
     disableMapButtons();
     updateStatusDisplay('mapping', previouslyAccepted);
-    log(`Starting ${n} run(s)...`, 'dim');
-
-    const body = {n};
-    if (baseParams) body.base_params = baseParams;
 
     try {
         const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/serial_map`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
-            body: JSON.stringify(body),
+            body: JSON.stringify(body || {}),
         });
         const data = await r.json();
         if (data.error) {
@@ -762,7 +745,7 @@ async function startSerialRun(baseParams, n) {
             enableMapButtons();
             return;
         }
-        log(`Queued ${data.n} run(s). Watching for results...`);
+        log(`Queued ${data.n_settings} setting(s) × ${data.k_runs} run(s) = ${data.total}. Watching for results...`);
         serverLineCount = 0;
     } catch (err) {
         log('Failed to start runs: ' + err.message, 'error');
@@ -772,88 +755,19 @@ async function startSerialRun(baseParams, n) {
 }
 
 // -----------------------------------------------------------------------
-// Start mapping — always routes through serial path for consistent UX
+// Start mapping — one-click: primary setting × K replicates.
 // -----------------------------------------------------------------------
 async function startMapping() {
     if (isMapping) return;
-    const nRuns = getRunCount();
-    const params = getParams();
-
-    // Re-crop first if padding changed so images update before mapping starts
-    if (lastPreparedPadding !== null && params.padding !== lastPreparedPadding) {
-        log(`Re-cropping with padding=${params.padding}...`);
-        await prepareFire(params.padding);
-    }
-
-    return startSerialRun(params, nRuns);
+    return startSerialRun({mode: 'primary'});
 }
 
 // -----------------------------------------------------------------------
-// Map Fire with recommended settings
+// Map Fire with recommended settings — all N settings × K replicates.
 // -----------------------------------------------------------------------
-function applySettingsToForm(p) {
-    const setVal = (id, val) => {
-        const el = document.getElementById(id);
-        if (el && val != null) el.value = val;
-    };
-    setVal('p-padding', p.padding);
-    setVal('p-sample_rate', p.sample_rate);
-    setVal('p-min_samples', p.min_samples);
-    setVal('p-max_samples', p.max_samples);
-    setVal('p-seed', p.seed);
-    setVal('p-embed_bands', p.embed_bands);
-    setVal('p-tsne_perplexity', p.tsne_perplexity);
-    setVal('p-tsne_learning_rate', p.tsne_learning_rate);
-    setVal('p-tsne_max_iter', p.tsne_max_iter);
-    setVal('p-tsne_n_components', p.tsne_n_components);
-    setVal('p-tsne_random_state', p.tsne_random_state);
-    setVal('p-rf_n_estimators', p.rf_n_estimators);
-    setVal('p-rf_max_depth', p.rf_max_depth);
-    setVal('p-rf_max_features', p.rf_max_features);
-    setVal('p-rf_random_state', p.rf_random_state);
-    setVal('p-controlled_ratio', p.controlled_ratio);
-    setVal('p-hdbscan_min_samples', p.hdbscan_min_samples);
-    setVal('p-contour_width', p.contour_width);
-    if (p.tsne_init) {
-        const initEl = document.getElementById('p-tsne_init');
-        if (initEl) initEl.value = p.tsne_init;
-    }
-    updateSampleSize();
-}
-
 async function mapWithSettings() {
-    const fireSize = parseFloat('{{ fire_size_ha }}') || 0;
-    const nRuns = getRunCount();
-
-    try {
-        const r = await fetch('/api/settings');
-        const settings = await r.json();
-        if (!Array.isArray(settings) || settings.length === 0) {
-            log('No recommended settings configured. Use the Settings panel on the fire list page.', 'error');
-            return;
-        }
-        const row = settings.find(s =>
-            fireSize >= s.min_ha && (s.max_ha == null || fireSize < s.max_ha));
-        if (!row) {
-            log('No matching settings row for fire size ' + fireSize + ' ha.', 'error');
-            return;
-        }
-        const p = row.params;
-        applySettingsToForm(p);
-        log(`Applied recommended settings for ${row.min_ha} ha → ${row.max_ha != null ? row.max_ha + ' ha' : '∞'}`, 'success');
-
-        // Re-crop if padding differs from what was last prepared
-        const newPad = parseFloat(p.padding);
-        if (!isNaN(newPad) && lastPreparedPadding !== null && newPad !== lastPreparedPadding) {
-            log(`Re-cropping with padding=${newPad}...`);
-            disableMapButtons();
-            await prepareFire(newPad);
-        }
-
-        startSerialRun(nRuns > 1 ? null : getParams(), nRuns);
-    } catch (err) {
-        log('Failed to load settings: ' + err.message, 'error');
-    }
+    if (isMapping) return;
+    return startSerialRun({mode: 'all'});
 }
 
 // -----------------------------------------------------------------------
@@ -914,7 +828,7 @@ async function pollFireState() {
         // 4. Update serial results gallery as they arrive
         const serialResults = data.serial_results || [];
         if (serialResults.length > 0 && serialResults.length !== lastSerialCount) {
-            showSerialGallery(serialResults);
+            showSerialGallery(serialResults, data.settings_used || []);
             lastSerialCount = serialResults.length;
         }
 
@@ -1054,114 +968,280 @@ function formatParams(params) {
         '</table>';
 }
 
-function showSerialGallery(results) {
+// HSL palette: stable hue per setting_idx.
+function settingColors(idx, n) {
+    const total = Math.max(1, n);
+    const hue = Math.round((idx * 360) / total);
+    return {
+        band:    `hsl(${hue}, 35%, 92%)`,
+        header:  `hsl(${hue}, 45%, 40%)`,
+        hover:   `hsl(${hue}, 35%, 85%)`,
+        selBg:   `hsl(${hue}, 25%, 82%)`,
+        selBorder: `hsl(${hue}, 55%, 35%)`,
+    };
+}
+
+// Track the N used by the current gallery so viewSerialRun can re-derive hue.
+let galleryNSettings = 1;
+let gallerySettingsUsed = [];
+
+function showSerialGallery(results, settingsUsed) {
     const gallery = document.getElementById('serial-gallery');
     const items = document.getElementById('serial-gallery-items');
     gallery.style.display = '';
-    items.innerHTML = '';
 
-    // Separate previous (Run 0) from new runs
     const previous = results.filter(r => r.is_previous);
     const newRuns = results.filter(r => !r.is_previous);
 
-    // Update gallery title
-    const titleEl = document.getElementById('serial-gallery-title');
-    if (titleEl) titleEl.textContent = newRuns.length > 1 ? 'Serial Results' : 'Results';
-
-    // Sort new runs by agreement (best first)
-    const sorted = [...newRuns].sort(
-        (a, b) => (b.agreement_pct || -1) - (a.agreement_pct || -1));
-
-    // Show previous accepted first, then new runs
-    const ordered = [...previous, ...sorted];
-
-    for (const r of ordered) {
-        const isPrevious = r.is_previous;
-        const isBest = !isPrevious && r === sorted[0] && r.agreement_pct >= 0;
-        const div = document.createElement('div');
-        div.className = 'serial-run-card';
-        div.id = 'serial-card-' + r.run_id;
-
-        let borderColor = '#ddd';
-        let bgColor = '#fff';
-        if (isPrevious) {
-            borderColor = '#8b6914';
-            bgColor = '#fdf8ec';
-        } else if (isBest) {
-            borderColor = '#2d8a4e';
-            bgColor = '#f0fff4';
+    // Determine N (settings count) from settings_used, or derive.
+    let nSettings = 0;
+    if (Array.isArray(settingsUsed) && settingsUsed.length > 0) {
+        nSettings = settingsUsed.length;
+    } else {
+        for (const r of newRuns) {
+            const idx = Number(r.setting_idx || 0);
+            if (idx + 1 > nSettings) nSettings = idx + 1;
         }
-        div.style.cssText = 'padding:8px;cursor:pointer;' +
-            'border:2px solid ' + borderColor + ';border-radius:6px;' +
-            'background:' + bgColor;
-        div.onclick = function(e) {
-            if (e.target.tagName === 'BUTTON' || e.target.tagName === 'A') return;
-            viewSerialRun(r.run_id);
-        };
-
-        const agr = r.agreement_pct >= 0 ? r.agreement_pct + '%' : 'failed';
-        const mlArea = r.ml_area_ha >= 0 ? r.ml_area_ha.toLocaleString() + ' ha' : '--';
-        const label = isPrevious
-            ? '<span style="color:#8b6914;font-weight:600">Previously accepted</span>'
-            : `<strong>Run ${r.run_id}</strong>`;
-        const badge = isBest ? ' <span style="color:#2d8a4e;font-weight:600">(best)</span>' : '';
-        const errMsg = r.error ? `<span style="color:#cc3333;font-size:11px"> ${r.error}</span>` : '';
-        const detailsId = `serial-details-${r.run_id}`;
-        const detailsTitle = isPrevious ? 'Previously Accepted' : `Serial Run #${r.run_id}`;
-
-        // No Accept button for Run 0 (previous)
-        const acceptBtn = (!isPrevious && r.agreement_pct >= 0)
-            ? `<button class="btn btn-success" style="font-size:11px;padding:2px 8px"
-                onclick="acceptSerialRun(${r.run_id})">Accept</button>`
-            : '';
-
-        div.innerHTML = `
-            <div style="display:flex;align-items:center;gap:8px">
-                <img src="/api/fire/${encodeURIComponent(FIRE)}/serial/${r.run_id}/image?t=${Date.now()}"
-                     style="width:80px;height:60px;object-fit:cover;border-radius:4px;cursor:pointer;image-rendering:pixelated"
-                     onclick="viewSerialRun(${r.run_id})" onerror="this.style.display='none'">
-                <div style="flex:1;font-size:12px">
-                    ${label}${badge}${errMsg}<br>
-                    <span style="color:#555">Agreement: ${agr} &middot; ML: ${mlArea}</span><br>
-                    <a href="#" class="serial-info-toggle" onclick="event.preventDefault();event.stopPropagation();
-                        var el=document.getElementById('${detailsId}');
-                        el.style.display=el.style.display==='none'?'block':'none'">Info</a>
-                </div>
-                ${acceptBtn}
-            </div>
-            <div id="${detailsId}" class="serial-details-panel" style="display:none">
-                <div class="serial-details-title">${detailsTitle}</div>
-                <div class="serial-details-row"><span>Agreement</span><strong>${agr}</strong></div>
-                <div class="serial-details-row"><span>ML Fire Size</span><strong>${mlArea}</strong></div>
-                <div class="serial-details-section">
-                    <a href="#" onclick="event.preventDefault();
-                        var el=this.nextElementSibling;
-                        el.style.display=el.style.display==='none'?'block':'none';
-                        this.textContent=el.style.display==='none'?'Show parameters':'Hide parameters'">Show parameters</a>
-                    <div style="display:none;margin-top:4px">${formatParams(r.params)}</div>
-                </div>
-            </div>
-        `;
-        items.appendChild(div);
+        nSettings = Math.max(1, nSettings);
     }
+    galleryNSettings = nSettings;
+    gallerySettingsUsed = Array.isArray(settingsUsed)
+        ? settingsUsed.slice()
+        : [];
+
+    const titleEl = document.getElementById('serial-gallery-title');
+    if (titleEl) {
+        titleEl.textContent = (nSettings > 1 || newRuns.length > 1)
+            ? 'Serial Results' : 'Results';
+    }
+
+    // Find best run for green "(best)" badge (global across all settings).
+    const successful = newRuns.filter(r => (r.agreement_pct || -1) >= 0);
+    const bestRun = successful.length
+        ? successful.reduce((a, b) =>
+              (b.agreement_pct || -1) > (a.agreement_pct || -1) ? b : a)
+        : null;
+    const bestRunId = bestRun ? bestRun.run_id : null;
+
+    // Signature used to short-circuit identical re-renders. Every poll tick
+    // calls this; most ticks add nothing new, so bail out cheaply.
+    const sig = JSON.stringify({
+        n: nSettings,
+        best: bestRunId,
+        prev: previous.map(r => r.run_id),
+        runs: newRuns.map(r => [
+            r.run_id, r.setting_idx || 0,
+            r.agreement_pct == null ? -1 : r.agreement_pct,
+            r.ml_area_ha == null ? -1 : r.ml_area_ha,
+            r.error || '',
+        ]),
+        labels: (settingsUsed || []).map(s => s && s.label || ''),
+    });
+    if (items.dataset.sig === sig) return;
+
+    const prevBestId = items.dataset.bestRunId
+        ? Number(items.dataset.bestRunId) : null;
+
+    // Group new runs by setting_idx, preserve replicate order within group.
+    const groups = new Map();
+    for (const r of newRuns) {
+        const si = Number(r.setting_idx || 0);
+        if (!groups.has(si)) groups.set(si, []);
+        groups.get(si).push(r);
+    }
+    for (const arr of groups.values()) {
+        arr.sort((a, b) => (a.run_idx || 0) - (b.run_idx || 0));
+    }
+
+    // Drop any DOM cards whose run_id is no longer in the result set
+    // (e.g. a fresh mapping cleared the server-side list). Then prune
+    // empty groups. Do this before indexing existing cards.
+    const desiredIds = new Set();
+    for (const r of previous) desiredIds.add(r.run_id);
+    for (const r of newRuns) desiredIds.add(r.run_id);
+    for (const card of Array.from(
+            items.querySelectorAll('.serial-run-card'))) {
+        const m = card.id.match(/^serial-card-(\d+)$/);
+        if (m && !desiredIds.has(Number(m[1]))) card.remove();
+    }
+    for (const g of Array.from(items.querySelectorAll('.serial-group'))) {
+        if (!g.querySelector('.serial-run-card')
+            && !g.dataset.keepEmpty) {
+            g.remove();
+        }
+    }
+
+    // Existing card index — keyed by run_id. Anything in here we leave
+    // alone unless its best-badge state changed.
+    const existingCards = new Map();
+    for (const card of items.querySelectorAll('.serial-run-card')) {
+        const m = card.id.match(/^serial-card-(\d+)$/);
+        if (m) existingCards.set(Number(m[1]), card);
+    }
+
+    // 1. Previously-accepted card(s) at the top. Insert only if missing.
+    for (const r of previous) {
+        if (!existingCards.has(r.run_id)) {
+            const card = renderSerialCard(r, {
+                isPrevious: true, isBest: false, colors: null,
+            });
+            items.insertBefore(card, items.firstChild);
+        }
+    }
+
+    // 2. Per-setting groups, ordered by setting_idx.
+    const sortedIdx = [...groups.keys()].sort((a, b) => a - b);
+    for (const si of sortedIdx) {
+        const arr = groups.get(si);
+        const colors = settingColors(si, nSettings);
+        const label = (settingsUsed && settingsUsed[si]
+                       && settingsUsed[si].label)
+                      || (arr[0] && arr[0].setting_label)
+                      || `Setting ${si + 1}`;
+
+        let group = items.querySelector(
+            `.serial-group[data-setting-idx="${si}"]`);
+        if (!group) {
+            group = document.createElement('div');
+            group.className = 'serial-group';
+            group.dataset.settingIdx = String(si);
+            group.style.cssText =
+                `background:${colors.band};border-radius:6px;` +
+                'padding:6px;margin-bottom:6px;' +
+                'display:flex;flex-direction:column;gap:6px';
+
+            const header = document.createElement('div');
+            header.style.cssText =
+                `font-size:11px;font-weight:700;color:${colors.header};` +
+                'text-transform:uppercase;letter-spacing:0.04em;' +
+                'padding:2px 4px';
+            header.textContent = `${si + 1}. ${label}`;
+            group.appendChild(header);
+            items.appendChild(group);
+        }
+
+        for (const r of arr) {
+            const existing = existingCards.get(r.run_id);
+            const isBest = bestRunId !== null && r.run_id === bestRunId;
+            const wasBest = prevBestId !== null && r.run_id === prevBestId;
+            // A finished card is immutable except for its "(best)" badge,
+            // which flips at most twice per mapping (old best loses it,
+            // new best gains it). Only rebuild those two cards.
+            if (existing && isBest === wasBest) continue;
+            const card = renderSerialCard(r, {
+                isPrevious: false,
+                isBest,
+                colors,
+            });
+            if (existing) {
+                existing.replaceWith(card);
+            } else {
+                group.appendChild(card);
+            }
+        }
+    }
+
+    // If we replaced the currently-selected card (because its best state
+    // flipped), reapply the selection styling so the user's click state
+    // doesn't visually reset.
+    if (selectedRun !== null) {
+        const sel = document.getElementById('serial-card-' + selectedRun);
+        if (sel) {
+            const si = Number(sel.dataset.settingIdx || 0);
+            const sc = settingColors(si, nSettings);
+            sel.style.borderColor = sc.selBorder;
+            sel.style.background = sc.selBg;
+        }
+    }
+
+    items.dataset.sig = sig;
+    items.dataset.bestRunId = bestRunId !== null ? String(bestRunId) : '';
+}
+
+function renderSerialCard(r, opts) {
+    const isPrevious = !!opts.isPrevious;
+    const isBest = !!opts.isBest;
+    const colors = opts.colors;
+    const div = document.createElement('div');
+    div.className = 'serial-run-card';
+    div.id = 'serial-card-' + r.run_id;
+    div.dataset.settingIdx = String(r.setting_idx || 0);
+
+    // Default styling — the per-setting group band provides the hue.
+    let borderColor = isPrevious ? '#8b6914' : 'rgba(0,0,0,0.08)';
+    let bgColor = isPrevious ? '#fdf8ec' : '#fff';
+    div.style.cssText = 'padding:8px;cursor:pointer;' +
+        'border:2px solid ' + borderColor + ';border-radius:6px;' +
+        'background:' + bgColor;
+    div.onclick = function(e) {
+        if (e.target.tagName === 'BUTTON' || e.target.tagName === 'A') return;
+        viewSerialRun(r.run_id);
+    };
+
+    const agr = r.agreement_pct >= 0 ? r.agreement_pct + '%' : 'failed';
+    const mlArea = r.ml_area_ha >= 0 ? r.ml_area_ha.toLocaleString() + ' ha' : '--';
+    const label = isPrevious
+        ? '<span style="color:#8b6914;font-weight:600">Previously accepted</span>'
+        : `<strong>Run ${r.run_id}</strong>`;
+    const badge = isBest
+        ? ' <span style="color:#2d8a4e;font-weight:600">(best)</span>'
+        : '';
+    const errMsg = r.error ? `<span style="color:#cc3333;font-size:11px"> ${r.error}</span>` : '';
+    const detailsId = `serial-details-${r.run_id}`;
+    const detailsTitle = isPrevious ? 'Previously Accepted' : `Serial Run #${r.run_id}`;
+
+    const acceptBtn = (!isPrevious && r.agreement_pct >= 0)
+        ? `<button class="btn btn-success" style="font-size:11px;padding:2px 8px"
+            onclick="acceptSerialRun(${r.run_id})">Accept</button>`
+        : '';
+
+    div.innerHTML = `
+        <div style="display:flex;align-items:center;gap:8px">
+            <img src="/api/fire/${encodeURIComponent(FIRE)}/serial/${r.run_id}/image"
+                 style="width:80px;height:60px;object-fit:cover;border-radius:4px;cursor:pointer;image-rendering:pixelated"
+                 onclick="viewSerialRun(${r.run_id})" onerror="this.style.display='none'">
+            <div style="flex:1;font-size:12px">
+                ${label}${badge}${errMsg}<br>
+                <span style="color:#555">Agreement: ${agr} &middot; ML: ${mlArea}</span><br>
+                <a href="#" class="serial-info-toggle" onclick="event.preventDefault();event.stopPropagation();
+                    var el=document.getElementById('${detailsId}');
+                    el.style.display=el.style.display==='none'?'block':'none'">Info</a>
+            </div>
+            ${acceptBtn}
+        </div>
+        <div id="${detailsId}" class="serial-details-panel" style="display:none">
+            <div class="serial-details-title">${detailsTitle}</div>
+            <div class="serial-details-row"><span>Agreement</span><strong>${agr}</strong></div>
+            <div class="serial-details-row"><span>ML Fire Size</span><strong>${mlArea}</strong></div>
+            <div class="serial-details-section">
+                <a href="#" onclick="event.preventDefault();
+                    var el=this.nextElementSibling;
+                    el.style.display=el.style.display==='none'?'block':'none';
+                    this.textContent=el.style.display==='none'?'Show parameters':'Hide parameters'">Show parameters</a>
+                <div style="display:none;margin-top:4px">${formatParams(r.params)}</div>
+            </div>
+        </div>
+    `;
+    return div;
 }
 
 function viewSerialRun(runId) {
-    // Highlight selected card, restore default style for others
+    // Restore default styling for every card
     document.querySelectorAll('.serial-run-card').forEach(el => {
         if (el.id === 'serial-card-0') {
-            // Restore gold style for "Previously accepted"
             el.style.borderColor = '#8b6914';
             el.style.background = '#fdf8ec';
         } else {
-            el.style.borderColor = '#ddd';
+            el.style.borderColor = 'rgba(0,0,0,0.08)';
             el.style.background = '#fff';
         }
     });
     const card = document.getElementById('serial-card-' + runId);
     if (card) {
-        card.style.borderColor = '#2d8a4e';
-        card.style.background = '#f0fff4';
+        const si = Number(card.dataset.settingIdx || 0);
+        const colors = settingColors(si, galleryNSettings);
+        card.style.borderColor = colors.selBorder;
+        card.style.background = colors.selBg;
     }
 
     // Set selected run and reload current view for the active pane
@@ -1170,7 +1250,6 @@ function viewSerialRun(runId) {
     if (currentView) {
         loadPaneImage(activePane, currentView);
     }
-    // Also update the other pane if split is open and its view has per-run variant
     const otherPane = activePane === 'left' ? 'right' : 'left';
     const otherView = activePane === 'left' ? rightView : leftView;
     const rightEl = document.getElementById('image-area-right');
@@ -1197,7 +1276,10 @@ async function acceptSerialRun(runId) {
             lastSerialCount = 0;
             updateStatusDisplay('accepted', false);
             document.getElementById('serial-gallery').style.display = 'none';
-            document.getElementById('serial-gallery-items').innerHTML = '';
+            const galItems = document.getElementById('serial-gallery-items');
+            galItems.innerHTML = '';
+            delete galItems.dataset.sig;
+            delete galItems.dataset.bestRunId;
         } else {
             log('Accept error: ' + (data.error || 'unknown'), 'error');
         }
@@ -1272,7 +1354,7 @@ async function restoreFireState() {
         // Restore serial gallery if results exist
         const serialResults = data.serial_results || [];
         if (serialResults.length > 0) {
-            showSerialGallery(serialResults);
+            showSerialGallery(serialResults, data.settings_used || []);
             lastSerialCount = serialResults.length;
         }
     } catch {}

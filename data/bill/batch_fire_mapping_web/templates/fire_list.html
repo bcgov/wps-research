@@ -52,18 +52,59 @@
     </div>
 </div>
 
-<!-- Recommended Settings -->
+<!-- Recommended Settings (global) -->
 <div class="filter-panel" id="settings-panel">
     <div class="filter-panel-header" onclick="this.parentElement.classList.toggle('open')">
-        <span>Recommended Settings</span>
+        <span>Recommended Settings (N × K)</span>
         <span class="filter-toggle-arrow"></span>
     </div>
     <div class="filter-panel-body">
+        <div style="display:flex;gap:16px;margin-bottom:8px">
+            <label class="sp-label">K replicates per setting
+                <input type="number" id="settings-k-runs" min="1" max="10"
+                    value="3" style="width:50px">
+            </label>
+            <label class="sp-label">K jitter (HDBSCAN fan-out step)
+                <input type="number" id="settings-k-jitter" min="0" max="20"
+                    value="1" style="width:50px">
+            </label>
+        </div>
         <div id="settings-rows"></div>
         <div class="filter-actions">
-            <button class="btn" onclick="addSettingsRow()">Add Threshold</button>
+            <button class="btn" onclick="addSettingsRow()">Add Setting</button>
             <button class="btn btn-success" onclick="saveSettings()">Save</button>
             <span class="filter-preview-count" id="settings-status"></span>
+        </div>
+        <div style="font-size:11px;color:#666;margin-top:6px">
+            First setting is the <strong>primary</strong> (used by one-click Map Fire).
+            "Map Fire with Settings" runs <strong>all</strong> settings × K replicates.
+        </div>
+    </div>
+</div>
+
+<!-- Per-fire override modal -->
+<div id="override-modal" style="display:none;position:fixed;inset:0;
+     background:rgba(0,0,0,0.45);z-index:100;
+     align-items:flex-start;justify-content:center;overflow:auto">
+    <div style="background:#fff;border-radius:8px;padding:16px;margin:30px;
+                max-width:900px;width:90%;
+                box-shadow:0 8px 32px rgba(0,0,0,0.25)">
+        <div style="display:flex;align-items:center;justify-content:space-between;
+                    margin-bottom:8px">
+            <h3 style="margin:0">Per-fire settings override</h3>
+            <button class="btn btn-secondary" onclick="closeOverrideModal()">&times;</button>
+        </div>
+        <div style="font-size:12px;color:#555;margin-bottom:8px">
+            Fire <strong id="override-fire-label"></strong>.
+            Leaving this empty (or clicking <em>Clear Override</em>)
+            falls back to the global recommended settings.
+        </div>
+        <div id="override-rows"></div>
+        <div class="filter-actions" style="margin-top:8px">
+            <button class="btn" onclick="addOverrideRow()">Add Setting</button>
+            <button class="btn btn-danger" onclick="clearOverride()">Clear Override</button>
+            <button class="btn btn-success" onclick="saveOverride()">Save</button>
+            <span id="override-status" class="filter-preview-count"></span>
         </div>
     </div>
 </div>
@@ -91,6 +132,7 @@
             <th data-key="ml_area_ha">ML Size (ha) <span class="sort-arrow"></span></th>
             <th data-key="agreement_pct">Agreement <span class="sort-arrow"></span></th>
             <th data-key="status">Status <span class="sort-arrow"></span></th>
+            <th>Settings</th>
             <th>Action</th>
         </tr>
     </thead>
@@ -301,8 +343,12 @@ function render() {
         const agr = f.agreement_pct >= 0 ? f.agreement_pct + '%' : '';
         const mlSize = f.ml_area_ha >= 0 ? f.ml_area_ha.toLocaleString() : '';
         const noteIcon = f.notes ? ` <span title="${esc(f.notes)}" style="cursor:help;color:#888">&#9998;</span>` : '';
+        const fireEnc = encodeURIComponent(f.fire_numbe);
+        const overrideBadge = f.has_override
+            ? '<span class="status-badge" title="Has per-fire override" style="background:#e1d5f7;color:#5a3dbf;margin-right:4px">override</span>'
+            : '';
         tr.innerHTML = `
-            <td><input type="checkbox" class="fire-check" value="${encodeURIComponent(f.fire_numbe)}" ${checked} onchange="updateSelection()"></td>
+            <td><input type="checkbox" class="fire-check" value="${fireEnc}" ${checked} onchange="updateSelection()"></td>
             <td><strong>${esc(f.fire_numbe)}</strong>${noteIcon}</td>
             <td>${esc(f.fire_date)}</td>
             <td>${f.fire_year || ''}</td>
@@ -310,7 +356,8 @@ function render() {
             <td>${mlSize}</td>
             <td>${agr}</td>
             <td>${prevBadge}${badge}</td>
-            <td><a href="/fire/${encodeURIComponent(f.fire_numbe)}" class="btn">Open</a></td>
+            <td>${overrideBadge}<button class="btn btn-secondary" style="font-size:11px;padding:2px 6px" onclick="openOverrideModal('${fireEnc}')">Edit</button></td>
+            <td><a href="/fire/${fireEnc}" class="btn">Open</a></td>
         `;
         tbody.appendChild(tr);
     }
@@ -498,118 +545,153 @@ async function batchCancel() {
 }
 
 // -----------------------------------------------------------------------
-// Recommended settings
+// Recommended settings (global + per-fire override).
+// Schema: {k_runs_per_setting, k_jitter, settings: [{label, params}]}
 // -----------------------------------------------------------------------
 const DEFAULT_PARAMS = {
-    padding: 0.1, sample_rate: 0.05, min_samples: 500, max_samples: 30000, seed: 123,
-    embed_bands: '', tsne_perplexity: 60, tsne_learning_rate: 200,
+    padding: 0.1, sample_rate: 0.5, min_samples: 500, max_samples: 50000,
+    seed: 123, embed_bands: '1,2,3,4,5,6,7,8,9,10,11,12',
+    tsne_perplexity: 60, tsne_learning_rate: 200,
     tsne_max_iter: 2000, tsne_init: 'pca', tsne_n_components: 2,
     tsne_random_state: 42, rf_n_estimators: 100, rf_max_depth: 15,
     rf_max_features: 'sqrt', rf_random_state: 42,
     controlled_ratio: 0.5, hdbscan_min_samples: 20, contour_width: 1,
 };
 
-let settings = [];
+let settings = [];    // global settings
+let kRuns = 3;
+let kJitter = 1;
 
 function paramInput(name, val, type, width) {
     const w = width || 55;
     return `<label class="sp-label">${name}<input type="${type||'number'}" ` +
-           `data-param="${name}" value="${val}" style="width:${w}px"></label>`;
+           `data-param="${name}" value="${val == null ? '' : val}" style="width:${w}px"></label>`;
+}
+
+function renderSettingsRow(row, idx, opts) {
+    const p = row.params || {};
+    const isPrimary = idx === 0;
+    const primaryTag = isPrimary
+        ? ' <span style="color:#2d8a4e;font-size:10px;font-weight:700">PRIMARY</span>'
+        : '';
+    const removeBtn = (!opts || opts.allowRemove !== false)
+        ? `<button class="btn btn-danger" style="font-size:10px;padding:1px 6px" data-action="remove" data-index="${idx}">Remove</button>`
+        : '';
+    const upBtn = (idx > 0 && (!opts || opts.allowMove !== false))
+        ? `<button class="btn btn-secondary" style="font-size:10px;padding:1px 6px" data-action="up" data-index="${idx}">↑</button>`
+        : '';
+    const div = document.createElement('div');
+    div.className = 'settings-row';
+    div.dataset.index = idx;
+    div.innerHTML = `
+        <div class="settings-row-header" style="display:flex;gap:8px;align-items:center">
+            <label class="sp-label">Label<input type="text" data-field="label"
+                value="${esc(row.label || '')}" style="width:160px"></label>
+            ${primaryTag}
+            <span style="flex:1"></span>
+            ${upBtn}
+            ${removeBtn}
+        </div>
+        <div class="settings-row-params">
+            ${paramInput('padding', p.padding, 'number', 45)}
+            ${paramInput('sample_rate', p.sample_rate, 'number', 55)}
+            ${paramInput('min_samples', p.min_samples, 'number', 55)}
+            ${paramInput('max_samples', p.max_samples, 'number', 60)}
+            ${paramInput('seed', p.seed, 'number', 45)}
+            ${paramInput('embed_bands', p.embed_bands || '', 'text', 110)}
+            ${paramInput('tsne_perplexity', p.tsne_perplexity, 'number', 45)}
+            ${paramInput('tsne_learning_rate', p.tsne_learning_rate, 'number', 50)}
+            ${paramInput('tsne_max_iter', p.tsne_max_iter, 'number', 50)}
+            ${paramInput('controlled_ratio', p.controlled_ratio, 'number', 45)}
+            ${paramInput('hdbscan_min_samples', p.hdbscan_min_samples, 'number', 40)}
+            ${paramInput('rf_n_estimators', p.rf_n_estimators, 'number', 45)}
+            ${paramInput('rf_max_depth', p.rf_max_depth, 'number', 40)}
+            ${paramInput('rf_max_features', p.rf_max_features || 'sqrt', 'text', 50)}
+            ${paramInput('contour_width', p.contour_width, 'number', 35)}
+        </div>
+    `;
+    return div;
 }
 
 function renderSettings() {
     const container = document.getElementById('settings-rows');
     container.innerHTML = '';
     settings.forEach((row, i) => {
-        const maxLabel = row.max_ha != null ? row.max_ha + ' ha' : '∞';
-        const p = row.params;
-        const div = document.createElement('div');
-        div.className = 'settings-row';
-        div.dataset.index = i;
-        div.innerHTML = `
-            <div class="settings-row-header">
-                <strong>${row.min_ha} ha → ${maxLabel}</strong>
-                ${settings.length > 1 ? `<button class="btn btn-danger" style="font-size:10px;padding:1px 6px" onclick="removeSettingsRow(${i})">Remove</button>` : ''}
-            </div>
-            <div class="settings-row-params">
-                ${paramInput('padding', p.padding, 'number', 45)}
-                ${paramInput('sample_rate', p.sample_rate, 'number', 55)}
-                ${paramInput('min_samples', p.min_samples, 'number', 55)}
-                ${paramInput('max_samples', p.max_samples, 'number', 60)}
-                ${paramInput('seed', p.seed, 'number', 45)}
-                ${paramInput('embed_bands', p.embed_bands || '', 'text', 65)}
-                ${paramInput('tsne_perplexity', p.tsne_perplexity, 'number', 45)}
-                ${paramInput('tsne_learning_rate', p.tsne_learning_rate, 'number', 50)}
-                ${paramInput('tsne_max_iter', p.tsne_max_iter, 'number', 50)}
-                ${paramInput('controlled_ratio', p.controlled_ratio, 'number', 45)}
-                ${paramInput('hdbscan_min_samples', p.hdbscan_min_samples, 'number', 40)}
-                ${paramInput('rf_n_estimators', p.rf_n_estimators, 'number', 45)}
-                ${paramInput('rf_max_depth', p.rf_max_depth, 'number', 40)}
-                ${paramInput('rf_max_features', p.rf_max_features || 'sqrt', 'text', 50)}
-                ${paramInput('contour_width', p.contour_width, 'number', 35)}
-            </div>
-        `;
-        container.appendChild(div);
+        container.appendChild(renderSettingsRow(row, i, {
+            allowRemove: settings.length > 1, allowMove: true,
+        }));
     });
+    document.getElementById('settings-k-runs').value = kRuns;
+    document.getElementById('settings-k-jitter').value = kJitter;
 }
+
+document.getElementById('settings-rows').addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-action]');
+    if (!btn) return;
+    const i = parseInt(btn.dataset.index);
+    if (btn.dataset.action === 'remove') {
+        if (settings.length <= 1) return;
+        readSettingsFromDOM('settings-rows', settings);
+        settings.splice(i, 1);
+        renderSettings();
+    } else if (btn.dataset.action === 'up' && i > 0) {
+        readSettingsFromDOM('settings-rows', settings);
+        [settings[i - 1], settings[i]] = [settings[i], settings[i - 1]];
+        renderSettings();
+    }
+});
 
 function addSettingsRow() {
-    if (settings.length === 0) {
-        settings.push({min_ha: 0, max_ha: null, params: {...DEFAULT_PARAMS}});
-    } else {
-        const threshStr = prompt('Enter fire size threshold (ha) to split at:');
-        if (!threshStr) return;
-        const thresh = parseFloat(threshStr);
-        if (isNaN(thresh) || thresh <= 0) return;
-        // Find which row this threshold falls into
-        let idx = settings.findIndex(r =>
-            thresh > r.min_ha && (r.max_ha == null || thresh < r.max_ha));
-        if (idx < 0) { alert('Threshold out of range'); return; }
-        const old = settings[idx];
-        const newRow = {min_ha: thresh, max_ha: old.max_ha,
-                        params: {...old.params}};
-        old.max_ha = thresh;
-        settings.splice(idx + 1, 0, newRow);
-    }
+    readSettingsFromDOM('settings-rows', settings);
+    settings.push({
+        label: `setting_${settings.length + 1}`,
+        params: {...DEFAULT_PARAMS},
+    });
     renderSettings();
 }
 
-function removeSettingsRow(i) {
-    if (settings.length <= 1) return;
-    if (i === 0) {
-        settings[1].min_ha = 0;
-    } else if (i === settings.length - 1) {
-        settings[i - 1].max_ha = null;
-    } else {
-        settings[i + 1].min_ha = settings[i].min_ha;
-    }
-    settings.splice(i, 1);
-    renderSettings();
-}
-
-function readSettingsFromDOM() {
-    document.querySelectorAll('.settings-row').forEach(div => {
+function readSettingsFromDOM(containerId, target) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.querySelectorAll('.settings-row').forEach(div => {
         const i = parseInt(div.dataset.index);
+        if (!target[i]) return;
+        const labelEl = div.querySelector('[data-field="label"]');
+        if (labelEl) target[i].label = labelEl.value.trim() || `setting_${i + 1}`;
+        target[i].params = target[i].params || {};
         div.querySelectorAll('[data-param]').forEach(inp => {
             const key = inp.dataset.param;
             let val = inp.value.trim();
             if (inp.type === 'number' && val !== '') val = parseFloat(val);
-            settings[i].params[key] = val;
+            target[i].params[key] = val;
         });
     });
 }
 
 async function saveSettings() {
-    readSettingsFromDOM();
+    readSettingsFromDOM('settings-rows', settings);
+    kRuns = Math.max(1, Math.min(10,
+        parseInt(document.getElementById('settings-k-runs').value) || 3));
+    kJitter = Math.max(0,
+        parseInt(document.getElementById('settings-k-jitter').value) || 0);
     const statusEl = document.getElementById('settings-status');
     try {
-        await fetch('/api/settings', {
+        const r = await fetch('/api/settings', {
             method: 'POST',
             headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
-            body: JSON.stringify({settings}),
+            body: JSON.stringify({
+                settings,
+                k_runs_per_setting: kRuns,
+                k_jitter: kJitter,
+            }),
         });
-        statusEl.textContent = 'Saved!';
-        setTimeout(() => statusEl.textContent = '', 2000);
+        const data = await r.json();
+        if (data.error) {
+            statusEl.textContent = 'Error: ' + data.error;
+        } else {
+            statusEl.textContent = 'Saved!';
+            setTimeout(() => statusEl.textContent = '', 2000);
+        }
     } catch (err) {
         statusEl.textContent = 'Save failed';
     }
@@ -619,15 +701,143 @@ async function loadSettings() {
     try {
         const r = await fetch('/api/settings');
         const data = await r.json();
-        if (Array.isArray(data) && data.length > 0) {
-            settings = data;
+        if (data && Array.isArray(data.settings) && data.settings.length > 0) {
+            settings = data.settings.map(s => ({
+                label: s.label || '',
+                params: {...DEFAULT_PARAMS, ...(s.params || {})},
+            }));
+            kRuns = parseInt(data.k_runs_per_setting) || 3;
+            kJitter = parseInt(data.k_jitter) || 1;
         } else {
-            settings = [{min_ha: 0, max_ha: null, params: {...DEFAULT_PARAMS}}];
+            settings = [{label: 'default', params: {...DEFAULT_PARAMS}}];
         }
     } catch {
-        settings = [{min_ha: 0, max_ha: null, params: {...DEFAULT_PARAMS}}];
+        settings = [{label: 'default', params: {...DEFAULT_PARAMS}}];
     }
     renderSettings();
+}
+
+// -----------------------------------------------------------------------
+// Per-fire override modal
+// -----------------------------------------------------------------------
+let overrideFire = null;        // fire number currently editing
+let overrideSettings = [];
+
+function openOverrideModal(fireEnc) {
+    overrideFire = decodeURIComponent(fireEnc);
+    document.getElementById('override-fire-label').textContent = overrideFire;
+    document.getElementById('override-status').textContent = '';
+    document.getElementById('override-modal').style.display = 'flex';
+
+    fetch(`/api/fire/${encodeURIComponent(overrideFire)}/recommended`)
+        .then(r => r.json())
+        .then(data => {
+            // Load the effective settings into the editor. If there's no
+            // override, this starts from the global list so the user can
+            // diverge from there.
+            const src = (data.has_override ? data.settings : data.global_settings)
+                        || [];
+            overrideSettings = src.map(s => ({
+                label: s.label || '',
+                params: {...DEFAULT_PARAMS, ...(s.params || {})},
+            }));
+            if (overrideSettings.length === 0) {
+                overrideSettings = [{label: 'default', params: {...DEFAULT_PARAMS}}];
+            }
+            renderOverrideRows();
+        })
+        .catch(err => {
+            document.getElementById('override-status').textContent =
+                'Load failed: ' + err.message;
+        });
+}
+
+function closeOverrideModal() {
+    document.getElementById('override-modal').style.display = 'none';
+    overrideFire = null;
+    overrideSettings = [];
+}
+
+function renderOverrideRows() {
+    const container = document.getElementById('override-rows');
+    container.innerHTML = '';
+    overrideSettings.forEach((row, i) => {
+        container.appendChild(renderSettingsRow(row, i, {
+            allowRemove: overrideSettings.length > 1, allowMove: true,
+        }));
+    });
+}
+
+document.getElementById('override-rows').addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-action]');
+    if (!btn) return;
+    const i = parseInt(btn.dataset.index);
+    if (btn.dataset.action === 'remove') {
+        if (overrideSettings.length <= 1) return;
+        readSettingsFromDOM('override-rows', overrideSettings);
+        overrideSettings.splice(i, 1);
+        renderOverrideRows();
+    } else if (btn.dataset.action === 'up' && i > 0) {
+        readSettingsFromDOM('override-rows', overrideSettings);
+        [overrideSettings[i - 1], overrideSettings[i]] =
+            [overrideSettings[i], overrideSettings[i - 1]];
+        renderOverrideRows();
+    }
+});
+
+function addOverrideRow() {
+    readSettingsFromDOM('override-rows', overrideSettings);
+    overrideSettings.push({
+        label: `setting_${overrideSettings.length + 1}`,
+        params: {...DEFAULT_PARAMS},
+    });
+    renderOverrideRows();
+}
+
+async function saveOverride() {
+    if (!overrideFire) return;
+    readSettingsFromDOM('override-rows', overrideSettings);
+    const statusEl = document.getElementById('override-status');
+    try {
+        const r = await fetch(
+            `/api/fire/${encodeURIComponent(overrideFire)}/recommended`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+            body: JSON.stringify({settings: overrideSettings}),
+        });
+        const data = await r.json();
+        if (data.error) {
+            statusEl.textContent = 'Error: ' + data.error;
+        } else {
+            statusEl.textContent = 'Saved!';
+            setTimeout(() => { closeOverrideModal(); refreshFires(); }, 600);
+        }
+    } catch (err) {
+        statusEl.textContent = 'Save failed';
+    }
+}
+
+async function clearOverride() {
+    if (!overrideFire) return;
+    if (!confirm('Clear the per-fire override? The fire will fall back to the global recommended settings.')) return;
+    const statusEl = document.getElementById('override-status');
+    try {
+        const r = await fetch(
+            `/api/fire/${encodeURIComponent(overrideFire)}/recommended`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+            body: JSON.stringify({settings: null}),
+        });
+        const data = await r.json();
+        if (data.error) {
+            statusEl.textContent = 'Error: ' + data.error;
+        } else {
+            statusEl.textContent = 'Cleared.';
+            setTimeout(() => { closeOverrideModal(); refreshFires(); }, 600);
+        }
+    } catch (err) {
+        statusEl.textContent = 'Clear failed';
+    }
 }
 
 // -----------------------------------------------------------------------
