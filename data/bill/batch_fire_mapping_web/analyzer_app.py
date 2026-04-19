@@ -326,15 +326,11 @@ def handle_api_analyzer_config_get(self):
     if not _require_admin(self):
         return
     from .app import state as app_state
-    # Seed: the recommended settings tiers the admin can copy from.
+    # Seed: the recommended settings the admin can copy from.
     seeds = []
     for tier in app_state.recommended_settings:
         seeds.append({
-            'label': (
-                f"{tier.get('min_ha', 0)}+"
-                if tier.get('max_ha') is None
-                else f"{tier.get('min_ha', 0)}\u2013{tier.get('max_ha')}"
-            ) + ' ha',
+            'label': str(tier.get('label', '') or 'setting'),
             'params': dict(tier.get('params', {})),
         })
     self._send_json({

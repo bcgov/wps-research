@@ -69,7 +69,13 @@ class FireInfo:
     agreement_pct: float = -1.0   # -1 = not computed
     console_log: deque = field(
         default_factory=lambda: deque(maxlen=CONSOLE_LOG_MAX_LINES))
-    serial_results: list = field(default_factory=list)  # [{params, agreement, run_id}]
+    # [{params, agreement, run_id, setting_idx, run_idx, setting_label}]
+    serial_results: list = field(default_factory=list)
+    # Settings used for the last serial map call (for legend/grouping).
+    serial_settings: list = field(default_factory=list)  # [{label, params}]
+    # Per-fire override for recommended settings. None -> use global list.
+    # Same shape as AppState.recommended_settings entries.
+    recommended_override: Optional[list] = None
 
 
 class AppState:
@@ -118,8 +124,13 @@ class AppState:
         self.pending_ips: dict = {}     # {ip: {first_seen, last_seen}}
         self.ip_file: str = ""          # path to persistent YAML
 
-        # Recommended settings (list of {min_ha, max_ha, params})
+        # Recommended settings (list of {label, params}). The first entry
+        # is the PRIMARY (used by plain "Map Fire" and batch map). All
+        # entries are used by "Map Fire with Settings".
         self.recommended_settings: list = []
+        # K replicates per setting; jitter = hdbscan_min_samples fan-out step.
+        self.k_runs_per_setting: int = 3
+        self.k_jitter: int = 1
 
         # Queue tracking
         self.current_job: Optional[dict] = None   # {fire_numbe, client_ip, started_at}

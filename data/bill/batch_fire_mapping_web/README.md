@@ -388,27 +388,34 @@ The two workflows are strictly isolated -- nothing the analyzer does affects the
 
 ## Recommended settings
 
-The file `recommended_settings.yaml` defines parameter presets by fire size range. Loaded automatically on startup from the output directory first, falling back to the package directory for defaults.
+The file `recommended_settings.yaml` defines an ordered list of parameter presets plus K (HDBSCAN replicates per setting). The first setting is the **primary** used by one-click "Map Fire". "Map Fire with Settings" runs every setting × K replicates. Loaded on startup from the output directory first, falling back to the package directory for defaults.
 
 ```yaml
-- min_ha: 0
-  max_ha: 500
-  params:
-    padding: 0.1
-    sample_rate: 0.05
-    embed_bands: '5,6,7,9,10,11,13,14,15'
-    tsne_perplexity: 60
-    # ... all pipeline parameters
+k_runs_per_setting: 3
+k_jitter: 1          # HDBSCAN fan-out step across K replicates
 
-- min_ha: 500
-  max_ha: null    # null = no upper limit
-  params:
-    padding: 0.1
-    embed_bands: '1,2,3,5,6,7,9,10,11,13,14,15'
-    # ... different bands for larger fires
+settings:
+  - label: all-bands-tight
+    params:
+      padding: 0.10
+      hdbscan_min_samples: 21
+      tsne_perplexity: 60
+      embed_bands: '1,2,3,4,5,6,7,8,9,10,11,12'
+      # ... rest of pipeline parameters
+
+  - label: all-bands-loose
+    params:
+      padding: 0.05
+      hdbscan_min_samples: 19
+      # ...
+
+  - label: change-only
+    params:
+      embed_bands: '7,8,9,10,11,12'
+      # ...
 ```
 
-Admins can view and edit settings in the web UI. Changes are persisted to `<out_dir>/recommended_settings.yaml` on save, keeping the package-bundled defaults intact as a fallback.
+Admins edit the global list in the Recommended Settings panel on the fire list page. Per-fire overrides live in `fire_state.yaml` and are edited via the **Edit** button in each fire row — clearing the override falls back to the global list. The old size-bucket schema is rejected on startup; regenerate the file if you see a legacy-format error.
 
 ---
 
