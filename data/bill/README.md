@@ -24,6 +24,16 @@ Lightweight toolkit for fire-mapping workflows on Sentinel-2 imagery. Provides b
 
 ---
 
+## Batch Fire Mapping — Web Interface
+
+[`batch_fire_mapping_web/`](https://github.com/bcgov/wps-research/tree/master/data/bill/batch_fire_mapping_web)
+
+<img src="images/fire_mapping_web.png" width="60%">
+
+Interactive web companion to the `batch_fire_mapping` CLI. Serves a browser UI for reviewing a shapefile of fire perimeters, running the ML classification pipeline (t-SNE + Random Forest + HDBSCAN) on individual fires, comparing multiple parameter sets side-by-side, and accepting the best result. Supports per-fire parameter overrides, N×K replicate sweeps, VIIRS hotspot hints, and PDF report generation for accepted fires.
+
+---
+
 ## Sentinel-2 Cloud Masking
 
 [`cloud_masking/`](https://github.com/bcgov/wps-research/tree/master/data/bill/cloud_masking)
