@@ -148,7 +148,18 @@ def _scan_canonical_dir(app_state):
                     m = yaml.safe_load(f) or {}
                 info.saved_max_padding = float(m.get('saved_padding', 0.0))
                 info.saved_max_crop_rel = str(m.get('saved_crop', ''))
-                accept_ids = list(m.get('accepts', []))
+                # Only accept values matching the canonical 'run_NNNN'
+                # shape — a corrupted or crafted manifest cannot inject
+                # path segments like '../../etc' into the joins below.
+                raw_ids = list(m.get('accepts', []))
+                accept_ids = [str(a) for a in raw_ids
+                              if isinstance(a, str)
+                              and re.fullmatch(r'run_\d{4,}', a)]
+                if len(accept_ids) != len(raw_ids):
+                    sys.stderr.write(
+                        f'[analyzer] WARNING: dropped '
+                        f'{len(raw_ids) - len(accept_ids)} malformed '
+                        f'accept id(s) from {manifest_path}\n')
             except Exception as exc:
                 sys.stderr.write(
                     f'[analyzer] WARNING: Bad manifest for {fn}: {exc}\n')

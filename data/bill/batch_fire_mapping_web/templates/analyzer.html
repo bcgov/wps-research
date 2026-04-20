@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Parameter Analyzer — Admin</title>
     <link rel="stylesheet" href="/static/style.css">
+    <script src="/static/help.js" defer></script>
     <style>
         .analyzer-header {
             padding: 14px 24px;
@@ -265,7 +266,7 @@
 <div class="analyzer-header">
     <h2>Parameter grid exploration</h2>
     <div class="meta">
-        Runs <strong>N parameter sets &times; M HDBSCAN runs</strong> on selected fires.
+        Runs <strong>N parameter sets &times; M HDBSCAN runs</strong><span class="help" tabindex="0" aria-label="About N×M" aria-expanded="false" data-tip="Each selected fire is mapped N×M times: every parameter set you configure is run M times with small HDBSCAN jitter. For 5 fires, 3 sets, M=3, the analyzer produces 5×3×3 = 45 result maps, letting you compare which parameter choices are stable across replicates and across fires.">?</span> on selected fires.
         All outputs live under <code>{{ analyzer_root }}</code> — the user-facing accepted
         fires are never touched by this tool.
     </div>
@@ -284,11 +285,11 @@
     <h3>Global settings</h3>
     <div style="display:flex;gap:20px;align-items:end;flex-wrap:wrap">
         <div style="display:flex;flex-direction:column">
-            <label style="font-size:11px;color:#475569">HDBSCAN runs per set (M)</label>
+            <label style="font-size:11px;color:#475569">HDBSCAN runs per set (M)<span class="help" tabindex="0" aria-label="About M" aria-expanded="false" data-tip="How many times each parameter set is run on each fire. Replicates let you check whether a good result was repeatable or a lucky roll. Because cuML HDBSCAN on GPU has no random seed, the jitter step below is what makes the M replicates produce different answers.">?</span></label>
             <input type="number" id="m-runs" class="m-runs-input" min="1" max="20" value="3">
         </div>
         <div style="display:flex;flex-direction:column">
-            <label style="font-size:11px;color:#475569">HDBSCAN jitter step</label>
+            <label style="font-size:11px;color:#475569">HDBSCAN jitter step<span class="help" tabindex="0" aria-label="About jitter" aria-expanded="false" data-tip="Integer offset applied to hdbscan_min_samples across the M replicates. For base=20, M=3, jitter=1, runs use [20, 21, 19]. Because GPU HDBSCAN is deterministic, jitter is how we get distinct replicates without invalidating the t-SNE+RF cache shared by the set. Set to 0 for true replicates (may be identical).">?</span></label>
             <input type="number" id="m-run-jitter" class="m-runs-input" min="0" max="50" value="1">
         </div>
         <div style="display:flex;flex-direction:column;flex:1;min-width:240px">
@@ -308,7 +309,7 @@
 
 <!-- Param sets -->
 <div class="analyzer-section">
-    <h3>Parameter sets (N) <span id="set-count" style="font-size:11px;color:#64748b"></span></h3>
+    <h3>Parameter sets (N)<span class="help" tabindex="0" aria-label="About N" aria-expanded="false" data-tip="Each set is one distinct combination of t-SNE, Random Forest, and HDBSCAN parameters. Add a set per hypothesis you want to test (e.g. 'high perplexity', 'loose clustering'). Fields left blank fall back to pipeline defaults. Sets that share all non-HDBSCAN values reuse one cached embedding, so the cost is linear in new t-SNE configs — not in total sets.">?</span> <span id="set-count" style="font-size:11px;color:#64748b"></span></h3>
     <div class="seed-bar">
         Seed a new set from a recommended tier:
         <span id="seed-buttons"></span>
