@@ -77,6 +77,18 @@ class FireInfo:
     # Same shape as AppState.recommended_settings entries.
     recommended_override: Optional[list] = None
 
+    # Set by handle_api_serial_accept / handle_api_serial_cancel when the
+    # user accepts a run (or clicks Cancel) while the N×K worker is still
+    # executing. The worker polls this between replicates and between
+    # settings, and skips its final "pick best + overwrite status/cache"
+    # block so the pre-sweep state is preserved.
+    serial_canceled: bool = False
+
+    # Status captured by handle_api_serial_map right before it flips to
+    # MAPPING. The worker restores this on cancel so a user who bails out
+    # of a sweep lands back where they started (MAPPED / ACCEPTED / READY).
+    serial_prev_status: Optional[FireStatus] = None
+
 
 class AppState:
     """Global application state shared across all routes."""

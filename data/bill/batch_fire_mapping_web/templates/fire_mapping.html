@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Fire {{ fire_numbe }}</title>
     <link rel="stylesheet" href="/static/style.css">
+    <script src="/static/help.js" defer></script>
 </head>
 <body>
 
@@ -24,6 +25,7 @@
     <span>ML Size: <strong id="ml-size-text">--</strong></span>
     <span>Status: <span id="status-badges"><strong id="status-text">{{ fire_status }}</strong></span></span>
     <span id="agreement-info"></span>
+    <span class="help" tabindex="0" aria-label="About agreement" aria-expanded="false" data-tip="Agreement % compares the ML-classified burn footprint against the hint perimeter (VIIRS hotspot polygon). 100% = the ML result exactly matches the hint; lower values mean the ML deviated from the hint. It's a sanity check, not ground truth — a low agreement may mean the hint was loose, not that the map is wrong.">?</span>
     <span id="crop-info"></span>
 </div>
 
@@ -73,7 +75,7 @@
                 <h3 onclick="this.parentElement.classList.toggle('open')">Crop &amp; Sampling</h3>
                 <div class="params-body">
                     <div class="param-row">
-                        <label>Padding:</label>
+                        <label>Padding<span class="help" tabindex="0" aria-label="About padding" aria-expanded="false" data-tip="Fraction of the hint perimeter's bounding box added as a buffer around the crop. 0.2 means the crop extends 20% beyond the hint on each side. Larger padding gives the model more unburned context to contrast against — useful for small fires or when the hint is tight to the burn edge.">?</span>:</label>
                         <input type="number" id="p-padding" value="{{ padding }}" step="0.05" min="0" max="1">
                         <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="recrop()">Re-crop</button>
                     </div>
@@ -200,7 +202,7 @@
 
             <!-- Action buttons. K replicates per setting is a global
                  (from recommended_settings.yaml). -->
-            <div class="action-buttons">
+            <div class="action-buttons" style="align-items:center">
                 <button class="btn" id="btn-map" disabled onclick="startMapping()">
                     Map Fire
                 </button>
@@ -208,6 +210,11 @@
                     style="background:#555;font-size:12px;line-height:1.2">
                     Map Fire<br><small>with settings</small>
                 </button>
+                <button class="btn btn-danger" id="btn-cancel-map" onclick="cancelMapping()"
+                    style="display:none;flex:1;font-size:13px">
+                    Cancel mapping
+                </button>
+                <span class="help" tabindex="0" aria-label="About mapping modes" aria-expanded="false" data-tip="Map Fire: runs once using the current parameter values in the panel — fast, single result. Map Fire with settings: sweeps N recommended parameter sets × K replicates per set, producing N×K maps. Replicates jitter HDBSCAN's min_samples so you can see which runs agree. Use the sweep when you want robustness; use single-run when you're tweaking parameters. Cancel aborts the sweep and restores the fire to its pre-sweep status (the current subprocess finishes, but no more runs start).">?</span>
             </div>
 
             <!-- Serial results gallery -->
@@ -708,13 +715,56 @@ function getParams() {
 // Shared helpers for enabling/disabling mapping buttons
 // -----------------------------------------------------------------------
 function disableMapButtons() {
-    document.getElementById('btn-map').disabled = true;
-    document.getElementById('btn-map-settings').disabled = true;
+    // While mapping is running, hide the Map buttons entirely and show
+    // Cancel in their place — the Map buttons are unclickable anyway,
+    // so keeping them around as disabled shapes just adds visual noise.
+    document.getElementById('btn-map').style.display = 'none';
+    document.getElementById('btn-map-settings').style.display = 'none';
+    const cancel = document.getElementById('btn-cancel-map');
+    if (cancel) {
+        cancel.style.display = '';
+        cancel.disabled = false;
+        cancel.textContent = 'Cancel mapping';
+    }
 }
 
 function enableMapButtons() {
+    document.getElementById('btn-map').style.display = '';
     document.getElementById('btn-map').disabled = false;
+    document.getElementById('btn-map-settings').style.display = '';
     document.getElementById('btn-map-settings').disabled = false;
+    const cancel = document.getElementById('btn-cancel-map');
+    if (cancel) {
+        cancel.style.display = 'none';
+        cancel.disabled = false;
+        cancel.textContent = 'Cancel mapping';
+    }
+}
+
+async function cancelMapping() {
+    if (!isMapping) return;
+    if (!confirm('Cancel the current mapping? The run in progress will finish, but no further runs will start and no result will be kept.')) return;
+    const btn = document.getElementById('btn-cancel-map');
+    btn.disabled = true;
+    btn.textContent = 'Cancelling…';
+    try {
+        const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/serial/cancel`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+        });
+        const data = await r.json();
+        if (data.error) {
+            log('Cancel failed: ' + data.error, 'error');
+            btn.disabled = false;
+            btn.textContent = 'Cancel';
+            return;
+        }
+        log('Cancel requested. Worker will stop after the current run finishes.', 'dim');
+    } catch (err) {
+        log('Cancel failed: ' + err.message, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Cancel';
+    }
 }
 
 // -----------------------------------------------------------------------
@@ -869,6 +919,15 @@ async function pollFireState() {
             } else if (data.status === 'mapping') {
                 isMapping = true;
                 disableMapButtons();
+
+            } else if (isMapping) {
+                // Any other transition away from mapping (e.g. ready /
+                // pending after a user-cancel) clears the mapping flag.
+                isMapping = false;
+                enableMapButtons();
+                if (oldStatus === 'mapping') {
+                    log(`Mapping cancelled — back to ${data.status}.`, 'dim');
+                }
             }
         }
 

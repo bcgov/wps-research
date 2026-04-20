@@ -13,6 +13,7 @@ import mimetypes
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -60,6 +61,11 @@ def _stream_subprocess(cmd, cwd, on_line):
     is always reaped before this function returns, so the caller never
     has to worry about leaking PIDs.
 
+    The child runs in its own session (new process group) so a kill
+    can signal the whole group -- the CLI spawns helpers via
+    ``subprocess.run`` (gdal, qgis) and without group kill those
+    grandchildren would orphan to init on watchdog timeout.
+
     Returns ``(rc, killed)``. When the watchdog fires, ``rc`` is None
     and ``killed`` is True.
     """
@@ -68,17 +74,28 @@ def _stream_subprocess(cmd, cwd, on_line):
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         cwd=cwd,
+        start_new_session=True,
     )
 
     killed = [False]
     timer_box = [None]
 
+    def _kill_group(sig):
+        try:
+            os.killpg(proc.pid, sig)
+        except (ProcessLookupError, PermissionError):
+            pass
+        except Exception:
+            # Fall back to killing just the direct child so we at least
+            # release the GPU lock holder even on exotic platforms.
+            try:
+                proc.send_signal(sig)
+            except Exception:
+                pass
+
     def _watchdog_fire():
         killed[0] = True
-        try:
-            proc.kill()
-        except Exception:
-            pass
+        _kill_group(signal.SIGKILL)
 
     def _arm():
         t_old = timer_box[0]
@@ -103,14 +120,16 @@ def _stream_subprocess(cmd, cwd, on_line):
         if t_last is not None:
             t_last.cancel()
         if proc.poll() is None:
-            try:
-                proc.kill()
-            except Exception:
-                pass
+            # Give the group a chance to exit cleanly before the hammer.
+            _kill_group(signal.SIGTERM)
             try:
                 proc.wait(timeout=5)
             except Exception:
-                pass
+                _kill_group(signal.SIGKILL)
+                try:
+                    proc.wait(timeout=5)
+                except Exception:
+                    pass
     return (None if killed[0] else rc), killed[0]
 
 
@@ -897,6 +916,7 @@ def _serial_map_worker(fire_numbe: str, settings: list[dict],
     fire = state.fires[fire_numbe]
     fire.serial_results = []
     fire.serial_settings = [_clone_setting(s) for s in settings]
+    fire.serial_canceled = False
     fire.console_log.clear()
     n_settings = len(settings)
     k_runs = max(1, int(k_runs))
@@ -1008,6 +1028,8 @@ def _serial_map_worker(fire_numbe: str, settings: list[dict],
     run_id = 0
 
     for setting_idx, setting in enumerate(settings):
+        if fire.serial_canceled:
+            break
         setting_label = str(setting.get('label', f'setting_{setting_idx}'))
         base_params = dict(setting.get('params', {}))
         try:
@@ -1040,7 +1062,7 @@ def _serial_map_worker(fire_numbe: str, settings: list[dict],
         setting_stopped = False
 
         for replicate in range(k_runs):
-            if setting_stopped:
+            if setting_stopped or fire.serial_canceled:
                 break
             run_id += 1
             params = dict(base_params)
@@ -1095,6 +1117,11 @@ def _serial_map_worker(fire_numbe: str, settings: list[dict],
                                 f'{fire_numbe}_serial_state_s'
                                 f'{setting_idx}.npz')
 
+                    # If the user accepted a completed run while we
+                    # were waiting on the GPU lock, skip this replicate
+                    # so we don't overwrite the accepted status / cache.
+                    if fire.serial_canceled:
+                        break
                     with state.lock:
                         fire.status = FireStatus.MAPPING
                         fire.last_params = params
@@ -1264,6 +1291,54 @@ def _serial_map_worker(fire_numbe: str, settings: list[dict],
                 sys.stderr.flush()
                 if replicate == 0:
                     setting_stopped = True
+
+    # User accepted a run mid-batch — preserve the accepted state
+    # (status=ACCEPTED, main cache files, canonical dir) and just wipe
+    # any per-run serial files we produced before noticing the cancel.
+    if fire.serial_canceled:
+        for sr in list(fire.serial_results):
+            rid = sr.get('run_id')
+            if rid is None:
+                continue
+            for pat in (
+                f'{fire_numbe}_serial_{rid}_classified.bin',
+                f'{fire_numbe}_serial_{rid}_classified.hdr',
+                f'{fire_numbe}_serial_{rid}.png',
+                f'{fire_numbe}_serial_{rid}_brush.png',
+            ):
+                p = os.path.join(fire.cache_dir, pat)
+                if os.path.isfile(p):
+                    try:
+                        os.remove(p)
+                    except OSError:
+                        pass
+            overlay = os.path.join(
+                fire.cache_dir, 'previews', f'serial_{rid}.png')
+            if os.path.isfile(overlay):
+                try:
+                    os.remove(overlay)
+                except OSError:
+                    pass
+        with state.lock:
+            # Worker may have raced past a cancel check and written
+            # MAPPING over the cancel source's chosen status. Restore
+            # the pre-sweep status (accept handler patches this to
+            # ACCEPTED; user-cancel leaves it as whatever the fire was
+            # before the sweep started).
+            revert = fire.serial_prev_status or FireStatus.PENDING
+            fire.status = revert
+            fire.serial_results = []
+            fire.serial_canceled = False
+            fire.serial_prev_status = None
+            state.current_job = None
+        fire.console_log.append(
+            f'Serial mapping cancelled — status restored to '
+            f'{revert.value}.')
+        _save_fire_state()
+        sys.stderr.write(
+            f'[serial] {fire_numbe} cancelled → {revert.value}\n')
+        sys.stderr.flush()
+        return
 
     # Pick best result as the "current" mapping (exclude Run 0 / previous)
     successful = [r for r in fire.serial_results
@@ -1722,22 +1797,16 @@ def _accept_fire_sync(fire_numbe: str) -> str:
         import csv
         csv_path = os.path.join(state.output_root, 'accepted_params.csv')
         with _accept_file_lock:
-            write_header = not os.path.isfile(csv_path)
-
-            # Remove existing entry for this fire to avoid duplicates
-            if not write_header:
-                existing = []
+            # Read existing rows (if any), drop the row for this fire
+            # (dedupe on re-accept), then write everything + the new row
+            # in a single tmp-file + rename so a crash or disk-full
+            # cannot truncate the CSV mid-write.
+            existing = []
+            if os.path.isfile(csv_path):
                 with open(csv_path, newline='') as cf:
                     reader = csv.DictReader(cf)
                     existing = [r for r in reader
                                 if r.get('fire_numbe') != fire_numbe]
-                with open(csv_path, 'w', newline='') as cf:
-                    writer = csv.DictWriter(
-                        cf, fieldnames=_CSV_FIELDNAMES,
-                        extrasaction='ignore')
-                    writer.writeheader()
-                    writer.writerows(existing)
-                write_header = False
 
             row_data = {
                 'fire_numbe': fire_numbe,
@@ -1750,13 +1819,16 @@ def _accept_fire_sync(fire_numbe: str) -> str:
             if fire.last_params:
                 for k, v in fire.last_params.items():
                     row_data[k] = v
-            with open(csv_path, 'a', newline='') as cf:
+
+            tmp_path = csv_path + '.tmp'
+            with open(tmp_path, 'w', newline='') as cf:
                 writer = csv.DictWriter(
                     cf, fieldnames=_CSV_FIELDNAMES,
                     extrasaction='ignore')
-                if write_header:
-                    writer.writeheader()
+                writer.writeheader()
+                writer.writerows(existing)
                 writer.writerow(row_data)
+            os.replace(tmp_path, csv_path)
     except Exception as exc:
         sys.stderr.write(
             f'[save] WARNING: Failed to update accepted_params.csv: '
@@ -1918,6 +1990,9 @@ class FireHandler(BaseHTTPRequestHandler):
         (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/serial/(?P<run_id>[0-9]+)/accept$'),
          'handle_api_serial_accept'),
+        (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/serial/cancel$'),
+         'handle_api_serial_cancel'),
         (re.compile(r'^/api/admin/ip/(?P<action>approve|block|revoke|unblock)$'),
          'handle_api_admin_ip_action'),
         (re.compile(
@@ -2465,35 +2540,42 @@ class FireHandler(BaseHTTPRequestHandler):
             state.batch_status = {'running': True, 'total': 0,
                                   'completed': 0, 'current_fire': '',
                                   'errors': []}
-        body = self._read_body()
-        if body is None:
+        # From here until the worker thread is started, any exception
+        # (e.g. rfile.read raises ConnectionResetError mid-POST) must
+        # clear batch_status -- otherwise the server rejects every
+        # future batch with "already running" until restart.
+        started = False
+        try:
+            body = self._read_body()
+            if body is None:
+                return
+            fire_numbes = body.get('fire_numbes', [])
+            fire_numbes = [
+                fn for fn in fire_numbes
+                if fn in state.fires
+                and state.fires[fn].status != FireStatus.ACCEPTED
+            ]
+            if not fire_numbes:
+                self._send_json(
+                    {'error': 'No eligible fires selected'}, 400)
+                return
             with state.lock:
-                state.batch_status = None
-            return
-        fire_numbes = body.get('fire_numbes', [])
-        # Filter out accepted fires
-        fire_numbes = [
-            fn for fn in fire_numbes
-            if fn in state.fires
-            and state.fires[fn].status != FireStatus.ACCEPTED
-        ]
-        if not fire_numbes:
-            with state.lock:
-                state.batch_status = None
-            self._send_json({'error': 'No eligible fires selected'}, 400)
-            return
-        with state.lock:
-            state.batch_status['total'] = len(fire_numbes)
-        _batch_cancel.clear()
-        _batch_thread = threading.Thread(
-            target=_batch_map_worker,
-            args=(fire_numbes,),
-            daemon=True)
-        _batch_thread.start()
-        self._send_json({
-            'status': 'started',
-            'total': len(fire_numbes),
-        })
+                state.batch_status['total'] = len(fire_numbes)
+            _batch_cancel.clear()
+            _batch_thread = threading.Thread(
+                target=_batch_map_worker,
+                args=(fire_numbes,),
+                daemon=True)
+            _batch_thread.start()
+            started = True
+            self._send_json({
+                'status': 'started',
+                'total': len(fire_numbes),
+            })
+        finally:
+            if not started:
+                with state.lock:
+                    state.batch_status = None
 
     def handle_api_batch_status(self):
         with state.lock:
@@ -2970,7 +3052,9 @@ class FireHandler(BaseHTTPRequestHandler):
         k_runs = max(1, min(10, int(state.k_runs_per_setting)))
         k_jitter = max(0, int(state.k_jitter))
 
-        # Set status BEFORE starting thread to avoid race
+        # Set status BEFORE starting thread to avoid race. Save the
+        # pre-sweep status so the worker can restore it on cancel.
+        fire.serial_prev_status = fire.status
         if fire.status == FireStatus.ACCEPTED:
             fire.previously_accepted = True
         fire.status = FireStatus.MAPPING
@@ -3094,6 +3178,18 @@ class FireHandler(BaseHTTPRequestHandler):
             self._send_json({'error': 'Run not found'}, 404)
             return
 
+        # If the N×K worker is still running, tell it to stop. It will
+        # skip its "pick best + overwrite status" block on exit, so our
+        # accepted result survives. Worker will also clean up any
+        # serial_* cache files it produces, so we don't duplicate that
+        # work below. Pin serial_prev_status to ACCEPTED so the worker's
+        # generic revert lands there (it reverts to prev_status
+        # regardless of cancel source).
+        worker_running = (fire.status == FireStatus.MAPPING)
+        if worker_running:
+            fire.serial_prev_status = FireStatus.ACCEPTED
+            fire.serial_canceled = True
+
         # Copy the selected run's results as the main results
         serial_clf = result.get('classified', '')
         serial_comp = result.get('comparison', '')
@@ -3124,34 +3220,58 @@ class FireHandler(BaseHTTPRequestHandler):
         # Now accept via the normal flow
         _accept_fire_sync(fire_numbe)
 
-        # Clean up serial cache files and clear results
-        for sr in fire.serial_results:
-            rid = sr.get('run_id')
-            if rid is None:
-                continue
-            for pat in (
-                f'{fire_numbe}_serial_{rid}_classified.bin',
-                f'{fire_numbe}_serial_{rid}_classified.hdr',
-                f'{fire_numbe}_serial_{rid}.png',
-                f'{fire_numbe}_serial_{rid}_brush.png',
-            ):
-                p = os.path.join(fire.cache_dir, pat)
-                if os.path.isfile(p):
+        # If the worker is still running, leave serial_results / serial
+        # file cleanup to it — racing to clear the list here would fight
+        # with the worker's in-flight append for the next replicate, and
+        # racing to delete serial files would fight its in-flight writes.
+        if not worker_running:
+            for sr in fire.serial_results:
+                rid = sr.get('run_id')
+                if rid is None:
+                    continue
+                for pat in (
+                    f'{fire_numbe}_serial_{rid}_classified.bin',
+                    f'{fire_numbe}_serial_{rid}_classified.hdr',
+                    f'{fire_numbe}_serial_{rid}.png',
+                    f'{fire_numbe}_serial_{rid}_brush.png',
+                ):
+                    p = os.path.join(fire.cache_dir, pat)
+                    if os.path.isfile(p):
+                        try:
+                            os.remove(p)
+                        except OSError:
+                            pass
+                overlay = os.path.join(
+                    fire.cache_dir, 'previews', f'serial_{rid}.png')
+                if os.path.isfile(overlay):
                     try:
-                        os.remove(p)
+                        os.remove(overlay)
                     except OSError:
                         pass
-            overlay = os.path.join(
-                fire.cache_dir, 'previews', f'serial_{rid}.png')
-            if os.path.isfile(overlay):
-                try:
-                    os.remove(overlay)
-                except OSError:
-                    pass
-        fire.serial_results = []
-        fire.previously_accepted = False
+            fire.serial_results = []
 
         self._send_json({'status': 'accepted'})
+
+    def handle_api_serial_cancel(self, fire_numbe):
+        """Cancel a running N×K serial mapping without accepting any run.
+
+        Sets the cancel flag; the worker sees it between replicates,
+        bails out, cleans up its serial cache files, and restores the
+        pre-sweep status (saved in ``fire.serial_prev_status`` when the
+        sweep started). If no sweep is running, 400.
+        """
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        if fire.status != FireStatus.MAPPING:
+            self._send_json(
+                {'error': f'Not mapping (status={fire.status.value})'},
+                400)
+            return
+        fire.serial_canceled = True
+        self._send_json({'status': 'cancelling'})
 
     def handle_api_notes(self, fire_numbe):
         fire_numbe = unquote(fire_numbe)
@@ -3338,13 +3458,16 @@ class FireHandler(BaseHTTPRequestHandler):
             _gpu_queue += 1
             state.waiting_jobs.append(job_entry)
 
-        if _gpu_lock.locked():
-            sse('log', {
-                'message': f'Queued — {queue_pos} job(s) ahead. '
-                           f'Waiting for GPU...',
-            })
-
         try:
+            # sse() can raise BrokenPipeError if the client already
+            # disconnected; the surrounding try/finally guarantees the
+            # queue/waiting_jobs cleanup runs even then.
+            if _gpu_lock.locked():
+                sse('log', {
+                    'message': f'Queued — {queue_pos} job(s) ahead. '
+                               f'Waiting for GPU...',
+                })
+
             with _gpu_lock:
                 with state.lock:
                     # Move from waiting to current

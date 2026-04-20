@@ -210,16 +210,26 @@ def _csv_row(info: AnalyzerFireInfo, run: AnalyzerRun,
 
 
 def _append_csv_row(astate, row: dict):
+    """Append a row atomically: read existing rows, add the new one,
+    and write the whole file via tmp + os.replace. Slower than a raw
+    append, but a crash cannot leave a half-written or header-less CSV.
+    """
     csv_path = astate.csv_file
     with _csv_lock:
-        write_header = not os.path.isfile(csv_path)
-        with open(csv_path, 'a', newline='') as f:
+        existing = []
+        if os.path.isfile(csv_path):
+            with open(csv_path, newline='') as f:
+                reader = csv.DictReader(f)
+                existing = list(reader)
+        tmp = csv_path + '.tmp'
+        with open(tmp, 'w', newline='') as f:
             writer = csv.DictWriter(
                 f, fieldnames=ANALYZER_CSV_FIELDNAMES,
                 extrasaction='ignore')
-            if write_header:
-                writer.writeheader()
+            writer.writeheader()
+            writer.writerows(existing)
             writer.writerow(row)
+        os.replace(tmp, csv_path)
 
 
 def _remove_csv_row(astate, fire_numbe: str, accept_id: str):
@@ -257,6 +267,14 @@ def accept_run(fire_numbe: str, set_idx: int, run_idx: int,
     Raises ValueError on bad arguments, FileNotFoundError if the cache
     directory no longer has the run's outputs.
     """
+    # Claim the run atomically under the lock so two concurrent accepts
+    # cannot both pass the `not r.accepted` check. We allocate accept_id
+    # and set run.accepted before releasing the lock; subsequent file
+    # work happens outside the lock. If any of it fails, the rollback
+    # block restores run.accepted=False so the run can be re-claimed.
+    canon_dir = os.path.join(astate.analyzer_root, fire_numbe)
+    os.makedirs(canon_dir, exist_ok=True)
+    now = datetime.datetime.now().isoformat(timespec='seconds')
     with astate.lock:
         info = astate.fires.get(fire_numbe)
         if info is None:
@@ -270,28 +288,31 @@ def accept_run(fire_numbe: str, set_idx: int, run_idx: int,
         if run.status != 'done':
             raise ValueError(
                 f'Cannot accept a run in state {run.status!r}')
-
-    run_dir, snap_dir = _locate_run_files(fire_numbe, run, astate)
-
-    canon_dir = os.path.join(astate.analyzer_root, fire_numbe)
-    os.makedirs(canon_dir, exist_ok=True)
-    accept_id = _next_accept_id(canon_dir)
-    dest = os.path.join(canon_dir, accept_id)
-    os.makedirs(dest)
-
-    # Copy per-run outputs
-    for name in ('classified.bin', 'classified.hdr',
-                 'comparison.png', 'brush_comparison.png', 'thumb.png'):
-        src = os.path.join(run_dir, name)
-        if os.path.isfile(src):
-            shutil.copy2(src, os.path.join(dest, name))
-
-    # Mark accepted on the in-memory run
-    now = datetime.datetime.now().isoformat(timespec='seconds')
-    with astate.lock:
+        accept_id = _next_accept_id(canon_dir)
+        dest = os.path.join(canon_dir, accept_id)
+        # makedirs without exist_ok=True: if two threads ever race to the
+        # same accept_id (shouldn't happen under the lock, but cheap
+        # defense-in-depth) the second raises and we roll back.
+        os.makedirs(dest)
         run.accepted = True
         run.accept_id = accept_id
         run.accepted_at = now
+
+    try:
+        run_dir, snap_dir = _locate_run_files(fire_numbe, run, astate)
+        # Copy per-run outputs
+        for name in ('classified.bin', 'classified.hdr',
+                     'comparison.png', 'brush_comparison.png', 'thumb.png'):
+            src = os.path.join(run_dir, name)
+            if os.path.isfile(src):
+                shutil.copy2(src, os.path.join(dest, name))
+    except Exception:
+        with astate.lock:
+            run.accepted = False
+            run.accept_id = ''
+            run.accepted_at = ''
+        shutil.rmtree(dest, ignore_errors=True)
+        raise
 
     # Provenance YAML
     _write_accept_params_yaml(dest, run, info, accept_id, app_state)

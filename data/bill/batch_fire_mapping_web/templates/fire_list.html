@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Batch Fire Mapping</title>
     <link rel="stylesheet" href="/static/style.css">
+    <script src="/static/help.js" defer></script>
 </head>
 <body>
 
@@ -18,6 +19,14 @@
     <a href="/logout" class="btn btn-secondary" style="font-size:11px;padding:3px 10px">Logout</a>
     <img src="/static/BC-Wildfire-Service-logo.png" alt="BC Wildfire Service" class="header-logo">
 </header>
+
+<!-- Currently-mapping banner (shown only when a fire is in MAPPING state) -->
+<div id="mapping-banner" class="mapping-banner" style="display:none">
+    <span>&#128293; Currently mapping:</span>
+    <span class="fire-num" id="mapping-banner-fire"></span>
+    <a id="mapping-banner-link" href="#" class="btn">Open</a>
+    <button class="btn btn-secondary" onclick="scrollToMappingRow()">Scroll to row</button>
+</div>
 
 <!-- Filter panel -->
 <div class="filter-panel">
@@ -130,8 +139,8 @@
             <th data-key="fire_year">Year <span class="sort-arrow"></span></th>
             <th data-key="fire_size_ha">Hint Size (ha) <span class="sort-arrow"></span></th>
             <th data-key="ml_area_ha">ML Size (ha) <span class="sort-arrow"></span></th>
-            <th data-key="agreement_pct">Agreement <span class="sort-arrow"></span></th>
-            <th data-key="status">Status <span class="sort-arrow"></span></th>
+            <th data-key="agreement_pct">Agreement<span class="help" tabindex="0" aria-label="About agreement" aria-expanded="false" data-tip="How closely the ML-classified burn matches the hint perimeter (VIIRS hotspot polygon). 100% = exact match; lower values may indicate the ML disagreed with the hint or the hint was loose. A sanity check, not ground truth.">?</span> <span class="sort-arrow"></span></th>
+            <th data-key="status">Status<span class="help" tabindex="0" aria-label="About status" aria-expanded="false" data-tip="pending = never opened. preparing/ready = crop being built or ready to map. mapping = ML running. mapped = result available, awaiting review. accepted = a run was approved and copied to the canonical output folder. error = a step failed (see console in the fire page).">?</span> <span class="sort-arrow"></span></th>
             <th>Settings</th>
             <th>Action</th>
         </tr>
@@ -330,11 +339,29 @@ function render() {
     document.getElementById('fire-count').textContent =
         `${filtered.length} / ${allFires.length} fires`;
 
+    // Update currently-mapping banner (scan all fires, not just filtered,
+    // so it's visible even when the user has filtered out 'mapping' status)
+    const mappingFire = allFires.find(f => f.status === 'mapping');
+    const banner = document.getElementById('mapping-banner');
+    if (mappingFire) {
+        document.getElementById('mapping-banner-fire').textContent =
+            mappingFire.fire_numbe;
+        document.getElementById('mapping-banner-link').href =
+            `/fire/${encodeURIComponent(mappingFire.fire_numbe)}`;
+        banner.style.display = 'flex';
+    } else {
+        banner.style.display = 'none';
+    }
+
     // Build rows
     const tbody = document.getElementById('tbody');
     tbody.innerHTML = '';
     for (const f of filtered) {
         const tr = document.createElement('tr');
+        if (f.status === 'mapping') {
+            tr.className = 'row-mapping';
+            tr.dataset.mapping = '1';
+        }
         const badge = `<span class="status-badge status-${f.status}">${f.status}</span>`;
         const prevBadge = f.previously_accepted
             ? '<span class="status-badge status-accepted status-badge-muted">accepted</span> '
@@ -376,6 +403,17 @@ function render() {
             arrow.textContent = '';
         }
     });
+}
+
+function scrollToMappingRow() {
+    const row = document.querySelector('tr[data-mapping="1"]');
+    if (row) {
+        row.scrollIntoView({behavior: 'smooth', block: 'center'});
+    } else {
+        alert('The mapping fire is hidden by the current filters. ' +
+              'Use the Open button in the banner, or enable the "mapping" ' +
+              'status filter.');
+    }
 }
 
 function esc(s) {

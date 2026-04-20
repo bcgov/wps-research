@@ -1,6 +1,6 @@
 # batch_fire_mapping_web
 
-*Last updated: April 18, 2026*
+*Last updated: April 20, 2026*
 
 Interactive web interface for mapping wildfire burn areas from Sentinel-2 satellite imagery. Uses a machine learning pipeline (T-SNE dimensionality reduction, Random Forest classification, HDBSCAN clustering) accelerated on GPU to classify burned vs. unburned pixels, then lets users visually review and accept results through a browser.
 
@@ -122,6 +122,8 @@ With `--insecure_no_auth`, all authentication is bypassed and every user has ful
 ---
 
 ## How the web UI works
+
+**In-UI help.** Non-obvious concepts (N × M parameter sets, HDBSCAN jitter, padding, agreement %, status badges, the two "Map Fire" modes) carry a small grey "?" next to their label. Click it for a short explanation; click outside or press Escape to close. The tooltips are click-only — nothing pops up on hover — and are implemented as a shared primitive in `static/help.js` + the `.help` / `.help-popover` rules in `static/style.css`.
 
 ### Fire list (home page)
 
@@ -551,6 +553,17 @@ On startup, the server:
 The `.web_cache/` directory is no longer wiped on every re-prepare. Cache is only cleared when padding actually changes (which invalidates the crop dimensions). This means un-accepted mapping results survive across page reloads and re-prepares with the same padding.
 
 The `.analyzer_cache/` directory is never wiped automatically — un-accepted analyzer runs survive across restarts so the admin can resume or reaccept without re-running the grid. Delete the whole `analyzing_parameters/` tree to start fresh; nothing in the user workflow depends on it.
+
+### Crash-safety details
+
+- `accepted_params.csv` and `analyzer_accepted.csv` are written via tmp-file + `os.replace`. A crash or disk-full mid-write leaves the previous file intact rather than a truncated one. Re-accepting the same fire (user CSV) still dedupes — the read/filter/write happens inside one atomic replace.
+- All YAML persistence goes through `_atomic_yaml_dump` (tmp + `os.replace`, `0o600` for sessions/IP lists).
+- Analyzer accepts claim the target `accept_id` and set `run.accepted = True` under `astate.lock` before any file copies, so two concurrent admin clicks on the same run cannot both succeed. If the subsequent copy fails, the claim is rolled back.
+- On startup, `accept_id` values loaded from `analyzing_parameters/<FIRE>/manifest.yaml` are validated against `run_NNNN` before being joined into paths. A corrupted manifest is logged and the malformed entries are dropped.
+- The GPU queue's `waiting_jobs` append is wrapped in the same `try/finally` that releases it, so a client disconnect while the "queued" log line is being streamed cannot leak a phantom entry.
+- `fire_mapping_cli.py` is launched with `start_new_session=True`. The silence watchdog (and the cleanup path) signal the whole process group (SIGTERM → SIGKILL), so helper grandchildren the CLI spawns via `subprocess.run` (e.g. `gdal_translate`, `qgis`) do not orphan to init when the watchdog fires.
+- `handle_api_batch_map` wraps the body read + validation in `try/finally`: a client disconnect after headers but before the JSON body arrives no longer leaves `state.batch_status = {'running': True}` stuck, which would previously block every subsequent batch until a server restart.
+- Accepting a serial run mid-batch (user clicks Accept on run 2 while runs 3–5 are still queued) sets `fire.serial_canceled = True`. The worker polls this between replicates, between settings, and inside the GPU-locked status write just before starting each subprocess, then skips its final "pick best + overwrite main cache files + set status=MAPPED" block on exit. Previously, the worker would race past the accept, overwrite the ACCEPTED status with MAPPING→MAPPED, overwrite the cache comparison with the best of the non-accepted runs, and persist the wrong state to `fire_state.yaml` — so the accepted run effectively vanished from the UI (and `previously_accepted` stayed `False` across restarts, so a subsequent re-map wouldn't show the accepted result as its Run 0 snapshot).
 
 ---
 
