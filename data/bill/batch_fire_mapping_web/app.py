@@ -254,6 +254,9 @@ _PARAM_SPEC = {
     'sample_rate':          ('float', 0.001, 1.0),
     'min_samples':          ('int',   1, 1000000),
     'max_samples':          ('int',   1, 1000000),
+    'brush_size':           ('int',   1, 10000),
+    'point_threshold':      ('int',   1, 10_000_000),
+    'brush_all_segments':   ('bool',),
 }
 
 
@@ -282,6 +285,15 @@ def _validate_param(key: str, raw):
             raise ValueError(
                 f'{key}={raw} must be one of {sorted(allowed)}')
         return s
+    if kind == 'bool':
+        if isinstance(raw, bool):
+            return raw
+        s = str(raw).strip().lower()
+        if s in ('1', 'true', 'yes', 'on'):
+            return True
+        if s in ('0', 'false', 'no', 'off', ''):
+            return False
+        raise ValueError(f'{key}={raw} must be boolean')
     return raw
 
 
@@ -305,6 +317,7 @@ _CSV_FIELDNAMES = [
     'controlled_ratio', 'hdbscan_min_samples',
     'rf_n_estimators', 'rf_max_depth', 'rf_max_features',
     'rf_random_state', 'contour_width',
+    'brush_size', 'point_threshold', 'brush_all_segments',
 ]
 
 
@@ -412,6 +425,21 @@ def _save_fire_state():
                      'params': dict(s.get('params', {}))}
                     for s in fire.recommended_override
                 ]
+            # Persist serial gallery state so the results gallery survives
+            # restart. Without this, fire.serial_results defaults back to
+            # [] on boot and the left-pane ML overlay (restored from the
+            # canonical classified.bin) appears without the per-run cards.
+            if fire.serial_results:
+                entry['serial_results'] = [
+                    {k: v for k, v in r.items()}
+                    for r in fire.serial_results
+                ]
+            if fire.serial_settings:
+                entry['serial_settings'] = [
+                    {'label': str(s.get('label', '')),
+                     'params': dict(s.get('params', {}))}
+                    for s in fire.serial_settings
+                ]
             data[fn] = entry
 
         state_path = os.path.join(state.output_root, 'fire_state.yaml')
@@ -493,6 +521,88 @@ def _load_fire_state():
             fire.agreement_pct = entry.get('agreement_pct', -1.0)
             fire.previously_accepted = entry.get(
                 'previously_accepted', False)
+
+            # Restore serial gallery. Each entry's classified.bin must
+            # still be on disk — drop entries whose files were deleted
+            # out of band (manual cleanup, external wipe). The 'previous
+            # accepted snapshot' run (is_previous=True) is restored
+            # unconditionally; its backing files live in accepted output,
+            # not the .web_cache directory.
+            saved_serial = entry.get('serial_results')
+            if isinstance(saved_serial, list) and saved_serial:
+                clean_serial = []
+                for r in saved_serial:
+                    if not isinstance(r, dict):
+                        continue
+                    clf = r.get('classified', '')
+                    if r.get('is_previous'):
+                        clean_serial.append(dict(r))
+                        continue
+                    if clf and os.path.isfile(clf):
+                        clean_serial.append(dict(r))
+                if clean_serial:
+                    fire.serial_results = clean_serial
+
+            saved_settings = entry.get('serial_settings')
+            if isinstance(saved_settings, list) and saved_settings:
+                clean_settings = []
+                for s in saved_settings:
+                    if not isinstance(s, dict):
+                        continue
+                    clean_settings.append({
+                        'label': str(s.get('label', '') or ''),
+                        'params': dict(s.get('params', {}) or {}),
+                    })
+                if clean_settings:
+                    fire.serial_settings = clean_settings
+
+            # Fallback: if fire_state.yaml predates the serial_results
+            # persistence change, reconstruct a partial gallery by
+            # scanning the cache dir for per-run classified.bin files.
+            # Setting labels and params are lost (they lived only in
+            # memory), but run_id, file paths, agreement_pct, and
+            # ml_area_ha can be recovered. Accept/Rebrush still work.
+            if not fire.serial_results:
+                try:
+                    import re as _re
+                    pat = _re.compile(
+                        r'^' + _re.escape(fn)
+                        + r'_serial_(\d+)_classified\.bin$')
+                    scanned = []
+                    for name in os.listdir(cache_dir):
+                        m = pat.match(name)
+                        if not m:
+                            continue
+                        rid = int(m.group(1))
+                        clf = os.path.join(cache_dir, name)
+                        comp = os.path.join(
+                            cache_dir, f'{fn}_serial_{rid}.png')
+                        entry_ = {
+                            'run_id': rid,
+                            'setting_idx': 0,
+                            'run_idx': 0,
+                            'setting_label': '',
+                            'params': {},
+                            'classified': clf,
+                            'comparison': comp if os.path.isfile(comp)
+                                          else '',
+                            'agreement_pct': _compute_agreement(
+                                fire, clf_path=clf),
+                            'ml_area_ha': _compute_ml_area(fire, clf),
+                        }
+                        scanned.append(entry_)
+                    if scanned:
+                        scanned.sort(key=lambda r: r['run_id'])
+                        fire.serial_results = scanned
+                        sys.stderr.write(
+                            f'[load] Rebuilt {len(scanned)} serial '
+                            f'gallery entries for {fn} from cache scan '
+                            f'(no persisted serial_results).\n')
+                except Exception as exc:
+                    sys.stderr.write(
+                        f'[load] WARNING: serial gallery rebuild '
+                        f'failed for {fn}: {exc}\n')
+                    sys.stderr.flush()
 
             # Validate critical files exist before restoring status
             if saved_status in ('ready', 'mapped'):
@@ -679,15 +789,19 @@ def _generate_result_preview(fire: 'FireInfo'):
         _overlay_mask_on_post(fire, fire.hint_bin, 'hint', (0.0, 0.8, 0.2))
 
 
-def _compute_agreement(fire: 'FireInfo') -> float:
+def _compute_agreement(fire: 'FireInfo',
+                       clf_path: str | None = None) -> float:
     """Compute overlap % between ML classification and hint perimeter.
 
+    When *clf_path* is None, reads the main crop's classified.bin;
+    callers can pass a per-run classified.bin for serial-run agreement.
     Returns percentage (0-100) or -1 if computation fails.
     """
     try:
-        clf_path = os.path.join(
-            fire.cache_dir,
-            f'{fire.fire_numbe}_crop.bin_classified.bin')
+        if clf_path is None:
+            clf_path = os.path.join(
+                fire.cache_dir,
+                f'{fire.fire_numbe}_crop.bin_classified.bin')
         hint_path = fire.hint_bin
         if not clf_path or not hint_path:
             return -1.0
@@ -1198,6 +1312,10 @@ def _serial_map_worker(fire_numbe: str, settings: list[dict],
                         if src_clf is None:
                             for _cand in glob.glob(os.path.join(
                                     fire.cache_dir, '*classified*.bin')):
+                                # Skip the pre-brush backup siblings —
+                                # we want the canonical (brushed) copy.
+                                if _cand.endswith('_raw.bin'):
+                                    continue
                                 src_clf = _cand
                                 break
 
@@ -1215,6 +1333,24 @@ def _serial_map_worker(fire_numbe: str, settings: list[dict],
                                     src_hdr,
                                     os.path.splitext(serial_clf)[0]
                                     + '.hdr')
+                            # Also preserve the pre-brush backup so a
+                            # per-run rebrush can start from the raw.
+                            src_raw = (os.path.splitext(src_clf)[0]
+                                       + '_raw.bin')
+                            if os.path.isfile(src_raw):
+                                serial_raw = (
+                                    os.path.splitext(serial_clf)[0]
+                                    + '_raw.bin')
+                                shutil.copy2(src_raw, serial_raw)
+                                src_raw_hdr = (
+                                    os.path.splitext(src_raw)[0] + '.hdr')
+                                if not os.path.isfile(src_raw_hdr):
+                                    src_raw_hdr = src_raw + '.hdr'
+                                if os.path.isfile(src_raw_hdr):
+                                    shutil.copy2(
+                                        src_raw_hdr,
+                                        os.path.splitext(serial_raw)[0]
+                                        + '.hdr')
 
                         clf_for_run = serial_clf if os.path.isfile(
                             serial_clf) else src_clf
@@ -1303,6 +1439,8 @@ def _serial_map_worker(fire_numbe: str, settings: list[dict],
             for pat in (
                 f'{fire_numbe}_serial_{rid}_classified.bin',
                 f'{fire_numbe}_serial_{rid}_classified.hdr',
+                f'{fire_numbe}_serial_{rid}_classified_raw.bin',
+                f'{fire_numbe}_serial_{rid}_classified_raw.hdr',
                 f'{fire_numbe}_serial_{rid}.png',
                 f'{fire_numbe}_serial_{rid}_brush.png',
             ):
@@ -1319,6 +1457,16 @@ def _serial_map_worker(fire_numbe: str, settings: list[dict],
                     os.remove(overlay)
                 except OSError:
                     pass
+        # Free per-setting T-SNE+RF caches. Used only to accelerate
+        # intra-sweep replicates; with the sweep cancelled or accepted,
+        # they are the single largest free win (30-100 MB each).
+        for npz in glob.glob(os.path.join(
+                fire.cache_dir,
+                f'{fire_numbe}_serial_state_s*.npz')):
+            try:
+                os.remove(npz)
+            except OSError:
+                pass
         with state.lock:
             # Worker may have raced past a cancel check and written
             # MAPPING over the cancel source's chosen status. Restore
@@ -1699,9 +1847,14 @@ def _accept_fire_sync(fire_numbe: str) -> str:
         shutil.rmtree(fire_dir)
     os.makedirs(fire_dir)
 
+    # Only canonical/final artifacts belong in the output dir. Per-run
+    # serial artifacts ({fire}_serial_{rid}*) live in .web_cache and
+    # must not leak into the final result.
     for pattern in ('*.bin', '*.hdr', '*.png', '*.shp', '*.dbf',
                      '*.shx', '*.prj', '*.cpg'):
         for f in glob.glob(os.path.join(cache_dir, pattern)):
+            if '_serial_' in os.path.basename(f):
+                continue
             shutil.copy2(f, fire_dir)
 
     # Compute ML area from the accepted dir
@@ -1894,6 +2047,8 @@ def _build_mapping_cmd(fire: FireInfo, params: dict,
         'tsne_n_components': '--tsne_n_components',
         'tsne_random_state': '--tsne_random_state',
         'contour_width': '--contour_width',
+        'brush_size': '--brush_size',
+        'point_threshold': '--point_threshold',
     }
 
     for key, flag in flag_map.items():
@@ -1905,6 +2060,12 @@ def _build_mapping_cmd(fire: FireInfo, params: dict,
                 val = int(val)
             cmd += [flag, str(val)]
 
+    # Boolean store_true flag — append only when truthy
+    bas = params.get('brush_all_segments')
+    if bas is not None and str(bas).strip() != '':
+        if _validate_param('brush_all_segments', bas):
+            cmd.append('--brush_all_segments')
+
     eb = params.get('embed_bands')
     if eb and str(eb).strip():
         eb = _validate_embed_bands(eb)
@@ -1912,6 +2073,202 @@ def _build_mapping_cmd(fire: FireInfo, params: dict,
             cmd += ['--embed_bands', eb]
 
     return cmd
+
+
+# =========================================================================
+# class_brush rebrush helpers — reruns post-processing only, no t-SNE/RF.
+# =========================================================================
+
+def _class_brush_exe() -> str:
+    """Locate the compiled class_brush.exe relative to project_root."""
+    # state.project_root is wps-research/data/bill; class_brush.exe lives at
+    # wps-research/cpp/class_brush.exe
+    root = state.project_root
+    repo_root = os.path.dirname(os.path.dirname(root))
+    return os.path.join(repo_root, 'cpp', 'class_brush.exe')
+
+
+def _read_envi_mask(path: str) -> np.ndarray:
+    """Read an ENVI .bin classification as a boolean mask (first band)."""
+    ds = gdal.Open(path, gdal.GA_ReadOnly)
+    if ds is None:
+        raise RuntimeError(f'Cannot open {path}')
+    arr = ds.GetRasterBand(1).ReadAsArray()
+    ds = None
+    return (arr > 0) & np.isfinite(arr)
+
+
+def _write_envi_mask_like(mask: np.ndarray, out_path: str,
+                           ref_path: str) -> None:
+    """Write a boolean mask as float32 ENVI .bin, copying the reference
+    file's .hdr geometry so downstream GDAL readers see identical
+    dimensions/projection."""
+    mask.astype(np.float32).tofile(out_path)
+    # Copy the sibling .hdr from ref_path (handles both foo.hdr and
+    # foo.bin.hdr naming conventions).
+    ref_hdr = os.path.splitext(ref_path)[0] + '.hdr'
+    if not os.path.isfile(ref_hdr):
+        ref_hdr = ref_path + '.hdr'
+    if os.path.isfile(ref_hdr):
+        out_hdr = os.path.splitext(out_path)[0] + '.hdr'
+        shutil.copy2(ref_hdr, out_hdr)
+
+
+# Registry of running rebrush subprocesses, keyed by fire_numbe. The
+# cancel endpoint uses this to terminate a running class_brush.exe.
+_rebrush_procs: dict = {}
+_rebrush_procs_lock = threading.Lock()
+
+
+def _run_class_brush_only(clf_path: str, brush_size: int,
+                          point_threshold: int,
+                          all_segments: bool,
+                          fire_numbe: str | None = None
+                          ) -> tuple[np.ndarray | None, bool]:
+    """Shell to class_brush.exe on an existing classification.
+
+    Returns ``(brushed_mask, cancelled)``:
+      - brushed_mask: boolean mask, or None if exe unavailable / produced
+        nothing / was cancelled.
+      - cancelled:    True iff a cancel signal terminated the subprocess.
+
+    When ``fire_numbe`` is provided, the subprocess handle is registered
+    in ``_rebrush_procs[fire_numbe]`` so ``handle_api_rebrush_cancel``
+    can terminate it. Intermediate files are always cleaned up.
+    """
+    brush_exe = _class_brush_exe()
+    if not os.path.isfile(brush_exe):
+        return None, False
+
+    cmd = [brush_exe]
+    if all_segments:
+        cmd.append('--all_segments')
+    cmd += [clf_path, str(int(brush_size)), str(int(point_threshold))]
+
+    proc = subprocess.Popen(
+        cmd, cwd=os.path.dirname(clf_path),
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if fire_numbe is not None:
+        with _rebrush_procs_lock:
+            _rebrush_procs[fire_numbe] = proc
+    try:
+        # communicate() drains stdout+stderr concurrently on internal
+        # threads. Using proc.wait() here would deadlock once the OS
+        # pipe buffer fills up (class_brush.exe emits one line per
+        # component — easily >64KB for complex fires).
+        proc.communicate()
+        rc = proc.returncode
+    finally:
+        if fire_numbe is not None:
+            with _rebrush_procs_lock:
+                _rebrush_procs.pop(fire_numbe, None)
+
+    # rc < 0 on POSIX when terminated by signal (e.g. SIGTERM = -15).
+    cancelled = rc is not None and rc < 0
+
+    comp_files = sorted(glob.glob(clf_path + '_comp_*.bin'))
+    brushed = None
+    if comp_files:
+        if all_segments:
+            for cf in comp_files:
+                try:
+                    m = _read_envi_mask(cf)
+                    brushed = m if brushed is None else (brushed | m)
+                except Exception:
+                    continue
+        else:
+            largest_count = -1
+            for cf in comp_files:
+                try:
+                    m = _read_envi_mask(cf)
+                    c = int(m.sum())
+                    if c > largest_count:
+                        largest_count = c
+                        brushed = m
+                except Exception:
+                    continue
+
+    # Clean up component files + their headers
+    for cf in comp_files:
+        for p in (cf, os.path.splitext(cf)[0] + '.hdr'):
+            if os.path.exists(p):
+                try: os.remove(p)
+                except OSError: pass
+
+    # Clean up C++ stage intermediaries
+    for suffix in ('_flood4.bin', '_flood4.hdr',
+                   '_flood4.bin_link.bin', '_flood4.bin_link.hdr',
+                   '_flood4.bin_link.bin_recode.bin',
+                   '_flood4.bin_link.bin_recode.hdr',
+                   '_flood4.bin_link.bin_recode.bin_wheel.bin',
+                   '_flood4.bin_link.bin_recode.bin_wheel.hdr'):
+        p = clf_path + suffix
+        if os.path.exists(p):
+            try: os.remove(p)
+            except OSError: pass
+
+    # Discard any partial output if the subprocess was cancelled.
+    if cancelled:
+        return None, True
+    return brushed, False
+
+
+def _render_brush_comparison_png(raw: np.ndarray, brushed: np.ndarray | None,
+                                 bg_path: str, out_path: str,
+                                 title: str) -> None:
+    """Draw a two-panel (raw vs brushed) contour figure on bg_path."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    from matplotlib.image import imread
+    from scipy.ndimage import zoom as scipy_zoom
+
+    bg = imread(bg_path)
+    bh, bw = bg.shape[:2]
+
+    def _resize(mask):
+        mh, mw = mask.shape
+        if (mh, mw) == (bh, bw):
+            return mask.astype(bool)
+        zy = bh / mh
+        zx = bw / mw
+        return scipy_zoom(mask.astype(np.uint8),
+                          (zy, zx), order=0).astype(bool)
+
+    def _contour_rgba(mask_bg):
+        from scipy.ndimage import binary_dilation
+        mask_bg = mask_bg.astype(bool)
+        dil = binary_dilation(mask_bg)
+        boundary = dil & (~mask_bg)
+        rgba = np.zeros((bh, bw, 4), dtype=np.float32)
+        rgba[..., 0] = 1.0  # red
+        rgba[..., 3] = boundary.astype(np.float32)
+        return rgba
+
+    raw_bg = _resize(raw)
+    after_mask = _resize(brushed) if brushed is not None else raw_bg
+    after_title = ('After class_brush\n(brushed)'
+                   if brushed is not None
+                   else 'After class_brush\n(no output)')
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 7))
+    fig.suptitle(title, fontsize=10, fontweight='bold')
+    for ax, m, t in [
+        (axes[0], raw_bg,     'Before class_brush\n(raw classification)'),
+        (axes[1], after_mask, after_title),
+    ]:
+        ax.imshow(bg, interpolation='nearest', origin='upper')
+        ax.imshow(_contour_rgba(m), interpolation='nearest', origin='upper')
+        ax.set_title(t, fontsize=9)
+        ax.set_xlim(0, bw)
+        ax.set_ylim(bh, 0)
+        ax.set_xlabel('Column (px)', fontsize=8)
+        ax.set_ylabel('Row (px)', fontsize=8)
+        ax.tick_params(labelsize=7)
+
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
 
 
 # =========================================================================
@@ -1999,6 +2356,12 @@ class FireHandler(BaseHTTPRequestHandler):
             r'^/api/fire/(?P<fire_numbe>[^/]+)/unhide$'),
          'handle_api_unhide'),
         (re.compile(r'^/api/batch/cancel$'), 'handle_api_batch_cancel'),
+        (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/rebrush$'),
+         'handle_api_rebrush'),
+        (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/rebrush/cancel$'),
+         'handle_api_rebrush_cancel'),
     ]
 
     # Paths that bypass IP checks (pending page needs CSS/logo + status poll)
@@ -2845,6 +3208,203 @@ class FireHandler(BaseHTTPRequestHandler):
             return
         self._send_file(path, 'image/png')
 
+    def handle_api_rebrush(self, fire_numbe):
+        """Re-run class_brush on an existing classification; no re-map.
+
+        POST body:
+          brush_size (int)         — required
+          point_threshold (int)    — required
+          brush_all_segments (bool)— optional, default false
+          run_id (int|null)        — optional; when set, rebrushes the
+                                     serial run's classified.bin and
+                                     updates its per-run brush PNG copy.
+        """
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        if fire.status == FireStatus.MAPPING:
+            self._send_json(
+                {'error': 'Mapping in progress; rebrush disabled'}, 409)
+            return
+        body = self._read_body()
+        if body is None:
+            return
+
+        try:
+            bs  = _validate_param('brush_size',
+                                  body.get('brush_size', 15))
+            pt  = _validate_param('point_threshold',
+                                  body.get('point_threshold', 10))
+            bas = _validate_param('brush_all_segments',
+                                  body.get('brush_all_segments', False))
+        except ValueError as exc:
+            self._send_json({'error': str(exc)}, 400)
+            return
+
+        run_id = body.get('run_id')
+        clf_path = None         # canonical (overwritten with brushed)
+        extra_brush_png = None
+        if run_id not in (None, ''):
+            serial_clf = os.path.join(
+                fire.cache_dir,
+                f'{fire_numbe}_serial_{run_id}_classified.bin')
+            if os.path.isfile(serial_clf):
+                clf_path = serial_clf
+                extra_brush_png = os.path.join(
+                    fire.cache_dir,
+                    f'{fire_numbe}_serial_{run_id}_brush.png')
+        if clf_path is None:
+            for pat in (f'{fire_numbe}_crop.bin_classified.bin',
+                        f'{fire_numbe}_crop_classified.bin',
+                        f'{fire_numbe}_classified.bin'):
+                cand = os.path.join(fire.cache_dir, pat)
+                if os.path.isfile(cand):
+                    clf_path = cand
+                    break
+        if clf_path is None:
+            self._send_json(
+                {'error': 'No classification found to rebrush'}, 404)
+            return
+
+        # Prefer the pre-brush sibling as brush input so we're not
+        # re-brushing an already-brushed mask. Fall back to the canonical
+        # file if no _raw backup exists (older runs predating the fix).
+        raw_sibling = os.path.splitext(clf_path)[0] + '_raw.bin'
+        source_path = raw_sibling if os.path.isfile(raw_sibling) else clf_path
+
+        post_png = os.path.join(fire.cache_dir, 'previews', 'post.png')
+        if not os.path.isfile(post_png):
+            self._send_json(
+                {'error': 'Post-fire preview missing; prepare the fire first'},
+                404)
+            return
+
+        # Reject overlapping rebrushes for the same fire — the process
+        # registry is single-slot per fire_numbe.
+        with _rebrush_procs_lock:
+            if fire_numbe in _rebrush_procs:
+                self._send_json(
+                    {'error': 'A rebrush is already running for this fire'},
+                    409)
+                return
+
+        try:
+            raw = _read_envi_mask(source_path)
+            brushed, cancelled = _run_class_brush_only(
+                source_path, int(bs), int(pt), bool(bas),
+                fire_numbe=fire_numbe)
+
+            if cancelled:
+                self._send_json({
+                    'status': 'cancelled',
+                    'run_id': run_id,
+                }, 200)
+                return
+
+            # Promote brushed result to the canonical classified.bin so
+            # the ML-classification overlay, agreement%, and ML-area
+            # metric reflect the new post-brush polygon. Preserve the
+            # pre-brush raster as _raw.bin for subsequent rebrushes.
+            # ORDER MATTERS: back up the pre-brush source BEFORE we
+            # overwrite clf_path, otherwise the "raw backup" would
+            # actually end up holding the brushed mask.
+            if brushed is not None:
+                raw_backup = os.path.splitext(clf_path)[0] + '_raw.bin'
+                if source_path != raw_backup:
+                    try:
+                        shutil.copy2(source_path, raw_backup)
+                        hdr_src = os.path.splitext(source_path)[0] + '.hdr'
+                        if not os.path.isfile(hdr_src):
+                            hdr_src = source_path + '.hdr'
+                        if os.path.isfile(hdr_src):
+                            shutil.copy2(
+                                hdr_src,
+                                os.path.splitext(raw_backup)[0] + '.hdr')
+                    except OSError:
+                        pass
+                _write_envi_mask_like(brushed, clf_path, source_path)
+
+            out_png = os.path.join(
+                fire.cache_dir, f'{fire_numbe}_brush_comparison.png')
+            start = getattr(fire, 'acc_start', '') or ''
+            end   = getattr(fire, 'acc_end', '') or ''
+            title = (f'Fire: {fire_numbe}  —  class_brush comparison '
+                     f'(size={bs}, threshold={pt}, '
+                     f'all_segments={bool(bas)})')
+            if start or end:
+                title += f'\nStart: {start}   |   End: {end}'
+            _render_brush_comparison_png(raw, brushed, post_png,
+                                         out_png, title)
+            if extra_brush_png:
+                try:
+                    shutil.copy2(out_png, extra_brush_png)
+                except OSError:
+                    pass
+
+            # Refresh the ML-classification overlay the UI actually
+            # reads for this context. Serial runs read
+            # previews/serial_{rid}.png; the main classification reads
+            # previews/result.png. Also recompute the summary metrics
+            # so the gallery/header reflect the new post-brush polygon.
+            if brushed is not None:
+                is_serial = run_id not in (None, '')
+                overlay_name = (f'serial_{run_id}'
+                                if is_serial else 'result')
+                try:
+                    _overlay_mask_on_post(
+                        fire, clf_path, overlay_name, (0.9, 0.1, 0.0))
+                    if not is_serial:
+                        fire.agreement_pct = _compute_agreement(fire)
+                        fire.ml_area_ha = _compute_ml_area(fire, clf_path)
+                    else:
+                        new_area = _compute_ml_area(fire, clf_path)
+                        new_agr = _compute_agreement(
+                            fire, clf_path=clf_path)
+                        try:
+                            rid_match = int(run_id)
+                        except (TypeError, ValueError):
+                            rid_match = run_id
+                        with state.lock:
+                            for sr in fire.serial_results:
+                                if sr.get('run_id') == rid_match:
+                                    sr['ml_area_ha'] = new_area
+                                    sr['agreement_pct'] = new_agr
+                                    break
+                    _save_fire_state()
+                except Exception:
+                    pass
+        except Exception as exc:
+            self._send_json({'error': f'Rebrush failed: {exc}'}, 500)
+            return
+
+        brushed_px = int(brushed.sum()) if brushed is not None else 0
+        raw_px     = int(raw.sum())
+        self._send_json({
+            'status': 'ok',
+            'brush_size': int(bs),
+            'point_threshold': int(pt),
+            'brush_all_segments': bool(bas),
+            'run_id': run_id,
+            'raw_px': raw_px,
+            'brushed_px': brushed_px,
+        })
+
+    def handle_api_rebrush_cancel(self, fire_numbe):
+        """Terminate a running class_brush.exe for this fire, if any."""
+        fire_numbe = unquote(fire_numbe)
+        with _rebrush_procs_lock:
+            proc = _rebrush_procs.get(fire_numbe)
+        if proc is None:
+            self._send_json({'status': 'idle'}, 200)
+            return
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+        self._send_json({'status': 'cancelling'}, 200)
+
     def handle_api_accept(self, fire_numbe):
         fire_numbe = unquote(fire_numbe)
         if fire_numbe not in state.fires:
@@ -2924,6 +3484,12 @@ class FireHandler(BaseHTTPRequestHandler):
                 'is_previous': r.get('is_previous', False),
             })
 
+        # Is class_brush.exe currently running for this fire? The
+        # frontend uses this to re-adopt a rebrush that started before
+        # a page refresh (or from a different browser tab).
+        with _rebrush_procs_lock:
+            rebrush_running = fire_numbe in _rebrush_procs
+
         self._send_json({
             'status': f.status.value,
             'previously_accepted': f.previously_accepted,
@@ -2937,6 +3503,7 @@ class FireHandler(BaseHTTPRequestHandler):
             'k_runs_per_setting': int(state.k_runs_per_setting),
             'has_comparison': has_comparison,
             'has_brush_comparison': has_brush,
+            'rebrush_running': rebrush_running,
         })
 
     # -- Serial mapping & parameter ranking API --
@@ -3206,6 +3773,15 @@ class FireHandler(BaseHTTPRequestHandler):
                 shutil.copy2(
                     ser_hdr,
                     os.path.splitext(main_clf)[0] + '.hdr')
+            # Regenerate the "ML classification" overlay from the
+            # accepted run's (possibly rebrushed) mask. The worker
+            # overwrites previews/result.png on every completed run,
+            # so without this it points at whichever run finished last.
+            try:
+                _overlay_mask_on_post(
+                    fire, main_clf, 'result', (0.9, 0.1, 0.0))
+            except Exception:
+                pass
         if serial_comp and os.path.isfile(serial_comp):
             main_comp = os.path.join(
                 fire.cache_dir, f'{fire_numbe}_comparison.png')
@@ -3232,6 +3808,8 @@ class FireHandler(BaseHTTPRequestHandler):
                 for pat in (
                     f'{fire_numbe}_serial_{rid}_classified.bin',
                     f'{fire_numbe}_serial_{rid}_classified.hdr',
+                    f'{fire_numbe}_serial_{rid}_classified_raw.bin',
+                    f'{fire_numbe}_serial_{rid}_classified_raw.hdr',
                     f'{fire_numbe}_serial_{rid}.png',
                     f'{fire_numbe}_serial_{rid}_brush.png',
                 ):
@@ -3248,6 +3826,17 @@ class FireHandler(BaseHTTPRequestHandler):
                         os.remove(overlay)
                     except OSError:
                         pass
+            # Free per-setting T-SNE+RF caches (single heaviest artifact
+            # in .web_cache — 30-100 MB each, typically 3 per sweep).
+            # They exist to let replicates skip the full pipeline within
+            # a sweep; once accepted, they're dead weight.
+            for npz in glob.glob(os.path.join(
+                    fire.cache_dir,
+                    f'{fire_numbe}_serial_state_s*.npz')):
+                try:
+                    os.remove(npz)
+                except OSError:
+                    pass
             fire.serial_results = []
 
         self._send_json({'status': 'accepted'})

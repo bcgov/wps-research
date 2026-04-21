@@ -1,6 +1,6 @@
 # batch_fire_mapping_web
 
-*Last updated: April 20, 2026*
+*Last updated: April 21, 2026*
 
 Interactive web interface for mapping wildfire burn areas from Sentinel-2 satellite imagery. Uses a machine learning pipeline (T-SNE dimensionality reduction, Random Forest classification, HDBSCAN clustering) accelerated on GPU to classify burned vs. unburned pixels, then lets users visually review and accept results through a browser.
 
@@ -150,7 +150,7 @@ Opening a fire takes you to the mapping page. On load, the server automatically:
 - **Split view**: side-by-side comparison. Post-fire on the left, ML classification on the right (opens automatically when results are available).
 - **Synced zoom/pan**: both panes move together by default. Zoom preserves your position when toggling split or collapsing the control panel -- you won't lose your place on large fires.
 - **Pixel-perfect rendering**: `image-rendering: pixelated` at all zoom levels.
-- **View dropdown**: switch between post-fire, pre-fire, difference, ML classification, hint perimeter, comparison figure, brush comparison.
+- **View dropdown**: switch between post-fire, pre-fire, difference, ML classification, hint perimeter, comparison figure, **brush comparison** (side-by-side PNG showing raw HDBSCAN output vs. brushed output — regenerated on every rebrush, making it the quickest way to see whether a brush-parameter change actually did what you wanted).
 - **Geospatial overlay alignment**: when re-cropping with different padding, previously accepted ML classification overlays are placed at the correct geographic position within the new crop using GDAL geotransforms, rather than being stretched to fit.
 
 #### Parameters (right side)
@@ -161,28 +161,48 @@ Collapsible sections for every pipeline parameter:
 - **T-SNE**: perplexity, learning rate, max iterations, init method, components, random state, embed bands.
 - **Random Forest**: estimators, max depth, max features, random state.
 - **HDBSCAN**: controlled ratio, min samples.
-- **Display**: contour width.
+- **Display / brush**: `contour_width`, plus the brush post-processing knobs that control how `class_brush.exe` cleans the raw HDBSCAN mask:
+  - `brush_size` (int, default 15) — radius, in pixels, of the morphological brush used to close gaps and smooth edges. Larger values produce fatter, more forgiving perimeters; smaller values hug the raw classification more tightly.
+  - `point_threshold` (int, default 10) — minimum connected-component size, in pixels. Components smaller than this are dropped as speckle.
+  - `brush_all_segments` (bool, default false) — when true, the brush is applied to every connected component independently; when false, the brush operates on the dominant component only. Useful for fires with multiple disjoint burn patches.
+  These three parameters are also consumed by the standalone **Rebrush** button (see *Rebrushing without re-mapping* below), which re-runs only the brush stage against the cached pre-brush raster.
 - **Notes**: free-text annotations per fire (e.g., "cloud contamination"). Persisted immediately on change with visual save confirmation (green border flash).
 
 #### Mapping
 
-- **Map Fire**: runs the pipeline with the parameters currently in the form. If the padding value has changed since the last crop, the fire is automatically re-cropped first and all preview images update immediately before mapping begins.
-- **Map Fire / with settings**: applies the recommended settings for the fire's size range, re-crops if padding changed, then maps.
+- **Map Fire**: runs the pipeline using exactly the parameters currently in the right-hand panel. The panel is snapshotted into a single custom setting (labelled `Current panel` in the gallery) and sent to the serial worker, so whatever you see in the form is what runs — including any bespoke `embed_bands` string, custom `padding`, or tuned HDBSCAN values. If the padding value has changed since the last crop, the fire is automatically re-cropped first and all preview images update immediately before mapping begins. This is the default "single custom run" button; use it when you want full control over one parameter set.
+  > Historical note: earlier versions of the UI silently fell back to the first entry of `recommended_settings.yaml` when you clicked Map Fire, which meant panel edits (like switching `embed_bands` to `4,…,12`) were ignored and the run was mislabelled. That bug was fixed on 2026-04-21 — the panel is now authoritative for this button.
+- **Map Fire / with settings**: ignores the form and runs **every** entry in the recommended settings list × `k_runs_per_setting` HDBSCAN replicates (with `k_jitter` applied to `hdbscan_min_samples`). Use this for a broader sweep when you don't yet know which parameter family works for this fire. Padding is honored per-setting, and grouped cache reuse means parameter sets sharing a `(padding, tsne_rf_signature)` key only run the expensive stages once — see *Serial mapping* below for details.
 - **Re-crop**: manually re-crops the fire with the current padding value and updates all preview images, without running the ML pipeline.
-- **Runs (N)**: set N > 1 to run multiple mappings with varied HDBSCAN parameters. All runs appear as cards in a results gallery, ranked by agreement score.
+- **Runs (N)**: legacy control retained for compatibility; the recommended-settings sweep uses `k_runs_per_setting` from the YAML instead. Set N > 1 to run multiple mappings with varied HDBSCAN parameters. All runs appear as cards in a results gallery, ranked by agreement score.
 - **Console**: streams pipeline output in real time. Persists across page navigation.
+
+#### Rebrushing without re-mapping
+
+The brush stage (morphological smoothing + speckle removal) is the cheapest part of the pipeline and also the one users most often want to tweak after seeing the classification. **Rebrush only** re-runs this stage against the pre-brush raster without touching T-SNE or Random Forest, so iterating on `brush_size` / `point_threshold` / `brush_all_segments` costs seconds instead of minutes.
+
+- **Rebrush only** button (next to Map Fire): takes the three brush parameters from the panel and re-runs `class_brush.exe` against the fire's cached classification. The ML classification overlay, agreement %, ML area, and brush-comparison figure all refresh in place. No T-SNE or Random Forest cost is incurred.
+- **Per-run rebrush**: each card in the results gallery has its own Rebrush button. Clicking it rebrushes that specific serial run's `classified.bin`, regenerates its thumbnail and brush-comparison PNG, and updates the card's agreement % / ML area stats in the gallery (and in `fire.serial_results` on the server). The main classification on the left pane is **not** affected by a per-run rebrush — only the card. Use this when you want to compare different brush settings across serial results side-by-side.
+- **Cancel** button: appears next to the Rebrush button while a rebrush is running. Posts to `/api/fire/<FIRE_NUMBER>/rebrush/cancel`, which SIGTERMs the running `class_brush.exe`. A cancelled rebrush returns `status: cancelled` and leaves the canonical classification untouched.
+- **`_raw.bin` backup**: the first time a classification is rebrushed, the server copies the pre-brush raster to `<classified>_raw.bin` (plus a matching `.hdr`) alongside the classified file. Every subsequent rebrush reads from `_raw.bin` as its input, so repeated rebrushes are always applied to the original raw HDBSCAN output, not to an already-smoothed mask. This means `brush_size = 3` followed by `brush_size = 30` does not compound; each run starts clean. Older fires without a `_raw.bin` sibling fall back to using the current `classified.bin` as input (documented in `handle_api_rebrush`) — this is a one-time edge case; the first rebrush creates the backup for future runs.
+- **Concurrency**: only one rebrush per fire at a time. Overlapping requests return HTTP 409 with `{"error": "A rebrush is already running for this fire"}`. Rebrushing is also disabled while the fire is in `MAPPING` status (409 with `Mapping in progress; rebrush disabled`).
+- **State recovery**: the `/api/fire/<FIRE>/console` endpoint returns a `rebrush_running` boolean so the UI can *adopt* a rebrush that started before a page reload. If you kick off a rebrush and then refresh the page, the UI polls `/console`, sees `rebrush_running: true`, and restores the "Brushing…" button state + Cancel button without the user having to know it was in flight. Once the rebrush ends, the polled state flips to false and the UI releases the adopt lock.
+- **Backend**: `_run_class_brush_only` (in `app.py`) launches `class_brush.exe` via `subprocess.Popen` with `stdout=PIPE`, then uses `proc.communicate()` (not `proc.wait()`) to drain the pipe concurrently on an internal thread. `class_brush.exe` emits one status line per connected component — on complex fires the pipe buffer easily overflows 64 KB, which would deadlock a naive `wait()`. The running subprocess is registered in `_rebrush_procs[fire_numbe]` so the cancel endpoint can SIGTERM it; the registry is single-slot per fire and cleared in a `finally` to guarantee release even on exceptions.
 
 #### Results gallery
 
 Every mapping (even a single run) produces a result card showing:
 
-- Thumbnail of the ML classification overlay.
+- Thumbnail of the ML classification overlay (cache-busted with a `?t=<timestamp>` query param, so rebrushed cards update visually without a hard reload).
 - Agreement score (IoU between ML result and hint perimeter).
 - ML fire area estimate in hectares.
 - Expandable parameter details.
 - **Accept** button to save that result.
+- **Rebrush** button — re-runs the brush stage on just this serial run using the current panel brush parameters. Per-card stats update in place when the rebrush finishes. See *Rebrushing without re-mapping* above.
 
 When re-mapping a previously accepted fire, the old result appears as a "Previously accepted" card (gold border) so you can compare old vs. new before deciding.
+
+Cards are re-rendered whenever their backing stats change. Each card writes a `statSig` (agreement %, ML area, error flag, is-best flag) into `card.dataset.statSig`; on every poll, `showSerialGallery` compares the new signature against the stored one and only rebuilds the DOM node when something actually changed. This means rebrushes that bump `ml_area_ha` or `agreement_pct` propagate to the gallery even when the card count is unchanged — a regression fixed on 2026-04-21 where a length-only short-circuit had been suppressing stat updates after rebrush.
 
 #### Accepting
 
@@ -450,8 +470,16 @@ Admins edit the global list in the Recommended Settings panel on the fire list p
             *_crop.bin / .hdr     # Cropped raster
             *_perimeter.bin       # Rasterized perimeter
             VIIRS_*.bin           # Rasterized VIIRS hint
-            *_classified.bin      # Classification output
+            *_classified.bin      # Classification output (post-brush)
+            *_classified_raw.bin  # Pre-brush HDBSCAN mask + .hdr
+                                  #   Created on first rebrush; every
+                                  #   subsequent rebrush reads from here
+                                  #   so brushes never compound.
             *_comparison.png      # Comparison figure
+            *_brush_comparison.png # Raw vs brushed side-by-side
+            *_serial_<ID>_classified.bin       # Per serial run
+            *_serial_<ID>_classified_raw.bin   # Per-run raw backup
+            *_serial_<ID>_brush.png            # Per-run brush preview
             previews/             # Preview PNGs for web display
     <FIRE_NUMBER>/                # Accepted results (one directory per fire)
         *_crop.bin / .hdr
@@ -575,6 +603,67 @@ The `.analyzer_cache/` directory is never wiped automatically — un-accepted an
 - **Login rate limiting is in-memory**: the 5-attempt rate limit resets on restart. The table is size-bounded (see Security hardening) but not persisted. All other security state persists.
 - **Analyzer disk usage grows with grid size**: every completed run stores a classification `.bin`, comparison PNG, and thumbnail (typically ~5-50 MB per run). A grid of 2500 runs can consume many GB. Delete the `.analyzer_cache/<FIRE>/` tree for a fire once you have accepted everything you want; the accepted results live in `analyzing_parameters/<FIRE>/run_XXXX/` and are unaffected.
 - **Analyzer concurrency**: only one analyzer session runs at a time (enforced server-side). Only admins can start one.
+
+---
+
+## HTTP API reference (selected endpoints)
+
+The server is a plain `http.server` dispatcher; routes are registered on `FireHandler` via regex tables in `app.py`. The endpoints most relevant to the mapping / rebrush workflow are documented below. All POST endpoints require an `X-Requested-With: XMLHttpRequest` header (CSRF guard) and a valid session cookie unless `--insecure_no_auth` is on.
+
+### Mapping / state
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET`  | `/api/fire/<FIRE>/console`  | Returns the fire's console log tail, current status, serial-results array, and a `rebrush_running` boolean. The frontend polls this to keep the UI in sync after a page reload — a `true` `rebrush_running` triggers the rebrush-adopt UI path. |
+| `POST` | `/api/fire/<FIRE>/map`      | Kicks off a serial mapping job. Body: `{mode: 'primary' \| 'settings', settings: [{label, params}, …]}`. Map Fire sends the panel as a single-element `settings` array; Map Fire with settings omits `settings` and the server fans out the recommended YAML. |
+| `POST` | `/api/fire/<FIRE>/accept`   | Accepts a specific serial run into the canonical `<out_dir>/<FIRE>/` directory. |
+
+### Rebrush (new, as of 2026-04-20)
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/fire/<FIRE>/rebrush`         | Re-run `class_brush.exe` on an existing classification. See body schema below. |
+| `POST` | `/api/fire/<FIRE>/rebrush/cancel`  | SIGTERM the currently-running rebrush for this fire. 200 even if nothing is running. |
+
+**`/rebrush` request body:**
+
+```json
+{
+  "brush_size":         15,
+  "point_threshold":    10,
+  "brush_all_segments": false,
+  "run_id":             null
+}
+```
+
+- `brush_size` (int, 1..10000) — morphological brush radius in pixels. Required.
+- `point_threshold` (int, 1..10_000_000) — min connected-component size, in pixels. Required.
+- `brush_all_segments` (bool) — apply brush per-segment when true; dominant-segment only when false. Default false.
+- `run_id` (int or null) — when set, rebrushes that serial run's `classified.bin` only and regenerates its per-run `*_serial_<ID>_brush.png`. When null, rebrushes the main canonical `classified.bin` used by the left-pane ML overlay.
+
+**`/rebrush` response (2xx):**
+
+```json
+{
+  "status":             "ok"  | "cancelled",
+  "run_id":             null | <int>,
+  "ml_area_ha":         <float or null>,
+  "agreement_pct":      <float or null>,
+  "brush_size":         <int>,
+  "point_threshold":    <int>,
+  "brush_all_segments": <bool>
+}
+```
+
+**`/rebrush` error responses:**
+
+| Status | Condition |
+|---|---|
+| 400 | Parameter failed `_validate_param` (out of bounds, wrong type). |
+| 404 | `Fire not found`, `No classification found to rebrush`, or `Post-fire preview missing; prepare the fire first`. |
+| 409 | Fire is currently `MAPPING`, or another rebrush is already running for this fire (single-slot per `fire_numbe` in `_rebrush_procs`). |
+
+On success, for a whole-fire rebrush, the server updates `fire.ml_area_ha`, `fire.agreement_pct`, regenerates `*_comparison.png` and `*_brush_comparison.png`, and persists fire state. For a per-run rebrush, the server updates the matching entry in `fire.serial_results` so the gallery card stats reflect the new values on the next poll.
 
 ---
 
