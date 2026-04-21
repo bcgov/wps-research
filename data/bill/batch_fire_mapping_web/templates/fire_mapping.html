@@ -189,6 +189,42 @@
                 </div>
             </div>
 
+            <!-- class_brush post-processing -->
+            <div class="param-section">
+                <h3 onclick="this.parentElement.classList.toggle('open')">Brush</h3>
+                <div class="params-body">
+                    <div class="param-row">
+                        <label>Brush size:</label>
+                        <input type="number" id="p-brush_size" value="15" min="1" max="999"
+                               title="Sliding-window width in pixels. Larger → merges more distant components.">
+                    </div>
+                    <div class="param-row">
+                        <label>Point threshold:</label>
+                        <input type="number" id="p-point_threshold" value="10" min="1"
+                               title="Minimum component pixel count. Components below are dropped.">
+                    </div>
+                    <div class="param-row">
+                        <label>All segments:</label>
+                        <input type="checkbox" id="p-brush_all_segments"
+                               title="Keep every component above threshold (OR'd together). Default: largest only.">
+                    </div>
+                    <div class="param-row" style="justify-content:flex-end;gap:6px">
+                        <button type="button" id="btn-rebrush"
+                                onclick="runRebrush()"
+                                style="font-size:11px;padding:3px 8px"
+                                title="Re-run class_brush on the active run's classification (no re-mapping).">
+                            Rebrush only
+                        </button>
+                        <button type="button" id="btn-rebrush-cancel"
+                                onclick="cancelRebrush()"
+                                style="font-size:11px;padding:3px 8px;display:none"
+                                title="Terminate the running class_brush.exe for this fire.">
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            </div>
+
             <!-- Notes -->
             <div class="param-section open">
                 <h3 onclick="this.parentElement.classList.toggle('open')">Notes</h3>
@@ -611,14 +647,11 @@ function loadPaneImage(pane, viewKey) {
     const runActive = selectedRun !== null && RUN_VIEWS.has(viewKey);
 
     if (runActive && viewKey === 'result') {
-        // Use the same URL as the gallery thumbnail so the main-pane load
-        // hits the browser cache (the thumbnail already fetched this PNG).
-        // Both endpoints serve the same `previews/serial_<rid>.png` file.
-        url = `/api/fire/${encodeURIComponent(FIRE)}/serial/${selectedRun}/image`;
+        url = `/api/fire/${encodeURIComponent(FIRE)}/serial/${selectedRun}/image?t=${Date.now()}`;
     } else if (runActive && viewKey === 'comparison') {
-        url = `/api/fire/${encodeURIComponent(FIRE)}/serial/${selectedRun}/image?type=comparison`;
+        url = `/api/fire/${encodeURIComponent(FIRE)}/serial/${selectedRun}/image?type=comparison&t=${Date.now()}`;
     } else if (runActive && viewKey === 'brush_comparison') {
-        url = `/api/fire/${encodeURIComponent(FIRE)}/serial/${selectedRun}/image?type=brush`;
+        url = `/api/fire/${encodeURIComponent(FIRE)}/serial/${selectedRun}/image?type=brush&t=${Date.now()}`;
     } else if (viewKey === 'comparison') {
         url = `/api/fire/${encodeURIComponent(FIRE)}/comparison?t=${Date.now()}`;
     } else if (viewKey === 'brush_comparison') {
@@ -708,6 +741,9 @@ function getParams() {
         controlled_ratio:     parseFloat(v('p-controlled_ratio')) || 0.5,
         hdbscan_min_samples:  parseInt(v('p-hdbscan_min_samples')) || 20,
         contour_width:        parseInt(v('p-contour_width')) || 1,
+        brush_size:           parseInt(v('p-brush_size')) || 15,
+        point_threshold:      parseInt(v('p-point_threshold')) || 10,
+        brush_all_segments:   !!document.getElementById('p-brush_all_segments')?.checked,
     };
 }
 
@@ -805,11 +841,141 @@ async function startSerialRun(body) {
 }
 
 // -----------------------------------------------------------------------
-// Start mapping — one-click: primary setting × K replicates.
+// Rebrush — re-run class_brush only, without re-mapping.
+// Reads the three brush fields and POSTs to /api/fire/:fire/rebrush.
+// If a serial run is selected, rebrushes that run; otherwise rebrushes
+// the main classification.
+//
+// rebrushInFlight: true whenever the UI shows the Rebrushing state.
+// rebrushAdopted:  true when that state is tracking a server-side
+//                  rebrush owned by a different tab or a prior page
+//                  load (we didn't POST it from here). Polling drives
+//                  the UI transition back to idle in that case; the
+//                  POST finally-block must not clobber it.
+// -----------------------------------------------------------------------
+let rebrushInFlight = false;
+let rebrushAdopted = false;
+
+function setRebrushButtons(running) {
+    const btn = document.getElementById('btn-rebrush');
+    const cancel = document.getElementById('btn-rebrush-cancel');
+    if (btn) {
+        btn.disabled = running;
+        btn.textContent = running ? 'Rebrushing ...' : 'Rebrush only';
+    }
+    if (cancel) {
+        cancel.style.display = running ? '' : 'none';
+        cancel.disabled = false;
+        cancel.textContent = 'Cancel';
+    }
+}
+
+async function cancelRebrush() {
+    if (!rebrushInFlight) return;
+    const cancel = document.getElementById('btn-rebrush-cancel');
+    if (cancel) { cancel.disabled = true; cancel.textContent = 'Cancelling ...'; }
+    try {
+        await fetch(
+            `/api/fire/${encodeURIComponent(FIRE)}/rebrush/cancel`,
+            { method: 'POST' });
+    } catch (err) {
+        log('Cancel request failed: ' + err.message, 'error');
+    }
+}
+
+async function runRebrush() {
+    if (isMapping) {
+        log('Cannot rebrush while mapping is running', 'error');
+        return;
+    }
+    if (rebrushInFlight) return;
+    const bs = parseInt(document.getElementById('p-brush_size').value) || 15;
+    const pt = parseInt(document.getElementById('p-point_threshold').value) || 10;
+    const bas = !!document.getElementById('p-brush_all_segments').checked;
+    const payload = {
+        brush_size: bs,
+        point_threshold: pt,
+        brush_all_segments: bas,
+    };
+    if (selectedRun !== null) payload.run_id = selectedRun;
+
+    rebrushInFlight = true;
+    rebrushAdopted = false;
+    setRebrushButtons(true);
+    log(`Rebrushing (size=${bs}, threshold=${pt}, `
+        + `all_segments=${bas}${selectedRun !== null ? ', run=' + selectedRun : ''}) ...`,
+        'dim');
+
+    try {
+        const r = await fetch(
+            `/api/fire/${encodeURIComponent(FIRE)}/rebrush`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+        const data = await r.json();
+        if (r.status === 409) {
+            // Another tab or a prior page load already started a
+            // rebrush for this fire. Hand control to polling — it
+            // will clear the Rebrushing UI when the server finishes.
+            log(data.error || 'A rebrush is already running for this fire.', 'dim');
+            rebrushAdopted = true;
+            return;
+        }
+        if (!r.ok || data.error) {
+            log('Rebrush error: ' + (data.error || r.statusText), 'error');
+            return;
+        }
+        if (data.status === 'cancelled') {
+            log('Rebrush cancelled.', 'dim');
+            return;
+        }
+        log(`Rebrush done — raw=${data.raw_px}px, `
+            + `brushed=${data.brushed_px}px`, 'dim');
+
+        // Make sure the view dropdown offers Brush comparison, then
+        // switch the left pane to it. There is only one `view-select`
+        // dropdown in this template — it binds to the active pane.
+        const sel = document.getElementById('view-select');
+        if (sel && !sel.querySelector('option[value="brush_comparison"]')) {
+            const opt = document.createElement('option');
+            opt.value = 'brush_comparison';
+            opt.textContent = VIEW_LABELS.brush_comparison || 'Brush comparison';
+            sel.appendChild(opt);
+        }
+        loadPaneImage('left', 'brush_comparison');
+        if (sel && activePane === 'left') sel.value = 'brush_comparison';
+
+        // Reload the right pane (if split is active) so the
+        // ML-classification overlay — 'result' for the main map,
+        // serial_{rid} for a serial run — reflects the new mask.
+        if (splitActive && rightView) {
+            loadPaneImage('right', rightView);
+        }
+    } catch (err) {
+        log('Rebrush failed: ' + err.message, 'error');
+    } finally {
+        // If we handed the state over to polling (409 from a stale
+        // rebrush), polling will drive the transition back to idle.
+        if (!rebrushAdopted) {
+            rebrushInFlight = false;
+            setRebrushButtons(false);
+        }
+    }
+}
+
+// -----------------------------------------------------------------------
+// Start mapping — one-click: use the current panel values (tooltip says
+// "runs once using the current parameter values in the panel"). We send
+// the panel fields as a custom single-element settings list, otherwise
+// the backend would fall back to recommended[0] and ignore the panel.
 // -----------------------------------------------------------------------
 async function startMapping() {
     if (isMapping) return;
-    return startSerialRun({mode: 'primary'});
+    return startSerialRun({
+        mode: 'primary',
+        settings: [{label: 'Current panel', params: getParams()}],
+    });
 }
 
 // -----------------------------------------------------------------------
@@ -875,9 +1041,41 @@ async function pollFireState() {
         }
         if (data.has_comparison) hasComparison = true;
 
-        // 4. Update serial results gallery as they arrive
+        // 3b. Mirror server-side rebrush state into the UI. Handles
+        // the case where a rebrush was started from this tab but the
+        // page was refreshed before the POST returned, or started
+        // from another tab entirely.
+        if (data.rebrush_running && !rebrushInFlight) {
+            rebrushInFlight = true;
+            rebrushAdopted = true;
+            setRebrushButtons(true);
+            log('Rebrush in progress on server — watching for completion ...',
+                'dim');
+        } else if (!data.rebrush_running && rebrushInFlight && rebrushAdopted) {
+            rebrushInFlight = false;
+            rebrushAdopted = false;
+            setRebrushButtons(false);
+            log('Rebrush finished on server. Refreshing views ...', 'dim');
+            // brush_comparison may now exist; make sure dropdown has it.
+            const sel2 = document.getElementById('view-select');
+            if (sel2 && !sel2.querySelector('option[value="brush_comparison"]')) {
+                const opt = document.createElement('option');
+                opt.value = 'brush_comparison';
+                opt.textContent = VIEW_LABELS.brush_comparison || 'Brush comparison';
+                sel2.appendChild(opt);
+            }
+            if (leftView) loadPaneImage('left', leftView);
+            if (splitActive && rightView) loadPaneImage('right', rightView);
+        }
+
+        // 4. Update serial results gallery as they arrive.
+        // Always call showSerialGallery when the list is non-empty;
+        // its internal signature check (agreement_pct, ml_area_ha, …)
+        // handles no-op ticks. A length-only guard here would skip
+        // re-renders after a per-run rebrush, which keeps the same
+        // number of runs but changes their stats.
         const serialResults = data.serial_results || [];
-        if (serialResults.length > 0 && serialResults.length !== lastSerialCount) {
+        if (serialResults.length > 0) {
             showSerialGallery(serialResults, data.settings_used || []);
             lastSerialCount = serialResults.length;
         }
@@ -1183,15 +1381,24 @@ function showSerialGallery(results, settingsUsed) {
             const existing = existingCards.get(r.run_id);
             const isBest = bestRunId !== null && r.run_id === bestRunId;
             const wasBest = prevBestId !== null && r.run_id === prevBestId;
-            // A finished card is immutable except for its "(best)" badge,
-            // which flips at most twice per mapping (old best loses it,
-            // new best gains it). Only rebuild those two cards.
-            if (existing && isBest === wasBest) continue;
+            // Per-card signature: covers the mutable surface of a card.
+            // Rebrush can change ml_area_ha/agreement_pct on an already-
+            // finished run, so we can't treat finished cards as immutable
+            // — a length check alone (outer gallery sig) would miss this.
+            const statSig = [
+                r.agreement_pct == null ? -1 : r.agreement_pct,
+                r.ml_area_ha == null ? -1 : r.ml_area_ha,
+                r.error || '',
+                isBest ? 1 : 0,
+            ].join('|');
+            if (existing && existing.dataset.statSig === statSig
+                && isBest === wasBest) continue;
             const card = renderSerialCard(r, {
                 isPrevious: false,
                 isBest,
                 colors,
             });
+            card.dataset.statSig = statSig;
             if (existing) {
                 existing.replaceWith(card);
             } else {
@@ -1256,7 +1463,7 @@ function renderSerialCard(r, opts) {
 
     div.innerHTML = `
         <div style="display:flex;align-items:center;gap:8px">
-            <img src="/api/fire/${encodeURIComponent(FIRE)}/serial/${r.run_id}/image"
+            <img src="/api/fire/${encodeURIComponent(FIRE)}/serial/${r.run_id}/image?t=${Date.now()}"
                  style="width:80px;height:60px;object-fit:cover;border-radius:4px;cursor:pointer;image-rendering:pixelated"
                  onclick="viewSerialRun(${r.run_id})" onerror="this.style.display='none'">
             <div style="flex:1;font-size:12px">
@@ -1387,9 +1594,16 @@ async function restoreFireState() {
             setVal('p-controlled_ratio', p.controlled_ratio);
             setVal('p-hdbscan_min_samples', p.hdbscan_min_samples);
             setVal('p-contour_width', p.contour_width);
+            setVal('p-brush_size', p.brush_size);
+            setVal('p-point_threshold', p.point_threshold);
             if (p.tsne_init) {
                 const el = document.getElementById('p-tsne_init');
                 if (el) el.value = p.tsne_init;
+            }
+            const basEl = document.getElementById('p-brush_all_segments');
+            if (basEl && p.brush_all_segments != null) {
+                const s = String(p.brush_all_segments).toLowerCase();
+                basEl.checked = (s === 'true' || s === '1' || s === 'yes' || s === 'on');
             }
             updateSampleSize();
         }
@@ -1400,6 +1614,16 @@ async function restoreFireState() {
                 `Agreement: <strong>${data.agreement_pct}%</strong>`;
         }
         updateMlSize(data.ml_area_ha);
+
+        // If a rebrush was in flight when we reloaded, restore the
+        // Rebrushing UI immediately so the user doesn't have to wait
+        // for the first poll tick to see it.
+        if (data.rebrush_running) {
+            rebrushInFlight = true;
+            rebrushAdopted = true;
+            setRebrushButtons(true);
+            log('Rebrush in progress on server (reconnected) ...', 'dim');
+        }
 
         // If fire is currently mapping, set flag
         if (data.status === 'mapping') {

@@ -144,6 +144,11 @@ class FireMappingCLI:
         # Figure
         contour_width:       int   = 1,
 
+        # class_brush post-processing
+        brush_size:          int   = 15,
+        point_threshold:     int   = 10,
+        brush_all_segments:  bool  = False,
+
         # Intermediate state caching (serial mapping optimisation)
         save_state_path:     str   = None,
         load_state_path:     str   = None,
@@ -199,6 +204,11 @@ class FireMappingCLI:
 
         # Figure
         self.contour_width   = contour_width
+
+        # class_brush post-processing
+        self.brush_size         = int(brush_size)
+        self.point_threshold    = int(point_threshold)
+        self.brush_all_segments = bool(brush_all_segments)
 
         # Intermediate state caching
         self.save_state_path = save_state_path
@@ -799,12 +809,10 @@ class FireMappingCLI:
         Call class_brush.exe directly (bypass class_brush.py which requires
         a Sentinel-2 timestamp in the image filename).
 
-        Uses the same default parameters as class_brush.py:
-          brush_size=15  point_threshold=10
-
-        The exe writes <clf_path>_comp_NNN.bin for each component above
-        threshold.  We read them back, keep only the largest (by pixel
-        count), clean up, and return a boolean mask.
+        Uses the instance brush parameters (brush_size, point_threshold,
+        brush_all_segments). When brush_all_segments is False the C++ tool
+        only emits the main (largest) segment; when True it emits every
+        component above threshold and the Python side ORs them together.
 
         Returns the brushed binary mask (same shape as classification), or
         None if the exe is not found or produces no components.
@@ -821,39 +829,54 @@ class FireMappingCLI:
                   f'skipping brush.')
             return None
 
-        # Same defaults as class_brush.py: brush_size=15, point_threshold=10
-        BRUSH_SIZE  = 15
-        POINT_THRES = 10
-
-        cmd = [brush_exe, clf_path, str(BRUSH_SIZE), str(POINT_THRES)]
-        print(f'[CLI] Running class_brush.exe (brush={BRUSH_SIZE}, '
-              f'threshold={POINT_THRES}) ...')
+        cmd = [brush_exe]
+        if self.brush_all_segments:
+            cmd.append('--all_segments')
+        cmd += [clf_path, str(self.brush_size), str(self.point_threshold)]
+        print(f'[CLI] Running class_brush.exe '
+              f'(brush={self.brush_size}, threshold={self.point_threshold}, '
+              f'all_segments={self.brush_all_segments}) ...')
         result = subprocess.run(cmd, cwd=self.save_dir)
         if result.returncode != 0:
             print(f'[CLI] Warning — class_brush.exe exited with code '
                   f'{result.returncode}')
 
-        # Find component .bin files and keep only the largest one
+        # Find component .bin files
         comp_files = sorted(_glob.glob(clf_path + '_comp_*.bin'))
 
         brushed_mask = None
         if comp_files:
-            largest_file  = None
-            largest_count = -1
-            for cf in comp_files:
-                try:
-                    dat   = Raster(cf).read_bands('all').squeeze().astype(bool)
-                    count = int(dat.sum())
-                    if count > largest_count:
-                        largest_count = count
-                        largest_file  = cf
-                        brushed_mask  = dat
-                except Exception as exc:
-                    print(f'[CLI] Warning — could not read {cf}: {exc}')
+            if self.brush_all_segments:
+                combined = None
+                kept = 0
+                for cf in comp_files:
+                    try:
+                        dat = Raster(cf).read_bands('all').squeeze().astype(bool)
+                        combined = dat if combined is None else (combined | dat)
+                        kept += 1
+                    except Exception as exc:
+                        print(f'[CLI] Warning — could not read {cf}: {exc}')
+                brushed_mask = combined
+                total = int(combined.sum()) if combined is not None else 0
+                print(f'[CLI] class_brush done — {kept} component(s) '
+                      f'merged ({total} px total)')
+            else:
+                largest_file  = None
+                largest_count = -1
+                for cf in comp_files:
+                    try:
+                        dat   = Raster(cf).read_bands('all').squeeze().astype(bool)
+                        count = int(dat.sum())
+                        if count > largest_count:
+                            largest_count = count
+                            largest_file  = cf
+                            brushed_mask  = dat
+                    except Exception as exc:
+                        print(f'[CLI] Warning — could not read {cf}: {exc}')
 
-            print(f'[CLI] class_brush done — {len(comp_files)} component(s), '
-                  f'using largest ({largest_count} px): '
-                  f'{os.path.basename(largest_file)}')
+                print(f'[CLI] class_brush done — {len(comp_files)} component(s), '
+                      f'using largest ({largest_count} px): '
+                      f'{os.path.basename(largest_file)}')
 
             # Clean up all component files and their intermediaries
             for cf in comp_files:
@@ -1085,6 +1108,32 @@ class FireMappingCLI:
         print(f'\nRunning class_brush post-processing ...')
         brushed = self.run_class_brush(clf_path)
 
+        # Promote the brushed mask to the canonical classified.bin so
+        # downstream consumers (ML-classification overlay, agreement%,
+        # ML-area metric) reflect the post-brush polygon. The pre-brush
+        # mask is preserved next to it as *_classified_raw.bin so that
+        # later rebrush operations can start from the original.
+        if brushed is not None:
+            import shutil as _shutil
+            raw_path = os.path.splitext(clf_path)[0] + '_raw.bin'
+            hdr_src = os.path.splitext(clf_path)[0] + '.hdr'
+            if not os.path.isfile(hdr_src):
+                hdr_src = clf_path + '.hdr'
+            _shutil.copy2(clf_path, raw_path)
+            if os.path.isfile(hdr_src):
+                _shutil.copy2(hdr_src,
+                              os.path.splitext(raw_path)[0] + '.hdr')
+            writeENVI(
+                output_filename=clf_path,
+                data=brushed.astype(np.float32),
+                mode='new',
+                ref_filename=self.image_filename,
+                band_names=['burned_brushed(bool)'],
+            )
+            print(f'[CLI] Brushed mask written → {os.path.basename(clf_path)} '
+                  f'(pre-brush backed up to '
+                  f'{os.path.basename(raw_path)})')
+
         print('\nGenerating figures ...')
         self.make_brush_comparison_figure(classification, brushed)
         fig_path = self.make_comparison_figure(
@@ -1185,6 +1234,20 @@ Examples
     p.add_argument('--contour_width', type=int, default=1,
                    help='Contour line width in pixels (default: 1)')
 
+    # ---- class_brush post-processing ----
+    p.add_argument('--brush_size', type=int, default=15,
+                   help='class_brush sliding-window width (pixels). Nearby '
+                        'connected components within this window are merged '
+                        'via union-find. Larger → more aggressive merging '
+                        '(default: 15)')
+    p.add_argument('--point_threshold', type=int, default=10,
+                   help='class_brush minimum component pixel count. '
+                        'Components below this are dropped (default: 10)')
+    p.add_argument('--brush_all_segments', action='store_true',
+                   help='Keep every component above threshold (OR them '
+                        'together). Default: keep only the single largest '
+                        'component.')
+
     # ---- Intermediate state caching (serial mapping optimisation) ----
     p.add_argument('--save_state', default=None,
                    help='Save t-SNE + RF state to .npz after embedding '
@@ -1227,6 +1290,9 @@ def main(argv=None):
         tsne_n_components   = args.tsne_n_components,
         tsne_random_state   = args.tsne_random_state,
         contour_width       = args.contour_width,
+        brush_size          = args.brush_size,
+        point_threshold     = args.point_threshold,
+        brush_all_segments  = args.brush_all_segments,
         save_state_path     = args.save_state,
         load_state_path     = args.load_state,
     )

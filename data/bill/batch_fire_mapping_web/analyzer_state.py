@@ -151,6 +151,7 @@ ANALYZER_CSV_FIELDNAMES = [
     'controlled_ratio', 'hdbscan_min_samples',
     'rf_n_estimators', 'rf_max_depth', 'rf_max_features',
     'rf_random_state', 'contour_width',
+    'brush_size', 'point_threshold', 'brush_all_segments',
 ]
 
 
