@@ -85,9 +85,18 @@ class FireInfo:
     serial_canceled: bool = False
 
     # Status captured by handle_api_serial_map right before it flips to
-    # MAPPING. The worker restores this on cancel so a user who bails out
-    # of a sweep lands back where they started (MAPPED / ACCEPTED / READY).
+    # MAPPING. The worker restores this on cancel when no run succeeded
+    # so a user who bails out of a sweep lands back where they started
+    # (MAPPED / ACCEPTED / READY).
     serial_prev_status: Optional[FireStatus] = None
+
+    # Set only by handle_api_serial_accept (not by handle_api_serial_cancel)
+    # to tell the worker's cancel path "accept handler already promoted
+    # a run and wants a clean gallery — drop all serial_* files and
+    # clear serial_results". User-initiated cancel leaves this False, in
+    # which case the worker preserves the gallery + promotes the best
+    # successful run so the fire lands in MAPPED (not back to READY).
+    serial_accept_promoted: bool = False
 
 
 class AppState:

@@ -174,13 +174,23 @@ def _normalize_ip(ip_str: str) -> str:
 
 
 def _atomic_yaml_dump(path: str, data, mode: int = 0o600):
-    """Write YAML atomically via tmp + rename. Sets restrictive permissions."""
+    """Write YAML atomically via tmp + rename. Sets restrictive permissions.
+
+    Uses a unique tmp suffix (pid + thread id) so concurrent writers to the
+    same target path do not clobber each other's tmp file."""
     import yaml
-    tmp = path + '.tmp'
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
-    with os.fdopen(fd, 'w') as f:
-        yaml.dump(data, f, default_flow_style=False, sort_keys=False)
-    os.replace(tmp, path)
+    tmp = f'{path}.{os.getpid()}.{threading.get_ident()}.tmp'
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+        with os.fdopen(fd, 'w') as f:
+            yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 # Login rate limiting
@@ -374,73 +384,76 @@ def _save_fire_state():
     """Persist per-fire state to fire_state.yaml so mapped fires survive restart."""
     try:
         data = {}
+        # Hold the lock across the entire snapshot so no fire attribute is
+        # read while another thread is mutating it. state.lock is an RLock
+        # so any inner helpers that re-acquire it remain safe.
         with state.lock:
-            fires_snapshot = list(state.fires.items())
-        for fn, fire in fires_snapshot:
-            # Only persist fires with meaningful state beyond PENDING
-            if (fire.status == FireStatus.PENDING and not fire.hidden
-                    and not fire.cache_dir):
-                continue
-            entry = {
-                'status': fire.status.value,
-                'hidden': fire.hidden,
-            }
-            if fire.cache_dir:
-                entry['cache_dir'] = fire.cache_dir
-            if fire.crop_bin:
-                entry['crop_bin'] = fire.crop_bin
-            if fire.hint_bin:
-                entry['hint_bin'] = fire.hint_bin
-            if fire.perim_bin:
-                entry['perim_bin'] = fire.perim_bin
-            if fire.viirs_bin:
-                entry['viirs_bin'] = fire.viirs_bin
-            if fire.crop_w:
-                entry['crop_w'] = fire.crop_w
-                entry['crop_h'] = fire.crop_h
-            if fire.padding_used:
-                entry['padding_used'] = fire.padding_used
-            if fire.acc_start:
-                entry['acc_start'] = fire.acc_start
-                entry['acc_end'] = fire.acc_end
-            if fire.perimeter_type:
-                entry['perimeter_type'] = fire.perimeter_type
-            if fire.sample_size:
-                entry['sample_size'] = fire.sample_size
-            if fire.available_views:
-                entry['available_views'] = list(fire.available_views)
-            if fire.last_comparison:
-                entry['last_comparison'] = fire.last_comparison
-            if fire.last_params:
-                entry['last_params'] = dict(fire.last_params)
-            if fire.ml_area_ha >= 0:
-                entry['ml_area_ha'] = fire.ml_area_ha
-            if fire.agreement_pct >= 0:
-                entry['agreement_pct'] = fire.agreement_pct
-            if fire.previously_accepted:
-                entry['previously_accepted'] = True
-            if fire.recommended_override:
-                entry['recommended_override'] = [
-                    {'label': str(s.get('label', '')),
-                     'params': dict(s.get('params', {}))}
-                    for s in fire.recommended_override
-                ]
-            # Persist serial gallery state so the results gallery survives
-            # restart. Without this, fire.serial_results defaults back to
-            # [] on boot and the left-pane ML overlay (restored from the
-            # canonical classified.bin) appears without the per-run cards.
-            if fire.serial_results:
-                entry['serial_results'] = [
-                    {k: v for k, v in r.items()}
-                    for r in fire.serial_results
-                ]
-            if fire.serial_settings:
-                entry['serial_settings'] = [
-                    {'label': str(s.get('label', '')),
-                     'params': dict(s.get('params', {}))}
-                    for s in fire.serial_settings
-                ]
-            data[fn] = entry
+            for fn, fire in state.fires.items():
+                # Only persist fires with meaningful state beyond PENDING
+                if (fire.status == FireStatus.PENDING and not fire.hidden
+                        and not fire.cache_dir):
+                    continue
+                entry = {
+                    'status': fire.status.value,
+                    'hidden': fire.hidden,
+                }
+                if fire.cache_dir:
+                    entry['cache_dir'] = fire.cache_dir
+                if fire.crop_bin:
+                    entry['crop_bin'] = fire.crop_bin
+                if fire.hint_bin:
+                    entry['hint_bin'] = fire.hint_bin
+                if fire.perim_bin:
+                    entry['perim_bin'] = fire.perim_bin
+                if fire.viirs_bin:
+                    entry['viirs_bin'] = fire.viirs_bin
+                if fire.crop_w:
+                    entry['crop_w'] = fire.crop_w
+                    entry['crop_h'] = fire.crop_h
+                if fire.padding_used:
+                    entry['padding_used'] = fire.padding_used
+                if fire.acc_start:
+                    entry['acc_start'] = fire.acc_start
+                    entry['acc_end'] = fire.acc_end
+                if fire.perimeter_type:
+                    entry['perimeter_type'] = fire.perimeter_type
+                if fire.sample_size:
+                    entry['sample_size'] = fire.sample_size
+                if fire.available_views:
+                    entry['available_views'] = list(fire.available_views)
+                if fire.last_comparison:
+                    entry['last_comparison'] = fire.last_comparison
+                if fire.last_params:
+                    entry['last_params'] = dict(fire.last_params)
+                if fire.ml_area_ha >= 0:
+                    entry['ml_area_ha'] = fire.ml_area_ha
+                if fire.agreement_pct >= 0:
+                    entry['agreement_pct'] = fire.agreement_pct
+                if fire.previously_accepted:
+                    entry['previously_accepted'] = True
+                if fire.recommended_override:
+                    entry['recommended_override'] = [
+                        {'label': str(s.get('label', '')),
+                         'params': dict(s.get('params', {}))}
+                        for s in fire.recommended_override
+                    ]
+                # Persist serial gallery state so the results gallery
+                # survives restart. Without this, fire.serial_results
+                # defaults back to [] on boot and the left-pane ML overlay
+                # (restored from the canonical classified.bin) appears
+                # without the per-run cards.
+                if fire.serial_results:
+                    entry['serial_results'] = [
+                        {k: v for k, v in r.items()}
+                        for r in fire.serial_results
+                    ]
+                if fire.serial_settings:
+                    entry['serial_settings'] = [
+                        {'label': str(s.get('label', '')),
+                         'params': dict(s.get('params', {}))}
+                        for s in fire.serial_settings
+                    ]
+                data[fn] = entry
 
         state_path = os.path.join(state.output_root, 'fire_state.yaml')
         _atomic_yaml_dump(state_path, data, mode=0o644)
@@ -1028,9 +1041,31 @@ def _serial_map_worker(fire_numbe: str, settings: list[dict],
     from .analyzer_worker import _jitter_hdbscan
 
     fire = state.fires[fire_numbe]
+    # A fresh sweep discards anything left from a previously cancelled
+    # run — both the in-memory gallery and the serial_* files on disk
+    # that back it. Without the disk cleanup, run_ids from the prior
+    # sweep that aren't reused by this one (e.g. prior went to 5, new
+    # only reaches 3) would leak as orphan files in cache_dir.
+    if fire.cache_dir and os.path.isdir(fire.cache_dir):
+        prefix = f'{fire_numbe}_serial_'
+        for f in os.listdir(fire.cache_dir):
+            if f.startswith(prefix):
+                try:
+                    os.remove(os.path.join(fire.cache_dir, f))
+                except OSError:
+                    pass
+        prev_dir = os.path.join(fire.cache_dir, 'previews')
+        if os.path.isdir(prev_dir):
+            for f in os.listdir(prev_dir):
+                if f.startswith('serial_'):
+                    try:
+                        os.remove(os.path.join(prev_dir, f))
+                    except OSError:
+                        pass
     fire.serial_results = []
     fire.serial_settings = [_clone_setting(s) for s in settings]
     fire.serial_canceled = False
+    fire.serial_accept_promoted = False
     fire.console_log.clear()
     n_settings = len(settings)
     k_runs = max(1, int(k_runs))
@@ -1428,63 +1463,171 @@ def _serial_map_worker(fire_numbe: str, settings: list[dict],
                 if replicate == 0:
                     setting_stopped = True
 
-    # User accepted a run mid-batch — preserve the accepted state
-    # (status=ACCEPTED, main cache files, canonical dir) and just wipe
-    # any per-run serial files we produced before noticing the cancel.
+    # Cancel path. Two flavors:
+    #
+    # (A) Accept-initiated cancel (serial_accept_promoted=True): the
+    #     accept handler already copied the chosen run into the main
+    #     slot and flipped status to ACCEPTED. Gallery should clear —
+    #     drop every serial_* file and empty serial_results.
+    #
+    # (B) User-initiated cancel (serial_accept_promoted=False): the
+    #     user hit "stop, that's enough". Keep the gallery. If at
+    #     least one run succeeded, promote the best into the main slot
+    #     and land on MAPPED so the fire is usable. If nothing
+    #     succeeded, revert to the pre-sweep status.
+    #
+    # _gpu_lock is held across the entire cleanup so concurrent accept
+    # handlers cannot race our file writes / deletes on the same
+    # cache_dir.
     if fire.serial_canceled:
-        for sr in list(fire.serial_results):
-            rid = sr.get('run_id')
-            if rid is None:
-                continue
-            for pat in (
-                f'{fire_numbe}_serial_{rid}_classified.bin',
-                f'{fire_numbe}_serial_{rid}_classified.hdr',
-                f'{fire_numbe}_serial_{rid}_classified_raw.bin',
-                f'{fire_numbe}_serial_{rid}_classified_raw.hdr',
-                f'{fire_numbe}_serial_{rid}.png',
-                f'{fire_numbe}_serial_{rid}_brush.png',
-            ):
-                p = os.path.join(fire.cache_dir, pat)
-                if os.path.isfile(p):
-                    try:
-                        os.remove(p)
-                    except OSError:
-                        pass
-            overlay = os.path.join(
-                fire.cache_dir, 'previews', f'serial_{rid}.png')
-            if os.path.isfile(overlay):
+        with _gpu_lock:
+            accept_promoted = fire.serial_accept_promoted
+
+            if accept_promoted:
+                # (A) — full gallery wipe.
+                for sr in list(fire.serial_results):
+                    rid = sr.get('run_id')
+                    if rid is None:
+                        continue
+                    for pat in (
+                        f'{fire_numbe}_serial_{rid}_classified.bin',
+                        f'{fire_numbe}_serial_{rid}_classified.hdr',
+                        f'{fire_numbe}_serial_{rid}_classified_raw.bin',
+                        f'{fire_numbe}_serial_{rid}_classified_raw.hdr',
+                        f'{fire_numbe}_serial_{rid}.png',
+                        f'{fire_numbe}_serial_{rid}_brush.png',
+                    ):
+                        p = os.path.join(fire.cache_dir, pat)
+                        if os.path.isfile(p):
+                            try:
+                                os.remove(p)
+                            except OSError:
+                                pass
+                    overlay = os.path.join(
+                        fire.cache_dir, 'previews', f'serial_{rid}.png')
+                    if os.path.isfile(overlay):
+                        try:
+                            os.remove(overlay)
+                        except OSError:
+                            pass
+
+            # Free per-setting T-SNE+RF caches regardless of flavor.
+            # They only accelerate intra-sweep replicates; the gallery
+            # does not need them and they are the single biggest disk
+            # win (30-100 MB each).
+            for npz in glob.glob(os.path.join(
+                    fire.cache_dir,
+                    f'{fire_numbe}_serial_state_s*.npz')):
                 try:
-                    os.remove(overlay)
+                    os.remove(npz)
                 except OSError:
                     pass
-        # Free per-setting T-SNE+RF caches. Used only to accelerate
-        # intra-sweep replicates; with the sweep cancelled or accepted,
-        # they are the single largest free win (30-100 MB each).
-        for npz in glob.glob(os.path.join(
-                fire.cache_dir,
-                f'{fire_numbe}_serial_state_s*.npz')):
-            try:
-                os.remove(npz)
-            except OSError:
-                pass
-        with state.lock:
-            # Worker may have raced past a cancel check and written
-            # MAPPING over the cancel source's chosen status. Restore
-            # the pre-sweep status (accept handler patches this to
-            # ACCEPTED; user-cancel leaves it as whatever the fire was
-            # before the sweep started).
-            revert = fire.serial_prev_status or FireStatus.PENDING
-            fire.status = revert
-            fire.serial_results = []
-            fire.serial_canceled = False
-            fire.serial_prev_status = None
-            state.current_job = None
-        fire.console_log.append(
-            f'Serial mapping cancelled — status restored to '
-            f'{revert.value}.')
-        _save_fire_state()
+
+            if accept_promoted:
+                with state.lock:
+                    # Accept handler set serial_prev_status = ACCEPTED;
+                    # trust it.
+                    revert = (fire.serial_prev_status
+                              or FireStatus.ACCEPTED)
+                    fire.status = revert
+                    fire.serial_results = []
+                    fire.serial_canceled = False
+                    fire.serial_prev_status = None
+                    fire.serial_accept_promoted = False
+                    state.current_job = None
+                fire.console_log.append(
+                    f'Serial mapping cancelled by accept — status set '
+                    f'to {revert.value}.')
+                _save_fire_state()
+                sys.stderr.write(
+                    f'[serial] {fire_numbe} accept-cancel → '
+                    f'{revert.value}\n')
+                sys.stderr.flush()
+                return
+
+            # (B) — preserve gallery; promote best successful run.
+            successful = [r for r in fire.serial_results
+                          if r.get('agreement_pct', -1) >= 0
+                          and not r.get('is_previous')
+                          and r.get('classified')
+                          and os.path.isfile(r.get('classified', ''))]
+            if successful:
+                best = max(successful,
+                           key=lambda r: r['agreement_pct'])
+                try:
+                    best_comp = best.get('comparison', '')
+                    if best_comp and os.path.isfile(best_comp):
+                        main_comp = os.path.join(
+                            fire.cache_dir,
+                            f'{fire_numbe}_comparison.png')
+                        shutil.copy2(best_comp, main_comp)
+                        fire.last_comparison = main_comp
+                    best_clf = best.get('classified', '')
+                    if best_clf and os.path.isfile(best_clf):
+                        main_clf = os.path.join(
+                            fire.cache_dir,
+                            f'{fire_numbe}_crop.bin_classified.bin')
+                        shutil.copy2(best_clf, main_clf)
+                        best_hdr = (
+                            os.path.splitext(best_clf)[0] + '.hdr')
+                        if not os.path.isfile(best_hdr):
+                            best_hdr = best_clf + '.hdr'
+                        if os.path.isfile(best_hdr):
+                            shutil.copy2(
+                                best_hdr,
+                                os.path.splitext(main_clf)[0] + '.hdr')
+                        _generate_result_preview(fire)
+                except Exception:
+                    pass
+                with state.lock:
+                    fire.agreement_pct = best['agreement_pct']
+                    fire.ml_area_ha = best.get('ml_area_ha', -1.0)
+                    fire.last_params = best['params']
+                    # If the fire was already ACCEPTED before the sweep
+                    # started, keep that — the canonical dir is still on
+                    # disk and the user didn't explicitly un-accept.
+                    # Otherwise land on MAPPED so the fire is usable.
+                    prev = fire.serial_prev_status
+                    if prev == FireStatus.ACCEPTED:
+                        fire.status = FireStatus.ACCEPTED
+                    else:
+                        fire.status = FireStatus.MAPPED
+                    fire.serial_canceled = False
+                    fire.serial_prev_status = None
+                    fire.serial_accept_promoted = False
+                    state.current_job = None
+                fire.console_log.append(
+                    f'Serial mapping cancelled — kept gallery '
+                    f'({len(successful)} run(s)); best: run '
+                    f'{best["run_id"]} '
+                    f'(agreement={best["agreement_pct"]}%). '
+                    f'Click Map Fire again to discard and re-sweep.')
+                _save_fire_state()
+                sys.stderr.write(
+                    f'[serial] {fire_numbe} user-cancel → '
+                    f'{fire.status.value} ({len(successful)} kept)\n')
+                sys.stderr.flush()
+                return
+
+            # No successful runs — nothing worth keeping. Revert to
+            # pre-sweep status and clear serial_results so the UI
+            # doesn't show a gallery of error cards for a fire that
+            # now has no data.
+            with state.lock:
+                revert = fire.serial_prev_status or FireStatus.PENDING
+                fire.status = revert
+                fire.serial_results = []
+                fire.serial_canceled = False
+                fire.serial_prev_status = None
+                fire.serial_accept_promoted = False
+                state.current_job = None
+            fire.console_log.append(
+                f'Serial mapping cancelled — no successful runs, '
+                f'status restored to {revert.value}.')
+            _save_fire_state()
         sys.stderr.write(
-            f'[serial] {fire_numbe} cancelled → {revert.value}\n')
+            f'[serial] {fire_numbe} user-cancel (empty) → '
+            f'{revert.value}\n')
         sys.stderr.flush()
         return
 
@@ -1530,6 +1673,18 @@ def _serial_map_worker(fire_numbe: str, settings: list[dict],
         _set_fire_status(
             fire, FireStatus.ERROR, 'All serial runs failed')
         fire.console_log.append('All serial runs failed.')
+
+    # Free per-setting T-SNE+RF caches. These accelerate intra-sweep
+    # replicates but are dead weight after the sweep finishes (the
+    # user will either accept a result or leave the gallery — neither
+    # needs the .npz again). Single largest disk win per fire.
+    for npz in glob.glob(os.path.join(
+            fire.cache_dir,
+            f'{fire_numbe}_serial_state_s*.npz')):
+        try:
+            os.remove(npz)
+        except OSError:
+            pass
 
     _save_fire_state()
     sys.stderr.write(
@@ -1667,6 +1822,11 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
 
     crop_w = px_hi - px_lo
     crop_h = py_hi - py_lo
+    # Capture the old padding BEFORE mutating fire.padding_used so the
+    # cache-wipe comparison below can detect a real change. Previously the
+    # assignment happened first and the check was always False, so stale
+    # crops survived a padding change and were reused with the new label.
+    old_pad = fire.padding_used
     fire.crop_w = crop_w
     fire.crop_h = crop_h
     fire.padding_used = pad
@@ -1678,8 +1838,8 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
     # -- Create / clear cache directory --
     # Only wipe when padding actually changed; preserve existing results
     cache_dir = os.path.join(state.output_root, '.web_cache', fire_numbe)
-    padding_changed = (fire.padding_used != 0
-                       and fire.padding_used != pad
+    padding_changed = (old_pad != 0
+                       and old_pad != pad
                        and os.path.isdir(cache_dir))
     if padding_changed:
         shutil.rmtree(cache_dir)
@@ -1849,11 +2009,15 @@ def _accept_fire_sync(fire_numbe: str) -> str:
 
     # Only canonical/final artifacts belong in the output dir. Per-run
     # serial artifacts ({fire}_serial_{rid}*) live in .web_cache and
-    # must not leak into the final result.
+    # must not leak into the final result. Same for rebrush backups
+    # (*_raw.bin / *_raw.hdr) which are cache-only pre-brush snapshots.
     for pattern in ('*.bin', '*.hdr', '*.png', '*.shp', '*.dbf',
                      '*.shx', '*.prj', '*.cpg'):
         for f in glob.glob(os.path.join(cache_dir, pattern)):
-            if '_serial_' in os.path.basename(f):
+            basename = os.path.basename(f)
+            if '_serial_' in basename:
+                continue
+            if basename.endswith('_raw.bin') or basename.endswith('_raw.hdr'):
                 continue
             shutil.copy2(f, fire_dir)
 
@@ -1973,15 +2137,23 @@ def _accept_fire_sync(fire_numbe: str) -> str:
                 for k, v in fire.last_params.items():
                     row_data[k] = v
 
-            tmp_path = csv_path + '.tmp'
-            with open(tmp_path, 'w', newline='') as cf:
-                writer = csv.DictWriter(
-                    cf, fieldnames=_CSV_FIELDNAMES,
-                    extrasaction='ignore')
-                writer.writeheader()
-                writer.writerows(existing)
-                writer.writerow(row_data)
-            os.replace(tmp_path, csv_path)
+            tmp_path = (
+                f'{csv_path}.{os.getpid()}.{threading.get_ident()}.tmp')
+            try:
+                with open(tmp_path, 'w', newline='') as cf:
+                    writer = csv.DictWriter(
+                        cf, fieldnames=_CSV_FIELDNAMES,
+                        extrasaction='ignore')
+                    writer.writeheader()
+                    writer.writerows(existing)
+                    writer.writerow(row_data)
+                os.replace(tmp_path, csv_path)
+            finally:
+                if os.path.exists(tmp_path):
+                    try:
+                        os.remove(tmp_path)
+                    except OSError:
+                        pass
     except Exception as exc:
         sys.stderr.write(
             f'[save] WARNING: Failed to update accepted_params.csv: '
@@ -3358,6 +3530,18 @@ class FireHandler(BaseHTTPRequestHandler):
                     if not is_serial:
                         fire.agreement_pct = _compute_agreement(fire)
                         fire.ml_area_ha = _compute_ml_area(fire, clf_path)
+                        # Persist the brush params onto last_params so a
+                        # later accept writes them to the canonical
+                        # params YAML and accepted_params.csv. Without
+                        # this, an operator who rebrushes and then
+                        # accepts gets a CSV row reflecting the original
+                        # brush settings, not the final ones.
+                        with state.lock:
+                            if fire.last_params is None:
+                                fire.last_params = {}
+                            fire.last_params['brush_size'] = int(bs)
+                            fire.last_params['point_threshold'] = int(pt)
+                            fire.last_params['brush_all_segments'] = bool(bas)
                     else:
                         new_area = _compute_ml_area(fire, clf_path)
                         new_agr = _compute_agreement(
@@ -3371,6 +3555,18 @@ class FireHandler(BaseHTTPRequestHandler):
                                 if sr.get('run_id') == rid_match:
                                     sr['ml_area_ha'] = new_area
                                     sr['agreement_pct'] = new_agr
+                                    # Update the run's own params dict
+                                    # so a subsequent serial-accept of
+                                    # this run promotes the new brush
+                                    # values into fire.last_params (see
+                                    # handle_api_serial_accept).
+                                    p = sr.get('params')
+                                    if p is None:
+                                        p = {}
+                                        sr['params'] = p
+                                    p['brush_size'] = int(bs)
+                                    p['point_threshold'] = int(pt)
+                                    p['brush_all_segments'] = bool(bas)
                                     break
                     _save_fire_state()
                 except Exception:
@@ -3416,7 +3612,12 @@ class FireHandler(BaseHTTPRequestHandler):
                 {'error': f'Cannot accept: status is {fire.status.value}'},
                 400)
             return
-        _accept_fire_sync(fire_numbe)
+        # Serialize accept against any running mapping/brush worker for
+        # this fire. _gpu_lock already serializes the heavy pipeline, so
+        # holding it here guarantees the cache dir is stable while we
+        # copy it into the canonical output dir.
+        with _gpu_lock:
+            _accept_fire_sync(fire_numbe)
         self._send_json({'status': 'accepted'})
 
     def handle_api_status(self, fire_numbe):
@@ -3755,89 +3956,100 @@ class FireHandler(BaseHTTPRequestHandler):
         worker_running = (fire.status == FireStatus.MAPPING)
         if worker_running:
             fire.serial_prev_status = FireStatus.ACCEPTED
+            fire.serial_accept_promoted = True
             fire.serial_canceled = True
 
-        # Copy the selected run's results as the main results
-        serial_clf = result.get('classified', '')
-        serial_comp = result.get('comparison', '')
-        if serial_clf and os.path.isfile(serial_clf):
-            main_clf = os.path.join(
-                fire.cache_dir,
-                f'{fire_numbe}_crop.bin_classified.bin')
-            shutil.copy2(serial_clf, main_clf)
-            ser_hdr = (
-                os.path.splitext(serial_clf)[0] + '.hdr')
-            if not os.path.isfile(ser_hdr):
-                ser_hdr = serial_clf + '.hdr'
-            if os.path.isfile(ser_hdr):
-                shutil.copy2(
-                    ser_hdr,
-                    os.path.splitext(main_clf)[0] + '.hdr')
-            # Regenerate the "ML classification" overlay from the
-            # accepted run's (possibly rebrushed) mask. The worker
-            # overwrites previews/result.png on every completed run,
-            # so without this it points at whichever run finished last.
-            try:
-                _overlay_mask_on_post(
-                    fire, main_clf, 'result', (0.9, 0.1, 0.0))
-            except Exception:
-                pass
-        if serial_comp and os.path.isfile(serial_comp):
-            main_comp = os.path.join(
-                fire.cache_dir, f'{fire_numbe}_comparison.png')
-            shutil.copy2(serial_comp, main_comp)
-            fire.last_comparison = main_comp
+        # Serialize the copy + accept under _gpu_lock. The worker takes
+        # the same lock per replicate and (after the matching fix) for
+        # its cancel cleanup, so this blocks until the worker is not
+        # actively writing to cache_dir. Without this, the accept
+        # handler could read serial_clf while the worker was in the
+        # middle of writing it, or vice-versa.
+        with _gpu_lock:
+            # Copy the selected run's results as the main results
+            serial_clf = result.get('classified', '')
+            serial_comp = result.get('comparison', '')
+            if serial_clf and os.path.isfile(serial_clf):
+                main_clf = os.path.join(
+                    fire.cache_dir,
+                    f'{fire_numbe}_crop.bin_classified.bin')
+                shutil.copy2(serial_clf, main_clf)
+                ser_hdr = (
+                    os.path.splitext(serial_clf)[0] + '.hdr')
+                if not os.path.isfile(ser_hdr):
+                    ser_hdr = serial_clf + '.hdr'
+                if os.path.isfile(ser_hdr):
+                    shutil.copy2(
+                        ser_hdr,
+                        os.path.splitext(main_clf)[0] + '.hdr')
+                # Regenerate the "ML classification" overlay from the
+                # accepted run's (possibly rebrushed) mask. The worker
+                # overwrites previews/result.png on every completed run,
+                # so without this it points at whichever run finished
+                # last.
+                try:
+                    _overlay_mask_on_post(
+                        fire, main_clf, 'result', (0.9, 0.1, 0.0))
+                except Exception:
+                    pass
+            if serial_comp and os.path.isfile(serial_comp):
+                main_comp = os.path.join(
+                    fire.cache_dir, f'{fire_numbe}_comparison.png')
+                shutil.copy2(serial_comp, main_comp)
+                fire.last_comparison = main_comp
 
-        fire.agreement_pct = result.get('agreement_pct', -1)
-        fire.ml_area_ha = result.get('ml_area_ha', -1.0)
-        fire.last_params = result.get('params', {})
-        fire.status = FireStatus.MAPPED
+            fire.agreement_pct = result.get('agreement_pct', -1)
+            fire.ml_area_ha = result.get('ml_area_ha', -1.0)
+            fire.last_params = result.get('params', {})
+            fire.status = FireStatus.MAPPED
 
-        # Now accept via the normal flow
-        _accept_fire_sync(fire_numbe)
+            # Now accept via the normal flow
+            _accept_fire_sync(fire_numbe)
 
-        # If the worker is still running, leave serial_results / serial
-        # file cleanup to it — racing to clear the list here would fight
-        # with the worker's in-flight append for the next replicate, and
-        # racing to delete serial files would fight its in-flight writes.
-        if not worker_running:
-            for sr in fire.serial_results:
-                rid = sr.get('run_id')
-                if rid is None:
-                    continue
-                for pat in (
-                    f'{fire_numbe}_serial_{rid}_classified.bin',
-                    f'{fire_numbe}_serial_{rid}_classified.hdr',
-                    f'{fire_numbe}_serial_{rid}_classified_raw.bin',
-                    f'{fire_numbe}_serial_{rid}_classified_raw.hdr',
-                    f'{fire_numbe}_serial_{rid}.png',
-                    f'{fire_numbe}_serial_{rid}_brush.png',
-                ):
-                    p = os.path.join(fire.cache_dir, pat)
-                    if os.path.isfile(p):
+            # If the worker is still running, leave serial_results /
+            # serial file cleanup to it — racing to clear the list here
+            # would fight with the worker's in-flight append for the
+            # next replicate, and racing to delete serial files would
+            # fight its in-flight writes.
+            if not worker_running:
+                for sr in fire.serial_results:
+                    rid = sr.get('run_id')
+                    if rid is None:
+                        continue
+                    for pat in (
+                        f'{fire_numbe}_serial_{rid}_classified.bin',
+                        f'{fire_numbe}_serial_{rid}_classified.hdr',
+                        f'{fire_numbe}_serial_{rid}_classified_raw.bin',
+                        f'{fire_numbe}_serial_{rid}_classified_raw.hdr',
+                        f'{fire_numbe}_serial_{rid}.png',
+                        f'{fire_numbe}_serial_{rid}_brush.png',
+                    ):
+                        p = os.path.join(fire.cache_dir, pat)
+                        if os.path.isfile(p):
+                            try:
+                                os.remove(p)
+                            except OSError:
+                                pass
+                    overlay = os.path.join(
+                        fire.cache_dir, 'previews', f'serial_{rid}.png')
+                    if os.path.isfile(overlay):
                         try:
-                            os.remove(p)
+                            os.remove(overlay)
                         except OSError:
                             pass
-                overlay = os.path.join(
-                    fire.cache_dir, 'previews', f'serial_{rid}.png')
-                if os.path.isfile(overlay):
+                # Free per-setting T-SNE+RF caches (single heaviest
+                # artifact in .web_cache — 30-100 MB each, typically 3
+                # per sweep). They exist to let replicates skip the
+                # full pipeline within a sweep; once accepted, they
+                # are dead weight.
+                for npz in glob.glob(os.path.join(
+                        fire.cache_dir,
+                        f'{fire_numbe}_serial_state_s*.npz')):
                     try:
-                        os.remove(overlay)
+                        os.remove(npz)
                     except OSError:
                         pass
-            # Free per-setting T-SNE+RF caches (single heaviest artifact
-            # in .web_cache — 30-100 MB each, typically 3 per sweep).
-            # They exist to let replicates skip the full pipeline within
-            # a sweep; once accepted, they're dead weight.
-            for npz in glob.glob(os.path.join(
-                    fire.cache_dir,
-                    f'{fire_numbe}_serial_state_s*.npz')):
-                try:
-                    os.remove(npz)
-                except OSError:
-                    pass
-            fire.serial_results = []
+                fire.serial_results = []
 
         self._send_json({'status': 'accepted'})
 
@@ -3940,7 +4152,33 @@ class FireHandler(BaseHTTPRequestHandler):
         if fire_numbe not in state.fires:
             self._send_json({'error': 'Fire not found'}, 404)
             return
-        state.fires[fire_numbe].hidden = True
+        fire = state.fires[fire_numbe]
+        # Refuse to hide a fire while a worker is actively using its
+        # cache_dir — removing the cache out from under the running
+        # subprocess causes spurious failures.
+        if fire.status in (FireStatus.MAPPING, FireStatus.PREPARING):
+            self._send_json(
+                {'error': f'Cannot remove while {fire.status.value}'}, 409)
+            return
+        # Drop the .web_cache/<FIRE>/ directory so memory doesn't leak
+        # on hide/unhide cycles. The canonical output dir (if the fire
+        # was accepted) is preserved separately. Re-preparing on unhide
+        # will rebuild the cache from scratch.
+        cache_dir = fire.cache_dir
+        with state.lock:
+            fire.hidden = True
+            fire.cache_dir = ''
+            fire.crop_bin = ''
+            fire.hint_bin = ''
+            fire.perim_bin = ''
+            fire.viirs_bin = ''
+            fire.available_views = []
+            fire.last_comparison = ''
+        if cache_dir and os.path.isdir(cache_dir):
+            try:
+                shutil.rmtree(cache_dir, ignore_errors=True)
+            except Exception:
+                pass
         _save_fire_state()
         self._send_json({'status': 'removed'})
 
