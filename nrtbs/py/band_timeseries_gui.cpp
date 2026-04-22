@@ -533,7 +533,7 @@ static void* loadWorker(void* arg) {
 
 int main(int argc, char** argv) {
     std::string dir = ".";
-    std::string ext = "tif";
+    std::string ext = "bin";
     int startIdx    = 0;
 
     for (int i = 1; i < argc; i++) {
@@ -548,7 +548,7 @@ int main(int argc, char** argv) {
                 "  -d <dir>   Directory of GDAL-readable raster files  (default: .)\n"
                 "  -w <int>   Sampling square side-length in pixels     (default: 10)\n"
                 "  -i <int>   Initial image index (0-based, -1=last)   (default: 0)\n"
-                "  -e <ext>   File extension to filter for             (default: tif)\n"
+                "  -e <ext>   File extension to filter for             (default: bin)\n"
                 "\n"
                 "Controls (work in every window):\n"
                 "  Left/Right arrows  Navigate images forward/backward in time\n"
@@ -690,5 +690,3 @@ int main(int argc, char** argv) {
     glutMainLoop();
     return 0;
 }
-
-
