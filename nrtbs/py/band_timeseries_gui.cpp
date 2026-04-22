@@ -822,8 +822,8 @@ int main(int argc, char** argv) {
 
     g_mlW = g_fullW / g_mlFactor;
     g_mlH = g_fullH / g_mlFactor;
-    g_imgW = g_mlW; /* texture dims = multilooked dims */
-    g_imgH = g_mlH;
+    //g_imgW = g_mlW; /* texture dims = multilooked dims */
+    //g_imgH = g_mlH;
 
     printf("multilook: M=%d, full %dx%d -> display %dx%d\n",
            g_mlFactor, g_fullW, g_fullH, g_mlW, g_mlH);
