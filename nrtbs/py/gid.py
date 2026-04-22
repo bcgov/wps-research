@@ -1,0 +1,31 @@
+'''jurisdiction-specific GID
+'''
+def bc():
+    return ['T09UXR', 'T10UGB', 'T09VVF', 'T10UCG', 'T10UDG', 'T11ULB',
+            'T11ULT', 'T09VWG', 'T10UFF', 'T11UPQ', 'T08VPK', 'T07VFG',
+            'T09VXF', 'T10UCE', 'T08VPL', 'T10UFV', 'T09UWA', 'T10UCF',
+            'T08UPD', 'T11UQQ', 'T10UDV', 'T07VFF', 'T09UWV', 'T09UUA',
+            'T08UQC', 'T09UVV', 'T11UPS', 'T11UMS', 'T10VDK', 'T10VCK',
+            'T11UNR', 'T09UYQ', 'T09UWT', 'T10UEG', 'T09VXG', 'T10UFC',
+            'T11VLD', 'T09VUG', 'T09UWB', 'T09UYS', 'T10VCL', 'T09VUC',
+            'T10UGD', 'T09UVU', 'T11VLF', 'T10UCV', 'T10VEL', 'T10VFM',
+            'T08UQD', 'T09UUV', 'T11UMT', 'T10UFE', 'T11ULS', 'T11ULU',
+            'T09UVS', 'T08UPF', 'T11UMU', 'T10VFJ', 'T10UDA', 'T09UXA',
+            'T09UXQ', 'T10VCH', 'T09UYR', 'T09UYP', 'T09VUF', 'T10UFG',
+            'T10UEV', 'T10UGV', 'T11VLC', 'T09VVD', 'T10UEC', 'T10VCM',
+            'T10VDL', 'T09UWR', 'T10UGA', 'T09VUD', 'T10UGE', 'T10VEK',
+            'T10UDU', 'T07VEG', 'T10UFA', 'T10VDH', 'T08VPH', 'T11ULA',
+            'T09UXT', 'T11VLE', 'T08VNM', 'T08VLL', 'T11UNS', 'T10VFL',
+            'T10UCB', 'T10VDM', 'T09VWF', 'T10VEH', 'T10VFK', 'T08VMM',
+            'T10UFB', 'T09VXC', 'T10UDD', 'T10UEE', 'T09VUE', 'T10UDB',
+            'T09VXD', 'T09UWU', 'T11VLG', 'T11UNQ', 'T11ULR', 'T11ULV',
+            'T08VNK', 'T08VPJ', 'T09UUU', 'T09UUT', 'T10VCJ', 'T09UYT',
+            'T09VXE', 'T10UGC', 'T08VNL', 'T09UYU', 'T11UMQ', 'T08VLM',
+            'T09UXB', 'T11UNT', 'T09VVC', 'T10UEB', 'T10UFD', 'T08VML',
+            'T11UPR', 'T10UDE', 'T09UVA', 'T10UCC', 'T08VPM', 'T09UXS',
+            'T10VEM', 'T10VEJ', 'T10UCD', 'T10UED', 'T09VWE', 'T09VWC',
+            'T09VWD', 'T09UXU', 'T09UVB', 'T09UWS', 'T10UDC', 'T09UVT',
+            'T09UXV', 'T09VVG', 'T10UDF', 'T08UQE', 'T09VVE', 'T10UEA',
+            'T09UYV', 'T10UCA', 'T10VFH', 'T10UCU', 'T11ULQ', 'T10VDJ',
+            'T08UPE', 'T10UEF', 'T11UMR']
+    
