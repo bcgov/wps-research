@@ -19,19 +19,18 @@
  *   Left / Right arrow   Navigate backward / forward through dates
  *   c                    Clear all sampling squares and time-series traces
  *   q / Escape           Clean exit
- *   Left-click on image  Add a sampling square; TS plots update
+ *   Left-click on image  Add sampling square (max 3, R/G/B); TS plots update
  *   Right-click on image Clear all squares and traces
  *
- * Features:
- *   - Pre-checks: validates all files share same dimensions/bands;
- *     exits if .tif and .bin coexist in the same directory.
- *   - Sorts files by embedded yyyymmddThhmmss timestamp.
- *   - Removes duplicate frames (identical binary content) via parallel
- *     pairwise comparison.
- *   - Computes NBR = (B08 - B12) / (B08 + B12) if both bands present;
- *     plots in an extra TS window.
- *   - Caches histogram stretch limits and duplicate-removal indices in
- *     .restore_* files for fast restart.
+ * Image display:
+ *   Uses a multilook scheme — non-overlapping M×M boxes averaged — so the
+ *   displayed image is floor(nrow/M) × floor(ncol/M).  M is chosen so the
+ *   image fills at most half the screen width.  Multilook results are cached
+ *   in .restore_multilook_<filename> for instant restart.
+ *
+ * Time-series envelopes:
+ *   Solid line = mean over the M×M box at the clicked pixel.
+ *   Dashed lines = min and max over that same M×M box.
  */
 
 #include <cstdio>
@@ -50,7 +49,6 @@
 #include <pthread.h>
 #include <dirent.h>
 #include <sys/stat.h>
-#include <regex>
 #include <set>
 #include <map>
 #include <functional>
@@ -61,14 +59,9 @@
 
 using namespace std;
 
-/* ─────────────────── misc-style macros and helpers ───────────────── */
-
 #define for0(i,n) for(i = 0; i < n; i++)
 
-static void err(const string& msg) {
-    cerr << "Error: " << msg << endl;
-    exit(1);
-}
+static void err(const string& msg) { cerr << "Error: " << msg << endl; exit(1); }
 
 static size_t fsize(const string& fn) {
     FILE* f = fopen(fn.c_str(), "rb");
@@ -79,11 +72,9 @@ static size_t fsize(const string& fn) {
     return sz;
 }
 
-static bool exists(const string& fn) {
-    return fsize(fn) > 0;
-}
+static bool exists(const string& fn) { return fsize(fn) > 0; }
 
-/* ─────────────────── ENVI header reading (from misc.cpp) ────────── */
+/* ─────────────────── ENVI header reading ────────────────────────── */
 
 static string hdr_fn(const string& fn) {
     string base = fn.substr(0, fn.size() - 4);
@@ -99,49 +90,30 @@ static void hread(const string& hfn, size_t& nrow, size_t& ncol, size_t& nband,
                   vector<string>& band_names) {
     ifstream hf(hfn);
     if (!hf.is_open()) err(string("failed to open header: ") + hfn);
-
     nrow = ncol = nband = 0;
     string line;
-    bool in_band_names = false;
+    bool in_bn = false;
     string bn_accum;
-
     while (getline(hf, line)) {
-        if (in_band_names) {
-            bn_accum += line;
-            if (line.find('}') != string::npos) in_band_names = false;
-            continue;
-        }
-
+        if (in_bn) { bn_accum += line; if (line.find('}') != string::npos) in_bn = false; continue; }
         size_t eq = line.find('=');
         if (eq == string::npos) continue;
-        string key = line.substr(0, eq);
-        string val = line.substr(eq + 1);
-
+        string key = line.substr(0, eq), val = line.substr(eq + 1);
         auto trim = [](string& s) {
             while (!s.empty() && isspace(s.front())) s.erase(s.begin());
             while (!s.empty() && isspace(s.back()))  s.pop_back();
         };
         trim(key); trim(val);
-
-        if (key == "samples") ncol  = atoi(val.c_str());
-        else if (key == "lines")   nrow  = atoi(val.c_str());
-        else if (key == "bands")   nband = atoi(val.c_str());
-        else if (key == "band names") {
-            bn_accum = val;
-            if (val.find('}') == string::npos) in_band_names = true;
-        }
+        if (key == "samples") ncol = atoi(val.c_str());
+        else if (key == "lines") nrow = atoi(val.c_str());
+        else if (key == "bands") nband = atoi(val.c_str());
+        else if (key == "band names") { bn_accum = val; if (val.find('}') == string::npos) in_bn = true; }
     }
     hf.close();
-
     if (!bn_accum.empty()) {
-        size_t i;
-        string clean;
-        for0(i, bn_accum.size()) {
-            char c = bn_accum[i];
-            if (c != '{' && c != '}') clean += c;
-        }
-        istringstream iss(clean);
-        string tok;
+        size_t i; string clean;
+        for0(i, bn_accum.size()) { char c = bn_accum[i]; if (c != '{' && c != '}') clean += c; }
+        istringstream iss(clean); string tok;
         while (getline(iss, tok, ',')) {
             while (!tok.empty() && isspace(tok.front())) tok.erase(tok.begin());
             while (!tok.empty() && isspace(tok.back()))  tok.pop_back();
@@ -150,42 +122,48 @@ static void hread(const string& hfn, size_t& nrow, size_t& ncol, size_t& nband,
     }
 }
 
-/* ──────────────────────────── data types ──────────────────────────── */
+/* ──────────────────────── data types ────────────────────────────── */
 
 struct BandImage {
-    size_t width  = 0;
-    size_t height = 0;
-    size_t nBands = 0;
-    float* data   = nullptr;
+    size_t width = 0, height = 0, nBands = 0;
+    float* data = nullptr;
     vector<string> bandNames;
-    string filename;
-    string timestamp; /* yyyymmddThhmmss extracted from filename */
-
+    string filename, timestamp;
     const float* band(size_t b) const { return data + b * width * height; }
     float* band(size_t b) { return data + b * width * height; }
 };
 
-struct Click { int x, y; };
-struct TSPoint { float mean, stddev; };
+struct Click { int x, y; };           /* coordinates in multilooked image space */
+struct TSPoint { float mean, mn, mx; }; /* mean, min, max over M×M box */
 
-/* ──────────────────────────── globals ─────────────────────────────── */
+/* ──────────────────────── globals ───────────────────────────────── */
 
-static vector<BandImage>  g_images;
-static vector<string>     g_filenames;
-static string             g_dir;
-static int g_curIdx       = 0;
-static int g_squareWidth  = 10;
-static int g_imgW = 0, g_imgH = 0;
+static vector<BandImage> g_images;
+static vector<string>    g_filenames;
+static string            g_dir;
+static int g_curIdx      = 0;
+static int g_squareWidth = 10;
+
+/* original full-res dimensions */
+static int g_fullW = 0, g_fullH = 0;
 static int g_nBands = 0;
 static vector<string> g_bandNames;
 
-/* NBR band indices (-1 if not found) */
+/* multilook parameters */
+static int g_mlFactor = 1;            /* M: multilook box size */
+static int g_mlW = 0, g_mlH = 0;     /* multilooked image dims = floor(full/M) */
+
+/* per-image multilooked band data: g_mlData[img_idx][band * mlW * mlH + pixel] */
+static vector<float*> g_mlData;
+
+/* NBR */
 static int g_b08_idx = -1, g_b12_idx = -1;
 static bool g_hasNBR = false;
-static int g_winNBR = -1; /* NBR TS window ID */
+static int g_winNBR = -1;
 
+/* clicks: max 3, R/G/B */
 static vector<Click> g_clicks;
-static const int g_maxClicks = 3; /* retain only last 3 clicks */
+static const int g_maxClicks = 3;
 static const float g_colors[][3] = {
     {1.0f,0.0f,0.0f}, {0.0f,1.0f,0.0f}, {0.0f,0.0f,1.0f}
 };
@@ -196,18 +174,16 @@ static vector<int> g_winTS;
 
 static vector<vector<unsigned char>> g_rgbTextures;
 static GLuint g_texId = 0;
-static bool   g_texAllocated = false;
-
+static bool g_texAllocated = false;
 static int g_dispW = 800, g_dispH = 600;
 
 #define MAX_TS_WINDOWS 32
 static int g_tsWindowBandMap[MAX_TS_WINDOWS];
 
-/* ─────────────── parfor: work-stealing parallel for ─────────────── */
+/* ─────────────── parfor ─────────────────────────────────────────── */
 
 static pthread_mutex_t pf_mtx = PTHREAD_MUTEX_INITIALIZER;
-static size_t pf_next_j;
-static size_t pf_end_j;
+static size_t pf_next_j, pf_end_j;
 static void (*pf_eval)(size_t);
 
 static void* pf_worker(void* arg) {
@@ -223,41 +199,27 @@ static void* pf_worker(void* arg) {
 
 static void parfor(size_t start_j, size_t end_j, void(*eval)(size_t), int cores_use = 0) {
     if (end_j <= start_j) return;
-    pf_eval   = eval;
-    pf_end_j  = end_j;
-    pf_next_j = start_j;
-
-    int cores_avail = sysconf(_SC_NPROCESSORS_ONLN);
-    int n_cores = (cores_use > 0) ? min(cores_use, cores_avail) : cores_avail;
-    n_cores = min(n_cores, (int)(end_j - start_j));
-    if (n_cores < 1) n_cores = 1;
-
+    pf_eval = eval; pf_end_j = end_j; pf_next_j = start_j;
+    int ca = sysconf(_SC_NPROCESSORS_ONLN);
+    int nc = (cores_use > 0) ? min(cores_use, ca) : ca;
+    nc = min(nc, (int)(end_j - start_j));
+    if (nc < 1) nc = 1;
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
-
-    vector<pthread_t> threads(n_cores);
+    vector<pthread_t> threads(nc);
     size_t j;
-    for0(j, (size_t)n_cores)
-        pthread_create(&threads[j], &attr, pf_worker, (void*)j);
-    for0(j, (size_t)n_cores)
-        pthread_join(threads[j], nullptr);
+    for0(j, (size_t)nc) pthread_create(&threads[j], &attr, pf_worker, (void*)j);
+    for0(j, (size_t)nc) pthread_join(threads[j], nullptr);
     pthread_attr_destroy(&attr);
 }
 
-/* ─────────────── timestamp extraction and sorting ───────────────── */
+/* ─────────────── timestamp extraction ───────────────────────────── */
 
-/*
- * Extract the first yyyymmddThhmmss pattern from a filename.
- * Sentinel-2 names contain this after the processing level field.
- * Returns empty string if no match.
- */
 static string extract_timestamp(const string& fn) {
-    /* look for 8 digits + 'T' + 6 digits */
     for (size_t i = 0; i + 15 <= fn.size(); i++) {
         if (fn[i + 8] != 'T') continue;
-        bool ok = true;
-        size_t k;
+        bool ok = true; size_t k;
         for0(k, (size_t)8) if (!isdigit(fn[i + k])) { ok = false; break; }
         if (!ok) continue;
         for (k = 9; k < 15; k++) if (!isdigit(fn[i + k])) { ok = false; break; }
@@ -266,138 +228,151 @@ static string extract_timestamp(const string& fn) {
     return "";
 }
 
-/* ──────────── .restore_ persistence helpers ─────────────────────── */
+/* ─────────────── .restore_ persistence ──────────────────────────── */
 
 static string restore_prefix() { return g_dir + "/.restore_"; }
 
 static void save_duplicates(const set<size_t>& dups, const vector<string>& fnames) {
     string fn = restore_prefix() + "duplicates";
-    ofstream f(fn);
-    for (auto idx : dups) f << fnames[idx] << "\n";
-    f.close();
-    printf("saved %zu duplicate filenames to %s\n", dups.size(), fn.c_str());
+    ofstream f(fn); for (auto idx : dups) f << fnames[idx] << "\n"; f.close();
 }
 
 static set<string> load_duplicates() {
-    set<string> result;
-    string fn = restore_prefix() + "duplicates";
-    ifstream f(fn);
-    if (!f.is_open()) return result;
-    string line;
-    while (getline(f, line)) {
-        while (!line.empty() && isspace(line.back())) line.pop_back();
-        if (!line.empty()) result.insert(line);
-    }
-    f.close();
-    return result;
+    set<string> r; string fn = restore_prefix() + "duplicates";
+    ifstream f(fn); if (!f.is_open()) return r; string line;
+    while (getline(f, line)) { while (!line.empty() && isspace(line.back())) line.pop_back(); if (!line.empty()) r.insert(line); }
+    return r;
 }
 
-/* per-file stretch limits: .restore_stretch_<filename> */
 struct StretchLimits { float vmin[3], vmax[3]; };
 
-static string stretch_restore_fn(const string& filename) {
-    return restore_prefix() + "stretch_" + filename;
+static string stretch_restore_fn(const string& filename) { return restore_prefix() + "stretch_" + filename; }
+
+static bool load_stretch(const string& fn, StretchLimits& sl) {
+    FILE* f = fopen(stretch_restore_fn(fn).c_str(), "rb");
+    if (!f) return false; size_t nr = fread(&sl, sizeof(sl), 1, f); fclose(f); return nr == 1;
 }
 
-static bool load_stretch(const string& filename, StretchLimits& sl) {
-    string fn = stretch_restore_fn(filename);
+static void save_stretch(const string& fn, const StretchLimits& sl) {
+    FILE* f = fopen(stretch_restore_fn(fn).c_str(), "wb");
+    if (f) { fwrite(&sl, sizeof(sl), 1, f); fclose(f); }
+}
+
+/* ─────────── multilook: cache file per image ────────────────────── */
+
+static string ml_restore_fn(const string& filename, int M) {
+    char buf[32]; snprintf(buf, sizeof(buf), "_M%d", M);
+    return restore_prefix() + "multilook" + buf + "_" + filename;
+}
+
+static bool load_ml_cache(const string& filename, int M, float* dst, size_t nfloats) {
+    string fn = ml_restore_fn(filename, M);
     FILE* f = fopen(fn.c_str(), "rb");
     if (!f) return false;
-    size_t nr = fread(&sl, sizeof(StretchLimits), 1, f);
+    size_t nr = fread(dst, sizeof(float), nfloats, f);
     fclose(f);
-    return (nr == 1);
+    return (nr == nfloats);
 }
 
-static void save_stretch(const string& filename, const StretchLimits& sl) {
-    string fn = stretch_restore_fn(filename);
+static void save_ml_cache(const string& filename, int M, const float* src, size_t nfloats) {
+    string fn = ml_restore_fn(filename, M);
     FILE* f = fopen(fn.c_str(), "wb");
-    if (!f) return;
-    fwrite(&sl, sizeof(StretchLimits), 1, f);
-    fclose(f);
+    if (f) { fwrite(src, sizeof(float), nfloats, f); fclose(f); }
 }
 
-/* ──────────────── fast histogram stretch to u8 (O(n)) ───────────── */
+/* ─────────── multilook computation for one image ────────────────── */
+/*
+ * For each band, for each M×M non-overlapping box, compute the mean
+ * of finite values.  If all values in a box are NaN, result is NaN.
+ * Edge boxes (right/bottom) that extend past the image boundary use
+ * only the available pixels.
+ *
+ * Output layout: band-sequential, mlH rows × mlW cols per band.
+ */
+static void multilook_one(size_t img_idx) {
+    const BandImage& img = g_images[img_idx];
+    int M  = g_mlFactor;
+    int mw = g_mlW, mh = g_mlH;
+    size_t npix = (size_t)mw * mh;
+    size_t nfloats = npix * img.nBands;
+    float* ml = g_mlData[img_idx];
+
+    /* try cache first */
+    if (load_ml_cache(img.filename, M, ml, nfloats)) return;
+
+    size_t b;
+    for0(b, img.nBands) {
+        const float* src = img.band(b);
+        float* dst = ml + b * npix;
+        for (int my = 0; my < mh; my++) {
+            for (int mx = 0; mx < mw; mx++) {
+                int y0 = my * M, x0 = mx * M;
+                int y1 = min(y0 + M, (int)img.height);
+                int x1 = min(x0 + M, (int)img.width);
+                double sum = 0; int cnt = 0;
+                for (int r = y0; r < y1; r++) {
+                    size_t roff = (size_t)r * img.width;
+                    for (int c = x0; c < x1; c++) {
+                        float v = src[roff + c];
+                        if (isfinite(v)) { sum += v; cnt++; }
+                    }
+                }
+                dst[my * mw + mx] = (cnt > 0) ? (float)(sum / cnt) : NAN;
+            }
+        }
+    }
+    save_ml_cache(img.filename, M, ml, nfloats);
+}
+
+static void pf_multilook(size_t idx) { multilook_one(idx); }
+
+/* ─────────── histogram stretch (operates on multilooked data) ──── */
 
 static void histStretchToU8(const float* src, size_t n, unsigned char* dst,
                             float pct, float& out_vmin, float& out_vmax) {
-    vector<float> vals;
-    vals.reserve(n);
+    vector<float> vals; vals.reserve(n);
     size_t i;
-    for0(i, n) {
-        if (isfinite(src[i])) vals.push_back(src[i]);
-    }
+    for0(i, n) if (isfinite(src[i])) vals.push_back(src[i]);
     if (vals.empty()) { memset(dst, 0, n); out_vmin = out_vmax = 0; return; }
-
     float frac = pct / 100.0f;
-    int lo = (int)(vals.size() * frac);
-    int hi = (int)(vals.size() * (1.0f - frac));
-    if (lo < 0) lo = 0;
-    if (hi >= (int)vals.size()) hi = (int)vals.size() - 1;
-    if (hi <= lo) hi = lo + 1;
-
-    nth_element(vals.begin(), vals.begin() + lo, vals.end());
-    float vmin = vals[lo];
-    nth_element(vals.begin(), vals.begin() + hi, vals.end());
-    float vmax = vals[hi];
-
-    float range = vmax - vmin;
-    if (range < 1e-12f) range = 1.0f;
+    int lo = (int)(vals.size() * frac), hi = (int)(vals.size() * (1.0f - frac));
+    if (lo < 0) lo = 0; if (hi >= (int)vals.size()) hi = (int)vals.size() - 1; if (hi <= lo) hi = lo + 1;
+    nth_element(vals.begin(), vals.begin() + lo, vals.end()); float vmin = vals[lo];
+    nth_element(vals.begin(), vals.begin() + hi, vals.end()); float vmax = vals[hi];
+    float range = vmax - vmin; if (range < 1e-12f) range = 1.0f;
     float scale = 255.0f / range;
-
-    for0(i, n) {
-        float v = (src[i] - vmin) * scale;
-        if (v < 0.f)   v = 0.f;
-        if (v > 255.f) v = 255.f;
-        dst[i] = (unsigned char)v;
-    }
-    out_vmin = vmin;
-    out_vmax = vmax;
+    for0(i, n) { float v = (src[i] - vmin) * scale; dst[i] = (unsigned char)max(0.0f, min(255.0f, v)); }
+    out_vmin = vmin; out_vmax = vmax;
 }
 
-/* overload without out params for callers that don't need them */
-static void histStretchToU8(const float* src, size_t n, unsigned char* dst, float pct = 1.0f) {
-    float dummy1, dummy2;
-    histStretchToU8(src, n, dst, pct, dummy1, dummy2);
-}
-
-/* ────────────── precompute RGB texture for one date ──────────────── */
+/* ─────────── precompute RGB textures from multilooked data ──────── */
 
 static void buildOneRGB(size_t idx) {
-    const BandImage& img = g_images[idx];
-    size_t n = img.width * img.height;
+    size_t n = (size_t)g_mlW * g_mlH;
     auto& tex = g_rgbTextures[idx];
     tex.resize(n * 3);
 
+    const BandImage& img = g_images[idx];
     size_t rgbCount = min(img.nBands, (size_t)3);
+    float* ml = g_mlData[idx];
     vector<unsigned char> chan(n);
     size_t c, i;
 
-    /* try to load cached stretch limits */
     StretchLimits sl;
     bool cached = load_stretch(img.filename, sl);
 
     for0(c, (size_t)3) {
         size_t srcBand = min(c, rgbCount - 1);
+        const float* bandPtr = ml + srcBand * n;
         if (cached) {
-            /* apply cached limits directly */
-            float range = sl.vmax[c] - sl.vmin[c];
-            if (range < 1e-12f) range = 1.0f;
+            float range = sl.vmax[c] - sl.vmin[c]; if (range < 1e-12f) range = 1.0f;
             float scale = 255.0f / range;
-            const float* src = img.band(srcBand);
-            for0(i, n) {
-                float v = (src[i] - sl.vmin[c]) * scale;
-                if (v < 0.f) v = 0.f;
-                if (v > 255.f) v = 255.f;
-                chan[i] = (unsigned char)v;
-            }
+            for0(i, n) { float v = (bandPtr[i] - sl.vmin[c]) * scale; chan[i] = (unsigned char)max(0.0f, min(255.0f, v)); }
         } else {
-            histStretchToU8(img.band(srcBand), n, chan.data(), 1.0f,
-                            sl.vmin[c], sl.vmax[c]);
+            histStretchToU8(bandPtr, n, chan.data(), 1.0f, sl.vmin[c], sl.vmax[c]);
         }
-        for0(i, n)
-            tex[i * 3 + c] = chan[i];
+        for0(i, n) tex[i * 3 + c] = chan[i];
     }
-
     if (!cached) save_stretch(img.filename, sl);
 }
 
@@ -406,12 +381,12 @@ static void pf_buildRGB(size_t idx) { buildOneRGB(idx); }
 static void precomputeAllRGB() {
     size_t nImg = g_images.size();
     g_rgbTextures.resize(nImg);
-    printf("precomputing %zu RGB textures...\n", nImg);
+    printf("precomputing %zu RGB textures (from multilook)...\n", nImg);
     parfor(0, nImg, pf_buildRGB);
     printf("RGB precompute done\n");
 }
 
-/* ──────────────────────────── texture upload ─────────────────────── */
+/* ─────────── texture upload (multilooked dimensions) ────────────── */
 
 static void uploadTexture() {
     glutSetWindow(g_winImage);
@@ -420,121 +395,85 @@ static void uploadTexture() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-
     const auto& tex = g_rgbTextures[g_curIdx];
     if (!g_texAllocated) {
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, g_imgW, g_imgH, 0,
-                     GL_RGB, GL_UNSIGNED_BYTE, tex.data());
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, g_mlW, g_mlH, 0, GL_RGB, GL_UNSIGNED_BYTE, tex.data());
         g_texAllocated = true;
     } else {
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, g_imgW, g_imgH,
-                        GL_RGB, GL_UNSIGNED_BYTE, tex.data());
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, g_mlW, g_mlH, GL_RGB, GL_UNSIGNED_BYTE, tex.data());
     }
 }
 
-/* ──────────────────────────── time-series stats ──────────────────── */
+/* ─────────── time-series: mean/min/max over M×M box ─────────────── */
 
 static void computeTS(int clickIdx, int bandIdx, vector<TSPoint>& out) {
     out.resize(g_images.size());
-    int cx = g_clicks[clickIdx].x;
-    int cy = g_clicks[clickIdx].y;
-    int w  = g_squareWidth;
+    /* click coords are in multilooked image space; map back to full-res box */
+    int mlx = g_clicks[clickIdx].x;
+    int mly = g_clicks[clickIdx].y;
+    int M   = g_mlFactor;
+    int fy0 = mly * M, fx0 = mlx * M;
+    int fy1 = min(fy0 + M, g_fullH);
+    int fx1 = min(fx0 + M, g_fullW);
     size_t t;
     for0(t, g_images.size()) {
-        const BandImage& img = g_images[t];
-        const float* bdata = img.band(bandIdx);
-        double sum = 0, sum2 = 0;
-        int cnt = 0;
-        int yEnd = min(cy + w, (int)img.height);
-        int xEnd = min(cx + w, (int)img.width);
-        for (int row = cy; row < yEnd; row++) {
-            size_t rowOff = (size_t)row * img.width;
-            for (int col = cx; col < xEnd; col++) {
-                float v = bdata[rowOff + col];
-                if (isfinite(v)) {
-                    sum  += v;
-                    sum2 += (double)v * v;
-                    cnt++;
-                }
+        const float* bdata = g_images[t].band(bandIdx);
+        double sum = 0; float lo = FLT_MAX, hi = -FLT_MAX; int cnt = 0;
+        for (int r = fy0; r < fy1; r++) {
+            size_t roff = (size_t)r * g_images[t].width;
+            for (int c = fx0; c < fx1; c++) {
+                float v = bdata[roff + c];
+                if (isfinite(v)) { sum += v; if (v < lo) lo = v; if (v > hi) hi = v; cnt++; }
             }
         }
-        if (cnt > 0) {
-            float m = (float)(sum / cnt);
-            float s = (float)sqrt(max(0.0, sum2 / cnt - (double)m * m));
-            out[t] = {m, s};
-        } else {
-            out[t] = {0.0f, 0.0f};
-        }
+        if (cnt > 0) out[t] = { (float)(sum / cnt), lo, hi };
+        else         out[t] = { 0.0f, 0.0f, 0.0f };
     }
 }
 
-/* NBR = (B08 - B12) / (B08 + B12) */
 static void computeNBR_TS(int clickIdx, vector<TSPoint>& out) {
     out.resize(g_images.size());
-    int cx = g_clicks[clickIdx].x;
-    int cy = g_clicks[clickIdx].y;
-    int w  = g_squareWidth;
+    int mlx = g_clicks[clickIdx].x, mly = g_clicks[clickIdx].y;
+    int M = g_mlFactor;
+    int fy0 = mly * M, fx0 = mlx * M;
+    int fy1 = min(fy0 + M, g_fullH), fx1 = min(fx0 + M, g_fullW);
     size_t t;
     for0(t, g_images.size()) {
-        const BandImage& img = g_images[t];
-        const float* b08 = img.band(g_b08_idx);
-        const float* b12 = img.band(g_b12_idx);
-        double sum = 0, sum2 = 0;
-        int cnt = 0;
-        int yEnd = min(cy + w, (int)img.height);
-        int xEnd = min(cx + w, (int)img.width);
-        for (int row = cy; row < yEnd; row++) {
-            size_t rowOff = (size_t)row * img.width;
-            for (int col = cx; col < xEnd; col++) {
-                float v8  = b08[rowOff + col];
-                float v12 = b12[rowOff + col];
+        const float* b08 = g_images[t].band(g_b08_idx);
+        const float* b12 = g_images[t].band(g_b12_idx);
+        double sum = 0; float lo = FLT_MAX, hi = -FLT_MAX; int cnt = 0;
+        for (int r = fy0; r < fy1; r++) {
+            size_t roff = (size_t)r * g_images[t].width;
+            for (int c = fx0; c < fx1; c++) {
+                float v8 = b08[roff + c], v12 = b12[roff + c];
                 if (isfinite(v8) && isfinite(v12)) {
-                    float denom = v8 + v12;
-                    float nbr = (fabsf(denom) > 1e-12f) ? (v8 - v12) / denom : 0.0f;
-                    sum  += nbr;
-                    sum2 += (double)nbr * nbr;
-                    cnt++;
+                    float d = v8 + v12;
+                    float nbr = (fabsf(d) > 1e-12f) ? (v8 - v12) / d : 0.0f;
+                    sum += nbr; if (nbr < lo) lo = nbr; if (nbr > hi) hi = nbr; cnt++;
                 }
             }
         }
-        if (cnt > 0) {
-            float m = (float)(sum / cnt);
-            float s = (float)sqrt(max(0.0, sum2 / cnt - (double)m * m));
-            out[t] = {m, s};
-        } else {
-            out[t] = {0.0f, 0.0f};
-        }
+        if (cnt > 0) out[t] = { (float)(sum / cnt), lo, hi };
+        else         out[t] = { 0.0f, 0.0f, 0.0f };
     }
 }
 
-/* ──────────────── GLUT display: image window ─────────────────────── */
+/* ─────────── GLUT display: image window ─────────────────────────── */
 
 static void imgQuad(float& x0, float& y0, float& x1, float& y1) {
-    float winAspect = (float)g_dispW / g_dispH;
-    float imgAspect = (float)g_imgW / g_imgH;
-    if (imgAspect > winAspect) {
-        x0 = -1.0f; x1 = 1.0f;
-        float h = 2.0f * winAspect / imgAspect;
-        y0 = -h / 2; y1 = h / 2;
-    } else {
-        y0 = -1.0f; y1 = 1.0f;
-        float w = 2.0f * imgAspect / winAspect;
-        x0 = -w / 2; x1 = w / 2;
-    }
+    float wa = (float)g_dispW / g_dispH, ia = (float)g_mlW / g_mlH;
+    if (ia > wa) { x0 = -1; x1 = 1; float h = 2.0f * wa / ia; y0 = -h/2; y1 = h/2; }
+    else { y0 = -1; y1 = 1; float w = 2.0f * ia / wa; x0 = -w/2; x1 = w/2; }
 }
 
 static void displayImage() {
     glutSetWindow(g_winImage);
     glClearColor(0.12f, 0.12f, 0.14f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
-
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, g_texId);
     glColor3f(1, 1, 1);
-
-    float x0, y0, x1, y1;
-    imgQuad(x0, y0, x1, y1);
-
+    float x0, y0, x1, y1; imgQuad(x0, y0, x1, y1);
     glBegin(GL_QUADS);
     glTexCoord2f(0, 0); glVertex2f(x0, y1);
     glTexCoord2f(1, 0); glVertex2f(x1, y1);
@@ -543,17 +482,15 @@ static void displayImage() {
     glEnd();
     glDisable(GL_TEXTURE_2D);
 
+    /* draw sampling squares (1 pixel in multilooked space) */
     size_t i;
     for0(i, g_clicks.size()) {
         const float* col = g_colors[i % g_nColors];
-        glColor3fv(col);
-        glLineWidth(2.0f);
-
-        float px0 = x0 + (x1 - x0) * (float)g_clicks[i].x / g_imgW;
-        float py0 = y1 - (y1 - y0) * (float)g_clicks[i].y / g_imgH;
-        float px1 = x0 + (x1 - x0) * (float)(g_clicks[i].x + g_squareWidth) / g_imgW;
-        float py1 = y1 - (y1 - y0) * (float)(g_clicks[i].y + g_squareWidth) / g_imgH;
-
+        glColor3fv(col); glLineWidth(2.0f);
+        float px0 = x0 + (x1 - x0) * (float)g_clicks[i].x / g_mlW;
+        float py0 = y1 - (y1 - y0) * (float)g_clicks[i].y / g_mlH;
+        float px1 = x0 + (x1 - x0) * (float)(g_clicks[i].x + 1) / g_mlW;
+        float py1 = y1 - (y1 - y0) * (float)(g_clicks[i].y + 1) / g_mlH;
         glBegin(GL_LINE_LOOP);
         glVertex2f(px0, py0); glVertex2f(px1, py0);
         glVertex2f(px1, py1); glVertex2f(px0, py1);
@@ -561,34 +498,31 @@ static void displayImage() {
     }
 
     char title[512];
-    snprintf(title, sizeof(title), "[%d/%d] %s",
-             g_curIdx + 1, (int)g_filenames.size(), g_filenames[g_curIdx].c_str());
+    snprintf(title, sizeof(title), "[%d/%d] %s  (M=%d, %dx%d)",
+             g_curIdx + 1, (int)g_filenames.size(), g_filenames[g_curIdx].c_str(),
+             g_mlFactor, g_mlW, g_mlH);
     glutSetWindowTitle(title);
     glutSwapBuffers();
 }
 
-/* ──────────────── generic TS drawing (bands and NBR) ─────────────── */
+/* ─────────── generic TS drawing (mean solid, min/max dashed) ───── */
 
 static void drawTSGeneric(const char* label,
                           function<void(int, vector<TSPoint>&)> computeFn) {
     glClearColor(0.95f, 0.95f, 0.93f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
     glutSetWindowTitle(label);
-
     int nT = (int)g_images.size();
     if (g_clicks.empty() || nT < 2) { glutSwapBuffers(); return; }
 
     float globalMin = FLT_MAX, globalMax = -FLT_MAX;
     vector<vector<TSPoint>> allTS(g_clicks.size());
-    size_t c;
-    int t;
+    size_t c; int t;
     for0(c, g_clicks.size()) {
         computeFn((int)c, allTS[c]);
         for0(t, nT) {
-            float lo = allTS[c][t].mean - allTS[c][t].stddev;
-            float hi = allTS[c][t].mean + allTS[c][t].stddev;
-            if (lo < globalMin) globalMin = lo;
-            if (hi > globalMax) globalMax = hi;
+            if (allTS[c][t].mn < globalMin) globalMin = allTS[c][t].mn;
+            if (allTS[c][t].mx > globalMax) globalMax = allTS[c][t].mx;
         }
     }
     float yRange = globalMax - globalMin;
@@ -597,548 +531,331 @@ static void drawTSGeneric(const char* label,
     float ml = 0.12f, mr = 0.05f, mb = 0.10f, mt = 0.08f;
     float pw = 1.0f - ml - mr, ph = 1.0f - mb - mt;
 
-    glColor3f(0.3f, 0.3f, 0.3f);
-    glLineWidth(1.0f);
+    glColor3f(0.3f, 0.3f, 0.3f); glLineWidth(1.0f);
     glBegin(GL_LINE_LOOP);
     glVertex2f(ml, mb); glVertex2f(ml + pw, mb);
     glVertex2f(ml + pw, mb + ph); glVertex2f(ml, mb + ph);
     glEnd();
 
-    {
-        float xn = ml + pw * (float)g_curIdx / (nT - 1);
-        glColor3f(0.6f, 0.6f, 0.6f);
-        glEnable(GL_LINE_STIPPLE);
-        glLineStipple(1, 0x00FF);
-        glBegin(GL_LINES); glVertex2f(xn, mb); glVertex2f(xn, mb + ph); glEnd();
-        glDisable(GL_LINE_STIPPLE);
-    }
+    { float xn = ml + pw * (float)g_curIdx / (nT - 1);
+      glColor3f(0.6f, 0.6f, 0.6f); glEnable(GL_LINE_STIPPLE); glLineStipple(1, 0x00FF);
+      glBegin(GL_LINES); glVertex2f(xn, mb); glVertex2f(xn, mb + ph); glEnd();
+      glDisable(GL_LINE_STIPPLE); }
 
     for0(c, g_clicks.size()) {
         const float* col = g_colors[c % g_nColors];
         const auto& ts = allTS[c];
 
+        /* mean (solid) */
         glColor3fv(col); glLineWidth(2.0f);
         glBegin(GL_LINE_STRIP);
-        for0(t, nT) {
-            float xn = ml + pw * (float)t / (nT - 1);
-            float yn = mb + ph * (ts[t].mean - globalMin) / yRange;
-            glVertex2f(xn, yn);
-        }
+        for0(t, nT) { float xn = ml + pw * (float)t / (nT-1);
+            float yn = mb + ph * (ts[t].mean - globalMin) / yRange; glVertex2f(xn, yn); }
         glEnd();
 
-        glLineWidth(1.0f);
-        glEnable(GL_LINE_STIPPLE);
-        glLineStipple(2, 0xAAAA);
+        /* max (dashed) */
+        glLineWidth(1.0f); glEnable(GL_LINE_STIPPLE); glLineStipple(2, 0xAAAA);
         glBegin(GL_LINE_STRIP);
-        for0(t, nT) {
-            float xn = ml + pw * (float)t / (nT - 1);
-            float yn = mb + ph * ((ts[t].mean + ts[t].stddev) - globalMin) / yRange;
-            glVertex2f(xn, yn);
-        }
+        for0(t, nT) { float xn = ml + pw * (float)t / (nT-1);
+            float yn = mb + ph * (ts[t].mx - globalMin) / yRange; glVertex2f(xn, yn); }
         glEnd();
 
+        /* min (dotted) */
         glLineStipple(1, 0x3333);
         glBegin(GL_LINE_STRIP);
-        for0(t, nT) {
-            float xn = ml + pw * (float)t / (nT - 1);
-            float yn = mb + ph * ((ts[t].mean - ts[t].stddev) - globalMin) / yRange;
-            glVertex2f(xn, yn);
-        }
+        for0(t, nT) { float xn = ml + pw * (float)t / (nT-1);
+            float yn = mb + ph * (ts[t].mn - globalMin) / yRange; glVertex2f(xn, yn); }
         glEnd();
         glDisable(GL_LINE_STIPPLE);
     }
 
-    /* Y-axis labels */
-    glColor3f(0.2f, 0.2f, 0.2f);
-    char buf[64];
-    int yi;
-    for0(yi, 5) {
-        float frac = (float)yi / 4.0f;
-        float val  = globalMin + yRange * frac;
-        float yn   = mb + ph * frac;
-        snprintf(buf, sizeof(buf), "%.3g", val);
+    glColor3f(0.2f, 0.2f, 0.2f); char buf[64]; int yi;
+    for0(yi, 5) { float frac = (float)yi / 4.0f; float val = globalMin + yRange * frac;
+        float yn = mb + ph * frac; snprintf(buf, sizeof(buf), "%.3g", val);
         glRasterPos2f(0.005f, yn - 0.01f);
-        for (char* p = buf; *p; p++)
-            glutBitmapCharacter(GLUT_BITMAP_HELVETICA_10, *p);
-    }
+        for (char* p = buf; *p; p++) glutBitmapCharacter(GLUT_BITMAP_HELVETICA_10, *p); }
 
-    /* X-axis labels */
     glRasterPos2f(ml, 0.01f);
-    { const char* p; for (p = g_filenames.front().c_str(); *p; p++)
-        glutBitmapCharacter(GLUT_BITMAP_HELVETICA_10, *p); }
-    float labelX = ml + pw - 0.15f;
-    if (labelX < ml) labelX = ml;
-    glRasterPos2f(labelX, 0.01f);
-    { const char* p; for (p = g_filenames.back().c_str(); *p; p++)
-        glutBitmapCharacter(GLUT_BITMAP_HELVETICA_10, *p); }
-
+    { const char* p; for (p = g_filenames.front().c_str(); *p; p++) glutBitmapCharacter(GLUT_BITMAP_HELVETICA_10, *p); }
+    float lx = ml + pw - 0.15f; if (lx < ml) lx = ml;
+    glRasterPos2f(lx, 0.01f);
+    { const char* p; for (p = g_filenames.back().c_str(); *p; p++) glutBitmapCharacter(GLUT_BITMAP_HELVETICA_10, *p); }
     glutSwapBuffers();
 }
-
-/* ──────────────── TS window dispatch ─────────────────────────────── */
 
 static void drawTSForBand(int bandIdx) {
     char title[128];
     if (bandIdx < (int)g_bandNames.size())
         snprintf(title, sizeof(title), "%s (band %d)", g_bandNames[bandIdx].c_str(), bandIdx + 1);
-    else
-        snprintf(title, sizeof(title), "Band %d", bandIdx + 1);
-
-    drawTSGeneric(title, [bandIdx](int ci, vector<TSPoint>& out) {
-        computeTS(ci, bandIdx, out);
-    });
+    else snprintf(title, sizeof(title), "Band %d", bandIdx + 1);
+    drawTSGeneric(title, [bandIdx](int ci, vector<TSPoint>& out) { computeTS(ci, bandIdx, out); });
 }
 
 static void displayNBR() {
-    drawTSGeneric("NBR = (B08-B12)/(B08+B12)", [](int ci, vector<TSPoint>& out) {
-        computeNBR_TS(ci, out);
-    });
+    drawTSGeneric("NBR = (B08-B12)/(B08+B12)", [](int ci, vector<TSPoint>& out) { computeNBR_TS(ci, out); });
 }
 
 static void displayTS_dispatch() {
     int win = glutGetWindow();
-
     if (g_hasNBR && win == g_winNBR) { displayNBR(); return; }
-
-    size_t i;
-    for0(i, g_winTS.size()) {
-        if (g_winTS[i] == win) {
-            drawTSForBand(g_tsWindowBandMap[i]);
-            return;
-        }
-    }
+    size_t i; for0(i, g_winTS.size()) if (g_winTS[i] == win) { drawTSForBand(g_tsWindowBandMap[i]); return; }
 }
 
-/* ──────────────────────── refresh all windows ────────────────────── */
+/* ─────────── refresh ────────────────────────────────────────────── */
 
 static void refreshAll() {
     uploadTexture();
-    glutSetWindow(g_winImage);
-    glutPostRedisplay();
-
-    size_t i;
-    for0(i, g_winTS.size()) {
-        glutSetWindow(g_winTS[i]);
-        glutPostRedisplay();
-    }
-    if (g_hasNBR && g_winNBR > 0) {
-        glutSetWindow(g_winNBR);
-        glutPostRedisplay();
-    }
+    glutSetWindow(g_winImage); glutPostRedisplay();
+    size_t i; for0(i, g_winTS.size()) { glutSetWindow(g_winTS[i]); glutPostRedisplay(); }
+    if (g_hasNBR && g_winNBR > 0) { glutSetWindow(g_winNBR); glutPostRedisplay(); }
 }
 
-/* ──────────────────── clean exit ─────────────────────────────────── */
+/* ─────────── clean exit ─────────────────────────────────────────── */
 
 static void cleanExit() {
     printf("clean exit\n");
-    /* free image data */
-    size_t i;
-    for0(i, g_images.size()) {
-        if (g_images[i].data) { free(g_images[i].data); g_images[i].data = nullptr; }
-    }
+    size_t i; for0(i, g_images.size()) if (g_images[i].data) { free(g_images[i].data); g_images[i].data = nullptr; }
+    for0(i, g_mlData.size()) if (g_mlData[i]) { free(g_mlData[i]); g_mlData[i] = nullptr; }
     exit(0);
 }
 
-/* ──────────────────────── input callbacks ────────────────────────── */
+/* ─────────── input callbacks ────────────────────────────────────── */
 
 static void keyboardAll(unsigned char key, int, int) {
-    if (key == 'q' || key == 27) cleanExit();  /* q or Escape */
-    if (key == 'c' || key == 'C') {
-        g_clicks.clear();
-        printf("cleared all squares\n");
-        refreshAll();
-    }
+    if (key == 'q' || key == 27) cleanExit();
+    if (key == 'c' || key == 'C') { g_clicks.clear(); printf("cleared\n"); refreshAll(); }
 }
 
 static void specialAll(int key, int, int) {
     if (key == GLUT_KEY_RIGHT) {
         g_curIdx = (g_curIdx + 1) % (int)g_images.size();
-        printf("-> [%d] %s\n", g_curIdx, g_filenames[g_curIdx].c_str());
-        refreshAll();
+        printf("-> [%d] %s\n", g_curIdx, g_filenames[g_curIdx].c_str()); refreshAll();
     } else if (key == GLUT_KEY_LEFT) {
         g_curIdx = (g_curIdx - 1 + (int)g_images.size()) % (int)g_images.size();
-        printf("-> [%d] %s\n", g_curIdx, g_filenames[g_curIdx].c_str());
-        refreshAll();
+        printf("-> [%d] %s\n", g_curIdx, g_filenames[g_curIdx].c_str()); refreshAll();
     }
 }
 
 static void mouseImage(int button, int state, int mx, int my) {
     if (state != GLUT_DOWN) return;
-
-    if (button == GLUT_RIGHT_BUTTON) {
-        g_clicks.clear();
-        printf("cleared all squares\n");
-        refreshAll();
-        return;
-    }
+    if (button == GLUT_RIGHT_BUTTON) { g_clicks.clear(); printf("cleared\n"); refreshAll(); return; }
     if (button != GLUT_LEFT_BUTTON) return;
 
-    float x0, y0, x1, y1;
-    imgQuad(x0, y0, x1, y1);
-
-    float wx0 = (x0 + 1.0f) / 2.0f * g_dispW;
-    float wx1 = (x1 + 1.0f) / 2.0f * g_dispW;
-    float wy0 = (1.0f - y1) / 2.0f * g_dispH;
-    float wy1 = (1.0f - y0) / 2.0f * g_dispH;
-
+    float x0, y0, x1, y1; imgQuad(x0, y0, x1, y1);
+    float wx0 = (x0 + 1.0f) / 2.0f * g_dispW, wx1 = (x1 + 1.0f) / 2.0f * g_dispW;
+    float wy0 = (1.0f - y1) / 2.0f * g_dispH, wy1 = (1.0f - y0) / 2.0f * g_dispH;
     float fx = (float)mx, fy = (float)my;
     if (fx < wx0 || fx > wx1 || fy < wy0 || fy > wy1) return;
 
-    int px = (int)((fx - wx0) / (wx1 - wx0) * g_imgW);
-    int py = (int)((fy - wy0) / (wy1 - wy0) * g_imgH);
-    px = max(0, min(px, g_imgW - 1));
-    py = max(0, min(py, g_imgH - 1));
+    int px = (int)((fx - wx0) / (wx1 - wx0) * g_mlW);
+    int py = (int)((fy - wy0) / (wy1 - wy0) * g_mlH);
+    px = max(0, min(px, g_mlW - 1));
+    py = max(0, min(py, g_mlH - 1));
 
     g_clicks.push_back({px, py});
-    /* keep only the last 3 clicks */
-    while ((int)g_clicks.size() > g_maxClicks)
-        g_clicks.erase(g_clicks.begin());
-    printf("click #%d at pixel (%d, %d)\n", (int)g_clicks.size(), px, py);
+    while ((int)g_clicks.size() > g_maxClicks) g_clicks.erase(g_clicks.begin());
+    printf("click at ml(%d,%d) -> full-res box [%d:%d, %d:%d]\n",
+           px, py, py * g_mlFactor, min(py * g_mlFactor + g_mlFactor, g_fullH),
+           px * g_mlFactor, min(px * g_mlFactor + g_mlFactor, g_fullW));
     refreshAll();
 }
 
 static void reshapeImage(int w, int h) {
-    g_dispW = w; g_dispH = h;
-    glViewport(0, 0, w, h);
-    glMatrixMode(GL_PROJECTION); glLoadIdentity();
-    gluOrtho2D(-1, 1, -1, 1);
+    g_dispW = w; g_dispH = h; glViewport(0, 0, w, h);
+    glMatrixMode(GL_PROJECTION); glLoadIdentity(); gluOrtho2D(-1, 1, -1, 1);
     glMatrixMode(GL_MODELVIEW); glLoadIdentity();
 }
 
 static void reshapeTS(int w, int h) {
     glViewport(0, 0, w, h);
-    glMatrixMode(GL_PROJECTION); glLoadIdentity();
-    gluOrtho2D(0, 1, 0, 1);
+    glMatrixMode(GL_PROJECTION); glLoadIdentity(); gluOrtho2D(0, 1, 0, 1);
     glMatrixMode(GL_MODELVIEW); glLoadIdentity();
 }
 
-/* ──────────────── parallel file loading via parfor ───────────────── */
+/* ─────────── file loading ───────────────────────────────────────── */
 
-struct LoadSlot {
-    string path;
-    size_t nrow, ncol, nband;
-    vector<string> bandNames;
-    float* data;
-    int ok;
-};
-
+struct LoadSlot { string path; size_t nrow, ncol, nband; vector<string> bandNames; float* data; int ok; };
 static vector<LoadSlot> g_loadSlots;
-
 static void pf_loadFile(size_t idx) {
     LoadSlot& s = g_loadSlots[idx];
-    FILE* f = fopen(s.path.c_str(), "rb");
-    if (!f) { s.ok = 0; return; }
+    FILE* f = fopen(s.path.c_str(), "rb"); if (!f) { s.ok = 0; return; }
     size_t nf = s.nrow * s.ncol * s.nband;
     s.data = (float*)malloc(nf * sizeof(float));
     if (!s.data) { fclose(f); s.ok = 0; return; }
-    size_t nr = fread(s.data, sizeof(float), nf, f);
-    fclose(f);
-    s.ok = (nr == nf) ? 1 : 0;
-    if (!s.ok) { free(s.data); s.data = nullptr; }
+    size_t nr = fread(s.data, sizeof(float), nf, f); fclose(f);
+    s.ok = (nr == nf) ? 1 : 0; if (!s.ok) { free(s.data); s.data = nullptr; }
 }
 
-/* ──────── parallel pairwise duplicate detection ─────────────────── */
-
-static vector<int> g_dupFlag; /* 1 = this index is a duplicate of previous */
-
+static vector<int> g_dupFlag;
 static void pf_checkDup(size_t idx) {
-    /* compare image idx with image idx+1 */
-    const BandImage& a = g_images[idx];
-    const BandImage& b = g_images[idx + 1];
+    const BandImage& a = g_images[idx], &b = g_images[idx + 1];
     size_t n = a.width * a.height * a.nBands;
-    if (memcmp(a.data, b.data, n * sizeof(float)) == 0) {
-        g_dupFlag[idx + 1] = 1; /* mark the later one as duplicate */
-    }
+    if (memcmp(a.data, b.data, n * sizeof(float)) == 0) g_dupFlag[idx + 1] = 1;
 }
 
-/* ──────────────────────────── main ───────────────────────────────── */
+/* ─────────── main ───────────────────────────────────────────────── */
 
 int main(int argc, char** argv) {
-    g_dir = ".";
-    string ext = "bin";
-    int startIdx = 0;
-    size_t i;
+    g_dir = "."; string ext = "bin"; int startIdx = 0; size_t i;
 
     for (int a = 1; a < argc; a++) {
-        if (!strcmp(argv[a], "-d") && a + 1 < argc)      { g_dir = argv[++a]; }
-        else if (!strcmp(argv[a], "-w") && a + 1 < argc)  { g_squareWidth = atoi(argv[++a]); }
-        else if (!strcmp(argv[a], "-i") && a + 1 < argc)  { startIdx = atoi(argv[++a]); }
-        else if (!strcmp(argv[a], "-e") && a + 1 < argc)  { ext = argv[++a]; }
+        if (!strcmp(argv[a], "-d") && a+1 < argc) g_dir = argv[++a];
+        else if (!strcmp(argv[a], "-w") && a+1 < argc) g_squareWidth = atoi(argv[++a]);
+        else if (!strcmp(argv[a], "-i") && a+1 < argc) startIdx = atoi(argv[++a]);
+        else if (!strcmp(argv[a], "-e") && a+1 < argc) ext = argv[++a];
         else if (!strcmp(argv[a], "-h") || !strcmp(argv[a], "--help")) {
-            printf(
-                "Usage: %s [-d dir] [-w square_width] [-i index] [-e ext]\n\n"
-                "  -d <dir>   Directory of ENVI .bin/.hdr files      (default: .)\n"
-                "  -w <int>   Sampling square side-length in pixels  (default: 10)\n"
-                "  -i <int>   Initial image index (0-based, -1=last) (default: 0)\n"
-                "  -e <ext>   File extension to filter for           (default: bin)\n\n"
-                "Controls (work in every window):\n"
-                "  Left/Right arrows  Navigate forward/backward in time\n"
-                "  Left-click image   Add sampling square, update time series\n"
-                "  Right-click image  Clear all squares and traces\n"
-                "  c                  Clear all squares and traces\n"
-                "  q / Escape         Clean exit\n",
-                argv[0]);
-            return 0;
+            printf("Usage: %s [-d dir] [-w width] [-i index] [-e ext]\n", argv[0]); return 0;
         }
     }
 
-    /* ═══════════════ 1. SCAN DIRECTORY ══════════════════════════════ */
-
+    /* ═══════ 1. SCAN DIRECTORY ═══════════════════════════════════── */
     bool has_bin = false, has_tif = false;
     vector<string> allNames;
-    {
-        DIR* dp = opendir(g_dir.c_str());
-        if (!dp) { fprintf(stderr, "cannot open directory %s\n", g_dir.c_str()); return 1; }
-        struct dirent* ent;
-        while ((ent = readdir(dp)) != nullptr) {
-            string fname(ent->d_name);
-            size_t len = fname.size();
-            if (len > 4 && fname.compare(len - 4, 4, ".bin") == 0 &&
-                fname.compare(0, 9, ".restore_") != 0) has_bin = true;
-            if (len > 4 && fname.compare(len - 4, 4, ".tif") == 0 &&
-                fname.compare(0, 9, ".restore_") != 0) has_tif = true;
+    { DIR* dp = opendir(g_dir.c_str());
+      if (!dp) { fprintf(stderr, "cannot open %s\n", g_dir.c_str()); return 1; }
+      struct dirent* ent;
+      while ((ent = readdir(dp)) != nullptr) {
+          string fname(ent->d_name); size_t len = fname.size();
+          if (len > 4 && fname.compare(len-4,4,".bin")==0 && fname.compare(0,9,".restore_")!=0) has_bin = true;
+          if (len > 4 && fname.compare(len-4,4,".tif")==0 && fname.compare(0,9,".restore_")!=0) has_tif = true;
+          string dotExt = string(".") + ext;
+          if (len > dotExt.size() && fname.compare(len-dotExt.size(), dotExt.size(), dotExt)==0 &&
+              fname.compare(0,9,".restore_")!=0) allNames.push_back(fname);
+      } closedir(dp); }
+    if (has_bin && has_tif) err("directory has both .bin and .tif — separate them");
+    if (allNames.empty()) { fprintf(stderr, "no .%s files in %s\n", ext.c_str(), g_dir.c_str()); return 1; }
 
-            string dotExt = string(".") + ext;
-            if (len > dotExt.size() &&
-                fname.compare(len - dotExt.size(), dotExt.size(), dotExt) == 0 &&
-                fname.compare(0, 9, ".restore_") != 0) {
-                allNames.push_back(fname);
-            }
-        }
-        closedir(dp);
-    }
-
-    if (has_bin && has_tif) {
-        err("directory contains both .bin and .tif files — please separate them");
-    }
-
-    if (allNames.empty()) {
-        fprintf(stderr, "no .%s files found in %s\n", ext.c_str(), g_dir.c_str());
-        return 1;
-    }
-
-    /* ═══════════════ 2. SORT BY TIMESTAMP ═══════════════════════════ */
-
-    /* extract timestamps for sorting */
+    /* ═══════ 2. SORT BY TIMESTAMP ═══════════════════════════════── */
     map<string, string> fname_to_ts;
-    for0(i, allNames.size()) {
-        string ts = extract_timestamp(allNames[i]);
-        fname_to_ts[allNames[i]] = ts;
-    }
-
+    for0(i, allNames.size()) fname_to_ts[allNames[i]] = extract_timestamp(allNames[i]);
     sort(allNames.begin(), allNames.end(), [&](const string& a, const string& b) {
-        const string& ta = fname_to_ts[a];
-        const string& tb = fname_to_ts[b];
+        const string &ta = fname_to_ts[a], &tb = fname_to_ts[b];
         if (ta.empty() && tb.empty()) return a < b;
-        if (ta.empty()) return false; /* no timestamp sorts last */
-        if (tb.empty()) return true;
-        if (ta != tb) return ta < tb;
-        return a < b; /* stable tie-break on full name */
+        if (ta.empty()) return false; if (tb.empty()) return true;
+        return (ta != tb) ? ta < tb : a < b;
     });
+    printf("found %zu .%s files (sorted by timestamp)\n", allNames.size(), ext.c_str());
 
-    printf("found %zu .%s files in %s (sorted by timestamp)\n",
-           allNames.size(), ext.c_str(), g_dir.c_str());
-    for0(i, allNames.size())
-        printf("  [%zu] %s  ts=%s\n", i, allNames[i].c_str(), fname_to_ts[allNames[i]].c_str());
-
-    /* ═══════════════ 3. CHECK FOR CACHED DUPLICATES ════════════════ */
-
+    /* ═══════ 3. CACHED DUPLICATES ═══════════════════════════════── */
     set<string> cached_dups = load_duplicates();
     if (!cached_dups.empty()) {
-        printf("loaded %zu cached duplicate filenames from .restore_duplicates\n", cached_dups.size());
         vector<string> filtered;
-        for0(i, allNames.size()) {
-            if (cached_dups.count(allNames[i]) == 0)
-                filtered.push_back(allNames[i]);
-            else
-                printf("  skipping cached duplicate: %s\n", allNames[i].c_str());
-        }
+        for0(i, allNames.size()) if (cached_dups.count(allNames[i]) == 0) filtered.push_back(allNames[i]);
         allNames = move(filtered);
     }
+    g_filenames = allNames; size_t nFiles = g_filenames.size();
 
-    g_filenames = allNames;
-    size_t nFiles = g_filenames.size();
-
-    /* ═══════════════ 4. READ HEADERS & PRE-CHECK DIMENSIONS ════════ */
-
+    /* ═══════ 4. READ HEADERS & PRE-CHECK ════════════════════════── */
     g_loadSlots.resize(nFiles);
     for0(i, nFiles) {
-        string path = g_dir + "/" + g_filenames[i];
-        string hfn  = hdr_fn(path);
-        g_loadSlots[i].path = path;
-        g_loadSlots[i].data = nullptr;
-        g_loadSlots[i].ok = 0;
-        hread(hfn, g_loadSlots[i].nrow, g_loadSlots[i].ncol,
-              g_loadSlots[i].nband, g_loadSlots[i].bandNames);
+        string path = g_dir + "/" + g_filenames[i], hfn = hdr_fn(path);
+        g_loadSlots[i].path = path; g_loadSlots[i].data = nullptr; g_loadSlots[i].ok = 0;
+        hread(hfn, g_loadSlots[i].nrow, g_loadSlots[i].ncol, g_loadSlots[i].nband, g_loadSlots[i].bandNames);
     }
+    { map<string, int> dc;
+      for0(i, nFiles) { char k[128]; snprintf(k,128,"%zu_%zu_%zu", g_loadSlots[i].nrow, g_loadSlots[i].ncol, g_loadSlots[i].nband); dc[string(k)]++; }
+      string mk; int mc = 0; for (auto& kv : dc) if (kv.second > mc) { mc = kv.second; mk = kv.first; }
+      size_t mr, mcc, mb; sscanf(mk.c_str(), "%zu_%zu_%zu", &mr, &mcc, &mb);
+      size_t eb = mr * mcc * mb * sizeof(float); bool mis = false;
+      for0(i, nFiles) { char k[128]; snprintf(k,128,"%zu_%zu_%zu", g_loadSlots[i].nrow, g_loadSlots[i].ncol, g_loadSlots[i].nband);
+          if (string(k)!=mk) { fprintf(stderr,"DIM MISMATCH: %s\n", g_filenames[i].c_str()); mis=true; }
+          if (fsize(g_loadSlots[i].path) != eb) { fprintf(stderr,"SIZE MISMATCH: %s\n", g_filenames[i].c_str()); mis=true; } }
+      if (mis) err("dimension/size mismatches"); }
 
-    /* find majority dimensions */
-    {
-        map<string, int> dim_counts;
-        for0(i, nFiles) {
-            char key[128];
-            snprintf(key, sizeof(key), "%zu_%zu_%zu",
-                     g_loadSlots[i].nrow, g_loadSlots[i].ncol, g_loadSlots[i].nband);
-            dim_counts[string(key)]++;
-        }
-        /* find majority */
-        string majority_key;
-        int majority_count = 0;
-        for (auto& kv : dim_counts) {
-            if (kv.second > majority_count) {
-                majority_count = kv.second;
-                majority_key = kv.first;
-            }
-        }
-        /* check expected file sizes */
-        size_t maj_nrow, maj_ncol, maj_nband;
-        sscanf(majority_key.c_str(), "%zu_%zu_%zu", &maj_nrow, &maj_ncol, &maj_nband);
-        size_t expected_bytes = maj_nrow * maj_ncol * maj_nband * sizeof(float);
-
-        bool mismatch = false;
-        for0(i, nFiles) {
-            char key[128];
-            snprintf(key, sizeof(key), "%zu_%zu_%zu",
-                     g_loadSlots[i].nrow, g_loadSlots[i].ncol, g_loadSlots[i].nband);
-            if (string(key) != majority_key) {
-                fprintf(stderr, "DIMENSION MISMATCH: %s has %zux%zu, %zu bands "
-                        "(expected %zux%zu, %zu bands)\n",
-                        g_filenames[i].c_str(),
-                        g_loadSlots[i].ncol, g_loadSlots[i].nrow, g_loadSlots[i].nband,
-                        maj_ncol, maj_nrow, maj_nband);
-                mismatch = true;
-            }
-            /* also check file size on disk */
-            size_t actual = fsize(g_loadSlots[i].path);
-            if (actual != expected_bytes) {
-                fprintf(stderr, "FILE SIZE MISMATCH: %s is %zu bytes (expected %zu)\n",
-                        g_filenames[i].c_str(), actual, expected_bytes);
-                mismatch = true;
-            }
-        }
-        if (mismatch) err("dimension/size mismatches found — please fix or remove the offending files");
-    }
-
-    /* ═══════════════ 5. PARALLEL BINARY READS ══════════════════════ */
-
-    printf("loading %zu files (parallel fread)...\n", nFiles);
+    /* ═══════ 5. PARALLEL LOAD ═══════════════════════════════════── */
+    printf("loading %zu files...\n", nFiles);
     parfor(0, nFiles, pf_loadFile);
+    { vector<string> gn;
+      for0(i, nFiles) { LoadSlot& s = g_loadSlots[i]; if (!s.ok) continue;
+          BandImage img; img.width=s.ncol; img.height=s.nrow; img.nBands=s.nband;
+          img.data=s.data; img.bandNames=move(s.bandNames); img.filename=g_filenames[i];
+          img.timestamp=fname_to_ts[g_filenames[i]]; g_images.push_back(move(img)); gn.push_back(g_filenames[i]); }
+      g_filenames = move(gn); }
+    if (g_images.empty()) err("no files loaded");
 
-    /* collect successful loads */
-    {
-        vector<string> goodNames;
-        for0(i, nFiles) {
-            LoadSlot& s = g_loadSlots[i];
-            if (!s.ok) {
-                fprintf(stderr, "warning: failed to load %s\n", s.path.c_str());
-                continue;
-            }
-            BandImage img;
-            img.width     = s.ncol;
-            img.height    = s.nrow;
-            img.nBands    = s.nband;
-            img.data      = s.data;
-            img.bandNames = move(s.bandNames);
-            img.filename  = g_filenames[i];
-            img.timestamp = fname_to_ts[g_filenames[i]];
-            g_images.push_back(move(img));
-            goodNames.push_back(g_filenames[i]);
-        }
-        g_filenames = move(goodNames);
-    }
-
-    if (g_images.empty()) err("no files loaded successfully");
-
-    /* ═══════════════ 6. PARALLEL DUPLICATE REMOVAL ═════════════════ */
-
+    /* ═══════ 6. DUPLICATE REMOVAL ═══════════════════════════════── */
     if (g_images.size() >= 2 && cached_dups.empty()) {
-        printf("checking %zu pairs for duplicates (parallel memcmp)...\n", g_images.size() - 1);
         g_dupFlag.assign(g_images.size(), 0);
-        parfor(0, g_images.size() - 1, pf_checkDup);
-
-        /* walk pairwise: if idx is dup of idx-1, mark it; chain extends */
-        set<size_t> to_remove;
-        for (i = 1; i < g_images.size(); i++) {
-            if (g_dupFlag[i]) {
-                to_remove.insert(i);
-                printf("  duplicate: [%zu] %s == [%zu] %s\n",
-                       i, g_filenames[i].c_str(), i - 1, g_filenames[i - 1].c_str());
-            }
-        }
-
-        if (!to_remove.empty()) {
-            /* save for next run */
-            set<size_t> dup_indices = to_remove;
-            save_duplicates(dup_indices, g_filenames);
-
-            /* remove from back to front */
-            vector<size_t> sorted_remove(to_remove.rbegin(), to_remove.rend());
-            for (auto idx : sorted_remove) {
-                if (g_images[idx].data) free(g_images[idx].data);
-                g_images.erase(g_images.begin() + idx);
-                g_filenames.erase(g_filenames.begin() + idx);
-            }
-            printf("removed %zu duplicates, %zu images remain\n",
-                   to_remove.size(), g_images.size());
-        } else {
-            printf("no duplicates found\n");
-            /* save empty file so we skip the check next time */
-            set<size_t> empty_set;
-            save_duplicates(empty_set, g_filenames);
-        }
+        parfor(0, g_images.size()-1, pf_checkDup);
+        set<size_t> to_rm;
+        for (i=1; i < g_images.size(); i++) if (g_dupFlag[i]) to_rm.insert(i);
+        if (!to_rm.empty()) { save_duplicates(to_rm, g_filenames);
+            vector<size_t> sr(to_rm.rbegin(), to_rm.rend());
+            for (auto idx : sr) { if (g_images[idx].data) free(g_images[idx].data);
+                g_images.erase(g_images.begin()+idx); g_filenames.erase(g_filenames.begin()+idx); }
+            printf("removed %zu duplicates\n", to_rm.size());
+        } else { set<size_t> es; save_duplicates(es, g_filenames); }
     }
+    if (g_images.empty()) err("no images remain");
 
-    if (g_images.empty()) err("no images remain after duplicate removal");
-
-    g_imgW   = (int)g_images[0].width;
-    g_imgH   = (int)g_images[0].height;
+    g_fullW  = (int)g_images[0].width;
+    g_fullH  = (int)g_images[0].height;
     g_nBands = (int)g_images[0].nBands;
     g_bandNames = g_images[0].bandNames;
 
-    /* ═══════════════ 7. DETECT B08 / B12 FOR NBR ═══════════════════ */
-
+    /* ═══════ 7. NBR DETECTION ═══════════════════════════════════── */
     for0(i, g_bandNames.size()) {
         if (g_bandNames[i].find("B08") != string::npos) g_b08_idx = (int)i;
         if (g_bandNames[i].find("B12") != string::npos) g_b12_idx = (int)i;
     }
     g_hasNBR = (g_b08_idx >= 0 && g_b12_idx >= 0);
-    if (g_hasNBR)
-        printf("NBR enabled: B08=band %d, B12=band %d\n", g_b08_idx + 1, g_b12_idx + 1);
-    else
-        printf("NBR disabled (need both B08 and B12 band names)\n");
+    if (g_hasNBR) printf("NBR enabled: B08=band %d, B12=band %d\n", g_b08_idx+1, g_b12_idx+1);
+
+    /* ═══════ 8. COMPUTE MULTILOOK FACTOR M ══════════════════════── */
+    /*
+     * Choose M such that floor(ncol/M) <= screenW/2.
+     * We query screen width early via a temporary GLUT init, or use a
+     * conservative default.  M = ceil(ncol / (screenW/2)).
+     */
+    glutInit(&argc, argv);
+    glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB);
+    int screenW = glutGet(GLUT_SCREEN_WIDTH);
+    int screenH = glutGet(GLUT_SCREEN_HEIGHT);
+    if (screenW < 800) screenW = 1920;
+    if (screenH < 600) screenH = 1080;
+
+    int halfW = screenW / 2;
+    g_mlFactor = max(1, (int)ceil((double)g_fullW / halfW));
+    /* also ensure height fits */
+    int mfH = max(1, (int)ceil((double)g_fullH / (screenH - 80)));
+    g_mlFactor = max(g_mlFactor, mfH);
+
+    g_mlW = g_fullW / g_mlFactor;
+    g_mlH = g_fullH / g_mlFactor;
+    g_imgW = g_mlW; /* texture dims = multilooked dims */
+    g_imgH = g_mlH;
+
+    printf("multilook: M=%d, full %dx%d -> display %dx%d\n",
+           g_mlFactor, g_fullW, g_fullH, g_mlW, g_mlH);
+
+    /* ═══════ 9. PARALLEL MULTILOOK ══════════════════════════════── */
+    {
+        size_t mlPixels = (size_t)g_mlW * g_mlH;
+        g_mlData.resize(g_images.size());
+        for0(i, g_images.size()) {
+            g_mlData[i] = (float*)malloc(mlPixels * g_images[i].nBands * sizeof(float));
+            if (!g_mlData[i]) err("malloc multilook");
+        }
+        printf("computing multilook for %zu images...\n", g_images.size());
+        parfor(0, g_images.size(), pf_multilook);
+        printf("multilook done\n");
+    }
+
+    /* ═══════ 10. PRECOMPUTE RGB TEXTURES ════════════════════════── */
+    precomputeAllRGB();
 
     if (startIdx < 0) startIdx = (int)g_images.size() + startIdx;
     startIdx = max(0, min(startIdx, (int)g_images.size() - 1));
     g_curIdx = startIdx;
 
-    printf("image: %d x %d, %d bands, %zu dates\n", g_imgW, g_imgH, g_nBands, g_images.size());
-    printf("band names:");
-    for0(i, g_bandNames.size()) printf(" %s", g_bandNames[i].c_str());
-    printf("\n");
-    for0(i, g_images.size())
-        printf("  [%zu] %s  ts=%s%s\n", i, g_filenames[i].c_str(),
-               g_images[i].timestamp.c_str(),
-               (int)i == g_curIdx ? " <-" : "");
+    printf("image: %dx%d full, %dx%d display (M=%d), %d bands, %zu dates\n",
+           g_fullW, g_fullH, g_mlW, g_mlH, g_mlFactor, g_nBands, g_images.size());
+    printf("controls: left/right=navigate, click=sample (max 3, R/G/B), right-click/c=clear, q/Esc=quit\n");
 
-    /* ═══════════════ 8. PRECOMPUTE RGB TEXTURES ════════════════════ */
+    /* ═══════ 11. GLUT WINDOWS ═══════════════════════════════════── */
+    g_dispW = g_mlW;
+    g_dispH = g_mlH;
 
-    precomputeAllRGB();
-
-    printf("controls: left/right=navigate, left-click=add square, right-click/c=clear, q/Esc=quit\n");
-
-    /* ═══════════════ 9. GLUT INIT ══════════════════════════════════ */
-
-    glutInit(&argc, argv);
-    glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB);
-
-    g_dispW = min(g_imgW, 1200);
-    g_dispH = (int)((float)g_dispW / g_imgW * g_imgH);
-    if (g_dispH > 900) {
-        g_dispH = 900;
-        g_dispW = (int)((float)g_dispH / g_imgH * g_imgW);
-    }
-
-    /* image window */
     glutInitWindowSize(g_dispW, g_dispH);
     glutInitWindowPosition(50, 50);
     g_winImage = glutCreateWindow("Band Viewer");
@@ -1147,53 +864,34 @@ int main(int argc, char** argv) {
     glutMouseFunc(mouseImage);
     glutKeyboardFunc(keyboardAll);
     glutSpecialFunc(specialAll);
-
     uploadTexture();
 
-    /* one TS window per band, stacked in a single column to the right */
+    /* TS windows: single column to the right, filling screen height */
     int nTSBands = min(g_nBands, MAX_TS_WINDOWS);
-    int nTSTotal = nTSBands + (g_hasNBR ? 1 : 0); /* total TS windows */
-
-    /* query screen size to fill remaining space */
-    int screenW = glutGet(GLUT_SCREEN_WIDTH);
-    int screenH = glutGet(GLUT_SCREEN_HEIGHT);
-    if (screenW < 800) screenW = 1920; /* fallback */
-    if (screenH < 600) screenH = 1080;
-
-    int tsX = 50 + g_dispW + 10;            /* x position: right of image window */
-    int tsW = screenW - tsX - 20;           /* fill remaining width */
-    if (tsW < 300) tsW = 300;
-    int tsH = max(120, (screenH - 80) / max(nTSTotal, 1)); /* divide screen height evenly */
+    int nTSTotal = nTSBands + (g_hasNBR ? 1 : 0);
+    int tsX = 50 + g_dispW + 10;
+    int tsW = screenW - tsX - 20; if (tsW < 300) tsW = 300;
+    int tsH = max(120, (screenH - 80) / max(nTSTotal, 1));
 
     for (int b = 0; b < nTSBands; b++) {
         glutInitWindowSize(tsW, tsH);
         glutInitWindowPosition(tsX, 50 + b * tsH);
         char name[128];
-        if (b < (int)g_bandNames.size())
-            snprintf(name, sizeof(name), "%s (band %d)", g_bandNames[b].c_str(), b + 1);
-        else
-            snprintf(name, sizeof(name), "Band %d", b + 1);
+        if (b < (int)g_bandNames.size()) snprintf(name, 128, "%s (band %d)", g_bandNames[b].c_str(), b+1);
+        else snprintf(name, 128, "Band %d", b+1);
         int win = glutCreateWindow(name);
-        g_winTS.push_back(win);
-        g_tsWindowBandMap[b] = b;
-        glutDisplayFunc(displayTS_dispatch);
-        glutReshapeFunc(reshapeTS);
-        glutKeyboardFunc(keyboardAll);
-        glutSpecialFunc(specialAll);
+        g_winTS.push_back(win); g_tsWindowBandMap[b] = b;
+        glutDisplayFunc(displayTS_dispatch); glutReshapeFunc(reshapeTS);
+        glutKeyboardFunc(keyboardAll); glutSpecialFunc(specialAll);
     }
-
-    /* NBR window (last in the column) */
     if (g_hasNBR) {
         glutInitWindowSize(tsW, tsH);
         glutInitWindowPosition(tsX, 50 + nTSBands * tsH);
         g_winNBR = glutCreateWindow("NBR = (B08-B12)/(B08+B12)");
-        glutDisplayFunc(displayTS_dispatch);
-        glutReshapeFunc(reshapeTS);
-        glutKeyboardFunc(keyboardAll);
-        glutSpecialFunc(specialAll);
+        glutDisplayFunc(displayTS_dispatch); glutReshapeFunc(reshapeTS);
+        glutKeyboardFunc(keyboardAll); glutSpecialFunc(specialAll);
     }
 
     glutMainLoop();
     return 0;
 }
-
