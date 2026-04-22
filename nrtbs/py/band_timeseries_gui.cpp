@@ -657,16 +657,24 @@ static void lowess_eval(const vector<float>& x, const vector<float>& y,
                 fitted[j] = out_y[best_ei];
             }
             vector<float> resid(n);
-            for (int j = 0; j < n; j++) resid[j] = fabsf(y[j] - fitted[j]);
-            /* median absolute residual */
-            vector<float> sorted_r(resid);
-            nth_element(sorted_r.begin(), sorted_r.begin() + n/2, sorted_r.end());
-            float med = sorted_r[n/2];
-            float s = 6.0f * med; /* scale factor */
+            for (int j = 0; j < n; j++) resid[j] = y[j] - fitted[j]; /* signed residual */
+            /* collect only positive residuals for scale estimation */
+            vector<float> pos_resid;
+            for (int j = 0; j < n; j++) if (resid[j] > 0) pos_resid.push_back(resid[j]);
+            float med = 0;
+            if (!pos_resid.empty()) {
+                nth_element(pos_resid.begin(), pos_resid.begin() + pos_resid.size()/2, pos_resid.end());
+                med = pos_resid[pos_resid.size()/2];
+            }
+            float s = 6.0f * med;
             if (s < 1e-12f) s = 1.0f;
             for (int j = 0; j < n; j++) {
-                float u = resid[j] / s;
-                weights[j] = (u < 1.0f) ? (1.0f - u * u) * (1.0f - u * u) : 0.0f;
+                if (resid[j] <= 0) {
+                    weights[j] = 1.0f; /* negative residual (shadow/low) → keep full weight */
+                } else {
+                    float u = resid[j] / s;
+                    weights[j] = (u < 1.0f) ? (1.0f - u * u) * (1.0f - u * u) : 0.0f;
+                }
             }
         }
     }
@@ -1130,5 +1138,4 @@ int main(int argc, char** argv) {
     glutMainLoop();
     return 0;
 }
-
 
