@@ -808,6 +808,8 @@ static void displayTS_dispatch() {
 
 /* ─────────── click on TS window → navigate to nearest date ──────── */
 
+static void refreshAll(); /* forward declaration */
+
 static void mouseTS(int button, int state, int mx, int /*my*/) {
     if (state != GLUT_DOWN || button != GLUT_LEFT_BUTTON) return;
     int nT = (int)g_images.size();
@@ -1128,4 +1130,5 @@ int main(int argc, char** argv) {
     glutMainLoop();
     return 0;
 }
+
 
