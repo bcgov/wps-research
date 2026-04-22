@@ -185,11 +185,11 @@ static bool g_hasNBR = false;
 static int g_winNBR = -1; /* NBR TS window ID */
 
 static vector<Click> g_clicks;
+static const int g_maxClicks = 3; /* retain only last 3 clicks */
 static const float g_colors[][3] = {
-    {0.2f,0.5f,1.0f}, {1.0f,0.3f,0.3f}, {1.0f,1.0f,0.2f},
-    {0.1f,0.9f,0.1f}, {0.0f,1.0f,1.0f}, {1.0f,0.4f,1.0f}
+    {1.0f,0.0f,0.0f}, {0.0f,1.0f,0.0f}, {0.0f,0.0f,1.0f}
 };
-static const int g_nColors = 6;
+static const int g_nColors = 3;
 
 static int g_winImage = -1;
 static vector<int> g_winTS;
@@ -790,6 +790,9 @@ static void mouseImage(int button, int state, int mx, int my) {
     py = max(0, min(py, g_imgH - 1));
 
     g_clicks.push_back({px, py});
+    /* keep only the last 3 clicks */
+    while ((int)g_clicks.size() > g_maxClicks)
+        g_clicks.erase(g_clicks.begin());
     printf("click #%d at pixel (%d, %d)\n", (int)g_clicks.size(), px, py);
     refreshAll();
 }
@@ -1144,15 +1147,24 @@ int main(int argc, char** argv) {
 
     uploadTexture();
 
-    /* one TS window per band */
-    int tsW = 480, tsH = 220;
+    /* one TS window per band, stacked in a single column to the right */
     int nTSBands = min(g_nBands, MAX_TS_WINDOWS);
+    int nTSTotal = nTSBands + (g_hasNBR ? 1 : 0); /* total TS windows */
+
+    /* query screen size to fill remaining space */
+    int screenW = glutGet(GLUT_SCREEN_WIDTH);
+    int screenH = glutGet(GLUT_SCREEN_HEIGHT);
+    if (screenW < 800) screenW = 1920; /* fallback */
+    if (screenH < 600) screenH = 1080;
+
+    int tsX = 50 + g_dispW + 10;            /* x position: right of image window */
+    int tsW = screenW - tsX - 20;           /* fill remaining width */
+    if (tsW < 300) tsW = 300;
+    int tsH = max(120, (screenH - 80) / max(nTSTotal, 1)); /* divide screen height evenly */
+
     for (int b = 0; b < nTSBands; b++) {
-        int col = b / 4;
-        int row = b % 4;
         glutInitWindowSize(tsW, tsH);
-        glutInitWindowPosition(60 + g_dispW + 20 + col * (tsW + 10),
-                               50 + row * (tsH + 50));
+        glutInitWindowPosition(tsX, 50 + b * tsH);
         char name[128];
         if (b < (int)g_bandNames.size())
             snprintf(name, sizeof(name), "%s (band %d)", g_bandNames[b].c_str(), b + 1);
@@ -1167,14 +1179,10 @@ int main(int argc, char** argv) {
         glutSpecialFunc(specialAll);
     }
 
-    /* NBR window (below the band windows) */
+    /* NBR window (last in the column) */
     if (g_hasNBR) {
-        int nbrRow = nTSBands;
-        int col = nbrRow / 4;
-        int row = nbrRow % 4;
         glutInitWindowSize(tsW, tsH);
-        glutInitWindowPosition(60 + g_dispW + 20 + col * (tsW + 10),
-                               50 + row * (tsH + 50));
+        glutInitWindowPosition(tsX, 50 + nTSBands * tsH);
         g_winNBR = glutCreateWindow("NBR = (B08-B12)/(B08+B12)");
         glutDisplayFunc(displayTS_dispatch);
         glutReshapeFunc(reshapeTS);
@@ -1185,5 +1193,3 @@ int main(int argc, char** argv) {
     glutMainLoop();
     return 0;
 }
-
-
