@@ -870,19 +870,29 @@ def _get_recommended_settings(fire) -> list[dict]:
     return [_clone_setting(s) for s in state.recommended_settings]
 
 
-def _get_primary_params(fire) -> dict:
-    """Return a copy of the first setting's params for a fire."""
-    effective = _get_recommended_settings(fire)
-    if not effective:
-        return {}
-    return dict(effective[0].get('params', {}))
-
-
 _batch_thread = None
 
 
 def _batch_map_worker(fire_numbes: list[str]):
-    """Process fires sequentially with recommended settings."""
+    """Process fires sequentially, delegating each to ``_serial_map_worker``.
+
+    This mirrors what the fire page's "Map Fire with settings" button
+    does: a full N recommended settings × K replicates sweep per fire,
+    populating ``fire.serial_results`` so the gallery is visible when
+    the user opens the fire later. Replaces the previous single-shot
+    path (recommended[0] only, no gallery), which made batch-mapped
+    fires indistinguishable from failures because the gallery stayed
+    empty.
+
+    Threading contract:
+      * ``_serial_map_worker`` acquires ``_gpu_lock`` per run internally,
+        so this function must NOT wrap the call in ``_gpu_lock`` (would
+        deadlock).
+      * ``_serial_map_worker`` manages ``state.current_job`` per run.
+      * Between-fires cancel: checked via ``_batch_cancel``. In-flight
+        cancel is driven by ``handle_api_batch_cancel`` setting the
+        running fire's ``serial_canceled`` flag.
+    """
     import traceback
 
     with state.lock:
@@ -898,8 +908,10 @@ def _batch_map_worker(fire_numbes: list[str]):
         f'[batch] Starting batch: {len(fire_numbes)} fire(s)\n')
     sys.stderr.flush()
 
+    k_runs = max(1, min(10, int(state.k_runs_per_setting)))
+    k_jitter = max(0, int(state.k_jitter))
+
     for fire_numbe in fire_numbes:
-        # Check cancellation
         if _batch_cancel.is_set():
             sys.stderr.write('[batch] Cancelled by user.\n')
             sys.stderr.flush()
@@ -912,110 +924,66 @@ def _batch_map_worker(fire_numbes: list[str]):
                 state.batch_status['completed'] += 1
             continue
 
+        settings = _get_recommended_settings(fire)
+        if not settings:
+            _set_fire_status(
+                fire, FireStatus.ERROR,
+                'No recommended settings configured')
+            with state.lock:
+                state.batch_status['errors'].append(fire_numbe)
+                state.batch_status['completed'] += 1
+            sys.stderr.write(
+                f'[batch] [{fire_numbe}] SKIPPED: no recommended '
+                f'settings.\n')
+            sys.stderr.flush()
+            continue
+
         with state.lock:
             state.batch_status['current_fire'] = fire_numbe
-        sys.stderr.write(f'[batch] [{fire_numbe}] Starting...\n')
+            # Prime the same state the /serial_map handler sets before
+            # spawning its thread. _serial_map_worker re-initialises
+            # some of these (idempotent), but setting MAPPING here
+            # avoids a transient window where the fire list shows a
+            # stale status.
+            fire.serial_prev_status = fire.status
+            fire.status = FireStatus.MAPPING
+            fire.serial_results = []
+            fire.serial_settings = [_clone_setting(s) for s in settings]
+            fire.serial_canceled = False
+            fire.console_log.clear()
+
+        sys.stderr.write(
+            f'[batch] [{fire_numbe}] Starting sweep: '
+            f'{len(settings)} setting(s) × {k_runs} run(s)\n')
         sys.stderr.flush()
 
-        params = _get_primary_params(fire)
-        if not params:
-            params = {}
-
-        padding = params.get('padding')
-        if padding is None:
-            padding = state.padding
-        padding = float(padding)
-
         try:
-            with _gpu_lock:
-                # Prepare
-                sys.stderr.write(
-                    f'[batch] [{fire_numbe}] Preparing '
-                    f'(padding={padding})...\n')
-                sys.stderr.flush()
-                _prepare_fire_sync(fire_numbe, padding)
-                fire = state.fires[fire_numbe]
-                if fire.status == FireStatus.ERROR:
-                    sys.stderr.write(
-                        f'[batch] [{fire_numbe}] Prepare FAILED: '
-                        f'{fire.error_msg}\n')
-                    sys.stderr.flush()
-                    with state.lock:
-                        state.batch_status['errors'].append(fire_numbe)
-                        state.batch_status['completed'] += 1
-                    continue
-
-                # Map
-                with state.lock:
-                    fire.status = FireStatus.MAPPING
-                    fire.console_log.clear()
-                    fire.last_params = params
-                    state.current_job = {
-                        'fire_numbe': fire_numbe,
-                        'client_ip': 'batch',
-                        'started_at': datetime.datetime.now().isoformat(
-                            timespec='seconds'),
-                    }
-
-                cmd = _build_mapping_cmd(fire, params)
-                sys.stderr.write(
-                    f'[batch] [{fire_numbe}] Running CLI: '
-                    f'{" ".join(os.path.basename(c) for c in cmd[:3])} '
-                    f'...\n')
-                sys.stderr.flush()
-
-                def _on_line(text, _fn=fire_numbe, _fire=fire):
-                    _fire.console_log.append(text)
-                    sys.stderr.write(f'[batch] [{_fn}] {text}\n')
-                    sys.stderr.flush()
-
-                rc, killed = _stream_subprocess(
-                    cmd, state.project_root, _on_line)
-                with state.lock:
-                    state.current_job = None
-
-                if killed:
-                    fire.console_log.append(
-                        f'[watchdog] killed after '
-                        f'{_SUBPROCESS_SILENCE_TIMEOUT}s of silence')
-
-                if rc == 0:
-                    comp = os.path.join(
-                        fire.cache_dir,
-                        f'{fire_numbe}_comparison.png')
-                    fire.last_comparison = (
-                        comp if os.path.exists(comp) else '')
-                    fire.last_params = params
-                    fire.agreement_pct = _compute_agreement(fire)
-                    fire.ml_area_ha = _compute_ml_area(fire)
-                    _generate_result_preview(fire)
-                    fire.status = FireStatus.MAPPED
-                    sys.stderr.write(
-                        f'[batch] [{fire_numbe}] MAPPED OK '
-                        f'(agreement={fire.agreement_pct}%)\n')
-                else:
-                    _set_fire_status(
-                        fire, FireStatus.ERROR,
-                        f'Exited with code {rc}')
-                    with state.lock:
-                        state.batch_status['errors'].append(fire_numbe)
-                    sys.stderr.write(
-                        f'[batch] [{fire_numbe}] FAILED (rc={rc})\n')
-                sys.stderr.flush()
-
+            _serial_map_worker(fire_numbe, settings, k_runs, k_jitter)
         except Exception as exc:
             _set_fire_status(fire, FireStatus.ERROR, str(exc))
             with state.lock:
-                state.batch_status['errors'].append(fire_numbe)
                 state.current_job = None
             sys.stderr.write(
                 f'[batch] [{fire_numbe}] EXCEPTION:\n'
                 f'{traceback.format_exc()}\n')
             sys.stderr.flush()
 
+        fire = state.fires.get(fire_numbe)
+        if fire and fire.status == FireStatus.ERROR:
+            with state.lock:
+                state.batch_status['errors'].append(fire_numbe)
+            sys.stderr.write(
+                f'[batch] [{fire_numbe}] FAILED '
+                f'({fire.error_msg or "see fire console"})\n')
+        elif fire and fire.status == FireStatus.MAPPED:
+            sys.stderr.write(
+                f'[batch] [{fire_numbe}] MAPPED '
+                f'(agreement={fire.agreement_pct}%, '
+                f'{len(fire.serial_results)} run(s) in gallery)\n')
+        sys.stderr.flush()
+
         with state.lock:
             state.batch_status['completed'] += 1
-        _save_fire_state()
 
     with state.lock:
         state.batch_status['running'] = False
@@ -4213,14 +4181,30 @@ class FireHandler(BaseHTTPRequestHandler):
         self._send_json(fires)
 
     def handle_api_batch_cancel(self):
-        """Cancel a running batch mapping."""
+        """Cancel a running batch mapping.
+
+        Sets the batch-wide cancel event (stops the loop between fires)
+        AND flips ``serial_canceled`` on the currently-running fire so
+        its in-flight sweep unwinds instead of running to completion.
+        Without the second step, clicking Cancel while a fire's N×K
+        sweep is in progress would make the user wait for that whole
+        sweep to finish before the batch actually stops.
+        """
         if getattr(self, '_role', '') != 'admin':
             self._send_json({'error': 'Admin only'}, 403)
             return
-        if not state.batch_status or not state.batch_status.get('running'):
+        with state.lock:
+            batch = (dict(state.batch_status)
+                     if state.batch_status else None)
+        if not batch or not batch.get('running'):
             self._send_json({'error': 'No batch running'}, 400)
             return
         _batch_cancel.set()
+        current = batch.get('current_fire') or ''
+        if current and current in state.fires:
+            fire = state.fires[current]
+            if fire.status == FireStatus.MAPPING:
+                fire.serial_canceled = True
         self._send_json({'status': 'cancelling'})
 
     # -- Mapping with SSE streaming --
