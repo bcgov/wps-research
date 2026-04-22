@@ -14,6 +14,11 @@ gdal.UseExceptions()
 
 MAX_PREVIEW_DIM = 2000  # max pixels on longest side for web display
 
+# How many post-hoc diff/anomaly groups the UI knows about. Increase if
+# you start shipping stacks with more than 3 derived groups after pre+post.
+MAX_DIFF_GROUPS = 3
+DIFF_KEYS = tuple(f'diff{k}' for k in range(1, MAX_DIFF_GROUPS + 1))
+
 
 # ---------------------------------------------------------------------------
 # ENVI header parsing
@@ -40,33 +45,53 @@ def parse_envi_band_names(raster_path: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 def detect_band_groups(band_names: list[str]) -> dict[str, list[int]]:
-    """Detect pre/post/diff1/diff2 groups from ENVI band names.
+    """Detect pre/post/diffK groups from ENVI band names — positional.
 
-    Returns dict mapping group key to list of 1-based band indices (max 3).
+    Strategy, keyword-agnostic beyond the pre/post prefix:
+      * ``pre``  = bands whose name starts with ``pre``.
+      * ``post`` = bands whose name starts with ``pst`` or ``post``.
+      * ``N``    = band-count of ``pre`` (or ``post`` if no pre was
+        found). This is the group size.
+      * ``diff1``, ``diff2``, … ``diffMAX_DIFF_GROUPS`` = successive
+        chunks of ``N`` bands taken from everything *not* claimed by
+        pre/post, in band-index order. Anomaly-labelling keywords in
+        the header are ignored — position decides the group.
+      * If neither pre nor post can be identified by prefix, fall back
+        to the legacy B12/B11/B9 positional scan (same behaviour as
+        before).
+
+    Returns a dict mapping group key to a list of 1-based band indices.
+    Every diffK slot up to ``MAX_DIFF_GROUPS`` is always present; empty
+    lists mean that chunk wasn't available.
     """
-    groups: dict[str, list[int]] = {
-        'pre': [], 'post': [], 'diff1': [], 'diff2': [],
-    }
+    groups: dict[str, list[int]] = {'pre': [], 'post': []}
+    for k in DIFF_KEYS:
+        groups[k] = []
 
+    pre_idxs: list[int] = []
+    post_idxs: list[int] = []
     for i, name in enumerate(band_names):
-        low = name.lower()
-        idx = i + 1  # 1-based
-        if 'anomaly2' in low or ('post/pre' in low and 'anomaly' not in low):
-            groups['diff2'].append(idx)
-        elif 'anomaly1' in low or '(post-pre)/(post+pre)' in low:
-            groups['diff1'].append(idx)
+        low = name.lower().lstrip()
+        if low.startswith('pre'):
+            pre_idxs.append(i + 1)
         elif low.startswith('pst') or low.startswith('post'):
-            groups['post'].append(idx)
-        elif low.startswith('pre'):
-            groups['pre'].append(idx)
+            post_idxs.append(i + 1)
 
-    has_keywords = any(len(v) > 0 for v in groups.values())
-    if has_keywords:
-        for k in groups:
-            groups[k] = groups[k][:3]
+    if pre_idxs or post_idxs:
+        n_per_group = len(pre_idxs) or len(post_idxs)
+        groups['pre'] = pre_idxs[:n_per_group]
+        groups['post'] = post_idxs[:n_per_group]
+
+        claimed = set(groups['pre']) | set(groups['post'])
+        remaining = [i + 1 for i in range(len(band_names))
+                     if (i + 1) not in claimed]
+        for k, key in enumerate(DIFF_KEYS):
+            chunk = remaining[k * n_per_group: (k + 1) * n_per_group]
+            if len(chunk) == n_per_group:
+                groups[key] = chunk
         return groups
 
-    # Fallback: positional B12/B11/B9 groups
+    # Fallback: positional B12/B11/B9 groups (legacy behaviour).
     positional: list[list[int]] = []
     i = 0
     while i < len(band_names):
@@ -174,7 +199,7 @@ def generate_all_previews(crop_path: str, cache_dir: str,
     os.makedirs(preview_dir, exist_ok=True)
 
     available: list[str] = []
-    for key in ('post', 'pre', 'diff1', 'diff2'):
+    for key in ('post', 'pre', *DIFF_KEYS):
         indices = groups.get(key, [])
         if not indices:
             continue

@@ -256,7 +256,15 @@
             <!-- Serial results gallery -->
             <div id="serial-gallery" style="display:none">
                 <div style="padding:8px 16px;border-top:1px solid #eee">
-                    <h4 id="serial-gallery-title" style="font-size:12px;color:#6b6b73;text-transform:uppercase;margin-bottom:8px">Results</h4>
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px">
+                        <h4 id="serial-gallery-title" style="font-size:12px;color:#6b6b73;text-transform:uppercase;margin:0">Results</h4>
+                        <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap"
+                               title="When enabled, clicking a result copies its parameters into the control panel above.">
+                            <input type="checkbox" id="sync-params-on-click" checked
+                                   onchange="onSyncParamsToggle()">
+                            Sync params on click
+                        </label>
+                    </div>
                     <div id="serial-gallery-items" style="display:flex;flex-direction:column;gap:6px"></div>
                 </div>
             </div>
@@ -304,7 +312,7 @@ const RUN_VIEWS = new Set(['result', 'comparison', 'brush_comparison']);
 
 const VIEW_LABELS = {
     pre: 'Pre-fire', post: 'Post-fire',
-    diff1: 'Diff (norm)', diff2: 'Diff (ratio)',
+    diff1: 'Diff 1', diff2: 'Diff 2', diff3: 'Diff 3',
     result: 'ML classification', hint: 'Hint perimeter',
     comparison: 'Comparison (figure)', brush_comparison: 'Brush comparison',
 };
@@ -1242,6 +1250,71 @@ function settingColors(idx, n) {
 let galleryNSettings = 1;
 let gallerySettingsUsed = [];
 
+// runId → params, populated from showSerialGallery. Used by viewSerialRun
+// to mirror a clicked run's parameters back into the control panel.
+const galleryRunParams = new Map();
+
+// Apply a params object (as returned by the server) to the control-panel
+// form fields. Shared between restoreFireState (page load) and
+// viewSerialRun (click-to-sync a serial run). Only sets fields for which
+// the params object has a non-empty value — missing keys are left alone.
+function applyParamsToForm(p) {
+    if (!p || typeof p !== 'object') return;
+    const setVal = (id, val) => {
+        const el = document.getElementById(id);
+        if (el && val != null && val !== '') el.value = val;
+    };
+    setVal('p-padding', p.padding);
+    setVal('p-sample_rate', p.sample_rate);
+    setVal('p-min_samples', p.min_samples);
+    setVal('p-max_samples', p.max_samples);
+    setVal('p-seed', p.seed);
+    setVal('p-embed_bands', p.embed_bands);
+    setVal('p-tsne_perplexity', p.tsne_perplexity);
+    setVal('p-tsne_learning_rate', p.tsne_learning_rate);
+    setVal('p-tsne_max_iter', p.tsne_max_iter);
+    setVal('p-tsne_n_components', p.tsne_n_components);
+    setVal('p-tsne_random_state', p.tsne_random_state);
+    setVal('p-rf_n_estimators', p.rf_n_estimators);
+    setVal('p-rf_max_depth', p.rf_max_depth);
+    setVal('p-rf_max_features', p.rf_max_features);
+    setVal('p-rf_random_state', p.rf_random_state);
+    setVal('p-controlled_ratio', p.controlled_ratio);
+    setVal('p-hdbscan_min_samples', p.hdbscan_min_samples);
+    setVal('p-contour_width', p.contour_width);
+    setVal('p-brush_size', p.brush_size);
+    setVal('p-point_threshold', p.point_threshold);
+    if (p.tsne_init) {
+        const el = document.getElementById('p-tsne_init');
+        if (el) el.value = p.tsne_init;
+    }
+    const basEl = document.getElementById('p-brush_all_segments');
+    if (basEl && p.brush_all_segments != null) {
+        const s = String(p.brush_all_segments).toLowerCase();
+        basEl.checked = (s === 'true' || s === '1' || s === 'yes' || s === 'on');
+    }
+    updateSampleSize();
+}
+
+// Sync-params-on-click checkbox — default ON, persisted in localStorage.
+function isSyncParamsOn() {
+    const el = document.getElementById('sync-params-on-click');
+    return el ? !!el.checked : true;
+}
+
+function onSyncParamsToggle() {
+    const on = isSyncParamsOn();
+    localStorage.setItem('syncParamsOnClick', on ? '1' : '0');
+}
+
+(function initSyncParamsCheckbox() {
+    const saved = localStorage.getItem('syncParamsOnClick');
+    if (saved === '0') {
+        const el = document.getElementById('sync-params-on-click');
+        if (el) el.checked = false;
+    }
+})();
+
 function showSerialGallery(results, settingsUsed) {
     const gallery = document.getElementById('serial-gallery');
     const items = document.getElementById('serial-gallery-items');
@@ -1265,6 +1338,15 @@ function showSerialGallery(results, settingsUsed) {
     gallerySettingsUsed = Array.isArray(settingsUsed)
         ? settingsUsed.slice()
         : [];
+
+    // Refresh the runId → params map so viewSerialRun can mirror them
+    // back into the control panel. Include previously-accepted rows too.
+    galleryRunParams.clear();
+    for (const r of results) {
+        if (r && r.run_id != null && r.params) {
+            galleryRunParams.set(r.run_id, r.params);
+        }
+    }
 
     const titleEl = document.getElementById('serial-gallery-title');
     if (titleEl) {
@@ -1510,6 +1592,14 @@ function viewSerialRun(runId) {
         card.style.background = colors.selBg;
     }
 
+    // Mirror the run's params into the control panel so the user can
+    // tweak and re-map from the same starting point. Controlled by the
+    // "Sync params on click" checkbox in the gallery header.
+    if (isSyncParamsOn()) {
+        const p = galleryRunParams.get(runId);
+        if (p) applyParamsToForm(p);
+    }
+
     // Set selected run and reload current view for the active pane
     selectedRun = runId;
     const currentView = activePane === 'left' ? leftView : rightView;
@@ -1572,40 +1662,7 @@ async function restoreFireState() {
 
         // Restore last params to form
         if (data.last_params && Object.keys(data.last_params).length > 0) {
-            const p = data.last_params;
-            const setVal = (id, val) => {
-                const el = document.getElementById(id);
-                if (el && val != null && val !== '') el.value = val;
-            };
-            setVal('p-sample_rate', p.sample_rate);
-            setVal('p-min_samples', p.min_samples);
-            setVal('p-max_samples', p.max_samples);
-            setVal('p-seed', p.seed);
-            setVal('p-embed_bands', p.embed_bands);
-            setVal('p-tsne_perplexity', p.tsne_perplexity);
-            setVal('p-tsne_learning_rate', p.tsne_learning_rate);
-            setVal('p-tsne_max_iter', p.tsne_max_iter);
-            setVal('p-tsne_n_components', p.tsne_n_components);
-            setVal('p-tsne_random_state', p.tsne_random_state);
-            setVal('p-rf_n_estimators', p.rf_n_estimators);
-            setVal('p-rf_max_depth', p.rf_max_depth);
-            setVal('p-rf_max_features', p.rf_max_features);
-            setVal('p-rf_random_state', p.rf_random_state);
-            setVal('p-controlled_ratio', p.controlled_ratio);
-            setVal('p-hdbscan_min_samples', p.hdbscan_min_samples);
-            setVal('p-contour_width', p.contour_width);
-            setVal('p-brush_size', p.brush_size);
-            setVal('p-point_threshold', p.point_threshold);
-            if (p.tsne_init) {
-                const el = document.getElementById('p-tsne_init');
-                if (el) el.value = p.tsne_init;
-            }
-            const basEl = document.getElementById('p-brush_all_segments');
-            if (basEl && p.brush_all_segments != null) {
-                const s = String(p.brush_all_segments).toLowerCase();
-                basEl.checked = (s === 'true' || s === '1' || s === 'yes' || s === 'on');
-            }
-            updateSampleSize();
+            applyParamsToForm(data.last_params);
         }
 
         // Show agreement + ML size if available
