@@ -348,6 +348,16 @@ static void uploadTexture() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
+    /*
+     * Critical: GL_UNPACK_ALIGNMENT defaults to 4, meaning OpenGL expects
+     * each row of pixel data to start on a 4-byte boundary.  With GL_RGB
+     * (3 bytes/pixel), row stride = width * 3.  For width=5490, that's
+     * 16470 bytes which is NOT a multiple of 4 — so OpenGL pads each row
+     * by 2 bytes, shifting all subsequent rows and producing horizontal
+     * colour stripes.  Setting alignment to 1 fixes this.
+     */
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+
     const auto& tex = g_rgbTextures[g_curIdx];
     if (!g_texAllocated) {
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, g_imgW, g_imgH, 0,
@@ -893,4 +903,3 @@ int main(int argc, char** argv) {
     glutMainLoop();
     return 0;
 }
-
