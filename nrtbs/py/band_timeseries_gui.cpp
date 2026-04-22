@@ -4,7 +4,7 @@
  * A fast, interactive multi-band satellite-image time-series viewer.
  *
  * Build:
- *   g++ -O2 -o band_ts band_timeseries_gui.cpp $(gdal-config --cflags --libs) -lGL -lGLU -lglut -lpthread -std=c++17
+ *   g++ -O2 -std=c++17 $(gdal-config --cflags) band_timeseries_gui.cpp -lGL -lGLU -lglut -lpthread $(gdal-config --libs) -o band_ts
  *
  * Usage:
  *   ./band_ts [options]
