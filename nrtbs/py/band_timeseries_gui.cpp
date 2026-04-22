@@ -893,12 +893,15 @@ int main(int argc, char** argv) {
         while ((ent = readdir(dp)) != nullptr) {
             string fname(ent->d_name);
             size_t len = fname.size();
-            if (len > 4 && fname.compare(len - 4, 4, ".bin") == 0) has_bin = true;
-            if (len > 4 && fname.compare(len - 4, 4, ".tif") == 0) has_tif = true;
+            if (len > 4 && fname.compare(len - 4, 4, ".bin") == 0 &&
+                fname.compare(0, 9, ".restore_") != 0) has_bin = true;
+            if (len > 4 && fname.compare(len - 4, 4, ".tif") == 0 &&
+                fname.compare(0, 9, ".restore_") != 0) has_tif = true;
 
             string dotExt = string(".") + ext;
             if (len > dotExt.size() &&
-                fname.compare(len - dotExt.size(), dotExt.size(), dotExt) == 0) {
+                fname.compare(len - dotExt.size(), dotExt.size(), dotExt) == 0 &&
+                fname.compare(0, 9, ".restore_") != 0) {
                 allNames.push_back(fname);
             }
         }
@@ -1193,3 +1196,4 @@ int main(int argc, char** argv) {
     glutMainLoop();
     return 0;
 }
+
