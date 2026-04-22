@@ -431,6 +431,7 @@ static void buildOneRGB(size_t idx) {
         if (range < 1e-12f) range = 1.0f;
         float scale = 255.0f / range;
         for0(i, n) {
+            if (!isfinite(bandPtr[i])) { tex[i * 3 + c] = 0; continue; } /* NaN → black */
             float v = (bandPtr[i] - g_avgStretch.vmin[c]) * scale;
             tex[i * 3 + c] = (unsigned char)max(0.0f, min(255.0f, v));
         }
@@ -775,22 +776,61 @@ static void drawTSGeneric(const char* label,
     glutSwapBuffers();
 }
 
+/* helper: extract yyyymmdd from current image timestamp */
+static string curDateStr() {
+    if (g_curIdx >= 0 && g_curIdx < (int)g_images.size()) {
+        const string& ts = g_images[g_curIdx].timestamp;
+        if (ts.size() >= 8) return ts.substr(0, 8);
+    }
+    return "--------";
+}
+
 static void drawTSForBand(int bandIdx) {
-    char title[128];
+    char title[256];
+    string ds = curDateStr();
     if (bandIdx < (int)g_bandNames.size())
-        snprintf(title, sizeof(title), "%s (band %d)", g_bandNames[bandIdx].c_str(), bandIdx + 1);
-    else snprintf(title, sizeof(title), "Band %d", bandIdx + 1);
+        snprintf(title, sizeof(title), "%s (band %d) — %s", g_bandNames[bandIdx].c_str(), bandIdx + 1, ds.c_str());
+    else snprintf(title, sizeof(title), "Band %d — %s", bandIdx + 1, ds.c_str());
     drawTSGeneric(title, [bandIdx](int ci, vector<TSPoint>& out) { computeTS(ci, bandIdx, out); });
 }
 
 static void displayNBR() {
-    drawTSGeneric("NBR = (B08-B12)/(B08+B12)", [](int ci, vector<TSPoint>& out) { computeNBR_TS(ci, out); });
+    char title[256];
+    snprintf(title, sizeof(title), "NBR = (B08-B12)/(B08+B12) — %s", curDateStr().c_str());
+    drawTSGeneric(title, [](int ci, vector<TSPoint>& out) { computeNBR_TS(ci, out); });
 }
 
 static void displayTS_dispatch() {
     int win = glutGetWindow();
     if (g_hasNBR && win == g_winNBR) { displayNBR(); return; }
     size_t i; for0(i, g_winTS.size()) if (g_winTS[i] == win) { drawTSForBand(g_tsWindowBandMap[i]); return; }
+}
+
+/* ─────────── click on TS window → navigate to nearest date ──────── */
+
+static void mouseTS(int button, int state, int mx, int /*my*/) {
+    if (state != GLUT_DOWN || button != GLUT_LEFT_BUTTON) return;
+    int nT = (int)g_images.size();
+    if (nT < 2) return;
+
+    /* get window width to map mx → fractional x position */
+    int winW = glutGet(GLUT_WINDOW_WIDTH);
+    float ml = 0.12f, mr = 0.05f;
+    float pw = 1.0f - ml - mr;
+
+    /* convert mx (pixels) to NDC [0,1] fraction within the plot area */
+    float frac = ((float)mx / winW - ml) / pw;
+    if (frac < 0.0f) frac = 0.0f;
+    if (frac > 1.0f) frac = 1.0f;
+
+    int idx = (int)roundf(frac * (nT - 1));
+    idx = max(0, min(idx, nT - 1));
+
+    if (idx != g_curIdx) {
+        g_curIdx = idx;
+        printf("TS click -> [%d] %s\n", g_curIdx, g_filenames[g_curIdx].c_str());
+        refreshAll();
+    }
 }
 
 /* ─────────── refresh ────────────────────────────────────────────── */
@@ -1073,6 +1113,7 @@ int main(int argc, char** argv) {
         int win = glutCreateWindow(name);
         g_winTS.push_back(win); g_tsWindowBandMap[b] = b;
         glutDisplayFunc(displayTS_dispatch); glutReshapeFunc(reshapeTS);
+        glutMouseFunc(mouseTS);
         glutKeyboardFunc(keyboardAll); glutSpecialFunc(specialAll);
     }
     if (g_hasNBR) {
@@ -1080,9 +1121,11 @@ int main(int argc, char** argv) {
         glutInitWindowPosition(tsX, 50 + nTSBands * tsH);
         g_winNBR = glutCreateWindow("NBR = (B08-B12)/(B08+B12)");
         glutDisplayFunc(displayTS_dispatch); glutReshapeFunc(reshapeTS);
+        glutMouseFunc(mouseTS);
         glutKeyboardFunc(keyboardAll); glutSpecialFunc(specialAll);
     }
 
     glutMainLoop();
     return 0;
 }
+
