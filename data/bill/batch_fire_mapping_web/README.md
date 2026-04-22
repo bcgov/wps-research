@@ -1,26 +1,29 @@
 # batch_fire_mapping_web
 
-*Last updated: April 21, 2026*
+*Last updated: April 22, 2026*
 
 Interactive web interface for mapping wildfire burn areas from Sentinel-2 satellite imagery. Uses a machine learning pipeline (T-SNE dimensionality reduction, Random Forest classification, HDBSCAN clustering) accelerated on GPU to classify burned vs. unburned pixels, then lets users visually review and accept results through a browser.
 
 This is the web companion to the `batch_fire_mapping` CLI. It wraps the same underlying pipeline but replaces the sequential batch workflow with an interactive one: users can inspect each fire, tune parameters, compare results side-by-side, and build up a parameter knowledge base over time.
 
+**Multi-year aware**: one launch accepts many Sentinel-2 rasters (one per year). The server auto-detects each raster's year from its filename, picks a default "active year", and lets admins swap to another year from the fire-list filter panel without restarting the process.
+
 ---
 
 ## What this tool does
 
-1. **Loads** a shapefile of historical fire perimeters and a Sentinel-2 raster stack.
-2. **Optionally downloads** VIIRS active fire satellite detections to use as classification hints.
+1. **Loads** a shapefile of historical fire perimeters and one Sentinel-2 raster **per year** (e.g. `pgfc_2022.bin`, `pgfc_2023.bin`).
+2. **Optionally downloads** VIIRS active fire satellite detections per year to use as classification hints.
 3. **Serves a web UI** where users can:
-   - Browse all fires in the shapefile, sorted and filtered by year, size, status, etc.
+   - Pick the **active year** from a single-select radio in the filter panel (admin-only). The active year determines which raster and which per-year output directory are in effect.
+   - Browse all fires whose `FIRE_YEAR` matches the active year **and** whose polygon intersects that year's raster footprint, sorted and filtered by number, size, status, etc.
    - Open any fire to see post-fire, pre-fire, and difference imagery at full pixel resolution.
    - Run the ML classification pipeline with adjustable parameters.
    - Run **serial mapping** (multiple parameter sets at once) and compare results in a gallery.
-   - Accept the best result, which saves it to disk and logs the parameters for future use.
+   - Accept the best result, which saves it to that year's per-year output directory and logs the parameters for future use.
    - Batch-map many fires at once using recommended settings.
 4. **Learns over time**: accepted parameters are logged. Future serial mappings rank parameter sets by how well they performed on similar fires (same region, similar size), so results improve as more fires are processed.
-5. **Parameter Analyzer (admin-only)**: a dedicated high-throughput tool for exploring N parameter sets × M HDBSCAN replicates across selected fires. Admins accept one or more runs per fire; accepted parameters and fire characteristics are logged to a master CSV for offline analysis. All outputs live in a separate `analyzing_parameters/` directory and never touch the user-facing accepted fires.
+5. **Parameter Analyzer (admin-only)**: a dedicated high-throughput tool for exploring N parameter sets × M HDBSCAN replicates across selected fires (scoped to the active year). Admins accept one or more runs per fire; accepted parameters and fire characteristics are logged to a master CSV for offline analysis. All outputs live in a separate `analyzing_parameters/` directory under the active year's outdir and never touch the user-facing accepted fires.
 
 ---
 
@@ -38,12 +41,18 @@ This is the web companion to the `batch_fire_mapping` CLI. It wraps the same und
 ```bash
 python -m batch_fire_mapping_web \
     /path/to/fire_perimeters.shp \
-    /path/to/sentinel2_stack.bin \
-    --skip_download \
-    --out_dir ./results
+    --rasters  /path/to/pgfc_2022.bin \
+               /path/to/pgfc_2023.bin \
+               /path/to/pgfc_2024.bin \
+    --out_root ./mapping_results \
+    --skip_download
 ```
 
-Then open `http://localhost:8765` in your browser.
+Then open `http://localhost:8765` in your browser. The server picks the newest year (2024 in this example) as the initial active year; an admin can switch to another year from the fire-list filter panel.
+
+Each filename must contain a unique, plausible 4-digit year (1970 ≤ year ≤ current year + 1). Digit position is not hardcoded — `pgfc_2023.bin`, `2023_pgfc.bin`, and `S2C_MSIL1C_20251014T192401_20m.bin` are all valid. Two rasters with the same detected year are rejected at startup.
+
+Per-year outputs live under `<out_root>/<raster_stem>_mapping_results/` (e.g. `./mapping_results/pgfc_2023_mapping_results/`). Shared state — sessions, IP access list, recommended settings, active-year pointer — lives at `<out_root>/` and is preserved across year switches.
 
 Authentication is required by default. Set passwords via environment variables or CLI flags:
 
@@ -52,42 +61,47 @@ export FIRE_ADMIN_PASSWORD=<your-admin-password>
 export FIRE_USER_PASSWORD=<your-user-password>
 
 python -m batch_fire_mapping_web \
-    fire_perimeters.shp sentinel2_stack.bin \
-    --skip_download --out_dir ./results
+    fire_perimeters.shp \
+    --rasters  pgfc_2022.bin  pgfc_2023.bin  pgfc_2024.bin \
+    --out_root ./mapping_results --skip_download
 ```
 
 To run without authentication (e.g. localhost-only testing), pass `--insecure_no_auth`:
 
 ```bash
 python -m batch_fire_mapping_web \
-    fire_perimeters.shp sentinel2_stack.bin \
-    --skip_download --out_dir ./results --insecure_no_auth
+    fire_perimeters.shp \
+    --rasters  pgfc_2023.bin \
+    --out_root ./mapping_results --skip_download --insecure_no_auth
 ```
 
 > **Tip**: Use environment variables instead of CLI flags on shared systems, since CLI arguments are visible in process listings.
+
+> **Bash tip**: pass the raster list with an unquoted expansion or a bash array so argparse sees multiple words, not one long string: `--rasters "${RASTERS[@]}"` is safe; `--rasters "$RASTERS"` is not.
 
 ---
 
 ## Command reference
 
 ```
-python -m batch_fire_mapping_web  POLYGON_FILE  RASTER_FILE  [options]
+python -m batch_fire_mapping_web  POLYGON_FILE  --rasters R1 [R2 …]  --out_root DIR  [options]
 ```
 
 ### Required arguments
 
 | Argument | Description |
 |---|---|
-| `POLYGON_FILE` | Fire perimeters shapefile (`.shp`). Must have columns: `FIRE_NUMBE`, `FIRE_DATE`, `FIRE_YEAR`, `FIRE_SIZE_`. |
-| `RASTER_FILE` | Sentinel-2 ENVI raster (`.bin` with companion `.hdr`). |
+| `POLYGON_FILE` | Fire perimeters shapefile (`.shp`, positional). Must have columns: `FIRE_NUMBE`, `FIRE_DATE`, `FIRE_YEAR`, `FIRE_SIZE_`. One shapefile is shared across all years; per-year polygons are selected by `FIRE_YEAR`. |
+| `--rasters R1 [R2 …]` | One or more Sentinel-2 ENVI rasters (`.bin` with companion `.hdr`). Each filename must contain a unique 4-digit year; the year is auto-detected. Duplicate years are rejected. |
+| `--out_root DIR` | Mother directory. Per-year outputs go to `<out_root>/<raster_stem>_mapping_results/`. Shared state (sessions, IP list, recommended settings, active-year pointer) lives directly under `<out_root>/`. |
 
 ### Optional arguments
 
 | Flag | Default | Description |
 |---|---|---|
-| `--out_dir DIR` | raster directory | Root directory for all outputs. |
-| `--perimeter_mode {viirs,traditional}` | `viirs` | Hint source. `viirs` uses VIIRS active fire data when available, falls back to polygon perimeter. `traditional` always uses the polygon. |
-| `--skip_download` | off | Skip VIIRS download (use when data already exists from a previous run). |
+| `--year N` | newest year, or value saved in `<out_root>/active_year.yaml` | Initial active year at startup. Must match one of the years detected from `--rasters`. |
+| `--perimeter_mode {viirs,traditional}` | `viirs` | Hint source. `viirs` uses VIIRS active fire data when available, falls back to polygon perimeter. `traditional` always uses the polygon and skips VIIRS entirely. |
+| `--skip_download` | off | Skip VIIRS download + shapify (use when data already exists from a previous run). |
 | `--shapify_workers N` | `8` | Parallel workers for VIIRS NetCDF-to-shapefile conversion. |
 | `--sample_rate FLOAT` | `0.05` | Fraction of crop pixels to sample for T-SNE. Adjustable per-fire in the UI. |
 | `--min_samples N` | `500` | Minimum samples (floor). |
@@ -101,6 +115,56 @@ python -m batch_fire_mapping_web  POLYGON_FILE  RASTER_FILE  [options]
 
 ---
 
+## Multi-year support
+
+A single server process manages **N rasters for N years** under one shared `<out_root>`. Only one year is "active" at a time; the active year determines which raster, which per-year output directory, and which set of fires the UI shows.
+
+### Year detection
+
+Each raster's year is extracted from its filename by scanning **all** 4-digit substrings and keeping those inside `[1970 … currentYear+1]`. The stem must yield **exactly one** plausible year:
+
+| Filename | Detected year |
+|---|---|
+| `pgfc_2023.bin` | 2023 |
+| `2024_pgfc.bin` | 2024 |
+| `S2_2023_v2.bin` | 2023 |
+| `S2C_MSIL1C_20251014T192401_20m.bin` | 2025 |
+| `foo.bin` | ERROR: no plausible year |
+| `a_1999_b_2001.bin` | ERROR: multiple plausible years |
+| `pgfc_2023_2024.bin` | ERROR: multiple plausible years |
+
+Duplicate years across `--rasters` also error at startup. This guarantees the `{year → raster}` map is injective.
+
+### Active year
+
+- The active year is set from (in order of precedence): `--year N` CLI arg → the value in `<out_root>/active_year.yaml` → the newest year in the registry.
+- It is persisted to `<out_root>/active_year.yaml` on every successful switch, so restarts remember.
+- Fire list scope: `state.fires` only contains polygons whose `FIRE_YEAR` column equals the active year **and** whose geometry intersects the active raster's extent. Fires from other years that happen to sit inside the raster footprint do not leak in.
+
+### Switching years (admin-only)
+
+The filter panel's "Year" section is a set of **radio buttons** (single-select) covering every year passed via `--rasters`. The active year is pre-checked.
+
+- Pick a different year → click **Apply** → confirm the prompt → the server swaps state in place and the page reloads.
+- Pick the same year → click **Apply** → plain client-side refilter, no backend call.
+- Non-admin roles see the radios disabled with a `(year switch is admin-only)` note.
+
+The backend endpoint is `POST /api/year/switch {year: N}`. It refuses if any long-running job is in flight — a one-shot mapping, a batch, or an analyzer session — returning `409` with a message like `A mapping job is running (fire XXX). Wait for it to finish.` Finish or cancel the job, then retry.
+
+A successful switch runs synchronously under `state.lock`: re-reads raster info for the new year, re-projects the cached raw polygon GDF and spatial-/FIRE_YEAR-filters it, reloads VIIRS, rebuilds `state.fires` via `init_fires_from_gdf`, calls `_load_fire_state()` against the new outdir's `fire_state.yaml`, and re-initializes the Parameter Analyzer against the new `analyzing_parameters/` directory. Typical cost is well under a second with warm caches.
+
+### Shared vs. per-year files
+
+| Path | Scope | Contents |
+|---|---|---|
+| `<out_root>/active_year.yaml` | shared | The currently-active year. |
+| `<out_root>/sessions.yaml` | shared | Hashed session tokens. Survives year switches so logins carry across. |
+| `<out_root>/access_control.yaml` | shared | Approved / blocked / pending IP list. |
+| `<out_root>/recommended_settings.yaml` | shared | User-edited settings (with fallback to the package default). |
+| `<out_root>/<raster_stem>_mapping_results/` | per-year | Everything else: `fire_state.yaml`, canonical `<FIRE>/` directories, `.web_cache/`, `accepted_params.csv`, `notes.yaml`, `fire_status.yaml`, `analyzing_parameters/`. |
+
+---
+
 ## Authentication and access control
 
 Authentication is **required by default**. The server will refuse to start without passwords unless `--insecure_no_auth` is explicitly passed. When both an admin and user password are configured, the server enables a two-role system:
@@ -108,7 +172,7 @@ Authentication is **required by default**. The server will refuse to start witho
 - **Admin**: full access. Can approve or block other users' IP addresses via the admin dashboard (`/admin`). Can edit recommended settings. Can trigger and cancel batch mapping. Can restore hidden fires.
 - **User**: fire mapping access. Must have their IP approved by an admin before they can see any content.
 
-New user IPs appear as "pending" on the admin dashboard. The admin approves or blocks them. Approved, blocked, and pending IP state all persist across server restarts (stored in `access_control.yaml`). Sessions are cookie-based and persist across restarts (stored in `sessions.yaml`).
+New user IPs appear as "pending" on the admin dashboard. The admin approves or blocks them. Approved, blocked, and pending IP state all persist across server restarts (stored in `<out_root>/access_control.yaml`). Sessions are cookie-based and persist across restarts and year switches (stored in `<out_root>/sessions.yaml`).
 
 Password rules:
 - `--admin_password` alone enables admin-only mode (no user role).
@@ -127,10 +191,11 @@ With `--insecure_no_auth`, all authentication is bypassed and every user has ful
 
 ### Fire list (home page)
 
-A sortable, filterable table of every fire in the shapefile.
+A sortable, filterable table of every fire for the currently-active year.
 
 - **Columns**: fire number, date, year, size (ha), agreement %, ML area, status.
-- **Filters**: year, fire number (regex), minimum size, status. Filter state persists across page navigation, browser tabs, and browser restarts (stored in `localStorage`).
+- **Filters**: year (single-select radio, doubles as admin-only year switcher — see *Multi-year support*), fire number (regex), minimum size, status. Non-year filter state persists across page navigation, browser tabs, and browser restarts (stored in `localStorage`). The year selection itself is **not** persisted client-side — it's the server-side active year, kept in `<out_root>/active_year.yaml`.
+- **Year filter preview**: when you pick a year different from the active one, the preview count panel shows `Apply will switch active year to YYYY (current year: N / M matches)` so you know Apply will trigger a raster swap rather than a pure client-side refilter.
 - **Batch actions**: select fires with checkboxes, then "Map Selected (with settings)" to batch-process them, or "Remove Selected" to hide them from the list. Running batches can be **cancelled** via the Cancel button.
 - **Removing / restoring fires**: removed fires are hidden from the list and persist across restarts. Admins can restore hidden fires from the admin dashboard.
 - **PDF report**: generates a downloadable PDF of all accepted fires.
@@ -206,10 +271,10 @@ Cards are re-rendered whenever their backing stats change. Each card writes a `s
 
 #### Accepting
 
-All mapping results live in `.web_cache/` until explicitly accepted. Nothing is written to the canonical output directory until you click Accept. Clicking Accept on a result card:
-- Copies all outputs to the canonical output directory (`<out_dir>/<FIRE_NUMBER>/`).
+All mapping results live in the active year's `.web_cache/` until explicitly accepted. Nothing is written to the canonical output directory until you click Accept. Clicking Accept on a result card:
+- Copies all outputs to the active year's canonical output directory (`<out_root>/<raster_stem>_mapping_results/<FIRE_NUMBER>/`).
 - Writes a `_params.yaml` file with the full parameter record and ML area estimate.
-- Logs parameters to `accepted_params.csv` (feeds the learning system). Re-accepting a fire replaces its previous CSV entry rather than appending a duplicate.
+- Logs parameters to that year's `accepted_params.csv` (feeds the learning system). Re-accepting a fire replaces its previous CSV entry rather than appending a duplicate.
 - Clears the results gallery and serial cache files.
 - Shows a confirmation dialog if overwriting a previously accepted result.
 
@@ -282,7 +347,7 @@ The `/analyzer` page lets the admin define:
 - **Parameter sets (N)**: any number of sets. Each set contains a full set of pipeline parameters (padding, sample_rate, embed_bands, t-SNE and Random Forest settings, HDBSCAN controlled_ratio/min_samples). Leave a field blank to fall back to the pipeline default. Sets can be seeded from the recommended tiers for a quick start, then tweaked field-by-field.
 - **HDBSCAN runs per set (M)**: how many replicate runs per set, 1-20.
 - **HDBSCAN jitter step**: how much to vary `hdbscan_min_samples` across the M replicates (see below).
-- **Fires to analyze**: multi-select via a rich filter panel (year, region, zone, size bucket, user status, analyzer status, accepted-runs toggle, fire-number regex) with live count preview. Filter state is persisted in `localStorage`.
+- **Fires to analyze**: multi-select via a rich filter panel (year, region, zone, size bucket, user status, analyzer status, accepted-runs toggle, fire-number regex) with live count preview. Filter state is persisted in `localStorage`. The candidate pool is scoped to the **active year** — switching years in the main UI reinitializes the analyzer against the new year's outdir. If you need to analyze 2023 and 2024 separately, switch years between runs.
 - **Description**: free-text label for the config.
 
 Config is persisted to `analyzing_parameters/analyzer_config.yaml` on save.
@@ -354,10 +419,10 @@ The CSV schema is a superset of the user-facing `accepted_params.csv` -- overlap
 
 ### Output directory
 
-The analyzer writes everything under `<out_dir>/analyzing_parameters/`. You can delete the whole directory to start fresh without touching user-accepted fires in `<out_dir>/<FIRE_NUMBER>/` or the user-facing `accepted_params.csv`.
+The analyzer is scoped to the active year: it writes everything under `<out_root>/<active_raster_stem>_mapping_results/analyzing_parameters/`. Switching years reinitializes the analyzer against the new year's directory. You can delete the whole `analyzing_parameters/` tree to start fresh without touching user-accepted fires in `<FIRE_NUMBER>/` or the year's `accepted_params.csv`.
 
 ```
-<out_dir>/analyzing_parameters/
+<out_root>/<active_raster_stem>_mapping_results/analyzing_parameters/
     analyzer_config.yaml              # admin's current config (N sets, M, jitter, fires)
     analyzer_accepted.csv             # master CSV, one row per accepted run
     <FIRE>/                           # only exists after at least one accept
@@ -410,7 +475,7 @@ The two workflows are strictly isolated -- nothing the analyzer does affects the
 
 ## Recommended settings
 
-The file `recommended_settings.yaml` defines an ordered list of parameter presets plus K (HDBSCAN replicates per setting). The first setting is the **primary** used by one-click "Map Fire". "Map Fire with Settings" runs every setting × K replicates. Loaded on startup from the output directory first, falling back to the package directory for defaults.
+The file `recommended_settings.yaml` defines an ordered list of parameter presets plus K (HDBSCAN replicates per setting). The first setting is the **primary** used by one-click "Map Fire". "Map Fire with Settings" runs every setting × K replicates. Loaded on startup from `<out_root>/recommended_settings.yaml` first, falling back to the package-shipped default if the shared copy is missing. The recommended settings list is **shared across years** (not per-year): a year switch preserves whatever the admin last saved.
 
 ```yaml
 k_runs_per_setting: 3
@@ -443,68 +508,84 @@ Admins edit the global list in the Recommended Settings panel on the fire list p
 
 ## Typical workflow
 
-1. **Filter** the fire list (e.g., year 2023, minimum 10 ha).
-2. **Select all** and click **Map Selected (with settings)** for a batch run.
-3. Wait. The fire list auto-refreshes as each fire completes.
-4. **Filter by status = mapped** to see fires needing review.
-5. **Open** the first fire. The split view shows post-fire imagery alongside the ML classification.
-6. If the result looks good, click **Accept** on the result card. If not, tweak parameters and re-map.
-7. Click **Next** to move to the next fire.
-8. Accepted results are in `<out_dir>/<FIRE_NUMBER>/` with full parameter records.
+1. **Pick the active year** in the filter panel (single-select radio, admin-only). This loads that year's raster and filters the fire list to fires whose `FIRE_YEAR` matches. Skip if you only launched with one raster — its year is already active.
+2. **Apply the other filters** (minimum size, fire-number regex, status).
+3. **Select all** and click **Map Selected (with settings)** for a batch run.
+4. Wait. The fire list auto-refreshes as each fire completes.
+5. **Filter by status = mapped** to see fires needing review.
+6. **Open** the first fire. The split view shows post-fire imagery alongside the ML classification.
+7. If the result looks good, click **Accept** on the result card. If not, tweak parameters and re-map.
+8. Click **Next** to move to the next fire.
+9. Accepted results are in `<out_root>/<raster_stem>_mapping_results/<FIRE_NUMBER>/` with full parameter records. When you're done with that year, switch the year in the filter panel and repeat from step 2 — the next year's `.web_cache/` and canonical dirs live in a sibling directory, so the two years cannot overwrite each other.
 
 ---
 
 ## Output structure
 
+Multi-year: `<out_root>/` holds shared state at the top and **one sibling directory per year**, named `<raster_stem>_mapping_results/`, with everything per-year inside.
+
 ```
-<out_dir>/
-    fire_state.yaml               # Per-fire state (survives restart)
-    fire_status.yaml              # Status index for all fires
-    accepted_params.csv           # Parameter log (one row per accepted fire)
-    notes.yaml                    # Per-fire notes
-    recommended_settings.yaml     # User-edited settings (overrides package defaults)
-    access_control.yaml           # Approved/blocked/pending IP addresses
-    sessions.yaml                 # Persistent login sessions (hashed tokens)
-    .web_cache/                   # Working files (preserved across re-prepares)
-        <FIRE_NUMBER>/
-            *_crop.bin / .hdr     # Cropped raster
-            *_perimeter.bin       # Rasterized perimeter
-            VIIRS_*.bin           # Rasterized VIIRS hint
-            *_classified.bin      # Classification output (post-brush)
-            *_classified_raw.bin  # Pre-brush HDBSCAN mask + .hdr
-                                  #   Created on first rebrush; every
-                                  #   subsequent rebrush reads from here
-                                  #   so brushes never compound.
-            *_comparison.png      # Comparison figure
-            *_brush_comparison.png # Raw vs brushed side-by-side
-            *_serial_<ID>_classified.bin       # Per serial run
-            *_serial_<ID>_classified_raw.bin   # Per-run raw backup
-            *_serial_<ID>_brush.png            # Per-run brush preview
-            previews/             # Preview PNGs for web display
-    <FIRE_NUMBER>/                # Accepted results (one directory per fire)
-        *_crop.bin / .hdr
-        *_classified.bin
-        *_comparison.png
-        *_brush_comparison.png
-        *_params.yaml             # Full parameter record + ML area
-    analyzing_parameters/         # Parameter Analyzer outputs (admin only)
-        analyzer_config.yaml
-        analyzer_accepted.csv
-        <FIRE_NUMBER>/            # Only exists after at least one analyzer accept
-            <FIRE>_crop_max.bin   # Biggest-padded accepted crop (overlay backdrop)
-            <FIRE>_post_max.png
-            <FIRE>_overlay.png    # Composite overlay (rebuilt on demand)
-            manifest.yaml
-            run_0001/             # One accepted run
-            run_0002/
-        .analyzer_cache/          # Working cache, delete-safe
+<out_root>/                                    # mother dir (--out_root)
+    active_year.yaml                           # {active_year: NNNN}
+    recommended_settings.yaml                  # Shared user-edited settings
+    access_control.yaml                        # Shared approved/blocked/pending IPs
+    sessions.yaml                              # Shared persistent login sessions
+
+    pgfc_2023_mapping_results/                 # one sibling per --rasters entry
+        fire_state.yaml                        # Per-fire state (survives restart)
+        fire_status.yaml                       # Status index for this year's fires
+        accepted_params.csv                    # Parameter log (one row per accepted fire)
+        notes.yaml                             # Per-fire notes
+        .web_cache/                            # Working files (preserved across re-prepares)
             <FIRE_NUMBER>/
-                p_<padding>/      # One snapshot per padding
-                    tsne_rf_<sig>.npz    # Cached intermediate state
-                    set_<S>_run_<R>/     # Per-run outputs + sidecar
+                *_crop.bin / .hdr              # Cropped raster
+                *_perimeter.bin                # Rasterized perimeter
+                VIIRS_*.bin                    # Rasterized VIIRS hint
+                *_classified.bin               # Classification output (post-brush)
+                *_classified_raw.bin           # Pre-brush HDBSCAN mask + .hdr
+                                               #   Created on first rebrush; every
+                                               #   subsequent rebrush reads from here
+                                               #   so brushes never compound.
+                *_comparison.png               # Comparison figure
+                *_brush_comparison.png         # Raw vs brushed side-by-side
+                *_serial_<ID>_classified.bin   # Per serial run
+                *_serial_<ID>_classified_raw.bin # Per-run raw backup
+                *_serial_<ID>_brush.png        # Per-run brush preview
+                previews/                      # Preview PNGs for web display
+        <FIRE_NUMBER>/                         # Accepted results (one directory per fire)
+            *_crop.bin / .hdr
+            *_classified.bin
+            *_comparison.png
+            *_brush_comparison.png
+            *_params.yaml                      # Full parameter record + ML area
+        analyzing_parameters/                  # Parameter Analyzer outputs (admin only)
+            analyzer_config.yaml
+            analyzer_accepted.csv
+            <FIRE_NUMBER>/                     # Only exists after at least one analyzer accept
+                <FIRE>_crop_max.bin            # Biggest-padded accepted crop (overlay backdrop)
+                <FIRE>_post_max.png
+                <FIRE>_overlay.png             # Composite overlay (rebuilt on demand)
+                manifest.yaml
+                run_0001/                      # One accepted run
+                run_0002/
+            .analyzer_cache/                   # Working cache, delete-safe
+                <FIRE_NUMBER>/
+                    p_<padding>/               # One snapshot per padding
+                        tsne_rf_<sig>.npz      # Cached intermediate state
+                        set_<S>_run_<R>/       # Per-run outputs + sidecar
+
+    pgfc_2024_mapping_results/                 # same shape as above, for 2024
+        fire_state.yaml
+        accepted_params.csv
+        .web_cache/
+        <FIRE_NUMBER>/
+        analyzing_parameters/
+        ...
 ```
 
-Accepted fire directories are compatible with `batch_fire_mapping` CLI output. The `analyzing_parameters/` tree is self-contained and can be deleted independently -- see the Parameter Analyzer section for full details.
+Accepted fire directories (`<out_root>/<stem>_mapping_results/<FIRE_NUMBER>/`) are compatible with `batch_fire_mapping` CLI output. The `analyzing_parameters/` tree under each year's outdir is self-contained and can be deleted independently — see the Parameter Analyzer section for full details.
+
+**Practical note on VIIRS downloads**: VIIRS shapefiles are stored next to each raster (`<raster_dir>/<stem>_VIIRS/VNP14IMG/`), not inside `<out_root>`. This is deliberate so repeated launches against the same raster reuse the same VIIRS cache. At startup, the server prepares VIIRS up-front for **every** year (honoring `--skip_download`), so later year switches never block on a download.
 
 ---
 
@@ -559,24 +640,31 @@ The following security measures are built into the server:
 
 The server persists all important state to disk so that work survives restarts and crashes:
 
-| File | What it stores | When it's written |
-|---|---|---|
-| `fire_state.yaml` | Per-fire status, cache paths, parameters, agreement, hidden flags | After every prepare, mapping, accept, and remove/restore |
-| `notes.yaml` | Per-fire text annotations | On every note edit |
-| `accepted_params.csv` | One row per accepted fire (deduplicated on re-accept) | On accept |
-| `access_control.yaml` | Approved, blocked, and pending IPs | On every IP action |
-| `sessions.yaml` | Hashed session tokens | On login/logout |
-| `recommended_settings.yaml` | User-edited parameter presets (in output dir) | On admin save |
-| `analyzing_parameters/analyzer_config.yaml` | Analyzer config (N sets, M, jitter, fires) | On analyzer save |
-| `analyzing_parameters/analyzer_accepted.csv` | One row per accepted analyzer run (append-only) | On analyzer accept |
-| `analyzing_parameters/<FIRE>/manifest.yaml` | Per-fire accept list + max-crop tracking | On analyzer accept/unaccept |
-| `.analyzer_cache/<FIRE>/runs.yaml` | Fast-reload cache of the in-memory runs list | After every run completes |
+All paths below are relative to the active year's outdir (`<out_root>/<stem>_mapping_results/`) unless otherwise noted.
+
+| File | Scope | What it stores | When it's written |
+|---|---|---|---|
+| `<out_root>/active_year.yaml` | shared | The currently-active year | On startup and on every successful `/api/year/switch` |
+| `<out_root>/sessions.yaml` | shared | Hashed session tokens | On login/logout; survives year switches |
+| `<out_root>/access_control.yaml` | shared | Approved, blocked, and pending IPs | On every IP action |
+| `<out_root>/recommended_settings.yaml` | shared | User-edited parameter presets | On admin save |
+| `fire_state.yaml` | per-year | Per-fire status, cache paths, parameters, agreement, hidden flags | After every prepare, mapping, accept, and remove/restore. Also flushed during `/api/year/switch` before the swap. |
+| `notes.yaml` | per-year | Per-fire text annotations | On every note edit |
+| `accepted_params.csv` | per-year | One row per accepted fire (deduplicated on re-accept) | On accept |
+| `analyzing_parameters/analyzer_config.yaml` | per-year | Analyzer config (N sets, M, jitter, fires) | On analyzer save |
+| `analyzing_parameters/analyzer_accepted.csv` | per-year | One row per accepted analyzer run (append-only) | On analyzer accept |
+| `analyzing_parameters/<FIRE>/manifest.yaml` | per-year | Per-fire accept list + max-crop tracking | On analyzer accept/unaccept |
+| `.analyzer_cache/<FIRE>/runs.yaml` | per-year | Fast-reload cache of the in-memory runs list | After every run completes |
 
 On startup, the server:
-1. Loads fires from the shapefile and detects accepted fires by checking for `_comparison.png` on disk.
-2. Restores fire state from `fire_state.yaml` — mapped fires, cache paths, hidden flags, parameters, and agreement scores are all recovered.
-3. Validates that cached files still exist before restoring status. If a fire was mid-mapping when the server crashed, it recovers to MAPPED (if results exist in cache) or READY (if not), rather than being stuck in MAPPING.
-4. Initializes the Parameter Analyzer: loads `analyzer_config.yaml`, scans `analyzing_parameters/<FIRE>/` directories to reconstruct accepted-run state, and scans `.analyzer_cache/<FIRE>/` for un-accepted (pending or partial) run sidecars. Fires that had analyzer data on disk return to ANALYZED or PARTIAL status accordingly.
+1. Builds the `{year → raster}` registry from `--rasters`, auto-detecting each year from the filename. Duplicate years error out.
+2. Determines the initial active year from `--year` → `<out_root>/active_year.yaml` → newest year, and persists it back to `active_year.yaml`.
+3. Prepares VIIRS (download + shapify) for **every** year's raster, unless `--skip_download` is passed. Per-year VIIRS directories live next to each raster as `<raster_stem>_VIIRS/`.
+4. Loads the polygon shapefile into memory once (the raw cache used by `/api/year/switch` for fast re-filtering) and filters it for the active year: keeps only polygons whose `FIRE_YEAR` matches and whose geometry intersects the active raster.
+5. Loads fires from the filtered GDF and detects accepted fires by checking for `_comparison.png` on disk in the active year's outdir.
+6. Restores fire state from the active year's `fire_state.yaml` — mapped fires, cache paths, hidden flags, parameters, and agreement scores are all recovered.
+7. Validates that cached files still exist before restoring status. If a fire was mid-mapping when the server crashed, it recovers to MAPPED (if results exist in cache) or READY (if not), rather than being stuck in MAPPING.
+8. Initializes the Parameter Analyzer against the active year's `analyzing_parameters/` tree: loads `analyzer_config.yaml`, scans `analyzing_parameters/<FIRE>/` directories to reconstruct accepted-run state, and scans `.analyzer_cache/<FIRE>/` for un-accepted (pending or partial) run sidecars. Fires that had analyzer data on disk return to ANALYZED or PARTIAL status accordingly. Switching years reruns steps 4–8 against the new year's outdir.
 
 The `.web_cache/` directory is no longer wiped on every re-prepare. Cache is only cleared when padding actually changes (which invalidates the crop dimensions). This means un-accepted mapping results survive across page reloads and re-prepares with the same padding.
 
@@ -616,7 +704,14 @@ The server is a plain `http.server` dispatcher; routes are registered on `FireHa
 |---|---|---|
 | `GET`  | `/api/fire/<FIRE>/console`  | Returns the fire's console log tail, current status, serial-results array, and a `rebrush_running` boolean. The frontend polls this to keep the UI in sync after a page reload — a `true` `rebrush_running` triggers the rebrush-adopt UI path. |
 | `POST` | `/api/fire/<FIRE>/map`      | Kicks off a serial mapping job. Body: `{mode: 'primary' \| 'settings', settings: [{label, params}, …]}`. Map Fire sends the panel as a single-element `settings` array; Map Fire with settings omits `settings` and the server fans out the recommended YAML. |
-| `POST` | `/api/fire/<FIRE>/accept`   | Accepts a specific serial run into the canonical `<out_dir>/<FIRE>/` directory. |
+| `POST` | `/api/fire/<FIRE>/accept`   | Accepts a specific serial run into the active year's canonical `<out_root>/<raster_stem>_mapping_results/<FIRE>/` directory. |
+
+### Multi-year
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET`  | `/api/years`        | Returns `{years: [NNNN, …], active: NNNN}` — the sorted list of years in the registry plus the active year. Any authenticated session. |
+| `POST` | `/api/year/switch`  | Admin-only. Body: `{year: NNNN}`. Swaps the active raster, outdir, polygon filter, fires, fire-state, and analyzer in place under `state.lock`. Returns `{ok: true, year: NNNN}` on success; `409` with `{error: '…'}` if any mapping / batch / analyzer job is running (cancel or wait). The browser should call `location.reload()` on a `200`. |
 
 ### Rebrush (new, as of 2026-04-20)
 
@@ -671,9 +766,9 @@ On success, for a whole-fire rebrush, the server updates `fire.ml_area_ha`, `fir
 
 | File | Purpose |
 |---|---|
-| `__main__.py` | Entry point. Parses arguments, loads data, initializes state, starts server, registers analyzer routes. |
-| `app.py` | Web server, all route handlers, mapping orchestration, template rendering. |
-| `state.py` | Data classes for per-fire state (`FireInfo`) and global app state (`AppState`). |
+| `__main__.py` | Entry point. Parses arguments, auto-detects each raster's year via `_year_from_filename`, builds the `{year → raster/outdir/viirs_dir}` registry, resolves the initial active year, prepares VIIRS per year, filters polygons for the active year, initializes state, starts server, registers analyzer routes. |
+| `app.py` | Web server, all route handlers, mapping orchestration, template rendering. Owns `_switch_year` (in-place year swap), `_save_active_year`, and the `/api/year/switch` + `/api/years` endpoints. |
+| `state.py` | Data classes for per-fire state (`FireInfo`) and global app state (`AppState`). `AppState` carries the multi-year registry (`active_year`, `shared_root`, `rasters_by_year`, `outdirs_by_year`, `viirs_shp_dirs_by_year`, `polygon_gdf_raw`) alongside the active-year views (`raster_path`, `output_root`, `viirs_shp_dir`, `gdf`, `viirs_gdf`). |
 | `preview.py` | ENVI header parsing, band detection, preview PNG generation. |
 | `analyzer_state.py` | Analyzer data classes (`AnalyzerRun`, `AnalyzerFireInfo`, `AnalyzerConfig`, `AnalyzerState`), the 35-column CSV schema, and the list of parameter keys that invalidate the t-SNE+RF cache. |
 | `analyzer_app.py` | Analyzer route handlers and admin gate. Registers its routes on `FireHandler` via monkey-patching so `app.py` stays untouched. Config read/write, fires list, status, per-fire gallery, run images, accept/unaccept, CSV preview/download, composite overlay. |

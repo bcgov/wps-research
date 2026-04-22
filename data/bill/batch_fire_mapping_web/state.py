@@ -124,6 +124,20 @@ class AppState:
         self.project_root: str = ""
         self.cli_script: str = ""
 
+        # Multi-year registry. output_root / raster_path / viirs_shp_dir /
+        # gdf / viirs_gdf above always refer to the currently-active year;
+        # these maps let /api/year/switch re-point them without restart.
+        self.active_year: int = 0
+        self.shared_root: str = ""        # mother dir: sessions/IPs live here
+        self.rasters_by_year: dict = {}   # {year: abs raster path}
+        self.outdirs_by_year: dict = {}   # {year: abs per-year out dir}
+        self.viirs_shp_dirs_by_year: dict = {}  # {year: abs VIIRS shp dir}
+        # Raw polygon GeoDataFrame (source CRS, pre-filter) cached so
+        # year switches only re-project + spatial-filter, not re-read.
+        self.polygon_gdf_raw = None
+        # Persistent paths under shared_root — set once, never change.
+        self.settings_file: str = ""
+
         # Defaults
         self.padding: float = 0.2
         self.sample_rate: float = 0.05

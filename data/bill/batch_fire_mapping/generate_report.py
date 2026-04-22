@@ -157,10 +157,18 @@ def _build_param_table_tex(params: dict) -> str:
     return '\n'.join(lines)
 
 
-def generate_report(results_root: str, output_path: str = None) -> str | None:
+def generate_report(results_root: str, output_path: str = None,
+                    mode: str = 'full') -> str | None:
     """
     Scan *results_root* for fire folders, collect PNGs and params,
     and build a PDF report.
+
+    ``mode``:
+      - ``'full'`` (default) — Pass 1 (ML-classification hero per fire)
+        followed by Pass 2 (perimeter-style comparison + parameters
+        table + optional brush comparison) per fire.
+      - ``'brief'`` — Pass 1 only. Skips the parameters table and
+        brush comparison for a lightweight "ML output only" PDF.
 
     Returns path to the generated PDF, or None if generation failed.
     """
@@ -168,6 +176,8 @@ def generate_report(results_root: str, output_path: str = None) -> str | None:
 
     if output_path is None:
         output_path = os.path.join(fm_root, 'report.pdf')
+
+    mode = 'brief' if str(mode).lower() == 'brief' else 'full'
 
     # Discover fire directories (contain at least one PNG)
     fire_dirs = sorted([
@@ -183,20 +193,40 @@ def generate_report(results_root: str, output_path: str = None) -> str | None:
 
     print(f'[report] Found {len(fire_dirs)} fire(s) with PNGs.')
 
-    # Collect data for each fire
+    # Collect data for each fire.
+    # Pass 1 (full-page hero) prefers an ML-classification view (filled
+    # red mask on post-fire) produced on demand by the web server into
+    # `<fire>_ml_overlay.png` when generating the PDF. When absent (CLI
+    # users who run this script directly), fall back to the saved
+    # perimeter-style comparison.
+    # Pass 2 (detail + params) always uses the saved perimeter-style
+    # `<fire>_comparison.png` so the reader can read outlines + metrics
+    # alongside the parameters table.
     fires = []
     for fire_dir in fire_dirs:
         fire_numbe = os.path.basename(fire_dir)
+        ml_overlay_png = _find_png(fire_dir, '_ml_overlay')
         comparison_png = _find_png(fire_dir, '_comparison')
         brush_png = _find_png(fire_dir, '_brush_comparison')
         no_viirs_png = _find_png(fire_dir, '_no_viirs')
-        hero_png = comparison_png or brush_png or no_viirs_png
-        if hero_png is None:
+        # Pass-1 hero preference: ml_overlay > comparison > brush > no_viirs.
+        pass1_png = (ml_overlay_png or comparison_png
+                     or brush_png or no_viirs_png)
+        # Pass-2 detail preference: comparison > brush > no_viirs. Never
+        # ml_overlay here — detail pages want the outline+metrics figure.
+        pass2_png = comparison_png or brush_png or no_viirs_png
+        if pass1_png is None and pass2_png is None:
             continue
+        # Brush PNG shows alongside the detail image when distinct from
+        # the Pass-2 hero; otherwise we'd be duplicating the same figure.
+        brush_extra = (brush_png
+                       if brush_png and brush_png != pass2_png
+                       else None)
         fires.append({
             'fire_numbe': fire_numbe,
-            'hero_png': hero_png,
-            'brush_png': brush_png if brush_png and brush_png != hero_png else None,
+            'pass1_png': pass1_png or pass2_png,
+            'pass2_png': pass2_png or pass1_png,
+            'brush_png': brush_extra,
             'params': _load_params(fire_dir),
         })
 
@@ -217,13 +247,13 @@ def generate_report(results_root: str, output_path: str = None) -> str | None:
         r'\begin{document}',
     ]
 
-    # ---- Pass 1: Full-page comparison images ----
+    # ---- Pass 1: Full-page ML-classification hero images ----
     for i, fire in enumerate(fires):
         if i > 0:
             lines.append(r'\newpage')
         fire_label = _escape_tex(fire['fire_numbe'])
         subtitle = _build_subtitle_tex(fire['params'], fire['fire_numbe'])
-        img_path = os.path.abspath(fire['hero_png']).replace('\\', '/')
+        img_path = os.path.abspath(fire['pass1_png']).replace('\\', '/')
 
         lines.append(r'\begin{center}')
         lines.append(r'{\Large\bfseries ' + fire_label + r'}\\[0.1cm]')
@@ -235,8 +265,9 @@ def generate_report(results_root: str, output_path: str = None) -> str | None:
         )
         lines.append(r'\end{center}')
 
-    # ---- Pass 2: Detail pages (image left + params right) ----
-    for fire in fires:
+    # ---- Pass 2: Detail pages (perimeter-style comparison + params) ----
+    # Skipped entirely in brief mode.
+    for fire in ([] if mode == 'brief' else fires):
         lines.append(r'\newpage')
         fire_label = _escape_tex(fire['fire_numbe'])
         subtitle = _build_subtitle_tex(fire['params'], fire['fire_numbe'])
@@ -250,7 +281,7 @@ def generate_report(results_root: str, output_path: str = None) -> str | None:
         lines.append(r'\noindent')
         lines.append(r'\begin{minipage}[t]{0.60\textwidth}')
 
-        img_path = os.path.abspath(fire['hero_png']).replace('\\', '/')
+        img_path = os.path.abspath(fire['pass2_png']).replace('\\', '/')
         lines.append(
             r'\includegraphics[width=\textwidth,'
             r'height=0.44\textheight,keepaspectratio]{'
@@ -331,9 +362,13 @@ def main(argv=None):
                    help='Directory containing fire output folders')
     p.add_argument('--output', '-o', default=None,
                    help='Output PDF path (default: <results_dir>/report.pdf)')
+    p.add_argument('--mode', choices=['full', 'brief'], default='full',
+                   help='full (default): ML hero pages + detail pages '
+                        '(perimeter comparison + parameters table + brush). '
+                        'brief: ML hero pages only (no parameters, no brush).')
 
     args = p.parse_args(argv)
-    pdf = generate_report(args.results_dir, args.output)
+    pdf = generate_report(args.results_dir, args.output, mode=args.mode)
     if pdf is None:
         sys.exit(1)
 

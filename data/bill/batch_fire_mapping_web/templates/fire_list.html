@@ -124,7 +124,34 @@
     <button class="btn" id="btn-batch-map" onclick="batchMap()">Map Selected (with settings)</button>
     <button class="btn btn-danger" id="btn-batch-cancel" onclick="batchCancel()" style="display:none">Cancel Batch</button>
     <button class="btn btn-danger" onclick="batchRemove()">Remove Selected</button>
-    <button class="btn btn-success" onclick="downloadReport()">PDF Report (accepted)</button>
+    <details class="report-menu" style="display:inline-block;position:relative">
+        <summary class="btn btn-success"
+                 style="list-style:none;cursor:pointer;user-select:none">
+            PDF Report (accepted) &#9662;
+        </summary>
+        <div class="report-menu-body"
+             style="position:absolute;top:calc(100% + 4px);right:0;
+                    background:#fff;border:1px solid #bbb;border-radius:4px;
+                    box-shadow:0 4px 16px rgba(0,0,0,0.15);padding:4px 0;
+                    z-index:20;min-width:220px">
+            <a href="#" onclick="pickReport('full');return false"
+               style="display:block;padding:8px 14px;color:#222;
+                      text-decoration:none">
+                With details
+                <span style="color:#888;font-size:11px">
+                    &nbsp;— heavier (ML + params + brush)
+                </span>
+            </a>
+            <a href="#" onclick="pickReport('brief');return false"
+               style="display:block;padding:8px 14px;color:#222;
+                      text-decoration:none">
+                ML only
+                <span style="color:#888;font-size:11px">
+                    &nbsp;— lightweight (ML pages only)
+                </span>
+            </a>
+        </div>
+    </details>
     <span class="batch-progress" id="batch-progress"></span>
 </div>
 
@@ -153,10 +180,14 @@
 // -----------------------------------------------------------------------
 // State
 // -----------------------------------------------------------------------
+const ALL_YEARS = {{{ all_years_json }}};
+const ACTIVE_YEAR = {{{ active_year_json }}};
+const IS_ADMIN = {{{ is_admin_json }}};
+
 let allFires = [];
 let sortKey = 'fire_size_ha';
 let sortAsc = false;
-let yearSet = new Set();
+let yearSet = new Set([ACTIVE_YEAR]);  // single-select: always exactly 1 year
 let statusSet = new Set();
 let selectedFires = new Set();
 
@@ -180,15 +211,25 @@ async function loadFires() {
 // Build dynamic filter checkboxes
 // -----------------------------------------------------------------------
 function buildFilterUI() {
-    // Years
-    const years = [...new Set(allFires.map(f => f.fire_year))].filter(Boolean).sort();
+    // Year is single-select across the full registry of years (one raster
+    // per year). Selecting a different year + Apply swaps the active
+    // raster via /api/year/switch.
     const yDiv = document.getElementById('year-filters');
     yDiv.innerHTML = '';
-    for (const y of years) {
-        yearSet.add(y);
+    const disabledAttr = IS_ADMIN ? '' : ' disabled';
+    for (const y of ALL_YEARS) {
+        const checked = (y === ACTIVE_YEAR) ? ' checked' : '';
         const lbl = document.createElement('label');
-        lbl.innerHTML = `<input type="checkbox" checked value="${y}"> ${y}`;
+        lbl.innerHTML = `<input type="radio" name="year-filter" `
+            + `value="${y}"${checked}${disabledAttr}> ${y}`;
         yDiv.appendChild(lbl);
+    }
+    if (!IS_ADMIN && ALL_YEARS.length > 1) {
+        const note = document.createElement('div');
+        note.style.fontSize = '11px';
+        note.style.color = '#888';
+        note.textContent = '(year switch is admin-only)';
+        yDiv.appendChild(note);
     }
 
     // Statuses
@@ -205,8 +246,9 @@ function buildFilterUI() {
 }
 
 function saveFilterState() {
+    // Year is NOT persisted: it's tied to the active raster, which the
+    // server owns. Only persist non-year filters.
     const state = {
-        years: [...yearSet],
         statuses: [...statusSet],
         number: document.getElementById('filter-number').value,
         minSize: document.getElementById('filter-min-size').value,
@@ -223,14 +265,6 @@ function restoreFilterState() {
         if (s.number) document.getElementById('filter-number').value = s.number;
         if (s.minSize) document.getElementById('filter-min-size').value = s.minSize;
         if (s.sortKey) { sortKey = s.sortKey; sortAsc = !!s.sortAsc; }
-        if (s.years) {
-            yearSet.clear();
-            s.years.forEach(y => yearSet.add(y));
-            document.querySelectorAll('#year-filters input').forEach(cb => {
-                const v = parseInt(cb.value) || cb.value;
-                cb.checked = yearSet.has(v);
-            });
-        }
         if (s.statuses) {
             statusSet.clear();
             s.statuses.forEach(st => statusSet.add(st));
@@ -242,12 +276,60 @@ function restoreFilterState() {
     } catch { return false; }
 }
 
-function applyFilters() {
-    // Read checkbox states
-    yearSet.clear();
-    document.querySelectorAll('#year-filters input:checked').forEach(cb => {
-        yearSet.add(parseInt(cb.value) || cb.value);
-    });
+async function applyFilters() {
+    // Year is single-select. If the user picked a different year,
+    // swap the active raster (admin-only, page reloads on success).
+    const selectedYearEl = document.querySelector(
+        '#year-filters input[name="year-filter"]:checked');
+    const selectedYear = selectedYearEl
+        ? (parseInt(selectedYearEl.value, 10) || selectedYearEl.value)
+        : ACTIVE_YEAR;
+    if (selectedYear !== ACTIVE_YEAR) {
+        if (!IS_ADMIN) {
+            alert('Switching year is admin-only.');
+            // Revert the radio to the active year.
+            document.querySelectorAll('#year-filters input').forEach(r => {
+                r.checked = (parseInt(r.value, 10) === ACTIVE_YEAR);
+            });
+            return;
+        }
+        if (!confirm('Switch active year to ' + selectedYear
+                     + '? This affects every logged-in user; in-flight '
+                     + 'mapping or analyzer jobs must be finished or '
+                     + 'cancelled first.')) {
+            // Revert radio
+            document.querySelectorAll('#year-filters input').forEach(r => {
+                r.checked = (parseInt(r.value, 10) === ACTIVE_YEAR);
+            });
+            return;
+        }
+        try {
+            const r = await fetch('/api/year/switch', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({year: selectedYear}),
+            });
+            if (!r.ok) {
+                const j = await r.json().catch(() => ({}));
+                alert('Year switch failed: '
+                      + (j.error || ('HTTP ' + r.status)));
+                // Revert radio
+                document.querySelectorAll('#year-filters input').forEach(r => {
+                    r.checked = (parseInt(r.value, 10) === ACTIVE_YEAR);
+                });
+                return;
+            }
+        } catch (e) {
+            alert('Year switch network error: ' + e);
+            return;
+        }
+        // Full reload — ALL_YEARS / ACTIVE_YEAR come from the template.
+        location.reload();
+        return;
+    }
+
+    // Same year: just a client-side filter redraw.
+    yearSet = new Set([selectedYear]);
     statusSet.clear();
     document.querySelectorAll('#status-filters input:checked').forEach(cb => {
         statusSet.add(cb.value);
@@ -257,11 +339,16 @@ function applyFilters() {
 }
 
 function previewFilterCount() {
-    // Count how many fires would match current filter state (before Apply)
-    const tmpYears = new Set();
-    document.querySelectorAll('#year-filters input:checked').forEach(cb => {
-        tmpYears.add(parseInt(cb.value) || cb.value);
-    });
+    // allFires only contains the active year's fires. If the user picked
+    // a different year but hasn't applied yet, the preview reflects what
+    // the CURRENT list would look like after status/regex/size filters;
+    // the "year swap" preview is conceptually empty until Apply.
+    const selectedYearEl = document.querySelector(
+        '#year-filters input[name="year-filter"]:checked');
+    const selectedYear = selectedYearEl
+        ? (parseInt(selectedYearEl.value, 10) || selectedYearEl.value)
+        : ACTIVE_YEAR;
+    const yearWillSwitch = (selectedYear !== ACTIVE_YEAR);
     const tmpStatuses = new Set();
     document.querySelectorAll('#status-filters input:checked').forEach(cb => {
         tmpStatuses.add(cb.value);
@@ -272,26 +359,32 @@ function previewFilterCount() {
     if (numPat) { try { re = new RegExp(numPat, 'i'); } catch {} }
 
     const count = allFires.filter(f => {
-        if (f.fire_year && !tmpYears.has(f.fire_year)) return false;
         if (!tmpStatuses.has(f.status)) return false;
         if (f.fire_size_ha < minSize) return false;
         if (re && !re.test(f.fire_numbe)) return false;
         return true;
     }).length;
 
-    document.getElementById('filter-preview-count').textContent =
-        `${count} / ${allFires.length} matches`;
+    const el = document.getElementById('filter-preview-count');
+    if (yearWillSwitch) {
+        el.textContent = `Apply will switch active year to ${selectedYear}`
+            + ` (current year: ${count} / ${allFires.length} matches)`;
+    } else {
+        el.textContent = `${count} / ${allFires.length} matches`;
+    }
 }
 
 function resetFilters() {
     document.getElementById('filter-number').value = '';
     document.getElementById('filter-min-size').value = '';
-    document.querySelectorAll('#year-filters input, #status-filters input').forEach(cb => {
-        cb.checked = true;
+    // Year resets to the active year (single-select).
+    document.querySelectorAll('#year-filters input').forEach(r => {
+        r.checked = (parseInt(r.value, 10) === ACTIVE_YEAR);
     });
-    yearSet.clear();
-    document.querySelectorAll('#year-filters input').forEach(cb => {
-        yearSet.add(parseInt(cb.value) || cb.value);
+    yearSet = new Set([ACTIVE_YEAR]);
+    // Status resets to all-checked.
+    document.querySelectorAll('#status-filters input').forEach(cb => {
+        cb.checked = true;
     });
     statusSet.clear();
     document.querySelectorAll('#status-filters input').forEach(cb => {
@@ -905,8 +998,12 @@ setInterval(refreshFires, 5000);
 // -----------------------------------------------------------------------
 // Download PDF report of accepted fires
 // -----------------------------------------------------------------------
-function downloadReport() {
-    // Only accepted fires from the selection
+function pickReport(mode) {
+    // Close the dropdown immediately so the menu doesn't linger while
+    // the browser is off fetching the PDF.
+    const d = document.querySelector('details.report-menu');
+    if (d) d.open = false;
+
     const accepted = [...selectedFires].filter(fn => {
         const f = allFires.find(x => x.fire_numbe === fn);
         return f && f.status === 'accepted';
@@ -915,9 +1012,19 @@ function downloadReport() {
         alert('No accepted fires selected. Select accepted fires to generate a report.');
         return;
     }
-    const params = accepted.map(fn => `fire=${encodeURIComponent(fn)}`).join('&');
-    window.location.href = `/api/report?${params}`;
+    mode = (mode === 'brief') ? 'brief' : 'full';
+    const parts = accepted.map(fn => `fire=${encodeURIComponent(fn)}`);
+    parts.push(`mode=${encodeURIComponent(mode)}`);
+    window.location.href = `/api/report?${parts.join('&')}`;
 }
+
+// Close the dropdown when the user clicks outside of it.
+document.addEventListener('click', (e) => {
+    const d = document.querySelector('details.report-menu');
+    if (d && d.open && !d.contains(e.target)) {
+        d.open = false;
+    }
+});
 
 // -----------------------------------------------------------------------
 // Check if batch is already running on page load
