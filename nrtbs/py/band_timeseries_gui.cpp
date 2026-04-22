@@ -347,6 +347,73 @@ static void histStretchToU8(const float* src, size_t n, unsigned char* dst,
 
 /* ─────────── precompute RGB textures from multilooked data ──────── */
 
+/* global averaged stretch limits (computed once, shared across all images) */
+static StretchLimits g_avgStretch;
+static bool g_avgStretchReady = false;
+
+static void computeAveragedStretch() {
+    /* check if cached */
+    string fn = restore_prefix() + "stretch_averaged";
+    FILE* cf = fopen(fn.c_str(), "rb");
+    if (cf) {
+        if (fread(&g_avgStretch, sizeof(StretchLimits), 1, cf) == 1) {
+            fclose(cf);
+            g_avgStretchReady = true;
+            printf("loaded cached averaged stretch limits\n");
+            return;
+        }
+        fclose(cf);
+    }
+
+    /* compute per-image stretch limits, then average them */
+    size_t nImg = g_images.size();
+    size_t n = (size_t)g_mlW * g_mlH;
+    double sumMin[3] = {0,0,0}, sumMax[3] = {0,0,0};
+
+    for (size_t img = 0; img < nImg; img++) {
+        size_t rgbCount = min(g_images[img].nBands, (size_t)3);
+        float* ml = g_mlData[img];
+        for (int c = 0; c < 3; c++) {
+            size_t srcBand = min((size_t)c, rgbCount - 1);
+            const float* bandPtr = ml + srcBand * n;
+
+            vector<float> vals;
+            vals.reserve(n);
+            size_t k;
+            for0(k, n) if (isfinite(bandPtr[k])) vals.push_back(bandPtr[k]);
+            if (vals.empty()) continue;
+
+            float frac = 1.0f / 100.0f;
+            int lo = (int)(vals.size() * frac);
+            int hi = (int)(vals.size() * (1.0f - frac));
+            if (lo < 0) lo = 0;
+            if (hi >= (int)vals.size()) hi = (int)vals.size() - 1;
+            if (hi <= lo) hi = lo + 1;
+
+            nth_element(vals.begin(), vals.begin() + lo, vals.end());
+            float vmin = vals[lo];
+            nth_element(vals.begin(), vals.begin() + hi, vals.end());
+            float vmax = vals[hi];
+
+            sumMin[c] += vmin;
+            sumMax[c] += vmax;
+        }
+    }
+    for (int c = 0; c < 3; c++) {
+        g_avgStretch.vmin[c] = (float)(sumMin[c] / nImg);
+        g_avgStretch.vmax[c] = (float)(sumMax[c] / nImg);
+    }
+    g_avgStretchReady = true;
+
+    /* save to cache */
+    cf = fopen(fn.c_str(), "wb");
+    if (cf) { fwrite(&g_avgStretch, sizeof(StretchLimits), 1, cf); fclose(cf); }
+    printf("computed averaged stretch: R[%.1f,%.1f] G[%.1f,%.1f] B[%.1f,%.1f]\n",
+           g_avgStretch.vmin[0], g_avgStretch.vmax[0],
+           g_avgStretch.vmin[1], g_avgStretch.vmax[1],
+           g_avgStretch.vmin[2], g_avgStretch.vmax[2]);
+}
+
 static void buildOneRGB(size_t idx) {
     size_t n = (size_t)g_mlW * g_mlH;
     auto& tex = g_rgbTextures[idx];
@@ -355,25 +422,19 @@ static void buildOneRGB(size_t idx) {
     const BandImage& img = g_images[idx];
     size_t rgbCount = min(img.nBands, (size_t)3);
     float* ml = g_mlData[idx];
-    vector<unsigned char> chan(n);
     size_t c, i;
-
-    StretchLimits sl;
-    bool cached = load_stretch(img.filename, sl);
 
     for0(c, (size_t)3) {
         size_t srcBand = min(c, rgbCount - 1);
         const float* bandPtr = ml + srcBand * n;
-        if (cached) {
-            float range = sl.vmax[c] - sl.vmin[c]; if (range < 1e-12f) range = 1.0f;
-            float scale = 255.0f / range;
-            for0(i, n) { float v = (bandPtr[i] - sl.vmin[c]) * scale; chan[i] = (unsigned char)max(0.0f, min(255.0f, v)); }
-        } else {
-            histStretchToU8(bandPtr, n, chan.data(), 1.0f, sl.vmin[c], sl.vmax[c]);
+        float range = g_avgStretch.vmax[c] - g_avgStretch.vmin[c];
+        if (range < 1e-12f) range = 1.0f;
+        float scale = 255.0f / range;
+        for0(i, n) {
+            float v = (bandPtr[i] - g_avgStretch.vmin[c]) * scale;
+            tex[i * 3 + c] = (unsigned char)max(0.0f, min(255.0f, v));
         }
-        for0(i, n) tex[i * 3 + c] = chan[i];
     }
-    if (!cached) save_stretch(img.filename, sl);
 }
 
 static void pf_buildRGB(size_t idx) { buildOneRGB(idx); }
@@ -381,7 +442,8 @@ static void pf_buildRGB(size_t idx) { buildOneRGB(idx); }
 static void precomputeAllRGB() {
     size_t nImg = g_images.size();
     g_rgbTextures.resize(nImg);
-    printf("precomputing %zu RGB textures (from multilook)...\n", nImg);
+    computeAveragedStretch();
+    printf("precomputing %zu RGB textures (from multilook, averaged stretch)...\n", nImg);
     parfor(0, nImg, pf_buildRGB);
     printf("RGB precompute done\n");
 }
@@ -507,6 +569,108 @@ static void displayImage() {
 
 /* ─────────── generic TS drawing (mean solid, min/max dashed) ───── */
 
+/*
+ * Robust LOWESS (locally weighted scatterplot smoothing):
+ * Linear local regression with bisquare robust reweighting.
+ * At each evaluation point, fits a weighted linear regression using
+ * points within the window, then iteratively downweights outliers.
+ *
+ * x, y: input data (size n)
+ * eval_x: x-values at which to evaluate the trend (size n_eval)
+ * out_y: output smoothed values (size n_eval)
+ * halfwin: number of points on each side of the evaluation point
+ * n_robust: number of robustness iterations
+ */
+static void lowess_eval(const vector<float>& x, const vector<float>& y,
+                        const vector<float>& eval_x, vector<float>& out_y,
+                        int halfwin = 10, int n_robust = 3) {
+    int n = (int)x.size();
+    int ne = (int)eval_x.size();
+    out_y.resize(ne);
+    if (n < 2) { for (int i = 0; i < ne; i++) out_y[i] = (n == 1) ? y[0] : 0; return; }
+
+    vector<float> weights(n, 1.0f);
+
+    for (int robiter = 0; robiter <= n_robust; robiter++) {
+        for (int ei = 0; ei < ne; ei++) {
+            float xc = eval_x[ei];
+
+            /* find window: nearest points within halfwin index range */
+            /* map xc to nearest index in x */
+            int center = 0;
+            float bestd = fabsf(x[0] - xc);
+            for (int j = 1; j < n; j++) {
+                float d = fabsf(x[j] - xc);
+                if (d < bestd) { bestd = d; center = j; }
+            }
+            int i0 = max(0, center - halfwin);
+            int i1 = min(n - 1, center + halfwin);
+
+            /* compute max distance for bisquare kernel */
+            float maxdist = 0;
+            for (int j = i0; j <= i1; j++) {
+                float d = fabsf(x[j] - xc);
+                if (d > maxdist) maxdist = d;
+            }
+            if (maxdist < 1e-12f) maxdist = 1.0f;
+
+            /* weighted linear regression: y = a + b*(x - xc) */
+            double sw = 0, swx = 0, swy = 0, swxx = 0, swxy = 0;
+            for (int j = i0; j <= i1; j++) {
+                float u = fabsf(x[j] - xc) / maxdist;
+                /* bisquare kernel: (1 - u^2)^2 for u < 1 */
+                float kern = (u < 1.0f) ? (1.0f - u * u) * (1.0f - u * u) : 0.0f;
+                float w = kern * weights[j];
+                float dx = x[j] - xc;
+                sw   += w;
+                swx  += w * dx;
+                swy  += w * y[j];
+                swxx += w * dx * dx;
+                swxy += w * dx * y[j];
+            }
+            if (sw < 1e-12) { out_y[ei] = y[center]; continue; }
+            double det = sw * swxx - swx * swx;
+            double a, b_coeff;
+            if (fabs(det) < 1e-20) {
+                a = swy / sw; b_coeff = 0;
+            } else {
+                a = (swxx * swy - swx * swxy) / det;
+                b_coeff = (sw * swxy - swx * swy) / det;
+            }
+            out_y[ei] = (float)a; /* evaluated at dx=0 by construction */
+        }
+
+        /* compute residuals and update weights for robustness */
+        if (robiter < n_robust) {
+            /* recompute fitted values at all data points for residuals */
+            vector<float> fitted(n);
+            for (int j = 0; j < n; j++) {
+                /* quick: find nearest eval point */
+                int best_ei = 0;
+                float bd = fabsf(eval_x[0] - x[j]);
+                for (int ei = 1; ei < ne; ei++) {
+                    float d = fabsf(eval_x[ei] - x[j]);
+                    if (d < bd) { bd = d; best_ei = ei; }
+                }
+                /* linear interp between two nearest eval points */
+                fitted[j] = out_y[best_ei];
+            }
+            vector<float> resid(n);
+            for (int j = 0; j < n; j++) resid[j] = fabsf(y[j] - fitted[j]);
+            /* median absolute residual */
+            vector<float> sorted_r(resid);
+            nth_element(sorted_r.begin(), sorted_r.begin() + n/2, sorted_r.end());
+            float med = sorted_r[n/2];
+            float s = 6.0f * med; /* scale factor */
+            if (s < 1e-12f) s = 1.0f;
+            for (int j = 0; j < n; j++) {
+                float u = resid[j] / s;
+                weights[j] = (u < 1.0f) ? (1.0f - u * u) * (1.0f - u * u) : 0.0f;
+            }
+        }
+    }
+}
+
 static void drawTSGeneric(const char* label,
                           function<void(int, vector<TSPoint>&)> computeFn) {
     glClearColor(0.95f, 0.95f, 0.93f, 1.0f);
@@ -546,8 +710,8 @@ static void drawTSGeneric(const char* label,
         const float* col = g_colors[c % g_nColors];
         const auto& ts = allTS[c];
 
-        /* mean (solid) */
-        glColor3fv(col); glLineWidth(2.0f);
+        /* mean (solid, thin) */
+        glColor3fv(col); glLineWidth(1.0f);
         glBegin(GL_LINE_STRIP);
         for0(t, nT) { float xn = ml + pw * (float)t / (nT-1);
             float yn = mb + ph * (ts[t].mean - globalMin) / yRange; glVertex2f(xn, yn); }
@@ -567,6 +731,34 @@ static void drawTSGeneric(const char* label,
             float yn = mb + ph * (ts[t].mn - globalMin) / yRange; glVertex2f(xn, yn); }
         glEnd();
         glDisable(GL_LINE_STIPPLE);
+
+        /* LOWESS trend line: evaluate every 15 points, window half-width 10 */
+        if (nT >= 15) {
+            /* build x/y arrays from the mean time series */
+            vector<float> tx(nT), ty(nT);
+            for0(t, nT) { tx[t] = (float)t; ty[t] = ts[t].mean; }
+
+            /* evaluation points: every 15th index, starting at index 14 (15th point) */
+            vector<float> eval_x;
+            for (int e = 14; e < nT; e += 15) eval_x.push_back((float)e);
+            /* always include last point for a complete curve */
+            if (eval_x.empty() || eval_x.back() != (float)(nT - 1))
+                eval_x.push_back((float)(nT - 1));
+
+            vector<float> eval_y;
+            lowess_eval(tx, ty, eval_x, eval_y, 10, 3);
+
+            /* draw trend as solid line, same color, thicker */
+            glColor3fv(col); glLineWidth(3.0f);
+            glBegin(GL_LINE_STRIP);
+            for (size_t e = 0; e < eval_x.size(); e++) {
+                float xn = ml + pw * eval_x[e] / (nT - 1);
+                float yn = mb + ph * (eval_y[e] - globalMin) / yRange;
+                glVertex2f(xn, yn);
+            }
+            glEnd();
+            glLineWidth(1.0f);
+        }
     }
 
     glColor3f(0.2f, 0.2f, 0.2f); char buf[64]; int yi;
@@ -622,7 +814,8 @@ static void cleanExit() {
 /* ─────────── input callbacks ────────────────────────────────────── */
 
 static void keyboardAll(unsigned char key, int, int) {
-    if (key == 'q' || key == 27) cleanExit();
+    if (key == 27) exit(0);  /* Escape: hard exit, no cleanup */
+    if (key == 'q') exit(0);
     if (key == 'c' || key == 'C') { g_clicks.clear(); printf("cleared\n"); refreshAll(); }
 }
 
@@ -822,8 +1015,6 @@ int main(int argc, char** argv) {
 
     g_mlW = g_fullW / g_mlFactor;
     g_mlH = g_fullH / g_mlFactor;
-    //g_imgW = g_mlW; /* texture dims = multilooked dims */
-    //g_imgH = g_mlH;
 
     printf("multilook: M=%d, full %dx%d -> display %dx%d\n",
            g_mlFactor, g_fullW, g_fullH, g_mlW, g_mlH);
