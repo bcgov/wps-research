@@ -571,20 +571,25 @@ static void displayImage() {
 /* ─────────── generic TS drawing (mean solid, min/max dashed) ───── */
 
 /*
- * Robust LOWESS (locally weighted scatterplot smoothing):
- * Linear local regression with bisquare robust reweighting.
- * At each evaluation point, fits a weighted linear regression using
- * points within the window, then iteratively downweights outliers.
+ * Robust LOWESS that tracks the cloud-free lower envelope.
  *
- * x, y: input data (size n)
- * eval_x: x-values at which to evaluate the trend (size n_eval)
- * out_y: output smoothed values (size n_eval)
- * halfwin: number of points on each side of the evaluation point
- * n_robust: number of robustness iterations
+ * Strategy:
+ *   1. In each window, compute the local median of y values.
+ *   2. Compute MAD (median absolute deviation) using only positive
+ *      deviations from the median (right tail only — clouds/bright).
+ *   3. Points above median + 1.5*MAD get zero weight (hard cloud reject).
+ *   4. Points at or below median keep full weight.
+ *   5. Points between median and median+1.5*MAD get bisquare-tapered weight.
+ *   6. Additionally, points below the median get a bonus weight (×2) so
+ *      the regression is pulled toward the lower envelope.
+ *   7. Multiple robustness iterations refine the envelope.
+ *
+ * The result tracks the "clean" baseline — roughly the lower quartile
+ * of the distribution, ignoring cloud-contaminated spikes.
  */
 static void lowess_eval(const vector<float>& x, const vector<float>& y,
                         const vector<float>& eval_x, vector<float>& out_y,
-                        int halfwin = 10, int n_robust = 3) {
+                        int halfwin = 10, int n_robust = 4) {
     int n = (int)x.size();
     int ne = (int)eval_x.size();
     out_y.resize(ne);
@@ -596,8 +601,7 @@ static void lowess_eval(const vector<float>& x, const vector<float>& y,
         for (int ei = 0; ei < ne; ei++) {
             float xc = eval_x[ei];
 
-            /* find window: nearest points within halfwin index range */
-            /* map xc to nearest index in x */
+            /* find nearest center index */
             int center = 0;
             float bestd = fabsf(x[0] - xc);
             for (int j = 1; j < n; j++) {
@@ -607,7 +611,7 @@ static void lowess_eval(const vector<float>& x, const vector<float>& y,
             int i0 = max(0, center - halfwin);
             int i1 = min(n - 1, center + halfwin);
 
-            /* compute max distance for bisquare kernel */
+            /* distance kernel */
             float maxdist = 0;
             for (int j = i0; j <= i1; j++) {
                 float d = fabsf(x[j] - xc);
@@ -619,61 +623,67 @@ static void lowess_eval(const vector<float>& x, const vector<float>& y,
             double sw = 0, swx = 0, swy = 0, swxx = 0, swxy = 0;
             for (int j = i0; j <= i1; j++) {
                 float u = fabsf(x[j] - xc) / maxdist;
-                /* bisquare kernel: (1 - u^2)^2 for u < 1 */
                 float kern = (u < 1.0f) ? (1.0f - u * u) * (1.0f - u * u) : 0.0f;
                 float w = kern * weights[j];
                 float dx = x[j] - xc;
-                sw   += w;
-                swx  += w * dx;
-                swy  += w * y[j];
-                swxx += w * dx * dx;
-                swxy += w * dx * y[j];
+                sw += w; swx += w * dx; swy += w * y[j];
+                swxx += w * dx * dx; swxy += w * dx * y[j];
             }
             if (sw < 1e-12) { out_y[ei] = y[center]; continue; }
             double det = sw * swxx - swx * swx;
-            double a, b_coeff;
-            if (fabs(det) < 1e-20) {
-                a = swy / sw; b_coeff = 0;
-            } else {
-                a = (swxx * swy - swx * swxy) / det;
-                b_coeff = (sw * swxy - swx * swy) / det;
-            }
-            out_y[ei] = (float)a; /* evaluated at dx=0 by construction */
+            if (fabs(det) < 1e-20) out_y[ei] = (float)(swy / sw);
+            else out_y[ei] = (float)((swxx * swy - swx * swxy) / det);
         }
 
-        /* compute residuals and update weights for robustness */
+        /* robust reweighting using MAD from right tail */
         if (robiter < n_robust) {
-            /* recompute fitted values at all data points for residuals */
+            /* interpolate fitted values at all data points */
             vector<float> fitted(n);
             for (int j = 0; j < n; j++) {
-                /* quick: find nearest eval point */
                 int best_ei = 0;
                 float bd = fabsf(eval_x[0] - x[j]);
                 for (int ei = 1; ei < ne; ei++) {
                     float d = fabsf(eval_x[ei] - x[j]);
                     if (d < bd) { bd = d; best_ei = ei; }
                 }
-                /* linear interp between two nearest eval points */
                 fitted[j] = out_y[best_ei];
             }
-            vector<float> resid(n);
-            for (int j = 0; j < n; j++) resid[j] = y[j] - fitted[j]; /* signed residual */
-            /* collect only positive residuals for scale estimation */
-            vector<float> pos_resid;
-            for (int j = 0; j < n; j++) if (resid[j] > 0) pos_resid.push_back(resid[j]);
-            float med = 0;
-            if (!pos_resid.empty()) {
-                nth_element(pos_resid.begin(), pos_resid.begin() + pos_resid.size()/2, pos_resid.end());
-                med = pos_resid[pos_resid.size()/2];
-            }
-            float s = 6.0f * med;
-            if (s < 1e-12f) s = 1.0f;
+
+            /* compute residuals and local median in a sliding window */
             for (int j = 0; j < n; j++) {
-                if (resid[j] <= 0) {
-                    weights[j] = 1.0f; /* negative residual (shadow/low) → keep full weight */
-                } else {
-                    float u = resid[j] / s;
+                int w0 = max(0, j - halfwin), w1 = min(n - 1, j + halfwin);
+
+                /* local median of raw y values */
+                vector<float> local_y;
+                for (int k = w0; k <= w1; k++) local_y.push_back(y[k]);
+                nth_element(local_y.begin(), local_y.begin() + (int)local_y.size()/2, local_y.end());
+                float local_med = local_y[local_y.size()/2];
+
+                /* MAD from right tail only: deviations of points above median */
+                vector<float> right_dev;
+                for (int k = w0; k <= w1; k++) {
+                    if (y[k] > local_med) right_dev.push_back(y[k] - local_med);
+                }
+                float mad = 0;
+                if (!right_dev.empty()) {
+                    nth_element(right_dev.begin(), right_dev.begin() + (int)right_dev.size()/2, right_dev.end());
+                    mad = right_dev[right_dev.size()/2];
+                }
+                if (mad < 1e-12f) mad = 1.0f;
+
+                float thresh = local_med + 1.5f * mad;
+                float resid = y[j] - fitted[j];
+
+                if (y[j] > thresh) {
+                    /* hard reject: above median + 1.5*MAD → cloud */
+                    weights[j] = 0.0f;
+                } else if (resid > 0) {
+                    /* above the fit but within threshold: taper */
+                    float u = resid / (1.5f * mad);
                     weights[j] = (u < 1.0f) ? (1.0f - u * u) * (1.0f - u * u) : 0.0f;
+                } else {
+                    /* at or below the fit: full weight, bonus for below-median */
+                    weights[j] = (y[j] <= local_med) ? 2.0f : 1.0f;
                 }
             }
         }
@@ -1138,4 +1148,5 @@ int main(int argc, char** argv) {
     glutMainLoop();
     return 0;
 }
+
 
