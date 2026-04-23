@@ -345,10 +345,11 @@ def _save_sessions():
 
 
 def _save_settings():
-    """Persist recommended settings to output_root (not the package dir)."""
+    """Persist recommended settings to shared_root (not per-year)."""
     try:
-        settings_path = os.path.join(
-            state.output_root, 'recommended_settings.yaml')
+        settings_path = state.settings_file or os.path.join(
+            state.shared_root or state.output_root,
+            'recommended_settings.yaml')
         payload = {
             'k_runs_per_setting': int(state.k_runs_per_setting),
             'k_jitter': int(state.k_jitter),
@@ -650,6 +651,146 @@ def _load_fire_state():
             f'[load] Restored state for {restored} fire(s) '
             f'from fire_state.yaml\n')
         sys.stderr.flush()
+
+
+def _save_active_year():
+    """Persist the currently-active year so it survives restarts."""
+    if not state.shared_root:
+        return
+    try:
+        path = os.path.join(state.shared_root, 'active_year.yaml')
+        _atomic_yaml_dump(path, {'active_year': int(state.active_year)},
+                          mode=0o644)
+    except Exception as exc:
+        sys.stderr.write(
+            f'[save] WARNING: Failed to save active year: {exc}\n')
+        sys.stderr.flush()
+
+
+def _switch_year(year: int) -> tuple[bool, str]:
+    """Re-point active-year state to *year* without restarting the server.
+
+    Fails fast if any long-running job is in flight (one-shot mapping,
+    batch mapping, analyzer). Returns (ok, message). On success the
+    caller should persist and notify clients to reload.
+    """
+    if not isinstance(year, int):
+        return False, 'year must be an int'
+    if year not in state.rasters_by_year:
+        return False, f'unknown year {year}'
+    if year == state.active_year:
+        return True, 'already active'
+
+    # Busy checks — refuse mid-job rather than corrupting in-flight state.
+    with state.lock:
+        if state.current_job is not None:
+            return False, ('A mapping job is running '
+                           f'(fire {state.current_job.get("fire_numbe")}). '
+                           'Wait for it to finish.')
+        if state.batch_status and state.batch_status.get('running'):
+            return False, 'A batch mapping is running. Cancel or wait.'
+    if state.analyzer is not None:
+        a = state.analyzer
+        with a.lock:
+            if a.running or (a.batch_status and not a.batch_status.get(
+                    'cancelled') and a.batch_status.get(
+                        'total', 0) > a.batch_status.get('completed', 0)):
+                return False, 'Analyzer is running. Cancel or wait.'
+
+    from batch_fire_mapping.run_fire_mapping import (
+        get_raster_info, load_all_viirs)
+    import geopandas as _gpd
+    from shapely.geometry import box as _shapely_box
+
+    new_raster = state.rasters_by_year[year]
+    new_outdir = state.outdirs_by_year[year]
+    new_viirs  = state.viirs_shp_dirs_by_year[year]
+
+    # Persist current year's state before swapping so nothing is lost.
+    _save_fire_state()
+
+    try:
+        crs_wkt, gt, W, H = get_raster_info(new_raster)
+    except Exception as exc:
+        return False, f'Failed to read raster: {exc}'
+
+    # Re-project + spatial-filter the cached raw polygon GDF to the new
+    # raster. Falling back to re-reading the shapefile if the cache is
+    # missing (e.g. a stale AppState).
+    raw = state.polygon_gdf_raw
+    if raw is None:
+        try:
+            raw = _gpd.read_file(state.polygon_file)
+            state.polygon_gdf_raw = raw
+        except Exception as exc:
+            return False, f'Failed to read polygons: {exc}'
+
+    from batch_fire_mapping.run_fire_mapping import (
+        _wkt_to_pyproj_crs, raster_native_extent)
+    import pandas as _pd
+    try:
+        # Filter by FIRE_YEAR first (cheap, drops most rows before reproject)
+        if 'FIRE_YEAR' in raw.columns:
+            fy = _pd.to_numeric(raw['FIRE_YEAR'], errors='coerce')
+            gdf = raw[fy == year].copy()
+        else:
+            gdf = raw.copy()
+        if gdf.empty:
+            return False, (f'No polygons with FIRE_YEAR={year} in the '
+                           'shapefile.')
+        gdf = gdf.to_crs(_wkt_to_pyproj_crs(crs_wkt))
+        xmin, ymin, xmax, ymax = raster_native_extent(gt, W, H)
+        gdf = gdf[gdf.geometry.intersects(
+            _shapely_box(xmin, ymin, xmax, ymax))].copy()
+    except Exception as exc:
+        return False, f'Failed to filter polygons: {exc}'
+
+    if gdf.empty:
+        return False, (f'No polygons with FIRE_YEAR={year} overlap the '
+                       f'year-{year} raster extent.')
+
+    # Load VIIRS for the new year (traditional mode -> empty GDF)
+    if state.perimeter_mode == 'traditional':
+        viirs_gdf = _gpd.GeoDataFrame()
+    else:
+        try:
+            viirs_gdf = load_all_viirs(new_viirs, crs_wkt)
+        except Exception as exc:
+            return False, f'Failed to load VIIRS: {exc}'
+
+    # Atomic swap under the state lock. Rebuild fires from the new gdf;
+    # _load_fire_state reads the new outdir's fire_state.yaml afterwards.
+    with state.lock:
+        state.active_year    = year
+        state.raster_path    = new_raster
+        state.output_root    = new_outdir
+        state.viirs_shp_dir  = new_viirs
+        state.raster_crs     = crs_wkt
+        state.raster_gt      = gt
+        state.raster_W       = W
+        state.raster_H       = H
+        state.gdf            = gdf
+        state.viirs_gdf      = viirs_gdf
+        state.fires          = {}
+        state.init_fires_from_gdf()
+
+    _load_fire_state()
+    _save_active_year()
+
+    # Rebuild the analyzer from the new outdir. init_analyzer resets its
+    # module-global _astate and scans the new analyzing_parameters dir.
+    try:
+        from .analyzer_app import init_analyzer
+        init_analyzer(state)
+    except Exception as exc:
+        sys.stderr.write(
+            f'[switch_year] WARNING: analyzer reinit failed: {exc}\n')
+        sys.stderr.flush()
+
+    sys.stderr.write(
+        f'[switch_year] Active year -> {year}, {len(state.fires)} fire(s)\n')
+    sys.stderr.flush()
+    return True, 'ok'
 
 
 def _compute_ml_area(fire: 'FireInfo',
@@ -2353,6 +2494,276 @@ def _run_class_brush_only(clf_path: str, brush_size: int,
     return brushed, False
 
 
+def _render_comparison_png(fire: 'FireInfo', classified_path: str,
+                           out_path: str) -> bool:
+    """Regenerate the perimeter-style comparison PNG.
+
+    Mirrors fire_mapping_cli.make_comparison_figure so callers (rebrush)
+    can keep ``<fire>_comparison.png`` in sync with the current
+    ``classified.bin`` without re-running the full mapping pipeline.
+    Background is taken from ``cache_dir/previews/post.png``.
+
+    Returns True on success, False if inputs are missing or render fails.
+    """
+    try:
+        post_path = os.path.join(fire.cache_dir, 'previews', 'post.png')
+        if not (os.path.isfile(post_path)
+                and os.path.isfile(classified_path)):
+            return False
+
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        from matplotlib.image import imread
+        from matplotlib.lines import Line2D
+        from scipy.ndimage import zoom as scipy_zoom, binary_dilation
+
+        bg = imread(post_path)
+        if bg.ndim == 2:
+            bg = np.stack([bg] * 3, axis=2)
+        bh, bw = bg.shape[:2]
+
+        def _read_mask(path):
+            if not path or not os.path.isfile(path):
+                return None
+            ds = gdal.Open(path, gdal.GA_ReadOnly)
+            if ds is None:
+                return None
+            arr = ds.GetRasterBand(1).ReadAsArray()
+            ds = None
+            return arr
+
+        def _resize(mask):
+            if mask is None:
+                return None
+            mh, mw = mask.shape
+            if (mh, mw) == (bh, bw):
+                return mask.astype(bool)
+            return scipy_zoom(
+                mask.astype(np.uint8),
+                (bh / mh, bw / mw), order=0).astype(bool)
+
+        def _contour_rgba(mask, rgb):
+            dil = binary_dilation(mask)
+            boundary = dil & (~mask)
+            rgba = np.zeros((bh, bw, 4), dtype=np.float32)
+            rgba[..., 0] = rgb[0]
+            rgba[..., 1] = rgb[1]
+            rgba[..., 2] = rgb[2]
+            rgba[..., 3] = boundary.astype(np.float32)
+            return rgba
+
+        clf_mask = _resize(_read_mask(classified_path))
+        hint_path = fire.hint_bin or fire.viirs_bin or ''
+        hint_mask = _resize(_read_mask(hint_path))
+        perim_mask = _resize(_read_mask(fire.perim_bin))
+
+        # If perimeter == hint file, drop the separate cyan outline.
+        if (fire.perim_bin and hint_path
+                and os.path.abspath(fire.perim_bin)
+                == os.path.abspath(hint_path)):
+            perim_mask = None
+
+        pt = (fire.perimeter_type or '').lower()
+        if pt == 'viirs':
+            hint_label = 'VIIRS hint'
+        elif pt in ('polygon_perimeter', 'polygon', 'traditional'):
+            hint_label = 'Traditional perimeter (hint)'
+        else:
+            hint_label = 'Hint'
+
+        def _iou(a, b):
+            if a is None or b is None:
+                return None
+            inter = int(np.sum(a & b))
+            union = int(np.sum(a | b))
+            return inter / union if union > 0 else 0.0
+
+        def _acc(a, b):
+            if a is None or b is None:
+                return None
+            return float(np.sum(a == b)) / a.size if a.size else 0.0
+
+        iou_cv = _iou(clf_mask, hint_mask)
+        acc_cv = _acc(clf_mask, hint_mask)
+        parts = []
+        if iou_cv is not None:
+            parts.append(f'IoU(ours/{hint_label})={iou_cv:.3f}')
+        if acc_cv is not None:
+            parts.append(f'Acc(ours/{hint_label})={acc_cv:.3f}')
+        metrics = '  '.join(parts)
+        if perim_mask is not None and clf_mask is not None:
+            iou_cp = _iou(clf_mask, perim_mask)
+            iou_vp = _iou(hint_mask, perim_mask) if hint_mask is not None else None
+            extras = []
+            if iou_cp is not None:
+                extras.append(f'IoU(ours/perim)={iou_cp:.3f}')
+            if iou_vp is not None:
+                extras.append(f'IoU({hint_label}/perim)={iou_vp:.3f}')
+            if extras:
+                metrics += '\n' + '  '.join(extras)
+
+        fig, ax = plt.subplots(figsize=(10, 10))
+        ax.imshow(bg, interpolation='nearest', origin='upper')
+        if clf_mask is not None:
+            ax.imshow(_contour_rgba(clf_mask, (1.0, 0.0, 0.0)),
+                      interpolation='nearest', origin='upper')
+        if hint_mask is not None:
+            ax.imshow(_contour_rgba(hint_mask, (0.0, 1.0, 0.0)),
+                      interpolation='nearest', origin='upper')
+        if perim_mask is not None:
+            ax.imshow(_contour_rgba(perim_mask, (0.0, 1.0, 1.0)),
+                      interpolation='nearest', origin='upper')
+
+        ax.set_xlim(0, bw)
+        ax.set_ylim(bh, 0)
+        ax.set_xlabel('Column (px)', fontsize=8)
+        ax.set_ylabel('Row (px)', fontsize=8)
+        ax.tick_params(labelsize=7)
+
+        handles = []
+        if clf_mask is not None:
+            handles.append(Line2D([0], [0], color='red', linewidth=2,
+                                  label='Our mapping'))
+        if hint_mask is not None:
+            handles.append(Line2D([0], [0], color='lime', linewidth=2,
+                                  label=hint_label))
+        if perim_mask is not None:
+            handles.append(Line2D([0], [0], color='cyan', linewidth=2,
+                                  label='Traditional perimeter'))
+        if handles:
+            ax.legend(handles=handles, loc='lower right', fontsize=9,
+                      framealpha=0.7, edgecolor='white')
+
+        title = f'Fire: {fire.fire_numbe}'
+        if fire.acc_start or fire.acc_end:
+            title += (f'   |   Start: {fire.acc_start}'
+                      f'   |   End: {fire.acc_end}')
+        if metrics:
+            title += f'\n{metrics}'
+        ax.set_title(title, fontsize=10, fontweight='bold')
+
+        plt.tight_layout()
+        plt.savefig(out_path, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        return True
+    except Exception as exc:
+        sys.stderr.write(
+            f'[comparison] WARNING: regen failed: {exc}\n')
+        sys.stderr.flush()
+        return False
+
+
+def _render_ml_classification_png(fire_numbe: str, post_path: str,
+                                  classified_path: str, out_path: str,
+                                  subtitle: str = '',
+                                  hint_path: str = '',
+                                  hint_label: str = 'Hint') -> bool:
+    """Render an ML-classification view: post-fire background with the
+    burned mask tinted red (filled). Optionally overlays a lime contour
+    for the hint perimeter (VIIRS or traditional) so the reader can see
+    the ground truth alongside the ML output.
+
+    Ephemeral — used only for the PDF report's Pass-1 hero pages, never
+    saved to a fire's permanent directory. ``subtitle`` is appended to
+    the figure's title.
+
+    Returns True on success.
+    """
+    try:
+        if not (os.path.isfile(post_path)
+                and os.path.isfile(classified_path)):
+            return False
+
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        from matplotlib.image import imread
+        from matplotlib.lines import Line2D
+        from scipy.ndimage import zoom as scipy_zoom, binary_dilation
+
+        bg = imread(post_path)
+        if bg.ndim == 2:
+            bg = np.stack([bg] * 3, axis=2)
+        bh, bw = bg.shape[:2]
+
+        ds = gdal.Open(classified_path, gdal.GA_ReadOnly)
+        if ds is None:
+            return False
+        arr = ds.GetRasterBand(1).ReadAsArray()
+        ds = None
+        ah, aw = arr.shape
+        if (ah, aw) != (bh, bw):
+            arr = scipy_zoom(arr.astype(np.uint8),
+                             (bh / ah, bw / aw), order=0)
+        mask = arr > 0
+
+        rgb = bg[:, :, :3].astype(np.float32)
+        if rgb.max() > 1.0:
+            rgb = rgb / 255.0
+        r, g, b = 0.9, 0.1, 0.0
+        result = rgb.copy()
+        result[mask, 0] = np.clip(rgb[mask, 0] * 0.3 + r * 0.7, 0, 1)
+        result[mask, 1] = np.clip(rgb[mask, 1] * 0.3 + g * 0.7, 0, 1)
+        result[mask, 2] = np.clip(rgb[mask, 2] * 0.3 + b * 0.7, 0, 1)
+
+        # Optional hint contour (lime). Same contour technique as
+        # _render_comparison_png so outline style matches the detail
+        # pages. Silently skipped if the hint raster is missing.
+        hint_rgba = None
+        if hint_path and os.path.isfile(hint_path):
+            try:
+                ds_h = gdal.Open(hint_path, gdal.GA_ReadOnly)
+                if ds_h is not None:
+                    harr = ds_h.GetRasterBand(1).ReadAsArray()
+                    ds_h = None
+                    hh, hw = harr.shape
+                    if (hh, hw) != (bh, bw):
+                        harr = scipy_zoom(harr.astype(np.uint8),
+                                          (bh / hh, bw / hw), order=0)
+                    hmask = harr > 0
+                    if hmask.any():
+                        dil = binary_dilation(hmask)
+                        boundary = dil & (~hmask)
+                        hint_rgba = np.zeros((bh, bw, 4), dtype=np.float32)
+                        hint_rgba[..., 1] = 1.0  # lime
+                        hint_rgba[..., 3] = boundary.astype(np.float32)
+            except Exception:
+                hint_rgba = None
+
+        fig, ax = plt.subplots(figsize=(10, 10))
+        ax.imshow(result, interpolation='nearest', origin='upper')
+        if hint_rgba is not None:
+            ax.imshow(hint_rgba, interpolation='nearest', origin='upper')
+        ax.set_xlim(0, bw)
+        ax.set_ylim(bh, 0)
+        ax.set_xlabel('Column (px)', fontsize=8)
+        ax.set_ylabel('Row (px)', fontsize=8)
+        ax.tick_params(labelsize=7)
+
+        handles = [Line2D([0], [0], color='red', linewidth=6,
+                          alpha=0.7, label='ML classification')]
+        if hint_rgba is not None:
+            handles.append(Line2D([0], [0], color='lime', linewidth=2,
+                                  label=hint_label))
+        ax.legend(handles=handles, loc='lower right', fontsize=9,
+                  framealpha=0.7, edgecolor='white')
+
+        title = f'Fire: {fire_numbe}  —  ML classification'
+        if subtitle:
+            title += f'\n{subtitle}'
+        ax.set_title(title, fontsize=10, fontweight='bold')
+        plt.tight_layout()
+        plt.savefig(out_path, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        return True
+    except Exception as exc:
+        sys.stderr.write(
+            f'[ml_overlay] WARNING: render failed: {exc}\n')
+        sys.stderr.flush()
+        return False
+
+
 def _render_brush_comparison_png(raw: np.ndarray, brushed: np.ndarray | None,
                                  bg_path: str, out_path: str,
                                  title: str) -> None:
@@ -2457,6 +2868,7 @@ class FireHandler(BaseHTTPRequestHandler):
          'handle_api_serial_image'),
         (re.compile(r'^/api/report$'), 'handle_api_report'),
         (re.compile(r'^/api/fires/hidden$'), 'handle_api_fires_hidden'),
+        (re.compile(r'^/api/years$'), 'handle_api_years'),
         (re.compile(r'^/static/(?P<path>.+)$'), 'handle_static'),
     ]
     ROUTES_POST = [
@@ -2502,6 +2914,7 @@ class FireHandler(BaseHTTPRequestHandler):
         (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/rebrush/cancel$'),
          'handle_api_rebrush_cancel'),
+        (re.compile(r'^/api/year/switch$'), 'handle_api_year_switch'),
     ]
 
     # Paths that bypass IP checks (pending page needs CSS/logo + status poll)
@@ -2783,17 +3196,48 @@ class FireHandler(BaseHTTPRequestHandler):
     # -- Page handlers --
 
     def handle_fire_list(self):
+        is_admin = (getattr(self, '_role', '') == 'admin')
         admin_link = ('<a href="/admin" class="btn" '
                       'style="font-size:11px;padding:3px 10px">'
                       'Admin</a>'
-                      if getattr(self, '_role', '') == 'admin' else '')
+                      if is_admin else '')
+        years_sorted = sorted(state.rasters_by_year)
         html = render_template('fire_list.html', {
             'raster_name': os.path.basename(state.raster_path),
             'polygon_name': os.path.basename(state.polygon_file),
             'n_fires': str(len(state.fires)),
             'admin_link': admin_link,
+            'all_years_json': json.dumps(years_sorted),
+            'active_year_json': json.dumps(int(state.active_year)),
+            'is_admin_json': json.dumps(bool(is_admin)),
         })
         self._send_html(html)
+
+    def handle_api_years(self):
+        self._send_json({
+            'years': sorted(state.rasters_by_year),
+            'active': state.active_year,
+        })
+
+    def handle_api_year_switch(self):
+        # Admin-only: switching is disruptive (affects every logged-in user).
+        if (getattr(self, '_role', '') != 'admin'
+                and state.admin_password):
+            self._send_json({'error': 'Admin only'}, 403)
+            return
+        body = self._read_body()
+        if body is None:
+            return
+        try:
+            year = int(body.get('year'))
+        except (TypeError, ValueError):
+            self._send_json({'error': 'year must be an int'}, 400)
+            return
+        ok, msg = _switch_year(year)
+        if not ok:
+            self._send_json({'error': msg}, 409)
+            return
+        self._send_json({'ok': True, 'year': year})
 
     def handle_login_page(self):
         # Already logged in? Redirect to home.
@@ -3510,6 +3954,35 @@ class FireHandler(BaseHTTPRequestHandler):
                             fire.last_params['brush_size'] = int(bs)
                             fire.last_params['point_threshold'] = int(pt)
                             fire.last_params['brush_all_segments'] = bool(bas)
+
+                        # Regenerate the saved perimeter-style comparison
+                        # PNG so the PDF report's detail pages and any
+                        # viewer that reads <fire>_comparison.png reflect
+                        # the rebrushed mask. Rebrush previously only
+                        # updated previews/result.png + _brush_comparison,
+                        # leaving _comparison.png stale and making the
+                        # PDF look "horrible" despite a correct UI.
+                        comp_path = os.path.join(
+                            fire.cache_dir,
+                            f'{fire_numbe}_comparison.png')
+                        if _render_comparison_png(fire, clf_path, comp_path):
+                            fire.last_comparison = comp_path
+                            # For already-accepted fires, also push the
+                            # refreshed PNG into the canonical fire dir
+                            # so a PDF generated without re-accepting
+                            # still shows the current mask.
+                            if fire.status == FireStatus.ACCEPTED:
+                                canon = os.path.join(
+                                    state.output_root, fire_numbe)
+                                if os.path.isdir(canon):
+                                    try:
+                                        shutil.copy2(
+                                            comp_path,
+                                            os.path.join(
+                                                canon,
+                                                f'{fire_numbe}_comparison.png'))
+                                    except OSError:
+                                        pass
                     else:
                         new_area = _compute_ml_area(fire, clf_path)
                         new_agr = _compute_agreement(
@@ -4059,6 +4532,8 @@ class FireHandler(BaseHTTPRequestHandler):
     def handle_api_report(self):
         """Generate PDF report of selected accepted fires."""
         from batch_fire_mapping.generate_report import generate_report
+        from .preview import (
+            parse_envi_band_names, detect_band_groups, generate_preview_png)
         import tempfile
 
         # Get selected fire numbers from query params
@@ -4066,14 +4541,23 @@ class FireHandler(BaseHTTPRequestHandler):
         from urllib.parse import parse_qs
         qs = parse_qs(parsed.query)
         fire_list = qs.get('fire', [])
+        # mode=full (default) → ML hero + detail pages + brush comparison.
+        # mode=brief → ML hero pages only (no params table, no brush).
+        mode_raw = (qs.get('mode') or ['full'])[0].lower()
+        report_mode = 'brief' if mode_raw == 'brief' else 'full'
 
         if not fire_list:
             self._send_json(
                 {'error': 'No fires specified'}, 400)
             return
 
-        # Create temp dir with symlinks to selected fire dirs
-        # Validate each fire number to prevent path traversal
+        # Stage each selected fire into a real tmp subdir (not a symlink
+        # to the canonical fire dir). Symlink the individual files we
+        # need in, then generate an EPHEMERAL <fire>_ml_overlay.png in
+        # that subdir for the PDF's Pass-1 hero pages. Using a real
+        # subdir means the ephemeral file never lands in the canonical
+        # fire dir, which it would if the parent were a symlink.
+        # Validate each fire number to prevent path traversal.
         root = os.path.realpath(state.output_root)
         tmp_dir = tempfile.mkdtemp(prefix='fire_report_sel_')
         try:
@@ -4090,11 +4574,108 @@ class FireHandler(BaseHTTPRequestHandler):
                     continue
                 if not os.path.isdir(src):
                     continue
-                dst = os.path.join(tmp_dir, fn)
-                os.symlink(src, dst)
+
+                tmp_fire_dir = os.path.join(tmp_dir, fn)
+                os.makedirs(tmp_fire_dir, exist_ok=True)
+                for entry in os.listdir(src):
+                    fsrc = os.path.join(src, entry)
+                    if not os.path.isfile(fsrc):
+                        continue
+                    try:
+                        os.symlink(fsrc, os.path.join(tmp_fire_dir, entry))
+                    except FileExistsError:
+                        pass
+
+                # Render the ephemeral ML-classification hero PNG from
+                # the canonical crop + classified bin. This is only
+                # used by generate_report.py's Pass-1 pages; the saved
+                # <fire>_comparison.png (perimeter style) continues to
+                # drive Pass-2 detail pages.
+                try:
+                    crop_bin = os.path.join(src, f'{fn}_crop.bin')
+                    clf_bin = os.path.join(
+                        src, f'{fn}_crop.bin_classified.bin')
+                    if (os.path.isfile(crop_bin)
+                            and os.path.isfile(clf_bin)):
+                        post_tmp = os.path.join(
+                            tmp_fire_dir, '_post_tmp.png')
+                        band_names = parse_envi_band_names(crop_bin)
+                        groups = detect_band_groups(band_names)
+                        post_idx = (groups.get('post')
+                                    or groups.get('pre'))
+                        if post_idx and generate_preview_png(
+                                crop_bin, post_idx, post_tmp):
+                            f_obj = state.fires.get(fn)
+                            subtitle_parts = []
+                            hint_for_overlay = ''
+                            hint_label = 'Hint'
+                            if f_obj:
+                                if f_obj.ml_area_ha >= 0:
+                                    subtitle_parts.append(
+                                        f'ML area: '
+                                        f'{f_obj.ml_area_ha:.1f} ha')
+                                if f_obj.agreement_pct >= 0:
+                                    subtitle_parts.append(
+                                        f'Agreement: '
+                                        f'{f_obj.agreement_pct:.1f}%')
+                                pt = (f_obj.perimeter_type or '').lower()
+                                if pt == 'viirs':
+                                    hint_label = 'VIIRS hint'
+                                elif pt in ('polygon_perimeter',
+                                             'polygon', 'traditional'):
+                                    hint_label = ('Traditional perimeter '
+                                                  '(hint)')
+                            # Look up the hint raster inside the CANONICAL
+                            # accepted dir (copied there by _accept_fire_sync
+                            # via its *.bin glob). fire.hint_bin on the
+                            # FireInfo points to the cache path, which may
+                            # be missing for fires accepted in a prior
+                            # session — that was why some PDFs silently
+                            # dropped the lime overlay. Fall back to the
+                            # cache path only if the canonical files are
+                            # also missing.
+                            viirs_matches = sorted(glob.glob(
+                                os.path.join(src, 'VIIRS_*.bin')))
+                            perim_in_canon = os.path.join(
+                                src, f'{fn}_perimeter.bin')
+                            if viirs_matches:
+                                hint_for_overlay = viirs_matches[-1]
+                                if hint_label == 'Hint':
+                                    hint_label = 'VIIRS hint'
+                            elif os.path.isfile(perim_in_canon):
+                                hint_for_overlay = perim_in_canon
+                                if hint_label == 'Hint':
+                                    hint_label = ('Traditional perimeter '
+                                                  '(hint)')
+                            elif f_obj:
+                                # Last resort: whatever the FireInfo has,
+                                # even if it's a stale cache path — the
+                                # renderer will silently skip if missing.
+                                hint_for_overlay = (
+                                    f_obj.hint_bin
+                                    or f_obj.viirs_bin
+                                    or f_obj.perim_bin
+                                    or '')
+                            ml_png = os.path.join(
+                                tmp_fire_dir, f'{fn}_ml_overlay.png')
+                            _render_ml_classification_png(
+                                fn, post_tmp, clf_bin, ml_png,
+                                '  |  '.join(subtitle_parts),
+                                hint_path=hint_for_overlay,
+                                hint_label=hint_label)
+                        if os.path.isfile(post_tmp):
+                            try:
+                                os.remove(post_tmp)
+                            except OSError:
+                                pass
+                except Exception as exc:
+                    sys.stderr.write(
+                        f'[report] ML overlay render failed for '
+                        f'{fn}: {exc}\n')
+                    sys.stderr.flush()
 
             tmp_pdf = os.path.join(tmp_dir, 'report.pdf')
-            pdf = generate_report(tmp_dir, tmp_pdf)
+            pdf = generate_report(tmp_dir, tmp_pdf, mode=report_mode)
             if pdf is None or not os.path.isfile(pdf):
                 self._send_json(
                     {'error': 'Report generation failed'}, 500)
@@ -4105,8 +4686,11 @@ class FireHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-Type', 'application/pdf')
             self.send_header('Content-Length', str(len(data)))
+            fname = ('fire_report_ml_only.pdf'
+                     if report_mode == 'brief'
+                     else 'fire_report.pdf')
             self.send_header('Content-Disposition',
-                             'attachment; filename="fire_report.pdf"')
+                             f'attachment; filename="{fname}"')
             self.end_headers()
             self.wfile.write(data)
         finally:

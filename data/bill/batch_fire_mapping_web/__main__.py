@@ -1,19 +1,24 @@
 """
 batch_fire_mapping_web
 ======================
-Web interface for interactive fire mapping.
+Web interface for interactive fire mapping, multi-year aware.
 
 Launch
 ------
-    python -m batch_fire_mapping_web  POLYGONS.shp  RASTER.bin  [options]
+    python -m batch_fire_mapping_web  POLYGONS.shp  \\
+        --rasters  pgfc_2022.bin  pgfc_2023.bin  pgfc_2024.bin  \\
+        --out_root /path/to/mother_dir  [options]
 
-Then open http://localhost:8765 in a browser.
+Then open http://localhost:8765 in a browser. Admins can switch the
+active year from the UI; each year gets its own per-year output dir
+``<out_root>/<raster_stem>_mapping_results`` automatically.
 """
 
 # ---------------------------------------------------------------------------
 # Path setup — identical to batch_fire_mapping/run_fire_mapping.py
 # ---------------------------------------------------------------------------
 import os
+import re
 import sys
 
 _HERE         = os.path.dirname(os.path.abspath(__file__))
@@ -42,17 +47,50 @@ from batch_fire_mapping.run_fire_mapping import (
 )
 
 
+def _year_from_filename(path: str) -> int:
+    """Extract a 4-digit year from a raster filename.
+
+    Scans all 4-digit substrings in the file's stem and keeps those in
+    [1970, now+1]. Exactly one plausible year must be derivable; raises
+    ValueError otherwise. This makes ``pgfc_2023.bin`` -> 2023 and
+    ``S2C_MSIL1C_20251014T192401_20m.bin`` -> 2025 without hardcoding
+    digit positions.
+    """
+    stem = os.path.splitext(os.path.basename(path))[0]
+    now_year = datetime.datetime.now().year
+    lo, hi = 1970, now_year + 1
+    found = set()
+    for m in re.finditer(r'(?=(\d{4}))', stem):
+        try:
+            y = int(m.group(1))
+        except ValueError:
+            continue
+        if lo <= y <= hi:
+            found.add(y)
+    if len(found) == 0:
+        raise ValueError(
+            f'Cannot find a 4-digit year in [{lo},{hi}] in '
+            f'filename "{stem}".')
+    if len(found) > 1:
+        raise ValueError(
+            f'Filename "{stem}" contains multiple year-like tokens '
+            f'{sorted(found)} — cannot pick one automatically.')
+    return next(iter(found))
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog='batch_fire_mapping_web',
-        description='Web interface for interactive Sentinel-2 fire mapping.',
+        description='Web interface for interactive Sentinel-2 fire mapping '
+                    '(multi-year).',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Example
 -------
   python -m batch_fire_mapping_web  \\
       IN_HISTORICAL_FIRE_POLYGONS_SVW.shp  \\
-      S2C_MSIL1C_20251014T192401_20m.bin   \\
+      --rasters  pgfc_2022.bin  pgfc_2023.bin  pgfc_2024.bin  \\
+      --out_root /data/bill/mapping_results \\
       --skip_download --padding 0.2
         """,
     )
@@ -60,12 +98,15 @@ Example
     # Required
     p.add_argument('polygon_file',
                    help='Fire perimeters shapefile (.shp)')
-    p.add_argument('raster_file',
-                   help='Sentinel-2 ENVI .bin raster')
-
-    # Output
-    p.add_argument('--out_dir', default=None,
-                   help='Output root directory (default: same as raster)')
+    p.add_argument('--rasters', nargs='+', required=True,
+                   help='One or more Sentinel-2 ENVI .bin rasters; each '
+                        'filename must contain a unique 4-digit year.')
+    p.add_argument('--out_root', required=True,
+                   help='Mother directory; per-year outputs go to '
+                        '<out_root>/<raster_stem>_mapping_results.')
+    p.add_argument('--year', type=int, default=None,
+                   help='Initial active year (default: value stored in '
+                        '<out_root>/active_year.yaml, else newest year).')
 
     # Perimeter mode
     p.add_argument('--perimeter_mode', default='viirs',
@@ -105,81 +146,174 @@ Example
     return p
 
 
+def _prepare_year_for_viirs(raster_path: str, polygon_file: str,
+                            viirs_save_dir: str, viirs_shp_dir: str,
+                            args):
+    """Download + shapify VIIRS for a given year's raster, as needed.
+
+    Mirrors the original single-raster path. Safe to call per-year during
+    startup; each year has its own viirs_save_dir so nothing collides.
+    """
+    os.makedirs(viirs_shp_dir, exist_ok=True)
+
+    if args.perimeter_mode == 'traditional':
+        print(f'      [{os.path.basename(raster_path)}] '
+              f'perimeter_mode=traditional — skipping VIIRS')
+        return
+
+    if args.skip_download:
+        print(f'      [{os.path.basename(raster_path)}] '
+              f'--skip_download — skipping VIIRS download/shapify')
+        return
+
+    # Load polygons for this year to figure out the date window
+    gdf = load_and_filter_polygons(polygon_file, raster_path)
+    if gdf.empty:
+        print(f'      [{os.path.basename(raster_path)}] '
+              f'no polygons in raster extent — skipping VIIRS download')
+        return
+
+    years = pd.to_numeric(
+        gdf.get('FIRE_YEAR', pd.Series(dtype=int)),
+        errors='coerce').dropna()
+    if years.empty:
+        years = pd.to_datetime(
+            gdf['FIRE_DATE'], errors='coerce').dt.year.dropna()
+    if years.empty:
+        print(f'      [{os.path.basename(raster_path)}] '
+              f'cannot determine fire years — skipping VIIRS download')
+        return
+
+    min_y, max_y = int(years.min()), int(years.max())
+    dl_start = datetime.datetime(min_y, 1, 1)
+    dl_end   = datetime.datetime(max_y, 12, 31)
+
+    print(f'      [{os.path.basename(raster_path)}] VIIRS '
+          f'{dl_start.date()} -> {dl_end.date()}')
+    token = load_token()
+    download_viirs(raster_path, dl_start, dl_end, token, viirs_save_dir)
+    shapify_viirs(viirs_save_dir, raster_path, args.shapify_workers)
+
+
 def main():
     args = _build_parser().parse_args()
 
-    raster_path  = os.path.abspath(args.raster_file)
     polygon_file = os.path.abspath(args.polygon_file)
-    raster_dir   = os.path.dirname(raster_path)
-    output_root  = os.path.abspath(args.out_dir) if args.out_dir else raster_dir
+    out_root     = os.path.abspath(args.out_root)
 
-    if not os.path.exists(raster_path):
-        sys.exit(f'ERROR: Raster not found: {raster_path}')
     if not os.path.exists(polygon_file):
         sys.exit(f'ERROR: Polygon file not found: {polygon_file}')
+    os.makedirs(out_root, exist_ok=True)
 
-    os.makedirs(output_root, exist_ok=True)
+    # ------------------------------------------------------------------
+    # Build {year -> raster} registry with filename-based detection
+    # ------------------------------------------------------------------
+    rasters_abs = [os.path.abspath(r) for r in args.rasters]
+    for r in rasters_abs:
+        if not os.path.exists(r):
+            sys.exit(f'ERROR: Raster not found: {r}')
+
+    rasters_by_year: dict = {}
+    for r in rasters_abs:
+        try:
+            y = _year_from_filename(r)
+        except ValueError as e:
+            sys.exit(f'ERROR: {e}')
+        if y in rasters_by_year:
+            sys.exit(
+                f'ERROR: Year {y} appears in two rasters:\n'
+                f'  {rasters_by_year[y]}\n  {r}\n'
+                f'Each year must be unique.')
+        rasters_by_year[y] = r
+
+    # Per-year output dirs: <out_root>/<raster_stem>_mapping_results
+    outdirs_by_year: dict = {}
+    viirs_shp_dirs_by_year: dict = {}
+    for y, r in rasters_by_year.items():
+        stem = os.path.splitext(os.path.basename(r))[0]
+        od = os.path.join(out_root, f'{stem}_mapping_results')
+        os.makedirs(od, exist_ok=True)
+        outdirs_by_year[y] = od
+
+        raster_dir = os.path.dirname(r)
+        viirs_save_dir = os.path.join(raster_dir, f'{stem}_VIIRS')
+        viirs_shp_dirs_by_year[y] = os.path.join(viirs_save_dir, 'VNP14IMG')
+
+    # ------------------------------------------------------------------
+    # Decide initial active year
+    # ------------------------------------------------------------------
+    import yaml
+    active_year_file = os.path.join(out_root, 'active_year.yaml')
+    active_year = None
+    if args.year is not None:
+        if args.year not in rasters_by_year:
+            sys.exit(f'ERROR: --year {args.year} not in '
+                     f'{sorted(rasters_by_year)}')
+        active_year = args.year
+    else:
+        if os.path.isfile(active_year_file):
+            try:
+                with open(active_year_file) as _f:
+                    _d = yaml.safe_load(_f) or {}
+                cand = int(_d.get('active_year', 0))
+                if cand in rasters_by_year:
+                    active_year = cand
+            except Exception:
+                pass
+        if active_year is None:
+            active_year = max(rasters_by_year)  # newest
+
+    raster_path    = rasters_by_year[active_year]
+    output_root    = outdirs_by_year[active_year]
+    viirs_shp_dir  = viirs_shp_dirs_by_year[active_year]
 
     sep = '=' * 60
     print(f'\n{sep}')
-    print('  BATCH FIRE MAPPING — WEB INTERFACE')
+    print('  BATCH FIRE MAPPING — WEB INTERFACE (multi-year)')
     print(sep)
-    print(f'  Raster     : {raster_path}')
     print(f'  Polygons   : {polygon_file}')
+    print(f'  Out root   : {out_root}')
+    print(f'  Years      : {sorted(rasters_by_year)}')
+    print(f'  Active year: {active_year}')
+    print(f'  Raster     : {raster_path}')
     print(f'  Output     : {output_root}')
     print(f'  Perimeter  : {args.perimeter_mode}')
     print(sep)
 
     # ------------------------------------------------------------------
-    # Step 1 — Load and filter polygons
+    # Step 1 — VIIRS download/shapify for every year (so switches are fast)
     # ------------------------------------------------------------------
-    print('\n[1/4] Loading polygons ...')
-    gdf = load_and_filter_polygons(polygon_file, raster_path)
+    print('\n[1/4] VIIRS prepare (per year) ...')
+    for y in sorted(rasters_by_year):
+        r = rasters_by_year[y]
+        raster_dir = os.path.dirname(r)
+        stem = os.path.splitext(os.path.basename(r))[0]
+        viirs_save_dir = os.path.join(raster_dir, f'{stem}_VIIRS')
+        _prepare_year_for_viirs(
+            r, polygon_file, viirs_save_dir,
+            viirs_shp_dirs_by_year[y], args)
+
+    # ------------------------------------------------------------------
+    # Step 2 — Load polygons + filter for the active year's raster.
+    # Filter by FIRE_YEAR == active_year so fires from other years (that
+    # happen to intersect this raster's footprint) don't leak into the
+    # list. Each year's raster is meant to show only that year's fires.
+    # ------------------------------------------------------------------
+    print('\n[2/4] Loading polygons ...')
+    gdf = load_and_filter_polygons(polygon_file, raster_path,
+                                   year=active_year)
     if gdf.empty:
-        sys.exit('No matching polygons found in shapefile.')
-    print(f'      {len(gdf)} fire(s) loaded.')
+        sys.exit(f'No polygons with FIRE_YEAR={active_year} inside the '
+                 'active raster extent.')
+    print(f'      {len(gdf)} fire(s) loaded for year {active_year}.')
+
+    # Raw GDF (source CRS, unfiltered) — cached for fast year switches
+    raw_gdf = gpd.read_file(polygon_file)
 
     # ------------------------------------------------------------------
-    # Step 2 — VIIRS download & shapify
+    # Step 3 — Load VIIRS shapefiles for the active year
     # ------------------------------------------------------------------
-    raster_basename = os.path.splitext(os.path.basename(raster_path))[0]
-    viirs_save_dir  = os.path.join(raster_dir, f'{raster_basename}_VIIRS')
-    viirs_shp_dir   = os.path.join(viirs_save_dir, 'VNP14IMG')
-    os.makedirs(viirs_shp_dir, exist_ok=True)
-
     viirs_gdf = gpd.GeoDataFrame()
-
-    if args.perimeter_mode == 'traditional':
-        print('\n[2/4] Skipping VIIRS (--perimeter_mode=traditional)')
-    elif not args.skip_download:
-        years = pd.to_numeric(
-            gdf.get('FIRE_YEAR', pd.Series(dtype=int)),
-            errors='coerce').dropna()
-        if years.empty:
-            years = pd.to_datetime(
-                gdf['FIRE_DATE'], errors='coerce').dt.year.dropna()
-        if years.empty:
-            sys.exit('ERROR: Cannot determine fire years.')
-
-        min_y, max_y = int(years.min()), int(years.max())
-        dl_start = datetime.datetime(min_y, 1, 1)
-        dl_end   = datetime.datetime(max_y, 12, 31)
-
-        print(f'\n[2/4] Downloading VIIRS '
-              f'({dl_start.date()} -> {dl_end.date()}) ...')
-        token = load_token()
-        download_viirs(raster_path, dl_start, dl_end,
-                       token, viirs_save_dir)
-
-        print('\n[3/4] Shapifying ...')
-        shapify_viirs(viirs_save_dir, raster_path,
-                      args.shapify_workers)
-    else:
-        print('\n[2/4] Skipping VIIRS download (--skip_download)')
-
-    # ------------------------------------------------------------------
-    # Step 3 — Load all VIIRS shapefiles
-    # ------------------------------------------------------------------
     if args.perimeter_mode != 'traditional':
         print('\n[3/4] Loading VIIRS shapefiles ...')
         crs_wkt, _, _, _ = get_raster_info(raster_path)
@@ -196,6 +330,7 @@ def main():
     from .app import init_app, create_server
 
     app_state = AppState()
+    # Active-year views
     app_state.gdf            = gdf
     app_state.viirs_gdf      = viirs_gdf
     app_state.raster_path    = raster_path
@@ -206,6 +341,15 @@ def main():
     app_state.raster_H       = H
     app_state.viirs_shp_dir  = viirs_shp_dir
     app_state.output_root    = output_root
+
+    # Multi-year registry
+    app_state.active_year             = active_year
+    app_state.shared_root             = out_root
+    app_state.rasters_by_year         = rasters_by_year
+    app_state.outdirs_by_year         = outdirs_by_year
+    app_state.viirs_shp_dirs_by_year  = viirs_shp_dirs_by_year
+    app_state.polygon_gdf_raw         = raw_gdf
+
     app_state.project_root   = _PROJECT_ROOT
     app_state.cli_script     = os.path.join(
         _REPO_ROOT, 'py', 'fire_mapping', 'fire_mapping_cli.py')
@@ -250,20 +394,17 @@ def main():
         sys.exit(f'ERROR: fire_mapping_cli.py not found at '
                  f'{app_state.cli_script}')
 
-    # Load recommended settings (output_root first, fallback to package dir).
+    # Load recommended settings from shared_root (shared across all years)
+    # with a fallback to the package default.
     # Schema: {k_runs_per_setting, k_jitter, settings: [{label, params}, ...]}
-    # The old schema (list with min_ha/max_ha) is rejected explicitly so
-    # stale configs cause a clean failure instead of silent misbehavior.
-    import yaml
-    _settings_path = None
-    _user_settings = os.path.join(output_root, 'recommended_settings.yaml')
+    app_state.settings_file = os.path.join(out_root, 'recommended_settings.yaml')
     _pkg_settings  = os.path.join(_HERE, 'recommended_settings.yaml')
-    if os.path.isfile(_user_settings):
-        _settings_path = _user_settings
-    elif os.path.isfile(_pkg_settings):
-        _settings_path = _pkg_settings
+    _settings_path = (app_state.settings_file
+                      if os.path.isfile(app_state.settings_file)
+                      else (_pkg_settings if os.path.isfile(_pkg_settings)
+                            else None))
     if _settings_path is None:
-        sys.exit('ERROR: recommended_settings.yaml not found in output dir '
+        sys.exit('ERROR: recommended_settings.yaml not found in out_root '
                  'or package dir.')
     try:
         with open(_settings_path) as _f:
@@ -306,14 +447,14 @@ def main():
 
     print(f'      Loaded {len(app_state.recommended_settings)} '
           f'recommended setting(s) from '
-          f'{"output dir" if _settings_path == _user_settings else "package"}.'
-          f' K={app_state.k_runs_per_setting}, jitter={app_state.k_jitter}')
+          f'{"out_root" if _settings_path == app_state.settings_file else "package"}'
+          f'. K={app_state.k_runs_per_setting}, jitter={app_state.k_jitter}')
 
-    # Load persistent IP access list
-    app_state.ip_file = os.path.join(output_root, 'access_control.yaml')
+    # Shared persistent files live under out_root so logins and IP rules
+    # survive a year-switch (per-year fire data stays in the per-year outdir).
+    app_state.ip_file = os.path.join(out_root, 'access_control.yaml')
     if os.path.isfile(app_state.ip_file):
         try:
-            import yaml
             with open(app_state.ip_file) as _f:
                 _ip_data = yaml.safe_load(_f) or {}
             app_state.approved_ips = _ip_data.get('approved', {})
@@ -325,14 +466,11 @@ def main():
         except Exception as _e:
             print(f'      WARNING: Failed to load IP list: {_e}')
 
-    # Load persistent sessions
-    app_state.session_file = os.path.join(output_root, 'sessions.yaml')
+    app_state.session_file = os.path.join(out_root, 'sessions.yaml')
     if os.path.isfile(app_state.session_file):
         try:
-            import yaml
             with open(app_state.session_file) as _f:
                 _sess = yaml.safe_load(_f) or {}
-            # Filter out expired sessions (30 days)
             _now = datetime.datetime.now()
             for _tok, _info in list(_sess.items()):
                 try:
@@ -351,9 +489,10 @@ def main():
 
     init_app(app_state)
 
-    # Restore per-fire state from previous session
-    from .app import _load_fire_state
+    # Restore per-fire state from previous session for the active year
+    from .app import _load_fire_state, _save_active_year
     _load_fire_state()
+    _save_active_year()
 
     # Parameter analyzer (admin-only). Registers its own routes on
     # FireHandler; leaves app.py untouched.
@@ -386,6 +525,8 @@ def main():
     else:
         print(f'  Auth:    NONE (--insecure_no_auth)')
         print(f'  WARNING: All users have full admin access!')
+    print(f'  Years:   {sorted(app_state.rasters_by_year)} '
+          f'(active={app_state.active_year})')
     print(f'  {len(app_state.fires)} fire(s) available')
     print(f'{sep}\n')
 
