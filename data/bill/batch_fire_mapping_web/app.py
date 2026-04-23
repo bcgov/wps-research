@@ -950,6 +950,13 @@ def _compute_agreement(fire: 'FireInfo',
     When *clf_path* is None, reads the main crop's classified.bin;
     callers can pass a per-run classified.bin for serial-run agreement.
     Returns percentage (0-100) or -1 if computation fails.
+
+    When clf and hint have different shapes (e.g. rebrush on a serial
+    run whose padding differs from the current fire.hint_bin extent —
+    recommended_settings sweeps can span multiple paddings), aligns
+    them via GeoTransform and computes IoU over the common overlap
+    rectangle. Without this, every rebrush of a cross-padding run
+    collapses to agreement=-1 → Accept button disappears.
     """
     try:
         if clf_path is None:
@@ -969,10 +976,37 @@ def _compute_agreement(fire: 'FireInfo',
 
         clf = ds_clf.GetRasterBand(1).ReadAsArray()
         hint = ds_hint.GetRasterBand(1).ReadAsArray()
+        clf_gt = ds_clf.GetGeoTransform()
+        hint_gt = ds_hint.GetGeoTransform()
         ds_clf = ds_hint = None
 
         if clf.shape != hint.shape:
-            return -1.0
+            # Cross-extent: crops are from the same source raster so
+            # pixel sizes must match — only the origin / extent differ.
+            # Refuse if pixel sizes don't line up (can't align sensibly).
+            if not (clf_gt and hint_gt
+                    and abs(clf_gt[1] - hint_gt[1]) < 1e-6
+                    and abs(clf_gt[5] - hint_gt[5]) < 1e-6):
+                return -1.0
+            # Offset of clf's origin expressed in hint's pixel frame.
+            off_x = round((clf_gt[0] - hint_gt[0]) / hint_gt[1])
+            off_y = round((clf_gt[3] - hint_gt[3]) / hint_gt[5])
+            ch, cw = clf.shape
+            hh, hw = hint.shape
+            # Intersection rectangle in hint's pixel coordinates.
+            com_x0 = max(0, off_x)
+            com_y0 = max(0, off_y)
+            com_x1 = min(hw, off_x + cw)
+            com_y1 = min(hh, off_y + ch)
+            if com_x1 <= com_x0 or com_y1 <= com_y0:
+                return -1.0
+            hint = hint[com_y0:com_y1, com_x0:com_x1]
+            clf = clf[
+                com_y0 - off_y:com_y1 - off_y,
+                com_x0 - off_x:com_x1 - off_x,
+            ]
+            if clf.shape != hint.shape:
+                return -1.0
 
         clf_mask = clf > 0
         hint_mask = hint > 0
@@ -1858,11 +1892,16 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
 
     fire = state.fires[fire_numbe]
 
-    # Refuse to prepare while a mapping is in progress on this fire
-    if fire.status in (FireStatus.MAPPING, FireStatus.PREPARING):
-        fire.error_msg = (
-            'Cannot prepare: fire is currently '
-            + fire.status.value)
+    # Refuse only if another prepare is already running on this fire.
+    # MAPPING is *not* a refusal condition: _serial_map_worker sets
+    # status=MAPPING before calling this (see app.py:1090, 1384) and
+    # then asks us to re-prep when padding changes or the crop/hint
+    # files are missing. Treating MAPPING as "busy" here was the root
+    # cause of batch-mapping failures on never-opened fires — the
+    # guard no-op'd, crop_bin/hint_bin stayed empty, and the CLI
+    # subprocess crashed on empty positional args.
+    if fire.status == FireStatus.PREPARING:
+        fire.error_msg = 'Cannot prepare: fire is currently preparing'
         return
 
     fire.status = FireStatus.PREPARING
@@ -1951,7 +1990,31 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
                        and old_pad != pad
                        and os.path.isdir(cache_dir))
     if padding_changed:
-        shutil.rmtree(cache_dir)
+        # Selective wipe: keep {fire}_serial_* (the gallery's
+        # classified.bin + standalone comparison PNGs) and drop
+        # everything else. A recommended-settings sweep whose
+        # settings span multiple padding values re-enters this
+        # branch between settings; the old shutil.rmtree wiped
+        # every prior setting's gallery files off disk, leaving
+        # in-memory fire.serial_results entries pointing at
+        # non-existent files (ghost cards with no thumbnails).
+        # Serial overlay PNGs under previews/ are tied to the
+        # old post.png extent, so drop those — handle_api_serial_image
+        # regenerates them on demand from the surviving
+        # classified.bin via _overlay_mask_on_post, which aligns
+        # across crop extents using GeoTransform.
+        serial_prefix = f'{fire_numbe}_serial_'
+        for fname in os.listdir(cache_dir):
+            full_path = os.path.join(cache_dir, fname)
+            if (os.path.isfile(full_path)
+                    and not fname.startswith(serial_prefix)):
+                try:
+                    os.remove(full_path)
+                except OSError:
+                    pass
+        previews_dir = os.path.join(cache_dir, 'previews')
+        if os.path.isdir(previews_dir):
+            shutil.rmtree(previews_dir, ignore_errors=True)
     os.makedirs(cache_dir, exist_ok=True)
     fire.cache_dir = cache_dir
 
@@ -2176,9 +2239,44 @@ def _accept_fire_sync(fire_numbe: str) -> str:
             },
         }
         if fire.last_params:
-            for section in ('tsne', 'hdbscan', 'random_forest'):
-                if section in fire.last_params:
-                    params_dict[section] = fire.last_params[section]
+            # fire.last_params is a FLAT CLI-style dict (e.g.
+            # 'hdbscan_min_samples', 'tsne_perplexity', 'embed_bands',
+            # 'rf_n_estimators', 'brush_size'). The previous version
+            # expected nested sub-dicts under 'tsne'/'hdbscan'/
+            # 'random_forest' keys and silently wrote nothing, so
+            # every accepted YAML (and the PDF built from it) lost
+            # bands, t-SNE, RF, HDBSCAN, and brush settings. Group by
+            # prefix so readers can pull a whole stage without string
+            # parsing; unknown keys fall into 'misc'.
+            _prefix_to_section = (
+                ('tsne_',    'tsne'),
+                ('hdbscan_', 'hdbscan'),
+                ('rf_',      'random_forest'),
+                ('brush_',   'brush'),
+            )
+            _explicit = {
+                'embed_bands':       'bands',
+                'point_threshold':   'brush',
+                'controlled_ratio':  'random_forest',
+                'contour_width':     'output',
+            }
+            # These are already represented in higher-level sections
+            # (crop/sampling). Skip to avoid duplication/conflicting
+            # values if the per-run override differs from the global.
+            _skip = {'padding', 'sample_rate', 'min_samples', 'max_samples'}
+            for k, v in fire.last_params.items():
+                if v is None or v == '':
+                    continue
+                if k in _skip:
+                    continue
+                section = None
+                for prefix, sec in _prefix_to_section:
+                    if k.startswith(prefix):
+                        section = sec
+                        break
+                if section is None:
+                    section = _explicit.get(k, 'misc')
+                params_dict.setdefault(section, {})[k] = v
 
         path = os.path.join(fire_dir, f'{fire_numbe}_params.yaml')
         with open(path, 'w') as f:
