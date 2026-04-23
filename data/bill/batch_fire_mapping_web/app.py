@@ -969,16 +969,19 @@ def _compute_agreement(fire: 'FireInfo',
         if not os.path.isfile(clf_path) or not os.path.isfile(hint_path):
             return -1.0
 
-        ds_clf = gdal.Open(clf_path, gdal.GA_ReadOnly)
-        ds_hint = gdal.Open(hint_path, gdal.GA_ReadOnly)
-        if ds_clf is None or ds_hint is None:
-            return -1.0
-
-        clf = ds_clf.GetRasterBand(1).ReadAsArray()
-        hint = ds_hint.GetRasterBand(1).ReadAsArray()
-        clf_gt = ds_clf.GetGeoTransform()
-        hint_gt = ds_hint.GetGeoTransform()
         ds_clf = ds_hint = None
+        try:
+            ds_clf = gdal.Open(clf_path, gdal.GA_ReadOnly)
+            ds_hint = gdal.Open(hint_path, gdal.GA_ReadOnly)
+            if ds_clf is None or ds_hint is None:
+                return -1.0
+
+            clf = ds_clf.GetRasterBand(1).ReadAsArray()
+            hint = ds_hint.GetRasterBand(1).ReadAsArray()
+            clf_gt = ds_clf.GetGeoTransform()
+            hint_gt = ds_hint.GetGeoTransform()
+        finally:
+            ds_clf = ds_hint = None
 
         if clf.shape != hint.shape:
             # Cross-extent: crops are from the same source raster so
@@ -2279,9 +2282,7 @@ def _accept_fire_sync(fire_numbe: str) -> str:
                 params_dict.setdefault(section, {})[k] = v
 
         path = os.path.join(fire_dir, f'{fire_numbe}_params.yaml')
-        with open(path, 'w') as f:
-            yaml.dump(params_dict, f,
-                      default_flow_style=False, sort_keys=False)
+        _atomic_yaml_dump(path, params_dict, mode=0o644)
     except ImportError:
         pass
 
@@ -2810,11 +2811,11 @@ def _render_ml_classification_png(fire_numbe: str, post_path: str,
         # pages. Silently skipped if the hint raster is missing.
         hint_rgba = None
         if hint_path and os.path.isfile(hint_path):
+            ds_h = None
             try:
                 ds_h = gdal.Open(hint_path, gdal.GA_ReadOnly)
                 if ds_h is not None:
                     harr = ds_h.GetRasterBand(1).ReadAsArray()
-                    ds_h = None
                     hh, hw = harr.shape
                     if (hh, hw) != (bh, bw):
                         harr = scipy_zoom(harr.astype(np.uint8),
@@ -2828,6 +2829,8 @@ def _render_ml_classification_png(fire_numbe: str, post_path: str,
                         hint_rgba[..., 3] = boundary.astype(np.float32)
             except Exception:
                 hint_rgba = None
+            finally:
+                ds_h = None
 
         fig, ax = plt.subplots(figsize=(10, 10))
         ax.imshow(result, interpolation='nearest', origin='upper')

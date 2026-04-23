@@ -237,7 +237,7 @@ class AppState:
                 if os.path.isfile(params_path):
                     try:
                         import yaml
-                        with open(params_path) as _pf:
+                        with open(params_path, encoding='utf-8') as _pf:
                             _pd = yaml.safe_load(_pf) or {}
                         fire_info = _pd.get('fire', {})
                         notes = fire_info.get('notes', '')
@@ -245,11 +245,22 @@ class AppState:
                             fire_info.get('agreement_pct', -1) or -1)
                         ml_area = float(
                             fire_info.get('ml_area_ha', -1) or -1)
-                        # Restore mapping params
-                        for section in ('tsne', 'hdbscan', 'random_forest',
-                                        'sampling', 'crop'):
-                            if section in _pd:
-                                last_params[section] = _pd[section]
+                        # last_params is a FLAT CLI-style dict in memory
+                        # ('tsne_perplexity', 'rf_n_estimators', ...) but
+                        # written to YAML grouped by stage. Flatten every
+                        # CLI section back so the next accept round-trips
+                        # cleanly; 'fire'/'run'/'inputs'/'crop'/'sampling'/
+                        # 'accumulation' are context, not CLI args.
+                        _context_sections = {
+                            'fire', 'run', 'inputs', 'crop',
+                            'sampling', 'accumulation',
+                        }
+                        for section, payload in _pd.items():
+                            if section in _context_sections:
+                                continue
+                            if isinstance(payload, dict):
+                                for k, v in payload.items():
+                                    last_params[k] = v
                     except Exception:
                         pass
 
@@ -270,7 +281,7 @@ class AppState:
         if os.path.isfile(notes_path):
             try:
                 import yaml
-                with open(notes_path) as _nf:
+                with open(notes_path, encoding='utf-8') as _nf:
                     _notes_data = yaml.safe_load(_nf) or {}
                 for fn, note_text in _notes_data.items():
                     if fn in self.fires and note_text:

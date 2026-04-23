@@ -30,7 +30,7 @@ def parse_envi_band_names(raster_path: str) -> list[str]:
     for hdr in (base + '.hdr', raster_path + '.hdr'):
         if not os.path.exists(hdr):
             continue
-        with open(hdr) as f:
+        with open(hdr, encoding='utf-8', errors='replace') as f:
             content = f.read()
         m = re.search(
             r'band names\s*=\s*\{(.+?)\}', content,
@@ -134,17 +134,19 @@ def generate_preview_png(raster_path: str, band_indices: list[int],
     if ds is None:
         return False
 
-    w, h = ds.RasterXSize, ds.RasterYSize
-    n_bands = ds.RasterCount
+    try:
+        w, h = ds.RasterXSize, ds.RasterYSize
+        n_bands = ds.RasterCount
 
-    channels = []
-    for b_idx in band_indices[:3]:
-        if b_idx < 1 or b_idx > n_bands:
-            channels.append(np.zeros((h, w), dtype=np.float32))
-            continue
-        arr = ds.GetRasterBand(b_idx).ReadAsArray().astype(np.float32)
-        channels.append(arr)
-    ds = None
+        channels = []
+        for b_idx in band_indices[:3]:
+            if b_idx < 1 or b_idx > n_bands:
+                channels.append(np.zeros((h, w), dtype=np.float32))
+                continue
+            arr = ds.GetRasterBand(b_idx).ReadAsArray().astype(np.float32)
+            channels.append(arr)
+    finally:
+        ds = None
 
     while len(channels) < 3:
         channels.append(channels[-1].copy())
@@ -189,8 +191,10 @@ def generate_all_previews(crop_path: str, cache_dir: str,
     if not band_names:
         ds = gdal.Open(crop_path, gdal.GA_ReadOnly)
         if ds:
-            n = ds.RasterCount
-            ds = None
+            try:
+                n = ds.RasterCount
+            finally:
+                ds = None
             band_names = [f'band {i + 1}' for i in range(n)]
 
     groups = detect_band_groups(band_names)
