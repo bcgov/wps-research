@@ -1,0 +1,7 @@
+earthengine-api==0.1.406
+folium==0.14.0
+geemap==0.32.1
+matplotlib==3.7.1
+numpy==1.25.2
+pandas<2.7.0
+pytz==2023.4
