@@ -2183,6 +2183,9 @@ def _serial_map_worker(fire_numbe: str, settings: list[dict],
     fire.serial_settings = [_clone_setting(s) for s in settings]
     fire.serial_canceled = False
     fire.serial_accept_promoted = False
+    # Drop any Event left behind by a prior accept — the cleanup
+    # below would otherwise wait on it and stall the worker.
+    fire.serial_accept_event = None
     fire.console_log.clear()
     n_settings = len(settings)
     k_runs = max(1, int(k_runs))
@@ -2348,6 +2351,15 @@ def _serial_map_worker(fire_numbe: str, settings: list[dict],
 
             try:
                 with _gpu_lock:
+                    # Cancel window (A): check serial_canceled BEFORE
+                    # calling _prepare_fire_sync. Without this, a
+                    # cancel/accept arriving between settings with
+                    # different paddings would still run a full prep
+                    # (briefly flipping status to PREPARING) before
+                    # the worker noticed the cancel — user-visible as
+                    # a "back to preparing" flicker after Accept.
+                    if fire.serial_canceled:
+                        break
                     # Re-prepare if padding changed or cache files missing.
                     # Per-setting padding: re-prep each time padding differs
                     # from fire.padding_used. Replicates within the same
@@ -2442,6 +2454,19 @@ def _serial_map_worker(fire_numbe: str, settings: list[dict],
                         fire.console_log.append(
                             f'[watchdog] killed after '
                             f'{_SUBPROCESS_SILENCE_TIMEOUT}s of silence')
+
+                    # Subprocess was SIGTERMed by an accept/cancel
+                    # handler (rc is non-zero, cancel flag is set, and
+                    # the watchdog didn't fire). Don't log as FAILED
+                    # or append a phantom gallery card — the cancel
+                    # cleanup below will wipe serial_results anyway,
+                    # and a "Run N FAILED" line is misleading since
+                    # the user's accept was the cause.
+                    if (rc != 0 and not killed
+                            and fire.serial_canceled):
+                        fire.console_log.append(
+                            f'Run {run_id} terminated by cancel/accept.')
+                        break
 
                     if rc == 0:
                         agr = _compute_agreement(fire)
@@ -2609,6 +2634,21 @@ def _serial_map_worker(fire_numbe: str, settings: list[dict],
     # handlers cannot race our file writes / deletes on the same
     # cache_dir.
     if fire.serial_canceled:
+        # If an accept handler is mid-run, wait for it to finish
+        # writing the canonical output before we enter the cleanup
+        # block. Without this, the worker and the accept handler race
+        # for _gpu_lock — if the worker wins, it deletes the
+        # per-run serial_* files before accept has copied them into
+        # the main slot, and the canonical dir ends up empty. The
+        # event is set by handle_api_serial_accept's finally, so it
+        # unblocks on both success and exception. Timeout is a
+        # generous 120s to survive disk-heavy accepts; if it expires,
+        # fall through and let the existing _gpu_lock contention
+        # arbitrate (previous behaviour).
+        accept_event = fire.serial_accept_event
+        if (fire.serial_accept_promoted
+                and accept_event is not None):
+            accept_event.wait(timeout=120)
         with _gpu_lock:
             accept_promoted = fire.serial_accept_promoted
 
@@ -5805,33 +5845,54 @@ class FireHandler(BaseHTTPRequestHandler):
                 400)
             return
 
-        # Serialize the copy + accept under _gpu_lock. The worker takes
-        # the same lock per replicate AND for its cancel cleanup, so
-        # this blocks until the worker is not actively writing to
-        # cache_dir. Without this, the accept handler could read
-        # serial_clf while the worker was in the middle of writing it,
-        # or vice-versa.
+        # Fast path to release _gpu_lock: if the worker is currently
+        # running a mapping subprocess, set the cancel flags and SIGTERM
+        # its CLI BEFORE we wait for the lock. Without this step, the
+        # lock wait below takes the full duration of the in-flight
+        # replicate (minutes), during which the user sees "mapping
+        # still running" even though they just clicked Accept.
         #
-        # CRITICAL: set the cancel flags *inside* this lock, not
-        # before acquiring it. Previous versions flipped
-        # serial_canceled=True before taking the lock — that let the
-        # worker's cleanup block win the lock race and delete
-        # {fire}_serial_{rid}_classified.bin *before* we copied it
-        # into the main slot. Symptom: accepting a run while the
-        # sweep was still running produced a fire with no
-        # classification and a zeroed agreement.
-        with _gpu_lock:
-            # Re-check status now that we hold the lock; if the worker
-            # finished naturally between the outer status read and
-            # here, there's nothing left to cancel.
-            worker_running = (fire.status == FireStatus.MAPPING)
-            if worker_running:
+        # Lock-race safety (why this is NOT the old pre-lock setup):
+        # the worker's cancel cleanup is gated on fire.serial_accept_event.
+        # We clear the event before setting flags, then set it once
+        # _accept_fire_sync has copied files into the canonical dir.
+        # So even though serial_canceled is set before _gpu_lock here,
+        # the worker's cleanup block (which deletes serial_* files)
+        # will wait for us to finish regardless of which thread wins
+        # the lock race — fixing the original race where flag-before-
+        # lock let the worker delete files before accept copied them.
+        worker_running = (fire.status == FireStatus.MAPPING)
+        accept_event = None
+        if worker_running:
+            accept_event = threading.Event()
+            accept_event.clear()
+            with state.lock:
+                fire.serial_accept_event = accept_event
                 # Pin serial_prev_status to ACCEPTED so the worker's
                 # generic revert lands there (it reverts to
                 # prev_status regardless of cancel source).
                 fire.serial_prev_status = FireStatus.ACCEPTED
                 fire.serial_accept_promoted = True
                 fire.serial_canceled = True
+            # SIGTERM the running CLI. The worker's _stream_subprocess
+            # returns promptly, the worker exits its with _gpu_lock
+            # block, and _gpu_lock is released so we can acquire it
+            # below without waiting minutes for the replicate to
+            # finish on its own.
+            _terminate_serial_proc(fire_numbe)
+
+        # Serialize the copy + accept under _gpu_lock. The worker takes
+        # the same lock per replicate AND for its cancel cleanup, so
+        # this blocks until the worker is not actively writing to
+        # cache_dir. With the SIGTERM above, the wait is bounded by
+        # subprocess teardown (seconds), not full replicate duration.
+        try:
+            _gpu_lock.acquire()
+        except Exception:
+            if accept_event is not None:
+                accept_event.set()
+            raise
+        try:
             # Copy the selected run's results as the main results
             serial_clf = result.get('classified', '')
             serial_comp = result.get('comparison', '')
@@ -5964,6 +6025,15 @@ class FireHandler(BaseHTTPRequestHandler):
                 # in-memory state (empty gallery for an ACCEPTED fire)
                 # so a restart doesn't resurrect a stale gallery.
                 _save_fire_state()
+        finally:
+            _gpu_lock.release()
+            # Signal the worker's cleanup to proceed — now that the
+            # canonical dir is written and status is ACCEPTED, it is
+            # safe for the worker to delete the per-run serial_*
+            # files. The event is always set, even on exception, so
+            # the worker never hangs waiting for us.
+            if accept_event is not None:
+                accept_event.set()
 
         self._send_json({'status': 'accepted'})
 
@@ -5986,6 +6056,12 @@ class FireHandler(BaseHTTPRequestHandler):
                 400)
             return
         fire.serial_canceled = True
+        # SIGTERM the running CLI so the worker's _gpu_lock releases
+        # promptly and the cancel takes effect within seconds rather
+        # than waiting up to the full duration of the current
+        # replicate. Safe no-op if the worker happens to be between
+        # replicates (no proc registered for this fire).
+        _terminate_serial_proc(fire_numbe)
         self._send_json({'status': 'cancelling'})
 
     def handle_api_notes(self, fire_numbe):
@@ -6263,6 +6339,7 @@ class FireHandler(BaseHTTPRequestHandler):
             fire = state.fires[current]
             if fire.status == FireStatus.MAPPING:
                 fire.serial_canceled = True
+                _terminate_serial_proc(current)
         self._send_json({'status': 'cancelling'})
 
     # -- Progress / queue / notifications / cache / abort / presets --
@@ -6467,6 +6544,12 @@ class FireHandler(BaseHTTPRequestHandler):
                 pass
         if fire.status == FireStatus.MAPPING:
             fire.serial_canceled = True
+            # SIGTERM the CLI so _gpu_lock releases in seconds, not
+            # minutes. Worker's cleanup waits on serial_accept_event
+            # only when serial_accept_promoted is True (which /abort
+            # does not set), so the user-cancel path here does not
+            # stall on the event.
+            _terminate_serial_proc(fire_numbe)
             actions.append('mapping_cancel_requested')
 
         if not actions:
