@@ -98,6 +98,21 @@ class FireInfo:
     # successful run so the fire lands in MAPPED (not back to READY).
     serial_accept_promoted: bool = False
 
+    # Live progress snapshot — written by _ProgressTracker as the CLI
+    # emits stage markers, read by /api/fire/:fire/progress. Ephemeral
+    # (cleared on status transition away from MAPPING / PREPARING). Keys:
+    # stage, stage_idx, total_stages, stage_started_at, job_started_at,
+    # run_id, total_runs, pipeline ('full' | 'resume'), last_line.
+    progress: dict = field(default_factory=dict)
+
+    # User-selected preset bundle label (one of the keys under `presets:`
+    # in recommended_settings.yaml). Persisted in fire_state.yaml so the
+    # panel remembers which preset last seeded the form.
+    last_preset: str = ""
+
+    # Reason the most recent cancel was issued (for audit). Persisted.
+    last_cancel_reason: str = ""
+
 
 class AppState:
     """Global application state shared across all routes."""
@@ -171,6 +186,39 @@ class AppState:
         self.current_job: Optional[dict] = None   # {fire_numbe, client_ip, started_at}
         self.waiting_jobs: list = []               # [{fire_numbe, client_ip, queued_at}]
 
+        # Running median stage durations (seconds) for ETA estimation.
+        # Keys are stage names ('load', 'sample', 'tsne', ...); values
+        # are deques of recent durations. Persisted to
+        # <shared_root>/stage_timings.yaml.
+        self.stage_timings: dict = {}
+
+        # Per-session notification queues (toast system). Keyed by
+        # SHA-256 hash of the session cookie (same key space as
+        # self.sessions). Value: list of {id, ts, kind, title, body,
+        # fire, acked}. Broadcast entries live in the special
+        # '__broadcast__' bucket and are copied to each session on
+        # first poll. Persisted to <shared_root>/notifications.yaml.
+        self.notifications: dict = {}
+        self.broadcast_cursor: dict = {}  # {session_hash: last_broadcast_id}
+        self.broadcast_counter: int = 0
+        self.notification_counter: int = 0
+
+        # Cache retention config. Persisted to
+        # <shared_root>/cache_retention.yaml.
+        self.cache_retention: dict = {
+            'max_gb': 20.0,
+            'max_age_days': 30,
+            'sweep_interval_hours': 6,
+            'enabled': True,
+        }
+        # Timestamp of last successful sweep (unix epoch seconds).
+        self.cache_last_sweep: float = 0.0
+
+        # Preset bundles loaded from recommended_settings.yaml
+        # `presets:` key. Shape: {name: {label, params}}. The active
+        # preset UI reads this; empty dict = no presets configured.
+        self.presets: dict = {}
+
         # Batch mapping
         self.batch_status: Optional[dict] = None   # {running, total, completed, current_fire, errors}
 
@@ -237,7 +285,7 @@ class AppState:
                 if os.path.isfile(params_path):
                     try:
                         import yaml
-                        with open(params_path) as _pf:
+                        with open(params_path, encoding='utf-8') as _pf:
                             _pd = yaml.safe_load(_pf) or {}
                         fire_info = _pd.get('fire', {})
                         notes = fire_info.get('notes', '')
@@ -245,11 +293,22 @@ class AppState:
                             fire_info.get('agreement_pct', -1) or -1)
                         ml_area = float(
                             fire_info.get('ml_area_ha', -1) or -1)
-                        # Restore mapping params
-                        for section in ('tsne', 'hdbscan', 'random_forest',
-                                        'sampling', 'crop'):
-                            if section in _pd:
-                                last_params[section] = _pd[section]
+                        # last_params is a FLAT CLI-style dict in memory
+                        # ('tsne_perplexity', 'rf_n_estimators', ...) but
+                        # written to YAML grouped by stage. Flatten every
+                        # CLI section back so the next accept round-trips
+                        # cleanly; 'fire'/'run'/'inputs'/'crop'/'sampling'/
+                        # 'accumulation' are context, not CLI args.
+                        _context_sections = {
+                            'fire', 'run', 'inputs', 'crop',
+                            'sampling', 'accumulation',
+                        }
+                        for section, payload in _pd.items():
+                            if section in _context_sections:
+                                continue
+                            if isinstance(payload, dict):
+                                for k, v in payload.items():
+                                    last_params[k] = v
                     except Exception:
                         pass
 
@@ -270,7 +329,7 @@ class AppState:
         if os.path.isfile(notes_path):
             try:
                 import yaml
-                with open(notes_path) as _nf:
+                with open(notes_path, encoding='utf-8') as _nf:
                     _notes_data = yaml.safe_load(_nf) or {}
                 for fn, note_text in _notes_data.items():
                     if fn in self.fires and note_text:

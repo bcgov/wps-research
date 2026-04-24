@@ -490,9 +490,37 @@ def main():
     init_app(app_state)
 
     # Restore per-fire state from previous session for the active year
-    from .app import _load_fire_state, _save_active_year
+    from .app import (_load_fire_state, _save_active_year,
+                      _load_stage_timings, _load_notifications,
+                      _load_cache_retention, _cache_sweep_loop)
     _load_fire_state()
     _save_active_year()
+
+    # Task-5 subsystems: persistent stage-timing medians, per-session
+    # toast queues, and cache retention config.
+    _load_stage_timings()
+    _load_notifications()
+    _load_cache_retention()
+
+    # Load preset bundles (if present) from recommended_settings.yaml.
+    presets_raw = _cfg.get('presets')
+    if isinstance(presets_raw, dict):
+        clean_presets = {}
+        for name, val in presets_raw.items():
+            if not isinstance(val, dict):
+                continue
+            clean_presets[str(name)] = {
+                'label': str(val.get('label', name)),
+                'description': str(val.get('description', '')),
+                'params': dict(val.get('params', {}) or {}),
+            }
+        app_state.presets = clean_presets
+        print(f'      Loaded {len(clean_presets)} preset bundle(s).')
+
+    # Background thread: prune .web_cache every N hours.
+    import threading as _threading
+    _threading.Thread(target=_cache_sweep_loop,
+                      daemon=True).start()
 
     # Parameter analyzer (admin-only). Registers its own routes on
     # FireHandler; leaves app.py untouched.

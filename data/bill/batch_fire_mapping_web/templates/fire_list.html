@@ -28,6 +28,11 @@
     <button class="btn btn-secondary" onclick="scrollToMappingRow()">Scroll to row</button>
 </div>
 
+<!-- Toast container for cross-page notifications (map complete,
+     rebrush done, year switched, ...). Populated by pollNotifications
+     inline below. -->
+<div id="toast-container" class="toast-container" aria-live="polite"></div>
+
 <!-- Filter panel -->
 <div class="filter-panel">
     <div class="filter-panel-header" onclick="document.querySelector('.filter-panel').classList.toggle('open')">
@@ -1050,6 +1055,85 @@ async function checkBatchOnLoad() {
 loadFires();
 loadSettings();
 checkBatchOnLoad();
+
+// -----------------------------------------------------------------------
+// Toast notifications — same shape as fire_mapping.html. Polls every
+// 5s and displays any queued messages. Errors and warnings stick until
+// dismissed; success / info auto-dismiss after 8s.
+// -----------------------------------------------------------------------
+const seenToastIds = new Set();
+
+function showToast(n) {
+    if (!n || n.id == null) return;
+    if (seenToastIds.has(n.id)) return;
+    seenToastIds.add(n.id);
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+    const el = document.createElement('div');
+    el.className = 'toast toast-' + (n.kind || 'info');
+    el.dataset.id = n.id;
+
+    const title = document.createElement('div');
+    title.className = 'toast-title';
+    title.textContent = n.title || '';
+    el.appendChild(title);
+
+    if (n.body) {
+        const body = document.createElement('div');
+        body.className = 'toast-body';
+        body.textContent = n.body;
+        el.appendChild(body);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'toast-actions';
+    if (n.action && n.action.url && n.action.label) {
+        const a = document.createElement('a');
+        a.href = n.action.url;
+        a.textContent = n.action.label;
+        a.className = 'toast-action';
+        actions.appendChild(a);
+    }
+    const close = document.createElement('button');
+    close.textContent = '×';
+    close.className = 'toast-close';
+    close.setAttribute('aria-label', 'Dismiss');
+    close.onclick = () => dismissToast(el);
+    actions.appendChild(close);
+    el.appendChild(actions);
+
+    container.appendChild(el);
+
+    const sticky = (n.kind === 'error' || n.kind === 'warning');
+    if (!sticky) setTimeout(() => dismissToast(el), 8000);
+}
+
+function dismissToast(el) {
+    if (!el || !el.parentNode) return;
+    el.classList.add('toast-leaving');
+    setTimeout(() => {
+        if (el.parentNode) el.parentNode.removeChild(el);
+    }, 250);
+}
+
+async function pollNotifications() {
+    try {
+        const r = await fetch('/api/notifications');
+        if (!r.ok) return;
+        const data = await r.json();
+        for (const n of (data.notifications || [])) {
+            showToast(n);
+            // If a year-switch broadcast lands, the fire list may be
+            // stale — reload it in-place.
+            if (n.title && n.title.startsWith('Active year switched')) {
+                loadFires();
+            }
+        }
+    } catch {}
+}
+
+setInterval(pollNotifications, 5000);
+setTimeout(pollNotifications, 1200);
 </script>
 </body>
 </html>

@@ -78,6 +78,34 @@
         </div>
     </div>
 
+    <!-- Cache retention -->
+    <div class="admin-card">
+        <h3>Cache retention</h3>
+        <p class="admin-desc">
+            Intermediate files under <code>&lt;out_root&gt;/&lt;year&gt;/.web_cache/</code>.
+            Canonical accepted outputs are never touched.
+        </p>
+        <div id="cache-summary" style="font-size:12px;margin-bottom:8px">Loading...</div>
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+            <label style="font-size:11px">Max size (GB):
+                <input id="cache-max-gb" type="number" step="1" min="1" max="5000" style="width:80px">
+            </label>
+            <label style="font-size:11px">Max age (days):
+                <input id="cache-max-age" type="number" step="1" min="1" max="3650" style="width:80px">
+            </label>
+            <label style="font-size:11px">Sweep every (hours):
+                <input id="cache-interval" type="number" step="1" min="1" max="168" style="width:80px">
+            </label>
+            <label style="font-size:11px;display:flex;align-items:center;gap:4px">
+                <input id="cache-enabled" type="checkbox"> Enabled
+            </label>
+            <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px" onclick="cacheSave()">Save</button>
+            <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px" onclick="cacheSweep(true)">Dry run</button>
+            <button class="btn" style="font-size:11px;padding:4px 10px;background:#ca4a1e" onclick="cacheSweep(false)">Run sweep now</button>
+        </div>
+        <div id="cache-result" style="font-size:11px;font-family:monospace;white-space:pre-wrap;max-height:200px;overflow:auto;background:#f5f5f5;padding:6px;border-radius:3px;display:none"></div>
+    </div>
+
     <!-- Hidden Fires -->
     <div class="admin-card">
         <h3>Hidden Fires</h3>
@@ -239,6 +267,111 @@ async function loadData() {
 
 loadData();
 setInterval(loadData, 5000);
+
+// -----------------------------------------------------------------------
+// Cache retention panel
+// -----------------------------------------------------------------------
+function fmtBytes(b) {
+    if (!b) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let i = 0, n = Number(b);
+    while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+    return n.toFixed(i === 0 ? 0 : 1) + ' ' + units[i];
+}
+function fmtAge(tsSec) {
+    if (!tsSec) return 'never';
+    const d = new Date(tsSec * 1000);
+    return d.toLocaleString();
+}
+
+async function loadCache() {
+    try {
+        const r = await fetch('/api/cache/status');
+        if (!r.ok) return;
+        const data = await r.json();
+        const cfg = data.config || {};
+        const byYear = data.by_year || {};
+        const yearBits = Object.keys(byYear).sort()
+            .map(y => `${y}: ${fmtBytes(byYear[y])}`)
+            .join(' · ') || 'no data';
+        document.getElementById('cache-summary').innerHTML =
+            `Total: <strong>${fmtBytes(data.total_bytes)}</strong> `
+            + `across ${data.n_fires} fire(s). `
+            + `Pinned (in-flight): ${fmtBytes(data.pinned_bytes)}. `
+            + `Last sweep: ${fmtAge(data.last_sweep_ts)}. `
+            + `<br><span style="color:#666;font-size:11px">By year: ${esc(yearBits)}</span>`;
+        document.getElementById('cache-max-gb').value = cfg.max_gb ?? 20;
+        document.getElementById('cache-max-age').value = cfg.max_age_days ?? 30;
+        document.getElementById('cache-interval').value = cfg.sweep_interval_hours ?? 6;
+        document.getElementById('cache-enabled').checked = cfg.enabled !== false;
+    } catch {}
+}
+
+async function cacheSweep(dryRun) {
+    if (!dryRun && !confirm(
+            'Run cache sweep now? Unpinned fires older than the age '
+            + 'limit or over the size limit will have their '
+            + '.web_cache/<fire>/ directory deleted.\n\n'
+            + 'Canonical accepted outputs are never touched.')) return;
+    const out = document.getElementById('cache-result');
+    out.style.display = '';
+    out.textContent = dryRun ? 'Running dry run...' : 'Running sweep...';
+    try {
+        const r = await fetch('/api/cache/sweep', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+            body: JSON.stringify({dry_run: !!dryRun}),
+        });
+        const data = await r.json();
+        if (data.error) {
+            out.textContent = 'Error: ' + data.error;
+            return;
+        }
+        const lines = [
+            `status: ${data.status}`,
+            `pruned ${(data.pruned_fires || []).length} fire(s), `
+                + `${fmtBytes(data.pruned_bytes)} freed`,
+        ];
+        if (data.pruned_fires && data.pruned_fires.length) {
+            lines.push('fires: ' + data.pruned_fires.join(', '));
+        }
+        out.textContent = lines.join('\n');
+        loadCache();
+    } catch (err) {
+        out.textContent = 'Request failed: ' + err.message;
+    }
+}
+
+async function cacheSave() {
+    const body = {
+        max_gb: parseFloat(document.getElementById('cache-max-gb').value),
+        max_age_days: parseInt(document.getElementById('cache-max-age').value),
+        sweep_interval_hours: parseInt(document.getElementById('cache-interval').value),
+        enabled: document.getElementById('cache-enabled').checked,
+        dry_run: true,  // save config without evicting
+    };
+    try {
+        const r = await fetch('/api/cache/sweep', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+            body: JSON.stringify(body),
+        });
+        const data = await r.json();
+        if (data.error) {
+            alert('Save failed: ' + data.error);
+            return;
+        }
+        const out = document.getElementById('cache-result');
+        out.style.display = '';
+        out.textContent = 'Config saved.';
+        loadCache();
+    } catch (err) {
+        alert('Save failed: ' + err.message);
+    }
+}
+
+loadCache();
+setInterval(loadCache, 30000);
 </script>
 </body>
 </html>

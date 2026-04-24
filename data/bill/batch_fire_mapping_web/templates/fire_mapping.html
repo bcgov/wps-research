@@ -29,6 +29,30 @@
     <span id="crop-info"></span>
 </div>
 
+<!-- Queue banner — shown when another fire is currently mapping (your
+     click would queue behind it) or when THIS fire is mapping (shows
+     progress). Hidden when idle. -->
+<div id="queue-banner" class="queue-banner" style="display:none">
+    <span id="queue-banner-text"></span>
+</div>
+
+<!-- Stage-aware progress bar — visible only while THIS fire is
+     mapping or preparing. -->
+<div id="progress-bar" class="progress-bar" style="display:none">
+    <div class="progress-header">
+        <span id="progress-title">Mapping ...</span>
+        <span id="progress-eta" class="progress-eta"></span>
+    </div>
+    <div class="progress-track">
+        <div id="progress-fill" class="progress-fill"></div>
+    </div>
+    <div id="progress-stages" class="progress-stages"></div>
+</div>
+
+<!-- Toast container — cross-fire notifications (map complete, rebrush
+     done, etc.). Populated by pollNotifications(). -->
+<div id="toast-container" class="toast-container" aria-live="polite"></div>
+
 <div class="main-content">
 
     <!-- =============================================================== -->
@@ -69,6 +93,19 @@
     <div class="control-panel" id="control-panel">
 
         <div class="params-scroll" id="params-scroll">
+
+            <!-- Preset bundles — quick-seed the form with known-good
+                 defaults. Populated by loadPresets() at init. -->
+            <div class="param-section open" id="preset-section" style="display:none">
+                <h3 onclick="this.parentElement.classList.toggle('open')">Presets
+                    <span class="help" tabindex="0" aria-label="About presets" aria-expanded="false"
+                          data-tip="Click a preset to seed the parameter sliders with known-good defaults. Use Balanced for most fires; Aggressive for large fires with diffuse edges; Conservative for small or cleanly-bounded fires; Change only when pre-fire imagery is cloudy. You can always tweak any slider after applying a preset.">?</span>
+                </h3>
+                <div class="params-body">
+                    <div id="preset-buttons" class="preset-row"></div>
+                    <div id="preset-description" class="preset-desc"></div>
+                </div>
+            </div>
 
             <!-- Crop & Sampling -->
             <div class="param-section">
@@ -787,18 +824,33 @@ function enableMapButtons() {
 
 async function cancelMapping() {
     if (!isMapping) return;
-    if (!confirm('Cancel the current mapping? The run in progress will finish, but no further runs will start and no result will be kept.')) return;
+    const reason = prompt(
+        'Cancel the current mapping? The run in progress will finish, '
+        + 'but no further runs will start.\n\n'
+        + 'Optional: describe why (for the audit log). Leave blank to skip.',
+        '');
+    if (reason === null) return;  // user clicked Cancel on the prompt
     const btn = document.getElementById('btn-cancel-map');
     btn.disabled = true;
     btn.textContent = 'Cancelling…';
     try {
-        const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/serial/cancel`, {
+        // /abort is a unified endpoint — works for mapping AND rebrush,
+        // writes the reason to the audit log, and returns a structured
+        // summary so we know what was actually signalled.
+        const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/abort`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+            body: JSON.stringify({reason}),
         });
         const data = await r.json();
         if (data.error) {
             log('Cancel failed: ' + data.error, 'error');
+            btn.disabled = false;
+            btn.textContent = 'Cancel';
+            return;
+        }
+        if (data.status === 'idle') {
+            log('Nothing running — ignored.', 'dim');
             btn.disabled = false;
             btn.textContent = 'Cancel';
             return;
@@ -1861,6 +1913,306 @@ prepareFire(null);
 loadNotes();
 // Start the unified state poller (handles all live updates)
 setTimeout(pollFireState, 3000);
+
+// -----------------------------------------------------------------------
+// Task-5 additions: toasts, stage-aware progress bar, queue banner,
+// preset bundles. Polling cadence is adaptive — 2s while MAPPING,
+// 5s-10s idle — to keep the server quiet when nothing is happening.
+// -----------------------------------------------------------------------
+
+// ---- Toast notifications ---------------------------------------------
+const seenToastIds = new Set();
+
+function showToast(n) {
+    if (!n || n.id == null) return;
+    if (seenToastIds.has(n.id)) return;
+    seenToastIds.add(n.id);
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+
+    const el = document.createElement('div');
+    el.className = 'toast toast-' + (n.kind || 'info');
+    el.dataset.id = n.id;
+
+    const title = document.createElement('div');
+    title.className = 'toast-title';
+    title.textContent = n.title || '';
+    el.appendChild(title);
+
+    if (n.body) {
+        const body = document.createElement('div');
+        body.className = 'toast-body';
+        body.textContent = n.body;
+        el.appendChild(body);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'toast-actions';
+    if (n.action && n.action.url && n.action.label) {
+        const a = document.createElement('a');
+        a.href = n.action.url;
+        a.textContent = n.action.label;
+        a.className = 'toast-action';
+        actions.appendChild(a);
+    }
+    const close = document.createElement('button');
+    close.textContent = '×';
+    close.className = 'toast-close';
+    close.setAttribute('aria-label', 'Dismiss');
+    close.onclick = () => dismissToast(el, n.id);
+    actions.appendChild(close);
+    el.appendChild(actions);
+
+    container.appendChild(el);
+
+    // Error / warning toasts stick until dismissed. Info / success
+    // auto-dismiss after 8s so the analyst doesn't have to manually
+    // clear every "rebrush done" message.
+    const sticky = (n.kind === 'error' || n.kind === 'warning');
+    if (!sticky) {
+        setTimeout(() => dismissToast(el, n.id), 8000);
+    }
+}
+
+function dismissToast(el, id) {
+    if (!el || !el.parentNode) return;
+    el.classList.add('toast-leaving');
+    setTimeout(() => {
+        if (el.parentNode) el.parentNode.removeChild(el);
+    }, 250);
+    // Ack is currently a no-op server-side (notifications are popped on
+    // GET) but the endpoint is there for future extensions.
+    try {
+        fetch('/api/notifications/ack', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+            body: JSON.stringify({ids: [id]}),
+        }).catch(() => {});
+    } catch {}
+}
+
+async function pollNotifications() {
+    try {
+        const r = await fetch('/api/notifications');
+        if (!r.ok) return;
+        const data = await r.json();
+        for (const n of (data.notifications || [])) {
+            showToast(n);
+        }
+    } catch {}
+}
+
+setInterval(pollNotifications, 5000);
+setTimeout(pollNotifications, 1200);
+
+// ---- Stage-aware progress bar + queue banner -------------------------
+const PROGRESS_STAGE_ORDER_FULL = [
+    'load', 'hint', 'sample', 'tsne', 'rf', 'hdbscan',
+    'classify', 'brush', 'figure',
+];
+const PROGRESS_STAGE_ORDER_RESUME = [
+    'load', 'hint', 'hdbscan', 'classify', 'brush', 'figure',
+];
+const PROGRESS_STAGE_LABELS = {
+    load: 'Load', hint: 'Hint', sample: 'Sample',
+    tsne: 't-SNE', rf: 'RF', hdbscan: 'HDBSCAN',
+    classify: 'Classify', brush: 'Brush', figure: 'Figure',
+};
+
+function formatSeconds(s) {
+    if (s == null || !isFinite(s) || s < 0) return '--';
+    if (s < 60) return `${Math.round(s)}s`;
+    if (s < 3600) {
+        const m = Math.floor(s / 60);
+        const rem = Math.round(s - m * 60);
+        return rem > 0 ? `${m}m ${rem}s` : `${m}m`;
+    }
+    const h = Math.floor(s / 3600);
+    const m = Math.round((s - h * 3600) / 60);
+    return `${h}h ${m}m`;
+}
+
+function renderProgress(p) {
+    const bar = document.getElementById('progress-bar');
+    if (!bar) return;
+    if (!p || !p.stage || !(p.status === 'mapping' || p.status === 'preparing')) {
+        bar.style.display = 'none';
+        return;
+    }
+    bar.style.display = '';
+
+    const order = (p.pipeline === 'resume')
+        ? PROGRESS_STAGE_ORDER_RESUME
+        : PROGRESS_STAGE_ORDER_FULL;
+    const curIdx = order.indexOf(p.stage);
+
+    // Title + run-of-total
+    const title = document.getElementById('progress-title');
+    const totalRuns = p.total_runs || 1;
+    const runLabel = (totalRuns > 1)
+        ? ` — run ${p.run_id}/${totalRuns}`
+        : '';
+    const label = PROGRESS_STAGE_LABELS[p.stage] || p.stage;
+    title.textContent = `${label}${runLabel}`;
+
+    // ETA — null total_eta_s means we have no history for this pipeline
+    // yet (first-ever run on this server). Show "Estimating…" rather
+    // than a made-up fallback that misleads the user.
+    const eta = document.getElementById('progress-eta');
+    const elapsed = formatSeconds(p.job_elapsed_s);
+    let etaText;
+    if (p.total_eta_s == null) {
+        etaText = 'Estimating…';
+    } else {
+        etaText = '~' + formatSeconds(p.total_eta_s) + ' left';
+    }
+    // Suffix makes it explicit whether the ETA covers 1 run or the
+    // whole sweep.
+    const scope = (p.total_runs > 1)
+        ? ` (sweep of ${p.total_runs} runs)`
+        : '';
+    eta.textContent = `elapsed ${elapsed} · ${etaText}${scope}`;
+
+    // Fill
+    const fill = document.getElementById('progress-fill');
+    const pct = Math.max(1, Math.min(99, p.percent || 0));
+    fill.style.width = pct + '%';
+
+    // Stage pills
+    const stages = document.getElementById('progress-stages');
+    stages.innerHTML = '';
+    for (let i = 0; i < order.length; i++) {
+        const s = order[i];
+        const pill = document.createElement('span');
+        pill.className = 'progress-stage';
+        if (i < curIdx) pill.classList.add('stage-done');
+        else if (i === curIdx) pill.classList.add('stage-active');
+        pill.textContent = PROGRESS_STAGE_LABELS[s] || s;
+        stages.appendChild(pill);
+    }
+}
+
+function renderQueueBanner(queue, myStatus) {
+    const banner = document.getElementById('queue-banner');
+    const text = document.getElementById('queue-banner-text');
+    if (!banner || !text) return;
+
+    // Hide when this fire is itself mapping — the progress bar takes over.
+    if (myStatus === 'mapping' || myStatus === 'preparing') {
+        banner.style.display = 'none';
+        return;
+    }
+
+    const cur = queue && queue.current;
+    if (!cur) {
+        banner.style.display = 'none';
+        return;
+    }
+    const curFire = cur.fire_numbe || '';
+    if (curFire === FIRE) {
+        // Shouldn't happen (handled above) but guard anyway.
+        banner.style.display = 'none';
+        return;
+    }
+    const prog = cur.progress || {};
+    const etaText = formatSeconds(prog.total_eta_s || 0);
+    let msg = `Mapping in progress: fire `;
+    banner.style.display = '';
+    text.innerHTML = '';
+    text.appendChild(document.createTextNode(msg));
+    const link = document.createElement('a');
+    link.href = '/fire/' + encodeURIComponent(curFire);
+    link.textContent = curFire;
+    text.appendChild(link);
+    const tail = document.createTextNode(
+        prog.stage_label
+            ? ` (${prog.stage_label}, ~${etaText} left). Your "Map Fire" click will queue.`
+            : '. Your "Map Fire" click will queue.');
+    text.appendChild(tail);
+}
+
+async function pollProgress() {
+    try {
+        const [pr, qr] = await Promise.all([
+            fetch(`/api/fire/${encodeURIComponent(FIRE)}/progress`),
+            fetch('/api/queue'),
+        ]);
+        const p = pr.ok ? await pr.json() : {};
+        const q = qr.ok ? await qr.json() : {};
+        renderProgress(p);
+        renderQueueBanner(q, p.status || lastKnownStatus);
+    } catch {}
+    setTimeout(pollProgress, isMapping ? 2500 : 7000);
+}
+
+setTimeout(pollProgress, 1500);
+
+// ---- Preset bundles --------------------------------------------------
+let availablePresets = {};
+let activePreset = '';
+
+async function loadPresets() {
+    try {
+        const r = await fetch('/api/presets');
+        if (!r.ok) return;
+        const data = await r.json();
+        const presets = data.presets || {};
+        const names = Object.keys(presets);
+        if (!names.length) return;
+        availablePresets = presets;
+
+        const section = document.getElementById('preset-section');
+        const buttons = document.getElementById('preset-buttons');
+        if (!section || !buttons) return;
+        section.style.display = '';
+        buttons.innerHTML = '';
+        for (const name of names) {
+            const info = presets[name] || {};
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'preset-btn';
+            btn.dataset.preset = name;
+            btn.textContent = info.label || name;
+            btn.title = info.description || '';
+            btn.onclick = () => applyPreset(name, true);
+            buttons.appendChild(btn);
+        }
+        // Highlight whichever preset the fire was last using.
+        highlightActivePreset();
+    } catch {}
+}
+
+function applyPreset(name, persist) {
+    const info = availablePresets[name];
+    if (!info || !info.params) return;
+    applyParamsToForm(info.params);
+    updateSampleSize();
+    activePreset = name;
+    highlightActivePreset();
+    const desc = document.getElementById('preset-description');
+    if (desc) desc.textContent = info.description || '';
+    if (persist) {
+        try {
+            fetch(`/api/fire/${encodeURIComponent(FIRE)}/preset`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+                body: JSON.stringify({preset: name}),
+            }).catch(() => {});
+        } catch {}
+    }
+}
+
+function highlightActivePreset() {
+    document.querySelectorAll('.preset-btn').forEach(btn => {
+        if (btn.dataset.preset === activePreset) {
+            btn.classList.add('preset-btn-active');
+        } else {
+            btn.classList.remove('preset-btn-active');
+        }
+    });
+}
+
+setTimeout(loadPresets, 600);
 </script>
 </body>
 </html>

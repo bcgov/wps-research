@@ -834,3 +834,178 @@ tbody tr.row-mapping:hover { background: #ede1ff; }
     box-shadow: 0 4px 16px rgba(0,0,0,0.25);
     white-space: normal;
 }
+
+/* =========================================================================
+   Task-5 additions: queue banner, progress bar, toast, preset buttons
+   ========================================================================= */
+
+.queue-banner {
+    padding: 8px 18px;
+    background: #fff7e6;
+    border-bottom: 1px solid #f0c96a;
+    color: #6b4300;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.queue-banner a { color: #6b4300; text-decoration: underline; font-weight: 600; }
+
+.progress-bar {
+    padding: 10px 18px;
+    background: #f2f7ff;
+    border-bottom: 1px solid #c5ddfd;
+}
+.progress-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    font-weight: 600;
+    color: #254a89;
+    margin-bottom: 4px;
+}
+.progress-eta { font-weight: 400; color: #4a5a75; font-size: 11px; }
+.progress-track {
+    width: 100%;
+    height: 8px;
+    background: #dce6f5;
+    border-radius: 4px;
+    overflow: hidden;
+}
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #2d6cdf 0%, #4a90e2 100%);
+    width: 0;
+    transition: width 400ms ease-out;
+}
+.progress-stages {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin-top: 6px;
+}
+.progress-stage {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: #e5ecf7;
+    color: #6b7a90;
+}
+.progress-stage.stage-done {
+    background: #2d6cdf;
+    color: #fff;
+}
+.progress-stage.stage-active {
+    background: #f59e0b;
+    color: #fff;
+    animation: progress-pulse 1.2s ease-in-out infinite;
+}
+@keyframes progress-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+}
+
+.toast-container {
+    position: fixed;
+    top: 70px;
+    right: 18px;
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 340px;
+    max-width: calc(100vw - 36px);
+    pointer-events: none;
+}
+.toast {
+    background: #fff;
+    border-left: 4px solid #6b7a90;
+    border-radius: 4px;
+    box-shadow: 0 6px 20px rgba(20, 30, 50, 0.18);
+    padding: 10px 12px 10px 14px;
+    pointer-events: auto;
+    animation: toast-in 220ms ease-out;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.toast-info    { border-left-color: #4a90e2; }
+.toast-success { border-left-color: #2d8a4e; }
+.toast-warning { border-left-color: #d48806; }
+.toast-error   { border-left-color: #cc3333; }
+.toast-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #1a1a1a;
+    padding-right: 18px;
+}
+.toast-body {
+    font-size: 12px;
+    color: #4a5a75;
+    line-height: 1.4;
+}
+.toast-actions {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 10px;
+    margin-top: 4px;
+}
+.toast-action {
+    font-size: 11px;
+    font-weight: 600;
+    color: #2d6cdf;
+    text-decoration: none;
+}
+.toast-action:hover { text-decoration: underline; }
+.toast-close {
+    background: transparent;
+    border: none;
+    color: #8a95a6;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 2px;
+}
+.toast-close:hover { color: #1a1a1a; }
+.toast.toast-leaving {
+    animation: toast-out 220ms ease-in forwards;
+}
+@keyframes toast-in {
+    from { transform: translateX(16px); opacity: 0; }
+    to   { transform: translateX(0); opacity: 1; }
+}
+@keyframes toast-out {
+    from { transform: translateX(0); opacity: 1; }
+    to   { transform: translateX(16px); opacity: 0; }
+}
+
+.preset-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+.preset-btn {
+    font-size: 11px;
+    padding: 4px 10px;
+    border: 1px solid #c5cedd;
+    border-radius: 3px;
+    background: #f5f7fa;
+    color: #33405a;
+    cursor: pointer;
+    transition: background 120ms, border-color 120ms;
+}
+.preset-btn:hover { background: #e9eef7; }
+.preset-btn-active {
+    background: #2d6cdf;
+    border-color: #2d6cdf;
+    color: #fff;
+}
+.preset-desc {
+    font-size: 11px;
+    color: #6b7a90;
+    margin-top: 6px;
+    line-height: 1.35;
+    min-height: 16px;
+}
