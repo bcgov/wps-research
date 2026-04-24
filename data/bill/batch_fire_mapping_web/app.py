@@ -57,13 +57,52 @@ _accept_file_lock = threading.Lock()
 _accept_in_progress: set = set()
 _accept_in_progress_lock = threading.Lock()
 
+# Live mapping subprocesses, keyed by fire_numbe. Lets the accept /
+# cancel handlers SIGTERM the running CLI so _gpu_lock releases
+# promptly instead of waiting up to several minutes for the current
+# replicate to finish naturally. Mirrors the rebrush-side
+# _rebrush_procs dict.
+_serial_procs: dict = {}
+_serial_procs_lock = threading.Lock()
+
+
+def _terminate_serial_proc(fire_numbe: str) -> bool:
+    """SIGTERM the mapping CLI subprocess for *fire_numbe* if one is
+    running. Returns True iff a proc was found and signalled. Safe
+    to call when no proc is registered (no-op).
+
+    Signals the entire process group so helper grandchildren the CLI
+    spawns via subprocess.run (gdal_translate, qgis, …) terminate
+    too — same group-kill discipline _stream_subprocess uses for the
+    silence watchdog.
+    """
+    with _serial_procs_lock:
+        proc = _serial_procs.get(fire_numbe)
+    if proc is None:
+        return False
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        # Already exited or in another session — fall back to a
+        # direct SIGTERM on the child PID so we at least try.
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+    except Exception:
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+    return True
+
 # Kill fire_mapping_cli.py if stdout goes silent this long. Without this,
 # a hung CLI would hold _gpu_lock forever and brick every mapping until
 # the server is restarted.
 _SUBPROCESS_SILENCE_TIMEOUT = 1800  # 30 minutes
 
 
-def _stream_subprocess(cmd, cwd, on_line, tracker=None):
+def _stream_subprocess(cmd, cwd, on_line, tracker=None, fire_numbe=None):
     """Run *cmd*, pass each non-empty stdout line to ``on_line(text)``.
 
     Arms a watchdog timer that kills the process if stdout is silent
@@ -81,6 +120,11 @@ def _stream_subprocess(cmd, cwd, on_line, tracker=None):
 
     *tracker* (optional) is a ``_ProgressTracker``; each line is fed to
     its ``observe()`` for stage detection before ``on_line`` runs.
+
+    *fire_numbe* (optional) registers the spawned Popen in
+    ``_serial_procs`` so the accept / cancel handlers can SIGTERM it
+    via ``_terminate_serial_proc``. Always deregistered on return,
+    even on exception.
     """
     proc = subprocess.Popen(
         cmd,
@@ -89,6 +133,10 @@ def _stream_subprocess(cmd, cwd, on_line, tracker=None):
         cwd=cwd,
         start_new_session=True,
     )
+
+    if fire_numbe is not None:
+        with _serial_procs_lock:
+            _serial_procs[fire_numbe] = proc
 
     killed = [False]
     timer_box = [None]
@@ -134,6 +182,13 @@ def _stream_subprocess(cmd, cwd, on_line, tracker=None):
                 on_line(text)
         rc = proc.wait()
     finally:
+        # Deregister BEFORE the kill-cleanup so external callers
+        # (accept/cancel handlers) can no longer see this proc once
+        # it's on its way down. The killpg below is idempotent.
+        if fire_numbe is not None:
+            with _serial_procs_lock:
+                if _serial_procs.get(fire_numbe) is proc:
+                    del _serial_procs[fire_numbe]
         t_last = timer_box[0]
         if t_last is not None:
             t_last.cancel()
@@ -2377,7 +2432,7 @@ def _serial_map_worker(fire_numbe: str, settings: list[dict],
                                   else 'resume'))
                     rc, killed = _stream_subprocess(
                         cmd, state.project_root, _on_line,
-                        tracker=tracker)
+                        tracker=tracker, fire_numbe=fire_numbe)
                     tracker.mark_run_end()
                     with state.lock:
                         state.current_job = None
@@ -6551,7 +6606,7 @@ class FireHandler(BaseHTTPRequestHandler):
                     tracker.mark_run_start(1, pipeline='full')
                     rc, killed = _stream_subprocess(
                         cmd, state.project_root, _on_line,
-                        tracker=tracker)
+                        tracker=tracker, fire_numbe=fire_numbe)
                     tracker.mark_run_end()
 
                 except Exception as exc:
