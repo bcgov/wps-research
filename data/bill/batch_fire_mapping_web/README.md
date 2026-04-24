@@ -1,6 +1,6 @@
 # batch_fire_mapping_web
 
-*Last updated: April 23, 2026*
+*Last updated: April 24, 2026 (progress pills anchored per stage with unbuffered CLI stdout; report overlays use geotransform-aware placement; serial-accept race fix; brush comparison guaranteed in outdir)*
 
 Interactive web interface for mapping wildfire burn areas from Sentinel-2 satellite imagery. Uses a machine learning pipeline (T-SNE dimensionality reduction, Random Forest classification, HDBSCAN clustering) accelerated on GPU to classify burned vs. unburned pixels, then lets users visually review and accept results through a browser.
 
@@ -24,6 +24,7 @@ This is the web companion to the `batch_fire_mapping` CLI. It wraps the same und
    - Batch-map many fires at once using recommended settings.
 4. **Learns over time**: accepted parameters are logged. Future serial mappings rank parameter sets by how well they performed on similar fires (same region, similar size), so results improve as more fires are processed.
 5. **Parameter Analyzer (admin-only)**: a dedicated high-throughput tool for exploring N parameter sets × M HDBSCAN replicates across selected fires (scoped to the active year). Admins accept one or more runs per fire; accepted parameters and fire characteristics are logged to a master CSV for offline analysis. All outputs live in a separate `analyzing_parameters/` directory under the active year's outdir and never touch the user-facing accepted fires.
+6. **Operational visibility**: a stage-aware progress bar with a running-median ETA, a unified job-queue view so analysts can see what's running before they click Map, toast notifications for map completes / rebrushes / accepts / year switches, preset parameter bundles for one-click seeding of the form, a unified abort endpoint that cancels whichever job is active on a fire (with an audit-logged reason), and a disk-retention policy that prunes `.web_cache/` by size + age while pinning in-flight and unfinished-user-work directories. See *Operational features* below.
 
 ---
 
@@ -216,12 +217,13 @@ Opening a fire takes you to the mapping page. On load, the server automatically:
 - **Synced zoom/pan**: both panes move together by default. Zoom preserves your position when toggling split or collapsing the control panel -- you won't lose your place on large fires.
 - **Pixel-perfect rendering**: `image-rendering: pixelated` at all zoom levels.
 - **View dropdown**: switch between post-fire, pre-fire, difference, ML classification, hint perimeter, comparison figure, **brush comparison** (side-by-side PNG showing raw HDBSCAN output vs. brushed output — regenerated on every rebrush, making it the quickest way to see whether a brush-parameter change actually did what you wanted).
-- **Geospatial overlay alignment**: when re-cropping with different padding, previously accepted ML classification overlays are placed at the correct geographic position within the new crop using GDAL geotransforms, rather than being stretched to fit. The same GeoTransform-based alignment is now also used inside `_compute_agreement`: when a serial run's `classified.bin` and the current `fire.hint_bin` have different extents (e.g. a rebrush on a run whose padding differs from the current hint, or a recommended-settings sweep that spans multiple paddings), IoU is computed over the common overlap rectangle rather than collapsing to `-1`. Without this, every cross-padding rebrush dropped agreement to `-1` and the Accept button disappeared from the gallery card.
+- **Geospatial overlay alignment**: when re-cropping with different padding, previously accepted ML classification overlays are placed at the correct geographic position within the new crop using GDAL geotransforms, rather than being stretched to fit. The same GeoTransform-based alignment is now also used inside `_compute_agreement`: when a serial run's `classified.bin` and the current `fire.hint_bin` have different extents (e.g. a rebrush on a run whose padding differs from the current hint, or a recommended-settings sweep that spans multiple paddings), IoU is computed over the common overlap rectangle rather than collapsing to `-1`. Without this, every cross-padding rebrush dropped agreement to `-1` and the Accept button disappeared from the gallery card. **As of 2026-04-24** the PDF-report renderers (`_render_comparison_png` for the detail-page perimeter figure and `_render_ml_classification_png` for the hero-page ML overlay) share the same alignment helper (`_align_mask_to_crop_frame`). Before this, the report path used a naive `scipy_zoom` stretch that rescaled the classification to fill the background dimensions instead of placing it at its true geographic position, so a fire whose classification came from a different padding epoch looked visibly wrong-scale in the PDF even though the web UI rendered it correctly.
 
 #### Parameters (right side)
 
 Collapsible sections for every pipeline parameter:
 
+- **Presets** *(new)*: one-click buttons (`Balanced`, `Aggressive`, `Conservative`, `Change only`) that seed every slider below with a curated bundle. The active preset is highlighted; an explanatory line beneath the buttons describes the tradeoff. Last preset applied per fire is persisted in `fire_state.yaml`. Bundles are defined in `recommended_settings.yaml` under the `presets:` key — edit the YAML to add more. See *Operational features → Preset bundles* below.
 - **Crop & Sampling**: padding, sample rate, min/max samples, seed.
 - **T-SNE**: perplexity, learning rate, max iterations, init method, components, random state, embed bands.
 - **Random Forest**: estimators, max depth, max features, random state.
@@ -240,6 +242,8 @@ Collapsible sections for every pipeline parameter:
 - **Map Fire / with settings**: ignores the form and runs **every** entry in the recommended settings list × `k_runs_per_setting` HDBSCAN replicates (with `k_jitter` applied to `hdbscan_min_samples`). Use this for a broader sweep when you don't yet know which parameter family works for this fire. Padding is honored per-setting, and grouped cache reuse means parameter sets sharing a `(padding, tsne_rf_signature)` key only run the expensive stages once — see *Serial mapping* below for details.
 - **Re-crop**: manually re-crops the fire with the current padding value and updates all preview images, without running the ML pipeline.
 - **Runs (N)**: legacy control retained for compatibility; the recommended-settings sweep uses `k_runs_per_setting` from the YAML instead. Set N > 1 to run multiple mappings with varied HDBSCAN parameters. All runs appear as cards in a results gallery, ranked by agreement score.
+- **Progress bar** *(new)*: between the fire info bar and the control panel. Shows the current CLI stage (Load / Hint / Sample / t-SNE / RF / HDBSCAN / Classify / Brush / Figure) with pulse-animated pills, a percent fill, and a running-median ETA — `elapsed 1m 26s · ~16m left (sweep of 9 runs)` makes the scope explicit. Shows `Estimating…` on the first-ever run of a pipeline variant rather than inventing a fallback. See *Operational features → Stage-aware progress bar + ETA*.
+- **Cancel mapping** *(updated)*: prompts for a free-text reason, which is stored in `fire.last_cancel_reason` as `<ISO timestamp>|<username>|<reason>` for audit. The button posts to the unified `/api/fire/<FIRE>/abort` endpoint that signals whichever job is active (serial mapping and/or rebrush) rather than needing to know the job type up front.
 - **Console**: streams pipeline output in real time. Persists across page navigation.
 
 #### Rebrushing without re-mapping
@@ -278,6 +282,12 @@ All mapping results live in the active year's `.web_cache/` until explicitly acc
 - Clears the results gallery and serial cache files.
 - Shows a confirmation dialog if overwriting a previously accepted result.
 
+**Brush comparison is always in outdir (2026-04-24)**: accepting a serial run copies that run's `{FIRE}_serial_<ID>_brush.png` into the canonical slot before the sync, so the PDF / viewer always reflects the accepted run's brushing (previously it could reflect the LAST replicate of the sweep, or be missing entirely). As a belt-and-suspenders, `_accept_fire_sync` calls `_ensure_brush_comparison_in_cache` just before the glob copy: if `{FIRE}_brush_comparison.png` is missing from cache, it regenerates from the raw + brushed masks on disk (or from the single canonical mask with an "After unavailable" title if the raw backup was never created). Best-effort — rendering errors are logged and swallowed so accept never fails because of a cosmetic figure.
+
+**Accept hardening (2026-04-24)**: `_accept_fire_sync` now refuses to run when `fire.cache_dir` is missing or empty (the glob loop would otherwise resolve against the process CWD and copy unrelated files into the canonical output). A serial accept also propagates the selected run's pre-brush raw mask (`{FIRE}_serial_<ID>_classified_raw.bin` + `.hdr`) into the main slot so a subsequent rebrush starts from the raw that pairs with the accepted brushed mask — not whichever raw the LAST replicate happened to leave behind. After the copy, `fire.last_comparison` is repointed at the canonical `{FIRE}_comparison.png` so the UI / PDF builder does not dangle once cache retention reaps `.web_cache/`. `fire.progress`, `state.current_job`, and any stale serial gallery from a prior sweep are cleared (under `state.lock`) as part of the status flip so a restart never resurrects a gallery for an ACCEPTED fire.
+
+**Cache-sweep coordination (2026-04-24)**: accepts register the fire in a module-level `_accept_in_progress` set; `_cache_scan` reads it and treats those fires as **hard-pinned** for the duration of the copy. Without this, `_cache_sweep` (which holds its own separate lock) could rmtree `cache_dir` mid-glob and leave the canonical output dir half-written. The set is maintained with `try/finally` so the entry is always released.
+
 Re-cropping or re-mapping a previously accepted fire does not affect the accepted results on disk. You can freely change padding and re-run with different parameters -- the accepted output is only overwritten when you accept a new result.
 
 ### Navigation
@@ -287,7 +297,174 @@ Re-cropping or re-mapping a previously accepted fire does not affect the accepte
 
 ### GPU queue
 
-Only one fire maps at a time (GPU serialization). Additional requests queue automatically. Queue state is visible in the admin dashboard.
+Only one fire maps at a time (GPU serialization). Additional requests queue automatically. Queue state is visible in the admin dashboard **and** in a public `/api/queue` endpoint — see *Operational features → Job queue visibility* below for details.
+
+---
+
+## Operational features
+
+A set of features added in April 2026 to make the system easier to operate when multiple analysts share one GPU and runs take 15–20 minutes. They are purely additive: the classification pipeline is unchanged.
+
+### Stage-aware progress bar + ETA
+
+Between the info bar and the control panel on every fire page sits a live progress bar with:
+
+- A **labelled stage** (`Load`, `Hint`, `Sample`, `t-SNE`, `RF`, `HDBSCAN`, `Classify`, `Brush`, `Figure`) that matches the current CLI step, detected by parsing `[N/7]` markers and unique stage substrings from `fire_mapping_cli.py` stdout.
+- **Pills for every stage** — completed stages turn blue, the active stage pulses amber, future stages are grey. Resume runs (ones that reuse a cached t-SNE+RF `.npz`) render a shorter 6-stage pipeline.
+- **Per-stage granularity (2026-04-24)**: the CLI subprocess is now launched with `-u` so Python's stdout is line-buffered into the pipe. Without the flag, Python block-buffers (~8 KB) stdout to a pipe, so 6–8 stage-transition lines were arriving to the parser in one burst and every pill flipped to "done" at once before the active pill caught up. With `-u` each `print` flushes on newline and the parser sees transitions in real time. Stage-marker anchoring was also fixed so each pill is visible for its true duration: `rf` anchors on `[5/7] Mapping burn` (start of training, not end), `hdbscan` advances on `Forest mapping done` in full mode or `[4/4] Mapping burn` in resume mode, and `classify` fires on `Burned clusters:` / `Saving classification` (start of the save step, not end). The legacy end-of-stage markers are kept as safety fallbacks so an older CLI version still works.
+- A **percent fill** and a human-readable elapsed / remaining ETA.
+- A **scope suffix** — `~12m left (sweep of 9 runs)` makes it explicit when the ETA covers every remaining run of a serial sweep, not just the current one.
+
+**ETA algorithm.** The primary signal is the **running median of past total-run durations**, bucketed per pipeline variant:
+
+- `state.stage_timings['__total_full__']` — durations of full pipelines (t-SNE + RF + HDBSCAN).
+- `state.stage_timings['__total_resume__']` — durations of resume runs (HDBSCAN only, loading a cached `.npz`).
+
+Both are persisted to `<shared_root>/stage_timings.yaml` (kept as rolling windows of the last 30 samples). The worker records a new sample via `_ProgressTracker.mark_run_end()` — one number per completed run, dwarfing per-stage sums in robustness.
+
+For a live run the snapshot computes:
+
+```
+cur_run_remaining  = max(5s, median_total × 1.10 − elapsed_this_run)
+total_eta_s        = cur_run_remaining + remaining_runs × per_run_avg
+percent            = ((run_id − 1) + elapsed_this_run / (median × 1.10)) / total_runs
+```
+
+Key properties, all verified by regression tests:
+
+- **No "Estimating…" lie.** When the fire's pipeline variant has zero history samples, `total_eta_s` is returned as `null` and the UI renders `Estimating…` instead of an invented fallback.
+- **No collapse to zero.** A 1.10× fudge factor plus a 5-second floor keeps the ETA positive until the run actually completes; if the run overruns its typical time, the percent pins at 99% and the pill for the active stage stays amber, signalling "this is taking longer than usual" without flipping to fake "done".
+- **Run-level, not stage-level.** Earlier drafts summed nine per-stage medians; a stage that happened to be slower than its median would collapse `cur_remaining` to zero and the display misled. The current algorithm uses one number per run.
+- **Per-stage medians are still computed** (under the stage-name keys) and drive the pill visual, just not the headline ETA number.
+
+Stored at `<shared_root>/stage_timings.yaml`; survives restart.
+
+### Job queue visibility
+
+Every authenticated user can call `GET /api/queue` to see what's running without knowing whose IP submitted it. The endpoint returns:
+
+```
+{
+  "current": {"fire_numbe": "G70345", "display": "G70345 (run 3/9)",
+              "started_at": "2026-04-23T14:02:15",
+              "progress": { …live progress snapshot… }},
+  "waiting": [ {fire_numbe, queued_at}, … ],
+  "rebrushes": ["G71002"],
+  "batch": {running, total, completed, current_fire, errors},
+  "active_year": 2024
+}
+```
+
+The **fire_mapping.html** page renders a yellow "Mapping in progress: fire X (t-SNE, ~8m left). Your Map Fire click will queue." banner when another fire is running — analysts can tell at a glance that clicking Map will queue rather than starting immediately, without pestering the admin dashboard. When the fire you are looking at is itself mapping, the banner hides and the progress bar takes over.
+
+The admin dashboard continues to show the authoritative per-IP view at `/api/admin/queue`; the new endpoint is a read-only subset safe for all roles.
+
+### Toast notifications
+
+Cross-page event feed. Pushed server-side on every meaningful state change and delivered via a 5-second poll to every logged-in session. Two delivery modes:
+
+- **Personal** — routed to the SHA-256 hash of the session cookie that initiated the job. So only *you* see "Mapping complete" for the fire you just kicked off. Popped on first GET; stored at most 50 per session.
+- **Broadcast** — routed to every session via a broadcast bucket + per-session cursor, so year-switch + batch completion reach all active users. Cursor advances on GET so each session only sees a broadcast once; if you log in after a broadcast, you still receive it on your first poll.
+
+Notifications that trigger toasts:
+
+| Event | Kind | Target |
+|---|---|---|
+| Fire mapping complete (single run) | success | initiating session |
+| Fire mapping failed | error | initiating session |
+| Serial sweep complete | success / error | initiating session |
+| Serial sweep cancelled | info / warning | initiating session |
+| Rebrush complete | success | initiating session |
+| Fire accepted | success | initiating session |
+| Batch mapping complete | success / warning | initiating session |
+| Active year switched | info | broadcast |
+
+Kinds map to colour-coded left borders (`info` blue, `success` green, `warning` amber, `error` red). `error` and `warning` toasts **stick** until dismissed; `info` and `success` auto-dismiss after 8 seconds. Each toast has an optional `Open fire` / `Reload fire list` action link derived from the notification's `action` field.
+
+Backing state persists to `<shared_root>/notifications.yaml` (queues + counters + per-session broadcast cursors). On logout or session expiry, the session's personal queue and broadcast cursor are dropped.
+
+Frontend: `pollNotifications()` in both `fire_mapping.html` and `fire_list.html`, firing every 5 seconds and on 1.2s initial delay. `/api/notifications/ack` exists as a forward-compat no-op (dequeue happens on GET, but the endpoint lets the UI acknowledge specific IDs without a 4xx on the close-button click).
+
+### Preset bundles
+
+Above the parameter sliders, a row of `Balanced / Aggressive / Conservative / Change only` buttons seeds the form with a known-good parameter bundle. Click a preset → every slider updates → the button highlights. Each preset carries a `description` string shown in a small helper line below the buttons.
+
+Presets live in the same `recommended_settings.yaml`, under a top-level `presets:` key (sibling of `settings:`):
+
+```yaml
+presets:
+  balanced:
+    label: Balanced
+    description: Default preset — good starting point for most fires.
+    params:
+      padding: 0.10
+      tsne_perplexity: 60
+      hdbscan_min_samples: 21
+      …
+  aggressive:
+    label: Aggressive
+    description: Looser clustering + wider brush. For big fires with diffuse edges.
+    params:
+      padding: 0.05
+      hdbscan_min_samples: 15
+      brush_size: 25
+      brush_all_segments: true
+      …
+```
+
+Presets are additive to the existing `settings:` list (which drives Map Fire with settings). They are read at startup and loaded into `state.presets`; they do not require a code change to add a new bundle — editing the YAML is sufficient.
+
+The last preset a user applied to a fire is persisted per-fire in `fire_state.yaml` (`last_preset` field), so reopening the fire still highlights the active preset. Available as `POST /api/fire/<FIRE>/preset {preset: "balanced"}` for programmatic setting.
+
+### Unified abort + cancel audit log
+
+`POST /api/fire/<FIRE>/abort {reason: "…"}` is a single cancel endpoint that routes to whichever job is active:
+
+- If `class_brush.exe` is running for this fire (`_rebrush_procs[fire_numbe]` populated), SIGTERM it.
+- If the fire is in `MAPPING`, set `fire.serial_canceled = True` so the worker stops after the current replicate.
+- If both are active, signal both.
+- If nothing is running, return `{status: 'idle'}`.
+
+The endpoint records `fire.last_cancel_reason` as `<ISO timestamp>|<username>|<reason>` and persists it in `fire_state.yaml`, giving a lightweight audit trail of why analysts cancelled runs.
+
+The existing per-mode endpoints (`/serial/cancel`, `/rebrush/cancel`) continue to work as before — `/abort` is the new unified front door used by the Cancel button in `fire_mapping.html`, which prompts for a reason and sends it along.
+
+### Cache retention
+
+`.web_cache/<fire_numbe>/` directories accumulate as analysts open and re-crop fires. A background thread (started at server launch) and an opportunistic trigger after every accept enforce a retention policy:
+
+- **Hard-pinned (never evicted)**: fires currently in `PREPARING` or `MAPPING`, and fires with a live entry in `_rebrush_procs`. Evicting these would corrupt an in-flight subprocess.
+- **Soft-pinned (not evicted by size limit, but still evictable by age)**: fires in `READY` or `MAPPED` — the analyst may still be tweaking brush params before accepting. Age-based eviction still applies, so truly stale caches (older than `max_age_days`) go regardless.
+- **Evictable**: everything else — `PENDING`, `ACCEPTED` (because canonical `<FIRE>/` has everything durable), `ERROR`.
+
+The sweep runs two phases:
+
+1. **Age phase** — drop every evictable or soft-pinned entry older than `max_age_days`, unconditional on size.
+2. **Size phase** — drop evictable entries oldest-first until total bytes ≤ `max_gb`.
+
+When the sweep removes a cache dir belonging to a `READY` or `MAPPED` fire (age phase only), the fire's status, cache paths, views, and serial-results are cleared so the UI doesn't point at missing files; status drops back to `PENDING`. `ACCEPTED` fires are never demoted — the canonical dir survives.
+
+Config persists to `<shared_root>/cache_retention.yaml`:
+
+```yaml
+config:
+  max_gb: 20.0
+  max_age_days: 30
+  sweep_interval_hours: 6
+  enabled: true
+last_sweep: 1714000000.0
+```
+
+Defaults are generous (20 GB / 30 days). Admins edit them live on the admin dashboard, which has a new "Cache retention" card showing total bytes, per-year breakdown, pinned bytes, last sweep time, plus **Dry run** (preview what would be pruned) and **Run sweep now** buttons.
+
+API:
+
+- `GET /api/cache/status` — any authenticated user. Returns `{total_bytes, pinned_bytes, by_year, n_fires, config, last_sweep_ts, entries: [top 200 by size]}`.
+- `POST /api/cache/sweep` — admin only. Body: `{dry_run: bool, max_gb?, max_age_days?, sweep_interval_hours?, enabled?}`. Updates any supplied config keys, then runs a sweep (dry or real) and returns `{status, pruned_bytes, pruned_fires, total_bytes, max_bytes, after_bytes}`.
+
+### Hardened year-switch guard
+
+`_switch_year` previously refused while a mapping / batch / analyzer was running. It now also refuses while any **rebrush** is running (checked against `_rebrush_procs`). On success, a **broadcast toast** is pushed so every logged-in user sees `Active year switched to YYYY · Reload fire list` — the fire list poller also auto-reloads when it sees this title. Non-admin browsers get a 403; analyzer- or mapping-in-flight errors return `409` with a precise message.
 
 ---
 
@@ -479,6 +656,8 @@ The two workflows are strictly isolated -- nothing the analyzer does affects the
 
 The file `recommended_settings.yaml` defines an ordered list of parameter presets plus K (HDBSCAN replicates per setting). The first setting is the **primary** used by one-click "Map Fire". "Map Fire with Settings" runs every setting × K replicates. Loaded on startup from `<out_root>/recommended_settings.yaml` first, falling back to the package-shipped default if the shared copy is missing. The recommended settings list is **shared across years** (not per-year): a year switch preserves whatever the admin last saved.
 
+Since 2026-04-23 the file also carries a sibling `presets:` key (see *Operational features → Preset bundles*). `settings:` and `presets:` serve different UIs — `settings:` is the sweep list for **Map Fire with settings**, `presets:` is the quick-seed button row above the sliders for one-click form fill. Both coexist; either can be empty.
+
 ```yaml
 k_runs_per_setting: 3
 k_jitter: 1          # HDBSCAN fan-out step across K replicates
@@ -649,8 +828,11 @@ All paths below are relative to the active year's outdir (`<out_root>/<stem>_map
 | `<out_root>/active_year.yaml` | shared | The currently-active year | On startup and on every successful `/api/year/switch` |
 | `<out_root>/sessions.yaml` | shared | Hashed session tokens | On login/logout; survives year switches |
 | `<out_root>/access_control.yaml` | shared | Approved, blocked, and pending IPs | On every IP action |
-| `<out_root>/recommended_settings.yaml` | shared | User-edited parameter presets | On admin save |
-| `fire_state.yaml` | per-year | Per-fire status, cache paths, parameters, agreement, hidden flags | After every prepare, mapping, accept, and remove/restore. Also flushed during `/api/year/switch` before the swap. |
+| `<out_root>/recommended_settings.yaml` | shared | User-edited parameter presets + preset bundles (`presets:` key) + sweep settings (`settings:` key) | On admin save |
+| `<out_root>/stage_timings.yaml` | shared | Running windows of past stage durations + per-pipeline total-run durations (`__total_full__`, `__total_resume__`). Drives the progress-bar ETA. | After every completed run (`_ProgressTracker.mark_run_end`) |
+| `<out_root>/notifications.yaml` | shared | Toast queues per session + broadcast bucket + per-session broadcast cursors + counters | On every push, pop, and logout |
+| `<out_root>/cache_retention.yaml` | shared | Cache-sweep config (`max_gb`, `max_age_days`, `sweep_interval_hours`, `enabled`) and `last_sweep` timestamp | On admin config save and after every sweep |
+| `fire_state.yaml` | per-year | Per-fire status, cache paths, parameters, agreement, hidden flags, **last preset applied**, **last cancel reason** | After every prepare, mapping, accept, preset change, cancel, and remove/restore. Also flushed during `/api/year/switch` before the swap. |
 | `notes.yaml` | per-year | Per-fire text annotations | On every note edit |
 | `accepted_params.csv` | per-year | One row per accepted fire (deduplicated on re-accept) | On accept |
 | `<FIRE>/<FIRE>_params.yaml` | per-year | Full per-fire parameter record: context (`fire`, `run`, `inputs`, `crop`, `sampling`, `accumulation`) plus CLI-stage sections (`tsne`, `hdbscan`, `random_forest`, `brush`, `bands`, `output`, `misc`) flattened back into `last_params` on startup | On accept (atomic: tmp + `os.replace`) |
@@ -668,6 +850,7 @@ On startup, the server:
 6. Restores fire state from the active year's `fire_state.yaml` — mapped fires, cache paths, hidden flags, parameters, and agreement scores are all recovered.
 7. Validates that cached files still exist before restoring status. If a fire was mid-mapping when the server crashed, it recovers to MAPPED (if results exist in cache) or READY (if not), rather than being stuck in MAPPING.
 8. Initializes the Parameter Analyzer against the active year's `analyzing_parameters/` tree: loads `analyzer_config.yaml`, scans `analyzing_parameters/<FIRE>/` directories to reconstruct accepted-run state, and scans `.analyzer_cache/<FIRE>/` for un-accepted (pending or partial) run sidecars. Fires that had analyzer data on disk return to ANALYZED or PARTIAL status accordingly. Switching years reruns steps 4–8 against the new year's outdir.
+9. Loads the Task-5 operational state: `_load_stage_timings()` rehydrates the per-pipeline run-duration medians from `<shared_root>/stage_timings.yaml`; `_load_notifications()` rehydrates per-session toast queues and broadcast cursors from `<shared_root>/notifications.yaml`; `_load_cache_retention()` rehydrates retention config and last-sweep timestamp from `<shared_root>/cache_retention.yaml`; `state.presets` is populated from the `presets:` key of `recommended_settings.yaml`. A background thread starts that runs `_cache_sweep_loop` every `sweep_interval_hours` hours (default 6).
 
 The `.web_cache/` directory is no longer wiped on every re-prepare. On a same-padding re-prepare, nothing is cleared — un-accepted mapping results survive across page reloads. On a padding change (which invalidates the crop dimensions), the wipe is **selective**: per-run serial artifacts (`{FIRE}_serial_*` — classified bins and standalone comparison PNGs) are preserved, while the old `previews/` directory (tied to the old post.png extent) and the stale main-crop files are dropped. This matters during a recommended-settings sweep whose settings span multiple padding values: the gallery cards produced by earlier settings stay intact, and on-demand serial overlay PNGs are regenerated from the surviving `classified.bin` via `_overlay_mask_on_post`, which aligns across crop extents using GeoTransform. Previously, any padding change between settings wiped every prior setting's gallery files off disk, leaving in-memory `fire.serial_results` entries pointing at non-existent files (ghost cards with no thumbnails).
 
@@ -683,6 +866,7 @@ The `.analyzer_cache/` directory is never wiped automatically — un-accepted an
 - `fire_mapping_cli.py` is launched with `start_new_session=True`. The silence watchdog (and the cleanup path) signal the whole process group (SIGTERM → SIGKILL), so helper grandchildren the CLI spawns via `subprocess.run` (e.g. `gdal_translate`, `qgis`) do not orphan to init when the watchdog fires.
 - `handle_api_batch_map` wraps the body read + validation in `try/finally`: a client disconnect after headers but before the JSON body arrives no longer leaves `state.batch_status = {'running': True}` stuck, which would previously block every subsequent batch until a server restart.
 - Accepting a serial run mid-batch (user clicks Accept on run 2 while runs 3–5 are still queued) sets `fire.serial_canceled = True`. The worker polls this between replicates, between settings, and inside the GPU-locked status write just before starting each subprocess, then skips its final "pick best + overwrite main cache files + set status=MAPPED" block on exit. Previously, the worker would race past the accept, overwrite the ACCEPTED status with MAPPING→MAPPED, overwrite the cache comparison with the best of the non-accepted runs, and persist the wrong state to `fire_state.yaml` — so the accepted run effectively vanished from the UI (and `previously_accepted` stayed `False` across restarts, so a subsequent re-map wouldn't show the accepted result as its Run 0 snapshot).
+- `handle_api_serial_accept` sets the cancel flags (`serial_canceled`, `serial_accept_promoted`, `serial_prev_status`) **inside** `with _gpu_lock:`, not before (2026-04-24). The worker holds `_gpu_lock` for each replicate's subprocess AND for its post-loop cleanup block; if accept flipped `serial_canceled=True` before acquiring the lock, the worker could win the lock race to its cleanup block and delete `{FIRE}_serial_<ID>_classified.bin` *before* accept got to copy it into the main slot. Symptom: the canonical output directory ended up with no `*_classified.bin` and the UI showed no map for the fire you just accepted. With the flag-setting now inside the lock, accept is guaranteed to finish its copy + `_accept_fire_sync` before the worker's cleanup can run, so the serial run's files are always carried over intact.
 - `{FIRE}_params.yaml` is written via `_atomic_yaml_dump` (tmp + `os.replace`, `0o644`), matching the rest of the YAML persistence layer. A crash or disk-full mid-write leaves the previous accepted-params file intact rather than truncated. Before this, the file was written with a plain `open('w')` + `yaml.dump`, and a mid-write failure would zero out the entire accepted parameter record for a fire.
 - Pipeline parameters round-trip correctly across restart. `fire.last_params` is a **flat CLI-style dict** in memory (`tsne_perplexity`, `rf_n_estimators`, `hdbscan_min_samples`, `embed_bands`, `brush_size`, …). On accept, `_accept_fire_sync` groups keys by prefix into nested YAML sections (`tsne`, `hdbscan`, `random_forest`, `brush`, `bands`, `output`, `misc`) so a reader can pull a whole stage without string parsing; unknown keys fall into `misc`. On startup, `init_fires_from_gdf` flattens those sections back into the flat dict. The context-only sections (`fire`, `run`, `inputs`, `crop`, `sampling`, `accumulation`) are skipped during flatten so they never pollute `last_params`. Previously the accept path expected nested sub-dicts already in `last_params` and silently wrote nothing, so every accepted YAML (and the PDF built from it) lost t-SNE, RF, HDBSCAN, brush, and band settings.
 - `_prepare_fire_sync` refuses concurrent prepare by checking only `PREPARING`, not `MAPPING`. The serial worker flips `status=MAPPING` before calling `_prepare_fire_sync` between sweep settings whose paddings differ; treating `MAPPING` as "busy" (the old behavior) was the root cause of batch-mapping failures on never-opened fires — the guard no-op'd, `crop_bin`/`hint_bin` stayed empty, and the CLI subprocess crashed on empty positional args. Same-fire double-prepare from external callers is still rejected.
@@ -718,7 +902,31 @@ The server is a plain `http.server` dispatcher; routes are registered on `FireHa
 | Method | Path | Purpose |
 |---|---|---|
 | `GET`  | `/api/years`        | Returns `{years: [NNNN, …], active: NNNN}` — the sorted list of years in the registry plus the active year. Any authenticated session. |
-| `POST` | `/api/year/switch`  | Admin-only. Body: `{year: NNNN}`. Swaps the active raster, outdir, polygon filter, fires, fire-state, and analyzer in place under `state.lock`. Returns `{ok: true, year: NNNN}` on success; `409` with `{error: '…'}` if any mapping / batch / analyzer job is running (cancel or wait). The browser should call `location.reload()` on a `200`. |
+| `POST` | `/api/year/switch`  | Admin-only. Body: `{year: NNNN}`. Swaps the active raster, outdir, polygon filter, fires, fire-state, and analyzer in place under `state.lock`. Returns `{ok: true, year: NNNN}` on success; `409` with `{error: '…'}` if any mapping / batch / analyzer / **rebrush** job is running (cancel or wait). On success, a broadcast toast is pushed so every logged-in user sees the switch and the fire list reloads automatically. |
+
+### Progress, queue, and notifications (new, as of 2026-04-23)
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET`  | `/api/fire/<FIRE>/progress` | Live progress snapshot. Returns `{stage, stage_label, stage_idx, total_stages, stage_elapsed_s, stage_eta_s, run_id, total_runs, completed_runs, pipeline, job_elapsed_s, total_eta_s, percent, n_samples_full, n_samples_resume, status, queue_current, queue_waiting}`. `total_eta_s` is `null` when the current pipeline variant has no history — UI should render `Estimating…`. Pollable. |
+| `GET`  | `/api/queue`                | Public unified queue view — `{current, waiting, rebrushes, batch, active_year}`. `current.progress` embeds a live progress snapshot. Used by the queue banner on `fire_mapping.html`. |
+| `GET`  | `/api/notifications`        | Returns + dequeues this session's personal toasts, plus any new broadcast entries past the session's broadcast cursor. Shape: `{notifications: [{id, ts, kind, title, body, fire, action}]}`. |
+| `POST` | `/api/notifications/ack`    | Forward-compat no-op accept (dequeue happens on GET). Body: `{ids: [...]}`. Always `{ok: true}`. |
+
+### Cache retention
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET`  | `/api/cache/status` | Public. `{total_bytes, pinned_bytes, by_year, n_fires, config, last_sweep_ts, entries: [{fire_numbe, year, bytes, mtime_s, pinned, pin_reason}]}` (entries capped at top 200 by size). |
+| `POST` | `/api/cache/sweep`  | Admin-only. Body: `{dry_run, max_gb?, max_age_days?, sweep_interval_hours?, enabled?}`. Updates config then runs a sweep. Returns `{status: 'ok'\|'dry_run'\|'disabled'\|'busy', pruned_bytes, pruned_fires, total_bytes, max_bytes, after_bytes}`. |
+
+### Unified abort / preset / audit
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/fire/<FIRE>/abort`   | Cancel whichever job is active on the fire (rebrush SIGTERM + serial-map cancel flag). Body: `{reason: 'text'}` — persisted into `fire.last_cancel_reason` for audit. Returns `{status: 'cancelling'\|'idle', actions: [...]}`. |
+| `GET`  | `/api/presets`             | Public. Returns `{presets: {name: {label, description, params}}}` from `recommended_settings.yaml`'s `presets:` key. |
+| `POST` | `/api/fire/<FIRE>/preset`  | Persist the last-applied preset for this fire (body: `{preset: "balanced"}`). `""` clears. |
 
 ### Rebrush (new, as of 2026-04-20)
 
@@ -773,20 +981,20 @@ On success, for a whole-fire rebrush, the server updates `fire.ml_area_ha`, `fir
 
 | File | Purpose |
 |---|---|
-| `__main__.py` | Entry point. Parses arguments, auto-detects each raster's year via `_year_from_filename`, builds the `{year → raster/outdir/viirs_dir}` registry, resolves the initial active year, prepares VIIRS per year, filters polygons for the active year, initializes state, starts server, registers analyzer routes. |
-| `app.py` | Web server, all route handlers, mapping orchestration, template rendering. Owns `_switch_year` (in-place year swap), `_save_active_year`, and the `/api/year/switch` + `/api/years` endpoints. |
-| `state.py` | Data classes for per-fire state (`FireInfo`) and global app state (`AppState`). `AppState` carries the multi-year registry (`active_year`, `shared_root`, `rasters_by_year`, `outdirs_by_year`, `viirs_shp_dirs_by_year`, `polygon_gdf_raw`) alongside the active-year views (`raster_path`, `output_root`, `viirs_shp_dir`, `gdf`, `viirs_gdf`). |
+| `__main__.py` | Entry point. Parses arguments, auto-detects each raster's year via `_year_from_filename`, builds the `{year → raster/outdir/viirs_dir}` registry, resolves the initial active year, prepares VIIRS per year, filters polygons for the active year, initializes state, starts server, registers analyzer routes. Also loads the Task-5 subsystems (`_load_stage_timings`, `_load_notifications`, `_load_cache_retention`, `state.presets`) and starts the background `_cache_sweep_loop` thread. |
+| `app.py` | Web server, all route handlers, mapping orchestration, template rendering. Owns `_switch_year` (in-place year swap, now also guarded on rebrushes and broadcasts a toast on success), `_save_active_year`, the `/api/year/switch` + `/api/years` endpoints. Also owns the Task-5 subsystems: `_ProgressTracker` + stage-marker table + `_progress_snapshot` (run-duration-median ETA); `_push_notification`/`_pop_notifications` (per-session toast queues + broadcast cursor); `_cache_scan`/`_cache_sweep`/`_cache_sweep_loop` (retention). |
+| `state.py` | Data classes for per-fire state (`FireInfo`) and global app state (`AppState`). `AppState` carries the multi-year registry (`active_year`, `shared_root`, `rasters_by_year`, `outdirs_by_year`, `viirs_shp_dirs_by_year`, `polygon_gdf_raw`) alongside the active-year views (`raster_path`, `output_root`, `viirs_shp_dir`, `gdf`, `viirs_gdf`) **plus the Task-5 operational state**: `stage_timings`, `notifications`, `broadcast_cursor`, `notification_counter`, `broadcast_counter`, `cache_retention`, `cache_last_sweep`, and `presets`. `FireInfo` adds `progress` (ephemeral tracker snapshot), `last_preset`, and `last_cancel_reason`. |
 | `preview.py` | ENVI header parsing, band detection, preview PNG generation. |
 | `analyzer_state.py` | Analyzer data classes (`AnalyzerRun`, `AnalyzerFireInfo`, `AnalyzerConfig`, `AnalyzerState`), the 35-column CSV schema, and the list of parameter keys that invalidate the t-SNE+RF cache. |
 | `analyzer_app.py` | Analyzer route handlers and admin gate. Registers its routes on `FireHandler` via monkey-patching so `app.py` stays untouched. Config read/write, fires list, status, per-fire gallery, run images, accept/unaccept, CSV preview/download, composite overlay. |
 | `analyzer_worker.py` | Grid planner (padding-grouped → signature-grouped → run_idx), HDBSCAN jitter, snapshot preparer, per-run subprocess launcher, sidecar-based resume, cancel event, startup cache scan. |
 | `analyzer_accept.py` | Accept/unaccept logic: promote a cached run to `analyzing_parameters/<FIRE>/run_XXXX/`, append / remove CSV row, maintain `manifest.yaml`, grow `<FIRE>_crop_max.bin` backdrop only when accepted padding exceeds saved padding. |
-| `templates/fire_list.html` | Fire list page template. |
-| `templates/fire_mapping.html` | Fire mapping page template (image viewer, parameters, console, results gallery). |
+| `templates/fire_list.html` | Fire list page template. Now embeds a toast container + `pollNotifications()` so cross-page events (batch complete, year switch broadcast) render as toasts without navigating to a fire page. |
+| `templates/fire_mapping.html` | Fire mapping page template (image viewer, parameters, console, results gallery). Now includes the queue banner, stage-aware progress bar, toast container, preset button row, and Cancel-with-reason flow. Polls `/api/fire/<FIRE>/progress`, `/api/queue`, and `/api/notifications`. |
 | `templates/login.html` | Login page template. |
-| `templates/admin.html` | Admin dashboard template. Entry point to the analyzer. |
+| `templates/admin.html` | Admin dashboard template. Entry point to the analyzer. Adds a Cache retention card: live size + per-year breakdown, config inputs (`max_gb`, `max_age_days`, `sweep_interval_hours`, `enabled`), Save / Dry run / Run sweep now buttons. |
 | `templates/pending.html` | IP approval waiting page template. |
 | `templates/analyzer.html` | Analyzer main page: status, param-set editor, fire selector with rich filters, accepted-runs CSV preview table. |
 | `templates/analyzer_fire.html` | Per-fire analyzer gallery: composite overlay viewer, worker console, runs grouped by set with accept/unaccept. |
-| `static/style.css` | All CSS styles. |
-| `recommended_settings.yaml` | Default parameter presets by fire size range. |
+| `static/style.css` | All CSS styles. Adds rules for the queue banner, progress bar (pills, pulse animation), toast container (per-kind colour-coded left border, slide-in/slide-out animations), and preset buttons. |
+| `recommended_settings.yaml` | Two top-level keys: `presets:` (dict of `{name → {label, description, params}}` bundles loaded into `state.presets` for the preset-button UI) and `settings:` (ordered list consumed by Map Fire with settings). Plus `k_runs_per_setting` and `k_jitter`. |

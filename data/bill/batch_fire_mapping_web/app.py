@@ -47,13 +47,23 @@ _batch_cancel = threading.Event()
 # from corrupting these files or losing rows.
 _accept_file_lock = threading.Lock()
 
+# Set of fire_numbers whose accept is currently in progress. Read by
+# _cache_scan so the background cache sweeper cannot rmtree a
+# cache_dir mid-copy. _gpu_lock already blocks the mapping worker, but
+# _cache_sweep uses its own separate lock, so without this guard an
+# age-based eviction could race the glob-copy loop in
+# _accept_fire_sync and leave the canonical output partially
+# populated.
+_accept_in_progress: set = set()
+_accept_in_progress_lock = threading.Lock()
+
 # Kill fire_mapping_cli.py if stdout goes silent this long. Without this,
 # a hung CLI would hold _gpu_lock forever and brick every mapping until
 # the server is restarted.
 _SUBPROCESS_SILENCE_TIMEOUT = 1800  # 30 minutes
 
 
-def _stream_subprocess(cmd, cwd, on_line):
+def _stream_subprocess(cmd, cwd, on_line, tracker=None):
     """Run *cmd*, pass each non-empty stdout line to ``on_line(text)``.
 
     Arms a watchdog timer that kills the process if stdout is silent
@@ -68,6 +78,9 @@ def _stream_subprocess(cmd, cwd, on_line):
 
     Returns ``(rc, killed)``. When the watchdog fires, ``rc`` is None
     and ``killed`` is True.
+
+    *tracker* (optional) is a ``_ProgressTracker``; each line is fed to
+    its ``observe()`` for stage detection before ``on_line`` runs.
     """
     proc = subprocess.Popen(
         cmd,
@@ -113,6 +126,11 @@ def _stream_subprocess(cmd, cwd, on_line):
             _arm()
             text = raw_line.decode(errors='replace').rstrip()
             if text:
+                if tracker is not None:
+                    try:
+                        tracker.observe(text)
+                    except Exception:
+                        pass
                 on_line(text)
         rc = proc.wait()
     finally:
@@ -193,6 +211,858 @@ def _atomic_yaml_dump(path: str, data, mode: int = 0o600):
         raise
 
 
+# =========================================================================
+# Stage-aware progress tracking — stage markers + running-median ETA
+# =========================================================================
+
+# Substring markers parsed from fire_mapping_cli.py stdout. Order matters:
+# later stages override earlier ones when multiple match. 'full' is the
+# from-scratch pipeline ([1..7/7]); 'resume' loads cached t-SNE+RF
+# ([1..4/4]). 'brush' runs inside either. Stage IDs are stable across
+# both pipelines so running medians pool both types.
+# Each stage has a set of UNIQUE substrings. Avoid markers that overlap
+# across stages (e.g. 'Mapping burn' printed by both RF step header and
+# HDBSCAN body — we anchor to the numeric step header instead).
+_STAGE_MARKERS = [
+    ('load',     ('[1/4] Loading image', '[1/7] Loading image',
+                  'Loading image')),
+    ('hint',     ('[2/4] Loading hint', '[2/7] Loading hint',
+                  'No hint provided — generating')),
+    ('sample',   ('[3/7] Sampling', ' pixels sampled')),
+    ('tsne',     ('[4/7] T-SNE', 'T-SNE embedding', 'T-SNE params',
+                  'T-SNE done')),
+    # 'rf' anchors on the [5/7] step header (full pipeline) so the RF
+    # pill stays active for the entire RF training duration. Previously
+    # the only marker was 'Forest mapping done' (end-of-stage) which
+    # meant the pill flickered for a few ms between RF and HDBSCAN.
+    ('rf',       ('[5/7] Mapping burn',)),
+    # 'hdbscan' advances on:
+    #   - 'Forest mapping done' — full mode, end of RF = start of HDBSCAN
+    #   - '[4/4] Mapping burn'  — resume mode step header (HDBSCAN only,
+    #                             no RF phase)
+    #   - 'HDBSCAN done'        — legacy/safety fallback
+    # Note: 'HDBSCAN min_cluster_size' is no longer a marker because
+    # that line is printed BEFORE RF in full mode (see map_burn in
+    # fire_mapping_cli.py), which would wrongly advance the stage
+    # during RF training.
+    ('hdbscan',  ('Forest mapping done', '[4/4] Mapping burn',
+                  'HDBSCAN done')),
+    # 'classify' fires on 'Burned clusters:' (end of classify_cluster's
+    # internal loop) or 'Saving classification' (just before the save).
+    # 'Classification saved' is kept as a legacy fallback. This way the
+    # Classify pill is visible for the brief window between HDBSCAN
+    # finishing and brush starting.
+    ('classify', ('Burned clusters:', 'Saving classification',
+                  'Classification saved')),
+    ('brush',    ('Running class_brush.exe',
+                  'class_brush done',
+                  'class_brush post-processing')),
+    ('figure',   ('Generating figures', '[7/7]',
+                  'Comparison figure →',
+                  'Brush comparison figure →')),
+]
+# Display order for UI rendering (left-to-right). Also defines the
+# canonical stage sequence for "step N of M" math. 'hint', 'sample',
+# 'classify' are small; hidden from ETA weighting if they never appear
+# in medians yet (falls back to uniform weight).
+_STAGE_ORDER_FULL = [
+    'load', 'hint', 'sample', 'tsne', 'rf', 'hdbscan',
+    'classify', 'brush', 'figure',
+]
+_STAGE_ORDER_RESUME = [
+    'load', 'hint', 'hdbscan', 'classify', 'brush', 'figure',
+]
+_STAGE_LABELS = {
+    'load':     'Loading image',
+    'hint':     'Loading hint',
+    'sample':   'Sampling',
+    'tsne':     't-SNE embedding',
+    'rf':       'Random Forest',
+    'hdbscan':  'HDBSCAN clustering',
+    'classify': 'Saving classification',
+    'brush':    'class_brush post-process',
+    'figure':   'Generating figures',
+}
+
+_STAGE_TIMINGS_MAX_SAMPLES = 30  # keep last N durations per stage
+
+
+def _detect_stage(line: str) -> str | None:
+    """Return the stage ID a CLI output line marks, or None.
+
+    Scans markers in reverse stage order so later markers (e.g.
+    'Classification saved') win over earlier ones on the same line
+    (defensive — normally only one marker matches).
+    """
+    for stage_id, markers in reversed(_STAGE_MARKERS):
+        for m in markers:
+            if m in line:
+                return stage_id
+    return None
+
+
+def _save_stage_timings():
+    """Persist running stage durations to stage_timings.yaml."""
+    if not state.shared_root:
+        return
+    try:
+        path = os.path.join(state.shared_root, 'stage_timings.yaml')
+        with state.lock:
+            snap = {k: list(v) for k, v in state.stage_timings.items()}
+        _atomic_yaml_dump(path, snap, mode=0o644)
+    except Exception as exc:
+        sys.stderr.write(
+            f'[save] WARNING: stage_timings: {exc}\n')
+
+
+def _load_stage_timings():
+    """Restore stage timings on startup (best-effort)."""
+    if not state.shared_root:
+        return
+    path = os.path.join(state.shared_root, 'stage_timings.yaml')
+    if not os.path.isfile(path):
+        return
+    try:
+        import yaml
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+        if isinstance(data, dict):
+            for k, v in data.items():
+                if isinstance(v, list):
+                    state.stage_timings[str(k)] = [
+                        float(x) for x in v[-_STAGE_TIMINGS_MAX_SAMPLES:]
+                        if isinstance(x, (int, float)) and x > 0]
+    except Exception as exc:
+        sys.stderr.write(
+            f'[load] WARNING: stage_timings: {exc}\n')
+
+
+def _record_stage_duration(stage_id: str, seconds: float):
+    """Append a stage duration to the running samples (bounded)."""
+    if seconds <= 0 or seconds > 7200:  # sanity: reject > 2 hours
+        return
+    with state.lock:
+        samples = state.stage_timings.setdefault(stage_id, [])
+        samples.append(round(float(seconds), 2))
+        if len(samples) > _STAGE_TIMINGS_MAX_SAMPLES:
+            del samples[:-_STAGE_TIMINGS_MAX_SAMPLES]
+
+
+def _stage_median(stage_id: str, fallback: float = 0.0) -> float:
+    """Return the median of the last N durations for *stage_id*."""
+    with state.lock:
+        samples = list(state.stage_timings.get(stage_id, []))
+    if not samples:
+        return float(fallback)
+    samples.sort()
+    m = len(samples)
+    mid = m // 2
+    if m % 2:
+        return float(samples[mid])
+    return float((samples[mid - 1] + samples[mid]) / 2.0)
+
+
+# Fallback durations (seconds) used when no samples exist. These are
+# rough orders of magnitude so first-time users see *some* ETA rather
+# than "unknown"; medians replace them within 1-2 runs.
+_STAGE_FALLBACK = {
+    'load': 15, 'hint': 3, 'sample': 10,
+    'tsne': 180, 'rf': 90, 'hdbscan': 60,
+    'classify': 3, 'brush': 30, 'figure': 10,
+}
+
+
+def _estimate_full_run_seconds(pipeline: str = 'full') -> float:
+    order = (_STAGE_ORDER_FULL if pipeline == 'full'
+             else _STAGE_ORDER_RESUME)
+    return sum(_stage_median(s, _STAGE_FALLBACK.get(s, 0)) for s in order)
+
+
+class _ProgressTracker:
+    """Tracks pipeline stage transitions for one mapping run.
+
+    Lives on ``fire.progress``; updated from the ``_on_line`` hook of
+    ``_stream_subprocess``. Records each completed stage's duration
+    into ``state.stage_timings`` so future runs can estimate ETA.
+    """
+
+    def __init__(self, fire, total_runs: int = 1, run_id: int = 1,
+                 pipeline: str = 'full'):
+        self.fire = fire
+        self.total_runs = int(total_runs)
+        self.run_id = int(run_id)
+        self.pipeline = pipeline
+        self.job_start = time.time()
+        self.stage_start = self.job_start
+        self.current_stage = 'init'
+        self._run_starts: list = [self.job_start]
+        self._completed_runs = 0
+        # Snapshot onto the fire. We reassign dict so readers get a
+        # consistent view without fine-grained locking.
+        self._publish()
+
+    @property
+    def stage_order(self) -> list:
+        return (_STAGE_ORDER_FULL if self.pipeline == 'full'
+                else _STAGE_ORDER_RESUME)
+
+    def observe(self, line: str):
+        """Feed one CLI output line. Detects stage transitions."""
+        if not line:
+            return
+        new_stage = _detect_stage(line)
+        if new_stage and new_stage != self.current_stage:
+            now = time.time()
+            if self.current_stage in self.stage_order:
+                _record_stage_duration(
+                    self.current_stage, now - self.stage_start)
+            self.current_stage = new_stage
+            self.stage_start = now
+            # 'load' on a later run marks a new pipeline invocation —
+            # the previous run-boundary is the hand-off.
+            self._publish()
+
+    def mark_run_start(self, run_id: int, pipeline: str = 'full'):
+        """Record the start of a new replicate in a serial sweep."""
+        now = time.time()
+        if self.current_stage in self.stage_order:
+            _record_stage_duration(
+                self.current_stage, now - self.stage_start)
+        self.run_id = int(run_id)
+        self.pipeline = pipeline
+        self.stage_start = now
+        self.current_stage = 'init'
+        self._run_starts.append(now)
+        self._completed_runs = max(0, len(self._run_starts) - 1)
+        self._publish()
+
+    def mark_run_end(self):
+        """Record the tail-end stage duration + the total run duration.
+
+        Totals are bucketed by pipeline ('full' vs 'resume') under a
+        special key (``__total_full__`` / ``__total_resume__``) so the
+        ETA snapshot can use a single robust number per-run rather
+        than summing nine potentially-stale per-stage medians.
+        """
+        now = time.time()
+        if self.current_stage in self.stage_order:
+            _record_stage_duration(
+                self.current_stage, now - self.stage_start)
+        # Total for this run. self._run_starts[-1] is the last run's
+        # start timestamp (set in mark_run_start). If mark_run_start
+        # was never called (pathological — shouldn't happen), fall back
+        # to job_start.
+        run_start = (self._run_starts[-1] if self._run_starts
+                     else self.job_start)
+        total = now - run_start
+        _record_stage_duration(
+            f'__total_{self.pipeline}__', total)
+        self._completed_runs += 1
+        self._publish()
+        _save_stage_timings()
+
+    def _publish(self):
+        """Write a snapshot to fire.progress (read by /progress)."""
+        order = self.stage_order
+        idx = (order.index(self.current_stage)
+               if self.current_stage in order else -1)
+        # Current run start = most recent entry in _run_starts. Falls
+        # back to job_start if mark_run_start was never called (the
+        # __init__-only publish, before the worker kicks off run 1).
+        run_started_at = (self._run_starts[-1] if self._run_starts
+                          else self.job_start)
+        try:
+            self.fire.progress = {
+                'stage': self.current_stage,
+                'stage_label': _STAGE_LABELS.get(
+                    self.current_stage, self.current_stage),
+                'stage_idx': idx + 1,   # 1-based for UI
+                'total_stages': len(order),
+                'stage_started_at': self.stage_start,
+                'run_started_at': run_started_at,
+                'job_started_at': self.job_start,
+                'run_id': self.run_id,
+                'total_runs': self.total_runs,
+                'completed_runs': self._completed_runs,
+                'pipeline': self.pipeline,
+            }
+        except Exception:
+            pass
+
+
+# Fudge factor — the "1.1×" safety margin on top of the past-run median
+# so ETA doesn't collapse to 0 the instant a run crosses the median.
+# Also the minimum remaining seconds we'll show while the run is still
+# in flight (so the display doesn't render "0s left" until the run
+# actually completes).
+_ETA_FUDGE = 1.10
+_ETA_FLOOR_S = 5
+
+
+def _progress_snapshot(fire) -> dict:
+    """Compute live progress + ETA from ``fire.progress``.
+
+    ETA algorithm:
+      * Primary signal is the running median of PAST TOTAL-RUN
+        durations (``__total_full__`` / ``__total_resume__``). This
+        dwarfs any per-stage sum in robustness — one number per run,
+        directly comparable to current elapsed.
+      * ``total_eta = median_total * 1.1 - run_elapsed`` for the
+        current run, plus ``remaining_runs * median_per_run`` for the
+        sweep tail.
+      * If median drops below actual elapsed, extrapolate the current
+        stage using ``max(median_total * 1.1 - elapsed,
+        median_remaining_stages)`` so we keep climbing rather than
+        clamping to zero.
+      * If no history yet, return ``total_eta_s = None`` so the UI
+        shows "Estimating…" instead of a misleading number.
+
+    Stage-by-stage medians are still computed for the pill visual (so
+    the user sees which stage is active), but not used for the ETA.
+    """
+    prog = dict(getattr(fire, 'progress', {}) or {})
+    if not prog or fire.status not in (
+            FireStatus.MAPPING, FireStatus.PREPARING):
+        return {}
+    now = time.time()
+    pipeline = prog.get('pipeline', 'full')
+    order = (_STAGE_ORDER_FULL if pipeline == 'full'
+             else _STAGE_ORDER_RESUME)
+    cur_stage = prog.get('stage', '')
+    stage_idx = prog.get('stage_idx', 0)
+    stage_started = prog.get('stage_started_at', now)
+    job_started = prog.get('job_started_at', now)
+    run_id = prog.get('run_id', 1)
+    total_runs = max(1, prog.get('total_runs', 1))
+
+    stage_elapsed = max(0.0, now - stage_started)
+    job_elapsed = max(0.0, now - job_started)
+
+    # --- per-stage ETA (used only for the "eta of current stage" label,
+    # not the total) ---
+    cur_median = _stage_median(cur_stage, _STAGE_FALLBACK.get(
+        cur_stage, 0)) if cur_stage in order else 0
+    stage_eta_s = max(0.0, cur_median * _ETA_FUDGE - stage_elapsed)
+
+    # --- total ETA: run-level median of past runs ---
+    with state.lock:
+        full_samples = list(state.stage_timings.get('__total_full__', []))
+        resume_samples = list(state.stage_timings.get(
+            '__total_resume__', []))
+    n_full = len(full_samples)
+    n_resume = len(resume_samples)
+
+    def _median(samples):
+        if not samples:
+            return 0.0
+        s = sorted(samples)
+        m = len(s)
+        if m % 2:
+            return float(s[m // 2])
+        return float((s[m // 2 - 1] + s[m // 2]) / 2.0)
+
+    median_full = _median(full_samples)
+    median_resume = _median(resume_samples)
+
+    # Current run: estimate from the total median of its pipeline.
+    have_current_history = (
+        (pipeline == 'full' and n_full > 0)
+        or (pipeline == 'resume' and n_resume > 0))
+    cur_run_elapsed = now - prog.get('run_started_at', job_started)
+
+    if have_current_history:
+        base = median_full if pipeline == 'full' else median_resume
+        cur_run_remaining = max(
+            _ETA_FLOOR_S, base * _ETA_FUDGE - cur_run_elapsed)
+    else:
+        cur_run_remaining = None
+
+    # Future runs in this sweep. A serial sweep does full+resume×(K-1)
+    # per setting; without setting boundaries here we use an average
+    # shape. When we have both full and resume history, weight
+    # accordingly; fall back to whichever we have.
+    future_runs = max(0, total_runs - run_id)
+    if n_full and n_resume:
+        # A sweep of S settings × K replicates = S full + S×(K-1) resume.
+        # Without S and K here we approximate: ratio observed from past.
+        per_run_avg = (median_full + median_resume * 2) / 3.0
+    elif n_full:
+        per_run_avg = median_full
+    elif n_resume:
+        per_run_avg = median_resume
+    else:
+        per_run_avg = None
+
+    if cur_run_remaining is not None and per_run_avg is not None:
+        total_eta_s = cur_run_remaining + future_runs * per_run_avg
+        total_eta_s = max(_ETA_FLOOR_S, total_eta_s)
+    elif cur_run_remaining is not None:
+        # Know current run but no per-run estimate for future runs.
+        total_eta_s = cur_run_remaining
+        if future_runs > 0:
+            # Flag as partial — UI will render "…".
+            pass
+    else:
+        total_eta_s = None  # "Estimating…"
+
+    # --- percent ---
+    # Prefer elapsed/median ratio on the current run (far more accurate
+    # than summing stage fractions). Floor at 1, ceil at 99.
+    if have_current_history:
+        base = median_full if pipeline == 'full' else median_resume
+        if base > 0:
+            cur_run_frac = min(0.99, cur_run_elapsed / (base * _ETA_FUDGE))
+        else:
+            cur_run_frac = 0.0
+    elif cur_stage in order:
+        # First-ever run: fall back to stage-index fraction.
+        cur_run_frac = order.index(cur_stage) / max(1, len(order))
+    else:
+        cur_run_frac = 0.0
+    overall_pct = min(99, max(1, int(round(
+        100 * ((run_id - 1) + cur_run_frac) / total_runs))))
+
+    return {
+        'stage': cur_stage,
+        'stage_label': prog.get('stage_label', cur_stage),
+        'stage_idx': stage_idx,
+        'total_stages': prog.get('total_stages', len(order)),
+        'stage_elapsed_s': round(stage_elapsed, 1),
+        'stage_eta_s': round(stage_eta_s, 1),
+        'run_id': run_id,
+        'total_runs': total_runs,
+        'completed_runs': prog.get('completed_runs', 0),
+        'pipeline': pipeline,
+        'job_elapsed_s': round(job_elapsed, 1),
+        # None → UI renders "Estimating…" (no history for this pipeline).
+        'total_eta_s': (None if total_eta_s is None
+                        else round(total_eta_s, 1)),
+        'percent': overall_pct,
+        'n_samples_full': n_full,
+        'n_samples_resume': n_resume,
+    }
+
+
+# =========================================================================
+# Toast notifications — per-session queues + broadcast channel
+# =========================================================================
+
+_NOTIFICATIONS_MAX_PER_SESSION = 50
+_NOTIFICATIONS_MAX_BROADCAST = 20
+_NOTIFICATION_TTL_SECONDS = 7 * 24 * 3600  # 7 days
+
+_NOTIFICATION_KINDS = {'info', 'success', 'warning', 'error'}
+
+
+def _save_notifications():
+    """Persist notifications to notifications.yaml (best-effort)."""
+    if not state.shared_root:
+        return
+    try:
+        path = os.path.join(state.shared_root, 'notifications.yaml')
+        with state.lock:
+            snap = {
+                'counter': int(state.notification_counter),
+                'broadcast_counter': int(state.broadcast_counter),
+                'queues': {k: list(v)
+                           for k, v in state.notifications.items()},
+                'cursor': dict(state.broadcast_cursor),
+            }
+        _atomic_yaml_dump(path, snap, mode=0o600)
+    except Exception as exc:
+        sys.stderr.write(
+            f'[save] WARNING: notifications: {exc}\n')
+
+
+def _load_notifications():
+    if not state.shared_root:
+        return
+    path = os.path.join(state.shared_root, 'notifications.yaml')
+    if not os.path.isfile(path):
+        return
+    try:
+        import yaml
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+        with state.lock:
+            state.notification_counter = int(
+                data.get('counter', 0) or 0)
+            state.broadcast_counter = int(
+                data.get('broadcast_counter', 0) or 0)
+            queues = data.get('queues', {}) or {}
+            if isinstance(queues, dict):
+                for k, v in queues.items():
+                    if isinstance(v, list):
+                        state.notifications[str(k)] = [
+                            dict(e) for e in v if isinstance(e, dict)]
+            cursor = data.get('cursor', {}) or {}
+            if isinstance(cursor, dict):
+                for k, v in cursor.items():
+                    try:
+                        state.broadcast_cursor[str(k)] = int(v)
+                    except (TypeError, ValueError):
+                        pass
+    except Exception as exc:
+        sys.stderr.write(
+            f'[load] WARNING: notifications: {exc}\n')
+
+
+def _prune_notifications_unlocked():
+    """Drop expired / over-limit notifications. Call under state.lock.
+
+    Cursors for sessions are left untouched here — a session key may
+    not appear in ``state.sessions`` yet (e.g. notification pushed
+    before the first poll from that session, or insecure_no_auth
+    mode). Cursor cleanup happens in ``_sweep_expired_sessions`` via
+    the session-expiry path.
+    """
+    cutoff = time.time() - _NOTIFICATION_TTL_SECONDS
+    for key, queue in list(state.notifications.items()):
+        pruned = [n for n in queue
+                  if n.get('ts', 0) >= cutoff]
+        limit = (_NOTIFICATIONS_MAX_BROADCAST if key == '__broadcast__'
+                 else _NOTIFICATIONS_MAX_PER_SESSION)
+        if len(pruned) > limit:
+            pruned = pruned[-limit:]
+        if pruned:
+            state.notifications[key] = pruned
+        else:
+            del state.notifications[key]
+
+
+def _push_notification(session_hash: str | None,
+                       kind: str,
+                       title: str,
+                       body: str = '',
+                       fire: str | None = None,
+                       action: dict | None = None):
+    """Enqueue a notification.
+
+    *session_hash=None* → broadcast to every logged-in session.
+    """
+    if kind not in _NOTIFICATION_KINDS:
+        kind = 'info'
+    now = time.time()
+    with state.lock:
+        state.notification_counter += 1
+        nid = state.notification_counter
+        entry = {
+            'id': int(nid),
+            'ts': float(now),
+            'kind': kind,
+            'title': str(title)[:200],
+            'body': str(body)[:2000],
+            'fire': (str(fire)[:128] if fire else None),
+            'action': (dict(action) if isinstance(action, dict)
+                       else None),
+        }
+        if session_hash is None:
+            state.broadcast_counter += 1
+            entry['broadcast_id'] = int(state.broadcast_counter)
+            state.notifications.setdefault(
+                '__broadcast__', []).append(entry)
+        else:
+            state.notifications.setdefault(
+                session_hash, []).append(entry)
+        _prune_notifications_unlocked()
+    _save_notifications()
+    return entry
+
+
+def _pop_notifications(session_hash: str) -> list:
+    """Return + dequeue this session's pending notifications.
+
+    Combines personal queue with any broadcast entries newer than the
+    session's broadcast_cursor. Broadcast entries remain in the
+    broadcast bucket for other sessions.
+    """
+    out: list = []
+    with state.lock:
+        # Personal — returned and cleared.
+        personal = state.notifications.pop(session_hash, [])
+        out.extend(personal)
+        # Broadcast — returned once per session.
+        last_seen = int(state.broadcast_cursor.get(session_hash, 0))
+        max_id = last_seen
+        for entry in state.notifications.get('__broadcast__', []):
+            bid = int(entry.get('broadcast_id', 0))
+            if bid > last_seen:
+                out.append(entry)
+                if bid > max_id:
+                    max_id = bid
+        state.broadcast_cursor[session_hash] = max_id
+        _prune_notifications_unlocked()
+    if out:
+        _save_notifications()
+    # Stable order by id
+    out.sort(key=lambda e: e.get('id', 0))
+    return out
+
+
+# =========================================================================
+# Cache retention — prune .web_cache by size + age, never touch canonical
+# =========================================================================
+
+_cache_sweep_lock = threading.Lock()
+
+
+def _save_cache_retention():
+    if not state.shared_root:
+        return
+    try:
+        path = os.path.join(state.shared_root, 'cache_retention.yaml')
+        with state.lock:
+            snap = {
+                'config': dict(state.cache_retention),
+                'last_sweep': float(state.cache_last_sweep),
+            }
+        _atomic_yaml_dump(path, snap, mode=0o644)
+    except Exception as exc:
+        sys.stderr.write(
+            f'[save] WARNING: cache_retention: {exc}\n')
+
+
+def _load_cache_retention():
+    if not state.shared_root:
+        return
+    path = os.path.join(state.shared_root, 'cache_retention.yaml')
+    if not os.path.isfile(path):
+        return
+    try:
+        import yaml
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+        cfg = data.get('config', {}) or {}
+        with state.lock:
+            for k in ('max_gb', 'max_age_days', 'sweep_interval_hours'):
+                if k in cfg:
+                    try:
+                        state.cache_retention[k] = (
+                            float(cfg[k]) if k == 'max_gb'
+                            else int(cfg[k]))
+                    except (TypeError, ValueError):
+                        pass
+            if 'enabled' in cfg:
+                state.cache_retention['enabled'] = bool(cfg['enabled'])
+            try:
+                state.cache_last_sweep = float(data.get('last_sweep', 0))
+            except (TypeError, ValueError):
+                state.cache_last_sweep = 0.0
+    except Exception as exc:
+        sys.stderr.write(
+            f'[load] WARNING: cache_retention: {exc}\n')
+
+
+def _dir_bytes_and_mtime(path: str) -> tuple[int, float]:
+    """Return (total_size_bytes, latest_mtime) for a directory tree."""
+    total = 0
+    latest = 0.0
+    for root, dirs, files in os.walk(path):
+        for f in files:
+            fp = os.path.join(root, f)
+            try:
+                st = os.stat(fp)
+                total += int(st.st_size)
+                if st.st_mtime > latest:
+                    latest = st.st_mtime
+            except OSError:
+                continue
+    return total, latest
+
+
+def _cache_scan() -> dict:
+    """Summarise all .web_cache dirs across all years.
+
+    Returns {entries: [{fire_numbe, year, bytes, mtime_s, pinned,
+    pin_reason}], total_bytes, pinned_bytes, by_year: {year: bytes}}.
+    """
+    entries: list = []
+    total_bytes = 0
+    pinned_bytes = 0
+    by_year: dict = {}
+    years = getattr(state, 'outdirs_by_year', {}) or {
+        state.active_year: state.output_root}
+    # Pin fires the analyst might still be working on. READY and MAPPED
+    # mean there's cached work the user hasn't accepted yet — evicting
+    # it would wipe their progress silently. ACCEPTED is safe to
+    # reclaim because the canonical dir has everything durable.
+    # PREPARING / MAPPING are hard pins (in-flight I/O).
+    with state.lock:
+        hard_pin = {FireStatus.PREPARING, FireStatus.MAPPING}
+        soft_pin = {FireStatus.READY, FireStatus.MAPPED}
+        status_by_fire = {fn: f.status for fn, f in state.fires.items()}
+    hard_fires = {fn for fn, s in status_by_fire.items() if s in hard_pin}
+    soft_fires = {fn for fn, s in status_by_fire.items() if s in soft_pin}
+    with _rebrush_procs_lock:
+        hard_fires |= set(_rebrush_procs.keys())
+    # Accept-in-progress is a hard pin: the accept handler is copying
+    # files from cache_dir into the canonical output and must not have
+    # its source dir yanked out from under it.
+    with _accept_in_progress_lock:
+        hard_fires |= set(_accept_in_progress)
+    for year, outdir in years.items():
+        cache_root = os.path.join(outdir, '.web_cache')
+        if not os.path.isdir(cache_root):
+            continue
+        for entry in os.scandir(cache_root):
+            if not entry.is_dir():
+                continue
+            size, mtime = _dir_bytes_and_mtime(entry.path)
+            is_hard = entry.name in hard_fires
+            is_soft = entry.name in soft_fires
+            is_pinned = is_hard or is_soft
+            pin_reason = ('in-flight' if is_hard
+                          else 'user-work' if is_soft
+                          else '')
+            entries.append({
+                'fire_numbe': entry.name,
+                'year': int(year),
+                'bytes': size,
+                'mtime_s': mtime,
+                'path': entry.path,
+                'pinned': is_pinned,
+                'hard_pinned': is_hard,
+                'pin_reason': pin_reason,
+            })
+            total_bytes += size
+            by_year[int(year)] = by_year.get(int(year), 0) + size
+            if is_pinned:
+                pinned_bytes += size
+    return {
+        'entries': entries,
+        'total_bytes': total_bytes,
+        'pinned_bytes': pinned_bytes,
+        'by_year': by_year,
+    }
+
+
+def _cache_sweep(dry_run: bool = False) -> dict:
+    """Evict unpinned cache dirs until size <= max_gb and age <= max_age_days.
+
+    Returns a summary dict. Safe to call concurrently — serialised by
+    ``_cache_sweep_lock`` so overlapping triggers are no-ops.
+    """
+    if not _cache_sweep_lock.acquire(blocking=False):
+        return {'status': 'busy', 'pruned_bytes': 0, 'pruned_fires': []}
+    try:
+        with state.lock:
+            cfg = dict(state.cache_retention)
+        if not cfg.get('enabled', True) and not dry_run:
+            return {'status': 'disabled', 'pruned_bytes': 0,
+                    'pruned_fires': []}
+        max_bytes = int(float(cfg.get('max_gb', 20.0)) * (1024 ** 3))
+        max_age_s = int(cfg.get('max_age_days', 30)) * 86400
+        now = time.time()
+
+        scan = _cache_scan()
+        entries = scan['entries']
+        total = scan['total_bytes']
+
+        # Age-based eviction ignores soft pins — truly stale caches
+        # (older than max_age_days) always go, because the user
+        # obviously isn't actively working on them. Hard pins
+        # (in-flight jobs) are never touched.
+        age_cutoff = now - max_age_s
+        pruned: list = []
+        for e in list(entries):
+            if e.get('hard_pinned'):
+                continue
+            if e['mtime_s'] and e['mtime_s'] < age_cutoff:
+                pruned.append(e)
+
+        # Size-based eviction respects soft pins — we don't evict
+        # READY/MAPPED (user might still be working on the brush params)
+        # just to stay under the size limit.
+        pruned_ids = {(e['path']) for e in pruned}
+        evictable = [e for e in entries
+                     if not e.get('pinned')
+                     and e['path'] not in pruned_ids]
+        evictable.sort(key=lambda e: e['mtime_s'] or 0)
+        projected_total = total - sum(e['bytes'] for e in pruned)
+        while projected_total > max_bytes and evictable:
+            e = evictable.pop(0)
+            pruned.append(e)
+            projected_total -= e['bytes']
+
+        if dry_run:
+            return {
+                'status': 'dry_run',
+                'pruned_bytes': sum(e['bytes'] for e in pruned),
+                'pruned_fires': [e['fire_numbe'] for e in pruned],
+                'total_bytes': total,
+                'max_bytes': max_bytes,
+            }
+
+        # Apply.
+        actually_pruned = []
+        for e in pruned:
+            try:
+                shutil.rmtree(e['path'], ignore_errors=False)
+                actually_pruned.append(e)
+                # Best-effort: clear the fire's in-memory cache_dir
+                # reference so callers don't read a stale path. Never
+                # demote ACCEPTED — its canonical dir is intact and
+                # still authoritative. MAPPED/READY cache only gets
+                # pruned by the age-based path (size path respects the
+                # soft pin), so demotion to PENDING is reasonable in
+                # that case — the analyst would have to re-prepare
+                # anyway since the crop/hint files are gone.
+                with state.lock:
+                    fire = state.fires.get(e['fire_numbe'])
+                    if fire and fire.cache_dir == e['path']:
+                        fire.cache_dir = ''
+                        fire.available_views = []
+                        fire.last_comparison = ''
+                        if fire.status in (FireStatus.READY,
+                                           FireStatus.MAPPED):
+                            fire.status = FireStatus.PENDING
+                            fire.last_params = {}
+                            fire.agreement_pct = -1.0
+                            fire.ml_area_ha = -1.0
+                            fire.serial_results = []
+                            fire.serial_settings = []
+                            fire.progress = {}
+            except Exception as exc:
+                sys.stderr.write(
+                    f'[cache] WARNING: could not remove {e["path"]}: '
+                    f'{exc}\n')
+
+        pruned_bytes = sum(e['bytes'] for e in actually_pruned)
+        with state.lock:
+            state.cache_last_sweep = time.time()
+        _save_cache_retention()
+        if actually_pruned:
+            _save_fire_state()
+            sys.stderr.write(
+                f'[cache] Pruned {len(actually_pruned)} fire(s), '
+                f'{pruned_bytes / (1024**2):.1f} MB freed.\n')
+        return {
+            'status': 'ok',
+            'pruned_bytes': pruned_bytes,
+            'pruned_fires': [e['fire_numbe'] for e in actually_pruned],
+            'total_bytes': total,
+            'max_bytes': max_bytes,
+            'after_bytes': projected_total,
+        }
+    finally:
+        _cache_sweep_lock.release()
+
+
+def _cache_sweep_loop():
+    """Background thread: periodically run _cache_sweep()."""
+    while True:
+        try:
+            with state.lock:
+                interval_h = int(state.cache_retention.get(
+                    'sweep_interval_hours', 6))
+            interval = max(1, interval_h) * 3600
+            time.sleep(interval)
+            _cache_sweep(dry_run=False)
+        except Exception as exc:
+            sys.stderr.write(f'[cache] sweep loop error: {exc}\n')
+            time.sleep(600)
+
+
 # Login rate limiting
 _LOGIN_MAX_ATTEMPTS = 5
 _LOGIN_WINDOW_SECONDS = 300  # 5 minutes
@@ -227,7 +1097,12 @@ def _record_failed_login(ip: str):
 
 
 def _sweep_expired_sessions():
-    """Drop sessions past _SESSION_MAX_AGE. Call under state.lock."""
+    """Drop sessions past _SESSION_MAX_AGE. Call under state.lock.
+
+    Also drops broadcast-cursors + personal notification queues for
+    sessions that are being evicted, so notification state doesn't
+    outlive its session.
+    """
     now = datetime.datetime.now()
     stale = []
     for tok, sess in state.sessions.items():
@@ -239,6 +1114,8 @@ def _sweep_expired_sessions():
             stale.append(tok)
     for tok in stale:
         state.sessions.pop(tok, None)
+        state.notifications.pop(tok, None)
+        state.broadcast_cursor.pop(tok, None)
     return len(stale)
 
 
@@ -438,6 +1315,11 @@ def _save_fire_state():
                          'params': dict(s.get('params', {}))}
                         for s in fire.recommended_override
                     ]
+                if fire.last_preset:
+                    entry['last_preset'] = str(fire.last_preset)
+                if fire.last_cancel_reason:
+                    entry['last_cancel_reason'] = str(
+                        fire.last_cancel_reason)
                 # Persist serial gallery state so the results gallery
                 # survives restart. Without this, fire.serial_results
                 # defaults back to [] on boot and the left-pane ML overlay
@@ -503,6 +1385,10 @@ def _load_fire_state():
                 })
             if clean:
                 fire.recommended_override = clean
+        if entry.get('last_preset'):
+            fire.last_preset = str(entry['last_preset'])
+        if entry.get('last_cancel_reason'):
+            fire.last_cancel_reason = str(entry['last_cancel_reason'])
 
         saved_status = entry.get('status', 'pending')
 
@@ -671,8 +1557,8 @@ def _switch_year(year: int) -> tuple[bool, str]:
     """Re-point active-year state to *year* without restarting the server.
 
     Fails fast if any long-running job is in flight (one-shot mapping,
-    batch mapping, analyzer). Returns (ok, message). On success the
-    caller should persist and notify clients to reload.
+    batch mapping, rebrush, analyzer). Returns (ok, message). On
+    success the caller should persist and notify clients to reload.
     """
     if not isinstance(year, int):
         return False, 'year must be an int'
@@ -686,9 +1572,21 @@ def _switch_year(year: int) -> tuple[bool, str]:
         if state.current_job is not None:
             return False, ('A mapping job is running '
                            f'(fire {state.current_job.get("fire_numbe")}). '
-                           'Wait for it to finish.')
+                           'Wait for it to finish or cancel it.')
         if state.batch_status and state.batch_status.get('running'):
-            return False, 'A batch mapping is running. Cancel or wait.'
+            return False, ('A batch mapping is running '
+                           f'(fire {state.batch_status.get("current_fire") or "?"}). '
+                           'Cancel it from the fire list or wait.')
+    # Rebrush workers run outside _gpu_lock — check explicitly so the
+    # switch doesn't wipe fire_state.yaml out from under a running
+    # class_brush.exe.
+    with _rebrush_procs_lock:
+        if _rebrush_procs:
+            active = ', '.join(sorted(_rebrush_procs.keys())[:3])
+            more = ('' if len(_rebrush_procs) <= 3
+                    else f' (+{len(_rebrush_procs) - 3} more)')
+            return False, (f'A rebrush is running on fire {active}{more}. '
+                           'Cancel it or wait.')
     if state.analyzer is not None:
         a = state.analyzer
         with a.lock:
@@ -790,6 +1688,12 @@ def _switch_year(year: int) -> tuple[bool, str]:
     sys.stderr.write(
         f'[switch_year] Active year -> {year}, {len(state.fires)} fire(s)\n')
     sys.stderr.flush()
+    _push_notification(
+        None, 'info',
+        f'Active year switched to {year}',
+        f'{len(state.fires)} fire(s) loaded. Reload the page to see the '
+        'new fire list.',
+        action={'url': '/', 'label': 'Reload fire list'})
     return True, 'ok'
 
 
@@ -1051,7 +1955,8 @@ def _get_recommended_settings(fire) -> list[dict]:
 _batch_thread = None
 
 
-def _batch_map_worker(fire_numbes: list[str]):
+def _batch_map_worker(fire_numbes: list[str],
+                      session_hash: str | None = None):
     """Process fires sequentially, delegating each to ``_serial_map_worker``.
 
     This mirrors what the fire page's "Map Fire with settings" button
@@ -1136,7 +2041,8 @@ def _batch_map_worker(fire_numbes: list[str]):
         sys.stderr.flush()
 
         try:
-            _serial_map_worker(fire_numbe, settings, k_runs, k_jitter)
+            _serial_map_worker(fire_numbe, settings, k_runs, k_jitter,
+                                session_hash=session_hash)
         except Exception as exc:
             _set_fire_status(fire, FireStatus.ERROR, str(exc))
             with state.lock:
@@ -1166,15 +2072,25 @@ def _batch_map_worker(fire_numbes: list[str]):
     with state.lock:
         state.batch_status['running'] = False
         state.batch_status['current_fire'] = ''
+        total = int(state.batch_status.get('total', 0))
+        completed = int(state.batch_status.get('completed', 0))
+        n_errors = len(state.batch_status.get('errors', []))
     sys.stderr.write(
-        f'[batch] Complete: {state.batch_status["completed"]}'
-        f'/{state.batch_status["total"]} fires, '
-        f'{len(state.batch_status["errors"])} error(s)\n')
+        f'[batch] Complete: {completed}/{total} fires, '
+        f'{n_errors} error(s)\n')
     sys.stderr.flush()
+    _push_notification(
+        session_hash,
+        'warning' if n_errors else 'success',
+        'Batch mapping complete',
+        f'{completed - n_errors}/{total} fires mapped successfully'
+        + (f' ({n_errors} error(s))' if n_errors else '') + '.',
+        action={'url': '/', 'label': 'Open fire list'})
 
 
 def _serial_map_worker(fire_numbe: str, settings: list[dict],
-                        k_runs: int, k_jitter: int):
+                        k_runs: int, k_jitter: int,
+                        session_hash: str | None = None):
     """Run N settings × K HDBSCAN replicates for one fire.
 
     For each setting, the expensive deterministic part (t-SNE + RF) runs
@@ -1217,6 +2133,12 @@ def _serial_map_worker(fire_numbe: str, settings: list[dict],
     k_runs = max(1, int(k_runs))
     k_jitter = max(0, int(k_jitter))
     n_total = n_settings * k_runs
+
+    # Progress tracker — wired to _stream_subprocess in each replicate.
+    # run_id advances as the sweep progresses; stage transitions are
+    # detected from CLI stdout.
+    tracker = _ProgressTracker(fire, total_runs=n_total, run_id=1,
+                               pipeline='full')
 
     sys.stderr.write(
         f'[serial] Starting {n_settings} setting(s) × {k_runs} run(s) '
@@ -1449,8 +2371,14 @@ def _serial_map_worker(fire_numbe: str, settings: list[dict],
                         sys.stderr.write(
                             f'[serial] [{_fn}#{_rid}] {text}\n')
 
+                    tracker.mark_run_start(
+                        run_id,
+                        pipeline=('full' if is_first_of_setting
+                                  else 'resume'))
                     rc, killed = _stream_subprocess(
-                        cmd, state.project_root, _on_line)
+                        cmd, state.project_root, _on_line,
+                        tracker=tracker)
+                    tracker.mark_run_end()
                     with state.lock:
                         state.current_job = None
                     sys.stderr.flush()
@@ -1680,6 +2608,7 @@ def _serial_map_worker(fire_numbe: str, settings: list[dict],
                     fire.serial_canceled = False
                     fire.serial_prev_status = None
                     fire.serial_accept_promoted = False
+                    fire.progress = {}
                     state.current_job = None
                 fire.console_log.append(
                     f'Serial mapping cancelled by accept — status set '
@@ -1741,6 +2670,7 @@ def _serial_map_worker(fire_numbe: str, settings: list[dict],
                     fire.serial_canceled = False
                     fire.serial_prev_status = None
                     fire.serial_accept_promoted = False
+                    fire.progress = {}
                     state.current_job = None
                 fire.console_log.append(
                     f'Serial mapping cancelled — kept gallery '
@@ -1749,6 +2679,14 @@ def _serial_map_worker(fire_numbe: str, settings: list[dict],
                     f'(agreement={best["agreement_pct"]}%). '
                     f'Click Map Fire again to discard and re-sweep.')
                 _save_fire_state()
+                _push_notification(
+                    session_hash, 'info',
+                    f'Mapping cancelled — {fire_numbe}',
+                    f'Kept {len(successful)} run(s); best agreement '
+                    f'{best["agreement_pct"]}%.',
+                    fire=fire_numbe,
+                    action={'url': f'/fire/{fire_numbe}',
+                            'label': 'Open fire'})
                 sys.stderr.write(
                     f'[serial] {fire_numbe} user-cancel → '
                     f'{fire.status.value} ({len(successful)} kept)\n')
@@ -1766,11 +2704,17 @@ def _serial_map_worker(fire_numbe: str, settings: list[dict],
                 fire.serial_canceled = False
                 fire.serial_prev_status = None
                 fire.serial_accept_promoted = False
+                fire.progress = {}
                 state.current_job = None
             fire.console_log.append(
                 f'Serial mapping cancelled — no successful runs, '
                 f'status restored to {revert.value}.')
             _save_fire_state()
+            _push_notification(
+                session_hash, 'warning',
+                f'Mapping cancelled — {fire_numbe}',
+                'No successful runs. Status restored.',
+                fire=fire_numbe)
         sys.stderr.write(
             f'[serial] {fire_numbe} user-cancel (empty) → '
             f'{revert.value}\n')
@@ -1832,7 +2776,28 @@ def _serial_map_worker(fire_numbe: str, settings: list[dict],
         except OSError:
             pass
 
+    # Clear live progress — the sweep is done.
+    with state.lock:
+        fire.progress = {}
     _save_fire_state()
+    _save_stage_timings()
+    # Notify the initiating session.
+    if successful:
+        best_agr = max(r['agreement_pct'] for r in successful)
+        _push_notification(
+            session_hash, 'success',
+            f'Mapping complete — {fire_numbe}',
+            f'{len(successful)}/{n_total} run(s) succeeded. '
+            f'Best agreement: {best_agr}%.',
+            fire=fire_numbe,
+            action={'url': f'/fire/{fire_numbe}', 'label': 'Open fire'})
+    else:
+        _push_notification(
+            session_hash, 'error',
+            f'Mapping failed — {fire_numbe}',
+            'All runs failed. Check the fire console for details.',
+            fire=fire_numbe,
+            action={'url': f'/fire/{fire_numbe}', 'label': 'Open fire'})
     sys.stderr.write(
         f'[serial] {fire_numbe} done: {len(successful)}/{n_total} '
         f'successful\n')
@@ -2172,205 +3137,319 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
 # Accept — runs synchronously
 # =========================================================================
 
+def _ensure_brush_comparison_in_cache(fire: 'FireInfo', cache_dir: str) -> None:
+    """If the cache is missing a brush comparison PNG, try to render one
+    from the pre- and post-brush masks available on disk.
+
+    Inputs resolved in cache_dir:
+      - brushed mask = ``{fire}_crop.bin_classified.bin`` (canonical;
+        contains the brushed mask when brush succeeded, else the raw
+        classification — the same data either way).
+      - raw mask    = ``{fire}_crop.bin_classified_raw.bin`` (pre-brush
+        backup; only exists when brush succeeded at least once).
+
+    When both exist, renders a full before/after figure. When only the
+    canonical mask exists, renders a figure where "After" falls back to
+    the raw view and the title reflects the missing brush output. When
+    neither exists, silently no-ops — the canonical dir just won't have
+    a brush PNG, same as before.
+
+    Best-effort: any rendering error is logged and swallowed so accept
+    never fails because of a cosmetic figure.
+    """
+    fire_numbe = fire.fire_numbe
+    out_path = os.path.join(cache_dir, f'{fire_numbe}_brush_comparison.png')
+    if os.path.isfile(out_path):
+        return
+
+    brushed_path = os.path.join(
+        cache_dir, f'{fire_numbe}_crop.bin_classified.bin')
+    if not os.path.isfile(brushed_path):
+        return
+
+    raw_path = os.path.join(
+        cache_dir, f'{fire_numbe}_crop.bin_classified_raw.bin')
+    post_png = os.path.join(cache_dir, 'previews', 'post.png')
+    if not os.path.isfile(post_png):
+        return
+
+    try:
+        brushed = _read_envi_mask(brushed_path)
+        if os.path.isfile(raw_path):
+            raw = _read_envi_mask(raw_path)
+            brushed_for_fig = brushed
+        else:
+            # No pre-brush backup on disk — we only have one mask. Show
+            # it as "Before" and flag "After" as unavailable so the
+            # figure is informative rather than misleadingly claiming
+            # brushing happened.
+            raw = brushed
+            brushed_for_fig = None
+
+        start = getattr(fire, 'acc_start', '') or ''
+        end = getattr(fire, 'acc_end', '') or ''
+        title = f'Fire: {fire_numbe}  —  class_brush comparison'
+        if start or end:
+            title += f'\nStart: {start}   |   End: {end}'
+        _render_brush_comparison_png(
+            raw, brushed_for_fig, post_png, out_path, title)
+    except Exception as exc:
+        sys.stderr.write(
+            f'[accept] WARNING: brush comparison regen for '
+            f'{fire_numbe}: {exc}\n')
+        sys.stderr.flush()
+
+
 def _accept_fire_sync(fire_numbe: str) -> str:
     """Copy results from cache to canonical dir, write params. Returns path."""
     fire = state.fires[fire_numbe]
     cache_dir = fire.cache_dir
+    # Refuse to run with no cache_dir — glob.glob(os.path.join('',
+    # '*.bin')) would silently fall through to the process CWD and
+    # copy unrelated files into the canonical output dir.
+    if not cache_dir or not os.path.isdir(cache_dir):
+        raise RuntimeError(
+            f'Cannot accept {fire_numbe}: cache_dir missing or invalid '
+            f'({cache_dir!r}). Re-prepare the fire and try again.')
+    if not state.output_root:
+        raise RuntimeError(
+            f'Cannot accept {fire_numbe}: output_root not configured.')
     fire_dir = os.path.join(state.output_root, fire_numbe)
 
-    if os.path.isdir(fire_dir):
-        shutil.rmtree(fire_dir)
-    os.makedirs(fire_dir)
-
-    # Only canonical/final artifacts belong in the output dir. Per-run
-    # serial artifacts ({fire}_serial_{rid}*) live in .web_cache and
-    # must not leak into the final result. Same for rebrush backups
-    # (*_raw.bin / *_raw.hdr) which are cache-only pre-brush snapshots.
-    for pattern in ('*.bin', '*.hdr', '*.png', '*.shp', '*.dbf',
-                     '*.shx', '*.prj', '*.cpg'):
-        for f in glob.glob(os.path.join(cache_dir, pattern)):
-            basename = os.path.basename(f)
-            if '_serial_' in basename:
-                continue
-            if basename.endswith('_raw.bin') or basename.endswith('_raw.hdr'):
-                continue
-            shutil.copy2(f, fire_dir)
-
-    # Compute ML area from the accepted dir
-    clf_bin = os.path.join(
-        fire_dir, f'{fire_numbe}_crop.bin_classified.bin')
-    ml_area_val = _compute_ml_area(fire, clf_bin)
-    ml_area_ha = ml_area_val if ml_area_val >= 0 else None
-    ml_area_m2 = (ml_area_ha * 10000.0) if ml_area_ha is not None else None
-    fire.ml_area_ha = ml_area_val
-
-    # Write params YAML
+    # Register this accept as in-progress so the background cache
+    # sweeper treats cache_dir as hard-pinned for the duration.
+    # Without this, _cache_sweep (which uses its own lock, not
+    # _gpu_lock) could rmtree cache_dir mid-copy.
+    with _accept_in_progress_lock:
+        _accept_in_progress.add(fire_numbe)
     try:
-        import yaml
-        params_dict = {
-            'fire': {
-                'fire_numbe': fire_numbe,
-                'fire_date': fire.fire_date,
-                'fire_size_ha': fire.fire_size_ha,
-                'ml_area_ha': ml_area_ha,
-                'ml_area_m2': ml_area_m2,
-                'agreement_pct': fire.agreement_pct,
-                'notes': fire.notes or '',
-            },
-            'run': {
-                'timestamp': datetime.datetime.now().isoformat(
-                    timespec='seconds'),
-                'source': 'web',
-            },
-            'inputs': {
-                'raster': state.raster_path,
-                'perimeter_type': fire.perimeter_type,
-            },
-            'crop': {
-                'padding': fire.padding_used,
-                'width_px': fire.crop_w,
-                'height_px': fire.crop_h,
-                'total_px': fire.crop_w * fire.crop_h,
-            },
-            'sampling': {
-                'sample_rate': state.sample_rate,
-                'actual_sample_size': fire.sample_size,
-            },
-            'accumulation': {
-                'start_date': fire.acc_start,
-                'end_date': fire.acc_end,
-            },
-        }
-        if fire.last_params:
-            # fire.last_params is a FLAT CLI-style dict (e.g.
-            # 'hdbscan_min_samples', 'tsne_perplexity', 'embed_bands',
-            # 'rf_n_estimators', 'brush_size'). The previous version
-            # expected nested sub-dicts under 'tsne'/'hdbscan'/
-            # 'random_forest' keys and silently wrote nothing, so
-            # every accepted YAML (and the PDF built from it) lost
-            # bands, t-SNE, RF, HDBSCAN, and brush settings. Group by
-            # prefix so readers can pull a whole stage without string
-            # parsing; unknown keys fall into 'misc'.
-            _prefix_to_section = (
-                ('tsne_',    'tsne'),
-                ('hdbscan_', 'hdbscan'),
-                ('rf_',      'random_forest'),
-                ('brush_',   'brush'),
-            )
-            _explicit = {
-                'embed_bands':       'bands',
-                'point_threshold':   'brush',
-                'controlled_ratio':  'random_forest',
-                'contour_width':     'output',
-            }
-            # These are already represented in higher-level sections
-            # (crop/sampling). Skip to avoid duplication/conflicting
-            # values if the per-run override differs from the global.
-            _skip = {'padding', 'sample_rate', 'min_samples', 'max_samples'}
-            for k, v in fire.last_params.items():
-                if v is None or v == '':
+        if os.path.isdir(fire_dir):
+            shutil.rmtree(fire_dir)
+        os.makedirs(fire_dir)
+
+        # Safety net: ensure {fire}_brush_comparison.png exists in cache
+        # before the copy, regenerating from the pre/post-brush masks on
+        # disk if it's missing. Guarantees the canonical dir always has a
+        # brush comparison figure, even for fires mapped before
+        # class_brush.exe was available (where the CLI produced a
+        # "FAILED" figure that may have been cleaned up) or where the
+        # serial accept path didn't supply one.
+        _ensure_brush_comparison_in_cache(fire, cache_dir)
+
+        # Only canonical/final artifacts belong in the output dir. Per-run
+        # serial artifacts ({fire}_serial_{rid}*) live in .web_cache and
+        # must not leak into the final result. Same for rebrush backups
+        # (*_raw.bin / *_raw.hdr) which are cache-only pre-brush snapshots.
+        for pattern in ('*.bin', '*.hdr', '*.png', '*.shp', '*.dbf',
+                         '*.shx', '*.prj', '*.cpg'):
+            for f in glob.glob(os.path.join(cache_dir, pattern)):
+                basename = os.path.basename(f)
+                if '_serial_' in basename:
                     continue
-                if k in _skip:
+                if basename.endswith('_raw.bin') or basename.endswith('_raw.hdr'):
                     continue
-                section = None
-                for prefix, sec in _prefix_to_section:
-                    if k.startswith(prefix):
-                        section = sec
-                        break
-                if section is None:
-                    section = _explicit.get(k, 'misc')
-                params_dict.setdefault(section, {})[k] = v
+                shutil.copy2(f, fire_dir)
 
-        path = os.path.join(fire_dir, f'{fire_numbe}_params.yaml')
-        _atomic_yaml_dump(path, params_dict, mode=0o644)
-    except ImportError:
-        pass
+        # Compute ML area from the accepted dir
+        clf_bin = os.path.join(
+            fire_dir, f'{fire_numbe}_crop.bin_classified.bin')
+        ml_area_val = _compute_ml_area(fire, clf_bin)
+        ml_area_ha = ml_area_val if ml_area_val >= 0 else None
+        ml_area_m2 = (ml_area_ha * 10000.0) if ml_area_ha is not None else None
+        fire.ml_area_ha = ml_area_val
 
-    # Update fire_status.yaml (atomic write). Hold the file lock across
-    # the read-modify-write so concurrent accepts of different fires
-    # don't lose each other's entries.
-    try:
-        import yaml
-        status_path = os.path.join(state.output_root, 'fire_status.yaml')
-        with _accept_file_lock:
-            idx = {}
-            if os.path.exists(status_path):
-                with open(status_path) as f:
-                    idx = yaml.safe_load(f) or {}
-            idx[fire_numbe] = {
-                'status': 'accepted',
-                'timestamp': datetime.datetime.now().isoformat(
-                    timespec='seconds'),
-                'fire_dir': fire_dir,
-                'source': 'web',
-            }
-            _atomic_yaml_dump(status_path, idx)
-    except Exception:
-        pass
-
-    # Clean up XML artefacts
-    for xml in glob.glob(os.path.join(fire_dir, '*.xml')):
+        # Write params YAML
         try:
-            os.remove(xml)
+            import yaml
+            params_dict = {
+                'fire': {
+                    'fire_numbe': fire_numbe,
+                    'fire_date': fire.fire_date,
+                    'fire_size_ha': fire.fire_size_ha,
+                    'ml_area_ha': ml_area_ha,
+                    'ml_area_m2': ml_area_m2,
+                    'agreement_pct': fire.agreement_pct,
+                    'notes': fire.notes or '',
+                },
+                'run': {
+                    'timestamp': datetime.datetime.now().isoformat(
+                        timespec='seconds'),
+                    'source': 'web',
+                },
+                'inputs': {
+                    'raster': state.raster_path,
+                    'perimeter_type': fire.perimeter_type,
+                },
+                'crop': {
+                    'padding': fire.padding_used,
+                    'width_px': fire.crop_w,
+                    'height_px': fire.crop_h,
+                    'total_px': fire.crop_w * fire.crop_h,
+                },
+                'sampling': {
+                    'sample_rate': state.sample_rate,
+                    'actual_sample_size': fire.sample_size,
+                },
+                'accumulation': {
+                    'start_date': fire.acc_start,
+                    'end_date': fire.acc_end,
+                },
+            }
+            if fire.last_params:
+                # fire.last_params is a FLAT CLI-style dict (e.g.
+                # 'hdbscan_min_samples', 'tsne_perplexity', 'embed_bands',
+                # 'rf_n_estimators', 'brush_size'). The previous version
+                # expected nested sub-dicts under 'tsne'/'hdbscan'/
+                # 'random_forest' keys and silently wrote nothing, so
+                # every accepted YAML (and the PDF built from it) lost
+                # bands, t-SNE, RF, HDBSCAN, and brush settings. Group by
+                # prefix so readers can pull a whole stage without string
+                # parsing; unknown keys fall into 'misc'.
+                _prefix_to_section = (
+                    ('tsne_',    'tsne'),
+                    ('hdbscan_', 'hdbscan'),
+                    ('rf_',      'random_forest'),
+                    ('brush_',   'brush'),
+                )
+                _explicit = {
+                    'embed_bands':       'bands',
+                    'point_threshold':   'brush',
+                    'controlled_ratio':  'random_forest',
+                    'contour_width':     'output',
+                }
+                # These are already represented in higher-level sections
+                # (crop/sampling). Skip to avoid duplication/conflicting
+                # values if the per-run override differs from the global.
+                _skip = {'padding', 'sample_rate', 'min_samples', 'max_samples'}
+                for k, v in fire.last_params.items():
+                    if v is None or v == '':
+                        continue
+                    if k in _skip:
+                        continue
+                    section = None
+                    for prefix, sec in _prefix_to_section:
+                        if k.startswith(prefix):
+                            section = sec
+                            break
+                    if section is None:
+                        section = _explicit.get(k, 'misc')
+                    params_dict.setdefault(section, {})[k] = v
+
+            path = os.path.join(fire_dir, f'{fire_numbe}_params.yaml')
+            _atomic_yaml_dump(path, params_dict, mode=0o644)
+        except ImportError:
+            pass
+
+        # Update fire_status.yaml (atomic write). Hold the file lock across
+        # the read-modify-write so concurrent accepts of different fires
+        # don't lose each other's entries.
+        try:
+            import yaml
+            status_path = os.path.join(state.output_root, 'fire_status.yaml')
+            with _accept_file_lock:
+                idx = {}
+                if os.path.exists(status_path):
+                    with open(status_path) as f:
+                        idx = yaml.safe_load(f) or {}
+                idx[fire_numbe] = {
+                    'status': 'accepted',
+                    'timestamp': datetime.datetime.now().isoformat(
+                        timespec='seconds'),
+                    'fire_dir': fire_dir,
+                    'source': 'web',
+                }
+                _atomic_yaml_dump(status_path, idx)
         except Exception:
             pass
 
-    # Append to accepted_params.csv for parameter learning (deduplicate).
-    # The full read-dedupe-rewrite-append sequence runs under the file
-    # lock so concurrent accepts cannot interleave and corrupt the file.
-    try:
-        import csv
-        csv_path = os.path.join(state.output_root, 'accepted_params.csv')
-        with _accept_file_lock:
-            # Read existing rows (if any), drop the row for this fire
-            # (dedupe on re-accept), then write everything + the new row
-            # in a single tmp-file + rename so a crash or disk-full
-            # cannot truncate the CSV mid-write.
-            existing = []
-            if os.path.isfile(csv_path):
-                with open(csv_path, newline='') as cf:
-                    reader = csv.DictReader(cf)
-                    existing = [r for r in reader
-                                if r.get('fire_numbe') != fire_numbe]
-
-            row_data = {
-                'fire_numbe': fire_numbe,
-                'fire_size_ha': fire.fire_size_ha,
-                'agreement_pct': fire.agreement_pct,
-                'padding': fire.padding_used,
-                'timestamp': datetime.datetime.now().isoformat(
-                    timespec='seconds'),
-            }
-            if fire.last_params:
-                for k, v in fire.last_params.items():
-                    row_data[k] = v
-
-            tmp_path = (
-                f'{csv_path}.{os.getpid()}.{threading.get_ident()}.tmp')
+        # Clean up XML artefacts
+        for xml in glob.glob(os.path.join(fire_dir, '*.xml')):
             try:
-                with open(tmp_path, 'w', newline='') as cf:
-                    writer = csv.DictWriter(
-                        cf, fieldnames=_CSV_FIELDNAMES,
-                        extrasaction='ignore')
-                    writer.writeheader()
-                    writer.writerows(existing)
-                    writer.writerow(row_data)
-                os.replace(tmp_path, csv_path)
-            finally:
-                if os.path.exists(tmp_path):
-                    try:
-                        os.remove(tmp_path)
-                    except OSError:
-                        pass
-    except Exception as exc:
-        sys.stderr.write(
-            f'[save] WARNING: Failed to update accepted_params.csv: '
-            f'{exc}\n')
+                os.remove(xml)
+            except Exception:
+                pass
 
-    fire.status = FireStatus.ACCEPTED
-    fire.previously_accepted = False
-    _save_fire_state()
-    return fire_dir
+        # Append to accepted_params.csv for parameter learning (deduplicate).
+        # The full read-dedupe-rewrite-append sequence runs under the file
+        # lock so concurrent accepts cannot interleave and corrupt the file.
+        try:
+            import csv
+            csv_path = os.path.join(state.output_root, 'accepted_params.csv')
+            with _accept_file_lock:
+                # Read existing rows (if any), drop the row for this fire
+                # (dedupe on re-accept), then write everything + the new row
+                # in a single tmp-file + rename so a crash or disk-full
+                # cannot truncate the CSV mid-write.
+                existing = []
+                if os.path.isfile(csv_path):
+                    with open(csv_path, newline='') as cf:
+                        reader = csv.DictReader(cf)
+                        existing = [r for r in reader
+                                    if r.get('fire_numbe') != fire_numbe]
+
+                row_data = {
+                    'fire_numbe': fire_numbe,
+                    'fire_size_ha': fire.fire_size_ha,
+                    'agreement_pct': fire.agreement_pct,
+                    'padding': fire.padding_used,
+                    'timestamp': datetime.datetime.now().isoformat(
+                        timespec='seconds'),
+                }
+                if fire.last_params:
+                    for k, v in fire.last_params.items():
+                        row_data[k] = v
+
+                tmp_path = (
+                    f'{csv_path}.{os.getpid()}.{threading.get_ident()}.tmp')
+                try:
+                    with open(tmp_path, 'w', newline='') as cf:
+                        writer = csv.DictWriter(
+                            cf, fieldnames=_CSV_FIELDNAMES,
+                            extrasaction='ignore')
+                        writer.writeheader()
+                        writer.writerows(existing)
+                        writer.writerow(row_data)
+                    os.replace(tmp_path, csv_path)
+                finally:
+                    if os.path.exists(tmp_path):
+                        try:
+                            os.remove(tmp_path)
+                        except OSError:
+                            pass
+        except Exception as exc:
+            sys.stderr.write(
+                f'[save] WARNING: Failed to update accepted_params.csv: '
+                f'{exc}\n')
+
+        # Re-point last_comparison at the canonical copy. Until now
+        # it points into cache_dir, which _cache_sweep is free to
+        # reap once status flips to ACCEPTED — that would leave the
+        # UI / PDF builder pointing at a deleted file.
+        canon_comp = os.path.join(
+            fire_dir, f'{fire_numbe}_comparison.png')
+        if os.path.isfile(canon_comp):
+            fire.last_comparison = canon_comp
+
+        # Flip status + clear ephemeral tracking state under state.lock
+        # so readers never observe a fire that is ACCEPTED but still
+        # has a live progress snapshot. Per-run serial gallery cleanup
+        # (fire.serial_results + on-disk serial_* files) is the
+        # caller's responsibility — the mapping worker has the full
+        # list and deletes the files in its cancel path; clearing the
+        # list here would strand those files.
+        with state.lock:
+            fire.status = FireStatus.ACCEPTED
+            fire.previously_accepted = False
+            fire.progress = {}
+            if state.current_job:
+                cur = state.current_job.get('fire_numbe', '')
+                if cur.split(' (run')[0].strip() == fire_numbe:
+                    state.current_job = None
+        _save_fire_state()
+        return fire_dir
+    finally:
+        with _accept_in_progress_lock:
+            _accept_in_progress.discard(fire_numbe)
 
 
 # =========================================================================
@@ -2393,8 +3472,14 @@ def _build_mapping_cmd(fire: FireInfo, params: dict,
     sample_size = int(round(fire.crop_w * fire.crop_h * rate))
     sample_size = max(min_s, min(max_s, sample_size))
 
+    # '-u' forces line-buffered stdout on the CLI child. Without it,
+    # Python block-buffers to a pipe (~8 KB), so the web UI sees many
+    # stage-transition lines arrive in one burst and the progress pills
+    # appear to flip to "done" all at once. With '-u' each print flushes
+    # immediately and the UI can animate each stage individually.
     cmd = [
         sys.executable,
+        '-u',
         state.cli_script,
         '--sample_size', str(sample_size),
         fire.crop_bin,
@@ -2593,6 +3678,90 @@ def _run_class_brush_only(clf_path: str, brush_size: int,
     return brushed, False
 
 
+def _align_mask_to_crop_frame(mask_path: str, crop_bin_path: str,
+                              target_h: int, target_w: int):
+    """Align a raster mask to the current crop's geographic frame and
+    resize to ``(target_h, target_w)``.
+
+    When the mask and the crop share pixel size but differ in extent
+    (e.g. the classification was produced with a different padding
+    epoch than the current crop), this places the mask in the crop's
+    coordinate frame at the correct pixel offset computed from the
+    geotransforms — the same technique ``_overlay_mask_on_post`` uses
+    for the interactive web UI. That path is why the main-page overlay
+    looks right; the PDF report used a naive stretch which visibly
+    mis-scaled the overlay. Falls back to a naive zoom when
+    geotransforms aren't available or pixel sizes don't match.
+
+    Returns a boolean ``ndarray`` of shape ``(target_h, target_w)``,
+    or ``None`` if the mask can't be loaded.
+    """
+    if not mask_path or not os.path.isfile(mask_path):
+        return None
+    try:
+        from scipy.ndimage import zoom as scipy_zoom
+        ds = gdal.Open(mask_path, gdal.GA_ReadOnly)
+        if ds is None:
+            return None
+        arr = ds.GetRasterBand(1).ReadAsArray()
+        old_gt = ds.GetGeoTransform()
+        ds = None
+        if arr is None:
+            return None
+
+        ah, aw = arr.shape
+        aligned = False
+
+        if crop_bin_path and os.path.isfile(crop_bin_path):
+            try:
+                ds_crop = gdal.Open(crop_bin_path, gdal.GA_ReadOnly)
+                if ds_crop is not None:
+                    new_gt = ds_crop.GetGeoTransform()
+                    new_w = ds_crop.RasterXSize
+                    new_h = ds_crop.RasterYSize
+                    ds_crop = None
+
+                    if (old_gt and new_gt
+                            and abs(old_gt[1] - new_gt[1]) < 1e-6
+                            and abs(old_gt[5] - new_gt[5]) < 1e-6):
+                        off_x = round(
+                            (old_gt[0] - new_gt[0]) / new_gt[1])
+                        off_y = round(
+                            (old_gt[3] - new_gt[3]) / new_gt[5])
+                        arr_aligned = np.zeros(
+                            (new_h, new_w), dtype=arr.dtype)
+                        src_y0 = max(0, -off_y)
+                        src_x0 = max(0, -off_x)
+                        dst_y0 = max(0, off_y)
+                        dst_x0 = max(0, off_x)
+                        copy_h = min(ah - src_y0, new_h - dst_y0)
+                        copy_w = min(aw - src_x0, new_w - dst_x0)
+                        if copy_h > 0 and copy_w > 0:
+                            arr_aligned[
+                                dst_y0:dst_y0 + copy_h,
+                                dst_x0:dst_x0 + copy_w,
+                            ] = arr[
+                                src_y0:src_y0 + copy_h,
+                                src_x0:src_x0 + copy_w,
+                            ]
+                        arr = arr_aligned
+                        aligned = True
+            except Exception:
+                pass
+
+        ah2, aw2 = arr.shape
+        if (ah2, aw2) != (target_h, target_w):
+            arr = scipy_zoom(
+                arr.astype(np.uint8),
+                (target_h / ah2, target_w / aw2), order=0)
+
+        return arr.astype(bool)
+    except Exception as exc:
+        sys.stderr.write(
+            f'[align_mask] WARNING: {mask_path}: {exc}\n')
+        return None
+
+
 def _render_comparison_png(fire: 'FireInfo', classified_path: str,
                            out_path: str) -> bool:
     """Regenerate the perimeter-style comparison PNG.
@@ -2622,26 +3791,6 @@ def _render_comparison_png(fire: 'FireInfo', classified_path: str,
             bg = np.stack([bg] * 3, axis=2)
         bh, bw = bg.shape[:2]
 
-        def _read_mask(path):
-            if not path or not os.path.isfile(path):
-                return None
-            ds = gdal.Open(path, gdal.GA_ReadOnly)
-            if ds is None:
-                return None
-            arr = ds.GetRasterBand(1).ReadAsArray()
-            ds = None
-            return arr
-
-        def _resize(mask):
-            if mask is None:
-                return None
-            mh, mw = mask.shape
-            if (mh, mw) == (bh, bw):
-                return mask.astype(bool)
-            return scipy_zoom(
-                mask.astype(np.uint8),
-                (bh / mh, bw / mw), order=0).astype(bool)
-
         def _contour_rgba(mask, rgb):
             dil = binary_dilation(mask)
             boundary = dil & (~mask)
@@ -2652,10 +3801,17 @@ def _render_comparison_png(fire: 'FireInfo', classified_path: str,
             rgba[..., 3] = boundary.astype(np.float32)
             return rgba
 
-        clf_mask = _resize(_read_mask(classified_path))
+        # Use geotransform-aware placement so masks produced under a
+        # different crop/padding epoch still land at the right position
+        # relative to the current post-fire background.
+        crop_bin = fire.crop_bin or ''
+        clf_mask = _align_mask_to_crop_frame(
+            classified_path, crop_bin, bh, bw)
         hint_path = fire.hint_bin or fire.viirs_bin or ''
-        hint_mask = _resize(_read_mask(hint_path))
-        perim_mask = _resize(_read_mask(fire.perim_bin))
+        hint_mask = _align_mask_to_crop_frame(
+            hint_path, crop_bin, bh, bw)
+        perim_mask = _align_mask_to_crop_frame(
+            fire.perim_bin, crop_bin, bh, bw)
 
         # If perimeter == hint file, drop the separate cyan outline.
         if (fire.perim_bin and hint_path
@@ -2757,7 +3913,8 @@ def _render_ml_classification_png(fire_numbe: str, post_path: str,
                                   classified_path: str, out_path: str,
                                   subtitle: str = '',
                                   hint_path: str = '',
-                                  hint_label: str = 'Hint') -> bool:
+                                  hint_label: str = 'Hint',
+                                  crop_bin: str = '') -> bool:
     """Render an ML-classification view: post-fire background with the
     burned mask tinted red (filled). Optionally overlays a lime contour
     for the hint perimeter (VIIRS or traditional) so the reader can see
@@ -2786,16 +3943,26 @@ def _render_ml_classification_png(fire_numbe: str, post_path: str,
             bg = np.stack([bg] * 3, axis=2)
         bh, bw = bg.shape[:2]
 
-        ds = gdal.Open(classified_path, gdal.GA_ReadOnly)
-        if ds is None:
-            return False
-        arr = ds.GetRasterBand(1).ReadAsArray()
-        ds = None
-        ah, aw = arr.shape
-        if (ah, aw) != (bh, bw):
-            arr = scipy_zoom(arr.astype(np.uint8),
-                             (bh / ah, bw / aw), order=0)
-        mask = arr > 0
+        # Geotransform-aware placement when crop_bin is known; falls
+        # back to naive resize otherwise (preserves prior behavior for
+        # any external callers that don't pass crop_bin).
+        if crop_bin:
+            aligned = _align_mask_to_crop_frame(
+                classified_path, crop_bin, bh, bw)
+            if aligned is None:
+                return False
+            mask = aligned
+        else:
+            ds = gdal.Open(classified_path, gdal.GA_ReadOnly)
+            if ds is None:
+                return False
+            arr = ds.GetRasterBand(1).ReadAsArray()
+            ds = None
+            ah, aw = arr.shape
+            if (ah, aw) != (bh, bw):
+                arr = scipy_zoom(arr.astype(np.uint8),
+                                 (bh / ah, bw / aw), order=0)
+            mask = arr > 0
 
         rgb = bg[:, :, :3].astype(np.float32)
         if rgb.max() > 1.0:
@@ -2811,26 +3978,30 @@ def _render_ml_classification_png(fire_numbe: str, post_path: str,
         # pages. Silently skipped if the hint raster is missing.
         hint_rgba = None
         if hint_path and os.path.isfile(hint_path):
-            ds_h = None
             try:
-                ds_h = gdal.Open(hint_path, gdal.GA_ReadOnly)
-                if ds_h is not None:
-                    harr = ds_h.GetRasterBand(1).ReadAsArray()
-                    hh, hw = harr.shape
-                    if (hh, hw) != (bh, bw):
-                        harr = scipy_zoom(harr.astype(np.uint8),
-                                          (bh / hh, bw / hw), order=0)
-                    hmask = harr > 0
-                    if hmask.any():
-                        dil = binary_dilation(hmask)
-                        boundary = dil & (~hmask)
-                        hint_rgba = np.zeros((bh, bw, 4), dtype=np.float32)
-                        hint_rgba[..., 1] = 1.0  # lime
-                        hint_rgba[..., 3] = boundary.astype(np.float32)
+                if crop_bin:
+                    hmask = _align_mask_to_crop_frame(
+                        hint_path, crop_bin, bh, bw)
+                else:
+                    ds_h = gdal.Open(hint_path, gdal.GA_ReadOnly)
+                    hmask = None
+                    if ds_h is not None:
+                        harr = ds_h.GetRasterBand(1).ReadAsArray()
+                        ds_h = None
+                        hh, hw = harr.shape
+                        if (hh, hw) != (bh, bw):
+                            harr = scipy_zoom(
+                                harr.astype(np.uint8),
+                                (bh / hh, bw / hw), order=0)
+                        hmask = harr > 0
+                if hmask is not None and hmask.any():
+                    dil = binary_dilation(hmask)
+                    boundary = dil & (~hmask)
+                    hint_rgba = np.zeros((bh, bw, 4), dtype=np.float32)
+                    hint_rgba[..., 1] = 1.0  # lime
+                    hint_rgba[..., 3] = boundary.astype(np.float32)
             except Exception:
                 hint_rgba = None
-            finally:
-                ds_h = None
 
         fig, ax = plt.subplots(figsize=(10, 10))
         ax.imshow(result, interpolation='nearest', origin='upper')
@@ -2970,6 +4141,14 @@ class FireHandler(BaseHTTPRequestHandler):
         (re.compile(r'^/api/report$'), 'handle_api_report'),
         (re.compile(r'^/api/fires/hidden$'), 'handle_api_fires_hidden'),
         (re.compile(r'^/api/years$'), 'handle_api_years'),
+        (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/progress$'),
+         'handle_api_progress'),
+        (re.compile(r'^/api/queue$'), 'handle_api_queue'),
+        (re.compile(r'^/api/notifications$'),
+         'handle_api_notifications_get'),
+        (re.compile(r'^/api/cache/status$'), 'handle_api_cache_status'),
+        (re.compile(r'^/api/presets$'), 'handle_api_presets_get'),
         (re.compile(r'^/static/(?P<path>.+)$'), 'handle_static'),
     ]
     ROUTES_POST = [
@@ -3015,6 +4194,15 @@ class FireHandler(BaseHTTPRequestHandler):
         (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/rebrush/cancel$'),
          'handle_api_rebrush_cancel'),
+        (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/abort$'),
+         'handle_api_fire_abort'),
+        (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/preset$'),
+         'handle_api_preset_post'),
+        (re.compile(r'^/api/notifications/ack$'),
+         'handle_api_notifications_ack'),
+        (re.compile(r'^/api/cache/sweep$'), 'handle_api_cache_sweep'),
         (re.compile(r'^/api/year/switch$'), 'handle_api_year_switch'),
     ]
 
@@ -3057,10 +4245,19 @@ class FireHandler(BaseHTTPRequestHandler):
                 raw = xff.split(',')[-1].strip()
         return _normalize_ip(raw)
 
+    def _session_hash(self) -> str:
+        """Return the SHA-256 hash of the session cookie, or '' if none.
+
+        Used to key per-session notifications. Safe to call after
+        _check_session has set or cleared ``self._session_hash_cached``.
+        """
+        return getattr(self, '_session_hash_cached', '') or ''
+
     def _check_session(self) -> str | None:
         """Check session cookie. Returns role or None."""
         self._username = ''
         self._role = ''
+        self._session_hash_cached = ''
 
         # No passwords configured → everyone is admin
         if not state.admin_password and not state.user_password:
@@ -3092,6 +4289,7 @@ class FireHandler(BaseHTTPRequestHandler):
 
         self._username = session.get('username', '')
         self._role = session.get('role', 'user')
+        self._session_hash_cached = token
         return self._role
 
     def _check_ip(self, role: str) -> bool:
@@ -3440,7 +4638,11 @@ class FireHandler(BaseHTTPRequestHandler):
             with state.lock:
                 if hashed in state.sessions:
                     del state.sessions[hashed]
+                # Notification bookkeeping follows the session's lifetime.
+                state.notifications.pop(hashed, None)
+                state.broadcast_cursor.pop(hashed, None)
             _save_sessions()
+            _save_notifications()
         # Clear cookie and redirect to login
         self.send_response(302)
         self.send_header('Location', '/login')
@@ -3610,9 +4812,10 @@ class FireHandler(BaseHTTPRequestHandler):
             with state.lock:
                 state.batch_status['total'] = len(fire_numbes)
             _batch_cancel.clear()
+            sess_hash = self._session_hash()
             _batch_thread = threading.Thread(
                 target=_batch_map_worker,
-                args=(fire_numbes,),
+                args=(fire_numbes, sess_hash),
                 daemon=True)
             _batch_thread.start()
             started = True
@@ -4119,6 +5322,11 @@ class FireHandler(BaseHTTPRequestHandler):
 
         brushed_px = int(brushed.sum()) if brushed is not None else 0
         raw_px     = int(raw.sum())
+        _push_notification(
+            self._session_hash(), 'success',
+            f'Rebrush done — {fire_numbe}',
+            f'raw={raw_px:,}px → brushed={brushed_px:,}px.',
+            fire=fire_numbe)
         self._send_json({
             'status': 'ok',
             'brush_size': int(bs),
@@ -4154,12 +5362,39 @@ class FireHandler(BaseHTTPRequestHandler):
                 {'error': f'Cannot accept: status is {fire.status.value}'},
                 400)
             return
+        if not fire.cache_dir or not os.path.isdir(fire.cache_dir):
+            self._send_json(
+                {'error': 'Fire cache directory is missing — '
+                          're-prepare the fire and re-run mapping.'},
+                400)
+            return
         # Serialize accept against any running mapping/brush worker for
         # this fire. _gpu_lock already serializes the heavy pipeline, so
         # holding it here guarantees the cache dir is stable while we
         # copy it into the canonical output dir.
         with _gpu_lock:
             _accept_fire_sync(fire_numbe)
+            # Clear any stale serial gallery left over from a prior
+            # cancelled sweep. _accept_fire_sync intentionally leaves
+            # gallery cleanup to the caller (the mapping worker needs
+            # the list for its own file cleanup in the MAPPING case),
+            # but in this handler no worker is running (status was
+            # MAPPED), so it is safe to strip the gallery here. On-disk
+            # serial_* files will be reaped by the cache sweep below.
+            if fire.serial_results or fire.serial_settings:
+                with state.lock:
+                    fire.serial_results = []
+                    fire.serial_settings = []
+                _save_fire_state()
+        _push_notification(
+            self._session_hash(), 'success',
+            f'Accepted — {fire_numbe}',
+            f'Canonical output written. Agreement: {fire.agreement_pct}%.',
+            fire=fire_numbe)
+        # Trigger an opportunistic cache sweep — the accept copied the
+        # cache into canonical output, so .web_cache for this fire is
+        # free to reclaim if it falls below the age threshold.
+        threading.Thread(target=_cache_sweep, daemon=True).start()
         self._send_json({'status': 'accepted'})
 
     def handle_api_status(self, fire_numbe):
@@ -4371,10 +5606,14 @@ class FireHandler(BaseHTTPRequestHandler):
         fire.serial_results = []
         fire.serial_settings = [_clone_setting(s) for s in settings]
         fire.console_log.clear()
+        fire.progress = {}
+
+        # Capture session so notifications can target the initiating user.
+        sess_hash = self._session_hash()
 
         thread = threading.Thread(
             target=_serial_map_worker,
-            args=(fire_numbe, settings, k_runs, k_jitter),
+            args=(fire_numbe, settings, k_runs, k_jitter, sess_hash),
             daemon=True)
         thread.start()
 
@@ -4487,27 +5726,57 @@ class FireHandler(BaseHTTPRequestHandler):
         if not result:
             self._send_json({'error': 'Run not found'}, 404)
             return
-
-        # If the N×K worker is still running, tell it to stop. It will
-        # skip its "pick best + overwrite status" block on exit, so our
-        # accepted result survives. Worker will also clean up any
-        # serial_* cache files it produces, so we don't duplicate that
-        # work below. Pin serial_prev_status to ACCEPTED so the worker's
-        # generic revert lands there (it reverts to prev_status
-        # regardless of cancel source).
-        worker_running = (fire.status == FireStatus.MAPPING)
-        if worker_running:
-            fire.serial_prev_status = FireStatus.ACCEPTED
-            fire.serial_accept_promoted = True
-            fire.serial_canceled = True
+        # Refuse when cache_dir is gone (e.g. pruned by _cache_sweep
+        # after serial_results was persisted). Without this, the
+        # accept path falls through to _accept_fire_sync which would
+        # raise RuntimeError and surface as a 500; a 400 with a clear
+        # message is easier for the analyst to act on.
+        if not fire.cache_dir or not os.path.isdir(fire.cache_dir):
+            self._send_json(
+                {'error': 'Fire cache directory is missing — '
+                          're-prepare the fire and re-run mapping.'},
+                400)
+            return
+        # Only fires that have or had an active sweep are eligible
+        # (MAPPING during sweep, MAPPED after completion, ACCEPTED if
+        # re-picking a different run). Reject obviously-wrong states
+        # rather than partially running the copy + write.
+        if fire.status not in (
+                FireStatus.MAPPING, FireStatus.MAPPED,
+                FireStatus.ACCEPTED):
+            self._send_json(
+                {'error': f'Cannot accept: status is '
+                          f'{fire.status.value}'},
+                400)
+            return
 
         # Serialize the copy + accept under _gpu_lock. The worker takes
-        # the same lock per replicate and (after the matching fix) for
-        # its cancel cleanup, so this blocks until the worker is not
-        # actively writing to cache_dir. Without this, the accept
-        # handler could read serial_clf while the worker was in the
-        # middle of writing it, or vice-versa.
+        # the same lock per replicate AND for its cancel cleanup, so
+        # this blocks until the worker is not actively writing to
+        # cache_dir. Without this, the accept handler could read
+        # serial_clf while the worker was in the middle of writing it,
+        # or vice-versa.
+        #
+        # CRITICAL: set the cancel flags *inside* this lock, not
+        # before acquiring it. Previous versions flipped
+        # serial_canceled=True before taking the lock — that let the
+        # worker's cleanup block win the lock race and delete
+        # {fire}_serial_{rid}_classified.bin *before* we copied it
+        # into the main slot. Symptom: accepting a run while the
+        # sweep was still running produced a fire with no
+        # classification and a zeroed agreement.
         with _gpu_lock:
+            # Re-check status now that we hold the lock; if the worker
+            # finished naturally between the outer status read and
+            # here, there's nothing left to cancel.
+            worker_running = (fire.status == FireStatus.MAPPING)
+            if worker_running:
+                # Pin serial_prev_status to ACCEPTED so the worker's
+                # generic revert lands there (it reverts to
+                # prev_status regardless of cancel source).
+                fire.serial_prev_status = FireStatus.ACCEPTED
+                fire.serial_accept_promoted = True
+                fire.serial_canceled = True
             # Copy the selected run's results as the main results
             serial_clf = result.get('classified', '')
             serial_comp = result.get('comparison', '')
@@ -4524,6 +5793,29 @@ class FireHandler(BaseHTTPRequestHandler):
                     shutil.copy2(
                         ser_hdr,
                         os.path.splitext(main_clf)[0] + '.hdr')
+                # Propagate the pre-brush raw mask into the main slot
+                # too. Without this, a post-accept rebrush would read
+                # whichever raw backup the LAST replicate happened to
+                # leave in cache_dir — not the one that pairs with the
+                # accepted brushed mask. The canonical dir intentionally
+                # skips *_raw.bin (it's a cache-only artifact), but the
+                # main-slot raw has to match the main-slot classified so
+                # that rebrush + brush-comparison figure regen stay
+                # coherent with the accepted run.
+                ser_raw = (
+                    os.path.splitext(serial_clf)[0] + '_raw.bin')
+                if os.path.isfile(ser_raw):
+                    main_raw = (
+                        os.path.splitext(main_clf)[0] + '_raw.bin')
+                    shutil.copy2(ser_raw, main_raw)
+                    ser_raw_hdr = (
+                        os.path.splitext(ser_raw)[0] + '.hdr')
+                    if not os.path.isfile(ser_raw_hdr):
+                        ser_raw_hdr = ser_raw + '.hdr'
+                    if os.path.isfile(ser_raw_hdr):
+                        shutil.copy2(
+                            ser_raw_hdr,
+                            os.path.splitext(main_raw)[0] + '.hdr')
                 # Regenerate the "ML classification" overlay from the
                 # accepted run's (possibly rebrushed) mask. The worker
                 # overwrites previews/result.png on every completed run,
@@ -4539,6 +5831,22 @@ class FireHandler(BaseHTTPRequestHandler):
                     fire.cache_dir, f'{fire_numbe}_comparison.png')
                 shutil.copy2(serial_comp, main_comp)
                 fire.last_comparison = main_comp
+
+            # Propagate the accepted run's brush comparison PNG into
+            # the main slot so _accept_fire_sync's *.png glob copies
+            # it into the canonical dir. Without this, accepting a
+            # non-last serial run left the canonical output with
+            # whichever brush PNG the LAST replicate produced — or
+            # nothing at all, if the original map run predated
+            # class_brush.exe being available.
+            serial_brush = os.path.join(
+                fire.cache_dir,
+                f'{fire_numbe}_serial_{run_id}_brush.png')
+            if os.path.isfile(serial_brush):
+                main_brush = os.path.join(
+                    fire.cache_dir,
+                    f'{fire_numbe}_brush_comparison.png')
+                shutil.copy2(serial_brush, main_brush)
 
             fire.agreement_pct = result.get('agreement_pct', -1)
             fire.ml_area_ha = result.get('ml_area_ha', -1.0)
@@ -4591,7 +5899,16 @@ class FireHandler(BaseHTTPRequestHandler):
                         os.remove(npz)
                     except OSError:
                         pass
-                fire.serial_results = []
+                with state.lock:
+                    fire.serial_results = []
+                    fire.serial_settings = []
+                # Re-persist — _accept_fire_sync already wrote
+                # fire_state.yaml once, but at that point
+                # serial_results was still populated. Writing again
+                # now ensures on-disk state matches the final
+                # in-memory state (empty gallery for an ACCEPTED fire)
+                # so a restart doesn't resurrect a stale gallery.
+                _save_fire_state()
 
         self._send_json({'status': 'accepted'})
 
@@ -4763,7 +6080,8 @@ class FireHandler(BaseHTTPRequestHandler):
                                 fn, post_tmp, clf_bin, ml_png,
                                 '  |  '.join(subtitle_parts),
                                 hint_path=hint_for_overlay,
-                                hint_label=hint_label)
+                                hint_label=hint_label,
+                                crop_bin=crop_bin)
                         if os.path.isfile(post_tmp):
                             try:
                                 os.remove(post_tmp)
@@ -4892,6 +6210,247 @@ class FireHandler(BaseHTTPRequestHandler):
                 fire.serial_canceled = True
         self._send_json({'status': 'cancelling'})
 
+    # -- Progress / queue / notifications / cache / abort / presets --
+
+    def handle_api_progress(self, fire_numbe):
+        """Live progress snapshot for a fire currently being mapped.
+
+        Empty object when the fire is not in a running state. The poller
+        in the UI uses this to render the stage-aware progress bar.
+        """
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        snap = _progress_snapshot(fire)
+        # Always include status so UI can decide whether to hide the bar.
+        snap['status'] = fire.status.value
+        # Also expose queue context — "you are waiting behind N".
+        with state.lock:
+            current = (dict(state.current_job)
+                       if state.current_job else None)
+            waiting = [dict(w) for w in state.waiting_jobs]
+        snap['queue_current'] = current
+        snap['queue_waiting'] = len(waiting)
+        self._send_json(snap)
+
+    def handle_api_queue(self):
+        """Unified view of running + queued jobs across all users.
+
+        Public (any authenticated user): lets analysts see what's in
+        flight before clicking Map. Admin sees the same thing via
+        /api/admin/queue plus IP details.
+        """
+        with state.lock:
+            current_raw = (dict(state.current_job)
+                           if state.current_job else None)
+            waiting_raw = [dict(w) for w in state.waiting_jobs]
+            batch = (dict(state.batch_status)
+                     if state.batch_status else None)
+
+        # Enrich current with ETA from the progress tracker (if the
+        # running fire has a live progress snapshot).
+        enriched_current = None
+        if current_raw:
+            cur_fire = current_raw.get('fire_numbe', '')
+            # Strip " (run i/N)" suffix that _serial_map_worker adds.
+            base_fn = cur_fire.split(' (run')[0].strip()
+            f_obj = state.fires.get(base_fn)
+            prog = _progress_snapshot(f_obj) if f_obj else {}
+            enriched_current = {
+                'fire_numbe': base_fn or cur_fire,
+                'display': cur_fire,
+                'started_at': current_raw.get('started_at', ''),
+                'progress': prog,
+            }
+
+        # Active rebrushes (a different GPU-less pipeline).
+        with _rebrush_procs_lock:
+            rebrushes = list(_rebrush_procs.keys())
+
+        self._send_json({
+            'current': enriched_current,
+            'waiting': [
+                {'fire_numbe': w.get('fire_numbe', ''),
+                 'queued_at': w.get('queued_at', '')}
+                for w in waiting_raw
+            ],
+            'rebrushes': rebrushes,
+            'batch': batch,
+            'active_year': int(getattr(state, 'active_year', 0)),
+        })
+
+    def handle_api_notifications_get(self):
+        """Return + dequeue pending notifications for this session.
+
+        Personal entries are removed from the queue on this poll;
+        broadcast entries advance the session's cursor but remain for
+        other sessions.
+        """
+        sess = self._session_hash()
+        if not sess:
+            # No session → no notifications. Common when the user is
+            # browsing with --insecure_no_auth on.
+            self._send_json({'notifications': []})
+            return
+        items = _pop_notifications(sess)
+        self._send_json({'notifications': items})
+
+    def handle_api_notifications_ack(self):
+        """Explicit acknowledgement — no-op (notifications are popped
+        on GET), but accepted for UI convenience when the user clicks
+        X on a toast before polling happens again.
+        """
+        body = self._read_body()
+        if body is None:
+            return
+        # Nothing to do server-side. Return OK so the frontend doesn't
+        # error on non-2xx.
+        self._send_json({'ok': True})
+
+    def handle_api_cache_status(self):
+        """Summary of .web_cache disk usage and retention config."""
+        scan = _cache_scan()
+        with state.lock:
+            cfg = dict(state.cache_retention)
+            last = float(state.cache_last_sweep)
+        self._send_json({
+            'total_bytes': scan['total_bytes'],
+            'pinned_bytes': scan['pinned_bytes'],
+            'by_year': scan['by_year'],
+            'n_fires': len(scan['entries']),
+            'config': cfg,
+            'last_sweep_ts': last,
+            # Only send a summary per fire — 100s of fires × full paths
+            # would bloat the payload.
+            'entries': [
+                {'fire_numbe': e['fire_numbe'],
+                 'year': e['year'],
+                 'bytes': e['bytes'],
+                 'mtime_s': e['mtime_s'],
+                 'pinned': e['pinned'],
+                 'pin_reason': e['pin_reason']}
+                for e in sorted(
+                    scan['entries'],
+                    key=lambda e: e['bytes'], reverse=True)[:200]
+            ],
+        })
+
+    def handle_api_cache_sweep(self):
+        """Admin: trigger a synchronous cache sweep.
+
+        Body: {dry_run: bool, max_gb?: float, max_age_days?: int,
+               enabled?: bool}. Config keys (if any) are persisted.
+        """
+        if getattr(self, '_role', '') != 'admin':
+            self._send_json({'error': 'Admin only'}, 403)
+            return
+        body = self._read_body()
+        if body is None:
+            return
+        dry_run = bool(body.get('dry_run', False))
+
+        # Optional config update in the same call.
+        cfg_patch = {}
+        for k in ('max_gb',):
+            if k in body:
+                try:
+                    cfg_patch[k] = float(body[k])
+                except (TypeError, ValueError):
+                    self._send_json(
+                        {'error': f'{k} must be a number'}, 400)
+                    return
+        for k in ('max_age_days', 'sweep_interval_hours'):
+            if k in body:
+                try:
+                    cfg_patch[k] = max(1, int(body[k]))
+                except (TypeError, ValueError):
+                    self._send_json(
+                        {'error': f'{k} must be an int'}, 400)
+                    return
+        if 'enabled' in body:
+            cfg_patch['enabled'] = bool(body['enabled'])
+        if cfg_patch:
+            with state.lock:
+                state.cache_retention.update(cfg_patch)
+            _save_cache_retention()
+
+        result = _cache_sweep(dry_run=dry_run)
+        self._send_json(result)
+
+    def handle_api_fire_abort(self, fire_numbe):
+        """Unified cancel — signals whichever job is currently active.
+
+        Routes to rebrush cancel if a class_brush.exe is running, else
+        falls through to the serial-mapping cancel semantics. Returns a
+        structured summary the UI can trust without knowing the job
+        type. Also records ``fire.last_cancel_reason`` for audit.
+        """
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        body = self._read_body() or {}
+        reason = str(body.get('reason', '') or '').strip()[:500]
+        user = getattr(self, '_username', '') or ''
+        with state.lock:
+            fire.last_cancel_reason = (
+                f'{datetime.datetime.now().isoformat(timespec="seconds")}'
+                f'|{user}|{reason}' if reason else '')
+        _save_fire_state()
+
+        actions = []
+        with _rebrush_procs_lock:
+            proc = _rebrush_procs.get(fire_numbe)
+        if proc is not None:
+            try:
+                proc.terminate()
+                actions.append('rebrush_cancel_requested')
+            except Exception:
+                pass
+        if fire.status == FireStatus.MAPPING:
+            fire.serial_canceled = True
+            actions.append('mapping_cancel_requested')
+
+        if not actions:
+            self._send_json(
+                {'status': 'idle', 'actions': [],
+                 'message': 'No running job on this fire.'}, 200)
+            return
+        self._send_json({'status': 'cancelling', 'actions': actions})
+
+    def handle_api_presets_get(self):
+        """Return the preset bundles loaded from recommended_settings.yaml."""
+        with state.lock:
+            presets = {k: {
+                'label': v.get('label', k),
+                'description': v.get('description', ''),
+                'params': dict(v.get('params', {})),
+            } for k, v in state.presets.items()}
+        self._send_json({'presets': presets})
+
+    def handle_api_preset_post(self, fire_numbe):
+        """Persist which preset the user last applied to a fire's form."""
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        body = self._read_body()
+        if body is None:
+            return
+        name = str(body.get('preset', '') or '').strip()
+        if name and name not in state.presets:
+            self._send_json(
+                {'error': f'Unknown preset: {name!r}'}, 400)
+            return
+        fire = state.fires[fire_numbe]
+        with state.lock:
+            fire.last_preset = name
+        _save_fire_state()
+        self._send_json({'ok': True, 'preset': name})
+
     # -- Mapping with SSE streaming --
 
     def handle_api_map(self, fire_numbe):
@@ -4987,11 +6546,18 @@ class FireHandler(BaseHTTPRequestHandler):
                     def _on_line(text):
                         sse('log', {'message': text})
 
+                    tracker = _ProgressTracker(
+                        fire, total_runs=1, run_id=1, pipeline='full')
+                    tracker.mark_run_start(1, pipeline='full')
                     rc, killed = _stream_subprocess(
-                        cmd, state.project_root, _on_line)
+                        cmd, state.project_root, _on_line,
+                        tracker=tracker)
+                    tracker.mark_run_end()
 
                 except Exception as exc:
                     fire.status = FireStatus.READY
+                    with state.lock:
+                        fire.progress = {}
                     sse('error', {
                         'message': f'Failed to start subprocess: {exc}',
                     })
@@ -5017,7 +6583,17 @@ class FireHandler(BaseHTTPRequestHandler):
                     fire.ml_area_ha = _compute_ml_area(fire)
                     _generate_result_preview(fire)
                     fire.status = FireStatus.MAPPED
+                    with state.lock:
+                        fire.progress = {}
                     _save_fire_state()
+                    _push_notification(
+                        self._session_hash(), 'success',
+                        f'Mapping complete — {fire_numbe}',
+                        f'Agreement: {fire.agreement_pct}%, '
+                        f'ML area: {fire.ml_area_ha} ha.',
+                        fire=fire_numbe,
+                        action={'url': f'/fire/{fire_numbe}',
+                                'label': 'Open fire'})
                     sse('complete', {
                         'comparison_url': (
                             f'/api/fire/{fire_numbe}/comparison'
@@ -5027,6 +6603,13 @@ class FireHandler(BaseHTTPRequestHandler):
                     })
                 else:
                     fire.status = FireStatus.READY
+                    with state.lock:
+                        fire.progress = {}
+                    _push_notification(
+                        self._session_hash(), 'error',
+                        f'Mapping failed — {fire_numbe}',
+                        f'CLI exited with code {rc}. See console for details.',
+                        fire=fire_numbe)
                     sse('error', {
                         'message': (
                             f'fire_mapping_cli.py exited with code {rc}'),
@@ -5043,6 +6626,7 @@ class FireHandler(BaseHTTPRequestHandler):
                 # the next request can run.
                 if fire.status == FireStatus.MAPPING:
                     fire.status = FireStatus.READY
+                fire.progress = {}
 
     # -- Logging --
 
