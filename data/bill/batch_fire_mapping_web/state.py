@@ -98,6 +98,15 @@ class FireInfo:
     # successful run so the fire lands in MAPPED (not back to READY).
     serial_accept_promoted: bool = False
 
+    # Created by handle_api_serial_accept right before it sets
+    # serial_canceled / SIGTERMs the running CLI. The worker's cancel
+    # cleanup waits on this Event before deleting any serial_* files,
+    # so the accept handler is guaranteed to finish its file copy +
+    # status flip first regardless of _gpu_lock fairness. Reset to
+    # None on every fresh sweep start so a stale event from a prior
+    # accept cannot block a subsequent worker.
+    serial_accept_event: Optional[threading.Event] = None
+
     # Live progress snapshot — written by _ProgressTracker as the CLI
     # emits stage markers, read by /api/fire/:fire/progress. Ephemeral
     # (cleared on status transition away from MAPPING / PREPARING). Keys:
