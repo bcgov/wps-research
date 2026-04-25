@@ -239,10 +239,13 @@ class AppState:
         # Login rate limiting  {ip: [timestamp, ...]}
         self.login_attempts: dict = {}
 
-        # Parameter analyzer (admin-only). Populated by analyzer_app.init_analyzer().
-        # Kept as a generic attribute so analyzer_state.py does not need to be
-        # imported here — keeps state.py free of analyzer dependencies.
-        self.analyzer = None
+        # Set by _load_fire_state when fire_state.yaml fails to parse.
+        # _save_fire_state refuses to write while this is True, so a
+        # transient corruption (e.g. partial write from a pre-fsync
+        # build) cannot be followed by a clobbering save that destroys
+        # the recoverable-but-unparseable file. Operator clears it by
+        # fixing or removing the .corrupt-<ts> backup and restarting.
+        self.fire_state_load_failed: bool = False
 
     def init_fires_from_gdf(self):
         """Populate fires dict from the loaded GeoDataFrame."""

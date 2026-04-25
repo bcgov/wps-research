@@ -522,12 +522,6 @@ def main():
     _threading.Thread(target=_cache_sweep_loop,
                       daemon=True).start()
 
-    # Parameter analyzer (admin-only). Registers its own routes on
-    # FireHandler; leaves app.py untouched.
-    from .analyzer_app import init_analyzer, register_routes
-    register_routes()
-    init_analyzer(app_state)
-
     server = create_server(args.host, args.port)
 
     print(f'\n{sep}')
