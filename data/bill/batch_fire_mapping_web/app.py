@@ -257,6 +257,13 @@ def _atomic_yaml_dump(path: str, data, mode: int = 0o600):
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
         with os.fdopen(fd, 'w') as f:
             yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+            # fsync before rename: os.replace is rename-atomic, but without
+            # fsync the new file's bytes can still be in the page cache when
+            # the directory entry flips. A power loss in that window leaves
+            # a zero-length or truncated file after reboot even though the
+            # rename "succeeded". Critical for fire_state.yaml et al.
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, path)
     except Exception:
         try:
@@ -719,7 +726,7 @@ def _save_notifications():
             snap = {
                 'counter': int(state.notification_counter),
                 'broadcast_counter': int(state.broadcast_counter),
-                'queues': {k: list(v)
+                'queues': {k: [dict(n) for n in v]
                            for k, v in state.notifications.items()},
                 'cursor': dict(state.broadcast_cursor),
             }
@@ -1315,6 +1322,12 @@ def _save_notes():
 
 def _save_fire_state():
     """Persist per-fire state to fire_state.yaml so mapped fires survive restart."""
+    # Refuse to overwrite a file we couldn't parse on boot. Without this
+    # guard, a corrupt-but-recoverable fire_state.yaml would be clobbered
+    # by the next save with the stripped init-from-GDF state, permanently
+    # destroying ACCEPTED/MAPPED markers that were still in the old file.
+    if state.fire_state_load_failed:
+        return
     try:
         data = {}
         # Hold the lock across the entire snapshot so no fire attribute is
@@ -1412,9 +1425,22 @@ def _load_fire_state():
         with open(state_path) as f:
             data = yaml.safe_load(f) or {}
     except Exception as exc:
+        # Rotate the unparseable file aside so the refuse-to-save guard
+        # in _save_fire_state does not need the original path free, and
+        # an operator has something to inspect/recover. Then flip the
+        # load-failed flag to block future saves from clobbering the
+        # on-disk original.
+        backup = f'{state_path}.corrupt-{int(time.time())}'
+        try:
+            shutil.copy2(state_path, backup)
+        except OSError:
+            backup = '<copy failed>'
         sys.stderr.write(
-            f'[load] WARNING: Failed to load fire state: {exc}\n')
+            f'[load] CRITICAL: fire_state.yaml failed to parse ({exc}). '
+            f'Copied aside to {backup}. Saves are now blocked; '
+            f'investigate and restart before next save.\n')
         sys.stderr.flush()
+        state.fire_state_load_failed = True
         return
 
     restored = 0
@@ -1612,8 +1638,8 @@ def _switch_year(year: int) -> tuple[bool, str]:
     """Re-point active-year state to *year* without restarting the server.
 
     Fails fast if any long-running job is in flight (one-shot mapping,
-    batch mapping, rebrush, analyzer). Returns (ok, message). On
-    success the caller should persist and notify clients to reload.
+    batch mapping, rebrush). Returns (ok, message). On success the caller
+    should persist and notify clients to reload.
     """
     if not isinstance(year, int):
         return False, 'year must be an int'
@@ -1642,13 +1668,6 @@ def _switch_year(year: int) -> tuple[bool, str]:
                     else f' (+{len(_rebrush_procs) - 3} more)')
             return False, (f'A rebrush is running on fire {active}{more}. '
                            'Cancel it or wait.')
-    if state.analyzer is not None:
-        a = state.analyzer
-        with a.lock:
-            if a.running or (a.batch_status and not a.batch_status.get(
-                    'cancelled') and a.batch_status.get(
-                        'total', 0) > a.batch_status.get('completed', 0)):
-                return False, 'Analyzer is running. Cancel or wait.'
 
     from batch_fire_mapping.run_fire_mapping import (
         get_raster_info, load_all_viirs)
@@ -1729,16 +1748,6 @@ def _switch_year(year: int) -> tuple[bool, str]:
 
     _load_fire_state()
     _save_active_year()
-
-    # Rebuild the analyzer from the new outdir. init_analyzer resets its
-    # module-global _astate and scans the new analyzing_parameters dir.
-    try:
-        from .analyzer_app import init_analyzer
-        init_analyzer(state)
-    except Exception as exc:
-        sys.stderr.write(
-            f'[switch_year] WARNING: analyzer reinit failed: {exc}\n')
-        sys.stderr.flush()
 
     sys.stderr.write(
         f'[switch_year] Active year -> {year}, {len(state.fires)} fire(s)\n')
@@ -2143,6 +2152,19 @@ def _batch_map_worker(fire_numbes: list[str],
         action={'url': '/', 'label': 'Open fire list'})
 
 
+def _jitter_hdbscan(base: int, run_idx: int, step: int) -> int:
+    """Return a jittered hdbscan_min_samples for replicate `run_idx`.
+
+    Fan-out pattern: base, base+step, base-step, base+2*step, base-2*step, ...
+    Guaranteed >= 1. step=0 disables jitter (returns base).
+    """
+    if step <= 0 or run_idx == 0:
+        return max(1, int(base))
+    level = (run_idx + 1) // 2
+    sign = 1 if run_idx % 2 == 1 else -1
+    return max(1, int(base) + sign * level * int(step))
+
+
 def _serial_map_worker(fire_numbe: str, settings: list[dict],
                         k_runs: int, k_jitter: int,
                         session_hash: str | None = None):
@@ -2151,11 +2173,9 @@ def _serial_map_worker(fire_numbe: str, settings: list[dict],
     For each setting, the expensive deterministic part (t-SNE + RF) runs
     once on its first replicate and is cached in a per-setting .npz.
     Replicates 2..K load the cached state and only re-run HDBSCAN with
-    a jittered hdbscan_min_samples value (fan-out pattern matching the
-    analyzer).
+    a jittered hdbscan_min_samples value (fan-out pattern).
     """
     import traceback
-    from .analyzer_worker import _jitter_hdbscan
 
     fire = state.fires[fire_numbe]
     # A fresh sweep discards anything left from a previously cancelled
@@ -5964,10 +5984,15 @@ class FireHandler(BaseHTTPRequestHandler):
                     f'{fire_numbe}_brush_comparison.png')
                 shutil.copy2(serial_brush, main_brush)
 
-            fire.agreement_pct = result.get('agreement_pct', -1)
-            fire.ml_area_ha = result.get('ml_area_ha', -1.0)
-            fire.last_params = result.get('params', {})
-            fire.status = FireStatus.MAPPED
+            # Hold state.lock across the four mutations so readers on
+            # other threads (gallery, console, _save_fire_state) never
+            # observe a torn fire (e.g. status=MAPPED with stale
+            # agreement_pct / ml_area_ha / last_params).
+            with state.lock:
+                fire.agreement_pct = result.get('agreement_pct', -1)
+                fire.ml_area_ha = result.get('ml_area_ha', -1.0)
+                fire.last_params = result.get('params', {})
+                fire.status = FireStatus.MAPPED
 
             # Now accept via the normal flow
             _accept_fire_sync(fire_numbe)

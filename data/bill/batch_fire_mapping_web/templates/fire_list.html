@@ -300,8 +300,8 @@ async function applyFilters() {
         }
         if (!confirm('Switch active year to ' + selectedYear
                      + '? This affects every logged-in user; in-flight '
-                     + 'mapping or analyzer jobs must be finished or '
-                     + 'cancelled first.')) {
+                     + 'mapping jobs must be finished or cancelled '
+                     + 'first.')) {
             // Revert radio
             document.querySelectorAll('#year-filters input').forEach(r => {
                 r.checked = (parseInt(r.value, 10) === ACTIVE_YEAR);
