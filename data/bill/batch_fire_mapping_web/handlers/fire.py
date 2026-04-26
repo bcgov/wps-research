@@ -164,6 +164,10 @@ class FireRoutes:
                     # User changed params — treat as fresh start
                     fire.previously_accepted = (
                         prev_status == FireStatus.ACCEPTED)
+                    if (fire.previously_accepted
+                            and fire.agreement_pct >= 0):
+                        fire.previously_accepted_agreement_pct = (
+                            fire.agreement_pct)
                     fire.last_comparison = ''
                 else:
                     # Initial page load — just regenerating previews
@@ -371,6 +375,8 @@ class FireRoutes:
         self._send_json({
             'status': f.status.value,
             'previously_accepted': f.previously_accepted,
+            'previously_accepted_agreement_pct': (
+                f.previously_accepted_agreement_pct),
             'lines': console_lines,
             'last_params': f.last_params,
             'agreement_pct': f.agreement_pct,

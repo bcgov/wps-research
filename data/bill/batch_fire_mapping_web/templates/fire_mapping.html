@@ -32,13 +32,13 @@
 <!-- Queue banner — shown when another fire is currently mapping (your
      click would queue behind it) or when THIS fire is mapping (shows
      progress). Hidden when idle. -->
-<div id="queue-banner" class="queue-banner" style="display:none">
+<div id="queue-banner" class="queue-banner is-collapsed">
     <span id="queue-banner-text"></span>
 </div>
 
 <!-- Stage-aware progress bar — visible only while THIS fire is
      mapping or preparing. -->
-<div id="progress-bar" class="progress-bar" style="display:none">
+<div id="progress-bar" class="progress-bar is-collapsed">
     <div class="progress-header">
         <span id="progress-title">Mapping ...</span>
         <span id="progress-eta" class="progress-eta"></span>
@@ -750,6 +750,23 @@ function updateStatusDisplay(status, prevAccepted) {
     container.innerHTML = html;
 }
 
+// Agreement display. When a fire has been re-mapped after acceptance,
+// also show the previously-accepted agreement so the operator can tell
+// whether the new run regressed against what was blessed before.
+function renderAgreement(agreementPct, prevAccAgreement) {
+    const el = document.getElementById('agreement-info');
+    if (!el) return;
+    if (!(agreementPct >= 0)) {
+        el.innerHTML = '';
+        return;
+    }
+    let html = `Agreement: <strong>${agreementPct}%</strong>`;
+    if (prevAccAgreement != null && prevAccAgreement >= 0) {
+        html += ` <span class="agreement-prev" title="Previously accepted result">· was ${prevAccAgreement}% (accepted)</span>`;
+    }
+    el.innerHTML = html;
+}
+
 // ML size display
 function updateMlSize(mlAreaHa) {
     const el = document.getElementById('ml-size-text');
@@ -1075,10 +1092,9 @@ async function pollFireState() {
         }
 
         // 2. Update agreement + ML size
-        if (data.agreement_pct >= 0) {
-            document.getElementById('agreement-info').innerHTML =
-                `Agreement: <strong>${data.agreement_pct}%</strong>`;
-        }
+        renderAgreement(
+            data.agreement_pct,
+            data.previously_accepted_agreement_pct);
         updateMlSize(data.ml_area_ha);
 
         // 3. Add new views to dropdown as they become available
@@ -1722,10 +1738,9 @@ async function restoreFireState() {
         }
 
         // Show agreement + ML size if available
-        if (data.agreement_pct >= 0) {
-            document.getElementById('agreement-info').innerHTML =
-                `Agreement: <strong>${data.agreement_pct}%</strong>`;
-        }
+        renderAgreement(
+            data.agreement_pct,
+            data.previously_accepted_agreement_pct);
         updateMlSize(data.ml_area_ha);
 
         // If a rebrush was in flight when we reloaded, restore the
@@ -1797,9 +1812,10 @@ async function loadNotes() {
         if (f && f.notes) {
             document.getElementById('fire-notes').value = f.notes;
         }
-        if (f && f.agreement_pct >= 0) {
-            document.getElementById('agreement-info').innerHTML =
-                `Agreement: <strong>${f.agreement_pct}%</strong>`;
+        if (f) {
+            renderAgreement(
+                f.agreement_pct,
+                f.previously_accepted_agreement_pct);
         }
     } catch {}
 }
@@ -2040,10 +2056,10 @@ function renderProgress(p) {
     const bar = document.getElementById('progress-bar');
     if (!bar) return;
     if (!p || !p.stage || !(p.status === 'mapping' || p.status === 'preparing')) {
-        bar.style.display = 'none';
+        bar.classList.add('is-collapsed');
         return;
     }
-    bar.style.display = '';
+    bar.classList.remove('is-collapsed');
 
     const order = (p.pipeline === 'resume')
         ? PROGRESS_STAGE_ORDER_RESUME
@@ -2103,25 +2119,25 @@ function renderQueueBanner(queue, myStatus) {
 
     // Hide when this fire is itself mapping — the progress bar takes over.
     if (myStatus === 'mapping' || myStatus === 'preparing') {
-        banner.style.display = 'none';
+        banner.classList.add('is-collapsed');
         return;
     }
 
     const cur = queue && queue.current;
     if (!cur) {
-        banner.style.display = 'none';
+        banner.classList.add('is-collapsed');
         return;
     }
     const curFire = cur.fire_numbe || '';
     if (curFire === FIRE) {
         // Shouldn't happen (handled above) but guard anyway.
-        banner.style.display = 'none';
+        banner.classList.add('is-collapsed');
         return;
     }
     const prog = cur.progress || {};
     const etaText = formatSeconds(prog.total_eta_s || 0);
     let msg = `Mapping in progress: fire `;
-    banner.style.display = '';
+    banner.classList.remove('is-collapsed');
     text.innerHTML = '';
     text.appendChild(document.createTextNode(msg));
     const link = document.createElement('a');

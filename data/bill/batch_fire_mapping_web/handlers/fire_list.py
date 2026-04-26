@@ -167,6 +167,8 @@ class FireListRoutes:
                     'fire_size_ha': f.fire_size_ha,
                     'status': f.status.value,
                     'previously_accepted': f.previously_accepted,
+                    'previously_accepted_agreement_pct': (
+                        f.previously_accepted_agreement_pct),
                     'agreement_pct': f.agreement_pct,
                     'ml_area_ha': f.ml_area_ha,
                     'notes': f.notes,

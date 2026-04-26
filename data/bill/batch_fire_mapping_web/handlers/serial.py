@@ -171,6 +171,8 @@ class SerialRoutes:
         fire.serial_prev_status = fire.status
         if fire.status == FireStatus.ACCEPTED:
             fire.previously_accepted = True
+            if fire.agreement_pct >= 0:
+                fire.previously_accepted_agreement_pct = fire.agreement_pct
         fire.status = FireStatus.MAPPING
         fire.serial_results = []
         fire.serial_settings = [_clone_setting(s) for s in settings]

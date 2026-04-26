@@ -67,6 +67,14 @@ class FireInfo:
     hidden: bool = False
     notes: str = ""
     agreement_pct: float = -1.0   # -1 = not computed
+    # Snapshot of agreement_pct from the moment a re-map began on a
+    # previously-accepted fire (i.e. captured wherever
+    # previously_accepted is flipped True). Lets the UI show
+    # "new 62% · was 78%" so the operator can see whether the new
+    # sweep regressed against the previously-blessed result.
+    # Cleared back to -1 in _accept_fire_sync alongside the
+    # previously_accepted flag.
+    previously_accepted_agreement_pct: float = -1.0
     console_log: deque = field(
         default_factory=lambda: deque(maxlen=CONSOLE_LOG_MAX_LINES))
     # [{params, agreement, run_id, setting_idx, run_idx, setting_label}]

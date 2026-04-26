@@ -632,6 +632,7 @@ def _accept_fire_sync(fire_numbe: str) -> str:
         with state.lock:
             fire.status = FireStatus.ACCEPTED
             fire.previously_accepted = False
+            fire.previously_accepted_agreement_pct = -1.0
             fire.progress = {}
             if state.current_job:
                 cur = state.current_job.get('fire_numbe', '')

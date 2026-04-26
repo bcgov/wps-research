@@ -468,7 +468,11 @@ function render() {
             ? '<span class="status-badge status-accepted status-badge-muted">accepted</span> '
             : '';
         const checked = selectedFires.has(f.fire_numbe) ? 'checked' : '';
-        const agr = f.agreement_pct >= 0 ? f.agreement_pct + '%' : '';
+        let agr = f.agreement_pct >= 0 ? f.agreement_pct + '%' : '';
+        if (agr && f.previously_accepted_agreement_pct != null
+                && f.previously_accepted_agreement_pct >= 0) {
+            agr += ` <span class="agreement-prev" title="Previously accepted result">· was ${f.previously_accepted_agreement_pct}%</span>`;
+        }
         const mlSize = f.ml_area_ha >= 0 ? f.ml_area_ha.toLocaleString() : '';
         const noteIcon = f.notes ? ` <span title="${esc(f.notes)}" style="cursor:help;color:#888">&#9998;</span>` : '';
         const fireEnc = encodeURIComponent(f.fire_numbe);

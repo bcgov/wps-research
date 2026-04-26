@@ -162,6 +162,9 @@ def _save_fire_state():
                     entry['agreement_pct'] = fire.agreement_pct
                 if fire.previously_accepted:
                     entry['previously_accepted'] = True
+                if fire.previously_accepted_agreement_pct >= 0:
+                    entry['previously_accepted_agreement_pct'] = (
+                        fire.previously_accepted_agreement_pct)
                 if fire.recommended_override:
                     entry['recommended_override'] = [
                         {'label': str(s.get('label', '')),
@@ -297,6 +300,8 @@ def _load_fire_state():
             fire.agreement_pct = entry.get('agreement_pct', -1.0)
             fire.previously_accepted = entry.get(
                 'previously_accepted', False)
+            fire.previously_accepted_agreement_pct = float(
+                entry.get('previously_accepted_agreement_pct', -1.0))
 
             # Restore serial gallery. Each entry's classified.bin must
             # still be on disk — drop entries whose files were deleted
