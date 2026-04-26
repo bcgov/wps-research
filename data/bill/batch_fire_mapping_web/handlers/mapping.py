@@ -196,6 +196,9 @@ class MappingRoutes:
                     }
                     if fire.status == FireStatus.ACCEPTED:
                         fire.previously_accepted = True
+                        if fire.agreement_pct >= 0:
+                            fire.previously_accepted_agreement_pct = (
+                                fire.agreement_pct)
                     fire.status = FireStatus.MAPPING
                 cmd = _build_mapping_cmd(fire, params)
                 short_cmd = ' '.join(
