@@ -461,7 +461,10 @@ function render() {
             tr.dataset.mapping = '1';
         }
         const badge = `<span class="status-badge status-${f.status}">${f.status}</span>`;
-        const prevBadge = f.previously_accepted
+        // Suppress the muted "previously accepted" badge when the
+        // live status is itself 'accepted' — otherwise re-running an
+        // already-accepted fire shows two identical "accepted" pills.
+        const prevBadge = (f.previously_accepted && f.status !== 'accepted')
             ? '<span class="status-badge status-accepted status-badge-muted">accepted</span> '
             : '';
         const checked = selectedFires.has(f.fire_numbe) ? 'checked' : '';
