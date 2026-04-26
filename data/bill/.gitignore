@@ -8,4 +8,7 @@ mapped_burn/
 *test*
 .config/
 .ollama/
+.claude/
 inspection_files/
+*results
+*.sh

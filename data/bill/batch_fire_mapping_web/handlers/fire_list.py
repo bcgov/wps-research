@@ -1,0 +1,261 @@
+"""Fire-list / per-fire navigation routes (home page, fire page, notes).
+
+This is one slice of FireHandler. Methods reference module-level
+helpers from ``app`` via top-of-file imports; ``state`` is rebound
+in :func:`init` so it tracks the live :class:`AppState` instance
+created by ``app.init_app``.
+"""
+
+import datetime
+import glob
+import json
+import mimetypes
+import os
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import threading
+import time
+from urllib.parse import urlparse, unquote, parse_qs
+
+import numpy as np
+from osgeo import gdal
+
+from ..state import AppState, FireInfo, FireStatus
+from ..auth import (
+    _hash_token, _normalize_ip, _check_login_rate, _record_failed_login,
+    _sweep_expired_sessions, _SESSION_MAX_AGE,
+)
+from ..notifications import (
+    _save_notifications, _load_notifications, _prune_notifications_unlocked,
+    _push_notification, _pop_notifications,
+)
+from ..cache_retention import (
+    _save_cache_retention, _load_cache_retention, _dir_bytes_and_mtime,
+    _cache_scan, _cache_sweep, _cache_sweep_loop, _cache_sweep_lock,
+)
+from ..progress import (
+    _STAGE_MARKERS, _STAGE_ORDER_FULL, _STAGE_ORDER_RESUME, _STAGE_LABELS,
+    _STAGE_TIMINGS_MAX_SAMPLES, _STAGE_FALLBACK,
+    _detect_stage, _save_stage_timings, _load_stage_timings,
+    _record_stage_duration, _stage_median, _estimate_full_run_seconds,
+    _ProgressTracker, _progress_snapshot, _ETA_FUDGE, _ETA_FLOOR_S,
+)
+from ..mapping import (
+    _compute_ml_area, _overlay_mask_on_post, _generate_result_preview,
+    _compute_agreement,
+)
+from ..persistence import (
+    _save_sessions, _save_settings, _save_notes, _save_ip_list,
+    _save_fire_state, _load_fire_state,
+    _save_active_year, _switch_year,
+)
+from ..brush import (
+    _class_brush_exe, _read_envi_mask, _write_envi_mask_like,
+    _run_class_brush_only, _align_mask_to_crop_frame,
+    _render_comparison_png, _render_ml_classification_png,
+    _render_brush_comparison_png,
+)
+from ..templates import _html_escape, render_template
+from ..validation import _PARAM_SPEC, _validate_param, _validate_embed_bands
+from ..mapping_cmd import _build_mapping_cmd
+from ..io_utils import _atomic_yaml_dump
+from ..preview import generate_all_previews
+
+# Late-bound to avoid a circular-import: app imports the mixins, then
+# app.init_app calls each mixin's ``init`` which re-assigns ``state`` and
+# the inter-handler helpers/registries that live in ``app.py``.
+state: AppState = None
+_HERE = None
+_gpu_lock = None
+_gpu_queue_lock = None
+_gpu_queue = None
+_batch_thread = None
+_SUBPROCESS_SILENCE_TIMEOUT = None
+_batch_cancel = None
+_serial_procs = None
+_serial_procs_lock = None
+_rebrush_procs = None
+_rebrush_procs_lock = None
+_accept_in_progress = None
+_accept_in_progress_lock = None
+_accept_file_lock = None
+_set_fire_status = None
+_terminate_serial_proc = None
+_stream_subprocess = None
+_get_recommended_settings = None
+_clone_setting = None
+_batch_map_worker = None
+_serial_map_worker = None
+_jitter_hdbscan = None
+_prepare_fire_sync = None
+_accept_fire_sync = None
+_ensure_brush_comparison_in_cache = None
+# These two stay in app.py because they need ``global`` rebinding.
+# They are referenced through ``import_app_globals`` only as needed.
+
+
+def init(app_state, helpers):
+    """Bind shared helpers and the live AppState into this mixin module.
+
+    ``helpers`` is the namespace dict published by ``app.init_app``;
+    we copy each name into our module globals so unmodified method
+    bodies (which reference bare names like ``state`` or ``_gpu_lock``)
+    look them up here at call time.
+    """
+    g = globals()
+    g['state'] = app_state
+    for name, value in helpers.items():
+        g[name] = value
+
+
+class FireListRoutes:
+    """Fire-list / per-fire navigation routes (home page, fire page, notes)."""
+
+
+    # -- Page handlers --
+
+    def handle_fire_list(self):
+        is_admin = (getattr(self, '_role', '') == 'admin')
+        admin_link = ('<a href="/admin" class="btn" '
+                      'style="font-size:11px;padding:3px 10px">'
+                      'Admin</a>'
+                      if is_admin else '')
+        years_sorted = sorted(state.rasters_by_year)
+        html = render_template('fire_list.html', {
+            'raster_name': os.path.basename(state.raster_path),
+            'polygon_name': os.path.basename(state.polygon_file),
+            'n_fires': str(len(state.fires)),
+            'admin_link': admin_link,
+            'all_years_json': json.dumps(years_sorted),
+            'active_year_json': json.dumps(int(state.active_year)),
+            'is_admin_json': json.dumps(bool(is_admin)),
+        })
+        self._send_html(html)
+
+    def handle_fire_page(self, fire_numbe):
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_html('Fire not found', 404)
+            return
+        fire = state.fires[fire_numbe]
+        html = render_template('fire_mapping.html', {
+            'fire_numbe': fire_numbe,
+            'fire_numbe_json': json.dumps(fire_numbe),
+            'fire_date': fire.fire_date,
+            'fire_year': str(fire.fire_year),
+            'fire_size_ha': str(fire.fire_size_ha),
+            'fire_status': fire.status.value,
+            'padding': str(state.padding),
+            'sample_rate': str(state.sample_rate),
+            'min_samples': str(state.min_samples),
+            'max_samples': str(state.max_samples),
+        })
+        self._send_html(html)
+
+    # -- API handlers --
+
+    def handle_api_fires(self):
+        with state.lock:
+            fires = [
+                {
+                    'fire_numbe': f.fire_numbe,
+                    'fire_date': f.fire_date,
+                    'fire_year': f.fire_year,
+                    'fire_size_ha': f.fire_size_ha,
+                    'status': f.status.value,
+                    'previously_accepted': f.previously_accepted,
+                    'agreement_pct': f.agreement_pct,
+                    'ml_area_ha': f.ml_area_ha,
+                    'notes': f.notes,
+                    'has_override': bool(
+                        getattr(f, 'recommended_override', None)),
+                }
+                for f in state.fires.values()
+                if not f.hidden
+            ]
+        self._send_json(fires)
+
+    def handle_api_notes(self, fire_numbe):
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        body = self._read_body()
+        if body is None:
+            return
+        state.fires[fire_numbe].notes = body.get('notes', '')
+        _save_notes()
+        self._send_json({'status': 'saved'})
+
+    _VALID_FN = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_. -]*$')
+
+    def handle_api_remove(self, fire_numbe):
+        if getattr(self, '_role', '') != 'admin':
+            self._send_json({'error': 'Admin only'}, 403)
+            return
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        # Refuse to hide a fire while a worker is actively using its
+        # cache_dir — removing the cache out from under the running
+        # subprocess causes spurious failures.
+        if fire.status in (FireStatus.MAPPING, FireStatus.PREPARING):
+            self._send_json(
+                {'error': f'Cannot remove while {fire.status.value}'}, 409)
+            return
+        # Drop the .web_cache/<FIRE>/ directory so memory doesn't leak
+        # on hide/unhide cycles. The canonical output dir (if the fire
+        # was accepted) is preserved separately. Re-preparing on unhide
+        # will rebuild the cache from scratch.
+        cache_dir = fire.cache_dir
+        with state.lock:
+            fire.hidden = True
+            fire.cache_dir = ''
+            fire.crop_bin = ''
+            fire.hint_bin = ''
+            fire.perim_bin = ''
+            fire.viirs_bin = ''
+            fire.available_views = []
+            fire.last_comparison = ''
+        if cache_dir and os.path.isdir(cache_dir):
+            try:
+                shutil.rmtree(cache_dir, ignore_errors=True)
+            except Exception:
+                pass
+        _save_fire_state()
+        self._send_json({'status': 'removed'})
+
+    def handle_api_unhide(self, fire_numbe):
+        if getattr(self, '_role', '') != 'admin':
+            self._send_json({'error': 'Admin only'}, 403)
+            return
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        state.fires[fire_numbe].hidden = False
+        _save_fire_state()
+        self._send_json({'status': 'restored'})
+
+    def handle_api_fires_hidden(self):
+        """Return list of hidden fires (for admin restore UI)."""
+        if getattr(self, '_role', '') != 'admin':
+            self._send_json({'error': 'Admin only'}, 403)
+            return
+        fires = [
+            {
+                'fire_numbe': f.fire_numbe,
+                'fire_date': f.fire_date,
+                'fire_year': f.fire_year,
+                'fire_size_ha': f.fire_size_ha,
+                'status': f.status.value,
+            }
+            for f in state.fires.values()
+            if f.hidden
+        ]
+        self._send_json(fires)

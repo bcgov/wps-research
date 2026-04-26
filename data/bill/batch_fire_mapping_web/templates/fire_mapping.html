@@ -739,7 +739,11 @@ function onViewDropdownChange() {
 function updateStatusDisplay(status, prevAccepted) {
     const container = document.getElementById('status-badges');
     let html = '';
-    if (prevAccepted) {
+    // Suppress the muted "previously accepted" badge when the live
+    // status is itself 'accepted' — otherwise the user sees two
+    // identical "accepted" pills side by side after re-running an
+    // already-accepted fire.
+    if (prevAccepted && status !== 'accepted') {
         html += '<span class="status-badge status-accepted status-badge-muted">accepted</span> ';
     }
     html += `<span class="status-badge status-${status}">${status}</span>`;
