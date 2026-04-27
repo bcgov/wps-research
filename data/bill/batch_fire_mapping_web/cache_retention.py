@@ -138,8 +138,15 @@ def _cache_scan() -> dict:
         hard_pin = {FireStatus.PREPARING, FireStatus.MAPPING}
         soft_pin = {FireStatus.READY, FireStatus.MAPPED}
         status_by_fire = {fn: f.status for fn, f in state.fires.items()}
+        # Post-accept rebrush leaves a gallery entry in cache that the
+        # canonical dir does NOT have. Reaping the cache would silently
+        # destroy the user's rebrush exploration. Soft-pin so manual
+        # eviction is still possible but the auto-sweep stays off.
+        rebrush_dirty_fires = {
+            fn for fn, f in state.fires.items() if f.rebrush_dirty}
     hard_fires = {fn for fn, s in status_by_fire.items() if s in hard_pin}
     soft_fires = {fn for fn, s in status_by_fire.items() if s in soft_pin}
+    soft_fires |= rebrush_dirty_fires
     with _rebrush_procs_lock:
         hard_fires |= set(_rebrush_procs.keys())
     # Accept-in-progress is a hard pin: the accept handler is copying

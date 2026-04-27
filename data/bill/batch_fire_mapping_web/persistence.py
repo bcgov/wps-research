@@ -176,6 +176,8 @@ def _save_fire_state():
                 if fire.last_cancel_reason:
                     entry['last_cancel_reason'] = str(
                         fire.last_cancel_reason)
+                if fire.rebrush_dirty:
+                    entry['rebrush_dirty'] = True
                 # Persist serial gallery state so the results gallery
                 # survives restart. Without this, fire.serial_results
                 # defaults back to [] on boot and the left-pane ML overlay
@@ -271,6 +273,8 @@ def _load_fire_state():
             fire.last_preset = str(entry['last_preset'])
         if entry.get('last_cancel_reason'):
             fire.last_cancel_reason = str(entry['last_cancel_reason'])
+        if entry.get('rebrush_dirty'):
+            fire.rebrush_dirty = bool(entry['rebrush_dirty'])
 
         saved_status = entry.get('status', 'pending')
 
