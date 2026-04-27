@@ -128,8 +128,24 @@ class MappingRoutes:
             return
         params = body.get('params', {})
 
-        if fire.status not in (
-                FireStatus.READY, FireStatus.MAPPED, FireStatus.ACCEPTED):
+        # AUDIT-C5: atomic test-and-claim of fire.status. Two simultaneous
+        # POSTs would otherwise both pass the readiness check and both
+        # enqueue, leading to duplicate mapping runs that overwrite each
+        # other's last_params / agreement_pct / ml_area_ha.
+        with state.lock:
+            if fire.status not in (
+                    FireStatus.READY, FireStatus.MAPPED,
+                    FireStatus.ACCEPTED):
+                _prev_status = None
+            else:
+                _prev_status = fire.status
+                if fire.status == FireStatus.ACCEPTED:
+                    fire.previously_accepted = True
+                    if fire.agreement_pct >= 0:
+                        fire.previously_accepted_agreement_pct = (
+                            fire.agreement_pct)
+                fire.status = FireStatus.MAPPING
+        if _prev_status is None:
             self._send_json({
                 'error': f'Fire not ready (status: {fire.status.value})',
             }, 400)
@@ -185,8 +201,10 @@ class MappingRoutes:
                 })
 
             with _gpu_lock:
+                # AUDIT-C5: status was already flipped to MAPPING under
+                # state.lock at the top of the handler; we only need to
+                # update queue bookkeeping here.
                 with state.lock:
-                    # Move from waiting to current
                     if job_entry in state.waiting_jobs:
                         state.waiting_jobs.remove(job_entry)
                     state.current_job = {
@@ -194,12 +212,6 @@ class MappingRoutes:
                         'started_at': datetime.datetime.now().isoformat(
                             timespec='seconds'),
                     }
-                    if fire.status == FireStatus.ACCEPTED:
-                        fire.previously_accepted = True
-                        if fire.agreement_pct >= 0:
-                            fire.previously_accepted_agreement_pct = (
-                                fire.agreement_pct)
-                    fire.status = FireStatus.MAPPING
                 cmd = _build_mapping_cmd(fire, params)
                 short_cmd = ' '.join(
                     os.path.basename(c) if i < 3 else c

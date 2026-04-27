@@ -107,7 +107,12 @@ def _dir_bytes_and_mtime(path: str) -> tuple[int, float]:
                 total += int(st.st_size)
                 if st.st_mtime > latest:
                     latest = st.st_mtime
-            except OSError:
+            except OSError as exc:
+                # AUDIT-M6: silently skipping unreadable files makes the
+                # sweeper under-count bytes and overshoot max_gb.
+                sys.stderr.write(
+                    f'[cache] WARNING: stat {fp}: {exc}\n')
+                sys.stderr.flush()
                 continue
     return total, latest
 

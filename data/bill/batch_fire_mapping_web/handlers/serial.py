@@ -132,9 +132,6 @@ class SerialRoutes:
             self._send_json({'error': 'Fire not found'}, 404)
             return
         fire = state.fires[fire_numbe]
-        if fire.status == FireStatus.MAPPING:
-            self._send_json({'error': 'Already mapping'}, 400)
-            return
 
         body = self._read_body()
         if body is None:
@@ -166,18 +163,24 @@ class SerialRoutes:
         k_runs = max(1, min(10, int(state.k_runs_per_setting)))
         k_jitter = max(0, int(state.k_jitter))
 
-        # Set status BEFORE starting thread to avoid race. Save the
-        # pre-sweep status so the worker can restore it on cancel.
-        fire.serial_prev_status = fire.status
-        if fire.status == FireStatus.ACCEPTED:
-            fire.previously_accepted = True
-            if fire.agreement_pct >= 0:
-                fire.previously_accepted_agreement_pct = fire.agreement_pct
-        fire.status = FireStatus.MAPPING
-        fire.serial_results = []
-        fire.serial_settings = [_clone_setting(s) for s in settings]
-        fire.console_log.clear()
-        fire.progress = {}
+        # AUDIT-C5: atomic test-and-set of fire.status under state.lock.
+        # Two simultaneous POSTs would otherwise both pass the MAPPING
+        # check and both spawn worker threads that share serial_results,
+        # serial_settings, console_log, and progress.
+        with state.lock:
+            if fire.status == FireStatus.MAPPING:
+                self._send_json({'error': 'Already mapping'}, 400)
+                return
+            fire.serial_prev_status = fire.status
+            if fire.status == FireStatus.ACCEPTED:
+                fire.previously_accepted = True
+                if fire.agreement_pct >= 0:
+                    fire.previously_accepted_agreement_pct = fire.agreement_pct
+            fire.status = FireStatus.MAPPING
+            fire.serial_results = []
+            fire.serial_settings = [_clone_setting(s) for s in settings]
+            fire.console_log.clear()
+            fire.progress = {}
 
         # Capture session so notifications can target the initiating user.
         sess_hash = self._session_hash()

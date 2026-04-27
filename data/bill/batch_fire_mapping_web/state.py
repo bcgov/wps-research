@@ -1,5 +1,6 @@
 """Per-fire state management for the web interface."""
 
+import math
 import os
 import threading
 from collections import deque
@@ -280,14 +281,24 @@ class AppState:
                 fire_date = ''
 
             # Parse fire year
+            # AUDIT-H1: pandas hands NaN back from missing numeric cells
+            # without raising; the bare int()/float() casts let NaN leak
+            # into FireInfo and propagate to JSON output (where NaN is
+            # not legal). Reject non-finite values explicitly.
             try:
-                fire_year = int(row.get('FIRE_YEAR', 0) or 0)
+                _fy_raw = float(row.get('FIRE_YEAR', 0) or 0)
+                if not math.isfinite(_fy_raw):
+                    fire_year = 0
+                else:
+                    fire_year = int(_fy_raw)
             except (ValueError, TypeError):
                 fire_year = 0
 
             # Parse fire size
             try:
                 fire_size = float(row.get('FIRE_SIZE_', 0) or 0)
+                if not math.isfinite(fire_size):
+                    fire_size = 0.0
             except (ValueError, TypeError):
                 fire_size = 0.0
 

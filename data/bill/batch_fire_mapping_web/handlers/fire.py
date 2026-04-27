@@ -249,6 +249,15 @@ class FireRoutes:
                         if os.path.exists(png):
                             break
 
+        # Cache may have been evicted after accept. Fall back to the
+        # canonical accepted dir, which now mirrors previews/ from
+        # cache_dir at accept time (see prepare._accept_fire_sync).
+        if not os.path.exists(png):
+            canon_png = os.path.join(
+                state.output_root, fire_numbe, 'previews', f'{view}.png')
+            if os.path.isfile(canon_png):
+                png = canon_png
+
         if not os.path.exists(png):
             self._send_json(
                 {'error': f"Preview '{view}' not available"}, 404)

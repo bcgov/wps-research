@@ -188,14 +188,20 @@ class RebrushRoutes:
                 404)
             return
 
-        # Reject overlapping rebrushes for the same fire — the process
-        # registry is single-slot per fire_numbe.
+        # AUDIT-C5: atomic claim of the _rebrush_procs[fire_numbe] slot.
+        # The previous check-then-spawn left a window during which two
+        # simultaneous POSTs could both pass the check, then both Popens
+        # would race; the second Popen overwrote the first's registration
+        # and the first subprocess became unkillable from the cancel
+        # endpoint. Plant a sentinel under the lock; _run_class_brush_only
+        # replaces it with the real Popen and pops it in its finally.
         with _rebrush_procs_lock:
             if fire_numbe in _rebrush_procs:
                 self._send_json(
                     {'error': 'A rebrush is already running for this fire'},
                     409)
                 return
+            _rebrush_procs[fire_numbe] = None  # claim sentinel
 
         try:
             raw = _read_envi_mask(source_path)
@@ -338,6 +344,13 @@ class RebrushRoutes:
         except Exception as exc:
             self._send_json({'error': f'Rebrush failed: {exc}'}, 500)
             return
+        finally:
+            # AUDIT-C5: drop the sentinel if no Popen ever replaced it
+            # (e.g., class_brush.exe missing or _read_envi_mask raised
+            # before _run_class_brush_only's own pop in its finally).
+            with _rebrush_procs_lock:
+                if _rebrush_procs.get(fire_numbe) is None:
+                    _rebrush_procs.pop(fire_numbe, None)
 
         brushed_px = int(brushed.sum()) if brushed is not None else 0
         raw_px     = int(raw.sum())

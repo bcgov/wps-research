@@ -64,12 +64,16 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
     # cause of batch-mapping failures on never-opened fires — the
     # guard no-op'd, crop_bin/hint_bin stayed empty, and the CLI
     # subprocess crashed on empty positional args.
-    if fire.status == FireStatus.PREPARING:
-        fire.error_msg = 'Cannot prepare: fire is currently preparing'
-        return
-
-    fire.status = FireStatus.PREPARING
-    fire.error_msg = ""
+    # AUDIT-C4: atomic test-and-set under state.lock. The check and the
+    # status flip must happen under the same lock; otherwise two callers
+    # both reading PENDING can both flip to PREPARING and race on
+    # crop_raster / VIIRS / preview output.
+    with state.lock:
+        if fire.status == FireStatus.PREPARING:
+            fire.error_msg = 'Cannot prepare: fire is currently preparing'
+            return
+        fire.status = FireStatus.PREPARING
+        fire.error_msg = ""
 
     pad = padding if padding is not None else state.padding
 
@@ -199,7 +203,13 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
             state.polygon_file, fire_numbe, state.raster_crs,
             crop_bin, perim_bin, geometry=clipped,
             crop_gt=crop_gt, crop_w=crop_w, crop_h=crop_h)
-    except Exception:
+    except Exception as exc:
+        # AUDIT-M3: log the actionable reason (CRS mismatch, OOM, polygon
+        # self-intersection) instead of silently dropping the perimeter.
+        sys.stderr.write(
+            f'[prepare] [{fire_numbe}] perimeter rasterize failed: '
+            f'{exc}\n')
+        sys.stderr.flush()
         perim_bin = None
     fire.perim_bin = perim_bin or ''
 
@@ -412,7 +422,16 @@ def _accept_fire_sync(fire_numbe: str) -> str:
     # sweeper treats cache_dir as hard-pinned for the duration.
     # Without this, _cache_sweep (which uses its own lock, not
     # _gpu_lock) could rmtree cache_dir mid-copy.
+    # AUDIT-C3: refuse re-entry for the same fire. The set is intended
+    # for cache-sweeper coordination, not mutual exclusion — but two
+    # concurrent accepts on the same fire would race fire_dir rmtree
+    # vs makedirs. Caller-side _gpu_lock currently serialises the only
+    # call sites, but make this contract explicit so a future caller
+    # that forgets the lock fails fast instead of corrupting fire_dir.
     with _accept_in_progress_lock:
+        if fire_numbe in _accept_in_progress:
+            raise RuntimeError(
+                f'Accept already in progress for {fire_numbe}')
         _accept_in_progress.add(fire_numbe)
     try:
         if os.path.isdir(fire_dir):
@@ -442,6 +461,31 @@ def _accept_fire_sync(fire_numbe: str) -> str:
                     continue
                 shutil.copy2(f, fire_dir)
 
+        # Per-view preview PNGs (pre, post, hint, diff1..diffN, result)
+        # live under cache_dir/previews/ — a subdirectory the top-level
+        # glob above never traverses. Without this copy the canonical
+        # accept dir loses every diff/anomaly group view as soon as the
+        # cache sweeper reaps .web_cache. Mirror the previews/ tree
+        # into the fire_dir, skipping per-run serial overlays which
+        # are gallery-only.
+        src_previews = os.path.join(cache_dir, 'previews')
+        if os.path.isdir(src_previews):
+            dst_previews = os.path.join(fire_dir, 'previews')
+            os.makedirs(dst_previews, exist_ok=True)
+            for fname in os.listdir(src_previews):
+                if fname.startswith('serial_'):
+                    continue
+                src = os.path.join(src_previews, fname)
+                if not os.path.isfile(src):
+                    continue
+                try:
+                    shutil.copy2(src, os.path.join(dst_previews, fname))
+                except OSError as exc:
+                    sys.stderr.write(
+                        f'[accept] [{fire_numbe}] previews copy '
+                        f'{fname}: {exc}\n')
+                    sys.stderr.flush()
+
         # Compute ML area from the accepted dir
         clf_bin = os.path.join(
             fire_dir, f'{fire_numbe}_crop.bin_classified.bin')
@@ -450,87 +494,91 @@ def _accept_fire_sync(fire_numbe: str) -> str:
         ml_area_m2 = (ml_area_ha * 10000.0) if ml_area_ha is not None else None
         fire.ml_area_ha = ml_area_val
 
+        # AUDIT-M4: yaml is a hard dependency; the prior `except ImportError`
+        # was unreachable. Run the dict construction inline and narrow the
+        # except to OSError around the actual disk write.
         # Write params YAML
-        try:
-            import yaml
-            params_dict = {
-                'fire': {
-                    'fire_numbe': fire_numbe,
-                    'fire_date': fire.fire_date,
-                    'fire_size_ha': fire.fire_size_ha,
-                    'ml_area_ha': ml_area_ha,
-                    'ml_area_m2': ml_area_m2,
-                    'agreement_pct': fire.agreement_pct,
-                    'notes': fire.notes or '',
-                },
-                'run': {
-                    'timestamp': datetime.datetime.now().isoformat(
-                        timespec='seconds'),
-                    'source': 'web',
-                },
-                'inputs': {
-                    'raster': state.raster_path,
-                    'perimeter_type': fire.perimeter_type,
-                },
-                'crop': {
-                    'padding': fire.padding_used,
-                    'width_px': fire.crop_w,
-                    'height_px': fire.crop_h,
-                    'total_px': fire.crop_w * fire.crop_h,
-                },
-                'sampling': {
-                    'sample_rate': state.sample_rate,
-                    'actual_sample_size': fire.sample_size,
-                },
-                'accumulation': {
-                    'start_date': fire.acc_start,
-                    'end_date': fire.acc_end,
-                },
+        params_dict = {
+            'fire': {
+                'fire_numbe': fire_numbe,
+                'fire_date': fire.fire_date,
+                'fire_size_ha': fire.fire_size_ha,
+                'ml_area_ha': ml_area_ha,
+                'ml_area_m2': ml_area_m2,
+                'agreement_pct': fire.agreement_pct,
+                'notes': fire.notes or '',
+            },
+            'run': {
+                'timestamp': datetime.datetime.now().isoformat(
+                    timespec='seconds'),
+                'source': 'web',
+            },
+            'inputs': {
+                'raster': state.raster_path,
+                'perimeter_type': fire.perimeter_type,
+            },
+            'crop': {
+                'padding': fire.padding_used,
+                'width_px': fire.crop_w,
+                'height_px': fire.crop_h,
+                'total_px': fire.crop_w * fire.crop_h,
+            },
+            'sampling': {
+                'sample_rate': state.sample_rate,
+                'actual_sample_size': fire.sample_size,
+            },
+            'accumulation': {
+                'start_date': fire.acc_start,
+                'end_date': fire.acc_end,
+            },
+        }
+        if fire.last_params:
+            # fire.last_params is a FLAT CLI-style dict (e.g.
+            # 'hdbscan_min_samples', 'tsne_perplexity', 'embed_bands',
+            # 'rf_n_estimators', 'brush_size'). The previous version
+            # expected nested sub-dicts under 'tsne'/'hdbscan'/
+            # 'random_forest' keys and silently wrote nothing, so
+            # every accepted YAML (and the PDF built from it) lost
+            # bands, t-SNE, RF, HDBSCAN, and brush settings. Group by
+            # prefix so readers can pull a whole stage without string
+            # parsing; unknown keys fall into 'misc'.
+            _prefix_to_section = (
+                ('tsne_',    'tsne'),
+                ('hdbscan_', 'hdbscan'),
+                ('rf_',      'random_forest'),
+                ('brush_',   'brush'),
+            )
+            _explicit = {
+                'embed_bands':       'bands',
+                'point_threshold':   'brush',
+                'controlled_ratio':  'random_forest',
+                'contour_width':     'output',
             }
-            if fire.last_params:
-                # fire.last_params is a FLAT CLI-style dict (e.g.
-                # 'hdbscan_min_samples', 'tsne_perplexity', 'embed_bands',
-                # 'rf_n_estimators', 'brush_size'). The previous version
-                # expected nested sub-dicts under 'tsne'/'hdbscan'/
-                # 'random_forest' keys and silently wrote nothing, so
-                # every accepted YAML (and the PDF built from it) lost
-                # bands, t-SNE, RF, HDBSCAN, and brush settings. Group by
-                # prefix so readers can pull a whole stage without string
-                # parsing; unknown keys fall into 'misc'.
-                _prefix_to_section = (
-                    ('tsne_',    'tsne'),
-                    ('hdbscan_', 'hdbscan'),
-                    ('rf_',      'random_forest'),
-                    ('brush_',   'brush'),
-                )
-                _explicit = {
-                    'embed_bands':       'bands',
-                    'point_threshold':   'brush',
-                    'controlled_ratio':  'random_forest',
-                    'contour_width':     'output',
-                }
-                # These are already represented in higher-level sections
-                # (crop/sampling). Skip to avoid duplication/conflicting
-                # values if the per-run override differs from the global.
-                _skip = {'padding', 'sample_rate', 'min_samples', 'max_samples'}
-                for k, v in fire.last_params.items():
-                    if v is None or v == '':
-                        continue
-                    if k in _skip:
-                        continue
-                    section = None
-                    for prefix, sec in _prefix_to_section:
-                        if k.startswith(prefix):
-                            section = sec
-                            break
-                    if section is None:
-                        section = _explicit.get(k, 'misc')
-                    params_dict.setdefault(section, {})[k] = v
+            # These are already represented in higher-level sections
+            # (crop/sampling). Skip to avoid duplication/conflicting
+            # values if the per-run override differs from the global.
+            _skip = {'padding', 'sample_rate', 'min_samples', 'max_samples'}
+            for k, v in fire.last_params.items():
+                if v is None or v == '':
+                    continue
+                if k in _skip:
+                    continue
+                section = None
+                for prefix, sec in _prefix_to_section:
+                    if k.startswith(prefix):
+                        section = sec
+                        break
+                if section is None:
+                    section = _explicit.get(k, 'misc')
+                params_dict.setdefault(section, {})[k] = v
 
-            path = os.path.join(fire_dir, f'{fire_numbe}_params.yaml')
+        path = os.path.join(fire_dir, f'{fire_numbe}_params.yaml')
+        try:
             _atomic_yaml_dump(path, params_dict, mode=0o644)
-        except ImportError:
-            pass
+        except OSError as exc:
+            sys.stderr.write(
+                f'[save] WARNING: {fire_numbe}_params.yaml: {exc}\n')
+            sys.stderr.flush()
 
         # Update fire_status.yaml (atomic write). Hold the file lock across
         # the read-modify-write so concurrent accepts of different fires
@@ -551,8 +599,13 @@ def _accept_fire_sync(fire_numbe: str) -> str:
                     'source': 'web',
                 }
                 _atomic_yaml_dump(status_path, idx)
-        except Exception:
-            pass
+        except Exception as exc:
+            # AUDIT-C2: don't swallow fire_status.yaml write failures
+            # silently — surface to stderr like other persistence helpers.
+            sys.stderr.write(
+                f'[save] WARNING: fire_status.yaml update failed for '
+                f'{fire_numbe}: {exc}\n')
+            sys.stderr.flush()
 
         # Clean up XML artefacts
         for xml in glob.glob(os.path.join(fire_dir, '*.xml')):
@@ -601,7 +654,16 @@ def _accept_fire_sync(fire_numbe: str) -> str:
                         writer.writeheader()
                         writer.writerows(existing)
                         writer.writerow(row_data)
+                        cf.flush()
+                        os.fsync(cf.fileno())
                     os.replace(tmp_path, csv_path)
+                    # AUDIT-C1: parent dir fsync — see AUDIT_REPORT.md.
+                    dir_fd = os.open(
+                        os.path.dirname(csv_path) or '.', os.O_RDONLY)
+                    try:
+                        os.fsync(dir_fd)
+                    finally:
+                        os.close(dir_fd)
                 finally:
                     if os.path.exists(tmp_path):
                         try:

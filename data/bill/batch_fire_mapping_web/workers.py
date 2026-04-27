@@ -717,6 +717,17 @@ def _serial_handle_cancel(fire, fire_numbe: str,
             except OSError:
                 pass
 
+        # AUDIT-H4: hold _gpu_lock only across cache_dir file operations
+        # and state mutations. Save and notification do their own disk
+        # I/O which doesn't need to block other GPU work — capture the
+        # variables we need into locals and run the slow calls outside
+        # the lock at the end of the function.
+        _branch = None  # 'A' (accept) | 'B' (kept) | 'C' (empty)
+        _revert = None
+        _kept_count = 0
+        _best_agreement = -1
+        _final_status = None
+
         if accept_promoted:
             with state.lock:
                 # Accept handler set serial_prev_status = ACCEPTED;
@@ -733,111 +744,127 @@ def _serial_handle_cancel(fire, fire_numbe: str,
             fire.console_log.append(
                 f'Serial mapping cancelled by accept — status set '
                 f'to {revert.value}.')
-            _save_fire_state()
-            sys.stderr.write(
-                f'[serial] {fire_numbe} accept-cancel → '
-                f'{revert.value}\n')
-            sys.stderr.flush()
-            return True
+            _branch = 'A'
+            _revert = revert
+        else:
+            # (B) — preserve gallery; promote best successful run.
+            successful = [r for r in fire.serial_results
+                          if r.get('agreement_pct', -1) >= 0
+                          and not r.get('is_previous')
+                          and r.get('classified')
+                          and os.path.isfile(r.get('classified', ''))]
+            if successful:
+                best = max(successful,
+                           key=lambda r: r['agreement_pct'])
+                try:
+                    best_comp = best.get('comparison', '')
+                    if best_comp and os.path.isfile(best_comp):
+                        main_comp = os.path.join(
+                            fire.cache_dir,
+                            f'{fire_numbe}_comparison.png')
+                        shutil.copy2(best_comp, main_comp)
+                        fire.last_comparison = main_comp
+                    best_clf = best.get('classified', '')
+                    if best_clf and os.path.isfile(best_clf):
+                        main_clf = os.path.join(
+                            fire.cache_dir,
+                            f'{fire_numbe}_crop.bin_classified.bin')
+                        shutil.copy2(best_clf, main_clf)
+                        best_hdr = (
+                            os.path.splitext(best_clf)[0] + '.hdr')
+                        if not os.path.isfile(best_hdr):
+                            best_hdr = best_clf + '.hdr'
+                        if os.path.isfile(best_hdr):
+                            shutil.copy2(
+                                best_hdr,
+                                os.path.splitext(main_clf)[0] + '.hdr')
+                        _generate_result_preview(fire)
+                except Exception:
+                    pass
+                with state.lock:
+                    fire.agreement_pct = best['agreement_pct']
+                    fire.ml_area_ha = best.get('ml_area_ha', -1.0)
+                    fire.last_params = best['params']
+                    # If the fire was already ACCEPTED before the sweep
+                    # started, keep that — the canonical dir is still on
+                    # disk and the user didn't explicitly un-accept.
+                    # Otherwise land on MAPPED so the fire is usable.
+                    prev = fire.serial_prev_status
+                    if prev == FireStatus.ACCEPTED:
+                        fire.status = FireStatus.ACCEPTED
+                    else:
+                        fire.status = FireStatus.MAPPED
+                    fire.serial_canceled = False
+                    fire.serial_prev_status = None
+                    fire.serial_accept_promoted = False
+                    fire.progress = {}
+                    state.current_job = None
+                fire.console_log.append(
+                    f'Serial mapping cancelled — kept gallery '
+                    f'({len(successful)} run(s)); best: run '
+                    f'{best["run_id"]} '
+                    f'(agreement={best["agreement_pct"]}%). '
+                    f'Click Map Fire again to discard and re-sweep.')
+                _branch = 'B'
+                _kept_count = len(successful)
+                _best_agreement = best['agreement_pct']
+                _final_status = fire.status
+            else:
+                # No successful runs — nothing worth keeping. Revert to
+                # pre-sweep status and clear serial_results so the UI
+                # doesn't show a gallery of error cards for a fire that
+                # now has no data.
+                with state.lock:
+                    revert = (fire.serial_prev_status
+                              or FireStatus.PENDING)
+                    fire.status = revert
+                    fire.serial_results = []
+                    fire.serial_canceled = False
+                    fire.serial_prev_status = None
+                    fire.serial_accept_promoted = False
+                    fire.progress = {}
+                    state.current_job = None
+                fire.console_log.append(
+                    f'Serial mapping cancelled — no successful runs, '
+                    f'status restored to {revert.value}.')
+                _branch = 'C'
+                _revert = revert
 
-        # (B) — preserve gallery; promote best successful run.
-        successful = [r for r in fire.serial_results
-                      if r.get('agreement_pct', -1) >= 0
-                      and not r.get('is_previous')
-                      and r.get('classified')
-                      and os.path.isfile(r.get('classified', ''))]
-        if successful:
-            best = max(successful,
-                       key=lambda r: r['agreement_pct'])
-            try:
-                best_comp = best.get('comparison', '')
-                if best_comp and os.path.isfile(best_comp):
-                    main_comp = os.path.join(
-                        fire.cache_dir,
-                        f'{fire_numbe}_comparison.png')
-                    shutil.copy2(best_comp, main_comp)
-                    fire.last_comparison = main_comp
-                best_clf = best.get('classified', '')
-                if best_clf and os.path.isfile(best_clf):
-                    main_clf = os.path.join(
-                        fire.cache_dir,
-                        f'{fire_numbe}_crop.bin_classified.bin')
-                    shutil.copy2(best_clf, main_clf)
-                    best_hdr = (
-                        os.path.splitext(best_clf)[0] + '.hdr')
-                    if not os.path.isfile(best_hdr):
-                        best_hdr = best_clf + '.hdr'
-                    if os.path.isfile(best_hdr):
-                        shutil.copy2(
-                            best_hdr,
-                            os.path.splitext(main_clf)[0] + '.hdr')
-                    _generate_result_preview(fire)
-            except Exception:
-                pass
-            with state.lock:
-                fire.agreement_pct = best['agreement_pct']
-                fire.ml_area_ha = best.get('ml_area_ha', -1.0)
-                fire.last_params = best['params']
-                # If the fire was already ACCEPTED before the sweep
-                # started, keep that — the canonical dir is still on
-                # disk and the user didn't explicitly un-accept.
-                # Otherwise land on MAPPED so the fire is usable.
-                prev = fire.serial_prev_status
-                if prev == FireStatus.ACCEPTED:
-                    fire.status = FireStatus.ACCEPTED
-                else:
-                    fire.status = FireStatus.MAPPED
-                fire.serial_canceled = False
-                fire.serial_prev_status = None
-                fire.serial_accept_promoted = False
-                fire.progress = {}
-                state.current_job = None
-            fire.console_log.append(
-                f'Serial mapping cancelled — kept gallery '
-                f'({len(successful)} run(s)); best: run '
-                f'{best["run_id"]} '
-                f'(agreement={best["agreement_pct"]}%). '
-                f'Click Map Fire again to discard and re-sweep.')
-            _save_fire_state()
-            _push_notification(
-                session_hash, 'info',
-                f'Mapping cancelled — {fire_numbe}',
-                f'Kept {len(successful)} run(s); best agreement '
-                f'{best["agreement_pct"]}%.',
-                fire=fire_numbe,
-                action={'url': f'/fire/{fire_numbe}',
-                        'label': 'Open fire'})
-            sys.stderr.write(
-                f'[serial] {fire_numbe} user-cancel → '
-                f'{fire.status.value} ({len(successful)} kept)\n')
-            sys.stderr.flush()
-            return True
-
-        # No successful runs — nothing worth keeping. Revert to
-        # pre-sweep status and clear serial_results so the UI
-        # doesn't show a gallery of error cards for a fire that
-        # now has no data.
-        with state.lock:
-            revert = fire.serial_prev_status or FireStatus.PENDING
-            fire.status = revert
-            fire.serial_results = []
-            fire.serial_canceled = False
-            fire.serial_prev_status = None
-            fire.serial_accept_promoted = False
-            fire.progress = {}
-            state.current_job = None
-        fire.console_log.append(
-            f'Serial mapping cancelled — no successful runs, '
-            f'status restored to {revert.value}.')
+    # AUDIT-H4: _gpu_lock released. Save and notify outside so disk
+    # I/O does not block concurrent mapping/rebrush requests for other
+    # fires.
+    if _branch == 'A':
+        _save_fire_state()
+        sys.stderr.write(
+            f'[serial] {fire_numbe} accept-cancel → '
+            f'{_revert.value}\n')
+        sys.stderr.flush()
+        return True
+    if _branch == 'B':
         _save_fire_state()
         _push_notification(
-            session_hash, 'warning',
+            session_hash, 'info',
             f'Mapping cancelled — {fire_numbe}',
-            'No successful runs. Status restored.',
-            fire=fire_numbe)
+            f'Kept {_kept_count} run(s); best agreement '
+            f'{_best_agreement}%.',
+            fire=fire_numbe,
+            action={'url': f'/fire/{fire_numbe}',
+                    'label': 'Open fire'})
+        sys.stderr.write(
+            f'[serial] {fire_numbe} user-cancel → '
+            f'{_final_status.value} ({_kept_count} kept)\n')
+        sys.stderr.flush()
+        return True
+    # _branch == 'C'
+    _save_fire_state()
+    _push_notification(
+        session_hash, 'warning',
+        f'Mapping cancelled — {fire_numbe}',
+        'No successful runs. Status restored.',
+        fire=fire_numbe)
     sys.stderr.write(
         f'[serial] {fire_numbe} user-cancel (empty) → '
-        f'{revert.value}\n')
+        f'{_revert.value}\n')
     sys.stderr.flush()
     return True
 

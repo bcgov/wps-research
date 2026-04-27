@@ -1,11 +1,15 @@
 # batch_fire_mapping_web
 
-*Last updated: April 26, 2026 — README rewritten end-to-end. Reflects the
-fully-modular layout: `app.py` reduced from ~4,600 lines to ~440 by
-extracting `auth`, `notifications`, `cache_retention`, `progress`,
+*Last updated: April 27, 2026 — correctness audit pass. Critical and
+High items from `AUDIT_REPORT.md` (parent-dir fsync, TOCTOU on
+`fire.status` test-and-set, re-entrant accept guard, NaN leak into
+`fire_size_ha`, single-pass template substitution, startup sweep of
+stale tmp files, save/notify outside `_gpu_lock`) are fixed. The
+package layout is unchanged: `app.py` remains the thin composition root
+that wires `auth`, `notifications`, `cache_retention`, `progress`,
 `mapping`, `persistence`, `brush`, `io_utils`, `templates`, `validation`,
 `mapping_cmd`, `prepare`, `workers`, and the `handlers/` subpackage.
-`FireHandler` is now pure mixin composition — no inline route methods.*
+`FireHandler` is pure mixin composition — no inline route methods.*
 
 Interactive web interface for mapping wildfire burn areas from
 Sentinel‑2 satellite imagery. The system runs a GPU‑accelerated machine
@@ -97,7 +101,7 @@ nodes and the dependency graph is kept minimal.
                              │ init_app(app_state)
                              ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│  app.py — composition root (~440 lines)                          │
+│  app.py — composition root (~450 lines)                          │
 │   • module-level locks/registries (gpu_lock, batch_thread, etc)  │
 │   • subprocess plumbing (_stream_subprocess, watchdog, sigterm)  │
 │   • init_app() wires every sibling module in order               │
@@ -203,8 +207,9 @@ provides.
 
 `__main__.py` calls `_year_from_filename` on each raster path. The
 detector looks for a 4-digit year token bracketed by non-digits in the
-filename (any of `2018..2099`). Two rasters mapping to the same year
-is a fatal error at launch.
+filename (range `[1970, now_year + 1]`). Multiple year-like tokens in
+a single filename, no year token at all, or two rasters that map to
+the same year are all fatal errors at launch.
 
 ### Active year
 
@@ -613,25 +618,39 @@ honored for the IP access control layer.
 ## Persistence and crash recovery
 
 Every state-changing endpoint persists immediately through
-`io_utils._atomic_yaml_dump`, which writes to `<file>.tmp`, fsyncs,
-then `os.replace`s into place. The pattern guarantees that a crash
-mid-write leaves either the old file intact or the new file fully
-written — never partial.
+`io_utils._atomic_yaml_dump`, which writes to `<file>.<pid>.<tid>.tmp`,
+fsyncs the file, `os.replace`s into place, and **then fsyncs the
+parent directory**. The directory fsync is what makes the rename
+durable — POSIX guarantees `rename` is atomic, not durable, so
+without it a power loss right after `os.replace` can lose the new
+file even though `os.fsync` on the file content succeeded. The same
+pattern is applied to the open-coded CSV writer for
+`accepted_params.csv` in `prepare.py`.
 
-On restart:
+On restart, `init_app` first sweeps any stale `*.<pid>.<tid>.tmp`
+files older than 24h from `output_root` and `shared_root` so a
+previous SIGKILL'd process doesn't leak orphan tmp files. Then:
+
 - `_load_fire_state` rebuilds `state.fires` from `fire_state.yaml`,
   filters every `available_views` entry against the actual on-disk
   PNGs (a manual `.web_cache` wipe cannot leave the UI asking for a
   vanished view), and restores in-flight statuses to safe terminal
-  ones (`MAPPING` → `READY`, `PREPARING` → `PENDING`).
+  ones (`MAPPING` → `READY`, `PREPARING` → `PENDING`). If
+  `fire_state.yaml` itself fails to parse, the file is copied aside
+  to `fire_state.yaml.corrupt-<ts>` (the copy is fsynced, parent dir
+  too, so the only forensic evidence survives a subsequent crash)
+  and `state.fire_state_load_failed` is set, blocking subsequent
+  saves until an operator clears it.
 - `_load_notifications` restores in-flight toasts and per-session
   cursors.
 - Sessions, IP access list, settings overrides, presets, stage
   timings, and cache-retention config all reload from their YAMLs.
 
 Concurrent-write safety: `_atomic_yaml_dump` is itself atomic at the
-filesystem level, and the `_accept_file_lock` (for `accepted_params.csv`)
-serialises accept-time CSV mutations across all routes.
+filesystem level (each writer uses a unique `<pid>.<tid>` tmp suffix
+so concurrent writers do not clobber each other's tmp file), and the
+`_accept_file_lock` (for `accepted_params.csv`) serialises
+accept-time CSV mutations across all routes.
 
 ---
 
@@ -770,15 +789,15 @@ grouped by role.
 |---|---|
 | `__init__.py` | Empty package marker. |
 | `__main__.py` | The `python -m batch_fire_mapping_web` entry point. Parses arguments, validates polygon and raster paths, builds the `{year → raster/outdir/viirs_dir}` registry via `_year_from_filename`, resolves the initial active year, prepares VIIRS for every detected year (so subsequent year-switches are O(1)), filters polygons against the active year's raster extent, constructs an `AppState`, calls `app.init_app`, starts `cache_retention._cache_sweep_loop` in a daemon thread, then runs `app.create_server(...).serve_forever()`. |
-| `app.py` | Composition root (~440 lines). Holds `init_app` (which calls every sibling module's `init` in dependency order), the shared module-level locks/registries (`_gpu_lock`, `_gpu_queue`, `_batch_thread`, `_serial_procs`, `_rebrush_procs`, `_accept_in_progress`, `_accept_file_lock`), the subprocess plumbing (`_stream_subprocess` with idle-watchdog timer, `_terminate_serial_proc`), the small in-app helpers `_set_fire_status`, `_clone_setting`, `_get_recommended_settings`, the canonical CSV fieldnames, `_wire_handlers` (builds the helpers dict and calls each handler mixin's `init`), the `FireHandler` class (pure mixin composition — every route method body lives in `handlers/`), and `create_server`. Re-exports every name extracted into a sibling module so external callers and `__main__.py` need no changes. |
+| `app.py` | Composition root (~450 lines). Holds `init_app` (which calls every sibling module's `init` in dependency order, plus a startup sweep of stale `*.<pid>.<tid>.tmp` files via `_sweep_stale_tmp_files`), the shared module-level locks/registries (`_gpu_lock`, `_gpu_queue`, `_batch_thread`, `_serial_procs`, `_rebrush_procs`, `_accept_in_progress`, `_accept_file_lock`), the subprocess plumbing (`_stream_subprocess` with idle-watchdog timer, `_terminate_serial_proc`), the small in-app helpers `_set_fire_status`, `_clone_setting`, `_get_recommended_settings`, the canonical CSV fieldnames, `_wire_handlers` (builds the helpers dict and calls each handler mixin's `init`), the `FireHandler` class (pure mixin composition — every route method body lives in `handlers/`), and `create_server`. Re-exports every name extracted into a sibling module so external callers and `__main__.py` need no changes. |
 
 ### Shared data and helpers
 
 | File | Purpose |
 |---|---|
 | `state.py` | Data classes for app-wide state. `FireStatus` is the status enum. `FireInfo` is the per-fire dataclass — `fire_numbe`, `fire_date`, `fire_year`, `fire_size_ha` (required); status, error_msg, the per-fire cache paths (`cache_dir`, `crop_bin`, `hint_bin`, `perim_bin`, `viirs_bin`), crop dims and `padding_used`, accumulation date window, `available_views`, results (`last_comparison`, `last_params`, `ml_area_ha`, `agreement_pct`), tracking flags (`previously_accepted`, `hidden`, `notes`), the `console_log` deque, the serial-sweep fields (`serial_results`, `serial_settings`, `serial_canceled`, `serial_prev_status`, `serial_accept_promoted`, `serial_accept_event`), the live `progress` dict, plus `last_preset` and `last_cancel_reason`. `AppState` is the global container — fires dict, raster/polygon GeoDataFrames, the multi-year registry (`active_year`, `shared_root`, `rasters_by_year`, `outdirs_by_year`, `viirs_shp_dirs_by_year`, `polygon_gdf_raw`), per-deployment defaults, the auth/session/IP state, the operational state (`stage_timings`, `notifications`, `broadcast_cursor`, `cache_retention`, `presets`, etc.), and an `RLock` used for read-modify-write of any shared mutable field. |
-| `io_utils.py` | `_atomic_yaml_dump(path, payload)` — the tmp-file + fsync + `os.replace` pattern used by every persistence module. Stateless. |
-| `templates.py` | `_html_escape` (the four-character XSS-safe escape) and `render_template` (whole-file substitution: load a `.html` from the templates directory and replace `{{KEY}}` placeholders with their values). |
+| `io_utils.py` | `_atomic_yaml_dump(path, payload, mode=0o600)` — the durable atomic-write pattern used by every persistence module: write to `<path>.<pid>.<tid>.tmp`, fsync the file, `os.replace` into place, then fsync the parent directory so the rename itself reaches disk. `_sweep_stale_tmp_files(roots, max_age_seconds=86400)` — startup helper that removes `*.<pid>.<tid>.tmp` files older than the threshold from each root, called once from `init_app`. Stateless. |
+| `templates.py` | `_html_escape` (the five-character XSS-safe escape covering `&`, `<`, `>`, `"`, `'`) and `render_template` (load a `.html` from the templates directory and resolve placeholders in a single regex pass: `{{ key }}` substitutes the HTML-escaped context value, `{{{ key }}}` substitutes the raw value for known-safe insertion. The single-pass walk means a context value containing placeholder syntax is treated as literal output — placeholders cannot recursively reference other context keys). |
 | `validation.py` | Pure-function parameter validation. `_PARAM_SPEC` is a dict mapping every CLI parameter to its kind (`int` / `float` / `choice` / `bool`) and bounds. `_validate_param(key, raw)` casts and bounds-checks one parameter; raises `ValueError` on any failure; returns the raw value for unknown keys. `_validate_embed_bands(eb)` validates a comma-separated band string (1-indexed, 1..999), tolerates whitespace and trailing commas, returns the cleaned string or `None` for empty input. |
 | `preview.py` | ENVI header parsing, band detection, and preview PNG generation. |
 | `recommended_settings.yaml` | Operator-tunable presets and the ordered settings list for "Map with Settings". See [Recommended settings](#recommended-settings). |
@@ -795,8 +814,8 @@ grouped by role.
 | `persistence.py` | All on-disk YAML persistence: `_save_sessions`, `_save_settings`, `_save_notes`, `_save_ip_list`, `_save_fire_state`, `_load_fire_state` (filters `available_views` against on-disk PNGs — see [Persistence and crash recovery](#persistence-and-crash-recovery)), `_save_active_year`, `_switch_year`. Wired by `persistence.init(app_state, _rebrush_procs, _rebrush_procs_lock, _compute_agreement, _compute_ml_area, _push_notification)`. **Init order matters**: `persistence.init` must run before `cache_retention.init`. |
 | `brush.py` | C++ `class_brush.exe` wrapper + figure renderers used by the rebrush flow: `_class_brush_exe` (locator), `_read_envi_mask` / `_write_envi_mask_like` (ENVI mask IO), `_run_class_brush_only` (subprocess runner with intermediate-file cleanup and registry-based cancel), `_align_mask_to_crop_frame` (geotransform-aware resampler), `_render_comparison_png`, `_render_ml_classification_png`, `_render_brush_comparison_png`. Wired by `brush.init(app_state, _rebrush_procs, _rebrush_procs_lock)` so the cancel handler in `app.py` and the cache pin logic in `cache_retention.py` share the same registry. |
 | `mapping_cmd.py` | `_build_mapping_cmd(fire, params, save_state=None, load_state=None) -> list[str]`: assembles the `fire_mapping_cli.py` argv from a fire + a params dict, applies `validation._validate_param` to every entry, computes the bounds-checked sample size from `crop_w*crop_h*sample_rate`, and injects the `-u` flag for line-buffered child stdout. Wired by `mapping_cmd.init(app_state)`. |
-| `prepare.py` | Synchronous prepare + accept flow. `_prepare_fire_sync(fire_numbe, padding=None)` — crops the raster + VIIRS to the fire bounding box (with padding), accumulates VIIRS hot pixels into a hint mask, generates preview PNGs, and writes the per-fire `.web_cache/<FIRE>/` layout. Refuses re-entry when the fire is already in PREPARING (but explicitly allows MAPPING, because the serial worker calls this re-entry to handle padding changes mid-sweep). `_ensure_brush_comparison_in_cache` makes sure the brush comparison PNG exists for the gallery view. `_accept_fire_sync` is the canonical accept implementation — copies the chosen run from `.web_cache/` into `<output_root>/<FIRE>/`, appends a row to `accepted_params.csv` under `_accept_file_lock`, and registers/deregisters from `_accept_in_progress` so the cache sweeper holds off mid-copy. Wired by `prepare.init(app_state, _set_fire_status, _accept_in_progress, _accept_in_progress_lock, _accept_file_lock, _CSV_FIELDNAMES)`. |
-| `workers.py` | Mapping worker family. **Top-level entry points**: `_batch_map_worker(fire_numbes, session_hash)` drives a list of fires sequentially, delegating each to `_serial_map_worker`; `_serial_map_worker(fire_numbe, settings, k_runs, k_jitter, session_hash)` runs the N×K sweep for one fire by walking the five phase helpers (`_serial_setup` → `_serial_snapshot_run0` → `_serial_run_replicate` looped → `_serial_handle_cancel` → `_serial_finalize`). `_jitter_hdbscan(base, run_idx, step)` returns a fan-out-jittered min-samples value. Wired by `workers.init(app_state, helpers)` — the helpers dict supplies `_gpu_lock`, `_batch_cancel`, `_SUBPROCESS_SILENCE_TIMEOUT`, plus the small in-app helpers (`_set_fire_status`, `_get_recommended_settings`, `_clone_setting`, `_stream_subprocess`) that each reach back into `app.py`'s module-level state. Sibling-module functions like `_save_fire_state`, `_compute_agreement`, `_compute_ml_area`, `_overlay_mask_on_post`, `_generate_result_preview`, `_build_mapping_cmd`, `_prepare_fire_sync`, `_save_stage_timings`, `_push_notification` are imported directly. |
+| `prepare.py` | Synchronous prepare + accept flow. `_prepare_fire_sync(fire_numbe, padding=None)` — crops the raster + VIIRS to the fire bounding box (with padding), accumulates VIIRS hot pixels into a hint mask, generates preview PNGs, and writes the per-fire `.web_cache/<FIRE>/` layout. The `PREPARING` test-and-flip is atomic under `state.lock` so two concurrent prepares cannot both pass the guard and race on cache files; MAPPING is allowed through because the serial worker calls back into prepare to handle mid-sweep padding changes. Rasterize-polygon failures are logged to stderr instead of silently dropping the perimeter. `_ensure_brush_comparison_in_cache` makes sure the brush comparison PNG exists for the gallery view. `_accept_fire_sync` is the canonical accept implementation — refuses re-entry for the same fire (raises `RuntimeError` if `fire_numbe` is already in `_accept_in_progress`), copies the chosen run from `.web_cache/` into `<output_root>/<FIRE>/`, appends a row to `accepted_params.csv` (open-coded atomic write with file fsync + parent-dir fsync) under `_accept_file_lock`, and registers/deregisters from `_accept_in_progress` so the cache sweeper holds off mid-copy. Failures to update `fire_status.yaml` log a WARNING to stderr instead of being silently swallowed. Wired by `prepare.init(app_state, _set_fire_status, _accept_in_progress, _accept_in_progress_lock, _accept_file_lock, _CSV_FIELDNAMES)`. |
+| `workers.py` | Mapping worker family. **Top-level entry points**: `_batch_map_worker(fire_numbes, session_hash)` drives a list of fires sequentially, delegating each to `_serial_map_worker`; `_serial_map_worker(fire_numbe, settings, k_runs, k_jitter, session_hash)` runs the N×K sweep for one fire by walking the five phase helpers (`_serial_setup` → `_serial_snapshot_run0` → `_serial_run_replicate` looped → `_serial_handle_cancel` → `_serial_finalize`). `_serial_handle_cancel` does its file operations and state mutations under `_gpu_lock`, captures the values it needs into locals, and only then drops the lock to call `_save_fire_state` and `_push_notification` — disk I/O for one fire's cancel cleanup never blocks mapping/rebrush requests on a different fire. `_jitter_hdbscan(base, run_idx, step)` returns a fan-out-jittered min-samples value. Wired by `workers.init(app_state, helpers)` — the helpers dict supplies `_gpu_lock`, `_batch_cancel`, `_SUBPROCESS_SILENCE_TIMEOUT`, plus the small in-app helpers (`_set_fire_status`, `_get_recommended_settings`, `_clone_setting`, `_stream_subprocess`) that each reach back into `app.py`'s module-level state. Sibling-module functions like `_save_fire_state`, `_compute_agreement`, `_compute_ml_area`, `_overlay_mask_on_post`, `_generate_result_preview`, `_build_mapping_cmd`, `_prepare_fire_sync`, `_save_stage_timings`, `_push_notification` are imported directly. |
 
 ### Handler subpackage
 
@@ -816,9 +835,9 @@ shared state through these module-level names at call time.
 | `handlers/auth.py` | Login page, login POST, logout, admin dashboard page, IP-list admin endpoints, session/IP status JSON for the UI top bar. |
 | `handlers/fire_list.py` | Home page (fire list HTML), per-fire mapping page HTML, paginated fires JSON, hidden-fires JSON, per-fire notes / hide / unhide. |
 | `handlers/fire.py` | Per-fire status / console / progress JSON, per-view preview PNG GETs, comparison and brush-comparison PNG GETs, prepare POST, abort POST. |
-| `handlers/mapping.py` | Single-shot SSE mapping (`handle_api_map` — relocated here from `app.py` after the container refactor), accept POST, recommended-settings GET/POST, default-settings GET/POST, presets GET, per-fire preset POST. |
-| `handlers/serial.py` | Serial-map start, cancel, results gallery JSON, per-run image GET, accept-best POST. Spawns the worker thread that calls `workers._serial_map_worker`. |
-| `handlers/rebrush.py` | Rebrush start (registers in `_rebrush_procs`, runs `class_brush.exe` only, generates the new comparison PNG), rebrush cancel, brush-state IO. |
+| `handlers/mapping.py` | Single-shot SSE mapping (`handle_api_map` — relocated here from `app.py` after the container refactor), accept POST, recommended-settings GET/POST, default-settings GET/POST, presets GET, per-fire preset POST. The single-shot map flips `fire.status` to `MAPPING` atomically under `state.lock` before joining the GPU queue, so two simultaneous POSTs cannot both enqueue duplicate runs. |
+| `handlers/serial.py` | Serial-map start, cancel, results gallery JSON, per-run image GET, accept-best POST. Spawns the worker thread that calls `workers._serial_map_worker`. The MAPPING test-and-set (and the snapshotting of `serial_prev_status`, `serial_results`, `serial_settings`, `console_log`, `progress`) runs under `state.lock` before the worker thread is spawned. |
+| `handlers/rebrush.py` | Rebrush start (atomically claims the `_rebrush_procs[fire_numbe]` slot under `_rebrush_procs_lock` with a `None` sentinel, then `class_brush.exe` replaces the sentinel with its real `Popen`; sentinel is freed by a `finally` if no Popen ever ran), rebrush cancel, brush-state IO. |
 | `handlers/batch.py` | Batch start (`handle_api_batch_map` — relocated here from `app.py`; admin-only), status JSON, batch cancel POST. |
 | `handlers/ops.py` | Queue / notifications / cache / years / year-switch / diagnostic-report / cancel-audit endpoints. |
 | `handlers/static.py` | Serves files from `static/` with content-type detection. Path traversal is rejected. |
@@ -859,11 +878,16 @@ shared state through these module-level names at call time.
   handler mixins (which were generated with `from app import …` in
   mind) keep working unchanged. When you extract a new name, add
   the re-export.
-- **Tests**: there is no formal test suite, but the wiring layer is
-  exercised end-to-end by the live server and by the in-package
-  smoke checks documented in the maintenance log. The
-  `_wire_handlers` helpers dict is the primary point of failure for
-  refactors — every mixin must end up `is`-identical to `app` for
-  every shared name.
+- **Tests**: an audit-driven test suite lives under `tests/audit/`
+  (run `bash tests/audit/run_all.sh`). It covers atomic-YAML write
+  invariants, auth helpers, cache retention pin/evict logic, the
+  CSV race, fire-numbe regex, fire-state round-trip, jitter fan-out,
+  notifications, progress / stage detection, template substitution,
+  parameter validation, year detection, and handler concurrency
+  (the test-and-set patterns from `AUDIT_REPORT.md` items C3/C4/C5
+  are exercised in `test_handler_concurrency.py`). A baseline run
+  should report 284 pass / 0 fail. The `_wire_handlers` helpers dict
+  is the primary point of failure for refactors — every mixin must
+  end up `is`-identical to `app` for every shared name.
 
 ---
