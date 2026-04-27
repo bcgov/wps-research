@@ -4,12 +4,14 @@
 High items from `AUDIT_REPORT.md` (parent-dir fsync, TOCTOU on
 `fire.status` test-and-set, re-entrant accept guard, NaN leak into
 `fire_size_ha`, single-pass template substitution, startup sweep of
-stale tmp files, save/notify outside `_gpu_lock`) are fixed. The
-package layout is unchanged: `app.py` remains the thin composition root
-that wires `auth`, `notifications`, `cache_retention`, `progress`,
-`mapping`, `persistence`, `brush`, `io_utils`, `templates`, `validation`,
-`mapping_cmd`, `prepare`, `workers`, and the `handlers/` subpackage.
-`FireHandler` is pure mixin composition — no inline route methods.*
+stale tmp files, save/notify outside `_gpu_lock`) are fixed. Accept
+now also emits `<FIRE>.shp` (source CRS) and `<FIRE>.kml` (EPSG:4326)
+via the new `kml` module. The package layout: `app.py` remains the
+thin composition root that wires `auth`, `notifications`,
+`cache_retention`, `progress`, `mapping`, `persistence`, `brush`,
+`kml`, `io_utils`, `templates`, `validation`, `mapping_cmd`,
+`prepare`, `workers`, and the `handlers/` subpackage. `FireHandler`
+is pure mixin composition — no inline route methods.*
 
 Interactive web interface for mapping wildfire burn areas from
 Sentinel‑2 satellite imagery. The system runs a GPU‑accelerated machine
@@ -147,6 +149,11 @@ earlier. Handlers import from siblings but not vice‑versa.
   this server drives)
 - **`class_brush.exe`** built from `cpp/class_brush.cpp` (the C++
   morphological-brush helper used by the rebrush flow)
+- **`ogr2ogr`** on PATH and **`py/binary_polygonize.py`** on disk
+  for the KML/shapefile export at accept time. The polygonize path
+  defaults to `/home/bill/GitHub/wps-research/py/binary_polygonize.py`
+  and can be overridden with the `WPS_BINARY_POLYGONIZE` env var.
+  KML failures warn but do not abort an accept.
 
 The web layer never imports the GPU pipeline directly — it spawns the
 CLI as a subprocess and parses its stdout for stage markers.
@@ -376,6 +383,9 @@ Below the console is the gallery of serial-map runs (visible after
    not evict the cache_dir mid-copy).
 3. Copies the run's classified.bin / hdr / overlay / comparison PNG /
    raw.bin from the `.web_cache` dir into `<out_root>/<FIRE>/`.
+3a. Generates `<FIRE>.shp` (source CRS) and `<FIRE>.kml` (EPSG:4326)
+    by polygonizing the classified raster. KML failures warn-and-
+    continue — they do not abort the accept.
 4. Sets `serial_accept_promoted = True` and `serial_canceled = True`
    on the fire so the worker's cancel path will tear down the
    gallery cleanly when it picks up the signal.
@@ -587,9 +597,12 @@ so callers can mutate without polluting the canonical list.
 │   │           ├── pre.png, post.png, hint.png, ...
 │   │           └── result.png
 │   └── <FIRE_NUMBER>/            # promoted-on-accept canonical dir
-│       ├── <FIRE>_crop.bin_classified.bin
+│       ├── <FIRE>_crop.bin_classified.bin   # final raster (source CRS)
+│       ├── <FIRE>.shp / .shx / .dbf / .prj  # polygons in source CRS
+│       ├── <FIRE>.kml                       # polygons in WGS84
 │       ├── <FIRE>_comparison.png
-│       └── <FIRE>_brush_comparison.png
+│       ├── <FIRE>_brush_comparison.png
+│       └── <FIRE>_params.yaml
 └── <raster_stem_year_B>_mapping_results/
     └── …                         # same shape, different year
 ```
@@ -812,9 +825,10 @@ grouped by role.
 | `progress.py` | Stage-aware progress tracking: `_STAGE_MARKERS` (substring → stage table), `_detect_stage`, the canonical stage-order constants, the `_ProgressTracker` class consumed by `_stream_subprocess`'s `on_line` hook, `_progress_snapshot` (run-duration-median ETA), and stage-timing persistence (`_save_stage_timings` / `_load_stage_timings`). Wired by `progress.init(app_state)`. |
 | `mapping.py` | Result helpers used after a mapping run completes: `_compute_ml_area` (burned hectares from a classified raster), `_compute_agreement` (IoU% between ML mask and hint, with cross-extent geotransform alignment), `_overlay_mask_on_post` (tinted preview PNG with geotransform alignment), `_generate_result_preview` (calls `_overlay_mask_on_post` for the result + hint). Wired by `mapping.init(app_state)`. |
 | `persistence.py` | All on-disk YAML persistence: `_save_sessions`, `_save_settings`, `_save_notes`, `_save_ip_list`, `_save_fire_state`, `_load_fire_state` (filters `available_views` against on-disk PNGs — see [Persistence and crash recovery](#persistence-and-crash-recovery)), `_save_active_year`, `_switch_year`. Wired by `persistence.init(app_state, _rebrush_procs, _rebrush_procs_lock, _compute_agreement, _compute_ml_area, _push_notification)`. **Init order matters**: `persistence.init` must run before `cache_retention.init`. |
+| `kml.py` | KML/shapefile export at accept time. `_export_kml(fire_numbe, fire_dir)` runs `binary_polygonize.py` on `<FIRE>_crop.bin_classified.bin` (in `fire_dir`), renames the verbose `<FIRE>_crop.bin_classified.bin.{shp,shx,dbf,prj,cpg}` sidecars to `<FIRE>.{shp,shx,dbf,prj,cpg}`, deletes the wrong-CRS leftover KML that polygonize emits as a side effect, then runs `ogr2ogr -f KML -t_srs EPSG:4326 -overwrite` to produce `<FIRE>.kml` reprojected to WGS84 for Google Earth. Polygonize exits with status 1 even on success — success is verified by checking the `.shp` exists on disk; on failure the captured stderr's last 3 lines are surfaced in the warning. Path to `binary_polygonize.py` is overridable via the `WPS_BINARY_POLYGONIZE` environment variable. Failures warn-and-return-`None`; the function never raises so KML problems cannot abort an accept. Stateless (no `init`). |
 | `brush.py` | C++ `class_brush.exe` wrapper + figure renderers used by the rebrush flow: `_class_brush_exe` (locator), `_read_envi_mask` / `_write_envi_mask_like` (ENVI mask IO), `_run_class_brush_only` (subprocess runner with intermediate-file cleanup and registry-based cancel), `_align_mask_to_crop_frame` (geotransform-aware resampler), `_render_comparison_png`, `_render_ml_classification_png`, `_render_brush_comparison_png`. Wired by `brush.init(app_state, _rebrush_procs, _rebrush_procs_lock)` so the cancel handler in `app.py` and the cache pin logic in `cache_retention.py` share the same registry. |
 | `mapping_cmd.py` | `_build_mapping_cmd(fire, params, save_state=None, load_state=None) -> list[str]`: assembles the `fire_mapping_cli.py` argv from a fire + a params dict, applies `validation._validate_param` to every entry, computes the bounds-checked sample size from `crop_w*crop_h*sample_rate`, and injects the `-u` flag for line-buffered child stdout. Wired by `mapping_cmd.init(app_state)`. |
-| `prepare.py` | Synchronous prepare + accept flow. `_prepare_fire_sync(fire_numbe, padding=None)` — crops the raster + VIIRS to the fire bounding box (with padding), accumulates VIIRS hot pixels into a hint mask, generates preview PNGs, and writes the per-fire `.web_cache/<FIRE>/` layout. The `PREPARING` test-and-flip is atomic under `state.lock` so two concurrent prepares cannot both pass the guard and race on cache files; MAPPING is allowed through because the serial worker calls back into prepare to handle mid-sweep padding changes. Rasterize-polygon failures are logged to stderr instead of silently dropping the perimeter. `_ensure_brush_comparison_in_cache` makes sure the brush comparison PNG exists for the gallery view. `_accept_fire_sync` is the canonical accept implementation — refuses re-entry for the same fire (raises `RuntimeError` if `fire_numbe` is already in `_accept_in_progress`), copies the chosen run from `.web_cache/` into `<output_root>/<FIRE>/`, appends a row to `accepted_params.csv` (open-coded atomic write with file fsync + parent-dir fsync) under `_accept_file_lock`, and registers/deregisters from `_accept_in_progress` so the cache sweeper holds off mid-copy. Failures to update `fire_status.yaml` log a WARNING to stderr instead of being silently swallowed. Wired by `prepare.init(app_state, _set_fire_status, _accept_in_progress, _accept_in_progress_lock, _accept_file_lock, _CSV_FIELDNAMES)`. |
+| `prepare.py` | Synchronous prepare + accept flow. `_prepare_fire_sync(fire_numbe, padding=None)` — crops the raster + VIIRS to the fire bounding box (with padding), accumulates VIIRS hot pixels into a hint mask, generates preview PNGs, and writes the per-fire `.web_cache/<FIRE>/` layout. The `PREPARING` test-and-flip is atomic under `state.lock` so two concurrent prepares cannot both pass the guard and race on cache files; MAPPING is allowed through because the serial worker calls back into prepare to handle mid-sweep padding changes. Rasterize-polygon failures are logged to stderr instead of silently dropping the perimeter. `_ensure_brush_comparison_in_cache` makes sure the brush comparison PNG exists for the gallery view. `_accept_fire_sync` is the canonical accept implementation — refuses re-entry for the same fire (raises `RuntimeError` if `fire_numbe` is already in `_accept_in_progress`), copies the chosen run from `.web_cache/` into `<output_root>/<FIRE>/`, calls `kml._export_kml` to emit `<FIRE>.shp` + `<FIRE>.kml` (warn-and-continue on failure), appends a row to `accepted_params.csv` (open-coded atomic write with file fsync + parent-dir fsync) under `_accept_file_lock`, and registers/deregisters from `_accept_in_progress` so the cache sweeper holds off mid-copy. Failures to update `fire_status.yaml` log a WARNING to stderr instead of being silently swallowed. Wired by `prepare.init(app_state, _set_fire_status, _accept_in_progress, _accept_in_progress_lock, _accept_file_lock, _CSV_FIELDNAMES)`. |
 | `workers.py` | Mapping worker family. **Top-level entry points**: `_batch_map_worker(fire_numbes, session_hash)` drives a list of fires sequentially, delegating each to `_serial_map_worker`; `_serial_map_worker(fire_numbe, settings, k_runs, k_jitter, session_hash)` runs the N×K sweep for one fire by walking the five phase helpers (`_serial_setup` → `_serial_snapshot_run0` → `_serial_run_replicate` looped → `_serial_handle_cancel` → `_serial_finalize`). `_serial_handle_cancel` does its file operations and state mutations under `_gpu_lock`, captures the values it needs into locals, and only then drops the lock to call `_save_fire_state` and `_push_notification` — disk I/O for one fire's cancel cleanup never blocks mapping/rebrush requests on a different fire. `_jitter_hdbscan(base, run_idx, step)` returns a fan-out-jittered min-samples value. Wired by `workers.init(app_state, helpers)` — the helpers dict supplies `_gpu_lock`, `_batch_cancel`, `_SUBPROCESS_SILENCE_TIMEOUT`, plus the small in-app helpers (`_set_fire_status`, `_get_recommended_settings`, `_clone_setting`, `_stream_subprocess`) that each reach back into `app.py`'s module-level state. Sibling-module functions like `_save_fire_state`, `_compute_agreement`, `_compute_ml_area`, `_overlay_mask_on_post`, `_generate_result_preview`, `_build_mapping_cmd`, `_prepare_fire_sync`, `_save_stage_timings`, `_push_notification` are imported directly. |
 
 ### Handler subpackage
