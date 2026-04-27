@@ -1,0 +1,110 @@
+## Recommended settings.
+## K HDBSCAN replicates applied per setting. K_jitter is the fan-out step
+## for hdbscan_min_samples across those replicates (same pattern the
+## analyzer uses). First entry in `settings:` is the PRIMARY — used by
+## plain "Map Fire" and the batch map. "Map Fire with Settings" runs
+## all entries N * K times.
+
+k_runs_per_setting: 3
+k_jitter: 1
+
+settings:
+  - label: balanced
+    params:
+      padding: 0.10
+      hdbscan_min_samples: 21
+      tsne_perplexity: 60
+      embed_bands: '1,2,3,4,5,6,7,8,9,10,11,12'
+      sample_rate: 0.5
+      min_samples: 500
+      max_samples: 50000
+      seed: 123
+      tsne_learning_rate: 200
+      tsne_max_iter: 2000
+      tsne_init: pca
+      tsne_n_components: 2
+      tsne_random_state: 42
+      rf_n_estimators: 100
+      rf_max_depth: 15
+      rf_max_features: sqrt
+      rf_random_state: 42
+      controlled_ratio: 0.5
+      contour_width: 1
+      brush_size: 15
+      point_threshold: 10
+      brush_all_segments: false
+
+  - label: aggressive
+    params:
+      padding: 0.05
+      hdbscan_min_samples: 15
+      tsne_perplexity: 60
+      embed_bands: '1,2,3,4,5,6,7,8,9,10,11,12'
+      sample_rate: 0.5
+      min_samples: 500
+      max_samples: 50000
+      seed: 123
+      tsne_learning_rate: 200
+      tsne_max_iter: 2000
+      tsne_init: pca
+      tsne_n_components: 2
+      tsne_random_state: 42
+      rf_n_estimators: 100
+      rf_max_depth: 15
+      rf_max_features: sqrt
+      rf_random_state: 42
+      controlled_ratio: 0.5
+      contour_width: 1
+      brush_size: 25
+      point_threshold: 5
+      brush_all_segments: true
+
+  - label: conservative
+    params:
+      padding: 0.15
+      hdbscan_min_samples: 30
+      tsne_perplexity: 60
+      embed_bands: '1,2,3,4,5,6,7,8,9,10,11,12'
+      sample_rate: 0.5
+      min_samples: 500
+      max_samples: 50000
+      seed: 123
+      tsne_learning_rate: 200
+      tsne_max_iter: 2000
+      tsne_init: pca
+      tsne_n_components: 2
+      tsne_random_state: 42
+      rf_n_estimators: 100
+      rf_max_depth: 15
+      rf_max_features: sqrt
+      rf_random_state: 42
+      controlled_ratio: 0.5
+      contour_width: 1
+      brush_size: 8
+      point_threshold: 50
+      brush_all_segments: false
+
+  - label: change_only
+    params:
+      padding: 0.10
+      hdbscan_min_samples: 21
+      tsne_perplexity: 60
+      embed_bands: '7,8,9,10,11,12'
+      sample_rate: 0.5
+      min_samples: 500
+      max_samples: 50000
+      seed: 123
+      tsne_learning_rate: 200
+      tsne_max_iter: 2000
+      tsne_init: pca
+      tsne_n_components: 2
+      tsne_random_state: 42
+      rf_n_estimators: 100
+      rf_max_depth: 15
+      rf_max_features: sqrt
+      rf_random_state: 42
+      controlled_ratio: 0.5
+      contour_width: 1
+      brush_size: 15
+      point_threshold: 10
+      brush_all_segments: false

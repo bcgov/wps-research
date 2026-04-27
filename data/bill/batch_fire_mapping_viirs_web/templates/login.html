@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Login - Fire Mapping</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        body { background: #e8ecf1; display: flex; align-items: center;
+               justify-content: center; min-height: 100vh; }
+        .login-card { background: #fff; border-radius: 12px; padding: 40px;
+                      box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+                      width: 360px; text-align: center; }
+        .login-card img { height: 80px; margin-bottom: 16px; }
+        .login-card h2 { font-size: 18px; margin-bottom: 4px; color: #1a1a1a; }
+        .login-card .subtitle { font-size: 13px; color: #888;
+                                margin-bottom: 24px; }
+        .login-card input { width: 100%; padding: 10px 12px; margin-bottom: 12px;
+                            border: 1px solid #ccc; border-radius: 6px;
+                            font-size: 14px; box-sizing: border-box; }
+        .login-card input:focus { outline: none; border-color: #0066cc;
+                                  box-shadow: 0 0 0 2px rgba(0,102,204,0.15); }
+        .login-card button { width: 100%; padding: 10px; background: #0066cc;
+                             color: #fff; border: none; border-radius: 6px;
+                             font-size: 14px; cursor: pointer; margin-top: 4px; }
+        .login-card button:hover { background: #0055aa; }
+        .error-msg { color: #cc3333; font-size: 13px; margin-bottom: 12px;
+                     display: none; }
+    </style>
+</head>
+<body>
+<div class="login-card">
+    <img src="/static/BC-Wildfire-Service-logo.png" alt="BC Wildfire Service">
+    <h2>Batch Fire Mapping</h2>
+    <p class="subtitle">Sign in to continue</p>
+    <div class="error-msg" id="error-msg">{{{ error_msg }}}</div>
+    <form method="POST" action="/login">
+        <input type="text" name="username" placeholder="Username"
+               autocomplete="username" required>
+        <input type="password" name="password" placeholder="Password"
+               autocomplete="current-password" required>
+        <button type="submit">Sign in</button>
+    </form>
+</div>
+</body>
+</html>

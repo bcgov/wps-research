@@ -1,0 +1,1313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Batch Fire Mapping</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="/static/help.js" defer></script>
+</head>
+<body>
+
+<header>
+    <h1>Batch Fire Mapping</h1>
+    <span class="subtitle">
+        {{ raster_name }} &middot; {{ polygon_name }} &middot;
+        <span id="fire-count">{{ n_fires }} fires</span>
+    </span>
+    <a href="/new_fire" class="btn btn-success"
+       style="font-size:11px;padding:3px 10px">+ New Fire</a>
+    {{{ admin_link }}}
+    <a href="/logout" class="btn btn-secondary" style="font-size:11px;padding:3px 10px">Logout</a>
+    <img src="/static/BC-Wildfire-Service-logo.png" alt="BC Wildfire Service" class="header-logo">
+</header>
+
+<!-- Currently-mapping banner (shown only when a fire is in MAPPING state) -->
+<div id="mapping-banner" class="mapping-banner" style="display:none">
+    <span>&#128293; Currently mapping:</span>
+    <span class="fire-num" id="mapping-banner-fire"></span>
+    <a id="mapping-banner-link" href="#" class="btn">Open</a>
+    <button class="btn btn-secondary" onclick="scrollToMappingRow()">Scroll to row</button>
+</div>
+
+<!-- Toast container for cross-page notifications (map complete,
+     rebrush done, year switched, ...). Populated by pollNotifications
+     inline below. -->
+<div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+<!-- Filter panel -->
+<div class="filter-panel">
+    <div class="filter-panel-header" onclick="document.querySelector('.filter-panel').classList.toggle('open')">
+        <span>Filters</span>
+        <span class="filter-toggle-arrow"></span>
+    </div>
+    <div class="filter-panel-body">
+        <div class="filter-row">
+            <div class="filter-group">
+                <label class="title">Year</label>
+                <div class="checkboxes" id="year-filters"></div>
+            </div>
+            <div class="filter-group">
+                <label class="title">Fire Number</label>
+                <input type="text" id="filter-number" placeholder="regex, e.g. C11.*">
+            </div>
+            <div class="filter-group">
+                <label class="title">Min Size (ha)</label>
+                <input type="number" id="filter-min-size" step="any" min="0">
+            </div>
+            <div class="filter-group">
+                <label class="title">Status</label>
+                <div class="checkboxes" id="status-filters"></div>
+            </div>
+        </div>
+        <div class="filter-actions">
+            <button class="btn" onclick="applyFilters()">Apply</button>
+            <button class="btn btn-secondary" onclick="resetFilters()">Reset</button>
+            <span class="filter-preview-count" id="filter-preview-count"></span>
+        </div>
+    </div>
+</div>
+
+<!-- Recommended Settings (global) -->
+<div class="filter-panel" id="settings-panel">
+    <div class="filter-panel-header" onclick="this.parentElement.classList.toggle('open')">
+        <span>Recommended Settings (N × K)</span>
+        <span class="filter-toggle-arrow"></span>
+    </div>
+    <div class="filter-panel-body">
+        <div style="display:flex;gap:16px;margin-bottom:8px">
+            <label class="sp-label">K replicates per setting
+                <input type="number" id="settings-k-runs" min="1" max="10"
+                    value="3" style="width:50px">
+            </label>
+            <label class="sp-label">K jitter (HDBSCAN fan-out step)
+                <input type="number" id="settings-k-jitter" min="0" max="20"
+                    value="1" style="width:50px">
+            </label>
+        </div>
+        <div id="settings-rows"></div>
+        <div class="filter-actions">
+            <button class="btn" onclick="addSettingsRow()">Add Setting</button>
+            <button class="btn btn-success" onclick="saveSettings()">Save</button>
+            <span class="filter-preview-count" id="settings-status"></span>
+        </div>
+        <div style="font-size:11px;color:#666;margin-top:6px">
+            First setting is the <strong>primary</strong> (used by one-click Map Fire).
+            "Map Fire with Settings" runs <strong>all</strong> settings × K replicates.
+        </div>
+    </div>
+</div>
+
+<!-- Per-fire override modal -->
+<div id="override-modal" style="display:none;position:fixed;inset:0;
+     background:rgba(0,0,0,0.45);z-index:100;
+     align-items:flex-start;justify-content:center;overflow:auto">
+    <div style="background:#fff;border-radius:8px;padding:16px;margin:30px;
+                max-width:900px;width:90%;
+                box-shadow:0 8px 32px rgba(0,0,0,0.25)">
+        <div style="display:flex;align-items:center;justify-content:space-between;
+                    margin-bottom:8px">
+            <h3 style="margin:0">Per-fire settings override</h3>
+            <button class="btn btn-secondary" onclick="closeOverrideModal()">&times;</button>
+        </div>
+        <div style="font-size:12px;color:#555;margin-bottom:8px">
+            Fire <strong id="override-fire-label"></strong>.
+            Leaving this empty (or clicking <em>Clear Override</em>)
+            falls back to the global recommended settings.
+        </div>
+        <div id="override-rows"></div>
+        <div class="filter-actions" style="margin-top:8px">
+            <button class="btn" onclick="addOverrideRow()">Add Setting</button>
+            <button class="btn btn-danger" onclick="clearOverride()">Clear Override</button>
+            <button class="btn btn-success" onclick="saveOverride()">Save</button>
+            <span id="override-status" class="filter-preview-count"></span>
+        </div>
+    </div>
+</div>
+
+<!-- Batch action bar (appears when fires are selected) -->
+<div class="batch-bar" id="batch-bar" style="display:none">
+    <span id="selected-count">0 selected</span>
+    <button class="btn" id="btn-batch-map" onclick="batchMap()">Map Selected (with settings)</button>
+    <button class="btn btn-danger" id="btn-batch-cancel" onclick="batchCancel()" style="display:none">Cancel Batch</button>
+    <button class="btn btn-danger" onclick="batchRemove()">Remove Selected</button>
+    <details class="report-menu" style="display:inline-block;position:relative">
+        <summary class="btn btn-success"
+                 style="list-style:none;cursor:pointer;user-select:none">
+            PDF Report (accepted) &#9662;
+        </summary>
+        <div class="report-menu-body"
+             style="position:absolute;top:calc(100% + 4px);right:0;
+                    background:#fff;border:1px solid #bbb;border-radius:4px;
+                    box-shadow:0 4px 16px rgba(0,0,0,0.15);padding:4px 0;
+                    z-index:20;min-width:220px">
+            <a href="#" onclick="pickReport('full');return false"
+               style="display:block;padding:8px 14px;color:#222;
+                      text-decoration:none">
+                With details
+                <span style="color:#888;font-size:11px">
+                    &nbsp;— heavier (ML + params + brush)
+                </span>
+            </a>
+            <a href="#" onclick="pickReport('brief');return false"
+               style="display:block;padding:8px 14px;color:#222;
+                      text-decoration:none">
+                ML only
+                <span style="color:#888;font-size:11px">
+                    &nbsp;— lightweight (ML pages only)
+                </span>
+            </a>
+        </div>
+    </details>
+    <span class="batch-progress" id="batch-progress"></span>
+</div>
+
+<!-- Table -->
+<div class="table-wrap">
+<table>
+    <thead>
+        <tr>
+            <th style="width:30px"><input type="checkbox" id="select-all" onchange="toggleSelectAll(this)"></th>
+            <th data-key="fire_numbe">Fire Number <span class="sort-arrow"></span></th>
+            <th data-key="fire_date">Fire Date <span class="sort-arrow"></span></th>
+            <th data-key="fire_year">Year <span class="sort-arrow"></span></th>
+            <th data-key="fire_size_ha">Hint Size (ha) <span class="sort-arrow"></span></th>
+            <th data-key="ml_area_ha">ML Size (ha) <span class="sort-arrow"></span></th>
+            <th data-key="agreement_pct">Agreement<span class="help" tabindex="0" aria-label="About agreement" aria-expanded="false" data-tip="How closely the ML-classified burn matches the hint perimeter (VIIRS hotspot polygon). 100% = exact match; lower values may indicate the ML disagreed with the hint or the hint was loose. A sanity check, not ground truth.">?</span> <span class="sort-arrow"></span></th>
+            <th data-key="status">Status<span class="help" tabindex="0" aria-label="About status" aria-expanded="false" data-tip="pending = never opened. preparing/ready = crop being built or ready to map. mapping = ML running. mapped = result available, awaiting review. accepted = a run was approved and copied to the canonical output folder. error = a step failed (see console in the fire page).">?</span> <span class="sort-arrow"></span></th>
+            <th>Settings</th>
+            <th>Action</th>
+        </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+</table>
+</div>
+
+<script>
+// -----------------------------------------------------------------------
+// State
+// -----------------------------------------------------------------------
+const ALL_YEARS = {{{ all_years_json }}};
+const ACTIVE_YEAR = {{{ active_year_json }}};
+const IS_ADMIN = {{{ is_admin_json }}};
+
+let allFires = [];
+let sortKey = 'fire_size_ha';
+let sortAsc = false;
+let yearSet = new Set([ACTIVE_YEAR]);  // single-select: always exactly 1 year
+let statusSet = new Set();
+let showAllStatuses = false;  // when true, render() ignores statusSet
+let selectedFires = new Set();
+
+const STATUS_ORDER = [
+    'pending', 'preparing', 'ready', 'mapping', 'mapped', 'accepted', 'error'
+];
+
+// -----------------------------------------------------------------------
+// Fetch fire list
+// -----------------------------------------------------------------------
+async function loadFires() {
+    const r = await fetch('/api/fires');
+    allFires = await r.json();
+    lastFiresJSON = JSON.stringify(allFires);
+    buildFilterUI();
+    restoreFilterState();
+    render();
+}
+
+// -----------------------------------------------------------------------
+// Build dynamic filter checkboxes
+// -----------------------------------------------------------------------
+function buildFilterUI() {
+    // Year is single-select across the full registry of years (one raster
+    // per year). Selecting a different year + Apply swaps the active
+    // raster via /api/year/switch.
+    const yDiv = document.getElementById('year-filters');
+    yDiv.innerHTML = '';
+    const disabledAttr = IS_ADMIN ? '' : ' disabled';
+    for (const y of ALL_YEARS) {
+        const checked = (y === ACTIVE_YEAR) ? ' checked' : '';
+        const lbl = document.createElement('label');
+        lbl.innerHTML = `<input type="radio" name="year-filter" `
+            + `value="${y}"${checked}${disabledAttr}> ${y}`;
+        yDiv.appendChild(lbl);
+    }
+    if (!IS_ADMIN && ALL_YEARS.length > 1) {
+        const note = document.createElement('div');
+        note.style.fontSize = '11px';
+        note.style.color = '#888';
+        note.textContent = '(year switch is admin-only)';
+        yDiv.appendChild(note);
+    }
+
+    // Statuses — first row is the "Show all" toggle so transitioning
+    // fires (e.g. preparing → ready) never silently disappear from view.
+    const sDiv = document.getElementById('status-filters');
+    sDiv.innerHTML = '';
+    const allLbl = document.createElement('label');
+    allLbl.style.fontWeight = 'bold';
+    allLbl.innerHTML = '<input type="checkbox" id="status-filter-all"> All';
+    sDiv.appendChild(allLbl);
+    const allCb = document.getElementById('status-filter-all');
+    allCb.checked = showAllStatuses;
+    allCb.addEventListener('change', (ev) => {
+        showAllStatuses = ev.target.checked;
+        document.querySelectorAll(
+                '#status-filters input[type="checkbox"]')
+            .forEach(cb => {
+                if (cb.id === 'status-filter-all') return;
+                cb.disabled = showAllStatuses;
+                if (showAllStatuses) cb.checked = true;
+            });
+        if (showAllStatuses) {
+            statusSet = new Set(
+                [...document.querySelectorAll(
+                    '#status-filters input[type="checkbox"]')]
+                    .filter(cb => cb.id !== 'status-filter-all')
+                    .map(cb => cb.value));
+        }
+        saveFilterState();
+        render();
+        previewFilterCount();
+    });
+
+    const statuses = [...new Set(allFires.map(f => f.status))].sort(
+        (a, b) => STATUS_ORDER.indexOf(a) - STATUS_ORDER.indexOf(b));
+    for (const s of statuses) {
+        _addStatusCheckbox(s, true);
+    }
+}
+
+// Add a single status checkbox to the filter UI. Idempotent — duplicate
+// calls for the same status are no-ops. ``checked`` decides the initial
+// checked state; existing entries are not mutated.
+function _addStatusCheckbox(status, checked) {
+    const sDiv = document.getElementById('status-filters');
+    if (!sDiv) return;
+    if (sDiv.querySelector(`label[data-status-value="${status}"]`)) return;
+    if (checked) statusSet.add(status);
+    const lbl = document.createElement('label');
+    lbl.dataset.statusValue = status;
+    const cbChecked = checked ? ' checked' : '';
+    const cbDisabled = showAllStatuses ? ' disabled' : '';
+    lbl.innerHTML = `<input type="checkbox"${cbChecked}${cbDisabled} `
+        + `value="${status}"> ${status}`;
+    sDiv.appendChild(lbl);
+}
+
+// Auto-add filter checkboxes for any newly-seen statuses (e.g. a fire
+// just flipped from 'pending' to 'preparing'). Auto-checks so the
+// fire stays visible without a manual filter tweak.
+function ensureStatusCheckboxes() {
+    const seen = new Set(
+        [...document.querySelectorAll(
+            '#status-filters label[data-status-value]')]
+            .map(l => l.dataset.statusValue));
+    for (const f of allFires) {
+        if (!seen.has(f.status)) {
+            _addStatusCheckbox(f.status, true);
+            seen.add(f.status);
+        }
+    }
+}
+
+function saveFilterState() {
+    // Year is NOT persisted: it's tied to the active raster, which the
+    // server owns. Only persist non-year filters.
+    const state = {
+        statuses: [...statusSet],
+        showAll: showAllStatuses,
+        number: document.getElementById('filter-number').value,
+        minSize: document.getElementById('filter-min-size').value,
+        sortKey, sortAsc,
+    };
+    localStorage.setItem('fireFilters', JSON.stringify(state));
+}
+
+function restoreFilterState() {
+    const raw = localStorage.getItem('fireFilters');
+    if (!raw) return false;
+    try {
+        const s = JSON.parse(raw);
+        if (s.number) document.getElementById('filter-number').value = s.number;
+        if (s.minSize) document.getElementById('filter-min-size').value = s.minSize;
+        if (s.sortKey) { sortKey = s.sortKey; sortAsc = !!s.sortAsc; }
+        if (s.statuses) {
+            statusSet.clear();
+            s.statuses.forEach(st => statusSet.add(st));
+            document.querySelectorAll(
+                    '#status-filters input[type="checkbox"]')
+                .forEach(cb => {
+                    if (cb.id === 'status-filter-all') return;
+                    cb.checked = statusSet.has(cb.value);
+                });
+        }
+        if (typeof s.showAll === 'boolean') {
+            showAllStatuses = s.showAll;
+            const allCb = document.getElementById('status-filter-all');
+            if (allCb) {
+                allCb.checked = showAllStatuses;
+                document.querySelectorAll(
+                        '#status-filters input[type="checkbox"]')
+                    .forEach(cb => {
+                        if (cb.id === 'status-filter-all') return;
+                        cb.disabled = showAllStatuses;
+                        if (showAllStatuses) cb.checked = true;
+                    });
+            }
+        }
+        return true;
+    } catch { return false; }
+}
+
+async function applyFilters() {
+    // Year is single-select. If the user picked a different year,
+    // swap the active raster (admin-only, page reloads on success).
+    const selectedYearEl = document.querySelector(
+        '#year-filters input[name="year-filter"]:checked');
+    const selectedYear = selectedYearEl
+        ? (parseInt(selectedYearEl.value, 10) || selectedYearEl.value)
+        : ACTIVE_YEAR;
+    if (selectedYear !== ACTIVE_YEAR) {
+        if (!IS_ADMIN) {
+            alert('Switching year is admin-only.');
+            // Revert the radio to the active year.
+            document.querySelectorAll('#year-filters input').forEach(r => {
+                r.checked = (parseInt(r.value, 10) === ACTIVE_YEAR);
+            });
+            return;
+        }
+        if (!confirm('Switch active year to ' + selectedYear
+                     + '? This affects every logged-in user; in-flight '
+                     + 'mapping jobs must be finished or cancelled '
+                     + 'first.')) {
+            // Revert radio
+            document.querySelectorAll('#year-filters input').forEach(r => {
+                r.checked = (parseInt(r.value, 10) === ACTIVE_YEAR);
+            });
+            return;
+        }
+        try {
+            const r = await fetch('/api/year/switch', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({year: selectedYear}),
+            });
+            if (!r.ok) {
+                const j = await r.json().catch(() => ({}));
+                alert('Year switch failed: '
+                      + (j.error || ('HTTP ' + r.status)));
+                // Revert radio
+                document.querySelectorAll('#year-filters input').forEach(r => {
+                    r.checked = (parseInt(r.value, 10) === ACTIVE_YEAR);
+                });
+                return;
+            }
+        } catch (e) {
+            alert('Year switch network error: ' + e);
+            return;
+        }
+        // Full reload — ALL_YEARS / ACTIVE_YEAR come from the template.
+        location.reload();
+        return;
+    }
+
+    // Same year: just a client-side filter redraw.
+    yearSet = new Set([selectedYear]);
+    statusSet.clear();
+    document.querySelectorAll(
+            '#status-filters input[type="checkbox"]:checked')
+        .forEach(cb => {
+            if (cb.id === 'status-filter-all') return;
+            statusSet.add(cb.value);
+        });
+    const allCb = document.getElementById('status-filter-all');
+    showAllStatuses = !!(allCb && allCb.checked);
+    saveFilterState();
+    render();
+}
+
+function previewFilterCount() {
+    // allFires only contains the active year's fires. If the user picked
+    // a different year but hasn't applied yet, the preview reflects what
+    // the CURRENT list would look like after status/regex/size filters;
+    // the "year swap" preview is conceptually empty until Apply.
+    const selectedYearEl = document.querySelector(
+        '#year-filters input[name="year-filter"]:checked');
+    const selectedYear = selectedYearEl
+        ? (parseInt(selectedYearEl.value, 10) || selectedYearEl.value)
+        : ACTIVE_YEAR;
+    const yearWillSwitch = (selectedYear !== ACTIVE_YEAR);
+    const tmpStatuses = new Set();
+    document.querySelectorAll(
+            '#status-filters input[type="checkbox"]:checked')
+        .forEach(cb => {
+            if (cb.id === 'status-filter-all') return;
+            tmpStatuses.add(cb.value);
+        });
+    const allCb = document.getElementById('status-filter-all');
+    const tmpShowAll = !!(allCb && allCb.checked);
+    const numPat = document.getElementById('filter-number').value.trim();
+    const minSize = parseFloat(document.getElementById('filter-min-size').value) || 0;
+    let re = null;
+    if (numPat) { try { re = new RegExp(numPat, 'i'); } catch {} }
+
+    const count = allFires.filter(f => {
+        if (!tmpShowAll && !tmpStatuses.has(f.status)) return false;
+        if (f.fire_size_ha < minSize) return false;
+        if (re && !re.test(f.fire_numbe)) return false;
+        return true;
+    }).length;
+
+    const el = document.getElementById('filter-preview-count');
+    if (yearWillSwitch) {
+        el.textContent = `Apply will switch active year to ${selectedYear}`
+            + ` (current year: ${count} / ${allFires.length} matches)`;
+    } else {
+        el.textContent = `${count} / ${allFires.length} matches`;
+    }
+}
+
+function resetFilters() {
+    document.getElementById('filter-number').value = '';
+    document.getElementById('filter-min-size').value = '';
+    // Year resets to the active year (single-select).
+    document.querySelectorAll('#year-filters input').forEach(r => {
+        r.checked = (parseInt(r.value, 10) === ACTIVE_YEAR);
+    });
+    yearSet = new Set([ACTIVE_YEAR]);
+    // Status resets to all-checked + the "Show all" toggle off.
+    showAllStatuses = false;
+    const allCb = document.getElementById('status-filter-all');
+    if (allCb) allCb.checked = false;
+    statusSet.clear();
+    document.querySelectorAll(
+            '#status-filters input[type="checkbox"]')
+        .forEach(cb => {
+            cb.disabled = false;
+            if (cb.id === 'status-filter-all') return;
+            cb.checked = true;
+            statusSet.add(cb.value);
+        });
+    localStorage.removeItem('fireFilters');
+    render();
+}
+
+// -----------------------------------------------------------------------
+// Render table
+// -----------------------------------------------------------------------
+function render() {
+    const numPat = document.getElementById('filter-number').value.trim();
+    const minSize = parseFloat(document.getElementById('filter-min-size').value) || 0;
+
+    let re = null;
+    if (numPat) {
+        try { re = new RegExp(numPat, 'i'); } catch {}
+    }
+
+    let filtered = allFires.filter(f => {
+        if (f.fire_year && !yearSet.has(f.fire_year)) return false;
+        if (!showAllStatuses && !statusSet.has(f.status)) return false;
+        if (f.fire_size_ha < minSize) return false;
+        if (re && !re.test(f.fire_numbe)) return false;
+        return true;
+    });
+
+    // Sort
+    filtered.sort((a, b) => {
+        let va = a[sortKey], vb = b[sortKey];
+        if (va == null) va = '';
+        if (vb == null) vb = '';
+        let cmp;
+        if (typeof va === 'number' && typeof vb === 'number') {
+            cmp = va - vb;
+        } else {
+            cmp = String(va).localeCompare(String(vb));
+        }
+        return sortAsc ? cmp : -cmp;
+    });
+
+    // Update header count
+    document.getElementById('fire-count').textContent =
+        `${filtered.length} / ${allFires.length} fires`;
+
+    // Update currently-mapping banner (scan all fires, not just filtered,
+    // so it's visible even when the user has filtered out 'mapping' status)
+    const mappingFire = allFires.find(f => f.status === 'mapping');
+    const banner = document.getElementById('mapping-banner');
+    if (mappingFire) {
+        document.getElementById('mapping-banner-fire').textContent =
+            mappingFire.fire_numbe;
+        document.getElementById('mapping-banner-link').href =
+            `/fire/${encodeURIComponent(mappingFire.fire_numbe)}`;
+        banner.style.display = 'flex';
+    } else {
+        banner.style.display = 'none';
+    }
+
+    // Build rows
+    const tbody = document.getElementById('tbody');
+    tbody.innerHTML = '';
+    for (const f of filtered) {
+        const tr = document.createElement('tr');
+        if (f.status === 'mapping') {
+            tr.className = 'row-mapping';
+            tr.dataset.mapping = '1';
+        }
+        const badge = `<span class="status-badge status-${f.status}">${f.status}</span>`;
+        // Suppress the muted "previously accepted" badge when the
+        // live status is itself 'accepted' — otherwise re-running an
+        // already-accepted fire shows two identical "accepted" pills.
+        const prevBadge = (f.previously_accepted && f.status !== 'accepted')
+            ? '<span class="status-badge status-accepted status-badge-muted">accepted</span> '
+            : '';
+        const checked = selectedFires.has(f.fire_numbe) ? 'checked' : '';
+        let agr = f.agreement_pct >= 0 ? f.agreement_pct + '%' : '';
+        if (agr && f.previously_accepted_agreement_pct != null
+                && f.previously_accepted_agreement_pct >= 0) {
+            agr += ` <span class="agreement-prev" title="Previously accepted result">· was ${f.previously_accepted_agreement_pct}%</span>`;
+        }
+        const mlSize = f.ml_area_ha >= 0 ? f.ml_area_ha.toLocaleString() : '';
+        const noteIcon = f.notes ? ` <span title="${esc(f.notes)}" style="cursor:help;color:#888">&#9998;</span>` : '';
+        const fireEnc = encodeURIComponent(f.fire_numbe);
+        const overrideBadge = f.has_override
+            ? '<span class="status-badge" title="Has per-fire override" style="background:#e1d5f7;color:#5a3dbf;margin-right:4px">override</span>'
+            : '';
+        const newBadge = f.is_new
+            ? '<span class="status-badge status-new" style="background:#fff3a8;color:#7a5d00;margin-right:4px" title="Just finished preparing">new</span>'
+            : '';
+        let subStage = '';
+        if (f.status === 'preparing' && f.sub_stage) {
+            const idx = f.sub_stage_idx || 0;
+            const tot = f.sub_stage_total || 0;
+            const detail = f.sub_stage_detail
+                ? ` <span style="color:#666;font-size:11px">${esc(f.sub_stage_detail)}</span>`
+                : '';
+            subStage = `<div style="font-size:11px;color:#444;margin-top:2px">${esc(f.sub_stage)}${tot ? ' (' + idx + '/' + tot + ')' : ''}${detail}</div>`;
+        }
+        const errMsg = (f.status === 'error' && f.error_msg)
+            ? `<div style="font-size:11px;color:#a00;margin-top:2px">${esc(f.error_msg)}</div>`
+            : '';
+        const cancelBtn = (f.status === 'preparing')
+            ? `<button class="btn btn-danger" style="font-size:11px;padding:2px 6px;margin-left:4px" onclick="cancelCreate('${fireEnc}')">Cancel</button>`
+            : '';
+        tr.innerHTML = `
+            <td><input type="checkbox" class="fire-check" value="${fireEnc}" ${checked} onchange="updateSelection()"></td>
+            <td>${newBadge}<strong>${esc(f.fire_numbe)}</strong>${noteIcon}</td>
+            <td>${esc(f.fire_date)}</td>
+            <td>${f.fire_year || ''}</td>
+            <td>${f.fire_size_ha != null ? f.fire_size_ha.toLocaleString() : ''}</td>
+            <td>${mlSize}</td>
+            <td>${agr}</td>
+            <td>${prevBadge}${badge}${subStage}${errMsg}</td>
+            <td>${overrideBadge}<button class="btn btn-secondary" style="font-size:11px;padding:2px 6px" onclick="openOverrideModal('${fireEnc}')">Edit</button></td>
+            <td><a href="/fire/${fireEnc}" class="btn" onclick="markFireOpened('${fireEnc}')">Open</a>${cancelBtn}</td>
+        `;
+        tbody.appendChild(tr);
+    }
+    updateSelection();
+
+    // Save filtered+sorted order for Next/Prev navigation on mapping page
+    localStorage.setItem('fireOrder',
+        JSON.stringify(filtered.map(f => f.fire_numbe)));
+
+    // Update sort arrows
+    document.querySelectorAll('thead th[data-key]').forEach(th => {
+        const arrow = th.querySelector('.sort-arrow');
+        if (th.dataset.key === sortKey) {
+            arrow.textContent = sortAsc ? ' ▲' : ' ▼';
+        } else {
+            arrow.textContent = '';
+        }
+    });
+}
+
+function scrollToMappingRow() {
+    const row = document.querySelector('tr[data-mapping="1"]');
+    if (row) {
+        row.scrollIntoView({behavior: 'smooth', block: 'center'});
+    } else {
+        alert('The mapping fire is hidden by the current filters. ' +
+              'Use the Open button in the banner, or enable the "mapping" ' +
+              'status filter.');
+    }
+}
+
+function esc(s) {
+    if (s === null || s === undefined || s === '') return '';
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+// -----------------------------------------------------------------------
+// Event listeners
+// -----------------------------------------------------------------------
+document.querySelectorAll('thead th[data-key]').forEach(th => {
+    th.addEventListener('click', () => {
+        const key = th.dataset.key;
+        if (sortKey === key) { sortAsc = !sortAsc; }
+        else { sortKey = key; sortAsc = true; }
+        saveFilterState();
+        render();
+    });
+});
+
+// Live preview count on any filter change
+document.getElementById('filter-number').addEventListener('input', previewFilterCount);
+document.getElementById('filter-min-size').addEventListener('input', previewFilterCount);
+document.querySelector('.filter-panel-body').addEventListener('change', previewFilterCount);
+
+// Apply filters on Enter key
+document.getElementById('filter-number').addEventListener('keydown', e => {
+    if (e.key === 'Enter') applyFilters();
+});
+document.getElementById('filter-min-size').addEventListener('keydown', e => {
+    if (e.key === 'Enter') applyFilters();
+});
+
+// -----------------------------------------------------------------------
+// Checkbox selection
+// -----------------------------------------------------------------------
+let batchRunning = false;
+
+function updateSelection() {
+    selectedFires.clear();
+    document.querySelectorAll('.fire-check:checked').forEach(cb => {
+        selectedFires.add(decodeURIComponent(cb.value));
+    });
+    const bar = document.getElementById('batch-bar');
+    const count = selectedFires.size;
+    if (count > 0 || batchRunning) {
+        bar.style.display = 'flex';
+        if (!batchRunning) {
+            document.getElementById('selected-count').textContent =
+                `${count} selected`;
+        }
+    } else {
+        bar.style.display = 'none';
+    }
+}
+
+function toggleSelectAll(master) {
+    document.querySelectorAll('.fire-check').forEach(cb => {
+        cb.checked = master.checked;
+    });
+    updateSelection();
+}
+
+// -----------------------------------------------------------------------
+// Batch remove
+// -----------------------------------------------------------------------
+async function batchRemove() {
+    const fires = [...selectedFires];
+    if (!confirm(`Remove ${fires.length} fire(s) from the list?`)) return;
+    for (const fn of fires) {
+        try {
+            await fetch(`/api/fire/${encodeURIComponent(fn)}/remove`,
+                {method: 'POST', headers: {'X-Requested-With': 'fetch'}});
+            allFires = allFires.filter(f => f.fire_numbe !== fn);
+        } catch {}
+    }
+    selectedFires.clear();
+    render();
+}
+
+// -----------------------------------------------------------------------
+// Batch map with recommended settings
+// -----------------------------------------------------------------------
+async function batchMap() {
+    const fires = [...selectedFires].filter(fn => {
+        const f = allFires.find(x => x.fire_numbe === fn);
+        return f && f.status !== 'accepted';
+    });
+    if (fires.length === 0) {
+        alert('No eligible fires selected (accepted fires are skipped).');
+        return;
+    }
+    if (!confirm(`Map ${fires.length} fire(s) with recommended settings?\n\nAccepted fires will be skipped.`)) return;
+
+    document.getElementById('btn-batch-map').disabled = true;
+    batchRunning = true;
+
+    try {
+        const r = await fetch('/api/batch/map', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+            body: JSON.stringify({fire_numbes: fires}),
+        });
+        const data = await r.json();
+        if (data.error) {
+            alert(data.error);
+            document.getElementById('btn-batch-map').disabled = false;
+            return;
+        }
+        pollBatchStatus();
+    } catch (err) {
+        alert('Failed to start batch: ' + err.message);
+        document.getElementById('btn-batch-map').disabled = false;
+    }
+}
+
+async function pollBatchStatus() {
+    const prog = document.getElementById('batch-progress');
+    try {
+        const r = await fetch('/api/batch/status');
+        const s = await r.json();
+        if (s.running) {
+            batchRunning = true;
+            const current = s.current_fire ? ` (${s.current_fire})` : '';
+            document.getElementById('selected-count').textContent = 'Batch running';
+            prog.textContent =
+                `${s.completed}/${s.total} done${current}`;
+            document.getElementById('batch-bar').style.display = 'flex';
+            document.getElementById('btn-batch-cancel').style.display = '';
+            document.getElementById('btn-batch-map').disabled = true;
+            setTimeout(pollBatchStatus, 3000);
+        } else {
+            batchRunning = false;
+            const errors = (s.errors || []).length;
+            prog.textContent = errors > 0
+                ? `Batch complete. ${errors} error(s).`
+                : 'Batch complete.';
+            document.getElementById('btn-batch-map').disabled = false;
+            document.getElementById('btn-batch-cancel').style.display = 'none';
+            setTimeout(() => { prog.textContent = ''; updateSelection(); }, 8000);
+        }
+    } catch {
+        batchRunning = false;
+        prog.textContent = '';
+        document.getElementById('btn-batch-map').disabled = false;
+        document.getElementById('btn-batch-cancel').style.display = 'none';
+    }
+}
+
+async function batchCancel() {
+    if (!confirm('Cancel the running batch?')) return;
+    try {
+        await fetch('/api/batch/cancel', {
+            method: 'POST',
+            headers: {'X-Requested-With': 'fetch'},
+        });
+        document.getElementById('batch-progress').textContent = 'Cancelling...';
+        document.getElementById('btn-batch-cancel').disabled = true;
+    } catch (err) {
+        alert('Failed to cancel: ' + err.message);
+    }
+}
+
+// -----------------------------------------------------------------------
+// Recommended settings (global + per-fire override).
+// Schema: {k_runs_per_setting, k_jitter, settings: [{label, params}]}
+// -----------------------------------------------------------------------
+const DEFAULT_PARAMS = {
+    padding: 0.1, sample_rate: 0.5, min_samples: 500, max_samples: 50000,
+    seed: 123, embed_bands: '1,2,3,4,5,6,7,8,9,10,11,12',
+    tsne_perplexity: 60, tsne_learning_rate: 200,
+    tsne_max_iter: 2000, tsne_init: 'pca', tsne_n_components: 2,
+    tsne_random_state: 42, rf_n_estimators: 100, rf_max_depth: 15,
+    rf_max_features: 'sqrt', rf_random_state: 42,
+    controlled_ratio: 0.5, hdbscan_min_samples: 20, contour_width: 1,
+};
+
+let settings = [];    // global settings
+let kRuns = 3;
+let kJitter = 1;
+
+function paramInput(name, val, type, width) {
+    const w = width || 55;
+    return `<label class="sp-label">${name}<input type="${type||'number'}" ` +
+           `data-param="${name}" value="${val == null ? '' : val}" style="width:${w}px"></label>`;
+}
+
+function renderSettingsRow(row, idx, opts) {
+    const p = row.params || {};
+    const isPrimary = idx === 0;
+    const primaryTag = isPrimary
+        ? ' <span style="color:#2d8a4e;font-size:10px;font-weight:700">PRIMARY</span>'
+        : '';
+    const removeBtn = (!opts || opts.allowRemove !== false)
+        ? `<button class="btn btn-danger" style="font-size:10px;padding:1px 6px" data-action="remove" data-index="${idx}">Remove</button>`
+        : '';
+    const upBtn = (idx > 0 && (!opts || opts.allowMove !== false))
+        ? `<button class="btn btn-secondary" style="font-size:10px;padding:1px 6px" data-action="up" data-index="${idx}">↑</button>`
+        : '';
+    const div = document.createElement('div');
+    div.className = 'settings-row';
+    div.dataset.index = idx;
+    div.innerHTML = `
+        <div class="settings-row-header" style="display:flex;gap:8px;align-items:center">
+            <label class="sp-label">Label<input type="text" data-field="label"
+                value="${esc(row.label || '')}" style="width:160px"></label>
+            ${primaryTag}
+            <span style="flex:1"></span>
+            ${upBtn}
+            ${removeBtn}
+        </div>
+        <div class="settings-row-params">
+            ${paramInput('padding', p.padding, 'number', 45)}
+            ${paramInput('sample_rate', p.sample_rate, 'number', 55)}
+            ${paramInput('min_samples', p.min_samples, 'number', 55)}
+            ${paramInput('max_samples', p.max_samples, 'number', 60)}
+            ${paramInput('seed', p.seed, 'number', 45)}
+            ${paramInput('embed_bands', p.embed_bands || '', 'text', 110)}
+            ${paramInput('tsne_perplexity', p.tsne_perplexity, 'number', 45)}
+            ${paramInput('tsne_learning_rate', p.tsne_learning_rate, 'number', 50)}
+            ${paramInput('tsne_max_iter', p.tsne_max_iter, 'number', 50)}
+            ${paramInput('controlled_ratio', p.controlled_ratio, 'number', 45)}
+            ${paramInput('hdbscan_min_samples', p.hdbscan_min_samples, 'number', 40)}
+            ${paramInput('rf_n_estimators', p.rf_n_estimators, 'number', 45)}
+            ${paramInput('rf_max_depth', p.rf_max_depth, 'number', 40)}
+            ${paramInput('rf_max_features', p.rf_max_features || 'sqrt', 'text', 50)}
+            ${paramInput('contour_width', p.contour_width, 'number', 35)}
+        </div>
+    `;
+    return div;
+}
+
+function renderSettings() {
+    const container = document.getElementById('settings-rows');
+    container.innerHTML = '';
+    settings.forEach((row, i) => {
+        container.appendChild(renderSettingsRow(row, i, {
+            allowRemove: settings.length > 1, allowMove: true,
+        }));
+    });
+    document.getElementById('settings-k-runs').value = kRuns;
+    document.getElementById('settings-k-jitter').value = kJitter;
+}
+
+document.getElementById('settings-rows').addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-action]');
+    if (!btn) return;
+    const i = parseInt(btn.dataset.index);
+    if (btn.dataset.action === 'remove') {
+        if (settings.length <= 1) return;
+        readSettingsFromDOM('settings-rows', settings);
+        settings.splice(i, 1);
+        renderSettings();
+    } else if (btn.dataset.action === 'up' && i > 0) {
+        readSettingsFromDOM('settings-rows', settings);
+        [settings[i - 1], settings[i]] = [settings[i], settings[i - 1]];
+        renderSettings();
+    }
+});
+
+function addSettingsRow() {
+    readSettingsFromDOM('settings-rows', settings);
+    settings.push({
+        label: `setting_${settings.length + 1}`,
+        params: {...DEFAULT_PARAMS},
+    });
+    renderSettings();
+}
+
+function readSettingsFromDOM(containerId, target) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.querySelectorAll('.settings-row').forEach(div => {
+        const i = parseInt(div.dataset.index);
+        if (!target[i]) return;
+        const labelEl = div.querySelector('[data-field="label"]');
+        if (labelEl) target[i].label = labelEl.value.trim() || `setting_${i + 1}`;
+        target[i].params = target[i].params || {};
+        div.querySelectorAll('[data-param]').forEach(inp => {
+            const key = inp.dataset.param;
+            let val = inp.value.trim();
+            if (inp.type === 'number' && val !== '') val = parseFloat(val);
+            target[i].params[key] = val;
+        });
+    });
+}
+
+async function saveSettings() {
+    readSettingsFromDOM('settings-rows', settings);
+    kRuns = Math.max(1, Math.min(10,
+        parseInt(document.getElementById('settings-k-runs').value) || 3));
+    kJitter = Math.max(0,
+        parseInt(document.getElementById('settings-k-jitter').value) || 0);
+    const statusEl = document.getElementById('settings-status');
+    try {
+        const r = await fetch('/api/settings', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+            body: JSON.stringify({
+                settings,
+                k_runs_per_setting: kRuns,
+                k_jitter: kJitter,
+            }),
+        });
+        const data = await r.json();
+        if (data.error) {
+            statusEl.textContent = 'Error: ' + data.error;
+        } else {
+            statusEl.textContent = 'Saved!';
+            setTimeout(() => statusEl.textContent = '', 2000);
+        }
+    } catch (err) {
+        statusEl.textContent = 'Save failed';
+    }
+}
+
+async function loadSettings() {
+    try {
+        const r = await fetch('/api/settings');
+        const data = await r.json();
+        if (data && Array.isArray(data.settings) && data.settings.length > 0) {
+            settings = data.settings.map(s => ({
+                label: s.label || '',
+                params: {...DEFAULT_PARAMS, ...(s.params || {})},
+            }));
+            kRuns = parseInt(data.k_runs_per_setting) || 3;
+            kJitter = parseInt(data.k_jitter) || 1;
+        } else {
+            settings = [{label: 'default', params: {...DEFAULT_PARAMS}}];
+        }
+    } catch {
+        settings = [{label: 'default', params: {...DEFAULT_PARAMS}}];
+    }
+    renderSettings();
+}
+
+// -----------------------------------------------------------------------
+// Per-fire override modal
+// -----------------------------------------------------------------------
+let overrideFire = null;        // fire number currently editing
+let overrideSettings = [];
+
+function openOverrideModal(fireEnc) {
+    overrideFire = decodeURIComponent(fireEnc);
+    document.getElementById('override-fire-label').textContent = overrideFire;
+    document.getElementById('override-status').textContent = '';
+    document.getElementById('override-modal').style.display = 'flex';
+
+    fetch(`/api/fire/${encodeURIComponent(overrideFire)}/recommended`)
+        .then(r => r.json())
+        .then(data => {
+            // Load the effective settings into the editor. If there's no
+            // override, this starts from the global list so the user can
+            // diverge from there.
+            const src = (data.has_override ? data.settings : data.global_settings)
+                        || [];
+            overrideSettings = src.map(s => ({
+                label: s.label || '',
+                params: {...DEFAULT_PARAMS, ...(s.params || {})},
+            }));
+            if (overrideSettings.length === 0) {
+                overrideSettings = [{label: 'default', params: {...DEFAULT_PARAMS}}];
+            }
+            renderOverrideRows();
+        })
+        .catch(err => {
+            document.getElementById('override-status').textContent =
+                'Load failed: ' + err.message;
+        });
+}
+
+function closeOverrideModal() {
+    document.getElementById('override-modal').style.display = 'none';
+    overrideFire = null;
+    overrideSettings = [];
+}
+
+function renderOverrideRows() {
+    const container = document.getElementById('override-rows');
+    container.innerHTML = '';
+    overrideSettings.forEach((row, i) => {
+        container.appendChild(renderSettingsRow(row, i, {
+            allowRemove: overrideSettings.length > 1, allowMove: true,
+        }));
+    });
+}
+
+document.getElementById('override-rows').addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-action]');
+    if (!btn) return;
+    const i = parseInt(btn.dataset.index);
+    if (btn.dataset.action === 'remove') {
+        if (overrideSettings.length <= 1) return;
+        readSettingsFromDOM('override-rows', overrideSettings);
+        overrideSettings.splice(i, 1);
+        renderOverrideRows();
+    } else if (btn.dataset.action === 'up' && i > 0) {
+        readSettingsFromDOM('override-rows', overrideSettings);
+        [overrideSettings[i - 1], overrideSettings[i]] =
+            [overrideSettings[i], overrideSettings[i - 1]];
+        renderOverrideRows();
+    }
+});
+
+function addOverrideRow() {
+    readSettingsFromDOM('override-rows', overrideSettings);
+    overrideSettings.push({
+        label: `setting_${overrideSettings.length + 1}`,
+        params: {...DEFAULT_PARAMS},
+    });
+    renderOverrideRows();
+}
+
+async function saveOverride() {
+    if (!overrideFire) return;
+    readSettingsFromDOM('override-rows', overrideSettings);
+    const statusEl = document.getElementById('override-status');
+    try {
+        const r = await fetch(
+            `/api/fire/${encodeURIComponent(overrideFire)}/recommended`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+            body: JSON.stringify({settings: overrideSettings}),
+        });
+        const data = await r.json();
+        if (data.error) {
+            statusEl.textContent = 'Error: ' + data.error;
+        } else {
+            statusEl.textContent = 'Saved!';
+            setTimeout(() => { closeOverrideModal(); refreshFires(); }, 600);
+        }
+    } catch (err) {
+        statusEl.textContent = 'Save failed';
+    }
+}
+
+async function clearOverride() {
+    if (!overrideFire) return;
+    if (!confirm('Clear the per-fire override? The fire will fall back to the global recommended settings.')) return;
+    const statusEl = document.getElementById('override-status');
+    try {
+        const r = await fetch(
+            `/api/fire/${encodeURIComponent(overrideFire)}/recommended`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+            body: JSON.stringify({settings: null}),
+        });
+        const data = await r.json();
+        if (data.error) {
+            statusEl.textContent = 'Error: ' + data.error;
+        } else {
+            statusEl.textContent = 'Cleared.';
+            setTimeout(() => { closeOverrideModal(); refreshFires(); }, 600);
+        }
+    } catch (err) {
+        statusEl.textContent = 'Clear failed';
+    }
+}
+
+// -----------------------------------------------------------------------
+// Auto-refresh fire list every 5 seconds (skip re-render if unchanged)
+// -----------------------------------------------------------------------
+let lastFiresJSON = '';
+
+async function refreshFires() {
+    try {
+        const r = await fetch('/api/fires');
+        const newFires = await r.json();
+        const newJSON = JSON.stringify(newFires);
+        if (newJSON !== lastFiresJSON) {
+            lastFiresJSON = newJSON;
+            // Preserve scroll position across re-renders
+            const wrap = document.querySelector('.table-wrap');
+            const scrollTop = wrap ? wrap.scrollTop : 0;
+            allFires = newFires;
+            // A fire that just transitioned (e.g. preparing → ready)
+            // may have a status no checkbox exists for yet — add one
+            // and auto-check it so the row stays visible without the
+            // user having to refresh / reset filters.
+            ensureStatusCheckboxes();
+            render();
+            if (wrap) wrap.scrollTop = scrollTop;
+        }
+    } catch {}
+}
+
+// Poll every 2s instead of 5s so preparing → ready / mapping → mapped
+// transitions feel near-instant. /api/fires is a small in-memory dict
+// dump; the cost on the server is negligible. The render() call early-
+// exits when JSON hasn't changed, so unchanged ticks are nearly free.
+setInterval(refreshFires, 2000);
+
+// -----------------------------------------------------------------------
+// Download PDF report of accepted fires
+// -----------------------------------------------------------------------
+function pickReport(mode) {
+    // Close the dropdown immediately so the menu doesn't linger while
+    // the browser is off fetching the PDF.
+    const d = document.querySelector('details.report-menu');
+    if (d) d.open = false;
+
+    const accepted = [...selectedFires].filter(fn => {
+        const f = allFires.find(x => x.fire_numbe === fn);
+        return f && f.status === 'accepted';
+    });
+    if (accepted.length === 0) {
+        alert('No accepted fires selected. Select accepted fires to generate a report.');
+        return;
+    }
+    mode = (mode === 'brief') ? 'brief' : 'full';
+    const parts = accepted.map(fn => `fire=${encodeURIComponent(fn)}`);
+    parts.push(`mode=${encodeURIComponent(mode)}`);
+    window.location.href = `/api/report?${parts.join('&')}`;
+}
+
+// Close the dropdown when the user clicks outside of it.
+document.addEventListener('click', (e) => {
+    const d = document.querySelector('details.report-menu');
+    if (d && d.open && !d.contains(e.target)) {
+        d.open = false;
+    }
+});
+
+// -----------------------------------------------------------------------
+// Check if batch is already running on page load
+// -----------------------------------------------------------------------
+async function checkBatchOnLoad() {
+    try {
+        const r = await fetch('/api/batch/status');
+        const s = await r.json();
+        if (s.running) {
+            batchRunning = true;
+            document.getElementById('batch-bar').style.display = 'flex';
+            document.getElementById('selected-count').textContent = 'Batch running';
+            document.getElementById('btn-batch-map').disabled = true;
+            document.getElementById('btn-batch-cancel').style.display = '';
+            pollBatchStatus();
+        }
+    } catch {}
+}
+
+// -----------------------------------------------------------------------
+// Init
+// -----------------------------------------------------------------------
+loadFires();
+loadSettings();
+checkBatchOnLoad();
+
+// -----------------------------------------------------------------------
+// Toast notifications — same shape as fire_mapping.html. Polls every
+// 5s and displays any queued messages. Errors and warnings stick until
+// dismissed; success / info auto-dismiss after 8s.
+// -----------------------------------------------------------------------
+const seenToastIds = new Set();
+
+function showToast(n) {
+    if (!n || n.id == null) return;
+    if (seenToastIds.has(n.id)) return;
+    seenToastIds.add(n.id);
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+    const el = document.createElement('div');
+    el.className = 'toast toast-' + (n.kind || 'info');
+    el.dataset.id = n.id;
+
+    const title = document.createElement('div');
+    title.className = 'toast-title';
+    title.textContent = n.title || '';
+    el.appendChild(title);
+
+    if (n.body) {
+        const body = document.createElement('div');
+        body.className = 'toast-body';
+        body.textContent = n.body;
+        el.appendChild(body);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'toast-actions';
+    if (n.action && n.action.url && n.action.label) {
+        const a = document.createElement('a');
+        a.href = n.action.url;
+        a.textContent = n.action.label;
+        a.className = 'toast-action';
+        actions.appendChild(a);
+    }
+    const close = document.createElement('button');
+    close.textContent = '×';
+    close.className = 'toast-close';
+    close.setAttribute('aria-label', 'Dismiss');
+    close.onclick = () => dismissToast(el);
+    actions.appendChild(close);
+    el.appendChild(actions);
+
+    container.appendChild(el);
+
+    const sticky = (n.kind === 'error' || n.kind === 'warning');
+    if (!sticky) setTimeout(() => dismissToast(el), 8000);
+}
+
+function dismissToast(el) {
+    if (!el || !el.parentNode) return;
+    el.classList.add('toast-leaving');
+    setTimeout(() => {
+        if (el.parentNode) el.parentNode.removeChild(el);
+    }, 250);
+}
+
+async function pollNotifications() {
+    try {
+        const r = await fetch('/api/notifications');
+        if (!r.ok) return;
+        const data = await r.json();
+        for (const n of (data.notifications || [])) {
+            showToast(n);
+            // If a year-switch broadcast lands, the fire list may be
+            // stale — reload it in-place.
+            if (n.title && n.title.startsWith('Active year switched')) {
+                loadFires();
+            }
+        }
+    } catch {}
+}
+
+setInterval(pollNotifications, 5000);
+setTimeout(pollNotifications, 1200);
+
+// VIIRS-web: cancel an in-flight prepare; mark "new" badge cleared on Open.
+async function cancelCreate(fireEnc) {
+    const fire = decodeURIComponent(fireEnc);
+    if (!confirm(`Cancel prepare for "${fire}"? This abandons the fire and removes its cache.`)) {
+        return;
+    }
+    // Optimistic update: drop the row immediately so the user sees
+    // instant feedback. If the request 409s (fire already past
+    // PREPARING) the next /api/fires poll will resurrect it.
+    const snapshot = allFires;
+    allFires = allFires.filter(f => f.fire_numbe !== fire);
+    render();
+    try {
+        const r = await fetch(`/api/fire/${fireEnc}/cancel_create`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json',
+                      'X-Requested-With': 'fetch'},
+        });
+        if (!r.ok) {
+            const j = await r.json().catch(() => ({}));
+            alert(`Cancel failed: ${j.error || r.status}`);
+            // Revert by refetching truth from the server.
+            allFires = snapshot;
+            render();
+            refreshFires();
+        }
+    } catch (e) {
+        alert(`Cancel failed: ${e}`);
+        allFires = snapshot;
+        render();
+        refreshFires();
+    }
+}
+
+function markFireOpened(fireEnc) {
+    // Fire-and-forget: clear the "new" badge server-side. Don't block
+    // navigation if the request fails.
+    try {
+        fetch(`/api/fire/${fireEnc}/clear_new`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json',
+                      'X-Requested-With': 'fetch'},
+        }).catch(() => {});
+    } catch {}
+}
+</script>
+</body>
+</html>

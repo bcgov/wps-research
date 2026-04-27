@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>New Fire - Batch Fire Mapping</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header>
+    <h1>Create Fire (VIIRS)</h1>
+    <a href="/" class="back-link">Back to fire list</a>
+    <a href="/logout" class="btn btn-secondary" style="font-size:11px;padding:3px 10px">Logout</a>
+    <img src="/static/BC-Wildfire-Service-logo.png" alt="BC Wildfire Service" class="header-logo">
+</header>
+
+<div class="newfire-wrap">
+    <div class="newfire-left">
+        <div class="newfire-toolbar">
+            <label>Year:&nbsp;
+                <select id="nf-year"></select>
+            </label>
+            <span id="nf-coords" class="nf-coords"></span>
+            <button id="nf-clear-bbox" type="button" class="btn btn-secondary">Clear bbox</button>
+        </div>
+        <div class="newfire-canvas-wrap">
+            <img id="nf-overview" alt="Year overview" />
+            <canvas id="nf-canvas"></canvas>
+        </div>
+        <p class="newfire-hint">
+            Click and drag on the overview to mark the VIIRS download
+            area. Click inside an existing rectangle to drag-move it.
+            The final raster crop will be tightened to the actual fire
+            pixels after the download finishes.
+        </p>
+    </div>
+
+    <div class="newfire-right">
+        <h3>Fire</h3>
+        <label class="nf-field">
+            Name
+            <input id="nf-name" type="text" maxlength="64"
+                   placeholder="e.g. C12345 or My Fire 2023">
+        </label>
+
+        <h3>Bounding Box (raster CRS)</h3>
+        <div class="nf-grid2">
+            <label>x_min<input id="nf-xmin" type="text" readonly></label>
+            <label>y_min<input id="nf-ymin" type="text" readonly></label>
+            <label>x_max<input id="nf-xmax" type="text" readonly></label>
+            <label>y_max<input id="nf-ymax" type="text" readonly></label>
+        </div>
+        <h3>Bounding Box (WGS84 deg)</h3>
+        <div class="nf-grid2">
+            <label>W<input id="nf-w" type="text" readonly></label>
+            <label>E<input id="nf-e" type="text" readonly></label>
+            <label>S<input id="nf-s" type="text" readonly></label>
+            <label>N<input id="nf-n" type="text" readonly></label>
+        </div>
+
+        <h3>Date Range</h3>
+        <label class="nf-field">
+            Start (YYYY-MM-DD)
+            <input id="nf-start" type="text" placeholder="">
+        </label>
+        <label class="nf-field">
+            End (YYYY-MM-DD)
+            <input id="nf-end" type="text" placeholder="">
+        </label>
+
+        <div id="nf-errors" class="nf-errors" aria-live="polite"></div>
+
+        <h3>Hint Preview</h3>
+        <p class="newfire-hint" style="margin-top:0">
+            Optional. Click <em>Preview Hint</em> to accumulate VIIRS fire
+            pixels for the selected bbox + date window and see them
+            overlaid on the post imagery — without committing to creating
+            the fire.
+        </p>
+        <div class="nf-preview-row">
+            <button id="nf-preview" class="btn btn-secondary" type="button">
+                Preview Hint
+            </button>
+            <span id="nf-preview-status" class="nf-coords"></span>
+        </div>
+        <div id="nf-preview-wrap" style="display:none">
+            <img id="nf-preview-img" alt="Hint preview"
+                 style="max-width:100%;display:block;border:1px solid #888;
+                        border-radius:4px;background:#222"/>
+            <div id="nf-preview-meta" class="nf-coords"
+                 style="display:block;margin-top:4px"></div>
+        </div>
+
+        <div class="nf-actions">
+            <a href="/" class="btn btn-secondary">Cancel</a>
+            <button id="nf-submit" class="btn btn-success" type="button">
+                Confirm &amp; Create
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+const NF_ALL_YEARS = {{{ all_years_json }}};
+const NF_ACTIVE_YEAR = {{{ active_year_json }}};
+const NF_IS_ADMIN = {{{ is_admin_json }}};
+const NF_MULTI_YEAR = {{{ multi_year_json }}};
+</script>
+<script src="/static/new_fire.js" defer></script>
+</body>
+</html>
