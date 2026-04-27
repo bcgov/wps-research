@@ -131,6 +131,15 @@ class FireInfo:
     # Reason the most recent cancel was issued (for audit). Persisted.
     last_cancel_reason: str = ""
 
+    # Set when a post-accept rebrush has produced a gallery entry that
+    # is NOT yet in the canonical accepted output. Cleared when any
+    # gallery entry is accepted (the user committed) OR when the
+    # gallery is wiped. Used by cache_retention to soft-pin the cache
+    # dir so an unsaved rebrush exploration doesn't get reaped, and by
+    # the UI to show a "rebrushed since accept — re-accept to save"
+    # banner.
+    rebrush_dirty: bool = False
+
 
 class AppState:
     """Global application state shared across all routes."""

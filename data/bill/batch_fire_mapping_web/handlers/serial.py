@@ -223,6 +223,8 @@ class SerialRoutes:
                 'error': r.get('error', ''),
                 'params': r.get('params', {}),
                 'is_previous': r.get('is_previous', False),
+                'kind': r.get('kind', 'serial'),
+                'parent': r.get('parent', ''),
             })
         self._send_json({
             'status': fire.status.value,
@@ -456,6 +458,12 @@ class SerialRoutes:
             # Now accept via the normal flow
             _accept_fire_sync(fire_numbe)
 
+            # Clear the post-accept rebrush dirty flag — the user has
+            # committed, so the canonical dir is now in sync with
+            # whatever gallery entry they chose (rebrush or otherwise).
+            with state.lock:
+                fire.rebrush_dirty = False
+
             # If the worker is still running, leave serial_results /
             # serial file cleanup to it — racing to clear the list here
             # would fight with the worker's in-flight append for the
@@ -502,6 +510,7 @@ class SerialRoutes:
                 with state.lock:
                     fire.serial_results = []
                     fire.serial_settings = []
+                    fire.rebrush_dirty = False
                 # Re-persist — _accept_fire_sync already wrote
                 # fire_state.yaml once, but at that point
                 # serial_results was still populated. Writing again
