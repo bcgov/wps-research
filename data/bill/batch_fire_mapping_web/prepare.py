@@ -22,6 +22,7 @@ from .mapping import (
     _compute_ml_area, _overlay_mask_on_post, _generate_result_preview,
 )
 from .brush import _read_envi_mask, _render_brush_comparison_png
+from .kml import _export_kml
 from .persistence import _save_fire_state
 
 # Bound by ``init`` from app.init_app — these live in ``app.py`` because
@@ -674,6 +675,10 @@ def _accept_fire_sync(fire_numbe: str) -> str:
             sys.stderr.write(
                 f'[save] WARNING: Failed to update accepted_params.csv: '
                 f'{exc}\n')
+
+        # Generate KML deliverable in EPSG:4326. Warn-and-continue on
+        # failure — KML is for Google Earth viewing, not analysis.
+        _export_kml(fire_numbe, fire_dir)
 
         # Re-point last_comparison at the canonical copy. Until now
         # it points into cache_dir, which _cache_sweep is free to
