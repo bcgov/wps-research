@@ -125,6 +125,13 @@ class RebrushRoutes:
           run_id (int|null)        — optional; when set, rebrushes the
                                      serial run's classified.bin and
                                      updates its per-run brush PNG copy.
+
+        Post-accept rebrush (status=ACCEPTED, no run_id supplied):
+        creates a NEW gallery entry (kind='rebrush') instead of
+        mutating the canonical accepted result in place. The user
+        must Accept on that gallery entry to commit. fire.rebrush_dirty
+        is set so cache_retention soft-pins the cache and the UI can
+        show a "rebrushed since accept" banner.
         """
         fire_numbe = unquote(fire_numbe)
         if fire_numbe not in state.fires:
@@ -151,6 +158,71 @@ class RebrushRoutes:
             return
 
         run_id = body.get('run_id')
+
+        # Post-accept rebrush detection: if the fire is already
+        # ACCEPTED and the caller did not specify a run_id, synthesize
+        # a high-range integer run_id, stage the canonical raw mask
+        # into the cache as a per-run source file, and let the rest
+        # of this method run unchanged. After class_brush returns,
+        # we append a gallery entry below (search for "post_accept_rebrush").
+        post_accept_rebrush = False
+        post_accept_rid = None
+        if (run_id in (None, '')
+                and fire.status == FireStatus.ACCEPTED
+                and fire.cache_dir
+                and os.path.isdir(fire.cache_dir)):
+            post_accept_rebrush = True
+            # Pick a run_id well above any conceivable serial sweep.
+            # Walk fire.serial_results to find the next free 10000+ id.
+            existing = {r.get('run_id') for r in fire.serial_results
+                        if isinstance(r.get('run_id'), int)}
+            post_accept_rid = 10000
+            while post_accept_rid in existing:
+                post_accept_rid += 1
+            # Stage the accepted mask + raw sibling into the cache as
+            # the per-run source file class_brush will read. Prefer
+            # the cache's own _raw.bin if present (untouched pre-brush
+            # mask); fall back to copying the canonical classified.bin
+            # from the accepted dir.
+            staged_clf = os.path.join(
+                fire.cache_dir,
+                f'{fire_numbe}_serial_{post_accept_rid}_classified.bin')
+            cache_main = os.path.join(
+                fire.cache_dir,
+                f'{fire_numbe}_crop.bin_classified.bin')
+            cache_main_raw = os.path.splitext(cache_main)[0] + '_raw.bin'
+            canon_main = os.path.join(
+                state.output_root, fire_numbe,
+                f'{fire_numbe}_crop.bin_classified.bin')
+            staged_src = None
+            if os.path.isfile(cache_main_raw):
+                staged_src = cache_main_raw
+            elif os.path.isfile(cache_main):
+                staged_src = cache_main
+            elif os.path.isfile(canon_main):
+                staged_src = canon_main
+            if staged_src is None:
+                self._send_json(
+                    {'error': 'Cannot rebrush an accepted fire whose '
+                              'cache and canonical classification are '
+                              'both missing.'},
+                    404)
+                return
+            try:
+                shutil.copy2(staged_src, staged_clf)
+                hdr_src = os.path.splitext(staged_src)[0] + '.hdr'
+                if not os.path.isfile(hdr_src):
+                    hdr_src = staged_src + '.hdr'
+                if os.path.isfile(hdr_src):
+                    shutil.copy2(
+                        hdr_src,
+                        os.path.splitext(staged_clf)[0] + '.hdr')
+            except OSError as exc:
+                self._send_json(
+                    {'error': f'Failed to stage rebrush source: {exc}'},
+                    500)
+                return
+            run_id = post_accept_rid
         clf_path = None         # canonical (overwritten with brushed)
         extra_brush_png = None
         if run_id not in (None, ''):
@@ -312,6 +384,58 @@ class RebrushRoutes:
                                                 f'{fire_numbe}_comparison.png'))
                                     except OSError:
                                         pass
+                    elif post_accept_rebrush:
+                        # Append a new gallery entry instead of mutating
+                        # the canonical accepted state. The canonical
+                        # output dir stays untouched until the user
+                        # accepts this gallery entry via
+                        # handle_api_serial_accept (which routes through
+                        # _accept_fire_sync, refreshing KML/SHP/params).
+                        new_area = _compute_ml_area(fire, clf_path)
+                        new_agr = _compute_agreement(
+                            fire, clf_path=clf_path)
+                        # Render a per-run brush_comparison + comparison
+                        # so the gallery shows them. We already wrote
+                        # extra_brush_png above; comparison PNG is
+                        # rendered on demand by _render_comparison_png.
+                        run_comp = os.path.join(
+                            fire.cache_dir,
+                            f'{fire_numbe}_serial_{run_id}.png')
+                        try:
+                            _render_comparison_png(fire, clf_path, run_comp)
+                        except Exception:
+                            pass
+                        # Build params dict so a subsequent serial-accept
+                        # promotes brush settings into fire.last_params.
+                        rebrush_params = dict(fire.last_params or {})
+                        rebrush_params['brush_size'] = int(bs)
+                        rebrush_params['point_threshold'] = int(pt)
+                        rebrush_params['brush_all_segments'] = bool(bas)
+                        with state.lock:
+                            fire.serial_results.append({
+                                'run_id': int(run_id),
+                                'setting_idx': 0,
+                                'run_idx': 0,
+                                'setting_label': 'Rebrushed (from accepted)',
+                                'agreement_pct': new_agr,
+                                'ml_area_ha': new_area,
+                                'classified': clf_path,
+                                'comparison': (run_comp
+                                               if os.path.isfile(run_comp)
+                                               else ''),
+                                'params': rebrush_params,
+                                'kind': 'rebrush',
+                                'parent': 'accepted',
+                            })
+                            fire.rebrush_dirty = True
+                        # Generate a serial overlay so the gallery
+                        # thumbnail viewer has something to render.
+                        try:
+                            _overlay_mask_on_post(
+                                fire, clf_path,
+                                f'serial_{run_id}', (0.9, 0.1, 0.0))
+                        except Exception:
+                            pass
                     else:
                         new_area = _compute_ml_area(fire, clf_path)
                         new_agr = _compute_agreement(
