@@ -15,7 +15,7 @@ from osgeo import gdal
 
 from .state import AppState
 from .preview import generate_all_previews
-from .io_utils import _atomic_yaml_dump
+from .io_utils import _atomic_yaml_dump, _sweep_stale_tmp_files
 from . import auth as _auth
 from .auth import (
     _hash_token, _normalize_ip, _check_login_rate, _record_failed_login,
@@ -265,6 +265,12 @@ def _stream_subprocess(cmd, cwd, on_line, tracker=None, fire_numbe=None):
 def init_app(app_state: AppState):
     global state
     state = app_state
+    # AUDIT-H3: clean up *.<pid>.<tid>.tmp files left behind by prior
+    # crashed processes. _atomic_yaml_dump removes its own tmp on
+    # exception, but a SIGKILL or hard crash leaks them.
+    _sweep_stale_tmp_files(
+        [getattr(app_state, 'output_root', ''),
+         getattr(app_state, 'shared_root', '')])
     _auth.init(app_state)
     _notifications.init(app_state)
     _progress.init(app_state)

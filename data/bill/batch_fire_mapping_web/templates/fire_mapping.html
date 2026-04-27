@@ -311,16 +311,17 @@
         <!-- Drag handle to resize console vs parameters -->
         <div class="resize-handle" id="resize-handle"></div>
 
-        <!-- Console -->
-        <div class="console-section" id="console-section">
+        <!-- Console (collapsed by default; click ▲ to expand) -->
+        <div class="console-section" id="console-section"
+             style="height:auto;min-height:0">
             <div class="console-header">
                 <h4>Console</h4>
                 <div style="display:flex;gap:6px">
                     <button onclick="document.getElementById('console-output').innerHTML=''">clear</button>
-                    <button id="console-toggle" onclick="toggleConsole()">&#9660;</button>
+                    <button id="console-toggle" onclick="toggleConsole()">&#9650;</button>
                 </div>
             </div>
-            <div id="console-output"></div>
+            <div id="console-output" style="display:none"></div>
         </div>
 
     </div><!-- /control-panel -->
@@ -1233,7 +1234,9 @@ async function removeFire() {
 // -----------------------------------------------------------------------
 // Console toggle & resize
 // -----------------------------------------------------------------------
-let consoleCollapsed = false;
+// Console starts collapsed — see the inline style on #console-output
+// and #console-section in the HTML above. Clicking ▲ expands.
+let consoleCollapsed = true;
 
 function toggleConsole() {
     const sec = document.getElementById('console-section');

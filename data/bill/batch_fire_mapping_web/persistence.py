@@ -221,6 +221,19 @@ def _load_fire_state():
         backup = f'{state_path}.corrupt-{int(time.time())}'
         try:
             shutil.copy2(state_path, backup)
+            # AUDIT-M5: fsync the .corrupt copy and its parent dir so the
+            # only evidence of the corruption survives a subsequent crash.
+            fd = os.open(backup, os.O_RDONLY)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            dir_fd = os.open(
+                os.path.dirname(backup) or '.', os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
         except OSError:
             backup = '<copy failed>'
         sys.stderr.write(

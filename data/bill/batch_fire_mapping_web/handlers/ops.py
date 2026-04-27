@@ -144,7 +144,7 @@ class OpsRoutes:
     def handle_api_report(self):
         """Generate PDF report of selected accepted fires."""
         from batch_fire_mapping.generate_report import generate_report
-        from .preview import (
+        from ..preview import (
             parse_envi_band_names, detect_band_groups, generate_preview_png)
         import tempfile
 

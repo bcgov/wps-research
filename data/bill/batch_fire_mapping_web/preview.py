@@ -41,7 +41,7 @@ def parse_envi_band_names(raster_path: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Band group detection (mirrors fire_mapping_cli._find_band_groups)
+# Band group detection — positional, formula-agnostic.
 # ---------------------------------------------------------------------------
 
 def detect_band_groups(band_names: list[str]) -> dict[str, list[int]]:
