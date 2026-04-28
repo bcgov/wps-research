@@ -290,6 +290,28 @@ def _load_fire_state():
             state.fires[fn] = fire
         else:
             fire = state.fires[fn]
+            # init_fires_from_disk Pass 2 fills these with placeholder
+            # values (active_year / 0.0 / '') for any fire reconstructed
+            # from .web_cache/<NAME>/. Without this overlay, the YAML's
+            # authoritative values would be silently dropped — wrong
+            # year picks the wrong reference raster on re-prepare; zero
+            # area shows up in the UI; missing date breaks downstream
+            # filters.
+            saved_year = entry.get('fire_year')
+            if saved_year is not None:
+                try:
+                    fire.fire_year = int(saved_year)
+                except (TypeError, ValueError):
+                    pass
+            saved_size = entry.get('fire_size_ha')
+            if saved_size is not None:
+                try:
+                    fire.fire_size_ha = float(saved_size)
+                except (TypeError, ValueError):
+                    pass
+            saved_date = entry.get('fire_date')
+            if saved_date:
+                fire.fire_date = str(saved_date)
 
         # Restore hidden flag
         if entry.get('hidden'):
@@ -472,8 +494,19 @@ def _load_fire_state():
                     restored += 1
                 else:
                     fire.status = FireStatus.PENDING
+                    # Pass-2 init_fires_from_disk planted 'interrupted;
+                    # retry create' when it found this fire's .web_cache
+                    # dir. Now that we've verified the saved state is
+                    # actually corrupt (files missing) and downgraded to
+                    # PENDING, the placeholder error message is stale;
+                    # leaving it makes the UI show "PENDING" alongside
+                    # an unrelated error.
+                    fire.error_msg = ''
             elif saved_status == 'accepted':
                 fire.status = FireStatus.ACCEPTED
+                restored += 1
+            elif saved_status == 'error':
+                fire.status = FireStatus.ERROR
                 restored += 1
             # MAPPING/PREPARING on disk means crashed mid-work — reset
             elif saved_status in ('mapping', 'preparing'):
@@ -488,6 +521,13 @@ def _load_fire_state():
                     fire.status = FireStatus.READY
         elif saved_status == 'accepted':
             fire.status = FireStatus.ACCEPTED
+        elif saved_status == 'error':
+            # ERROR fires don't necessarily have a cache_dir on disk
+            # (e.g., LAADS auth failed before any artefact was written).
+            # Restore them so the operator sees the original failure
+            # message rather than a silent transition to PENDING.
+            fire.status = FireStatus.ERROR
+            restored += 1
 
     if restored:
         sys.stderr.write(

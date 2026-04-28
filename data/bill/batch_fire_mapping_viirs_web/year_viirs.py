@@ -196,11 +196,128 @@ def shapify_year(save_dir: str, raster_path: str, workers: int = 8) -> int:
         save_dir, 'VNP14IMG', '**', '*.shp'), recursive=True))
 
 
+# ---------------------------------------------------------------------------
+# Year-wide spatial index (single GeoPackage)
+# ---------------------------------------------------------------------------
+
+def year_index_path(save_dir: str) -> str:
+    """Path to the consolidated year-wide GeoPackage index."""
+    return os.path.join(save_dir, 'year_index.gpkg')
+
+
+def _index_is_fresh(index_path: str, shp_files: list) -> bool:
+    if not os.path.isfile(index_path):
+        return False
+    manifest = index_path + '.manifest'
+    try:
+        with open(manifest) as fh:
+            recorded = int(fh.read().strip())
+    except (OSError, ValueError):
+        return False
+    if recorded != len(shp_files):
+        return False
+    try:
+        idx_mtime = os.path.getmtime(index_path)
+    except OSError:
+        return False
+    for shp in shp_files:
+        try:
+            if os.path.getmtime(shp) > idx_mtime:
+                return False
+        except OSError:
+            return False
+    return True
+
+
+def build_year_index(save_dir: str, raster_path: str) -> str:
+    """Consolidate every per-granule shapefile under *save_dir* into a single
+    GeoPackage with a text ``det_dt`` column (compact YYYYMMDDHHMM, so date
+    filters reduce to lexicographic comparisons regardless of GDAL/SQLite
+    type coercion). The GPKG driver builds an R-tree on geometry so per-fire
+    bbox queries skip irrelevant points without opening per-granule files.
+
+    Idempotent: rebuilt only when the .shp count or any .shp's mtime
+    diverges from the recorded manifest. Atomic write (tmp → rename).
+    Returns the index path, or '' when there are no shapefiles to index.
+    """
+    import geopandas as gpd
+    import pandas as pd
+    from pathlib import Path
+    from viirs.utils.accumulate import extract_datetime_from_filename
+
+    shp_files = sorted(glob.glob(
+        os.path.join(save_dir, 'VNP14IMG', '**', '*.shp'), recursive=True))
+    index_path = year_index_path(save_dir)
+    manifest_path = index_path + '.manifest'
+
+    if not shp_files:
+        for p in (index_path, manifest_path):
+            try:
+                os.remove(p)
+            except FileNotFoundError:
+                pass
+        return ''
+
+    if _index_is_fresh(index_path, shp_files):
+        return index_path
+
+    print(f'      [{os.path.basename(raster_path)}] '
+          f'building year index from {len(shp_files)} shapefiles ...')
+
+    frames = []
+    crs = None
+    for shp in shp_files:
+        dt = extract_datetime_from_filename(Path(shp).stem)
+        if dt is None:
+            continue
+        try:
+            gdf = gpd.read_file(shp)
+        except Exception as exc:
+            sys.stderr.write(f'[year_viirs] index read {shp}: {exc}\n')
+            continue
+        if gdf.empty:
+            continue
+        if crs is None and gdf.crs is not None:
+            crs = gdf.crs
+        gdf['det_dt'] = dt.strftime('%Y%m%d%H%M')
+        frames.append(gdf)
+
+    if not frames:
+        for p in (index_path, manifest_path):
+            try:
+                os.remove(p)
+            except FileNotFoundError:
+                pass
+        return ''
+
+    combined = gpd.GeoDataFrame(
+        pd.concat(frames, ignore_index=True), crs=crs)
+    # GPKG reserves the lowercase ``fid`` column as the primary key; the
+    # ``FID`` column geopandas pulls off shapefiles case-folds onto it on
+    # write and collides across concatenated granules. Drop it.
+    drop_cols = [c for c in combined.columns if c.lower() == 'fid']
+    if drop_cols:
+        combined = combined.drop(columns=drop_cols)
+
+    # Keep the .gpkg suffix on the temp path so pyogrio's extension sniff
+    # doesn't second-guess the explicit driver= argument.
+    tmp_path = index_path + '.tmp.gpkg'
+    if os.path.isfile(tmp_path):
+        os.remove(tmp_path)
+    combined.to_file(tmp_path, driver='GPKG', layer='viirs')
+    os.replace(tmp_path, index_path)
+    with open(manifest_path, 'w') as fh:
+        fh.write(str(len(shp_files)))
+    print(f'      [{os.path.basename(raster_path)}] '
+          f'year index: {len(combined)} features → {index_path}')
+    return index_path
+
+
 def bootstrap_year(state, year: int, raster_path: str,
                    save_dir: str = None,
                    download_workers: int = 16,
                    shapify_workers: int = 8) -> dict:
-    """Run download + shapify for a year's full raster footprint and
+    """Run download + shapify + index for a year's full raster footprint and
     default seasonal window. Idempotent. Returns counts."""
     if save_dir is None:
         save_dir = year_viirs_dir(state, year)
@@ -210,7 +327,9 @@ def bootstrap_year(state, year: int, raster_path: str,
         year, raster_path, save_dir, state.laads_token,
         workers=download_workers)
     n_shp = shapify_year(save_dir, raster_path, workers=shapify_workers)
-    return {'n_nc': n_nc, 'n_shp': n_shp, 'save_dir': save_dir}
+    index_path = build_year_index(save_dir, raster_path)
+    return {'n_nc': n_nc, 'n_shp': n_shp, 'save_dir': save_dir,
+            'index_path': index_path}
 
 
 def bootstrap_all_years(state) -> dict:

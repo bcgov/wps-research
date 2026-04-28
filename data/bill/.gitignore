@@ -10,5 +10,5 @@ mapped_burn/
 .ollama/
 .claude/
 inspection_files/
-*results
+*results*
 *.sh
