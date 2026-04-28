@@ -220,7 +220,7 @@ def process_job(job):
         resampled_files.append(resampled_file)
 
     if cmds:
-        parfor(run, cmds, int(mp.cpu_count()))
+        parfor(run, cmds, min(int(mp.cpu_count()), 16))
     else:
         print(f'[RESAMPLE skip all] all intermediates already exist for {target_label}', flush=True)
 
