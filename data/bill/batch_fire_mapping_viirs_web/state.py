@@ -161,7 +161,7 @@ class AppState:
         self.settings_file: str = ""
 
         # Defaults
-        self.padding: float = 0.2
+        self.padding: float = 0.1
         self.sample_rate: float = 0.05
         self.min_samples: int = 500
         self.max_samples: int = 30000

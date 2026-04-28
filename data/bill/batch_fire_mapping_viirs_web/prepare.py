@@ -67,6 +67,7 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
         _tight_bounds_from_shapefile, _verify_viirs_bin_nonzero,
         _read_dims, _compute_viirs_area_ha, accumulate_for_fire,
         _RASTERIZE_BUFFER_M, WorkerError,
+        _invalidate_stale_rasterize,
     )
     from viirs.utils.rasterize import rasterize_shapefile
 
@@ -188,6 +189,12 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
     if cached_bounds != bounds_key and os.path.isdir(crop_rast_dir):
         shutil.rmtree(crop_rast_dir, ignore_errors=True)
     os.makedirs(crop_rast_dir, exist_ok=True)
+    # The bounds_key cache only invalidates on crop-extent change. If
+    # the cumulative shapefile itself was rebuilt with new days but the
+    # crop bounds happen to match, rasterize_shapefile would short-
+    # circuit on the existing .bin and silently return stale data.
+    # Force re-rasterize whenever the .shp is newer than the .bin.
+    _invalidate_stale_rasterize(acc_shp, crop_rast_dir)
     viirs_bin = None
     try:
         viirs_bin = rasterize_shapefile(

@@ -21,7 +21,7 @@ exactly as in the polygon-driven sibling.
 |---|---|---|
 | Fire source | Pre-curated polygon shapefile | User draws bbox in `/new_fire` |
 | Fire identity | `FIRE_NUMBE` from polygon attribute | User-supplied name (validated) |
-| VIIRS download | All-years, at startup, blocking | **Per-year, at startup, blocking (idempotent)** — fire creation only runs `accumulate` against the shared shp dir |
+| VIIRS download | All-years, at startup, blocking | **Per-year, at startup, blocking (idempotent)** — bootstrap also builds a per-year `year_index.gpkg` so fire creation runs a single bbox-pushdown read instead of walking the per-granule shp tree |
 | Crop bounds | Polygon geometry intersection + padding | bbox of nonzero VIIRS pixels + padding |
 | `--polygon_file` | Required positional | **Removed** |
 | `--perimeter_mode` | `viirs` / `traditional` | **Removed** (always VIIRS) |
@@ -122,23 +122,33 @@ disabled for non-admins (year-switch is admin-only).
 
 ## The VIIRS prepare worker
 
-Download + shapify happen **once per year at server boot** in
-`year_viirs.bootstrap_all_years` (idempotent — pre-existing `.nc` and
-`.shp` files are reused). Each year's full raster footprint is downloaded
-for the seasonal window `<year>-03-01` to `<year>-10-30` (or to today if
-the upper bound is in the future) into
+Download + shapify + **index build** happen **once per year at server boot**
+in `year_viirs.bootstrap_all_years` (idempotent — pre-existing `.nc`,
+`.shp`, and `year_index.gpkg` are reused). Each year's full raster
+footprint is downloaded for the seasonal window `<year>-03-01` to
+`<year>-10-30` (or to today if the upper bound is in the future) into
 `<output_root_for_year>/_year_viirs/VNP14IMG/<year>/<jday>/`.
+
+After shapify, `year_viirs.build_year_index` consolidates every
+per-granule `*.shp` under that tree into a single GeoPackage at
+`<output_root_for_year>/_year_viirs/year_index.gpkg` (layer `viirs`, GPKG
+R-tree on geometry, text `det_dt` column in compact `YYYYMMDDHHMM` so date
+filters reduce to lexicographic comparisons regardless of GDAL/SQLite type
+coercion). A sidecar `year_index.gpkg.manifest` records the source `.shp`
+count; the index is rebuilt only when the count or any source `.shp`'s
+mtime advances. Atomic write via `.tmp.gpkg → rename`. Per-fire prepare
+queries this single file with bbox pushdown instead of opening hundreds
+of per-granule shapefiles.
 
 Per-fire submitted via `/api/fire/create` are dispatched to a module-level
 FIFO queue (`viirs_worker._dispatch_queue`) with `--viirs_concurrent_jobs`
-parallel workers (default 1). Each fire walks **three** stages — no
+parallel workers (default 1). Each fire walks **two** stages — no
 download, no shapify (already done at boot):
 
 | Stage | What happens | Cancellable |
 |---|---|---|
-| `accumulating` | `viirs.utils.accumulate(...)` — combines per-granule shapefiles from the **shared per-year dir** into one cumulative shapefile bbox-filtered to the user's drawn bbox. | Between stages. |
-| `rasterizing` | `viirs.utils.rasterize_shapefile(...)` against the year's reference raster (full extent). Verified non-empty. | Between rasterize and crop. |
-| `cropping` | `_tight_bounds_from_viirs_bin` (bbox of nonzero VIIRS pixels + `padding * max_dim`). `crop_raster` produces `<NAME>_crop.bin`; VIIRS is **re-rasterized** onto the cropped extent so the hint aligns to the crop's grid. Previews are generated, including a green-tinted hint overlay on `previews/post.png`. | n/a (last stage). |
+| `accumulating` | **Fast path** (default): `viirs_worker._fast_accumulate_from_index` runs a single bbox-pushdown read against `year_index.gpkg`, date-filters in pandas, and writes the per-fire `VIIRS_VNP14IMG_<startdt>_<enddt>.shp` the rasterize step expects. **Slow fallback** (when the index is missing — older deployments, build failure): `viirs.utils.accumulate(...)` walks the per-granule shapefile tree with bbox filter at read time. Both paths are interchangeable from the rest of the pipeline's perspective. | Between stages. |
+| `cropping` | `_tight_bounds_from_shapefile` reads `gdf.total_bounds` from the cumulative shapefile (no full-extent rasterize), expands by `_RASTERIZE_BUFFER_M` and `padding * max_dim`. `crop_raster` produces `<NAME>_crop.bin`; VIIRS is rasterized onto the cropped extent so the hint aligns to the crop's grid. Previews are generated, including a green-tinted hint overlay on `previews/post.png`. | n/a (last stage). |
 
 On success the fire flips to `READY`, `is_new=True` (drives the "new"
 badge), `fire.crop_bin` / `fire.viirs_bin` / `fire.hint_bin` /
@@ -239,12 +249,14 @@ pill.
 ├── pgfc_2023_mapping_results/
 │   ├── fire_state.yaml
 │   ├── accepted_params.csv
+│   ├── _year_viirs/                # year-wide VIIRS data (built once at boot)
+│   │   ├── VNP14IMG/<year>/<jday>/*.nc + *.shp  # per-granule raw + shapified
+│   │   ├── year_index.gpkg                       # consolidated R-tree-indexed GPKG
+│   │   └── year_index.gpkg.manifest              # shp-count freshness sidecar
 │   ├── .web_cache/
 │   │   └── <NAME>/                 # per-fire prepare cache
-│   │       ├── VNP14IMG/<year>/<jday>/*.nc
-│   │       ├── *_VIIRS_*.shp/.dbf/.shx/.prj
-│   │       ├── VIIRS_VNP14IMG_<...>.bin           # full-extent rasterize
-│   │       ├── _viirs_crop/VIIRS_VNP14IMG_<...>.bin   # crop-aligned rerasterize
+│   │       ├── VIIRS_VNP14IMG_<...>.shp/.dbf/.shx/.prj  # cumulative (from fast path or accumulate)
+│   │       ├── _viirs_crop/VIIRS_VNP14IMG_<...>.bin   # crop-aligned rasterize
 │   │       ├── <NAME>_crop.bin                    # ENVI cropped raster
 │   │       ├── <NAME>_serial_<N>_classified.bin   # gallery entries
 │   │       └── previews/{pre,post,hint,result}.png
@@ -283,7 +295,8 @@ Files that exist only in this package:
 | File | Purpose |
 |---|---|
 | `overview.py` | Per-year overview PNG + sidecar JSON generator. `generate_overview(raster, png_path, json_path, max_dim=2000)` does a memory-bounded GDAL `ReadAsArray(buf_xsize=, buf_ysize=)` so a 100 GB raster reads at ~50 MB peak. Atomic write (tmp + fsync + rename + parent-dir fsync). Reuses `preview.detect_band_groups` to prefer the post group. `overview_is_fresh` and `ensure_overview` implement the cache by `(st_mtime_ns, st_size)`. The sidecar JSON is consumed client-side in `new_fire.js` for pixel ↔ CRS ↔ WGS84 math. |
-| `viirs_worker.py` | The 5-stage prepare worker. `submit_fire(fire)` enqueues; a daemon dispatcher pulls FIFO and calls `_viirs_worker(fire)` which walks `_laads_download → _run_shapify → accumulate → rasterize_shapefile → _tight_bounds_from_viirs_bin → crop_raster → re-rasterize → previews`. `cancel_fire(fire)` sets `fire.cancel_event` and SIGTERMs any live subprocess. `_tight_bounds_from_viirs_bin` mirrors `prepare.py:117-128` from the sibling exactly, just sourcing the bbox from VIIRS pixels instead of polygon geometry. Cancellation, subprocess group kills, and progress snapshots all go through this module. |
+| `year_viirs.py` | Year-wide VIIRS bootstrap (download + shapify + index) run once at server boot. `bootstrap_all_years(state)` iterates every (year, raster) and calls `bootstrap_year` → `download_year` (per-day LAADS pulls into `_year_viirs/VNP14IMG/<year>/<jday>/`, parallel via `--viirs_download_workers`) → `shapify_year` (parallel via `--viirs_shapify_workers`, skips already-shapified granules) → `build_year_index`. `build_year_index` consolidates every `*.shp` under that tree into a single GeoPackage `year_index.gpkg` (layer `viirs`, GPKG R-tree on geometry, text `det_dt` column in compact `YYYYMMDDHHMM` for lexicographic compare). Idempotent via a `.manifest` recording shp count + per-source-shp mtime check. Atomic write (`.tmp.gpkg → rename`). Drops the `FID` column geopandas pulls off shapefiles so it doesn't collide on the GPKG primary key. |
+| `viirs_worker.py` | The 2-stage prepare worker (`accumulating`, `cropping`). `submit_fire(fire)` enqueues; a daemon dispatcher pulls FIFO and calls `_viirs_worker(fire)` which walks `accumulate_for_fire → _tight_bounds_from_shapefile → crop_raster → rasterize_shapefile (onto crop) → previews`. `accumulate_for_fire` first checks for a matching seeded shapefile (`_seeded_shp_matches_fire`), then tries the **fast path** (`_fast_accumulate_from_index`) which bbox-pushdowns into `year_index.gpkg`, date-filters in pandas, and writes a per-fire cumulative `VIIRS_VNP14IMG_<startdt>_<enddt>.shp` matching the slow path's column contract; falls back to `viirs.utils.accumulate(...)` (per-granule walk with bbox-filtered reads) when the index is missing or unreadable. `cancel_fire(fire)` sets `fire.cancel_event` and SIGTERMs any live subprocess. `_tight_bounds_from_shapefile` reads `gdf.total_bounds` directly (no full-extent rasterize); `_tight_bounds_from_viirs_bin` is retained for tests / re-prepare. Cancellation, subprocess group kills, and progress snapshots all go through this module. |
 | `templates/new_fire.html` | The bbox-drawing page. Static `<img>` overview underneath an HTML5 `<canvas>` overlay. Embeds a small JSON config block for `new_fire.js`. |
 | `static/new_fire.js` | Canvas drag handler (create / move), pixel ↔ raster CRS ↔ WGS84 conversion off the overview JSON, live cursor readout, form validation, POST to `/api/fire/create`. No external libraries. |
 | `tests/conftest.py` | Synthetic raster + VIIRS bin fixtures (UTM 10N, 30 m/pixel). |
@@ -294,6 +307,7 @@ Files that exist only in this package:
 | `tests/test_tight_crop.py` | 5 tests for the bbox-of-nonzero-pixels + padding math. |
 | `tests/test_viirs_worker_cancel.py` | 4 tests for cooperative cancel during download / subprocess kill mid-shapify / cache cleanup / idempotent no-op. |
 | `tests/test_fire_create_endpoint.py` | 7 tests exercising the validation-and-enqueue path of `/api/fire/create`. |
+| `tests/test_year_index_fast_path.py` | 6 tests for `build_year_index` (creation, idempotence, rebuild on new shp) and `_fast_accumulate_from_index` (bbox+date filter, empty-result raise, missing-index fallback). |
 
 Files changed from the sibling:
 
@@ -343,12 +357,14 @@ python3 -m pytest batch_fire_mapping_viirs_web/tests/ \
     --ignore=batch_fire_mapping_viirs_web/tests/audit -v
 ```
 
-Baseline: **72 pass** across `test_overview*`, `test_*validation*`,
-`test_tight_crop`, `test_viirs_worker_cancel`,
-`test_fire_create_endpoint`. The audit-suite tests under
-`tests/audit/` are the legacy `bash run_all.sh` PASS/FAIL framework
-imported wholesale from the sibling — they reference the polygon
-package and are skipped here.
+Baseline: **111 pass** across `test_overview*`, `test_*validation*`,
+`test_tight_crop`, `test_tight_bounds_from_shapefile`,
+`test_viirs_worker_cancel`, `test_viirs_worker_progress`,
+`test_cancel_create_nonblocking`, `test_detective`,
+`test_fire_create_endpoint`, `test_year_index_fast_path`. The
+audit-suite tests under `tests/audit/` are the legacy `bash run_all.sh`
+PASS/FAIL framework imported wholesale from the sibling — they reference
+the polygon package and are skipped here.
 
 A real-LAADS end-to-end test (small AOI + 2-day window against a
 working token) is left to manual QA — see `PLAN.md` §14 for the
