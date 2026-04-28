@@ -1088,9 +1088,12 @@ tbody tr.row-mapping:hover { background: #ede1ff; }
 }
 .nf-actions {
     display: flex;
-    justify-content: flex-end;
     gap: 8px;
     margin-top: 12px;
+}
+.nf-actions > .btn {
+    flex: 1;
+    text-align: center;
 }
 .nf-preview-row {
     display: flex;
