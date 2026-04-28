@@ -1,3 +1,7 @@
+This version of the web application is for historical research purposes. It seeds fire mapping results from historical polygons. The other version is for operational use and seeds fire mapping results from VIIRS data: 
+
+* [batch_fire_mapping_viirs_web](https://github.com/bcgov/wps-research/tree/master/data/bill/batch_fire_mapping_viirs_web)
+
 # batch_fire_mapping_web
 
 *Last updated: April 27, 2026 — correctness audit pass. Critical and

@@ -1,3 +1,7 @@
+This version of the web application is for operational use. It seeds fire mapping results from NRT (accumulated) VIIRS data. The other version is for historical research use and seeds fire mapping results from historical fire perimeters:
+
+* [batch_fire_mapping_web](https://github.com/bcgov/wps-research/tree/master/data/bill/batch_fire_mapping_web)
+
 # batch_fire_mapping_viirs_web
 
 *Sibling of `batch_fire_mapping_web`. Same downstream ML pipeline; the

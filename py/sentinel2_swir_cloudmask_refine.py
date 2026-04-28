@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-sentinel2_swir_cloudmask.py
+sentinel2_swir_cloudmask_refine.py
 ===========================
 Extract cloud-masked SWIR (B12, B11, B9) from Sentinel-2 zip files.
 
@@ -11,9 +11,10 @@ For each L2A zip file the script:
   3. Combines the refined cloud mask with SCL-based nodata pixels
      (SCL classes 0=NO_DATA, 1=SATURATED_OR_DEFECTIVE, 2=DARK_AREA_PIXELS,
       3=CLOUD_SHADOWS are all treated as invalid / written as NaN).
-  4. Extracts B12, B11, B9 either from the same L2A zip (default) or from a
-     matching L1C zip when --l1_dir is supplied.  Matching is done by tile-ID
-     and acquisition date parsed from the Sentinel-2 filename convention.
+  4. Extracts B12, B11, B9, B8 (default) or B12, B11, B9 (with --three_band)
+     either from the same L2A zip (default) or from a matching L1C zip when
+     --l1_dir is supplied.  Matching is done by tile-ID and acquisition date
+     parsed from the Sentinel-2 filename convention.
   5. Writes an ENVI float32 output (.bin + .hdr) next to the source zip, with
      the same filename stem plus .bin extension, and georeference copied from
      the B12 subdataset.
@@ -34,31 +35,35 @@ SCL nodata classes (marked * = treated as invalid):
 
 Usage examples
 --------------
-# Process all L2A zips in current directory (B12/B11/B9 from L2A):
-    python3 sentinel2_swir_cloudmask.py
+# Process all L2A zips in current directory (B12/B11/B9/B8 from L2A, default):
+    python3 sentinel2_swir_cloudmask_refine.py
+
+# Three-band output (B12/B11/B9 only, no B8):
+    python3 sentinel2_swir_cloudmask_refine.py --three_band
 
 # Specify L2A directory explicitly:
-    python3 sentinel2_swir_cloudmask.py --l2_dir /data/L2A
+    python3 sentinel2_swir_cloudmask_refine.py --l2_dir /data/L2A
 
 # Use L1C bands instead (still needs L2A for cloud masks):
-    python3 sentinel2_swir_cloudmask.py --l2_dir /data/L2A --l1_dir /data/L1C
+    python3 sentinel2_swir_cloudmask_refine.py --l2_dir /data/L2A --l1_dir /data/L1C
 
 # Tune RF sampling stride and cloud threshold:
-    python3 sentinel2_swir_cloudmask.py --skip_f 3000 --cloud_threshold 0.4
+    python3 sentinel2_swir_cloudmask_refine.py --skip_f 3000 --cloud_threshold 0.4
 
 # Save trained RF models for reuse:
-    python3 sentinel2_swir_cloudmask.py --save_model --model_dir ./models
+    python3 sentinel2_swir_cloudmask_refine.py --save_model --model_dir ./models
 
 # Skip RF refinement, use raw CLD probability only:
-    python3 sentinel2_swir_cloudmask.py --no_rf
+    python3 sentinel2_swir_cloudmask_refine.py --no_rf
 
 # Save a side-by-side diagnostic PNG next to each output:
-    python3 sentinel2_swir_cloudmask.py --png
+    python3 sentinel2_swir_cloudmask_refine.py --png
 
 Flags
 -----
 --l2_dir          DIR   Directory containing L2A zip/SAFE files  [default: cwd]
 --l1_dir          DIR   Directory containing L1C zip/SAFE files  [optional]
+--three_band            Output only B12, B11, B9 (omit B8)       [default: 4 bands]
 --skip_f          INT   RF training pixel stride                  [default: 5000]
 --offset          INT   RF training pixel offset                  [default: 0]
 --cloud_threshold FLOAT Probability threshold for cloud masking   [default: 0.0001]
@@ -67,6 +72,7 @@ Flags
 --no_rf                 Skip RF refinement; use raw CLD directly
 --png                   Write diagnostic PNG alongside each output
 --overwrite             Re-process scenes whose output .bin already exists
+--mrap                  Write MRAP composites instead of per-scene outputs
 --N_workers       INT   Number of parallel worker processes       [default: 32]
 """
 
@@ -113,14 +119,11 @@ def _open_zip_or_safe(path: str) -> Optional[gdal.Dataset]:
     if path.endswith('.zip'):
         vsi = f'/vsizip/{path}'
         ds = None
-        # Try opening vsi path directly — may raise RuntimeError if not a
-        # self-describing dataset (most Sentinel-2 zips are not), so catch it.
         try:
             ds = gdal.Open(vsi)
         except RuntimeError:
             ds = None
         if ds is None:
-            # Walk the zip contents and open the MTD XML inside the .SAFE folder
             files = gdal.ReadDir(vsi) or []
             for f in files:
                 if f.endswith('.SAFE'):
@@ -174,9 +177,6 @@ def _find_bands_in_subdatasets(
             if bn in wanted_set and bn not in found:
                 arr = band.ReadAsArray().astype(np.float32)
                 found[bn] = (arr, sub_ds)
-        # Don't close sub_ds here — the array is already in memory but we
-        # keep sub_ds alive for geotransform queries below; caller is
-        # responsible for cleanup (they will fall out of scope naturally).
 
     return found
 
@@ -207,6 +207,55 @@ def _resample_to_target(
     return result
 
 
+def _make_mem_ds(arr: np.ndarray, geo: tuple, proj: str) -> gdal.Dataset:
+    """Create an in-memory GDAL dataset from a 2D array (helper for resampling)."""
+    mem = gdal.GetDriverByName('MEM')
+    ds  = mem.Create('', arr.shape[1], arr.shape[0], 1, gdal.GDT_Float32)
+    ds.SetGeoTransform(geo)
+    ds.SetProjection(proj)
+    ds.GetRasterBand(1).WriteArray(arr)
+    return ds
+
+
+# ===========================================================================
+# Band list helpers (centralised three_band logic)
+# ===========================================================================
+
+def _output_band_names_list(three_band: bool) -> list[str]:
+    """Return the list of output band name keys in order."""
+    if three_band:
+        return ['B12', 'B11', 'B9']
+    return ['B12', 'B11', 'B9', 'B8']
+
+
+def _wanted_swir_bands(three_band: bool) -> list[str]:
+    """Band names to request from subdatasets."""
+    return _output_band_names_list(three_band)
+
+
+def _build_output_band_names(date_str: str, swir_res: float, three_band: bool) -> list[str]:
+    """Return band description strings for the output ENVI file."""
+    info = {
+        'B12': '2190nm',
+        'B11': '1610nm',
+        'B9':  '945nm',
+        'B8':  '842nm',
+    }
+    return [f'{date_str} {int(swir_res)}m: {b} {info[b]}'
+            for b in _output_band_names_list(three_band)]
+
+
+def _build_output_stack(bands_dict: dict, three_band: bool) -> np.ndarray:
+    """Stack output bands into (H, W, K) float32 array.
+
+    bands_dict must contain keys 'b12', 'b11', 'b9' [, 'b8'].
+    """
+    layers = [bands_dict['b12'], bands_dict['b11'], bands_dict['b9']]
+    if not three_band:
+        layers.append(bands_dict['b8'])
+    return np.dstack(layers).astype(np.float32)
+
+
 # ===========================================================================
 # L2A extraction: CLD, SCL, and optionally SWIR bands
 # ===========================================================================
@@ -214,18 +263,14 @@ def _resample_to_target(
 def extract_l2a_masks_and_swir(
     l2a_path: str,
     extract_swir: bool = True,
+    three_band: bool = False,
 ) -> Optional[Dict]:
     """
-    Extract from a L2A zip/SAFE file into RAM:
-      - CLD array  (cloud probability, 0-100 raw)
-      - SCL array  (scene classification)
-      - Optionally B12, B11, B9 arrays
-      - Geotransform and projection for the 20m grid (masks)
-      - Geotransform and projection for the SWIR grid (B12 native res)
+    Extract from a L2A zip/SAFE file into RAM.
 
     Returns a dict with keys:
         cld, scl, cld_geo, cld_proj, cld_xsize, cld_ysize,
-        b12, b11, b9, swir_geo, swir_proj, swir_xsize, swir_ysize  (if extract_swir)
+        b12, b11, b9, [b8,] swir_geo, swir_proj, swir_xsize, swir_ysize  (if extract_swir)
     Returns None on failure.
     """
     ds = _open_zip_or_safe(l2a_path)
@@ -235,10 +280,7 @@ def extract_l2a_masks_and_swir(
 
     # --- cloud / SCL ---
     wanted_masks = ['CLD', 'SCL']
-    if extract_swir:
-        wanted_swir = ['B12', 'B11', 'B9']
-    else:
-        wanted_swir = []
+    wanted_swir = _wanted_swir_bands(three_band) if extract_swir else []
 
     mask_found = _find_bands_in_subdatasets(ds, wanted_masks)
     if 'CLD' not in mask_found or 'SCL' not in mask_found:
@@ -295,7 +337,7 @@ def extract_l2a_masks_and_swir(
     swir_found = _find_bands_in_subdatasets(ds, wanted_swir)
     missing = [b for b in wanted_swir if b not in swir_found]
     if missing:
-        print(f'[ERROR] SWIR band(s) {missing} not found in {l2a_path}')
+        print(f'[ERROR] Band(s) {missing} not found in {l2a_path}')
         return None
 
     b12_arr, b12_sub = swir_found['B12']
@@ -328,21 +370,27 @@ def extract_l2a_masks_and_swir(
         swir_ysize=swir_ysize,
         swir_res=swir_res,
     ))
+
+    # B8 (10m native) — resample to B12 grid
+    if not three_band:
+        b8_arr, b8_sub = swir_found['B8']
+        if b8_arr.shape != (swir_ysize, swir_xsize):
+            b8_arr = _resample_to_target(
+                b8_arr, b8_sub, swir_xsize, swir_ysize,
+                tuple(swir_geo), swir_proj, 'bilinear')
+        result['b8'] = b8_arr
+
     return result
 
 
 # ===========================================================================
-# L1C extraction: SWIR bands only (B12, B11, B9)
+# L1C extraction: SWIR bands only
 # ===========================================================================
 
-def extract_l1c_swir(l1c_path: str) -> Optional[Dict]:
+def extract_l1c_swir(l1c_path: str, three_band: bool = False) -> Optional[Dict]:
     """
-    Extract B12, B11, B9 from a L1C zip/SAFE file into RAM.
-    B9 is resampled to match B12 native resolution.
-
-    Returns dict with keys: b12, b11, b9, swir_geo, swir_proj,
-                             swir_xsize, swir_ysize, swir_res
-    Returns None on failure.
+    Extract B12, B11, B9 [, B8] from a L1C zip/SAFE file into RAM.
+    B9 and B8 are resampled to match B12 native resolution.
     """
     gdal.PushErrorHandler(_suppress_gdal_warnings)
     ds = None
@@ -369,7 +417,7 @@ def extract_l1c_swir(l1c_path: str) -> Optional[Dict]:
         print(f'[ERROR] Cannot open L1C file: {l1c_path}')
         return None
 
-    wanted = ['B12', 'B11', 'B9']
+    wanted = _wanted_swir_bands(three_band)
     found  = _find_bands_in_subdatasets(ds, wanted)
     missing = [b for b in wanted if b not in found]
     if missing:
@@ -395,7 +443,7 @@ def extract_l1c_swir(l1c_path: str) -> Optional[Dict]:
             b9_arr, b9_sub, swir_xsize, swir_ysize,
             tuple(swir_geo), swir_proj, 'bilinear')
 
-    return dict(
+    result = dict(
         b12=b12_arr,
         b11=b11_arr,
         b9=b9_arr,
@@ -405,6 +453,16 @@ def extract_l1c_swir(l1c_path: str) -> Optional[Dict]:
         swir_ysize=swir_ysize,
         swir_res=swir_res,
     )
+
+    if not three_band:
+        b8_arr, b8_sub = found['B8']
+        if b8_arr.shape != (swir_ysize, swir_xsize):
+            b8_arr = _resample_to_target(
+                b8_arr, b8_sub, swir_xsize, swir_ysize,
+                tuple(swir_geo), swir_proj, 'bilinear')
+        result['b8'] = b8_arr
+
+    return result
 
 
 # ===========================================================================
@@ -445,15 +503,6 @@ def abcd_rf_arrays(
 ) -> Tuple[np.ndarray, object]:
     """
     A:B::C:D RF regression entirely in RAM.
-
-    Parameters
-    ----------
-    A        : (n_bands, n_pixels) float32 — training features
-    B        : (1, n_pixels)       float32 — training targets (cloud prob)
-    C        : (n_bands, n_pixels) float32 — inference features (== A here)
-    skip_f   : sampling stride
-    offset   : sampling offset
-    pkl_path : path to cache/load trained model
 
     Returns (D, rf) where D is (1, n_pixels).
     """
@@ -527,12 +576,10 @@ def refine_cloud_mask(
     H, W = cld_arr.shape
     n_px = H * W
 
-    # Normalise CLD to [0,1]
     cld_prob = cld_arr.astype(np.float32)
     if cld_prob.max() > 1.0:
         cld_prob = cld_prob / 100.0
 
-    # Build A (features) and B (targets) as (n_bands, n_pixels)
     A = (swir_stack.astype(np.float32) / 10_000.0).reshape(n_px, 3).T   # (3, n_px)
     B = cld_prob.ravel()[np.newaxis, :]                                   # (1, n_px)
     np.nan_to_num(B, copy=False, nan=0.0)
@@ -561,48 +608,25 @@ def refine_shadow_mask(
     """
     Refine the SCL cloud-shadow mask using the ABCD RF method.
 
-    The SCL shadow class (3) binary indicator is used as the training target B.
-    Water pixels (SCL class 6) are excluded from training so the RF is not
-    confused by the spectrally similar water signature.  All pixels receive
-    a prediction at inference time regardless.
-
-    scl_arr    : (H, W) SCL classification array (integer classes)
-    swir_stack : (H, W, 3) float32 B12/B11/B9 stack at 20m (same grid as SCL)
-    skip_f     : RF stride
-    offset     : RF offset
-    pkl_path   : optional path to cache / load trained model
-
     Returns refined shadow probability array (H, W) in [0, 1].
-    A value >= 0.5 indicates likely shadow.
     """
     H, W  = scl_arr.shape
     n_px  = H * W
 
-    # Binary shadow target: 1 where SCL == 3 (CLOUD_SHADOWS), else 0
-    shadow_binary = (scl_arr == 3).astype(np.float32).ravel()   # (n_px,)
+    shadow_binary = (scl_arr == 3).astype(np.float32).ravel()
+    water_mask = (scl_arr == 6).ravel()
 
-    # Water mask: SCL == 6 — exclude from training
-    water_mask = (scl_arr == 6).ravel()                          # (n_px,) bool
-
-    # Features A: normalised SWIR bands (3, n_px)
     A = (swir_stack.astype(np.float32) / 10_000.0).reshape(n_px, 3).T
-
-    # Target B: shadow binary (1, n_px)
     B = shadow_binary[np.newaxis, :]
     np.nan_to_num(B, copy=False, nan=0.0)
 
-    # -----------------------------------------------------------------------
-    # Custom training-index selection: stride sample, then drop water pixels
-    # and bad (NaN / all-zero) pixels.
-    # -----------------------------------------------------------------------
     if pkl_path and os.path.isfile(pkl_path):
         print(f'  [shadow] Loading cached model: {pkl_path}')
         with open(pkl_path, 'rb') as fh:
             rf = pickle.load(fh)
     else:
-        bp   = _bad_pixel_mask(A)                              # (n_px,) bool
+        bp   = _bad_pixel_mask(A)
         idx  = np.arange(offset, n_px, skip_f)
-        # Exclude bad pixels and water pixels from training
         good = idx[~bp[idx] & ~water_mask[idx]]
         n_train = len(good)
         print(f'  [shadow] Training samples: {n_train:,} '
@@ -611,8 +635,8 @@ def refine_shadow_mask(
             print('  [shadow] No valid training pixels — returning raw SCL shadow.')
             return shadow_binary.reshape(H, W)
 
-        X_train = A[:, good].T                 # (n_train, 3)
-        Y_train = B[0, good]                   # (n_train,)
+        X_train = A[:, good].T
+        Y_train = B[0, good]
         np.nan_to_num(Y_train, copy=False, nan=0.0)
 
         rf = _fit_rf(X_train, Y_train)
@@ -623,7 +647,6 @@ def refine_shadow_mask(
                 pickle.dump(rf, fh)
             print(f'  [shadow] Model saved → {pkl_path}')
 
-    # Inference on all non-bad pixels
     bp_c   = _bad_pixel_mask(A)
     good_c = np.where(~bp_c)[0]
     D      = np.full(n_px, np.nan, dtype=np.float32)
@@ -645,13 +668,7 @@ def write_envi(
     proj: str,
     band_names: Optional[list[str]] = None,
 ) -> None:
-    """
-    Write a float32 ENVI (.bin + .hdr) file.
-
-    data : (H, W, K) or (H, W) — NaN where invalid
-    geo  : GDAL geotransform 6-tuple
-    proj : WKT projection string
-    """
+    """Write a float32 ENVI (.bin + .hdr) file."""
     if data.ndim == 2:
         data = data[..., np.newaxis]
     H, W, K = data.shape
@@ -689,27 +706,7 @@ def _save_png(
     refined_cld: Optional[np.ndarray] = None,
     refined_cloud_pct: float = 0.0,
 ) -> None:
-    """
-    Save a diagnostic PNG.
-
-    4-panel (full pipeline, refined_cld provided):
-      input SWIR | Sen2Cor CLD | ABCD-RF refined | output product (masked)
-
-    3-panel (bin already existed, RF not re-run, refined_cld=None):
-      input SWIR | Sen2Cor CLD | output product (masked)
-
-    The final mask is not shown explicitly — its effect is visible by
-    comparing the input SWIR panel against the output product panel.
-
-    Parameters
-    ----------
-    raw_cld        : (H, W) Sen2Cor cloud probability (0-100 or 0-1)
-    input_swir     : (H, W, 3) raw SWIR stack at 20m (no masking applied)
-    output_product : (H, W, 3) masked SWIR at 20m (NaN where invalid)
-    raw_cloud_pct  : Sen2Cor cloud coverage %
-    refined_cld    : (H, W) ABCD-RF refined probability in [0,1], or None
-    refined_cloud_pct : ABCD-RF cloud coverage %
-    """
+    """Save a diagnostic PNG (3- or 4-panel)."""
     try:
         import matplotlib
         matplotlib.use('Agg')
@@ -723,25 +720,22 @@ def _save_png(
 
     fig, axes = plt.subplots(1, n_panels, figsize=(6 * n_panels, 6))
 
-    # ------------------------------------------------------------------
-    # Compute per-band stretch coefficients from the OUTPUT PRODUCT only
-    # (valid/non-NaN pixels).  The same lo/hi are then applied to both
-    # the output panel and the input panel so they share a consistent
-    # radiometric scale — differences are purely due to masking, not
-    # independent re-stretching.
-    # ------------------------------------------------------------------
-    n_bands = output_product.shape[2] if output_product.ndim == 3 else 1
+    # Use first 3 bands for display
+    disp_out = output_product[..., :3] if output_product.ndim == 3 and output_product.shape[2] > 3 else output_product
+    disp_in  = input_swir[..., :3] if input_swir.ndim == 3 and input_swir.shape[2] > 3 else input_swir
+
+    n_bands = disp_out.shape[2] if disp_out.ndim == 3 else 1
     lo = np.zeros(n_bands, dtype=np.float32)
     hi = np.ones(n_bands,  dtype=np.float32)
     for b in range(n_bands):
-        band = output_product[..., b] if output_product.ndim == 3 else output_product
+        band = disp_out[..., b] if disp_out.ndim == 3 else disp_out
         valid = band[np.isfinite(band) & (band != 0)]
         if valid.size > 0:
             lo[b] = np.percentile(valid, 1)
             hi[b] = np.percentile(valid, 99)
 
     def _apply_stretch(arr):
-        """Apply the shared lo/hi stretch; NaN → 0 (black) for display."""
+        arr = arr[..., :3] if arr.ndim == 3 and arr.shape[2] > 3 else arr
         arr = arr.astype(np.float32)
         out = np.zeros_like(arr)
         nb  = arr.shape[2] if arr.ndim == 3 else 1
@@ -756,35 +750,14 @@ def _save_png(
         cld_norm = cld_norm / 100.0
 
     if full_mode:
-        # Panel 0: Input SWIR — same stretch as output product
-        axes[0].imshow(_apply_stretch(input_swir))
-        axes[0].set_title('Input SWIR (B12/B11/B9)')
-        axes[0].axis('off')
-        # Panel 1: Sen2Cor raw CLD probability
-        axes[1].imshow(cld_norm, cmap='gray', vmin=0, vmax=1)
-        axes[1].set_title(f'Sen2Cor CLD — {raw_cloud_pct:.1f}% cloud')
-        axes[1].axis('off')
-        # Panel 2: ABCD-RF refined CLD probability
-        axes[2].imshow(refined_cld, cmap='gray', vmin=0, vmax=1)
-        axes[2].set_title(f'ABCD-RF refined — {refined_cloud_pct:.1f}% cloud')
-        axes[2].axis('off')
-        # Panel 3: Output product — same stretch, NaN → black
-        axes[3].imshow(_apply_stretch(output_product))
-        axes[3].set_title('Output product (black = masked)')
-        axes[3].axis('off')
+        axes[0].imshow(_apply_stretch(disp_in));  axes[0].set_title('Input SWIR (B12/B11/B9)'); axes[0].axis('off')
+        axes[1].imshow(cld_norm, cmap='gray', vmin=0, vmax=1); axes[1].set_title(f'Sen2Cor CLD — {raw_cloud_pct:.1f}% cloud'); axes[1].axis('off')
+        axes[2].imshow(refined_cld, cmap='gray', vmin=0, vmax=1); axes[2].set_title(f'ABCD-RF refined — {refined_cloud_pct:.1f}% cloud'); axes[2].axis('off')
+        axes[3].imshow(_apply_stretch(disp_out)); axes[3].set_title('Output product (black = masked)'); axes[3].axis('off')
     else:
-        # Panel 0: Input SWIR — same stretch as output product
-        axes[0].imshow(_apply_stretch(input_swir))
-        axes[0].set_title('Input SWIR (B12/B11/B9)')
-        axes[0].axis('off')
-        # Panel 1: Sen2Cor raw CLD
-        axes[1].imshow(cld_norm, cmap='gray', vmin=0, vmax=1)
-        axes[1].set_title(f'Sen2Cor CLD — {raw_cloud_pct:.1f}% cloud')
-        axes[1].axis('off')
-        # Panel 2: Output product — same stretch, NaN → black
-        axes[2].imshow(_apply_stretch(output_product))
-        axes[2].set_title('Output product (black = masked)')
-        axes[2].axis('off')
+        axes[0].imshow(_apply_stretch(disp_in));  axes[0].set_title('Input SWIR (B12/B11/B9)'); axes[0].axis('off')
+        axes[1].imshow(cld_norm, cmap='gray', vmin=0, vmax=1); axes[1].set_title(f'Sen2Cor CLD — {raw_cloud_pct:.1f}% cloud'); axes[1].axis('off')
+        axes[2].imshow(_apply_stretch(disp_out)); axes[2].set_title('Output product (black = masked)'); axes[2].axis('off')
 
     fig.tight_layout()
     fig.savefig(png_path, dpi=120, bbox_inches='tight')
@@ -797,15 +770,9 @@ def _save_png(
 # ===========================================================================
 
 def _parse_sentinel2_key(filename: str) -> Optional[Tuple[str, str]]:
-    """
-    Return (tile_id, date_str) from a Sentinel-2 filename, e.g.
-    S2A_MSIL2A_20210715T102021_N0301_R065_T32TPT_20210715T140000.zip
-    -> ('T32TPT', '20210715')
-    Returns None if parsing fails.
-    """
     parts = Path(filename).stem.split('_')
     try:
-        date_str = parts[2][:8]          # YYYYMMDD
+        date_str = parts[2][:8]
         tile_id  = next(p for p in parts if p.startswith('T') and len(p) == 6)
         return tile_id, date_str
     except (IndexError, StopIteration):
@@ -813,10 +780,6 @@ def _parse_sentinel2_key(filename: str) -> Optional[Tuple[str, str]]:
 
 
 def _build_l1c_lookup(l1c_dir: str) -> Dict[Tuple[str, str], str]:
-    """
-    Scan l1c_dir for L1C zip/SAFE files and build a dict
-    {(tile_id, date_str): full_path}.
-    """
     lookup: Dict[Tuple[str, str], str] = {}
     for entry in sorted(Path(l1c_dir).iterdir()):
         name = entry.name
@@ -833,10 +796,6 @@ def _build_l1c_lookup(l1c_dir: str) -> Dict[Tuple[str, str], str]:
 # ===========================================================================
 
 def _load_envi_bands(bin_path: str) -> Optional[np.ndarray]:
-    """
-    Load all bands from an ENVI .bin file into a (H, W, K) float32 array.
-    Returns None on failure.
-    """
     try:
         ds = gdal.Open(str(bin_path), gdal.GA_ReadOnly)
     except RuntimeError:
@@ -861,14 +820,6 @@ def _build_masks_from_cld_scl(
     refined_shadow: Optional[np.ndarray] = None,
     shadow_threshold: float = 0.5,
 ) -> Tuple[np.ndarray, np.ndarray, float, float]:
-    """
-    Given raw CLD, SCL, threshold, and already-refined cloud probability,
-    return (cloud_mask_20m, invalid_20m, raw_cloud_pct, refined_cloud_pct).
-
-    If refined_shadow is provided, pixels where refined_shadow >= shadow_threshold
-    are also included in invalid_20m (in addition to the SCL class-3 pixels that
-    are already captured by SCL_NODATA_CLASSES).
-    """
     H20, W20 = cld_raw.shape
 
     cld_raw_norm = cld_raw.astype(np.float32)
@@ -904,14 +855,6 @@ def _png_from_existing(
     l2a_path: str,
     cloud_threshold: float,
 ) -> bool:
-    """
-    Fast path: .bin exists but .png does not.
-
-    Re-extracts only CLD+SCL from the L2A zip (no SWIR bands, no RF).
-    Loads the saved output .bin as the display product.
-    Writes a 3-panel PNG: Sen2Cor CLD | final mask | output product.
-    Returns True on success.
-    """
     print('  .bin exists, .png missing — re-extracting CLD/SCL only (no RF) ...')
 
     l2a_data = extract_l2a_masks_and_swir(l2a_path, extract_swir=False)
@@ -930,7 +873,6 @@ def _png_from_existing(
         cld_raw_norm = cld_raw_norm / 100.0
     raw_cloud_pct = (cld_raw_norm >= cloud_threshold).mean() * 100
 
-    # Build SCL-based nodata mask and combined invalid mask using raw CLD
     scl_nodata_20m = np.zeros((H20, W20), dtype=bool)
     for cls in SCL_NODATA_CLASSES:
         scl_nodata_20m |= (scl_arr == cls)
@@ -941,8 +883,6 @@ def _png_from_existing(
     print(f'  SCL nodata                   : {scl_nodata_20m.mean()*100:.1f}%')
     print(f'  Total invalid                : {invalid_20m.mean()*100:.1f}%')
 
-    # Load the already-written output product for the display panel.
-    # Resample to 20m if the native SWIR grid differs.
     swir_out = _load_envi_bands(out_bin)
     if swir_out is None:
         print(f'  [FAIL] Could not load {out_bin} for PNG.')
@@ -963,15 +903,11 @@ def _png_from_existing(
     else:
         swir_20m = swir_out[..., :3] if swir_out.shape[2] >= 3 else swir_out
 
-    # 3-panel PNG — refined_cld=None triggers the 3-panel branch in _save_png.
-    # For the "input" panel we show the output .bin with NaN filled as 0
-    # (gives a fair sense of the scene content). The "output product" panel
-    # shows the same data with NaN kept (black = masked regions).
     _save_png(
         str(out_png),
         cld_raw,
-        np.nan_to_num(swir_20m, nan=0.0),   # input panel: NaN → 0 for context
-        swir_20m,                             # output panel: NaN kept (black)
+        np.nan_to_num(swir_20m, nan=0.0),
+        swir_20m,
         raw_cloud_pct=raw_cloud_pct,
         refined_cld=None,
     )
@@ -989,20 +925,14 @@ def process_scene(
     model_dir: str,
     write_png: bool,
     overwrite: bool,
+    three_band: bool = False,
 ) -> bool:
     """
     Process one L2A scene (with optional L1C SWIR source).
-
-    stdout is captured externally by _worker() so parallel output
-    never interleaves. This function just uses plain print().
-
     Returns True on success, False on skip/failure.
     """
     stem     = Path(l2a_path).stem
     out_bin  = Path(l2a_path).parent / (stem + '.bin')
-    # PNG filename is prefixed with the acquisition datetime stamp
-    # (3rd field when split on '_', e.g. '20250502T193831') so PNGs
-    # sort chronologically and are easy to find alongside the .bin.
     _stem_parts  = stem.split('_')
     _dt_prefix   = _stem_parts[2] if len(_stem_parts) > 2 else stem
     out_png  = Path(l2a_path).parent / f'{_dt_prefix}_{stem}.png'
@@ -1010,15 +940,9 @@ def process_scene(
     print(f'\n{"="*60}')
     print(f'  Scene : {stem}')
 
-    # ------------------------------------------------------------------ #
-    # Fast path: .bin exists and .png is missing — write 3-panel PNG only
-    # ------------------------------------------------------------------ #
     if write_png and out_bin.exists() and not out_png.exists() and not overwrite:
         return _png_from_existing(out_bin, out_png, l2a_path, cloud_threshold)
 
-    # ------------------------------------------------------------------ #
-    # Skip entirely if outputs are already present and overwrite not set
-    # ------------------------------------------------------------------ #
     bin_done = out_bin.exists() and not overwrite
     png_done = (not write_png) or (out_png.exists() and not overwrite)
     if bin_done and png_done:
@@ -1028,12 +952,12 @@ def process_scene(
     source_label = 'L1C' if l1c_path else 'L2A'
     print(f'  SWIR  : {source_label}')
     print(f'  Cloud : L2A (ABCD-RF{"" if use_rf else " disabled"})')
+    print(f'  Bands : {"3 (B12/B11/B9)" if three_band else "4 (B12/B11/B9/B8)"}')
 
-    # ------------------------------------------------------------------ #
-    # 1. Extract cloud masks from L2A (always)
-    # ------------------------------------------------------------------ #
+    # 1. Extract cloud masks from L2A
     print('  Extracting L2A cloud masks ...')
-    l2a_data = extract_l2a_masks_and_swir(l2a_path, extract_swir=(l1c_path is None))
+    l2a_data = extract_l2a_masks_and_swir(l2a_path, extract_swir=(l1c_path is None),
+                                          three_band=three_band)
     if l2a_data is None:
         print(f'  [FAIL] Could not extract from {l2a_path}')
         return False
@@ -1044,24 +968,20 @@ def process_scene(
     cld_proj = l2a_data['cld_proj']
     H20, W20 = cld_raw.shape
 
-    # ------------------------------------------------------------------ #
-    # 2. Extract SWIR bands (L1C or L2A)
-    # ------------------------------------------------------------------ #
+    # 2. Extract SWIR bands
     if l1c_path:
         print(f'  Extracting L1C SWIR from {Path(l1c_path).name} ...')
-        swir_data = extract_l1c_swir(l1c_path)
+        swir_data = extract_l1c_swir(l1c_path, three_band=three_band)
     else:
         print('  Using L2A SWIR bands ...')
         swir_data = {
-            'b12': l2a_data['b12'],
-            'b11': l2a_data['b11'],
-            'b9':  l2a_data['b9'],
-            'swir_geo':   l2a_data['swir_geo'],
-            'swir_proj':  l2a_data['swir_proj'],
-            'swir_xsize': l2a_data['swir_xsize'],
-            'swir_ysize': l2a_data['swir_ysize'],
-            'swir_res':   l2a_data['swir_res'],
+            'b12': l2a_data['b12'], 'b11': l2a_data['b11'], 'b9': l2a_data['b9'],
+            'swir_geo': l2a_data['swir_geo'], 'swir_proj': l2a_data['swir_proj'],
+            'swir_xsize': l2a_data['swir_xsize'], 'swir_ysize': l2a_data['swir_ysize'],
+            'swir_res': l2a_data['swir_res'],
         }
+        if not three_band:
+            swir_data['b8'] = l2a_data['b8']
 
     if swir_data is None:
         print('  [FAIL] SWIR extraction failed.')
@@ -1070,12 +990,13 @@ def process_scene(
     b12       = swir_data['b12']
     b11       = swir_data['b11']
     b9        = swir_data['b9']
+    b8        = swir_data.get('b8')
     swir_geo  = swir_data['swir_geo']
     swir_proj = swir_data['swir_proj']
     Hs, Ws    = swir_data['swir_ysize'], swir_data['swir_xsize']
     swir_res  = swir_data['swir_res']
 
-    # Build 20m SWIR stack for RF input
+    # Build 20m SWIR stack for RF input (always 3-band: B12/B11/B9)
     swir_stack_20m = np.dstack([b12, b11, b9])
     if abs(swir_res - 20.0) > 0.5 or swir_stack_20m.shape[:2] != (H20, W20):
         print(f'  Resampling SWIR stack → 20m for RF ...')
@@ -1088,9 +1009,7 @@ def process_scene(
                                 W20, H20, cld_geo, cld_proj, 'bilinear'),
         ])
 
-    # ------------------------------------------------------------------ #
-    # 3. Build / refine cloud probability at 20 m
-    # ------------------------------------------------------------------ #
+    # 3. Refine cloud probability
     if use_rf:
         print('  Running ABCD-RF cloud refinement ...')
         pkl_path: Optional[str] = None
@@ -1105,15 +1024,11 @@ def process_scene(
         if refined_cld.max() > 1.0:
             refined_cld /= 100.0
 
-    # ------------------------------------------------------------------ #
-    # 4. Build final invalid-pixel mask at 20m
-    # ------------------------------------------------------------------ #
+    # 4. Build final invalid-pixel mask
     cloud_mask_20m, invalid_20m, raw_cloud_pct, refined_cloud_pct = (
         _build_masks_from_cld_scl(cld_raw, scl_arr, cloud_threshold, refined_cld))
 
-    # ------------------------------------------------------------------ #
-    # 5. Upsample the invalid mask to the native SWIR grid
-    # ------------------------------------------------------------------ #
+    # 5. Upsample mask to native SWIR grid
     if invalid_20m.shape != (Hs, Ws):
         print(f'  Resampling mask from 20m → {swir_res:.1f}m SWIR grid ...')
         invalid_float = invalid_20m.astype(np.float32)
@@ -1124,28 +1039,17 @@ def process_scene(
     else:
         invalid_swir_bool = invalid_20m
 
-    # ------------------------------------------------------------------ #
-    # 6. Apply mask to SWIR stack and write output
-    # ------------------------------------------------------------------ #
-    out_stack = np.dstack([b12, b11, b9]).astype(np.float32)
+    # 6. Apply mask and write output
+    out_stack = _build_output_stack({'b12': b12, 'b11': b11, 'b9': b9, 'b8': b8}, three_band)
     out_stack[invalid_swir_bool] = np.nan
     out_stack[np.all(out_stack == 0.0, axis=-1)] = np.nan
 
-    date_str   = stem.split('_')[2][:8] if len(stem.split('_')) > 2 else stem
-    band_names = [
-        f'{date_str} {int(swir_res)}m: B12 2190nm',
-        f'{date_str} {int(swir_res)}m: B11 1610nm',
-        f'{date_str} {int(swir_res)}m: B9  945nm',
-    ]
+    date_str = stem.split('_')[2][:8] if len(stem.split('_')) > 2 else stem
+    band_names = _build_output_band_names(date_str, swir_res, three_band)
     write_envi(str(out_bin), out_stack, swir_geo, swir_proj, band_names)
 
-    # ------------------------------------------------------------------ #
     # 7. Optional PNG
-    # ------------------------------------------------------------------ #
     if write_png:
-        # Bring the masked output stack to 20m for the display panel.
-        # out_stack is at native SWIR resolution; swir_stack_20m is already
-        # at 20m and serves as the unmasked input panel.
         if out_stack.shape[:2] != (H20, W20):
             out_stack_20m = np.dstack([
                 _resample_to_target(
@@ -1160,8 +1064,8 @@ def process_scene(
         _save_png(
             str(out_png),
             cld_raw,
-            swir_stack_20m,        # unmasked input
-            out_stack_20m,         # masked output product
+            swir_stack_20m,
+            out_stack_20m,
             raw_cloud_pct=raw_cloud_pct,
             refined_cld=refined_cld,
             refined_cloud_pct=refined_cloud_pct,
@@ -1170,25 +1074,11 @@ def process_scene(
     return True
 
 
-def _make_mem_ds(arr: np.ndarray, geo: tuple, proj: str) -> gdal.Dataset:
-    """Create an in-memory GDAL dataset from a 2D array (helper for resampling)."""
-    mem = gdal.GetDriverByName('MEM')
-    ds  = mem.Create('', arr.shape[1], arr.shape[0], 1, gdal.GDT_Float32)
-    ds.SetGeoTransform(geo)
-    ds.SetProjection(proj)
-    ds.GetRasterBand(1).WriteArray(arr)
-    return ds
-
-
-
 # ===========================================================================
 # MRAP helpers
 # ===========================================================================
 
 def _load_envi_stack(bin_path: str) -> Optional[np.ndarray]:
-    """
-    Load an ENVI .bin stack → (H, W, K) float32, or None on failure.
-    """
     try:
         ds = gdal.Open(bin_path)
         if ds is None:
@@ -1208,20 +1098,10 @@ def _composite_mrap(
     prev: Optional[np.ndarray],
     current: np.ndarray,
 ) -> np.ndarray:
-    """
-    MRAP compositing: start from prev (or a blank slate), then paint in
-    every pixel from current that is not NaN.
-
-    prev    : (H, W, K) float32 MRAP at previous timestep, or None
-    current : (H, W, K) float32 cloud-masked output for this timestep
-
-    Returns the new MRAP composite (H, W, K) float32.
-    """
     if prev is None:
-        # First timestep — MRAP == current output
         return current.copy()
     composite = prev.copy()
-    valid = ~np.all(np.isnan(current), axis=-1)   # (H, W) True where current has data
+    valid = ~np.all(np.isnan(current), axis=-1)
     composite[valid] = current[valid]
     return composite
 
@@ -1232,33 +1112,15 @@ def _save_png_mrap(
     refined_cld: np.ndarray,
     scl_shadow_raw: np.ndarray,
     refined_shadow: Optional[np.ndarray],
-    # Deprecated (SCL-only) MRAP composites — comparison row
     prev_mrap_dep: Optional[np.ndarray],
     curr_mrap_dep: np.ndarray,
-    # RF-refined MRAP composites — written to file
     prev_mrap_rf: Optional[np.ndarray],
     curr_mrap_rf: np.ndarray,
     raw_cloud_pct: float = 0.0,
     refined_cloud_pct: float = 0.0,
     cloud_threshold: float = 0.0001,
 ) -> None:
-    """
-    Save a 2×4 diagnostic PNG for MRAP mode.
-
-    Layout (each cell contains the same number of image pixels):
-
-      Col 0          Col 1               Col 2                  Col 3
-      ─────────────  ──────────────────  ─────────────────────  ──────────────────────
-      Sen2Cor CLD    SCL shadow (raw)    Deprecated MRAP prev   Deprecated MRAP curr
-      ABCD-RF CLD    RF refined shadow   RF MRAP prev           RF MRAP curr
-
-    Stretch policy
-    ──────────────
-    Per-band lo/hi are derived once from curr_mrap_rf (2%–98% histogram trim
-    on valid, non-zero pixels) and applied identically to every raster image
-    panel (columns 2–3).  Probability/mask panels (columns 0–1) use their
-    own fixed [0, 1] greyscale scale.
-    """
+    """Save a 2×4 diagnostic PNG for MRAP mode."""
     try:
         import matplotlib
         matplotlib.use('Agg')
@@ -1270,34 +1132,28 @@ def _save_png_mrap(
     ref_h, ref_w = raw_cld.shape[:2]
     panel_inches  = 8.0
     dpi           = 100
-    n_bands       = curr_mrap_rf.shape[2] if curr_mrap_rf.ndim == 3 else 1
+    # Use first 3 bands for display regardless of output band count
+    display_rf  = curr_mrap_rf[..., :3] if curr_mrap_rf.ndim == 3 and curr_mrap_rf.shape[2] > 3 else curr_mrap_rf
+    n_bands     = display_rf.shape[2] if display_rf.ndim == 3 else 1
 
-    # ------------------------------------------------------------------
-    # Shared per-band stretch: 2%–98% trim on curr_mrap_rf valid pixels
-    # ------------------------------------------------------------------
     lo = np.zeros(n_bands, dtype=np.float32)
     hi = np.ones(n_bands,  dtype=np.float32)
     for b in range(n_bands):
-        layer = (curr_mrap_rf[..., b] if curr_mrap_rf.ndim == 3
-                 else curr_mrap_rf).astype(np.float32)
+        layer = (display_rf[..., b] if display_rf.ndim == 3
+                 else display_rf).astype(np.float32)
         valid = layer[np.isfinite(layer) & (layer != 0)]
         if valid.size > 0:
             lo[b] = np.percentile(valid, 2)
             hi[b] = np.percentile(valid, 98)
 
-    # ------------------------------------------------------------------
-    # Nearest-neighbour display resample (numpy only, display only)
-    # ------------------------------------------------------------------
     def _resample_arr_to(arr: np.ndarray, tgt_h: int, tgt_w: int) -> np.ndarray:
         src_h, src_w = arr.shape[:2]
         row_idx = (np.arange(tgt_h) * src_h / tgt_h).astype(int)
         col_idx = (np.arange(tgt_w) * src_w / tgt_w).astype(int)
         return arr[np.ix_(row_idx, col_idx)]
 
-    # ------------------------------------------------------------------
-    # Apply shared stretch to a raster stack → (H, W, nb) in [0, 1]
-    # ------------------------------------------------------------------
     def _apply_stretch(stack: np.ndarray) -> np.ndarray:
+        stack = stack[..., :3] if stack.ndim == 3 and stack.shape[2] > 3 else stack
         nb  = stack.shape[2] if stack.ndim == 3 else 1
         out = np.zeros((*stack.shape[:2], nb), dtype=np.float32)
         for b in range(nb):
@@ -1306,68 +1162,42 @@ def _save_png_mrap(
             out[..., b] = np.clip(scaled, 0.0, 1.0)
         return out
 
-    # ------------------------------------------------------------------
-    # Panel renderers
-    # ------------------------------------------------------------------
     def _show_mask(ax, arr, title, cmap='gray', vmin=0, vmax=1):
-        """Greyscale probability / binary mask panel — its own fixed scale."""
         a = arr.astype(np.float32)
         if a.max() > 1.0:
             a = a / 100.0
         if a.shape[:2] != (ref_h, ref_w):
             a = _resample_arr_to(a, ref_h, ref_w)
-        ax.imshow(a, cmap=cmap, vmin=vmin, vmax=vmax,
-                  aspect='auto', interpolation='nearest')
-        ax.set_title(title, fontsize=11)
-        ax.axis('off')
+        ax.imshow(a, cmap=cmap, vmin=vmin, vmax=vmax, aspect='auto', interpolation='nearest')
+        ax.set_title(title, fontsize=11); ax.axis('off')
 
     def _show_rgb(ax, stack, title):
-        """Raster RGB panel using shared stretch; grey box when None."""
         if stack is None:
             ax.set_facecolor('#404040')
-            ax.text(0.5, 0.5, 'No previous MRAP',
-                    ha='center', va='center', color='white',
+            ax.text(0.5, 0.5, 'No previous MRAP', ha='center', va='center', color='white',
                     transform=ax.transAxes, fontsize=11)
-            ax.axis('off')
-            ax.set_title(title, fontsize=11)
-            return
+            ax.axis('off'); ax.set_title(title, fontsize=11); return
         rgb = _apply_stretch(stack)
         if rgb.shape[:2] != (ref_h, ref_w):
             rgb = np.dstack([_resample_arr_to(rgb[..., b], ref_h, ref_w)
                              for b in range(rgb.shape[2])])
         ax.imshow(rgb, aspect='auto', interpolation='nearest')
-        ax.set_title(title, fontsize=11)
-        ax.axis('off')
+        ax.set_title(title, fontsize=11); ax.axis('off')
 
-    # ------------------------------------------------------------------
-    # Draw 2 × 4 figure
-    # ------------------------------------------------------------------
     fig, axes = plt.subplots(2, 4, figsize=(panel_inches * 4, panel_inches * 2))
 
-    # Row 0 — deprecated SCL-only product
-    _show_mask(axes[0, 0], raw_cld,
-               f'Sen2Cor CLD  ({raw_cloud_pct:.1f}% cloud)')
-    _show_mask(axes[0, 1], scl_shadow_raw,
-               'SCL shadow (raw, class 3)')
-    _show_rgb(axes[0, 2], prev_mrap_dep,
-              'Deprecated MRAP — previous timestep')
-    _show_rgb(axes[0, 3], curr_mrap_dep,
-              'Deprecated MRAP — current timestep')
+    _show_mask(axes[0, 0], raw_cld, f'Sen2Cor CLD  ({raw_cloud_pct:.1f}% cloud)')
+    _show_mask(axes[0, 1], scl_shadow_raw, 'SCL shadow (raw, class 3)')
+    _show_rgb(axes[0, 2], prev_mrap_dep, 'Deprecated MRAP — previous timestep')
+    _show_rgb(axes[0, 3], curr_mrap_dep, 'Deprecated MRAP — current timestep')
 
-    # Row 1 — RF-refined product
-    _show_mask(axes[1, 0], refined_cld,
-               f'ABCD-RF refined CLD  ({refined_cloud_pct:.1f}% cloud)')
+    _show_mask(axes[1, 0], refined_cld, f'ABCD-RF refined CLD  ({refined_cloud_pct:.1f}% cloud)')
     if refined_shadow is not None:
-        _show_mask(axes[1, 1], refined_shadow,
-                   'RF refined shadow prob')
+        _show_mask(axes[1, 1], refined_shadow, 'RF refined shadow prob')
     else:
-        # No RF shadow available (--no_rf path): show raw SCL shadow
-        _show_mask(axes[1, 1], scl_shadow_raw,
-                   'SCL shadow (raw, class 3)\n[RF not run]')
-    _show_rgb(axes[1, 2], prev_mrap_rf,
-              f'RF MRAP — previous timestep\n(threshold={cloud_threshold:.4g})')
-    _show_rgb(axes[1, 3], curr_mrap_rf,
-              f'RF MRAP — current timestep\n(threshold={cloud_threshold:.4g})')
+        _show_mask(axes[1, 1], scl_shadow_raw, 'SCL shadow (raw, class 3)\n[RF not run]')
+    _show_rgb(axes[1, 2], prev_mrap_rf, f'RF MRAP — previous timestep\n(threshold={cloud_threshold:.4g})')
+    _show_rgb(axes[1, 3], curr_mrap_rf, f'RF MRAP — current timestep\n(threshold={cloud_threshold:.4g})')
 
     fig.tight_layout()
     fig.savefig(png_path, dpi=dpi, bbox_inches='tight')
@@ -1376,26 +1206,15 @@ def _save_png_mrap(
 
 
 def _mrap_compute(task: tuple) -> Tuple[int, dict]:
-    """
-    Parallelisable part of MRAP processing (steps 1-7):
-    I/O, resampling, RF cloud refinement, mask building, masked SWIR stack.
-
-    Returns (os.getpid(), result_dict).
-    result_dict keys:
-      ok, log, stem, out_mrap_bin, out_png, write_png, write_dep,
-      out_stack, dep_stack (or None when write_dep=False),
-      cld_raw, refined_cld, raw_cloud_pct, refined_cloud_pct,
-      swir_geo, swir_proj, swir_res, Hs, Ws,
-      cld_geo, cld_proj, H20, W20
-    On failure: ok=False, all array keys absent.
-    """
+    """Parallelisable part of MRAP processing."""
     import io, contextlib, os as _os
     buf = io.StringIO()
     pid = _os.getpid()
     res: dict = {'ok': False, 'log': ''}
 
     (l2a_path, l1c_path, skip_f, offset, cloud_threshold,
-     use_rf, save_model, model_dir, write_png, overwrite, write_dep) = task
+     use_rf, save_model, model_dir, write_png, overwrite, write_dep,
+     three_band) = task
 
     with contextlib.redirect_stdout(buf):
         stem        = Path(l2a_path).stem
@@ -1410,6 +1229,7 @@ def _mrap_compute(task: tuple) -> Tuple[int, dict]:
 
         print(f'\n{"="*60}')
         print(f'  Scene (MRAP compute) : {stem}')
+        print(f'  Bands : {"3 (B12/B11/B9)" if three_band else "4 (B12/B11/B9/B8)"}')
 
         if out_mrap_bin.exists() and not overwrite:
             print(f'  [SKIP] {out_mrap_bin.name} already exists — will seed from it.')
@@ -1422,7 +1242,8 @@ def _mrap_compute(task: tuple) -> Tuple[int, dict]:
 
         # Step 1
         print('  Extracting L2A cloud masks ...')
-        l2a_data = extract_l2a_masks_and_swir(l2a_path, extract_swir=(l1c_path is None))
+        l2a_data = extract_l2a_masks_and_swir(l2a_path, extract_swir=(l1c_path is None),
+                                              three_band=three_band)
         if l2a_data is None:
             print(f'  [FAIL] Could not extract from {l2a_path}')
             res['log'] = buf.getvalue(); return pid, res
@@ -1436,10 +1257,11 @@ def _mrap_compute(task: tuple) -> Tuple[int, dict]:
         # Step 2
         if l1c_path:
             print(f'  Extracting L1C SWIR from {Path(l1c_path).name} ...')
-            swir_data = extract_l1c_swir(l1c_path)
+            swir_data = extract_l1c_swir(l1c_path, three_band=three_band)
             if swir_data is None:
                 print('  [WARN] L1C SWIR failed; falling back to L2A SWIR.')
-                l2a_swir = extract_l2a_masks_and_swir(l2a_path, extract_swir=True)
+                l2a_swir = extract_l2a_masks_and_swir(l2a_path, extract_swir=True,
+                                                      three_band=three_band)
                 if l2a_swir is None:
                     print('  [FAIL] L2A SWIR fallback also failed.')
                     res['log'] = buf.getvalue(); return pid, res
@@ -1453,13 +1275,16 @@ def _mrap_compute(task: tuple) -> Tuple[int, dict]:
                 'swir_xsize': l2a_data['swir_xsize'], 'swir_ysize': l2a_data['swir_ysize'],
                 'swir_res':   l2a_data['swir_res'],
             }
+            if not three_band:
+                swir_data['b8'] = l2a_data['b8']
 
         b12 = swir_data['b12']; b11 = swir_data['b11']; b9 = swir_data['b9']
+        b8  = swir_data.get('b8')
         swir_geo  = swir_data['swir_geo']; swir_proj = swir_data['swir_proj']
         Hs, Ws    = swir_data['swir_ysize'], swir_data['swir_xsize']
         swir_res  = swir_data['swir_res']
 
-        # Step 3: 20m SWIR stack
+        # Step 3: 20m SWIR stack (always 3-band for RF)
         swir_stack_20m = np.dstack([b12, b11, b9])
         if abs(swir_res - 20.0) > 0.5 or swir_stack_20m.shape[:2] != (H20, W20):
             swir_stack_20m = np.dstack([
@@ -1484,8 +1309,6 @@ def _mrap_compute(task: tuple) -> Tuple[int, dict]:
             if refined_cld.max() > 1.0:
                 refined_cld /= 100.0
 
-        # Step 4b: RF shadow refinement (only in RF mode; uses SCL class 3 as
-        # training target with water pixels excluded from training)
         scl_shadow_raw: np.ndarray = (scl_arr == 3).astype(np.float32)
         if use_rf:
             print('  Running ABCD-RF shadow refinement ...')
@@ -1511,14 +1334,13 @@ def _mrap_compute(task: tuple) -> Tuple[int, dict]:
         else:
             invalid_swir_bool = invalid_20m
 
-        # Step 7: Apply mask (RF-refined product)
-        out_stack = np.dstack([b12, b11, b9]).astype(np.float32)
+        # Step 7: Apply mask
+        bands_dict = {'b12': b12, 'b11': b11, 'b9': b9, 'b8': b8}
+        out_stack = _build_output_stack(bands_dict, three_band)
         out_stack[invalid_swir_bool] = np.nan
         out_stack[np.all(out_stack == 0.0, axis=-1)] = np.nan
 
-        # Step 7b: Deprecated SCL-only stack (only built when --mrap --png).
-        # Masks the same SCL_NODATA_CLASSES plus SCL classes 8/9/10 (cloud),
-        # but does NOT use the RF-refined probability at all.
+        # Step 7b: Deprecated SCL-only stack
         dep_stack: Optional[np.ndarray] = None
         if write_dep:
             dep_invalid_20m = np.zeros((H20, W20), dtype=bool)
@@ -1531,19 +1353,19 @@ def _mrap_compute(task: tuple) -> Tuple[int, dict]:
                     Ws, Hs, swir_geo, swir_proj, 'near') >= 0.5
             else:
                 dep_invalid_swir = dep_invalid_20m
-            dep_stack = np.dstack([b12, b11, b9]).astype(np.float32)
+            dep_stack = _build_output_stack(bands_dict, three_band)
             dep_stack[dep_invalid_swir] = np.nan
             dep_stack[np.all(dep_stack == 0.0, axis=-1)] = np.nan
 
         res.update(dict(
             ok=True, skip=False,
-            out_stack=out_stack,
-            dep_stack=dep_stack,
+            out_stack=out_stack, dep_stack=dep_stack,
             cld_raw=cld_raw, refined_cld=refined_cld,
             scl_shadow_raw=scl_shadow_raw, refined_shadow=refined_shadow,
             raw_cloud_pct=raw_cloud_pct, refined_cloud_pct=refined_cloud_pct,
             swir_geo=swir_geo, swir_proj=swir_proj, swir_res=swir_res,
             Hs=Hs, Ws=Ws, cld_geo=cld_geo, cld_proj=cld_proj, H20=H20, W20=W20,
+            three_band=three_band,
         ))
 
     res['log'] = buf.getvalue()
@@ -1557,20 +1379,7 @@ def _mrap_composite_and_write(
     write_threads: list,
     cloud_threshold: float,
 ) -> Tuple[bool, Optional[np.ndarray], Optional[np.ndarray]]:
-    """
-    Serial part of MRAP processing.
-
-    Step 8  (blocking): composite prev_mrap_rf + out_stack → new_mrap_rf.
-             If write_dep, also composite prev_mrap_dep + dep_stack → new_mrap_dep.
-             These must complete before the next timestep can start.
-
-    Step 9  (background thread): write new_mrap_rf to *_MRAP.bin.
-    Step 10 (background thread): render and write the 2×3 PNG (if write_png).
-
-    dep_mrap is never written to disk — it is PNG-only.
-
-    Returns (success, new_mrap_rf, new_mrap_dep).
-    """
+    """Serial part of MRAP processing."""
     import threading
 
     if not res['ok']:
@@ -1581,8 +1390,9 @@ def _mrap_composite_and_write(
         return False, existing, prev_mrap_dep
 
     out_stack    = res['out_stack']
-    dep_stack    = res.get('dep_stack')          # None unless write_dep=True
+    dep_stack    = res.get('dep_stack')
     write_dep    = res.get('write_dep', False)
+    three_band   = res.get('three_band', False)
     swir_geo     = res['swir_geo'];  swir_proj = res['swir_proj'];  swir_res = res['swir_res']
     Hs, Ws       = res['Hs'], res['Ws']
     cld_geo      = res['cld_geo'];   cld_proj  = res['cld_proj']
@@ -1592,7 +1402,6 @@ def _mrap_composite_and_write(
     out_png      = res['out_png']
     write_png    = res['write_png']
 
-    # --- Step 8 (blocking): composite RF product ---
     def _resample_prev(stack):
         if stack is None:
             return None
@@ -1610,13 +1419,8 @@ def _mrap_composite_and_write(
     new_mrap_dep = (_composite_mrap(_resample_prev(prev_mrap_dep), dep_stack)
                     if write_dep and dep_stack is not None else prev_mrap_dep)
 
-    # --- Step 9 (background thread): write ENVI .bin for RF product ---
-    date_str   = stem.split('_')[2][:8] if len(stem.split('_')) > 2 else stem
-    band_names = [
-        f'{date_str} {int(swir_res)}m: B12 2190nm MRAP',
-        f'{date_str} {int(swir_res)}m: B11 1610nm MRAP',
-        f'{date_str} {int(swir_res)}m: B9  945nm  MRAP',
-    ]
+    date_str = stem.split('_')[2][:8] if len(stem.split('_')) > 2 else stem
+    band_names = [n + ' MRAP' for n in _build_output_band_names(date_str, swir_res, three_band)]
 
     def _write_bin(_arr, _path, _geo, _proj, _names):
         write_envi(_path, _arr, _geo, _proj, _names)
@@ -1630,7 +1434,6 @@ def _mrap_composite_and_write(
     t_bin.start()
     write_threads.append(t_bin)
 
-    # --- Step 10 (background thread): PNG ---
     if write_png:
         def _write_png_thread(_prev_rf, _curr_rf, _prev_dep, _curr_dep):
             def _to_20m(stack):
@@ -1669,7 +1472,6 @@ def _mrap_composite_and_write(
 # ===========================================================================
 
 def find_l2a_files(l2a_dir: str) -> list[str]:
-    """Return sorted list of L2A zip/SAFE files in l2a_dir."""
     files = []
     for entry in sorted(Path(l2a_dir).iterdir()):
         name = entry.name
@@ -1680,21 +1482,13 @@ def find_l2a_files(l2a_dir: str) -> list[str]:
 
 
 # ===========================================================================
-# Simple parallel dispatcher — fixed worker count, serial retry on failure
+# Simple parallel dispatcher
 # ===========================================================================
 
 def _run_parallel(
     tasks: list,
     n_workers: int,
 ) -> Tuple[int, int, list]:
-    """
-    Submit tasks to a ProcessPoolExecutor with a fixed concurrency limit.
-
-    Failed tasks (exception raised or '[EXCEPTION' in log) are collected
-    and returned as retry_list for a subsequent serial retry pass.
-
-    Returns (n_ok, n_skipped, retry_list).
-    """
     from concurrent.futures import ProcessPoolExecutor, as_completed
 
     n_ok       = 0
@@ -1724,15 +1518,7 @@ def _run_parallel(
     return n_ok, n_skip, retry_list
 
 
-# ===========================================================================
-# Worker wrapper — captures stdout, returns (pid, bool, log_str)
-# ===========================================================================
-
 def _worker(task: tuple) -> Tuple[int, bool, str]:
-    """
-    Top-level picklable worker.  Captures all stdout and returns
-    (os.getpid(), success, log_str).
-    """
     import io, contextlib, os as _os
     buf    = io.StringIO()
     result = False
@@ -1756,59 +1542,42 @@ def main() -> None:
     _t_main_start = _time.monotonic()
 
     parser = argparse.ArgumentParser(
-        description='Extract cloud-masked SWIR (B12, B11, B9) from Sentinel-2 zips.',
+        description='Extract cloud-masked SWIR (B12, B11, B9[, B8]) from Sentinel-2 zips.',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument(
-        '--l2_dir', default=None,
+    parser.add_argument('--l2_dir', default=None,
         help='Directory of L2A zip/SAFE files. Default: current working directory.')
-    parser.add_argument(
-        '--l1_dir', default=None,
-        help='Optional directory of L1C zip/SAFE files. '
-             'When supplied, SWIR bands are taken from L1C; '
-             'L2A files are still used for cloud masks.')
-    parser.add_argument(
-        '--skip_f', type=int, default=5000,
+    parser.add_argument('--l1_dir', default=None,
+        help='Optional directory of L1C zip/SAFE files.')
+    parser.add_argument('--three_band', action='store_true',
+        help='Output only B12, B11, B9 (omit B8). Default is 4 bands.')
+    parser.add_argument('--skip_f', type=int, default=5000,
         help='RF training pixel stride (default: 5000).')
-    parser.add_argument(
-        '--offset', type=int, default=0,
+    parser.add_argument('--offset', type=int, default=0,
         help='RF training pixel offset (default: 0).')
-    parser.add_argument(
-        '--cloud_threshold', type=float, default=0.0001,
+    parser.add_argument('--cloud_threshold', type=float, default=0.0001,
         help='Probability threshold for cloud masking (default: 0.0001).')
-    parser.add_argument(
-        '--no_rf', action='store_true',
+    parser.add_argument('--no_rf', action='store_true',
         help='Skip RF refinement and use raw CLD probability directly.')
-    parser.add_argument(
-        '--save_model', action='store_true',
+    parser.add_argument('--save_model', action='store_true',
         help='Save trained RF model (.pkl) for each scene.')
-    parser.add_argument(
-        '--model_dir', default='./models',
+    parser.add_argument('--model_dir', default='./models',
         help='Directory for saved RF models (default: ./models).')
-    parser.add_argument(
-        '--png', action='store_true',
-        help='Write diagnostic PNG alongside each output .bin. '
-             '4-panel when running the full pipeline; '
-             '3-panel (CLD | product) when .bin already exists.')
-    parser.add_argument(
-        '--overwrite', action='store_true',
+    parser.add_argument('--png', action='store_true',
+        help='Write diagnostic PNG alongside each output .bin.')
+    parser.add_argument('--overwrite', action='store_true',
         help='Re-process scenes whose output .bin already exists.')
-    parser.add_argument(
-        '--mrap', action='store_true',
-        help='Write MRAP (most-recent-available-pixel) composites instead of '
-             'per-scene outputs. Tasks are sorted by datetime stamp (field 2 '
-             'of filename) and run serially so each step can seed the next. '
-             'Output files are named *_MRAP.bin + *_MRAP.hdr.')
-    parser.add_argument(
-        '--N_workers', type=int, default=32,
-        help='Number of parallel worker processes (default: 32). '
-             'Set to 1 to run serially.')
+    parser.add_argument('--mrap', action='store_true',
+        help='Write MRAP composites instead of per-scene outputs.')
+    parser.add_argument('--N_workers', type=int, default=32,
+        help='Number of parallel worker processes (default: 32).')
 
     args = parser.parse_args()
 
     l2a_dir = os.path.abspath(args.l2_dir or os.getcwd())
     use_rf  = not args.no_rf
+    three_band = args.three_band
 
     if not os.path.isdir(l2a_dir):
         sys.exit(f'[ERROR] l2_dir not found: {l2a_dir}')
@@ -1817,8 +1586,8 @@ def main() -> None:
     if not l2a_files:
         sys.exit(f'[ERROR] No L2A zip/SAFE files found in {l2a_dir}')
     print(f'Found {len(l2a_files)} L2A scene(s) in {l2a_dir}')
+    print(f'Output bands: {"3 (B12/B11/B9)" if three_band else "4 (B12/B11/B9/B8)"}')
 
-    # Build L1C lookup if requested
     l1c_lookup: Dict[Tuple[str, str], str] = {}
     if args.l1_dir:
         l1c_dir = os.path.abspath(args.l1_dir)
@@ -1830,7 +1599,6 @@ def main() -> None:
     if args.save_model:
         os.makedirs(args.model_dir, exist_ok=True)
 
-    # write_dep: deprecated SCL-only stack needed only when --mrap --png
     write_dep = args.mrap and args.png
 
     # Build per-scene task list
@@ -1848,20 +1616,19 @@ def main() -> None:
             l2a_path, l1c_path,
             args.skip_f, args.offset, args.cloud_threshold,
             use_rf, args.save_model, args.model_dir,
-            args.png, args.overwrite, write_dep,
+            args.png, args.overwrite, three_band,
         ))
 
     n_total = len(tasks)
 
     # ------------------------------------------------------------------ #
-    # MRAP mode: sort tasks by acquisition datetime, run serially
+    # MRAP mode
     # ------------------------------------------------------------------ #
     if args.mrap:
         def _dt_key(task):
             parts = Path(task[0]).stem.split('_')
             return parts[2] if len(parts) > 2 else ''
 
-        # Deduplicate by datetime (keep latest processing timestamp, field 6)
         by_dt: Dict[str, tuple] = {}
         for task in tasks:
             parts = Path(task[0]).stem.split('_')
@@ -1870,33 +1637,31 @@ def main() -> None:
             if dt not in by_dt or proc > by_dt[dt][1]:
                 by_dt[dt] = (task, proc)
         tasks_mrap = [v[0] for v in sorted(by_dt.values(), key=lambda x: x[1])]
-        # Sort by datetime stamp
         tasks_mrap.sort(key=_dt_key)
         print(f'MRAP mode: {len(tasks_mrap)} timestep(s) (sorted by acquisition datetime)')
 
-        # ---------------------------------------------------------------- #
-        # Pipelined MRAP execution:
-        #   - A ProcessPoolExecutor runs _mrap_compute on all timesteps
-        #     in parallel (I/O + RF refinement).
-        #   - The main thread consumes futures IN DATETIME ORDER, so the
-        #     compositing step always sees the correct prev_mrap.
-        #   - Workers for the compute phase use the same GPU-aware sizing
-        #     as normal mode.
-        # ---------------------------------------------------------------- #
+        # Rebuild task tuples for _mrap_compute (adds write_dep and three_band)
+        tasks_mrap_compute = []
+        for t in tasks_mrap:
+            (l2a_path, l1c_path, skip_f, offset, cloud_threshold,
+             use_rf, save_model, model_dir, write_png, overwrite, _tb) = t
+            tasks_mrap_compute.append((
+                l2a_path, l1c_path, skip_f, offset, cloud_threshold,
+                use_rf, save_model, model_dir, write_png, overwrite, write_dep,
+                three_band,
+            ))
+
         from concurrent.futures import ProcessPoolExecutor
 
-        n_mrap     = len(tasks_mrap)
+        n_mrap     = len(tasks_mrap_compute)
         n_workers  = min(args.N_workers, n_mrap)
         print(f'MRAP compute workers: {n_workers}')
 
-        # Submit all compute tasks; store futures in datetime order
         ordered_futures = []
         with ProcessPoolExecutor(max_workers=n_workers) as executor:
-            for task in tasks_mrap:
+            for task in tasks_mrap_compute:
                 ordered_futures.append(executor.submit(_mrap_compute, task))
 
-            # Consume in strict datetime order — composite (step 8) is
-            # serial; bin + PNG writes run in background threads.
             prev_mrap_rf:  Optional[np.ndarray] = None
             prev_mrap_dep: Optional[np.ndarray] = None
             write_threads: list = []
@@ -1924,7 +1689,6 @@ def main() -> None:
                 else:
                     n_skip += 1
 
-                # ETA
                 _done     = n_ok + n_skip
                 _remain   = n_mrap - _done
                 _elapsed  = _time.monotonic() - _t_mrap_loop_start
@@ -1937,8 +1701,6 @@ def main() -> None:
                     f'ETA {_eta_s:.1f}s',
                     flush=True)
 
-        # All compositing done; wait for any background bin/PNG writes
-        # still in flight before exiting.
         pending = [t for t in write_threads if t.is_alive()]
         if pending:
             print(f'  Waiting for {len(pending)} background write(s) to finish ...')
@@ -1951,7 +1713,7 @@ def main() -> None:
         return
 
     # ------------------------------------------------------------------ #
-    # Normal mode: fixed worker count, serial retry on crash
+    # Normal mode
     # ------------------------------------------------------------------ #
     n_workers = min(args.N_workers, n_total)
     print(f'Workers: {n_workers}')
@@ -1974,9 +1736,6 @@ def main() -> None:
     else:
         n_ok, n_skip, retry_list = _run_parallel(tasks, n_workers)
 
-    # ------------------------------------------------------------------ #
-    # Retry crashed jobs serially
-    # ------------------------------------------------------------------ #
     if retry_list:
         print(f'\n[RETRY] {len(retry_list)} crashed job(s) — retrying serially ...')
         for task in retry_list:

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""
+"""sentinel2_swir_cloudmask_refine_L2_alltiles.py
+
 20260408 Run sentinel2_swir_cloudmask_refine.py --mrap on each L2_T* folder
 in the current directory, one at a time.
 """
