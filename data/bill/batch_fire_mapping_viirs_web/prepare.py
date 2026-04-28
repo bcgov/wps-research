@@ -495,6 +495,14 @@ def _accept_fire_sync(fire_numbe: str) -> str:
                 'point_threshold':   'brush',
                 'controlled_ratio':  'random_forest',
                 'contour_width':     'output',
+                # New A* / B* tuning — group under semantically clean
+                # section names instead of falling into 'misc'.
+                'hint_aware_brush':       'brush',
+                'stratify':               'sampling',
+                'stratify_inside_ratio':  'sampling',
+                'scale_features':         'preprocessing',
+                'spatial_weight':         'embedding',
+                'cluster_score_threshold': 'vote',
             }
             # These are already represented in higher-level sections
             # (crop/sampling). Skip to avoid duplication/conflicting

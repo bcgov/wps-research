@@ -53,7 +53,7 @@ from misc import (
     draw_border,
 )
 
-from sampling import regular_sampling
+from sampling import regular_sampling, stratified_sampling
 
 from dominant_band import dominant_band
 
@@ -149,6 +149,39 @@ class FireMappingCLI:
         point_threshold:     int   = 10,
         brush_all_segments:  bool  = False,
 
+        # A12: hint-aware brush — score components by overlap+proximity
+        # to the hint and union top-scorers, instead of "largest only".
+        # Disable to fall back to the legacy largest-or-all behaviour.
+        hint_aware_brush:    bool  = True,
+        brush_score_threshold: float = 0.05,
+        brush_proximity_frac: float = 0.10,
+
+        # B3: skip class_brush internal scratch files (flood/link/recode/
+        # wheel). Defaults to True since these were always deleted by the
+        # CLI right after the run anyway.
+        brush_no_intermediates: bool = True,
+
+        # A1: stratified sampling — match target_inside_ratio of samples
+        # to inside-hint pixels so t-SNE has both classes well-represented
+        # even on small fires. Set to False to use the old uniform random.
+        stratify:            bool  = True,
+        stratify_inside_ratio: float = 0.5,
+
+        # A4: robust z-score (median, MAD) per band before t-SNE / RF.
+        # Standardises bands so Euclidean distances inside t-SNE aren't
+        # dominated by whichever band has the largest reflectance scale.
+        scale_features:      bool  = True,
+
+        # A8: spatial coherence — append normalized (x, y) features to
+        # the embedding input with this weight (relative to z-scored
+        # spectral magnitude). 0 disables. Modest values (0.1–0.5)
+        # encourage spatial contiguity without overpowering spectra.
+        spatial_weight:      float = 0.3,
+
+        # A5: cluster-vote score threshold (0.0..1.0). A pixel is burned
+        # iff F1×lift × HDBSCAN-strength > threshold.
+        cluster_score_threshold: float = 0.05,
+
         # Intermediate state caching (serial mapping optimisation)
         save_state_path:     str   = None,
         load_state_path:     str   = None,
@@ -209,6 +242,25 @@ class FireMappingCLI:
         self.brush_size         = int(brush_size)
         self.point_threshold    = int(point_threshold)
         self.brush_all_segments = bool(brush_all_segments)
+        self.hint_aware_brush   = bool(hint_aware_brush)
+        self.brush_score_threshold = float(brush_score_threshold)
+        self.brush_proximity_frac  = float(brush_proximity_frac)
+        self.brush_no_intermediates = bool(brush_no_intermediates)
+
+        # Sampling / scaling / spatial / vote
+        self.stratify              = bool(stratify)
+        self.stratify_inside_ratio = float(stratify_inside_ratio)
+        self.scale_features        = bool(scale_features)
+        self.spatial_weight        = float(spatial_weight)
+        self.cluster_score_threshold = float(cluster_score_threshold)
+
+        # Filled in by load_image (scale stats) and load_image_embed_RF
+        # (full-image valid mask). HDBSCAN strengths from approximate
+        # are stashed by map_burn for the cluster vote.
+        self._band_median = None
+        self._band_mad    = None
+        self.full_valid_mask = None
+        self.img_strengths   = None
 
         # Intermediate state caching
         self.save_state_path = save_state_path
@@ -282,10 +334,94 @@ class FireMappingCLI:
         # display bands: B12/B11/B9 post group (or bands 1-3)
         self.img_band_list = self.find_default_rgb_bands()
 
+        # A4: robust scaling stats over the full image, embed bands only.
+        # Median + MAD on finite pixels — NaN propagates through nanmedian
+        # but we mask first to avoid scanning twice.
+        embed_idx = [b - 1 for b in self.embed_band_list]
+        embed_data = self.image_dat[..., embed_idx].reshape(-1, len(embed_idx))
+        finite_rows = np.isfinite(embed_data).all(axis=1)
+        ok = embed_data[finite_rows]
+        if ok.size == 0:
+            # Fallback so downstream divisions don't blow up — but this
+            # crop is unmappable (no valid pixels at all).
+            self._band_median = np.zeros(len(embed_idx), dtype=np.float32)
+            self._band_mad    = np.ones(len(embed_idx),  dtype=np.float32)
+        else:
+            self._band_median = np.median(ok, axis=0).astype(np.float32)
+            self._band_mad    = np.median(
+                np.abs(ok - self._band_median), axis=0).astype(np.float32)
+            # Constant or nearly-constant bands → MAD≈0; avoid /0 and the
+            # band ends up with zero variance (won't drive anything).
+            self._band_mad = np.where(
+                self._band_mad < 1e-6, 1.0, self._band_mad)
+
         print(f'[CLI] Image: {self.image._xSize} x {self.image._ySize} px, '
               f'{n_bands} bands')
         print(f'[CLI] Embed bands: {self.embed_band_list}')
         print(f'[CLI] Display bands: {self.img_band_list}')
+        if self.scale_features:
+            print(f'[CLI] Robust scale: median={self._band_median}, '
+                  f'mad={self._band_mad}')
+
+    # -----------------------------------------------------------------------
+    # Feature extraction with optional A4 (z-score) + A8 (spatial features)
+    # -----------------------------------------------------------------------
+
+    def _scale_bands(self, X: np.ndarray) -> np.ndarray:
+        """Apply robust z-score (median, 1.4826·MAD) per embed band."""
+        if not self.scale_features:
+            return X
+        return ((X - self._band_median) / (1.4826 * self._band_mad)).astype(
+            np.float32, copy=False)
+
+    def _spatial_features_for_indices(self, flat_indices: np.ndarray
+                                       ) -> np.ndarray:
+        """Return (N, 2) array of weighted, [-1, 1]-normalized (x, y) for
+        the supplied flat pixel indices. Returns shape (N, 0) when
+        spatial_weight is 0."""
+        if self.spatial_weight <= 0:
+            return np.zeros((flat_indices.size, 0), dtype=np.float32)
+        W = int(self.image._xSize)
+        H = int(self.image._ySize)
+        rows = (flat_indices // W).astype(np.float32)
+        cols = (flat_indices %  W).astype(np.float32)
+        nx = (cols / max(1, W - 1)) * 2.0 - 1.0
+        ny = (rows / max(1, H - 1)) * 2.0 - 1.0
+        return (self.spatial_weight
+                * np.column_stack([nx, ny])).astype(np.float32, copy=False)
+
+    def _features_for_samples(self) -> np.ndarray:
+        """Build embedding-ready feature matrix for ``self.samples``."""
+        X = self.samples[..., [b - 1 for b in self.embed_band_list]]
+        X = self._scale_bands(X)
+        if self.spatial_weight > 0:
+            xy = self._spatial_features_for_indices(self.sample_indices)
+            X = np.column_stack([X, xy]).astype(np.float32, copy=False)
+        return X
+
+    def _features_for_full_image(self) -> tuple[np.ndarray, np.ndarray]:
+        """Build feature matrix for every pixel.
+
+        Returns ``(X, valid_mask)``. NaN pixels are imputed with the
+        per-band median so RF inference does not fail, and ``valid_mask``
+        flags them so downstream stages (HDBSCAN approximate, classify
+        vote) can mask their outputs back to no-data.
+        """
+        embed_idx = [b - 1 for b in self.embed_band_list]
+        IMAGE = self.image_dat[..., embed_idx].reshape(-1, len(embed_idx))
+        valid = np.isfinite(IMAGE).all(axis=1)
+        if (~valid).any():
+            # Impute NaN pixels with the per-band median so RF doesn't see
+            # NaN. Their output is masked back to no-data via valid_mask.
+            IMAGE = IMAGE.copy()
+            IMAGE[~valid] = self._band_median
+        IMAGE = self._scale_bands(IMAGE)
+        if self.spatial_weight > 0:
+            n_pix = IMAGE.shape[0]
+            xy = self._spatial_features_for_indices(np.arange(n_pix))
+            IMAGE = np.column_stack([IMAGE, xy]).astype(
+                np.float32, copy=False)
+        return IMAGE, valid
 
     def generate_mask_from_rgb(self):
         """
@@ -345,16 +481,26 @@ class FireMappingCLI:
                   f'valid pixels ({n_valid}). Clamping to {n_valid}.')
             self.sample_size = n_valid
 
-        self.sample_indices, self.samples = regular_sampling(
-            raster_dat=self.image_dat,
-            sample_size=self.sample_size,
-            seed=self.random_state,
-        )
+        if self.stratify:
+            self.sample_indices, self.samples = stratified_sampling(
+                raster_dat=self.image_dat,
+                hint_dat=self.polygon_dat,
+                sample_size=self.sample_size,
+                target_inside_ratio=self.stratify_inside_ratio,
+                seed=self.random_state,
+            )
+        else:
+            self.sample_indices, self.samples = regular_sampling(
+                raster_dat=self.image_dat,
+                sample_size=self.sample_size,
+                seed=self.random_state,
+            )
         self.sample_in_polygon = (
             self.polygon_dat.ravel()[self.sample_indices].astype(np.bool_)
         )
         n_in = int(self.sample_in_polygon.sum())
-        print(f'[CLI] {len(self.samples)} pixels sampled  '
+        mode = 'stratified' if self.stratify else 'uniform'
+        print(f'[CLI] {len(self.samples)} pixels sampled ({mode}) '
               f'(inside hint: {n_in},  outside: {len(self.samples) - n_in})')
 
     # -----------------------------------------------------------------------
@@ -370,10 +516,13 @@ class FireMappingCLI:
         from cuml.manifold import TSNE
         import cupy as cp
 
-        X_s   = self.samples[..., [b - 1 for b in self.embed_band_list]]
+        X_s   = self._features_for_samples()
         X_gpu = cp.asarray(X_s, dtype=cp.float32)
 
         print(f'[CLI] T-SNE params: {self.tsne_params}')
+        print(f'[CLI] T-SNE input shape: {X_s.shape} '
+              f'(spectral={len(self.embed_band_list)}, '
+              f'spatial={X_s.shape[1] - len(self.embed_band_list)})')
         tsne_model = TSNE(**self.tsne_params)
         embedding  = tsne_model.fit_transform(X_gpu)
         cp.cuda.Stream.null.synchronize()
@@ -388,25 +537,36 @@ class FireMappingCLI:
     # RF image embedding  (mirrors GUI.load_image_embed_RF)
     # -----------------------------------------------------------------------
 
-    def _get_band_image_2d(self):
-        """Full image in embed bands, flattened to (N_pixels, n_bands)."""
-        IMAGE = self.image_dat[..., [b - 1 for b in self.embed_band_list]]
-        IMAGE = IMAGE.reshape(-1, len(self.embed_band_list))
-        return np.nan_to_num(IMAGE, nan=0.0)
-
     def load_image_embed_RF(self):
+        """A2+A4+A8: train two RF regressors on scaled+spatial sample
+        features → t-SNE coords; predict only on finite pixels and leave
+        NaN rows as NaN in the output. The full image's valid mask is
+        stashed on the instance so the cluster vote and HDBSCAN
+        approximate stage can mask their outputs."""
         from machine_learning.trees import rf_regressor
 
-        X  = self.samples[..., [b - 1 for b in self.embed_band_list]]
+        X  = self._features_for_samples()
         y1 = self.current_embed[:, 0]
         y2 = self.current_embed[:, 1]
 
         reg1 = rf_regressor(X, y1, **self.rf_params)
         reg2 = rf_regressor(X, y2, **self.rf_params)
 
-        input_img  = self._get_band_image_2d()
-        img_embed1 = reg1.predict(input_img)
-        img_embed2 = reg2.predict(input_img)
+        input_img, valid_mask = self._features_for_full_image()
+        # Stash for downstream stages — needed by classify_cluster (skip
+        # nodata in the precision/recall maths) and by the brush stage
+        # (leave NaN holes alone, don't flood-fill into them).
+        self.full_valid_mask = valid_mask
+
+        # Predict only on valid pixels — RF has no native NaN support
+        # and predicting on imputed-median spectra would just produce a
+        # phantom "all-zeros" cluster that the vote could pick up.
+        img_embed1 = np.full(input_img.shape[0], np.nan, dtype=np.float32)
+        img_embed2 = np.full(input_img.shape[0], np.nan, dtype=np.float32)
+        if valid_mask.any():
+            X_valid = input_img[valid_mask]
+            img_embed1[valid_mask] = reg1.predict(X_valid)
+            img_embed2[valid_mask] = reg2.predict(X_valid)
 
         return np.column_stack((img_embed1, img_embed2))
 
@@ -446,21 +606,48 @@ class FireMappingCLI:
     def map_burn(self, transformed_img=None):
         from machine_learning.cluster import hdbscan_fit, hdbscan_approximate
 
-        self.hdbscan_params['min_cluster_size'] = max(5, int(min(
-            self.sample_size * self.guessed_burn_p          * self.controlled_ratio,
-            self.sample_size * (1.0 - self.guessed_burn_p)  * self.controlled_ratio,
-        )))
+        # A6: focus min_cluster_size on the burn class directly. The old
+        # formula took min(burn_count, non_burn_count)·r — symmetric in
+        # the prior, which made it too large on half-burn fires (eats
+        # severity-gradient structure) and too small on tiny fires
+        # (over-fragmented background). burn_count·r tracks the class
+        # we actually care about isolating.
+        burn_count = self.sample_size * self.guessed_burn_p
+        self.hdbscan_params['min_cluster_size'] = max(5, int(
+            burn_count * self.controlled_ratio))
         print(f'[CLI] HDBSCAN min_cluster_size = '
-              f'{self.hdbscan_params["min_cluster_size"]}')
+              f'{self.hdbscan_params["min_cluster_size"]} '
+              f'(burn_p={self.guessed_burn_p:.4f}, '
+              f'ratio={self.controlled_ratio})')
 
         if transformed_img is None:
             t0 = time.time()
             transformed_img = self.load_image_embed_RF()
             print(f'[CLI] Forest mapping done, cost {time.time() - t0:.2f}s')
 
+        # Resume path may not have re-run load_image_embed_RF, so derive
+        # the valid mask from the transformed image (NaN rows = invalid).
+        if self.full_valid_mask is None:
+            self.full_valid_mask = np.isfinite(transformed_img).all(axis=1)
+
         t1 = time.time()
-        cluster, _     = hdbscan_fit(self.current_embed, **self.hdbscan_params)
-        img_cluster, _ = hdbscan_approximate(transformed_img, cluster)
+        cluster, _ = hdbscan_fit(self.current_embed, **self.hdbscan_params)
+
+        # HDBSCAN approximate doesn't accept NaN — only run it on the
+        # finite rows and reconstruct the full output. Strengths are
+        # kept for the A5 vote.
+        valid = self.full_valid_mask
+        n_pix = transformed_img.shape[0]
+        img_cluster   = np.full(n_pix, -1, dtype=np.int32)
+        img_strengths = np.zeros(n_pix,    dtype=np.float32)
+        if valid.any():
+            sub_labels, sub_strengths = hdbscan_approximate(
+                transformed_img[valid], cluster)
+            img_cluster[valid]   = sub_labels.astype(np.int32, copy=False)
+            img_strengths[valid] = sub_strengths.astype(
+                np.float32, copy=False)
+
+        self.img_strengths = img_strengths
         print(f'[CLI] Unique clusters: {np.unique(img_cluster)}')
         print(f'[CLI] HDBSCAN done, cost {time.time() - t1:.3f}s')
 
@@ -471,46 +658,96 @@ class FireMappingCLI:
     # -----------------------------------------------------------------------
 
     def classify_cluster(self, cluster):
-        """Use the hint mask to determine which HDBSCAN cluster(s) = burned.
+        """A5: assign per-pixel burn probability from a continuous
+        cluster score weighted by HDBSCAN membership strength, then
+        threshold.
 
-        For each cluster label, compute two overlap ratios:
-          - precision: fraction of the cluster's pixels inside the hint
-          - recall:    fraction of the hint's pixels belonging to this cluster
+        For each cluster label compute precision and recall against the
+        hint (over valid pixels only — nodata is excluded so masked
+        regions don't dilute the prior). Combine into F1, then multiply
+        by *lift* relative to the burn prior so a cluster that just
+        tracks the prior (precision ≈ burn_prior, e.g. a giant
+        background cluster that grazes the hint by chance) gets a low
+        score regardless of how high its raw recall is.
 
-        A cluster is burned if EITHER ratio exceeds 50%.  This handles both
-        small fires (high precision, low recall) and large fires where the
-        burned cluster spills beyond the hint boundary (low precision, high
-        recall — e.g. 42% precision but the cluster covers most of the hint).
+            score(c)   = F1(precision_c, recall_c) · max(0, lift_c)
+            lift_c     = (precision_c − burn_prior) / (1 − burn_prior)
+            P(burn|x)  = score(cluster(x)) · strength(x)
+            burned     = P(burn|x) > cluster_score_threshold
+
+        ``strength`` comes from HDBSCAN's ``approximate_predict``; pixels
+        on the noisy edge of a cluster contribute proportionally less,
+        which softens the OR rule's hard cluster boundaries.
+
+        Pixels outside ``self.full_valid_mask`` (NaN/no-data) are forced
+        to False — they were never embedded so any cluster id they carry
+        is meaningless.
         """
-        classification = np.full(self.polygon_dat.shape, False)
-        hint_flat = self.polygon_dat.ravel()
+        H, W = self.polygon_dat.shape
+        classification = np.full((H, W), False)
+
+        hint_flat = self.polygon_dat.ravel().astype(np.bool_)
         cluster_flat = cluster.ravel()
-        n_hint = int(hint_flat.sum())
+
+        valid_flat = (self.full_valid_mask
+                      if self.full_valid_mask is not None
+                      else np.ones(hint_flat.size, dtype=bool))
+        strengths_flat = (self.img_strengths
+                          if self.img_strengths is not None
+                          else np.ones(hint_flat.size, dtype=np.float32))
+
+        n_valid = int(valid_flat.sum())
+        n_hint  = int((hint_flat & valid_flat).sum())
+        burn_prior = (n_hint / n_valid) if n_valid > 0 else 0.0
+        print(f'[CLI] Vote: burn_prior={burn_prior:.4f}, '
+              f'n_hint={n_hint}, n_valid={n_valid}')
 
         unique_labels = np.unique(cluster_flat)
-        burned_labels = []
+        score_lookup: dict[int, float] = {-1: 0.0}
 
         for label in unique_labels:
             if label == -1:
                 continue
-            mask = cluster_flat == label
+            mask = (cluster_flat == int(label)) & valid_flat
             n_total = int(mask.sum())
             if n_total == 0:
                 continue
             n_inside = int((mask & hint_flat).sum())
-            precision = n_inside / n_total
-            recall    = n_inside / n_hint if n_hint > 0 else 0.0
+            precision = (n_inside / n_total) if n_total > 0 else 0.0
+            recall    = (n_inside / n_hint)  if n_hint  > 0 else 0.0
+            f1        = (2.0 * precision * recall
+                         / (precision + recall + 1e-9))
+            lift      = ((precision - burn_prior)
+                         / max(1e-6, 1.0 - burn_prior))
+            score     = max(0.0, f1) * max(0.0, lift)
+            score_lookup[int(label)] = score
             print(f'[CLI]   cluster {label}: {n_total} px, '
-                  f'{n_inside} inside hint '
-                  f'(precision={precision:.2%}, recall={recall:.2%})')
-            if precision > 0.5 or recall > 0.5:
-                burned_labels.append(label)
+                  f'{n_inside} inside hint  '
+                  f'P={precision:.2%}, R={recall:.2%}, '
+                  f'F1={f1:.2%}, lift={lift:.2f}, score={score:.3f}')
 
-        print(f'[CLI] Burned clusters: {burned_labels}')
+        # Vectorised score lookup: build an array indexed by (label+1) so
+        # -1 (noise) maps to score 0.0 at index 0.
+        max_label = int(cluster_flat.max()) if cluster_flat.size else -1
+        score_arr = np.zeros(max_label + 2, dtype=np.float32)
+        for label, score in score_lookup.items():
+            score_arr[int(label) + 1] = score
+        per_pixel_score = score_arr[cluster_flat + 1]
 
-        for label in burned_labels:
-            classification[cluster == label] = True
+        proba = per_pixel_score * strengths_flat.astype(np.float32, copy=False)
+        proba[~valid_flat] = 0.0
+        self.last_proba = proba.reshape(H, W)
 
+        burned_flat = proba > self.cluster_score_threshold
+        burned_labels = sorted(
+            int(l) for l, s in score_lookup.items()
+            if s > self.cluster_score_threshold and l != -1)
+        print(f'[CLI] Cluster score threshold: '
+              f'{self.cluster_score_threshold}')
+        print(f'[CLI] Burned clusters (raw score > threshold): '
+              f'{burned_labels}')
+
+        classification = burned_flat.reshape(H, W)
         return classification
 
     # -----------------------------------------------------------------------
@@ -804,18 +1041,74 @@ class FireMappingCLI:
     # class_brush post-processing  (mirrors GUI's run_brush_then_qgis)
     # -----------------------------------------------------------------------
 
+    def _score_brush_component(self, comp_mask: np.ndarray,
+                                hint_mask: np.ndarray,
+                                hint_dt: np.ndarray | None,
+                                diag_px: float) -> dict:
+        """A12: score a brushed component by overlap + proximity to the
+        hint plus a small size term.
+
+        Returns a dict with the precision, recall, proximity and final
+        score so the caller can log per-component diagnostics.
+        """
+        n_comp = int(comp_mask.sum())
+        n_hint = int(hint_mask.sum())
+        if n_comp == 0:
+            return {'n': 0, 'precision': 0.0, 'recall': 0.0,
+                    'proximity': 0.0, 'score': 0.0}
+
+        inter = int((comp_mask & hint_mask).sum())
+        precision = inter / max(1, n_comp)
+        recall    = (inter / n_hint) if n_hint > 0 else 0.0
+
+        # Proximity: 1 when the component is on top of the hint, falls
+        # off as the mean distance from component pixels to the nearest
+        # hint pixel grows. ``brush_proximity_frac`` sets the falloff
+        # scale relative to the image diagonal — at distance =
+        # frac · diagonal the proximity hits 0.
+        if hint_dt is None or n_hint == 0:
+            proximity = 0.0
+        else:
+            mean_d = float(hint_dt[comp_mask].mean())
+            falloff = max(1.0, self.brush_proximity_frac * diag_px)
+            proximity = max(0.0, 1.0 - mean_d / falloff)
+
+        # F1 component (overlap quality) + proximity safety net so a
+        # component touching the hint with poor overlap still gets some
+        # credit when no other component overlaps either.
+        f1 = (2.0 * precision * recall
+              / (precision + recall + 1e-9))
+        score = max(f1, 0.5 * proximity)
+        return {'n': n_comp, 'precision': precision, 'recall': recall,
+                'proximity': proximity, 'score': score}
+
     def run_class_brush(self, clf_path: str) -> np.ndarray:
         """
         Call class_brush.exe directly (bypass class_brush.py which requires
         a Sentinel-2 timestamp in the image filename).
 
-        Uses the instance brush parameters (brush_size, point_threshold,
-        brush_all_segments). When brush_all_segments is False the C++ tool
-        only emits the main (largest) segment; when True it emits every
-        component above threshold and the Python side ORs them together.
+        Selection logic (in order of preference):
 
-        Returns the brushed binary mask (same shape as classification), or
-        None if the exe is not found or produces no components.
+        * **Hint-aware (A12, default).** Force ``--all_segments`` from
+          the C++ tool and score each component against the VIIRS /
+          dominant-band hint using overlap (F1) plus proximity (Euclidean
+          distance transform). Union components whose score exceeds
+          ``brush_score_threshold``; if none pass, fall back to the
+          highest-scoring single component so the run never returns an
+          empty mask. This stops "largest wins" from mistakenly keeping
+          an unburned artefact when a smaller-but-real burn component
+          exists, and stops "all segments" from gluing the burn to
+          unrelated noise.
+
+        * **Legacy modes.** When ``hint_aware_brush`` is False, behave as
+          before: ``brush_all_segments=True`` ORs every component above
+          threshold, otherwise keeps the single largest.
+
+        Also passes ``--no-intermediates`` (B3) when configured to skip
+        the C++ tool's flood/link/recode/wheel scratch writes.
+
+        Returns the brushed binary mask, or None if the exe is not found
+        or produced nothing.
         """
         import glob as _glob
 
@@ -829,13 +1122,22 @@ class FireMappingCLI:
                   f'skipping brush.')
             return None
 
+        # Hint-aware selection needs to see every component so we can
+        # score them. Force --all_segments on the C++ side; we'll do
+        # the keep/drop decision in Python.
+        force_all = self.hint_aware_brush or self.brush_all_segments
+
         cmd = [brush_exe]
-        if self.brush_all_segments:
+        if force_all:
             cmd.append('--all_segments')
+        if self.brush_no_intermediates:
+            cmd.append('--no-intermediates')
         cmd += [clf_path, str(self.brush_size), str(self.point_threshold)]
         print(f'[CLI] Running class_brush.exe '
               f'(brush={self.brush_size}, threshold={self.point_threshold}, '
-              f'all_segments={self.brush_all_segments}) ...')
+              f'all_segments={force_all}, '
+              f'hint_aware={self.hint_aware_brush}, '
+              f'no_intermediates={self.brush_no_intermediates}) ...')
         result = subprocess.run(cmd, cwd=self.save_dir)
         if result.returncode != 0:
             print(f'[CLI] Warning — class_brush.exe exited with code '
@@ -846,7 +1148,83 @@ class FireMappingCLI:
 
         brushed_mask = None
         if comp_files:
-            if self.brush_all_segments:
+            if self.hint_aware_brush:
+                # Build the hint distance transform once. For typical
+                # crops this is sub-second — we only do it inside the
+                # rare case the hint is non-empty.
+                hint_mask = (np.asarray(self.polygon_dat, dtype=bool)
+                             if self.polygon_dat is not None
+                             else None)
+                hint_dt = None
+                if hint_mask is not None and bool(hint_mask.any()):
+                    try:
+                        from scipy.ndimage import distance_transform_edt
+                        hint_dt = distance_transform_edt(~hint_mask)
+                    except Exception as exc:
+                        print(f'[CLI] Warning — distance_transform_edt '
+                              f'failed: {exc}; using overlap only.')
+                        hint_dt = None
+
+                # Image diagonal in pixels — sets the proximity falloff
+                # scale.
+                if hint_mask is not None:
+                    h, w = hint_mask.shape
+                    diag_px = float(np.hypot(h, w))
+                else:
+                    diag_px = 1.0
+
+                scored: list[tuple[float, str, np.ndarray, dict]] = []
+                for cf in comp_files:
+                    try:
+                        dat = Raster(cf).read_bands('all').squeeze().astype(bool)
+                    except Exception as exc:
+                        print(f'[CLI] Warning — could not read {cf}: {exc}')
+                        continue
+                    if hint_mask is None:
+                        # No hint at all — fall back to size-only score.
+                        info = {'n': int(dat.sum()), 'precision': 0.0,
+                                'recall': 0.0, 'proximity': 0.0,
+                                'score': float(dat.sum())}
+                    else:
+                        info = self._score_brush_component(
+                            dat, hint_mask, hint_dt, diag_px)
+                    scored.append(
+                        (info['score'], cf, dat, info))
+
+                # Sort by score descending for diagnostics.
+                scored.sort(key=lambda x: -x[0])
+                for score, cf, dat, info in scored:
+                    print(f'[CLI]   comp {os.path.basename(cf)}: '
+                          f'n={info["n"]}, P={info["precision"]:.2%}, '
+                          f'R={info["recall"]:.2%}, '
+                          f'prox={info["proximity"]:.2f}, '
+                          f'score={score:.3f}')
+
+                kept_above = [(s, cf, dat) for (s, cf, dat, _i) in scored
+                              if s > self.brush_score_threshold]
+                if kept_above:
+                    combined = None
+                    for _s, _cf, dat in kept_above:
+                        combined = dat if combined is None else (combined | dat)
+                    brushed_mask = combined
+                    total = int(combined.sum()) if combined is not None else 0
+                    print(f'[CLI] hint-aware brush — kept '
+                          f'{len(kept_above)}/{len(scored)} component(s) '
+                          f'above score {self.brush_score_threshold} '
+                          f'({total} px total)')
+                elif scored:
+                    # Nothing above threshold — keep the highest scorer
+                    # so the run never returns an empty mask. This is
+                    # the same fallback the legacy "largest" mode did.
+                    _s, cf, dat, info = scored[0]
+                    brushed_mask = dat
+                    print(f'[CLI] hint-aware brush — no component above '
+                          f'score {self.brush_score_threshold}; '
+                          f'falling back to top-scoring comp '
+                          f'{os.path.basename(cf)} '
+                          f'(n={info["n"]}, score={_s:.3f})')
+
+            elif self.brush_all_segments:
                 combined = None
                 kept = 0
                 for cf in comp_files:
@@ -883,7 +1261,10 @@ class FireMappingCLI:
                 for p in (cf, os.path.splitext(cf)[0] + '.hdr'):
                     if os.path.exists(p):
                         os.remove(p)
-            # C++ intermediaries written alongside clf_path
+            # C++ intermediaries written alongside clf_path. Skipped
+            # automatically when --no-intermediates was passed (the
+            # files won't exist), but keep the unconditional remove
+            # so legacy runs without the flag also clean up.
             for pat in [clf_path + '_flood4.bin',
                         clf_path + '_flood4.hdr',
                         clf_path + '_flood4.bin_link.bin',
@@ -898,136 +1279,6 @@ class FireMappingCLI:
             print('[CLI] class_brush.exe produced no component files.')
 
         return brushed_mask
-
-    # -----------------------------------------------------------------------
-    # Diagnostic PNGs  (pre / post / difference bands)
-    # -----------------------------------------------------------------------
-
-    def _find_band_groups(self):
-        """Detect pre, post, and difference band groups from band names.
-
-        Scans the ENVI band descriptions for keywords:
-          - 'pre'      → pre-fire group
-          - 'pst'/'post' → post-fire group
-          - 'anomaly1' / 'diff' with '(post-pre)/(post+pre)' → difference-1
-          - 'anomaly2' / 'ratio' with 'post/pre'             → difference-2
-
-        If no keywords are found, falls back to positional B12/B11/B9 groups
-        (first = pre, second = post).
-
-        Returns dict: {'pre': [...], 'post': [...], 'diff1': [...], 'diff2': [...]}
-        Each value is a list of 1-based band indices (up to 3 bands).
-        """
-        n_bands = self.image_dat.shape[2]
-        raw_names = [self.image.band_info_list[i] for i in range(n_bands)]
-
-        groups = {'pre': [], 'post': [], 'diff1': [], 'diff2': []}
-
-        for i, name in enumerate(raw_names):
-            low = name.lower()
-            idx = i + 1  # 1-based
-            if 'anomaly2' in low or ('post/pre' in low and 'anomaly' not in low):
-                groups['diff2'].append(idx)
-            elif 'anomaly1' in low or '(post-pre)/(post+pre)' in low:
-                groups['diff1'].append(idx)
-            elif low.startswith('pst') or low.startswith('post'):
-                groups['post'].append(idx)
-            elif low.startswith('pre'):
-                groups['pre'].append(idx)
-
-        # If keyword-based detection found something, trim each to first 3
-        has_keywords = any(len(v) > 0 for v in groups.values())
-        if has_keywords:
-            for k in groups:
-                groups[k] = groups[k][:3]
-            print(f'[CLI] Band groups (keyword): '
-                  f'pre={groups["pre"]} post={groups["post"]} '
-                  f'diff1={groups["diff1"]} diff2={groups["diff2"]}')
-            return groups
-
-        # Fallback: use positional B12/B11/B9 groups
-        all_band_names = [self.image.band_name(i + 1) for i in range(n_bands)]
-        positional = []
-        i = 0
-        while i < len(all_band_names):
-            if 'B12' in all_band_names[i]:
-                for j in range(i + 1, min(i + 3, len(all_band_names))):
-                    if 'B11' in all_band_names[j]:
-                        for k in range(j + 1, min(j + 3, len(all_band_names))):
-                            if 'B9' in all_band_names[k]:
-                                positional.append([i + 1, j + 1, k + 1])
-                                break
-                        break
-            i += 1
-
-        if len(positional) >= 2:
-            groups['pre'] = positional[0]
-            groups['post'] = positional[1]
-        elif len(positional) == 1:
-            groups['post'] = positional[0]
-        else:
-            # Last resort: first 3 bands
-            groups['post'] = list(range(1, min(4, n_bands + 1)))
-
-        print(f'[CLI] Band groups (positional fallback): '
-              f'pre={groups["pre"]} post={groups["post"]} '
-              f'diff1={groups["diff1"]} diff2={groups["diff2"]}')
-        return groups
-
-    def make_diagnostic_pngs(self):
-        """Generate RGB PNGs for each detected band group (pre, post, diff1, diff2)."""
-        groups = self._find_band_groups()
-
-        labels = {
-            'pre':   'Pre-fire',
-            'post':  'Post-fire',
-            'diff1': 'Difference (post-pre)/(post+pre)',
-            'diff2': 'Difference post/pre',
-        }
-
-        paths = []
-        for key in ('pre', 'post', 'diff1', 'diff2'):
-            band_indices = groups[key]
-            if not band_indices:
-                continue
-
-            dat = self.image_dat[..., [b - 1 for b in band_indices]]
-
-            # Normalise each channel independently to [0, 1] via 2-98 percentile
-            channels = []
-            for c in range(dat.shape[2]):
-                ch = dat[..., c].astype(np.float32)
-                lo, hi = np.nanpercentile(ch, [2, 98])
-                channels.append(np.clip((ch - lo) / max(hi - lo, 1e-6), 0, 1))
-            rgb = np.stack(channels, axis=2)
-
-            # Build band label string
-            n_bands_total = self.image_dat.shape[2]
-            band_labels = []
-            for b in band_indices:
-                raw = self.image.band_info_list[b - 1] if b <= n_bands_total else f'band {b}'
-                band_labels.append(raw)
-
-            fig, ax = plt.subplots(figsize=(8, 8))
-            ax.imshow(rgb, interpolation='nearest', origin='upper')
-            ax.set_title(f'{self.fire_numbe}  —  {labels[key]}\n'
-                         f'Bands: {", ".join(band_labels)}',
-                         fontsize=9)
-            dh, dw = rgb.shape[:2]
-            ax.set_xlim(0, dw)
-            ax.set_ylim(dh, 0)
-            ax.set_xlabel('Column (px)', fontsize=8)
-            ax.set_ylabel('Row (px)', fontsize=8)
-            ax.tick_params(labelsize=7)
-
-            fig_path = os.path.join(
-                self.save_dir, f'{self.fire_numbe}_{key}.png')
-            fig.savefig(fig_path, dpi=150, bbox_inches='tight')
-            plt.close(fig)
-            print(f'[CLI] Diagnostic PNG → {os.path.basename(fig_path)}')
-            paths.append(fig_path)
-
-        return paths
 
     # -----------------------------------------------------------------------
     # Full pipeline
@@ -1067,9 +1318,6 @@ class FireMappingCLI:
             )
             print('[1/7] Loading image ...')
             self.load_image()
-
-            print('\nGenerating diagnostic PNGs (pre/post/diff) ...')
-            self.make_diagnostic_pngs()
 
             print('\n[2/7] Loading hint ...')
             self.load_polygon()
@@ -1248,6 +1496,47 @@ Examples
                         'together). Default: keep only the single largest '
                         'component.')
 
+    # ---- A12: hint-aware brush ----
+    p.add_argument('--no_hint_aware_brush', action='store_true',
+                   help='Disable A12 hint-aware brush selection and fall '
+                        'back to the legacy largest-or-all behaviour.')
+    p.add_argument('--brush_score_threshold', type=float, default=0.05,
+                   help='A12: hint-aware brush keeps components whose '
+                        'score (max(F1, 0.5·proximity)) exceeds this '
+                        'value. Default: 0.05.')
+    p.add_argument('--brush_proximity_frac', type=float, default=0.10,
+                   help='A12: hint distance-transform falloff scale, as '
+                        'a fraction of the image diagonal. Default: 0.10.')
+
+    # ---- B3: skip class_brush internal scratch files ----
+    p.add_argument('--brush_keep_intermediates', action='store_true',
+                   help='B3: keep class_brush.exe scratch files '
+                        '(flood/link/recode/wheel). Default: drop them; '
+                        'the CLI deleted them anyway after the run.')
+
+    # ---- A1: stratified sampling ----
+    p.add_argument('--no_stratify', action='store_true',
+                   help='A1: disable stratified sampling on the hint and '
+                        'fall back to uniform random.')
+    p.add_argument('--stratify_inside_ratio', type=float, default=0.5,
+                   help='A1: target fraction of samples drawn from inside '
+                        'the hint. Default: 0.5.')
+
+    # ---- A4: robust band scaling ----
+    p.add_argument('--no_scale_features', action='store_true',
+                   help='A4: disable robust per-band z-scoring before '
+                        't-SNE/RF. Default: scaling is on.')
+
+    # ---- A8: spatial coherence ----
+    p.add_argument('--spatial_weight', type=float, default=0.3,
+                   help='A8: weight of normalized (x, y) features in the '
+                        'embedding input. 0 disables. Default: 0.3.')
+
+    # ---- A5: cluster-vote score threshold ----
+    p.add_argument('--cluster_score_threshold', type=float, default=0.05,
+                   help='A5: per-pixel burn probability threshold '
+                        '(F1 × lift × HDBSCAN strength). Default: 0.05.')
+
     # ---- Intermediate state caching (serial mapping optimisation) ----
     p.add_argument('--save_state', default=None,
                    help='Save t-SNE + RF state to .npz after embedding '
@@ -1293,6 +1582,15 @@ def main(argv=None):
         brush_size          = args.brush_size,
         point_threshold     = args.point_threshold,
         brush_all_segments  = args.brush_all_segments,
+        hint_aware_brush       = not args.no_hint_aware_brush,
+        brush_score_threshold  = args.brush_score_threshold,
+        brush_proximity_frac   = args.brush_proximity_frac,
+        brush_no_intermediates = not args.brush_keep_intermediates,
+        stratify               = not args.no_stratify,
+        stratify_inside_ratio  = args.stratify_inside_ratio,
+        scale_features         = not args.no_scale_features,
+        spatial_weight         = args.spatial_weight,
+        cluster_score_threshold = args.cluster_score_threshold,
         save_state_path     = args.save_state,
         load_state_path     = args.load_state,
     )

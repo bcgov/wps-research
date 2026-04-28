@@ -549,27 +549,40 @@ static void stage_onehot_output(float *recode, size_t nrow, size_t ncol,
 
 int main(int argc, char **argv) {
     if (argc < 4) {
-        err("Usage: class_brush.exe [--all_segments] <input_mask.bin> <brush_size> <point_threshold>");
+        err("Usage: class_brush.exe [--all_segments] [--no-intermediates] "
+            "<input_mask.bin> <brush_size> <point_threshold>");
     }
 
-    // Optional flag: --all_segments (must appear before positional args)
-    bool all_segments = false;
+    // Optional flags (any order, must appear before positional args):
+    //   --all_segments      : emit every component, not just the largest
+    //   --no-intermediates  : skip writing flood/link/recode/wheel scratch
+    //                         files (B3). The Python wrapper always
+    //                         deleted them anyway, and on big crops the
+    //                         four full-image float32 writes dominate
+    //                         brush wall time.
+    bool all_segments    = false;
+    bool no_intermediates = false;
     int arg_offset = 0;
-    if (argc >= 2 && std::string(argv[1]) == "--all_segments") {
-        all_segments = true;
-        arg_offset = 1;
+    while (arg_offset + 1 < argc) {
+        std::string a(argv[1 + arg_offset]);
+        if (a == "--all_segments")          { all_segments = true; }
+        else if (a == "--no-intermediates") { no_intermediates = true; }
+        else                                  break;
+        arg_offset++;
     }
 
     if (argc < 4 + arg_offset) {
-        err("Usage: class_brush.exe [--all_segments] <input_mask.bin> <brush_size> <point_threshold>");
+        err("Usage: class_brush.exe [--all_segments] [--no-intermediates] "
+            "<input_mask.bin> <brush_size> <point_threshold>");
     }
 
     str fn(argv[1 + arg_offset]);
     long int brush_size      = atol(argv[2 + arg_offset]);
     long int point_threshold = atol(argv[3 + arg_offset]);
 
-    if (all_segments) printf("Mode: all_segments\n");
-    else              printf("Mode: main segment only\n");
+    if (all_segments)     printf("Mode: all_segments\n");
+    else                  printf("Mode: main segment only\n");
+    if (no_intermediates) printf("Mode: no intermediates\n");
 
     if (brush_size <= 0)      err("brush_size must be > 0");
     if (point_threshold <= 0) err("point_threshold must be > 0");
@@ -594,11 +607,13 @@ int main(int argc, char **argv) {
     float *flood = stage_flood(dat, nrow, ncol, n_flood_labels);
     printf("  flood labels: %zu\n", n_flood_labels); fflush(stdout);
 
-    // Write flood result
+    // Write flood result (skipped under --no-intermediates).
     str flood_fn  = fn + "_flood4.bin";
     str flood_hfn = fn + "_flood4.hdr";
-    bwrite(flood, flood_fn, nrow, ncol, 1);
-    hwrite(flood_hfn, nrow, ncol, 1, 4);
+    if (!no_intermediates) {
+        bwrite(flood, flood_fn, nrow, ncol, 1);
+        hwrite(flood_hfn, nrow, ncol, 1, 4);
+    }
 
     free(dat);  // no longer needed
 
@@ -609,8 +624,10 @@ int main(int argc, char **argv) {
 
     str link_fn  = flood_fn + "_link.bin";
     str link_hfn = flood_fn + "_link.hdr";
-    bwrite(linked, link_fn, nrow, ncol, 1);
-    hwrite(link_hfn, nrow, ncol, 1, 4);
+    if (!no_intermediates) {
+        bwrite(linked, link_fn, nrow, ncol, 1);
+        hwrite(link_hfn, nrow, ncol, 1, 4);
+    }
 
     // ── Stage 3: Recode ─────────────────────────────────────────────────────
     printf("Stage 3: recode...\n"); fflush(stdout);
@@ -621,14 +638,21 @@ int main(int argc, char **argv) {
 
     str recode_fn  = link_fn + "_recode.bin";
     str recode_hfn = link_fn + "_recode.hdr";
-    bwrite(recoded, recode_fn, nrow, ncol, 1);
-    hwrite(recode_hfn, nrow, ncol, 1, 4);
+    if (!no_intermediates) {
+        bwrite(recoded, recode_fn, nrow, ncol, 1);
+        hwrite(recode_hfn, nrow, ncol, 1, 4);
+    }
 
-    // ── Stage 4: Colour-wheel visualisation ─────────────────────────────────
-    printf("Stage 4: colour wheel...\n"); fflush(stdout);
+    // ── Stage 4: Colour-wheel visualisation (debug-only viz) ────────────────
     str wheel_fn  = recode_fn + "_wheel.bin";
     str wheel_hfn = recode_fn + "_wheel.hdr";
-    stage_wheel(recoded, nrow, ncol, n_classes, wheel_fn, wheel_hfn);
+    if (!no_intermediates) {
+        printf("Stage 4: colour wheel...\n"); fflush(stdout);
+        stage_wheel(recoded, nrow, ncol, n_classes, wheel_fn, wheel_hfn);
+    } else {
+        printf("Stage 4: colour wheel SKIPPED (--no-intermediates)\n");
+        fflush(stdout);
+    }
 
     // ── Stages 5 & 6: One-hot split, count, write per-component masks ───────
     printf("Stage 5/6: one-hot component output (threshold=%ld)...\n",

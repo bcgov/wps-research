@@ -342,6 +342,15 @@ _CSV_FIELDNAMES = [
     'rf_n_estimators', 'rf_max_depth', 'rf_max_features',
     'rf_random_state', 'contour_width',
     'brush_size', 'point_threshold', 'brush_all_segments',
+    # Algorithm tuning (A1/A4/A5/A8/A12/B3) — extras append to existing
+    # rows via DictWriter(extrasaction='ignore') and are blank for runs
+    # before they were introduced.
+    'stratify', 'stratify_inside_ratio',
+    'scale_features',
+    'spatial_weight',
+    'cluster_score_threshold',
+    'hint_aware_brush', 'brush_score_threshold', 'brush_proximity_frac',
+    'brush_keep_intermediates',
 ]
 
 

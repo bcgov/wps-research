@@ -117,6 +117,100 @@ def row_sampling(
 
 
 
+def stratified_sampling(
+        raster_dat,
+        hint_dat,
+        sample_size: int,
+        *,
+        target_inside_ratio: float = 0.5,
+        seed: int = 42,
+):
+    '''
+    Description
+    -----------
+    Stratified random sampling on a binary hint mask.
+
+    Aims for ``target_inside_ratio`` of samples inside-hint and the rest
+    outside-hint, drawing without replacement and skipping NaN rows. Any
+    deficit in one stratum (e.g. tiny fire with few hint pixels) is
+    redistributed to the other stratum so the total returned count
+    matches ``sample_size`` whenever possible.
+
+    Falls back to uniform random across all valid pixels when one
+    stratum has fewer than 5 valid pixels (uninformative hint).
+
+    Parameters
+    ----------
+    raster_dat : ndarray, shape (H, W, B)
+        Used to detect NaN rows.
+    hint_dat : ndarray, shape (H, W), bool-like
+        The hint mask (True = inside hint).
+    sample_size : int
+        Total samples to draw.
+    target_inside_ratio : float in (0, 1)
+        Fraction of ``sample_size`` to draw from inside-hint pixels.
+    seed : int
+        RNG seed for reproducibility.
+
+    Returns
+    -------
+    sampled_indices : ndarray of int
+        Flat indices into ``raster_dat.reshape(-1, B)``.
+    samples : ndarray, shape (n_drawn, B)
+    '''
+    flat = raster_dat.reshape(-1, raster_dat.shape[-1])
+    valid = np.isfinite(flat).all(axis=1)
+
+    hint_flat = np.asarray(hint_dat, dtype=bool).ravel()
+    inside = valid & hint_flat
+    outside = valid & ~hint_flat
+    n_inside = int(inside.sum())
+    n_outside = int(outside.sum())
+
+    rng = np.random.default_rng(seed)
+
+    # Uninformative hint → uniform random over valid pixels (no
+    # stratification possible).
+    if n_inside < 5 or n_outside < 5:
+        valid_idx = np.where(valid)[0]
+        n_take = min(sample_size, valid_idx.size)
+        if n_take == 0:
+            raise ValueError(
+                'stratified_sampling: no valid (non-NaN) pixels to sample.')
+        sample_indices = rng.choice(valid_idx, size=n_take, replace=False)
+        return sample_indices, flat[sample_indices]
+
+    n_in_target = int(round(sample_size * target_inside_ratio))
+    n_out_target = sample_size - n_in_target
+
+    n_in_actual = min(n_in_target, n_inside)
+    n_out_actual = min(n_out_target, n_outside)
+
+    # Reallocate any deficit so total stays at sample_size when feasible.
+    deficit = sample_size - n_in_actual - n_out_actual
+    if deficit > 0 and n_in_actual < n_inside:
+        extra = min(deficit, n_inside - n_in_actual)
+        n_in_actual += extra
+        deficit -= extra
+    if deficit > 0 and n_out_actual < n_outside:
+        extra = min(deficit, n_outside - n_out_actual)
+        n_out_actual += extra
+
+    inside_idx = np.where(inside)[0]
+    outside_idx = np.where(outside)[0]
+
+    sampled_in = (rng.choice(inside_idx, size=n_in_actual, replace=False)
+                  if n_in_actual > 0 else np.array([], dtype=np.int64))
+    sampled_out = (rng.choice(outside_idx, size=n_out_actual, replace=False)
+                   if n_out_actual > 0 else np.array([], dtype=np.int64))
+
+    sample_indices = np.concatenate([sampled_in, sampled_out])
+    rng.shuffle(sample_indices)
+    samples = flat[sample_indices]
+
+    return sample_indices, samples
+
+
 def regular_sampling(
         raster_dat = None,
         *,
