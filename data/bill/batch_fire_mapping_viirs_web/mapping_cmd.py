@@ -72,6 +72,13 @@ def _build_mapping_cmd(fire: FireInfo, params: dict,
         'contour_width': '--contour_width',
         'brush_size': '--brush_size',
         'point_threshold': '--point_threshold',
+        # A12 hint-aware brush thresholds — passed verbatim.
+        'brush_score_threshold': '--brush_score_threshold',
+        'brush_proximity_frac':  '--brush_proximity_frac',
+        # A1 / A8 / A5 numeric knobs.
+        'stratify_inside_ratio':  '--stratify_inside_ratio',
+        'spatial_weight':         '--spatial_weight',
+        'cluster_score_threshold': '--cluster_score_threshold',
     }
 
     for key, flag in flag_map.items():
@@ -88,6 +95,29 @@ def _build_mapping_cmd(fire: FireInfo, params: dict,
     if bas is not None and str(bas).strip() != '':
         if _validate_param('brush_all_segments', bas):
             cmd.append('--brush_all_segments')
+
+    # Inverted booleans: the CLI defaults the new behaviours ON, so the
+    # flags are negative (--no_stratify, --no_scale_features,
+    # --no_hint_aware_brush, --brush_keep_intermediates). YAML keys keep
+    # the positive sense so analysts read "stratify: true" not "no_stratify".
+    _inverted = {
+        'stratify':                ('--no_stratify',           True),
+        'scale_features':          ('--no_scale_features',     True),
+        'hint_aware_brush':        ('--no_hint_aware_brush',   True),
+        'brush_keep_intermediates': ('--brush_keep_intermediates', False),
+    }
+    for key, (flag, default_on) in _inverted.items():
+        v = params.get(key)
+        if v is None or str(v).strip() == '':
+            continue
+        v = _validate_param(key, v)
+        # Append the negative flag only when the user explicitly toggled
+        # off a default-on behaviour, or explicitly asked for the
+        # default-off one (debug intermediates).
+        if default_on and not v:
+            cmd.append(flag)
+        if (not default_on) and v:
+            cmd.append(flag)
 
     eb = params.get('embed_bands')
     if eb and str(eb).strip():

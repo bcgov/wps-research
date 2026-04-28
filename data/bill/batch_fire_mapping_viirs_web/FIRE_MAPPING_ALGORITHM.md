@@ -132,12 +132,17 @@ to identify *which* of those groupings is "fire".
 Output: cropped raster, hint mask, optional traditional perimeter
 raster, preview PNGs — all under `.web_cache/<FIRE>/`.
 
-### Stage 2 — Sample (`sampling.py::regular_sampling`)
+### Stage 2 — Sample (`sampling.py::stratified_sampling`)
 
 t‑SNE on a full Sentinel‑2 crop is too expensive. Instead, draw a
-**regular (stratified) grid** of ~10 000 pixels — clamped by the crop
-size and `--sample_rate`. Stratification preserves spatial coverage so
-both fire and non‑fire regions appear in the sample.
+**stratified random sample** of ~10 000 pixels — clamped by the crop
+size and `--sample_rate`. By default the sampler aims for 50% of
+samples inside the hint mask and 50% outside (`stratify_inside_ratio`,
+A1), which keeps the burn class represented even on small fires where
+the burn footprint is a tiny fraction of the crop. When one stratum
+has too few valid pixels (uninformative hint), the sampler falls back
+to uniform random across all valid (non-NaN) pixels. Pass
+`--no_stratify` to disable.
 
 For each sampled pixel we also record whether it falls inside the
 hint mask — used later for the cluster vote.
@@ -145,13 +150,33 @@ hint mask — used later for the cluster vote.
 ### Stage 3 — t‑SNE embedding (cuML GPU)
 
 ```
-  input:  N samples × B bands           (float)
+  input:  N samples × (B + 2)           (scaled spectra + (x, y))
   output: N samples × 2                 (t-SNE coords)
 ```
 
 t‑SNE places spectrally similar pixels close together in 2D. Burn
 scars, healthy vegetation, exposed soil, water, and cloud shadow tend
-to fall into separate blobs. Hyperparameters exposed on the CLI:
+to fall into separate blobs.
+
+Two preprocessing steps run before t‑SNE:
+
+* **A4 — robust per-band z-score.** Each embed band is centred on its
+  median and divided by `1.4826 · MAD` (median absolute deviation).
+  Without this, t-SNE's Euclidean distances are dominated by whichever
+  band has the largest reflectance scale (typically B12 SWIR-2 over
+  forest), drowning out separation between burn and non-burn. Stats
+  are computed over the *full image* and applied identically to
+  samples and the full-image RF inference, so train/inference scales
+  match. Disable with `--no_scale_features`.
+
+* **A8 — spatial coherence features.** Two extra features
+  `(x, y)` normalised to `[-1, 1]` and weighted by `--spatial_weight`
+  (default 0.3) are appended after the spectral bands. These nudge
+  HDBSCAN toward spatially contiguous clusters; two unrelated burns
+  in the same crop fall into different clusters even if their spectra
+  look similar. Set `--spatial_weight 0` to disable.
+
+Hyperparameters exposed on the CLI:
 `perplexity`, `learning_rate`, `max_iter`, `init`, `n_components`,
 `random_state`. Defaults live in `recommended_settings.yaml` and are
 the first thing analysts tune.
@@ -174,41 +199,55 @@ HDBSCAN groups dense regions in the 2D embedding into clusters and
 labels low‑density points as noise (`-1`). It does not need a
 predetermined cluster count.
 
-`min_cluster_size` is auto-derived from the hint:
+`min_cluster_size` is auto-derived from the hint (A6):
 
 ```
 hint_burn_proportion = (#hint pixels) / (#sampled pixels)
-min_cluster_size = max(5, min(
-        sample_size · hint_burn_proportion · controlled_ratio,
-        sample_size · (1 - hint_burn_proportion) · controlled_ratio))
+min_cluster_size = max(5, sample_size · hint_burn_proportion · controlled_ratio)
 ```
 
-`controlled_ratio` (default 0.5) is the user‑facing knob; the
-formula keeps `min_cluster_size` reasonable whether the fire fills
-most of the crop or just a small piece of it.
+The previous formula used `min(burn_count, non_burn_count) · r`,
+which was symmetric in the prior. That made `min_cluster_size` too
+large on half-burn fires (eats severity-gradient subclusters) and
+too small on tiny fires (over-fragmented background). Tracking the
+burn class directly fixes both extremes. `controlled_ratio` (default
+0.5) is the user‑facing knob.
 
-### Stage 6 — Cluster → burned/unburned vote
+HDBSCAN's `approximate_predict` is run only on **finite pixels** —
+NaN pixels never enter the cluster (A2) — and we keep the per-pixel
+**membership strength** for the vote stage.
 
-For each cluster compute, against the hint mask:
+### Stage 6 — Cluster → per-pixel burn probability
+
+Replaces the legacy `precision OR recall > 50 %` hard rule (A5).
+
+For each cluster compute, against the hint mask (over valid pixels
+only — NaN/no-data is excluded so it doesn't dilute the prior):
 
 - **Precision** = (cluster ∩ hint) / cluster
 - **Recall**    = (cluster ∩ hint) / hint
+- **F1**        = 2·P·R / (P + R)
+- **Lift**      = (P − burn_prior) / (1 − burn_prior)
+- **Score**     = max(0, F1) · max(0, Lift)
+
+Lift penalises clusters whose precision merely tracks the prior
+(e.g. a giant background cluster that grazes the hint by chance gets
+score ~0 even with high raw recall). The per-pixel burn probability
+is the cluster score weighted by HDBSCAN membership strength —
+edge-of-cluster pixels contribute proportionally less than core
+members:
 
 ```
-cluster is BURNED  iff  precision > 50 %  OR  recall > 50 %
+P(burn | x) = score(cluster(x)) · strength(x)
+burned     iff  P(burn|x)  >  cluster_score_threshold   (default 0.05)
 ```
 
-Why OR? The hint is unreliable at *both* extremes:
+NaN/no-data pixels are forced to `False` so they never enter the
+output mask.
 
-- A small intense fire may produce a hint that sits well inside the
-  true burn footprint → high precision, low recall (the cluster is
-  bigger than the hint). OR rule keeps it.
-- A sprawling fire with sparse VIIRS coverage produces a hint that
-  only samples part of the burn → some clusters cover most of the
-  hint (high recall) without covering only the hint (low precision).
-  OR rule keeps those too.
-
-Output: binary classification raster (`0` unburned, `1` burned).
+Output: binary classification raster (`0` unburned, `1` burned)
+plus a soft burn-probability map (kept on the CLI instance as
+`last_proba` for diagnostics).
 
 ### Stage 7 — Brush post‑processing (`class_brush.cpp`, called from `brush.py`)
 
@@ -224,11 +263,35 @@ disconnected blobs. The brush stage cleans up morphologically:
    pixels (default 10).
 5. Emit one binary raster per surviving component.
 
-`brush.py` then either keeps the **largest** component or takes the
-**logical OR** of all of them (`brush_all_segments`). The pre‑brush
-mask is preserved as `*_classified_raw.bin` so the analyst can
-"rebrush" with different settings without re-running t‑SNE / RF /
-HDBSCAN.
+**A12 — hint-aware selection (default).** The CLI forces
+`--all_segments` from the C++ tool so every component above threshold
+appears, then scores each component in Python:
+
+```
+precision    = (comp ∩ hint) / comp
+recall       = (comp ∩ hint) / hint
+proximity    = max(0, 1 − mean_distance_to_hint / (frac · diagonal))
+score(comp)  = max(F1, 0.5 · proximity)
+```
+
+Proximity uses a Euclidean distance transform of the hint, so a
+component that doesn't overlap the hint but sits right next to it
+still gets partial credit. Components above
+`brush_score_threshold` (default 0.05) are unioned together; if none
+clear the bar, the highest-scoring component is kept so the run never
+returns an empty mask. Pass `--no_hint_aware_brush` to fall back to
+legacy "largest" or `--brush_all_segments` "OR everything" behaviour.
+
+**B3 — `--no-intermediates`.** The C++ tool used to write four full-
+image float32 scratch files (`_flood4`, `_link`, `_recode`, `_wheel`)
+that the Python wrapper deleted right after the run. The default CLI
+now passes `--no-intermediates` so the C++ tool skips the writes
+entirely, saving 4× full-image disk I/O per brush call. Pass
+`--brush_keep_intermediates` to recover the debug viz.
+
+The pre‑brush mask is preserved as `*_classified_raw.bin` so the
+analyst can "rebrush" with different settings without re-running
+t‑SNE / RF / HDBSCAN.
 
 ### Stage 8 — Metrics and outputs
 

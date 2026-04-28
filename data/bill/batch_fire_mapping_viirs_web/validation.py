@@ -31,6 +31,21 @@ _PARAM_SPEC = {
     'brush_size':           ('int',   1, 10000),
     'point_threshold':      ('int',   1, 10_000_000),
     'brush_all_segments':   ('bool',),
+    # A12 hint-aware brush — controls per-component scoring.
+    'hint_aware_brush':       ('bool',),
+    'brush_score_threshold':  ('float', 0.0, 1.0),
+    'brush_proximity_frac':   ('float', 0.0, 1.0),
+    # B3 — keep class_brush scratch files (debug-only).
+    'brush_keep_intermediates': ('bool',),
+    # A1 — stratified sampling.
+    'stratify':                ('bool',),
+    'stratify_inside_ratio':   ('float', 0.05, 0.95),
+    # A4 — robust per-band z-scoring.
+    'scale_features':          ('bool',),
+    # A8 — spatial coherence weight.
+    'spatial_weight':          ('float', 0.0, 5.0),
+    # A5 — cluster-vote score threshold.
+    'cluster_score_threshold': ('float', 0.0, 1.0),
 }
 
 

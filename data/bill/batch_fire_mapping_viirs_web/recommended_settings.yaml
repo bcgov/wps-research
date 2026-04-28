@@ -4,6 +4,24 @@
 ## analyzer uses). First entry in `settings:` is the PRIMARY — used by
 ## plain "Map Fire" and the batch map. "Map Fire with Settings" runs
 ## all entries N * K times.
+##
+## Algorithm tuning keys (defaults applied when omitted):
+##   stratify (bool)             — A1, default true. Sample 50/50 inside/
+##                                  outside hint instead of uniform.
+##   stratify_inside_ratio       — A1, default 0.5.
+##   scale_features (bool)       — A4, default true. Robust per-band
+##                                  z-score (median, MAD) before t-SNE/RF.
+##   spatial_weight (float)      — A8, default 0.3. Adds normalized
+##                                  (x, y) features to the embedding.
+##   cluster_score_threshold     — A5, default 0.05. Per-pixel burn
+##                                  probability threshold (F1 × lift ×
+##                                  HDBSCAN strength).
+##   hint_aware_brush (bool)     — A12, default true. Score brushed
+##                                  components by hint overlap+proximity.
+##   brush_score_threshold       — A12, default 0.05.
+##   brush_proximity_frac        — A12, default 0.10 (of image diagonal).
+##   brush_keep_intermediates    — B3, default false. Keep class_brush
+##                                  scratch files (debug-only).
 
 k_runs_per_setting: 3
 k_jitter: 1
