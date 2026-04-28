@@ -63,7 +63,15 @@ def _overlay_mask_on_post(fire: 'FireInfo', raster_path: str,
     """
     try:
         post_path = os.path.join(fire.cache_dir, 'previews', 'post.png')
-        if not os.path.isfile(post_path) or not os.path.isfile(raster_path):
+        if not os.path.isfile(post_path):
+            sys.stderr.write(
+                f'[overlay] WARNING: cannot build {out_name} overlay — '
+                f'post preview missing at {post_path}\n')
+            return
+        if not os.path.isfile(raster_path):
+            sys.stderr.write(
+                f'[overlay] WARNING: cannot build {out_name} overlay — '
+                f'mask raster missing at {raster_path}\n')
             return
 
         import matplotlib
@@ -155,9 +163,10 @@ def _overlay_mask_on_post(fire: 'FireInfo', raster_path: str,
                 and not out_name.startswith('serial_')):
             fire.available_views.append(out_name)
     except Exception as exc:
+        import traceback
         sys.stderr.write(
             f'[overlay] WARNING: Failed to generate {out_name} '
-            f'overlay: {exc}\n')
+            f'overlay: {exc}\n{traceback.format_exc()}')
 
 
 def _generate_result_preview(fire: 'FireInfo'):

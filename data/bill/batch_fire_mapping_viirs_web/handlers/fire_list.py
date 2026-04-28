@@ -141,6 +141,16 @@ class FireListRoutes:
             self._send_html('Fire not found', 404)
             return
         fire = state.fires[fire_numbe]
+        # Clear the "new" badge here rather than relying on the
+        # fire-list's onclick fire-and-forget fetch — page navigation
+        # often cancels that request before it lands, leaving the badge
+        # stuck on. Rendering this page is unambiguous proof the user
+        # opened the fire.
+        if getattr(fire, 'is_new', False):
+            with state.lock:
+                fire.is_new = False
+            threading.Thread(
+                target=_save_fire_state, daemon=True).start()
         html = render_template('fire_mapping.html', {
             'fire_numbe': fire_numbe,
             'fire_numbe_json': json.dumps(fire_numbe),
