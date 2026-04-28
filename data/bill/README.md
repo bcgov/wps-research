@@ -25,8 +25,8 @@ Lightweight toolkit for fire-mapping workflows on Sentinel-2 imagery. Provides b
 ---
 
 ## Batch Fire Mapping — Web Interface
-
-[`batch_fire_mapping_web/`](https://github.com/bcgov/wps-research/tree/master/data/bill/batch_fire_mapping_web)
+* [batch_fire_mapping_viirs_web](https://github.com/bcgov/wps-research/tree/master/data/bill/batch_fire_mapping_viirs_web)
+* [`batch_fire_mapping_web/`](https://github.com/bcgov/wps-research/tree/master/data/bill/batch_fire_mapping_web)
 
 <img src="images/fire_mapping_web.png" width="60%">
 
