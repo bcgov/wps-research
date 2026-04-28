@@ -98,7 +98,7 @@ Other classifiers that could be used: Minimum Dist; Max Likelihood; Spectral Ang
 
 # License
 
-Copyright 202 Province of British Columbia
+Copyright 2026 Province of British Columbia
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use these files except in compliance with the License.

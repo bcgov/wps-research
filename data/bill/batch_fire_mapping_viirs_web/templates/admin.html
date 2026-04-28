@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Admin - Batch Fire Mapping</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header>
+    <h1>Admin Dashboard</h1>
+    <a href="/" class="back-link">Back to fire list</a>
+    <a href="/logout" class="btn btn-secondary" style="font-size:11px;padding:3px 10px">Logout</a>
+    <img src="/static/BC-Wildfire-Service-logo.png" alt="BC Wildfire Service" class="header-logo">
+</header>
+
+<div style="padding:16px 24px;display:flex;flex-direction:column;gap:20px">
+
+    <!-- Pending IPs -->
+    <div class="admin-card">
+        <h3>Pending IPs</h3>
+        <p class="admin-desc">Users waiting for approval</p>
+        <table class="admin-table">
+            <thead><tr>
+                <th>IP Address</th><th>Username</th><th>First Seen</th><th>Last Seen</th><th>Actions</th>
+            </tr></thead>
+            <tbody id="pending-body"></tbody>
+        </table>
+        <p class="empty-msg" id="pending-empty">No pending requests</p>
+    </div>
+
+    <!-- Approved IPs -->
+    <div class="admin-card">
+        <h3>Approved IPs</h3>
+        <p class="admin-desc">Users with access</p>
+        <table class="admin-table">
+            <thead><tr>
+                <th>IP Address</th><th>Username</th><th>Role</th><th>Approved By</th><th>Since</th><th>Actions</th>
+            </tr></thead>
+            <tbody id="approved-body"></tbody>
+        </table>
+        <p class="empty-msg" id="approved-empty">No approved IPs</p>
+    </div>
+
+    <!-- Blocked IPs -->
+    <div class="admin-card">
+        <h3>Blocked IPs</h3>
+        <p class="admin-desc">Denied access</p>
+        <table class="admin-table">
+            <thead><tr>
+                <th>IP Address</th><th>Username</th><th>Blocked By</th><th>Since</th><th>Actions</th>
+            </tr></thead>
+            <tbody id="blocked-body"></tbody>
+        </table>
+        <p class="empty-msg" id="blocked-empty">No blocked IPs</p>
+    </div>
+
+    <!-- GPU Queue -->
+    <div class="admin-card">
+        <h3>GPU Queue</h3>
+        <p class="admin-desc">Current and waiting mapping jobs</p>
+        <div id="queue-content">
+            <p class="empty-msg">No active jobs</p>
+        </div>
+    </div>
+
+    <!-- Cache retention -->
+    <div class="admin-card">
+        <h3>Cache retention</h3>
+        <p class="admin-desc">
+            Intermediate files under <code>&lt;out_root&gt;/&lt;year&gt;/.web_cache/</code>.
+            Canonical accepted outputs are never touched.
+        </p>
+        <div id="cache-summary" style="font-size:12px;margin-bottom:8px">Loading...</div>
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+            <label style="font-size:11px">Max size (GB):
+                <input id="cache-max-gb" type="number" step="1" min="1" max="5000" style="width:80px">
+            </label>
+            <label style="font-size:11px">Max age (days):
+                <input id="cache-max-age" type="number" step="1" min="1" max="3650" style="width:80px">
+            </label>
+            <label style="font-size:11px">Sweep every (hours):
+                <input id="cache-interval" type="number" step="1" min="1" max="168" style="width:80px">
+            </label>
+            <label style="font-size:11px;display:flex;align-items:center;gap:4px">
+                <input id="cache-enabled" type="checkbox"> Enabled
+            </label>
+            <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px" onclick="cacheSave()">Save</button>
+            <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px" onclick="cacheSweep(true)">Dry run</button>
+            <button class="btn" style="font-size:11px;padding:4px 10px;background:#ca4a1e" onclick="cacheSweep(false)">Run sweep now</button>
+        </div>
+        <div id="cache-result" style="font-size:11px;font-family:monospace;white-space:pre-wrap;max-height:200px;overflow:auto;background:#f5f5f5;padding:6px;border-radius:3px;display:none"></div>
+    </div>
+
+    <!-- Hidden Fires -->
+    <div class="admin-card">
+        <h3>Hidden Fires</h3>
+        <p class="admin-desc">Fires removed from the list — restore them here</p>
+        <table class="admin-table">
+            <thead><tr>
+                <th>Fire Number</th><th>Date</th><th>Year</th><th>Size (ha)</th><th>Status</th><th>Actions</th>
+            </tr></thead>
+            <tbody id="hidden-body"></tbody>
+        </table>
+        <p class="empty-msg" id="hidden-empty">No hidden fires</p>
+    </div>
+
+</div>
+
+<script>
+function esc(s) {
+    if (s === null || s === undefined || s === '') return '';
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+async function unhideFire(fn) {
+    await fetch(`/api/fire/${encodeURIComponent(fn)}/unhide`, {
+        method: 'POST',
+        headers: {'X-Requested-With': 'fetch'},
+    });
+    loadData();
+}
+
+async function ipAction(action, ip) {
+    await fetch(`/api/admin/ip/${action}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+        body: JSON.stringify({ip}),
+    });
+    loadData();
+}
+
+async function loadData() {
+    try {
+        const r = await fetch('/api/admin/ips');
+        const data = await r.json();
+
+        // Pending
+        const pb = document.getElementById('pending-body');
+        const pe = document.getElementById('pending-empty');
+        const pending = Object.entries(data.pending || {});
+        pb.innerHTML = '';
+        pe.style.display = pending.length ? 'none' : 'block';
+        for (const [ip, info] of pending) {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><strong>${esc(ip)}</strong></td>
+                <td>${esc(info.username)}</td>
+                <td>${esc(info.first_seen)}</td>
+                <td>${esc(info.last_seen)}</td>
+                <td>
+                    <button class="btn btn-success" style="font-size:11px;padding:2px 8px"
+                        onclick="ipAction('approve','${esc(ip)}')">Approve</button>
+                    <button class="btn btn-danger" style="font-size:11px;padding:2px 8px"
+                        onclick="ipAction('block','${esc(ip)}')">Block</button>
+                </td>`;
+            pb.appendChild(tr);
+        }
+
+        // Approved
+        const ab = document.getElementById('approved-body');
+        const ae = document.getElementById('approved-empty');
+        const approved = Object.entries(data.approved || {});
+        ab.innerHTML = '';
+        ae.style.display = approved.length ? 'none' : 'block';
+        for (const [ip, info] of approved) {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><strong>${esc(ip)}</strong></td>
+                <td>${esc(info.username)}</td>
+                <td>${esc(info.role)}</td>
+                <td>${esc(info.approved_by)}</td>
+                <td>${esc(info.timestamp)}</td>
+                <td>
+                    <button class="btn btn-danger" style="font-size:11px;padding:2px 8px"
+                        onclick="ipAction('revoke','${esc(ip)}')">Revoke</button>
+                </td>`;
+            ab.appendChild(tr);
+        }
+
+        // Blocked
+        const bb = document.getElementById('blocked-body');
+        const be = document.getElementById('blocked-empty');
+        const blocked = Object.entries(data.blocked || {});
+        bb.innerHTML = '';
+        be.style.display = blocked.length ? 'none' : 'block';
+        for (const [ip, info] of blocked) {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><strong>${esc(ip)}</strong></td>
+                <td>${esc(info.username)}</td>
+                <td>${esc(info.blocked_by)}</td>
+                <td>${esc(info.timestamp)}</td>
+                <td>
+                    <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px"
+                        onclick="ipAction('unblock','${esc(ip)}')">Unblock</button>
+                </td>`;
+            bb.appendChild(tr);
+        }
+    } catch {}
+
+    // Load hidden fires
+    try {
+        const r2 = await fetch('/api/fires/hidden');
+        const hidden = await r2.json();
+        const hb = document.getElementById('hidden-body');
+        const he = document.getElementById('hidden-empty');
+        hb.innerHTML = '';
+        he.style.display = hidden.length ? 'none' : 'block';
+        for (const f of hidden) {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><strong>${esc(f.fire_numbe)}</strong></td>
+                <td>${esc(f.fire_date)}</td>
+                <td>${f.fire_year || ''}</td>
+                <td>${f.fire_size_ha}</td>
+                <td>${esc(f.status)}</td>
+                <td>
+                    <button class="btn btn-success" style="font-size:11px;padding:2px 8px"
+                        onclick="unhideFire('${esc(f.fire_numbe)}')">Restore</button>
+                </td>`;
+            hb.appendChild(tr);
+        }
+    } catch {}
+
+    // Load queue
+    try {
+        const r = await fetch('/api/admin/queue');
+        const q = await r.json();
+        const div = document.getElementById('queue-content');
+        let html = '';
+        if (q.current) {
+            html += `<div class="queue-item running">
+                <strong>Running:</strong> ${esc(q.current.fire_numbe)}
+                <span class="queue-meta">${esc(q.current.client_ip)} &middot; started ${esc(q.current.started_at)}</span>
+            </div>`;
+        }
+        for (const w of (q.waiting || [])) {
+            html += `<div class="queue-item waiting">
+                <strong>Waiting:</strong> ${esc(w.fire_numbe)}
+                <span class="queue-meta">${esc(w.client_ip)} &middot; queued ${esc(w.queued_at)}</span>
+            </div>`;
+        }
+        if (!html) html = '<p class="empty-msg">No active jobs</p>';
+        div.innerHTML = html;
+    } catch {}
+}
+
+loadData();
+setInterval(loadData, 5000);
+
+// -----------------------------------------------------------------------
+// Cache retention panel
+// -----------------------------------------------------------------------
+function fmtBytes(b) {
+    if (!b) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let i = 0, n = Number(b);
+    while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+    return n.toFixed(i === 0 ? 0 : 1) + ' ' + units[i];
+}
+function fmtAge(tsSec) {
+    if (!tsSec) return 'never';
+    const d = new Date(tsSec * 1000);
+    return d.toLocaleString();
+}
+
+async function loadCache() {
+    try {
+        const r = await fetch('/api/cache/status');
+        if (!r.ok) return;
+        const data = await r.json();
+        const cfg = data.config || {};
+        const byYear = data.by_year || {};
+        const yearBits = Object.keys(byYear).sort()
+            .map(y => `${y}: ${fmtBytes(byYear[y])}`)
+            .join(' · ') || 'no data';
+        document.getElementById('cache-summary').innerHTML =
+            `Total: <strong>${fmtBytes(data.total_bytes)}</strong> `
+            + `across ${data.n_fires} fire(s). `
+            + `Pinned (in-flight): ${fmtBytes(data.pinned_bytes)}. `
+            + `Last sweep: ${fmtAge(data.last_sweep_ts)}. `
+            + `<br><span style="color:#666;font-size:11px">By year: ${esc(yearBits)}</span>`;
+        document.getElementById('cache-max-gb').value = cfg.max_gb ?? 20;
+        document.getElementById('cache-max-age').value = cfg.max_age_days ?? 30;
+        document.getElementById('cache-interval').value = cfg.sweep_interval_hours ?? 6;
+        document.getElementById('cache-enabled').checked = cfg.enabled !== false;
+    } catch {}
+}
+
+async function cacheSweep(dryRun) {
+    if (!dryRun && !confirm(
+            'Run cache sweep now? Unpinned fires older than the age '
+            + 'limit or over the size limit will have their '
+            + '.web_cache/<fire>/ directory deleted.\n\n'
+            + 'Canonical accepted outputs are never touched.')) return;
+    const out = document.getElementById('cache-result');
+    out.style.display = '';
+    out.textContent = dryRun ? 'Running dry run...' : 'Running sweep...';
+    try {
+        const r = await fetch('/api/cache/sweep', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+            body: JSON.stringify({dry_run: !!dryRun}),
+        });
+        const data = await r.json();
+        if (data.error) {
+            out.textContent = 'Error: ' + data.error;
+            return;
+        }
+        const lines = [
+            `status: ${data.status}`,
+            `pruned ${(data.pruned_fires || []).length} fire(s), `
+                + `${fmtBytes(data.pruned_bytes)} freed`,
+        ];
+        if (data.pruned_fires && data.pruned_fires.length) {
+            lines.push('fires: ' + data.pruned_fires.join(', '));
+        }
+        out.textContent = lines.join('\n');
+        loadCache();
+    } catch (err) {
+        out.textContent = 'Request failed: ' + err.message;
+    }
+}
+
+async function cacheSave() {
+    const body = {
+        max_gb: parseFloat(document.getElementById('cache-max-gb').value),
+        max_age_days: parseInt(document.getElementById('cache-max-age').value),
+        sweep_interval_hours: parseInt(document.getElementById('cache-interval').value),
+        enabled: document.getElementById('cache-enabled').checked,
+        dry_run: true,  // save config without evicting
+    };
+    try {
+        const r = await fetch('/api/cache/sweep', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+            body: JSON.stringify(body),
+        });
+        const data = await r.json();
+        if (data.error) {
+            alert('Save failed: ' + data.error);
+            return;
+        }
+        const out = document.getElementById('cache-result');
+        out.style.display = '';
+        out.textContent = 'Config saved.';
+        loadCache();
+    } catch (err) {
+        alert('Save failed: ' + err.message);
+    }
+}
+
+loadCache();
+setInterval(loadCache, 30000);
+</script>
+</body>
+</html>

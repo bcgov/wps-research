@@ -1,0 +1,2195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Fire {{ fire_numbe }}</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="/static/help.js" defer></script>
+</head>
+<body>
+
+<header>
+    <a id="btn-prev" class="btn btn-secondary" style="font-size:11px;padding:3px 10px;display:none" href="#">Prev</a>
+    <h1>{{ fire_numbe }}</h1>
+    <a id="btn-next" class="btn btn-secondary" style="font-size:11px;padding:3px 10px;display:none" href="#">Next</a>
+    <button class="btn btn-danger" style="font-size:11px;padding:3px 10px" onclick="removeFire()">Remove</button>
+    <a href="/" class="back-link">Back to fire list</a>
+    <a href="/logout" class="btn btn-secondary" style="font-size:11px;padding:3px 10px">Logout</a>
+</header>
+
+<div class="fire-info-bar">
+    <span>Date: <strong>{{ fire_date }}</strong></span>
+    <span>Year: <strong>{{ fire_year }}</strong></span>
+    <span>Hint Size: <strong>{{ fire_size_ha }} ha</strong></span>
+    <span>ML Size: <strong id="ml-size-text">--</strong></span>
+    <span>Status: <span id="status-badges"><strong id="status-text">{{ fire_status }}</strong></span></span>
+    <span id="agreement-info"></span>
+    <span class="help" tabindex="0" aria-label="About agreement" aria-expanded="false" data-tip="Agreement % compares the ML-classified burn footprint against the hint perimeter (VIIRS hotspot polygon). 100% = the ML result exactly matches the hint; lower values mean the ML deviated from the hint. It's a sanity check, not ground truth — a low agreement may mean the hint was loose, not that the map is wrong.">?</span>
+    <span id="crop-info"></span>
+</div>
+
+<!-- Queue banner — shown when another fire is currently mapping (your
+     click would queue behind it) or when THIS fire is mapping (shows
+     progress). Hidden when idle. -->
+<div id="queue-banner" class="queue-banner is-collapsed">
+    <span id="queue-banner-text"></span>
+</div>
+
+<!-- Stage-aware progress bar — visible only while THIS fire is
+     mapping or preparing. -->
+<div id="progress-bar" class="progress-bar is-collapsed">
+    <div class="progress-header">
+        <span id="progress-title">Mapping ...</span>
+        <span id="progress-eta" class="progress-eta"></span>
+    </div>
+    <div class="progress-track">
+        <div id="progress-fill" class="progress-fill"></div>
+    </div>
+    <div id="progress-stages" class="progress-stages"></div>
+</div>
+
+<!-- Toast container — cross-fire notifications (map complete, rebrush
+     done, etc.). Populated by pollNotifications(). -->
+<div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+<div class="main-content">
+
+    <!-- =============================================================== -->
+    <!-- LEFT: Image viewer                                              -->
+    <!-- =============================================================== -->
+    <div class="image-panel">
+        <div class="image-controls">
+            <select id="view-select" disabled onchange="onViewDropdownChange()">
+                <option value="">Loading...</option>
+            </select>
+            <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="zoomIn()">+</button>
+            <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="zoomOut()">-</button>
+            <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="zoomReset()">Fit</button>
+            <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" id="btn-split" onclick="toggleSplit()">Split</button>
+            <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;display:none" id="btn-sync" onclick="toggleSync()" title="Sync pan/zoom between panes">Sync</button>
+            <span class="info" id="zoom-info"></span>
+            <span class="info" id="image-info"></span>
+        </div>
+        <div class="image-viewer-container" id="image-viewer-container">
+            <div class="image-area pane-active" id="image-area" onclick="setActivePane('left')" data-pane="left">
+                <span class="pane-subtitle" id="subtitle-left"></span>
+                <span class="loading" id="loading-msg">Preparing fire data...</span>
+                <img id="main-img" style="display:none" alt="Fire view">
+            </div>
+            <div class="image-area" id="image-area-right" style="display:none" onclick="setActivePane('right')" data-pane="right">
+                <span class="pane-subtitle" id="subtitle-right"></span>
+                <img id="right-img" style="display:none" alt="Comparison view">
+            </div>
+        </div>
+    </div>
+
+    <!-- Toggle for control panel -->
+    <button class="panel-toggle" id="panel-toggle" onclick="toggleControlPanel()" title="Toggle panel">&#9654;</button>
+
+    <!-- =============================================================== -->
+    <!-- RIGHT: Parameters + controls + console                          -->
+    <!-- =============================================================== -->
+    <div class="control-panel" id="control-panel">
+
+        <div class="params-scroll" id="params-scroll">
+
+            <!-- Crop & Sampling -->
+            <div class="param-section">
+                <h3 onclick="this.parentElement.classList.toggle('open')">Crop &amp; Sampling</h3>
+                <div class="params-body">
+                    <div class="param-row">
+                        <label>Padding<span class="help" tabindex="0" aria-label="About padding" aria-expanded="false" data-tip="Fraction of the hint perimeter's bounding box added as a buffer around the crop. 0.2 means the crop extends 20% beyond the hint on each side. Larger padding gives the model more unburned context to contrast against — useful for small fires or when the hint is tight to the burn edge.">?</span>:</label>
+                        <input type="number" id="p-padding" value="{{ padding }}" step="0.05" min="0" max="1">
+                        <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="recrop()">Re-crop</button>
+                    </div>
+                    <div class="param-row">
+                        <label>Sample rate:</label>
+                        <input type="number" id="p-sample_rate" value="{{ sample_rate }}" step="0.01" min="0.001" max="1" oninput="updateSampleSize()">
+                    </div>
+                    <div class="param-row">
+                        <label>Min samples:</label>
+                        <input type="number" id="p-min_samples" value="{{ min_samples }}" oninput="updateSampleSize()">
+                    </div>
+                    <div class="param-row">
+                        <label>Max samples:</label>
+                        <input type="number" id="p-max_samples" value="{{ max_samples }}" oninput="updateSampleSize()">
+                    </div>
+                    <div class="param-row">
+                        <label>Sample size:</label>
+                        <span id="computed-sample-size" style="font-size:12px;color:#333;font-weight:600">—</span>
+                    </div>
+                    <div class="param-row">
+                        <label>Seed:</label>
+                        <input type="number" id="p-seed" value="123">
+                    </div>
+                </div>
+            </div>
+
+            <!-- T-SNE -->
+            <div class="param-section">
+                <h3 onclick="this.parentElement.classList.toggle('open')">T-SNE</h3>
+                <div class="params-body">
+                    <div class="param-row">
+                        <label>Perplexity:</label>
+                        <input type="number" id="p-tsne_perplexity" value="60" step="5">
+                    </div>
+                    <div class="param-row">
+                        <label>Learning rate:</label>
+                        <input type="number" id="p-tsne_learning_rate" value="200" step="50">
+                    </div>
+                    <div class="param-row">
+                        <label>Max iter:</label>
+                        <input type="number" id="p-tsne_max_iter" value="2000" step="100">
+                    </div>
+                    <div class="param-row">
+                        <label>Init:</label>
+                        <select id="p-tsne_init">
+                            <option value="pca" selected>pca</option>
+                            <option value="random">random</option>
+                        </select>
+                    </div>
+                    <div class="param-row">
+                        <label>Components:</label>
+                        <input type="number" id="p-tsne_n_components" value="2" min="2" max="3">
+                    </div>
+                    <div class="param-row">
+                        <label>Random state:</label>
+                        <input type="number" id="p-tsne_random_state" value="42">
+                    </div>
+                    <div class="param-row">
+                        <label>Embed bands:</label>
+                        <input type="text" id="p-embed_bands" placeholder="all  (e.g. 1,2,3)">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Random Forest -->
+            <div class="param-section">
+                <h3 onclick="this.parentElement.classList.toggle('open')">Random Forest</h3>
+                <div class="params-body">
+                    <div class="param-row">
+                        <label>Estimators:</label>
+                        <input type="number" id="p-rf_n_estimators" value="100">
+                    </div>
+                    <div class="param-row">
+                        <label>Max depth:</label>
+                        <input type="number" id="p-rf_max_depth" value="15">
+                    </div>
+                    <div class="param-row">
+                        <label>Max features:</label>
+                        <input type="text" id="p-rf_max_features" value="sqrt">
+                    </div>
+                    <div class="param-row">
+                        <label>Random state:</label>
+                        <input type="number" id="p-rf_random_state" value="42">
+                    </div>
+                </div>
+            </div>
+
+            <!-- HDBSCAN -->
+            <div class="param-section">
+                <h3 onclick="this.parentElement.classList.toggle('open')">HDBSCAN</h3>
+                <div class="params-body">
+                    <div class="param-row">
+                        <label>Ctrl ratio:</label>
+                        <input type="number" id="p-controlled_ratio" value="0.5" step="0.05" min="0.05" max="2">
+                    </div>
+                    <div class="param-row">
+                        <label>Min samples:</label>
+                        <input type="number" id="p-hdbscan_min_samples" value="20">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Display -->
+            <div class="param-section">
+                <h3 onclick="this.parentElement.classList.toggle('open')">Display</h3>
+                <div class="params-body">
+                    <div class="param-row">
+                        <label>Contour width:</label>
+                        <input type="number" id="p-contour_width" value="1" min="1" max="5">
+                    </div>
+                </div>
+            </div>
+
+            <!-- class_brush post-processing -->
+            <div class="param-section">
+                <h3 onclick="this.parentElement.classList.toggle('open')">Brush</h3>
+                <div class="params-body">
+                    <div class="param-row">
+                        <label>Brush size:</label>
+                        <input type="number" id="p-brush_size" value="15" min="1" max="999"
+                               title="Sliding-window width in pixels. Larger → merges more distant components.">
+                    </div>
+                    <div class="param-row">
+                        <label>Point threshold:</label>
+                        <input type="number" id="p-point_threshold" value="10" min="1"
+                               title="Minimum component pixel count. Components below are dropped.">
+                    </div>
+                    <div class="param-row">
+                        <label>All segments:</label>
+                        <input type="checkbox" id="p-brush_all_segments"
+                               title="Keep every component above threshold (OR'd together). Default: largest only.">
+                    </div>
+                    <div class="param-row" style="justify-content:flex-end;gap:6px">
+                        <button type="button" id="btn-rebrush"
+                                onclick="runRebrush()"
+                                style="font-size:11px;padding:3px 8px"
+                                title="Re-run class_brush on the active run's classification (no re-mapping).">
+                            Rebrush only
+                        </button>
+                        <button type="button" id="btn-rebrush-cancel"
+                                onclick="cancelRebrush()"
+                                style="font-size:11px;padding:3px 8px;display:none"
+                                title="Terminate the running class_brush.exe for this fire.">
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Notes -->
+            <div class="param-section open">
+                <h3 onclick="this.parentElement.classList.toggle('open')">Notes</h3>
+                <div class="params-body">
+                    <textarea id="fire-notes" rows="2"
+                        style="width:100%;font-size:12px;padding:4px 6px;border:1px solid #ccc;border-radius:3px;resize:vertical"
+                        placeholder="Add notes about this fire..."
+                        onchange="saveNotes()"></textarea>
+                </div>
+            </div>
+
+            <!-- Action buttons. K replicates per setting is a global
+                 (from recommended_settings.yaml). -->
+            <div class="action-buttons" style="align-items:center">
+                <button class="btn" id="btn-map" disabled onclick="startMapping()">
+                    Map Fire
+                </button>
+                <button class="btn" id="btn-map-settings" disabled onclick="mapWithSettings()"
+                    style="background:#555;font-size:12px;line-height:1.2">
+                    Map Fire<br><small>with settings</small>
+                </button>
+                <button class="btn btn-danger" id="btn-cancel-map" onclick="cancelMapping()"
+                    style="display:none;flex:1;font-size:13px">
+                    Cancel mapping
+                </button>
+                <span class="help" tabindex="0" aria-label="About mapping modes" aria-expanded="false" data-tip="Map Fire: runs once using the current parameter values in the panel — fast, single result. Map Fire with settings: sweeps N recommended parameter sets × K replicates per set, producing N×K maps. Replicates jitter HDBSCAN's min_samples so you can see which runs agree. Use the sweep when you want robustness; use single-run when you're tweaking parameters. Cancel aborts the sweep and restores the fire to its pre-sweep status (the current subprocess finishes, but no more runs start).">?</span>
+            </div>
+
+            <!-- Serial results gallery -->
+            <div id="serial-gallery" style="display:none">
+                <div style="padding:8px 16px;border-top:1px solid #eee">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px">
+                        <h4 id="serial-gallery-title" style="font-size:12px;color:#6b6b73;text-transform:uppercase;margin:0">Results</h4>
+                        <label style="font-size:11px;color:#555;display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap"
+                               title="When enabled, clicking a result copies its parameters into the control panel above.">
+                            <input type="checkbox" id="sync-params-on-click" checked
+                                   onchange="onSyncParamsToggle()">
+                            Sync params on click
+                        </label>
+                    </div>
+                    <div id="serial-gallery-items" style="display:flex;flex-direction:column;gap:6px"></div>
+                </div>
+            </div>
+
+        </div><!-- /params-scroll -->
+
+        <!-- Drag handle to resize console vs parameters -->
+        <div class="resize-handle" id="resize-handle"></div>
+
+        <!-- Console (collapsed by default; click ▲ to expand) -->
+        <div class="console-section" id="console-section"
+             style="height:auto;min-height:0">
+            <div class="console-header">
+                <h4>Console</h4>
+                <div style="display:flex;gap:6px">
+                    <button onclick="document.getElementById('console-output').innerHTML=''">clear</button>
+                    <button id="console-toggle" onclick="toggleConsole()">&#9650;</button>
+                </div>
+            </div>
+            <div id="console-output" style="display:none"></div>
+        </div>
+
+    </div><!-- /control-panel -->
+</div><!-- /main-content -->
+
+<script>
+// -----------------------------------------------------------------------
+// Constants
+// -----------------------------------------------------------------------
+const FIRE = {{{ fire_numbe_json }}};
+let cropW = 0, cropH = 0;
+let isMapping = false;
+let hasComparison = false;
+let sseActive = false;
+let serverLineCount = 0;
+let lastSerialCount = 0;
+let previouslyAccepted = false;
+let lastPreparedPadding = null;  // tracks what padding was last prepared
+
+// Active pane tracking
+let activePane = 'left';  // 'left' or 'right'
+let leftView = '';   // current view key for left pane
+let rightView = '';  // current view key for right pane
+let selectedRun = null;  // currently selected serial run (null or run_id)
+const RUN_VIEWS = new Set(['result', 'comparison', 'brush_comparison']);
+
+const VIEW_LABELS = {
+    pre: 'Pre-fire', post: 'Post-fire',
+    diff1: 'Diff 1', diff2: 'Diff 2', diff3: 'Diff 3',
+    result: 'ML classification', hint: 'Hint perimeter',
+    comparison: 'Comparison (figure)', brush_comparison: 'Brush comparison',
+};
+
+// -----------------------------------------------------------------------
+// Console logging
+// -----------------------------------------------------------------------
+function log(msg, cls) {
+    const out = document.getElementById('console-output');
+    const div = document.createElement('div');
+    div.className = 'line' + (cls ? ' line-' + cls : '');
+    div.textContent = msg;
+    out.appendChild(div);
+    out.scrollTop = out.scrollHeight;
+}
+
+// -----------------------------------------------------------------------
+// Sample size computation
+// -----------------------------------------------------------------------
+function updateSampleSize() {
+    if (!cropW || !cropH) return;
+    const rate = parseFloat(document.getElementById('p-sample_rate').value) || 0.05;
+    const mn = parseInt(document.getElementById('p-min_samples').value) || 500;
+    const mx = parseInt(document.getElementById('p-max_samples').value) || 30000;
+    let s = Math.round(cropW * cropH * rate);
+    s = Math.max(mn, Math.min(mx, s));
+    document.getElementById('computed-sample-size').textContent = s.toLocaleString();
+}
+
+// -----------------------------------------------------------------------
+// Prepare fire on page load
+// -----------------------------------------------------------------------
+async function prepareFire(padding) {
+    const loadMsg = document.getElementById('loading-msg');
+    const img = document.getElementById('main-img');
+    loadMsg.style.display = 'block';
+    loadMsg.textContent = 'Preparing fire data...';
+    img.style.display = 'none';
+
+    const body = padding != null ? JSON.stringify({padding}) : '{}';
+
+    try {
+        const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/prepare`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+            body: body,
+        });
+        const data = await r.json();
+
+        if (data.status === 'error') {
+            loadMsg.textContent = 'Error: ' + (data.error || 'unknown');
+            log('Prepare error: ' + (data.error || 'unknown'), 'error');
+            return;
+        }
+
+        cropW = data.crop_w || 0;
+        cropH = data.crop_h || 0;
+
+        // Populate view dropdown with preview images
+        const sel = document.getElementById('view-select');
+        sel.innerHTML = '';
+        for (const v of (data.views || [])) {
+            const opt = document.createElement('option');
+            opt.value = v;
+            opt.textContent = VIEW_LABELS[v] || v;
+            sel.appendChild(opt);
+        }
+
+        // Add comparison views if results exist
+        if (data.has_comparison) {
+            const opt = document.createElement('option');
+            opt.value = 'comparison';
+            opt.textContent = 'Comparison (figure)';
+            sel.appendChild(opt);
+            hasComparison = true;
+        }
+        if (data.has_brush_comparison) {
+            const opt = document.createElement('option');
+            opt.value = 'brush_comparison';
+            opt.textContent = 'Brush comparison';
+            sel.appendChild(opt);
+        }
+
+        sel.disabled = false;
+
+        // Default views: left=post, right=result overlay (or comparison)
+        if (data.views && data.views.includes('post')) {
+            leftView = 'post';
+        }
+        if (data.views && data.views.includes('result')) {
+            rightView = 'result';
+        } else if (data.has_comparison) {
+            rightView = 'comparison';
+        } else if (data.views && data.views.includes('pre')) {
+            rightView = 'pre';
+        }
+
+        // Set dropdown to show active pane's view
+        sel.value = (activePane === 'left') ? leftView : rightView;
+
+        // Show serial gallery for mapped fires (accept via per-run buttons)
+
+        // Status text with dual badge for previously_accepted
+        previouslyAccepted = !!data.previously_accepted;
+        updateStatusDisplay(data.status, previouslyAccepted);
+
+        // ML size
+        updateMlSize(data.ml_area_ha);
+
+        document.getElementById('crop-info').innerHTML =
+            `Crop: <strong>${cropW}&times;${cropH} px</strong> &middot; ` +
+            `Hint: <strong>${data.perimeter_type || '?'}</strong> &middot; ` +
+            `Accum: <strong>${data.acc_start || '?'} &rarr; ${data.acc_end || '?'}</strong>`;
+
+        updateSampleSize();
+        loadPaneImage('left', leftView);
+        updateSubtitle('left', leftView);
+
+        // Auto-open split if ML classification is available
+        if (!splitActive && rightView === 'result') {
+            toggleSplit();
+        } else if (splitActive) {
+            loadPaneImage('right', rightView);
+            updateSubtitle('right', rightView);
+        }
+
+        // Track which padding was actually prepared
+        lastPreparedPadding = (padding != null)
+            ? parseFloat(padding)
+            : parseFloat('{{ padding }}');
+
+        enableMapButtons();
+        log('Fire prepared. Ready to map.', 'success');
+
+        // Restore console and params if fire is mapping or was mapped
+        restoreFireState();
+
+    } catch (err) {
+        loadMsg.textContent = 'Error: ' + err.message;
+        log('Prepare failed: ' + err.message, 'error');
+    }
+}
+
+// -----------------------------------------------------------------------
+// Re-crop with new padding
+// -----------------------------------------------------------------------
+async function recrop() {
+    const pad = parseFloat(document.getElementById('p-padding').value);
+    if (isNaN(pad)) return;
+    log(`Re-cropping with padding=${pad}...`);
+    document.getElementById('btn-map').disabled = true;
+    hasComparison = false;
+    const sel = document.getElementById('view-select');
+    const compOpt = sel.querySelector('option[value="comparison"]');
+    if (compOpt) compOpt.remove();
+    const brushOpt = sel.querySelector('option[value="brush_comparison"]');
+    if (brushOpt) brushOpt.remove();
+    await prepareFire(pad);
+}
+
+// -----------------------------------------------------------------------
+// Zoom & Pan state — per-pane
+// -----------------------------------------------------------------------
+const paneState = {
+    left:  { scale: 1, panX: 0, panY: 0 },
+    right: { scale: 1, panX: 0, panY: 0 },
+};
+let syncPanes = true;
+let isDragging = false;
+let dragPane = null;
+let dragStartX = 0, dragStartY = 0;
+let dragStartPanX = 0, dragStartPanY = 0;
+
+function getPaneElements(pane) {
+    if (pane === 'right') {
+        return { area: document.getElementById('image-area-right'),
+                 img: document.getElementById('right-img') };
+    }
+    return { area: document.getElementById('image-area'),
+             img: document.getElementById('main-img') };
+}
+
+function updateTransformForPane(pane) {
+    const s = paneState[pane];
+    const { img } = getPaneElements(pane);
+    img.style.transform = `translate(${s.panX}px, ${s.panY}px) scale(${s.scale})`;
+    if (pane === activePane) {
+        document.getElementById('zoom-info').textContent = `${Math.round(s.scale * 100)}%`;
+    }
+    if (syncPanes && splitActive) {
+        const other = pane === 'left' ? 'right' : 'left';
+        const os = paneState[other];
+        os.scale = s.scale; os.panX = s.panX; os.panY = s.panY;
+        const { img: oImg } = getPaneElements(other);
+        oImg.style.transform = `translate(${os.panX}px, ${os.panY}px) scale(${os.scale})`;
+    }
+}
+
+function zoomFitPane(pane) {
+    const { area, img } = getPaneElements(pane);
+    if (!img.naturalWidth || !img.naturalHeight) return;
+    const s = paneState[pane];
+    s.scale = Math.min(area.clientWidth / img.naturalWidth, area.clientHeight / img.naturalHeight);
+    s.panX = (area.clientWidth - img.naturalWidth * s.scale) / 2;
+    s.panY = (area.clientHeight - img.naturalHeight * s.scale) / 2;
+    updateTransformForPane(pane);
+}
+
+function zoomFit() { zoomFitPane('left'); }
+function zoomReset() { zoomFitPane(activePane); }
+
+function zoomIn() {
+    const { area } = getPaneElements(activePane);
+    applyZoomToPane(activePane, area.clientWidth / 2, area.clientHeight / 2, 1.3);
+}
+
+function zoomOut() {
+    const { area } = getPaneElements(activePane);
+    applyZoomToPane(activePane, area.clientWidth / 2, area.clientHeight / 2, 1 / 1.3);
+}
+
+function applyZoomToPane(pane, cx, cy, factor) {
+    const s = paneState[pane];
+    const newScale = Math.max(0.1, Math.min(200, s.scale * factor));
+    const ratio = newScale / s.scale;
+    s.panX = cx - ratio * (cx - s.panX);
+    s.panY = cy - ratio * (cy - s.panY);
+    s.scale = newScale;
+    updateTransformForPane(pane);
+}
+
+const _paneInitialized = {};
+function initPaneInteraction(pane) {
+    if (_paneInitialized[pane]) return;
+    _paneInitialized[pane] = true;
+    const { area } = getPaneElements(pane);
+
+    area.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const rect = area.getBoundingClientRect();
+        applyZoomToPane(pane, e.clientX - rect.left, e.clientY - rect.top,
+                        e.deltaY < 0 ? 1.15 : 1 / 1.15);
+    }, {passive: false});
+
+    area.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        setActivePane(pane);
+        isDragging = true;
+        dragPane = pane;
+        dragStartX = e.clientX;
+        dragStartY = e.clientY;
+        dragStartPanX = paneState[pane].panX;
+        dragStartPanY = paneState[pane].panY;
+        area.classList.add('dragging');
+        e.preventDefault();
+    });
+}
+
+// Initialize left pane
+initPaneInteraction('left');
+
+document.addEventListener('mousemove', (e) => {
+    if (!isDragging || !dragPane) return;
+    const s = paneState[dragPane];
+    s.panX = dragStartPanX + (e.clientX - dragStartX);
+    s.panY = dragStartPanY + (e.clientY - dragStartY);
+    updateTransformForPane(dragPane);
+});
+
+document.addEventListener('mouseup', () => {
+    if (!isDragging) return;
+    if (dragPane) {
+        getPaneElements(dragPane).area.classList.remove('dragging');
+    }
+    isDragging = false;
+    dragPane = null;
+});
+
+// -----------------------------------------------------------------------
+// Active pane management
+// -----------------------------------------------------------------------
+function setActivePane(pane) {
+    if (activePane === pane) return;
+    activePane = pane;
+    document.getElementById('image-area').classList.toggle('pane-active', pane === 'left');
+    document.getElementById('image-area-right').classList.toggle('pane-active', pane === 'right');
+    // Update dropdown to show active pane's current view
+    const sel = document.getElementById('view-select');
+    const curView = (pane === 'left') ? leftView : rightView;
+    if (curView && sel.querySelector(`option[value="${curView}"]`)) {
+        sel.value = curView;
+    }
+    // Update zoom info
+    document.getElementById('zoom-info').textContent =
+        `${Math.round(paneState[pane].scale * 100)}%`;
+}
+
+function toggleSync() {
+    syncPanes = !syncPanes;
+    const btn = document.getElementById('btn-sync');
+    btn.style.background = syncPanes ? '#0066cc' : '';
+    btn.style.color = syncPanes ? '#fff' : '';
+    if (syncPanes) {
+        // Sync right pane to left
+        const ls = paneState.left;
+        const rs = paneState.right;
+        rs.scale = ls.scale; rs.panX = ls.panX; rs.panY = ls.panY;
+        updateTransformForPane('right');
+    }
+}
+
+// -----------------------------------------------------------------------
+// View label helper
+// -----------------------------------------------------------------------
+function getViewLabel(viewKey) {
+    if (!viewKey) return '';
+    return VIEW_LABELS[viewKey] || viewKey;
+}
+
+// -----------------------------------------------------------------------
+// Subtitle on each pane
+// -----------------------------------------------------------------------
+function updateSubtitle(pane, viewKey) {
+    const elId = pane === 'left' ? 'subtitle-left' : 'subtitle-right';
+    const el = document.getElementById(elId);
+    el.textContent = getViewLabel(viewKey);
+}
+
+// -----------------------------------------------------------------------
+// Load image into a specific pane
+// -----------------------------------------------------------------------
+let firstLoad = true;
+
+function loadPaneImage(pane, viewKey) {
+    if (!viewKey) return;
+    const { img } = getPaneElements(pane);
+    const loadMsg = document.getElementById('loading-msg');
+
+    let url;
+    const runActive = selectedRun !== null && RUN_VIEWS.has(viewKey);
+
+    if (runActive && viewKey === 'result') {
+        url = `/api/fire/${encodeURIComponent(FIRE)}/serial/${selectedRun}/image?t=${Date.now()}`;
+    } else if (runActive && viewKey === 'comparison') {
+        url = `/api/fire/${encodeURIComponent(FIRE)}/serial/${selectedRun}/image?type=comparison&t=${Date.now()}`;
+    } else if (runActive && viewKey === 'brush_comparison') {
+        url = `/api/fire/${encodeURIComponent(FIRE)}/serial/${selectedRun}/image?type=brush&t=${Date.now()}`;
+    } else if (viewKey === 'comparison') {
+        url = `/api/fire/${encodeURIComponent(FIRE)}/comparison?t=${Date.now()}`;
+    } else if (viewKey === 'brush_comparison') {
+        url = `/api/fire/${encodeURIComponent(FIRE)}/brush_comparison?t=${Date.now()}`;
+    } else {
+        url = `/api/fire/${encodeURIComponent(FIRE)}/preview/${viewKey}?t=${Date.now()}`;
+    }
+    let retried = false;
+    img.src = url;
+
+    img.onload = () => {
+        if (pane === 'left') loadMsg.style.display = 'none';
+        img.style.display = 'block';
+        if (firstLoad) { zoomFitPane(pane); firstLoad = false; }
+        else { updateTransformForPane(pane); }
+    };
+    img.onerror = () => {
+        // Transient 404 on run switch — the serial overlay PNG may be
+        // mid-generation. Retry once before giving up.
+        if (!retried) {
+            retried = true;
+            setTimeout(() => { img.src = url + '&_retry=' + Date.now(); }, 500);
+            return;
+        }
+        if (pane === 'left') {
+            loadMsg.style.display = 'block';
+            loadMsg.textContent = `View "${getViewLabel(viewKey)}" not available`;
+        }
+        img.style.display = 'none';
+    };
+
+    // Update tracking
+    if (pane === 'left') leftView = viewKey;
+    else rightView = viewKey;
+    updateSubtitle(pane, viewKey);
+}
+
+// -----------------------------------------------------------------------
+// Dropdown change handler (controls active pane)
+// -----------------------------------------------------------------------
+function onViewDropdownChange() {
+    const viewKey = document.getElementById('view-select').value;
+    if (!viewKey) return;
+    loadPaneImage(activePane, viewKey);
+}
+
+// Status display with dual badges
+function updateStatusDisplay(status, prevAccepted) {
+    const container = document.getElementById('status-badges');
+    let html = '';
+    // Suppress the muted "previously accepted" badge when the live
+    // status is itself 'accepted' — otherwise the user sees two
+    // identical "accepted" pills side by side after re-running an
+    // already-accepted fire.
+    if (prevAccepted && status !== 'accepted') {
+        html += '<span class="status-badge status-accepted status-badge-muted">accepted</span> ';
+    }
+    html += `<span class="status-badge status-${status}">${status}</span>`;
+    container.innerHTML = html;
+}
+
+// Agreement display. When a fire has been re-mapped after acceptance,
+// also show the previously-accepted agreement so the operator can tell
+// whether the new run regressed against what was blessed before.
+function renderAgreement(agreementPct, prevAccAgreement) {
+    const el = document.getElementById('agreement-info');
+    if (!el) return;
+    if (!(agreementPct >= 0)) {
+        el.innerHTML = '';
+        return;
+    }
+    let html = `Agreement: <strong>${agreementPct}%</strong>`;
+    if (prevAccAgreement != null && prevAccAgreement >= 0) {
+        html += ` <span class="agreement-prev" title="Previously accepted result">· was ${prevAccAgreement}% (accepted)</span>`;
+    }
+    el.innerHTML = html;
+}
+
+// ML size display
+function updateMlSize(mlAreaHa) {
+    const el = document.getElementById('ml-size-text');
+    if (mlAreaHa >= 0) {
+        el.textContent = mlAreaHa.toLocaleString() + ' ha';
+    } else {
+        el.textContent = '--';
+    }
+}
+
+// -----------------------------------------------------------------------
+// Collect params from the form
+// -----------------------------------------------------------------------
+function getParams() {
+    const v = id => {
+        const el = document.getElementById(id);
+        if (!el) return null;
+        const val = el.value.trim();
+        return val === '' ? null : val;
+    };
+    return {
+        padding:              parseFloat(v('p-padding')) || 0.1,
+        sample_rate:          parseFloat(v('p-sample_rate')) || 0.05,
+        min_samples:          parseInt(v('p-min_samples')) || 500,
+        max_samples:          parseInt(v('p-max_samples')) || 30000,
+        seed:                 parseInt(v('p-seed')) || 123,
+        tsne_perplexity:      parseFloat(v('p-tsne_perplexity')) || 60,
+        tsne_learning_rate:   parseFloat(v('p-tsne_learning_rate')) || 200,
+        tsne_max_iter:        parseInt(v('p-tsne_max_iter')) || 2000,
+        tsne_init:            v('p-tsne_init') || 'pca',
+        tsne_n_components:    parseInt(v('p-tsne_n_components')) || 2,
+        tsne_random_state:    parseInt(v('p-tsne_random_state')) || 42,
+        embed_bands:          v('p-embed_bands'),
+        rf_n_estimators:      parseInt(v('p-rf_n_estimators')) || 100,
+        rf_max_depth:         parseInt(v('p-rf_max_depth')) || 15,
+        rf_max_features:      v('p-rf_max_features') || 'sqrt',
+        rf_random_state:      parseInt(v('p-rf_random_state')) || 42,
+        controlled_ratio:     parseFloat(v('p-controlled_ratio')) || 0.5,
+        hdbscan_min_samples:  parseInt(v('p-hdbscan_min_samples')) || 20,
+        contour_width:        parseInt(v('p-contour_width')) || 1,
+        brush_size:           parseInt(v('p-brush_size')) || 15,
+        point_threshold:      parseInt(v('p-point_threshold')) || 10,
+        brush_all_segments:   !!document.getElementById('p-brush_all_segments')?.checked,
+    };
+}
+
+// -----------------------------------------------------------------------
+// Shared helpers for enabling/disabling mapping buttons
+// -----------------------------------------------------------------------
+function disableMapButtons() {
+    // While mapping is running, hide the Map buttons entirely and show
+    // Cancel in their place — the Map buttons are unclickable anyway,
+    // so keeping them around as disabled shapes just adds visual noise.
+    document.getElementById('btn-map').style.display = 'none';
+    document.getElementById('btn-map-settings').style.display = 'none';
+    const cancel = document.getElementById('btn-cancel-map');
+    if (cancel) {
+        cancel.style.display = '';
+        cancel.disabled = false;
+        cancel.textContent = 'Cancel mapping';
+    }
+}
+
+function enableMapButtons() {
+    document.getElementById('btn-map').style.display = '';
+    document.getElementById('btn-map').disabled = false;
+    document.getElementById('btn-map-settings').style.display = '';
+    document.getElementById('btn-map-settings').disabled = false;
+    const cancel = document.getElementById('btn-cancel-map');
+    if (cancel) {
+        cancel.style.display = 'none';
+        cancel.disabled = false;
+        cancel.textContent = 'Cancel mapping';
+    }
+}
+
+async function cancelMapping() {
+    if (!isMapping) return;
+    const reason = prompt(
+        'Cancel the current mapping? The run in progress will finish, '
+        + 'but no further runs will start.\n\n'
+        + 'Optional: describe why (for the audit log). Leave blank to skip.',
+        '');
+    if (reason === null) return;  // user clicked Cancel on the prompt
+    const btn = document.getElementById('btn-cancel-map');
+    btn.disabled = true;
+    btn.textContent = 'Cancelling…';
+    try {
+        // /abort is a unified endpoint — works for mapping AND rebrush,
+        // writes the reason to the audit log, and returns a structured
+        // summary so we know what was actually signalled.
+        const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/abort`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+            body: JSON.stringify({reason}),
+        });
+        const data = await r.json();
+        if (data.error) {
+            log('Cancel failed: ' + data.error, 'error');
+            btn.disabled = false;
+            btn.textContent = 'Cancel';
+            return;
+        }
+        if (data.status === 'idle') {
+            log('Nothing running — ignored.', 'dim');
+            btn.disabled = false;
+            btn.textContent = 'Cancel';
+            return;
+        }
+        log('Cancel requested. Worker will stop after the current run finishes.', 'dim');
+    } catch (err) {
+        log('Cancel failed: ' + err.message, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Cancel';
+    }
+}
+
+// -----------------------------------------------------------------------
+// Serial run — N settings × K HDBSCAN replicates.
+// Body: {mode: 'primary'|'all', settings?: [...]}
+// -----------------------------------------------------------------------
+async function startSerialRun(body) {
+    if (isMapping) return;
+    isMapping = true;
+    serverLineCount = 0;
+    lastSerialCount = 0;
+    selectedRun = null;
+
+    if (lastKnownStatus === 'accepted') previouslyAccepted = true;
+    disableMapButtons();
+    updateStatusDisplay('mapping', previouslyAccepted);
+
+    try {
+        const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/serial_map`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+            body: JSON.stringify(body || {}),
+        });
+        const data = await r.json();
+        if (data.error) {
+            log('ERROR: ' + data.error, 'error');
+            isMapping = false;
+            enableMapButtons();
+            return;
+        }
+        log(`Queued ${data.n_settings} setting(s) × ${data.k_runs} run(s) = ${data.total}. Watching for results...`);
+        serverLineCount = 0;
+    } catch (err) {
+        log('Failed to start runs: ' + err.message, 'error');
+        isMapping = false;
+        enableMapButtons();
+    }
+}
+
+// -----------------------------------------------------------------------
+// Rebrush — re-run class_brush only, without re-mapping.
+// Reads the three brush fields and POSTs to /api/fire/:fire/rebrush.
+// If a serial run is selected, rebrushes that run; otherwise rebrushes
+// the main classification.
+//
+// rebrushInFlight: true whenever the UI shows the Rebrushing state.
+// rebrushAdopted:  true when that state is tracking a server-side
+//                  rebrush owned by a different tab or a prior page
+//                  load (we didn't POST it from here). Polling drives
+//                  the UI transition back to idle in that case; the
+//                  POST finally-block must not clobber it.
+// -----------------------------------------------------------------------
+let rebrushInFlight = false;
+let rebrushAdopted = false;
+
+function setRebrushButtons(running) {
+    const btn = document.getElementById('btn-rebrush');
+    const cancel = document.getElementById('btn-rebrush-cancel');
+    if (btn) {
+        btn.disabled = running;
+        btn.textContent = running ? 'Rebrushing ...' : 'Rebrush only';
+    }
+    if (cancel) {
+        cancel.style.display = running ? '' : 'none';
+        cancel.disabled = false;
+        cancel.textContent = 'Cancel';
+    }
+}
+
+async function cancelRebrush() {
+    if (!rebrushInFlight) return;
+    const cancel = document.getElementById('btn-rebrush-cancel');
+    if (cancel) { cancel.disabled = true; cancel.textContent = 'Cancelling ...'; }
+    try {
+        await fetch(
+            `/api/fire/${encodeURIComponent(FIRE)}/rebrush/cancel`,
+            { method: 'POST' });
+    } catch (err) {
+        log('Cancel request failed: ' + err.message, 'error');
+    }
+}
+
+async function runRebrush() {
+    if (isMapping) {
+        log('Cannot rebrush while mapping is running', 'error');
+        return;
+    }
+    if (rebrushInFlight) return;
+    const bs = parseInt(document.getElementById('p-brush_size').value) || 15;
+    const pt = parseInt(document.getElementById('p-point_threshold').value) || 10;
+    const bas = !!document.getElementById('p-brush_all_segments').checked;
+    const payload = {
+        brush_size: bs,
+        point_threshold: pt,
+        brush_all_segments: bas,
+    };
+    if (selectedRun !== null) payload.run_id = selectedRun;
+
+    rebrushInFlight = true;
+    rebrushAdopted = false;
+    setRebrushButtons(true);
+    log(`Rebrushing (size=${bs}, threshold=${pt}, `
+        + `all_segments=${bas}${selectedRun !== null ? ', run=' + selectedRun : ''}) ...`,
+        'dim');
+
+    try {
+        const r = await fetch(
+            `/api/fire/${encodeURIComponent(FIRE)}/rebrush`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+        const data = await r.json();
+        if (r.status === 409) {
+            // Another tab or a prior page load already started a
+            // rebrush for this fire. Hand control to polling — it
+            // will clear the Rebrushing UI when the server finishes.
+            log(data.error || 'A rebrush is already running for this fire.', 'dim');
+            rebrushAdopted = true;
+            return;
+        }
+        if (!r.ok || data.error) {
+            log('Rebrush error: ' + (data.error || r.statusText), 'error');
+            return;
+        }
+        if (data.status === 'cancelled') {
+            log('Rebrush cancelled.', 'dim');
+            return;
+        }
+        log(`Rebrush done — raw=${data.raw_px}px, `
+            + `brushed=${data.brushed_px}px`, 'dim');
+
+        // Make sure the view dropdown offers Brush comparison, then
+        // switch the left pane to it. There is only one `view-select`
+        // dropdown in this template — it binds to the active pane.
+        const sel = document.getElementById('view-select');
+        if (sel && !sel.querySelector('option[value="brush_comparison"]')) {
+            const opt = document.createElement('option');
+            opt.value = 'brush_comparison';
+            opt.textContent = VIEW_LABELS.brush_comparison || 'Brush comparison';
+            sel.appendChild(opt);
+        }
+        loadPaneImage('left', 'brush_comparison');
+        if (sel && activePane === 'left') sel.value = 'brush_comparison';
+
+        // Reload the right pane (if split is active) so the
+        // ML-classification overlay — 'result' for the main map,
+        // serial_{rid} for a serial run — reflects the new mask.
+        if (splitActive && rightView) {
+            loadPaneImage('right', rightView);
+        }
+    } catch (err) {
+        log('Rebrush failed: ' + err.message, 'error');
+    } finally {
+        // If we handed the state over to polling (409 from a stale
+        // rebrush), polling will drive the transition back to idle.
+        if (!rebrushAdopted) {
+            rebrushInFlight = false;
+            setRebrushButtons(false);
+        }
+    }
+}
+
+// -----------------------------------------------------------------------
+// Start mapping — one-click: use the current panel values (tooltip says
+// "runs once using the current parameter values in the panel"). We send
+// the panel fields as a custom single-element settings list, otherwise
+// the backend would fall back to recommended[0] and ignore the panel.
+// -----------------------------------------------------------------------
+async function startMapping() {
+    if (isMapping) return;
+    return startSerialRun({
+        mode: 'primary',
+        settings: [{label: 'Current panel', params: getParams()}],
+    });
+}
+
+// -----------------------------------------------------------------------
+// Map Fire with recommended settings — all N settings × K replicates.
+// -----------------------------------------------------------------------
+async function mapWithSettings() {
+    if (isMapping) return;
+    return startSerialRun({mode: 'all'});
+}
+
+// -----------------------------------------------------------------------
+// Unified state poller — replaces refreshStatus, pollSerialResults,
+// pollMappingStatus with a single loop that handles all live updates.
+// -----------------------------------------------------------------------
+let lastKnownStatus = '{{ fire_status }}';
+
+async function pollFireState() {
+    if (sseActive) {
+        setTimeout(pollFireState, 2000);
+        return;
+    }
+
+    try {
+        const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/console`);
+        const data = await r.json();
+
+        // 1. Append new console lines incrementally
+        if (data.lines && data.lines.length > serverLineCount) {
+            for (let i = serverLineCount; i < data.lines.length; i++) {
+                log(data.lines[i]);
+            }
+            serverLineCount = data.lines.length;
+        }
+
+        // 2. Update agreement + ML size
+        renderAgreement(
+            data.agreement_pct,
+            data.previously_accepted_agreement_pct);
+        updateMlSize(data.ml_area_ha);
+
+        // 3. Add new views to dropdown as they become available
+        const sel = document.getElementById('view-select');
+        for (const v of (data.available_views || [])) {
+            if (!sel.querySelector(`option[value="${v}"]`)) {
+                const opt = document.createElement('option');
+                opt.value = v;
+                opt.textContent = VIEW_LABELS[v] || v;
+                sel.appendChild(opt);
+            }
+        }
+        if (data.has_comparison && !sel.querySelector('option[value="comparison"]')) {
+            const opt = document.createElement('option');
+            opt.value = 'comparison';
+            opt.textContent = 'Comparison (figure)';
+            sel.appendChild(opt);
+        }
+        if (data.has_brush_comparison && !sel.querySelector('option[value="brush_comparison"]')) {
+            const opt = document.createElement('option');
+            opt.value = 'brush_comparison';
+            opt.textContent = 'Brush comparison';
+            sel.appendChild(opt);
+        }
+        if (data.has_comparison) hasComparison = true;
+
+        // 3b. Mirror server-side rebrush state into the UI. Handles
+        // the case where a rebrush was started from this tab but the
+        // page was refreshed before the POST returned, or started
+        // from another tab entirely.
+        if (data.rebrush_running && !rebrushInFlight) {
+            rebrushInFlight = true;
+            rebrushAdopted = true;
+            setRebrushButtons(true);
+            log('Rebrush in progress on server — watching for completion ...',
+                'dim');
+        } else if (!data.rebrush_running && rebrushInFlight && rebrushAdopted) {
+            rebrushInFlight = false;
+            rebrushAdopted = false;
+            setRebrushButtons(false);
+            log('Rebrush finished on server. Refreshing views ...', 'dim');
+            // brush_comparison may now exist; make sure dropdown has it.
+            const sel2 = document.getElementById('view-select');
+            if (sel2 && !sel2.querySelector('option[value="brush_comparison"]')) {
+                const opt = document.createElement('option');
+                opt.value = 'brush_comparison';
+                opt.textContent = VIEW_LABELS.brush_comparison || 'Brush comparison';
+                sel2.appendChild(opt);
+            }
+            if (leftView) loadPaneImage('left', leftView);
+            if (splitActive && rightView) loadPaneImage('right', rightView);
+        }
+
+        // 4. Update serial results gallery as they arrive.
+        // Always call showSerialGallery when the list is non-empty;
+        // its internal signature check (agreement_pct, ml_area_ha, …)
+        // handles no-op ticks. A length-only guard here would skip
+        // re-renders after a per-run rebrush, which keeps the same
+        // number of runs but changes their stats.
+        const serialResults = data.serial_results || [];
+        if (serialResults.length > 0) {
+            showSerialGallery(serialResults, data.settings_used || []);
+            lastSerialCount = serialResults.length;
+        }
+
+        // 5. Handle status transitions
+        if (data.status !== lastKnownStatus) {
+            const oldStatus = lastKnownStatus;
+            lastKnownStatus = data.status;
+            previouslyAccepted = !!data.previously_accepted;
+            updateStatusDisplay(data.status, previouslyAccepted);
+
+            if (data.status === 'mapped' && (oldStatus === 'mapping' || isMapping)) {
+                isMapping = false;
+                enableMapButtons();
+
+                leftView = 'post'; rightView = 'result';
+                loadPaneImage('left', leftView);
+                if (splitActive) {
+                    loadPaneImage('right', rightView);
+                } else {
+                    toggleSplit();
+                }
+                sel.value = (activePane === 'left') ? leftView : rightView;
+
+                if (oldStatus === 'mapping' && !sseActive) {
+                    log('Mapping complete!', 'success');
+                }
+
+            } else if (data.status === 'accepted') {
+                isMapping = false;
+                document.getElementById('serial-gallery').style.display = 'none';
+                enableMapButtons();
+
+            } else if (data.status === 'error' && isMapping) {
+                isMapping = false;
+                enableMapButtons();
+                log('Mapping failed.', 'error');
+
+            } else if (data.status === 'mapping') {
+                isMapping = true;
+                disableMapButtons();
+
+            } else if (isMapping) {
+                // Any other transition away from mapping (e.g. ready /
+                // pending after a user-cancel) clears the mapping flag.
+                isMapping = false;
+                enableMapButtons();
+                if (oldStatus === 'mapping') {
+                    log(`Mapping cancelled — back to ${data.status}.`, 'dim');
+                }
+            }
+        }
+
+        if (data.status === 'ready' || data.status === 'mapped') {
+            enableMapButtons();
+        }
+    } catch {}
+
+    setTimeout(pollFireState, isMapping ? 2000 : 5000);
+}
+
+// -----------------------------------------------------------------------
+// Remove fire
+// -----------------------------------------------------------------------
+async function removeFire() {
+    if (!confirm(`Remove fire "${FIRE}" from the list?\nThis hides it from the fire list. Accepted results are not deleted.`)) return;
+    try {
+        await fetch(`/api/fire/${encodeURIComponent(FIRE)}/remove`, {method: 'POST', headers: {'X-Requested-With': 'fetch'}});
+        window.location.href = '/';
+    } catch (err) {
+        log('Remove failed: ' + err.message, 'error');
+    }
+}
+
+// -----------------------------------------------------------------------
+// Console toggle & resize
+// -----------------------------------------------------------------------
+// Console starts collapsed — see the inline style on #console-output
+// and #console-section in the HTML above. Clicking ▲ expands.
+let consoleCollapsed = true;
+
+function toggleConsole() {
+    const sec = document.getElementById('console-section');
+    const out = document.getElementById('console-output');
+    const btn = document.getElementById('console-toggle');
+    consoleCollapsed = !consoleCollapsed;
+    if (consoleCollapsed) {
+        out.style.display = 'none';
+        sec.style.height = 'auto';
+        sec.style.minHeight = '0';
+        btn.innerHTML = '&#9650;';
+    } else {
+        out.style.display = '';
+        sec.style.height = '250px';
+        sec.style.minHeight = '30px';
+        btn.innerHTML = '&#9660;';
+    }
+}
+
+(function() {
+    const handle = document.getElementById('resize-handle');
+    const consoleSec = document.getElementById('console-section');
+    let dragging = false;
+    let startY = 0;
+    let startH = 0;
+
+    handle.addEventListener('mousedown', (e) => {
+        dragging = true;
+        startY = e.clientY;
+        startH = consoleSec.offsetHeight;
+        handle.classList.add('active');
+        document.body.style.cursor = 'row-resize';
+        document.body.style.userSelect = 'none';
+        e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!dragging) return;
+        const newH = Math.max(30, startH + (startY - e.clientY));
+        consoleSec.style.height = newH + 'px';
+        // Auto-hide output if dragged very small
+        const out = document.getElementById('console-output');
+        if (newH <= 35) {
+            out.style.display = 'none';
+            consoleCollapsed = true;
+            document.getElementById('console-toggle').innerHTML = '&#9650;';
+        } else if (consoleCollapsed) {
+            out.style.display = '';
+            consoleCollapsed = false;
+            document.getElementById('console-toggle').innerHTML = '&#9660;';
+        }
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (!dragging) return;
+        dragging = false;
+        handle.classList.remove('active');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+    });
+})();
+
+function formatParams(params) {
+    if (!params || typeof params !== 'object') return '';
+    const keys = Object.keys(params).filter(k => params[k] != null && params[k] !== '');
+    if (keys.length === 0) return '<em>No parameters</em>';
+    return '<table style="font-size:10px;border-collapse:collapse;width:100%">' +
+        keys.map(k => `<tr><td style="padding:1px 6px 1px 0;color:#888">${k}</td><td style="padding:1px 0">${params[k]}</td></tr>`).join('') +
+        '</table>';
+}
+
+// HSL palette: stable hue per setting_idx.
+function settingColors(idx, n) {
+    const total = Math.max(1, n);
+    const hue = Math.round((idx * 360) / total);
+    return {
+        band:    `hsl(${hue}, 35%, 92%)`,
+        header:  `hsl(${hue}, 45%, 40%)`,
+        hover:   `hsl(${hue}, 35%, 85%)`,
+        selBg:   `hsl(${hue}, 25%, 82%)`,
+        selBorder: `hsl(${hue}, 55%, 35%)`,
+    };
+}
+
+// Track the N used by the current gallery so viewSerialRun can re-derive hue.
+let galleryNSettings = 1;
+let gallerySettingsUsed = [];
+
+// runId → params, populated from showSerialGallery. Used by viewSerialRun
+// to mirror a clicked run's parameters back into the control panel.
+const galleryRunParams = new Map();
+
+// Apply a params object (as returned by the server) to the control-panel
+// form fields. Shared between restoreFireState (page load) and
+// viewSerialRun (click-to-sync a serial run). Only sets fields for which
+// the params object has a non-empty value — missing keys are left alone.
+function applyParamsToForm(p) {
+    if (!p || typeof p !== 'object') return;
+    const setVal = (id, val) => {
+        const el = document.getElementById(id);
+        if (el && val != null && val !== '') el.value = val;
+    };
+    setVal('p-padding', p.padding);
+    setVal('p-sample_rate', p.sample_rate);
+    setVal('p-min_samples', p.min_samples);
+    setVal('p-max_samples', p.max_samples);
+    setVal('p-seed', p.seed);
+    setVal('p-embed_bands', p.embed_bands);
+    setVal('p-tsne_perplexity', p.tsne_perplexity);
+    setVal('p-tsne_learning_rate', p.tsne_learning_rate);
+    setVal('p-tsne_max_iter', p.tsne_max_iter);
+    setVal('p-tsne_n_components', p.tsne_n_components);
+    setVal('p-tsne_random_state', p.tsne_random_state);
+    setVal('p-rf_n_estimators', p.rf_n_estimators);
+    setVal('p-rf_max_depth', p.rf_max_depth);
+    setVal('p-rf_max_features', p.rf_max_features);
+    setVal('p-rf_random_state', p.rf_random_state);
+    setVal('p-controlled_ratio', p.controlled_ratio);
+    setVal('p-hdbscan_min_samples', p.hdbscan_min_samples);
+    setVal('p-contour_width', p.contour_width);
+    setVal('p-brush_size', p.brush_size);
+    setVal('p-point_threshold', p.point_threshold);
+    if (p.tsne_init) {
+        const el = document.getElementById('p-tsne_init');
+        if (el) el.value = p.tsne_init;
+    }
+    const basEl = document.getElementById('p-brush_all_segments');
+    if (basEl && p.brush_all_segments != null) {
+        const s = String(p.brush_all_segments).toLowerCase();
+        basEl.checked = (s === 'true' || s === '1' || s === 'yes' || s === 'on');
+    }
+    updateSampleSize();
+}
+
+// Sync-params-on-click checkbox — default ON, persisted in localStorage.
+function isSyncParamsOn() {
+    const el = document.getElementById('sync-params-on-click');
+    return el ? !!el.checked : true;
+}
+
+function onSyncParamsToggle() {
+    const on = isSyncParamsOn();
+    localStorage.setItem('syncParamsOnClick', on ? '1' : '0');
+}
+
+(function initSyncParamsCheckbox() {
+    const saved = localStorage.getItem('syncParamsOnClick');
+    if (saved === '0') {
+        const el = document.getElementById('sync-params-on-click');
+        if (el) el.checked = false;
+    }
+})();
+
+function showSerialGallery(results, settingsUsed) {
+    const gallery = document.getElementById('serial-gallery');
+    const items = document.getElementById('serial-gallery-items');
+    gallery.style.display = '';
+
+    const previous = results.filter(r => r.is_previous);
+    const newRuns = results.filter(r => !r.is_previous);
+
+    // Determine N (settings count) from settings_used, or derive.
+    let nSettings = 0;
+    if (Array.isArray(settingsUsed) && settingsUsed.length > 0) {
+        nSettings = settingsUsed.length;
+    } else {
+        for (const r of newRuns) {
+            const idx = Number(r.setting_idx || 0);
+            if (idx + 1 > nSettings) nSettings = idx + 1;
+        }
+        nSettings = Math.max(1, nSettings);
+    }
+    galleryNSettings = nSettings;
+    gallerySettingsUsed = Array.isArray(settingsUsed)
+        ? settingsUsed.slice()
+        : [];
+
+    // Refresh the runId → params map so viewSerialRun can mirror them
+    // back into the control panel. Include previously-accepted rows too.
+    galleryRunParams.clear();
+    for (const r of results) {
+        if (r && r.run_id != null && r.params) {
+            galleryRunParams.set(r.run_id, r.params);
+        }
+    }
+
+    const titleEl = document.getElementById('serial-gallery-title');
+    if (titleEl) {
+        titleEl.textContent = (nSettings > 1 || newRuns.length > 1)
+            ? 'Serial Results' : 'Results';
+    }
+
+    // Find best run for green "(best)" badge (global across all settings).
+    const successful = newRuns.filter(r => (r.agreement_pct || -1) >= 0);
+    const bestRun = successful.length
+        ? successful.reduce((a, b) =>
+              (b.agreement_pct || -1) > (a.agreement_pct || -1) ? b : a)
+        : null;
+    const bestRunId = bestRun ? bestRun.run_id : null;
+
+    // Signature used to short-circuit identical re-renders. Every poll tick
+    // calls this; most ticks add nothing new, so bail out cheaply.
+    const sig = JSON.stringify({
+        n: nSettings,
+        best: bestRunId,
+        prev: previous.map(r => r.run_id),
+        runs: newRuns.map(r => [
+            r.run_id, r.setting_idx || 0,
+            r.agreement_pct == null ? -1 : r.agreement_pct,
+            r.ml_area_ha == null ? -1 : r.ml_area_ha,
+            r.error || '',
+        ]),
+        labels: (settingsUsed || []).map(s => s && s.label || ''),
+    });
+    if (items.dataset.sig === sig) return;
+
+    const prevBestId = items.dataset.bestRunId
+        ? Number(items.dataset.bestRunId) : null;
+
+    // Group new runs by setting_idx, preserve replicate order within group.
+    const groups = new Map();
+    for (const r of newRuns) {
+        const si = Number(r.setting_idx || 0);
+        if (!groups.has(si)) groups.set(si, []);
+        groups.get(si).push(r);
+    }
+    for (const arr of groups.values()) {
+        arr.sort((a, b) => (a.run_idx || 0) - (b.run_idx || 0));
+    }
+
+    // Drop any DOM cards whose run_id is no longer in the result set
+    // (e.g. a fresh mapping cleared the server-side list). Then prune
+    // empty groups. Do this before indexing existing cards.
+    const desiredIds = new Set();
+    for (const r of previous) desiredIds.add(r.run_id);
+    for (const r of newRuns) desiredIds.add(r.run_id);
+    for (const card of Array.from(
+            items.querySelectorAll('.serial-run-card'))) {
+        const m = card.id.match(/^serial-card-(\d+)$/);
+        if (m && !desiredIds.has(Number(m[1]))) card.remove();
+    }
+    for (const g of Array.from(items.querySelectorAll('.serial-group'))) {
+        if (!g.querySelector('.serial-run-card')
+            && !g.dataset.keepEmpty) {
+            g.remove();
+        }
+    }
+
+    // Existing card index — keyed by run_id. Anything in here we leave
+    // alone unless its best-badge state changed.
+    const existingCards = new Map();
+    for (const card of items.querySelectorAll('.serial-run-card')) {
+        const m = card.id.match(/^serial-card-(\d+)$/);
+        if (m) existingCards.set(Number(m[1]), card);
+    }
+
+    // 1. Previously-accepted card(s) at the top. Insert only if missing.
+    for (const r of previous) {
+        if (!existingCards.has(r.run_id)) {
+            const card = renderSerialCard(r, {
+                isPrevious: true, isBest: false, colors: null,
+            });
+            items.insertBefore(card, items.firstChild);
+        }
+    }
+
+    // 2. Per-setting groups, ordered by setting_idx.
+    const sortedIdx = [...groups.keys()].sort((a, b) => a - b);
+    for (const si of sortedIdx) {
+        const arr = groups.get(si);
+        const colors = settingColors(si, nSettings);
+        const label = (settingsUsed && settingsUsed[si]
+                       && settingsUsed[si].label)
+                      || (arr[0] && arr[0].setting_label)
+                      || `Setting ${si + 1}`;
+
+        let group = items.querySelector(
+            `.serial-group[data-setting-idx="${si}"]`);
+        if (!group) {
+            group = document.createElement('div');
+            group.className = 'serial-group';
+            group.dataset.settingIdx = String(si);
+            group.style.cssText =
+                `background:${colors.band};border-radius:6px;` +
+                'padding:6px;margin-bottom:6px;' +
+                'display:flex;flex-direction:column;gap:6px';
+
+            const header = document.createElement('div');
+            header.style.cssText =
+                `font-size:11px;font-weight:700;color:${colors.header};` +
+                'text-transform:uppercase;letter-spacing:0.04em;' +
+                'padding:2px 4px';
+            header.textContent = `${si + 1}. ${label}`;
+            group.appendChild(header);
+            items.appendChild(group);
+        }
+
+        for (const r of arr) {
+            const existing = existingCards.get(r.run_id);
+            const isBest = bestRunId !== null && r.run_id === bestRunId;
+            const wasBest = prevBestId !== null && r.run_id === prevBestId;
+            // Per-card signature: covers the mutable surface of a card.
+            // Rebrush can change ml_area_ha/agreement_pct on an already-
+            // finished run, so we can't treat finished cards as immutable
+            // — a length check alone (outer gallery sig) would miss this.
+            const statSig = [
+                r.agreement_pct == null ? -1 : r.agreement_pct,
+                r.ml_area_ha == null ? -1 : r.ml_area_ha,
+                r.error || '',
+                isBest ? 1 : 0,
+            ].join('|');
+            if (existing && existing.dataset.statSig === statSig
+                && isBest === wasBest) continue;
+            const card = renderSerialCard(r, {
+                isPrevious: false,
+                isBest,
+                colors,
+            });
+            card.dataset.statSig = statSig;
+            if (existing) {
+                existing.replaceWith(card);
+            } else {
+                group.appendChild(card);
+            }
+        }
+    }
+
+    // If we replaced the currently-selected card (because its best state
+    // flipped), reapply the selection styling so the user's click state
+    // doesn't visually reset.
+    if (selectedRun !== null) {
+        const sel = document.getElementById('serial-card-' + selectedRun);
+        if (sel) {
+            const si = Number(sel.dataset.settingIdx || 0);
+            const sc = settingColors(si, nSettings);
+            sel.style.borderColor = sc.selBorder;
+            sel.style.background = sc.selBg;
+        }
+    }
+
+    items.dataset.sig = sig;
+    items.dataset.bestRunId = bestRunId !== null ? String(bestRunId) : '';
+}
+
+function renderSerialCard(r, opts) {
+    const isPrevious = !!opts.isPrevious;
+    const isBest = !!opts.isBest;
+    const colors = opts.colors;
+    const div = document.createElement('div');
+    div.className = 'serial-run-card';
+    div.id = 'serial-card-' + r.run_id;
+    div.dataset.settingIdx = String(r.setting_idx || 0);
+
+    // Default styling — the per-setting group band provides the hue.
+    let borderColor = isPrevious ? '#8b6914' : 'rgba(0,0,0,0.08)';
+    let bgColor = isPrevious ? '#fdf8ec' : '#fff';
+    div.style.cssText = 'padding:8px;cursor:pointer;' +
+        'border:2px solid ' + borderColor + ';border-radius:6px;' +
+        'background:' + bgColor;
+    div.onclick = function(e) {
+        if (e.target.tagName === 'BUTTON' || e.target.tagName === 'A') return;
+        viewSerialRun(r.run_id);
+    };
+
+    const agr = r.agreement_pct >= 0 ? r.agreement_pct + '%' : 'failed';
+    const mlArea = r.ml_area_ha >= 0 ? r.ml_area_ha.toLocaleString() + ' ha' : '--';
+    const label = isPrevious
+        ? '<span style="color:#8b6914;font-weight:600">Previously accepted</span>'
+        : `<strong>Run ${r.run_id}</strong>`;
+    const badge = isBest
+        ? ' <span style="color:#2d8a4e;font-weight:600">(best)</span>'
+        : '';
+    const errMsg = r.error ? `<span style="color:#cc3333;font-size:11px"> ${r.error}</span>` : '';
+    const detailsId = `serial-details-${r.run_id}`;
+    const detailsTitle = isPrevious ? 'Previously Accepted' : `Serial Run #${r.run_id}`;
+
+    const acceptBtn = (!isPrevious && r.agreement_pct >= 0)
+        ? `<button class="btn btn-success accept-serial-btn"
+            data-run-id="${r.run_id}"
+            style="font-size:11px;padding:2px 8px"
+            onclick="acceptSerialRun(${r.run_id})">Accept</button>`
+        : '';
+
+    div.innerHTML = `
+        <div style="display:flex;align-items:center;gap:8px">
+            <img src="/api/fire/${encodeURIComponent(FIRE)}/serial/${r.run_id}/image?t=${Date.now()}"
+                 style="width:80px;height:60px;object-fit:cover;border-radius:4px;cursor:pointer;image-rendering:pixelated"
+                 onclick="viewSerialRun(${r.run_id})" onerror="this.style.display='none'">
+            <div style="flex:1;font-size:12px">
+                ${label}${badge}${errMsg}<br>
+                <span style="color:#555">Agreement: ${agr} &middot; ML: ${mlArea}</span><br>
+                <a href="#" class="serial-info-toggle" onclick="event.preventDefault();event.stopPropagation();
+                    var el=document.getElementById('${detailsId}');
+                    el.style.display=el.style.display==='none'?'block':'none'">Info</a>
+            </div>
+            ${acceptBtn}
+        </div>
+        <div id="${detailsId}" class="serial-details-panel" style="display:none">
+            <div class="serial-details-title">${detailsTitle}</div>
+            <div class="serial-details-row"><span>Agreement</span><strong>${agr}</strong></div>
+            <div class="serial-details-row"><span>ML Fire Size</span><strong>${mlArea}</strong></div>
+            <div class="serial-details-section">
+                <a href="#" onclick="event.preventDefault();
+                    var el=this.nextElementSibling;
+                    el.style.display=el.style.display==='none'?'block':'none';
+                    this.textContent=el.style.display==='none'?'Show parameters':'Hide parameters'">Show parameters</a>
+                <div style="display:none;margin-top:4px">${formatParams(r.params)}</div>
+            </div>
+        </div>
+    `;
+    return div;
+}
+
+function viewSerialRun(runId) {
+    // Restore default styling for every card
+    document.querySelectorAll('.serial-run-card').forEach(el => {
+        if (el.id === 'serial-card-0') {
+            el.style.borderColor = '#8b6914';
+            el.style.background = '#fdf8ec';
+        } else {
+            el.style.borderColor = 'rgba(0,0,0,0.08)';
+            el.style.background = '#fff';
+        }
+    });
+    const card = document.getElementById('serial-card-' + runId);
+    if (card) {
+        const si = Number(card.dataset.settingIdx || 0);
+        const colors = settingColors(si, galleryNSettings);
+        card.style.borderColor = colors.selBorder;
+        card.style.background = colors.selBg;
+    }
+
+    // Mirror the run's params into the control panel so the user can
+    // tweak and re-map from the same starting point. Controlled by the
+    // "Sync params on click" checkbox in the gallery header.
+    if (isSyncParamsOn()) {
+        const p = galleryRunParams.get(runId);
+        if (p) applyParamsToForm(p);
+    }
+
+    // Set selected run and reload current view for the active pane
+    selectedRun = runId;
+    const currentView = activePane === 'left' ? leftView : rightView;
+    if (currentView) {
+        loadPaneImage(activePane, currentView);
+    }
+    const otherPane = activePane === 'left' ? 'right' : 'left';
+    const otherView = activePane === 'left' ? rightView : leftView;
+    const rightEl = document.getElementById('image-area-right');
+    if (rightEl && rightEl.style.display !== 'none' &&
+        otherView && RUN_VIEWS.has(otherView)) {
+        loadPaneImage(otherPane, otherView);
+    }
+}
+
+async function acceptSerialRun(runId) {
+    const msg = previouslyAccepted
+        ? `This will overwrite the previously accepted result with run ${runId}. Continue?`
+        : `Accept run ${runId} as the final result?`;
+    if (!confirm(msg)) return;
+
+    // Immediate visual feedback: disable every gallery Accept button and
+    // mark the clicked one as in-progress so the user can tell something
+    // is happening while the server copies files into the canonical
+    // output dir (can take a couple of seconds for big crops).
+    const acceptButtons = document.querySelectorAll(
+        '#serial-gallery-items button.accept-serial-btn');
+    let clickedBtn = null;
+    let originalLabel = '';
+    acceptButtons.forEach(b => {
+        b.disabled = true;
+        if (parseInt(b.dataset.runId, 10) === runId) {
+            clickedBtn = b;
+            originalLabel = b.textContent;
+            b.textContent = 'Accepting…';
+        }
+    });
+    log(`Accepting run ${runId}…`);
+
+    try {
+        const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/serial/${runId}/accept`, {
+            method: 'POST',
+            headers: {'X-Requested-With': 'fetch'},
+        });
+        const data = await r.json();
+        if (data.status === 'accepted') {
+            log(`Run ${runId} accepted!`, 'success');
+            previouslyAccepted = false;
+            lastSerialCount = 0;
+            updateStatusDisplay('accepted', false);
+            document.getElementById('serial-gallery').style.display = 'none';
+            const galItems = document.getElementById('serial-gallery-items');
+            galItems.innerHTML = '';
+            delete galItems.dataset.sig;
+            delete galItems.dataset.bestRunId;
+        } else {
+            log('Accept error: ' + (data.error || 'unknown'), 'error');
+            // Revert the buttons since accept failed.
+            acceptButtons.forEach(b => { b.disabled = false; });
+            if (clickedBtn) clickedBtn.textContent = originalLabel;
+        }
+    } catch (err) {
+        log('Accept failed: ' + err.message, 'error');
+        acceptButtons.forEach(b => { b.disabled = false; });
+        if (clickedBtn) clickedBtn.textContent = originalLabel;
+    }
+}
+
+// -----------------------------------------------------------------------
+// Restore fire state (console, params) on page load
+// -----------------------------------------------------------------------
+async function restoreFireState() {
+    try {
+        const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/console`);
+        const data = await r.json();
+
+        // Restore console output and sync line count
+        if (data.lines && data.lines.length > 0) {
+            for (const line of data.lines) {
+                log(line);
+            }
+            serverLineCount = data.lines.length;
+        }
+
+        // Restore last params to form
+        if (data.last_params && Object.keys(data.last_params).length > 0) {
+            applyParamsToForm(data.last_params);
+        }
+
+        // Show agreement + ML size if available
+        renderAgreement(
+            data.agreement_pct,
+            data.previously_accepted_agreement_pct);
+        updateMlSize(data.ml_area_ha);
+
+        // If a rebrush was in flight when we reloaded, restore the
+        // Rebrushing UI immediately so the user doesn't have to wait
+        // for the first poll tick to see it.
+        if (data.rebrush_running) {
+            rebrushInFlight = true;
+            rebrushAdopted = true;
+            setRebrushButtons(true);
+            log('Rebrush in progress on server (reconnected) ...', 'dim');
+        }
+
+        // If fire is currently mapping, set flag
+        if (data.status === 'mapping') {
+            isMapping = true;
+            previouslyAccepted = !!data.previously_accepted;
+            disableMapButtons();
+            updateStatusDisplay('mapping', previouslyAccepted);
+            log('--- Mapping in progress (reconnected) ---', 'dim');
+        }
+
+        // Restore serial gallery if results exist
+        const serialResults = data.serial_results || [];
+        if (serialResults.length > 0) {
+            showSerialGallery(serialResults, data.settings_used || []);
+            lastSerialCount = serialResults.length;
+        }
+    } catch {}
+}
+
+// -----------------------------------------------------------------------
+// Notes
+// -----------------------------------------------------------------------
+async function saveNotes() {
+    const notes = document.getElementById('fire-notes').value;
+    const textarea = document.getElementById('fire-notes');
+    try {
+        const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/notes`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+            body: JSON.stringify({notes}),
+        });
+        if (r.ok) {
+            textarea.style.borderColor = '#2d8a4e';
+            const origPlaceholder = textarea.placeholder;
+            textarea.placeholder = 'Saved!';
+            setTimeout(() => {
+                textarea.style.borderColor = '#ccc';
+                textarea.placeholder = origPlaceholder;
+            }, 1500);
+        } else {
+            textarea.style.borderColor = '#cc3333';
+            log('Failed to save notes', 'error');
+            setTimeout(() => textarea.style.borderColor = '#ccc', 2000);
+        }
+    } catch (err) {
+        textarea.style.borderColor = '#cc3333';
+        log('Failed to save notes: ' + err.message, 'error');
+        setTimeout(() => textarea.style.borderColor = '#ccc', 2000);
+    }
+}
+
+async function loadNotes() {
+    // Notes come with the fire list API; fetch status endpoint for this fire
+    try {
+        const r = await fetch(`/api/fires`);
+        const fires = await r.json();
+        const f = fires.find(x => x.fire_numbe === FIRE);
+        if (f && f.notes) {
+            document.getElementById('fire-notes').value = f.notes;
+        }
+        if (f) {
+            renderAgreement(
+                f.agreement_pct,
+                f.previously_accepted_agreement_pct);
+        }
+    } catch {}
+}
+
+// -----------------------------------------------------------------------
+// Split view (side-by-side)
+// -----------------------------------------------------------------------
+let splitActive = false;
+
+function toggleSplit() {
+    splitActive = !splitActive;
+    const container = document.getElementById('image-viewer-container');
+    const leftArea = document.getElementById('image-area');
+    const rightArea = document.getElementById('image-area-right');
+    const btnSplit = document.getElementById('btn-split');
+    const btnSync = document.getElementById('btn-sync');
+
+    if (splitActive) {
+        container.classList.add('split');
+        rightArea.style.display = '';
+        btnSplit.style.background = '#0066cc';
+        btnSplit.style.color = '#fff';
+        btnSync.style.display = '';
+        btnSync.style.background = syncPanes ? '#0066cc' : '';
+        btnSync.style.color = syncPanes ? '#fff' : '';
+        initPaneInteraction('right');
+
+        if (syncPanes) {
+            // Inherit left pane's zoom/pan — don't reset either pane
+            const ls = paneState.left;
+            paneState.right.scale = ls.scale;
+            paneState.right.panX = ls.panX;
+            paneState.right.panY = ls.panY;
+        }
+        loadPaneImage('right', rightView);
+        // Re-apply transforms after layout settles (no fit — preserve position)
+        setTimeout(() => {
+            updateTransformForPane('left');
+            if (!syncPanes) zoomFitPane('right');
+            else updateTransformForPane('right');
+        }, 50);
+    } else {
+        container.classList.remove('split');
+        // Close the pane the user is NOT focused on
+        if (activePane === 'right') {
+            // Keep right, close left — swap right content into left pane
+            leftView = rightView;
+            loadPaneImage('left', leftView);
+            updateSubtitle('left', leftView);
+            paneState.left.scale = paneState.right.scale;
+            paneState.left.panX = paneState.right.panX;
+            paneState.left.panY = paneState.right.panY;
+            updateTransformForPane('left');
+        }
+        // Either way, hide right area and focus left
+        rightArea.style.display = 'none';
+        btnSplit.style.background = '';
+        btnSplit.style.color = '';
+        btnSync.style.display = 'none';
+        setActivePane('left');
+        // Update dropdown to reflect the surviving view
+        const sel = document.getElementById('view-select');
+        if (sel.querySelector(`option[value="${leftView}"]`)) sel.value = leftView;
+    }
+}
+
+// -----------------------------------------------------------------------
+// Prev / Next navigation from fire list order
+// -----------------------------------------------------------------------
+(function() {
+    try {
+        const order = JSON.parse(localStorage.getItem('fireOrder') || '[]');
+        if (order.length < 2) return;
+        const idx = order.indexOf(FIRE);
+        if (idx < 0) return;
+        if (idx > 0) {
+            const prev = document.getElementById('btn-prev');
+            prev.href = '/fire/' + encodeURIComponent(order[idx - 1]);
+            prev.title = order[idx - 1];
+            prev.style.display = '';
+        }
+        if (idx < order.length - 1) {
+            const next = document.getElementById('btn-next');
+            next.href = '/fire/' + encodeURIComponent(order[idx + 1]);
+            next.title = order[idx + 1];
+            next.style.display = '';
+        }
+    } catch {}
+})();
+
+// -----------------------------------------------------------------------
+// Init
+// -----------------------------------------------------------------------
+// -----------------------------------------------------------------------
+// Collapsible control panel
+// -----------------------------------------------------------------------
+function toggleControlPanel() {
+    const panel = document.getElementById('control-panel');
+    const btn = document.getElementById('panel-toggle');
+    const hidden = panel.style.display === 'none';
+    panel.style.display = hidden ? '' : 'none';
+    btn.innerHTML = hidden ? '&#9654;' : '&#9664;';
+    localStorage.setItem('panelHidden', hidden ? '' : '1');
+    // Re-apply transforms after layout change (preserve zoom position)
+    setTimeout(() => { updateTransformForPane('left'); if (splitActive) updateTransformForPane('right'); }, 50);
+}
+
+// Restore panel state
+if (localStorage.getItem('panelHidden') === '1') {
+    document.getElementById('control-panel').style.display = 'none';
+    document.getElementById('panel-toggle').innerHTML = '&#9664;';
+}
+
+prepareFire(null);
+loadNotes();
+// Start the unified state poller (handles all live updates)
+setTimeout(pollFireState, 3000);
+
+// -----------------------------------------------------------------------
+// Task-5 additions: toasts, stage-aware progress bar, queue banner.
+// Polling cadence is adaptive — 2s while MAPPING, 5s-10s idle — to
+// keep the server quiet when nothing is happening.
+// -----------------------------------------------------------------------
+
+// ---- Toast notifications ---------------------------------------------
+const seenToastIds = new Set();
+
+function showToast(n) {
+    if (!n || n.id == null) return;
+    if (seenToastIds.has(n.id)) return;
+    seenToastIds.add(n.id);
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+
+    const el = document.createElement('div');
+    el.className = 'toast toast-' + (n.kind || 'info');
+    el.dataset.id = n.id;
+
+    const title = document.createElement('div');
+    title.className = 'toast-title';
+    title.textContent = n.title || '';
+    el.appendChild(title);
+
+    if (n.body) {
+        const body = document.createElement('div');
+        body.className = 'toast-body';
+        body.textContent = n.body;
+        el.appendChild(body);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'toast-actions';
+    if (n.action && n.action.url && n.action.label) {
+        const a = document.createElement('a');
+        a.href = n.action.url;
+        a.textContent = n.action.label;
+        a.className = 'toast-action';
+        actions.appendChild(a);
+    }
+    const close = document.createElement('button');
+    close.textContent = '×';
+    close.className = 'toast-close';
+    close.setAttribute('aria-label', 'Dismiss');
+    close.onclick = () => dismissToast(el, n.id);
+    actions.appendChild(close);
+    el.appendChild(actions);
+
+    container.appendChild(el);
+
+    // Error / warning toasts stick until dismissed. Info / success
+    // auto-dismiss after 8s so the analyst doesn't have to manually
+    // clear every "rebrush done" message.
+    const sticky = (n.kind === 'error' || n.kind === 'warning');
+    if (!sticky) {
+        setTimeout(() => dismissToast(el, n.id), 8000);
+    }
+}
+
+function dismissToast(el, id) {
+    if (!el || !el.parentNode) return;
+    el.classList.add('toast-leaving');
+    setTimeout(() => {
+        if (el.parentNode) el.parentNode.removeChild(el);
+    }, 250);
+    // Ack is currently a no-op server-side (notifications are popped on
+    // GET) but the endpoint is there for future extensions.
+    try {
+        fetch('/api/notifications/ack', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+            body: JSON.stringify({ids: [id]}),
+        }).catch(() => {});
+    } catch {}
+}
+
+async function pollNotifications() {
+    try {
+        const r = await fetch('/api/notifications');
+        if (!r.ok) return;
+        const data = await r.json();
+        for (const n of (data.notifications || [])) {
+            showToast(n);
+        }
+    } catch {}
+}
+
+setInterval(pollNotifications, 5000);
+setTimeout(pollNotifications, 1200);
+
+// ---- Stage-aware progress bar + queue banner -------------------------
+const PROGRESS_STAGE_ORDER_FULL = [
+    'load', 'hint', 'sample', 'tsne', 'rf', 'hdbscan',
+    'classify', 'brush', 'figure',
+];
+const PROGRESS_STAGE_ORDER_RESUME = [
+    'load', 'hint', 'hdbscan', 'classify', 'brush', 'figure',
+];
+const PROGRESS_STAGE_LABELS = {
+    load: 'Load', hint: 'Hint', sample: 'Sample',
+    tsne: 't-SNE', rf: 'RF', hdbscan: 'HDBSCAN',
+    classify: 'Classify', brush: 'Brush', figure: 'Figure',
+};
+
+function formatSeconds(s) {
+    if (s == null || !isFinite(s) || s < 0) return '--';
+    if (s < 60) return `${Math.round(s)}s`;
+    if (s < 3600) {
+        const m = Math.floor(s / 60);
+        const rem = Math.round(s - m * 60);
+        return rem > 0 ? `${m}m ${rem}s` : `${m}m`;
+    }
+    const h = Math.floor(s / 3600);
+    const m = Math.round((s - h * 3600) / 60);
+    return `${h}h ${m}m`;
+}
+
+function renderProgress(p) {
+    const bar = document.getElementById('progress-bar');
+    if (!bar) return;
+    if (!p || !p.stage || !(p.status === 'mapping' || p.status === 'preparing')) {
+        bar.classList.add('is-collapsed');
+        return;
+    }
+    bar.classList.remove('is-collapsed');
+
+    const order = (p.pipeline === 'resume')
+        ? PROGRESS_STAGE_ORDER_RESUME
+        : PROGRESS_STAGE_ORDER_FULL;
+    const curIdx = order.indexOf(p.stage);
+
+    // Title + run-of-total
+    const title = document.getElementById('progress-title');
+    const totalRuns = p.total_runs || 1;
+    const runLabel = (totalRuns > 1)
+        ? ` — run ${p.run_id}/${totalRuns}`
+        : '';
+    const label = PROGRESS_STAGE_LABELS[p.stage] || p.stage;
+    title.textContent = `${label}${runLabel}`;
+
+    // ETA — null total_eta_s means we have no history for this pipeline
+    // yet (first-ever run on this server). Show "Estimating…" rather
+    // than a made-up fallback that misleads the user.
+    const eta = document.getElementById('progress-eta');
+    const elapsed = formatSeconds(p.job_elapsed_s);
+    let etaText;
+    if (p.total_eta_s == null) {
+        etaText = 'Estimating…';
+    } else {
+        etaText = '~' + formatSeconds(p.total_eta_s) + ' left';
+    }
+    // Suffix makes it explicit whether the ETA covers 1 run or the
+    // whole sweep.
+    const scope = (p.total_runs > 1)
+        ? ` (sweep of ${p.total_runs} runs)`
+        : '';
+    eta.textContent = `elapsed ${elapsed} · ${etaText}${scope}`;
+
+    // Fill
+    const fill = document.getElementById('progress-fill');
+    const pct = Math.max(1, Math.min(99, p.percent || 0));
+    fill.style.width = pct + '%';
+
+    // Stage pills
+    const stages = document.getElementById('progress-stages');
+    stages.innerHTML = '';
+    for (let i = 0; i < order.length; i++) {
+        const s = order[i];
+        const pill = document.createElement('span');
+        pill.className = 'progress-stage';
+        if (i < curIdx) pill.classList.add('stage-done');
+        else if (i === curIdx) pill.classList.add('stage-active');
+        pill.textContent = PROGRESS_STAGE_LABELS[s] || s;
+        stages.appendChild(pill);
+    }
+}
+
+function renderQueueBanner(queue, myStatus) {
+    const banner = document.getElementById('queue-banner');
+    const text = document.getElementById('queue-banner-text');
+    if (!banner || !text) return;
+
+    // Hide when this fire is itself mapping — the progress bar takes over.
+    if (myStatus === 'mapping' || myStatus === 'preparing') {
+        banner.classList.add('is-collapsed');
+        return;
+    }
+
+    const cur = queue && queue.current;
+    if (!cur) {
+        banner.classList.add('is-collapsed');
+        return;
+    }
+    const curFire = cur.fire_numbe || '';
+    if (curFire === FIRE) {
+        // Shouldn't happen (handled above) but guard anyway.
+        banner.classList.add('is-collapsed');
+        return;
+    }
+    const prog = cur.progress || {};
+    const etaText = formatSeconds(prog.total_eta_s || 0);
+    let msg = `Mapping in progress: fire `;
+    banner.classList.remove('is-collapsed');
+    text.innerHTML = '';
+    text.appendChild(document.createTextNode(msg));
+    const link = document.createElement('a');
+    link.href = '/fire/' + encodeURIComponent(curFire);
+    link.textContent = curFire;
+    text.appendChild(link);
+    const tail = document.createTextNode(
+        prog.stage_label
+            ? ` (${prog.stage_label}, ~${etaText} left). Your "Map Fire" click will queue.`
+            : '. Your "Map Fire" click will queue.');
+    text.appendChild(tail);
+}
+
+async function pollProgress() {
+    try {
+        const [pr, qr] = await Promise.all([
+            fetch(`/api/fire/${encodeURIComponent(FIRE)}/progress`),
+            fetch('/api/queue'),
+        ]);
+        const p = pr.ok ? await pr.json() : {};
+        const q = qr.ok ? await qr.json() : {};
+        renderProgress(p);
+        renderQueueBanner(q, p.status || lastKnownStatus);
+    } catch {}
+    setTimeout(pollProgress, isMapping ? 2500 : 7000);
+}
+
+setTimeout(pollProgress, 1500);
+</script>
+</body>
+</html>
