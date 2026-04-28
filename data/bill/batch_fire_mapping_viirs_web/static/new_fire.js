@@ -18,9 +18,22 @@ const errorsEl = document.getElementById('nf-errors');
 const submitBtn = document.getElementById('nf-submit');
 const previewBtn = document.getElementById('nf-preview');
 const previewStatus = document.getElementById('nf-preview-status');
+const previewStages = document.getElementById('nf-preview-stages');
 const previewWrap = document.getElementById('nf-preview-wrap');
 const previewImg = document.getElementById('nf-preview-img');
 const previewMeta = document.getElementById('nf-preview-meta');
+
+// Stages walked client-side while the single /api/fire/preview_hint
+// request is in flight. The server is one-shot, but the user wants
+// to see *what* it's doing — so we sequence pills on heuristic
+// timers (validate is instant, accumulate dominates, rasterize +
+// generate are fast tail). Order matches fire_list.handle_api_fire_preview_hint.
+const PREVIEW_STAGES = [
+    {key: 'validate',   label: 'Validating', delayMs: 0},
+    {key: 'accumulate', label: 'Accumulating VIIRS', delayMs: 250},
+    {key: 'rasterize',  label: 'Rasterizing', delayMs: 4000},
+    {key: 'generate',   label: 'Generating preview', delayMs: 6500},
+];
 
 const fields = {
     name: document.getElementById('nf-name'),
@@ -42,6 +55,14 @@ let drag = null;          // {kind: 'create'|'move', startMx, startMy, origBbox?
 let lastPreview = null;   // {preview_id, year, start, end, bbox_native} —
                           // sent in the create body when the form still
                           // matches, so the worker can skip accumulate.
+// Generation counter — bumped on every input the preview depends on
+// (bbox draw/move, year, dates, manual clear). The preview request
+// captures this at start; on response we drop the result if the
+// generation moved, so a bbox redrawn mid-flight cannot adopt a
+// stale preview_id or leave a wrong hint image on screen.
+let previewGen = 0;
+let previewInflightGen = -1;
+let previewStageTimers = [];
 
 // Populate year selector
 NF_ALL_YEARS.forEach(y => {
@@ -278,18 +299,51 @@ clearBtn.addEventListener('click', () => {
 });
 
 // Drop the cached preview reference when the user changes any input
-// that would feed the create body — the server-side seed match check
-// would reject a stale preview anyway, but this also wipes the
-// "Preview ready" UI so the user knows they need to re-preview.
+// that would feed the create body. Bumping previewGen also poisons
+// any in-flight preview request: when its response lands, the
+// generation mismatch makes us discard the preview_id, hide the
+// (stale) hint image, and keep the user from confirming a fire
+// whose form bbox no longer matches the previewed one.
 function invalidatePreview() {
-    if (lastPreview) {
-        lastPreview = null;
-        if (previewStatus) previewStatus.textContent = 'Preview is stale — click again.';
+    previewGen += 1;
+    clearPreviewStageTimers();
+    const hadCommitted = !!lastPreview;
+    const hadInflight = previewInflightGen >= 0;
+    lastPreview = null;
+    if (hadCommitted || hadInflight) {
+        if (previewWrap) previewWrap.style.display = 'none';
+        if (previewImg) previewImg.removeAttribute('src');
+        if (previewMeta) previewMeta.textContent = '';
+        if (previewStages) previewStages.innerHTML = '';
+        if (previewStatus) {
+            previewStatus.textContent =
+                hadInflight
+                    ? 'Preview canceled — bbox/dates changed. Click again.'
+                    : 'Preview is stale — click again.';
+        }
     }
 }
 fields.start.addEventListener('input', invalidatePreview);
 fields.end.addEventListener('input', invalidatePreview);
 yearSelect.addEventListener('change', invalidatePreview);
+
+function clearPreviewStageTimers() {
+    for (const t of previewStageTimers) clearTimeout(t);
+    previewStageTimers = [];
+}
+
+function renderPreviewStages(activeIdx) {
+    if (!previewStages) return;
+    previewStages.innerHTML = '';
+    for (let i = 0; i < PREVIEW_STAGES.length; i++) {
+        const pill = document.createElement('span');
+        pill.className = 'progress-stage';
+        if (i < activeIdx) pill.classList.add('stage-done');
+        else if (i === activeIdx) pill.classList.add('stage-active');
+        pill.textContent = PREVIEW_STAGES[i].label;
+        previewStages.appendChild(pill);
+    }
+}
 
 // ----- Preview Hint -----
 
@@ -318,9 +372,26 @@ previewBtn.addEventListener('click', async () => {
                      message: 'Year metadata not loaded yet.'}]);
         return;
     }
+    // Capture the generation under which this request runs. If the
+    // user changes the bbox/year/dates while we await, invalidatePreview
+    // bumps previewGen and we drop our result on the floor below.
+    const myGen = previewGen;
+    previewInflightGen = myGen;
     previewBtn.disabled = true;
-    previewStatus.textContent = 'Accumulating VIIRS for bbox + dates …';
     previewWrap.style.display = 'none';
+    previewMeta.textContent = '';
+    if (previewImg) previewImg.removeAttribute('src');
+    previewStatus.textContent = 'Working …';
+    clearPreviewStageTimers();
+    renderPreviewStages(0);
+    for (let i = 1; i < PREVIEW_STAGES.length; i++) {
+        const idx = i;
+        previewStageTimers.push(setTimeout(() => {
+            // A later request can have superseded us; only walk stages
+            // for the request the user is actually waiting on.
+            if (previewInflightGen === myGen) renderPreviewStages(idx);
+        }, PREVIEW_STAGES[i].delayMs));
+    }
     try {
         const body = buildBodyForPreview();
         const r = await fetch('/api/fire/preview_hint', {
@@ -332,17 +403,24 @@ previewBtn.addEventListener('click', async () => {
             body: JSON.stringify(body),
         });
         const j = await r.json().catch(() => ({}));
+        if (myGen !== previewGen) return;  // user moved on — discard
         if (!r.ok) {
             if (j.errors) showErrors(j.errors);
             else showErrors([{message: j.error || `HTTP ${r.status}`}]);
             previewStatus.textContent = '';
+            clearPreviewStageTimers();
+            if (previewStages) previewStages.innerHTML = '';
             return;
         }
         if (j.errors && j.errors.length) {
             showErrors(j.errors);
             previewStatus.textContent = '';
+            clearPreviewStageTimers();
+            if (previewStages) previewStages.innerHTML = '';
             return;
         }
+        clearPreviewStageTimers();
+        renderPreviewStages(PREVIEW_STAGES.length);  // all done
         previewWrap.style.display = '';
         previewImg.src = j.views.hint + '?t=' + Date.now();
         const start = j.start || '?';
@@ -361,9 +439,13 @@ previewBtn.addEventListener('click', async () => {
             bbox_native: j.bbox_native || body.bbox_native,
         };
     } catch (exc) {
+        if (myGen !== previewGen) return;
         showErrors([{message: `Network error: ${exc}`}]);
         previewStatus.textContent = '';
+        clearPreviewStageTimers();
+        if (previewStages) previewStages.innerHTML = '';
     } finally {
+        if (previewInflightGen === myGen) previewInflightGen = -1;
         previewBtn.disabled = false;
     }
 });
