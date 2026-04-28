@@ -41,8 +41,8 @@ def default_window(year: int) -> tuple:
     """Return (start, end) datetimes for the year's default seasonal window,
     clamped so the upper bound never exceeds today (LAADS only has past data).
     """
-    start = datetime.datetime(year, 3, 1)
-    end = datetime.datetime(year, 10, 30)
+    start = datetime.datetime(year, 1, 1)
+    end = datetime.datetime(year, 12, 31)
     today = datetime.datetime.now().replace(
         hour=0, minute=0, second=0, microsecond=0)
     if end > today:

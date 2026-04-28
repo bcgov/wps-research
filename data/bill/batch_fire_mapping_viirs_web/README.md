@@ -105,7 +105,7 @@ shows live cursor coords (raster CRS + WGS84) in the toolbar.
 - **Bounding Box (raster CRS / WGS84)** — read-only readouts that
   update as you drag.
 - **Start / End** date inputs — placeholders are
-  `<year>-03-01` and `<year>-10-30` (from the overview JSON's
+  `<year>-01-01` and `<year>-12-31` (from the overview JSON's
   `default_start` / `default_end`). **Empty fields fall through to
   the placeholders** at submit time. Constraints:
   - parseable as `YYYY-MM-DD`
@@ -129,8 +129,8 @@ disabled for non-admins (year-switch is admin-only).
 Download + shapify + **index build** happen **once per year at server boot**
 in `year_viirs.bootstrap_all_years` (idempotent — pre-existing `.nc`,
 `.shp`, and `year_index.gpkg` are reused). Each year's full raster
-footprint is downloaded for the seasonal window `<year>-03-01` to
-`<year>-10-30` (or to today if the upper bound is in the future) into
+footprint is downloaded for the full-year window `<year>-01-01` to
+`<year>-12-31` (or to today if the upper bound is in the future) into
 `<output_root_for_year>/_year_viirs/VNP14IMG/<year>/<jday>/`.
 
 After shapify, `year_viirs.build_year_index` consolidates every

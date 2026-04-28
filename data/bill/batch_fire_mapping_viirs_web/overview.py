@@ -210,8 +210,8 @@ def generate_overview(
 
     year = _year_from_filename(raster_path)
     if year is not None:
-        default_start = f'{year}-03-01'
-        default_end = f'{year}-10-30'
+        default_start = f'{year}-01-01'
+        default_end = f'{year}-12-31'
     else:
         default_start = ''
         default_end = ''
