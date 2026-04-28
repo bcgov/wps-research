@@ -47,6 +47,7 @@ const fields = {
     n: document.getElementById('nf-n'),
     start: document.getElementById('nf-start'),
     end: document.getElementById('nf-end'),
+    fireDate: document.getElementById('nf-fire-date'),
 };
 
 let meta = null;
@@ -124,6 +125,17 @@ async function loadYear(year) {
     fields.end.placeholder = meta.default_end || 'YYYY-MM-DD';
     if (!fields.start.value) fields.start.value = '';
     if (!fields.end.value) fields.end.value = '';
+    refreshFireDatePlaceholder();
+}
+
+function refreshFireDatePlaceholder() {
+    if (!fields.fireDate) return;
+    const eff = fields.end.value.trim() || fields.end.placeholder || '';
+    fields.fireDate.placeholder = eff || 'YYYY-MM-DD';
+}
+
+if (fields.fireDate) {
+    fields.end.addEventListener('input', refreshFireDatePlaceholder);
 }
 
 window.addEventListener('resize', () => {
@@ -159,6 +171,28 @@ function canvasToNative(mx, my) {
     const rp = canvasToRasterPx(mx, my);
     if (!rp) return null;
     return rasterPxToNative(rp[0], rp[1]);
+}
+
+// Inverse of the affine geotransform — needed when the user types
+// raster-CRS bbox coords directly and we have to draw the rectangle on
+// the canvas to match.
+function nativeToRasterPx(x, y) {
+    const gt = meta.geotransform;
+    const det = gt[1] * gt[5] - gt[2] * gt[4];
+    if (!det) return null;
+    const dx = x - gt[0], dy = y - gt[3];
+    const rx = (dx * gt[5] - dy * gt[2]) / det;
+    const ry = (-dx * gt[4] + dy * gt[1]) / det;
+    return [rx, ry];
+}
+
+function nativeToCanvas(x, y) {
+    if (!meta) return null;
+    const rp = nativeToRasterPx(x, y);
+    if (!rp) return null;
+    const cx = rp[0] * (canvas.width / meta.raster_W);
+    const cy = rp[1] * (canvas.height / meta.raster_H);
+    return [cx, cy];
 }
 
 function nativeBboxToWGS84(xmin, ymin, xmax, ymax) {
@@ -215,13 +249,64 @@ function clearReadout() {
     Object.values(fields).forEach(f => {
         if (f.readOnly) f.value = '';
     });
+    // Raster-CRS inputs are editable now, so clearReadout has to wipe
+    // them explicitly when the bbox is dropped.
+    ['xmin', 'ymin', 'xmax', 'ymax'].forEach(k => {
+        if (fields[k]) fields[k].value = '';
+    });
 }
+
+// Apply user-typed raster-CRS bbox values: rebuild the canvas rectangle
+// and refresh the WGS84 readout. Returns true on success, false on
+// invalid input (the user can keep editing without losing the rest).
+function applyTypedRasterBbox() {
+    if (!meta) return false;
+    const xmin = parseFloat(fields.xmin.value);
+    const ymin = parseFloat(fields.ymin.value);
+    const xmax = parseFloat(fields.xmax.value);
+    const ymax = parseFloat(fields.ymax.value);
+    if (![xmin, ymin, xmax, ymax].every(Number.isFinite)) return false;
+    if (xmin >= xmax || ymin >= ymax) return false;
+    const tl = nativeToCanvas(xmin, ymax);  // upper-left corner
+    const br = nativeToCanvas(xmax, ymin);  // lower-right corner
+    if (!tl || !br) return false;
+    bbox = {x0: tl[0], y0: tl[1], x1: br[0], y1: br[1]};
+    redraw();
+    // Refresh WGS84 readout (raster-CRS values are already what the
+    // user typed — leave them alone so we don't fight their cursor).
+    const wgs = nativeBboxToWGS84(xmin, ymin, xmax, ymax);
+    if (wgs) {
+        fields.w.value = wgs[0].toFixed(6);
+        fields.s.value = wgs[1].toFixed(6);
+        fields.e.value = wgs[2].toFixed(6);
+        fields.n.value = wgs[3].toFixed(6);
+    }
+    invalidatePreview();
+    return true;
+}
+
+// Wire each raster-CRS field. ``input`` fires on every keystroke so
+// the WGS84 readout and the canvas rectangle track the user's edits
+// in real time. We only touch the *other* fields, never the one being
+// edited, so we don't fight the user's cursor.
+['xmin', 'ymin', 'xmax', 'ymax'].forEach(k => {
+    if (!fields[k]) return;
+    fields[k].addEventListener('input', applyTypedRasterBbox);
+});
 
 // ----- Mouse handlers -----
 
 function getMousePos(ev) {
+    // getBoundingClientRect returns the post-CSS-transform size, so
+    // dividing by it remaps cursor pixels back into canvas-buffer
+    // pixels regardless of the current zoom scale.
     const rect = canvas.getBoundingClientRect();
-    return [ev.clientX - rect.left, ev.clientY - rect.top];
+    if (!rect.width || !rect.height) {
+        return [ev.clientX - rect.left, ev.clientY - rect.top];
+    }
+    const sx = canvas.width / rect.width;
+    const sy = canvas.height / rect.height;
+    return [(ev.clientX - rect.left) * sx, (ev.clientY - rect.top) * sy];
 }
 
 function bboxContains(b, mx, my) {
@@ -480,6 +565,8 @@ submitBtn.addEventListener('click', async () => {
         bbox_native: [xmin, ymin, xmax, ymax],
         start: fields.start.value.trim(),
         end: fields.end.value.trim(),
+        fire_date: (fields.fireDate
+                    ? fields.fireDate.value.trim() : ''),
     };
     // Reuse the last preview's accumulate result if the form still
     // matches it exactly. The server re-validates, so a mismatch is a
@@ -523,6 +610,79 @@ submitBtn.addEventListener('click', async () => {
         submitBtn.disabled = false;
     }
 });
+
+// ----- Wheel zoom + reset -----
+//
+// We scale ``.nf-zoom-inner`` (which contains both the overview <img>
+// and the bbox <canvas>) via CSS transform. The canvas draw buffer
+// stays at its natural pixel size — getMousePos divides by
+// getBoundingClientRect to remap cursor px → canvas px regardless of
+// scale, so bbox math is unaffected.
+
+const zoomWrap = document.getElementById('nf-canvas-wrap');
+const zoomInner = document.getElementById('nf-zoom-inner');
+const zoomResetBtn = document.getElementById('nf-zoom-reset');
+let zoomScale = 1, zoomTx = 0, zoomTy = 0;
+const ZOOM_MIN = 1, ZOOM_MAX = 32;
+
+function applyZoom() {
+    if (!zoomInner) return;
+    zoomInner.style.transform =
+        `translate(${zoomTx}px, ${zoomTy}px) scale(${zoomScale})`;
+}
+
+function resetZoom() {
+    zoomScale = 1;
+    zoomTx = 0;
+    zoomTy = 0;
+    applyZoom();
+}
+
+function clampPan() {
+    // Stop the scaled content from wandering beyond the wrap edges. At
+    // scale=1 both bounds collapse to 0; otherwise we let the user pan
+    // anywhere up to where the content edge meets the viewport edge.
+    if (!zoomWrap || !zoomInner) return;
+    const wrapW = zoomWrap.clientWidth;
+    const wrapH = zoomWrap.clientHeight;
+    const innerW = zoomInner.offsetWidth * zoomScale;
+    const innerH = zoomInner.offsetHeight * zoomScale;
+    const minTx = Math.min(0, wrapW - innerW);
+    const minTy = Math.min(0, wrapH - innerH);
+    if (zoomTx > 0) zoomTx = 0;
+    if (zoomTy > 0) zoomTy = 0;
+    if (zoomTx < minTx) zoomTx = minTx;
+    if (zoomTy < minTy) zoomTy = minTy;
+}
+
+if (zoomWrap && zoomInner) {
+    // ``passive: false`` is required to call preventDefault on a wheel
+    // event and stop the page from scrolling while the user zooms.
+    zoomWrap.addEventListener('wheel', (ev) => {
+        ev.preventDefault();
+        const rect = zoomWrap.getBoundingClientRect();
+        // Cursor position relative to the wrap (the scale anchor frame).
+        const cx = ev.clientX - rect.left;
+        const cy = ev.clientY - rect.top;
+        // Same point in unscaled-content coordinates.
+        const contentX = (cx - zoomTx) / zoomScale;
+        const contentY = (cy - zoomTy) / zoomScale;
+        // Standard exponential zoom feel: ~10% per notch.
+        const factor = Math.exp(-ev.deltaY * 0.0015);
+        let next = zoomScale * factor;
+        if (next < ZOOM_MIN) next = ZOOM_MIN;
+        if (next > ZOOM_MAX) next = ZOOM_MAX;
+        // Re-anchor so the content point under the cursor stays under
+        // the cursor.
+        zoomTx = cx - contentX * next;
+        zoomTy = cy - contentY * next;
+        zoomScale = next;
+        clampPan();
+        applyZoom();
+    }, {passive: false});
+}
+
+if (zoomResetBtn) zoomResetBtn.addEventListener('click', resetZoom);
 
 // ----- Boot -----
 

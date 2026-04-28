@@ -1129,6 +1129,14 @@ tbody tr.row-mapping:hover { background: #ede1ff; }
     border: 1px solid #aab;
     background: #000;
     max-width: 100%;
+    overflow: hidden;
+    overscroll-behavior: contain;
+}
+.nf-zoom-inner {
+    position: relative;
+    display: block;
+    transform-origin: 0 0;
+    will-change: transform;
 }
 .newfire-canvas-wrap img {
     display: block;

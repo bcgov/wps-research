@@ -22,17 +22,22 @@
                 <select id="nf-year"></select>
             </label>
             <span id="nf-coords" class="nf-coords"></span>
+            <button id="nf-zoom-reset" type="button" class="btn btn-secondary">Reset zoom</button>
             <button id="nf-clear-bbox" type="button" class="btn btn-secondary">Clear bbox</button>
         </div>
-        <div class="newfire-canvas-wrap">
-            <img id="nf-overview" alt="Year overview" />
-            <canvas id="nf-canvas"></canvas>
+        <div class="newfire-canvas-wrap" id="nf-canvas-wrap">
+            <div class="nf-zoom-inner" id="nf-zoom-inner">
+                <img id="nf-overview" alt="Year overview" />
+                <canvas id="nf-canvas"></canvas>
+            </div>
         </div>
         <p class="newfire-hint">
             Click and drag on the overview to mark the VIIRS download
             area. Click inside an existing rectangle to drag-move it.
-            The final raster crop will be tightened to the actual fire
-            pixels after the download finishes.
+            Scroll to zoom around the cursor (page won't scroll while
+            you're over the image). The final raster crop will be
+            tightened to the actual fire pixels after the download
+            finishes.
         </p>
     </div>
 
@@ -45,11 +50,16 @@
         </label>
 
         <h3>Bounding Box (raster CRS)</h3>
+        <p class="newfire-hint" style="margin-top:0">
+            Editable. Type values to set the bbox without drawing — the
+            rectangle on the overview and the WGS84 readout update to
+            match.
+        </p>
         <div class="nf-grid2">
-            <label>x_min<input id="nf-xmin" type="text" readonly></label>
-            <label>y_min<input id="nf-ymin" type="text" readonly></label>
-            <label>x_max<input id="nf-xmax" type="text" readonly></label>
-            <label>y_max<input id="nf-ymax" type="text" readonly></label>
+            <label>x_min<input id="nf-xmin" type="text"></label>
+            <label>y_min<input id="nf-ymin" type="text"></label>
+            <label>x_max<input id="nf-xmax" type="text"></label>
+            <label>y_max<input id="nf-ymax" type="text"></label>
         </div>
         <h3>Bounding Box (WGS84 deg)</h3>
         <div class="nf-grid2">
@@ -67,6 +77,17 @@
         <label class="nf-field">
             End (YYYY-MM-DD)
             <input id="nf-end" type="text" placeholder="">
+        </label>
+
+        <h3>Fire Date</h3>
+        <p class="newfire-hint" style="margin-top:0">
+            Defaults to the End date above. Override to record the actual
+            fire date once you know it (still editable later from the
+            mapping page until the fire is accepted).
+        </p>
+        <label class="nf-field">
+            Fire Date (YYYY-MM-DD)
+            <input id="nf-fire-date" type="text" placeholder="">
         </label>
 
         <div id="nf-errors" class="nf-errors" aria-live="polite"></div>
