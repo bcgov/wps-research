@@ -25,8 +25,10 @@ Lightweight toolkit for fire-mapping workflows on Sentinel-2 imagery. Provides b
 ---
 
 ## Batch Fire Mapping — Web Interface
-* [batch_fire_mapping_viirs_web](https://github.com/bcgov/wps-research/tree/master/data/bill/batch_fire_mapping_viirs_web)
-* [`batch_fire_mapping_web/`](https://github.com/bcgov/wps-research/tree/master/data/bill/batch_fire_mapping_web)
+There are two versions of this application. The first is for operational use: mapping fires without a perimeter. The second is for mapping historical fires from province-wide/ end of year perimeters. 
+
+* [`batch_fire_mapping_viirs_web/`](https://github.com/bcgov/wps-research/tree/master/data/bill/batch_fire_mapping_viirs_web) ( seeded from VIIRS hotspots )
+* [`batch_fire_mapping_web/`](https://github.com/bcgov/wps-research/tree/master/data/bill/batch_fire_mapping_web) ( seeded from historical fire perimeters ) 
 
 <img src="images/fire_mapping_web.png" width="60%">
 
