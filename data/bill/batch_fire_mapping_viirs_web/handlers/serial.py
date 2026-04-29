@@ -281,13 +281,17 @@ class SerialRoutes:
         if os.path.isfile(overlay_path):
             self._send_file(overlay_path, 'image/png')
             return
-        # Fall back to comparison figure
-        comp_path = os.path.join(
-            fire.cache_dir, f'{fire_numbe}_serial_{run_id}.png')
-        if os.path.isfile(comp_path):
-            self._send_file(comp_path, 'image/png')
-            return
-        self._send_json({'error': 'Image not found'}, 404)
+        # Do NOT fall back to the comparison figure here — the gallery
+        # thumbnail must always be the pixel-aligned overlay. Returning
+        # the comparison plot under the same URL silently substitutes a
+        # different artifact, which is confusing when overlay
+        # generation has failed. Surface a 404 instead so the missing
+        # overlay is visible (and check the [overlay] WARNING in the
+        # server log for the underlying cause).
+        sys.stderr.write(
+            f'[serial_image] overlay missing for fire={fire_numbe} '
+            f'run={run_id}: {overlay_path}\n')
+        self._send_json({'error': 'Overlay not found'}, 404)
 
     def handle_api_serial_accept(self, fire_numbe, run_id):
         fire_numbe = unquote(fire_numbe)

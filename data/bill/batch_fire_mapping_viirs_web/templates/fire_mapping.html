@@ -19,7 +19,26 @@
 </header>
 
 <div class="fire-info-bar">
-    <span>Date: <strong>{{ fire_date }}</strong></span>
+    <span id="fire-date-cell">Date:
+        <strong id="fire-date-text">{{ fire_date }}</strong>
+        <button type="button" id="fire-date-edit"
+                class="btn btn-secondary"
+                style="font-size:11px;padding:1px 6px;margin-left:4px"
+                title="Edit fire date" onclick="startEditFireDate()">&#9998;</button>
+        <span id="fire-date-editor" style="display:none">
+            <input id="fire-date-input" type="text" maxlength="10"
+                   placeholder="YYYY-MM-DD"
+                   style="width:96px;font-size:12px;padding:1px 4px">
+            <button type="button" class="btn btn-success"
+                    style="font-size:11px;padding:1px 6px"
+                    onclick="saveFireDate()">Save</button>
+            <button type="button" class="btn btn-secondary"
+                    style="font-size:11px;padding:1px 6px"
+                    onclick="cancelEditFireDate()">Cancel</button>
+            <span id="fire-date-error" class="error-text"
+                  style="margin-left:6px;color:#c33;font-size:11px"></span>
+        </span>
+    </span>
     <span>Year: <strong>{{ fire_year }}</strong></span>
     <span>Hint Size: <strong>{{ fire_size_ha }} ha</strong></span>
     <span>ML Size: <strong id="ml-size-text">--</strong></span>
@@ -669,7 +688,17 @@ function updateSubtitle(pane, viewKey) {
 // -----------------------------------------------------------------------
 // Load image into a specific pane
 // -----------------------------------------------------------------------
-let firstLoad = true;
+// Per-pane "have we ever fit this pane?" — tracked separately because the
+// right pane only enters the DOM when split opens, and using a single
+// global flag let the right pane skip its initial fit (it'd render at
+// scale=1 next to a fitted left pane). Also remember the dims the current
+// transform was computed against, so we can re-fit when an image with a
+// different aspect ratio loads (e.g. switching to the matplotlib
+// comparison figure from a same-aspect overlay).
+const _paneFitState = {
+    left:  { fitted: false, fitW: 0, fitH: 0 },
+    right: { fitted: false, fitW: 0, fitH: 0 },
+};
 
 function loadPaneImage(pane, viewKey) {
     if (!viewKey) return;
@@ -698,8 +727,23 @@ function loadPaneImage(pane, viewKey) {
     img.onload = () => {
         if (pane === 'left') loadMsg.style.display = 'none';
         img.style.display = 'block';
-        if (firstLoad) { zoomFitPane(pane); firstLoad = false; }
-        else { updateTransformForPane(pane); }
+        const fs = _paneFitState[pane];
+        const dimsChanged = fs.fitted
+            && (img.naturalWidth !== fs.fitW
+                || img.naturalHeight !== fs.fitH);
+        // In syncPanes the right pane mirrors left's transform — skip the
+        // fit so we don't clobber the inherited scale. The fit state is
+        // still recorded so a later un-sync doesn't trigger a spurious
+        // refit.
+        const inheritFromLeft = syncPanes && splitActive && pane === 'right';
+        if (!inheritFromLeft && (!fs.fitted || dimsChanged)) {
+            zoomFitPane(pane);
+        } else {
+            updateTransformForPane(pane);
+        }
+        fs.fitted = true;
+        fs.fitW = img.naturalWidth;
+        fs.fitH = img.naturalHeight;
     };
     img.onerror = () => {
         // Transient 404 on run switch — the serial overlay PNG may be
@@ -731,6 +775,85 @@ function onViewDropdownChange() {
     loadPaneImage(activePane, viewKey);
 }
 
+// -----------------------------------------------------------------------
+// Editable Fire Date (pencil icon next to the date in the info bar).
+// Disabled once the fire is accepted — at that point fire_date has been
+// written into <NAME>_params.yaml and the canonical output dir, so the
+// server rejects edits anyway.
+// -----------------------------------------------------------------------
+function syncFireDateEditability() {
+    const btn = document.getElementById('fire-date-edit');
+    const editor = document.getElementById('fire-date-editor');
+    if (!btn) return;
+    const locked = (lastKnownStatus === 'accepted');
+    btn.style.display = locked ? 'none' : '';
+    if (locked && editor) {
+        editor.style.display = 'none';
+        document.getElementById('fire-date-text').style.display = '';
+    }
+}
+
+function startEditFireDate() {
+    if (lastKnownStatus === 'accepted') return;
+    const text = document.getElementById('fire-date-text');
+    const editor = document.getElementById('fire-date-editor');
+    const input = document.getElementById('fire-date-input');
+    const err = document.getElementById('fire-date-error');
+    const btn = document.getElementById('fire-date-edit');
+    err.textContent = '';
+    input.value = text.textContent.trim();
+    text.style.display = 'none';
+    btn.style.display = 'none';
+    editor.style.display = '';
+    input.focus();
+    input.select();
+}
+
+function cancelEditFireDate() {
+    document.getElementById('fire-date-editor').style.display = 'none';
+    document.getElementById('fire-date-text').style.display = '';
+    syncFireDateEditability();
+    document.getElementById('fire-date-error').textContent = '';
+}
+
+async function saveFireDate() {
+    const input = document.getElementById('fire-date-input');
+    const err = document.getElementById('fire-date-error');
+    const text = document.getElementById('fire-date-text');
+    err.textContent = '';
+    const value = input.value.trim();
+    // Cheap client-side guard so the user gets immediate feedback.
+    // Server re-validates (the source of truth, including calendar
+    // existence checks via datetime.fromisoformat).
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        err.textContent = 'Use YYYY-MM-DD';
+        return;
+    }
+    const fireName = {{{ fire_numbe_json }}};
+    try {
+        const r = await fetch(
+            '/api/fire/' + encodeURIComponent(fireName) + '/set_date', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'fetch',
+            },
+            body: JSON.stringify({fire_date: value}),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) {
+            const msg = (j.errors && j.errors[0] && j.errors[0].message)
+                || j.error || ('HTTP ' + r.status);
+            err.textContent = msg;
+            return;
+        }
+        text.textContent = j.fire_date || value;
+        cancelEditFireDate();
+    } catch (exc) {
+        err.textContent = 'Network error: ' + exc;
+    }
+}
+
 // Status display with dual badges
 function updateStatusDisplay(status, prevAccepted) {
     const container = document.getElementById('status-badges');
@@ -744,6 +867,7 @@ function updateStatusDisplay(status, prevAccepted) {
     }
     html += `<span class="status-badge status-${status}">${status}</span>`;
     container.innerHTML = html;
+    syncFireDateEditability();
 }
 
 // Agreement display. When a fire has been re-mapped after acceptance,
@@ -1068,6 +1192,7 @@ async function mapWithSettings() {
 // pollMappingStatus with a single loop that handles all live updates.
 // -----------------------------------------------------------------------
 let lastKnownStatus = '{{ fire_status }}';
+syncFireDateEditability();
 
 async function pollFireState() {
     if (sseActive) {
@@ -1576,6 +1701,31 @@ function showSerialGallery(results, settingsUsed) {
     items.dataset.bestRunId = bestRunId !== null ? String(bestRunId) : '';
 }
 
+// Serial thumbnail retry. The overlay PNG is written by the worker just
+// before the run is appended to serial_results, but the gallery can poll
+// in the small window between append and the file being visible to
+// readers (fs flush, matplotlib cold start on the first overlay of a
+// session). A single 404 used to permanently hide the thumbnail because
+// the card is then memoized by statSig and not re-rendered. Retry with
+// a short backoff before giving up so the thumbnail self-heals without
+// a page reload.
+function onSerialThumbError(img) {
+    const max = 8;
+    const retries = Number(img.dataset.retries || 0);
+    if (retries >= max) {
+        img.style.display = 'none';
+        return;
+    }
+    img.dataset.retries = String(retries + 1);
+    const delay = Math.min(2000, 250 * Math.pow(1.5, retries));
+    const runId = img.dataset.runId;
+    setTimeout(() => {
+        if (!img.isConnected) return;
+        img.src = '/api/fire/' + encodeURIComponent(FIRE)
+            + '/serial/' + runId + '/image?t=' + Date.now();
+    }, delay);
+}
+
 function renderSerialCard(r, opts) {
     const isPrevious = !!opts.isPrevious;
     const isBest = !!opts.isBest;
@@ -1619,7 +1769,10 @@ function renderSerialCard(r, opts) {
         <div style="display:flex;align-items:center;gap:8px">
             <img src="/api/fire/${encodeURIComponent(FIRE)}/serial/${r.run_id}/image?t=${Date.now()}"
                  style="width:80px;height:60px;object-fit:cover;border-radius:4px;cursor:pointer;image-rendering:pixelated"
-                 onclick="viewSerialRun(${r.run_id})" onerror="this.style.display='none'">
+                 data-run-id="${r.run_id}" data-retries="0"
+                 onclick="viewSerialRun(${r.run_id})"
+                 onerror="onSerialThumbError(this)"
+                 onload="this.dataset.retries='0';this.style.display=''">
             <div style="flex:1;font-size:12px">
                 ${label}${badge}${errMsg}<br>
                 <span style="color:#555">Agreement: ${agr} &middot; ML: ${mlArea}</span><br>
