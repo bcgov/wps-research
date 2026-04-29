@@ -1372,22 +1372,55 @@ def _mrap_compute(task: tuple) -> Tuple[int, dict]:
     return pid, res
 
 
+def _resolve_prev_mrap(prev) -> Optional[np.ndarray]:
+    """Resolve a deferred MRAP reference.
+
+    prev can be:
+      - None           → return None
+      - np.ndarray     → return as-is
+      - str (filepath) → load from disk (deferred skip)
+    """
+    if prev is None:
+        return None
+    if isinstance(prev, np.ndarray):
+        return prev
+    # str path — deferred load from a skipped timestep
+    print(f'  [SEED] Loading deferred MRAP: {prev}')
+    return _load_envi_stack(prev)
+
+
 def _mrap_composite_and_write(
     res: dict,
-    prev_mrap_rf: Optional[np.ndarray],
-    prev_mrap_dep: Optional[np.ndarray],
+    prev_mrap_rf,    # Optional[np.ndarray | str]  — array or deferred path
+    prev_mrap_dep,   # Optional[np.ndarray | str]
     write_threads: list,
     cloud_threshold: float,
-) -> Tuple[bool, Optional[np.ndarray], Optional[np.ndarray]]:
-    """Serial part of MRAP processing."""
+) -> Tuple[bool, object, object]:
+    """Serial part of MRAP processing.
+
+    prev_mrap_rf / prev_mrap_dep may be numpy arrays, filepath strings
+    (deferred from a skipped timestep), or None.  When a skip is
+    encountered, the path is stored without loading — it is only
+    loaded when the next non-skip timestep needs to seed from it.
+    This avoids reading every intermediate MRAP.bin during long
+    runs of already-processed timesteps.
+
+    Returns (success, new_prev_rf, new_prev_dep) where the prev
+    values may again be arrays, paths, or None.
+    """
     import threading
 
     if not res['ok']:
         return False, prev_mrap_rf, prev_mrap_dep
 
     if res.get('skip'):
-        existing = _load_envi_stack(res['out_mrap_bin'])
-        return False, existing, prev_mrap_dep
+        # Defer loading — just remember the path.  The file will only be
+        # read if/when a subsequent non-skip timestep needs to seed from it.
+        return False, res['out_mrap_bin'], prev_mrap_dep
+
+    # --- Non-skip: we actually need the previous MRAP arrays ---
+    prev_mrap_rf  = _resolve_prev_mrap(prev_mrap_rf)
+    prev_mrap_dep = _resolve_prev_mrap(prev_mrap_dep)
 
     out_stack    = res['out_stack']
     dep_stack    = res.get('dep_stack')
@@ -1662,8 +1695,8 @@ def main() -> None:
             for task in tasks_mrap_compute:
                 ordered_futures.append(executor.submit(_mrap_compute, task))
 
-            prev_mrap_rf:  Optional[np.ndarray] = None
-            prev_mrap_dep: Optional[np.ndarray] = None
+            prev_mrap_rf  = None   # np.ndarray | str (deferred path) | None
+            prev_mrap_dep = None   # np.ndarray | str (deferred path) | None
             write_threads: list = []
             n_ok  = 0
             n_skip = 0
@@ -1756,5 +1789,4 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
-
 
