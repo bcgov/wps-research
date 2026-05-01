@@ -11,6 +11,13 @@
             - --L1 syncs from S2MSI1C, writes to L1_TXXXXX/ folders
             - --L2 syncs from S2MSI2A, writes to L2_TXXXXX/ folders
             - --n N overrides the automatic lookback (default: auto or 1)
+
+20260501: Added --aggressive flag for mosaic cleanup behaviour:
+            - Default: only delete merged mosaics less than 3 days old, and
+              write .mrap_merge_dates for sentinel2_mrap_merge.py to pick up.
+            - --aggressive: delete all merged mosaics from earliest regen date
+              onward (original behaviour).
+          Fixed missing dot in small_DATE.tar.gz filename.
 '''
 import os
 import sys
@@ -23,16 +30,19 @@ from misc import err, exist, parfor, sep, assert_aws_cli_installed
 # assert_aws_cli_installed()
 
 # ---------------------------------------------------------------------------
-# Parse --L1, --L2, --n flags
+# Parse --L1, --L2, --n, --aggressive flags
 # ---------------------------------------------------------------------------
 argv = list(sys.argv)
 
 flag_L1 = '--L1' in argv
 flag_L2 = '--L2' in argv
+flag_aggressive = '--aggressive' in argv
 if flag_L1:
     argv.remove('--L1')
 if flag_L2:
     argv.remove('--L2')
+if flag_aggressive:
+    argv.remove('--aggressive')
 
 user_N = None
 if '--n' in argv:
@@ -78,6 +88,7 @@ else:
     MSI_tag    = 'MSIL2A'
 
 print(f'Level mode: {L_mode}  (S3 product: {S2_product}, filename tag: {MSI_tag})')
+print(f'Cleanup mode: {"aggressive (delete all from earliest regen date)" if flag_aggressive else "default (delete only mosaics < 3 days old)"}')
 
 # ---------------------------------------------------------------------------
 # GID setup
@@ -254,29 +265,69 @@ def min_d(dates):
     return [md]
 
 if len(regen_dates) > 0:
-    regen_dates = min_d(regen_dates)  # find earliest date that needs regenerating
 
-    # delete mrap files / folders for dates equal or greater to then..
-    mrap_files = os.popen("ls -1 *_mrap.bin 2>/dev/null").read().strip().split('\n')
+    # Write .mrap_merge_dates so sentinel2_mrap_merge.py knows which dates
+    # need regeneration (it reads this file as a side-channel input).
+    regen_dates.sort()
+    with open('.mrap_merge_dates', 'w') as f:
+        for d in regen_dates:
+            f.write(d + '\n')
+    print("wrote .mrap_merge_dates:", regen_dates)
 
-    to_delete = []
-    for f in mrap_files:
-        if f == '':
-            continue
-        ds = f.split('_')[0]
+    if flag_aggressive:
+        # --aggressive: delete all merged mosaics from earliest regen date onward
+        regen_dates = min_d(regen_dates)
 
-        if ds >= regen_dates[0]:
-            print(ds, regen_dates[0])
-            to_delete += [ds]
+        mrap_files = os.popen("ls -1 *_mrap.bin 2>/dev/null").read().strip().split('\n')
 
-    print("mrap dates to delete:")
-    print(to_delete)
+        to_delete = []
+        for f in mrap_files:
+            if f == '':
+                continue
+            ds = f.split('_')[0]
 
-    for d in to_delete:
-        files_d = [d,
-                   d + '_mrap.bin',
-                   d + '_mrap.hdr',
-                   'small_' + d + 'tar.gz']
-        cmd = 'rm -rf ' + ' '.join(files_d)
-        print(cmd)
-        a = os.system(cmd)
+            if ds >= regen_dates[0]:
+                print(ds, regen_dates[0])
+                to_delete += [ds]
+
+        print("mrap dates to delete (aggressive):")
+        print(to_delete)
+
+        for d in to_delete:
+            files_d = [d,
+                       d + '_mrap.bin',
+                       d + '_mrap.hdr',
+                       'small_' + d + '.tar.gz']
+            cmd = 'rm -rf ' + ' '.join(files_d)
+            print(cmd)
+            a = os.system(cmd)
+
+    else:
+        # Default: only delete merged mosaics whose dates are less than 3 days old
+        today_s = ''.join([str(today.year).zfill(4), str(today.month).zfill(2), str(today.day).zfill(2)])
+        cutoff_date = today - timedelta(days=3)
+        cutoff_s = ''.join([str(cutoff_date.year).zfill(4), str(cutoff_date.month).zfill(2), str(cutoff_date.day).zfill(2)])
+
+        mrap_files = os.popen("ls -1 *_mrap.bin 2>/dev/null").read().strip().split('\n')
+
+        to_delete = []
+        for f in mrap_files:
+            if f == '':
+                continue
+            ds = f.split('_')[0]
+
+            if ds in regen_dates and ds >= cutoff_s:
+                print(ds, "(< 3 days old, flagged for regen)")
+                to_delete += [ds]
+
+        print("mrap dates to delete (recent only, < 3 days):")
+        print(to_delete)
+
+        for d in to_delete:
+            files_d = [d,
+                       d + '_mrap.bin',
+                       d + '_mrap.hdr',
+                       'small_' + d + '.tar.gz']
+            cmd = 'rm -rf ' + ' '.join(files_d)
+            print(cmd)
+            a = os.system(cmd)
