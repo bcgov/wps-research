@@ -18,6 +18,7 @@ Side-channel inputs:
 from misc import sep, args, exists, run, err, parfor, hdr_fn
 import multiprocessing as mp
 import os
+import sys
 import shutil
 import threading
 import queue
