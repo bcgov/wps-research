@@ -419,11 +419,22 @@ if not job_list:
     print('[PLAN] Nothing to do.', flush=True)
     raise SystemExit(0)
 
+'''
 print(flush=True)
 answer = input(f'Proceed to generate {len(job_list)} file(s)? [y/n] ').strip().lower()
 if answer != 'y':
     print('Aborted.', flush=True)
     raise SystemExit(0)
+'''
+
+print(flush=True)
+if sys.stdin.isatty():
+    answer = input(f'Proceed to generate {len(job_list)} file(s)? [y/n] ').strip().lower()
+    if answer != 'y':
+        print('Aborted.', flush=True)
+        raise SystemExit(0)
+else:
+    print(f'Non-interactive mode — proceeding to generate {len(job_list)} file(s).', flush=True)
 
 # ---------------------------------------------------------------------------
 # populate work queue and launch worker threads
