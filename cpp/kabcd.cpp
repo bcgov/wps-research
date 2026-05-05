@@ -8,12 +8,13 @@ Todo:
 (*) develop an entropy concept to show if results are conflicted
 (*) probability (pi) for each class, is the ratio of the count of observations (among the knn) for that class, divided by K (the number of neighbours)
 
-Regression mode: (NOT implemented)
-(*) Value for object is average of the values for the K-nearest neighbours. 
+Regression mode:
+(*) Value for object is average of the values for the K-nearest neighbours. DONE (--regress flag)
 (*) add a standard deviation, min, max or other parameters to characterize the distribution and assess conflict.
 
  * 20220517 e.g.: abcd.exe A.bin B.bin C.bin # and compare w D.bin!
 20220610 add skip_offset factor
+20260505 add --regress flag for regression mode
 
 How to project importance back on the dimensions?
 Should windowing be added?
@@ -26,6 +27,7 @@ static size_t nr[3], nc[3], nb[3], skip_f, skip_off, m, np, np2; // shapes
 static float * y[3], *x, t, *A, *B, *C;  // data
 static int * bp, * bp2;  // bad px: {A,B}, C respectively
 static int knn_k; // number of neighbours to consider
+static bool regress_mode = false; // regression vs classification
 
 void infer_px(size_t i){
   int debug = false;
@@ -55,51 +57,61 @@ void infer_px(size_t i){
     pq.push(f_i(d, j));
   }
 
-  map<vector<float>, size_t> c;
-  //map<vector<float>, size_t> exemplar;
-
   if(pq.size() < knn_k) err("not enough elements pushed");
-  for0(k, knn_k){
-    f_i t(pq.top());
-    pq.pop();
-    vector<float> v;
-    for0(m, nb[1]) v.push_back(B[np * m + t.i]);
-    
-    if(debug){
-      printf("%e %zu ", t.d, t.i);
-      cout << v << endl;
+
+  if(regress_mode){
+    /* regression: average B-values over K nearest neighbours */
+    vector<double> sum(nb_1, 0.);
+    for0(k, knn_k){
+      f_i t(pq.top());
+      pq.pop();
+      for0(m, nb_1) sum[m] += (double)B[np * m + t.i];
+    }
+    for0(k, nb_1) x[np2 * k + i] = (float)(sum[k] / (double)knn_k);
+  }
+  else{
+    /* classification: mode of B-values over K nearest neighbours */
+    map<vector<float>, size_t> c;
+
+    for0(k, knn_k){
+      f_i t(pq.top());
+      pq.pop();
+      vector<float> v;
+      for0(m, nb[1]) v.push_back(B[np * m + t.i]);
+
+      if(debug){
+        printf("%e %zu ", t.d, t.i);
+        cout << v << endl;
+      }
+
+      if(c.count(v) < 1) c[v] = 1;
+      c[v] += 1;
     }
 
-    if(c.count(v) < 1) c[v] = 1; // 1, 2, 3! 
-    c[v] += 1;
+    priority_queue<f_v> pq2;
+    map<vector<float>, size_t>::iterator ci;
+    for(ci = c.begin(); ci != c.end(); ci ++){
+      if(debug) cout << "  " << ci->first << " " << ci->second << endl;
+      pq2.push(f_v(ci->second, ci->first));
+    }
 
-    //exemplar[v] = t.i; // hold index of instance of vector
-  }
+    f_v top_val(pq2.top());
+    while(pq2.size() > 0){
+      f_v val(pq2.top());
+      pq2.pop();
+      if(debug) cout << "  " << val.d << " " << val.v << endl;
+    }
 
-  priority_queue<f_v> pq2;
-  map<vector<float>, size_t>::iterator ci;
-  for(ci = c.begin(); ci != c.end(); ci ++){
-    if(debug) cout << "  " << ci->first << " " << ci->second << endl;
-    pq2.push(f_v(ci->second, ci->first));
-  }
+    if(debug){
+      cout << "mode: " << top_val.d << " " << top_val.v << endl;
+      cout << "exit" << endl;
+      exit(1);
+    }
 
-  f_v top_val(pq2.top());
-  while(pq2.size() > 0){
-    f_v val(pq2.top());
-    pq2.pop();
-    if(debug) cout << "  " << val.d << " " << val.v << endl;
-  }
-
-  if(debug){
-    cout << "mode: " << top_val.d << " " << top_val.v << endl;
-    cout << "exit" << endl;
-    exit(1);
-  }
-
-  // mi should be j of most frequent
-  size_t mi = 0;
-  for0(k, nb[1]){ // nb[2]) : need to revise in abcd.cpp?
-    x[np2 * k + i] = top_val.v[k]; //B[np * k + mi];  // assign most frequent // not nearest
+    size_t mi = 0;
+    for0(k, nb[1]){
+      x[np2 * k + i] = top_val.v[k];
+    }
   }
   if(i % 10000 == 0) status(i, np2);
 }
@@ -118,6 +130,23 @@ int main(int argc, char** argv){
   
   knn_k = 13;  // don't forget to set this at the command line later
 
+  /* scan for --regress flag and remove it from argv */
+  int new_argc = 0;
+  char * new_argv[argc];
+  for(int a = 0; a < argc; a++){
+    if(str(argv[a]) == str("--regress")){
+      regress_mode = true;
+    }
+    else{
+      new_argv[new_argc++] = argv[a];
+    }
+  }
+  argc = new_argc;
+  argv = new_argv;
+
+  if(regress_mode) cout << "Mode: regression (average of KNN)" << endl;
+  else cout << "Mode: classification (mode of KNN)" << endl;
+
   size_t i, n_bad;
   if(argc < 4){
     printf("A is to B as C is to ? Answer: D (the output)\n");
@@ -125,7 +154,7 @@ int main(int argc, char** argv){
     printf("Note: C's dimensions can differ (from A's and B's); C's band count matches A's\n");
     printf("The output result (i.e. \"D\") has the same dimensions as C\n");
     printf("D's band count wil match the band count of B\n"); 
-    err("kabcd [A: img1 (n bands)] [B: img2 (m bands)] [C: img3 (n bands)] # [skip] # [skip_offset]\n");
+    err("kabcd [A: img1 (n bands)] [B: img2 (m bands)] [C: img3 (n bands)] # [skip] # [skip_offset] [--regress]\n");
   }
   skip_f = (argc > 4) ? (size_t) atol(argv[4]): 1; // bsq2bip -> binary_sort -> bip2bsq
   skip_off = (argc > 5) ? (size_t) atol(argv[5]): 0;
@@ -176,7 +205,8 @@ int main(int argc, char** argv){
   str u("_");
   parfor(0, np2, infer_px, 0); //1);  // inference by output pixel
 
-  str pre(str("kabcd_") + str(argv[1]) + u + str(argv[2]) + u +
+  str mode_str(regress_mode ? str("reg") : str("cls"));
+  str pre(str("kabcd_") + mode_str + u + str(argv[1]) + u + str(argv[2]) + u +
  	  		 str(argv[3]) + u + to_string(skip_f) + u +
 			 		    to_string(skip_off));
   bwrite(x, pre + str(".bin"), nr[2], nc[2], nb[1]);  // write out
