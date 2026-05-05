@@ -128,14 +128,18 @@ inline int is_bad(float * dat, size_t i, size_t n_b){
 
 int main(int argc, char** argv){
   
-  knn_k = 13;  // don't forget to set this at the command line later
+  knn_k = 7;
 
-  /* scan for --regress flag and remove it from argv */
+  /* scan for flags and remove them from argv */
   int new_argc = 0;
   char * new_argv[argc];
   for(int a = 0; a < argc; a++){
     if(str(argv[a]) == str("--regress")){
       regress_mode = true;
+    }
+    else if(str(argv[a]) == str("--knn_k") && a + 1 < argc){
+      knn_k = atoi(argv[++a]);
+      if(knn_k < 1) err("knn_k must be >= 1");
     }
     else{
       new_argv[new_argc++] = argv[a];
@@ -144,8 +148,8 @@ int main(int argc, char** argv){
   argc = new_argc;
   argv = new_argv;
 
-  if(regress_mode) cout << "Mode: regression (average of KNN)" << endl;
-  else cout << "Mode: classification (mode of KNN)" << endl;
+  cout << "Mode: " << (regress_mode ? "regression (average of KNN)" : "classification (mode of KNN)") << endl;
+  cout << "K: " << knn_k << endl;
 
   size_t i, n_bad;
   if(argc < 4){
@@ -153,8 +157,8 @@ int main(int argc, char** argv){
     printf("Note: A and B must have same shape (possibly different band count)\n");
     printf("Note: C's dimensions can differ (from A's and B's); C's band count matches A's\n");
     printf("The output result (i.e. \"D\") has the same dimensions as C\n");
-    printf("D's band count wil match the band count of B\n"); 
-    err("kabcd [A: img1 (n bands)] [B: img2 (m bands)] [C: img3 (n bands)] # [skip] # [skip_offset] [--regress]\n");
+    printf("D's band count wil match the band count of B\n");
+    err("kabcd [A: img1 (n bands)] [B: img2 (m bands)] [C: img3 (n bands)] # [skip] # [skip_offset] [--regress] [--knn_k K]\n");
   }
   skip_f = (argc > 4) ? (size_t) atol(argv[4]): 1; // bsq2bip -> binary_sort -> bip2bsq
   skip_off = (argc > 5) ? (size_t) atol(argv[5]): 0;
@@ -207,13 +211,13 @@ int main(int argc, char** argv){
 
   str mode_str(regress_mode ? str("reg") : str("cls"));
   str pre(str("kabcd_") + mode_str + u + str(argv[1]) + u + str(argv[2]) + u +
- 	  		 str(argv[3]) + u + to_string(skip_f) + u +
-			 		    to_string(skip_off));
+                str(argv[3]) + u + to_string(skip_f) + u +
+                         to_string(skip_off));
   bwrite(x, pre + str(".bin"), nr[2], nc[2], nb[1]);  // write out
   hwrite(pre + str(".hdr"), nr[2], nc[2], nb[1]); // this info corroborates the choice above in alloc
-  if(true){
+  if(false){
     int r = system((str("python3 ~/GitHub/wps-research/py/raster_plot.py ") + pre +
-  	            str(".bin 1 2 3 1")).c_str());
+                  str(".bin 1 2 3 1")).c_str());
   }
   run((str("envi_header_copy_bandnames.py ") + str(hdr_fn(argv[1 + 1])) + str(" ") + pre + str(".hdr")).c_str());
   run((str("envi_header_copy_mapinfo.py ") + str(hdr_fn(argv[1 + 1])) + str(" ") + pre + str(".hdr")).c_str());
