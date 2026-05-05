@@ -186,6 +186,7 @@ int main(int argc, char** argv){
   	            str(".bin 1 2 3 1")).c_str());
   }
   run((str("envi_header_copy_bandnames.py ") + str(hdr_fn(argv[1 + 1])) + str(" ") + pre + str(".hdr")).c_str());
+  run((str("envi_header_copy_mapinfo.py ") + str(hdr_fn(argv[1 + 1])) + str(" ") + pre + str(".hdr")).c_str());
   //run(cmd);
   return 0;
 }
