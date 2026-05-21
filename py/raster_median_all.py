@@ -7,3 +7,4 @@ lines = [x.strip() for x in lines]
 cmd = 'raster_median ' + ' '.join(lines) + ' median.bin'
 print(cmd)
 
+a = os.system(cmd)
