@@ -34,5 +34,5 @@ def run(c):
     print(c)
     return os.system(c)
 
-parfor(run, cmds, min(32, int(mp.cpu_count())))
+parfor(run, cmds, min(8, int(mp.cpu_count())))
 
