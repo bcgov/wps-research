@@ -15,6 +15,7 @@ Regression mode:
  * 20220517 e.g.: abcd.exe A.bin B.bin C.bin # and compare w D.bin!
 20220610 add skip_offset factor
 20260505 add --regress flag for regression mode
+20260525 fix is_bad to use correct pixel count for each image
 
 How to project importance back on the dimensions?
 Should windowing be added?
@@ -116,10 +117,10 @@ void infer_px(size_t i){
   if(i % 10000 == 0) status(i, np2);
 }
 
-inline int is_bad(float * dat, size_t i, size_t n_b){
+inline int is_bad(float * dat, size_t i, size_t n_b, size_t n_pix){
   int zero = true;
   for0(m, n_b){  // find bad/empty pix
-    t = dat[np * m + i];
+    t = dat[n_pix * m + i];
     if(isnan(t) || isinf(t)) return true;
     if(t != 0) zero = false;
   }
@@ -193,14 +194,14 @@ int main(int argc, char** argv){
 
   (n_bad = 0, bp = ialloc(np));  // bad pixels in A, B?
   for0(i, np){
-    bp[i] = is_bad(y[0], i, nb[0]) || is_bad(y[1], i, nb[1]);
+    bp[i] = is_bad(y[0], i, nb[0], np) || is_bad(y[1], i, nb[1], np);
     if(bp[i]) n_bad ++;
   }
   if(n_bad == np) err("no good pix: AxB");
 
   (n_bad = 0, bp2 = ialloc(np2));  // bad pxls in C?
   for0(i, np2){
-    bp2[i] = is_bad(y[2], i, nb[2]);
+    bp2[i] = is_bad(y[2], i, nb[2], np2);
     if(bp2[i]) n_bad ++;
   }
   if(n_bad == np2) err("no good pix: C");
@@ -215,10 +216,8 @@ int main(int argc, char** argv){
                          to_string(skip_off));
   bwrite(x, pre + str(".bin"), nr[2], nc[2], nb[1]);  // write out
   hwrite(pre + str(".hdr"), nr[2], nc[2], nb[1]); // this info corroborates the choice above in alloc
-  if(false){
-    int r = system((str("python3 ~/GitHub/wps-research/py/raster_plot.py ") + pre +
+  int r = system((str("python3 ~/GitHub/wps-research/py/raster_plot.py ") + pre +
                   str(".bin 1 2 3 1")).c_str());
-  }
   run((str("envi_header_copy_bandnames.py ") + str(hdr_fn(argv[1 + 1])) + str(" ") + pre + str(".hdr")).c_str());
   run((str("envi_header_copy_mapinfo.py ") + str(hdr_fn(argv[1 + 1])) + str(" ") + pre + str(".hdr")).c_str());
   //run(cmd);
