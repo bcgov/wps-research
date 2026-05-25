@@ -1,8 +1,13 @@
+# 20260525 calculate median/mediod for all .bin files in present folder. Exclude tmp* and median.bin files
 import os
 import sys
+import glob
 
-lines = os.popen('ls -1 *.bin').readlines()
-lines = [x.strip() for x in lines]
+# Get all .bin files excluding median.bin and tmp*
+lines = [
+    f for f in glob.glob("*.bin")
+    if f != "median.bin" and not f.startswith("tmp")
+]
 
 cmd = 'raster_median ' + ' '.join(lines) + ' median.bin'
 print(cmd)
