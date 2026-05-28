@@ -250,9 +250,16 @@ for arg in args:
         new_args += [arg]
 args = new_args
 
-
 # Parse dates and GIDs from arguments
 # args[0] is script name, args[1] is first date, args[2] may be second date or GID
+if len(args) < 2:
+    print("Usage: python3 sync_daterange_gid_zip.py [yyyymmdd] [yyyymmdd2] [optional: GID list]")
+    print("       python3 sync_daterange_gid_zip.py 20260101           # single date")
+    print("       python3 sync_daterange_gid_zip.py 20260101 20260131  # date range")
+    print("       python3 sync_daterange_gid_zip.py 20260101 20260131 T10UGU T10UGV  # with GIDs")
+    print("       python3 sync_daterange_gid_zip.py 20260101 --L2      # L2 mode")
+    sys.exit(0)
+
 yyyymmdd = args[1]
 
 # Check if args[2] exists and is a date (8 digits), otherwise use same date for both
