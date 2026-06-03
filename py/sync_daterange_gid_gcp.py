@@ -458,6 +458,9 @@ def download_safe(item, gsutil_path):
     safe_path = item['safe_path']
 
     md(out_dir)
+    # gsutil rsync -r requires the destination directory to already exist
+    # when a trailing slash is used; create the .SAFE dir upfront.
+    os.makedirs(safe_path, exist_ok=True)
 
     stdout_log = safe_path + '_stdout.txt'
     stderr_log = safe_path + '_stderr.txt'
@@ -766,5 +769,3 @@ if __name__ == '__main__':
         gsutil_path   = gsutil_path,
         l2a_process   = l2a_process,
     )
-
-
