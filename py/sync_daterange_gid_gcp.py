@@ -66,7 +66,7 @@ SEN2COR_INSTALLER = f'Sen2Cor-{SEN2COR_VERSION}-Linux64.run'
 SEN2COR_URL       = (f'https://step.esa.int/thirdparties/sen2cor/{SEN2COR_VERSION}/'
                      + SEN2COR_INSTALLER)
 
-N_WORKERS = 4   # parallel worker count when --parallel is active
+N_WORKERS = 4    # parallel worker count when --parallel is active
 
 # ---------------------------------------------------------------------------
 # Listing directory: shared with the AWS sync script
@@ -76,7 +76,7 @@ _base1 = sep.join(os.path.abspath(__file__).split(sep)[:-1]) + sep
 _listing_base = _base1
 try:
     if not exists(_base0):
-        print('mkdir', _base0)
+        print(f'[{__import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M:%S")}] mkdir {_base0}')
         os.mkdir(_base0)
     _listing_base = _base0
 except Exception:
@@ -102,7 +102,7 @@ _total_bytes     = 0
 
 def md(path):
     if not exists(path):
-        print('mkdir', path)
+        log(f'mkdir {path}')
         os.makedirs(path, exist_ok=True)
 
 
@@ -113,6 +113,13 @@ def today_str():
 
 def is_date_format(s):
     return len(s) == 8 and s.isdigit()
+
+
+def log(msg, prefix=''):
+    """Timestamped print — all script output goes through here."""
+    ts = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    tag = f'[{prefix}] ' if prefix else ''
+    print(f'[{ts}] {tag}{msg}', flush=True)
 
 
 def print_status_update(file_name, file_size, file_dl_time):
@@ -165,30 +172,37 @@ def find_gsutil():
 
 
 def ensure_gsutil():
+    log('STEP 1: Locating gsutil', 'gsutil')
     gsutil = find_gsutil()
     if gsutil:
-        print(f'gsutil found: {gsutil}')
+        log(f'gsutil found: {gsutil}', 'gsutil')
         _ensure_crcmod()
         return gsutil
 
-    print('gsutil not found — installing Google Cloud SDK...')
+    log('gsutil not found — installing Google Cloud SDK...', 'gsutil')
+    log(f'  install dir : {GCP_INSTALL_DIR}', 'gsutil')
+    log(f'  SDK version : {SDK_VERSION}', 'gsutil')
+    log(f'  SDK URL     : {SDK_URL}', 'gsutil')
     md(GCP_INSTALL_DIR)
 
     local_tar = os.path.join(GCP_INSTALL_DIR, SDK_TARBALL)
     if not exists(local_tar):
-        print(f'Downloading SDK: {SDK_URL}')
+        log(f'  Downloading SDK tarball -> {local_tar}', 'gsutil')
         run(f'wget -q --show-progress -O {local_tar} {SDK_URL}')
+        log(f'  Download complete: {local_tar}', 'gsutil')
     else:
-        print(f'SDK tarball cached: {local_tar}')
+        log(f'  SDK tarball already cached: {local_tar}', 'gsutil')
 
     sdk_dir = os.path.join(GCP_INSTALL_DIR, 'google-cloud-sdk')
     if not exists(sdk_dir):
-        print('Extracting SDK...')
+        log(f'  Extracting SDK to {GCP_INSTALL_DIR}...', 'gsutil')
         run(f'tar -xzf {local_tar} -C {GCP_INSTALL_DIR}')
+        log(f'  Extraction complete: {sdk_dir}', 'gsutil')
     else:
-        print(f'SDK already extracted: {sdk_dir}')
+        log(f'  SDK already extracted: {sdk_dir}', 'gsutil')
 
     install_sh = os.path.join(sdk_dir, 'install.sh')
+    log(f'  Running install.sh...', 'gsutil')
     run(f'bash {install_sh} --quiet --usage-reporting=false --path-update=true')
 
     gsutil = os.path.join(sdk_dir, 'bin', 'gsutil')
@@ -196,9 +210,8 @@ def ensure_gsutil():
         err(f'gsutil not found after install — expected: {gsutil}')
 
     _ensure_crcmod()
-    print(f'gsutil installed: {gsutil}')
+    log(f'gsutil ready: {gsutil}', 'gsutil')
 
-    # Note for future reference (public bucket needs no credentials)
     cred_note = os.path.join(GCP_INSTALL_DIR, 'CREDENTIALS_NOTE.txt')
     if not exists(cred_note):
         with open(cred_note, 'w') as fh:
@@ -214,12 +227,13 @@ def ensure_gsutil():
 def _ensure_crcmod():
     try:
         import crcmod  # noqa: F401
-        print('crcmod already installed.')
+        log('crcmod already installed (gsutil CRC32c acceleration active)', 'gsutil')
     except ImportError:
-        print('Installing crcmod for gsutil performance...')
+        log('crcmod not found — installing for gsutil CRC32c performance...', 'gsutil')
         run('sudo apt-get install -y gcc python3-dev python3-setuptools 2>/dev/null || true')
         run('pip3 install --no-cache-dir -U crcmod --break-system-packages 2>/dev/null '
             '|| pip3 install --no-cache-dir -U crcmod')
+        log('crcmod install complete', 'gsutil')
 
 
 # ---------------------------------------------------------------------------
@@ -238,21 +252,27 @@ def find_sen2cor():
 
 
 def ensure_sen2cor():
+    log('STEP 2: Locating Sen2Cor (L2A_Process)', 'sen2cor')
+    log(f'  version   : {SEN2COR_VERSION}', 'sen2cor')
+    log(f'  installer : {SEN2COR_INSTALLER}', 'sen2cor')
     l2a = find_sen2cor()
     if l2a:
-        print(f'L2A_Process found: {l2a}')
+        log(f'L2A_Process found: {l2a}', 'sen2cor')
         return l2a
 
-    print('Sen2Cor not found — installing...')
+    log('Sen2Cor not found — installing...', 'sen2cor')
+    log(f'  URL: {SEN2COR_URL}', 'sen2cor')
     md(GCP_INSTALL_DIR)
 
     local_installer = os.path.join(GCP_INSTALL_DIR, SEN2COR_INSTALLER)
     if not exists(local_installer):
-        print(f'Downloading Sen2Cor: {SEN2COR_URL}')
+        log(f'  Downloading Sen2Cor installer -> {local_installer}', 'sen2cor')
         run(f'wget -q --show-progress -O {local_installer} {SEN2COR_URL}')
+        log(f'  Download complete: {local_installer}', 'sen2cor')
     else:
-        print(f'Sen2Cor installer cached: {local_installer}')
+        log(f'  Sen2Cor installer already cached: {local_installer}', 'sen2cor')
 
+    log(f'  Running installer (target={GCP_INSTALL_DIR})...', 'sen2cor')
     run(f'bash {local_installer} --target {GCP_INSTALL_DIR}')
 
     l2a = find_sen2cor()
@@ -262,7 +282,7 @@ def ensure_sen2cor():
             f'If the ESA URL has changed, update SEN2COR_VERSION/SEN2COR_URL and retry.\n'
             f'Manual: https://step.esa.int/main/snap-supported-plugins/sen2cor/'
         )
-    print(f'L2A_Process installed: {l2a}')
+    log(f'Sen2Cor ready: {l2a}', 'sen2cor')
     return l2a
 
 
@@ -300,31 +320,39 @@ def select_listing(end_date_str, force_update):
     newest_date = _listing_datestamp(newest) if newest else ''
     today       = today_str()
 
+    log('STEP 3: Selecting GCP index listing', 'listing')
+    log(f'  listing dir : {LISTING_DIR}', 'listing')
+    log(f'  newest file : {newest or "none"}', 'listing')
+    log(f'  newest date : {newest_date or "n/a"}', 'listing')
+    log(f'  today       : {today}', 'listing')
+    log(f'  end_date    : {end_date_str}', 'listing')
+
     need_dl = False
     if force_update:
-        print('--force-listing: refreshing GCP index.')
+        log('--force-listing set: will refresh GCP index', 'listing')
         need_dl = True
     elif newest is None:
-        print('No GCP listing found — downloading fresh copy.')
+        log('No GCP listing found — will download fresh copy', 'listing')
         need_dl = True
     elif end_date_str <= newest_date:
-        print(f'Historical query (end={end_date_str} <= listing={newest_date}): '
-              f'reusing {newest}')
+        log(f'Historical query (end={end_date_str} <= listing={newest_date}): reusing {newest}', 'listing')
     elif newest_date < today:
-        print(f'Listing from {newest_date}, today={today}: refreshing.')
+        log(f'Listing from {newest_date} is stale (today={today}): will refresh', 'listing')
         need_dl = True
     else:
-        print(f'Listing already fresh from today ({newest_date}): reusing {newest}')
+        log(f'Listing already fresh from today ({newest_date}): reusing {newest}', 'listing')
 
     if need_dl:
         ts       = timestamp()
         new_fn   = GCP_INDEX_PREFIX + ts + '.csv.gz'
         new_path = os.path.join(LISTING_DIR, new_fn)
-        print(f'Downloading GCP index -> {new_path}')
+        log(f'  Downloading GCP index from {GCP_INDEX_URL}', 'listing')
+        log(f'  -> {new_path}', 'listing')
         run(f'wget -q --show-progress -O {new_path} {GCP_INDEX_URL}')
         newest_path = new_path
-        print(f'Cached: {new_path}')
+        log(f'  Download complete: {new_path}', 'listing')
 
+    log(f'Using listing: {newest_path}', 'listing')
     return newest_path
 
 
@@ -343,16 +371,24 @@ def load_index(listing_gz_path):
     else:
         listing_csv_path = listing_gz_path         # already uncompressed somehow
 
+    log('STEP 4: Loading GCP product index', 'index')
+    log(f'  gz  : {listing_gz_path}', 'index')
+    log(f'  csv : {listing_csv_path}', 'index')
+
     if not exists(listing_csv_path):
-        print(f'Decompressing: {listing_gz_path} -> {listing_csv_path}')
+        log(f'  Decompressing gz -> csv (first use of this listing)...', 'index')
+        t0 = time.time()
         with gzip.open(listing_gz_path, 'rb') as src_fh, \
              open(listing_csv_path, 'wb') as dst_fh:
             shutil.copyfileobj(src_fh, dst_fh)
-        print(f'Cached decompressed index: {listing_csv_path}')
+        csv_size = os.path.getsize(listing_csv_path)
+        log(f'  Decompressed in {time.time()-t0:.1f}s  ({csv_size/(1024**2):.1f} MB)', 'index')
     else:
-        print(f'Using cached index: {listing_csv_path}')
+        csv_size = os.path.getsize(listing_csv_path)
+        log(f'  Using cached CSV ({csv_size/(1024**2):.1f} MB): {listing_csv_path}', 'index')
 
-    print(f'Loading GCP index: {listing_csv_path}')
+    log(f'  Parsing CSV...', 'index')
+    t1 = time.time()
     product_to_url   = {}
     product_to_cloud = {}
     with open(listing_csv_path, 'r', encoding='utf-8', errors='replace') as fh:
@@ -367,7 +403,7 @@ def load_index(listing_gz_path):
                     product_to_cloud[pid] = float(cc)
                 except ValueError:
                     product_to_cloud[pid] = 999.0
-    print(f'Index loaded: {len(product_to_url):,} products.')
+    log(f'  Index parsed in {time.time()-t1:.1f}s: {len(product_to_url):,} products', 'index')
     return product_to_url, product_to_cloud
 
 
@@ -380,8 +416,10 @@ def fix_s2(safe_dir):
     for sub in ('AUX_DATA', 'HTML'):
         d = os.path.join(safe_dir, sub)
         if not exists(d):
-            print('mkdir', d)
+            log(f'fix_s2: creating missing dir: {d}', 'fix_s2')
             os.makedirs(d, exist_ok=True)
+        else:
+            log(f'fix_s2: {sub} already exists', 'fix_s2')
 
 
 # ---------------------------------------------------------------------------
@@ -406,15 +444,16 @@ def safe_to_zip(safe_dir):
     zip_path = zip_stem + '.zip'
 
     if exists(zip_path):
-        print(f'Zip already present: {zip_path}')
+        log(f'Zip already present: {zip_path}', 'zip')
         return zip_path
 
-    print(f'Zipping {safe_name} -> {zip_path}')
+    log(f'Zipping {safe_name} -> {zip_path}', 'zip')
     # make_archive(base_name, format, root_dir, base_dir)
     #   root_dir = parent     <- archive is created relative to here
     #   base_dir = safe_name  <- this subtree becomes the zip root entry
     shutil.make_archive(zip_stem, 'zip', parent, safe_name)
-    print(f'Created: {zip_path}')
+    zip_size = os.path.getsize(zip_path) if exists(zip_path) else 0
+    log(f'Created: {zip_path}  ({zip_size/(1024**2):.0f} MB)', 'zip')
     return zip_path
 
 
@@ -434,22 +473,23 @@ def extract_safe_from_zip(zip_path, target_parent):
     out_safe      = os.path.join(target_parent, safe_name)
 
     if exists(out_safe):
-        print(f'Already extracted: {out_safe}')
+        log(f'Already extracted: {out_safe}', 'zip')
         return out_safe
 
-    print(f'Extracting {zip_path} -> {target_parent}/')
+    log(f'Extracting {zip_path} -> {target_parent}/', 'zip')
+    t0 = time.time()
     with zipfile.ZipFile(zip_path, 'r') as zf:
         members = zf.namelist()
+        log(f'  zip contains {len(members)} members', 'zip')
         bad = [m for m in members
                if not (m == safe_name + '/' or m.startswith(safe_name + '/'))]
         if bad:
-            print(f'WARNING: unexpected zip members (first 5): {bad[:5]}')
-        # extractall with target_parent -> target_parent/<stem>.SAFE/...
+            log(f'  WARNING: unexpected zip members (first 5): {bad[:5]}', 'zip')
         zf.extractall(target_parent)
 
     if not exists(out_safe):
         err(f'Expected {out_safe} after extraction — not found.')
-    print(f'Extracted: {out_safe}')
+    log(f'Extracted in {time.time()-t0:.1f}s: {out_safe}', 'zip')
     return out_safe
 
 
@@ -472,35 +512,58 @@ def download_safe(item, gsutil_path):
     safe_name = item['safe_name']
     safe_path = item['safe_path']
 
+    log(f'DOWNLOAD START: {pid}', 'rsync')
+    log(f'  src  : {base_url}', 'rsync')
+    log(f'  dst  : {safe_path}', 'rsync')
+
+    # Create output dirs — gsutil rsync requires destination to exist
     md(out_dir)
-    # gsutil rsync -r requires the destination directory to already exist
-    # when a trailing slash is used; create the .SAFE dir upfront.
     os.makedirs(safe_path, exist_ok=True)
 
     stdout_log = safe_path + '_stdout.txt'
     stderr_log = safe_path + '_stderr.txt'
+    log(f'  logs : {stderr_log}', 'rsync')
 
-    # Trailing slashes on both src and dst are required by gsutil rsync:
-    # without them gsutil may see a same-named object and refuse to treat
-    # the destination as a directory (CommandException: does not name a directory).
+    # Trailing slashes on both src and dst required by gsutil rsync
     src = base_url.rstrip('/') + '/'
     dst = safe_path.rstrip('/') + '/'
     cmd = f'{gsutil_path} -m rsync -r {src} {dst}'
-    print(f'\n[gsutil rsync] {cmd}')
+    log(f'  cmd  : {cmd}', 'rsync')
+
     t0  = time.time()
     ret = os.system(f'{cmd} > {stdout_log} 2> {stderr_log}')
     dt  = time.time() - t0
 
     if ret != 0:
-        print(f'WARNING: gsutil rsync returned {ret} for {pid} — check {stderr_log}')
+        log(f'FAILED (exit {ret}): {pid}', 'rsync')
+        # Print stderr inline so failures are visible in the main log
+        if exists(stderr_log):
+            try:
+                stderr_text = open(stderr_log).read().strip()
+                if stderr_text:
+                    log(f'  stderr:\n{stderr_text}', 'rsync')
+            except Exception:
+                pass
+        if exists(stdout_log):
+            try:
+                stdout_text = open(stdout_log).read().strip()
+                if stdout_text:
+                    log(f'  stdout:\n{stdout_text}', 'rsync')
+            except Exception:
+                pass
     else:
+        log(f'DOWNLOAD OK in {dt:.1f}s: {pid}', 'rsync')
+        log(f'  Running fix_s2 on {safe_path}', 'rsync')
         fix_s2(safe_path)
+        log(f'  fix_s2 done', 'rsync')
 
+    # Count bytes on disk (works even for partial downloads)
     safe_bytes = (
         sum(os.path.getsize(os.path.join(r, f))
             for r, _, fs in os.walk(safe_path) for f in fs)
         if exists(safe_path) else 0
     )
+    log(f'  on-disk size: {safe_bytes/(1024**2):.1f} MB', 'rsync')
 
     _files_completed += 1
     _bytes_completed += safe_bytes
@@ -523,36 +586,60 @@ def run_sen2cor_job(job, l2a_process):
     '''
     safe_path, l2a_safe_path, l2a_zip_path, out_dir = job
 
+    log(f'SEN2COR START: {os.path.basename(safe_path)}', 'sen2cor')
+    log(f'  L1C  : {safe_path}', 'sen2cor')
+    log(f'  L2A  : {l2a_safe_path}', 'sen2cor')
+    log(f'  zip  : {l2a_zip_path}', 'sen2cor')
+
     if exists(l2a_zip_path):
-        print(f'L2A zip already present — skipping: {l2a_zip_path}')
+        log(f'L2A zip already present — skipping: {l2a_zip_path}', 'sen2cor')
         return
 
     if not exists(safe_path):
-        print(f'L1C SAFE missing — cannot run sen2cor: {safe_path}')
+        log(f'ERROR: L1C SAFE missing — cannot run sen2cor: {safe_path}', 'sen2cor')
         return
 
+    log(f'  Running fix_s2 on L1C...', 'sen2cor')
     fix_s2(safe_path)
 
     cmd = f'{l2a_process} {safe_path}'
-    print(f'[sen2cor] {cmd}')
+    log(f'  cmd  : {cmd}', 'sen2cor')
+    t0  = time.time()
     ret = os.system(cmd)
+    dt  = time.time() - t0
+
     if ret != 0:
-        print(f'WARNING: sen2cor returned {ret} for {safe_path}')
+        log(f'ERROR: sen2cor returned {ret} after {dt:.1f}s for {safe_path}', 'sen2cor')
         return
+
+    log(f'  sen2cor finished in {dt:.1f}s', 'sen2cor')
 
     # Sen2Cor should write L2A .SAFE into the same directory as L1C .SAFE
     if not exists(l2a_safe_path):
         # Some sen2cor versions write to cwd — check and relocate
         cwd_l2a = os.path.join(os.getcwd(), os.path.basename(l2a_safe_path))
         if exists(cwd_l2a):
-            print(f'Relocating sen2cor output: {cwd_l2a} -> {l2a_safe_path}')
+            log(f'  Relocating sen2cor output: {cwd_l2a} -> {l2a_safe_path}', 'sen2cor')
             shutil.move(cwd_l2a, l2a_safe_path)
         else:
-            print(f'WARNING: L2A SAFE not found after sen2cor: {l2a_safe_path}')
+            log(f'ERROR: L2A SAFE not found after sen2cor at either:', 'sen2cor')
+            log(f'    {l2a_safe_path}', 'sen2cor')
+            log(f'    {cwd_l2a}', 'sen2cor')
             return
 
-    fix_s2(l2a_safe_path)           # belt-and-suspenders on L2A output
-    safe_to_zip(l2a_safe_path)      # .SAFE retained — not deleted
+    l2a_bytes = sum(os.path.getsize(os.path.join(r, f))
+                    for r, _, fs in os.walk(l2a_safe_path) for f in fs)
+    log(f'  L2A on-disk size: {l2a_bytes/(1024**2):.1f} MB', 'sen2cor')
+
+    log(f'  Running fix_s2 on L2A...', 'sen2cor')
+    fix_s2(l2a_safe_path)
+
+    log(f'  Zipping L2A: {l2a_safe_path}', 'sen2cor')
+    t1 = time.time()
+    safe_to_zip(l2a_safe_path)
+    log(f'  Zip done in {time.time()-t1:.1f}s: {l2a_zip_path}', 'sen2cor')
+
+    log(f'SEN2COR DONE: {os.path.basename(l2a_safe_path)}', 'sen2cor')
 
 
 # ---------------------------------------------------------------------------
@@ -572,7 +659,7 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2,
 
     start_d = datetime.datetime(int(yyyymmdd[:4]), int(yyyymmdd[4:6]), int(yyyymmdd[6:]))
     end_d   = datetime.datetime(int(yyyymmdd2[:4]), int(yyyymmdd2[4:6]), int(yyyymmdd2[6:]))
-    print(f'Date range: {start_d.date()} -> {end_d.date()}')
+    log(f'Date range: {start_d.date()} -> {end_d.date()}')
 
     date_range = set()
     cur = start_d
@@ -615,12 +702,12 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2,
             l2a_pid      = pid.replace('MSIL1C', 'MSIL2A')
             l2a_zip_path = os.path.join(out_dir, l2a_pid + '.zip')
             if exists(l2a_zip_path):
-                print(f'L2A zip present — skipping: {l2a_zip_path}')
+                log(f'SKIP (L2A zip present): {l2a_zip_path}')
                 skipped += 1
                 continue
         else:
             if exists(zip_path):
-                print(f'L1C zip present — skipping: {zip_path}')
+                log(f'SKIP (L1C zip present): {zip_path}')
                 skipped += 1
                 continue
 
@@ -634,22 +721,24 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2,
             'zip_path': zip_path,
         })
 
-    print(f'\n{"="*60}')
-    print(f'MATCH SUMMARY')
-    print(f'{"="*60}')
-    print(f'Products to download/process : {len(work_items)}')
-    print(f'Already complete (skipped)   : {skipped}')
-    print(f'{"="*60}\n')
+    log(f'{"="*60}')
+    log(f'MATCH SUMMARY')
+    log(f'  Products to download/process : {len(work_items)}')
+    log(f'  Already complete (skipped)   : {skipped}')
+    log(f'  Output prefix                : {out_prefix}')
+    log(f'  Mode                         : {"L2 (L1C + Sen2Cor)" if use_L2 else "L1C only"}')
+    log(f'{"="*60}')
 
     if not work_items:
-        print('Nothing to do.')
+        log('Nothing to do — all products already complete.')
         return
 
     disk = shutil.disk_usage(os.getcwd())
     rough_gb = len(work_items) * 1.0
+    log(f'Disk free: {disk.free/(1024**3):.1f} GB  |  rough estimate: ~{rough_gb:.0f} GB needed')
     if disk.free < rough_gb * (1024**3):
-        print(f'WARNING: {disk.free/(1024**3):.1f} GB free may be insufficient '
-              f'for ~{rough_gb:.0f} GB estimated download.')
+        log(f'WARNING: disk may be insufficient — {disk.free/(1024**3):.1f} GB free, '
+            f'~{rough_gb:.0f} GB estimated')
 
     _total_files         = len(work_items)
     _download_start_time = time.time()
@@ -657,9 +746,10 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2,
     # ------------------------------------------------------------------
     # Step 5: download .SAFE folders via gsutil rsync
     # ------------------------------------------------------------------
-    print(f'\n--- Downloading {_total_files} .SAFE folder(s) '
-          f'[{"parallel" if use_parallel else "serial"}] ---')
+    log(f'STEP 5: Downloading {_total_files} .SAFE folder(s) '
+        f'[{"parallel" if use_parallel else "serial"}, workers={N_WORKERS if use_parallel else 1}]')
 
+    t_dl0 = time.time()
     if use_parallel:
         def _dl(item):
             return download_safe(item, gsutil_path)
@@ -667,25 +757,48 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2,
     else:
         for item in work_items:
             download_safe(item, gsutil_path)
+    t_dl = time.time() - t_dl0
+
+    dl_ok  = sum(1 for item in work_items if exists(item['safe_path']))
+    dl_bad = _total_files - dl_ok
+    log(f'STEP 5 DONE in {t_dl/60:.1f} min: {dl_ok} succeeded, {dl_bad} failed')
 
     # ------------------------------------------------------------------
     # Step 6: zip each successfully downloaded L1C .SAFE
     # fix_s2 was already called inside download_safe on success
     # .SAFE folders are NEVER deleted
     # ------------------------------------------------------------------
-    print('\n--- Zipping L1C .SAFE folders ---')
+    log(f'STEP 6: Zipping {dl_ok} L1C .SAFE folder(s)')
+    t_zip0   = time.time()
+    zip_ok   = 0
+    zip_skip = 0
+    zip_fail = 0
     for item in work_items:
         safe_path = item['safe_path']
+        zip_path  = item['zip_path']
         if not exists(safe_path):
-            print(f'SAFE not found (download failed?): {safe_path}')
+            log(f'  SKIP (no SAFE): {safe_path}', 'zip')
+            zip_fail += 1
             continue
-        safe_to_zip(safe_path)   # no-op if zip already present
+        safe_size = sum(os.path.getsize(os.path.join(r, f))
+                        for r, _, fs in os.walk(safe_path) for f in fs)
+        if exists(zip_path):
+            log(f'  ALREADY ZIPPED: {zip_path}', 'zip')
+            zip_skip += 1
+            continue
+        log(f'  Zipping {os.path.basename(safe_path)} ({safe_size/(1024**2):.0f} MB) -> {zip_path}', 'zip')
+        t1 = time.time()
+        safe_to_zip(safe_path)
+        zip_size = os.path.getsize(zip_path) if exists(zip_path) else 0
+        log(f'  Done in {time.time()-t1:.1f}s  zip size: {zip_size/(1024**2):.0f} MB', 'zip')
+        zip_ok += 1
+    log(f'STEP 6 DONE in {(time.time()-t_zip0)/60:.1f} min: '
+        f'{zip_ok} zipped, {zip_skip} already existed, {zip_fail} failed')
 
     # ------------------------------------------------------------------
     # Sen2Cor (--L2 only)
     # ------------------------------------------------------------------
     if use_L2:
-        print('\n--- Running Sen2Cor for L2A ---')
         sen2cor_jobs = []
         for item in work_items:
             pid       = item['pid']
@@ -695,16 +808,16 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2,
             l2a_safe_path = os.path.join(out_dir, l2a_pid + '.SAFE')
             l2a_zip_path  = os.path.join(out_dir, l2a_pid + '.zip')
             if exists(l2a_zip_path):
-                print(f'L2A zip already present — skipping: {l2a_zip_path}')
+                log(f'  L2A zip already present — skipping: {l2a_zip_path}', 'sen2cor')
                 continue
             if not exists(safe_path):
-                print(f'L1C SAFE missing — skipping sen2cor: {safe_path}')
+                log(f'  L1C SAFE missing — skipping sen2cor: {safe_path}', 'sen2cor')
                 continue
             sen2cor_jobs.append((safe_path, l2a_safe_path, l2a_zip_path, out_dir))
 
-        print(f'Sen2Cor jobs: {len(sen2cor_jobs)} '
-              f'[{"parallel" if use_parallel else "serial"}]')
-
+        log(f'STEP 7: Sen2Cor on {len(sen2cor_jobs)} tile(s) '
+            f'[{"parallel" if use_parallel else "serial"}, workers={N_WORKERS if use_parallel else 1}]')
+        t_s2c0 = time.time()
         if use_parallel:
             def _s2c(job):
                 return run_sen2cor_job(job, l2a_process)
@@ -713,7 +826,13 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2,
             for job in sen2cor_jobs:
                 run_sen2cor_job(job, l2a_process)
 
-    print('\n=== Done ===')
+        s2c_ok = sum(1 for _, l2a_safe, l2a_zip, _ in sen2cor_jobs if exists(l2a_zip))
+        log(f'STEP 7 DONE in {(time.time()-t_s2c0)/60:.1f} min: '
+            f'{s2c_ok}/{len(sen2cor_jobs)} L2A zips produced')
+
+    total_elapsed = time.time() - _download_start_time
+    log(f'ALL DONE — total elapsed: {total_elapsed/60:.1f} min  ({total_elapsed/3600:.2f} hr)')
+    log(f'  Downloaded : {_bytes_completed/(1024**3):.2f} GB across {_files_completed} files')
 
 
 # ---------------------------------------------------------------------------
@@ -749,24 +868,26 @@ raw_gids = set(clean_args[gid_start_idx:]) if len(clean_args) > gid_start_idx el
 if not raw_gids:
     from gid import bc
     gids = bc()
-    print('Pulling BC GIDs (default)...')
+    log('Pulling BC GIDs (default)...')
 elif 'all' in raw_gids:
     gids = None
-    print('Pulling all Canada GIDs...')
+    log('Pulling all Canada GIDs...')
 else:
     gids = raw_gids
 
 # ---------------------------------------------------------------------------
 if __name__ == '__main__':
-    print(f'{"="*60}')
-    print(f'sync_daterange_gid_zip_gcp.py')
-    print(f'Mode      : {"L2 (L1C + Sen2Cor)" if use_L2 else "L1C"}')
-    print(f'Parallel  : {use_parallel}  (workers={N_WORKERS})')
-    print(f'Date range: {yyyymmdd} -> {yyyymmdd2}')
-    print(f'GIDs      : {gids if gids is not None else "ALL"}')
-    print(f'Install   : {GCP_INSTALL_DIR}')
-    print(f'Listings  : {LISTING_DIR}')
-    print(f'{"="*60}')
+    log(f'{"="*60}')
+    log(f'sync_daterange_gid_zip_gcp.py')
+    log(f'Started   : {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
+    log(f'Mode      : {"L2 (L1C + Sen2Cor)" if use_L2 else "L1C"}')
+    log(f'Parallel  : {use_parallel}  (workers={N_WORKERS})')
+    log(f'Date range: {yyyymmdd} -> {yyyymmdd2}')
+    log(f'GIDs      : {gids if gids is not None else "ALL"}')
+    log(f'Install   : {GCP_INSTALL_DIR}')
+    log(f'Listings  : {LISTING_DIR}')
+    log(f'CWD       : {os.getcwd()}')
+    log(f'{"="*60}')
 
     gsutil_path = ensure_gsutil()
 
