@@ -66,7 +66,7 @@ SEN2COR_INSTALLER = f'Sen2Cor-{SEN2COR_VERSION}-Linux64.run'
 SEN2COR_URL       = (f'https://step.esa.int/thirdparties/sen2cor/{SEN2COR_VERSION}/'
                      + SEN2COR_INSTALLER)
 
-N_WORKERS = 16   # parallel worker count when --parallel is active
+N_WORKERS = 4   # parallel worker count when --parallel is active
 
 # ---------------------------------------------------------------------------
 # Listing directory: shared with the AWS sync script
@@ -117,19 +117,34 @@ def is_date_format(s):
 
 def print_status_update(file_name, file_size, file_dl_time):
     global _files_completed, _total_files, _bytes_completed, _total_bytes, _download_start_time
-    elapsed = time.time() - _download_start_time
-    pct_f   = (_files_completed / _total_files  * 100) if _total_files  > 0 else 0
-    pct_b   = (_bytes_completed / _total_bytes  * 100) if _total_bytes  > 0 else 0
-    eta     = (elapsed / _files_completed * (_total_files - _files_completed)
-               if _files_completed > 0 else 0)
+    elapsed  = time.time() - _download_start_time
+    pct_f    = (_files_completed / _total_files * 100) if _total_files > 0 else 0
+    eta      = (elapsed / _files_completed * (_total_files - _files_completed)
+                if _files_completed > 0 else 0)
+
+    # Speed: MB/s for this file, and overall average MB/s
+    speed_now = file_size / (1024**2) / file_dl_time if file_dl_time > 0 else 0
+    speed_avg = _bytes_completed / (1024**2) / elapsed if elapsed > 0 else 0
+
+    # Bytes: we don't know total upfront (index has no sizes), so show
+    # cumulative downloaded + a rolling estimate of total based on avg file size.
+    avg_bytes  = _bytes_completed / _files_completed if _files_completed > 0 else 0
+    est_total  = avg_bytes * _total_files
+    pct_b      = (_bytes_completed / est_total * 100) if est_total > 0 else 0
+
+    remaining_files = _total_files - _files_completed
+    est_remaining_bytes = avg_bytes * remaining_files
+
     print(f"\n{'='*60}")
     print(f"DOWNLOAD STATUS UPDATE")
     print(f"{'='*60}")
     print(f"File completed: {file_name}")
-    print(f"File size: {file_size/(1024**2):.2f} MB | Download time: {file_dl_time:.1f}s")
+    print(f"File size: {file_size/(1024**2):.2f} MB | Download time: {file_dl_time:.1f}s | Speed: {speed_now:.1f} MB/s")
     print(f"{'='*60}")
     print(f"Files:   {_files_completed} / {_total_files} ({pct_f:.1f}%)")
-    print(f"Bytes:   {_bytes_completed/(1024**3):.2f} / {_total_bytes/(1024**3):.2f} GB ({pct_b:.1f}%)")
+    print(f"Bytes:   {_bytes_completed/(1024**3):.2f} GB downloaded"
+          f"  (~{est_total/(1024**3):.1f} GB est. total, {pct_b:.1f}%)")
+    print(f"Avg size/file: {avg_bytes/(1024**2):.0f} MB  |  Avg speed: {speed_avg:.1f} MB/s")
     print(f"Elapsed: {elapsed/60:.1f} min")
     print(f"ETA:     {eta/60:.1f} min  |  {eta/3600:.2f} hr  |  {eta/86400:.3f} days")
     print(f"{'='*60}\n")
