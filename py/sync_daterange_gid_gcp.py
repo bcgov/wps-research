@@ -314,11 +314,33 @@ def select_listing(end_date_str, force_update):
 
 
 def load_index(listing_gz_path):
-    '''Stream-parse gzipped CSV. Returns (product_to_url, product_to_cloud).'''
-    print(f'Loading GCP index: {listing_gz_path}')
+    '''
+    Parse GCP index CSV. Returns (product_to_url, product_to_cloud).
+
+    Decompressed CSV is cached as <listing_gz_path without .gz>.
+    On subsequent runs the .csv is read directly — no gunzip overhead.
+    Each new .gz gets its own sibling .csv on first use; if you delete
+    or replace the .gz its .csv won't exist yet so decompression reruns once.
+    '''
+    # Cache path: strip .gz to get the plain .csv sibling
+    if listing_gz_path.endswith('.gz'):
+        listing_csv_path = listing_gz_path[:-3]   # e.g. gcp_index_20260603_120000.csv
+    else:
+        listing_csv_path = listing_gz_path         # already uncompressed somehow
+
+    if not exists(listing_csv_path):
+        print(f'Decompressing: {listing_gz_path} -> {listing_csv_path}')
+        with gzip.open(listing_gz_path, 'rb') as src_fh, \
+             open(listing_csv_path, 'wb') as dst_fh:
+            shutil.copyfileobj(src_fh, dst_fh)
+        print(f'Cached decompressed index: {listing_csv_path}')
+    else:
+        print(f'Using cached index: {listing_csv_path}')
+
+    print(f'Loading GCP index: {listing_csv_path}')
     product_to_url   = {}
     product_to_cloud = {}
-    with gzip.open(listing_gz_path, 'rt', encoding='utf-8', errors='replace') as fh:
+    with open(listing_csv_path, 'r', encoding='utf-8', errors='replace') as fh:
         reader = csv.DictReader(fh)
         for row in reader:
             pid = row.get('PRODUCT_ID',  '').strip()
@@ -744,3 +766,5 @@ if __name__ == '__main__':
         gsutil_path   = gsutil_path,
         l2a_process   = l2a_process,
     )
+
+
