@@ -440,7 +440,12 @@ def download_safe(item, gsutil_path):
     stdout_log = safe_path + '_stdout.txt'
     stderr_log = safe_path + '_stderr.txt'
 
-    cmd = f'{gsutil_path} -m rsync -r {base_url} {safe_path}'
+    # Trailing slashes on both src and dst are required by gsutil rsync:
+    # without them gsutil may see a same-named object and refuse to treat
+    # the destination as a directory (CommandException: does not name a directory).
+    src = base_url.rstrip('/') + '/'
+    dst = safe_path.rstrip('/') + '/'
+    cmd = f'{gsutil_path} -m rsync -r {src} {dst}'
     print(f'\n[gsutil rsync] {cmd}')
     t0  = time.time()
     ret = os.system(f'{cmd} > {stdout_log} 2> {stderr_log}')
@@ -739,4 +744,3 @@ if __name__ == '__main__':
         gsutil_path   = gsutil_path,
         l2a_process   = l2a_process,
     )
-
