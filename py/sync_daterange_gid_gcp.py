@@ -10,7 +10,7 @@ Usage:
 Flags:
     --L1            L1C mode (default)
     --L2            download L1C + run Sen2Cor -> L2A zip
-    --parallel      enable 16-worker parallel downloads / sen2cor
+    --parallel      enable parallel downloads (N_DL_WORKERS=4); sen2cor is always parallel (N_S2C_WORKERS=64)
     --force-listing force refresh of GCP index even if a fresh copy exists
 
 Examples:
@@ -66,7 +66,8 @@ SEN2COR_INSTALLER = f'Sen2Cor-{SEN2COR_VERSION}-Linux64.run'
 SEN2COR_URL       = (f'https://step.esa.int/thirdparties/sen2cor/{SEN2COR_VERSION}/'
                      + SEN2COR_INSTALLER)
 
-N_WORKERS = 4    # parallel worker count when --parallel is active
+N_DL_WORKERS  = 4    # parallel workers for gsutil downloads (--parallel flag)
+N_S2C_WORKERS = 64   # parallel workers for sen2cor — always parallel, flag ignored
 
 # ---------------------------------------------------------------------------
 # Listing directory: shared with the AWS sync script
@@ -747,13 +748,13 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2,
     # Step 5: download .SAFE folders via gsutil rsync
     # ------------------------------------------------------------------
     log(f'STEP 5: Downloading {_total_files} .SAFE folder(s) '
-        f'[{"parallel" if use_parallel else "serial"}, workers={N_WORKERS if use_parallel else 1}]')
+        f'[{"parallel" if use_parallel else "serial"}, workers={N_DL_WORKERS if use_parallel else 1}]')
 
     t_dl0 = time.time()
     if use_parallel:
         def _dl(item):
             return download_safe(item, gsutil_path)
-        parfor(_dl, work_items, N_WORKERS)
+        parfor(_dl, work_items, N_DL_WORKERS)
     else:
         for item in work_items:
             download_safe(item, gsutil_path)
@@ -816,15 +817,11 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2,
             sen2cor_jobs.append((safe_path, l2a_safe_path, l2a_zip_path, out_dir))
 
         log(f'STEP 7: Sen2Cor on {len(sen2cor_jobs)} tile(s) '
-            f'[{"parallel" if use_parallel else "serial"}, workers={N_WORKERS if use_parallel else 1}]')
+            f'[always parallel, workers={N_S2C_WORKERS}]')
         t_s2c0 = time.time()
-        if use_parallel:
-            def _s2c(job):
-                return run_sen2cor_job(job, l2a_process)
-            parfor(_s2c, sen2cor_jobs, N_WORKERS)
-        else:
-            for job in sen2cor_jobs:
-                run_sen2cor_job(job, l2a_process)
+        def _s2c(job):
+            return run_sen2cor_job(job, l2a_process)
+        parfor(_s2c, sen2cor_jobs, N_S2C_WORKERS)
 
         s2c_ok = sum(1 for _, l2a_safe, l2a_zip, _ in sen2cor_jobs if exists(l2a_zip))
         log(f'STEP 7 DONE in {(time.time()-t_s2c0)/60:.1f} min: '
@@ -881,7 +878,7 @@ if __name__ == '__main__':
     log(f'sync_daterange_gid_zip_gcp.py')
     log(f'Started   : {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
     log(f'Mode      : {"L2 (L1C + Sen2Cor)" if use_L2 else "L1C"}')
-    log(f'Parallel  : {use_parallel}  (workers={N_WORKERS})')
+    log(f'Parallel  : {use_parallel}  (dl_workers={N_DL_WORKERS}, s2c_workers={N_S2C_WORKERS})')
     log(f'Date range: {yyyymmdd} -> {yyyymmdd2}')
     log(f'GIDs      : {gids if gids is not None else "ALL"}')
     log(f'Install   : {GCP_INSTALL_DIR}')
