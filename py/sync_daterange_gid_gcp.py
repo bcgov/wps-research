@@ -123,6 +123,56 @@ def log(msg, prefix=''):
     print(f'[{ts}] {tag}{msg}', flush=True)
 
 
+# ---------------------------------------------------------------------------
+# Completion ledger — one PID per line, append-only, human-readable.
+# Three ledger files live inside each output dir (e.g. L2_T10VFK/):
+#   .ledger_dl      — L1C .SAFE download confirmed complete
+#   .ledger_l1zip   — L1C .zip created
+#   .ledger_l2zip   — L2A .zip created
+# On restart, any PID already in the ledger is skipped instantly with no
+# filesystem I/O beyond the initial file read.
+# ---------------------------------------------------------------------------
+
+LEDGER_DL    = '.ledger_dl'
+LEDGER_L1ZIP = '.ledger_l1zip'
+LEDGER_L2ZIP = '.ledger_l2zip'
+
+
+def ledger_path(out_dir, ledger_name):
+    return os.path.join(out_dir, ledger_name)
+
+
+def load_ledger(out_dir, ledger_name):
+    """Return set of PIDs recorded in ledger. Empty set if file absent."""
+    p = ledger_path(out_dir, ledger_name)
+    if not exists(p):
+        return set()
+    with open(p, 'r') as fh:
+        return {line.strip() for line in fh if line.strip()}
+
+
+def load_all_ledgers(out_dirs):
+    """
+    Load all three ledgers for every out_dir in out_dirs.
+    Returns (done_dl, done_l1zip, done_l2zip) as sets of PIDs.
+    """
+    done_dl    = set()
+    done_l1zip = set()
+    done_l2zip = set()
+    for od in out_dirs:
+        done_dl    |= load_ledger(od, LEDGER_DL)
+        done_l1zip |= load_ledger(od, LEDGER_L1ZIP)
+        done_l2zip |= load_ledger(od, LEDGER_L2ZIP)
+    return done_dl, done_l1zip, done_l2zip
+
+
+def ledger_add(out_dir, ledger_name, pid):
+    """Append pid to ledger (atomic line append)."""
+    p = ledger_path(out_dir, ledger_name)
+    with open(p, 'a') as fh:
+        fh.write(pid + '\n')
+
+
 def print_status_update(file_name, file_size, file_dl_time):
     global _files_completed, _total_files, _bytes_completed, _total_bytes, _download_start_time
     elapsed  = time.time() - _download_start_time
@@ -513,6 +563,12 @@ def download_safe(item, gsutil_path):
     safe_name = item['safe_name']
     safe_path = item['safe_path']
 
+    # Check ledger — skip instantly if already confirmed done
+    if item.get('done_dl'):
+        log(f'SKIP (ledger_dl): {pid}', 'rsync')
+        _files_completed += 1
+        return item
+
     log(f'DOWNLOAD START: {pid}', 'rsync')
     log(f'  src  : {base_url}', 'rsync')
     log(f'  dst  : {safe_path}', 'rsync')
@@ -557,6 +613,8 @@ def download_safe(item, gsutil_path):
         log(f'  Running fix_s2 on {safe_path}', 'rsync')
         fix_s2(safe_path)
         log(f'  fix_s2 done', 'rsync')
+        ledger_add(out_dir, LEDGER_DL, pid)
+        log(f'  ledger_dl updated', 'rsync')
 
     # Count bytes on disk (works even for partial downloads)
     safe_bytes = (
@@ -640,6 +698,7 @@ def run_sen2cor_job(job, l2a_process):
     safe_to_zip(l2a_safe_path)
     log(f'  Zip done in {time.time()-t1:.1f}s: {l2a_zip_path}', 'sen2cor')
 
+    ledger_add(out_dir, LEDGER_L2ZIP, os.path.basename(safe_path).replace('.SAFE', ''))
     log(f'SEN2COR DONE: {os.path.basename(l2a_safe_path)}', 'sen2cor')
 
 
@@ -676,8 +735,28 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2,
     # GCP stores only L1C; we always download L1C regardless of --L2
     # ------------------------------------------------------------------
     out_prefix = 'L2_' if use_L2 else 'L1_'
+
+    # Pre-scan which out_dirs will be used so we can load ledgers up front.
+    # This avoids any per-tile filesystem I/O for already-completed tiles.
+    candidate_out_dirs = set()
+    if gids is not None:
+        for g in gids:
+            candidate_out_dirs.add(out_prefix + g)
+    else:
+        # all mode: scan existing dirs with matching prefix
+        for entry in os.listdir('.'):
+            if entry.startswith(out_prefix) and os.path.isdir(entry):
+                candidate_out_dirs.add(entry)
+
+    log(f'Loading completion ledgers from {len(candidate_out_dirs)} output dir(s)...')
+    done_dl, done_l1zip, done_l2zip = load_all_ledgers(candidate_out_dirs)
+    log(f'  ledger_dl    : {len(done_dl):,} PIDs already downloaded')
+    log(f'  ledger_l1zip : {len(done_l1zip):,} PIDs already L1-zipped')
+    log(f'  ledger_l2zip : {len(done_l2zip):,} PIDs already L2-zipped')
+
     work_items = []
     skipped    = 0
+    skipped_ledger = 0
 
     for pid, base_url in product_to_url.items():
         parts = pid.split('_')
@@ -702,13 +781,25 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2,
         if use_L2:
             l2a_pid      = pid.replace('MSIL1C', 'MSIL2A')
             l2a_zip_path = os.path.join(out_dir, l2a_pid + '.zip')
+            # Fast path: ledger says done — no filesystem check needed
+            if pid in done_l2zip:
+                skipped_ledger += 1
+                skipped += 1
+                continue
+            # Slower fallback: check zip file on disk (handles pre-ledger runs)
             if exists(l2a_zip_path):
-                log(f'SKIP (L2A zip present): {l2a_zip_path}')
+                log(f'SKIP (L2A zip present, writing to ledger): {l2a_zip_path}')
+                ledger_add(out_dir, LEDGER_L2ZIP, pid)
                 skipped += 1
                 continue
         else:
+            if pid in done_l1zip:
+                skipped_ledger += 1
+                skipped += 1
+                continue
             if exists(zip_path):
-                log(f'SKIP (L1C zip present): {zip_path}')
+                log(f'SKIP (L1C zip present, writing to ledger): {zip_path}')
+                ledger_add(out_dir, LEDGER_L1ZIP, pid)
                 skipped += 1
                 continue
 
@@ -720,12 +811,16 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2,
             'safe_name':safe_name,
             'safe_path':safe_path,
             'zip_path': zip_path,
+            'done_dl':  pid in done_dl,
+            'done_l1zip': pid in done_l1zip,
         })
 
     log(f'{"="*60}')
     log(f'MATCH SUMMARY')
     log(f'  Products to download/process : {len(work_items)}')
-    log(f'  Already complete (skipped)   : {skipped}')
+    log(f'  Skipped (ledger, instant)    : {skipped_ledger}')
+    log(f'  Skipped (zip present)        : {skipped - skipped_ledger}')
+    log(f'  Total skipped                : {skipped}')
     log(f'  Output prefix                : {out_prefix}')
     log(f'  Mode                         : {"L2 (L1C + Sen2Cor)" if use_L2 else "L1C only"}')
     log(f'{"="*60}')
@@ -775,8 +870,15 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2,
     zip_skip = 0
     zip_fail = 0
     for item in work_items:
+        pid       = item['pid']
         safe_path = item['safe_path']
         zip_path  = item['zip_path']
+        out_dir   = item['out_dir']
+        # Fast path: ledger says L1C zip is done
+        if item.get('done_l1zip'):
+            log(f'  SKIP (ledger_l1zip): {pid}', 'zip')
+            zip_skip += 1
+            continue
         if not exists(safe_path):
             log(f'  SKIP (no SAFE): {safe_path}', 'zip')
             zip_fail += 1
@@ -784,7 +886,8 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2,
         safe_size = sum(os.path.getsize(os.path.join(r, f))
                         for r, _, fs in os.walk(safe_path) for f in fs)
         if exists(zip_path):
-            log(f'  ALREADY ZIPPED: {zip_path}', 'zip')
+            log(f'  ALREADY ZIPPED (writing to ledger): {zip_path}', 'zip')
+            ledger_add(out_dir, LEDGER_L1ZIP, pid)
             zip_skip += 1
             continue
         log(f'  Zipping {os.path.basename(safe_path)} ({safe_size/(1024**2):.0f} MB) -> {zip_path}', 'zip')
@@ -792,6 +895,7 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2,
         safe_to_zip(safe_path)
         zip_size = os.path.getsize(zip_path) if exists(zip_path) else 0
         log(f'  Done in {time.time()-t1:.1f}s  zip size: {zip_size/(1024**2):.0f} MB', 'zip')
+        ledger_add(out_dir, LEDGER_L1ZIP, pid)
         zip_ok += 1
     log(f'STEP 6 DONE in {(time.time()-t_zip0)/60:.1f} min: '
         f'{zip_ok} zipped, {zip_skip} already existed, {zip_fail} failed')
@@ -808,8 +912,13 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2,
             l2a_pid       = pid.replace('MSIL1C', 'MSIL2A')
             l2a_safe_path = os.path.join(out_dir, l2a_pid + '.SAFE')
             l2a_zip_path  = os.path.join(out_dir, l2a_pid + '.zip')
+            # Fast path: ledger
+            if pid in done_l2zip:
+                log(f'  SKIP (ledger_l2zip): {pid}', 'sen2cor')
+                continue
             if exists(l2a_zip_path):
-                log(f'  L2A zip already present — skipping: {l2a_zip_path}', 'sen2cor')
+                log(f'  L2A zip present (writing to ledger): {l2a_zip_path}', 'sen2cor')
+                ledger_add(out_dir, LEDGER_L2ZIP, pid)
                 continue
             if not exists(safe_path):
                 log(f'  L1C SAFE missing — skipping sen2cor: {safe_path}', 'sen2cor')
