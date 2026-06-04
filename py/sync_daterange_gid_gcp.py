@@ -35,8 +35,10 @@ import gzip
 import csv
 import time
 import shutil
+import signal
 import datetime
 import zipfile
+import subprocess
 
 sep = os.path.sep
 my_path = sep.join(os.path.abspath(__file__).split(sep)[:-1]) + sep
@@ -124,6 +126,43 @@ def log(msg, prefix=''):
 
 
 # ---------------------------------------------------------------------------
+# Subprocess helper
+# ---------------------------------------------------------------------------
+
+def run_cmd(cmd, stdout=None, stderr=None):
+    """
+    Run cmd in a new session (own process group) so that orphaned
+    grandchildren don't prevent Python from exiting cleanly.
+
+    Returns (returncode, elapsed_seconds).
+    stdout/stderr may be file paths (strings) or None (inherit).
+    """
+    stdout_fh = open(stdout, 'w') if isinstance(stdout, str) else stdout
+    stderr_fh = open(stderr, 'w') if isinstance(stderr, str) else stderr
+    try:
+        proc = subprocess.Popen(
+            cmd, shell=True,
+            stdout=stdout_fh, stderr=stderr_fh,
+            start_new_session=True,   # own process group → no orphan hang
+        )
+        t0 = time.time()
+        proc.wait()
+        return proc.returncode, time.time() - t0
+    finally:
+        if isinstance(stdout, str) and stdout_fh:
+            stdout_fh.close()
+        if isinstance(stderr, str) and stderr_fh:
+            stderr_fh.close()
+
+
+def _sigterm_handler(signum, frame):
+    log('Received SIGTERM — flushing and exiting cleanly.')
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, _sigterm_handler)
+
+
+# ---------------------------------------------------------------------------
 # Completion ledger — one PID per line, append-only, human-readable.
 # Three ledger files live inside each output dir (e.g. L2_T10VFK/):
 #   .ledger_dl      — L1C .SAFE download confirmed complete
@@ -171,6 +210,64 @@ def ledger_add(out_dir, ledger_name, pid):
     p = ledger_path(out_dir, ledger_name)
     with open(p, 'a') as fh:
         fh.write(pid + '\n')
+
+
+def backfill_ledgers(out_dirs):
+    """
+    One-time backfill: scan out_dirs for artifacts that already exist on disk
+    and write any missing ledger entries.  Safe to call on every startup —
+    it only writes entries that are absent from the ledger, so it is idempotent
+    and cheap after the first run (ledger already full → nothing to write).
+
+    Rules:
+      .SAFE dir present              → LEDGER_DL
+      L1C .zip present               → LEDGER_DL + LEDGER_L1ZIP
+      L2A .zip present               → LEDGER_DL + LEDGER_L1ZIP + LEDGER_L2ZIP
+    """
+    total_written = 0
+    for od in out_dirs:
+        if not os.path.isdir(od):
+            continue
+        existing_dl    = load_ledger(od, LEDGER_DL)
+        existing_l1zip = load_ledger(od, LEDGER_L1ZIP)
+        existing_l2zip = load_ledger(od, LEDGER_L2ZIP)
+        new_dl    = set()
+        new_l1zip = set()
+        new_l2zip = set()
+
+        for entry in os.listdir(od):
+            full = os.path.join(od, entry)
+            # L2A zip  →  all three stages done
+            if entry.endswith('.zip') and '_MSIL2A_' in entry:
+                pid = entry[:-4]   # strip .zip → L1C PID is the MSIL1C variant
+                l1c_pid = pid.replace('MSIL2A', 'MSIL1C')
+                if l1c_pid not in existing_dl:    new_dl.add(l1c_pid)
+                if l1c_pid not in existing_l1zip: new_l1zip.add(l1c_pid)
+                if pid     not in existing_l2zip: new_l2zip.add(pid)
+            # L1C zip  →  download + l1zip done
+            elif entry.endswith('.zip') and '_MSIL1C_' in entry:
+                pid = entry[:-4]
+                if pid not in existing_dl:    new_dl.add(pid)
+                if pid not in existing_l1zip: new_l1zip.add(pid)
+            # .SAFE dir  →  download done
+            elif entry.endswith('.SAFE') and '_MSIL1C_' in entry and os.path.isdir(full):
+                pid = entry[:-5]   # strip .SAFE
+                if pid not in existing_dl: new_dl.add(pid)
+
+        # Write new entries in one shot per ledger
+        for pid in sorted(new_dl):
+            ledger_add(od, LEDGER_DL, pid)
+        for pid in sorted(new_l1zip):
+            ledger_add(od, LEDGER_L1ZIP, pid)
+        for pid in sorted(new_l2zip):
+            ledger_add(od, LEDGER_L2ZIP, pid)
+
+        n = len(new_dl) + len(new_l1zip) + len(new_l2zip)
+        if n:
+            log(f'  backfill {od}: +{len(new_dl)} dl, +{len(new_l1zip)} l1zip, +{len(new_l2zip)} l2zip')
+        total_written += n
+
+    return total_written
 
 
 def print_status_update(file_name, file_size, file_dl_time):
@@ -587,9 +684,7 @@ def download_safe(item, gsutil_path):
     cmd = f'{gsutil_path} -m rsync -r {src} {dst}'
     log(f'  cmd  : {cmd}', 'rsync')
 
-    t0  = time.time()
-    ret = os.system(f'{cmd} > {stdout_log} 2> {stderr_log}')
-    dt  = time.time() - t0
+    ret, dt = run_cmd(cmd, stdout=stdout_log, stderr=stderr_log)
 
     if ret != 0:
         log(f'FAILED (exit {ret}): {pid}', 'rsync')
@@ -663,9 +758,7 @@ def run_sen2cor_job(job, l2a_process):
 
     cmd = f'{l2a_process} {safe_path}'
     log(f'  cmd  : {cmd}', 'sen2cor')
-    t0  = time.time()
-    ret = os.system(cmd)
-    dt  = time.time() - t0
+    ret, dt = run_cmd(cmd)
 
     if ret != 0:
         log(f'ERROR: sen2cor returned {ret} after {dt:.1f}s for {safe_path}', 'sen2cor')
@@ -727,23 +820,18 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2,
         date_range.add(f'{cur.year:04d}{cur.month:02d}{cur.day:02d}')
         cur += datetime.timedelta(days=1)
 
-    listing_path = select_listing(yyyymmdd2, force_listing)
-    product_to_url, _ = load_index(listing_path)
-
-    # ------------------------------------------------------------------
-    # Filter: L1C products matching date range and GID list
-    # GCP stores only L1C; we always download L1C regardless of --L2
-    # ------------------------------------------------------------------
     out_prefix = 'L2_' if use_L2 else 'L1_'
 
-    # Pre-scan which out_dirs will be used so we can load ledgers up front.
-    # This avoids any per-tile filesystem I/O for already-completed tiles.
+    # ------------------------------------------------------------------
+    # Load ledgers BEFORE touching the index.
+    # If the final-stage ledger already accounts for all zips on disk,
+    # we can skip the 11 GB CSV parse entirely.
+    # ------------------------------------------------------------------
     candidate_out_dirs = set()
     if gids is not None:
         for g in gids:
             candidate_out_dirs.add(out_prefix + g)
     else:
-        # all mode: scan existing dirs with matching prefix
         for entry in os.listdir('.'):
             if entry.startswith(out_prefix) and os.path.isdir(entry):
                 candidate_out_dirs.add(entry)
@@ -754,6 +842,50 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2,
     log(f'  ledger_l1zip : {len(done_l1zip):,} PIDs already L1-zipped')
     log(f'  ledger_l2zip : {len(done_l2zip):,} PIDs already L2-zipped')
 
+    # Backfill: populate ledger from artifacts already on disk.
+    # Covers tiles completed before ledger support was added, and the
+    # tiles completed in the current (or any interrupted) run so far.
+    # After backfill, reload so the fast-path check below sees full counts.
+    n_backfilled = backfill_ledgers(candidate_out_dirs)
+    if n_backfilled:
+        log(f'Backfilled {n_backfilled} ledger entries from disk — reloading...')
+        done_dl, done_l1zip, done_l2zip = load_all_ledgers(candidate_out_dirs)
+        log(f'  ledger_dl    : {len(done_dl):,} PIDs (after backfill)')
+        log(f'  ledger_l1zip : {len(done_l1zip):,} PIDs (after backfill)')
+        log(f'  ledger_l2zip : {len(done_l2zip):,} PIDs (after backfill)')
+    else:
+        log(f'Ledgers already up to date — no backfill needed')
+
+    # Fast-path: count zips on disk in all candidate output dirs.
+    # If every zip on disk is covered by the final-stage ledger (and
+    # there is at least one), the job is done — skip CSV parsing entirely.
+    final_ledger = done_l2zip if use_L2 else done_l1zip
+    final_suffix = '_MSIL2A_' if use_L2 else '_MSIL1C_'
+    if not force_listing and final_ledger:
+        zips_on_disk = set()
+        for od in candidate_out_dirs:
+            if os.path.isdir(od):
+                for fn in os.listdir(od):
+                    if fn.endswith('.zip') and final_suffix in fn:
+                        zips_on_disk.add(fn.replace('.zip', ''))
+        uncovered = zips_on_disk - final_ledger
+        log(f'Fast-path check: {len(zips_on_disk)} final-stage zips on disk, '
+            f'{len(final_ledger)} in ledger, {len(uncovered)} not yet in ledger')
+        if zips_on_disk and not uncovered:
+            log('All zips on disk are covered by the ledger — skipping CSV parse.')
+            log('Nothing to do.')
+            return
+
+    # ------------------------------------------------------------------
+    # Need the index — load it now.
+    # ------------------------------------------------------------------
+    listing_path = select_listing(yyyymmdd2, force_listing)
+    product_to_url, _ = load_index(listing_path)
+
+    # ------------------------------------------------------------------
+    # Filter: L1C products matching date range and GID list
+    # GCP stores only L1C; we always download L1C regardless of --L2
+    # ------------------------------------------------------------------
     work_items = []
     skipped    = 0
     skipped_ledger = 0
@@ -1011,3 +1143,4 @@ if __name__ == '__main__':
         gsutil_path   = gsutil_path,
         l2a_process   = l2a_process,
     )
+
