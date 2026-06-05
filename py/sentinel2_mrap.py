@@ -1,4 +1,4 @@
-'''
+'''sentinel2_mrap.py
 20250226: Added --L1 flag to optionally process L1_ folders instead of L2_ folders.
 
 20230727 extract most recent available pixel (MRAP) from sentinel2 series.. assume tile based
@@ -29,8 +29,14 @@ import multiprocessing as mp
 from osgeo import gdal
 import numpy as np
 import copy
+import gc
 import sys
 import os
+
+# Bound GDAL's internal block cache so it does not grow unbounded across a long
+# series of large Sentinel-2 tiles. Without a cap, GDAL will happily eat RAM
+# caching blocks it no longer needs, which contributes to OOM crashes.
+gdal.SetCacheMax(256 * 1024 * 1024)  # 256 MB cap
 
 # Parse --L1 flag
 L1_mode = '--L1' in sys.argv
@@ -54,10 +60,18 @@ def run_mrap(gid):  # run MRAP on one tile
             if i not in my_bands:  #initialize the band / first time
                 my_bands[i] = new_data # new data for this band becomes the band
             else:
-                nans, update = np.isnan(new_data), copy.deepcopy(my_bands[i])  # forgot copy before?
-                update[~nans] = new_data[~nans]
-                my_bands[i] = update
+                # Merge IN PLACE instead of copy.deepcopy(my_bands[i]): the
+                # deepcopy held a second full-size copy of every band in RAM on
+                # each scene (~0.5 GB per band for a full tile), which is the
+                # main cause of memory growth / OOM. This is the cheaper path the
+                # original author had already left commented out below.
+                nans = np.isnan(new_data)
+                my_bands[i][~nans] = new_data[~nans]
+                del nans
                 # my_bands[i][~nans] = new_data[~nans]
+            # drop this scene's band array as soon as it has been merged so we
+            # never carry the input scene alongside the composite
+            del new_data, band
         my_proj = d.GetProjection() if my_proj is None else my_proj
         my_geo = d.GetGeoTransform() if my_geo is None else my_geo
         if my_xsize is None:
@@ -77,7 +91,8 @@ def run_mrap(gid):  # run MRAP on one tile
 
             for i in range(1, nbands + 1):
                 stack_ds.GetRasterBand(i).WriteArray(my_bands[i])
-            stack_ds = None
+            stack_ds.FlushCache()  # make sure everything is on disk before we drop the handle
+            stack_ds = None        # close output file (releases its write cache)
             run('fh ' + out_file_name)  # fix envi header, then reproduce the band names
             envi_update_band_names(['envi_update_band_names.py',
                                     hdr_fn(file_name),
@@ -85,6 +100,11 @@ def run_mrap(gid):  # run MRAP on one tile
         else:
             pass
             # print(out_file_name, 'exists [SKIP WRITE]')
+
+        # reclaim transient arrays and trim GDAL's cache so RAM use stays flat
+        # across a long series rather than creeping up with every scene
+        gdal.SetCacheMax(256 * 1024 * 1024)
+        gc.collect()
 
     # look for all the dates in this tile's folder and sort them in aquisition time
 
@@ -209,6 +229,7 @@ def run_mrap(gid):  # run MRAP on one tile
         my_bands = {i: d.GetRasterBand(i).ReadAsArray().astype(np.float32) for i in range(1, d.RasterCount + 1)}
         my_proj, my_geo = d.GetProjection(), d.GetGeoTransform()
         my_xsize, my_ysize, nbands = d.RasterXSize, d.RasterYSize, d.RasterCount
+        d = None  # close the seed dataset; the arrays we need are already in my_bands
         # print(my_proj, my_geo, my_xsize, my_ysize, nbands)
 
     print("run extract:")  # run extract() on data files later than the last MRAP date
@@ -226,6 +247,12 @@ def run_mrap(gid):  # run MRAP on one tile
     for [line_date, line] in lines:
         print("mrap " + line)
     '''
+
+    # release this tile's composite before moving on to the next tile so RAM
+    # does not carry one tile's worth of bands into the next iteration
+    my_bands.clear()
+    gc.collect()
+
     print("done " + gid + "------------------------------------")
 
 if __name__ == "__main__":
@@ -248,5 +275,3 @@ if __name__ == "__main__":
         parfor(f, gids, 1) #  int(mp.cpu_count()))
     else:
         run_mrap(args[1])  # single tile mode: no mosaicing
-
-
