@@ -169,8 +169,8 @@ def _process_pixel(pixel_idx: int):
             p_cg=_P_CG,
             conse=_CONSE,
             pos=int(pixel_idx + 1),  # CRITICAL FIX
-            tmask_b1_index=None,#_TMASK_B1,
-            tmask_b2_index=None,# _TMASK_B2,
+            tmask_b1_index=0, # None,#_TMASK_B1,
+            tmask_b2_index=0, None,# _TMASK_B2,
         )
     except Exception as e:
         print(f"[COLD ERROR] pixel={pixel_idx} -> {repr(e)}")
