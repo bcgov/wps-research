@@ -91,23 +91,25 @@ def build_subtree(strings, start, level, max_level):
 INDENT = '  '  # single systematic indent applied to everything under an extension
 
 
-def print_tree(nodes, acc, exemplars, stem_to_name):
+def print_tree(nodes, acc, examples, exemplars, stem_to_name):
     """Print nodes flush at one indent level (no per-depth indentation, no
     bullets). `acc` is the cumulative stem inherited from ancestors, so each
-    line prints acc+label and the full prefix pattern lines up legibly."""
+    line prints acc+label and the full prefix pattern lines up legibly. When
+    `examples` is False, the sample-filename lines are omitted (compressed)."""
     for node in nodes:
         cum = acc + node['label']
         shown_label = cum if cum != '' else '(empty stem)'
         print(f"{INDENT}{shown_label}  \u00d7{node['count']}")
 
         if node['is_leaf']:
-            shown = node['members'][:exemplars]
-            more = node['count'] > len(shown)
-            for k, stem in enumerate(shown):
-                trail = ' \u2026' if (more and k == len(shown) - 1) else ''
-                print(f"{INDENT}{stem_to_name[stem]}{trail}")
+            if examples:
+                shown = node['members'][:exemplars]
+                more = node['count'] > len(shown)
+                for k, stem in enumerate(shown):
+                    trail = ' \u2026' if (more and k == len(shown) - 1) else ''
+                    print(f"{INDENT}{stem_to_name[stem]}{trail}")
         else:
-            print_tree(node['children'], cum, exemplars, stem_to_name)
+            print_tree(node['children'], cum, examples, exemplars, stem_to_name)
 
 
 # ----------------------------- caching ----------------------------------- #
@@ -176,8 +178,12 @@ def main():
                     help='directory to scan (default: current working directory)')
     ap.add_argument('--levels', type=int, default=5,
                     help='max hierarchy depth, including the extension level (default 5)')
-    ap.add_argument('--exemplars', type=int, default=1,
-                    help='sample filenames to show per bottom class (default 1)')
+    ap.add_argument('--examples', '--example', dest='examples', action='store_true',
+                    help='print sample filename(s) under each bottom class '
+                         '(default: omit for a compressed view)')
+    ap.add_argument('--exemplars', type=int, default=None,
+                    help='how many sample filenames per bottom class; '
+                         'implies --examples (default 1 when examples are shown)')
     ap.add_argument('--refresh', action='store_true',
                     help='ignore any existing cache and recompute')
     ap.add_argument('--no-cache', action='store_true',
@@ -188,8 +194,10 @@ def main():
 
     if args.levels < 1:
         ap.error('--levels must be >= 1')
-    if args.exemplars < 1:
+    if args.exemplars is not None and args.exemplars < 1:
         ap.error('--exemplars must be >= 1')
+    show_examples = args.examples or (args.exemplars is not None)
+    exemplars = args.exemplars if args.exemplars is not None else 1
 
     abspath = os.path.abspath(args.directory)
     cache_path = os.path.join(args.directory, CACHE_NAME)
@@ -221,14 +229,15 @@ def main():
             ext_label = e['ext'] if e['ext'] else '(no extension)'
             print(f"{ext_label}  \u00d7{e['count']}")
             if e['children']:
-                print_tree(e['children'], '', args.exemplars, e['stem_to_name'])
+                print_tree(e['children'], '', show_examples, exemplars, e['stem_to_name'])
             else:  # levels==1 case: list exemplars under the extension
-                stems = sorted(e['stem_to_name'])
-                shown = stems[:args.exemplars]
-                more = len(stems) > len(shown)
-                for k, stem in enumerate(shown):
-                    trail = ' \u2026' if (more and k == len(shown) - 1) else ''
-                    print(f"{INDENT}{e['stem_to_name'][stem]}{trail}")
+                if show_examples:
+                    stems = sorted(e['stem_to_name'])
+                    shown = stems[:exemplars]
+                    more = len(stems) > len(shown)
+                    for k, stem in enumerate(shown):
+                        trail = ' \u2026' if (more and k == len(shown) - 1) else ''
+                        print(f"{INDENT}{e['stem_to_name'][stem]}{trail}")
             print()
         return
 
@@ -256,14 +265,15 @@ def main():
         ext_label = e['ext'] if e['ext'] else '(no extension)'
         print(f"{ext_label}  \u00d7{e['count']}")
         if e['children']:
-            print_tree(e['children'], '', args.exemplars, e['stem_to_name'])
+            print_tree(e['children'], '', show_examples, exemplars, e['stem_to_name'])
         else:
-            stems = sorted(e['stem_to_name'])
-            shown = stems[:args.exemplars]
-            more = len(stems) > len(shown)
-            for k, stem in enumerate(shown):
-                trail = ' \u2026' if (more and k == len(shown) - 1) else ''
-                print(f"{INDENT}{e['stem_to_name'][stem]}{trail}")
+            if show_examples:
+                stems = sorted(e['stem_to_name'])
+                shown = stems[:exemplars]
+                more = len(stems) > len(shown)
+                for k, stem in enumerate(shown):
+                    trail = ' \u2026' if (more and k == len(shown) - 1) else ''
+                    print(f"{INDENT}{e['stem_to_name'][stem]}{trail}")
         print()
 
     # ---- archive if large ----
@@ -276,4 +286,11 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except BrokenPipeError:
+        # Output was piped into something that closed early (e.g. `head`/`less`).
+        import sys
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        sys.exit(0)
