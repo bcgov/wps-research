@@ -88,24 +88,26 @@ def build_subtree(strings, start, level, max_level):
     return nodes
 
 
-def print_tree(nodes, depth, acc, exemplars, stem_to_name):
-    """Print nodes. `acc` is the cumulative stem inherited from ancestors;
-    each line prints acc+label so the full prefix pattern is visible."""
-    indent = '  ' * depth
-    ex_indent = '  ' * (depth + 1)
+INDENT = '  '  # single systematic indent applied to everything under an extension
+
+
+def print_tree(nodes, acc, exemplars, stem_to_name):
+    """Print nodes flush at one indent level (no per-depth indentation, no
+    bullets). `acc` is the cumulative stem inherited from ancestors, so each
+    line prints acc+label and the full prefix pattern lines up legibly."""
     for node in nodes:
         cum = acc + node['label']
         shown_label = cum if cum != '' else '(empty stem)'
-        print(f"{indent}{shown_label}  \u00d7{node['count']}")
+        print(f"{INDENT}{shown_label}  \u00d7{node['count']}")
 
         if node['is_leaf']:
             shown = node['members'][:exemplars]
             more = node['count'] > len(shown)
             for k, stem in enumerate(shown):
                 trail = ' \u2026' if (more and k == len(shown) - 1) else ''
-                print(f"{ex_indent}\u2022 {stem_to_name[stem]}{trail}")
+                print(f"{INDENT}{stem_to_name[stem]}{trail}")
         else:
-            print_tree(node['children'], depth + 1, cum, exemplars, stem_to_name)
+            print_tree(node['children'], cum, exemplars, stem_to_name)
 
 
 # ----------------------------- caching ----------------------------------- #
@@ -219,14 +221,14 @@ def main():
             ext_label = e['ext'] if e['ext'] else '(no extension)'
             print(f"{ext_label}  \u00d7{e['count']}")
             if e['children']:
-                print_tree(e['children'], 1, '', args.exemplars, e['stem_to_name'])
+                print_tree(e['children'], '', args.exemplars, e['stem_to_name'])
             else:  # levels==1 case: list exemplars under the extension
                 stems = sorted(e['stem_to_name'])
                 shown = stems[:args.exemplars]
                 more = len(stems) > len(shown)
                 for k, stem in enumerate(shown):
                     trail = ' \u2026' if (more and k == len(shown) - 1) else ''
-                    print(f"  \u2022 {e['stem_to_name'][stem]}{trail}")
+                    print(f"{INDENT}{e['stem_to_name'][stem]}{trail}")
             print()
         return
 
@@ -254,14 +256,14 @@ def main():
         ext_label = e['ext'] if e['ext'] else '(no extension)'
         print(f"{ext_label}  \u00d7{e['count']}")
         if e['children']:
-            print_tree(e['children'], 1, '', args.exemplars, e['stem_to_name'])
+            print_tree(e['children'], '', args.exemplars, e['stem_to_name'])
         else:
             stems = sorted(e['stem_to_name'])
             shown = stems[:args.exemplars]
             more = len(stems) > len(shown)
             for k, stem in enumerate(shown):
                 trail = ' \u2026' if (more and k == len(shown) - 1) else ''
-                print(f"  \u2022 {e['stem_to_name'][stem]}{trail}")
+                print(f"{INDENT}{e['stem_to_name'][stem]}{trail}")
         print()
 
     # ---- archive if large ----
