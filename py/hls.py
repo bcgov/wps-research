@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-hier_tree.py - hierarchical, radix-style grouping of filenames.
+hls.py - hierarchical, radix-style grouping of filenames.
 
 Level 1  : file extension (equivalence class by extension).
 Level 2+ : "common-prefix-until-the-next-difference" classes. Two names stay
@@ -21,9 +21,16 @@ Recall / archive: when a directory holds more than --cache-threshold files
 directory. A later run reuses it (same files + same --levels) instead of
 recomputing. Use --refresh to recompute, --no-cache to never write.
 
+Grouping: --group [N] does not just display - it ORGANIZES the files into
+nested directories N levels deep (defaulting to --levels), where each directory
+name is only the characters at which the names diverge at that level (e.g.
+A/ B/ C/ then 19/ 20/ 21/ ...). The extension is not used as a level. It runs
+as a dry run unless --apply is supplied.
+
 Usage:
-    python hier_tree.py [DIR] [--levels N] [--exemplars K]
+    python hier_tree.py [DIR] [--levels N] [--examples] [--exemplars K]
                         [--refresh] [--no-cache] [--cache-threshold N]
+                        [--group [N]] [--apply]
 """
 
 import os
@@ -112,6 +119,148 @@ def print_tree(nodes, acc, examples, exemplars, stem_to_name):
             print_tree(node['children'], cum, examples, exemplars, stem_to_name)
 
 
+# --------------------------- grouping (--group) --------------------------- #
+
+def _column_state(strings, i):
+    """Classify column i across `strings`:
+       'agree'  - every string reaches i and has the same character there
+       'differ' - characters mismatch, or some string has ended while others go on
+       'end'    - every string has ended (i is past them all)."""
+    present = 0
+    ref = None
+    differ = False
+    for s in strings:
+        if i < len(s):
+            present += 1
+            if ref is None:
+                ref = s[i]
+            elif s[i] != ref:
+                differ = True
+    if present == 0:
+        return 'end'
+    if present < len(strings) or differ:
+        return 'differ'
+    return 'agree'
+
+
+def _safe_component(name):
+    """Make a divergence block safe to use as a single path component."""
+    for bad in (os.sep, os.altsep):
+        if bad:
+            name = name.replace(bad, '_')
+    if name in ('.', '..'):
+        name = name + '_'
+    return name
+
+
+def assign_group_paths(strings, start, level, max_levels):
+    """Map each filename to the nested directory components it belongs under.
+
+    At each level we skip the columns the group agrees on, then take the
+    contiguous run of columns where it differs; that run's text is the
+    directory name (so the name contains ONLY the differing characters). We
+    recurse into each resulting subgroup, up to `max_levels` deep. Files that
+    cannot diverge further stay where they are ([] = current level)."""
+    if level > max_levels or len(strings) <= 1:
+        return {s: [] for s in strings}
+
+    d0 = start
+    while _column_state(strings, d0) == 'agree':
+        d0 += 1
+    if _column_state(strings, d0) == 'end':
+        return {s: [] for s in strings}          # identical from `start`; nothing to split
+
+    d1 = d0
+    while _column_state(strings, d1) == 'differ':
+        d1 += 1
+
+    groups = OrderedDict()
+    for s in strings:
+        groups.setdefault(s[d0:d1], []).append(s)   # block content = directory name
+
+    result = {}
+    for key, grp in groups.items():
+        if key == '':                               # a string ended inside the block
+            for s in grp:
+                result[s] = []
+            continue
+        comp = _safe_component(key)
+        sub = assign_group_paths(grp, d1, level + 1, max_levels)
+        for s, tail in sub.items():
+            result[s] = [comp] + tail
+    return result
+
+
+def _build_dir_tree(assignments):
+    root = {'children': OrderedDict(), 'files': []}
+    for name in sorted(assignments):
+        node = root
+        for c in assignments[name]:
+            node = node['children'].setdefault(c, {'children': OrderedDict(), 'files': []})
+        node['files'].append(name)
+    return root
+
+
+def _count_under(node):
+    return len(node['files']) + sum(_count_under(c) for c in node['children'].values())
+
+
+def _print_dir_tree(node, depth, examples, exemplars):
+    for comp in sorted(node['children']):
+        child = node['children'][comp]
+        print(f"{'  ' * depth}{comp}/  \u00d7{_count_under(child)}")
+        if examples and child['files']:
+            shown = child['files'][:exemplars]
+            more = len(child['files']) > len(shown)
+            for k, fn in enumerate(shown):
+                trail = ' \u2026' if (more and k == len(shown) - 1) else ''
+                print(f"{'  ' * (depth + 1)}{fn}{trail}")
+        _print_dir_tree(child, depth + 1, examples, exemplars)
+
+
+def run_group(directory, entries, max_levels, apply_moves, examples, exemplars):
+    abspath = os.path.abspath(directory)
+    assignments = assign_group_paths(sorted(entries), 0, 1, max_levels)
+
+    moved = sum(1 for comps in assignments.values() if comps)
+    staying = len(entries) - moved
+    leaf_dirs = {tuple(assignments[n]) for n in assignments if assignments[n]}
+
+    mode = 'APPLY' if apply_moves else 'DRY RUN'
+    print(f"{abspath}  [group: {len(entries)} files -> {len(leaf_dirs)} leaf dirs, "
+          f"up to {max_levels} levels]  ({mode})")
+    print()
+    _print_dir_tree(_build_dir_tree(assignments), 0, examples, exemplars)
+    if staying:
+        print(f"\n({staying} file(s) stay in place - nothing to split on)")
+
+    if not apply_moves:
+        print("\nDry run only. Re-run with --apply to move the files.")
+        return
+
+    import shutil
+    done = errors = 0
+    for name in sorted(assignments):
+        comps = assignments[name]
+        if not comps:
+            continue
+        dest_dir = os.path.join(directory, *comps)
+        dest = os.path.join(dest_dir, name)
+        try:
+            os.makedirs(dest_dir, exist_ok=True)
+            if os.path.exists(dest):
+                print(f"  ! skip (target exists): {name}")
+                errors += 1
+                continue
+            shutil.move(os.path.join(directory, name), dest)
+            done += 1
+        except OSError as ex:
+            print(f"  ! error moving {name}: {ex}")
+            errors += 1
+    tail = f", {errors} skipped/failed" if errors else ""
+    print(f"\nMoved {done} file(s){tail}.")
+
+
 # ----------------------------- caching ----------------------------------- #
 
 def _prune_for_cache(nodes):
@@ -184,6 +333,14 @@ def main():
     ap.add_argument('--exemplars', type=int, default=None,
                     help='how many sample filenames per bottom class; '
                          'implies --examples (default 1 when examples are shown)')
+    ap.add_argument('--group', nargs='?', type=int, const=0, default=None, metavar='N',
+                    help='ORGANIZE files into nested directories by where their '
+                         'names diverge, N levels deep (defaults to --levels). '
+                         'Directory names contain only the differing characters; '
+                         'the extension is NOT used as a level. Dry run unless '
+                         '--apply is given.')
+    ap.add_argument('--apply', action='store_true',
+                    help='with --group, actually move the files (default: dry run)')
     ap.add_argument('--refresh', action='store_true',
                     help='ignore any existing cache and recompute')
     ap.add_argument('--no-cache', action='store_true',
@@ -210,6 +367,14 @@ def main():
 
     if not entries:
         print(f"(no files in {abspath})")
+        return
+
+    # ---- grouping mode: organize files into directories, then stop ----
+    if args.group is not None:
+        depth = args.levels if args.group == 0 else args.group
+        if depth < 1:
+            ap.error('--group level count must be >= 1')
+        run_group(args.directory, entries, depth, args.apply, show_examples, exemplars)
         return
 
     fp = fingerprint(entries)
