@@ -370,6 +370,39 @@ void trimmed_cov(const float *resid, int n_obs, int n_bands, float *cov)
 }
 
 /* =========================================================================
+ * Convert Python ordinal date to year and month.
+ * Works for both __device__ (kernel) and host (diagnostic) code.
+ * Python ordinal: 1 = Jan 1, year 1 (proleptic Gregorian).
+ * =========================================================================*/
+__device__ __host__
+void ordinal_to_ym(int ord, int *out_year, int *out_month)
+{
+    int d0   = ord - 1;
+    int n400 = d0 / 146097;
+    int d1   = d0 % 146097;
+    int n100 = d1 / 36524;
+    if (n100 == 4) n100 = 3;
+    int d2   = d1 - n100 * 36524;
+    int n4   = d2 / 1461;
+    int d3   = d2 % 1461;
+    int n1   = d3 / 365;
+    if (n1 == 4) n1 = 3;
+
+    int year = n400*400 + n100*100 + n4*4 + n1 + 1;
+    int doy  = d3 - n1*365;
+
+    int leap = (year%4==0 && (year%100!=0 || year%400==0)) ? 1 : 0;
+    int mdays[] = {31, 28+leap, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    int month = 1;
+    for (int m = 0; m < 12; ++m) {
+        if (doy < mdays[m]) { month = m + 1; break; }
+        doy -= mdays[m];
+    }
+    *out_year  = year;
+    *out_month = month;
+}
+
+/* =========================================================================
  * Main kernel: one thread per pixel
  * =========================================================================
  * stack_gpu : float32, shape (n_times, n_bands, n_pixels), C-order
@@ -464,6 +497,88 @@ void ccdc_kernel(const float * __restrict__ stack_gpu,
             }
         }
         n_valid = out;
+    }
+
+    /* ---- 2c. Filter out winter months (Nov-Mar inclusive) ----
+     * Low sun angles, snow, ice, and shadow dominate winter imagery
+     * at high latitudes and inject noise that harmonic models cannot
+     * separate from real land-cover change. */
+    {
+        int out = 0;
+        for (int i = 0; i < n_valid; ++i) {
+            int ord = (int)(t_cl[i] + t_base);
+            int y, m;
+            ordinal_to_ym(ord, &y, &m);
+            if (m >= 4 && m <= 10) {   /* keep April through October only */
+                t_cl[out] = t_cl[i];
+                for (int b = 0; b < n_bands; ++b)
+                    Y_cl[out*n_bands+b] = Y_cl[i*n_bands+b];
+                out++;
+            }
+        }
+        n_valid = out;
+    }
+
+    /* ---- 2d. Compute monthly medians ----
+     * Collapse all observations within each calendar month into a
+     * single representative value (median per band, median date).
+     * This suppresses within-month noise (residual clouds, BRDF
+     * effects, atmospheric variation) and produces a clean seasonal
+     * signal that the harmonic model can fit reliably.
+     * Observations are already sorted chronologically, so month
+     * groups are contiguous. */
+    {
+        int n_monthly = 0;
+        int grp = 0;
+        while (grp < n_valid) {
+            /* identify this month's group */
+            int ord0 = (int)(t_cl[grp] + t_base);
+            int y0, m0;
+            ordinal_to_ym(ord0, &y0, &m0);
+            int ym0 = y0 * 100 + m0;
+
+            int grp_end = grp + 1;
+            while (grp_end < n_valid) {
+                int oe = (int)(t_cl[grp_end] + t_base);
+                int ye, me;
+                ordinal_to_ym(oe, &ye, &me);
+                if (ye*100 + me != ym0) break;
+                grp_end++;
+            }
+            int gsz = grp_end - grp;
+
+            /* median date (series is sorted, so just pick middle) */
+            float med_t;
+            if (gsz % 2 == 1)
+                med_t = t_cl[grp + gsz/2];
+            else
+                med_t = (t_cl[grp + gsz/2 - 1] + t_cl[grp + gsz/2]) * 0.5f;
+
+            /* median per band via insertion sort on small buffer */
+            float med_b[MAX_BANDS];
+            for (int b = 0; b < n_bands; ++b) {
+                float sv[64];
+                int nv = 0;
+                for (int i = grp; i < grp_end && nv < 64; ++i)
+                    sv[nv++] = Y_cl[i*n_bands+b];
+                /* insertion sort */
+                for (int i = 1; i < nv; ++i) {
+                    float v = sv[i]; int j = i-1;
+                    while (j >= 0 && sv[j] > v) { sv[j+1]=sv[j]; --j; }
+                    sv[j+1] = v;
+                }
+                med_b[b] = (nv % 2 == 1) ? sv[nv/2]
+                                           : (sv[nv/2-1]+sv[nv/2])*0.5f;
+            }
+
+            t_cl[n_monthly] = med_t;
+            for (int b = 0; b < n_bands; ++b)
+                Y_cl[n_monthly*n_bands+b] = med_b[b];
+            n_monthly++;
+
+            grp = grp_end;
+        }
+        n_valid = n_monthly;
     }
 
     /* ---- 3. Guard checks ---- */
@@ -939,7 +1054,71 @@ static void run_diagnostics(const float *stack_host, const float *dates_host,
                n_before_dedup, n_valid,
                100.0*(n_before_dedup - n_valid) / n_before_dedup);
 
-        /* 4. Data value ranges (after dedup) */
+        /* 3c. Filter out winter months (Nov-Mar) */
+        int n_before_winter = n_valid;
+        {
+            int out = 0;
+            for (int i = 0; i < n_valid; ++i) {
+                int ord = (int)(t_cl[i] + t_base);
+                int y, m;
+                ordinal_to_ym(ord, &y, &m);
+                if (m >= 4 && m <= 10) {
+                    t_cl[out] = t_cl[i];
+                    for (int b = 0; b < n_bands; ++b)
+                        Y_cl[out*n_bands+b] = Y_cl[i*n_bands+b];
+                    out++;
+                }
+            }
+            n_valid = out;
+        }
+        printf("  Winter filter: %d -> %d obs (removed %d Nov-Mar obs)\n",
+               n_before_winter, n_valid, n_before_winter - n_valid);
+
+        /* 3d. Monthly medians */
+        int n_before_median = n_valid;
+        {
+            int n_monthly = 0;
+            int grp = 0;
+            while (grp < n_valid) {
+                int ord0 = (int)(t_cl[grp] + t_base);
+                int y0, m0;
+                ordinal_to_ym(ord0, &y0, &m0);
+                int ym0 = y0 * 100 + m0;
+                int grp_end = grp + 1;
+                while (grp_end < n_valid) {
+                    int oe = (int)(t_cl[grp_end] + t_base);
+                    int ye, me;
+                    ordinal_to_ym(oe, &ye, &me);
+                    if (ye*100+me != ym0) break;
+                    grp_end++;
+                }
+                int gsz = grp_end - grp;
+                float med_t = (gsz%2==1) ? t_cl[grp+gsz/2]
+                              : (t_cl[grp+gsz/2-1]+t_cl[grp+gsz/2])*0.5f;
+                float med_b[8];
+                for (int b = 0; b < n_bands; ++b) {
+                    float sv[64]; int nv=0;
+                    for (int i=grp; i<grp_end && nv<64; ++i)
+                        sv[nv++] = Y_cl[i*n_bands+b];
+                    for (int i=1; i<nv; ++i) {
+                        float v=sv[i]; int j=i-1;
+                        while(j>=0 && sv[j]>v) { sv[j+1]=sv[j]; --j; }
+                        sv[j+1]=v;
+                    }
+                    med_b[b] = (nv%2==1) ? sv[nv/2] : (sv[nv/2-1]+sv[nv/2])*0.5f;
+                }
+                t_cl[n_monthly] = med_t;
+                for (int b=0; b<n_bands; ++b)
+                    Y_cl[n_monthly*n_bands+b] = med_b[b];
+                n_monthly++;
+                grp = grp_end;
+            }
+            n_valid = n_monthly;
+        }
+        printf("  Monthly medians: %d obs -> %d monthly values\n",
+               n_before_median, n_valid);
+
+        /* 4. Data value ranges (after monthly medians) */
         float bmin[8]={1e30f,1e30f,1e30f,1e30f}, bmax[8]={-1e30f,-1e30f,-1e30f,-1e30f};
         float bmean[8]={0};
         for (int i = 0; i < n_valid; ++i) {
@@ -1537,3 +1716,5 @@ int main(int argc, char **argv)
  * set_nodata() with an inline macro or helper function.
  * ===========================================================================
  */
+
+
