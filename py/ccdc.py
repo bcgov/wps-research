@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """20260692 cuda based ccdc implementation
 ccdc.py
