@@ -426,6 +426,46 @@ void ccdc_kernel(const float * __restrict__ stack_gpu,
     for (int i = 0; i < n_valid; ++i)
         t_cl[i] -= t_base;
 
+    /* ---- 2b. Remove consecutive duplicate observations ----
+     * Carry-forward compositing creates long runs of identical values
+     * at different dates.  CCDC interprets the transition between
+     * runs as a spectral break.  Deduplication keeps only the FIRST
+     * observation in each run of identical values, preserving the
+     * true change timestamps while eliminating artificial inflation
+     * of the observation count.
+     *
+     * This is safe for all data — if the input is actual per-scene
+     * observations with no carry-forward, consecutive duplicates are
+     * extremely rare and dedup is essentially a no-op. */
+    {
+        int out = 0;
+        for (int i = 0; i < n_valid; ++i) {
+            if (out == 0) {
+                /* always keep the first observation */
+                t_cl[out]  = t_cl[i];
+                for (int b = 0; b < n_bands; ++b)
+                    Y_cl[out*n_bands+b] = Y_cl[i*n_bands+b];
+                out++;
+            } else {
+                /* check if ANY band value differs from the last kept obs */
+                bool changed = false;
+                for (int b = 0; b < n_bands; ++b) {
+                    if (Y_cl[i*n_bands+b] != Y_cl[(out-1)*n_bands+b]) {
+                        changed = true;
+                        break;
+                    }
+                }
+                if (changed) {
+                    t_cl[out]  = t_cl[i];
+                    for (int b = 0; b < n_bands; ++b)
+                        Y_cl[out*n_bands+b] = Y_cl[i*n_bands+b];
+                    out++;
+                }
+            }
+        }
+        n_valid = out;
+    }
+
     /* ---- 3. Guard checks ---- */
     int nodata_tbreak = NODATA_INT, nodata_count = NODATA_INT;
     auto set_nodata = [&]() {
@@ -868,7 +908,38 @@ static void run_diagnostics(const float *stack_host, const float *dates_host,
         printf("  t_base=%.0f  centered range=[0, %.1f]  span=%.2f years\n",
                t_base, t_cl[n_valid-1], t_cl[n_valid-1]/365.25);
 
-        /* 4. Data value ranges */
+        /* 3b. Remove consecutive duplicate observations */
+        int n_before_dedup = n_valid;
+        {
+            int out = 0;
+            for (int i = 0; i < n_valid; ++i) {
+                if (out == 0) {
+                    t_cl[out] = t_cl[i];
+                    for (int b = 0; b < n_bands; ++b)
+                        Y_cl[out*n_bands+b] = Y_cl[i*n_bands+b];
+                    out++;
+                } else {
+                    bool changed = false;
+                    for (int b = 0; b < n_bands; ++b) {
+                        if (Y_cl[i*n_bands+b] != Y_cl[(out-1)*n_bands+b]) {
+                            changed = true; break;
+                        }
+                    }
+                    if (changed) {
+                        t_cl[out] = t_cl[i];
+                        for (int b = 0; b < n_bands; ++b)
+                            Y_cl[out*n_bands+b] = Y_cl[i*n_bands+b];
+                        out++;
+                    }
+                }
+            }
+            n_valid = out;
+        }
+        printf("  Dedup: %d -> %d unique obs (%.0f%% were duplicates)\n",
+               n_before_dedup, n_valid,
+               100.0*(n_before_dedup - n_valid) / n_before_dedup);
+
+        /* 4. Data value ranges (after dedup) */
         float bmin[8]={1e30f,1e30f,1e30f,1e30f}, bmax[8]={-1e30f,-1e30f,-1e30f,-1e30f};
         float bmean[8]={0};
         for (int i = 0; i < n_valid; ++i) {
@@ -1466,6 +1537,3 @@ int main(int argc, char **argv)
  * set_nodata() with an inline macro or helper function.
  * ===========================================================================
  */
-
-
-
