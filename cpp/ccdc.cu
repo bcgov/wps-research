@@ -1,4 +1,4 @@
-/* 20260609
+/*
  * miniccdc_cuda.cu
  * ================
  * GPU-accelerated CCDC-like change detection for 4-band Sentinel-2
@@ -415,7 +415,17 @@ void ccdc_kernel(const float * __restrict__ stack_gpu,
         }
     }
 
-    /* ---- 2. Guard checks ---- */
+    /* ---- 2. Center time values for numerical stability ----
+     * Raw ordinal dates (~738,000) cause sinf(k*omega*t) to operate
+     * at ~12,700 radians where float32 argument reduction loses all
+     * precision.  Subtracting t_base brings the range to [0, ~2200]
+     * (~38 radians max) which sinf handles accurately.
+     * The harmonic model is periodic so this is just a phase shift. */
+    float t_base = (n_valid > 0) ? t_cl[0] : 0.0f;
+    for (int i = 0; i < n_valid; ++i)
+        t_cl[i] -= t_base;
+
+    /* ---- 3. Guard checks ---- */
     int nodata_tbreak = NODATA_INT, nodata_count = NODATA_INT;
     auto set_nodata = [&]() {
         out_tbreak[pid] = nodata_tbreak;
@@ -589,7 +599,7 @@ void ccdc_kernel(const float * __restrict__ stack_gpu,
         magrms = sqrtf(magrms / n_bands);
 
         if (break_count == 0) {
-            first_break_date  = (int32_t)t_cl[break_idx];
+            first_break_date  = (int32_t)(t_cl[break_idx] + t_base);
             first_break_magrms = magrms;
             for (int b = 0; b < n_bands; ++b)
                 first_break_magb[b] = mag_b[b];
@@ -1101,4 +1111,6 @@ int main(int argc, char **argv)
  * set_nodata() with an inline macro or helper function.
  * ===========================================================================
  */
+
+
 
