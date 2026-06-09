@@ -754,6 +754,324 @@ static void parse_args(int argc, char **argv, Args &a)
 }
 
 /* =========================================================================
+ * Host-side diagnostic: sample a few pixels and trace the algorithm
+ * =========================================================================*/
+static void run_diagnostics(const float *stack_host, const float *dates_host,
+                            int n_times, long n_pixels, int n_bands,
+                            int n_lines, int n_samples, const Args &a)
+{
+    printf("\n");
+    printf("========================================================\n");
+    printf("  D I A G N O S T I C S   (CPU, %d sample pixels)\n", 12);
+    printf("========================================================\n");
+
+    float omega = 2.0f * 3.14159265f / 365.25f;
+    float chi2_crit = chi2_ppf(a.alpha, n_bands);
+    int n_pred = 1 + 2 * a.harmonics;
+
+    /* Pick 10 evenly-spaced pixels + center + corner */
+    long sample_pids[12];
+    for (int i = 0; i < 10; ++i)
+        sample_pids[i] = (long)i * n_pixels / 10;
+    sample_pids[10] = (long)(n_lines/2) * n_samples + n_samples/2;  /* center */
+    sample_pids[11] = n_pixels - 1;                                  /* last */
+
+    /* --- Global stack stats (sample first 100 pixels for speed) --- */
+    printf("\n--- GLOBAL DATA CHECKS ---\n");
+    {
+        long check_n = (n_pixels < 100) ? n_pixels : 100;
+        int all_zero=1, all_nan=1, all_same=1;
+        float first_val = 0;
+        int first_set = 0;
+        for (long p = 0; p < check_n; ++p) {
+            for (int ti = 0; ti < n_times && ti < 5; ++ti) {
+                for (int b = 0; b < n_bands; ++b) {
+                    float v = stack_host[((long)ti*n_bands+b)*n_pixels + p];
+                    if (!isnan(v)) {
+                        all_nan = 0;
+                        if (v != 0.0f) all_zero = 0;
+                        if (!first_set) { first_val=v; first_set=1; }
+                        else if (v != first_val) all_same = 0;
+                    }
+                }
+            }
+        }
+        printf("  First 100 pixels x first 5 times:\n");
+        printf("    all_NaN=%d  all_zero=%d  all_same_value=%d",
+               all_nan, all_zero, all_same);
+        if (first_set) printf("  (first_val=%.6f)", first_val);
+        printf("\n");
+    }
+
+    /* --- Per-pixel diagnostics --- */
+    for (int si = 0; si < 12; ++si) {
+        long pid = sample_pids[si];
+        if (pid < 0 || pid >= n_pixels) continue;
+
+        int row = (int)(pid / n_samples);
+        int col = (int)(pid % n_samples);
+
+        printf("\n--- PIXEL %ld  (row=%d, col=%d) ---\n", pid, row, col);
+
+        /* 1. Collect valid observations */
+        float *t_cl = (float*)malloc(n_times * sizeof(float));
+        float *Y_cl = (float*)malloc(n_times * n_bands * sizeof(float));
+        int n_valid = 0;
+        int n_nan = 0;
+
+        for (int ti = 0; ti < n_times; ++ti) {
+            int any_nan = 0;
+            float vals[8];
+            for (int b = 0; b < n_bands; ++b) {
+                float v = stack_host[((long)ti*n_bands+b)*n_pixels + pid];
+                vals[b] = v;
+                if (isnan(v)) any_nan = 1;
+            }
+            if (!any_nan) {
+                t_cl[n_valid] = dates_host[ti];
+                for (int b = 0; b < n_bands; ++b)
+                    Y_cl[n_valid*n_bands+b] = vals[b];
+                n_valid++;
+            } else {
+                n_nan++;
+            }
+        }
+
+        printf("  Valid obs: %d / %d  (NaN: %d)\n", n_valid, n_times, n_nan);
+
+        if (n_valid == 0) {
+            printf("  ALL NaN -- skipping\n");
+            free(t_cl); free(Y_cl); continue;
+        }
+
+        /* 2. Show raw date range */
+        printf("  Raw dates: first=%.0f  last=%.0f\n", t_cl[0], t_cl[n_valid-1]);
+
+        /* 3. Center times */
+        float t_base = t_cl[0];
+        for (int i = 0; i < n_valid; ++i) t_cl[i] -= t_base;
+        printf("  t_base=%.0f  centered range=[0, %.1f]  span=%.2f years\n",
+               t_base, t_cl[n_valid-1], t_cl[n_valid-1]/365.25);
+
+        /* 4. Data value ranges */
+        float bmin[8]={1e30f,1e30f,1e30f,1e30f}, bmax[8]={-1e30f,-1e30f,-1e30f,-1e30f};
+        float bmean[8]={0};
+        for (int i = 0; i < n_valid; ++i) {
+            for (int b = 0; b < n_bands; ++b) {
+                float v = Y_cl[i*n_bands+b];
+                if (v < bmin[b]) bmin[b] = v;
+                if (v > bmax[b]) bmax[b] = v;
+                bmean[b] += v;
+            }
+        }
+        printf("  Band value ranges (min/mean/max):\n");
+        const char *bnames_diag[] = {"B12","B11","B9","B8"};
+        for (int b = 0; b < n_bands; ++b) {
+            bmean[b] /= n_valid;
+            printf("    %s: %.4f / %.4f / %.4f\n",
+                   (b<4)?bnames_diag[b]:"Bx", bmin[b], bmean[b], bmax[b]);
+        }
+
+        /* 5. Show first 3 observations */
+        printf("  First 3 observations:\n");
+        for (int i = 0; i < 3 && i < n_valid; ++i) {
+            printf("    t=%.1f d  vals=[", t_cl[i]);
+            for (int b = 0; b < n_bands; ++b)
+                printf("%.4f%s", Y_cl[i*n_bands+b], b<n_bands-1?", ":"");
+            printf("]\n");
+        }
+
+        /* 6. Guard checks */
+        if (n_valid < a.min_history + 3) {
+            printf("  FAIL: n_valid=%d < min_history+3=%d -> NODATA\n",
+                   n_valid, a.min_history+3);
+            free(t_cl); free(Y_cl); continue;
+        }
+        float span_yr = t_cl[n_valid-1] / 365.25f;
+        if (span_yr < a.min_years) {
+            printf("  FAIL: span=%.2f years < min_years=%.2f -> NODATA\n",
+                   span_yr, a.min_years);
+            free(t_cl); free(Y_cl); continue;
+        }
+        float hist_span = (t_cl[a.min_history-1] - t_cl[0]) / 365.25f;
+        if (hist_span < a.min_hist_years) {
+            printf("  FAIL: history window span=%.2f years < min_hist_years=%.2f\n",
+                   hist_span, a.min_hist_years);
+            free(t_cl); free(Y_cl); continue;
+        }
+        printf("  Guards passed (span=%.2f yr, hist_span=%.2f yr)\n",
+               span_yr, hist_span);
+
+        /* 7. Build design matrix for first min_history obs */
+        int h_end = a.min_history;
+        printf("  Design matrix (first & last row of history):\n");
+        {
+            float row_first[8], row_last[8];
+            /* first row */
+            row_first[0] = 1.0f;
+            for (int k = 1; k <= a.harmonics; ++k) {
+                row_first[2*k-1] = sinf(k * omega * t_cl[0]);
+                row_first[2*k  ] = cosf(k * omega * t_cl[0]);
+            }
+            /* last row */
+            row_last[0] = 1.0f;
+            for (int k = 1; k <= a.harmonics; ++k) {
+                row_last[2*k-1] = sinf(k * omega * t_cl[h_end-1]);
+                row_last[2*k  ] = cosf(k * omega * t_cl[h_end-1]);
+            }
+            printf("    t=%.1f: [", t_cl[0]);
+            for (int p=0;p<n_pred;++p) printf("%.4f%s",row_first[p],p<n_pred-1?", ":"");
+            printf("]\n");
+            printf("    t=%.1f: [", t_cl[h_end-1]);
+            for (int p=0;p<n_pred;++p) printf("%.4f%s",row_last[p],p<n_pred-1?", ":"");
+            printf("]\n");
+        }
+
+        /* 8. Try OLS fit (simplified, on CPU) */
+        printf("  Attempting OLS fit (min_history=%d obs, n_pred=%d)...\n",
+               h_end, n_pred);
+        {
+            /* Build X (h_end x n_pred) */
+            float *X = (float*)calloc(h_end * n_pred, sizeof(float));
+            for (int i = 0; i < h_end; ++i) {
+                X[i*n_pred] = 1.0f;
+                for (int k = 1; k <= a.harmonics; ++k) {
+                    X[i*n_pred + 2*k-1] = sinf(k * omega * t_cl[i]);
+                    X[i*n_pred + 2*k  ] = cosf(k * omega * t_cl[i]);
+                }
+            }
+            /* XtX (n_pred x n_pred) */
+            float XtX[25] = {0};
+            for (int r = 0; r < n_pred; ++r)
+                for (int c = 0; c < n_pred; ++c)
+                    for (int i = 0; i < h_end; ++i)
+                        XtX[r*n_pred+c] += X[i*n_pred+r] * X[i*n_pred+c];
+
+            printf("    XtX diagonal: [");
+            for (int p=0;p<n_pred;++p) printf("%.2f%s",XtX[p*n_pred+p],p<n_pred-1?", ":"");
+            printf("]\n");
+
+            /* Cholesky check */
+            float L[25] = {0};
+            int chol_ok = 1;
+            for (int i = 0; i < n_pred && chol_ok; ++i) {
+                for (int j = 0; j <= i && chol_ok; ++j) {
+                    float s = XtX[i*n_pred+j];
+                    for (int k = 0; k < j; ++k) s -= L[i*n_pred+k]*L[j*n_pred+k];
+                    if (i == j) {
+                        if (s <= 0.0f) { chol_ok = 0; printf("    CHOLESKY FAIL at diag[%d] = %.6e\n", i, s); }
+                        else L[i*n_pred+i] = sqrtf(s);
+                    } else {
+                        L[i*n_pred+j] = s / L[j*n_pred+j];
+                    }
+                }
+            }
+            if (chol_ok) {
+                printf("    Cholesky: OK\n");
+
+                /* Solve for coefficients: XtX * coef = XtY */
+                float XtY[20] = {0}; /* n_pred x n_bands */
+                for (int r = 0; r < n_pred; ++r)
+                    for (int b = 0; b < n_bands; ++b)
+                        for (int i = 0; i < h_end; ++i)
+                            XtY[r*n_bands+b] += X[i*n_pred+r] * Y_cl[i*n_bands+b];
+
+                /* Forward/back substitution for band 0 just to show coefs */
+                float y2[5], x2[5];
+                for (int i=0;i<n_pred;++i) y2[i] = XtY[i*n_bands+0];
+                for (int i=0;i<n_pred;++i) {
+                    float s=y2[i];
+                    for (int k=0;k<i;++k) s-=L[i*n_pred+k]*y2[k];
+                    y2[i]=s/L[i*n_pred+i];
+                }
+                for (int i=n_pred-1;i>=0;--i) {
+                    float s=y2[i];
+                    for (int k=i+1;k<n_pred;++k) s-=L[k*n_pred+i]*x2[k];
+                    x2[i]=s/L[i*n_pred+i];
+                }
+                printf("    Coefficients (band 0): [");
+                for (int p=0;p<n_pred;++p) printf("%.6f%s",x2[p],p<n_pred-1?", ":"");
+                printf("]\n");
+
+                /* Compute residuals and show md2 for first 10 monitoring obs */
+                /* (very simplified - just uses OLS coefs, no robust refit) */
+                float coef_all[20] = {0}; /* n_pred x n_bands */
+                for (int b = 0; b < n_bands; ++b) {
+                    float yy[5], xx[5];
+                    for (int i=0;i<n_pred;++i) yy[i] = XtY[i*n_bands+b];
+                    for (int i=0;i<n_pred;++i) {
+                        float s=yy[i]; for(int k=0;k<i;++k) s-=L[i*n_pred+k]*yy[k];
+                        yy[i]=s/L[i*n_pred+i];
+                    }
+                    for (int i=n_pred-1;i>=0;--i) {
+                        float s=yy[i]; for(int k=i+1;k<n_pred;++k) s-=L[k*n_pred+i]*xx[k];
+                        xx[i]=s/L[i*n_pred+i];
+                    }
+                    for (int p=0;p<n_pred;++p) coef_all[p*n_bands+b] = xx[p];
+                }
+
+                /* Compute residual covariance */
+                float resid_cov[16] = {0}; /* n_bands x n_bands */
+                for (int i = 0; i < h_end; ++i) {
+                    float r[4];
+                    for (int b=0;b<n_bands;++b) {
+                        float pred=0;
+                        for (int p=0;p<n_pred;++p)
+                            pred += X[i*n_pred+p]*coef_all[p*n_bands+b];
+                        r[b] = Y_cl[i*n_bands+b] - pred;
+                    }
+                    for (int r1=0;r1<n_bands;++r1)
+                        for (int c1=0;c1<n_bands;++c1)
+                            resid_cov[r1*n_bands+c1] += r[r1]*r[c1];
+                }
+                float nf = (h_end>1) ? 1.0f/(h_end-1) : 1.0f;
+                printf("    Residual cov diag: [");
+                for (int b=0;b<n_bands;++b) {
+                    resid_cov[b*n_bands+b] = resid_cov[b*n_bands+b]*nf + 1e-6f;
+                    printf("%.6e%s", resid_cov[b*n_bands+b], b<n_bands-1?", ":"");
+                }
+                printf("]\n");
+
+                /* Show md2 for first 10 monitoring obs */
+                printf("    md2 for first 10 monitoring obs (chi2_crit=%.2f):\n      ",
+                       chi2_crit);
+                /* invert cov (just use diagonal for quick diag) */
+                float cov_diag_inv[4];
+                for (int b=0;b<n_bands;++b)
+                    cov_diag_inv[b] = 1.0f / resid_cov[b*n_bands+b];
+
+                int shown = 0;
+                for (int i = h_end; i < n_valid && shown < 10; ++i, ++shown) {
+                    float xrow[5];
+                    xrow[0] = 1.0f;
+                    for (int k=1;k<=a.harmonics;++k) {
+                        xrow[2*k-1] = sinf(k*omega*t_cl[i]);
+                        xrow[2*k  ] = cosf(k*omega*t_cl[i]);
+                    }
+                    float md2 = 0;
+                    for (int b=0;b<n_bands;++b) {
+                        float pred=0;
+                        for (int p=0;p<n_pred;++p) pred+=xrow[p]*coef_all[p*n_bands+b];
+                        float r = Y_cl[i*n_bands+b] - pred;
+                        md2 += r*r * cov_diag_inv[b];
+                    }
+                    printf("%.1f%s", md2, (shown<9)?", ":"");
+                }
+                printf("\n");
+            }
+            free(X);
+        }
+
+        free(t_cl);
+        free(Y_cl);
+    }
+
+    printf("\n========================================================\n");
+    printf("  END DIAGNOSTICS\n");
+    printf("========================================================\n\n");
+}
+
+/* =========================================================================
  * main
  * =========================================================================*/
 int main(int argc, char **argv)
@@ -819,6 +1137,10 @@ int main(int argc, char **argv)
             printf("  Loaded %d / %d\n", ti+1, n_times);
     }
     printf("  All images loaded\n");
+
+    /* --- run CPU-side diagnostics on sample pixels --- */
+    run_diagnostics(stack_host, dates_host, n_times, n_pixels,
+                    a.bands, a.lines, a.samples, a);
 
     /* --- GPU setup --- */
     int dev = 0;
