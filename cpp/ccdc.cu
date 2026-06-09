@@ -74,7 +74,7 @@
  * Compile-time constants
  * ========================================================================= */
 #define MAX_BANDS    4
-#define MAX_TIMES    1024   /* max time steps; increase if needed */
+#define MAX_TIMES    1536   /* max time steps; supports ~1300 S2 scenes */
 #define MAX_PRED     5      /* max design-matrix columns: 1 + 2*harmonics */
 #define MAX_HISTORY  64     /* max min_history value accepted */
 #define NODATA_INT   (-9999)
@@ -98,6 +98,7 @@ struct Params {
     float min_hist_years;
     float chi2_crit;        /* precomputed on host */
     float omega;            /* 2*pi/365.25          */
+    int   tile_n_pixels;    /* pixels in current tile (for tiling) */
 };
 
 __constant__ Params d_params;
@@ -385,7 +386,7 @@ void ccdc_kernel(const float * __restrict__ stack_gpu,
 {
     int pid = blockIdx.x * blockDim.x + threadIdx.x;
     const Params &p = d_params;
-    int n_pixels = p.n_lines * p.n_samples;
+    int n_pixels = p.tile_n_pixels;
     if (pid >= n_pixels) return;
 
     int n_bands  = p.n_bands;
@@ -816,26 +817,84 @@ int main(int argc, char **argv)
     printf("GPU: %s  (%.0f GB VRAM)\n",
            prop.name, prop.totalGlobalMem/1e9);
 
-    /* --- copy stack to GPU --- */
-    printf("Copying stack to GPU (%.1f GB)...\n", n_total*4.0/1e9);
-    float *d_stack;
-    cudaMalloc(&d_stack, n_total * sizeof(float));
-    cudaMemcpy(d_stack, stack_host, n_total*sizeof(float), cudaMemcpyHostToDevice);
-    free(stack_host);
+    /* --- query free GPU memory and compute tile size --- */
+    size_t gpu_free = 0, gpu_total = 0;
+    cudaMemGetInfo(&gpu_free, &gpu_total);
+    printf("GPU memory: %.1f GB free / %.1f GB total\n",
+           gpu_free/1e9, gpu_total/1e9);
 
+    /*
+     * Per-pixel GPU memory breakdown:
+     *   stack data  : n_times * n_bands * 4  bytes
+     *   outputs     : 2*4 (int32) + (1+n_bands)*4 (float) bytes
+     *   local memory: each thread allocates large scratch arrays from
+     *                 global memory (t_cl, Y_cl, stable_buf, X_st, Y_st,
+     *                 resid_st).  CUDA allocates local mem for ALL launched
+     *                 threads, not just resident ones.
+     *                 Estimate: ~(3*MAX_TIMES + 3*MAX_TIMES*MAX_BANDS
+     *                           + MAX_TIMES*MAX_PRED) * 4  + 4096
+     */
+    size_t stack_per_px  = (size_t)n_times * a.bands * sizeof(float);
+    size_t out_per_px    = 2*sizeof(int32_t) + (size_t)(1 + a.bands)*sizeof(float);
+    size_t local_per_thr = (size_t)(3*MAX_TIMES + 3*MAX_TIMES*MAX_BANDS
+                                    + MAX_TIMES*MAX_PRED) * sizeof(float) + 4096;
+    size_t total_per_px  = stack_per_px + out_per_px + local_per_thr;
+
+    /* leave 2 GB headroom for driver / CUDA runtime */
+    size_t budget = gpu_free - (size_t)2ULL * 1024 * 1024 * 1024;
+    long tile_pixels = (long)(budget / total_per_px);
+
+    /* round to multiple of threads_per_block */
+    int tpb = a.threads_per_block;
+    tile_pixels = (tile_pixels / tpb) * tpb;
+    if (tile_pixels < tpb) tile_pixels = tpb;
+    if (tile_pixels > n_pixels) tile_pixels = n_pixels;
+
+    int n_tiles = (int)((n_pixels + tile_pixels - 1) / tile_pixels);
+    printf("Tile size: %ld pixels  (%d tiles to cover %ld pixels)\n",
+           tile_pixels, n_tiles, n_pixels);
+    printf("Per-pixel GPU footprint: %.1f KB "
+           "(stack %.1f + local %.1f + out %.0f B)\n",
+           total_per_px/1024.0, stack_per_px/1024.0,
+           local_per_thr/1024.0, (double)out_per_px);
+
+    /* --- allocate host output arrays (full image) --- */
+    int32_t *h_tbreak = (int32_t*)malloc(n_pixels*sizeof(int32_t));
+    int32_t *h_count  = (int32_t*)malloc(n_pixels*sizeof(int32_t));
+    float   *h_magrms = (float*)  malloc(n_pixels*sizeof(float));
+    float   *h_magb   = (float*)  malloc((long)a.bands*n_pixels*sizeof(float));
+    if (!h_tbreak||!h_count||!h_magrms||!h_magb) {
+        fprintf(stderr, "Host output malloc failed\n"); return 1;
+    }
+
+    /* --- dates to GPU (shared across all tiles, tiny) --- */
     float *d_dates;
     cudaMalloc(&d_dates, n_times * sizeof(float));
     cudaMemcpy(d_dates, dates_host, n_times*sizeof(float), cudaMemcpyHostToDevice);
 
-    /* --- output buffers on GPU --- */
+    /* --- allocate GPU buffers sized for one tile --- */
+    float   *d_stack;
     int32_t *d_tbreak, *d_count;
     float   *d_magrms, *d_magb;
-    cudaMalloc(&d_tbreak, n_pixels * sizeof(int32_t));
-    cudaMalloc(&d_count,  n_pixels * sizeof(int32_t));
-    cudaMalloc(&d_magrms, n_pixels * sizeof(float));
-    cudaMalloc(&d_magb,   (long)a.bands * n_pixels * sizeof(float));
 
-    /* --- fill constant params --- */
+    size_t tile_stack_bytes = (size_t)tile_pixels * n_times * a.bands * sizeof(float);
+    cudaMalloc(&d_stack,  tile_stack_bytes);
+    cudaMalloc(&d_tbreak, tile_pixels * sizeof(int32_t));
+    cudaMalloc(&d_count,  tile_pixels * sizeof(int32_t));
+    cudaMalloc(&d_magrms, tile_pixels * sizeof(float));
+    cudaMalloc(&d_magb,   (long)a.bands * tile_pixels * sizeof(float));
+
+    cudaError_t alloc_err = cudaGetLastError();
+    if (alloc_err != cudaSuccess) {
+        fprintf(stderr, "GPU alloc failed: %s\n", cudaGetErrorString(alloc_err));
+        return 1;
+    }
+
+    /* host-side tile extraction buffer (reused each tile) */
+    float *tile_buf = (float*)malloc(tile_stack_bytes);
+    if (!tile_buf) { fprintf(stderr,"tile_buf malloc failed\n"); return 1; }
+
+    /* --- fill constant params (updated per tile for tile_n_pixels) --- */
     Params hp;
     hp.n_times        = n_times;
     hp.n_lines        = a.lines;
@@ -851,48 +910,96 @@ int main(int argc, char **argv)
     hp.min_hist_years = a.min_hist_years;
     hp.chi2_crit      = chi2_ppf(a.alpha, a.bands);
     hp.omega          = 2.0f * 3.14159265f / 365.25f;
+    hp.tile_n_pixels  = 0; /* set per tile below */
 
     printf("chi2_crit (alpha=%.2f, df=%d) = %.4f\n",
            a.alpha, a.bands, hp.chi2_crit);
 
-    cudaMemcpyToSymbol(d_params, &hp, sizeof(Params));
+    /* --- tiled processing loop --- */
+    cudaEvent_t ev0, ev1;
+    cudaEventCreate(&ev0); cudaEventCreate(&ev1);
+    float total_kernel_ms = 0.0f;
 
-    /* --- launch kernel --- */
-    int tpb    = a.threads_per_block;
-    int blocks = ((int)n_pixels + tpb - 1) / tpb;
-    printf("Launching %d blocks x %d threads = %d threads\n",
-           blocks, tpb, blocks*tpb);
+    for (int tile = 0; tile < n_tiles; ++tile) {
+        long p_off  = (long)tile * tile_pixels;
+        long p_end  = p_off + tile_pixels;
+        if (p_end > n_pixels) p_end = n_pixels;
+        long tile_sz = p_end - p_off;
 
-    cudaEvent_t t0, t1;
-    cudaEventCreate(&t0); cudaEventCreate(&t1);
-    cudaEventRecord(t0);
+        printf("Tile %d/%d : pixels %ld .. %ld  (%ld px)\n",
+               tile+1, n_tiles, p_off, p_end-1, tile_sz);
 
-    ccdc_kernel<<<blocks, tpb>>>(d_stack, d_dates,
-                                  d_tbreak, d_count,
-                                  d_magrms, d_magb);
+        /* --- extract tile pixels from host stack ---
+         * Host stack layout: (n_times, n_bands, n_pixels)
+         * Each (t, b) plane has n_pixels contiguous floats.
+         * We copy tile_sz contiguous floats starting at offset p_off
+         * from each plane into tile_buf at (t*n_bands+b)*tile_sz.
+         */
+        for (int ti = 0; ti < n_times; ++ti) {
+            for (int b = 0; b < a.bands; ++b) {
+                long src_off = ((long)ti * a.bands + b) * n_pixels + p_off;
+                long dst_off = ((long)ti * a.bands + b) * tile_sz;
+                memcpy(tile_buf + dst_off,
+                       stack_host + src_off,
+                       tile_sz * sizeof(float));
+            }
+        }
 
-    cudaEventRecord(t1);
-    cudaEventSynchronize(t1);
+        /* --- copy tile to GPU --- */
+        size_t tile_bytes = (size_t)tile_sz * n_times * a.bands * sizeof(float);
+        cudaMemcpy(d_stack, tile_buf, tile_bytes, cudaMemcpyHostToDevice);
 
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "Kernel error: %s\n", cudaGetErrorString(err));
-        return 1;
+        /* --- update params with this tile's pixel count --- */
+        hp.tile_n_pixels = (int)tile_sz;
+        cudaMemcpyToSymbol(d_params, &hp, sizeof(Params));
+
+        /* --- launch kernel --- */
+        int blocks = ((int)tile_sz + tpb - 1) / tpb;
+        cudaEventRecord(ev0);
+
+        ccdc_kernel<<<blocks, tpb>>>(d_stack, d_dates,
+                                      d_tbreak, d_count,
+                                      d_magrms, d_magb);
+
+        cudaEventRecord(ev1);
+        cudaEventSynchronize(ev1);
+
+        cudaError_t kerr = cudaGetLastError();
+        if (kerr != cudaSuccess) {
+            fprintf(stderr, "Kernel error tile %d: %s\n",
+                    tile+1, cudaGetErrorString(kerr));
+            return 1;
+        }
+        float tile_ms;
+        cudaEventElapsedTime(&tile_ms, ev0, ev1);
+        total_kernel_ms += tile_ms;
+        printf("  Kernel: %.2f s\n", tile_ms/1000.0f);
+
+        /* --- copy tile results back to correct host offset --- */
+        cudaMemcpy(h_tbreak + p_off, d_tbreak,
+                   tile_sz*sizeof(int32_t), cudaMemcpyDeviceToHost);
+        cudaMemcpy(h_count  + p_off, d_count,
+                   tile_sz*sizeof(int32_t), cudaMemcpyDeviceToHost);
+        cudaMemcpy(h_magrms + p_off, d_magrms,
+                   tile_sz*sizeof(float),   cudaMemcpyDeviceToHost);
+        /* per-band magnitude: d_magb layout is (n_bands, tile_sz) on GPU
+         * but h_magb layout is (n_bands, n_pixels) on host */
+        for (int b = 0; b < a.bands; ++b) {
+            cudaMemcpy(h_magb + (long)b*n_pixels + p_off,
+                       d_magb + (long)b*tile_sz,
+                       tile_sz*sizeof(float), cudaMemcpyDeviceToHost);
+        }
     }
-    float ms;
-    cudaEventElapsedTime(&ms, t0, t1);
-    printf("Kernel finished in %.2f s\n", ms/1000.0f);
 
-    /* --- copy results back --- */
-    int32_t *h_tbreak = (int32_t*)malloc(n_pixels*sizeof(int32_t));
-    int32_t *h_count  = (int32_t*)malloc(n_pixels*sizeof(int32_t));
-    float   *h_magrms = (float*)  malloc(n_pixels*sizeof(float));
-    float   *h_magb   = (float*)  malloc((long)a.bands*n_pixels*sizeof(float));
+    printf("All tiles done. Total kernel time: %.2f s\n",
+           total_kernel_ms/1000.0f);
 
-    cudaMemcpy(h_tbreak, d_tbreak, n_pixels*sizeof(int32_t), cudaMemcpyDeviceToHost);
-    cudaMemcpy(h_count,  d_count,  n_pixels*sizeof(int32_t), cudaMemcpyDeviceToHost);
-    cudaMemcpy(h_magrms, d_magrms, n_pixels*sizeof(float),   cudaMemcpyDeviceToHost);
-    cudaMemcpy(h_magb,   d_magb,   (long)a.bands*n_pixels*sizeof(float), cudaMemcpyDeviceToHost);
+    /* --- cleanup GPU tile buffers --- */
+    cudaFree(d_stack); cudaFree(d_dates);
+    cudaFree(d_tbreak); cudaFree(d_count);
+    cudaFree(d_magrms); cudaFree(d_magb);
+    free(tile_buf);
+    free(stack_host);
 
     /* --- summary stats --- */
     long n_changed=0, n_nodata=0;
@@ -956,11 +1063,8 @@ int main(int argc, char **argv)
 
     printf("Outputs written to %s\n", a.output_dir);
 
-    /* cleanup */
+    /* cleanup host outputs */
     free(h_tbreak); free(h_count); free(h_magrms); free(h_magb);
-    cudaFree(d_stack); cudaFree(d_dates);
-    cudaFree(d_tbreak); cudaFree(d_count);
-    cudaFree(d_magrms); cudaFree(d_magb);
 
     return 0;
 }
@@ -997,3 +1101,4 @@ int main(int argc, char **argv)
  * set_nodata() with an inline macro or helper function.
  * ===========================================================================
  */
+
