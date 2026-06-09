@@ -76,7 +76,7 @@
 #define MAX_BANDS    4
 #define MAX_TIMES    1536   /* max time steps; supports ~1300 S2 scenes */
 #define MAX_PRED     5      /* max design-matrix columns: 1 + 2*harmonics */
-#define MAX_HISTORY  64     /* max min_history value accepted */
+#define MAX_HISTORY  512    /* max initial history window (expanded to span min_hist_years) */
 #define NODATA_INT   (-9999)
 #define NODATA_FLOAT (NAN)
 
@@ -211,7 +211,7 @@ int fit_robust(const float *X_rows, const float *Y,
                int n_obs, int n_pred, int n_bands,
                float *coef)
 {
-    float W[MAX_HISTORY];
+    float W[MAX_TIMES];   /* MAX_TIMES: called from refit with up to n_stable obs */
     for (int i = 0; i < n_obs; ++i) W[i] = 1.0f;
 
     for (int iter = 0; iter < 5; ++iter) {
@@ -219,7 +219,7 @@ int fit_robust(const float *X_rows, const float *Y,
             return -1;
 
         /* compute per-observation RMS residual */
-        float rms[MAX_HISTORY];
+        float rms[MAX_TIMES];
         for (int i = 0; i < n_obs; ++i) {
             float s = 0.0f;
             for (int b = 0; b < n_bands; ++b) {
@@ -234,7 +234,7 @@ int fit_robust(const float *X_rows, const float *Y,
 
         /* MAD of rms values */
         /* simple insertion sort for small n */
-        float sorted[MAX_HISTORY];
+        float sorted[MAX_TIMES];
         for (int i = 0; i < n_obs; ++i) sorted[i] = rms[i];
         for (int i = 1; i < n_obs; ++i) {
             float v = sorted[i]; int j = i-1;
@@ -243,7 +243,7 @@ int fit_robust(const float *X_rows, const float *Y,
         }
         float med = (n_obs % 2) ? sorted[n_obs/2]
                                  : 0.5f*(sorted[n_obs/2-1]+sorted[n_obs/2]);
-        float devs[MAX_HISTORY];
+        float devs[MAX_TIMES];
         for (int i = 0; i < n_obs; ++i)
             devs[i] = fabsf(rms[i] - med);
         for (int i = 1; i < n_obs; ++i) {
@@ -317,7 +317,8 @@ __device__
 void trimmed_cov(const float *resid, int n_obs, int n_bands, float *cov)
 {
     /* norms */
-    float norms[MAX_HISTORY];
+    /* norms and idx need to handle up to MAX_TIMES entries (refit path) */
+    float norms[MAX_TIMES];
     for (int i = 0; i < n_obs; ++i) {
         float s = 0.0f;
         for (int b = 0; b < n_bands; ++b)
@@ -325,7 +326,7 @@ void trimmed_cov(const float *resid, int n_obs, int n_bands, float *cov)
         norms[i] = sqrtf(s);
     }
     /* argsort by norm (insertion) */
-    int idx[MAX_HISTORY];
+    int idx[MAX_TIMES];
     for (int i = 0; i < n_obs; ++i) idx[i] = i;
     for (int i = 1; i < n_obs; ++i) {
         int v = idx[i]; int j = i-1;
@@ -453,9 +454,19 @@ void ccdc_kernel(const float * __restrict__ stack_gpu,
 
         int hist_end = seg_start + p.min_history;
 
-        /* guard: history window must span enough time */
-        float hist_span = (t_cl[hist_end-1] - t_cl[seg_start]) / 365.25f;
-        if (hist_span < p.min_hist_years) break;
+        /* Expand history window until it spans min_hist_years.
+         * With S2 revisit every 2-3 days, min_history=24 only spans
+         * ~70 days.  We need ~300 days (0.8 yr) for a stable 2-harmonic
+         * fit, so expand to include enough observations. */
+        while (hist_end < n_valid &&
+               hist_end - seg_start < MAX_HISTORY &&
+               (t_cl[hist_end-1] - t_cl[seg_start]) / 365.25f < p.min_hist_years) {
+            hist_end++;
+        }
+
+        /* still too short after expansion, or not enough monitoring obs left */
+        if ((t_cl[hist_end-1] - t_cl[seg_start]) / 365.25f < p.min_hist_years) break;
+        if (n_valid - hist_end < 3) break;
 
         /* build design matrix for history window */
         float X_hist[MAX_HISTORY * MAX_PRED];
@@ -648,6 +659,9 @@ static float chi2_ppf(float alpha, int df)
 /* =========================================================================
  * GDAL output helpers
  * =========================================================================*/
+#ifdef __CUDACC__
+#pragma diag_suppress 1650
+#endif
 static void write_envi_band(const char *path, void *data,
                              int cols, int rows, GDALDataType dtype,
                              double *geotransform, const char *wkt,
@@ -675,9 +689,10 @@ static void write_envi_band(const char *path, void *data,
     }
     GDALRasterBandH band = GDALGetRasterBand(ds, 1);
     GDALSetRasterNoDataValue(band, nodata);
-    (void)GDALSetDescription(band, desc);
-    GDALRasterIO(band, GF_Write, 0, 0, cols, rows,
-                 data, cols, rows, dtype, 0, 0);
+    GDALSetDescription(band, desc);
+    if (GDALRasterIO(band, GF_Write, 0, 0, cols, rows,
+                     data, cols, rows, dtype, 0, 0) != CE_None)
+        fprintf(stderr, "Warning: GDALRasterIO write failed for %s\n", path);
     GDALFlushCache(ds);
     GDALClose(ds);
 }
@@ -894,17 +909,29 @@ static void run_diagnostics(const float *stack_host, const float *dates_host,
             free(t_cl); free(Y_cl); continue;
         }
         float hist_span = (t_cl[a.min_history-1] - t_cl[0]) / 365.25f;
-        if (hist_span < a.min_hist_years) {
-            printf("  FAIL: history window span=%.2f years < min_hist_years=%.2f\n",
-                   hist_span, a.min_hist_years);
+        /* Expand history window like the kernel does */
+        int h_end = a.min_history;
+        while (h_end < n_valid && h_end < 512 &&
+               (t_cl[h_end-1] - t_cl[0]) / 365.25f < a.min_hist_years) {
+            h_end++;
+        }
+        float expanded_span = (t_cl[h_end-1] - t_cl[0]) / 365.25f;
+        if (expanded_span < a.min_hist_years) {
+            printf("  FAIL: expanded history %d obs, span=%.2f yr < min_hist_years=%.2f\n",
+                   h_end, expanded_span, a.min_hist_years);
             free(t_cl); free(Y_cl); continue;
         }
-        printf("  Guards passed (span=%.2f yr, hist_span=%.2f yr)\n",
-               span_yr, hist_span);
+        if (n_valid - h_end < 3) {
+            printf("  FAIL: only %d monitoring obs left after %d history obs\n",
+                   n_valid - h_end, h_end);
+            free(t_cl); free(Y_cl); continue;
+        }
+        printf("  Guards passed: initial span=%.2f yr at %d obs, expanded to %d obs "
+               "(span=%.2f yr), %d monitoring obs remain\n",
+               hist_span, a.min_history, h_end, expanded_span, n_valid - h_end);
 
-        /* 7. Build design matrix for first min_history obs */
-        int h_end = a.min_history;
-        printf("  Design matrix (first & last row of history):\n");
+        /* 7. Build design matrix for history window */
+        printf("  Design matrix (first & last row of %d-obs history):\n", h_end);
         {
             float row_first[8], row_last[8];
             /* first row */
@@ -928,7 +955,7 @@ static void run_diagnostics(const float *stack_host, const float *dates_host,
         }
 
         /* 8. Try OLS fit (simplified, on CPU) */
-        printf("  Attempting OLS fit (min_history=%d obs, n_pred=%d)...\n",
+        printf("  Attempting OLS fit (%d history obs, n_pred=%d)...\n",
                h_end, n_pred);
         {
             /* Build X (h_end x n_pred) */
@@ -1168,8 +1195,13 @@ int main(int argc, char **argv)
      */
     size_t stack_per_px  = (size_t)n_times * a.bands * sizeof(float);
     size_t out_per_px    = 2*sizeof(int32_t) + (size_t)(1 + a.bands)*sizeof(float);
-    size_t local_per_thr = (size_t)(3*MAX_TIMES + 3*MAX_TIMES*MAX_BANDS
-                                    + MAX_TIMES*MAX_PRED) * sizeof(float) + 4096;
+    size_t local_per_thr = (
+        /* MAX_TIMES-sized arrays: t_cl, stable_buf, norms, idx,
+           Y_cl, Y_st, resid_st, X_st, W, rms, sorted, devs (fit_robust) */
+        (size_t)(8*MAX_TIMES + 3*MAX_TIMES*MAX_BANDS + MAX_TIMES*MAX_PRED)
+        /* MAX_HISTORY-sized arrays: X_hist, resid_hist */
+        + (size_t)(MAX_HISTORY*MAX_PRED + MAX_HISTORY*MAX_BANDS)
+    ) * sizeof(float) + 8192; /* coef, cov, cov_inv, small scratch */
     size_t total_per_px  = stack_per_px + out_per_px + local_per_thr;
 
     /* leave 2 GB headroom for driver / CUDA runtime */
@@ -1364,7 +1396,8 @@ int main(int argc, char **argv)
     /* create output dir */
     char mkdir_cmd[600];
     snprintf(mkdir_cmd, sizeof(mkdir_cmd), "mkdir -p %s", a.output_dir);
-    (void)system(mkdir_cmd);
+    if (system(mkdir_cmd) != 0)
+        fprintf(stderr, "Warning: mkdir -p failed\n");
 
     snprintf(outpath, sizeof(outpath), "%s/tBreak_first.bin", a.output_dir);
     write_envi_band(outpath, h_tbreak, a.samples, a.lines, GDT_Int32,
