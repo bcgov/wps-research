@@ -924,16 +924,105 @@ static void parse_args(int argc, char **argv, Args &a)
 }
 
 /* =========================================================================
+ * Detect B9 (945nm water vapor) band index from ENVI header.
+ * Returns 0-based index of B9 band, or -1 if not found.
+ * Looks for "B9 " or "945" in the "band names" header field.
+ * Will NOT match "B8A" / "B9A" / other similar names.
+ * =========================================================================*/
+static int detect_b9_band(const char *bin_path)
+{
+    char hdr_path[512];
+    strncpy(hdr_path, bin_path, 507);
+    hdr_path[507] = '\0';
+    char *dot = strrchr(hdr_path, '.');
+    if (dot) strcpy(dot, ".hdr");
+    else     strcat(hdr_path, ".hdr");
+
+    FILE *f = fopen(hdr_path, "r");
+    if (!f) {
+        snprintf(hdr_path, sizeof(hdr_path), "%s.hdr", bin_path);
+        f = fopen(hdr_path, "r");
+    }
+    if (!f) return -1;
+
+    /* read entire header into buffer */
+    fseek(f, 0, SEEK_END);
+    long fsize = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    char *buf = (char*)malloc(fsize + 1);
+    if (!buf) { fclose(f); return -1; }
+    size_t nr = fread(buf, 1, fsize, f);
+    buf[nr] = '\0';
+    fclose(f);
+
+    /* find "band names" section */
+    char *bn = strstr(buf, "band names");
+    if (!bn) { free(buf); return -1; }
+    char *open = strchr(bn, '{');
+    if (!open) { free(buf); return -1; }
+    char *close = strchr(open, '}');
+    if (!close) { free(buf); return -1; }
+
+    /* iterate through comma-separated band entries */
+    int band_idx = 0;
+    char *p = open + 1;
+    while (p < close) {
+        char *comma = (char*)memchr(p, ',', close - p);
+        char *end = comma ? comma : close;
+
+        /* extract this entry */
+        int len = (int)(end - p);
+        if (len > 255) len = 255;
+        char entry[256];
+        memcpy(entry, p, len);
+        entry[len] = '\0';
+
+        /* check for B9 specifically (not B9A, B19, etc.)
+         * look for ": B9 " or " B9 " or "B9\t" patterns,
+         * OR the wavelength "945" */
+        char *hit = strstr(entry, "B9");
+        if (hit) {
+            char after = hit[2];
+            if (after == ' ' || after == '\t' || after == '\n' ||
+                after == '\r' || after == '\0' || after == ',') {
+                free(buf);
+                return band_idx;
+            }
+        }
+        if (strstr(entry, "945")) {
+            free(buf);
+            return band_idx;
+        }
+
+        band_idx++;
+        p = end + 1;
+    }
+
+    free(buf);
+    return -1;
+}
+
+/* =========================================================================
  * Host-side diagnostic: sample a few pixels and trace the algorithm
  * =========================================================================*/
 static void run_diagnostics(const float *stack_host, const float *dates_host,
                             int n_times, long n_pixels, int n_bands,
-                            int n_lines, int n_samples, const Args &a)
+                            int n_lines, int n_samples, const Args &a,
+                            int drop_band_idx)
 {
     printf("\n");
     printf("========================================================\n");
     printf("  D I A G N O S T I C S   (CPU, %d sample pixels)\n", 12);
     printf("========================================================\n");
+
+    /* build band name list matching the stack layout */
+    const char *all_bn[] = {"B12","B11","B9","B8"};
+    const char *bnames_diag[4];
+    int nbn = 0;
+    for (int b = 0; b < 4 && nbn < n_bands; ++b) {
+        if (b == drop_band_idx) continue;
+        bnames_diag[nbn++] = all_bn[b];
+    }
 
     float omega = 2.0f * 3.14159265f / 365.25f;
     float chi2_crit = chi2_ppf(a.alpha, n_bands);
@@ -1130,7 +1219,6 @@ static void run_diagnostics(const float *stack_host, const float *dates_host,
             }
         }
         printf("  Band value ranges (min/mean/max):\n");
-        const char *bnames_diag[] = {"B12","B11","B9","B8"};
         for (int b = 0; b < n_bands; ++b) {
             bmean[b] /= n_valid;
             printf("    %s: %.4f / %.4f / %.4f\n",
@@ -1393,31 +1481,58 @@ int main(int argc, char **argv)
     printf("Found %d time steps\n", n_times);
 
     long n_pixels = (long)a.lines * a.samples;
-    long n_per_image = (long)a.bands * n_pixels;
-    long n_total = (long)n_times * n_per_image;
 
-    /* --- allocate host stack --- */
-    printf("Allocating %.1f GB host RAM...\n",
-           n_total*4.0/1e9);
+    /* --- detect and drop B9 (945nm water vapor) band --- */
+    int drop_band_idx = (n_times > 0) ? detect_b9_band(paths[0]) : -1;
+    int n_bands_file = a.bands;   /* original band count in files */
+    if (drop_band_idx >= 0 && drop_band_idx < n_bands_file) {
+        printf("Dropping band %d (B9 945nm water vapor) from %d-band input\n",
+               drop_band_idx, n_bands_file);
+        a.bands = n_bands_file - 1;  /* all subsequent a.bands refs use reduced count */
+    } else {
+        printf("No B9 band detected in header -- using all %d bands\n", n_bands_file);
+        drop_band_idx = -1;
+    }
+
+    long n_per_image_file = (long)n_bands_file * n_pixels;
+    long n_per_image_out  = (long)a.bands * n_pixels;
+    long n_total = (long)n_times * n_per_image_out;
+
+    /* --- allocate host stack (using reduced band count) --- */
+    printf("Allocating %.1f GB host RAM (%d bands x %d times x %ld pixels)...\n",
+           n_total*4.0/1e9, a.bands, n_times, n_pixels);
     float *stack_host = (float*)malloc(n_total * sizeof(float));
     if (!stack_host) { fprintf(stderr,"malloc failed\n"); return 1; }
 
-    /* --- load all images --- */
+    /* --- load all images, skipping dropped band --- */
     printf("Loading images...\n");
     for (int ti = 0; ti < n_times; ++ti) {
-        float *img = read_envi_float(paths[ti], n_per_image);
+        float *img = read_envi_float(paths[ti], n_per_image_file);
         if (!img) { fprintf(stderr,"Failed loading %s\n",paths[ti]); return 1; }
-        memcpy(stack_host + (long)ti * n_per_image,
-               img, n_per_image * sizeof(float));
+
+        if (drop_band_idx >= 0) {
+            /* copy bands, skipping the dropped one */
+            int dst_b = 0;
+            for (int b = 0; b < n_bands_file; ++b) {
+                if (b == drop_band_idx) continue;
+                memcpy(stack_host + (long)ti * n_per_image_out + (long)dst_b * n_pixels,
+                       img + (long)b * n_pixels,
+                       n_pixels * sizeof(float));
+                dst_b++;
+            }
+        } else {
+            memcpy(stack_host + (long)ti * n_per_image_out,
+                   img, n_per_image_out * sizeof(float));
+        }
         free(img);
         if ((ti+1) % 50 == 0)
             printf("  Loaded %d / %d\n", ti+1, n_times);
     }
-    printf("  All images loaded\n");
+    printf("  All images loaded (%d bands per image after B9 filter)\n", a.bands);
 
     /* --- run CPU-side diagnostics on sample pixels --- */
     run_diagnostics(stack_host, dates_host, n_times, n_pixels,
-                    a.bands, a.lines, a.samples, a);
+                    a.bands, a.lines, a.samples, a, drop_band_idx);
 
     /* --- GPU setup --- */
     int dev = 0;
@@ -1639,8 +1754,18 @@ int main(int argc, char **argv)
         GDALClose(ref_ds);
     }
 
+    /* --- build output band name list (excluding dropped band) --- */
+    const char *all_bnames[] = {"B12","B11","B9","B8"};
+    const char *bnames[MAX_BANDS];
+    {
+        int nb = 0;
+        for (int b = 0; b < n_bands_file && nb < MAX_BANDS; ++b) {
+            if (b == drop_band_idx) continue;
+            bnames[nb++] = (b < 4) ? all_bnames[b] : "Bx";
+        }
+    }
+
     /* --- write outputs --- */
-    const char *bnames[] = {"B12","B11","B9","B8"};
     char outpath[600];
 
     /* create output dir */
@@ -1666,11 +1791,11 @@ int main(int argc, char **argv)
 
     for (int b=0; b<a.bands; ++b) {
         snprintf(outpath, sizeof(outpath), "%s/MAG_%s.bin",
-                 a.output_dir, (b < 4) ? bnames[b] : "Bx");
+                 a.output_dir, bnames[b]);
         char desc[128];
         snprintf(desc, sizeof(desc),
                  "Signed magnitude %s at first break (negative=loss)",
-                 (b<4)?bnames[b]:"Bx");
+                 bnames[b]);
         write_envi_band(outpath, h_magb + (long)b*n_pixels,
                         a.samples, a.lines, GDT_Float32,
                         geotransform, wkt_buf, -9999.0, desc);
@@ -1716,5 +1841,6 @@ int main(int argc, char **argv)
  * set_nodata() with an inline macro or helper function.
  * ===========================================================================
  */
+
 
 
