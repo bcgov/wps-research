@@ -13,8 +13,6 @@
     <a id="btn-prev" class="btn btn-secondary" style="font-size:11px;padding:3px 10px;display:none" href="#">Prev</a>
     <h1>{{ fire_numbe }}</h1>
     <a id="btn-next" class="btn btn-secondary" style="font-size:11px;padding:3px 10px;display:none" href="#">Next</a>
-    <a class="btn btn-secondary" style="font-size:11px;padding:3px 10px"
-       href="/api/fire/{{ fire_numbe }}/download" download>Download</a>
     <button class="btn btn-danger" style="font-size:11px;padding:3px 10px" onclick="removeFire()">Remove</button>
     <a href="/" class="back-link">Back to fire list</a>
     <a href="/logout" class="btn btn-secondary" style="font-size:11px;padding:3px 10px">Logout</a>
@@ -296,6 +294,14 @@
                     Cancel mapping
                 </button>
                 <span class="help" tabindex="0" aria-label="About mapping modes" aria-expanded="false" data-tip="Map Fire: runs once using the current parameter values in the panel — fast, single result. Map Fire with settings: sweeps N recommended parameter sets × K replicates per set, producing N×K maps. Replicates jitter HDBSCAN's min_samples so you can see which runs agree. Use the sweep when you want robustness; use single-run when you're tweaking parameters. Cancel aborts the sweep and restores the fire to its pre-sweep status (the current subprocess finishes, but no more runs start).">?</span>
+            </div>
+
+            <div class="action-buttons" style="align-items:center">
+                <a class="btn btn-secondary" id="btn-download"
+                   style="flex:1;text-align:center"
+                   href="/api/fire/{{ fire_numbe }}/download" download>
+                    Download
+                </a>
             </div>
 
             <!-- Serial results gallery -->
@@ -795,6 +801,26 @@ function syncFireDateEditability() {
     }
 }
 
+// Download button is only meaningful once a result is on disk in the
+// canonical <output_root>/<fire_numbe>/ dir, which only happens on
+// accept. Grey + inert otherwise; green + clickable once accepted.
+function syncDownloadButton() {
+    const btn = document.getElementById('btn-download');
+    if (!btn) return;
+    const accepted = (lastKnownStatus === 'accepted');
+    btn.classList.toggle('btn-success', accepted);
+    btn.classList.toggle('btn-secondary', !accepted);
+    if (accepted) {
+        btn.removeAttribute('aria-disabled');
+        btn.style.pointerEvents = '';
+        btn.style.opacity = '';
+    } else {
+        btn.setAttribute('aria-disabled', 'true');
+        btn.style.pointerEvents = 'none';
+        btn.style.opacity = '0.6';
+    }
+}
+
 function startEditFireDate() {
     if (lastKnownStatus === 'accepted') return;
     const text = document.getElementById('fire-date-text');
@@ -870,6 +896,7 @@ function updateStatusDisplay(status, prevAccepted) {
     html += `<span class="status-badge status-${status}">${status}</span>`;
     container.innerHTML = html;
     syncFireDateEditability();
+    syncDownloadButton();
 }
 
 // Agreement display. When a fire has been re-mapped after acceptance,
@@ -1195,6 +1222,7 @@ async function mapWithSettings() {
 // -----------------------------------------------------------------------
 let lastKnownStatus = '{{ fire_status }}';
 syncFireDateEditability();
+syncDownloadButton();
 
 async function pollFireState() {
     if (sseActive) {
