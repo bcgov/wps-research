@@ -115,6 +115,7 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2):
         data = os.popen(cmd).read()
     else:
         data_files = [x.strip() for x in os.popen('ls -1 ' + list_dir).readlines()]
+        data_files = [f for f in data_files if f.endswith('_objects.txt')]
         data_files.sort(reverse=True)
         for d in data_files:
             print('  ', d)
