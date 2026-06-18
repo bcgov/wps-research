@@ -13,6 +13,8 @@
     <a id="btn-prev" class="btn btn-secondary" style="font-size:11px;padding:3px 10px;display:none" href="#">Prev</a>
     <h1>{{ fire_numbe }}</h1>
     <a id="btn-next" class="btn btn-secondary" style="font-size:11px;padding:3px 10px;display:none" href="#">Next</a>
+    <a class="btn btn-secondary" style="font-size:11px;padding:3px 10px"
+       href="/api/fire/{{ fire_numbe }}/download" download>Download</a>
     <button class="btn btn-danger" style="font-size:11px;padding:3px 10px" onclick="removeFire()">Remove</button>
     <a href="/" class="back-link">Back to fire list</a>
     <a href="/logout" class="btn btn-secondary" style="font-size:11px;padding:3px 10px">Logout</a>

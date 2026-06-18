@@ -320,6 +320,67 @@ class FireRoutes:
             payload = {'status': f.status.value, 'error': f.error_msg}
         self._send_json(payload)
 
+    def handle_api_download(self, fire_numbe):
+        """Zip the fire's canonical accepted-result directory and stream
+        it back as a download. The fire must have been accepted at
+        least once — this serves ``<output_root>/<fire_numbe>/``, not
+        the ephemeral .web_cache working dir.
+
+        The zip is (re)built fresh on every request rather than cached
+        on disk, so it's always in sync with whatever is currently in
+        the canonical dir (e.g. after a re-brush + re-accept). Built in
+        a tmp file next to the canonical dir, streamed, then removed —
+        nothing is left behind in <output_root> after the response.
+        """
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        if not state.output_root:
+            self._send_json({'error': 'output_root not configured'}, 500)
+            return
+
+        result_dir = os.path.join(state.output_root, fire_numbe)
+        if not os.path.isdir(result_dir):
+            self._send_json(
+                {'error': 'No accepted result on disk for this fire yet. '
+                          'Accept the fire first.'}, 404)
+            return
+
+        # Build the zip into a tmp path beside the canonical dir (same
+        # filesystem -> the rename inside make_archive's caller-visible
+        # contract is irrelevant here; we just clean up after streaming).
+        # shutil.make_archive wants the destination *without* the
+        # extension it appends, and writes under <output_root>/, so the
+        # tmp name is collision-safe via the pid/thread suffix.
+        tmp_base = os.path.join(
+            state.output_root,
+            f'.{fire_numbe}.{os.getpid()}.{threading.get_ident()}.tmp')
+        try:
+            tmp_zip = shutil.make_archive(
+                tmp_base, 'zip', root_dir=state.output_root,
+                base_dir=fire_numbe)
+        except Exception as exc:
+            self._send_json({'error': f'Zip failed: {exc}'}, 500)
+            return
+
+        try:
+            size = os.path.getsize(tmp_zip)
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/zip')
+            self.send_header('Content-Length', str(size))
+            self.send_header(
+                'Content-Disposition',
+                f'attachment; filename="{fire_numbe}.zip"')
+            self.end_headers()
+            with open(tmp_zip, 'rb') as f:
+                shutil.copyfileobj(f, self.wfile)
+        finally:
+            try:
+                os.remove(tmp_zip)
+            except OSError:
+                pass
+
     def handle_api_console(self, fire_numbe):
         fire_numbe = unquote(fire_numbe)
         if fire_numbe not in state.fires:
