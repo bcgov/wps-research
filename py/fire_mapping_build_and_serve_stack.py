@@ -344,6 +344,22 @@ def main() -> None:
 
     date_str, post_bin = find_latest_mrap(MRAP_DIR)
     stack_out = RAM_DIR / f"{date_str}_stack.bin"
+    
+    # ------------------------------------------------------------
+    # IDENTITY CHECK: skip compute if stack already exists
+    # ------------------------------------------------------------
+    hdr_file = stack_out.with_suffix(".hdr")
+
+    if stack_out.exists() and hdr_file.exists():
+        log(f"Stack already exists for {date_str}, skipping rebuild:")
+        log(f"  {stack_out}")
+
+        # still update server + restart
+        update_rasters_line(SERVER_DIR / SERVER_SCRIPT, stack_out)
+        start_server(SERVER_DIR, SERVER_SCRIPT)
+
+        log("Done (skipped compute path).")
+        return
 
     log(f"Pre-image  : {PRE_BIN}")
     log(f"Post-image : {post_bin} (date={date_str})")
