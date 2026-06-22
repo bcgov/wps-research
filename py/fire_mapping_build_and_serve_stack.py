@@ -112,36 +112,64 @@ def port_in_use(port: int) -> bool:
 
 
 def stop_server() -> None:
-    log("Stopping fire-mapping server (if running) ...")
-    result = subprocess.run(["pkill", "-f", "batch_fire_mapping_viirs_web"])
-    if result.returncode == 0:
-        log("  sent SIGTERM to batch_fire_mapping_viirs_web process(es)")
+    log("Checking fire-mapping server status ...")
+    was_up = port_in_use(SERVER_PORT)
+
+    if was_up:
+        log(f"  server IS UP (port {SERVER_PORT} is in use)")
     else:
-        log("  no matching process found")
+        log(f"  server is NOT running (port {SERVER_PORT} is free)")
+
+    result = subprocess.run(["pkill", "-f", "batch_fire_mapping_viirs_web"])
+    pkill_matched = (result.returncode == 0)
+
+    if not was_up:
+        if pkill_matched:
+            # Port was free but a matching process existed anyway --
+            # e.g. it was stuck shutting down, or about to bind.
+            log("  no listener on the port, but pkill matched a process "
+                "and signalled it anyway")
+        else:
+            log("  nothing to stop.")
+        return
+
+    if not pkill_matched:
+        die("server appears to be up (port in use) but no "
+            "batch_fire_mapping_viirs_web process was found to kill -- "
+            "something else may be holding the port")
+
+    log("  sent SIGTERM to batch_fire_mapping_viirs_web process(es); "
+        "waiting for it to exit ...")
 
     for _ in range(30):
         if not port_in_use(SERVER_PORT):
-            log(f"  port {SERVER_PORT} is free")
+            log(f"  confirmed: server killed successfully, "
+                f"port {SERVER_PORT} is now free")
             return
         time.sleep(1)
 
-    die(f"port {SERVER_PORT} still in use after 30s, aborting")
+    die(f"server did not shut down: port {SERVER_PORT} still in use "
+        f"30s after SIGTERM")
 
 
 def run_anomaly(pre_bin: Path, post_bin: Path, scratch_dir: Path) -> Path:
     log("Running sentinel2_anomaly3 ...")
     scratch_dir.mkdir(parents=True, exist_ok=True)
 
-    ratio_bin = scratch_dir / "ratio.bin"
-    ratio_hdr = scratch_dir / "ratio.hdr"
-    ratio_bin.unlink(missing_ok=True)
-    ratio_hdr.unlink(missing_ok=True)
+    # Without --divide, sentinel2_anomaly3 writes ratio.bin/.hdr. Clear
+    # out both possible names (plain and --divide's ratio_divide.*)
+    # from a previous run before invoking it, in case the mode ever
+    # changes again.
+    for stem in ("ratio", "ratio_divide"):
+        (scratch_dir / f"{stem}.bin").unlink(missing_ok=True)
+        (scratch_dir / f"{stem}.hdr").unlink(missing_ok=True)
 
     subprocess.run(
-        ["sentinel2_anomaly3", str(pre_bin), str(post_bin), "--divide"],
+        ["sentinel2_anomaly3", str(pre_bin), str(post_bin)],
         cwd=scratch_dir, check=True, env=build_env(),
     )
 
+    ratio_bin = scratch_dir / "ratio.bin"
     if not ratio_bin.exists():
         die(f"sentinel2_anomaly3 did not produce {ratio_bin}")
     return ratio_bin
