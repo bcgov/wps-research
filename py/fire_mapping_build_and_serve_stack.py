@@ -356,6 +356,33 @@ def main() -> None:
     delete_scratch(SCRATCH_DIR)
     delete_previous_stacks(RAM_DIR, keep=stack_out)
 
+
+
+    # ------------------------------------------------------------
+    # Repair ENVI header for newly created stack
+    # ------------------------------------------------------------
+    hdr_file = stack_out.with_suffix(".hdr")
+
+    if not hdr_file.exists():
+        die(f"Expected stack header not found: {hdr_file}")
+
+    log(f"Repairing ENVI header: {hdr_file}")
+
+    result = subprocess.run(
+        ["fire_mapping_stack_header_repair.py", str(hdr_file)],
+        env=build_env()
+    )
+
+    rc = result.returncode
+
+    if rc != 0:
+        die(f"header repair failed (rc={rc}) for {hdr_file}")
+
+    log(f"Header repair completed successfully (rc={rc})")
+
+
+
+
     update_rasters_line(SERVER_DIR / SERVER_SCRIPT, stack_out)
     start_server(SERVER_DIR, SERVER_SCRIPT)
 
