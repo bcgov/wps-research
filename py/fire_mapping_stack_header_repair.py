@@ -2,7 +2,6 @@
 
 terminate the band names field properly, and restore map / proj / CRS info from the corresponding post MRAP file.
 '''
-
 #!/usr/bin/env python3
 import sys
 import os
@@ -16,30 +15,19 @@ REMOVE_KEYS = {
     "coordinate system string",
 }
 
-KEEP_KEYS = {
-    "envi",
-}
 
-
-def backup_once(path: str):
+# ------------------------------------------------------------
+# BACKUP (ONCE ONLY)
+# ------------------------------------------------------------
+def backup_once(path):
     bak = path + ".bak"
     if not os.path.exists(bak):
         with open(path, "rb") as f1, open(bak, "wb") as f2:
             f2.write(f1.read())
 
 
-def read_lines(path):
-    with open(path, "r", encoding="utf-8") as f:
-        return f.readlines()
-
-
-def write_text(path, text):
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(text)
-
-
 # ------------------------------------------------------------
-# STRICT ENVI PARSER
+# ENVI PARSER (STATE MACHINE, BRACE SAFE)
 # ------------------------------------------------------------
 def parse_envi(lines):
     records = []
@@ -60,15 +48,19 @@ def parse_envi(lines):
         key = key.strip().lower()
         val = val.strip()
 
-        # brace block (map info / band names / etc.)
-        if "{" in val and "}" not in val:
+        # ---- capture full {...} block safely ----
+        if "{" in val:
+            depth = val.count("{") - val.count("}")
+
             buf = [val]
             i += 1
-            while i < len(lines):
-                buf.append(lines[i].rstrip("\n"))
-                if "}" in lines[i]:
-                    break
+
+            while i < len(lines) and depth > 0:
+                l = lines[i].rstrip("\n")
+                depth += l.count("{") - l.count("}")
+                buf.append(l)
                 i += 1
+
             val = "\n".join(buf)
 
         records.append((key, val))
@@ -77,12 +69,15 @@ def parse_envi(lines):
     return records
 
 
-def get_external_geo(date_str):
+# ------------------------------------------------------------
+# GEO EXTRACTION (AUTHORITATIVE SOURCE)
+# ------------------------------------------------------------
+def load_geo(date_str):
     path = Path(f"/data/mrap_bc/{date_str}_mrap.hdr")
     if not path.exists():
         raise FileNotFoundError(path)
 
-    lines = read_lines(path)
+    lines = path.read_text().splitlines()
     records = parse_envi(lines)
 
     geo = {}
@@ -93,14 +88,17 @@ def get_external_geo(date_str):
     return geo
 
 
-def extract_band_block(records):
+# ------------------------------------------------------------
+# BAND HANDLING (FIXED - NO PREFIX BUGS)
+# ------------------------------------------------------------
+def extract_band(records):
     for k, v in records:
         if k == "band names":
             return v
     return None
 
 
-def parse_bands(block):
+def parse_band_list(block):
     if not block:
         return []
 
@@ -110,15 +108,9 @@ def parse_bands(block):
 
     raw = m.group(1).strip()
 
-    # split safely on commas ONLY
+    # split on commas ONLY
     parts = [p.strip().rstrip(",") for p in raw.split(",")]
     return [p for p in parts if p]
-
-
-def rebuild_bands(bands):
-    # IMPORTANT: NO newlines inside values (ENVI-safe compact form)
-    inner = ",\n".join(bands)
-    return f"band names = {{{inner}}}"
 
 
 def prefix_bands(bands):
@@ -133,13 +125,13 @@ def prefix_bands(bands):
 
     out = []
     for i, b in enumerate(bands):
+        prefix = ""
         if i < g:
             prefix = "pre "
         elif i < 2 * g:
             prefix = "pst "
-        else:
-            prefix = ""
 
+        # avoid double-prefixing
         if not b.startswith("pre ") and not b.startswith("pst "):
             b = prefix + b
 
@@ -148,77 +140,109 @@ def prefix_bands(bands):
     return out
 
 
-def clean_records(records):
-    cleaned = []
+def build_band_block(bands):
+    # ENVI-safe compact formatting (no duplicate key injection)
+    return "band names = {" + ",\n".join(bands) + "}"
+
+
+# ------------------------------------------------------------
+# CLEAN + DEDUP RECORDS (CRITICAL FIX)
+# ------------------------------------------------------------
+def normalize(records):
+    """
+    Enforces:
+    - only ONE instance of each key
+    - last occurrence wins
+    """
+    latest = {}
+
     for k, v in records:
-        if k in REMOVE_KEYS:
-            continue
         if k == "band names":
             continue
-        cleaned.append((k, v))
-    return cleaned
+        if k in REMOVE_KEYS:
+            continue
+        latest[k] = v
+
+    return latest
 
 
-def format_records(records):
+def format_envi(kv, band_block, geo):
     out = ["ENVI"]
 
-    for k, v in records:
-        if k == "envi":
+    # core metadata first (stable ordering)
+    core_order = [
+        "samples",
+        "lines",
+        "bands",
+        "header offset",
+        "file type",
+        "data type",
+        "interleave",
+        "byte order",
+    ]
+
+    for k in core_order:
+        if k in kv:
+            out.append(f"{k} = {kv[k]}")
+
+    # band names (fixed)
+    out.append(band_block)
+
+    # everything else except geo
+    for k, v in kv.items():
+        if k in core_order:
             continue
         out.append(f"{k} = {v}")
 
-    # remove empty lines & trailing whitespace
-    out = [l.rstrip() for l in out if l.strip()]
-    return "\n".join(out) + "\n"
+    # authoritative geo (ONLY ONCE)
+    for k in REMOVE_KEYS:
+        if k in geo:
+            out.append(f"{k} = {geo[k]}")
+
+    return "\n".join(out).rstrip() + "\n"
 
 
 # ------------------------------------------------------------
 # MAIN
 # ------------------------------------------------------------
 def main():
-    hdr_path = sys.argv[1]
+    hdr = sys.argv[1]
 
-    backup_once(hdr_path)
+    backup_once(hdr)
 
-    lines = read_lines(hdr_path)
+    lines = Path(hdr).read_text().splitlines()
     records = parse_envi(lines)
 
-    # -------------------------
+    # -----------------------
     # BAND FIX
-    # -------------------------
-    band_block = extract_band_block(records)
-    bands = parse_bands(band_block)
+    # -----------------------
+    band_block = extract_band(records)
+    bands = parse_band_list(band_block)
 
     if not bands:
-        raise RuntimeError("No valid band names found")
+        raise RuntimeError("Failed to parse band names")
 
     bands = prefix_bands(bands)
-    new_band_block = rebuild_bands(bands)
+    band_block = build_band_block(bands)
 
-    # -------------------------
-    # CLEAN OLD RECORDS
-    # -------------------------
-    records = clean_records(records)
+    # -----------------------
+    # DEDUP EVERYTHING
+    # -----------------------
+    kv = normalize(records)
 
-    # reinsert corrected band names ONCE
-    records.append(("band names", new_band_block))
+    # -----------------------
+    # GEO OVERRIDE (AUTHORITATIVE)
+    # -----------------------
+    date_str = re.search(r"(\d{8})", hdr).group(1)
+    geo = load_geo(date_str)
 
-    # -------------------------
-    # GEO OVERRIDE (NO APPEND BUG)
-    # -------------------------
-    date_str = re.search(r"(\d{8})", hdr_path).group(1)
-    geo = get_external_geo(date_str)
-
-    for k in REMOVE_KEYS:
-        if k in geo:
-            records.append((k, geo[k]))
-
-    # -------------------------
+    # -----------------------
     # WRITE OUTPUT
-    # -------------------------
-    out = format_records(records)
-    write_text(hdr_path, out)
+    # -----------------------
+    out = format_envi(kv, band_block, geo)
+    Path(hdr).write_text(out)
 
 
 if __name__ == "__main__":
     main()
+
