@@ -28,7 +28,6 @@ Exits non-zero on any failure. Steps before the server restart try not to
 leave things worse than they started -- e.g. a failed rewrite of the
 launch script restores its backup.
 """
-
 import glob
 import os
 import re
