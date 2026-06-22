@@ -17,7 +17,7 @@ REMOVE_KEYS = {
 
 
 # ------------------------------------------------------------
-# BACKUP (ONCE ONLY)
+# BACKUP
 # ------------------------------------------------------------
 def backup_once(path):
     bak = path + ".bak"
@@ -27,7 +27,7 @@ def backup_once(path):
 
 
 # ------------------------------------------------------------
-# ENVI PARSER (STATE MACHINE, BRACE SAFE)
+# PARSER (brace-safe)
 # ------------------------------------------------------------
 def parse_envi(lines):
     records = []
@@ -48,10 +48,9 @@ def parse_envi(lines):
         key = key.strip().lower()
         val = val.strip()
 
-        # ---- capture full {...} block safely ----
-        if "{" in val:
+        # brace block capture (map info / band names / CRS)
+        if "{" in val and "}" not in val:
             depth = val.count("{") - val.count("}")
-
             buf = [val]
             i += 1
 
@@ -70,26 +69,26 @@ def parse_envi(lines):
 
 
 # ------------------------------------------------------------
-# GEO EXTRACTION (AUTHORITATIVE SOURCE)
+# GEO LOADING (authoritative)
 # ------------------------------------------------------------
 def load_geo(date_str):
     path = Path(f"/data/mrap_bc/{date_str}_mrap.hdr")
     if not path.exists():
         raise FileNotFoundError(path)
 
-    lines = path.read_text().splitlines()
-    records = parse_envi(lines)
+    return parse_envi(path.read_text().splitlines())
 
+
+def geo_dict(records):
     geo = {}
     for k, v in records:
         if k in REMOVE_KEYS:
             geo[k] = v
-
     return geo
 
 
 # ------------------------------------------------------------
-# BAND HANDLING (FIXED - NO PREFIX BUGS)
+# BAND HANDLING (FIXED RULES)
 # ------------------------------------------------------------
 def extract_band(records):
     for k, v in records:
@@ -98,7 +97,7 @@ def extract_band(records):
     return None
 
 
-def parse_band_list(block):
+def parse_bands(block):
     if not block:
         return []
 
@@ -106,71 +105,80 @@ def parse_band_list(block):
     if not m:
         return []
 
-    raw = m.group(1).strip()
+    raw = m.group(1)
 
-    # split on commas ONLY
-    parts = [p.strip().rstrip(",") for p in raw.split(",")]
-    return [p for p in parts if p]
+    # FIX: handle commas + accidental periods safely
+    parts = []
+    for p in raw.replace("\n", " ").split(","):
+        p = p.strip().rstrip(".").rstrip(",")
+        if p:
+            parts.append(p)
+
+    return parts
 
 
+# ------------------------------------------------------------
+# EXACT PREFIX RULE IMPLEMENTATION
+# ------------------------------------------------------------
 def prefix_bands(bands):
     n = len(bands)
 
     if n % 4 == 0:
-        g = 4
+        group = 4
     elif n % 3 == 0:
-        g = 3
+        group = 3
     else:
         return bands
 
     out = []
     for i, b in enumerate(bands):
-        prefix = ""
-        if i < g:
+
+        if i < group:
             prefix = "pre "
-        elif i < 2 * g:
+        elif i < 2 * group:
             prefix = "pst "
+        else:
+            prefix = ""
 
-        # avoid double-prefixing
-        if not b.startswith("pre ") and not b.startswith("pst "):
-            b = prefix + b
-
-        out.append(b)
+        # prevent double prefixing
+        if b.startswith("pre ") or b.startswith("pst "):
+            out.append(b)
+        else:
+            out.append(prefix + b)
 
     return out
 
 
 def build_band_block(bands):
-    # ENVI-safe compact formatting (no duplicate key injection)
-    return "band names = {" + ",\n".join(bands) + "}"
+    # IMPORTANT: ENVI expects single-line per entry, NO duplicate key
+    inner = ",\n".join(bands)
+    return f"band names = {{{inner}}}"
 
 
 # ------------------------------------------------------------
-# CLEAN + DEDUP RECORDS (CRITICAL FIX)
+# CLEAN RECORDS (remove duplicates safely)
 # ------------------------------------------------------------
 def normalize(records):
-    """
-    Enforces:
-    - only ONE instance of each key
-    - last occurrence wins
-    """
-    latest = {}
+    kv = {}
 
     for k, v in records:
         if k == "band names":
             continue
         if k in REMOVE_KEYS:
             continue
-        latest[k] = v
+        kv[k] = v  # last-write-wins
 
-    return latest
+    return kv
 
 
-def format_envi(kv, band_block, geo):
+# ------------------------------------------------------------
+# OUTPUT WRITER (ENSURES GEO PRESERVED EXACTLY ONCE)
+# ------------------------------------------------------------
+def format_output(kv, band_block, geo):
     out = ["ENVI"]
 
-    # core metadata first (stable ordering)
-    core_order = [
+    # stable ordering for core fields
+    core = [
         "samples",
         "lines",
         "bands",
@@ -181,21 +189,19 @@ def format_envi(kv, band_block, geo):
         "byte order",
     ]
 
-    for k in core_order:
+    for k in core:
         if k in kv:
             out.append(f"{k} = {kv[k]}")
 
-    # band names (fixed)
     out.append(band_block)
 
-    # everything else except geo
+    # rest of metadata (non-geo)
     for k, v in kv.items():
-        if k in core_order:
-            continue
-        out.append(f"{k} = {v}")
+        if k not in core:
+            out.append(f"{k} = {v}")
 
-    # authoritative geo (ONLY ONCE)
-    for k in REMOVE_KEYS:
+    # FIX: ensure geo is appended EXACTLY ONCE, correct order
+    for k in ["map info", "projection info", "coordinate system string"]:
         if k in geo:
             out.append(f"{k} = {geo[k]}")
 
@@ -213,36 +219,28 @@ def main():
     lines = Path(hdr).read_text().splitlines()
     records = parse_envi(lines)
 
-    # -----------------------
-    # BAND FIX
-    # -----------------------
+    # band fix
     band_block = extract_band(records)
-    bands = parse_band_list(band_block)
+    bands = parse_bands(band_block)
 
     if not bands:
-        raise RuntimeError("Failed to parse band names")
+        raise RuntimeError("No band names parsed")
 
     bands = prefix_bands(bands)
     band_block = build_band_block(bands)
 
-    # -----------------------
-    # DEDUP EVERYTHING
-    # -----------------------
+    # normalize metadata
     kv = normalize(records)
 
-    # -----------------------
-    # GEO OVERRIDE (AUTHORITATIVE)
-    # -----------------------
+    # geo override (authoritative source)
     date_str = re.search(r"(\d{8})", hdr).group(1)
-    geo = load_geo(date_str)
+    geo_records = load_geo(date_str)
+    geo = geo_dict(geo_records)
 
-    # -----------------------
-    # WRITE OUTPUT
-    # -----------------------
-    out = format_envi(kv, band_block, geo)
+    # write
+    out = format_output(kv, band_block, geo)
     Path(hdr).write_text(out)
 
 
 if __name__ == "__main__":
     main()
-
