@@ -2,6 +2,7 @@
 
 terminate the band names field properly, and restore map / proj / CRS info from the corresponding post MRAP file.
 '''
+
 #!/usr/bin/env python3
 import sys
 import os
@@ -15,37 +16,39 @@ REMOVE_KEYS = {
     "coordinate system string",
 }
 
+KEEP_KEYS = {
+    "envi",
+}
 
-def read_file(path):
+
+def backup_once(path: str):
+    bak = path + ".bak"
+    if not os.path.exists(bak):
+        with open(path, "rb") as f1, open(bak, "wb") as f2:
+            f2.write(f1.read())
+
+
+def read_lines(path):
     with open(path, "r", encoding="utf-8") as f:
-        return f.read()
+        return f.readlines()
 
 
-def write_file(path, text):
+def write_text(path, text):
     with open(path, "w", encoding="utf-8") as f:
         f.write(text)
 
 
-def backup_once(path):
-    bak = path + ".bak"
-    if not os.path.exists(bak):
-        with open(path, "rb") as src, open(bak, "wb") as dst:
-            dst.write(src.read())
-
-
-def split_records(text):
-    """
-    Split ENVI header into {key: value} records.
-    Handles multiline {...} blocks safely.
-    """
-    lines = text.splitlines()
+# ------------------------------------------------------------
+# STRICT ENVI PARSER
+# ------------------------------------------------------------
+def parse_envi(lines):
     records = []
     i = 0
 
     while i < len(lines):
-        line = lines[i].strip()
+        line = lines[i].rstrip("\n")
 
-        if not line:
+        if not line.strip():
             i += 1
             continue
 
@@ -57,12 +60,12 @@ def split_records(text):
         key = key.strip().lower()
         val = val.strip()
 
-        # multiline brace block
+        # brace block (map info / band names / etc.)
         if "{" in val and "}" not in val:
             buf = [val]
             i += 1
             while i < len(lines):
-                buf.append(lines[i])
+                buf.append(lines[i].rstrip("\n"))
                 if "}" in lines[i]:
                     break
                 i += 1
@@ -74,80 +77,68 @@ def split_records(text):
     return records
 
 
-def parse_date_from_filename(path):
-    name = os.path.basename(path)
-    m = re.match(r"(\d{8})_stack\.hdr", name)
-    if not m:
-        raise ValueError("Filename must be yyyymmdd_stack.hdr")
-    return m.group(1)
-
-
-def load_external_geo(date_str):
-    path = f"/data/mrap_bc/{date_str}_mrap.hdr"
-    if not os.path.exists(path):
+def get_external_geo(date_str):
+    path = Path(f"/data/mrap_bc/{date_str}_mrap.hdr")
+    if not path.exists():
         raise FileNotFoundError(path)
 
-    text = read_file(path)
-    records = split_records(text)
+    lines = read_lines(path)
+    records = parse_envi(lines)
 
     geo = {}
     for k, v in records:
         if k in REMOVE_KEYS:
             geo[k] = v
+
     return geo
 
 
-def extract_band_names(records):
+def extract_band_block(records):
     for k, v in records:
         if k == "band names":
             return v
     return None
 
 
-def parse_band_list(band_block):
-    if not band_block:
+def parse_bands(block):
+    if not block:
         return []
 
-    # extract inside {...}
-    m = re.search(r"\{(.*)\}", band_block, re.S)
+    m = re.search(r"\{(.*)\}", block, re.S)
     if not m:
         return []
 
-    content = m.group(1).strip()
+    raw = m.group(1).strip()
 
-    # split by commas but keep structure
-    parts = [p.strip().rstrip(",") for p in content.split(",") if p.strip()]
-    return parts
+    # split safely on commas ONLY
+    parts = [p.strip().rstrip(",") for p in raw.split(",")]
+    return [p for p in parts if p]
 
 
-def rebuild_band_block(bands):
-    cleaned = []
-    for b in bands:
-        b = b.strip().rstrip(",")
-        cleaned.append(b)
-
-    return "band names = {" + ",\n".join(cleaned) + "}"
+def rebuild_bands(bands):
+    # IMPORTANT: NO newlines inside values (ENVI-safe compact form)
+    inner = ",\n".join(bands)
+    return f"band names = {{{inner}}}"
 
 
 def prefix_bands(bands):
     n = len(bands)
 
-    # rule priority: prefer 4-band grouping, else 3-band grouping
     if n % 4 == 0:
-        group = 4
+        g = 4
     elif n % 3 == 0:
-        group = 3
+        g = 3
     else:
         return bands
 
     out = []
     for i, b in enumerate(bands):
-        prefix = ""
-
-        if i < group:
+        if i < g:
             prefix = "pre "
-        elif i < 2 * group:
+        elif i < 2 * g:
             prefix = "pst "
+        else:
+            prefix = ""
 
         if not b.startswith("pre ") and not b.startswith("pst "):
             b = prefix + b
@@ -169,61 +160,65 @@ def clean_records(records):
 
 
 def format_records(records):
-    lines = []
-
-    # keep ENVI first if present
-    lines.append("ENVI")
+    out = ["ENVI"]
 
     for k, v in records:
         if k == "envi":
             continue
-        lines.append(f"{k} = {v}")
+        out.append(f"{k} = {v}")
 
-    return "\n".join(lines)
+    # remove empty lines & trailing whitespace
+    out = [l.rstrip() for l in out if l.strip()]
+    return "\n".join(out) + "\n"
 
 
+# ------------------------------------------------------------
+# MAIN
+# ------------------------------------------------------------
 def main():
-    path = sys.argv[1]
+    hdr_path = sys.argv[1]
 
-    backup_once(path)
+    backup_once(hdr_path)
 
-    text = read_file(path)
-    records = split_records(text)
+    lines = read_lines(hdr_path)
+    records = parse_envi(lines)
 
-    # extract band names
-    band_block = extract_band_names(records)
-    bands = parse_band_list(band_block)
+    # -------------------------
+    # BAND FIX
+    # -------------------------
+    band_block = extract_band_block(records)
+    bands = parse_bands(band_block)
 
     if not bands:
-        raise RuntimeError("No band names found or failed to parse")
+        raise RuntimeError("No valid band names found")
 
-    # fix bands
     bands = prefix_bands(bands)
-    band_block_fixed = rebuild_band_block(bands)
+    new_band_block = rebuild_bands(bands)
 
-    # remove broken geo fields
+    # -------------------------
+    # CLEAN OLD RECORDS
+    # -------------------------
     records = clean_records(records)
 
-    # reinsert corrected band names
-    records.append(("band names", band_block_fixed))
+    # reinsert corrected band names ONCE
+    records.append(("band names", new_band_block))
 
-    # load external geo info
-    date_str = parse_date_from_filename(path)
-    geo = load_external_geo(date_str)
+    # -------------------------
+    # GEO OVERRIDE (NO APPEND BUG)
+    # -------------------------
+    date_str = re.search(r"(\d{8})", hdr_path).group(1)
+    geo = get_external_geo(date_str)
 
     for k in REMOVE_KEYS:
         if k in geo:
             records.append((k, geo[k]))
 
-    # rebuild file
+    # -------------------------
+    # WRITE OUTPUT
+    # -------------------------
     out = format_records(records)
-
-    # remove empty lines + trailing whitespace
-    out = "\n".join(line.rstrip() for line in out.splitlines() if line.strip())
-
-    write_file(path, out)
+    write_text(hdr_path, out)
 
 
 if __name__ == "__main__":
     main()
-
