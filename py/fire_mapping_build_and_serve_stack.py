@@ -28,6 +28,7 @@ Exits non-zero on any failure. Steps before the server restart try not to
 leave things worse than they started -- e.g. a failed rewrite of the
 launch script restores its backup.
 """
+
 import glob
 import os
 import re
@@ -54,7 +55,13 @@ EXTRA_PATH = [
 ]
 
 MRAP_NAME_RE = re.compile(r"^(\d{8})_mrap\.bin$")
-STACK_LINE_RE = re.compile(r"^(\s*)/ram/\d{8}_stack\.bin")
+# Matches any active (non-comment) path line inside RASTERS=( ... ),
+# e.g. "    /ram/20260618_stack.bin" or "    /data/mrap_bc/20260618_mrap.bin".
+# Deliberately NOT restricted to the /ram/<date>_stack.bin shape, so this
+# still works if someone has manually pointed the array at a raw
+# .../mrap.bin for testing -- it just replaces whatever single active
+# path line it finds.
+RASTER_LINE_RE = re.compile(r"^(\s*)(/\S+)\s*$")
 
 
 def log(msg: str) -> None:
@@ -110,8 +117,37 @@ def port_in_use(port: int) -> bool:
     return f":{port}" in result.stdout
 
 
+def lan_ip() -> str | None:
+    """Best-effort LAN IP, via the same trick the app itself uses at
+    startup (open a UDP socket toward an external address; nothing is
+    actually sent, this just makes the OS pick the outbound route/IP)."""
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except OSError:
+        return None
+
+
+def report_server_address(port: int) -> None:
+    """Report the IP/hostname/port the server is (or would be)
+    reachable at, regardless of whether it's currently up."""
+    import socket
+    hostname = socket.gethostname()
+    ip = lan_ip()
+    if ip:
+        log(f"  server address: http://{ip}:{port}  (http://{hostname}:{port})")
+    else:
+        log(f"  server address: http://{hostname}:{port}  "
+            f"(could not determine LAN IP)")
+
+
 def stop_server() -> None:
     log("Checking fire-mapping server status ...")
+    report_server_address(SERVER_PORT)
     was_up = port_in_use(SERVER_PORT)
 
     if was_up:
@@ -213,26 +249,57 @@ def delete_scratch(scratch_dir: Path) -> None:
 
 
 def update_rasters_line(script_path: Path, stack_out: Path) -> None:
+    """Rewrite the single active (non-comment) path inside
+    RASTERS=( ... ) in script_path to point at stack_out.
+
+    Scoped strictly to lines between "RASTERS=(" and the closing ")",
+    so this can't accidentally touch OUT_ROOT, LAADS_TOKEN_FILE, or
+    anything else in the script. Works regardless of what the current
+    active line looks like -- a /ram/<date>_stack.bin from a previous
+    run, or a raw /data/mrap_bc/<date>_mrap.bin someone pointed it at
+    by hand for testing -- as long as there's exactly one uncommented
+    path line in the array.
+    """
     log(f"Updating RASTERS in {script_path} to point at {stack_out} ...")
     backup_path = script_path.with_suffix(script_path.suffix + ".bak")
     shutil.copyfile(script_path, backup_path)
 
-    text = script_path.read_text()
+    lines = script_path.read_text().splitlines(keepends=True)
     new_lines = []
+    in_rasters_block = False
     replaced = False
-    for line in text.splitlines(keepends=True):
-        m = STACK_LINE_RE.match(line)
-        if m:
+
+    for line in lines:
+        stripped = line.strip()
+
+        if not in_rasters_block:
+            new_lines.append(line)
+            if stripped.startswith("RASTERS="):
+                in_rasters_block = True
+            continue
+
+        if stripped == ")":
+            in_rasters_block = False
+            new_lines.append(line)
+            continue
+
+        m = RASTER_LINE_RE.match(line)
+        if m and not stripped.startswith("#"):
+            if replaced:
+                die(f"found more than one active path line inside "
+                    f"RASTERS=( ... ) in {script_path} -- expected "
+                    f"exactly one, refusing to guess which to replace")
             indent = m.group(1)
-            trailing = line[m.end():]  # keep anything after the matched path (e.g. trailing newline)
+            trailing = line[m.end(2):]  # preserve trailing newline etc.
             new_lines.append(f"{indent}{stack_out}{trailing}")
             replaced = True
         else:
             new_lines.append(line)
 
     if not replaced:
-        die(f"could not find an active /ram/<date>_stack.bin line in "
-            f"{script_path} -- leaving it unchanged")
+        die(f"could not find an active (uncommented) path line inside "
+            f"RASTERS=( ... ) in {script_path} -- leaving it unchanged. "
+            f"Check that the array has exactly one uncommented path.")
 
     script_path.write_text("".join(new_lines))
 
@@ -260,7 +327,8 @@ def start_server(server_dir: Path, server_script: str) -> None:
 
     time.sleep(2)
     if port_in_use(SERVER_PORT):
-        log(f"Server is back up on port {SERVER_PORT}.")
+        log(f"Server is back up.")
+        report_server_address(SERVER_PORT)
     else:
         print(f"WARNING: server may not have started -- check {log_name}",
               file=sys.stderr)
@@ -296,5 +364,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
 
