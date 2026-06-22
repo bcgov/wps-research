@@ -14,5 +14,4 @@ sentinel2_mrap_update.py  >> "$log_file" 2>&1
 
 # stack the new data and reboot the server!
 
-fire_mapping_build_and_serve_stack.py >> ".log_$(date +%Y%m%d_%H%M%S).txt" 2>&1
-
+fire_mapping_build_and_serve_stack.py >> ".log_fire_mapping_build_and_serve_$(date +%Y%m%d_%H%M%S).txt" 2>&1
