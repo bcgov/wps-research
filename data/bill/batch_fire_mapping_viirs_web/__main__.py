@@ -161,8 +161,18 @@ def _load_laads_token(path: str) -> str:
 
 def _ensure_overviews(rasters_by_year: dict, shared_root: str):
     """Generate per-year overview PNG + sidecar JSON. Returns (png_map,
-    meta_map). Cached on disk keyed by raster mtime+size."""
-    from .overview import ensure_overview
+    meta_map).
+
+    Always regenerates at server startup, regardless of the on-disk
+    mtime/size cache -- this is the one moment we know for certain
+    which raster is actually being served, so it's worth paying the
+    (one-time, at-startup) cost of a full read to guarantee the
+    overview and its reported band names can't be stale leftovers
+    from a previous raster. ensure_overview()'s normal freshness
+    check still applies everywhere else this cache is read (e.g.
+    per-fire crop preview), so this only affects the startup cost.
+    """
+    from .overview import generate_overview
 
     cache_dir = os.path.join(shared_root, '.web_cache', '_overviews')
     os.makedirs(cache_dir, exist_ok=True)
@@ -173,7 +183,11 @@ def _ensure_overviews(rasters_by_year: dict, shared_root: str):
         stem = os.path.splitext(os.path.basename(raster))[0]
         png = os.path.join(cache_dir, f'{stem}.png')
         meta = os.path.join(cache_dir, f'{stem}.json')
-        ensure_overview(raster, png, meta, max_dim=2000)
+        sys.stderr.write(
+            f'[overview] Regenerating {os.path.basename(png)} from '
+            f'{os.path.basename(raster)} (forced at startup) ...\n')
+        sys.stderr.flush()
+        generate_overview(raster, png, meta, max_dim=2000)
         png_map[y] = png
         meta_map[y] = meta
     return png_map, meta_map

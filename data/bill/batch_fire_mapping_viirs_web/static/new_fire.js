@@ -13,6 +13,7 @@ const yearSelect = document.getElementById('nf-year');
 const overview = document.getElementById('nf-overview');
 const canvas = document.getElementById('nf-canvas');
 const coordsEl = document.getElementById('nf-coords');
+const bandCaptionEl = document.getElementById('nf-band-caption');
 const clearBtn = document.getElementById('nf-clear-bbox');
 const errorsEl = document.getElementById('nf-errors');
 const submitBtn = document.getElementById('nf-submit');
@@ -113,6 +114,17 @@ async function loadYear(year) {
     } catch (exc) {
         showErrors([{message: `Network error: ${exc}`}]);
         return;
+    }
+    if (bandCaptionEl) {
+        const names = meta.rgb_band_names || [];
+        // textContent + <br> built via DOM, not innerHTML, so a band
+        // name containing '<' or '&' (unlikely, but it's free-text
+        // from a .hdr file someone hand-edited) can't break the markup.
+        bandCaptionEl.replaceChildren();
+        names.forEach((line) => {
+            bandCaptionEl.appendChild(document.createTextNode(line));
+            bandCaptionEl.appendChild(document.createElement('br'));
+        });
     }
     overview.src = `/api/year/${year}/overview.png?t=${Date.now()}`;
     overview.onload = () => {

@@ -1155,6 +1155,13 @@ tbody tr.row-mapping:hover { background: #ede1ff; }
     margin-top: 8px;
     max-width: 560px;
 }
+#nf-band-caption {
+    display: block;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-weight: 600;
+    color: #2a3340;
+    margin-bottom: 6px;
+}
 .status-badge.status-new {
     background: #fff3a8;
     color: #7a5d00;

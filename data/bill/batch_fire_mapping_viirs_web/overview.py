@@ -112,9 +112,10 @@ def _atomic_write_text(path: str, text: str) -> None:
     _atomic_write_bytes(path, text.encode('utf-8'))
 
 
-def _pick_band_indices(raster_path: str, n_bands: int) -> list[int]:
+def _pick_band_indices(raster_path: str, n_bands: int) -> tuple[list[int], str]:
     """Decide which bands to render. Prefers post group, else pre, else
-    first three bands."""
+    first three bands. Returns (band_indices, group_key) where
+    group_key is 'post', 'pre', or 'fallback'."""
     band_names = parse_envi_band_names(raster_path)
     if not band_names:
         band_names = [f'band {i + 1}' for i in range(n_bands)]
@@ -122,8 +123,8 @@ def _pick_band_indices(raster_path: str, n_bands: int) -> list[int]:
     for key in ('post', 'pre'):
         idxs = groups.get(key) or []
         if idxs:
-            return list(idxs[:3])
-    return [b for b in (1, 2, 3) if b <= n_bands] or [1]
+            return list(idxs[:3]), key
+    return [b for b in (1, 2, 3) if b <= n_bands] or [1], 'fallback'
 
 
 def _stretched_uint8(channels: list[np.ndarray]) -> np.ndarray:
@@ -173,7 +174,8 @@ def generate_overview(
         else:
             ovr_W, ovr_H = W, H
 
-        band_indices = _pick_band_indices(raster_path, n_bands)
+        band_indices, band_group = _pick_band_indices(raster_path, n_bands)
+        all_band_names = parse_envi_band_names(raster_path)
         channels: list[np.ndarray] = []
         for b_idx in band_indices[:3]:
             if b_idx < 1 or b_idx > n_bands:
@@ -216,6 +218,19 @@ def generate_overview(
         default_start = ''
         default_end = ''
 
+    # Human-readable "R: <band name>" / "G: ..." / "B: ..." lines for
+    # whichever bands actually went into the overview's RGB channels,
+    # so the UI can show exactly what's being displayed rather than
+    # leaving the user to guess from the raw header.
+    rgb_letters = ('R', 'G', 'B')
+    rgb_band_names = []
+    for letter, b_idx in zip(rgb_letters, band_indices[:3]):
+        if 1 <= b_idx <= len(all_band_names):
+            name = all_band_names[b_idx - 1]
+        else:
+            name = f'band {b_idx}'
+        rgb_band_names.append(f'{letter}: {name}')
+
     meta = {
         'raster_path': raster_path,
         'raster_stem': os.path.splitext(os.path.basename(raster_path))[0],
@@ -230,6 +245,9 @@ def generate_overview(
         'default_end': default_end,
         'extent_native': extent_native,
         'extent_wgs84': extent_wgs84,
+        'band_group': band_group,
+        'band_indices': [int(b) for b in band_indices[:3]],
+        'rgb_band_names': rgb_band_names,
         'cache_key': _cache_key_for(raster_path),
     }
     _atomic_write_text(
