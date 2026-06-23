@@ -225,6 +225,24 @@ class AppState:
         self.login_attempts: dict = {}
         self.fire_state_load_failed: bool = False
 
+        # ------------------------------------------------------------
+        # Startup gate. The server starts listening immediately;
+        # everything that depends on the year-wide VIIRS bootstrap
+        # being complete is gated behind startup_complete. While
+        # False, every request gets a plain "still starting up" page
+        # regardless of auth/routing (see handlers/base.py).
+        # startup_progress is a free-form dict the background
+        # bootstrap thread updates so the placeholder page (and
+        # /api/startup_status) can show real progress rather than a
+        # blank wait.
+        # ------------------------------------------------------------
+        self.startup_complete: bool = False
+        self.startup_error: str = ""
+        self.startup_progress: dict = {
+            'stage': 'starting',
+            'detail': '',
+        }
+
     # ------------------------------------------------------------------
     # Fire registry rebuild from disk (no polygon source)
     # ------------------------------------------------------------------

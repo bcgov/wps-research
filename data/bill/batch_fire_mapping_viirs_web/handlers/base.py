@@ -432,13 +432,65 @@ class BaseHandler:
 
         return role
 
+    def _serve_startup_placeholder(self) -> None:
+        """Plain, self-contained 'still starting up' page. No auth, no
+        static assets, no dependency on anything that might not be
+        wired up yet -- this must work even if init_app() partially
+        failed. Auto-refreshes so the visitor doesn't have to remember
+        to come back."""
+        progress = getattr(state, 'startup_progress', {}) or {}
+        detail = progress.get('detail', '')
+        error = getattr(state, 'startup_error', '') or ''
+        error_html = ''
+        if error:
+            error_html = (
+                f'<p style="color:#b00">A background step hit an '
+                f'unexpected error and was logged on the server '
+                f'console: {_html_escape(error)}. The app will still '
+                f'become available once startup finishes.</p>')
+        body = f"""<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="20">
+<title>Starting up...</title>
+<style>
+body {{ font-family: system-ui, sans-serif; background:#1c2230;
+        color:#e8ecf3; display:flex; align-items:center;
+        justify-content:center; height:100vh; margin:0; }}
+.box {{ max-width:480px; text-align:center; padding:24px; }}
+h1 {{ font-size:20px; margin-bottom:8px; }}
+p {{ color:#aab4c6; font-size:14px; line-height:1.5; }}
+</style>
+</head><body>
+<div class="box">
+<h1>Server is starting up...</h1>
+<p>Please wait about 5 minutes and reload the page.</p>
+<p>{_html_escape(detail) if detail else ''}</p>
+{error_html}
+<p>This page refreshes automatically every 20 seconds.</p>
+</div>
+</body></html>"""
+        encoded = body.encode('utf-8')
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header('Content-Length', str(len(encoded)))
+        self.send_header('Cache-Control', 'no-store')
+        self.end_headers()
+        self.wfile.write(encoded)
+
     def do_GET(self):
+        if not getattr(state, 'startup_complete', True):
+            self._serve_startup_placeholder()
+            return
         if self._gate() is None:
             return
         if not self._route(self.ROUTES_GET):
             self.send_error(404)
 
     def do_POST(self):
+        if not getattr(state, 'startup_complete', True):
+            self._serve_startup_placeholder()
+            return
         if self._gate() is None:
             return
         # CSRF protection — exempt login form, require header on API calls
