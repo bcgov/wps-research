@@ -187,7 +187,7 @@ def _ensure_overviews(rasters_by_year: dict, shared_root: str):
             f'[overview] Regenerating {os.path.basename(png)} from '
             f'{os.path.basename(raster)} (forced at startup) ...\n')
         sys.stderr.flush()
-        generate_overview(raster, png, meta, max_dim=5000)
+        generate_overview(raster, png, meta, max_dim=9090)
         png_map[y] = png
         meta_map[y] = meta
     return png_map, meta_map
