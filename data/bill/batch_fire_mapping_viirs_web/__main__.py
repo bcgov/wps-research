@@ -431,18 +431,23 @@ def main():
             print(f'      WARNING: Failed to load sessions: {_e}')
 
     # ------------------------------------------------------------------
-    # Step 3 — Wire up application state and start the server
-    # immediately. The VIIRS bootstrap (download + shapify + index) is
-    # network-bound and can retry indefinitely on failure (see
-    # year_viirs.py) -- it must NOT block the server from accepting
-    # connections, or an outage on NASA's end becomes an outage of
-    # this app too. Everything in this step is local/disk-only and
-    # fast, so it's safe to run before the listening socket opens.
+    # Step 3 — Bootstrap year-wide VIIRS data (download + shapify once).
+    # Per-fire prepare then only has to ``accumulate`` from this shared
+    # dir — no per-fire LAADS calls and no per-fire shapify.
     # ------------------------------------------------------------------
+    print('\n[3/4] Bootstrapping per-year VIIRS data '
+          '(download + shapify) ...')
     from . import year_viirs
     for _y in sorted(rasters_by_year):
         app_state.viirs_shp_dirs_by_year[_y] = year_viirs.year_shp_dir(
             app_state, _y)
+    try:
+        year_viirs.bootstrap_all_years(app_state)
+    except Exception as _exc:
+        sys.stderr.write(
+            f'      WARNING: VIIRS bootstrap failed: {_exc}\n'
+            f'      Per-fire creation will fall back to on-demand '
+            f'download.\n')
 
     app_state.init_fires_from_disk()
 
@@ -466,7 +471,7 @@ def main():
     # ------------------------------------------------------------------
     # Step 4 — Start the server
     # ------------------------------------------------------------------
-    print('\n[3/4] Starting web server ...')
+    print('\n[4/4] Starting web server ...')
     server = create_server(args.host, args.port)
 
     print(f'\n{sep}')
@@ -494,48 +499,12 @@ def main():
     print(f'  Years:   {sorted(app_state.rasters_by_year)} '
           f'(active={app_state.active_year})')
     print(f'  {len(app_state.fires)} fire(s) available')
-    print(f'  VIIRS bootstrap running in background -- until it')
-    print(f'  completes, visitors see a brief "starting up" page.')
     print(f'{sep}\n')
-
-    # ------------------------------------------------------------------
-    # Step 5 — Bootstrap year-wide VIIRS data in the background.
-    # Retries indefinitely per-day/per-step (year_viirs.retry_forever);
-    # never silently skips data. state.startup_complete gates the
-    # placeholder page in handlers/base.py until this finishes.
-    # ------------------------------------------------------------------
-    def _run_bootstrap():
-        print('\n[4/4] Bootstrapping per-year VIIRS data '
-              '(download + shapify) -- running in background ...')
-        try:
-            year_viirs.bootstrap_all_years(app_state)
-        except Exception as _exc:
-            # Should be unreachable -- every step inside
-            # bootstrap_all_years retries forever instead of raising.
-            # If something still gets here, it's a genuine bug, and we
-            # still want the app usable rather than stuck, so log it
-            # and let the gate open with a recorded error.
-            app_state.startup_error = str(_exc)
-            sys.stderr.write(
-                f'      WARNING: VIIRS bootstrap raised unexpectedly: '
-                f'{_exc}\n')
-        if not year_viirs.shutdown_event.is_set():
-            app_state.startup_complete = True
-            app_state.startup_progress = {
-                'stage': 'ready', 'detail': 'VIIRS bootstrap complete',
-            }
-            print('\n[4/4] VIIRS bootstrap complete -- full app now '
-                  'available to visitors.\n')
-
-    bootstrap_thread = _threading.Thread(
-        target=_run_bootstrap, daemon=True, name='viirs-bootstrap')
-    bootstrap_thread.start()
 
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print('\nShutting down...')
-        year_viirs.shutdown_event.set()
         server.shutdown()
 
 
