@@ -14,6 +14,7 @@ const overview = document.getElementById('nf-overview');
 const canvas = document.getElementById('nf-canvas');
 const coordsEl = document.getElementById('nf-coords');
 const bandCaptionEl = document.getElementById('nf-band-caption');
+const resolutionCaptionEl = document.getElementById('nf-resolution-caption');
 const clearBtn = document.getElementById('nf-clear-bbox');
 const errorsEl = document.getElementById('nf-errors');
 const submitBtn = document.getElementById('nf-submit');
@@ -115,6 +116,13 @@ async function loadYear(year) {
         showErrors([{message: `Network error: ${exc}`}]);
         return;
     }
+    if (resolutionCaptionEl) {
+        const res = meta.overview_resolution_m;
+        resolutionCaptionEl.textContent = (typeof res === 'number')
+            ? `Overview sampled at ~${res.toFixed(0)}m/px `
+              + `(native ${meta.native_resolution_m.toFixed(0)}m/px).`
+            : '';
+    }
     if (bandCaptionEl) {
         const names = meta.rgb_band_names || [];
         // textContent + <br> built via DOM, not innerHTML, so a band
@@ -133,10 +141,21 @@ async function loadYear(year) {
         // Resize on window resize too
         redraw();
     };
+    if (resolutionCaptionEl) {
+        const res = meta.overview_resolution_m;
+        resolutionCaptionEl.textContent = (typeof res === 'number')
+            ? `Overview sampled at ~${res.toFixed(0)}m/px `
+              + `(native ${meta.native_resolution_m.toFixed(0)}m/px).`
+            : '';
+    }
     fields.start.placeholder = meta.default_start || 'YYYY-MM-DD';
     fields.end.placeholder = meta.default_end || 'YYYY-MM-DD';
-    if (!fields.start.value) fields.start.value = '';
-    if (!fields.end.value) fields.end.value = '';
+    // Pre-fill with the computed defaults as real values (not just
+    // placeholders) so the common case needs zero clicks -- but only
+    // if the field is still empty, so switching the Year dropdown
+    // doesn't clobber something the user already typed.
+    if (!fields.start.value) fields.start.value = meta.default_start || '';
+    if (!fields.end.value) fields.end.value = meta.default_end || '';
     refreshFireDatePlaceholder();
 }
 
@@ -144,6 +163,9 @@ function refreshFireDatePlaceholder() {
     if (!fields.fireDate) return;
     const eff = fields.end.value.trim() || fields.end.placeholder || '';
     fields.fireDate.placeholder = eff || 'YYYY-MM-DD';
+    if (!fields.fireDate.value) {
+        fields.fireDate.value = (meta && meta.default_fire_date) || eff || '';
+    }
 }
 
 if (fields.fireDate) {

@@ -43,6 +43,25 @@ def _year_from_filename(path: str) -> int | None:
     return None
 
 
+def _date_from_filename(path: str) -> datetime.date | None:
+    """Extract a full yyyymmdd date from a raster filename if present
+    (e.g. "20260622_stack.bin" -> 2026-06-22), else None. Used to seed
+    sensible default dates in the UI from the actual data on disk,
+    rather than hardcoding "today" -- the stack file's own date is the
+    authoritative answer to "what date is this post-imagery from."""
+    stem = os.path.splitext(os.path.basename(path))[0]
+    for m in re.finditer(r'(\d{8})', stem):
+        token = m.group(1)
+        try:
+            d = datetime.datetime.strptime(token, '%Y%m%d').date()
+        except ValueError:
+            continue
+        now_year = datetime.datetime.now().year
+        if 1970 <= d.year <= now_year + 1:
+            return d
+    return None
+
+
 def _bbox_to_wgs84(crs_wkt: str, xmin, ymin, xmax, ymax):
     """Reproject native bbox corners to WGS84. Returns (W, S, E, N)."""
     src = osr.SpatialReference()
@@ -211,12 +230,44 @@ def generate_overview(
         extent_wgs84 = None
 
     year = _year_from_filename(raster_path)
-    if year is not None:
-        default_start = f'{year}-01-01'
+    file_date = _date_from_filename(raster_path)
+
+    # Start: May 1 of the raster's year (the post-imagery's year, or
+    # today's year if the filename has no parseable year at all).
+    start_year = file_date.year if file_date else (
+        year if year is not None else datetime.date.today().year)
+    default_start = datetime.date(start_year, 5, 1).isoformat()
+
+    # End / fire date: the date actually encoded in the stack
+    # filename (e.g. "20260622_stack.bin" -> 2026-06-22) -- this is
+    # the post-imagery's real acquisition date, which is the
+    # authoritative answer, not "today" (today's run could be using
+    # yesterday's, or an older, stack file). Falls back to Dec 31 of
+    # the year if the filename has no full date, matching the
+    # previous whole-year-window behaviour.
+    if file_date:
+        default_end = file_date.isoformat()
+    elif year is not None:
         default_end = f'{year}-12-31'
     else:
-        default_start = ''
         default_end = ''
+    # Fire date has no independent meaning in this app today -- it's
+    # purely a user-facing label (shown in the fire list / mapping
+    # page, written to the per-fire params.yaml) that never feeds the
+    # classifier or the VIIRS accumulation window. The existing
+    # fire-creation code already defaults it to the accumulation
+    # end date when the user leaves it blank, so default_fire_date
+    # mirrors that same value here.
+    default_fire_date = default_end
+
+    # Native pixel size (e.g. 20m), read from the geotransform, never
+    # hardcoded -- and the actual resolution this overview is sampled
+    # at, given how much it was downscaled to fit max_dim.
+    native_resolution_m = abs(gt[1])
+    if ovr_W > 0:
+        overview_resolution_m = native_resolution_m * (W / ovr_W)
+    else:
+        overview_resolution_m = native_resolution_m
 
     # Human-readable "R: <band name>" / "G: ..." / "B: ..." lines for
     # whichever bands actually went into the overview's RGB channels,
@@ -240,9 +291,12 @@ def generate_overview(
         'crs_wkt': crs_wkt,
         'overview_W': int(ovr_W),
         'overview_H': int(ovr_H),
+        'native_resolution_m': float(native_resolution_m),
+        'overview_resolution_m': float(overview_resolution_m),
         'year': int(year) if year is not None else None,
         'default_start': default_start,
         'default_end': default_end,
+        'default_fire_date': default_fire_date,
         'extent_native': extent_native,
         'extent_wgs84': extent_wgs84,
         'band_group': band_group,
