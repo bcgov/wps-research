@@ -698,6 +698,7 @@ function resetZoom() {
     zoomTx = 0;
     zoomTy = 0;
     applyZoom();
+    redraw();
 }
 
 function clampPan() {
@@ -741,6 +742,7 @@ if (zoomWrap && zoomInner) {
         zoomScale = next;
         clampPan();
         applyZoom();
+        redraw();
     }, {passive: false});
 }
 
