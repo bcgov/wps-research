@@ -795,5 +795,3 @@ if (bcwsRefreshBtn) {
 loadYear(NF_ACTIVE_YEAR);
 loadBcwsOverlay();
 })();
-
-
