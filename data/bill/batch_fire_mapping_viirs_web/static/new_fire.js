@@ -130,9 +130,7 @@ async function loadYear(year) {
                        // stale image with no way to detect staleness.
     overview.src = `/api/year/${year}/overview.png?v=${cacheKey}`;
     overview.onload = () => {
-        canvas.width = overview.clientWidth;
-        canvas.height = overview.clientHeight;
-        // Resize on window resize too
+        sizeCanvasToWrap();
         redraw();
     };
     fields.start.placeholder = meta.default_start || 'YYYY-MM-DD';
@@ -152,27 +150,78 @@ if (fields.fireDate) {
     fields.end.addEventListener('input', refreshFireDatePlaceholder);
 }
 
+// The canvas sits OUTSIDE .nf-zoom-inner (see new_fire.html) so the
+// CSS zoom transform never touches it -- only the <img> gets CSS-
+// scaled (acceptable: it's already a downsampled raster, blurring on
+// zoom is imperceptible). The canvas is sized once to match its wrap
+// box 1:1 in real pixels and stays that size regardless of zoom;
+// everything drawn on it is redrawn fresh at the current zoom/pan via
+// bufferToScreen() below, so it rasterizes crisp at any zoom level
+// instead of being a bitmap that gets stretched and blurred.
+//
+// Declared here (rather than down with the rest of the zoom
+// machinery) so sizeCanvasToWrap() -- called from callbacks that can
+// run before the rest of the file finishes its top-to-bottom pass --
+// never reads it before initialization.
+const zoomWrap = document.getElementById('nf-canvas-wrap');
+
+function sizeCanvasToWrap() {
+    if (!zoomWrap) return;
+    canvas.width = zoomWrap.clientWidth;
+    canvas.height = zoomWrap.clientHeight;
+}
+
 window.addEventListener('resize', () => {
     if (!overview.complete) return;
-    canvas.width = overview.clientWidth;
-    canvas.height = overview.clientHeight;
+    sizeCanvasToWrap();
     redraw();
 });
 
 // ----- Coordinate conversions -----
+//
+// Two coordinate spaces meet here:
+//   "buffer" space  -- pixels in the unscaled overview image, i.e.
+//                       what canvasToRasterPx/nativeToRasterPx already
+//                       worked in before zoom was added. Independent
+//                       of zoomScale/pan.
+//   "screen" space  -- actual on-screen canvas pixels, after applying
+//                       the same pan+zoom the CSS transform used to
+//                       apply to the whole element. This is the space
+//                       mouse events and ctx.draw* calls use now.
+// bufferToScreen / screenToBuffer convert between them; every other
+// function below is unchanged and still operates in buffer space.
+
+function bufferToScreen(bx, by) {
+    return [bx * zoomScale + zoomTx, by * zoomScale + zoomTy];
+}
+
+function screenToBuffer(sx, sy) {
+    return [(sx - zoomTx) / zoomScale, (sy - zoomTy) / zoomScale];
+}
 
 function canvasToRasterPx(mx, my) {
     if (!meta) return null;
-    // Canvas pixels → overview pixels (canvas matches overview client dims)
-    const sx = meta.overview_W / canvas.width;
-    const sy = meta.overview_H / canvas.height;
-    const ovx = mx * sx;
-    const ovy = my * sy;
+    // mx, my arrive in screen space (raw canvas pixels, since the
+    // canvas is never CSS-scaled) -- undo pan/zoom to get back to
+    // buffer space before the existing overview_W/H-based math below.
+    const [bx, by] = screenToBuffer(mx, my);
+    // Buffer pixels → overview pixels (buffer matches overview dims 1:1)
+    const sx = meta.overview_W / overviewBufferW();
+    const sy = meta.overview_H / overviewBufferH();
+    const ovx = bx * sx;
+    const ovy = by * sy;
     // Overview px → raster px
     const rx = ovx * (meta.raster_W / meta.overview_W);
     const ry = ovy * (meta.raster_H / meta.overview_H);
     return [rx, ry];
 }
+
+// The buffer's pixel dimensions are simply the overview image's
+// natural/intrinsic size (meta.overview_W/H) -- this no longer has
+// anything to do with canvas.width/height, which is now the wrap's
+// fixed on-screen size, not the image's pixel size.
+function overviewBufferW() { return (meta && meta.overview_W) || 1; }
+function overviewBufferH() { return (meta && meta.overview_H) || 1; }
 
 function rasterPxToNative(rx, ry) {
     const gt = meta.geotransform;
@@ -204,9 +253,13 @@ function nativeToCanvas(x, y) {
     if (!meta) return null;
     const rp = nativeToRasterPx(x, y);
     if (!rp) return null;
-    const cx = rp[0] * (canvas.width / meta.raster_W);
-    const cy = rp[1] * (canvas.height / meta.raster_H);
-    return [cx, cy];
+    // raster px → buffer px (buffer matches overview's native size)
+    const bx = rp[0] * (overviewBufferW() / meta.raster_W);
+    const by = rp[1] * (overviewBufferH() / meta.raster_H);
+    // buffer px → screen px (apply current pan/zoom so drawing lands
+    // at its true on-screen position, redrawn crisp every time rather
+    // than relying on a CSS transform to visually stretch a bitmap)
+    return bufferToScreen(bx, by);
 }
 
 function nativeBboxToWGS84(xmin, ymin, xmax, ymax) {
@@ -250,32 +303,19 @@ function drawBcwsOverlay(ctx) {
     const polys = bcwsOverlay.polygons || [];
     const pts = bcwsOverlay.points || [];
 
-    // Zoom is applied as a CSS transform: scale() on .nf-zoom-inner
-    // (see applyZoom()) -- the CSS transform itself already makes
-    // anything drawn on the canvas appear `zoomScale` times bigger on
-    // screen. So:
-    //   - line WIDTH must be divided by zoomScale, so the on-screen
-    //     stroke stays a constant 1px no matter how far in we zoom.
-    //   - marker GEOMETRY (the X's arm length) must stay a CONSTANT
-    //     canvas-pixel value, not be divided by zoomScale -- dividing
-    //     it too was the bug: it made the X collapse toward a single
-    //     point at high zoom, on top of an already-thinning stroke,
-    //     so at sufficient zoom both vanished into sub-pixel nothing
-    //     that no amount of "less anti-aliasing" can fix, since
-    //     there's no longer enough geometry there to render crisply.
-    //     A fixed-size X drawn at its true canvas size, then shown
-    //     `zoomScale`x bigger by the CSS transform, is the only way
-    //     to get a constant ON-SCREEN size at every zoom level.
-    const z = (typeof zoomScale === 'number' && zoomScale > 0) ? zoomScale : 1;
-    // Canvas2D has no way to force a sub-pixel stroke to render crisp
-    // -- below ~1 canvas pixel wide, anti-aliasing fades it toward
-    // transparent regardless of any setting, and that fade then gets
-    // magnified by the CSS zoom transform. Floor at 1 so it never
-    // disappears; the tradeoff (confirmed) is that at extreme zoom
-    // the line is slightly thicker on screen than a true 1px-at-
-    // reset-zoom line would be, in exchange for never vanishing.
-    const lineWidthPx = Math.max(1 / z, 1);
-    const markerHalfPx = 5;  // constant -- see note above
+    // Under the old design the canvas itself was CSS-scaled by the
+    // zoom transform, so a constant ctx.lineWidth/marker size would
+    // visually grow with zoom -- everything here had to be divided by
+    // zoomScale to compensate. That's no longer true: the canvas now
+    // lives outside the zoom transform and is redrawn fresh every
+    // frame via nativeToCanvas() -> bufferToScreen(), which already
+    // bakes the current pan/zoom into each point's screen position.
+    // A plain constant width/size here is therefore CORRECT and
+    // crisp at any zoom level by construction -- no compensation
+    // needed, and dividing by zoomScale would be wrong (it would
+    // make lines thinner, not constant, as you zoom in).
+    const lineWidthPx = 1;
+    const markerHalfPx = 5;
 
     ctx.strokeStyle = 'rgba(220, 0, 0, 0.9)';
     ctx.fillStyle = 'rgba(220, 0, 0, 0.18)';
@@ -298,7 +338,7 @@ function drawBcwsOverlay(ctx) {
     // filled circles -- circles at small/clamped radius were
     // visually blending together and made it impossible to tell
     // whether polygons were rendering underneath them. An X's
-    // strokes are the same 1px-pinned width as the polygon outlines,
+    // strokes are the same constant width as the polygon outlines,
     // and an X's open center doesn't occlude a polygon edge sitting
     // right under a point the way a filled disc does.
     ctx.strokeStyle = 'rgba(220, 0, 0, 0.95)';
@@ -404,9 +444,13 @@ function applyTypedRasterBbox() {
 // ----- Mouse handlers -----
 
 function getMousePos(ev) {
-    // getBoundingClientRect returns the post-CSS-transform size, so
-    // dividing by it remaps cursor pixels back into canvas-buffer
-    // pixels regardless of the current zoom scale.
+    // The canvas is no longer inside the CSS zoom transform (see
+    // new_fire.html / sizeCanvasToWrap()), so canvas.width/height
+    // already equals rect.width/height in the normal case -- sx/sy
+    // below are always ~1.0 in practice. Left in as a defensive
+    // fallback in case some other CSS (browser zoom, devtools
+    // scaling, etc.) ever puts the canvas's rendered size out of
+    // sync with its buffer size; costs nothing when they match.
     const rect = canvas.getBoundingClientRect();
     if (!rect.width || !rect.height) {
         return [ev.clientX - rect.left, ev.clientY - rect.top];
@@ -720,13 +764,13 @@ submitBtn.addEventListener('click', async () => {
 
 // ----- Wheel zoom + reset -----
 //
-// We scale ``.nf-zoom-inner`` (which contains both the overview <img>
-// and the bbox <canvas>) via CSS transform. The canvas draw buffer
-// stays at its natural pixel size — getMousePos divides by
-// getBoundingClientRect to remap cursor px → canvas px regardless of
-// scale, so bbox math is unaffected.
+// We scale ``.nf-zoom-inner`` (which now contains only the overview
+// <img>) via CSS transform for pan/zoom. The canvas lives OUTSIDE
+// that transform (see new_fire.html) and is redrawn fresh at the
+// current zoom/pan via bufferToScreen()/screenToBuffer() instead of
+// being visually stretched -- this is what keeps thin lines and
+// fixed-size markers crisp at any zoom level rather than blurring.
 
-const zoomWrap = document.getElementById('nf-canvas-wrap');
 const zoomInner = document.getElementById('nf-zoom-inner');
 const zoomResetBtn = document.getElementById('nf-zoom-reset');
 let zoomTx = 0, zoomTy = 0;
