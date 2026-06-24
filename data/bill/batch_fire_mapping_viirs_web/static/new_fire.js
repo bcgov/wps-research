@@ -222,6 +222,8 @@ async function loadBcwsOverlay() {
         const r = await fetch('/api/bcws/overlay');
         if (!r.ok) return;
         bcwsOverlay = await r.json();
+        console.log('[bcws] points:', (bcwsOverlay.points || []).length,
+                    'polygons:', (bcwsOverlay.polygons || []).length);
     } catch (exc) {
         // Non-fatal -- the bbox drawer still works without the overlay.
         bcwsOverlay = null;
@@ -242,14 +244,20 @@ function drawBcwsOverlay(ctx) {
     // whatever it is at zoomScale=1 (i.e. "Reset zoom"), regardless
     // of how far in/out the user has zoomed.
     const z = (typeof zoomScale === 'number' && zoomScale > 0) ? zoomScale : 1;
-    const lineWidthPx = 1 / z;     // exactly 1px wide at reset-zoom, always
-    const pointRadiusPx = 4 / z;   // same on-screen radius at any zoom
+    // Clamp to a sane minimum in canvas-pixel space -- below ~0.5px
+    // canvas anti-aliasing makes strokes/dots fade to near-invisible
+    // regardless of the math being "correct". The clamp means at
+    // very high zoom the on-screen size grows slightly past the
+    // reset-zoom size rather than vanishing -- a visible dot beats an
+    // invisible one.
+    const lineWidthPx = Math.max(1 / z, 0.5);
+    const pointRadiusPx = Math.max(4 / z, 1.5);
 
     ctx.strokeStyle = 'rgba(220, 0, 0, 0.9)';
     ctx.fillStyle = 'rgba(220, 0, 0, 0.18)';
     ctx.lineWidth = lineWidthPx;
     polys.forEach((ring) => {
-        if (!ring || ring.length < 2) return;
+        if (!ring || ring.length < 3) return;
         ctx.beginPath();
         ring.forEach(([x, y], i) => {
             const cp = nativeToCanvas(x, y);
@@ -274,6 +282,7 @@ function drawBcwsOverlay(ctx) {
 
 function redraw() {
     const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     drawBcwsOverlay(ctx);
     if (!bbox) return;
@@ -786,3 +795,5 @@ if (bcwsRefreshBtn) {
 loadYear(NF_ACTIVE_YEAR);
 loadBcwsOverlay();
 })();
+
+
