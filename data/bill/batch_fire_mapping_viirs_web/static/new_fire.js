@@ -251,19 +251,31 @@ function drawBcwsOverlay(ctx) {
     const pts = bcwsOverlay.points || [];
 
     // Zoom is applied as a CSS transform: scale() on .nf-zoom-inner
-    // (see applyZoom()), which scales the canvas's drawn pixels right
-    // along with everything else -- so without compensating here, a
-    // 1px line grows on screen as you zoom in. Dividing by the
-    // current zoomScale keeps the on-screen line width pinned to
-    // exactly 1px at every zoom level, with NO minimum-size clamp --
-    // unlike an earlier version of this code, lines are allowed to
-    // get visually thin/sub-pixel at high zoom rather than growing
-    // past their true 1px size, per explicit request.
+    // (see applyZoom()) -- the CSS transform itself already makes
+    // anything drawn on the canvas appear `zoomScale` times bigger on
+    // screen. So:
+    //   - line WIDTH must be divided by zoomScale, so the on-screen
+    //     stroke stays a constant 1px no matter how far in we zoom.
+    //   - marker GEOMETRY (the X's arm length) must stay a CONSTANT
+    //     canvas-pixel value, not be divided by zoomScale -- dividing
+    //     it too was the bug: it made the X collapse toward a single
+    //     point at high zoom, on top of an already-thinning stroke,
+    //     so at sufficient zoom both vanished into sub-pixel nothing
+    //     that no amount of "less anti-aliasing" can fix, since
+    //     there's no longer enough geometry there to render crisply.
+    //     A fixed-size X drawn at its true canvas size, then shown
+    //     `zoomScale`x bigger by the CSS transform, is the only way
+    //     to get a constant ON-SCREEN size at every zoom level.
     const z = (typeof zoomScale === 'number' && zoomScale > 0) ? zoomScale : 1;
-    const lineWidthPx = 1 / z;
-    // X marker arm half-length, in canvas px at zoomScale=1 -- fixed
-    // regardless of zoom, same reasoning as lineWidthPx.
-    const markerHalfPx = 5 / z;
+    // Canvas2D has no way to force a sub-pixel stroke to render crisp
+    // -- below ~1 canvas pixel wide, anti-aliasing fades it toward
+    // transparent regardless of any setting, and that fade then gets
+    // magnified by the CSS zoom transform. Floor at 1 so it never
+    // disappears; the tradeoff (confirmed) is that at extreme zoom
+    // the line is slightly thicker on screen than a true 1px-at-
+    // reset-zoom line would be, in exchange for never vanishing.
+    const lineWidthPx = Math.max(1 / z, 1);
+    const markerHalfPx = 5;  // constant -- see note above
 
     ctx.strokeStyle = 'rgba(220, 0, 0, 0.9)';
     ctx.fillStyle = 'rgba(220, 0, 0, 0.18)';
