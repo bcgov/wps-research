@@ -335,6 +335,40 @@ class FireListRoutes:
             return
         self._send_json(meta)
 
+    def handle_api_bcws_overlay(self):
+        """Return the cached BCWS current-fire points/polygons overlay
+        (already reprojected into the active raster's native CRS), or
+        an empty overlay if it's never been downloaded yet -- this is
+        a read of whatever's cached, not a trigger to fetch."""
+        from ..bcws import load_bcws_overlay
+        overlay = load_bcws_overlay(state)
+        if overlay is None:
+            self._send_json({'points': [], 'polygons': [],
+                              'updated_at': None})
+            return
+        self._send_json(overlay)
+
+    def handle_api_bcws_refresh(self):
+        """Admin-only: download the latest BCWS current-fire points +
+        polygons from data.gov.bc.ca, reproject into the active
+        raster's CRS, and cache. Synchronous -- a few small zips, this
+        is a few-seconds operation, not a background job."""
+        if getattr(self, '_role', '') != 'admin':
+            self._send_json({'error': 'admin only'}, 403)
+            return
+        from ..bcws import refresh_bcws_overlay
+        try:
+            overlay = refresh_bcws_overlay(state)
+        except Exception as exc:
+            self._send_json({'error': f'BCWS refresh failed: {exc}'}, 500)
+            return
+        self._send_json({
+            'status': 'ok',
+            'updated_at': overlay['updated_at'],
+            'n_points': overlay['n_points'],
+            'n_polygons': overlay['n_polygons'],
+        })
+
     def handle_api_fire_create(self):
         from ..validation import (
             _validate_fire_name, _validate_bbox, _validate_date_range,

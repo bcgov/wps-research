@@ -245,9 +245,56 @@ function nativeBboxToWGS84(xmin, ymin, xmax, ymax) {
 
 // ----- Drawing -----
 
+let bcwsOverlay = null;  // {points: [[x,y],...], polygons: [[[x,y],...]]} in raster-native CRS
+
+async function loadBcwsOverlay() {
+    try {
+        const r = await fetch('/api/bcws/overlay');
+        if (!r.ok) return;
+        bcwsOverlay = await r.json();
+    } catch (exc) {
+        // Non-fatal -- the bbox drawer still works without the overlay.
+        bcwsOverlay = null;
+    }
+    redraw();
+}
+
+function drawBcwsOverlay(ctx) {
+    if (!bcwsOverlay || !meta) return;
+    const polys = bcwsOverlay.polygons || [];
+    const pts = bcwsOverlay.points || [];
+
+    ctx.strokeStyle = 'rgba(220, 0, 0, 0.9)';
+    ctx.fillStyle = 'rgba(220, 0, 0, 0.18)';
+    ctx.lineWidth = 1.5;
+    polys.forEach((ring) => {
+        if (!ring || ring.length < 2) return;
+        ctx.beginPath();
+        ring.forEach(([x, y], i) => {
+            const cp = nativeToCanvas(x, y);
+            if (!cp) return;
+            if (i === 0) ctx.moveTo(cp[0], cp[1]);
+            else ctx.lineTo(cp[0], cp[1]);
+        });
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+    });
+
+    ctx.fillStyle = 'rgba(220, 0, 0, 0.95)';
+    pts.forEach(([x, y]) => {
+        const cp = nativeToCanvas(x, y);
+        if (!cp) return;
+        ctx.beginPath();
+        ctx.arc(cp[0], cp[1], 4, 0, 2 * Math.PI);
+        ctx.fill();
+    });
+}
+
 function redraw() {
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawBcwsOverlay(ctx);
     if (!bbox) return;
     const x = Math.min(bbox.x0, bbox.x1);
     const y = Math.min(bbox.y0, bbox.y1);
@@ -718,7 +765,41 @@ if (zoomWrap && zoomInner) {
 
 if (zoomResetBtn) zoomResetBtn.addEventListener('click', resetZoom);
 
+// ----- BCWS points + polygons overlay -----
+
+const bcwsRefreshBtn = document.getElementById('nf-bcws-refresh');
+const bcwsStatusEl = document.getElementById('nf-bcws-status');
+
+if (bcwsRefreshBtn) {
+    bcwsRefreshBtn.addEventListener('click', async () => {
+        bcwsRefreshBtn.disabled = true;
+        if (bcwsStatusEl) bcwsStatusEl.textContent = 'Downloading BCWS data...';
+        try {
+            const r = await fetch('/api/bcws/refresh', {method: 'POST'});
+            const j = await r.json().catch(() => ({}));
+            if (!r.ok) {
+                if (bcwsStatusEl) {
+                    bcwsStatusEl.textContent =
+                        `Failed: ${j.error || r.statusText}`;
+                }
+            } else {
+                if (bcwsStatusEl) {
+                    bcwsStatusEl.textContent =
+                        `Updated: ${j.n_points} point(s), `
+                        + `${j.n_polygons} polygon(s)`;
+                }
+                await loadBcwsOverlay();
+            }
+        } catch (exc) {
+            if (bcwsStatusEl) bcwsStatusEl.textContent = `Network error: ${exc}`;
+        } finally {
+            bcwsRefreshBtn.disabled = false;
+        }
+    });
+}
+
 // ----- Boot -----
 
 loadYear(NF_ACTIVE_YEAR);
+loadBcwsOverlay();
 })();

@@ -123,6 +123,7 @@ class BaseHandler:
          'handle_api_year_overview_png'),
         (re.compile(r'^/api/year/(?P<y>\d+)/overview_meta$'),
          'handle_api_year_overview_meta'),
+        (re.compile(r'^/api/bcws/overlay$'), 'handle_api_bcws_overlay'),
         (re.compile(
             r'^/api/fire/preview_hint/(?P<preview_id>[A-Za-z0-9_-]+)/'
             r'(?P<view>[A-Za-z0-9_-]+)\.png$'),
@@ -175,6 +176,7 @@ class BaseHandler:
     ]
     ROUTES_POST = [
         (re.compile(r'^/login$'), 'handle_login_post'),
+        (re.compile(r'^/api/bcws/refresh$'), 'handle_api_bcws_refresh'),
         (re.compile(r'^/api/fire/create$'), 'handle_api_fire_create'),
         (re.compile(r'^/api/fire/preview_hint$'),
          'handle_api_fire_preview_hint'),
