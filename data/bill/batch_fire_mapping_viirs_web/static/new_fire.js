@@ -299,9 +299,21 @@ async function loadBcwsOverlay() {
 }
 
 function drawBcwsOverlay(ctx) {
-    if (!bcwsOverlay || !meta) return;
+    if (!bcwsOverlay || !meta) {
+        console.log('[bcws-debug] bailing out: bcwsOverlay=',
+                    !!bcwsOverlay, 'meta=', !!meta);
+        return;
+    }
     const polys = bcwsOverlay.polygons || [];
     const pts = bcwsOverlay.points || [];
+
+    if (pts.length > 0) {
+        const sample = nativeToCanvas(pts[0][0], pts[0][1]);
+        console.log('[bcws-debug] canvas size:', canvas.width, canvas.height,
+                    '| first point native:', pts[0],
+                    '| -> screen:', sample,
+                    '| zoomScale:', zoomScale, zoomTx, zoomTy);
+    }
 
     // Under the old design the canvas itself was CSS-scaled by the
     // zoom transform, so a constant ctx.lineWidth/marker size would
