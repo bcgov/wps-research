@@ -138,6 +138,13 @@ Example
                    help=f'Path to LAADS DAAC token file '
                         f'(default: {_LAADS_TOKEN_PATH})')
 
+
+    # Startup behaviour toggles
+    p.add_argument("--skip_viirs_bootstrap", action="store_true",
+                   help="Skip the year-wide VIIRS download step at startup.")
+    p.add_argument("--disable_overview_force_regeneration",
+                   action="store_true",
+                   help="Skip forced overview regeneration at startup.")
     return p
 
 
