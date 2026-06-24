@@ -277,7 +277,8 @@ def main():
     # ------------------------------------------------------------------
     print('\n[1/4] Per-year overview previews ...')
     overview_png_by_year, overview_meta_by_year = _ensure_overviews(
-        rasters_by_year, out_root)
+        rasters_by_year, out_root,
+        force=not args.disable_overview_force_regeneration)
 
     # ------------------------------------------------------------------
     # Step 2 — Initialise application state
@@ -435,19 +436,23 @@ def main():
     # Per-fire prepare then only has to ``accumulate`` from this shared
     # dir — no per-fire LAADS calls and no per-fire shapify.
     # ------------------------------------------------------------------
-    print('\n[3/4] Bootstrapping per-year VIIRS data '
-          '(download + shapify) ...')
     from . import year_viirs
     for _y in sorted(rasters_by_year):
         app_state.viirs_shp_dirs_by_year[_y] = year_viirs.year_shp_dir(
             app_state, _y)
-    try:
-        year_viirs.bootstrap_all_years(app_state)
-    except Exception as _exc:
-        sys.stderr.write(
-            f'      WARNING: VIIRS bootstrap failed: {_exc}\n'
-            f'      Per-fire creation will fall back to on-demand '
-            f'download.\n')
+    if args.skip_viirs_bootstrap:
+        print('\n[3/4] Skipping VIIRS bootstrap (--skip_viirs_bootstrap). '
+              'Per-fire creation will fall back to on-demand download.')
+    else:
+        print('\n[3/4] Bootstrapping per-year VIIRS data '
+              '(download + shapify) ...')
+        try:
+            year_viirs.bootstrap_all_years(app_state)
+        except Exception as _exc:
+            sys.stderr.write(
+                f'      WARNING: VIIRS bootstrap failed: {_exc}\n'
+                f'      Per-fire creation will fall back to on-demand '
+                f'download.\n')
 
     app_state.init_fires_from_disk()
 
