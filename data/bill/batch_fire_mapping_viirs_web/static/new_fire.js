@@ -220,8 +220,16 @@ function canvasToRasterPx(mx, my) {
 // natural/intrinsic size (meta.overview_W/H) -- this no longer has
 // anything to do with canvas.width/height, which is now the wrap's
 // fixed on-screen size, not the image's pixel size.
-function overviewBufferW() { return (meta && meta.overview_W) || 1; }
-function overviewBufferH() { return (meta && meta.overview_H) || 1; }
+// The buffer's pixel dimensions are the overview <img>'s actual
+// RENDERED size (its CSS box, e.g. clientWidth/Height) -- NOT
+// meta.overview_W/H, which is the PNG's native/source pixel
+// resolution (can be many times larger, e.g. up to max_dim=9090).
+// canvasToRasterPx below already divides by this to get to overview
+// pixels, so it must match whatever size the image is ACTUALLY
+// displayed at, same as the original (pre-zoom-rewrite) code did via
+// canvas.width = overview.clientWidth.
+function overviewBufferW() { return overview.clientWidth || 1; }
+function overviewBufferH() { return overview.clientHeight || 1; }
 
 function rasterPxToNative(rx, ry) {
     const gt = meta.geotransform;
