@@ -357,6 +357,14 @@ function drawBcwsOverlay(ctx) {
 }
 
 function redraw() {
+    // Always resync first -- the wrap's size can be 0x0 until the
+    // overview <img> has actually loaded (the wrap is unsized CSS
+    // that shrinks to its content), so whichever of loadYear()'s
+    // image load / loadBcwsOverlay()'s fetch happens to resolve
+    // first cannot be trusted to have already sized the canvas
+    // correctly. Cheap to call every redraw; only a real resize if
+    // the wrap's dimensions actually changed since last time.
+    sizeCanvasToWrap();
     const ctx = canvas.getContext('2d');
     ctx.imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -871,6 +879,17 @@ if (bcwsRefreshBtn) {
 }
 
 // ----- Boot -----
+
+// Size the canvas up front, synchronously, before either async load
+// below has a chance to resolve and call redraw() against a
+// still-zero-sized canvas. Previously this only happened inside
+// overview.onload, which was fine when the image always took a
+// moment to load -- but now that the overview PNG is browser-cached
+// (see the cache_key change above), it can load near-instantly, and
+// loadBcwsOverlay()'s fetch could resolve and redraw() first, onto a
+// canvas that was still 0x0 -- which is exactly why markers stopped
+// appearing once caching made the image load "too fast".
+sizeCanvasToWrap();
 
 loadYear(NF_ACTIVE_YEAR);
 loadBcwsOverlay();
