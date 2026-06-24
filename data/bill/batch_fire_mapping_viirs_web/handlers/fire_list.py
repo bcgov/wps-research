@@ -316,7 +316,7 @@ class FireListRoutes:
         if not path or not os.path.isfile(path):
             self._send_json({'error': 'overview not generated'}, 404)
             return
-        self._send_file(path, media_type='image/png')
+        self._send_file(path, media_type='image/png', cache_seconds=86400)
 
     def handle_api_year_overview_meta(self, y):
         yi = self._resolve_year(y)

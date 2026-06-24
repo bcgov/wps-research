@@ -114,7 +114,21 @@ async function loadYear(year) {
         showErrors([{message: `Network error: ${exc}`}]);
         return;
     }
-    overview.src = `/api/year/${year}/overview.png?t=${Date.now()}`;
+    // Cache-bust on the raster's own cache_key (mtime+size), not on
+    // wall-clock time -- using Date.now() forced a full re-fetch of a
+    // 50-100MB+ overview PNG on every single page load/year-switch,
+    // even when the underlying stack file hadn't changed at all. The
+    // server already computes this exact key to decide whether ITS
+    // OWN on-disk cache is stale (overview_is_fresh() in overview.py);
+    // reusing it here means the browser's HTTP cache can actually
+    // serve a repeat load from disk/memory instead of re-downloading,
+    // and only refetches when the stack file is genuinely different.
+    const cacheKey = meta.cache_key
+        ? `${meta.cache_key.st_mtime_ns}_${meta.cache_key.st_size}`
+        : Date.now();  // no cache_key in the metadata -- fall back
+                       // to always-fresh rather than risk showing a
+                       // stale image with no way to detect staleness.
+    overview.src = `/api/year/${year}/overview.png?v=${cacheKey}`;
     overview.onload = () => {
         canvas.width = overview.clientWidth;
         canvas.height = overview.clientHeight;

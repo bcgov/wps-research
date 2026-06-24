@@ -488,7 +488,7 @@ class BaseHandler:
         self.end_headers()
         self.wfile.write(body)
 
-    def _send_file(self, filepath, media_type=None):
+    def _send_file(self, filepath, media_type=None, cache_seconds=None):
         if not os.path.isfile(filepath):
             self.send_error(404)
             return
@@ -500,6 +500,17 @@ class BaseHandler:
         self.send_response(200)
         self.send_header('Content-Type', media_type)
         self.send_header('Content-Length', str(len(data)))
+        if cache_seconds is not None:
+            # Safe to cache aggressively when the URL is itself
+            # content-keyed (the caller's query string changes
+            # whenever the underlying file does) -- "immutable" tells
+            # the browser not to even revalidate with the server
+            # until the URL changes, which is the whole point: a
+            # 50-100MB+ overview PNG should be fetched once per
+            # raster, not once per page load.
+            self.send_header(
+                'Cache-Control',
+                f'public, max-age={cache_seconds}, immutable')
         self.end_headers()
         self.wfile.write(data)
 
