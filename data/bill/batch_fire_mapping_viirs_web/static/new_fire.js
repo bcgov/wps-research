@@ -239,19 +239,17 @@ function drawBcwsOverlay(ctx) {
     // Zoom is applied as a CSS transform: scale() on .nf-zoom-inner
     // (see applyZoom()), which scales the canvas's drawn pixels right
     // along with everything else -- so without compensating here, a
-    // 1px line or 4px dot grows on screen as you zoom in. Dividing by
-    // the current zoomScale keeps their ON-SCREEN size pinned to
-    // whatever it is at zoomScale=1 (i.e. "Reset zoom"), regardless
-    // of how far in/out the user has zoomed.
+    // 1px line grows on screen as you zoom in. Dividing by the
+    // current zoomScale keeps the on-screen line width pinned to
+    // exactly 1px at every zoom level, with NO minimum-size clamp --
+    // unlike an earlier version of this code, lines are allowed to
+    // get visually thin/sub-pixel at high zoom rather than growing
+    // past their true 1px size, per explicit request.
     const z = (typeof zoomScale === 'number' && zoomScale > 0) ? zoomScale : 1;
-    // Clamp to a sane minimum in canvas-pixel space -- below ~0.5px
-    // canvas anti-aliasing makes strokes/dots fade to near-invisible
-    // regardless of the math being "correct". The clamp means at
-    // very high zoom the on-screen size grows slightly past the
-    // reset-zoom size rather than vanishing -- a visible dot beats an
-    // invisible one.
-    const lineWidthPx = Math.max(1 / z, 0.5);
-    const pointRadiusPx = Math.max(4 / z, 1.5);
+    const lineWidthPx = 1 / z;
+    // X marker arm half-length, in canvas px at zoomScale=1 -- fixed
+    // regardless of zoom, same reasoning as lineWidthPx.
+    const markerHalfPx = 5 / z;
 
     ctx.strokeStyle = 'rgba(220, 0, 0, 0.9)';
     ctx.fillStyle = 'rgba(220, 0, 0, 0.18)';
@@ -270,13 +268,25 @@ function drawBcwsOverlay(ctx) {
         ctx.stroke();
     });
 
-    ctx.fillStyle = 'rgba(220, 0, 0, 0.95)';
+    // Points as X markers (two crossed line segments) rather than
+    // filled circles -- circles at small/clamped radius were
+    // visually blending together and made it impossible to tell
+    // whether polygons were rendering underneath them. An X's
+    // strokes are the same 1px-pinned width as the polygon outlines,
+    // and an X's open center doesn't occlude a polygon edge sitting
+    // right under a point the way a filled disc does.
+    ctx.strokeStyle = 'rgba(220, 0, 0, 0.95)';
+    ctx.lineWidth = lineWidthPx;
     pts.forEach(([x, y]) => {
         const cp = nativeToCanvas(x, y);
         if (!cp) return;
+        const [cx, cy] = cp;
         ctx.beginPath();
-        ctx.arc(cp[0], cp[1], pointRadiusPx, 0, 2 * Math.PI);
-        ctx.fill();
+        ctx.moveTo(cx - markerHalfPx, cy - markerHalfPx);
+        ctx.lineTo(cx + markerHalfPx, cy + markerHalfPx);
+        ctx.moveTo(cx + markerHalfPx, cy - markerHalfPx);
+        ctx.lineTo(cx - markerHalfPx, cy + markerHalfPx);
+        ctx.stroke();
     });
 }
 
