@@ -453,6 +453,24 @@ def main():
 
     init_app(app_state)
 
+    # Download the latest BCWS current-fire points + polygons once at
+    # startup, so the overlay is already populated when /new_fire is
+    # first opened (rather than only after someone clicks the manual
+    # refresh button). Non-fatal: data.gov.bc.ca being unreachable at
+    # boot shouldn't prevent the server from starting -- the overlay
+    # just stays empty until the button is used.
+    print('\n[bcws] Downloading current-fire points + polygons ...')
+    try:
+        from . import bcws
+        _overlay = bcws.refresh_bcws_overlay(app_state)
+        print(f"      {_overlay['n_points']} point(s), "
+              f"{_overlay['n_polygons']} polygon(s) downloaded.")
+    except Exception as _exc:
+        sys.stderr.write(
+            f'      WARNING: BCWS download failed: {_exc}\n'
+            f'      Points/polygons overlay will be empty until the '
+            f'"Update BCWS points + polys" button is used.\n')
+
     # Restore per-fire state from previous session for the active year
     from .app import (_load_fire_state, _save_active_year,
                       _load_stage_timings, _load_notifications,

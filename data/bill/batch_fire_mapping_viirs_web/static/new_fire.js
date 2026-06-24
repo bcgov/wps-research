@@ -259,6 +259,7 @@ async function loadBcwsOverlay() {
     redraw();
 }
 
+let zoomScale = 1;
 function drawBcwsOverlay(ctx) {
     if (!bcwsOverlay || !meta) return;
     const polys = bcwsOverlay.polygons || [];
@@ -703,7 +704,7 @@ submitBtn.addEventListener('click', async () => {
 const zoomWrap = document.getElementById('nf-canvas-wrap');
 const zoomInner = document.getElementById('nf-zoom-inner');
 const zoomResetBtn = document.getElementById('nf-zoom-reset');
-let zoomScale = 1, zoomTx = 0, zoomTy = 0;
+let zoomTx = 0, zoomTy = 0;
 const ZOOM_MIN = 1, ZOOM_MAX = 32;
 
 function applyZoom() {
@@ -798,8 +799,76 @@ if (bcwsRefreshBtn) {
     });
 }
 
+// ----- BCWS points + polygons overlay -----
+
+const bcwsRefreshBtn = document.getElementById('nf-bcws-refresh');
+const bcwsStatusEl = document.getElementById('nf-bcws-status');
+
+if (bcwsRefreshBtn) {
+    bcwsRefreshBtn.addEventListener('click', async () => {
+        bcwsRefreshBtn.disabled = true;
+        if (bcwsStatusEl) bcwsStatusEl.textContent = 'Downloading BCWS data...';
+        try {
+            const r = await fetch('/api/bcws/refresh', {method: 'POST'});
+            const j = await r.json().catch(() => ({}));
+            if (!r.ok) {
+                if (bcwsStatusEl) {
+                    bcwsStatusEl.textContent =
+                        `Failed: ${j.error || r.statusText}`;
+                }
+            } else {
+                if (bcwsStatusEl) {
+                    bcwsStatusEl.textContent =
+                        `Updated: ${j.n_points} point(s), `
+                        + `${j.n_polygons} polygon(s)`;
+                }
+                await loadBcwsOverlay();
+            }
+        } catch (exc) {
+            if (bcwsStatusEl) bcwsStatusEl.textContent = `Network error: ${exc}`;
+        } finally {
+            bcwsRefreshBtn.disabled = false;
+        }
+    });
+}
+
+// ----- BCWS points + polygons overlay -----
+
+const bcwsRefreshBtn = document.getElementById('nf-bcws-refresh');
+const bcwsStatusEl = document.getElementById('nf-bcws-status');
+
+if (bcwsRefreshBtn) {
+    bcwsRefreshBtn.addEventListener('click', async () => {
+        bcwsRefreshBtn.disabled = true;
+        if (bcwsStatusEl) bcwsStatusEl.textContent = 'Downloading BCWS data...';
+        try {
+            const r = await fetch('/api/bcws/refresh', {method: 'POST'});
+            const j = await r.json().catch(() => ({}));
+            if (!r.ok) {
+                if (bcwsStatusEl) {
+                    bcwsStatusEl.textContent =
+                        `Failed: ${j.error || r.statusText}`;
+                }
+            } else {
+                if (bcwsStatusEl) {
+                    bcwsStatusEl.textContent =
+                        `Updated: ${j.n_points} point(s), `
+                        + `${j.n_polygons} polygon(s)`;
+                }
+                await loadBcwsOverlay();
+            }
+        } catch (exc) {
+            if (bcwsStatusEl) bcwsStatusEl.textContent = `Network error: ${exc}`;
+        } finally {
+            bcwsRefreshBtn.disabled = false;
+        }
+    });
+}
+
 // ----- Boot -----
 
 loadYear(NF_ACTIVE_YEAR);
+loadBcwsOverlay();
+loadBcwsOverlay();
 loadBcwsOverlay();
 })();
