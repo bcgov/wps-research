@@ -891,6 +891,14 @@ if (bcwsRefreshBtn) {
 // appearing once caching made the image load "too fast".
 sizeCanvasToWrap();
 
-loadYear(NF_ACTIVE_YEAR);
-loadBcwsOverlay();
+// loadYear() must complete (and set `meta`) before loadBcwsOverlay()
+// draws anything -- drawBcwsOverlay() bails out silently if `meta`
+// is still null, and nothing else was forcing a later redraw once it
+// became available. Running these in sequence instead of
+// concurrently removes that race entirely rather than relying on
+// timing happening to work out.
+(async () => {
+    await loadYear(NF_ACTIVE_YEAR);
+    await loadBcwsOverlay();
+})();
 })();
