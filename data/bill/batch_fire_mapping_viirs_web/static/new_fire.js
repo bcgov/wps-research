@@ -13,8 +13,6 @@ const yearSelect = document.getElementById('nf-year');
 const overview = document.getElementById('nf-overview');
 const canvas = document.getElementById('nf-canvas');
 const coordsEl = document.getElementById('nf-coords');
-const bandCaptionEl = document.getElementById('nf-band-caption');
-const resolutionCaptionEl = document.getElementById('nf-resolution-caption');
 const clearBtn = document.getElementById('nf-clear-bbox');
 const errorsEl = document.getElementById('nf-errors');
 const submitBtn = document.getElementById('nf-submit');
@@ -116,24 +114,6 @@ async function loadYear(year) {
         showErrors([{message: `Network error: ${exc}`}]);
         return;
     }
-    if (resolutionCaptionEl) {
-        const res = meta.overview_resolution_m;
-        resolutionCaptionEl.textContent = (typeof res === 'number')
-            ? `Overview sampled at ~${res.toFixed(0)}m/px `
-              + `(native ${meta.native_resolution_m.toFixed(0)}m/px).`
-            : '';
-    }
-    if (bandCaptionEl) {
-        const names = meta.rgb_band_names || [];
-        // textContent + <br> built via DOM, not innerHTML, so a band
-        // name containing '<' or '&' (unlikely, but it's free-text
-        // from a .hdr file someone hand-edited) can't break the markup.
-        bandCaptionEl.replaceChildren();
-        names.forEach((line) => {
-            bandCaptionEl.appendChild(document.createTextNode(line));
-            bandCaptionEl.appendChild(document.createElement('br'));
-        });
-    }
     overview.src = `/api/year/${year}/overview.png?t=${Date.now()}`;
     overview.onload = () => {
         canvas.width = overview.clientWidth;
@@ -141,21 +121,10 @@ async function loadYear(year) {
         // Resize on window resize too
         redraw();
     };
-    if (resolutionCaptionEl) {
-        const res = meta.overview_resolution_m;
-        resolutionCaptionEl.textContent = (typeof res === 'number')
-            ? `Overview sampled at ~${res.toFixed(0)}m/px `
-              + `(native ${meta.native_resolution_m.toFixed(0)}m/px).`
-            : '';
-    }
     fields.start.placeholder = meta.default_start || 'YYYY-MM-DD';
     fields.end.placeholder = meta.default_end || 'YYYY-MM-DD';
-    // Pre-fill with the computed defaults as real values (not just
-    // placeholders) so the common case needs zero clicks -- but only
-    // if the field is still empty, so switching the Year dropdown
-    // doesn't clobber something the user already typed.
-    if (!fields.start.value) fields.start.value = meta.default_start || '';
-    if (!fields.end.value) fields.end.value = meta.default_end || '';
+    if (!fields.start.value) fields.start.value = '';
+    if (!fields.end.value) fields.end.value = '';
     refreshFireDatePlaceholder();
 }
 
@@ -163,9 +132,6 @@ function refreshFireDatePlaceholder() {
     if (!fields.fireDate) return;
     const eff = fields.end.value.trim() || fields.end.placeholder || '';
     fields.fireDate.placeholder = eff || 'YYYY-MM-DD';
-    if (!fields.fireDate.value) {
-        fields.fireDate.value = (meta && meta.default_fire_date) || eff || '';
-    }
 }
 
 if (fields.fireDate) {
@@ -246,6 +212,10 @@ function nativeBboxToWGS84(xmin, ymin, xmax, ymax) {
 // ----- Drawing -----
 
 let bcwsOverlay = null;  // {points: [[x,y],...], polygons: [[[x,y],...]]} in raster-native CRS
+// Forward-declared here (assigned further down, alongside the rest of
+// the zoom machinery) so drawBcwsOverlay() -- which runs earlier in
+// some call paths -- never references it before initialization.
+let zoomScale = 1;
 
 async function loadBcwsOverlay() {
     try {
@@ -259,15 +229,25 @@ async function loadBcwsOverlay() {
     redraw();
 }
 
-let zoomScale = 1;
 function drawBcwsOverlay(ctx) {
     if (!bcwsOverlay || !meta) return;
     const polys = bcwsOverlay.polygons || [];
     const pts = bcwsOverlay.points || [];
 
+    // Zoom is applied as a CSS transform: scale() on .nf-zoom-inner
+    // (see applyZoom()), which scales the canvas's drawn pixels right
+    // along with everything else -- so without compensating here, a
+    // 1px line or 4px dot grows on screen as you zoom in. Dividing by
+    // the current zoomScale keeps their ON-SCREEN size pinned to
+    // whatever it is at zoomScale=1 (i.e. "Reset zoom"), regardless
+    // of how far in/out the user has zoomed.
+    const z = (typeof zoomScale === 'number' && zoomScale > 0) ? zoomScale : 1;
+    const lineWidthPx = 1 / z;     // exactly 1px wide at reset-zoom, always
+    const pointRadiusPx = 4 / z;   // same on-screen radius at any zoom
+
     ctx.strokeStyle = 'rgba(220, 0, 0, 0.9)';
     ctx.fillStyle = 'rgba(220, 0, 0, 0.18)';
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = lineWidthPx;
     polys.forEach((ring) => {
         if (!ring || ring.length < 2) return;
         ctx.beginPath();
@@ -287,7 +267,7 @@ function drawBcwsOverlay(ctx) {
         const cp = nativeToCanvas(x, y);
         if (!cp) return;
         ctx.beginPath();
-        ctx.arc(cp[0], cp[1], 4, 0, 2 * Math.PI);
+        ctx.arc(cp[0], cp[1], pointRadiusPx, 0, 2 * Math.PI);
         ctx.fill();
     });
 }
@@ -799,76 +779,8 @@ if (bcwsRefreshBtn) {
     });
 }
 
-// ----- BCWS points + polygons overlay -----
-
-const bcwsRefreshBtn = document.getElementById('nf-bcws-refresh');
-const bcwsStatusEl = document.getElementById('nf-bcws-status');
-
-if (bcwsRefreshBtn) {
-    bcwsRefreshBtn.addEventListener('click', async () => {
-        bcwsRefreshBtn.disabled = true;
-        if (bcwsStatusEl) bcwsStatusEl.textContent = 'Downloading BCWS data...';
-        try {
-            const r = await fetch('/api/bcws/refresh', {method: 'POST'});
-            const j = await r.json().catch(() => ({}));
-            if (!r.ok) {
-                if (bcwsStatusEl) {
-                    bcwsStatusEl.textContent =
-                        `Failed: ${j.error || r.statusText}`;
-                }
-            } else {
-                if (bcwsStatusEl) {
-                    bcwsStatusEl.textContent =
-                        `Updated: ${j.n_points} point(s), `
-                        + `${j.n_polygons} polygon(s)`;
-                }
-                await loadBcwsOverlay();
-            }
-        } catch (exc) {
-            if (bcwsStatusEl) bcwsStatusEl.textContent = `Network error: ${exc}`;
-        } finally {
-            bcwsRefreshBtn.disabled = false;
-        }
-    });
-}
-
-// ----- BCWS points + polygons overlay -----
-
-const bcwsRefreshBtn = document.getElementById('nf-bcws-refresh');
-const bcwsStatusEl = document.getElementById('nf-bcws-status');
-
-if (bcwsRefreshBtn) {
-    bcwsRefreshBtn.addEventListener('click', async () => {
-        bcwsRefreshBtn.disabled = true;
-        if (bcwsStatusEl) bcwsStatusEl.textContent = 'Downloading BCWS data...';
-        try {
-            const r = await fetch('/api/bcws/refresh', {method: 'POST'});
-            const j = await r.json().catch(() => ({}));
-            if (!r.ok) {
-                if (bcwsStatusEl) {
-                    bcwsStatusEl.textContent =
-                        `Failed: ${j.error || r.statusText}`;
-                }
-            } else {
-                if (bcwsStatusEl) {
-                    bcwsStatusEl.textContent =
-                        `Updated: ${j.n_points} point(s), `
-                        + `${j.n_polygons} polygon(s)`;
-                }
-                await loadBcwsOverlay();
-            }
-        } catch (exc) {
-            if (bcwsStatusEl) bcwsStatusEl.textContent = `Network error: ${exc}`;
-        } finally {
-            bcwsRefreshBtn.disabled = false;
-        }
-    });
-}
-
 // ----- Boot -----
 
 loadYear(NF_ACTIVE_YEAR);
-loadBcwsOverlay();
-loadBcwsOverlay();
 loadBcwsOverlay();
 })();
