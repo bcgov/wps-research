@@ -40,10 +40,14 @@ def year_shp_dir(state, year: int) -> str:
 
 
 def migrate_stale_viirs_data(out_root: str, active_dirs: set) -> dict:
-    """Move already-downloaded VIIRS day-folders from OTHER
+    """Blindly move every .nc file from OTHER
     <stem>_mapping_results/_year_viirs/VNP14IMG/<year>/<jday>/
     directories under out_root into the corresponding location inside
-    whichever of *active_dirs* is in use today.
+    whichever of *active_dirs* is in use today. Shapefiles (.shp and
+    siblings) are deliberately left behind in the old folder -- see
+    purge_active_shapefiles(), which deletes and regenerates them for
+    the active dir instead, since this migration alone doesn't
+    guarantee every .nc has been (re)shapified yet.
 
     Each daily stack file (e.g. 20260622_stack.bin -> 20260623_stack.bin
     tomorrow) gets its own freshly-named _mapping_results directory --
@@ -52,25 +56,26 @@ def migrate_stale_viirs_data(out_root: str, active_dirs: set) -> dict:
     scratch on every restart, for no reason (the VNP14IMG data for a
     given calendar day doesn't change).
 
-    Deliberately simple, NOT footprint-aware: a day-folder is moved if
-    the active directory doesn't already have one for that
-    year/jday. No attempt is made to verify the source and
-    destination rasters cover the same extent -- per the explicit
-    instruction this was built against, this is left for a future
-    pass. Existing data at the destination is never overwritten.
+    Blind overwrite: if a destination .nc with the same filename
+    already exists, it's replaced unconditionally (no footprint
+    checking, per instruction) -- but if the two files' contents
+    differ, a warning is printed first so a real discrepancy doesn't
+    pass silently.
 
-    active_dirs may contain more than one directory (multi-year
-    setups) -- a moved day only needs to land in ANY one of them; in
-    practice each year's stem is independent so this rarely matters,
-    but the check guards against ever leaving migratable data behind
-    just because it happened to check against the wrong active year's
-    directory first.
-
-    Returns {'moved': N, 'skipped_existing': N, 'errors': [...]}.
+    Returns {'moved': N, 'overwritten': N, 'overwritten_mismatched':
+    N, 'errors': [...]}.
     """
-    result = {'moved': 0, 'skipped_existing': 0, 'errors': []}
+    result = {'moved': 0, 'overwritten': 0, 'overwritten_mismatched': 0,
+              'errors': []}
 
-    active_dirs = {os.path.abspath(d) for d in active_dirs}
+    active_dirs = sorted({os.path.abspath(d) for d in active_dirs})
+    if not active_dirs or not os.path.isdir(out_root):
+        return result
+    # Single destination root for .nc migration -- with multiple
+    # active dirs (multi-year), use the first; in practice each
+    # year's stem is independent so this is just a stable choice.
+    dest_root = active_dirs[0]
+
     if not os.path.isdir(out_root):
         return result
 
@@ -90,45 +95,75 @@ def migrate_stale_viirs_data(out_root: str, active_dirs: set) -> dict:
         stale_viirs = os.path.join(stale_root, '_year_viirs', 'VNP14IMG')
         if not os.path.isdir(stale_viirs):
             continue
-        for year_name in sorted(os.listdir(stale_viirs)):
-            year_dir = os.path.join(stale_viirs, year_name)
-            if not os.path.isdir(year_dir):
-                continue
-            for jday_name in sorted(os.listdir(year_dir)):
-                src_day_dir = os.path.join(year_dir, jday_name)
-                if not os.path.isdir(src_day_dir):
-                    continue
-                src_nc = glob.glob(os.path.join(src_day_dir, '*.nc'))
-                if not src_nc:
-                    continue  # nothing worth moving for this day
-
-                moved_this_day = False
-                for active_dir in active_dirs:
-                    dst_day_dir = os.path.join(
-                        active_dir, '_year_viirs', 'VNP14IMG',
-                        year_name, jday_name)
-                    dst_nc = glob.glob(os.path.join(dst_day_dir, '*.nc'))
-                    if dst_nc:
-                        result['skipped_existing'] += 1
-                        moved_this_day = True  # already covered, don't
-                                               # also move it elsewhere
-                        break
-                    try:
-                        os.makedirs(dst_day_dir, exist_ok=True)
-                        for f in os.listdir(src_day_dir):
-                            shutil.move(
-                                os.path.join(src_day_dir, f),
-                                os.path.join(dst_day_dir, f))
-                        result['moved'] += 1
-                        moved_this_day = True
-                        break
-                    except OSError as exc:
-                        result['errors'].append(
-                            f'{src_day_dir} -> {dst_day_dir}: {exc}')
-                if not moved_this_day:
-                    result['errors'].append(
-                        f'{src_day_dir}: no active directory accepted it')
+        for nc_path in glob.glob(
+                os.path.join(stale_viirs, '**', '*.nc'), recursive=True):
+            rel = os.path.relpath(nc_path, stale_viirs)
+            dst_path = os.path.join(
+                dest_root, '_year_viirs', 'VNP14IMG', rel)
+            try:
+                os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+                if os.path.isfile(dst_path):
+                    same = _files_identical(nc_path, dst_path)
+                    if not same:
+                        sys.stderr.write(
+                            f'[year_viirs] WARNING: overwriting '
+                            f'{dst_path} with different content from '
+                            f'{nc_path} (sizes/bytes differ) -- '
+                            f'stomping as instructed.\n')
+                        result['overwritten_mismatched'] += 1
+                    result['overwritten'] += 1
+                    os.remove(dst_path)
+                shutil.move(nc_path, dst_path)
+                result['moved'] += 1
+            except OSError as exc:
+                result['errors'].append(f'{nc_path} -> {dst_path}: {exc}')
     return result
+
+
+def _files_identical(path_a: str, path_b: str) -> bool:
+    """Cheap content comparison: size first, then bytes if sizes
+    match. Good enough to decide whether an overwrite is silent
+    (truly identical) or worth a warning (different)."""
+    try:
+        if os.path.getsize(path_a) != os.path.getsize(path_b):
+            return False
+        with open(path_a, 'rb') as fa, open(path_b, 'rb') as fb:
+            while True:
+                ca = fa.read(1 << 20)
+                cb = fb.read(1 << 20)
+                if ca != cb:
+                    return False
+                if not ca:
+                    return True
+    except OSError:
+        return False  # can't confirm identical -- treat as mismatch
+
+
+def purge_active_shapefiles(active_dirs: set) -> int:
+    """Delete every VNP*.shp and its sidecar components (.cpg, .dbf,
+    .prj, .shx) under each active dir's _year_viirs/VNP14IMG tree, so
+    shapify_year() re-derives shapefiles from .nc on this run -- this
+    is what makes freshly-migrated/newly-downloaded .nc granules
+    actually get (re)converted, since shapify_year() only shapifies a
+    .nc that doesn't already have a sibling .shp. Returns count of
+    files deleted.
+    """
+    removed = 0
+    for active_dir in {os.path.abspath(d) for d in active_dirs}:
+        viirs_dir = os.path.join(active_dir, '_year_viirs', 'VNP14IMG')
+        if not os.path.isdir(viirs_dir):
+            continue
+        for ext in ('shp', 'cpg', 'dbf', 'prj', 'shx'):
+            for f in glob.glob(os.path.join(
+                    viirs_dir, '**', f'VNP*.{ext}'), recursive=True):
+                try:
+                    os.remove(f)
+                    removed += 1
+                except OSError as exc:
+                    sys.stderr.write(
+                        f'[year_viirs] WARNING: could not remove '
+                        f'{f}: {exc}\n')
+    return removed
 
 
 def check_laads_credentials(token: str, timeout_s: float = 15.0) -> dict:
@@ -246,10 +281,21 @@ def _wgs84_extent_of(raster_path: str):
 
 
 def _download_day(day: datetime.datetime, save_dir: str,
-                  bbox_wgs84: tuple, token: str) -> int:
+                  bbox_wgs84: tuple, token: str) -> dict:
     """Download one day's granules into save_dir/VNP14IMG/<year>/<jday>/.
-    Returns the count of .nc files in that day's dir after the call.
-    Skips if the dir already has .nc files."""
+
+    Always calls sync() -- does NOT skip just because the day-folder
+    already has some .nc files. sync() lists what LAADS has for this
+    day/bbox and only fetches files it doesn't already have locally
+    (it recurses the remote listing and skips by filename), so this
+    is the correct way to pick up any additional granules for a day
+    that was only partially downloaded before, without re-fetching
+    what's already there.
+
+    Returns {'before': N, 'after': N, 'error': str|None} so the
+    caller can report exactly how many were already present vs newly
+    downloaded vs still missing for this day.
+    """
     from viirs.utils.laads_data_download_v2 import sync as _sync
 
     west, south, east, north = bbox_wgs84
@@ -259,9 +305,7 @@ def _download_day(day: datetime.datetime, save_dir: str,
         save_dir, 'VNP14IMG', f'{year:04d}', f'{jday:03d}')
     os.makedirs(target_dir, exist_ok=True)
 
-    existing = glob.glob(os.path.join(target_dir, '*.nc'))
-    if existing:
-        return len(existing)
+    before = len(glob.glob(os.path.join(target_dir, '*.nc')))
 
     url = (
         f'https://ladsweb.modaps.eosdis.nasa.gov/api/v2/content/details?'
@@ -270,26 +314,41 @@ def _download_day(day: datetime.datetime, save_dir: str,
         f'regions=%5BBBOX%5DN{north:.6f}%20S{south:.6f}'
         f'%20E{east:.6f}%20W{west:.6f}'
     )
+    error = None
     try:
         _sync(url, target_dir, token)
     except Exception as exc:
+        error = str(exc)
         sys.stderr.write(
             f'[year_viirs] download {day.date()}: {exc}\n')
-    return len(glob.glob(os.path.join(target_dir, '*.nc')))
+
+    after = len(glob.glob(os.path.join(target_dir, '*.nc')))
+    return {'before': before, 'after': after, 'error': error}
 
 
 def download_year(year: int, raster_path: str, save_dir: str,
                   token: str, workers: int = 16,
                   start: datetime.datetime = None,
-                  end: datetime.datetime = None) -> int:
+                  end: datetime.datetime = None) -> dict:
     """Download .nc granules for the raster's full bbox + year window.
-    Idempotent (skips days that already have .nc files). Returns total .nc count."""
+
+    Every day in the window is checked against LAADS's listing (via
+    sync(), see _download_day) -- a day-folder already having some
+    .nc files no longer skips that day outright, since that could
+    mean only some of the day's granules were ever fetched. sync()
+    itself avoids re-fetching files it already has locally.
+
+    Returns {'already_present': N, 'newly_downloaded': N,
+    'still_missing': N, 'missing_days': [...], 'total_nc': N} -- the
+    counts requested for the end-of-run summary.
+    """
     if start is None or end is None:
         ds, de = default_window(year)
         start = start or ds
         end = end or de
     if end < start:
-        return 0
+        return {'already_present': 0, 'newly_downloaded': 0,
+                'still_missing': 0, 'missing_days': [], 'total_nc': 0}
 
     bbox_wgs84 = _wgs84_extent_of(raster_path)
 
@@ -299,45 +358,54 @@ def download_year(year: int, raster_path: str, save_dir: str,
         days.append(d)
         d += datetime.timedelta(days=1)
 
-    pending = []
-    for day in days:
-        jday = day.timetuple().tm_yday
-        day_dir = os.path.join(
-            save_dir, 'VNP14IMG', f'{day.year:04d}', f'{jday:03d}')
-        if not glob.glob(os.path.join(day_dir, '*.nc')):
-            pending.append(day)
-
-    if not pending:
-        return sum(
-            len(glob.glob(os.path.join(
-                save_dir, 'VNP14IMG', f'{d.year:04d}',
-                f'{d.timetuple().tm_yday:03d}', '*.nc')))
-            for d in days)
-
-    completed = {'n': 0}
     print(f'      [{os.path.basename(raster_path)}] '
-          f'{len(pending)} day(s) of VIIRS to download '
+          f'checking {len(days)} day(s) of VIIRS data '
           f'(workers={workers}) ...')
+
+    per_day = {}
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         futs = {
             pool.submit(_download_day, d, save_dir, bbox_wgs84, token): d
-            for d in pending
+            for d in days
         }
+        completed = 0
         for fut in as_completed(futs):
+            day = futs[fut]
             try:
-                fut.result()
+                per_day[day] = fut.result()
             except Exception as exc:
                 sys.stderr.write(
-                    f'[year_viirs] download error: {exc}\n')
-            completed['n'] += 1
-            if completed['n'] % 10 == 0 or completed['n'] == len(pending):
-                print(f'        downloaded {completed["n"]}/{len(pending)}',
+                    f'[year_viirs] download error for {day.date()}: '
+                    f'{exc}\n')
+                per_day[day] = {'before': 0, 'after': 0, 'error': str(exc)}
+            completed += 1
+            if completed % 10 == 0 or completed == len(days):
+                print(f'        checked {completed}/{len(days)}',
                       flush=True)
-    return sum(
-        len(glob.glob(os.path.join(
-            save_dir, 'VNP14IMG', f'{d.year:04d}',
-            f'{d.timetuple().tm_yday:03d}', '*.nc')))
-        for d in days)
+
+    already_present = 0
+    newly_downloaded = 0
+    still_missing = 0
+    missing_days = []
+    total_nc = 0
+    for day, info in per_day.items():
+        before, after = info['before'], info['after']
+        total_nc += after
+        gained = max(0, after - before)
+        newly_downloaded += gained
+        already_present += min(before, after)
+        if after == 0:
+            still_missing += 1
+            reason = info['error'] or 'no granules returned for this day/bbox'
+            missing_days.append((day.date().isoformat(), reason))
+
+    return {
+        'already_present': already_present,
+        'newly_downloaded': newly_downloaded,
+        'still_missing': still_missing,
+        'missing_days': missing_days,
+        'total_nc': total_nc,
+    }
 
 
 def shapify_year(save_dir: str, raster_path: str, workers: int = 8) -> int:
@@ -478,154 +546,6 @@ def build_year_index(save_dir: str, raster_path: str) -> str:
     return index_path
 
 
-_FOOTPRINT_TOLERANCE_DEG = 1e-4  # ~10m at these latitudes; generous
-                                  # enough to absorb reprojection
-                                  # float noise between two computations
-                                  # of the "same" extent, tight enough
-                                  # to reject a genuinely different one.
-
-
-def _footprint_marker_path(save_dir: str) -> str:
-    return os.path.join(save_dir, '_footprint.json')
-
-
-def _write_footprint_marker(save_dir: str, wgs84_bbox: tuple) -> None:
-    """Best-effort -- a failure here must never block bootstrap."""
-    try:
-        with open(_footprint_marker_path(save_dir), 'w', encoding='utf-8') as f:
-            json.dump({'wgs84_bbox': list(wgs84_bbox)}, f)
-    except OSError:
-        pass
-
-
-def _read_footprint_marker(save_dir: str) -> tuple | None:
-    path = _footprint_marker_path(save_dir)
-    try:
-        with open(path, encoding='utf-8') as f:
-            data = json.load(f)
-        bbox = data.get('wgs84_bbox')
-        if bbox and len(bbox) == 4:
-            return tuple(bbox)
-    except (OSError, json.JSONDecodeError, TypeError, ValueError):
-        pass
-    return None
-
-
-def _footprints_match(a: tuple, b: tuple,
-                      tol: float = _FOOTPRINT_TOLERANCE_DEG) -> bool:
-    return all(abs(a[i] - b[i]) <= tol for i in range(4))
-
-
-def migrate_viirs_from_previous_stacks(state, year: int,
-                                       raster_path: str) -> dict:
-    """Look for VIIRS data already downloaded under a DIFFERENT
-    stack-date's output directory (e.g. yesterday's
-    20260622_stack_mapping_results/_year_viirs/...) whose footprint
-    matches the CURRENT raster, and move (not copy) any day-folders
-    not already present in the current stack's _year_viirs/VNP14IMG/
-    tree -- so a fresh daily stack file doesn't force a full
-    redownload of a whole year's VIIRS history it already has.
-
-    Each stack's _mapping_results dir gets a per-output-dir
-    _year_viirs/_footprint.json the first time it's bootstrapped here,
-    recording its WGS84 extent -- comparing against that marker
-    (rather than re-opening the OLD raster file) is necessary because
-    old /ram/<date>_stack.bin files are routinely deleted once a new
-    stack is built (see build_and_serve_stack.py's cleanup step), so
-    the old raster usually no longer exists to re-derive its extent
-    from. A directory with no marker (predates this feature, or the
-    marker write failed) is skipped -- conservative: no migration
-    rather than guessing.
-
-    Returns {'migrated_days': N, 'skipped_existing': N, 'sources': [...]}
-    for startup logging. Best-effort throughout: any single source
-    directory or day-folder that fails to process is skipped with a
-    warning rather than aborting the whole migration.
-    """
-    result = {'migrated_days': 0, 'skipped_existing': 0, 'sources': []}
-
-    save_dir = year_viirs_dir(state, year)
-    os.makedirs(save_dir, exist_ok=True)
-
-    try:
-        current_bbox = _wgs84_extent_of(raster_path)
-    except Exception as exc:
-        sys.stderr.write(
-            f'[viirs-migrate] could not compute footprint for '
-            f'{raster_path}: {exc} -- skipping migration\n')
-        return result
-
-    # Stamp our own marker now (idempotent -- overwrites with the
-    # same value on every run) so a FUTURE stack date can find us.
-    _write_footprint_marker(save_dir, current_bbox)
-
-    out_root = state.output_root
-    if not out_root or not os.path.isdir(out_root):
-        return result
-
-    current_shp_dir = os.path.join(save_dir, 'VNP14IMG')
-
-    for entry in sorted(os.listdir(out_root)):
-        candidate_dir = os.path.join(out_root, entry, '_year_viirs')
-        if not os.path.isdir(candidate_dir):
-            continue
-        if os.path.abspath(candidate_dir) == os.path.abspath(save_dir):
-            continue
-
-        other_bbox = _read_footprint_marker(candidate_dir)
-        if other_bbox is None:
-            sys.stderr.write(
-                f'[viirs-migrate] {entry}: no footprint marker, '
-                f'skipping (predates this feature, or raster no '
-                f'longer available to confirm a match)\n')
-            continue
-        if not _footprints_match(current_bbox, other_bbox):
-            continue
-
-        other_shp_dir = os.path.join(candidate_dir, 'VNP14IMG')
-        if not os.path.isdir(other_shp_dir):
-            continue
-
-        sys.stderr.write(
-            f'[viirs-migrate] {entry}: footprint matches current stack '
-            f'-- checking for VIIRS data to reuse ...\n')
-        moved_here = 0
-        for yyyy in sorted(os.listdir(other_shp_dir)):
-            src_year_dir = os.path.join(other_shp_dir, yyyy)
-            if not os.path.isdir(src_year_dir):
-                continue
-            for jday in sorted(os.listdir(src_year_dir)):
-                src_day_dir = os.path.join(src_year_dir, jday)
-                if not os.path.isdir(src_day_dir):
-                    continue
-                dst_day_dir = os.path.join(current_shp_dir, yyyy, jday)
-                if glob.glob(os.path.join(dst_day_dir, '*.nc')):
-                    result['skipped_existing'] += 1
-                    continue
-                try:
-                    os.makedirs(os.path.dirname(dst_day_dir), exist_ok=True)
-                    if os.path.isdir(dst_day_dir):
-                        # Empty dir from a prior makedirs elsewhere --
-                        # remove so shutil.move can place the real one.
-                        if not os.listdir(dst_day_dir):
-                            os.rmdir(dst_day_dir)
-                        else:
-                            result['skipped_existing'] += 1
-                            continue
-                    shutil.move(src_day_dir, dst_day_dir)
-                    moved_here += 1
-                    result['migrated_days'] += 1
-                except OSError as exc:
-                    sys.stderr.write(
-                        f'[viirs-migrate] {entry}/{yyyy}/{jday}: '
-                        f'move failed: {exc}\n')
-        if moved_here:
-            sys.stderr.write(
-                f'[viirs-migrate] {entry}: reused {moved_here} '
-                f'day(s) of VIIRS data -- will not be redownloaded\n')
-            result['sources'].append(entry)
-
-    return result
 
 
 def bootstrap_year(state, year: int, raster_path: str,
@@ -633,25 +553,34 @@ def bootstrap_year(state, year: int, raster_path: str,
                    download_workers: int = 16,
                    shapify_workers: int = 8) -> dict:
     """Run download + shapify + index for a year's full raster footprint and
-    default seasonal window. Idempotent. Returns counts."""
+    default seasonal window. Idempotent. Returns counts.
+
+    Migration of VIIRS data from previous stack-dated directories
+    happens once, centrally, in __main__.py (migrate_stale_viirs_data
+    + purge_active_shapefiles) before this is called -- not here.
+    """
     if save_dir is None:
         save_dir = year_viirs_dir(state, year)
     os.makedirs(save_dir, exist_ok=True)
 
-    migration = migrate_viirs_from_previous_stacks(state, year, raster_path)
-    if migration['migrated_days']:
-        print(f'      [{os.path.basename(raster_path)}] reused '
-              f"{migration['migrated_days']} VIIRS day(s) already "
-              f"downloaded under a previous stack date with a matching "
-              f"footprint ({', '.join(migration['sources'])})")
-
-    n_nc = download_year(
+    dl_result = download_year(
         year, raster_path, save_dir, state.laads_token,
         workers=download_workers)
+    print(f"      [{os.path.basename(raster_path)}] VIIRS summary: "
+          f"{dl_result['already_present']} already present, "
+          f"{dl_result['newly_downloaded']} newly downloaded, "
+          f"{dl_result['still_missing']} day(s) still missing "
+          f"(total {dl_result['total_nc']} .nc file(s) on disk).")
+    for day_iso, reason in dl_result['missing_days']:
+        sys.stderr.write(
+            f"      [{os.path.basename(raster_path)}] no data for "
+            f"{day_iso}: {reason}\n")
+
     n_shp = shapify_year(save_dir, raster_path, workers=shapify_workers)
     index_path = build_year_index(save_dir, raster_path)
-    return {'n_nc': n_nc, 'n_shp': n_shp, 'save_dir': save_dir,
-            'index_path': index_path, 'migration': migration}
+    return {'n_nc': dl_result['total_nc'], 'n_shp': n_shp,
+            'save_dir': save_dir, 'index_path': index_path,
+            'download_summary': dl_result}
 
 
 def bootstrap_all_years(state) -> dict:

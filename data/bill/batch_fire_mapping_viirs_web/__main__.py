@@ -440,16 +440,26 @@ def main():
     print('\n[3/4] Checking for VIIRS data from previous stack dates ...')
     _migration = year_viirs.migrate_stale_viirs_data(
         out_root, set(outdirs_by_year.values()))
-    if _migration['moved'] or _migration['skipped_existing']:
-        print(f"      Recovered {_migration['moved']} day(s) of VIIRS "
-              f"data from previous stack folder(s) "
-              f"({_migration['skipped_existing']} already present, "
-              f"left as-is).")
+    if _migration['moved'] or _migration['overwritten']:
+        print(f"      Moved {_migration['moved']} .nc file(s) from "
+              f"previous stack folder(s) into the active one "
+              f"({_migration['overwritten']} overwrote an existing "
+              f"file with the same name, "
+              f"{_migration['overwritten_mismatched']} of those had "
+              f"DIFFERING content -- see warnings above if so).")
     else:
         print('      Nothing to recover (no previous stack folders, or '
               'nothing in them).')
     for _err in _migration['errors']:
         sys.stderr.write(f'      WARNING: VIIRS migration: {_err}\n')
+
+    print('      Clearing existing VIIRS shapefiles for the active '
+          'stack so they get fully regenerated from all .nc files '
+          '(including anything just migrated or about to be '
+          'downloaded) ...')
+    _purged = year_viirs.purge_active_shapefiles(
+        set(outdirs_by_year.values()))
+    print(f'      Removed {_purged} shapefile component(s).')
 
     for _y in sorted(rasters_by_year):
         app_state.viirs_shp_dirs_by_year[_y] = year_viirs.year_shp_dir(
