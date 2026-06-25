@@ -47,7 +47,6 @@ const fields = {
     n: document.getElementById('nf-n'),
     start: document.getElementById('nf-start'),
     end: document.getElementById('nf-end'),
-    fireDate: document.getElementById('nf-fire-date'),
 };
 
 let meta = null;
@@ -137,17 +136,6 @@ async function loadYear(year) {
     fields.end.placeholder = meta.default_end || 'YYYY-MM-DD';
     if (!fields.start.value) fields.start.value = '';
     if (!fields.end.value) fields.end.value = '';
-    refreshFireDatePlaceholder();
-}
-
-function refreshFireDatePlaceholder() {
-    if (!fields.fireDate) return;
-    const eff = fields.end.value.trim() || fields.end.placeholder || '';
-    fields.fireDate.placeholder = eff || 'YYYY-MM-DD';
-}
-
-if (fields.fireDate) {
-    fields.end.addEventListener('input', refreshFireDatePlaceholder);
 }
 
 // The canvas sits OUTSIDE .nf-zoom-inner (see new_fire.html) so the
@@ -307,21 +295,9 @@ async function loadBcwsOverlay() {
 }
 
 function drawBcwsOverlay(ctx) {
-    if (!bcwsOverlay || !meta) {
-        console.log('[bcws-debug] bailing out: bcwsOverlay=',
-                    !!bcwsOverlay, 'meta=', !!meta);
-        return;
-    }
+    if (!bcwsOverlay || !meta) return;
     const polys = bcwsOverlay.polygons || [];
     const pts = bcwsOverlay.points || [];
-
-    if (pts.length > 0) {
-        const sample = nativeToCanvas(pts[0][0], pts[0][1]);
-        console.log('[bcws-debug] canvas size:', canvas.width, canvas.height,
-                    '| first point native:', pts[0],
-                    '| -> screen:', sample,
-                    '| zoomScale:', zoomScale, zoomTx, zoomTy);
-    }
 
     // Under the old design the canvas itself was CSS-scaled by the
     // zoom transform, so a constant ctx.lineWidth/marker size would
@@ -744,8 +720,6 @@ submitBtn.addEventListener('click', async () => {
         bbox_native: [xmin, ymin, xmax, ymax],
         start: fields.start.value.trim(),
         end: fields.end.value.trim(),
-        fire_date: (fields.fireDate
-                    ? fields.fireDate.value.trim() : ''),
     };
     // Reuse the last preview's accumulate result if the form still
     // matches it exactly. The server re-validates, so a mismatch is a

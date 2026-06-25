@@ -187,9 +187,6 @@ class BaseHandler:
             r'^/api/fire/(?P<fire_numbe>[^/]+)/clear_new$'),
          'handle_api_fire_clear_new'),
         (re.compile(
-            r'^/api/fire/(?P<fire_numbe>[^/]+)/set_date$'),
-         'handle_api_fire_set_date'),
-        (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/prepare$'),
          'handle_api_prepare'),
         (re.compile(

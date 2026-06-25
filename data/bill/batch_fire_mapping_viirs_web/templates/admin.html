@@ -99,7 +99,7 @@
         <p class="admin-desc">Fires removed from the list — restore them here</p>
         <table class="admin-table">
             <thead><tr>
-                <th>Fire Number</th><th>Date</th><th>Year</th><th>Size (ha)</th><th>Status</th><th>Actions</th>
+                <th>Fire Number</th><th>Year</th><th>Size (ha)</th><th>Status</th><th>Actions</th>
             </tr></thead>
             <tbody id="hidden-body"></tbody>
         </table>
@@ -217,7 +217,6 @@ async function loadData() {
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td><strong>${esc(f.fire_numbe)}</strong></td>
-                <td>${esc(f.fire_date)}</td>
                 <td>${f.fire_year || ''}</td>
                 <td>${f.fire_size_ha}</td>
                 <td>${esc(f.status)}</td>

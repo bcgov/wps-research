@@ -251,14 +251,6 @@ def generate_overview(
         default_end = f'{year}-12-31'
     else:
         default_end = ''
-    # Fire date has no independent meaning in this app today -- it's
-    # purely a user-facing label (shown in the fire list / mapping
-    # page, written to the per-fire params.yaml) that never feeds the
-    # classifier or the VIIRS accumulation window. The existing
-    # fire-creation code already defaults it to the accumulation
-    # end date when the user leaves it blank, so default_fire_date
-    # mirrors that same value here.
-    default_fire_date = default_end
 
     # Native pixel size (e.g. 20m), read from the geotransform, never
     # hardcoded -- and the actual resolution this overview is sampled
@@ -296,7 +288,6 @@ def generate_overview(
         'year': int(year) if year is not None else None,
         'default_start': default_start,
         'default_end': default_end,
-        'default_fire_date': default_fire_date,
         'extent_native': extent_native,
         'extent_wgs84': extent_wgs84,
         'band_group': band_group,

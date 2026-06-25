@@ -443,7 +443,6 @@ def _accept_fire_sync(fire_numbe: str) -> str:
         params_dict = {
             'fire': {
                 'fire_numbe': fire_numbe,
-                'fire_date': fire.fire_date,
                 'fire_size_ha': fire.fire_size_ha,
                 'ml_area_ha': ml_area_ha,
                 'ml_area_m2': ml_area_m2,

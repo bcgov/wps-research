@@ -187,20 +187,6 @@ def _validate_date_range(start_str, end_str,
     return start, end
 
 
-def _validate_fire_date(value, field_name='fire_date'):
-    """Validate a user-supplied fire date.
-
-    Returns the canonical 'YYYY-MM-DD' string. Raises ValueError on bad
-    format, non-existent calendar date, or empty input. Calendar
-    existence (e.g. rejects 2023-02-30) is delegated to
-    ``datetime.date.fromisoformat``.
-    """
-    if value is None or (isinstance(value, str) and not value.strip()):
-        raise ValueError(f'{field_name} is required')
-    d = _validate_date(value, field_name)
-    return d.isoformat()
-
-
 def _validate_bbox(bbox, raster_extent):
     """Validate a user-drawn bbox against the year's raster extent.
 

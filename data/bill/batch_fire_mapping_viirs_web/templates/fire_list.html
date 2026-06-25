@@ -169,7 +169,6 @@
         <tr>
             <th style="width:30px"><input type="checkbox" id="select-all" onchange="toggleSelectAll(this)"></th>
             <th data-key="fire_numbe">Fire Number <span class="sort-arrow"></span></th>
-            <th data-key="fire_date">Fire Date <span class="sort-arrow"></span></th>
             <th data-key="fire_year">Year <span class="sort-arrow"></span></th>
             <th data-key="fire_size_ha">Hint Size (ha) <span class="sort-arrow"></span></th>
             <th data-key="ml_area_ha">ML Size (ha) <span class="sort-arrow"></span></th>
@@ -594,7 +593,6 @@ function render() {
         tr.innerHTML = `
             <td><input type="checkbox" class="fire-check" value="${fireEnc}" ${checked} onchange="updateSelection()"></td>
             <td>${newBadge}<strong>${esc(f.fire_numbe)}</strong>${noteIcon}</td>
-            <td>${esc(f.fire_date)}</td>
             <td>${f.fire_year || ''}</td>
             <td>${f.fire_size_ha != null ? f.fire_size_ha.toLocaleString() : ''}</td>
             <td>${mlSize}</td>

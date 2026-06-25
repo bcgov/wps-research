@@ -436,9 +436,44 @@ def main():
     # dir — no per-fire LAADS calls and no per-fire shapify.
     # ------------------------------------------------------------------
     from . import year_viirs
+
+    print('\n[3/4] Checking for VIIRS data from previous stack dates ...')
+    _migration = year_viirs.migrate_stale_viirs_data(
+        out_root, set(outdirs_by_year.values()))
+    if _migration['moved'] or _migration['skipped_existing']:
+        print(f"      Recovered {_migration['moved']} day(s) of VIIRS "
+              f"data from previous stack folder(s) "
+              f"({_migration['skipped_existing']} already present, "
+              f"left as-is).")
+    else:
+        print('      Nothing to recover (no previous stack folders, or '
+              'nothing in them).')
+    for _err in _migration['errors']:
+        sys.stderr.write(f'      WARNING: VIIRS migration: {_err}\n')
+
     for _y in sorted(rasters_by_year):
         app_state.viirs_shp_dirs_by_year[_y] = year_viirs.year_shp_dir(
             app_state, _y)
+
+    if not args.skip_viirs_bootstrap:
+        print('      Checking LAADS DAAC credentials/connectivity ...')
+        _preflight = year_viirs.check_laads_credentials(laads_token)
+        _status_label = {
+            'ok': 'OK',
+            'bad_token': 'BAD TOKEN',
+            'http_error': 'SERVER ERROR',
+            'unreachable': 'UNREACHABLE',
+            'unknown': 'UNKNOWN',
+        }.get(_preflight['status'], _preflight['status'].upper())
+        print(f"      LAADS preflight: {_status_label} "
+              f"-- {_preflight['detail']}")
+        if _preflight['status'] != 'ok':
+            sys.stderr.write(
+                f"      WARNING: LAADS preflight check did not pass "
+                f"cleanly ({_preflight['status']}). The bootstrap "
+                f"below may fail or download nothing for this reason "
+                f"-- see the line above for which case this is "
+                f"(bad token vs. server/network issue).\n")
     if args.skip_viirs_bootstrap:
         print('\n[3/4] Skipping VIIRS bootstrap (--skip_viirs_bootstrap). '
               'Per-fire creation will fall back to on-demand download.')

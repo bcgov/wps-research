@@ -154,7 +154,6 @@ class FireListRoutes:
         html = render_template('fire_mapping.html', {
             'fire_numbe': fire_numbe,
             'fire_numbe_json': json.dumps(fire_numbe),
-            'fire_date': fire.fire_date,
             'fire_year': str(fire.fire_year),
             'fire_size_ha': str(fire.fire_size_ha),
             'fire_status': fire.status.value,
@@ -172,7 +171,6 @@ class FireListRoutes:
             fires = [
                 {
                     'fire_numbe': f.fire_numbe,
-                    'fire_date': f.fire_date,
                     'fire_year': f.fire_year,
                     'fire_size_ha': f.fire_size_ha,
                     'status': f.status.value,
@@ -272,7 +270,6 @@ class FireListRoutes:
         fires = [
             {
                 'fire_numbe': f.fire_numbe,
-                'fire_date': f.fire_date,
                 'fire_year': f.fire_year,
                 'fire_size_ha': f.fire_size_ha,
                 'status': f.status.value,
@@ -372,7 +369,6 @@ class FireListRoutes:
     def handle_api_fire_create(self):
         from ..validation import (
             _validate_fire_name, _validate_bbox, _validate_date_range,
-            _validate_fire_date,
         )
         from ..state import FireInfo, FireStatus
         from ..viirs_worker import submit_fire
@@ -440,17 +436,6 @@ class FireListRoutes:
         except ValueError as exc:
             errors.append({'field': 'dates', 'message': str(exc)})
 
-        # Optional user-supplied fire_date. When blank, fall through to
-        # the validated end date below.
-        fire_date_raw = body.get('fire_date', '')
-        fire_date_str = ''
-        if fire_date_raw and str(fire_date_raw).strip():
-            try:
-                fire_date_str = _validate_fire_date(
-                    fire_date_raw, field_name='fire_date')
-            except ValueError as exc:
-                errors.append({'field': 'fire_date', 'message': str(exc)})
-
         if errors:
             self._send_json({'errors': errors}, 400)
             return
@@ -486,7 +471,6 @@ class FireListRoutes:
                 return
             fire = FireInfo(
                 fire_numbe=name,
-                fire_date=(fire_date_str or end_date.isoformat()),
                 fire_year=year,
                 fire_size_ha=0.0,
                 status=FireStatus.PREPARING,
@@ -585,42 +569,6 @@ class FireListRoutes:
             state.fires[fire_numbe].is_new = False
         _save_fire_state()
         self._send_json({'status': 'cleared'})
-
-    def handle_api_fire_set_date(self, fire_numbe):
-        """Update ``fire.fire_date`` for a not-yet-accepted fire.
-
-        Body: ``{"fire_date": "YYYY-MM-DD"}``. Rejects if the fire is
-        already accepted (the params YAML has been written and the
-        canonical output dir promoted; date is locked at that point).
-        """
-        from ..validation import _validate_fire_date
-        fire_numbe = unquote(fire_numbe)
-        if fire_numbe not in state.fires:
-            self._send_json({'error': 'Fire not found'}, 404)
-            return
-        body = self._read_body()
-        if body is None:
-            return
-        try:
-            fire_date_str = _validate_fire_date(
-                body.get('fire_date', ''), field_name='fire_date')
-        except ValueError as exc:
-            self._send_json(
-                {'errors': [{'field': 'fire_date',
-                             'message': str(exc)}]}, 400)
-            return
-        with state.lock:
-            fire = state.fires[fire_numbe]
-            if fire.status == FireStatus.ACCEPTED:
-                self._send_json(
-                    {'errors': [{'field': 'fire_date',
-                                 'message': 'Cannot edit date after the '
-                                            'fire has been accepted'}]},
-                    409)
-                return
-            fire.fire_date = fire_date_str
-        _save_fire_state()
-        self._send_json({'status': 'saved', 'fire_date': fire_date_str})
 
     # ====================================================================
     # VIIRS-web: hint preview (accumulate + rasterize on a user bbox)
@@ -782,7 +730,6 @@ class FireListRoutes:
         # Build a throwaway FireInfo to reuse the worker helpers.
         ephemeral = FireInfo(
             fire_numbe=preview_id,
-            fire_date=end_date.isoformat(),
             fire_year=year, fire_size_ha=0.0,
         )
         ephemeral.bbox_native = tuple(float(v) for v in bbox_clipped)

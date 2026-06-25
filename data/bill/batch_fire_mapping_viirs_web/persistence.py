@@ -191,8 +191,6 @@ def _save_fire_state():
                     entry['fire_year'] = int(fire.fire_year)
                 if fire.fire_size_ha:
                     entry['fire_size_ha'] = float(fire.fire_size_ha)
-                if fire.fire_date:
-                    entry['fire_date'] = str(fire.fire_date)
                 if fire.error_msg:
                     entry['error_msg'] = str(fire.error_msg)
                 # Persist serial gallery state so the results gallery
@@ -279,7 +277,6 @@ def _load_fire_state():
             try:
                 fire = FireInfo(
                     fire_numbe=fn,
-                    fire_date=str(entry.get('fire_date', '') or ''),
                     fire_year=int(entry.get('fire_year',
                                             state.active_year or 0) or 0),
                     fire_size_ha=float(entry.get('fire_size_ha', 0) or 0),
@@ -291,12 +288,11 @@ def _load_fire_state():
         else:
             fire = state.fires[fn]
             # init_fires_from_disk Pass 2 fills these with placeholder
-            # values (active_year / 0.0 / '') for any fire reconstructed
+            # values (active_year / 0.0) for any fire reconstructed
             # from .web_cache/<NAME>/. Without this overlay, the YAML's
             # authoritative values would be silently dropped — wrong
             # year picks the wrong reference raster on re-prepare; zero
-            # area shows up in the UI; missing date breaks downstream
-            # filters.
+            # area shows up in the UI.
             saved_year = entry.get('fire_year')
             if saved_year is not None:
                 try:
@@ -309,9 +305,6 @@ def _load_fire_state():
                     fire.fire_size_ha = float(saved_size)
                 except (TypeError, ValueError):
                     pass
-            saved_date = entry.get('fire_date')
-            if saved_date:
-                fire.fire_date = str(saved_date)
 
         # Restore hidden flag
         if entry.get('hidden'):

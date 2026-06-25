@@ -46,7 +46,6 @@ class FireStatus(str, Enum):
 class FireInfo:
     """Tracks per-fire state through the web workflow."""
     fire_numbe: str
-    fire_date: str
     fire_year: int
     fire_size_ha: float
 
@@ -254,7 +253,6 @@ class AppState:
                 continue
             fire = FireInfo(
                 fire_numbe=name,
-                fire_date='',
                 fire_year=int(self.active_year or 0),
                 fire_size_ha=0.0,
                 status=FireStatus.ACCEPTED,
@@ -266,7 +264,6 @@ class AppState:
                     with open(params_path, encoding='utf-8') as pf:
                         pdoc = yaml.safe_load(pf) or {}
                     fi = pdoc.get('fire') or {}
-                    fire.fire_date = str(fi.get('fire_date', '') or '')
                     try:
                         fire.fire_size_ha = float(
                             fi.get('fire_size_ha', 0) or 0)
@@ -334,7 +331,6 @@ class AppState:
                     continue
                 fire = FireInfo(
                     fire_numbe=name,
-                    fire_date='',
                     fire_year=int(self.active_year or 0),
                     fire_size_ha=0.0,
                     status=FireStatus.ERROR,
