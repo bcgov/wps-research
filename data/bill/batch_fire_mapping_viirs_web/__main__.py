@@ -46,6 +46,31 @@ from batch_fire_mapping.run_fire_mapping import get_raster_info
 _LAADS_TOKEN_PATH = '/data/.tokens/laads'
 
 
+def _ts() -> str:
+    """Current timestamp as [YYYY-MM-DD HH:MM:SS], for prefixing every
+    startup status/debug/update message so it's clear when (and
+    whether) the server is stuck on a given step."""
+    return datetime.datetime.now().strftime('[%Y-%m-%d %H:%M:%S]')
+
+
+def _log(msg: str = '') -> None:
+    """print() with a timestamp prefix on every line (msg may contain
+    embedded \\n -- each line gets its own timestamp so multi-line
+    blocks stay readable when interleaved with other timestamped
+    output)."""
+    ts = _ts()
+    for line in str(msg).split('\n'):
+        print(f'{ts} {line}', flush=True)
+
+
+def _elog(msg: str = '') -> None:
+    """sys.stderr.write() with a timestamp prefix, matching _log()."""
+    ts = _ts()
+    for line in str(msg).rstrip('\n').split('\n'):
+        sys.stderr.write(f'{ts} {line}\n')
+    sys.stderr.flush()
+
+
 def _year_from_filename(path: str) -> int:
     """Extract a 4-digit year from a raster filename."""
     stem = os.path.splitext(os.path.basename(path))[0]
@@ -188,11 +213,11 @@ def _ensure_overviews(rasters_by_year: dict, shared_root: str,
         png = os.path.join(cache_dir, f'{stem}.png')
         meta = os.path.join(cache_dir, f'{stem}.json')
         if force:
-            sys.stderr.write(
+            _elog(
                 f'[overview] Regenerating {os.path.basename(png)} from '
-                f'{os.path.basename(raster)} (forced at startup) ...\n')
-            sys.stderr.flush()
+                f'{os.path.basename(raster)} (forced at startup) ...')
             generate_overview(raster, png, meta, max_dim=9090)
+            _elog(f'[overview] Done: {os.path.basename(png)}')
         else:
             ensure_overview(raster, png, meta, max_dim=9090)
         png_map[y] = png
@@ -267,29 +292,30 @@ def main():
     output_root = outdirs_by_year[active_year]
 
     sep = '=' * 60
-    print(f'\n{sep}')
-    print('  BATCH FIRE MAPPING — VIIRS WEB INTERFACE (multi-year)')
-    print(sep)
-    print(f'  Out root   : {out_root}')
-    print(f'  Years      : {sorted(rasters_by_year)}')
-    print(f'  Active year: {active_year}')
-    print(f'  Raster     : {raster_path}')
-    print(f'  Output     : {output_root}')
-    print(f'  LAADS token: {args.laads_token_file}')
-    print(sep)
+    _log(f'\n{sep}')
+    _log('  BATCH FIRE MAPPING — VIIRS WEB INTERFACE (multi-year)')
+    _log(sep)
+    _log(f'  Out root   : {out_root}')
+    _log(f'  Years      : {sorted(rasters_by_year)}')
+    _log(f'  Active year: {active_year}')
+    _log(f'  Raster     : {raster_path}')
+    _log(f'  Output     : {output_root}')
+    _log(f'  LAADS token: {args.laads_token_file}')
+    _log(sep)
 
     # ------------------------------------------------------------------
     # Step 1 — Generate per-year overview PNG + sidecar JSON (cached)
     # ------------------------------------------------------------------
-    print('\n[1/4] Per-year overview previews ...')
+    _log('\n[1/4] Per-year overview previews: starting ...')
     overview_png_by_year, overview_meta_by_year = _ensure_overviews(
         rasters_by_year, out_root,
         force=not args.disable_overview_force_regeneration)
+    _log('[1/4] Per-year overview previews: done.')
 
     # ------------------------------------------------------------------
     # Step 2 — Initialise application state
     # ------------------------------------------------------------------
-    print('\n[2/4] Initialising AppState ...')
+    _log('\n[2/4] Initialising AppState: starting ...')
     crs_wkt, gt, W, H = get_raster_info(raster_path)
 
     from .state import AppState
@@ -403,9 +429,9 @@ def main():
         app_state.k_jitter = 1
     app_state.k_jitter = max(0, app_state.k_jitter)
 
-    print(f'      Loaded {len(app_state.recommended_settings)} '
-          f'recommended setting(s). K={app_state.k_runs_per_setting}, '
-          f'jitter={app_state.k_jitter}')
+    _log(f'      Loaded {len(app_state.recommended_settings)} '
+         f'recommended setting(s). K={app_state.k_runs_per_setting}, '
+         f'jitter={app_state.k_jitter}')
 
     # IP/session persistence
     app_state.ip_file = os.path.join(out_root, 'access_control.yaml')
@@ -417,7 +443,7 @@ def main():
             app_state.blocked_ips = _ip_data.get('blocked', {})
             app_state.pending_ips = _ip_data.get('pending', {})
         except Exception as _e:
-            print(f'      WARNING: Failed to load IP list: {_e}')
+            _log(f'      WARNING: Failed to load IP list: {_e}')
 
     app_state.session_file = os.path.join(out_root, 'sessions.yaml')
     if os.path.isfile(app_state.session_file):
@@ -435,7 +461,9 @@ def main():
                     del _sess[_tok]
             app_state.sessions = _sess
         except Exception as _e:
-            print(f'      WARNING: Failed to load sessions: {_e}')
+            _log(f'      WARNING: Failed to load sessions: {_e}')
+
+    _log('[2/4] Initialising AppState: done.')
 
     # ------------------------------------------------------------------
     # Step 3 — Bootstrap year-wide VIIRS data (download + shapify once).
@@ -444,36 +472,40 @@ def main():
     # ------------------------------------------------------------------
     from . import year_viirs
 
-    print('\n[3/4] Checking for VIIRS data from previous stack dates ...')
+    _log('\n[3/4] VIIRS data migration from previous stack dates: '
+         'starting ...')
     _migration = year_viirs.migrate_stale_viirs_data(
         out_root, set(outdirs_by_year.values()))
     if _migration['moved'] or _migration['overwritten']:
-        print(f"      Moved {_migration['moved']} .nc file(s) from "
-              f"previous stack folder(s) into the active one "
-              f"({_migration['overwritten']} overwrote an existing "
-              f"file with the same name, "
+        _log(f"      Moved {_migration['moved']} .nc file(s) from "
+             f"previous stack folder(s) into the active one "
+             f"({_migration['overwritten']} overwrote an existing "
+             f"file with the same name, "
               f"{_migration['overwritten_mismatched']} of those had "
               f"DIFFERING content -- see warnings above if so).")
     else:
-        print('      Nothing to recover (no previous stack folders, or '
-              'nothing in them).')
+        _log('      Nothing to recover (no previous stack folders, or '
+             'nothing in them).')
     for _err in _migration['errors']:
-        sys.stderr.write(f'      WARNING: VIIRS migration: {_err}\n')
+        _elog(f'      WARNING: VIIRS migration: {_err}')
+    _log('[3/4] VIIRS data migration from previous stack dates: done.')
 
-    print('      Clearing existing VIIRS shapefiles for the active '
-          'stack so they get fully regenerated from all .nc files '
-          '(including anything just migrated or about to be '
-          'downloaded) ...')
+    _log('\n[3/4] Purging existing VIIRS shapefiles for the active '
+         'stack: starting (so they get fully regenerated from all '
+         '.nc files, including anything just migrated or about to '
+         'be downloaded) ...')
     _purged = year_viirs.purge_active_shapefiles(
         set(outdirs_by_year.values()))
-    print(f'      Removed {_purged} shapefile component(s).')
+    _log(f'      Removed {_purged} shapefile component(s).')
+    _log('[3/4] Purging existing VIIRS shapefiles: done.')
 
     for _y in sorted(rasters_by_year):
         app_state.viirs_shp_dirs_by_year[_y] = year_viirs.year_shp_dir(
             app_state, _y)
 
     if not args.skip_viirs_bootstrap:
-        print('      Checking LAADS DAAC credentials/connectivity ...')
+        _log('\n[3/4] LAADS DAAC credentials/connectivity check: '
+             'starting ...')
         _preflight_log_dir = year_viirs.year_viirs_dir(
             app_state, app_state.active_year)
         _preflight = year_viirs.check_laads_credentials(
@@ -485,33 +517,36 @@ def main():
             'unreachable': 'UNREACHABLE',
             'unknown': 'UNKNOWN',
         }.get(_preflight['status'], _preflight['status'].upper())
-        print(f"      LAADS preflight: {_status_label} "
-              f"-- {_preflight['detail']}")
+        _log(f"      LAADS preflight: {_status_label} "
+             f"-- {_preflight['detail']}")
         if _preflight['status'] != 'ok':
-            sys.stderr.write(
+            _elog(
                 f"      WARNING: LAADS preflight check did not pass "
                 f"cleanly ({_preflight['status']}). The bootstrap "
                 f"below may fail or download nothing for this reason "
                 f"-- see the line above for which case this is "
-                f"(bad token vs. server/network issue).\n")
+                f"(bad token vs. server/network issue).")
+        _log('[3/4] LAADS DAAC credentials/connectivity check: done.')
     if args.skip_viirs_bootstrap:
-        print('\n[3/4] Skipping VIIRS bootstrap (--skip_viirs_bootstrap). '
-              'Per-fire creation will fall back to on-demand download.')
+        _log('\n[3/4] Skipping VIIRS bootstrap (--skip_viirs_bootstrap). '
+             'Per-fire creation will fall back to on-demand download.')
     else:
         _curl_primary = (args.viirs_download_method == 'curl_primary')
         _method_label = ('curl primary, urllib fallback'
                          if _curl_primary
                          else 'urllib primary, curl fallback')
-        print(f'\n[3/4] Bootstrapping per-year VIIRS data '
-              f'(download + shapify, {_method_label}) ...')
+        _log(f'\n[3/4] Bootstrapping per-year VIIRS data '
+             f'(download + shapify, {_method_label}): starting ...')
         try:
             year_viirs.bootstrap_all_years(app_state,
                                            curl_primary=_curl_primary)
+            _log('[3/4] Bootstrapping per-year VIIRS data: done.')
         except Exception as _exc:
-            sys.stderr.write(
+            _elog(
                 f'      WARNING: VIIRS bootstrap failed: {_exc}\n'
                 f'      Per-fire creation will fall back to on-demand '
-                f'download.\n')
+                f'download.')
+            _log('[3/4] Bootstrapping per-year VIIRS data: FAILED.')
 
     app_state.init_fires_from_disk()
 
@@ -523,19 +558,24 @@ def main():
     # refresh button). Non-fatal: data.gov.bc.ca being unreachable at
     # boot shouldn't prevent the server from starting -- the overlay
     # just stays empty until the button is used.
-    print('\n[bcws] Downloading current-fire points + polygons ...')
+    _log('\n[bcws] Downloading current-fire points + polygons: '
+         'starting ...')
     try:
         from . import bcws
         _overlay = bcws.refresh_bcws_overlay(app_state)
-        print(f"      {_overlay['n_points']} point(s), "
-              f"{_overlay['n_polygons']} polygon(s) downloaded.")
+        _log(f"      {_overlay['n_points']} point(s), "
+             f"{_overlay['n_polygons']} polygon(s) downloaded.")
+        _log('[bcws] Downloading current-fire points + polygons: done.')
     except Exception as _exc:
-        sys.stderr.write(
+        _elog(
             f'      WARNING: BCWS download failed: {_exc}\n'
             f'      Points/polygons overlay will be empty until the '
-            f'"Update BCWS points + polys" button is used.\n')
+            f'"Update BCWS points + polys" button is used.')
+        _log('[bcws] Downloading current-fire points + polygons: FAILED.')
 
     # Restore per-fire state from previous session for the active year
+    _log('\n[startup] Restoring per-fire state from previous session: '
+         'starting ...')
     from .app import (_load_fire_state, _save_active_year,
                       _load_stage_timings, _load_notifications,
                       _load_cache_retention, _cache_sweep_loop)
@@ -545,6 +585,7 @@ def main():
     _load_stage_timings()
     _load_notifications()
     _load_cache_retention()
+    _log('[startup] Restoring per-fire state from previous session: done.')
 
     import threading as _threading
     _threading.Thread(target=_cache_sweep_loop,
@@ -553,12 +594,13 @@ def main():
     # ------------------------------------------------------------------
     # Step 4 — Start the server
     # ------------------------------------------------------------------
-    print('\n[4/4] Starting web server ...')
+    _log('\n[4/4] Starting web server: starting ...')
     server = create_server(args.host, args.port)
+    _log('[4/4] Starting web server: done.')
 
-    print(f'\n{sep}')
-    print(f'  Server ready!')
-    print(f'  Local:   http://localhost:{args.port}')
+    _log(f'\n{sep}')
+    _log(f'  Server ready!')
+    _log(f'  Local:   http://localhost:{args.port}')
     import socket
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -566,27 +608,27 @@ def main():
         lan_ip = s.getsockname()[0]
         s.close()
         hostname = socket.gethostname()
-        print(f'  Network: http://{lan_ip}:{args.port}')
-        print(f'           http://{hostname}:{args.port}')
+        _log(f'  Network: http://{lan_ip}:{args.port}')
+        _log(f'           http://{hostname}:{args.port}')
         app_state.allowed_origins.add(f'http://{lan_ip}:{args.port}')
         app_state.allowed_origins.add(f'http://{hostname}:{args.port}')
     except Exception:
         pass
     if app_state.admin_password:
-        print(f'  Auth:    admin + user passwords configured')
-        print(f'  IP ctrl: {app_state.ip_file}')
+        _log(f'  Auth:    admin + user passwords configured')
+        _log(f'  IP ctrl: {app_state.ip_file}')
     else:
-        print(f'  Auth:    NONE (--insecure_no_auth)')
-        print(f'  WARNING: All users have full admin access!')
-    print(f'  Years:   {sorted(app_state.rasters_by_year)} '
-          f'(active={app_state.active_year})')
-    print(f'  {len(app_state.fires)} fire(s) available')
-    print(f'{sep}\n')
+        _log(f'  Auth:    NONE (--insecure_no_auth)')
+        _log(f'  WARNING: All users have full admin access!')
+    _log(f'  Years:   {sorted(app_state.rasters_by_year)} '
+         f'(active={app_state.active_year})')
+    _log(f'  {len(app_state.fires)} fire(s) available')
+    _log(f'{sep}\n')
 
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print('\nShutting down...')
+        _log('\nShutting down...')
         server.shutdown()
 
 

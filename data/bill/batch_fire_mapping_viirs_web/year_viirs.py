@@ -28,6 +28,27 @@ from osgeo import gdal, osr
 gdal.UseExceptions()
 
 
+def _ts() -> str:
+    """Current timestamp as [YYYY-MM-DD HH:MM:SS], matching the
+    prefix used everywhere else in startup output."""
+    return datetime.datetime.now().strftime('[%Y-%m-%d %H:%M:%S]')
+
+
+def _log(msg: str = '') -> None:
+    """print() with a timestamp prefix on every line."""
+    ts = _ts()
+    for line in str(msg).split('\n'):
+        print(f'{ts} {line}', flush=True)
+
+
+def _elog(msg: str = '') -> None:
+    """sys.stderr.write() with a timestamp prefix, matching _log()."""
+    ts = _ts()
+    for line in str(msg).rstrip('\n').split('\n'):
+        sys.stderr.write(f'{ts} {line}\n')
+    sys.stderr.flush()
+
+
 def year_viirs_dir(state, year: int) -> str:
     """Return the year-wide VIIRS data dir for *year*."""
     out_dir = state.outdirs_by_year.get(year) or state.output_root
@@ -105,11 +126,11 @@ def migrate_stale_viirs_data(out_root: str, active_dirs: set) -> dict:
                 if os.path.isfile(dst_path):
                     same = _files_identical(nc_path, dst_path)
                     if not same:
-                        sys.stderr.write(
+                        _elog(
                             f'[year_viirs] WARNING: overwriting '
                             f'{dst_path} with different content from '
                             f'{nc_path} (sizes/bytes differ) -- '
-                            f'stomping as instructed.\n')
+                            f'stomping as instructed.')
                         result['overwritten_mismatched'] += 1
                     result['overwritten'] += 1
                     os.remove(dst_path)
@@ -160,9 +181,9 @@ def purge_active_shapefiles(active_dirs: set) -> int:
                     os.remove(f)
                     removed += 1
                 except OSError as exc:
-                    sys.stderr.write(
+                    _elog(
                         f'[year_viirs] WARNING: could not remove '
-                        f'{f}: {exc}\n')
+                        f'{f}: {exc}')
     return removed
 
 
@@ -320,8 +341,8 @@ def _log_http_pair(log_dir: str, request_text: str,
         with open(base + '.http_response', 'w', encoding='utf-8') as f:
             f.write(response_text)
     except OSError as exc:
-        sys.stderr.write(f'[year_viirs] WARNING: could not write HTTP '
-                         f'log pair in {log_dir}: {exc}\n')
+        _elog(f'[year_viirs] WARNING: could not write HTTP '
+              f'log pair in {log_dir}: {exc}')
 
 
 def _log_curl_pair(log_dir: str, request_text: str,
@@ -340,8 +361,8 @@ def _log_curl_pair(log_dir: str, request_text: str,
         with open(base + '.curl_response', 'w', encoding='utf-8') as f:
             f.write(response_text)
     except OSError as exc:
-        sys.stderr.write(f'[year_viirs] WARNING: could not write curl '
-                         f'log pair in {log_dir}: {exc}\n')
+        _elog(f'[year_viirs] WARNING: could not write curl '
+              f'log pair in {log_dir}: {exc}')
 
 
 def _install_http_logging(log_dir: str) -> None:
@@ -539,18 +560,22 @@ def _download_day(day: datetime.datetime, save_dir: str,
         f'regions=%5BBBOX%5DN{north:.6f}%20S{south:.6f}'
         f'%20E{east:.6f}%20W{west:.6f}'
     )
+    _log(f'        [download] {day.date()} (jday {jday}): starting '
+         f'({before} .nc already on disk) ...')
     ok, error = _sync_in_subprocess(url, target_dir, token,
                                      curl_primary=curl_primary)
     if not ok:
-        sys.stderr.write(
-            f'[year_viirs] download {day.date()}: {error}\n')
+        _elog(
+            f'[year_viirs] download {day.date()}: {error}')
 
     after_files = set(glob.glob(os.path.join(target_dir, '*.nc')))
     new_files = sorted(after_files - before_files)
     for f in new_files:
-        print(f'        DOWNLOAD SUCCESS: {os.path.basename(f)}',
-              flush=True)
+        _log(f'        DOWNLOAD SUCCESS: {os.path.basename(f)}')
     after = len(after_files)
+    _log(f'        [download] {day.date()} (jday {jday}): done '
+         f'({after} .nc on disk now, {len(new_files)} new'
+         f'{"" if ok else ", FAILED: " + str(error)}).')
     return {'before': before, 'after': after, 'error': error}
 
 
@@ -587,9 +612,9 @@ def download_year(year: int, raster_path: str, save_dir: str,
         days.append(d)
         d += datetime.timedelta(days=1)
 
-    print(f'      [{os.path.basename(raster_path)}] '
-          f'checking {len(days)} day(s) of VIIRS data '
-          f'(workers={workers}) ...')
+    _log(f'      [{os.path.basename(raster_path)}] '
+         f'VIIRS download: starting -- checking {len(days)} day(s) '
+         f'(workers={workers}) ...')
 
     per_day = {}
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
@@ -604,20 +629,21 @@ def download_year(year: int, raster_path: str, save_dir: str,
             try:
                 per_day[day] = fut.result()
             except Exception as exc:
-                sys.stderr.write(
+                _elog(
                     f'[year_viirs] download error for {day.date()}: '
-                    f'{exc}\n')
+                    f'{exc}')
                 per_day[day] = {'before': 0, 'after': 0, 'error': str(exc)}
             completed += 1
             info = per_day[day]
             gained = max(0, info['after'] - info['before'])
             if gained > 0:
-                print(f"        CONFIRMED: {gained} new .nc file(s) for "
-                      f"{day.date()} ({info['after']} total on disk now)",
-                      flush=True)
+                _log(f"        CONFIRMED: {gained} new .nc file(s) for "
+                     f"{day.date()} ({info['after']} total on disk now)")
             if completed % 10 == 0 or completed == len(days):
-                print(f'        checked {completed}/{len(days)}',
-                      flush=True)
+                _log(f'        checked {completed}/{len(days)}')
+
+    _log(f'      [{os.path.basename(raster_path)}] '
+         f'VIIRS download: done ({len(days)} day(s) checked).')
 
     already_present = 0
     newly_downloaded = 0
@@ -657,12 +683,14 @@ def shapify_year(save_dir: str, raster_path: str, workers: int = 8) -> int:
         if not glob.glob(os.path.join(nc_dir, '*.shp')):
             pending_nc.append(nc)
     if pending_nc:
-        print(f'      [{os.path.basename(raster_path)}] '
-              f'shapifying {len(pending_nc)} .nc granule(s) '
-              f'(workers={workers}) ...')
+        _log(f'      [{os.path.basename(raster_path)}] '
+             f'shapify: starting -- {len(pending_nc)} .nc granule(s) '
+             f'(workers={workers}) ...')
         shapify_viirs(save_dir, raster_path, workers=workers)
-    return len(glob.glob(os.path.join(
+        _log(f'      [{os.path.basename(raster_path)}] shapify: done.')
+    n_shp = len(glob.glob(os.path.join(
         save_dir, 'VNP14IMG', '**', '*.shp'), recursive=True))
+    return n_shp
 
 
 # ---------------------------------------------------------------------------
@@ -730,8 +758,9 @@ def build_year_index(save_dir: str, raster_path: str) -> str:
     if _index_is_fresh(index_path, shp_files):
         return index_path
 
-    print(f'      [{os.path.basename(raster_path)}] '
-          f'building year index from {len(shp_files)} shapefiles ...')
+    _log(f'      [{os.path.basename(raster_path)}] '
+         f'year index: starting -- building from {len(shp_files)} '
+         f'shapefiles ...')
 
     frames = []
     crs = None
@@ -742,7 +771,7 @@ def build_year_index(save_dir: str, raster_path: str) -> str:
         try:
             gdf = gpd.read_file(shp)
         except Exception as exc:
-            sys.stderr.write(f'[year_viirs] index read {shp}: {exc}\n')
+            _elog(f'[year_viirs] index read {shp}: {exc}')
             continue
         if gdf.empty:
             continue
@@ -757,6 +786,8 @@ def build_year_index(save_dir: str, raster_path: str) -> str:
                 os.remove(p)
             except FileNotFoundError:
                 pass
+        _log(f'      [{os.path.basename(raster_path)}] year index: '
+             f'done (no usable shapefiles, index cleared).')
         return ''
 
     combined = gpd.GeoDataFrame(
@@ -777,8 +808,8 @@ def build_year_index(save_dir: str, raster_path: str) -> str:
     os.replace(tmp_path, index_path)
     with open(manifest_path, 'w') as fh:
         fh.write(str(len(shp_files)))
-    print(f'      [{os.path.basename(raster_path)}] '
-          f'year index: {len(combined)} features → {index_path}')
+    _log(f'      [{os.path.basename(raster_path)}] '
+         f'year index: done -- {len(combined)} features → {index_path}')
     return index_path
 
 
@@ -800,21 +831,26 @@ def bootstrap_year(state, year: int, raster_path: str,
         save_dir = year_viirs_dir(state, year)
     os.makedirs(save_dir, exist_ok=True)
 
+    _log(f'      [{os.path.basename(raster_path)}] year {year}: '
+         f'bootstrap starting ...')
+
     dl_result = download_year(
         year, raster_path, save_dir, state.laads_token,
         workers=download_workers, curl_primary=curl_primary)
-    print(f"      [{os.path.basename(raster_path)}] VIIRS summary: "
-          f"{dl_result['already_present']} already present, "
-          f"{dl_result['newly_downloaded']} newly downloaded, "
-          f"{dl_result['still_missing']} day(s) still missing "
-          f"(total {dl_result['total_nc']} .nc file(s) on disk).")
+    _log(f"      [{os.path.basename(raster_path)}] VIIRS summary: "
+         f"{dl_result['already_present']} already present, "
+         f"{dl_result['newly_downloaded']} newly downloaded, "
+         f"{dl_result['still_missing']} day(s) still missing "
+         f"(total {dl_result['total_nc']} .nc file(s) on disk).")
     for day_iso, reason in dl_result['missing_days']:
-        sys.stderr.write(
+        _elog(
             f"      [{os.path.basename(raster_path)}] no data for "
-            f"{day_iso}: {reason}\n")
+            f"{day_iso}: {reason}")
 
     n_shp = shapify_year(save_dir, raster_path, workers=shapify_workers)
     index_path = build_year_index(save_dir, raster_path)
+    _log(f'      [{os.path.basename(raster_path)}] year {year}: '
+         f'bootstrap done.')
     return {'n_nc': dl_result['total_nc'], 'n_shp': n_shp,
             'save_dir': save_dir, 'index_path': index_path,
             'download_summary': dl_result}
