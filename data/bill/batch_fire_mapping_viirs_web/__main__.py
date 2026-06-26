@@ -467,7 +467,10 @@ def main():
 
     if not args.skip_viirs_bootstrap:
         print('      Checking LAADS DAAC credentials/connectivity ...')
-        _preflight = year_viirs.check_laads_credentials(laads_token)
+        _preflight_log_dir = year_viirs.year_viirs_dir(
+            app_state, app_state.active_year)
+        _preflight = year_viirs.check_laads_credentials(
+            laads_token, log_dir=_preflight_log_dir)
         _status_label = {
             'ok': 'OK',
             'bad_token': 'BAD TOKEN',

@@ -166,7 +166,8 @@ def purge_active_shapefiles(active_dirs: set) -> int:
     return removed
 
 
-def check_laads_credentials(token: str, timeout_s: float = 15.0) -> dict:
+def check_laads_credentials(token: str, timeout_s: float = 15.0,
+                            log_dir: str = None) -> dict:
     """One small, fast request to LAADS's discovery API to find out
     WHY VIIRS downloads might be failing, before running the full
     (slow, many-day) bootstrap. Distinguishes:
@@ -186,6 +187,11 @@ def check_laads_credentials(token: str, timeout_s: float = 15.0) -> dict:
     it's a one-shot "is the credential/connection even viable" check
     so a startup log line can say something more useful than "VIIRS
     bootstrap failed" with no indication of which of these it was.
+
+    If log_dir is given, the request/response is logged there as a
+    .http_request / .http_response file pair (this check isn't tied
+    to a specific day, so it belongs one level up from the day
+    folders -- the year dir).
     """
     import json
     import urllib.error
@@ -199,14 +205,29 @@ def check_laads_credentials(token: str, timeout_s: float = 15.0) -> dict:
         'regions=%5BBBOX%5DN50.0%20S49.9%20E-122.9%20W-123.0'
     )
     headers = {'Authorization': f'Bearer {token}'} if token else {}
+    request_text = f'GET {probe_url}\n' + '\n'.join(
+        f'{k}: {v}' for k, v in headers.items())
 
     try:
         req = urllib.request.Request(probe_url, headers=headers)
         with urllib.request.urlopen(req, timeout=timeout_s) as resp:
             code = resp.status
             raw = resp.read()
+        if log_dir:
+            response_text = (
+                f'HTTP {code}\n'
+                + '\n'.join(f'{k}: {v}' for k, v in resp.headers.items())
+                + '\n\n' + raw.decode('utf-8', errors='replace'))
+            _log_http_pair(log_dir, request_text, response_text)
     except urllib.error.HTTPError as exc:
         code = exc.code
+        if log_dir:
+            try:
+                body = exc.read().decode('utf-8', errors='replace')
+            except Exception:
+                body = ''
+            _log_http_pair(log_dir, request_text,
+                           f'HTTP {code}\n\n{body}')
         if code in (401, 403):
             return {'status': 'bad_token',
                     'detail': f'HTTP {code} from LAADS -- token is '
@@ -217,6 +238,8 @@ def check_laads_credentials(token: str, timeout_s: float = 15.0) -> dict:
                           f'problem -- likely a server-side issue).',
                 'http_code': code}
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        if log_dir:
+            _log_http_pair(log_dir, request_text, f'EXCEPTION: {exc}')
         return {'status': 'unreachable',
                 'detail': f'Could not reach LAADS at all: {exc} -- '
                           f'check network connectivity, not the token.',
@@ -280,6 +303,65 @@ def _wgs84_extent_of(raster_path: str):
     return min(lons), min(lats), max(lons), max(lats)
 
 
+def _log_http_pair(log_dir: str, request_text: str,
+                   response_text: str) -> None:
+    """Write one matched .http_request / .http_response file pair into
+    log_dir. Filenames: yyyymmddhhmmss_<uuid>.http_request/.http_response
+    -- timestamp for sorting, uuid guarantees no collision between
+    concurrent requests."""
+    import uuid
+    try:
+        os.makedirs(log_dir, exist_ok=True)
+        ts = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+        uid = uuid.uuid4().hex[:12]
+        base = os.path.join(log_dir, f'{ts}_{uid}')
+        with open(base + '.http_request', 'w', encoding='utf-8') as f:
+            f.write(request_text)
+        with open(base + '.http_response', 'w', encoding='utf-8') as f:
+            f.write(response_text)
+    except OSError as exc:
+        sys.stderr.write(f'[year_viirs] WARNING: could not write HTTP '
+                         f'log pair in {log_dir}: {exc}\n')
+
+
+def _install_http_logging(log_dir: str) -> None:
+    """Monkey-patch urllib.request.urlopen (used by
+    viirs.utils.laads_data_download_v2.geturl) so every HTTP
+    request/response it makes gets logged as a file pair in log_dir.
+    Only safe to call inside the forked subprocess in
+    _sync_in_subprocess -- it permanently patches urlopen in whatever
+    process calls it."""
+    import urllib.request
+
+    _orig_urlopen = urllib.request.urlopen
+
+    def _logging_urlopen(req, *args, **kwargs):
+        url = req.full_url if hasattr(req, 'full_url') else str(req)
+        headers = (dict(req.headers) if hasattr(req, 'headers') else {})
+        request_text = f'GET {url}\n' + '\n'.join(
+            f'{k}: {v}' for k, v in headers.items())
+        try:
+            resp = _orig_urlopen(req, *args, **kwargs)
+            body = resp.read()
+            response_text = (
+                f'HTTP {resp.status}\n'
+                + '\n'.join(f'{k}: {v}' for k, v in resp.headers.items())
+                + '\n\n' + body.decode('utf-8', errors='replace'))
+            _log_http_pair(log_dir, request_text, response_text)
+            resp_replay = type(resp)
+            import io
+            replay = io.BytesIO(body)
+            replay.status = resp.status
+            replay.headers = resp.headers
+            return replay
+        except Exception as exc:
+            response_text = f'EXCEPTION: {exc}'
+            _log_http_pair(log_dir, request_text, response_text)
+            raise
+
+    urllib.request.urlopen = _logging_urlopen
+
+
 def _sync_in_subprocess(url: str, target_dir: str, token: str,
                         timeout_s: int = 600) -> tuple:
     """Run sync() in a child process. netCDF4's corrupt-file
@@ -291,12 +373,16 @@ def _sync_in_subprocess(url: str, target_dir: str, token: str,
     this function detects that and returns a normal failure instead
     of taking the server down with it.
 
+    Every HTTP request sync() makes is logged as a .http_request /
+    .http_response file pair into target_dir (the day's own folder).
+
     Returns (ok: bool, error: str|None).
     """
     import multiprocessing
 
     def _target(q):
         try:
+            _install_http_logging(target_dir)
             from viirs.utils.laads_data_download_v2 import sync as _sync
             _sync(url, target_dir, token)
             q.put((True, None))
