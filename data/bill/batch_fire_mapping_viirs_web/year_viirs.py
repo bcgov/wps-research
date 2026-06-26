@@ -381,6 +381,7 @@ def _install_http_logging(log_dir: str) -> None:
         headers = (dict(req.headers) if hasattr(req, 'headers') else {})
         request_text = f'GET {url}\n' + '\n'.join(
             f'{k}: {v}' for k, v in headers.items())
+        _log(f'        [http] ENTER  GET {url}')
         try:
             resp = _orig_urlopen(req, *args, **kwargs)
             body = resp.read()
@@ -389,15 +390,23 @@ def _install_http_logging(log_dir: str) -> None:
                 + '\n'.join(f'{k}: {v}' for k, v in resp.headers.items())
                 + '\n\n' + body.decode('utf-8', errors='replace'))
             _log_http_pair(log_dir, request_text, response_text)
+            _log(f'        [http] REQUEST  GET {url}')
+            _log(f'        [http] RESPONSE HTTP {resp.status} '
+                 f'({len(body)} bytes) for {url}')
             resp_replay = type(resp)
             import io
             replay = io.BytesIO(body)
             replay.status = resp.status
             replay.headers = resp.headers
+            _log(f'        [http] EXIT   GET {url} -- OK '
+                 f'(HTTP {resp.status})')
             return replay
         except Exception as exc:
             response_text = f'EXCEPTION: {exc}'
             _log_http_pair(log_dir, request_text, response_text)
+            _log(f'        [http] REQUEST  GET {url}')
+            _log(f'        [http] RESPONSE EXCEPTION for {url}: {exc}')
+            _log(f'        [http] EXIT   GET {url} -- FAILED: {exc}')
             raise
 
     urllib.request.urlopen = _logging_urlopen
@@ -417,16 +426,27 @@ def _install_curl_logging(log_dir: str) -> None:
 
     def _logging_getcURL(url, tok, *args, **kwargs):
         request_text = f'CURL {url}\nAuthorization: Bearer {tok[:20]}...'
+        _log(f'        [curl] ENTER  {url}')
         try:
             result = _orig_getcURL(url, tok, *args, **kwargs)
             if result is None:
                 response_text = 'CURL RETURNED None (failed)'
+                _log(f'        [curl] REQUEST  {url}')
+                _log(f'        [curl] RESPONSE None (failed) for {url}')
+                _log(f'        [curl] EXIT   {url} -- FAILED (None)')
             else:
                 body_preview = str(result)[:4000]
                 response_text = f'CURL OK (len={len(str(result))})\n\n{body_preview}'
+                _log(f'        [curl] REQUEST  {url}')
+                _log(f'        [curl] RESPONSE OK ({len(str(result))} '
+                     f'bytes) for {url}')
+                _log(f'        [curl] EXIT   {url} -- OK')
             _log_curl_pair(log_dir, request_text, response_text)
             return result
         except Exception as exc:
+            _log(f'        [curl] REQUEST  {url}')
+            _log(f'        [curl] RESPONSE EXCEPTION for {url}: {exc}')
+            _log(f'        [curl] EXIT   {url} -- FAILED: {exc}')
             _log_curl_pair(log_dir, request_text, f'CURL EXCEPTION: {exc}')
             raise
 
@@ -501,9 +521,12 @@ def _sync_in_subprocess(url: str, target_dir: str, token: str,
             if curl_primary:
                 _install_curl_primary_order()
             from viirs.utils.laads_data_download_v2 import sync as _sync
+            _log(f'      [sync] ENTER  {url}')
             _sync(url, target_dir, token)
+            _log(f'      [sync] EXIT   {url} -- OK')
             q.put((True, None))
         except Exception as exc:
+            _log(f'      [sync] EXIT   {url} -- FAILED: {exc}')
             q.put((False, str(exc)))
 
     ctx = multiprocessing.get_context('fork')
@@ -583,7 +606,8 @@ def download_year(year: int, raster_path: str, save_dir: str,
                   token: str, workers: int = 16,
                   start: datetime.datetime = None,
                   end: datetime.datetime = None,
-                  curl_primary: bool = True) -> dict:
+                  curl_primary: bool = True,
+                  parallel: bool = False) -> dict:
     """Download .nc granules for the raster's full bbox + year window.
 
     Every day in the window is checked against LAADS's listing (via
@@ -595,6 +619,15 @@ def download_year(year: int, raster_path: str, save_dir: str,
     Returns {'already_present': N, 'newly_downloaded': N,
     'still_missing': N, 'missing_days': [...], 'total_nc': N} -- the
     counts requested for the end-of-run summary.
+
+    If parallel is False (default), days are downloaded one at a
+    time, with no thread pool -- entry/exit and request/response
+    messages for every curl/http call print directly to stdout in
+    the order they happen, since there's no concurrent worker output
+    to untangle. If parallel is True, days run concurrently across
+    up to `workers` threads (each still in its own crash-safe
+    subprocess), matching the original behaviour; per-call stdout
+    lines still print but may interleave across days.
     """
     if start is None or end is None:
         ds, de = default_window(year)
@@ -612,22 +645,50 @@ def download_year(year: int, raster_path: str, save_dir: str,
         days.append(d)
         d += datetime.timedelta(days=1)
 
+    _mode_label = (f'parallel, workers={workers}' if parallel
+                  else 'serial, no thread pool')
     _log(f'      [{os.path.basename(raster_path)}] '
          f'VIIRS download: starting -- checking {len(days)} day(s) '
-         f'(workers={workers}) ...')
+         f'({_mode_label}) ...')
 
     per_day = {}
-    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-        futs = {
-            pool.submit(_download_day, d, save_dir, bbox_wgs84, token,
-                        curl_primary): d
-            for d in days
-        }
+    if parallel:
+        with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+            futs = {
+                pool.submit(_download_day, d, save_dir, bbox_wgs84, token,
+                            curl_primary): d
+                for d in days
+            }
+            completed = 0
+            for fut in as_completed(futs):
+                day = futs[fut]
+                try:
+                    per_day[day] = fut.result()
+                except Exception as exc:
+                    _elog(
+                        f'[year_viirs] download error for {day.date()}: '
+                        f'{exc}')
+                    per_day[day] = {'before': 0, 'after': 0,
+                                    'error': str(exc)}
+                completed += 1
+                info = per_day[day]
+                gained = max(0, info['after'] - info['before'])
+                if gained > 0:
+                    _log(f"        CONFIRMED: {gained} new .nc file(s) for "
+                         f"{day.date()} ({info['after']} total on disk now)")
+                if completed % 10 == 0 or completed == len(days):
+                    _log(f'        checked {completed}/{len(days)}')
+    else:
+        # Serial: one day at a time, no thread pool. Every curl/http
+        # entry/exit + request/response message (see
+        # _logging_urlopen / _logging_getcURL above) prints to stdout
+        # in strict chronological order, since nothing else is
+        # running concurrently to interleave with it.
         completed = 0
-        for fut in as_completed(futs):
-            day = futs[fut]
+        for day in days:
             try:
-                per_day[day] = fut.result()
+                per_day[day] = _download_day(
+                    day, save_dir, bbox_wgs84, token, curl_primary)
             except Exception as exc:
                 _elog(
                     f'[year_viirs] download error for {day.date()}: '
@@ -819,7 +880,8 @@ def bootstrap_year(state, year: int, raster_path: str,
                    save_dir: str = None,
                    download_workers: int = 16,
                    shapify_workers: int = 8,
-                   curl_primary: bool = True) -> dict:
+                   curl_primary: bool = True,
+                   parallel_viirs_downloading: bool = False) -> dict:
     """Run download + shapify + index for a year's full raster footprint and
     default seasonal window. Idempotent. Returns counts.
 
@@ -836,7 +898,8 @@ def bootstrap_year(state, year: int, raster_path: str,
 
     dl_result = download_year(
         year, raster_path, save_dir, state.laads_token,
-        workers=download_workers, curl_primary=curl_primary)
+        workers=download_workers, curl_primary=curl_primary,
+        parallel=parallel_viirs_downloading)
     _log(f"      [{os.path.basename(raster_path)}] VIIRS summary: "
          f"{dl_result['already_present']} already present, "
          f"{dl_result['newly_downloaded']} newly downloaded, "
@@ -856,7 +919,8 @@ def bootstrap_year(state, year: int, raster_path: str,
             'download_summary': dl_result}
 
 
-def bootstrap_all_years(state, curl_primary: bool = True) -> dict:
+def bootstrap_all_years(state, curl_primary: bool = True,
+                        parallel_viirs_downloading: bool = False) -> dict:
     """Run bootstrap_year for every (year, raster) in state.rasters_by_year.
     Sequential — printing progress is more useful than parallelism here.
     Returns {year: result_dict}."""
@@ -867,5 +931,6 @@ def bootstrap_all_years(state, curl_primary: bool = True) -> dict:
             state, year, rasters[year],
             download_workers=state.viirs_download_workers or 16,
             shapify_workers=state.viirs_shapify_workers or 8,
-            curl_primary=curl_primary)
+            curl_primary=curl_primary,
+            parallel_viirs_downloading=parallel_viirs_downloading)
     return out

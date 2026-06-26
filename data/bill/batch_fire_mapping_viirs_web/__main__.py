@@ -177,6 +177,13 @@ Example
                         "(default) uses curl first with urllib fallback; "
                         "urllib_primary uses urllib first with curl "
                         "fallback (the original order).")
+    p.add_argument("--parallel_viirs_downloading", action="store_true",
+                   help="Download VIIRS days concurrently across "
+                        "--viirs_download_workers threads. Default is "
+                        "serial (one day at a time, no thread pool) so "
+                        "every curl/http entry/exit and request/response "
+                        "message prints to stdout in clear chronological "
+                        "order.")
     return p
 
 
@@ -535,11 +542,15 @@ def main():
         _method_label = ('curl primary, urllib fallback'
                          if _curl_primary
                          else 'urllib primary, curl fallback')
+        _parallel_label = ('parallel' if args.parallel_viirs_downloading
+                           else 'serial, no thread pool')
         _log(f'\n[3/4] Bootstrapping per-year VIIRS data '
-             f'(download + shapify, {_method_label}): starting ...')
+             f'(download + shapify, {_method_label}, '
+             f'{_parallel_label}): starting ...')
         try:
-            year_viirs.bootstrap_all_years(app_state,
-                                           curl_primary=_curl_primary)
+            year_viirs.bootstrap_all_years(
+                app_state, curl_primary=_curl_primary,
+                parallel_viirs_downloading=args.parallel_viirs_downloading)
             _log('[3/4] Bootstrapping per-year VIIRS data: done.')
         except Exception as _exc:
             _elog(
