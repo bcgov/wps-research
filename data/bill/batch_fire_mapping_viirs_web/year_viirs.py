@@ -346,7 +346,8 @@ def _download_day(day: datetime.datetime, save_dir: str,
         save_dir, 'VNP14IMG', f'{year:04d}', f'{jday:03d}')
     os.makedirs(target_dir, exist_ok=True)
 
-    before = len(glob.glob(os.path.join(target_dir, '*.nc')))
+    before_files = set(glob.glob(os.path.join(target_dir, '*.nc')))
+    before = len(before_files)
 
     url = (
         f'https://ladsweb.modaps.eosdis.nasa.gov/api/v2/content/details?'
@@ -360,7 +361,12 @@ def _download_day(day: datetime.datetime, save_dir: str,
         sys.stderr.write(
             f'[year_viirs] download {day.date()}: {error}\n')
 
-    after = len(glob.glob(os.path.join(target_dir, '*.nc')))
+    after_files = set(glob.glob(os.path.join(target_dir, '*.nc')))
+    new_files = sorted(after_files - before_files)
+    for f in new_files:
+        print(f'        DOWNLOAD SUCCESS: {os.path.basename(f)}',
+              flush=True)
+    after = len(after_files)
     return {'before': before, 'after': after, 'error': error}
 
 
