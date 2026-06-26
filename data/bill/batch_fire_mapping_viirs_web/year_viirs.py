@@ -280,6 +280,49 @@ def _wgs84_extent_of(raster_path: str):
     return min(lons), min(lats), max(lons), max(lats)
 
 
+def _sync_in_subprocess(url: str, target_dir: str, token: str,
+                        timeout_s: int = 600) -> tuple:
+    """Run sync() in a child process. netCDF4's corrupt-file
+    validation (inside sync(), checking previously-downloaded .nc
+    files) can segfault the whole interpreter on a sufficiently
+    mangled/truncated file -- a plain try/except cannot catch that,
+    since it's a C-level crash, not a Python exception. Running it
+    in a subprocess means a crash there only kills that subprocess;
+    this function detects that and returns a normal failure instead
+    of taking the server down with it.
+
+    Returns (ok: bool, error: str|None).
+    """
+    import multiprocessing
+
+    def _target(q):
+        try:
+            from viirs.utils.laads_data_download_v2 import sync as _sync
+            _sync(url, target_dir, token)
+            q.put((True, None))
+        except Exception as exc:
+            q.put((False, str(exc)))
+
+    ctx = multiprocessing.get_context('fork')
+    q = ctx.Queue()
+    proc = ctx.Process(target=_target, args=(q,))
+    proc.start()
+    proc.join(timeout_s)
+
+    if proc.is_alive():
+        proc.terminate()
+        proc.join(5)
+        return False, f'timed out after {timeout_s}s'
+    if proc.exitcode != 0:
+        return False, (f'subprocess crashed (exit code {proc.exitcode}) -- '
+                       f'likely a corrupted .nc file segfaulting the '
+                       f'netCDF4/HDF5 library during validation')
+    try:
+        return q.get_nowait()
+    except Exception:
+        return False, 'subprocess exited with no result'
+
+
 def _download_day(day: datetime.datetime, save_dir: str,
                   bbox_wgs84: tuple, token: str) -> dict:
     """Download one day's granules into save_dir/VNP14IMG/<year>/<jday>/.
@@ -296,8 +339,6 @@ def _download_day(day: datetime.datetime, save_dir: str,
     caller can report exactly how many were already present vs newly
     downloaded vs still missing for this day.
     """
-    from viirs.utils.laads_data_download_v2 import sync as _sync
-
     west, south, east, north = bbox_wgs84
     jday = day.timetuple().tm_yday
     year = day.year
@@ -314,13 +355,10 @@ def _download_day(day: datetime.datetime, save_dir: str,
         f'regions=%5BBBOX%5DN{north:.6f}%20S{south:.6f}'
         f'%20E{east:.6f}%20W{west:.6f}'
     )
-    error = None
-    try:
-        _sync(url, target_dir, token)
-    except Exception as exc:
-        error = str(exc)
+    ok, error = _sync_in_subprocess(url, target_dir, token)
+    if not ok:
         sys.stderr.write(
-            f'[year_viirs] download {day.date()}: {exc}\n')
+            f'[year_viirs] download {day.date()}: {error}\n')
 
     after = len(glob.glob(os.path.join(target_dir, '*.nc')))
     return {'before': before, 'after': after, 'error': error}
@@ -379,6 +417,12 @@ def download_year(year: int, raster_path: str, save_dir: str,
                     f'{exc}\n')
                 per_day[day] = {'before': 0, 'after': 0, 'error': str(exc)}
             completed += 1
+            info = per_day[day]
+            gained = max(0, info['after'] - info['before'])
+            if gained > 0:
+                print(f"        CONFIRMED: {gained} new .nc file(s) for "
+                      f"{day.date()} ({info['after']} total on disk now)",
+                      flush=True)
             if completed % 10 == 0 or completed == len(days):
                 print(f'        checked {completed}/{len(days)}',
                       flush=True)
