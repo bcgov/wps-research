@@ -11,7 +11,9 @@ if not os.path.exists(args[2]):
     err('file to project onto not found:' + args[2])
 
 in_dir = os.path.abspath(args[1])
-to_reproject = [x.strip() for x in os.popen('ls -1 ' + in_dir + os.path.sep + ' -name "*.bin"').readlines()]
+cmd = 'ls -1 ' + in_dir + os.path.sep + ' -name "*.bin"'
+print([cmd])
+to_reproject = [x.strip() for x in os.popen(cmd).readlines()]
 
 cmds = []
 for f in to_reproject:
