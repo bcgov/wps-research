@@ -267,12 +267,13 @@ def generate_overview(
     # leaving the user to guess from the raw header.
     rgb_letters = ('R', 'G', 'B')
     rgb_band_names = []
+    raster_basename = os.path.basename(raster_path)
     for letter, b_idx in zip(rgb_letters, band_indices[:3]):
         if 1 <= b_idx <= len(all_band_names):
             name = all_band_names[b_idx - 1]
         else:
             name = f'band {b_idx}'
-        rgb_band_names.append(f'{letter}: {name}')
+        rgb_band_names.append(f'{letter}: {raster_basename} {name}')
 
     meta = {
         'raster_path': raster_path,

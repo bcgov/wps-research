@@ -23,6 +23,8 @@ const previewStages = document.getElementById('nf-preview-stages');
 const previewWrap = document.getElementById('nf-preview-wrap');
 const previewImg = document.getElementById('nf-preview-img');
 const previewMeta = document.getElementById('nf-preview-meta');
+const bandCaptionEl = document.getElementById('nf-band-caption');
+const resolutionCaptionEl = document.getElementById('nf-resolution-caption');
 
 // Stages walked client-side while the single /api/fire/preview_hint
 // request is in flight. The server is one-shot, but the user wants
@@ -113,6 +115,24 @@ async function loadYear(year) {
     } catch (exc) {
         showErrors([{message: `Network error: ${exc}`}]);
         return;
+    }
+    // Render the R:/G:/B: band-name caption (bold) showing exactly
+    // which bands of the active stack file are being visualized.
+    if (bandCaptionEl) {
+        bandCaptionEl.innerHTML = '';
+        (meta.rgb_band_names || []).forEach((line) => {
+            const b = document.createElement('b');
+            b.textContent = line;
+            bandCaptionEl.appendChild(b);
+            bandCaptionEl.appendChild(document.createElement('br'));
+        });
+    }
+    if (resolutionCaptionEl) {
+        const res = meta.overview_resolution_m;
+        resolutionCaptionEl.textContent = (typeof res === 'number')
+            ? `Overview sampled at ~${res.toFixed(0)}m/px `
+              + `(native ${meta.native_resolution_m.toFixed(0)}m/px).`
+            : '';
     }
     // Cache-bust on the raster's own cache_key (mtime+size), not on
     // wall-clock time -- using Date.now() forced a full re-fetch of a
