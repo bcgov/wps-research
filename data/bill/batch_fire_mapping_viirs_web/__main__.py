@@ -145,6 +145,13 @@ Example
     p.add_argument("--disable_overview_force_regeneration",
                    action="store_true",
                    help="Skip forced overview regeneration at startup.")
+    p.add_argument("--viirs_download_method",
+                   choices=["curl_primary", "urllib_primary"],
+                   default="curl_primary",
+                   help="VIIRS download method order: curl_primary "
+                        "(default) uses curl first with urllib fallback; "
+                        "urllib_primary uses urllib first with curl "
+                        "fallback (the original order).")
     return p
 
 
@@ -491,10 +498,15 @@ def main():
         print('\n[3/4] Skipping VIIRS bootstrap (--skip_viirs_bootstrap). '
               'Per-fire creation will fall back to on-demand download.')
     else:
-        print('\n[3/4] Bootstrapping per-year VIIRS data '
-              '(download + shapify) ...')
+        _curl_primary = (args.viirs_download_method == 'curl_primary')
+        _method_label = ('curl primary, urllib fallback'
+                         if _curl_primary
+                         else 'urllib primary, curl fallback')
+        print(f'\n[3/4] Bootstrapping per-year VIIRS data '
+              f'(download + shapify, {_method_label}) ...')
         try:
-            year_viirs.bootstrap_all_years(app_state)
+            year_viirs.bootstrap_all_years(app_state,
+                                           curl_primary=_curl_primary)
         except Exception as _exc:
             sys.stderr.write(
                 f'      WARNING: VIIRS bootstrap failed: {_exc}\n'

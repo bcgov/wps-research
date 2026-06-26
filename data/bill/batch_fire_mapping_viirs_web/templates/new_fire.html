@@ -47,12 +47,17 @@
 
     <div class="newfire-right">
         <h3>Fire</h3>
-        <label class="nf-field">
-            Name
-            <input id="nf-name" type="text" maxlength="64"
-                   value="new fire"
-                   placeholder="e.g. C12345 or My Fire 2023">
-        </label>
+        <div class="nf-name-row">
+            <label class="nf-field" style="flex:0 0 auto;margin-bottom:0">
+                Name
+                <input id="nf-name" type="text" maxlength="64"
+                       value="new fire"
+                       placeholder="e.g. C12345 or My Fire 2023"
+                       style="width:120px">
+            </label>
+            <button id="nf-zoom-fire" type="button" class="btn btn-secondary"
+                    style="align-self:flex-end;white-space:nowrap">Zoom to Fire#</button>
+        </div>
 
         <h3>Bounding Box (raster CRS)</h3>
         <p class="newfire-hint" style="margin-top:0">

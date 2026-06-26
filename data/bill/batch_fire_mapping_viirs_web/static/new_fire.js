@@ -17,6 +17,7 @@ const clearBtn = document.getElementById('nf-clear-bbox');
 const errorsEl = document.getElementById('nf-errors');
 const submitBtn = document.getElementById('nf-submit');
 const previewBtn = document.getElementById('nf-preview');
+const zoomFireBtn = document.getElementById('nf-zoom-fire');
 const previewStatus = document.getElementById('nf-preview-status');
 const previewStages = document.getElementById('nf-preview-stages');
 const previewWrap = document.getElementById('nf-preview-wrap');
@@ -869,6 +870,74 @@ if (bcwsRefreshBtn) {
         } finally {
             bcwsRefreshBtn.disabled = false;
         }
+    });
+}
+
+// ----- Zoom to Fire# -----
+//
+// When the Name field contains a BCWS fire number (1 letter + 5 digits,
+// e.g. G80280), clicking "Zoom to Fire#" finds it in the loaded BCWS
+// overlay data and zooms the overview to center on it at max zoom.
+// Searches points first; falls back to polygons if not found in points.
+
+const _FIRE_NUM_RE = /^[A-Za-z]\d{5}$/;
+
+if (zoomFireBtn) {
+    zoomFireBtn.addEventListener('click', () => {
+        const rawName = (fields.name.value || '').trim().toUpperCase();
+        if (!_FIRE_NUM_RE.test(rawName)) return;  // not a fire number pattern
+        if (!bcwsOverlay || !meta) return;
+
+        const ptNums = bcwsOverlay.point_fire_nums || [];
+        const polyNums = bcwsOverlay.polygon_fire_nums || [];
+        const pts = bcwsOverlay.points || [];
+        const polys = bcwsOverlay.polygons || [];
+
+        // Search points first
+        let targetNativeX = null, targetNativeY = null;
+        const ptIdx = ptNums.indexOf(rawName);
+        if (ptIdx >= 0 && pts[ptIdx]) {
+            targetNativeX = pts[ptIdx][0];
+            targetNativeY = pts[ptIdx][1];
+        } else {
+            // Search polygons — center of bounding box
+            const polyIdx = polyNums.indexOf(rawName);
+            if (polyIdx >= 0 && polys[polyIdx] && polys[polyIdx].length >= 2) {
+                const ring = polys[polyIdx];
+                let minX = Infinity, minY = Infinity;
+                let maxX = -Infinity, maxY = -Infinity;
+                for (const [px, py] of ring) {
+                    if (px < minX) minX = px;
+                    if (py < minY) minY = py;
+                    if (px > maxX) maxX = px;
+                    if (py > maxY) maxY = py;
+                }
+                targetNativeX = (minX + maxX) / 2;
+                targetNativeY = (minY + maxY) / 2;
+            }
+        }
+
+        if (targetNativeX === null) {
+            alert(rawName + ' not found in BCWS points or polys data');
+            return;
+        }
+
+        // Convert native CRS coords to buffer-space pixel position
+        const rp = nativeToRasterPx(targetNativeX, targetNativeY);
+        if (!rp) return;
+        const bufX = rp[0] * (overviewBufferW() / meta.raster_W);
+        const bufY = rp[1] * (overviewBufferH() / meta.raster_H);
+
+        // Zoom to max and center on the target point
+        zoomScale = ZOOM_MAX;
+        // Pan so the target buffer point lands at the center of the wrap
+        const wrapCx = (zoomWrap ? zoomWrap.clientWidth : canvas.width) / 2;
+        const wrapCy = (zoomWrap ? zoomWrap.clientHeight : canvas.height) / 2;
+        zoomTx = wrapCx - bufX * zoomScale;
+        zoomTy = wrapCy - bufY * zoomScale;
+        clampPan();
+        applyZoom();
+        redraw();
     });
 }
 

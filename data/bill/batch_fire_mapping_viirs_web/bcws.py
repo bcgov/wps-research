@@ -19,8 +19,10 @@ JSON below is itself the only artifact the app reads.
 
 import json
 import os
+import re
 import ssl
 import shutil
+import sys
 import urllib.request
 import zipfile
 
@@ -28,6 +30,9 @@ from osgeo import ogr, osr
 
 ogr.UseExceptions()
 osr.UseExceptions()
+
+# Pattern for BCWS fire numbers: 1 letter + 5 digits (e.g. G80280, C12345)
+_FIRE_NUM_RE = re.compile(r'^[A-Za-z]\d{5}$')
 
 BCWS_DATASETS = [
     {
@@ -108,11 +113,53 @@ def _reproject_ring(ring, ct) -> list:
     return pts
 
 
-def _read_features(shp_path: str, target_crs_wkt: str) -> tuple:
-    """Returns (points, polygons): points is a list of [x, y] in the
-    target CRS; polygons is a list of rings (each a list of [x, y]),
-    one ring per polygon outer boundary (holes are ignored -- this is
-    a visual overlay, not a geometric operation)."""
+def _detect_fire_num_field(shp_path: str) -> str | None:
+    """Auto-detect which field in the shapefile contains BCWS fire
+    numbers (pattern: 1 letter + 5 digits, e.g. G80280). Scans all
+    text fields and returns the first field name where at least one
+    stripped value matches. Returns None if no field matches."""
+    from osgeo import gdal as _gdal
+    _gdal.PushErrorHandler('CPLQuietErrorHandler')
+    try:
+        ds = ogr.Open(shp_path)
+    finally:
+        _gdal.PopErrorHandler()
+    if ds is None:
+        return None
+    layer = ds.GetLayer(0)
+    defn = layer.GetLayerDefn()
+    # Collect candidate text field names
+    text_fields = []
+    for i in range(defn.GetFieldCount()):
+        fd = defn.GetFieldDefn(i)
+        if fd.GetType() == ogr.OFTString:
+            text_fields.append(fd.GetName())
+    if not text_fields:
+        ds = None
+        return None
+    # Check up to 200 features for a match
+    layer.ResetReading()
+    for _ in range(200):
+        feat = layer.GetNextFeature()
+        if feat is None:
+            break
+        for fname in text_fields:
+            val = (feat.GetField(fname) or '').strip()
+            if _FIRE_NUM_RE.match(val):
+                ds = None
+                return fname
+    ds = None
+    return None
+
+
+def _read_features(shp_path: str, target_crs_wkt: str,
+                   fire_num_field: str = None) -> tuple:
+    """Returns (points, polygons, point_fire_nums, polygon_fire_nums):
+    points is a list of [x, y] in the target CRS; polygons is a list
+    of rings (each a list of [x, y]), one ring per polygon outer
+    boundary (holes are ignored). point_fire_nums and
+    polygon_fire_nums are parallel arrays of fire number strings (or
+    None for features without one)."""
     # Suppress GDAL's "Value '...' of field FEATURE_CD parsed
     # incompletely to real 0" warnings -- BCWS's FEATURE_CD is a
     # text code (e.g. "JA70003000") that OGR's shapefile driver
@@ -138,12 +185,21 @@ def _read_features(shp_path: str, target_crs_wkt: str) -> tuple:
 
     points: list = []
     polygons: list = []
+    point_fire_nums: list = []
+    polygon_fire_nums: list = []
     for feature in layer:
         geom = feature.GetGeometryRef()
         if geom is None:
             continue
         gtype = geom.GetGeometryType()
         gtype_flat = ogr.GT_Flatten(gtype)
+
+        # Extract fire number if field is known
+        fire_num = None
+        if fire_num_field:
+            val = (feature.GetField(fire_num_field) or '').strip()
+            if _FIRE_NUM_RE.match(val):
+                fire_num = val.upper()
 
         def _xform_point(x, y):
             if ct is None:
@@ -154,10 +210,12 @@ def _read_features(shp_path: str, target_crs_wkt: str) -> tuple:
         if gtype_flat == ogr.wkbPoint:
             x, y = geom.GetX(), geom.GetY()
             points.append(_xform_point(x, y))
+            point_fire_nums.append(fire_num)
         elif gtype_flat == ogr.wkbMultiPoint:
             for i in range(geom.GetGeometryCount()):
                 pt = geom.GetGeometryRef(i)
                 points.append(_xform_point(pt.GetX(), pt.GetY()))
+                point_fire_nums.append(fire_num)
         elif gtype_flat == ogr.wkbPolygon:
             if geom.GetGeometryCount() > 0:
                 ring = geom.GetGeometryRef(0)  # outer ring only
@@ -168,6 +226,7 @@ def _read_features(shp_path: str, target_crs_wkt: str) -> tuple:
                         [round(ring.GetX(i), 2), round(ring.GetY(i), 2)]
                         for i in range(ring.GetPointCount())
                     ])
+                polygon_fire_nums.append(fire_num)
         elif gtype_flat == ogr.wkbMultiPolygon:
             for i in range(geom.GetGeometryCount()):
                 poly = geom.GetGeometryRef(i)
@@ -180,8 +239,9 @@ def _read_features(shp_path: str, target_crs_wkt: str) -> tuple:
                             [round(ring.GetX(i), 2), round(ring.GetY(i), 2)]
                             for i in range(ring.GetPointCount())
                         ])
+                    polygon_fire_nums.append(fire_num)
     ds = None
-    return points, polygons
+    return points, polygons, point_fire_nums, polygon_fire_nums
 
 
 def refresh_bcws_overlay(state) -> dict:
@@ -212,19 +272,32 @@ def refresh_bcws_overlay(state) -> dict:
     dest_dir = _bcws_dir(state)
     all_points: list = []
     all_polygons: list = []
+    all_point_fire_nums: list = []
+    all_polygon_fire_nums: list = []
     for dataset in BCWS_DATASETS:
         _download_and_extract(dataset, dest_dir)
         shp_path = _find_shapefile(dest_dir, dataset['key'][:5])
         if shp_path is None:
             raise RuntimeError(
                 f"no .shp found after extracting {dataset['filename']}")
-        pts, polys = _read_features(shp_path, target_crs_wkt)
+        # Auto-detect which field holds the fire number
+        fn_field = _detect_fire_num_field(shp_path)
+        if fn_field:
+            sys.stderr.write(
+                f'[bcws] Detected fire number field in '
+                f'{os.path.basename(shp_path)}: {fn_field}\n')
+        pts, polys, pt_fnums, poly_fnums = _read_features(
+            shp_path, target_crs_wkt, fire_num_field=fn_field)
         all_points.extend(pts)
         all_polygons.extend(polys)
+        all_point_fire_nums.extend(pt_fnums)
+        all_polygon_fire_nums.extend(poly_fnums)
 
     overlay = {
         'points': all_points,
         'polygons': all_polygons,
+        'point_fire_nums': all_point_fire_nums,
+        'polygon_fire_nums': all_polygon_fire_nums,
         'updated_at': datetime.datetime.now().isoformat(timespec='seconds'),
         'crs_wkt': target_crs_wkt,
         'n_points': len(all_points),

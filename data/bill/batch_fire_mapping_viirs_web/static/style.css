@@ -1060,6 +1060,12 @@ tbody tr.row-mapping:hover { background: #ede1ff; }
     color: #4a5566;
     margin-bottom: 8px;
 }
+.nf-name-row {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+    margin-bottom: 8px;
+}
 .nf-field input {
     display: block;
     width: 100%;

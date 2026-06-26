@@ -324,6 +324,26 @@ def _log_http_pair(log_dir: str, request_text: str,
                          f'log pair in {log_dir}: {exc}\n')
 
 
+def _log_curl_pair(log_dir: str, request_text: str,
+                   response_text: str) -> None:
+    """Write one matched .curl_request / .curl_response file pair into
+    log_dir — mirrors _log_http_pair but uses different extensions so
+    curl traffic is distinguishable from urllib traffic at a glance."""
+    import uuid
+    try:
+        os.makedirs(log_dir, exist_ok=True)
+        ts = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+        uid = uuid.uuid4().hex[:12]
+        base = os.path.join(log_dir, f'{ts}_{uid}')
+        with open(base + '.curl_request', 'w', encoding='utf-8') as f:
+            f.write(request_text)
+        with open(base + '.curl_response', 'w', encoding='utf-8') as f:
+            f.write(response_text)
+    except OSError as exc:
+        sys.stderr.write(f'[year_viirs] WARNING: could not write curl '
+                         f'log pair in {log_dir}: {exc}\n')
+
+
 def _install_http_logging(log_dir: str) -> None:
     """Monkey-patch urllib.request.urlopen (used by
     viirs.utils.laads_data_download_v2.geturl) so every HTTP
@@ -362,8 +382,76 @@ def _install_http_logging(log_dir: str) -> None:
     urllib.request.urlopen = _logging_urlopen
 
 
+def _install_curl_logging(log_dir: str) -> None:
+    """Monkey-patch the third-party module's getcURL so every curl
+    request/response is logged as .curl_request / .curl_response.
+    Only safe inside the forked subprocess."""
+    try:
+        import viirs.utils.laads_data_download_v2 as _ldl
+    except ImportError:
+        return
+    if not hasattr(_ldl, 'getcURL'):
+        return
+    _orig_getcURL = _ldl.getcURL
+
+    def _logging_getcURL(url, tok, *args, **kwargs):
+        request_text = f'CURL {url}\nAuthorization: Bearer {tok[:20]}...'
+        try:
+            result = _orig_getcURL(url, tok, *args, **kwargs)
+            if result is None:
+                response_text = 'CURL RETURNED None (failed)'
+            else:
+                body_preview = str(result)[:4000]
+                response_text = f'CURL OK (len={len(str(result))})\n\n{body_preview}'
+            _log_curl_pair(log_dir, request_text, response_text)
+            return result
+        except Exception as exc:
+            _log_curl_pair(log_dir, request_text, f'CURL EXCEPTION: {exc}')
+            raise
+
+    _ldl.getcURL = _logging_getcURL
+
+
+def _install_curl_primary_order() -> None:
+    """Monkey-patch the third-party module's geturl() to try curl
+    first and urllib as fallback (opposite of the default order).
+    Only safe inside the forked subprocess."""
+    try:
+        import viirs.utils.laads_data_download_v2 as _ldl
+    except ImportError:
+        return
+    if not hasattr(_ldl, 'geturl') or not hasattr(_ldl, 'getcURL'):
+        return
+    _orig_geturl = _ldl.geturl
+    _orig_getcURL = _ldl.getcURL  # may already be the logging wrapper
+
+    def _curl_first_geturl(url, tok, *args, **kwargs):
+        """Try curl first; fall back to urllib on failure."""
+        import urllib.request
+        import urllib.error
+        # Try curl first
+        try:
+            result = _orig_getcURL(url, tok)
+            if result is not None:
+                return result
+        except Exception:
+            pass
+        # Fall back to urllib
+        try:
+            headers = {'Authorization': f'Bearer {tok}'} if tok else {}
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                return resp.read()
+        except Exception:
+            pass
+        return None
+
+    _ldl.geturl = _curl_first_geturl
+
+
 def _sync_in_subprocess(url: str, target_dir: str, token: str,
-                        timeout_s: int = 600) -> tuple:
+                        timeout_s: int = 600,
+                        curl_primary: bool = True) -> tuple:
     """Run sync() in a child process. netCDF4's corrupt-file
     validation (inside sync(), checking previously-downloaded .nc
     files) can segfault the whole interpreter on a sufficiently
@@ -375,6 +463,11 @@ def _sync_in_subprocess(url: str, target_dir: str, token: str,
 
     Every HTTP request sync() makes is logged as a .http_request /
     .http_response file pair into target_dir (the day's own folder).
+    Curl requests are logged as .curl_request / .curl_response.
+
+    If curl_primary is True (default), the download order is
+    curl-first with urllib fallback; otherwise urllib-first with
+    curl fallback (the original third-party module's default order).
 
     Returns (ok: bool, error: str|None).
     """
@@ -383,6 +476,9 @@ def _sync_in_subprocess(url: str, target_dir: str, token: str,
     def _target(q):
         try:
             _install_http_logging(target_dir)
+            _install_curl_logging(target_dir)
+            if curl_primary:
+                _install_curl_primary_order()
             from viirs.utils.laads_data_download_v2 import sync as _sync
             _sync(url, target_dir, token)
             q.put((True, None))
@@ -410,7 +506,8 @@ def _sync_in_subprocess(url: str, target_dir: str, token: str,
 
 
 def _download_day(day: datetime.datetime, save_dir: str,
-                  bbox_wgs84: tuple, token: str) -> dict:
+                  bbox_wgs84: tuple, token: str,
+                  curl_primary: bool = True) -> dict:
     """Download one day's granules into save_dir/VNP14IMG/<year>/<jday>/.
 
     Always calls sync() -- does NOT skip just because the day-folder
@@ -442,7 +539,8 @@ def _download_day(day: datetime.datetime, save_dir: str,
         f'regions=%5BBBOX%5DN{north:.6f}%20S{south:.6f}'
         f'%20E{east:.6f}%20W{west:.6f}'
     )
-    ok, error = _sync_in_subprocess(url, target_dir, token)
+    ok, error = _sync_in_subprocess(url, target_dir, token,
+                                     curl_primary=curl_primary)
     if not ok:
         sys.stderr.write(
             f'[year_viirs] download {day.date()}: {error}\n')
@@ -459,7 +557,8 @@ def _download_day(day: datetime.datetime, save_dir: str,
 def download_year(year: int, raster_path: str, save_dir: str,
                   token: str, workers: int = 16,
                   start: datetime.datetime = None,
-                  end: datetime.datetime = None) -> dict:
+                  end: datetime.datetime = None,
+                  curl_primary: bool = True) -> dict:
     """Download .nc granules for the raster's full bbox + year window.
 
     Every day in the window is checked against LAADS's listing (via
@@ -495,7 +594,8 @@ def download_year(year: int, raster_path: str, save_dir: str,
     per_day = {}
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         futs = {
-            pool.submit(_download_day, d, save_dir, bbox_wgs84, token): d
+            pool.submit(_download_day, d, save_dir, bbox_wgs84, token,
+                        curl_primary): d
             for d in days
         }
         completed = 0
@@ -687,7 +787,8 @@ def build_year_index(save_dir: str, raster_path: str) -> str:
 def bootstrap_year(state, year: int, raster_path: str,
                    save_dir: str = None,
                    download_workers: int = 16,
-                   shapify_workers: int = 8) -> dict:
+                   shapify_workers: int = 8,
+                   curl_primary: bool = True) -> dict:
     """Run download + shapify + index for a year's full raster footprint and
     default seasonal window. Idempotent. Returns counts.
 
@@ -701,7 +802,7 @@ def bootstrap_year(state, year: int, raster_path: str,
 
     dl_result = download_year(
         year, raster_path, save_dir, state.laads_token,
-        workers=download_workers)
+        workers=download_workers, curl_primary=curl_primary)
     print(f"      [{os.path.basename(raster_path)}] VIIRS summary: "
           f"{dl_result['already_present']} already present, "
           f"{dl_result['newly_downloaded']} newly downloaded, "
@@ -719,7 +820,7 @@ def bootstrap_year(state, year: int, raster_path: str,
             'download_summary': dl_result}
 
 
-def bootstrap_all_years(state) -> dict:
+def bootstrap_all_years(state, curl_primary: bool = True) -> dict:
     """Run bootstrap_year for every (year, raster) in state.rasters_by_year.
     Sequential — printing progress is more useful than parallelism here.
     Returns {year: result_dict}."""
@@ -729,5 +830,6 @@ def bootstrap_all_years(state) -> dict:
         out[year] = bootstrap_year(
             state, year, rasters[year],
             download_workers=state.viirs_download_workers or 16,
-            shapify_workers=state.viirs_shapify_workers or 8)
+            shapify_workers=state.viirs_shapify_workers or 8,
+            curl_primary=curl_primary)
     return out
