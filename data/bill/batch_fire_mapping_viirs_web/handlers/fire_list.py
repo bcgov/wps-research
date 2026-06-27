@@ -345,6 +345,15 @@ class FireListRoutes:
             return
         self._send_json(overlay)
 
+    def handle_api_viirs_overlay(self):
+        """Return the cached, deduplicated VIIRS accumulated-detections
+        overlay for the active year (already reprojected into the
+        active raster's native CRS), or an empty overlay if the
+        accumulation hasn't run yet."""
+        from .. import year_viirs
+        overlay = year_viirs.load_viirs_overlay(state)
+        self._send_json(overlay)
+
     def handle_api_bcws_refresh(self):
         """Admin-only: download the latest BCWS current-fire points +
         polygons from data.gov.bc.ca, reproject into the active

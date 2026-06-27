@@ -18,7 +18,9 @@ import datetime
 import glob
 import json
 import os
+import re
 import shutil
+import subprocess
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -365,10 +367,75 @@ def _log_curl_pair(log_dir: str, request_text: str,
               f'log pair in {log_dir}: {exc}')
 
 
-def _install_http_logging(log_dir: str) -> None:
+def _classify_status(method: str, status, exc: Exception = None) -> tuple:
+    """Returns (return_code_str, meaning_str) for a request outcome,
+    used to build the JSON event entries requested for every
+    listing/download attempt."""
+    if exc is not None:
+        msg = str(exc)
+        if '401' in msg or 'Unauthorized' in msg:
+            return ('401', f'{method}: server rejected credentials for '
+                    f'this specific request (token works elsewhere in '
+                    f'this run -- likely an auth-header/redirect '
+                    f'handling difference, not a bad token)')
+        if '500' in msg:
+            return ('500', f'{method}: LAADS server-side error')
+        if 'items' in msg and 'str' in msg:
+            return ('EXCEPTION', f'{method}: third-party wrapper bug '
+                    f'(not a network/auth failure) -- {msg}')
+        return ('EXCEPTION', f'{method}: request raised {type(exc).__name__}'
+                f': {msg}')
+    if status == 200:
+        return ('200', f'{method}: request succeeded')
+    if status == 401:
+        return ('401', f'{method}: unauthorized')
+    if status == 500:
+        return ('500', f'{method}: server error')
+    if status is None:
+        return ('NONE', f'{method}: no response received')
+    return (str(status), f'{method}: HTTP {status}')
+
+
+_FILENAME_RE_GLOBAL = None
+
+
+def _extract_filenames(text: str) -> list:
+    """Best-effort extraction of VNP14IMG granule filenames from a
+    listing response body, for the 'files' field of listing JSON
+    events."""
+    import re
+    global _FILENAME_RE_GLOBAL
+    if _FILENAME_RE_GLOBAL is None:
+        _FILENAME_RE_GLOBAL = re.compile(
+            r'VNP14IMG\.A\d{7}\.\d{4}\.\d{3}\.\d{13}\.nc')
+    try:
+        return sorted(set(_FILENAME_RE_GLOBAL.findall(text)))
+    except Exception:
+        return []
+
+
+def _log_json_event(events_path: str, event: dict) -> None:
+    """Print one JSON-encoded line to stdout for this listing/download
+    attempt (as requested), and also append it to a shared JSONL file
+    so the parent process can build the post-run summary section
+    (each day's sync() runs in its own subprocess, so module-level
+    counters here wouldn't be visible to the parent otherwise)."""
+    import json as _json
+    line = _json.dumps(event, default=str)
+    print(line, flush=True)
+    if events_path:
+        try:
+            with open(events_path, 'a', encoding='utf-8') as f:
+                f.write(line + '\n')
+        except OSError:
+            pass
+
+
+def _install_http_logging(log_dir: str, events_path: str = None) -> None:
     """Monkey-patch urllib.request.urlopen (used by
     viirs.utils.laads_data_download_v2.geturl) so every HTTP
-    request/response it makes gets logged as a file pair in log_dir.
+    request/response it makes gets logged as a file pair in log_dir,
+    plus a JSON event (listing or download) to stdout/events_path.
     Only safe to call inside the forked subprocess in
     _sync_in_subprocess -- it permanently patches urlopen in whatever
     process calls it."""
@@ -376,24 +443,46 @@ def _install_http_logging(log_dir: str) -> None:
 
     _orig_urlopen = urllib.request.urlopen
 
+    def _is_listing_url(url: str) -> bool:
+        return '/content/details' in url
+
     def _logging_urlopen(req, *args, **kwargs):
         url = req.full_url if hasattr(req, 'full_url') else str(req)
         headers = (dict(req.headers) if hasattr(req, 'headers') else {})
         request_text = f'GET {url}\n' + '\n'.join(
             f'{k}: {v}' for k, v in headers.items())
+        listing = _is_listing_url(url)
+        filename = url.rsplit('/', 1)[-1] if not listing else None
         _log(f'        [http] ENTER  GET {url}')
         try:
             resp = _orig_urlopen(req, *args, **kwargs)
             body = resp.read()
+            body_text = body.decode('utf-8', errors='replace')
             response_text = (
                 f'HTTP {resp.status}\n'
                 + '\n'.join(f'{k}: {v}' for k, v in resp.headers.items())
-                + '\n\n' + body.decode('utf-8', errors='replace'))
+                + '\n\n' + body_text)
             _log_http_pair(log_dir, request_text, response_text)
             _log(f'        [http] REQUEST  GET {url}')
             _log(f'        [http] RESPONSE HTTP {resp.status} '
                  f'({len(body)} bytes) for {url}')
-            resp_replay = type(resp)
+            rc, meaning = _classify_status('urllib', resp.status)
+            if listing:
+                _log_json_event(events_path, {
+                    'kind': 'listing', 'method': 'urllib', 'url': url,
+                    'files': _extract_filenames(body_text),
+                    'return_code': rc, 'meaning': meaning,
+                    'request': request_text[:2000],
+                    'response': response_text[:4000],
+                })
+            else:
+                _log_json_event(events_path, {
+                    'kind': 'download', 'method': 'urllib',
+                    'filename': filename, 'size_bytes': len(body),
+                    'return_code': rc, 'meaning': meaning,
+                    'request': request_text[:2000],
+                    'response': response_text[:2000],
+                })
             import io
             replay = io.BytesIO(body)
             replay.status = resp.status
@@ -406,65 +495,181 @@ def _install_http_logging(log_dir: str) -> None:
             _log_http_pair(log_dir, request_text, response_text)
             _log(f'        [http] REQUEST  GET {url}')
             _log(f'        [http] RESPONSE EXCEPTION for {url}: {exc}')
+            rc, meaning = _classify_status('urllib', None, exc)
+            if listing:
+                _log_json_event(events_path, {
+                    'kind': 'listing', 'method': 'urllib', 'url': url,
+                    'files': [], 'return_code': rc, 'meaning': meaning,
+                    'request': request_text[:2000],
+                    'response': response_text[:2000],
+                })
+            else:
+                _log_json_event(events_path, {
+                    'kind': 'download', 'method': 'urllib',
+                    'filename': filename, 'size_bytes': 'N/A',
+                    'return_code': rc, 'meaning': meaning,
+                    'request': request_text[:2000],
+                    'response': response_text[:2000],
+                })
             _log(f'        [http] EXIT   GET {url} -- FAILED: {exc}')
             raise
 
     urllib.request.urlopen = _logging_urlopen
 
 
-def _install_curl_logging(log_dir: str) -> None:
-    """Monkey-patch the third-party module's getcURL so every curl
-    request/response is logged as .curl_request / .curl_response.
-    Only safe inside the forked subprocess."""
+def _curl_cli_request(url: str, token: str, timeout: int = 120) -> tuple:
+    """Issue the request using the real system `curl` binary via
+    subprocess, bypassing the third-party module's getcURL() wrapper
+    entirely (that wrapper has a bug -- 'str' object has no attribute
+    'items' -- that fires on every call regardless of outcome).
+
+    Returns (body_bytes_or_None, http_status_or_None, request_text,
+    response_text).
+    """
+    request_text = f'CURL {url}\nAuthorization: Bearer {token[:20]}...'
+    cmd = [
+        'curl', '-s', '-L', '--max-time', str(timeout),
+        '-D', '-',  # dump headers to stdout, ahead of the body
+        '-H', f'Authorization: Bearer {token}',
+        url,
+    ]
+    try:
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, timeout=timeout + 10)
+    except Exception as exc:
+        return None, None, request_text, f'CURL CLI EXCEPTION: {exc}'
+
+    raw = proc.stdout
+    # With -L, redirects mean multiple header blocks are concatenated;
+    # the LAST one (immediately preceding the final body) is the one
+    # that matters. Split on the blank-line CRLF/LF boundary between
+    # headers and body, repeatedly, to walk past intermediate redirects.
+    status = None
+    body = raw
+    remaining = raw
+    while True:
+        sep_idx = None
+        for sep in (b'\r\n\r\n', b'\n\n'):
+            idx = remaining.find(sep)
+            if idx != -1:
+                sep_idx = (idx, len(sep))
+                break
+        if sep_idx is None:
+            break
+        idx, sep_len = sep_idx
+        header_block = remaining[:idx]
+        first_line = header_block.split(b'\n', 1)[0]
+        m = re.match(rb'HTTP/\S+\s+(\d+)', first_line)
+        if not m:
+            break
+        status = int(m.group(1))
+        body = remaining[idx + sep_len:]
+        # If this header block's body looks like it's just another
+        # header block (next redirect hop), keep peeling; otherwise stop.
+        if body[:5] == b'HTTP/':
+            remaining = body
+            continue
+        break
+
+    if status is None and proc.returncode != 0:
+        stderr_text = proc.stderr.decode('utf-8', errors='replace')
+        return None, None, request_text, f'CURL CLI FAILED (exit {proc.returncode}): {stderr_text}'
+
+    response_text = (f'HTTP {status}\n\n'
+                     + body[:4000].decode('utf-8', errors='replace'))
+    return body, status, request_text, response_text
+
+
+def _install_native_curl(log_dir: str, events_path: str = None) -> None:
+    """Replace the third-party module's getcURL() entirely with a call
+    to the real system curl binary, since the wrapper has a bug that
+    raises on every call regardless of whether the transfer actually
+    succeeded. Logs a .curl_request/.curl_response file pair and a
+    JSON listing/download event for every call, same as
+    _install_http_logging does for urllib."""
     try:
         import viirs.utils.laads_data_download_v2 as _ldl
     except ImportError:
         return
     if not hasattr(_ldl, 'getcURL'):
         return
-    _orig_getcURL = _ldl.getcURL
 
-    def _logging_getcURL(url, tok, *args, **kwargs):
-        request_text = f'CURL {url}\nAuthorization: Bearer {tok[:20]}...'
+    def _is_listing_url(url: str) -> bool:
+        return '/content/details' in url
+
+    def _native_getcURL(url, tok, *args, **kwargs):
+        listing = _is_listing_url(url)
+        filename = url.rsplit('/', 1)[-1] if not listing else None
         _log(f'        [curl] ENTER  {url}')
-        try:
-            result = _orig_getcURL(url, tok, *args, **kwargs)
-            if result is None:
-                response_text = 'CURL RETURNED None (failed)'
-                _log(f'        [curl] REQUEST  {url}')
-                _log(f'        [curl] RESPONSE None (failed) for {url}')
-                _log(f'        [curl] EXIT   {url} -- FAILED (None)')
+        body, status, request_text, response_text = _curl_cli_request(
+            url, tok)
+        _log_curl_pair(log_dir, request_text, response_text)
+        _log(f'        [curl] REQUEST  {url}')
+        if body is None:
+            _log(f'        [curl] RESPONSE FAILED for {url}: '
+                 f'{response_text[:200]}')
+            _log(f'        [curl] EXIT   {url} -- FAILED')
+            rc, meaning = _classify_status(
+                'curl(native)', status,
+                Exception(response_text[:300]))
+            if listing:
+                _log_json_event(events_path, {
+                    'kind': 'listing', 'method': 'curl', 'url': url,
+                    'files': [], 'return_code': rc, 'meaning': meaning,
+                    'request': request_text[:2000],
+                    'response': response_text[:2000],
+                })
             else:
-                body_preview = str(result)[:4000]
-                response_text = f'CURL OK (len={len(str(result))})\n\n{body_preview}'
-                _log(f'        [curl] REQUEST  {url}')
-                _log(f'        [curl] RESPONSE OK ({len(str(result))} '
-                     f'bytes) for {url}')
-                _log(f'        [curl] EXIT   {url} -- OK')
-            _log_curl_pair(log_dir, request_text, response_text)
-            return result
-        except Exception as exc:
-            _log(f'        [curl] REQUEST  {url}')
-            _log(f'        [curl] RESPONSE EXCEPTION for {url}: {exc}')
-            _log(f'        [curl] EXIT   {url} -- FAILED: {exc}')
-            _log_curl_pair(log_dir, request_text, f'CURL EXCEPTION: {exc}')
-            raise
+                _log_json_event(events_path, {
+                    'kind': 'download', 'method': 'curl',
+                    'filename': filename, 'size_bytes': 'N/A',
+                    'return_code': rc, 'meaning': meaning,
+                    'request': request_text[:2000],
+                    'response': response_text[:2000],
+                })
+            return None
+        _log(f'        [curl] RESPONSE HTTP {status} '
+             f'({len(body)} bytes) for {url}')
+        _log(f'        [curl] EXIT   {url} -- '
+             f'{"OK" if status == 200 else "FAILED"} (HTTP {status})')
+        rc, meaning = _classify_status('curl(native)', status)
+        if listing:
+            body_text = body.decode('utf-8', errors='replace')
+            _log_json_event(events_path, {
+                'kind': 'listing', 'method': 'curl', 'url': url,
+                'files': _extract_filenames(body_text),
+                'return_code': rc, 'meaning': meaning,
+                'request': request_text[:2000],
+                'response': response_text[:4000],
+            })
+        else:
+            _log_json_event(events_path, {
+                'kind': 'download', 'method': 'curl',
+                'filename': filename, 'size_bytes': len(body),
+                'return_code': rc, 'meaning': meaning,
+                'request': request_text[:2000],
+                'response': response_text[:2000],
+            })
+        if status != 200:
+            return None
+        return body
 
-    _ldl.getcURL = _logging_getcURL
+    _ldl.getcURL = _native_getcURL
 
 
 def _install_curl_primary_order() -> None:
     """Monkey-patch the third-party module's geturl() to try curl
     first and urllib as fallback (opposite of the default order).
-    Only safe inside the forked subprocess."""
+    Only safe inside the forked subprocess. Assumes getcURL has
+    already been replaced (by _install_native_curl) with the native
+    CLI implementation, or the original wrapper otherwise."""
     try:
         import viirs.utils.laads_data_download_v2 as _ldl
     except ImportError:
         return
     if not hasattr(_ldl, 'geturl') or not hasattr(_ldl, 'getcURL'):
         return
-    _orig_geturl = _ldl.geturl
-    _orig_getcURL = _ldl.getcURL  # may already be the logging wrapper
+    _orig_getcURL = _ldl.getcURL  # already the logging/native wrapper
 
     def _curl_first_geturl(url, tok, *args, **kwargs):
         """Try curl first; fall back to urllib on failure."""
@@ -490,9 +695,13 @@ def _install_curl_primary_order() -> None:
     _ldl.geturl = _curl_first_geturl
 
 
+
+
+
 def _sync_in_subprocess(url: str, target_dir: str, token: str,
                         timeout_s: int = 600,
-                        curl_primary: bool = True) -> tuple:
+                        curl_primary: bool = True,
+                        events_path: str = None) -> tuple:
     """Run sync() in a child process. netCDF4's corrupt-file
     validation (inside sync(), checking previously-downloaded .nc
     files) can segfault the whole interpreter on a sufficiently
@@ -504,7 +713,11 @@ def _sync_in_subprocess(url: str, target_dir: str, token: str,
 
     Every HTTP request sync() makes is logged as a .http_request /
     .http_response file pair into target_dir (the day's own folder).
-    Curl requests are logged as .curl_request / .curl_response.
+    Curl requests (now issued via the native system curl binary, not
+    the buggy third-party getcURL wrapper) are logged as
+    .curl_request / .curl_response. A JSON event is also emitted to
+    stdout (and appended to events_path) for every listing/download
+    attempt, on either path.
 
     If curl_primary is True (default), the download order is
     curl-first with urllib fallback; otherwise urllib-first with
@@ -516,8 +729,8 @@ def _sync_in_subprocess(url: str, target_dir: str, token: str,
 
     def _target(q):
         try:
-            _install_http_logging(target_dir)
-            _install_curl_logging(target_dir)
+            _install_http_logging(target_dir, events_path)
+            _install_native_curl(target_dir, events_path)
             if curl_primary:
                 _install_curl_primary_order()
             from viirs.utils.laads_data_download_v2 import sync as _sync
@@ -551,7 +764,8 @@ def _sync_in_subprocess(url: str, target_dir: str, token: str,
 
 def _download_day(day: datetime.datetime, save_dir: str,
                   bbox_wgs84: tuple, token: str,
-                  curl_primary: bool = True) -> dict:
+                  curl_primary: bool = True,
+                  events_path: str = None) -> dict:
     """Download one day's granules into save_dir/VNP14IMG/<year>/<jday>/.
 
     Always calls sync() -- does NOT skip just because the day-folder
@@ -586,7 +800,8 @@ def _download_day(day: datetime.datetime, save_dir: str,
     _log(f'        [download] {day.date()} (jday {jday}): starting '
          f'({before} .nc already on disk) ...')
     ok, error = _sync_in_subprocess(url, target_dir, token,
-                                     curl_primary=curl_primary)
+                                     curl_primary=curl_primary,
+                                     events_path=events_path)
     if not ok:
         _elog(
             f'[year_viirs] download {day.date()}: {error}')
@@ -639,6 +854,14 @@ def download_year(year: int, raster_path: str, save_dir: str,
 
     bbox_wgs84 = _wgs84_extent_of(raster_path)
 
+    events_path = os.path.join(save_dir, '_viirs_events.jsonl')
+    try:
+        os.makedirs(save_dir, exist_ok=True)
+        if os.path.isfile(events_path):
+            os.remove(events_path)
+    except OSError:
+        pass
+
     days = []
     d = start
     while d <= end:
@@ -656,7 +879,7 @@ def download_year(year: int, raster_path: str, save_dir: str,
         with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
             futs = {
                 pool.submit(_download_day, d, save_dir, bbox_wgs84, token,
-                            curl_primary): d
+                            curl_primary, events_path): d
                 for d in days
             }
             completed = 0
@@ -688,7 +911,8 @@ def download_year(year: int, raster_path: str, save_dir: str,
         for day in days:
             try:
                 per_day[day] = _download_day(
-                    day, save_dir, bbox_wgs84, token, curl_primary)
+                    day, save_dir, bbox_wgs84, token, curl_primary,
+                    events_path)
             except Exception as exc:
                 _elog(
                     f'[year_viirs] download error for {day.date()}: '
@@ -728,6 +952,7 @@ def download_year(year: int, raster_path: str, save_dir: str,
         'still_missing': still_missing,
         'missing_days': missing_days,
         'total_nc': total_nc,
+        'events_path': events_path,
     }
 
 
@@ -876,6 +1101,206 @@ def build_year_index(save_dir: str, raster_path: str) -> str:
 
 
 
+def print_viirs_events_summary(events_path: str) -> dict:
+    """Read the JSONL events file written during this run's listing
+    and download attempts, and print the requested 'VIIRS listing and
+    VIIRS data summary' section -- counts by kind/method/outcome,
+    after the run finishes. Returns the summary dict (also useful for
+    tests)."""
+    summary = {
+        'listing': {'curl': {'ok': 0, 'failed': 0},
+                    'urllib': {'ok': 0, 'failed': 0}},
+        'download': {'curl': {'ok': 0, 'failed': 0},
+                     'urllib': {'ok': 0, 'failed': 0}},
+        'files_seen': set(),
+        'files_downloaded': set(),
+        'total_events': 0,
+    }
+    if not events_path or not os.path.isfile(events_path):
+        _log('[VIIRS SUMMARY] No events recorded for this run.')
+        return summary
+    with open(events_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                ev = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            summary['total_events'] += 1
+            kind = ev.get('kind')
+            method = ev.get('method', 'unknown')
+            ok = (str(ev.get('return_code')) == '200')
+            if kind == 'listing':
+                bucket = summary['listing'].setdefault(
+                    method, {'ok': 0, 'failed': 0})
+                bucket['ok' if ok else 'failed'] += 1
+                for fn in ev.get('files', []):
+                    summary['files_seen'].add(fn)
+            elif kind == 'download':
+                bucket = summary['download'].setdefault(
+                    method, {'ok': 0, 'failed': 0})
+                bucket['ok' if ok else 'failed'] += 1
+                if ok and ev.get('filename'):
+                    summary['files_downloaded'].add(ev['filename'])
+
+    _log('')
+    _log('=' * 60)
+    _log('  VIIRS LISTING AND DATA SUMMARY')
+    _log('=' * 60)
+    _log(f"  Total request events recorded: {summary['total_events']}")
+    _log('  Listing requests:')
+    for method, counts in summary['listing'].items():
+        _log(f"    {method:8s}: {counts['ok']} succeeded, "
+             f"{counts['failed']} failed")
+    _log('  Download requests:')
+    for method, counts in summary['download'].items():
+        _log(f"    {method:8s}: {counts['ok']} succeeded, "
+             f"{counts['failed']} failed")
+    _log(f"  Distinct granule filenames seen in listings: "
+         f"{len(summary['files_seen'])}")
+    _log(f"  Distinct granule filenames actually downloaded: "
+         f"{len(summary['files_downloaded'])}")
+    _log('=' * 60)
+    _log('')
+    return summary
+
+
+def build_viirs_accumulated_buffer(save_dir: str, raster_path: str) -> dict:
+    """Accumulate every VIIRS detection across all per-granule
+    shapefiles under save_dir into a single deduplicated buffer:
+
+    - Initialize an empty buffer.
+    - For each detection record, add it to the buffer if no record
+      already exists at that geo-coordinate.
+    - If a record already exists at that coordinate, keep whichever
+      of the two (existing vs candidate) has the most recent
+      detection date.
+    - All coordinates are reprojected to the active raster's own CRS
+      first, so the buffer (and the resulting shapefile) use one
+      consistent projection regardless of which CRS individual
+      granule shapefiles came in.
+
+    Writes the deduplicated result to <save_dir>/VIIRS.shp, and a
+    lightweight JSON cache (<save_dir>/viirs_overlay.json) with the
+    point coordinates + detection dates + nominal VIIRS pixel
+    resolution, for the client-side overlay.
+
+    Returns a summary dict: {'n_input_records', 'n_unique', 'shp_path',
+    'overlay_path'}.
+    """
+    import geopandas as gpd
+    import pandas as pd
+    from osgeo import gdal as _gdal, osr as _osr
+
+    index_path = year_index_path(save_dir)
+    overlay_path = os.path.join(save_dir, 'viirs_overlay.json')
+    shp_path = os.path.join(save_dir, 'VIIRS.shp')
+
+    if not os.path.isfile(index_path):
+        _log('      [accumulate] No year_index.gpkg found -- nothing to '
+             'accumulate yet.')
+        return {'n_input_records': 0, 'n_unique': 0, 'shp_path': None,
+                'overlay_path': None}
+
+    _log(f'      [accumulate] Building deduplicated VIIRS buffer from '
+         f'{index_path}: starting ...')
+
+    try:
+        gdf = gpd.read_file(index_path)
+    except Exception as exc:
+        _elog(f'[year_viirs] accumulate: could not read {index_path}: {exc}')
+        return {'n_input_records': 0, 'n_unique': 0, 'shp_path': None,
+                'overlay_path': None}
+
+    n_input = len(gdf)
+    if n_input == 0:
+        _log('      [accumulate] year index is empty -- nothing to '
+             'accumulate.')
+        return {'n_input_records': 0, 'n_unique': 0, 'shp_path': None,
+                'overlay_path': None}
+
+    # Consistent CRS: reproject everything to the active raster's own
+    # projection (same convention used elsewhere in this app, e.g.
+    # bcws.py), rather than trusting whatever CRS happened to be on
+    # the first granule shapefile read into the index.
+    ds = _gdal.Open(raster_path)
+    raster_wkt = ds.GetProjection()
+    ds = None
+    if raster_wkt and gdf.crs is not None:
+        try:
+            gdf = gdf.to_crs(raster_wkt)
+        except Exception as exc:
+            _elog(f'[year_viirs] accumulate: reprojection failed, '
+                 f'keeping original CRS: {exc}')
+
+    # Dedup by geo-coordinate (rounded to the nearest metre -- VIIRS
+    # detections at the same physical pixel reproject to effectively
+    # identical coordinates across different overpasses/days, modulo
+    # floating-point noise), keeping the record with the latest
+    # det_dt at each coordinate.
+    xs = gdf.geometry.x.round(0)
+    ys = gdf.geometry.y.round(0)
+    gdf = gdf.assign(_xr=xs, _yr=ys)
+    gdf = gdf.sort_values('det_dt')
+    deduped = gdf.drop_duplicates(subset=['_xr', '_yr'], keep='last')
+    deduped = deduped.drop(columns=['_xr', '_yr'])
+    n_unique = len(deduped)
+
+    deduped = gpd.GeoDataFrame(deduped, crs=gdf.crs)
+    tmp_path = shp_path + '.tmp.shp'
+    for ext in ('.shp', '.shx', '.dbf', '.prj', '.cpg'):
+        try:
+            os.remove(tmp_path[:-4] + ext)
+        except FileNotFoundError:
+            pass
+    deduped.to_file(tmp_path, driver='ESRI Shapefile')
+    for ext in ('.shp', '.shx', '.dbf', '.prj', '.cpg'):
+        src = tmp_path[:-4] + ext
+        dst = shp_path[:-4] + ext
+        if os.path.isfile(src):
+            try:
+                os.remove(dst)
+            except FileNotFoundError:
+                pass
+            os.replace(src, dst)
+
+    points = [[round(float(pt.x), 2), round(float(pt.y), 2)]
+              for pt in deduped.geometry]
+    det_dts = [str(v) for v in deduped['det_dt']]
+    overlay = {
+        'points': points,
+        'det_dts': det_dts,
+        'n_points': len(points),
+        'native_resolution_m': 375.0,  # VIIRS I-band nadir pixel size
+        'crs_wkt': raster_wkt,
+        'updated_at': datetime.datetime.now().isoformat(timespec='seconds'),
+    }
+    with open(overlay_path, 'w', encoding='utf-8') as f:
+        json.dump(overlay, f)
+
+    _log(f'      [accumulate] Building deduplicated VIIRS buffer: done '
+         f'-- {n_input} input record(s) -> {n_unique} unique '
+         f'location(s) -> {shp_path}')
+    return {'n_input_records': n_input, 'n_unique': n_unique,
+            'shp_path': shp_path, 'overlay_path': overlay_path}
+
+
+def load_viirs_overlay(state) -> dict:
+    """Load the cached viirs_overlay.json for the active year, or an
+    empty overlay if it doesn't exist yet."""
+    year = state.active_year
+    save_dir = year_viirs_dir(state, year)
+    overlay_path = os.path.join(save_dir, 'viirs_overlay.json')
+    if not os.path.isfile(overlay_path):
+        return {'points': [], 'det_dts': [], 'n_points': 0,
+                'native_resolution_m': 375.0}
+    with open(overlay_path, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+
+
 def bootstrap_year(state, year: int, raster_path: str,
                    save_dir: str = None,
                    download_workers: int = 16,
@@ -912,11 +1337,17 @@ def bootstrap_year(state, year: int, raster_path: str,
 
     n_shp = shapify_year(save_dir, raster_path, workers=shapify_workers)
     index_path = build_year_index(save_dir, raster_path)
+
+    print_viirs_events_summary(dl_result.get('events_path'))
+
+    acc_result = build_viirs_accumulated_buffer(save_dir, raster_path)
+
     _log(f'      [{os.path.basename(raster_path)}] year {year}: '
          f'bootstrap done.')
     return {'n_nc': dl_result['total_nc'], 'n_shp': n_shp,
             'save_dir': save_dir, 'index_path': index_path,
-            'download_summary': dl_result}
+            'download_summary': dl_result,
+            'accumulate_summary': acc_result}
 
 
 def bootstrap_all_years(state, curl_primary: bool = True,

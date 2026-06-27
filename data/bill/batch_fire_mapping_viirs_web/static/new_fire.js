@@ -296,10 +296,57 @@ function nativeBboxToWGS84(xmin, ymin, xmax, ymax) {
 // ----- Drawing -----
 
 let bcwsOverlay = null;  // {points: [[x,y],...], polygons: [[[x,y],...]]} in raster-native CRS
+let viirsOverlay = null;  // {points: [[x,y],...], det_dts: [...], native_resolution_m} in raster-native CRS
+const viirsToggle = document.getElementById('nf-viirs-toggle');
 // Forward-declared here (assigned further down, alongside the rest of
 // the zoom machinery) so drawBcwsOverlay() -- which runs earlier in
 // some call paths -- never references it before initialization.
 let zoomScale = 1;
+
+async function loadViirsOverlay() {
+    try {
+        const r = await fetch('/api/viirs/overlay');
+        if (!r.ok) return;
+        viirsOverlay = await r.json();
+        console.log('[viirs] points:', (viirsOverlay.points || []).length,
+                    'native_resolution_m:', viirsOverlay.native_resolution_m);
+    } catch (exc) {
+        viirsOverlay = null;
+    }
+    redraw();
+}
+
+function drawViirsOverlay(ctx) {
+    if (!viirsOverlay || !meta) return;
+    if (viirsToggle && !viirsToggle.checked) return;
+    const pts = viirsOverlay.points || [];
+    if (!pts.length) return;
+
+    // VIIRS detection pixel radius, in native CRS metres, scaled to
+    // however the overview/zoom is currently rendering -- computed
+    // dynamically from two native-CRS points a known distance apart,
+    // rather than any hardcoded pixel ratio, so it stays correct
+    // regardless of the overview's sampling resolution or current
+    // zoom level.
+    const resM = viirsOverlay.native_resolution_m || 375.0;
+    const radiusM = resM / 2;
+
+    ctx.fillStyle = 'rgba(0, 204, 51, 0.55)';
+    ctx.strokeStyle = 'rgba(0, 150, 40, 0.85)';
+    ctx.lineWidth = 1;
+
+    pts.forEach(([x, y]) => {
+        const c0 = nativeToCanvas(x, y);
+        const c1 = nativeToCanvas(x + radiusM, y);
+        if (!c0 || !c1) return;
+        const screenRadius = Math.hypot(c1[0] - c0[0], c1[1] - c0[1]);
+        if (screenRadius <= 0) return;
+        ctx.beginPath();
+        ctx.arc(c0[0], c0[1], screenRadius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+    });
+}
 
 async function loadBcwsOverlay() {
     try {
@@ -385,6 +432,7 @@ function redraw() {
     const ctx = canvas.getContext('2d');
     ctx.imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawViirsOverlay(ctx);
     drawBcwsOverlay(ctx);
     if (!bbox) return;
     const x = Math.min(bbox.x0, bbox.x1);
@@ -982,6 +1030,11 @@ sizeCanvasToWrap();
 // timing happening to work out.
 (async () => {
     await loadYear(NF_ACTIVE_YEAR);
+    await loadViirsOverlay();
     await loadBcwsOverlay();
 })();
+
+if (viirsToggle) {
+    viirsToggle.addEventListener('change', () => redraw());
+}
 })();
