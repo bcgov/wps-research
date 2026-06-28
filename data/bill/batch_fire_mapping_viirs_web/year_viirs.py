@@ -23,6 +23,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from osgeo import gdal, osr
@@ -454,8 +455,31 @@ def _install_http_logging(log_dir: str, events_path: str = None) -> None:
         listing = _is_listing_url(url)
         filename = url.rsplit('/', 1)[-1] if not listing else None
         _log(f'        [http] ENTER  GET {url}')
+        # Same rationale as the curl path's retry loop below: only
+        # retry on a 5xx (transient server-side) response, not on 4xx
+        # or connection-level failures. The inner try/except here only
+        # decides retry-vs-not; any exception that ends up propagating
+        # past it (a non-5xx HTTPError, or a 5xx with retries
+        # exhausted) falls through to the existing outer except below,
+        # so every failure path still gets logged exactly as before --
+        # this only adds a delay-and-retry step in front of that.
         try:
-            resp = _orig_urlopen(req, *args, **kwargs)
+            _RETRY_DELAYS_S = (2, 5, 10)
+            attempt = 0
+            while True:
+                try:
+                    resp = _orig_urlopen(req, *args, **kwargs)
+                    break
+                except urllib.error.HTTPError as exc:
+                    if exc.code >= 500 and attempt < len(_RETRY_DELAYS_S):
+                        delay = _RETRY_DELAYS_S[attempt]
+                        _log(f'        [http] RETRY  GET {url} -- '
+                             f'HTTP {exc.code}, retrying in {delay}s '
+                             f'({attempt + 1}/{len(_RETRY_DELAYS_S)}) ...')
+                        time.sleep(delay)
+                        attempt += 1
+                        continue
+                    raise
             body = resp.read()
             body_text = body.decode('utf-8', errors='replace')
             response_text = (
@@ -601,8 +625,30 @@ def _install_native_curl(log_dir: str, events_path: str = None) -> None:
         listing = _is_listing_url(url)
         filename = url.rsplit('/', 1)[-1] if not listing else None
         _log(f'        [curl] ENTER  {url}')
+        # Retry a handful of times on a 5xx (server-side) response.
+        # LAADS occasionally returns transient 500s -- the LAADS
+        # preflight check at startup logs exactly this -- and without
+        # a retry here, a transient server hiccup on the *listing*
+        # call gets indistinguishable from a genuine "no fire
+        # detected this day" and silently drops real detections from
+        # the season's accumulation. 4xx responses and outright
+        # connection failures are deliberately NOT retried: those
+        # aren't transient server load, so retrying just delays an
+        # outcome that won't change.
+        _RETRY_DELAYS_S = (2, 5, 10)
         body, status, request_text, response_text = _curl_cli_request(
             url, tok)
+        attempt = 0
+        while (status is not None and status >= 500
+               and attempt < len(_RETRY_DELAYS_S)):
+            delay = _RETRY_DELAYS_S[attempt]
+            _log(f'        [curl] RETRY  {url} -- HTTP {status}, '
+                 f'retrying in {delay}s ({attempt + 1}/'
+                 f'{len(_RETRY_DELAYS_S)}) ...')
+            time.sleep(delay)
+            body, status, request_text, response_text = _curl_cli_request(
+                url, tok)
+            attempt += 1
         _log_curl_pair(log_dir, request_text, response_text)
         _log(f'        [curl] REQUEST  {url}')
         if body is None:

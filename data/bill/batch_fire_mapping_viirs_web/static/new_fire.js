@@ -53,8 +53,18 @@ const fields = {
 };
 
 let meta = null;
-let bbox = null;          // {x0, y0, x1, y1} in canvas pixels (top-left origin)
-let drag = null;          // {kind: 'create'|'move', startMx, startMy, origBbox?}
+// {x0, y0, x1, y1} -- two opposite corners of the AOI box, in RASTER-NATIVE
+// CRS units (metres), NOT screen/canvas pixels. Storing it in native CRS
+// (the same space VIIRS/BCWS overlay points live in) means it's projected
+// to screen pixels fresh on every redraw via nativeToCanvas(), exactly
+// like every other overlay -- so it automatically tracks window resizes,
+// zoom, and pan instead of staying pinned at a stale absolute pixel
+// position. (Previously this stored raw screen-pixel mouse coordinates,
+// which is why the box visually drifted away from the underlying image
+// whenever the window was reshaped: the image's on-screen position/size
+// changed but the box's cached pixel coords did not.)
+let bbox = null;
+let drag = null;          // {kind: 'create'|'move', startNative, origBbox?}
 let lastPreview = null;   // {preview_id, year, start, end, bbox_native} —
                           // sent in the create body when the form still
                           // matches, so the worker can skip accumulate.
@@ -331,8 +341,11 @@ function drawViirsOverlay(ctx) {
     const resM = viirsOverlay.native_resolution_m || 375.0;
     const radiusM = resM / 2;
 
-    ctx.fillStyle = 'rgba(0, 204, 51, 0.55)';
-    ctx.strokeStyle = 'rgba(0, 150, 40, 0.85)';
+    // Magenta so detections stand out clearly against the green/yellow
+    // vegetation and blue water of the false-color overview, instead of
+    // blending into the foliage the way the previous green did.
+    ctx.fillStyle = 'rgba(255, 0, 220, 0.55)';
+    ctx.strokeStyle = 'rgba(200, 0, 170, 0.9)';
     ctx.lineWidth = 1;
 
     pts.forEach(([x, y]) => {
@@ -420,6 +433,30 @@ function drawBcwsOverlay(ctx) {
     });
 }
 
+// Projects a native-CRS bbox {x0,y0,x1,y1} to a screen-pixel rect
+// {x0,y0,x1,y1} via nativeToCanvas, the same projection every other
+// overlay point goes through -- so the box is always positioned
+// relative to wherever the underlying image is currently rendered,
+// regardless of window size, zoom, or pan.
+function nativeBboxScreenRect(b) {
+    if (!b || !meta) return null;
+    const c0 = nativeToCanvas(b.x0, b.y0);
+    const c1 = nativeToCanvas(b.x1, b.y1);
+    if (!c0 || !c1) return null;
+    return {x0: c0[0], y0: c0[1], x1: c1[0], y1: c1[1]};
+}
+
+// True once the overview <img> has actually decoded and has real pixel
+// dimensions. Before that, overviewBufferW()/H() fall back to a bogus
+// 1px width, which would briefly place every overlay point/marker at a
+// garbage position near the canvas origin. Drawing is skipped in that
+// window; the overview's own onload handler triggers a fresh redraw()
+// once it's actually ready, so nothing is lost -- this just avoids ever
+// painting the wrong thing in between.
+function overviewReady() {
+    return !!(overview.naturalWidth && overview.naturalHeight);
+}
+
 function redraw() {
     // Always resync first -- the wrap's size can be 0x0 until the
     // overview <img> has actually loaded (the wrap is unsized CSS
@@ -432,13 +469,17 @@ function redraw() {
     const ctx = canvas.getContext('2d');
     ctx.imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!overviewReady()) return;  // see overviewReady() -- avoid drawing
+                                    // against not-yet-decoded image dims
     drawViirsOverlay(ctx);
     drawBcwsOverlay(ctx);
     if (!bbox) return;
-    const x = Math.min(bbox.x0, bbox.x1);
-    const y = Math.min(bbox.y0, bbox.y1);
-    const w = Math.abs(bbox.x1 - bbox.x0);
-    const h = Math.abs(bbox.y1 - bbox.y0);
+    const r = nativeBboxScreenRect(bbox);
+    if (!r) return;
+    const x = Math.min(r.x0, r.x1);
+    const y = Math.min(r.y0, r.y1);
+    const w = Math.abs(r.x1 - r.x0);
+    const h = Math.abs(r.y1 - r.y0);
     ctx.fillStyle = 'rgba(255, 220, 70, 0.18)';
     ctx.fillRect(x, y, w, h);
     ctx.strokeStyle = 'rgba(255, 180, 0, 0.95)';
@@ -448,10 +489,8 @@ function redraw() {
 
 function updateReadout() {
     if (!bbox || !meta) return;
-    const [xa, ya] = canvasToNative(bbox.x0, bbox.y0);
-    const [xb, yb] = canvasToNative(bbox.x1, bbox.y1);
-    const xmin = Math.min(xa, xb), xmax = Math.max(xa, xb);
-    const ymin = Math.min(ya, yb), ymax = Math.max(ya, yb);
+    const xmin = Math.min(bbox.x0, bbox.x1), xmax = Math.max(bbox.x0, bbox.x1);
+    const ymin = Math.min(bbox.y0, bbox.y1), ymax = Math.max(bbox.y0, bbox.y1);
     fields.xmin.value = xmin.toFixed(2);
     fields.ymin.value = ymin.toFixed(2);
     fields.xmax.value = xmax.toFixed(2);
@@ -487,10 +526,7 @@ function applyTypedRasterBbox() {
     const ymax = parseFloat(fields.ymax.value);
     if (![xmin, ymin, xmax, ymax].every(Number.isFinite)) return false;
     if (xmin >= xmax || ymin >= ymax) return false;
-    const tl = nativeToCanvas(xmin, ymax);  // upper-left corner
-    const br = nativeToCanvas(xmax, ymin);  // lower-right corner
-    if (!tl || !br) return false;
-    bbox = {x0: tl[0], y0: tl[1], x1: br[0], y1: br[1]};
+    bbox = {x0: xmin, y0: ymax, x1: xmax, y1: ymin};
     redraw();
     // Refresh WGS84 readout (raster-CRS values are already what the
     // user typed — leave them alone so we don't fight their cursor).
@@ -534,9 +570,10 @@ function getMousePos(ev) {
 }
 
 function bboxContains(b, mx, my) {
-    if (!b) return false;
-    const x0 = Math.min(b.x0, b.x1), x1 = Math.max(b.x0, b.x1);
-    const y0 = Math.min(b.y0, b.y1), y1 = Math.max(b.y0, b.y1);
+    const r = nativeBboxScreenRect(b);
+    if (!r) return false;
+    const x0 = Math.min(r.x0, r.x1), x1 = Math.max(r.x0, r.x1);
+    const y0 = Math.min(r.y0, r.y1), y1 = Math.max(r.y0, r.y1);
     return mx >= x0 && mx <= x1 && my >= y0 && my <= y1;
 }
 
@@ -544,10 +581,14 @@ canvas.addEventListener('mousedown', (ev) => {
     if (!meta) return;
     const [mx, my] = getMousePos(ev);
     if (bbox && bboxContains(bbox, mx, my)) {
-        drag = {kind: 'move', startMx: mx, startMy: my,
+        const startNative = canvasToNative(mx, my);
+        if (!startNative) return;
+        drag = {kind: 'move', startNative,
                 origBbox: Object.assign({}, bbox)};
     } else {
-        bbox = {x0: mx, y0: my, x1: mx, y1: my};
+        const nat = canvasToNative(mx, my);
+        if (!nat) return;
+        bbox = {x0: nat[0], y0: nat[1], x1: nat[0], y1: nat[1]};
         drag = {kind: 'create'};
         redraw();
     }
@@ -569,15 +610,18 @@ canvas.addEventListener('mousemove', (ev) => {
     }
     if (!drag) return;
     if (drag.kind === 'create') {
-        bbox.x1 = mx;
-        bbox.y1 = my;
+        const nat = canvasToNative(mx, my);
+        if (nat) { bbox.x1 = nat[0]; bbox.y1 = nat[1]; }
     } else if (drag.kind === 'move') {
-        const dx = mx - drag.startMx;
-        const dy = my - drag.startMy;
-        bbox.x0 = drag.origBbox.x0 + dx;
-        bbox.y0 = drag.origBbox.y0 + dy;
-        bbox.x1 = drag.origBbox.x1 + dx;
-        bbox.y1 = drag.origBbox.y1 + dy;
+        const cur = canvasToNative(mx, my);
+        if (cur) {
+            const dx = cur[0] - drag.startNative[0];
+            const dy = cur[1] - drag.startNative[1];
+            bbox.x0 = drag.origBbox.x0 + dx;
+            bbox.y0 = drag.origBbox.y0 + dy;
+            bbox.x1 = drag.origBbox.x1 + dx;
+            bbox.y1 = drag.origBbox.y1 + dy;
+        }
     }
     redraw();
     updateReadout();
@@ -587,8 +631,10 @@ window.addEventListener('mouseup', () => {
     if (drag) {
         const wasDragging = drag;
         drag = null;
-        if (bbox && Math.abs(bbox.x0 - bbox.x1) < 2
-                 && Math.abs(bbox.y0 - bbox.y1) < 2) {
+        const r = bbox ? nativeBboxScreenRect(bbox) : null;
+        const tooSmall = !r
+            || (Math.abs(r.x0 - r.x1) < 2 && Math.abs(r.y0 - r.y1) < 2);
+        if (!bbox || tooSmall) {
             bbox = null;
             clearReadout();
             redraw();
