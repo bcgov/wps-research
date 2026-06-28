@@ -464,7 +464,7 @@ def _install_http_logging(log_dir: str, events_path: str = None) -> None:
         # so every failure path still gets logged exactly as before --
         # this only adds a delay-and-retry step in front of that.
         try:
-            _RETRY_DELAYS_S = (2, 5, 10)
+            _RETRY_DELAYS_S = (0.02, 0.05, 0.1)
             attempt = 0
             while True:
                 try:
@@ -635,7 +635,7 @@ def _install_native_curl(log_dir: str, events_path: str = None) -> None:
         # connection failures are deliberately NOT retried: those
         # aren't transient server load, so retrying just delays an
         # outcome that won't change.
-        _RETRY_DELAYS_S = (2, 5, 10)
+        _RETRY_DELAYS_S = (0.02, 0.05, 0.1)
         body, status, request_text, response_text = _curl_cli_request(
             url, tok)
         attempt = 0
