@@ -26,6 +26,7 @@
     <span id="agreement-info"></span>
     <span class="help" tabindex="0" aria-label="About agreement" aria-expanded="false" data-tip="Agreement % compares the ML-classified burn footprint against the hint perimeter (VIIRS hotspot polygon). 100% = the ML result exactly matches the hint; lower values mean the ML deviated from the hint. It's a sanity check, not ground truth — a low agreement may mean the hint was loose, not that the map is wrong.">?</span>
     <span id="crop-info"></span>
+    <span id="hint-mode-group" class="hint-mode-group" style="display:none"></span>
 </div>
 
 <!-- Queue banner — shown when another fire is currently mapping (your
@@ -349,6 +350,63 @@ const VIEW_LABELS = {
     comparison: 'Comparison (figure)', brush_comparison: 'Brush comparison',
 };
 
+// Hint mode — tracks which hint mask source is active.
+let currentHintMode = 'viirs';
+
+const HINT_MODES = [
+    {id: 'viirs',         label: 'VIIRS'},
+    {id: 'redwins_post',  label: 'Red wins (post)'},
+    {id: 'redwins_diff',  label: 'Red wins (diff)'},
+];
+
+function renderHintModeButtons() {
+    const group = document.getElementById('hint-mode-group');
+    if (!group) return;
+    group.style.display = '';
+    group.innerHTML = '<span style="font-size:12px;margin-right:4px">Hint:</span>';
+    for (const m of HINT_MODES) {
+        const btn = document.createElement('button');
+        btn.textContent = m.label;
+        btn.className = 'btn-hint-mode' + (m.id === currentHintMode ? ' active' : '');
+        btn.onclick = () => switchHintMode(m.id);
+        group.appendChild(btn);
+    }
+}
+
+async function switchHintMode(mode) {
+    if (mode === currentHintMode) return;
+    const group = document.getElementById('hint-mode-group');
+    // Disable buttons while switching.
+    for (const btn of group.querySelectorAll('.btn-hint-mode')) {
+        btn.disabled = true;
+    }
+    log(`Switching hint to ${mode}...`);
+    try {
+        const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/hint_mode`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+            body: JSON.stringify({mode}),
+        });
+        const data = await r.json();
+        if (!r.ok || !data.ok) {
+            log('Hint switch failed: ' + (data.error || 'unknown'), 'error');
+            return;
+        }
+        currentHintMode = mode;
+        renderHintModeButtons();
+        log(`Hint switched to ${data.perimeter_type}.`, 'success');
+        // Refresh hint preview if either pane is showing it.
+        if (leftView === 'hint') loadPaneImage('left', 'hint');
+        if (splitActive && rightView === 'hint') loadPaneImage('right', 'hint');
+    } catch (err) {
+        log('Hint switch error: ' + err.message, 'error');
+    } finally {
+        for (const btn of group.querySelectorAll('.btn-hint-mode')) {
+            btn.disabled = false;
+        }
+    }
+}
+
 // -----------------------------------------------------------------------
 // Console logging
 // -----------------------------------------------------------------------
@@ -456,8 +514,9 @@ async function prepareFire(padding) {
 
         document.getElementById('crop-info').innerHTML =
             `Crop: <strong>${cropW}&times;${cropH} px</strong> &middot; ` +
-            `Hint: <strong>${data.perimeter_type || '?'}</strong> &middot; ` +
             `Accum: <strong>${data.acc_start || '?'} &rarr; ${data.acc_end || '?'}</strong>`;
+        currentHintMode = data.hint_mode || 'viirs';
+        renderHintModeButtons();
 
         updateSampleSize();
         loadPaneImage('left', leftView);

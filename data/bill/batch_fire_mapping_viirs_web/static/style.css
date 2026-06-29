@@ -367,6 +367,39 @@ tbody tr.row-mapping:hover { background: #ede1ff; }
 .fire-info-bar span { white-space: nowrap; }
 .fire-info-bar strong { color: #1a1a1a; }
 
+/* Hint mode toggle buttons (fire_mapping page info bar) */
+.hint-mode-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+.btn-hint-mode {
+    font-size: 11px;
+    padding: 2px 8px;
+    border: 1px solid #bbb;
+    background: #f0f0f2;
+    color: #555;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: background 0.15s, color 0.15s;
+}
+.btn-hint-mode:first-of-type { border-radius: 3px 0 0 3px; }
+.btn-hint-mode:last-of-type  { border-radius: 0 3px 3px 0; }
+.btn-hint-mode:not(:first-of-type):not(:last-of-type) { border-radius: 0; }
+.btn-hint-mode.active {
+    background: #3a7bd5;
+    color: #fff;
+    border-color: #2a5da0;
+    font-weight: 600;
+}
+.btn-hint-mode:hover:not(.active):not(:disabled) {
+    background: #dde4f0;
+}
+.btn-hint-mode:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
 /* Main two-column layout */
 .main-content {
     display: flex;

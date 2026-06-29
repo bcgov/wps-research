@@ -68,6 +68,7 @@ class FireInfo:
     acc_start: str = ""
     acc_end: str = ""
     perimeter_type: str = ""
+    hint_mode: str = "viirs"  # 'viirs' | 'redwins_post' | 'redwins_diff'
 
     # Sampling (computed from crop dims)
     sample_size: int = 0

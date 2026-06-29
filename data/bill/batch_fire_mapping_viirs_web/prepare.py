@@ -17,13 +17,152 @@ from osgeo import gdal
 
 from .state import AppState, FireInfo, FireStatus
 from .io_utils import _atomic_yaml_dump
-from .preview import generate_all_previews
+from .preview import generate_all_previews, detect_band_groups, parse_envi_band_names
 from .mapping import (
     _compute_ml_area, _overlay_mask_on_post, _generate_result_preview,
 )
 from .brush import _read_envi_mask, _render_brush_comparison_png
 from .kml import _export_kml
 from .persistence import _save_fire_state
+
+gdal.UseExceptions()
+
+
+# -----------------------------------------------------------------------
+# "Red wins" dominant-band hint generation
+# -----------------------------------------------------------------------
+
+def generate_redwins_hint(crop_bin: str, band_indices: list[int],
+                          output_path: str) -> bool:
+    """Generate a binary hint mask using the "red wins" rule.
+
+    For each pixel, the first of the three bands in *band_indices* is
+    compared against the other two.  Where it exceeds both, the pixel
+    is marked 1 (burned); elsewhere 0.  NaN in any input band produces
+    NaN in the output.  The result is written as a single-band ENVI
+    float32 raster whose geotransform and projection match *crop_bin*,
+    so it plugs straight into the same hint-overlay / mapping-CLI path
+    that the VIIRS rasterised mask already uses.
+
+    *band_indices* are 1-based GDAL band numbers — typically the three
+    bands of the ``post`` or ``diff1`` group from
+    :func:`preview.detect_band_groups`.
+
+    Returns True on success.
+    """
+    ds = gdal.Open(crop_bin, gdal.GA_ReadOnly)
+    if ds is None:
+        return False
+    try:
+        w, h = ds.RasterXSize, ds.RasterYSize
+        n_bands = ds.RasterCount
+        gt = ds.GetGeoTransform()
+        proj = ds.GetProjection()
+
+        channels = []
+        for b_idx in band_indices[:3]:
+            if b_idx < 1 or b_idx > n_bands:
+                channels.append(np.full((h, w), np.nan, dtype=np.float32))
+                continue
+            arr = ds.GetRasterBand(b_idx).ReadAsArray().astype(np.float32)
+            channels.append(arr)
+    finally:
+        ds = None
+
+    if len(channels) < 3:
+        return False
+
+    red, green, blue = channels[0], channels[1], channels[2]
+
+    # "Red wins" = the first band strictly exceeds the other two at
+    # this pixel.  This is the core logic from dominant_band.py.
+    mask = (red > green) & (red > blue)
+
+    # Propagate NaN from any input band.
+    any_nan = np.isnan(red) | np.isnan(green) | np.isnan(blue)
+
+    result = np.where(any_nan, np.nan, mask.astype(np.float32))
+
+    # Write as ENVI flat binary (BSQ, float32) with matching header.
+    driver = gdal.GetDriverByName('ENVI')
+    out_ds = driver.Create(output_path, w, h, 1, gdal.GDT_Float32)
+    if out_ds is None:
+        return False
+    out_ds.SetGeoTransform(gt)
+    out_ds.SetProjection(proj)
+    out_ds.GetRasterBand(1).WriteArray(result)
+    out_ds.FlushCache()
+    out_ds = None
+    return True
+
+
+def switch_hint_mode(fire: FireInfo, mode: str) -> dict:
+    """Switch a fire's hint mask between viirs / redwins_post / redwins_diff.
+
+    Regenerates ``fire.hint_bin``, the hint overlay preview PNG, and
+    updates ``fire.perimeter_type`` / ``fire.hint_mode``.
+
+    Returns a dict with 'ok' (bool) and 'error' (str, if not ok).
+    """
+    if mode not in ('viirs', 'redwins_post', 'redwins_diff'):
+        return {'ok': False, 'error': f'Unknown hint mode: {mode}'}
+
+    if not fire.crop_bin or not os.path.isfile(fire.crop_bin):
+        return {'ok': False, 'error': 'Fire has no crop raster.'}
+
+    if mode == 'viirs':
+        # Restore the original VIIRS hint.
+        if not fire.viirs_bin or not os.path.isfile(fire.viirs_bin):
+            return {'ok': False,
+                    'error': 'No VIIRS hint available for this fire.'}
+        fire.hint_bin = fire.viirs_bin
+        fire.perimeter_type = 'viirs'
+        fire.hint_mode = 'viirs'
+
+    else:
+        # Red-wins mode: pick band group.
+        band_names = parse_envi_band_names(fire.crop_bin)
+        if not band_names:
+            ds = gdal.Open(fire.crop_bin, gdal.GA_ReadOnly)
+            if ds:
+                try:
+                    n = ds.RasterCount
+                finally:
+                    ds = None
+                band_names = [f'band {i + 1}' for i in range(n)]
+        groups = detect_band_groups(band_names)
+
+        if mode == 'redwins_post':
+            indices = groups.get('post', [])
+            label = 'redwins_post'
+        else:
+            indices = groups.get('diff1', [])
+            label = 'redwins_diff'
+
+        if len(indices) < 3:
+            return {'ok': False,
+                    'error': f'Not enough bands for {label} '
+                             f'(need 3, found {len(indices)}).'}
+
+        out_dir = os.path.join(fire.cache_dir, '_redwins')
+        os.makedirs(out_dir, exist_ok=True)
+        out_path = os.path.join(out_dir, f'{label}_hint.bin')
+
+        if not generate_redwins_hint(fire.crop_bin, indices, out_path):
+            return {'ok': False,
+                    'error': f'Failed to generate {label} hint mask.'}
+
+        fire.hint_bin = out_path
+        fire.perimeter_type = label
+        fire.hint_mode = mode
+
+    # Regenerate the hint overlay preview PNG.
+    if fire.hint_bin and os.path.isfile(fire.hint_bin):
+        _overlay_mask_on_post(fire, fire.hint_bin, 'hint', (0.0, 0.8, 0.2))
+        if 'hint' not in fire.available_views:
+            fire.available_views.append('hint')
+
+    return {'ok': True}
 
 # Bound by ``init`` from app.init_app — these live in ``app.py`` because
 # they coordinate with locks/registries shared across the worker, the

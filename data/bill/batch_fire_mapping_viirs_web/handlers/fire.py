@@ -63,6 +63,7 @@ from ..validation import _PARAM_SPEC, _validate_param, _validate_embed_bands
 from ..mapping_cmd import _build_mapping_cmd
 from ..io_utils import _atomic_yaml_dump
 from ..preview import generate_all_previews
+from ..prepare import switch_hint_mode
 
 # Late-bound to avoid a circular-import: app imports the mixins, then
 # app.init_app calls each mixin's ``init`` which re-assigns ``state`` and
@@ -214,12 +215,34 @@ class FireRoutes:
             'crop_h': fire.crop_h,
             'sample_size': fire.sample_size,
             'perimeter_type': fire.perimeter_type,
+            'hint_mode': fire.hint_mode,
             'acc_start': fire.acc_start,
             'acc_end': fire.acc_end,
             'has_comparison': has_comparison,
             'has_brush_comparison': has_brush,
             'previously_accepted': fire.previously_accepted,
             'ml_area_ha': fire.ml_area_ha,
+        })
+
+    def handle_api_hint_mode(self, fire_numbe):
+        """Switch the hint mask between viirs / red-wins (post) / red-wins (diff)."""
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        body = self._read_body()
+        if body is None:
+            return
+        mode = body.get('mode', 'viirs')
+        result = switch_hint_mode(fire, mode)
+        if not result.get('ok'):
+            self._send_json({'error': result.get('error', 'unknown')}, 400)
+            return
+        self._send_json({
+            'ok': True,
+            'perimeter_type': fire.perimeter_type,
+            'hint_mode': fire.hint_mode,
         })
 
     def handle_api_preview(self, fire_numbe, view):

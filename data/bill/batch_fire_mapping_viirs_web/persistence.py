@@ -148,6 +148,8 @@ def _save_fire_state():
                     entry['acc_end'] = fire.acc_end
                 if fire.perimeter_type:
                     entry['perimeter_type'] = fire.perimeter_type
+                if fire.hint_mode and fire.hint_mode != 'viirs':
+                    entry['hint_mode'] = fire.hint_mode
                 if fire.sample_size:
                     entry['sample_size'] = fire.sample_size
                 if fire.available_views:
@@ -373,6 +375,7 @@ def _load_fire_state():
             fire.acc_start = entry.get('acc_start', '')
             fire.acc_end = entry.get('acc_end', '')
             fire.perimeter_type = entry.get('perimeter_type', '')
+            fire.hint_mode = entry.get('hint_mode', 'viirs')
             fire.sample_size = entry.get('sample_size', 0)
             # Drop view keys whose preview PNG is gone from disk.
             # Manual .web_cache wipes leave fire_state.yaml claiming
