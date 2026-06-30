@@ -203,7 +203,6 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
     """
     from batch_fire_mapping.run_fire_mapping import crop_raster
     from .viirs_worker import (
-        _tight_bounds_from_shapefile, _verify_viirs_bin_nonzero,
         _read_dims, _compute_viirs_area_ha, accumulate_for_fire,
         _RASTERIZE_BUFFER_M, WorkerError,
         _invalidate_stale_rasterize,
@@ -237,31 +236,40 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
         or state.raster_path
 
     # ---- Re-accumulate from year-wide shared dir into cache_dir ----
+    # Best-effort: if no VIIRS data exists for this fire's bbox/dates,
+    # the re-prepare continues without a VIIRS hint (user can switch to
+    # "red wins" on the fire mapping page).
+    acc_shp = None
     try:
         acc_shp = accumulate_for_fire(fire, cache_dir, ref_raster)
     except WorkerError as exc:
-        _set_fire_status(fire, FireStatus.ERROR, str(exc))
-        return
+        sys.stderr.write(
+            f'[prepare] [{fire_numbe}] VIIRS accumulate returned no '
+            f'data ({exc}) — proceeding without VIIRS hint.\n')
+        sys.stderr.flush()
     except Exception as exc:
-        _set_fire_status(fire, FireStatus.ERROR,
-                         f'accumulate failed: {exc}')
+        sys.stderr.write(
+            f'[prepare] [{fire_numbe}] accumulate failed ({exc}) '
+            f'— proceeding without VIIRS hint.\n')
+        sys.stderr.flush()
+
+    # ---- Crop bounds: the user's drawn AOI rectangle (bbox_native),
+    # optionally expanded by the padding fraction.
+    if not getattr(fire, 'bbox_native', None):
+        _set_fire_status(
+            fire, FireStatus.ERROR,
+            'Cannot re-prepare: fire has no bbox on record.')
         return
 
-    # ---- Tight crop bounds straight from the cumulative shapefile.
-    # Skips the full-extent rasterize that this used to do — for a
-    # year-wide reference raster that rasterize was the dominant cost
-    # of every padding change between settings, even though its output
-    # was thrown away after deriving these four bounds.
-    try:
-        crop_xmin, crop_ymin, crop_xmax, crop_ymax = \
-            _tight_bounds_from_shapefile(acc_shp, ref_raster, padding=pad)
-    except WorkerError as exc:
-        _set_fire_status(fire, FireStatus.ERROR, str(exc))
-        return
-    except Exception as exc:
-        _set_fire_status(fire, FireStatus.ERROR,
-                         f'tight bounds failed: {exc}')
-        return
+    bx0, by0, bx1, by1 = fire.bbox_native
+    if pad > 0:
+        bw = bx1 - bx0
+        bh = by1 - by0
+        bx0 -= pad * bw
+        by0 -= pad * bh
+        bx1 += pad * bw
+        by1 += pad * bh
+    crop_xmin, crop_ymin, crop_xmax, crop_ymax = bx0, by0, bx1, by1
 
     crop_w = max(1, int(round(
         (crop_xmax - crop_xmin) / abs(state.raster_gt[1] or 1))))
@@ -308,59 +316,49 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
     fire.perim_bin = ''
 
     # -- Re-rasterize the cumulative VIIRS shapefile onto the crop frame --
-    # rasterize_shapefile already skips when the output exists, but its
-    # output reflects whatever crop frame produced it. Invalidate only
-    # when the crop bounds actually changed; otherwise let the built-in
-    # skip return immediately. This is what makes a serial mapping sweep
-    # over many paddings cheap on the steady state — the dominant cost
-    # of the re-prepare path used to be rasterize on every padding bump.
-    crop_rast_dir = os.path.join(cache_dir, '_viirs_crop')
-    bounds_file = os.path.join(crop_rast_dir, '.crop_bounds')
-    bounds_key = (f'{crop_xmin:.3f},{crop_ymin:.3f},'
-                  f'{crop_xmax:.3f},{crop_ymax:.3f}')
-    cached_bounds = None
-    if os.path.isfile(bounds_file):
-        try:
-            with open(bounds_file, 'r') as f:
-                cached_bounds = f.read().strip()
-        except OSError:
-            cached_bounds = None
-    if cached_bounds != bounds_key and os.path.isdir(crop_rast_dir):
-        shutil.rmtree(crop_rast_dir, ignore_errors=True)
-    os.makedirs(crop_rast_dir, exist_ok=True)
-    # The bounds_key cache only invalidates on crop-extent change. If
-    # the cumulative shapefile itself was rebuilt with new days but the
-    # crop bounds happen to match, rasterize_shapefile would short-
-    # circuit on the existing .bin and silently return stale data.
-    # Force re-rasterize whenever the .shp is newer than the .bin.
-    _invalidate_stale_rasterize(acc_shp, crop_rast_dir)
+    # Best-effort: if acc_shp is None (no VIIRS data), skip rasterize.
     viirs_bin = None
-    try:
-        viirs_bin = rasterize_shapefile(
-            shp_path=acc_shp, ref_image=crop_bin,
-            output_dir=crop_rast_dir, buffer_m=375.0,
-        )
-        if viirs_bin and cached_bounds != bounds_key:
+    if acc_shp and os.path.isfile(acc_shp):
+        crop_rast_dir = os.path.join(cache_dir, '_viirs_crop')
+        bounds_file = os.path.join(crop_rast_dir, '.crop_bounds')
+        bounds_key = (f'{crop_xmin:.3f},{crop_ymin:.3f},'
+                      f'{crop_xmax:.3f},{crop_ymax:.3f}')
+        cached_bounds = None
+        if os.path.isfile(bounds_file):
             try:
-                with open(bounds_file, 'w') as f:
-                    f.write(bounds_key)
+                with open(bounds_file, 'r') as f:
+                    cached_bounds = f.read().strip()
             except OSError:
-                pass
-    except Exception as exc:
-        sys.stderr.write(
-            f'[prepare] [{fire_numbe}] re-rasterize failed: {exc}\n')
-        sys.stderr.flush()
-        viirs_bin = None
+                cached_bounds = None
+        if cached_bounds != bounds_key and os.path.isdir(crop_rast_dir):
+            shutil.rmtree(crop_rast_dir, ignore_errors=True)
+        os.makedirs(crop_rast_dir, exist_ok=True)
+        _invalidate_stale_rasterize(acc_shp, crop_rast_dir)
+        try:
+            viirs_bin = rasterize_shapefile(
+                shp_path=acc_shp, ref_image=crop_bin,
+                output_dir=crop_rast_dir, buffer_m=375.0,
+            )
+            if viirs_bin and cached_bounds != bounds_key:
+                try:
+                    with open(bounds_file, 'w') as f:
+                        f.write(bounds_key)
+                except OSError:
+                    pass
+        except Exception as exc:
+            sys.stderr.write(
+                f'[prepare] [{fire_numbe}] re-rasterize failed: {exc}\n')
+            sys.stderr.flush()
+            viirs_bin = None
 
-    if not viirs_bin or not os.path.isfile(viirs_bin):
-        _set_fire_status(
-            fire, FireStatus.ERROR,
-            'Cannot re-prepare hint: VIIRS shapefile missing or empty.')
-        return
-
-    fire.hint_bin = viirs_bin
-    fire.viirs_bin = viirs_bin
-    fire.perimeter_type = 'viirs'
+    if viirs_bin and os.path.isfile(viirs_bin):
+        fire.hint_bin = viirs_bin
+        fire.viirs_bin = viirs_bin
+        fire.perimeter_type = 'viirs'
+    else:
+        fire.hint_bin = ''
+        fire.viirs_bin = ''
+        fire.perimeter_type = 'none'
 
     if fire.viirs_start_date:
         fire.acc_start = fire.viirs_start_date

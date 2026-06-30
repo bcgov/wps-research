@@ -30,6 +30,12 @@ def _build_mapping_cmd(fire: FireInfo, params: dict,
     sample_size = int(round(fire.crop_w * fire.crop_h * rate))
     sample_size = max(min_s, min(max_s, sample_size))
 
+    if not fire.hint_bin or not os.path.isfile(fire.hint_bin):
+        raise ValueError(
+            'No hint mask available. Switch hint mode to '
+            '"Red wins (post)" or "Red wins (diff)" first, or '
+            'ensure VIIRS data is available for this fire.')
+
     # '-u' forces line-buffered stdout on the CLI child. Without it,
     # Python block-buffers to a pipe (~8 KB), so the web UI sees many
     # stage-transition lines arrive in one burst and the progress pills

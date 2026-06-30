@@ -232,11 +232,11 @@ def generate_overview(
     year = _year_from_filename(raster_path)
     file_date = _date_from_filename(raster_path)
 
-    # Start: May 1 of the raster's year (the post-imagery's year, or
-    # today's year if the filename has no parseable year at all).
+    # Start: January 1 of the raster's year (the post-imagery's year,
+    # or today's year if the filename has no parseable year at all).
     start_year = file_date.year if file_date else (
         year if year is not None else datetime.date.today().year)
-    default_start = datetime.date(start_year, 5, 1).isoformat()
+    default_start = datetime.date(start_year, 1, 1).isoformat()
 
     # End / fire date: the date actually encoded in the stack
     # filename (e.g. "20260622_stack.bin" -> 2026-06-22) -- this is

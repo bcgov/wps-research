@@ -587,53 +587,67 @@ def _viirs_worker(fire: FireInfo) -> None:
         or state.raster_path
 
     try:
-        # ---- Stage 1: accumulate from year-wide shp dir ----
+        # ---- Stage 1: accumulate VIIRS from year-wide shp dir ----
+        # This is best-effort: if no VIIRS fire pixels exist in the
+        # user's bbox + date range, the fire still proceeds — the user
+        # can switch to "red wins" hint mode on the fire mapping page.
+        acc_shp = None
+        viirs_cropped = None
         _set_progress(fire, 'accumulating',
                       detail='aggregating shapefiles')
-        acc_shp = accumulate_for_fire(fire, cache_dir, ref_raster)
+        try:
+            acc_shp = accumulate_for_fire(fire, cache_dir, ref_raster)
+        except WorkerError as exc:
+            sys.stderr.write(
+                f'[viirs_worker] {fire.fire_numbe}: VIIRS accumulate '
+                f'returned no data ({exc}) — proceeding without VIIRS '
+                f'hint.\n')
         if fire.cancel_event.is_set():
             raise WorkerCancelled()
 
-        # ---- Stage 2: tight crop derived from shapefile, then crop +
-        # rasterize on the small frame + previews. The full-extent
-        # rasterize that used to live here is gone — its only purpose was
-        # to derive tight bounds, which we now read straight from
-        # gdf.total_bounds (orders of magnitude faster on year-wide tiles).
-        _set_progress(fire, 'cropping', detail='deriving tight bounds',
-                      fraction=0.0)
-        xmin, ymin, xmax, ymax = _tight_bounds_from_shapefile(
-            acc_shp, ref_raster, padding=state.padding)
-        if fire.cancel_event.is_set():
-            raise WorkerCancelled()
-
+        # ---- Stage 2: crop the reference raster to the user's drawn
+        # AOI rectangle (bbox_native) exactly, with no extra padding.
         _set_progress(fire, 'cropping', detail='cropping reference raster',
                       fraction=0.25)
         from batch_fire_mapping.run_fire_mapping import crop_raster
+        xmin, ymin, xmax, ymax = fire.bbox_native
         crop_bin = os.path.join(cache_dir, f'{fire.fire_numbe}_crop.bin')
         if not crop_raster(ref_raster, crop_bin, xmin, ymin, xmax, ymax):
             raise WorkerError('GDAL crop failed.')
         if fire.cancel_event.is_set():
             raise WorkerCancelled()
 
-        # Rasterize VIIRS onto the cropped extent so the hint aligns
-        # with crop_bin pixel-for-pixel. Cheap because the crop frame is
-        # small.
-        _set_progress(fire, 'cropping',
-                      detail='rasterizing onto crop', fraction=0.5)
-        from viirs.utils.rasterize import rasterize_shapefile
-        crop_rast_dir = os.path.join(cache_dir, '_viirs_crop')
-        os.makedirs(crop_rast_dir, exist_ok=True)
-        _invalidate_stale_rasterize(acc_shp, crop_rast_dir)
-        viirs_cropped = rasterize_shapefile(
-            shp_path=acc_shp,
-            ref_image=crop_bin,
-            output_dir=crop_rast_dir,
-            buffer_m=_RASTERIZE_BUFFER_M,
-        )
-        if not viirs_cropped or not os.path.isfile(viirs_cropped):
-            raise WorkerError(
-                'Rasterize onto crop produced no output.')
-        _verify_viirs_bin_nonzero(viirs_cropped)
+        # Rasterize VIIRS onto the cropped extent (if we have data).
+        if acc_shp and os.path.isfile(acc_shp):
+            _set_progress(fire, 'cropping',
+                          detail='rasterizing onto crop', fraction=0.5)
+            try:
+                from viirs.utils.rasterize import rasterize_shapefile
+                crop_rast_dir = os.path.join(cache_dir, '_viirs_crop')
+                os.makedirs(crop_rast_dir, exist_ok=True)
+                _invalidate_stale_rasterize(acc_shp, crop_rast_dir)
+                viirs_cropped = rasterize_shapefile(
+                    shp_path=acc_shp,
+                    ref_image=crop_bin,
+                    output_dir=crop_rast_dir,
+                    buffer_m=_RASTERIZE_BUFFER_M,
+                )
+                if viirs_cropped and os.path.isfile(viirs_cropped):
+                    try:
+                        _verify_viirs_bin_nonzero(viirs_cropped)
+                    except WorkerError:
+                        sys.stderr.write(
+                            f'[viirs_worker] {fire.fire_numbe}: '
+                            f'rasterized VIIRS has no fire pixels — '
+                            f'proceeding without VIIRS hint.\n')
+                        viirs_cropped = None
+                else:
+                    viirs_cropped = None
+            except Exception as exc:
+                sys.stderr.write(
+                    f'[viirs_worker] {fire.fire_numbe}: VIIRS rasterize '
+                    f'failed ({exc}) — proceeding without.\n')
+                viirs_cropped = None
         if fire.cancel_event.is_set():
             raise WorkerCancelled()
 
@@ -651,35 +665,39 @@ def _viirs_worker(fire: FireInfo) -> None:
         # Set fire.cache_dir so _overlay_mask_on_post can resolve it.
         fire.cache_dir = cache_dir
 
-        # Generate hint overlay so the fire-mapping page already has a
-        # green mask over the post preview the moment status flips to
-        # READY (no classification needed).
-        try:
-            from .mapping import _overlay_mask_on_post
-            _overlay_mask_on_post(
-                fire, viirs_cropped, 'hint', (0.0, 0.8, 0.2))
-        except Exception as exc:
-            sys.stderr.write(
-                f'[viirs_worker] hint overlay generation failed: '
-                f'{exc}\n')
+        # Generate hint overlay (VIIRS mask over post preview) when we
+        # have VIIRS data; skip cleanly otherwise.
+        if viirs_cropped:
+            try:
+                from .mapping import _overlay_mask_on_post
+                _overlay_mask_on_post(
+                    fire, viirs_cropped, 'hint', (0.0, 0.8, 0.2))
+            except Exception as exc:
+                sys.stderr.write(
+                    f'[viirs_worker] hint overlay generation failed: '
+                    f'{exc}\n')
 
         with state.lock:
             fire.crop_bin = crop_bin
-            fire.viirs_bin = viirs_cropped
-            fire.hint_bin = viirs_cropped
+            fire.viirs_bin = viirs_cropped or ''
+            fire.hint_bin = viirs_cropped or ''
             fire.crop_w = crop_w
             fire.crop_h = crop_h
-            fire.padding_used = state.padding
+            fire.padding_used = 0.0
             fire.sample_size = sample_size
             fire.acc_start = fire.viirs_start_date
             fire.acc_end = fire.viirs_end_date
-            fire.perimeter_type = 'viirs'
+            fire.perimeter_type = 'viirs' if viirs_cropped else 'none'
+            fire.hint_mode = 'viirs' if viirs_cropped else 'viirs'
             fire.available_views = views
-            if 'hint' not in fire.available_views \
+            if viirs_cropped \
+                    and 'hint' not in fire.available_views \
                     and os.path.isfile(os.path.join(
                         cache_dir, 'previews', 'hint.png')):
                 fire.available_views.append('hint')
-            fire.fire_size_ha = _compute_viirs_area_ha(viirs_cropped)
+            fire.fire_size_ha = (
+                _compute_viirs_area_ha(viirs_cropped)
+                if viirs_cropped else 0.0)
             fire.status = FireStatus.READY
             fire.is_new = True
             fire.progress = {}
@@ -689,10 +707,13 @@ def _viirs_worker(fire: FireInfo) -> None:
             _save_fire_state()
         if _push_notification is not None:
             try:
+                viirs_note = (
+                    '' if viirs_cropped
+                    else ' (no VIIRS data — use red wins for hint)')
                 _push_notification(
                     None, 'success',
                     'Fire prepared',
-                    f'{fire.fire_numbe} is ready to map.',
+                    f'{fire.fire_numbe} is ready to map.{viirs_note}',
                     fire=fire.fire_numbe)
             except Exception:
                 pass
