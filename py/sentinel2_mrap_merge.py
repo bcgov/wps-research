@@ -381,6 +381,9 @@ for date_idx, (d, df) in enumerate(date_mrap):
                 err('unreachable b')
 
     # apply filters before adding to job list
+    if d < '20260501':
+        print(f'SKIPPING (before cutoff 20260501) {d}', flush=True)
+        continue
     if (merge_dates is not None) and (d not in merge_dates):
         continue
     if date_idx % N != 0:
