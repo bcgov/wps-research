@@ -165,6 +165,7 @@ class AppState:
         self.sample_rate: float = 0.05
         self.min_samples: int = 500
         self.max_samples: int = 30000
+        self.max_aoi_fraction: float = 0.10  # max AOI as fraction of full-res image area
 
         # LAADS DAAC token (read once at startup)
         self.laads_token: str = ""

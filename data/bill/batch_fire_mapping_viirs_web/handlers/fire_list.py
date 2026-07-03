@@ -330,6 +330,7 @@ class FireListRoutes:
         except Exception as exc:
             self._send_json({'error': f'parse failed: {exc}'}, 500)
             return
+        meta['max_aoi_fraction'] = state.max_aoi_fraction
         self._send_json(meta)
 
     def handle_api_bcws_overlay(self):

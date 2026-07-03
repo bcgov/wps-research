@@ -953,23 +953,15 @@ function enableMapButtons() {
 
 async function cancelMapping() {
     if (!isMapping) return;
-    const reason = prompt(
-        'Cancel the current mapping? The run in progress will finish, '
-        + 'but no further runs will start.\n\n'
-        + 'Optional: describe why (for the audit log). Leave blank to skip.',
-        '');
-    if (reason === null) return;  // user clicked Cancel on the prompt
+    if (!confirm('Cancel the current mapping?')) return;
     const btn = document.getElementById('btn-cancel-map');
     btn.disabled = true;
     btn.textContent = 'Cancelling…';
     try {
-        // /abort is a unified endpoint — works for mapping AND rebrush,
-        // writes the reason to the audit log, and returns a structured
-        // summary so we know what was actually signalled.
         const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/abort`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
-            body: JSON.stringify({reason}),
+            body: JSON.stringify({reason: ''}),
         });
         const data = await r.json();
         if (data.error) {
@@ -985,6 +977,8 @@ async function cancelMapping() {
             return;
         }
         log('Cancel requested. Worker will stop after the current run finishes.', 'dim');
+        // Reset to single-pane initial state.
+        if (typeof closeSplit === 'function') closeSplit();
     } catch (err) {
         log('Cancel failed: ' + err.message, 'error');
         btn.disabled = false;
@@ -1989,6 +1983,23 @@ async function loadNotes() {
 // Split view (side-by-side)
 // -----------------------------------------------------------------------
 let splitActive = false;
+
+function closeSplit() {
+    if (!splitActive) return;
+    splitActive = false;
+    const container = document.getElementById('image-viewer-container');
+    const rightArea = document.getElementById('image-area-right');
+    const btnSplit = document.getElementById('btn-split');
+    const btnSync = document.getElementById('btn-sync');
+    container.classList.remove('split');
+    rightArea.style.display = 'none';
+    btnSplit.style.background = '';
+    btnSplit.style.color = '';
+    btnSync.style.display = 'none';
+    setActivePane('left');
+    const sel = document.getElementById('view-select');
+    if (sel.querySelector(`option[value="${leftView}"]`)) sel.value = leftView;
+}
 
 function toggleSplit() {
     splitActive = !splitActive;

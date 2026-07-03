@@ -60,6 +60,7 @@ def _save_settings():
         payload = {
             'k_runs_per_setting': int(state.k_runs_per_setting),
             'k_jitter': int(state.k_jitter),
+            'max_aoi_fraction': float(state.max_aoi_fraction),
             'settings': [
                 {'label': str(s.get('label', '')),
                  'params': dict(s.get('params', {}))}

@@ -431,6 +431,37 @@ function drawBcwsOverlay(ctx) {
         ctx.lineTo(cx - markerHalfPx, cy + markerHalfPx);
         ctx.stroke();
     });
+
+    // Draw fire number labels next to polygons and points.
+    const polyNums = bcwsOverlay.polygon_fire_nums || [];
+    const ptNums = bcwsOverlay.point_fire_nums || [];
+    ctx.font = '10px sans-serif';
+    ctx.textBaseline = 'bottom';
+    polys.forEach((ring, i) => {
+        if (!ring || ring.length < 1 || !polyNums[i]) return;
+        // Label at centroid of the polygon's first ring.
+        let sx = 0, sy = 0;
+        ring.forEach(([x, y]) => { sx += x; sy += y; });
+        const cp = nativeToCanvas(sx / ring.length, sy / ring.length);
+        if (!cp) return;
+        const label = polyNums[i];
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        const tw = ctx.measureText(label).width;
+        ctx.fillRect(cp[0] - 1, cp[1] - 11, tw + 2, 12);
+        ctx.fillStyle = '#ff4444';
+        ctx.fillText(label, cp[0], cp[1]);
+    });
+    pts.forEach(([x, y], i) => {
+        if (!ptNums[i]) return;
+        const cp = nativeToCanvas(x, y);
+        if (!cp) return;
+        const label = ptNums[i];
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        const tw = ctx.measureText(label).width;
+        ctx.fillRect(cp[0] + markerHalfPx + 2, cp[1] - 11, tw + 2, 12);
+        ctx.fillStyle = '#ff4444';
+        ctx.fillText(label, cp[0] + markerHalfPx + 3, cp[1]);
+    });
 }
 
 // Projects a native-CRS bbox {x0,y0,x1,y1} to a screen-pixel rect
@@ -727,6 +758,11 @@ previewBtn.addEventListener('click', async () => {
                      message: 'Year metadata not loaded yet.'}]);
         return;
     }
+    const sizeErr = aoiTooLarge();
+    if (sizeErr) {
+        showErrors([{field: 'bbox_native', message: sizeErr}]);
+        return;
+    }
     // Capture the generation under which this request runs. If the
     // user changes the bbox/year/dates while we await, invalidatePreview
     // bumps previewGen and we drop our result on the floor below.
@@ -807,6 +843,36 @@ previewBtn.addEventListener('click', async () => {
 
 // ----- Submit -----
 
+function aoiTooLarge() {
+    // Returns an error message string if the drawn AOI exceeds the
+    // admin-configured max_aoi_fraction of the full-res raster area,
+    // or null if it's within limits.
+    if (!bbox || !meta) return null;
+    const gt = meta.geotransform;
+    if (!gt) return null;
+    const pixW = Math.abs(gt[1]);  // native CRS metres per pixel
+    const pixH = Math.abs(gt[5]);
+    const rW = meta.raster_W || 1;
+    const rH = meta.raster_H || 1;
+    const maxFrac = meta.max_aoi_fraction || 0.10;
+    const maxPixels = Math.floor(rW * rH * maxFrac);
+
+    const xmin = Math.min(bbox.x0, bbox.x1);
+    const xmax = Math.max(bbox.x0, bbox.x1);
+    const ymin = Math.min(bbox.y0, bbox.y1);
+    const ymax = Math.max(bbox.y0, bbox.y1);
+    const aoiW = Math.ceil(Math.abs(xmax - xmin) / pixW);
+    const aoiH = Math.ceil(Math.abs(ymax - ymin) / pixH);
+    const aoiPixels = aoiW * aoiH;
+    if (aoiPixels > maxPixels) {
+        const pct = (maxFrac * 100).toFixed(0);
+        return `AOI is too large: ${aoiW}×${aoiH} = ${aoiPixels.toLocaleString()} pixels `
+             + `(limit: ${pct}% of ${rW}×${rH} = ${maxPixels.toLocaleString()} pixels). `
+             + `Draw a smaller rectangle.`;
+    }
+    return null;
+}
+
 function bboxClose(a, b, tol = 1e-3) {
     if (!a || !b || a.length !== 4 || b.length !== 4) return false;
     for (let i = 0; i < 4; i++) {
@@ -823,6 +889,11 @@ submitBtn.addEventListener('click', async () => {
     }
     if (!meta) {
         showErrors([{field: 'year', message: 'Year metadata not loaded yet.'}]);
+        return;
+    }
+    const sizeErr = aoiTooLarge();
+    if (sizeErr) {
+        showErrors([{field: 'bbox_native', message: sizeErr}]);
         return;
     }
     const xmin = parseFloat(fields.xmin.value);

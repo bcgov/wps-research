@@ -67,6 +67,23 @@
 
     <!-- Cache retention -->
     <div class="admin-card">
+        <h3>AOI Size Limit</h3>
+        <p class="admin-desc">
+            Maximum AOI rectangle size on the new-fire page, as a percentage
+            of the full-resolution raster area. Prevents accidentally
+            selecting huge regions that would take too long to process.
+        </p>
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+            <label style="font-size:11px">Max AOI (% of image area):
+                <input id="aoi-max-pct" type="number" step="1" min="1" max="100" style="width:80px">
+            </label>
+            <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px" onclick="aoiSave()">Save</button>
+            <span id="aoi-status" style="font-size:11px;color:#666"></span>
+        </div>
+    </div>
+
+    <!-- Cache retention -->
+    <div class="admin-card">
         <h3>Cache retention</h3>
         <p class="admin-desc">
             Intermediate files under <code>&lt;out_root&gt;/&lt;year&gt;/.web_cache/</code>.
@@ -358,6 +375,51 @@ async function cacheSave() {
 
 loadCache();
 setInterval(loadCache, 30000);
+
+// -----------------------------------------------------------------------
+// AOI size limit
+// -----------------------------------------------------------------------
+async function loadAoi() {
+    try {
+        const r = await fetch('/api/settings');
+        if (!r.ok) return;
+        const data = await r.json();
+        const pct = Math.round((data.max_aoi_fraction || 0.10) * 100);
+        document.getElementById('aoi-max-pct').value = pct;
+    } catch {}
+}
+async function aoiSave() {
+    const pct = parseInt(document.getElementById('aoi-max-pct').value, 10);
+    if (isNaN(pct) || pct < 1 || pct > 100) {
+        document.getElementById('aoi-status').textContent = 'Enter 1–100';
+        return;
+    }
+    try {
+        // The settings POST also requires the settings array — fetch
+        // current settings first, then round-trip with the new AOI value.
+        const cur = await (await fetch('/api/settings')).json();
+        const body = {
+            settings: cur.settings || [],
+            k_runs_per_setting: cur.k_runs_per_setting,
+            k_jitter: cur.k_jitter,
+            max_aoi_fraction: pct / 100.0,
+        };
+        const r = await fetch('/api/settings', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+            body: JSON.stringify(body),
+        });
+        const data = await r.json();
+        if (data.error) {
+            document.getElementById('aoi-status').textContent = 'Error: ' + data.error;
+        } else {
+            document.getElementById('aoi-status').textContent = 'Saved.';
+        }
+    } catch (err) {
+        document.getElementById('aoi-status').textContent = 'Failed: ' + err.message;
+    }
+}
+loadAoi();
 </script>
 </body>
 </html>

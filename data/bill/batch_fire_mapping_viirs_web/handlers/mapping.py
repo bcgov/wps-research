@@ -308,6 +308,7 @@ class MappingRoutes:
         self._send_json({
             'k_runs_per_setting': int(state.k_runs_per_setting),
             'k_jitter': int(state.k_jitter),
+            'max_aoi_fraction': float(state.max_aoi_fraction),
             'settings': [
                 {'label': str(s.get('label', '')),
                  'params': dict(s.get('params', {}))}
@@ -360,6 +361,12 @@ class MappingRoutes:
         state.recommended_settings = clean
         state.k_runs_per_setting = k_runs
         state.k_jitter = k_jitter
+        try:
+            aoi_frac = float(body.get(
+                'max_aoi_fraction', state.max_aoi_fraction))
+            state.max_aoi_fraction = max(0.01, min(1.0, aoi_frac))
+        except (TypeError, ValueError):
+            pass
         _save_settings()
         self._send_json({'status': 'saved'})
 

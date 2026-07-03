@@ -538,6 +538,15 @@ def _render_brush_comparison_png(raw: np.ndarray, brushed: np.ndarray | None,
     bg = imread(bg_path)
     bh, bw = bg.shape[:2]
 
+    # Size the figure so each panel matches the raster's aspect ratio
+    # exactly, preventing the distortion that a hardcoded (14, 7)
+    # figsize caused on non-square rasters.
+    aspect = bh / max(bw, 1)
+    panel_w = 7  # inches per panel
+    panel_h = panel_w * aspect
+    fig_w = panel_w * 2 + 1  # 2 panels + padding
+    fig_h = max(panel_h + 1, 3)  # room for suptitle
+
     def _resize(mask):
         mh, mw = mask.shape
         if (mh, mw) == (bh, bw):
@@ -563,17 +572,20 @@ def _render_brush_comparison_png(raw: np.ndarray, brushed: np.ndarray | None,
                    if brushed is not None
                    else 'After class_brush\n(no output)')
 
-    fig, axes = plt.subplots(1, 2, figsize=(14, 7))
+    fig, axes = plt.subplots(1, 2, figsize=(fig_w, fig_h))
     fig.suptitle(title, fontsize=10, fontweight='bold')
     for ax, m, t in [
         (axes[0], raw_bg,     'Before class_brush\n(raw classification)'),
         (axes[1], after_mask, after_title),
     ]:
-        ax.imshow(bg, interpolation='nearest', origin='upper')
-        ax.imshow(_contour_rgba(m), interpolation='nearest', origin='upper')
+        ax.imshow(bg, interpolation='nearest', origin='upper',
+                  aspect='equal')
+        ax.imshow(_contour_rgba(m), interpolation='nearest', origin='upper',
+                  aspect='equal')
         ax.set_title(t, fontsize=9)
         ax.set_xlim(0, bw)
         ax.set_ylim(bh, 0)
+        ax.set_aspect('equal')
         ax.set_xlabel('Column (px)', fontsize=8)
         ax.set_ylabel('Row (px)', fontsize=8)
         ax.tick_params(labelsize=7)

@@ -435,10 +435,18 @@ def main():
     except (TypeError, ValueError):
         app_state.k_jitter = 1
     app_state.k_jitter = max(0, app_state.k_jitter)
+    try:
+        app_state.max_aoi_fraction = float(
+            _cfg.get('max_aoi_fraction', 0.10))
+        app_state.max_aoi_fraction = max(
+            0.01, min(1.0, app_state.max_aoi_fraction))
+    except (TypeError, ValueError):
+        app_state.max_aoi_fraction = 0.10
 
     _log(f'      Loaded {len(app_state.recommended_settings)} '
          f'recommended setting(s). K={app_state.k_runs_per_setting}, '
-         f'jitter={app_state.k_jitter}')
+         f'jitter={app_state.k_jitter}, '
+         f'max_aoi={app_state.max_aoi_fraction:.0%}')
 
     # IP/session persistence
     app_state.ip_file = os.path.join(out_root, 'access_control.yaml')
