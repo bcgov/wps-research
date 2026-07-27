@@ -1514,6 +1514,42 @@ def find_l2a_files(l2a_dir: str) -> list[str]:
     return files
 
 
+def _find_seed_mrap(l2a_dir: str, first_zip_timestamp: str) -> Optional[str]:
+    """Find the most recent existing _MRAP.bin whose acquisition timestamp
+    precedes *first_zip_timestamp*.
+
+    When old ZIP files have been deleted to save space, the MRAP composite
+    loop would otherwise start from None, losing all cloud-free pixels
+    accumulated by previous runs.  Seeding from the latest predecessor
+    MRAP.bin preserves that history.
+
+    Returns the path string (for deferred loading by _resolve_prev_mrap),
+    or None if no suitable predecessor exists.
+    """
+    candidates: list[tuple[str, str]] = []
+    for entry in sorted(Path(l2a_dir).iterdir()):
+        name = entry.name
+        if not name.endswith('_MRAP.bin'):
+            continue
+        parts = name.split('_')
+        if len(parts) > 2:
+            ts = parts[2]          # e.g. '20260715T185921'
+        else:
+            continue
+        if ts < first_zip_timestamp:
+            candidates.append((ts, str(entry)))
+
+    if not candidates:
+        return None
+
+    candidates.sort()
+    seed_ts, seed_path = candidates[-1]
+    print(f'[SEED] Seeding MRAP composite from most recent predecessor:')
+    print(f'  {seed_path}  (timestamp={seed_ts})')
+    print(f'  (first ZIP timestamp={first_zip_timestamp})')
+    return seed_path
+
+
 # ===========================================================================
 # Simple parallel dispatcher
 # ===========================================================================
@@ -1695,7 +1731,20 @@ def main() -> None:
             for task in tasks_mrap_compute:
                 ordered_futures.append(executor.submit(_mrap_compute, task))
 
-            prev_mrap_rf  = None   # np.ndarray | str (deferred path) | None
+            # Seed the MRAP composite from the most recent existing
+            # _MRAP.bin that precedes the first ZIP in the processing
+            # list.  This prevents losing accumulated cloud-free pixels
+            # when old ZIPs have been deleted to save disk space.
+            # The path is stored as a string for deferred loading —
+            # _resolve_prev_mrap will only read it from disk when the
+            # first non-skip timestep actually needs it.
+            _first_zip_ts = ''
+            if tasks_mrap_compute:
+                _first_parts = Path(tasks_mrap_compute[0][0]).stem.split('_')
+                _first_zip_ts = _first_parts[2] if len(_first_parts) > 2 else ''
+
+            prev_mrap_rf  = (_find_seed_mrap(l2a_dir, _first_zip_ts)
+                             if _first_zip_ts else None)
             prev_mrap_dep = None   # np.ndarray | str (deferred path) | None
             write_threads: list = []
             n_ok  = 0
@@ -1789,4 +1838,5 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
+
 
