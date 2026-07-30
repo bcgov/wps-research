@@ -115,16 +115,51 @@ function showErrors(errs) {
 async function loadYear(year) {
     clearErrors();
     bbox = null;
+
+    // Try sessionStorage first — avoids a network round-trip on
+    // window-switch / page-revisit when the stack file hasn't changed.
+    // The cache key is the ETag the server returned last time; if the
+    // server's ETag changes (new stack file), the 200 response replaces
+    // the cached entry automatically.
+    const ssKey = `nf_meta_${year}`;
+    let metaJson = null;
+    let cachedEtag = null;
     try {
-        const r = await fetch(`/api/year/${year}/overview_meta`);
-        if (!r.ok) {
+        const cached = sessionStorage.getItem(ssKey);
+        if (cached) {
+            const parsed = JSON.parse(cached);
+            metaJson = parsed.meta;
+            cachedEtag = parsed.etag || null;
+        }
+    } catch (_) {}
+
+    try {
+        const headers = {};
+        if (cachedEtag) headers['If-None-Match'] = cachedEtag;
+        const r = await fetch(`/api/year/${year}/overview_meta`, {headers});
+        if (r.status === 304 && metaJson) {
+            // Server confirmed nothing changed — use cached meta as-is.
+            meta = metaJson;
+        } else if (r.ok) {
+            meta = await r.json();
+            // Store fresh copy + new ETag for next load.
+            const newEtag = r.headers.get('ETag') || null;
+            try {
+                sessionStorage.setItem(ssKey, JSON.stringify(
+                    {meta, etag: newEtag}));
+            } catch (_) {}
+        } else {
             showErrors([{message: `Failed to load year ${year} metadata`}]);
             return;
         }
-        meta = await r.json();
     } catch (exc) {
-        showErrors([{message: `Network error: ${exc}`}]);
-        return;
+        if (metaJson) {
+            // Network error but we have a cached copy — use it.
+            meta = metaJson;
+        } else {
+            showErrors([{message: `Network error: ${exc}`}]);
+            return;
+        }
     }
     // Render the R:/G:/B: band-name caption (bold) showing exactly
     // which bands of the active stack file are being visualized.
@@ -158,11 +193,24 @@ async function loadYear(year) {
         : Date.now();  // no cache_key in the metadata -- fall back
                        // to always-fresh rather than risk showing a
                        // stale image with no way to detect staleness.
-    overview.src = `/api/year/${year}/overview.png?v=${cacheKey}`;
-    overview.onload = () => {
+    const newSrc = `/api/year/${year}/overview.png?v=${cacheKey}`;
+    if (overview.src !== newSrc) {
+        // Only assign when the URL actually changed — setting .src to
+        // the same value forces the browser to re-decode the image
+        // from its cache and re-fire onload, which causes the visible
+        // flicker on window-switch even though no data changed.
+        overview.src = newSrc;
+        overview.onload = () => {
+            sizeCanvasToWrap();
+            redraw();
+        };
+    } else if (overviewReady()) {
+        // URL unchanged and image already decoded — just resize/redraw
+        // in case the canvas needs updating (e.g. window was resized
+        // while away).
         sizeCanvasToWrap();
         redraw();
-    };
+    }
     fields.start.placeholder = meta.default_start || 'YYYY-MM-DD';
     fields.end.placeholder = meta.default_end || 'YYYY-MM-DD';
     if (!fields.start.value) fields.start.value = '';

@@ -326,12 +326,41 @@ class FireListRoutes:
             return
         try:
             with open(path, encoding='utf-8') as f:
-                meta = json.loads(f.read())
+                raw = f.read()
+            meta = json.loads(raw)
         except Exception as exc:
             self._send_json({'error': f'parse failed: {exc}'}, 500)
             return
         meta['max_aoi_fraction'] = state.max_aoi_fraction
-        self._send_json(meta)
+
+        # Build an ETag from the file's mtime+size so browsers can
+        # use a conditional GET (If-None-Match) and get a 304 when
+        # the stack file hasn't changed — avoiding a full JSON round-
+        # trip on every page load / window-switch.
+        try:
+            st = os.stat(path)
+            etag = f'"{st.st_mtime_ns}-{st.st_size}"'
+        except OSError:
+            etag = None
+
+        if etag:
+            client_etag = self.headers.get('If-None-Match', '')
+            if client_etag == etag:
+                self.send_response(304)
+                self.send_header('ETag', etag)
+                self.send_header('Cache-Control', 'no-cache')
+                self.end_headers()
+                return
+
+        body = json.dumps(meta).encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Cache-Control', 'no-cache')
+        if etag:
+            self.send_header('ETag', etag)
+        self.end_headers()
+        self.wfile.write(body)
 
     def handle_api_bcws_overlay(self):
         """Return the cached BCWS current-fire points/polygons overlay
