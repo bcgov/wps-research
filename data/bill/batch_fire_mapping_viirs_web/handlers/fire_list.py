@@ -326,41 +326,12 @@ class FireListRoutes:
             return
         try:
             with open(path, encoding='utf-8') as f:
-                raw = f.read()
-            meta = json.loads(raw)
+                meta = json.loads(f.read())
         except Exception as exc:
             self._send_json({'error': f'parse failed: {exc}'}, 500)
             return
         meta['max_aoi_fraction'] = state.max_aoi_fraction
-
-        # Build an ETag from the file's mtime+size so browsers can
-        # use a conditional GET (If-None-Match) and get a 304 when
-        # the stack file hasn't changed — avoiding a full JSON round-
-        # trip on every page load / window-switch.
-        try:
-            st = os.stat(path)
-            etag = f'"{st.st_mtime_ns}-{st.st_size}"'
-        except OSError:
-            etag = None
-
-        if etag:
-            client_etag = self.headers.get('If-None-Match', '')
-            if client_etag == etag:
-                self.send_response(304)
-                self.send_header('ETag', etag)
-                self.send_header('Cache-Control', 'no-cache')
-                self.end_headers()
-                return
-
-        body = json.dumps(meta).encode()
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Content-Length', str(len(body)))
-        self.send_header('Cache-Control', 'no-cache')
-        if etag:
-            self.send_header('ETag', etag)
-        self.end_headers()
-        self.wfile.write(body)
+        self._send_json(meta)
 
     def handle_api_bcws_overlay(self):
         """Return the cached BCWS current-fire points/polygons overlay
@@ -697,7 +668,10 @@ class FireListRoutes:
         from batch_fire_mapping.run_fire_mapping import crop_raster
         from viirs.utils.rasterize import rasterize_shapefile
         from ..mapping import _overlay_mask_on_post
-        from ..preview import generate_all_previews
+        from ..preview import (
+            generate_all_previews, detect_band_groups, parse_envi_band_names,
+        )
+        from ..prepare import generate_redwins_hint
 
         body = self._read_body()
         if body is None:
@@ -787,73 +761,104 @@ class FireListRoutes:
                              'message': 'GDAL crop failed'}]}, 500)
             return
 
+        # ---- Try VIIRS accumulate + rasterize (best-effort) ----
+        hint_bin = None
+        hint_source = 'viirs'
+        acc_shp = None
+        area_ha = 0.0
+
         try:
             acc_shp = accumulate_for_fire(
                 ephemeral, preview_dir, ref_raster)
-        except WorkerError as exc:
-            self._send_json(
-                {'errors': [{'field': 'dates', 'message': str(exc)}]}, 200)
-            return
-        except Exception as exc:
-            self._send_json(
-                {'errors': [{'field': 'dates',
-                             'message': f'accumulate failed: {exc}'}]},
-                500)
-            return
+        except (WorkerError, Exception) as exc:
+            sys.stderr.write(
+                f'[preview_hint] VIIRS accumulate returned no data '
+                f'({exc}) — will fall back to red wins.\n')
+            acc_shp = None
 
-        crop_rast_dir = os.path.join(preview_dir, '_viirs_crop')
-        os.makedirs(crop_rast_dir, exist_ok=True)
-        try:
-            viirs_bin = rasterize_shapefile(
-                shp_path=acc_shp, ref_image=crop_bin,
-                output_dir=crop_rast_dir, buffer_m=375.0,
-            )
-        except Exception as exc:
-            self._send_json(
-                {'errors': [{'field': 'dates',
-                             'message': f'rasterize failed: {exc}'}]},
-                500)
-            return
-        if not viirs_bin or not os.path.isfile(viirs_bin):
-            self._send_json(
-                {'errors': [{
-                    'field': 'dates',
-                    'message': 'No VIIRS fire pixels in this bbox + date '
-                               'range. Try a larger bbox or wider dates.'
-                }]}, 200)
-            return
+        if acc_shp:
+            crop_rast_dir = os.path.join(preview_dir, '_viirs_crop')
+            os.makedirs(crop_rast_dir, exist_ok=True)
+            try:
+                viirs_bin = rasterize_shapefile(
+                    shp_path=acc_shp, ref_image=crop_bin,
+                    output_dir=crop_rast_dir, buffer_m=375.0,
+                )
+                if viirs_bin and os.path.isfile(viirs_bin):
+                    _verify_viirs_bin_nonzero(viirs_bin)
+                    hint_bin = viirs_bin
+                    area_ha = _compute_viirs_area_ha(viirs_bin)
+            except Exception as exc:
+                sys.stderr.write(
+                    f'[preview_hint] VIIRS rasterize/verify failed '
+                    f'({exc}) — will fall back to red wins.\n')
+                hint_bin = None
 
-        try:
-            _verify_viirs_bin_nonzero(viirs_bin)
-        except Exception as exc:
-            self._send_json(
-                {'errors': [{'field': 'dates', 'message': str(exc)}]}, 200)
-            return
+        # ---- Fallback: red wins on post-fire bands ----
+        if not hint_bin:
+            hint_source = 'redwins_post'
+            band_names = parse_envi_band_names(crop_bin)
+            if not band_names:
+                from osgeo import gdal as _gdal
+                ds_tmp = _gdal.Open(crop_bin, _gdal.GA_ReadOnly)
+                if ds_tmp:
+                    try:
+                        n = ds_tmp.RasterCount
+                    finally:
+                        ds_tmp = None
+                    band_names = [f'band {i + 1}' for i in range(n)]
+            groups = detect_band_groups(band_names)
+            post_indices = groups.get('post', [])
+            if len(post_indices) < 3:
+                # Last resort: just use bands 1, 2, 3.
+                post_indices = [1, 2, 3]
+            redwins_path = os.path.join(preview_dir, 'redwins_hint.bin')
+            if generate_redwins_hint(crop_bin, post_indices, redwins_path):
+                hint_bin = redwins_path
+                # Estimate area from red-wins mask (count of nonzero
+                # pixels × pixel area).
+                try:
+                    from osgeo import gdal as _gdal
+                    import numpy as _np
+                    ds_rw = _gdal.Open(redwins_path, _gdal.GA_ReadOnly)
+                    if ds_rw:
+                        gt_rw = ds_rw.GetGeoTransform()
+                        arr_rw = ds_rw.GetRasterBand(1).ReadAsArray()
+                        ds_rw = None
+                        pixel_m2 = abs(gt_rw[1] * gt_rw[5])
+                        n_fire = int(_np.nansum(arr_rw > 0))
+                        area_ha = n_fire * pixel_m2 / 10000.0
+                except Exception:
+                    area_ha = 0.0
+            else:
+                self._send_json(
+                    {'errors': [{
+                        'field': 'dates',
+                        'message': 'No VIIRS data available and '
+                                   'red-wins fallback also failed.'
+                    }]}, 200)
+                return
 
         ephemeral.crop_bin = crop_bin
-        ephemeral.hint_bin = viirs_bin
-        ephemeral.viirs_bin = viirs_bin
+        ephemeral.hint_bin = hint_bin
+        ephemeral.viirs_bin = hint_bin if hint_source == 'viirs' else ''
         # The preview module looks at fire.cache_dir/previews/.
         generate_all_previews(crop_bin, preview_dir, preview_id)
         _overlay_mask_on_post(
-            ephemeral, viirs_bin, 'hint', (0.0, 0.8, 0.2))
-
-        area_ha = _compute_viirs_area_ha(viirs_bin)
+            ephemeral, hint_bin, 'hint', (0.0, 0.8, 0.2))
 
         # Persist a small meta.json so handle_api_fire_create can validate
         # that a preview_id passed by the client still matches the form.
-        # If it does, the create handler copies the cumulative .shp into
-        # the fire's cache_dir and the worker skips the accumulate stage
-        # (which is the dominant cost — geopandas reading hundreds of
-        # per-granule shapefiles).
         try:
             meta_blob = {
                 'year': year,
                 'start': start_date.isoformat(),
                 'end': end_date.isoformat(),
                 'bbox_native': list(ephemeral.bbox_native),
-                'acc_shp': os.path.basename(acc_shp),
+                'hint_source': hint_source,
             }
+            if acc_shp:
+                meta_blob['acc_shp'] = os.path.basename(acc_shp)
             with open(os.path.join(preview_dir, 'meta.json'), 'w',
                       encoding='utf-8') as f:
                 f.write(json.dumps(meta_blob))
@@ -867,6 +872,7 @@ class FireListRoutes:
             'end': end_date.isoformat(),
             'bbox_native': list(ephemeral.bbox_native),
             'area_ha': area_ha,
+            'hint_source': hint_source,
             'views': {
                 'hint': f'/api/fire/preview_hint/{preview_id}/hint.png',
                 'post': f'/api/fire/preview_hint/{preview_id}/post.png',
