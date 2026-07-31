@@ -861,20 +861,21 @@ class FireListRoutes:
                 # Last resort: just use bands 1, 2, 3.
                 post_indices = [1, 2, 3]
             redwins_path = os.path.join(preview_dir, 'redwins_hint.bin')
-            if generate_redwins_hint(crop_bin, post_indices, redwins_path):
+            # generate_redwins_hint returns the fire-pixel count, or -1
+            # on failure. 0 is a valid file but an empty hint -- the
+            # preview still renders it (an empty overlay is exactly the
+            # feedback the user needs), it just reports 0 ha.
+            n_fire = generate_redwins_hint(
+                crop_bin, post_indices, redwins_path)
+            if n_fire >= 0:
                 hint_bin = redwins_path
-                # Estimate area from red-wins mask (count of nonzero
-                # pixels × pixel area).
                 try:
                     from osgeo import gdal as _gdal
-                    import numpy as _np
                     ds_rw = _gdal.Open(redwins_path, _gdal.GA_ReadOnly)
                     if ds_rw:
                         gt_rw = ds_rw.GetGeoTransform()
-                        arr_rw = ds_rw.GetRasterBand(1).ReadAsArray()
                         ds_rw = None
                         pixel_m2 = abs(gt_rw[1] * gt_rw[5])
-                        n_fire = int(_np.nansum(arr_rw > 0))
                         area_ha = n_fire * pixel_m2 / 10000.0
                 except Exception:
                     area_ha = 0.0

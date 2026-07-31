@@ -33,7 +33,7 @@ gdal.UseExceptions()
 # -----------------------------------------------------------------------
 
 def generate_redwins_hint(crop_bin: str, band_indices: list[int],
-                          output_path: str) -> bool:
+                          output_path: str) -> int:
     """Generate a binary hint mask using the "red wins" rule.
 
     For each pixel, the first of the three bands in *band_indices* is
@@ -48,11 +48,14 @@ def generate_redwins_hint(crop_bin: str, band_indices: list[int],
     bands of the ``post`` or ``diff1`` group from
     :func:`preview.detect_band_groups`.
 
-    Returns True on success.
+    Returns the number of fire (1) pixels written, or -1 on failure.
+    A return of 0 means the rule matched nothing anywhere in the crop:
+    the file is still valid, but it is useless as a hint and callers
+    should treat it as an error rather than hand it to the mapping CLI.
     """
     ds = gdal.Open(crop_bin, gdal.GA_ReadOnly)
     if ds is None:
-        return False
+        return -1
     try:
         w, h = ds.RasterXSize, ds.RasterYSize
         n_bands = ds.RasterCount
@@ -70,7 +73,7 @@ def generate_redwins_hint(crop_bin: str, band_indices: list[int],
         ds = None
 
     if len(channels) < 3:
-        return False
+        return -1
 
     red, green, blue = channels[0], channels[1], channels[2]
 
@@ -78,22 +81,31 @@ def generate_redwins_hint(crop_bin: str, band_indices: list[int],
     # this pixel.  This is the core logic from dominant_band.py.
     mask = (red > green) & (red > blue)
 
-    # Propagate NaN from any input band.
+    # Pixels where any input band is NaN (nodata, usually the crop
+    # margins) count as "no evidence of burn" -> 0.
+    #
+    # This must NOT write NaN. The mapping CLI validates the hint with
+    # a strict "single-band 0/1 raster" check, and a NaN is neither 0
+    # nor 1, so a mask carrying nodata is rejected outright with
+    # "VIIRS hint is not a valid single-band 0/1 raster". Writing the
+    # band as Byte makes that invariant structural rather than a
+    # convention -- a NaN simply cannot be represented, so this class
+    # of failure cannot recur.
     any_nan = np.isnan(red) | np.isnan(green) | np.isnan(blue)
+    result = np.where(any_nan, 0, mask).astype(np.uint8)
+    n_fire = int(result.sum())
 
-    result = np.where(any_nan, np.nan, mask.astype(np.float32))
-
-    # Write as ENVI flat binary (BSQ, float32) with matching header.
+    # Write as single-band ENVI Byte, 0/1 only.
     driver = gdal.GetDriverByName('ENVI')
-    out_ds = driver.Create(output_path, w, h, 1, gdal.GDT_Float32)
+    out_ds = driver.Create(output_path, w, h, 1, gdal.GDT_Byte)
     if out_ds is None:
-        return False
+        return -1
     out_ds.SetGeoTransform(gt)
     out_ds.SetProjection(proj)
     out_ds.GetRasterBand(1).WriteArray(result)
     out_ds.FlushCache()
     out_ds = None
-    return True
+    return n_fire
 
 
 def build_redwins_hint_for_fire(fire: FireInfo, mode: str):
@@ -135,8 +147,23 @@ def build_redwins_hint_for_fire(fire: FireInfo, mode: str):
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, f'{mode}_hint.bin')
 
-    if not generate_redwins_hint(fire.crop_bin, indices, out_path):
+    n_fire = generate_redwins_hint(fire.crop_bin, indices, out_path)
+    if n_fire < 0:
         return None, f'Failed to generate {mode} hint mask.'
+    if n_fire == 0:
+        # A valid-but-empty mask would be rejected by the mapping CLI
+        # (or silently produce nothing), so fail here with a message
+        # that says which rule came up empty and what to try instead.
+        other = ('redwins_diff' if mode == 'redwins_post'
+                 else 'redwins_post')
+        return None, (
+            f'The {mode} rule matched no pixels in this crop -- the '
+            f'first of its three bands never exceeded the other two, '
+            f'so the hint would be empty. Try {other} instead, or use '
+            f'VIIRS if data is available for this fire.')
+    sys.stderr.write(
+        f'[redwins] {mode}: {n_fire} fire pixel(s) -> {out_path}\n')
+    sys.stderr.flush()
     return out_path, None
 
 
