@@ -182,6 +182,15 @@ Example
     p.add_argument("--disable_overview_force_regeneration",
                    action="store_true",
                    help="Skip forced overview regeneration at startup.")
+    p.add_argument("--overview_min_interval_minutes", type=int, default=60,
+                   help="Force-regenerate the per-year overview previews "
+                        "at most once per this many minutes, measured "
+                        "across server restarts via the same stamp file "
+                        "used by the VIIRS throttle. When throttled, "
+                        "overviews are still regenerated if the stack "
+                        "file itself changed or a PNG is missing. Set 0 "
+                        "to disable the throttle and force-regenerate on "
+                        "every start. Default: 60.")
     p.add_argument("--viirs_download_method",
                    choices=["curl_primary", "urllib_primary"],
                    default="curl_primary",
@@ -293,11 +302,11 @@ def _ensure_overviews(rasters_by_year: dict, shared_root: str,
 # download", which the log alone makes awkward to answer.
 # ----------------------------------------------------------------------
 
-_VIIRS_STAMP_NAME = 'viirs_run_stamp.json'
+_RUN_STAMP_NAME = 'viirs_run_stamp.json'
 
 
-def _viirs_stamp_path(out_root: str) -> str:
-    return os.path.join(out_root, '.web_cache', _VIIRS_STAMP_NAME)
+def _run_stamp_path(out_root: str) -> str:
+    return os.path.join(out_root, '.web_cache', _RUN_STAMP_NAME)
 
 
 def _iso_utc(ts: float) -> str:
@@ -305,7 +314,7 @@ def _iso_utc(ts: float) -> str:
         ts, datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
 
-def _read_viirs_stamp(path: str) -> dict:
+def _read_run_stamp(path: str) -> dict:
     """Return the stamp dict, or {} if absent/unreadable/corrupt."""
     try:
         with open(path, encoding='utf-8') as f:
@@ -317,7 +326,7 @@ def _read_viirs_stamp(path: str) -> dict:
         return {}
 
 
-def _write_viirs_stamp(path: str, payload: dict) -> None:
+def _write_run_stamp(path: str, payload: dict) -> None:
     """Atomically write the stamp. Failure is logged, never fatal."""
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -331,15 +340,15 @@ def _write_viirs_stamp(path: str, payload: dict) -> None:
               f'({path}): {exc}')
 
 
-def _viirs_attempt_age_s(stamp: dict):
-    """Seconds since the last recorded attempt, or None if unknown.
+def _stamp_age_s(stamp: dict, key: str = 'last_attempt_epoch'):
+    """Seconds since the timestamp at *key*, or None if unknown.
 
     A stamp dated in the future (system clock moved backwards, or the
     file was copied from another machine) is reported as unknown rather
     than as a huge negative age, so a bad clock can never wedge
     downloads off indefinitely."""
     try:
-        last = float(stamp.get('last_attempt_epoch', 0) or 0)
+        last = float(stamp.get(key, 0) or 0)
     except (TypeError, ValueError):
         return None
     if last <= 0:
@@ -439,13 +448,61 @@ def main():
     _log(sep)
 
     # ------------------------------------------------------------------
+    # Run stamp — read once, up front, so both the overview step below
+    # and the VIIRS step further down consult the same record. The
+    # server start is recorded unconditionally; the per-subsystem
+    # timestamps are written only when that subsystem actually runs.
+    # ------------------------------------------------------------------
+    _stamp_path = _run_stamp_path(out_root)
+    _stamp = _read_run_stamp(_stamp_path)
+    # Ages must be read BEFORE the server-start fields are rewritten,
+    # and before either step stamps itself.
+    _attempt_age = _stamp_age_s(_stamp, 'last_attempt_epoch')
+    _overview_age = _stamp_age_s(_stamp, 'last_overview_epoch')
+
+    _now = time.time()
+    _stamp['last_server_start_epoch'] = _now
+    _stamp['last_server_start_utc'] = _iso_utc(_now)
+    _stamp['server_starts'] = int(_stamp.get('server_starts', 0) or 0) + 1
+    _write_run_stamp(_stamp_path, _stamp)
+
+    # ------------------------------------------------------------------
     # Step 1 — Generate per-year overview PNG + sidecar JSON (cached)
     # ------------------------------------------------------------------
+    _ovr_interval_s = max(0, int(args.overview_min_interval_minutes)) * 60
+    _ovr_throttled = (
+        _ovr_interval_s > 0
+        and _overview_age is not None
+        and _overview_age < _ovr_interval_s)
+    # `force` re-renders every overview unconditionally. Dropping it
+    # does NOT mean "skip the step": ensure_overview() still regenerates
+    # anything whose sidecar cache_key no longer matches the stack file,
+    # or whose PNG is missing. So a throttled start is still correct --
+    # it just stops re-rendering images that are already up to date.
+    _ovr_force = (not args.disable_overview_force_regeneration
+                  and not _ovr_throttled)
+
     _log('\n[1/4] Per-year overview previews: starting ...')
+    if _ovr_throttled:
+        _remaining = _ovr_interval_s - _overview_age
+        _log(f'      Last forced regeneration was '
+             f'{_fmt_duration(_overview_age)} ago, within the '
+             f'{args.overview_min_interval_minutes}-minute minimum '
+             f'interval -- using cached overviews (any whose stack '
+             f'file changed, or whose PNG is missing, are still '
+             f'regenerated). Next forced regeneration allowed in '
+             f'{_fmt_duration(_remaining)}.')
     (overview_png_by_year, overview_low_png_by_year,
      overview_meta_by_year) = _ensure_overviews(
         rasters_by_year, out_root,
-        force=not args.disable_overview_force_regeneration)
+        force=_ovr_force)
+    if _ovr_force:
+        _ovr_done = time.time()
+        _stamp['last_overview_epoch'] = _ovr_done
+        _stamp['last_overview_utc'] = _iso_utc(_ovr_done)
+        _stamp['overview_regens'] = int(
+            _stamp.get('overview_regens', 0) or 0) + 1
+        _write_run_stamp(_stamp_path, _stamp)
     _log('[1/4] Per-year overview previews: done.')
 
     # ------------------------------------------------------------------
@@ -646,16 +703,6 @@ def main():
     # restarts -- restarting repeatedly while developing no longer
     # re-triggers a full LAADS download every time.
     # ------------------------------------------------------------------
-    _stamp_path = _viirs_stamp_path(out_root)
-    _stamp = _read_viirs_stamp(_stamp_path)
-    _attempt_age = _viirs_attempt_age_s(_stamp)
-
-    _now = time.time()
-    _stamp['last_server_start_epoch'] = _now
-    _stamp['last_server_start_utc'] = _iso_utc(_now)
-    _stamp['server_starts'] = int(_stamp.get('server_starts', 0) or 0) + 1
-    _write_viirs_stamp(_stamp_path, _stamp)
-
     _interval_s = max(0, int(args.viirs_min_interval_minutes)) * 60
     _throttled = (
         _interval_s > 0
@@ -767,7 +814,7 @@ def main():
             _stamp['last_attempt_utc'] = _iso_utc(_att)
             _stamp['last_outcome'] = _outcome
             _stamp['attempts'] = int(_stamp.get('attempts', 0) or 0) + 1
-            _write_viirs_stamp(_stamp_path, _stamp)
+            _write_run_stamp(_stamp_path, _stamp)
 
     app_state.init_fires_from_disk()
 
