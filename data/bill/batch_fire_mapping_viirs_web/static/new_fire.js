@@ -242,6 +242,16 @@ function _fmtEta(sec) {
     return `~${m}m ${s}s`;
 }
 
+// Ground sample distance, formatted for a caption. Adaptive precision
+// so a 200m/px overview reads "200m" rather than "200.0m", while a
+// fine one still shows a useful fraction.
+function _fmtResM(m) {
+    if (typeof m !== 'number' || !isFinite(m) || m <= 0) return null;
+    if (m >= 10) return `${Math.round(m)}m`;
+    if (m >= 1) return `${m.toFixed(1)}m`;
+    return `${m.toFixed(2)}m`;
+}
+
 // Fetch an image with byte-level progress, writing running totals into
 // `track` so a separate 100ms ticker can render them. Returns an
 // object URL for the downloaded bytes.
@@ -401,9 +411,16 @@ async function loadOverviewPyramid(year, cacheKey) {
 
     const showHiBar = lowObj && hiBlock && !highTrack.done;
     if (showHiBar) hiBlock.style.display = '';
+    // Name the level by its actual ground sample distance rather than
+    // calling it "full resolution": the full-size overview is still a
+    // downsample of the stack (e.g. ~200m/px against 20m/px native),
+    // so "full resolution" would overstate what is arriving.
+    const hiResTxt = _fmtResM(meta && meta.overview_resolution_m);
+    const hiLabel = hiResTxt
+        ? `Loading ${hiResTxt}/px overview`
+        : 'Loading higher-resolution overview';
     const hiTicker = showHiBar
-        ? startProgressTicker(highTrack, hiBar, hiEta,
-                              'Loading full-resolution overview')
+        ? startProgressTicker(highTrack, hiBar, hiEta, hiLabel)
         : null;
 
     let highObj = null;
