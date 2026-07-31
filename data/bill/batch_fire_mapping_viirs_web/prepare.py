@@ -96,6 +96,50 @@ def generate_redwins_hint(crop_bin: str, band_indices: list[int],
     return True
 
 
+def build_redwins_hint_for_fire(fire: FireInfo, mode: str):
+    """Generate the red-wins hint for *mode* against ``fire.crop_bin``.
+
+    Returns ``(path, None)`` on success or ``(None, error_message)``.
+
+    Shared by :func:`switch_hint_mode` (user picks a hint mode) and by
+    the re-prepare path (crop changed, so the mask must be rebuilt to
+    match the new crop's dimensions -- a hint raster generated for a
+    different crop would not align with it).
+    """
+    if mode not in ('redwins_post', 'redwins_diff'):
+        return None, f'Not a red-wins mode: {mode}'
+    if not fire.crop_bin or not os.path.isfile(fire.crop_bin):
+        return None, 'Fire has no crop raster.'
+
+    band_names = parse_envi_band_names(fire.crop_bin)
+    if not band_names:
+        ds = gdal.Open(fire.crop_bin, gdal.GA_ReadOnly)
+        if ds:
+            try:
+                n = ds.RasterCount
+            finally:
+                ds = None
+            band_names = [f'band {i + 1}' for i in range(n)]
+    groups = detect_band_groups(band_names)
+
+    if mode == 'redwins_post':
+        indices = groups.get('post', [])
+    else:
+        indices = groups.get('diff1', [])
+
+    if len(indices) < 3:
+        return None, (f'Not enough bands for {mode} '
+                      f'(need 3, found {len(indices)}).')
+
+    out_dir = os.path.join(fire.cache_dir, '_redwins')
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, f'{mode}_hint.bin')
+
+    if not generate_redwins_hint(fire.crop_bin, indices, out_path):
+        return None, f'Failed to generate {mode} hint mask.'
+    return out_path, None
+
+
 def switch_hint_mode(fire: FireInfo, mode: str) -> dict:
     """Switch a fire's hint mask between viirs / redwins_post / redwins_diff.
 
@@ -120,40 +164,11 @@ def switch_hint_mode(fire: FireInfo, mode: str) -> dict:
         fire.hint_mode = 'viirs'
 
     else:
-        # Red-wins mode: pick band group.
-        band_names = parse_envi_band_names(fire.crop_bin)
-        if not band_names:
-            ds = gdal.Open(fire.crop_bin, gdal.GA_ReadOnly)
-            if ds:
-                try:
-                    n = ds.RasterCount
-                finally:
-                    ds = None
-                band_names = [f'band {i + 1}' for i in range(n)]
-        groups = detect_band_groups(band_names)
-
-        if mode == 'redwins_post':
-            indices = groups.get('post', [])
-            label = 'redwins_post'
-        else:
-            indices = groups.get('diff1', [])
-            label = 'redwins_diff'
-
-        if len(indices) < 3:
-            return {'ok': False,
-                    'error': f'Not enough bands for {label} '
-                             f'(need 3, found {len(indices)}).'}
-
-        out_dir = os.path.join(fire.cache_dir, '_redwins')
-        os.makedirs(out_dir, exist_ok=True)
-        out_path = os.path.join(out_dir, f'{label}_hint.bin')
-
-        if not generate_redwins_hint(fire.crop_bin, indices, out_path):
-            return {'ok': False,
-                    'error': f'Failed to generate {label} hint mask.'}
-
+        out_path, err = build_redwins_hint_for_fire(fire, mode)
+        if err:
+            return {'ok': False, 'error': err}
         fire.hint_bin = out_path
-        fire.perimeter_type = label
+        fire.perimeter_type = mode
         fire.hint_mode = mode
 
     # Regenerate the hint overlay preview PNG.
@@ -352,12 +367,36 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
             viirs_bin = None
 
     if viirs_bin and os.path.isfile(viirs_bin):
-        fire.hint_bin = viirs_bin
         fire.viirs_bin = viirs_bin
+    else:
+        fire.viirs_bin = ''
+
+    # -- Re-establish the hint mask for the NEW crop ------------------
+    # The crop frame just changed, so any existing hint raster is sized
+    # for the *old* crop and no longer aligns. Rebuild it according to
+    # whichever hint mode the fire is actually using.
+    #
+    # This is what makes a serial sweep work with a red-wins hint: the
+    # sweep re-prepares on every padding change, and this path used to
+    # unconditionally fall back to VIIRS -- clearing hint_bin whenever
+    # VIIRS was unavailable, which then failed the whole run with
+    # "No hint mask available" even though the user had explicitly
+    # selected Red wins (post) or Red wins (diff).
+    _mode = getattr(fire, 'hint_mode', 'viirs') or 'viirs'
+    if _mode in ('redwins_post', 'redwins_diff'):
+        _rw_path, _rw_err = build_redwins_hint_for_fire(fire, _mode)
+        if _rw_err:
+            _set_fire_status(
+                fire, FireStatus.ERROR,
+                f'Cannot rebuild {_mode} hint for the new crop: {_rw_err}')
+            return
+        fire.hint_bin = _rw_path
+        fire.perimeter_type = _mode
+    elif fire.viirs_bin:
+        fire.hint_bin = fire.viirs_bin
         fire.perimeter_type = 'viirs'
     else:
         fire.hint_bin = ''
-        fire.viirs_bin = ''
         fire.perimeter_type = 'none'
 
     if fire.viirs_start_date:
