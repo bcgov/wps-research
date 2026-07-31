@@ -205,31 +205,63 @@ def _load_laads_token(path: str) -> str:
     return tok
 
 
+# LOW_OVERVIEW_HEIGHT is the pyramid's coarse level: tall enough to be
+# a usable map on its own, small enough to arrive quickly.
+LOW_OVERVIEW_HEIGHT = 2000
+
+
 def _ensure_overviews(rasters_by_year: dict, shared_root: str,
                       force: bool = True):
-    """Generate per-year overview PNG + sidecar JSON. Returns (png_map,
-    meta_map)."""
+    """Generate per-year overview PNGs + sidecar JSON.
+
+    Produces a two-level image pyramid per year:
+      * ``<stem>.png``     -- full-size overview (longest edge <= 9090)
+      * ``<stem>_low.png`` -- low-resolution level, 2000 px tall
+
+    The new-fire page loads the low level first so the map becomes
+    interactive quickly, then swaps in the full-size one once it has
+    finished downloading in the background. Both are rendered from the
+    same source at the same aspect ratio, so a single sidecar JSON
+    describes both -- the client's coordinate math depends only on the
+    image's rendered size, not its intrinsic resolution.
+
+    Returns (png_map, low_png_map, meta_map)."""
     from .overview import generate_overview, ensure_overview
     cache_dir = os.path.join(shared_root, '.web_cache', '_overviews')
     os.makedirs(cache_dir, exist_ok=True)
     png_map: dict = {}
+    low_png_map: dict = {}
     meta_map: dict = {}
     for y in sorted(rasters_by_year):
         raster = rasters_by_year[y]
         stem = os.path.splitext(os.path.basename(raster))[0]
         png = os.path.join(cache_dir, f'{stem}.png')
         meta = os.path.join(cache_dir, f'{stem}.json')
+        low_png = os.path.join(cache_dir, f'{stem}_low.png')
+        # The low level writes a sidecar too (generate_overview always
+        # does); it is deliberately not registered anywhere -- the
+        # full-size sidecar is the single source of truth for both.
+        low_meta = os.path.join(cache_dir, f'{stem}_low.json')
         if force:
             _elog(
                 f'[overview] Regenerating {os.path.basename(png)} from '
                 f'{os.path.basename(raster)} (forced at startup) ...')
             generate_overview(raster, png, meta, max_dim=9090)
             _elog(f'[overview] Done: {os.path.basename(png)}')
+            _elog(
+                f'[overview] Regenerating {os.path.basename(low_png)} '
+                f'({LOW_OVERVIEW_HEIGHT}px tall preview level) ...')
+            generate_overview(raster, low_png, low_meta,
+                              target_height=LOW_OVERVIEW_HEIGHT)
+            _elog(f'[overview] Done: {os.path.basename(low_png)}')
         else:
             ensure_overview(raster, png, meta, max_dim=9090)
+            ensure_overview(raster, low_png, low_meta,
+                            target_height=LOW_OVERVIEW_HEIGHT)
         png_map[y] = png
+        low_png_map[y] = low_png
         meta_map[y] = meta
-    return png_map, meta_map
+    return png_map, low_png_map, meta_map
 
 def main():
     args = _build_parser().parse_args()
@@ -314,7 +346,8 @@ def main():
     # Step 1 — Generate per-year overview PNG + sidecar JSON (cached)
     # ------------------------------------------------------------------
     _log('\n[1/4] Per-year overview previews: starting ...')
-    overview_png_by_year, overview_meta_by_year = _ensure_overviews(
+    (overview_png_by_year, overview_low_png_by_year,
+     overview_meta_by_year) = _ensure_overviews(
         rasters_by_year, out_root,
         force=not args.disable_overview_force_regeneration)
     _log('[1/4] Per-year overview previews: done.')
@@ -341,6 +374,7 @@ def main():
     app_state.rasters_by_year         = rasters_by_year
     app_state.outdirs_by_year         = outdirs_by_year
     app_state.overview_png_by_year    = overview_png_by_year
+    app_state.overview_low_png_by_year = overview_low_png_by_year
     app_state.overview_meta_by_year   = overview_meta_by_year
 
     app_state.project_root   = _PROJECT_ROOT

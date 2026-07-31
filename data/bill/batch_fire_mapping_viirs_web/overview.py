@@ -167,6 +167,7 @@ def generate_overview(
     png_path: str,
     json_path: str,
     max_dim: int = DEFAULT_MAX_DIM,
+    target_height: int | None = None,
 ) -> None:
     """Generate overview PNG + sidecar JSON. Raises on failure.
 
@@ -185,8 +186,34 @@ def generate_overview(
         gt = ds.GetGeoTransform()
         crs_wkt = ds.GetProjection() or ''
 
-        # Compute overview dims preserving aspect, longest edge ≤ max_dim
-        if max(W, H) > max_dim:
+        # Compute overview dims preserving aspect.
+        #
+        # Two modes:
+        #   target_height set -- scale so the output is exactly
+        #       ``target_height`` pixels tall (width follows from the
+        #       source aspect ratio). Used for the low-resolution
+        #       pyramid level, which the new-fire page loads first so
+        #       the map can appear before the full-size overview has
+        #       finished downloading. Never upscales.
+        #   otherwise        -- longest edge <= max_dim (original
+        #       behaviour, unchanged).
+        #
+        # Both levels are derived from the same source with the same
+        # aspect ratio, which is what lets the client swap one for the
+        # other without disturbing any of its coordinate math (that math
+        # depends only on the image's *rendered* size, not its intrinsic
+        # pixel dimensions).
+        if target_height is not None:
+            # Scale to the requested height, but never upscale and never
+            # exceed the full-size level's max_dim cap. Without the
+            # max_dim term an extremely wide raster (say 50000x4000)
+            # would give a "low" level of 25000x2000 -- larger than the
+            # 9090x727 full-size level, inverting the pyramid and making
+            # the preview slower than the image it is previewing.
+            scale = min(target_height / H, max_dim / max(W, H), 1.0)
+            ovr_W = max(1, int(round(W * scale)))
+            ovr_H = max(1, int(round(H * scale)))
+        elif max(W, H) > max_dim:
             scale = max_dim / max(W, H)
             ovr_W = max(1, int(round(W * scale)))
             ovr_H = max(1, int(round(H * scale)))
@@ -306,6 +333,7 @@ def ensure_overview(
     png_path: str,
     json_path: str,
     max_dim: int = DEFAULT_MAX_DIM,
+    target_height: int | None = None,
 ) -> bool:
     """Generate overview only if cache is stale. Returns True if (re)generated."""
     if overview_is_fresh(raster_path, json_path) and os.path.isfile(png_path):
@@ -314,5 +342,6 @@ def ensure_overview(
         f'[overview] Generating {os.path.basename(png_path)} from '
         f'{os.path.basename(raster_path)} ...\n')
     sys.stderr.flush()
-    generate_overview(raster_path, png_path, json_path, max_dim=max_dim)
+    generate_overview(raster_path, png_path, json_path, max_dim=max_dim,
+                      target_height=target_height)
     return True

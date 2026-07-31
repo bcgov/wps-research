@@ -115,16 +115,51 @@ function showErrors(errs) {
 async function loadYear(year) {
     clearErrors();
     bbox = null;
+
+    // Try sessionStorage first — avoids a network round-trip on
+    // window-switch / page-revisit when the stack file hasn't changed.
+    // The cache key is the ETag the server returned last time; if the
+    // server's ETag changes (new stack file), the 200 response replaces
+    // the cached entry automatically.
+    const ssKey = `nf_meta_${year}`;
+    let metaJson = null;
+    let cachedEtag = null;
     try {
-        const r = await fetch(`/api/year/${year}/overview_meta`);
-        if (!r.ok) {
+        const cached = sessionStorage.getItem(ssKey);
+        if (cached) {
+            const parsed = JSON.parse(cached);
+            metaJson = parsed.meta;
+            cachedEtag = parsed.etag || null;
+        }
+    } catch (_) {}
+
+    try {
+        const headers = {};
+        if (cachedEtag) headers['If-None-Match'] = cachedEtag;
+        const r = await fetch(`/api/year/${year}/overview_meta`, {headers});
+        if (r.status === 304 && metaJson) {
+            // Server confirmed nothing changed — use cached meta as-is.
+            meta = metaJson;
+        } else if (r.ok) {
+            meta = await r.json();
+            // Store fresh copy + new ETag for next load.
+            const newEtag = r.headers.get('ETag') || null;
+            try {
+                sessionStorage.setItem(ssKey, JSON.stringify(
+                    {meta, etag: newEtag}));
+            } catch (_) {}
+        } else {
             showErrors([{message: `Failed to load year ${year} metadata`}]);
             return;
         }
-        meta = await r.json();
     } catch (exc) {
-        showErrors([{message: `Network error: ${exc}`}]);
-        return;
+        if (metaJson) {
+            // Network error but we have a cached copy — use it.
+            meta = metaJson;
+        } else {
+            showErrors([{message: `Network error: ${exc}`}]);
+            return;
+        }
     }
     // Render the R:/G:/B: band-name caption (bold) showing exactly
     // which bands of the active stack file are being visualized.
@@ -158,15 +193,277 @@ async function loadYear(year) {
         : Date.now();  // no cache_key in the metadata -- fall back
                        // to always-fresh rather than risk showing a
                        // stale image with no way to detect staleness.
-    overview.src = `/api/year/${year}/overview.png?v=${cacheKey}`;
-    overview.onload = () => {
-        sizeCanvasToWrap();
-        redraw();
-    };
+    loadOverviewPyramid(year, cacheKey);
     fields.start.placeholder = meta.default_start || 'YYYY-MM-DD';
     fields.end.placeholder = meta.default_end || 'YYYY-MM-DD';
     if (!fields.start.value) fields.start.value = '';
     if (!fields.end.value) fields.end.value = '';
+}
+
+// ----- Two-level overview pyramid loading -----
+//
+// The overview PNG is generated at two resolutions server-side:
+//   overview_low.png -- 2000px tall, arrives quickly
+//   overview.png     -- full size (longest edge up to 9090)
+//
+// Both are fetched concurrently. The map stays hidden behind a
+// progress bar until the low level arrives; then the interface comes
+// up immediately on that image while the full-size one continues
+// downloading behind a second progress bar. When the full-size image
+// lands it replaces the low one in place.
+//
+// The swap is seamless because none of the coordinate math depends on
+// the image's intrinsic pixel size: canvasToRasterPx() divides by
+// meta.overview_W and immediately multiplies by raster_W/overview_W,
+// so overview_W cancels out entirely, and nativeToCanvas() only ever
+// uses overviewBufferW() -- the image's *rendered* CSS width. Both
+// levels share an aspect ratio, so both render into the same CSS box
+// and every stored coordinate (bbox, overlays) stays valid across the
+// swap without recomputation.
+
+let overviewPyramidGen = 0;
+let overviewObjectUrls = [];
+// Intrinsic width of whichever level is currently displayed. Used to
+// compute the "zoom to 1:1" target for click-to-zoom.
+let overviewNaturalW = 0;
+
+function _fmtBytes(b) {
+    if (b >= 1048576) return (b / 1048576).toFixed(1) + ' MB';
+    if (b >= 1024) return (b / 1024).toFixed(0) + ' kB';
+    return b + ' B';
+}
+
+function _fmtEta(sec) {
+    if (!isFinite(sec) || sec < 0) return 'estimating\u2026';
+    if (sec < 1) return 'under a second';
+    if (sec < 60) return `~${Math.ceil(sec)}s`;
+    const m = Math.floor(sec / 60);
+    const s = Math.ceil(sec % 60);
+    return `~${m}m ${s}s`;
+}
+
+// Fetch an image with byte-level progress, writing running totals into
+// `track` so a separate 100ms ticker can render them. Returns an
+// object URL for the downloaded bytes.
+async function fetchImageTracked(url, track) {
+    track.startedAt = performance.now();
+    track.received = 0;
+    track.total = 0;
+    track.done = false;
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const lenHdr = resp.headers.get('Content-Length');
+    track.total = lenHdr ? (parseInt(lenHdr, 10) || 0) : 0;
+    if (!resp.body || typeof resp.body.getReader !== 'function') {
+        // Streaming unavailable -- fall back to a plain blob read. No
+        // incremental progress, but the bar still completes correctly.
+        const blob = await resp.blob();
+        track.received = track.total = blob.size;
+        track.done = true;
+        return URL.createObjectURL(blob);
+    }
+    const reader = resp.body.getReader();
+    const chunks = [];
+    for (;;) {
+        const {done, value} = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        track.received += value.length;
+    }
+    track.done = true;
+    return URL.createObjectURL(new Blob(chunks, {type: 'image/png'}));
+}
+
+function startProgressTicker(track, barEl, etaEl, label) {
+    if (!barEl || !etaEl) return null;
+    const tick = () => {
+        const elapsed = (performance.now() - track.startedAt) / 1000;
+        let frac;
+        if (track.done) {
+            frac = 1;
+        } else if (track.total > 0) {
+            frac = Math.min(0.999, track.received / track.total);
+        } else {
+            // Unknown content length: creep toward 100% asymptotically
+            // so the bar still shows life rather than sitting at zero.
+            frac = 1 - Math.exp(-elapsed / 6);
+        }
+        barEl.style.width = (frac * 100).toFixed(1) + '%';
+        if (track.done) {
+            etaEl.textContent = `${label}: complete.`;
+            return;
+        }
+        if (track.total > 0 && track.received > 0 && elapsed > 0.2) {
+            const rate = track.received / elapsed;   // bytes/sec
+            const eta = (track.total - track.received) / rate;
+            etaEl.textContent =
+                `${label}: ${_fmtBytes(track.received)} of `
+                + `${_fmtBytes(track.total)} `
+                + `(${(frac * 100).toFixed(0)}%) \u2014 ETA ${_fmtEta(eta)}`;
+        } else {
+            etaEl.textContent = `${label}: starting\u2026`;
+        }
+    };
+    tick();
+    return setInterval(tick, 100);
+}
+
+// Point the <img> at `objUrl`, resolving once it has actually decoded
+// (so clientWidth/naturalWidth are meaningful immediately after).
+function setOverviewImage(objUrl) {
+    return new Promise((resolve, reject) => {
+        overview.onload = () => resolve();
+        overview.onerror = () => reject(new Error('image decode failed'));
+        overview.src = objUrl;
+    });
+}
+
+async function loadOverviewPyramid(year, cacheKey) {
+    const gen = ++overviewPyramidGen;
+
+    const initialBlock = document.getElementById('nf-initial-loading');
+    const initialBar   = document.getElementById('nf-initial-bar');
+    const initialEta   = document.getElementById('nf-initial-eta');
+    const hiBlock      = document.getElementById('nf-highres-loading');
+    const hiBar        = document.getElementById('nf-highres-bar');
+    const hiEta        = document.getElementById('nf-highres-eta');
+
+    const lowUrl  = `/api/year/${year}/overview_low.png?v=${cacheKey}`;
+    const highUrl = `/api/year/${year}/overview.png?v=${cacheKey}`;
+
+    // Release object URLs from a previous year so the blobs can be
+    // garbage collected.
+    overviewObjectUrls.forEach(u => {
+        try { URL.revokeObjectURL(u); } catch (_) {}
+    });
+    overviewObjectUrls = [];
+
+    // Hide the map; show the initial progress bar in its place.
+    if (zoomWrap) zoomWrap.style.display = 'none';
+    if (initialBlock) initialBlock.style.display = '';
+    if (hiBlock) hiBlock.style.display = 'none';
+
+    const lowTrack = {};
+    const highTrack = {};
+
+    // Kick BOTH downloads off at once -- the server is threaded, so the
+    // full-size fetch makes progress while the low level is still in
+    // flight. Only the low level gets a progress bar at this stage; it
+    // is far smaller and always finishes first.
+    const lowPromise = fetchImageTracked(lowUrl, lowTrack);
+    const highPromise = fetchImageTracked(highUrl, highTrack);
+    // Nothing awaits highPromise until later; swallow rejections now so
+    // a failure can never surface as an unhandled promise rejection.
+    highPromise.catch(() => {});
+
+    const lowTicker = startProgressTicker(
+        lowTrack, initialBar, initialEta, 'Loading map preview');
+
+    let lowObj = null;
+    try {
+        lowObj = await lowPromise;
+    } catch (exc) {
+        if (initialEta) {
+            initialEta.textContent =
+                `Preview unavailable (${exc.message}) \u2014 waiting for `
+                + `full-resolution image\u2026`;
+        }
+    }
+    if (gen !== overviewPyramidGen) {
+        if (lowTicker) clearInterval(lowTicker);
+        return;
+    }
+
+    if (lowObj) {
+        overviewObjectUrls.push(lowObj);
+        try {
+            await setOverviewImage(lowObj);
+        } catch (_) {
+            lowObj = null;   // fall through and wait for full size
+        }
+    }
+    if (gen !== overviewPyramidGen) {
+        if (lowTicker) clearInterval(lowTicker);
+        return;
+    }
+    if (lowTicker) clearInterval(lowTicker);
+
+    // Bring the map up on the low-resolution level. The wrap must be
+    // visible *before* sizeCanvasToWrap(), since clientWidth/Height
+    // read 0 while it is display:none.
+    if (lowObj) {
+        if (initialBlock) initialBlock.style.display = 'none';
+        if (zoomWrap) zoomWrap.style.display = '';
+        overviewNaturalW = overview.naturalWidth || 0;
+        sizeCanvasToWrap();
+        redraw();
+    }
+
+    const showHiBar = lowObj && hiBlock && !highTrack.done;
+    if (showHiBar) hiBlock.style.display = '';
+    const hiTicker = showHiBar
+        ? startProgressTicker(highTrack, hiBar, hiEta,
+                              'Loading full-resolution overview')
+        : null;
+
+    let highObj = null;
+    try {
+        highObj = await highPromise;
+    } catch (exc) {
+        if (hiTicker) clearInterval(hiTicker);
+        if (hiBlock) hiBlock.style.display = 'none';
+        if (!lowObj) {
+            if (initialBlock) initialBlock.style.display = 'none';
+            showErrors([{message: `Failed to load overview: ${exc.message}`}]);
+        }
+        return;
+    }
+    if (gen !== overviewPyramidGen) {
+        if (hiTicker) clearInterval(hiTicker);
+        try { URL.revokeObjectURL(highObj); } catch (_) {}
+        return;
+    }
+
+    // ---- Seamless swap ----
+    // Record the rendered width before swapping. Both levels share an
+    // aspect ratio and both normally exceed the container width, so
+    // max-width:100% renders them into an identical box and the ratio
+    // below is exactly 1. The compensation is a safety net for small
+    // rasters where the low level is narrower than the container: it
+    // rescales the pan offsets so the same ground point stays put.
+    const wBefore = overview.clientWidth || 0;
+    overviewObjectUrls.push(highObj);
+    try {
+        await setOverviewImage(highObj);
+    } catch (_) {
+        if (hiTicker) clearInterval(hiTicker);
+        if (hiBlock) hiBlock.style.display = 'none';
+        return;
+    }
+    if (gen !== overviewPyramidGen) {
+        if (hiTicker) clearInterval(hiTicker);
+        return;
+    }
+    const wAfter = overview.clientWidth || 0;
+    if (wBefore > 0 && wAfter > 0 && Math.abs(wAfter - wBefore) > 0.5) {
+        const ratio = wAfter / wBefore;
+        zoomTx *= ratio;
+        zoomTy *= ratio;
+        clampPan();
+        applyZoom();
+    }
+    overviewNaturalW = overview.naturalWidth || 0;
+
+    // If the low level never rendered, the map is still hidden --
+    // bring it up now on the full-size image.
+    if (!lowObj) {
+        if (initialBlock) initialBlock.style.display = 'none';
+        if (zoomWrap) zoomWrap.style.display = '';
+    }
+    if (hiTicker) clearInterval(hiTicker);
+    if (hiBlock) hiBlock.style.display = 'none';
+    sizeCanvasToWrap();
+    redraw();
 }
 
 // The canvas sits OUTSIDE .nf-zoom-inner (see new_fire.html) so the
@@ -611,19 +908,74 @@ function bboxContains(b, mx, my) {
 canvas.addEventListener('mousedown', (ev) => {
     if (!meta) return;
     const [mx, my] = getMousePos(ev);
+    // Remember where the press started, and what the bbox looked like
+    // beforehand. If the pointer never really moves, mouseup treats the
+    // gesture as a plain click (zoom toggle) and restores this snapshot
+    // -- otherwise a stray click would silently destroy the user's AOI,
+    // since the 'create' branch below overwrites `bbox` immediately.
+    const downInfo = {
+        downScreen: [mx, my],
+        bboxBefore: bbox ? Object.assign({}, bbox) : null,
+        moved: false,
+    };
     if (bbox && bboxContains(bbox, mx, my)) {
         const startNative = canvasToNative(mx, my);
         if (!startNative) return;
-        drag = {kind: 'move', startNative,
-                origBbox: Object.assign({}, bbox)};
+        drag = Object.assign({kind: 'move', startNative,
+                              origBbox: Object.assign({}, bbox)},
+                             downInfo);
     } else {
         const nat = canvasToNative(mx, my);
         if (!nat) return;
         bbox = {x0: nat[0], y0: nat[1], x1: nat[0], y1: nat[1]};
-        drag = {kind: 'create'};
+        drag = Object.assign({kind: 'create'}, downInfo);
         redraw();
     }
 });
+
+// ----- Click-to-zoom (no-drag left click) -----
+//
+// A press-and-release with no meaningful pointer movement toggles
+// between "fit" and "1:1 with the overview image's own pixels",
+// centred on wherever was clicked. Anything with actual drag in it is
+// an AOI gesture and never reaches here.
+const CLICK_SLOP_PX = 3;
+
+function overviewFullResScale() {
+    // Scale at which one overview-image pixel maps to one screen pixel.
+    const shown = overview.clientWidth || 0;
+    if (!shown || !overviewNaturalW) return null;
+    const s = overviewNaturalW / shown;
+    if (!isFinite(s) || s <= 1) return null;   // already at/above 1:1
+    return Math.min(s, ZOOM_MAX);
+}
+
+function toggleClickZoom(mx, my) {
+    const full = overviewFullResScale();
+    if (full === null) {
+        // Nothing meaningful to zoom into (image already displayed at
+        // or above its native resolution) -- just reset if zoomed.
+        if (zoomScale > 1) resetZoom();
+        return;
+    }
+    // Treat "close enough to full" as fully zoomed in, so the second
+    // click reliably zooms back out even after wheel adjustments.
+    if (zoomScale >= full * 0.999) {
+        resetZoom();
+        return;
+    }
+    if (!zoomWrap) return;
+    // Content point under the click, then re-anchor it to the centre of
+    // the viewport at the new scale.
+    const contentX = (mx - zoomTx) / zoomScale;
+    const contentY = (my - zoomTy) / zoomScale;
+    zoomScale = full;
+    zoomTx = zoomWrap.clientWidth / 2 - contentX * zoomScale;
+    zoomTy = zoomWrap.clientHeight / 2 - contentY * zoomScale;
+    clampPan();
+    applyZoom();
+    redraw();
+}
 
 canvas.addEventListener('mousemove', (ev) => {
     if (!meta) return;
@@ -640,6 +992,16 @@ canvas.addEventListener('mousemove', (ev) => {
             `(lon ${lon}, lat ${lat})`;
     }
     if (!drag) return;
+    // Once the pointer travels past the slop radius this is a real
+    // drag, not a click -- latch that so mouseup routes it to the AOI
+    // logic instead of the zoom toggle.
+    if (!drag.moved && drag.downScreen) {
+        const ddx = mx - drag.downScreen[0];
+        const ddy = my - drag.downScreen[1];
+        if ((ddx * ddx + ddy * ddy) > (CLICK_SLOP_PX * CLICK_SLOP_PX)) {
+            drag.moved = true;
+        }
+    }
     if (drag.kind === 'create') {
         const nat = canvasToNative(mx, my);
         if (nat) { bbox.x1 = nat[0]; bbox.y1 = nat[1]; }
@@ -662,6 +1024,22 @@ window.addEventListener('mouseup', () => {
     if (drag) {
         const wasDragging = drag;
         drag = null;
+
+        // No meaningful movement => this was a click, not a drag.
+        // Put the AOI back exactly as it was and use the gesture to
+        // toggle zoom instead. Nothing about the bbox changed, so the
+        // cached preview stays valid and is deliberately not
+        // invalidated here.
+        if (!wasDragging.moved && wasDragging.downScreen) {
+            bbox = wasDragging.bboxBefore
+                ? Object.assign({}, wasDragging.bboxBefore) : null;
+            if (bbox) updateReadout(); else clearReadout();
+            redraw();
+            toggleClickZoom(wasDragging.downScreen[0],
+                            wasDragging.downScreen[1]);
+            return;
+        }
+
         const r = bbox ? nativeBboxScreenRect(bbox) : null;
         const tooSmall = !r
             || (Math.abs(r.x0 - r.x1) < 2 && Math.abs(r.y0 - r.y1) < 2);
@@ -673,7 +1051,7 @@ window.addEventListener('mouseup', () => {
             updateReadout();
         }
         // Any actual drag invalidates the preview cache.
-        if (wasDragging) invalidatePreview();
+        invalidatePreview();
     }
 });
 
@@ -1138,6 +1516,13 @@ if (zoomFireBtn) {
 // loadBcwsOverlay()'s fetch could resolve and redraw() first, onto a
 // canvas that was still 0x0 -- which is exactly why markers stopped
 // appearing once caching made the image load "too fast".
+//
+// With pyramid loading the wrap starts hidden, so this first call
+// sizes to 0x0 and redraw() short-circuits on overviewReady() until an
+// image has actually decoded. loadOverviewPyramid() re-runs
+// sizeCanvasToWrap() immediately after it un-hides the wrap, which is
+// the call that establishes the real canvas size; this one just keeps
+// the pre-reveal state well-defined.
 sizeCanvasToWrap();
 
 // loadYear() must complete (and set `meta`) before loadBcwsOverlay()

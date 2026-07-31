@@ -121,6 +121,8 @@ class BaseHandler:
         (re.compile(r'^/new_fire$'), 'handle_new_fire_page'),
         (re.compile(r'^/api/year/(?P<y>\d+)/overview\.png$'),
          'handle_api_year_overview_png'),
+        (re.compile(r'^/api/year/(?P<y>\d+)/overview_low\.png$'),
+         'handle_api_year_overview_low_png'),
         (re.compile(r'^/api/year/(?P<y>\d+)/overview_meta$'),
          'handle_api_year_overview_meta'),
         (re.compile(r'^/api/bcws/overlay$'), 'handle_api_bcws_overlay'),

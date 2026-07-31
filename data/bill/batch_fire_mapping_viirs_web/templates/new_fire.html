@@ -31,7 +31,19 @@
             <button id="nf-zoom-reset" type="button" class="btn btn-secondary">Reset zoom</button>
             <button id="nf-clear-bbox" type="button" class="btn btn-secondary">Clear bbox</button>
         </div>
-        <div class="newfire-canvas-wrap" id="nf-canvas-wrap">
+        <!-- Shown in place of the map until the low-resolution overview
+             level has downloaded. Occupies the same width the overview
+             image will take once it appears. -->
+        <div class="nf-loading-block" id="nf-initial-loading">
+            <div class="nf-progress-outer">
+                <div class="nf-progress-inner" id="nf-initial-bar"></div>
+            </div>
+            <p class="nf-progress-eta" id="nf-initial-eta">
+                Loading map preview: starting&hellip;
+            </p>
+        </div>
+        <div class="newfire-canvas-wrap" id="nf-canvas-wrap"
+             style="display:none">
             <div class="nf-zoom-inner" id="nf-zoom-inner">
                 <img id="nf-overview" alt="Year overview" />
             </div>
@@ -45,8 +57,20 @@
             Scroll to zoom around the cursor (page won't scroll while
             you're over the image). The final raster crop will be
             tightened to the actual fire pixels after the download
-            finishes.
+            finishes. A single click (without dragging) zooms to the
+            overview's full resolution at that spot; clicking again
+            zooms back out.
         </p>
+        <!-- Shown only while the full-resolution overview is still
+             downloading in the background, after the low-resolution
+             preview has already brought the map up. -->
+        <div class="nf-loading-block" id="nf-highres-loading"
+             style="display:none">
+            <div class="nf-progress-outer">
+                <div class="nf-progress-inner" id="nf-highres-bar"></div>
+            </div>
+            <p class="nf-progress-eta" id="nf-highres-eta"></p>
+        </div>
     </div>
 
     <div class="newfire-right">

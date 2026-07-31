@@ -152,6 +152,10 @@ class AppState:
 
         # Overview PNG + sidecar JSON paths per year
         self.overview_png_by_year: dict = {}   # {year: abs png path}
+        # Low-resolution pyramid level (2000px tall) served to the
+        # new-fire page first so the map appears before the full-size
+        # overview has finished downloading.
+        self.overview_low_png_by_year: dict = {}  # {year: abs png path}
         self.overview_meta_by_year: dict = {}  # {year: abs json path}
 
         # Year-wide VIIRS shp dirs (downloaded + shapified once at boot;
