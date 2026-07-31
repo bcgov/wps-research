@@ -65,6 +65,10 @@ let meta = null;
 // changed but the box's cached pixel coords did not.)
 let bbox = null;
 let drag = null;          // {kind: 'create'|'move', startNative, origBbox?}
+// Right-button pan gesture: {lastX, lastY} in CLIENT (CSS pixel)
+// coordinates. Kept separate from `drag` so a pan can never be
+// confused with an AOI gesture in either direction.
+let panState = null;
 let lastPreview = null;   // {preview_id, year, start, end, bbox_native} —
                           // sent in the create body when the form still
                           // matches, so the worker can skip accumulate.
@@ -924,6 +928,22 @@ function bboxContains(b, mx, my) {
 
 canvas.addEventListener('mousedown', (ev) => {
     if (!meta) return;
+    // Right button starts a pan. Handled entirely separately from the
+    // AOI gestures below, and tracked on `window` (further down) so a
+    // pan that wanders off the canvas keeps working until the button
+    // comes back up.
+    if (ev.button === 2) {
+        ev.preventDefault();
+        panState = {lastX: ev.clientX, lastY: ev.clientY};
+        canvas.style.cursor = 'grabbing';
+        return;
+    }
+    // Everything below is a left-button gesture. Ignore middle/other
+    // buttons rather than letting them start an AOI drag -- previously
+    // there was no button check at all, so a right-click would create
+    // a degenerate bbox (destroying any existing one) and then trip
+    // the click-to-zoom toggle on release.
+    if (ev.button !== 0) return;
     const [mx, my] = getMousePos(ev);
     // Remember where the press started, and what the bbox looked like
     // beforehand. If the pointer never really moves, mouseup treats the
@@ -1037,7 +1057,11 @@ canvas.addEventListener('mousemove', (ev) => {
     updateReadout();
 });
 
-window.addEventListener('mouseup', () => {
+window.addEventListener('mouseup', (ev) => {
+    // Only the left button finishes an AOI gesture. Without this, a
+    // right-press/release while a left-drag was still held would
+    // prematurely commit the AOI.
+    if (ev && ev.button !== 0) return;
     if (drag) {
         const wasDragging = drag;
         drag = null;
@@ -1420,6 +1444,58 @@ if (zoomWrap && zoomInner) {
 }
 
 if (zoomResetBtn) zoomResetBtn.addEventListener('click', resetZoom);
+
+// ----- Right-button drag to pan -----
+//
+// zoomTx/zoomTy are consumed by a CSS ``translate(...px)``, so they
+// live in the same CSS-pixel space as clientX/clientY. Adding the raw
+// pointer delta therefore moves the content exactly 1:1 with the
+// mouse, in the same direction, with no scale factor to apply -- at
+// any zoom level.
+//
+// Tracked on `window` rather than the canvas so a pan that runs off
+// the edge of the map keeps following the pointer until the button is
+// released, instead of stalling at the boundary of the element.
+
+if (zoomWrap) {
+    // Without this the browser menu opens on right-press and the
+    // matching mouseup never arrives, leaving the pan stuck on.
+    zoomWrap.addEventListener('contextmenu', (ev) => ev.preventDefault());
+}
+
+window.addEventListener('mousemove', (ev) => {
+    if (!panState) return;
+    const dx = ev.clientX - panState.lastX;
+    const dy = ev.clientY - panState.lastY;
+    panState.lastX = ev.clientX;
+    panState.lastY = ev.clientY;
+    zoomTx += dx;
+    zoomTy += dy;
+    // clampPan() is what implements "provided we haven't reached the
+    // limit": once an edge of the scaled content meets the viewport
+    // edge, the offset stops advancing on that axis, so the pan simply
+    // stalls at the boundary rather than dragging the map off-screen.
+    // At scale 1 both bounds collapse to 0, so panning is a no-op when
+    // not zoomed in -- which is the intended behaviour.
+    clampPan();
+    applyZoom();
+    redraw();
+});
+
+function endPan() {
+    if (!panState) return;
+    panState = null;
+    canvas.style.cursor = '';
+}
+
+window.addEventListener('mouseup', (ev) => {
+    if (ev.button === 2) endPan();
+});
+
+// If the window loses focus mid-drag (alt-tab, another app steals the
+// pointer) the mouseup can be delivered elsewhere and never reach us,
+// which would otherwise leave the map panning on the next mousemove.
+window.addEventListener('blur', endPan);
 
 // ----- BCWS points + polygons overlay -----
 
