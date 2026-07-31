@@ -38,6 +38,8 @@ if _PROJECT_ROOT not in sys.path:
 # ---------------------------------------------------------------------------
 import argparse
 import datetime
+import json
+import time
 
 # Project imports (via sys.path)
 from batch_fire_mapping.run_fire_mapping import get_raster_info
@@ -167,6 +169,16 @@ Example
     # Startup behaviour toggles
     p.add_argument("--skip_viirs_bootstrap", action="store_true",
                    help="Skip the year-wide VIIRS download step at startup.")
+    p.add_argument("--viirs_min_interval_minutes", type=int, default=60,
+                   help="Attempt the year-wide VIIRS download at most once "
+                        "per this many minutes, measured across server "
+                        "restarts via a stamp file in "
+                        "<out_root>/.web_cache/. Set 0 to disable the "
+                        "throttle and attempt on every start. Default: 60.")
+    p.add_argument("--force_viirs_bootstrap", action="store_true",
+                   help="Ignore the --viirs_min_interval_minutes throttle "
+                        "and attempt the VIIRS download on this start "
+                        "regardless of when the last attempt was made.")
     p.add_argument("--disable_overview_force_regeneration",
                    action="store_true",
                    help="Skip forced overview regeneration at startup.")
@@ -262,6 +274,90 @@ def _ensure_overviews(rasters_by_year: dict, shared_root: str,
         low_png_map[y] = low_png
         meta_map[y] = meta
     return png_map, low_png_map, meta_map
+
+# ----------------------------------------------------------------------
+# VIIRS run stamp
+#
+# A small JSON file under <out_root>/.web_cache/ that survives restarts
+# and records two independent things:
+#
+#   * every server start        (last_server_start_*, server_starts)
+#   * every VIIRS download attempt (last_attempt_*, last_outcome,
+#                                   attempts)
+#
+# The attempt timestamps drive the once-per-interval throttle, so
+# restarting the server repeatedly while developing does not re-trigger
+# a full LAADS download each time. The server-start fields are recorded
+# unconditionally and are purely informational -- useful when you need
+# to tell "the server came up" apart from "the server tried to
+# download", which the log alone makes awkward to answer.
+# ----------------------------------------------------------------------
+
+_VIIRS_STAMP_NAME = 'viirs_run_stamp.json'
+
+
+def _viirs_stamp_path(out_root: str) -> str:
+    return os.path.join(out_root, '.web_cache', _VIIRS_STAMP_NAME)
+
+
+def _iso_utc(ts: float) -> str:
+    return datetime.datetime.fromtimestamp(
+        ts, datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
+def _read_viirs_stamp(path: str) -> dict:
+    """Return the stamp dict, or {} if absent/unreadable/corrupt."""
+    try:
+        with open(path, encoding='utf-8') as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        # A missing or corrupt stamp must never block startup -- it just
+        # means "no known previous attempt", i.e. go ahead and download.
+        return {}
+
+
+def _write_viirs_stamp(path: str, payload: dict) -> None:
+    """Atomically write the stamp. Failure is logged, never fatal."""
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = f'{path}.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(payload, f, indent=2, sort_keys=True)
+            f.write('\n')
+        os.replace(tmp, path)
+    except OSError as exc:
+        _elog(f'      WARNING: could not write VIIRS run stamp '
+              f'({path}): {exc}')
+
+
+def _viirs_attempt_age_s(stamp: dict):
+    """Seconds since the last recorded attempt, or None if unknown.
+
+    A stamp dated in the future (system clock moved backwards, or the
+    file was copied from another machine) is reported as unknown rather
+    than as a huge negative age, so a bad clock can never wedge
+    downloads off indefinitely."""
+    try:
+        last = float(stamp.get('last_attempt_epoch', 0) or 0)
+    except (TypeError, ValueError):
+        return None
+    if last <= 0:
+        return None
+    age = time.time() - last
+    return age if age >= 0 else None
+
+
+def _fmt_duration(seconds: float) -> str:
+    seconds = int(max(0, seconds))
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f'{h}h {m}m'
+    if m:
+        return f'{m}m {s}s'
+    return f'{s}s'
+
 
 def main():
     args = _build_parser().parse_args()
@@ -539,20 +635,80 @@ def main():
         _elog(f'      WARNING: VIIRS migration: {_err}')
     _log('[3/4] VIIRS data migration from previous stack dates: done.')
 
-    _log('\n[3/4] Purging existing VIIRS shapefiles for the active '
-         'stack: starting (so they get fully regenerated from all '
-         '.nc files, including anything just migrated or about to '
-         'be downloaded) ...')
-    _purged = year_viirs.purge_active_shapefiles(
-        set(outdirs_by_year.values()))
-    _log(f'      Removed {_purged} shapefile component(s).')
-    _log('[3/4] Purging existing VIIRS shapefiles: done.')
-
     for _y in sorted(rasters_by_year):
         app_state.viirs_shp_dirs_by_year[_y] = year_viirs.year_shp_dir(
             app_state, _y)
 
-    if not args.skip_viirs_bootstrap:
+    # ------------------------------------------------------------------
+    # VIIRS run stamp: record this server start, then decide whether a
+    # download attempt is due. The stamp lives under
+    # <out_root>/.web_cache/ so the interval is honoured across
+    # restarts -- restarting repeatedly while developing no longer
+    # re-triggers a full LAADS download every time.
+    # ------------------------------------------------------------------
+    _stamp_path = _viirs_stamp_path(out_root)
+    _stamp = _read_viirs_stamp(_stamp_path)
+    _attempt_age = _viirs_attempt_age_s(_stamp)
+
+    _now = time.time()
+    _stamp['last_server_start_epoch'] = _now
+    _stamp['last_server_start_utc'] = _iso_utc(_now)
+    _stamp['server_starts'] = int(_stamp.get('server_starts', 0) or 0) + 1
+    _write_viirs_stamp(_stamp_path, _stamp)
+
+    _interval_s = max(0, int(args.viirs_min_interval_minutes)) * 60
+    _throttled = (
+        _interval_s > 0
+        and not args.force_viirs_bootstrap
+        and _attempt_age is not None
+        and _attempt_age < _interval_s)
+
+    if _stamp.get('last_attempt_utc'):
+        _age_txt = (f'{_fmt_duration(_attempt_age)} ago'
+                    if _attempt_age is not None else 'age unknown')
+        _log(f"\n[3/4] Last VIIRS attempt: "
+             f"{_stamp['last_attempt_utc']} ({_age_txt}, outcome: "
+             f"{_stamp.get('last_outcome', 'unknown')}). "
+             f"Server start #{_stamp['server_starts']}.")
+    else:
+        _log(f"\n[3/4] No previous VIIRS attempt on record. "
+             f"Server start #{_stamp['server_starts']}.")
+
+    # A migration that actually moved .nc files overrides the throttle:
+    # those files still need shapifying, and skipping would leave them
+    # unprocessed until the interval elapsed.
+    if _throttled and _migration['moved']:
+        _log(f"      Throttle overridden: migration moved "
+             f"{_migration['moved']} file(s) that still need shapifying.")
+        _throttled = False
+
+    if args.skip_viirs_bootstrap:
+        _log('\n[3/4] Skipping VIIRS bootstrap (--skip_viirs_bootstrap). '
+             'Per-fire creation will fall back to on-demand download.')
+    elif _throttled:
+        _remaining = _interval_s - _attempt_age
+        _log(f'\n[3/4] Skipping VIIRS bootstrap: last attempt was '
+             f'{_fmt_duration(_attempt_age)} ago, within the '
+             f'{args.viirs_min_interval_minutes}-minute minimum '
+             f'interval. Next attempt allowed in '
+             f'{_fmt_duration(_remaining)}. Existing shapefiles are '
+             f'left intact; pass --force_viirs_bootstrap to override, '
+             f'or --viirs_min_interval_minutes 0 to disable the '
+             f'throttle.')
+    else:
+        # Purge only when a re-download is actually going to follow.
+        # The purge exists so shapefiles get regenerated from every
+        # .nc file; running it *without* the bootstrap below would
+        # leave the year with no shapefiles at all.
+        _log('\n[3/4] Purging existing VIIRS shapefiles for the active '
+             'stack: starting (so they get fully regenerated from all '
+             '.nc files, including anything just migrated or about to '
+             'be downloaded) ...')
+        _purged = year_viirs.purge_active_shapefiles(
+            set(outdirs_by_year.values()))
+        _log(f'      Removed {_purged} shapefile component(s).')
+        _log('[3/4] Purging existing VIIRS shapefiles: done.')
+
         _log('\n[3/4] LAADS DAAC credentials/connectivity check: '
              'starting ...')
         _preflight_log_dir = year_viirs.year_viirs_dir(
@@ -576,10 +732,7 @@ def main():
                 f"-- see the line above for which case this is "
                 f"(bad token vs. server/network issue).")
         _log('[3/4] LAADS DAAC credentials/connectivity check: done.')
-    if args.skip_viirs_bootstrap:
-        _log('\n[3/4] Skipping VIIRS bootstrap (--skip_viirs_bootstrap). '
-             'Per-fire creation will fall back to on-demand download.')
-    else:
+
         _curl_primary = (args.viirs_download_method == 'curl_primary')
         _method_label = ('curl primary, urllib fallback'
                          if _curl_primary
@@ -589,17 +742,32 @@ def main():
         _log(f'\n[3/4] Bootstrapping per-year VIIRS data '
              f'(download + shapify, {_method_label}, '
              f'{_parallel_label}): starting ...')
+        _outcome = 'unknown'
         try:
             year_viirs.bootstrap_all_years(
                 app_state, curl_primary=_curl_primary,
                 parallel_viirs_downloading=args.parallel_viirs_downloading)
+            _outcome = 'ok'
             _log('[3/4] Bootstrapping per-year VIIRS data: done.')
         except Exception as _exc:
+            _outcome = f'failed: {_exc}'
             _elog(
                 f'      WARNING: VIIRS bootstrap failed: {_exc}\n'
                 f'      Per-fire creation will fall back to on-demand '
                 f'download.')
             _log('[3/4] Bootstrapping per-year VIIRS data: FAILED.')
+        finally:
+            # Stamp the attempt whether or not it succeeded: the point
+            # of the throttle is not to hammer LAADS, and a failed
+            # attempt hammered it exactly as much as a successful one.
+            # (A transient LAADS 500 therefore costs at most one
+            # interval's delay, not an unthrottled retry loop.)
+            _att = time.time()
+            _stamp['last_attempt_epoch'] = _att
+            _stamp['last_attempt_utc'] = _iso_utc(_att)
+            _stamp['last_outcome'] = _outcome
+            _stamp['attempts'] = int(_stamp.get('attempts', 0) or 0) + 1
+            _write_viirs_stamp(_stamp_path, _stamp)
 
     app_state.init_fires_from_disk()
 
