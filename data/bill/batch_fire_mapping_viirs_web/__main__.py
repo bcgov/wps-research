@@ -265,20 +265,23 @@ def _ensure_overviews(rasters_by_year: dict, shared_root: str,
         low_meta = os.path.join(cache_dir, f'{stem}_low.json')
         if force:
             _elog(
-                f'[overview] Regenerating {os.path.basename(png)} from '
+                f'[overview] Regenerating {os.path.basename(png)} + '
+                f'{os.path.basename(low_png)} from '
                 f'{os.path.basename(raster)} (forced at startup) ...')
-            generate_overview(raster, png, meta, max_dim=9090)
-            _elog(f'[overview] Done: {os.path.basename(png)}')
-            _elog(
-                f'[overview] Regenerating {os.path.basename(low_png)} '
-                f'({LOW_OVERVIEW_HEIGHT}px tall preview level) ...')
-            generate_overview(raster, low_png, low_meta,
-                              target_height=LOW_OVERVIEW_HEIGHT)
-            _elog(f'[overview] Done: {os.path.basename(low_png)}')
+            # One pass over the source produces both levels: the coarse
+            # level is decimated from the full-size result in memory.
+            # Reading the source twice would roughly double the wall
+            # time, since these reads are seek-bound rather than
+            # throughput-bound.
+            generate_overview(raster, png, meta, max_dim=9090,
+                              also_low_png=low_png,
+                              low_target_height=LOW_OVERVIEW_HEIGHT)
+            _elog(f'[overview] Done: {os.path.basename(png)} + '
+                  f'{os.path.basename(low_png)}')
         else:
-            ensure_overview(raster, png, meta, max_dim=9090)
-            ensure_overview(raster, low_png, low_meta,
-                            target_height=LOW_OVERVIEW_HEIGHT)
+            ensure_overview(raster, png, meta, max_dim=9090,
+                            also_low_png=low_png,
+                            low_target_height=LOW_OVERVIEW_HEIGHT)
         png_map[y] = png
         low_png_map[y] = low_png
         meta_map[y] = meta

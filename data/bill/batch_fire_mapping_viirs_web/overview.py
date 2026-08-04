@@ -168,6 +168,8 @@ def generate_overview(
     json_path: str,
     max_dim: int = DEFAULT_MAX_DIM,
     target_height: int | None = None,
+    also_low_png: str | None = None,
+    low_target_height: int = 2000,
 ) -> None:
     """Generate overview PNG + sidecar JSON. Raises on failure.
 
@@ -243,6 +245,31 @@ def generate_overview(
     imsave(buf, rgb_uint8, format='png')
     os.makedirs(os.path.dirname(png_path) or '.', exist_ok=True)
     _atomic_write_bytes(png_path, buf.getvalue())
+
+    # Optionally derive the coarse pyramid level from the image we
+    # already have in memory, rather than reading the source a second
+    # time.
+    #
+    # Both levels are nearest-neighbour decimations of the same source,
+    # so decimating the full-size result again is the same operation as
+    # decimating the source directly -- nearest-neighbour picks a single
+    # source pixel per output pixel either way, and the full-size level
+    # is a superset of the rows/columns the coarse level would pick.
+    # Doing it here avoids re-reading ~2.2 GB scattered across a 27 GB
+    # band per channel, which on a seek-bound disk is the dominant cost
+    # of generating the coarse level at all.
+    if also_low_png:
+        low_scale = min(low_target_height / ovr_H, 1.0)
+        low_H = max(1, int(round(ovr_H * low_scale)))
+        low_W = max(1, int(round(ovr_W * low_scale)))
+        row_idx = (np.arange(low_H) * (ovr_H / low_H)).astype(np.int64)
+        col_idx = (np.arange(low_W) * (ovr_W / low_W)).astype(np.int64)
+        np.clip(row_idx, 0, ovr_H - 1, out=row_idx)
+        np.clip(col_idx, 0, ovr_W - 1, out=col_idx)
+        low_rgb = rgb_uint8[np.ix_(row_idx, col_idx)]
+        low_buf = io.BytesIO()
+        imsave(low_buf, low_rgb, format='png')
+        _atomic_write_bytes(also_low_png, low_buf.getvalue())
 
     # Native + WGS84 extents
     xmin = gt[0]
@@ -334,14 +361,25 @@ def ensure_overview(
     json_path: str,
     max_dim: int = DEFAULT_MAX_DIM,
     target_height: int | None = None,
+    also_low_png: str | None = None,
+    low_target_height: int = 2000,
 ) -> bool:
     """Generate overview only if cache is stale. Returns True if (re)generated."""
-    if overview_is_fresh(raster_path, json_path) and os.path.isfile(png_path):
+    fresh = (overview_is_fresh(raster_path, json_path)
+             and os.path.isfile(png_path))
+    # The coarse level shares the full-size level's sidecar, so a
+    # missing coarse PNG would otherwise look "fresh" and never be
+    # rebuilt -- leaving the new-fire page without its fast preview.
+    if fresh and also_low_png and not os.path.isfile(also_low_png):
+        fresh = False
+    if fresh:
         return False
     sys.stderr.write(
         f'[overview] Generating {os.path.basename(png_path)} from '
         f'{os.path.basename(raster_path)} ...\n')
     sys.stderr.flush()
     generate_overview(raster_path, png_path, json_path, max_dim=max_dim,
-                      target_height=target_height)
+                      target_height=target_height,
+                      also_low_png=also_low_png,
+                      low_target_height=low_target_height)
     return True
