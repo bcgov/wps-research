@@ -667,7 +667,7 @@ def _viirs_worker(fire: FireInfo) -> None:
         _set_progress(fire, 'cropping',
                       detail='building AOI stack on ramdisk',
                       fraction=0.05)
-        from ..aoi_stack import ensure_aoi_stack, AoiStackError
+        from .aoi_stack import ensure_aoi_stack, AoiStackError
 
         def _stack_progress(detail, frac):
             _set_progress(fire, 'cropping',
