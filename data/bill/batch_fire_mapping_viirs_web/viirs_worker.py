@@ -744,20 +744,51 @@ def _viirs_worker(fire: FireInfo) -> None:
                     f'[viirs_worker] hint overlay generation failed: '
                     f'{exc}\n')
 
+        # With VIIRS downloading disabled, a fire whose AOI has no        # granules already on disk would otherwise land in READY with
+        # an empty hint and fail at map time with "No hint mask
+        # available". Build the red-wins (post) hint up front instead,
+        # so the fire is immediately mappable and the UI opens with a
+        # working hint selected. The user can still switch modes.
+        _hint_bin = viirs_cropped or ''
+        _hint_mode = 'viirs'
+        _perimeter_type = 'viirs' if viirs_cropped else 'none'
+        if not viirs_cropped:
+            try:
+                from .prepare import build_redwins_hint_for_fire
+                fire.crop_bin = crop_bin
+                fire.cache_dir = cache_dir
+                _rw_path, _rw_err = build_redwins_hint_for_fire(
+                    fire, 'redwins_post')
+                if _rw_path:
+                    _hint_bin = _rw_path
+                    _hint_mode = 'redwins_post'
+                    _perimeter_type = 'redwins_post'
+                    fire.console_log.append(
+                        '  No VIIRS data for this AOI -- defaulting to '
+                        'the "Red wins (post)" hint.')
+                else:
+                    fire.console_log.append(
+                        f'  No VIIRS data for this AOI, and the red-wins '
+                        f'fallback could not be built ({_rw_err}).')
+            except Exception as exc:
+                sys.stderr.write(
+                    f'[viirs_worker] {fire.fire_numbe}: red-wins '
+                    f'fallback failed: {exc}\n')
+
         with state.lock:
             fire.crop_bin = crop_bin
             fire.viirs_bin = viirs_cropped or ''
-            fire.hint_bin = viirs_cropped or ''
+            fire.hint_bin = _hint_bin
             fire.crop_w = crop_w
             fire.crop_h = crop_h
             fire.padding_used = 0.0
             fire.sample_size = sample_size
             fire.acc_start = fire.viirs_start_date
             fire.acc_end = fire.viirs_end_date
-            fire.perimeter_type = 'viirs' if viirs_cropped else 'none'
-            fire.hint_mode = 'viirs' if viirs_cropped else 'viirs'
+            fire.perimeter_type = _perimeter_type
+            fire.hint_mode = _hint_mode
             fire.available_views = views
-            if viirs_cropped \
+            if _hint_bin \
                     and 'hint' not in fire.available_views \
                     and os.path.isfile(os.path.join(
                         cache_dir, 'previews', 'hint.png')):

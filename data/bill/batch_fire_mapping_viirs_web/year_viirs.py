@@ -52,6 +52,61 @@ def _elog(msg: str = '') -> None:
     sys.stderr.flush()
 
 
+# ----------------------------------------------------------------------
+# VIIRS DOWNLOADING KILL SWITCH
+# ----------------------------------------------------------------------
+# 20260804: New VIIRS downloading is DISABLED.
+#
+# Even scoped to a single AOI, fetching granules meant one LAADS
+# listing request per day in the fire's window (plus a fetch per
+# granule), and LAADS has been slow and intermittently returning 500s.
+# That put a multi-minute stall between confirming an AOI and being
+# able to map it.
+#
+# Nothing has been removed. Every download code path is intact and
+# reachable -- download_year, download_aoi, refresh_aoi_viirs,
+# _download_day and the whole curl/urllib layer are untouched. This
+# single flag short-circuits them, so re-enabling is a one-line change
+# (or --enable_viirs_download at runtime) with no code to restore.
+#
+# Still fully active while disabled:
+#   * searching / shapifying / indexing every .nc already on disk,
+#   * province-wide accumulation for the new-fire overlay,
+#   * per-fire accumulation from that existing data.
+# So VIIRS hints still work wherever data was already downloaded; only
+# the fetching of NEW granules is off.
+VIIRS_DOWNLOAD_ENABLED = False
+
+
+def set_viirs_download_enabled(enabled: bool) -> None:
+    """Toggle VIIRS downloading at runtime (see VIIRS_DOWNLOAD_ENABLED)."""
+    global VIIRS_DOWNLOAD_ENABLED
+    VIIRS_DOWNLOAD_ENABLED = bool(enabled)
+
+
+def viirs_download_enabled() -> bool:
+    return VIIRS_DOWNLOAD_ENABLED
+
+
+def _download_disabled_result(reason: str = 'VIIRS downloading is '
+                              'currently disabled') -> dict:
+    """The shape download_year/download_aoi return, meaning 'did nothing'.
+
+    Returning a well-formed result rather than raising keeps every
+    caller's summary/reporting code working unchanged.
+    """
+    return {
+        'already_present': 0,
+        'newly_downloaded': 0,
+        'still_missing': 0,
+        'missing_days': [],
+        'total_nc': 0,
+        'events_path': None,
+        'disabled': True,
+        'disabled_reason': reason,
+    }
+
+
 def year_viirs_dir(state, year: int) -> str:
     """Return the year-wide VIIRS data dir for *year*."""
     out_dir = state.outdirs_by_year.get(year) or state.output_root
@@ -890,6 +945,12 @@ def download_year(year: int, raster_path: str, save_dir: str,
     subprocess), matching the original behaviour; per-call stdout
     lines still print but may interleave across days.
     """
+    if not VIIRS_DOWNLOAD_ENABLED:
+        _log(f'      [{os.path.basename(raster_path)}] VIIRS download '
+             f'SKIPPED -- downloading is currently disabled. Existing '
+             f'.nc files on disk are still searched and used.')
+        return _download_disabled_result()
+
     if start is None or end is None:
         ds, de = default_window(year)
         start = start or ds
@@ -1034,10 +1095,13 @@ def download_aoi(bbox_wgs84: tuple, save_dir: str, token: str,
             except Exception:
                 pass
 
+    if not VIIRS_DOWNLOAD_ENABLED:
+        _emit(f'      [{label}] VIIRS download is currently disabled -- '
+              f'using granules already on disk for this AOI.')
+        return _download_disabled_result()
+
     if end < start:
-        return {'already_present': 0, 'newly_downloaded': 0,
-                'still_missing': 0, 'missing_days': [], 'total_nc': 0,
-                'events_path': None}
+        return _download_disabled_result('empty date window')
 
     os.makedirs(save_dir, exist_ok=True)
     events_path = os.path.join(save_dir, '_viirs_events.jsonl')

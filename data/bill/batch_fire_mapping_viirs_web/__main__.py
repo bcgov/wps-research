@@ -175,6 +175,14 @@ Example
                         "restarts via a stamp file in "
                         "<out_root>/.web_cache/. Set 0 to disable the "
                         "throttle and attempt on every start. Default: 60.")
+    p.add_argument("--enable_viirs_download", action="store_true",
+                   help="Re-enable downloading of NEW VIIRS granules. "
+                        "Downloading is currently DISABLED by default "
+                        "(year_viirs.VIIRS_DOWNLOAD_ENABLED): LAADS has "
+                        "been slow enough that even AOI-scoped fetches "
+                        "stalled fire creation for minutes. Searching, "
+                        "shapifying, indexing and accumulating the .nc "
+                        "files already on disk continue regardless.")
     p.add_argument("--province_wide_viirs_download", action="store_true",
                    help="Restore the old behaviour of downloading VIIRS "
                         "for the whole raster footprint at startup. Off "
@@ -712,6 +720,18 @@ def main():
     # restarts -- restarting repeatedly while developing no longer
     # re-triggers a full LAADS download every time.
     # ------------------------------------------------------------------
+    # Apply the download kill switch before anything can call into the
+    # download paths. Off by default; --enable_viirs_download turns the
+    # whole machinery back on with no code change.
+    year_viirs.set_viirs_download_enabled(args.enable_viirs_download)
+    if not args.enable_viirs_download:
+        _log('\n[3/4] VIIRS downloading is DISABLED '
+             '(pass --enable_viirs_download to turn it back on). '
+             'Existing .nc files are still searched, shapified, '
+             'indexed and accumulated; only fetching NEW granules is '
+             'off. Fires without VIIRS coverage default to the '
+             '"Red wins (post)" hint.')
+
     _interval_s = max(0, int(args.viirs_min_interval_minutes)) * 60
     # The throttle exists to stop repeated restarts hammering LAADS.
     # With province-wide downloading off, startup makes no LAADS calls

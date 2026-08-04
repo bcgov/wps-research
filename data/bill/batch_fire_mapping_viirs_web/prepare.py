@@ -503,8 +503,21 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
         fire.hint_bin = fire.viirs_bin
         fire.perimeter_type = 'viirs'
     else:
-        fire.hint_bin = ''
-        fire.perimeter_type = 'none'
+        # No VIIRS for this AOI (common now that downloading is
+        # disabled). Fall back to red-wins rather than leaving an
+        # empty hint, which would fail at map time.
+        _rw_path, _rw_err = build_redwins_hint_for_fire(
+            fire, 'redwins_post')
+        if _rw_path:
+            fire.hint_bin = _rw_path
+            fire.perimeter_type = 'redwins_post'
+            fire.hint_mode = 'redwins_post'
+        else:
+            fire.hint_bin = ''
+            fire.perimeter_type = 'none'
+            sys.stderr.write(
+                f'[prepare] [{fire_numbe}] no VIIRS and red-wins '
+                f'fallback failed: {_rw_err}\n')
 
     if fire.viirs_start_date:
         fire.acc_start = fire.viirs_start_date
