@@ -128,6 +128,18 @@ class MappingRoutes:
             return
         params = body.get('params', {})
 
+        # The AOI stack lives on tmpfs and does not survive a reboot.
+        # Rebuild it before claiming the fire, so a missing stack shows
+        # up as a clear console message rather than a CLI crash.
+        try:
+            from ..prepare import ensure_fire_stack_present
+            ensure_fire_stack_present(fire)
+        except Exception as exc:
+            self._send_json(
+                {'error': f'Could not regenerate the AOI stack: {exc}'},
+                500)
+            return
+
         # AUDIT-C5: atomic test-and-claim of fire.status. Two simultaneous
         # POSTs would otherwise both pass the readiness check and both
         # enqueue, leading to duplicate mapping runs that overwrite each

@@ -713,7 +713,6 @@ class FireListRoutes:
             _compute_viirs_area_ha, WorkerError,
         )
         from ..state import FireInfo
-        from batch_fire_mapping.run_fire_mapping import crop_raster
         from viirs.utils.rasterize import rasterize_shapefile
         from ..mapping import _overlay_mask_on_post
         from ..preview import (
@@ -798,15 +797,22 @@ class FireListRoutes:
         ephemeral.viirs_end_date = end_date.isoformat()
         ephemeral.cache_dir = preview_dir
 
-        # Crop to user's bbox (no tight-crop yet — preview uses the bbox
-        # the user drew, since the whole point is to verify their choice).
+        # Build the AOI stack for the user's bbox. The preview uses the
+        # bbox as drawn (no padding), since the whole point is to
+        # verify that choice. It goes to the preview dir rather than
+        # /ram: it is throwaway, swept with the rest of the preview,
+        # and must not collide with the real fire's ramdisk stack.
         crop_xmin, crop_ymin, crop_xmax, crop_ymax = ephemeral.bbox_native
         crop_bin = os.path.join(preview_dir, 'preview_crop.bin')
-        if not crop_raster(ref_raster, crop_bin,
-                           crop_xmin, crop_ymin, crop_xmax, crop_ymax):
+        try:
+            from ..aoi_stack import build_aoi_stack, AoiStackError
+            build_aoi_stack(crop_bin, crop_xmin, crop_ymin,
+                            crop_xmax, crop_ymax)
+        except Exception as exc:
             self._send_json(
                 {'errors': [{'field': 'bbox_native',
-                             'message': 'GDAL crop failed'}]}, 500)
+                             'message': f'AOI stack build failed: {exc}'}]},
+                500)
             return
 
         # ---- Try VIIRS accumulate + rasterize (best-effort) ----

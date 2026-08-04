@@ -605,15 +605,28 @@ def _viirs_worker(fire: FireInfo) -> None:
         if fire.cancel_event.is_set():
             raise WorkerCancelled()
 
-        # ---- Stage 2: crop the reference raster to the user's drawn
-        # AOI rectangle (bbox_native) exactly, with no extra padding.
-        _set_progress(fire, 'cropping', detail='cropping reference raster',
-                      fraction=0.25)
-        from batch_fire_mapping.run_fire_mapping import crop_raster
-        xmin, ymin, xmax, ymax = fire.bbox_native
-        crop_bin = os.path.join(cache_dir, f'{fire.fire_numbe}_crop.bin')
-        if not crop_raster(ref_raster, crop_bin, xmin, ymin, xmax, ymax):
-            raise WorkerError('GDAL crop failed.')
+        # ---- Stage 2: build the 12-band stack for the user's AOI ----
+        # Previously this cut the AOI out of a pre-built province-wide
+        # stack on the ramdisk. That stack is gone; the equivalent
+        # product is now generated directly from the median composite
+        # and the latest MRAP mosaic, reading only the AOI window.
+        _set_progress(fire, 'cropping',
+                      detail='building AOI stack on ramdisk',
+                      fraction=0.05)
+        from ..aoi_stack import ensure_aoi_stack, AoiStackError
+
+        def _stack_progress(detail, frac):
+            _set_progress(fire, 'cropping',
+                          detail=f'AOI stack: {detail}',
+                          fraction=0.05 + 0.20 * float(frac))
+
+        try:
+            stack_info = ensure_aoi_stack(
+                fire.fire_numbe, fire.bbox_native,
+                progress_cb=_stack_progress)
+        except AoiStackError as exc:
+            raise WorkerError(f'AOI stack build failed: {exc}')
+        crop_bin = stack_info['path']
         if fire.cancel_event.is_set():
             raise WorkerCancelled()
 

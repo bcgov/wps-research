@@ -7,29 +7,39 @@ Call this in ~/refresh_mrap.sh by:
 Run this AFTER refresh_mrap.sh has finished and a new <yyyymmdd>_mrap.bin
 has landed in /data/mrap_bc/.
 
-Steps:
-    1. Stop the running fire-mapping web server (it holds /ram/*_stack.bin
-       open; the stack must not be rebuilt while it's serving).
-    2. Find the most recently DATED *_mrap.bin in /data/mrap_bc (by the
+20260804: STOPPED PRE-BUILDING THE PROVINCE-WIDE STACK.
+----------------------------------------------------------------------
+This script used to run sentinel2_anomaly3 over the whole province and
+stack pre + post + anomaly into /ram/<date>_stack.bin. That file was
+~307 GB -- three times the size of the 103 GB mosaic it came from --
+and essentially all of it was never read: fires are mapped on small
+AOIs, and each one only ever used its own little window.
+
+The stack is now generated per-AOI, on demand, when a fire is created
+through the new_fire interface (see aoi_stack.py in the web app). Each
+AOI stack is written to /ram/<postdate>_stack_<identifier>.bin, is the
+same kind of product this script used to cut out of the province-wide
+stack, and costs megabytes instead of hundreds of gigabytes. /ram is
+tmpfs, so those per-AOI stacks are expendable; the web app rebuilds any
+that go missing after a reboot.
+
+What this script does now:
+    1. Find the most recently DATED *_mrap.bin in /data/mrap_bc (by the
        yyyymmdd filename prefix, not mtime -- regenerated files can have
        out-of-order mtimes).
-    3. Run sentinel2_anomaly3 on [pre=composite/median.bin] [post=that
-       mrap.bin] -- it always writes ./ratio.bin in the CWD, so we run it
-       in a scratch dir and immediately consume the result.
-    4. Stack [median.bin] [post mrap.bin] [ratio.bin] -> /ram/<date>_stack.bin
-       via raster_stack.py.
-    5. Delete the previous day's /ram/<date>_stack.bin (and its .hdr), so
-       /ram doesn't fill up -- this is almost certainly tmpfs.
-    6. Rewrite the RASTERS=(...) line in run_fire_viirs_web.sh to point at
-       the new dated stack file.
-    7. Restart the server.
+    2. Stop the running fire-mapping web server.
+    3. Delete any leftover province-wide /ram/<date>_stack.bin from the
+       old workflow, and any stale per-AOI stacks whose date prefix no
+       longer matches the current mosaic (their anomaly bands were
+       computed against a superseded post image).
+    4. Rewrite the RASTERS=(...) line in run_fire_viirs_web.sh to point
+       at the new mosaic itself. The web app derives its overview PNGs
+       (both pyramid levels) from this file directly.
+    5. Restart the server.
 
-Exits non-zero on any failure. Steps before the server restart try not to
-leave things worse than they started -- e.g. a failed rewrite of the
-launch script restores its backup.
+Exits non-zero on any failure.
 """
 
-import glob
 import os
 import re
 import shutil
@@ -55,12 +65,11 @@ EXTRA_PATH = [
 ]
 
 MRAP_NAME_RE = re.compile(r"^(\d{8})_mrap\.bin$")
-# Matches any active (non-comment) path line inside RASTERS=( ... ),
-# e.g. "    /ram/20260618_stack.bin" or "    /data/mrap_bc/20260618_mrap.bin".
-# Deliberately NOT restricted to the /ram/<date>_stack.bin shape, so this
-# still works if someone has manually pointed the array at a raw
-# .../mrap.bin for testing -- it just replaces whatever single active
-# path line it finds.
+# Province-wide stacks from the retired workflow: <date>_stack.bin
+OLD_STACK_RE = re.compile(r"^(\d{8})_stack\.bin$")
+# Per-AOI stacks from the new workflow: <date>_stack_<identifier>.bin
+AOI_STACK_RE = re.compile(r"^(\d{8})_stack_(.+)\.bin$")
+
 RASTER_LINE_RE = re.compile(r"^(\s*)(/\S+)\s*$")
 
 
@@ -75,16 +84,9 @@ def die(msg: str) -> None:
 
 
 def build_env() -> dict:
-    """Current environment with EXTRA_PATH prepended to PATH, matching
-    the bash script's PATH export."""
     env = os.environ.copy()
     env["PATH"] = os.pathsep.join(EXTRA_PATH + [env.get("PATH", "")])
     return env
-
-
-def require_on_path(tool: str, env: dict) -> None:
-    if shutil.which(tool, path=env["PATH"]) is None:
-        die(f"{tool} not found on PATH")
 
 
 def find_latest_mrap(mrap_dir: Path) -> tuple[str, Path]:
@@ -118,9 +120,6 @@ def port_in_use(port: int) -> bool:
 
 
 def lan_ip() -> str | None:
-    """Best-effort LAN IP, via the same trick the app itself uses at
-    startup (open a UDP socket toward an external address; nothing is
-    actually sent, this just makes the OS pick the outbound route/IP)."""
     import socket
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -133,8 +132,6 @@ def lan_ip() -> str | None:
 
 
 def report_server_address(port: int) -> None:
-    """Report the IP/hostname/port the server is (or would be)
-    reachable at, regardless of whether it's currently up."""
     import socket
     hostname = socket.gethostname()
     ip = lan_ip()
@@ -160,8 +157,6 @@ def stop_server() -> None:
 
     if not was_up:
         if pkill_matched:
-            # Port was free but a matching process existed anyway --
-            # e.g. it was stuck shutting down, or about to bind.
             log("  no listener on the port, but pkill matched a process "
                 "and signalled it anyway")
         else:
@@ -187,80 +182,83 @@ def stop_server() -> None:
         f"30s after SIGTERM")
 
 
-def run_anomaly(pre_bin: Path, post_bin: Path, scratch_dir: Path) -> Path:
-    log("Running sentinel2_anomaly3 ...")
-    scratch_dir.mkdir(parents=True, exist_ok=True)
+def cleanup_ram(ram_dir: Path, current_date: str) -> None:
+    """Free the ramdisk of everything the new workflow does not need.
 
-    # Without --divide, sentinel2_anomaly3 writes ratio.bin/.hdr. Clear
-    # out both possible names (plain and --divide's ratio_divide.*)
-    # from a previous run before invoking it, in case the mode ever
-    # changes again.
-    for stem in ("ratio", "ratio_divide"):
-        (scratch_dir / f"{stem}.bin").unlink(missing_ok=True)
-        (scratch_dir / f"{stem}.hdr").unlink(missing_ok=True)
+    Three categories:
+      * province-wide <date>_stack.bin from the retired workflow -- the
+        ~307 GB files this change exists to eliminate;
+      * per-AOI stacks whose date prefix is not the current mosaic's,
+        since their anomaly bands were computed against a superseded
+        post image and would be silently wrong if reused;
+      * the old sentinel2_anomaly3 scratch dir.
 
-    subprocess.run(
-        ["sentinel2_anomaly3", str(pre_bin), str(post_bin)],
-        cwd=scratch_dir, check=True, env=build_env(),
-    )
+    Per-AOI stacks matching the *current* date are kept: they are still
+    valid, and keeping them means fires mapped earlier today do not have
+    to rebuild.
+    """
+    freed = 0
 
-    ratio_bin = scratch_dir / "ratio.bin"
-    if not ratio_bin.exists():
-        die(f"sentinel2_anomaly3 did not produce {ratio_bin}")
-    return ratio_bin
-
-
-def run_stack(pre_bin: Path, post_bin: Path, ratio_bin: Path,
-              stack_out: Path) -> None:
-    log(f"Stacking pre + post + anomaly -> {stack_out} ...")
-    subprocess.run(
-        ["raster_stack.py", str(pre_bin), str(post_bin), str(ratio_bin),
-         str(stack_out)],
-        check=True, env=build_env(),
-    )
-    if not stack_out.exists():
-        die(f"raster_stack.py did not produce {stack_out}")
-    log(f"Stack written: {stack_out}")
-
-
-def delete_previous_stacks(ram_dir: Path, keep: Path) -> None:
-    """Delete every <yyyymmdd>_stack.bin/.hdr in ram_dir except `keep`,
-    so /ram (almost certainly tmpfs) doesn't fill up with old stacks."""
-    removed_any = False
-    for f in ram_dir.glob("*_stack.bin"):
-        if f == keep:
+    for f in sorted(ram_dir.glob("*_stack.bin")):
+        if not OLD_STACK_RE.match(f.name):
             continue
-        for path in (f, f.with_suffix(".hdr")):
+        for path in (f, f.with_suffix(".hdr"),
+                     Path(str(f) + ".aux.xml"),
+                     Path(str(f.with_suffix(".hdr")) + ".bak")):
             if path.exists():
-                log(f"Deleting old stack file: {path}")
-                path.unlink()
-                removed_any = True
-    if not removed_any:
-        log("No previous stack files to delete.")
+                try:
+                    size = path.stat().st_size
+                except OSError:
+                    size = 0
+                log(f"Deleting province-wide stack from the old "
+                    f"workflow: {path}")
+                try:
+                    path.unlink()
+                    freed += size
+                except OSError as exc:
+                    log(f"  WARNING: could not delete {path}: {exc}")
+
+    for f in sorted(ram_dir.glob("*_stack_*.bin")):
+        m = AOI_STACK_RE.match(f.name)
+        if not m:
+            continue
+        if m.group(1) == current_date:
+            log(f"Keeping current-date AOI stack: {f.name}")
+            continue
+        for path in (f, f.with_suffix(".hdr"),
+                     Path(str(f) + ".aux.xml")):
+            if path.exists():
+                try:
+                    size = path.stat().st_size
+                except OSError:
+                    size = 0
+                log(f"Deleting stale AOI stack (built against "
+                    f"{m.group(1)}, current is {current_date}): {path}")
+                try:
+                    path.unlink()
+                    freed += size
+                except OSError as exc:
+                    log(f"  WARNING: could not delete {path}: {exc}")
+
+    if SCRATCH_DIR.exists():
+        log(f"Deleting anomaly scratch dir: {SCRATCH_DIR}")
+        shutil.rmtree(SCRATCH_DIR, ignore_errors=True)
+
+    if freed:
+        log(f"Freed {freed / (1024 ** 3):.1f} GiB on {ram_dir}.")
+    else:
+        log("Nothing to clean up on the ramdisk.")
 
 
-def delete_scratch(scratch_dir: Path) -> None:
-    """Delete sentinel2_anomaly3's ratio.bin/.hdr (and the scratch dir
-    itself) now that the stack has consumed them -- they're only an
-    intermediate, and /ram is almost certainly tmpfs."""
-    if scratch_dir.exists():
-        log(f"Deleting anomaly scratch dir: {scratch_dir}")
-        shutil.rmtree(scratch_dir)
-
-
-def update_rasters_line(script_path: Path, stack_out: Path) -> None:
+def update_rasters_line(script_path: Path, raster_path: Path) -> None:
     """Rewrite the single active (non-comment) path inside
-    RASTERS=( ... ) in script_path to point at stack_out.
+    RASTERS=( ... ) in script_path to point at raster_path.
 
     Scoped strictly to lines between "RASTERS=(" and the closing ")",
     so this can't accidentally touch OUT_ROOT, LAADS_TOKEN_FILE, or
-    anything else in the script. Works regardless of what the current
-    active line looks like -- a /ram/<date>_stack.bin from a previous
-    run, or a raw /data/mrap_bc/<date>_mrap.bin someone pointed it at
-    by hand for testing -- as long as there's exactly one uncommented
-    path line in the array.
+    anything else in the script.
     """
-    log(f"Updating RASTERS in {script_path} to point at {stack_out} ...")
+    log(f"Updating RASTERS in {script_path} to point at {raster_path} ...")
     backup_path = script_path.with_suffix(script_path.suffix + ".bak")
     shutil.copyfile(script_path, backup_path)
 
@@ -290,8 +288,8 @@ def update_rasters_line(script_path: Path, stack_out: Path) -> None:
                     f"RASTERS=( ... ) in {script_path} -- expected "
                     f"exactly one, refusing to guess which to replace")
             indent = m.group(1)
-            trailing = line[m.end(2):]  # preserve trailing newline etc.
-            new_lines.append(f"{indent}{stack_out}{trailing}")
+            trailing = line[m.end(2):]
+            new_lines.append(f"{indent}{raster_path}{trailing}")
             replaced = True
         else:
             new_lines.append(line)
@@ -303,7 +301,7 @@ def update_rasters_line(script_path: Path, stack_out: Path) -> None:
 
     script_path.write_text("".join(new_lines))
 
-    if str(stack_out) not in script_path.read_text():
+    if str(raster_path) not in script_path.read_text():
         log(f"Restoring backup of {script_path} after failed update")
         shutil.copyfile(backup_path, script_path)
         die(f"failed to update RASTERS line in {script_path}")
@@ -322,7 +320,7 @@ def start_server(server_dir: Path, server_script: str) -> None:
             stdout=log_fh,
             stderr=log_fh,
             stdin=subprocess.DEVNULL,
-            start_new_session=True,  # detach, survives this script exiting
+            start_new_session=True,
         )
 
     time.sleep(2)
@@ -335,71 +333,25 @@ def start_server(server_dir: Path, server_script: str) -> None:
 
 
 def main() -> None:
+    # The median composite is not consumed here any more, but the web
+    # app needs it for every AOI stack it builds. Failing loudly now is
+    # far better than every fire creation failing later.
     if not PRE_BIN.exists():
-        die(f"pre-image not found: {PRE_BIN}")
-
-    env = build_env()
-    require_on_path("sentinel2_anomaly3", env)
-    require_on_path("raster_stack.py", env)
+        die(f"pre-image not found: {PRE_BIN} "
+            f"(the web app needs this to build per-AOI stacks)")
 
     date_str, post_bin = find_latest_mrap(MRAP_DIR)
-    stack_out = RAM_DIR / f"{date_str}_stack.bin"
-    
-    # ------------------------------------------------------------
-    # IDENTITY CHECK: skip compute if stack already exists
-    # ------------------------------------------------------------
-    hdr_file = stack_out.with_suffix(".hdr")
 
-    if stack_out.exists() and hdr_file.exists():
-        log(f"Stack already exists for {date_str}, skipping rebuild:")
-        log(f"  {stack_out}")
-
-        # still update server + restart
-        update_rasters_line(SERVER_DIR / SERVER_SCRIPT, stack_out)
-        start_server(SERVER_DIR, SERVER_SCRIPT)
-
-        log("Done (skipped compute path).")
-        return
-
-    log(f"Pre-image  : {PRE_BIN}")
-    log(f"Post-image : {post_bin} (date={date_str})")
-    log(f"Stack out  : {stack_out}")
+    log(f"Pre-image (median, used per-AOI by the web app): {PRE_BIN}")
+    log(f"Post-image (mosaic served to the web app)      : {post_bin}")
+    log(f"Date                                            : {date_str}")
+    log("No province-wide stack is built; per-AOI stacks are generated "
+        "on demand by the web app.")
 
     stop_server()
+    cleanup_ram(RAM_DIR, date_str)
 
-    ratio_bin = run_anomaly(PRE_BIN, post_bin, SCRATCH_DIR)
-    run_stack(PRE_BIN, post_bin, ratio_bin, stack_out)
-    delete_scratch(SCRATCH_DIR)
-    delete_previous_stacks(RAM_DIR, keep=stack_out)
-
-
-
-    # ------------------------------------------------------------
-    # Repair ENVI header for newly created stack
-    # ------------------------------------------------------------
-    hdr_file = stack_out.with_suffix(".hdr")
-
-    if not hdr_file.exists():
-        die(f"Expected stack header not found: {hdr_file}")
-
-    log(f"Repairing ENVI header: {hdr_file}")
-
-    result = subprocess.run(
-        ["fire_mapping_stack_header_repair.py", str(hdr_file)],
-        env=build_env()
-    )
-
-    rc = result.returncode
-
-    if rc != 0:
-        die(f"header repair failed (rc={rc}) for {hdr_file}")
-
-    log(f"Header repair completed successfully (rc={rc})")
-
-
-
-
-    update_rasters_line(SERVER_DIR / SERVER_SCRIPT, stack_out)
+    update_rasters_line(SERVER_DIR / SERVER_SCRIPT, post_bin)
     start_server(SERVER_DIR, SERVER_SCRIPT)
 
     log("Done.")
@@ -407,4 +359,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

@@ -11,6 +11,7 @@ import os
 import shutil
 import sys
 import threading
+import time
 
 import numpy as np
 from osgeo import gdal
@@ -229,6 +230,66 @@ def init(app_state, set_fire_status, accept_in_progress,
     _CSV_FIELDNAMES = csv_fieldnames
 
 
+def ensure_fire_stack_present(fire: FireInfo) -> dict:
+    """Make sure this fire's AOI stack still exists on the ramdisk.
+
+    /ram is tmpfs, so a reboot silently empties it while the fire's
+    state (on real disk) still points at the stack. Rather than letting
+    that surface as a file-not-found deep inside the mapping CLI, every
+    entry point that is about to use ``fire.crop_bin`` calls this first
+    and rebuilds from the source mosaics if needed.
+
+    Progress is reported through the fire's console log and progress
+    snapshot -- the same channels the prepare stages already use, so
+    the existing UI picks it up with no popup.
+
+    Returns {'rebuilt': bool, 'path': str}; raises nothing on the happy
+    path. On failure the fire is left untouched and the exception
+    propagates to the caller, which already knows how to report it.
+    """
+    from .aoi_stack import ensure_aoi_stack, stack_is_valid
+
+    if not getattr(fire, 'bbox_native', None):
+        # Nothing to rebuild from; leave whatever is on record alone.
+        return {'rebuilt': False, 'path': fire.crop_bin}
+
+    if fire.crop_bin and stack_is_valid(fire.crop_bin):
+        return {'rebuilt': False, 'path': fire.crop_bin}
+
+    fire.console_log.append(
+        '  AOI stack missing from ramdisk (server or machine restarted) '
+        '-- regenerating from source imagery ...')
+
+    def _cb(detail, frac):
+        try:
+            fire.progress = {
+                'stage': 'cropping',
+                'stage_idx': 5,
+                'total_stages': 5,
+                'detail': f'Regenerating AOI stack: {detail}',
+                'fraction': max(0.0, min(1.0, float(frac))),
+                'updated_at': time.time(),
+            }
+        except Exception:
+            pass
+
+    info = ensure_aoi_stack(fire.fire_numbe, fire.bbox_native,
+                            progress_cb=_cb)
+    fire.crop_bin = info['path']
+    if info.get('width'):
+        fire.crop_w = info['width']
+        fire.crop_h = info['height']
+    fire.progress = {}
+    if info.get('rebuilt'):
+        fire.console_log.append('  AOI stack regenerated.')
+    if _save_fire_state is not None:
+        try:
+            _save_fire_state()
+        except Exception:
+            pass
+    return info
+
+
 def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
     """Re-prepare a fire after padding change or cache eviction.
 
@@ -243,7 +304,6 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
     survive — the cache_dir wipe below removes the per-fire cumulative
     shapefile, and recovering it from the shared dir is fast.
     """
-    from batch_fire_mapping.run_fire_mapping import crop_raster
     from .viirs_worker import (
         _read_dims, _compute_viirs_area_ha, accumulate_for_fire,
         _RASTERIZE_BUFFER_M, WorkerError,
@@ -313,18 +373,14 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
         by1 += pad * bh
     crop_xmin, crop_ymin, crop_xmax, crop_ymax = bx0, by0, bx1, by1
 
-    crop_w = max(1, int(round(
-        (crop_xmax - crop_xmin) / abs(state.raster_gt[1] or 1))))
-    crop_h = max(1, int(round(
-        (crop_ymax - crop_ymin) / abs(state.raster_gt[5] or 1))))
+    # crop_w/crop_h are set from the AOI stack's real dimensions once it
+    # has been built (below) rather than estimated from the bbox here --
+    # the stack clips its window to the source raster, so an AOI hanging
+    # over the mosaic edge would otherwise report dimensions larger than
+    # the raster that actually exists, and sample_size would be computed
+    # from a pixel count that was never there.
     old_pad = fire.padding_used
-    fire.crop_w = crop_w
-    fire.crop_h = crop_h
     fire.padding_used = pad
-
-    sample_size = int(round(crop_w * crop_h * state.sample_rate))
-    sample_size = max(state.min_samples, min(state.max_samples, sample_size))
-    fire.sample_size = sample_size
 
     # -- Crop raster --
     # We deliberately do NOT wipe cache_dir here. The previous behaviour
@@ -339,23 +395,47 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
     if old_pad != 0 and old_pad != pad and os.path.isdir(previews_dir):
         shutil.rmtree(previews_dir, ignore_errors=True)
 
-    crop_bin = os.path.join(cache_dir, f'{fire_numbe}_crop.bin')
-    # crop_raster (gdal.Translate to ENVI) overwrites if the file exists,
-    # but the .hdr / .aux.xml siblings can stick around. Remove them so
-    # the new geotransform isn't overlaid on stale header lines.
-    for ext in ('.bin', '.hdr', '.bin.aux.xml'):
+    # Build the AOI stack for the (possibly padded) bounds. The stack
+    # is regenerated rather than cropped because there is no longer a
+    # province-wide stack to cut from -- and because a padding change
+    # alters the window, so the previous stack would be the wrong size
+    # regardless.
+    from .aoi_stack import ensure_aoi_stack, AoiStackError
+
+    def _stack_progress(detail, frac):
         try:
-            os.remove(os.path.join(cache_dir, f'{fire_numbe}_crop{ext}'))
-        except FileNotFoundError:
+            fire.progress = {
+                'stage': 'cropping',
+                'stage_idx': 5,
+                'total_stages': 5,
+                'detail': f'AOI stack: {detail}',
+                'fraction': max(0.0, min(1.0, float(frac))),
+                'updated_at': time.time(),
+            }
+        except Exception:
             pass
-        except OSError:
-            pass
-    if not crop_raster(ref_raster, crop_bin,
-                       crop_xmin, crop_ymin, crop_xmax, crop_ymax):
-        _set_fire_status(fire, FireStatus.ERROR, "GDAL crop failed")
+
+    try:
+        stack_info = ensure_aoi_stack(
+            fire_numbe,
+            (crop_xmin, crop_ymin, crop_xmax, crop_ymax),
+            progress_cb=_stack_progress, force=True)
+    except AoiStackError as exc:
+        _set_fire_status(fire, FireStatus.ERROR,
+                         f'AOI stack build failed: {exc}')
         return
+    crop_bin = stack_info['path']
     fire.crop_bin = crop_bin
+    fire.crop_w = stack_info['width']
+    fire.crop_h = stack_info['height']
     fire.perim_bin = ''
+
+    # Sample size follows the stack's real pixel count, now that it is
+    # known.
+    sample_size = int(round(
+        fire.crop_w * fire.crop_h * state.sample_rate))
+    fire.sample_size = max(state.min_samples,
+                           min(state.max_samples, sample_size))
 
     # -- Re-rasterize the cumulative VIIRS shapefile onto the crop frame --
     # Best-effort: if acc_shp is None (no VIIRS data), skip rasterize.

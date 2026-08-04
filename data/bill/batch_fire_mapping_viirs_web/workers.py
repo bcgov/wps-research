@@ -409,6 +409,16 @@ def _serial_run_replicate(fire, fire_numbe: str, *, setting_idx: int,
                 or not fire.hint_bin
                 or not os.path.isfile(fire.hint_bin)
             )
+            if not needs_prepare:
+                # Stack may have vanished with a reboot even when the
+                # padding is unchanged; rebuild before running.
+                try:
+                    from .prepare import ensure_fire_stack_present
+                    ensure_fire_stack_present(fire)
+                except Exception as exc:
+                    fire.console_log.append(
+                        f'  AOI stack regeneration failed: {exc}')
+                    needs_prepare = True
             if needs_prepare:
                 fire.console_log.append(
                     f'  Re-preparing (padding '
