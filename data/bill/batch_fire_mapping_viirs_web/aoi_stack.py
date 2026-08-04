@@ -250,15 +250,23 @@ def aoi_identity_hash(identifier: str, instance_key: str = '') -> str:
 
 def aoi_stack_path(identifier: str, post_date: str,
                    ram_dir: str = RAM_DIR,
-                   instance_key: str = '') -> str:
-    """``/ram/<postdate>_stack_<identifier>_<hash>.bin``
+                   instance_key: str = '',
+                   post_source: str = 'mrap') -> str:
+    """``/ram/<postdate>_stack_<identifier>_<hash>[_l2].bin``
 
     The readable identifier is kept so the files are diagnosable by eye;
     the hash is what actually guarantees uniqueness.
+
+    *post_source* selects which post imagery the stack was built from
+    ('mrap' or 'l2'). The two are different products over the same AOI,
+    so they must not share a path -- otherwise switching sources in the
+    UI would read whichever was written last.
     """
     safe = sanitize_identifier(identifier)
     h = aoi_identity_hash(identifier, instance_key)
-    return os.path.join(ram_dir, f'{post_date}_stack_{safe}_{h}.bin')
+    suffix = '' if post_source == 'mrap' else f'_{post_source}'
+    return os.path.join(
+        ram_dir, f'{post_date}_stack_{safe}_{h}{suffix}.bin')
 
 
 # ----------------------------------------------------------------------
@@ -271,7 +279,9 @@ def build_aoi_stack(out_bin: str, xmin: float, ymin: float,
                     post_bin: str = None,
                     post_date: str = None,
                     divide_mode: bool = False,
-                    progress_cb=None) -> dict:
+                    progress_cb=None,
+                    post_override: str = None,
+                    post_label: str = 'pst') -> dict:
     """Generate the 12-band AOI stack at *out_bin*.
 
     Band order matches the province-wide stack exactly:
@@ -291,8 +301,16 @@ def build_aoi_stack(out_bin: str, xmin: float, ymin: float,
             except Exception:
                 pass
 
+    # post_override is an already-windowed 4-band raster on the AOI
+    # grid (the L2-recent composite). When present its bands are used
+    # verbatim as the post imagery instead of windowing the province
+    # mosaic -- the pre bands and the anomaly formula are unchanged, so
+    # the two sources produce structurally identical stacks that differ
+    # only in where the post bands came from.
     if post_bin is None or post_date is None:
-        post_date, post_bin = find_latest_mrap()
+        _d, _p_ = find_latest_mrap()
+        post_date = post_date or _d
+        post_bin = post_bin or _p_
 
     if not os.path.isfile(pre_bin):
         raise AoiStackError(f'pre-image not found: {pre_bin}')
@@ -302,6 +320,8 @@ def build_aoi_stack(out_bin: str, xmin: float, ymin: float,
     _p('opening source mosaics', 0.02)
     ds_pre = gdal.Open(pre_bin, gdal.GA_ReadOnly)
     ds_post = gdal.Open(post_bin, gdal.GA_ReadOnly)
+    ds_override = (gdal.Open(post_override, gdal.GA_ReadOnly)
+                   if post_override else None)
     if ds_pre is None:
         raise AoiStackError(f'cannot open {pre_bin}')
     if ds_post is None:
@@ -326,6 +346,18 @@ def build_aoi_stack(out_bin: str, xmin: float, ymin: float,
         xoff, yoff, xsize, ysize, win_gt = _window_for_bbox(
             gt, ds_pre.RasterXSize, ds_pre.RasterYSize,
             xmin, ymin, xmax, ymax)
+
+        if ds_override is not None:
+            # The override was built on this same window, but guard
+            # anyway: a mismatch here would misalign pre against post
+            # and produce a meaningless anomaly.
+            if (ds_override.RasterXSize != xsize
+                    or ds_override.RasterYSize != ysize):
+                raise AoiStackError(
+                    f'post override is {ds_override.RasterXSize}x'
+                    f'{ds_override.RasterYSize} but the AOI window is '
+                    f'{xsize}x{ysize}')
+            n_band = min(n_band, ds_override.RasterCount)
 
         pre_names = _parse_band_names(_hdr_for(pre_bin))
         post_names = _parse_band_names(_hdr_for(post_bin))
@@ -386,8 +418,14 @@ def build_aoi_stack(out_bin: str, xmin: float, ymin: float,
                0.05 + 0.85 * (i / max(1, n_band)))
             pre_a = ds_pre.GetRasterBand(i + 1).ReadAsArray(
                 xoff, yoff, xsize, ysize).astype(np.float32)
-            post_a = ds_post.GetRasterBand(i + 1).ReadAsArray(
-                xoff, yoff, xsize, ysize).astype(np.float32)
+            if ds_override is not None:
+                # Already cropped to the AOI window and on the same
+                # grid, so it is read whole rather than windowed.
+                post_a = ds_override.GetRasterBand(
+                    i + 1).ReadAsArray().astype(np.float32)
+            else:
+                post_a = ds_post.GetRasterBand(i + 1).ReadAsArray(
+                    xoff, yoff, xsize, ysize).astype(np.float32)
 
             # Anomaly, matching sentinel2_anomaly3.cpp exactly. That
             # code does the raw float division with no zero guard, so
@@ -412,13 +450,14 @@ def build_aoi_stack(out_bin: str, xmin: float, ymin: float,
     finally:
         ds_pre = None
         ds_post = None
+        ds_override = None
 
     formula = (_ANOMALY_FORMULA_DIVIDE if divide_mode
                else _ANOMALY_FORMULA)
     band_names = (
         [f'pre {pre_date} 20m: {s}' if pre_date else f'pre 20m: {s}'
          for s in suffixes]
-        + [f'pst {post_date} 20m: {s}' for s in suffixes]
+        + [f'{post_label} {post_date} 20m: {s}' for s in suffixes]
         + [f'anomaly: {s} {formula}' for s in suffixes]
     )
 
@@ -606,7 +645,9 @@ def stack_is_valid(path: str, expect_w: int = 0, expect_h: int = 0) -> bool:
 
 def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
                      ram_dir: str = RAM_DIR, force: bool = False,
-                     instance_key: str = '') -> dict:
+                     instance_key: str = '',
+                     post_source: str = 'mrap',
+                     ref_raster: str = None) -> dict:
     """Return the AOI stack for *identifier*, building it if needed.
 
     This is the function that makes the ramdisk safe to lose. ``/ram``
@@ -624,7 +665,8 @@ def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
     xmin, ymin, xmax, ymax = (float(v) for v in bbox_native)
     post_date, post_bin = find_latest_mrap()
     out_bin = aoi_stack_path(identifier, post_date, ram_dir=ram_dir,
-                             instance_key=instance_key)
+                             instance_key=instance_key,
+                             post_source=post_source)
 
     def _describe(rebuilt: bool) -> dict:
         ds = gdal.Open(out_bin, gdal.GA_ReadOnly)
@@ -637,6 +679,7 @@ def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
             'post_bin': post_bin,
             'post_date': post_date,
             'rebuilt': rebuilt,
+            'post_source': post_source,
         }
         ds = None
         return info
@@ -662,10 +705,37 @@ def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
             f'({xmin:.1f}, {ymin:.1f}, {xmax:.1f}, {ymax:.1f}) ...\n')
         sys.stderr.flush()
 
+        override = None
+        post_label = 'pst'
+        if post_source == 'l2':
+            # Build the most-recent-L2 mosaic first; it becomes the
+            # post imagery for this stack. Its grid comes from the same
+            # reference raster, so it lands on the AOI window exactly.
+            from .l2_recent import build_l2_recent_post, L2RecentError
+            ref = ref_raster or post_bin
+            l2_tmp = f'{out_bin}.post.bin'
+            try:
+                l2_info = build_l2_recent_post(
+                    (xmin, ymin, xmax, ymax), ref, l2_tmp,
+                    progress_cb=(
+                        (lambda d, f: progress_cb(d, 0.6 * f))
+                        if progress_cb else None))
+            except L2RecentError as exc:
+                raise AoiStackError(f'L2-recent composite failed: {exc}')
+            override = l2_tmp
+            post_label = 'l2r'
+            post_date = l2_info.get('post_date') or post_date
+
         info = build_aoi_stack(out_bin, xmin, ymin, xmax, ymax,
                                post_bin=post_bin, post_date=post_date,
-                               progress_cb=progress_cb)
+                               progress_cb=progress_cb,
+                               post_override=override,
+                               post_label=post_label)
+        if post_source == 'l2':
+            info['tiles'] = l2_info.get('tiles', [])
+            info['tile_dates'] = l2_info.get('tile_dates', {})
     info['rebuilt'] = True
+    info['post_source'] = post_source
     return info
 
 

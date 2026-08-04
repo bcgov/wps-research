@@ -196,6 +196,9 @@ class BaseHandler:
             r'^/api/fire/(?P<fire_numbe>[^/]+)/hint_mode$'),
          'handle_api_hint_mode'),
         (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/post_source$'),
+         'handle_api_post_source'),
+        (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/accept$'),
          'handle_api_accept'),
         (re.compile(

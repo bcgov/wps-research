@@ -63,7 +63,7 @@ from ..validation import _PARAM_SPEC, _validate_param, _validate_embed_bands
 from ..mapping_cmd import _build_mapping_cmd
 from ..io_utils import _atomic_yaml_dump
 from ..preview import generate_all_previews
-from ..prepare import switch_hint_mode
+from ..prepare import switch_hint_mode, switch_post_source
 
 # Late-bound to avoid a circular-import: app imports the mixins, then
 # app.init_app calls each mixin's ``init`` which re-assigns ``state`` and
@@ -216,6 +216,7 @@ class FireRoutes:
             'sample_size': fire.sample_size,
             'perimeter_type': fire.perimeter_type,
             'hint_mode': fire.hint_mode,
+            'post_source': getattr(fire, 'post_source', 'l2'),
             'acc_start': fire.acc_start,
             'acc_end': fire.acc_end,
             'has_comparison': has_comparison,
@@ -244,6 +245,23 @@ class FireRoutes:
             'perimeter_type': fire.perimeter_type,
             'hint_mode': fire.hint_mode,
         })
+
+    def handle_api_post_source(self, fire_numbe):
+        """Switch between L2-recent and MRAP post imagery."""
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        body = self._read_body()
+        if body is None:
+            return
+        source = body.get('source', 'l2')
+        result = switch_post_source(fire, source)
+        if not result.get('ok'):
+            self._send_json({'error': result.get('error', 'unknown')}, 400)
+            return
+        self._send_json(result)
 
     def handle_api_preview(self, fire_numbe, view):
         fire_numbe = unquote(fire_numbe)

@@ -678,7 +678,9 @@ def _viirs_worker(fire: FireInfo) -> None:
             stack_info = ensure_aoi_stack(
                 fire.fire_numbe, fire.bbox_native,
                 progress_cb=_stack_progress,
-                instance_key=getattr(state, 'shared_root', '') or '')
+                instance_key=getattr(state, 'shared_root', '') or '',
+                post_source=getattr(fire, 'post_source', 'l2') or 'l2',
+                ref_raster=ref_raster)
         except AoiStackError as exc:
             raise WorkerError(f'AOI stack build failed: {exc}')
         crop_bin = stack_info['path']

@@ -168,6 +168,104 @@ def build_redwins_hint_for_fire(fire: FireInfo, mode: str):
     return out_path, None
 
 
+def switch_post_source(fire: FireInfo, source: str) -> dict:
+    """Switch a fire between the L2-recent and MRAP post imagery.
+
+    Only the POST bands change. The pre bands are the same median
+    composite in both cases, and the anomaly is recomputed from
+    (new post, same pre) with the identical formula -- so 'Pre-fire'
+    looks the same either way while 'Post-fire' and 'Diff 1' follow the
+    selection, which is exactly the intended behaviour.
+
+    The stacks live at different paths per source, so switching back and
+    forth reuses whichever is already built rather than rebuilding.
+    """
+    if source not in ('l2', 'mrap'):
+        return {'ok': False, 'error': f'Unknown post source: {source}'}
+    if not getattr(fire, 'bbox_native', None):
+        return {'ok': False, 'error': 'Fire has no bbox on record.'}
+
+    from .aoi_stack import ensure_aoi_stack, AoiStackError
+
+    ref_raster = (state.rasters_by_year.get(fire.fire_year)
+                  or state.raster_path)
+
+    def _cb(detail, frac):
+        try:
+            fire.progress = {
+                'stage': 'cropping', 'stage_idx': 5, 'total_stages': 5,
+                'detail': f'{source.upper()} stack: {detail}',
+                'fraction': max(0.0, min(1.0, float(frac))),
+                'updated_at': time.time(),
+            }
+        except Exception:
+            pass
+
+    try:
+        info = ensure_aoi_stack(
+            fire.fire_numbe, fire.bbox_native, progress_cb=_cb,
+            instance_key=getattr(state, 'shared_root', '') or '',
+            post_source=source, ref_raster=ref_raster)
+    except AoiStackError as exc:
+        fire.progress = {}
+        return {'ok': False, 'error': str(exc)}
+    except Exception as exc:
+        fire.progress = {}
+        return {'ok': False, 'error': f'stack build failed: {exc}'}
+
+    fire.progress = {}
+    fire.post_source = source
+    fire.crop_bin = info['path']
+    fire.crop_w = info.get('width', fire.crop_w)
+    fire.crop_h = info.get('height', fire.crop_h)
+
+    # Previews are derived from the stack, so they must be regenerated
+    # for the new post bands -- otherwise 'Post-fire' and 'Diff 1'
+    # would still show the previous source's imagery.
+    try:
+        views = generate_all_previews(
+            fire.crop_bin, fire.cache_dir, fire.fire_numbe)
+        fire.available_views = views
+    except Exception as exc:
+        sys.stderr.write(
+            f'[prepare] preview regeneration failed after post-source '
+            f'switch: {exc}\n')
+
+    # The red-wins hints are computed FROM the stack bands, so a hint
+    # built against the old source is stale. Rebuild whichever mode is
+    # active against the new bands.
+    mode = getattr(fire, 'hint_mode', 'viirs') or 'viirs'
+    if mode in ('redwins_post', 'redwins_diff'):
+        rw_path, rw_err = build_redwins_hint_for_fire(fire, mode)
+        if rw_path:
+            fire.hint_bin = rw_path
+            fire.perimeter_type = mode
+        else:
+            sys.stderr.write(
+                f'[prepare] red-wins rebuild after source switch '
+                f'failed: {rw_err}\n')
+
+    if fire.hint_bin and os.path.isfile(fire.hint_bin):
+        try:
+            _overlay_mask_on_post(
+                fire, fire.hint_bin, 'hint', (0.0, 0.8, 0.2))
+            if 'hint' not in fire.available_views:
+                fire.available_views.append('hint')
+        except Exception:
+            pass
+
+    if _save_fire_state is not None:
+        try:
+            _save_fire_state()
+        except Exception:
+            pass
+
+    return {'ok': True, 'post_source': source,
+            'tiles': info.get('tiles', []),
+            'tile_dates': info.get('tile_dates', {}),
+            'post_date': info.get('post_date', '')}
+
+
 def switch_hint_mode(fire: FireInfo, mode: str) -> dict:
     """Switch a fire's hint mask between viirs / redwins_post / redwins_diff.
 
@@ -275,7 +373,10 @@ def ensure_fire_stack_present(fire: FireInfo) -> dict:
 
     info = ensure_aoi_stack(
         fire.fire_numbe, fire.bbox_native, progress_cb=_cb,
-        instance_key=getattr(state, 'shared_root', '') or '')
+        instance_key=getattr(state, 'shared_root', '') or '',
+        post_source=getattr(fire, 'post_source', 'l2') or 'l2',
+        ref_raster=(state.rasters_by_year.get(fire.fire_year)
+                    or state.raster_path))
     fire.crop_bin = info['path']
     if info.get('width'):
         fire.crop_w = info['width']
@@ -421,7 +522,9 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
             fire_numbe,
             (crop_xmin, crop_ymin, crop_xmax, crop_ymax),
             progress_cb=_stack_progress, force=True,
-            instance_key=getattr(state, 'shared_root', '') or '')
+            instance_key=getattr(state, 'shared_root', '') or '',
+            post_source=getattr(fire, 'post_source', 'l2') or 'l2',
+            ref_raster=ref_raster)
     except AoiStackError as exc:
         _set_fire_status(fire, FireStatus.ERROR,
                          f'AOI stack build failed: {exc}')

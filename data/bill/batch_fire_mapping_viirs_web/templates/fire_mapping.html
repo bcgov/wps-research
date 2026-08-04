@@ -60,6 +60,12 @@
     <!-- =============================================================== -->
     <div class="image-panel">
         <div class="image-controls">
+            <select id="post-source-select" disabled
+                    onchange="onPostSourceChange()"
+                    title="Which post-fire imagery the stack is built from">
+                <option value="l2">L2 recent tile</option>
+                <option value="mrap">MRAP composite</option>
+            </select>
             <select id="view-select" disabled onchange="onViewDropdownChange()">
                 <option value="">Loading...</option>
             </select>
@@ -353,6 +359,58 @@ const VIEW_LABELS = {
 // Hint mode — tracks which hint mask source is active.
 let currentHintMode = 'viirs';
 
+// Which post imagery the stack is built from: 'l2' (most recent L2A
+// tiles over the AOI, default) or 'mrap' (province-wide composite).
+// Only the post and anomaly bands differ; the pre bands are the same
+// median composite either way, which is why 'Pre-fire' is unaffected
+// by this control while 'Post-fire' and 'Diff 1' follow it.
+let currentPostSource = 'l2';
+
+async function onPostSourceChange() {
+    const sel = document.getElementById('post-source-select');
+    if (!sel) return;
+    const src = sel.value;
+    if (src === currentPostSource) return;
+    sel.disabled = true;
+    log(`Rebuilding stack from ${src === 'l2'
+        ? 'most recent L2 tiles' : 'MRAP composite'}...`);
+    try {
+        const r = await fetch(
+            `/api/fire/${encodeURIComponent(FIRE)}/post_source`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json',
+                      'X-Requested-With': 'fetch'},
+            body: JSON.stringify({source: src}),
+        });
+        const data = await r.json();
+        if (!r.ok || data.error) {
+            log('Post source switch failed: ' + (data.error || 'unknown'),
+                'error');
+            sel.value = currentPostSource;   // revert the control
+            return;
+        }
+        currentPostSource = src;
+        if (data.tiles && data.tiles.length) {
+            const parts = Object.entries(data.tile_dates || {})
+                .map(([t, d]) => `${t}@${d}`).join(', ');
+            log(`Using L2 tiles: ${parts || data.tiles.join(', ')}`,
+                'success');
+        } else {
+            log(`Post imagery: ${src === 'l2'
+                ? 'L2 recent' : 'MRAP composite'}.`, 'success');
+        }
+        // Post/Diff/Hint all derive from the stack, so refresh whatever
+        // the panes are showing rather than assuming a particular view.
+        loadPaneImage('left', leftView);
+        if (splitActive && rightView) loadPaneImage('right', rightView);
+    } catch (err) {
+        log('Post source switch error: ' + err.message, 'error');
+        sel.value = currentPostSource;
+    } finally {
+        sel.disabled = false;
+    }
+}
+
 const HINT_MODES = [
     {id: 'viirs',         label: 'VIIRS'},
     {id: 'redwins_post',  label: 'Red wins (post)'},
@@ -517,6 +575,9 @@ async function prepareFire(padding) {
             `Accum: <strong>${data.acc_start || '?'} &rarr; ${data.acc_end || '?'}</strong>`;
         currentHintMode = data.hint_mode || 'viirs';
         renderHintModeButtons();
+        currentPostSource = data.post_source || 'l2';
+        const psSel = document.getElementById('post-source-select');
+        if (psSel) { psSel.value = currentPostSource; psSel.disabled = false; }
 
         updateSampleSize();
         loadPaneImage('left', leftView);
