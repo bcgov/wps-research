@@ -1002,6 +1002,158 @@ def download_year(year: int, raster_path: str, save_dir: str,
     }
 
 
+def download_aoi(bbox_wgs84: tuple, save_dir: str, token: str,
+                 start: datetime.datetime, end: datetime.datetime,
+                 workers: int = 16, curl_primary: bool = True,
+                 parallel: bool = False, label: str = 'AOI',
+                 log_cb=None) -> dict:
+    """Download .nc granules for ONE AOI bbox over a date window.
+
+    Same on-disk layout as :func:`download_year` -- granules land in
+    ``save_dir/VNP14IMG/<year>/<jday>/`` -- so everything already on
+    disk from the province-wide era is found by the existing readers,
+    and anything fetched here is indistinguishable from it. Only the
+    *bbox* and the *set of days* are narrowed.
+
+    This exists because the province-wide bootstrap was checking every
+    day of the season against the full BC footprint on every server
+    start, which dominated startup time. An AOI is a tiny fraction of
+    that footprint, so LAADS returns far fewer granules per day and the
+    whole thing finishes in seconds rather than minutes.
+
+    *log_cb*, if given, is called with each progress line so the caller
+    can mirror download output into a fire's console.
+
+    Returns the same dict shape as :func:`download_year`.
+    """
+    def _emit(msg):
+        _log(msg)
+        if log_cb:
+            try:
+                log_cb(msg)
+            except Exception:
+                pass
+
+    if end < start:
+        return {'already_present': 0, 'newly_downloaded': 0,
+                'still_missing': 0, 'missing_days': [], 'total_nc': 0,
+                'events_path': None}
+
+    os.makedirs(save_dir, exist_ok=True)
+    events_path = os.path.join(save_dir, '_viirs_events.jsonl')
+
+    days = []
+    d = start
+    while d <= end:
+        days.append(d)
+        d += datetime.timedelta(days=1)
+
+    west, south, east, north = bbox_wgs84
+    _emit(f'      [{label}] VIIRS AOI download: {len(days)} day(s), '
+          f'bbox W{west:.4f} S{south:.4f} E{east:.4f} N{north:.4f} ...')
+
+    per_day = {}
+    if parallel:
+        with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+            futs = {
+                pool.submit(_download_day, d, save_dir, bbox_wgs84, token,
+                            curl_primary, events_path): d
+                for d in days
+            }
+            for fut in as_completed(futs):
+                day = futs[fut]
+                try:
+                    per_day[day] = fut.result()
+                except Exception as exc:
+                    per_day[day] = {'before': 0, 'after': 0,
+                                    'error': str(exc)}
+    else:
+        for i, day in enumerate(days, 1):
+            try:
+                per_day[day] = _download_day(
+                    day, save_dir, bbox_wgs84, token, curl_primary,
+                    events_path)
+            except Exception as exc:
+                per_day[day] = {'before': 0, 'after': 0, 'error': str(exc)}
+            info = per_day[day]
+            gained = max(0, info['after'] - info['before'])
+            if gained > 0:
+                _emit(f'        {day.date()}: {gained} new granule(s)')
+            if i % 10 == 0 or i == len(days):
+                _emit(f'        checked {i}/{len(days)} day(s)')
+
+    already_present = newly_downloaded = still_missing = total_nc = 0
+    missing_days = []
+    for day, info in per_day.items():
+        before, after = info['before'], info['after']
+        total_nc += after
+        newly_downloaded += max(0, after - before)
+        already_present += min(before, after)
+        if after == 0:
+            still_missing += 1
+            missing_days.append((
+                day.date().isoformat(),
+                info['error'] or 'no granules returned for this day/bbox'))
+
+    _emit(f'      [{label}] VIIRS AOI download: done -- '
+          f'{newly_downloaded} new, {already_present} already present, '
+          f'{still_missing} day(s) with no data.')
+
+    return {
+        'already_present': already_present,
+        'newly_downloaded': newly_downloaded,
+        'still_missing': still_missing,
+        'missing_days': missing_days,
+        'total_nc': total_nc,
+        'events_path': events_path,
+    }
+
+
+def refresh_aoi_viirs(state, year: int, bbox_wgs84: tuple,
+                      start: datetime.datetime, end: datetime.datetime,
+                      raster_path: str, label: str = 'AOI',
+                      log_cb=None, curl_primary: bool = True) -> dict:
+    """Download + shapify + re-index VIIRS for one AOI and window.
+
+    The on-demand counterpart to :func:`bootstrap_year`. Called when a
+    fire is confirmed, so the user pays for exactly the data their AOI
+    needs, at the moment they ask for it -- with progress visible in
+    the fire console rather than blocking server startup.
+
+    shapify/index run over the year directory as a whole, which is
+    cheap next to downloading and keeps the shapefile set and
+    year_index.gpkg consistent with everything else on disk (older
+    province-wide granules included).
+    """
+    save_dir = year_viirs_dir(state, year)
+    os.makedirs(save_dir, exist_ok=True)
+
+    dl = download_aoi(bbox_wgs84, save_dir, state.laads_token,
+                      start, end, curl_primary=curl_primary,
+                      label=label, log_cb=log_cb)
+
+    def _emit(msg):
+        _log(msg)
+        if log_cb:
+            try:
+                log_cb(msg)
+            except Exception:
+                pass
+
+    if dl['newly_downloaded'] > 0:
+        _emit(f'      [{label}] shapifying {dl["newly_downloaded"]} new '
+              f'granule(s) ...')
+        n_shp = shapify_year(save_dir, raster_path, workers=8)
+        _emit(f'      [{label}] shapefiles present: {n_shp}')
+        build_year_index(save_dir, raster_path)
+        _emit(f'      [{label}] year index updated.')
+    else:
+        _emit(f'      [{label}] no new granules -- using VIIRS data '
+              f'already on disk.')
+
+    return dl
+
+
 def shapify_year(save_dir: str, raster_path: str, workers: int = 8) -> int:
     """Shapify any .nc inside save_dir that doesn't yet have a sibling .shp.
     Idempotent. Returns count of .shp files now on disk."""
@@ -1352,13 +1504,29 @@ def bootstrap_year(state, year: int, raster_path: str,
                    download_workers: int = 16,
                    shapify_workers: int = 8,
                    curl_primary: bool = True,
-                   parallel_viirs_downloading: bool = False) -> dict:
-    """Run download + shapify + index for a year's full raster footprint and
-    default seasonal window. Idempotent. Returns counts.
+                   parallel_viirs_downloading: bool = False,
+                   download: bool = False) -> dict:
+    """Index the VIIRS data already on disk for a year. Idempotent.
 
-    Migration of VIIRS data from previous stack-dated directories
-    happens once, centrally, in __main__.py (migrate_stale_viirs_data
-    + purge_active_shapefiles) before this is called -- not here.
+    20260804: NO LONGER DOWNLOADS BY DEFAULT.
+
+    This used to check every day of the season against the full BC
+    footprint on every server start. That dominated startup time --
+    hundreds of LAADS listing calls for a footprint the size of a
+    province -- while the data any individual fire needs is a tiny
+    window of it. New granules are now fetched on demand, scoped to a
+    single AOI, when a fire is confirmed (see
+    :func:`refresh_aoi_viirs`).
+
+    What still happens here is purely local and fast: shapify any .nc
+    files that lack shapefiles, rebuild the year index, and
+    re-accumulate the province-wide overlay so the new-fire map still
+    shows every detection already on disk. Granules downloaded under
+    the old province-wide scheme live in the same
+    ``VNP14IMG/<year>/<jday>/`` layout and are picked up unchanged.
+
+    Pass ``download=True`` to restore the old behaviour for a one-off
+    backfill.
     """
     if save_dir is None:
         save_dir = year_viirs_dir(state, year)
@@ -1367,40 +1535,57 @@ def bootstrap_year(state, year: int, raster_path: str,
     _log(f'      [{os.path.basename(raster_path)}] year {year}: '
          f'bootstrap starting ...')
 
-    dl_result = download_year(
-        year, raster_path, save_dir, state.laads_token,
-        workers=download_workers, curl_primary=curl_primary,
-        parallel=parallel_viirs_downloading)
-    _log(f"      [{os.path.basename(raster_path)}] VIIRS summary: "
-         f"{dl_result['already_present']} already present, "
-         f"{dl_result['newly_downloaded']} newly downloaded, "
-         f"{dl_result['still_missing']} day(s) still missing "
-         f"(total {dl_result['total_nc']} .nc file(s) on disk).")
-    for day_iso, reason in dl_result['missing_days']:
-        _elog(
-            f"      [{os.path.basename(raster_path)}] no data for "
-            f"{day_iso}: {reason}")
+    dl_result = None
+    if download:
+        dl_result = download_year(
+            year, raster_path, save_dir, state.laads_token,
+            workers=download_workers, curl_primary=curl_primary,
+            parallel=parallel_viirs_downloading)
+        _log(f"      [{os.path.basename(raster_path)}] VIIRS summary: "
+             f"{dl_result['already_present']} already present, "
+             f"{dl_result['newly_downloaded']} newly downloaded, "
+             f"{dl_result['still_missing']} day(s) still missing "
+             f"(total {dl_result['total_nc']} .nc file(s) on disk).")
+        for day_iso, reason in dl_result['missing_days']:
+            _elog(
+                f"      [{os.path.basename(raster_path)}] no data for "
+                f"{day_iso}: {reason}")
+    else:
+        n_nc = len(glob.glob(os.path.join(
+            save_dir, 'VNP14IMG', '*', '*', '*.nc')))
+        _log(f'      [{os.path.basename(raster_path)}] '
+             f'skipping province-wide download (on-demand per AOI now); '
+             f'indexing {n_nc} .nc file(s) already on disk.')
 
     n_shp = shapify_year(save_dir, raster_path, workers=shapify_workers)
     index_path = build_year_index(save_dir, raster_path)
 
-    print_viirs_events_summary(dl_result.get('events_path'))
+    if dl_result:
+        print_viirs_events_summary(dl_result.get('events_path'))
 
     acc_result = build_viirs_accumulated_buffer(save_dir, raster_path)
 
     _log(f'      [{os.path.basename(raster_path)}] year {year}: '
          f'bootstrap done.')
-    return {'n_nc': dl_result['total_nc'], 'n_shp': n_shp,
+    total_nc = (dl_result['total_nc'] if dl_result
+                else len(glob.glob(os.path.join(
+                    save_dir, 'VNP14IMG', '*', '*', '*.nc'))))
+    return {'n_nc': total_nc, 'n_shp': n_shp,
             'save_dir': save_dir, 'index_path': index_path,
             'download_summary': dl_result,
             'accumulate_summary': acc_result}
 
 
 def bootstrap_all_years(state, curl_primary: bool = True,
-                        parallel_viirs_downloading: bool = False) -> dict:
+                        parallel_viirs_downloading: bool = False,
+                        download: bool = False) -> dict:
     """Run bootstrap_year for every (year, raster) in state.rasters_by_year.
     Sequential — printing progress is more useful than parallelism here.
-    Returns {year: result_dict}."""
+    Returns {year: result_dict}.
+
+    ``download`` defaults to False: startup indexes and accumulates the
+    VIIRS already on disk but does not fetch anything province-wide.
+    New granules arrive per-AOI via :func:`refresh_aoi_viirs`."""
     out = {}
     rasters = state.rasters_by_year or {}
     for year in sorted(rasters):
@@ -1409,5 +1594,6 @@ def bootstrap_all_years(state, curl_primary: bool = True,
             download_workers=state.viirs_download_workers or 16,
             shapify_workers=state.viirs_shapify_workers or 8,
             curl_primary=curl_primary,
-            parallel_viirs_downloading=parallel_viirs_downloading)
+            parallel_viirs_downloading=parallel_viirs_downloading,
+            download=download)
     return out

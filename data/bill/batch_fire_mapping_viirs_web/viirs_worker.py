@@ -19,6 +19,7 @@ between stages. Each fire's cache_dir is wiped on cancel.
 Module-level dispatch queue caps concurrency at
 ``state.viirs_concurrent_jobs`` (default 1)."""
 
+import datetime
 import os
 import re
 import shutil
@@ -75,6 +76,11 @@ class WorkerCancelled(BaseException):
 # absorbs the only rasterize that's still needed (a fast one onto the
 # small cropped frame).
 STAGES = (
+    # 'downloading_viirs' is first now that granules are fetched
+    # per-AOI at confirm time rather than province-wide at startup;
+    # without it here _set_progress would report stage_idx 0 and the
+    # UI's stage pills would not light up for the download.
+    'downloading_viirs',
     'accumulating',
     'cropping',
 )
@@ -587,6 +593,54 @@ def _viirs_worker(fire: FireInfo) -> None:
         or state.raster_path
 
     try:
+        # ---- Stage 0: fetch VIIRS for THIS AOI only ----
+        # The province-wide download that used to run at server startup
+        # is gone (it dominated boot time). Instead each confirmed fire
+        # pulls the granules its own bbox + date window needs, which is
+        # a tiny fraction of the province and finishes in seconds.
+        # Output is mirrored into the fire console so the user can
+        # watch it after confirming the AOI.
+        _set_progress(fire, 'downloading_viirs',
+                      detail='downloading VIIRS for this AOI')
+        try:
+            from . import year_viirs as _yv
+            from .overview import _bbox_to_wgs84
+
+            ds_ref = gdal.Open(ref_raster, gdal.GA_ReadOnly)
+            crs_wkt = ds_ref.GetProjection() if ds_ref else ''
+            ds_ref = None
+            bx0, by0, bx1, by1 = fire.bbox_native
+            w_, s_, e_, n_ = _bbox_to_wgs84(crs_wkt, bx0, by0, bx1, by1)
+
+            start_dt = datetime.datetime.strptime(
+                fire.viirs_start_date, '%Y-%m-%d')
+            end_dt = datetime.datetime.strptime(
+                fire.viirs_end_date, '%Y-%m-%d')
+
+            def _console(msg):
+                fire.console_log.append(msg.rstrip())
+
+            fire.console_log.append(
+                f'  Fetching VIIRS for this AOI '
+                f'({fire.viirs_start_date} → {fire.viirs_end_date}) ...')
+            _yv.refresh_aoi_viirs(
+                state, fire.fire_year, (w_, s_, e_, n_),
+                start_dt, end_dt, ref_raster,
+                label=fire.fire_numbe, log_cb=_console)
+        except Exception as exc:
+            # Never fatal: whatever is already on disk (including
+            # everything fetched under the old province-wide scheme) is
+            # still usable, and red-wins covers the no-VIIRS case.
+            sys.stderr.write(
+                f'[viirs_worker] {fire.fire_numbe}: AOI VIIRS refresh '
+                f'failed ({exc}) — continuing with data already on '
+                f'disk.\n')
+            fire.console_log.append(
+                f'  VIIRS AOI download failed ({exc}); using data '
+                f'already on disk.')
+        if fire.cancel_event.is_set():
+            raise WorkerCancelled()
+
         # ---- Stage 1: accumulate VIIRS from year-wide shp dir ----
         # This is best-effort: if no VIIRS fire pixels exist in the
         # user's bbox + date range, the fire still proceeds — the user

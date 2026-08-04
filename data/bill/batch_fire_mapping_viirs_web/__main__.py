@@ -175,6 +175,12 @@ Example
                         "restarts via a stamp file in "
                         "<out_root>/.web_cache/. Set 0 to disable the "
                         "throttle and attempt on every start. Default: 60.")
+    p.add_argument("--province_wide_viirs_download", action="store_true",
+                   help="Restore the old behaviour of downloading VIIRS "
+                        "for the whole raster footprint at startup. Off "
+                        "by default: that scan dominated boot time, and "
+                        "granules are now fetched per-AOI when a fire is "
+                        "confirmed. Useful for a one-off backfill.")
     p.add_argument("--force_viirs_bootstrap", action="store_true",
                    help="Ignore the --viirs_min_interval_minutes throttle "
                         "and attempt the VIIRS download on this start "
@@ -707,8 +713,16 @@ def main():
     # re-triggers a full LAADS download every time.
     # ------------------------------------------------------------------
     _interval_s = max(0, int(args.viirs_min_interval_minutes)) * 60
+    # The throttle exists to stop repeated restarts hammering LAADS.
+    # With province-wide downloading off, startup makes no LAADS calls
+    # at all -- it only shapifies/indexes/accumulates what is already on
+    # disk, which is local work that must run every boot so the
+    # new-fire overlay reflects granules fetched per-AOI since the last
+    # start. So the throttle now applies only when downloading is
+    # actually enabled.
     _throttled = (
-        _interval_s > 0
+        args.province_wide_viirs_download
+        and _interval_s > 0
         and not args.force_viirs_bootstrap
         and _attempt_age is not None
         and _attempt_age < _interval_s)
@@ -789,14 +803,20 @@ def main():
                          else 'urllib primary, curl fallback')
         _parallel_label = ('parallel' if args.parallel_viirs_downloading
                            else 'serial, no thread pool')
-        _log(f'\n[3/4] Bootstrapping per-year VIIRS data '
-             f'(download + shapify, {_method_label}, '
-             f'{_parallel_label}): starting ...')
+        _dl_label = ('province-wide download ENABLED '
+                     '(--province_wide_viirs_download)'
+                     if args.province_wide_viirs_download
+                     else 'no province-wide download -- granules are '
+                          'fetched per-AOI when a fire is confirmed')
+        _log(f'\n[3/4] Indexing per-year VIIRS data '
+             f'(shapify + index + accumulate; {_dl_label}; '
+             f'{_method_label}, {_parallel_label}): starting ...')
         _outcome = 'unknown'
         try:
             year_viirs.bootstrap_all_years(
                 app_state, curl_primary=_curl_primary,
-                parallel_viirs_downloading=args.parallel_viirs_downloading)
+                parallel_viirs_downloading=args.parallel_viirs_downloading,
+                download=args.province_wide_viirs_download)
             _outcome = 'ok'
             _log('[3/4] Bootstrapping per-year VIIRS data: done.')
         except Exception as _exc:
