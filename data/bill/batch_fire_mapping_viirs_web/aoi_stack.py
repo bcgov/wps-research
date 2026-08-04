@@ -35,9 +35,12 @@ bounded by the AOI, not by the mosaic. Reading whole bands and slicing
 afterwards would defeat the entire point of this change.
 """
 
+import errno
+import hashlib
 import os
 import re
 import sys
+import time
 
 import numpy as np
 from osgeo import gdal, osr
@@ -210,18 +213,52 @@ def sanitize_identifier(identifier: str) -> str:
     Fire names come from user input and routinely contain spaces (the
     ``new fire`` default) and occasionally slashes, either of which
     would break the path or silently write somewhere unintended.
+
+    NOTE: this is deliberately lossy -- ``fire 1``, ``fire#1`` and
+    ``fire_1`` all collapse to ``fire_1``. It is only ever used as a
+    *human-readable* portion of the filename; uniqueness comes from the
+    hash appended by :func:`aoi_stack_path`.
     """
     cleaned = _SAFE_ID_RE.sub('_', str(identifier or '').strip())
     cleaned = cleaned.strip('_')
-    return cleaned or 'aoi'
+    # Keep the readable part bounded so the final path stays well under
+    # any filesystem name limit even for very long fire names.
+    return (cleaned[:48] or 'aoi')
+
+
+def aoi_identity_hash(identifier: str, instance_key: str = '') -> str:
+    """Short, stable hash uniquely identifying an AOI stack.
+
+    Guards against three distinct collisions that the sanitized name
+    alone cannot:
+
+    1. *Lossy sanitization.* ``fire 1`` / ``fire#1`` / ``fire_1`` all
+       sanitize to ``fire_1``. Hashing the RAW identifier keeps them
+       apart.
+    2. *Multiple server instances sharing /ram.* Two servers running
+       against different ``out_root``s can each have a fire called
+       ``new fire``. Mixing ``instance_key`` (the server's out_root)
+       into the hash separates them, so one instance can never read or
+       overwrite another's stack.
+    3. *Case-insensitive filesystems.* ``K52125`` and ``k52125`` are
+       distinct fire names but the same filename on such a mount; the
+       hash differs even when the sanitized names do not.
+    """
+    payload = f'{instance_key}\x00{identifier}'.encode('utf-8')
+    return hashlib.sha1(payload).hexdigest()[:10]
 
 
 def aoi_stack_path(identifier: str, post_date: str,
-                   ram_dir: str = RAM_DIR) -> str:
-    """``/ram/<postdate>_stack_<identifier>.bin``"""
-    return os.path.join(
-        ram_dir,
-        f'{post_date}_stack_{sanitize_identifier(identifier)}.bin')
+                   ram_dir: str = RAM_DIR,
+                   instance_key: str = '') -> str:
+    """``/ram/<postdate>_stack_<identifier>_<hash>.bin``
+
+    The readable identifier is kept so the files are diagnosable by eye;
+    the hash is what actually guarantees uniqueness.
+    """
+    safe = sanitize_identifier(identifier)
+    h = aoi_identity_hash(identifier, instance_key)
+    return os.path.join(ram_dir, f'{post_date}_stack_{safe}_{h}.bin')
 
 
 # ----------------------------------------------------------------------
@@ -318,20 +355,27 @@ def build_aoi_stack(out_bin: str, xmin: float, ymin: float,
                         f'post: {s_pre!r} vs {s_post!r}')
 
         os.makedirs(os.path.dirname(out_bin) or '.', exist_ok=True)
-        # Remove stale siblings so a new header is never overlaid on an
-        # old one.
-        for path in (out_bin, _hdr_for(out_bin), out_bin + '.aux.xml'):
+
+        # Build under a process-private temporary name and rename into
+        # place only once complete. Two clients confirming AOIs at the
+        # same time (or one reading while another rebuilds after a
+        # reboot) must never observe a half-written stack -- os.replace
+        # is atomic within a filesystem, so a reader sees either the old
+        # complete file or the new complete file, never a partial one.
+        tmp_bin = f'{out_bin}.tmp{os.getpid()}'
+        tmp_hdr = _hdr_for(tmp_bin)
+        for path in (tmp_bin, tmp_hdr, tmp_bin + '.aux.xml'):
             try:
                 os.remove(path)
             except OSError:
                 pass
 
         driver = gdal.GetDriverByName('ENVI')
-        out_ds = driver.Create(out_bin, xsize, ysize, n_band * 3,
+        out_ds = driver.Create(tmp_bin, xsize, ysize, n_band * 3,
                                gdal.GDT_Float32,
                                options=['INTERLEAVE=BSQ'])
         if out_ds is None:
-            raise AoiStackError(f'could not create {out_bin}')
+            raise AoiStackError(f'could not create {tmp_bin}')
         out_ds.SetGeoTransform(win_gt)
         if proj:
             out_ds.SetProjection(proj)
@@ -379,8 +423,20 @@ def build_aoi_stack(out_bin: str, xmin: float, ymin: float,
     )
 
     _p('writing header', 0.96)
-    _write_envi_header(_hdr_for(out_bin), xsize, ysize, total,
+    _write_envi_header(tmp_hdr, xsize, ysize, total,
                        band_names, win_gt, proj)
+
+    # Publish atomically: header first, then the data file. A reader
+    # checks for BOTH (see stack_is_valid), and only the .bin rename
+    # makes the pair visible, so ordering here cannot expose a stack
+    # whose header is missing.
+    os.replace(tmp_hdr, _hdr_for(out_bin))
+    os.replace(tmp_bin, out_bin)
+    for junk in (tmp_bin + '.aux.xml',):
+        try:
+            os.remove(junk)
+        except OSError:
+            pass
     _p('AOI stack ready', 1.0)
 
     return {
@@ -446,6 +502,79 @@ def _write_envi_header(hdr_path, samples, lines, bands, band_names,
 # Public entry point used by the web app
 # ----------------------------------------------------------------------
 
+class _BuildLock:
+    """Best-effort cross-process lock for one AOI stack path.
+
+    Two clients confirming the same fire at once -- or a rebuild racing
+    a serial sweep in another process -- would otherwise both do the
+    full read/compute/write. The loser now waits and reuses the
+    winner's output instead.
+
+    Uses O_EXCL lock-file creation rather than fcntl so it behaves the
+    same across processes and threads without holding an fd open, and
+    carries a staleness timeout so a killed builder cannot deadlock the
+    next one.
+    """
+
+    def __init__(self, target: str, timeout_s: float = 900.0,
+                 poll_s: float = 0.5):
+        self.path = f'{target}.lock'
+        self.timeout_s = timeout_s
+        self.poll_s = poll_s
+        self.acquired = False
+
+    def _stale(self) -> bool:
+        try:
+            age = time.time() - os.path.getmtime(self.path)
+        except OSError:
+            return False
+        return age > self.timeout_s
+
+    def acquire(self, wait_s: float = 900.0) -> bool:
+        """True if we hold the lock, False if we timed out waiting."""
+        deadline = time.time() + wait_s
+        while True:
+            try:
+                fd = os.open(self.path,
+                             os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+                os.write(fd, f'{os.getpid()}\n'.encode())
+                os.close(fd)
+                self.acquired = True
+                return True
+            except OSError as exc:
+                if exc.errno != errno.EEXIST:
+                    # Cannot lock (read-only dir, etc.) -- proceed
+                    # unlocked rather than failing the build outright.
+                    return True
+            if self._stale():
+                sys.stderr.write(
+                    f'[aoi_stack] removing stale lock {self.path}\n')
+                try:
+                    os.remove(self.path)
+                except OSError:
+                    pass
+                continue
+            if time.time() >= deadline:
+                return False
+            time.sleep(self.poll_s)
+
+    def release(self):
+        if not self.acquired:
+            return
+        try:
+            os.remove(self.path)
+        except OSError:
+            pass
+        self.acquired = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.release()
+        return False
+
+
 def stack_is_valid(path: str, expect_w: int = 0, expect_h: int = 0) -> bool:
     """True if *path* looks like a usable AOI stack.
 
@@ -476,7 +605,8 @@ def stack_is_valid(path: str, expect_w: int = 0, expect_h: int = 0) -> bool:
 
 
 def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
-                     ram_dir: str = RAM_DIR, force: bool = False) -> dict:
+                     ram_dir: str = RAM_DIR, force: bool = False,
+                     instance_key: str = '') -> dict:
     """Return the AOI stack for *identifier*, building it if needed.
 
     This is the function that makes the ramdisk safe to lose. ``/ram``
@@ -485,14 +615,18 @@ def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
     here, so a missing stack is rebuilt from the source mosaics on
     first use instead of surfacing as a file-not-found.
 
+    *instance_key* separates servers that share the same ramdisk (pass
+    the server's out_root); see :func:`aoi_identity_hash`.
+
     *progress_cb* is forwarded to :func:`build_aoi_stack`, and is how
     the "regenerating" message reaches the UI.
     """
     xmin, ymin, xmax, ymax = (float(v) for v in bbox_native)
     post_date, post_bin = find_latest_mrap()
-    out_bin = aoi_stack_path(identifier, post_date, ram_dir=ram_dir)
+    out_bin = aoi_stack_path(identifier, post_date, ram_dir=ram_dir,
+                             instance_key=instance_key)
 
-    if not force and stack_is_valid(out_bin):
+    def _describe(rebuilt: bool) -> dict:
         ds = gdal.Open(out_bin, gdal.GA_ReadOnly)
         info = {
             'path': out_bin,
@@ -502,19 +636,35 @@ def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
             'bands': ds.RasterCount if ds else 0,
             'post_bin': post_bin,
             'post_date': post_date,
-            'rebuilt': False,
+            'rebuilt': rebuilt,
         }
         ds = None
         return info
 
-    sys.stderr.write(
-        f'[aoi_stack] building {out_bin} for bbox '
-        f'({xmin:.1f}, {ymin:.1f}, {xmax:.1f}, {ymax:.1f}) ...\n')
-    sys.stderr.flush()
+    if not force and stack_is_valid(out_bin):
+        return _describe(False)
 
-    info = build_aoi_stack(out_bin, xmin, ymin, xmax, ymax,
-                           post_bin=post_bin, post_date=post_date,
-                           progress_cb=progress_cb)
+    # Serialize builders of this exact stack. Whoever gets the lock
+    # builds; anyone waiting re-checks afterwards and normally finds
+    # the finished file rather than repeating the work.
+    with _BuildLock(out_bin) as lock:
+        got = lock.acquire()
+        if not got:
+            sys.stderr.write(
+                f'[aoi_stack] timed out waiting for another builder of '
+                f'{out_bin}; building anyway\n')
+        elif not force and stack_is_valid(out_bin):
+            # Another process finished it while we waited.
+            return _describe(False)
+
+        sys.stderr.write(
+            f'[aoi_stack] building {out_bin} for bbox '
+            f'({xmin:.1f}, {ymin:.1f}, {xmax:.1f}, {ymax:.1f}) ...\n')
+        sys.stderr.flush()
+
+        info = build_aoi_stack(out_bin, xmin, ymin, xmax, ymax,
+                               post_bin=post_bin, post_date=post_date,
+                               progress_cb=progress_cb)
     info['rebuilt'] = True
     return info
 
@@ -533,7 +683,12 @@ def purge_other_aoi_stacks(keep_paths, ram_dir: str = RAM_DIR) -> int:
     except OSError:
         return 0
     for name in names:
+        # Only the finished-stack shape. Deliberately excludes
+        # .lock / .tmp<pid> files, which belong to a build that may
+        # still be in flight in another process.
         if not re.match(r'^\d{8}_stack_.+\.bin$', name):
+            continue
+        if name.endswith('.lock') or '.tmp' in name:
             continue
         path = os.path.abspath(os.path.join(ram_dir, name))
         if path in keep:

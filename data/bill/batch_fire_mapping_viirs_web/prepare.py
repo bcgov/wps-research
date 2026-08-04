@@ -273,8 +273,9 @@ def ensure_fire_stack_present(fire: FireInfo) -> dict:
         except Exception:
             pass
 
-    info = ensure_aoi_stack(fire.fire_numbe, fire.bbox_native,
-                            progress_cb=_cb)
+    info = ensure_aoi_stack(
+        fire.fire_numbe, fire.bbox_native, progress_cb=_cb,
+        instance_key=getattr(state, 'shared_root', '') or '')
     fire.crop_bin = info['path']
     if info.get('width'):
         fire.crop_w = info['width']
@@ -419,7 +420,8 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
         stack_info = ensure_aoi_stack(
             fire_numbe,
             (crop_xmin, crop_ymin, crop_xmax, crop_ymax),
-            progress_cb=_stack_progress, force=True)
+            progress_cb=_stack_progress, force=True,
+            instance_key=getattr(state, 'shared_root', '') or '')
     except AoiStackError as exc:
         _set_fire_status(fire, FireStatus.ERROR,
                          f'AOI stack build failed: {exc}')
