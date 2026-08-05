@@ -68,7 +68,10 @@ class FireInfo:
     acc_start: str = ""
     acc_end: str = ""
     perimeter_type: str = ""
-    hint_mode: str = "viirs"  # 'viirs' | 'redwins_post' | 'redwins_diff'
+    # Default hint is red wins (post): VIIRS downloading is disabled, so
+    # most AOIs have no VIIRS coverage and a 'viirs' default would leave
+    # them unmappable until the user noticed and switched.
+    hint_mode: str = "redwins_post"
     # Which post imagery the stack is built from:
     #   'l2'   -- most recent L2A tiles over the AOI (default; recent,
     #             may contain cloud)

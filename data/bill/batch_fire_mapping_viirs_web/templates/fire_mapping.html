@@ -388,7 +388,10 @@ function cacheKeyFor(viewKey) {
     // worth caching; run-specific images already carry their own ids.
     if (!['pre', 'post', 'diff1', 'diff2', 'diff3', 'hint'].includes(viewKey))
         return null;
-    return `${currentPostSource}:${viewKey}:${_previewStamp}`;
+    // 'hint' additionally varies with the hint mode; every other view
+    // depends only on the post source.
+    const modePart = (viewKey === 'hint') ? `:${currentHintMode}` : '';
+    return `${currentPostSource}:${viewKey}${modePart}:${_previewStamp}`;
 }
 
 async function cachePreview(key, url) {
@@ -399,6 +402,22 @@ async function cachePreview(key, url) {
         if (_previewBlobs.has(key)) return;
         _previewBlobs.set(key, URL.createObjectURL(blob));
     } catch (_) { /* caching is best-effort */ }
+}
+
+// Fetch every stack-derived view for a source into the blob cache, so
+// a later toggle never touches the network. Runs after a switch, when
+// the server has just rebuilt that source's previews.
+function warmSourceCache(src) {
+    const views = ['post', 'diff1', 'pre', 'hint'];
+    for (const v of views) {
+        const modePart = (v === 'hint') ? `:${currentHintMode}` : '';
+        const key = `${src}:${v}${modePart}:${_previewStamp}`;
+        if (_previewBlobs.has(key)) continue;
+        const hintQ = (v === 'hint') ? `&hint=${currentHintMode}` : '';
+        cachePreview(key,
+            `/api/fire/${encodeURIComponent(FIRE)}/preview/${v}`
+            + `?src=${src}${hintQ}&t=${_previewStamp}`);
+    }
 }
 
 function clearPreviewCache() {
@@ -426,9 +445,29 @@ async function onPostSourceChange() {
     if (!sel) return;
     const src = sel.value;
     if (src === currentPostSource) return;
+    // Optimistic swap: if both this view's images are already cached
+    // for the target source, repaint from cache NOW and let the server
+    // catch up in the background. The server call still has to happen
+    // (mapping reads fire.crop_bin, which it repoints), but the user
+    // should not wait on it just to look at the imagery.
+    const prevSource = currentPostSource;
+    const canSwapInstantly = ['pre', 'post', 'diff1', 'diff2', 'diff3',
+                              'hint'].includes(leftView)
+        && _previewBlobs.has(
+            `${src}:${leftView}${leftView === 'hint'
+                ? ':' + currentHintMode : ''}:${_previewStamp}`);
+    if (canSwapInstantly) {
+        currentPostSource = src;
+        loadPaneImage('left', leftView);
+        if (splitActive && rightView) loadPaneImage('right', rightView);
+    }
+
     sel.disabled = true;
-    log(`Rebuilding stack from ${src === 'l2'
-        ? 'most recent L2 tiles' : 'MRAP composite'}...`);
+    log(canSwapInstantly
+        ? `Showing ${src === 'l2' ? 'L2 recent' : 'MRAP composite'} `
+          + `(cached); syncing server ...`
+        : `Rebuilding stack from ${src === 'l2'
+            ? 'most recent L2 tiles' : 'MRAP composite'}...`);
     try {
         const r = await fetch(
             `/api/fire/${encodeURIComponent(FIRE)}/post_source`, {
@@ -441,7 +480,14 @@ async function onPostSourceChange() {
         if (!r.ok || data.error) {
             log('Post source switch failed: ' + (data.error || 'unknown'),
                 'error');
-            sel.value = currentPostSource;   // revert the control
+            // Undo the optimistic swap so the view matches the server.
+            currentPostSource = prevSource;
+            sel.value = prevSource;
+            if (canSwapInstantly) {
+                loadPaneImage('left', leftView);
+                if (splitActive && rightView)
+                    loadPaneImage('right', rightView);
+            }
             return;
         }
         // Previews for the OLD source stay valid (they are keyed by
@@ -459,6 +505,7 @@ async function onPostSourceChange() {
         }
         if (data.status) updateStatusDisplay(data.status);
         loadFireOverlays();
+        warmSourceCache(currentPostSource);
         if (data.tiles && data.tiles.length) {
             const parts = Object.entries(data.tile_dates || {})
                 .map(([t, d]) => `${t}@${d}`).join(', ');
@@ -468,10 +515,15 @@ async function onPostSourceChange() {
             log(`Post imagery: ${src === 'l2'
                 ? 'L2 recent' : 'MRAP composite'}.`, 'success');
         }
-        // Post/Diff/Hint all derive from the stack, so refresh whatever
-        // the panes are showing rather than assuming a particular view.
-        loadPaneImage('left', leftView);
-        if (splitActive && rightView) loadPaneImage('right', rightView);
+        // Already repainted above when the cache had it; otherwise
+        // refresh now that the server has rebuilt.
+        if (!canSwapInstantly) {
+            loadPaneImage('left', leftView);
+            if (splitActive && rightView) loadPaneImage('right', rightView);
+        }
+        // Warm the cache for every stack-derived view of this source so
+        // subsequent toggles are instant regardless of which view is up.
+        warmSourceCache(src);
     } catch (err) {
         log('Post source switch error: ' + err.message, 'error');
         sel.value = currentPostSource;
@@ -521,6 +573,11 @@ async function switchHintMode(mode) {
         }
         currentHintMode = mode;
         renderHintModeButtons();
+        // The cache key includes the mode, so this now fetches the new
+        // mask rather than replaying the previous mode's image.
+        if (leftView === 'hint') loadPaneImage('left', 'hint');
+        if (splitActive && rightView === 'hint')
+            loadPaneImage('right', 'hint');
         log(`Hint switched to ${data.perimeter_type}.`, 'success');
         // Refresh hint preview if either pane is showing it.
         if (leftView === 'hint') loadPaneImage('left', 'hint');
@@ -746,12 +803,19 @@ function drawFireOverlay(pane) {
     const { img } = getPaneElements(pane);
     if (!cv || !_fireOverlays || !img || !img.naturalWidth) return;
 
-    const W = _fireOverlays.width || img.naturalWidth;
-    const H = _fireOverlays.height || img.naturalHeight;
-    // Overlay geometry is in the CROP's pixel space. If the displayed
-    // preview is a different size (a run image, say), the overlay would
-    // misregister -- so only draw when the two agree.
-    if (img.naturalWidth !== W || img.naturalHeight !== H) {
+    // Geometry is in CROP pixels, but previews are downsampled to
+    // MAX_PREVIEW_DIM (2000 px) on the long side, so crop pixels and
+    // preview pixels are NOT the same unit. Requiring them to be equal
+    // is why the overlay never appeared. Scale instead: the ratio is
+    // uniform because the preview keeps the crop's aspect ratio.
+    const cropW = _fireOverlays.width || img.naturalWidth;
+    const cropH = _fireOverlays.height || img.naturalHeight;
+    const W = img.naturalWidth, H = img.naturalHeight;
+    if (!cropW || !cropH || !W || !H) { cv.style.display = 'none'; return; }
+    const kx = W / cropW, ky = H / cropH;
+    // Guard against a genuinely different image (a run comparison
+    // figure has its own aspect ratio and must not be annotated).
+    if (Math.abs(kx - ky) > 0.02 * Math.max(kx, ky)) {
         cv.style.display = 'none';
         return;
     }
@@ -766,11 +830,18 @@ function drawFireOverlay(pane) {
 
     const ctx = cv.getContext('2d');
     ctx.clearRect(0, 0, W, H);
+    // From here on, draw in crop-pixel coordinates and let the context
+    // do the conversion.
+    ctx.save();
+    ctx.scale(kx, ky);
 
     // Line widths are divided by the current scale so strokes stay a
     // constant width on screen instead of thickening as you zoom in.
-    const sc = paneState[pane].scale || 1;
-    const lw = (px) => Math.max(0.5, px / sc);
+    // Strokes are specified in screen px, so divide by BOTH the zoom
+    // scale and the crop->preview ratio to keep constant on-screen
+    // width through the ctx.scale() above.
+    const sc = (paneState[pane].scale || 1) * kx;
+    const lw = (px) => Math.max(0.5 / kx, px / sc);
 
     // --- 1. Sentinel-2 tile grid (blue, bottom) ---
     const tiles = _fireOverlays.tiles || [];
@@ -847,6 +918,7 @@ function drawFireOverlay(pane) {
     (b.points || []).forEach((p, i) => {
         drawLabel((b.point_fire_nums || [])[i], p[0] + half + 2, p[1]);
     });
+    ctx.restore();
 }
 
 let overlaysVisible = true;
@@ -1066,8 +1138,15 @@ function loadPaneImage(pane, viewKey) {
         // source's cached response -- which is why MRAP showed nothing
         // (it re-served the L2 bytes) and why that wrong image then got
         // stored under the MRAP cache key.
+        // The hint overlay PNG depends on the HINT MODE as well as the
+        // post source. Without the mode in the URL/key, switching from
+        // "Red wins (post)" to "Red wins (diff)" re-served the cached
+        // image -- which is exactly why the two masks looked identical
+        // in all four source/mode combinations.
+        const modePart = (viewKey === 'hint')
+            ? `&hint=${currentHintMode}` : '';
         url = `/api/fire/${encodeURIComponent(FIRE)}/preview/${viewKey}`
-            + `?src=${currentPostSource}&t=${previewStamp()}`;
+            + `?src=${currentPostSource}${modePart}&t=${previewStamp()}`;
     }
     let retried = false;
     // Serve from the blob cache when we already hold these exact bytes.

@@ -149,7 +149,7 @@ def _save_fire_state():
                     entry['acc_end'] = fire.acc_end
                 if fire.perimeter_type:
                     entry['perimeter_type'] = fire.perimeter_type
-                if fire.hint_mode and fire.hint_mode != 'viirs':
+                if fire.hint_mode:
                     entry['hint_mode'] = fire.hint_mode
                 if fire.post_source:
                     entry['post_source'] = fire.post_source
@@ -378,7 +378,7 @@ def _load_fire_state():
             fire.acc_start = entry.get('acc_start', '')
             fire.acc_end = entry.get('acc_end', '')
             fire.perimeter_type = entry.get('perimeter_type', '')
-            fire.hint_mode = entry.get('hint_mode', 'viirs')
+            fire.hint_mode = entry.get('hint_mode', 'redwins_post')
             fire.post_source = entry.get('post_source', 'l2')
             fire.sample_size = entry.get('sample_size', 0)
             # Drop view keys whose preview PNG is gone from disk.

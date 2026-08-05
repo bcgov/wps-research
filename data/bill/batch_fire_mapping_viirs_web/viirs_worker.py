@@ -753,10 +753,13 @@ def _viirs_worker(fire: FireInfo) -> None:
         # available". Build the red-wins (post) hint up front instead,
         # so the fire is immediately mappable and the UI opens with a
         # working hint selected. The user can still switch modes.
-        _hint_bin = viirs_cropped or ''
-        _hint_mode = 'viirs'
-        _perimeter_type = 'viirs' if viirs_cropped else 'none'
-        if not viirs_cropped:
+        # Red wins (post) is the default hint, so build it up front
+        # whether or not VIIRS exists. VIIRS remains available via the
+        # hint buttons when it was downloaded for this AOI.
+        _hint_bin = ''
+        _hint_mode = 'redwins_post'
+        _perimeter_type = 'none'
+        if True:
             try:
                 from .prepare import build_redwins_hint_for_fire
                 fire.crop_bin = crop_bin
@@ -768,12 +771,20 @@ def _viirs_worker(fire: FireInfo) -> None:
                     _hint_mode = 'redwins_post'
                     _perimeter_type = 'redwins_post'
                     fire.console_log.append(
-                        '  No VIIRS data for this AOI -- defaulting to '
-                        'the "Red wins (post)" hint.')
+                        '  Hint: "Red wins (post)" (default).')
+                elif viirs_cropped:
+                    # Red wins failed but VIIRS is available: use it
+                    # rather than leaving the fire without a hint.
+                    _hint_bin = viirs_cropped
+                    _hint_mode = 'viirs'
+                    _perimeter_type = 'viirs'
+                    fire.console_log.append(
+                        f'  Red-wins hint could not be built '
+                        f'({_rw_err}); falling back to the VIIRS hint.')
                 else:
                     fire.console_log.append(
                         f'  No VIIRS data for this AOI, and the red-wins '
-                        f'fallback could not be built ({_rw_err}).')
+                        f'hint could not be built ({_rw_err}).')
             except Exception as exc:
                 sys.stderr.write(
                     f'[viirs_worker] {fire.fire_numbe}: red-wins '
