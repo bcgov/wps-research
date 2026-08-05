@@ -91,6 +91,30 @@ def _aoi_polygon(gt, w, h):
     return poly
 
 
+# A Sentinel-2 tile is a rectangle in its OWN UTM zone, but the tile
+# shapefile stores it in WGS84 and the AOI is BC Albers. Reprojecting
+# only the four corners and joining them with straight lines misplaces
+# each edge by a couple of hundred metres (>10 px at 20 m) because the
+# true edge is curved in the target CRS. Segmentizing first -- adding
+# vertices along each edge BEFORE the transform -- makes the drawn
+# polyline follow the real edge.
+#
+# 0.02 deg is roughly 2 km, giving ~50 vertices along a 110 km tile
+# edge: far below one pixel of residual error, and still trivial to
+# draw.
+_TILE_SEGMENT_DEG = 0.02
+
+
+def _densify(geom, step: float = _TILE_SEGMENT_DEG):
+    """Add vertices along each edge so reprojection stays faithful."""
+    try:
+        g = geom.Clone()
+        g.Segmentize(step)
+        return g
+    except Exception:
+        return geom
+
+
 def _tile_grid_px(gt, proj, w, h, tiles_shp: str = TILES_SHP) -> list:
     """Sentinel-2 tiles intersecting the AOI, as full pixel rectangles.
 
@@ -113,9 +137,19 @@ def _tile_grid_px(gt, proj, w, h, tiles_shp: str = TILES_SHP) -> list:
         # Filter in the layer's own CRS, so transform the AOI outward.
         probe = aoi.Clone()
         if ct is not None:
-            inv = osr.CoordinateTransformation(
-                osr.SpatialReference(wkt=proj), layer.GetSpatialRef())
+            src_for_probe = osr.SpatialReference()
+            src_for_probe.ImportFromWkt(proj)
             try:
+                src_for_probe.SetAxisMappingStrategy(
+                    osr.OAMS_TRADITIONAL_GIS_ORDER)
+            except AttributeError:
+                pass
+            inv = osr.CoordinateTransformation(
+                src_for_probe, layer.GetSpatialRef())
+            try:
+                # Densify the AOI too: its edges also curve, and a
+                # 4-corner probe can miss a tile that clips a corner.
+                probe = _densify(probe, step=max(abs(gt[1]), 1.0) * 50)
                 probe.Transform(inv)
             except Exception:
                 probe = None
@@ -125,7 +159,8 @@ def _tile_grid_px(gt, proj, w, h, tiles_shp: str = TILES_SHP) -> list:
             geom = feat.GetGeometryRef()
             if geom is None:
                 continue
-            g = geom.Clone()
+            # Densify in the SOURCE CRS (degrees) before transforming.
+            g = _densify(geom)
             if ct is not None:
                 try:
                     g.Transform(ct)

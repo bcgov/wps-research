@@ -424,7 +424,14 @@ class FireListRoutes:
                 g = feat.GetGeometryRef()
                 if g is None:
                     continue
+                # Densify in WGS84 before reprojecting: a tile edge is
+                # curved in Albers, so a 4-corner ring draws the line
+                # a couple of hundred metres off (see fire_overlays).
                 g = g.Clone()
+                try:
+                    g.Segmentize(0.02)
+                except Exception:
+                    pass
                 if ct is not None:
                     try:
                         g.Transform(ct)

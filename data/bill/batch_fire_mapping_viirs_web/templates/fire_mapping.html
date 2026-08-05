@@ -420,6 +420,32 @@ function warmSourceCache(src) {
     }
 }
 
+// Blank the pane while a new hint mask loads. Without this the old
+// mask stays visible during the fetch, which reads as "both modes look
+// the same" even when they differ.
+function clearHintPane(pane) {
+    const { img } = getPaneElements(pane);
+    const cv = overlayFor(pane);
+    if (img) img.style.display = 'none';
+    if (cv) cv.style.display = 'none';
+    if (pane === 'left') {
+        const lm = document.getElementById('loading-msg');
+        if (lm) { lm.textContent = 'Loading hint...'; lm.style.display = ''; }
+    }
+}
+
+// Pull every hint mask (both modes) for a source into the cache, so
+// toggling hint modes is instant rather than a round-trip each time.
+function warmHintCache(src) {
+    for (const mode of ['redwins_post', 'redwins_diff', 'viirs']) {
+        const key = `${src}:hint:${mode}:${_previewStamp}`;
+        if (_previewBlobs.has(key)) continue;
+        cachePreview(key,
+            `/api/fire/${encodeURIComponent(FIRE)}/preview/hint`
+            + `?src=${src}&hint=${mode}&t=${_previewStamp}`);
+    }
+}
+
 function clearPreviewCache() {
     for (const u of _previewBlobs.values()) {
         try { URL.revokeObjectURL(u); } catch (_) {}
@@ -506,6 +532,7 @@ async function onPostSourceChange() {
         if (data.status) updateStatusDisplay(data.status);
         loadFireOverlays();
         warmSourceCache(currentPostSource);
+        warmHintCache(currentPostSource);
         if (data.tiles && data.tiles.length) {
             const parts = Object.entries(data.tile_dates || {})
                 .map(([t, d]) => `${t}@${d}`).join(', ');
@@ -524,6 +551,7 @@ async function onPostSourceChange() {
         // Warm the cache for every stack-derived view of this source so
         // subsequent toggles are instant regardless of which view is up.
         warmSourceCache(src);
+        warmHintCache(src);
     } catch (err) {
         log('Post source switch error: ' + err.message, 'error');
         sel.value = currentPostSource;
@@ -559,7 +587,13 @@ async function switchHintMode(mode) {
     for (const btn of group.querySelectorAll('.btn-hint-mode')) {
         btn.disabled = true;
     }
-    log(`Switching hint to ${mode}...`);
+    const srcName = currentPostSource === 'l2'
+        ? 'L2 recent' : 'MRAP composite';
+    log(`Switching hint to ${mode} (${srcName}) ...`);
+    // Clear the currently displayed hint straight away so the old mask
+    // is not left on screen looking like the new one while it loads.
+    if (leftView === 'hint') clearHintPane('left');
+    if (splitActive && rightView === 'hint') clearHintPane('right');
     try {
         const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/hint_mode`, {
             method: 'POST',
@@ -578,7 +612,9 @@ async function switchHintMode(mode) {
         if (leftView === 'hint') loadPaneImage('left', 'hint');
         if (splitActive && rightView === 'hint')
             loadPaneImage('right', 'hint');
-        log(`Hint switched to ${data.perimeter_type}.`, 'success');
+        warmHintCache(currentPostSource);
+        log(`Hint switched to ${data.perimeter_type} (${srcName}).`,
+            'success');
         // Refresh hint preview if either pane is showing it.
         if (leftView === 'hint') loadPaneImage('left', 'hint');
         if (splitActive && rightView === 'hint') loadPaneImage('right', 'hint');

@@ -39,6 +39,7 @@ import re
 import sys
 import time
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
 from osgeo import gdal, ogr, osr
@@ -473,82 +474,135 @@ def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
     used = []
     n_tiles = len(per_tile)
     tile_secs = []          # per-tile wall time, for the ETA
-    for ti, (tile, zlist) in enumerate(per_tile, 1):
-        t_start = time.time()
-        token = zlist[0][2]          # e.g. 'T10UEA', zone char included
 
-        # This tile's own footprint within the AOI, so the fill target
-        # is measured against what this tile could possibly cover.
+    def _process_tile(ti, tile, zlist):
+        """Fill one tile's footprint into a PRIVATE buffer.
+
+        Each worker owns its arrays and its GDAL datasets, so tiles can
+        run concurrently without locking. Results are merged into the
+        shared accumulator afterwards, on one thread -- merging is
+        cheap next to the ~1 GB reads this does.
+
+        Returning a private buffer (rather than writing into `acc`) is
+        what makes the parallelism safe: two tiles that overlap in the
+        AOI would otherwise race on the same pixels.
+        """
+        t_start = time.time()
+        token = zlist[0][2]
         tile_mask = _tile_footprint_mask(
             tile, win_gt, xsize, ysize, proj, tiles_shp)
         tile_px = int(tile_mask.sum())
         if tile_px == 0:
-            _log(f'  {token}: footprint does not overlap the AOI window; '
-                 f'skipping')
-            continue
+            return (tile, token, None, None, [], 0.0,
+                    [f'  {token}: footprint does not overlap the AOI '
+                     f'window; skipping'])
 
-        eta = ''
-        if tile_secs:
-            mean = sum(tile_secs) / len(tile_secs)
-            remaining = mean * (n_tiles - ti + 1)
-            eta = f' (ETA {remaining:.0f}s remaining this date)'
-        _p(f'extracting {token} ({zlist[0][1]}) '
-           f'{ti}/{n_tiles} tiles{eta}',
-           0.05 + 0.85 * (ti - 1) / n_tiles)
-        _log(f'  {token}: AOI footprint {tile_px:,} px; '
-             f'target {fill_target:.0%} filled')
+        lines = [f'  {token}: AOI footprint {tile_px:,} px; '
+                 f'target {fill_target:.0%} filled']
+        local = np.full((len(BANDS), ysize, xsize), np.nan,
+                        dtype=np.float32)
+        local_filled = np.zeros((ysize, xsize), dtype=bool)
+        local_used = []
 
         for zi, (_key, acq, _tok, zpath) in enumerate(zlist, 1):
-            before = int((filled & tile_mask).sum())
-            frac_before = before / tile_px
-            if frac_before >= fill_target:
+            got = int((local_filled & tile_mask).sum())
+            frac = got / tile_px
+            if frac >= fill_target:
                 break
-            _log(f'    [{zi}/{len(zlist)}] {os.path.basename(zpath)} '
-                 f'(acq {acq}) -- footprint {frac_before:.1%} filled, '
-                 f'extracting ...')
+            lines.append(
+                f'    [{zi}/{len(zlist)}] {os.path.basename(zpath)} '
+                f'(acq {acq}) -- footprint {frac:.1%} filled, '
+                f'extracting ...')
             try:
                 src = extract_bands_to_mem(zpath)
             except L2RecentError as exc:
-                _log(f'      skipped: {exc}')
+                lines.append(f'      skipped: {exc}')
                 continue
             try:
-                warped = mem.Create('', xsize, ysize, len(BANDS),
+                drv = gdal.GetDriverByName('MEM')
+                warped = drv.Create('', xsize, ysize, len(BANDS),
                                     gdal.GDT_Float32)
                 warped.SetGeoTransform(win_gt)
                 warped.SetProjection(proj)
                 for i in range(1, len(BANDS) + 1):
                     warped.GetRasterBand(i).WriteArray(
                         np.full((ysize, xsize), np.nan, dtype=np.float32))
-                # Each tile sits in its own UTM zone; reprojecting into
-                # the AOI CRS here is what lets tiles from different
-                # zones mosaic together.
                 gdal.Warp(warped, src, resampleAlg='near',
                           srcNodata=np.nan, dstNodata=np.nan)
                 new0 = warped.GetRasterBand(1).ReadAsArray()
-                # Fill ONLY where nothing has been written yet, so a
-                # newer acquisition is never overwritten by an older one.
-                gap = (~filled) & ~np.isnan(new0)
+                gap = (~local_filled) & ~np.isnan(new0)
                 n_new = int(gap.sum())
                 if n_new:
-                    for i in range(1, len(BANDS) + 1):
-                        dst = acc.GetRasterBand(i).ReadAsArray()
-                        nb = warped.GetRasterBand(i).ReadAsArray()
-                        dst[gap] = nb[gap]
-                        acc.GetRasterBand(i).WriteArray(dst)
-                    filled |= gap
-                    used.append((token, acq))
-                after = int((filled & tile_mask).sum())
-                _log(f'      +{n_new:,} px; footprint now '
-                     f'{after / tile_px:.1%} filled')
+                    for i in range(len(BANDS)):
+                        nb = warped.GetRasterBand(i + 1).ReadAsArray()
+                        local[i][gap] = nb[gap]
+                    local_filled |= gap
+                    local_used.append((token, acq))
+                after = int((local_filled & tile_mask).sum())
+                lines.append(f'      +{n_new:,} px; footprint now '
+                             f'{after / tile_px:.1%} filled')
             finally:
                 src = None
                 warped = None
 
-        final = int((filled & tile_mask).sum()) / tile_px
         secs = time.time() - t_start
-        tile_secs.append(secs)
-        _log(f'  {token}: done -- {final:.1%} of its AOI footprint '
-             f'filled in {secs:.0f}s')
+        final = int((local_filled & tile_mask).sum()) / tile_px
+        lines.append(f'  {token}: done -- {final:.1%} of its AOI '
+                     f'footprint filled in {secs:.0f}s')
+        return (tile, token, local, local_filled, local_used, secs, lines)
+
+    # Tiles are independent until the merge, and each is dominated by
+    # decompressing ~1 GB zips, so running them concurrently is close
+    # to a linear speedup. Capped so a many-tile AOI cannot exhaust
+    # memory: each worker holds a full AOI-sized 4-band float32 buffer.
+    max_workers = max(1, min(len(per_tile), 4))
+    _log(f'extracting {n_tiles} tile(s) with {max_workers} worker(s) '
+         f'in parallel ...')
+    done_n = 0
+    results = []
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futs = {pool.submit(_process_tile, ti, tile, zl): (ti, tile)
+                for ti, (tile, zl) in enumerate(per_tile, 1)}
+        for fut in as_completed(futs):
+            ti, tile = futs[fut]
+            try:
+                res = fut.result()
+            except Exception as exc:
+                _log(f'  {tile}: FAILED ({exc})')
+                continue
+            done_n += 1
+            for ln in res[6]:
+                _log(ln)
+            if res[5]:
+                tile_secs.append(res[5])
+            results.append(res)
+            eta = ''
+            if tile_secs and done_n < n_tiles:
+                mean = sum(tile_secs) / len(tile_secs)
+                pending = n_tiles - done_n
+                # With N workers the remaining tiles overlap, so the
+                # wall-clock estimate divides by the worker count.
+                remaining = mean * pending / max_workers
+                eta = f' (ETA {remaining:.0f}s remaining this date)'
+            _p(f'extracted {res[1]} {done_n}/{n_tiles} tiles{eta}',
+               0.05 + 0.85 * done_n / n_tiles)
+
+    # Merge private buffers. Deterministic order (sorted by tile) so the
+    # same inputs always give the same mosaic regardless of which
+    # worker finished first.
+    for tile, token, local, local_filled, local_used, _secs, _lines in \
+            sorted(results, key=lambda r: r[0]):
+        if local is None:
+            continue
+        gap = (~filled) & local_filled
+        if not gap.any():
+            continue
+        for i in range(len(BANDS)):
+            dst = acc.GetRasterBand(i + 1).ReadAsArray()
+            dst[gap] = local[i][gap]
+            acc.GetRasterBand(i + 1).WriteArray(dst)
+        filled |= gap
+        used.extend(local_used)
 
     if not used:
         raise L2RecentError('every intersecting tile failed to extract')
