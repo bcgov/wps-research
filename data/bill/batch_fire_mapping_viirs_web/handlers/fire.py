@@ -288,6 +288,34 @@ class FireRoutes:
         fire = state.fires[fire_numbe]
         png = os.path.join(fire.cache_dir, 'previews', f'{view}.png')
 
+        # The hint overlay depends on BOTH the post source and the hint
+        # mode, so it is stored per mode as hint_<mode>.png. Previously
+        # the ?hint= parameter was only a cache-buster and this handler
+        # always returned previews/hint.png -- whichever mode happened
+        # to have been rendered last -- which is why the two red-wins
+        # masks kept looking identical.
+        if view == 'hint':
+            from urllib.parse import urlparse, parse_qs
+            q = parse_qs(urlparse(self.path).query)
+            mode = (q.get('hint') or [''])[0]
+            if re.fullmatch(r'[A-Za-z0-9_-]+', mode or ''):
+                per_mode = os.path.join(
+                    fire.cache_dir, 'previews', f'hint_{mode}.png')
+                if os.path.isfile(per_mode):
+                    png = per_mode
+                else:
+                    # Not rendered yet: build it now so the client gets
+                    # the mode it actually asked for rather than a
+                    # silently wrong image.
+                    try:
+                        from ..prepare import render_hint_for_mode
+                        if render_hint_for_mode(fire, mode):
+                            png = per_mode
+                    except Exception as exc:
+                        sys.stderr.write(
+                            f'[fire] hint render for {mode} failed: '
+                            f'{exc}\n')
+
         # On-the-fly generation for serial overlays
         if not os.path.exists(png):
             m = re.match(r'^serial_(\d+)$', view)

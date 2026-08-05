@@ -153,6 +153,8 @@ def _save_fire_state():
                     entry['hint_mode'] = fire.hint_mode
                 if fire.post_source:
                     entry['post_source'] = fire.post_source
+                if getattr(fire, 'created_at', 0):
+                    entry['created_at'] = float(fire.created_at)
                 if fire.sample_size:
                     entry['sample_size'] = fire.sample_size
                 if fire.available_views:
@@ -380,6 +382,19 @@ def _load_fire_state():
             fire.perimeter_type = entry.get('perimeter_type', '')
             fire.hint_mode = entry.get('hint_mode', 'redwins_post')
             fire.post_source = entry.get('post_source', 'l2')
+            try:
+                fire.created_at = float(entry.get('created_at', 0) or 0)
+            except (TypeError, ValueError):
+                fire.created_at = 0.0
+            if not fire.created_at:
+                # Pre-existing fire: fall back to the cache directory's
+                # creation time so the ordering is still meaningful
+                # rather than dumping every old fire at the bottom.
+                try:
+                    if fire.cache_dir and os.path.isdir(fire.cache_dir):
+                        fire.created_at = os.path.getmtime(fire.cache_dir)
+                except OSError:
+                    pass
             fire.sample_size = entry.get('sample_size', 0)
             # Drop view keys whose preview PNG is gone from disk.
             # Manual .web_cache wipes leave fire_state.yaml claiming

@@ -173,6 +173,7 @@
             <th data-key="fire_size_ha">Hint Size (ha) <span class="sort-arrow"></span></th>
             <th data-key="ml_area_ha">ML Size (ha) <span class="sort-arrow"></span></th>
             <th data-key="agreement_pct">Agreement<span class="help" tabindex="0" aria-label="About agreement" aria-expanded="false" data-tip="How closely the ML-classified burn matches the hint perimeter (VIIRS hotspot polygon). 100% = exact match; lower values may indicate the ML disagreed with the hint or the hint was loose. A sanity check, not ground truth.">?</span> <span class="sort-arrow"></span></th>
+            <th data-key="created_at">Created <span class="sort-arrow"></span></th>
             <th data-key="status">Status<span class="help" tabindex="0" aria-label="About status" aria-expanded="false" data-tip="pending = never opened. preparing/ready = crop being built or ready to map. mapping = ML running. mapped = result available, awaiting review. accepted = a run was approved and copied to the canonical output folder. error = a step failed (see console in the fire page).">?</span> <span class="sort-arrow"></span></th>
             <th>Settings</th>
             <th>Action</th>
@@ -191,8 +192,20 @@ const ACTIVE_YEAR = {{{ active_year_json }}};
 const IS_ADMIN = {{{ is_admin_json }}};
 
 let allFires = [];
-let sortKey = 'fire_size_ha';
+// Newest first by default: the fire you just created is the one you
+// almost always want, and it was previously buried by size ordering.
+let sortKey = 'created_at';
 let sortAsc = false;
+
+// Local time, compact. Epoch 0 means the fire predates the field.
+function fmtCreated(ts) {
+    if (!ts) return '<span style="color:#999">--</span>';
+    const d = new Date(ts * 1000);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-`
+         + `${pad(d.getDate())} ${pad(d.getHours())}:`
+         + `${pad(d.getMinutes())}`;
+}
 let yearSet = new Set([ACTIVE_YEAR]);  // single-select: always exactly 1 year
 let statusSet = new Set();
 let showAllStatuses = false;  // when true, render() ignores statusSet
@@ -597,6 +610,7 @@ function render() {
             <td>${f.fire_size_ha != null ? f.fire_size_ha.toLocaleString() : ''}</td>
             <td>${mlSize}</td>
             <td>${agr}</td>
+            <td style="white-space:nowrap">${fmtCreated(f.created_at)}</td>
             <td>${prevBadge}${badge}${subStage}${errMsg}</td>
             <td>${overrideBadge}<button class="btn btn-secondary" style="font-size:11px;padding:2px 6px" onclick="openOverrideModal('${fireEnc}')">Edit</button></td>
             <td><a href="/fire/${fireEnc}" class="btn" onclick="markFireOpened('${fireEnc}')">Open</a>${cancelBtn}</td>

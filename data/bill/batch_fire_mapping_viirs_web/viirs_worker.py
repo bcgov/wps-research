@@ -820,7 +820,11 @@ def _viirs_worker(fire: FireInfo) -> None:
         # with, then build the other one in the background so the first
         # toggle in the UI is instant rather than a full rebuild.
         try:
-            from .prepare import _stash_previews, prebuild_other_source
+            from .prepare import (_stash_previews, prebuild_other_source,
+                                  pregenerate_all_hints)
+            # Render every hint mode for this source BEFORE stashing so
+            # the stash is complete and hint toggles are cache hits.
+            pregenerate_all_hints(fire)
             _stash_previews(fire, getattr(fire, 'post_source', 'l2'))
             threading.Thread(
                 target=prebuild_other_source, args=(fire,),

@@ -269,6 +269,64 @@ def prebuild_other_source(fire: FireInfo) -> None:
         sys.stderr.write(f'[prepare] prebuild failed: {exc}\n')
 
 
+def render_hint_for_mode(fire: FireInfo, mode: str) -> bool:
+    """Render previews/hint_<mode>.png for the CURRENT post source.
+
+    Each (post source x hint mode) pair is a distinct image, because the
+    red-wins rule reads the stack's post bands (mode 'redwins_post') or
+    its anomaly bands (mode 'redwins_diff'), and those bands differ
+    between the L2 and MRAP stacks. Storing them under one filename is
+    what made the masks appear identical.
+    """
+    if not fire.crop_bin or not os.path.isfile(fire.crop_bin):
+        return False
+    out = os.path.join(fire.cache_dir, 'previews', f'hint_{mode}.png')
+
+    if mode == 'viirs':
+        mask = fire.viirs_bin
+        if not mask or not os.path.isfile(mask):
+            return False
+    else:
+        mask, err = build_redwins_hint_for_fire(fire, mode)
+        if not mask:
+            sys.stderr.write(
+                f'[prepare] hint {mode}: {err}\n')
+            return False
+
+    # _overlay_mask_on_post writes previews/<name>.png, so render under
+    # the per-mode name directly.
+    try:
+        _overlay_mask_on_post(fire, mask, f'hint_{mode}', (0.0, 0.8, 0.2))
+    except Exception as exc:
+        sys.stderr.write(f'[prepare] hint overlay {mode} failed: {exc}\n')
+        return False
+    return os.path.isfile(out)
+
+
+def pregenerate_all_hints(fire: FireInfo) -> list:
+    """Render every hint mode available for the current post source.
+
+    Called after a source's stack is built so that switching hint modes
+    is a cache hit rather than a render. Returns the modes rendered.
+    """
+    done = []
+    modes = ['redwins_post', 'redwins_diff']
+    if fire.viirs_bin and os.path.isfile(fire.viirs_bin):
+        modes.append('viirs')
+    for m in modes:
+        try:
+            if render_hint_for_mode(fire, m):
+                done.append(m)
+        except Exception as exc:
+            sys.stderr.write(
+                f'[prepare] pregenerate hint {m} failed: {exc}\n')
+    src = getattr(fire, 'post_source', 'l2')
+    fire.console_log.append(
+        f'  Pre-rendered hint mask(s) for {src.upper()}: '
+        f'{", ".join(done) if done else "none"}')
+    return done
+
+
 def switch_post_source(fire: FireInfo, source: str) -> dict:
     """Switch a fire between the L2-recent and MRAP post imagery.
 
@@ -384,8 +442,13 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
             pass
 
     if not restored:
+        # Render EVERY hint mode for this source before stashing, so
+        # the stash carries all of them and later hint toggles never
+        # need a render.
+        pregenerate_all_hints(fire)
         # Snapshot now that previews/ holds this source's images AND
-        # its hint overlay, so a later switch back restores both.
+        # all of its hint overlays, so a later switch back restores
+        # everything.
         _stash_previews(fire, source)
 
     # Return the fire to READY. The switch rebuilds the same artifacts

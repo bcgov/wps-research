@@ -192,10 +192,15 @@ class FireListRoutes:
                                         if f.progress else 0),
                     'sub_stage_detail': (f.progress.get('detail', '')
                                          if f.progress else ''),
+                    'created_at': float(getattr(f, 'created_at', 0) or 0),
                 }
                 for f in state.fires.values()
                 if not f.hidden
             ]
+        # Newest first. Fires with no timestamp on record sort last
+        # rather than jumping to the top.
+        fires.sort(key=lambda d: d.get('created_at', 0) or 0,
+                   reverse=True)
         self._send_json(fires)
 
     def handle_api_notes(self, fire_numbe):
@@ -609,6 +614,7 @@ class FireListRoutes:
                 perimeter_type='viirs',
             )
             fire.bbox_native = tuple(float(v) for v in bbox_clipped)
+            fire.created_at = time.time()
             fire.bbox_wgs84 = tuple(float(v) for v in bbox_wgs84)
             fire.viirs_start_date = start_date.isoformat()
             fire.viirs_end_date = end_date.isoformat()

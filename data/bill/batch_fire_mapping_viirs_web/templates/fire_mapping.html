@@ -857,33 +857,41 @@ function drawFireOverlay(pane) {
     }
     if (!overlaysVisible) { cv.style.display = 'none'; return; }
 
-    cv.width = W;
-    cv.height = H;
-    cv.style.width = W + 'px';
-    cv.style.height = H + 'px';
+    const { area } = getPaneElements(pane);
+    const ir = img.getBoundingClientRect();
+    const ar = area.getBoundingClientRect();
+    if (ir.width <= 0 || ir.height <= 0) { cv.style.display = 'none'; return; }
+
+    // Backing store matches the on-screen size (times DPR for crisp
+    // lines on HiDPI); geometry is then scaled from CROP pixels into
+    // that rect. This is the only place the crop->screen ratio is
+    // computed, so it cannot disagree with the positioning above.
+    const dpr = window.devicePixelRatio || 1;
+    cv.width = Math.max(1, Math.round(ir.width * dpr));
+    cv.height = Math.max(1, Math.round(ir.height * dpr));
     cv.style.display = 'block';
     syncOverlayTransform(pane);
 
     const ctx = cv.getContext('2d');
-    ctx.clearRect(0, 0, W, H);
-    // From here on, draw in crop-pixel coordinates and let the context
-    // do the conversion.
+    ctx.clearRect(0, 0, cv.width, cv.height);
     ctx.save();
-    ctx.scale(kx, ky);
+    // crop px -> displayed px -> backing-store px
+    const sx = (ir.width / cropW) * dpr;
+    const sy = (ir.height / cropH) * dpr;
+    ctx.scale(sx, sy);
 
     // Line widths are divided by the current scale so strokes stay a
     // constant width on screen instead of thickening as you zoom in.
-    // Strokes are specified in screen px, so divide by BOTH the zoom
-    // scale and the crop->preview ratio to keep constant on-screen
-    // width through the ctx.scale() above.
-    const sc = (paneState[pane].scale || 1) * kx;
-    const lw = (px) => Math.max(0.5 / kx, px / sc);
+    // Strokes are specified in on-screen px; ctx.scale() above is in
+    // crop-px units, so divide by that same factor.
+    const lw = (px) => Math.max(0.25, (px * dpr) / sx);
 
     // --- 1. Sentinel-2 tile grid (blue, bottom) ---
     const tiles = _fireOverlays.tiles || [];
     ctx.strokeStyle = 'rgba(0, 200, 60, 0.95)';   // grid: green
     ctx.lineWidth = lw(2);
-    ctx.font = `${Math.max(9, 13 / sc)}px sans-serif`;
+    const fpx = (v) => Math.max(6 / sx, (v * dpr) / sx);
+    ctx.font = `${fpx(13)}px sans-serif`;
     ctx.textBaseline = 'top';
     for (const t of tiles) {
         const ring = t.ring || [];
@@ -903,7 +911,7 @@ function drawFireOverlay(pane) {
             // Label in magenta so it stays legible against the green
             // grid line it sits beside, and against vegetation.
             const tw = ctx.measureText(t.name).width;
-            const th = Math.max(9, 13 / sc);
+            const th = fpx(13);
             ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
             ctx.fillRect(lx - 1, ly - 1, tw + 2, th + 2);
             ctx.fillStyle = 'rgba(255, 0, 220, 1)';
@@ -924,7 +932,7 @@ function drawFireOverlay(pane) {
         ctx.closePath();
         ctx.stroke();
     }
-    const half = Math.max(3, 7 / sc);
+    const half = fpx(7);
     for (const p of (b.points || [])) {
         ctx.beginPath();
         ctx.moveTo(p[0] - half, p[1] - half);
@@ -933,12 +941,12 @@ function drawFireOverlay(pane) {
         ctx.lineTo(p[0] - half, p[1] + half);
         ctx.stroke();
     }
-    ctx.font = `${Math.max(9, 12 / sc)}px sans-serif`;
+    ctx.font = `${fpx(12)}px sans-serif`;
     ctx.textBaseline = 'bottom';
     const drawLabel = (txt, x, y) => {
         if (!txt) return;
         const tw = ctx.measureText(txt).width;
-        const th = Math.max(9, 12 / sc);
+        const th = fpx(12);
         ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
         ctx.fillRect(x - 1, y - th - 1, tw + 2, th + 2);
         ctx.fillStyle = '#ff4444';
@@ -959,6 +967,12 @@ function drawFireOverlay(pane) {
 
 let overlaysVisible = true;
 
+// The rendered rect changes on resize too, so re-register then.
+window.addEventListener('resize', () => {
+    drawFireOverlay('left');
+    if (splitActive) drawFireOverlay('right');
+});
+
 function toggleFireOverlays() {
     overlaysVisible = !overlaysVisible;
     const btn = document.getElementById('btn-overlays');
@@ -975,23 +989,44 @@ function overlayFor(pane) {
         pane === 'right' ? 'right-overlay' : 'main-overlay');
 }
 
-// The overlay canvas is sized to the image's INTRINSIC pixels and given
-// the identical CSS transform, so one uniform scale maps crop pixels to
-// screen. Registration then survives zoom and pan with no per-frame
-// maths -- the browser applies the same transform to both.
+// Register the overlay against the image's ACTUAL rendered rectangle.
+//
+// The previous approach copied the image's CSS transform onto the
+// canvas. That silently assumed both elements share a base position,
+// but the <img> is position:absolute with no left/top (so it sits at
+// its auto static position, offset by the container's centring) while
+// the canvas was pinned to top:0/left:0. The constant offset between
+// them was then multiplied by the zoom scale, which is why the
+// overlays drifted further out the more you zoomed.
+//
+// Measuring getBoundingClientRect() makes no assumption at all about
+// how the image is positioned or transformed: whatever the browser
+// actually painted, the canvas is placed exactly on top of it and the
+// geometry is scaled into that rect. Correct at every zoom level by
+// construction.
 function syncOverlayTransform(pane) {
-    const s = paneState[pane];
+    const { area, img } = getPaneElements(pane);
     const cv = overlayFor(pane);
-    if (!cv) return;
-    cv.style.transform =
-        `translate(${s.panX}px, ${s.panY}px) scale(${s.scale})`;
+    if (!cv || !img || !area || !img.naturalWidth) return;
+    const ir = img.getBoundingClientRect();
+    const ar = area.getBoundingClientRect();
+    if (ir.width <= 0 || ir.height <= 0) { cv.style.display = 'none'; return; }
+    // No CSS transform on the canvas -- it is laid out directly over
+    // the painted image.
+    cv.style.transform = 'none';
+    cv.style.left = (ir.left - ar.left) + 'px';
+    cv.style.top = (ir.top - ar.top) + 'px';
+    cv.style.width = ir.width + 'px';
+    cv.style.height = ir.height + 'px';
 }
 
 function updateTransformForPane(pane) {
     const s = paneState[pane];
     const { img } = getPaneElements(pane);
     img.style.transform = `translate(${s.panX}px, ${s.panY}px) scale(${s.scale})`;
-    syncOverlayTransform(pane);
+    // Redraw rather than just reposition: the canvas backing store is
+    // sized to the on-screen rect, which changes with zoom.
+    drawFireOverlay(pane);
     if (pane === activePane) {
         document.getElementById('zoom-info').textContent = `${Math.round(s.scale * 100)}%`;
     }
@@ -1001,7 +1036,7 @@ function updateTransformForPane(pane) {
         os.scale = s.scale; os.panX = s.panX; os.panY = s.panY;
         const { img: oImg } = getPaneElements(other);
         oImg.style.transform = `translate(${os.panX}px, ${os.panY}px) scale(${os.scale})`;
-        syncOverlayTransform(other);
+        drawFireOverlay(other);
     }
 }
 

@@ -77,6 +77,10 @@ class FireInfo:
     #             may contain cloud)
     #   'mrap' -- province-wide cloud-screened MRAP composite
     post_source: str = "l2"
+    # Epoch seconds when the fire was created. Drives the newest-first
+    # ordering in the fire list; 0 for fires created before this field
+    # existed, which sort last.
+    created_at: float = 0.0
 
     # Sampling (computed from crop dims)
     sample_size: int = 0
