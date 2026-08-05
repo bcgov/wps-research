@@ -196,15 +196,15 @@ Example
     p.add_argument("--disable_overview_force_regeneration",
                    action="store_true",
                    help="Skip forced overview regeneration at startup.")
-    p.add_argument("--overview_min_interval_minutes", type=int, default=60,
+    p.add_argument("--overview_force_regeneration", action="store_true",
                    help="Force-regenerate the per-year overview previews "
-                        "at most once per this many minutes, measured "
-                        "across server restarts via the same stamp file "
-                        "used by the VIIRS throttle. When throttled, "
-                        "overviews are still regenerated if the stack "
-                        "file itself changed or a PNG is missing. Set 0 "
-                        "to disable the throttle and force-regenerate on "
-                        "every start. Default: 60.")
+                        "even if they were already regenerated today. By "
+                        "default this happens at most once per calendar "
+                        "day in BC local time (UTC-7, no DST), tracked "
+                        "across restarts in the run stamp file. Note that "
+                        "overviews whose stack file changed, or whose PNG "
+                        "is missing, are ALWAYS regenerated regardless of "
+                        "this setting.")
     p.add_argument("--viirs_download_method",
                    choices=["curl_primary", "urllib_primary"],
                    default="curl_primary",
@@ -374,6 +374,26 @@ def _stamp_age_s(stamp: dict, key: str = 'last_attempt_epoch'):
     return age if age >= 0 else None
 
 
+# British Columbia stays on UTC-7 year round (no DST changes), so a
+# fixed offset is correct rather than a simplification -- no tz database
+# lookup is needed and there is no spring/fall discontinuity to handle.
+PACIFIC_UTC_OFFSET_H = -7
+_PACIFIC_TZ = datetime.timezone(
+    datetime.timedelta(hours=PACIFIC_UTC_OFFSET_H), 'PDT')
+
+
+def _pacific_date(ts: float) -> datetime.date:
+    """Calendar date of *ts* (epoch seconds) in BC local time."""
+    return datetime.datetime.fromtimestamp(ts, _PACIFIC_TZ).date()
+
+
+def _next_pacific_midnight(ts: float) -> datetime.datetime:
+    """First instant of the day after *ts*, in BC local time."""
+    d = _pacific_date(ts) + datetime.timedelta(days=1)
+    return datetime.datetime.combine(
+        d, datetime.time(0, 0), tzinfo=_PACIFIC_TZ)
+
+
 def _fmt_duration(seconds: float) -> str:
     seconds = int(max(0, seconds))
     h, rem = divmod(seconds, 3600)
@@ -486,11 +506,23 @@ def main():
     # ------------------------------------------------------------------
     # Step 1 — Generate per-year overview PNG + sidecar JSON (cached)
     # ------------------------------------------------------------------
-    _ovr_interval_s = max(0, int(args.overview_min_interval_minutes)) * 60
+    # Regenerate at most once per BC calendar day. The mosaics are
+    # rebuilt once a night by refresh_mrap.sh, so a second full re-render
+    # on the same day can never show anything new -- and on a 103 GB
+    # source that render is the single slowest part of startup.
+    #
+    # A calendar-day rule beats an elapsed-hours rule here: several
+    # restarts in an evening all correctly skip, while the first start
+    # after the nightly refresh always regenerates, regardless of how
+    # few hours separate it from the previous run.
+    _now_ts = time.time()
+    _ovr_last_day = (_pacific_date(_stamp['last_overview_epoch'])
+                     if _stamp.get('last_overview_epoch') else None)
+    _ovr_today = _pacific_date(_now_ts)
     _ovr_throttled = (
-        _ovr_interval_s > 0
-        and _overview_age is not None
-        and _overview_age < _ovr_interval_s)
+        not args.overview_force_regeneration
+        and _ovr_last_day is not None
+        and _ovr_last_day >= _ovr_today)
     # `force` re-renders every overview unconditionally. Dropping it
     # does NOT mean "skip the step": ensure_overview() still regenerates
     # anything whose sidecar cache_key no longer matches the stack file,
@@ -501,14 +533,19 @@ def main():
 
     _log('\n[1/4] Per-year overview previews: starting ...')
     if _ovr_throttled:
-        _remaining = _ovr_interval_s - _overview_age
-        _log(f'      Last forced regeneration was '
-             f'{_fmt_duration(_overview_age)} ago, within the '
-             f'{args.overview_min_interval_minutes}-minute minimum '
-             f'interval -- using cached overviews (any whose stack '
-             f'file changed, or whose PNG is missing, are still '
-             f'regenerated). Next forced regeneration allowed in '
-             f'{_fmt_duration(_remaining)}.')
+        _next = _next_pacific_midnight(_now_ts)
+        _log(f'      Already regenerated today '
+             f'({_ovr_last_day.isoformat()} Pacific, '
+             f'{_fmt_duration(_overview_age)} ago) -- using cached '
+             f'overviews. Any whose stack file changed, or whose PNG '
+             f'is missing, are still regenerated. Next forced '
+             f'regeneration after {_next:%Y-%m-%d %H:%M} Pacific '
+             f'(pass --overview_force_regeneration to override).')
+    else:
+        _log(f'      Last forced regeneration: '
+             + (f'{_ovr_last_day.isoformat()} Pacific'
+                if _ovr_last_day else 'never')
+             + f' -- regenerating for {_ovr_today.isoformat()}.')
     (overview_png_by_year, overview_low_png_by_year,
      overview_meta_by_year) = _ensure_overviews(
         rasters_by_year, out_root,
