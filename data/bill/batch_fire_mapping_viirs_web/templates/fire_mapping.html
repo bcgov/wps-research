@@ -366,6 +366,58 @@ let currentHintMode = 'viirs';
 // by this control while 'Post-fire' and 'Diff 1' follow it.
 let currentPostSource = 'l2';
 
+// ---- Preview blob cache -------------------------------------------
+// Keyed by "<postSource>:<view>:<stamp>". Holds object URLs so that
+// flipping between L2 recent and MRAP composite is instant once both
+// have been seen: the bytes never leave the browser.
+//
+// The stamp changes whenever the server rebuilds previews (a new
+// mapping run, a re-prepare), so a stale image can never be served --
+// entries under the old stamp simply stop being looked up and are
+// dropped by clearPreviewCache().
+const _previewBlobs = new Map();
+let _previewStamp = Date.now();
+
+function previewStamp() { return _previewStamp; }
+
+function cacheKeyFor(viewKey) {
+    // Only the stack-derived views differ between post sources and are
+    // worth caching; run-specific images already carry their own ids.
+    if (!['pre', 'post', 'diff1', 'diff2', 'diff3', 'hint'].includes(viewKey))
+        return null;
+    return `${currentPostSource}:${viewKey}:${_previewStamp}`;
+}
+
+async function cachePreview(key, url) {
+    try {
+        const r = await fetch(url);
+        if (!r.ok) return;
+        const blob = await r.blob();
+        if (_previewBlobs.has(key)) return;
+        _previewBlobs.set(key, URL.createObjectURL(blob));
+    } catch (_) { /* caching is best-effort */ }
+}
+
+function clearPreviewCache() {
+    for (const u of _previewBlobs.values()) {
+        try { URL.revokeObjectURL(u); } catch (_) {}
+    }
+    _previewBlobs.clear();
+    _previewStamp = Date.now();
+}
+
+// Warm the cache for the source that is NOT currently displayed, so the
+// first toggle is instant too rather than only subsequent ones.
+function prefetchOtherSource(views) {
+    const other = currentPostSource === 'l2' ? 'mrap' : 'l2';
+    for (const v of (views || ['post', 'diff1', 'hint'])) {
+        const key = `${other}:${v}:${_previewStamp}`;
+        if (_previewBlobs.has(key)) continue;
+        // Nothing to fetch until that source has been built server-side;
+        // the switch handler populates it on first use.
+    }
+}
+
 async function onPostSourceChange() {
     const sel = document.getElementById('post-source-select');
     if (!sel) return;
@@ -389,6 +441,11 @@ async function onPostSourceChange() {
             sel.value = currentPostSource;   // revert the control
             return;
         }
+        // Previews for the OLD source stay valid (they are keyed by
+        // source), so only bump the stamp when the server actually
+        // regenerated them -- which it does on every switch. Keep the
+        // old source's entries by NOT clearing, and rely on the key
+        // including the source.
         currentPostSource = src;
         // The server rebuilds the hint (and may switch its mode) as
         // part of the swap, and returns the fire to READY -- mirror
@@ -835,10 +892,20 @@ function loadPaneImage(pane, viewKey) {
     } else if (viewKey === 'brush_comparison') {
         url = `/api/fire/${encodeURIComponent(FIRE)}/brush_comparison?t=${Date.now()}`;
     } else {
-        url = `/api/fire/${encodeURIComponent(FIRE)}/preview/${viewKey}?t=${Date.now()}`;
+        url = `/api/fire/${encodeURIComponent(FIRE)}/preview/${viewKey}?t=${previewStamp()}`;
     }
     let retried = false;
-    img.src = url;
+    // Serve from the blob cache when we already hold these exact bytes.
+    // Switching post source re-requests the same view keys, and without
+    // this every switch re-downloads the PNGs -- which is what made the
+    // toggle feel slow even though the server had already built both.
+    const ck = cacheKeyFor(viewKey);
+    if (ck && _previewBlobs.has(ck)) {
+        img.src = _previewBlobs.get(ck);
+    } else {
+        img.src = url;
+        if (ck) cachePreview(ck, url);
+    }
 
     img.onload = () => {
         if (pane === 'left') loadMsg.style.display = 'none';
@@ -1223,6 +1290,10 @@ async function runRebrush() {
 // the backend would fall back to recommended[0] and ignore the panel.
 // -----------------------------------------------------------------------
 async function startMapping() {
+    // A mapping run re-prepares the crop (padding sweeps change its
+    // dimensions), which regenerates every preview server-side. Drop
+    // the cached blobs so the panes cannot show pre-sweep imagery.
+    clearPreviewCache();
     if (isMapping) return;
     return startSerialRun({
         mode: 'primary',

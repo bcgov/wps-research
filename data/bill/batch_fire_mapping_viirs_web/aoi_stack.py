@@ -653,7 +653,8 @@ def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
                      ram_dir: str = RAM_DIR, force: bool = False,
                      instance_key: str = '',
                      post_source: str = 'mrap',
-                     ref_raster: str = None) -> dict:
+                     ref_raster: str = None,
+                     log_cb=None) -> dict:
     """Return the AOI stack for *identifier*, building it if needed.
 
     This is the function that makes the ramdisk safe to lose. ``/ram``
@@ -725,7 +726,8 @@ def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
                     (xmin, ymin, xmax, ymax), ref, l2_tmp,
                     progress_cb=(
                         (lambda d, f: progress_cb(d, 0.6 * f))
-                        if progress_cb else None))
+                        if progress_cb else None),
+                    log_cb=log_cb)
             except L2RecentError as exc:
                 raise AoiStackError(f'L2-recent composite failed: {exc}')
             override = l2_tmp
@@ -740,6 +742,9 @@ def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
         if post_source == 'l2':
             info['tiles'] = l2_info.get('tiles', [])
             info['tile_dates'] = l2_info.get('tile_dates', {})
+            info['filled_fraction'] = l2_info.get('filled_fraction')
+            info['filled_px'] = l2_info.get('filled_px')
+            info['total_px'] = l2_info.get('total_px')
     info['rebuilt'] = True
     info['post_source'] = post_source
     return info

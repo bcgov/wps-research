@@ -205,7 +205,8 @@ def switch_post_source(fire: FireInfo, source: str) -> dict:
         info = ensure_aoi_stack(
             fire.fire_numbe, fire.bbox_native, progress_cb=_cb,
             instance_key=getattr(state, 'shared_root', '') or '',
-            post_source=source, ref_raster=ref_raster)
+            post_source=source, ref_raster=ref_raster,
+            log_cb=lambda m: fire.console_log.append(m.rstrip()))
     except AoiStackError as exc:
         fire.progress = {}
         return {'ok': False, 'error': str(exc)}
@@ -280,7 +281,14 @@ def switch_post_source(fire: FireInfo, source: str) -> dict:
         except Exception:
             pass
 
+    if info.get('filled_fraction') is not None:
+        fire.console_log.append(
+            f"  AOI coverage: {info.get('filled_px', 0):,}/"
+            f"{info.get('total_px', 0):,} px "
+            f"({info['filled_fraction']:.1%}) filled with non-nodata.")
+
     return {'ok': True, 'post_source': source,
+            'filled_fraction': info.get('filled_fraction'),
             'status': fire.status.value if hasattr(fire.status, 'value')
                       else str(fire.status),
             'hint_mode': fire.hint_mode,

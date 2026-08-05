@@ -37,6 +37,7 @@ import glob
 import os
 import re
 import sys
+import time
 import zipfile
 
 import numpy as np
@@ -56,10 +57,18 @@ BANDS = ('B12', 'B11', 'B9', 'B8')
 TARGET_RES_M = 20.0
 
 # S2A_MSIL2A_20260720T191831_..._T10UFB_20260721T032655.zip
-#                ^sensing datetime            ^tile   ^processing
+#                ^acquisition                ^tile   ^processing
+# The tile token is captured WITH its leading zone character (usually
+# 'T') so it can be displayed verbatim; the character is not assumed,
+# it is read from the filename.
 _ZIP_RE = re.compile(
-    r'^S2[A-Z]_MSIL2A_(\d{8})T(\d{6})_.*?_T([0-9]{2}[A-Z]{3})_'
-    r'(\d{8})T(\d{6})\.zip$', re.IGNORECASE)
+    r'^S2[A-Z]_MSIL2A_(\d{8}T\d{6})_.*?_([A-Z][0-9]{2}[A-Z]{3})_'
+    r'(\d{8}T\d{6})\.zip$', re.IGNORECASE)
+
+# Stop pulling in older acquisitions for a tile once this fraction of
+# its AOI footprint carries real data. Trades a little completeness for
+# a lot of extraction time -- each additional zip is a full ~1 GB read.
+FILL_TARGET = 0.95
 
 
 class L2RecentError(RuntimeError):
@@ -156,30 +165,52 @@ def tiles_intersecting_bbox(bbox_native, crs_wkt: str,
 # 2. tile -> most recent zip
 # ----------------------------------------------------------------------
 
-def most_recent_zip_for_tile(tile: str, mrap_dir: str = MRAP_DIR):
-    """Newest L2A zip for *tile*, as ``(sensing_yyyymmdd, path)``.
+def zips_for_tile(tile: str, mrap_dir: str = MRAP_DIR) -> list:
+    """All L2A zips for *tile*, newest first.
 
-    Ranked by the SENSING datetime in the filename, not mtime and not
-    the processing timestamp: a granule reprocessed later still images
-    the same day, and mtime reflects when it was downloaded.
+    Ordered by ``<acquisition>_<processing>`` concatenated, e.g.
+    ``20260716T191909_20260716T225545``. Acquisition dominates, and
+    within one acquisition the later-PROCESSED product wins -- these
+    directories really do carry two processings of the same overpass
+    (``20260728T190911`` appears with both ``...T223612`` and
+    ``...T233402``), and the later one supersedes the earlier.
+
+    Neither mtime nor processing time alone would order these
+    correctly: mtime reflects download order, and processing time alone
+    would rank a late reprocessing of an old scene above a fresh one.
+
+    Returns ``[(sort_key, acq_yyyymmdd, tile_token, path), ...]`` where
+    ``tile_token`` keeps its zone character (``T10UEA``).
     """
     d = os.path.join(mrap_dir, tile_dir_name(tile))
     if not os.path.isdir(d):
-        return None
-    best = None
-    for path in glob.glob(os.path.join(d, '*.zip')):
-        m = _ZIP_RE.match(os.path.basename(path))
+        return []
+    out = []
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return []
+    for name in names:
+        if not name.lower().endswith('.zip'):
+            continue
+        m = _ZIP_RE.match(name)
         if not m:
             continue
-        sens_date, sens_time, ztile, proc_date, proc_time = m.groups()
+        acq, ztile, proc = m.groups()
         if normalize_tile_id(ztile) != normalize_tile_id(tile):
             continue
-        key = (sens_date, sens_time, proc_date, proc_time)
-        if best is None or key > best[0]:
-            best = (key, sens_date, path)
-    if best is None:
+        out.append((f'{acq}_{proc}', acq[:8], ztile.upper(),
+                    os.path.join(d, name)))
+    out.sort(key=lambda r: r[0], reverse=True)
+    return out
+
+
+def most_recent_zip_for_tile(tile: str, mrap_dir: str = MRAP_DIR):
+    """Newest zip for *tile* as ``(acq_yyyymmdd, path)``, or None."""
+    z = zips_for_tile(tile, mrap_dir=mrap_dir)
+    if not z:
         return None
-    return best[1], best[2]
+    return z[0][1], z[0][3]
 
 
 # ----------------------------------------------------------------------
@@ -280,21 +311,115 @@ def extract_bands_to_mem(zip_path: str):
 # 4. mosaic into the AOI grid
 # ----------------------------------------------------------------------
 
+def _tile_footprint_mask(tile: str, win_gt, xsize: int, ysize: int,
+                         proj: str, tiles_shp: str = TILES_SHP):
+    """Boolean mask of the AOI window covered by *tile*'s footprint.
+
+    The fill target is measured against this rather than the whole AOI:
+    a tile clipping one corner of the AOI can never fill 95% of the AOI,
+    so a whole-AOI test would make it read every zip it owns and still
+    never stop early.
+
+    Falls back to all-True if the footprint cannot be rasterized, which
+    degrades to "measure against the whole window" -- conservative
+    (more reading) rather than wrong.
+    """
+    try:
+        ds = ogr.Open(tiles_shp)
+        if ds is None:
+            return np.ones((ysize, xsize), dtype=bool)
+        try:
+            layer = ds.GetLayer()
+            wanted = normalize_tile_id(tile)
+            match = None
+            for feat in layer:
+                nm = feat.GetField('Name') if \
+                    feat.GetFieldIndex('Name') >= 0 else None
+                if not nm and feat.GetFieldIndex('Row_Labels') >= 0:
+                    nm = feat.GetField('Row_Labels')
+                if nm and normalize_tile_id(nm) == wanted:
+                    match = feat.GetGeometryRef().Clone()
+                    break
+            if match is None:
+                return np.ones((ysize, xsize), dtype=bool)
+
+            src_srs = layer.GetSpatialRef()
+            dst_srs = osr.SpatialReference()
+            dst_srs.ImportFromWkt(proj)
+            try:
+                dst_srs.SetAxisMappingStrategy(
+                    osr.OAMS_TRADITIONAL_GIS_ORDER)
+                if src_srs is not None:
+                    src_srs.SetAxisMappingStrategy(
+                        osr.OAMS_TRADITIONAL_GIS_ORDER)
+            except AttributeError:
+                pass
+            if src_srs is not None and not src_srs.IsSame(dst_srs):
+                match.Transform(
+                    osr.CoordinateTransformation(src_srs, dst_srs))
+
+            mem_drv = ogr.GetDriverByName('Memory')
+            mds = mem_drv.CreateDataSource('mask')
+            mlayer = mds.CreateLayer('m', dst_srs, ogr.wkbPolygon)
+            f = ogr.Feature(mlayer.GetLayerDefn())
+            f.SetGeometry(match)
+            mlayer.CreateFeature(f)
+
+            rdrv = gdal.GetDriverByName('MEM')
+            rds = rdrv.Create('', xsize, ysize, 1, gdal.GDT_Byte)
+            rds.SetGeoTransform(win_gt)
+            rds.SetProjection(proj)
+            gdal.RasterizeLayer(rds, [1], mlayer, burn_values=[1])
+            arr = rds.GetRasterBand(1).ReadAsArray().astype(bool)
+            rds = None
+            mds = None
+            return arr
+        finally:
+            ds = None
+    except Exception:
+        return np.ones((ysize, xsize), dtype=bool)
+
+
 def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
                          progress_cb=None,
                          mrap_dir: str = MRAP_DIR,
-                         tiles_shp: str = TILES_SHP) -> dict:
+                         tiles_shp: str = TILES_SHP,
+                         log_cb=None,
+                         fill_target: float = FILL_TARGET) -> dict:
     """Build the 4-band most-recent-L2 composite over the AOI.
 
-    The output is written on the SAME grid the AOI stack uses (derived
-    from *ref_raster*'s geotransform and CRS), so the L2 post bands are
-    pixel-aligned with the pre bands and the anomaly can be computed
-    without any further resampling.
+    Output is on the SAME grid the AOI stack uses (from *ref_raster*),
+    so the L2 post bands are pixel-aligned with the pre bands and the
+    anomaly needs no further resampling.
+
+    Backfilling
+    -----------
+    A single overpass often leaves large nodata gaps over an AOI (swath
+    edges, and the L2A fill value). For each tile, older acquisitions
+    are pulled in -- newest first -- writing ONLY into pixels still
+    empty, until *fill_target* of that tile's AOI footprint carries
+    data or the tile's zips are exhausted. Because gaps are only ever
+    filled, never overwritten, the most recent observation always wins
+    wherever it exists; older scenes just patch the holes.
+
+    The threshold is evaluated per tile against that tile's own AOI
+    footprint, not against the whole AOI: a tile covering a sliver of
+    the AOI could never reach a whole-AOI threshold, and would then
+    read every zip it has for nothing.
     """
     def _p(detail, frac):
         if progress_cb:
             try:
                 progress_cb(detail, frac)
+            except Exception:
+                pass
+
+    def _log(msg):
+        sys.stderr.write(f'[l2_recent] {msg}\n')
+        sys.stderr.flush()
+        if log_cb:
+            try:
+                log_cb(msg)
             except Exception:
                 pass
 
@@ -312,23 +437,28 @@ def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
     xmin, ymin, xmax, ymax = (float(v) for v in bbox_native)
     xoff, yoff, xsize, ysize, win_gt = _window_for_bbox(
         gt, rW, rH, xmin, ymin, xmax, ymax)
+    total_px = xsize * ysize
 
-    _p('finding intersecting Sentinel-2 tiles', 0.05)
+    _p('finding intersecting Sentinel-2 tiles', 0.02)
     tiles = tiles_intersecting_bbox(bbox_native, proj, tiles_shp=tiles_shp)
     if not tiles:
         raise L2RecentError('no Sentinel-2 tiles intersect this AOI')
+    _log(f'AOI is {xsize}x{ysize} px ({total_px:,} px at 20 m); '
+         f'{len(tiles)} intersecting tile(s): {", ".join(tiles)}')
 
-    chosen = []
+    per_tile = []
     for t in tiles:
-        got = most_recent_zip_for_tile(t, mrap_dir=mrap_dir)
-        if got:
-            chosen.append((t, got[0], got[1]))
-    if not chosen:
+        z = zips_for_tile(t, mrap_dir=mrap_dir)
+        if z:
+            per_tile.append((t, z))
+            _log(f'  {z[0][2]}: {len(z)} zip(s) available, '
+                 f'newest {os.path.basename(z[0][3])}')
+        else:
+            _log(f'  {t}: no zips found in '
+                 f'{os.path.join(mrap_dir, tile_dir_name(t))}')
+    if not per_tile:
         raise L2RecentError(
             f'no L2A zips found for tile(s) {", ".join(tiles)}')
-
-    _p(f'{len(chosen)} tile(s): '
-       + ', '.join(f'{t}@{d}' for t, d, _ in chosen), 0.1)
 
     mem = gdal.GetDriverByName('MEM')
     acc = mem.Create('', xsize, ysize, len(BANDS), gdal.GDT_Float32)
@@ -337,45 +467,95 @@ def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
     for i in range(1, len(BANDS) + 1):
         acc.GetRasterBand(i).WriteArray(
             np.full((ysize, xsize), np.nan, dtype=np.float32))
+    # Band 1 drives the filled-mask; all four bands share nodata.
+    filled = np.zeros((ysize, xsize), dtype=bool)
 
     used = []
-    for n, (tile, sens_date, zpath) in enumerate(chosen, 1):
-        _p(f'extracting {tile} ({sens_date})',
-           0.1 + 0.75 * (n - 1) / len(chosen))
-        try:
-            src = extract_bands_to_mem(zpath)
-        except L2RecentError as exc:
-            sys.stderr.write(f'[l2_recent] skipping {tile}: {exc}\n')
+    n_tiles = len(per_tile)
+    tile_secs = []          # per-tile wall time, for the ETA
+    for ti, (tile, zlist) in enumerate(per_tile, 1):
+        t_start = time.time()
+        token = zlist[0][2]          # e.g. 'T10UEA', zone char included
+
+        # This tile's own footprint within the AOI, so the fill target
+        # is measured against what this tile could possibly cover.
+        tile_mask = _tile_footprint_mask(
+            tile, win_gt, xsize, ysize, proj, tiles_shp)
+        tile_px = int(tile_mask.sum())
+        if tile_px == 0:
+            _log(f'  {token}: footprint does not overlap the AOI window; '
+                 f'skipping')
             continue
-        try:
-            warped = mem.Create('', xsize, ysize, len(BANDS),
-                                gdal.GDT_Float32)
-            warped.SetGeoTransform(win_gt)
-            warped.SetProjection(proj)
-            for i in range(1, len(BANDS) + 1):
-                warped.GetRasterBand(i).WriteArray(
-                    np.full((ysize, xsize), np.nan, dtype=np.float32))
-            # Each tile is in its own UTM zone; reprojecting into the
-            # AOI's CRS here is what lets tiles from different zones
-            # mosaic together correctly.
-            gdal.Warp(warped, src, resampleAlg='near',
-                      srcNodata=np.nan, dstNodata=np.nan)
-            for i in range(1, len(BANDS) + 1):
-                dst = acc.GetRasterBand(i).ReadAsArray()
-                new = warped.GetRasterBand(i).ReadAsArray()
-                # First tile to cover a pixel wins. Tiles are processed
-                # in sorted order so the result is deterministic rather
-                # than depending on filesystem listing order.
-                fill = np.isnan(dst) & ~np.isnan(new)
-                dst[fill] = new[fill]
-                acc.GetRasterBand(i).WriteArray(dst)
-            used.append((tile, sens_date))
-        finally:
-            src = None
-            warped = None
+
+        eta = ''
+        if tile_secs:
+            mean = sum(tile_secs) / len(tile_secs)
+            remaining = mean * (n_tiles - ti + 1)
+            eta = f' (ETA {remaining:.0f}s remaining this date)'
+        _p(f'extracting {token} ({zlist[0][1]}) '
+           f'{ti}/{n_tiles} tiles{eta}',
+           0.05 + 0.85 * (ti - 1) / n_tiles)
+        _log(f'  {token}: AOI footprint {tile_px:,} px; '
+             f'target {fill_target:.0%} filled')
+
+        for zi, (_key, acq, _tok, zpath) in enumerate(zlist, 1):
+            before = int((filled & tile_mask).sum())
+            frac_before = before / tile_px
+            if frac_before >= fill_target:
+                break
+            _log(f'    [{zi}/{len(zlist)}] {os.path.basename(zpath)} '
+                 f'(acq {acq}) -- footprint {frac_before:.1%} filled, '
+                 f'extracting ...')
+            try:
+                src = extract_bands_to_mem(zpath)
+            except L2RecentError as exc:
+                _log(f'      skipped: {exc}')
+                continue
+            try:
+                warped = mem.Create('', xsize, ysize, len(BANDS),
+                                    gdal.GDT_Float32)
+                warped.SetGeoTransform(win_gt)
+                warped.SetProjection(proj)
+                for i in range(1, len(BANDS) + 1):
+                    warped.GetRasterBand(i).WriteArray(
+                        np.full((ysize, xsize), np.nan, dtype=np.float32))
+                # Each tile sits in its own UTM zone; reprojecting into
+                # the AOI CRS here is what lets tiles from different
+                # zones mosaic together.
+                gdal.Warp(warped, src, resampleAlg='near',
+                          srcNodata=np.nan, dstNodata=np.nan)
+                new0 = warped.GetRasterBand(1).ReadAsArray()
+                # Fill ONLY where nothing has been written yet, so a
+                # newer acquisition is never overwritten by an older one.
+                gap = (~filled) & ~np.isnan(new0)
+                n_new = int(gap.sum())
+                if n_new:
+                    for i in range(1, len(BANDS) + 1):
+                        dst = acc.GetRasterBand(i).ReadAsArray()
+                        nb = warped.GetRasterBand(i).ReadAsArray()
+                        dst[gap] = nb[gap]
+                        acc.GetRasterBand(i).WriteArray(dst)
+                    filled |= gap
+                    used.append((token, acq))
+                after = int((filled & tile_mask).sum())
+                _log(f'      +{n_new:,} px; footprint now '
+                     f'{after / tile_px:.1%} filled')
+            finally:
+                src = None
+                warped = None
+
+        final = int((filled & tile_mask).sum()) / tile_px
+        secs = time.time() - t_start
+        tile_secs.append(secs)
+        _log(f'  {token}: done -- {final:.1%} of its AOI footprint '
+             f'filled in {secs:.0f}s')
 
     if not used:
         raise L2RecentError('every intersecting tile failed to extract')
+
+    aoi_frac = float(filled.sum()) / max(1, total_px)
+    _log(f'AOI coverage: {int(filled.sum()):,}/{total_px:,} px '
+         f'({aoi_frac:.1%}) filled with non-nodata.')
 
     _p('writing L2-recent composite', 0.9)
     os.makedirs(os.path.dirname(out_bin) or '.', exist_ok=True)
@@ -407,9 +587,12 @@ def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
         'width': xsize,
         'height': ysize,
         'bands': len(BANDS),
-        'tiles': [t for t, _ in used],
+        'tiles': sorted({t for t, _ in used}),
         'tile_dates': dict(used),
         'post_date': newest,
+        'filled_fraction': aoi_frac,
+        'filled_px': int(filled.sum()),
+        'total_px': total_px,
         'geotransform': win_gt,
         'projection': proj,
     }
