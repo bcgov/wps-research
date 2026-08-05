@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""20260805: apply.py: help automate application of changes.
+"""20260805: apply.py: help automate application of changes
 apply.py — drop a changes .zip into the repo and report what it touched.
 
 Usage, from the wps-research repo root:
 
     python3 apply.py ~/Downloads/changes.zip
 
-It moves the archive into the current directory, extracts it with
-``unzip -o``, collects the extracted paths from unzip's own output, and
-prints (but does NOT run):
+It refuses to run unless the current directory is named
+``wps-research``, moves the archive here, extracts it with ``unzip -o``,
+collects the extracted paths from unzip's own output, then prints and
+runs:
 
     save <path> <path> ...
 
@@ -37,6 +38,15 @@ def main():
         print(f'usage: {os.path.basename(sys.argv[0])} <changes.zip>',
               file=sys.stderr)
         return 2
+
+    # Guard against running from the wrong directory: the archive's
+    # paths are relative to the repo root, so extracting elsewhere would
+    # scatter files into an unrelated tree.
+    cwd_name = os.path.basename(os.getcwd().rstrip(os.sep))
+    if cwd_name != 'wps-research':
+        print(f'ERROR: must be run from the wps-research repo root '
+              f'(current directory is {cwd_name!r})', file=sys.stderr)
+        return 1
 
     src = os.path.expanduser(sys.argv[1])
     if not os.path.isfile(src):
@@ -83,7 +93,11 @@ def main():
               file=sys.stderr)
         return 1
 
-    print(' '.join(['save'] + source_files))
+    cmd = ' '.join(['save'] + source_files)
+    print(cmd)
+    a = os.system(cmd)
+    if a != 0:
+        print(f'WARNING: save exited with status {a}', file=sys.stderr)
     return 0
 
 
