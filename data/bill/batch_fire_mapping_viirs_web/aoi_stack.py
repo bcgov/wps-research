@@ -281,7 +281,7 @@ def build_aoi_stack(out_bin: str, xmin: float, ymin: float,
                     divide_mode: bool = False,
                     progress_cb=None,
                     post_override: str = None,
-                    post_label: str = 'pst') -> dict:
+                    post_tag: str = '') -> dict:
     """Generate the 12-band AOI stack at *out_bin*.
 
     Band order matches the province-wide stack exactly:
@@ -457,7 +457,13 @@ def build_aoi_stack(out_bin: str, xmin: float, ymin: float,
     band_names = (
         [f'pre {pre_date} 20m: {s}' if pre_date else f'pre 20m: {s}'
          for s in suffixes]
-        + [f'{post_label} {post_date} 20m: {s}' for s in suffixes]
+        # The 'pst' prefix is load-bearing: preview.detect_band_groups
+        # identifies the post group by it, and the mapping CLI's RGB
+        # scan depends on that grouping. Provenance therefore goes in
+        # the trailing tag, never the prefix -- labelling these 'l2r'
+        # made detect_band_groups return zero post bands, which broke
+        # red-wins ("need 3, found 0"), the previews and the CLI.
+        + [f'pst {post_date} 20m: {s}{post_tag}' for s in suffixes]
         + [f'anomaly: {s} {formula}' for s in suffixes]
     )
 
@@ -706,7 +712,7 @@ def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
         sys.stderr.flush()
 
         override = None
-        post_label = 'pst'
+        post_tag = ''
         if post_source == 'l2':
             # Build the most-recent-L2 mosaic first; it becomes the
             # post imagery for this stack. Its grid comes from the same
@@ -723,14 +729,14 @@ def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
             except L2RecentError as exc:
                 raise AoiStackError(f'L2-recent composite failed: {exc}')
             override = l2_tmp
-            post_label = 'l2r'
+            post_tag = ' L2'
             post_date = l2_info.get('post_date') or post_date
 
         info = build_aoi_stack(out_bin, xmin, ymin, xmax, ymax,
                                post_bin=post_bin, post_date=post_date,
                                progress_cb=progress_cb,
                                post_override=override,
-                               post_label=post_label)
+                               post_tag=post_tag)
         if post_source == 'l2':
             info['tiles'] = l2_info.get('tiles', [])
             info['tile_dates'] = l2_info.get('tile_dates', {})

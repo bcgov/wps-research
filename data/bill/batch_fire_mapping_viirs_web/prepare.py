@@ -234,16 +234,28 @@ def switch_post_source(fire: FireInfo, source: str) -> dict:
     # The red-wins hints are computed FROM the stack bands, so a hint
     # built against the old source is stale. Rebuild whichever mode is
     # active against the new bands.
+    #
+    # If the fire has no usable hint at all (e.g. no VIIRS on disk, or
+    # a previous build failed), fall back to red-wins here rather than
+    # leaving hint_bin empty -- an empty hint is what makes the fire
+    # unmappable and leaves the UI parked on "preparing".
     mode = getattr(fire, 'hint_mode', 'viirs') or 'viirs'
+    if mode == 'viirs' and not (
+            fire.viirs_bin and os.path.isfile(fire.viirs_bin)):
+        mode = 'redwins_post'
     if mode in ('redwins_post', 'redwins_diff'):
         rw_path, rw_err = build_redwins_hint_for_fire(fire, mode)
         if rw_path:
             fire.hint_bin = rw_path
             fire.perimeter_type = mode
+            fire.hint_mode = mode
         else:
             sys.stderr.write(
                 f'[prepare] red-wins rebuild after source switch '
                 f'failed: {rw_err}\n')
+    elif fire.viirs_bin and os.path.isfile(fire.viirs_bin):
+        fire.hint_bin = fire.viirs_bin
+        fire.perimeter_type = 'viirs'
 
     if fire.hint_bin and os.path.isfile(fire.hint_bin):
         try:
@@ -254,6 +266,14 @@ def switch_post_source(fire: FireInfo, source: str) -> dict:
         except Exception:
             pass
 
+    # Return the fire to READY. The switch rebuilds the same artifacts
+    # preparation produces, so a fire that was mid-prepare (or errored
+    # on the previous source) is usable again -- without this the badge
+    # stays on "preparing"/"error" even though everything succeeded.
+    fire.status = FireStatus.READY
+    fire.error_msg = ''
+    fire.progress = {}
+
     if _save_fire_state is not None:
         try:
             _save_fire_state()
@@ -261,6 +281,9 @@ def switch_post_source(fire: FireInfo, source: str) -> dict:
             pass
 
     return {'ok': True, 'post_source': source,
+            'status': fire.status.value if hasattr(fire.status, 'value')
+                      else str(fire.status),
+            'hint_mode': fire.hint_mode,
             'tiles': info.get('tiles', []),
             'tile_dates': info.get('tile_dates', {}),
             'post_date': info.get('post_date', '')}

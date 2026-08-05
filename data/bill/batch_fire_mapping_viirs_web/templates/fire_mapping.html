@@ -390,6 +390,14 @@ async function onPostSourceChange() {
             return;
         }
         currentPostSource = src;
+        // The server rebuilds the hint (and may switch its mode) as
+        // part of the swap, and returns the fire to READY -- mirror
+        // both here so the badge and hint buttons don't lag behind.
+        if (data.hint_mode) {
+            currentHintMode = data.hint_mode;
+            renderHintModeButtons();
+        }
+        if (data.status) updateStatusDisplay(data.status);
         if (data.tiles && data.tiles.length) {
             const parts = Object.entries(data.tile_dates || {})
                 .map(([t, d]) => `${t}@${d}`).join(', ');
