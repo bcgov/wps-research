@@ -714,7 +714,7 @@ function drawTileGridOverlay(ctx) {
     if (tileToggle && !tileToggle.checked) return;
     const rings = tileGridOverlay.tiles || [];
     if (!rings.length) return;
-    ctx.strokeStyle = 'rgba(40, 90, 255, 0.9)';
+    ctx.strokeStyle = 'rgba(0, 200, 60, 0.9)';   // grid: green
     ctx.lineWidth = 1;
     ctx.font = '10px sans-serif';
     ctx.textBaseline = 'top';
@@ -735,7 +735,12 @@ function drawTileGridOverlay(ctx) {
         if (t.name && ring.length) {
             const cp = nativeToCanvas(ring[0][0], ring[0][1]);
             if (cp) {
-                ctx.fillStyle = 'rgba(40, 90, 255, 0.9)';
+                // Magenta label on a dark pill: legible against both
+                // the green grid line and the false-colour imagery.
+                const tw = ctx.measureText(t.name).width;
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+                ctx.fillRect(cp[0] + 2, cp[1] + 2, tw + 2, 12);
+                ctx.fillStyle = 'rgba(255, 0, 220, 1)';
                 ctx.fillText(t.name, cp[0] + 3, cp[1] + 3);
             }
         }

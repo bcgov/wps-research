@@ -805,6 +805,20 @@ def _viirs_worker(fire: FireInfo) -> None:
             fire.progress = {}
             fire.error_msg = ''
 
+        # Snapshot the previews for the source this fire was built
+        # with, then build the other one in the background so the first
+        # toggle in the UI is instant rather than a full rebuild.
+        try:
+            from .prepare import _stash_previews, prebuild_other_source
+            _stash_previews(fire, getattr(fire, 'post_source', 'l2'))
+            threading.Thread(
+                target=prebuild_other_source, args=(fire,),
+                daemon=True).start()
+        except Exception as exc:
+            sys.stderr.write(
+                f'[viirs_worker] preview stash/prebuild skipped: '
+                f'{exc}\n')
+
         if _save_fire_state is not None:
             _save_fire_state()
         if _push_notification is not None:

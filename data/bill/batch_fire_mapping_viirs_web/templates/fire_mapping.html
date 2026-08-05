@@ -774,7 +774,7 @@ function drawFireOverlay(pane) {
 
     // --- 1. Sentinel-2 tile grid (blue, bottom) ---
     const tiles = _fireOverlays.tiles || [];
-    ctx.strokeStyle = 'rgba(40, 90, 255, 0.95)';
+    ctx.strokeStyle = 'rgba(0, 200, 60, 0.95)';   // grid: green
     ctx.lineWidth = lw(2);
     ctx.font = `${Math.max(9, 13 / sc)}px sans-serif`;
     ctx.textBaseline = 'top';
@@ -793,7 +793,13 @@ function drawFireOverlay(pane) {
             const xs = ring.map(p => p[0]), ys = ring.map(p => p[1]);
             const lx = Math.max(2, Math.min(...xs) + 4);
             const ly = Math.max(2, Math.min(...ys) + 4);
-            ctx.fillStyle = 'rgba(40, 90, 255, 0.95)';
+            // Label in magenta so it stays legible against the green
+            // grid line it sits beside, and against vegetation.
+            const tw = ctx.measureText(t.name).width;
+            const th = Math.max(9, 13 / sc);
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+            ctx.fillRect(lx - 1, ly - 1, tw + 2, th + 2);
+            ctx.fillStyle = 'rgba(255, 0, 220, 1)';
             ctx.fillText(t.name, lx, ly);
         }
     }
@@ -1055,7 +1061,13 @@ function loadPaneImage(pane, viewKey) {
     } else if (viewKey === 'brush_comparison') {
         url = `/api/fire/${encodeURIComponent(FIRE)}/brush_comparison?t=${Date.now()}`;
     } else {
-        url = `/api/fire/${encodeURIComponent(FIRE)}/preview/${viewKey}?t=${previewStamp()}`;
+        // The source MUST be in the URL. Without it both sources share
+        // one URL, so after a switch the browser replays the previous
+        // source's cached response -- which is why MRAP showed nothing
+        // (it re-served the L2 bytes) and why that wrong image then got
+        // stored under the MRAP cache key.
+        url = `/api/fire/${encodeURIComponent(FIRE)}/preview/${viewKey}`
+            + `?src=${currentPostSource}&t=${previewStamp()}`;
     }
     let retried = false;
     // Serve from the blob cache when we already hold these exact bytes.

@@ -168,6 +168,107 @@ def build_redwins_hint_for_fire(fire: FireInfo, mode: str):
     return out_path, None
 
 
+# switch_post_source() swaps the contents of <cache>/previews, and the
+# background prebuild calls it too. Without a lock a user switch and the
+# prebuild can interleave and leave previews/ holding a mix of both
+# sources' images. One lock per fire keeps each fire's swap atomic while
+# letting different fires proceed in parallel.
+_SOURCE_SWITCH_LOCKS = {}
+_SOURCE_SWITCH_LOCKS_GUARD = threading.Lock()
+
+
+def _source_switch_lock(fire_numbe: str) -> threading.Lock:
+    with _SOURCE_SWITCH_LOCKS_GUARD:
+        lk = _SOURCE_SWITCH_LOCKS.get(fire_numbe)
+        if lk is None:
+            lk = threading.Lock()
+            _SOURCE_SWITCH_LOCKS[fire_numbe] = lk
+        return lk
+
+
+def _preview_stash_dir(fire: FireInfo, source: str) -> str:
+    """Per-source copy of the rendered previews.
+
+    generate_all_previews() always writes to ``<cache>/previews``, so
+    the two post sources overwrite each other there. Without a stash,
+    every switch has to re-render every preview even though the stack
+    it renders from is already cached -- which is what made switching
+    slow. Keeping a copy per source turns a switch into a handful of
+    file copies.
+    """
+    return os.path.join(fire.cache_dir, f'previews_{source}')
+
+
+def _stash_previews(fire: FireInfo, source: str) -> None:
+    src = os.path.join(fire.cache_dir, 'previews')
+    if not os.path.isdir(src):
+        return
+    dst = _preview_stash_dir(fire, source)
+    try:
+        if os.path.isdir(dst):
+            shutil.rmtree(dst, ignore_errors=True)
+        shutil.copytree(src, dst)
+    except OSError as exc:
+        sys.stderr.write(f'[prepare] preview stash failed: {exc}\n')
+
+
+def _restore_previews(fire: FireInfo, source: str) -> bool:
+    """Put *source*'s stashed previews back in place. True if restored.
+
+    Refuses a stash older than the stack it came from: a re-prepare can
+    resize the crop, which makes every stashed PNG the wrong dimensions
+    and would misregister the vector overlays drawn on top of them.
+    """
+    src = _preview_stash_dir(fire, source)
+    if not os.path.isdir(src):
+        return False
+    try:
+        if fire.crop_bin and os.path.isfile(fire.crop_bin):
+            if os.path.getmtime(src) < os.path.getmtime(fire.crop_bin):
+                return False
+        dst = os.path.join(fire.cache_dir, 'previews')
+        if os.path.isdir(dst):
+            shutil.rmtree(dst, ignore_errors=True)
+        shutil.copytree(src, dst)
+        return True
+    except OSError as exc:
+        sys.stderr.write(f'[prepare] preview restore failed: {exc}\n')
+        return False
+
+
+def prebuild_other_source(fire: FireInfo) -> None:
+    """Build the post source the user is NOT currently viewing.
+
+    Run in the background right after a fire becomes READY so the first
+    toggle is instant instead of paying for a full stack build and
+    preview render. Purely opportunistic: any failure is logged and
+    dropped, because the on-demand path in switch_post_source() still
+    works.
+    """
+    other = 'mrap' if getattr(fire, 'post_source', 'l2') == 'l2' else 'l2'
+    if os.path.isdir(_preview_stash_dir(fire, other)):
+        return
+    current = getattr(fire, 'post_source', 'l2')
+    try:
+        fire.console_log.append(
+            f'  Pre-building the {other.upper()} stack in the '
+            f'background so switching is instant ...')
+        res = switch_post_source(fire, other)
+        if res.get('ok'):
+            # Switch back so the user keeps the source they were on;
+            # the stash built above makes this second switch cheap.
+            switch_post_source(fire, current)
+            fire.console_log.append(
+                f'  {other.upper()} stack ready -- switching is now '
+                f'instant.')
+        else:
+            fire.console_log.append(
+                f'  Pre-build of {other.upper()} failed: '
+                f'{res.get("error", "unknown")}')
+    except Exception as exc:
+        sys.stderr.write(f'[prepare] prebuild failed: {exc}\n')
+
+
 def switch_post_source(fire: FireInfo, source: str) -> dict:
     """Switch a fire between the L2-recent and MRAP post imagery.
 
@@ -185,6 +286,11 @@ def switch_post_source(fire: FireInfo, source: str) -> dict:
     if not getattr(fire, 'bbox_native', None):
         return {'ok': False, 'error': 'Fire has no bbox on record.'}
 
+    with _source_switch_lock(fire.fire_numbe):
+        return _switch_post_source_locked(fire, source)
+
+
+def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
     from .aoi_stack import ensure_aoi_stack, AoiStackError
 
     ref_raster = (state.rasters_by_year.get(fire.fire_year)
@@ -220,17 +326,27 @@ def switch_post_source(fire: FireInfo, source: str) -> dict:
     fire.crop_w = info.get('width', fire.crop_w)
     fire.crop_h = info.get('height', fire.crop_h)
 
-    # Previews are derived from the stack, so they must be regenerated
-    # for the new post bands -- otherwise 'Post-fire' and 'Diff 1'
-    # would still show the previous source's imagery.
-    try:
-        views = generate_all_previews(
-            fire.crop_bin, fire.cache_dir, fire.fire_numbe)
-        fire.available_views = views
-    except Exception as exc:
-        sys.stderr.write(
-            f'[prepare] preview regeneration failed after post-source '
-            f'switch: {exc}\n')
+    # Previews are derived from the stack, so they must match the new
+    # post bands. Restore this source's stash when one exists (cheap
+    # copies) and only re-render when it does not.
+    restored = _restore_previews(fire, source)
+    if restored:
+        try:
+            fire.available_views = [
+                os.path.splitext(f)[0] for f in sorted(os.listdir(
+                    os.path.join(fire.cache_dir, 'previews')))
+                if f.endswith('.png')]
+        except OSError:
+            pass
+    else:
+        try:
+            views = generate_all_previews(
+                fire.crop_bin, fire.cache_dir, fire.fire_numbe)
+            fire.available_views = views
+        except Exception as exc:
+            sys.stderr.write(
+                f'[prepare] preview regeneration failed after '
+                f'post-source switch: {exc}\n')
 
     # The red-wins hints are computed FROM the stack bands, so a hint
     # built against the old source is stale. Rebuild whichever mode is
@@ -266,6 +382,11 @@ def switch_post_source(fire: FireInfo, source: str) -> dict:
                 fire.available_views.append('hint')
         except Exception:
             pass
+
+    if not restored:
+        # Snapshot now that previews/ holds this source's images AND
+        # its hint overlay, so a later switch back restores both.
+        _stash_previews(fire, source)
 
     # Return the fire to READY. The switch rebuilds the same artifacts
     # preparation produces, so a fire that was mid-prepare (or errored
