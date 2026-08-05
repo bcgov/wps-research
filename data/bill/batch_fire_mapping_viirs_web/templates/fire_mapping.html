@@ -408,15 +408,14 @@ async function cachePreview(key, url) {
 // a later toggle never touches the network. Runs after a switch, when
 // the server has just rebuilt that source's previews.
 function warmSourceCache(src) {
-    const views = ['post', 'diff1', 'pre', 'hint'];
-    for (const v of views) {
-        const modePart = (v === 'hint') ? `:${currentHintMode}` : '';
-        const key = `${src}:${v}${modePart}:${_previewStamp}`;
+    // Hint is handled by warmHintCache (it varies by mode as well as
+    // by source); here only the plain stack-derived views.
+    for (const v of ['post', 'diff1', 'pre']) {
+        const key = `${src}:${v}:${_previewStamp}`;
         if (_previewBlobs.has(key)) continue;
-        const hintQ = (v === 'hint') ? `&hint=${currentHintMode}` : '';
         cachePreview(key,
             `/api/fire/${encodeURIComponent(FIRE)}/preview/${v}`
-            + `?src=${src}${hintQ}&t=${_previewStamp}`);
+            + `?src=${src}&t=${_previewStamp}`);
     }
 }
 
@@ -488,12 +487,17 @@ async function onPostSourceChange() {
         if (splitActive && rightView) loadPaneImage('right', rightView);
     }
 
-    sel.disabled = true;
+    // Only lock the control when the user is actually waiting on the
+    // server. After an instant swap the view is already correct, so
+    // greying out the menu just looks like something is stuck.
+    sel.disabled = !canSwapInstantly;
+    // Don't claim a rebuild: the server keeps a per-source stack and
+    // preview stash, so a switch is normally a restore, not a rebuild.
+    // Saying "rebuilding" when nothing is being rebuilt is misleading.
+    const srcLabel = src === 'l2' ? 'L2 recent' : 'MRAP composite';
     log(canSwapInstantly
-        ? `Showing ${src === 'l2' ? 'L2 recent' : 'MRAP composite'} `
-          + `(cached); syncing server ...`
-        : `Rebuilding stack from ${src === 'l2'
-            ? 'most recent L2 tiles' : 'MRAP composite'}...`);
+        ? `Showing ${srcLabel} (cached).`
+        : `Loading ${srcLabel} ...`);
     try {
         const r = await fetch(
             `/api/fire/${encodeURIComponent(FIRE)}/post_source`, {
@@ -531,8 +535,15 @@ async function onPostSourceChange() {
         }
         if (data.status) updateStatusDisplay(data.status);
         loadFireOverlays();
-        warmSourceCache(currentPostSource);
-        warmHintCache(currentPostSource);
+        // Warm BOTH sources, not just the current one. The server has
+        // already built and stashed both (see the prebuild in the
+        // worker), so the other source's previews are sitting on disk
+        // ready to serve -- fetching them now is what makes the first
+        // toggle instant instead of showing "rebuilding".
+        for (const src of ['l2', 'mrap']) {
+            warmSourceCache(src);
+            warmHintCache(src);
+        }
         if (data.tiles && data.tiles.length) {
             const parts = Object.entries(data.tile_dates || {})
                 .map(([t, d]) => `${t}@${d}`).join(', ');
@@ -557,6 +568,9 @@ async function onPostSourceChange() {
         sel.value = currentPostSource;
     } finally {
         sel.disabled = false;
+        // Overlays are tied to the crop, which the switch may have
+        // repointed at the other source's stack.
+        loadFireOverlays();
     }
 }
 
@@ -743,6 +757,18 @@ async function prepareFire(padding) {
         loadFireOverlays();
         const psSel = document.getElementById('post-source-select');
         if (psSel) { psSel.value = currentPostSource; psSel.disabled = false; }
+
+        // Warm BOTH sources and every hint mode now, so the first
+        // toggle of either menu is served from memory. The server has
+        // already stashed both sources (worker prebuild), so these are
+        // plain file reads. Deferred a beat so the first visible image
+        // is not competing with the warm fetches for bandwidth.
+        setTimeout(() => {
+            for (const src of ['l2', 'mrap']) {
+                warmSourceCache(src);
+                warmHintCache(src);
+            }
+        }, 250);
 
         updateSampleSize();
         loadPaneImage('left', leftView);

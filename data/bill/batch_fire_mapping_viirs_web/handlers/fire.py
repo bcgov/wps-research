@@ -288,6 +288,25 @@ class FireRoutes:
         fire = state.fires[fire_numbe]
         png = os.path.join(fire.cache_dir, 'previews', f'{view}.png')
 
+        # Honour ?src=<post source>. previews/ only ever holds the
+        # CURRENTLY selected source, but each source's images are also
+        # stashed in previews_<src>/. Without this the parameter would
+        # be a mere cache-buster and a request for the other source
+        # would be answered with the current source's image -- which
+        # the client would then cache under the wrong key, showing the
+        # wrong imagery after a switch.
+        from urllib.parse import urlparse, parse_qs
+        _q = parse_qs(urlparse(self.path).query)
+        _src = (_q.get('src') or [''])[0]
+        _stash_dir = None
+        if re.fullmatch(r'[A-Za-z0-9_-]+', _src or ''):
+            cand = os.path.join(fire.cache_dir, f'previews_{_src}')
+            if os.path.isdir(cand):
+                _stash_dir = cand
+                cand_png = os.path.join(cand, f'{view}.png')
+                if os.path.isfile(cand_png):
+                    png = cand_png
+
         # The hint overlay depends on BOTH the post source and the hint
         # mode, so it is stored per mode as hint_<mode>.png. Previously
         # the ?hint= parameter was only a cache-buster and this handler
@@ -295,22 +314,35 @@ class FireRoutes:
         # to have been rendered last -- which is why the two red-wins
         # masks kept looking identical.
         if view == 'hint':
-            from urllib.parse import urlparse, parse_qs
-            q = parse_qs(urlparse(self.path).query)
-            mode = (q.get('hint') or [''])[0]
+            mode = (_q.get('hint') or [''])[0]
             if re.fullmatch(r'[A-Za-z0-9_-]+', mode or ''):
-                per_mode = os.path.join(
-                    fire.cache_dir, 'previews', f'hint_{mode}.png')
-                if os.path.isfile(per_mode):
+                # Prefer the requested source's stash; fall back to the
+                # live previews dir for the current source.
+                per_mode = None
+                if _stash_dir:
+                    c = os.path.join(_stash_dir, f'hint_{mode}.png')
+                    if os.path.isfile(c):
+                        per_mode = c
+                if per_mode is None:
+                    c = os.path.join(fire.cache_dir, 'previews',
+                                     f'hint_{mode}.png')
+                    if os.path.isfile(c):
+                        per_mode = c
+                if per_mode:
                     png = per_mode
-                else:
+                elif not _src or _src == getattr(
+                        fire, 'post_source', 'l2'):
                     # Not rendered yet: build it now so the client gets
                     # the mode it actually asked for rather than a
                     # silently wrong image.
                     try:
                         from ..prepare import render_hint_for_mode
                         if render_hint_for_mode(fire, mode):
-                            png = per_mode
+                            # render_hint_for_mode writes into the live
+                            # previews dir for the current source.
+                            png = os.path.join(
+                                fire.cache_dir, 'previews',
+                                f'hint_{mode}.png')
                     except Exception as exc:
                         sys.stderr.write(
                             f'[fire] hint render for {mode} failed: '

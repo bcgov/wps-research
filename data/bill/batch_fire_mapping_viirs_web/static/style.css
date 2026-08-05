@@ -475,6 +475,24 @@ tbody tr.row-mapping:hover { background: #ede1ff; }
     -webkit-user-drag: none;
 }
 
+/* Vector overlays for the fire view (S2 tile grid, BCWS features).
+   Positioned and sized from JS against the image's measured rect, so
+   no transform or transform-origin here on purpose.
+
+   The <img> above carries a CSS transform, which makes it create a
+   stacking context painted at z-index 0. With the canvas left at
+   z-index:auto the two ended up in the same paint group and the
+   overlay rendered UNDER the imagery. The explicit z-index settles it:
+   imagery at the bottom, vectors on top. */
+.fire-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+    display: none;
+    z-index: 10;
+}
+
 .image-area .loading {
     color: #aaa;
     font-size: 14px;
