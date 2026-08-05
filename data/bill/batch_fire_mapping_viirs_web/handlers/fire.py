@@ -263,6 +263,19 @@ class FireRoutes:
             return
         self._send_json(result)
 
+    def handle_api_fire_overlays(self, fire_numbe):
+        """Vector overlays (S2 tile grid + BCWS) in crop pixel coords."""
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        try:
+            from ..fire_overlays import build_fire_overlays
+            self._send_json(build_fire_overlays(state, fire))
+        except Exception as exc:
+            self._send_json({'error': str(exc)}, 500)
+
     def handle_api_preview(self, fire_numbe, view):
         fire_numbe = unquote(fire_numbe)
         if fire_numbe not in state.fires:

@@ -126,6 +126,10 @@ class BaseHandler:
         (re.compile(r'^/api/year/(?P<y>\d+)/overview_meta$'),
          'handle_api_year_overview_meta'),
         (re.compile(r'^/api/bcws/overlay$'), 'handle_api_bcws_overlay'),
+        (re.compile(r'^/api/tiles/overlay$'), 'handle_api_tiles_overlay'),
+        (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/overlays$'),
+         'handle_api_fire_overlays'),
         (re.compile(r'^/api/viirs/overlay$'), 'handle_api_viirs_overlay'),
         (re.compile(
             r'^/api/fire/preview_hint/(?P<preview_id>[A-Za-z0-9_-]+)/'

@@ -381,6 +381,73 @@ class FireListRoutes:
         self.end_headers()
         self.wfile.write(body)
 
+    def handle_api_tiles_overlay(self):
+        """Sentinel-2 tile grid for the province view, in native CRS.
+
+        Cached in-process after the first build: the grid is 159 fixed
+        rectangles that never change, so rebuilding it per request would
+        be pure waste.
+        """
+        cached = getattr(state, '_tiles_overlay_cache', None)
+        if cached is not None:
+            self._send_json(cached)
+            return
+        try:
+            from osgeo import ogr, osr
+            from ..l2_recent import TILES_SHP, normalize_tile_id
+            raster = state.rasters_by_year.get(state.active_year) \
+                or state.raster_path
+            from osgeo import gdal
+            ds_r = gdal.Open(raster, gdal.GA_ReadOnly)
+            proj = ds_r.GetProjection() if ds_r else ''
+            ds_r = None
+
+            dst = osr.SpatialReference()
+            dst.ImportFromWkt(proj)
+            ds = ogr.Open(TILES_SHP)
+            if ds is None:
+                self._send_json({'tiles': []})
+                return
+            layer = ds.GetLayer()
+            src = layer.GetSpatialRef()
+            try:
+                dst.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+                if src is not None:
+                    src.SetAxisMappingStrategy(
+                        osr.OAMS_TRADITIONAL_GIS_ORDER)
+            except AttributeError:
+                pass
+            ct = (None if src is None or src.IsSame(dst)
+                  else osr.CoordinateTransformation(src, dst))
+            out = []
+            for feat in layer:
+                g = feat.GetGeometryRef()
+                if g is None:
+                    continue
+                g = g.Clone()
+                if ct is not None:
+                    try:
+                        g.Transform(ct)
+                    except Exception:
+                        continue
+                if not g.GetGeometryCount():
+                    continue
+                ring = g.GetGeometryRef(0)
+                pts = [list(ring.GetPoint_2D(i))
+                       for i in range(ring.GetPointCount())]
+                nm = (feat.GetField('Name')
+                      if feat.GetFieldIndex('Name') >= 0 else None)
+                if not nm and feat.GetFieldIndex('Row_Labels') >= 0:
+                    nm = feat.GetField('Row_Labels')
+                out.append({'name': normalize_tile_id(nm or ''),
+                            'ring': pts})
+            ds = None
+            payload = {'tiles': out}
+            state._tiles_overlay_cache = payload
+            self._send_json(payload)
+        except Exception as exc:
+            self._send_json({'error': str(exc)}, 500)
+
     def handle_api_bcws_overlay(self):
         """Return the cached BCWS current-fire points/polygons overlay
         (already reprojected into the active raster's native CRS), or

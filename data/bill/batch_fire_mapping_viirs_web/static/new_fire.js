@@ -626,6 +626,7 @@ function nativeBboxToWGS84(xmin, ymin, xmax, ymax) {
 let bcwsOverlay = null;  // {points: [[x,y],...], polygons: [[[x,y],...]]} in raster-native CRS
 let viirsOverlay = null;  // {points: [[x,y],...], det_dts: [...], native_resolution_m} in raster-native CRS
 const viirsToggle = document.getElementById('nf-viirs-toggle');
+const tileToggle = document.getElementById('nf-tiles-toggle');
 // Forward-declared here (assigned further down, alongside the rest of
 // the zoom machinery) so drawBcwsOverlay() -- which runs earlier in
 // some call paths -- never references it before initialization.
@@ -691,6 +692,54 @@ async function loadBcwsOverlay() {
         bcwsOverlay = null;
     }
     redraw();
+}
+
+// Sentinel-2 tile grid, in native CRS like every other overlay here,
+// so it tracks zoom/pan/resize through nativeToCanvas() for free.
+let tileGridOverlay = null;
+
+async function loadTileGridOverlay() {
+    try {
+        const r = await fetch('/api/tiles/overlay');
+        if (!r.ok) return;
+        const data = await r.json();
+        if (data.error) return;
+        tileGridOverlay = data;
+        redraw();
+    } catch (_) { /* decoration only */ }
+}
+
+function drawTileGridOverlay(ctx) {
+    if (!tileGridOverlay || !meta) return;
+    if (tileToggle && !tileToggle.checked) return;
+    const rings = tileGridOverlay.tiles || [];
+    if (!rings.length) return;
+    ctx.strokeStyle = 'rgba(40, 90, 255, 0.9)';
+    ctx.lineWidth = 1;
+    ctx.font = '10px sans-serif';
+    ctx.textBaseline = 'top';
+    for (const t of rings) {
+        const ring = t.ring || [];
+        if (ring.length < 2) continue;
+        let started = false;
+        ctx.beginPath();
+        for (const [x, y] of ring) {
+            const cp = nativeToCanvas(x, y);
+            if (!cp) continue;
+            if (!started) { ctx.moveTo(cp[0], cp[1]); started = true; }
+            else ctx.lineTo(cp[0], cp[1]);
+        }
+        if (!started) continue;
+        ctx.closePath();
+        ctx.stroke();
+        if (t.name && ring.length) {
+            const cp = nativeToCanvas(ring[0][0], ring[0][1]);
+            if (cp) {
+                ctx.fillStyle = 'rgba(40, 90, 255, 0.9)';
+                ctx.fillText(t.name, cp[0] + 3, cp[1] + 3);
+            }
+        }
+    }
 }
 
 function drawBcwsOverlay(ctx) {
@@ -820,6 +869,10 @@ function redraw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (!overviewReady()) return;  // see overviewReady() -- avoid drawing
                                     // against not-yet-decoded image dims
+    // Tile grid first: it is a reference frame and must sit above the
+    // imagery but below every other annotation (VIIRS, BCWS, the AOI
+    // rectangle), which is exactly this draw order.
+    drawTileGridOverlay(ctx);
     drawViirsOverlay(ctx);
     drawBcwsOverlay(ctx);
     if (!bbox) return;
@@ -1633,4 +1686,8 @@ sizeCanvasToWrap();
 if (viirsToggle) {
     viirsToggle.addEventListener('change', () => redraw());
 }
+if (tileToggle) {
+    tileToggle.addEventListener('change', () => redraw());
+}
+loadTileGridOverlay();
 })();

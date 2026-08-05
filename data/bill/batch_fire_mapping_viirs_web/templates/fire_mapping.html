@@ -72,6 +72,7 @@
             <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="zoomIn()">+</button>
             <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="zoomOut()">-</button>
             <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="zoomReset()">Fit</button>
+            <button class="btn btn-secondary" id="btn-overlays" style="font-size:11px;padding:2px 8px;background:#3a7bd5;color:#fff" onclick="toggleFireOverlays()" title="Sentinel-2 tile grid (blue) and BCWS fires">Overlays</button>
             <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" id="btn-split" onclick="toggleSplit()">Split</button>
             <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;display:none" id="btn-sync" onclick="toggleSync()" title="Sync pan/zoom between panes">Sync</button>
             <span class="info" id="zoom-info"></span>
@@ -82,10 +83,12 @@
                 <span class="pane-subtitle" id="subtitle-left"></span>
                 <span class="loading" id="loading-msg">Preparing fire data...</span>
                 <img id="main-img" style="display:none" alt="Fire view">
+                <canvas id="main-overlay" class="fire-overlay"></canvas>
             </div>
             <div class="image-area" id="image-area-right" style="display:none" onclick="setActivePane('right')" data-pane="right">
                 <span class="pane-subtitle" id="subtitle-right"></span>
                 <img id="right-img" style="display:none" alt="Comparison view">
+                <canvas id="right-overlay" class="fire-overlay"></canvas>
             </div>
         </div>
     </div>
@@ -455,6 +458,7 @@ async function onPostSourceChange() {
             renderHintModeButtons();
         }
         if (data.status) updateStatusDisplay(data.status);
+        loadFireOverlays();
         if (data.tiles && data.tiles.length) {
             const parts = Object.entries(data.tile_dates || {})
                 .map(([t, d]) => `${t}@${d}`).join(', ');
@@ -641,6 +645,9 @@ async function prepareFire(padding) {
         currentHintMode = data.hint_mode || 'viirs';
         renderHintModeButtons();
         currentPostSource = data.post_source || 'l2';
+        // Vector overlays depend on the crop's geotransform, so they
+        // can only be built once preparation has produced it.
+        loadFireOverlays();
         const psSel = document.getElementById('post-source-select');
         if (psSel) { psSel.value = currentPostSource; psSel.disabled = false; }
 
@@ -712,10 +719,165 @@ function getPaneElements(pane) {
              img: document.getElementById('main-img') };
 }
 
+// ---- Fire-view vector overlays ------------------------------------
+// Geometry arrives from the server already in CROP PIXEL coordinates,
+// so nothing here needs a geotransform or CRS. Draw order is fixed:
+// the Sentinel-2 tile grid goes down first (it is a reference frame),
+// then BCWS polygons, points and fire numbers on top of it. The hint
+// raster is part of the PNG underneath, so both layers sit above the
+// imagery and the grid stays below every other annotation, as asked.
+let _fireOverlays = null;
+
+async function loadFireOverlays() {
+    try {
+        const r = await fetch(
+            `/api/fire/${encodeURIComponent(FIRE)}/overlays`);
+        if (!r.ok) return;
+        const data = await r.json();
+        if (data.error) return;
+        _fireOverlays = data;
+        drawFireOverlay('left');
+        if (splitActive) drawFireOverlay('right');
+    } catch (_) { /* overlays are decoration; never block the view */ }
+}
+
+function drawFireOverlay(pane) {
+    const cv = overlayFor(pane);
+    const { img } = getPaneElements(pane);
+    if (!cv || !_fireOverlays || !img || !img.naturalWidth) return;
+
+    const W = _fireOverlays.width || img.naturalWidth;
+    const H = _fireOverlays.height || img.naturalHeight;
+    // Overlay geometry is in the CROP's pixel space. If the displayed
+    // preview is a different size (a run image, say), the overlay would
+    // misregister -- so only draw when the two agree.
+    if (img.naturalWidth !== W || img.naturalHeight !== H) {
+        cv.style.display = 'none';
+        return;
+    }
+    if (!overlaysVisible) { cv.style.display = 'none'; return; }
+
+    cv.width = W;
+    cv.height = H;
+    cv.style.width = W + 'px';
+    cv.style.height = H + 'px';
+    cv.style.display = 'block';
+    syncOverlayTransform(pane);
+
+    const ctx = cv.getContext('2d');
+    ctx.clearRect(0, 0, W, H);
+
+    // Line widths are divided by the current scale so strokes stay a
+    // constant width on screen instead of thickening as you zoom in.
+    const sc = paneState[pane].scale || 1;
+    const lw = (px) => Math.max(0.5, px / sc);
+
+    // --- 1. Sentinel-2 tile grid (blue, bottom) ---
+    const tiles = _fireOverlays.tiles || [];
+    ctx.strokeStyle = 'rgba(40, 90, 255, 0.95)';
+    ctx.lineWidth = lw(2);
+    ctx.font = `${Math.max(9, 13 / sc)}px sans-serif`;
+    ctx.textBaseline = 'top';
+    for (const t of tiles) {
+        const ring = t.ring || [];
+        if (ring.length < 2) continue;
+        ctx.beginPath();
+        ctx.moveTo(ring[0][0], ring[0][1]);
+        for (let i = 1; i < ring.length; i++)
+            ctx.lineTo(ring[i][0], ring[i][1]);
+        ctx.closePath();
+        ctx.stroke();
+        if (t.name) {
+            // Label just inside the tile's top-left corner, clamped so
+            // it stays readable when the corner is off-canvas.
+            const xs = ring.map(p => p[0]), ys = ring.map(p => p[1]);
+            const lx = Math.max(2, Math.min(...xs) + 4);
+            const ly = Math.max(2, Math.min(...ys) + 4);
+            ctx.fillStyle = 'rgba(40, 90, 255, 0.95)';
+            ctx.fillText(t.name, lx, ly);
+        }
+    }
+
+    // --- 2. BCWS polygons, points, fire numbers (on top) ---
+    const b = _fireOverlays.bcws || {};
+    ctx.strokeStyle = 'rgba(220, 0, 0, 0.95)';
+    ctx.lineWidth = lw(2);
+    for (const ring of (b.polygons || [])) {
+        if (!ring || ring.length < 2) continue;
+        ctx.beginPath();
+        ctx.moveTo(ring[0][0], ring[0][1]);
+        for (let i = 1; i < ring.length; i++)
+            ctx.lineTo(ring[i][0], ring[i][1]);
+        ctx.closePath();
+        ctx.stroke();
+    }
+    const half = Math.max(3, 7 / sc);
+    for (const p of (b.points || [])) {
+        ctx.beginPath();
+        ctx.moveTo(p[0] - half, p[1] - half);
+        ctx.lineTo(p[0] + half, p[1] + half);
+        ctx.moveTo(p[0] + half, p[1] - half);
+        ctx.lineTo(p[0] - half, p[1] + half);
+        ctx.stroke();
+    }
+    ctx.font = `${Math.max(9, 12 / sc)}px sans-serif`;
+    ctx.textBaseline = 'bottom';
+    const drawLabel = (txt, x, y) => {
+        if (!txt) return;
+        const tw = ctx.measureText(txt).width;
+        const th = Math.max(9, 12 / sc);
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fillRect(x - 1, y - th - 1, tw + 2, th + 2);
+        ctx.fillStyle = '#ff4444';
+        ctx.fillText(txt, x, y);
+    };
+    (b.polygons || []).forEach((ring, i) => {
+        const nm = (b.polygon_fire_nums || [])[i];
+        if (!nm || !ring || !ring.length) return;
+        let sx = 0, sy = 0;
+        for (const p of ring) { sx += p[0]; sy += p[1]; }
+        drawLabel(nm, sx / ring.length, sy / ring.length);
+    });
+    (b.points || []).forEach((p, i) => {
+        drawLabel((b.point_fire_nums || [])[i], p[0] + half + 2, p[1]);
+    });
+}
+
+let overlaysVisible = true;
+
+function toggleFireOverlays() {
+    overlaysVisible = !overlaysVisible;
+    const btn = document.getElementById('btn-overlays');
+    if (btn) {
+        btn.style.background = overlaysVisible ? '#3a7bd5' : '';
+        btn.style.color = overlaysVisible ? '#fff' : '';
+    }
+    drawFireOverlay('left');
+    if (splitActive) drawFireOverlay('right');
+}
+
+function overlayFor(pane) {
+    return document.getElementById(
+        pane === 'right' ? 'right-overlay' : 'main-overlay');
+}
+
+// The overlay canvas is sized to the image's INTRINSIC pixels and given
+// the identical CSS transform, so one uniform scale maps crop pixels to
+// screen. Registration then survives zoom and pan with no per-frame
+// maths -- the browser applies the same transform to both.
+function syncOverlayTransform(pane) {
+    const s = paneState[pane];
+    const cv = overlayFor(pane);
+    if (!cv) return;
+    cv.style.transform =
+        `translate(${s.panX}px, ${s.panY}px) scale(${s.scale})`;
+}
+
 function updateTransformForPane(pane) {
     const s = paneState[pane];
     const { img } = getPaneElements(pane);
     img.style.transform = `translate(${s.panX}px, ${s.panY}px) scale(${s.scale})`;
+    syncOverlayTransform(pane);
     if (pane === activePane) {
         document.getElementById('zoom-info').textContent = `${Math.round(s.scale * 100)}%`;
     }
@@ -725,6 +887,7 @@ function updateTransformForPane(pane) {
         os.scale = s.scale; os.panX = s.panX; os.panY = s.panY;
         const { img: oImg } = getPaneElements(other);
         oImg.style.transform = `translate(${os.panX}px, ${os.panY}px) scale(${os.scale})`;
+        syncOverlayTransform(other);
     }
 }
 
@@ -910,6 +1073,7 @@ function loadPaneImage(pane, viewKey) {
     img.onload = () => {
         if (pane === 'left') loadMsg.style.display = 'none';
         img.style.display = 'block';
+        drawFireOverlay(pane);
         const fs = _paneFitState[pane];
         const dimsChanged = fs.fitted
             && (img.naturalWidth !== fs.fitW
