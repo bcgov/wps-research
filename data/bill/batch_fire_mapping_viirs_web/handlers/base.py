@@ -522,7 +522,17 @@ class BaseHandler:
                 'Cache-Control',
                 f'public, max-age={cache_seconds}, immutable')
         self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            # The client went away mid-transfer -- navigating off the
+            # page while a ~100 MB overview PNG is still downloading
+            # does this routinely. It is a normal client-side event,
+            # not a server fault, so log one line instead of dumping a
+            # traceback that looks like a crash.
+            sys.stderr.write(
+                f'[http] client disconnected during '
+                f'{os.path.basename(filepath)}; transfer aborted\n')
 
     _MAX_BODY = 1_000_000  # 1 MB
 
@@ -549,12 +559,25 @@ class BaseHandler:
 
     # -- Logging --
 
+    # Endpoints the UI polls on a timer. They succeed hundreds of times
+    # an hour and their log lines drown out everything that matters --
+    # in a recent session the extraction progress was buried under a
+    # solid wall of "GET /api/fires 200". Successful polls are dropped;
+    # non-200 responses are still logged, since a failing poll IS worth
+    # seeing.
+    _QUIET_POLL_PATHS = ('/api/fires', '/api/notifications',
+                         '/api/queue', '/api/batch/status')
+
     def log_message(self, format, *args):
         # Print only non-static requests to keep terminal clean
         msg = format % args
-        if '/static/' not in msg:
-            sys.stderr.write(
-                f'[{self.log_date_time_string()}] {msg}\n')
+        if '/static/' in msg:
+            return
+        if ' 200 ' in msg and any(p in msg
+                                  for p in self._QUIET_POLL_PATHS):
+            return
+        sys.stderr.write(
+            f'[{self.log_date_time_string()}] {msg}\n')
 
 
 # =========================================================================

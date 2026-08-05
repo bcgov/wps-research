@@ -146,7 +146,31 @@ def build_redwins_hint_for_fire(fire: FireInfo, mode: str):
 
     out_dir = os.path.join(fire.cache_dir, '_redwins')
     os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, f'{mode}_hint.bin')
+    # Per SOURCE as well as per mode. Both stacks previously wrote to
+    # <mode>_hint.bin, so switching post source silently overwrote the
+    # other source's mask -- and because fire.hint_bin is what the
+    # mapping CLI consumes, a run could be seeded with the wrong
+    # source's hint. The rendered PNGs hid this (they are stashed per
+    # source), so it would only have shown up in the mapping result.
+    src = getattr(fire, 'post_source', 'l2') or 'l2'
+    out_path = os.path.join(out_dir, f'{mode}_{src}_hint.bin')
+
+    # Reuse an existing mask when it is newer than the stack it was
+    # derived from. Six call sites reach this function and several run
+    # back-to-back during preparation, so without this the same mask is
+    # recomputed repeatedly (visible in the log as the identical
+    # "[redwins] redwins_post: 104792 fire pixel(s)" line twice).
+    #
+    # The stack's mtime is the correct invalidation signal: switching
+    # post source repoints crop_bin at a different file, and a
+    # re-prepare rewrites it, so either genuinely forces a rebuild.
+    try:
+        if (os.path.isfile(out_path)
+                and os.path.getmtime(out_path)
+                >= os.path.getmtime(fire.crop_bin)):
+            return out_path, None
+    except OSError:
+        pass
 
     n_fire = generate_redwins_hint(fire.crop_bin, indices, out_path)
     if n_fire < 0:
@@ -163,7 +187,8 @@ def build_redwins_hint_for_fire(fire: FireInfo, mode: str):
             f'so the hint would be empty. Try {other} instead, or use '
             f'VIIRS if data is available for this fire.')
     sys.stderr.write(
-        f'[redwins] {mode}: {n_fire} fire pixel(s) -> {out_path}\n')
+        f'[redwins] {mode} [{src}]: {n_fire} fire pixel(s) '
+        f'-> {out_path}\n')
     sys.stderr.flush()
     return out_path, None
 

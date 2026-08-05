@@ -359,7 +359,10 @@ def _tile_footprint_mask(tile: str, win_gt, xsize: int, ysize: int,
                 match.Transform(
                     osr.CoordinateTransformation(src_srs, dst_srs))
 
-            mem_drv = ogr.GetDriverByName('Memory')
+            # 'Memory' is deprecated from GDAL 3.11; 'MEM' is the
+            # replacement. Fall back so this still works on older GDAL.
+            mem_drv = (ogr.GetDriverByName('MEM')
+                       or ogr.GetDriverByName('Memory'))
             mds = mem_drv.CreateDataSource('mask')
             mlayer = mds.CreateLayer('m', dst_srs, ogr.wkbPolygon)
             f = ogr.Feature(mlayer.GetLayerDefn())
