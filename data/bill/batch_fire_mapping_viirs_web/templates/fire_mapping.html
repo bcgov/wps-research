@@ -417,12 +417,27 @@ function cacheKeyFor(viewKey) {
     return `${currentPostSource}:${viewKey}${modePart}:${_previewStamp}`;
 }
 
-async function cachePreview(key, url, announce) {
-    try {
+// In-flight fetches, keyed the same way as _previewBlobs. Without
+// this, two callers wanting the same preview each start their own
+// download of the same multi-megabyte PNG and then compete for the
+// connection -- which is exactly what made a 4.29 MB preview take 7 s
+// at an apparent 624 kB/s while TTFB stayed at 78 ms.
+const _previewInflight = new Map();
+
+// Single source of truth for "give me the object URL for this
+// preview". Returns a cached blob URL, joins an in-flight fetch, or
+// starts exactly one. Callers must never fetch a preview any other
+// way, or the duplication returns.
+function getPreviewObjectURL(key, url, announce) {
+    if (_previewBlobs.has(key)) return Promise.resolve(_previewBlobs.get(key));
+    const pending = _previewInflight.get(key);
+    if (pending) return pending;
+
+    const p = (async () => {
         const t0 = performance.now();
         const r = await fetch(url);
         const tH = performance.now();
-        if (!r.ok) return;
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const blob = await r.blob();
         const tB = performance.now();
         if (announce) {
@@ -433,21 +448,81 @@ async function cachePreview(key, url, announce) {
                 + `size ${fmtBytes(blob.size)}, `
                 + `rate ${fmtBytes(blob.size / secs)}/s`, 'dim');
         }
-        if (_previewBlobs.has(key)) return;
-        _previewBlobs.set(key, URL.createObjectURL(blob));
+        const obj = URL.createObjectURL(blob);
+        _previewBlobs.set(key, obj);
+        return obj;
+    })().finally(() => _previewInflight.delete(key));
+
+    _previewInflight.set(key, p);
+    return p;
+}
+
+async function cachePreview(key, url, announce) {
+    try {
+        await getPreviewObjectURL(key, url, announce);
     } catch (_) { /* caching is best-effort */ }
 }
 
 // Fetch every stack-derived view for a source into the blob cache, so
 // a later toggle never touches the network. Runs after a switch, when
 // the server has just rebuilt that source's previews.
+// Warming is a QUEUE, drained one item at a time.
+//
+// Firing every warm fetch at once put ~10 multi-megabyte downloads on
+// the wire simultaneously, all competing with the single preview the
+// user was actually waiting for. That is what turned a 4.29 MB
+// transfer into 7 s at an apparent 624 kB/s while TTFB stayed at
+// 78 ms -- the bytes were there, they were just being shared out
+// among a crowd of requests nobody was waiting on.
+//
+// Draining serially keeps the foreground request at full bandwidth
+// and still has everything cached within a few seconds.
+// Resolves once the left pane has a decoded image on screen (or after
+// a ceiling, so a failed load cannot block warming forever).
+function waitForFirstPaint(timeoutMs = 20000) {
+    const img = document.getElementById('main-img');
+    const t0 = performance.now();
+    return new Promise((resolve) => {
+        const tick = () => {
+            if (!img || (img.complete && img.naturalWidth
+                         && img.style.display === 'block')) return resolve();
+            if (performance.now() - t0 > timeoutMs) return resolve();
+            setTimeout(tick, 150);
+        };
+        tick();
+    });
+}
+
+const _warmQueue = [];
+let _warmRunning = false;
+
+function enqueueWarm(key, url) {
+    if (_previewBlobs.has(key) || _previewInflight.has(key)) return;
+    if (_warmQueue.some((e) => e.key === key)) return;
+    _warmQueue.push({key, url});
+}
+
+async function drainWarmQueue() {
+    if (_warmRunning) return;
+    _warmRunning = true;
+    try {
+        while (_warmQueue.length) {
+            const {key, url} = _warmQueue.shift();
+            if (_previewBlobs.has(key)) continue;
+            try {
+                await getPreviewObjectURL(key, url, false);
+            } catch (_) { /* skip and continue */ }
+        }
+    } finally {
+        _warmRunning = false;
+    }
+}
+
 function warmSourceCache(src) {
     // Hint is handled by warmHintCache (it varies by mode as well as
     // by source); here only the plain stack-derived views.
     for (const v of ['post', 'diff1', 'pre']) {
-        const key = `${src}:${v}:${_previewStamp}`;
-        if (_previewBlobs.has(key)) continue;
-        cachePreview(key,
+        enqueueWarm(`${src}:${v}:${_previewStamp}`,
             `/api/fire/${encodeURIComponent(FIRE)}/preview/${v}`
             + `?src=${src}&t=${_previewStamp}`);
     }
@@ -471,9 +546,7 @@ function clearHintPane(pane) {
 // toggling hint modes is instant rather than a round-trip each time.
 function warmHintCache(src) {
     for (const mode of ['redwins_post', 'redwins_diff', 'viirs']) {
-        const key = `${src}:hint:${mode}:${_previewStamp}`;
-        if (_previewBlobs.has(key)) continue;
-        cachePreview(key,
+        enqueueWarm(`${src}:hint:${mode}:${_previewStamp}`,
             `/api/fire/${encodeURIComponent(FIRE)}/preview/hint`
             + `?src=${src}&hint=${mode}&t=${_previewStamp}`);
     }
@@ -598,6 +671,7 @@ async function onPostSourceChange() {
         // subsequent toggles are instant regardless of which view is up.
         warmSourceCache(src);
         warmHintCache(src);
+        drainWarmQueue();
     } catch (err) {
         log('Post source switch error: ' + err.message, 'error');
         sel.value = currentPostSource;
@@ -719,30 +793,26 @@ function optimisticFirstPaint() {
     const modePart = (view === 'hint') ? `:${currentHintMode}` : '';
     const key = `${src}:${view}${modePart}:${_previewStamp}`;
     const hintQ = (view === 'hint') ? `&hint=${currentHintMode}` : '';
-    const url = _previewBlobs.get(key)
-        || `/api/fire/${encodeURIComponent(FIRE)}/preview/${view}`
-           + `?src=${src}${hintQ}&t=${_previewStamp}`;
+    const url = `/api/fire/${encodeURIComponent(FIRE)}/preview/${view}`
+              + `?src=${src}${hintQ}&t=${_previewStamp}`;
 
-    const probe = new Image();
-    probe.onload = () => {
-        // Only take over if the real path has not already painted.
-        if (img.style.display === 'block') return;
-        // Bake only once this src has decoded; bakeOverlaysIntoImage
-        // awaits decode() itself, but wiring it to onload keeps the
-        // ordering explicit and covers a cache-miss path.
+    // Goes through the SAME shared fetch as loadPaneImage. Previously
+    // this issued its own <img> load while loadPaneImage issued a
+    // second fetch of the identical file -- two (sometimes three)
+    // concurrent transfers of the same multi-megabyte PNG, competing
+    // for one connection. Joining the shared fetch means whichever
+    // caller arrives second simply awaits the first.
+    getPreviewObjectURL(key, url, true).then((obj) => {
+        if (img.dataset.painted === key) return;
+        img.dataset.painted = key;
         img.onload = () => {
             if (loadMsg) loadMsg.style.display = 'none';
             img.style.display = 'block';
-            _lastPaintedKey = `${src}:${view}:`
-                + `${view === 'hint' ? currentHintMode : ''}:`
-                + `${_previewStamp}`;
+            _lastPaintedKey = key;
             bakeOverlaysIntoImage('left', view);
         };
-        img.src = url;
-        img.style.display = 'block';
-        if (loadMsg) loadMsg.style.display = 'none';
-    };
-    probe.src = url;
+        img.src = obj;
+    }).catch(() => { /* the normal path will retry */ });
 }
 
 async function prepareFire(padding) {
@@ -883,12 +953,16 @@ async function prepareFire(padding) {
         // is not competing with the warm fetches for bandwidth --
         // short, because the optimistic first paint has usually
         // already put that image on screen by now.
-        setTimeout(() => {
-            for (const src of ['l2', 'mrap']) {
-                warmSourceCache(src);
-                warmHintCache(src);
-            }
-        }, 120);
+        // Queue the CURRENT source first so the views the user is most
+        // likely to touch arrive soonest, then the other source.
+        const other = currentPostSource === 'l2' ? 'mrap' : 'l2';
+        warmSourceCache(currentPostSource);
+        warmHintCache(currentPostSource);
+        warmSourceCache(other);
+        warmHintCache(other);
+        // Drain only after the foreground image has landed, so warming
+        // never competes with what the user is waiting to see.
+        waitForFirstPaint().then(drainWarmQueue);
 
         updateSampleSize();
         loadPaneImage('left', leftView);
@@ -1691,10 +1765,27 @@ function loadPaneImage(pane, viewKey) {
         log(`[perf] preview ${viewKey} served from client cache `
             + `(no network)`, 'dim');
         img.src = _previewBlobs.get(ck);
+    } else if (ck) {
+        // ONE download, shared. Assigning img.src = url here as well
+        // would start a second, independent transfer of the same file.
+        getPreviewObjectURL(ck, url, true)
+            .then((obj) => {
+                img.src = obj;
+                // Assigning src a value the element ALREADY holds
+                // fires no load event -- which happens whenever the
+                // optimistic first paint resolved the same shared
+                // fetch a moment earlier. The handler below would then
+                // never run and the pane would sit blank until some
+                // later action re-assigned a different src (switching
+                // source and back). Drive it manually when the image
+                // is already complete.
+                if (img.complete && img.naturalWidth) {
+                    if (img.onload) img.onload();
+                }
+            })
+            .catch(() => { img.src = url; });   // fall back on error
     } else {
-        img.src = url;
-        // announce=true: this is the fetch the user is waiting on.
-        if (ck) cachePreview(ck, url, true);
+        img.src = url;   // uncacheable view (run-specific images)
     }
 
     img.onload = () => {

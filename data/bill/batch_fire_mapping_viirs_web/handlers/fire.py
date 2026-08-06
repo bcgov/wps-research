@@ -481,7 +481,16 @@ class FireRoutes:
             sys.stderr.flush()
         except Exception as exc:
             sys.stderr.write(f'[perf] preview log failed: {exc}\n')
-        self._send_file(png, 'image/png')
+        # Cache aggressively. Every preview URL carries ?t=<stamp>,
+        # and the stamp changes whenever the server regenerates these
+        # images, so the URL is content-keyed: the browser can reuse a
+        # cached copy forever and will still pick up new renders,
+        # because those arrive under a new URL.
+        #
+        # Without this a 4+ MB PNG was re-fetched on every fire open
+        # and every pane change -- at the ~600 kB/s this link sustains,
+        # that is ~7 s of pure re-transfer for bytes already held.
+        self._send_file(png, 'image/png', cache_seconds=86400)
 
     def handle_api_comparison(self, fire_numbe):
         fire_numbe = unquote(fire_numbe)
