@@ -776,10 +776,13 @@ def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
     dates_json = date_polygons_path(out_bin)
     poly_payload = write_date_polygons(
         dates_json, date_map, date_list, xsize, ysize)
-    _log(f'date coverage: '
+    # Deliberately does NOT print the path: this sidecar is written
+    # beside the temporary post buffer and relocated next to the stack
+    # by the caller, so printing it here shows a filename that no
+    # longer exists a moment later.
+    _log('date coverage: '
          + ', '.join(f"{e['date']} ({e['pixels']:,} px)"
-                     for e in poly_payload['dates'])
-         + f' -> {os.path.basename(dates_json)}')
+                     for e in poly_payload['dates']))
 
     _p('L2-recent composite ready', 1.0)
     return {

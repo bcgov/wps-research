@@ -540,11 +540,7 @@ async function onPostSourceChange() {
                       'X-Requested-With': 'fetch'},
             body: JSON.stringify({source: src}),
         });
-        perfMark('POST /prepare  headers received',
-                 `(${(performance.now() - _tPrep).toFixed(0)} ms round trip)`);
         const data = await r.json();
-        perfMark('POST /prepare  body parsed',
-                 `status=${r.status} ready=${data.status || '?'}`);
         if (!r.ok || data.error) {
             log('Post source switch failed: ' + (data.error || 'unknown'),
                 'error');
@@ -801,7 +797,11 @@ async function prepareFire(padding) {
             headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
             body: body,
         });
+        perfMark('POST /prepare  headers received',
+                 `(${(performance.now() - _tPrep).toFixed(0)} ms round trip)`);
         const data = await r.json();
+        perfMark('POST /prepare  body parsed',
+                 `status=${r.status} ready=${data.status || '?'}`);
 
         if (data.status === 'error') {
             loadMsg.textContent = 'Error: ' + (data.error || 'unknown');

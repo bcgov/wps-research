@@ -750,6 +750,9 @@ def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
                 if src_json and os.path.isfile(src_json):
                     os.replace(src_json, dst_json)
                     l2_info['dates_json'] = dst_json
+                    sys.stderr.write(
+                        f'[aoi_stack] date coverage -> '
+                        f'{os.path.basename(dst_json)}\n')
             except OSError as exc:
                 sys.stderr.write(
                     f'[aoi_stack] could not relocate date sidecar: '

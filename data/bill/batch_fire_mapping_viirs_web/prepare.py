@@ -415,10 +415,23 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
     restored = _restore_previews(fire, source)
     if restored:
         try:
-            fire.available_views = [
-                os.path.splitext(f)[0] for f in sorted(os.listdir(
-                    os.path.join(fire.cache_dir, 'previews')))
-                if f.endswith('.png')]
+            # Only real VIEWS belong in this list. The previews dir
+            # also holds the per-mode hint renders (hint_redwins_post
+            # .png etc.), which are selected via the Hint buttons and
+            # served through ?hint= -- listing them blindly put
+            # "hint_redwins_post" into the view dropdown and, because
+            # the list is also what the client validates against, left
+            # legitimate views looking unavailable ("View 'Post-fire'
+            # not available").
+            _VIEW_WHITELIST = ('pre', 'post', 'diff1', 'diff2', 'diff3',
+                               'hint', 'result', 'comparison',
+                               'brush_comparison')
+            names = [os.path.splitext(f)[0]
+                     for f in sorted(os.listdir(
+                         os.path.join(fire.cache_dir, 'previews')))
+                     if f.endswith('.png')]
+            fire.available_views = [n for n in names
+                                    if n in _VIEW_WHITELIST]
         except OSError:
             pass
     else:
