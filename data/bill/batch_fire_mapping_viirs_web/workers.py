@@ -282,13 +282,21 @@ def _serial_snapshot_run0(fire, fire_numbe: str):
         search_dirs = [fire.cache_dir]
         if os.path.isdir(canon_dir):
             search_dirs.append(canon_dir)
+        # The CLI's --output is the ramdisk, so the classified mask
+        # lands beside the stack, not in the fire cache. Search there
+        # too or the mask is never found and the run reports FAILED
+        # despite having produced a good classification.
+        _ram = os.path.dirname(fire.crop_bin or '')
+        if _ram and os.path.isdir(_ram) and _ram not in search_dirs:
+            search_dirs.append(_ram)
 
         # Find existing classified raster
         old_clf = None
         for _dir in search_dirs:
-            for _pat in (f'{fire_numbe}_crop.bin_classified.bin',
-                         f'{fire_numbe}_crop_classified.bin',
-                         f'{fire_numbe}_classified.bin'):
+            # Includes the ramdisk stack's own name; see
+            # state.classified_names().
+            from .state import classified_names as _clf_names
+            for _pat in _clf_names(fire):
                 _cand = os.path.join(_dir, _pat)
                 if os.path.isfile(_cand):
                     old_clf = _cand
@@ -536,6 +544,7 @@ def _serial_run_replicate(fire, fire_numbe: str, *, setting_idx: int,
 
             src_clf = None
             for _pat in (
+                    os.path.basename(fire.crop_bin or '') + '_classified.bin',
                     f'{fire_numbe}_crop.bin_classified.bin',
                     f'{fire_numbe}_crop_classified.bin',
                     f'{fire_numbe}_classified.bin'):

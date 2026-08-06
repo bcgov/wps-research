@@ -12,7 +12,7 @@ import sys
 import numpy as np
 from osgeo import gdal
 
-from .state import AppState, FireInfo
+from .state import classified_names, find_classified, AppState, FireInfo
 
 state: AppState = None
 
@@ -29,9 +29,11 @@ def _compute_ml_area(fire: 'FireInfo',
     Returns area in ha or -1 if computation fails.
     """
     if clf_path is None:
-        clf_path = os.path.join(
-            fire.cache_dir,
-            f'{fire.fire_numbe}_crop.bin_classified.bin')
+        # Name follows the stack the CLI was given, not the old
+        # <fire>_crop.bin convention.
+        clf_path = find_classified(
+            fire, [fire.cache_dir, os.path.dirname(fire.crop_bin or '')]) \
+            or os.path.join(fire.cache_dir, classified_names(fire)[0])
     if not os.path.isfile(clf_path):
         return -1.0
     try:
@@ -178,9 +180,10 @@ def _overlay_mask_on_post(fire: 'FireInfo', raster_path: str,
 
 def _generate_result_preview(fire: 'FireInfo'):
     """Generate pixel-aligned overlay previews after mapping."""
-    clf_path = os.path.join(
-        fire.cache_dir,
-        f'{fire.fire_numbe}_crop.bin_classified.bin')
+    clf_path = find_classified(
+        fire, [fire.cache_dir, os.path.dirname(fire.crop_bin or '')])
+    if not clf_path:
+        clf_path = os.path.join(fire.cache_dir, classified_names(fire)[0])
     _overlay_mask_on_post(fire, clf_path, 'result', (0.9, 0.1, 0.0))
 
     # Also generate hint overlay if hint raster exists
@@ -205,9 +208,9 @@ def _compute_agreement(fire: 'FireInfo',
     """
     try:
         if clf_path is None:
-            clf_path = os.path.join(
-                fire.cache_dir,
-                f'{fire.fire_numbe}_crop.bin_classified.bin')
+            clf_path = find_classified(
+                fire, [fire.cache_dir,
+                       os.path.dirname(fire.crop_bin or '')])
         hint_path = fire.hint_bin
         if not clf_path or not hint_path:
             return -1.0

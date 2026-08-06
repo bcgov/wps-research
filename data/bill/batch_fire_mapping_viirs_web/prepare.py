@@ -917,9 +917,17 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
 
     # -- Find classified raster (try multiple naming patterns) --
     clf_path = None
-    for pattern in (f'{fire_numbe}_crop.bin_classified.bin',
-                    f'{fire_numbe}_crop_classified.bin',
-                    f'{fire_numbe}_classified.bin'):
+    # `fire` is not in scope in this function -- only fire_numbe and
+    # crop_bin are -- so build the candidate list from those directly
+    # rather than through state.classified_names().
+    _clf_patterns = []
+    if crop_bin:
+        _clf_patterns.append(
+            os.path.basename(crop_bin) + '_classified.bin')
+    _clf_patterns += [f'{fire_numbe}_crop.bin_classified.bin',
+                      f'{fire_numbe}_crop_classified.bin',
+                      f'{fire_numbe}_classified.bin']
+    for pattern in _clf_patterns:
         candidate = os.path.join(cache_dir, pattern)
         if os.path.isfile(candidate):
             clf_path = candidate

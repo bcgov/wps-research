@@ -42,6 +42,50 @@ class FireStatus(str, Enum):
     ERROR = "error"
 
 
+def classified_names(fire) -> list:
+    """Candidate filenames for a fire's classified mask, best first.
+
+    The mapping CLI names its output after the INPUT image:
+    ``<image>.bin_classified.bin``. That image used to be
+    ``<cache>/<FIRE>_crop.bin``, so the whole codebase hardcoded
+    ``<FIRE>_crop.bin_classified.bin``.
+
+    The image is now the per-AOI stack on the ramdisk
+    (``<date>_stack_<fire>_<hash>[_l2].bin``), so the CLI writes
+    ``<date>_stack_<fire>_<hash>[_l2].bin_classified.bin`` and every
+    lookup for the old name misses. The symptom is subtle and
+    expensive: mapping succeeds, the mask is written, but the result
+    overlay cannot be found, so agreement comes back -1 and the run is
+    reported as FAILED.
+
+    Legacy names are kept in the list so fires mapped before the
+    ramdisk change still resolve.
+    """
+    names = []
+    crop = getattr(fire, 'crop_bin', '') or ''
+    if crop:
+        names.append(os.path.basename(crop) + '_classified.bin')
+    fn = getattr(fire, 'fire_numbe', '')
+    names += [f'{fn}_crop.bin_classified.bin',
+              f'{fn}_crop_classified.bin',
+              f'{fn}_classified.bin']
+    # De-duplicate, preserving order.
+    seen = set()
+    return [n for n in names if not (n in seen or seen.add(n))]
+
+
+def find_classified(fire, search_dirs) -> str:
+    """First existing classified mask for *fire* across *search_dirs*."""
+    for d in search_dirs:
+        if not d:
+            continue
+        for n in classified_names(fire):
+            cand = os.path.join(d, n)
+            if os.path.isfile(cand):
+                return cand
+    return ''
+
+
 @dataclass
 class FireInfo:
     """Tracks per-fire state through the web workflow."""
