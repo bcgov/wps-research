@@ -715,10 +715,20 @@ function optimisticFirstPaint() {
     probe.onload = () => {
         // Only take over if the real path has not already painted.
         if (img.style.display === 'block') return;
+        // Bake only once this src has decoded; bakeOverlaysIntoImage
+        // awaits decode() itself, but wiring it to onload keeps the
+        // ordering explicit and covers a cache-miss path.
+        img.onload = () => {
+            if (loadMsg) loadMsg.style.display = 'none';
+            img.style.display = 'block';
+            _lastPaintedKey = `${src}:${view}:`
+                + `${view === 'hint' ? currentHintMode : ''}:`
+                + `${_previewStamp}`;
+            bakeOverlaysIntoImage('left', view);
+        };
         img.src = url;
         img.style.display = 'block';
         if (loadMsg) loadMsg.style.display = 'none';
-        bakeOverlaysIntoImage('left', view);
     };
     probe.src = url;
 }
@@ -952,6 +962,10 @@ function dateColor(i, n) {
     return `hsl(${hue}, 85%, 55%)`;
 }
 
+// What the left pane currently has painted and baked, so a redundant
+// reload of the same thing can be skipped.
+let _lastPaintedKey = null;
+
 let _datePlotRebuildAsked = false;
 let _datePlotPoll = null;
 
@@ -1105,13 +1119,30 @@ function drawDatePlot() {
 
 window.addEventListener('resize', drawDatePlot);
 
+// Overlay geometry per post source. The two stacks share an AOI and
+// a CRS, so their overlays are usually identical -- but they are
+// cached against different crop files server-side, so each is fetched
+// once and then reused. Re-fetching on every switch was the visible
+// lag between the imagery appearing and the vectors following.
+const _overlayCache = new Map();
+
 async function loadFireOverlays() {
+    const src = currentPostSource || 'l2';
+    const cached = _overlayCache.get(src);
+    if (cached) {
+        _fireOverlays = cached;
+        bakeOverlaysIntoImage('left', leftView);
+        if (splitActive && rightView)
+            bakeOverlaysIntoImage('right', rightView);
+        return;
+    }
     try {
         const r = await fetch(
             `/api/fire/${encodeURIComponent(FIRE)}/overlays`);
         if (!r.ok) return;
         const data = await r.json();
         if (data.error) return;
+        _overlayCache.set(src, data);
         _fireOverlays = data;
         // Overlays usually resolve after the first image has painted,
         // so bake now that the geometry is in hand.
@@ -1230,7 +1261,25 @@ const _bakedKeys = new WeakMap();
 async function bakeOverlaysIntoImage(pane, viewKey) {
     const { img } = getPaneElements(pane);
     const cv = overlayFor(pane);
-    if (!img || !img.naturalWidth) return;
+    if (!img) return;
+
+    // The image MUST be decoded before it can be drawn into a canvas.
+    // Baking a not-yet-decoded <img> silently draws nothing, leaving a
+    // composite that is vectors-on-blank -- which is exactly the
+    // "overlays appear but the imagery doesn't" symptom, and why it
+    // only corrected itself after switching source (that reload
+    // happened to bake an image that was by then in cache and
+    // decoded).
+    if (!img.complete || !img.naturalWidth) {
+        try {
+            await img.decode();
+        } catch (_) {
+            // decode() rejects if src changes underneath us; the new
+            // src will trigger its own bake via onload.
+            return;
+        }
+    }
+    if (!img.naturalWidth) return;
 
     const key = overlaysVisible && _fireOverlays
         ? `${currentPostSource}:${viewKey}:${currentHintMode}:`
@@ -1523,6 +1572,19 @@ function loadPaneImage(pane, viewKey) {
     // Switching post source re-requests the same view keys, and without
     // this every switch re-downloads the PNGs -- which is what made the
     // toggle feel slow even though the server had already built both.
+    // If the optimistic first paint already put exactly this
+    // (source, view, hint) on screen and baked it, re-issuing the load
+    // only costs a re-decode and a re-bake -- visible as a flicker and
+    // a stall right after the page settles.
+    const paintKey = `${currentPostSource}:${viewKey}:`
+        + `${viewKey === 'hint' ? currentHintMode : ''}:${_previewStamp}`;
+    if (pane === 'left' && _lastPaintedKey === paintKey
+            && img.complete && img.naturalWidth
+            && img.style.display === 'block') {
+        return;
+    }
+    if (pane === 'left') _lastPaintedKey = paintKey;
+
     const ck = cacheKeyFor(viewKey);
     if (ck && _previewBlobs.has(ck)) {
         img.src = _previewBlobs.get(ck);

@@ -734,12 +734,43 @@ def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
             post_tag = ' L2'
             post_date = l2_info.get('post_date') or post_date
 
+            # build_l2_recent_post writes its per-acquisition coverage
+            # sidecar next to the file it was told to create -- which
+            # is the TEMPORARY post buffer, not the stack. Move it
+            # beside the stack, where every reader (the date_plot
+            # endpoint) expects it. Without this the sidecar was
+            # generated correctly on every build and then silently
+            # orphaned at <stack>.bin.post_dates.json, so the UI
+            # reported "no coverage recorded" even for a fire created
+            # seconds earlier.
+            try:
+                from .l2_recent import date_polygons_path
+                src_json = l2_info.get('dates_json')
+                dst_json = date_polygons_path(out_bin)
+                if src_json and os.path.isfile(src_json):
+                    os.replace(src_json, dst_json)
+                    l2_info['dates_json'] = dst_json
+            except OSError as exc:
+                sys.stderr.write(
+                    f'[aoi_stack] could not relocate date sidecar: '
+                    f'{exc}\n')
+
         info = build_aoi_stack(out_bin, xmin, ymin, xmax, ymax,
                                post_bin=post_bin, post_date=post_date,
                                progress_cb=progress_cb,
                                post_override=override,
                                post_tag=post_tag)
         if post_source == 'l2':
+            # The temporary post buffer has been consumed into the
+            # stack; on a tmpfs it is worth reclaiming immediately
+            # rather than leaving a second full copy of the AOI in RAM.
+            for junk in (override, _hdr_for(override or ''),
+                         (override or '') + '.aux.xml'):
+                if junk:
+                    try:
+                        os.remove(junk)
+                    except OSError:
+                        pass
             info['tiles'] = l2_info.get('tiles', [])
             info['tile_dates'] = l2_info.get('tile_dates', {})
             info['filled_fraction'] = l2_info.get('filled_fraction')
