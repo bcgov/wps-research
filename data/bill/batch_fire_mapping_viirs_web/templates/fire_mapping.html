@@ -417,11 +417,22 @@ function cacheKeyFor(viewKey) {
     return `${currentPostSource}:${viewKey}${modePart}:${_previewStamp}`;
 }
 
-async function cachePreview(key, url) {
+async function cachePreview(key, url, announce) {
     try {
+        const t0 = performance.now();
         const r = await fetch(url);
+        const tH = performance.now();
         if (!r.ok) return;
         const blob = await r.blob();
+        const tB = performance.now();
+        if (announce) {
+            const secs = Math.max(0.001, (tB - tH) / 1000);
+            log(`[perf] preview ${key.split(':').slice(0, 2).join('/')}: `
+                + `wait(TTFB) ${(tH - t0).toFixed(0)} ms, `
+                + `transfer ${(tB - tH).toFixed(0)} ms, `
+                + `size ${fmtBytes(blob.size)}, `
+                + `rate ${fmtBytes(blob.size / secs)}/s`, 'dim');
+        }
         if (_previewBlobs.has(key)) return;
         _previewBlobs.set(key, URL.createObjectURL(blob));
     } catch (_) { /* caching is best-effort */ }
@@ -529,7 +540,11 @@ async function onPostSourceChange() {
                       'X-Requested-With': 'fetch'},
             body: JSON.stringify({source: src}),
         });
+        perfMark('POST /prepare  headers received',
+                 `(${(performance.now() - _tPrep).toFixed(0)} ms round trip)`);
         const data = await r.json();
+        perfMark('POST /prepare  body parsed',
+                 `status=${r.status} ready=${data.status || '?'}`);
         if (!r.ok || data.error) {
             log('Post source switch failed: ' + (data.error || 'unknown'),
                 'error');
@@ -576,6 +591,7 @@ async function onPostSourceChange() {
             log(`Post imagery: ${src === 'l2'
                 ? 'L2 recent' : 'MRAP composite'}.`, 'success');
         }
+        perfMark('post-source switch complete');
         // Already repainted above when the cache had it; otherwise
         // refresh now that the server has rebuilt.
         if (!canSwapInstantly) {
@@ -755,6 +771,9 @@ async function prepareFire(padding) {
     // Only safe when the padding is unchanged: a padding change makes
     // /prepare re-crop and re-render, so the current PNG would be
     // stale. In that case we skip the prefetch and take the slow path.
+    perfReset(`open fire "${FIRE}" (padding=${padding == null
+        ? 'unchanged' : padding})`);
+
     // Show the imagery WITHOUT waiting for /prepare.
     //
     // For a fire that is already READY, /prepare does almost nothing --
@@ -776,6 +795,7 @@ async function prepareFire(padding) {
     }
 
     try {
+        const _tPrep = performance.now();
         const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/prepare`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
@@ -962,6 +982,60 @@ function dateColor(i, n) {
     return `hsl(${hue}, 85%, 55%)`;
 }
 
+// ---- Transfer / timing instrumentation ----------------------------
+// Everything the fire view waits on is timed and reported to the
+// console, so a slow open can be attributed to a specific stage
+// (server think-time vs transfer vs decode vs bake) instead of guessed
+// at. Times are wall-clock milliseconds from performance.now().
+const PERF = {t0: 0, marks: []};
+
+function perfReset(label) {
+    PERF.t0 = performance.now();
+    PERF.marks = [];
+    log(`[perf] --- ${label} ---`, 'dim');
+}
+
+function perfMark(label, extra) {
+    const dt = performance.now() - PERF.t0;
+    PERF.marks.push([label, dt]);
+    log(`[perf] ${dt.toFixed(0).padStart(6)} ms  ${label}`
+        + (extra ? `  ${extra}` : ''), 'dim');
+}
+
+function fmtBytes(b) {
+    if (!b && b !== 0) return '?';
+    if (b >= 1048576) return (b / 1048576).toFixed(2) + ' MB';
+    if (b >= 1024) return (b / 1024).toFixed(0) + ' kB';
+    return b + ' B';
+}
+
+// fetch() wrapper that reports server think-time (time to headers)
+// separately from transfer time. The split is the whole point: a slow
+// TTFB means the server is working, a slow body means bytes are the
+// problem, and they need different fixes.
+async function timedFetch(label, url, opts) {
+    const t0 = performance.now();
+    let resp;
+    try {
+        resp = await fetch(url, opts);
+    } catch (err) {
+        log(`[perf] FAILED ${label}: ${err.message}`, 'error');
+        throw err;
+    }
+    const tHeaders = performance.now();
+    const buf = await resp.arrayBuffer();
+    const tBody = performance.now();
+    const len = buf.byteLength;
+    const secs = Math.max(0.001, (tBody - tHeaders) / 1000);
+    log(`[perf] ${label}: status ${resp.status}, `
+        + `wait(TTFB) ${(tHeaders - t0).toFixed(0)} ms, `
+        + `transfer ${(tBody - tHeaders).toFixed(0)} ms, `
+        + `size ${fmtBytes(len)}, `
+        + `rate ${fmtBytes(len / secs)}/s`, 'dim');
+    return {resp, buf, ttfb: tHeaders - t0, transfer: tBody - tHeaders,
+            bytes: len};
+}
+
 // What the left pane currently has painted and baked, so a redundant
 // reload of the same thing can be skipped.
 let _lastPaintedKey = null;
@@ -985,9 +1059,18 @@ async function loadDatePlot() {
 
     let data = null;
     try {
+        const t0 = performance.now();
         const r = await fetch(
             `/api/fire/${encodeURIComponent(FIRE)}/date_plot`);
-        if (r.ok) data = await r.json();
+        const tH = performance.now();
+        if (r.ok) {
+            const txt = await r.text();
+            data = JSON.parse(txt);
+            log(`[perf] date_plot: wait ${(tH - t0).toFixed(0)} ms, `
+                + `size ${fmtBytes(txt.length)}, `
+                + `${(data.dates || []).length} date(s)`
+                + (data.reason ? `, reason="${data.reason}"` : ''), 'dim');
+        }
     } catch (_) { /* handled below */ }
 
     if (data && data.dates && data.dates.length) {
@@ -1137,11 +1220,21 @@ async function loadFireOverlays() {
         return;
     }
     try {
+        const t0 = performance.now();
         const r = await fetch(
             `/api/fire/${encodeURIComponent(FIRE)}/overlays`);
+        const tH = performance.now();
         if (!r.ok) return;
-        const data = await r.json();
+        const txt = await r.text();
+        const tB = performance.now();
+        const data = JSON.parse(txt);
         if (data.error) return;
+        log(`[perf] overlays (${src}): wait ${(tH - t0).toFixed(0)} ms, `
+            + `transfer ${(tB - tH).toFixed(0)} ms, `
+            + `size ${fmtBytes(txt.length)}, `
+            + `${(data.tiles || []).length} tile(s), `
+            + `${((data.bcws || {}).polygons || []).length} poly, `
+            + `${((data.bcws || {}).points || []).length} pt`, 'dim');
         _overlayCache.set(src, data);
         _fireOverlays = data;
         // Overlays usually resolve after the first image has painted,
@@ -1270,9 +1363,14 @@ async function bakeOverlaysIntoImage(pane, viewKey) {
     // only corrected itself after switching source (that reload
     // happened to bake an image that was by then in cache and
     // decoded).
+    const _tBake0 = performance.now();
+    let _tDecoded = _tBake0;
     if (!img.complete || !img.naturalWidth) {
         try {
             await img.decode();
+            _tDecoded = performance.now();
+            log(`[perf] image decode (${pane}): `
+                + `${(_tDecoded - _tBake0).toFixed(0)} ms`, 'dim');
         } catch (_) {
             // decode() rejects if src changes underneath us; the new
             // src will trigger its own bake via onload.
@@ -1324,6 +1422,9 @@ async function bakeOverlaysIntoImage(pane, viewKey) {
     // Mark BEFORE assigning: setting src re-fires onload, and without
     // the guard that would bake the already-baked image again, forever.
     _bakedKeys.set(img, key);
+    log(`[perf] overlay bake (${pane}): `
+        + `${(performance.now() - _tDecoded).toFixed(0)} ms `
+        + `at ${W}x${H}px`, 'dim');
     img.src = url;
     // The vectors are in the bitmap now, so the live canvas would
     // double-draw them.
@@ -1587,10 +1688,13 @@ function loadPaneImage(pane, viewKey) {
 
     const ck = cacheKeyFor(viewKey);
     if (ck && _previewBlobs.has(ck)) {
+        log(`[perf] preview ${viewKey} served from client cache `
+            + `(no network)`, 'dim');
         img.src = _previewBlobs.get(ck);
     } else {
         img.src = url;
-        if (ck) cachePreview(ck, url);
+        // announce=true: this is the fetch the user is waiting on.
+        if (ck) cachePreview(ck, url, true);
     }
 
     img.onload = () => {

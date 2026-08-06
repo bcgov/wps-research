@@ -119,6 +119,12 @@ class FireRoutes:
     # -- Fire API --
 
     def handle_api_prepare(self, fire_numbe):
+        # Timed end to end. The client reports its own round trip; the
+        # difference between the two is network. If this number is
+        # small and the client's is large, the wait is transfer, not
+        # server work -- which is the distinction that has been hard to
+        # make from the outside.
+        _t0 = time.time()
         fire_numbe = unquote(fire_numbe)
         if fire_numbe not in state.fires:
             self._send_json({'error': 'Fire not found'}, 404)
@@ -208,6 +214,12 @@ class FireRoutes:
                     has_brush = True
                     break
 
+        sys.stderr.write(
+            f'[perf] /prepare {fire_numbe}: '
+            f'{(time.time() - _t0) * 1000:.0f} ms server-side '
+            f'(status={fire.status.value}, '
+            f'views={len(fire.available_views)})\n')
+        sys.stderr.flush()
         self._send_json({
             'status': fire.status.value,
             'views': fire.available_views,
@@ -450,6 +462,16 @@ class FireRoutes:
             self._send_json(
                 {'error': f"Preview '{view}' not available"}, 404)
             return
+        try:
+            _sz = os.path.getsize(png)
+        except OSError:
+            _sz = -1
+        sys.stderr.write(
+            f'[perf] /preview/{view} {fire_numbe}: '
+            f'{(time.time() - _t_prev) * 1000:.0f} ms server-side, '
+            f'{_sz / 1e6:.2f} MB, src={_src or "current"}, '
+            f'file={os.path.basename(png)}\n')
+        sys.stderr.flush()
         self._send_file(png, 'image/png')
 
     def handle_api_comparison(self, fire_numbe):
