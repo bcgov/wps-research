@@ -784,36 +784,13 @@ function updateSampleSize() {
 // already rendered; if /prepare later reports different available
 // views, the normal path re-issues loadPaneImage() and corrects it.
 function optimisticFirstPaint() {
-    const view = leftView || 'post';
-    const src = currentPostSource || 'l2';
-    const img = document.getElementById('main-img');
-    const loadMsg = document.getElementById('loading-msg');
-    if (!img) return;
-
-    const modePart = (view === 'hint') ? `:${currentHintMode}` : '';
-    const key = `${src}:${view}${modePart}:${_previewStamp}`;
-    const hintQ = (view === 'hint') ? `&hint=${currentHintMode}` : '';
-    const url = `/api/fire/${encodeURIComponent(FIRE)}/preview/${view}`
-              + `?src=${src}${hintQ}&t=${_previewStamp}`;
-
-    // Goes through the SAME shared fetch as loadPaneImage. Previously
-    // this issued its own <img> load while loadPaneImage issued a
-    // second fetch of the identical file -- two (sometimes three)
-    // concurrent transfers of the same multi-megabyte PNG, competing
-    // for one connection. Joining the shared fetch means whichever
-    // caller arrives second simply awaits the first.
-    getPreviewObjectURL(key, url, true).then((obj) => {
-        if (img.dataset.painted === key) return;
-        img.dataset.painted = key;
-        img.onload = () => {
-            if (loadMsg) loadMsg.style.display = 'none';
-            img.style.display = 'block';
-            _lastPaintedKey = key;
-            bakeOverlaysIntoImage('left', view);
-        };
-        img.src = obj;
-    }).catch(() => { /* the normal path will retry */ });
+    // Kept as an entry point, but it no longer paints independently.
+    // Owning a second assignment to img.src was the source of the
+    // out-of-order updates; loadPaneImage is now the only writer and
+    // is already cheap when the bytes are cached.
+    loadPaneImage('left', leftView || 'post');
 }
+
 
 async function prepareFire(padding) {
     const loadMsg = document.getElementById('loading-msg');
@@ -1425,85 +1402,14 @@ function paintOverlayVectors(ctx, unit) {
 // for. Toggling Overlays off restores the untouched image.
 const _bakedKeys = new WeakMap();
 
-async function bakeOverlaysIntoImage(pane, viewKey) {
-    const { img } = getPaneElements(pane);
-    const cv = overlayFor(pane);
-    if (!img) return;
-
-    // The image MUST be decoded before it can be drawn into a canvas.
-    // Baking a not-yet-decoded <img> silently draws nothing, leaving a
-    // composite that is vectors-on-blank -- which is exactly the
-    // "overlays appear but the imagery doesn't" symptom, and why it
-    // only corrected itself after switching source (that reload
-    // happened to bake an image that was by then in cache and
-    // decoded).
-    const _tBake0 = performance.now();
-    let _tDecoded = _tBake0;
-    if (!img.complete || !img.naturalWidth) {
-        try {
-            await img.decode();
-            _tDecoded = performance.now();
-            log(`[perf] image decode (${pane}): `
-                + `${(_tDecoded - _tBake0).toFixed(0)} ms`, 'dim');
-        } catch (_) {
-            // decode() rejects if src changes underneath us; the new
-            // src will trigger its own bake via onload.
-            return;
-        }
-    }
-    if (!img.naturalWidth) return;
-
-    const key = overlaysVisible && _fireOverlays
-        ? `${currentPostSource}:${viewKey}:${currentHintMode}:`
-          + `${_previewStamp}:on`
-        : `${viewKey}:off`;
-    if (_bakedKeys.get(img) === key) return;   // already correct
-
-    if (!overlaysVisible || !_fireOverlays) {
-        _bakedKeys.set(img, key);
-        if (cv) cv.style.display = 'none';
-        return;                                 // plain image as loaded
-    }
-
-    const cropW = _fireOverlays.width || img.naturalWidth;
-    const cropH = _fireOverlays.height || img.naturalHeight;
-    const W = img.naturalWidth, H = img.naturalHeight;
-    const kx = W / cropW, ky = H / cropH;
-    // Only annotate an image that really is this crop (a comparison
-    // figure has its own aspect ratio and must be left alone).
-    if (!cropW || !cropH || Math.abs(kx - ky) > 0.02 * Math.max(kx, ky)) {
-        if (cv) cv.style.display = 'none';
-        return;
-    }
-
-    const off = document.createElement('canvas');
-    off.width = W;
-    off.height = H;
-    const ctx = off.getContext('2d');
-    ctx.drawImage(img, 0, 0, W, H);
-    ctx.save();
-    ctx.scale(kx, ky);
-    paintOverlayVectors(ctx, kx);
-    ctx.restore();
-
-    const url = await new Promise((res) => {
-        try { off.toBlob((b) => res(b ? URL.createObjectURL(b) : null),
-                         'image/png'); }
-        catch (_) { res(null); }
-    });
-    if (!url) return;
-
-    // Mark BEFORE assigning: setting src re-fires onload, and without
-    // the guard that would bake the already-baked image again, forever.
-    _bakedKeys.set(img, key);
-    log(`[perf] overlay bake (${pane}): `
-        + `${(performance.now() - _tDecoded).toFixed(0)} ms `
-        + `at ${W}x${H}px`, 'dim');
-    img.src = url;
-    // The vectors are in the bitmap now, so the live canvas would
-    // double-draw them.
-    if (cv) cv.style.display = 'none';
+// Overlays arriving after an image has painted must go through the
+// renderer, not reassign img.src directly -- a direct assignment races
+// whatever render is currently in flight. Re-running loadPaneImage is
+// cheap (the bytes are cached) and keeps a single writer.
+function bakeOverlaysIntoImage(pane, viewKey) {
+    loadPaneImage(pane, viewKey);
 }
+
 
 let overlaysVisible = true;
 
@@ -1708,130 +1614,176 @@ const _paneFitState = {
     right: { fitted: false, fitW: 0, fitH: 0 },
 };
 
-function loadPaneImage(pane, viewKey) {
+// One deterministic path from "show view X of source Y" to pixels.
+//
+// This used to be several cooperating async paths -- an optimistic
+// paint, a cache lookup, a shared fetch, a bake step -- each assigning
+// img.src and each installing its own img.onload. Late completions
+// therefore landed out of order: a stale response could overwrite a
+// newer one, and a bake could re-enter the load handler and redo the
+// fit. That is what produced "switch twice before the right image
+// appears" and overlays lagging behind the imagery.
+//
+// The fix is to stop using img.onload as control flow. Everything is
+// resolved off-screen first -- fetch, decode, composite -- and the
+// visible <img> is assigned exactly ONCE, at the end, only if this
+// render is still the current one for its pane. A generation counter
+// makes "still current" precise, so any number of rapid switches
+// collapse to the last one rather than racing.
+const _paneGen = {left: 0, right: 0};
+
+function previewUrlFor(viewKey) {
+    const runActive = selectedRun !== null && RUN_VIEWS.has(viewKey);
+    if (runActive && viewKey === 'result') {
+        return `/api/fire/${encodeURIComponent(FIRE)}/serial/${selectedRun}/image?t=${Date.now()}`;
+    } else if (runActive && viewKey === 'comparison') {
+        return `/api/fire/${encodeURIComponent(FIRE)}/serial/${selectedRun}/image?type=comparison&t=${Date.now()}`;
+    } else if (runActive && viewKey === 'brush_comparison') {
+        return `/api/fire/${encodeURIComponent(FIRE)}/serial/${selectedRun}/image?type=brush&t=${Date.now()}`;
+    } else if (viewKey === 'comparison') {
+        return `/api/fire/${encodeURIComponent(FIRE)}/comparison?t=${Date.now()}`;
+    } else if (viewKey === 'brush_comparison') {
+        return `/api/fire/${encodeURIComponent(FIRE)}/brush_comparison?t=${Date.now()}`;
+    }
+    // Source AND hint mode must both be in the URL: they select
+    // different server-side files, not just different cache entries.
+    const modePart = (viewKey === 'hint') ? `&hint=${currentHintMode}` : '';
+    return `/api/fire/${encodeURIComponent(FIRE)}/preview/${viewKey}`
+        + `?src=${currentPostSource}${modePart}&t=${previewStamp()}`;
+}
+
+// Composite the vector overlays onto a decoded image, returning a blob
+// URL. Returns null when there is nothing to draw, so the caller can
+// use the original bytes untouched.
+async function compositeOverlays(bitmap, cropW, cropH) {
+    if (!overlaysVisible || !_fireOverlays) return null;
+    const W = bitmap.naturalWidth || bitmap.width;
+    const H = bitmap.naturalHeight || bitmap.height;
+    const cw = cropW || W, chh = cropH || H;
+    const kx = W / cw, ky = H / chh;
+    // A run comparison figure has its own aspect ratio and must not be
+    // annotated with geometry that does not belong to it.
+    if (!cw || !chh || Math.abs(kx - ky) > 0.02 * Math.max(kx, ky)) {
+        return null;
+    }
+    const off = document.createElement('canvas');
+    off.width = W;
+    off.height = H;
+    const ctx = off.getContext('2d');
+    ctx.drawImage(bitmap, 0, 0, W, H);
+    ctx.save();
+    ctx.scale(kx, ky);
+    paintOverlayVectors(ctx, kx);
+    ctx.restore();
+    return await new Promise((res) => {
+        try { off.toBlob((b) => res(b ? URL.createObjectURL(b) : null),
+                         'image/png'); }
+        catch (_) { res(null); }
+    });
+}
+
+function applyPaneFit(pane, img) {
+    const fs = _paneFitState[pane];
+    const dimsChanged = fs.fitted
+        && (img.naturalWidth !== fs.fitW || img.naturalHeight !== fs.fitH);
+    // In syncPanes the right pane mirrors left's transform — skip the
+    // fit so we don't clobber the inherited scale. The fit state is
+    // still recorded so a later un-sync doesn't trigger a spurious
+    // refit.
+    const inheritFromLeft = syncPanes && splitActive && pane === 'right';
+    if (!inheritFromLeft && (!fs.fitted || dimsChanged)) {
+        zoomFitPane(pane);
+    } else {
+        updateTransformForPane(pane);
+    }
+    fs.fitted = true;
+    fs.fitW = img.naturalWidth;
+    fs.fitH = img.naturalHeight;
+}
+
+async function loadPaneImage(pane, viewKey) {
     if (!viewKey) return;
     const { img } = getPaneElements(pane);
     const loadMsg = document.getElementById('loading-msg');
+    const gen = ++_paneGen[pane];
+    const stale = () => _paneGen[pane] !== gen;
 
-    let url;
-    const runActive = selectedRun !== null && RUN_VIEWS.has(viewKey);
+    // Tracking updates immediately: the UI should reflect the user's
+    // choice even while the bytes are still arriving.
+    if (pane === 'left') leftView = viewKey; else rightView = viewKey;
+    updateSubtitle(pane, viewKey);
 
-    if (runActive && viewKey === 'result') {
-        url = `/api/fire/${encodeURIComponent(FIRE)}/serial/${selectedRun}/image?t=${Date.now()}`;
-    } else if (runActive && viewKey === 'comparison') {
-        url = `/api/fire/${encodeURIComponent(FIRE)}/serial/${selectedRun}/image?type=comparison&t=${Date.now()}`;
-    } else if (runActive && viewKey === 'brush_comparison') {
-        url = `/api/fire/${encodeURIComponent(FIRE)}/serial/${selectedRun}/image?type=brush&t=${Date.now()}`;
-    } else if (viewKey === 'comparison') {
-        url = `/api/fire/${encodeURIComponent(FIRE)}/comparison?t=${Date.now()}`;
-    } else if (viewKey === 'brush_comparison') {
-        url = `/api/fire/${encodeURIComponent(FIRE)}/brush_comparison?t=${Date.now()}`;
-    } else {
-        // The source MUST be in the URL. Without it both sources share
-        // one URL, so after a switch the browser replays the previous
-        // source's cached response -- which is why MRAP showed nothing
-        // (it re-served the L2 bytes) and why that wrong image then got
-        // stored under the MRAP cache key.
-        // The hint overlay PNG depends on the HINT MODE as well as the
-        // post source. Without the mode in the URL/key, switching from
-        // "Red wins (post)" to "Red wins (diff)" re-served the cached
-        // image -- which is exactly why the two masks looked identical
-        // in all four source/mode combinations.
-        const modePart = (viewKey === 'hint')
-            ? `&hint=${currentHintMode}` : '';
-        url = `/api/fire/${encodeURIComponent(FIRE)}/preview/${viewKey}`
-            + `?src=${currentPostSource}${modePart}&t=${previewStamp()}`;
-    }
-    let retried = false;
-    // Serve from the blob cache when we already hold these exact bytes.
-    // Switching post source re-requests the same view keys, and without
-    // this every switch re-downloads the PNGs -- which is what made the
-    // toggle feel slow even though the server had already built both.
-    // If the optimistic first paint already put exactly this
-    // (source, view, hint) on screen and baked it, re-issuing the load
-    // only costs a re-decode and a re-bake -- visible as a flicker and
-    // a stall right after the page settles.
-    const paintKey = `${currentPostSource}:${viewKey}:`
-        + `${viewKey === 'hint' ? currentHintMode : ''}:${_previewStamp}`;
-    if (pane === 'left' && _lastPaintedKey === paintKey
-            && img.complete && img.naturalWidth
-            && img.style.display === 'block') {
-        return;
-    }
-    if (pane === 'left') _lastPaintedKey = paintKey;
-
+    const url = previewUrlFor(viewKey);
     const ck = cacheKeyFor(viewKey);
-    if (ck && _previewBlobs.has(ck)) {
-        log(`[perf] preview ${viewKey} served from client cache `
-            + `(no network)`, 'dim');
-        img.src = _previewBlobs.get(ck);
-    } else if (ck) {
-        // ONE download, shared. Assigning img.src = url here as well
-        // would start a second, independent transfer of the same file.
-        getPreviewObjectURL(ck, url, true)
-            .then((obj) => {
-                img.src = obj;
-                // Assigning src a value the element ALREADY holds
-                // fires no load event -- which happens whenever the
-                // optimistic first paint resolved the same shared
-                // fetch a moment earlier. The handler below would then
-                // never run and the pane would sit blank until some
-                // later action re-assigned a different src (switching
-                // source and back). Drive it manually when the image
-                // is already complete.
-                if (img.complete && img.naturalWidth) {
-                    if (img.onload) img.onload();
-                }
-            })
-            .catch(() => { img.src = url; });   // fall back on error
-    } else {
-        img.src = url;   // uncacheable view (run-specific images)
-    }
 
-    img.onload = () => {
-        if (pane === 'left') loadMsg.style.display = 'none';
-        img.style.display = 'block';
-        // Composite the vectors into the bitmap so the browser's own
-        // "Save image" / "Open image in new tab" include them.
-        bakeOverlaysIntoImage(pane, viewKey);
-        const fs = _paneFitState[pane];
-        const dimsChanged = fs.fitted
-            && (img.naturalWidth !== fs.fitW
-                || img.naturalHeight !== fs.fitH);
-        // In syncPanes the right pane mirrors left's transform — skip the
-        // fit so we don't clobber the inherited scale. The fit state is
-        // still recorded so a later un-sync doesn't trigger a spurious
-        // refit.
-        const inheritFromLeft = syncPanes && splitActive && pane === 'right';
-        if (!inheritFromLeft && (!fs.fitted || dimsChanged)) {
-            zoomFitPane(pane);
+    let srcUrl;
+    try {
+        if (ck) {
+            if (_previewBlobs.has(ck)) {
+                log(`[perf] preview ${viewKey} from client cache`, 'dim');
+            }
+            srcUrl = await getPreviewObjectURL(ck, url, !_previewBlobs.has(ck));
         } else {
-            updateTransformForPane(pane);
+            srcUrl = url;      // run-specific images are not cacheable
         }
-        fs.fitted = true;
-        fs.fitW = img.naturalWidth;
-        fs.fitH = img.naturalHeight;
-    };
-    img.onerror = () => {
-        // Transient 404 on run switch — the serial overlay PNG may be
-        // mid-generation. Retry once before giving up.
-        if (!retried) {
-            retried = true;
-            setTimeout(() => { img.src = url + '&_retry=' + Date.now(); }, 500);
-            return;
-        }
+    } catch (err) {
+        if (stale()) return;
         if (pane === 'left') {
             loadMsg.style.display = 'block';
-            loadMsg.textContent = `View "${getViewLabel(viewKey)}" not available`;
+            loadMsg.textContent =
+                `View "${getViewLabel(viewKey)}" not available`;
         }
         img.style.display = 'none';
-    };
+        return;
+    }
+    if (stale()) return;
 
-    // Update tracking
-    if (pane === 'left') leftView = viewKey;
-    else rightView = viewKey;
-    updateSubtitle(pane, viewKey);
+    // Decode off-screen. Nothing touches the visible element until the
+    // pixels exist, so there is no window where the pane shows a
+    // half-applied state.
+    const probe = new Image();
+    probe.decoding = 'async';
+    try {
+        probe.src = srcUrl;
+        await probe.decode();
+    } catch (_) {
+        if (stale()) return;
+        if (pane === 'left') {
+            loadMsg.style.display = 'block';
+            loadMsg.textContent =
+                `View "${getViewLabel(viewKey)}" not available`;
+        }
+        img.style.display = 'none';
+        return;
+    }
+    if (stale()) return;
+
+    let finalUrl = srcUrl;
+    if (_fireOverlays && overlaysVisible) {
+        const t0 = performance.now();
+        const baked = await compositeOverlays(
+            probe, _fireOverlays.width, _fireOverlays.height);
+        if (stale()) return;
+        if (baked) {
+            finalUrl = baked;
+            log(`[perf] overlay bake (${pane}): `
+                + `${(performance.now() - t0).toFixed(0)} ms`, 'dim');
+        }
+    }
+
+    // Single assignment. Wait for it to decode too, so the fit maths
+    // below reads real dimensions rather than the previous image's.
+    img.src = finalUrl;
+    try {
+        if (!img.complete || !img.naturalWidth) await img.decode();
+    } catch (_) { /* superseded */ }
+    if (stale()) return;
+
+    if (pane === 'left') loadMsg.style.display = 'none';
+    img.style.display = 'block';
+    applyPaneFit(pane, img);
 }
+
 
 // -----------------------------------------------------------------------
 // Dropdown change handler (controls active pane)
