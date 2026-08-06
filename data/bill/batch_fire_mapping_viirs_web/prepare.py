@@ -466,6 +466,19 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
         except Exception:
             pass
 
+    # Overlays are cached per crop_bin, and the switch just repointed
+    # it at the other source's stack -- so this source needs its own
+    # cache entry. Building it here means the background prebuild also
+    # warms the overlays for the source the user has not opened yet,
+    # instead of that cost landing on the first switch.
+    try:
+        from .fire_overlays import build_fire_overlays
+        build_fire_overlays(state, fire)
+    except Exception as exc:
+        sys.stderr.write(
+            f'[prepare] overlay build after source switch failed: '
+            f'{exc}\n')
+
     if not restored:
         # Render EVERY hint mode for this source before stashing, so
         # the stash carries all of them and later hint toggles never

@@ -693,6 +693,36 @@ function updateSampleSize() {
 // -----------------------------------------------------------------------
 // Prepare fire on page load
 // -----------------------------------------------------------------------
+// Paint the last-known view from cache or disk before /prepare
+// returns. Safe because it only ever displays an image the server
+// already rendered; if /prepare later reports different available
+// views, the normal path re-issues loadPaneImage() and corrects it.
+function optimisticFirstPaint() {
+    const view = leftView || 'post';
+    const src = currentPostSource || 'l2';
+    const img = document.getElementById('main-img');
+    const loadMsg = document.getElementById('loading-msg');
+    if (!img) return;
+
+    const modePart = (view === 'hint') ? `:${currentHintMode}` : '';
+    const key = `${src}:${view}${modePart}:${_previewStamp}`;
+    const hintQ = (view === 'hint') ? `&hint=${currentHintMode}` : '';
+    const url = _previewBlobs.get(key)
+        || `/api/fire/${encodeURIComponent(FIRE)}/preview/${view}`
+           + `?src=${src}${hintQ}&t=${_previewStamp}`;
+
+    const probe = new Image();
+    probe.onload = () => {
+        // Only take over if the real path has not already painted.
+        if (img.style.display === 'block') return;
+        img.src = url;
+        img.style.display = 'block';
+        if (loadMsg) loadMsg.style.display = 'none';
+        bakeOverlaysIntoImage('left', view);
+    };
+    probe.src = url;
+}
+
 async function prepareFire(padding) {
     const loadMsg = document.getElementById('loading-msg');
     const img = document.getElementById('main-img');
@@ -715,16 +745,24 @@ async function prepareFire(padding) {
     // Only safe when the padding is unchanged: a padding change makes
     // /prepare re-crop and re-render, so the current PNG would be
     // stale. In that case we skip the prefetch and take the slow path.
+    // Show the imagery WITHOUT waiting for /prepare.
+    //
+    // For a fire that is already READY, /prepare does almost nothing --
+    // it validates status and returns metadata. Yet the first preview
+    // request only went out after that response had been received AND
+    // ~80 lines of metadata handling had run, so the whole visible
+    // wait was serialised behind a call that had no work to do. The
+    // pixels do not depend on any of that metadata: the preview for
+    // (source, view) is already sitting on disk, rendered when the
+    // fire was created.
+    //
+    // So paint it immediately and let /prepare fill in the panel
+    // behind it. Skipped when padding changed, because then /prepare
+    // really does re-crop and re-render and the current PNG is stale.
     if (padding == null) {
         try {
-            const guessSrc = currentPostSource || 'l2';
-            const key = `${guessSrc}:post:${_previewStamp}`;
-            if (!_previewBlobs.has(key)) {
-                cachePreview(key,
-                    `/api/fire/${encodeURIComponent(FIRE)}/preview/post`
-                    + `?src=${guessSrc}&t=${_previewStamp}`);
-            }
-        } catch (_) { /* prefetch is best-effort */ }
+            optimisticFirstPaint();
+        } catch (_) { /* best-effort; the normal path still runs */ }
     }
 
     try {
@@ -812,13 +850,15 @@ async function prepareFire(padding) {
         // toggle of either menu is served from memory. The server has
         // already stashed both sources (worker prebuild), so these are
         // plain file reads. Deferred a beat so the first visible image
-        // is not competing with the warm fetches for bandwidth.
+        // is not competing with the warm fetches for bandwidth --
+        // short, because the optimistic first paint has usually
+        // already put that image on screen by now.
         setTimeout(() => {
             for (const src of ['l2', 'mrap']) {
                 warmSourceCache(src);
                 warmHintCache(src);
             }
-        }, 250);
+        }, 120);
 
         updateSampleSize();
         loadPaneImage('left', leftView);

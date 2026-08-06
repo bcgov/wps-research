@@ -826,6 +826,25 @@ def _viirs_worker(fire: FireInfo) -> None:
             # the stash is complete and hint toggles are cache hits.
             pregenerate_all_hints(fire)
             _stash_previews(fire, getattr(fire, 'post_source', 'l2'))
+            # Build the vector overlays now rather than on first open.
+            # This reads the tile shapefile, reprojects every
+            # intersecting footprint and rasterizes the per-tile masks
+            # -- seconds of work that was previously paid for by the
+            # user sitting on "Preparing fire data...". The result is
+            # cached beside the stack, so opening the fire is a file
+            # read.
+            try:
+                from .fire_overlays import build_fire_overlays
+                ov = build_fire_overlays(state, fire)
+                fire.console_log.append(
+                    f'  Pre-built map overlays: '
+                    f'{len(ov.get("tiles", []))} tile outline(s), '
+                    f'{len(ov.get("bcws", {}).get("polygons", []))} BCWS '
+                    f'polygon(s), '
+                    f'{len(ov.get("bcws", {}).get("points", []))} point(s).')
+            except Exception as exc:
+                sys.stderr.write(
+                    f'[viirs_worker] overlay pre-build skipped: {exc}\n')
             threading.Thread(
                 target=prebuild_other_source, args=(fire,),
                 daemon=True).start()
