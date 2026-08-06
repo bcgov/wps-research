@@ -306,6 +306,50 @@ class FireRoutes:
         except Exception as exc:
             self._send_json({'error': str(exc)}, 500)
 
+    def handle_api_date_plot_rebuild(self, fire_numbe):
+        """Regenerate the per-acquisition coverage sidecar.
+
+        The sidecar is a by-product of BUILDING the L2 buffer, so a
+        fire whose stack was already cached (created before the feature
+        existed, or reused across a restart) has none. Recomputing the
+        coverage means re-extracting the same zips, so this simply
+        forces a stack rebuild -- run in the background because that is
+        tens of seconds of work, with progress visible in the fire
+        console like any other build.
+        """
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        if getattr(fire, 'post_source', 'l2') != 'l2':
+            self._send_json(
+                {'error': 'Coverage applies to the L2 source only.'}, 400)
+            return
+
+        def _work():
+            try:
+                from ..aoi_stack import ensure_aoi_stack
+                fire.console_log.append(
+                    '  Rebuilding L2 buffer to generate per-acquisition '
+                    'coverage (this re-reads the source zips) ...')
+                ensure_aoi_stack(
+                    fire.fire_numbe, fire.bbox_native, force=True,
+                    instance_key=getattr(state, 'shared_root', '') or '',
+                    post_source='l2',
+                    ref_raster=(state.rasters_by_year.get(fire.fire_year)
+                                or state.raster_path),
+                    log_cb=lambda m: fire.console_log.append(m.rstrip()))
+                fire.console_log.append(
+                    '  Coverage generated -- the date plot will appear '
+                    'shortly.')
+            except Exception as exc:
+                fire.console_log.append(
+                    f'  Coverage generation failed: {exc}')
+
+        threading.Thread(target=_work, daemon=True).start()
+        self._send_json({'ok': True, 'started': True})
+
     def handle_api_preview(self, fire_numbe, view):
         fire_numbe = unquote(fire_numbe)
         if fire_numbe not in state.fires:

@@ -206,6 +206,9 @@ class BaseHandler:
             r'^/api/fire/(?P<fire_numbe>[^/]+)/post_source$'),
          'handle_api_post_source'),
         (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/date_plot/rebuild$'),
+         'handle_api_date_plot_rebuild'),
+        (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/accept$'),
          'handle_api_accept'),
         (re.compile(

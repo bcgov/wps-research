@@ -952,34 +952,77 @@ function dateColor(i, n) {
     return `hsl(${hue}, 85%, 55%)`;
 }
 
+let _datePlotRebuildAsked = false;
+let _datePlotPoll = null;
+
 async function loadDatePlot() {
     const box = document.getElementById('date-plot-box');
+    const legend = document.getElementById('date-plot-legend');
+    const cv = document.getElementById('date-plot');
     if (!box) return;
-    if (currentPostSource !== 'l2') { box.style.display = 'none'; return; }
+
+    // Only meaningful for L2: MRAP is a single composite with no
+    // per-acquisition structure.
+    if (currentPostSource !== 'l2') {
+        box.style.display = 'none';
+        if (_datePlotPoll) { clearInterval(_datePlotPoll); _datePlotPoll = null; }
+        return;
+    }
+
+    let data = null;
     try {
         const r = await fetch(
             `/api/fire/${encodeURIComponent(FIRE)}/date_plot`);
-        if (!r.ok) { box.style.display = 'none'; return; }
-        const data = await r.json();
-        if (data.error || !data.dates || !data.dates.length) {
-            box.style.display = 'none';
-            // Say why rather than silently showing nothing. The
-            // sidecar is written when the L2 buffer is BUILT, so a
-            // fire whose stack was already cached from before this
-            // feature existed has no coverage data until it is
-            // rebuilt.
-            if (data.reason) {
-                log(`Date plot unavailable: ${data.reason}. `
-                    + `Recreate the fire (or delete its /ram stack) to `
-                    + `generate per-acquisition coverage.`, 'dim');
-            }
-            return;
-        }
+        if (r.ok) data = await r.json();
+    } catch (_) { /* handled below */ }
+
+    if (data && data.dates && data.dates.length) {
         _datePlot = data;
         box.style.display = '';
+        if (cv) cv.style.display = '';
         drawDatePlot();
-    } catch (_) {
-        box.style.display = 'none';
+        // Re-measure after layout settles: the box was display:none a
+        // moment ago, so the first measurement can be short.
+        requestAnimationFrame(drawDatePlot);
+        if (_datePlotPoll) { clearInterval(_datePlotPoll); _datePlotPoll = null; }
+        return;
+    }
+
+    // No coverage on record. Show the box with an explanation rather
+    // than hiding silently -- an empty panel gave no clue that the
+    // feature existed or why it was blank.
+    box.style.display = '';
+    if (cv) cv.style.display = 'none';
+    if (legend) {
+        legend.innerHTML =
+            '<div style="color:#777;line-height:1.4">'
+            + 'Coverage data is produced when the L2 buffer is built. '
+            + 'This fire is using a buffer that was already cached, so '
+            + 'none was recorded.<br><span id="date-plot-state" '
+            + 'style="color:#3a7bd5"></span></div>';
+    }
+
+    // Ask the server to regenerate it -- once per page load, since it
+    // re-reads the source zips and takes tens of seconds.
+    if (!_datePlotRebuildAsked) {
+        _datePlotRebuildAsked = true;
+        const st = document.getElementById('date-plot-state');
+        if (st) st.textContent = 'Generating now (this re-reads the '
+                               + 'source imagery; watch the console) ...';
+        try {
+            await fetch(
+                `/api/fire/${encodeURIComponent(FIRE)}/date_plot/rebuild`,
+                {method: 'POST',
+                 headers: {'Content-Type': 'application/json',
+                           'X-Requested-With': 'fetch'},
+                 body: '{}'});
+            // Poll until the sidecar lands, then draw it.
+            if (_datePlotPoll) clearInterval(_datePlotPoll);
+            _datePlotPoll = setInterval(loadDatePlot, 5000);
+        } catch (err) {
+            if (st) st.textContent = 'Could not start generation: '
+                                   + err.message;
+        }
     }
 }
 
@@ -994,7 +1037,15 @@ function drawDatePlot() {
     // taller than wide, so width is the binding constraint; height
     // follows from the aspect ratio and is capped so a very tall AOI
     // cannot push the legend off screen.
-    const cssW = Math.max(80, cv.clientWidth || cv.parentElement.clientWidth);
+    // getBoundingClientRect survives a just-unhidden element better
+    // than clientWidth, which can still read 0 in the same tick the
+    // container became visible.
+    const measured = cv.getBoundingClientRect().width
+        || (cv.parentElement
+            ? cv.parentElement.getBoundingClientRect().width : 0)
+        || cv.clientWidth
+        || (cv.parentElement ? cv.parentElement.clientWidth : 0);
+    const cssW = Math.max(120, Math.round(measured));
     const maxH = 260;
     let cssH = cssW * (H / W);
     let scale = cssW / W;
