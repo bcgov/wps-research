@@ -36,19 +36,6 @@
     <span id="queue-banner-text"></span>
 </div>
 
-<!-- Stage-aware progress bar — visible only while THIS fire is
-     mapping or preparing. -->
-<div id="progress-bar" class="progress-bar is-collapsed">
-    <div class="progress-header">
-        <span id="progress-title">Mapping ...</span>
-        <span id="progress-eta" class="progress-eta"></span>
-    </div>
-    <div class="progress-track">
-        <div id="progress-fill" class="progress-fill"></div>
-    </div>
-    <div id="progress-stages" class="progress-stages"></div>
-</div>
-
 <!-- Toast container — cross-fire notifications (map complete, rebrush
      done, etc.). Populated by pollNotifications(). -->
 <div id="toast-container" class="toast-container" aria-live="polite"></div>
@@ -90,6 +77,27 @@
                 <img id="right-img" style="display:none" alt="Comparison view">
                 <canvas id="right-overlay" class="fire-overlay"></canvas>
             </div>
+        </div>
+
+        <!-- Stage-aware progress bar — visible only while THIS fire is
+             mapping or preparing.
+
+             Deliberately placed BELOW the image viewer and inside the
+             image panel. At the top of the document it sat above
+             .main-content, so showing it reflowed everything beneath:
+             the view menus and the imagery jumped down the moment a
+             run started, and jumped back when it ended. Here it grows
+             into the space under the viewer instead, leaving the
+             controls and image fixed. -->
+        <div id="progress-bar" class="progress-bar is-collapsed">
+            <div class="progress-header">
+                <span id="progress-title">Mapping ...</span>
+                <span id="progress-eta" class="progress-eta"></span>
+            </div>
+            <div class="progress-track">
+                <div id="progress-fill" class="progress-fill"></div>
+            </div>
+            <div id="progress-stages" class="progress-stages"></div>
         </div>
     </div>
 
@@ -1261,29 +1269,14 @@ function initPaneInteraction(pane) {
                         e.deltaY < 0 ? 1.15 : 1 / 1.15);
     }, {passive: false});
 
-    // Right-button pan, matching the province-wide overview in the
-    // new-fire page. The pane already pans on left-drag; this adds the
-    // same gesture on button 2 so muscle memory carries between the
-    // two interfaces, which matters most when zoomed in.
-    //
-    // Suppressing the context menu is not cosmetic: without it the
-    // browser menu opens on right-press and the matching mouseup is
-    // never delivered, leaving the pan stuck on.
-    area.addEventListener('contextmenu', (e) => e.preventDefault());
-
+    // NOTE: the right mouse button is deliberately NOT bound here.
+    // Panning already works on left-drag in this view, so binding
+    // button 2 as well only cost the native context menu (save image,
+    // open in new tab, inspect) that is genuinely useful over the
+    // imagery. The province-wide overview is the opposite case -- there
+    // the left button draws the AOI rectangle, so panning has nowhere
+    // else to live and the right button is worth spending.
     area.addEventListener('mousedown', (e) => {
-        if (e.button === 2) {
-            setActivePane(pane);
-            isDragging = true;
-            dragPane = pane;
-            dragStartX = e.clientX;
-            dragStartY = e.clientY;
-            dragStartPanX = paneState[pane].panX;
-            dragStartPanY = paneState[pane].panY;
-            area.classList.add('dragging');
-            e.preventDefault();
-            return;
-        }
         if (e.button !== 0) return;
         setActivePane(pane);
         isDragging = true;

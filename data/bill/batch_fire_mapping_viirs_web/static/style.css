@@ -923,7 +923,12 @@ tbody tr.row-mapping:hover { background: #ede1ff; }
 .progress-bar {
     padding: 10px 18px;
     background: #f2f7ff;
-    border-bottom: 1px solid #c5ddfd;
+    /* Sits at the BOTTOM of the image panel now, so the divider
+       belongs on its top edge. */
+    border-top: 1px solid #c5ddfd;
+    /* Never absorb flex space from the viewer above it: the bar grows
+       only to its own content height, and the viewer keeps the rest. */
+    flex: none;
     /* Drop-down animation — see .is-collapsed below. */
     overflow: hidden;
     max-height: 240px;
