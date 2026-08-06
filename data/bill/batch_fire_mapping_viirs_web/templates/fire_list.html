@@ -613,7 +613,7 @@ function render() {
             <td style="white-space:nowrap">${fmtCreated(f.created_at)}</td>
             <td>${prevBadge}${badge}${subStage}${errMsg}</td>
             <td>${overrideBadge}<button class="btn btn-secondary" style="font-size:11px;padding:2px 6px" onclick="openOverrideModal('${fireEnc}')">Edit</button></td>
-            <td><a href="/fire/${fireEnc}" class="btn" onclick="markFireOpened('${fireEnc}')">Open</a>${cancelBtn}</td>
+            <td><a href="/fire/${fireEnc}" class="btn" onclick="markFireOpened('${fireEnc}')" onmouseenter="prefetchFirePreview('${fireEnc}')">Open</a>${cancelBtn}</td>
         `;
         tbody.appendChild(tr);
     }
@@ -1307,6 +1307,26 @@ async function cancelCreate(fireEnc) {
         render();
         refreshFires();
     }
+}
+
+// Warm the browser cache with a fire's first preview when the pointer
+// lands on its Open button. Hovering precedes clicking by a few
+// hundred milliseconds, which is often enough to have the PNG (or most
+// of it) in cache by the time the fire view asks for it -- turning the
+// "Preparing fire data..." pause into an immediate render.
+//
+// Deliberately fire-and-forget and deduplicated: a failure here must
+// never affect navigation, and re-hovering must not re-download.
+const _prefetchedFires = new Set();
+
+function prefetchFirePreview(fireEnc) {
+    if (_prefetchedFires.has(fireEnc)) return;
+    _prefetchedFires.add(fireEnc);
+    try {
+        const img = new Image();
+        img.decoding = 'async';
+        img.src = `/api/fire/${fireEnc}/preview/post`;
+    } catch (_) { /* best-effort */ }
 }
 
 function markFireOpened(fireEnc) {

@@ -678,6 +678,31 @@ async function prepareFire(padding) {
 
     const body = padding != null ? JSON.stringify({padding}) : '{}';
 
+    // Start pulling the first preview NOW, in parallel with /prepare.
+    //
+    // For a fire that is already READY with previews on disk, /prepare
+    // does almost nothing -- it returns state and exits. The visible
+    // wait behind "Preparing fire data..." is therefore mostly the
+    // preview PNG download that only STARTED once /prepare came back.
+    // Issuing it concurrently overlaps the two, so by the time the
+    // metadata lands the image is usually already in the blob cache
+    // and displays immediately.
+    //
+    // Only safe when the padding is unchanged: a padding change makes
+    // /prepare re-crop and re-render, so the current PNG would be
+    // stale. In that case we skip the prefetch and take the slow path.
+    if (padding == null) {
+        try {
+            const guessSrc = currentPostSource || 'l2';
+            const key = `${guessSrc}:post:${_previewStamp}`;
+            if (!_previewBlobs.has(key)) {
+                cachePreview(key,
+                    `/api/fire/${encodeURIComponent(FIRE)}/preview/post`
+                    + `?src=${guessSrc}&t=${_previewStamp}`);
+            }
+        } catch (_) { /* prefetch is best-effort */ }
+    }
+
     try {
         const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/prepare`, {
             method: 'POST',
@@ -1112,7 +1137,29 @@ function initPaneInteraction(pane) {
                         e.deltaY < 0 ? 1.15 : 1 / 1.15);
     }, {passive: false});
 
+    // Right-button pan, matching the province-wide overview in the
+    // new-fire page. The pane already pans on left-drag; this adds the
+    // same gesture on button 2 so muscle memory carries between the
+    // two interfaces, which matters most when zoomed in.
+    //
+    // Suppressing the context menu is not cosmetic: without it the
+    // browser menu opens on right-press and the matching mouseup is
+    // never delivered, leaving the pan stuck on.
+    area.addEventListener('contextmenu', (e) => e.preventDefault());
+
     area.addEventListener('mousedown', (e) => {
+        if (e.button === 2) {
+            setActivePane(pane);
+            isDragging = true;
+            dragPane = pane;
+            dragStartX = e.clientX;
+            dragStartY = e.clientY;
+            dragStartPanX = paneState[pane].panX;
+            dragStartPanY = paneState[pane].panY;
+            area.classList.add('dragging');
+            e.preventDefault();
+            return;
+        }
         if (e.button !== 0) return;
         setActivePane(pane);
         isDragging = true;
@@ -1137,14 +1184,21 @@ document.addEventListener('mousemove', (e) => {
     updateTransformForPane(dragPane);
 });
 
-document.addEventListener('mouseup', () => {
+function endPaneDrag() {
     if (!isDragging) return;
     if (dragPane) {
         getPaneElements(dragPane).area.classList.remove('dragging');
     }
     isDragging = false;
     dragPane = null;
-});
+}
+
+document.addEventListener('mouseup', endPaneDrag);
+
+// If the window loses focus mid-drag (alt-tab, or another app grabs
+// the pointer) the mouseup can be delivered elsewhere and never reach
+// us, which would leave the pane panning on the next mousemove.
+window.addEventListener('blur', endPaneDrag);
 
 // -----------------------------------------------------------------------
 // Active pane management
