@@ -276,6 +276,36 @@ class FireRoutes:
         except Exception as exc:
             self._send_json({'error': str(exc)}, 500)
 
+    def handle_api_fire_date_plot(self, fire_numbe):
+        """Per-acquisition coverage polygons for the L2-recent buffer.
+
+        Read straight back from the ramdisk sidecar written alongside
+        the stack, so closing and reopening a fire (or flipping post
+        source) recalls exactly the polygons matching the L2 buffer
+        currently on disk. Returns an empty set for MRAP, which is a
+        single composite and has no per-date structure.
+        """
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        if getattr(fire, 'post_source', 'l2') != 'l2':
+            self._send_json({'dates': [], 'width': 0, 'height': 0,
+                             'reason': 'not applicable to MRAP'})
+            return
+        try:
+            from ..l2_recent import date_polygons_path
+            path = date_polygons_path(fire.crop_bin)
+            if not path or not os.path.isfile(path):
+                self._send_json({'dates': [], 'width': 0, 'height': 0,
+                                 'reason': 'not generated yet'})
+                return
+            with open(path, encoding='utf-8') as f:
+                self._send_json(json.loads(f.read()))
+        except Exception as exc:
+            self._send_json({'error': str(exc)}, 500)
+
     def handle_api_preview(self, fire_numbe, view):
         fire_numbe = unquote(fire_numbe)
         if fire_numbe not in state.fires:

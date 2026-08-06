@@ -294,6 +294,21 @@
                 </a>
             </div>
 
+            <!-- Per-acquisition coverage of the L2-recent buffer.
+                 Hidden for MRAP, which is a single composite with no
+                 per-date structure. -->
+            <div id="date-plot-box" style="display:none;margin-top:10px">
+                <div style="font-size:11px;font-weight:600;color:#555;
+                            margin-bottom:4px">
+                    L2 coverage by acquisition
+                </div>
+                <canvas id="date-plot" style="width:100%;display:block;
+                        background:#1e1e1e;border:1px solid #444;
+                        border-radius:3px"></canvas>
+                <div id="date-plot-legend"
+                     style="margin-top:6px;font-size:11px"></div>
+            </div>
+
             <!-- Serial results gallery -->
             <div id="serial-gallery" style="display:none">
                 <div style="padding:8px 16px;border-top:1px solid #eee">
@@ -571,6 +586,7 @@ async function onPostSourceChange() {
         // Overlays are tied to the crop, which the switch may have
         // repointed at the other source's stack.
         loadFireOverlays();
+        loadDatePlot();
     }
 }
 
@@ -780,6 +796,7 @@ async function prepareFire(padding) {
         // Vector overlays depend on the crop's geotransform, so they
         // can only be built once preparation has produced it.
         loadFireOverlays();
+        loadDatePlot();
         const psSel = document.getElementById('post-source-select');
         if (psSel) { psSel.value = currentPostSource; psSel.disabled = false; }
 
@@ -871,6 +888,113 @@ function getPaneElements(pane) {
 // raster is part of the PNG underneath, so both layers sit above the
 // imagery and the grid stays below every other annotation, as asked.
 let _fireOverlays = null;
+
+// ---- Date plot -----------------------------------------------------
+// Which acquisition filled which part of the AOI, as a small
+// aspect-preserving outline plot. Polygons arrive in CROP PIXEL
+// coordinates, so the only transform needed is a uniform fit into the
+// canvas box.
+let _datePlot = null;
+
+// Evenly spaced hues around the wheel, one per acquisition. Spacing by
+// count (rather than a fixed palette) keeps colours maximally distinct
+// no matter how many dates contributed.
+function dateColor(i, n) {
+    const hue = Math.round((360 * i) / Math.max(1, n));
+    return `hsl(${hue}, 85%, 55%)`;
+}
+
+async function loadDatePlot() {
+    const box = document.getElementById('date-plot-box');
+    if (!box) return;
+    if (currentPostSource !== 'l2') { box.style.display = 'none'; return; }
+    try {
+        const r = await fetch(
+            `/api/fire/${encodeURIComponent(FIRE)}/date_plot`);
+        if (!r.ok) { box.style.display = 'none'; return; }
+        const data = await r.json();
+        if (data.error || !data.dates || !data.dates.length) {
+            box.style.display = 'none';
+            return;
+        }
+        _datePlot = data;
+        box.style.display = '';
+        drawDatePlot();
+    } catch (_) {
+        box.style.display = 'none';
+    }
+}
+
+function drawDatePlot() {
+    const cv = document.getElementById('date-plot');
+    const legend = document.getElementById('date-plot-legend');
+    if (!cv || !_datePlot) return;
+    const W = _datePlot.width, H = _datePlot.height;
+    if (!W || !H) return;
+
+    // Fit the AOI's aspect into the panel width. The panel is far
+    // taller than wide, so width is the binding constraint; height
+    // follows from the aspect ratio and is capped so a very tall AOI
+    // cannot push the legend off screen.
+    const cssW = Math.max(80, cv.clientWidth || cv.parentElement.clientWidth);
+    const maxH = 260;
+    let cssH = cssW * (H / W);
+    let scale = cssW / W;
+    if (cssH > maxH) { cssH = maxH; scale = cssH / H; }
+    const dpr = window.devicePixelRatio || 1;
+    cv.style.height = cssH + 'px';
+    cv.width = Math.round(cssW * dpr);
+    cv.height = Math.round(cssH * dpr);
+
+    const ctx = cv.getContext('2d');
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    ctx.save();
+    // Centre horizontally when the height cap made the plot narrower.
+    const drawnW = W * scale, drawnH = H * scale;
+    ctx.translate(((cssW - drawnW) / 2) * dpr, 0);
+    ctx.scale(scale * dpr, scale * dpr);
+
+    const n = _datePlot.dates.length;
+    _datePlot.dates.forEach((d, i) => {
+        const col = dateColor(i, n);
+        ctx.fillStyle = col.replace('hsl', 'hsla').replace(')', ', 0.45)');
+        ctx.strokeStyle = col;
+        ctx.lineWidth = Math.max(0.5, 1 / scale);
+        for (const ring of (d.rings || [])) {
+            if (!ring || ring.length < 3) continue;
+            ctx.beginPath();
+            ctx.moveTo(ring[0][0], ring[0][1]);
+            for (let k = 1; k < ring.length; k++)
+                ctx.lineTo(ring[k][0], ring[k][1]);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+        }
+    });
+    ctx.restore();
+
+    // Legend BELOW the plot, one row per date, so it stacks in the
+    // tall narrow panel instead of squeezing the plot.
+    const total = _datePlot.dates.reduce((a, d) => a + (d.pixels || 0), 0);
+    legend.innerHTML = _datePlot.dates.map((d, i) => {
+        const pct = total ? (100 * (d.pixels || 0) / total) : 0;
+        const ds = String(d.date);
+        const pretty = ds.length === 8
+            ? `${ds.slice(0, 4)}-${ds.slice(4, 6)}-${ds.slice(6, 8)}`
+            : ds;
+        return `<div style="display:flex;align-items:center;gap:6px;
+                            margin-bottom:2px">
+                  <span style="width:11px;height:11px;flex:none;
+                               background:${dateColor(i, n)};
+                               border:1px solid #0006"></span>
+                  <span style="color:#333">${pretty}</span>
+                  <span style="color:#888;margin-left:auto">
+                    ${pct.toFixed(1)}%</span>
+                </div>`;
+    }).join('');
+}
+
+window.addEventListener('resize', drawDatePlot);
 
 async function loadFireOverlays() {
     try {

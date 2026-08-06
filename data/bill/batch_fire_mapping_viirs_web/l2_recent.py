@@ -34,9 +34,11 @@ assuming either form.
 """
 
 import glob
+import json
 import os
 import re
 import sys
+import threading
 import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -384,6 +386,109 @@ def _tile_footprint_mask(tile: str, win_gt, xsize: int, ysize: int,
         return np.ones((ysize, xsize), dtype=bool)
 
 
+def date_polygons_path(stack_bin: str) -> str:
+    """Sidecar holding the per-date coverage polygons.
+
+    Lives beside the AOI stack on the ramdisk: same lifetime, same
+    expendability, and it is rebuilt with the stack. Keeping it next to
+    the stack (rather than in the fire cache) means switching post
+    source or reopening a fire recalls exactly the polygons that match
+    the L2 buffer currently on disk.
+    """
+    return os.path.splitext(stack_bin)[0] + '_dates.json'
+
+
+def _polygonize_date_mask(mask, date_str: str, simplify_px: float = 1.5):
+    """Outline the pixels attributed to one acquisition.
+
+    Returns rings in CROP PIXEL coordinates, not map units: the client
+    only ever draws these into a fixed-aspect thumbnail, so pixel space
+    is the natural frame and needs no geotransform on the client side.
+
+    Polygons are simplified slightly -- a per-pixel outline of a
+    swath-shaped region can run to tens of thousands of vertices, which
+    is pointless for a thumbnail and slow to ship.
+    """
+    h, w = mask.shape
+    drv = gdal.GetDriverByName('MEM')
+    src = drv.Create('', w, h, 1, gdal.GDT_Byte)
+    src.GetRasterBand(1).WriteArray(mask.astype(np.uint8))
+    # Identity geotransform => polygon coordinates ARE pixel coords.
+    src.SetGeoTransform((0.0, 1.0, 0.0, 0.0, 0.0, 1.0))
+
+    ogr_drv = ogr.GetDriverByName('MEM') or ogr.GetDriverByName('Memory')
+    vds = ogr_drv.CreateDataSource('poly')
+    layer = vds.CreateLayer('p', None, ogr.wkbPolygon)
+    fld = ogr.FieldDefn('v', ogr.OFTInteger)
+    layer.CreateField(fld)
+    try:
+        # Band 1 doubles as its own mask so only value-1 pixels emit
+        # polygons; without the mask the 0-background becomes a
+        # polygon too.
+        gdal.Polygonize(src.GetRasterBand(1), src.GetRasterBand(1),
+                        layer, 0)
+    except Exception as exc:
+        sys.stderr.write(f'[l2_recent] polygonize failed: {exc}\n')
+        return []
+
+    rings = []
+    for feat in layer:
+        if feat.GetField('v') != 1:
+            continue
+        g = feat.GetGeometryRef()
+        if g is None:
+            continue
+        try:
+            g = g.Simplify(simplify_px)
+        except Exception:
+            pass
+        if g is None or g.IsEmpty():
+            continue
+        # A Polygonize result may be Polygon or MultiPolygon; flatten
+        # to exterior rings, which is all a thumbnail needs.
+        polys = ([g.GetGeometryRef(i) for i in range(g.GetGeometryCount())]
+                 if g.GetGeometryName() == 'MULTIPOLYGON' else [g])
+        for poly in polys:
+            if poly is None or poly.GetGeometryCount() == 0:
+                continue
+            ext = poly.GetGeometryRef(0)
+            if ext is None or ext.GetPointCount() < 4:
+                continue
+            rings.append([[round(px, 1), round(py, 1)]
+                          for px, py in
+                          (ext.GetPoint_2D(i)
+                           for i in range(ext.GetPointCount()))])
+    src = None
+    vds = None
+    return rings
+
+
+def write_date_polygons(out_json: str, date_map, date_list,
+                        xsize: int, ysize: int) -> dict:
+    """Build and persist the per-date coverage polygons."""
+    entries = []
+    for idx, acq in enumerate(date_list):
+        m = (date_map == idx)
+        n_px = int(m.sum())
+        if n_px == 0:
+            continue
+        rings = _polygonize_date_mask(m, acq)
+        entries.append({'date': acq, 'pixels': n_px, 'rings': rings})
+    # Newest first so the legend reads in the same order as the
+    # extraction log.
+    entries.sort(key=lambda e: e['date'], reverse=True)
+    payload = {'width': xsize, 'height': ysize, 'dates': entries}
+    try:
+        tmp = f'{out_json}.tmp{os.getpid()}'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(payload, f)
+        os.replace(tmp, out_json)
+    except OSError as exc:
+        sys.stderr.write(
+            f'[l2_recent] date polygon write failed: {exc}\n')
+    return payload
+
+
 def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
                          progress_cb=None,
                          mrap_dir: str = MRAP_DIR,
@@ -473,6 +578,24 @@ def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
             np.full((ysize, xsize), np.nan, dtype=np.float32))
     # Band 1 drives the filled-mask; all four bands share nodata.
     filled = np.zeros((ysize, xsize), dtype=bool)
+    # Per-pixel acquisition attribution for the whole AOI, and the
+    # registry the indices refer to.
+    date_map = np.full((ysize, xsize), -1, dtype=np.int16)
+    date_list = []
+    date_lock = threading.Lock()
+
+    def _date_index(acq: str) -> int:
+        """Stable index for an acquisition date, assigned on first use.
+
+        Workers run concurrently, so the registry is guarded; the index
+        is what gets written into the per-pixel maps.
+        """
+        with date_lock:
+            try:
+                return date_list.index(acq)
+            except ValueError:
+                date_list.append(acq)
+                return len(date_list) - 1
 
     used = []
     n_tiles = len(per_tile)
@@ -506,6 +629,12 @@ def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
                         dtype=np.float32)
         local_filled = np.zeros((ysize, xsize), dtype=bool)
         local_used = []
+        # Which acquisition each pixel came from, as an index into
+        # `date_list` below. Tracked per pixel rather than per zip
+        # because a later tile can pre-empt an earlier one during the
+        # merge; attributing dates from the zip loop alone would claim
+        # pixels that never made it into the final mosaic.
+        local_date = np.full((ysize, xsize), -1, dtype=np.int16)
 
         for zi, (_key, acq, _tok, zpath) in enumerate(zlist, 1):
             got = int((local_filled & tile_mask).sum())
@@ -540,6 +669,7 @@ def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
                         nb = warped.GetRasterBand(i + 1).ReadAsArray()
                         local[i][gap] = nb[gap]
                     local_filled |= gap
+                    local_date[gap] = _date_index(acq)
                     local_used.append((token, acq))
                 after = int((local_filled & tile_mask).sum())
                 lines.append(f'      +{n_new:,} px; footprint now '
@@ -552,7 +682,8 @@ def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
         final = int((local_filled & tile_mask).sum()) / tile_px
         lines.append(f'  {token}: done -- {final:.1%} of its AOI '
                      f'footprint filled in {secs:.0f}s')
-        return (tile, token, local, local_filled, local_used, secs, lines)
+        return (tile, token, local, local_filled, local_used, secs,
+                lines, local_date)
 
     # Tiles are independent until the merge, and each is dominated by
     # decompressing ~1 GB zips, so running them concurrently is close
@@ -593,8 +724,8 @@ def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
     # Merge private buffers. Deterministic order (sorted by tile) so the
     # same inputs always give the same mosaic regardless of which
     # worker finished first.
-    for tile, token, local, local_filled, local_used, _secs, _lines in \
-            sorted(results, key=lambda r: r[0]):
+    for (tile, token, local, local_filled, local_used, _secs, _lines,
+         local_date) in sorted(results, key=lambda r: r[0]):
         if local is None:
             continue
         gap = (~filled) & local_filled
@@ -604,6 +735,8 @@ def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
             dst = acc.GetRasterBand(i + 1).ReadAsArray()
             dst[gap] = local[i][gap]
             acc.GetRasterBand(i + 1).WriteArray(dst)
+        # Attribute only the pixels this tile actually contributed.
+        date_map[gap] = local_date[gap]
         filled |= gap
         used.extend(local_used)
 
@@ -638,6 +771,16 @@ def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
         os.replace(hdr_tmp, hdr_out)
 
     newest = max(d for _, d in used)
+
+    _p('outlining per-date coverage', 0.95)
+    dates_json = date_polygons_path(out_bin)
+    poly_payload = write_date_polygons(
+        dates_json, date_map, date_list, xsize, ysize)
+    _log(f'date coverage: '
+         + ', '.join(f"{e['date']} ({e['pixels']:,} px)"
+                     for e in poly_payload['dates'])
+         + f' -> {os.path.basename(dates_json)}')
+
     _p('L2-recent composite ready', 1.0)
     return {
         'path': out_bin,
@@ -648,6 +791,8 @@ def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
         'tile_dates': dict(used),
         'post_date': newest,
         'filled_fraction': aoi_frac,
+        'dates_json': dates_json,
+        'date_coverage': poly_payload['dates'],
         'filled_px': int(filled.sum()),
         'total_px': total_px,
         'geotransform': win_gt,
