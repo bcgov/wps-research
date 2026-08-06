@@ -434,6 +434,9 @@ class FireRoutes:
                             f'[fire] hint render for {mode} failed: '
                             f'{exc}\n')
 
+        # Timed from here: everything above is path resolution.
+        _t_prev = time.time()
+
         # On-the-fly generation for serial overlays
         if not os.path.exists(png):
             m = re.match(r'^serial_(\d+)$', view)
@@ -462,16 +465,22 @@ class FireRoutes:
             self._send_json(
                 {'error': f"Preview '{view}' not available"}, 404)
             return
+        # Instrumentation must never be able to break the response.
+        # A NameError in this block previously aborted the handler
+        # before _send_file ran, which the browser saw as
+        # ERR_EMPTY_RESPONSE and the UI reported as
+        # 'View "Post-fire" not available'. Diagnostics are not worth
+        # a broken endpoint.
         try:
             _sz = os.path.getsize(png)
-        except OSError:
-            _sz = -1
-        sys.stderr.write(
-            f'[perf] /preview/{view} {fire_numbe}: '
-            f'{(time.time() - _t_prev) * 1000:.0f} ms server-side, '
-            f'{_sz / 1e6:.2f} MB, src={_src or "current"}, '
-            f'file={os.path.basename(png)}\n')
-        sys.stderr.flush()
+            sys.stderr.write(
+                f'[perf] /preview/{view} {fire_numbe}: '
+                f'{(time.time() - _t_prev) * 1000:.0f} ms server-side, '
+                f'{_sz / 1e6:.2f} MB, src={_src or "current"}, '
+                f'file={os.path.basename(png)}\n')
+            sys.stderr.flush()
+        except Exception as exc:
+            sys.stderr.write(f'[perf] preview log failed: {exc}\n')
         self._send_file(png, 'image/png')
 
     def handle_api_comparison(self, fire_numbe):

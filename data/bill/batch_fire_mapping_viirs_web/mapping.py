@@ -159,8 +159,15 @@ def _overlay_mask_on_post(fire: 'FireInfo', raster_path: str,
         out_path = os.path.join(fire.cache_dir, 'previews', f'{out_name}.png')
         imsave(out_path, np.clip(result, 0, 1))
 
+        # Register as a selectable view only if it IS one. Per-mode
+        # hint renders (hint_redwins_post, hint_redwins_diff, ...) are
+        # written through this same helper but are chosen with the Hint
+        # buttons and served via ?hint=; letting them auto-register put
+        # them in the view dropdown and, since the client validates
+        # against that list, made real views report as unavailable.
         if (out_name not in fire.available_views
-                and not out_name.startswith('serial_')):
+                and not out_name.startswith('serial_')
+                and not out_name.startswith('hint_')):
             fire.available_views.append(out_name)
     except Exception as exc:
         import traceback

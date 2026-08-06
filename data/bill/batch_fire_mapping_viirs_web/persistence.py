@@ -382,6 +382,15 @@ def _load_fire_state():
             fire.perimeter_type = entry.get('perimeter_type', '')
             fire.hint_mode = entry.get('hint_mode', 'redwins_post')
             fire.post_source = entry.get('post_source', 'l2')
+            # Older state files may have per-mode hint renders saved as
+            # selectable views (hint_redwins_post, ...). They are not
+            # views, and leaving them in makes the client reject real
+            # ones, so strip them on load rather than requiring the
+            # fire to be recreated.
+            if fire.available_views:
+                fire.available_views = [
+                    v for v in fire.available_views
+                    if not str(v).startswith('hint_')]
             try:
                 fire.created_at = float(entry.get('created_at', 0) or 0)
             except (TypeError, ValueError):
