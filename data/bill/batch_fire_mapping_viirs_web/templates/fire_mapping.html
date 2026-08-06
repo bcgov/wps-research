@@ -923,6 +923,16 @@ async function loadDatePlot() {
         const data = await r.json();
         if (data.error || !data.dates || !data.dates.length) {
             box.style.display = 'none';
+            // Say why rather than silently showing nothing. The
+            // sidecar is written when the L2 buffer is BUILT, so a
+            // fire whose stack was already cached from before this
+            // feature existed has no coverage data until it is
+            // rebuilt.
+            if (data.reason) {
+                log(`Date plot unavailable: ${data.reason}. `
+                    + `Recreate the fire (or delete its /ram stack) to `
+                    + `generate per-acquisition coverage.`, 'dim');
+            }
             return;
         }
         _datePlot = data;
@@ -1012,71 +1022,40 @@ async function loadFireOverlays() {
         const data = await r.json();
         if (data.error) return;
         _fireOverlays = data;
-        drawFireOverlay('left');
-        if (splitActive) drawFireOverlay('right');
+        // Overlays usually resolve after the first image has painted,
+        // so bake now that the geometry is in hand.
+        bakeOverlaysIntoImage('left', leftView);
+        if (splitActive && rightView)
+            bakeOverlaysIntoImage('right', rightView);
     } catch (_) { /* overlays are decoration; never block the view */ }
 }
 
-function drawFireOverlay(pane) {
-    const cv = overlayFor(pane);
-    const { img } = getPaneElements(pane);
-    if (!cv || !_fireOverlays || !img || !img.naturalWidth) return;
+// NOTE: the previous drawFireOverlay() lived here. It painted the
+// vectors onto a separate canvas laid over the image. That canvas is
+// gone: the vectors are now composited into the image bitmap itself
+// (see bakeOverlaysIntoImage), which both makes the browser's native
+// "Save image" / "Open image in new tab" carry them and removes the
+// canvas-vs-image registration problem entirely.
 
-    // Geometry is in CROP pixels, but previews are downsampled to
-    // MAX_PREVIEW_DIM (2000 px) on the long side, so crop pixels and
-    // preview pixels are NOT the same unit. Requiring them to be equal
-    // is why the overlay never appeared. Scale instead: the ratio is
-    // uniform because the preview keeps the crop's aspect ratio.
-    const cropW = _fireOverlays.width || img.naturalWidth;
-    const cropH = _fireOverlays.height || img.naturalHeight;
-    const W = img.naturalWidth, H = img.naturalHeight;
-    if (!cropW || !cropH || !W || !H) { cv.style.display = 'none'; return; }
-    const kx = W / cropW, ky = H / cropH;
-    // Guard against a genuinely different image (a run comparison
-    // figure has its own aspect ratio and must not be annotated).
-    if (Math.abs(kx - ky) > 0.02 * Math.max(kx, ky)) {
-        cv.style.display = 'none';
-        return;
-    }
-    if (!overlaysVisible) { cv.style.display = 'none'; return; }
 
-    const { area } = getPaneElements(pane);
-    const ir = img.getBoundingClientRect();
-    const ar = area.getBoundingClientRect();
-    if (ir.width <= 0 || ir.height <= 0) { cv.style.display = 'none'; return; }
+// Paint the vector overlays into `ctx`, which the caller has already
+// scaled so that ONE UNIT == ONE CROP PIXEL. Shared by the live canvas
+// and by the baked export below, so the two can never disagree about
+// what an overlay looks like.
+//
+// `unit` is how many device pixels one crop pixel occupies, used to
+// keep stroke widths and text sizes visually constant.
+function paintOverlayVectors(ctx, unit) {
+    if (!_fireOverlays) return;
+    const lw = (px) => Math.max(0.25, px / unit);
+    const fpx = (v) => Math.max(6 / unit, v / unit);
 
-    // Backing store matches the on-screen size (times DPR for crisp
-    // lines on HiDPI); geometry is then scaled from CROP pixels into
-    // that rect. This is the only place the crop->screen ratio is
-    // computed, so it cannot disagree with the positioning above.
-    const dpr = window.devicePixelRatio || 1;
-    cv.width = Math.max(1, Math.round(ir.width * dpr));
-    cv.height = Math.max(1, Math.round(ir.height * dpr));
-    cv.style.display = 'block';
-    syncOverlayTransform(pane);
-
-    const ctx = cv.getContext('2d');
-    ctx.clearRect(0, 0, cv.width, cv.height);
-    ctx.save();
-    // crop px -> displayed px -> backing-store px
-    const sx = (ir.width / cropW) * dpr;
-    const sy = (ir.height / cropH) * dpr;
-    ctx.scale(sx, sy);
-
-    // Line widths are divided by the current scale so strokes stay a
-    // constant width on screen instead of thickening as you zoom in.
-    // Strokes are specified in on-screen px; ctx.scale() above is in
-    // crop-px units, so divide by that same factor.
-    const lw = (px) => Math.max(0.25, (px * dpr) / sx);
-
-    // --- 1. Sentinel-2 tile grid (blue, bottom) ---
-    const tiles = _fireOverlays.tiles || [];
-    ctx.strokeStyle = 'rgba(0, 200, 60, 0.95)';   // grid: green
+    // --- Sentinel-2 tile grid (green, bottom) ---
+    ctx.strokeStyle = 'rgba(0, 200, 60, 0.95)';
     ctx.lineWidth = lw(2);
-    const fpx = (v) => Math.max(6 / sx, (v * dpr) / sx);
     ctx.font = `${fpx(13)}px sans-serif`;
     ctx.textBaseline = 'top';
-    for (const t of tiles) {
+    for (const t of (_fireOverlays.tiles || [])) {
         const ring = t.ring || [];
         if (ring.length < 2) continue;
         ctx.beginPath();
@@ -1086,13 +1065,9 @@ function drawFireOverlay(pane) {
         ctx.closePath();
         ctx.stroke();
         if (t.name) {
-            // Label just inside the tile's top-left corner, clamped so
-            // it stays readable when the corner is off-canvas.
             const xs = ring.map(p => p[0]), ys = ring.map(p => p[1]);
             const lx = Math.max(2, Math.min(...xs) + 4);
             const ly = Math.max(2, Math.min(...ys) + 4);
-            // Label in magenta so it stays legible against the green
-            // grid line it sits beside, and against vegetation.
             const tw = ctx.measureText(t.name).width;
             const th = fpx(13);
             ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
@@ -1102,7 +1077,7 @@ function drawFireOverlay(pane) {
         }
     }
 
-    // --- 2. BCWS polygons, points, fire numbers (on top) ---
+    // --- BCWS polygons, points, fire numbers (on top) ---
     const b = _fireOverlays.bcws || {};
     ctx.strokeStyle = 'rgba(220, 0, 0, 0.95)';
     ctx.lineWidth = lw(2);
@@ -1145,16 +1120,79 @@ function drawFireOverlay(pane) {
     (b.points || []).forEach((p, i) => {
         drawLabel((b.point_fire_nums || [])[i], p[0] + half + 2, p[1]);
     });
+}
+
+// Bake the overlays INTO the displayed image.
+//
+// Right-click "Save image" / "Open image in new tab" export the <img>
+// element's own bitmap. The overlays live on a separate <canvas> on
+// top, so the browser never sees them and the exported file is bare
+// imagery. Compositing them into the image itself is the only way to
+// make the NATIVE menu items carry them.
+//
+// Trade-off worth knowing: the vectors become raster pixels at preview
+// resolution, so labels soften if you then zoom a long way in. The
+// live crispness is traded for exportability, which is what was asked
+// for. Toggling Overlays off restores the untouched image.
+const _bakedKeys = new WeakMap();
+
+async function bakeOverlaysIntoImage(pane, viewKey) {
+    const { img } = getPaneElements(pane);
+    const cv = overlayFor(pane);
+    if (!img || !img.naturalWidth) return;
+
+    const key = overlaysVisible && _fireOverlays
+        ? `${currentPostSource}:${viewKey}:${currentHintMode}:`
+          + `${_previewStamp}:on`
+        : `${viewKey}:off`;
+    if (_bakedKeys.get(img) === key) return;   // already correct
+
+    if (!overlaysVisible || !_fireOverlays) {
+        _bakedKeys.set(img, key);
+        if (cv) cv.style.display = 'none';
+        return;                                 // plain image as loaded
+    }
+
+    const cropW = _fireOverlays.width || img.naturalWidth;
+    const cropH = _fireOverlays.height || img.naturalHeight;
+    const W = img.naturalWidth, H = img.naturalHeight;
+    const kx = W / cropW, ky = H / cropH;
+    // Only annotate an image that really is this crop (a comparison
+    // figure has its own aspect ratio and must be left alone).
+    if (!cropW || !cropH || Math.abs(kx - ky) > 0.02 * Math.max(kx, ky)) {
+        if (cv) cv.style.display = 'none';
+        return;
+    }
+
+    const off = document.createElement('canvas');
+    off.width = W;
+    off.height = H;
+    const ctx = off.getContext('2d');
+    ctx.drawImage(img, 0, 0, W, H);
+    ctx.save();
+    ctx.scale(kx, ky);
+    paintOverlayVectors(ctx, kx);
     ctx.restore();
+
+    const url = await new Promise((res) => {
+        try { off.toBlob((b) => res(b ? URL.createObjectURL(b) : null),
+                         'image/png'); }
+        catch (_) { res(null); }
+    });
+    if (!url) return;
+
+    // Mark BEFORE assigning: setting src re-fires onload, and without
+    // the guard that would bake the already-baked image again, forever.
+    _bakedKeys.set(img, key);
+    img.src = url;
+    // The vectors are in the bitmap now, so the live canvas would
+    // double-draw them.
+    if (cv) cv.style.display = 'none';
 }
 
 let overlaysVisible = true;
 
-// The rendered rect changes on resize too, so re-register then.
-window.addEventListener('resize', () => {
-    drawFireOverlay('left');
-    if (splitActive) drawFireOverlay('right');
-});
+
 
 function toggleFireOverlays() {
     overlaysVisible = !overlaysVisible;
@@ -1163,8 +1201,11 @@ function toggleFireOverlays() {
         btn.style.background = overlaysVisible ? '#3a7bd5' : '';
         btn.style.color = overlaysVisible ? '#fff' : '';
     }
-    drawFireOverlay('left');
-    if (splitActive) drawFireOverlay('right');
+    // Re-fetch the untouched preview and bake (or don't). Reloading is
+    // required when turning overlays OFF: the displayed bitmap has the
+    // vectors burned in and cannot be un-drawn.
+    loadPaneImage('left', leftView);
+    if (splitActive && rightView) loadPaneImage('right', rightView);
 }
 
 function overlayFor(pane) {
@@ -1172,44 +1213,15 @@ function overlayFor(pane) {
         pane === 'right' ? 'right-overlay' : 'main-overlay');
 }
 
-// Register the overlay against the image's ACTUAL rendered rectangle.
-//
-// The previous approach copied the image's CSS transform onto the
-// canvas. That silently assumed both elements share a base position,
-// but the <img> is position:absolute with no left/top (so it sits at
-// its auto static position, offset by the container's centring) while
-// the canvas was pinned to top:0/left:0. The constant offset between
-// them was then multiplied by the zoom scale, which is why the
-// overlays drifted further out the more you zoomed.
-//
-// Measuring getBoundingClientRect() makes no assumption at all about
-// how the image is positioned or transformed: whatever the browser
-// actually painted, the canvas is placed exactly on top of it and the
-// geometry is scaled into that rect. Correct at every zoom level by
-// construction.
-function syncOverlayTransform(pane) {
-    const { area, img } = getPaneElements(pane);
-    const cv = overlayFor(pane);
-    if (!cv || !img || !area || !img.naturalWidth) return;
-    const ir = img.getBoundingClientRect();
-    const ar = area.getBoundingClientRect();
-    if (ir.width <= 0 || ir.height <= 0) { cv.style.display = 'none'; return; }
-    // No CSS transform on the canvas -- it is laid out directly over
-    // the painted image.
-    cv.style.transform = 'none';
-    cv.style.left = (ir.left - ar.left) + 'px';
-    cv.style.top = (ir.top - ar.top) + 'px';
-    cv.style.width = ir.width + 'px';
-    cv.style.height = ir.height + 'px';
-}
 
 function updateTransformForPane(pane) {
     const s = paneState[pane];
     const { img } = getPaneElements(pane);
     img.style.transform = `translate(${s.panX}px, ${s.panY}px) scale(${s.scale})`;
-    // Redraw rather than just reposition: the canvas backing store is
-    // sized to the on-screen rect, which changes with zoom.
-    drawFireOverlay(pane);
+    // Nothing to reposition: the vectors are baked into the image
+    // bitmap, so they are transformed along with it. This also
+    // removes the registration problem the separate canvas had.
+
     if (pane === activePane) {
         document.getElementById('zoom-info').textContent = `${Math.round(s.scale * 100)}%`;
     }
@@ -1219,7 +1231,6 @@ function updateTransformForPane(pane) {
         os.scale = s.scale; os.panX = s.panX; os.panY = s.panY;
         const { img: oImg } = getPaneElements(other);
         oImg.style.transform = `translate(${os.panX}px, ${os.panY}px) scale(${os.scale})`;
-        drawFireOverlay(other);
     }
 }
 
@@ -1432,7 +1443,9 @@ function loadPaneImage(pane, viewKey) {
     img.onload = () => {
         if (pane === 'left') loadMsg.style.display = 'none';
         img.style.display = 'block';
-        drawFireOverlay(pane);
+        // Composite the vectors into the bitmap so the browser's own
+        // "Save image" / "Open image in new tab" include them.
+        bakeOverlaysIntoImage(pane, viewKey);
         const fs = _paneFitState[pane];
         const dimsChanged = fs.fitted
             && (img.naturalWidth !== fs.fitW
