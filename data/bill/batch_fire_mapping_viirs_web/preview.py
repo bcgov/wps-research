@@ -177,7 +177,15 @@ def generate_preview_png(raster_path: str, band_indices: list[int],
     import matplotlib
     matplotlib.use('Agg')
     from matplotlib.image import imsave
-    imsave(output_path, rgb_uint8)
+    # Write atomically. A preview served while it is being rewritten
+    # is decoded as a partial image -- the picture appears with the
+    # correct width but only a fraction of its rows. The background
+    # prebuild rewrites these files, so a page open can land exactly
+    # in that window. tmp+rename makes the swap indivisible: a reader
+    # sees either the whole old file or the whole new one.
+    _tmp = output_path + '.tmp.png'
+    imsave(_tmp, rgb_uint8)
+    os.replace(_tmp, output_path)
     return True
 
 

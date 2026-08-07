@@ -653,7 +653,12 @@ def _overlay_mask_on_post(fire: 'FireInfo', raster_path: str,
             return
 
         out_path = os.path.join(fire.cache_dir, 'previews', f'{out_name}.png')
-        imsave(out_path, np.clip(result, 0, 1))
+        # Atomic for the same reason as preview.py: overlays are
+        # rewritten by prebuilds and re-renders while the page may be
+        # fetching them.
+        _tmp = out_path + '.tmp.png'
+        imsave(_tmp, np.clip(result, 0, 1))
+        os.replace(_tmp, out_path)
         # The PNG is in the CURRENT crop's space; record that so split
         # sync can align it against previews from other paddings.
         record_preview_geo(fire.cache_dir, fire.crop_bin,

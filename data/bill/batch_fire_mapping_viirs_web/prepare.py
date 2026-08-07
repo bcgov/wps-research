@@ -274,6 +274,18 @@ def prebuild_other_source(fire: FireInfo) -> None:
     if os.path.isdir(_preview_stash_dir(fire, other)):
         return
     current = getattr(fire, 'post_source', 'l2')
+
+    # The prebuild temporarily flips fire.post_source to the other
+    # source and back. Anything reading it during that window -- most
+    # importantly /prepare, which the page calls on open -- saw the
+    # WRONG source and rendered the wrong default in the dropdown, and
+    # could be served previews mid-rewrite (the truncated image).
+    #
+    # user_post_source records what the USER is on. It never changes
+    # during a prebuild, so readers have a stable answer no matter when
+    # they land.
+    fire.user_post_source = current
+    fire.prebuilding = True
     try:
         fire.console_log.append(
             f'  Pre-building the {other.upper()} stack in the '
@@ -292,6 +304,16 @@ def prebuild_other_source(fire: FireInfo) -> None:
                 f'{res.get("error", "unknown")}')
     except Exception as exc:
         sys.stderr.write(f'[prepare] prebuild failed: {exc}\n')
+    finally:
+        # Always restore, even if the switch raised: leaving the fire
+        # on the other source would change what the user sees.
+        fire.prebuilding = False
+        if getattr(fire, 'post_source', current) != current:
+            try:
+                switch_post_source(fire, current)
+            except Exception:
+                fire.post_source = current
+        fire.user_post_source = current
 
 
 def render_hint_for_mode(fire: FireInfo, mode: str) -> bool:
@@ -350,6 +372,11 @@ def pregenerate_all_hints(fire: FireInfo) -> list:
         f'  Pre-rendered hint mask(s) for {src.upper()}: '
         f'{", ".join(done) if done else "none"}')
     return done
+
+
+def set_user_post_source(fire: FireInfo, source: str) -> None:
+    """Record a source the USER chose (as opposed to a prebuild)."""
+    fire.user_post_source = source
 
 
 def switch_post_source(fire: FireInfo, source: str) -> dict:
@@ -837,6 +864,40 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
                          f'AOI stack build failed: {exc}')
         return
     crop_bin = stack_info['path']
+
+    # Sanity-check the built window against what was requested. The
+    # stack clips to the source raster, so an AOI hanging off the edge
+    # of the mosaic yields fewer rows/cols than asked for -- which
+    # renders as a correct-width, short-height image. Silently using it
+    # produced exactly that symptom, so say so loudly instead.
+    try:
+        # pixel_size is not part of the stack_info contract, so derive
+        # it from the built raster rather than assuming a key exists.
+        _px = 20.0
+        try:
+            from osgeo import gdal as _g
+            _ds = _g.Open(crop_bin, _g.GA_ReadOnly)
+            if _ds is not None:
+                _px = abs(_ds.GetGeoTransform()[1]) or 20.0
+                _ds = None
+        except Exception:
+            pass
+        _want_w = max(1, int(round((crop_xmax - crop_xmin) / _px)))
+        _want_h = max(1, int(round((crop_ymax - crop_ymin) / _px)))
+        _got_w = int(stack_info.get('width') or 0)
+        _got_h = int(stack_info.get('height') or 0)
+        if _got_w and _got_h and (abs(_got_w - _want_w) > 1
+                                  or abs(_got_h - _want_h) > 1):
+            msg = (f'  WARNING: AOI stack is {_got_w}x{_got_h} px but '
+                   f'the drawn AOI implies {_want_w}x{_want_h} -- the '
+                   f'window was clipped to the source raster. Part of '
+                   f'the AOI has no imagery for this source; try the '
+                   f'other post source or move the AOI inside '
+                   f'coverage.')
+            fire.console_log.append(msg)
+            sys.stderr.write('[prepare]' + msg + '\n')
+    except Exception as _sexc:
+        sys.stderr.write(f'[prepare] window check skipped: {_sexc}\n')
     fire.crop_bin = crop_bin
     fire.crop_w = stack_info['width']
     fire.crop_h = stack_info['height']

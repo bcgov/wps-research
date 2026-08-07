@@ -228,7 +228,12 @@ class FireRoutes:
             'sample_size': fire.sample_size,
             'perimeter_type': fire.perimeter_type,
             'hint_mode': fire.hint_mode,
-            'post_source': getattr(fire, 'post_source', 'l2'),
+            # Report what the USER is on, not the transient value the
+            # background prebuild may currently be sitting at -- that
+            # race made a new fire open on MRAP instead of L2.
+            'post_source': (getattr(fire, 'user_post_source', '')
+                            or getattr(fire, 'post_source', 'l2')
+                            or 'l2'),
             'acc_start': fire.acc_start,
             'acc_end': fire.acc_end,
             'has_comparison': has_comparison,
@@ -269,7 +274,14 @@ class FireRoutes:
         if body is None:
             return
         source = body.get('source', 'l2')
+        # An explicit user choice, so it becomes the stable value too.
         result = switch_post_source(fire, source)
+        if result.get('ok'):
+            try:
+                from ..prepare import set_user_post_source
+                set_user_post_source(fire, source)
+            except Exception:
+                fire.user_post_source = source
         if not result.get('ok'):
             self._send_json({'error': result.get('error', 'unknown')}, 400)
             return

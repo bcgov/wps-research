@@ -121,6 +121,11 @@ class FireInfo:
     #             may contain cloud)
     #   'mrap' -- province-wide cloud-screened MRAP composite
     post_source: str = "l2"
+    # What the USER selected. post_source is briefly flipped by the
+    # background prebuild; this is not, so readers always get a stable
+    # answer regardless of when they land.
+    user_post_source: str = "l2"
+    prebuilding: bool = False
     # Epoch seconds when the fire was created. Drives the newest-first
     # ordering in the fire list; 0 for fires created before this field
     # existed, which sort last.
