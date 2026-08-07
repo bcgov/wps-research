@@ -662,6 +662,16 @@ def _serial_run_replicate(fire, fire_numbe: str, *, setting_idx: int,
                 fire.cache_dir, 'previews', 'result.png')
             if os.path.isfile(serial_overlay):
                 shutil.copy2(serial_overlay, result_overlay)
+                # Carry the georeferencing across with the pixels, or
+                # 'result' keeps advertising the previous extent.
+                try:
+                    from .mapping import copy_preview_geo
+                    copy_preview_geo(fire.cache_dir,
+                                     f'serial_{run_id}', 'result')
+                except Exception as _gexc:
+                    fire.console_log.append(
+                        f'  [diag] run {run_id}: geo copy failed: '
+                        f'{_gexc}')
                 if 'result' not in fire.available_views:
                     fire.available_views.append('result')
             else:

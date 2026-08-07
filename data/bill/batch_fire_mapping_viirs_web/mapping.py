@@ -162,6 +162,42 @@ def diagnose_run(fire, label: str, clf_path: str,
     return out
 
 
+def copy_preview_geo(cache_dir: str, src_name: str,
+                     dst_name: str) -> bool:
+    """Make a preview's georeferencing follow a file copy.
+
+    previews/result.png is a byte copy of previews/serial_<N>.png, but
+    copying the pixels left geo.json['result'] pointing at whatever was
+    recorded earlier -- typically the crop at a DIFFERENT padding. The
+    result view then advertised the wrong extent, which is the ML
+    misalignment and the phantom zoom on flicker.
+
+    Returns True when an entry was carried across.
+    """
+    try:
+        gj = os.path.join(cache_dir, 'previews', 'geo.json')
+        if not os.path.isfile(gj):
+            return False
+        with open(gj, encoding='utf-8') as f:
+            data = json.load(f) or {}
+        if src_name not in data:
+            sys.stderr.write(
+                f'[geo] copy {src_name} -> {dst_name}: no source entry; '
+                f'{dst_name} would report a stale extent\n')
+            return False
+        data[dst_name] = dict(data[src_name])
+        tmp = gj + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(data, f)
+        os.replace(tmp, gj)
+        sys.stderr.write(
+            f'[geo] copied georeferencing {src_name} -> {dst_name}\n')
+        return True
+    except Exception as exc:
+        sys.stderr.write(f'[geo] copy failed: {exc}\n')
+        return False
+
+
 def record_preview_geo(cache_dir: str, raster_path: str,
                        out_name: str, png_path: str):
     """Record the georeferencing of a rendered preview PNG.

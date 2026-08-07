@@ -425,6 +425,42 @@ class FireRoutes:
             except Exception:
                 pw, ph = entry.get('w', 0), entry.get('h', 0)
 
+            # Self-check. A preview that is a COPY (result.png) can
+            # carry an entry left over from an earlier render at a
+            # different padding. The PNG's real dimensions are the
+            # honest witness: if they disagree with the entry, find the
+            # entry whose dimensions DO match and use that instead.
+            # This resolves provenance from the bytes rather than
+            # trusting a name, and repairs fires whose geo.json
+            # predates the copy fix.
+            if pw and ph and entry.get('w') and entry.get('h') and (
+                    int(entry['w']) != pw or int(entry['h']) != ph):
+                replacement = None
+                try:
+                    with open(gj, encoding='utf-8') as f:
+                        allents = _json.load(f) or {}
+                    for k, v in allents.items():
+                        if (int(v.get('w', -1)) == pw
+                                and int(v.get('h', -1)) == ph):
+                            replacement = (k, v)
+                            break
+                except Exception:
+                    replacement = None
+                if replacement:
+                    sys.stderr.write(
+                        f'[geo] {base}: recorded size '
+                        f'{entry.get("w")}x{entry.get("h")} != actual '
+                        f'{pw}x{ph}; using entry '
+                        f'"{replacement[0]}" instead\n')
+                    entry = replacement[1]
+                    base = f'{base}~{replacement[0]}'
+                else:
+                    sys.stderr.write(
+                        f'[geo] {base}: recorded size '
+                        f'{entry.get("w")}x{entry.get("h")} != actual '
+                        f'{pw}x{ph} and no matching entry found -- '
+                        f'split sync may be misaligned for this view\n')
+
             return {
                 'X-Geo-GT': ','.join(f'{v:.10g}' for v in entry['gt']),
                 'X-Geo-Raster': f"{entry.get('rw', 0)},"
