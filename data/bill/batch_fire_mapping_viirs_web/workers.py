@@ -523,6 +523,19 @@ def _serial_run_replicate(fire, fire_numbe: str, *, setting_idx: int,
 
         if rc == 0:
             agr = _compute_agreement(fire)
+            fire.console_log.append(
+                f'  [diag] run {run_id}: CLI exit=0, '
+                f'agreement={agr:.2f}% (-1 means not computable), '
+                f'hint_mode={getattr(fire, "hint_mode", "?")}, '
+                f'post_source={getattr(fire, "post_source", "?")}, '
+                f'padding={getattr(fire, "padding_used", "?")}, '
+                f'crop={getattr(fire, "crop_w", "?")}x'
+                f'{getattr(fire, "crop_h", "?")}, '
+                f'sample={getattr(fire, "sample_size", "?")}')
+            fire.console_log.append(
+                f'  [diag] run {run_id}: stack={fire.crop_bin}')
+            fire.console_log.append(
+                f'  [diag] run {run_id}: hint={fire.hint_bin}')
 
             # The CLI's output directory defaults to the directory of
             # its INPUT image, which is now the ramdisk rather than the
@@ -616,8 +629,26 @@ def _serial_run_replicate(fire, fire_numbe: str, *, setting_idx: int,
             clf_for_run = serial_clf if os.path.isfile(
                 serial_clf) else src_clf
 
+            # Always diagnose, not only on failure: the numbers that
+            # explain a 0% / 0 ha outcome must already be in the log
+            # when it happens.
+            try:
+                from .mapping import diagnose_run
+                diagnose_run(
+                    fire, f'run {run_id}', clf_for_run,
+                    getattr(fire, 'hint_bin', ''),
+                    log=lambda m: fire.console_log.append(m))
+            except Exception as _dexc:
+                fire.console_log.append(
+                    f'  [diag] run {run_id}: diagnostics failed: {_dexc}')
+
             run_ml_area = _compute_ml_area(
                 fire, clf_for_run) if clf_for_run else -1.0
+            fire.console_log.append(
+                f'  [diag] run {run_id}: ml_area={run_ml_area} ha  '
+                f'clf_used={clf_for_run or "<none found>"}  '
+                f'src_clf={src_clf or "<none>"}  '
+                f'searched={_art_dirs}')
 
             if clf_for_run:
                 _overlay_mask_on_post(
@@ -650,6 +681,17 @@ def _serial_run_replicate(fire, fire_numbe: str, *, setting_idx: int,
             fire.console_log.append(
                 f'Run {run_id} complete '
                 f'(agreement={agr}%, ML area={run_ml_area} ha)')
+            # Emit on every run, not just failures: the state that
+            # explains a number is gone by the time the number looks
+            # wrong, and a re-run will not reproduce a transient.
+            try:
+                from .mapping import diagnose_run
+                for _l in diagnose_run(fire, clf_for_run, fire.hint_bin,
+                                       label=f'run{run_id}'):
+                    fire.console_log.append(_l)
+            except Exception as _exc:
+                fire.console_log.append(
+                    f'  [diag:run{run_id}] unavailable: {_exc}')
         else:
             fire.serial_results.append({
                 'run_id': run_id,
