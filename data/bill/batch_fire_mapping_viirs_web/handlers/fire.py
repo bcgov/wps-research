@@ -362,6 +362,60 @@ class FireRoutes:
         threading.Thread(target=_work, daemon=True).start()
         self._send_json({'ok': True, 'started': True})
 
+    def handle_api_fire_geo(self, fire_numbe):
+        """Georeferencing for every raster a pane can display.
+
+        Split-view sync needs to put the SAME GROUND under both panes.
+        Matching by fraction-of-image only works when the two rasters
+        cover the same extent -- mapping results are padded relative to
+        the crop, so they cover MORE ground and fraction matching is
+        systematically wrong (visibly so once zoomed in).
+
+        Returning each raster's geotransform lets the client convert
+        pane pixels -> native CRS -> the other pane's pixels, which is
+        correct regardless of differing extents, resolutions or
+        padding.
+        """
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+
+        def _geo(path):
+            try:
+                from osgeo import gdal
+                ds = gdal.Open(path, gdal.GA_ReadOnly)
+                if ds is None:
+                    return None
+                gt = ds.GetGeoTransform()
+                out = {'gt': [float(v) for v in gt],
+                       'w': ds.RasterXSize, 'h': ds.RasterYSize}
+                ds = None
+                return out
+            except Exception:
+                return None
+
+        out = {'crop': None, 'runs': {}}
+        if fire.crop_bin and os.path.isfile(fire.crop_bin):
+            out['crop'] = _geo(fire.crop_bin)
+
+        # Serial runs keep their own classified raster, which may have
+        # been produced at a different padding than the current crop.
+        try:
+            for f in sorted(os.listdir(fire.cache_dir)):
+                m = re.match(
+                    rf'^{re.escape(fire_numbe)}_serial_(\d+)'
+                    rf'_classified\.bin$', f)
+                if not m:
+                    continue
+                g = _geo(os.path.join(fire.cache_dir, f))
+                if g:
+                    out['runs'][m.group(1)] = g
+        except OSError:
+            pass
+        self._send_json(out)
+
     def handle_api_preview(self, fire_numbe, view):
         fire_numbe = unquote(fire_numbe)
         if fire_numbe not in state.fires:

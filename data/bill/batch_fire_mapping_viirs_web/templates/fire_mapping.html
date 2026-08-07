@@ -680,6 +680,7 @@ async function onPostSourceChange() {
         // Overlays are tied to the crop, which the switch may have
         // repointed at the other source's stack.
         loadFireOverlays();
+        loadFireGeo();
         loadDatePlot();
     }
 }
@@ -1502,6 +1503,72 @@ function endFlicker() {
     if (active && restore) loadPaneImage(pane, restore);
 }
 
+// Georeferencing for each displayable raster, keyed 'crop' and by run
+// id. Fetched once per fire; without it we fall back to matching by
+// fraction of image, which is only correct when both panes cover the
+// same ground.
+let _fireGeo = null;
+
+async function loadFireGeo() {
+    try {
+        const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/geo`);
+        if (!r.ok) return;
+        const d = await r.json();
+        if (!d.error) _fireGeo = d;
+    } catch (_) { /* falls back to fraction sync */ }
+}
+
+// Which raster backs the view currently in a pane. Run results carry
+// their own geotransform because a sweep can change padding between
+// runs, so they may cover a different extent than the live crop.
+function geoForPane(pane) {
+    if (!_fireGeo) return null;
+    const view = pane === 'left' ? leftView : rightView;
+    const runActive = selectedRun !== null && RUN_VIEWS.has(view);
+    if (runActive && _fireGeo.runs) {
+        const g = _fireGeo.runs[String(selectedRun)];
+        if (g) return g;
+    }
+    return _fireGeo.crop;
+}
+
+// Pane pixel -> native CRS. The displayed PNG is a downsampled copy of
+// the raster, so pixels are converted through the raster's own size
+// before applying its geotransform.
+function paneToNative(pane, px, py) {
+    const g = geoForPane(pane);
+    const { img } = getPaneElements(pane);
+    if (!g || !img || !img.naturalWidth) return null;
+    const sx = g.w / img.naturalWidth;
+    const sy = g.h / img.naturalHeight;
+    const rx = px * sx, ry = py * sy;
+    return [g.gt[0] + rx * g.gt[1] + ry * g.gt[2],
+            g.gt[3] + rx * g.gt[4] + ry * g.gt[5]];
+}
+
+function nativeToPane(pane, X, Y) {
+    const g = geoForPane(pane);
+    const { img } = getPaneElements(pane);
+    if (!g || !img || !img.naturalWidth) return null;
+    const det = g.gt[1] * g.gt[5] - g.gt[2] * g.gt[4];
+    if (!det) return null;
+    const dx = X - g.gt[0], dy = Y - g.gt[3];
+    const rx = (dx * g.gt[5] - dy * g.gt[2]) / det;
+    const ry = (-dx * g.gt[4] + dy * g.gt[1]) / det;
+    return [rx * img.naturalWidth / g.w, ry * img.naturalHeight / g.h];
+}
+
+// Mirror one pane's viewport onto the other so BOTH SHOW THE SAME
+// GROUND.
+//
+// Earlier versions matched pixel offsets, then fractions of the image.
+// Both are only correct when the two rasters cover the same extent.
+// Mapping results are padded, so they cover more ground and every
+// such match is wrong by the padding -- which is exactly the
+// misalignment visible when flicking between panes.
+//
+// Going through the native CRS is correct for any combination of
+// extent, padding and resolution.
 function syncOtherPane(pane) {
     const other = pane === 'left' ? 'right' : 'left';
     const { area, img } = getPaneElements(pane);
@@ -1510,31 +1577,57 @@ function syncOtherPane(pane) {
     const s = paneState[pane];
     const os = paneState[other];
 
-    // Ratio of the two images' pixel dimensions. Uses width; a
-    // differing aspect ratio cannot be reconciled by a single scale,
-    // so fall back to verbatim copying in that case rather than
-    // producing a subtly wrong alignment.
+    const gA = geoForPane(pane), gB = geoForPane(other);
+    if (gA && gB && gA.gt && gB.gt) {
+        // Ground under this pane's centre.
+        const cxA = (area.clientWidth / 2 - s.panX) / s.scale;
+        const cyA = (area.clientHeight / 2 - s.panY) / s.scale;
+        const nat = paneToNative(pane, cxA, cyA);
+        // A second point one display-pixel across gives the metres per
+        // display pixel, which is what the other pane must match for
+        // features to appear the same size.
+        const nat2 = paneToNative(pane, cxA + 1, cyA);
+        if (nat && nat2) {
+            const mPerImgPxA = Math.hypot(nat2[0] - nat[0],
+                                          nat2[1] - nat[1]);
+            const pB = nativeToPane(other, nat[0], nat[1]);
+            const pB2 = nativeToPane(other, nat[0] + mPerImgPxA, nat[1]);
+            if (pB && pB2) {
+                const imgPxPerMetreB = Math.hypot(pB2[0] - pB[0],
+                                                  pB2[1] - pB[1]);
+                // s.scale is display px per image px on A; one image px
+                // on A spans mPerImgPxA metres, which spans
+                // imgPxPerMetreB image px on B.
+                if (imgPxPerMetreB > 0) {
+                    os.scale = s.scale / imgPxPerMetreB;
+                    os.panX = oArea.clientWidth / 2 - pB[0] * os.scale;
+                    os.panY = oArea.clientHeight / 2 - pB[1] * os.scale;
+                    oImg.style.transform =
+                        `translate(${os.panX}px, ${os.panY}px) `
+                        + `scale(${os.scale})`;
+                    return;
+                }
+            }
+        }
+    }
+
+    // Fallback: no georeferencing available. Match by fraction of
+    // image, which is right when the extents happen to agree.
     const rx = oImg.naturalWidth / img.naturalWidth;
     const ry = oImg.naturalHeight / img.naturalHeight;
     if (Math.abs(rx - ry) > 0.02 * Math.max(rx, ry)) {
         os.scale = s.scale; os.panX = s.panX; os.panY = s.panY;
-        oImg.style.transform =
-            `translate(${os.panX}px, ${os.panY}px) scale(${os.scale})`;
-        return;
+    } else {
+        const cx = (area.clientWidth / 2 - s.panX) / s.scale;
+        const cy = (area.clientHeight / 2 - s.panY) / s.scale;
+        os.scale = s.scale / rx;
+        os.panX = oArea.clientWidth / 2 - (cx * rx) * os.scale;
+        os.panY = oArea.clientHeight / 2 - (cy * ry) * os.scale;
     }
-
-    // Image pixel under this pane's centre.
-    const cx = (area.clientWidth / 2 - s.panX) / s.scale;
-    const cy = (area.clientHeight / 2 - s.panY) / s.scale;
-
-    // Same *fraction* of the other image, at a scale that keeps
-    // on-screen feature size identical.
-    os.scale = s.scale / rx;
-    os.panX = oArea.clientWidth / 2 - (cx * rx) * os.scale;
-    os.panY = oArea.clientHeight / 2 - (cy * ry) * os.scale;
     oImg.style.transform =
         `translate(${os.panX}px, ${os.panY}px) scale(${os.scale})`;
 }
+
 
 function zoomFitPane(pane) {
     const { area, img } = getPaneElements(pane);
