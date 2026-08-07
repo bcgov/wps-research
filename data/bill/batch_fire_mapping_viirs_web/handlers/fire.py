@@ -824,14 +824,24 @@ class FireRoutes:
                     a = imread(png)
                     # Previews are downsampled, so compare aspect
                     # rather than absolute size.
-                    ar_png = a.shape[1] / max(1, a.shape[0])
+                    # Compare SIZE, not just aspect. A padded render
+                    # keeps the aspect but changes the dimensions, so
+                    # an aspect-only test misses exactly the case that
+                    # causes the phantom zoom. Expected preview size is
+                    # the crop scaled down to MAX_PREVIEW_DIM.
+                    from ..preview import MAX_PREVIEW_DIM as _MPD
+                    _m = min(_MPD / max(cw, ch), 1.0)
+                    exp_w, exp_h = round(cw * _m), round(ch * _m)
+                    got_w, got_h = int(a.shape[1]), int(a.shape[0])
+                    ar_png = got_w / max(1, got_h)
                     ar_crop = cw / max(1, ch)
-                    if abs(ar_png - ar_crop) > 0.01 * max(ar_png,
-                                                          ar_crop):
+                    if (abs(got_w - exp_w) > 1 or abs(got_h - exp_h) > 1
+                            or abs(ar_png - ar_crop) > 0.01 * max(
+                                ar_png, ar_crop)):
                         sys.stderr.write(
-                            f'[geo] {view}: aspect {ar_png:.4f} does '
-                            f'not match current AOI {ar_crop:.4f} -- '
-                            f're-rendering onto the current grid\n')
+                            f'[geo] {view}: preview is {got_w}x{got_h} '
+                            f'but the current AOI implies '
+                            f'{exp_w}x{exp_h} -- re-rendering\n')
                         rerender_run_overlays(fire)
             except Exception as _hexc:
                 sys.stderr.write(
