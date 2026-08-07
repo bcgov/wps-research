@@ -362,6 +362,82 @@ class FireRoutes:
         threading.Thread(target=_work, daemon=True).start()
         self._send_json({'ok': True, 'started': True})
 
+    def _geo_headers(self, fire, png_path, view_key=None):
+        """Georeferencing headers describing the PNG being served.
+
+        The client pairs these with the exact bytes it displays, so a
+        preview can never be matched against another raster's
+        geotransform. Name-based lookup kept getting this wrong
+        because 'result' and 'serial_N' are copies whose provenance is
+        not recoverable from the filename.
+
+        Order of authority:
+          1. the geo.json entry recorded when the PNG was rendered,
+          2. the run's own classified raster (same grid as the crop it
+             was mapped against),
+          3. the current crop.
+        """
+        try:
+            import json as _json
+            from osgeo import gdal
+
+            entry = None
+            gj = os.path.join(fire.cache_dir, 'previews', 'geo.json')
+            base = os.path.splitext(os.path.basename(png_path))[0]
+            if os.path.isfile(gj):
+                try:
+                    with open(gj, encoding='utf-8') as f:
+                        entry = (_json.load(f) or {}).get(base)
+                except (OSError, ValueError):
+                    entry = None
+
+            if entry is None:
+                # Fall back to a raster with the same grid.
+                cand = None
+                m = re.match(r'^serial_(\d+)$', base)
+                if m:
+                    cand = os.path.join(
+                        fire.cache_dir,
+                        f'{fire.fire_numbe}_serial_{m.group(1)}'
+                        f'_classified.bin')
+                if not cand or not os.path.isfile(cand):
+                    cand = fire.crop_bin
+                if cand and os.path.isfile(cand):
+                    ds = gdal.Open(cand, gdal.GA_ReadOnly)
+                    if ds is not None:
+                        entry = {'gt': [float(v) for v in
+                                        ds.GetGeoTransform()],
+                                 'rw': ds.RasterXSize,
+                                 'rh': ds.RasterYSize}
+                        ds = None
+
+            if not entry:
+                return {}
+
+            # The PNG's own dimensions must come from the PNG being
+            # served, not from whatever was recorded earlier -- a
+            # re-render at a different size would otherwise desync.
+            pw = ph = 0
+            try:
+                from matplotlib.image import imread
+                a = imread(png_path)
+                ph, pw = int(a.shape[0]), int(a.shape[1])
+            except Exception:
+                pw, ph = entry.get('w', 0), entry.get('h', 0)
+
+            return {
+                'X-Geo-GT': ','.join(f'{v:.10g}' for v in entry['gt']),
+                'X-Geo-Raster': f"{entry.get('rw', 0)},"
+                                f"{entry.get('rh', 0)}",
+                'X-Geo-Png': f'{pw},{ph}',
+                'X-Geo-Source': base,
+                'Access-Control-Expose-Headers':
+                    'X-Geo-GT,X-Geo-Raster,X-Geo-Png,X-Geo-Source',
+            }
+        except Exception as exc:
+            sys.stderr.write(f'[geo] header build failed: {exc}\n')
+            return {}
+
     def handle_api_fire_geo(self, fire_numbe):
         """Georeferencing for every raster a pane can display.
 
@@ -467,6 +543,138 @@ class FireRoutes:
                     out['runs'][m.group(1)] = g
         except OSError:
             pass
+        self._send_json(out)
+
+    def handle_api_fire_diagnose(self, fire_numbe):
+        """Everything needed to explain a 0% / 0 ha outcome.
+
+        Zero agreement with zero mapped area has several distinct
+        causes that look identical from the UI: an empty hint, an empty
+        classification, a hint and mask that do not overlap because
+        they were produced at different paddings, an all-nodata stack,
+        or a mask written with unexpected values. Guessing between them
+        from the console log alone is slow, so this reports the raw
+        facts for each raster involved.
+        """
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        out = {'fire': fire_numbe,
+               'post_source': getattr(fire, 'post_source', ''),
+               'hint_mode': getattr(fire, 'hint_mode', ''),
+               'status': str(getattr(fire.status, 'value', fire.status)),
+               'padding_used': getattr(fire, 'padding_used', None),
+               'sample_size': getattr(fire, 'sample_size', None),
+               'agreement_pct': getattr(fire, 'agreement_pct', None),
+               'ml_area_ha': getattr(fire, 'ml_area_ha', None),
+               'rasters': {}, 'notes': []}
+
+        def _stats(label, path):
+            """Shape, geotransform and value distribution of a mask."""
+            info = {'path': path, 'exists': bool(
+                path and os.path.isfile(path))}
+            if not info['exists']:
+                out['notes'].append(f'{label}: MISSING at {path!r}')
+                out['rasters'][label] = info
+                return info
+            try:
+                from osgeo import gdal
+                import numpy as np
+                ds = gdal.Open(path, gdal.GA_ReadOnly)
+                if ds is None:
+                    info['error'] = 'gdal.Open returned None'
+                    out['rasters'][label] = info
+                    return info
+                info['w'] = ds.RasterXSize
+                info['h'] = ds.RasterYSize
+                info['bands'] = ds.RasterCount
+                info['gt'] = [float(v) for v in ds.GetGeoTransform()]
+                a = ds.GetRasterBand(1).ReadAsArray()
+                ds = None
+                info['dtype'] = str(a.dtype)
+                finite = np.isfinite(a)
+                info['nan_px'] = int((~finite).sum())
+                vals, counts = np.unique(a[finite], return_counts=True)
+                # Cap: an unexpectedly continuous mask would otherwise
+                # dump thousands of entries.
+                if vals.size <= 12:
+                    info['values'] = {str(v): int(c)
+                                      for v, c in zip(vals, counts)}
+                else:
+                    info['values'] = f'{vals.size} distinct values'
+                    info['min'] = float(vals.min())
+                    info['max'] = float(vals.max())
+                info['nonzero_px'] = int((a[finite] != 0).sum())
+                info['total_px'] = int(a.size)
+                if info['nonzero_px'] == 0:
+                    out['notes'].append(
+                        f'{label}: EMPTY -- no non-zero pixels')
+            except Exception as exc:
+                info['error'] = str(exc)
+            out['rasters'][label] = info
+            return info
+
+        crop = _stats('crop_stack', fire.crop_bin)
+        hint = _stats('hint', fire.hint_bin)
+
+        from ..state import find_classified
+        clf_path = find_classified(
+            fire, [fire.cache_dir, os.path.dirname(fire.crop_bin or '')])
+        clf = _stats('classified', clf_path or '(not found)')
+
+        # Overlap is the usual culprit: a hint and a mask can each be
+        # non-empty yet share no pixels if their extents differ.
+        try:
+            if (hint.get('exists') and clf.get('exists')
+                    and 'gt' in hint and 'gt' in clf):
+                same_grid = (
+                    abs(hint['gt'][0] - clf['gt'][0]) < 1e-6
+                    and abs(hint['gt'][3] - clf['gt'][3]) < 1e-6
+                    and hint['w'] == clf['w'] and hint['h'] == clf['h'])
+                out['hint_clf_same_grid'] = same_grid
+                if not same_grid:
+                    out['notes'].append(
+                        'hint and classified are on DIFFERENT grids -- '
+                        'agreement is computed over their overlap, and '
+                        'a padding change between them is the usual '
+                        'reason for 0%')
+                else:
+                    from osgeo import gdal
+                    import numpy as np
+                    a = gdal.Open(fire.hint_bin).ReadAsArray()
+                    b = gdal.Open(clf_path).ReadAsArray()
+                    am, bm = (a != 0), (b != 0)
+                    inter = int((am & bm).sum())
+                    union = int((am | bm).sum())
+                    out['overlap'] = {
+                        'hint_px': int(am.sum()),
+                        'clf_px': int(bm.sum()),
+                        'intersection_px': inter,
+                        'union_px': union,
+                        'iou_pct': (100.0 * inter / union) if union else 0.0,
+                    }
+                    if inter == 0 and am.sum() and bm.sum():
+                        out['notes'].append(
+                            'hint and classified are both non-empty but '
+                            'do not intersect at all')
+        except Exception as exc:
+            out['overlap_error'] = str(exc)
+
+        # Per-run summary: distinguishes "every run failed" from "one
+        # run failed".
+        try:
+            runs = []
+            for r in (getattr(fire, 'serial_results', None) or []):
+                runs.append({k: r.get(k) for k in
+                             ('run_id', 'agreement_pct', 'ml_area_ha',
+                              'setting_name', 'padding')
+                             if isinstance(r, dict)})
+            out['serial_results'] = runs
+        except Exception:
+            pass
+
         self._send_json(out)
 
     def handle_api_preview(self, fire_numbe, view):
@@ -597,7 +805,8 @@ class FireRoutes:
         # Without this a 4+ MB PNG was re-fetched on every fire open
         # and every pane change -- at the ~600 kB/s this link sustains,
         # that is ~7 s of pure re-transfer for bytes already held.
-        self._send_file(png, 'image/png', cache_seconds=86400)
+        self._send_file(png, 'image/png', cache_seconds=86400,
+                        extra_headers=self._geo_headers(fire, png, view))
 
     def handle_api_comparison(self, fire_numbe):
         fire_numbe = unquote(fire_numbe)

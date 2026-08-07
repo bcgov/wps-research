@@ -279,7 +279,15 @@ class SerialRoutes:
                     fire, serial_clf, f'serial_{run_id}',
                     (0.9, 0.1, 0.0))
         if os.path.isfile(overlay_path):
-            self._send_file(overlay_path, 'image/png')
+            # Ship this run's georeferencing with the image so split
+            # sync uses the extent the run was actually mapped at.
+            try:
+                hdrs = self._geo_headers(fire, overlay_path,
+                                         f'serial_{run_id}')
+            except Exception:
+                hdrs = None
+            self._send_file(overlay_path, 'image/png',
+                            extra_headers=hdrs)
             return
         # Do NOT fall back to the comparison figure here — the gallery
         # thumbnail must always be the pixel-aligned overlay. Returning

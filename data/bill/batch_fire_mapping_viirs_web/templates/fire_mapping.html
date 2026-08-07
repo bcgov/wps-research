@@ -459,6 +459,32 @@ function getPreviewObjectURL(key, url, announce) {
         }
         const obj = URL.createObjectURL(blob);
         _previewBlobs.set(key, obj);
+        // Bind the georeferencing to the BYTES, not to a view name.
+        // Whatever ends up in an <img>, its geotransform travels with
+        // it -- so a pane can never be paired with another raster's
+        // extent, which is what kept breaking split sync for results.
+        try {
+            const gt = r.headers.get('X-Geo-GT');
+            if (gt) {
+                const rs = (r.headers.get('X-Geo-Raster') || '0,0')
+                    .split(',').map(Number);
+                const ps = (r.headers.get('X-Geo-Png') || '0,0')
+                    .split(',').map(Number);
+                _geoByUrl.set(obj, {
+                    gt: gt.split(',').map(Number),
+                    rw: rs[0], rh: rs[1],
+                    w: ps[0] || rs[0], h: ps[1] || rs[1],
+                    src: r.headers.get('X-Geo-Source') || '',
+                });
+                log(`[diag] geo for ${key}: src=`
+                    + `${r.headers.get('X-Geo-Source')} raster=${rs} `
+                    + `png=${ps} gt=[${gt}]`, 'dim');
+            } else {
+                log(`[diag] geo for ${key}: NO X-Geo-GT header `
+                    + `-- sync will fall back to fraction matching`,
+                    'dim');
+            }
+        } catch (_) { /* headers are best-effort */ }
         return obj;
     })().finally(() => _previewInflight.delete(key));
 
@@ -1492,6 +1518,11 @@ let _flicker = null;
 // them assuming the pane's own view.
 let _flickerGeoOverride = null;
 
+// Georeferencing keyed by the object URL actually displayed. This is
+// the authoritative source; the view-name map is only a fallback for
+// images fetched outside getPreviewObjectURL().
+const _geoByUrl = new Map();
+
 function beginFlicker(pane) {
     if (!splitActive) return;                 // needs two views
     const other = pane === 'left' ? 'right' : 'left';
@@ -1531,7 +1562,9 @@ function beginFlicker(pane) {
     // the same ground stays under the centre at the same on-screen
     // scale. Deliberately does not touch the other pane.
     if (n0 && n1) {
-        const gB = geoForPane(other);
+        // The peek shows the other pane's BYTES, so take that image's
+        // geo rather than the other pane's nominal view.
+        const gB = _geoByUrl.get(otherImg.src) || geoForPane(other);
         const gSave = _flickerGeoOverride;
         _flickerGeoOverride = {pane, geo: gB};
         const mPerImgPx = Math.hypot(n1[0] - n0[0], n1[1] - n0[1]);
@@ -1599,6 +1632,11 @@ function geoForPane(pane) {
     if (_flickerGeoOverride && _flickerGeoOverride.pane === pane) {
         return _flickerGeoOverride.geo;
     }
+    // Authoritative: whatever this pane is actually showing.
+    const { img } = getPaneElements(pane);
+    if (img && img.src && _geoByUrl.has(img.src)) {
+        return _geoByUrl.get(img.src);
+    }
     if (!_fireGeo) return null;
     const view = pane === 'left' ? leftView : rightView;
 
@@ -1608,7 +1646,10 @@ function geoForPane(pane) {
     // which is what makes ML results line up with a crop rendered at a
     // different padding.
     const v = _fireGeo.views || {};
-    const runActive = selectedRun !== null && RUN_VIEWS.has(view);
+    // An empty result carries no mask, so it is the plain post
+    // preview and shares the CROP's extent, not the run's.
+    const runActive = selectedRun !== null && RUN_VIEWS.has(view)
+        && !(view === 'result' && !hasMlResult());
     if (runActive && v[`serial_${selectedRun}`]) {
         return v[`serial_${selectedRun}`];
     }
@@ -1905,7 +1946,18 @@ function toggleSync() {
 // View label helper
 // -----------------------------------------------------------------------
 function getViewLabel(viewKey) {
+    if (viewKey === 'result' && !hasMlResult()) {
+        // Nothing was classified, so the image IS the post preview.
+        return 'Post-fire (no ML result)';
+    }
     if (!viewKey) return '';
+    // An empty classification renders as plain post-fire imagery, so
+    // calling it "ML classification" misrepresents what is on screen.
+    // mlSizeHa <= 0 means the mapper produced no burned pixels.
+    if ((viewKey === 'result' || RUN_VIEWS.has(viewKey))
+            && !hasMlResult()) {
+        return 'Post-fire (no ML result)';
+    }
     return VIEW_LABELS[viewKey] || viewKey;
 }
 
@@ -2060,7 +2112,13 @@ async function loadPaneImage(pane, viewKey) {
             }
             srcUrl = await getPreviewObjectURL(ck, url, !_previewBlobs.has(ck));
         } else {
-            srcUrl = url;      // run-specific images are not cacheable
+            // Run images were bypassing the cached fetch, so they never
+            // picked up the X-Geo-* headers and fell back to the crop's
+            // extent -- the ML result misalignment. Route them through
+            // the same path with a per-request key so the geo travels
+            // with the bytes; the key includes the URL's timestamp, so
+            // nothing is cached longer than intended.
+            srcUrl = await getPreviewObjectURL(`run:${url}`, url, true);
         }
     } catch (err) {
         if (stale()) return;
@@ -2204,13 +2262,28 @@ function renderAgreement(agreementPct, prevAccAgreement) {
 }
 
 // ML size display
+// Last reported ML area. An empty classification means the 'result'
+// preview is just the post imagery with nothing drawn on it, so it
+// must not be labelled "ML classification" -- and must not be treated
+// as a run raster for georeferencing, which is what made the peek
+// appear to zoom (it was aligning against a padded extent that no
+// result actually occupied).
+let currentMlAreaHa = -1;
+
+function hasMlResult() { return currentMlAreaHa > 0; }
+
 function updateMlSize(mlAreaHa) {
+    currentMlAreaHa = (mlAreaHa == null) ? -1 : mlAreaHa;
     const el = document.getElementById('ml-size-text');
     if (mlAreaHa >= 0) {
         el.textContent = mlAreaHa.toLocaleString() + ' ha';
     } else {
         el.textContent = '--';
     }
+    // Whether a result exists changes how the result view is labelled,
+    // so refresh any pane currently showing one.
+    if (leftView) updateSubtitle('left', leftView);
+    if (splitActive && rightView) updateSubtitle('right', rightView);
 }
 
 // -----------------------------------------------------------------------

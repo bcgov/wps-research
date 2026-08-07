@@ -135,6 +135,8 @@ class BaseHandler:
          'handle_api_fire_date_plot'),
         (re.compile(r'^/api/fire/(?P<fire_numbe>[^/]+)/geo$'),
          'handle_api_fire_geo'),
+        (re.compile(r'^/api/fire/(?P<fire_numbe>[^/]+)/diagnose$'),
+         'handle_api_fire_diagnose'),
         (re.compile(r'^/api/viirs/overlay$'), 'handle_api_viirs_overlay'),
         (re.compile(
             r'^/api/fire/preview_hint/(?P<preview_id>[A-Za-z0-9_-]+)/'
@@ -506,7 +508,8 @@ class BaseHandler:
         self.end_headers()
         self.wfile.write(body)
 
-    def _send_file(self, filepath, media_type=None, cache_seconds=None):
+    def _send_file(self, filepath, media_type=None, cache_seconds=None,
+                   extra_headers=None):
         if not os.path.isfile(filepath):
             self.send_error(404)
             return
@@ -529,6 +532,16 @@ class BaseHandler:
             self.send_header(
                 'Cache-Control',
                 f'public, max-age={cache_seconds}, immutable')
+        # Extra headers let a response describe itself -- notably the
+        # georeferencing of the raster a preview was rendered from.
+        # Attaching it to the IMAGE removes any chance of the client
+        # pairing a picture with the wrong geotransform, which
+        # every name-based lookup scheme is prone to.
+        for _k, _v in (extra_headers or {}).items():
+            try:
+                self.send_header(_k, _v)
+            except Exception:
+                pass
         self.end_headers()
         try:
             self.wfile.write(data)
