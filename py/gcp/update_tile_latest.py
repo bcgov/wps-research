@@ -6,8 +6,8 @@ search for Sentinel2 frames: parameters:
 
 And download from Google Cloud Platform (GCP).
 
-The "gcp rsync" command is helpful for avoiding re-downloading the same data
-    https://cloud.google.com/storage/docs/gsutil/commands/rsync
+The "gcloud storage rsync" command is helpful for avoiding re-downloading the same data
+    https://cloud.google.com/storage/docs/gsutil-gcloud-storage-mapping
 
 (*) need concurrency mechanism so we can download on multiple
 folders without fetching index twice!
@@ -146,10 +146,10 @@ for m in matches:
     print(m, base_url[m[1]])
     
     # download L1 dataset from GCP
-    cmd = ' '.join(['gsutil -m',
-                    'rsync -r',
+    cmd = ' '.join(['gcloud storage rsync',
                     base_url[m[1]],
                     './',
+                    '--recursive',
                     '>',
                     m[3] + '.SAFE_stdout.txt',
                     '2>',
@@ -163,10 +163,10 @@ for m in matches:
         print('Presumed already downloaded.. skipping')
         continue # don't redownload files 
 
-    simple_cmd = ['gsutil -m',
-                  'rsync -r',
+    simple_cmd = ['gcloud storage rsync',
                   base_url[m[1]],
-                  out_dir]
+                  out_dir,
+                  '--recursive']
     a = run(' '.join(simple_cmd))
 
     # "fix" the output by adding empty directories expected by ESA SNAP

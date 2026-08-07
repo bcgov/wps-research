@@ -33,10 +33,10 @@ def download_urls_from_tileid(tile_id, start_date, end_date):
         URL.append(y[i])
         if not os.path.exists(x[i] + '.SAFE'):
             os.mkdir(x[i] + '.SAFE')
-        cmd = ' '.join(['gsutil -m',
-                            'rsync -r',
+        cmd = ' '.join(['gcloud storage rsync',
                             y[i].strip(),
-                            x[i] + '.SAFE']) 
+                            x[i] + '.SAFE',
+                            '--recursive'])
         a = os.system(cmd)
         
         file_name  = x[i] + ".SAFE"
