@@ -1447,12 +1447,93 @@ function updateTransformForPane(pane) {
         document.getElementById('zoom-info').textContent = `${Math.round(s.scale * 100)}%`;
     }
     if (syncPanes && splitActive) {
-        const other = pane === 'left' ? 'right' : 'left';
-        const os = paneState[other];
-        os.scale = s.scale; os.panX = s.panX; os.panY = s.panY;
-        const { img: oImg } = getPaneElements(other);
-        oImg.style.transform = `translate(${os.panX}px, ${os.panY}px) scale(${os.scale})`;
+        syncOtherPane(pane);
     }
+}
+
+// Mirror one pane's viewport onto the other, COMPENSATING for images
+// of different pixel dimensions.
+//
+// Copying scale/panX/panY verbatim only aligns when both panes show
+// images of identical size. Mapping results are padded relative to the
+// crop, so the result PNG is larger in pixels while covering the same
+// ground -- verbatim copying then shows a different area on each side
+// and the split view does not line up.
+//
+// The fix is to sync in NORMALISED image coordinates: work out which
+// fraction of the source image sits under the pane's centre, then put
+// that same fraction under the other pane's centre, with the zoom
+// scaled by the pixel-size ratio so a feature is the same size on
+// screen in both panes.
+// ---- Press-and-hold "flicker" comparison ---------------------------
+// Holding the left button over a pane temporarily swaps it to show the
+// OTHER pane's view, reverting on release. Flicking between two
+// renderings of the same ground in one place makes small differences
+// far easier to spot than looking side to side.
+//
+// The swap is applied on mousedown and undone on mouseup. If the
+// pointer moves more than a couple of pixels the user meant to pan, so
+// the peek is cancelled and the original view restored immediately.
+let _flicker = null;
+
+function beginFlicker(pane) {
+    if (!splitActive) return;                 // needs two views
+    const other = pane === 'left' ? 'right' : 'left';
+    const myView = pane === 'left' ? leftView : rightView;
+    const otherView = pane === 'left' ? rightView : leftView;
+    if (!otherView || otherView === myView) return;
+
+    _flicker = {pane, restore: myView, shown: otherView, active: true};
+    // Reuse the normal renderer so the peeked view gets the same
+    // overlays and caching; it is a cache hit, so effectively instant.
+    loadPaneImage(pane, otherView);
+    const sub = document.getElementById(
+        pane === 'right' ? 'subtitle-right' : 'subtitle-left');
+    if (sub) sub.style.opacity = '0.6';
+}
+
+function endFlicker() {
+    if (!_flicker) return;
+    const {pane, restore, active} = _flicker;
+    _flicker = null;
+    const sub = document.getElementById(
+        pane === 'right' ? 'subtitle-right' : 'subtitle-left');
+    if (sub) sub.style.opacity = '';
+    if (active && restore) loadPaneImage(pane, restore);
+}
+
+function syncOtherPane(pane) {
+    const other = pane === 'left' ? 'right' : 'left';
+    const { area, img } = getPaneElements(pane);
+    const { area: oArea, img: oImg } = getPaneElements(other);
+    if (!img || !oImg || !img.naturalWidth || !oImg.naturalWidth) return;
+    const s = paneState[pane];
+    const os = paneState[other];
+
+    // Ratio of the two images' pixel dimensions. Uses width; a
+    // differing aspect ratio cannot be reconciled by a single scale,
+    // so fall back to verbatim copying in that case rather than
+    // producing a subtly wrong alignment.
+    const rx = oImg.naturalWidth / img.naturalWidth;
+    const ry = oImg.naturalHeight / img.naturalHeight;
+    if (Math.abs(rx - ry) > 0.02 * Math.max(rx, ry)) {
+        os.scale = s.scale; os.panX = s.panX; os.panY = s.panY;
+        oImg.style.transform =
+            `translate(${os.panX}px, ${os.panY}px) scale(${os.scale})`;
+        return;
+    }
+
+    // Image pixel under this pane's centre.
+    const cx = (area.clientWidth / 2 - s.panX) / s.scale;
+    const cy = (area.clientHeight / 2 - s.panY) / s.scale;
+
+    // Same *fraction* of the other image, at a scale that keeps
+    // on-screen feature size identical.
+    os.scale = s.scale / rx;
+    os.panX = oArea.clientWidth / 2 - (cx * rx) * os.scale;
+    os.panY = oArea.clientHeight / 2 - (cy * ry) * os.scale;
+    oImg.style.transform =
+        `translate(${os.panX}px, ${os.panY}px) scale(${os.scale})`;
 }
 
 function zoomFitPane(pane) {
@@ -1518,6 +1599,11 @@ function initPaneInteraction(pane) {
         dragStartPanX = paneState[pane].panX;
         dragStartPanY = paneState[pane].panY;
         area.classList.add('dragging');
+        // Press-and-hold (without moving) peeks at the other pane's
+        // view in THIS pane, so the two can be compared without the
+        // eye travelling between panes. Started immediately; cancelled
+        // by the first real drag so panning is unaffected.
+        beginFlicker(pane);
         e.preventDefault();
     });
 }
@@ -1527,13 +1613,23 @@ initPaneInteraction('left');
 
 document.addEventListener('mousemove', (e) => {
     if (!isDragging || !dragPane) return;
+    const dx = e.clientX - dragStartX;
+    const dy = e.clientY - dragStartY;
+    // Any real movement means this is a pan, not a peek. 3 px of slop
+    // tolerates the small shift a normal click produces.
+    if (_flicker && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) {
+        endFlicker();
+    }
     const s = paneState[dragPane];
-    s.panX = dragStartPanX + (e.clientX - dragStartX);
-    s.panY = dragStartPanY + (e.clientY - dragStartY);
+    s.panX = dragStartPanX + dx;
+    s.panY = dragStartPanY + dy;
     updateTransformForPane(dragPane);
 });
 
 function endPaneDrag() {
+    // Release always ends a peek, whether or not a drag was in
+    // progress -- otherwise a peek could outlive the button press.
+    endFlicker();
     if (!isDragging) return;
     if (dragPane) {
         getPaneElements(dragPane).area.classList.remove('dragging');
@@ -1690,9 +1786,15 @@ function applyPaneFit(pane, img) {
     // fit so we don't clobber the inherited scale. The fit state is
     // still recorded so a later un-sync doesn't trigger a spurious
     // refit.
+    // When syncing, the right pane derives its viewport from the left
+    // rather than fitting independently -- but that derivation now
+    // needs the LEFT pane to recompute, since the ratio depends on
+    // this pane's freshly-loaded dimensions.
     const inheritFromLeft = syncPanes && splitActive && pane === 'right';
     if (!inheritFromLeft && (!fs.fitted || dimsChanged)) {
         zoomFitPane(pane);
+    } else if (inheritFromLeft) {
+        syncOtherPane('left');
     } else {
         updateTransformForPane(pane);
     }
