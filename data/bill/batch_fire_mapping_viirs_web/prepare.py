@@ -432,6 +432,11 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
                      if f.endswith('.png')]
             fire.available_views = [n for n in names
                                     if n in _VIEW_WHITELIST]
+            # A per-mode hint render implies the 'hint' view is usable
+            # even if the generic hint.png is absent.
+            if ('hint' not in fire.available_views
+                    and any(n.startswith('hint_') for n in names)):
+                fire.available_views.append('hint')
         except OSError:
             pass
     else:

@@ -524,37 +524,55 @@ def _serial_run_replicate(fire, fire_numbe: str, *, setting_idx: int,
         if rc == 0:
             agr = _compute_agreement(fire)
 
-            src_comp = os.path.join(
-                fire.cache_dir,
-                f'{fire_numbe}_comparison.png')
+            # The CLI's output directory defaults to the directory of
+            # its INPUT image, which is now the ramdisk rather than the
+            # fire cache. Every artifact it writes -- comparison PNG,
+            # brush PNG, classified mask -- therefore lands in /ram.
+            # Look in both places, ramdisk first, or the run produces
+            # good output that nothing can find (no serial_N.png, so
+            # the result is unclickable and reported as failed).
+            _art_dirs = [d for d in
+                         (os.path.dirname(fire.crop_bin or ''),
+                          fire.cache_dir) if d and os.path.isdir(d)]
+
+            def _find_artifact(*names):
+                for _d in _art_dirs:
+                    for _n in names:
+                        _c = os.path.join(_d, _n)
+                        if os.path.isfile(_c):
+                            return _c
+                return None
+
+            src_comp = _find_artifact(f'{fire_numbe}_comparison.png') \
+                or os.path.join(fire.cache_dir,
+                                f'{fire_numbe}_comparison.png')
             serial_comp = os.path.join(
                 fire.cache_dir,
                 f'{fire_numbe}_serial_{run_id}.png')
             if os.path.isfile(src_comp):
                 shutil.copy2(src_comp, serial_comp)
 
-            src_brush = os.path.join(
-                fire.cache_dir,
-                f'{fire_numbe}_brush_comparison.png')
+            src_brush = _find_artifact(
+                f'{fire_numbe}_brush_comparison.png') \
+                or os.path.join(fire.cache_dir,
+                                f'{fire_numbe}_brush_comparison.png')
             serial_brush = os.path.join(
                 fire.cache_dir,
                 f'{fire_numbe}_serial_{run_id}_brush.png')
             if os.path.isfile(src_brush):
                 shutil.copy2(src_brush, serial_brush)
 
-            src_clf = None
-            for _pat in (
-                    os.path.basename(fire.crop_bin or '') + '_classified.bin',
-                    f'{fire_numbe}_crop.bin_classified.bin',
-                    f'{fire_numbe}_crop_classified.bin',
-                    f'{fire_numbe}_classified.bin'):
-                _cand = os.path.join(fire.cache_dir, _pat)
-                if os.path.isfile(_cand):
-                    src_clf = _cand
-                    break
+            src_clf = _find_artifact(
+                os.path.basename(fire.crop_bin or '') + '_classified.bin',
+                f'{fire_numbe}_crop.bin_classified.bin',
+                f'{fire_numbe}_crop_classified.bin',
+                f'{fire_numbe}_classified.bin')
             if src_clf is None:
-                for _cand in glob.glob(os.path.join(
-                        fire.cache_dir, '*classified*.bin')):
+                _globs = []
+                for _d in _art_dirs:
+                    _globs += glob.glob(
+                        os.path.join(_d, '*classified*.bin'))
+                for _cand in _globs:
                     # Skip the pre-brush backup siblings —
                     # we want the canonical (brushed) copy.
                     if _cand.endswith('_raw.bin'):

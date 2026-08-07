@@ -736,17 +736,36 @@ def _viirs_worker(fire: FireInfo) -> None:
         # Set fire.cache_dir so _overlay_mask_on_post can resolve it.
         fire.cache_dir = cache_dir
 
-        # Generate hint overlay (VIIRS mask over post preview) when we
-        # have VIIRS data; skip cleanly otherwise.
-        if viirs_cropped:
+        def _render_generic_hint(mask_path):
+            """Write previews/hint.png for whichever mask is active.
+
+            'Hint perimeter' is only offered in the view menu when this
+            file exists, so it must be produced during creation --
+            whatever the hint source -- rather than as a side effect of
+            a later interaction.
+            """
+            if not mask_path or not os.path.isfile(mask_path):
+                return False
             try:
                 from .mapping import _overlay_mask_on_post
                 _overlay_mask_on_post(
-                    fire, viirs_cropped, 'hint', (0.0, 0.8, 0.2))
+                    fire, mask_path, 'hint', (0.0, 0.8, 0.2))
+                return os.path.isfile(
+                    os.path.join(cache_dir, 'previews', 'hint.png'))
             except Exception as exc:
                 sys.stderr.write(
                     f'[viirs_worker] hint overlay generation failed: '
                     f'{exc}\n')
+                return False
+
+        # The generic previews/hint.png is rendered further below, once
+        # the ACTIVE hint is known. It used to be written here and only
+        # when VIIRS existed -- so with red-wins as the default hint
+        # (the normal case now that VIIRS downloading is off) the file
+        # was never created at fire creation, the 'hint' view was
+        # therefore never registered, and "Hint perimeter" only
+        # appeared in the menu after some later action happened to
+        # render it.
 
         # With VIIRS downloading disabled, a fire whose AOI has no        # granules already on disk would otherwise land in READY with
         # an empty hint and fail at map time with "No hint mask
@@ -790,6 +809,19 @@ def _viirs_worker(fire: FireInfo) -> None:
                     f'[viirs_worker] {fire.fire_numbe}: red-wins '
                     f'fallback failed: {exc}\n')
 
+        # Render the generic hint overlay now that the active hint is
+        # settled, so 'Hint perimeter' is selectable from the moment
+        # the fire opens.
+        _render_generic_hint(_hint_bin)
+        # Register the view whenever a hint MASK exists, not only when
+        # the generic hint.png rendered. The preview endpoint serves
+        # hint_<mode>.png for an explicit ?hint=, so the view works
+        # either way -- gating on the render meant a single failed
+        # overlay hid "Hint perimeter" from the menu entirely until
+        # some later action happened to produce the file.
+        if _hint_bin and 'hint' not in views:
+            views.append('hint')
+
         with state.lock:
             fire.crop_bin = crop_bin
             fire.viirs_bin = viirs_cropped or ''
@@ -803,14 +835,30 @@ def _viirs_worker(fire: FireInfo) -> None:
             fire.perimeter_type = _perimeter_type
             fire.hint_mode = _hint_mode
             fire.available_views = views
-            if _hint_bin \
-                    and 'hint' not in fire.available_views \
-                    and os.path.isfile(os.path.join(
-                        cache_dir, 'previews', 'hint.png')):
-                fire.available_views.append('hint')
+            # Measure whichever hint is ACTUALLY in use. This only ever
+            # measured the VIIRS raster, so with red-wins as the
+            # default hint the panel always read "Hint Size: 0.0 ha"
+            # even when a large mask was plainly visible.
             fire.fire_size_ha = (
-                _compute_viirs_area_ha(viirs_cropped)
-                if viirs_cropped else 0.0)
+                _compute_viirs_area_ha(_hint_bin) if _hint_bin else 0.0)
+            if _hint_bin and fire.crop_w and fire.crop_h:
+                # A hint covering most of the AOI is legal but rarely
+                # useful as a seed -- worth saying so rather than
+                # letting a poor result look like a parameter problem.
+                try:
+                    px = fire.fire_size_ha * 10000.0 / (20.0 * 20.0)
+                    frac = px / float(fire.crop_w * fire.crop_h)
+                    fire.console_log.append(
+                        f'  Hint covers {frac:.1%} of the AOI '
+                        f'({fire.fire_size_ha:,.0f} ha).')
+                    if frac > 0.5:
+                        fire.console_log.append(
+                            '  NOTE: the hint covers more than half the '
+                            'AOI. Red wins is a coarse rule; consider a '
+                            'tighter AOI or the other red-wins mode if '
+                            'mapping results look poor.')
+                except Exception:
+                    pass
             fire.status = FireStatus.READY
             fire.is_new = True
             fire.progress = {}
