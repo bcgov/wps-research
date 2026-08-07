@@ -124,11 +124,16 @@
             <div class="param-section">
                 <h3 onclick="this.parentElement.classList.toggle('open')">Crop &amp; Sampling</h3>
                 <div class="params-body">
-                    <div class="param-row">
-                        <label>Padding<span class="help" tabindex="0" aria-label="About padding" aria-expanded="false" data-tip="Fraction of the hint perimeter's bounding box added as a buffer around the AOI. 0.2 means the AOI extends 20% beyond the hint on each side. Changing this rebuilds the AOI stack from the source imagery. Larger padding gives the model more unburned context to contrast against — useful for small fires or when the hint is tight to the burn edge.">?</span>:</label>
-                        <input type="number" id="p-padding" value="{{ padding }}" step="0.05" min="0" max="1">
-                        <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="recrop()">Rebuild AOI</button>
-                    </div>
+                    <!-- Padding removed. It was the only control that
+                         changed the AOI window after creation, and every
+                         such change put previews on a different grid,
+                         which is what kept breaking split-view
+                         alignment. The AOI is now always exactly the
+                         bbox drawn in the new-fire view, so every
+                         preview shares one grid permanently. A hidden
+                         input is kept at 0 so existing parameter
+                         collection code needs no changes. -->
+                    <input type="hidden" id="p-padding" value="0">
                     <div class="param-row">
                         <label>Sample rate:</label>
                         <input type="number" id="p-sample_rate" value="{{ sample_rate }}" step="0.01" min="0.001" max="1" oninput="updateSampleSize()">
@@ -1011,19 +1016,13 @@ async function prepareFire(padding) {
 // Re-crop with new padding
 // -----------------------------------------------------------------------
 async function recrop() {
-    const pad = parseFloat(document.getElementById('p-padding').value);
-    if (isNaN(pad)) return;
-    log(`Rebuilding AOI stack at padding=${pad} `
-        + `(re-reads the source imagery for the new window) ...`);
-    document.getElementById('btn-map').disabled = true;
-    hasComparison = false;
-    const sel = document.getElementById('view-select');
-    const compOpt = sel.querySelector('option[value="comparison"]');
-    if (compOpt) compOpt.remove();
-    const brushOpt = sel.querySelector('option[value="brush_comparison"]');
-    if (brushOpt) brushOpt.remove();
-    await prepareFire(pad);
+    // Retained so any stale reference cannot throw, but padding is
+    // gone: the AOI always equals the drawn bbox, so there is nothing
+    // to rebuild at a different extent.
+    log('Padding has been removed — the AOI is always the bbox you '
+        + 'drew, so there is no re-crop to perform.', 'dim');
 }
+
 
 // -----------------------------------------------------------------------
 // Zoom & Pan state — per-pane

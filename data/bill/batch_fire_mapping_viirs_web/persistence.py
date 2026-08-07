@@ -376,7 +376,9 @@ def _load_fire_state():
             fire.viirs_bin = entry.get('viirs_bin', '')
             fire.crop_w = entry.get('crop_w', 0)
             fire.crop_h = entry.get('crop_h', 0)
-            fire.padding_used = entry.get('padding_used', 0.0)
+            # Always 0: a fire saved with padding must not come back
+            # on a different grid than the one it will be rebuilt on.
+            fire.padding_used = 0.0
             fire.acc_start = entry.get('acc_start', '')
             fire.acc_end = entry.get('acc_end', '')
             fire.perimeter_type = entry.get('perimeter_type', '')

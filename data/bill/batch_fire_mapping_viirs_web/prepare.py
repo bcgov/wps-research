@@ -709,7 +709,27 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
         fire.status = FireStatus.PREPARING
         fire.error_msg = ""
 
-    pad = padding if padding is not None else state.padding
+    # PADDING IS REMOVED. It is pinned to 0 regardless of what the
+    # caller or the saved settings ask for.
+    #
+    # Padding was the only thing that changed the AOI window after a
+    # fire was created, and every crop change put previews on a
+    # different grid. Reconciling those grids in the split view was a
+    # persistent source of misalignment: each mechanism for tracking
+    # which grid a preview belonged to (view names, a sidecar, copied
+    # entries, HTTP headers, re-rendering) fixed one path and left
+    # another. With padding fixed at 0 the AOI window is exactly the
+    # bbox the user drew, for every run and every source, so all
+    # previews share one grid permanently and there is nothing to
+    # reconcile.
+    #
+    # The parameter is still accepted so old callers, saved settings
+    # and persisted state load without error -- it is simply ignored.
+    if padding not in (None, 0, 0.0):
+        sys.stderr.write(
+            f'[prepare] ignoring padding={padding}: padding has been '
+            f'removed; the AOI is always the drawn bbox\n')
+    pad = 0.0
     cache_dir = fire.cache_dir or os.path.join(
         state.output_root, '.web_cache', fire_numbe)
     os.makedirs(cache_dir, exist_ok=True)

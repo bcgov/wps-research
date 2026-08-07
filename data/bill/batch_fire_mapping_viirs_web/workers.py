@@ -408,9 +408,13 @@ def _serial_run_replicate(fire, fire_numbe: str, *, setting_idx: int,
         # from fire.padding_used. Replicates within the same
         # setting share the prep.
         if replicate == 0:
+            # Padding is removed, so it can no longer trigger a
+            # re-prepare. A sweep now runs every setting against ONE
+            # AOI stack -- which is also why all its results stay on a
+            # single grid and line up in the split view. Prep is only
+            # needed when something is genuinely missing.
             needs_prepare = (
-                fire.padding_used != padding
-                or not fire.cache_dir
+                not fire.cache_dir
                 or not os.path.isdir(fire.cache_dir)
                 or not fire.crop_bin
                 or not os.path.isfile(fire.crop_bin)
@@ -435,10 +439,10 @@ def _serial_run_replicate(fire, fire_numbe: str, *, setting_idx: int,
                 # from the new bands. That is the wait before t-SNE
                 # starts, not a crop.
                 fire.console_log.append(
-                    f'  Padding {fire.padding_used} → {padding}: '
-                    f'rebuilding the AOI stack for the new window, '
-                    f'then regenerating previews and the hint ...')
-                _prepare_fire_sync(fire_numbe, padding)
+                    '  Rebuilding the AOI stack (missing or stale '
+                    'cache), then regenerating previews and the hint '
+                    '...')
+                _prepare_fire_sync(fire_numbe, 0.0)
                 fire = state.fires[fire_numbe]
                 if fire.status == FireStatus.ERROR:
                     fire.serial_results.append({

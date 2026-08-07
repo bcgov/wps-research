@@ -125,8 +125,11 @@ Example
                         '<out_root>/active_year.yaml, else newest year).')
 
     # Sampling defaults
-    p.add_argument('--padding', type=float, default=0.1,
-                   help='Crop padding fraction (default: 0.1).')
+    p.add_argument('--padding', type=float, default=0.0,
+                   help='DEPRECATED and ignored. Padding has been '
+                        'removed: the AOI is always exactly the bbox '
+                        'drawn in the new-fire view. Kept so existing '
+                        'launch scripts do not break.')
     p.add_argument('--sample_rate', type=float, default=0.05,
                    help='Default sample rate (default: 0.05)')
     p.add_argument('--min_samples', type=int, default=500)
@@ -587,7 +590,13 @@ def main():
     app_state.project_root   = _PROJECT_ROOT
     app_state.cli_script     = os.path.join(
         _REPO_ROOT, 'py', 'fire_mapping', 'fire_mapping_cli.py')
-    app_state.padding        = args.padding
+    # Pinned to 0 regardless of the flag -- a non-zero value would
+    # reintroduce per-run AOI windows and with them the split-view
+    # misalignment this removal exists to prevent.
+    if args.padding:
+        _log(f'      NOTE: --padding {args.padding} ignored; padding '
+             f'has been removed.')
+    app_state.padding        = 0.0
     app_state.sample_rate    = args.sample_rate
     app_state.min_samples    = args.min_samples
     app_state.max_samples    = args.max_samples

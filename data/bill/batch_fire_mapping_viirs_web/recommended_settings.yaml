@@ -29,7 +29,7 @@ k_jitter: 1
 settings:
   - label: balanced
     params:
-      padding: 0.10
+      padding: 0.00   # padding removed; AOI is always the drawn bbox
       hdbscan_min_samples: 21
       tsne_perplexity: 60
       embed_bands: '1,2,3,4,5,6,7,8,9,10,11,12'
@@ -54,7 +54,7 @@ settings:
 
   - label: aggressive
     params:
-      padding: 0.05
+      padding: 0.00   # padding removed; AOI is always the drawn bbox
       hdbscan_min_samples: 15
       tsne_perplexity: 60
       embed_bands: '1,2,3,4,5,6,7,8,9,10,11,12'
@@ -79,7 +79,7 @@ settings:
 
   - label: conservative
     params:
-      padding: 0.15
+      padding: 0.00   # padding removed; AOI is always the drawn bbox
       hdbscan_min_samples: 30
       tsne_perplexity: 60
       embed_bands: '1,2,3,4,5,6,7,8,9,10,11,12'
@@ -104,7 +104,7 @@ settings:
 
   - label: change_only
     params:
-      padding: 0.10
+      padding: 0.00   # padding removed; AOI is always the drawn bbox
       hdbscan_min_samples: 21
       tsne_perplexity: 60
       embed_bands: '7,8,9,10,11,12'
