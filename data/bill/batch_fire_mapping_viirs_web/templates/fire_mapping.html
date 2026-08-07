@@ -56,6 +56,15 @@
             <select id="view-select" disabled onchange="onViewDropdownChange()">
                 <option value="">Loading...</option>
             </select>
+            <!-- Second selector, shown only in split view. With one
+                 dropdown the target pane was whichever was "active",
+                 which is invisible state the user has to track -- and
+                 clicking a pane to select it also triggers the peek,
+                 making it ambiguous. An explicit control per pane
+                 removes the guesswork entirely. -->
+            <select id="view-select-right" style="display:none"
+                    onchange="onRightViewDropdownChange()"
+                    title="View shown in the right pane"></select>
             <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="zoomIn()">+</button>
             <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="zoomOut()">-</button>
             <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="zoomReset()">Fit</button>
@@ -884,6 +893,7 @@ async function prepareFire(padding) {
             opt.textContent = 'Brush comparison';
             sel.appendChild(opt);
         }
+        syncRightViewOptions();
 
         sel.disabled = false;
 
@@ -1861,11 +1871,16 @@ function setActivePane(pane) {
     activePane = pane;
     document.getElementById('image-area').classList.toggle('pane-active', pane === 'left');
     document.getElementById('image-area-right').classList.toggle('pane-active', pane === 'right');
-    // Update dropdown to show active pane's current view
-    const sel = document.getElementById('view-select');
-    const curView = (pane === 'left') ? leftView : rightView;
-    if (curView && sel.querySelector(`option[value="${curView}"]`)) {
-        sel.value = curView;
+    // In split view each pane has its own selector, so neither should
+    // be rewritten on activation -- doing so made the left control
+    // silently retarget and is why a view chosen for one pane could
+    // appear to apply to the other.
+    if (!splitActive) {
+        const sel = document.getElementById('view-select');
+        const curView = (pane === 'left') ? leftView : rightView;
+        if (curView && sel.querySelector(`option[value="${curView}"]`)) {
+            sel.value = curView;
+        }
     }
     // Update zoom info
     document.getElementById('zoom-info').textContent =
@@ -2022,6 +2037,17 @@ async function loadPaneImage(pane, viewKey) {
     // choice even while the bytes are still arriving.
     if (pane === 'left') leftView = viewKey; else rightView = viewKey;
     updateSubtitle(pane, viewKey);
+    if (pane === 'right') {
+        const b = document.getElementById('view-select-right');
+        if (b && b.querySelector(`option[value="${viewKey}"]`)) {
+            b.value = viewKey;
+        }
+    } else if (splitActive) {
+        const a = document.getElementById('view-select');
+        if (a && a.querySelector(`option[value="${viewKey}"]`)) {
+            a.value = viewKey;
+        }
+    }
 
     const url = previewUrlFor(viewKey);
     const ck = cacheKeyFor(viewKey);
@@ -2101,7 +2127,27 @@ async function loadPaneImage(pane, viewKey) {
 function onViewDropdownChange() {
     const viewKey = document.getElementById('view-select').value;
     if (!viewKey) return;
-    loadPaneImage(activePane, viewKey);
+    // In split view the first selector always drives the LEFT pane, so
+    // its effect is predictable; the right pane has its own control.
+    loadPaneImage(splitActive ? 'left' : activePane, viewKey);
+}
+
+function onRightViewDropdownChange() {
+    const viewKey = document.getElementById('view-select-right').value;
+    if (!viewKey) return;
+    loadPaneImage('right', viewKey);
+}
+
+// Keep the right-pane selector's options in step with the left one.
+function syncRightViewOptions() {
+    const a = document.getElementById('view-select');
+    const b = document.getElementById('view-select-right');
+    if (!a || !b) return;
+    const want = rightView || '';
+    b.innerHTML = a.innerHTML;
+    if (want && b.querySelector(`option[value="${want}"]`)) b.value = want;
+    b.disabled = a.disabled;
+    b.style.display = splitActive ? '' : 'none';
 }
 
 // Download button is only meaningful once a result is on disk in the
@@ -3298,6 +3344,7 @@ function toggleSplit() {
     if (splitActive) {
         container.classList.add('split');
         rightArea.style.display = '';
+        syncRightViewOptions();
         btnSplit.style.background = '#0066cc';
         btnSplit.style.color = '#fff';
         btnSync.style.display = '';
@@ -3321,6 +3368,7 @@ function toggleSplit() {
         }, 50);
     } else {
         container.classList.remove('split');
+        syncRightViewOptions();
         // Close the pane the user is NOT focused on
         if (activePane === 'right') {
             // Keep right, close left — swap right content into left pane
