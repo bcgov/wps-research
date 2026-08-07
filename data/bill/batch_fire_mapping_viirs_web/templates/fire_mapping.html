@@ -125,9 +125,9 @@
                 <h3 onclick="this.parentElement.classList.toggle('open')">Crop &amp; Sampling</h3>
                 <div class="params-body">
                     <div class="param-row">
-                        <label>Padding<span class="help" tabindex="0" aria-label="About padding" aria-expanded="false" data-tip="Fraction of the hint perimeter's bounding box added as a buffer around the crop. 0.2 means the crop extends 20% beyond the hint on each side. Larger padding gives the model more unburned context to contrast against — useful for small fires or when the hint is tight to the burn edge.">?</span>:</label>
+                        <label>Padding<span class="help" tabindex="0" aria-label="About padding" aria-expanded="false" data-tip="Fraction of the hint perimeter's bounding box added as a buffer around the AOI. 0.2 means the AOI extends 20% beyond the hint on each side. Changing this rebuilds the AOI stack from the source imagery. Larger padding gives the model more unburned context to contrast against — useful for small fires or when the hint is tight to the burn edge.">?</span>:</label>
                         <input type="number" id="p-padding" value="{{ padding }}" step="0.05" min="0" max="1">
-                        <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="recrop()">Re-crop</button>
+                        <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="recrop()">Rebuild AOI</button>
                     </div>
                     <div class="param-row">
                         <label>Sample rate:</label>
@@ -948,7 +948,7 @@ async function prepareFire(padding) {
         updateMlSize(data.ml_area_ha);
 
         document.getElementById('crop-info').innerHTML =
-            `Crop: <strong>${cropW}&times;${cropH} px</strong> &middot; ` +
+            `AOI: <strong>${cropW}&times;${cropH} px</strong> &middot; ` +
             `Accum: <strong>${data.acc_start || '?'} &rarr; ${data.acc_end || '?'}</strong>`;
         currentHintMode = data.hint_mode || 'viirs';
         renderHintModeButtons();
@@ -1013,7 +1013,8 @@ async function prepareFire(padding) {
 async function recrop() {
     const pad = parseFloat(document.getElementById('p-padding').value);
     if (isNaN(pad)) return;
-    log(`Re-cropping with padding=${pad}...`);
+    log(`Rebuilding AOI stack at padding=${pad} `
+        + `(re-reads the source imagery for the new window) ...`);
     document.getElementById('btn-map').disabled = true;
     hasComparison = false;
     const sel = document.getElementById('view-select');
@@ -3617,9 +3618,18 @@ const PROGRESS_STAGE_ORDER_RESUME = [
     'load', 'hint', 'hdbscan', 'classify', 'brush', 'figure',
 ];
 const PROGRESS_STAGE_LABELS = {
+    // Mapping CLI stages.
     load: 'Load', hint: 'Hint', sample: 'Sample',
     tsne: 't-SNE', rf: 'RF', hdbscan: 'HDBSCAN',
     classify: 'Classify', brush: 'Brush', figure: 'Figure',
+    // Preparation stages. These had no labels, so the raw internal
+    // name leaked into the UI -- notably 'cropping', which dates from
+    // when the AOI was cut out of a pre-built province-wide stack.
+    // Nothing is cropped any more: the stack is built from the source
+    // mosaics for this AOI, which is where the time actually goes.
+    downloading_viirs: 'VIIRS',
+    accumulating: 'VIIRS accumulate',
+    cropping: 'Build AOI stack',
 };
 
 function formatSeconds(s) {

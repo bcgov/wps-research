@@ -640,7 +640,7 @@ def ensure_fire_stack_present(fire: FireInfo) -> dict:
                 'stage': 'cropping',
                 'stage_idx': 5,
                 'total_stages': 5,
-                'detail': f'Regenerating AOI stack: {detail}',
+                'detail': f'Rebuilding AOI stack: {detail}',
                 'fraction': max(0.0, min(1.0, float(frac))),
                 'updated_at': time.time(),
             }

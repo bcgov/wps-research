@@ -665,7 +665,7 @@ def _viirs_worker(fire: FireInfo) -> None:
         # product is now generated directly from the median composite
         # and the latest MRAP mosaic, reading only the AOI window.
         _set_progress(fire, 'cropping',
-                      detail='building AOI stack on ramdisk',
+                      detail='building 12-band AOI stack on ramdisk',
                       fraction=0.05)
         from .aoi_stack import ensure_aoi_stack, AoiStackError
 
@@ -691,7 +691,8 @@ def _viirs_worker(fire: FireInfo) -> None:
         # Rasterize VIIRS onto the cropped extent (if we have data).
         if acc_shp and os.path.isfile(acc_shp):
             _set_progress(fire, 'cropping',
-                          detail='rasterizing onto crop', fraction=0.5)
+                          detail='rasterizing VIIRS onto the AOI grid',
+                          fraction=0.5)
             try:
                 from viirs.utils.rasterize import rasterize_shapefile
                 crop_rast_dir = os.path.join(cache_dir, '_viirs_crop')
@@ -723,7 +724,8 @@ def _viirs_worker(fire: FireInfo) -> None:
             raise WorkerCancelled()
 
         # Generate previews from the crop.
-        _set_progress(fire, 'cropping', detail='generating previews',
+        _set_progress(fire, 'cropping',
+                      detail='rendering previews and hint',
                       fraction=0.75)
         from .preview import generate_all_previews
         views = generate_all_previews(crop_bin, cache_dir, fire.fire_numbe)

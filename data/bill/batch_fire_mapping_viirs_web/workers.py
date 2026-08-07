@@ -428,9 +428,16 @@ def _serial_run_replicate(fire, fire_numbe: str, *, setting_idx: int,
                         f'  AOI stack regeneration failed: {exc}')
                     needs_prepare = True
             if needs_prepare:
+                # Say what this actually costs. The padding change
+                # alters the AOI window, so the stack is rebuilt from
+                # the source mosaics (for L2, re-reading the SAFE zips
+                # per tile) and the previews and hint are regenerated
+                # from the new bands. That is the wait before t-SNE
+                # starts, not a crop.
                 fire.console_log.append(
-                    f'  Re-preparing (padding '
-                    f'{fire.padding_used} → {padding}) ...')
+                    f'  Padding {fire.padding_used} → {padding}: '
+                    f'rebuilding the AOI stack for the new window, '
+                    f'then regenerating previews and the hint ...')
                 _prepare_fire_sync(fire_numbe, padding)
                 fire = state.fires[fire_numbe]
                 if fire.status == FireStatus.ERROR:
