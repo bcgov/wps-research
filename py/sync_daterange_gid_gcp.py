@@ -21,8 +21,8 @@ Examples:
     python3 sync_daterange_gid_zip_gcp.py 20260101 20260131 all
 
 Workflow per dataset:
-    L1 mode:  gsutil rsync -> fix_s2 -> zip (keep .SAFE)
-    L2 mode:  gsutil rsync -> fix_s2 -> zip L1C -> sen2cor -> zip L2A (keep both .SAFEs)
+    L1 mode:  gcloud storage rsync -> fix_s2 -> zip (keep .SAFE)
+    L2 mode:  gcloud storage rsync -> fix_s2 -> zip L1C -> sen2cor -> zip L2A (keep both .SAFEs)
               skip if completed zip already present at any stage
 
 Step 6 NOTE: .SAFE downloads are currently ACTIVE. Run one tile serially
@@ -68,7 +68,7 @@ SEN2COR_INSTALLER = f'Sen2Cor-{SEN2COR_VERSION}-Linux64.run'
 SEN2COR_URL       = (f'https://step.esa.int/thirdparties/sen2cor/{SEN2COR_VERSION}/'
                      + SEN2COR_INSTALLER)
 
-N_DL_WORKERS  = 4    # parallel workers for gsutil downloads (--parallel flag)
+N_DL_WORKERS  = 4    # parallel workers for gcloud storage downloads (--parallel flag)
 N_S2C_WORKERS = 64   # parallel workers for sen2cor — always parallel, flag ignored
 
 # ---------------------------------------------------------------------------
@@ -306,82 +306,82 @@ def print_status_update(file_name, file_size, file_dl_time):
 
 
 # ---------------------------------------------------------------------------
-# Step 1+2: gsutil install
+# Step 1+2: gcloud CLI install
 # ---------------------------------------------------------------------------
 
-def find_gsutil():
-    p = os.popen('which gsutil 2>/dev/null').read().strip()
+def find_gcloud():
+    p = os.popen('which gcloud 2>/dev/null').read().strip()
     if p and exists(p):
         return p
-    candidate = os.path.join(GCP_INSTALL_DIR, 'google-cloud-sdk', 'bin', 'gsutil')
+    candidate = os.path.join(GCP_INSTALL_DIR, 'google-cloud-sdk', 'bin', 'gcloud')
     if exists(candidate):
         return candidate
     return None
 
 
-def ensure_gsutil():
-    log('STEP 1: Locating gsutil', 'gsutil')
-    gsutil = find_gsutil()
-    if gsutil:
-        log(f'gsutil found: {gsutil}', 'gsutil')
+def ensure_gcloud():
+    log('STEP 1: Locating gcloud', 'gcloud')
+    gcloud_bin = find_gcloud()
+    if gcloud_bin:
+        log(f'gcloud found: {gcloud_bin}', 'gcloud')
         _ensure_crcmod()
-        return gsutil
+        return gcloud_bin
 
-    log('gsutil not found — installing Google Cloud SDK...', 'gsutil')
-    log(f'  install dir : {GCP_INSTALL_DIR}', 'gsutil')
-    log(f'  SDK version : {SDK_VERSION}', 'gsutil')
-    log(f'  SDK URL     : {SDK_URL}', 'gsutil')
+    log('gcloud not found — installing Google Cloud SDK...', 'gcloud')
+    log(f'  install dir : {GCP_INSTALL_DIR}', 'gcloud')
+    log(f'  SDK version : {SDK_VERSION}', 'gcloud')
+    log(f'  SDK URL     : {SDK_URL}', 'gcloud')
     md(GCP_INSTALL_DIR)
 
     local_tar = os.path.join(GCP_INSTALL_DIR, SDK_TARBALL)
     if not exists(local_tar):
-        log(f'  Downloading SDK tarball -> {local_tar}', 'gsutil')
+        log(f'  Downloading SDK tarball -> {local_tar}', 'gcloud')
         run(f'wget -q --show-progress -O {local_tar} {SDK_URL}')
-        log(f'  Download complete: {local_tar}', 'gsutil')
+        log(f'  Download complete: {local_tar}', 'gcloud')
     else:
-        log(f'  SDK tarball already cached: {local_tar}', 'gsutil')
+        log(f'  SDK tarball already cached: {local_tar}', 'gcloud')
 
     sdk_dir = os.path.join(GCP_INSTALL_DIR, 'google-cloud-sdk')
     if not exists(sdk_dir):
-        log(f'  Extracting SDK to {GCP_INSTALL_DIR}...', 'gsutil')
+        log(f'  Extracting SDK to {GCP_INSTALL_DIR}...', 'gcloud')
         run(f'tar -xzf {local_tar} -C {GCP_INSTALL_DIR}')
-        log(f'  Extraction complete: {sdk_dir}', 'gsutil')
+        log(f'  Extraction complete: {sdk_dir}', 'gcloud')
     else:
-        log(f'  SDK already extracted: {sdk_dir}', 'gsutil')
+        log(f'  SDK already extracted: {sdk_dir}', 'gcloud')
 
     install_sh = os.path.join(sdk_dir, 'install.sh')
-    log(f'  Running install.sh...', 'gsutil')
+    log(f'  Running install.sh...', 'gcloud')
     run(f'bash {install_sh} --quiet --usage-reporting=false --path-update=true')
 
-    gsutil = os.path.join(sdk_dir, 'bin', 'gsutil')
-    if not exists(gsutil):
-        err(f'gsutil not found after install — expected: {gsutil}')
+    gcloud_bin = os.path.join(sdk_dir, 'bin', 'gcloud')
+    if not exists(gcloud_bin):
+        err(f'gcloud not found after install — expected: {gcloud_bin}')
 
     _ensure_crcmod()
-    log(f'gsutil ready: {gsutil}', 'gsutil')
+    log(f'gcloud ready: {gcloud_bin}', 'gcloud')
 
     cred_note = os.path.join(GCP_INSTALL_DIR, 'CREDENTIALS_NOTE.txt')
     if not exists(cred_note):
         with open(cred_note, 'w') as fh:
             fh.write(
                 'The public gcp-public-data-sentinel-2 bucket needs NO credentials.\n'
-                'For private bucket access run:  gsutil config\n'
-                'Credentials land in ~/.config/gcloud/ and ~/.boto\n'
+                'For private bucket access run:  gcloud auth login\n'
+                'Credentials land in ~/.config/gcloud/\n'
                 'Copy those files here to archive them alongside the SDK.\n'
             )
-    return gsutil
+    return gcloud_bin
 
 
 def _ensure_crcmod():
     try:
         import crcmod  # noqa: F401
-        log('crcmod already installed (gsutil CRC32c acceleration active)', 'gsutil')
+        log('crcmod already installed (gcloud storage CRC32c acceleration active)', 'gcloud')
     except ImportError:
-        log('crcmod not found — installing for gsutil CRC32c performance...', 'gsutil')
+        log('crcmod not found — installing for gcloud storage CRC32c performance...', 'gcloud')
         run('sudo apt-get install -y gcc python3-dev python3-setuptools 2>/dev/null || true')
         run('pip3 install --no-cache-dir -U crcmod --break-system-packages 2>/dev/null '
             '|| pip3 install --no-cache-dir -U crcmod')
-        log('crcmod install complete', 'gsutil')
+        log('crcmod install complete', 'gcloud')
 
 
 # ---------------------------------------------------------------------------
@@ -642,12 +642,12 @@ def extract_safe_from_zip(zip_path, target_parent):
 
 
 # ---------------------------------------------------------------------------
-# Step 5: per-dataset gsutil rsync worker
+# Step 5: per-dataset gcloud storage rsync worker
 # ---------------------------------------------------------------------------
 
-def download_safe(item, gsutil_path):
+def download_safe(item, gcloud_path):
     '''
-    Download one .SAFE folder via gsutil rsync -r.
+    Download one .SAFE folder via gcloud storage rsync.
     Resumable by design: reruns skip files already matching checksum.
     Calls fix_s2 on success.
     Returns item dict (pass-through for parfor).
@@ -670,7 +670,7 @@ def download_safe(item, gsutil_path):
     log(f'  src  : {base_url}', 'rsync')
     log(f'  dst  : {safe_path}', 'rsync')
 
-    # Create output dirs — gsutil rsync requires destination to exist
+    # Create output dirs — gcloud storage rsync requires destination to exist
     md(out_dir)
     os.makedirs(safe_path, exist_ok=True)
 
@@ -678,10 +678,10 @@ def download_safe(item, gsutil_path):
     stderr_log = safe_path + '_stderr.txt'
     log(f'  logs : {stderr_log}', 'rsync')
 
-    # Trailing slashes on both src and dst required by gsutil rsync
+    # Trailing slashes on both src and dst required by gcloud storage rsync
     src = base_url.rstrip('/') + '/'
     dst = safe_path.rstrip('/') + '/'
-    cmd = f'{gsutil_path} -m rsync -r {src} {dst}'
+    cmd = f'{gcloud_path} storage rsync {src} {dst} --recursive'
     log(f'  cmd  : {cmd}', 'rsync')
 
     ret, dt = run_cmd(cmd, stdout=stdout_log, stderr=stderr_log)
@@ -801,7 +801,7 @@ def run_sen2cor_job(job, l2a_process):
 
 def download_by_gids(gids, yyyymmdd, yyyymmdd2,
                      use_L2, use_parallel, force_listing,
-                     gsutil_path, l2a_process):
+                     gcloud_path, l2a_process):
     global _files_completed, _total_files, _bytes_completed, _total_bytes, _download_start_time
 
     _files_completed = 0; _total_files = 0
@@ -972,7 +972,7 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2,
     _download_start_time = time.time()
 
     # ------------------------------------------------------------------
-    # Step 5: download .SAFE folders via gsutil rsync
+    # Step 5: download .SAFE folders via gcloud storage rsync
     # ------------------------------------------------------------------
     log(f'STEP 5: Downloading {_total_files} .SAFE folder(s) '
         f'[{"parallel" if use_parallel else "serial"}, workers={N_DL_WORKERS if use_parallel else 1}]')
@@ -980,11 +980,11 @@ def download_by_gids(gids, yyyymmdd, yyyymmdd2,
     t_dl0 = time.time()
     if use_parallel:
         def _dl(item):
-            return download_safe(item, gsutil_path)
+            return download_safe(item, gcloud_path)
         parfor(_dl, work_items, N_DL_WORKERS)
     else:
         for item in work_items:
-            download_safe(item, gsutil_path)
+            download_safe(item, gcloud_path)
     t_dl = time.time() - t_dl0
 
     dl_ok  = sum(1 for item in work_items if exists(item['safe_path']))
@@ -1127,7 +1127,7 @@ if __name__ == '__main__':
     log(f'CWD       : {os.getcwd()}')
     log(f'{"="*60}')
 
-    gsutil_path = ensure_gsutil()
+    gcloud_path = ensure_gcloud()
 
     l2a_process = None
     if use_L2:
@@ -1140,7 +1140,7 @@ if __name__ == '__main__':
         use_L2        = use_L2,
         use_parallel  = use_parallel,
         force_listing = force_listing,
-        gsutil_path   = gsutil_path,
+        gcloud_path   = gcloud_path,
         l2a_process   = l2a_process,
     )
 

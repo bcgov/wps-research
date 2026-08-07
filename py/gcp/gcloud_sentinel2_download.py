@@ -46,7 +46,7 @@ for p in pi:
     else:
         print(g_prod_to_url[p]) 
         f.write(('test ! -f ' + p + '.SAFE && ' +
-                 'gsutil cp -r ' + g_prod_to_url[p] + ' ./ ' +
+                 'gcloud storage cp -r ' + g_prod_to_url[p] + ' ./ ' +
                  '> ' + p + '.SAFE_stdout.txt 2> ' + p + '.SAFE_stderr.txt\n').encode())
 f.close()
 g.close()

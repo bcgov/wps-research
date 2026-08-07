@@ -51,10 +51,10 @@ f = open("gcloud_download.sh", "wb")
 for p in g_prod_to_url:
     print(g_prod_to_url[p]) 
     f.write(("test ! -f " + p + ".SAFE && " +
-             "gsutil -m cp -r " + g_prod_to_url[p] + " ./ " +
+             "gcloud storage cp -r " + g_prod_to_url[p] + " ./ " +
              "> " + p + ".SAFE_stdout.txt 2> " + p + ".SAFE_stderr.txt" + "\n").encode())
 f.close()
 
 # step 2: cross-reference with index file..
 # create a list of download commands e.g.:
-# gsutil cp -r gs://gcp-public-data-sentinel-2/tiles/44/X/MQ/S2B_MSIL1C_20200526T101559_N0209_R065_T44XMQ_20200526T123451.SAFE ./
+# gcloud storage cp -r gs://gcp-public-data-sentinel-2/tiles/44/X/MQ/S2B_MSIL1C_20200526T101559_N0209_R065_T44XMQ_20200526T123451.SAFE ./

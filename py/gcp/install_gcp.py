@@ -22,17 +22,17 @@ sdk_folder = dp + 'google-cloud-sdk' + sep  # local extraction location
 if not exists(sdk_folder):
     run('tar xvf ' + tfn)
 
-gsutil = os.popen('which gsutil').read().strip() # what comes up under gsutil?
-gsutil_t = sdk_folder + 'bin' + sep + 'gsutil' # where our gsutil command should be!
-if gsutil != gsutil_t:
+gcloud_bin = os.popen('which gcloud').read().strip() # what comes up under gcloud?
+gcloud_t = sdk_folder + 'bin' + sep + 'gcloud' # where our gcloud command should be!
+if gcloud_bin != gcloud_t:
     run(sdk_folder + 'install.sh')  # add install info to ~/.bashrc file
     cmd = sep.join(['source ',  'home', os.popen('whoami').read().strip(), '.bashrc'])
     run(cmd) # load the ~.bashrc file to be able to use the command
 
-if gsutil != gsutil_t:  # check command without prefix in expected location
-    err('expected: ' + gsutil + ' == ' + gsutil_t)
+if gcloud_bin != gcloud_t:  # check command without prefix in expected location
+    err('expected: ' + gcloud_bin + ' == ' + gcloud_t)
 else:
-    print('gsutil installed')
+    print('gcloud installed')
 
 ''' do we need this step:?
      ./google-cloud-sdk/bin/gcloud init
