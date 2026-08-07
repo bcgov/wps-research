@@ -399,6 +399,14 @@ class FireRoutes:
         # Authoritative source: the sidecar written when each preview
         # was rendered. It knows the extent each PNG actually came
         # from, which the finished PNG itself cannot express.
+        def _png_dims(path):
+            try:
+                from matplotlib.image import imread
+                a = imread(path)
+                return int(a.shape[1]), int(a.shape[0])
+            except Exception:
+                return 0, 0
+
         out = {'crop': None, 'runs': {}, 'views': {}}
         gj = os.path.join(fire.cache_dir, 'previews', 'geo.json')
         if os.path.isfile(gj):
@@ -409,6 +417,41 @@ class FireRoutes:
                 pass
         if fire.crop_bin and os.path.isfile(fire.crop_bin):
             out['crop'] = _geo(fire.crop_bin)
+
+        # Backfill: a run mapped before geo.json existed has no entry,
+        # so its result would fall back to the CURRENT crop's extent --
+        # wrong whenever the sweep changed padding, which is the whole
+        # problem. The run's own classified raster shares the grid of
+        # the crop it was mapped against, so it reconstructs the
+        # correct extent exactly.
+        try:
+            prev_dir = os.path.join(fire.cache_dir, 'previews')
+            newest_run, newest_geo = None, None
+            for f in sorted(os.listdir(fire.cache_dir)):
+                m = re.match(
+                    rf'^{re.escape(fire_numbe)}_serial_(\d+)'
+                    rf'_classified\.bin$', f)
+                if not m:
+                    continue
+                rid = m.group(1)
+                key = f'serial_{rid}'
+                if key in out['views']:
+                    continue
+                g = _geo(os.path.join(fire.cache_dir, f))
+                if not g:
+                    continue
+                pw, ph = _png_dims(os.path.join(prev_dir, f'{key}.png'))
+                entry = {'gt': g['gt'], 'rw': g['w'], 'rh': g['h'],
+                         'w': pw or g['w'], 'h': ph or g['h']}
+                out['views'][key] = entry
+                if newest_run is None or int(rid) >= int(newest_run):
+                    newest_run, newest_geo = rid, entry
+            # previews/result.png is a copy of the most recent run's
+            # overlay, so it shares that run's extent.
+            if 'result' not in out['views'] and newest_geo:
+                out['views']['result'] = dict(newest_geo)
+        except OSError:
+            pass
 
         # Serial runs keep their own classified raster, which may have
         # been produced at a different padding than the current crop.

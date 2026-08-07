@@ -1477,6 +1477,10 @@ function updateTransformForPane(pane) {
 // pointer moves more than a couple of pixels the user meant to pan, so
 // the peek is cancelled and the original view restored immediately.
 let _flicker = null;
+// While peeking, a pane displays another pane's raster. This lets the
+// coordinate helpers be told which geo actually applies, instead of
+// them assuming the pane's own view.
+let _flickerGeoOverride = null;
 
 function beginFlicker(pane) {
     if (!splitActive) return;                 // needs two views
@@ -1493,13 +1497,49 @@ function beginFlicker(pane) {
     const { img: otherImg } = getPaneElements(other);
     if (!myImg || !otherImg || !otherImg.src) return;
 
+    const st = paneState[pane];
+    // Save the EXACT transform so restore is a byte-for-byte revert
+    // rather than a recomputation. Recomputing was the zoom drift:
+    // each peek re-derived the viewport, and because the pane was
+    // showing the other raster while geoForPane() still reported this
+    // pane's raster, every cycle nudged the scale.
     _flicker = {pane, restoreSrc: myImg.src, restoreView: myView,
-                active: true};
+                sx: st.scale, px: st.panX, py: st.panY, active: true};
+
+    // Ground currently under this pane's centre, and how many metres
+    // one display pixel spans -- both measured with THIS pane's geo,
+    // before the swap.
+    const { area } = getPaneElements(pane);
+    const cx = (area.clientWidth / 2 - st.panX) / st.scale;
+    const cy = (area.clientHeight / 2 - st.panY) / st.scale;
+    const n0 = paneToNative(pane, cx, cy);
+    const n1 = paneToNative(pane, cx + 1, cy);
+
     myImg.src = otherImg.src;
-    // The peeked image belongs to the other pane's raster, so the
-    // viewport must be re-derived or the ground under the cursor
-    // shifts during the peek -- defeating the point of comparing.
-    if (syncPanes && splitActive) syncOtherPane(other);
+
+    // Re-derive THIS pane's transform against the OTHER pane's geo, so
+    // the same ground stays under the centre at the same on-screen
+    // scale. Deliberately does not touch the other pane.
+    if (n0 && n1) {
+        const gB = geoForPane(other);
+        const gSave = _flickerGeoOverride;
+        _flickerGeoOverride = {pane, geo: gB};
+        const mPerImgPx = Math.hypot(n1[0] - n0[0], n1[1] - n0[1]);
+        const pB = nativeToPane(pane, n0[0], n0[1]);
+        const pB2 = nativeToPane(pane, n0[0] + mPerImgPx, n0[1]);
+        if (pB && pB2) {
+            const ippm = Math.hypot(pB2[0] - pB[0], pB2[1] - pB[1]);
+            if (ippm > 0) {
+                st.scale = st.scale / ippm;
+                st.panX = area.clientWidth / 2 - pB[0] * st.scale;
+                st.panY = area.clientHeight / 2 - pB[1] * st.scale;
+                myImg.style.transform =
+                    `translate(${st.panX}px, ${st.panY}px) `
+                    + `scale(${st.scale})`;
+            }
+        }
+        _flickerGeoOverride = gSave;
+    }
     const sub = document.getElementById(
         pane === 'right' ? 'subtitle-right' : 'subtitle-left');
     if (sub) sub.style.opacity = '0.6';
@@ -1507,16 +1547,23 @@ function beginFlicker(pane) {
 
 function endFlicker() {
     if (!_flicker) return;
+    const _f = _flicker;
     const {pane, restoreSrc, active} = _flicker;
     _flicker = null;
     const sub = document.getElementById(
         pane === 'right' ? 'subtitle-right' : 'subtitle-left');
     if (sub) sub.style.opacity = '';
     if (active && restoreSrc) {
-        // Straight swap back -- the original bytes are still decoded.
+        // Straight swap back, and restore the SAVED transform exactly.
+        // No recomputation, so repeated peeks cannot accumulate drift.
         const { img } = getPaneElements(pane);
-        if (img) img.src = restoreSrc;
-        if (syncPanes && splitActive) syncOtherPane(pane);
+        const st = paneState[pane];
+        st.scale = _f.sx; st.panX = _f.px; st.panY = _f.py;
+        if (img) {
+            img.src = restoreSrc;
+            img.style.transform =
+                `translate(${st.panX}px, ${st.panY}px) scale(${st.scale})`;
+        }
     }
 }
 
@@ -1539,6 +1586,9 @@ async function loadFireGeo() {
 // their own geotransform because a sweep can change padding between
 // runs, so they may cover a different extent than the live crop.
 function geoForPane(pane) {
+    if (_flickerGeoOverride && _flickerGeoOverride.pane === pane) {
+        return _flickerGeoOverride.geo;
+    }
     if (!_fireGeo) return null;
     const view = pane === 'left' ? leftView : rightView;
 
