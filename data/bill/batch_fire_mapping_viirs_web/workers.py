@@ -1047,6 +1047,20 @@ def _serial_finalize(fire, fire_numbe: str, n_total: int,
             'All runs failed. Check the fire console for details.',
             fire=fire_numbe,
             action={'url': f'/fire/{fire_numbe}', 'label': 'Open fire'})
+    # The sweep re-prepped at several paddings, so overlays from
+    # earlier settings sit on grids that no longer match the final
+    # crop. Re-render them all onto it, so every result the user can
+    # click shares the grid of the imagery beside it.
+    try:
+        from .mapping import rerender_run_overlays
+        _f = state.fires.get(fire_numbe)
+        if _f is not None:
+            rerender_run_overlays(
+                _f, log=lambda m: _f.console_log.append(m))
+    except Exception as _rexc:
+        sys.stderr.write(
+            f'[serial] final overlay re-render skipped: {_rexc}\n')
+
     sys.stderr.write(
         f'[serial] {fire_numbe} done: {len(successful)}/{n_total} '
         f'successful\n')

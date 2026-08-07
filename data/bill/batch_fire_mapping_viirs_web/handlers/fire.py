@@ -786,7 +786,56 @@ class FireRoutes:
                             f'{exc}\n')
 
         # Timed from here: everything above is path resolution.
+        # Before serving the ML result, make sure it is rendered in the
+        # CURRENT AOI grid. A sweep re-preps at different paddings, so
+        # an overlay written during an earlier run can describe a
+        # different extent than post.png -- the misalignment. Rendering
+        # it into today's grid makes the two identical by construction.
+        if view == 'result':
+            try:
+                from ..mapping import ensure_overlay_current
+                from ..state import find_classified
+                _clf = find_classified(
+                    fire, [fire.cache_dir,
+                           os.path.dirname(fire.crop_bin or '')])
+                if _clf:
+                    ensure_overlay_current(fire, 'result', _clf)
+            except Exception as _exc:
+                sys.stderr.write(
+                    f'[geo] result re-render skipped: {_exc}\n')
+
         _t_prev = time.time()
+
+        # Last line of defence. Every view in a fire should sit on the
+        # current AOI grid (prepare/switch/sweep-end all re-render to
+        # it). If a run overlay is somehow still on an older grid --
+        # a crash mid-sweep, a file restored from elsewhere -- repair
+        # it here rather than serving an image that will misalign.
+        if view in ('result',) or re.match(r'^serial_\d+$', view or ''):
+            try:
+                from osgeo import gdal
+                from ..mapping import rerender_run_overlays
+                ds = gdal.Open(fire.crop_bin, gdal.GA_ReadOnly) \
+                    if fire.crop_bin else None
+                if ds is not None and os.path.isfile(png):
+                    cw, ch = ds.RasterXSize, ds.RasterYSize
+                    ds = None
+                    from matplotlib.image import imread
+                    a = imread(png)
+                    # Previews are downsampled, so compare aspect
+                    # rather than absolute size.
+                    ar_png = a.shape[1] / max(1, a.shape[0])
+                    ar_crop = cw / max(1, ch)
+                    if abs(ar_png - ar_crop) > 0.01 * max(ar_png,
+                                                          ar_crop):
+                        sys.stderr.write(
+                            f'[geo] {view}: aspect {ar_png:.4f} does '
+                            f'not match current AOI {ar_crop:.4f} -- '
+                            f're-rendering onto the current grid\n')
+                        rerender_run_overlays(fire)
+            except Exception as _hexc:
+                sys.stderr.write(
+                    f'[geo] {view}: grid check skipped: {_hexc}\n')
 
         # On-the-fly generation for serial overlays
         if not os.path.exists(png):

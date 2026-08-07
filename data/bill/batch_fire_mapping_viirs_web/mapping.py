@@ -8,6 +8,7 @@ shared ``state`` (only ``state.raster_gt`` for pixel area) is wired by
 
 import json
 import os
+import re
 import sys
 
 import numpy as np
@@ -160,6 +161,152 @@ def diagnose_run(fire, label: str, clf_path: str,
              'and that both were built from the SAME post source.')
     emit(f'  [diag] ===== end {label} =====')
     return out
+
+
+def ensure_overlay_current(fire, out_name: str, clf_path: str,
+                           colour=(0.9, 0.1, 0.0)) -> bool:
+    """Guarantee an overlay PNG is in the CURRENT crop's grid.
+
+    This removes the misalignment at its source instead of describing
+    it. Every previous fix tried to TELL the client what extent a
+    result PNG had -- via names, then a sidecar, then HTTP headers --
+    and each one broke somewhere new, because 'result.png' is a copy
+    and its provenance kept getting lost.
+
+    The overlay renderer already resamples a mask from any extent into
+    the current crop's grid (same pixel size, integer offset -- always
+    true here, everything is 20 m). So if the overlay is simply
+    re-rendered whenever the crop has changed underneath it, the
+    result is ALWAYS pixel-identical in extent and size to post.png.
+    Split-view alignment then needs no georeferencing at all for the
+    result: it is aligned by construction, and cannot drift again.
+
+    Returns True if a re-render happened.
+    """
+    try:
+        if not clf_path or not os.path.isfile(clf_path):
+            return False
+        if not fire.crop_bin or not os.path.isfile(fire.crop_bin):
+            return False
+
+        from osgeo import gdal
+        ds = gdal.Open(fire.crop_bin, gdal.GA_ReadOnly)
+        if ds is None:
+            return False
+        cur = {'gt': [float(v) for v in ds.GetGeoTransform()],
+               'rw': ds.RasterXSize, 'rh': ds.RasterYSize}
+        ds = None
+
+        png = os.path.join(fire.cache_dir, 'previews', f'{out_name}.png')
+        entry = None
+        gj = os.path.join(fire.cache_dir, 'previews', 'geo.json')
+        if os.path.isfile(gj):
+            try:
+                with open(gj, encoding='utf-8') as f:
+                    entry = (json.load(f) or {}).get(out_name)
+            except (OSError, ValueError):
+                entry = None
+
+        same = (
+            entry is not None
+            and os.path.isfile(png)
+            and int(entry.get('rw', -1)) == cur['rw']
+            and int(entry.get('rh', -1)) == cur['rh']
+            and all(abs(a - b) < 1e-6 for a, b in
+                    zip(entry.get('gt', []), cur['gt']))
+        )
+        if same:
+            return False
+
+        why = ('no overlay on disk' if not os.path.isfile(png)
+               else 'no recorded geo' if entry is None
+               else f"grid changed "
+                    f"({entry.get('rw')}x{entry.get('rh')} -> "
+                    f"{cur['rw']}x{cur['rh']})")
+        sys.stderr.write(
+            f'[geo] {out_name}: re-rendering into the current AOI grid '
+            f'({why}) so it matches the post-fire preview exactly\n')
+        _overlay_mask_on_post(fire, clf_path, out_name, colour)
+        return True
+    except Exception as exc:
+        sys.stderr.write(
+            f'[geo] {out_name}: re-render check failed: {exc}\n')
+        return False
+
+
+def rerender_run_overlays(fire, log=None) -> int:
+    """Re-render every run overlay onto the CURRENT crop grid.
+
+    This removes the bug class rather than patching it again.
+
+    The recurring failure was that previews are rendered into whatever
+    crop existed AT RENDER TIME, and a settings sweep re-preps at
+    several paddings. So serial_1.png, result.png and the live
+    post.png could each sit on a DIFFERENT grid, and the split view
+    had to reconcile them from recorded metadata. Every mechanism for
+    carrying that metadata (view names, sidecars, file copies, HTTP
+    headers) is one more thing that can desync -- and each one did.
+
+    _overlay_mask_on_post already resamples a mask whose geotransform
+    differs onto the current crop, so re-running it after any crop
+    change makes ALL previews share ONE grid. Alignment then needs no
+    metadata at all: identical extents are identical by construction,
+    and the geo plumbing becomes belt-and-braces rather than the thing
+    correctness depends on.
+
+    Returns the number of overlays re-rendered.
+    """
+    def emit(msg):
+        sys.stderr.write(msg + '\n')
+        if log:
+            try:
+                log(msg)
+            except Exception:
+                pass
+
+    n = 0
+    try:
+        if not fire.crop_bin or not os.path.isfile(fire.crop_bin):
+            return 0
+        cache = fire.cache_dir
+        # Every run's classified raster, plus whichever one 'result'
+        # currently represents.
+        pat = re.compile(
+            rf'^{re.escape(fire.fire_numbe)}_serial_(\d+)'
+            rf'_classified\.bin$')
+        runs = []
+        for f in sorted(os.listdir(cache)):
+            m = pat.match(f)
+            if m:
+                runs.append((int(m.group(1)), os.path.join(cache, f)))
+        runs.sort()
+
+        for rid, clf in runs:
+            try:
+                _overlay_mask_on_post(fire, clf, f'serial_{rid}',
+                                      (0.9, 0.1, 0.0))
+                n += 1
+            except Exception as exc:
+                emit(f'  [geo] re-render serial_{rid} failed: {exc}')
+
+        if runs:
+            # 'result' mirrors the newest run.
+            newest_id, newest_clf = runs[-1]
+            try:
+                _overlay_mask_on_post(fire, newest_clf, 'result',
+                                      (0.9, 0.1, 0.0))
+                copy_preview_geo(cache, f'serial_{newest_id}', 'result')
+                n += 1
+            except Exception as exc:
+                emit(f'  [geo] re-render result failed: {exc}')
+
+        if n:
+            emit(f'  [geo] re-rendered {n} run overlay(s) onto the '
+                 f'current AOI grid -- all views now share one '
+                 f'geotransform, so the split view aligns exactly.')
+    except Exception as exc:
+        emit(f'  [geo] run overlay re-render failed: {exc}')
+    return n
 
 
 def copy_preview_geo(cache_dir: str, src_name: str,

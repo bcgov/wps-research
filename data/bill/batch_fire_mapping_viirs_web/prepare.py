@@ -502,6 +502,17 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
             f'[prepare] overlay build after source switch failed: '
             f'{exc}\n')
 
+    # Same grid change as a re-prepare: the crop now points at the
+    # other source's stack, so run overlays must be re-rendered onto
+    # it or they keep the previous source's extent.
+    try:
+        from .mapping import rerender_run_overlays
+        rerender_run_overlays(
+            fire, log=lambda m: fire.console_log.append(m))
+    except Exception as _rexc:
+        sys.stderr.write(
+            f'[prepare] run overlay re-render skipped: {_rexc}\n')
+
     if not restored:
         # Render EVERY hint mode for this source before stashing, so
         # the stash carries all of them and later hint toggles never
@@ -912,6 +923,16 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
         record_base_preview_geo(cache_dir, crop_bin)
     except Exception:
         pass
+    # The AOI grid just changed. Put every existing run overlay back
+    # onto it, so all views in this fire share one geotransform and
+    # the split view cannot misalign.
+    try:
+        from .mapping import rerender_run_overlays
+        rerender_run_overlays(
+            fire, log=lambda m: fire.console_log.append(m))
+    except Exception as _rexc:
+        sys.stderr.write(
+            f'[prepare] run overlay re-render skipped: {_rexc}\n')
     fire.available_views = views
 
     # -- Copy results from canonical dir for previously accepted fires --
