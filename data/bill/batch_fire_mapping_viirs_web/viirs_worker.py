@@ -727,6 +727,14 @@ def _viirs_worker(fire: FireInfo) -> None:
                       fraction=0.75)
         from .preview import generate_all_previews
         views = generate_all_previews(crop_bin, cache_dir, fire.fire_numbe)
+        # Record the crop's georeferencing against these previews so
+        # split-view sync can align them with results rendered at a
+        # different padding.
+        try:
+            from .mapping import record_base_preview_geo
+            record_base_preview_geo(cache_dir, crop_bin)
+        except Exception:
+            pass
 
         crop_w, crop_h = _read_dims(crop_bin)
         sample_size = max(state.min_samples, min(

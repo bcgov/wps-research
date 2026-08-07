@@ -443,6 +443,11 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
         try:
             views = generate_all_previews(
                 fire.crop_bin, fire.cache_dir, fire.fire_numbe)
+            try:
+                from .mapping import record_base_preview_geo
+                record_base_preview_geo(fire.cache_dir, fire.crop_bin)
+            except Exception:
+                pass
             fire.available_views = views
         except Exception as exc:
             sys.stderr.write(
@@ -902,6 +907,11 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
 
     # -- Generate preview images --
     views = generate_all_previews(crop_bin, cache_dir, fire_numbe)
+    try:
+        from .mapping import record_base_preview_geo
+        record_base_preview_geo(cache_dir, crop_bin)
+    except Exception:
+        pass
     fire.available_views = views
 
     # -- Copy results from canonical dir for previously accepted fires --

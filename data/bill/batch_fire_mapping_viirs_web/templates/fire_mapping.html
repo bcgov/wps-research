@@ -1449,6 +1449,7 @@ function updateTransformForPane(pane) {
     }
     if (syncPanes && splitActive) {
         syncOtherPane(pane);
+        logPaneGeometry();
     }
 }
 
@@ -1484,10 +1485,21 @@ function beginFlicker(pane) {
     const otherView = pane === 'left' ? rightView : leftView;
     if (!otherView || otherView === myView) return;
 
-    _flicker = {pane, restore: myView, shown: otherView, active: true};
-    // Reuse the normal renderer so the peeked view gets the same
-    // overlays and caching; it is a cache hit, so effectively instant.
-    loadPaneImage(pane, otherView);
+    // Both images are ALREADY decoded and on screen, so the peek is a
+    // straight src swap between the two <img> elements -- no fetch, no
+    // decode, no re-composite. Going through loadPaneImage() re-ran
+    // the whole async render path, which is why it was not instant.
+    const { img: myImg } = getPaneElements(pane);
+    const { img: otherImg } = getPaneElements(other);
+    if (!myImg || !otherImg || !otherImg.src) return;
+
+    _flicker = {pane, restoreSrc: myImg.src, restoreView: myView,
+                active: true};
+    myImg.src = otherImg.src;
+    // The peeked image belongs to the other pane's raster, so the
+    // viewport must be re-derived or the ground under the cursor
+    // shifts during the peek -- defeating the point of comparing.
+    if (syncPanes && splitActive) syncOtherPane(other);
     const sub = document.getElementById(
         pane === 'right' ? 'subtitle-right' : 'subtitle-left');
     if (sub) sub.style.opacity = '0.6';
@@ -1495,12 +1507,17 @@ function beginFlicker(pane) {
 
 function endFlicker() {
     if (!_flicker) return;
-    const {pane, restore, active} = _flicker;
+    const {pane, restoreSrc, active} = _flicker;
     _flicker = null;
     const sub = document.getElementById(
         pane === 'right' ? 'subtitle-right' : 'subtitle-left');
     if (sub) sub.style.opacity = '';
-    if (active && restore) loadPaneImage(pane, restore);
+    if (active && restoreSrc) {
+        // Straight swap back -- the original bytes are still decoded.
+        const { img } = getPaneElements(pane);
+        if (img) img.src = restoreSrc;
+        if (syncPanes && splitActive) syncOtherPane(pane);
+    }
 }
 
 // Georeferencing for each displayable raster, keyed 'crop' and by run
@@ -1524,12 +1541,27 @@ async function loadFireGeo() {
 function geoForPane(pane) {
     if (!_fireGeo) return null;
     const view = pane === 'left' ? leftView : rightView;
+
+    // The sidecar is keyed by the PNG that was rendered. A run result
+    // shown as 'result' was copied from serial_<id>.png, so try that
+    // key first -- it carries the extent of the padding THAT RUN used,
+    // which is what makes ML results line up with a crop rendered at a
+    // different padding.
+    const v = _fireGeo.views || {};
     const runActive = selectedRun !== null && RUN_VIEWS.has(view);
+    if (runActive && v[`serial_${selectedRun}`]) {
+        return v[`serial_${selectedRun}`];
+    }
+    if (v[view]) return v[view];
+    if (view === 'hint' && v[`hint_${currentHintMode}`]) {
+        return v[`hint_${currentHintMode}`];
+    }
     if (runActive && _fireGeo.runs) {
         const g = _fireGeo.runs[String(selectedRun)];
-        if (g) return g;
+        if (g) return {gt: g.gt, rw: g.w, rh: g.h, w: g.w, h: g.h};
     }
-    return _fireGeo.crop;
+    const c = _fireGeo.crop;
+    return c ? {gt: c.gt, rw: c.w, rh: c.h, w: c.w, h: c.h} : null;
 }
 
 // Pane pixel -> native CRS. The displayed PNG is a downsampled copy of
@@ -1539,8 +1571,8 @@ function paneToNative(pane, px, py) {
     const g = geoForPane(pane);
     const { img } = getPaneElements(pane);
     if (!g || !img || !img.naturalWidth) return null;
-    const sx = g.w / img.naturalWidth;
-    const sy = g.h / img.naturalHeight;
+    const sx = (g.rw || g.w) / img.naturalWidth;
+    const sy = (g.rh || g.h) / img.naturalHeight;
     const rx = px * sx, ry = py * sy;
     return [g.gt[0] + rx * g.gt[1] + ry * g.gt[2],
             g.gt[3] + rx * g.gt[4] + ry * g.gt[5]];
@@ -1555,7 +1587,8 @@ function nativeToPane(pane, X, Y) {
     const dx = X - g.gt[0], dy = Y - g.gt[3];
     const rx = (dx * g.gt[5] - dy * g.gt[2]) / det;
     const ry = (-dx * g.gt[4] + dy * g.gt[1]) / det;
-    return [rx * img.naturalWidth / g.w, ry * img.naturalHeight / g.h];
+    return [rx * img.naturalWidth / (g.rw || g.w),
+            ry * img.naturalHeight / (g.rh || g.h)];
 }
 
 // Mirror one pane's viewport onto the other so BOTH SHOW THE SAME
@@ -1569,6 +1602,26 @@ function nativeToPane(pane, X, Y) {
 //
 // Going through the native CRS is correct for any combination of
 // extent, padding and resolution.
+// Report the geometry of both panes once per view change. If the
+// panes still disagree, this says immediately whether the cause is
+// mismatched image dimensions, a missing geotransform, or genuinely
+// different ground extents.
+let _lastGeoLog = '';
+function logPaneGeometry() {
+    const L = getPaneElements('left').img;
+    const R = getPaneElements('right').img;
+    if (!L || !R || !L.naturalWidth || !R.naturalWidth) return;
+    const gL = geoForPane('left'), gR = geoForPane('right');
+    const fmt = (g) => g && g.gt
+        ? `raster ${g.w}x${g.h} origin (${g.gt[0].toFixed(1)}, `
+          + `${g.gt[3].toFixed(1)}) px ${g.gt[1].toFixed(3)}m`
+        : 'NO GEOTRANSFORM';
+    const msg = `[geo] left png ${L.naturalWidth}x${L.naturalHeight} `
+        + `(${leftView}) ${fmt(gL)} | right png `
+        + `${R.naturalWidth}x${R.naturalHeight} (${rightView}) ${fmt(gR)}`;
+    if (msg !== _lastGeoLog) { _lastGeoLog = msg; log(msg, 'dim'); }
+}
+
 function syncOtherPane(pane) {
     const other = pane === 'left' ? 'right' : 'left';
     const { area, img } = getPaneElements(pane);
@@ -1576,6 +1629,18 @@ function syncOtherPane(pane) {
     if (!img || !oImg || !img.naturalWidth || !oImg.naturalWidth) return;
     const s = paneState[pane];
     const os = paneState[other];
+
+    // Identical pixel dimensions means the two panes are showing the
+    // same grid, so the transform copies across exactly. Taking this
+    // shortcut avoids introducing rounding drift through the CRS
+    // round-trip, and is provably exact.
+    if (img.naturalWidth === oImg.naturalWidth
+            && img.naturalHeight === oImg.naturalHeight) {
+        os.scale = s.scale; os.panX = s.panX; os.panY = s.panY;
+        oImg.style.transform =
+            `translate(${os.panX}px, ${os.panY}px) scale(${os.scale})`;
+        return;
+    }
 
     const gA = geoForPane(pane), gB = geoForPane(other);
     if (gA && gB && gA.gt && gB.gt) {

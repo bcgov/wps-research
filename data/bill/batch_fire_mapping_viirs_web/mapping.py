@@ -6,6 +6,7 @@ shared ``state`` (only ``state.raster_gt`` for pixel area) is wired by
 :func:`init` at server boot.
 """
 
+import json
 import os
 import sys
 
@@ -49,6 +50,72 @@ def _compute_ml_area(fire: 'FireInfo',
         sys.stderr.write(
             f'[ml_area] WARNING: Failed to compute ML area: {exc}\n')
         return -1.0
+
+
+def record_preview_geo(cache_dir: str, raster_path: str,
+                       out_name: str, png_path: str):
+    """Record the georeferencing of a rendered preview PNG.
+
+    Preview PNGs are rendered in the CROP's coordinate space at the
+    moment of rendering, then downsampled. A settings sweep re-preps
+    the fire at different paddings, so serial_1.png, serial_4.png and
+    the live post.png can each cover a DIFFERENT ground extent.
+
+    Nothing about the finished PNG records which extent it came from,
+    so split-view sync had no way to line two of them up -- matching by
+    pixel or by fraction is wrong whenever the extents differ, which is
+    precisely the ML-result case.
+
+    Writing a sidecar at render time makes each PNG self-describing:
+    <cache>/previews/geo.json maps view name -> {gt, rw, rh, w, h},
+    where gt/rw/rh are the source raster's geotransform and size and
+    w/h are the PNG's.
+    """
+    try:
+        from osgeo import gdal
+        src = raster_path
+        if not src or not os.path.isfile(src):
+            return
+        ds = gdal.Open(src, gdal.GA_ReadOnly)
+        if ds is None:
+            return
+        gt = [float(v) for v in ds.GetGeoTransform()]
+        rw, rh = ds.RasterXSize, ds.RasterYSize
+        ds = None
+
+        pw = ph = 0
+        try:
+            from matplotlib.image import imread
+            a = imread(png_path)
+            ph, pw = a.shape[0], a.shape[1]
+        except Exception:
+            pass
+
+        gj = os.path.join(cache_dir, 'previews', 'geo.json')
+        data = {}
+        if os.path.isfile(gj):
+            try:
+                with open(gj, encoding='utf-8') as f:
+                    data = json.load(f)
+            except (OSError, ValueError):
+                data = {}
+        data[out_name] = {'gt': gt, 'rw': rw, 'rh': rh,
+                          'w': pw or rw, 'h': ph or rh}
+        tmp = gj + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(data, f)
+        os.replace(tmp, gj)
+    except Exception as exc:
+        sys.stderr.write(f'[overlay] geo record failed for '
+                         f'{out_name}: {exc}\n')
+
+
+def record_base_preview_geo(cache_dir: str, crop_bin: str) -> None:
+    """Record geo for the previews generate_all_previews() writes."""
+    for _v in ('pre', 'post', 'diff1', 'diff2', 'diff3'):
+        _p = os.path.join(cache_dir, 'previews', f'{_v}.png')
+        if os.path.isfile(_p):
+            record_preview_geo(cache_dir, crop_bin, _v, _p)
 
 
 def _overlay_mask_on_post(fire: 'FireInfo', raster_path: str,
@@ -160,6 +227,10 @@ def _overlay_mask_on_post(fire: 'FireInfo', raster_path: str,
 
         out_path = os.path.join(fire.cache_dir, 'previews', f'{out_name}.png')
         imsave(out_path, np.clip(result, 0, 1))
+        # The PNG is in the CURRENT crop's space; record that so split
+        # sync can align it against previews from other paddings.
+        record_preview_geo(fire.cache_dir, fire.crop_bin,
+                           out_name, out_path)
 
         # Register as a selectable view only if it IS one. Per-mode
         # hint renders (hint_redwins_post, hint_redwins_diff, ...) are

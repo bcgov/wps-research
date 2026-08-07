@@ -396,7 +396,17 @@ class FireRoutes:
             except Exception:
                 return None
 
-        out = {'crop': None, 'runs': {}}
+        # Authoritative source: the sidecar written when each preview
+        # was rendered. It knows the extent each PNG actually came
+        # from, which the finished PNG itself cannot express.
+        out = {'crop': None, 'runs': {}, 'views': {}}
+        gj = os.path.join(fire.cache_dir, 'previews', 'geo.json')
+        if os.path.isfile(gj):
+            try:
+                with open(gj, encoding='utf-8') as f:
+                    out['views'] = json.load(f)
+            except (OSError, ValueError):
+                pass
         if fire.crop_bin and os.path.isfile(fire.crop_bin):
             out['crop'] = _geo(fire.crop_bin)
 
