@@ -464,8 +464,10 @@ def _polygonize_date_mask(mask, date_str: str, simplify_px: float = 1.5):
 
 
 def write_date_polygons(out_json: str, date_map, date_list,
-                        xsize: int, ysize: int) -> dict:
+                        xsize: int, ysize: int,
+                        date_sats=None) -> dict:
     """Build and persist the per-date coverage polygons."""
+    date_sats = date_sats or {}
     entries = []
     for idx, acq in enumerate(date_list):
         m = (date_map == idx)
@@ -473,7 +475,8 @@ def write_date_polygons(out_json: str, date_map, date_list,
         if n_px == 0:
             continue
         rings = _polygonize_date_mask(m, acq)
-        entries.append({'date': acq, 'pixels': n_px, 'rings': rings})
+        entries.append({'date': acq, 'pixels': n_px, 'rings': rings,
+                        'sats': date_sats.get(acq, [])})
     # Newest first so the legend reads in the same order as the
     # extraction log.
     entries.sort(key=lambda e: e['date'], reverse=True)
@@ -582,15 +585,21 @@ def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
     # registry the indices refer to.
     date_map = np.full((ysize, xsize), -1, dtype=np.int16)
     date_list = []
+    # Which platform(s) contributed each acquisition date. A single
+    # date can be filled from more than one satellite where swaths
+    # overlap, so this is a set per date, not a single value.
+    date_sats = {}
     date_lock = threading.Lock()
 
-    def _date_index(acq: str) -> int:
+    def _date_index(acq: str, sat: str = '') -> int:
         """Stable index for an acquisition date, assigned on first use.
 
         Workers run concurrently, so the registry is guarded; the index
         is what gets written into the per-pixel maps.
         """
         with date_lock:
+            if sat:
+                date_sats.setdefault(acq, set()).add(sat)
             try:
                 return date_list.index(acq)
             except ValueError:
@@ -669,7 +678,11 @@ def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
                         nb = warped.GetRasterBand(i + 1).ReadAsArray()
                         local[i][gap] = nb[gap]
                     local_filled |= gap
-                    local_date[gap] = _date_index(acq)
+                    # Platform prefix comes straight off the SAFE
+                    # name (S2A_/S2B_/S2C_), so it needs no extra I/O.
+                    _sat = os.path.basename(zpath)[:3].upper()
+                    local_date[gap] = _date_index(
+                        acq, _sat if _sat.startswith('S2') else '')
                     local_used.append((token, acq))
                 after = int((local_filled & tile_mask).sum())
                 lines.append(f'      +{n_new:,} px; footprint now '
@@ -747,6 +760,31 @@ def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
     _log(f'AOI coverage: {int(filled.sum()):,}/{total_px:,} px '
          f'({aoi_frac:.1%}) filled with non-nodata.')
 
+    # NaN is the right sentinel WHILE building -- the backfill logic
+    # depends on "is this pixel still empty?" -- but it must not reach
+    # the stack. The MRAP mosaics use 0 for nodata, so a stack built
+    # from them is entirely finite; an L2 stack carrying NaN in its
+    # post bands (and therefore in the anomaly bands derived from them)
+    # is a different kind of raster than the mapping CLI has ever been
+    # given. scikit-learn's t-SNE/HDBSCAN/RandomForest all reject
+    # non-finite input, which fails every run identically regardless of
+    # parameters.
+    #
+    # Converting to 0 here makes the L2 product match the MRAP
+    # convention exactly, so downstream code cannot tell the two apart.
+    n_nan_total = 0
+    for i in range(1, len(BANDS) + 1):
+        arr = acc.GetRasterBand(i).ReadAsArray()
+        n_nan = int(np.isnan(arr).sum())
+        n_nan_total += n_nan
+        if n_nan:
+            arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+            acc.GetRasterBand(i).WriteArray(arr)
+    if n_nan_total:
+        _log(f'nodata: converted {n_nan_total:,} NaN cell(s) across '
+             f'{len(BANDS)} band(s) to 0 (matching the MRAP nodata '
+             f'convention; sklearn rejects non-finite input)')
+
     _p('writing L2-recent composite', 0.9)
     os.makedirs(os.path.dirname(out_bin) or '.', exist_ok=True)
     tmp = f'{out_bin}.tmp{os.getpid()}'
@@ -775,7 +813,8 @@ def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
     _p('outlining per-date coverage', 0.95)
     dates_json = date_polygons_path(out_bin)
     poly_payload = write_date_polygons(
-        dates_json, date_map, date_list, xsize, ysize)
+        dates_json, date_map, date_list, xsize, ysize,
+        date_sats={k: sorted(v) for k, v in date_sats.items()})
     # Deliberately does NOT print the path: this sidecar is written
     # beside the temporary post buffer and relocated next to the stack
     # by the caller, so printing it here shows a filename that no

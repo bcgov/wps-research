@@ -813,13 +813,40 @@ def next_coverage(aoi_ring_native, srs_wkt, geotransform, width, height,
                 (-dx * gt[4] + dy * gt[1]) / det)
 
     horizon = now_ts + horizon_days * 86400.0
+    # Per-satellite accounting, so "why is only one satellite listed?"
+    # is answerable from the response instead of guesswork. Each plan
+    # covers its own validity window, and a window that ends before the
+    # horizon silently reduces the apparent revisit rate.
+    census = {}
+
+    def _c(sat, key):
+        c = census.setdefault(sat or '?', {
+            'total': 0, 'wrong_mode': 0, 'past': 0, 'beyond_horizon': 0,
+            'candidate': 0, 'no_overlap': 0, 'used': 0,
+            'last_planned': None})
+        c[key] += 1
+        return c
+
     cand = []
     for d in plans['datatakes']:
+        sat = d.get('sat') or '?'
+        _c(sat, 'total')
         if modes and d.get('mode') not in modes:
+            _c(sat, 'wrong_mode')
             continue
         t0 = _iso_to_ts(d.get('start'))
-        if t0 is None or t0 < now_ts or t0 > horizon:
+        if t0 is None:
             continue
+        c = census.setdefault(sat, {})
+        if c.get('last_planned') is None or t0 > c['last_planned']:
+            c['last_planned'] = t0
+        if t0 < now_ts:
+            _c(sat, 'past')
+            continue
+        if t0 > horizon:
+            _c(sat, 'beyond_horizon')
+            continue
+        _c(sat, 'candidate')
         cand.append((t0, d))
     cand.sort(key=lambda p: p[0])
 
@@ -837,6 +864,7 @@ def next_coverage(aoi_ring_native, srs_wkt, geotransform, width, height,
         except Exception:
             continue
         if not swath.Intersects(aoi_poly):
+            _c(d.get('sat'), 'no_overlap')
             continue
         piece = swath.Intersection(aoi_poly)
         if piece is None or piece.IsEmpty():
@@ -886,6 +914,7 @@ def next_coverage(aoi_ring_native, srs_wkt, geotransform, width, height,
             'new_fraction': new_frac,
             'rings': rings_px,
         })
+        _c(d.get('sat'), 'used')
         claimed = piece if claimed is None else claimed.Union(piece)
         # Keep going past full coverage: the user wants the next N
         # opportunities, not merely the minimum set that tiles the AOI.
@@ -911,4 +940,6 @@ def next_coverage(aoi_ring_native, srs_wkt, geotransform, width, height,
         'plans_fetched_at': plans.get('fetched_at'),
         'plans_age_s': cache_age_s(),
         'insecure': bool(_status.get('insecure')),
+        'census': census,
+        'sources': plans.get('sources', {}),
     }

@@ -1375,6 +1375,41 @@ async function loadNextCoverage() {
     log(`[diag] next_coverage: ${d.passes.length} pass(es), `
         + `${((d.covered_fraction || 0) * 100).toFixed(1)}% of AOI `
         + `within ${d.horizon_days} d`, 'dim');
+    // Per-satellite accounting. If a satellite contributes no passes,
+    // this says whether its plan simply ends before the horizon (the
+    // usual cause of an apparently falling revisit rate) or whether
+    // its swaths genuinely miss this AOI.
+    Object.entries(d.census || {}).forEach(([sat, c]) => {
+        const last = c.last_planned
+            ? new Date(c.last_planned * 1000).toISOString().slice(0, 16)
+              + 'Z' : 'n/a';
+        log(`[diag]   ${sat}: ${c.used || 0} used, `
+            + `${c.candidate || 0} in window, `
+            + `${c.no_overlap || 0} missed AOI, `
+            + `${c.beyond_horizon || 0} beyond horizon, `
+            + `plan ends ${last}`, 'dim');
+    });
+    // Surface a plan that runs out before the horizon: coverage looks
+    // sparse purely because there is no published plan yet, not
+    // because the satellite stops passing over.
+    const now = Date.now() / 1000;
+    const short = Object.entries(d.census || {})
+        .filter(([, c]) => c.last_planned
+                && c.last_planned < now + (d.horizon_days || 21) * 86400
+                - 86400)
+        .map(([sat, c]) => `${sat} to `
+             + new Date(c.last_planned * 1000).toISOString().slice(0, 10));
+    if (short.length) {
+        const el = document.getElementById('next-cov-legend');
+        if (el) {
+            el.insertAdjacentHTML('beforeend',
+                `<div style="color:#a60;margin-top:3px">Published plans
+                 end before the ${d.horizon_days}-day horizon
+                 (${short.join('; ')}), so later passes are missing
+                 from this list rather than not happening. ESA
+                 republishes weekly.</div>`);
+        }
+    }
 }
 
 function nextCovColour(i, n) {
@@ -1506,6 +1541,17 @@ async function loadDatePlot() {
     }
 }
 
+// Which platform(s) produced an acquisition, formatted to match the
+// "S2A · date" style used by the expected-coverage plot below. A date
+// can be filled from more than one satellite where swaths overlap, so
+// several may be listed. Older date sidecars predate this and carry no
+// satellite, in which case the prefix is simply omitted rather than
+// guessed at.
+function satPrefix(sats) {
+    if (!sats || !sats.length) return '';
+    return `${sats.join('+')} \u00b7 `;
+}
+
 function drawDatePlot() {
     const cv = document.getElementById('date-plot');
     const legend = document.getElementById('date-plot-legend');
@@ -1576,7 +1622,7 @@ function drawDatePlot() {
                   <span style="width:11px;height:11px;flex:none;
                                background:${dateColor(i, n)};
                                border:1px solid #0006"></span>
-                  <span style="color:#333">${pretty}</span>
+                  <span style="color:#333">${satPrefix(d.sats)}${pretty}</span>
                   <span style="color:#888;margin-left:auto">
                     ${pct.toFixed(1)}%</span>
                 </div>`;
