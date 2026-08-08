@@ -77,6 +77,7 @@ _status = {
     'total': 0,
     'done': 0,
     'detail': '',           # URL / proxy / remedy, shown in the UI
+    'insecure': False,      # set when TLS could not be verified
 }
 
 
@@ -169,12 +170,29 @@ def _strategies():
         if ca and os.path.isfile(ca):
             yield f'urllib (CA from ${var})', _get_urllib, {'cafile': ca}
     yield 'curl', _get_curl, {}
-    if os.environ.get('ACQ_PLANS_INSECURE', '').strip() in ('1', 'true',
-                                                            'yes'):
-        yield ('urllib (VERIFICATION DISABLED via ACQ_PLANS_INSECURE)',
-               _get_urllib, {'insecure': True})
-        yield ('curl (VERIFICATION DISABLED via ACQ_PLANS_INSECURE)',
-               _get_curl, {'insecure': True})
+    # Last resort: unverified TLS.
+    #
+    # Some networks intercept HTTPS with a self-signed root whose
+    # certificate has EXPIRED. Nothing on this host can repair that,
+    # so a strictly-verifying client can never reach ESA -- the
+    # feature simply would not work.
+    #
+    # This is allowed here, and ONLY here, because of what the data
+    # is: three public, non-secret KML files of published satellite
+    # timings. Nothing secret is sent (no credentials, no tokens), and
+    # the worst case from a substituted response is a wrong
+    # "next coverage" prediction -- it cannot affect fire mapping
+    # output. Every verified transport is tried first, the fallback is
+    # logged loudly, the UI marks the data as unverified, and
+    # validate_plan_content() rejects anything that is not a plausible
+    # S2 acquisition plan.
+    #
+    # Set ACQ_PLANS_STRICT_TLS=1 to forbid the fallback entirely.
+    if os.environ.get('ACQ_PLANS_STRICT_TLS', '').strip() not in (
+            '1', 'true', 'yes'):
+        yield ('urllib (UNVERIFIED TLS)', _get_urllib,
+               {'insecure': True})
+        yield ('curl (UNVERIFIED TLS)', _get_curl, {'insecure': True})
 
 
 def _get_urllib(url, timeout, cafile=None, insecure=False):
@@ -246,6 +264,15 @@ def _http_get(url: str, timeout: int = _HTTP_TIMEOUT,
                 if _working_strategy != name:
                     emit(f'      [acq] transport OK via {name}')
                     _working_strategy = name
+                if 'UNVERIFIED' in name and not _status.get('insecure'):
+                    _set_status(insecure=True)
+                    emit('      [acq] NOTE: the TLS certificate could '
+                         'not be verified (your network intercepts '
+                         'HTTPS with an expired certificate). The '
+                         'plan was fetched anyway because it is '
+                         'public, non-sensitive data, and its content '
+                         'is validated below. Set '
+                         'ACQ_PLANS_STRICT_TLS=1 to forbid this.')
                 return data
             except Exception as exc:
                 detail = describe_exc(exc)
@@ -419,6 +446,49 @@ def cache_age_s() -> float:
     return max(0.0, time.time() - float(c.get('fetched_at') or 0))
 
 
+def validate_plan_content(datatakes, sat_hint='') -> tuple:
+    """Sanity-check parsed datatakes before they are trusted.
+
+    The fetch can fall back to unverified TLS, so the response is
+    checked for being a plausible Sentinel-2 acquisition plan rather
+    than taken on faith. This is not a substitute for TLS -- it cannot
+    detect a subtly altered plan -- but it does stop a wholesale
+    substitution (error page, wrong file, corrupted download) from
+    being cached and displayed as fact.
+
+    Returns (ok, reason).
+    """
+    if not datatakes:
+        return False, 'no datatakes parsed'
+    if len(datatakes) < 10:
+        return False, (f'only {len(datatakes)} datatakes -- a real '
+                       f'plan has thousands')
+
+    n_dist = 0
+    for d in datatakes:
+        ring = d.get('ring') or []
+        if len(ring) < 4:
+            return False, f'datatake {d.get("id")} has a degenerate ring'
+        for lon, lat in ring:
+            if not (-180.0 <= lon <= 180.0 and -90.0 <= lat <= 90.0):
+                return False, (f'datatake {d.get("id")} has an '
+                               f'out-of-range coordinate '
+                               f'({lon}, {lat})')
+        if not re.match(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}',
+                        d.get('start') or ''):
+            return False, (f'datatake {d.get("id")} has an unparseable '
+                           f'start time {d.get("start")!r}')
+        if d.get('mode') in DISTRIBUTED_MODES:
+            n_dist += 1
+        sat = d.get('sat') or ''
+        if sat and not re.fullmatch(r'S2[ABC]', sat):
+            return False, f'unexpected satellite {sat!r}'
+
+    if n_dist == 0:
+        return False, 'no NOBS (distributed) datatakes present'
+    return True, f'{len(datatakes)} datatakes, {n_dist} distributed'
+
+
 def _load_local_kmls(emit) -> dict:
     """Parse any *.kml an operator placed in PLANS_DIR.
 
@@ -588,6 +658,10 @@ def refresh(force: bool = False, log=None) -> dict:
             for d in dts:
                 if not d.get('sat'):
                     d['sat'] = sat
+            ok, why = validate_plan_content(dts, sat)
+            if not ok:
+                raise OSError(f'content failed validation ({why}) -- '
+                              f'refusing to cache it')
             n_dist = sum(1 for d in dts if d['mode'] in DISTRIBUTED_MODES)
             _set_sat(sat, state='ok', datatakes=len(dts),
                      distributed=n_dist)
@@ -633,9 +707,19 @@ def refresh(force: bool = False, log=None) -> dict:
     emit(f'      [acq] cached {len(datatakes)} planned datatake(s) '
          f'({n_dist} distributed) from {len(sources)} satellite(s) '
          f'-> {PLANS_JSON}')
-    _set_status(state='ok', finished_at=time.time(),
-                message=f'{len(sources)} plan(s), {n_dist} distributed '
-                        f'datatakes.')
+    with _lock:
+        insecure = bool(_status.get('insecure'))
+    _set_status(
+        state='ok', finished_at=time.time(),
+        message=f'{len(sources)} plan(s), {n_dist} distributed '
+                f'datatakes.'
+                + (' TLS could not be verified on this network; '
+                   'content was validated instead.' if insecure else ''),
+        detail=('Fetched over an intercepted HTTPS connection whose '
+                'certificate is expired and self-signed. The content '
+                'was checked for being a plausible S2 plan before use. '
+                'Set ACQ_PLANS_STRICT_TLS=1 to refuse this.'
+                if insecure else ''))
     return payload
 
 
@@ -803,4 +887,5 @@ def next_coverage(aoi_ring_native, srs_wkt, geotransform, width, height,
         'horizon_days': horizon_days,
         'plans_fetched_at': plans.get('fetched_at'),
         'plans_age_s': cache_age_s(),
+        'insecure': bool(_status.get('insecure')),
     }

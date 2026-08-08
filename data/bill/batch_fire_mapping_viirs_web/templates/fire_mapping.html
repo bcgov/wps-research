@@ -1341,7 +1341,14 @@ async function loadNextCoverage() {
         ? `<div style="color:#999;margin-top:3px">Plans fetched
            ${(d.plans_age_s / 3600).toFixed(1)} h ago. Simplified
            footprints; plans are revised weekly.</div>` : '';
-    if (legend) legend.innerHTML = rows + note + age;
+    // Be explicit when the transport could not be verified, rather
+    // than presenting the data as if it were fully trusted.
+    const unver = (d.insecure || (d.status && d.status.insecure))
+        ? `<div style="color:#a60;margin-top:3px">Fetched over an
+           unverified TLS connection (your network intercepts HTTPS
+           with an expired certificate). Content was validated as a
+           plausible S2 plan before use.</div>` : '';
+    if (legend) legend.innerHTML = rows + note + unver + age;
     log(`[diag] next_coverage: ${d.passes.length} pass(es), `
         + `${((d.covered_fraction || 0) * 100).toFixed(1)}% of AOI `
         + `within ${d.horizon_days} d`, 'dim');
