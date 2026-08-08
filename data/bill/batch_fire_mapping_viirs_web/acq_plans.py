@@ -61,6 +61,7 @@ _status = {
     'satellites': {},       # sat -> {state, bytes, datatakes, error}
     'total': 0,
     'done': 0,
+    'detail': '',           # URL / proxy / remedy, shown in the UI
 }
 
 
@@ -91,11 +92,71 @@ def _set_sat(sat, **kw):
 
 # ---------------------------------------------------------------- fetch
 
-def _http_get(url: str, timeout: int = _HTTP_TIMEOUT) -> bytes:
-    req = urllib.request.Request(
-        url, headers={'User-Agent': 'wps-research/fire-mapping'})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.read()
+def describe_exc(exc) -> str:
+    """A message that is never empty.
+
+    A bare TimeoutError (and OSError, and Exception) stringifies to the
+    empty string, so f'...: {exc}' produced 'Could not read the plans
+    index:' with nothing after the colon -- an error report carrying no
+    information. Always include the type, and unwrap the reasons urllib
+    hides inside URLError.
+    """
+    parts = [type(exc).__name__]
+    txt = str(exc).strip()
+    if txt:
+        parts.append(txt)
+    reason = getattr(exc, 'reason', None)
+    if reason is not None and str(reason).strip() and \
+            str(reason).strip() != txt:
+        parts.append(f'reason={reason}')
+    code = getattr(exc, 'code', None)
+    if code is not None:
+        parts.append(f'HTTP {code}')
+    if type(exc).__name__ in ('TimeoutError', 'timeout') and not txt:
+        parts.append(f'no response within {_HTTP_TIMEOUT}s -- the '
+                     f'server may have no outbound HTTPS route to '
+                     f'sentinels.copernicus.eu, or needs a proxy')
+    return ': '.join(parts)
+
+
+def proxy_info() -> str:
+    """Proxy environment, since that is the usual cause of timeouts."""
+    got = {k: os.environ.get(k) for k in
+           ('https_proxy', 'HTTPS_PROXY', 'http_proxy', 'HTTP_PROXY',
+            'no_proxy', 'NO_PROXY')}
+    got = {k: v for k, v in got.items() if v}
+    return ', '.join(f'{k}={v}' for k, v in got.items()) or 'none set'
+
+
+def _http_get(url: str, timeout: int = _HTTP_TIMEOUT,
+              attempts: int = 3, log=None) -> bytes:
+    """GET with retries and errors that say what actually happened."""
+    last = None
+    for i in range(1, attempts + 1):
+        try:
+            req = urllib.request.Request(url, headers={
+                'User-Agent': ('Mozilla/5.0 (compatible; '
+                               'wps-research/fire-mapping)'),
+                'Accept': '*/*',
+            })
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                data = r.read()
+            if not data:
+                raise OSError('empty response body')
+            return data
+        except Exception as exc:
+            last = exc
+            msg = (f'      [acq] attempt {i}/{attempts} failed for '
+                   f'{url}: {describe_exc(exc)}')
+            sys.stderr.write(msg + '\n')
+            if log:
+                try:
+                    log(msg)
+                except Exception:
+                    pass
+            if i < attempts:
+                time.sleep(min(5, 2 ** (i - 1)))
+    raise last if last else OSError('unknown fetch failure')
 
 
 def discover_kml_urls(index_html: str = None) -> dict:
@@ -251,6 +312,55 @@ def cache_age_s() -> float:
     return max(0.0, time.time() - float(c.get('fetched_at') or 0))
 
 
+def _load_local_kmls(emit) -> dict:
+    """Parse any *.kml an operator placed in PLANS_DIR.
+
+    A deliberate escape hatch: if the host cannot reach ESA (no route,
+    proxy, firewall), the plans can still be downloaded elsewhere and
+    dropped in, and everything downstream works unchanged.
+    """
+    global _cache
+    try:
+        if not os.path.isdir(PLANS_DIR):
+            return {}
+        files = [f for f in sorted(os.listdir(PLANS_DIR))
+                 if f.lower().endswith('.kml')]
+        if not files:
+            return {}
+        datatakes, sources = [], {}
+        for f in files:
+            path = os.path.join(PLANS_DIR, f)
+            try:
+                with open(path, 'rb') as fh:
+                    dts = parse_kml(fh.read())
+            except Exception as exc:
+                emit(f'      [acq] local {f}: parse failed: '
+                     f'{describe_exc(exc)}')
+                continue
+            m = re.search(r's2([abc])', f, re.I)
+            sat = ('S2' + m.group(1).upper()) if m else ''
+            for d in dts:
+                if not d.get('sat'):
+                    d['sat'] = sat
+            datatakes.extend(dts)
+            sources[sat or f] = {'url': f'file://{path}'}
+            emit(f'      [acq] local {f}: {len(dts)} datatake(s)')
+        if not datatakes:
+            return {}
+        payload = {'fetched_at': time.time(), 'sources': sources,
+                   'datatakes': datatakes, 'local': True,
+                   'local_files': len(sources)}
+        try:
+            _write_cache(payload)
+        except OSError:
+            pass
+        _cache = payload
+        return payload
+    except Exception as exc:
+        emit(f'      [acq] local KML scan failed: {describe_exc(exc)}')
+        return {}
+
+
 def refresh(force: bool = False, log=None) -> dict:
     """Fetch and cache the current plan for every satellite.
 
@@ -275,9 +385,27 @@ def refresh(force: bool = False, log=None) -> dict:
     try:
         urls = discover_kml_urls()
     except Exception as exc:
-        emit(f'      [acq] could not read the plans index: {exc}')
-        _set_status(state='error', finished_at=time.time(),
-                    message=f'Could not read the plans index: {exc}')
+        detail = describe_exc(exc)
+        emit(f'      [acq] could not read the plans index: {detail}')
+        emit(f'      [acq] proxy env: {proxy_info()}')
+        # Falling back to KMLs an operator dropped in by hand keeps the
+        # feature usable on a host with no route to ESA.
+        local = _load_local_kmls(emit)
+        if local:
+            _set_status(
+                state='ok', finished_at=time.time(),
+                message=f'Using {local.get("local_files", 0)} manually '
+                        f'supplied KML file(s) from {PLANS_DIR} '
+                        f'({len(local.get("datatakes", []))} '
+                        f'datatakes); the ESA index was unreachable.',
+                detail=f'Network error: {detail}')
+            return local
+        _set_status(
+            state='error', finished_at=time.time(),
+            message=f'Could not read the plans index -- {detail}',
+            detail=(f'URL: {PLANS_INDEX}  |  proxy env: '
+                    f'{proxy_info()}  |  drop KML files into '
+                    f'{PLANS_DIR} to use them without network access'))
         return load_cache() or {}
     if not urls:
         emit('      [acq] plans index listed no KML files; '
@@ -311,8 +439,9 @@ def refresh(force: bool = False, log=None) -> dict:
                  f'valid {meta["valid_from"]} - {meta["valid_to"]}')
             return sat, meta, dts, None
         except Exception as exc:
-            _set_sat(sat, state='error', error=str(exc))
-            emit(f'      [acq] {sat}: fetch/parse failed: {exc}')
+            _set_sat(sat, state='error', error=describe_exc(exc))
+            emit(f'      [acq] {sat}: fetch/parse failed: '
+                 f'{describe_exc(exc)}')
             return sat, meta, [], exc
 
     # The three satellite plans are independent files of a few MB, so

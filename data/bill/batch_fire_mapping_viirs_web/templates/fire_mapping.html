@@ -1197,14 +1197,17 @@ function renderAcqProgress(st) {
                 </div>`;
     }).join('');
 
-    const retry = (st.state === 'error')
+    const retry = (st.state === 'error' || st.state === 'idle')
         ? `<button class="btn btn-secondary" style="font-size:11px;
              padding:2px 8px;margin-top:6px"
              onclick="retryAcqPlans()">Retry download</button>` : '';
 
+    const detail = st.detail
+        ? `<div style="color:#999;margin-top:4px;font-size:10px;
+                 word-break:break-all">${st.detail}</div>` : '';
     legend.innerHTML =
         `<div style="color:#555">${st.message || ''}</div>`
-        + bar + rows + retry
+        + bar + rows + detail + retry
         + (st.has_cache
             ? `<div style="color:#999;margin-top:3px">Using the
                previously downloaded plan meanwhile.</div>` : '');
@@ -1229,16 +1232,34 @@ async function pollAcqPlans() {
 }
 
 async function retryAcqPlans() {
+    // Immediate feedback. A retry can take up to a minute of timeouts
+    // before the state changes, so without this the button looks dead
+    // -- which is exactly how it behaved.
+    renderAcqProgress({state: 'running', total: 3, done: 0,
+                       satellites: {},
+                       message: 'Contacting ESA (up to ~1 min if the '
+                                + 'host has no route) ...'});
+    log('[acq] retry requested', 'dim');
     try {
-        await fetch('/api/acq_plans/refresh', {
+        const r = await fetch('/api/acq_plans/refresh', {
             method: 'POST',
             headers: {'Content-Type': 'application/json',
                       'X-Requested-With': 'fetch'},
             body: '{}'});
-        if (!_acqPoll) _acqPoll = setInterval(pollAcqPlans, 1500);
-        pollAcqPlans();
+        const j = await r.json().catch(() => ({}));
+        log(`[acq] refresh request -> HTTP ${r.status} `
+            + `${JSON.stringify(j).slice(0, 200)}`, 'dim');
+        if (!r.ok) {
+            renderAcqProgress({state: 'error', satellites: {},
+                message: `Refresh request failed (HTTP ${r.status}).`});
+            return;
+        }
+        if (_acqPoll) clearInterval(_acqPoll);
+        _acqPoll = setInterval(pollAcqPlans, 1500);
     } catch (err) {
-        log(`Could not start plan refresh: ${err.message}`, 'error');
+        log(`[acq] retry failed: ${err.message}`, 'error');
+        renderAcqProgress({state: 'error', satellites: {},
+            message: `Could not reach the server: ${err.message}`});
     }
 }
 
