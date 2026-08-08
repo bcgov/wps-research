@@ -125,6 +125,15 @@ Example
                         '<out_root>/active_year.yaml, else newest year).')
 
     # Sampling defaults
+    p.add_argument('--acq_plans_insecure', action='store_true',
+                   help='Skip TLS verification when downloading the '
+                        'Sentinel-2 acquisition plans. Only for '
+                        'networks that intercept HTTPS with an '
+                        'expired/untrusted certificate. Applies to '
+                        'that one public dataset and nothing else.')
+    p.add_argument('--acq_plans_cafile', default='',
+                   help='CA bundle to use for the acquisition-plan '
+                        'download (e.g. your proxy\'s root CA).')
     p.add_argument('--padding', type=float, default=0.0,
                    help='DEPRECATED and ignored. Padding has been '
                         'removed: the AOI is always exactly the bbox '
@@ -955,6 +964,15 @@ def main():
     # the ramdisk. Non-fatal -- the rest of the server is unaffected if
     # ESA is unreachable, the feature just reports no data.
     _log('\n[3/4] Sentinel-2 acquisition plans: starting ...')
+    if getattr(args, 'acq_plans_cafile', ''):
+        os.environ['ACQ_PLANS_CAFILE'] = args.acq_plans_cafile
+        _log(f'      Using CA bundle {args.acq_plans_cafile}')
+    if getattr(args, 'acq_plans_insecure', False):
+        os.environ['ACQ_PLANS_INSECURE'] = '1'
+        _log('      WARNING: --acq_plans_insecure is set. TLS '
+             'verification is DISABLED for the acquisition-plan '
+             'download only. Everything else still verifies '
+             'normally.')
     try:
         from .acq_plans import start_background_refresh, PLANS_JSON
         start_background_refresh()

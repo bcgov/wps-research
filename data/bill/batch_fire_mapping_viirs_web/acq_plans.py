@@ -121,9 +121,11 @@ def describe_exc(exc) -> str:
     if txt:
         parts.append(txt)
     reason = getattr(exc, 'reason', None)
-    if reason is not None and str(reason).strip() and \
-            str(reason).strip() != txt:
-        parts.append(f'reason={reason}')
+    rtxt = str(reason).strip() if reason is not None else ''
+    # urllib wraps the real error, so str(URLError) already CONTAINS
+    # the reason. Appending it again doubled every message.
+    if rtxt and rtxt != txt and rtxt not in txt:
+        parts.append(f'reason={rtxt}')
     code = getattr(exc, 'code', None)
     if code is not None:
         parts.append(f'HTTP {code}')
@@ -252,7 +254,16 @@ def _http_get(url: str, timeout: int = _HTTP_TIMEOUT,
                      f'failed: {detail}')
                 if i < attempts:
                     time.sleep(1)
-    raise OSError('all transports failed -- ' + ' | '.join(errors[-4:]))
+    # De-duplicate: every transport reports the same handshake failure
+    # once per attempt, which turned the message into four copies of
+    # one fact.
+    uniq, seen = [], set()
+    for e in errors:
+        key = e.split(':', 1)[-1].strip()[:120]
+        if key not in seen:
+            seen.add(key)
+            uniq.append(e)
+    raise OSError('all transports failed -- ' + ' | '.join(uniq[:3]))
 
 
 def discover_kml_urls(index_html: str = None) -> dict:
@@ -498,7 +509,41 @@ def refresh(force: bool = False, log=None) -> dict:
                 detail=f'Network error: {detail}')
             return local
         tls = 'CERTIFICATE_VERIFY' in detail or 'SSL' in detail
-        if tls:
+        # A self-signed issuer in the chain means something is
+        # re-signing the connection: a TLS-inspecting firewall or
+        # proxy. Combined with "expired", that appliance's own
+        # certificate is out of date. Neither is fixable at ESA's end
+        # or in this code, so say so plainly rather than sending the
+        # operator to chase CA bundles that are not the problem.
+        intercepted = ('self-signed' in detail.lower()
+                       or 'self signed' in detail.lower())
+        expired = 'expired' in detail.lower()
+        if intercepted or expired:
+            what = []
+            if intercepted:
+                what.append('a self-signed issuer appears in the '
+                            'chain, so HTTPS is being intercepted and '
+                            're-signed on your network')
+            if expired:
+                what.append('the presented certificate has EXPIRED')
+            remedy = (
+                'TLS interception detected: ' + '; '.join(what) + '. '
+                'ESA\'s own certificate is not the problem and no CA '
+                'bundle here will help. Options: (1) ask whoever runs '
+                'the firewall/proxy to renew its certificate, or to '
+                'exempt sentinels.copernicus.eu from inspection; '
+                '(2) install the appliance\'s root CA on this server '
+                'and point ACQ_PLANS_CAFILE at it -- note this will '
+                'still fail while that certificate is expired; '
+                f'(3) download the three KMLs on a machine outside '
+                f'this network and drop them into {PLANS_DIR} or '
+                f'{PLANS_DIR_PERSISTENT}, which needs no network at '
+                f'all; (4) run with --acq_plans_insecure (or '
+                f'ACQ_PLANS_INSECURE=1) to skip verification for this '
+                f'one public dataset -- acceptable here only because '
+                f'the KMLs are public and non-sensitive, and it means '
+                f'trusting whatever is intercepting.')
+        elif tls:
             remedy = (
                 'TLS chain could not be verified. Every transport was '
                 'tried (system CA, certifi, $SSL_CERT_FILE, curl). '
