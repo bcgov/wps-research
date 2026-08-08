@@ -361,7 +361,7 @@ def _rings(node) -> list:
     return rings
 
 
-def parse_kml(data) -> list:
+def parse_kml(data, report: dict = None) -> list:
     """Datatakes from one acquisition-plan KML.
 
     Returns dicts with satellite, id, mode, start/stop (ISO UTC),
@@ -369,7 +369,28 @@ def parse_kml(data) -> list:
     """
     if isinstance(data, bytes):
         data = data.decode('utf-8', 'replace')
-    root = ET.fromstring(data)
+    if report is not None:
+        report['bytes'] = len(data)
+        report['head'] = data[:200].replace('\n', ' ')
+    try:
+        root = ET.fromstring(data)
+    except Exception as exc:
+        if report is not None:
+            report['xml_error'] = describe_exc(exc)
+            # Keep the start of the body: an HTML error page or a
+            # proxy block page is instantly recognisable here, whereas
+            # "0 datatakes" is not.
+            report['head'] = data[:400].replace('\n', ' ')
+        raise
+    if report is not None:
+        report['doc_name'] = ''
+        for el in root.iter(KML_NS + 'name'):
+            report['doc_name'] = (el.text or '').strip()
+            break
+        report['folders'] = []
+        report['by_sat_mode'] = {}
+        report['placemarks'] = 0
+        report['no_polygon'] = 0
 
     out = []
 
@@ -384,6 +405,9 @@ def parse_kml(data) -> list:
             tag = child.tag
             if tag in (KML_NS + 'Document', KML_NS + 'Folder'):
                 name = _text(child, 'name')
+                if report is not None and name and \
+                        len(report['folders']) < 40:
+                    report['folders'].append(name)
                 c_sat, c_mode = sat, mode
                 if re.fullmatch(r'S2[ABC]', name or '', re.I):
                     c_sat = name.upper()
@@ -391,9 +415,13 @@ def parse_kml(data) -> list:
                     c_mode = name.upper()
                 walk(child, c_sat, c_mode)
             elif tag == KML_NS + 'Placemark':
+                if report is not None:
+                    report['placemarks'] += 1
                 ext = _extended(child)
                 rings = _rings(child)
                 if not rings:
+                    if report is not None:
+                        report['no_polygon'] += 1
                     continue
                 ts = child.find(KML_NS + 'TimeSpan')
                 begin = _text(ts, 'begin') if ts is not None else ''
@@ -409,6 +437,10 @@ def parse_kml(data) -> list:
                     'scenes': ext.get('Scenes') or '',
                     'ring': rings[0],
                 })
+                if report is not None:
+                    k = f'{sat or "?"}/{out[-1]["mode"] or "?"}'
+                    report['by_sat_mode'][k] = \
+                        report['by_sat_mode'].get(k, 0) + 1
 
     walk(root, None, None)
     # Folder-level satellite may be absent on some files; fall back to
@@ -650,11 +682,12 @@ def refresh(force: bool = False, log=None) -> dict:
     def _one(item):
         """Fetch and parse one satellite's plan."""
         sat, meta = item
-        _set_sat(sat, state='downloading')
+        _set_sat(sat, state='downloading', url=meta['url'])
+        rep = {}
         try:
             raw = _http_get(meta['url'])
             _set_sat(sat, state='parsing', bytes=len(raw))
-            dts = parse_kml(raw)
+            dts = parse_kml(raw, report=rep)
             for d in dts:
                 if not d.get('sat'):
                     d['sat'] = sat
@@ -663,14 +696,24 @@ def refresh(force: bool = False, log=None) -> dict:
                 raise OSError(f'content failed validation ({why}) -- '
                               f'refusing to cache it')
             n_dist = sum(1 for d in dts if d['mode'] in DISTRIBUTED_MODES)
+            # Record the time span the plan ACTUALLY contains, not just
+            # what the filename claims. A plan whose datatakes stop
+            # early looks identical to a missing satellite in the
+            # forecast, and the two need different fixes.
+            starts = sorted(d.get('start', '') for d in dts
+                            if d.get('start'))
+            rep['first_start'] = starts[0] if starts else ''
+            rep['last_start'] = starts[-1] if starts else ''
+            rep['distributed'] = n_dist
             _set_sat(sat, state='ok', datatakes=len(dts),
-                     distributed=n_dist)
+                     distributed=n_dist, report=rep)
             emit(f'      [acq] {sat}: {len(dts)} datatake(s), '
                  f'{n_dist} distributed, {len(raw) / 1e6:.1f} MB, '
                  f'valid {meta["valid_from"]} - {meta["valid_to"]}')
             return sat, meta, dts, None
         except Exception as exc:
-            _set_sat(sat, state='error', error=describe_exc(exc))
+            _set_sat(sat, state='error', error=describe_exc(exc),
+                     report=rep)
             emit(f'      [acq] {sat}: fetch/parse failed: '
                  f'{describe_exc(exc)}')
             return sat, meta, [], exc
@@ -685,6 +728,25 @@ def refresh(force: bool = False, log=None) -> dict:
             if dts:
                 datatakes.extend(dts)
                 sources[sat] = meta
+
+    # Merge per satellite rather than replacing wholesale. A refresh
+    # where S2B fails but S2A/S2C succeed used to cache ONLY the
+    # successes, silently dropping S2B's still-valid plan from the
+    # forecast -- which looks exactly like "that satellite has no
+    # planned passes". Keeping the last good plan per satellite means
+    # a flaky network degrades the data's freshness, not its coverage.
+    prev = load_cache() or {}
+    fetched_sats = set(sources)
+    kept = {}
+    for d in prev.get('datatakes', []):
+        sat = d.get('sat') or '?'
+        if sat not in fetched_sats:
+            kept.setdefault(sat, []).append(d)
+    for sat, dts in kept.items():
+        datatakes.extend(dts)
+        sources.setdefault(sat, (prev.get('sources') or {}).get(sat, {}))
+        emit(f'      [acq] {sat}: kept {len(dts)} datatake(s) from the '
+             f'previous plan (this refresh did not replace it)')
 
     if not datatakes:
         emit('      [acq] no datatakes parsed; keeping the '
@@ -742,6 +804,53 @@ def start_background_refresh() -> None:
 
 
 # ------------------------------------------------------------- querying
+
+def diagnostics() -> dict:
+    """Everything needed to explain a missing satellite, in one place.
+
+    Answers, per satellite: was it discovered on the index, did it
+    download, did it parse, what folder/mode structure did it have,
+    how many datatakes of each kind, what time span do they actually
+    cover, and is it in the cache now.
+    """
+    plans = load_cache() or {}
+    st = status()
+    out = {
+        'status': st,
+        'cache': {
+            'path': PLANS_JSON,
+            'exists': os.path.isfile(PLANS_JSON),
+            'fetched_at': plans.get('fetched_at'),
+            'age_s': cache_age_s() if plans else None,
+            'local': bool(plans.get('local')),
+            'sources': plans.get('sources', {}),
+            'by_sat': _sat_counts(plans),
+        },
+        'transport': {
+            'working_strategy': _working_strategy,
+            'strategies': [n for n, _, _ in _strategies()],
+            'proxy_env': proxy_info(),
+        },
+        'index_url': PLANS_INDEX,
+        'local_dirs': _local_kml_dirs(),
+    }
+    # Per-satellite time span actually present in the cache, which is
+    # what determines how far ahead the forecast can see.
+    spans = {}
+    for d in plans.get('datatakes', []):
+        sat = d.get('sat') or '?'
+        s0 = d.get('start') or ''
+        if not s0:
+            continue
+        e = spans.setdefault(sat, {'first': s0, 'last': s0, 'n': 0})
+        e['n'] += 1
+        if s0 < e['first']:
+            e['first'] = s0
+        if s0 > e['last']:
+            e['last'] = s0
+    out['cache']['spans'] = spans
+    return out
+
 
 def _sat_counts(plans) -> dict:
     """How many datatakes the cache holds per satellite."""

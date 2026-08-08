@@ -1224,6 +1224,68 @@ function renderAcqProgress(st) {
                previously downloaded plan meanwhile.</div>` : '');
 }
 
+async function dumpAcqDiagnostics() {
+    try {
+        const r = await fetch('/api/acq_plans/diag');
+        if (!r.ok) { log(`[acq] diag HTTP ${r.status}`, 'dim'); return; }
+        const d = await r.json();
+        const c = d.cache || {}, st = d.status || {};
+        log(`[acq] === acquisition plan diagnostics ===`, 'dim');
+        log(`[acq] cache ${c.path} exists=${c.exists} `
+            + `age=${c.age_s == null ? 'n/a'
+                : (c.age_s / 3600).toFixed(1) + ' h'} `
+            + `local=${c.local}`, 'dim');
+        log(`[acq] refresh state=${st.state} "${st.message || ''}"`,
+            'dim');
+        log(`[acq] transport=${d.transport && d.transport
+            .working_strategy} proxy=${d.transport
+            && d.transport.proxy_env}`, 'dim');
+        // Per satellite: discovered? downloaded? parsed? what span?
+        const sats = new Set([
+            ...Object.keys(c.by_sat || {}),
+            ...Object.keys(c.spans || {}),
+            ...Object.keys(st.satellites || {}),
+            ...Object.keys(c.sources || {}),
+        ]);
+        [...sats].sort().forEach((k) => {
+            const b = (c.by_sat || {})[k] || {};
+            const sp = (c.spans || {})[k] || {};
+            const fs = (st.satellites || {})[k] || {};
+            const src = (c.sources || {})[k] || {};
+            log(`[acq]   ${k}: cached=${b.total || 0} `
+                + `(dist ${b.distributed || 0}) `
+                + `span ${sp.first || '-'} .. ${sp.last || '-'} `
+                + `| fetch=${fs.state || 'not attempted'}`
+                + `${fs.error ? ' ERR=' + fs.error : ''} `
+                + `| plan ${src.valid_from || '?'}-${src.valid_to || '?'}`,
+                'dim');
+            const rep = fs.report || {};
+            if (rep.folders || rep.by_sat_mode || rep.xml_error) {
+                log(`[acq]     parsed: placemarks=${rep.placemarks || 0}`
+                    + ` no_polygon=${rep.no_polygon || 0}`
+                    + ` bytes=${rep.bytes || 0}`
+                    + ` doc="${rep.doc_name || ''}"`, 'dim');
+                if (rep.by_sat_mode) {
+                    log(`[acq]     by sat/mode: `
+                        + JSON.stringify(rep.by_sat_mode), 'dim');
+                }
+                if (rep.folders) {
+                    log(`[acq]     folders: `
+                        + rep.folders.slice(0, 12).join(' > '), 'dim');
+                }
+                if (rep.xml_error) {
+                    log(`[acq]     XML ERROR: ${rep.xml_error} `
+                        + `head="${(rep.head || '').slice(0, 160)}"`,
+                        'error');
+                }
+            }
+        });
+        log(`[acq] === end diagnostics ===`, 'dim');
+    } catch (err) {
+        log(`[acq] diag failed: ${err.message}`, 'dim');
+    }
+}
+
 async function pollAcqPlans() {
     try {
         const r = await fetch('/api/acq_plans/status');
@@ -1429,6 +1491,11 @@ async function loadNextCoverage() {
         log(`[diag] next_coverage: observed=${[...observed].sort()} `
             + `cached=${[...inCache].sort()} MISSING=${missing}`,
             'dim');
+        // Pull the full picture automatically when something is
+        // missing -- that is exactly when the detail is wanted, and
+        // asking the user to hit an endpoint by hand wastes a round
+        // trip of debugging.
+        dumpAcqDiagnostics();
     }
     if (short.length) {
         const el = document.getElementById('next-cov-legend');

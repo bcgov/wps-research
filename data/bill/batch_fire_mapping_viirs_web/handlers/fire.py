@@ -801,6 +801,15 @@ class FireRoutes:
         except Exception as exc:
             self._send_json({'state': 'error', 'message': str(exc)})
 
+    def handle_api_acq_plans_diag(self):
+        """Full acquisition-plan diagnostics (why is a satellite
+        missing?)."""
+        try:
+            from ..acq_plans import diagnostics
+            self._send_json(diagnostics())
+        except Exception as exc:
+            self._send_json({'error': str(exc)})
+
     def handle_api_acq_plans_refresh(self):
         """Kick a refresh now (used by the Retry button)."""
         try:
