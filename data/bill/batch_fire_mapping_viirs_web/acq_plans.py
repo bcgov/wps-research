@@ -744,8 +744,8 @@ def start_background_refresh() -> None:
 # ------------------------------------------------------------- querying
 
 def next_coverage(aoi_ring_native, srs_wkt, geotransform, width, height,
-                  horizon_days: float = 14.0, now_ts: float = None,
-                  modes=DISTRIBUTED_MODES) -> dict:
+                  horizon_days: float = 21.0, now_ts: float = None,
+                  modes=DISTRIBUTED_MODES, max_passes: int = 10) -> dict:
     """Earliest planned coverage of an AOI, split by pass.
 
     Walks future datatakes in time order and, for each, takes the part
@@ -841,13 +841,24 @@ def next_coverage(aoi_ring_native, srs_wkt, geotransform, width, height,
         piece = swath.Intersection(aoi_poly)
         if piece is None or piece.IsEmpty():
             continue
-        if claimed is not None:
-            piece = piece.Difference(claimed)
-            if piece is None or piece.IsEmpty():
-                continue
+        # FULL footprint of this pass over the AOI. Earlier versions
+        # subtracted what previous passes already covered, so a pass
+        # that re-images ground shown above it vanished from the plot
+        # entirely. Listing each pass's whole footprint means a
+        # full-frame pass reads as one solid colour, and every date
+        # still appears in the legend.
         frac = (piece.GetArea() or 0.0) / aoi_area
         if frac < 0.002:                 # ignore slivers
             continue
+        # 'new_fraction' is what this pass adds beyond earlier ones --
+        # the number that answers "when is the AOI fully re-imaged".
+        if claimed is not None:
+            extra = piece.Difference(claimed)
+            new_frac = ((extra.GetArea() or 0.0) / aoi_area
+                        if extra is not None and not extra.IsEmpty()
+                        else 0.0)
+        else:
+            new_frac = frac
 
         rings_px = []
         for i in range(piece.GetGeometryCount() or 1):
@@ -872,18 +883,30 @@ def next_coverage(aoi_ring_native, srs_wkt, geotransform, width, height,
             'orbit_rel': d.get('orbit_rel', ''),
             'start_ts': t0,
             'fraction': frac,
+            'new_fraction': new_frac,
             'rings': rings_px,
         })
         claimed = piece if claimed is None else claimed.Union(piece)
-        if claimed.GetArea() / aoi_area > 0.999:
+        # Keep going past full coverage: the user wants the next N
+        # opportunities, not merely the minimum set that tiles the AOI.
+        if len(passes) >= max_passes:
             break
 
-    covered = sum(p['fraction'] for p in passes)
+    covered = sum(p['new_fraction'] for p in passes)
+    # When the AOI is first fully covered.
+    full_ts, acc = None, 0.0
+    for p in passes:
+        acc += p['new_fraction']
+        if acc > 0.999:
+            full_ts = p['start_ts']
+            break
     return {
         'width': width,
         'height': height,
         'passes': passes,
         'covered_fraction': covered,
+        'full_coverage_ts': full_ts,
+        'max_passes': max_passes,
         'horizon_days': horizon_days,
         'plans_fetched_at': plans.get('fetched_at'),
         'plans_age_s': cache_age_s(),

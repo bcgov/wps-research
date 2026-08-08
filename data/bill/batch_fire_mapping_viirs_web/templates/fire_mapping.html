@@ -341,13 +341,20 @@
                             margin-bottom:4px">
                     Expected next coverage
                     <span class="help" tabindex="0"
-                          data-tip="From ESA's published Sentinel-2
-                          acquisition plans for S2A/S2B/S2C. Each block
-                          is the part of this AOI first covered by that
-                          planned pass. Footprints in the published
-                          plans are simplified and plans are revised
-                          weekly, so treat these as expectations, not
-                          guarantees.">?</span>
+                          data-tip="Next planned passes over this AOI
+                          from ESA's Sentinel-2 acquisition plans
+                          (S2A/S2B/S2C), soonest painted on top. This
+                          is DATATAKE geometry, not tile geometry: a
+                          swath edge can cut across the AOI, so a pass
+                          may cover only part of it. The percentage is
+                          how much of the AOI that pass sees; a '+'
+                          value is how much is new versus earlier
+                          passes listed. Caveats: ESA draws these
+                          footprints simplified (corners joined), so
+                          edges are approximate; plans are revised
+                          weekly; and a planned pass still yields no
+                          usable imagery if it is cloudy, which no
+                          plan can predict.">?</span>
                 </div>
                 <canvas id="next-cov-plot" style="width:100%;
                         border:1px solid #ddd;border-radius:3px"></canvas>
@@ -1324,19 +1331,35 @@ async function loadNextCoverage() {
 
     const rows = d.passes.map((p, i) => {
         const col = nextCovColour(i, d.passes.length);
+        // Two numbers, because they answer different questions:
+        // how much of the AOI this pass sees, and how much of it is
+        // ground no earlier pass in this list already covers.
+        // Only worth showing when this pass adds ground the earlier
+        // passes miss. '+0%' on every repeat pass was pure noise.
+        const nf = (p.new_fraction != null
+                    && p.new_fraction >= 0.005
+                    && p.new_fraction < p.fraction - 0.005)
+            ? `<span style="color:#2a7" title="new ground not covered by
+                     an earlier pass in this list">+${
+                     (p.new_fraction * 100).toFixed(0)}%</span>`
+            : '';
         return `<div style="display:flex;align-items:center;gap:6px">
             <span style="width:10px;height:10px;background:${col};
-                  display:inline-block;border-radius:2px"></span>
+                  display:inline-block;border-radius:2px;flex:none"></span>
             <span>${p.sat || 'S2'} &middot; ${fmtWhen(p.start_ts)}</span>
             <span style="margin-left:auto;color:#666">
                   ${(p.fraction * 100).toFixed(1)}%</span>
+            ${nf}
         </div>`;
     }).join('');
     const gap = 1 - (d.covered_fraction || 0);
     const note = gap > 0.01
         ? `<div style="color:#a33;margin-top:3px">${(gap * 100).toFixed(1)}%
            of the AOI has no planned coverage in the next
-           ${d.horizon_days} days.</div>` : '';
+           ${d.horizon_days} days.</div>`
+        : (d.full_coverage_ts
+            ? `<div style="color:#666;margin-top:3px">Whole AOI covered
+               by ${fmtWhen(d.full_coverage_ts)}.</div>` : '');
     const age = d.plans_age_s != null
         ? `<div style="color:#999;margin-top:3px">Plans fetched
            ${(d.plans_age_s / 3600).toFixed(1)} h ago. Simplified
@@ -1381,9 +1404,14 @@ function drawNextCoverage() {
     ctx.fillRect(0, 0, cssW, cssH);
 
     const sx = cssW / d.width, sy = cssH / d.height;
-    d.passes.forEach((p, i) => {
+    // Paint LATEST first so the SOONEST ends up on top. Each pass now
+    // carries its whole footprint rather than only the part no earlier
+    // pass covered, so a full-frame next pass reads as one solid
+    // colour while every later date still appears in the legend.
+    for (let i = d.passes.length - 1; i >= 0; i--) {
+        const p = d.passes[i];
         ctx.fillStyle = nextCovColour(i, d.passes.length);
-        ctx.globalAlpha = 0.85;
+        ctx.globalAlpha = 1.0;
         (p.rings || []).forEach((ring) => {
             if (!ring.length) return;
             ctx.beginPath();
@@ -1394,7 +1422,7 @@ function drawNextCoverage() {
             ctx.closePath();
             ctx.fill();
         });
-    });
+    }
     ctx.globalAlpha = 1;
 }
 
