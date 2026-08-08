@@ -39,6 +39,21 @@ PLANS_INDEX = ('https://sentinels.copernicus.eu/copernicus/sentinel-2/'
 PLANS_DIR = '/ram/s2_acq_plans'
 PLANS_JSON = os.path.join(PLANS_DIR, 'plans.json')
 
+# Manually supplied KMLs are also looked for next to this module, which
+# unlike the ramdisk survives a reboot -- otherwise the offline
+# workaround has to be repeated after every restart.
+PLANS_DIR_PERSISTENT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), 's2_acq_plans')
+
+
+def _local_kml_dirs():
+    seen, out = set(), []
+    for d in (PLANS_DIR, PLANS_DIR_PERSISTENT):
+        if d and d not in seen and os.path.isdir(d):
+            seen.add(d)
+            out.append(d)
+    return out
+
 # Modes whose datatakes become products users can download.
 DISTRIBUTED_MODES = ('NOBS',)
 
@@ -128,35 +143,116 @@ def proxy_info() -> str:
     return ', '.join(f'{k}={v}' for k, v in got.items()) or 'none set'
 
 
+# TLS to sentinels.copernicus.eu can fail with
+# "unable to get issuer certificate": the server sends an incomplete
+# chain, or a middlebox re-signs it, and Python's store cannot complete
+# the path. curl usually carries a fuller CA bundle and often succeeds
+# where urllib does not, so several transports are tried in order and
+# the one that worked is logged.
+#
+# Verification is NEVER disabled implicitly. ACQ_PLANS_INSECURE=1 is an
+# explicit operator choice for this one public, non-sensitive dataset,
+# and it says loudly what it is doing.
+def _strategies():
+    yield 'urllib (system CA)', _get_urllib, {}
+    try:
+        import certifi
+        yield ('urllib (certifi CA)', _get_urllib,
+               {'cafile': certifi.where()})
+    except Exception:
+        pass
+    for var in ('ACQ_PLANS_CAFILE', 'SSL_CERT_FILE',
+                'REQUESTS_CA_BUNDLE'):
+        ca = os.environ.get(var)
+        if ca and os.path.isfile(ca):
+            yield f'urllib (CA from ${var})', _get_urllib, {'cafile': ca}
+    yield 'curl', _get_curl, {}
+    if os.environ.get('ACQ_PLANS_INSECURE', '').strip() in ('1', 'true',
+                                                            'yes'):
+        yield ('urllib (VERIFICATION DISABLED via ACQ_PLANS_INSECURE)',
+               _get_urllib, {'insecure': True})
+        yield ('curl (VERIFICATION DISABLED via ACQ_PLANS_INSECURE)',
+               _get_curl, {'insecure': True})
+
+
+def _get_urllib(url, timeout, cafile=None, insecure=False):
+    import ssl
+    if insecure:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    elif cafile:
+        ctx = ssl.create_default_context(cafile=cafile)
+    else:
+        ctx = ssl.create_default_context()
+    req = urllib.request.Request(url, headers={
+        'User-Agent': ('Mozilla/5.0 (compatible; '
+                       'wps-research/fire-mapping)'),
+        'Accept': '*/*',
+    })
+    with urllib.request.urlopen(req, timeout=timeout,
+                                context=ctx) as r:
+        return r.read()
+
+
+def _get_curl(url, timeout, insecure=False):
+    import subprocess
+    cmd = ['curl', '-sS', '-L', '--fail',
+           '--max-time', str(timeout),
+           '-A', 'Mozilla/5.0 (compatible; wps-research/fire-mapping)']
+    if insecure:
+        cmd.append('-k')
+    cmd.append(url)
+    p = subprocess.run(cmd, capture_output=True)
+    if p.returncode != 0:
+        err = (p.stderr or b'').decode('utf-8', 'replace').strip()
+        raise OSError(f'curl exit {p.returncode}: {err or "no stderr"}')
+    if not p.stdout:
+        raise OSError('curl returned an empty body')
+    return p.stdout
+
+
+# Remembers the transport that worked, so subsequent fetches in the
+# same run skip the ones already known to fail.
+_working_strategy = None
+
+
 def _http_get(url: str, timeout: int = _HTTP_TIMEOUT,
-              attempts: int = 3, log=None) -> bytes:
-    """GET with retries and errors that say what actually happened."""
-    last = None
-    for i in range(1, attempts + 1):
-        try:
-            req = urllib.request.Request(url, headers={
-                'User-Agent': ('Mozilla/5.0 (compatible; '
-                               'wps-research/fire-mapping)'),
-                'Accept': '*/*',
-            })
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                data = r.read()
-            if not data:
-                raise OSError('empty response body')
-            return data
-        except Exception as exc:
-            last = exc
-            msg = (f'      [acq] attempt {i}/{attempts} failed for '
-                   f'{url}: {describe_exc(exc)}')
-            sys.stderr.write(msg + '\n')
-            if log:
-                try:
-                    log(msg)
-                except Exception:
-                    pass
-            if i < attempts:
-                time.sleep(min(5, 2 ** (i - 1)))
-    raise last if last else OSError('unknown fetch failure')
+              attempts: int = 2, log=None) -> bytes:
+    """GET over whichever transport can complete the TLS handshake."""
+    global _working_strategy
+
+    def emit(msg):
+        sys.stderr.write(msg + '\n')
+        if log:
+            try:
+                log(msg)
+            except Exception:
+                pass
+
+    strategies = list(_strategies())
+    if _working_strategy:
+        strategies.sort(key=lambda s: s[0] != _working_strategy)
+
+    errors = []
+    for name, fn, kw in strategies:
+        for i in range(1, attempts + 1):
+            try:
+                data = fn(url, timeout, **kw)
+                if not data:
+                    raise OSError('empty response body')
+                if _working_strategy != name:
+                    emit(f'      [acq] transport OK via {name}')
+                    _working_strategy = name
+                return data
+            except Exception as exc:
+                detail = describe_exc(exc)
+                errors.append(f'{name}: {detail}')
+                emit(f'      [acq] {name} attempt {i}/{attempts} '
+                     f'failed: {detail}')
+                if i < attempts:
+                    time.sleep(1)
+    raise OSError('all transports failed -- ' + ' | '.join(errors[-4:]))
 
 
 def discover_kml_urls(index_html: str = None) -> dict:
@@ -321,15 +417,16 @@ def _load_local_kmls(emit) -> dict:
     """
     global _cache
     try:
-        if not os.path.isdir(PLANS_DIR):
-            return {}
-        files = [f for f in sorted(os.listdir(PLANS_DIR))
-                 if f.lower().endswith('.kml')]
-        if not files:
+        pairs = []
+        for d in _local_kml_dirs():
+            for f in sorted(os.listdir(d)):
+                if f.lower().endswith('.kml'):
+                    pairs.append((d, f))
+        if not pairs:
             return {}
         datatakes, sources = [], {}
-        for f in files:
-            path = os.path.join(PLANS_DIR, f)
+        for d, f in pairs:
+            path = os.path.join(d, f)
             try:
                 with open(path, 'rb') as fh:
                     dts = parse_kml(fh.read())
@@ -400,12 +497,27 @@ def refresh(force: bool = False, log=None) -> dict:
                         f'datatakes); the ESA index was unreachable.',
                 detail=f'Network error: {detail}')
             return local
+        tls = 'CERTIFICATE_VERIFY' in detail or 'SSL' in detail
+        if tls:
+            remedy = (
+                'TLS chain could not be verified. Every transport was '
+                'tried (system CA, certifi, $SSL_CERT_FILE, curl). '
+                'Fixes, best first: (1) install the missing '
+                'intermediate CA on the server, e.g. '
+                '"sudo update-ca-certificates"; (2) point '
+                'ACQ_PLANS_CAFILE at a bundle that includes it; '
+                '(3) download the three KMLs elsewhere and drop them '
+                f'into {PLANS_DIR}; (4) last resort, set '
+                'ACQ_PLANS_INSECURE=1 to skip verification for this '
+                'one public dataset.')
+        else:
+            remedy = (f'Drop KML files into {PLANS_DIR} to use them '
+                      f'without network access.')
         _set_status(
             state='error', finished_at=time.time(),
             message=f'Could not read the plans index -- {detail}',
             detail=(f'URL: {PLANS_INDEX}  |  proxy env: '
-                    f'{proxy_info()}  |  drop KML files into '
-                    f'{PLANS_DIR} to use them without network access'))
+                    f'{proxy_info()}  |  {remedy}'))
         return load_cache() or {}
     if not urls:
         emit('      [acq] plans index listed no KML files; '
