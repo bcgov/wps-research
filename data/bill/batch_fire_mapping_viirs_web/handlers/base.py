@@ -138,6 +138,10 @@ class BaseHandler:
         (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/next_coverage$'),
          'handle_api_next_coverage'),
+        (re.compile(r'^/api/acq_plans/status$'),
+         'handle_api_acq_plans_status'),
+        (re.compile(r'^/api/acq_plans/refresh$'),
+         'handle_api_acq_plans_refresh'),
         (re.compile(r'^/api/fire/(?P<fire_numbe>[^/]+)/diagnose$'),
          'handle_api_fire_diagnose'),
         (re.compile(r'^/api/viirs/overlay$'), 'handle_api_viirs_overlay'),

@@ -49,6 +49,45 @@ _lock = threading.Lock()
 _cache = None          # parsed plans, in memory
 _refresh_thread = None
 
+# Live progress, so the UI can show what is happening instead of a bare
+# "not downloaded yet". The refresh runs in the background at startup,
+# so a page opened in the first seconds legitimately finds no cache --
+# a state worth reporting, not an error.
+_status = {
+    'state': 'idle',        # idle | running | ok | error
+    'message': 'Acquisition plans have not been fetched yet.',
+    'started_at': None,
+    'finished_at': None,
+    'satellites': {},       # sat -> {state, bytes, datatakes, error}
+    'total': 0,
+    'done': 0,
+}
+
+
+def status() -> dict:
+    """Snapshot of the current/last refresh, plus cache facts."""
+    with _lock:
+        st = json.loads(json.dumps(_status))
+    c = load_cache()
+    st['has_cache'] = bool(c and c.get('datatakes'))
+    st['cache_age_s'] = cache_age_s() if st['has_cache'] else None
+    st['datatake_count'] = len(c.get('datatakes', [])) if c else 0
+    return st
+
+
+def _set_status(**kw):
+    with _lock:
+        _status.update(kw)
+
+
+def _set_sat(sat, **kw):
+    with _lock:
+        cur = _status['satellites'].setdefault(sat, {})
+        cur.update(kw)
+        _status['done'] = sum(
+            1 for v in _status['satellites'].values()
+            if v.get('state') in ('ok', 'error'))
+
 
 # ---------------------------------------------------------------- fetch
 
@@ -227,53 +266,91 @@ def refresh(force: bool = False, log=None) -> dict:
                 pass
 
     global _cache
-    with _lock:
-        if not force and cache_age_s() < REFRESH_INTERVAL_S:
-            return load_cache() or {}
-        try:
-            urls = discover_kml_urls()
-        except Exception as exc:
-            emit(f'      [acq] could not read the plans index: {exc}')
-            return load_cache() or {}
-        if not urls:
-            emit('      [acq] plans index listed no KML files; '
-                 'keeping the previous cache.')
-            return load_cache() or {}
+    if not force and cache_age_s() < REFRESH_INTERVAL_S:
+        return load_cache() or {}
 
-        datatakes, sources = [], {}
-        for sat, meta in sorted(urls.items()):
-            try:
-                raw = _http_get(meta['url'])
-                dts = parse_kml(raw)
-                for d in dts:
-                    if not d.get('sat'):
-                        d['sat'] = sat
+    _set_status(state='running', started_at=time.time(),
+                finished_at=None, satellites={}, total=0, done=0,
+                message='Reading ESA acquisition-plan index ...')
+    try:
+        urls = discover_kml_urls()
+    except Exception as exc:
+        emit(f'      [acq] could not read the plans index: {exc}')
+        _set_status(state='error', finished_at=time.time(),
+                    message=f'Could not read the plans index: {exc}')
+        return load_cache() or {}
+    if not urls:
+        emit('      [acq] plans index listed no KML files; '
+             'keeping the previous cache.')
+        _set_status(state='error', finished_at=time.time(),
+                    message='The plans index listed no KML files.')
+        return load_cache() or {}
+
+    _set_status(total=len(urls),
+                message=f'Downloading {len(urls)} acquisition plan(s) '
+                        f'in parallel ...')
+    for sat in urls:
+        _set_sat(sat, state='pending', bytes=0, datatakes=0)
+
+    def _one(item):
+        """Fetch and parse one satellite's plan."""
+        sat, meta = item
+        _set_sat(sat, state='downloading')
+        try:
+            raw = _http_get(meta['url'])
+            _set_sat(sat, state='parsing', bytes=len(raw))
+            dts = parse_kml(raw)
+            for d in dts:
+                if not d.get('sat'):
+                    d['sat'] = sat
+            n_dist = sum(1 for d in dts if d['mode'] in DISTRIBUTED_MODES)
+            _set_sat(sat, state='ok', datatakes=len(dts),
+                     distributed=n_dist)
+            emit(f'      [acq] {sat}: {len(dts)} datatake(s), '
+                 f'{n_dist} distributed, {len(raw) / 1e6:.1f} MB, '
+                 f'valid {meta["valid_from"]} - {meta["valid_to"]}')
+            return sat, meta, dts, None
+        except Exception as exc:
+            _set_sat(sat, state='error', error=str(exc))
+            emit(f'      [acq] {sat}: fetch/parse failed: {exc}')
+            return sat, meta, [], exc
+
+    # The three satellite plans are independent files of a few MB, so
+    # fetching them concurrently turns three serial round trips into
+    # roughly one.
+    datatakes, sources = [], {}
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=len(urls)) as pool:
+        for sat, meta, dts, err in pool.map(_one, sorted(urls.items())):
+            if dts:
                 datatakes.extend(dts)
                 sources[sat] = meta
-                n_dist = sum(1 for d in dts
-                             if d['mode'] in DISTRIBUTED_MODES)
-                emit(f'      [acq] {sat}: {len(dts)} datatake(s), '
-                     f'{n_dist} distributed, valid '
-                     f'{meta["valid_from"]} - {meta["valid_to"]}')
-            except Exception as exc:
-                emit(f'      [acq] {sat}: fetch/parse failed: {exc}')
 
-        if not datatakes:
-            emit('      [acq] no datatakes parsed; keeping the '
-                 'previous cache.')
-            return load_cache() or {}
+    if not datatakes:
+        emit('      [acq] no datatakes parsed; keeping the '
+             'previous cache.')
+        _set_status(state='error', finished_at=time.time(),
+                    message='All downloads failed. '
+                            'The previous plan is still in use.')
+        return load_cache() or {}
 
-        payload = {'fetched_at': time.time(),
-                   'sources': sources,
-                   'datatakes': datatakes}
+    payload = {'fetched_at': time.time(),
+               'sources': sources,
+               'datatakes': datatakes}
+    with _lock:
         try:
             _write_cache(payload)
         except OSError as exc:
             emit(f'      [acq] could not write cache: {exc}')
         _cache = payload
-        emit(f'      [acq] cached {len(datatakes)} planned datatake(s) '
-             f'from {len(sources)} satellite(s) -> {PLANS_JSON}')
-        return payload
+    n_dist = sum(1 for d in datatakes if d['mode'] in DISTRIBUTED_MODES)
+    emit(f'      [acq] cached {len(datatakes)} planned datatake(s) '
+         f'({n_dist} distributed) from {len(sources)} satellite(s) '
+         f'-> {PLANS_JSON}')
+    _set_status(state='ok', finished_at=time.time(),
+                message=f'{len(sources)} plan(s), {n_dist} distributed '
+                        f'datatakes.')
+    return payload
 
 
 def start_background_refresh() -> None:
@@ -313,7 +390,10 @@ def next_coverage(aoi_ring_native, srs_wkt, geotransform, width, height,
 
     plans = load_cache()
     if not plans or not plans.get('datatakes'):
+        # Report the refresh state so the caller can show progress
+        # rather than an unexplained absence.
         return {'error': 'no acquisition plans cached',
+                'status': status(),
                 'passes': [], 'width': width, 'height': height}
 
     now_ts = now_ts if now_ts is not None else time.time()

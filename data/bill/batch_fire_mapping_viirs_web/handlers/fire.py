@@ -725,6 +725,24 @@ class FireRoutes:
 
         self._send_json(out)
 
+    def handle_api_acq_plans_status(self):
+        """Progress of the acquisition-plan download."""
+        try:
+            from ..acq_plans import status
+            self._send_json(status())
+        except Exception as exc:
+            self._send_json({'state': 'error', 'message': str(exc)})
+
+    def handle_api_acq_plans_refresh(self):
+        """Kick a refresh now (used by the Retry button)."""
+        try:
+            from ..acq_plans import refresh, status
+            threading.Thread(
+                target=lambda: refresh(force=True), daemon=True).start()
+            self._send_json({'ok': True, 'status': status()})
+        except Exception as exc:
+            self._send_json({'ok': False, 'error': str(exc)})
+
     def handle_api_next_coverage(self, fire_numbe):
         """Expected soonest Sentinel-2 coverage of this AOI, by pass.
 
@@ -749,9 +767,11 @@ class FireRoutes:
             from ..acq_plans import next_coverage, load_cache
 
             if not load_cache():
+                from ..acq_plans import status as _acq_status
                 self._send_json({
                     'error': 'Acquisition plans have not been '
                              'downloaded yet.',
+                    'status': _acq_status(),
                     'passes': []})
                 return
 

@@ -1157,6 +1157,91 @@ let _datePlotRebuildAsked = false;
 let _datePlotPoll = null;
 
 let _nextCov = null;
+let _acqPoll = null;
+
+// Progress for the acquisition-plan download, shown in place of the
+// coverage plot until the plans are on disk.
+function renderAcqProgress(st) {
+    const legend = document.getElementById('next-cov-legend');
+    if (!legend) return;
+    const sats = st.satellites || {};
+    const names = Object.keys(sats).sort();
+    const total = st.total || names.length || 3;
+    const done = st.done || 0;
+    const pct = total ? Math.round((done / total) * 100) : 0;
+    const running = st.state === 'running';
+
+    const bar = `
+      <div style="height:6px;background:#eee;border-radius:3px;
+                  overflow:hidden;margin:4px 0">
+        <div style="height:100%;width:${running || done ? pct : 0}%;
+                    background:${st.state === 'error' ? '#c33' : '#3a7bd5'};
+                    transition:width .3s"></div>
+      </div>`;
+
+    const rows = names.map((n) => {
+        const v = sats[n] || {};
+        const icon = v.state === 'ok' ? '&#10003;'
+            : v.state === 'error' ? '&#10007;'
+            : v.state === 'downloading' ? '&#8595;'
+            : v.state === 'parsing' ? '&#8943;' : '&#183;';
+        const detail = v.state === 'ok'
+            ? `${(v.datatakes || 0).toLocaleString()} datatakes`
+            : v.state === 'error' ? (v.error || 'failed')
+            : v.bytes ? `${(v.bytes / 1e6).toFixed(1)} MB` : v.state || '';
+        const col = v.state === 'error' ? '#c33'
+            : v.state === 'ok' ? '#2a7' : '#666';
+        return `<div style="display:flex;gap:6px;color:${col}">
+                  <span>${icon}</span><span>${n}</span>
+                  <span style="margin-left:auto">${detail}</span>
+                </div>`;
+    }).join('');
+
+    const retry = (st.state === 'error')
+        ? `<button class="btn btn-secondary" style="font-size:11px;
+             padding:2px 8px;margin-top:6px"
+             onclick="retryAcqPlans()">Retry download</button>` : '';
+
+    legend.innerHTML =
+        `<div style="color:#555">${st.message || ''}</div>`
+        + bar + rows + retry
+        + (st.has_cache
+            ? `<div style="color:#999;margin-top:3px">Using the
+               previously downloaded plan meanwhile.</div>` : '');
+}
+
+async function pollAcqPlans() {
+    try {
+        const r = await fetch('/api/acq_plans/status');
+        if (!r.ok) return;
+        const st = await r.json();
+        if (st.has_cache && st.state !== 'running') {
+            // Plans have landed -- stop polling and draw for real.
+            if (_acqPoll) { clearInterval(_acqPoll); _acqPoll = null; }
+            loadNextCoverage();
+            return;
+        }
+        renderAcqProgress(st);
+        if (st.state === 'error' && _acqPoll) {
+            clearInterval(_acqPoll); _acqPoll = null;
+        }
+    } catch (_) { /* keep polling */ }
+}
+
+async function retryAcqPlans() {
+    try {
+        await fetch('/api/acq_plans/refresh', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json',
+                      'X-Requested-With': 'fetch'},
+            body: '{}'});
+        if (!_acqPoll) _acqPoll = setInterval(pollAcqPlans, 1500);
+        pollAcqPlans();
+    } catch (err) {
+        log(`Could not start plan refresh: ${err.message}`, 'error');
+    }
+}
+
 
 function fmtWhen(ts) {
     const d = new Date(ts * 1000);
@@ -1185,6 +1270,22 @@ async function loadNextCoverage() {
 
     if (!d || !d.passes || !d.passes.length) {
         if (cv) cv.style.display = 'none';
+        const st = d && d.status;
+        // A missing cache is usually just "still downloading" -- the
+        // refresh starts in the background at boot, so a page opened
+        // in the first seconds legitimately finds nothing. Show the
+        // progress rather than an unexplained absence.
+        if (st && (st.state === 'running' || st.state === 'idle')) {
+            renderAcqProgress(st);
+            if (!_acqPoll) {
+                _acqPoll = setInterval(pollAcqPlans, 1500);
+            }
+            return;
+        }
+        if (st && st.state === 'error') {
+            renderAcqProgress(st);
+            return;
+        }
         const why = (d && d.error) ? d.error
             : 'No planned pass covers this AOI within the published '
               + 'plan horizon.';
@@ -1194,6 +1295,7 @@ async function loadNextCoverage() {
         log(`[diag] next_coverage: no passes (${why})`, 'dim');
         return;
     }
+    if (_acqPoll) { clearInterval(_acqPoll); _acqPoll = null; }
     if (cv) cv.style.display = '';
     _nextCov = d;
     drawNextCoverage();
