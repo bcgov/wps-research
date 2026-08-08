@@ -751,8 +751,10 @@ async function onPostSourceChange() {
         // repointed at the other source's stack.
         loadFireOverlays();
         loadFireGeo();
-        loadDatePlot();
-        loadNextCoverage();
+        // Sequenced deliberately: the expected-coverage panel compares
+        // the platforms it can predict against the platforms actually
+        // seen in the date plot, so that data has to exist first.
+        loadDatePlot().then(loadNextCoverage).catch(loadNextCoverage);
     }
 }
 
@@ -992,8 +994,10 @@ async function prepareFire(padding) {
         // Vector overlays depend on the crop's geotransform, so they
         // can only be built once preparation has produced it.
         loadFireOverlays();
-        loadDatePlot();
-        loadNextCoverage();
+        // Sequenced deliberately: the expected-coverage panel compares
+        // the platforms it can predict against the platforms actually
+        // seen in the date plot, so that data has to exist first.
+        loadDatePlot().then(loadNextCoverage).catch(loadNextCoverage);
         const psSel = document.getElementById('post-source-select');
         if (psSel) { psSel.value = currentPostSource; psSel.disabled = false; }
 
@@ -1399,6 +1403,33 @@ async function loadNextCoverage() {
                 - 86400)
         .map(([sat, c]) => `${sat} to `
              + new Date(c.last_planned * 1000).toISOString().slice(0, 10));
+    // A satellite that images this AOI in practice but contributes no
+    // planned passes means the prediction is INCOMPLETE -- the gaps
+    // look longer than reality. Compare the platforms seen in the L2
+    // coverage plot against the platforms present in the plan cache.
+    const inCache = new Set(Object.keys(d.sats_in_cache || {})
+        .filter((k) => (d.sats_in_cache[k].distributed || 0) > 0));
+    const observed = new Set();
+    (_datePlot && _datePlot.dates || []).forEach(
+        (e) => (e.sats || []).forEach((x) => observed.add(x)));
+    const missing = [...observed].filter((x) => !inCache.has(x)).sort();
+    if (missing.length) {
+        const el = document.getElementById('next-cov-legend');
+        if (el) {
+            el.insertAdjacentHTML('beforeend',
+                `<div style="color:#a33;margin-top:3px">${
+                 missing.join(', ')} imaged this AOI recently but
+                 ${missing.length > 1 ? 'have' : 'has'} no planned
+                 passes in the cache (cached:
+                 ${[...inCache].sort().join(', ') || 'none'}). The
+                 intervals above are therefore LONGER than the real
+                 revisit — passes from ${missing.join(', ')} are
+                 missing from the prediction.</div>`);
+        }
+        log(`[diag] next_coverage: observed=${[...observed].sort()} `
+            + `cached=${[...inCache].sort()} MISSING=${missing}`,
+            'dim');
+    }
     if (short.length) {
         const el = document.getElementById('next-cov-legend');
         if (el) {

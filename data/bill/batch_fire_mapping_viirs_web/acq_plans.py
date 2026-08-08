@@ -743,9 +743,22 @@ def start_background_refresh() -> None:
 
 # ------------------------------------------------------------- querying
 
+def _sat_counts(plans) -> dict:
+    """How many datatakes the cache holds per satellite."""
+    out = {}
+    for d in (plans or {}).get('datatakes', []):
+        sat = d.get('sat') or '?'
+        e = out.setdefault(sat, {'total': 0, 'distributed': 0})
+        e['total'] += 1
+        if d.get('mode') in DISTRIBUTED_MODES:
+            e['distributed'] += 1
+    return out
+
+
 def next_coverage(aoi_ring_native, srs_wkt, geotransform, width, height,
                   horizon_days: float = 21.0, now_ts: float = None,
-                  modes=DISTRIBUTED_MODES, max_passes: int = 10) -> dict:
+                  modes=DISTRIBUTED_MODES,
+                  max_passes: int = 0) -> dict:
     """Earliest planned coverage of an AOI, split by pass.
 
     Walks future datatakes in time order and, for each, takes the part
@@ -916,9 +929,10 @@ def next_coverage(aoi_ring_native, srs_wkt, geotransform, width, height,
         })
         _c(d.get('sat'), 'used')
         claimed = piece if claimed is None else claimed.Union(piece)
-        # Keep going past full coverage: the user wants the next N
-        # opportunities, not merely the minimum set that tiles the AOI.
-        if len(passes) >= max_passes:
+        # 0 = no cap: show every planned pass within the horizon.
+        # The plans only run ~18 days ahead, so this is naturally
+        # bounded and a cap only hid opportunities.
+        if max_passes and len(passes) >= max_passes:
             break
 
     covered = sum(p['new_fraction'] for p in passes)
@@ -942,4 +956,9 @@ def next_coverage(aoi_ring_native, srs_wkt, geotransform, width, height,
         'insecure': bool(_status.get('insecure')),
         'census': census,
         'sources': plans.get('sources', {}),
+        # Which satellites the cached plan contains at all. If the
+        # observed L2 imagery comes from platforms absent here, the
+        # prediction is under-reporting rather than the satellites
+        # having stopped passing over.
+        'sats_in_cache': _sat_counts(plans),
     }
