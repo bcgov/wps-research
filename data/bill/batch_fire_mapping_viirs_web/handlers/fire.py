@@ -326,7 +326,22 @@ class FireRoutes:
                                  'reason': 'not generated yet'})
                 return
             with open(path, encoding='utf-8') as f:
-                self._send_json(json.loads(f.read()))
+                payload = json.loads(f.read())
+            # Recover the platform for sidecars written before it was
+            # recorded, and persist so the work is done once.
+            payload, changed = self._backfill_date_sats(fire, payload)
+            if changed:
+                try:
+                    tmp = path + '.tmp'
+                    with open(tmp, 'w', encoding='utf-8') as f:
+                        json.dump(payload, f)
+                    os.replace(tmp, path)
+                    sys.stderr.write(
+                        f'[date_plot] backfilled satellites for '
+                        f'{fire_numbe}\n')
+                except OSError:
+                    pass
+            self._send_json(payload)
         except Exception as exc:
             self._send_json({'error': str(exc)}, 500)
 
@@ -485,6 +500,59 @@ class FireRoutes:
         except Exception as exc:
             sys.stderr.write(f'[geo] header build failed: {exc}\n')
             return {}
+
+    def _backfill_date_sats(self, fire, payload):
+        """Fill in per-date satellites for sidecars built before they
+        were recorded.
+
+        The platform is in every SAFE filename, so it can be recovered
+        by listing the zips for this AOI's tiles -- no re-extraction,
+        no rebuild of the fire. Without this the prefix would only
+        appear on AOIs created after the change, which is a poor reason
+        to make someone recreate work.
+        """
+        try:
+            dates = payload.get('dates') or []
+            if not dates or all(d.get('sats') for d in dates):
+                return payload, False
+            from ..l2_recent import (tiles_intersecting_bbox,
+                                     zips_for_tile)
+            from osgeo import gdal
+            ds = gdal.Open(fire.crop_bin, gdal.GA_ReadOnly)
+            if ds is None:
+                return payload, False
+            gt, w, h = ds.GetGeoTransform(), ds.RasterXSize, \
+                ds.RasterYSize
+            wkt = ds.GetProjection()
+            ds = None
+            bbox = (gt[0], gt[3] + h * gt[5],
+                    gt[0] + w * gt[1], gt[3])
+            tiles = tiles_intersecting_bbox(bbox, wkt)
+
+            by_date = {}
+            for t in tiles:
+                for entry in zips_for_tile(t):
+                    # (sortkey, acq_yyyymmdd, tile, path)
+                    acq8 = entry[1]
+                    path = entry[-1]
+                    base = os.path.basename(str(path))
+                    sat = base[:3].upper()
+                    if sat.startswith('S2'):
+                        by_date.setdefault(acq8, set()).add(sat)
+
+            changed = False
+            for d in dates:
+                if d.get('sats'):
+                    continue
+                sats = sorted(by_date.get(str(d.get('date')), []))
+                if sats:
+                    d['sats'] = sats
+                    changed = True
+            return payload, changed
+        except Exception as exc:
+            sys.stderr.write(
+                f'[date_plot] satellite backfill skipped: {exc}\n')
+            return payload, False
 
     def handle_api_fire_geo(self, fire_numbe):
         """Georeferencing for every raster a pane can display.
