@@ -1240,6 +1240,18 @@ async function dumpAcqDiagnostics() {
         log(`[acq] transport=${d.transport && d.transport
             .working_strategy} proxy=${d.transport
             && d.transport.proxy_env}`, 'dim');
+        // Discovery is the step that decides which satellites are
+        // even attempted, so report it explicitly: a satellite absent
+        // here was never downloaded, which is a different failure
+        // from one that downloaded and failed to parse.
+        if (st.index_satellites || st.discovered) {
+            log(`[acq] index links=${JSON.stringify(
+                st.index_satellites || {})} discovered=${
+                (st.discovered || []).join(',') || 'none'}`
+                + (st.missing_from_index && st.missing_from_index.length
+                   ? `  MISSING FROM INDEX=${st.missing_from_index}`
+                   : ''), 'dim');
+        }
         // Per satellite: discovered? downloaded? parsed? what span?
         const sats = new Set([
             ...Object.keys(c.by_sat || {}),

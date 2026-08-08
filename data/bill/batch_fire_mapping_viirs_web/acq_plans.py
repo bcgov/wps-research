@@ -212,7 +212,19 @@ def _get_urllib(url, timeout, cafile=None, insecure=False):
     })
     with urllib.request.urlopen(req, timeout=timeout,
                                 context=ctx) as r:
-        return r.read()
+        data = r.read()
+        # A connection cut mid-body is NOT an exception -- read()
+        # simply returns what arrived. Silently short responses are
+        # how the index page lost its S2B/S2C sections, so compare
+        # against Content-Length whenever the server declares one.
+        declared = r.headers.get('Content-Length')
+        if declared and declared.isdigit():
+            want = int(declared)
+            if len(data) < want:
+                raise OSError(
+                    f'short read: got {len(data)} of {want} bytes '
+                    f'(connection closed early)')
+        return data
 
 
 def _get_curl(url, timeout, insecure=False):
@@ -238,8 +250,14 @@ _working_strategy = None
 
 
 def _http_get(url: str, timeout: int = _HTTP_TIMEOUT,
-              attempts: int = 2, log=None) -> bytes:
-    """GET over whichever transport can complete the TLS handshake."""
+              attempts: int = 2, log=None, validate=None) -> bytes:
+    """GET over whichever transport can complete the TLS handshake.
+
+    *validate* is called with the body and may raise to reject it. That
+    turns "downloaded something" into "downloaded the right thing", and
+    lets a truncated response fall through to another transport instead
+    of being cached as if it were complete.
+    """
     global _working_strategy
 
     def emit(msg):
@@ -261,6 +279,8 @@ def _http_get(url: str, timeout: int = _HTTP_TIMEOUT,
                 data = fn(url, timeout, **kw)
                 if not data:
                     raise OSError('empty response body')
+                if validate is not None:
+                    validate(data)
                 if _working_strategy != name:
                     emit(f'      [acq] transport OK via {name}')
                     _working_strategy = name
@@ -293,6 +313,39 @@ def _http_get(url: str, timeout: int = _HTTP_TIMEOUT,
     raise OSError('all transports failed -- ' + ' | '.join(uniq[:3]))
 
 
+EXPECTED_SATS = ('S2A', 'S2B', 'S2C')
+
+
+def _index_satellites(text) -> dict:
+    """Satellite -> number of plan links present in *text*."""
+    if isinstance(text, bytes):
+        text = text.decode('utf-8', 'replace')
+    out = {}
+    pat = re.compile(r'(s2[abc])_mp_acq__kml_', re.I)
+    for m in pat.finditer(text):
+        k = m.group(1).upper()
+        out[k] = out.get(k, 0) + 1
+    return out
+
+
+def _validate_index(data) -> None:
+    """Reject an index page that is missing satellites.
+
+    The page lists S2A, then S2B, then S2C. A body truncated anywhere
+    before the end therefore yields a VALID-looking page with fewer
+    satellites, and nothing raises -- which is how the plan cache ended
+    up containing S2A only, with S2B/S2C never even attempted.
+    """
+    found = _index_satellites(data)
+    missing = [s for s in EXPECTED_SATS if s not in found]
+    if missing:
+        n = len(data)
+        raise OSError(
+            f'index looks incomplete: {n:,} bytes, links for '
+            f'{sorted(found) or "none"}, missing {missing}. Likely a '
+            f'truncated response.')
+
+
 def discover_kml_urls(index_html: str = None) -> dict:
     """Newest KML URL per satellite, from the plans index page.
 
@@ -301,7 +354,13 @@ def discover_kml_urls(index_html: str = None) -> dict:
     the current plan.
     """
     if index_html is None:
-        index_html = _http_get(PLANS_INDEX).decode('utf-8', 'replace')
+        index_html = _http_get(
+            PLANS_INDEX, validate=_validate_index).decode(
+                'utf-8', 'replace')
+    found = _index_satellites(index_html)
+    sys.stderr.write(
+        f'      [acq] index: {len(index_html):,} bytes, plan links per '
+        f'satellite: {found}\n')
 
     out = {}
     # e.g. .../documents/d/sentinel/s2a_mp_acq__kml_20260806t150000_20260824t180000
@@ -315,6 +374,15 @@ def discover_kml_urls(index_html: str = None) -> dict:
             href = 'https://sentinels.copernicus.eu' + href
         if sat not in out:            # first = newest
             out[sat] = {'url': href, 'valid_from': t0, 'valid_to': t1}
+    missing = [s for s in EXPECTED_SATS if s not in out]
+    if missing:
+        # Not fatal -- ESA could genuinely retire a satellite -- but it
+        # is never routine, so it must be loud rather than silent.
+        sys.stderr.write(
+            f'      [acq] WARNING: no plan link found for {missing}. '
+            f'Those satellites will be absent from the forecast.\n')
+    _set_status(index_satellites=found, discovered=sorted(out),
+                missing_from_index=missing)
     return out
 
 
@@ -685,7 +753,17 @@ def refresh(force: bool = False, log=None) -> dict:
         _set_sat(sat, state='downloading', url=meta['url'])
         rep = {}
         try:
-            raw = _http_get(meta['url'])
+            def _validate_kml(body, _sat=sat):
+                # A truncated KML is not well-formed XML, so parsing
+                # it is itself the completeness check -- and it fails
+                # loudly instead of yielding a short plan that looks
+                # like reduced coverage.
+                if not body.rstrip().endswith(b'</kml>'):
+                    raise OSError(
+                        f'{_sat} KML is truncated: {len(body):,} bytes, '
+                        f'does not end with </kml>')
+
+            raw = _http_get(meta['url'], validate=_validate_kml)
             _set_sat(sat, state='parsing', bytes=len(raw))
             dts = parse_kml(raw, report=rep)
             for d in dts:
