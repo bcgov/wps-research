@@ -725,6 +725,59 @@ class FireRoutes:
 
         self._send_json(out)
 
+    def handle_api_next_coverage(self, fire_numbe):
+        """Expected soonest Sentinel-2 coverage of this AOI, by pass.
+
+        An AOI is often not re-imaged all at once, so a single "next
+        pass" date would be misleading. This returns the same shape as
+        the L2 coverage plot -- geometry per acquisition in crop pixel
+        coordinates -- so the two can be read the same way: one shows
+        which part of the AOI arrived when, the other which part
+        arrives next.
+        """
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        if not fire.crop_bin or not os.path.isfile(fire.crop_bin):
+            self._send_json({'error': 'AOI stack not built yet',
+                             'passes': []})
+            return
+        try:
+            from osgeo import gdal
+            from ..acq_plans import next_coverage, load_cache
+
+            if not load_cache():
+                self._send_json({
+                    'error': 'Acquisition plans have not been '
+                             'downloaded yet.',
+                    'passes': []})
+                return
+
+            ds = gdal.Open(fire.crop_bin, gdal.GA_ReadOnly)
+            if ds is None:
+                self._send_json({'error': 'cannot open AOI stack',
+                                 'passes': []})
+                return
+            gt = ds.GetGeoTransform()
+            w, h = ds.RasterXSize, ds.RasterYSize
+            wkt = ds.GetProjection()
+            ds = None
+
+            # AOI corners in native CRS, from the stack's own
+            # geotransform so it matches the previews exactly.
+            x0, y0 = gt[0], gt[3]
+            x1 = gt[0] + w * gt[1] + h * gt[2]
+            y1 = gt[3] + w * gt[4] + h * gt[5]
+            ring = [(x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)]
+
+            out = next_coverage(ring, wkt, gt, w, h)
+            self._send_json(out)
+        except Exception as exc:
+            sys.stderr.write(f'[acq] next_coverage failed: {exc}\n')
+            self._send_json({'error': str(exc), 'passes': []})
+
     def handle_api_preview(self, fire_numbe, view):
         fire_numbe = unquote(fire_numbe)
         if fire_numbe not in state.fires:

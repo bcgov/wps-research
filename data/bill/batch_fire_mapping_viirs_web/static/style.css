@@ -527,10 +527,30 @@ tbody tr.row-mapping:hover { background: #ede1ff; }
 }
 
 .params-scroll {
-    flex: 1;
+    /* Scroll region for the RIGHT panel only (Map Fire, coverage
+       plots, results). The left image pane is deliberately NOT
+       scrollable -- it pans and zooms instead.
+
+       min-height:0 is the load-bearing part: a flex item's default
+       min-height is auto, i.e. "never shrink below my content", so a
+       tall child (the coverage plots and the results gallery) pushes
+       the panel past the viewport and the scrollbar never appears.
+       flex:1 alone does not fix that. */
+    flex: 1 1 0;
+    min-height: 0;
     overflow-y: auto;
-    min-height: 80px;
+    overflow-x: hidden;
+    /* Keep the gutter reserved so content does not reflow the moment
+       the list grows past the fold. */
+    scrollbar-gutter: stable;
 }
+
+/* The panel itself must also be allowed to shrink, or the same
+   auto-min-height rule pushes the whole column past the viewport. */
+.control-panel { min-height: 0; }
+
+/* Explicitly leave the image pane unscrollable. */
+.image-panel, .image-area { overflow: hidden; }
 
 .resize-handle {
     height: 6px;

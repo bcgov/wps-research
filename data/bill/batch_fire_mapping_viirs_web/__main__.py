@@ -951,6 +951,19 @@ def main():
     # ------------------------------------------------------------------
     # Step 4 — Start the server
     # ------------------------------------------------------------------
+    # Sentinel-2 acquisition plans: refresh now, then daily. Cached on
+    # the ramdisk. Non-fatal -- the rest of the server is unaffected if
+    # ESA is unreachable, the feature just reports no data.
+    _log('\n[3/4] Sentinel-2 acquisition plans: starting ...')
+    try:
+        from .acq_plans import start_background_refresh, PLANS_JSON
+        start_background_refresh()
+        _log(f'      Plans cached at {PLANS_JSON}; refreshed on '
+             f'startup and every 24 h.')
+    except Exception as exc:
+        _log(f'      Acquisition plans unavailable: {exc}')
+    _log('[3/4] Sentinel-2 acquisition plans: done.')
+
     _log('\n[4/4] Starting web server: starting ...')
     server = create_server(args.host, args.port)
     _log('[4/4] Starting web server: done.')

@@ -135,6 +135,9 @@ class BaseHandler:
          'handle_api_fire_date_plot'),
         (re.compile(r'^/api/fire/(?P<fire_numbe>[^/]+)/geo$'),
          'handle_api_fire_geo'),
+        (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/next_coverage$'),
+         'handle_api_next_coverage'),
         (re.compile(r'^/api/fire/(?P<fire_numbe>[^/]+)/diagnose$'),
          'handle_api_fire_diagnose'),
         (re.compile(r'^/api/viirs/overlay$'), 'handle_api_viirs_overlay'),

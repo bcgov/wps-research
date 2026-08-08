@@ -332,6 +332,29 @@
             </div>
 
             <!-- Serial results gallery -->
+            <!-- Expected next coverage, same reading as the L2
+                 coverage plot above: which PART of the AOI arrives
+                 WHEN. An AOI is often not re-imaged in one pass, so a
+                 single "next pass" date would mislead. -->
+            <div id="next-cov-box" style="display:none;margin-top:14px">
+                <div style="font-size:11px;font-weight:600;color:#555;
+                            margin-bottom:4px">
+                    Expected next coverage
+                    <span class="help" tabindex="0"
+                          data-tip="From ESA's published Sentinel-2
+                          acquisition plans for S2A/S2B/S2C. Each block
+                          is the part of this AOI first covered by that
+                          planned pass. Footprints in the published
+                          plans are simplified and plans are revised
+                          weekly, so treat these as expectations, not
+                          guarantees.">?</span>
+                </div>
+                <canvas id="next-cov-plot" style="width:100%;
+                        border:1px solid #ddd;border-radius:3px"></canvas>
+                <div id="next-cov-legend"
+                     style="font-size:11px;margin-top:4px"></div>
+            </div>
+
             <div id="serial-gallery" style="display:none">
                 <div style="padding:8px 16px;border-top:1px solid #eee">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px">
@@ -722,6 +745,7 @@ async function onPostSourceChange() {
         loadFireOverlays();
         loadFireGeo();
         loadDatePlot();
+        loadNextCoverage();
     }
 }
 
@@ -962,6 +986,7 @@ async function prepareFire(padding) {
         // can only be built once preparation has produced it.
         loadFireOverlays();
         loadDatePlot();
+        loadNextCoverage();
         const psSel = document.getElementById('post-source-select');
         if (psSel) { psSel.value = currentPostSource; psSel.disabled = false; }
 
@@ -1130,6 +1155,118 @@ let _lastPaintedKey = null;
 
 let _datePlotRebuildAsked = false;
 let _datePlotPoll = null;
+
+let _nextCov = null;
+
+function fmtWhen(ts) {
+    const d = new Date(ts * 1000);
+    const hrs = (ts * 1000 - Date.now()) / 3600000;
+    const when = hrs < 24 ? `in ${Math.max(0, Math.round(hrs))} h`
+        : `in ${(hrs / 24).toFixed(1)} d`;
+    // UTC, matching how the acquisition plans state their times, so
+    // this can be compared against product timestamps directly.
+    const stamp = d.toISOString().replace('T', ' ').slice(0, 16) + 'Z';
+    return `${stamp} (${when})`;
+}
+
+async function loadNextCoverage() {
+    const box = document.getElementById('next-cov-box');
+    if (!box) return;
+    let d = null;
+    try {
+        const r = await fetch(
+            `/api/fire/${encodeURIComponent(FIRE)}/next_coverage`);
+        if (r.ok) d = await r.json();
+    } catch (_) { /* handled below */ }
+
+    const legend = document.getElementById('next-cov-legend');
+    box.style.display = '';
+    const cv = document.getElementById('next-cov-plot');
+
+    if (!d || !d.passes || !d.passes.length) {
+        if (cv) cv.style.display = 'none';
+        const why = (d && d.error) ? d.error
+            : 'No planned pass covers this AOI within the published '
+              + 'plan horizon.';
+        if (legend) {
+            legend.innerHTML = `<span style="color:#777">${why}</span>`;
+        }
+        log(`[diag] next_coverage: no passes (${why})`, 'dim');
+        return;
+    }
+    if (cv) cv.style.display = '';
+    _nextCov = d;
+    drawNextCoverage();
+    requestAnimationFrame(drawNextCoverage);
+
+    const rows = d.passes.map((p, i) => {
+        const col = nextCovColour(i, d.passes.length);
+        return `<div style="display:flex;align-items:center;gap:6px">
+            <span style="width:10px;height:10px;background:${col};
+                  display:inline-block;border-radius:2px"></span>
+            <span>${p.sat || 'S2'} &middot; ${fmtWhen(p.start_ts)}</span>
+            <span style="margin-left:auto;color:#666">
+                  ${(p.fraction * 100).toFixed(1)}%</span>
+        </div>`;
+    }).join('');
+    const gap = 1 - (d.covered_fraction || 0);
+    const note = gap > 0.01
+        ? `<div style="color:#a33;margin-top:3px">${(gap * 100).toFixed(1)}%
+           of the AOI has no planned coverage in the next
+           ${d.horizon_days} days.</div>` : '';
+    const age = d.plans_age_s != null
+        ? `<div style="color:#999;margin-top:3px">Plans fetched
+           ${(d.plans_age_s / 3600).toFixed(1)} h ago. Simplified
+           footprints; plans are revised weekly.</div>` : '';
+    if (legend) legend.innerHTML = rows + note + age;
+    log(`[diag] next_coverage: ${d.passes.length} pass(es), `
+        + `${((d.covered_fraction || 0) * 100).toFixed(1)}% of AOI `
+        + `within ${d.horizon_days} d`, 'dim');
+}
+
+function nextCovColour(i, n) {
+    // Sooner = warmer, matching the "what arrives first" reading.
+    const h = 200 - (200 * i) / Math.max(1, n - 1 || 1);
+    return `hsl(${Math.max(0, h)}, 70%, 55%)`;
+}
+
+function drawNextCoverage() {
+    const cv = document.getElementById('next-cov-plot');
+    if (!cv || !_nextCov) return;
+    const d = _nextCov;
+    const measured = cv.getBoundingClientRect().width
+        || (cv.parentElement
+            ? cv.parentElement.getBoundingClientRect().width : 0)
+        || cv.clientWidth || 0;
+    const cssW = Math.max(120, Math.round(measured));
+    const cssH = Math.max(60, Math.round(cssW * (d.height / d.width)));
+    const dpr = window.devicePixelRatio || 1;
+    cv.width = Math.round(cssW * dpr);
+    cv.height = Math.round(cssH * dpr);
+    cv.style.height = cssH + 'px';
+    const ctx = cv.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cssW, cssH);
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(0, 0, cssW, cssH);
+
+    const sx = cssW / d.width, sy = cssH / d.height;
+    d.passes.forEach((p, i) => {
+        ctx.fillStyle = nextCovColour(i, d.passes.length);
+        ctx.globalAlpha = 0.85;
+        (p.rings || []).forEach((ring) => {
+            if (!ring.length) return;
+            ctx.beginPath();
+            ctx.moveTo(ring[0][0] * sx, ring[0][1] * sy);
+            for (let k = 1; k < ring.length; k++) {
+                ctx.lineTo(ring[k][0] * sx, ring[k][1] * sy);
+            }
+            ctx.closePath();
+            ctx.fill();
+        });
+    });
+    ctx.globalAlpha = 1;
+}
 
 async function loadDatePlot() {
     const box = document.getElementById('date-plot-box');
