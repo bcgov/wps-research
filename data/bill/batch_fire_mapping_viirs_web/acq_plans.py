@@ -58,6 +58,9 @@ def _local_kml_dirs():
 DISTRIBUTED_MODES = ('NOBS',)
 
 REFRESH_INTERVAL_S = 24 * 3600
+# Used instead when the cache is missing a satellite, so a transient
+# failure does not cost a full day of degraded predictions.
+INCOMPLETE_RETRY_S = 15 * 60
 _HTTP_TIMEOUT = 60
 
 _lock = threading.Lock()
@@ -328,6 +331,82 @@ def _index_satellites(text) -> dict:
     return out
 
 
+def _get_with_range_continuation(url, timeout, log=None,
+                                 validate=None, max_rounds: int = 12):
+    """Fetch *url*, resuming with HTTP Range if the body arrives short.
+
+    The connection through the intercepting proxy truncates: the body
+    ends early and no error is raised. Detecting that is not enough --
+    every transport truncates the same way, so rejecting the short body
+    just means no data at all.
+
+    Ranged continuation asks for the remainder from where the body
+    stopped and stitches the pieces together, which recovers the full
+    document as long as the origin honours Range (ESA's does; most CDNs
+    do). Progress is required each round, so a server that ignores
+    Range terminates the loop instead of spinning.
+    """
+    def emit(msg):
+        sys.stderr.write(msg + '\n')
+        if log:
+            try:
+                log(msg)
+            except Exception:
+                pass
+
+    data = _http_get(url, timeout=timeout, log=log)
+    rounds = 0
+    while validate is not None and rounds < max_rounds:
+        try:
+            validate(data)
+            if rounds:
+                emit(f'      [acq] recovered full body via {rounds} '
+                     f'range request(s): {len(data):,} bytes')
+            return data
+        except Exception as why:
+            rounds += 1
+            emit(f'      [acq] body incomplete ({why}); requesting '
+                 f'bytes {len(data)}- (round {rounds})')
+            try:
+                more = _get_range(url, timeout, len(data))
+            except Exception as exc:
+                emit(f'      [acq] range request failed: '
+                     f'{describe_exc(exc)}')
+                break
+            if not more:
+                emit('      [acq] range request returned nothing; '
+                     'the server may not honour Range')
+                break
+            data += more
+    if validate is not None:
+        validate(data)      # raise the real reason if still incomplete
+    return data
+
+
+def _get_range(url, timeout, start: int) -> bytes:
+    """Bytes from *start* onward, over the working transport."""
+    import ssl
+    req = urllib.request.Request(url, headers={
+        'User-Agent': ('Mozilla/5.0 (compatible; '
+                       'wps-research/fire-mapping)'),
+        'Accept': '*/*',
+        'Range': f'bytes={start}-',
+    })
+    ctx = ssl.create_default_context()
+    if (_working_strategy or '').find('UNVERIFIED') >= 0 or \
+            os.environ.get('ACQ_PLANS_INSECURE', '') in ('1', 'true'):
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    with urllib.request.urlopen(req, timeout=timeout,
+                                context=ctx) as r:
+        # 206 = partial content. A 200 means Range was ignored and the
+        # whole body came back, so drop what we already have.
+        body = r.read()
+        if getattr(r, 'status', 200) == 200 and start:
+            return body[start:] if len(body) > start else b''
+        return body
+
+
 def _validate_index(data) -> None:
     """Reject an index page that is missing satellites.
 
@@ -354,9 +433,9 @@ def discover_kml_urls(index_html: str = None) -> dict:
     the current plan.
     """
     if index_html is None:
-        index_html = _http_get(
-            PLANS_INDEX, validate=_validate_index).decode(
-                'utf-8', 'replace')
+        index_html = _get_with_range_continuation(
+            PLANS_INDEX, _HTTP_TIMEOUT,
+            validate=_validate_index).decode('utf-8', 'replace')
     found = _index_satellites(index_html)
     sys.stderr.write(
         f'      [acq] index: {len(index_html):,} bytes, plan links per '
@@ -655,14 +734,42 @@ def refresh(force: bool = False, log=None) -> dict:
 
     global _cache
     if not force and cache_age_s() < REFRESH_INTERVAL_S:
-        return load_cache() or {}
+        have = set(_sat_counts(load_cache() or {}))
+        if all(x in have for x in EXPECTED_SATS):
+            return load_cache() or {}
+        # Incomplete cache: refresh even though it is young.
 
     _set_status(state='running', started_at=time.time(),
                 finished_at=None, satellites={}, total=0, done=0,
                 message='Reading ESA acquisition-plan index ...')
     try:
         urls = discover_kml_urls()
-    except Exception as exc:
+    except Exception as exc_strict:
+        # Strict discovery failed (usually a truncated index). Retry
+        # WITHOUT the completeness check: a partial index still names
+        # some satellites, and the rest can fall back to their
+        # previously discovered URLs below. Giving up entirely would
+        # strand every satellite over one short read.
+        emit(f'      [acq] strict index read failed '
+             f'({describe_exc(exc_strict)}); retrying leniently and '
+             f'falling back to previously known plan URLs')
+        try:
+            html = _http_get(PLANS_INDEX).decode('utf-8', 'replace')
+            urls = discover_kml_urls(html)
+        except Exception as exc:
+            urls = {}
+        if not urls:
+            # Nothing at all from the index; reuse everything known.
+            prev_src = (load_cache() or {}).get('sources') or {}
+            urls = {k: dict(v) for k, v in prev_src.items()
+                    if v.get('url')}
+            for v in urls.values():
+                v['reused'] = True
+            if urls:
+                emit(f'      [acq] index unreadable; reusing '
+                     f'{sorted(urls)} from the previous cache')
+    if not urls:
+        exc = locals().get('exc_strict') or OSError('no plan URLs')
         detail = describe_exc(exc)
         emit(f'      [acq] could not read the plans index: {detail}')
         emit(f'      [acq] proxy env: {proxy_info()}')
@@ -734,12 +841,23 @@ def refresh(force: bool = False, log=None) -> dict:
             detail=(f'URL: {PLANS_INDEX}  |  proxy env: '
                     f'{proxy_info()}  |  {remedy}'))
         return load_cache() or {}
-    if not urls:
-        emit('      [acq] plans index listed no KML files; '
-             'keeping the previous cache.')
-        _set_status(state='error', finished_at=time.time(),
-                    message='The plans index listed no KML files.')
-        return load_cache() or {}
+
+    # Reuse the last known URL for any satellite this index did not
+    # yield. Plan URLs stay valid after they are superseded, so an
+    # older-but-real plan beats no plan -- and it stops one truncated
+    # index from stranding a satellite until someone notices.
+    prev_sources = (load_cache() or {}).get('sources') or {}
+    for sat in EXPECTED_SATS:
+        if sat in urls:
+            continue
+        prev = prev_sources.get(sat) or {}
+        if prev.get('url'):
+            urls[sat] = dict(prev)
+            urls[sat]['reused'] = True
+            emit(f'      [acq] {sat}: absent from this index; reusing '
+                 f'the previously discovered plan '
+                 f'{prev.get("valid_from", "?")}-'
+                 f'{prev.get("valid_to", "?")}')
 
     _set_status(total=len(urls),
                 message=f'Downloading {len(urls)} acquisition plan(s) '
@@ -871,11 +989,27 @@ def start_background_refresh() -> None:
 
     def _loop():
         while True:
+            wait = REFRESH_INTERVAL_S
             try:
                 refresh(force=True)
+                # An INCOMPLETE cache should not persist for a day. A
+                # missing satellite makes the forecast under-report the
+                # revisit rate by several times, and the usual cause --
+                # a truncated response on a flaky link -- is transient.
+                # Retry soon instead of serving a known-partial plan
+                # until tomorrow.
+                have = set(_sat_counts(load_cache() or {}))
+                missing = [x for x in EXPECTED_SATS if x not in have]
+                if missing:
+                    wait = INCOMPLETE_RETRY_S
+                    sys.stderr.write(
+                        f'      [acq] cache still missing {missing}; '
+                        f'retrying in {wait // 60} min rather than '
+                        f'waiting {REFRESH_INTERVAL_S // 3600} h\n')
             except Exception as exc:
                 sys.stderr.write(f'[acq] refresh loop error: {exc}\n')
-            time.sleep(REFRESH_INTERVAL_S)
+                wait = INCOMPLETE_RETRY_S
+            time.sleep(wait)
 
     _refresh_thread = threading.Thread(target=_loop, daemon=True)
     _refresh_thread.start()
