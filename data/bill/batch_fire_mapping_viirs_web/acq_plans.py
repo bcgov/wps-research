@@ -1311,6 +1311,12 @@ def next_coverage(aoi_ring_native, srs_wkt, geotransform, width, height,
         'insecure': bool(_status.get('insecure')),
         'census': census,
         'sources': plans.get('sources', {}),
+        # The refresh status was only attached on the ERROR path, so
+        # the index diagnostics (byte count, per-satellite link counts,
+        # which satellites the index omitted) never rendered on a
+        # successful-but-incomplete response -- which is exactly the
+        # case being diagnosed.
+        'status': status(),
         # Which satellites the cached plan contains at all. If the
         # observed L2 imagery comes from platforms absent here, the
         # prediction is under-reporting rather than the satellites
