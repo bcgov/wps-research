@@ -1466,6 +1466,21 @@ async function loadNextCoverage() {
       <div style="margin-top:6px;padding-top:4px;border-top:1px solid #eee;
                   font-size:10px;color:#777">
         <div style="margin-bottom:2px">plan coverage check:</div>
+        ${(function () {
+            const st = d.status || {};
+            if (!st.index_satellites && !st.index_bytes) return '';
+            const links = st.index_satellites || {};
+            const miss = st.missing_from_index || [];
+            // The index page is where satellites are DISCOVERED. If a
+            // satellite's links are absent here, it was never even
+            // attempted -- which is a page/transport problem, not an
+            // orbit one.
+            return `<div style="color:${miss.length ? '#a33' : '#777'}">
+                index: ${(st.index_bytes || 0).toLocaleString()} bytes,
+                links ${JSON.stringify(links)}${
+                miss.length ? ` &mdash; MISSING ${miss.join(',')}
+                (page truncated before those sections)` : ''}</div>`;
+        })()}
         ${satKeys.map((k) => {
             const c = cen[k] || {};
             const b = cache[k] || {};

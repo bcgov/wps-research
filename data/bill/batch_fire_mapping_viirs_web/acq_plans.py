@@ -318,6 +318,26 @@ def _http_get(url: str, timeout: int = _HTTP_TIMEOUT,
 
 EXPECTED_SATS = ('S2A', 'S2B', 'S2C')
 
+# Seed URLs, used ONLY when discovery fails to find a satellite and no
+# previously discovered URL exists -- i.e. a cold start behind a link
+# that truncates the index page. Without them a satellite that has
+# never been discovered can never be discovered, because the reuse
+# fallback has nothing to reuse.
+#
+# These go stale: ESA republishes weekly and these windows end in late
+# August 2026. That is acceptable because they are a LAST resort and
+# are superseded the moment discovery succeeds once -- but it does mean
+# a long-lived deployment should not rely on them. Their use is logged
+# loudly for that reason.
+BOOTSTRAP_URLS = {
+    'S2A': ('https://sentinels.copernicus.eu/documents/d/sentinel/'
+            's2a_mp_acq__kml_20260806t150000_20260824t180000'),
+    'S2B': ('https://sentinels.copernicus.eu/documents/d/sentinel/'
+            's2b_mp_acq__kml_20260730t120000_20260817t150000'),
+    'S2C': ('https://sentinels.copernicus.eu/documents/d/sentinel/'
+            's2c_mp_acq__kml_20260806t120000_20260824t150000'),
+}
+
 
 def _index_satellites(text) -> dict:
     """Satellite -> number of plan links present in *text*."""
@@ -461,7 +481,8 @@ def discover_kml_urls(index_html: str = None) -> dict:
             f'      [acq] WARNING: no plan link found for {missing}. '
             f'Those satellites will be absent from the forecast.\n')
     _set_status(index_satellites=found, discovered=sorted(out),
-                missing_from_index=missing)
+                missing_from_index=missing,
+                index_bytes=len(index_html))
     return out
 
 
@@ -858,6 +879,19 @@ def refresh(force: bool = False, log=None) -> dict:
                  f'the previously discovered plan '
                  f'{prev.get("valid_from", "?")}-'
                  f'{prev.get("valid_to", "?")}')
+        elif BOOTSTRAP_URLS.get(sat):
+            m = re.search(r'_kml_(\d{8}t\d{6})_(\d{8}t\d{6})$',
+                          BOOTSTRAP_URLS[sat])
+            urls[sat] = {
+                'url': BOOTSTRAP_URLS[sat],
+                'valid_from': m.group(1) if m else '',
+                'valid_to': m.group(2) if m else '',
+                'bootstrap': True,
+            }
+            emit(f'      [acq] {sat}: absent from the index and never '
+                 f'previously discovered -- falling back to the '
+                 f'built-in seed URL. This is a stopgap; it will be '
+                 f'replaced as soon as the index is read in full.')
 
     _set_status(total=len(urls),
                 message=f'Downloading {len(urls)} acquisition plan(s) '
