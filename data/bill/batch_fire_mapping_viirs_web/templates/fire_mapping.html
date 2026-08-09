@@ -1449,7 +1449,46 @@ async function loadNextCoverage() {
            unverified TLS connection (your network intercepts HTTPS
            with an expired certificate). Content was validated as a
            plausible S2 plan before use.</div>` : '';
-    if (legend) legend.innerHTML = rows + note + unver + age;
+    // Per-satellite accounting, rendered IN THE PANEL rather than only
+    // in the console. When a satellite is absent from the forecast the
+    // question is always "was it downloaded, and did its swaths reach
+    // this AOI?" -- and that has to be answerable from a screenshot.
+    const cen = d.census || {};
+    const cache = d.sats_in_cache || {};
+    // Always list all three expected platforms. A satellite missing
+    // from BOTH the cache and the census would otherwise have no row,
+    // and its absence -- the thing being diagnosed -- would be
+    // invisible.
+    const satKeys = [...new Set(['S2A', 'S2B', 'S2C',
+                                 ...Object.keys(cache),
+                                 ...Object.keys(cen)])].sort();
+    const diagRows = satKeys.length ? `
+      <div style="margin-top:6px;padding-top:4px;border-top:1px solid #eee;
+                  font-size:10px;color:#777">
+        <div style="margin-bottom:2px">plan coverage check:</div>
+        ${satKeys.map((k) => {
+            const c = cen[k] || {};
+            const b = cache[k] || {};
+            const ends = c.last_planned
+                ? new Date(c.last_planned * 1000).toISOString().slice(0, 10)
+                : '-';
+            const bad = !(b.distributed > 0);
+            if (!Object.prototype.hasOwnProperty.call(cache, k)
+                    && !Object.prototype.hasOwnProperty.call(cen, k)) {
+                return `<div style="color:#a33">${k}: NOT IN PLAN CACHE
+                        (never downloaded or failed to parse)</div>`;
+            }
+            return `<div style="color:${bad ? '#a33' : '#777'}">
+                ${k}: ${b.distributed || 0} planned datatakes
+                &middot; ${c.candidate || 0} in window
+                &middot; ${c.used || 0} over AOI
+                &middot; ${c.no_overlap || 0} elsewhere
+                &middot; ends ${ends}</div>`;
+        }).join('')}
+      </div>` : `
+      <div style="margin-top:6px;font-size:10px;color:#a33">
+        No per-satellite plan data returned at all.</div>`;
+    if (legend) legend.innerHTML = rows + note + unver + age + diagRows;
     log(`[diag] next_coverage: ${d.passes.length} pass(es), `
         + `${((d.covered_fraction || 0) * 100).toFixed(1)}% of AOI `
         + `within ${d.horizon_days} d`, 'dim');
