@@ -2726,6 +2726,8 @@ async function loadPaneImage(pane, viewKey) {
     const loadMsg = document.getElementById('loading-msg');
     const gen = ++_paneGen[pane];
     const stale = () => _paneGen[pane] !== gen;
+    const { img: _img0 } = getPaneElements(pane);
+    if (_img0) _img0.dataset.full = '0';
 
     // Tracking updates immediately: the UI should reflect the user's
     // choice even while the bytes are still arriving.
@@ -2745,6 +2747,38 @@ async function loadPaneImage(pane, viewKey) {
 
     const url = previewUrlFor(viewKey);
     const ck = cacheKeyFor(viewKey);
+
+    // Progressive first paint: show the small proxy immediately, then
+    // replace it with the full image. On a slow link the pane goes
+    // from seconds of blank to showing the right scene almost at once.
+    // Strictly best-effort -- the full-resolution path below is
+    // unchanged and does not depend on this succeeding.
+    if (ck && !_previewBlobs.has(ck)) {
+        (async () => {
+            const myGen = gen;
+            try {
+                const lowUrl = url + '&lowres=1';
+                const t0 = performance.now();
+                const r = await fetch(lowUrl);
+                if (!r.ok || stale() || myGen !== _paneGen[pane]) return;
+                // If the full image already painted, do not regress to
+                // the proxy.
+                if (img.naturalWidth && img.dataset.full === '1') return;
+                const b = await r.blob();
+                if (stale() || myGen !== _paneGen[pane]) return;
+                if (img.dataset.full === '1') return;
+                img.dataset.full = '0';
+                img.src = URL.createObjectURL(b);
+                img.style.display = 'block';
+                if (pane === 'left' && loadMsg) {
+                    loadMsg.style.display = 'none';
+                }
+                log(`[perf] preview ${viewKey} PROXY: `
+                    + `${fmtBytes(b.size)} in `
+                    + `${(performance.now() - t0).toFixed(0)} ms`, 'dim');
+            } catch (_) { /* proxy is optional */ }
+        })();
+    }
 
     let srcUrl;
     try {
@@ -2809,6 +2843,7 @@ async function loadPaneImage(pane, viewKey) {
 
     // Single assignment. Wait for it to decode too, so the fit maths
     // below reads real dimensions rather than the previous image's.
+    img.dataset.full = '1';
     img.src = finalUrl;
     try {
         if (!img.complete || !img.naturalWidth) await img.decode();

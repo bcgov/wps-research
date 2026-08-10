@@ -1048,6 +1048,24 @@ class FireRoutes:
         # PNG whenever the twin is missing (older fires, mask views, or
         # a failed JPEG encode), so this can never break a view.
         serve_path, serve_type, fmt = png, 'image/png', 'png'
+
+        # ?lowres=1 asks for the small proxy: same scene, tens of kB,
+        # used for the first paint while the full image downloads.
+        if (_q.get('lowres', [''])[0] or '') in ('1', 'true', 'yes'):
+            _low = os.path.splitext(png)[0] + '.low.jpg'
+            if os.path.isfile(_low):
+                try:
+                    _lhdrs = self._geo_headers(fire, png, view)
+                except Exception:
+                    _lhdrs = {}
+                _lhdrs['X-Preview-Format'] = 'low'
+                self._send_file(_low, 'image/jpeg', cache_seconds=86400,
+                                extra_headers=_lhdrs)
+                return
+            # No proxy (older fire, or generation failed): fall through
+            # and serve the full image rather than nothing.
+            sys.stderr.write(
+                f'[preview] no low proxy for {view}; serving full\n')
         try:
             from ..preview import JPEG_VIEWS
             _b = os.path.splitext(os.path.basename(png))[0]

@@ -58,6 +58,53 @@ Notes:
 - Should be applied at export time, not to internal cache filenames,
   so internal paths stay stable.
 
+### 5. Core Sentinel-2 downloading / compositing: calculate actual data coverage from new frames on receipt
+Right now coverage is only known once an AOI stack is built.
+
+Notes:
+- Compute and store per-frame valid-data footprints when a SAFE zip
+  lands, not when a fire needs it.
+- Enables: accurate "what do we actually have" per tile/date without
+  opening zips; faster AOI builds (skip frames known not to cover);
+  and feeds item 3 (historical coverage calibration).
+- Store beside the zip or in a small index keyed by (tile, acquisition).
+
+### 6. Catalogue data types, formats and locations
+No single description exists of what the app stores, where, in what
+format, and for how long.
+
+Notes:
+- Cover: MRAP mosaics, L2A SAFE zips, AOI stacks on `/ram`, previews
+  and proxies, hint masks, classified rasters, serial run state,
+  `fire_state.yaml`, VIIRS `.nc` + shapefiles, acquisition-plan cache,
+  exports.
+- For each: format, path, producer, consumer, lifetime (session /
+  daily / permanent), and approximate size.
+- Prerequisite for retention policy, disk-space guards, and backup.
+
+### 7. Make VIIRS search, downloading and processing reliable
+Currently disabled by default (`VIIRS_DOWNLOAD_ENABLED = False`) and
+~735 cached `.nc` files fail to parse on every startup.
+
+Notes:
+- Quarantine unreadable `.nc` files instead of retrying forever.
+- Verify downloads (size/checksum) before accepting.
+- Make per-AOI download the normal path; re-enable by default once
+  reliable.
+- Clear reporting when VIIRS is unavailable so the red-wins fallback is
+  an explicit choice rather than a silent one.
+
+### 8. Auto-regenerate VIIRS (LAADS) keys
+Tokens expire and renewal is manual.
+
+Notes:
+- May need a headless browser to complete the Earthdata login flow.
+- Alternative worth checking first: whether LAADS offers a
+  programmatic token refresh / long-lived app credential, which would
+  avoid browser automation entirely.
+- Detect expiry from the 401/403 response and renew automatically,
+  logging clearly if renewal fails.
+
 ---
 
 ## Done
@@ -70,3 +117,6 @@ Notes:
   checkbox) + concurrent AOI preparation — 2026-08-10
 - JPEG previews for continuous-tone views + gzip JSON responses —
   2026-08-10
+- Progressive preview loading (~400 px proxy first paint) — 2026-08-10
+- Fix class_brush flag mismatch (brush post-processing never ran
+  against a binary older than `--no-intermediates`) — 2026-08-10

@@ -211,7 +211,52 @@ def generate_preview_png(raster_path: str, band_indices: list[int],
             sys.stderr.write(
                 f'[preview] JPEG twin for {base} failed ({exc}); '
                 f'PNG will be served instead\n')
+
+    # Low-resolution proxy for progressive loading.
+    #
+    # The full preview is megabytes; on a slow link that is seconds of
+    # blank pane. A ~400 px proxy is tens of kilobytes and arrives
+    # almost immediately, so the pane shows the right scene straight
+    # away and sharpens when the full image lands. Cheap to make (a
+    # decimation of an array already in memory) and written for every
+    # view, masks included, since the wait applies to all of them.
+    try:
+        _write_low_proxy(rgb_uint8, output_path)
+    except Exception as exc:
+        sys.stderr.write(
+            f'[preview] low proxy for {base} failed ({exc}); '
+            f'progressive loading disabled for this view\n')
     return True
+
+
+LOW_PROXY_DIM = 400
+
+
+def _write_low_proxy(rgb_uint8, png_path: str) -> str:
+    """Write ``<view>.low.jpg`` — a small proxy of the same scene."""
+    h, w = rgb_uint8.shape[0], rgb_uint8.shape[1]
+    step = max(1, int(round(max(h, w) / float(LOW_PROXY_DIM))))
+    small = rgb_uint8[::step, ::step, :]
+    from osgeo import gdal
+    sh, sw = small.shape[0], small.shape[1]
+    mem = gdal.GetDriverByName('MEM').Create('', sw, sh, 3, gdal.GDT_Byte)
+    for b in range(3):
+        mem.GetRasterBand(b + 1).WriteArray(small[:, :, b])
+    out_path = os.path.splitext(png_path)[0] + '.low.jpg'
+    tmp = out_path + '.tmp.jpg'
+    drv = gdal.GetDriverByName('JPEG')
+    if drv is None:
+        raise RuntimeError('GDAL has no JPEG driver')
+    ds = drv.CreateCopy(tmp, mem, options=['QUALITY=70'])
+    ds = None
+    mem = None
+    os.replace(tmp, out_path)
+    for junk in (out_path + '.aux.xml', tmp + '.aux.xml'):
+        try:
+            os.remove(junk)
+        except OSError:
+            pass
+    return out_path
 
 
 # Views whose previews are continuous-tone imagery, safe for JPEG.

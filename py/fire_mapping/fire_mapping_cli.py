@@ -96,6 +96,47 @@ def _status_box(title: str, lines: list = None, char: str = '=', width: int = 64
 # Core class
 # ===========================================================================
 
+
+_BRUSH_FLAG_CACHE = {}
+
+
+def _brush_supported_flags(brush_exe: str) -> set:
+    """Flags the given class_brush.exe build accepts.
+
+    Determined from its own usage text rather than assumed, because a
+    binary older than a flag silently misparses the command line rather
+    than rejecting the flag: it stops at the unknown token and treats
+    it as the input filename.
+
+    Run with no arguments, the binary prints usage and exits non-zero;
+    that text names every flag it knows. Cached per path -- the answer
+    cannot change while the process runs.
+    """
+    if brush_exe in _BRUSH_FLAG_CACHE:
+        return _BRUSH_FLAG_CACHE[brush_exe]
+
+    flags = set()
+    try:
+        p = subprocess.run([brush_exe], capture_output=True, timeout=30)
+        text = ((p.stdout or b'') + (p.stderr or b'')).decode(
+            'utf-8', 'replace')
+        for f in ('--all_segments', '--no-intermediates'):
+            if f in text:
+                flags.add(f)
+        if not flags:
+            # Usage text unrecognised. Assume nothing beyond the
+            # positional arguments, which every build has accepted --
+            # a slower correct run beats a fast broken one.
+            print('[CLI] NOTE: could not read class_brush.exe usage; '
+                  'passing positional arguments only.')
+    except Exception as exc:
+        print(f'[CLI] NOTE: could not probe class_brush.exe ({exc}); '
+              f'passing positional arguments only.')
+
+    _BRUSH_FLAG_CACHE[brush_exe] = flags
+    return flags
+
+
 class FireMappingCLI:
     """
     Non-GUI burn-mapping pipeline.
@@ -1127,11 +1168,38 @@ class FireMappingCLI:
         # the keep/drop decision in Python.
         force_all = self.hint_aware_brush or self.brush_all_segments
 
+        # Only pass flags the binary actually understands.
+        #
+        # class_brush.exe parses leading flags in a loop and STOPS at
+        # the first token it does not recognise, treating it as the
+        # input filename. So an older binary given --no-intermediates
+        # takes that string as the filename and the real path as
+        # brush_size; atol("/ram/...") is 0 and it dies with
+        # "brush_size must be > 0" -- having printed only
+        # "Mode: all_segments". Silent, total loss of brush
+        # post-processing, with an error that points at the wrong
+        # argument.
+        #
+        # Probing the usage text costs one cheap exec, once, and makes
+        # a stale binary degrade to "no --no-intermediates" instead of
+        # "no brushing at all".
+        supported = _brush_supported_flags(brush_exe)
         cmd = [brush_exe]
+        skipped = []
         if force_all:
-            cmd.append('--all_segments')
+            if '--all_segments' in supported:
+                cmd.append('--all_segments')
+            else:
+                skipped.append('--all_segments')
         if self.brush_no_intermediates:
-            cmd.append('--no-intermediates')
+            if '--no-intermediates' in supported:
+                cmd.append('--no-intermediates')
+            else:
+                skipped.append('--no-intermediates')
+        if skipped:
+            print(f'[CLI] NOTE: class_brush.exe does not support '
+                  f'{", ".join(skipped)} -- running without. Rebuild '
+                  f'cpp/class_brush.exe to enable.')
         cmd += [clf_path, str(self.brush_size), str(self.point_threshold)]
         print(f'[CLI] Running class_brush.exe '
               f'(brush={self.brush_size}, threshold={self.point_threshold}, '
