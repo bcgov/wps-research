@@ -1455,6 +1455,12 @@ async function loadNextCoverage() {
     // this AOI?" -- and that has to be answerable from a screenshot.
     const cen = d.census || {};
     const cache = d.sats_in_cache || {};
+    // Hoisted: the per-satellite rows below reference this, and it was
+    // previously declared inside the index-line helper function. That
+    // put it out of scope for those rows, so the whole panel render
+    // threw a ReferenceError and NOTHING was displayed -- a much worse
+    // failure than the missing diagnostic it was meant to add.
+    const st = d.status || {};
     // Always list all three expected platforms. A satellite missing
     // from BOTH the cache and the census would otherwise have no row,
     // and its absence -- the thing being diagnosed -- would be
@@ -1467,7 +1473,6 @@ async function loadNextCoverage() {
                   font-size:10px;color:#777">
         <div style="margin-bottom:2px">plan coverage check:</div>
         ${(function () {
-            const st = d.status || {};
             if (!st.index_satellites && !st.index_bytes) return '';
             const links = st.index_satellites || {};
             const miss = st.missing_from_index || [];
