@@ -2111,13 +2111,10 @@ function overlayFor(pane) {
 function updateTransformForPane(pane) {
     const s = paneState[pane];
     const { img } = getPaneElements(pane);
-    // While a low-res proxy is showing, its natural size is a fraction
-    // of the full image's, so the transform is pre-multiplied to keep
-    // the same ground area on screen. Without this, panning or zooming
-    // during the proxy phase would snap it to the wrong size.
-    const _k = parseFloat(img.dataset.proxyScale || '1') || 1;
+    // No per-level correction: applyPaneImageBox() makes both pyramid
+    // levels lay out at the same size, so one transform serves both.
     img.style.transform =
-        `translate(${s.panX}px, ${s.panY}px) scale(${s.scale * _k})`;
+        `translate(${s.panX}px, ${s.panY}px) scale(${s.scale})`;
     // Nothing to reposition: the vectors are baked into the image
     // bitmap, so they are transformed along with it. This also
     // removes the registration problem the separate canvas had.
@@ -2307,8 +2304,12 @@ function paneToNative(pane, px, py) {
     const g = geoForPane(pane);
     const { img } = getPaneElements(pane);
     if (!g || !img || !img.naturalWidth) return null;
-    const sx = (g.rw || g.w) / img.naturalWidth;
-    const sy = (g.rh || g.h) / img.naturalHeight;
+    // Box dims, not natural dims: during the proxy phase the element
+    // holds a decimated image but represents the full-resolution
+    // extent, and every geo conversion must agree with that.
+    const _d = paneImageDims(img);
+    const sx = (g.rw || g.w) / _d.w;
+    const sy = (g.rh || g.h) / _d.h;
     const rx = px * sx, ry = py * sy;
     return [g.gt[0] + rx * g.gt[1] + ry * g.gt[2],
             g.gt[3] + rx * g.gt[4] + ry * g.gt[5]];
@@ -2323,8 +2324,9 @@ function nativeToPane(pane, X, Y) {
     const dx = X - g.gt[0], dy = Y - g.gt[3];
     const rx = (dx * g.gt[5] - dy * g.gt[2]) / det;
     const ry = (-dx * g.gt[4] + dy * g.gt[1]) / det;
-    return [rx * img.naturalWidth / (g.rw || g.w),
-            ry * img.naturalHeight / (g.rh || g.h)];
+    const _d2 = paneImageDims(img);
+    return [rx * _d2.w / (g.rw || g.w),
+            ry * _d2.h / (g.rh || g.h)];
 }
 
 // Mirror one pane's viewport onto the other so BOTH SHOW THE SAME
@@ -2370,8 +2372,8 @@ function syncOtherPane(pane) {
     // same grid, so the transform copies across exactly. Taking this
     // shortcut avoids introducing rounding drift through the CRS
     // round-trip, and is provably exact.
-    if (img.naturalWidth === oImg.naturalWidth
-            && img.naturalHeight === oImg.naturalHeight) {
+    const _dA = paneImageDims(img), _dB = paneImageDims(oImg);
+    if (_dA.w === _dB.w && _dA.h === _dB.h) {
         os.scale = s.scale; os.panX = s.panX; os.panY = s.panY;
         oImg.style.transform =
             `translate(${os.panX}px, ${os.panY}px) scale(${os.scale})`;
@@ -2443,13 +2445,43 @@ function syncOtherPane(pane) {
 }
 
 
+// Intended size of the view in image pixels, independent of which
+// pyramid level is currently loaded.
+//
+// This is the trick the new-fire page already uses: BOTH levels render
+// into the same CSS box, so no coordinate maths depends on the
+// image's intrinsic pixel size. Here the low level is a ~400 px
+// decimation and the high level is the full 20 m preview, but as long
+// as every calculation asks for these dimensions -- not
+// naturalWidth -- the two levels are interchangeable and the swap is
+// invisible.
+function paneImageDims(img) {
+    const w = parseInt(img && img.dataset ? img.dataset.fullW : 0, 10);
+    const h = parseInt(img && img.dataset ? img.dataset.fullH : 0, 10);
+    if (w > 0 && h > 0) return {w, h};
+    return {w: (img && img.naturalWidth) || 0,
+            h: (img && img.naturalHeight) || 0};
+}
+
+// Force the element to LAY OUT at the full-resolution size whichever
+// level is loaded. The browser scales the low level up for us, so the
+// transform, the fit and every hit test behave identically.
+function applyPaneImageBox(img, w, h) {
+    if (!img || !(w > 0) || !(h > 0)) return;
+    img.dataset.fullW = String(w);
+    img.dataset.fullH = String(h);
+    img.style.width = w + 'px';
+    img.style.height = h + 'px';
+}
+
 function zoomFitPane(pane) {
     const { area, img } = getPaneElements(pane);
-    if (!img.naturalWidth || !img.naturalHeight) return;
+    const d = paneImageDims(img);
+    if (!d.w || !d.h) return;
     const s = paneState[pane];
-    s.scale = Math.min(area.clientWidth / img.naturalWidth, area.clientHeight / img.naturalHeight);
-    s.panX = (area.clientWidth - img.naturalWidth * s.scale) / 2;
-    s.panY = (area.clientHeight - img.naturalHeight * s.scale) / 2;
+    s.scale = Math.min(area.clientWidth / d.w, area.clientHeight / d.h);
+    s.panX = (area.clientWidth - d.w * s.scale) / 2;
+    s.panY = (area.clientHeight - d.h * s.scale) / 2;
     updateTransformForPane(pane);
 }
 
@@ -2703,8 +2735,9 @@ async function compositeOverlays(bitmap, cropW, cropH) {
 
 function applyPaneFit(pane, img) {
     const fs = _paneFitState[pane];
+    const _d = paneImageDims(img);
     const dimsChanged = fs.fitted
-        && (img.naturalWidth !== fs.fitW || img.naturalHeight !== fs.fitH);
+        && (_d.w !== fs.fitW || _d.h !== fs.fitH);
     // In syncPanes the right pane mirrors left's transform — skip the
     // fit so we don't clobber the inherited scale. The fit state is
     // still recorded so a later un-sync doesn't trigger a spurious
@@ -2722,8 +2755,8 @@ function applyPaneFit(pane, img) {
         updateTransformForPane(pane);
     }
     fs.fitted = true;
-    fs.fitW = img.naturalWidth;
-    fs.fitH = img.naturalHeight;
+    fs.fitW = _d.w;
+    fs.fitH = _d.h;
 }
 
 async function loadPaneImage(pane, viewKey) {
@@ -2785,6 +2818,9 @@ async function loadPaneImage(pane, viewKey) {
                 //
                 // The full size comes from the X-Geo-Png header, which
                 // describes the PNG rather than this proxy.
+                // Full-resolution dimensions come from the header
+                // (it describes the PNG, not this proxy), so the box
+                // can be set before the full image exists.
                 const ps = (r.headers.get('X-Geo-Png') || '')
                     .split(',').map(Number);
                 const fullW = ps[0] || 0, fullH = ps[1] || 0;
@@ -2796,11 +2832,8 @@ async function loadPaneImage(pane, viewKey) {
                 if (stale() || myGen !== _paneGen[pane]) return;
                 if (img.dataset.full === '1') return;
 
-                const k = (fullW && probe.naturalWidth)
-                    ? fullW / probe.naturalWidth : 1;
-
                 // Overlays are cheap vector work, so draw them on the
-                // proxy too -- otherwise tile labels and the BCWS
+                // proxy too -- otherwise tile outlines and the BCWS
                 // perimeter pop in only when the full image lands.
                 let painted = probe.src;
                 if (overlaysVisible && _fireOverlays) {
@@ -2815,14 +2848,21 @@ async function loadPaneImage(pane, viewKey) {
                 if (img.dataset.full === '1') return;
 
                 img.dataset.full = '0';
-                img.dataset.proxyScale = String(k);
                 img.src = painted;
                 img.style.display = 'block';
-                // Apply the pane transform pre-multiplied by k.
-                const st0 = paneState[pane];
-                img.style.transform =
-                    `translate(${st0.panX}px, ${st0.panY}px) `
-                    + `scale(${st0.scale * k})`;
+                // Lay out at FULL size, exactly as the new-fire page
+                // does: the browser upscales the low level into the
+                // same box, so the fit and transform below are the
+                // ones the full image will use unchanged.
+                applyPaneImageBox(img, fullW || probe.naturalWidth,
+                                  fullH || probe.naturalHeight);
+                const fs0 = _paneFitState[pane];
+                if (!fs0.fitted || fs0.fitW !== fullW
+                        || fs0.fitH !== fullH) {
+                    zoomFitPane(pane);
+                } else {
+                    updateTransformForPane(pane);
+                }
                 if (pane === 'left' && loadMsg) {
                     loadMsg.style.display = 'none';
                 }
@@ -2897,12 +2937,15 @@ async function loadPaneImage(pane, viewKey) {
     // Single assignment. Wait for it to decode too, so the fit maths
     // below reads real dimensions rather than the previous image's.
     img.dataset.full = '1';
-    img.dataset.proxyScale = '1';
     img.src = finalUrl;
     try {
         if (!img.complete || !img.naturalWidth) await img.decode();
     } catch (_) { /* superseded */ }
     if (stale()) return;
+    // Same box as the proxy used, now at native resolution. Setting it
+    // explicitly (rather than letting layout fall back to the natural
+    // size) keeps the element's size identical across the swap.
+    applyPaneImageBox(img, img.naturalWidth, img.naturalHeight);
 
     if (pane === 'left') loadMsg.style.display = 'none';
     img.style.display = 'block';
