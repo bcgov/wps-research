@@ -2111,7 +2111,13 @@ function overlayFor(pane) {
 function updateTransformForPane(pane) {
     const s = paneState[pane];
     const { img } = getPaneElements(pane);
-    img.style.transform = `translate(${s.panX}px, ${s.panY}px) scale(${s.scale})`;
+    // While a low-res proxy is showing, its natural size is a fraction
+    // of the full image's, so the transform is pre-multiplied to keep
+    // the same ground area on screen. Without this, panning or zooming
+    // during the proxy phase would snap it to the wrong size.
+    const _k = parseFloat(img.dataset.proxyScale || '1') || 1;
+    img.style.transform =
+        `translate(${s.panX}px, ${s.panY}px) scale(${s.scale * _k})`;
     // Nothing to reposition: the vectors are baked into the image
     // bitmap, so they are transformed along with it. This also
     // removes the registration problem the separate canvas had.
@@ -2767,9 +2773,56 @@ async function loadPaneImage(pane, viewKey) {
                 const b = await r.blob();
                 if (stale() || myGen !== _paneGen[pane]) return;
                 if (img.dataset.full === '1') return;
+
+                // The proxy is a decimation of the SAME scene, so it
+                // covers identical ground -- but at a fraction of the
+                // pixel dimensions. The pane transform is expressed in
+                // display-px-per-image-px, so painting it unchanged
+                // would draw the AOI several times too small. Scale by
+                // the dimension ratio so it occupies exactly the same
+                // area as the full image will, and the swap is
+                // invisible apart from sharpness.
+                //
+                // The full size comes from the X-Geo-Png header, which
+                // describes the PNG rather than this proxy.
+                const ps = (r.headers.get('X-Geo-Png') || '')
+                    .split(',').map(Number);
+                const fullW = ps[0] || 0, fullH = ps[1] || 0;
+
+                const probe = new Image();
+                probe.decoding = 'async';
+                probe.src = URL.createObjectURL(b);
+                try { await probe.decode(); } catch (_) { return; }
+                if (stale() || myGen !== _paneGen[pane]) return;
+                if (img.dataset.full === '1') return;
+
+                const k = (fullW && probe.naturalWidth)
+                    ? fullW / probe.naturalWidth : 1;
+
+                // Overlays are cheap vector work, so draw them on the
+                // proxy too -- otherwise tile labels and the BCWS
+                // perimeter pop in only when the full image lands.
+                let painted = probe.src;
+                if (overlaysVisible && _fireOverlays) {
+                    try {
+                        const baked = await compositeOverlays(
+                            probe, _fireOverlays.width,
+                            _fireOverlays.height);
+                        if (baked) painted = baked;
+                    } catch (_) { /* proxy without overlays is fine */ }
+                }
+                if (stale() || myGen !== _paneGen[pane]) return;
+                if (img.dataset.full === '1') return;
+
                 img.dataset.full = '0';
-                img.src = URL.createObjectURL(b);
+                img.dataset.proxyScale = String(k);
+                img.src = painted;
                 img.style.display = 'block';
+                // Apply the pane transform pre-multiplied by k.
+                const st0 = paneState[pane];
+                img.style.transform =
+                    `translate(${st0.panX}px, ${st0.panY}px) `
+                    + `scale(${st0.scale * k})`;
                 if (pane === 'left' && loadMsg) {
                     loadMsg.style.display = 'none';
                 }
@@ -2844,6 +2897,7 @@ async function loadPaneImage(pane, viewKey) {
     // Single assignment. Wait for it to decode too, so the fit maths
     // below reads real dimensions rather than the previous image's.
     img.dataset.full = '1';
+    img.dataset.proxyScale = '1';
     img.src = finalUrl;
     try {
         if (!img.complete || !img.naturalWidth) await img.decode();

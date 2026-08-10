@@ -109,14 +109,123 @@ Notes:
 
 ## Done
 
-- Remove AOI padding (all previews share one grid; fixes split-view
-  misalignment at the source) — 2026-08-08
-- Sentinel-2 acquisition plans: download, cache, per-AOI "expected next
-  coverage" visualisation — 2026-08-08
-- Auto-open a newly created fire when ready ("Open when ready"
-  checkbox) + concurrent AOI preparation — 2026-08-10
-- JPEG previews for continuous-tone views + gzip JSON responses —
-  2026-08-10
-- Progressive preview loading (~400 px proxy first paint) — 2026-08-10
-- Fix class_brush flag mismatch (brush post-processing never ran
-  against a binary older than `--no-intermediates`) — 2026-08-10
+Reverse chronological. Dates are when the change was handed over.
+
+### 2026-08-10
+
+- **Auto-open a newly created fire when ready.** "Open when ready"
+  checkbox beside Logout (default on, remembered). Cancelled if the
+  user navigates away from the fire list, so a fire finishing later
+  cannot yank them out of what they are doing. Also seeded from the
+  page transition, because `new_fire.js` is a cached static file and
+  the sessionStorage handoff alone was unreliable.
+- **Concurrent AOI preparation.** `viirs_concurrent_jobs` 1 → 2. The
+  work was already queued and backgrounded, but a single dispatch
+  thread made concurrent creation serial in practice.
+- **Fix `class_brush` flag mismatch.** Brush post-processing had not
+  run at all against a binary older than `--no-intermediates`: the C++
+  parser stops at an unknown flag and treats it as the filename, so
+  `brush_size` parsed from an absolute path as 0. The CLI now probes
+  the binary's usage text and passes only flags it supports. *Rebuild
+  `cpp/class_brush.exe` to regain `--no-intermediates`.*
+- **Progressive preview loading.** ~400 px JPEG proxy served via
+  `?lowres=1`, painted immediately and replaced by the full image.
+  Scaled to the same geographic framing and overlaid with the same
+  vectors, so the swap shows only a sharpness change. ~5.06 s → ~35 ms
+  to first paint at the measured link rate.
+- **JPEG previews + gzip JSON.** `pre`/`post`/`diff*` gain a JPEG twin
+  (~11x smaller); masks stay PNG. JSON responses gzip when the client
+  supports it. Both report format and savings to the browser console.
+- **Faster startup.** The daily province-overview regeneration moved
+  off the startup path; only missing overviews block. Startup went
+  from minutes to seconds on regeneration days.
+- **Plan completeness diagnostics.** Per-satellite datatakes/day,
+  window coverage and download size, with an explicit
+  complete/truncated verdict.
+
+### 2026-08-09 — Sentinel-2 acquisition plans
+
+- **New `acq_plans.py`**: fetch, parse and cache ESA's S2A/S2B/S2C
+  plans on the ramdisk; refresh at startup and daily, 15 min while
+  incomplete.
+- **"Expected next coverage" panel**: every planned pass over the AOI
+  within the horizon, soonest painted on top, with per-pass share of
+  the AOI and how much is new ground.
+- **Resilience**: parallel downloads; multi-transport fetch (system CA
+  → certifi → `$SSL_CERT_FILE` → curl → unverified as a last resort,
+  because the network intercepts HTTPS with an expired certificate);
+  short-read detection; salvage of truncated KMLs; per-satellite merge
+  so one failure cannot drop a satellite; local-KML offline fallback.
+- **Per-record validation.** The original all-or-nothing check
+  discarded two complete plans over one legal antimeridian coordinate
+  each (longitudes just outside ±180). Bad records are now dropped and
+  counted instead.
+
+### 2026-08-08 — Geometry and display correctness
+
+- **Removed AOI padding entirely** (pinned to 0 in prepare, settings,
+  CLI and persistence; control removed from the UI). Padding was the
+  only thing that moved the AOI window after creation, and every move
+  put previews on a different grid — the root cause of repeated
+  split-view misalignment. All views now share one grid by
+  construction.
+- **Run overlays re-rendered onto the current AOI grid** after any
+  prepare, source switch or sweep, with a self-healing size check when
+  a preview is served.
+- **Georeferencing shipped with the image** (`X-Geo-*` headers) so a
+  pane can never be paired with another raster's extent.
+- **Split-view sync**: identical grids copy the transform verbatim;
+  differing grids reconcile through the native CRS.
+- **Press-and-hold flicker** comparison, instant (direct `src` swap)
+  and drift-free (exact transform restore).
+- **Per-pane view selectors** in split view, replacing the ambiguous
+  single dropdown.
+- **Empty ML results no longer create a view** (an empty mask produced
+  a PNG identical to post-fire, mislabelled as "ML classification").
+
+### 2026-08-07 — Results pipeline
+
+- **Fixed serial results never appearing.** The mapping CLI writes its
+  outputs beside its input image, which moved to the ramdisk; the
+  post-run code still looked in the fire cache. Classified masks,
+  comparison figures and `serial_N.png` are now found where they
+  actually land — this was the "all runs failed" symptom despite
+  F1 85–89%.
+- **Classified-mask naming** derived from the stack rather than the old
+  `<fire>_crop.bin` convention, with legacy names as fallbacks.
+- **Exhaustive clustering diagnostics** on every run: mask/hint pixel
+  counts, geotransforms, intersection/union/IoU, and a named reason
+  for every non-computable agreement.
+- **Hint view registered whenever a hint mask exists**, rather than
+  only when the generic overlay rendered.
+
+### 2026-08-06 — Performance and data plumbing
+
+- **Per-AOI on-demand stacks** replacing the province-wide stack;
+  L2-recent compositing with parallel per-tile extraction and
+  per-acquisition date attribution.
+- **"L2 coverage by acquisition" plot**, later gaining satellite
+  prefixes (`S2A+S2B · 2026-08-04`), backfilled for existing fires
+  from SAFE filenames.
+- **Post-source switching** (L2 recent ↔ MRAP composite) with per-source
+  preview stashes and background prebuild of the other source.
+- **Client-side preview caching and warming**, optimistic first paint,
+  and `Cache-Control` on previews.
+- **Timing instrumentation** throughout (TTFB vs transfer vs decode vs
+  bake), which is what made the later diagnosis possible.
+- **Atomic preview writes** (tmp + rename), fixing images served
+  mid-rewrite as correct-width but truncated-height.
+- **Background prebuild no longer mutates the visible source**, fixing
+  new fires opening on MRAP instead of L2.
+- **Honest status labels**: `cropping` → "Build AOI stack", `Crop:` →
+  `AOI:`, and detail strings describing what actually happens.
+
+---
+
+## Notes
+
+- The C++ tools live in `wps-research/cpp` and are **not** rebuilt by
+  this app. `class_brush.exe` in particular must be recompiled after
+  source changes or the flag probe will keep it in degraded mode.
+- Diagnostics added during debugging are intended to be **permanent**;
+  they are what made several of the above findable at all.

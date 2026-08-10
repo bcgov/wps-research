@@ -1131,6 +1131,13 @@ async function refreshFires() {
     try {
         const r = await fetch('/api/fires');
         const newFires = await r.json();
+        // Checked on EVERY poll, not only when the table changed.
+        // This is the poll that actually runs (every 2 s); the earlier
+        // hook was in loadFires(), which runs once at page load -- so
+        // a fire still preparing at that moment was never re-checked
+        // and auto-open never fired.
+        try { checkAutoOpen(newFires); }
+        catch (e) { console.log('[auto-open] check failed:', e); }
         const newJSON = JSON.stringify(newFires);
         if (newJSON !== lastFiresJSON) {
             lastFiresJSON = newJSON;
@@ -1409,15 +1416,52 @@ window.addEventListener('pagehide', () => {
 });
 
 // Called from the fire-list refresh with the current rows.
+// Register the newest still-preparing fire when we have just arrived
+// from the New Fire page.
+//
+// The primary handoff writes sessionStorage in new_fire.js, but that
+// is a STATIC file the browser caches aggressively -- unlike this
+// template, which is re-read per request. A user running a cached
+// new_fire.js would register nothing and auto-open would silently
+// never fire. This recovers the intent from the page transition
+// itself, so it works regardless of which copy of the JS is loaded.
+let _autoOpenSeeded = false;
+
+function seedAutoOpenFromReferrer(fires) {
+    if (_autoOpenSeeded) return;
+    _autoOpenSeeded = true;
+    if (!openWhenReadyEnabled()) return;
+    if (pendingAutoOpen().length) return;          // already registered
+    let ref = '';
+    try { ref = String(document.referrer || ''); } catch (_) { }
+    if (!/\/new_fire\b/.test(ref)) return;
+    if (!Array.isArray(fires)) return;
+    const busy = fires.filter((f) => {
+        const st = String(f.status || '').toLowerCase();
+        return st === 'pending' || st === 'preparing';
+    }).sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+    if (!busy.length) return;
+    const id = busy[0].fire_numbe || busy[0].name;
+    if (!id) return;
+    addAutoOpen(id);
+    console.log(`[auto-open] armed for "${id}" (arrived from New Fire)`);
+}
+
 function checkAutoOpen(fires) {
+    seedAutoOpenFromReferrer(fires);
     if (!openWhenReadyEnabled()) return;
     const pending = pendingAutoOpen();
     if (!pending.length || !Array.isArray(fires)) return;
     for (const f of fires) {
         const id = f.fire_numbe || f.name;
         if (!id || !pending.includes(id)) continue;
+        // Openable statuses, from FireStatus in state.py. 'accepted'
+        // and 'mapping' are included: preparation is finished in both,
+        // which is the condition the user asked to be notified of.
         const st = String(f.status || '').toLowerCase();
-        if (st === 'ready' || st === 'mapped') {
+        if (st === 'ready' || st === 'mapped' || st === 'accepted'
+                || st === 'mapping') {
+            console.log(`[auto-open] "${id}" is ${st} -- opening`);
             _autoOpenNavigating = true;
             clearAutoOpen(null);
             try { markFireOpened(encodeURIComponent(id)); } catch (_) {}
