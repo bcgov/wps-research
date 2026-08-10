@@ -1360,7 +1360,26 @@ function fmtWhen(ts) {
     return `${stamp} (${when})`;
 }
 
+// Wrapper so a failure anywhere in the coverage panel still leaves
+// something on screen and names the problem, instead of silence.
 async function loadNextCoverage() {
+    try {
+        return await _loadNextCoverageInner();
+    } catch (err) {
+        const el = document.getElementById('next-cov-legend');
+        if (el) {
+            el.innerHTML = `<div style="color:#a33">Coverage panel
+                failed: ${err && err.message}. The underlying data may
+                still be fine -- this is a display error.</div>`;
+        }
+        const box = document.getElementById('next-cov-box');
+        if (box) box.style.display = '';
+        try { log(`[diag] loadNextCoverage threw: ${err}`, 'error'); }
+        catch (_) {}
+    }
+}
+
+async function _loadNextCoverageInner() {
     const box = document.getElementById('next-cov-box');
     if (!box) return;
     let d = null;
@@ -1453,6 +1472,8 @@ async function loadNextCoverage() {
     // in the console. When a satellite is absent from the forecast the
     // question is always "was it downloaded, and did its swaths reach
     // this AOI?" -- and that has to be answerable from a screenshot.
+    let diagRows = '';
+    try {
     const cen = d.census || {};
     const cache = d.sats_in_cache || {};
     // Hoisted: the per-satellite rows below reference this, and it was
@@ -1468,7 +1489,12 @@ async function loadNextCoverage() {
     const satKeys = [...new Set(['S2A', 'S2B', 'S2C',
                                  ...Object.keys(cache),
                                  ...Object.keys(cen)])].sort();
-    const diagRows = satKeys.length ? `
+    // Diagnostics are built in isolation and can NEVER remove the
+    // main content. A scope slip in this block previously blanked the
+    // entire panel -- the worst possible failure while debugging,
+    // because it hides the very information being sought AND the data
+    // that was working. If it throws, show the error and keep going.
+    diagRows = satKeys.length ? `
       <div style="margin-top:6px;padding-top:4px;border-top:1px solid #eee;
                   font-size:10px;color:#777">
         <div style="margin-bottom:2px">plan coverage check:</div>
@@ -1532,6 +1558,13 @@ async function loadNextCoverage() {
       </div>` : `
       <div style="margin-top:6px;font-size:10px;color:#a33">
         No per-satellite plan data returned at all.</div>`;
+    } catch (diagErr) {
+        diagRows = `<div style="margin-top:6px;font-size:10px;
+                    color:#a33">diagnostics failed to render:
+                    ${diagErr && diagErr.message}</div>`;
+        try { log(`[diag] panel diagnostics threw: ${diagErr}`,
+                  'error'); } catch (_) {}
+    }
     if (legend) legend.innerHTML = rows + note + unver + age + diagRows;
     log(`[diag] next_coverage: ${d.passes.length} pass(es), `
         + `${((d.covered_fraction || 0) * 100).toFixed(1)}% of AOI `

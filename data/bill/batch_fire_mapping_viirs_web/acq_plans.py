@@ -684,46 +684,70 @@ def cache_age_s() -> float:
 
 
 def validate_plan_content(datatakes, sat_hint='') -> tuple:
-    """Sanity-check parsed datatakes before they are trusted.
+    """Filter a parsed plan to the records that are usable.
 
-    The fetch can fall back to unverified TLS, so the response is
-    checked for being a plausible Sentinel-2 acquisition plan rather
-    than taken on faith. This is not a substitute for TLS -- it cannot
-    detect a subtly altered plan -- but it does stop a wholesale
-    substitution (error page, wrong file, corrupted download) from
-    being cached and displayed as fact.
+    Previously this was all-or-nothing: the first suspect record
+    rejected the ENTIRE file. That threw away two complete 2.2 MB
+    plans (921 and 886 datatakes) over ONE record each, and the
+    "offending" records were perfectly legal -- datatakes crossing the
+    antimeridian, where KML deliberately allows longitudes slightly
+    outside +/-180 so a polygon stays contiguous across the dateline.
 
-    Returns (ok, reason).
+    One bad record must never cost the whole satellite. This now drops
+    individual records and reports how many, rejecting the file only
+    if too little survives to be a plausible plan.
+
+    Returns (ok, reason, kept).
     """
     if not datatakes:
-        return False, 'no datatakes parsed'
-    if len(datatakes) < 10:
-        return False, (f'only {len(datatakes)} datatakes -- a real '
-                       f'plan has thousands')
+        return False, 'no datatakes parsed', []
 
-    n_dist = 0
+    kept, dropped = [], {}
+
+    def _drop(why):
+        dropped[why] = dropped.get(why, 0) + 1
+
     for d in datatakes:
         ring = d.get('ring') or []
         if len(ring) < 4:
-            return False, f'datatake {d.get("id")} has a degenerate ring'
+            _drop('degenerate ring')
+            continue
+        bad = False
         for lon, lat in ring:
-            if not (-180.0 <= lon <= 180.0 and -90.0 <= lat <= 90.0):
-                return False, (f'datatake {d.get("id")} has an '
-                               f'out-of-range coordinate '
-                               f'({lon}, {lat})')
+            if not (-90.0 <= lat <= 90.0):
+                bad = True
+                break
+            # Tolerate the antimeridian convention. Anything beyond a
+            # full wrap is genuinely corrupt.
+            if not (-360.0 <= lon <= 360.0):
+                bad = True
+                break
+        if bad:
+            _drop('coordinate out of range')
+            continue
         if not re.match(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}',
                         d.get('start') or ''):
-            return False, (f'datatake {d.get("id")} has an unparseable '
-                           f'start time {d.get("start")!r}')
-        if d.get('mode') in DISTRIBUTED_MODES:
-            n_dist += 1
+            _drop('unparseable start time')
+            continue
         sat = d.get('sat') or ''
         if sat and not re.fullmatch(r'S2[ABC]', sat):
-            return False, f'unexpected satellite {sat!r}'
+            _drop('unexpected satellite')
+            continue
+        kept.append(d)
 
+    n_dist = sum(1 for d in kept if d.get('mode') in DISTRIBUTED_MODES)
+    note = ''
+    if dropped:
+        note = ' (dropped ' + ', '.join(
+            f'{v} {k}' for k, v in sorted(dropped.items())) + ')'
+
+    if len(kept) < 10:
+        return (False,
+                f'only {len(kept)} usable datatakes{note} -- a real '
+                f'plan has hundreds', kept)
     if n_dist == 0:
-        return False, 'no NOBS (distributed) datatakes present'
-    return True, f'{len(datatakes)} datatakes, {n_dist} distributed'
+        return False, f'no NOBS (distributed) datatakes{note}', kept
+    return True, f'{len(kept)} datatakes, {n_dist} distributed{note}', kept
 
 
 def _load_local_kmls(emit) -> dict:
@@ -958,10 +982,12 @@ def refresh(force: bool = False, log=None) -> dict:
             for d in dts:
                 if not d.get('sat'):
                     d['sat'] = sat
-            ok, why = validate_plan_content(dts, sat)
+            ok, why, dts = validate_plan_content(dts, sat)
             if not ok:
                 raise OSError(f'content failed validation ({why}) -- '
                               f'refusing to cache it')
+            if 'dropped' in why:
+                emit(f'      [acq] {sat}: {why}')
             n_dist = sum(1 for d in dts if d['mode'] in DISTRIBUTED_MODES)
             # Record the time span the plan ACTUALLY contains, not just
             # what the filename claims. A plan whose datatakes stop
@@ -985,8 +1011,9 @@ def refresh(force: bool = False, log=None) -> dict:
             raw_partial = locals().get('raw')
             if raw_partial:
                 dts, n = salvage_kml(raw_partial)
-                ok, why = (validate_plan_content(dts, sat)
-                           if dts else (False, 'nothing salvageable'))
+                ok, why, dts = (validate_plan_content(dts, sat)
+                                if dts else
+                                (False, 'nothing salvageable', []))
                 if ok:
                     n_dist = sum(1 for d in dts
                                  if d['mode'] in DISTRIBUTED_MODES)
@@ -1240,6 +1267,18 @@ def next_coverage(aoi_ring_native, srs_wkt, geotransform, width, height,
         return ((dx * gt[5] - dy * gt[2]) / det,
                 (-dx * gt[4] + dy * gt[1]) / det)
 
+    # AOI bounds in WGS84, for the prefilter above.
+    try:
+        inv = osr.CoordinateTransformation(tgt, src)
+        _pts = [inv.TransformPoint(float(x), float(y))[:2]
+                for x, y in aoi_ring_native]
+        aoi_lon0 = min(p[0] for p in _pts)
+        aoi_lon1 = max(p[0] for p in _pts)
+        aoi_lat0 = min(p[1] for p in _pts)
+        aoi_lat1 = max(p[1] for p in _pts)
+    except Exception:
+        aoi_lon0, aoi_lon1, aoi_lat0, aoi_lat1 = -180.0, 180.0, -90.0, 90.0
+
     horizon = now_ts + horizon_days * 86400.0
     # Per-satellite accounting, so "why is only one satellite listed?"
     # is answerable from the response instead of guesswork. Each plan
@@ -1281,6 +1320,25 @@ def next_coverage(aoi_ring_native, srs_wkt, geotransform, width, height,
     passes = []
     claimed = None
     for t0, d in cand:
+        # Cheap WGS84 prefilter before any reprojection. Most
+        # datatakes are nowhere near the AOI, and this also keeps
+        # antimeridian rings -- whose longitudes legitimately run past
+        # +/-180 -- from being reprojected into nonsense that might
+        # then appear to intersect.
+        lons = [pt[0] for pt in d['ring']]
+        lats = [pt[1] for pt in d['ring']]
+        if (max(lons) < aoi_lon0 - 1.0 or min(lons) > aoi_lon1 + 1.0
+                or max(lats) < aoi_lat0 - 1.0
+                or min(lats) > aoi_lat1 + 1.0):
+            _c(d.get('sat'), 'no_overlap')
+            continue
+        if max(lons) - min(lons) > 180.0:
+            # Spans the dateline. Only meaningful for an AOI that also
+            # does; for anything else it is a false positive waiting to
+            # happen, so skip rather than guess at the unwrapping.
+            _c(d.get('sat'), 'no_overlap')
+            continue
+
         ring = ogr.Geometry(ogr.wkbLinearRing)
         for lon, lat in d['ring']:
             ring.AddPoint_2D(float(lon), float(lat))
