@@ -1553,7 +1553,7 @@ async function _loadNextCoverageInner() {
                 &middot; ${c.candidate || 0} in window
                 &middot; ${c.used || 0} over AOI
                 &middot; ${c.no_overlap || 0} elsewhere
-                &middot; ends ${ends}</div>`;
+                &middot; ends ${ends}</div>${planHealthLine(k, d)}`;
         }).join('')}
       </div>` : `
       <div style="margin-top:6px;font-size:10px;color:#a33">
@@ -1636,6 +1636,55 @@ async function _loadNextCoverageInner() {
                  republishes weekly.</div>`);
         }
     }
+}
+
+// Completeness verdict for one satellite's plan.
+//
+// A low datatake count has two very different explanations -- the
+// satellite planned less, or the file was cut. The declared window
+// from the filename is the discriminator: a plan whose records run to
+// its declared end is complete however sparse it looks, whereas one
+// stopping hours early was almost certainly truncated in transit.
+function planHealthLine(sat, d) {
+    const h = (d.plan_health || {})[sat];
+    if (!h) return '';
+    const bits = [];
+    if (h.bytes) bits.push(`${(h.bytes / 1e6).toFixed(2)} MB`);
+    if (h.per_day != null) bits.push(`${h.per_day}/day`);
+    if (h.span_days) bits.push(`spans ${h.span_days} d`);
+
+    // Compare density against the other satellites; a genuine outlier
+    // is worth naming rather than leaving to eyeballing.
+    const rates = Object.values(d.plan_health || {})
+        .map((x) => x && x.per_day).filter((x) => x != null);
+    const med = rates.length
+        ? rates.slice().sort((a, b) => a - b)[Math.floor(rates.length / 2)]
+        : null;
+    const sparse = (med && h.per_day != null && h.per_day < med * 0.6);
+
+    let verdict = '', colour = '#777';
+    if (h.window_covered == null) {
+        verdict = 'declared window unknown';
+    } else if (h.window_covered >= 0.98) {
+        verdict = `runs to its declared end — complete`;
+        colour = '#2a7';
+    } else if (h.ends_early_h != null && h.ends_early_h > 24) {
+        verdict = `STOPS ${(h.ends_early_h / 24).toFixed(1)} d before `
+            + `its declared end (${h.declared_to || '?'}) — likely `
+            + `truncated in transit`;
+        colour = '#a33';
+    } else {
+        verdict = `ends ${h.ends_early_h}h before declared end`;
+        colour = '#a60';
+    }
+    const sparseNote = sparse
+        ? ` <span style="color:#a60">— density ${h.per_day}/day vs `
+          + `${med}/day typical; sparse but not truncated if the `
+          + `window check above is green</span>`
+        : '';
+    return `<div style="margin-left:10px;color:${colour}">`
+        + `${bits.join(' · ')}${bits.length ? ' · ' : ''}`
+        + `${verdict}${sparseNote}</div>`;
 }
 
 function nextCovColour(i, n) {

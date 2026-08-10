@@ -978,6 +978,7 @@ def refresh(force: bool = False, log=None) -> dict:
 
             raw = _http_get(meta['url'], validate=_validate_kml)
             _set_sat(sat, state='parsing', bytes=len(raw))
+            _sat_bytes[sat] = len(raw)
             dts = parse_kml(raw, report=rep)
             for d in dts:
                 if not d.get('sat'):
@@ -1039,11 +1040,14 @@ def refresh(force: bool = False, log=None) -> dict:
     # fetching them concurrently turns three serial round trips into
     # roughly one.
     datatakes, sources = [], {}
+    _sat_bytes = {}
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=len(urls)) as pool:
         for sat, meta, dts, err in pool.map(_one, sorted(urls.items())):
             if dts:
                 datatakes.extend(dts)
+                meta = dict(meta)
+                meta['bytes'] = _sat_bytes.get(sat)
                 sources[sat] = meta
 
     # Merge per satellite rather than replacing wholesale. A refresh
@@ -1182,6 +1186,86 @@ def diagnostics() -> dict:
         if s0 > e['last']:
             e['last'] = s0
     out['cache']['spans'] = spans
+    return out
+
+
+def plan_health(plans=None) -> dict:
+    """Per-satellite completeness signals for a cached plan.
+
+    A plan can be short for two very different reasons: the satellite
+    genuinely planned fewer acquisitions, or the file was cut before it
+    finished. Raw datatake counts cannot tell those apart, so this
+    reports the quantities that can:
+
+    * datatakes per DAY of plan window -- comparable across satellites
+      whose windows differ in length,
+    * how much of the DECLARED window (from the filename) the
+      datatakes actually span; a file cut mid-download stops early
+      even though the filename still claims the full window,
+    * bytes received and datatakes per MB -- a truncated file keeps
+      normal record density but has fewer of them.
+
+    A file that runs to its declared end is almost certainly complete,
+    however few records it has.
+    """
+    plans = plans if plans is not None else (load_cache() or {})
+    out = {}
+    sources = plans.get('sources') or {}
+
+    def _ts(s):
+        try:
+            from datetime import datetime, timezone
+            s2 = (s or '').replace('Z', '')
+            fmt = '%Y-%m-%dT%H:%M:%S.%f' if '.' in s2 else \
+                  '%Y-%m-%dT%H:%M:%S'
+            return datetime.strptime(s2, fmt).replace(
+                tzinfo=timezone.utc).timestamp()
+        except Exception:
+            return None
+
+    def _decl(s):
+        try:
+            from datetime import datetime, timezone
+            return datetime.strptime(s, '%Y%m%dt%H%M%S').replace(
+                tzinfo=timezone.utc).timestamp()
+        except Exception:
+            return None
+
+    for d in plans.get('datatakes', []):
+        sat = d.get('sat') or '?'
+        e = out.setdefault(sat, {'n': 0, 'dist': 0, 'first': None,
+                                 'last': None})
+        e['n'] += 1
+        if d.get('mode') in DISTRIBUTED_MODES:
+            e['dist'] += 1
+        t = _ts(d.get('start'))
+        if t is None:
+            continue
+        if e['first'] is None or t < e['first']:
+            e['first'] = t
+        if e['last'] is None or t > e['last']:
+            e['last'] = t
+
+    for sat, e in out.items():
+        src = sources.get(sat) or {}
+        df, dt_ = _decl(src.get('valid_from', '')), \
+            _decl(src.get('valid_to', ''))
+        e['declared_from'] = src.get('valid_from', '')
+        e['declared_to'] = src.get('valid_to', '')
+        e['bytes'] = src.get('bytes')
+        span_days = ((e['last'] - e['first']) / 86400.0
+                     if e['first'] and e['last'] else 0.0)
+        e['span_days'] = round(span_days, 2)
+        e['per_day'] = (round(e['dist'] / span_days, 1)
+                        if span_days > 0.5 else None)
+        if df and dt_ and dt_ > df and e['last']:
+            # Fraction of the DECLARED window the data actually reaches.
+            e['window_covered'] = round(
+                max(0.0, min(1.0, (e['last'] - df) / (dt_ - df))), 3)
+            e['ends_early_h'] = round((dt_ - e['last']) / 3600.0, 1)
+        else:
+            e['window_covered'] = None
+            e['ends_early_h'] = None
     return out
 
 
@@ -1440,4 +1524,5 @@ def next_coverage(aoi_ring_native, srs_wkt, geotransform, width, height,
         # prediction is under-reporting rather than the satellites
         # having stopped passing over.
         'sats_in_cache': _sat_counts(plans),
+        'plan_health': plan_health(plans),
     }
