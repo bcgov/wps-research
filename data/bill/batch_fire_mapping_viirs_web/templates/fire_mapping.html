@@ -1490,11 +1490,35 @@ async function loadNextCoverage() {
             const bad = !(b.distributed > 0);
             if (!Object.prototype.hasOwnProperty.call(cache, k)
                     && !Object.prototype.hasOwnProperty.call(cen, k)) {
+                // Report WHY. "Not in cache" conflates never-attempted,
+                // download-failed and parse-rejected, which need
+                // completely different fixes -- and the fetch status
+                // already knows which one it was.
+                const fs = (st.satellites || {})[k] || {};
+                const rep = fs.report || {};
+                const bits = [];
+                if (fs.state) bits.push(`fetch=${fs.state}`);
+                if (fs.bytes) bits.push(
+                    `${(fs.bytes / 1e6).toFixed(2)} MB received`);
+                if (rep.placemarks != null) bits.push(
+                    `${rep.placemarks} placemarks parsed`);
+                if (rep.xml_error) bits.push(`XML: ${rep.xml_error}`);
+                const why = fs.error
+                    ? `<div style="margin-left:10px">${fs.error}</div>`
+                    : (fs.state ? '' :
+                       `<div style="margin-left:10px">no fetch
+                        recorded — the refresh may still be
+                        running</div>`);
                 return `<div style="color:#a33">${k}: NOT IN PLAN CACHE
-                        (never downloaded or failed to parse)</div>`;
+                        ${bits.length ? '(' + bits.join(', ') + ')' : ''}
+                        </div>${why}`;
             }
+            const fsat = (st.satellites || {})[k] || {};
+            const partial = fsat.partial
+                ? ` <span style="color:#a60">(PARTIAL — download was
+                    incomplete, recovered what arrived)</span>` : '';
             return `<div style="color:${bad ? '#a33' : '#777'}">
-                ${k}: ${b.distributed || 0} planned datatakes
+                ${k}: ${b.distributed || 0} planned datatakes${partial}
                 &middot; ${c.candidate || 0} in window
                 &middot; ${c.used || 0} over AOI
                 &middot; ${c.no_overlap || 0} elsewhere

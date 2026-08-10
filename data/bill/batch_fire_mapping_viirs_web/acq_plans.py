@@ -529,6 +529,43 @@ def _rings(node) -> list:
     return rings
 
 
+def salvage_kml(data):
+    """Recover the complete Placemarks from a truncated KML.
+
+    A cut download is not well-formed XML, so the strict parse rejects
+    the whole file and the satellite disappears from the forecast
+    entirely. But everything up to the last complete </Placemark> is
+    intact and perfectly usable -- a partial plan is far better than
+    none, provided it is labelled as partial.
+
+    Returns (datatakes, recovered_bytes) or ([], 0).
+    """
+    if isinstance(data, str):
+        data = data.encode('utf-8', 'replace')
+    cut = data.rfind(b'</Placemark>')
+    if cut < 0:
+        return [], 0
+    body = data[:cut + len(b'</Placemark>')]
+    # Close whatever elements were left open, outermost last.
+    tail = b''
+    for tag in (b'Folder', b'Folder', b'Folder', b'Document', b'kml'):
+        tail += b'</' + tag + b'>'
+    for attempt in range(5):
+        try:
+            dts = parse_kml(body + tail)
+            if dts:
+                return dts, len(body)
+        except Exception:
+            pass
+        # Too many closing tags is as fatal as too few, so peel one off
+        # and retry rather than guessing the nesting depth.
+        tail = tail[:tail.rfind(b'</', 0, len(tail) - 1)] \
+            if b'</' in tail[:-1] else b''
+        if not tail:
+            break
+    return [], 0
+
+
 def parse_kml(data, report: dict = None) -> list:
     """Datatakes from one acquisition-plan KML.
 
@@ -942,6 +979,29 @@ def refresh(force: bool = False, log=None) -> dict:
                  f'valid {meta["valid_from"]} - {meta["valid_to"]}')
             return sat, meta, dts, None
         except Exception as exc:
+            # Last chance: if a body arrived but was incomplete, keep
+            # the Placemarks that did land instead of discarding the
+            # whole satellite.
+            raw_partial = locals().get('raw')
+            if raw_partial:
+                dts, n = salvage_kml(raw_partial)
+                ok, why = (validate_plan_content(dts, sat)
+                           if dts else (False, 'nothing salvageable'))
+                if ok:
+                    n_dist = sum(1 for d in dts
+                                 if d['mode'] in DISTRIBUTED_MODES)
+                    rep['partial'] = True
+                    rep['salvaged_bytes'] = n
+                    _set_sat(sat, state='ok', datatakes=len(dts),
+                             distributed=n_dist, report=rep,
+                             partial=True)
+                    emit(f'      [acq] {sat}: download was incomplete '
+                         f'({describe_exc(exc)}); SALVAGED '
+                         f'{len(dts)} datatake(s) ({n_dist} '
+                         f'distributed) from the {n:,} bytes that did '
+                         f'arrive. Forecast for {sat} is partial.')
+                    return sat, meta, dts, None
+                emit(f'      [acq] {sat}: salvage failed ({why})')
             _set_sat(sat, state='error', error=describe_exc(exc),
                      report=rep)
             emit(f'      [acq] {sat}: fetch/parse failed: '
