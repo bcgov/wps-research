@@ -486,11 +486,22 @@ function getPreviewObjectURL(key, url, announce) {
         const tB = performance.now();
         if (announce) {
             const secs = Math.max(0.001, (tB - tH) / 1000);
+            // Report the delivered FORMAT and what the PNG would have
+            // cost. If the JPEG optimisation silently fails, this says
+            // "png" and shows no saving, rather than just looking slow.
+            const fmt = r.headers.get('X-Preview-Format') || '?';
+            const pngB = parseInt(
+                r.headers.get('X-Preview-Png-Bytes') || '0', 10);
+            const saving = (fmt === 'jpeg' && pngB > blob.size)
+                ? `, PNG would be ${fmtBytes(pngB)} `
+                  + `(${(pngB / blob.size).toFixed(1)}x saved)`
+                : (fmt === 'png'
+                   ? ', PNG (no JPEG twin for this view)' : '');
             log(`[perf] preview ${key.split(':').slice(0, 2).join('/')}: `
                 + `wait(TTFB) ${(tH - t0).toFixed(0)} ms, `
                 + `transfer ${(tB - tH).toFixed(0)} ms, `
-                + `size ${fmtBytes(blob.size)}, `
-                + `rate ${fmtBytes(blob.size / secs)}/s`, 'dim');
+                + `size ${fmtBytes(blob.size)} as ${fmt}, `
+                + `rate ${fmtBytes(blob.size / secs)}/s${saving}`, 'dim');
         }
         const obj = URL.createObjectURL(blob);
         _previewBlobs.set(key, obj);
@@ -1933,9 +1944,18 @@ async function loadFireOverlays() {
         const tB = performance.now();
         const data = JSON.parse(txt);
         if (data.error) return;
+        // txt.length is the DECODED size; the header reports what was
+        // actually sent, so a missing Content-Encoding shows up as no
+        // compression rather than as an unexplained slow transfer.
+        const rawB = parseInt(
+            r.headers.get('X-Uncompressed-Bytes') || '0', 10);
+        const gz = rawB
+            ? ` [gzip ${(rawB / 1024).toFixed(0)} kB -> wire, `
+              + `~${(rawB / Math.max(1, tB - tH)).toFixed(0)} B/ms]`
+            : ' [NOT gzipped]';
         log(`[perf] overlays (${src}): wait ${(tH - t0).toFixed(0)} ms, `
             + `transfer ${(tB - tH).toFixed(0)} ms, `
-            + `size ${fmtBytes(txt.length)}, `
+            + `size ${fmtBytes(txt.length)}${gz}, `
             + `${(data.tiles || []).length} tile(s), `
             + `${((data.bcws || {}).polygons || []).length} poly, `
             + `${((data.bcws || {}).points || []).length} pt`, 'dim');

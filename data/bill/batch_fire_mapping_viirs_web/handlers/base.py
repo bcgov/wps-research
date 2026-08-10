@@ -500,13 +500,46 @@ class BaseHandler:
 
     # -- Response helpers --
 
+    # Below this size compression costs more than it saves.
+    _GZIP_MIN_BYTES = 1024
+
     def _send_json(self, data, status=200):
         body = json.dumps(data).encode()
+        raw_len = len(body)
+        encoding = None
+
+        # The overlays payload alone is ~1.5 MB of coordinate text and
+        # compresses roughly 7x. Only applied when the client actually
+        # advertises gzip, and never for tiny bodies where the header
+        # overhead would dominate.
+        try:
+            accepts = (self.headers.get('Accept-Encoding') or '').lower()
+            if 'gzip' in accepts and raw_len >= self._GZIP_MIN_BYTES:
+                import gzip as _gzip
+                packed = _gzip.compress(body, 6)
+                # Guard against incompressible payloads growing.
+                if len(packed) < raw_len:
+                    body = packed
+                    encoding = 'gzip'
+        except Exception as exc:
+            sys.stderr.write(f'[gzip] skipped: {exc}\n')
+
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
+        if encoding:
+            self.send_header('Content-Encoding', encoding)
+            # Surfaced so the browser console can confirm compression
+            # is actually happening rather than silently disabled.
+            self.send_header('X-Uncompressed-Bytes', str(raw_len))
+            self.send_header('Access-Control-Expose-Headers',
+                             'X-Uncompressed-Bytes')
+            self.send_header('Vary', 'Accept-Encoding')
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def _send_html(self, html, status=200):
         body = html.encode()

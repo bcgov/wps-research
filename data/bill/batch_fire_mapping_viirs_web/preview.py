@@ -5,6 +5,7 @@ No external dependencies beyond numpy, GDAL, scipy, and matplotlib
 """
 
 import os
+import sys
 import re
 
 import numpy as np
@@ -186,7 +187,76 @@ def generate_preview_png(raster_path: str, band_indices: list[int],
     _tmp = output_path + '.tmp.png'
     imsave(_tmp, rgb_uint8)
     os.replace(_tmp, output_path)
+
+    # Continuous-tone imagery also gets a JPEG twin.
+    #
+    # These previews are the single biggest cost in the UI: a 2000 px
+    # PNG of satellite imagery runs ~6.7 MB, which is seconds of
+    # transfer on this link. The same picture as JPEG is roughly an
+    # order of magnitude smaller with no visible difference on
+    # continuous-tone data.
+    #
+    # Masks are deliberately excluded: hint/result overlays have hard
+    # edges and exact overlay colours that JPEG would ring and shift.
+    #
+    # The PNG is still written, so anything that looks for <view>.png
+    # -- available_views, geo.json keys, the aspect checks -- is
+    # unaffected, and the JPEG is a pure serving optimisation that can
+    # be ignored or deleted at any time.
+    base = os.path.splitext(os.path.basename(output_path))[0]
+    if base in JPEG_VIEWS:
+        try:
+            _write_jpeg_twin(rgb_uint8, output_path)
+        except Exception as exc:
+            sys.stderr.write(
+                f'[preview] JPEG twin for {base} failed ({exc}); '
+                f'PNG will be served instead\n')
     return True
+
+
+# Views whose previews are continuous-tone imagery, safe for JPEG.
+JPEG_VIEWS = ('pre', 'post', 'diff1', 'diff2', 'diff3')
+JPEG_QUALITY = 85
+
+
+def _write_jpeg_twin(rgb_uint8, png_path: str) -> str:
+    """Write a JPEG alongside *png_path*, atomically.
+
+    Uses GDAL rather than matplotlib/Pillow: GDAL is a hard dependency
+    here already, whereas Pillow may not be installed, and matplotlib's
+    JPEG support requires it.
+    """
+    from osgeo import gdal
+    h, w = rgb_uint8.shape[0], rgb_uint8.shape[1]
+    mem = gdal.GetDriverByName('MEM').Create('', w, h, 3, gdal.GDT_Byte)
+    for b in range(3):
+        mem.GetRasterBand(b + 1).WriteArray(rgb_uint8[:, :, b])
+    jpg = os.path.splitext(png_path)[0] + '.jpg'
+    tmp = jpg + '.tmp.jpg'
+    drv = gdal.GetDriverByName('JPEG')
+    if drv is None:
+        raise RuntimeError('GDAL has no JPEG driver')
+    out = drv.CreateCopy(tmp, mem,
+                         options=[f'QUALITY={JPEG_QUALITY}'])
+    out = None
+    mem = None
+    os.replace(tmp, jpg)
+    # Remove GDAL's sidecar; it serves no purpose for a web preview.
+    for junk in (jpg + '.aux.xml', tmp + '.aux.xml'):
+        try:
+            os.remove(junk)
+        except OSError:
+            pass
+    try:
+        p_sz = os.path.getsize(png_path)
+        j_sz = os.path.getsize(jpg)
+        sys.stderr.write(
+            f'[preview] {os.path.basename(jpg)}: '
+            f'{j_sz / 1e6:.2f} MB vs PNG {p_sz / 1e6:.2f} MB '
+            f'({p_sz / max(1, j_sz):.1f}x smaller)\n')
+    except OSError:
+        pass
+    return jpg
 
 
 def generate_all_previews(crop_path: str, cache_dir: str,

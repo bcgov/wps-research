@@ -1043,13 +1043,39 @@ class FireRoutes:
         # ERR_EMPTY_RESPONSE and the UI reported as
         # 'View "Post-fire" not available'. Diagnostics are not worth
         # a broken endpoint.
+        # Prefer the JPEG twin for continuous-tone views: same picture,
+        # roughly an order of magnitude fewer bytes. Falls back to the
+        # PNG whenever the twin is missing (older fires, mask views, or
+        # a failed JPEG encode), so this can never break a view.
+        serve_path, serve_type, fmt = png, 'image/png', 'png'
         try:
-            _sz = os.path.getsize(png)
+            from ..preview import JPEG_VIEWS
+            _b = os.path.splitext(os.path.basename(png))[0]
+            if _b in JPEG_VIEWS:
+                _jpg = os.path.splitext(png)[0] + '.jpg'
+                if os.path.isfile(_jpg):
+                    # Only if it is actually smaller -- a pathological
+                    # JPEG bigger than its PNG would be a silent
+                    # pessimisation.
+                    if os.path.getsize(_jpg) < os.path.getsize(png):
+                        serve_path, serve_type, fmt = (
+                            _jpg, 'image/jpeg', 'jpeg')
+        except Exception as _jexc:
+            sys.stderr.write(f'[preview] JPEG selection skipped: '
+                             f'{_jexc}\n')
+
+        try:
+            _sz = os.path.getsize(serve_path)
+            _png_sz = os.path.getsize(png)
             sys.stderr.write(
                 f'[perf] /preview/{view} {fire_numbe}: '
                 f'{(time.time() - _t_prev) * 1000:.0f} ms server-side, '
-                f'{_sz / 1e6:.2f} MB, src={_src or "current"}, '
-                f'file={os.path.basename(png)}\n')
+                f'{_sz / 1e6:.2f} MB as {fmt}'
+                + (f' (PNG would be {_png_sz / 1e6:.2f} MB, '
+                   f'{_png_sz / max(1, _sz):.1f}x)' if fmt == 'jpeg'
+                   else '')
+                + f', src={_src or "current"}, '
+                f'file={os.path.basename(serve_path)}\n')
             sys.stderr.flush()
         except Exception as exc:
             sys.stderr.write(f'[perf] preview log failed: {exc}\n')
@@ -1062,8 +1088,20 @@ class FireRoutes:
         # Without this a 4+ MB PNG was re-fetched on every fire open
         # and every pane change -- at the ~600 kB/s this link sustains,
         # that is ~7 s of pure re-transfer for bytes already held.
-        self._send_file(png, 'image/png', cache_seconds=86400,
-                        extra_headers=self._geo_headers(fire, png, view))
+        _hdrs = self._geo_headers(fire, png, view)
+        # Report the chosen format so the browser console can show it;
+        # a silent fallback to PNG would look like the optimisation
+        # simply not working.
+        _hdrs['X-Preview-Format'] = fmt
+        try:
+            _hdrs['X-Preview-Png-Bytes'] = str(os.path.getsize(png))
+        except OSError:
+            pass
+        _hdrs['Access-Control-Expose-Headers'] = (
+            _hdrs.get('Access-Control-Expose-Headers', '')
+            + ',X-Preview-Format,X-Preview-Png-Bytes').strip(',')
+        self._send_file(serve_path, serve_type, cache_seconds=86400,
+                        extra_headers=_hdrs)
 
     def handle_api_comparison(self, fire_numbe):
         fire_numbe = unquote(fire_numbe)
