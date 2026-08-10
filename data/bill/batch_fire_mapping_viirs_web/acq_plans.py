@@ -1065,7 +1065,10 @@ def refresh(force: bool = False, log=None) -> dict:
             kept.setdefault(sat, []).append(d)
     for sat, dts in kept.items():
         datatakes.extend(dts)
-        sources.setdefault(sat, (prev.get('sources') or {}).get(sat, {}))
+        prev_meta = dict((prev.get('sources') or {}).get(sat, {}))
+        # Keep whatever size the previous refresh recorded, so a
+        # satellite carried forward still reports its download size.
+        sources.setdefault(sat, prev_meta)
         emit(f'      [acq] {sat}: kept {len(dts)} datatake(s) from the '
              f'previous plan (this refresh did not replace it)')
 
@@ -1252,7 +1255,16 @@ def plan_health(plans=None) -> dict:
             _decl(src.get('valid_to', ''))
         e['declared_from'] = src.get('valid_from', '')
         e['declared_to'] = src.get('valid_to', '')
+        # Prefer the size recorded in the cache, but fall back to the
+        # live fetch status. A cache written by an older build (or by
+        # the per-satellite merge, which carries the previous entry
+        # forward) has no 'bytes', and the figure would silently
+        # vanish from the panel until the next full refresh.
         e['bytes'] = src.get('bytes')
+        if not e['bytes']:
+            with _lock:
+                fs = (_status.get('satellites') or {}).get(sat) or {}
+            e['bytes'] = fs.get('bytes')
         span_days = ((e['last'] - e['first']) / 86400.0
                      if e['first'] and e['last'] else 0.0)
         e['span_days'] = round(span_days, 2)

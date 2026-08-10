@@ -558,17 +558,43 @@ def main():
              + (f'{_ovr_last_day.isoformat()} Pacific'
                 if _ovr_last_day else 'never')
              + f' -- regenerating for {_ovr_today.isoformat()}.')
+    # Generate only what is MISSING before the server starts, so a
+    # first run for a new mosaic date still has an overview to serve.
     (overview_png_by_year, overview_low_png_by_year,
      overview_meta_by_year) = _ensure_overviews(
-        rasters_by_year, out_root,
-        force=_ovr_force)
+        rasters_by_year, out_root, force=False)
+
     if _ovr_force:
-        _ovr_done = time.time()
-        _stamp['last_overview_epoch'] = _ovr_done
-        _stamp['last_overview_utc'] = _iso_utc(_ovr_done)
-        _stamp['overview_regens'] = int(
-            _stamp.get('overview_regens', 0) or 0) + 1
-        _write_run_stamp(_stamp_path, _stamp)
+        # The daily forced REGENERATION rewrites files that already
+        # exist, so it does not need to block startup -- and it is a
+        # full-resolution pass over a province-scale mosaic, i.e.
+        # minutes during which nothing else could be used. Serve the
+        # existing overview immediately and refresh it in the
+        # background; the paths do not change, so the returned mapping
+        # stays valid throughout.
+        def _regen_overviews():
+            try:
+                _ensure_overviews(rasters_by_year, out_root, force=True)
+                done = time.time()
+                _stamp['last_overview_epoch'] = done
+                _stamp['last_overview_utc'] = _iso_utc(done)
+                _stamp['overview_regens'] = int(
+                    _stamp.get('overview_regens', 0) or 0) + 1
+                _write_run_stamp(_stamp_path, _stamp)
+                sys.stderr.write(
+                    '[overview] daily regeneration complete\n')
+            except Exception as exc:
+                sys.stderr.write(
+                    f'[overview] background regeneration failed: '
+                    f'{exc}\n')
+
+        # Imported here: the module-level alias is bound further down
+        # in main(), long after this point.
+        import threading as _thr
+        _thr.Thread(target=_regen_overviews, daemon=True).start()
+        _log('      Daily regeneration started in the BACKGROUND; the '
+             'existing overview is served meanwhile, so startup is '
+             'not blocked.')
     _log('[1/4] Per-year overview previews: done.')
 
     # ------------------------------------------------------------------
