@@ -19,6 +19,17 @@
        style="font-size:11px;padding:3px 10px">+ New Fire</a>
     {{{ admin_link }}}
     <a href="/logout" class="btn btn-secondary" style="font-size:11px;padding:3px 10px">Logout</a>
+    <label id="open-when-ready-wrap" title="When a newly created fire
+           finishes preparing, open it automatically. Only applies while
+           you stay on this page -- navigating away cancels it, so a
+           fire finishing later will not yank you out of what you are
+           doing."
+           style="font-size:11px;margin-left:10px;display:inline-flex;
+                  align-items:center;gap:4px;cursor:pointer">
+      <input type="checkbox" id="open-when-ready" checked
+             onchange="saveOpenWhenReady()">
+      Open when ready
+    </label>
     <img src="/static/BC-Wildfire-Service-logo.png" alt="BC Wildfire Service" class="header-logo">
 </header>
 
@@ -225,6 +236,10 @@ async function loadFires() {
     buildFilterUI();
     restoreFilterState();
     render();
+    // Checked after every refresh, so a fire that finishes while this
+    // page is open is picked up on the next poll.
+    try { checkAutoOpen(allFires); }
+    catch (e) { console.log('[auto-open] check failed:', e); }
 }
 
 // -----------------------------------------------------------------------
@@ -1192,6 +1207,7 @@ async function checkBatchOnLoad() {
 // -----------------------------------------------------------------------
 // Init
 // -----------------------------------------------------------------------
+restoreOpenWhenReady();
 loadFires();
 loadSettings();
 checkBatchOnLoad();
@@ -1327,6 +1343,94 @@ function prefetchFirePreview(fireEnc) {
         img.decoding = 'async';
         img.src = `/api/fire/${fireEnc}/preview/post`;
     } catch (_) { /* best-effort */ }
+}
+
+// ---- Auto-open a newly created fire when it becomes ready --------
+//
+// Creation is queued server-side and can take minutes, so the useful
+// behaviour is "start it, and take me there when it is done" -- while
+// still allowing another AOI to be drawn in the meantime.
+//
+// Deliberately scoped to THIS page. If the user navigates away, the
+// trigger is dropped, so a fire finishing later can never yank them
+// out of whatever they moved on to. Pending fires live in
+// sessionStorage so a refresh keeps them but a new tab does not
+// inherit them.
+const PENDING_KEY = 'autoOpenPending';
+let _autoOpenNavigating = false;
+
+function openWhenReadyEnabled() {
+    const el = document.getElementById('open-when-ready');
+    return !el || el.checked;
+}
+
+function saveOpenWhenReady() {
+    try {
+        localStorage.setItem('openWhenReady',
+            openWhenReadyEnabled() ? '1' : '0');
+    } catch (_) { /* preference is best-effort */ }
+    if (!openWhenReadyEnabled()) clearAutoOpen('checkbox unchecked');
+}
+
+function restoreOpenWhenReady() {
+    try {
+        const v = localStorage.getItem('openWhenReady');
+        const el = document.getElementById('open-when-ready');
+        if (el && v !== null) el.checked = (v === '1');
+    } catch (_) { /* default stays checked */ }
+}
+
+function pendingAutoOpen() {
+    try {
+        return JSON.parse(sessionStorage.getItem(PENDING_KEY) || '[]');
+    } catch (_) { return []; }
+}
+
+function addAutoOpen(fireNumbe) {
+    if (!openWhenReadyEnabled() || !fireNumbe) return;
+    try {
+        const list = pendingAutoOpen();
+        if (!list.includes(fireNumbe)) list.push(fireNumbe);
+        sessionStorage.setItem(PENDING_KEY, JSON.stringify(list));
+    } catch (_) { /* non-fatal: auto-open just will not fire */ }
+}
+
+function clearAutoOpen(why) {
+    try { sessionStorage.removeItem(PENDING_KEY); } catch (_) {}
+    if (why && window.console) {
+        console.log(`[auto-open] cancelled (${why})`);
+    }
+}
+
+// Any navigation away from this page cancels every pending trigger --
+// except the auto-open navigation itself.
+window.addEventListener('pagehide', () => {
+    if (!_autoOpenNavigating) clearAutoOpen('left the fire list');
+});
+
+// Called from the fire-list refresh with the current rows.
+function checkAutoOpen(fires) {
+    if (!openWhenReadyEnabled()) return;
+    const pending = pendingAutoOpen();
+    if (!pending.length || !Array.isArray(fires)) return;
+    for (const f of fires) {
+        const id = f.fire_numbe || f.name;
+        if (!id || !pending.includes(id)) continue;
+        const st = String(f.status || '').toLowerCase();
+        if (st === 'ready' || st === 'mapped') {
+            _autoOpenNavigating = true;
+            clearAutoOpen(null);
+            try { markFireOpened(encodeURIComponent(id)); } catch (_) {}
+            window.location.href = '/fire/' + encodeURIComponent(id);
+            return;
+        }
+        if (st === 'error') {
+            // Do not navigate into a failed fire; drop the trigger so
+            // it cannot fire later and surprise the user.
+            clearAutoOpen(`${id} failed to prepare`);
+            return;
+        }
+    }
 }
 
 function markFireOpened(fireEnc) {

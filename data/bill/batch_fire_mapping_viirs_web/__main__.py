@@ -145,7 +145,7 @@ Example
     p.add_argument('--max_samples', type=int, default=30000)
 
     # VIIRS prepare workers
-    p.add_argument('--viirs_concurrent_jobs', type=int, default=1,
+    p.add_argument('--viirs_concurrent_jobs', type=int, default=2,
                    help='How many VIIRS prepare jobs run in parallel '
                         '(default: 1; FIFO queue).')
     p.add_argument('--viirs_download_workers', type=int, default=16,

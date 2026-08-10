@@ -1412,6 +1412,22 @@ submitBtn.addEventListener('click', async () => {
         });
         if (r.status === 202) {
             const j = await r.json();
+            // Register for auto-open on the fire list. Preparation is
+            // queued server-side and can take minutes, so the fire
+            // list decides when (and whether) to jump -- it only does
+            // so while the user stays on that page.
+            try {
+                const id = j.fire_numbe || j.name || body.fire_numbe;
+                if (id && localStorage.getItem('openWhenReady') !== '0') {
+                    const key = 'autoOpenPending';
+                    const cur = JSON.parse(
+                        sessionStorage.getItem(key) || '[]');
+                    if (!cur.includes(id)) cur.push(id);
+                    sessionStorage.setItem(key, JSON.stringify(cur));
+                }
+            } catch (e) {
+                console.log('[auto-open] could not register:', e);
+            }
             window.location.href = '/';
             return;
         }

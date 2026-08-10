@@ -236,7 +236,13 @@ class AppState:
         self.laads_token: str = ""
         self.viirs_download_workers: int = 16
         self.viirs_shapify_workers: int = 8
-        self.viirs_concurrent_jobs: int = 1
+        # 2 by default so a second AOI can be created and prepared
+        # while the first is still building -- the queue already
+        # backgrounds the work, but a single dispatch thread made
+        # concurrent creation serial in practice. Raise further only
+        # with care: each job holds a full AOI stack in /ram and
+        # competes for the same disk during L2 extraction.
+        self.viirs_concurrent_jobs: int = 2
 
         # Registry of running VIIRS prepare workers, keyed by fire name.
         # Mirrors _serial_procs / _rebrush_procs shape so cancel handlers
