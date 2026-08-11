@@ -9,6 +9,62 @@ from .validation import _validate_param, _validate_embed_bands
 state: AppState = None
 
 
+# Which original band indices survived B8 removal, in output order.
+# Set when the reduced stack is built (or found cached) and consumed
+# when embed_bands is translated, so the two cannot disagree.
+_kept_band_map = []
+
+
+def _publish_kept_bands(keep):
+    global _kept_band_map
+    _kept_band_map = list(keep or [])
+
+
+def _remap_embed_bands(spec: str, kept, log=None) -> str:
+    """Translate embed_bands indices onto a B8-free stack.
+
+    *kept* is the list of ORIGINAL 0-based band indices that survive,
+    in output order. A saved selection like "1,...,12" refers to the
+    full stack; after B8 removal the same bands live at new positions
+    and the count is smaller, so passing the original string either
+    selects the wrong bands or overruns the stack.
+
+    Indices naming a dropped band are removed. An empty result means
+    "all bands", which is the correct fallback -- the CLI's own
+    default -- rather than an empty selection.
+    """
+    try:
+        old_to_new = {orig: j + 1 for j, orig in enumerate(kept)}
+        out, dropped = [], []
+        for tok in str(spec).split(','):
+            tok = tok.strip()
+            if not tok:
+                continue
+            try:
+                one = int(tok)
+            except ValueError:
+                continue
+            new = old_to_new.get(one - 1)
+            if new is None:
+                dropped.append(one)
+            else:
+                out.append(new)
+        msg = (f'[b8] embed_bands remapped for the B8-free stack: '
+               f'"{spec}" -> "{",".join(str(i) for i in out) or "all"}"'
+               + (f' (dropped B8 band(s) {dropped})' if dropped else ''))
+        sys.stderr.write(msg + '\n')
+        if log:
+            try:
+                log('  ' + msg)
+            except Exception:
+                pass
+        return ','.join(str(i) for i in out)
+    except Exception as exc:
+        sys.stderr.write(f'[b8] embed_bands remap failed ({exc}); '
+                         f'letting the CLI use all bands\n')
+        return ''
+
+
 def _b8_names(names):
     """Indices of B8/B8A bands (any era, including anomaly)."""
     import re as _re
@@ -47,6 +103,10 @@ def stack_without_b8(src_path: str, log=None):
             ds = None
             return src_path
         keep = [i for i in range(ds.RasterCount) if i not in drop]
+        # Published so embed_bands can be remapped onto this stack.
+        # Recorded even on the cached-file path below, since the
+        # mapping is a property of the band list, not of the write.
+        _publish_kept_bands(keep)
 
         out_path = os.path.splitext(src_path)[0] + '_nob8.bin'
         try:
@@ -211,6 +271,17 @@ def _build_mapping_cmd(fire: FireInfo, params: dict,
     if eb and str(eb).strip():
         eb = _validate_embed_bands(eb)
         if eb:
-            cmd += ['--embed_bands', eb]
+            # embed_bands holds ABSOLUTE 1-based indices into the stack
+            # the CLI receives. When B8 is excluded that stack is
+            # narrower, so the saved indices no longer name the same
+            # bands -- and any index past the new count makes the
+            # embedding step fail outright. Remap to the surviving
+            # positions rather than passing stale numbers through.
+            if getattr(fire, 'exclude_b8', True) and _kept_band_map:
+                eb = _remap_embed_bands(eb, _kept_band_map,
+                                        log=lambda m:
+                                        fire.console_log.append(m))
+            if eb:
+                cmd += ['--embed_bands', eb]
 
     return cmd

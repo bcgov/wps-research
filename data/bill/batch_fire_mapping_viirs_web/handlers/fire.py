@@ -1338,6 +1338,20 @@ class FireRoutes:
             out_ds = None
             ds = None
 
+            # Verify the driver actually produced the data file before
+            # anything else runs. A silent Create() failure would
+            # otherwise surface as an archive containing only the hint
+            # rasters -- everything downstream succeeds, so nothing
+            # else would report it.
+            if not os.path.isfile(out_bin) or \
+                    os.path.getsize(out_bin) == 0:
+                self._send_json(
+                    {'error': f'ENVI write produced no data at '
+                              f'{os.path.basename(out_bin)}. Bands '
+                              f'selected: {len(picks)}; size '
+                              f'{w}x{h}.'}, 500)
+                return
+
             # GDAL writes <base>.hdr with SUFFIX=ADD; make sure band
             # names really landed, since some GDAL builds drop them.
             hdr = os.path.splitext(out_bin)[0] + '.hdr'
@@ -1423,6 +1437,7 @@ class FireRoutes:
             zip_path = os.path.join(tmp_dir, base + '.zip')
             with zipfile.ZipFile(zip_path, 'w',
                                  zipfile.ZIP_DEFLATED) as zf:
+                written = []
                 for f_ in sorted(os.listdir(tmp_dir)):
                     # .aux.xml is GDAL bookkeeping (statistics etc.),
                     # not part of the ENVI product, and only confuses
@@ -1430,6 +1445,18 @@ class FireRoutes:
                     if f_.endswith('.zip') or f_.endswith('.aux.xml'):
                         continue
                     zf.write(os.path.join(tmp_dir, f_), f_)
+                    written.append(f_)
+            # The imagery stack is the point of this export, so confirm
+            # it is in the archive rather than trusting the directory
+            # listing.
+            if (base + '.bin') not in written:
+                sys.stderr.write(
+                    f'[imagery] {fire_numbe}: WARNING -- {base}.bin is '
+                    f'missing from the archive. tmp_dir contained: '
+                    f'{written}\n')
+            sys.stderr.write(
+                f'[imagery] {fire_numbe}: archive contents: '
+                f'{", ".join(written)}\n')
 
             size = os.path.getsize(zip_path)
             self.send_response(200)
