@@ -273,9 +273,35 @@ def _verify_viirs_bin_nonzero(path: str) -> None:
 
 
 def _read_dims(path: str):
+    """(width, height) of an ENVI/GDAL raster.
+
+    gdal.Open() returns None rather than raising when a file is
+    missing, unreadable, or still being written -- the last is a real
+    possibility here, since this runs immediately after the AOI stack
+    is built. Dereferencing that None raised deep inside the
+    background worker and surfaced on the fire list as an unpacking
+    error with no indication of which file was at fault.
+
+    Raises AoiStackError naming the path instead, so the fire's error
+    message says what actually went wrong.
+    """
+    from .aoi_stack import AoiStackError
+    if not path:
+        raise AoiStackError('no raster path given for dimension read')
+    if not os.path.isfile(path):
+        raise AoiStackError(f'raster does not exist: {path}')
     ds = gdal.Open(path, gdal.GA_ReadOnly)
+    if ds is None:
+        raise AoiStackError(
+            f'GDAL could not open {path} '
+            f'({os.path.getsize(path) if os.path.isfile(path) else 0} '
+            f'bytes) -- it may be incomplete or missing its header')
     try:
-        return ds.RasterXSize, ds.RasterYSize
+        w, h = ds.RasterXSize, ds.RasterYSize
+        if not w or not h:
+            raise AoiStackError(
+                f'{path} reports a degenerate size {w}x{h}')
+        return w, h
     finally:
         ds = None
 
@@ -1000,8 +1026,36 @@ def _dispatch_loop():
         try:
             _viirs_worker(fire)
         except Exception as exc:
+            # Anything escaping _viirs_worker used to be logged to
+            # stderr only, leaving the fire stuck in PREPARING with a
+            # spinner forever -- or showing a raw exception string on
+            # the list with no clue which stage failed. Record a
+            # readable error against the fire AND log the traceback,
+            # so the list is honest and the log is diagnosable.
+            import traceback
+            tb = traceback.format_exc()
             sys.stderr.write(
-                f'[viirs_worker] dispatch loop error: {exc!r}\n')
+                f'[viirs_worker] preparation of '
+                f'{getattr(fire, "fire_numbe", "?")} failed: '
+                f'{type(exc).__name__}: {exc}\n{tb}\n')
+            try:
+                # Match how this module already reports errors (see the
+                # status assignments above) rather than importing a
+                # helper that lives in app.py and would create a cycle.
+                msg = str(exc).strip() or type(exc).__name__
+                with state.lock:
+                    fire.status = FireStatus.ERROR
+                    fire.error_msg = (
+                        f'Preparation failed '
+                        f'({type(exc).__name__}): {msg}. See the '
+                        f'server log for the full traceback.')
+                    fire.progress = {}
+                if _save_fire_state is not None:
+                    _save_fire_state()
+            except Exception as exc2:
+                sys.stderr.write(
+                    f'[viirs_worker] could not record the failure: '
+                    f'{exc2!r}\n')
         finally:
             _dispatch_queue.task_done()
 

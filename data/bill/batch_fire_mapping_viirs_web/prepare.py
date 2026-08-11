@@ -655,7 +655,7 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
     # a previous build failed), fall back to red-wins here rather than
     # leaving hint_bin empty -- an empty hint is what makes the fire
     # unmappable and leaves the UI parked on "preparing".
-    mode = getattr(fire, 'hint_mode', 'viirs') or 'viirs'
+    mode = getattr(fire, 'hint_mode', 'redwins_post') or 'redwins_post'
     if mode == 'viirs' and not (
             fire.viirs_bin and os.path.isfile(fire.viirs_bin)):
         mode = 'redwins_post'
@@ -779,7 +779,25 @@ def switch_hint_mode(fire: FireInfo, mode: str) -> dict:
 
     # Regenerate the hint overlay preview PNG.
     if fire.hint_bin and os.path.isfile(fire.hint_bin):
+        # Render BOTH the generic hint.png and the per-mode
+        # hint_<mode>.png.
+        #
+        # The preview endpoint prefers the per-mode file and falls back
+        # to the generic one. Rendering only the generic file meant the
+        # image you got depended on whether a background
+        # pregenerate_all_hints() had already produced a per-mode file
+        # for some OTHER mode -- so a freshly selected hint sometimes
+        # appeared only after toggling views, which happened to force a
+        # different resolution path. Writing both makes the result the
+        # same regardless of what has run in the background.
         _overlay_mask_on_post(fire, fire.hint_bin, 'hint', (0.0, 0.8, 0.2))
+        try:
+            _overlay_mask_on_post(fire, fire.hint_bin, f'hint_{mode}',
+                                  (0.0, 0.8, 0.2))
+        except Exception as exc:
+            sys.stderr.write(
+                f'[prepare] per-mode hint render failed for {mode}: '
+                f'{exc}\n')
         if 'hint' not in fire.available_views:
             fire.available_views.append('hint')
 
@@ -1128,7 +1146,7 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
     # VIIRS was unavailable, which then failed the whole run with
     # "No hint mask available" even though the user had explicitly
     # selected Red wins (post) or Red wins (diff).
-    _mode = getattr(fire, 'hint_mode', 'viirs') or 'viirs'
+    _mode = getattr(fire, 'hint_mode', 'redwins_post') or 'redwins_post'
     if _mode in DERIVED_HINT_MODES:
         _rw_path, _rw_err = build_derived_hint_for_fire(fire, _mode)
         if _rw_err:

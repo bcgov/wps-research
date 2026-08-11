@@ -427,7 +427,10 @@ const VIEW_LABELS = {
 };
 
 // Hint mode — tracks which hint mask source is active.
-let currentHintMode = 'viirs';
+// Matches FireInfo.hint_mode in state.py. A different
+// default here would light the wrong button until the
+// first /prepare response arrived.
+let currentHintMode = 'redwins_post';
 
 // Which post imagery the stack is built from: 'l2' (most recent L2A
 // tiles over the AOI, default) or 'mrap' (province-wide composite).
@@ -447,6 +450,17 @@ let currentPostSource = 'l2';
 // dropped by clearPreviewCache().
 const _previewBlobs = new Map();
 let _previewStamp = Date.now();
+// Separate stamp for HINT images only.
+//
+// Warming pre-fetches every hint mode, including modes whose per-mode
+// PNG the server has not rendered yet -- those requests fall back to
+// the generic hint.png and the WRONG image gets cached under the new
+// mode's key. Selecting that mode then replayed the cached fallback,
+// which is why a hint sometimes appeared only after toggling views.
+// Bumping this on every switch invalidates both the in-memory blob
+// cache and the browser's HTTP cache (previews are served immutable)
+// without disturbing pre/post/diff, which are unaffected.
+let _hintStamp = Date.now();
 
 function previewStamp() { return _previewStamp; }
 
@@ -458,7 +472,8 @@ function cacheKeyFor(viewKey) {
     // 'hint' additionally varies with the hint mode; every other view
     // depends only on the post source.
     const modePart = (viewKey === 'hint') ? `:${currentHintMode}` : '';
-    return `${currentPostSource}:${viewKey}${modePart}:${_previewStamp}`;
+    const stamp = (viewKey === 'hint') ? _hintStamp : _previewStamp;
+    return `${currentPostSource}:${viewKey}${modePart}:${stamp}`;
 }
 
 // In-flight fetches, keyed the same way as _previewBlobs. Without
@@ -819,6 +834,23 @@ async function switchHintMode(mode) {
             return;
         }
         currentHintMode = mode;
+        // The server has now rendered this mode's mask. Invalidate any
+        // hint image cached before it existed, so what loads next is
+        // the freshly rendered one rather than a warmed fallback.
+        _hintStamp = Date.now();
+        let dropped = 0;
+        for (const k of [..._previewBlobs.keys()]) {
+            if (k.includes(':hint')) {
+                try { URL.revokeObjectURL(_previewBlobs.get(k)); }
+                catch (_) {}
+                _previewBlobs.delete(k);
+                dropped++;
+            }
+        }
+        if (dropped) {
+            log(`[diag] hint switch: dropped ${dropped} cached hint `
+                + `image(s) so the new mask is fetched fresh`, 'dim');
+        }
         renderHintModeButtons();
         // The cache key includes the mode, so this now fetches the new
         // mask rather than replaying the previous mode's image.
@@ -1003,7 +1035,7 @@ async function prepareFire(padding) {
         document.getElementById('crop-info').innerHTML =
             `AOI: <strong>${cropW}&times;${cropH} px</strong> &middot; ` +
             `Accum: <strong>${data.acc_start || '?'} &rarr; ${data.acc_end || '?'}</strong>`;
-        currentHintMode = data.hint_mode || 'viirs';
+        currentHintMode = data.hint_mode || 'redwins_post';
         renderHintModeButtons();
         currentPostSource = data.post_source || 'l2';
         // Vector overlays depend on the crop's geotransform, so they
@@ -2714,8 +2746,9 @@ function previewUrlFor(viewKey) {
     // Source AND hint mode must both be in the URL: they select
     // different server-side files, not just different cache entries.
     const modePart = (viewKey === 'hint') ? `&hint=${currentHintMode}` : '';
+    const stamp = (viewKey === 'hint') ? _hintStamp : previewStamp();
     return `/api/fire/${encodeURIComponent(FIRE)}/preview/${viewKey}`
-        + `?src=${currentPostSource}${modePart}&t=${previewStamp()}`;
+        + `?src=${currentPostSource}${modePart}&t=${stamp}`;
 }
 
 // Composite the vector overlays onto a decoded image, returning a blob
