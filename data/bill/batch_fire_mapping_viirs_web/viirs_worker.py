@@ -105,7 +105,46 @@ def _set_progress(fire: FireInfo, stage: str, *, detail: str = '',
             snapshot['fraction'] = max(0.0, min(1.0, float(fraction)))
         except (TypeError, ValueError):
             pass
+
+    # ETA and staleness.
+    #
+    # "cropping (5/5) AOI stack: extracted T10UGA 3/3 tiles" says what
+    # is happening but not whether it is progressing -- an identical
+    # line appears whether the step finished a second ago or wedged ten
+    # minutes ago. Carrying the start time, the time of the last
+    # CHANGE, and a projected finish lets the UI answer both "how long"
+    # and "is this stuck".
     with state.lock:
+        prev = getattr(fire, 'progress', None) or {}
+        now = time.time()
+        started = prev.get('started_at') or now
+        # A new stage restarts the clock: per-stage rates differ by
+        # orders of magnitude, so projecting across them is misleading.
+        if prev.get('stage') != stage:
+            started = now
+        snapshot['started_at'] = started
+
+        changed = (prev.get('stage') != stage
+                   or prev.get('detail') != detail
+                   or prev.get('fraction') != snapshot.get('fraction'))
+        snapshot['last_change_at'] = (
+            now if changed else (prev.get('last_change_at') or now))
+
+        frac = snapshot.get('fraction')
+        elapsed = max(0.0, now - started)
+        if frac and frac > 0.02 and elapsed > 2.0:
+            total = elapsed / frac
+            snapshot['eta_s'] = max(0.0, total - elapsed)
+            snapshot['elapsed_s'] = elapsed
+        elif prev.get('stage') == stage and prev.get('eta_s') is not None:
+            # Keep the last estimate across updates that carry no
+            # fraction, rather than flickering the ETA away.
+            snapshot['eta_s'] = max(
+                0.0, prev['eta_s'] - (now - (prev.get('updated_at') or now)))
+            snapshot['elapsed_s'] = elapsed
+        else:
+            snapshot['elapsed_s'] = elapsed
+
         fire.progress = snapshot
 
 

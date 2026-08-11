@@ -70,6 +70,13 @@
             <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="zoomReset()">Fit</button>
             <button class="btn btn-secondary" id="btn-overlays" style="font-size:11px;padding:2px 8px;background:#3a7bd5;color:#fff" onclick="toggleFireOverlays()" title="Sentinel-2 tile grid (blue) and BCWS fires">Overlays</button>
             <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" id="btn-split" onclick="toggleSplit()">Split</button>
+            <!-- Imagery loading state, in the spare toolbar space.
+                 Switching source can rebuild a stack server-side and
+                 refetch several MB; without this the interface looks
+                 idle and a slow load is indistinguishable from a stuck
+                 one. -->
+            <span id="layer-status" style="display:none;font-size:11px;
+                  color:#555;margin-left:10px;white-space:nowrap"></span>
             <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;display:none" id="btn-sync" onclick="toggleSync()" title="Sync pan/zoom between panes">Sync</button>
             <span class="info" id="zoom-info"></span>
             <span class="info" id="image-info"></span>
@@ -668,7 +675,18 @@ function prefetchOtherSource(views) {
     }
 }
 
+// Wrapper so the busy indicator is released on EVERY exit path -- the
+// inner function has several early returns and an error branch, and a
+// missed release would leave the toolbar claiming to load forever.
 async function onPostSourceChange() {
+    try {
+        return await _onPostSourceChangeInner();
+    } finally {
+        layerBusyEnd();
+    }
+}
+
+async function _onPostSourceChangeInner() {
     const sel = document.getElementById('post-source-select');
     if (!sel) return;
     const src = sel.value;
@@ -679,6 +697,11 @@ async function onPostSourceChange() {
     // (mapping reads fire.crop_bin, which it repoints), but the user
     // should not wait on it just to look at the imagery.
     const prevSource = currentPostSource;
+    // Held for the whole switch, including the server-side stack
+    // repoint, so the toolbar shows activity even when the pane is
+    // repainted instantly from cache.
+    layerBusyBegin(src === 'l2' ? 'Switching to L2 recent tile'
+                                : 'Switching to MRAP composite');
     const canSwapInstantly = ['pre', 'post', 'diff1', 'diff2', 'diff3',
                               'hint'].includes(leftView)
         && _previewBlobs.has(
@@ -2805,6 +2828,44 @@ function applyPaneFit(pane, img) {
     fs.fitted = true;
     fs.fitW = _d.w;
     fs.fitH = _d.h;
+}
+
+// ---- Imagery loading indicator -----------------------------------
+let _layerBusy = 0;
+let _layerLabel = '';
+let _layerStart = 0;
+let _layerTimer = null;
+
+function layerBusyBegin(label) {
+    _layerBusy++;
+    _layerLabel = label || 'Loading';
+    if (_layerBusy === 1) _layerStart = performance.now();
+    layerStatusPaint();
+    if (!_layerTimer) _layerTimer = setInterval(layerStatusPaint, 250);
+}
+
+function layerBusyEnd() {
+    _layerBusy = Math.max(0, _layerBusy - 1);
+    if (_layerBusy === 0 && _layerTimer) {
+        clearInterval(_layerTimer);
+        _layerTimer = null;
+    }
+    layerStatusPaint();
+}
+
+function layerStatusPaint() {
+    const el = document.getElementById('layer-status');
+    if (!el) return;
+    if (_layerBusy <= 0) { el.style.display = 'none'; return; }
+    const secs = (performance.now() - _layerStart) / 1000;
+    // Elapsed time rather than a percentage: the transfer size is not
+    // known until the response arrives, and a source switch may
+    // include a server-side rebuild of unknown length, so a progress
+    // bar would be invented. Elapsed is honest and answers the real
+    // question -- is this moving.
+    el.style.display = '';
+    el.textContent = `${_layerLabel} ... ${secs.toFixed(1)}s`
+        + (secs > 20 ? '  (still working)' : '');
 }
 
 async function loadPaneImage(pane, viewKey) {

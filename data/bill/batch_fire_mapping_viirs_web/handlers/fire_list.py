@@ -192,6 +192,17 @@ class FireListRoutes:
                                         if f.progress else 0),
                     'sub_stage_detail': (f.progress.get('detail', '')
                                          if f.progress else ''),
+                    # ETA, elapsed and time-since-last-change, so the
+                    # list can say how long is left and flag a job that
+                    # has stopped progressing.
+                    'eta_s': (f.progress.get('eta_s')
+                              if f.progress else None),
+                    'elapsed_s': (f.progress.get('elapsed_s')
+                                  if f.progress else None),
+                    'last_change_at': (f.progress.get('last_change_at')
+                                       if f.progress else None),
+                    'progress_fraction': (f.progress.get('fraction')
+                                          if f.progress else None),
                     'created_at': float(getattr(f, 'created_at', 0) or 0),
                 }
                 for f in state.fires.values()

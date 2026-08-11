@@ -977,6 +977,47 @@ def main():
     _load_stage_timings()
     _load_notifications()
     _load_cache_retention()
+    # Requeue fires that were still being prepared when the server
+    # stopped.
+    #
+    # PENDING/PREPARING is an in-flight state held by a worker thread.
+    # A restart kills the thread but the state persists, so those fires
+    # come back looking busy forever -- a spinner that never resolves
+    # and no way to retry short of deleting and redrawing the AOI.
+    # Anything left in that state cannot still be running, so it is
+    # safe to resubmit.
+    try:
+        from .state import FireStatus
+        from .viirs_worker import submit_fire
+        stuck = []
+        with app_state.lock:
+            for f in app_state.fires.values():
+                if f.status in (FireStatus.PENDING, FireStatus.PREPARING):
+                    stuck.append(f)
+        if stuck:
+            _log(f'      {len(stuck)} fire(s) were still preparing when '
+                 f'the server stopped; resubmitting:')
+            for f in stuck:
+                with app_state.lock:
+                    f.status = FireStatus.PENDING
+                    f.progress = {}
+                    f.error_msg = ''
+                _log(f'        - {f.fire_numbe} (was '
+                     f'{f.status.value if hasattr(f.status, "value") else f.status})')
+                try:
+                    submit_fire(f)
+                except Exception as exc:
+                    with app_state.lock:
+                        f.status = FireStatus.ERROR
+                        f.error_msg = (
+                            f'Could not resubmit after server restart: '
+                            f'{type(exc).__name__}: {exc}')
+                    _log(f'          resubmit FAILED: {exc}')
+        else:
+            _log('      No interrupted fire preparations to resume.')
+    except Exception as exc:
+        _log(f'      Could not check for interrupted preparations: {exc}')
+
     _log('[startup] Restoring per-fire state from previous session: done.')
 
     import threading as _threading

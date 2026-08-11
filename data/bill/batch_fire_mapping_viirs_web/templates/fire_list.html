@@ -523,6 +523,21 @@ function resetFilters() {
 // -----------------------------------------------------------------------
 // Render table
 // -----------------------------------------------------------------------
+// Compact duration for status lines: seconds under a minute, then
+// minutes, then hours.
+function fmtDur(sec) {
+    if (!isFinite(sec) || sec < 0) return '--';
+    if (sec < 60) return `${Math.round(sec)}s`;
+    if (sec < 3600) {
+        const m = Math.floor(sec / 60);
+        const r = Math.round(sec - m * 60);
+        return r ? `${m}m ${r}s` : `${m}m`;
+    }
+    const h = Math.floor(sec / 3600);
+    const m = Math.round((sec - h * 3600) / 60);
+    return m ? `${h}h ${m}m` : `${h}h`;
+}
+
 function render() {
     const numPat = document.getElementById('filter-number').value.trim();
     const minSize = parseFloat(document.getElementById('filter-min-size').value) || 0;
@@ -610,7 +625,30 @@ function render() {
             const detail = f.sub_stage_detail
                 ? ` <span style="color:#666;font-size:11px">${esc(f.sub_stage_detail)}</span>`
                 : '';
-            subStage = `<div style="font-size:11px;color:#444;margin-top:2px">${esc(f.sub_stage)}${tot ? ' (' + idx + '/' + tot + ')' : ''}${detail}</div>`;
+            // ETA and stall detection. The detail line alone reads the
+            // same whether a step finished a second ago or wedged ten
+            // minutes ago, which is the question actually being asked
+            // while watching a long AOI build.
+            let eta = '';
+            if (typeof f.eta_s === 'number' && f.eta_s >= 0) {
+                eta = ` <span style="color:#2a7">~${fmtDur(f.eta_s)} left`
+                    + (typeof f.progress_fraction === 'number'
+                        ? ` (${Math.round(f.progress_fraction * 100)}%)`
+                        : '') + '</span>';
+            } else if (typeof f.elapsed_s === 'number') {
+                eta = ` <span style="color:#888">${fmtDur(f.elapsed_s)}`
+                    + ' elapsed</span>';
+            }
+            let stalled = '';
+            if (typeof f.last_change_at === 'number') {
+                const since = (Date.now() / 1000) - f.last_change_at;
+                if (since > 180) {
+                    stalled = ` <span style="color:#a60"
+                        title="No progress update since then">no change`
+                        + ` for ${fmtDur(since)}</span>`;
+                }
+            }
+            subStage = `<div style="font-size:11px;color:#444;margin-top:2px">${esc(f.sub_stage)}${tot ? ' (' + idx + '/' + tot + ')' : ''}${detail}${eta}${stalled}</div>`;
         }
         const errMsg = (f.status === 'error' && f.error_msg)
             ? `<div style="font-size:11px;color:#a00;margin-top:2px">${esc(f.error_msg)}</div>`
