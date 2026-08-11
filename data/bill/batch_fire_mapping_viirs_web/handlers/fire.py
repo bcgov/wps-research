@@ -708,6 +708,7 @@ class FireRoutes:
         out = {'fire': fire_numbe,
                'post_source': getattr(fire, 'post_source', ''),
                'hint_mode': getattr(fire, 'hint_mode', ''),
+            'exclude_b8': bool(getattr(fire, 'exclude_b8', True)),
                'status': str(getattr(fire.status, 'value', fire.status)),
                'padding_used': getattr(fire, 'padding_used', None),
                'sample_size': getattr(fire, 'sample_size', None),
@@ -1205,6 +1206,29 @@ class FireRoutes:
             payload = {'status': f.status.value, 'error': f.error_msg}
         self._send_json(payload)
 
+    def handle_api_exclude_b8(self, fire_numbe):
+        """Set whether B8/B8A are withheld from ML and from export."""
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        try:
+            body = self._read_body() or {}
+        except Exception:
+            body = {}
+        val = bool(body.get('exclude_b8', True))
+        with state.lock:
+            fire.exclude_b8 = val
+        try:
+            from ..persistence import _save_fire_state
+            _save_fire_state()
+        except Exception:
+            pass
+        sys.stderr.write(
+            f'[b8] {fire_numbe}: exclude_b8 = {val}\n')
+        self._send_json({'ok': True, 'exclude_b8': val})
+
     def handle_api_download_imagery(self, fire_numbe):
         """Export the pre/post reflectance bands as an ENVI stack.
 
@@ -1262,7 +1286,11 @@ class FireRoutes:
             # Select by band NAME rather than index: band order has
             # changed between stack versions, and picking positionally
             # would silently export the wrong bands.
-            wanted = ('B12', 'B11', 'B9', 'B8')
+            # Honour the same Exclude B8 setting the classifier uses,
+            # so an exported stack matches what the model was given.
+            excl_b8 = bool(getattr(fire, 'exclude_b8', True))
+            wanted = ('B12', 'B11', 'B9') if excl_b8 \
+                else ('B12', 'B11', 'B9', 'B8')
 
             def _match(name, era, code):
                 n = (name or '').lower()
@@ -1293,10 +1321,12 @@ class FireRoutes:
             base = f'{fire_numbe}_{want_src}_prepost'
             out_bin = os.path.join(tmp_dir, base + '.bin')
             # INTERLEAVE=BSQ and Float32 as specified.
+            # No SUFFIX=ADD: that writes <name>.bin.hdr, whereas ENVI
+            # convention (and every tool that reads these) expects
+            # <name>.hdr beside <name>.bin.
             out_ds = drv.Create(out_bin, w, h, len(picks),
                                 gdal.GDT_Float32,
-                                options=['INTERLEAVE=BSQ',
-                                         'SUFFIX=ADD'])
+                                options=['INTERLEAVE=BSQ'])
             out_ds.SetGeoTransform(ds.GetGeoTransform())
             out_ds.SetProjection(ds.GetProjection())
             for out_i, (src_i, nm) in enumerate(picks, start=1):
@@ -1310,11 +1340,12 @@ class FireRoutes:
 
             # GDAL writes <base>.hdr with SUFFIX=ADD; make sure band
             # names really landed, since some GDAL builds drop them.
-            hdr = out_bin + '.hdr'
-            if not os.path.isfile(hdr):
-                alt = os.path.splitext(out_bin)[0] + '.hdr'
-                if os.path.isfile(alt):
-                    hdr = alt
+            hdr = os.path.splitext(out_bin)[0] + '.hdr'
+            if not os.path.isfile(hdr) and os.path.isfile(out_bin
+                                                          + '.hdr'):
+                # Some GDAL builds still append; normalise the name so
+                # the archive is consistent whatever the build does.
+                os.replace(out_bin + '.hdr', hdr)
             try:
                 with open(hdr, encoding='utf-8') as f:
                     hdr_txt = f.read()
@@ -1326,12 +1357,77 @@ class FireRoutes:
             except OSError:
                 pass
 
+            # Hint masks as ENVI rasters, one pair per mode.
+            #
+            # The hints are what the classifier is scored against, so
+            # an export without them cannot be independently checked or
+            # reproduced. Written in the stack's grid and CRS so they
+            # overlay the imagery directly.
+            try:
+                from ..prepare import (build_derived_hint_for_fire,
+                                       ALL_HINT_MODES)
+                for mode in ALL_HINT_MODES:
+                    mask_path = None
+                    if mode == 'viirs':
+                        mp = getattr(fire, 'viirs_bin', '') or ''
+                        if mp and os.path.isfile(mp):
+                            mask_path = mp
+                    else:
+                        mp, merr = build_derived_hint_for_fire(fire, mode)
+                        if mp and os.path.isfile(mp):
+                            mask_path = mp
+                        elif merr:
+                            sys.stderr.write(
+                                f'[imagery] {fire_numbe}: hint {mode} '
+                                f'unavailable: {merr}\n')
+                    if not mask_path:
+                        continue
+                    mds = gdal.Open(mask_path, gdal.GA_ReadOnly)
+                    if mds is None:
+                        continue
+                    hp = os.path.join(tmp_dir,
+                                      f'{fire_numbe}_hint_{mode}.bin')
+                    hout = drv.Create(hp, mds.RasterXSize,
+                                      mds.RasterYSize, 1,
+                                      gdal.GDT_Float32,
+                                      options=['INTERLEAVE=BSQ'])
+                    hout.SetGeoTransform(mds.GetGeoTransform())
+                    hout.SetProjection(mds.GetProjection())
+                    hb = hout.GetRasterBand(1)
+                    hb.WriteArray(
+                        mds.GetRasterBand(1).ReadAsArray().astype(
+                            'float32'))
+                    hb.SetDescription(f'hint {mode}')
+                    hb = None
+                    hout = None
+                    mds = None
+                    hhdr = os.path.splitext(hp)[0] + '.hdr'
+                    if (not os.path.isfile(hhdr)
+                            and os.path.isfile(hp + '.hdr')):
+                        os.replace(hp + '.hdr', hhdr)
+                    try:
+                        with open(hhdr, encoding='utf-8') as f:
+                            t = f.read()
+                        if 'band names' not in t.lower():
+                            with open(hhdr, 'a', encoding='utf-8') as f:
+                                f.write('band names = {\n'
+                                        f'hint {mode}' + '}\n')
+                    except OSError:
+                        pass
+            except Exception as hexc:
+                sys.stderr.write(
+                    f'[imagery] {fire_numbe}: hint export skipped: '
+                    f'{type(hexc).__name__}: {hexc}\n')
+
             import zipfile
             zip_path = os.path.join(tmp_dir, base + '.zip')
             with zipfile.ZipFile(zip_path, 'w',
                                  zipfile.ZIP_DEFLATED) as zf:
                 for f_ in sorted(os.listdir(tmp_dir)):
-                    if f_.endswith('.zip'):
+                    # .aux.xml is GDAL bookkeeping (statistics etc.),
+                    # not part of the ENVI product, and only confuses
+                    # whoever opens the archive.
+                    if f_.endswith('.zip') or f_.endswith('.aux.xml'):
                         continue
                     zf.write(os.path.join(tmp_dir, f_), f_)
 

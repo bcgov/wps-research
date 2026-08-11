@@ -116,6 +116,12 @@ class FireInfo:
     # most AOIs have no VIIRS coverage and a 'viirs' default would leave
     # them unmappable until the user noticed and switched.
     hint_mode: str = "redwins_post"
+    # Drop B8 (and B8A) from the stack handed to the ML stage and from
+    # the imagery export. Default ON: B8 adds little for burn
+    # discrimination relative to the SWIR bands and costs sampling
+    # width. Visualisations and overviews are unaffected -- none of
+    # them use B8 -- so this only changes what the classifier sees.
+    exclude_b8: bool = True
     # Which post imagery the stack is built from:
     #   'l2'   -- most recent L2A tiles over the AOI (default; recent,
     #             may contain cloud)

@@ -151,6 +151,8 @@ def _save_fire_state():
                     entry['perimeter_type'] = fire.perimeter_type
                 if fire.hint_mode:
                     entry['hint_mode'] = fire.hint_mode
+                entry['exclude_b8'] = bool(
+                    getattr(fire, 'exclude_b8', True))
                 if fire.post_source:
                     entry['post_source'] = fire.post_source
                 if getattr(fire, 'created_at', 0):
@@ -383,6 +385,7 @@ def _load_fire_state():
             fire.acc_end = entry.get('acc_end', '')
             fire.perimeter_type = entry.get('perimeter_type', '')
             fire.hint_mode = entry.get('hint_mode', 'redwins_post')
+            fire.exclude_b8 = bool(entry.get('exclude_b8', True))
             fire.post_source = entry.get('post_source', 'l2')
             # Older state files may have per-mode hint renders saved as
             # selectable views (hint_redwins_post, ...). They are not

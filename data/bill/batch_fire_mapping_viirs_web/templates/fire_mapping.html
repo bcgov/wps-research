@@ -76,6 +76,20 @@
                   min-width:200px"></span>
             <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;display:none" id="btn-sync" onclick="toggleSync()" title="Sync pan/zoom between panes">Sync</button>
             <span class="info" id="zoom-info"></span>
+            <!-- Affects only what the ML stage and the imagery export
+                 receive. Visualisations and overviews never used B8,
+                 so toggling this changes nothing on screen. -->
+            <label id="exclude-b8-wrap"
+                   title="Drop B8/B8A bands from the stack sent to ML
+                          fire mapping and from Download imagery.
+                          Visualisations are unaffected."
+                   style="font-size:11px;margin-left:10px;
+                          display:inline-flex;align-items:center;
+                          gap:4px;cursor:pointer;white-space:nowrap">
+              <input type="checkbox" id="exclude-b8" checked
+                     onchange="onExcludeB8Change()">
+              Exclude B8
+            </label>
             <!-- Right-pane controls, shown only in split view.
                  Grouped and pushed right so they sit above the pane
                  they drive: with one set of dropdowns the target pane
@@ -1115,6 +1129,10 @@ async function prepareFire(padding) {
             `AOI: <strong>${cropW}&times;${cropH} px</strong> &middot; ` +
             `Accum: <strong>${data.acc_start || '?'} &rarr; ${data.acc_end || '?'}</strong>`;
         currentHintMode = data.hint_mode || 'redwins_post';
+        const b8 = document.getElementById('exclude-b8');
+        if (b8 && typeof data.exclude_b8 === 'boolean') {
+            b8.checked = data.exclude_b8;
+        }
         renderHintModeButtons();
         currentPostSource = data.post_source || 'l2';
         // Vector overlays depend on the crop's geotransform, so they
@@ -1492,6 +1510,38 @@ function fmtWhen(ts) {
 // RIGHT-MOST view: the right pane's selector when split, otherwise the
 // single one. Reading it at click time (rather than baking a URL into
 // the template) keeps it correct as the user switches sources.
+async function onExcludeB8Change() {
+    const el = document.getElementById('exclude-b8');
+    if (!el) return;
+    const val = !!el.checked;
+    el.disabled = true;
+    try {
+        const r = await fetch(
+            `/api/fire/${encodeURIComponent(FIRE)}/exclude_b8`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json',
+                          'X-Requested-With': 'fetch'},
+                body: JSON.stringify({exclude_b8: val}),
+            });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || j.error) {
+            // Put the box back: leaving it showing a state the server
+            // did not accept would silently mislead the next run.
+            el.checked = !val;
+            log(`Could not change Exclude B8: `
+                + `${j.error || ('HTTP ' + r.status)}`, 'error');
+            return;
+        }
+        log(`[b8] Exclude B8 ${val ? 'ON' : 'OFF'} — applies to the `
+            + `next mapping run and to Download imagery`, 'dim');
+    } catch (err) {
+        el.checked = !val;
+        log(`Could not change Exclude B8: ${err.message}`, 'error');
+    } finally {
+        el.disabled = false;
+    }
+}
+
 function downloadImagery() {
     const src = splitActive ? rightPostSource : currentPostSource;
     const btn = document.getElementById('btn-download-imagery');
