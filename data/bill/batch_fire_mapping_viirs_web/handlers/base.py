@@ -171,6 +171,9 @@ class BaseHandler:
             r'^/api/fire/(?P<fire_numbe>[^/]+)/status$'),
          'handle_api_status'),
         (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/rename$'),
+         'handle_api_fire_rename'),
+        (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/exclude_b8$'),
          'handle_api_exclude_b8'),
         (re.compile(

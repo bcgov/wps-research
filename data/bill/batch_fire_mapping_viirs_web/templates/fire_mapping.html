@@ -11,9 +11,12 @@
 
 <header>
     <a id="btn-prev" class="btn btn-secondary" style="font-size:11px;padding:3px 10px;display:none" href="#">Prev</a>
-    <h1>{{ fire_numbe }}</h1>
+    <h1 id="fire-title">{{ fire_numbe }}</h1>
     <a id="btn-next" class="btn btn-secondary" style="font-size:11px;padding:3px 10px;display:none" href="#">Next</a>
     <button class="btn btn-danger" style="font-size:11px;padding:3px 10px" onclick="removeFire()">Remove</button>
+    <button id="btn-rename" class="btn btn-secondary"
+            style="font-size:11px;padding:3px 10px"
+            onclick="startRename()">Rename</button>
     <a href="/" class="back-link">Back to fire list</a>
     <a href="/logout" class="btn btn-secondary" style="font-size:11px;padding:3px 10px">Logout</a>
 </header>
@@ -3873,6 +3876,95 @@ async function pollFireState() {
 // -----------------------------------------------------------------------
 // Remove fire
 // -----------------------------------------------------------------------
+// ---- Rename ------------------------------------------------------
+//
+// Edits the title in place rather than using a prompt: the current
+// name is already there to edit, and the result is visible in context.
+// Enter commits, Escape cancels, blur commits (so clicking away does
+// not silently discard a typed name).
+let _renaming = false;
+
+function startRename() {
+    if (_renaming) return;
+    const h = document.getElementById('fire-title');
+    const btn = document.getElementById('btn-rename');
+    if (!h) return;
+    _renaming = true;
+    const original = h.textContent.trim();
+    h.contentEditable = 'true';
+    h.spellcheck = false;
+    h.style.outline = '2px solid #3a7bd5';
+    h.style.borderRadius = '3px';
+    h.style.padding = '0 4px';
+    h.focus();
+    // Select the whole name so typing replaces it.
+    try {
+        const r = document.createRange();
+        r.selectNodeContents(h);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(r);
+    } catch (_) { /* selection is a convenience only */ }
+    if (btn) btn.textContent = 'Save';
+
+    const finish = (commit) => {
+        if (!_renaming) return;
+        _renaming = false;
+        h.contentEditable = 'false';
+        h.style.outline = '';
+        h.style.padding = '';
+        if (btn) btn.textContent = 'Rename';
+        h.removeEventListener('keydown', onKey);
+        h.removeEventListener('blur', onBlur);
+        const proposed = h.textContent.trim();
+        if (!commit || !proposed || proposed === original) {
+            h.textContent = original;
+            return;
+        }
+        applyRename(original, proposed);
+    };
+    const onKey = (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+        else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    };
+    const onBlur = () => finish(true);
+    h.addEventListener('keydown', onKey);
+    h.addEventListener('blur', onBlur);
+    // Clicking Save while the field has focus fires blur first, which
+    // already commits; this keeps the button working if it does not.
+    if (btn) btn.onclick = () => finish(true);
+}
+
+async function applyRename(oldName, newName) {
+    const h = document.getElementById('fire-title');
+    try {
+        const r = await fetch(
+            `/api/fire/${encodeURIComponent(FIRE)}/rename`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json',
+                          'X-Requested-With': 'fetch'},
+                body: JSON.stringify({name: newName}),
+            });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || j.error) {
+            if (h) h.textContent = oldName;
+            const btn = document.getElementById('btn-rename');
+            if (btn) btn.onclick = startRename;
+            alert(`Could not rename: ${j.error || ('HTTP ' + r.status)}`);
+            return;
+        }
+        // The name is in the URL and in every per-fire API path, so
+        // reload at the new location rather than trying to rewrite
+        // FIRE and every cached key in place.
+        window.location.href = '/fire/' + encodeURIComponent(j.name);
+    } catch (err) {
+        if (h) h.textContent = oldName;
+        const btn = document.getElementById('btn-rename');
+        if (btn) btn.onclick = startRename;
+        alert(`Could not rename: ${err.message}`);
+    }
+}
+
 async function removeFire() {
     if (!confirm(`Remove fire "${FIRE}" from the list?\nThis hides it from the fire list. Accepted results are not deleted.`)) return;
     try {

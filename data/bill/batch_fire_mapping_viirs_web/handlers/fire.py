@@ -1209,6 +1209,33 @@ class FireRoutes:
             payload = {'status': f.status.value, 'error': f.error_msg}
         self._send_json(payload)
 
+    def handle_api_fire_rename(self, fire_numbe):
+        """Rename a fire, moving its directories with it."""
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        try:
+            body = self._read_body() or {}
+        except Exception:
+            body = {}
+        new_name = (body.get('name') or '').strip()
+        try:
+            from ..prepare import rename_fire
+            res = rename_fire(fire_numbe, new_name)
+        except Exception as exc:
+            sys.stderr.write(
+                f'[rename] {fire_numbe}: {type(exc).__name__}: {exc}\n')
+            self._send_json({'error': str(exc)}, 500)
+            return
+        if not res.get('ok'):
+            # 409: the usual failure is a name already in use, which is
+            # a conflict rather than a malformed request.
+            self._send_json({'error': res.get('error', 'Rename failed')},
+                            409)
+            return
+        self._send_json(res)
+
     def handle_api_exclude_b8(self, fire_numbe):
         """Set whether B8/B8A are withheld from ML and from export."""
         fire_numbe = unquote(fire_numbe)

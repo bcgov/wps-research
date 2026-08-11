@@ -117,6 +117,154 @@ DERIVED_HINT_MODES = ('redwins_post', 'redwins_diff', 'bcws_perimeter')
 ALL_HINT_MODES = ('viirs',) + DERIVED_HINT_MODES
 
 
+def rename_fire(old_name: str, new_name: str) -> dict:
+    """Rename a fire, moving everything the old name keyed.
+
+    The name is not just a label -- it identifies the fire in
+    ``state.fires``, names the working cache directory, names the
+    accepted-result directory, and is embedded in per-fire filenames.
+    Renaming only the label would leave the fire pointing at
+    directories under its old name: it would keep working until
+    something rebuilt a path from the new name, then fail confusingly.
+
+    Directories are moved first, because that is the step that can fail
+    (permissions, a file held open); in-memory state is only updated
+    once the filesystem is consistent, so a failure leaves the fire
+    exactly as it was rather than half-renamed.
+
+    Per-fire FILENAMES inside the cache keep the old name. They are
+    referenced through absolute paths held on the FireInfo, so they
+    stay valid, and renaming them would mean rewriting several
+    sidecars for a cosmetic gain. The accepted-result directory is
+    what carries the name into exports, and it is moved.
+
+    Returns ``{'ok': True, 'name': new}`` or
+    ``{'ok': False, 'error': ...}``.
+    """
+    from .validation import _validate_fire_name
+
+    old_name = (old_name or '').strip()
+    new_name = (new_name or '').strip()
+    if old_name not in state.fires:
+        return {'ok': False, 'error': 'Fire not found'}
+    if not new_name:
+        return {'ok': False, 'error': 'New name is required'}
+    if new_name == old_name:
+        return {'ok': True, 'name': old_name, 'unchanged': True}
+
+    fire = state.fires[old_name]
+
+    # Refuse while work is in flight: a worker thread holds this
+    # FireInfo and writes into the old directories, so moving them
+    # underneath it would corrupt the run.
+    busy = {FireStatus.PENDING, FireStatus.PREPARING, FireStatus.MAPPING}
+    if fire.status in busy:
+        return {'ok': False,
+                'error': f'Cannot rename while the fire is '
+                         f'{fire.status.value}. Wait for it to finish '
+                         f'or cancel it first.'}
+
+    others = [n for n in state.fires if n != old_name]
+    try:
+        new_name = _validate_fire_name(new_name, existing_names=others)
+    except ValueError as exc:
+        return {'ok': False, 'error': str(exc)}
+
+    moves = []
+    try:
+        # 1. Working cache directory.
+        old_cache = getattr(fire, 'cache_dir', '') or ''
+        if old_cache and os.path.isdir(old_cache):
+            parent = os.path.dirname(old_cache)
+            if os.path.basename(old_cache) == old_name:
+                new_cache = os.path.join(parent, new_name)
+                if os.path.exists(new_cache):
+                    return {'ok': False,
+                            'error': f'A directory already exists at '
+                                     f'{new_cache}'}
+                os.rename(old_cache, new_cache)
+                moves.append((new_cache, old_cache))
+                fire.cache_dir = new_cache
+
+        # 2. Accepted-result directory, which is what exports carry.
+        if state.output_root:
+            old_out = os.path.join(state.output_root, old_name)
+            new_out = os.path.join(state.output_root, new_name)
+            if os.path.isdir(old_out):
+                if os.path.exists(new_out):
+                    raise OSError(
+                        f'A result directory already exists at {new_out}')
+                os.rename(old_out, new_out)
+                moves.append((new_out, old_out))
+    except Exception as exc:
+        # Undo any move already made, so a partial rename cannot
+        # survive the failure.
+        for src, dst in reversed(moves):
+            try:
+                os.rename(src, dst)
+            except OSError:
+                pass
+        if moves:
+            fire.cache_dir = moves[0][1] if moves else fire.cache_dir
+        return {'ok': False,
+                'error': f'Could not move files: '
+                         f'{type(exc).__name__}: {exc}'}
+
+    # Filesystem is consistent; now update state under the lock.
+    with state.lock:
+        fire.fire_numbe = new_name
+        state.fires[new_name] = state.fires.pop(old_name)
+        # Every OTHER registry keyed by the fire name has to follow,
+        # or a later lookup under the new name misses and the fire
+        # looks idle when it is not (or a lock stops protecting it).
+        for attr in ('viirs_jobs', 'viirs_subprocs'):
+            d = getattr(state, attr, None)
+            if isinstance(d, dict) and old_name in d:
+                d[new_name] = d.pop(old_name)
+
+    # Module-level registries live outside AppState. Renaming is
+    # refused while the fire is busy, so these should be empty for it,
+    # but a stale entry would otherwise be orphaned under the old name.
+    for mod_name, reg_name in (('.app', '_serial_procs'),
+                               ('.brush', '_rebrush_procs'),
+                               ('.prepare', '_SOURCE_SWITCH_LOCKS')):
+        try:
+            if mod_name == '.prepare':
+                reg = globals().get(reg_name)
+            else:
+                import importlib
+                mod = importlib.import_module(mod_name, __package__)
+                reg = getattr(mod, reg_name, None)
+            if isinstance(reg, dict) and old_name in reg:
+                reg[new_name] = reg.pop(old_name)
+                sys.stderr.write(
+                    f'[rename] moved {reg_name} entry\n')
+        except Exception as exc:
+            sys.stderr.write(
+                f'[rename] could not move {reg_name}: {exc}\n')
+
+    with state.lock:
+
+        # Repoint absolute paths whose directory moved.
+        for attr in ('crop_bin', 'hint_bin', 'viirs_bin', 'perim_bin'):
+            val = getattr(fire, attr, '') or ''
+            for new_dir, old_dir in moves:
+                if val.startswith(old_dir + os.sep):
+                    setattr(fire, attr,
+                            new_dir + val[len(old_dir):])
+                    break
+
+    try:
+        _save_fire_state()
+    except Exception as exc:
+        sys.stderr.write(f'[rename] state save failed: {exc}\n')
+
+    sys.stderr.write(
+        f'[rename] "{old_name}" -> "{new_name}" '
+        f'({len(moves)} director(y/ies) moved)\n')
+    return {'ok': True, 'name': new_name, 'moved': len(moves)}
+
+
 def vectorize_classified(fire: FireInfo, clf_path: str = None,
                          log=None) -> dict:
     """Polygonize the accepted classification to Shapefile and KML.
