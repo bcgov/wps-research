@@ -15,6 +15,11 @@ state: AppState = None
 _kept_band_map = []
 
 
+def init(app_state: AppState):
+    global state
+    state = app_state
+
+
 def _fire_exclusions(fire):
     """The three band exclusions for *fire*, defaults applied."""
     return (bool(getattr(fire, 'exclude_b8', True)),
