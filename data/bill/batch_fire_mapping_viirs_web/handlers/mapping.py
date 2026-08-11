@@ -173,20 +173,47 @@ class MappingRoutes:
         # Clear console log for fresh mapping
         fire.console_log.clear()
 
+        # Set once the SSE socket dies. Mutable container so the nested
+        # sse() closure can update it.
+        _client_gone = {'v': False}
+
         def sse(event_type, data):
             payload = json.dumps({'type': event_type, **data})
             # Buffer for reconnection
             if event_type == 'log':
                 fire.console_log.append(data.get('message', ''))
+            if _client_gone['v']:
+                # Already disconnected: keep consuming the CLI's output
+                # into fire.console_log (done above) but stop writing to
+                # a dead socket.
+                return
             try:
                 self.wfile.write(f'data: {payload}\n\n'.encode())
                 self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError):
-                # Client disconnected. Propagate so _stream_subprocess's
-                # finally block kills the running CLI instead of orphaning
-                # it. Any outer sse('error', ...) will re-raise here too,
-                # which is fine — the finally blocks still clean up.
-                raise
+                # The client went away -- almost always because the user
+                # navigated to another fire or to New Fire, not because
+                # they wanted to cancel.
+                #
+                # This used to propagate so _stream_subprocess's finally
+                # block killed the CLI, which meant leaving the page
+                # threw away a mapping run that may have been minutes
+                # from finishing, with no warning. Mapping is expensive
+                # and the results are stored server-side, so the useful
+                # behaviour is to let it finish: the fire ends up
+                # MAPPED, results appear in the gallery, and the log is
+                # still captured in fire.console_log.
+                #
+                # Cancel remains available explicitly via the Cancel
+                # button, which is the honest way to stop a run.
+                _client_gone['v'] = True
+                sys.stderr.write(
+                    f'[mapping] {fire_numbe}: client disconnected; '
+                    f'continuing the run in the background\n')
+                fire.console_log.append(
+                    '  Client disconnected -- run continues in the '
+                    'background. Reopen this fire to see the result.')
+                return
 
         # GPU serialisation with queue tracking
         client_ip = self._client_ip()
@@ -270,6 +297,14 @@ class MappingRoutes:
                     fire.agreement_pct = _compute_agreement(fire)
                     fire.ml_area_ha = _compute_ml_area(fire)
                     _generate_result_preview(fire)
+                    # Always-on diagnostics; see mapping.diagnose_run.
+                    try:
+                        from ..mapping import diagnose_run
+                        for _l in diagnose_run(fire, label='map'):
+                            fire.console_log.append(_l)
+                    except Exception as _exc:
+                        fire.console_log.append(
+                            f'  [diag:map] unavailable: {_exc}')
                     fire.status = FireStatus.MAPPED
                     with state.lock:
                         fire.progress = {}
