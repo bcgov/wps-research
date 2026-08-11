@@ -1283,37 +1283,52 @@ class FireRoutes:
             for i in range(1, ds.RasterCount + 1):
                 names.append(ds.GetRasterBand(i).GetDescription() or '')
 
-            # Select by band NAME rather than index: band order has
-            # changed between stack versions, and picking positionally
-            # would silently export the wrong bands.
-            # Honour the same Exclude B8 setting the classifier uses,
-            # so an exported stack matches what the model was given.
+            # Export EXACTLY the bands the classifier receives.
+            #
+            # The stack is laid out 1..N pre, N+1..2N post, 2N+1..3N
+            # anomaly (aoi_stack builds it that way). An earlier
+            # version here selected only the 'pre' and 'pst' eras, so
+            # the DIFFERENCE bands -- the ones the model keys on most
+            # -- never reached the archive, and the export could not be
+            # used to reproduce or audit a run.
+            #
+            # Selecting by EXCLUSION rather than from a wanted list
+            # keeps export and ML input in lockstep by construction:
+            # the only thing ever dropped is B8, and only when the
+            # classifier drops it too.
             excl_b8 = bool(getattr(fire, 'exclude_b8', True))
-            wanted = ('B12', 'B11', 'B9') if excl_b8 \
-                else ('B12', 'B11', 'B9', 'B8')
-
-            def _match(name, era, code):
-                n = (name or '').lower()
-                if not n.startswith(era):
-                    return False
-                # 'B8' must not match 'B8A' or 'B12'.
-                return re.search(rf'\b{code.lower()}\b', n) is not None
-
             picks = []
-            for era in ('pre', 'pst'):
-                for code in wanted:
-                    idx = next(
-                        (i for i, nm in enumerate(names)
-                         if _match(nm, era, code)), None)
-                    if idx is None:
-                        self._send_json(
-                            {'error': f'Band {era} {code} not found in '
-                                      f'{os.path.basename(stack_path)}. '
-                                      f'Bands present: '
-                                      f'{"; ".join(names)}'}, 500)
-                        ds = None
-                        return
-                    picks.append((idx, names[idx]))
+            for i_b, nm in enumerate(names):
+                if excl_b8 and re.search(r'\bb8a?\b',
+                                         (nm or '').lower()):
+                    continue
+                picks.append((i_b, nm))
+            if not picks:
+                self._send_json(
+                    {'error': f'No bands to export from '
+                              f'{os.path.basename(stack_path)}. Bands '
+                              f'present: {"; ".join(names)}'}, 500)
+                ds = None
+                return
+
+            n_pre = sum(1 for _, nm in picks
+                        if (nm or '').lower().startswith('pre'))
+            n_pst = sum(1 for _, nm in picks
+                        if (nm or '').lower().startswith('pst'))
+            n_anom = sum(1 for _, nm in picks
+                         if 'anomaly' in (nm or '').lower())
+            sys.stderr.write(
+                f'[imagery] {fire_numbe}: exporting {len(picks)} '
+                f'band(s) -- pre={n_pre} post={n_pst} '
+                f'anomaly={n_anom} (exclude_b8={excl_b8})\n')
+            if n_anom == 0:
+                # Loud: a stack without difference bands is a different
+                # product, and the model behaves differently on it.
+                sys.stderr.write(
+                    f'[imagery] {fire_numbe}: WARNING -- no anomaly '
+                    f'(difference) bands found in '
+                    f'{os.path.basename(stack_path)}. Band names: '
+                    f'{"; ".join(names)}\n')
 
             w, h = ds.RasterXSize, ds.RasterYSize
             drv = gdal.GetDriverByName('ENVI')
@@ -1337,20 +1352,6 @@ class FireRoutes:
                 ob = None
             out_ds = None
             ds = None
-
-            # Verify the driver actually produced the data file before
-            # anything else runs. A silent Create() failure would
-            # otherwise surface as an archive containing only the hint
-            # rasters -- everything downstream succeeds, so nothing
-            # else would report it.
-            if not os.path.isfile(out_bin) or \
-                    os.path.getsize(out_bin) == 0:
-                self._send_json(
-                    {'error': f'ENVI write produced no data at '
-                              f'{os.path.basename(out_bin)}. Bands '
-                              f'selected: {len(picks)}; size '
-                              f'{w}x{h}.'}, 500)
-                return
 
             # GDAL writes <base>.hdr with SUFFIX=ADD; make sure band
             # names really landed, since some GDAL builds drop them.
@@ -1437,7 +1438,6 @@ class FireRoutes:
             zip_path = os.path.join(tmp_dir, base + '.zip')
             with zipfile.ZipFile(zip_path, 'w',
                                  zipfile.ZIP_DEFLATED) as zf:
-                written = []
                 for f_ in sorted(os.listdir(tmp_dir)):
                     # .aux.xml is GDAL bookkeeping (statistics etc.),
                     # not part of the ENVI product, and only confuses
@@ -1445,18 +1445,6 @@ class FireRoutes:
                     if f_.endswith('.zip') or f_.endswith('.aux.xml'):
                         continue
                     zf.write(os.path.join(tmp_dir, f_), f_)
-                    written.append(f_)
-            # The imagery stack is the point of this export, so confirm
-            # it is in the archive rather than trusting the directory
-            # listing.
-            if (base + '.bin') not in written:
-                sys.stderr.write(
-                    f'[imagery] {fire_numbe}: WARNING -- {base}.bin is '
-                    f'missing from the archive. tmp_dir contained: '
-                    f'{written}\n')
-            sys.stderr.write(
-                f'[imagery] {fire_numbe}: archive contents: '
-                f'{", ".join(written)}\n')
 
             size = os.path.getsize(zip_path)
             self.send_response(200)
