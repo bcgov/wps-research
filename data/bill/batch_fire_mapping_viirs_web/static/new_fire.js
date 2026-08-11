@@ -1045,6 +1045,10 @@ function overviewFullResScale() {
     return Math.min(s, ZOOM_MAX);
 }
 
+// Retained but no longer wired to a click: click-without-drag used to
+// toggle zoom, which reset the view on a stray click. Kept because the
+// zoom-in/out logic is still the correct behaviour for a deliberate
+// control, and a future zoom button can call it directly.
 function toggleClickZoom(mx, my) {
     const full = overviewFullResScale();
     if (full === null) {
@@ -1125,17 +1129,18 @@ window.addEventListener('mouseup', (ev) => {
         drag = null;
 
         // No meaningful movement => this was a click, not a drag.
-        // Put the AOI back exactly as it was and use the gesture to
-        // toggle zoom instead. Nothing about the bbox changed, so the
-        // cached preview stays valid and is deliberately not
-        // invalidated here.
+        // Restore the AOI exactly as it was and do nothing else.
+        //
+        // This used to also toggle zoom, which meant a stray click --
+        // easy while positioning for a drag -- silently reset the view
+        // and lost the framing the user had set up. Zooming stays
+        // available deliberately: the wheel, and the zoom/reset
+        // buttons. Dragging to create an AOI is unaffected.
         if (!wasDragging.moved && wasDragging.downScreen) {
             bbox = wasDragging.bboxBefore
                 ? Object.assign({}, wasDragging.bboxBefore) : null;
             if (bbox) updateReadout(); else clearReadout();
             redraw();
-            toggleClickZoom(wasDragging.downScreen[0],
-                            wasDragging.downScreen[1]);
             return;
         }
 

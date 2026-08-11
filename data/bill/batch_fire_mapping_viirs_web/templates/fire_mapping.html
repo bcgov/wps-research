@@ -56,15 +56,30 @@
             <select id="view-select" disabled onchange="onViewDropdownChange()">
                 <option value="">Loading...</option>
             </select>
-            <!-- Second selector, shown only in split view. With one
-                 dropdown the target pane was whichever was "active",
-                 which is invisible state the user has to track -- and
-                 clicking a pane to select it also triggers the peek,
-                 making it ambiguous. An explicit control per pane
-                 removes the guesswork entirely. -->
-            <select id="view-select-right" style="display:none"
-                    onchange="onRightViewDropdownChange()"
-                    title="View shown in the right pane"></select>
+            <!-- Right-pane controls, shown only in split view.
+                 Grouped and pushed right so they sit above the pane
+                 they drive: with one set of dropdowns the target pane
+                 was whichever was "active", which is invisible state
+                 the user has to track, and clicking a pane to select
+                 it also triggers the peek. A labelled group per pane
+                 removes the guesswork. -->
+            <span id="right-pane-controls"
+                  style="display:none;align-items:center;gap:6px;
+                         margin-left:auto;padding-left:12px;
+                         border-left:1px solid #ddd">
+                <span style="font-size:10px;color:#888;
+                             text-transform:uppercase;
+                             letter-spacing:0.5px">right</span>
+                <select id="post-source-select-right"
+                        onchange="onRightPostSourceChange()"
+                        title="Imagery source for the right pane">
+                    <option value="l2">L2 recent tile</option>
+                    <option value="mrap">MRAP composite</option>
+                </select>
+                <select id="view-select-right"
+                        onchange="onRightViewDropdownChange()"
+                        title="View shown in the right pane"></select>
+            </span>
             <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="zoomIn()">+</button>
             <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="zoomOut()">-</button>
             <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="zoomReset()">Fit</button>
@@ -445,6 +460,15 @@ let currentHintMode = 'redwins_post';
 // median composite either way, which is why 'Pre-fire' is unaffected
 // by this control while 'Post-fire' and 'Diff 1' follow it.
 let currentPostSource = 'l2';
+// Source shown in the RIGHT pane. Independent of currentPostSource so
+// the split view can compare L2 against MRAP directly -- the whole
+// point of comparing sources side by side.
+//
+// Only the LEFT pane's source drives the server: fire.crop_bin, the
+// hint and mapping all follow it. The right pane reads previews that
+// were stashed per source when they were generated, so showing the
+// other source there costs a fetch and nothing more.
+let rightPostSource = 'l2';
 
 // ---- Preview blob cache -------------------------------------------
 // Keyed by "<postSource>:<view>:<stamp>". Holds object URLs so that
@@ -471,7 +495,7 @@ let _hintStamp = Date.now();
 
 function previewStamp() { return _previewStamp; }
 
-function cacheKeyFor(viewKey) {
+function cacheKeyFor(viewKey, pane) {
     // Only the stack-derived views differ between post sources and are
     // worth caching; run-specific images already carry their own ids.
     if (!['pre', 'post', 'diff1', 'diff2', 'diff3', 'hint'].includes(viewKey))
@@ -480,7 +504,8 @@ function cacheKeyFor(viewKey) {
     // depends only on the post source.
     const modePart = (viewKey === 'hint') ? `:${currentHintMode}` : '';
     const stamp = (viewKey === 'hint') ? _hintStamp : _previewStamp;
-    return `${currentPostSource}:${viewKey}${modePart}:${stamp}`;
+    const src = (pane === 'right') ? rightPostSource : currentPostSource;
+    return `${src}:${viewKey}${modePart}:${stamp}`;
 }
 
 // In-flight fetches, keyed the same way as _previewBlobs. Without
@@ -709,6 +734,14 @@ async function _onPostSourceChangeInner() {
                 ? ':' + currentHintMode : ''}:${_previewStamp}`);
     if (canSwapInstantly) {
         currentPostSource = src;
+        if (!splitActive) {
+            // Not comparing: keep the right pane aligned so entering
+            // split shows the same imagery on both sides.
+            rightPostSource = src;
+            const rs1 = document.getElementById(
+                'post-source-select-right');
+            if (rs1) rs1.value = src;
+        }
         loadPaneImage('left', leftView);
         if (splitActive && rightView) loadPaneImage('right', rightView);
     }
@@ -2753,7 +2786,7 @@ const _paneFitState = {
 // collapse to the last one rather than racing.
 const _paneGen = {left: 0, right: 0};
 
-function previewUrlFor(viewKey) {
+function previewUrlFor(viewKey, pane) {
     const runActive = selectedRun !== null && RUN_VIEWS.has(viewKey);
     if (runActive && viewKey === 'result') {
         return `/api/fire/${encodeURIComponent(FIRE)}/serial/${selectedRun}/image?t=${Date.now()}`;
@@ -2770,8 +2803,10 @@ function previewUrlFor(viewKey) {
     // different server-side files, not just different cache entries.
     const modePart = (viewKey === 'hint') ? `&hint=${currentHintMode}` : '';
     const stamp = (viewKey === 'hint') ? _hintStamp : previewStamp();
+    // Per-pane source, so the right pane can show the other imagery.
+    const src = (pane === 'right') ? rightPostSource : currentPostSource;
     return `/api/fire/${encodeURIComponent(FIRE)}/preview/${viewKey}`
-        + `?src=${currentPostSource}${modePart}&t=${stamp}`;
+        + `?src=${src}${modePart}&t=${stamp}`;
 }
 
 // Composite the vector overlays onto a decoded image, returning a blob
@@ -2893,8 +2928,8 @@ async function loadPaneImage(pane, viewKey) {
         }
     }
 
-    const url = previewUrlFor(viewKey);
-    const ck = cacheKeyFor(viewKey);
+    const url = previewUrlFor(viewKey, pane);
+    const ck = cacheKeyFor(viewKey, pane);
 
     // Progressive first paint: show the small proxy immediately, then
     // replace it with the full image. On a slow link the pane goes
@@ -3078,6 +3113,30 @@ function onViewDropdownChange() {
     loadPaneImage(splitActive ? 'left' : activePane, viewKey);
 }
 
+async function onRightPostSourceChange() {
+    const sel = document.getElementById('post-source-select-right');
+    if (!sel) return;
+    const src = sel.value;
+    if (src === rightPostSource) return;
+
+    // Purely client-side: unlike the left selector this does NOT call
+    // /post_source, because that repoints fire.crop_bin and would
+    // change what mapping reads. The right pane is for comparison, so
+    // it just displays the other source's already-stashed previews.
+    rightPostSource = src;
+    layerBusyBegin(src === 'l2' ? 'Loading L2 recent tile (right)'
+                                : 'Loading MRAP composite (right)');
+    try {
+        await loadPaneImage('right', rightView || 'post');
+        updateSubtitle('right', rightView || 'post');
+    } catch (err) {
+        log(`[perf] right-pane source switch failed: ${err.message}`,
+            'error');
+    } finally {
+        layerBusyEnd();
+    }
+}
+
 function onRightViewDropdownChange() {
     const viewKey = document.getElementById('view-select-right').value;
     if (!viewKey) return;
@@ -3093,7 +3152,16 @@ function syncRightViewOptions() {
     b.innerHTML = a.innerHTML;
     if (want && b.querySelector(`option[value="${want}"]`)) b.value = want;
     b.disabled = a.disabled;
-    b.style.display = splitActive ? '' : 'none';
+    const grp = document.getElementById('right-pane-controls');
+    if (grp) grp.style.display = splitActive ? 'inline-flex' : 'none';
+    const rs = document.getElementById('post-source-select-right');
+    if (rs) {
+        rs.disabled = a.disabled;
+        // Entering split, start the right pane on the source the left
+        // pane is showing: a comparison that begins identical is
+        // predictable, and switching one side is one click away.
+        if (splitActive) rs.value = rightPostSource;
+    }
 }
 
 // Download button is only meaningful once a result is on disk in the
@@ -4329,6 +4397,13 @@ function toggleSplit() {
         }, 50);
     } else {
         container.classList.remove('split');
+        // Leaving split: the surviving pane is the left one, so the
+        // right pane's independent source is no longer meaningful.
+        // Reset it to the left's, or re-entering split would silently
+        // start on whatever was chosen last time.
+        rightPostSource = currentPostSource;
+        const rs0 = document.getElementById('post-source-select-right');
+        if (rs0) rs0.value = rightPostSource;
         syncRightViewOptions();
         // Close the pane the user is NOT focused on
         if (activePane === 'right') {
