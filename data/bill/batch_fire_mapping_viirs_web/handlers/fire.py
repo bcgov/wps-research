@@ -709,6 +709,9 @@ class FireRoutes:
                'post_source': getattr(fire, 'post_source', ''),
                'hint_mode': getattr(fire, 'hint_mode', ''),
             'exclude_b8': bool(getattr(fire, 'exclude_b8', True)),
+            'exclude_pre_fire': bool(
+                getattr(fire, 'exclude_pre_fire', True)),
+            'exclude_diff': bool(getattr(fire, 'exclude_diff', True)),
                'status': str(getattr(fire.status, 'value', fire.status)),
                'padding_used': getattr(fire, 'padding_used', None),
                'sample_size': getattr(fire, 'sample_size', None),
@@ -1217,17 +1220,25 @@ class FireRoutes:
             body = self._read_body() or {}
         except Exception:
             body = {}
-        val = bool(body.get('exclude_b8', True))
+        # One endpoint for all three exclusions: they are the same
+        # kind of setting and always applied together, so a single
+        # round trip keeps them consistent.
         with state.lock:
-            fire.exclude_b8 = val
+            for key in ('exclude_b8', 'exclude_pre_fire',
+                        'exclude_diff'):
+                if key in body:
+                    setattr(fire, key, bool(body[key]))
+        val = bool(getattr(fire, 'exclude_b8', True))
         try:
             from ..persistence import _save_fire_state
             _save_fire_state()
         except Exception:
             pass
-        sys.stderr.write(
-            f'[b8] {fire_numbe}: exclude_b8 = {val}\n')
-        self._send_json({'ok': True, 'exclude_b8': val})
+        flags = {k: bool(getattr(fire, k, True))
+                 for k in ('exclude_b8', 'exclude_pre_fire',
+                           'exclude_diff')}
+        sys.stderr.write(f'[bands] {fire_numbe}: {flags}\n')
+        self._send_json({'ok': True, **flags})
 
     def handle_api_download_imagery(self, fire_numbe):
         """Export the pre/post reflectance bands as an ENVI stack.
@@ -1283,26 +1294,16 @@ class FireRoutes:
             for i in range(1, ds.RasterCount + 1):
                 names.append(ds.GetRasterBand(i).GetDescription() or '')
 
-            # Export EXACTLY the bands the classifier receives.
-            #
-            # The stack is laid out 1..N pre, N+1..2N post, 2N+1..3N
-            # anomaly (aoi_stack builds it that way). An earlier
-            # version here selected only the 'pre' and 'pst' eras, so
-            # the DIFFERENCE bands -- the ones the model keys on most
-            # -- never reached the archive, and the export could not be
-            # used to reproduce or audit a run.
-            #
-            # Selecting by EXCLUSION rather than from a wanted list
-            # keeps export and ML input in lockstep by construction:
-            # the only thing ever dropped is B8, and only when the
-            # classifier drops it too.
-            excl_b8 = bool(getattr(fire, 'exclude_b8', True))
-            picks = []
-            for i_b, nm in enumerate(names):
-                if excl_b8 and re.search(r'\bb8a?\b',
-                                         (nm or '').lower()):
-                    continue
-                picks.append((i_b, nm))
+            # Export EXACTLY the bands the classifier receives, by
+            # calling the SAME selector. Sharing the implementation is
+            # the only reliable way to keep the archive and the model
+            # input identical; two parallel band lists drifted before.
+            from ..band_select import select_bands
+            excl = (bool(getattr(fire, 'exclude_b8', True)),
+                    bool(getattr(fire, 'exclude_pre_fire', True)),
+                    bool(getattr(fire, 'exclude_diff', True)))
+            sel = select_bands(names, *excl)
+            picks = [(i_b, names[i_b]) for i_b in sel['keep']]
             if not picks:
                 self._send_json(
                     {'error': f'No bands to export from '
@@ -1310,25 +1311,8 @@ class FireRoutes:
                               f'present: {"; ".join(names)}'}, 500)
                 ds = None
                 return
-
-            n_pre = sum(1 for _, nm in picks
-                        if (nm or '').lower().startswith('pre'))
-            n_pst = sum(1 for _, nm in picks
-                        if (nm or '').lower().startswith('pst'))
-            n_anom = sum(1 for _, nm in picks
-                         if 'anomaly' in (nm or '').lower())
             sys.stderr.write(
-                f'[imagery] {fire_numbe}: exporting {len(picks)} '
-                f'band(s) -- pre={n_pre} post={n_pst} '
-                f'anomaly={n_anom} (exclude_b8={excl_b8})\n')
-            if n_anom == 0:
-                # Loud: a stack without difference bands is a different
-                # product, and the model behaves differently on it.
-                sys.stderr.write(
-                    f'[imagery] {fire_numbe}: WARNING -- no anomaly '
-                    f'(difference) bands found in '
-                    f'{os.path.basename(stack_path)}. Band names: '
-                    f'{"; ".join(names)}\n')
+                f'[imagery] {fire_numbe}: {sel["summary"]}\n')
 
             w, h = ds.RasterXSize, ds.RasterYSize
             drv = gdal.GetDriverByName('ENVI')

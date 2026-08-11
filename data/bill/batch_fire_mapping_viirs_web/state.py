@@ -122,6 +122,12 @@ class FireInfo:
     # width. Visualisations and overviews are unaffected -- none of
     # them use B8 -- so this only changes what the classifier sees.
     exclude_b8: bool = True
+    # Withhold whole eras from the classifier and the imagery export.
+    # Both default ON: the post bands plus a hint carry most of the
+    # burn signal, and a narrower stack samples faster. Visualisations
+    # are unaffected -- these only change what the model receives.
+    exclude_pre_fire: bool = True
+    exclude_diff: bool = True
     # Which post imagery the stack is built from:
     #   'l2'   -- most recent L2A tiles over the AOI (default; recent,
     #             may contain cloud)

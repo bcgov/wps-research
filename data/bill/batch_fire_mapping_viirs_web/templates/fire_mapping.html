@@ -60,7 +60,7 @@
             <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="zoomOut()">-</button>
             <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="zoomReset()">Fit</button>
             <button class="btn btn-secondary" id="btn-overlays" style="font-size:11px;padding:2px 8px;background:#3a7bd5;color:#fff" onclick="toggleFireOverlays()" title="Sentinel-2 tile grid (blue) and BCWS fires">Overlays</button>
-            <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" id="btn-split" onclick="toggleSplit()">Split</button>
+            <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" id="btn-split" onclick="toggleSplit(true)">Split</button>
             <!-- Imagery loading state, in the spare toolbar space.
                  Switching source can rebuild a stack server-side and
                  refetch several MB; without this the interface looks
@@ -87,8 +87,27 @@
                           display:inline-flex;align-items:center;
                           gap:4px;cursor:pointer;white-space:nowrap">
               <input type="checkbox" id="exclude-b8" checked
-                     onchange="onExcludeB8Change()">
+                     onchange="onBandExclusionChange()">
               Exclude B8
+            </label>
+            <label title="Drop the pre-fire bands from the stack sent to
+                          ML fire mapping and from Download imagery."
+                   style="font-size:11px;margin-left:8px;
+                          display:inline-flex;align-items:center;
+                          gap:4px;cursor:pointer;white-space:nowrap">
+              <input type="checkbox" id="exclude-pre-fire" checked
+                     onchange="onBandExclusionChange()">
+              Exclude pre-fire
+            </label>
+            <label title="Drop the difference/anomaly bands from the
+                          stack sent to ML fire mapping and from
+                          Download imagery."
+                   style="font-size:11px;margin-left:8px;
+                          display:inline-flex;align-items:center;
+                          gap:4px;cursor:pointer;white-space:nowrap">
+              <input type="checkbox" id="exclude-diff" checked
+                     onchange="onBandExclusionChange()">
+              Exclude diff
             </label>
             <!-- Right-pane controls, shown only in split view.
                  Grouped and pushed right so they sit above the pane
@@ -1129,9 +1148,13 @@ async function prepareFire(padding) {
             `AOI: <strong>${cropW}&times;${cropH} px</strong> &middot; ` +
             `Accum: <strong>${data.acc_start || '?'} &rarr; ${data.acc_end || '?'}</strong>`;
         currentHintMode = data.hint_mode || 'redwins_post';
-        const b8 = document.getElementById('exclude-b8');
-        if (b8 && typeof data.exclude_b8 === 'boolean') {
-            b8.checked = data.exclude_b8;
+        for (const [id, key] of [['exclude-b8', 'exclude_b8'],
+                                 ['exclude-pre-fire', 'exclude_pre_fire'],
+                                 ['exclude-diff', 'exclude_diff']]) {
+            const el = document.getElementById(id);
+            if (el && typeof data[key] === 'boolean') {
+                el.checked = data[key];
+            }
         }
         renderHintModeButtons();
         currentPostSource = data.post_source || 'l2';
@@ -1510,35 +1533,61 @@ function fmtWhen(ts) {
 // RIGHT-MOST view: the right pane's selector when split, otherwise the
 // single one. Reading it at click time (rather than baking a URL into
 // the template) keeps it correct as the user switches sources.
-async function onExcludeB8Change() {
-    const el = document.getElementById('exclude-b8');
-    if (!el) return;
-    const val = !!el.checked;
-    el.disabled = true;
+// All three band exclusions share one handler and one round trip:
+// they are the same kind of setting, always applied together, and
+// sending them as a set keeps the server's view consistent with the
+// boxes.
+async function onBandExclusionChange() {
+    const ids = {
+        'exclude-b8': 'exclude_b8',
+        'exclude-pre-fire': 'exclude_pre_fire',
+        'exclude-diff': 'exclude_diff',
+    };
+    const els = {};
+    const payload = {};
+    for (const [id, key] of Object.entries(ids)) {
+        const el = document.getElementById(id);
+        if (!el) continue;
+        els[key] = el;
+        payload[key] = !!el.checked;
+        el.disabled = true;
+    }
+    const before = Object.fromEntries(
+        Object.entries(payload).map(([k, v]) => [k, v]));
     try {
         const r = await fetch(
             `/api/fire/${encodeURIComponent(FIRE)}/exclude_b8`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json',
                           'X-Requested-With': 'fetch'},
-                body: JSON.stringify({exclude_b8: val}),
+                body: JSON.stringify(payload),
             });
         const j = await r.json().catch(() => ({}));
         if (!r.ok || j.error) {
-            // Put the box back: leaving it showing a state the server
-            // did not accept would silently mislead the next run.
-            el.checked = !val;
-            log(`Could not change Exclude B8: `
+            // Revert: boxes showing a state the server did not accept
+            // would silently mislead the next run.
+            for (const [k, el] of Object.entries(els)) {
+                el.checked = !before[k];
+            }
+            log(`Could not change band exclusions: `
                 + `${j.error || ('HTTP ' + r.status)}`, 'error');
             return;
         }
-        log(`[b8] Exclude B8 ${val ? 'ON' : 'OFF'} — applies to the `
-            + `next mapping run and to Download imagery`, 'dim');
+        for (const [k, el] of Object.entries(els)) {
+            if (typeof j[k] === 'boolean') el.checked = j[k];
+        }
+        const on = Object.entries(payload)
+            .filter(([, v]) => v)
+            .map(([k]) => k.replace('exclude_', ''));
+        log(`[bands] excluding ${on.join(', ') || 'nothing'} — applies `
+            + `to the next mapping run and to Download imagery`, 'dim');
     } catch (err) {
-        el.checked = !val;
-        log(`Could not change Exclude B8: ${err.message}`, 'error');
+        for (const [k, el] of Object.entries(els)) {
+            el.checked = !before[k];
+        }
+        log(`Could not change band exclusions: ${err.message}`, 'error');
     } finally {
-        el.disabled = false;
+        for (const el of Object.values(els)) el.disabled = false;
     }
 }
 
@@ -4502,7 +4551,11 @@ function closeSplit() {
     if (sel.querySelector(`option[value="${leftView}"]`)) sel.value = leftView;
 }
 
-function toggleSplit() {
+// `manual` is true only for the toolbar button. The two programmatic
+// callers open split to show a finished ML result, and must keep
+// choosing that view themselves.
+function toggleSplit(manual) {
+    const openingManually = manual === true && !splitActive;
     splitActive = !splitActive;
     const container = document.getElementById('image-viewer-container');
     const leftArea = document.getElementById('image-area');
@@ -4513,6 +4566,18 @@ function toggleSplit() {
     if (splitActive) {
         container.classList.add('split');
         rightArea.style.display = '';
+        if (openingManually) {
+            // A manual split is nearly always "show me the other
+            // source" -- comparing a pane with itself is not worth a
+            // click. Default the right pane to post-fire from the
+            // source the left pane is NOT showing.
+            rightPostSource = (currentPostSource === 'l2')
+                ? 'mrap' : 'l2';
+            rightView = 'post';
+            const rs = document.getElementById(
+                'post-source-select-right');
+            if (rs) rs.value = rightPostSource;
+        }
         syncRightViewOptions();
         btnSplit.style.background = '#0066cc';
         btnSplit.style.color = '#fff';

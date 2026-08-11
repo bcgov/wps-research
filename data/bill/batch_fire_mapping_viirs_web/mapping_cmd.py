@@ -9,106 +9,62 @@ from .validation import _validate_param, _validate_embed_bands
 state: AppState = None
 
 
-# Which original band indices survived B8 removal, in output order.
-# Set when the reduced stack is built (or found cached) and consumed
-# when embed_bands is translated, so the two cannot disagree.
+# Bands kept by the most recent reduction, in output order (original
+# 0-based indices). Consumed when embed_bands is remapped, so the two
+# cannot disagree.
 _kept_band_map = []
 
 
-def _publish_kept_bands(keep):
+def _fire_exclusions(fire):
+    """The three band exclusions for *fire*, defaults applied."""
+    return (bool(getattr(fire, 'exclude_b8', True)),
+            bool(getattr(fire, 'exclude_pre_fire', True)),
+            bool(getattr(fire, 'exclude_diff', True)))
+
+
+def reduced_stack(src_path: str, fire, log=None):
+    """A copy of *src_path* holding only the bands the model should see.
+
+    Built as a real file rather than by teaching the CLI to skip bands:
+    the CLI treats its input as an opaque stack, and every downstream
+    artifact (classified raster, geo sidecars, previews) keys off that
+    file's geometry. Reducing here keeps all of that untouched.
+
+    Cached beside the source, with the exclusion combination in the
+    filename -- a cache keyed only on "reduced" would serve a stack
+    built for different settings and silently feed the classifier the
+    wrong bands.
+
+    Returns the original path when nothing is excluded, or on any
+    failure: a wider stack still produces a result, an absent one does
+    not.
+    """
     global _kept_band_map
-    _kept_band_map = list(keep or [])
-
-
-def _remap_embed_bands(spec: str, kept, log=None) -> str:
-    """Translate embed_bands indices onto a B8-free stack.
-
-    *kept* is the list of ORIGINAL 0-based band indices that survive,
-    in output order. A saved selection like "1,...,12" refers to the
-    full stack; after B8 removal the same bands live at new positions
-    and the count is smaller, so passing the original string either
-    selects the wrong bands or overruns the stack.
-
-    Indices naming a dropped band are removed. An empty result means
-    "all bands", which is the correct fallback -- the CLI's own
-    default -- rather than an empty selection.
-    """
-    try:
-        old_to_new = {orig: j + 1 for j, orig in enumerate(kept)}
-        out, dropped = [], []
-        for tok in str(spec).split(','):
-            tok = tok.strip()
-            if not tok:
-                continue
-            try:
-                one = int(tok)
-            except ValueError:
-                continue
-            new = old_to_new.get(one - 1)
-            if new is None:
-                dropped.append(one)
-            else:
-                out.append(new)
-        msg = (f'[b8] embed_bands remapped for the B8-free stack: '
-               f'"{spec}" -> "{",".join(str(i) for i in out) or "all"}"'
-               + (f' (dropped B8 band(s) {dropped})' if dropped else ''))
-        sys.stderr.write(msg + '\n')
-        if log:
-            try:
-                log('  ' + msg)
-            except Exception:
-                pass
-        return ','.join(str(i) for i in out)
-    except Exception as exc:
-        sys.stderr.write(f'[b8] embed_bands remap failed ({exc}); '
-                         f'letting the CLI use all bands\n')
-        return ''
-
-
-def _b8_names(names):
-    """Indices of B8/B8A bands (any era, including anomaly)."""
-    import re as _re
-    out = []
-    for i, nm in enumerate(names or []):
-        n = (nm or '').lower()
-        if _re.search(r'\bb8a?\b', n):
-            out.append(i)
-    return out
-
-
-def stack_without_b8(src_path: str, log=None):
-    """A copy of *src_path* with every B8/B8A band removed.
-
-    Built as a real file rather than by teaching the CLI to skip
-    bands: the CLI treats its input as an opaque stack, and every
-    downstream artifact (classified raster, geo sidecars, previews)
-    keys off that file's geometry. Dropping bands here keeps all of
-    that untouched and means the change cannot leak into anything but
-    what the classifier reads.
-
-    Cached beside the source and reused while it is newer, so this
-    costs one pass the first time and nothing afterwards. Returns the
-    original path if there is nothing to drop or anything goes wrong --
-    a slightly wider stack is far better than a failed run.
-    """
     try:
         from osgeo import gdal
+        from .band_select import select_bands, selection_tag
+
+        x_b8, x_pre, x_diff = _fire_exclusions(fire)
+        if not (x_b8 or x_pre or x_diff):
+            _kept_band_map = []
+            return src_path
+
         ds = gdal.Open(src_path, gdal.GA_ReadOnly)
         if ds is None:
             return src_path
         names = [ds.GetRasterBand(i + 1).GetDescription() or ''
                  for i in range(ds.RasterCount)]
-        drop = set(_b8_names(names))
-        if not drop:
+
+        sel = select_bands(names, x_b8, x_pre, x_diff, log=log)
+        keep = sel['keep']
+        _kept_band_map = list(keep)
+        if len(keep) == len(names):
+            # Nothing actually matched (e.g. a stack with no B8).
             ds = None
             return src_path
-        keep = [i for i in range(ds.RasterCount) if i not in drop]
-        # Published so embed_bands can be remapped onto this stack.
-        # Recorded even on the cached-file path below, since the
-        # mapping is a property of the band list, not of the write.
-        _publish_kept_bands(keep)
 
-        out_path = os.path.splitext(src_path)[0] + '_nob8.bin'
+        tag = selection_tag(x_b8, x_pre, x_diff)
+        out_path = f'{os.path.splitext(src_path)[0]}_{tag}.bin'
         try:
             if (os.path.isfile(out_path)
                     and os.path.getmtime(out_path)
@@ -124,33 +80,22 @@ def stack_without_b8(src_path: str, log=None):
                          options=['INTERLEAVE=BSQ'])
         out.SetGeoTransform(ds.GetGeoTransform())
         out.SetProjection(ds.GetProjection())
-        for j, i in enumerate(keep, start=1):
-            b = out.GetRasterBand(j)
-            b.WriteArray(ds.GetRasterBand(i + 1).ReadAsArray())
-            b.SetDescription(names[i])
+        for j_, i_ in enumerate(keep, start=1):
+            b = out.GetRasterBand(j_)
+            b.WriteArray(ds.GetRasterBand(i_ + 1).ReadAsArray())
+            b.SetDescription(names[i_])
             b = None
         out = None
         ds = None
-        msg = (f'[b8] excluded {len(drop)} B8/B8A band(s); '
-               f'classifier sees {len(keep)} of {len(names)} bands '
-               f'-> {os.path.basename(out_path)}')
-        sys.stderr.write(msg + '\n')
-        if log:
-            try:
-                log('  ' + msg)
-            except Exception:
-                pass
+        sys.stderr.write(
+            f'[bands] classifier input -> {os.path.basename(out_path)}\n')
         return out_path
     except Exception as exc:
         sys.stderr.write(
-            f'[b8] could not build a B8-free stack ({exc}); '
+            f'[bands] could not build the reduced stack ({exc}); '
             f'using the full stack\n')
+        _kept_band_map = []
         return src_path
-
-
-def init(app_state: AppState):
-    global state
-    state = app_state
 
 
 def _build_mapping_cmd(fire: FireInfo, params: dict,
@@ -185,10 +130,8 @@ def _build_mapping_cmd(fire: FireInfo, params: dict,
         '-u',
         state.cli_script,
         '--sample_size', str(sample_size),
-        (stack_without_b8(
-            fire.crop_bin,
-            log=lambda m: fire.console_log.append(m))
-         if getattr(fire, 'exclude_b8', True) else fire.crop_bin),
+        reduced_stack(fire.crop_bin, fire,
+                      log=lambda m: fire.console_log.append(m)),
         fire.hint_bin,
         '--fire_numbe', fire.fire_numbe,
         '--start_date', fire.acc_start,
@@ -277,10 +220,11 @@ def _build_mapping_cmd(fire: FireInfo, params: dict,
             # bands -- and any index past the new count makes the
             # embedding step fail outright. Remap to the surviving
             # positions rather than passing stale numbers through.
-            if getattr(fire, 'exclude_b8', True) and _kept_band_map:
-                eb = _remap_embed_bands(eb, _kept_band_map,
-                                        log=lambda m:
-                                        fire.console_log.append(m))
+            if _kept_band_map:
+                from .band_select import remap_indices
+                eb = remap_indices(
+                    eb, _kept_band_map,
+                    log=lambda m: fire.console_log.append(m))
             if eb:
                 cmd += ['--embed_bands', eb]
 
