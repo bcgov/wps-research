@@ -56,6 +56,26 @@
             <select id="view-select" disabled onchange="onViewDropdownChange()">
                 <option value="">Loading...</option>
             </select>
+            <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="zoomIn()">+</button>
+            <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="zoomOut()">-</button>
+            <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="zoomReset()">Fit</button>
+            <button class="btn btn-secondary" id="btn-overlays" style="font-size:11px;padding:2px 8px;background:#3a7bd5;color:#fff" onclick="toggleFireOverlays()" title="Sentinel-2 tile grid (blue) and BCWS fires">Overlays</button>
+            <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" id="btn-split" onclick="toggleSplit()">Split</button>
+            <!-- Imagery loading state, in the spare toolbar space.
+                 Switching source can rebuild a stack server-side and
+                 refetch several MB; without this the interface looks
+                 idle and a slow load is indistinguishable from a stuck
+                 one. -->
+            <!-- Reserves its width permanently (visibility, not
+                 display) so text appearing and the elapsed counter
+                 changing width cannot reflow the toolbar and make the
+                 controls jump while a layer loads. -->
+            <span id="layer-status" style="visibility:hidden;
+                  font-size:11px;color:#555;margin-left:10px;
+                  white-space:nowrap;display:inline-block;
+                  min-width:200px"></span>
+            <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;display:none" id="btn-sync" onclick="toggleSync()" title="Sync pan/zoom between panes">Sync</button>
+            <span class="info" id="zoom-info"></span>
             <!-- Right-pane controls, shown only in split view.
                  Grouped and pushed right so they sit above the pane
                  they drive: with one set of dropdowns the target pane
@@ -63,8 +83,14 @@
                  the user has to track, and clicking a pane to select
                  it also triggers the peek. A labelled group per pane
                  removes the guesswork. -->
+            <!-- visibility rather than display: the group keeps its
+                 slot in the layout at all times, so entering or
+                 leaving split view -- and switching the right source,
+                 which re-renders these selects -- cannot move the
+                 controls to a different position. -->
             <span id="right-pane-controls"
-                  style="display:none;align-items:center;gap:6px;
+                  style="visibility:hidden;display:inline-flex;
+                         align-items:center;gap:6px;
                          margin-left:auto;padding-left:12px;
                          border-left:1px solid #ddd">
                 <span style="font-size:10px;color:#888;
@@ -80,20 +106,6 @@
                         onchange="onRightViewDropdownChange()"
                         title="View shown in the right pane"></select>
             </span>
-            <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="zoomIn()">+</button>
-            <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="zoomOut()">-</button>
-            <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="zoomReset()">Fit</button>
-            <button class="btn btn-secondary" id="btn-overlays" style="font-size:11px;padding:2px 8px;background:#3a7bd5;color:#fff" onclick="toggleFireOverlays()" title="Sentinel-2 tile grid (blue) and BCWS fires">Overlays</button>
-            <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" id="btn-split" onclick="toggleSplit()">Split</button>
-            <!-- Imagery loading state, in the spare toolbar space.
-                 Switching source can rebuild a stack server-side and
-                 refetch several MB; without this the interface looks
-                 idle and a slow load is indistinguishable from a stuck
-                 one. -->
-            <span id="layer-status" style="display:none;font-size:11px;
-                  color:#555;margin-left:10px;white-space:nowrap"></span>
-            <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;display:none" id="btn-sync" onclick="toggleSync()" title="Sync pan/zoom between panes">Sync</button>
-            <span class="info" id="zoom-info"></span>
             <span class="info" id="image-info"></span>
         </div>
         <div class="image-viewer-container" id="image-viewer-container">
@@ -2270,7 +2282,20 @@ function beginFlicker(pane) {
     const other = pane === 'left' ? 'right' : 'left';
     const myView = pane === 'left' ? leftView : rightView;
     const otherView = pane === 'left' ? rightView : leftView;
-    if (!otherView || otherView === myView) return;
+    if (!otherView) return;
+
+    // Identity is (view, source), not view alone.
+    //
+    // Comparing view names only meant flicker refused whenever both
+    // panes showed the same view -- but since each pane has its own
+    // imagery source, "Post-fire (L2)" against "Post-fire (MRAP)" is
+    // two different pictures and exactly the comparison flicker exists
+    // for. Including the source makes those distinct while still
+    // skipping a genuinely identical pair.
+    const mySrc = (pane === 'left') ? currentPostSource : rightPostSource;
+    const otherSrc = (other === 'left') ? currentPostSource
+                                        : rightPostSource;
+    if (otherView === myView && otherSrc === mySrc) return;
 
     // Both images are ALREADY decoded and on screen, so the peek is a
     // straight src swap between the two <img> elements -- no fetch, no
@@ -2750,7 +2775,18 @@ function getViewLabel(viewKey) {
 function updateSubtitle(pane, viewKey) {
     const elId = pane === 'left' ? 'subtitle-left' : 'subtitle-right';
     const el = document.getElementById(elId);
-    el.textContent = getViewLabel(viewKey);
+    // Name the source when the two panes disagree. Two panes both
+    // labelled "Post-fire" showing different imagery is confusing, and
+    // it is now a normal state rather than a bug.
+    let label = getViewLabel(viewKey);
+    if (splitActive && currentPostSource !== rightPostSource
+            && ['pre', 'post', 'diff1', 'diff2', 'diff3', 'hint']
+                .includes(viewKey)) {
+        const src = (pane === 'left') ? currentPostSource
+                                      : rightPostSource;
+        label += (src === 'l2') ? '  (L2 recent)' : '  (MRAP)';
+    }
+    el.textContent = label;
 }
 
 // -----------------------------------------------------------------------
@@ -2891,14 +2927,14 @@ function layerBusyEnd() {
 function layerStatusPaint() {
     const el = document.getElementById('layer-status');
     if (!el) return;
-    if (_layerBusy <= 0) { el.style.display = 'none'; return; }
+    if (_layerBusy <= 0) { el.style.visibility = 'hidden'; return; }
     const secs = (performance.now() - _layerStart) / 1000;
     // Elapsed time rather than a percentage: the transfer size is not
     // known until the response arrives, and a source switch may
     // include a server-side rebuild of unknown length, so a progress
     // bar would be invented. Elapsed is honest and answers the real
     // question -- is this moving.
-    el.style.display = '';
+    el.style.visibility = 'visible';
     el.textContent = `${_layerLabel} ... ${secs.toFixed(1)}s`
         + (secs > 20 ? '  (still working)' : '');
 }
@@ -3128,7 +3164,10 @@ async function onRightPostSourceChange() {
                                 : 'Loading MRAP composite (right)');
     try {
         await loadPaneImage('right', rightView || 'post');
+        // Both, since the left label gains or loses its source tag
+        // depending on whether the two panes now differ.
         updateSubtitle('right', rightView || 'post');
+        updateSubtitle('left', leftView || 'post');
     } catch (err) {
         log(`[perf] right-pane source switch failed: ${err.message}`,
             'error');
@@ -3153,7 +3192,9 @@ function syncRightViewOptions() {
     if (want && b.querySelector(`option[value="${want}"]`)) b.value = want;
     b.disabled = a.disabled;
     const grp = document.getElementById('right-pane-controls');
-    if (grp) grp.style.display = splitActive ? 'inline-flex' : 'none';
+    // visibility keeps the slot reserved; hiding with display would
+    // let the rest of the bar reflow on every split toggle.
+    if (grp) grp.style.visibility = splitActive ? 'visible' : 'hidden';
     const rs = document.getElementById('post-source-select-right');
     if (rs) {
         rs.disabled = a.disabled;
