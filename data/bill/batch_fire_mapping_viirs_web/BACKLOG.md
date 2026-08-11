@@ -105,6 +105,21 @@ Notes:
 - Detect expiry from the 401/403 response and renew automatically,
   logging clearly if renewal fails.
 
+### 9. Distinguish active fire / hotspots from burned area
+The system currently detects "fire/burn" as one class.
+
+Notes:
+- Active fire (thermal anomaly, currently burning) and burned area
+  (already-consumed fuel) are different products with different users
+  and different validation.
+- VIIRS hotspots are inherently active-fire; the red-wins and BCWS
+  perimeter hints are closer to burned area. Today they all feed the
+  same binary classifier.
+- Would likely need a third class in the classifier output, or two
+  passes, plus a decision about how the two are exported.
+- Relevant to the new BCWS perimeter hint: an official perimeter
+  includes ground already burned AND ground still burning.
+
 ---
 
 ## Done
@@ -113,6 +128,12 @@ Reverse chronological. Dates are when the change was handed over.
 
 ### 2026-08-10
 
+- **New hint option: "BCWS perimeter".** Rasterises every BCWS fire
+  polygon intersecting the AOI into a hint mask -- deliberately not
+  filtered to one fire number, since this system detects burn rather
+  than attributing it. Uses the same storage, per-source naming,
+  mtime invalidation and CLI contract as the red-wins hints.
+  "Red wins (post)" remains the default.
 - **Auto-open a newly created fire when ready.** "Open when ready"
   checkbox beside Logout (default on, remembered). Cancelled if the
   user navigates away from the fire list, so a fire finishing later

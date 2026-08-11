@@ -7,6 +7,7 @@ hand-off. Holds no GPU lock; the caller arranges that.
 
 import datetime
 import glob
+import json
 import os
 import shutil
 import sys
@@ -107,6 +108,171 @@ def generate_redwins_hint(crop_bin: str, band_indices: list[int],
     out_ds.FlushCache()
     out_ds = None
     return n_fire
+
+
+# Hint modes that are DERIVED FROM THE AOI STACK OR VECTOR DATA, i.e.
+# rebuilt whenever the crop changes. VIIRS is not here: its mask comes
+# from downloaded granules rather than from the stack.
+DERIVED_HINT_MODES = ('redwins_post', 'redwins_diff', 'bcws_perimeter')
+ALL_HINT_MODES = ('viirs',) + DERIVED_HINT_MODES
+
+
+def build_derived_hint_for_fire(fire: FireInfo, mode: str):
+    """Build whichever derived hint *mode* names.
+
+    Single entry point so the call sites -- switch, prepare, re-prepare,
+    pregenerate -- do not each need to know which builder handles which
+    mode. Adding a mode means adding it here and to DERIVED_HINT_MODES,
+    not editing five branches.
+    """
+    if mode == 'bcws_perimeter':
+        return build_bcws_hint_for_fire(fire)
+    return build_redwins_hint_for_fire(fire, mode)
+
+
+def build_bcws_hint_for_fire(fire: FireInfo):
+    """Hint mask from BCWS fire polygons intersecting the AOI.
+
+    Every BCWS polygon overlapping the AOI is burned into one mask --
+    deliberately NOT filtered to a particular fire number. This system
+    detects fire/burn; deciding which perimeter belongs to which
+    incident is somebody else's job, and filtering here would silently
+    drop burn that belongs to a neighbouring fire.
+
+    Written to the same place, in the same format, and with the same
+    invalidation rule as the red-wins masks, so everything downstream
+    -- the mapping CLI, the hint preview, agreement scoring -- consumes
+    it without knowing the difference.
+
+    Returns ``(path, None)`` or ``(None, error_message)``.
+    """
+    if not fire.crop_bin or not os.path.isfile(fire.crop_bin):
+        return None, 'Fire has no crop raster.'
+
+    out_dir = os.path.join(fire.cache_dir, '_redwins')
+    os.makedirs(out_dir, exist_ok=True)
+    src = getattr(fire, 'post_source', 'l2') or 'l2'
+    # Per source like the others: the mask must match the dimensions of
+    # whichever stack is current, and switching source repoints
+    # crop_bin at a different raster.
+    out_path = os.path.join(out_dir, f'bcws_perimeter_{src}_hint.bin')
+
+    try:
+        if (os.path.isfile(out_path)
+                and os.path.getmtime(out_path)
+                >= os.path.getmtime(fire.crop_bin)):
+            return out_path, None
+    except OSError:
+        pass
+
+    ds = gdal.Open(fire.crop_bin, gdal.GA_ReadOnly)
+    if ds is None:
+        return None, 'Could not open the AOI stack.'
+    gt = ds.GetGeoTransform()
+    proj = ds.GetProjection()
+    w, h = ds.RasterXSize, ds.RasterYSize
+    ds = None
+
+    # Same province-wide overlay JSON the map overlays use: already in
+    # the raster's native CRS, so no reprojection, and the hint cannot
+    # disagree with the perimeter the user sees drawn on screen.
+    from .bcws import _overlay_json_path
+    path = _overlay_json_path(state)
+    if not path or not os.path.isfile(path):
+        return None, ('BCWS perimeters have not been downloaded yet. '
+                      'They are fetched at startup; check the server '
+                      'log for the [bcws] lines.')
+    try:
+        with open(path, encoding='utf-8') as f:
+            data = json.load(f)
+    except (OSError, ValueError) as exc:
+        return None, f'Could not read the BCWS overlay data: {exc}'
+
+    rings = data.get('polygons') or []
+    if not rings:
+        return None, 'No BCWS fire polygons are currently available.'
+
+    try:
+        import numpy as np
+        from osgeo import ogr, osr
+
+        srs = osr.SpatialReference()
+        if proj:
+            srs.ImportFromWkt(proj)
+
+        mem_drv = ogr.GetDriverByName('Memory')
+        mem_ds = mem_drv.CreateDataSource('bcws_hint')
+        layer = mem_ds.CreateLayer('polys', srs, ogr.wkbPolygon)
+
+        # AOI rectangle, for the intersection test.
+        x0, y0 = gt[0], gt[3]
+        x1 = gt[0] + w * gt[1] + h * gt[2]
+        y1 = gt[3] + w * gt[4] + h * gt[5]
+        aoi_ring = ogr.Geometry(ogr.wkbLinearRing)
+        for x, y in ((x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)):
+            aoi_ring.AddPoint_2D(float(x), float(y))
+        aoi_ring.CloseRings()
+        aoi_poly = ogr.Geometry(ogr.wkbPolygon)
+        aoi_poly.AddGeometry(aoi_ring)
+
+        n_used = 0
+        for ring in rings:
+            if not ring or len(ring) < 3:
+                continue
+            r = ogr.Geometry(ogr.wkbLinearRing)
+            for pt in ring:
+                r.AddPoint_2D(float(pt[0]), float(pt[1]))
+            r.CloseRings()
+            poly = ogr.Geometry(ogr.wkbPolygon)
+            poly.AddGeometry(r)
+            if not poly.IsValid():
+                poly = poly.Buffer(0)          # repair self-touching rings
+            if poly is None or poly.IsEmpty():
+                continue
+            if not poly.Intersects(aoi_poly):
+                continue
+            feat = ogr.Feature(layer.GetLayerDefn())
+            feat.SetGeometry(poly)
+            layer.CreateFeature(feat)
+            feat = None
+            n_used += 1
+
+        if n_used == 0:
+            return None, (
+                'No BCWS fire polygon intersects this AOI. The '
+                'perimeter layer only covers currently-reported fires, '
+                'so a new or unreported fire will not appear in it -- '
+                'use "Red wins (post)" instead.')
+
+        # Rasterise to a 1-band float mask, matching what the red-wins
+        # path produces so the CLI and previews need no special case.
+        drv = gdal.GetDriverByName('ENVI')
+        out_ds = drv.Create(out_path, w, h, 1, gdal.GDT_Float32)
+        out_ds.SetGeoTransform(gt)
+        if proj:
+            out_ds.SetProjection(proj)
+        gdal.RasterizeLayer(out_ds, [1], layer, burn_values=[1.0])
+        band = out_ds.GetRasterBand(1)
+        arr = band.ReadAsArray()
+        n_px = int(np.count_nonzero(arr > 0)) if arr is not None else 0
+        band.SetDescription('bcws_perimeter')
+        band = None
+        out_ds = None
+        mem_ds = None
+
+        if n_px == 0:
+            return None, (
+                'BCWS polygons intersect this AOI but covered no '
+                'pixels once rasterised -- the overlap is smaller than '
+                'one pixel.')
+
+        sys.stderr.write(
+            f'[bcws_hint] bcws_perimeter [{src}]: {n_used} polygon(s), '
+            f'{n_px} pixel(s) -> {out_path}\n')
+        sys.stderr.flush()
+        return out_path, None
+    except Exception as exc:
+        return None, f'Failed to rasterise BCWS perimeters: {exc}'
 
 
 def build_redwins_hint_for_fire(fire: FireInfo, mode: str):
@@ -334,7 +500,7 @@ def render_hint_for_mode(fire: FireInfo, mode: str) -> bool:
         if not mask or not os.path.isfile(mask):
             return False
     else:
-        mask, err = build_redwins_hint_for_fire(fire, mode)
+        mask, err = build_derived_hint_for_fire(fire, mode)
         if not mask:
             sys.stderr.write(
                 f'[prepare] hint {mode}: {err}\n')
@@ -357,7 +523,7 @@ def pregenerate_all_hints(fire: FireInfo) -> list:
     is a cache hit rather than a render. Returns the modes rendered.
     """
     done = []
-    modes = ['redwins_post', 'redwins_diff']
+    modes = list(DERIVED_HINT_MODES)
     if fire.viirs_bin and os.path.isfile(fire.viirs_bin):
         modes.append('viirs')
     for m in modes:
@@ -493,8 +659,8 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
     if mode == 'viirs' and not (
             fire.viirs_bin and os.path.isfile(fire.viirs_bin)):
         mode = 'redwins_post'
-    if mode in ('redwins_post', 'redwins_diff'):
-        rw_path, rw_err = build_redwins_hint_for_fire(fire, mode)
+    if mode in DERIVED_HINT_MODES:
+        rw_path, rw_err = build_derived_hint_for_fire(fire, mode)
         if rw_path:
             fire.hint_bin = rw_path
             fire.perimeter_type = mode
@@ -588,7 +754,7 @@ def switch_hint_mode(fire: FireInfo, mode: str) -> dict:
 
     Returns a dict with 'ok' (bool) and 'error' (str, if not ok).
     """
-    if mode not in ('viirs', 'redwins_post', 'redwins_diff'):
+    if mode not in ALL_HINT_MODES:
         return {'ok': False, 'error': f'Unknown hint mode: {mode}'}
 
     if not fire.crop_bin or not os.path.isfile(fire.crop_bin):
@@ -604,7 +770,7 @@ def switch_hint_mode(fire: FireInfo, mode: str) -> dict:
         fire.hint_mode = 'viirs'
 
     else:
-        out_path, err = build_redwins_hint_for_fire(fire, mode)
+        out_path, err = build_derived_hint_for_fire(fire, mode)
         if err:
             return {'ok': False, 'error': err}
         fire.hint_bin = out_path
@@ -963,8 +1129,8 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
     # "No hint mask available" even though the user had explicitly
     # selected Red wins (post) or Red wins (diff).
     _mode = getattr(fire, 'hint_mode', 'viirs') or 'viirs'
-    if _mode in ('redwins_post', 'redwins_diff'):
-        _rw_path, _rw_err = build_redwins_hint_for_fire(fire, _mode)
+    if _mode in DERIVED_HINT_MODES:
+        _rw_path, _rw_err = build_derived_hint_for_fire(fire, _mode)
         if _rw_err:
             _set_fire_status(
                 fire, FireStatus.ERROR,

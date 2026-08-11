@@ -773,6 +773,10 @@ const HINT_MODES = [
     {id: 'viirs',         label: 'VIIRS'},
     {id: 'redwins_post',  label: 'Red wins (post)'},
     {id: 'redwins_diff',  label: 'Red wins (diff)'},
+    // Every BCWS polygon overlapping the AOI, burned into one mask --
+    // not filtered to a single fire number, because this system
+    // detects burn rather than deciding which incident it belongs to.
+    {id: 'bcws_perimeter', label: 'BCWS perimeter'},
 ];
 
 function renderHintModeButtons() {
@@ -1984,10 +1988,21 @@ async function loadFireOverlays() {
 //
 // `unit` is how many device pixels one crop pixel occupies, used to
 // keep stroke widths and text sizes visually constant.
-function paintOverlayVectors(ctx, unit) {
+// sizeMul scales text and line weights for a canvas that will be
+// UPSCALED before display.
+//
+// Sizes here are chosen to land at a fixed number of device pixels
+// after ctx.scale(unit). That is right when the bitmap is shown at
+// 1:1, but the low pyramid level is baked at ~1/5 resolution and then
+// stretched into the full-size box, which magnified the labels by the
+// same factor -- fire numbers appeared roughly five times too large
+// until the full image replaced them. Passing the level's resolution
+// ratio cancels the upscale exactly, so both levels look identical.
+function paintOverlayVectors(ctx, unit, sizeMul) {
     if (!_fireOverlays) return;
-    const lw = (px) => Math.max(0.25, px / unit);
-    const fpx = (v) => Math.max(6 / unit, v / unit);
+    const _m = (sizeMul && sizeMul > 0) ? sizeMul : 1;
+    const lw = (px) => Math.max(0.25 * _m, (px * _m) / unit);
+    const fpx = (v) => Math.max((6 * _m) / unit, (v * _m) / unit);
 
     // --- Sentinel-2 tile grid (green, bottom) ---
     ctx.strokeStyle = 'rgba(0, 200, 60, 0.95)';
@@ -2706,7 +2721,7 @@ function previewUrlFor(viewKey) {
 // Composite the vector overlays onto a decoded image, returning a blob
 // URL. Returns null when there is nothing to draw, so the caller can
 // use the original bytes untouched.
-async function compositeOverlays(bitmap, cropW, cropH) {
+async function compositeOverlays(bitmap, cropW, cropH, sizeMul) {
     if (!overlaysVisible || !_fireOverlays) return null;
     const W = bitmap.naturalWidth || bitmap.width;
     const H = bitmap.naturalHeight || bitmap.height;
@@ -2724,7 +2739,7 @@ async function compositeOverlays(bitmap, cropW, cropH) {
     ctx.drawImage(bitmap, 0, 0, W, H);
     ctx.save();
     ctx.scale(kx, ky);
-    paintOverlayVectors(ctx, kx);
+    paintOverlayVectors(ctx, kx, sizeMul);
     ctx.restore();
     return await new Promise((res) => {
         try { off.toBlob((b) => res(b ? URL.createObjectURL(b) : null),
@@ -2838,9 +2853,14 @@ async function loadPaneImage(pane, viewKey) {
                 let painted = probe.src;
                 if (overlaysVisible && _fireOverlays) {
                     try {
+                        // Ratio of this level's resolution to the
+                        // full one, so labels come out the same size
+                        // on screen after the box upscales the proxy.
+                        const rMul = (fullW && probe.naturalWidth)
+                            ? probe.naturalWidth / fullW : 1;
                         const baked = await compositeOverlays(
                             probe, _fireOverlays.width,
-                            _fireOverlays.height);
+                            _fireOverlays.height, rMul);
                         if (baked) painted = baked;
                     } catch (_) { /* proxy without overlays is fine */ }
                 }
