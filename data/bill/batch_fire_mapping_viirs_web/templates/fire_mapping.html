@@ -596,6 +596,19 @@ function getPreviewObjectURL(key, url, announce) {
             // cost. If the JPEG optimisation silently fails, this says
             // "png" and shows no saving, rather than just looking slow.
             const fmt = r.headers.get('X-Preview-Format') || '?';
+            // Catch a pane showing the wrong source's pixels. This
+            // presented as two identical panes with different labels,
+            // which is indistinguishable from two sources that happen
+            // to agree -- so it has to be reported explicitly.
+            const gotSrc = r.headers.get('X-Preview-Source') || '';
+            const wantSrc = r.headers.get('X-Preview-Requested-Source')
+                || '';
+            if (gotSrc && wantSrc && gotSrc !== wantSrc) {
+                log(`[warn] preview ${viewKey}: asked for ${wantSrc} `
+                    + `but the server served ${gotSrc} imagery. The `
+                    + `panes are NOT showing different sources.`,
+                    'error');
+            }
             const pngB = parseInt(
                 r.headers.get('X-Preview-Png-Bytes') || '0', 10);
             const saving = (fmt === 'jpeg' && pngB > blob.size)

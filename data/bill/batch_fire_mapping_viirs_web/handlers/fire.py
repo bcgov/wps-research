@@ -930,6 +930,7 @@ class FireRoutes:
         _q = parse_qs(urlparse(self.path).query)
         _src = (_q.get('src') or [''])[0]
         _stash_dir = None
+        _cur_src = getattr(fire, 'post_source', 'l2') or 'l2'
         if re.fullmatch(r'[A-Za-z0-9_-]+', _src or ''):
             cand = os.path.join(fire.cache_dir, f'previews_{_src}')
             if os.path.isdir(cand):
@@ -937,6 +938,78 @@ class FireRoutes:
                 cand_png = os.path.join(cand, f'{view}.png')
                 if os.path.isfile(cand_png):
                     png = cand_png
+            elif _src != _cur_src:
+                # A source was explicitly requested, it is NOT the one
+                # currently loaded, and no stash exists for it.
+                #
+                # Falling through here served the CURRENT source's
+                # previews instead -- identical pixels under the other
+                # source's label, which looks like two sources that
+                # happen to agree rather than a missing stash. That is
+                # the worst possible failure for a comparison view.
+                #
+                # Build it on demand: switch the fire to that source
+                # (which stashes the current previews and renders the
+                # other set), then switch back so nothing else is
+                # disturbed. Costs one stack build the first time and
+                # nothing afterwards.
+                sys.stderr.write(
+                    f'[preview] {fire_numbe}: no previews_{_src} '
+                    f'stash; generating it on demand\n')
+                try:
+                    from ..prepare import switch_post_source
+                    # switch_post_source() repoints fire.post_source
+                    # and fire.crop_bin. Mark the fire as prebuilding
+                    # and pin user_post_source so a concurrent
+                    # /prepare reports the source the USER is on rather
+                    # than the transient one -- the same race that made
+                    # new fires open on MRAP.
+                    fire.prebuilding = True
+                    fire.user_post_source = _cur_src
+                    r1 = switch_post_source(fire, _src)
+                    if not r1.get('ok'):
+                        raise RuntimeError(
+                            r1.get('error', 'switch failed'))
+                    r2 = switch_post_source(fire, _cur_src)
+                    fire.prebuilding = False
+                    if not r2.get('ok'):
+                        sys.stderr.write(
+                            f'[preview] {fire_numbe}: could not switch '
+                            f'back to {_cur_src}: '
+                            f'{r2.get("error")}\n')
+                    cand = os.path.join(fire.cache_dir,
+                                        f'previews_{_src}')
+                    if os.path.isdir(cand):
+                        _stash_dir = cand
+                        cand_png = os.path.join(cand, f'{view}.png')
+                        if os.path.isfile(cand_png):
+                            png = cand_png
+                            sys.stderr.write(
+                                f'[preview] {fire_numbe}: '
+                                f'previews_{_src} built\n')
+                except Exception as exc:
+                    # Always clear the flag, or the fire would look
+                    # permanently mid-prebuild after one failure.
+                    try:
+                        fire.prebuilding = False
+                        if getattr(fire, 'post_source', '') != _cur_src:
+                            switch_post_source(fire, _cur_src)
+                    except Exception:
+                        pass
+                    # Report rather than serve the wrong source: a
+                    # visibly missing image is recoverable, a silently
+                    # wrong one is not.
+                    sys.stderr.write(
+                        f'[preview] {fire_numbe}: could not build '
+                        f'previews_{_src}: {type(exc).__name__}: '
+                        f'{exc}\n')
+                    self._send_json(
+                        {'error': f'No {_src.upper()} imagery is '
+                                  f'available for this fire yet '
+                                  f'({exc}). Switch the left pane to '
+                                  f'{_src.upper()} once to build it.'},
+                        409)
+                    return
 
         # The hint overlay depends on BOTH the post source and the hint
         # mode, so it is stored per mode as hint_<mode>.png. Previously
@@ -1143,13 +1216,20 @@ class FireRoutes:
         # a silent fallback to PNG would look like the optimisation
         # simply not working.
         _hdrs['X-Preview-Format'] = fmt
+        # Which source's pixels these actually are. If it disagrees
+        # with what was asked for, the client says so loudly instead of
+        # the panes silently showing the same picture twice.
+        _hdrs['X-Preview-Source'] = (
+            _src if _stash_dir else _cur_src)
+        _hdrs['X-Preview-Requested-Source'] = _src or _cur_src
         try:
             _hdrs['X-Preview-Png-Bytes'] = str(os.path.getsize(png))
         except OSError:
             pass
         _hdrs['Access-Control-Expose-Headers'] = (
             _hdrs.get('Access-Control-Expose-Headers', '')
-            + ',X-Preview-Format,X-Preview-Png-Bytes').strip(',')
+            + ',X-Preview-Format,X-Preview-Png-Bytes'
+            + ',X-Preview-Source,X-Preview-Requested-Source').strip(',')
         self._send_file(serve_path, serve_type, cache_seconds=86400,
                         extra_headers=_hdrs)
 
