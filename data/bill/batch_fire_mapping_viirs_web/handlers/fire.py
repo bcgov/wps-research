@@ -13,6 +13,7 @@ import mimetypes
 import os
 import re
 import shutil
+import tempfile
 import signal
 import subprocess
 import sys
@@ -146,13 +147,40 @@ class FireRoutes:
         # in-memory available_views list isn't enough — _load_fire_state
         # filters it on startup, but a wipe after startup would leave
         # the in-memory list stale.
-        if fire.status in (FireStatus.ACCEPTED, FireStatus.MAPPED):
-            post_png = (os.path.join(fire.cache_dir, 'previews', 'post.png')
-                        if fire.cache_dir else '')
-            if (not fire.available_views
-                    or not post_png
-                    or not os.path.isfile(post_png)):
-                needs_prepare = True
+        # READY was missing from this list, which is how a fire could
+        # sit at "ready", open fine, and then report
+        # 'View "Post-fire" not available' with no way to recover:
+        # nothing ever re-checked its files.
+        #
+        # Rather than forcing a full re-prepare for any discrepancy,
+        # verify_and_repair_fire() fixes what it can cheaply -- an
+        # empty view list is re-derived from the directory, missing
+        # previews are regenerated from the existing stack -- and only
+        # asks for a full rebuild when the stack itself is gone (which
+        # is expected after a reboot, since stacks live on /ram).
+        if fire.status in (FireStatus.READY, FireStatus.ACCEPTED,
+                           FireStatus.MAPPED):
+            try:
+                from ..prepare import verify_and_repair_fire
+                rep = verify_and_repair_fire(fire)
+                if rep.get('needs_full_rebuild'):
+                    needs_prepare = True
+                if rep.get('actions'):
+                    sys.stderr.write(
+                        f'[verify] {fire_numbe}: '
+                        f'{"; ".join(rep["actions"])}\n')
+            except Exception as exc:
+                sys.stderr.write(
+                    f'[verify] {fire_numbe}: check failed '
+                    f'({type(exc).__name__}: {exc}); falling back to '
+                    f'the previous file test\n')
+                post_png = (os.path.join(fire.cache_dir, 'previews',
+                                         'post.png')
+                            if fire.cache_dir else '')
+                if (not fire.available_views
+                        or not post_png
+                        or not os.path.isfile(post_png)):
+                    needs_prepare = True
         padding_changed = (padding is not None
                            and fire.padding_used != float(padding))
         if padding_changed:
@@ -1177,6 +1205,164 @@ class FireRoutes:
             payload = {'status': f.status.value, 'error': f.error_msg}
         self._send_json(payload)
 
+    def handle_api_download_imagery(self, fire_numbe):
+        """Export the pre/post reflectance bands as an ENVI stack.
+
+        Eight bands -- B12, B11, B9, B8 for pre and for post -- taken
+        from whichever AOI stack corresponds to the requested source,
+        written as ENVI BSQ float32 with band names and the map info /
+        CRS the source carries. Zipped with its .hdr, since the pair is
+        useless apart.
+
+        The anomaly bands are deliberately excluded: they are derived,
+        and anyone wanting them can compute them from what is here.
+        """
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+
+        q = parse_qs(urlparse(self.path).query)
+        want_src = (q.get('src', [''])[0] or '').strip().lower()
+        if want_src not in ('l2', 'mrap'):
+            want_src = getattr(fire, 'post_source', 'l2') or 'l2'
+
+        try:
+            from ..aoi_stack import ensure_aoi_stack
+            from osgeo import gdal
+            import numpy as np
+
+            # Stacks are per-source; ask for the one the caller wants
+            # rather than assuming the fire's current selection, which
+            # is what the right-hand pane may be overriding.
+            info = ensure_aoi_stack(
+                fire.fire_numbe, fire.bbox_native,
+                post_source=want_src)
+            stack_path = info['path'] if isinstance(info, dict) else info
+        except Exception as exc:
+            self._send_json(
+                {'error': f'Could not obtain the {want_src.upper()} '
+                          f'AOI stack: {type(exc).__name__}: {exc}'}, 500)
+            return
+
+        # Bound before the try, so the finally block cannot raise
+        # NameError when an early failure happens before mkdtemp.
+        tmp_dir = None
+        try:
+            ds = gdal.Open(stack_path, gdal.GA_ReadOnly)
+            if ds is None:
+                self._send_json(
+                    {'error': f'Could not open {stack_path}'}, 500)
+                return
+            names = []
+            for i in range(1, ds.RasterCount + 1):
+                names.append(ds.GetRasterBand(i).GetDescription() or '')
+
+            # Select by band NAME rather than index: band order has
+            # changed between stack versions, and picking positionally
+            # would silently export the wrong bands.
+            wanted = ('B12', 'B11', 'B9', 'B8')
+
+            def _match(name, era, code):
+                n = (name or '').lower()
+                if not n.startswith(era):
+                    return False
+                # 'B8' must not match 'B8A' or 'B12'.
+                return re.search(rf'\b{code.lower()}\b', n) is not None
+
+            picks = []
+            for era in ('pre', 'pst'):
+                for code in wanted:
+                    idx = next(
+                        (i for i, nm in enumerate(names)
+                         if _match(nm, era, code)), None)
+                    if idx is None:
+                        self._send_json(
+                            {'error': f'Band {era} {code} not found in '
+                                      f'{os.path.basename(stack_path)}. '
+                                      f'Bands present: '
+                                      f'{"; ".join(names)}'}, 500)
+                        ds = None
+                        return
+                    picks.append((idx, names[idx]))
+
+            w, h = ds.RasterXSize, ds.RasterYSize
+            drv = gdal.GetDriverByName('ENVI')
+            tmp_dir = tempfile.mkdtemp(prefix=f'{fire_numbe}_img_')
+            base = f'{fire_numbe}_{want_src}_prepost'
+            out_bin = os.path.join(tmp_dir, base + '.bin')
+            # INTERLEAVE=BSQ and Float32 as specified.
+            out_ds = drv.Create(out_bin, w, h, len(picks),
+                                gdal.GDT_Float32,
+                                options=['INTERLEAVE=BSQ',
+                                         'SUFFIX=ADD'])
+            out_ds.SetGeoTransform(ds.GetGeoTransform())
+            out_ds.SetProjection(ds.GetProjection())
+            for out_i, (src_i, nm) in enumerate(picks, start=1):
+                arr = ds.GetRasterBand(src_i + 1).ReadAsArray()
+                ob = out_ds.GetRasterBand(out_i)
+                ob.WriteArray(arr.astype('float32'))
+                ob.SetDescription(nm)
+                ob = None
+            out_ds = None
+            ds = None
+
+            # GDAL writes <base>.hdr with SUFFIX=ADD; make sure band
+            # names really landed, since some GDAL builds drop them.
+            hdr = out_bin + '.hdr'
+            if not os.path.isfile(hdr):
+                alt = os.path.splitext(out_bin)[0] + '.hdr'
+                if os.path.isfile(alt):
+                    hdr = alt
+            try:
+                with open(hdr, encoding='utf-8') as f:
+                    hdr_txt = f.read()
+                if 'band names' not in hdr_txt.lower():
+                    with open(hdr, 'a', encoding='utf-8') as f:
+                        f.write('band names = {\n'
+                                + ',\n'.join(nm for _, nm in picks)
+                                + '}\n')
+            except OSError:
+                pass
+
+            import zipfile
+            zip_path = os.path.join(tmp_dir, base + '.zip')
+            with zipfile.ZipFile(zip_path, 'w',
+                                 zipfile.ZIP_DEFLATED) as zf:
+                for f_ in sorted(os.listdir(tmp_dir)):
+                    if f_.endswith('.zip'):
+                        continue
+                    zf.write(os.path.join(tmp_dir, f_), f_)
+
+            size = os.path.getsize(zip_path)
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/zip')
+            self.send_header('Content-Length', str(size))
+            self.send_header(
+                'Content-Disposition',
+                f'attachment; filename="{base}.zip"')
+            self.end_headers()
+            with open(zip_path, 'rb') as f:
+                shutil.copyfileobj(f, self.wfile)
+            sys.stderr.write(
+                f'[imagery] {fire_numbe}: exported {len(picks)} band(s) '
+                f'from the {want_src.upper()} stack '
+                f'({size / 1e6:.1f} MB zipped)\n')
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except Exception as exc:
+            sys.stderr.write(
+                f'[imagery] {fire_numbe}: export failed: '
+                f'{type(exc).__name__}: {exc}\n')
+            try:
+                self._send_json({'error': str(exc)}, 500)
+            except Exception:
+                pass
+        finally:
+            if tmp_dir:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+
     def handle_api_download(self, fire_numbe):
         """Zip the fire's canonical accepted-result directory and stream
         it back as a download. The fire must have been accepted at
@@ -1203,6 +1389,45 @@ class FireRoutes:
                 {'error': 'No accepted result on disk for this fire yet. '
                           'Accept the fire first.'}, 404)
             return
+
+        # Backfill vectors for fires accepted before vectorization
+        # existed (K41351 and friends): the raster is in the canonical
+        # dir but the perimeter is not, and re-accepting just to get a
+        # shapefile would be an absurd requirement.
+        try:
+            fire = state.fires[fire_numbe]
+            has_vec = any(f.endswith(('.shp', '.kml'))
+                          for f in os.listdir(result_dir))
+            if not has_vec:
+                from ..prepare import vectorize_classified
+                clf = None
+                for f in sorted(os.listdir(result_dir)):
+                    if 'classified' in f and f.endswith('.bin'):
+                        clf = os.path.join(result_dir, f)
+                        break
+                if clf:
+                    sys.stderr.write(
+                        f'[download] {fire_numbe}: no vector product '
+                        f'in the accepted dir; generating from '
+                        f'{os.path.basename(clf)}\n')
+                    vres = vectorize_classified(fire, clf_path=clf)
+                    # Written into cache_dir by the helper; copy the
+                    # parts into the accepted dir so they ship.
+                    for ext in ('.shp', '.shx', '.dbf', '.prj', '.cpg',
+                                '.kml'):
+                        src = os.path.join(
+                            fire.cache_dir,
+                            f'{fire_numbe}_perimeter{ext}')
+                        if os.path.isfile(src):
+                            shutil.copy2(src, result_dir)
+                    if vres.get('error'):
+                        sys.stderr.write(
+                            f'[download] {fire_numbe}: vectorization '
+                            f'failed: {vres["error"]}\n')
+        except Exception as exc:
+            sys.stderr.write(
+                f'[download] {fire_numbe}: vector backfill skipped: '
+                f'{type(exc).__name__}: {exc}\n')
 
         # Build the zip into a tmp path beside the canonical dir (same
         # filesystem -> the rename inside make_archive's caller-visible

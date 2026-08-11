@@ -348,6 +348,17 @@
                    href="/api/fire/{{ fire_numbe }}/download" download>
                     Download
                 </a>
+                <!-- Not an <a download>: the source has to be read
+                     from the right-hand selector at click time, so the
+                     URL cannot be baked into the template. -->
+                <button class="btn btn-secondary" id="btn-download-imagery"
+                        style="flex:1;text-align:center"
+                        onclick="downloadImagery()"
+                        title="Pre and post B12/B11/B9/B8 as an ENVI
+                               BSQ float32 stack, from the source
+                               selected in the right-most view">
+                    Download imagery
+                </button>
             </div>
 
             <!-- Per-acquisition coverage of the L2-recent buffer.
@@ -1477,6 +1488,44 @@ function fmtWhen(ts) {
 
 // Wrapper so a failure anywhere in the coverage panel still leaves
 // something on screen and names the problem, instead of silence.
+// Export the pre/post reflectance stack for the source shown in the
+// RIGHT-MOST view: the right pane's selector when split, otherwise the
+// single one. Reading it at click time (rather than baking a URL into
+// the template) keeps it correct as the user switches sources.
+function downloadImagery() {
+    const src = splitActive ? rightPostSource : currentPostSource;
+    const btn = document.getElementById('btn-download-imagery');
+    const label = src === 'l2' ? 'L2 recent' : 'MRAP';
+    if (btn) {
+        // The server may have to build the stack first, which is not
+        // instant; without feedback the button looks inert.
+        btn.disabled = true;
+        btn.textContent = `Preparing ${label} ...`;
+    }
+    log(`[export] requesting ${label} pre/post stack`, 'dim');
+    const url = `/api/fire/${encodeURIComponent(FIRE)}`
+        + `/download_imagery?src=${encodeURIComponent(src)}`;
+    // Hidden iframe so the browser handles the download and any
+    // Content-Disposition, without navigating away from the fire.
+    let f = document.getElementById('imagery-dl-frame');
+    if (!f) {
+        f = document.createElement('iframe');
+        f.id = 'imagery-dl-frame';
+        f.style.display = 'none';
+        document.body.appendChild(f);
+    }
+    f.src = url;
+    // The response streams; there is no reliable completion event for
+    // an iframe download, so re-enable after a short delay rather than
+    // leaving the button stuck.
+    setTimeout(() => {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Download imagery';
+        }
+    }, 4000);
+}
+
 async function loadNextCoverage() {
     try {
         return await _loadNextCoverageInner();

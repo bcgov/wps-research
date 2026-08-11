@@ -117,6 +117,279 @@ DERIVED_HINT_MODES = ('redwins_post', 'redwins_diff', 'bcws_perimeter')
 ALL_HINT_MODES = ('viirs',) + DERIVED_HINT_MODES
 
 
+def vectorize_classified(fire: FireInfo, clf_path: str = None,
+                         log=None) -> dict:
+    """Polygonize the accepted classification to Shapefile and KML.
+
+    The raster mask is the model's output, but a fire perimeter is a
+    VECTOR product: it goes into GIS, gets shared, gets edited. The
+    export lost these at some point -- the accept step still copies
+    *.shp/*.dbf/*.shx/*.prj, so nothing was ever producing them.
+
+    Both formats, deliberately:
+      * Shapefile in the raster's own CRS, for GIS work at full
+        precision.
+      * KML in EPSG:4326, because KML is defined in WGS84 and writing
+        anything else produces a file that silently lands in the wrong
+        place.
+
+    Only class-1 (burned) pixels become polygons; the zero background
+    is dropped. Returns a dict of what was written.
+    """
+    def emit(msg):
+        sys.stderr.write(msg + '\n')
+        if log:
+            try:
+                log(msg)
+            except Exception:
+                pass
+
+    out = {'shp': None, 'kml': None, 'polygons': 0, 'error': None}
+    try:
+        from osgeo import gdal, ogr, osr
+
+        if clf_path is None:
+            from .state import find_classified
+            clf_path = find_classified(
+                fire.fire_numbe, [fire.cache_dir])
+        if not clf_path or not os.path.isfile(clf_path):
+            out['error'] = 'no classified raster found'
+            emit(f'[vector] {fire.fire_numbe}: {out["error"]}')
+            return out
+
+        ds = gdal.Open(clf_path, gdal.GA_ReadOnly)
+        if ds is None:
+            out['error'] = f'cannot open {clf_path}'
+            emit(f'[vector] {fire.fire_numbe}: {out["error"]}')
+            return out
+        band = ds.GetRasterBand(1)
+        proj = ds.GetProjection()
+        srs = osr.SpatialReference()
+        if proj:
+            srs.ImportFromWkt(proj)
+
+        # Mask so only burned pixels are polygonized -- without it
+        # GDALPolygonize emits one huge polygon for the background too.
+        mask_band = band.GetMaskBand()
+        try:
+            import numpy as np
+            arr = band.ReadAsArray()
+            mem_drv = gdal.GetDriverByName('MEM')
+            mds = mem_drv.Create('', ds.RasterXSize, ds.RasterYSize, 1,
+                                 gdal.GDT_Byte)
+            mds.SetGeoTransform(ds.GetGeoTransform())
+            if proj:
+                mds.SetProjection(proj)
+            mds.GetRasterBand(1).WriteArray(
+                (np.nan_to_num(arr) > 0).astype('uint8') * 255)
+            mask_band = mds.GetRasterBand(1)
+        except Exception:
+            mds = None
+
+        base = os.path.join(fire.cache_dir, f'{fire.fire_numbe}_perimeter')
+        shp_path = base + '.shp'
+        for ext in ('.shp', '.shx', '.dbf', '.prj', '.cpg'):
+            try:
+                os.remove(base + ext)
+            except OSError:
+                pass
+
+        shp_drv = ogr.GetDriverByName('ESRI Shapefile')
+        shp_ds = shp_drv.CreateDataSource(shp_path)
+        layer = shp_ds.CreateLayer(
+            f'{fire.fire_numbe}_perimeter', srs, ogr.wkbPolygon)
+        layer.CreateField(ogr.FieldDefn('DN', ogr.OFTInteger))
+        layer.CreateField(ogr.FieldDefn('FIRE_NUM', ogr.OFTString))
+        layer.CreateField(ogr.FieldDefn('AREA_HA', ogr.OFTReal))
+
+        gdal.Polygonize(band, mask_band, layer, 0, [], callback=None)
+
+        # Drop background polygons and stamp attributes.
+        n_poly = 0
+        total_ha = 0.0
+        layer.ResetReading()
+        doomed = []
+        for feat in layer:
+            dn = feat.GetField('DN')
+            geom = feat.GetGeometryRef()
+            if dn is None or dn <= 0 or geom is None:
+                doomed.append(feat.GetFID())
+                continue
+            ha = (geom.GetArea() or 0.0) / 10000.0
+            feat.SetField('FIRE_NUM', str(fire.fire_numbe))
+            feat.SetField('AREA_HA', round(ha, 4))
+            layer.SetFeature(feat)
+            total_ha += ha
+            n_poly += 1
+        for fid in doomed:
+            layer.DeleteFeature(fid)
+        shp_ds.ExecuteSQL(f'REPACK {layer.GetName()}')
+        shp_ds = None
+        mds = None
+        ds = None
+
+        out['shp'] = shp_path
+        out['polygons'] = n_poly
+
+        # KML must be WGS84.
+        kml_path = base + '.kml'
+        try:
+            os.remove(kml_path)
+        except OSError:
+            pass
+        try:
+            src_ds = ogr.Open(shp_path)
+            wgs = osr.SpatialReference()
+            wgs.ImportFromEPSG(4326)
+            try:
+                wgs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+                srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+            except AttributeError:
+                pass
+            gdal.VectorTranslate(
+                kml_path, src_ds, format='KML',
+                dstSRS='EPSG:4326', reproject=True)
+            src_ds = None
+            if os.path.isfile(kml_path):
+                out['kml'] = kml_path
+        except Exception as exc:
+            emit(f'[vector] {fire.fire_numbe}: KML export failed: '
+                 f'{exc} (shapefile was still written)')
+
+        emit(f'[vector] {fire.fire_numbe}: {n_poly} polygon(s), '
+             f'{total_ha:.2f} ha -> '
+             f'{os.path.basename(shp_path)}'
+             + (f' + {os.path.basename(kml_path)}'
+                if out['kml'] else ''))
+        return out
+    except Exception as exc:
+        out['error'] = f'{type(exc).__name__}: {exc}'
+        emit(f'[vector] {fire.fire_numbe}: vectorization failed: '
+             f'{out["error"]}')
+        return out
+
+
+def verify_and_repair_fire(fire: FireInfo, log=None) -> dict:
+    """Check a fire's on-disk artifacts and rebuild what is missing.
+
+    A fire's STATUS and its FILES can disagree. Preparation is several
+    steps across a worker thread, a ramdisk and a cache directory, and
+    a crash, a cleared /ram, a cache sweep or an interrupted run can
+    leave the state saying READY while the previews are gone. The
+    symptom is unhelpful -- 'View "Post-fire" not available' -- and
+    there was no way to recover short of deleting and redrawing the
+    AOI.
+
+    Repairs in increasing order of cost, doing only what is needed:
+
+      1. available_views empty but previews present -> re-derive the
+         list from the directory (no raster work).
+      2. previews missing but the stack is present -> regenerate the
+         previews from the stack.
+      3. stack missing -> needs a full re-prepare; reported, not
+         attempted here, because it belongs on the worker queue.
+
+    Returns a dict describing what was found and done.
+    """
+    def emit(msg):
+        sys.stderr.write(msg + '\n')
+        if log:
+            try:
+                log(msg)
+            except Exception:
+                pass
+
+    out = {'fire': fire.fire_numbe, 'actions': [], 'ok': True,
+           'needs_full_rebuild': False}
+
+    cache_dir = getattr(fire, 'cache_dir', '') or ''
+    if not cache_dir or not os.path.isdir(cache_dir):
+        out['ok'] = False
+        out['needs_full_rebuild'] = True
+        out['actions'].append('cache directory missing')
+        emit(f'[verify] {fire.fire_numbe}: cache dir missing '
+             f'({cache_dir or "unset"}) -- needs a full re-prepare')
+        return out
+
+    crop = getattr(fire, 'crop_bin', '') or ''
+    if not crop or not os.path.isfile(crop):
+        out['ok'] = False
+        out['needs_full_rebuild'] = True
+        out['actions'].append('AOI stack missing')
+        emit(f'[verify] {fire.fire_numbe}: AOI stack missing '
+             f'({crop or "unset"}) -- needs a full re-prepare. This is '
+             f'expected after a reboot if the stack lived on /ram.')
+        return out
+
+    prev_dir = os.path.join(cache_dir, 'previews')
+    have_post = os.path.isfile(os.path.join(prev_dir, 'post.png'))
+
+    if not have_post:
+        emit(f'[verify] {fire.fire_numbe}: previews missing -- '
+             f'regenerating from {os.path.basename(crop)}')
+        try:
+            views = generate_all_previews(
+                crop, cache_dir, fire.fire_numbe)
+            try:
+                from .mapping import record_base_preview_geo
+                record_base_preview_geo(cache_dir, crop)
+            except Exception:
+                pass
+            fire.available_views = list(views or [])
+            out['actions'].append(
+                f'regenerated previews ({len(views or [])} view(s))')
+        except Exception as exc:
+            out['ok'] = False
+            out['actions'].append(f'preview regeneration failed: {exc}')
+            emit(f'[verify] {fire.fire_numbe}: preview regeneration '
+                 f'failed: {type(exc).__name__}: {exc}')
+            return out
+
+    # Re-derive the view list from what is actually on disk. Cheap, and
+    # it is the field the client validates against -- an empty list is
+    # what produces "View ... not available" even when the images exist.
+    try:
+        whitelist = ('pre', 'post', 'diff1', 'diff2', 'diff3', 'hint',
+                     'result', 'comparison', 'brush_comparison')
+        names = [os.path.splitext(f)[0]
+                 for f in sorted(os.listdir(prev_dir))
+                 if f.endswith('.png')]
+        found = [n for n in names if n in whitelist]
+        if ('hint' not in found
+                and any(n.startswith('hint_') for n in names)):
+            found.append('hint')
+        if found and set(found) != set(fire.available_views or []):
+            before = len(fire.available_views or [])
+            fire.available_views = found
+            out['actions'].append(
+                f'view list rebuilt: {before} -> {len(found)}')
+            emit(f'[verify] {fire.fire_numbe}: view list rebuilt '
+                 f'({before} -> {len(found)}): {", ".join(found)}')
+    except OSError as exc:
+        out['actions'].append(f'could not list previews: {exc}')
+
+    # A hint the CLI would consume must still exist, or mapping fails
+    # at run time with a less obvious message.
+    hb = getattr(fire, 'hint_bin', '') or ''
+    if hb and not os.path.isfile(hb):
+        mode = getattr(fire, 'hint_mode', 'redwins_post') or 'redwins_post'
+        if mode in DERIVED_HINT_MODES:
+            path, err = build_derived_hint_for_fire(fire, mode)
+            if path:
+                fire.hint_bin = path
+                out['actions'].append(f'rebuilt {mode} hint')
+                emit(f'[verify] {fire.fire_numbe}: rebuilt {mode} hint')
+            else:
+                out['actions'].append(f'hint rebuild failed: {err}')
+
+    if out['actions']:
+        try:
+            _save_fire_state()
+        except Exception:
+            pass
+    return out
+
+
 def build_derived_hint_for_fire(fire: FireInfo, mode: str):
     """Build whichever derived hint *mode* names.
 
@@ -1369,8 +1642,27 @@ def _accept_fire_sync(fire_numbe: str) -> str:
         # serial artifacts ({fire}_serial_{rid}*) live in .web_cache and
         # must not leak into the final result. Same for rebrush backups
         # (*_raw.bin / *_raw.hdr) which are cache-only pre-brush snapshots.
+        # Vectorize the accepted mask first, so the copy loop below
+        # picks up the shapefile parts and the KML. The accept step
+        # already copied *.shp/*.dbf/*.shx/*.prj -- nothing was
+        # producing them, which is why exports lost the perimeter.
+        try:
+            vres = vectorize_classified(fire)
+            if vres.get('error'):
+                fire.console_log.append(
+                    f'  Perimeter vectorization skipped: '
+                    f'{vres["error"]}')
+            else:
+                fire.console_log.append(
+                    f'  Perimeter vectorized: {vres["polygons"]} '
+                    f'polygon(s) -> shapefile'
+                    + (' + KML' if vres.get('kml') else ''))
+        except Exception as _vexc:
+            fire.console_log.append(
+                f'  Perimeter vectorization failed: {_vexc}')
+
         for pattern in ('*.bin', '*.hdr', '*.png', '*.shp', '*.dbf',
-                         '*.shx', '*.prj', '*.cpg'):
+                         '*.shx', '*.prj', '*.cpg', '*.kml'):
             for f in glob.glob(os.path.join(cache_dir, pattern)):
                 basename = os.path.basename(f)
                 if '_serial_' in basename:
