@@ -142,8 +142,6 @@ class BaseHandler:
          'handle_api_acq_plans_status'),
         (re.compile(r'^/api/acq_plans/diag$'),
          'handle_api_acq_plans_diag'),
-        (re.compile(r'^/api/acq_plans/refresh$'),
-         'handle_api_acq_plans_refresh'),
         (re.compile(r'^/api/fire/(?P<fire_numbe>[^/]+)/diagnose$'),
          'handle_api_fire_diagnose'),
         (re.compile(r'^/api/viirs/overlay$'), 'handle_api_viirs_overlay'),
@@ -170,12 +168,6 @@ class BaseHandler:
         (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/status$'),
          'handle_api_status'),
-        (re.compile(
-            r'^/api/fire/(?P<fire_numbe>[^/]+)/rename$'),
-         'handle_api_fire_rename'),
-        (re.compile(
-            r'^/api/fire/(?P<fire_numbe>[^/]+)/exclude_b8$'),
-         'handle_api_exclude_b8'),
         (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/download_imagery$'),
          'handle_api_download_imagery'),
@@ -209,7 +201,18 @@ class BaseHandler:
     ROUTES_POST = [
         (re.compile(r'^/login$'), 'handle_login_post'),
         (re.compile(r'^/api/bcws/refresh$'), 'handle_api_bcws_refresh'),
+        # POST: it triggers a refresh. It was registered under GET, so
+        # the Retry download button's POST never matched and 404'd --
+        # the same mistake as rename and exclude_b8.
+        (re.compile(r'^/api/acq_plans/refresh$'),
+         'handle_api_acq_plans_refresh'),
         (re.compile(r'^/api/fire/create$'), 'handle_api_fire_create'),
+        (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/rename$'),
+         'handle_api_fire_rename'),
+        (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/exclude_b8$'),
+         'handle_api_exclude_b8'),
         (re.compile(r'^/api/fire/preview_hint$'),
          'handle_api_fire_preview_hint'),
         (re.compile(
