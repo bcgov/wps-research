@@ -215,6 +215,11 @@ class BaseHandler:
         (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/rename$'),
          'handle_api_fire_rename'),
+        (re.compile(r'^/api/fire/(?P<fire_numbe>[^/]+)/erase$'),
+         'handle_api_erase'),
+        (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/erase_revert$'),
+         'handle_api_erase_revert'),
         (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/exclude_b8$'),
          'handle_api_exclude_b8'),

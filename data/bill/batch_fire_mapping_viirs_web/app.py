@@ -298,6 +298,8 @@ def init_app(app_state: AppState):
     try:
         from . import kgc as _kgc
         _kgc.init(app_state)
+        from . import erase as _erase
+        _erase.init(app_state)
     except Exception as exc:
         import sys as _s
         _s.stderr.write(f'[kgc] init skipped: {exc}\n')

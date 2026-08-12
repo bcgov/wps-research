@@ -1291,6 +1291,83 @@ class FireRoutes:
             payload = {'status': f.status.value, 'error': f.error_msg}
         self._send_json(payload)
 
+    def handle_api_erase(self, fire_numbe):
+        """Apply manual eraser strokes to the classification."""
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        try:
+            body = self._read_body() or {}
+        except Exception:
+            body = {}
+        boxes = body.get('boxes') or []
+        try:
+            size = int(body.get('size', 11) or 11)
+        except (TypeError, ValueError):
+            size = 11
+        if not isinstance(boxes, list) or not boxes:
+            self._send_json({'error': 'No stroke points supplied'}, 400)
+            return
+        # Bound the payload: a long drag can generate thousands of
+        # points, and every one is a slice assignment.
+        boxes = boxes[:20000]
+
+        try:
+            from ..erase import (active_classified, apply_erase,
+                                 refresh_after_edit)
+            clf = active_classified(fire)
+            if not clf:
+                self._send_json(
+                    {'error': 'No ML classification to edit. Run a '
+                              'mapping first.'}, 409)
+                return
+            res = apply_erase(
+                fire, clf, boxes, size,
+                log=lambda m: fire.console_log.append(m))
+            if not res.get('ok'):
+                self._send_json(
+                    {'error': res.get('error', 'erase failed')}, 500)
+                return
+            res.update(refresh_after_edit(
+                fire, clf, log=lambda m: fire.console_log.append(m)))
+            self._send_json(res)
+        except Exception as exc:
+            sys.stderr.write(
+                f'[erase] {fire_numbe}: {type(exc).__name__}: {exc}\n')
+            self._send_json({'error': str(exc)}, 500)
+
+    def handle_api_erase_revert(self, fire_numbe):
+        """Undo every eraser stroke since the mask was last produced."""
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        try:
+            from ..erase import (active_classified, revert,
+                                 refresh_after_edit)
+            clf = active_classified(fire)
+            if not clf:
+                self._send_json(
+                    {'error': 'No ML classification to revert.'}, 409)
+                return
+            res = revert(fire, clf,
+                         log=lambda m: fire.console_log.append(m))
+            if not res.get('ok'):
+                self._send_json(
+                    {'error': res.get('error', 'revert failed')}, 409)
+                return
+            res.update(refresh_after_edit(
+                fire, clf, log=lambda m: fire.console_log.append(m)))
+            self._send_json(res)
+        except Exception as exc:
+            sys.stderr.write(
+                f'[erase] {fire_numbe}: revert: '
+                f'{type(exc).__name__}: {exc}\n')
+            self._send_json({'error': str(exc)}, 500)
+
     def handle_api_fire_rename(self, fire_numbe):
         """Rename a fire, moving its directories with it."""
         fire_numbe = unquote(fire_numbe)

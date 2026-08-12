@@ -133,6 +133,25 @@
                      onchange="onBandExclusionChange('diff-only')">
               Diff only
             </label>
+            <label id="eraser-wrap"
+                   title="Erase parts of the ML classification by hand.
+                          With this on, dragging over a pane showing the
+                          classification clears the mask under the
+                          cursor."
+                   style="font-size:11px;margin-left:10px;
+                          display:inline-flex;align-items:center;
+                          gap:4px;cursor:pointer;white-space:nowrap">
+              <input type="checkbox" id="eraser-on"
+                     onchange="onEraserToggle()">
+              Eraser
+            </label>
+            <button class="btn btn-secondary" id="btn-erase-revert"
+                    onclick="revertErase()"
+                    style="display:none;font-size:11px;padding:2px 8px"
+                    title="Undo every eraser stroke since this
+                           classification was produced.">
+              Revert
+            </button>
             <!-- Right-pane controls, shown only in split view.
                  Grouped and pushed right so they sit above the pane
                  they drive: with one set of dropdowns the target pane
@@ -458,6 +477,18 @@
                                intersects the AOI.">?</span>:</label>
                         <input type="checkbox" id="clip-to-bcws"
                                onchange="onBandExclusionChange('clip')">
+                    </div>
+                    <div class="param-row">
+                        <label>Manual eraser size<span class="help"
+                               tabindex="0"
+                               data-tip="Side of the square the manual
+                               eraser removes, in IMAGE pixels -- so it
+                               covers the same ground at any zoom.
+                               Applies to the eraser tool in the
+                               toolbar.">?</span>:</label>
+                        <input type="number" id="p-eraser_size"
+                               value="11" step="2" min="1" max="201"
+                               onchange="onEraserSizeChange()">
                     </div>
                     <div class="param-row" style="justify-content:flex-end;gap:6px">
                         <button type="button" id="btn-rebrush"
@@ -2675,6 +2706,9 @@ function updateTransformForPane(pane) {
     if (pane === activePane) {
         document.getElementById('zoom-info').textContent = `${Math.round(s.scale * 100)}%`;
     }
+    // The cursor is drawn at the box's ON-SCREEN size, so it has to be
+    // rebuilt whenever the zoom changes.
+    if (_eraseOn) applyEraserCursor();
     if (syncPanes && splitActive) {
         syncOtherPane(pane);
         logPaneGeometry();
@@ -2695,6 +2729,245 @@ function updateTransformForPane(pane) {
 // that same fraction under the other pane's centre, with the zoom
 // scaled by the pixel-size ratio so a feature is the same size on
 // screen in both panes.
+// ---- Manual eraser ------------------------------------------------
+//
+// Strokes are painted locally for immediate feedback and posted to the
+// server on mouse-up, where they are applied to the canonical mask so
+// agreement, area, the overlay, polygonisation and export all reflect
+// the edit. Local-only editing would look right and change nothing.
+//
+// Coordinates are converted to IMAGE pixels before leaving the client,
+// so the box covers the same ground at any zoom or pan, and the server
+// needs no knowledge of the viewport.
+let _eraseOn = false;
+let _erasing = false;
+let _erasePts = [];          // image-pixel centres for this stroke
+let _eraseBase = null;       // post-fire pixels, to reveal when erasing
+let _eraseWork = null;       // canvas holding the edited result
+let _erasePane = null;
+
+function eraserSize() {
+    const el = document.getElementById('p-eraser_size');
+    const v = el ? parseInt(el.value, 10) : 11;
+    return (Number.isFinite(v) && v > 0) ? Math.min(201, v) : 11;
+}
+
+function onEraserSizeChange() {
+    log(`[erase] eraser size ${eraserSize()}x${eraserSize()} px`, 'dim');
+    applyEraserCursor();
+}
+
+function paneShowsResult(pane) {
+    const v = (pane === 'left') ? leftView : rightView;
+    return v === 'result' || (RUN_VIEWS && RUN_VIEWS.has(v));
+}
+
+function onEraserToggle() {
+    const el = document.getElementById('eraser-on');
+    _eraseOn = !!(el && el.checked);
+    const rev = document.getElementById('btn-erase-revert');
+    if (rev) rev.style.display = _eraseOn ? '' : 'none';
+    applyEraserCursor();
+    if (_eraseOn) {
+        log('[erase] eraser on — drag over the ML classification to '
+            + 'remove pixels', 'dim');
+        prepareEraseCanvases();
+    } else {
+        _eraseBase = null;
+        _eraseWork = null;
+    }
+}
+
+// Square cursor sized to the eraser, so what will be removed is
+// visible before committing to a stroke. Drawn as an SVG data URI at
+// the on-screen size of the box, capped because browsers refuse very
+// large cursors (and then show none at all).
+function applyEraserCursor() {
+    ['left', 'right'].forEach((pane) => {
+        const { area } = getPaneElements(pane);
+        if (!area) return;
+        if (!_eraseOn || !paneShowsResult(pane)) {
+            area.style.cursor = '';
+            return;
+        }
+        const s = paneState[pane].scale || 1;
+        const px = Math.max(6, Math.min(96,
+                                        Math.round(eraserSize() * s)));
+        const half = Math.round(px / 2);
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" `
+            + `width="${px + 2}" height="${px + 2}">`
+            + `<rect x="1" y="1" width="${px}" height="${px}" `
+            + `fill="rgba(255,255,255,0.25)" stroke="black" `
+            + `stroke-width="1"/></svg>`;
+        area.style.cursor =
+            `url("data:image/svg+xml;base64,${btoa(svg)}") `
+            + `${half} ${half}, crosshair`;
+    });
+}
+
+// The post-fire preview is the same scene without the mask, so copying
+// from it is exactly what erasing looks like -- rather than painting a
+// placeholder colour and hoping the server agrees.
+async function prepareEraseCanvases() {
+    const pane = paneShowsResult('right') ? 'right'
+        : (paneShowsResult('left') ? 'left' : null);
+    if (!pane) return;
+    _erasePane = pane;
+    try {
+        const { img } = getPaneElements(pane);
+        if (!img || !img.naturalWidth) return;
+        const w = img.naturalWidth, h = img.naturalHeight;
+
+        _eraseWork = document.createElement('canvas');
+        _eraseWork.width = w; _eraseWork.height = h;
+        _eraseWork.getContext('2d').drawImage(img, 0, 0);
+
+        const url = previewUrlFor('post', pane);
+        const r = await fetch(url);
+        if (!r.ok) return;
+        const blob = await r.blob();
+        const probe = new Image();
+        probe.src = URL.createObjectURL(blob);
+        await probe.decode();
+        const base = document.createElement('canvas');
+        base.width = w; base.height = h;
+        base.getContext('2d').drawImage(probe, 0, 0, w, h);
+        _eraseBase = base;
+        log('[erase] ready', 'dim');
+    } catch (err) {
+        log(`[erase] could not prepare the eraser: ${err.message}`,
+            'dim');
+    }
+}
+
+// Screen point -> image pixel, inverting the pane transform. The
+// dataset box size is used, not naturalWidth, so this is correct while
+// the low-res pyramid level is displayed.
+function screenToImagePx(pane, clientX, clientY) {
+    const { area, img } = getPaneElements(pane);
+    if (!area || !img) return null;
+    const rect = area.getBoundingClientRect();
+    const s = paneState[pane];
+    const x = (clientX - rect.left - s.panX) / s.scale;
+    const y = (clientY - rect.top - s.panY) / s.scale;
+    const d = paneImageDims(img);
+    if (!d.w || !d.h) return null;
+    if (x < 0 || y < 0 || x >= d.w || y >= d.h) return null;
+    // The mask is on the AOI grid; the preview may be downsampled from
+    // it, so scale into mask pixels using the recorded raster size.
+    const g = geoForPane(pane);
+    const kx = (g && g.rw) ? (g.rw / d.w) : 1;
+    const ky = (g && g.rh) ? (g.rh / d.h) : 1;
+    return {ix: x * kx, iy: y * ky, px: x, py: y};
+}
+
+function eraseAt(pane, clientX, clientY) {
+    const p = screenToImagePx(pane, clientX, clientY);
+    if (!p) return;
+    _erasePts.push([Math.round(p.ix), Math.round(p.iy)]);
+
+    // Local preview: copy the same box out of the post-fire canvas.
+    if (_eraseWork && _eraseBase) {
+        const { img } = getPaneElements(pane);
+        const d = paneImageDims(img);
+        const g = geoForPane(pane);
+        const kx = (g && g.rw) ? (d.w / g.rw) : 1;
+        const ky = (g && g.rh) ? (d.h / g.rh) : 1;
+        const bw = Math.max(1, Math.round(eraserSize() * kx));
+        const bh = Math.max(1, Math.round(eraserSize() * ky));
+        const x0 = Math.round(p.px - bw / 2);
+        const y0 = Math.round(p.py - bh / 2);
+        const ctx = _eraseWork.getContext('2d');
+        try {
+            ctx.drawImage(_eraseBase, x0, y0, bw, bh,
+                          x0, y0, bw, bh);
+        } catch (_) { /* off-canvas strokes are harmless */ }
+        try {
+            img.src = _eraseWork.toDataURL('image/png');
+        } catch (_) { /* tainted canvas: server sync still applies */ }
+    }
+}
+
+async function flushErase() {
+    if (!_erasePts.length) return;
+    const pts = _erasePts.slice();
+    _erasePts = [];
+    try {
+        const r = await fetch(
+            `/api/fire/${encodeURIComponent(FIRE)}/erase`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json',
+                          'X-Requested-With': 'fetch'},
+                body: JSON.stringify({boxes: pts, size: eraserSize()}),
+            });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || j.error) {
+            log(`[erase] server rejected the stroke: `
+                + `${j.error || ('HTTP ' + r.status)}`, 'error');
+            return;
+        }
+        log(`[erase] removed ${(j.erased || 0).toLocaleString()} px; `
+            + `${(j.remaining || 0).toLocaleString()} remain`, 'dim');
+        if (typeof j.ml_area_ha === 'number') updateMlSize(j.ml_area_ha);
+        if (typeof j.agreement_pct === 'number') {
+            renderAgreement(j.agreement_pct, previouslyAccepted);
+        }
+        // Refetch so what is displayed is the server's rendering, not
+        // the local approximation.
+        _previewStamp = Date.now();
+        for (const k of [..._previewBlobs.keys()]) {
+            if (k.includes(':result') || k.includes(':serial_')) {
+                try { URL.revokeObjectURL(_previewBlobs.get(k)); }
+                catch (_) {}
+                _previewBlobs.delete(k);
+            }
+        }
+        if (_erasePane) {
+            await loadPaneImage(_erasePane,
+                                (_erasePane === 'left') ? leftView
+                                                        : rightView);
+            prepareEraseCanvases();
+        }
+    } catch (err) {
+        log(`[erase] sync failed: ${err.message}`, 'error');
+    }
+}
+
+async function revertErase() {
+    if (!confirm('Undo all eraser strokes on this classification?')) {
+        return;
+    }
+    try {
+        const r = await fetch(
+            `/api/fire/${encodeURIComponent(FIRE)}/erase_revert`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json',
+                          'X-Requested-With': 'fetch'},
+                body: '{}'});
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || j.error) {
+            alert(`Could not revert: `
+                  + `${j.error || ('HTTP ' + r.status)}`);
+            return;
+        }
+        if (typeof j.ml_area_ha === 'number') updateMlSize(j.ml_area_ha);
+        if (typeof j.agreement_pct === 'number') {
+            renderAgreement(j.agreement_pct, previouslyAccepted);
+        }
+        _previewStamp = Date.now();
+        for (const k of [..._previewBlobs.keys()]) {
+            try { URL.revokeObjectURL(_previewBlobs.get(k)); } catch (_) {}
+            _previewBlobs.delete(k);
+        }
+        log('[erase] reverted', 'dim');
+        await loadPaneImage('left', leftView);
+        if (splitActive) await loadPaneImage('right', rightView);
+        prepareEraseCanvases();
+    } catch (err) {
+        alert(`Could not revert: ${err.message}`);
+    }
+}
+
 // ---- Press-and-hold "flicker" comparison ---------------------------
 // Holding the left button over a pane temporarily swaps it to show the
 // OTHER pane's view, reverting on release. Flicking between two
@@ -3103,6 +3376,19 @@ function initPaneInteraction(pane) {
         dragStartY = e.clientY;
         dragStartPanX = paneState[pane].panX;
         dragStartPanY = paneState[pane].panY;
+
+        // Eraser takes precedence over pan and over the flicker peek:
+        // with the tool on, a press on the classification is an edit,
+        // and panning would be a surprising thing to do instead.
+        if (_eraseOn && paneShowsResult(pane)) {
+            _erasing = true;
+            _erasePane = pane;
+            isDragging = false;
+            eraseAt(pane, e.clientX, e.clientY);
+            e.preventDefault();
+            return;
+        }
+
         area.classList.add('dragging');
         // Press-and-hold (without moving) peeks at the other pane's
         // view in THIS pane, so the two can be compared without the
@@ -3117,6 +3403,12 @@ function initPaneInteraction(pane) {
 initPaneInteraction('left');
 
 document.addEventListener('mousemove', (e) => {
+    if (_erasing && _erasePane) {
+        // Continuous strokes: every move point erases, so dragging
+        // sweeps rather than leaving gaps between samples.
+        eraseAt(_erasePane, e.clientX, e.clientY);
+        return;
+    }
     if (!isDragging || !dragPane) return;
     const dx = e.clientX - dragStartX;
     const dy = e.clientY - dragStartY;
@@ -3132,6 +3424,14 @@ document.addEventListener('mousemove', (e) => {
 });
 
 function endPaneDrag() {
+    if (_erasing) {
+        // Commit the stroke on release: one request per stroke rather
+        // than one per mouse-move, which would flood the server and
+        // rewrite the raster hundreds of times.
+        _erasing = false;
+        flushErase();
+        return;
+    }
     // Release always ends a peek, whether or not a drag was in
     // progress -- otherwise a peek could outlive the button press.
     endFlicker();
