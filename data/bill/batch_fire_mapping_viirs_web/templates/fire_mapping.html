@@ -5271,6 +5271,15 @@ async function pollProgress() {
 }
 
 setTimeout(pollProgress, 1500);
+
+// Apply the clustering-method visibility ONCE at page load.
+//
+// The earlier call sat inside the source-switch handler, so the
+// HDBSCAN sections stayed visible on a freshly opened fire and only
+// hid after switching source -- exactly the reported symptom. Running
+// it here, at the end of the script, guarantees the DOM exists and
+// that nothing later re-shows the sections.
+restoreMethodToggle();
 </script>
 </body>
 </html>
