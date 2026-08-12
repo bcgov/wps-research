@@ -419,6 +419,10 @@ tbody tr.row-mapping:hover { background: #ede1ff; }
 }
 
 .image-controls {
+    /* Containing block for the absolutely positioned
+       loading indicator, so it centres over the bar rather
+       than the page. */
+    position: relative;
     padding: 8px 16px;
     background: #f7f7fa;
     border-bottom: 1px solid #e0e0e5;

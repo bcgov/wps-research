@@ -83,10 +83,16 @@
                  display) so text appearing and the elapsed counter
                  changing width cannot reflow the toolbar and make the
                  controls jump while a layer loads. -->
-            <span id="layer-status" style="visibility:hidden;
-                  font-size:11px;color:#555;margin-left:10px;
-                  white-space:nowrap;display:inline-block;
-                  min-width:200px"></span>
+            <!-- Reserves no width when idle: a fixed 200px gutter
+                 pushed the right-hand controls off the edge on
+                 narrower windows. It is absolutely positioned while
+                 visible so appearing text still cannot reflow the bar
+                 (the reason it used a reserved gutter in the first
+                 place). -->
+            <span id="layer-status" style="display:none;
+                  font-size:11px;color:#555;white-space:nowrap;
+                  position:absolute;left:50%;transform:translateX(-50%);
+                  pointer-events:none"></span>
             <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;display:none" id="btn-sync" onclick="toggleSync()" title="Sync pan/zoom between panes">Sync</button>
             <span class="info" id="zoom-info"></span>
             <!-- Affects only what the ML stage and the imagery export
@@ -147,6 +153,19 @@
                   style="display:inline-block;width:1px;height:16px;
                          background:#ccc;margin:0 10px;
                          vertical-align:middle"></span>
+
+            <label id="eraser-wrap"
+                   title="Erase parts of the ML classification by hand.
+                          With this on, dragging over a pane showing the
+                          classification clears the mask under the
+                          cursor."
+                   style="font-size:11px;margin-left:10px;
+                          display:inline-flex;align-items:center;
+                          gap:4px;cursor:pointer;white-space:nowrap">
+              <input type="checkbox" id="eraser-on"
+                     onchange="onEraserToggle()">
+              Eraser (E key) to toggle
+            </label>
             <label id="eraser-size-wrap"
                    title="Side of the square the eraser removes, in
                           IMAGE pixels, so it covers the same ground at
@@ -161,25 +180,7 @@
                      oninput="onEraserSizeChange()"
                      onchange="onEraserSizeChange()">
             </label>
-            <label id="eraser-wrap"
-                   title="Erase parts of the ML classification by hand.
-                          With this on, dragging over a pane showing the
-                          classification clears the mask under the
-                          cursor."
-                   style="font-size:11px;margin-left:10px;
-                          display:inline-flex;align-items:center;
-                          gap:4px;cursor:pointer;white-space:nowrap">
-              <input type="checkbox" id="eraser-on"
-                     onchange="onEraserToggle()">
-              Eraser (E key) to toggle
-            </label>
-            <button class="btn btn-secondary" id="btn-erase-revert"
-                    onclick="revertErase()"
-                    style="display:none;font-size:11px;padding:2px 8px"
-                    title="Undo every eraser stroke since this
-                           classification was produced.">
-              Revert
-            </button>
+
             <label id="erase-outside-wrap"
                    title="Only erase the parts of the eraser box that
                           fall OUTSIDE the BCWS perimeter polygons, so a
@@ -191,6 +192,13 @@
               <input type="checkbox" id="erase-outside-only" checked>
               Outside BCWS only
             </label>
+            <button class="btn btn-secondary" id="btn-erase-revert"
+                    onclick="revertErase()"
+                    style="display:none;font-size:11px;padding:2px 8px"
+                    title="Undo every eraser stroke since this
+                           classification was produced.">
+              Revert
+            </button>
             <!-- Right-pane controls, shown only in split view.
                  Grouped and pushed right so they sit above the pane
                  they drive: with one set of dropdowns the target pane
@@ -3951,14 +3959,14 @@ function layerBusyEnd() {
 function layerStatusPaint() {
     const el = document.getElementById('layer-status');
     if (!el) return;
-    if (_layerBusy <= 0) { el.style.visibility = 'hidden'; return; }
+    if (_layerBusy <= 0) { el.style.display = 'none'; return; }
     const secs = (performance.now() - _layerStart) / 1000;
     // Elapsed time rather than a percentage: the transfer size is not
     // known until the response arrives, and a source switch may
     // include a server-side rebuild of unknown length, so a progress
     // bar would be invented. Elapsed is honest and answers the real
     // question -- is this moving.
-    el.style.visibility = 'visible';
+    el.style.display = '';
     el.textContent = `${_layerLabel} ... ${secs.toFixed(1)}s`
         + (secs > 20 ? '  (still working)' : '');
 }
