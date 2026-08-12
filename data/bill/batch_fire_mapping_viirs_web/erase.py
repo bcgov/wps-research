@@ -63,7 +63,52 @@ def ensure_backup(clf_path: str, log=None) -> str:
     return bak
 
 
-def apply_erase(fire, clf_path: str, boxes, size: int, log=None) -> dict:
+def perimeter_mask_png(fire, out_path: str, width=None,
+                       height=None) -> str:
+    """Render the BCWS perimeter as a plain 8-bit PNG (255 = inside).
+
+    The client needs to know which pixels are protected so its live
+    preview matches what the server will do. It cannot read ENVI, and
+    the hint PREVIEW is a green overlay on post-fire imagery -- fine to
+    look at, useless to threshold. A clean binary PNG is unambiguous
+    and tiny.
+    """
+    from osgeo import gdal
+    import numpy as np
+    from matplotlib.image import imsave
+
+    from .prepare import build_bcws_hint_for_fire
+    mask_path, err = build_bcws_hint_for_fire(fire)
+    if not mask_path or not os.path.isfile(mask_path):
+        raise RuntimeError(err or 'no BCWS perimeter for this AOI')
+
+    ds = gdal.Open(mask_path, gdal.GA_ReadOnly)
+    if ds is None:
+        raise RuntimeError('cannot open the perimeter mask')
+    arr = ds.GetRasterBand(1).ReadAsArray()
+    ds = None
+    m = (np.nan_to_num(arr) > 0)
+
+    # Downsample by decimation to the preview size when asked. Nearest
+    # is right here: a perimeter is a hard boundary, and interpolating
+    # would invent half-protected pixels.
+    if width and height and (m.shape[1] != width or m.shape[0] != height):
+        ys = (np.linspace(0, m.shape[0] - 1, int(height))
+              ).astype('int32')
+        xs = (np.linspace(0, m.shape[1] - 1, int(width))
+              ).astype('int32')
+        m = m[ys][:, xs]
+
+    rgb = np.zeros((m.shape[0], m.shape[1], 3), dtype='uint8')
+    rgb[m] = 255
+    tmp = out_path + '.tmp.png'
+    imsave(tmp, rgb)
+    os.replace(tmp, out_path)
+    return out_path
+
+
+def apply_erase(fire, clf_path: str, boxes, size: int, log=None,
+                outside_bcws_only: bool = False) -> dict:
     """Zero an N x N box in the mask around each (x, y) in *boxes*.
 
     Coordinates are IMAGE pixels in the mask's own grid, so the result
@@ -103,6 +148,32 @@ def apply_erase(fire, clf_path: str, boxes, size: int, log=None) -> dict:
     h, w = arr.shape[0], arr.shape[1]
     before = int(np.count_nonzero(np.nan_to_num(arr) > 0))
 
+    # Pixels the perimeter protects, when the caller asked for it.
+    # Loaded once per request rather than per stroke point.
+    protect = None
+    if outside_bcws_only:
+        try:
+            from .prepare import build_bcws_hint_for_fire
+            mp, merr = build_bcws_hint_for_fire(fire)
+            if mp and os.path.isfile(mp):
+                pds = gdal.Open(mp, gdal.GA_ReadOnly)
+                parr = pds.GetRasterBand(1).ReadAsArray() if pds else None
+                pds = None
+                if parr is not None and parr.shape == arr.shape:
+                    protect = np.nan_to_num(parr) > 0
+                elif parr is not None:
+                    if log:
+                        log(f'  Eraser: perimeter is {parr.shape} but '
+                            f'the mask is {arr.shape}; erasing '
+                            f'everywhere instead')
+            elif log:
+                log(f'  Eraser: no BCWS perimeter ({merr or "none"}); '
+                    f'erasing everywhere')
+        except Exception as exc:
+            if log:
+                log(f'  Eraser: could not load the perimeter ({exc}); '
+                    f'erasing everywhere')
+
     half = size // 2
     for pt in boxes:
         try:
@@ -117,7 +188,15 @@ def apply_erase(fire, clf_path: str, boxes, size: int, log=None) -> dict:
         y1 = min(h, cy + half + 1)
         if x1 <= x0 or y1 <= y0:
             continue
-        arr[y0:y1, x0:x1] = 0.0
+        if protect is None:
+            arr[y0:y1, x0:x1] = 0.0
+        else:
+            # Clear only the part of the box outside the perimeter, so
+            # a stroke that overlaps the official boundary trims the
+            # outside without eating into what BCWS reported.
+            sub = arr[y0:y1, x0:x1]
+            keep = protect[y0:y1, x0:x1]
+            arr[y0:y1, x0:x1] = np.where(keep, sub, 0.0)
 
     after = int(np.count_nonzero(np.nan_to_num(arr) > 0))
     band.WriteArray(arr.astype('float32'))

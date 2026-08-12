@@ -1325,7 +1325,9 @@ class FireRoutes:
                 return
             res = apply_erase(
                 fire, clf, boxes, size,
-                log=lambda m: fire.console_log.append(m))
+                log=lambda m: fire.console_log.append(m),
+                outside_bcws_only=bool(
+                    body.get('outside_bcws_only', False)))
             if not res.get('ok'):
                 self._send_json(
                     {'error': res.get('error', 'erase failed')}, 500)
@@ -1337,6 +1339,35 @@ class FireRoutes:
             sys.stderr.write(
                 f'[erase] {fire_numbe}: {type(exc).__name__}: {exc}\n')
             self._send_json({'error': str(exc)}, 500)
+
+    def handle_api_bcws_mask(self, fire_numbe):
+        """Binary BCWS perimeter as a PNG, for the eraser's preview.
+
+        Optional ?w=&h= renders it at the preview's dimensions so the
+        client can index it directly against the displayed image.
+        """
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        q = parse_qs(urlparse(self.path).query)
+
+        def _int(name):
+            try:
+                return int((q.get(name, ['0']) or ['0'])[0])
+            except (TypeError, ValueError):
+                return 0
+
+        w, h = _int('w'), _int('h')
+        try:
+            from ..erase import perimeter_mask_png
+            out = os.path.join(fire.cache_dir, 'previews',
+                               f'_bcws_mask_{w}x{h}.png')
+            perimeter_mask_png(fire, out, w or None, h or None)
+            self._send_file(out, 'image/png', cache_seconds=0)
+        except Exception as exc:
+            self._send_json({'error': str(exc)}, 409)
 
     def handle_api_erase_revert(self, fire_numbe):
         """Undo every eraser stroke since the mask was last produced."""

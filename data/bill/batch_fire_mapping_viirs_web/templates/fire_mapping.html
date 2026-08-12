@@ -152,6 +152,17 @@
                            classification was produced.">
               Revert
             </button>
+            <label id="erase-outside-wrap"
+                   title="Only erase the parts of the eraser box that
+                          fall OUTSIDE the BCWS perimeter polygons, so a
+                          stroke overlapping the official boundary trims
+                          the outside without eating into it."
+                   style="display:none;font-size:11px;margin-left:6px;
+                          align-items:center;gap:4px;cursor:pointer;
+                          white-space:nowrap">
+              <input type="checkbox" id="erase-outside-only" checked>
+              Outside BCWS only
+            </label>
             <!-- Right-pane controls, shown only in split view.
                  Grouped and pushed right so they sit above the pane
                  they drive: with one set of dropdowns the target pane
@@ -488,6 +499,7 @@
                                toolbar.">?</span>:</label>
                         <input type="number" id="p-eraser_size"
                                value="11" step="2" min="1" max="201"
+                               oninput="onEraserSizeChange()"
                                onchange="onEraserSizeChange()">
                     </div>
                     <div class="param-row" style="justify-content:flex-end;gap:6px">
@@ -2743,6 +2755,9 @@ let _eraseOn = false;
 let _erasing = false;
 let _erasePts = [];          // image-pixel centres for this stroke
 let _eraseBase = null;       // post-fire pixels, to reveal when erasing
+let _erasePerim = null;      // Uint8Array, 1 where the BCWS perimeter
+                             // protects a pixel (preview resolution)
+let _erasePerimDims = null;
 let _eraseWork = null;       // canvas holding the edited result
 let _erasePane = null;
 
@@ -2753,8 +2768,9 @@ function eraserSize() {
 }
 
 function onEraserSizeChange() {
-    log(`[erase] eraser size ${eraserSize()}x${eraserSize()} px`, 'dim');
-    applyEraserCursor();
+    // force: the size changed, so the cached cursor must be rebuilt
+    // even though the pane and zoom did not.
+    applyEraserCursor(true);
 }
 
 function paneShowsResult(pane) {
@@ -2762,11 +2778,18 @@ function paneShowsResult(pane) {
     return v === 'result' || (RUN_VIEWS && RUN_VIEWS.has(v));
 }
 
+function eraseOutsideOnly() {
+    const el = document.getElementById('erase-outside-only');
+    return !!(el && el.checked);
+}
+
 function onEraserToggle() {
     const el = document.getElementById('eraser-on');
     _eraseOn = !!(el && el.checked);
     const rev = document.getElementById('btn-erase-revert');
     if (rev) rev.style.display = _eraseOn ? '' : 'none';
+    const ow = document.getElementById('erase-outside-wrap');
+    if (ow) ow.style.display = _eraseOn ? 'inline-flex' : 'none';
     applyEraserCursor();
     if (_eraseOn) {
         log('[erase] eraser on — drag over the ML classification to '
@@ -2782,17 +2805,28 @@ function onEraserToggle() {
 // visible before committing to a stroke. Drawn as an SVG data URI at
 // the on-screen size of the box, capped because browsers refuse very
 // large cursors (and then show none at all).
-function applyEraserCursor() {
+let _cursorKey = '';
+
+function applyEraserCursor(force) {
     ['left', 'right'].forEach((pane) => {
         const { area } = getPaneElements(pane);
         if (!area) return;
         if (!_eraseOn || !paneShowsResult(pane)) {
             area.style.cursor = '';
+            _cursorKey = '';
             return;
         }
         const s = paneState[pane].scale || 1;
         const px = Math.max(6, Math.min(96,
                                         Math.round(eraserSize() * s)));
+        // Browsers cache the cursor image per URL and will not repaint
+        // a stationary pointer when the property is reassigned. Clear
+        // it first, and only rebuild when the size actually changed --
+        // otherwise every mousemove would allocate a new data URI.
+        const key = `${pane}:${px}`;
+        if (!force && key === _cursorKey && area.style.cursor) return;
+        _cursorKey = key;
+        area.style.cursor = 'auto';
         const half = Math.round(px / 2);
         const svg = `<svg xmlns="http://www.w3.org/2000/svg" `
             + `width="${px + 2}" height="${px + 2}">`
@@ -2833,6 +2867,41 @@ async function prepareEraseCanvases() {
         base.width = w; base.height = h;
         base.getContext('2d').drawImage(probe, 0, 0, w, h);
         _eraseBase = base;
+
+        // Perimeter mask at the SAME dimensions, so the live preview
+        // protects exactly the pixels the server will protect. Without
+        // it the local paint would erase inside the perimeter and then
+        // visibly snap back after the sync.
+        _erasePerim = null;
+        _erasePerimDims = null;
+        try {
+            const mr = await fetch(
+                `/api/fire/${encodeURIComponent(FIRE)}/bcws_mask`
+                + `?w=${w}&h=${h}`);
+            if (mr.ok) {
+                const mb = await mr.blob();
+                const mi = new Image();
+                mi.src = URL.createObjectURL(mb);
+                await mi.decode();
+                const mc = document.createElement('canvas');
+                mc.width = w; mc.height = h;
+                const mx = mc.getContext('2d');
+                mx.drawImage(mi, 0, 0, w, h);
+                const d = mx.getImageData(0, 0, w, h).data;
+                const u = new Uint8Array(w * h);
+                for (let i = 0, j = 0; i < d.length; i += 4, j++) {
+                    u[j] = d[i] > 127 ? 1 : 0;
+                }
+                _erasePerim = u;
+                _erasePerimDims = {w, h};
+                log('[erase] perimeter loaded for the live preview',
+                    'dim');
+            } else {
+                log('[erase] no BCWS perimeter available; "Outside '
+                    + 'BCWS only" will have no effect', 'dim');
+            }
+        } catch (_) { /* preview falls back to erasing everywhere */ }
+
         log('[erase] ready', 'dim');
     } catch (err) {
         log(`[erase] could not prepare the eraser: ${err.message}`,
@@ -2879,8 +2948,35 @@ function eraseAt(pane, clientX, clientY) {
         const y0 = Math.round(p.py - bh / 2);
         const ctx = _eraseWork.getContext('2d');
         try {
-            ctx.drawImage(_eraseBase, x0, y0, bw, bh,
-                          x0, y0, bw, bh);
+            if (eraseOutsideOnly() && _erasePerim && _erasePerimDims
+                    && _erasePerimDims.w === _eraseWork.width) {
+                // Per-pixel so protected pixels keep the mask. The box
+                // is small (11x11 by default), so this is cheap.
+                const W = _eraseWork.width;
+                const cx0 = Math.max(0, x0), cy0 = Math.max(0, y0);
+                const cx1 = Math.min(W, x0 + bw);
+                const cy1 = Math.min(_eraseWork.height, y0 + bh);
+                if (cx1 > cx0 && cy1 > cy0) {
+                    const w2 = cx1 - cx0, h2 = cy1 - cy0;
+                    const cur = ctx.getImageData(cx0, cy0, w2, h2);
+                    const bctx = _eraseBase.getContext('2d');
+                    const src = bctx.getImageData(cx0, cy0, w2, h2);
+                    for (let yy = 0; yy < h2; yy++) {
+                        for (let xx = 0; xx < w2; xx++) {
+                            const gi = (cy0 + yy) * W + (cx0 + xx);
+                            if (_erasePerim[gi]) continue;
+                            const o = (yy * w2 + xx) * 4;
+                            cur.data[o] = src.data[o];
+                            cur.data[o + 1] = src.data[o + 1];
+                            cur.data[o + 2] = src.data[o + 2];
+                        }
+                    }
+                    ctx.putImageData(cur, cx0, cy0);
+                }
+            } else {
+                ctx.drawImage(_eraseBase, x0, y0, bw, bh,
+                              x0, y0, bw, bh);
+            }
         } catch (_) { /* off-canvas strokes are harmless */ }
         try {
             img.src = _eraseWork.toDataURL('image/png');
@@ -2898,7 +2994,11 @@ async function flushErase() {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json',
                           'X-Requested-With': 'fetch'},
-                body: JSON.stringify({boxes: pts, size: eraserSize()}),
+                body: JSON.stringify({
+                    boxes: pts,
+                    size: eraserSize(),
+                    outside_bcws_only: eraseOutsideOnly(),
+                }),
             });
         const j = await r.json().catch(() => ({}));
         if (!r.ok || j.error) {
