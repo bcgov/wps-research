@@ -25,6 +25,58 @@ def init(app_state: AppState):
     state = app_state
 
 
+def ensure_geo(path: str, ref_path: str, log=None) -> bool:
+    """Make sure *path* carries the same map info as *ref_path*.
+
+    ENVI keeps georeferencing in the sidecar .hdr, and several places
+    write a mask as raw floats plus a copied header. If that copy is
+    missed -- or the header came from a raster on a different grid --
+    the mask still opens and still has the right dimensions, so nothing
+    complains until it is drawn against the imagery after a restart and
+    lands in the wrong place.
+
+    Cheap to check on every write, and it repairs rather than reports.
+    """
+    try:
+        from osgeo import gdal
+        if not path or not os.path.isfile(path):
+            return False
+        ds = gdal.Open(path, gdal.GA_Update)
+        if ds is None:
+            return False
+        gt = ds.GetGeoTransform()
+        proj = ds.GetProjection()
+        need = (not proj) or gt == (0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+        if not need:
+            ds = None
+            return False
+        ref = gdal.Open(ref_path, gdal.GA_ReadOnly) if ref_path else None
+        if ref is None:
+            ds = None
+            return False
+        if (ref.RasterXSize, ref.RasterYSize) != (ds.RasterXSize,
+                                                  ds.RasterYSize):
+            ds = None
+            ref = None
+            return False
+        ds.SetGeoTransform(ref.GetGeoTransform())
+        rp = ref.GetProjection()
+        if rp:
+            ds.SetProjection(rp)
+        ds.FlushCache()
+        ds = None
+        ref = None
+        msg = (f'  Restored map info on {os.path.basename(path)} from '
+               f'{os.path.basename(ref_path)}')
+        sys.stderr.write(msg + '\n')
+        if log:
+            log(msg)
+        return True
+    except Exception as exc:
+        sys.stderr.write(f'[geo] check failed for {path}: {exc}\n')
+        return False
+
+
 def _backup_path(clf_path: str) -> str:
     """Where the pre-erase mask is kept.
 
@@ -204,6 +256,7 @@ def apply_erase(fire, clf_path: str, boxes, size: int, log=None,
     band = None
     ds = None
 
+    ensure_geo(clf_path, getattr(fire, 'crop_bin', ''), log=log)
     msg = (f'  Eraser: {len(boxes)} stroke point(s) at {size}x{size} px '
            f'-> {before - after:,} pixel(s) removed, {after:,} remain')
     sys.stderr.write(msg + '\n')
@@ -231,6 +284,7 @@ def revert(fire, clf_path: str, log=None) -> dict:
                 os.remove(p)
             except OSError:
                 pass
+        ensure_geo(clf_path, getattr(fire, 'crop_bin', ''), log=log)
         msg = '  Eraser: reverted to the pre-edit classification'
         sys.stderr.write(msg + '\n')
         if log:

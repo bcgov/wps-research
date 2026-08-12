@@ -29,6 +29,36 @@ def _fire_exclusions(fire):
             list(getattr(fire, 'band_override', None) or []))
 
 
+def _maybe_scale(path: str, fire, log=None) -> str:
+    """Apply the fire's scaling to an already band-selected stack.
+
+    Deliberately last: scaling statistics (percentiles, means, per-pixel
+    magnitudes) must be computed over the bands the model will actually
+    see, not over bands that were about to be dropped.
+    """
+    try:
+        from .scaling import scale_raster, scaling_tag, DEFAULTS
+        params = dict(getattr(fire, 'scaling', None) or {})
+        if not params:
+            return path
+        method = str(params.get('method') or DEFAULTS['method'])
+        if method in ('none',):
+            return path
+        tag = scaling_tag(params)
+        out = f'{os.path.splitext(path)[0]}_s-{tag}.bin'
+        try:
+            if (os.path.isfile(out)
+                    and os.path.getmtime(out) >= os.path.getmtime(path)):
+                return out
+        except OSError:
+            pass
+        return scale_raster(path, out, params, log=log)
+    except Exception as exc:
+        sys.stderr.write(
+            f'[scale] skipped ({exc}); using the unscaled stack\n')
+        return path
+
+
 def reduced_stack(src_path: str, fire, log=None):
     """A copy of *src_path* holding only the bands the model should see.
 
@@ -54,7 +84,7 @@ def reduced_stack(src_path: str, fire, log=None):
         x_b8, x_pre, x_diff, only, override = _fire_exclusions(fire)
         if not (x_b8 or x_pre or x_diff or only or override):
             _kept_band_map = []
-            return src_path
+            return _maybe_scale(src_path, fire, log=log)
 
         ds = gdal.Open(src_path, gdal.GA_ReadOnly)
         if ds is None:
@@ -69,7 +99,7 @@ def reduced_stack(src_path: str, fire, log=None):
         if len(keep) == len(names):
             # Nothing actually matched (e.g. a stack with no B8).
             ds = None
-            return src_path
+            return _maybe_scale(src_path, fire, log=log)
 
         tag = selection_tag(x_b8, x_pre, x_diff, only, override)
         out_path = f'{os.path.splitext(src_path)[0]}_{tag}.bin'
@@ -78,7 +108,7 @@ def reduced_stack(src_path: str, fire, log=None):
                     and os.path.getmtime(out_path)
                     >= os.path.getmtime(src_path)):
                 ds = None
-                return out_path
+                return _maybe_scale(out_path, fire, log=log)
         except OSError:
             pass
 
@@ -97,7 +127,7 @@ def reduced_stack(src_path: str, fire, log=None):
         ds = None
         sys.stderr.write(
             f'[bands] classifier input -> {os.path.basename(out_path)}\n')
-        return out_path
+        return _maybe_scale(out_path, fire, log=log)
     except Exception as exc:
         sys.stderr.write(
             f'[bands] could not build the reduced stack ({exc}); '

@@ -63,6 +63,12 @@ def _write_envi_mask_like(mask: np.ndarray, out_path: str,
     file's .hdr geometry so downstream GDAL readers see identical
     dimensions/projection."""
     mask.astype(np.float32).tofile(out_path)
+    # The .hdr copied below carries samples/lines/bands and the map
+    # info, so the pair stays georeferenced. Verified explicitly after
+    # the copy (see below) because a mask written without its map info
+    # plots at the wrong place once the app restarts and re-reads it
+    # from disk -- the failure only shows up later, which is what makes
+    # it expensive.
     # Copy the sibling .hdr from ref_path (handles both foo.hdr and
     # foo.bin.hdr naming conventions).
     ref_hdr = os.path.splitext(ref_path)[0] + '.hdr'

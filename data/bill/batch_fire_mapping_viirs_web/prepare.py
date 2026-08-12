@@ -393,9 +393,32 @@ def vectorize_classified(fire: FireInfo, clf_path: str = None,
         from osgeo import gdal, ogr, osr
 
         if clf_path is None:
+            # find_classified() takes the FIRE (classified_names()
+            # reads fire.crop_bin to derive the stack-based name), not
+            # the fire number. Passing the string made every candidate
+            # name wrong, so the lookup always missed and the download
+            # reported "no classified raster found" even with a result
+            # plainly on screen.
+            #
+            # Also search the ACCEPTED directory: on a download the
+            # canonical copy lives there, and the cache may have been
+            # swept.
             from .state import find_classified
-            clf_path = find_classified(
-                fire.fire_numbe, [fire.cache_dir])
+            dirs = [fire.cache_dir]
+            try:
+                if state.output_root:
+                    dirs.append(os.path.join(state.output_root,
+                                             fire.fire_numbe))
+            except Exception:
+                pass
+            clf_path = find_classified(fire, dirs)
+            if not clf_path:
+                # Last resort: whatever the active run recorded.
+                try:
+                    from .erase import active_classified
+                    clf_path = active_classified(fire)
+                except Exception:
+                    clf_path = ''
         if not clf_path or not os.path.isfile(clf_path):
             out['error'] = 'no classified raster found'
             emit(f'[vector] {fire.fire_numbe}: {out["error"]}')
@@ -669,6 +692,98 @@ def verify_and_repair_fire(fire: FireInfo, log=None) -> dict:
         except Exception:
             pass
     return out
+
+
+def restrict_hint_to_bcws(fire: FireInfo, hint_path: str,
+                          log=None) -> str:
+    """Clip a hint mask to the BCWS perimeter polygons.
+
+    Written to a SEPARATE file rather than edited in place: the
+    unrestricted hint is still the right answer when the checkbox is
+    off, and rebuilding it from scratch on every toggle would be slow
+    and would lose the VIIRS mask, which is downloaded rather than
+    derived.
+
+    Returns the restricted path, or the original when there is nothing
+    to clip against -- an empty hint would fail the run, and silently
+    substituting one is worse than ignoring the setting.
+    """
+    def emit(msg):
+        sys.stderr.write(msg + '\n')
+        if log:
+            try:
+                log(msg)
+            except Exception:
+                pass
+
+    try:
+        import numpy as np
+        from osgeo import gdal
+
+        if not hint_path or not os.path.isfile(hint_path):
+            return hint_path
+        per_path, err = build_bcws_hint_for_fire(fire)
+        if not per_path or not os.path.isfile(per_path):
+            emit(f'[hint] restrict to BCWS skipped: '
+                 f'{err or "no perimeter"}')
+            return hint_path
+
+        out = (os.path.splitext(hint_path)[0] + '_bcws.bin')
+        try:
+            if (os.path.isfile(out)
+                    and os.path.getmtime(out) >= os.path.getmtime(hint_path)
+                    and os.path.getmtime(out) >= os.path.getmtime(per_path)):
+                return out
+        except OSError:
+            pass
+
+        hds = gdal.Open(hint_path, gdal.GA_ReadOnly)
+        pds = gdal.Open(per_path, gdal.GA_ReadOnly)
+        if hds is None or pds is None:
+            return hint_path
+        harr = hds.GetRasterBand(1).ReadAsArray()
+        parr = pds.GetRasterBand(1).ReadAsArray()
+        if harr is None or parr is None or harr.shape != parr.shape:
+            emit('[hint] restrict to BCWS skipped: shapes differ')
+            hds = None
+            pds = None
+            return hint_path
+
+        keep = np.nan_to_num(parr) > 0
+        res = np.where(keep, np.nan_to_num(harr), 0.0).astype('float32')
+        before = int(np.count_nonzero(np.nan_to_num(harr) > 0))
+        after = int(np.count_nonzero(res > 0))
+        if after == 0:
+            emit(f'[hint] restrict to BCWS skipped: it would empty the '
+                 f'hint ({before:,} px, none inside the perimeter)')
+            hds = None
+            pds = None
+            return hint_path
+
+        drv = gdal.GetDriverByName('ENVI')
+        ods = drv.Create(out, hds.RasterXSize, hds.RasterYSize, 1,
+                         gdal.GDT_Float32, options=['INTERLEAVE=BSQ'])
+        ods.SetGeoTransform(hds.GetGeoTransform())
+        pr = hds.GetProjection()
+        if pr:
+            ods.SetProjection(pr)
+        b = ods.GetRasterBand(1)
+        b.WriteArray(res)
+        b.SetDescription('hint restricted to BCWS perimeter')
+        b = None
+        ods = None
+        hds = None
+        pds = None
+        hdr = os.path.splitext(out)[0] + '.hdr'
+        if not os.path.isfile(hdr) and os.path.isfile(out + '.hdr'):
+            os.replace(out + '.hdr', hdr)
+        emit(f'[hint] restricted to BCWS perimeter: {before:,} -> '
+             f'{after:,} px')
+        return out
+    except Exception as exc:
+        emit(f'[hint] restrict to BCWS failed ({exc}); using the '
+             f'unrestricted hint')
+        return hint_path
 
 
 def build_derived_hint_for_fire(fire: FireInfo, mode: str):
@@ -1055,6 +1170,11 @@ def render_hint_for_mode(fire: FireInfo, mode: str) -> bool:
             return False
     else:
         mask, err = build_derived_hint_for_fire(fire, mode)
+        if mask and getattr(fire, 'restrict_hint_bcws', False):
+            # Clip the chosen hint to the BCWS perimeter, so
+            # the preview, the agreement score and the
+            # clustering all use the same restricted mask.
+            mask = restrict_hint_to_bcws(fire, mask)
         if not mask:
             sys.stderr.write(
                 f'[prepare] hint {mode}: {err}\n')
@@ -1234,6 +1354,11 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
         mode = 'redwins_post'
     if mode in DERIVED_HINT_MODES:
         rw_path, rw_err = build_derived_hint_for_fire(fire, mode)
+        if rw_path and getattr(fire, 'restrict_hint_bcws', False):
+            # Clip the chosen hint to the BCWS perimeter, so
+            # the preview, the agreement score and the
+            # clustering all use the same restricted mask.
+            rw_path = restrict_hint_to_bcws(fire, rw_path)
         if rw_path:
             fire.hint_bin = rw_path
             fire.perimeter_type = mode
@@ -1352,6 +1477,11 @@ def switch_hint_mode(fire: FireInfo, mode: str) -> dict:
 
     else:
         out_path, err = build_derived_hint_for_fire(fire, mode)
+        if out_path and getattr(fire, 'restrict_hint_bcws', False):
+            # Clip the chosen hint to the BCWS perimeter, so
+            # the preview, the agreement score and the
+            # clustering all use the same restricted mask.
+            out_path = restrict_hint_to_bcws(fire, out_path)
         if err:
             return {'ok': False, 'error': err}
         fire.hint_bin = out_path

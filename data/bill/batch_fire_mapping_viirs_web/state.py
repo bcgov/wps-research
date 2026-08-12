@@ -143,6 +143,11 @@ class FireInfo:
     # this replaces the checkbox rules entirely; toggling any checkbox
     # clears it.
     band_override: list = field(default_factory=list)
+    # Scaling applied to the SELECTED bands before clustering and
+    # export. Display is deliberately unaffected.
+    scaling: dict = field(default_factory=dict)
+    # Clip the selected hint to the BCWS perimeter polygons.
+    restrict_hint_bcws: bool = False
     # Which post imagery the stack is built from:
     #   'l2'   -- most recent L2A tiles over the AOI (default; recent,
     #             may contain cloud)

@@ -30,6 +30,17 @@
     <span class="help" tabindex="0" aria-label="About agreement" aria-expanded="false" data-tip="Agreement % compares the ML-classified burn footprint against the hint perimeter (VIIRS hotspot polygon). 100% = the ML result exactly matches the hint; lower values mean the ML deviated from the hint. It's a sanity check, not ground truth — a low agreement may mean the hint was loose, not that the map is wrong.">?</span>
     <span id="crop-info"></span>
     <span id="hint-mode-group" class="hint-mode-group" style="display:none"></span>
+    <label id="restrict-hint-wrap"
+           title="Clip whichever hint is selected to the BCWS perimeter
+                  polygons in this AOI. Affects the hint layer shown and
+                  the hint sent to the clustering."
+           style="font-size:11px;margin-left:8px;display:none;
+                  align-items:center;gap:4px;cursor:pointer;
+                  white-space:nowrap">
+      <input type="checkbox" id="restrict-hint-bcws"
+             onchange="onRestrictHintChange()">
+      Restrict hint to BCWS perimeter
+    </label>
 </div>
 
 <!-- Queue banner — shown when another fire is currently mapping (your
@@ -149,6 +160,13 @@
                            margin-left:8px;white-space:nowrap"
                     title="Pick exactly which bands go to the
                            classifier and to Download imagery.">Custom bands</button>
+            <button class="btn btn-secondary" id="btn-custom-scaling"
+                    onclick="openScalingPicker()"
+                    style="font-size:11px;padding:2px 8px;
+                           margin-left:6px;white-space:nowrap"
+                    title="How the selected bands are scaled before
+                           clustering and export. Does not change the
+                           displayed imagery.">Custom scaling</button>
             <span aria-hidden="true"
                   style="display:inline-block;width:1px;height:16px;
                          background:#ccc;margin:0 10px;
@@ -174,7 +192,7 @@
                           align-items:center;gap:4px;
                           white-space:nowrap">
               Size
-              <input type="number" id="p-eraser_size" value="11"
+              <input type="number" id="p-eraser_size" value="21"
                      step="2" min="1" max="201"
                      style="width:3.5em"
                      oninput="onEraserSizeChange()"
@@ -310,7 +328,7 @@
                                explicitly. More points means finer classes
                                and a larger neighbour table.">?</span>:</label>
                         <input type="number" id="p-kgc_budget_points"
-                               value="20000" step="1000" min="100">
+                               value="50000" step="1000" min="100">
                     </div>
                     <div class="param-row">
                         <label>n_skip<span class="help" tabindex="0"
@@ -1134,6 +1152,10 @@ const HINT_MODES = [
 function renderHintModeButtons() {
     const group = document.getElementById('hint-mode-group');
     if (!group) return;
+    // The restriction applies to whichever hint is chosen, so it
+    // belongs with the hint buttons and appears and hides with them.
+    const rw = document.getElementById('restrict-hint-wrap');
+    if (rw) rw.style.display = 'inline-flex';
     group.style.display = '';
     group.innerHTML = '<span style="font-size:12px;margin-right:4px">Hint:</span>';
     for (const m of HINT_MODES) {
@@ -1377,7 +1399,9 @@ async function prepareFire(padding) {
                                  ['exclude-pre-fire', 'exclude_pre_fire'],
                                  ['exclude-diff', 'exclude_diff'],
                                  ['diff-only', 'diff_only'],
-                                 ['clip-to-bcws', 'clip_to_bcws']]) {
+                                 ['clip-to-bcws', 'clip_to_bcws'],
+                                 ['restrict-hint-bcws',
+                                  'restrict_hint_bcws']]) {
             const el = document.getElementById(id);
             if (el && typeof data[key] === 'boolean') {
                 el.checked = data[key];
@@ -2663,9 +2687,13 @@ function paintOverlayVectors(ctx, unit, sizeMul) {
         if (!txt) return;
         const tw = ctx.measureText(txt).width;
         const th = fpx(12);
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-        ctx.fillRect(x - 1, y - th - 1, tw + 2, th + 2);
-        ctx.fillStyle = '#ff4444';
+        // Fully opaque black plate with white text: a translucent
+        // plate let bright imagery bleed through, and red on
+        // semi-transparent black is hard to read over pale cloud --
+        // exactly where fire numbers matter most.
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(x - 2, y - th - 2, tw + 4, th + 4);
+        ctx.fillStyle = '#ffffff';
         ctx.fillText(txt, x, y);
     };
     (b.polygons || []).forEach((ring, i) => {
@@ -2764,6 +2792,223 @@ function updateTransformForPane(pane) {
 // that same fraction under the other pane's centre, with the zoom
 // scaled by the pixel-size ratio so a feature is the same size on
 // screen in both panes.
+// ---- Custom scaling -----------------------------------------------
+//
+// One method at a time: these are alternatives, not layers, and
+// composing them would produce combinations nobody could reason about.
+// The formulae are shown because the choice changes what "similar"
+// means to the clustering, which is a modelling decision rather than a
+// display preference.
+const SCALING_METHODS = [
+    {id: 'none', label: 'None (raw values)',
+     formula: "x' = x"},
+    {id: 'band01', label: 'Per-band 0-1  (default)',
+     formula: "x' = (x - min_b) / (max_b - min_b),  per band b"},
+    {id: 'trim_band', label: 'Percentile trim, per band',
+     formula: "x' = (x - L_b) / (U_b - L_b),  L_b = P-th pct, "
+              + "U_b = (100-P)-th pct of band b",
+     params: 'trim'},
+    {id: 'trim_int', label: 'Percentile trim, intensity based',
+     formula: "I(p) = sqrt( sum_b x_b(p)^2 );  L, U = P-th and "
+              + "(100-P)-th pct of I;  x' = (x - L) / (U - L) for "
+              + "every band",
+     params: 'int'},
+    {id: 'global', label: 'Global min-max (all bands together)',
+     formula: "x' = (x - min) / (max - min),  over all bands and pixels"},
+    {id: 'pixel_mm', label: 'Per-pixel min-max (across bands)',
+     formula: "x' = (x - min_p) / (max_p - min_p),  per pixel p "
+              + "(removes brightness, keeps spectral shape)"},
+    {id: 'pixel_l2', label: 'Per-pixel L2 / intensity',
+     formula: "x' = x / sqrt( sum_b x_b(p)^2 )  (unit sphere; "
+              + "Euclidean distance becomes spectral angle)"},
+    {id: 'zscore', label: 'Z-score, per band',
+     formula: "x' = (x - mean_b) / std_b"},
+    {id: 'robust_z', label: 'Robust Z-score, per band',
+     formula: "x' = (x - median_b) / (1.4826 * MAD_b)"},
+    {id: 'logdb', label: 'Log / dB transform',
+     formula: "x' = 10 * log10( max(x, eps) ),  then per-band 0-1"},
+];
+
+let _scaling = {method: 'band01'};
+
+function openScalingPicker() {
+    const dlg = document.getElementById('scaling-picker');
+    const list = document.getElementById('scaling-list');
+    if (!dlg || !list) return;
+    const cur = _scaling || {};
+    const m = cur.method || 'band01';
+    const num = (id, val, step) => `<input type="number" id="${id}"
+        value="${val}" step="${step}" min="0" max="49"
+        style="width:4.5em">`;
+    list.innerHTML = SCALING_METHODS.map((s) => {
+        let extra = '';
+        if (s.params === 'trim') {
+            extra = `<div style="margin:4px 0 0 24px;font-size:11px;
+                          display:flex;flex-wrap:wrap;gap:12px;
+                          align-items:center">
+                <label>P (% per side): ${num('sc-trim-pct',
+                    cur.trim_percent != null ? cur.trim_percent : 1.5,
+                    '0.1')}</label>
+                <label><input type="checkbox" id="sc-trim-noclip"
+                    ${cur.trim_no_clip === false ? '' : 'checked'}>
+                    no clip</label>
+                <label><input type="checkbox" id="sc-trim-right"
+                    ${cur.trim_right_only ? 'checked' : ''}
+                    onchange="if(this.checked)
+                        document.getElementById('sc-trim-left').checked=false">
+                    right only</label>
+                <label><input type="checkbox" id="sc-trim-left"
+                    ${cur.trim_left_only ? 'checked' : ''}
+                    onchange="if(this.checked)
+                        document.getElementById('sc-trim-right').checked=false">
+                    left only</label>
+              </div>`;
+        } else if (s.params === 'int') {
+            extra = `<div style="margin:4px 0 0 24px;font-size:11px;
+                          display:flex;flex-wrap:wrap;gap:12px;
+                          align-items:center">
+                <label>P (% per side): ${num('sc-int-pct',
+                    cur.int_percent != null ? cur.int_percent : 1.5,
+                    '0.1')}</label>
+                <label><input type="checkbox" id="sc-int-noclip"
+                    ${cur.int_no_clip === false ? '' : 'checked'}>
+                    no clip</label>
+                <label><input type="checkbox" id="sc-int-right"
+                    ${cur.int_right_only ? 'checked' : ''}
+                    onchange="if(this.checked)
+                        document.getElementById('sc-int-left').checked=false">
+                    right only</label>
+                <label><input type="checkbox" id="sc-int-left"
+                    ${cur.int_left_only ? 'checked' : ''}
+                    onchange="if(this.checked)
+                        document.getElementById('sc-int-right').checked=false">
+                    left only</label>
+              </div>`;
+        }
+        return `<div style="padding:8px 0;border-bottom:1px solid #f0f0f0">
+            <label style="display:flex;align-items:flex-start;gap:8px;
+                          cursor:pointer">
+              <input type="checkbox" class="sc-pick" data-id="${s.id}"
+                     ${m === s.id ? 'checked' : ''}
+                     onchange="scalingPickOne(this)">
+              <span>
+                <span style="font-weight:600">${s.label}</span><br>
+                <code style="font-size:11px;color:#555">${s.formula}</code>
+              </span>
+            </label>${extra}</div>`;
+    }).join('');
+    const cl = document.getElementById('scaling-current');
+    if (cl) cl.textContent = `Currently: ${m}`;
+    dlg.style.display = 'flex';
+}
+
+// Checkboxes, but mutually exclusive: the methods are alternatives, so
+// ticking one unticks the rest rather than silently combining them.
+function scalingPickOne(el) {
+    document.querySelectorAll('.sc-pick').forEach((o) => {
+        if (o !== el) o.checked = false;
+    });
+    if (!el.checked) el.checked = true;
+}
+
+function closeScalingPicker() {
+    const d = document.getElementById('scaling-picker');
+    if (d) d.style.display = 'none';
+}
+
+function numVal(id, dflt) {
+    const el = document.getElementById(id);
+    if (!el || el.value === '') return dflt;
+    const v = parseFloat(el.value);
+    return Number.isFinite(v) ? v : dflt;
+}
+
+function chk(id) {
+    const el = document.getElementById(id);
+    return !!(el && el.checked);
+}
+
+async function applyScaling() {
+    const picked = [...document.querySelectorAll('.sc-pick')]
+        .find((el) => el.checked);
+    const method = picked ? picked.dataset.id : 'band01';
+    const payload = {
+        method,
+        trim_percent: numVal('sc-trim-pct', 1.5),
+        trim_no_clip: chk('sc-trim-noclip'),
+        trim_right_only: chk('sc-trim-right'),
+        trim_left_only: chk('sc-trim-left'),
+        int_percent: numVal('sc-int-pct', 1.5),
+        int_no_clip: chk('sc-int-noclip'),
+        int_right_only: chk('sc-int-right'),
+        int_left_only: chk('sc-int-left'),
+    };
+    try {
+        const r = await fetch(
+            `/api/fire/${encodeURIComponent(FIRE)}/exclude_b8`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json',
+                          'X-Requested-With': 'fetch'},
+                body: JSON.stringify({scaling: payload})});
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || j.error) {
+            alert(`Could not apply scaling: `
+                  + `${j.error || ('HTTP ' + r.status)}`);
+            return;
+        }
+        _scaling = payload;
+        const btn = document.getElementById('btn-custom-scaling');
+        if (btn) {
+            const on = method !== 'band01';
+            btn.style.background = on ? '#3a7bd5' : '';
+            btn.style.color = on ? '#fff' : '';
+            btn.textContent = on ? `Scaling: ${method}`
+                                 : 'Custom scaling';
+        }
+        log(`[scale] ${method} applied — affects the next clustering `
+            + `run and Download imagery`, 'dim');
+        closeScalingPicker();
+    } catch (err) {
+        alert(`Could not apply scaling: ${err.message}`);
+    }
+}
+
+async function onRestrictHintChange() {
+    const el = document.getElementById('restrict-hint-bcws');
+    const val = !!(el && el.checked);
+    try {
+        const r = await fetch(
+            `/api/fire/${encodeURIComponent(FIRE)}/exclude_b8`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json',
+                          'X-Requested-With': 'fetch'},
+                body: JSON.stringify({restrict_hint_bcws: val})});
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || j.error) {
+            if (el) el.checked = !val;
+            log(`Could not change the hint restriction: `
+                + `${j.error || ('HTTP ' + r.status)}`, 'error');
+            return;
+        }
+        // Rebuild the hint so the layer on screen matches what the
+        // clustering will receive.
+        _hintStamp = Date.now();
+        for (const k of [..._previewBlobs.keys()]) {
+            if (k.includes(':hint')) {
+                try { URL.revokeObjectURL(_previewBlobs.get(k)); }
+                catch (_) {}
+                _previewBlobs.delete(k);
+            }
+        }
+        await switchHintMode(currentHintMode);
+        log(`[hint] restrict to BCWS ${val ? 'ON' : 'off'}`, 'dim');
+    } catch (err) {
+        if (el) el.checked = !val;
+        log(`Could not change the hint restriction: ${err.message}`,
+            'error');
+    }
+}
+
 // ---- Custom band selection ----------------------------------------
 //
 // The checkboxes express RULES; this expresses a LIST. A hand-picked
@@ -6116,6 +6361,40 @@ setTimeout(pollProgress, 1500);
 // that nothing later re-shows the sections.
 restoreMethodToggle();
 </script>
+<!-- Scaling picker. One method at a time (they are alternatives, not
+     layers), with the parameters for the two histogram-trim methods
+     inline. Formulae are shown because "which scaling" is a modelling
+     decision, not a preference. -->
+<div id="scaling-picker" style="display:none;position:fixed;inset:0;
+     background:rgba(0,0,0,0.45);z-index:1000;align-items:center;
+     justify-content:center">
+  <div style="background:#fff;border-radius:6px;max-width:760px;
+              width:92%;max-height:85vh;display:flex;
+              flex-direction:column;box-shadow:0 8px 30px #0006">
+    <div style="padding:12px 16px;border-bottom:1px solid #e5e5e5;
+                display:flex;align-items:center;gap:10px">
+      <strong style="flex:1">Custom scaling</strong>
+      <button class="btn btn-secondary" style="font-size:11px;
+              padding:2px 8px"
+              onclick="closeScalingPicker()">Close</button>
+    </div>
+    <div style="padding:8px 16px;font-size:11px;color:#666">
+      Applied to the selected bands only, after band selection, and
+      only to what the clustering and Download imagery receive &mdash;
+      the displayed panes are unaffected.
+    </div>
+    <div id="scaling-list"
+         style="overflow:auto;padding:4px 16px 12px;flex:1"></div>
+    <div style="padding:12px 16px;border-top:1px solid #e5e5e5;
+                display:flex;gap:8px;align-items:center">
+      <span id="scaling-current" style="flex:1;font-size:11px;
+            color:#666"></span>
+      <button class="btn" id="btn-apply-scaling"
+              onclick="applyScaling()">Apply scaling</button>
+    </div>
+  </div>
+</div>
+
 <!-- Band picker. Populated from /bands when opened, so it always
      reflects the selection in force at that moment. -->
 <div id="band-picker" style="display:none;position:fixed;inset:0;
