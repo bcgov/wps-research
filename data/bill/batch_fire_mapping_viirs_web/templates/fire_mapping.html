@@ -2901,24 +2901,42 @@ function eraserSize() {
 // number fields, and stealing "e" from those would make them
 // unusable (it is also a valid character in a number input). Modifier
 // combinations are left alone so browser and OS shortcuts still work.
-document.addEventListener('keydown', (e) => {
+// Bound on WINDOW in the CAPTURE phase.
+//
+// A document-level bubble listener never sees the key if something
+// nearer the target consumes it first, and after clicking a button or
+// a checkbox the focus sits on that element -- which is exactly when
+// the shortcut is wanted. Capturing on window means the key is seen
+// wherever focus happens to be in the fire view, while the typing
+// guard below still protects the text and number fields.
+function _eraserKeyHandler(e) {
     if (e.key !== 'e' && e.key !== 'E') return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const t = e.target;
     if (t) {
         const tag = (t.tagName || '').toLowerCase();
-        if (tag === 'input' || tag === 'textarea' || tag === 'select'
-                || t.isContentEditable) {
-            return;
-        }
+        // Only TEXT-entry controls swallow it. A checkbox or a button
+        // holding focus must not block the shortcut.
+        const typing = (tag === 'textarea')
+            || (tag === 'select')
+            || t.isContentEditable
+            || (tag === 'input'
+                && !['checkbox', 'radio', 'button', 'submit']
+                    .includes((t.type || 'text').toLowerCase()));
+        if (typing) return;
     }
     const el = document.getElementById('eraser-on');
     if (!el) return;
     e.preventDefault();
+    e.stopPropagation();
     el.checked = !el.checked;
     onEraserToggle();
-    log(`[erase] eraser ${el.checked ? 'ON' : 'off'} (E)`, 'dim');
-});
+    try {
+        log(`[erase] eraser ${el.checked ? 'ON' : 'off'} (E key)`,
+            'dim');
+    } catch (_) { /* logging is not worth failing the toggle for */ }
+}
+window.addEventListener('keydown', _eraserKeyHandler, true);
 
 function onEraserSizeChange() {
     // force: the size changed, so the cached cursor must be rebuilt

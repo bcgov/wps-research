@@ -235,6 +235,24 @@ class RebrushRoutes:
                     fire.cache_dir,
                     f'{fire_numbe}_serial_{run_id}_brush.png')
         if clf_path is None:
+            # The ACTIVE result's file comes first.
+            #
+            # Accept promotes serial_results[...]['classified'], and a
+            # KGC run records <fire>_classified.bin there. Searching the
+            # legacy names first meant that if an older HDBSCAN run had
+            # left <fire>_crop.bin_classified.bin in the cache, rebrush
+            # edited that file while Accept promoted the KGC one -- the
+            # rebrush silently lost. Resolving through the same helper
+            # the eraser uses keeps all three operating on one file.
+            try:
+                from ..erase import active_classified
+                cand = active_classified(fire)
+                if cand and os.path.isfile(cand):
+                    clf_path = cand
+            except Exception as exc:
+                sys.stderr.write(
+                    f'[rebrush] active result lookup failed: {exc}\n')
+        if clf_path is None:
             for pat in (f'{fire_numbe}_crop.bin_classified.bin',
                         f'{fire_numbe}_crop_classified.bin',
                         f'{fire_numbe}_classified.bin'):
@@ -354,9 +372,22 @@ class RebrushRoutes:
                 try:
                     _overlay_mask_on_post(
                         fire, clf_path, overlay_name, (0.9, 0.1, 0.0))
+                    # Rescore in BOTH cases and write the numbers back
+                    # onto the gallery entry for this file.
+                    #
+                    # Accept reads the entry, so leaving it holding the
+                    # pre-rebrush agreement and area meant the accepted
+                    # record described a mask that no longer existed.
+                    _agr = _compute_agreement(fire)
+                    _area = _compute_ml_area(fire, clf_path)
+                    with state.lock:
+                        fire.agreement_pct = _agr
+                        fire.ml_area_ha = _area
+                        for _r in (fire.serial_results or []):
+                            if _r.get('classified') == clf_path:
+                                _r['agreement_pct'] = _agr
+                                _r['ml_area_ha'] = _area
                     if not is_serial:
-                        fire.agreement_pct = _compute_agreement(fire)
-                        fire.ml_area_ha = _compute_ml_area(fire, clf_path)
                         # Persist the brush params onto last_params so a
                         # later accept writes them to the canonical
                         # params YAML and accepted_params.csv. Without
