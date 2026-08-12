@@ -3918,7 +3918,14 @@ async function startKgcMapping() {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json',
                           'X-Requested-With': 'fetch'},
-                body: JSON.stringify({params: collectKgcParams()}),
+                // Right-most pane's source: the right selector when
+                // split, otherwise the only one. Same rule as
+                // Download imagery, so the two always agree about
+                // which imagery a run used.
+                body: JSON.stringify({
+                    params: collectKgcParams(),
+                    src: splitActive ? rightPostSource : currentPostSource,
+                }),
             });
         const j = await r.json().catch(() => ({}));
         if (!r.ok || j.error) {
@@ -3927,8 +3934,11 @@ async function startKgcMapping() {
             if (btn) { btn.disabled = false; btn.textContent = 'Map Fire'; }
             return;
         }
-        log('[kgc] started — the run continues server-side even if you '
-            + 'navigate away', 'dim');
+        const usedSrc = j.src
+            || (splitActive ? rightPostSource : currentPostSource);
+        log(`[kgc] started on ${usedSrc === 'l2' ? 'L2 recent'
+            : 'MRAP composite'} imagery — the run continues `
+            + `server-side even if you navigate away`, 'dim');
         // Status polling drives the rest, exactly as for a sweep.
         isMapping = true;
         updateStatusDisplay('mapping', previouslyAccepted);

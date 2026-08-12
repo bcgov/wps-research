@@ -216,6 +216,14 @@ class SerialRoutes:
         if body is None:
             return
         params = body.get('params') or {}
+        # Source follows the RIGHT-MOST pane's selector, the same rule
+        # Download imagery uses. Reading it from the request rather
+        # than from fire.post_source also avoids racing the preview
+        # handler, which flips that field while building the other
+        # source's stash.
+        src = (body.get('src') or '').strip().lower()
+        if src not in ('l2', 'mrap'):
+            src = getattr(fire, 'post_source', 'l2') or 'l2'
 
         busy = (FireStatus.PENDING, FireStatus.PREPARING,
                 FireStatus.MAPPING)
@@ -240,7 +248,7 @@ class SerialRoutes:
             from ..kgc import run_kgc, set_kgc_progress
             try:
                 run_kgc(
-                    fire, params,
+                    fire, params, source=src,
                     progress=lambda stage, detail, frac:
                         set_kgc_progress(fire, stage, detail, frac))
                 try:
@@ -270,7 +278,8 @@ class SerialRoutes:
                     pass
 
         threading.Thread(target=_worker, daemon=True).start()
-        self._send_json({'status': 'started', 'method': 'kgc'})
+        self._send_json({'status': 'started', 'method': 'kgc',
+                         'src': src})
 
     def handle_api_serial_results(self, fire_numbe):
         fire_numbe = unquote(fire_numbe)

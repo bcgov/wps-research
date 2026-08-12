@@ -275,7 +275,35 @@ def _extract_class_band(selected_bin: str, ref_raster: str,
     return out_bin
 
 
-def run_kgc(fire, params: dict, log=None, progress=None) -> dict:
+def resolve_stack_for_source(fire, want_src: str, log=None) -> str:
+    """AOI stack path for *want_src*, building it if needed.
+
+    fire.crop_bin follows whichever source the fire was last switched
+    to, and that can be flipped temporarily by the preview handler
+    while it builds the other source's stash. Reading crop_bin here
+    therefore raced with the UI and could feed the classifier the
+    source the user was not looking at -- silently, since the run
+    still succeeds.
+
+    Asking ensure_aoi_stack for the source explicitly removes the race
+    and makes the KGC input match the selector the user actually set.
+    """
+    cur = getattr(fire, 'post_source', 'l2') or 'l2'
+    if not want_src or want_src == cur:
+        if fire.crop_bin and os.path.isfile(fire.crop_bin):
+            return fire.crop_bin
+    from .aoi_stack import ensure_aoi_stack
+    info = ensure_aoi_stack(fire.fire_numbe, fire.bbox_native,
+                            post_source=want_src or cur)
+    path = info['path'] if isinstance(info, dict) else info
+    if log:
+        log(f'  KGC source: {(want_src or cur).upper()} '
+            f'-> {os.path.basename(path)}')
+    return path
+
+
+def run_kgc(fire, params: dict, log=None, progress=None,
+            source: str = None) -> dict:
     """Run KGC for *fire* and leave the result where the UI expects it.
 
     Mirrors the CLI pipeline's outputs exactly:
@@ -310,6 +338,10 @@ def run_kgc(fire, params: dict, log=None, progress=None) -> dict:
     from .mapping import (_compute_agreement, _compute_ml_area,
                           _overlay_mask_on_post)
 
+    want_src = (source or getattr(fire, 'post_source', 'l2')
+                or 'l2').strip().lower()
+    if want_src not in ('l2', 'mrap'):
+        want_src = getattr(fire, 'post_source', 'l2') or 'l2'
     if not fire.crop_bin or not os.path.isfile(fire.crop_bin):
         raise RuntimeError('The AOI stack is missing; re-prepare the '
                            'fire first.')
@@ -323,7 +355,8 @@ def run_kgc(fire, params: dict, log=None, progress=None) -> dict:
     # Same band selection the ML pipeline receives, so the two methods
     # are comparable and the exclusion checkboxes mean one thing.
     step('kgc_stack', 'preparing the band stack', 0.06)
-    image = reduced_stack(fire.crop_bin, fire, log=emit)
+    base_stack = resolve_stack_for_source(fire, want_src, log=emit)
+    image = reduced_stack(base_stack, fire, log=emit)
     emit(f'  KGC input stack: {os.path.basename(image)}')
     emit(f'  KGC hint: {os.path.basename(fire.hint_bin)} '
          f'({getattr(fire, "hint_mode", "?")})')
@@ -337,7 +370,8 @@ def run_kgc(fire, params: dict, log=None, progress=None) -> dict:
     except Exception:
         ram = '/ram'
     key = hashlib.sha1(
-        f'{fire.fire_numbe}|{image}'.encode('utf-8')).hexdigest()[:10]
+        f'{fire.fire_numbe}|{want_src}|{image}'.encode(
+            'utf-8')).hexdigest()[:10]
     work = os.path.join(ram, f'kgc_{fire.fire_numbe}_{key}')
     os.makedirs(work, exist_ok=True)
     out_prefix = os.path.join(work, fire.fire_numbe)
@@ -387,7 +421,7 @@ def run_kgc(fire, params: dict, log=None, progress=None) -> dict:
     # ---- from here on, identical to the CLI pipeline --------------
     step('kgc_classify', 'extracting the class mask', 0.80)
     clf = os.path.join(fire.cache_dir, f'{fire.fire_numbe}_classified.bin')
-    _extract_class_band(selected, fire.crop_bin, clf, log=emit)
+    _extract_class_band(selected, base_stack, clf, log=emit)
 
     # Keep the full KGC product with the fire: it carries the
     # diagnostics (log-likelihood ratio, neighbouring K levels) that
@@ -432,7 +466,7 @@ def run_kgc(fire, params: dict, log=None, progress=None) -> dict:
         'run_id': 1,
         'setting_idx': 0,
         'run_idx': 0,
-        'setting_label': 'KGC',
+        'setting_label': f'KGC ({want_src.upper()})',
         'method': 'kgc',
         'params': dict(params or {}),
         'agreement_pct': agr,
@@ -443,7 +477,11 @@ def run_kgc(fire, params: dict, log=None, progress=None) -> dict:
     with state.lock:
         fire.serial_results = [entry]
         fire.agreement_pct = agr
-        fire.ml_size_ha = ml_area
+        # FireInfo's field is ml_area_ha; writing ml_size_ha created a
+        # stray attribute, left the header at '--', and made
+        # hasMlResult() false -- which is why the pane was labelled
+        # "Post-fire (no ML result)" while showing the red mask.
+        fire.ml_area_ha = ml_area
         fire.status = FireStatus.MAPPED
     emit(f'  KGC result: agreement {agr}%, ML area {ml_area} ha')
     step('kgc_figure', 'done', 1.0)
