@@ -143,7 +143,7 @@
                           gap:4px;cursor:pointer;white-space:nowrap">
               <input type="checkbox" id="eraser-on"
                      onchange="onEraserToggle()">
-              Eraser
+              Eraser (E key) to toggle
             </label>
             <button class="btn btn-secondary" id="btn-erase-revert"
                     onclick="revertErase()"
@@ -2766,6 +2766,31 @@ function eraserSize() {
     const v = el ? parseInt(el.value, 10) : 11;
     return (Number.isFinite(v) && v > 0) ? Math.min(201, v) : 11;
 }
+
+// E toggles the eraser.
+//
+// Ignored while typing: the page has a renameable title and several
+// number fields, and stealing "e" from those would make them
+// unusable (it is also a valid character in a number input). Modifier
+// combinations are left alone so browser and OS shortcuts still work.
+document.addEventListener('keydown', (e) => {
+    if (e.key !== 'e' && e.key !== 'E') return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const t = e.target;
+    if (t) {
+        const tag = (t.tagName || '').toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || tag === 'select'
+                || t.isContentEditable) {
+            return;
+        }
+    }
+    const el = document.getElementById('eraser-on');
+    if (!el) return;
+    e.preventDefault();
+    el.checked = !el.checked;
+    onEraserToggle();
+    log(`[erase] eraser ${el.checked ? 'ON' : 'off'} (E)`, 'dim');
+});
 
 function onEraserSizeChange() {
     // force: the size changed, so the cached cursor must be rebuilt
