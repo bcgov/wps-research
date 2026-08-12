@@ -19,6 +19,7 @@ demand with the flags from its own ``run_all.sh``.
 
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -202,6 +203,84 @@ def build_kgc_cmd(exe: str, image: str, hint: str, out_prefix: str,
     return cmd
 
 
+def _fmt_secs(sec) -> str:
+    """Compact duration for a status line."""
+    try:
+        sec = float(sec)
+    except (TypeError, ValueError):
+        return '?'
+    if sec < 60:
+        return f'{sec:.0f}s'
+    if sec < 3600:
+        m_ = int(sec // 60)
+        r = int(round(sec - m_ * 60))
+        return f'{m_}m {r}s' if r else f'{m_}m'
+    h_ = int(sec // 3600)
+    m_ = int(round((sec - h_ * 3600) / 60))
+    return f'{h_}h {m_}m' if m_ else f'{h_}h'
+
+
+def ensure_float32(path: str, work_dir: str, tag: str,
+                   log=None) -> str:
+    """Return *path*, or a float32 copy of it beside the work dir.
+
+    KGC accepts ENVI data type 4 only, and says so by exiting 1 with
+    "only ENVI data type 4 (32-bit float) is supported; got type N".
+    Hint masks are the usual offenders: a 1/0 mask is naturally written
+    as Byte, and every builder that does so breaks KGC.
+
+    Converting here rather than only fixing the writers means KGC works
+    against a hint from ANY source -- including files produced before
+    this change and any future builder that reaches for Byte again.
+
+    Returns the original path when it is already float32.
+    """
+    try:
+        from osgeo import gdal
+        ds = gdal.Open(path, gdal.GA_ReadOnly)
+        if ds is None:
+            return path
+        dt = ds.GetRasterBand(1).DataType
+        if dt == gdal.GDT_Float32:
+            ds = None
+            return path
+
+        name = os.path.splitext(os.path.basename(path))[0]
+        out = os.path.join(work_dir, f'{name}_f32.bin')
+        drv = gdal.GetDriverByName('ENVI')
+        o = drv.Create(out, ds.RasterXSize, ds.RasterYSize,
+                       ds.RasterCount, gdal.GDT_Float32,
+                       options=['INTERLEAVE=BSQ'])
+        o.SetGeoTransform(ds.GetGeoTransform())
+        proj = ds.GetProjection()
+        if proj:
+            o.SetProjection(proj)
+        for b in range(1, ds.RasterCount + 1):
+            src_b = ds.GetRasterBand(b)
+            arr = src_b.ReadAsArray()
+            ob = o.GetRasterBand(b)
+            ob.WriteArray(arr.astype('float32'))
+            desc = src_b.GetDescription()
+            if desc:
+                ob.SetDescription(desc)
+            ob = None
+        o = None
+        ds = None
+        hdr = os.path.splitext(out)[0] + '.hdr'
+        if not os.path.isfile(hdr) and os.path.isfile(out + '.hdr'):
+            os.replace(out + '.hdr', hdr)
+        msg = (f'  {tag} was ENVI data type {dt}, not 4 (float32); '
+               f'converted -> {os.path.basename(out)}')
+        sys.stderr.write(msg + '\n')
+        if log:
+            log(msg)
+        return out
+    except Exception as exc:
+        sys.stderr.write(
+            f'[kgc] float32 conversion of {path} failed: {exc}\n')
+        return path
+
+
 def _extract_class_band(selected_bin: str, ref_raster: str,
                         out_bin: str, log=None) -> str:
     """Write band 1 of the KGC product as a standalone classified mask.
@@ -376,7 +455,12 @@ def run_kgc(fire, params: dict, log=None, progress=None,
     os.makedirs(work, exist_ok=True)
     out_prefix = os.path.join(work, fire.fire_numbe)
 
-    cmd = build_kgc_cmd(exe, image, fire.hint_bin, out_prefix, params)
+    # KGC reads ENVI type 4 only. The stack is written float32, but a
+    # hint mask often is not -- that is what "got type 1" was.
+    image = ensure_float32(image, work, 'input stack', log=emit)
+    hint = ensure_float32(fire.hint_bin, work, 'hint mask', log=emit)
+
+    cmd = build_kgc_cmd(exe, image, hint, out_prefix, params)
     emit('  ' + ' '.join(cmd))
     step('kgc_cluster', 'clustering (the long step)', 0.15)
 
@@ -405,10 +489,40 @@ def run_kgc(fire, params: dict, log=None, progress=None,
             continue
         lines.append(line)
         emit('  ' + line[:300])
-        # kgc reports its K sweep; surface it as progress rather than
-        # leaving the bar frozen through the longest stage.
-        if line.startswith('[k]') or ' K=' in line:
-            step('kgc_cluster', line[:120], None)
+
+        # Turn KGC's own output into progress with an ETA.
+        #
+        # The sweep prints "  N/M levels, best K=..." every 50 levels,
+        # which is the only quantitative progress the tool emits and
+        # covers the long stage. Everything else is a stage marker.
+        # Without this the bar sat still for the entire run and there
+        # was no way to tell work from a hang.
+        m = re.match(r'\s*(\d+)/(\d+)\s+levels', line)
+        if m:
+            done_l, total_l = int(m.group(1)), int(m.group(2))
+            if total_l > 0:
+                f = max(0.0, min(1.0, done_l / float(total_l)))
+                el = time.time() - t0
+                eta = (el / f - el) if f > 0.02 and el > 2 else None
+                # 0.15..0.78 of the whole run is the sweep; the stages
+                # either side are quick by comparison.
+                overall = 0.15 + 0.63 * f
+                detail = (f'sweep {done_l}/{total_l} levels'
+                          + (f' ({m.string.split("best K=")[1].strip()})'
+                             if 'best K=' in line else ''))
+                if eta is not None:
+                    detail += f' - about {_fmt_secs(eta)} left'
+                step('kgc_cluster', detail[:160], overall)
+                continue
+        low = line.lower()
+        if low.startswith('[dedup]'):
+            step('kgc_cluster', line.strip()[:160], 0.10)
+        elif low.startswith('[knn]'):
+            step('kgc_cluster', line.strip()[:160], 0.13)
+        elif low.startswith('[hint]'):
+            step('kgc_cluster', line.strip()[:160], 0.16)
+        elif low.startswith('[out]'):
+            step('kgc_classify', 'writing the KGC product', 0.79)
     rc = proc.wait()
     try:
         fire.kgc_proc = None

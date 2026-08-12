@@ -5268,6 +5268,13 @@ const PROGRESS_STAGE_ORDER_FULL = [
 const PROGRESS_STAGE_ORDER_RESUME = [
     'load', 'hint', 'hdbscan', 'classify', 'brush', 'figure',
 ];
+// KGC runs its own stages (kgc.KGC_STAGES). Without them here
+// order.indexOf() returns -1 and no pill ever lights, so the bar looks
+// dead for the whole run.
+const PROGRESS_STAGE_ORDER_KGC = [
+    'kgc_build', 'kgc_stack', 'kgc_cluster', 'kgc_classify',
+    'kgc_brush', 'kgc_figure',
+];
 const PROGRESS_STAGE_LABELS = {
     // Mapping CLI stages.
     load: 'Load', hint: 'Hint', sample: 'Sample',
@@ -5312,9 +5319,13 @@ function renderProgress(p) {
     }
     bar.classList.remove('is-collapsed');
 
-    const order = (p.pipeline === 'resume')
-        ? PROGRESS_STAGE_ORDER_RESUME
-        : PROGRESS_STAGE_ORDER_FULL;
+    // Pick the list the current stage actually belongs to, so a KGC
+    // run and a CLI run each get their own pills.
+    const order = String(p.stage || '').startsWith('kgc_')
+        ? PROGRESS_STAGE_ORDER_KGC
+        : ((p.pipeline === 'resume')
+            ? PROGRESS_STAGE_ORDER_RESUME
+            : PROGRESS_STAGE_ORDER_FULL);
     const curIdx = order.indexOf(p.stage);
 
     // Title + run-of-total

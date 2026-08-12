@@ -97,14 +97,26 @@ def generate_redwins_hint(crop_bin: str, band_indices: list[int],
     result = np.where(any_nan, 0, mask).astype(np.uint8)
     n_fire = int(result.sum())
 
-    # Write as single-band ENVI Byte, 0/1 only.
+    # Single-band ENVI, 0/1 values but written as data type 4
+    # (float32).
+    #
+    # Byte was the natural choice for a 1/0 mask and it is what this
+    # wrote for a long time, but every consumer here expects type 4:
+    # the KGC binary rejects anything else outright ("only ENVI data
+    # type 4 is supported; got type 1"), and the stack and classified
+    # rasters are all float32. Uniform typing costs 3 bytes a pixel on
+    # a mask and removes a whole class of downstream failure.
     driver = gdal.GetDriverByName('ENVI')
-    out_ds = driver.Create(output_path, w, h, 1, gdal.GDT_Byte)
+    out_ds = driver.Create(output_path, w, h, 1, gdal.GDT_Float32)
     if out_ds is None:
         return -1
     out_ds.SetGeoTransform(gt)
     out_ds.SetProjection(proj)
-    out_ds.GetRasterBand(1).WriteArray(result)
+    # Cast explicitly: GDAL would coerce, but writing a bool/uint8
+    # array into a float32 band without saying so is the kind of
+    # implicit conversion that quietly changes if the array's dtype
+    # changes upstream.
+    out_ds.GetRasterBand(1).WriteArray(result.astype('float32'))
     out_ds.FlushCache()
     out_ds = None
     return n_fire
