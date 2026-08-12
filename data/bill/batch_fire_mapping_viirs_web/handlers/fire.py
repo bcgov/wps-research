@@ -1477,11 +1477,21 @@ class FireRoutes:
 
             size = os.path.getsize(out)
             self.send_response(200)
-            self.send_header('Content-Type', 'image/gif')
+            # application/octet-stream, not image/gif: a browser will
+            # happily render an image/gif inline if anything strips or
+            # ignores Content-Disposition, and this response only ever
+            # exists to be saved. Both headers are sent, so a client
+            # that honours the disposition still gets the right name.
+            self.send_header('Content-Type', 'application/octet-stream')
             self.send_header('Content-Length', str(size))
             self.send_header(
                 'Content-Disposition',
                 f'attachment; filename="{os.path.basename(out)}"')
+            # The filename is the only way the client can label the
+            # download, so make it readable cross-origin.
+            self.send_header('Access-Control-Expose-Headers',
+                             'Content-Disposition')
+            self.send_header('Cache-Control', 'no-store')
             self.end_headers()
             with open(out, 'rb') as fh:
                 shutil.copyfileobj(fh, self.wfile)

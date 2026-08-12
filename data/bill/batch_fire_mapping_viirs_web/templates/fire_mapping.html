@@ -1729,7 +1729,7 @@ async function onBandExclusionChange() {
 // Blink-comparator GIF of the two panes. Server-side, because the
 // frames already exist there as preview PNGs -- encoding a GIF in the
 // browser would mean shipping an encoder and re-uploading the pixels.
-function downloadBlinkGif() {
+async function downloadBlinkGif() {
     if (!splitActive) return;
     const btn = document.getElementById('btn-gif');
     if (btn) { btn.disabled = true; btn.textContent = 'Building ...'; }
@@ -1745,22 +1745,57 @@ function downloadBlinkGif() {
         + `${rightView}/${rightPostSource}`, 'dim');
     const url = `/api/fire/${encodeURIComponent(FIRE)}`
         + `/interlaced_gif?${p.toString()}`;
-    let f = document.getElementById('gif-dl-frame');
-    if (!f) {
-        f = document.createElement('iframe');
-        f.id = 'gif-dl-frame';
-        f.style.display = 'none';
-        document.body.appendChild(f);
-    }
-    f.src = url;
-    // No reliable completion event for an iframe download, so restore
-    // the button after a delay rather than leaving it stuck.
-    setTimeout(() => {
+    try {
+        // Fetched, then saved via an anchor click.
+        //
+        // A hidden iframe was wrong twice over: the browser can render
+        // an image inline instead of saving it, and a JSON error
+        // response (409 when a pane has no preview) vanished silently
+        // with no indication the button had done anything. Fetching
+        // lets the error be read and reported, and the anchor click is
+        // an unambiguous "save this file now".
+        const r = await fetch(url);
+        if (!r.ok) {
+            let msg = `HTTP ${r.status}`;
+            try {
+                const j = await r.json();
+                if (j && j.error) msg = j.error;
+            } catch (_) { /* not JSON; keep the status */ }
+            alert(`Could not build the GIF: ${msg}`);
+            log(`[gif] failed: ${msg}`, 'error');
+            return;
+        }
+        const blob = await r.blob();
+
+        // Prefer the server's filename, which encodes both panes.
+        let name = `${FIRE}_blink.gif`;
+        const cd = r.headers.get('Content-Disposition') || '';
+        const m = cd.match(/filename="?([^"]+)"?/);
+        if (m) name = m[1];
+
+        const href = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = href;
+        a.download = name;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        // Revoke on the next tick: revoking immediately can cancel the
+        // save before the browser has read the blob.
+        setTimeout(() => {
+            try { URL.revokeObjectURL(href); } catch (_) {}
+            a.remove();
+        }, 2000);
+        log(`[gif] downloaded ${name} (${fmtBytes(blob.size)})`, 'dim');
+    } catch (err) {
+        alert(`Could not build the GIF: ${err.message}`);
+        log(`[gif] failed: ${err.message}`, 'error');
+    } finally {
         if (btn) {
             btn.disabled = false;
             btn.textContent = 'Interlaced GIF';
         }
-    }, 4000);
+    }
 }
 
 function downloadImagery() {
