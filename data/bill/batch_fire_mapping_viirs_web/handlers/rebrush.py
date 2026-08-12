@@ -328,6 +328,18 @@ class RebrushRoutes:
                     except OSError:
                         pass
                 _write_envi_mask_like(brushed, clf_path, source_path)
+                # _write_envi_mask_like writes raw floats and copies a
+                # sibling .hdr; if that copy is missed or came from a
+                # raster on another grid, the mask still opens with the
+                # right dimensions and only plots wrong after a
+                # restart. Verify and repair against the AOI stack.
+                try:
+                    from ..erase import ensure_geo
+                    ensure_geo(clf_path, getattr(fire, 'crop_bin', ''),
+                               log=lambda m: fire.console_log.append(m))
+                except Exception as _gexc:
+                    sys.stderr.write(
+                        f'[rebrush] geo check failed: {_gexc}\n')
 
             # Clip after the brushed mask is in place, so the clip
             # applies to what the user will actually see and export.

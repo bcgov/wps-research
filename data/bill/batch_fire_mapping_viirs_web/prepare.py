@@ -672,6 +672,20 @@ def verify_and_repair_fire(fire: FireInfo, log=None) -> dict:
     except Exception as exc:
         out['actions'].append(f'result overlay rebuild failed: {exc}')
 
+    # Repair map info on the classification if it was lost. This runs
+    # on open and in the startup sweep, so a mask written by an older
+    # build -- before every writer set the geotransform -- is corrected
+    # once rather than plotting in the wrong place forever.
+    try:
+        from .erase import active_classified, ensure_geo
+        _clf = active_classified(fire)
+        if _clf and fire.crop_bin:
+            if ensure_geo(_clf, fire.crop_bin):
+                out['actions'].append('restored map info on the '
+                                      'classification')
+    except Exception as exc:
+        out['actions'].append(f'geo check failed: {exc}')
+
     # A hint the CLI would consume must still exist, or mapping fails
     # at run time with a less obvious message.
     hb = getattr(fire, 'hint_bin', '') or ''

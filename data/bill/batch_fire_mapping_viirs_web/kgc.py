@@ -585,6 +585,15 @@ def run_kgc(fire, params: dict, log=None, progress=None,
         except Exception as exc:
             emit(f'  Clip to BCWS failed: {exc}')
 
+    # The brush rewrites the mask as raw floats plus a copied header,
+    # so confirm the map info survived before anything is rendered or
+    # scored against it.
+    try:
+        from .erase import ensure_geo
+        ensure_geo(clf, fire.crop_bin, log=emit)
+    except Exception as exc:
+        emit(f'  Geo check failed: {exc}')
+
     step('kgc_figure', 'scoring and rendering', 0.94)
     agr = _compute_agreement(fire)
     ml_area = _compute_ml_area(fire, clf)
