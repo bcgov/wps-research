@@ -168,6 +168,12 @@ class BaseHandler:
         (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/status$'),
          'handle_api_status'),
+        # GET: the browser fetches it as a download, like
+        # download_imagery. (Registering a downloaded resource under
+        # POST is what made rename 404.)
+        (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/interlaced_gif$'),
+         'handle_api_interlaced_gif'),
         (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/download_imagery$'),
          'handle_api_download_imagery'),

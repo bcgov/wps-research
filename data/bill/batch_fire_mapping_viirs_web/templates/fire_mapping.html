@@ -64,6 +64,16 @@
             <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="zoomReset()">Fit</button>
             <button class="btn btn-secondary" id="btn-overlays" style="font-size:11px;padding:2px 8px;background:#3a7bd5;color:#fff" onclick="toggleFireOverlays()" title="Sentinel-2 tile grid (blue) and BCWS fires">Overlays</button>
             <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" id="btn-split" onclick="toggleSplit(true)">Split</button>
+            <!-- Only meaningful with two panes, so it appears with
+                 split mode and disappears with it. -->
+            <button class="btn" id="btn-gif" onclick="downloadBlinkGif()"
+                    style="display:none;font-size:11px;padding:2px 8px;
+                           background:#2a8a4a;color:#fff"
+                    title="Download an animated GIF that alternates
+                           between the two panes, at the resolution
+                           they are shown.">
+                Interlaced GIF
+            </button>
             <!-- Imagery loading state, in the spare toolbar space.
                  Switching source can rebuild a stack server-side and
                  refetch several MB; without this the interface looks
@@ -1714,6 +1724,43 @@ async function onBandExclusionChange() {
     } finally {
         for (const el of Object.values(els)) el.disabled = false;
     }
+}
+
+// Blink-comparator GIF of the two panes. Server-side, because the
+// frames already exist there as preview PNGs -- encoding a GIF in the
+// browser would mean shipping an encoder and re-uploading the pixels.
+function downloadBlinkGif() {
+    if (!splitActive) return;
+    const btn = document.getElementById('btn-gif');
+    if (btn) { btn.disabled = true; btn.textContent = 'Building ...'; }
+    const p = new URLSearchParams({
+        left_view: leftView || 'post',
+        left_src: currentPostSource,
+        right_view: rightView || 'post',
+        right_src: rightPostSource,
+        hint: currentHintMode || '',
+        ms: '700',
+    });
+    log(`[gif] ${leftView}/${currentPostSource} vs `
+        + `${rightView}/${rightPostSource}`, 'dim');
+    const url = `/api/fire/${encodeURIComponent(FIRE)}`
+        + `/interlaced_gif?${p.toString()}`;
+    let f = document.getElementById('gif-dl-frame');
+    if (!f) {
+        f = document.createElement('iframe');
+        f.id = 'gif-dl-frame';
+        f.style.display = 'none';
+        document.body.appendChild(f);
+    }
+    f.src = url;
+    // No reliable completion event for an iframe download, so restore
+    // the button after a delay rather than leaving it stuck.
+    setTimeout(() => {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Interlaced GIF';
+        }
+    }, 4000);
 }
 
 function downloadImagery() {
@@ -3468,6 +3515,10 @@ function syncRightViewOptions() {
     // visibility keeps the slot reserved; hiding with display would
     // let the rest of the bar reflow on every split toggle.
     if (grp) grp.style.visibility = splitActive ? 'visible' : 'hidden';
+    // The GIF button is only meaningful with two panes. display (not
+    // visibility) so it does not reserve toolbar width when hidden.
+    const gif = document.getElementById('btn-gif');
+    if (gif) gif.style.display = splitActive ? '' : 'none';
     const rs = document.getElementById('post-source-select-right');
     if (rs) {
         rs.disabled = a.disabled;

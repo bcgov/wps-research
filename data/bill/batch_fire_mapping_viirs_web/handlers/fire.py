@@ -1347,6 +1347,161 @@ class FireRoutes:
         sys.stderr.write(f'[bands] {fire_numbe}: {flags}\n')
         self._send_json({'ok': True, **flags})
 
+    def handle_api_interlaced_gif(self, fire_numbe):
+        """Blink-comparator GIF alternating the two split-view panes.
+
+        Flipping between two registered frames makes a difference
+        obvious in a way two side-by-side panels do not -- the same
+        reason the press-and-hold flicker exists. This is the
+        downloadable version of it.
+
+        Each pane's frame is resolved exactly as the preview endpoint
+        resolves it, so the GIF shows what the panes show: the same
+        views, the same sources, and the per-source stash when the two
+        panes differ.
+        """
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+
+        q = parse_qs(urlparse(self.path).query)
+
+        def _arg(name, default=''):
+            return (q.get(name, [default]) or [default])[0]
+
+        cur_src = getattr(fire, 'post_source', 'l2') or 'l2'
+        lv = _arg('left_view', 'post')
+        rv = _arg('right_view', 'post')
+        ls = (_arg('left_src', cur_src) or cur_src).lower()
+        rs = (_arg('right_src', cur_src) or cur_src).lower()
+        hint_mode = _arg('hint', getattr(fire, 'hint_mode', '') or '')
+        try:
+            ms = max(120, min(5000, int(_arg('ms', '700'))))
+        except (TypeError, ValueError):
+            ms = 700
+
+        def _resolve(view, src):
+            """Preview PNG for (view, source), honouring the stash."""
+            prev = os.path.join(fire.cache_dir, 'previews')
+            name = view
+            if view == 'hint' and hint_mode:
+                per_mode = os.path.join(prev, f'hint_{hint_mode}.png')
+                if os.path.isfile(per_mode):
+                    name = f'hint_{hint_mode}'
+            # A source other than the loaded one lives in its stash.
+            if src and src != cur_src:
+                stash = os.path.join(fire.cache_dir, f'previews_{src}')
+                cand = os.path.join(stash, f'{name}.png')
+                if os.path.isfile(cand):
+                    return cand
+                cand = os.path.join(stash, f'{view}.png')
+                if os.path.isfile(cand):
+                    return cand
+                # No stash: say so rather than silently substituting
+                # the other source, which would make a GIF that blinks
+                # between two copies of the same image.
+                return None
+            cand = os.path.join(prev, f'{name}.png')
+            if os.path.isfile(cand):
+                return cand
+            cand = os.path.join(prev, f'{view}.png')
+            return cand if os.path.isfile(cand) else None
+
+        left = _resolve(lv, ls)
+        right = _resolve(rv, rs)
+        missing = [n for n, p_ in (('left', left), ('right', right))
+                   if not p_]
+        if missing:
+            self._send_json(
+                {'error': f'No preview available for the '
+                          f'{" and ".join(missing)} pane '
+                          f'({lv}/{ls}, {rv}/{rs}). Load both panes '
+                          f'first.'}, 409)
+            return
+
+        try:
+            from PIL import Image, ImageDraw
+        except ImportError:
+            self._send_json(
+                {'error': 'Pillow is not installed on the server, so '
+                          'GIFs cannot be written.'}, 500)
+            return
+
+        tmp_dir = None
+        try:
+            def _label(im, text):
+                """Caption strip, so a saved GIF is self-describing."""
+                im = im.convert('RGB')
+                d = ImageDraw.Draw(im)
+                w, h = im.size
+                d.rectangle([0, h - 22, w, h], fill=(10, 12, 16))
+                d.text((8, h - 16), text, fill=(200, 215, 235))
+                return im
+
+            f1 = Image.open(left)
+            f2 = Image.open(right)
+            # Both frames must be the same size or the GIF jitters.
+            # The panes are the same AOI, so any difference is preview
+            # downsampling; match the SMALLER to keep the file modest.
+            w = min(f1.width, f2.width)
+            h = min(f1.height, f2.height)
+            # Cap the long side: a 2000 px two-frame GIF is tens of MB.
+            cap = 1200
+            if max(w, h) > cap:
+                scale = cap / float(max(w, h))
+                w, h = max(1, int(w * scale)), max(1, int(h * scale))
+            if (f1.width, f1.height) != (w, h):
+                f1 = f1.resize((w, h), Image.LANCZOS)
+            if (f2.width, f2.height) != (w, h):
+                f2 = f2.resize((w, h), Image.LANCZOS)
+
+            def _cap(view, src):
+                vl = {'post': 'Post-fire', 'pre': 'Pre-fire',
+                      'diff1': 'Diff 1', 'diff2': 'Diff 2',
+                      'diff3': 'Diff 3', 'hint': 'Hint perimeter',
+                      'result': 'ML classification'}.get(view, view)
+                sl = 'L2 recent' if src == 'l2' else 'MRAP'
+                return f'{fire_numbe}  -  {vl}  ({sl})'
+
+            f1 = _label(f1, _cap(lv, ls))
+            f2 = _label(f2, _cap(rv, rs))
+
+            tmp_dir = tempfile.mkdtemp(prefix=f'{fire_numbe}_gif_')
+            out = os.path.join(
+                tmp_dir,
+                f'{fire_numbe}_{lv}_{ls}__{rv}_{rs}_blink.gif')
+            f1.save(out, save_all=True, append_images=[f2],
+                    duration=ms, loop=0, optimize=True)
+
+            size = os.path.getsize(out)
+            self.send_response(200)
+            self.send_header('Content-Type', 'image/gif')
+            self.send_header('Content-Length', str(size))
+            self.send_header(
+                'Content-Disposition',
+                f'attachment; filename="{os.path.basename(out)}"')
+            self.end_headers()
+            with open(out, 'rb') as fh:
+                shutil.copyfileobj(fh, self.wfile)
+            sys.stderr.write(
+                f'[gif] {fire_numbe}: {w}x{h}, {ms} ms/frame, '
+                f'{size / 1e6:.2f} MB  [{lv}/{ls} | {rv}/{rs}]\n')
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except Exception as exc:
+            sys.stderr.write(
+                f'[gif] {fire_numbe}: failed: '
+                f'{type(exc).__name__}: {exc}\n')
+            try:
+                self._send_json({'error': str(exc)}, 500)
+            except Exception:
+                pass
+        finally:
+            if tmp_dir:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+
     def handle_api_download_imagery(self, fire_numbe):
         """Export the pre/post reflectance bands as an ENVI stack.
 
