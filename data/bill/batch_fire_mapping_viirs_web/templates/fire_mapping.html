@@ -133,6 +133,37 @@
                      onchange="onBandExclusionChange('diff-only')">
               Diff only
             </label>
+            <!-- Left of the divider: band selection. Right of it:
+                 the eraser tools. The rule is grouped away from the
+                 hand-editing so the two are not mistaken for each
+                 other. -->
+            <button class="btn btn-secondary" id="btn-custom-bands"
+                    onclick="openBandPicker()"
+                    style="font-size:11px;padding:2px 8px;margin-left:8px"
+                    title="Pick exactly which bands go to the
+                           classifier and to Download imagery.
+                           Overrides the checkboxes until one of them is
+                           changed.">
+              Custom band select
+            </button>
+            <span aria-hidden="true"
+                  style="display:inline-block;width:1px;height:16px;
+                         background:#ccc;margin:0 10px;
+                         vertical-align:middle"></span>
+            <label id="eraser-size-wrap"
+                   title="Side of the square the eraser removes, in
+                          IMAGE pixels, so it covers the same ground at
+                          any zoom."
+                   style="display:none;font-size:11px;
+                          align-items:center;gap:4px;
+                          white-space:nowrap">
+              Size
+              <input type="number" id="p-eraser_size" value="11"
+                     step="2" min="1" max="201"
+                     style="width:3.5em"
+                     oninput="onEraserSizeChange()"
+                     onchange="onEraserSizeChange()">
+            </label>
             <label id="eraser-wrap"
                    title="Erase parts of the ML classification by hand.
                           With this on, dragging over a pane showing the
@@ -488,19 +519,6 @@
                                intersects the AOI.">?</span>:</label>
                         <input type="checkbox" id="clip-to-bcws"
                                onchange="onBandExclusionChange('clip')">
-                    </div>
-                    <div class="param-row">
-                        <label>Manual eraser size<span class="help"
-                               tabindex="0"
-                               data-tip="Side of the square the manual
-                               eraser removes, in IMAGE pixels -- so it
-                               covers the same ground at any zoom.
-                               Applies to the eraser tool in the
-                               toolbar.">?</span>:</label>
-                        <input type="number" id="p-eraser_size"
-                               value="11" step="2" min="1" max="201"
-                               oninput="onEraserSizeChange()"
-                               onchange="onEraserSizeChange()">
                     </div>
                     <div class="param-row" style="justify-content:flex-end;gap:6px">
                         <button type="button" id="btn-rebrush"
@@ -2741,6 +2759,117 @@ function updateTransformForPane(pane) {
 // that same fraction under the other pane's centre, with the zoom
 // scaled by the pixel-size ratio so a feature is the same size on
 // screen in both panes.
+// ---- Custom band selection ----------------------------------------
+//
+// The checkboxes express RULES; this expresses a LIST. A hand-picked
+// list can be any shape, including combinations no rule could produce,
+// so the two are not reconciled: the list wins while it exists, and
+// touching any checkbox discards it and returns to the rules. That is
+// the only behaviour that does not silently throw away one or the
+// other.
+let _bandRows = [];
+
+async function openBandPicker() {
+    const dlg = document.getElementById('band-picker');
+    const list = document.getElementById('band-picker-list');
+    const note = document.getElementById('band-picker-note');
+    if (!dlg || !list) return;
+    list.innerHTML = '<div style="color:#888">Loading bands ...</div>';
+    if (note) note.textContent = '';
+    dlg.style.display = 'flex';
+    try {
+        const r = await fetch(
+            `/api/fire/${encodeURIComponent(FIRE)}/bands`);
+        const j = await r.json();
+        if (!r.ok || j.error) {
+            list.innerHTML = `<div style="color:#a33">`
+                + `${j.error || ('HTTP ' + r.status)}</div>`;
+            return;
+        }
+        _bandRows = j.bands || [];
+        // Opens showing what is in force RIGHT NOW, whether that came
+        // from the checkboxes or a previous custom selection.
+        list.innerHTML = _bandRows.map((b) => `
+            <label style="display:flex;align-items:center;gap:8px;
+                          padding:3px 0;font-size:12px;cursor:pointer">
+              <input type="checkbox" class="band-pick"
+                     data-index="${b.index}"
+                     ${b.selected ? 'checked' : ''}>
+              <span style="color:#888;min-width:2.2em">${b.index + 1}</span>
+              <span>${b.name}</span>
+            </label>`).join('');
+        if (note) {
+            note.textContent = (j.custom
+                ? 'A custom selection is currently in force. '
+                : 'Currently following the checkboxes. ')
+                + (j.summary || '');
+        }
+    } catch (err) {
+        list.innerHTML = `<div style="color:#a33">${err.message}</div>`;
+    }
+}
+
+function closeBandPicker() {
+    const dlg = document.getElementById('band-picker');
+    if (dlg) dlg.style.display = 'none';
+}
+
+function bandPickerAll(on) {
+    document.querySelectorAll('.band-pick').forEach((el) => {
+        el.checked = !!on;
+    });
+}
+
+async function applyBandSelection() {
+    const picked = [...document.querySelectorAll('.band-pick')]
+        .filter((el) => el.checked)
+        .map((el) => parseInt(el.dataset.index, 10))
+        .filter((n) => Number.isFinite(n));
+    if (!picked.length) {
+        alert('Select at least one band.');
+        return;
+    }
+    await postBandOverride({indices: picked});
+    log(`[bands] custom selection applied: ${picked.length} band(s)`,
+        'dim');
+    closeBandPicker();
+}
+
+async function clearBandOverride() {
+    await postBandOverride({});
+    log('[bands] custom selection cleared; following the checkboxes',
+        'dim');
+    closeBandPicker();
+}
+
+async function postBandOverride(payload) {
+    try {
+        const r = await fetch(
+            `/api/fire/${encodeURIComponent(FIRE)}/bands`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json',
+                          'X-Requested-With': 'fetch'},
+                body: JSON.stringify(payload)});
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || j.error) {
+            alert(`Could not set the band selection: `
+                  + `${j.error || ('HTTP ' + r.status)}`);
+            return;
+        }
+        const btn = document.getElementById('btn-custom-bands');
+        if (btn) {
+            const on = (j.override || []).length > 0;
+            btn.style.background = on ? '#3a7bd5' : '';
+            btn.style.color = on ? '#fff' : '';
+            btn.textContent = on
+                ? `Custom bands (${j.override.length})`
+                : 'Custom band select';
+        }
+    } catch (err) {
+        alert(`Could not set the band selection: ${err.message}`);
+    }
+}
+
 // ---- Manual eraser ------------------------------------------------
 //
 // Strokes are painted locally for immediate feedback and posted to the
@@ -2794,8 +2923,12 @@ document.addEventListener('keydown', (e) => {
 
 function onEraserSizeChange() {
     // force: the size changed, so the cached cursor must be rebuilt
-    // even though the pane and zoom did not.
+    // even though the pane and zoom did not. Clearing the keys as well
+    // means a later un-forced call cannot skip the rebuild.
+    _cursorKeys.left = '';
+    _cursorKeys.right = '';
     applyEraserCursor(true);
+    log(`[erase] eraser ${eraserSize()}x${eraserSize()} px`, 'dim');
 }
 
 function paneShowsResult(pane) {
@@ -2815,6 +2948,8 @@ function onEraserToggle() {
     if (rev) rev.style.display = _eraseOn ? '' : 'none';
     const ow = document.getElementById('erase-outside-wrap');
     if (ow) ow.style.display = _eraseOn ? 'inline-flex' : 'none';
+    const sw = document.getElementById('eraser-size-wrap');
+    if (sw) sw.style.display = _eraseOn ? 'inline-flex' : 'none';
     applyEraserCursor();
     if (_eraseOn) {
         log('[erase] eraser on — drag over the ML classification to '
@@ -2830,7 +2965,10 @@ function onEraserToggle() {
 // visible before committing to a stroke. Drawn as an SVG data URI at
 // the on-screen size of the box, capped because browsers refuse very
 // large cursors (and then show none at all).
-let _cursorKey = '';
+// Per PANE. A single shared key meant the two panes invalidated each
+// other's entry, so the guard never held and -- worse -- the value
+// could be left describing the other pane.
+const _cursorKeys = {left: '', right: ''};
 
 function applyEraserCursor(force) {
     ['left', 'right'].forEach((pane) => {
@@ -2838,7 +2976,7 @@ function applyEraserCursor(force) {
         if (!area) return;
         if (!_eraseOn || !paneShowsResult(pane)) {
             area.style.cursor = '';
-            _cursorKey = '';
+            _cursorKeys[pane] = '';
             return;
         }
         const s = paneState[pane].scale || 1;
@@ -2848,9 +2986,11 @@ function applyEraserCursor(force) {
         // a stationary pointer when the property is reassigned. Clear
         // it first, and only rebuild when the size actually changed --
         // otherwise every mousemove would allocate a new data URI.
-        const key = `${pane}:${px}`;
-        if (!force && key === _cursorKey && area.style.cursor) return;
-        _cursorKey = key;
+        const key = String(px);
+        if (!force && key === _cursorKeys[pane] && area.style.cursor) {
+            return;
+        }
+        _cursorKeys[pane] = key;
         area.style.cursor = 'auto';
         const half = Math.round(px / 2);
         const svg = `<svg xmlns="http://www.w3.org/2000/svg" `
@@ -3528,6 +3668,10 @@ function initPaneInteraction(pane) {
 initPaneInteraction('left');
 
 document.addEventListener('mousemove', (e) => {
+    // Browsers repaint a cursor on movement, not on assignment, so
+    // re-assert it here. The per-pane key makes this a no-op unless
+    // the size or zoom actually changed.
+    if (_eraseOn) applyEraserCursor(false);
     if (_erasing && _erasePane) {
         // Continuous strokes: every move point erases, so dragging
         // sweeps rather than leaving gaps between samples.
@@ -5947,5 +6091,40 @@ setTimeout(pollProgress, 1500);
 // that nothing later re-shows the sections.
 restoreMethodToggle();
 </script>
+<!-- Band picker. Populated from /bands when opened, so it always
+     reflects the selection in force at that moment. -->
+<div id="band-picker" style="display:none;position:fixed;inset:0;
+     background:rgba(0,0,0,0.45);z-index:1000;align-items:center;
+     justify-content:center">
+  <div style="background:#fff;border-radius:6px;max-width:640px;
+              width:90%;max-height:80vh;display:flex;
+              flex-direction:column;box-shadow:0 8px 30px #0006">
+    <div style="padding:12px 16px;border-bottom:1px solid #e5e5e5;
+                display:flex;align-items:center;gap:10px">
+      <strong style="flex:1">Custom band selection</strong>
+      <button class="btn btn-secondary" style="font-size:11px;
+              padding:2px 8px" onclick="closeBandPicker()">Close</button>
+    </div>
+    <div id="band-picker-note"
+         style="padding:8px 16px;font-size:11px;color:#666"></div>
+    <div id="band-picker-list"
+         style="overflow:auto;padding:4px 16px 12px;flex:1"></div>
+    <div style="padding:12px 16px;border-top:1px solid #e5e5e5;
+                display:flex;gap:8px;align-items:center">
+      <button class="btn btn-secondary" style="font-size:11px;
+              padding:2px 8px" onclick="bandPickerAll(true)">All</button>
+      <button class="btn btn-secondary" style="font-size:11px;
+              padding:2px 8px" onclick="bandPickerAll(false)">None</button>
+      <button class="btn btn-secondary" style="font-size:11px;
+              padding:2px 8px" onclick="clearBandOverride()"
+              title="Discard the custom selection and go back to the
+                     checkbox rules.">Use checkboxes</button>
+      <span style="flex:1"></span>
+      <button class="btn" id="btn-apply-bands"
+              onclick="applyBandSelection()">Apply selection</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>

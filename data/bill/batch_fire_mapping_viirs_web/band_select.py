@@ -75,7 +75,8 @@ def describe_bands(names) -> dict:
 
 
 def select_bands(names, exclude_b8=False, exclude_pre=False,
-                 exclude_diff=False, diff_only=False, log=None) -> dict:
+                 exclude_diff=False, diff_only=False, override=None,
+                 log=None) -> dict:
     """Choose the bands to keep.
 
     The three exclusions are independent and compose: B8 is dropped
@@ -98,6 +99,38 @@ def select_bands(names, exclude_b8=False, exclude_pre=False,
     """
     names = list(names or [])
     n = len(names)
+
+    # An explicit override wins outright.
+    #
+    # The checkboxes describe RULES; the override is a hand-picked
+    # list, and a hand-picked list can be any shape at all -- including
+    # combinations no rule could express. Trying to reconcile the two
+    # would either silently discard the user's picks or invent a rule
+    # they did not ask for, so the override is simply used as given and
+    # the rules resume the moment a checkbox is touched (which clears
+    # it).
+    if override:
+        keep = sorted({int(i) for i in override
+                       if isinstance(i, (int, float))
+                       and 0 <= int(i) < n})
+        if keep:
+            dk = describe_bands([names[i] for i in keep])
+            summary = (f'{len(keep)}/{n} band(s) kept by a CUSTOM '
+                       f'selection (pre={dk["pre"]} post={dk["pst"]} '
+                       f'anomaly={dk["anomaly"]}); the exclusion '
+                       f'checkboxes are not applied')
+            msg = f'[bands] {summary}'
+            sys.stderr.write(msg + '\n')
+            if log:
+                try:
+                    log('  ' + msg)
+                except Exception:
+                    pass
+            return {'keep': keep, 'dropped': [], 'reasons': {},
+                    'summary': summary, 'degraded': False,
+                    'custom': True,
+                    'describe_all': describe_bands(names),
+                    'describe_keep': dk}
 
     # 'Diff only' is a stronger statement than the era exclusions: it
     # names what to KEEP rather than what to drop, so it implies
@@ -186,13 +219,22 @@ def select_bands(names, exclude_b8=False, exclude_pre=False,
 
 
 def selection_tag(exclude_b8=False, exclude_pre=False,
-                  exclude_diff=False, diff_only=False) -> str:
+                  exclude_diff=False, diff_only=False,
+                  override=None) -> str:
     """Short, stable tag naming a selection, for cache filenames.
 
     A reduced stack is cached on disk; without the combination in the
     filename a stack built for one set of exclusions would be reused
     for another, silently feeding the classifier the wrong bands.
     """
+    if override:
+        # Hash the picks: a custom stack must never be served from a
+        # cache built for a different selection, and the list itself is
+        # too long for a filename.
+        import hashlib
+        key = ','.join(str(int(i)) for i in sorted(override))
+        return 'custom' + hashlib.sha1(
+            key.encode('utf-8')).hexdigest()[:8]
     parts = []
     if diff_only:
         # Named separately: a diff-only stack is not the same file as

@@ -139,6 +139,10 @@ class FireInfo:
     diff_only: bool = False
     # Remove classified pixels outside the BCWS perimeter polygons.
     clip_to_bcws: bool = False
+    # Hand-picked band indices (0-based into the AOI stack). When set,
+    # this replaces the checkbox rules entirely; toggling any checkbox
+    # clears it.
+    band_override: list = field(default_factory=list)
     # Which post imagery the stack is built from:
     #   'l2'   -- most recent L2A tiles over the AOI (default; recent,
     #             may contain cloud)

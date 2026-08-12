@@ -25,7 +25,8 @@ def _fire_exclusions(fire):
     return (bool(getattr(fire, 'exclude_b8', True)),
             bool(getattr(fire, 'exclude_pre_fire', True)),
             bool(getattr(fire, 'exclude_diff', True)),
-            bool(getattr(fire, 'diff_only', False)))
+            bool(getattr(fire, 'diff_only', False)),
+            list(getattr(fire, 'band_override', None) or []))
 
 
 def reduced_stack(src_path: str, fire, log=None):
@@ -50,8 +51,8 @@ def reduced_stack(src_path: str, fire, log=None):
         from osgeo import gdal
         from .band_select import select_bands, selection_tag
 
-        x_b8, x_pre, x_diff, only = _fire_exclusions(fire)
-        if not (x_b8 or x_pre or x_diff or only):
+        x_b8, x_pre, x_diff, only, override = _fire_exclusions(fire)
+        if not (x_b8 or x_pre or x_diff or only or override):
             _kept_band_map = []
             return src_path
 
@@ -61,7 +62,8 @@ def reduced_stack(src_path: str, fire, log=None):
         names = [ds.GetRasterBand(i + 1).GetDescription() or ''
                  for i in range(ds.RasterCount)]
 
-        sel = select_bands(names, x_b8, x_pre, x_diff, only, log=log)
+        sel = select_bands(names, x_b8, x_pre, x_diff, only,
+                           override=override, log=log)
         keep = sel['keep']
         _kept_band_map = list(keep)
         if len(keep) == len(names):
@@ -69,7 +71,7 @@ def reduced_stack(src_path: str, fire, log=None):
             ds = None
             return src_path
 
-        tag = selection_tag(x_b8, x_pre, x_diff, only)
+        tag = selection_tag(x_b8, x_pre, x_diff, only, override)
         out_path = f'{os.path.splitext(src_path)[0]}_{tag}.bin'
         try:
             if (os.path.isfile(out_path)

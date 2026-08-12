@@ -161,6 +161,8 @@ def _save_fire_state():
                     getattr(fire, 'diff_only', False))
                 entry['clip_to_bcws'] = bool(
                     getattr(fire, 'clip_to_bcws', False))
+                if getattr(fire, 'band_override', None):
+                    entry['band_override'] = list(fire.band_override)
                 if fire.post_source:
                     entry['post_source'] = fire.post_source
                 if getattr(fire, 'created_at', 0):
@@ -399,6 +401,7 @@ def _load_fire_state():
             fire.exclude_diff = bool(entry.get('exclude_diff', True))
             fire.diff_only = bool(entry.get('diff_only', False))
             fire.clip_to_bcws = bool(entry.get('clip_to_bcws', False))
+            fire.band_override = list(entry.get('band_override', []) or [])
             fire.post_source = entry.get('post_source', 'l2')
             # Older state files may have per-mode hint renders saved as
             # selectable views (hint_redwins_post, ...). They are not

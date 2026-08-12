@@ -1291,6 +1291,90 @@ class FireRoutes:
             payload = {'status': f.status.value, 'error': f.error_msg}
         self._send_json(payload)
 
+    def handle_api_bands(self, fire_numbe):
+        """List the AOI stack's bands and which are currently selected.
+
+        GET returns every band with its current state, so the picker
+        opens showing exactly what the classifier would receive right
+        now -- whether that comes from the checkboxes or from an
+        earlier custom selection.
+
+        POST sets a custom selection (or clears it when 'indices' is
+        absent), which then overrides the checkboxes until one of them
+        is toggled.
+        """
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+
+        if self.command == 'POST':
+            try:
+                body = self._read_body() or {}
+            except Exception:
+                body = {}
+            if 'indices' in body:
+                try:
+                    idx = sorted({int(i) for i in (body['indices'] or [])})
+                except (TypeError, ValueError):
+                    self._send_json({'error': 'bad indices'}, 400)
+                    return
+                with state.lock:
+                    fire.band_override = idx
+                sys.stderr.write(
+                    f'[bands] {fire_numbe}: custom selection of '
+                    f'{len(idx)} band(s)\n')
+            else:
+                with state.lock:
+                    fire.band_override = []
+                sys.stderr.write(
+                    f'[bands] {fire_numbe}: custom selection cleared\n')
+            try:
+                from ..persistence import _save_fire_state
+                _save_fire_state()
+            except Exception:
+                pass
+            self._send_json({'ok': True,
+                             'override': list(fire.band_override)})
+            return
+
+        try:
+            from osgeo import gdal
+            from ..band_select import select_bands
+            if not fire.crop_bin or not os.path.isfile(fire.crop_bin):
+                self._send_json(
+                    {'error': 'The AOI stack is not built yet.'}, 409)
+                return
+            ds = gdal.Open(fire.crop_bin, gdal.GA_ReadOnly)
+            if ds is None:
+                self._send_json(
+                    {'error': 'cannot open the AOI stack'}, 500)
+                return
+            names = [ds.GetRasterBand(i + 1).GetDescription() or
+                     f'band {i + 1}' for i in range(ds.RasterCount)]
+            ds = None
+            override = list(getattr(fire, 'band_override', None) or [])
+            sel = select_bands(
+                names,
+                bool(getattr(fire, 'exclude_b8', True)),
+                bool(getattr(fire, 'exclude_pre_fire', True)),
+                bool(getattr(fire, 'exclude_diff', True)),
+                bool(getattr(fire, 'diff_only', False)),
+                override=override)
+            keep = set(sel['keep'])
+            self._send_json({
+                'bands': [{'index': i, 'name': nm,
+                           'selected': i in keep}
+                          for i, nm in enumerate(names)],
+                'custom': bool(override),
+                'summary': sel.get('summary', ''),
+            })
+        except Exception as exc:
+            sys.stderr.write(
+                f'[bands] {fire_numbe}: {type(exc).__name__}: {exc}\n')
+            self._send_json({'error': str(exc)}, 500)
+
     def handle_api_erase(self, fire_numbe):
         """Apply manual eraser strokes to the classification."""
         fire_numbe = unquote(fire_numbe)
@@ -1441,10 +1525,22 @@ class FireRoutes:
         # kind of setting and always applied together, so a single
         # round trip keeps them consistent.
         with state.lock:
+            changed = []
             for key in ('exclude_b8', 'exclude_pre_fire',
                         'exclude_diff', 'diff_only', 'clip_to_bcws'):
                 if key in body:
+                    if bool(getattr(fire, key, None)) != bool(body[key]):
+                        changed.append(key)
                     setattr(fire, key, bool(body[key]))
+            # A custom selection is a snapshot of what the user picked;
+            # once they change a RULE, the rules take over again. Only
+            # an actual change clears it, so the periodic re-post of
+            # unchanged flags leaves a custom selection alone.
+            if changed and getattr(fire, 'band_override', None):
+                fire.band_override = []
+                sys.stderr.write(
+                    f'[bands] {fire_numbe}: custom selection cleared '
+                    f'by {", ".join(changed)}\n')
         val = bool(getattr(fire, 'exclude_b8', True))
         try:
             from ..persistence import _save_fire_state
@@ -1676,7 +1772,10 @@ class FireRoutes:
                     bool(getattr(fire, 'exclude_pre_fire', True)),
                     bool(getattr(fire, 'exclude_diff', True)),
                     bool(getattr(fire, 'diff_only', False)))
-            sel = select_bands(names, *excl)
+            sel = select_bands(
+                names, *excl,
+                override=list(getattr(fire, 'band_override', None)
+                              or []))
             picks = [(i_b, names[i_b]) for i_b in sel['keep']]
             if not picks:
                 self._send_json(
