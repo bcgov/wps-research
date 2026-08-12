@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-20260812: List Sentinel-2 product zips that are older than a cutoff age.
+Delete (or list) Sentinel-2 product zips that are older than a cutoff age.
 
 Age is taken from the *sensing* timestamp in the filename -- the first
 YYYYMMDDTHHMMSS field, e.g. for
@@ -11,11 +11,13 @@ YYYYMMDDTHHMMSS field, e.g. for
 the sensing time is 2026-08-11 18:49:21 UTC.  The trailing timestamp
 (processing/baseline time) is ignored.
 
+*** Files are DELETED by default. Use --dry-run (-n) to only list them. ***
+
 Usage:
-    ./old_s2_zips.py                       # default: /data/mrap_bc/, 14 days
+    ./old_s2_zips.py --dry-run             # list what would go, delete nothing
+    ./old_s2_zips.py                       # delete: /data/mrap_bc/, >14 days
     ./old_s2_zips.py --days 30
-    ./old_s2_zips.py --root /data/mrap_bc/L2_T11UNS
-    ./old_s2_zips.py --paths-only | xargs -d '\n' ls -lh
+    ./old_s2_zips.py -n --paths-only | xargs -d '\n' du -ch
 """
 
 import argparse
@@ -62,6 +64,13 @@ def sensing_time(path):
         return None
 
 
+def human(nbytes):
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if abs(nbytes) < 1024 or unit == "TB":
+            return f"{nbytes:.1f}{unit}"
+        nbytes /= 1024.0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -71,10 +80,12 @@ def main():
                     help="find -name pattern (default: %(default)s)")
     ap.add_argument("--days", type=float, default=14,
                     help="age cutoff in days (default: %(default)s)")
+    ap.add_argument("-n", "--dry-run", "--dry_run", dest="dry_run", action="store_true",
+                    help="list only; do not delete anything")
     ap.add_argument("--paths-only", action="store_true",
                     help="print bare paths only, for piping into xargs")
     ap.add_argument("--newer", action="store_true",
-                    help="invert: list files NEWER than the cutoff instead")
+                    help="invert: act on files NEWER than the cutoff instead")
     args = ap.parse_args()
 
     now = datetime.now(timezone.utc)
@@ -92,26 +103,47 @@ def main():
 
     hits.sort()                            # oldest first
 
-    if args.paths_only:
-        for _, path in hits:
+    freed = 0
+    failed = []
+    for stamp, path in hits:
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            size = 0
+
+        if not args.dry_run:
+            try:
+                os.remove(path)
+            except OSError as exc:
+                failed.append((path, exc))
+                print(f"error: could not remove {path}: {exc}", file=sys.stderr)
+                continue
+        freed += size
+
+        if args.paths_only:
             print(path)
-    else:
-        for stamp, path in hits:
+        else:
             age = (now - stamp).total_seconds() / 86400.0
-            print(f"{stamp:%Y-%m-%d %H:%M}  {age:6.1f}d  {path}")
+            verb = "would delete" if args.dry_run else "deleted     "
+            print(f"{verb}  {stamp:%Y-%m-%d %H:%M}  {age:6.1f}d  {human(size):>8}  {path}")
 
     if unparsed:
-        print(f"\n{len(unparsed)} file(s) with no parsable timestamp:", file=sys.stderr)
+        print(f"\n{len(unparsed)} file(s) with no parsable timestamp, left alone:",
+              file=sys.stderr)
         for path in unparsed:
             print(f"  {path}", file=sys.stderr)
 
     if not args.paths_only:
         word = "newer" if args.newer else "older"
-        print(f"\n{len(hits)} file(s) {word} than {args.days:g} days "
-              f"(cutoff {cutoff:%Y-%m-%d %H:%M} UTC)", file=sys.stderr)
+        action = "matched" if args.dry_run else "deleted"
+        print(f"\n{len(hits) - len(failed)} file(s) {action}, {word} than {args.days:g} days "
+              f"(cutoff {cutoff:%Y-%m-%d %H:%M} UTC), {human(freed)} "
+              f"{'to free' if args.dry_run else 'freed'}", file=sys.stderr)
+        if failed:
+            print(f"{len(failed)} file(s) could not be removed", file=sys.stderr)
+
+    sys.exit(1 if failed else 0)
 
 
 if __name__ == "__main__":
     main()
-
-
