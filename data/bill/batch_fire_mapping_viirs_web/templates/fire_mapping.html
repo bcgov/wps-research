@@ -3778,7 +3778,19 @@ function disableMapButtons() {
     }
 }
 
+// Restore the red KGC button. startKgcMapping() disables it and sets
+// "Running KGC ...", and nothing else knew to put it back -- so after
+// a run it stayed disabled and looked like the run never finished.
+function resetKgcButton() {
+    const b = document.getElementById('btn-map-kgc');
+    if (b) { b.disabled = false; b.textContent = 'Map Fire'; }
+}
+
 function enableMapButtons() {
+    // Called on every terminal transition (mapped / accepted / error /
+    // cancelled), so the KGC button is restored here rather than at
+    // each call site -- one of which would inevitably be missed.
+    resetKgcButton();
     document.getElementById('btn-map').style.display = '';
     document.getElementById('btn-map').disabled = false;
     document.getElementById('btn-map-settings').style.display = '';
@@ -4268,6 +4280,28 @@ async function pollFireState() {
             if (data.status === 'mapped' && (oldStatus === 'mapping' || isMapping)) {
                 isMapping = false;
                 enableMapButtons();
+
+                // A new run rewrote previews/result.png at the SAME
+                // url, and previews are served immutable for a day, so
+                // both the in-memory blob cache and the browser cache
+                // would replay the previous run's mask. Bumping the
+                // stamp changes every preview key and URL, which is
+                // what makes the new result appear immediately instead
+                // of after a manual reload.
+                _previewStamp = Date.now();
+                _hintStamp = Date.now();
+                let dropped = 0;
+                for (const k of [..._previewBlobs.keys()]) {
+                    try { URL.revokeObjectURL(_previewBlobs.get(k)); }
+                    catch (_) {}
+                    _previewBlobs.delete(k);
+                    dropped++;
+                }
+                if (dropped) {
+                    log(`[diag] run complete: dropped ${dropped} cached `
+                        + `preview(s) so the new result is fetched`,
+                        'dim');
+                }
 
                 leftView = 'post'; rightView = 'result';
                 loadPaneImage('left', leftView);

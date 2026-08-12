@@ -1916,7 +1916,18 @@ class FireRoutes:
             self._send_json({'error': 'Fire not found'}, 404)
             return
         fire = state.fires[fire_numbe]
-        snap = _progress_snapshot(fire)
+        # KGC reports its own stages and its own ETA (parsed from the
+        # executable's output), so pass that through untouched.
+        # _progress_snapshot() reasons about the CLI's stage order and
+        # its historical timings; a kgc_* stage is not in that order,
+        # so routing it through there produced an empty or meaningless
+        # snapshot -- which is why the bar stayed blank while the
+        # button still said "Running KGC".
+        raw = dict(getattr(fire, 'progress', {}) or {})
+        if str(raw.get('stage', '')).startswith('kgc_'):
+            snap = raw
+        else:
+            snap = _progress_snapshot(fire)
         # Always include status so UI can decide whether to hide the bar.
         snap['status'] = fire.status.value
         # Also expose queue context — "you are waiting behind N".
