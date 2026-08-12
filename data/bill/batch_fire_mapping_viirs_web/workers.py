@@ -661,6 +661,18 @@ def _serial_run_replicate(fire, fire_numbe: str, *, setting_idx: int,
                 f'src_clf={src_clf or "<none>"}  '
                 f'searched={_art_dirs}')
 
+            # Same rule as the other two paths: clip the finished
+            # mask before it is scored, overlaid or offered for accept.
+            if clf_for_run and bool(getattr(fire, 'clip_to_bcws', False)):
+                try:
+                    from .prepare import clip_mask_to_bcws
+                    clip_mask_to_bcws(
+                        fire, clf_for_run,
+                        log=lambda m: fire.console_log.append(m))
+                except Exception as _cexc:
+                    fire.console_log.append(
+                        f'  Clip to BCWS failed: {_cexc}')
+
             if clf_for_run:
                 _overlay_mask_on_post(
                     fire, clf_for_run, f'serial_{run_id}',

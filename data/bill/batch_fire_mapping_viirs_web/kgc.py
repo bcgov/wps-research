@@ -574,6 +574,17 @@ def run_kgc(fire, params: dict, log=None, progress=None,
     step('kgc_brush', 'brushing the KGC result', 0.88)
     clf = _brush_classified(fire, clf, params, log=emit)
 
+    # Clip AFTER brushing: brushing cleans up speckle, and clipping
+    # then removes whatever survived outside the perimeter. Doing it
+    # first would let the brush grow the mask back across the boundary.
+    if bool(getattr(fire, 'clip_to_bcws', False)):
+        step('kgc_brush', 'clipping to the BCWS perimeter', 0.92)
+        try:
+            from .prepare import clip_mask_to_bcws
+            clip_mask_to_bcws(fire, clf, log=emit)
+        except Exception as exc:
+            emit(f'  Clip to BCWS failed: {exc}')
+
     step('kgc_figure', 'scoring and rendering', 0.94)
     agr = _compute_agreement(fire)
     ml_area = _compute_ml_area(fire, clf)

@@ -133,6 +133,12 @@ class FireInfo:
     # are unaffected -- these only change what the model receives.
     exclude_pre_fire: bool = True
     exclude_diff: bool = True
+    # Keep ONLY the difference/anomaly bands. Stronger than the era
+    # exclusions and mutually exclusive with exclude_diff, which the
+    # band selector resolves.
+    diff_only: bool = False
+    # Remove classified pixels outside the BCWS perimeter polygons.
+    clip_to_bcws: bool = False
     # Which post imagery the stack is built from:
     #   'l2'   -- most recent L2A tiles over the AOI (default; recent,
     #             may contain cloud)

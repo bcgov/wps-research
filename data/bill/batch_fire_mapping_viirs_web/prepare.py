@@ -277,6 +277,90 @@ def rename_fire(old_name: str, new_name: str) -> dict:
     return {'ok': True, 'name': new_name, 'moved': len(moves)}
 
 
+def clip_mask_to_bcws(fire: FireInfo, clf_path: str,
+                      log=None) -> bool:
+    """Remove classified pixels outside the BCWS perimeter polygons.
+
+    An official perimeter bounds where the fire is; anything the
+    classifier finds beyond it is either a different fire or a false
+    positive, and for a product that will be compared against BCWS
+    records the outside pixels are noise.
+
+    Reuses the BCWS hint raster, so the clip and the "BCWS perimeter"
+    hint are the same geometry by construction -- clipping against a
+    separately-rasterised copy could disagree with what the operator
+    sees on screen.
+
+    Modifies *clf_path* in place and returns True when anything was
+    removed. A missing perimeter is reported and left alone rather
+    than clearing the mask: an empty result is worse than an unclipped
+    one.
+    """
+    def emit(msg):
+        sys.stderr.write(msg + '\n')
+        if log:
+            try:
+                log(msg)
+            except Exception:
+                pass
+
+    try:
+        import numpy as np
+        from osgeo import gdal
+
+        if not clf_path or not os.path.isfile(clf_path):
+            return False
+
+        mask_path, err = build_bcws_hint_for_fire(fire)
+        if not mask_path or not os.path.isfile(mask_path):
+            emit(f'  Clip to BCWS skipped: {err or "no perimeter mask"}')
+            return False
+
+        ds_c = gdal.Open(clf_path, gdal.GA_Update)
+        if ds_c is None:
+            ds_c = gdal.Open(clf_path, gdal.GA_ReadOnly)
+            if ds_c is None:
+                emit('  Clip to BCWS skipped: cannot open the mask')
+                return False
+        arr = ds_c.GetRasterBand(1).ReadAsArray()
+        ds_p = gdal.Open(mask_path, gdal.GA_ReadOnly)
+        per = ds_p.GetRasterBand(1).ReadAsArray() if ds_p else None
+        ds_p = None
+        if arr is None or per is None:
+            ds_c = None
+            emit('  Clip to BCWS skipped: could not read a raster')
+            return False
+        if arr.shape != per.shape:
+            ds_c = None
+            emit(f'  Clip to BCWS skipped: shapes differ '
+                 f'{arr.shape} vs {per.shape}')
+            return False
+
+        keep = np.nan_to_num(per) > 0
+        before = int(np.count_nonzero(np.nan_to_num(arr) > 0))
+        out = np.where(keep, np.nan_to_num(arr), 0.0).astype('float32')
+        after = int(np.count_nonzero(out > 0))
+        if after == 0 and before > 0:
+            ds_c = None
+            emit(f'  Clip to BCWS skipped: it would have removed all '
+                 f'{before:,} classified pixel(s) -- the perimeter and '
+                 f'the result do not overlap')
+            return False
+
+        band = ds_c.GetRasterBand(1)
+        band.WriteArray(out)
+        band.FlushCache()
+        band = None
+        ds_c = None
+        emit(f'  Clipped to BCWS perimeter: {before:,} -> {after:,} '
+             f'pixel(s) ({before - after:,} removed)')
+        return before != after
+    except Exception as exc:
+        emit(f'  Clip to BCWS failed ({type(exc).__name__}: {exc}); '
+             f'the mask was left unclipped')
+        return False
+
+
 def vectorize_classified(fire: FireInfo, clf_path: str = None,
                          log=None) -> dict:
     """Polygonize the accepted classification to Shapefile and KML.

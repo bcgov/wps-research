@@ -311,6 +311,20 @@ class RebrushRoutes:
                         pass
                 _write_envi_mask_like(brushed, clf_path, source_path)
 
+            # Clip after the brushed mask is in place, so the clip
+            # applies to what the user will actually see and export.
+            # Runs even when the brush produced nothing, since the
+            # setting is about the perimeter, not about brushing.
+            if bool(getattr(fire, 'clip_to_bcws', False)):
+                try:
+                    from ..prepare import clip_mask_to_bcws
+                    clip_mask_to_bcws(
+                        fire, clf_path,
+                        log=lambda m: fire.console_log.append(m))
+                except Exception as _cexc:
+                    sys.stderr.write(
+                        f'[rebrush] clip to BCWS failed: {_cexc}\n')
+
             out_png = os.path.join(
                 fire.cache_dir, f'{fire_numbe}_brush_comparison.png')
             start = getattr(fire, 'acc_start', '') or ''

@@ -712,6 +712,8 @@ class FireRoutes:
             'exclude_pre_fire': bool(
                 getattr(fire, 'exclude_pre_fire', True)),
             'exclude_diff': bool(getattr(fire, 'exclude_diff', True)),
+            'diff_only': bool(getattr(fire, 'diff_only', False)),
+            'clip_to_bcws': bool(getattr(fire, 'clip_to_bcws', False)),
                'status': str(getattr(fire.status, 'value', fire.status)),
                'padding_used': getattr(fire, 'padding_used', None),
                'sample_size': getattr(fire, 'sample_size', None),
@@ -1332,7 +1334,7 @@ class FireRoutes:
         # round trip keeps them consistent.
         with state.lock:
             for key in ('exclude_b8', 'exclude_pre_fire',
-                        'exclude_diff'):
+                        'exclude_diff', 'diff_only', 'clip_to_bcws'):
                 if key in body:
                     setattr(fire, key, bool(body[key]))
         val = bool(getattr(fire, 'exclude_b8', True))
@@ -1341,9 +1343,12 @@ class FireRoutes:
             _save_fire_state()
         except Exception:
             pass
-        flags = {k: bool(getattr(fire, k, True))
-                 for k in ('exclude_b8', 'exclude_pre_fire',
-                           'exclude_diff')}
+        flags = {k: bool(getattr(fire, k, dflt))
+                 for k, dflt in (('exclude_b8', True),
+                                 ('exclude_pre_fire', True),
+                                 ('exclude_diff', True),
+                                 ('diff_only', False),
+                                 ('clip_to_bcws', False))}
         sys.stderr.write(f'[bands] {fire_numbe}: {flags}\n')
         self._send_json({'ok': True, **flags})
 
@@ -1561,7 +1566,8 @@ class FireRoutes:
             from ..band_select import select_bands
             excl = (bool(getattr(fire, 'exclude_b8', True)),
                     bool(getattr(fire, 'exclude_pre_fire', True)),
-                    bool(getattr(fire, 'exclude_diff', True)))
+                    bool(getattr(fire, 'exclude_diff', True)),
+                    bool(getattr(fire, 'diff_only', False)))
             sel = select_bands(names, *excl)
             picks = [(i_b, names[i_b]) for i_b in sel['keep']]
             if not picks:

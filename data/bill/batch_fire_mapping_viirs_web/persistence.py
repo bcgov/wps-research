@@ -157,6 +157,10 @@ def _save_fire_state():
                     getattr(fire, 'exclude_pre_fire', True))
                 entry['exclude_diff'] = bool(
                     getattr(fire, 'exclude_diff', True))
+                entry['diff_only'] = bool(
+                    getattr(fire, 'diff_only', False))
+                entry['clip_to_bcws'] = bool(
+                    getattr(fire, 'clip_to_bcws', False))
                 if fire.post_source:
                     entry['post_source'] = fire.post_source
                 if getattr(fire, 'created_at', 0):
@@ -393,6 +397,8 @@ def _load_fire_state():
             fire.exclude_pre_fire = bool(
                 entry.get('exclude_pre_fire', True))
             fire.exclude_diff = bool(entry.get('exclude_diff', True))
+            fire.diff_only = bool(entry.get('diff_only', False))
+            fire.clip_to_bcws = bool(entry.get('clip_to_bcws', False))
             fire.post_source = entry.get('post_source', 'l2')
             # Older state files may have per-mode hint renders saved as
             # selectable views (hint_redwins_post, ...). They are not

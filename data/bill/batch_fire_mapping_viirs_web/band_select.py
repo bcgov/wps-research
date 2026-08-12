@@ -75,7 +75,7 @@ def describe_bands(names) -> dict:
 
 
 def select_bands(names, exclude_b8=False, exclude_pre=False,
-                 exclude_diff=False, log=None) -> dict:
+                 exclude_diff=False, diff_only=False, log=None) -> dict:
     """Choose the bands to keep.
 
     The three exclusions are independent and compose: B8 is dropped
@@ -99,12 +99,24 @@ def select_bands(names, exclude_b8=False, exclude_pre=False,
     names = list(names or [])
     n = len(names)
 
-    def _apply(x_b8, x_pre, x_diff):
+    # 'Diff only' is a stronger statement than the era exclusions: it
+    # names what to KEEP rather than what to drop, so it implies
+    # excluding pre AND post and contradicts excluding diff. Resolving
+    # that here means every caller gets the same answer, rather than
+    # each one re-deriving the implications.
+    if diff_only:
+        exclude_pre = True
+        exclude_diff = False
+
+    def _apply(x_b8, x_pre, x_diff, only_diff=False):
         keep, reasons = [], {}
         for i, nm in enumerate(names):
             era = band_era(nm)
             if x_b8 and is_b8(nm):
                 reasons[i] = 'B8'
+                continue
+            if only_diff and era != _ERA_ANOM:
+                reasons[i] = 'not a difference band'
                 continue
             if x_pre and era == _ERA_PRE:
                 reasons[i] = 'pre-fire'
@@ -115,14 +127,15 @@ def select_bands(names, exclude_b8=False, exclude_pre=False,
             keep.append(i)
         return keep, reasons
 
-    keep, reasons = _apply(exclude_b8, exclude_pre, exclude_diff)
+    keep, reasons = _apply(exclude_b8, exclude_pre, exclude_diff,
+                           diff_only)
     degraded = False
     note = ''
 
     if not keep and n:
         # Back off the era exclusions first: they remove whole groups,
         # so they are the likeliest cause of an empty selection.
-        keep, reasons = _apply(exclude_b8, False, False)
+        keep, reasons = _apply(exclude_b8, False, False, False)
         degraded = True
         note = ('every band would have been excluded; kept all eras '
                 'and applied only the B8 rule')
@@ -136,8 +149,10 @@ def select_bands(names, exclude_b8=False, exclude_pre=False,
     desc_all = describe_bands(names)
     desc_keep = describe_bands([names[i] for i in keep])
 
-    asked = [k for k, v in (('B8', exclude_b8), ('pre-fire', exclude_pre),
-                            ('difference', exclude_diff)) if v]
+    asked = [k for k, v in (('B8', exclude_b8),
+                            ('pre-fire', exclude_pre),
+                            ('difference', exclude_diff),
+                            ('all but difference', diff_only)) if v]
     ineffective = []
     if exclude_b8 and not desc_all['has_b8']:
         ineffective.append('B8 (not present in this stack)')
@@ -145,6 +160,9 @@ def select_bands(names, exclude_b8=False, exclude_pre=False,
         ineffective.append('pre-fire (no pre bands in this stack)')
     if exclude_diff and desc_all['anomaly'] == 0:
         ineffective.append('difference (no anomaly bands in this stack)')
+    if diff_only and desc_all['anomaly'] == 0:
+        ineffective.append('diff-only (this stack has no anomaly bands, '
+                           'so nothing could be kept)')
 
     summary = (
         f'{len(keep)}/{n} band(s) kept '
@@ -168,7 +186,7 @@ def select_bands(names, exclude_b8=False, exclude_pre=False,
 
 
 def selection_tag(exclude_b8=False, exclude_pre=False,
-                  exclude_diff=False) -> str:
+                  exclude_diff=False, diff_only=False) -> str:
     """Short, stable tag naming a selection, for cache filenames.
 
     A reduced stack is cached on disk; without the combination in the
@@ -176,11 +194,16 @@ def selection_tag(exclude_b8=False, exclude_pre=False,
     for another, silently feeding the classifier the wrong bands.
     """
     parts = []
+    if diff_only:
+        # Named separately: a diff-only stack is not the same file as
+        # one built with the era exclusions, and sharing a cache name
+        # would feed the classifier the wrong bands.
+        parts.append('diffonly')
     if exclude_b8:
         parts.append('nob8')
-    if exclude_pre:
+    if exclude_pre and not diff_only:
         parts.append('nopre')
-    if exclude_diff:
+    if exclude_diff and not diff_only:
         parts.append('nodiff')
     return '_'.join(parts) if parts else 'all'
 
