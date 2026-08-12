@@ -133,14 +133,16 @@ def main():
         for path in unparsed:
             print(f"  {path}", file=sys.stderr)
 
-    if not args.paths_only:
-        word = "newer" if args.newer else "older"
-        action = "matched" if args.dry_run else "deleted"
-        print(f"\n{len(hits) - len(failed)} file(s) {action}, {word} than {args.days:g} days "
-              f"(cutoff {cutoff:%Y-%m-%d %H:%M} UTC), {human(freed)} "
-              f"{'to free' if args.dry_run else 'freed'}", file=sys.stderr)
-        if failed:
-            print(f"{len(failed)} file(s) could not be removed", file=sys.stderr)
+    # Summary always goes to stderr, so --paths-only stdout stays pipeable.
+    word = "newer" if args.newer else "older"
+    action = "matched" if args.dry_run else "deleted"
+    print(f"\n{len(hits) - len(failed)} file(s) {action}, {word} than {args.days:g} days "
+          f"(cutoff {cutoff:%Y-%m-%d %H:%M} UTC)", file=sys.stderr)
+    if failed:
+        print(f"{len(failed)} file(s) could not be removed", file=sys.stderr)
+
+    label = "TOTAL SPACE TO FREE" if args.dry_run else "TOTAL SPACE FREED"
+    print(f"{label}: {human(freed)} ({freed:,} bytes)", file=sys.stderr)
 
     sys.exit(1 if failed else 0)
 
