@@ -1,0 +1,16 @@
+ENVI
+description = {
+/tmp/C50929_img_ltibc_i0/C50929_hint_redwins_post.bin}
+samples = 712
+lines   = 429
+bands   = 1
+header offset = 0
+file type = ENVI Standard
+data type = 4
+interleave = bsq
+byte order = 0
+map info = {Albers Conical Equal Area, 1, 1, 1039689.17866393, 855689.504795379, 19.9874198046199, 19.9874198046199,North America 1983}
+projection info = {9, 6378137, 6356752.314140356, 45, -126, 1000000, 0, 50, 58.5,North America 1983, Albers Conical Equal Area}
+coordinate system string = {PROJCS["NAD_1983_BC_Environment_Albers",GEOGCS["GCS_North_American_1983",DATUM["D_North_American_1983",SPHEROID["GRS_1980",6378137.0,298.257222101]],PRIMEM["Greenwich",0.0],UNIT["Degree",0.0174532925199433]],PROJECTION["Albers"],PARAMETER["False_Easting",1000000.0],PARAMETER["False_Northing",0.0],PARAMETER["Central_Meridian",-126.0],PARAMETER["Standard_Parallel_1",50.0],PARAMETER["Standard_Parallel_2",58.5],PARAMETER["Latitude_Of_Origin",45.0],UNIT["Meter",1.0]]}
+band names = {
+hint redwins_post}
