@@ -251,6 +251,9 @@ class BaseHandler:
             r'^/api/fire/(?P<fire_numbe>[^/]+)/serial_map$'),
          'handle_api_serial_map'),
         (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/kgc_map$'),
+         'handle_api_kgc_map'),
+        (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/recommended$'),
          'handle_api_recommended_post'),
         (re.compile(

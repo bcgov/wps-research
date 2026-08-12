@@ -190,6 +190,98 @@
 
         <div class="params-scroll" id="params-scroll">
 
+            <!-- Method switch. Unchecked (the default) selects KGC:
+                 the t-SNE/RF/HDBSCAN parameter sections are hidden and
+                 replaced by the KGC section and its own Map Fire
+                 button. BRUSH stays visible either way, because the
+                 brushing step runs on whichever classifier produced
+                 the mask. -->
+            <label id="method-toggle-wrap"
+                   title="On: the t-SNE + Random Forest + HDBSCAN
+                          pipeline. Off: KGC clustering."
+                   style="display:flex;align-items:center;gap:6px;
+                          padding:8px 10px;font-size:12px;
+                          border-bottom:1px solid #e5e5e5;
+                          cursor:pointer;background:#fafafa">
+              <input type="checkbox" id="use-hdbscan"
+                     onchange="onMethodToggle()">
+              <strong>hdbscan</strong>
+              <span style="color:#888;font-size:11px">
+                (unchecked = KGC)</span>
+            </label>
+
+            <!-- KGC parameters. Same look as the sections below;
+                 shown only when hdbscan is unchecked. Defaults match
+                 the Args struct in cpp/kgc2/kgc.cpp. -->
+            <div class="param-section" id="kgc-section">
+                <h3 onclick="this.parentElement.classList.toggle('open')">KGC</h3>
+                <div class="params-body">
+                    <div class="param-row">
+                        <label>Budget points<span class="help" tabindex="0"
+                               data-tip="Target number of retained points.
+                               n_skip is derived from this unless it is set
+                               explicitly. More points means finer classes
+                               and a larger neighbour table.">?</span>:</label>
+                        <input type="number" id="p-kgc_budget_points"
+                               value="20000" step="1000" min="100">
+                    </div>
+                    <div class="param-row">
+                        <label>n_skip<span class="help" tabindex="0"
+                               data-tip="Decimation stride. -1 lets KGC
+                               choose it from the point budget.">?</span>:</label>
+                        <input type="number" id="p-kgc_nskip"
+                               value="-1" step="1" min="-1">
+                    </div>
+                    <div class="param-row">
+                        <label>k_max<span class="help" tabindex="0"
+                               data-tip="Largest neighbourhood size. The
+                               neighbour table is n_points x k_max entries
+                               of 12 bytes, so 10000 is a little over 2 GB.
+                               Lower it if memory is tight.">?</span>:</label>
+                        <input type="number" id="p-kgc_kmax"
+                               value="10000" step="500" min="10">
+                    </div>
+                    <div class="param-row">
+                        <label>k_step<span class="help" tabindex="0"
+                               data-tip="The sweep visits K = k_step,
+                               2*k_step, ... and stops early once the best
+                               match stops improving.">?</span>:</label>
+                        <input type="number" id="p-kgc_kstep"
+                               value="5" step="1" min="1">
+                    </div>
+                    <div class="param-row">
+                        <label>Patience<span class="help" tabindex="0"
+                               data-tip="How many non-improving K levels to
+                               tolerate before stopping. 0 stops at the
+                               first non-improvement.">?</span>:</label>
+                        <input type="number" id="p-kgc_patience"
+                               value="0" step="1" min="0">
+                    </div>
+                    <div class="param-row">
+                        <label>Min class<span class="help" tabindex="0"
+                               data-tip="Smallest acceptable class size.
+                               -1 means no minimum.">?</span>:</label>
+                        <input type="number" id="p-kgc_min_class"
+                               value="-1" step="1" min="-1">
+                    </div>
+                    <div class="param-row">
+                        <label>Threads<span class="help" tabindex="0"
+                               data-tip="Worker threads. -1 uses one per
+                               CPU core.">?</span>:</label>
+                        <input type="number" id="p-kgc_threads"
+                               value="-1" step="1" min="-1">
+                    </div>
+                    <div class="param-row">
+                        <label>No cache<span class="help" tabindex="0"
+                               data-tip="Ignore the memoised deduplication
+                               and neighbour table and recompute them.
+                               Slower; use when the inputs changed but the
+                               cache key did not.">?</span>:</label>
+                        <input type="checkbox" id="p-kgc_no_cache">
+                    </div>
+                </div>
+            </div>
+
             <!-- Crop & Sampling -->
             <div class="param-section">
                 <h3 onclick="this.parentElement.classList.toggle('open')">Crop &amp; Sampling</h3>
@@ -361,9 +453,25 @@
                 </div>
             </div>
 
+            <!-- KGC's own Map Fire. Red, and separate from the
+                 HDBSCAN buttons rather than a mode of them, so which
+                 method is about to run is never ambiguous. -->
+            <div class="action-buttons" id="kgc-actions"
+                 style="align-items:center">
+                <button class="btn btn-danger" id="btn-map-kgc"
+                        onclick="startKgcMapping()"
+                        style="flex:1;font-size:13px"
+                        title="Cluster with KGC using the AOI stack (with
+                               the current band exclusions) and the
+                               selected hint, then brush the result.">
+                    Map Fire
+                </button>
+            </div>
+
             <!-- Action buttons. K replicates per setting is a global
                  (from recommended_settings.yaml). -->
-            <div class="action-buttons" style="align-items:center">
+            <div class="action-buttons" id="hdbscan-actions"
+                 style="align-items:center">
                 <button class="btn" id="btn-map" disabled onclick="startMapping()">
                     Map Fire
                 </button>
@@ -865,6 +973,7 @@ async function _onPostSourceChangeInner() {
             renderHintModeButtons();
         }
         if (data.status) updateStatusDisplay(data.status);
+        restoreMethodToggle();
         loadFireOverlays();
         // Warm BOTH sources, not just the current one. The server has
         // already built and stashed both (see the prebuild in the
@@ -3715,6 +3824,120 @@ async function runRebrush() {
 // the panel fields as a custom single-element settings list, otherwise
 // the backend would fall back to recommended[0] and ignore the panel.
 // -----------------------------------------------------------------------
+// ---- Clustering method: KGC (default) or HDBSCAN ------------------
+//
+// Unchecked means KGC. The HDBSCAN parameter sections are hidden
+// because they configure a pipeline that is not going to run, and
+// showing settings that have no effect is worse than showing none.
+// BRUSH is deliberately exempt: brushing runs on whichever mask was
+// produced, so its parameters apply to both methods.
+const HDBSCAN_ONLY_SECTIONS = ['Crop & Sampling', 'T-SNE',
+                               'Random Forest', 'HDBSCAN', 'Display',
+                               'Notes'];
+
+function usingHdbscan() {
+    const el = document.getElementById('use-hdbscan');
+    return !!(el && el.checked);
+}
+
+function onMethodToggle() {
+    const hdb = usingHdbscan();
+    try {
+        localStorage.setItem('useHdbscan', hdb ? '1' : '0');
+    } catch (_) { /* preference only */ }
+
+    // Hide by section heading rather than by id: the sections have no
+    // ids, and matching the visible label keeps this readable.
+    document.querySelectorAll('.param-section').forEach((sec) => {
+        const h = sec.querySelector('h3');
+        if (!h) return;
+        const label = h.textContent.replace(/\s+/g, ' ').trim();
+        if (label === 'KGC') {
+            sec.style.display = hdb ? 'none' : '';
+            return;
+        }
+        const hide = HDBSCAN_ONLY_SECTIONS.some(
+            (n) => label.toLowerCase() === n.toLowerCase());
+        if (hide) sec.style.display = hdb ? '' : 'none';
+    });
+
+    // The HDBSCAN action buttons follow the same rule; the KGC button
+    // is the inverse. (Notes is handled above, by label.)
+    const hact = document.getElementById('hdbscan-actions');
+    if (hact) hact.style.display = hdb ? '' : 'none';
+    const kact = document.getElementById('kgc-actions');
+    if (kact) kact.style.display = hdb ? 'none' : '';
+    log(`[method] ${hdb ? 'HDBSCAN pipeline' : 'KGC clustering'} `
+        + `selected`, 'dim');
+}
+
+function restoreMethodToggle() {
+    try {
+        const v = localStorage.getItem('useHdbscan');
+        const el = document.getElementById('use-hdbscan');
+        // Default OFF (KGC), per the requested behaviour.
+        if (el) el.checked = (v === '1');
+    } catch (_) { /* default stands */ }
+    onMethodToggle();
+}
+
+function collectKgcParams() {
+    const num = (id, dflt) => {
+        const el = document.getElementById(id);
+        if (!el || el.value === '') return dflt;
+        const v = parseInt(el.value, 10);
+        return Number.isFinite(v) ? v : dflt;
+    };
+    const chk = (id) => {
+        const el = document.getElementById(id);
+        return !!(el && el.checked);
+    };
+    return {
+        kgc_budget_points: num('p-kgc_budget_points', 20000),
+        kgc_nskip: num('p-kgc_nskip', -1),
+        kgc_kmax: num('p-kgc_kmax', 10000),
+        kgc_kstep: num('p-kgc_kstep', 5),
+        kgc_patience: num('p-kgc_patience', 0),
+        kgc_min_class: num('p-kgc_min_class', -1),
+        kgc_threads: num('p-kgc_threads', -1),
+        kgc_no_cache: chk('p-kgc_no_cache'),
+        // Brushing runs on the KGC mask, so its parameters travel with
+        // the request rather than being read from a stale saved copy.
+        brush_size: num('p-brush_size', 15),
+        point_threshold: num('p-point_threshold', 10),
+        brush_all_segments: chk('p-brush_all_segments'),
+    };
+}
+
+async function startKgcMapping() {
+    const btn = document.getElementById('btn-map-kgc');
+    if (btn) { btn.disabled = true; btn.textContent = 'Running KGC ...'; }
+    try {
+        const r = await fetch(
+            `/api/fire/${encodeURIComponent(FIRE)}/kgc_map`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json',
+                          'X-Requested-With': 'fetch'},
+                body: JSON.stringify({params: collectKgcParams()}),
+            });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || j.error) {
+            alert(`Could not start KGC: `
+                  + `${j.error || ('HTTP ' + r.status)}`);
+            if (btn) { btn.disabled = false; btn.textContent = 'Map Fire'; }
+            return;
+        }
+        log('[kgc] started — the run continues server-side even if you '
+            + 'navigate away', 'dim');
+        // Status polling drives the rest, exactly as for a sweep.
+        isMapping = true;
+        updateStatusDisplay('mapping', previouslyAccepted);
+    } catch (err) {
+        alert(`Could not start KGC: ${err.message}`);
+        if (btn) { btn.disabled = false; btn.textContent = 'Map Fire'; }
+    }
+}
+
 async function startMapping() {
     // A mapping run re-prepares the crop (padding sweeps change its
     // dimensions), which regenerates every preview server-side. Drop
@@ -4902,6 +5125,13 @@ const PROGRESS_STAGE_LABELS = {
     downloading_viirs: 'VIIRS',
     accumulating: 'VIIRS accumulate',
     cropping: 'Build AOI stack',
+    // KGC run stages (see kgc.KGC_STAGES).
+    kgc_build: 'Build KGC',
+    kgc_stack: 'Band stack',
+    kgc_cluster: 'KGC cluster',
+    kgc_classify: 'Class mask',
+    kgc_brush: 'Brush',
+    kgc_figure: 'Finish',
 };
 
 function formatSeconds(s) {

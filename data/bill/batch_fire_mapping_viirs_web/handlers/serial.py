@@ -198,6 +198,80 @@ class SerialRoutes:
             'total': len(settings) * k_runs,
         })
 
+    def handle_api_kgc_map(self, fire_numbe):
+        """Run the KGC clustering method for this fire.
+
+        Backgrounded like the settings sweep, so the browser can be
+        closed or navigated away from while it runs. Results land in
+        the same places the CLI pipeline uses, so the gallery, Accept,
+        download and polygonisation need no special case.
+        """
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+
+        body = self._read_body()
+        if body is None:
+            return
+        params = body.get('params') or {}
+
+        busy = (FireStatus.PENDING, FireStatus.PREPARING,
+                FireStatus.MAPPING)
+        if fire.status in busy:
+            self._send_json(
+                {'error': f'Fire is {fire.status.value}; wait for it '
+                          f'to finish first.'}, 409)
+            return
+        if not fire.crop_bin or not os.path.isfile(fire.crop_bin):
+            self._send_json(
+                {'error': 'The AOI stack is not built yet.'}, 409)
+            return
+
+        with state.lock:
+            fire.serial_results = []
+            fire.console_log.clear()
+            fire.progress = {}
+            fire.status = FireStatus.MAPPING
+            fire.error_msg = ''
+
+        def _worker():
+            from ..kgc import run_kgc, set_kgc_progress
+            try:
+                run_kgc(
+                    fire, params,
+                    progress=lambda stage, detail, frac:
+                        set_kgc_progress(fire, stage, detail, frac))
+                try:
+                    from ..persistence import _save_fire_state
+                    _save_fire_state()
+                except Exception:
+                    pass
+            except Exception as exc:
+                import traceback
+                sys.stderr.write(
+                    f'[kgc] {fire_numbe} failed: '
+                    f'{type(exc).__name__}: {exc}\n'
+                    f'{traceback.format_exc()}\n')
+                msg = str(exc).strip() or type(exc).__name__
+                with state.lock:
+                    fire.status = FireStatus.ERROR
+                    fire.error_msg = f'KGC failed: {msg}'
+                    fire.progress = {}
+                try:
+                    fire.console_log.append(f'ERROR: KGC failed: {msg}')
+                except Exception:
+                    pass
+                try:
+                    from ..persistence import _save_fire_state
+                    _save_fire_state()
+                except Exception:
+                    pass
+
+        threading.Thread(target=_worker, daemon=True).start()
+        self._send_json({'status': 'started', 'method': 'kgc'})
+
     def handle_api_serial_results(self, fire_numbe):
         fire_numbe = unquote(fire_numbe)
         if fire_numbe not in state.fires:
@@ -270,6 +344,21 @@ class SerialRoutes:
         # Default: serve pixel-aligned overlay
         overlay_path = os.path.join(
             fire.cache_dir, 'previews', f'serial_{run_id}.png')
+
+        # Re-render into the current AOI grid when the crop has moved
+        # under it, so this run lines up with the post-fire preview
+        # exactly rather than relying on extent bookkeeping.
+        try:
+            from ..mapping import ensure_overlay_current
+            _sclf = os.path.join(
+                fire.cache_dir,
+                f'{fire_numbe}_serial_{run_id}_classified.bin')
+            if os.path.isfile(_sclf):
+                ensure_overlay_current(
+                    fire, f'serial_{run_id}', _sclf)
+        except Exception as _exc:
+            sys.stderr.write(
+                f'[geo] serial_{run_id} re-render skipped: {_exc}\n')
         if not os.path.isfile(overlay_path):
             serial_clf = os.path.join(
                 fire.cache_dir,

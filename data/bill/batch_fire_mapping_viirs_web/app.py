@@ -293,6 +293,14 @@ def init_app(app_state: AppState):
     )
     _brush.init(app_state, _rebrush_procs, _rebrush_procs_lock)
     _mapping_cmd.init(app_state)
+    # KGC shares AppState the same way, so it can reach state.lock and
+    # the ramdisk path without importing app.
+    try:
+        from . import kgc as _kgc
+        _kgc.init(app_state)
+    except Exception as exc:
+        import sys as _s
+        _s.stderr.write(f'[kgc] init skipped: {exc}\n')
     # _prepare uses the shared accept-in-progress registry and the
     # CSV-write file lock; pass them in so the cache sweeper and accept
     # handler all coordinate through the same primitives.
