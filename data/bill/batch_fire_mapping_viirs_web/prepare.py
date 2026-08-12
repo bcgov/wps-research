@@ -516,6 +516,43 @@ def verify_and_repair_fire(fire: FireInfo, log=None) -> dict:
     except OSError as exc:
         out['actions'].append(f'could not list previews: {exc}')
 
+    # Rebuild previews/result.png when a run is recorded but its
+    # overlay is gone.
+    #
+    # serial_results is persisted, so a fire can come back from a
+    # restart knowing it has a result while the image that shows it has
+    # been lost (a stale per-source stash used to do exactly that). The
+    # classified raster is still on disk, so the overlay can simply be
+    # re-rendered -- and the "ML classification" view is available
+    # again without the user having to re-run or re-accept anything.
+    try:
+        results = list(getattr(fire, 'serial_results', None) or [])
+        if results and 'result' not in (fire.available_views or []):
+            newest = results[-1]
+            clf = newest.get('classified') or ''
+            if not clf or not os.path.isfile(clf):
+                from .state import find_classified
+                clf = find_classified(fire, [cache_dir]) or ''
+            if clf and os.path.isfile(clf):
+                from .mapping import _overlay_mask_on_post
+                _overlay_mask_on_post(fire, clf, 'result',
+                                      (0.9, 0.1, 0.0))
+                rp = os.path.join(prev_dir, 'result.png')
+                if os.path.isfile(rp):
+                    if 'result' not in fire.available_views:
+                        fire.available_views.append('result')
+                    out['actions'].append(
+                        'rebuilt the ML classification overlay')
+                    emit(f'[verify] {fire.fire_numbe}: rebuilt '
+                         f'previews/result.png from '
+                         f'{os.path.basename(clf)}')
+            else:
+                emit(f'[verify] {fire.fire_numbe}: a run is recorded '
+                     f'but no classified raster was found; the ML '
+                     f'classification view cannot be rebuilt')
+    except Exception as exc:
+        out['actions'].append(f'result overlay rebuild failed: {exc}')
+
     # A hint the CLI would consume must still exist, or mapping fails
     # at run time with a less obvious message.
     hb = getattr(fire, 'hint_bin', '') or ''
@@ -1018,6 +1055,25 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
         return {'ok': False, 'error': f'stack build failed: {exc}'}
 
     fire.progress = {}
+    # Snapshot the OUTGOING source's previews before repointing.
+    #
+    # Only the "no stash existed" branch below stashed anything, so a
+    # switch to a source that already had a stash discarded whatever
+    # had been produced since the outgoing source was last stashed --
+    # including previews/result.png from a mapping or KGC run. The
+    # symptom is that "ML classification" silently disappears from the
+    # view list after any source switch (and the on-demand stash build
+    # in the preview handler performs two switches, so simply opening
+    # a fire could do it).
+    prev_src = getattr(fire, 'post_source', '') or ''
+    if prev_src and prev_src != source:
+        try:
+            _stash_previews(fire, prev_src)
+        except Exception as exc:
+            sys.stderr.write(
+                f'[prepare] could not stash {prev_src} previews before '
+                f'switching to {source}: {exc}\n')
+
     fire.post_source = source
     fire.crop_bin = info['path']
     fire.crop_w = info.get('width', fire.crop_w)
@@ -1141,7 +1197,15 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
     # preparation produces, so a fire that was mid-prepare (or errored
     # on the previous source) is usable again -- without this the badge
     # stays on "preparing"/"error" even though everything succeeded.
-    fire.status = FireStatus.READY
+    #
+    # But do NOT demote a fire that already has a result: MAPPED and
+    # ACCEPTED are states the user reached by mapping and accepting,
+    # and a source switch (including the automatic one the preview
+    # handler performs to build the other source's stash) must not
+    # quietly undo them. Only the states that mean "not usable yet"
+    # are cleared.
+    if fire.status not in (FireStatus.MAPPED, FireStatus.ACCEPTED):
+        fire.status = FireStatus.READY
     fire.error_msg = ''
     fire.progress = {}
 
