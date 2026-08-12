@@ -1729,62 +1729,102 @@ async function onBandExclusionChange() {
 // Blink-comparator GIF of the two panes. Server-side, because the
 // frames already exist there as preview PNGs -- encoding a GIF in the
 // browser would mean shipping an encoder and re-uploading the pixels.
+// Capture a pane exactly as displayed, at NATURAL resolution.
+//
+// The <img> already holds the composited frame -- base imagery with
+// the overlays baked in by compositeOverlays() -- so drawing it to a
+// canvas at its natural size gives the whole image with overlays,
+// independent of the current zoom and pan. Reading the DOM instead of
+// asking the server for a preview also sidesteps the per-source
+// lookup entirely: whatever is on screen is what gets captured.
+function capturePaneFrame(pane) {
+    return new Promise((resolve, reject) => {
+        const { img } = getPaneElements(pane);
+        if (!img || !img.src || !img.naturalWidth) {
+            reject(new Error(`the ${pane} pane has no image loaded`));
+            return;
+        }
+        try {
+            const c = document.createElement('canvas');
+            c.width = img.naturalWidth;
+            c.height = img.naturalHeight;
+            const ctx = c.getContext('2d');
+            ctx.drawImage(img, 0, 0, c.width, c.height);
+            c.toBlob((b) => {
+                if (b) resolve(b);
+                else reject(new Error(`could not encode the ${pane} `
+                                      + `pane`));
+            }, 'image/png');
+        } catch (err) {
+            reject(err);
+        }
+    });
+}
+
+function paneCaption(pane) {
+    const view = (pane === 'left') ? leftView : rightView;
+    const src = (pane === 'left') ? currentPostSource : rightPostSource;
+    const vl = (typeof getViewLabel === 'function')
+        ? getViewLabel(view) : view;
+    return `${vl} (${src === 'l2' ? 'L2 recent' : 'MRAP'})`;
+}
+
 async function downloadBlinkGif() {
     if (!splitActive) return;
     const btn = document.getElementById('btn-gif');
     if (btn) { btn.disabled = true; btn.textContent = 'Building ...'; }
-    const p = new URLSearchParams({
-        left_view: leftView || 'post',
-        left_src: currentPostSource,
-        right_view: rightView || 'post',
-        right_src: rightPostSource,
-        hint: currentHintMode || '',
-        ms: '700',
-    });
-    log(`[gif] ${leftView}/${currentPostSource} vs `
-        + `${rightView}/${rightPostSource}`, 'dim');
-    const url = `/api/fire/${encodeURIComponent(FIRE)}`
-        + `/interlaced_gif?${p.toString()}`;
     try {
-        // Fetched, then saved via an anchor click.
-        //
-        // A hidden iframe was wrong twice over: the browser can render
-        // an image inline instead of saving it, and a JSON error
-        // response (409 when a pane has no preview) vanished silently
-        // with no indication the button had done anything. Fetching
-        // lets the error be read and reported, and the anchor click is
-        // an unambiguous "save this file now".
-        const r = await fetch(url);
+        const [a, b] = await Promise.all([capturePaneFrame('left'),
+                                          capturePaneFrame('right')]);
+        // Length-prefixed framing: 4-byte big-endian size then bytes,
+        // per frame. Exact, and avoids multipart parsing server-side.
+        const head = (n) => {
+            const u = new Uint8Array(4);
+            new DataView(u.buffer).setUint32(0, n, false);
+            return u;
+        };
+        const body = new Blob([head(a.size), a, head(b.size), b]);
+        const p = new URLSearchParams({
+            ms: '700',
+            left_label: paneCaption('left'),
+            right_label: paneCaption('right'),
+        });
+        log(`[gif] posting ${fmtBytes(body.size)} of frames `
+            + `(${paneCaption('left')} | ${paneCaption('right')})`,
+            'dim');
+        const r = await fetch(
+            `/api/fire/${encodeURIComponent(FIRE)}`
+            + `/interlaced_gif?${p.toString()}`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/octet-stream',
+                          'X-Requested-With': 'fetch'},
+                body,
+            });
         if (!r.ok) {
             let msg = `HTTP ${r.status}`;
             try {
                 const j = await r.json();
                 if (j && j.error) msg = j.error;
-            } catch (_) { /* not JSON; keep the status */ }
+            } catch (_) { /* not JSON */ }
             alert(`Could not build the GIF: ${msg}`);
             log(`[gif] failed: ${msg}`, 'error');
             return;
         }
         const blob = await r.blob();
-
-        // Prefer the server's filename, which encodes both panes.
         let name = `${FIRE}_blink.gif`;
         const cd = r.headers.get('Content-Disposition') || '';
         const m = cd.match(/filename="?([^"]+)"?/);
         if (m) name = m[1];
-
         const href = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = href;
-        a.download = name;
-        a.style.display = 'none';
-        document.body.appendChild(a);
-        a.click();
-        // Revoke on the next tick: revoking immediately can cancel the
-        // save before the browser has read the blob.
+        const el = document.createElement('a');
+        el.href = href;
+        el.download = name;
+        el.style.display = 'none';
+        document.body.appendChild(el);
+        el.click();
         setTimeout(() => {
             try { URL.revokeObjectURL(href); } catch (_) {}
-            a.remove();
+            el.remove();
         }, 2000);
         log(`[gif] downloaded ${name} (${fmtBytes(blob.size)})`, 'dim');
     } catch (err) {

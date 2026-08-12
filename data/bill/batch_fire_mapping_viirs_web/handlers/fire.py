@@ -1347,79 +1347,85 @@ class FireRoutes:
         sys.stderr.write(f'[bands] {fire_numbe}: {flags}\n')
         self._send_json({'ok': True, **flags})
 
+    # Frames arrive as raw PNG bytes and are megabytes each, so this
+    # endpoint reads the body itself rather than through _read_body(),
+    # whose 1 MB JSON limit exists to protect the small API surface.
+    _GIF_MAX_BODY = 80 * 1024 * 1024
+
     def handle_api_interlaced_gif(self, fire_numbe):
-        """Blink-comparator GIF alternating the two split-view panes.
+        """Blink GIF built from the frames the panes are DISPLAYING.
 
-        Flipping between two registered frames makes a difference
-        obvious in a way two side-by-side panels do not -- the same
-        reason the press-and-hold flicker exists. This is the
-        downloadable version of it.
+        The client posts the two rendered images rather than naming
+        views for the server to look up. That is the only way to get
+        what was actually asked for:
 
-        Each pane's frame is resolved exactly as the preview endpoint
-        resolves it, so the GIF shows what the panes show: the same
-        views, the same sources, and the per-source stash when the two
-        panes differ.
+          * The overlays -- tile grid, BCWS perimeter, labels -- are
+            composited in the browser, so a server-side preview PNG
+            does not contain them.
+          * A pane can show a view that has no per-source preview file
+            (the ML classification exists only for the source that
+            produced it), which is what made the lookup fail with
+            "no preview available" for panes that were plainly on
+            screen.
+
+        Frames are sent at natural resolution, so the GIF is the whole
+        image rather than the zoomed and cropped viewport.
+
+        Body: multipart-free, two PNGs separated by a boundary we
+        control -- see the length-prefixed framing below.
         """
         fire_numbe = unquote(fire_numbe)
         if fire_numbe not in state.fires:
             self._send_json({'error': 'Fire not found'}, 404)
             return
-        fire = state.fires[fire_numbe]
+
+        try:
+            length = int(self.headers.get('Content-Length', 0) or 0)
+        except (TypeError, ValueError):
+            length = 0
+        if length <= 0:
+            self._send_json({'error': 'No frames were posted'}, 400)
+            return
+        if length > self._GIF_MAX_BODY:
+            self._send_json(
+                {'error': f'Frames are {length / 1e6:.0f} MB, over the '
+                          f'{self._GIF_MAX_BODY / 1e6:.0f} MB limit.'},
+                413)
+            return
+
+        raw = self.rfile.read(length)
+
+        # Framing: 4-byte big-endian length, then that many bytes, per
+        # frame. Simple, exact, and free of multipart parsing.
+        frames = []
+        off = 0
+        try:
+            while off + 4 <= len(raw) and len(frames) < 8:
+                n = int.from_bytes(raw[off:off + 4], 'big')
+                off += 4
+                if n <= 0 or off + n > len(raw):
+                    break
+                frames.append(raw[off:off + n])
+                off += n
+        except Exception:
+            frames = []
+        if len(frames) < 2:
+            self._send_json(
+                {'error': f'Expected 2 frames, decoded {len(frames)}.'},
+                400)
+            return
 
         q = parse_qs(urlparse(self.path).query)
 
         def _arg(name, default=''):
             return (q.get(name, [default]) or [default])[0]
 
-        cur_src = getattr(fire, 'post_source', 'l2') or 'l2'
-        lv = _arg('left_view', 'post')
-        rv = _arg('right_view', 'post')
-        ls = (_arg('left_src', cur_src) or cur_src).lower()
-        rs = (_arg('right_src', cur_src) or cur_src).lower()
-        hint_mode = _arg('hint', getattr(fire, 'hint_mode', '') or '')
         try:
             ms = max(120, min(5000, int(_arg('ms', '700'))))
         except (TypeError, ValueError):
             ms = 700
-
-        def _resolve(view, src):
-            """Preview PNG for (view, source), honouring the stash."""
-            prev = os.path.join(fire.cache_dir, 'previews')
-            name = view
-            if view == 'hint' and hint_mode:
-                per_mode = os.path.join(prev, f'hint_{hint_mode}.png')
-                if os.path.isfile(per_mode):
-                    name = f'hint_{hint_mode}'
-            # A source other than the loaded one lives in its stash.
-            if src and src != cur_src:
-                stash = os.path.join(fire.cache_dir, f'previews_{src}')
-                cand = os.path.join(stash, f'{name}.png')
-                if os.path.isfile(cand):
-                    return cand
-                cand = os.path.join(stash, f'{view}.png')
-                if os.path.isfile(cand):
-                    return cand
-                # No stash: say so rather than silently substituting
-                # the other source, which would make a GIF that blinks
-                # between two copies of the same image.
-                return None
-            cand = os.path.join(prev, f'{name}.png')
-            if os.path.isfile(cand):
-                return cand
-            cand = os.path.join(prev, f'{view}.png')
-            return cand if os.path.isfile(cand) else None
-
-        left = _resolve(lv, ls)
-        right = _resolve(rv, rs)
-        missing = [n for n, p_ in (('left', left), ('right', right))
-                   if not p_]
-        if missing:
-            self._send_json(
-                {'error': f'No preview available for the '
-                          f'{" and ".join(missing)} pane '
-                          f'({lv}/{ls}, {rv}/{rs}). Load both panes '
-                          f'first.'}, 409)
-            return
+        left_cap = _arg('left_label', 'left')
+        right_cap = _arg('right_label', 'right')
 
         try:
             from PIL import Image, ImageDraw
@@ -1429,66 +1435,48 @@ class FireRoutes:
                           'GIFs cannot be written.'}, 500)
             return
 
+        import io
         tmp_dir = None
         try:
-            def _label(im, text):
-                """Caption strip, so a saved GIF is self-describing."""
-                im = im.convert('RGB')
-                d = ImageDraw.Draw(im)
-                w, h = im.size
-                d.rectangle([0, h - 22, w, h], fill=(10, 12, 16))
-                d.text((8, h - 16), text, fill=(200, 215, 235))
-                return im
+            f1 = Image.open(io.BytesIO(frames[0])).convert('RGB')
+            f2 = Image.open(io.BytesIO(frames[1])).convert('RGB')
 
-            f1 = Image.open(left)
-            f2 = Image.open(right)
-            # Both frames must be the same size or the GIF jitters.
-            # The panes are the same AOI, so any difference is preview
-            # downsampling; match the SMALLER to keep the file modest.
+            # Frames must match exactly or the animation jitters. Both
+            # panes show the same AOI, so any difference is preview
+            # downsampling; match the larger to the smaller.
             w = min(f1.width, f2.width)
             h = min(f1.height, f2.height)
-            # Cap the long side: a 2000 px two-frame GIF is tens of MB.
-            cap = 1200
-            if max(w, h) > cap:
-                scale = cap / float(max(w, h))
-                w, h = max(1, int(w * scale)), max(1, int(h * scale))
             if (f1.width, f1.height) != (w, h):
                 f1 = f1.resize((w, h), Image.LANCZOS)
             if (f2.width, f2.height) != (w, h):
                 f2 = f2.resize((w, h), Image.LANCZOS)
 
-            def _cap(view, src):
-                vl = {'post': 'Post-fire', 'pre': 'Pre-fire',
-                      'diff1': 'Diff 1', 'diff2': 'Diff 2',
-                      'diff3': 'Diff 3', 'hint': 'Hint perimeter',
-                      'result': 'ML classification'}.get(view, view)
-                sl = 'L2 recent' if src == 'l2' else 'MRAP'
-                return f'{fire_numbe}  -  {vl}  ({sl})'
+            def _label(im, text):
+                d = ImageDraw.Draw(im)
+                d.rectangle([0, im.height - 22, im.width, im.height],
+                            fill=(10, 12, 16))
+                d.text((8, im.height - 16), text, fill=(200, 215, 235))
+                return im
 
-            f1 = _label(f1, _cap(lv, ls))
-            f2 = _label(f2, _cap(rv, rs))
+            f1 = _label(f1, f'{fire_numbe}  -  {left_cap}')
+            f2 = _label(f2, f'{fire_numbe}  -  {right_cap}')
 
             tmp_dir = tempfile.mkdtemp(prefix=f'{fire_numbe}_gif_')
-            out = os.path.join(
-                tmp_dir,
-                f'{fire_numbe}_{lv}_{ls}__{rv}_{rs}_blink.gif')
+            safe = re.sub(r'[^A-Za-z0-9_.-]+', '_',
+                          f'{left_cap}__{right_cap}')[:80]
+            out = os.path.join(tmp_dir, f'{fire_numbe}_{safe}_blink.gif')
             f1.save(out, save_all=True, append_images=[f2],
                     duration=ms, loop=0, optimize=True)
 
             size = os.path.getsize(out)
             self.send_response(200)
-            # application/octet-stream, not image/gif: a browser will
-            # happily render an image/gif inline if anything strips or
-            # ignores Content-Disposition, and this response only ever
-            # exists to be saved. Both headers are sent, so a client
-            # that honours the disposition still gets the right name.
+            # octet-stream so nothing renders it inline; this response
+            # only ever exists to be saved.
             self.send_header('Content-Type', 'application/octet-stream')
             self.send_header('Content-Length', str(size))
             self.send_header(
                 'Content-Disposition',
                 f'attachment; filename="{os.path.basename(out)}"')
-            # The filename is the only way the client can label the
-            # download, so make it readable cross-origin.
             self.send_header('Access-Control-Expose-Headers',
                              'Content-Disposition')
             self.send_header('Cache-Control', 'no-store')
@@ -1497,7 +1485,7 @@ class FireRoutes:
                 shutil.copyfileobj(fh, self.wfile)
             sys.stderr.write(
                 f'[gif] {fire_numbe}: {w}x{h}, {ms} ms/frame, '
-                f'{size / 1e6:.2f} MB  [{lv}/{ls} | {rv}/{rs}]\n')
+                f'{size / 1e6:.2f} MB  [{left_cap} | {right_cap}]\n')
         except (BrokenPipeError, ConnectionResetError):
             pass
         except Exception as exc:
