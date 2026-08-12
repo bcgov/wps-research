@@ -139,13 +139,10 @@
                  other. -->
             <button class="btn btn-secondary" id="btn-custom-bands"
                     onclick="openBandPicker()"
-                    style="font-size:11px;padding:2px 8px;margin-left:8px"
+                    style="font-size:11px;padding:2px 8px;
+                           margin-left:8px;white-space:nowrap"
                     title="Pick exactly which bands go to the
-                           classifier and to Download imagery.
-                           Overrides the checkboxes until one of them is
-                           changed.">
-              Custom band select
-            </button>
+                           classifier and to Download imagery.">Custom bands</button>
             <span aria-hidden="true"
                   style="display:inline-block;width:1px;height:16px;
                          background:#ccc;margin:0 10px;
@@ -2861,9 +2858,11 @@ async function postBandOverride(payload) {
             const on = (j.override || []).length > 0;
             btn.style.background = on ? '#3a7bd5' : '';
             btn.style.color = on ? '#fff' : '';
+            // Single line always: a wrapping button thickens the
+            // whole toolbar.
             btn.textContent = on
                 ? `Custom bands (${j.override.length})`
-                : 'Custom band select';
+                : 'Custom bands';
         }
     } catch (err) {
         alert(`Could not set the band selection: ${err.message}`);

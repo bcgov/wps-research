@@ -1291,6 +1291,47 @@ class FireRoutes:
             payload = {'status': f.status.value, 'error': f.error_msg}
         self._send_json(payload)
 
+    def _apply_band_flag_changes(self, fire, changes) -> None:
+        """Fold checkbox changes into the current band selection."""
+        from osgeo import gdal
+        from ..band_select import (apply_flag_change, select_bands)
+
+        if not fire.crop_bin or not os.path.isfile(fire.crop_bin):
+            return
+        ds = gdal.Open(fire.crop_bin, gdal.GA_ReadOnly)
+        if ds is None:
+            return
+        names = [ds.GetRasterBand(i + 1).GetDescription() or ''
+                 for i in range(ds.RasterCount)]
+        ds = None
+
+        cur = list(getattr(fire, 'band_override', None) or [])
+        if not cur:
+            # No explicit selection yet: start from what the flags
+            # produced BEFORE this change, so the change is a delta on
+            # what the user was actually looking at.
+            prev = {k: bool(getattr(fire, k, None))
+                    for k, _ in changes}
+            for k, v in changes:
+                setattr(fire, k, not v)          # undo, momentarily
+            base = select_bands(
+                names,
+                bool(getattr(fire, 'exclude_b8', True)),
+                bool(getattr(fire, 'exclude_pre_fire', True)),
+                bool(getattr(fire, 'exclude_diff', True)),
+                bool(getattr(fire, 'diff_only', False)))
+            for k in prev:
+                setattr(fire, k, prev[k])        # restore
+            cur = list(base['keep'])
+
+        for key, turned_on in changes:
+            cur = apply_flag_change(
+                names, cur, key, turned_on,
+                log=lambda m: fire.console_log.append(m))
+
+        with state.lock:
+            fire.band_override = sorted(set(int(i) for i in cur))
+
     def handle_api_bands(self, fire_numbe):
         """List the AOI stack's bands and which are currently selected.
 
@@ -1530,17 +1571,26 @@ class FireRoutes:
                         'exclude_diff', 'diff_only', 'clip_to_bcws'):
                 if key in body:
                     if bool(getattr(fire, key, None)) != bool(body[key]):
-                        changed.append(key)
+                        changed.append((key, bool(body[key])))
                     setattr(fire, key, bool(body[key]))
-            # A custom selection is a snapshot of what the user picked;
-            # once they change a RULE, the rules take over again. Only
-            # an actual change clears it, so the periodic re-post of
-            # unchanged flags leaves a custom selection alone.
-            if changed and getattr(fire, 'band_override', None):
-                fire.band_override = []
+
+        # Apply each rule change INCREMENTALLY to the selection in
+        # force, rather than recomputing it from all the flags.
+        #
+        # Recomputing would discard a hand-picked selection every time
+        # any box was clicked -- and would also "fix" combinations the
+        # user deliberately created. Adding or removing only the bands
+        # the clicked box governs leaves every other choice alone,
+        # which is the behaviour asked for.
+        band_flags = [c for c in changed
+                      if c[0] != 'clip_to_bcws']
+        if band_flags:
+            try:
+                self._apply_band_flag_changes(fire, band_flags)
+            except Exception as exc:
                 sys.stderr.write(
-                    f'[bands] {fire_numbe}: custom selection cleared '
-                    f'by {", ".join(changed)}\n')
+                    f'[bands] {fire_numbe}: incremental update failed '
+                    f'({exc}); the checkbox rules still apply\n')
         val = bool(getattr(fire, 'exclude_b8', True))
         try:
             from ..persistence import _save_fire_state

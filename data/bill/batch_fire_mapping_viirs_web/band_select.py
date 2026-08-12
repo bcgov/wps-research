@@ -218,6 +218,66 @@ def select_bands(names, exclude_b8=False, exclude_pre=False,
             'describe_all': desc_all, 'describe_keep': desc_keep}
 
 
+def bands_governed_by(names, flag: str) -> list:
+    """Indices the given exclusion rule controls.
+
+    Each checkbox owns a set of bands. Toggling it should add or remove
+    exactly that set, leaving every other band as the user left it --
+    which is what makes an incremental change predictable rather than a
+    recomputation that quietly discards hand-picked choices.
+    """
+    out = []
+    for i, nm in enumerate(names or []):
+        era = band_era(nm)
+        if flag == 'exclude_b8' and is_b8(nm):
+            out.append(i)
+        elif flag == 'exclude_pre_fire' and era == _ERA_PRE:
+            out.append(i)
+        elif flag == 'exclude_diff' and era == _ERA_ANOM:
+            out.append(i)
+        elif flag == 'diff_only' and era != _ERA_ANOM:
+            # 'Diff only' governs everything that is NOT a difference
+            # band: turning it on removes them, turning it off puts
+            # them back.
+            out.append(i)
+    return out
+
+
+def apply_flag_change(names, current, flag: str, turned_on: bool,
+                      log=None) -> list:
+    """Apply ONE rule change to an existing selection.
+
+    *current* is the selection in force; the return value is that
+    selection with the bands this flag governs removed (when it was
+    switched on) or restored (when switched off). Nothing else moves.
+
+    This is deliberately not a recomputation from all the flags: doing
+    that would undo a custom selection every time any box was clicked,
+    which is precisely the behaviour being avoided.
+    """
+    cur = set(int(i) for i in (current or []))
+    gov = set(bands_governed_by(names, flag))
+    if not gov:
+        return sorted(cur)
+    before = len(cur)
+    if turned_on:
+        cur -= gov
+    else:
+        cur |= gov
+    keep = sorted(cur)
+    msg = (f'[bands] {flag} {"on" if turned_on else "off"}: '
+           f'{"removed" if turned_on else "restored"} '
+           f'{len(gov)} band(s) it governs; selection {before} -> '
+           f'{len(keep)}')
+    sys.stderr.write(msg + '\n')
+    if log:
+        try:
+            log('  ' + msg)
+        except Exception:
+            pass
+    return keep
+
+
 def selection_tag(exclude_b8=False, exclude_pre=False,
                   exclude_diff=False, diff_only=False,
                   override=None) -> str:
