@@ -148,6 +148,14 @@ class FireInfo:
     scaling: dict = field(default_factory=dict)
     # Clip the selected hint to the BCWS perimeter polygons.
     restrict_hint_bcws: bool = False
+    # Last KGC parameters used, so re-opening a fire shows the values
+    # that produced its result rather than the defaults.
+    kgc_params: dict = field(default_factory=dict)
+    # Opaque per-fire GUI state (which views, split, sync, eraser
+    # size...). The server does not interpret it; it only needs to
+    # survive a reload, and keeping it per fire means a fire re-opens
+    # looking as it was left.
+    ui_state: dict = field(default_factory=dict)
     # Which post imagery the stack is built from:
     #   'l2'   -- most recent L2A tiles over the AOI (default; recent,
     #             may contain cloud)

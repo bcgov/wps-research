@@ -1395,6 +1395,28 @@ async function prepareFire(padding) {
             `AOI: <strong>${cropW}&times;${cropH} px</strong> &middot; ` +
             `Accum: <strong>${data.acc_start || '?'} &rarr; ${data.acc_end || '?'}</strong>`;
         currentHintMode = data.hint_mode || 'redwins_post';
+        // Restore the saved GUI state and the parameters that
+        // produced the stored result, before the checkboxes below.
+        try { restoreUiState(data.ui_state, data.kgc_params); }
+        catch (_) { /* defaults stand */ }
+        if (data.scaling && data.scaling.method) {
+            _scaling = data.scaling;
+            const sb = document.getElementById('btn-custom-scaling');
+            if (sb && data.scaling.method !== 'band01') {
+                sb.style.background = '#3a7bd5';
+                sb.style.color = '#fff';
+                sb.textContent = `Scaling: ${data.scaling.method}`;
+            }
+        }
+        if ((data.band_override || []).length) {
+            const bb = document.getElementById('btn-custom-bands');
+            if (bb) {
+                bb.style.background = '#3a7bd5';
+                bb.style.color = '#fff';
+                bb.textContent =
+                    `Custom bands (${data.band_override.length})`;
+            }
+        }
         for (const [id, key] of [['exclude-b8', 'exclude_b8'],
                                  ['exclude-pre-fire', 'exclude_pre_fire'],
                                  ['exclude-diff', 'exclude_diff'],
@@ -2792,6 +2814,140 @@ function updateTransformForPane(pane) {
 // that same fraction under the other pane's centre, with the zoom
 // scaled by the pixel-size ratio so a feature is the same size on
 // screen in both panes.
+// ---- Per-fire GUI state ------------------------------------------
+//
+// Stored on the FIRE, not in localStorage: the useful property is that
+// a given fire re-opens looking as it was left, including from another
+// browser, and localStorage would key it to the machine instead. Only
+// the fields listed here are saved -- transient things like a
+// half-finished eraser stroke deliberately are not.
+let _uiSaveTimer = null;
+let _uiRestoring = false;
+
+function collectUiState() {
+    const v = (id) => {
+        const el = document.getElementById(id);
+        return el ? el.value : undefined;
+    };
+    const c = (id) => {
+        const el = document.getElementById(id);
+        return el ? !!el.checked : undefined;
+    };
+    return {
+        left_view: leftView,
+        right_view: rightView,
+        left_src: currentPostSource,
+        right_src: rightPostSource,
+        split: !!splitActive,
+        overlays: !!overlaysVisible,
+        use_hdbscan: c('use-hdbscan'),
+        eraser_size: v('p-eraser_size'),
+        eraser_on: c('eraser-on'),
+        erase_outside_only: c('erase-outside-only'),
+        kgc: {
+            budget_points: v('p-kgc_budget_points'),
+            nskip: v('p-kgc_nskip'),
+            kmax: v('p-kgc_kmax'),
+            kstep: v('p-kgc_kstep'),
+            patience: v('p-kgc_patience'),
+            min_class: v('p-kgc_min_class'),
+            threads: v('p-kgc_threads'),
+            no_cache: c('p-kgc_no_cache'),
+        },
+        brush: {
+            brush_size: v('p-brush_size'),
+            point_threshold: v('p-point_threshold'),
+            all_segments: c('p-brush_all_segments'),
+            clip_to_bcws: c('clip-to-bcws'),
+        },
+    };
+}
+
+function saveUiState() {
+    if (_uiRestoring) return;      // do not echo back what we restored
+    if (_uiSaveTimer) clearTimeout(_uiSaveTimer);
+    // Debounced: typing in a number box fires per keystroke, and one
+    // request each would be pointless traffic.
+    _uiSaveTimer = setTimeout(async () => {
+        try {
+            await fetch(
+                `/api/fire/${encodeURIComponent(FIRE)}/exclude_b8`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json',
+                              'X-Requested-With': 'fetch'},
+                    body: JSON.stringify({ui_state: collectUiState()})});
+        } catch (_) { /* a lost GUI preference is not worth a dialog */ }
+    }, 800);
+}
+
+function restoreUiState(ui, kgcParams) {
+    if (!ui && !kgcParams) return;
+    _uiRestoring = true;
+    try {
+        const setV = (id, val) => {
+            if (val === undefined || val === null) return;
+            const el = document.getElementById(id);
+            if (el) el.value = val;
+        };
+        const setC = (id, val) => {
+            if (val === undefined || val === null) return;
+            const el = document.getElementById(id);
+            if (el) el.checked = !!val;
+        };
+        ui = ui || {};
+        const k = ui.kgc || {};
+        // Server-side kgc_params (what actually ran) wins over the
+        // GUI copy, so the boxes describe the stored result.
+        const kp = kgcParams || {};
+        setV('p-kgc_budget_points',
+             kp.kgc_budget_points != null ? kp.kgc_budget_points
+                                          : k.budget_points);
+        setV('p-kgc_nskip', kp.kgc_nskip != null ? kp.kgc_nskip : k.nskip);
+        setV('p-kgc_kmax', kp.kgc_kmax != null ? kp.kgc_kmax : k.kmax);
+        setV('p-kgc_kstep', kp.kgc_kstep != null ? kp.kgc_kstep : k.kstep);
+        setV('p-kgc_patience',
+             kp.kgc_patience != null ? kp.kgc_patience : k.patience);
+        setV('p-kgc_min_class',
+             kp.kgc_min_class != null ? kp.kgc_min_class : k.min_class);
+        setV('p-kgc_threads',
+             kp.kgc_threads != null ? kp.kgc_threads : k.threads);
+        setC('p-kgc_no_cache',
+             kp.kgc_no_cache != null ? kp.kgc_no_cache : k.no_cache);
+
+        const b = ui.brush || {};
+        setV('p-brush_size', b.brush_size);
+        setV('p-point_threshold', b.point_threshold);
+        setC('p-brush_all_segments', b.all_segments);
+        setC('clip-to-bcws', b.clip_to_bcws);
+
+        setV('p-eraser_size', ui.eraser_size);
+        setC('erase-outside-only', ui.erase_outside_only);
+        if (ui.use_hdbscan !== undefined) {
+            setC('use-hdbscan', ui.use_hdbscan);
+            onMethodToggle();
+        }
+        if (ui.left_view) leftView = ui.left_view;
+        if (ui.right_view) rightView = ui.right_view;
+        if (ui.left_src) currentPostSource = ui.left_src;
+        if (ui.right_src) rightPostSource = ui.right_src;
+    } catch (err) {
+        log(`[ui] could not restore the saved view: ${err.message}`,
+            'dim');
+    } finally {
+        _uiRestoring = false;
+    }
+}
+
+// Any control change saves; one listener rather than editing every
+// handler, so a control added later is covered automatically.
+document.addEventListener('change', (e) => {
+    const t = e.target;
+    if (!t || !t.id) return;
+    if (/^(p-|use-hdbscan|clip-to-bcws|erase|eraser)/.test(t.id)) {
+        saveUiState();
+    }
+});
+
 // ---- Custom scaling -----------------------------------------------
 //
 // One method at a time: these are alternatives, not layers, and
@@ -4050,6 +4206,8 @@ function getViewLabel(viewKey) {
 // Subtitle on each pane
 // -----------------------------------------------------------------------
 function updateSubtitle(pane, viewKey) {
+    // View changes are part of the saved state.
+    try { saveUiState(); } catch (_) {}
     const elId = pane === 'left' ? 'subtitle-left' : 'subtitle-right';
     const el = document.getElementById(elId);
     // Name the source when the two panes disagree. Two panes both
@@ -4981,6 +5139,9 @@ async function startKgcMapping() {
         serverLineCount = 0;
         const _co = document.getElementById('console-output');
         if (_co) _co.innerHTML = '';
+        // The params that were actually submitted are what should
+        // come back when the fire is re-opened.
+        try { saveUiState(); } catch (_) {}
         const usedSrc = j.src
             || (splitActive ? rightPostSource : currentPostSource);
         log(`[kgc] started on ${usedSrc === 'l2' ? 'L2 recent'

@@ -627,6 +627,9 @@ def run_kgc(fire, params: dict, log=None, progress=None,
         'classified': clf,
     }
     with state.lock:
+        # Keep the parameters that produced this result, so re-opening
+        # the fire shows what was actually run rather than defaults.
+        fire.kgc_params = dict(params or {})
         fire.serial_results = [entry]
         fire.agreement_pct = agr
         # FireInfo's field is ml_area_ha; writing ml_size_ha created a

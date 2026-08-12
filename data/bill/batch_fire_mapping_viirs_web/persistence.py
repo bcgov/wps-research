@@ -165,6 +165,10 @@ def _save_fire_state():
                     entry['band_override'] = list(fire.band_override)
                 if getattr(fire, 'scaling', None):
                     entry['scaling'] = dict(fire.scaling)
+                if getattr(fire, 'kgc_params', None):
+                    entry['kgc_params'] = dict(fire.kgc_params)
+                if getattr(fire, 'ui_state', None):
+                    entry['ui_state'] = dict(fire.ui_state)
                 entry['restrict_hint_bcws'] = bool(
                     getattr(fire, 'restrict_hint_bcws', False))
                 if fire.post_source:
@@ -407,6 +411,8 @@ def _load_fire_state():
             fire.clip_to_bcws = bool(entry.get('clip_to_bcws', False))
             fire.band_override = list(entry.get('band_override', []) or [])
             fire.scaling = dict(entry.get('scaling', {}) or {})
+            fire.kgc_params = dict(entry.get('kgc_params', {}) or {})
+            fire.ui_state = dict(entry.get('ui_state', {}) or {})
             fire.restrict_hint_bcws = bool(
                 entry.get('restrict_hint_bcws', False))
             fire.post_source = entry.get('post_source', 'l2')

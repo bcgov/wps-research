@@ -714,6 +714,16 @@ class FireRoutes:
             'exclude_diff': bool(getattr(fire, 'exclude_diff', True)),
             'diff_only': bool(getattr(fire, 'diff_only', False)),
             'clip_to_bcws': bool(getattr(fire, 'clip_to_bcws', False)),
+            # Everything the UI must restore when a fire is re-opened,
+            # so the page comes back configured as it was left rather
+            # than at defaults that do not match the stored result.
+            'restrict_hint_bcws': bool(
+                getattr(fire, 'restrict_hint_bcws', False)),
+            'scaling': dict(getattr(fire, 'scaling', None) or {}),
+            'band_override': list(
+                getattr(fire, 'band_override', None) or []),
+            'kgc_params': dict(getattr(fire, 'kgc_params', None) or {}),
+            'ui_state': dict(getattr(fire, 'ui_state', None) or {}),
                'status': str(getattr(fire.status, 'value', fire.status)),
                'padding_used': getattr(fire, 'padding_used', None),
                'sample_size': getattr(fire, 'sample_size', None),
@@ -1567,6 +1577,22 @@ class FireRoutes:
         # round trip keeps them consistent.
         with state.lock:
             changed = []
+            # Non-boolean settings that share this endpoint. Each is
+            # merged or replaced independently, so a client posting one
+            # of them never disturbs the others.
+            if isinstance(body.get('scaling'), dict):
+                fire.scaling = dict(body['scaling'])
+            if isinstance(body.get('kgc_params'), dict):
+                fire.kgc_params = dict(body['kgc_params'])
+            if isinstance(body.get('ui_state'), dict):
+                # Merged, not replaced: the client posts only what
+                # changed, and a replace would drop settings saved a
+                # moment earlier by another control.
+                _ui = dict(getattr(fire, 'ui_state', None) or {})
+                _ui.update(body['ui_state'])
+                fire.ui_state = _ui
+            if 'restrict_hint_bcws' in body:
+                fire.restrict_hint_bcws = bool(body['restrict_hint_bcws'])
             for key in ('exclude_b8', 'exclude_pre_fire',
                         'exclude_diff', 'diff_only', 'clip_to_bcws'):
                 if key in body:
@@ -1602,7 +1628,11 @@ class FireRoutes:
                                  ('exclude_pre_fire', True),
                                  ('exclude_diff', True),
                                  ('diff_only', False),
-                                 ('clip_to_bcws', False))}
+                                 ('clip_to_bcws', False),
+                                 ('restrict_hint_bcws', False))}
+        flags['scaling'] = dict(getattr(fire, 'scaling', None) or {})
+        flags['band_override'] = list(
+            getattr(fire, 'band_override', None) or [])
         sys.stderr.write(f'[bands] {fire_numbe}: {flags}\n')
         self._send_json({'ok': True, **flags})
 
@@ -1859,6 +1889,30 @@ class FireRoutes:
                 ob = None
             out_ds = None
             ds = None
+
+            # Same scaling the classifier receives, applied after band
+            # selection, so the archive and the model input are the
+            # same product. Written in place so the filenames and the
+            # header handling below are unchanged.
+            try:
+                from ..scaling import scale_raster, scaling_tag
+                _sp = dict(getattr(fire, 'scaling', None) or {})
+                if _sp and str(_sp.get('method') or '') not in (
+                        '', 'none'):
+                    _tmp = os.path.join(tmp_dir, base + '_scaled.bin')
+                    if scale_raster(out_bin, _tmp, _sp) == _tmp:
+                        for _e in ('.bin', '.hdr'):
+                            _a = os.path.splitext(_tmp)[0] + _e
+                            _b = os.path.splitext(out_bin)[0] + _e
+                            if os.path.isfile(_a):
+                                os.replace(_a, _b)
+                        sys.stderr.write(
+                            f'[imagery] {fire_numbe}: applied '
+                            f'{scaling_tag(_sp)} scaling\n')
+            except Exception as _sexc:
+                sys.stderr.write(
+                    f'[imagery] {fire_numbe}: scaling skipped '
+                    f'({_sexc})\n')
 
             # GDAL writes <base>.hdr with SUFFIX=ADD; make sure band
             # names really landed, since some GDAL builds drop them.
