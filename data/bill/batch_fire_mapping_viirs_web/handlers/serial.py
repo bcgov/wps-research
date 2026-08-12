@@ -240,9 +240,32 @@ class SerialRoutes:
         with state.lock:
             fire.serial_results = []
             fire.console_log.clear()
-            fire.progress = {}
             fire.status = FireStatus.MAPPING
             fire.error_msg = ''
+            fire.kgc_cancel = False
+            # Seed progress immediately, under the same lock as the
+            # status. Without it there is a window where the fire reads
+            # MAPPING with no stage, so the list shows a bare "mapping"
+            # until the worker thread is scheduled -- which is exactly
+            # when someone navigates away to create another AOI.
+            fire.progress = {
+                'stage': 'kgc_build',
+                'stage_idx': 1,
+                'total_stages': 6,
+                'detail': 'starting KGC',
+                'updated_at': time.time(),
+                'started_at': time.time(),
+                'last_change_at': time.time(),
+                'method': 'kgc',
+            }
+        # Persist before returning: another user's browser and a
+        # restarted server both read the saved state, and a run that
+        # only exists in memory looks like it never started.
+        try:
+            from ..persistence import _save_fire_state
+            _save_fire_state()
+        except Exception:
+            pass
 
         def _worker():
             from ..kgc import run_kgc, set_kgc_progress
@@ -280,6 +303,32 @@ class SerialRoutes:
         threading.Thread(target=_worker, daemon=True).start()
         self._send_json({'status': 'started', 'method': 'kgc',
                          'src': src})
+
+    def handle_api_kgc_cancel(self, fire_numbe):
+        """Stop a running KGC clustering run."""
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        with state.lock:
+            fire.kgc_cancel = True
+            proc = getattr(fire, 'kgc_proc', None)
+        # Terminate directly as well as setting the flag: the runner
+        # only checks between output lines, and KGC can be silent for
+        # minutes during the neighbour-table build.
+        killed = False
+        if proc is not None:
+            try:
+                proc.terminate()
+                killed = True
+            except Exception as exc:
+                sys.stderr.write(
+                    f'[kgc] {fire_numbe}: terminate failed: {exc}\n')
+        sys.stderr.write(
+            f'[kgc] {fire_numbe}: cancel requested '
+            f'(subprocess {"terminated" if killed else "not running"})\n')
+        self._send_json({'ok': True, 'terminated': killed})
 
     def handle_api_serial_results(self, fire_numbe):
         fire_numbe = unquote(fire_numbe)

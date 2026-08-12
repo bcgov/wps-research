@@ -525,6 +525,25 @@ function resetFilters() {
 // -----------------------------------------------------------------------
 // Compact duration for status lines: seconds under a minute, then
 // minutes, then hours.
+// Stage names are internal identifiers; the list shows them raw, so
+// map the KGC ones to something readable. Anything unmapped falls
+// through unchanged rather than being hidden.
+const LIST_STAGE_LABELS = {
+    downloading_viirs: 'VIIRS',
+    accumulating: 'VIIRS accumulate',
+    cropping: 'Build AOI stack',
+    kgc_build: 'KGC: build',
+    kgc_stack: 'KGC: band stack',
+    kgc_cluster: 'KGC: clustering',
+    kgc_classify: 'KGC: class mask',
+    kgc_brush: 'KGC: brush',
+    kgc_figure: 'KGC: finishing',
+};
+
+function stageLabel(name) {
+    return LIST_STAGE_LABELS[name] || name || '';
+}
+
 function fmtDur(sec) {
     if (!isFinite(sec) || sec < 0) return '--';
     if (sec < 60) return `${Math.round(sec)}s`;
@@ -619,7 +638,13 @@ function render() {
             ? '<span class="status-badge status-new" style="background:#fff3a8;color:#7a5d00;margin-right:4px" title="Just finished preparing">new</span>'
             : '';
         let subStage = '';
-        if (f.status === 'preparing' && f.sub_stage) {
+        // 'mapping' included: a clustering run reports its stage the
+        // same way preparation does, and a fire that says only
+        // "mapping" for several minutes is indistinguishable from one
+        // that is stuck. This is what someone sees after starting a
+        // run and navigating away to draw the next AOI.
+        if ((f.status === 'preparing' || f.status === 'mapping')
+                && f.sub_stage) {
             const idx = f.sub_stage_idx || 0;
             const tot = f.sub_stage_total || 0;
             const detail = f.sub_stage_detail
@@ -648,7 +673,7 @@ function render() {
                         + ` for ${fmtDur(since)}</span>`;
                 }
             }
-            subStage = `<div style="font-size:11px;color:#444;margin-top:2px">${esc(f.sub_stage)}${tot ? ' (' + idx + '/' + tot + ')' : ''}${detail}${eta}${stalled}</div>`;
+            subStage = `<div style="font-size:11px;color:#444;margin-top:2px">${esc(stageLabel(f.sub_stage))}${tot ? ' (' + idx + '/' + tot + ')' : ''}${detail}${eta}${stalled}</div>`;
         }
         const errMsg = (f.status === 'error' && f.error_msg)
             ? `<div style="font-size:11px;color:#a00;margin-top:2px">${esc(f.error_msg)}</div>`

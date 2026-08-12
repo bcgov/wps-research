@@ -3754,6 +3754,26 @@ async function cancelMapping() {
     const btn = document.getElementById('btn-cancel-map');
     btn.disabled = true;
     btn.textContent = 'Cancelling…';
+    // A KGC run is not a serial sweep, so the sweep's cancel endpoint
+    // would report success while KGC kept running. Route to the
+    // matching canceller instead.
+    if (!usingHdbscan()) {
+        try {
+            await fetch(`/api/fire/${encodeURIComponent(FIRE)}`
+                        + `/kgc_cancel`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json',
+                          'X-Requested-With': 'fetch'},
+                body: '{}'});
+            log('[kgc] cancel requested', 'dim');
+        } catch (err) {
+            log(`[kgc] cancel failed: ${err.message}`, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Cancel mapping';
+        }
+        return;
+    }
     try {
         const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/abort`, {
             method: 'POST',

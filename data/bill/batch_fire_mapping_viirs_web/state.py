@@ -122,6 +122,11 @@ class FireInfo:
     # width. Visualisations and overviews are unaffected -- none of
     # them use B8 -- so this only changes what the classifier sees.
     exclude_b8: bool = True
+    # KGC run control. kgc_cancel is polled by the runner's output
+    # loop; kgc_proc is the live subprocess so a cancel can terminate
+    # it promptly rather than waiting for the next line of output.
+    kgc_cancel: bool = False
+    kgc_proc: object = None
     # Withhold whole eras from the classifier and the imagery export.
     # Both default ON: the post bands plus a hint carry most of the
     # burn signal, and a narrower stack samples faster. Visualisations

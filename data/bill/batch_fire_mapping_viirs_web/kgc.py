@@ -390,6 +390,16 @@ def run_kgc(fire, params: dict, log=None, progress=None,
         pass
     lines = []
     for line in proc.stdout:
+        # Cancel is cooperative: the flag is set by the endpoint, and
+        # the subprocess is terminated here rather than from the
+        # request thread, so cleanup happens in one place.
+        if getattr(fire, 'kgc_cancel', False):
+            emit('  Cancel requested -- terminating KGC')
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+            break
         line = line.rstrip('\n')
         if not line:
             continue
@@ -405,6 +415,14 @@ def run_kgc(fire, params: dict, log=None, progress=None,
     except Exception:
         pass
     dt = time.time() - t0
+
+    if getattr(fire, 'kgc_cancel', False):
+        with state.lock:
+            fire.kgc_cancel = False
+            fire.status = FireStatus.READY
+            fire.progress = {}
+        emit(f'  KGC cancelled after {dt:.0f}s')
+        return {'ok': False, 'cancelled': True}
 
     if rc != 0:
         tail = '\n'.join(lines[-15:])
