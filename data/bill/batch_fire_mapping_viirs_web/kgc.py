@@ -319,6 +319,26 @@ def _extract_class_band(selected_bin: str, ref_raster: str,
             f'stack is {rw}x{rh}; refusing to write a mask that does '
             f'not match the grid')
 
+    # Dimensions matching is necessary but not sufficient: two rasters
+    # on DIFFERENT ground can share a pixel count. Compare the
+    # geotransforms too, so a mask can never be written onto the wrong
+    # extent and then look "geographically incorrect" later.
+    try:
+        sds = gdal.Open(selected_bin, gdal.GA_ReadOnly)
+        sgt = sds.GetGeoTransform() if sds else None
+        sds = None
+        if sgt and gt and any(abs(a - b) > 1e-6 for a, b in zip(sgt, gt)):
+            # KGC copies the input's header, so a mismatch means the
+            # input was not the stack we think it was.
+            msg = (f'  WARNING: KGC output geotransform {sgt} differs '
+                   f'from the AOI stack {gt}; using the stack\'s, but '
+                   f'check which image was passed in')
+            sys.stderr.write(msg + '\n')
+            if log:
+                log(msg)
+    except Exception:
+        pass
+
     drv = gdal.GetDriverByName('ENVI')
     out = drv.Create(out_bin, rw, rh, 1, gdal.GDT_Float32,
                      options=['INTERLEAVE=BSQ'])
@@ -341,6 +361,28 @@ def _extract_class_band(selected_bin: str, ref_raster: str,
             os.remove(junk)
         except OSError:
             pass
+
+    # Read the file back rather than trusting the write: this is the
+    # artifact everything downstream reads, and a truncated or
+    # unflushed write would otherwise surface much later as a wrong
+    # picture.
+    try:
+        chk = gdal.Open(out_bin, gdal.GA_ReadOnly)
+        if chk is None:
+            raise RuntimeError('could not reopen the class mask')
+        if (chk.RasterXSize, chk.RasterYSize) != (rw, rh):
+            raise RuntimeError(
+                f'class mask reopened as {chk.RasterXSize}x'
+                f'{chk.RasterYSize}, expected {rw}x{rh}')
+        cgt = chk.GetGeoTransform()
+        cpr = chk.GetProjection()
+        chk = None
+        if any(abs(a - b) > 1e-6 for a, b in zip(cgt, gt)):
+            raise RuntimeError('class mask lost its geotransform')
+        if proj and not cpr:
+            raise RuntimeError('class mask lost its projection')
+    except Exception as exc:
+        raise RuntimeError(f'class mask failed verification: {exc}')
 
     n = int((np.nan_to_num(arr) > 0.5).sum())
     msg = (f'  KGC class mask: {n:,} selected pixel(s) of '
@@ -460,6 +502,25 @@ def run_kgc(fire, params: dict, log=None, progress=None,
     image = ensure_float32(image, work, 'input stack', log=emit)
     hint = ensure_float32(fire.hint_bin, work, 'hint mask', log=emit)
 
+    # Remove any product from a previous run BEFORE launching.
+    #
+    # The work directory is keyed on the fire, source and input path --
+    # not on content -- so a re-run with different settings reuses it.
+    # If a run then failed to write (or wrote under a different name),
+    # the extractor would happily pick up the PREVIOUS run's
+    # _selected.bin and present it as the new result. That is exactly
+    # the "same wrong blob came back" symptom, and it is invisible
+    # because every step reports success.
+    for suffix in ('_selected.bin', '_selected.hdr', '_klevels.csv',
+                   '_params.txt'):
+        stale = out_prefix + suffix
+        try:
+            if os.path.isfile(stale):
+                os.remove(stale)
+                emit(f'  cleared stale {os.path.basename(stale)}')
+        except OSError as exc:
+            emit(f'  could not clear {os.path.basename(stale)}: {exc}')
+
     cmd = build_kgc_cmd(exe, image, hint, out_prefix, params)
     emit('  ' + ' '.join(cmd))
     step('kgc_cluster', 'clustering (the long step)', 0.15)
@@ -548,9 +609,40 @@ def run_kgc(fire, params: dict, log=None, progress=None,
         raise RuntimeError(
             f'KGC finished but wrote no {os.path.basename(selected)}. '
             f'Last output:\n' + '\n'.join(lines[-10:]))
+    # Belt and braces after the pre-clean: a product older than this
+    # run cannot be this run's.
+    try:
+        if os.path.getmtime(selected) < t0 - 1.0:
+            raise RuntimeError(
+                f'{os.path.basename(selected)} predates this run '
+                f'(written {time.time() - os.path.getmtime(selected):.0f}s '
+                f'ago); refusing to present a stale result')
+    except OSError:
+        pass
     emit(f'  KGC finished in {dt:.0f}s')
 
     # ---- from here on, identical to the CLI pipeline --------------
+    # Hint and input sizes, so a result that looks wrong can be
+    # attributed to its inputs rather than guessed at.
+    try:
+        from osgeo import gdal as _g
+        import numpy as _np
+        _hd = _g.Open(hint, _g.GA_ReadOnly)
+        if _hd is not None:
+            _ha = _hd.GetRasterBand(1).ReadAsArray()
+            _hn = int(_np.count_nonzero(_np.nan_to_num(_ha) > 0))
+            _gt = _hd.GetGeoTransform()
+            _px = abs(_gt[1] * _gt[5]) / 10000.0
+            emit(f'  hint: {_hn:,} px ({_hn * _px:.2f} ha) from '
+                 f'{os.path.basename(hint)}')
+            if _hn < 25:
+                emit('  WARNING: the hint is nearly empty, so the '
+                     'selected class will be tiny. Check the hint '
+                     'mode and "Restrict hint to BCWS perimeter".')
+            _hd = None
+    except Exception:
+        pass
+
     step('kgc_classify', 'extracting the class mask', 0.80)
     clf = os.path.join(fire.cache_dir, f'{fire.fire_numbe}_classified.bin')
     _extract_class_band(selected, base_stack, clf, log=emit)

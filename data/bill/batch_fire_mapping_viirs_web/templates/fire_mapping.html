@@ -23,7 +23,14 @@
 
 <div class="fire-info-bar">
     <span>Year: <strong>{{ fire_year }}</strong></span>
-    <span>Hint Size: <strong>{{ fire_size_ha }} ha</strong></span>
+    <!-- This is the BCWS-REPORTED size from the fire record, not the
+         area of the hint mask. Labelling it "Hint Size" made a stale
+         official record (0.76 ha on a fire covering tens of hectares)
+         look like a broken hint, and sent debugging in the wrong
+         direction. -->
+    <span title="Fire size as reported in the BCWS record. Not the area
+                 of the hint mask.">BCWS Size:
+      <strong>{{ fire_size_ha }} ha</strong></span>
     <span>ML Size: <strong id="ml-size-text">--</strong></span>
     <span>Status: <span id="status-badges"><strong id="status-text">{{ fire_status }}</strong></span></span>
     <span id="agreement-info"></span>
