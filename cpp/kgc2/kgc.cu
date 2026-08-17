@@ -18,18 +18,32 @@
  * sm_89 is Ada, which is the L40S. The launcher passes -arch matching
  * the detected device, falling back to sm_89.
  *
- * Numerical agreement with the CPU build: distances are computed in
- * float and square-rooted, exactly as the CPU does. Ties between equal
- * distances may be broken differently, because the sort is not the same
- * algorithm -- so a tie at the k-th neighbour can select a different but
- * equally valid neighbour. Everything downstream consumes the table as a
- * set, so this does not change the clustering.
+ * Agreement with the CPU build, item by item:
+ *
+ *   candidates  n-1 per row; the query is excluded, exactly as the CPU
+ *               does with its `if (i == q) continue`. It is kept in the
+ *               sort at +INF and then never read, because k is capped
+ *               at n-1.
+ *   k           min(kmax, n-1), matching min(kmax, v.size()).
+ *   distances   float, square-rooted at the end -- the same arithmetic
+ *               in the same order, so the same values.
+ *   ties        the CPU sorts std::pair<float,size_t>, so equal
+ *               distances come out in ascending index order. CUB's
+ *               segmented radix sort is stable and the values are
+ *               initialised in ascending index order, so equal keys
+ *               keep that order too. The tie-break therefore matches.
+ *   padding     when kmax > n-1 the remaining slots repeat the k-th
+ *               entry, as the CPU does.
+ *
+ * The two builds should therefore produce the same neighbour table, and
+ * hence the same best K and the same class map, for the same inputs.
  */
 
 #define KGC_BUILD_KNN_EXTERNAL 1
 #include "kgc.cpp"
 
 #include <cuda_runtime.h>
+#include <math_constants.h>   /* CUDART_INF_F */
 #include <cub/cub.cuh>
 
 #include <cstdio>
@@ -109,11 +123,21 @@ void build_knn_cuda(const float* pts, size_t n, size_t dim, size_t kmax,
   size_t free_b = 0, total_b = 0;
   CUDA_OK(cudaMemGetInfo(&free_b, &total_b));
   std::fprintf(stderr,
+               "[gpu] build: CUDA neighbour table; the sweep, dedup and "
+               "output are the shared CPU code\n");
+  std::fprintf(stderr,
                "[gpu] %s, %.1f GB free of %.1f GB, sm_%d%d\n",
                prop.name, free_b / 1e9, total_b / 1e9,
                prop.major, prop.minor);
 
-  const size_t k = (kmax < n) ? kmax : n;
+  /* The CPU build excludes the query from its own candidate list, so a
+   * row has n-1 candidates and k = min(kmax, n-1). Using min(kmax, n)
+   * here put the +INF self entry in the k-th slot whenever
+   * kmax >= n-1 -- an infinite distance to itself, which the CPU never
+   * produces and which the sweep then reads as a real neighbour. That
+   * is a genuine behavioural difference, not a rounding one. */
+  const size_t ncand = (n > 0) ? (n - 1) : 0;
+  const size_t k = (kmax < ncand) ? kmax : ncand;
 
   /* Points live on the device for the whole run: n * dim * 4 bytes,
    * which is tiny next to the distance batches. */
@@ -173,13 +197,17 @@ void build_knn_cuda(const float* pts, size_t n, size_t dim, size_t kmax,
         d_tmp, tmp_bytes, d_din, d_dout, d_iin, d_iout,
         (int)(nq * n), (int)nq, d_off, d_off + 1));
 
-    /* Copy back only the first k of each row. */
-    for (size_t r = 0; r < nq; r++) {
-      CUDA_OK(cudaMemcpy(&h_d[r * k], d_dout + r * n, k * sizeof(float),
+    /* One strided copy per batch instead of two per row. With 512
+     * rows that was 1024 separate transfers, each carrying its own
+     * launch latency -- the copies, not the maths, dominated a batch. */
+    CUDA_OK(cudaMemcpy2D(&h_d[0], k * sizeof(float),
+                         d_dout, n * sizeof(float),
+                         k * sizeof(float), nq,
                          cudaMemcpyDeviceToHost));
-      CUDA_OK(cudaMemcpy(&h_i[r * k], d_iout + r * n, k * sizeof(int),
+    CUDA_OK(cudaMemcpy2D(&h_i[0], k * sizeof(int),
+                         d_iout, n * sizeof(int),
+                         k * sizeof(int), nq,
                          cudaMemcpyDeviceToHost));
-    }
 
     for (size_t r = 0; r < nq; r++) {
       size_t q = q0 + r;
@@ -198,10 +226,11 @@ void build_knn_cuda(const float* pts, size_t n, size_t dim, size_t kmax,
     done += nq;
     /* Same progress line as the CPU build, so the server's log parsing
      * and the ETA it drives work identically for both. */
-    std::fprintf(stderr, "  neighbours %5.1f%%\r", 100.0 * done / n);
+    std::fprintf(stderr, "[gpu]  neighbours %5.1f%%\r",
+                 100.0 * done / n);
     std::fflush(stderr);
   }
-  std::fprintf(stderr, "  neighbours 100.0%%\n");
+  std::fprintf(stderr, "[gpu]  neighbours 100.0%%\n");
 
   cudaFree(d_tmp);
   cudaFree(d_off);

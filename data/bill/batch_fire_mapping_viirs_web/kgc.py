@@ -782,7 +782,11 @@ def run_kgc(fire, params: dict, log=None, progress=None,
         # covers the long stage. Everything else is a stage marker.
         # Without this the bar sat still for the entire run and there
         # was no way to tell work from a hang.
-        m = re.match(r'\s*(\d+)/(\d+)\s+levels', line)
+        # Both builds emit "N/M levels ...", now prefixed with [cpu]
+        # or [gpu] so the operator can tell which ran. The parser
+        # tolerates either, so the ETA works the same for both.
+        m = re.match(r'\s*(?:\[(?:cpu|gpu)\])?\s*(\d+)/(\d+)\s+levels',
+                     line)
         if m:
             done_l, total_l = int(m.group(1)), int(m.group(2))
             if total_l > 0:
@@ -800,6 +804,11 @@ def run_kgc(fire, params: dict, log=None, progress=None,
                 step('kgc_cluster', detail[:160], overall)
                 continue
         low = line.lower()
+        # Strip a build tag before matching the stage markers.
+        for _t in ('[cpu] ', '[gpu] ', '[cpu]', '[gpu]'):
+            if low.startswith(_t):
+                low = low[len(_t):].lstrip()
+                break
         if low.startswith('[dedup]'):
             step('kgc_cluster', line.strip()[:160], 0.10)
         elif low.startswith('[knn]'):
@@ -993,7 +1002,8 @@ def run_kgc(fire, params: dict, log=None, progress=None,
         'run_id': 1,
         'setting_idx': 0,
         'run_idx': 0,
-        'setting_label': f'KGC ({want_src.upper()})',
+        'setting_label': f'KGC {_which.upper()} ({want_src.upper()})',
+        'build': _which,
         'method': 'kgc',
         'params': dict(params or {}),
         'agreement_pct': agr,
