@@ -829,7 +829,8 @@ class FireRoutes:
             for r in (getattr(fire, 'serial_results', None) or []):
                 runs.append({k: r.get(k) for k in
                              ('run_id', 'agreement_pct', 'ml_area_ha',
-                              'setting_name', 'padding')
+                              'setting_name', 'padding',
+                              'finished_at', 'setting_label')
                              if isinstance(r, dict)})
             out['serial_results'] = runs
         except Exception:

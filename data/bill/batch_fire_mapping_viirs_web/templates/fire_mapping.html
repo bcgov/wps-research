@@ -6013,9 +6013,27 @@ function renderSerialCard(r, opts) {
 
     const agr = r.agreement_pct >= 0 ? r.agreement_pct + '%' : 'failed';
     const mlArea = r.ml_area_ha >= 0 ? r.ml_area_ha.toLocaleString() + ' ha' : '--';
-    const label = isPrevious
+    // When the run was made, so several runs on one fire can be told
+    // apart. Local time, since the operator is comparing their own
+    // runs; the date is shown only when it is not today, which keeps
+    // the common case short.
+    let stamp = '';
+    if (r.finished_at) {
+        const d = new Date(r.finished_at * 1000);
+        const now = new Date();
+        const sameDay = d.toDateString() === now.toDateString();
+        const hhmm = d.toLocaleTimeString([], {hour: '2-digit',
+                                              minute: '2-digit'});
+        const txt = sameDay
+            ? hhmm
+            : `${d.toLocaleDateString([], {month: 'short',
+                                           day: 'numeric'})} ${hhmm}`;
+        stamp = ` <span style="color:#888;font-weight:400;font-size:11px"
+                        title="${d.toLocaleString()}">${txt}</span>`;
+    }
+    const label = (isPrevious
         ? '<span style="color:#8b6914;font-weight:600">Previously accepted</span>'
-        : `<strong>Run ${r.run_id}</strong>`;
+        : `<strong>Run ${r.run_id}</strong>`) + stamp;
     const badge = isBest
         ? ' <span style="color:#2d8a4e;font-weight:600">(best)</span>'
         : '';

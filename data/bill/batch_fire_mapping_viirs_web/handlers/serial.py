@@ -398,6 +398,7 @@ class SerialRoutes:
                 'is_previous': r.get('is_previous', False),
                 'kind': r.get('kind', 'serial'),
                 'parent': r.get('parent', ''),
+                'finished_at': r.get('finished_at', 0),
             })
         self._send_json({
             'status': fire.status.value,

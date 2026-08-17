@@ -1417,6 +1417,11 @@ def run_kgc(fire, params: dict, log=None, progress=None,
 
     entry = {
         'run_id': _run_id,
+        # When this run produced its result. Recorded here rather than
+        # derived from a file mtime, because brushing, clipping and the
+        # eraser all rewrite the raster afterwards -- the file's time
+        # would report the last EDIT, not the run.
+        'finished_at': time.time(),
         'setting_idx': 0,
         'run_idx': 0,
         'setting_label': f'KGC {_which.upper()} ({want_src.upper()})',

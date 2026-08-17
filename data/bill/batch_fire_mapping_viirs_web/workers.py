@@ -447,6 +447,7 @@ def _serial_run_replicate(fire, fire_numbe: str, *, setting_idx: int,
                 if fire.status == FireStatus.ERROR:
                     fire.serial_results.append({
                         'run_id': run_id,
+                        'finished_at': time.time(),
                         'setting_idx': setting_idx,
                         'run_idx': replicate,
                         'setting_label': setting_label,
@@ -727,6 +728,8 @@ def _serial_run_replicate(fire, fire_numbe: str, *, setting_idx: int,
 
             fire.serial_results.append({
                 'run_id': run_id,
+
+                'finished_at': time.time(),
                 'setting_idx': setting_idx,
                 'run_idx': replicate,
                 'setting_label': setting_label,
@@ -753,6 +756,7 @@ def _serial_run_replicate(fire, fire_numbe: str, *, setting_idx: int,
         else:
             fire.serial_results.append({
                 'run_id': run_id,
+                'finished_at': time.time(),
                 'setting_idx': setting_idx,
                 'run_idx': replicate,
                 'setting_label': setting_label,
@@ -1195,6 +1199,7 @@ def _serial_map_worker(fire_numbe: str, settings: list[dict],
                     state.current_job = None
                 fire.serial_results.append({
                     'run_id': run_id,
+                    'finished_at': time.time(),
                     'setting_idx': setting_idx,
                     'run_idx': replicate,
                     'setting_label': setting_label,
