@@ -249,16 +249,18 @@ def ensure_kgc_gpu_binary(log=None) -> str:
 
     d = kgc_dir()
     cu = os.path.join(d, 'kgc.cu')
-    cpp = os.path.join(d, 'kgc.cpp')
     exe = os.path.join(d, 'kgc_gpu')
     if not os.path.isfile(cu):
         raise RuntimeError(f'no CUDA source at {cu}')
 
+    # kgc.cu is SELF-CONTAINED: it no longer includes kgc.cpp, so the
+    # CPU source is not a dependency of this build. The two are
+    # deliberately independent -- kgc.cpp is the reference
+    # implementation and nothing here may change how it behaves.
     fresh = False
     try:
         fresh = (os.path.isfile(exe)
-                 and os.path.getmtime(exe) >= os.path.getmtime(cu)
-                 and os.path.getmtime(exe) >= os.path.getmtime(cpp))
+                 and os.path.getmtime(exe) >= os.path.getmtime(cu))
     except OSError:
         fresh = False
     if fresh and os.access(exe, os.X_OK):

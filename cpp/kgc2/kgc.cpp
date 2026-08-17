@@ -103,25 +103,6 @@ struct Args {
  * Brute force with a partial selection, because k_max is a sizeable fraction
  * of the point count and a tree degenerates to a full scan at that ratio
  * while paying for the traversal as well.                                  */
-/* The neighbour table is the whole cost of this program: O(n^2 * dim)
- * distances, and the table itself is n * kmax * 12 bytes. It is
- * therefore the only part worth moving to a GPU.
- *
- * kgc.cu compiles THIS FILE with KGC_BUILD_KNN_EXTERNAL defined and
- * supplies a CUDA build_knn with the same signature. Everything else --
- * the dedup, the K sweep, the class selection, the output and every log
- * line -- is literally this code, so the two builds cannot drift apart
- * in behaviour. */
-#ifdef KGC_BUILD_KNN_EXTERNAL
-void build_knn_cuda(const float* pts, size_t n, size_t dim, size_t kmax,
-                    size_t threads, std::vector<float>& dd,
-                    std::vector<size_t>& di);
-static void build_knn(const float* pts, size_t n, size_t dim, size_t kmax,
-                      size_t threads, std::vector<float>& dd,
-                      std::vector<size_t>& di) {
-  build_knn_cuda(pts, n, dim, kmax, threads, dd, di);
-}
-#else
 static void build_knn(const float* pts, size_t n, size_t dim, size_t kmax,
                       size_t threads, std::vector<float>& dd,
                       std::vector<size_t>& di) {
@@ -156,7 +137,6 @@ static void build_knn(const float* pts, size_t n, size_t dim, size_t kmax,
   });
   std::fprintf(stderr, "  neighbours 100.0%%\n");
 }
-#endif  /* KGC_BUILD_KNN_EXTERNAL */
 
 /* ------------------------------------------------------------------------ */
 /* on-disk memoisation                                                       */
@@ -189,15 +169,6 @@ static void cache_write_head(FILE* f, uint64_t sum, uint64_t tag) {
 /* Read-only for the duration of the sweep.  These are file-scope so that every
  * worker reads one definite object rather than a captured reference whose
  * lifetime depends on the caller's frame.                                   */
-/* Which build is running. kgc.cu defines KGC_BUILD_KNN_EXTERNAL, so the
- * two builds print the same lines with a different tag -- the operator
- * can tell them apart, and the server can parse either. */
-#ifdef KGC_BUILD_KNN_EXTERNAL
-#define KGC_TAG "[gpu]"
-#else
-#define KGC_TAG "[cpu]"
-#endif
-
 struct Level {
   size_t K, n_classes;
   long best;
@@ -311,12 +282,10 @@ static void sweep_job(size_t job, size_t worker) {
 
   if ((g_n_done % 50) == 0 || g_n_done == g_n_levels) {
     if (g_best_K > 0)
-      std::fprintf(stderr,
-                   KGC_TAG "  %zu/%zu levels, best K=%ld MI=%.4f\n",
+      std::fprintf(stderr, "  %zu/%zu levels, best K=%ld MI=%.4f\n",
                    g_n_done, g_n_levels, g_best_K, g_best_mi);
     else
-      std::fprintf(stderr,
-                   KGC_TAG "  %zu/%zu levels, no eligible class yet\n",
+      std::fprintf(stderr, "  %zu/%zu levels, no eligible class yet\n",
                    g_n_done, g_n_levels);
   }
   pthread_mutex_unlock(&g_res_mtx);
