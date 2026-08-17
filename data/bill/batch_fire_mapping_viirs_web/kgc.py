@@ -663,6 +663,40 @@ def run_kgc(fire, params: dict, log=None, progress=None,
             except OSError as exc:
                 emit(f'  (could not keep {suffix}: {exc})')
 
+    # Render "before brushing" HERE, from the classifier's own output,
+    # while it is still the file on disk.
+    #
+    # Deriving it later from the _raw.bin sibling made the layer depend
+    # on the brush step having run, on the copy having succeeded, and
+    # on a filename convention that differs between the KGC and CLI
+    # paths -- three ways to end up with no layer, which is what kept
+    # happening. Rendering it at the one moment the pre-brush mask is
+    # unambiguously present removes all three.
+    try:
+        import numpy as _np
+        from osgeo import gdal as _g
+        _d = _g.Open(clf, _g.GA_ReadOnly)
+        _n = (int(_np.count_nonzero(
+            _np.nan_to_num(_d.GetRasterBand(1).ReadAsArray()) > 0))
+            if _d is not None else -1)
+        _d = None
+        emit(f'  before brushing: {_n:,} px -> rendering '
+             f'"ML Classification - before brushing"')
+        _overlay_mask_on_post(fire, clf, 'result_prebrush',
+                              (0.9, 0.1, 0.0))
+        _pb = os.path.join(fire.cache_dir, 'previews',
+                           'result_prebrush.png')
+        if os.path.isfile(_pb):
+            with state.lock:
+                if 'result_prebrush' not in fire.available_views:
+                    fire.available_views.append('result_prebrush')
+            emit('  pre-brush layer written')
+        else:
+            emit('  WARNING: the pre-brush overlay was not written '
+                 '(empty mask?)')
+    except Exception as exc:
+        emit(f'  Pre-brush layer failed: {type(exc).__name__}: {exc}')
+
     step('kgc_brush', 'brushing the KGC result', 0.88)
     clf = _brush_classified(fire, clf, params, log=emit)
 
@@ -685,12 +719,6 @@ def run_kgc(fire, params: dict, log=None, progress=None,
         ensure_geo(clf, fire.crop_bin, log=emit)
     except Exception as exc:
         emit(f'  Geo check failed: {exc}')
-
-    try:
-        from .erase import render_prebrush_overlay
-        render_prebrush_overlay(fire, clf, log=emit)
-    except Exception as exc:
-        emit(f'  Pre-brush layer failed: {exc}')
 
     step('kgc_figure', 'scoring and rendering', 0.94)
     agr = _compute_agreement(fire)

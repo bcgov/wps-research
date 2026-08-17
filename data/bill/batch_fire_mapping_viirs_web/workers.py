@@ -663,6 +663,31 @@ def _serial_run_replicate(fire, fire_numbe: str, *, setting_idx: int,
 
             # Same rule as the other two paths: clip the finished
             # mask before it is scored, overlaid or offered for accept.
+            # "Before brushing" for the CLI pipeline. The CLI brushes
+            # internally, so its pre-brush mask is the *_raw.bin
+            # sibling it leaves behind; render from that when it
+            # exists, and otherwise from the result itself so the layer
+            # is always present rather than silently missing.
+            if clf_for_run:
+                try:
+                    from .mapping import _overlay_mask_on_post as _ov
+                    _raw = os.path.splitext(clf_for_run)[0] + '_raw.bin'
+                    _src_mask = _raw if os.path.isfile(_raw) else clf_for_run
+                    _ov(fire, _src_mask, 'result_prebrush',
+                        (0.9, 0.1, 0.0))
+                    _pb = os.path.join(fire.cache_dir, 'previews',
+                                       'result_prebrush.png')
+                    if (os.path.isfile(_pb)
+                            and 'result_prebrush' not in
+                            fire.available_views):
+                        fire.available_views.append('result_prebrush')
+                    fire.console_log.append(
+                        f'  Pre-brush layer from '
+                        f'{os.path.basename(_src_mask)}')
+                except Exception as _pexc:
+                    fire.console_log.append(
+                        f'  Pre-brush layer failed: {_pexc}')
+
             if clf_for_run and bool(getattr(fire, 'clip_to_bcws', False)):
                 try:
                     from .prepare import clip_mask_to_bcws
