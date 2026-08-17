@@ -797,6 +797,9 @@ function cacheKeyFor(viewKey, pane) {
     const modePart = (viewKey === 'hint') ? `:${currentHintMode}` : '';
     const stamp = (viewKey === 'hint') ? _hintStamp : _previewStamp;
     const src = (pane === 'right') ? rightPostSource : currentPostSource;
+    // Source FIRST and always present, including for hints: a hint
+    // image is a mask over that source's post-fire preview, so the two
+    // sources' hints are different pictures and must not share a key.
     return `${src}:${viewKey}${modePart}:${stamp}`;
 }
 

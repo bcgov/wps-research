@@ -1080,16 +1080,47 @@ class FireRoutes:
             if re.fullmatch(r'[A-Za-z0-9_-]+', mode or ''):
                 # Prefer the requested source's stash; fall back to the
                 # live previews dir for the current source.
+                # Resolve within ONE source's directory only.
+                #
+                # Falling back from a source's stash to the live
+                # previews dir crossed sources: with MRAP selected but
+                # only an L2 hint rendered, the pane showed the L2 hint
+                # ON L2 imagery while claiming to be MRAP. A hint image
+                # is a mask drawn over that source's post-fire preview,
+                # so it is only ever valid for its own source.
                 per_mode = None
-                if _stash_dir:
-                    c = os.path.join(_stash_dir, f'hint_{mode}.png')
-                    if os.path.isfile(c):
-                        per_mode = c
-                if per_mode is None:
-                    c = os.path.join(fire.cache_dir, 'previews',
-                                     f'hint_{mode}.png')
-                    if os.path.isfile(c):
-                        per_mode = c
+                _live = os.path.join(fire.cache_dir, 'previews')
+                _dir = _stash_dir if _stash_dir else _live
+                c = os.path.join(_dir, f'hint_{mode}.png')
+                if os.path.isfile(c):
+                    per_mode = c
+                elif _stash_dir:
+                    # The requested source has a stash but no hint for
+                    # this mode. Build it for THAT source rather than
+                    # borrowing another one's picture.
+                    try:
+                        from ..prepare import (switch_post_source,
+                                               render_hint_for_mode)
+                        _back = getattr(fire, 'post_source', 'l2') or 'l2'
+                        fire.prebuilding = True
+                        fire.user_post_source = _back
+                        if switch_post_source(fire, _src).get('ok'):
+                            render_hint_for_mode(fire, mode)
+                            switch_post_source(fire, _back)
+                        fire.prebuilding = False
+                        c = os.path.join(
+                            fire.cache_dir, f'previews_{_src}',
+                            f'hint_{mode}.png')
+                        if os.path.isfile(c):
+                            per_mode = c
+                            sys.stderr.write(
+                                f'[fire] rendered hint {mode} for '
+                                f'{_src.upper()} on demand\n')
+                    except Exception as exc:
+                        fire.prebuilding = False
+                        sys.stderr.write(
+                            f'[fire] could not render hint {mode} for '
+                            f'{_src}: {exc}\n')
                 if per_mode:
                     png = per_mode
                 elif not _src or _src == getattr(
