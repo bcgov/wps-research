@@ -384,15 +384,6 @@
                                value="-1" step="1" min="-1">
                     </div>
                     <div class="param-row">
-                        <label>CPU only<span class="help" tabindex="0"
-                               data-tip="Force the CPU build even when a
-                               GPU is available and the run would fit.
-                               Use this to compare the two builds on the
-                               same fire and parameters -- they should
-                               agree on the chosen K and MI.">?</span>:</label>
-                        <input type="checkbox" id="p-kgc_cpu_only">
-                    </div>
-                    <div class="param-row">
                         <label>No cache<span class="help" tabindex="0"
                                data-tip="Ignore the memoised deduplication
                                and neighbour table and recompute them.
@@ -2894,7 +2885,6 @@ function collectUiState() {
             threads: v('p-kgc_threads'),
             no_cache: c('p-kgc_no_cache'),
             cpu_only: c('p-kgc_cpu_only'),
-            cpu_only: c('p-kgc_cpu_only'),
         },
         brush: {
             brush_size: v('p-brush_size'),
@@ -2955,8 +2945,6 @@ function restoreUiState(ui, kgcParams) {
              kp.kgc_threads != null ? kp.kgc_threads : k.threads);
         setC('p-kgc_no_cache',
              kp.kgc_no_cache != null ? kp.kgc_no_cache : k.no_cache);
-        setC('p-kgc_cpu_only',
-             kp.kgc_cpu_only != null ? kp.kgc_cpu_only : k.cpu_only);
         setC('p-kgc_cpu_only',
              kp.kgc_cpu_only != null ? kp.kgc_cpu_only : k.cpu_only);
 
@@ -5241,7 +5229,6 @@ function collectKgcParams() {
         kgc_min_class: num('p-kgc_min_class', -1),
         kgc_threads: num('p-kgc_threads', -1),
         kgc_no_cache: chk('p-kgc_no_cache'),
-        kgc_cpu_only: chk('p-kgc_cpu_only'),
         kgc_cpu_only: chk('p-kgc_cpu_only'),
         // Brushing runs on the KGC mask, so its parameters travel with
         // the request rather than being read from a stale saved copy.
