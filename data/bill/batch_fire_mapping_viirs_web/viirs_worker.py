@@ -874,6 +874,16 @@ def _viirs_worker(fire: FireInfo) -> None:
                 elif viirs_cropped:
                     # Red wins failed but VIIRS is available: use it
                     # rather than leaving the fire without a hint.
+                    #
+                    # Say WHY loudly. "Red wins (post)" is the default,
+                    # so a fire opening on VIIRS looks like the default
+                    # was ignored when in fact the default could not be
+                    # built for this AOI.
+                    _why = _rw_err or 'no reason given'
+                    fire.console_log.append(
+                        '  NOTE: the default hint "Red wins (post)" '
+                        'could not be built (' + str(_why) + '); '
+                        'falling back to VIIRS.')
                     _hint_bin = viirs_cropped
                     _hint_mode = 'viirs'
                     _perimeter_type = 'viirs'

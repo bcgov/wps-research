@@ -707,7 +707,12 @@ class FireRoutes:
         fire = state.fires[fire_numbe]
         out = {'fire': fire_numbe,
                'post_source': getattr(fire, 'post_source', ''),
-               'hint_mode': getattr(fire, 'hint_mode', ''),
+               # Never report an empty mode: the client assigns this
+               # straight to currentHintMode in one place, and '' left
+               # no button lit, which read as "VIIRS" because it is
+               # first in the row.
+               'hint_mode': (getattr(fire, 'hint_mode', '')
+                             or 'redwins_post'),
             'exclude_b8': bool(getattr(fire, 'exclude_b8', True)),
             'exclude_pre_fire': bool(
                 getattr(fire, 'exclude_pre_fire', True)),
@@ -1543,7 +1548,11 @@ class FireRoutes:
         try:
             from ..erase import (active_classified, apply_erase,
                                  refresh_after_edit)
-            clf = active_classified(fire)
+            # The client says which run it is displaying, so the edit
+            # lands on the raster the operator can actually see.
+            _rid = body.get('run_id')
+            clf = active_classified(
+                fire, _rid if isinstance(_rid, int) else None)
             if not clf:
                 self._send_json(
                     {'error': 'No ML classification to edit. Run a '

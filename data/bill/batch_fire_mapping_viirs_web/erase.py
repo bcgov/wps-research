@@ -307,18 +307,32 @@ def refresh_after_edit(fire, clf_path: str, log=None) -> dict:
 
     out = {}
     try:
-        _overlay_mask_on_post(fire, clf_path, 'serial_1', (0.9, 0.1, 0.0))
+        # Re-render the overlay for the run this mask BELONGS TO, not
+        # serial_1.
+        #
+        # Runs are numbered now, so a fire can be showing serial_3 while
+        # this wrote serial_1. The edit reached the raster, the gallery
+        # and the pane kept fetching the old serial_3 image, and the
+        # change appeared to revert the moment the pane reloaded.
+        run_name = 'serial_1'
+        for r in (getattr(fire, 'serial_results', None) or []):
+            if r.get('classified') == clf_path and r.get('run_id'):
+                run_name = f"serial_{int(r['run_id'])}"
+                break
+        _overlay_mask_on_post(fire, clf_path, run_name, (0.9, 0.1, 0.0))
         prev = os.path.join(fire.cache_dir, 'previews')
-        s1 = os.path.join(prev, 'serial_1.png')
+        s1 = os.path.join(prev, f'{run_name}.png')
         res = os.path.join(prev, 'result.png')
         if os.path.isfile(s1):
             shutil.copy2(s1, res)
             try:
-                copy_preview_geo(fire.cache_dir, 'serial_1', 'result')
+                copy_preview_geo(fire.cache_dir, run_name, 'result')
             except Exception:
                 pass
             if 'result' not in fire.available_views:
                 fire.available_views.append('result')
+            sys.stderr.write(
+                f'[erase] refreshed {run_name}.png and result.png\n')
     except Exception as exc:
         sys.stderr.write(f'[erase] overlay refresh failed: {exc}\n')
 
@@ -500,7 +514,7 @@ def render_prebrush_overlay(fire, clf_path: str = None,
         return False
 
 
-def active_classified(fire) -> str:
+def active_classified(fire, run_id=None) -> str:
     """The mask the eraser should edit.
 
     The canonical classified raster: it is what the overlay, agreement,
@@ -508,12 +522,25 @@ def active_classified(fire) -> str:
     show a change that nothing downstream honoured.
     """
     from .state import find_classified
-    cands = []
-    for r in (getattr(fire, 'serial_results', None) or []):
+
+    # Prefer the run the UI is SHOWING, then the most recent.
+    #
+    # Taking the first entry meant that with several runs in the
+    # gallery an edit landed on run 1's raster while the pane displayed
+    # run 3: the change appeared while painting locally, then vanished
+    # the moment the pane refetched run 3. Silent, and it corrupted an
+    # older result at the same time.
+    runs = [r for r in (getattr(fire, 'serial_results', None) or [])
+            if r.get('classified')]
+    if run_id is not None:
+        for r in runs:
+            if int(r.get('run_id') or 0) == int(run_id):
+                c = r.get('classified')
+                if c and os.path.isfile(c):
+                    return c
+    for r in sorted(runs, key=lambda r: int(r.get('run_id') or 0),
+                    reverse=True):
         c = r.get('classified')
-        if c:
-            cands.append(c)
-    for c in cands:
         if c and os.path.isfile(c):
             return c
     return find_classified(fire, [fire.cache_dir]) or ''
