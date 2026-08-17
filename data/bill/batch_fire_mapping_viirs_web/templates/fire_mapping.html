@@ -738,7 +738,7 @@ const VIEW_LABELS = {
     diff1: 'Diff 1', diff2: 'Diff 2', diff3: 'Diff 3',
     result: 'ML classification', hint: 'Hint perimeter',
     comparison: 'Comparison (figure)',
-    result_prebrush: 'ML classification \u2014 before brushing',
+    result_prebrush: 'ML Classification \u2014 before brushing',
 };
 
 // Hint mode — tracks which hint mask source is active.
@@ -1370,7 +1370,16 @@ async function prepareFire(padding) {
         // result or read against the imagery. The pre-brush mask is now
         // an ordinary overlay layer instead, which can sit in either
         // split pane and flicker against the brushed result.
-        if ((data.available_views || []).includes('result_prebrush')) {
+        // Offered whenever a classification exists. The pre-brush mask
+        // is written by every brushing path, and the overlay is
+        // rendered on demand the first time it is requested, so gating
+        // on available_views would hide the layer on every fire mapped
+        // before it existed.
+        const _hasPrebrush =
+            (data.available_views || []).includes('result_prebrush')
+            || (data.available_views || []).includes('result');
+        if (_hasPrebrush
+                && !sel.querySelector('option[value="result_prebrush"]')) {
             const opt = document.createElement('option');
             opt.value = 'result_prebrush';
             opt.textContent = VIEW_LABELS.result_prebrush;

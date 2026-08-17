@@ -686,6 +686,25 @@ def verify_and_repair_fire(fire: FireInfo, log=None) -> dict:
     except Exception as exc:
         out['actions'].append(f'geo check failed: {exc}')
 
+    # Render "ML Classification - before brushing" for fires whose
+    # result predates the layer. The pre-brush mask (_raw.bin) has been
+    # written by every brushing path all along, so the layer can be
+    # produced retroactively -- without this it only ever appeared on
+    # fires mapped AFTER the change, which looks like the feature is
+    # missing.
+    try:
+        from .erase import render_prebrush_overlay, prebrush_path, \
+            active_classified
+        _clf2 = active_classified(fire)
+        if _clf2 and os.path.isfile(prebrush_path(_clf2)):
+            _png = os.path.join(prev_dir, 'result_prebrush.png')
+            if not os.path.isfile(_png):
+                if render_prebrush_overlay(fire, _clf2):
+                    out['actions'].append(
+                        'rendered the pre-brush classification layer')
+    except Exception as exc:
+        out['actions'].append(f'pre-brush layer skipped: {exc}')
+
     # A hint the CLI would consume must still exist, or mapping fails
     # at run time with a less obvious message.
     hb = getattr(fire, 'hint_bin', '') or ''

@@ -941,6 +941,21 @@ class FireRoutes:
         from urllib.parse import urlparse, parse_qs
         _q = parse_qs(urlparse(self.path).query)
         _src = (_q.get('src') or [''])[0]
+        # Produce the pre-brush layer the first time it is asked for.
+        # Cheaper than rendering it eagerly for every fire, and it means
+        # the layer works for results produced before it existed.
+        if view == 'result_prebrush':
+            _pb = os.path.join(fire.cache_dir, 'previews',
+                               'result_prebrush.png')
+            if not os.path.isfile(_pb):
+                try:
+                    from ..erase import render_prebrush_overlay
+                    render_prebrush_overlay(fire)
+                except Exception as _pexc:
+                    sys.stderr.write(
+                        f'[prebrush] on-demand render failed: '
+                        f'{_pexc}\n')
+
         _stash_dir = None
         _cur_src = getattr(fire, 'post_source', 'l2') or 'l2'
         if re.fullmatch(r'[A-Za-z0-9_-]+', _src or ''):
