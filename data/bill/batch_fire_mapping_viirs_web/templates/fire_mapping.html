@@ -1035,6 +1035,7 @@ function prefetchOtherSource(views) {
 // inner function has several early returns and an error branch, and a
 // missed release would leave the toolbar claiming to load forever.
 async function onPostSourceChange() {
+    setTimeout(() => { try { saveUiState(); } catch (_) {} }, 0);
     try {
         return await _onPostSourceChangeInner();
     } finally {
@@ -1443,8 +1444,18 @@ async function prepareFire(padding) {
         currentHintMode = data.hint_mode || 'redwins_post';
         // Restore the saved GUI state and the parameters that
         // produced the stored result, before the checkboxes below.
-        try { restoreUiState(data.ui_state, data.kgc_params); }
-        catch (_) { /* defaults stand */ }
+        // Applied AFTER the default views above, and it now drives the
+        // DOM as well as the variables.
+        //
+        // Previously it ran BEFORE those defaults, which promptly
+        // overwrote the restored views -- and even when the variables
+        // survived, nothing set the selectors or reopened split, so a
+        // fire came back looking like a fresh one.
+        try { applySavedUiState(data.ui_state, data.kgc_params); }
+        catch (err) {
+            log(`[ui] could not restore the saved view: ${err.message}`,
+                'dim');
+        }
         if (data.scaling && data.scaling.method) {
             _scaling = data.scaling;
             const sb = document.getElementById('btn-custom-scaling');
@@ -2791,10 +2802,66 @@ function drawOverlayLayer(pane) {
     ctx.restore();
 }
 
+// The overlay follows the image by WATCHING it, not by being told.
+//
+// Every place that moves a pane had to remember to repaint the overlay,
+// and the synced pane was missed: zooming one side moved the other's
+// image while its overlay stayed where it was. Rather than hunt for the
+// next such site, this compares each image's rendered rectangle to the
+// one last drawn and repaints when it differs. Two getBoundingClientRect
+// calls per frame is nothing next to being permanently correct.
+// Last-drawn signature per pane, so the watcher only repaints when the
+// image has actually moved or resized.
+const _ovlSig = {left: '', right: ''};
+
+// Force a repaint on the next tick, for changes the rectangle cannot
+// show -- new overlay data, or the toggle flipping.
+function invalidateOverlayLayers() {
+    _ovlSig.left = '';
+    _ovlSig.right = '';
+}
+
+// Repaint both panes now. The watcher handles movement; this is for
+// callers that changed something the rectangle cannot reveal.
 function drawAllOverlayLayers() {
+    invalidateOverlayLayers();
     drawOverlayLayer('left');
     if (splitActive) drawOverlayLayer('right');
 }
+
+function overlaySignature(pane) {
+    const { img, area } = getPaneElements(pane);
+    if (!img || !area || img.style.display === 'none' || !img.src) {
+        return 'off';
+    }
+    const r = img.getBoundingClientRect();
+    const a = area.getBoundingClientRect();
+    // Rounded to 0.1px: sub-pixel jitter during a drag would otherwise
+    // force a redraw every frame for no visible difference.
+    const q = (v) => Math.round(v * 10) / 10;
+    return `${q(r.left - a.left)},${q(r.top - a.top)},`
+         + `${q(r.width)},${q(r.height)},`
+         + `${overlaysVisible ? 1 : 0},${_fireOverlays ? 1 : 0}`;
+}
+
+function overlayWatchTick() {
+    try {
+        for (const pane of ['left', 'right']) {
+            if (pane === 'right' && !splitActive) {
+                _ovlSig.right = '';
+                continue;
+            }
+            const sig = overlaySignature(pane);
+            if (sig !== _ovlSig[pane]) {
+                _ovlSig[pane] = sig;
+                drawOverlayLayer(pane);
+            }
+        }
+    } catch (_) { /* never let a bad frame stop the watch */ }
+    requestAnimationFrame(overlayWatchTick);
+}
+
+requestAnimationFrame(overlayWatchTick);
 
 window.addEventListener('resize', () => {
     try { drawAllOverlayLayers(); } catch (_) {}
@@ -2904,6 +2971,8 @@ let overlaysVisible = true;
 
 
 function toggleFireOverlays() {
+    setTimeout(() => { try { saveUiState(); } catch (_) {} }, 0);
+
     overlaysVisible = !overlaysVisible;
     const btn = document.getElementById('btn-overlays');
     if (btn) {
@@ -3032,6 +3101,62 @@ function saveUiState() {
                     body: JSON.stringify({ui_state: collectUiState()})});
         } catch (_) { /* a lost GUI preference is not worth a dialog */ }
     }, 800);
+}
+
+// Put the page back the way this fire was left: parameter boxes,
+// selectors, split, and the view and source of BOTH panes.
+function applySavedUiState(ui, kgcParams) {
+    restoreUiState(ui, kgcParams);          // parameter boxes
+    if (!ui) return;
+    _uiRestoring = true;
+    try {
+        const views = new Set(Array.from(
+            document.getElementById('view-select').options)
+            .map((o) => o.value));
+
+        // Only restore a view that still exists for this fire: a saved
+        // "result" is meaningless if the fire has since been re-prepared
+        // and has no result yet.
+        if (ui.left_view && views.has(ui.left_view)) leftView = ui.left_view;
+        if (ui.right_view && views.has(ui.right_view)) {
+            rightView = ui.right_view;
+        }
+        if (ui.left_src === 'l2' || ui.left_src === 'mrap') {
+            currentPostSource = ui.left_src;
+        }
+        if (ui.right_src === 'l2' || ui.right_src === 'mrap') {
+            rightPostSource = ui.right_src;
+        }
+        if (typeof ui.overlays === 'boolean') overlaysVisible = ui.overlays;
+
+        const setSel = (id, val) => {
+            const el = document.getElementById(id);
+            if (el && val) el.value = val;
+        };
+        setSel('view-select', leftView);
+        setSel('view-select-right', rightView);
+        setSel('post-source-select', currentPostSource);
+        setSel('post-source-select-right', rightPostSource);
+
+        // Split last: it reads the values above when it opens, and
+        // openSplit(false) means "restoring", not "the user clicked",
+        // so it must not re-derive the right pane's source.
+        if (ui.split && !splitActive && typeof toggleSplit === 'function') {
+            toggleSplit(false);
+            setSel('view-select-right', rightView);
+            setSel('post-source-select-right', rightPostSource);
+        }
+    } finally {
+        _uiRestoring = false;
+    }
+    // Repaint both panes with what was restored.
+    try {
+        loadPaneImage('left', leftView);
+        if (splitActive) loadPaneImage('right', rightView);
+        updateSubtitle('left', leftView);
+        if (splitActive) updateSubtitle('right', rightView);
+        invalidateOverlayLayers();
+    } catch (_) { /* the panes will be loaded by the caller anyway */ }
 }
 
 function restoreUiState(ui, kgcParams) {
@@ -5061,6 +5186,8 @@ function onViewDropdownChange() {
 }
 
 async function onRightPostSourceChange() {
+    setTimeout(() => { try { saveUiState(); } catch (_) {} }, 0);
+
     const sel = document.getElementById('post-source-select-right');
     if (!sel) return;
     const src = sel.value;
@@ -6636,6 +6763,9 @@ function closeSplit() {
 // callers open split to show a finished ML result, and must keep
 // choosing that view themselves.
 function toggleSplit(manual) {
+    // The split state is part of what a fire is restored to.
+    setTimeout(() => { try { saveUiState(); } catch (_) {} }, 0);
+
     const openingManually = manual === true && !splitActive;
     splitActive = !splitActive;
     const container = document.getElementById('image-viewer-container');
