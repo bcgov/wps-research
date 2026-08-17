@@ -99,6 +99,11 @@ def _set_progress(fire: FireInfo, stage: str, *, detail: str = '',
         'total_stages': len(STAGES),
         'detail': detail,
         'updated_at': time.time(),
+        # Which phase wrote this. The fire list uses it to refuse detail
+        # left over from an earlier phase -- a tile count from the AOI
+        # build lingered well into clustering, describing work that had
+        # finished minutes earlier.
+        'kind': 'prepare',
     }
     if fraction is not None:
         try:

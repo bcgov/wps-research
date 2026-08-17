@@ -287,6 +287,7 @@ class SerialRoutes:
                 'stage_idx': 1,
                 'total_stages': 6,
                 'detail': 'starting KGC',
+                'kind': 'kgc',
                 'updated_at': time.time(),
                 'started_at': time.time(),
                 'last_change_at': time.time(),

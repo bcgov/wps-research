@@ -91,6 +91,7 @@ def set_kgc_progress(fire, stage: str, detail: str = '',
         'total_stages': len(KGC_STAGES),
         'detail': detail,
         'updated_at': now,
+        'kind': 'kgc',
     }
     if fraction is not None:
         try:
@@ -437,6 +438,157 @@ def build_kgc_cmd(exe: str, image: str, hint: str, out_prefix: str,
     if (params or {}).get('kgc_no_cache'):
         cmd.append('--no-cache')
     return cmd
+
+
+class KgcEstimator:
+    """Turns kgc's own output into a description and a time estimate.
+
+    Two things make the naive version useless. First, "KGC cluster,
+    estimating" says nothing about what is happening or how big the job
+    is. Second, the sweep's levels are NOT equal cost: level j evaluates
+    K = j * kstep neighbours, so cumulative work grows with the SQUARE
+    of the level index. A linear "1050/2000" bar understates the
+    remaining wait by about 4x at a quarter of the way through.
+
+    An estimate is available immediately from the parameters, then
+    replaced by measured rates as each phase reports progress -- so the
+    first number is a guess and says so, and later ones are observed.
+    """
+
+    # Calibration from a measured run: 30,190 points x 11 bands,
+    # k_max 10,000, 512 CPU workers. Only used before the run reports
+    # anything of its own; every later figure is measured.
+    CPU_NB_OPS = 3.3e9         # distance+select ops per second
+    CPU_SW_OPS = 2.3e10        # sweep ops per second
+    GPU_NB_GAIN = 8.0
+    GPU_SW_GAIN = 12.0
+
+    def __init__(self, params, dim, which):
+        self.dim = max(1, int(dim or 1))
+        self.gpu = (which == 'gpu')
+        self.kmax = int((params or {}).get('kgc_kmax')
+                        or KGC_DEFAULTS['kgc_kmax'])
+        self.kstep = max(1, int((params or {}).get('kgc_kstep')
+                                or KGC_DEFAULTS['kgc_kstep']))
+        self.budget = int((params or {}).get('kgc_budget_points')
+                          or KGC_DEFAULTS['kgc_budget_points'])
+        self.n = None            # retained points, known from [params]
+        self.levels = None
+        self.t_start = time.time()
+        self.phase = 'startup'
+        self.phase_start = self.t_start
+        self.nb_seconds = None   # measured, once the table finishes
+        self.best = ''
+
+    # ---- modelled totals -------------------------------------------
+    def _ops(self):
+        n = self.n or self.budget
+        lv = self.levels or max(1, self.kmax // self.kstep)
+        nb = n * n * self.dim
+        sw = n * self.kstep * (lv * (lv + 1) / 2.0)
+        return nb, sw
+
+    def initial_estimate(self):
+        nb, sw = self._ops()
+        r_nb = self.CPU_NB_OPS * (self.GPU_NB_GAIN if self.gpu else 1.0)
+        r_sw = self.CPU_SW_OPS * (self.GPU_SW_GAIN if self.gpu else 1.0)
+        return nb / r_nb + sw / r_sw
+
+    def sweep_estimate_from_table(self):
+        """Once the table is timed, scale the sweep by the same machine.
+
+        Both phases run on the same hardware, so the measured neighbour
+        time is a far better calibration than any constant -- it folds
+        in the actual core count, clocks and memory speed.
+        """
+        if not self.nb_seconds:
+            return None
+        nb, sw = self._ops()
+        if nb <= 0:
+            return None
+        ratio = (self.CPU_SW_OPS
+                 * (self.GPU_SW_GAIN if self.gpu else 1.0))
+        base = (self.CPU_NB_OPS
+                * (self.GPU_NB_GAIN if self.gpu else 1.0))
+        # observed ops/sec for the table, transferred to the sweep by
+        # the modelled ratio between the two rates
+        obs = nb / max(1e-9, self.nb_seconds)
+        return sw / max(1e-9, obs * (ratio / base))
+
+    # ---- line handling ---------------------------------------------
+    def feed(self, line):
+        """Return (stage, detail, fraction) or None if the line is noise."""
+        t = line.strip()
+
+        m = re.search(r'n_skip=(\d+)\s*->\s*([\d,]+)\s*retained points'
+                      r'.*?\((\d+)\s*levels\)', t)
+        if m:
+            self.n = int(m.group(2).replace(',', ''))
+            self.levels = int(m.group(3))
+            est = self.initial_estimate()
+            return ('kgc_cluster',
+                    f'{self.n:,} points x {self.dim} bands, k_max '
+                    f'{self.kmax:,}, {self.levels:,} levels '
+                    f'- first estimate {_fmt_secs(est)}', 0.10)
+
+        m = re.match(r'\[neighbours\]\s*computing\s*([\d,]+)\s*x\s*([\d,]+)',
+                     t)
+        if m:
+            self.phase = 'neighbours'
+            self.phase_start = time.time()
+            return ('kgc_cluster',
+                    f'building the neighbour table '
+                    f'({m.group(1)} x {m.group(2)})', 0.12)
+
+        m = re.match(r'(?:\[gpu\])?\s*neighbours\s+([\d.]+)%', t)
+        if m:
+            pct = float(m.group(1)) / 100.0
+            el = time.time() - self.phase_start
+            eta = (el / pct - el) if (pct > 0.02 and el > 1) else None
+            if pct >= 0.999:
+                self.nb_seconds = max(el, 1e-6)
+            det = f'neighbour table {pct * 100:.0f}%'
+            if eta is not None:
+                det += f' - {_fmt_secs(eta)} left in this phase'
+            # the table occupies 0.12..0.35 of the whole run
+            return ('kgc_cluster', det, 0.12 + 0.23 * pct)
+
+        m = re.match(r'\[sweep\]\s*(\d[\d,]*)\s*levels', t)
+        if m:
+            self.phase = 'sweep'
+            self.phase_start = time.time()
+            est = self.sweep_estimate_from_table()
+            det = 'sweeping K'
+            if est:
+                det += f' - estimated {_fmt_secs(est)}'
+            return ('kgc_cluster', det, 0.36)
+
+        m = re.match(r'(?:\[(?:cpu|gpu)\])?\s*(\d+)/(\d+)\s+levels(.*)', t)
+        if m:
+            done, tot = int(m.group(1)), int(m.group(2))
+            tail = m.group(3) or ''
+            b = re.search(r'best K=(\d+)\s*MI=([\d.]+)', tail)
+            if b:
+                self.best = f'best K={b.group(1)} MI={b.group(2)}'
+            # Cost-weighted: level j costs ~ j, so work done ~ j^2.
+            f = (done * (done + 1.0)) / float(tot * (tot + 1.0)) if tot else 0
+            el = time.time() - self.phase_start
+            eta = (el / f - el) if (f > 0.001 and el > 1) else None
+            det = (f'K sweep {done:,}/{tot:,} levels '
+                   f'({f * 100:.0f}% of the work)')
+            if self.best:
+                det += f' - {self.best}'
+            if eta is not None:
+                det += f' - {_fmt_secs(eta)} left'
+            return ('kgc_cluster', det, 0.36 + 0.44 * f)
+
+        if t.startswith('[select] best K'):
+            return ('kgc_cluster', t[9:].strip(), 0.82)
+        if t.startswith('[dedup]'):
+            return ('kgc_cluster', t[8:].strip(), 0.08)
+        if t.startswith('[out]'):
+            return ('kgc_classify', 'writing the KGC product', 0.84)
+        return None
 
 
 def _fmt_secs(sec) -> str:
@@ -945,6 +1097,11 @@ def run_kgc(fire, params: dict, log=None, progress=None,
     exe, _which, _note = choose_kgc_build(params, _npts, _dim, log=emit)
     emit(f'  running the {_which.upper()} build: '
          f'{os.path.basename(exe)}')
+    _est = KgcEstimator(params, _dim, _which)
+    step('kgc_cluster',
+         f'starting the {_which.upper()} build - first estimate '
+         f'{_fmt_secs(_est.initial_estimate())} for '
+         f'{_npts:,} points x {_dim} bands', 0.06)
     # The memoised dedup/neighbour tables are keyed on the image only,
     # so they must not survive a backend switch.
     enforce_backend_cache(image, _which, log=emit)
@@ -1003,11 +1160,15 @@ def run_kgc(fire, params: dict, log=None, progress=None,
         while not _beat_stop.wait(3.0):
             try:
                 el = time.time() - t0
+                # Names the phase and keeps the last measured
+                # estimate visible, so a silent stretch still says
+                # what is being waited on.
+                ph = {'startup': 'starting up',
+                      'neighbours': 'building the neighbour table',
+                      'sweep': 'sweeping K'}.get(_est.phase, _est.phase)
+                extra = f' - {_est.best}' if _est.best else ''
                 step('kgc_cluster',
-                     f'running \u2014 {_fmt_secs(el)} elapsed'
-                     + (' (building the neighbour table; this is the '
-                        'long, silent part)' if el < 600 else ''),
-                     None)
+                     f'{ph} - {_fmt_secs(el)} elapsed{extra}', None)
             except Exception:
                 return
 
@@ -1032,48 +1193,13 @@ def run_kgc(fire, params: dict, log=None, progress=None,
         lines.append(line)
         emit('  ' + line[:300])
 
-        # Turn KGC's own output into progress with an ETA.
-        #
-        # The sweep prints "  N/M levels, best K=..." every 50 levels,
-        # which is the only quantitative progress the tool emits and
-        # covers the long stage. Everything else is a stage marker.
-        # Without this the bar sat still for the entire run and there
-        # was no way to tell work from a hang.
-        # Both builds emit "N/M levels ...", now prefixed with [cpu]
-        # or [gpu] so the operator can tell which ran. The parser
-        # tolerates either, so the ETA works the same for both.
-        m = re.match(r'\s*(?:\[(?:cpu|gpu)\])?\s*(\d+)/(\d+)\s+levels',
-                     line)
-        if m:
-            done_l, total_l = int(m.group(1)), int(m.group(2))
-            if total_l > 0:
-                f = max(0.0, min(1.0, done_l / float(total_l)))
-                el = time.time() - t0
-                eta = (el / f - el) if f > 0.02 and el > 2 else None
-                # 0.15..0.78 of the whole run is the sweep; the stages
-                # either side are quick by comparison.
-                overall = 0.15 + 0.63 * f
-                detail = (f'sweep {done_l}/{total_l} levels'
-                          + (f' ({m.string.split("best K=")[1].strip()})'
-                             if 'best K=' in line else ''))
-                if eta is not None:
-                    detail += f' - about {_fmt_secs(eta)} left'
-                step('kgc_cluster', detail[:160], overall)
-                continue
-        low = line.lower()
-        # Strip a build tag before matching the stage markers.
-        for _t in ('[cpu] ', '[gpu] ', '[cpu]', '[gpu]'):
-            if low.startswith(_t):
-                low = low[len(_t):].lstrip()
-                break
-        if low.startswith('[dedup]'):
-            step('kgc_cluster', line.strip()[:160], 0.10)
-        elif low.startswith('[knn]'):
-            step('kgc_cluster', line.strip()[:160], 0.13)
-        elif low.startswith('[hint]'):
-            step('kgc_cluster', line.strip()[:160], 0.16)
-        elif low.startswith('[out]'):
-            step('kgc_classify', 'writing the KGC product', 0.79)
+        # Every line goes through the estimator, which knows the shape
+        # of the work and can therefore say what is happening and how
+        # long is left, rather than "elapsed --, estimating".
+        upd = _est.feed(line)
+        if upd:
+            step(upd[0], upd[1][:200], upd[2])
+            continue
     rc = proc.wait()
     _beat_stop.set()
     try:

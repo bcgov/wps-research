@@ -643,8 +643,15 @@ function render() {
         // "mapping" for several minutes is indistinguishable from one
         // that is stuck. This is what someone sees after starting a
         // run and navigating away to draw the next AOI.
+        // Only show progress written by the phase the fire is
+        // actually in. A snapshot from preparation ("extracted T10UGA
+        // 3/3 tiles") otherwise survives into clustering and describes
+        // work that finished minutes ago.
+        const kindOK =
+            (f.status === 'preparing' && f.sub_stage_kind !== 'kgc')
+            || (f.status === 'mapping' && f.sub_stage_kind === 'kgc');
         if ((f.status === 'preparing' || f.status === 'mapping')
-                && f.sub_stage) {
+                && f.sub_stage && kindOK) {
             const idx = f.sub_stage_idx || 0;
             const tot = f.sub_stage_total || 0;
             const detail = f.sub_stage_detail
