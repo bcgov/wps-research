@@ -5112,10 +5112,15 @@ function syncRightViewOptions() {
     if (gif) gif.style.display = splitActive ? '' : 'none';
     const rs = document.getElementById('post-source-select-right');
     if (rs) {
-        rs.disabled = a.disabled;
-        // Entering split, start the right pane on the source the left
-        // pane is showing: a comparison that begins identical is
-        // predictable, and switching one side is one click away.
+        // NOT tied to the left selector's disabled state.
+        //
+        // The left one is disabled during a run because changing it
+        // repoints fire.crop_bin, which is what the run is reading.
+        // The right pane only displays already-stashed previews, so it
+        // is safe at any time -- and disabling it meant that during a
+        // clustering run the pane opened on the other source with no
+        // way to switch back, which is simply confusing.
+        rs.disabled = false;
         if (splitActive) rs.value = rightPostSource;
     }
 }
@@ -6643,12 +6648,15 @@ function toggleSplit(manual) {
         container.classList.add('split');
         rightArea.style.display = '';
         if (openingManually) {
-            // A manual split is nearly always "show me the other
-            // source" -- comparing a pane with itself is not worth a
-            // click. Default the right pane to post-fire from the
-            // source the left pane is NOT showing.
-            rightPostSource = (currentPostSource === 'l2')
-                ? 'mrap' : 'l2';
+            // Open on the SAME source the left pane is showing.
+            //
+            // This used to default to the opposite source, which
+            // contradicted the comment on the selector and, during a
+            // run, opened the comparison on imagery the run was not
+            // using. Starting identical is predictable: the usual first
+            // move is changing the VIEW (result vs post), and switching
+            // the source is one click away when that is what is wanted.
+            rightPostSource = currentPostSource;
             rightView = 'post';
             const rs = document.getElementById(
                 'post-source-select-right');

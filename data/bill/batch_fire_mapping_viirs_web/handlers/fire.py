@@ -997,7 +997,20 @@ class FireRoutes:
         _cur_src = getattr(fire, 'post_source', 'l2') or 'l2'
         if re.fullmatch(r'[A-Za-z0-9_-]+', _src or ''):
             cand = os.path.join(fire.cache_dir, f'previews_{_src}')
-            if os.path.isdir(cand):
+            if _src == _cur_src:
+                # The requested source IS the one loaded, so previews/
+                # is authoritative. A stash for the same source is a
+                # SNAPSHOT from before it was last made current, and
+                # preferring it served pre-run imagery while the run was
+                # writing fresh previews next door -- which looked like
+                # the pane was stuck on the wrong source.
+                if os.path.isdir(cand):
+                    _stash_dir = cand
+                    if not os.path.isfile(png):
+                        cand_png = os.path.join(cand, f'{view}.png')
+                        if os.path.isfile(cand_png):
+                            png = cand_png
+            elif os.path.isdir(cand):
                 _stash_dir = cand
                 cand_png = os.path.join(cand, f'{view}.png')
                 if os.path.isfile(cand_png):
