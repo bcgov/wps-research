@@ -97,6 +97,37 @@ _ensure_brush_comparison_in_cache = None
 # They are referenced through ``import_app_globals`` only as needed.
 
 
+def _effectively_hidden(f) -> bool:
+    """Hidden for display purposes.
+
+    A fire is only really hidden if someone hid it AND it has nothing
+    left on disk. Deletion clears cache_dir and removes the directory,
+    so a record flagged hidden while its cache is intact was flagged in
+    error -- and a fire invisible in the list cannot be recovered from
+    the UI at all, which is far worse than briefly showing one that was
+    meant to be hidden.
+    """
+    if not getattr(f, 'hidden', False):
+        return False
+    if getattr(f, 'removed', False):
+        return True
+    try:
+        cd = getattr(f, 'cache_dir', '') or ''
+        if cd and os.path.isdir(cd) and os.listdir(cd):
+            if not getattr(f, '_unhide_logged', False):
+                try:
+                    f._unhide_logged = True
+                except Exception:
+                    pass
+                sys.stderr.write(
+                    f'[fires] {f.fire_numbe}: flagged hidden but its '
+                    f'cache is intact; showing it in the list\n')
+            return False
+    except OSError:
+        pass
+    return True
+
+
 def init(app_state, helpers):
     """Bind shared helpers and the live AppState into this mixin module.
 
@@ -208,7 +239,7 @@ class FireListRoutes:
                     'created_at': float(getattr(f, 'created_at', 0) or 0),
                 }
                 for f in state.fires.values()
-                if not f.hidden
+                if not _effectively_hidden(f)
             ]
         # Newest first. Fires with no timestamp on record sort last
         # rather than jumping to the top.

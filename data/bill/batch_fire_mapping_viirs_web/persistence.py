@@ -121,6 +121,16 @@ def _save_fire_state():
         # so any inner helpers that re-acquire it remain safe.
         with state.lock:
             for fn, fire in state.fires.items():
+                # A removed fire is not persisted at all.
+                #
+                # Keeping a tombstone entry meant two records shared a
+                # fire_numbe once the name was reused, and the loader
+                # applied the DELETED record's flags to the LIVE fire of
+                # the same name -- which hid three freshly created fires
+                # from the list. Its products are already purged, so
+                # there is nothing left to remember.
+                if getattr(fire, 'removed', False):
+                    continue
                 # Only persist fires with meaningful state beyond PENDING
                 if (fire.status == FireStatus.PENDING and not fire.hidden
                         and not fire.cache_dir):
@@ -128,7 +138,6 @@ def _save_fire_state():
                 entry = {
                     'status': fire.status.value,
                     'hidden': fire.hidden,
-                    'removed': bool(getattr(fire, 'removed', False)),
                 }
                 if fire.cache_dir:
                     entry['cache_dir'] = fire.cache_dir
@@ -314,20 +323,10 @@ def _load_fire_state():
                 )
             except Exception:
                 continue
-            # A removed fire is loaded under a tombstone key so it
-            # cannot occupy its old name.
-            #
-            # Re-keying it in memory at deletion was not enough: the key
-            # comes from fire_numbe on every load, so the tombstone was
-            # lost the next time state was read and the name became
-            # taken again -- exactly the "already in use" report on a
-            # list the user had just cleared.
-            fire.removed = bool(entry.get('removed', False))
-            if fire.removed:
-                fire.hidden = True
-                state.fires[f'{fn}~removed'] = fire
-            else:
-                state.fires[fn] = fire
+            # Removed fires are no longer written, so anything read
+            # here is a live record.
+            fire.removed = False
+            state.fires[fn] = fire
         else:
             fire = state.fires[fn]
             # init_fires_from_disk Pass 2 fills these with placeholder
@@ -349,9 +348,29 @@ def _load_fire_state():
                 except (TypeError, ValueError):
                     pass
 
-        # Restore hidden flag
+        # Restore hidden flag.
+        #
+        # ...unless the fire plainly still exists. A removal clears
+        # cache_dir and deletes the directory, so a record marked hidden
+        # whose cache is still on disk was hidden by the stale-tombstone
+        # bug rather than by anyone's decision. Un-hiding it puts fires
+        # back in the list that would otherwise be invisible with no way
+        # to recover them from the UI.
         if entry.get('hidden'):
-            fire.hidden = True
+            cache_ok = False
+            try:
+                cd = entry.get('cache_dir') or getattr(fire, 'cache_dir', '')
+                cache_ok = bool(cd) and os.path.isdir(cd) and bool(
+                    os.listdir(cd))
+            except OSError:
+                cache_ok = False
+            if cache_ok and not entry.get('removed'):
+                sys.stderr.write(
+                    f'[persistence] {fn}: marked hidden but its cache is '
+                    f'intact; restoring it to the list\n')
+                fire.hidden = False
+            else:
+                fire.hidden = True
 
         # VIIRS-web fields — always restored, regardless of cache_dir
         bn = entry.get('bbox_native')
