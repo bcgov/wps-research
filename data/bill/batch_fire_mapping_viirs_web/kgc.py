@@ -41,6 +41,10 @@ KGC_DEFAULTS = {
     'kgc_budget_points': 20000,
     'kgc_threads': -1,           # -1 = one per CPU
     'kgc_no_cache': False,
+    # Force the CPU build regardless of GPU availability. Not a kgc
+    # flag -- it selects which binary runs, so it is deliberately not
+    # in _KGC_FLAGS below.
+    'kgc_cpu_only': False,
 }
 
 # CLI flag for each parameter, and whether -1/0 means "let kgc decide"
@@ -192,6 +196,14 @@ def choose_kgc_build(params: dict, n_points: int, dim: int,
                 log(msg)
             except Exception:
                 pass
+
+    # An explicit request wins over the memory model. This exists so
+    # the two builds can be compared on identical inputs -- the whole
+    # point is to take the automatic choice out of the picture, so it
+    # is checked before anything else and reported plainly.
+    if (params or {}).get('kgc_cpu_only'):
+        emit('  CPU only requested; the GPU build is not considered')
+        return ensure_kgc_binary(log=log), 'cpu', 'forced by the user'
 
     kmax = int((params or {}).get('kgc_kmax')
                or KGC_DEFAULTS['kgc_kmax'])
