@@ -709,6 +709,39 @@ async function loadTileGridOverlay() {
     } catch (_) { /* decoration only */ }
 }
 
+// Sentinel-2 tiles containing a native (x, y).
+//
+// The tile rings are already loaded for the grid overlay, in the same
+// native CRS as the cursor readout, so this is a point-in-polygon test
+// against data the page already has -- no extra request, and it stays
+// correct if the grid is ever reprojected, because both sides move
+// together.
+//
+// Tiles overlap by design, so more than one answer is normal and all
+// of them are reported.
+function tilesAtNative(x, y) {
+    if (!tileGridOverlay) return [];
+    const out = [];
+    for (const t of (tileGridOverlay.tiles || [])) {
+        const ring = t.ring || [];
+        if (ring.length < 3) continue;
+        // Ray casting. Rings are closed polygons in native coordinates.
+        let inside = false;
+        for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+            const xi = ring[i][0], yi = ring[i][1];
+            const xj = ring[j][0], yj = ring[j][1];
+            if (((yi > y) !== (yj > y))
+                    && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) {
+                inside = !inside;
+            }
+        }
+        if (inside && t.name) out.push(t.name);
+    }
+    // Sorted and de-duplicated so the readout is stable as the pointer
+    // moves within one tile rather than flickering between orderings.
+    return [...new Set(out)].sort();
+}
+
 function drawTileGridOverlay(ctx) {
     if (!tileGridOverlay || !meta) return;
     if (tileToggle && !tileToggle.checked) return;
@@ -1086,9 +1119,13 @@ canvas.addEventListener('mousemove', (ev) => {
                                        native[0] + 0.001, native[1] + 0.001);
         const lon = wgs ? wgs[0].toFixed(4) : '?';
         const lat = wgs ? wgs[1].toFixed(4) : '?';
+        // Appended to the same line: the readout is a single strip and
+        // a second line would push the map down on every mouse move.
+        const tiles = tilesAtNative(native[0], native[1]);
         coordsEl.textContent =
             `cursor: x=${native[0].toFixed(0)} y=${native[1].toFixed(0)}  ` +
-            `(lon ${lon}, lat ${lat})`;
+            `(lon ${lon}, lat ${lat})` +
+            (tiles.length ? `  ${tiles.join(',')}` : '');
     }
     if (!drag) return;
     // Once the pointer travels past the slop radius this is a real

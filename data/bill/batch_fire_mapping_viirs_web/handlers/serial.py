@@ -300,12 +300,18 @@ class SerialRoutes:
             pass
 
         def _worker():
-            from ..kgc import run_kgc, set_kgc_progress
+            from ..kgc import (run_kgc, compare_cpu_gpu,
+                               set_kgc_progress)
             try:
-                run_kgc(
-                    fire, params, source=src,
-                    progress=lambda stage, detail, frac:
-                        set_kgc_progress(fire, stage, detail, frac))
+                _prog = (lambda stage, detail, frac:
+                         set_kgc_progress(fire, stage, detail, frac))
+                if params.get('kgc_compare'):
+                    # Two full runs, CPU then GPU, caches cleared
+                    # between. Takes roughly twice as long by design.
+                    compare_cpu_gpu(fire, params, source=src,
+                                    progress=_prog)
+                else:
+                    run_kgc(fire, params, source=src, progress=_prog)
                 try:
                     from ..persistence import _save_fire_state
                     _save_fire_state()

@@ -263,8 +263,69 @@ class FireListRoutes:
                 shutil.rmtree(cache_dir, ignore_errors=True)
             except Exception:
                 pass
+
+        # Purge everything else this fire owns, wherever it lives.
+        #
+        # Dropping the cache directory alone left the accepted results,
+        # the ramdisk stacks, kgc's memoised tables and the per-name
+        # registries behind -- so a NEW fire created with the same name
+        # inherited another fire's products. Worse, the name itself
+        # stayed taken, because state.fires is keyed on it and the
+        # hidden entry kept the key.
+        removed = []
+
+        def _rm(path):
+            try:
+                if os.path.isdir(path):
+                    shutil.rmtree(path, ignore_errors=True)
+                    removed.append(path)
+                elif os.path.isfile(path):
+                    os.remove(path)
+                    removed.append(path)
+            except OSError:
+                pass
+
+        # Accepted results.
+        try:
+            if state.output_root:
+                _rm(os.path.join(state.output_root, fire_numbe))
+        except Exception:
+            pass
+
+        # Ramdisk: AOI stacks, derived band/scaling stacks, kgc work
+        # directories, and kgc's dedup / neighbour-table caches.
+        try:
+            from ..aoi_stack import RAM_DIR
+            for pat in (f'*_stack_{fire_numbe}_*',
+                        f'kgc_{fire_numbe}_*'):
+                for f in glob.glob(os.path.join(RAM_DIR, pat)):
+                    _rm(f)
+        except Exception as exc:
+            sys.stderr.write(f'[remove] ramdisk purge: {exc}\n')
+
+        # In-memory registries keyed on the fire name.
+        with state.lock:
+            for attr in ('viirs_jobs', 'viirs_subprocs'):
+                d = getattr(state, attr, None)
+                if isinstance(d, dict):
+                    d.pop(fire_numbe, None)
+            # Free the NAME by re-keying the hidden record to a
+            # tombstone. The admin restore list still finds it (it reads
+            # fire.fire_numbe, not the dict key), but a new fire may now
+            # take the original name.
+            rec = state.fires.pop(fire_numbe, None)
+            if rec is not None:
+                tomb = f'{fire_numbe}~removed~{int(time.time())}'
+                state.fires[tomb] = rec
+
+        sys.stderr.write(
+            f'[remove] {fire_numbe}: purged {len(removed)} path(s); '
+            f'the name is free for reuse\n')
+        for pth in removed[:20]:
+            sys.stderr.write(f'[remove]   {pth}\n')
+
         _save_fire_state()
-        self._send_json({'status': 'removed'})
+        self._send_json({'status': 'removed', 'purged': len(removed)})
 
     def handle_api_unhide(self, fire_numbe):
         if getattr(self, '_role', '') != 'admin':

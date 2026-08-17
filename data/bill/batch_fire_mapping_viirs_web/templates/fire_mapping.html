@@ -401,6 +401,19 @@
                                inputs.">?</span>:</label>
                         <input type="checkbox" id="p-kgc_cpu_only">
                     </div>
+                    <div class="param-row">
+                        <label>CPU vs GPU compare<span class="help"
+                               tabindex="0"
+                               data-tip="Run the CPU build, then the GPU
+                               build, on identical inputs with every
+                               memoised product cleared in between, and
+                               report whether the classifications match
+                               plus a timing breakdown. Takes about
+                               twice as long as a normal run. If the two
+                               disagree, the CPU result is kept as the
+                               fire's classification.">?</span>:</label>
+                        <input type="checkbox" id="p-kgc_compare">
+                    </div>
                 </div>
             </div>
 
@@ -2885,6 +2898,7 @@ function collectUiState() {
             threads: v('p-kgc_threads'),
             no_cache: c('p-kgc_no_cache'),
             cpu_only: c('p-kgc_cpu_only'),
+            compare: c('p-kgc_compare'),
         },
         brush: {
             brush_size: v('p-brush_size'),
@@ -2947,6 +2961,8 @@ function restoreUiState(ui, kgcParams) {
              kp.kgc_no_cache != null ? kp.kgc_no_cache : k.no_cache);
         setC('p-kgc_cpu_only',
              kp.kgc_cpu_only != null ? kp.kgc_cpu_only : k.cpu_only);
+        setC('p-kgc_compare',
+             kp.kgc_compare != null ? kp.kgc_compare : k.compare);
 
         const b = ui.brush || {};
         setV('p-brush_size', b.brush_size);
@@ -4461,19 +4477,40 @@ function layerBusyEnd() {
 }
 
 function layerStatusPaint() {
+    // Reported in the BOTTOM progress bar, where every other long
+    // operation reports. Over the toolbar it sat on top of the buttons
+    // and shifted them about -- exactly where a transient message
+    // should never go.
     const el = document.getElementById('layer-status');
-    if (!el) return;
-    if (_layerBusy <= 0) { el.style.display = 'none'; return; }
+    if (el) el.style.display = 'none';        // never in the toolbar
+
+    const bar = document.getElementById('progress-bar');
+    const title = document.getElementById('progress-title');
+    const eta = document.getElementById('progress-eta');
+    if (!bar || !title) return;
+
+    if (_layerBusy <= 0) {
+        // Only put the bar away if WE opened it: a mapping run may be
+        // using it, and stealing it back would hide real progress.
+        if (bar.dataset.layerOwned === '1') {
+            bar.classList.add('is-collapsed');
+            bar.dataset.layerOwned = '';
+            if (eta) eta.textContent = '';
+        }
+        return;
+    }
     const secs = (performance.now() - _layerStart) / 1000;
-    // Elapsed time rather than a percentage: the transfer size is not
-    // known until the response arrives, and a source switch may
-    // include a server-side rebuild of unknown length, so a progress
-    // bar would be invented. Elapsed is honest and answers the real
-    // question -- is this moving.
-    el.style.display = '';
-    el.textContent = `${_layerLabel} ... ${secs.toFixed(1)}s`
-        + (secs > 20 ? '  (still working)' : '');
+    const mapping = (typeof isMapping !== 'undefined') && isMapping;
+    if (mapping && bar.dataset.layerOwned !== '1') return;
+    bar.dataset.layerOwned = '1';
+    bar.classList.remove('is-collapsed');
+    title.textContent = _layerLabel;
+    if (eta) {
+        eta.textContent = `${secs.toFixed(1)}s`
+            + (secs > 20 ? '  (still working)' : '');
+    }
 }
+
 
 async function loadPaneImage(pane, viewKey) {
     if (!viewKey) return;
@@ -5230,6 +5267,7 @@ function collectKgcParams() {
         kgc_threads: num('p-kgc_threads', -1),
         kgc_no_cache: chk('p-kgc_no_cache'),
         kgc_cpu_only: chk('p-kgc_cpu_only'),
+        kgc_compare: chk('p-kgc_compare'),
         // Brushing runs on the KGC mask, so its parameters travel with
         // the request rather than being read from a stale saved copy.
         brush_size: num('p-brush_size', 15),

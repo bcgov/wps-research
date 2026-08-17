@@ -45,6 +45,10 @@ KGC_DEFAULTS = {
     # flag -- it selects which binary runs, so it is deliberately not
     # in _KGC_FLAGS below.
     'kgc_cpu_only': False,
+    # Run both builds back to back and report the difference. Neither
+    # is a kgc flag: both select what the SERVER does, so they are
+    # deliberately absent from _KGC_FLAGS.
+    'kgc_compare': False,
 }
 
 # CLI flag for each parameter, and whether -1/0 means "let kgc decide"
@@ -278,7 +282,11 @@ def ensure_kgc_gpu_binary(log=None) -> str:
     except Exception:
         pass
 
-    cmd = ['nvcc', '-O3', '-std=c++14', f'-arch={arch}',
+    # -fmad=false is not optional. Contracting a*b+c into an FMA changes
+    # the low bits of the squared distance, which reorders near-ties in
+    # the neighbour list and therefore changes the classification. The
+    # CPU build does not contract, so the GPU must not either.
+    cmd = ['nvcc', '-O3', '-std=c++14', f'-arch={arch}', '-fmad=false',
            '-Xcompiler', '-pthread', 'kgc.cu', '-o', 'kgc_gpu']
     emit(f'  Building the GPU KGC: {" ".join(cmd)} (in {d})')
     t0 = time.time()
@@ -339,6 +347,71 @@ def ensure_kgc_binary(log=None) -> str:
             f'KGC build failed (exit {p.returncode}):\n{err[-2000:]}')
     emit(f'  KGC built in {time.time() - t0:.1f}s -> {exe}')
     return exe
+
+
+def purge_kgc_caches(image: str, why: str = '', log=None) -> int:
+    """Delete kgc's memoised dedup and neighbour-table files for *image*.
+
+    kgc writes ``<image>.kgc_dedup`` and ``<image>.kgc_knn_s<N>_k<K>``
+    beside its INPUT, and the key is a checksum of that input plus
+    n_skip and k_max. Nothing in the key identifies which build produced
+    the table -- so a CPU run and a GPU run on the same stack share it,
+    and whichever runs second silently reuses the other's neighbours.
+
+    That makes a CPU-vs-GPU comparison meaningless and can carry a bad
+    table across a backend switch. Purging from the server keeps
+    kgc.cpp untouched, which matters because it is the reference
+    implementation.
+    """
+    import glob as _glob
+    n = 0
+    base = os.path.splitext(image)[0]
+    for pat in (image + '.kgc_dedup', image + '.kgc_knn_*',
+                base + '.kgc_dedup', base + '.kgc_knn_*'):
+        for f in _glob.glob(pat):
+            try:
+                os.remove(f)
+                n += 1
+            except OSError:
+                pass
+    if n:
+        msg = (f'  cleared {n} kgc cache file(s) for '
+               f'{os.path.basename(image)}'
+               + (f' ({why})' if why else ''))
+        sys.stderr.write(msg + '\n')
+        if log:
+            log(msg)
+    return n
+
+
+def _backend_stamp_path(image: str) -> str:
+    return image + '.kgc_backend'
+
+
+def enforce_backend_cache(image: str, which: str, log=None) -> None:
+    """Purge the caches when the backend differs from the last run.
+
+    A sidecar records which build last wrote the tables for this image.
+    Same backend -> the cache is legitimately reusable and is kept, so
+    repeat runs stay fast. Different backend -> purge, because the two
+    may order equidistant neighbours differently and the key cannot tell
+    them apart.
+    """
+    stamp = _backend_stamp_path(image)
+    prev = ''
+    try:
+        with open(stamp, encoding='utf-8') as f:
+            prev = f.read().strip()
+    except OSError:
+        prev = ''
+    if prev and prev != which:
+        purge_kgc_caches(image, f'backend changed {prev} -> {which}',
+                         log=log)
+    try:
+        with open(stamp, 'w', encoding='utf-8') as f:
+            f.write(which)
+    except OSError:
+        pass
 
 
 def build_kgc_cmd(exe: str, image: str, hint: str, out_prefix: str,
@@ -586,6 +659,164 @@ def resolve_stack_for_source(fire, want_src: str, log=None) -> str:
     return path
 
 
+def compare_cpu_gpu(fire, params: dict, log=None, progress=None,
+                    source: str = None) -> dict:
+    """Run CPU then GPU on identical inputs and report the difference.
+
+    Every memoised product is cleared between the two runs. Without
+    that the second run reuses the first's dedup and neighbour table --
+    they are keyed on the image, not the backend -- and the comparison
+    would be of one computation against itself.
+
+    CPU runs first and is treated as the reference, since it is the
+    implementation that has been validated. The GPU result is what
+    remains in place afterwards ONLY if the two agree; otherwise the
+    CPU result is restored, because leaving a disagreeing GPU mask as
+    the fire's classification would quietly promote the unverified one.
+    """
+    import numpy as np
+    from osgeo import gdal
+
+    def emit(msg):
+        sys.stderr.write(msg + '\n')
+        try:
+            fire.console_log.append(msg)
+        except Exception:
+            pass
+        if log:
+            try:
+                log(msg)
+            except Exception:
+                pass
+
+    def snapshot(path):
+        d = gdal.Open(path, gdal.GA_ReadOnly)
+        if d is None:
+            return None
+        a = d.GetRasterBand(1).ReadAsArray()
+        d = None
+        return None if a is None else (np.nan_to_num(a) > 0)
+
+    results = {}
+    emit('  ' + '=' * 62)
+    emit('  CPU vs GPU COMPARISON: two independent runs, caches cleared')
+    emit('  ' + '=' * 62)
+
+    for which in ('cpu', 'gpu'):
+        p2 = dict(params or {})
+        p2['kgc_cpu_only'] = (which == 'cpu')
+        # --no-cache as well as the purge: belt and braces, since the
+        # purge only covers the paths we can predict.
+        p2['kgc_no_cache'] = True
+        p2['kgc_compare'] = False        # never recurse
+        emit('')
+        emit(f'  --- {which.upper()} run ---')
+        t0 = time.time()
+        try:
+            r = run_kgc(fire, p2, log=log, progress=progress,
+                        source=source)
+        except Exception as exc:
+            emit(f'  {which.upper()} run FAILED: '
+                 f'{type(exc).__name__}: {exc}')
+            results[which] = {'ok': False, 'error': str(exc)}
+            continue
+        clf = r.get('classified')
+        mask = snapshot(clf) if clf else None
+        results[which] = {
+            'ok': True,
+            'seconds': time.time() - t0,
+            'kgc_seconds': r.get('seconds'),
+            'agreement_pct': r.get('agreement_pct'),
+            'ml_area_ha': r.get('ml_area_ha'),
+            'mask': mask,
+            'classified': clf,
+        }
+        # Keep a copy of the CPU mask; the GPU run overwrites the file.
+        if which == 'cpu' and clf and os.path.isfile(clf):
+            keep = os.path.splitext(clf)[0] + '_cpuref.bin'
+            try:
+                shutil.copy2(clf, keep)
+                h = os.path.splitext(clf)[0] + '.hdr'
+                if os.path.isfile(h):
+                    shutil.copy2(h, os.path.splitext(keep)[0] + '.hdr')
+                results['cpu']['ref_path'] = keep
+            except OSError as exc:
+                emit(f'  (could not keep a CPU reference copy: {exc})')
+
+    a = results.get('cpu', {})
+    b = results.get('gpu', {})
+    emit('')
+    emit('  ' + '=' * 62)
+    emit('  COMPARISON RESULT')
+    emit('  ' + '=' * 62)
+
+    if not (a.get('ok') and b.get('ok')):
+        emit('  One of the runs failed; no comparison is possible.')
+        return {'ok': False, 'results': results}
+
+    ma, mb = a.get('mask'), b.get('mask')
+    verdict = {}
+    if ma is None or mb is None or ma.shape != mb.shape:
+        emit('  Masks are missing or differently shaped; cannot compare.')
+    else:
+        inter = int(np.count_nonzero(ma & mb))
+        union = int(np.count_nonzero(ma | mb))
+        diff = int(np.count_nonzero(ma ^ mb))
+        na, nb = int(np.count_nonzero(ma)), int(np.count_nonzero(mb))
+        iou = (inter / union) if union else 1.0
+        agree_px = int(ma.size - diff)
+        verdict = {'identical': diff == 0, 'iou': iou,
+                   'differing_px': diff, 'cpu_px': na, 'gpu_px': nb,
+                   'pixel_agreement': agree_px / float(ma.size)}
+        if diff == 0:
+            emit(f'  IDENTICAL: both builds selected the same '
+                 f'{na:,} pixel(s).')
+        else:
+            emit(f'  DIFFERENT: {diff:,} of {ma.size:,} pixel(s) '
+                 f'disagree ({100.0 * diff / ma.size:.4f}%)')
+            emit(f'    CPU selected {na:,} px, GPU selected {nb:,} px, '
+                 f'IoU {iou:.6f}')
+            emit(f'    pixel agreement {100.0 * agree_px / ma.size:.4f}%')
+            emit('    A small difference is expected only from exact '
+                 'ties; a large one means the ports diverge.')
+
+    emit('')
+    emit('  TIMING')
+    emit(f'    {"stage":<28}{"CPU":>12}{"GPU":>12}{"speedup":>10}')
+    ka, kb = a.get('kgc_seconds') or 0, b.get('kgc_seconds') or 0
+    ta, tb = a.get('seconds') or 0, b.get('seconds') or 0
+    def _row(label, x, y):
+        sp = (f'{x / y:.2f}x' if (x and y) else '-')
+        emit(f'    {label:<28}{x:>11.1f}s{y:>11.1f}s{sp:>10}')
+    _row('kgc executable', ka, kb)
+    _row('total incl. brush/score', ta, tb)
+    emit('    (the K sweep runs on the CPU in BOTH builds; the GPU '
+         'accelerates')
+    emit('     the neighbour table only, so the speedup is bounded by '
+         'that share)')
+    emit('  ' + '=' * 62)
+
+    # Restore the CPU result unless the two agree.
+    if verdict and not verdict.get('identical'):
+        ref = a.get('ref_path')
+        clf = b.get('classified')
+        if ref and clf and os.path.isfile(ref):
+            try:
+                shutil.copy2(ref, clf)
+                h = os.path.splitext(ref)[0] + '.hdr'
+                if os.path.isfile(h):
+                    shutil.copy2(h, os.path.splitext(clf)[0] + '.hdr')
+                emit('  The builds disagree, so the CPU result has been '
+                     'restored as this fire\'s classification.')
+                from .erase import refresh_after_edit
+                refresh_after_edit(fire, clf, log=log)
+            except Exception as exc:
+                emit(f'  (could not restore the CPU result: {exc})')
+
+    return {'ok': True, 'verdict': verdict,
+            'cpu_seconds': ta, 'gpu_seconds': tb}
+
+
 def run_kgc(fire, params: dict, log=None, progress=None,
             source: str = None) -> dict:
     """Run KGC for *fire* and leave the result where the UI expects it.
@@ -705,6 +936,9 @@ def run_kgc(fire, params: dict, log=None, progress=None,
     exe, _which, _note = choose_kgc_build(params, _npts, _dim, log=emit)
     emit(f'  running the {_which.upper()} build: '
          f'{os.path.basename(exe)}')
+    # The memoised dedup/neighbour tables are keyed on the image only,
+    # so they must not survive a backend switch.
+    enforce_backend_cache(image, _which, log=emit)
 
     cmd = build_kgc_cmd(exe, image, hint, out_prefix, params)
     emit('  ' + ' '.join(cmd))
@@ -1038,6 +1272,23 @@ def run_kgc(fire, params: dict, log=None, progress=None,
         fire.ml_area_ha = ml_area
         fire.status = FireStatus.MAPPED
     emit(f'  KGC result: agreement {agr}%, ML area {ml_area} ha')
+    # One unambiguous line at the end. Which build ran is otherwise
+    # inferred from tags that only appear on GPU-specific lines, and the
+    # K sweep -- the most visible part of the log -- runs on the CPU in
+    # both builds, so its output looks the same either way.
+    emit('  ' + '=' * 62)
+    emit(f'  KGC COMPLETE using the {_which.upper()} build '
+         f'({os.path.basename(exe)})')
+    if _which == 'gpu':
+        emit('    neighbour table: GPU (CUDA)   |   K sweep: CPU '
+             '(threads)')
+    else:
+        emit('    neighbour table: CPU (threads) |   K sweep: CPU '
+             '(threads)')
+    emit(f'    source={want_src.upper()}  bands={_dim}  '
+         f'points<={_npts:,}  elapsed={dt:.0f}s'
+         + (f'  [{_note}]' if _note else ''))
+    emit('  ' + '=' * 62)
     step('kgc_figure', 'done', 1.0)
     return {'ok': True, 'agreement_pct': agr, 'ml_area_ha': ml_area,
             'classified': clf, 'seconds': dt}

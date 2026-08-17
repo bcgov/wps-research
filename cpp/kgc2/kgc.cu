@@ -36,9 +36,15 @@
  * CPU build so the server parses one format.
  *
  * Build (the server does this on first use):
- *   nvcc -O3 -std=c++14 -arch=sm_89 -Xcompiler -pthread kgc.cu -o kgc_gpu
+ *   nvcc -O3 -std=c++14 -arch=sm_89 -fmad=false -Xcompiler -pthread \
+ *        kgc.cu -o kgc_gpu
+ *
+ * -fmad=false matters: contracting a*b+c into an FMA changes the low
+ * bits of the squared distance, which reorders near-ties in the
+ * neighbour list and therefore changes the classification.
  */
 
+#include <cstring>
 #include <cuda_runtime.h>
 #include <math_constants.h>
 #include <cub/cub.cuh>
@@ -150,11 +156,26 @@ struct Args {
  * consumes the table as a set of neighbours, so that cannot change a
  * clustering except through an exact-tie coincidence.
  */
+/* One 64-bit sort key per candidate: the squared distance in the high
+ * 32 bits, the point index in the low 32.
+ *
+ * This is what makes ties break the way the CPU breaks them. The CPU
+ * uses std::partial_sort over std::pair<float,size_t>, so equal
+ * distances order by ASCENDING POINT INDEX. A radix sort on the float
+ * alone resolves ties arbitrarily, which reorders the neighbour list,
+ * which changes the ascent target, which changes the classes. Packing
+ * the index into the key makes the comparison lexicographic --
+ * distance first, index second -- which is exactly pair's ordering.
+ *
+ * Distances are non-negative, so the IEEE-754 bit pattern of a float
+ * sorts in the same order as the value and can be used directly. +inf
+ * has the largest pattern of any finite-or-infinite non-negative float,
+ * so the self point lands last, as intended.
+ */
 __global__ void kgc_dist_kernel(const float* __restrict__ pts,
                                 size_t n, size_t dim,
                                 size_t q0, size_t nq,
-                                float* __restrict__ out_d,
-                                int* __restrict__ out_i) {
+                                unsigned long long* __restrict__ out_k) {
   extern __shared__ float qvec[];
   size_t qi = blockIdx.x;
   if (qi >= nq) return;
@@ -164,23 +185,26 @@ __global__ void kgc_dist_kernel(const float* __restrict__ pts,
     qvec[m] = pts[q * dim + m];
   __syncthreads();
 
-  float* drow = out_d + qi * n;
-  int*   irow = out_i + qi * n;
+  unsigned long long* krow = out_k + qi * n;
 
   for (size_t i = threadIdx.x; i < n; i += blockDim.x) {
+    /* Accumulated in float, band by band, in index order -- identical
+     * to the CPU loop. Compiled with -fmad=false so the multiply and
+     * add are not contracted into an FMA, which would change the low
+     * bits and reorder near-ties. */
     float s = 0.f;
     const float* b = pts + i * dim;
     for (size_t m = 0; m < dim; m++) { float t = qvec[m] - b[m]; s += t * t; }
-    /* The CPU skips the self point entirely. Sorting it to the end with
-     * +inf keeps every row the same length, which the segmented sort
-     * needs, and it never enters the first k because k <= n-1. */
-    drow[i] = (i == q) ? CUDART_INF_F : s;
-    irow[i] = (int)i;
+    if (i == q) s = CUDART_INF_F;   /* CPU skips self; sort it last */
+    unsigned int sb = __float_as_uint(s);
+    krow[i] = ((unsigned long long)sb << 32) | (unsigned int)i;
   }
 }
 
 static size_t kgc_batch_bytes(size_t n, size_t batch) {
-  return batch * n * (sizeof(float) * 2 + sizeof(int) * 2);
+  /* keys in + keys out; the index rides inside the key, so there is no
+   * separate value array to move or sort. */
+  return batch * n * (sizeof(unsigned long long) * 2);
 }
 
 static void build_knn(const float* pts, size_t n, size_t dim, size_t kmax,
@@ -217,12 +241,9 @@ static void build_knn(const float* pts, size_t n, size_t dim, size_t kmax,
                " k %zu of kmax %zu\n",
                batch, kgc_batch_bytes(n, batch) / 1e9, n, dim, k, kmax);
 
-  float *d_din = 0, *d_dout = 0;
-  int   *d_iin = 0, *d_iout = 0;
-  CUDA_OK(cudaMalloc(&d_din,  batch * n * sizeof(float)));
-  CUDA_OK(cudaMalloc(&d_dout, batch * n * sizeof(float)));
-  CUDA_OK(cudaMalloc(&d_iin,  batch * n * sizeof(int)));
-  CUDA_OK(cudaMalloc(&d_iout, batch * n * sizeof(int)));
+  unsigned long long *d_kin = 0, *d_kout = 0;
+  CUDA_OK(cudaMalloc(&d_kin,  batch * n * sizeof(unsigned long long)));
+  CUDA_OK(cudaMalloc(&d_kout, batch * n * sizeof(unsigned long long)));
 
   std::vector<int> h_off(batch + 1);
   for (size_t i = 0; i <= batch; i++) h_off[i] = (int)(i * n);
@@ -233,14 +254,13 @@ static void build_knn(const float* pts, size_t n, size_t dim, size_t kmax,
 
   void*  d_tmp = 0;
   size_t tmp_bytes = 0;
-  CUDA_OK(cub::DeviceSegmentedRadixSort::SortPairs(
-      0, tmp_bytes, d_din, d_dout, d_iin, d_iout,
+  CUDA_OK(cub::DeviceSegmentedRadixSort::SortKeys(
+      0, tmp_bytes, d_kin, d_kout,
       (int)(batch * n), (int)batch, d_off, d_off + 1));
   CUDA_OK(cudaMalloc(&d_tmp, tmp_bytes));
   std::fprintf(stderr, "[gpu] sort scratch %.2f GB\n", tmp_bytes / 1e9);
 
-  std::vector<float> h_d(batch * k);
-  std::vector<int>   h_i(batch * k);
+  std::vector<unsigned long long> h_k(batch * k);
 
   const int tpb = 256;
   size_t done = 0;
@@ -248,27 +268,30 @@ static void build_knn(const float* pts, size_t n, size_t dim, size_t kmax,
     size_t nq = (q0 + batch <= n) ? batch : (n - q0);
 
     kgc_dist_kernel<<<(unsigned)nq, tpb, dim * sizeof(float)>>>(
-        d_pts, n, dim, q0, nq, d_din, d_iin);
+        d_pts, n, dim, q0, nq, d_kin);
     CUDA_OK(cudaGetLastError());
 
-    CUDA_OK(cub::DeviceSegmentedRadixSort::SortPairs(
-        d_tmp, tmp_bytes, d_din, d_dout, d_iin, d_iout,
+    CUDA_OK(cub::DeviceSegmentedRadixSort::SortKeys(
+        d_tmp, tmp_bytes, d_kin, d_kout,
         (int)(nq * n), (int)nq, d_off, d_off + 1));
 
     /* One strided copy per array, not two per row: with 512 rows that
      * was 1024 transfers per batch, and the latency dominated. */
-    CUDA_OK(cudaMemcpy2D(&h_d[0], k * sizeof(float),
-                         d_dout, n * sizeof(float),
-                         k * sizeof(float), nq, cudaMemcpyDeviceToHost));
-    CUDA_OK(cudaMemcpy2D(&h_i[0], k * sizeof(int),
-                         d_iout, n * sizeof(int),
-                         k * sizeof(int), nq, cudaMemcpyDeviceToHost));
+    CUDA_OK(cudaMemcpy2D(&h_k[0], k * sizeof(unsigned long long),
+                         d_kout, n * sizeof(unsigned long long),
+                         k * sizeof(unsigned long long), nq,
+                         cudaMemcpyDeviceToHost));
 
     for (size_t r = 0; r < nq; r++) {
       size_t q = q0 + r;
       for (size_t m = 0; m < k; m++) {
-        dd[q * kmax + m] = std::sqrt(h_d[r * k + m]);
-        di[q * kmax + m] = (size_t)h_i[r * k + m];
+        unsigned long long kk = h_k[r * k + m];
+        unsigned int sb = (unsigned int)(kk >> 32);
+        float s2;
+        std::memcpy(&s2, &sb, sizeof s2);   /* undo the bit packing */
+        /* sqrt only after selection, exactly as the CPU does. */
+        dd[q * kmax + m] = std::sqrt(s2);
+        di[q * kmax + m] = (size_t)(unsigned int)(kk & 0xffffffffull);
       }
       for (size_t m = k; m < kmax; m++) {           /* pad as the CPU does */
         dd[q * kmax + m] = k ? dd[q * kmax + k - 1] : 0.f;
@@ -282,8 +305,7 @@ static void build_knn(const float* pts, size_t n, size_t dim, size_t kmax,
   std::fprintf(stderr, "[gpu]  neighbours 100.0%%\n");
 
   cudaFree(d_tmp); cudaFree(d_off);
-  cudaFree(d_iout); cudaFree(d_iin);
-  cudaFree(d_dout); cudaFree(d_din); cudaFree(d_pts);
+  cudaFree(d_kout); cudaFree(d_kin); cudaFree(d_pts);
 }
 
 /* ------------------------------------------------------------------------ */
