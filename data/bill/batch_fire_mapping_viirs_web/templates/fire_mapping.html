@@ -1034,11 +1034,80 @@ function prefetchOtherSource(views) {
 // Wrapper so the busy indicator is released on EVERY exit path -- the
 // inner function has several early returns and an error branch, and a
 // missed release would leave the toolbar claiming to load forever.
+let _srcSwitchBusy = false;
+let _srcSwitchAbort = null;
+let _srcSwitchPoll = null;
+
+// Report what the server is actually doing while a switch runs.
+//
+// The first switch to a source has to BUILD that source's stack, which
+// means extracting tiles and can take minutes. With no progress and no
+// limit the page looked hung, and a second click queued behind the
+// server's per-fire lock and appeared to hang for good.
+function startSourceSwitchProgress(src) {
+    const label = (src === 'l2') ? 'L2 recent tile' : 'MRAP composite';
+    if (_srcSwitchPoll) clearInterval(_srcSwitchPoll);
+    _srcSwitchPoll = setInterval(async () => {
+        try {
+            const r = await fetch(
+                `/api/fire/${encodeURIComponent(FIRE)}/progress`,
+                {headers: {'X-Requested-With': 'fetch'}});
+            if (!r.ok) return;
+            const j = await r.json();
+            const d = (j.progress && j.progress.detail) || '';
+            _layerLabel = d ? `Switching to ${label} — ${d}`
+                            : `Switching to ${label}`;
+            layerStatusPaint();
+        } catch (_) { /* progress is a nicety, not a requirement */ }
+    }, 1500);
+}
+
+function stopSourceSwitchProgress() {
+    if (_srcSwitchPoll) clearInterval(_srcSwitchPoll);
+    _srcSwitchPoll = null;
+}
+
 async function onPostSourceChange() {
+    const sel = document.getElementById('post-source-select');
+    const want = sel ? sel.value : currentPostSource;
+
+    if (_srcSwitchBusy) {
+        // Put the selector back rather than queueing: the server
+        // serialises switches per fire, so a second one would block
+        // until the first finished with nothing on screen to say why.
+        if (sel) sel.value = currentPostSource;
+        log('A source switch is already running; wait for it to '
+            + 'finish.', 'dim');
+        return;
+    }
+    const previous = currentPostSource;
+    _srcSwitchBusy = true;
+    _srcSwitchAbort = new AbortController();
+    // Generous, but finite: a build that has not finished in 20 minutes
+    // is stuck, and leaving the page waiting forever helps nobody.
+    const killer = setTimeout(() => {
+        try { _srcSwitchAbort.abort(); } catch (_) {}
+    }, 20 * 60 * 1000);
+    startSourceSwitchProgress(want);
     setTimeout(() => { try { saveUiState(); } catch (_) {} }, 0);
     try {
         return await _onPostSourceChangeInner();
+    } catch (err) {
+        // Revert, so the selector never claims a source that is not
+        // loaded.
+        currentPostSource = previous;
+        if (sel) sel.value = previous;
+        const aborted = err && err.name === 'AbortError';
+        log(aborted
+            ? 'Source switch timed out after 20 minutes and was '
+              + 'cancelled; the previous source is still loaded.'
+            : `Source switch failed: ${err.message}`, 'error');
+        try { updateSubtitle('left', leftView); } catch (_) {}
     } finally {
+        clearTimeout(killer);
+        stopSourceSwitchProgress();
+        _srcSwitchBusy = false;
+        _srcSwitchAbort = null;
         layerBusyEnd();
     }
 }
@@ -1096,6 +1165,7 @@ async function _onPostSourceChangeInner() {
             headers: {'Content-Type': 'application/json',
                       'X-Requested-With': 'fetch'},
             body: JSON.stringify({source: src}),
+            signal: _srcSwitchAbort.signal,
         });
         const data = await r.json();
         if (!r.ok || data.error) {

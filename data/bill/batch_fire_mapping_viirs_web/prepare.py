@@ -1269,8 +1269,29 @@ def switch_post_source(fire: FireInfo, source: str) -> dict:
     if not getattr(fire, 'bbox_native', None):
         return {'ok': False, 'error': 'Fire has no bbox on record.'}
 
-    with _source_switch_lock(fire.fire_numbe):
+    # Refuse rather than queue when a switch for this fire is already
+    # running.
+    #
+    # Blocking on the lock meant a second request sat there until the
+    # first finished -- which, on a first-time stack build, can be
+    # minutes -- with nothing to distinguish it from a hang. Callers
+    # that legitimately want to wait can retry; the UI reports it.
+    lk = _source_switch_lock(fire.fire_numbe)
+    if not lk.acquire(blocking=False):
+        return {'ok': False, 'busy': True,
+                'error': ('A source switch is already running for this '
+                          'fire; wait for it to finish.')}
+    try:
+        # Already there: nothing to do, and saying so instantly is much
+        # better than repeating the work.
+        if (getattr(fire, 'post_source', '') or 'l2') == source:
+            prev_dir = os.path.join(fire.cache_dir, 'previews')
+            if os.path.isdir(prev_dir) and os.listdir(prev_dir):
+                return {'ok': True, 'unchanged': True,
+                        'post_source': source}
         return _switch_post_source_locked(fire, source)
+    finally:
+        lk.release()
 
 
 def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:

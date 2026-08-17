@@ -283,7 +283,13 @@ class FireRoutes:
         mode = body.get('mode', 'viirs')
         result = switch_hint_mode(fire, mode)
         if not result.get('ok'):
-            self._send_json({'error': result.get('error', 'unknown')}, 400)
+            # 409 for "already running": a client can tell that apart
+            # from a real failure and simply wait, whereas 400 reads as
+            # "your request was wrong".
+            self._send_json(
+                {'error': result.get('error', 'unknown'),
+                 'busy': bool(result.get('busy'))},
+                409 if result.get('busy') else 400)
             return
         self._send_json({
             'ok': True,
