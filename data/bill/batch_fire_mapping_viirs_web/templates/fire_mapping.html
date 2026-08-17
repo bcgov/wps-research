@@ -1949,6 +1949,21 @@ function capturePaneFrame(pane) {
             c.height = img.naturalHeight;
             const ctx = c.getContext('2d');
             ctx.drawImage(img, 0, 0, c.width, c.height);
+            // The overlays live in their own screen-space canvas now, so
+            // they are not in the bitmap. Draw them into the capture at
+            // NATURAL resolution -- a GIF without the perimeter and the
+            // fire numbers would be much less useful.
+            if (overlaysVisible && _fireOverlays) {
+                try {
+                    const cw = _fireOverlays.width || c.width;
+                    const chh = _fireOverlays.height || c.height;
+                    const kx = c.width / cw, ky = c.height / chh;
+                    ctx.save();
+                    ctx.scale(kx, ky);
+                    paintOverlayVectors(ctx, kx, 1);
+                    ctx.restore();
+                } catch (_) { /* frame without overlays is still usable */ }
+            }
             c.toBlob((b) => {
                 if (b) resolve(b);
                 else reject(new Error(`could not encode the ${pane} `
@@ -2692,6 +2707,80 @@ async function loadFireOverlays() {
 // same factor -- fire numbers appeared roughly five times too large
 // until the full image replaced them. Passing the level's resolution
 // ratio cancels the upscale exactly, so both levels look identical.
+// ---- Live vector overlay layer ------------------------------------
+//
+// Overlays used to be BAKED into the image bitmap, which had two costs.
+// The labels scaled with the zoom, so at 200% a fire number covered the
+// ground it was pointing at; and every eraser stroke had to re-composite
+// and re-encode the whole bitmap, which is what made erasing crawl.
+//
+// Drawing them into their own canvas fixes both. The canvas is in SCREEN
+// space, so text and line widths are specified in CSS pixels and stay
+// the same size at any zoom, while the geometry follows the image
+// exactly because the same pan/scale is applied to the path coordinates.
+function overlayCanvasFor(pane) {
+    return document.getElementById(
+        pane === 'right' ? 'right-overlay' : 'main-overlay');
+}
+
+function drawOverlayLayer(pane) {
+    const cv = overlayCanvasFor(pane);
+    const { area, img } = getPaneElements(pane);
+    if (!cv || !area) return;
+
+    if (!overlaysVisible || !_fireOverlays || !img || !img.src
+            || img.style.display === 'none') {
+        cv.style.display = 'none';
+        return;
+    }
+
+    // Match the pane's box, at device resolution so the text is crisp.
+    const dpr = window.devicePixelRatio || 1;
+    const w = area.clientWidth, h = area.clientHeight;
+    if (!w || !h) { cv.style.display = 'none'; return; }
+    if (cv.width !== Math.round(w * dpr) ||
+            cv.height !== Math.round(h * dpr)) {
+        cv.width = Math.round(w * dpr);
+        cv.height = Math.round(h * dpr);
+    }
+    cv.style.width = w + 'px';
+    cv.style.height = h + 'px';
+    cv.style.display = 'block';
+
+    const ctx = cv.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+
+    const st = paneState[pane];
+    const d = paneImageDims(img);
+    const cw = _fireOverlays.width || d.w || 1;
+    const ch = _fireOverlays.height || d.h || 1;
+    if (!d.w || !d.h) return;
+
+    // crop px -> displayed px -> screen px
+    const k = d.w / cw;
+    const unit = st.scale * k;              // screen px per crop px
+    if (!(unit > 0)) return;
+
+    ctx.save();
+    ctx.translate(st.panX, st.panY);
+    ctx.scale(unit, unit * ((d.h / ch) / k || 1));
+    // paintOverlayVectors divides every width and font size by `unit`,
+    // so passing the on-screen scale makes them land at a fixed number
+    // of CSS pixels no matter how far in we are zoomed.
+    paintOverlayVectors(ctx, unit, 1);
+    ctx.restore();
+}
+
+function drawAllOverlayLayers() {
+    drawOverlayLayer('left');
+    if (splitActive) drawOverlayLayer('right');
+}
+
+window.addEventListener('resize', () => {
+    try { drawAllOverlayLayers(); } catch (_) {}
+});
+
 function paintOverlayVectors(ctx, unit, sizeMul) {
     if (!_fireOverlays) return;
     const _m = (sizeMul && sizeMul > 0) ? sizeMul : 1;
@@ -2712,17 +2801,12 @@ function paintOverlayVectors(ctx, unit, sizeMul) {
             ctx.lineTo(ring[i][0], ring[i][1]);
         ctx.closePath();
         ctx.stroke();
-        if (t.name) {
-            const xs = ring.map(p => p[0]), ys = ring.map(p => p[1]);
-            const lx = Math.max(2, Math.min(...xs) + 4);
-            const ly = Math.max(2, Math.min(...ys) + 4);
-            const tw = ctx.measureText(t.name).width;
-            const th = fpx(13);
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
-            ctx.fillRect(lx - 1, ly - 1, tw + 2, th + 2);
-            ctx.fillStyle = 'rgba(255, 0, 220, 1)';
-            ctx.fillText(t.name, lx, ly);
-        }
+        // Labels are NOT drawn here any more. Baked into the bitmap
+        // they scale with the image, so zooming in made them cover the
+        // pixels being inspected. They are drawn instead on a live
+        // canvas above the pane, at a constant size in screen pixels --
+        // see drawPaneLabels(). The geometry stays baked, because a
+        // tile boundary IS a geographic feature and should scale.
     }
 
     // --- BCWS polygons, points, fire numbers (on top) ---
@@ -2749,19 +2833,9 @@ function paintOverlayVectors(ctx, unit, sizeMul) {
     }
     ctx.font = `${fpx(12)}px sans-serif`;
     ctx.textBaseline = 'bottom';
-    const drawLabel = (txt, x, y) => {
-        if (!txt) return;
-        const tw = ctx.measureText(txt).width;
-        const th = fpx(12);
-        // Fully opaque black plate with white text: a translucent
-        // plate let bright imagery bleed through, and red on
-        // semi-transparent black is hard to read over pale cloud --
-        // exactly where fire numbers matter most.
-        ctx.fillStyle = '#000000';
-        ctx.fillRect(x - 2, y - th - 2, tw + 4, th + 4);
-        ctx.fillStyle = '#ffffff';
-        ctx.fillText(txt, x, y);
-    };
+    // Fire-number labels are drawn on the live layer too; see
+    // drawPaneLabels(). This no-op keeps the call sites below unchanged.
+    const drawLabel = () => {};
     (b.polygons || []).forEach((ring, i) => {
         const nm = (b.polygon_fire_nums || [])[i];
         if (!nm || !ring || !ring.length) return;
@@ -2813,6 +2887,9 @@ function toggleFireOverlays() {
     // vectors burned in and cannot be un-drawn.
     loadPaneImage('left', leftView);
     if (splitActive && rightView) loadPaneImage('right', rightView);
+    // Vector layer only: no image needs re-fetching to show or hide
+    // overlays now, which also makes the toggle instant.
+    try { drawAllOverlayLayers(); } catch (_) {}
 }
 
 function overlayFor(pane) {
@@ -2842,6 +2919,9 @@ function updateTransformForPane(pane) {
         syncOtherPane(pane);
         logPaneGeometry();
     }
+    // The overlay is drawn in screen space, so it must be repainted
+    // whenever the pan or zoom changes.
+    try { drawOverlayLayer(pane); } catch (_) {}
 }
 
 // Mirror one pane's viewport onto the other, COMPENSATING for images
@@ -3328,6 +3408,129 @@ async function postBandOverride(payload) {
     }
 }
 
+// ---- Live overlay layer (labels + eraser preview) -----------------
+//
+// A canvas sitting above each pane's image, in SCREEN space. Two jobs:
+//
+//  * Labels at a constant size. Baked into the bitmap they scaled with
+//    the image, so zooming in to inspect pixels covered them with giant
+//    text. Geometry stays baked -- a tile boundary is a real feature
+//    and should scale -- but a label is annotation and should not.
+//
+//  * The eraser's live preview. It previously re-encoded the whole
+//    image with toDataURL() on EVERY mouse-move, which is a full PNG
+//    compress of a multi-megapixel canvas per sample; that is where the
+//    lag came from. Painting the cleared boxes here is a handful of
+//    drawImage calls and costs nothing.
+const _layerCanvas = {left: null, right: null};
+let _layerRaf = null;
+
+function getLayerCanvas(pane) {
+    if (_layerCanvas[pane]) return _layerCanvas[pane];
+    const { area } = getPaneElements(pane);
+    if (!area) return null;
+    const c = document.createElement('canvas');
+    c.className = 'pane-overlay-layer';
+    c.style.cssText = 'position:absolute;left:0;top:0;'
+        + 'pointer-events:none;z-index:5';
+    if (getComputedStyle(area).position === 'static') {
+        area.style.position = 'relative';
+    }
+    area.appendChild(c);
+    _layerCanvas[pane] = c;
+    return c;
+}
+
+// Screen position of an image-space point, using the pane transform.
+function imageToScreen(pane, x, y) {
+    const s = paneState[pane];
+    return [x * s.scale + s.panX, y * s.scale + s.panY];
+}
+
+function drawPaneLabels(pane) {
+    const c = getLayerCanvas(pane);
+    const { area, img } = getPaneElements(pane);
+    if (!c || !area) return;
+    const w = area.clientWidth, h = area.clientHeight;
+    const dpr = window.devicePixelRatio || 1;
+    if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) {
+        c.width = Math.round(w * dpr);
+        c.height = Math.round(h * dpr);
+        c.style.width = w + 'px';
+        c.style.height = h + 'px';
+    }
+    const ctx = c.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    if (!img || !img.src || img.style.display === 'none') return;
+
+    // Erase preview first, so labels stay readable over it.
+    drawErasePreview(pane, ctx);
+
+    if (!overlaysVisible || !_fireOverlays) return;
+
+    // Overlay coordinates are in CROP space; the pane transform is in
+    // preview space, so convert with the same ratio the image uses.
+    const d = paneImageDims(img);
+    const cw = _fireOverlays.width || d.w;
+    const ch = _fireOverlays.height || d.h;
+    if (!cw || !ch || !d.w) return;
+    const kx = d.w / cw, ky = d.h / ch;
+
+    const plate = (txt, sx, sy, fg, bg) => {
+        const tw = ctx.measureText(txt).width;
+        ctx.fillStyle = bg;
+        ctx.fillRect(sx - 2, sy - 2, tw + 4, 15);
+        ctx.fillStyle = fg;
+        ctx.fillText(txt, sx, sy);
+    };
+
+    // Constant 12px regardless of zoom -- the whole point of this layer.
+    ctx.font = '12px sans-serif';
+    ctx.textBaseline = 'top';
+
+    for (const t of (_fireOverlays.tiles || [])) {
+        const ring = t.ring || [];
+        if (!t.name || ring.length < 2) continue;
+        const xs = ring.map(p => p[0]), ys = ring.map(p => p[1]);
+        const [sx, sy] = imageToScreen(pane, Math.min(...xs) * kx + 4,
+                                       Math.min(...ys) * ky + 4);
+        if (sx < -80 || sy < -20 || sx > w + 80 || sy > h + 20) continue;
+        plate(t.name, sx, sy, 'rgba(255,0,220,1)', 'rgba(0,0,0,0.55)');
+    }
+
+    const b = _fireOverlays.bcws || {};
+    const fires = [];
+    (b.polygons || []).forEach((ring, i) => {
+        const nm = (b.polygon_fire_nums || [])[i];
+        if (!nm || !ring.length) return;
+        let sx = 0, sy = 0;
+        for (const [x, y] of ring) { sx += x; sy += y; }
+        fires.push([nm, sx / ring.length, sy / ring.length]);
+    });
+    (b.points || []).forEach((pt, i) => {
+        const nm = (b.point_fire_nums || [])[i];
+        if (nm && pt) fires.push([nm, pt[0], pt[1]]);
+    });
+    for (const [nm, x, y] of fires) {
+        const [sx, sy] = imageToScreen(pane, x * kx, y * ky);
+        if (sx < -80 || sy < -20 || sx > w + 80 || sy > h + 20) continue;
+        plate(nm, sx, sy, '#ffffff', '#000000');
+    }
+}
+
+// Coalesced to one draw per frame: pan, zoom and erase strokes all ask
+// for a redraw, and doing each synchronously would repaint many times
+// per mouse-move for no visible benefit.
+function requestLayerRedraw() {
+    if (_layerRaf) return;
+    _layerRaf = requestAnimationFrame(() => {
+        _layerRaf = null;
+        drawPaneLabels('left');
+        if (splitActive) drawPaneLabels('right');
+    });
+}
+
 // ---- Manual eraser ------------------------------------------------
 //
 // Strokes are painted locally for immediate feedback and posted to the
@@ -3343,6 +3546,9 @@ let _erasing = false;
 let _erasePts = [];          // image-pixel centres for this stroke
 let _eraseBase = null;       // post-fire pixels, to reveal when erasing
 let _hoverPane = null;       // pane under the pointer, or null
+let _eraseRaf = null;        // pending animation-frame id
+let _eraseDirty = false;     // working canvas changed since last paint
+let _eraseObjUrl = '';       // current object URL, revoked on replace
 let _erasePerim = null;      // Uint8Array, 1 where the BCWS perimeter
                              // protects a pixel (preview resolution)
 let _erasePerimDims = null;
@@ -3663,10 +3869,49 @@ function eraseAt(pane, clientX, clientY) {
                               x0, y0, bw, bh);
             }
         } catch (_) { /* off-canvas strokes are harmless */ }
-        try {
-            img.src = _eraseWork.toDataURL('image/png');
-        } catch (_) { /* tainted canvas: server sync still applies */ }
+        // Refresh the pane at most once per frame, via toBlob.
+        //
+        // The old path re-composited the overlays and called
+        // toDataURL() on a full-resolution canvas for EVERY mouse-move
+        // sample -- base64-encoding several megabytes per stroke point,
+        // which is what made erasing crawl. Overlays are now a separate
+        // layer, so only the image needs refreshing, and one refresh per
+        // animation frame is all a display can show anyway.
+        _eraseDirty = true;
+        if (!_eraseRaf) {
+            _eraseRaf = requestAnimationFrame(flushEraseFrame);
+        }
     }
+}
+
+// Paint the working canvas into the pane, at most once per frame.
+//
+// toBlob + object URL rather than toDataURL: no base64 step, and the
+// browser can hand the decoder the bytes directly. The previous URL is
+// revoked as soon as the next one is attached, so a long stroke does
+// not leak a URL per sample.
+function flushEraseFrame() {
+    _eraseRaf = null;
+    if (!_eraseDirty || !_eraseWork || !_erasePane) return;
+    _eraseDirty = false;
+    const { img } = getPaneElements(_erasePane);
+    if (!img) return;
+    try {
+        _eraseWork.toBlob((b) => {
+            if (!b) return;
+            const url = URL.createObjectURL(b);
+            const old = _eraseObjUrl;
+            _eraseObjUrl = url;
+            img.src = url;
+            if (old) {
+                // Revoke on the next frame: revoking immediately can
+                // cancel the decode of the image just assigned.
+                requestAnimationFrame(() => {
+                    try { URL.revokeObjectURL(old); } catch (_) {}
+                });
+            }
+        }, 'image/png');
+    } catch (_) { /* server sync still carries the edit */ }
 }
 
 async function flushErase() {
@@ -4074,6 +4319,13 @@ function syncOtherPane(pane) {
     }
     oImg.style.transform =
         `translate(${os.panX}px, ${os.panY}px) scale(${os.scale})`;
+    // This sets the transform directly rather than going through
+    // updateTransformForPane, so the other pane's overlay has to be
+    // repainted here too -- otherwise its labels and perimeter would
+    // stay where the image used to be while it panned underneath.
+    try {
+        drawOverlayLayer(pane === 'left' ? 'right' : 'left');
+    } catch (_) {}
 }
 
 
@@ -4243,6 +4495,9 @@ function endPaneDrag() {
         // than one per mouse-move, which would flood the server and
         // rewrite the raster hundreds of times.
         _erasing = false;
+        // One last paint so the final sample is visible even if the
+        // frame callback had not fired yet.
+        if (_eraseDirty) flushEraseFrame();
         flushErase();
         return;
     }
@@ -4588,20 +4843,10 @@ async function loadPaneImage(pane, viewKey) {
                 // Overlays are cheap vector work, so draw them on the
                 // proxy too -- otherwise tile outlines and the BCWS
                 // perimeter pop in only when the full image lands.
-                let painted = probe.src;
-                if (overlaysVisible && _fireOverlays) {
-                    try {
-                        // Ratio of this level's resolution to the
-                        // full one, so labels come out the same size
-                        // on screen after the box upscales the proxy.
-                        const rMul = (fullW && probe.naturalWidth)
-                            ? probe.naturalWidth / fullW : 1;
-                        const baked = await compositeOverlays(
-                            probe, _fireOverlays.width,
-                            _fireOverlays.height, rMul);
-                        if (baked) painted = baked;
-                    } catch (_) { /* proxy without overlays is fine */ }
-                }
+                // No baking here either -- the vector layer sits above
+                // the image and is unaffected by which pyramid level is
+                // showing.
+                const painted = probe.src;
                 if (stale() || myGen !== _paneGen[pane]) return;
                 if (img.dataset.full === '1') return;
 
@@ -4692,18 +4937,10 @@ async function loadPaneImage(pane, viewKey) {
     }
     if (stale()) return;
 
-    let finalUrl = srcUrl;
-    if (_fireOverlays && overlaysVisible) {
-        const t0 = performance.now();
-        const baked = await compositeOverlays(
-            probe, _fireOverlays.width, _fireOverlays.height);
-        if (stale()) return;
-        if (baked) {
-            finalUrl = baked;
-            log(`[perf] overlay bake (${pane}): `
-                + `${(performance.now() - t0).toFixed(0)} ms`, 'dim');
-        }
-    }
+    // Overlays are NOT baked in: they are drawn into their own canvas
+    // over the pane, so the labels keep a constant size at any zoom and
+    // an edit does not have to re-encode the whole bitmap.
+    const finalUrl = srcUrl;
 
     // Single assignment. Wait for it to decode too, so the fit maths
     // below reads real dimensions rather than the previous image's.
@@ -4717,6 +4954,7 @@ async function loadPaneImage(pane, viewKey) {
     // explicitly (rather than letting layout fall back to the natural
     // size) keeps the element's size identical across the swap.
     applyPaneImageBox(img, img.naturalWidth, img.naturalHeight);
+    try { drawOverlayLayer(pane); } catch (_) {}
 
     if (pane === 'left') loadMsg.style.display = 'none';
     img.style.display = 'block';
