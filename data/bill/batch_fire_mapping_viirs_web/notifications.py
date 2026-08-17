@@ -115,6 +115,25 @@ def _push_notification(session_hash: str | None,
     """
     if kind not in _NOTIFICATION_KINDS:
         kind = 'info'
+
+    # Nothing is announced for a fire the user deleted.
+    #
+    # Work already in flight when a fire is removed still runs to
+    # completion in its worker and still reports, so the user saw
+    # "mapping complete" for fires that were no longer in the list.
+    # Filtering centrally covers every producer, present and future,
+    # rather than each call site remembering to check.
+    if fire:
+        try:
+            rec = state.fires.get(fire) or state.fires.get(f'{fire}~removed')
+            if rec is not None and getattr(rec, 'removed', False):
+                sys.stderr.write(
+                    f'[notify] suppressed "{title}" for removed fire '
+                    f'{fire}\n')
+                return
+        except Exception:
+            pass
+
     now = time.time()
     with state.lock:
         state.notification_counter += 1

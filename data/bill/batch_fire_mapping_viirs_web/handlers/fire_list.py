@@ -253,6 +253,8 @@ class FireListRoutes:
         cache_dir = fire.cache_dir
         with state.lock:
             fire.hidden = True
+            # Durable: survives the reload that re-keys state.fires.
+            fire.removed = True
             fire.cache_dir = ''
             fire.crop_bin = ''
             fire.hint_bin = ''
@@ -342,6 +344,23 @@ class FireListRoutes:
 
         # Registries keyed on the name, for this record only.
         with state.lock:
+            # Drop any queued work for this fire. A job left in the
+            # queue still runs, still finishes, and still pushes a
+            # completion notification -- for a fire the user deleted,
+            # which is where the phantom update messages came from.
+            try:
+                before = len(state.waiting_jobs)
+                state.waiting_jobs[:] = [
+                    w for w in state.waiting_jobs
+                    if (w or {}).get('fire_numbe') != fire_numbe]
+                dropped = before - len(state.waiting_jobs)
+                if dropped:
+                    sys.stderr.write(
+                        f'[remove] {fire_numbe}: dropped {dropped} '
+                        f'queued job(s)\n')
+            except Exception as exc:
+                sys.stderr.write(f'[remove] queue purge: {exc}\n')
+
             for attr in ('viirs_jobs', 'viirs_subprocs'):
                 d = getattr(state, attr, None)
                 if isinstance(d, dict):
@@ -392,7 +411,7 @@ class FireListRoutes:
                 'status': f.status.value,
             }
             for f in state.fires.values()
-            if f.hidden
+            if f.hidden and not getattr(f, 'removed', False)
         ]
         self._send_json(fires)
 
@@ -640,7 +659,10 @@ class FireListRoutes:
 
         # Name
         name_raw = body.get('name', '')
-        existing = list(state.fires.keys())
+        # Removed fires do not hold their names. They are kept only so
+        # the record exists; their products are gone.
+        existing = [k for k, f in state.fires.items()
+                    if not getattr(f, 'removed', False)]
         try:
             name = _validate_fire_name(name_raw, existing_names=existing)
         except ValueError as exc:

@@ -128,6 +128,7 @@ def _save_fire_state():
                 entry = {
                     'status': fire.status.value,
                     'hidden': fire.hidden,
+                    'removed': bool(getattr(fire, 'removed', False)),
                 }
                 if fire.cache_dir:
                     entry['cache_dir'] = fire.cache_dir
@@ -313,7 +314,20 @@ def _load_fire_state():
                 )
             except Exception:
                 continue
-            state.fires[fn] = fire
+            # A removed fire is loaded under a tombstone key so it
+            # cannot occupy its old name.
+            #
+            # Re-keying it in memory at deletion was not enough: the key
+            # comes from fire_numbe on every load, so the tombstone was
+            # lost the next time state was read and the name became
+            # taken again -- exactly the "already in use" report on a
+            # list the user had just cleared.
+            fire.removed = bool(entry.get('removed', False))
+            if fire.removed:
+                fire.hidden = True
+                state.fires[f'{fn}~removed'] = fire
+            else:
+                state.fires[fn] = fire
         else:
             fire = state.fires[fn]
             # init_fires_from_disk Pass 2 fills these with placeholder

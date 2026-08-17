@@ -143,6 +143,10 @@ class FireInfo:
     # record never accepted anything, so any directory bearing its name
     # belongs to some other fire and must not be removed with it.
     accepted_dir: str = ""
+    # Deleted from the list. Distinct from `hidden`, which is a
+    # reversible admin action: a removed fire has had its products
+    # purged, must not appear anywhere, and must not hold its name.
+    removed: bool = False
     # Hand-picked band indices (0-based into the AOI stack). When set,
     # this replaces the checkbox rules entirely; toggling any checkbox
     # clears it.
