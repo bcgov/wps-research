@@ -948,9 +948,40 @@ class FireRoutes:
             _pb = os.path.join(fire.cache_dir, 'previews',
                                'result_prebrush.png')
             if not os.path.isfile(_pb):
+                # Produce it from whatever pre-brush mask exists, and
+                # failing that from the classification itself.
+                #
+                # Brushing is performed by class_brush.exe, invoked from
+                # brush.py -- NOT inside kgc.cpp. So when that binary
+                # fails (a stale build rejects its arguments), no
+                # pre-brush sibling is ever written and this layer had
+                # nothing to render. Falling back to the classification
+                # means the layer always exists; identical before/after
+                # is a true statement about a run where brushing did
+                # nothing, and far better than a missing view.
                 try:
-                    from ..erase import render_prebrush_overlay
-                    render_prebrush_overlay(fire)
+                    from ..erase import (render_prebrush_overlay,
+                                         active_classified,
+                                         prebrush_path)
+                    ok = render_prebrush_overlay(fire)
+                    if not ok:
+                        clf = active_classified(fire)
+                        if clf and os.path.isfile(clf):
+                            from ..mapping import _overlay_mask_on_post
+                            _overlay_mask_on_post(
+                                fire, clf, 'result_prebrush',
+                                (0.9, 0.1, 0.0))
+                            sys.stderr.write(
+                                f'[prebrush] {fire_numbe}: no pre-brush '
+                                f'mask on disk (brushing did not modify '
+                                f'this result); rendered from '
+                                f'{os.path.basename(clf)}\n')
+                            if os.path.isfile(_pb):
+                                with state.lock:
+                                    if ('result_prebrush' not in
+                                            fire.available_views):
+                                        fire.available_views.append(
+                                            'result_prebrush')
                 except Exception as _pexc:
                     sys.stderr.write(
                         f'[prebrush] on-demand render failed: '

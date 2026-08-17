@@ -380,6 +380,9 @@ def _verify_overlay_differs(fire, out_name: str, log=None) -> bool:
             except OSError:
                 return None
         sig = _sig(out)
+        # Only the BASE imagery counts as "drew nothing". Being
+        # identical to result.png is legitimate -- it means brushing
+        # changed nothing, which is a fact worth showing, not a fault.
         for base in ('post.png', 'pre.png'):
             if sig and sig == _sig(os.path.join(prev, base)):
                 msg = (f'  WARNING: {out_name}.png is byte-identical to '

@@ -3316,6 +3316,23 @@ let _erasePerimDims = null;
 let _eraseWork = null;       // canvas holding the edited result
 let _erasePane = null;
 
+// Preview px per MASK px for a pane.
+//
+// The eraser size is in mask pixels; the pane transform is in preview
+// pixels; previews are capped at 2000 px while the mask can be larger.
+// The cursor and the erase MUST use this same number, or the box drawn
+// and the area cleared disagree -- which they have, twice, because each
+// computed its own ratio with a different fallback.
+function maskToPreviewRatio(pane) {
+    try {
+        const { img } = getPaneElements(pane);
+        const d = paneImageDims(img);
+        const g = geoForPane(pane);
+        if (g && g.rw && d.w) return d.w / g.rw;
+    } catch (_) { /* fall through */ }
+    return 1;
+}
+
 function eraserSize() {
     const el = document.getElementById('p-eraser_size');
     const v = el ? parseInt(el.value, 10) : 11;
@@ -3357,7 +3374,16 @@ function _eraserKeyHandler(e) {
     e.preventDefault();
     e.stopPropagation();
     el.checked = !el.checked;
-    onEraserToggle();
+    // Wrapped: if onEraserToggle throws (it touches several optional
+    // elements), the checkbox would flip with nothing happening, and
+    // the key would look dead until the box was clicked once by hand.
+    try {
+        onEraserToggle();
+    } catch (err) {
+        try {
+            log(`[erase] toggle failed: ${err.message}`, 'error');
+        } catch (_) {}
+    }
     try {
         log(`[erase] eraser ${el.checked ? 'ON' : 'off'} (E key)`,
             'dim');
@@ -3429,10 +3455,7 @@ function applyEraserCursor(force) {
         // while the mask can be larger (2969 px here). Drawing the box
         // at size*scale therefore made the cursor smaller than the area
         // actually erased, by exactly the preview/mask ratio.
-        const { img: _ci } = getPaneElements(pane);
-        const _cd = paneImageDims(_ci);
-        const _cg = geoForPane(pane);
-        const _k = (_cg && _cg.rw && _cd.w) ? (_cd.w / _cg.rw) : 1;
+        const _k = maskToPreviewRatio(pane);
         const px = Math.max(6, Math.min(96,
                                         Math.round(eraserSize() * _k * s)));
         // Browsers cache the cursor image per URL and will not repaint
@@ -3555,13 +3578,9 @@ function eraseAt(pane, clientX, clientY) {
 
     // Local preview: copy the same box out of the post-fire canvas.
     if (_eraseWork && _eraseBase) {
-        const { img } = getPaneElements(pane);
-        const d = paneImageDims(img);
-        const g = geoForPane(pane);
-        const kx = (g && g.rw) ? (d.w / g.rw) : 1;
-        const ky = (g && g.rh) ? (d.h / g.rh) : 1;
+        const kx = maskToPreviewRatio(pane);
         const bw = Math.max(1, Math.round(eraserSize() * kx));
-        const bh = Math.max(1, Math.round(eraserSize() * ky));
+        const bh = bw;
         const x0 = Math.round(p.px - bw / 2);
         const y0 = Math.round(p.py - bh / 2);
         const ctx = _eraseWork.getContext('2d');
@@ -4552,6 +4571,15 @@ async function loadPaneImage(pane, viewKey) {
         // working one -- the label changed, the picture did not.
         try { img.removeAttribute('src'); } catch (_) {}
         img.style.display = 'none';
+        // Say which layer is missing. Reverting to another view while
+        // leaving the label alone is what made a missing layer look
+        // like a wrong one -- the console showed 'pre' while the pill
+        // said "before brushing".
+        try {
+            log(`[view] "${getViewLabel(viewKey)}" has no image for `
+                + `this fire; nothing is displayed. Run Map Fire to `
+                + `produce it.`, 'error');
+        } catch (_) {}
         return;
     }
     if (stale()) return;
