@@ -4318,11 +4318,13 @@ function previewUrlFor(viewKey, pane) {
     const runActive = selectedRun !== null && RUN_VIEWS.has(viewKey);
     if (runActive && viewKey === 'result') {
         return `/api/fire/${encodeURIComponent(FIRE)}/serial/${selectedRun}/image?t=${Date.now()}`;
-} else if (viewKey === 'result_prebrush') {
-        // A normal preview on the AOI grid, so it flickers and syncs
-        // like every other layer.
-        return previewUrlFor('result_prebrush', pane);
     }
+    // 'result_prebrush' deliberately has NO branch here: it is an
+    // ordinary preview and falls through to the generic URL below.
+    // A branch that returned previewUrlFor('result_prebrush', ...)
+    // called this function with the same arguments -- infinite
+    // recursion, a swallowed RangeError, and a pane that silently kept
+    // its previous image. That is why this layer never appeared.
     // Source AND hint mode must both be in the URL: they select
     // different server-side files, not just different cache entries.
     const modePart = (viewKey === 'hint') ? `&hint=${currentHintMode}` : '';
