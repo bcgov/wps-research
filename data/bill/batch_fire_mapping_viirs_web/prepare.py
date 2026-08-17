@@ -617,7 +617,7 @@ def verify_and_repair_fire(fire: FireInfo, log=None) -> dict:
     # what produces "View ... not available" even when the images exist.
     try:
         whitelist = ('pre', 'post', 'diff1', 'diff2', 'diff3', 'hint',
-                     'result', 'comparison', 'brush_comparison')
+                     'result', 'result_prebrush', 'comparison')
         names = [os.path.splitext(f)[0]
                  for f in sorted(os.listdir(prev_dir))
                  if f.endswith('.png')]
@@ -1324,8 +1324,8 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
             # legitimate views looking unavailable ("View 'Post-fire'
             # not available").
             _VIEW_WHITELIST = ('pre', 'post', 'diff1', 'diff2', 'diff3',
-                               'hint', 'result', 'comparison',
-                               'brush_comparison')
+                               'hint', 'result', 'result_prebrush',
+                               'comparison')
             names = [os.path.splitext(f)[0]
                      for f in sorted(os.listdir(
                          os.path.join(fire.cache_dir, 'previews')))

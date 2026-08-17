@@ -390,6 +390,18 @@ class RebrushRoutes:
                     # Accept reads the entry, so leaving it holding the
                     # pre-rebrush agreement and area meant the accepted
                     # record described a mask that no longer existed.
+                    # The pre-brush mask has just been (re)written, so
+                    # refresh the comparison layer alongside the result.
+                    try:
+                        from ..erase import render_prebrush_overlay
+                        render_prebrush_overlay(
+                            fire, clf_path,
+                            log=lambda m: fire.console_log.append(m))
+                    except Exception as _pexc:
+                        sys.stderr.write(
+                            f'[rebrush] pre-brush layer failed: '
+                            f'{_pexc}\n')
+
                     _agr = _compute_agreement(fire)
                     _area = _compute_ml_area(fire, clf_path)
                     with state.lock:

@@ -686,6 +686,12 @@ def run_kgc(fire, params: dict, log=None, progress=None,
     except Exception as exc:
         emit(f'  Geo check failed: {exc}')
 
+    try:
+        from .erase import render_prebrush_overlay
+        render_prebrush_overlay(fire, clf, log=emit)
+    except Exception as exc:
+        emit(f'  Pre-brush layer failed: {exc}')
+
     step('kgc_figure', 'scoring and rendering', 0.94)
     agr = _compute_agreement(fire)
     ml_area = _compute_ml_area(fire, clf)

@@ -348,6 +348,59 @@ def refresh_after_edit(fire, clf_path: str, log=None) -> dict:
     return out
 
 
+def prebrush_path(clf_path: str) -> str:
+    """Where the pre-BRUSH mask lives for a given classification.
+
+    Written by every brushing path as ``<name>_raw.bin`` before the
+    brushed result overwrites the canonical file.
+    """
+    return os.path.splitext(clf_path)[0] + '_raw.bin'
+
+
+def render_prebrush_overlay(fire, clf_path: str = None,
+                            log=None) -> bool:
+    """Render 'ML classification - before brushing' as a map layer.
+
+    The old brush comparison was a two-panel FIGURE: not on the AOI
+    grid, so it could not be flickered against the result or read
+    against the imagery. Rendering the pre-brush mask as an ordinary
+    overlay on the same grid makes it a peer of every other layer --
+    it can sit in either split pane, flicker against the brushed
+    result, and line up with the base imagery.
+
+    Returns True when the layer exists afterwards.
+    """
+    from .mapping import _overlay_mask_on_post
+
+    try:
+        clf = clf_path or active_classified(fire)
+        if not clf:
+            return False
+        raw = prebrush_path(clf)
+        if not os.path.isfile(raw):
+            # No brushing has happened, so there is nothing to compare
+            # against. Drop any stale layer rather than leaving one
+            # that no longer corresponds to anything.
+            if 'result_prebrush' in (fire.available_views or []):
+                fire.available_views.remove('result_prebrush')
+            return False
+        _overlay_mask_on_post(fire, raw, 'result_prebrush',
+                              (1.0, 0.65, 0.0))
+        png = os.path.join(fire.cache_dir, 'previews',
+                           'result_prebrush.png')
+        if os.path.isfile(png):
+            if 'result_prebrush' not in fire.available_views:
+                fire.available_views.append('result_prebrush')
+            if log:
+                log('  Rendered "ML classification - before brushing"')
+            return True
+        return False
+    except Exception as exc:
+        sys.stderr.write(
+            f'[prebrush] overlay failed: {type(exc).__name__}: {exc}\n')
+        return False
+
+
 def active_classified(fire) -> str:
     """The mask the eraser should edit.
 

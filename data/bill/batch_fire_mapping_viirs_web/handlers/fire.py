@@ -2068,8 +2068,34 @@ class FireRoutes:
         # shapefile would be an absurd requirement.
         try:
             fire = state.fires[fire_numbe]
-            has_vec = any(f.endswith(('.shp', '.kml'))
-                          for f in os.listdir(result_dir))
+            # Regenerate when the vectors are MISSING or STALE.
+            #
+            # Only checking for absence meant that a rebrush (or an
+            # eraser edit) after acceptance shipped the perimeter from
+            # before the edit, while the raster in the same archive
+            # reflected it -- an internally inconsistent download, and
+            # the vector is the part most likely to be used downstream.
+            vec_files = [f for f in os.listdir(result_dir)
+                         if f.endswith(('.shp', '.kml'))]
+            stale_vec = False
+            try:
+                from ..erase import active_classified
+                _live = active_classified(fire)
+                if vec_files and _live and os.path.isfile(_live):
+                    newest_vec = max(
+                        os.path.getmtime(os.path.join(result_dir, f))
+                        for f in vec_files)
+                    if os.path.getmtime(_live) > newest_vec + 1.0:
+                        stale_vec = True
+                        sys.stderr.write(
+                            f'[download] {fire_numbe}: classification '
+                            f'is newer than the vector products; '
+                            f'regenerating\n')
+            except Exception as exc:
+                sys.stderr.write(
+                    f'[download] {fire_numbe}: staleness check failed '
+                    f'({exc}); keeping the existing vectors\n')
+            has_vec = bool(vec_files) and not stale_vec
             if not has_vec:
                 from ..prepare import vectorize_classified
                 clf = None
@@ -2100,6 +2126,31 @@ class FireRoutes:
             sys.stderr.write(
                 f'[download] {fire_numbe}: vector backfill skipped: '
                 f'{type(exc).__name__}: {exc}\n')
+
+        # Refresh the accepted RASTER when the working copy is newer.
+        # The vector regeneration above derives from the live mask, so
+        # without this the archive could hold a perimeter and a raster
+        # from different states of the same fire.
+        try:
+            from ..erase import active_classified
+            _live = active_classified(fire)
+            if _live and os.path.isfile(_live):
+                _dst = os.path.join(result_dir, os.path.basename(_live))
+                if (not os.path.isfile(_dst)
+                        or os.path.getmtime(_live)
+                        > os.path.getmtime(_dst) + 1.0):
+                    for _e in ('.bin', '.hdr'):
+                        _a = os.path.splitext(_live)[0] + _e
+                        _b = os.path.splitext(_dst)[0] + _e
+                        if os.path.isfile(_a):
+                            shutil.copy2(_a, _b)
+                    sys.stderr.write(
+                        f'[download] {fire_numbe}: refreshed the '
+                        f'accepted raster from the working copy\n')
+        except Exception as exc:
+            sys.stderr.write(
+                f'[download] {fire_numbe}: raster refresh skipped '
+                f'({exc})\n')
 
         # Build the zip into a tmp path beside the canonical dir (same
         # filesystem -> the rename inside make_archive's caller-visible

@@ -731,13 +731,14 @@ let activePane = 'left';  // 'left' or 'right'
 let leftView = '';   // current view key for left pane
 let rightView = '';  // current view key for right pane
 let selectedRun = null;  // currently selected serial run (null or run_id)
-const RUN_VIEWS = new Set(['result', 'comparison', 'brush_comparison']);
+const RUN_VIEWS = new Set(['result', 'result_prebrush', 'comparison']);
 
 const VIEW_LABELS = {
     pre: 'Pre-fire', post: 'Post-fire',
     diff1: 'Diff 1', diff2: 'Diff 2', diff3: 'Diff 3',
     result: 'ML classification', hint: 'Hint perimeter',
-    comparison: 'Comparison (figure)', brush_comparison: 'Brush comparison',
+    comparison: 'Comparison (figure)',
+    result_prebrush: 'ML classification \u2014 before brushing',
 };
 
 // Hint mode — tracks which hint mask source is active.
@@ -1364,10 +1365,15 @@ async function prepareFire(padding) {
             sel.appendChild(opt);
             hasComparison = true;
         }
-        if (data.has_brush_comparison) {
+        // The old two-panel "Brush comparison" FIGURE is gone: it was
+        // not on the AOI grid, so it could not be flickered against the
+        // result or read against the imagery. The pre-brush mask is now
+        // an ordinary overlay layer instead, which can sit in either
+        // split pane and flicker against the brushed result.
+        if ((data.available_views || []).includes('result_prebrush')) {
             const opt = document.createElement('option');
-            opt.value = 'brush_comparison';
-            opt.textContent = 'Brush comparison';
+            opt.value = 'result_prebrush';
+            opt.textContent = VIEW_LABELS.result_prebrush;
             sel.appendChild(opt);
         }
         syncRightViewOptions();
@@ -4270,12 +4276,14 @@ function previewUrlFor(viewKey, pane) {
         return `/api/fire/${encodeURIComponent(FIRE)}/serial/${selectedRun}/image?t=${Date.now()}`;
     } else if (runActive && viewKey === 'comparison') {
         return `/api/fire/${encodeURIComponent(FIRE)}/serial/${selectedRun}/image?type=comparison&t=${Date.now()}`;
-    } else if (runActive && viewKey === 'brush_comparison') {
-        return `/api/fire/${encodeURIComponent(FIRE)}/serial/${selectedRun}/image?type=brush&t=${Date.now()}`;
-    } else if (viewKey === 'comparison') {
+    } else if (viewKey === 'result_prebrush') {
+        // A normal preview on the AOI grid, so it flickers and syncs
+        // like every other layer.
+        return previewUrlFor('result_prebrush', pane);
+} else if (viewKey === 'comparison') {
         return `/api/fire/${encodeURIComponent(FIRE)}/comparison?t=${Date.now()}`;
-    } else if (viewKey === 'brush_comparison') {
-        return `/api/fire/${encodeURIComponent(FIRE)}/brush_comparison?t=${Date.now()}`;
+    } else if (viewKey === 'result_prebrush') {
+        return previewUrlFor('result_prebrush', pane);
     }
     // Source AND hint mode must both be in the URL: they select
     // different server-side files, not just different cache entries.
@@ -4996,14 +5004,30 @@ async function runRebrush() {
         // switch the left pane to it. There is only one `view-select`
         // dropdown in this template — it binds to the active pane.
         const sel = document.getElementById('view-select');
-        if (sel && !sel.querySelector('option[value="brush_comparison"]')) {
+        if (sel && !sel.querySelector('option[value="result_prebrush"]')) {
             const opt = document.createElement('option');
-            opt.value = 'brush_comparison';
-            opt.textContent = VIEW_LABELS.brush_comparison || 'Brush comparison';
+            opt.value = 'result_prebrush';
+            opt.textContent = VIEW_LABELS.result_prebrush;
             sel.appendChild(opt);
         }
-        loadPaneImage('left', 'brush_comparison');
-        if (sel && activePane === 'left') sel.value = 'brush_comparison';
+        // Both layers changed: 'result' now holds the newly brushed
+        // mask and 'result_prebrush' the mask it came from. Previews
+        // are served immutable, so bust the caches before reloading or
+        // the panes would replay the pre-rebrush images at the same
+        // URLs.
+        _previewStamp = Date.now();
+        for (const k of [..._previewBlobs.keys()]) {
+            if (k.includes(':result') || k.includes(':serial_')) {
+                try { URL.revokeObjectURL(_previewBlobs.get(k)); }
+                catch (_) {}
+                _previewBlobs.delete(k);
+            }
+        }
+        // Keep whichever layer the user was looking at, rather than
+        // forcing a switch: after a rebrush the interesting comparison
+        // is usually the one they already had open.
+        await loadPaneImage('left', leftView || 'result');
+        if (sel && activePane === 'left') sel.value = leftView;
 
         // Reload the right pane (if split is active) so the
         // ML-classification overlay — 'result' for the main map,
@@ -5230,10 +5254,11 @@ async function pollFireState() {
             opt.textContent = 'Comparison (figure)';
             sel.appendChild(opt);
         }
-        if (data.has_brush_comparison && !sel.querySelector('option[value="brush_comparison"]')) {
+        if ((data.available_views || []).includes('result_prebrush')
+                && !sel.querySelector('option[value="result_prebrush"]')) {
             const opt = document.createElement('option');
-            opt.value = 'brush_comparison';
-            opt.textContent = 'Brush comparison';
+            opt.value = 'result_prebrush';
+            opt.textContent = VIEW_LABELS.result_prebrush;
             sel.appendChild(opt);
         }
         if (data.has_comparison) hasComparison = true;
@@ -5253,12 +5278,13 @@ async function pollFireState() {
             rebrushAdopted = false;
             setRebrushButtons(false);
             log('Rebrush finished on server. Refreshing views ...', 'dim');
-            // brush_comparison may now exist; make sure dropdown has it.
+            // the pre-brush layer may now exist; make sure the
+            // dropdown has it.
             const sel2 = document.getElementById('view-select');
-            if (sel2 && !sel2.querySelector('option[value="brush_comparison"]')) {
+            if (sel2 && !sel2.querySelector('option[value="result_prebrush"]')) {
                 const opt = document.createElement('option');
-                opt.value = 'brush_comparison';
-                opt.textContent = VIEW_LABELS.brush_comparison || 'Brush comparison';
+                opt.value = 'result_prebrush';
+                opt.textContent = VIEW_LABELS.result_prebrush;
                 sel2.appendChild(opt);
             }
             if (leftView) loadPaneImage('left', leftView);
