@@ -731,13 +731,12 @@ let activePane = 'left';  // 'left' or 'right'
 let leftView = '';   // current view key for left pane
 let rightView = '';  // current view key for right pane
 let selectedRun = null;  // currently selected serial run (null or run_id)
-const RUN_VIEWS = new Set(['result', 'result_prebrush', 'comparison']);
+const RUN_VIEWS = new Set(['result', 'result_prebrush']);
 
 const VIEW_LABELS = {
     pre: 'Pre-fire', post: 'Post-fire',
     diff1: 'Diff 1', diff2: 'Diff 2', diff3: 'Diff 3',
     result: 'ML classification', hint: 'Hint perimeter',
-    comparison: 'Comparison (figure)',
     result_prebrush: 'ML Classification \u2014 before brushing',
 };
 
@@ -1357,14 +1356,10 @@ async function prepareFire(padding) {
             sel.appendChild(opt);
         }
 
-        // Add comparison views if results exist
-        if (data.has_comparison) {
-            const opt = document.createElement('option');
-            opt.value = 'comparison';
-            opt.textContent = 'Comparison (figure)';
-            sel.appendChild(opt);
-            hasComparison = true;
-        }
+        // "Comparison (figure)" removed: it was a matplotlib plot,
+        // not on the AOI grid, so it could not be flickered against
+        // any other layer or read against the imagery. Its numbers
+        // (IoU, accuracy) live in the header instead.
         // The old two-panel "Brush comparison" FIGURE is gone: it was
         // not on the AOI grid, so it could not be flickered against the
         // result or read against the imagery. The pre-brush mask is now
@@ -1395,8 +1390,9 @@ async function prepareFire(padding) {
         }
         if (data.views && data.views.includes('result')) {
             rightView = 'result';
-        } else if (data.has_comparison) {
-            rightView = 'comparison';
+        } else if ((data.available_views || [])
+                   .includes('result_prebrush')) {
+            rightView = 'result_prebrush';
         } else if (data.views && data.views.includes('pre')) {
             rightView = 'pre';
         }
@@ -4283,15 +4279,9 @@ function previewUrlFor(viewKey, pane) {
     const runActive = selectedRun !== null && RUN_VIEWS.has(viewKey);
     if (runActive && viewKey === 'result') {
         return `/api/fire/${encodeURIComponent(FIRE)}/serial/${selectedRun}/image?t=${Date.now()}`;
-    } else if (runActive && viewKey === 'comparison') {
-        return `/api/fire/${encodeURIComponent(FIRE)}/serial/${selectedRun}/image?type=comparison&t=${Date.now()}`;
-    } else if (viewKey === 'result_prebrush') {
+} else if (viewKey === 'result_prebrush') {
         // A normal preview on the AOI grid, so it flickers and syncs
         // like every other layer.
-        return previewUrlFor('result_prebrush', pane);
-} else if (viewKey === 'comparison') {
-        return `/api/fire/${encodeURIComponent(FIRE)}/comparison?t=${Date.now()}`;
-    } else if (viewKey === 'result_prebrush') {
         return previewUrlFor('result_prebrush', pane);
     }
     // Source AND hint mode must both be in the URL: they select
@@ -5256,12 +5246,6 @@ async function pollFireState() {
                 opt.textContent = VIEW_LABELS[v] || v;
                 sel.appendChild(opt);
             }
-        }
-        if (data.has_comparison && !sel.querySelector('option[value="comparison"]')) {
-            const opt = document.createElement('option');
-            opt.value = 'comparison';
-            opt.textContent = 'Comparison (figure)';
-            sel.appendChild(opt);
         }
         if ((data.available_views || []).includes('result_prebrush')
                 && !sel.querySelector('option[value="result_prebrush"]')) {

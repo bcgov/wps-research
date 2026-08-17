@@ -378,14 +378,57 @@ def render_prebrush_overlay(fire, clf_path: str = None,
             return False
         raw = prebrush_path(clf)
         if not os.path.isfile(raw):
-            # No brushing has happened, so there is nothing to compare
+            # The serial/CLI path names its pre-brush sibling after the
+            # image it processed rather than after the classification,
+            # so fall back to any *_raw.bin on the same grid before
+            # concluding there is nothing to show.
+            import glob as _glob
+            cands = sorted(
+                _glob.glob(os.path.join(fire.cache_dir, '*_raw.bin')),
+                key=lambda p_: os.path.getmtime(p_), reverse=True)
+            raw = cands[0] if cands else ''
+        if not raw or not os.path.isfile(raw):
+            # Nothing was brushed, so there is nothing to compare
             # against. Drop any stale layer rather than leaving one
             # that no longer corresponds to anything.
             if 'result_prebrush' in (fire.available_views or []):
                 fire.available_views.remove('result_prebrush')
+            if log:
+                log('  No pre-brush mask found; the '
+                    '"before brushing" layer is not available')
             return False
+
+        # Report both pixel counts. If they are equal the layer is
+        # real but shows nothing new (brushing changed nothing), and
+        # that is worth saying rather than leaving the operator to
+        # wonder whether the feature works.
+        try:
+            import numpy as _np
+            from osgeo import gdal as _g
+            def _count(path_):
+                d = _g.Open(path_, _g.GA_ReadOnly)
+                if d is None:
+                    return -1
+                a = d.GetRasterBand(1).ReadAsArray()
+                d = None
+                return int(_np.count_nonzero(_np.nan_to_num(a) > 0))
+            n_raw, n_brushed = _count(raw), _count(clf)
+            if log:
+                log(f'  before brushing: {n_raw:,} px '
+                    f'({os.path.basename(raw)}); after: {n_brushed:,} px '
+                    f'({os.path.basename(clf)})')
+                if n_raw == n_brushed:
+                    log('  (identical -- brushing removed nothing, so '
+                        'the two layers will look the same)')
+        except Exception:
+            pass
+
+        # SAME red as 'ML classification': the two layers are the same
+        # product before and after brushing, and a colour difference
+        # would read as a difference in kind rather than in processing
+        # -- which defeats the point of flickering between them.
         _overlay_mask_on_post(fire, raw, 'result_prebrush',
-                              (1.0, 0.65, 0.0))
+                              (0.9, 0.1, 0.0))
         png = os.path.join(fire.cache_dir, 'previews',
                            'result_prebrush.png')
         if os.path.isfile(png):
