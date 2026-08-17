@@ -1043,6 +1043,38 @@ def _viirs_worker(fire: FireInfo) -> None:
     finally:
         with state.lock:
             state.viirs_jobs.pop(fire.fire_numbe, None)
+            # A fire must never be left sitting on PREPARING.
+            #
+            # Any exception that is not WorkerError/WorkerCancelled
+            # unwinds past the handlers above without touching the
+            # status, so the job disappears from the queue while the
+            # list keeps saying "preparing" forever, with nothing to say
+            # why. Turning that into an ERROR with the last stage makes
+            # the failure visible and the fire retryable.
+            if fire.status == FireStatus.PREPARING:
+                last = ''
+                try:
+                    last = (fire.progress or {}).get('stage', '') or ''
+                except Exception:
+                    last = ''
+                fire.status = FireStatus.ERROR
+                fire.error_msg = (
+                    'Preparation stopped unexpectedly'
+                    + (f' during "{last}"' if last else '')
+                    + '. See the console for the last step reached.')
+                fire.progress = {}
+                fire.console_log.append(
+                    '  ERROR: preparation stopped unexpectedly'
+                    + (f' during "{last}".' if last else '.'))
+                sys.stderr.write(
+                    f'[viirs_worker] {fire.fire_numbe}: left PREPARING '
+                    f'after the worker exited (last stage: '
+                    f'{last or "unknown"}); marked ERROR\n')
+        if _save_fire_state is not None:
+            try:
+                _save_fire_state()
+            except Exception:
+                pass
 
 
 # ---------------------------------------------------------------------------

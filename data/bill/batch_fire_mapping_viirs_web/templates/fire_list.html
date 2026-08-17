@@ -647,9 +647,18 @@ function render() {
         // actually in. A snapshot from preparation ("extracted T10UGA
         // 3/3 tiles") otherwise survives into clustering and describes
         // work that finished minutes ago.
+        // Show progress unless it plainly belongs to the OTHER phase.
+        //
+        // Requiring kind === 'kgc' while mapping also hid the serial
+        // (HDBSCAN) pipeline's progress, which writes no kind at all,
+        // and left those fires showing a bare status with no detail --
+        // exactly the vagueness this was meant to remove. Unknown kind
+        // now means "show it": a slightly stale line is far better than
+        // no line.
+        const kind = f.sub_stage_kind || '';
         const kindOK =
-            (f.status === 'preparing' && f.sub_stage_kind !== 'kgc')
-            || (f.status === 'mapping' && f.sub_stage_kind === 'kgc');
+            (f.status === 'preparing' && kind !== 'kgc')
+            || (f.status === 'mapping' && kind !== 'prepare');
         if ((f.status === 'preparing' || f.status === 'mapping')
                 && f.sub_stage && kindOK) {
             const idx = f.sub_stage_idx || 0;
