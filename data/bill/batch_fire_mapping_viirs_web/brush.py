@@ -76,7 +76,20 @@ def _write_envi_mask_like(mask: np.ndarray, out_path: str,
         ref_hdr = ref_path + '.hdr'
     if os.path.isfile(ref_hdr):
         out_hdr = os.path.splitext(out_path)[0] + '.hdr'
-        shutil.copy2(ref_hdr, out_hdr)
+        # Skip a copy of a file onto itself.
+        #
+        # Rewriting a mask IN PLACE is a legitimate call -- the mask
+        # changes, the geometry does not -- and it makes ref_hdr and
+        # out_hdr the same path. shutil.copy2 raises SameFileError for
+        # that, AFTER tofile() has already written the new data, so the
+        # caller saw an exception, reported failure and kept using the
+        # old array while the correct one sat on disk. The data was
+        # right; the report was wrong.
+        try:
+            if os.path.abspath(ref_hdr) != os.path.abspath(out_hdr):
+                shutil.copy2(ref_hdr, out_hdr)
+        except shutil.SameFileError:
+            pass
 
 
 

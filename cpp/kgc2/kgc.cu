@@ -368,24 +368,195 @@ static volatile int g_stop = 0;
 
 /* The clustering at one K, on this worker's own scratch.  Reads globals only.
  * If cls_out is given it also returns the class index of every point.       */
+/* ---- GPU sweep -------------------------------------------------------- */
+/* The neighbour table was only ~7% of the run; the K sweep is the rest, so
+ * accelerating the table alone could not help much (measured: 0.92x). Two
+ * changes together fix that:
+ *
+ *  1. S_K(i) = sum of the first K neighbour distances is a PREFIX SUM over
+ *     each row. The CPU recomputes it from scratch at every level, which is
+ *     O(n*K) per level and about half the sweep. Accumulating each row once,
+ *     in double, in the same order, and storing the value at each level
+ *     boundary makes it O(1) per level -- and bit-identical, because it is
+ *     the same additions in the same sequence.
+ *
+ *  2. The ascent scan, O(n*K) per level, is the remaining cost. It is a
+ *     gather over the neighbour list followed by an argmin, which is what a
+ *     GPU is for.
+ *
+ * The pointer chase, class assembly and scoring stay on the host: they are
+ * O(n) per level, and the class numbering is first-encounter order over a
+ * std::map, which is precisely the kind of ordering a parallel rewrite gets
+ * wrong.
+ */
+static float*  g_d_dd = 0;     /* neighbour distances on device  n x kmax   */
+static int*    g_d_di = 0;     /* neighbour indices   on device  n x kmax   */
+static double* g_d_Sstr = 0;   /* S at each level boundary,      n x levels */
+static double* g_d_S = 0;      /* S for the current level,       n         */
+static int*    g_d_asc = 0;    /* ascent target,                 n         */
+static bool    g_gpu_sweep = false;
+
+/* One thread per row: walk the row once, accumulating in double exactly as
+ * the CPU does, and record the running total at every level boundary. */
+__global__ void kgc_prefix_kernel(const float* __restrict__ dd,
+                                  size_t n, size_t kmax,
+                                  size_t kstep, size_t levels,
+                                  double* __restrict__ Sstr) {
+  size_t i = blockIdx.x * (size_t)blockDim.x + threadIdx.x;
+  if (i >= n) return;
+  const float* d = dd + i * kmax;
+  double s = 0.0;
+  size_t next = kstep;           /* level j ends after K = (j+1)*kstep */
+  size_t j = 0;
+  for (size_t m = 0; m < kmax && j < levels; m++) {
+    s += d[m];                   /* same order, same type as the CPU */
+    if (m + 1 == next) {
+      Sstr[i * levels + j] = s;
+      j++;
+      next = (j + 1) * kstep;
+      if (next > kmax) next = kmax;
+    }
+  }
+  for (; j < levels; j++) Sstr[i * levels + j] = s;
+}
+
+__global__ void kgc_gather_S(const double* __restrict__ Sstr,
+                             size_t n, size_t levels, size_t j,
+                             double* __restrict__ S) {
+  size_t i = blockIdx.x * (size_t)blockDim.x + threadIdx.x;
+  if (i < n) S[i] = Sstr[i * levels + j];
+}
+
+/* One block per point. Threads stride over the K neighbours carrying
+ * (S value, neighbour rank m); the reduction keeps the smallest S and, on a
+ * tie, the smallest m -- which is what the CPU's strictly-greater test does
+ * when it scans m ascending. The point itself is the incumbent and is only
+ * displaced by a STRICTLY smaller S, so the ascent map stays acyclic. */
+__global__ void kgc_ascent_kernel(const int* __restrict__ di,
+                                  const double* __restrict__ S,
+                                  size_t n, size_t kmax, size_t K,
+                                  int* __restrict__ asc) {
+  extern __shared__ char smem[];
+  double* bs = (double*)smem;                 /* blockDim doubles */
+  int*    bm = (int*)(bs + blockDim.x);       /* blockDim ints    */
+
+  size_t i = blockIdx.x;
+  if (i >= n) return;
+  const int* ni = di + i * kmax;
+
+  double best = 1.0e308;
+  int bestm = -1;
+  for (size_t m = threadIdx.x; m < K; m += blockDim.x) {
+    double v = S[ni[m]];
+    if (v < best || (v == best && (int)m < bestm)) { best = v; bestm = (int)m; }
+  }
+  bs[threadIdx.x] = best;
+  bm[threadIdx.x] = bestm;
+  __syncthreads();
+
+  for (unsigned s2 = blockDim.x / 2; s2 > 0; s2 >>= 1) {
+    if (threadIdx.x < s2) {
+      double ov = bs[threadIdx.x + s2];
+      int    om = bm[threadIdx.x + s2];
+      if (om >= 0 && (bm[threadIdx.x] < 0 || ov < bs[threadIdx.x] ||
+                      (ov == bs[threadIdx.x] && om < bm[threadIdx.x]))) {
+        bs[threadIdx.x] = ov;
+        bm[threadIdx.x] = om;
+      }
+    }
+    __syncthreads();
+  }
+
+  if (threadIdx.x == 0) {
+    /* Strictly smaller than the incumbent, exactly as -S[j] > -S[i]. */
+    asc[i] = (bm[0] >= 0 && bs[0] < S[i]) ? ni[bm[0]] : (int)i;
+  }
+}
+
+/* Upload the table and precompute the strided prefix sums. Falls back to the
+ * host path (returns false) if anything does not fit or fails -- a slower
+ * correct run beats a fast wrong one. */
+static bool kgc_gpu_sweep_prepare(const std::vector<float>& dd,
+                                  const std::vector<size_t>& di,
+                                  size_t n, size_t kmax,
+                                  size_t kstep, size_t levels) {
+  if (!n || !kmax || !levels) return false;
+  size_t need = n * kmax * (sizeof(float) + sizeof(int))
+              + n * levels * sizeof(double)
+              + n * (sizeof(double) + sizeof(int));
+  size_t freeb = 0, totalb = 0;
+  if (cudaMemGetInfo(&freeb, &totalb) != cudaSuccess) return false;
+  if (need + (need / 4) > freeb) {
+    std::fprintf(stderr,
+                 "[gpu] sweep needs %.2f GB but %.2f GB is free; "
+                 "sweeping on the CPU\n", need / 1e9, freeb / 1e9);
+    return false;
+  }
+  std::vector<int> di32(n * kmax);
+  for (size_t t = 0; t < n * kmax; t++) di32[t] = (int)di[t];
+
+  if (cudaMalloc(&g_d_dd, n * kmax * sizeof(float)) != cudaSuccess ||
+      cudaMalloc(&g_d_di, n * kmax * sizeof(int)) != cudaSuccess ||
+      cudaMalloc(&g_d_Sstr, n * levels * sizeof(double)) != cudaSuccess ||
+      cudaMalloc(&g_d_S, n * sizeof(double)) != cudaSuccess ||
+      cudaMalloc(&g_d_asc, n * sizeof(int)) != cudaSuccess) return false;
+
+  CUDA_OK(cudaMemcpy(g_d_dd, &dd[0], n * kmax * sizeof(float),
+                     cudaMemcpyHostToDevice));
+  CUDA_OK(cudaMemcpy(g_d_di, &di32[0], n * kmax * sizeof(int),
+                     cudaMemcpyHostToDevice));
+
+  int tpb = 256;
+  kgc_prefix_kernel<<<(unsigned)((n + tpb - 1) / tpb), tpb>>>(
+      g_d_dd, n, kmax, kstep, levels, g_d_Sstr);
+  CUDA_OK(cudaGetLastError());
+  CUDA_OK(cudaDeviceSynchronize());
+  std::fprintf(stderr,
+               "[gpu] sweep on device: table %.2f GB, prefix sums %.2f GB "
+               "(%zu levels)\n",
+               n * kmax * (sizeof(float) + sizeof(int)) / 1e9,
+               n * levels * sizeof(double) / 1e9, levels);
+  g_gpu_sweep = true;
+  return true;
+}
+
 static Level compute_level(size_t K, Scratch& sc, std::vector<long>* cls_out) {
   const size_t n = g_n, kmax = g_kmax;
   std::vector<double>& S = sc.S;
-  for (size_t i = 0; i < n; i++) {
-    double s = 0;
-    const float* d = &g_dd[i * kmax];
-    for (size_t m = 0; m < K; m++) s += d[m];
-    S[i] = s;
-  }
-  for (size_t i = 0; i < n; i++) {
-    double br = -S[i];
-    size_t bi = i;
-    const size_t* ni = &g_di[i * kmax];
-    for (size_t m = 0; m < K; m++) {
-      size_t j = ni[m];
-      if (-S[j] > br) { br = -S[j]; bi = j; }
+  if (g_gpu_sweep) {
+    /* S comes from the precomputed prefix sums; the ascent scan -- the
+     * O(n*K) part that dominates the whole program -- runs on the GPU. */
+    size_t j = (K / g_kstep);
+    if (j) j -= 1;
+    if (j >= g_n_levels) j = g_n_levels - 1;
+    int tpb = 256;
+    kgc_gather_S<<<(unsigned)((n + tpb - 1) / tpb), tpb>>>(
+        g_d_Sstr, n, g_n_levels, j, g_d_S);
+    size_t shmem = tpb * (sizeof(double) + sizeof(int));
+    kgc_ascent_kernel<<<(unsigned)n, tpb, shmem>>>(
+        g_d_di, g_d_S, n, kmax, K, g_d_asc);
+    static std::vector<int> asc32;
+    if (asc32.size() != n) asc32.assign(n, 0);
+    CUDA_OK(cudaMemcpy(&asc32[0], g_d_asc, n * sizeof(int),
+                       cudaMemcpyDeviceToHost));
+    for (size_t i = 0; i < n; i++) sc.asc[i] = (size_t)asc32[i];
+  } else {
+    for (size_t i = 0; i < n; i++) {
+      double s = 0;
+      const float* d = &g_dd[i * kmax];
+      for (size_t m = 0; m < K; m++) s += d[m];
+      S[i] = s;
     }
-    sc.asc[i] = bi;
+    for (size_t i = 0; i < n; i++) {
+      double br = -S[i];
+      size_t bi = i;
+      const size_t* ni = &g_di[i * kmax];
+      for (size_t m = 0; m < K; m++) {
+        size_t j = ni[m];
+        if (-S[j] > br) { br = -S[j]; bi = j; }
+      }
+      sc.asc[i] = bi;
+    }
   }
   for (size_t i = 0; i < n; i++) {
     size_t j = i, g = 0;
@@ -730,16 +901,32 @@ int main(int argc, char** argv) {
   g_n = n; g_nb = nb; g_kmax = kmax; g_np = np;
   g_min_class = min_class; g_HN = HN;
   g_dd = &dd[0]; g_di = &di[0]; g_w = &w[0]; g_h = &hcount[0];
+  g_levels.assign(n_levels, Level());
+  g_kstep = kstep;
+  g_n_levels = n_levels;
+  g_patience = (size_t)std::max(0L, A.patience);
+
+  /* Move the sweep to the device if it fits.
+   *
+   * The worker count drops to 1 when it does: every level's work is now a
+   * pair of kernels, so many host threads would only queue against the same
+   * device and serialise anyway, while multiplying the per-level scratch.
+   * The host keeps the pointer chase and class assembly, which are O(n) and
+   * order-sensitive. */
+  if (kgc_gpu_sweep_prepare(dd, di, n, kmax, kstep, n_levels)) {
+    if (threads != 1) {
+      std::fprintf(stderr,
+                   "[gpu] sweep runs on the device; using 1 host worker "
+                   "(was %zu)\n", threads);
+      threads = 1;
+    }
+  }
   g_scratch.resize(threads);
   for (size_t t = 0; t < threads; t++) {
     g_scratch[t].S.resize(n);
     g_scratch[t].asc.resize(n);
     g_scratch[t].peak.resize(n);
   }
-  g_levels.assign(n_levels, Level());
-  g_kstep = kstep;
-  g_n_levels = n_levels;
-  g_patience = (size_t)std::max(0L, A.patience);
   g_best_mi = -1e300;
   g_best_K = -1;
   g_since_best = 0;
