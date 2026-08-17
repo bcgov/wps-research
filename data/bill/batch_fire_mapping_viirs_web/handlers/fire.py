@@ -1238,6 +1238,19 @@ class FireRoutes:
         # Without this a 4+ MB PNG was re-fetched on every fire open
         # and every pane change -- at the ~600 kB/s this link sustains,
         # that is ~7 s of pure re-transfer for bytes already held.
+        # Explicit check before serving. Without it a missing layer
+        # produced an ambiguous failure, and the pane kept whatever it
+        # was already showing under the NEW label -- a pane lying about
+        # its contents, which is worse than a visible gap.
+        if not os.path.isfile(serve_path):
+            sys.stderr.write(
+                f'[preview] {fire_numbe}: {view} requested but '
+                f'{os.path.basename(serve_path)} does not exist\n')
+            self._send_json(
+                {'error': f'The "{view}" layer has not been generated '
+                          f'for this fire.'}, 404)
+            return
+
         _hdrs = self._geo_headers(fire, png, view)
         # Report the chosen format so the browser console can show it;
         # a silent fallback to PNG would look like the optimisation

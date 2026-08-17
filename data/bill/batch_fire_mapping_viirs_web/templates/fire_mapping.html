@@ -4530,6 +4530,10 @@ async function loadPaneImage(pane, viewKey) {
             loadMsg.textContent =
                 `View "${getViewLabel(viewKey)}" not available`;
         }
+        // Clear the source as well as hiding: leaving the previous
+        // layer's bitmap attached is how a missing layer looked like a
+        // working one -- the label changed, the picture did not.
+        try { img.removeAttribute('src'); } catch (_) {}
         img.style.display = 'none';
         return;
     }

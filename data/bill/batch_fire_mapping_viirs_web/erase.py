@@ -388,15 +388,23 @@ def render_prebrush_overlay(fire, clf_path: str = None,
                 key=lambda p_: os.path.getmtime(p_), reverse=True)
             raw = cands[0] if cands else ''
         if not raw or not os.path.isfile(raw):
-            # Nothing was brushed, so there is nothing to compare
-            # against. Drop any stale layer rather than leaving one
-            # that no longer corresponds to anything.
-            if 'result_prebrush' in (fire.available_views or []):
-                fire.available_views.remove('result_prebrush')
+            # No pre-brush mask on disk means brushing never modified
+            # this result -- either it was skipped, or class_brush
+            # failed (a stale binary rejecting its arguments does
+            # exactly this). "Before brushing" is then simply the
+            # classification itself.
+            #
+            # Render it anyway, from the canonical mask. Leaving the
+            # layer absent is what produced the real complaint: the
+            # request 404s, the pane keeps whatever it was showing, and
+            # the label changes -- so the pane claims to show a product
+            # it is not showing. An honest identical layer is far
+            # better than a mislabelled stale one.
+            raw = clf
             if log:
-                log('  No pre-brush mask found; the '
-                    '"before brushing" layer is not available')
-            return False
+                log('  No pre-brush mask on disk: brushing has not '
+                    'modified this result, so "before brushing" is '
+                    'identical to the classification.')
 
         # Report both pixel counts. If they are equal the layer is
         # real but shows nothing new (brushing changed nothing), and

@@ -778,6 +778,30 @@ def _brush_classified(fire, clf_path: str, params: dict, log=None):
             log('  Brush skipped (brush_size <= 0)')
         return clf_path
 
+    # Snapshot the classifier's own output BEFORE brushing is
+    # attempted.
+    #
+    # Taking the copy only on success meant a failed brush (a stale
+    # class_brush binary rejecting its arguments does exactly that)
+    # left no pre-brush mask at all -- so the "before brushing" layer
+    # had nothing to show. The snapshot is what that layer IS, and it
+    # exists regardless of whether brushing then works.
+    raw_backup = os.path.splitext(clf_path)[0] + '_raw.bin'
+    if clf_path != raw_backup:
+        try:
+            shutil.copy2(clf_path, raw_backup)
+            _h = os.path.splitext(clf_path)[0] + '.hdr'
+            if not os.path.isfile(_h):
+                _h = clf_path + '.hdr'
+            if os.path.isfile(_h):
+                shutil.copy2(_h, os.path.splitext(raw_backup)[0] + '.hdr')
+            if log:
+                log(f'  Kept the pre-brush classification as '
+                    f'{os.path.basename(raw_backup)}')
+        except OSError as exc:
+            if log:
+                log(f'  Could not keep a pre-brush copy: {exc}')
+
     try:
         if log:
             log(f'  Brushing: size={size} threshold={thresh} '
@@ -795,19 +819,9 @@ def _brush_classified(fire, clf_path: str, params: dict, log=None):
                     'built?); keeping the raw KGC mask')
             return clf_path
 
-        raw_backup = os.path.splitext(clf_path)[0] + '_raw.bin'
-        if clf_path != raw_backup:
-            try:
-                shutil.copy2(clf_path, raw_backup)
-                hdr_src = os.path.splitext(clf_path)[0] + '.hdr'
-                if not os.path.isfile(hdr_src):
-                    hdr_src = clf_path + '.hdr'
-                if os.path.isfile(hdr_src):
-                    shutil.copy2(
-                        hdr_src,
-                        os.path.splitext(raw_backup)[0] + '.hdr')
-            except OSError:
-                pass
+        # The pre-brush copy was already taken above, before brushing
+        # was attempted; copying again here would overwrite it with the
+        # brushed result the moment this runs twice.
         _write_envi_mask_like(brushed, clf_path, clf_path)
         if log:
             import numpy as _np
