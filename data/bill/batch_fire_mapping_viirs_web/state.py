@@ -139,6 +139,10 @@ class FireInfo:
     diff_only: bool = False
     # Remove classified pixels outside the BCWS perimeter polygons.
     clip_to_bcws: bool = False
+    # Directory this record wrote when accepted. Empty means this
+    # record never accepted anything, so any directory bearing its name
+    # belongs to some other fire and must not be removed with it.
+    accepted_dir: str = ""
     # Hand-picked band indices (0-based into the AOI stack). When set,
     # this replaces the checkbox rules entirely; toggling any checkbox
     # clears it.

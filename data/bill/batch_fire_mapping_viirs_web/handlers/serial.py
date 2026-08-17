@@ -270,7 +270,9 @@ class SerialRoutes:
             return
 
         with state.lock:
-            fire.serial_results = []
+            # Previous runs are KEPT so the gallery accumulates and any
+            # of them can still be accepted. Clearing here is what made
+            # a re-run discard the comparison the user wanted.
             fire.console_log.clear()
             fire.status = FireStatus.MAPPING
             fire.error_msg = ''

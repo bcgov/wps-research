@@ -264,15 +264,16 @@ class FireListRoutes:
             except Exception:
                 pass
 
-        # Purge everything else this fire owns, wherever it lives.
+        # Purge what THIS RECORD owns -- identified by the paths the
+        # record itself holds, never by its name.
         #
-        # Dropping the cache directory alone left the accepted results,
-        # the ramdisk stacks, kgc's memoised tables and the per-name
-        # registries behind -- so a NEW fire created with the same name
-        # inherited another fire's products. Worse, the name itself
-        # stayed taken, because state.fires is keyed on it and the
-        # hidden entry kept the key.
-        removed = []
+        # A name is not an identity: the same name can be used again
+        # later, and an earlier fire may already have written results
+        # under it. Globbing on the name would delete another fire's
+        # work. Every path below is either recorded on the FireInfo or
+        # derived from one that is, so nothing outside this record's
+        # own artifacts can be reached.
+        removed, skipped = [], []
 
         def _rm(path):
             try:
@@ -285,47 +286,84 @@ class FireListRoutes:
             except OSError:
                 pass
 
-        # Accepted results.
-        try:
-            if state.output_root:
-                _rm(os.path.join(state.output_root, fire_numbe))
-        except Exception:
-            pass
+        # Paths the record holds directly.
+        own = [getattr(fire, a, '') for a in
+               ('crop_bin', 'hint_bin', 'viirs_bin', 'perim_bin')]
 
-        # Ramdisk: AOI stacks, derived band/scaling stacks, kgc work
-        # directories, and kgc's dedup / neighbour-table caches.
-        try:
-            from ..aoi_stack import RAM_DIR
-            for pat in (f'*_stack_{fire_numbe}_*',
-                        f'kgc_{fire_numbe}_*'):
-                for f in glob.glob(os.path.join(RAM_DIR, pat)):
-                    _rm(f)
-        except Exception as exc:
-            sys.stderr.write(f'[remove] ramdisk purge: {exc}\n')
+        # Files derived from this record's AOI stack: the band-selected
+        # and scaled copies, and kgc's memoised tables. All share the
+        # stack's stem, which embeds a per-AOI hash, so this cannot
+        # reach another fire's stack.
+        stack = getattr(fire, 'crop_bin', '') or ''
+        if stack:
+            stem = os.path.splitext(stack)[0]
+            for pat in (stem + '_*.bin', stem + '_*.hdr',
+                        stack + '.kgc_*', stem + '.kgc_*',
+                        stack + '.kgc_backend', stem + '.hdr'):
+                for f in glob.glob(pat):
+                    own.append(f)
+            own.append(stack)
+            # kgc work directories are keyed on the fire and the stack
+            # path, so match on the stack's hash rather than the name.
+            try:
+                from ..aoi_stack import RAM_DIR
+                tag = os.path.basename(stem)
+                for d in glob.glob(os.path.join(RAM_DIR, 'kgc_*')):
+                    marker = os.path.join(d, '.stack')
+                    keep = False
+                    try:
+                        with open(marker, encoding='utf-8') as fh:
+                            keep = (fh.read().strip() == stack)
+                    except OSError:
+                        # No marker: fall back to the stack stem, which
+                        # contains the per-AOI hash.
+                        keep = tag in os.path.basename(d)
+                    if keep:
+                        own.append(d)
+            except Exception as exc:
+                sys.stderr.write(f'[remove] ramdisk scan: {exc}\n')
 
-        # In-memory registries keyed on the fire name.
+        for pth in own:
+            if pth:
+                _rm(pth)
+
+        # Accepted results: ONLY the directory this record wrote. If it
+        # never accepted anything, a directory bearing its name belongs
+        # to a different fire and is left alone.
+        acc = getattr(fire, 'accepted_dir', '') or ''
+        if acc and os.path.isdir(acc):
+            _rm(acc)
+        elif state.output_root:
+            cand = os.path.join(state.output_root, fire_numbe)
+            if os.path.isdir(cand):
+                skipped.append(cand)
+
+        # Registries keyed on the name, for this record only.
         with state.lock:
             for attr in ('viirs_jobs', 'viirs_subprocs'):
                 d = getattr(state, attr, None)
                 if isinstance(d, dict):
                     d.pop(fire_numbe, None)
             # Free the NAME by re-keying the hidden record to a
-            # tombstone. The admin restore list still finds it (it reads
-            # fire.fire_numbe, not the dict key), but a new fire may now
-            # take the original name.
+            # tombstone: state.fires is keyed on the name, so leaving it
+            # in place is what stopped the name being reused.
             rec = state.fires.pop(fire_numbe, None)
             if rec is not None:
-                tomb = f'{fire_numbe}~removed~{int(time.time())}'
-                state.fires[tomb] = rec
+                state.fires[f'{fire_numbe}~removed~{int(time.time())}'] = rec
 
         sys.stderr.write(
-            f'[remove] {fire_numbe}: purged {len(removed)} path(s); '
-            f'the name is free for reuse\n')
-        for pth in removed[:20]:
-            sys.stderr.write(f'[remove]   {pth}\n')
+            f'[remove] {fire_numbe}: purged {len(removed)} path(s) '
+            f'belonging to this record; the name is free for reuse\n')
+        for pth in removed[:25]:
+            sys.stderr.write(f'[remove]   removed {pth}\n')
+        for pth in skipped:
+            sys.stderr.write(
+                f'[remove]   KEPT {pth} -- this record never accepted '
+                f'anything, so that directory is another fire\'s\n')
 
         _save_fire_state()
-        self._send_json({'status': 'removed', 'purged': len(removed)})
+        self._send_json({'status': 'removed', 'purged': len(removed),
+                         'kept': len(skipped)})
 
     def handle_api_unhide(self, fire_numbe):
         if getattr(self, '_role', '') != 'admin':

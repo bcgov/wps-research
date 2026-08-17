@@ -2078,6 +2078,13 @@ def _accept_fire_sync(fire_numbe: str) -> str:
         raise RuntimeError(
             f'Cannot accept {fire_numbe}: output_root not configured.')
     fire_dir = os.path.join(state.output_root, fire_numbe)
+    # Remember that THIS record produced this directory. Deletion uses
+    # it to tell "results this fire wrote" from "results some earlier
+    # fire of the same name wrote", which a name match cannot do.
+    try:
+        fire.accepted_dir = fire_dir
+    except Exception:
+        pass
 
     # Register this accept as in-progress so the background cache
     # sweeper treats cache_dir as hard-pinned for the duration.

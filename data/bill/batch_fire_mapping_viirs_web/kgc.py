@@ -892,6 +892,15 @@ def run_kgc(fire, params: dict, log=None, progress=None,
             'utf-8')).hexdigest()[:10]
     work = os.path.join(ram, f'kgc_{fire.fire_numbe}_{key}')
     os.makedirs(work, exist_ok=True)
+    # Record which stack this directory serves. Deleting a fire matches
+    # on this rather than on the fire's NAME, so a later fire reusing
+    # the name cannot have its working directory removed.
+    try:
+        with open(os.path.join(work, '.stack'), 'w',
+                  encoding='utf-8') as f:
+            f.write(base_stack)
+    except OSError:
+        pass
     out_prefix = os.path.join(work, fire.fire_numbe)
 
     # KGC reads ENVI type 4 only. The stack is written float32, but a
@@ -1135,8 +1144,20 @@ def run_kgc(fire, params: dict, log=None, progress=None,
         pass
 
     step('kgc_classify', 'extracting the class mask', 0.80)
-    clf = os.path.join(fire.cache_dir, f'{fire.fire_numbe}_classified.bin')
+    # Each run gets its OWN classified raster, numbered like the sweep's.
+    #
+    # Writing every run to <fire>_classified.bin meant a re-run
+    # overwrote the file the previous entry pointed at: the old
+    # thumbnail stayed in the gallery but its Accept button would have
+    # promoted the NEW mask. Per-run files make the gallery a real
+    # history that can be compared and accepted from.
+    with state.lock:
+        _prev = list(getattr(fire, 'serial_results', None) or [])
+    _run_id = 1 + max([int(r.get('run_id') or 0) for r in _prev] or [0])
+    clf = os.path.join(fire.cache_dir,
+                       f'{fire.fire_numbe}_serial_{_run_id}_classified.bin')
     _extract_class_band(selected, base_stack, clf, log=emit)
+    emit(f'  run #{_run_id} -> {os.path.basename(clf)}')
 
     # Keep the full KGC product with the fire: it carries the
     # diagnostics (log-likelihood ratio, neighbouring K levels) that
@@ -1230,15 +1251,17 @@ def run_kgc(fire, params: dict, log=None, progress=None,
     agr = _compute_agreement(fire)
     ml_area = _compute_ml_area(fire, clf)
 
-    _overlay_mask_on_post(fire, clf, 'serial_1', (0.9, 0.1, 0.0))
+    _overlay_mask_on_post(fire, clf, f'serial_{_run_id}',
+                          (0.9, 0.1, 0.0))
     prev_dir = os.path.join(fire.cache_dir, 'previews')
-    s1 = os.path.join(prev_dir, 'serial_1.png')
+    s1 = os.path.join(prev_dir, f'serial_{_run_id}.png')
     res = os.path.join(prev_dir, 'result.png')
     if os.path.isfile(s1):
         shutil.copy2(s1, res)
         try:
             from .mapping import copy_preview_geo
-            copy_preview_geo(fire.cache_dir, 'serial_1', 'result')
+            copy_preview_geo(fire.cache_dir, f'serial_{_run_id}',
+                             'result')
         except Exception:
             pass
         if 'result' not in fire.available_views:
@@ -1246,8 +1269,28 @@ def run_kgc(fire, params: dict, log=None, progress=None,
 
     # One entry, shaped exactly like a serial run's, so the gallery and
     # its Accept button need no special case for KGC.
+    # The canonical <fire>_classified.bin tracks the LATEST run, because
+    # the eraser, rebrush and Download all read that path. Accepting an
+    # older run copies its own file over this one.
+    try:
+        canon = os.path.join(fire.cache_dir,
+                             f'{fire.fire_numbe}_classified.bin')
+        shutil.copy2(clf, canon)
+        _h = os.path.splitext(clf)[0] + '.hdr'
+        if os.path.isfile(_h):
+            shutil.copy2(_h, os.path.splitext(canon)[0] + '.hdr')
+        _r = os.path.splitext(clf)[0] + '_raw.bin'
+        if os.path.isfile(_r):
+            shutil.copy2(_r, os.path.splitext(canon)[0] + '_raw.bin')
+            _rh = os.path.splitext(_r)[0] + '.hdr'
+            if os.path.isfile(_rh):
+                shutil.copy2(_rh,
+                             os.path.splitext(canon)[0] + '_raw.hdr')
+    except OSError as exc:
+        emit(f'  (could not update the canonical mask: {exc})')
+
     entry = {
-        'run_id': 1,
+        'run_id': _run_id,
         'setting_idx': 0,
         'run_idx': 0,
         'setting_label': f'KGC {_which.upper()} ({want_src.upper()})',
@@ -1263,7 +1306,10 @@ def run_kgc(fire, params: dict, log=None, progress=None,
         # Keep the parameters that produced this result, so re-opening
         # the fire shows what was actually run rather than defaults.
         fire.kgc_params = dict(params or {})
-        fire.serial_results = [entry]
+        # APPEND: every run stays in the gallery so runs can be compared
+        # and any of them accepted, including after one has been
+        # accepted already.
+        fire.serial_results = _prev + [entry]
         fire.agreement_pct = agr
         # FireInfo's field is ml_area_ha; writing ml_size_ha created a
         # stray attribute, left the header at '--', and made
