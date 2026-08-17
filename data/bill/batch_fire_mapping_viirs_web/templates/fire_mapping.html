@@ -2753,32 +2753,41 @@ function drawOverlayLayer(pane) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
-    const st = paneState[pane];
-    const d = paneImageDims(img);
-    const cw = _fireOverlays.width || d.w || 1;
-    const ch = _fireOverlays.height || d.h || 1;
-    if (!d.w || !d.h) return;
+    // Geometry comes from the image's ACTUAL rendered rectangle, not
+    // from paneState plus the recorded box.
+    //
+    // Those can disagree: some load paths set the box after applying
+    // the transform, or leave a previous image's dimensions on the
+    // element. The overlay then scales and offsets differently from the
+    // picture it belongs to, which is how a perimeter ended up floating
+    // below the right pane while the left pane was correct.
+    // getBoundingClientRect() reports what the browser actually drew,
+    // so it cannot disagree with what is on screen.
+    const ir = img.getBoundingClientRect();
+    const ar = area.getBoundingClientRect();
+    if (!ir.width || !ir.height) return;
 
-    // crop px -> displayed px -> screen px
-    const k = d.w / cw;
-    const unit = st.scale * k;              // screen px per crop px
-    if (!(unit > 0)) return;
+    const cw = _fireOverlays.width || 0;
+    const ch = _fireOverlays.height || 0;
+    if (!cw || !ch) return;
 
-    const unitY = st.scale * (d.h / ch);
+    const sx = ir.width / cw;           // screen px per crop px
+    const sy = ir.height / ch;
+    if (!(sx > 0) || !(sy > 0)) return;
+
     ctx.save();
-    ctx.translate(st.panX, st.panY);
-    // Clip to the image's own footprint. Baked overlays were bounded by
-    // the bitmap; a full-pane canvas is not, so without this a
-    // neighbouring fire's perimeter is drawn across empty background
-    // and reads as part of this AOI.
+    ctx.translate(ir.left - ar.left, ir.top - ar.top);
+    // Clip to the image. A full-pane canvas is not bounded by the
+    // bitmap the way a baked overlay was, so without this a
+    // neighbouring fire's perimeter is drawn across empty background.
     ctx.beginPath();
-    ctx.rect(0, 0, d.w * st.scale, d.h * st.scale);
+    ctx.rect(0, 0, ir.width, ir.height);
     ctx.clip();
-    ctx.scale(unit, unitY);
-    // paintOverlayVectors divides every width and font size by `unit`,
-    // so passing the on-screen scale makes them land at a fixed number
-    // of CSS pixels no matter how far in we are zoomed.
-    paintOverlayVectors(ctx, unit, 1);
+    ctx.scale(sx, sy);
+    // paintOverlayVectors divides widths and font sizes by the unit it
+    // is given, so passing the on-screen scale makes them land at a
+    // fixed number of CSS pixels at any zoom.
+    paintOverlayVectors(ctx, sx, 1);
     ctx.restore();
 }
 
