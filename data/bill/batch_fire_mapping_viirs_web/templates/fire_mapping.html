@@ -1035,6 +1035,16 @@ function prefetchOtherSource(views) {
 // inner function has several early returns and an error branch, and a
 // missed release would leave the toolbar claiming to load forever.
 let _srcSwitchBusy = false;
+let _srcBusyReleased = false;
+
+// Release the busy indicator once the panes show the new source.
+// Idempotent, so the outer finally can call it again safely.
+function srcSwitchVisualDone() {
+    if (_srcBusyReleased) return;
+    _srcBusyReleased = true;
+    stopSourceSwitchProgress();
+    layerBusyEnd();
+}
 let _srcSwitchAbort = null;
 let _srcSwitchPoll = null;
 
@@ -1082,6 +1092,11 @@ async function onPostSourceChange() {
     }
     const previous = currentPostSource;
     _srcSwitchBusy = true;
+    _srcBusyReleased = false;
+    // Grey out BOTH selectors: the right pane reads the same per-source
+    // preview stash, so letting it be changed mid-switch would race the
+    // very files being rewritten.
+    setSourceSelectorsEnabled(false);
     _srcSwitchAbort = new AbortController();
     // Generous, but finite: a build that has not finished in 20 minutes
     // is stuck, and leaving the page waiting forever helps nobody.
@@ -1105,10 +1120,20 @@ async function onPostSourceChange() {
         try { updateSubtitle('left', leftView); } catch (_) {}
     } finally {
         clearTimeout(killer);
-        stopSourceSwitchProgress();
+        srcSwitchVisualDone();      // no-op if already released
+        setSourceSelectorsEnabled(true);
         _srcSwitchBusy = false;
         _srcSwitchAbort = null;
-        layerBusyEnd();
+    }
+}
+
+function setSourceSelectorsEnabled(on) {
+    for (const id of ['post-source-select', 'post-source-select-right']) {
+        const el = document.getElementById(id);
+        if (!el) continue;
+        el.disabled = !on;
+        el.style.opacity = on ? '' : '0.5';
+        el.style.cursor = on ? '' : 'wait';
     }
 }
 
@@ -1220,12 +1245,26 @@ async function _onPostSourceChangeInner() {
         perfMark('post-source switch complete');
         // Already repainted above when the cache had it; otherwise
         // refresh now that the server has rebuilt.
+        //
+        // AWAITED, so "finished" means the new imagery is actually on
+        // screen. Previously these were fired and forgotten and the
+        // cache warming below ran before the indicator cleared, so the
+        // bar claimed to be working for several seconds after the panes
+        // had visibly switched.
         if (!canSwapInstantly) {
-            loadPaneImage('left', leftView);
-            if (splitActive && rightView) loadPaneImage('right', rightView);
+            await loadPaneImage('left', leftView);
+            if (splitActive && rightView) {
+                await loadPaneImage('right', rightView);
+            }
         }
+        // The visible work is done: release the indicator HERE rather
+        // than after the background warming below.
+        srcSwitchVisualDone();
+
         // Warm the cache for every stack-derived view of this source so
         // subsequent toggles are instant regardless of which view is up.
+        // Deliberately not awaited and not covered by the indicator --
+        // it is prefetching, and the user is not waiting for it.
         warmSourceCache(src);
         warmHintCache(src);
         drainWarmQueue();
@@ -5253,6 +5292,8 @@ function onViewDropdownChange() {
     // In split view the first selector always drives the LEFT pane, so
     // its effect is predictable; the right pane has its own control.
     loadPaneImage(splitActive ? 'left' : activePane, viewKey);
+    // Persist it: the chosen layer is part of how this fire was left.
+    setTimeout(() => { try { saveUiState(); } catch (_) {} }, 0);
 }
 
 async function onRightPostSourceChange() {
@@ -5268,6 +5309,9 @@ async function onRightPostSourceChange() {
     // change what mapping reads. The right pane is for comparison, so
     // it just displays the other source's already-stashed previews.
     rightPostSource = src;
+    // Same treatment as the left: grey both selectors while this runs,
+    // because both read the per-source preview stash.
+    setSourceSelectorsEnabled(false);
     layerBusyBegin(src === 'l2' ? 'Loading L2 recent tile (right)'
                                 : 'Loading MRAP composite (right)');
     try {
@@ -5280,6 +5324,7 @@ async function onRightPostSourceChange() {
         log(`[perf] right-pane source switch failed: ${err.message}`,
             'error');
     } finally {
+        setSourceSelectorsEnabled(true);
         layerBusyEnd();
     }
 }
@@ -5288,6 +5333,9 @@ function onRightViewDropdownChange() {
     const viewKey = document.getElementById('view-select-right').value;
     if (!viewKey) return;
     loadPaneImage('right', viewKey);
+    // The right pane's view is half of what a split comparison IS;
+    // without this it was the one setting that never came back.
+    setTimeout(() => { try { saveUiState(); } catch (_) {} }, 0);
 }
 
 // Keep the right-pane selector's options in step with the left one.
