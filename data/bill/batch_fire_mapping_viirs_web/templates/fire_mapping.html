@@ -3313,6 +3313,7 @@ let _eraseOn = false;
 let _erasing = false;
 let _erasePts = [];          // image-pixel centres for this stroke
 let _eraseBase = null;       // post-fire pixels, to reveal when erasing
+let _hoverPane = null;       // pane under the pointer, or null
 let _erasePerim = null;      // Uint8Array, 1 where the BCWS perimeter
                              // protects a pixel (preview resolution)
 let _erasePerimDims = null;
@@ -3371,6 +3372,21 @@ function _eraserKeyHandler(e) {
                 && !['checkbox', 'radio', 'button', 'submit']
                     .includes((t.type || 'text').toLowerCase()));
         if (typing) return;
+    }
+    // Only while the pointer is over a pane showing the
+    // classification. E is a destructive-tool toggle, and enabling it
+    // while the mouse is over the imagery or the parameter panel makes
+    // the next click erase something the user was not looking at.
+    if (!_hoverPane || !paneShowsResult(_hoverPane)) {
+        return;
+    }
+    // Only while the pointer is over a pane showing the ML
+    // classification. The eraser edits that mask, so the key should do
+    // nothing when the pointer is somewhere it could not be used --
+    // silently toggling a tool the user cannot see is worse than not
+    // responding.
+    if (!_hoverPane || !paneShowsResult(_hoverPane)) {
+        return;
     }
     const el = document.getElementById('eraser-on');
     if (!el) return;
@@ -4150,10 +4166,27 @@ function initPaneInteraction(pane) {
 // Initialize left pane
 initPaneInteraction('left');
 
+// _hoverPane is already maintained elsewhere in this file; the eraser
+// key reads it rather than tracking hover a second time.
 document.addEventListener('mousemove', (e) => {
     // Browsers repaint a cursor on movement, not on assignment, so
     // re-assert it here. The per-pane key makes this a no-op unless
     // the size or zoom actually changed.
+    // Remember which pane the pointer is over, so the E shortcut can
+    // apply only where erasing is meaningful.
+    try {
+        _hoverPane = null;
+        for (const pn of (splitActive ? ['left', 'right'] : ['left'])) {
+            const { area } = getPaneElements(pn);
+            if (!area) continue;
+            const r = area.getBoundingClientRect();
+            if (e.clientX >= r.left && e.clientX <= r.right
+                    && e.clientY >= r.top && e.clientY <= r.bottom) {
+                _hoverPane = pn;
+                break;
+            }
+        }
+    } catch (_) { _hoverPane = null; }
     if (_eraseOn) applyEraserCursor(false);
     if (_erasing && _erasePane) {
         // Continuous strokes: every move point erases, so dragging

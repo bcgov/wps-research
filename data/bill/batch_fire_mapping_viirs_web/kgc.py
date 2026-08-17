@@ -128,6 +128,155 @@ def kgc_dir() -> str:
     return os.path.join(repo, 'cpp', 'kgc2')
 
 
+def estimate_memory(n_points: int, kmax: int, dim: int,
+                    batch: int = 256) -> dict:
+    """Bytes the run needs, on the host and on a GPU.
+
+    The neighbour table dominates everything: n x kmax entries of a
+    float distance plus a size_t index. The GPU additionally needs the
+    points, one batch of the distance matrix, and CUB's sort scratch --
+    but NOT the whole table, which is streamed back to the host as it is
+    produced.
+
+    This is what decides which build runs. The host has far more memory
+    than the card, so the GPU is used only when its working set fits
+    with margin; otherwise the CPU build is correct and merely slower.
+    """
+    n, k, d = max(1, int(n_points)), max(1, int(kmax)), max(1, int(dim))
+    k = min(k, n)
+    host_table = n * k * (4 + 8)          # float dist + size_t index
+    host_points = n * d * 4
+    gpu_points = n * d * 4
+    # keys in/out + values in/out for one batch, plus CUB scratch which
+    # is roughly the same size again.
+    gpu_batch = batch * n * (4 * 2 + 4 * 2)
+    gpu_total = gpu_points + gpu_batch * 2
+    return {
+        'n_points': n, 'kmax': k, 'dim': d, 'batch': batch,
+        'host_bytes': host_table + host_points,
+        'host_table_bytes': host_table,
+        'gpu_bytes': gpu_total,
+        'host_gb': (host_table + host_points) / 1e9,
+        'gpu_gb': gpu_total / 1e9,
+    }
+
+
+def gpu_free_bytes() -> int:
+    """Free memory on the first CUDA device, or 0 if there is none."""
+    try:
+        p = subprocess.run(
+            ['nvidia-smi',
+             '--query-gpu=memory.free', '--format=csv,noheader,nounits'],
+            capture_output=True, timeout=15)
+        if p.returncode != 0:
+            return 0
+        first = (p.stdout or b'').decode().strip().splitlines()
+        return int(float(first[0].strip())) * 1024 * 1024 if first else 0
+    except Exception:
+        return 0
+
+
+def choose_kgc_build(params: dict, n_points: int, dim: int,
+                     log=None) -> tuple:
+    """(exe_path, which, note) -- pick the GPU build when it fits.
+
+    Deliberately conservative: a run that exceeds device memory does not
+    fail cleanly, it thrashes or is killed, and from the UI that is
+    indistinguishable from slow. Requiring 1.5x headroom costs some
+    speed on borderline cases and avoids that failure entirely.
+    """
+    def emit(msg):
+        sys.stderr.write(msg + '\n')
+        if log:
+            try:
+                log(msg)
+            except Exception:
+                pass
+
+    kmax = int((params or {}).get('kgc_kmax')
+               or KGC_DEFAULTS['kgc_kmax'])
+    est = estimate_memory(n_points, kmax, dim)
+    emit(f'  memory model: host {est["host_gb"]:.1f} GB '
+         f'(table {est["host_table_bytes"] / 1e9:.1f} GB), '
+         f'GPU working set {est["gpu_gb"]:.1f} GB '
+         f'[{est["n_points"]:,} points x k_max {est["kmax"]:,} '
+         f'x {est["dim"]} dims]')
+
+    free = gpu_free_bytes()
+    if free <= 0:
+        emit('  no CUDA device visible; using the CPU build')
+        return ensure_kgc_binary(log=log), 'cpu', 'no GPU'
+    need = int(est['gpu_bytes'] * 1.5)
+    if need > free:
+        emit(f'  GPU has {free / 1e9:.1f} GB free but the run wants '
+             f'~{need / 1e9:.1f} GB with headroom; using the CPU build')
+        return ensure_kgc_binary(log=log), 'cpu', 'insufficient GPU memory'
+    try:
+        exe = ensure_kgc_gpu_binary(log=log)
+        emit(f'  GPU build selected ({free / 1e9:.1f} GB free)')
+        return exe, 'gpu', ''
+    except Exception as exc:
+        emit(f'  GPU build unavailable ({exc}); using the CPU build')
+        return ensure_kgc_binary(log=log), 'cpu', str(exc)
+
+
+def ensure_kgc_gpu_binary(log=None) -> str:
+    """Path to a built ``kgc_gpu``, compiling the .cu if needed.
+
+    Rebuilt whenever either source is newer than the binary: kgc.cu
+    #includes kgc.cpp, so a change to the CPU file changes the GPU build
+    too and checking only the .cu would silently ship a stale binary.
+    """
+    def emit(msg):
+        sys.stderr.write(msg + '\n')
+        if log:
+            try:
+                log(msg)
+            except Exception:
+                pass
+
+    d = kgc_dir()
+    cu = os.path.join(d, 'kgc.cu')
+    cpp = os.path.join(d, 'kgc.cpp')
+    exe = os.path.join(d, 'kgc_gpu')
+    if not os.path.isfile(cu):
+        raise RuntimeError(f'no CUDA source at {cu}')
+
+    fresh = False
+    try:
+        fresh = (os.path.isfile(exe)
+                 and os.path.getmtime(exe) >= os.path.getmtime(cu)
+                 and os.path.getmtime(exe) >= os.path.getmtime(cpp))
+    except OSError:
+        fresh = False
+    if fresh and os.access(exe, os.X_OK):
+        return exe
+
+    # Match the device rather than assuming. sm_89 is Ada (L40S).
+    arch = 'sm_89'
+    try:
+        p = subprocess.run(
+            ['nvidia-smi', '--query-gpu=compute_cap',
+             '--format=csv,noheader'], capture_output=True, timeout=15)
+        cc = (p.stdout or b'').decode().strip().splitlines()
+        if cc:
+            arch = 'sm_' + cc[0].strip().replace('.', '')
+    except Exception:
+        pass
+
+    cmd = ['nvcc', '-O3', '-std=c++14', f'-arch={arch}',
+           '-Xcompiler', '-pthread', 'kgc.cu', '-o', 'kgc_gpu']
+    emit(f'  Building the GPU KGC: {" ".join(cmd)} (in {d})')
+    t0 = time.time()
+    p = subprocess.run(cmd, cwd=d, capture_output=True)
+    if p.returncode != 0:
+        err = (p.stderr or b'').decode('utf-8', 'replace').strip()
+        raise RuntimeError(
+            f'nvcc failed (exit {p.returncode}):\n{err[-2000:]}')
+    emit(f'  GPU KGC built in {time.time() - t0:.1f}s -> {exe}')
+    return exe
+
+
 def ensure_kgc_binary(log=None) -> str:
     """Path to a built ``kgc``, compiling it if needed.
 
@@ -471,7 +620,10 @@ def run_kgc(fire, params: dict, log=None, progress=None,
                            'mode that can be built for this AOI.')
 
     step('kgc_build', 'compiling / checking the KGC binary', 0.02)
-    exe = ensure_kgc_binary(log=emit)
+    # Which build runs is decided AFTER the stack is known, since the
+    # memory model needs the point count and band count. Resolve the
+    # stack first, then choose.
+    exe = None
 
     # Same band selection the ML pipeline receives, so the two methods
     # are comparable and the exclusion checkboxes mean one thing.
@@ -520,6 +672,25 @@ def run_kgc(fire, params: dict, log=None, progress=None,
                 emit(f'  cleared stale {os.path.basename(stale)}')
         except OSError as exc:
             emit(f'  could not clear {os.path.basename(stale)}: {exc}')
+
+    # Point count and dimensionality drive the memory model. Points are
+    # bounded by the budget; dims come from the (already band-selected,
+    # already scaled) stack.
+    try:
+        from osgeo import gdal as _g2
+        _ds2 = _g2.Open(image, _g2.GA_ReadOnly)
+        _dim = _ds2.RasterCount if _ds2 is not None else 3
+        _npix = ((_ds2.RasterXSize * _ds2.RasterYSize)
+                 if _ds2 is not None else 0)
+        _ds2 = None
+    except Exception:
+        _dim, _npix = 3, 0
+    _budget = int((params or {}).get('kgc_budget_points')
+                  or KGC_DEFAULTS['kgc_budget_points'])
+    _npts = min(_budget, _npix) if _npix else _budget
+    exe, _which, _note = choose_kgc_build(params, _npts, _dim, log=emit)
+    emit(f'  running the {_which.upper()} build: '
+         f'{os.path.basename(exe)}')
 
     cmd = build_kgc_cmd(exe, image, hint, out_prefix, params)
     emit('  ' + ' '.join(cmd))

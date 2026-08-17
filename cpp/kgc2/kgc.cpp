@@ -103,6 +103,25 @@ struct Args {
  * Brute force with a partial selection, because k_max is a sizeable fraction
  * of the point count and a tree degenerates to a full scan at that ratio
  * while paying for the traversal as well.                                  */
+/* The neighbour table is the whole cost of this program: O(n^2 * dim)
+ * distances, and the table itself is n * kmax * 12 bytes. It is
+ * therefore the only part worth moving to a GPU.
+ *
+ * kgc.cu compiles THIS FILE with KGC_BUILD_KNN_EXTERNAL defined and
+ * supplies a CUDA build_knn with the same signature. Everything else --
+ * the dedup, the K sweep, the class selection, the output and every log
+ * line -- is literally this code, so the two builds cannot drift apart
+ * in behaviour. */
+#ifdef KGC_BUILD_KNN_EXTERNAL
+void build_knn_cuda(const float* pts, size_t n, size_t dim, size_t kmax,
+                    size_t threads, std::vector<float>& dd,
+                    std::vector<size_t>& di);
+static void build_knn(const float* pts, size_t n, size_t dim, size_t kmax,
+                      size_t threads, std::vector<float>& dd,
+                      std::vector<size_t>& di) {
+  build_knn_cuda(pts, n, dim, kmax, threads, dd, di);
+}
+#else
 static void build_knn(const float* pts, size_t n, size_t dim, size_t kmax,
                       size_t threads, std::vector<float>& dd,
                       std::vector<size_t>& di) {
@@ -137,6 +156,7 @@ static void build_knn(const float* pts, size_t n, size_t dim, size_t kmax,
   });
   std::fprintf(stderr, "  neighbours 100.0%%\n");
 }
+#endif  /* KGC_BUILD_KNN_EXTERNAL */
 
 /* ------------------------------------------------------------------------ */
 /* on-disk memoisation                                                       */
