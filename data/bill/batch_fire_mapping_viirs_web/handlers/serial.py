@@ -228,10 +228,42 @@ class SerialRoutes:
         busy = (FireStatus.PENDING, FireStatus.PREPARING,
                 FireStatus.MAPPING)
         if fire.status in busy:
-            self._send_json(
-                {'error': f'Fire is {fire.status.value}; wait for it '
-                          f'to finish first.'}, 409)
-            return
+            # A run whose worker died leaves the fire MAPPING forever,
+            # and every retry is refused -- the user is locked out of
+            # their own fire with no way back except a restart. If
+            # nothing has reported progress for a while and no
+            # subprocess is alive, treat the run as dead and let this
+            # one proceed.
+            stale_for = 0.0
+            try:
+                prog = getattr(fire, 'progress', None) or {}
+                last = prog.get('last_change_at') or prog.get('updated_at')
+                if last:
+                    stale_for = time.time() - float(last)
+            except Exception:
+                stale_for = 0.0
+            proc = getattr(fire, 'kgc_proc', None)
+            alive = False
+            try:
+                alive = proc is not None and proc.poll() is None
+            except Exception:
+                alive = False
+            if alive or stale_for < 180.0:
+                self._send_json(
+                    {'error': f'Fire is {fire.status.value}; wait for '
+                              f'it to finish first.'
+                              + (f' (no progress for '
+                                 f'{stale_for / 60:.0f} min \u2014 it '
+                                 f'will be recoverable shortly)'
+                                 if stale_for > 60 else '')}, 409)
+                return
+            sys.stderr.write(
+                f'[kgc] {fire_numbe}: previous run looks dead '
+                f'(no progress for {stale_for:.0f}s, no subprocess); '
+                f'starting a new one\n')
+            with state.lock:
+                fire.status = FireStatus.READY
+                fire.progress = {}
         if not fire.crop_bin or not os.path.isfile(fire.crop_bin):
             self._send_json(
                 {'error': 'The AOI stack is not built yet.'}, 409)

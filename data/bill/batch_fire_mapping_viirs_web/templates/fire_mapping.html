@@ -3424,13 +3424,22 @@ function applyEraserCursor(force) {
             return;
         }
         const s = paneState[pane].scale || 1;
+        // The eraser size is in MASK pixels, but the transform is
+        // display-px per PREVIEW-px, and previews are capped at 2000 px
+        // while the mask can be larger (2969 px here). Drawing the box
+        // at size*scale therefore made the cursor smaller than the area
+        // actually erased, by exactly the preview/mask ratio.
+        const { img: _ci } = getPaneElements(pane);
+        const _cd = paneImageDims(_ci);
+        const _cg = geoForPane(pane);
+        const _k = (_cg && _cg.rw && _cd.w) ? (_cd.w / _cg.rw) : 1;
         const px = Math.max(6, Math.min(96,
-                                        Math.round(eraserSize() * s)));
+                                        Math.round(eraserSize() * _k * s)));
         // Browsers cache the cursor image per URL and will not repaint
         // a stationary pointer when the property is reassigned. Clear
         // it first, and only rebuild when the size actually changed --
         // otherwise every mousemove would allocate a new data URI.
-        const key = String(px);
+        const key = `${px}:${_k.toFixed(4)}`;
         if (!force && key === _cursorKeys[pane] && area.style.cursor) {
             return;
         }

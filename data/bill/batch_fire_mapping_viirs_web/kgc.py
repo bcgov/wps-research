@@ -525,6 +525,34 @@ def run_kgc(fire, params: dict, log=None, progress=None,
     emit('  ' + ' '.join(cmd))
     step('kgc_cluster', 'clustering (the long step)', 0.15)
 
+    # Neighbour-table size, before anything is launched.
+    #
+    # It is n_points x k_max x 12 bytes, so the point budget and k_max
+    # multiply: 20k x 10k is ~2.4 GB, 50k x 10k is ~6 GB. A run that
+    # exceeds available memory does not fail cleanly -- it thrashes, or
+    # the kernel kills it, and from the UI that is indistinguishable
+    # from a run that is merely slow.
+    try:
+        _pts = int((params or {}).get('kgc_budget_points')
+                   or KGC_DEFAULTS['kgc_budget_points'])
+        _kmx = int((params or {}).get('kgc_kmax')
+                   or KGC_DEFAULTS['kgc_kmax'])
+        _gb = _pts * _kmx * 12 / 1e9
+        emit(f'  neighbour table ~{_gb:.1f} GB '
+             f'({_pts:,} points x k_max {_kmx:,})')
+        if _gb > 4.0:
+            emit(f'  WARNING: that is large. If the run stalls or dies, '
+                 f'lower "Budget points" or "k_max" -- the table has to '
+                 f'fit in RAM.')
+        try:
+            import shutil as _sh
+            free = _sh.disk_usage(work).free / 1e9
+            emit(f'  ramdisk free at {work}: {free:.1f} GB')
+        except Exception:
+            pass
+    except Exception:
+        pass
+
     t0 = time.time()
     proc = subprocess.Popen(cmd, cwd=work, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT,
@@ -533,6 +561,31 @@ def run_kgc(fire, params: dict, log=None, progress=None,
         fire.kgc_proc = proc
     except Exception:
         pass
+    # Heartbeat on its OWN thread.
+    #
+    # KGC is silent for minutes while it builds the neighbour table, so
+    # anything driven by its output cannot tick during exactly the
+    # stretch where the user most needs to know the run is alive. A
+    # separate thread updates the elapsed time regardless of whether
+    # the subprocess has said anything.
+    import threading as _th
+    _beat_stop = _th.Event()
+
+    def _beat():
+        while not _beat_stop.wait(3.0):
+            try:
+                el = time.time() - t0
+                step('kgc_cluster',
+                     f'running \u2014 {_fmt_secs(el)} elapsed'
+                     + (' (building the neighbour table; this is the '
+                        'long, silent part)' if el < 600 else ''),
+                     None)
+            except Exception:
+                return
+
+    _beat_thread = _th.Thread(target=_beat, daemon=True)
+    _beat_thread.start()
+
     lines = []
     for line in proc.stdout:
         # Cancel is cooperative: the flag is set by the endpoint, and
@@ -585,6 +638,7 @@ def run_kgc(fire, params: dict, log=None, progress=None,
         elif low.startswith('[out]'):
             step('kgc_classify', 'writing the KGC product', 0.79)
     rc = proc.wait()
+    _beat_stop.set()
     try:
         fire.kgc_proc = None
     except Exception:
@@ -601,6 +655,15 @@ def run_kgc(fire, params: dict, log=None, progress=None,
 
     if rc != 0:
         tail = '\n'.join(lines[-15:])
+        if rc < 0:
+            # Negative return code means a signal. -9 is the OOM killer
+            # in almost every case, and saying so saves an hour of
+            # looking for a bug in the clustering.
+            raise RuntimeError(
+                f'KGC was killed by signal {-rc} after {dt:.0f}s '
+                f'(signal 9 is almost always the out-of-memory killer). '
+                f'Lower "Budget points" or "k_max" so the neighbour '
+                f'table fits in RAM.\n{tail}')
         raise RuntimeError(
             f'KGC exited with code {rc} after {dt:.0f}s.\n{tail}')
 
