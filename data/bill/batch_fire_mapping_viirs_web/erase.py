@@ -357,6 +357,47 @@ def prebrush_path(clf_path: str) -> str:
     return os.path.splitext(clf_path)[0] + '_raw.bin'
 
 
+def _verify_overlay_differs(fire, out_name: str, log=None) -> bool:
+    """True when previews/<out_name>.png actually differs from the base.
+
+    _overlay_mask_on_post() draws the mask onto post.png. If the mask it
+    was given was empty -- or if it silently fell back -- the output is
+    a copy of the base imagery, which renders as "the layer shows the
+    wrong picture" rather than as an error. Comparing the bytes is
+    cheap and catches exactly that.
+    """
+    try:
+        prev = os.path.join(fire.cache_dir, 'previews')
+        out = os.path.join(prev, f'{out_name}.png')
+        if not os.path.isfile(out):
+            return False
+        import hashlib
+
+        def _sig(p_):
+            try:
+                with open(p_, 'rb') as f:
+                    return hashlib.md5(f.read()).hexdigest()
+            except OSError:
+                return None
+        sig = _sig(out)
+        for base in ('post.png', 'pre.png'):
+            if sig and sig == _sig(os.path.join(prev, base)):
+                msg = (f'  WARNING: {out_name}.png is byte-identical to '
+                       f'{base} -- the overlay drew no mask, so the '
+                       f'layer would show plain imagery. Removing it.')
+                sys.stderr.write(msg + '\n')
+                if log:
+                    log(msg)
+                try:
+                    os.remove(out)
+                except OSError:
+                    pass
+                return False
+        return True
+    except Exception:
+        return True
+
+
 def render_prebrush_overlay(fire, clf_path: str = None,
                             log=None) -> bool:
     """Render 'ML classification - before brushing' as a map layer.
@@ -439,6 +480,10 @@ def render_prebrush_overlay(fire, clf_path: str = None,
                               (0.9, 0.1, 0.0))
         png = os.path.join(fire.cache_dir, 'previews',
                            'result_prebrush.png')
+        if not _verify_overlay_differs(fire, 'result_prebrush', log=log):
+            if 'result_prebrush' in (fire.available_views or []):
+                fire.available_views.remove('result_prebrush')
+            return False
         if os.path.isfile(png):
             if 'result_prebrush' not in fire.available_views:
                 fire.available_views.append('result_prebrush')

@@ -743,13 +743,28 @@ def run_kgc(fire, params: dict, log=None, progress=None,
             _np.nan_to_num(_d.GetRasterBand(1).ReadAsArray()) > 0))
             if _d is not None else -1)
         _d = None
-        emit(f'  before brushing: {_n:,} px -> rendering '
-             f'"ML Classification - before brushing"')
+        # Name the BASE too. The overlay is drawn onto previews/post.png,
+        # so if that file is currently the other source's post image --
+        # or a stale one -- the layer shows imagery that does not match
+        # the pane, which is indistinguishable from "the layer is
+        # broken". Recording both inputs makes the difference legible.
+        _postp = os.path.join(fire.cache_dir, 'previews', 'post.png')
+        try:
+            _psz = os.path.getsize(_postp)
+            _page = time.time() - os.path.getmtime(_postp)
+        except OSError:
+            _psz, _page = -1, -1
+        emit(f'  before brushing: {_n:,} px; base=previews/post.png '
+             f'({_psz:,} B, written {_page:.0f}s ago); '
+             f'source={want_src.upper()}')
         _overlay_mask_on_post(fire, clf, 'result_prebrush',
                               (0.9, 0.1, 0.0))
+        from .erase import _verify_overlay_differs
+        _ok_pb = _verify_overlay_differs(fire, 'result_prebrush',
+                                         log=emit)
         _pb = os.path.join(fire.cache_dir, 'previews',
                            'result_prebrush.png')
-        if os.path.isfile(_pb):
+        if _ok_pb and os.path.isfile(_pb):
             with state.lock:
                 if 'result_prebrush' not in fire.available_views:
                     fire.available_views.append('result_prebrush')

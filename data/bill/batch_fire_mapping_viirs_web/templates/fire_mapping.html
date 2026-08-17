@@ -3640,12 +3640,20 @@ async function flushErase() {
                 _previewBlobs.delete(k);
             }
         }
-        if (_erasePane) {
-            await loadPaneImage(_erasePane,
-                                (_erasePane === 'left') ? leftView
-                                                        : rightView);
-            prepareEraseCanvases();
+        // Refresh EVERY pane showing the classification, not just the
+        // one being drawn on. With 'ML classification' in both panes
+        // the other one kept the pre-edit mask, so the two panes
+        // disagreed about the same layer.
+        const panes = splitActive ? ['left', 'right'] : ['left'];
+        for (const pn of panes) {
+            const v = (pn === 'left') ? leftView : rightView;
+            if (!v) continue;
+            if (v === 'result' || v === 'result_prebrush'
+                    || (RUN_VIEWS && RUN_VIEWS.has(v))) {
+                await loadPaneImage(pn, v);
+            }
         }
+        prepareEraseCanvases();
     } catch (err) {
         log(`[erase] sync failed: ${err.message}`, 'error');
     }
