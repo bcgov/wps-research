@@ -97,37 +97,6 @@ _ensure_brush_comparison_in_cache = None
 # They are referenced through ``import_app_globals`` only as needed.
 
 
-def _effectively_hidden(f) -> bool:
-    """Hidden for display purposes.
-
-    A fire is only really hidden if someone hid it AND it has nothing
-    left on disk. Deletion clears cache_dir and removes the directory,
-    so a record flagged hidden while its cache is intact was flagged in
-    error -- and a fire invisible in the list cannot be recovered from
-    the UI at all, which is far worse than briefly showing one that was
-    meant to be hidden.
-    """
-    if not getattr(f, 'hidden', False):
-        return False
-    if getattr(f, 'removed', False):
-        return True
-    try:
-        cd = getattr(f, 'cache_dir', '') or ''
-        if cd and os.path.isdir(cd) and os.listdir(cd):
-            if not getattr(f, '_unhide_logged', False):
-                try:
-                    f._unhide_logged = True
-                except Exception:
-                    pass
-                sys.stderr.write(
-                    f'[fires] {f.fire_numbe}: flagged hidden but its '
-                    f'cache is intact; showing it in the list\n')
-            return False
-    except OSError:
-        pass
-    return True
-
-
 def init(app_state, helpers):
     """Bind shared helpers and the live AppState into this mixin module.
 
@@ -140,6 +109,28 @@ def init(app_state, helpers):
     g['state'] = app_state
     for name, value in helpers.items():
         g[name] = value
+
+
+def _list_visible(f) -> bool:
+    """Should this fire appear in the list?
+
+    Two rules, in this order:
+
+    1. Work in progress is ALWAYS shown. A fire disappearing the moment
+       it starts mapping and reappearing when it finishes makes the list
+       untrustworthy, and that is precisely when the user wants to see
+       it.
+    2. Otherwise, show it unless it was hidden. Deleted fires are not
+       here at all -- the record is dropped outright -- so there is no
+       third case to reason about.
+    """
+    try:
+        st = getattr(getattr(f, 'status', None), 'value', '')
+        if st in ('pending', 'preparing', 'mapping'):
+            return True
+    except Exception:
+        pass
+    return not getattr(f, 'hidden', False)
 
 
 class FireListRoutes:
@@ -239,7 +230,7 @@ class FireListRoutes:
                     'created_at': float(getattr(f, 'created_at', 0) or 0),
                 }
                 for f in state.fires.values()
-                if not _effectively_hidden(f)
+                if _list_visible(f)
             ]
         # Newest first. Fires with no timestamp on record sort last
         # rather than jumping to the top.
@@ -396,12 +387,19 @@ class FireListRoutes:
                 d = getattr(state, attr, None)
                 if isinstance(d, dict):
                     d.pop(fire_numbe, None)
-            # Free the NAME by re-keying the hidden record to a
-            # tombstone: state.fires is keyed on the name, so leaving it
-            # in place is what stopped the name being reused.
-            rec = state.fires.pop(fire_numbe, None)
-            if rec is not None:
-                state.fires[f'{fire_numbe}~removed~{int(time.time())}'] = rec
+            # Drop the record outright and note the name in the
+            # graveyard.
+            #
+            # Keeping a tombstone RECORD meant two entries shared a
+            # fire_numbe once the name was reused, and the deleted one's
+            # flags were applied to the live fire. There is nothing left
+            # to keep -- the products are purged -- so the record goes
+            # and only the name is remembered.
+            state.fires.pop(fire_numbe, None)
+            try:
+                state.deleted_fires[fire_numbe] = time.time()
+            except Exception:
+                state.deleted_fires = {fire_numbe: time.time()}
 
         sys.stderr.write(
             f'[remove] {fire_numbe}: purged {len(removed)} path(s) '
@@ -692,8 +690,7 @@ class FireListRoutes:
         name_raw = body.get('name', '')
         # Removed fires do not hold their names. They are kept only so
         # the record exists; their products are gone.
-        existing = [k for k, f in state.fires.items()
-                    if not getattr(f, 'removed', False)]
+        existing = list(state.fires.keys())
         try:
             name = _validate_fire_name(name_raw, existing_names=existing)
         except ValueError as exc:
@@ -785,6 +782,13 @@ class FireListRoutes:
             fire.viirs_end_date = end_date.isoformat()
             import threading as _t
             fire.cancel_event = _t.Event()
+            # The name is being reused, so it is no longer deleted.
+            # Leaving it in the graveyard would stop the on-disk
+            # scan ever reconstructing THIS fire.
+            try:
+                (state.deleted_fires or {}).pop(name, None)
+            except Exception:
+                pass
             state.fires[name] = fire
 
         # If the user previewed before confirming, seed cache_dir with

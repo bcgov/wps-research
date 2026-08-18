@@ -116,6 +116,14 @@ def _save_fire_state():
         return
     try:
         data = {}
+        # Names the user deleted. Persisted so a restart cannot bring
+        # them back via the output-directory scan.
+        try:
+            data['deleted_fires'] = {
+                str(k): float(v) for k, v in
+                (getattr(state, 'deleted_fires', {}) or {}).items()}
+        except Exception:
+            pass
         # Hold the lock across the entire snapshot so no fire attribute is
         # read while another thread is mutating it. state.lock is an RLock
         # so any inner helpers that re-acquire it remain safe.
@@ -129,7 +137,20 @@ def _save_fire_state():
                 # the same name -- which hid three freshly created fires
                 # from the list. Its products are already purged, so
                 # there is nothing left to remember.
+                # Removed fires are not written, and neither is any
+                # record whose NAME carries the tombstone marker.
+                #
+                # An earlier fix re-keyed deleted fires to
+                # "<name>~removed~<ts>" in state.fires. This file is
+                # keyed by that dict key, so the marker was written back
+                # as the fire's NUMBER, reloaded as a genuine fire,
+                # re-prepared, notified about, and tombstoned again on
+                # the next delete -- which is how a cleared list grew to
+                # 28 phantom fires.
                 if getattr(fire, 'removed', False):
+                    continue
+                if '~removed' in str(fn) or '~removed' in str(
+                        getattr(fire, 'fire_numbe', '')):
                     continue
                 # Only persist fires with meaningful state beyond PENDING
                 if (fire.status == FireStatus.PENDING and not fire.hidden
@@ -275,6 +296,18 @@ def _load_fire_state():
         import yaml
         with open(state_path) as f:
             data = yaml.safe_load(f) or {}
+        # Restore the graveyard BEFORE any fire is reconstructed, so the
+        # scan and the entries below both see it.
+        try:
+            state.deleted_fires = {
+                str(k): float(v) for k, v in
+                (data.get('deleted_fires') or {}).items()}
+            if state.deleted_fires:
+                sys.stderr.write(
+                    f'[persistence] {len(state.deleted_fires)} deleted '
+                    f'fire name(s) on record\n')
+        except Exception:
+            state.deleted_fires = {}
     except Exception as exc:
         # Rotate the unparseable file aside so the refuse-to-save guard
         # in _save_fire_state does not need the original path free, and
@@ -308,6 +341,18 @@ def _load_fire_state():
         return
 
     restored = 0
+    # Discard tombstone records written by the earlier bug. They are not
+    # fires; they are the marker leaking into the name.
+    _garbage = [k for k in list(data.keys()) if '~removed' in str(k)]
+    if _garbage:
+        for k in _garbage:
+            data.pop(k, None)
+        sys.stderr.write(
+            f'[persistence] discarded {len(_garbage)} tombstone '
+            f'record(s) left by the removal bug: '
+            f'{", ".join(_garbage[:5])}'
+            + (' ...' if len(_garbage) > 5 else '') + '\n')
+
     for fn, entry in data.items():
         if fn not in state.fires:
             # Synthesize a skeleton FireInfo so persisted state for fires
