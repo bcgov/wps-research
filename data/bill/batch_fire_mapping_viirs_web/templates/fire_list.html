@@ -308,6 +308,14 @@ function buildFilterUI() {
 // Add a single status checkbox to the filter UI. Idempotent — duplicate
 // calls for the same status are no-ops. ``checked`` decides the initial
 // checked state; existing entries are not mutated.
+// Has the filter UI ever offered this status? If not, the user cannot
+// have deselected it, so it must not be treated as filtered out.
+function statusKnownToFilter(status) {
+    const sDiv = document.getElementById('status-filters');
+    if (!sDiv) return false;
+    return !!sDiv.querySelector(`label[data-status-value="${status}"]`);
+}
+
 function _addStatusCheckbox(status, checked) {
     const sDiv = document.getElementById('status-filters');
     if (!sDiv) return;
@@ -567,8 +575,31 @@ function render() {
     }
 
     let filtered = allFires.filter(f => {
+        // A fire that is WORKING is never filtered out.
+        //
+        // The status filter used to drop it the moment it changed
+        // state, so starting a run made the fire disappear from the
+        // list -- the one moment you most want to watch it. Same for
+        // the year filter: an active fire is active whatever year it
+        // belongs to. The name pattern still applies, because that is
+        // the user actively searching for something specific.
+        const working = (f.status === 'mapping' || f.status === 'preparing'
+                         || f.status === 'pending');
+        if (working) return !re || re.test(f.fire_numbe);
+
         if (f.fire_year && !yearSet.has(f.fire_year)) return false;
-        if (!showAllStatuses && !statusSet.has(f.status)) return false;
+        // Fail OPEN for a status the filter has never offered.
+        //
+        // statusSet is restored from the last session, so a status that
+        // did not exist then -- 'preparing' on a freshly restarted
+        // server with an empty list -- was not in it, and a brand new
+        // fire stayed invisible until it reached a status that was.
+        // A filter should only hide what the user chose to hide.
+        if (!showAllStatuses && !statusSet.has(f.status)) {
+            if (statusKnownToFilter(f.status)) return false;
+            // Unknown: surface it and offer the checkbox, ticked.
+            _addStatusCheckbox(f.status, true);
+        }
         if (f.fire_size_ha < minSize) return false;
         if (re && !re.test(f.fire_numbe)) return false;
         return true;
