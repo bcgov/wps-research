@@ -4084,10 +4084,25 @@ function applyEraserCursor(force) {
 // The post-fire preview is the same scene without the mask, so copying
 // from it is exactly what erasing looks like -- rather than painting a
 // placeholder colour and hoping the server agrees.
-async function prepareEraseCanvases() {
-    const pane = paneShowsResult('right') ? 'right'
-        : (paneShowsResult('left') ? 'left' : null);
+let _erasePrepGen = 0;
+
+async function prepareEraseCanvases(forPane) {
+    // The pane is the caller's choice when given -- the pane a stroke
+    // actually starts on -- and only guessed (right first) for the
+    // warm-up at toggle time. The guess is NOT authoritative: erasing
+    // is defined by where the operator draws, never by what the other
+    // pane happens to show.
+    const pane = forPane
+        || (paneShowsResult('right') ? 'right'
+            : (paneShowsResult('left') ? 'left' : null));
     if (!pane) return;
+    // Invalidate any in-flight preparation for another pane. Without
+    // this, two overlapping preparations raced and the loser's buffers
+    // -- the OTHER pane's imagery, at the other pane's source -- could
+    // land after the winner's and be painted into.
+    const myPrep = ++_erasePrepGen;
+    _eraseWork = null;
+    _eraseBase = null;
     _erasePane = pane;
     // Freeze this stroke's geometry NOW. The blob swaps below replace
     // img.src, and geoForPane() resolves geometry BY URL -- so the
@@ -4105,13 +4120,18 @@ async function prepareEraseCanvases() {
         _eraseWork.width = w; _eraseWork.height = h;
         _eraseWork.getContext('2d').drawImage(img, 0, 0);
 
+        // The erased look comes from THIS pane's post preview, at THIS
+        // pane's source -- so what erasing reveals matches the imagery
+        // under the mask in the pane being edited, regardless of what
+        // the other pane shows.
         const url = previewUrlFor('post', pane);
         const r = await fetch(url);
-        if (!r.ok) return;
+        if (!r.ok || myPrep !== _erasePrepGen) return;
         const blob = await r.blob();
         const probe = new Image();
         probe.src = URL.createObjectURL(blob);
         await probe.decode();
+        if (myPrep !== _erasePrepGen) return;   // a newer prep superseded
         const base = document.createElement('canvas');
         base.width = w; base.height = h;
         base.getContext('2d').drawImage(probe, 0, 0, w, h);
@@ -4800,14 +4820,26 @@ function initPaneInteraction(pane) {
         // and panning would be a surprising thing to do instead.
         if (_eraseOn && paneShowsResult(pane)) {
             _erasing = true;
-            _erasePane = pane;
-    // Freeze this stroke's geometry NOW. The blob swaps below replace
-    // img.src, and geoForPane() resolves geometry BY URL -- so the
-    // moment the first flush landed, lookups fell through to a
-    // different geo with a different raster width, the box shrank, and
-    // coordinates drifted. A stroke's geometry cannot change mid-stroke,
-    // so it is read once and used throughout.
-    try { _eraseGeo = geoForPane(pane); } catch (_) { _eraseGeo = null; }
+            // The stroke defines the pane. If the canvases were
+            // prepared for the OTHER pane -- the toggle-time warm-up
+            // guesses right-first -- strokes here painted the other
+            // pane's buffers at the other pane's dimensions and source,
+            // which is the cross-pane confusion. Re-prepare for THIS
+            // pane; the canvas part is synchronous, so painting starts
+            // this stroke, and points reach the server regardless.
+            {
+                const { img } = getPaneElements(pane);
+                const stale = (_erasePane !== pane) || !_eraseWork
+                    || (img && img.naturalWidth
+                        && _eraseWork.width !== img.naturalWidth);
+                if (stale) prepareEraseCanvases(pane);
+                else {
+                    // Same pane, same buffers: just refresh the frozen
+                    // geometry for this stroke.
+                    try { _eraseGeo = geoForPane(pane); }
+                    catch (_) { _eraseGeo = null; }
+                }
+            }
             isDragging = false;
             eraseAt(pane, e.clientX, e.clientY);
             e.preventDefault();

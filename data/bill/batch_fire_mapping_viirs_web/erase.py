@@ -336,6 +336,39 @@ def refresh_after_edit(fire, clf_path: str, log=None) -> dict:
     except Exception as exc:
         sys.stderr.write(f'[erase] overlay refresh failed: {exc}\n')
 
+    # Keep the canonical raster in step with the edit.
+    #
+    # <fire>_classified.bin mirrors the LATEST run; the eraser edits the
+    # run's own serial_<N> file. Everything that renders or exports from
+    # the canonical -- preview regeneration after a source switch,
+    # verify/repair, Download -- was therefore reading the PRE-edit
+    # mask, and the erase visibly reverted the next time any of those
+    # ran. If the edited file IS the newest run's, the canonical must
+    # follow it.
+    try:
+        runs = [r for r in (getattr(fire, 'serial_results', None) or [])
+                if r.get('classified')]
+        newest = max((int(r.get('run_id') or 0) for r in runs),
+                     default=0)
+        edited_run = next(
+            (int(r.get('run_id') or 0) for r in runs
+             if r.get('classified') == clf_path), None)
+        canon = os.path.join(fire.cache_dir,
+                             f'{fire.fire_numbe}_classified.bin')
+        if (edited_run is not None and edited_run == newest
+                and os.path.isfile(clf_path)
+                and os.path.abspath(clf_path) != os.path.abspath(canon)):
+            shutil.copy2(clf_path, canon)
+            h = os.path.splitext(clf_path)[0] + '.hdr'
+            if os.path.isfile(h):
+                shutil.copy2(h, os.path.splitext(canon)[0] + '.hdr')
+            ensure_geo(canon, clf_path)
+            sys.stderr.write(
+                f'[erase] canonical mask synced from run '
+                f'{edited_run}\n')
+    except Exception as exc:
+        sys.stderr.write(f'[erase] canonical sync failed: {exc}\n')
+
     try:
         agr = _compute_agreement(fire)
         area = _compute_ml_area(fire, clf_path)
