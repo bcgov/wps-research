@@ -3812,6 +3812,8 @@ let _eraseRaf = null;        // pending animation-frame id
 let _eraseDirty = false;     // working canvas changed since last paint
 let _eraseObjUrl = '';       // current object URL, revoked on replace
 let _eraseGeo = null;        // geometry captured when the stroke began
+let _eraseOutsideStroke = false;  // 'Outside BCWS only', frozen per
+                                  // stroke so paint and sync agree
 let _erasePerim = null;      // Uint8Array, 1 where the BCWS perimeter
                              // protects a pixel (preview resolution)
 let _erasePerimDims = null;
@@ -4161,6 +4163,7 @@ async function prepareEraseCanvases(forPane) {
                 for (let i = 0, j = 0; i < d.length; i += 4, j++) {
                     u[j] = d[i] > 127 ? 1 : 0;
                 }
+                if (myPrep !== _erasePrepGen) return;  // superseded
                 _erasePerim = u;
                 _erasePerimDims = {w, h};
                 log('[erase] perimeter loaded for the live preview',
@@ -4212,9 +4215,17 @@ function eraseAt(pane, clientX, clientY) {
         const x0 = Math.round(p.px - bw / 2);
         const y0 = Math.round(p.py - bh / 2);
         const ctx = _eraseWork.getContext('2d');
+        const perimOK = _erasePerim && _erasePerimDims
+            && _erasePerimDims.w === _eraseWork.width
+            && _erasePerimDims.h === _eraseWork.height;
+        // Outside-only with no usable perimeter: painting would show an
+        // erase the server is about to refuse, and the refresh half a
+        // second later visibly "restores" it. Not painting is honest:
+        // the points still reach the server, and its render -- which
+        // applies the perimeter -- arrives at stroke end.
+        if (_eraseOutsideStroke && !perimOK) return;
         try {
-            if (eraseOutsideOnly() && _erasePerim && _erasePerimDims
-                    && _erasePerimDims.w === _eraseWork.width) {
+            if (_eraseOutsideStroke && perimOK) {
                 // Per-pixel so protected pixels keep the mask. The box
                 // is small (11x11 by default), so this is cheap.
                 const W = _eraseWork.width;
@@ -4315,7 +4326,7 @@ async function flushErase() {
                 body: JSON.stringify({
                     boxes: pts,
                     size: eraserSize(),
-                    outside_bcws_only: eraseOutsideOnly(),
+                    outside_bcws_only: _eraseOutsideStroke,
                     // Which run is on screen: with several runs in the
                     // gallery the server cannot otherwise tell which
                     // raster the operator is drawing on.
@@ -4832,6 +4843,11 @@ function initPaneInteraction(pane) {
                 const stale = (_erasePane !== pane) || !_eraseWork
                     || (img && img.naturalWidth
                         && _eraseWork.width !== img.naturalWidth);
+                // Freeze the option for this stroke: what the local
+                // paint honours and what the server is told MUST be the
+                // same reading, or toggling mid-stroke desynchronises
+                // them.
+                _eraseOutsideStroke = eraseOutsideOnly();
                 if (stale) prepareEraseCanvases(pane);
                 else {
                     // Same pane, same buffers: just refresh the frozen

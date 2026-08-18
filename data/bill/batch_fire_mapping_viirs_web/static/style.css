@@ -1203,7 +1203,25 @@ tbody tr.row-mapping:hover { background: #ede1ff; }
     margin-bottom: 8px;
     font-size: 12px;
 }
+/* The five action items sit together at the right edge; the cursor
+ * readout expands into the remaining space and is clipped rather than
+ * wrapped when it runs out. */
+.nf-toolbar-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+.nf-coords-grow {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
 .nf-coords {
+    white-space: nowrap;
     color: #4a5566;
     font-family: monospace;
     font-size: 11px;

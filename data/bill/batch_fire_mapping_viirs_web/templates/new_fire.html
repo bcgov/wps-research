@@ -21,19 +21,26 @@
             <label>Year:&nbsp;
                 <select id="nf-year"></select>
             </label>
-            <span id="nf-coords" class="nf-coords"></span>
-            <button id="nf-bcws-refresh" type="button" class="btn btn-danger">Update BCWS points + polys</button>
+            <!-- The cursor readout grows into whatever space the right
+                 group leaves free. Its length varies (lat/long plus the
+                 S2 tiles under the cursor), so it must never wrap: a
+                 second line shifts the map below it on every mouse
+                 move. -->
+            <span id="nf-coords" class="nf-coords nf-coords-grow"></span>
             <span id="nf-bcws-status" class="nf-coords"></span>
-            <label class="nf-coords" style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
-                <input type="checkbox" id="nf-viirs-toggle" checked>
-                Show VIIRS
-            </label>
-            <label style="font-size:12px;margin-left:10px">
-                <input type="checkbox" id="nf-tiles-toggle" checked>
-                Show S2 tiles
-            </label>
-            <button id="nf-zoom-reset" type="button" class="btn btn-secondary">Reset zoom</button>
-            <button id="nf-clear-bbox" type="button" class="btn btn-secondary">Clear bbox</button>
+            <div class="nf-toolbar-right">
+                <button id="nf-bcws-refresh" type="button" class="btn btn-danger">Update BCWS points + polys</button>
+                <label class="nf-coords" style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
+                    <input type="checkbox" id="nf-viirs-toggle" checked>
+                    Show VIIRS
+                </label>
+                <label style="font-size:12px">
+                    <input type="checkbox" id="nf-tiles-toggle" checked>
+                    Show S2 tiles
+                </label>
+                <button id="nf-zoom-reset" type="button" class="btn btn-secondary">Reset zoom</button>
+                <button id="nf-clear-bbox" type="button" class="btn btn-secondary">Clear bbox</button>
+            </div>
         </div>
         <!-- Shown in place of the map until the low-resolution overview
              level has downloaded. Occupies the same width the overview
