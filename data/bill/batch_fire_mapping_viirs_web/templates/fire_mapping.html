@@ -3983,6 +3983,72 @@ function onEraserToggle() {
 // could be left describing the other pane.
 const _cursorKeys = {left: '', right: ''};
 
+// On-screen pixels per MASK pixel, from the image's RENDERED rectangle.
+//
+// paneState.scale is the transform the code intended to apply; the
+// rendered rect is what the browser actually drew. They disagree when a
+// load path sets the box after the transform, which is the same
+// mismatch that put the vector overlay in the wrong place. The eraser
+// box must match what the user sees, so it measures rather than
+// assumes.
+function maskToScreenRatio(pane) {
+    try {
+        const { img } = getPaneElements(pane);
+        const g = geoForPane(pane);
+        if (!img || !g || !g.rw) return 1;
+        const r = img.getBoundingClientRect();
+        if (!r.width) return 1;
+        return r.width / g.rw;
+    } catch (_) {
+        return 1;
+    }
+}
+
+// A DOM box that follows the pointer, instead of a CSS cursor image.
+//
+// The cursor image was clamped to 96 px because browsers refuse larger
+// cursors -- so at high zoom, or with a big eraser, the box stopped
+// growing while the erased area kept going. A positioned element has no
+// such limit and is always exactly the area that will be cleared.
+function eraseBoxEl() {
+    let el = document.getElementById('erase-box');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'erase-box';
+        el.style.cssText = 'position:fixed;pointer-events:none;z-index:60;'
+            + 'display:none;border:1px solid #000;'
+            + 'box-shadow:0 0 0 1px rgba(255,255,255,0.9) inset;'
+            + 'background:rgba(255,255,255,0.22)';
+        document.body.appendChild(el);
+    }
+    return el;
+}
+
+function hideEraseBox() {
+    const el = document.getElementById('erase-box');
+    if (el) el.style.display = 'none';
+}
+
+function moveEraseBox(pane, clientX, clientY) {
+    const el = eraseBoxEl();
+    if (!_eraseOn || !pane || !paneShowsResult(pane)) {
+        el.style.display = 'none';
+        return;
+    }
+    // Exact, unclamped: eraser size is in MASK pixels.
+    const px = Math.max(2, eraserSize() * maskToScreenRatio(pane));
+    const half = px / 2;
+    el.style.width = `${px}px`;
+    el.style.height = `${px}px`;
+    el.style.left = `${clientX - half}px`;
+    el.style.top = `${clientY - half}px`;
+    el.style.display = 'block';
+}
+
+document.addEventListener('mouseleave', () => {
+    try { hideEraseBox(); } catch (_) {}
+});
+
 function applyEraserCursor(force) {
     ['left', 'right'].forEach((pane) => {
         const { area } = getPaneElements(pane);
@@ -3992,35 +4058,12 @@ function applyEraserCursor(force) {
             _cursorKeys[pane] = '';
             return;
         }
-        const s = paneState[pane].scale || 1;
-        // The eraser size is in MASK pixels, but the transform is
-        // display-px per PREVIEW-px, and previews are capped at 2000 px
-        // while the mask can be larger (2969 px here). Drawing the box
-        // at size*scale therefore made the cursor smaller than the area
-        // actually erased, by exactly the preview/mask ratio.
-        const _k = maskToPreviewRatio(pane);
-        const px = Math.max(6, Math.min(96,
-                                        Math.round(eraserSize() * _k * s)));
-        // Browsers cache the cursor image per URL and will not repaint
-        // a stationary pointer when the property is reassigned. Clear
-        // it first, and only rebuild when the size actually changed --
-        // otherwise every mousemove would allocate a new data URI.
-        const key = `${px}:${_k.toFixed(4)}`;
-        if (!force && key === _cursorKeys[pane] && area.style.cursor) {
-            return;
-        }
-        _cursorKeys[pane] = key;
-        area.style.cursor = 'auto';
-        const half = Math.round(px / 2);
-        const svg = `<svg xmlns="http://www.w3.org/2000/svg" `
-            + `width="${px + 2}" height="${px + 2}">`
-            + `<rect x="1" y="1" width="${px}" height="${px}" `
-            + `fill="rgba(255,255,255,0.25)" stroke="black" `
-            + `stroke-width="1"/></svg>`;
-        area.style.cursor =
-            `url("data:image/svg+xml;base64,${btoa(svg)}") `
-            + `${half} ${half}, crosshair`;
+        // The box itself is drawn by moveEraseBox(); the pointer just
+        // gets a crosshair so there is still something to aim with.
+        area.style.cursor = 'crosshair';
+        _cursorKeys[pane] = 'box';
     });
+    if (!_eraseOn) hideEraseBox();
 }
 
 // The post-fire preview is the same scene without the mask, so copying
@@ -4767,6 +4810,13 @@ document.addEventListener('mousemove', (e) => {
         }
         _hoverPane = over;
     } catch (_) { /* leave the previous value */ }
+
+    // Keep the eraser box under the pointer. Cheap: two rect reads and
+    // a style write, only while the eraser is on.
+    try {
+        if (_eraseOn) moveEraseBox(_hoverPane, e.clientX, e.clientY);
+        else hideEraseBox();
+    } catch (_) { /* the box is an aid, never a blocker */ }
 
     // Browsers repaint a cursor on movement, not on assignment, so
     // re-assert it here. The per-pane key makes this a no-op unless
