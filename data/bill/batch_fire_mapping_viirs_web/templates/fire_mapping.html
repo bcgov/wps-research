@@ -3811,6 +3811,7 @@ let _hoverPane = null;       // pane under the pointer, or null
 let _eraseRaf = null;        // pending animation-frame id
 let _eraseDirty = false;     // working canvas changed since last paint
 let _eraseObjUrl = '';       // current object URL, revoked on replace
+let _eraseGeo = null;        // geometry captured when the stroke began
 let _erasePerim = null;      // Uint8Array, 1 where the BCWS perimeter
                              // protects a pixel (preview resolution)
 let _erasePerimDims = null;
@@ -3991,16 +3992,30 @@ const _cursorKeys = {left: '', right: ''};
 // mismatch that put the vector overlay in the wrong place. The eraser
 // box must match what the user sees, so it measures rather than
 // assumes.
+const _maskRatioLast = {left: 0, right: 0};
+
 function maskToScreenRatio(pane) {
     try {
         const { img } = getPaneElements(pane);
-        const g = geoForPane(pane);
-        if (!img || !g || !g.rw) return 1;
+        // During a stroke the geometry is the one frozen at stroke
+        // start; between strokes it is whatever the pane shows.
+        const g = (_erasing && pane === _erasePane && _eraseGeo)
+            ? _eraseGeo : geoForPane(pane);
+        if (!img || !g || !g.rw) {
+            return _maskRatioLast[pane] || 1;
+        }
         const r = img.getBoundingClientRect();
-        if (!r.width) return 1;
-        return r.width / g.rw;
+        if (!r.width) {
+            // Mid-swap the image can briefly have no laid-out size;
+            // resizing the box from that made it collapse and twitch.
+            // The last measured ratio is the honest answer.
+            return _maskRatioLast[pane] || 1;
+        }
+        const k = r.width / g.rw;
+        _maskRatioLast[pane] = k;
+        return k;
     } catch (_) {
-        return 1;
+        return _maskRatioLast[pane] || 1;
     }
 }
 
@@ -4074,6 +4089,13 @@ async function prepareEraseCanvases() {
         : (paneShowsResult('left') ? 'left' : null);
     if (!pane) return;
     _erasePane = pane;
+    // Freeze this stroke's geometry NOW. The blob swaps below replace
+    // img.src, and geoForPane() resolves geometry BY URL -- so the
+    // moment the first flush landed, lookups fell through to a
+    // different geo with a different raster width, the box shrank, and
+    // coordinates drifted. A stroke's geometry cannot change mid-stroke,
+    // so it is read once and used throughout.
+    try { _eraseGeo = geoForPane(pane); } catch (_) { _eraseGeo = null; }
     try {
         const { img } = getPaneElements(pane);
         if (!img || !img.naturalWidth) return;
@@ -4234,12 +4256,26 @@ function flushEraseFrame() {
             const url = URL.createObjectURL(b);
             const old = _eraseObjUrl;
             _eraseObjUrl = url;
+            // The blob inherits the stroke's geometry, so geoForPane()
+            // keeps answering correctly while the preview is a local
+            // object URL rather than a server render.
+            try {
+                if (_eraseGeo) _geoByUrl.set(url, _eraseGeo);
+            } catch (_) {}
+            // Invalidate any in-flight load for this pane. A
+            // progressive level or full image requested BEFORE the
+            // stroke could land AFTER this blob and repaint pre-erase
+            // imagery -- the flashing of stale data over fresh strokes.
+            try {
+                _paneGen[_erasePane] = (_paneGen[_erasePane] || 0) + 1;
+            } catch (_) {}
             img.src = url;
             if (old) {
                 // Revoke on the next frame: revoking immediately can
                 // cancel the decode of the image just assigned.
                 requestAnimationFrame(() => {
                     try { URL.revokeObjectURL(old); } catch (_) {}
+                    try { _geoByUrl.delete(old); } catch (_) {}
                 });
             }
         }, 'image/png');
@@ -4765,6 +4801,13 @@ function initPaneInteraction(pane) {
         if (_eraseOn && paneShowsResult(pane)) {
             _erasing = true;
             _erasePane = pane;
+    // Freeze this stroke's geometry NOW. The blob swaps below replace
+    // img.src, and geoForPane() resolves geometry BY URL -- so the
+    // moment the first flush landed, lookups fell through to a
+    // different geo with a different raster width, the box shrank, and
+    // coordinates drifted. A stroke's geometry cannot change mid-stroke,
+    // so it is read once and used throughout.
+    try { _eraseGeo = geoForPane(pane); } catch (_) { _eraseGeo = null; }
             isDragging = false;
             eraseAt(pane, e.clientX, e.clientY);
             e.preventDefault();
