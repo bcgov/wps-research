@@ -841,7 +841,14 @@ function cacheKeyFor(viewKey, pane) {
     // Source FIRST and always present, including for hints: a hint
     // image is a mask over that source's post-fire preview, so the two
     // sources' hints are different pictures and must not share a key.
-    return `${src}:${viewKey}${modePart}:${stamp}`;
+    //
+    // The L2 DATE belongs here for the same reason. Two composites of
+    // the same AOI from different start dates are different pictures,
+    // and without the date in the key a cached preview from one date
+    // was served for another -- which is how a switch could appear not
+    // to happen, and why switching away and back "fixed" it.
+    const datePart = (src === 'l2') ? `:${currentL2Date || 'latest'}` : '';
+    return `${src}${datePart}:${viewKey}${modePart}:${stamp}`;
 }
 
 // In-flight fetches, keyed the same way as _previewBlobs. Without
@@ -998,10 +1005,17 @@ async function drainWarmQueue() {
 function warmSourceCache(src) {
     // Hint is handled by warmHintCache (it varies by mode as well as
     // by source); here only the plain stack-derived views.
+    // Key AND url must both carry the L2 date, exactly as cacheKeyFor
+    // and previewUrlFor do. A warm entry under a date-less key is read
+    // by nobody; a warm entry fetched from a date-less URL is the wrong
+    // composite. Getting one right and not the other is worse than
+    // getting both wrong, because it caches a mismatch.
+    const _dp = (src === 'l2') ? `:${currentL2Date || 'latest'}` : '';
+    const _dq = (src === 'l2') ? `&l2=${currentL2Date || 'latest'}` : '';
     for (const v of ['post', 'diff1', 'pre']) {
-        enqueueWarm(`${src}:${v}:${_previewStamp}`,
+        enqueueWarm(`${src}${_dp}:${v}:${_previewStamp}`,
             `/api/fire/${encodeURIComponent(FIRE)}/preview/${v}`
-            + `?src=${src}&t=${_previewStamp}`);
+            + `?src=${src}${_dq}&t=${_previewStamp}`);
     }
 }
 
@@ -1022,10 +1036,12 @@ function clearHintPane(pane) {
 // Pull every hint mask (both modes) for a source into the cache, so
 // toggling hint modes is instant rather than a round-trip each time.
 function warmHintCache(src) {
+    const _hp = (src === 'l2') ? `:${currentL2Date || 'latest'}` : '';
+    const _hq = (src === 'l2') ? `&l2=${currentL2Date || 'latest'}` : '';
     for (const mode of ['redwins_post', 'redwins_diff', 'viirs']) {
-        enqueueWarm(`${src}:hint:${mode}:${_previewStamp}`,
+        enqueueWarm(`${src}${_hp}:hint:${mode}:${_previewStamp}`,
             `/api/fire/${encodeURIComponent(FIRE)}/preview/hint`
-            + `?src=${src}&hint=${mode}&t=${_previewStamp}`);
+            + `?src=${src}${_hq}&hint=${mode}&t=${_previewStamp}`);
     }
 }
 
@@ -1042,7 +1058,11 @@ function clearPreviewCache() {
 function prefetchOtherSource(views) {
     const other = currentPostSource === 'l2' ? 'mrap' : 'l2';
     for (const v of (views || ['post', 'diff1', 'hint'])) {
-        const key = `${other}:${v}:${_previewStamp}`;
+        // Same key shape as cacheKeyFor, including the L2 date --
+        // otherwise the prefetch fills entries no reader ever looks up.
+        const otherDate = (other === 'l2')
+            ? `:${currentL2Date || 'latest'}` : '';
+        const key = `${other}${otherDate}:${v}:${_previewStamp}`;
         if (_previewBlobs.has(key)) continue;
         // Nothing to fetch until that source has been built server-side;
         // the switch handler populates it on first use.
@@ -1182,11 +1202,23 @@ async function _onPostSourceChangeInner() {
     // repainted instantly from cache.
     layerBusyBegin(src === 'l2' ? 'Switching to L2 recent tile'
                                 : 'Switching to MRAP composite');
-    const canSwapInstantly = ['pre', 'post', 'diff1', 'diff2', 'diff3',
-                              'hint'].includes(leftView)
-        && _previewBlobs.has(
-            `${src}:${leftView}${leftView === 'hint'
-                ? ':' + currentHintMode : ''}:${_previewStamp}`);
+    // Ask the SAME key builder the cache is filled with.
+    //
+    // This built its key by hand, so every change to cacheKeyFor (the
+    // source prefix, now the L2 date) silently desynchronised the two:
+    // the lookup missed, or worse matched an entry for a different
+    // product. Deriving it from the same function is the only way the
+    // two cannot drift.
+    const _swapKey = (() => {
+        const wasSrc = currentPostSource;
+        try {
+            currentPostSource = src;      // key for the TARGET source
+            return cacheKeyFor(leftView, 'left');
+        } finally {
+            currentPostSource = wasSrc;
+        }
+    })();
+    const canSwapInstantly = !!_swapKey && _previewBlobs.has(_swapKey);
     if (canSwapInstantly) {
         currentPostSource = src;
     try { invalidateEraseBuffers('source changed'); } catch (_) {}
