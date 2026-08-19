@@ -179,6 +179,27 @@
                          background:#ccc;margin:0 10px;
                          vertical-align:middle"></span>
 
+            <!-- Right-pane source and view. Placed after the
+                 separator bar and before the eraser controls, which is
+                 where it reads in the row. No margin-left:auto: the row
+                 packs from the left, and pinning this to the right edge
+                 is what made the layout depend on split mode. -->
+            <span id="right-pane-controls"
+                  style="display:none;align-items:center;gap:6px">
+                <span style="font-size:10px;color:#888;
+                             text-transform:uppercase;
+                             letter-spacing:0.5px">right</span>
+                <select id="post-source-select-right"
+                        onchange="onRightPostSourceChange()"
+                        title="Imagery source for the right pane">
+                    <option value="l2">L2 recent tile</option>
+                    <option value="mrap">MRAP composite</option>
+                </select>
+                <select id="view-select-right"
+                        onchange="onRightViewDropdownChange()"
+                        title="View shown in the right pane"></select>
+            </span>
+
             <label id="eraser-wrap"
                    title="Erase parts of the ML classification by hand.
                           With this on, dragging over a pane showing the
@@ -236,24 +257,6 @@
                  leaving split view -- and switching the right source,
                  which re-renders these selects -- cannot move the
                  controls to a different position. -->
-            <span id="right-pane-controls"
-                  style="display:none;
-                         align-items:center;gap:6px;
-                         margin-left:auto;padding-left:12px;
-                         border-left:1px solid #ddd">
-                <span style="font-size:10px;color:#888;
-                             text-transform:uppercase;
-                             letter-spacing:0.5px">right</span>
-                <select id="post-source-select-right"
-                        onchange="onRightPostSourceChange()"
-                        title="Imagery source for the right pane">
-                    <option value="l2">L2 recent tile</option>
-                    <option value="mrap">MRAP composite</option>
-                </select>
-                <select id="view-select-right"
-                        onchange="onRightViewDropdownChange()"
-                        title="View shown in the right pane"></select>
-            </span>
             <span class="info" id="image-info"></span>
         </div>
         <div class="image-viewer-container" id="image-viewer-container">
@@ -5558,10 +5561,7 @@ function syncRightViewOptions() {
     b.innerHTML = a.innerHTML;
     if (want && b.querySelector(`option[value="${want}"]`)) b.value = want;
     b.disabled = a.disabled;
-    const grp = document.getElementById('right-pane-controls');
-    // visibility keeps the slot reserved; hiding with display would
-    // let the rest of the bar reflow on every split toggle.
-    if (grp) grp.style.visibility = splitActive ? 'visible' : 'hidden';
+    syncRightPaneControls();
     // The GIF button is only meaningful with two panes. display (not
     // visibility) so it does not reserve toolbar width when hidden.
     const gif = document.getElementById('btn-gif');
@@ -7091,12 +7091,30 @@ function closeSplit() {
 // `manual` is true only for the toolbar button. The two programmatic
 // callers open split to show a finished ML result, and must keep
 // choosing that view themselves.
+// Show or hide the right pane's source and view selectors.
+//
+// Its own function, called from every path that changes split state, so
+// a route that does not run syncRightViewOptions cannot leave the
+// controls hidden while the second pane is open.
+//
+// display, not visibility: the row packs from the left now, so a
+// hidden-but-space-taking element would leave a gap mid-row. The markup
+// starts at display:none, which is why toggling only `visibility` left
+// these permanently invisible.
+function syncRightPaneControls() {
+    const grp = document.getElementById('right-pane-controls');
+    if (!grp) return;
+    grp.style.visibility = 'visible';
+    grp.style.display = splitActive ? 'inline-flex' : 'none';
+}
+
 function toggleSplit(manual) {
     // The split state is part of what a fire is restored to.
     setTimeout(() => { try { saveUiState(); } catch (_) {} }, 0);
 
     const openingManually = manual === true && !splitActive;
     splitActive = !splitActive;
+    syncRightPaneControls();
     const container = document.getElementById('image-viewer-container');
     const leftArea = document.getElementById('image-area');
     const rightArea = document.getElementById('image-area-right');
