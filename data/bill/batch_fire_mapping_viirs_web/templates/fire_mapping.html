@@ -1600,6 +1600,11 @@ async function prepareFire(padding) {
         syncRightViewOptions();
 
         sel.disabled = false;
+        // The fire's source is known and the selector is live, so
+        // the Date select button can be placed now. This is the
+        // hook that matters on a FRESH fire: the others sit in
+        // paths that only run on a switch or a restore.
+        try { syncDateSelectButton(); } catch (_) {}
 
         // Default views: left=post, right=result overlay (or comparison)
         if (data.views && data.views.includes('post')) {
@@ -3032,7 +3037,20 @@ function overlaySignature(pane) {
          + `${overlaysVisible ? 1 : 0},${_fireOverlays ? 1 : 0}`;
 }
 
+let _dateBtnLast = null;
+
 function overlayWatchTick() {
+    try {
+        // Cheap safety net: whichever path changed the source, the
+        // button follows within a frame. Guarded so it only touches the
+        // DOM when the answer actually changes.
+        const _sel = document.getElementById('post-source-select');
+        const _src = (_sel && _sel.value) ? _sel.value : currentPostSource;
+        if (_src !== _dateBtnLast) {
+            _dateBtnLast = _src;
+            syncDateSelectButton();
+        }
+    } catch (_) { /* never let the watcher stop */ }
     try {
         for (const pane of ['left', 'right']) {
             if (pane === 'right' && !splitActive) {

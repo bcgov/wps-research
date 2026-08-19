@@ -199,9 +199,7 @@ class BaseHandler:
         (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/l2_dates$'),
          'handle_api_l2_dates'),
-        (re.compile(
-            r'^/api/fire/(?P<fire_numbe>[^/]+)/l2_date$'),
-         'handle_api_l2_date_apply'),
+
         (re.compile(r'^/api/queue$'), 'handle_api_queue'),
         (re.compile(r'^/api/notifications$'),
          'handle_api_notifications_get'),
@@ -209,6 +207,12 @@ class BaseHandler:
         (re.compile(r'^/static/(?P<path>.+)$'), 'handle_static'),
     ]
     ROUTES_POST = [
+        # Applying a start date REBUILDS the composite, so it is a
+        # POST. It was registered in ROUTES_GET, which is why the
+        # listing worked and Apply came back 404.
+        (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/l2_date$'),
+         'handle_api_l2_date_apply'),
         (re.compile(r'^/login$'), 'handle_login_post'),
         (re.compile(r'^/api/bcws/refresh$'), 'handle_api_bcws_refresh'),
         # POST: it triggers a refresh. It was registered under GET, so
