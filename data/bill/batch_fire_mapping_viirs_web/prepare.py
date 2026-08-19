@@ -1416,6 +1416,17 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
     # stale stash so the previews are re-rendered from the new stack.
     if source == 'l2' and prev_src == 'l2':
         try:
+            # The LIVE previews describe the outgoing date too, and
+            # each carries a geo sidecar naming the raster it was
+            # rendered from. Leaving them lets a view that is not
+            # re-rendered keep the old date's pixels AND its geo, which
+            # is how imagery and overlays end up disagreeing.
+            live = os.path.join(fire.cache_dir, 'previews')
+            if os.path.isdir(live):
+                shutil.rmtree(live, ignore_errors=True)
+                sys.stderr.write(
+                    '[prepare] cleared live previews: the L2 start date '
+                    'changed, so every rendering is stale\n')
             stale = _preview_stash_dir(fire, 'l2')
             if os.path.isdir(stale):
                 shutil.rmtree(stale, ignore_errors=True)

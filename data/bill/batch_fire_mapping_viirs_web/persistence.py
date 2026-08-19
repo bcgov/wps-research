@@ -343,6 +343,19 @@ def _load_fire_state():
         return
 
     restored = 0
+    # Top-level keys that are NOT fires.
+    #
+    # This file mixes per-fire records with bookkeeping written at the
+    # same level, and the loop below treats every key as a fire name --
+    # so 'deleted_fires' was loaded as a fire called "deleted_fires" and
+    # appeared in the list as a zombie row. Metadata keys are removed
+    # before the loop; each is read explicitly where it is needed.
+    for meta in ('deleted_fires', 'schema', 'version', 'saved_at',
+                 'active_year', 'settings'):
+        if isinstance(data.get(meta), (dict, list, str, int, float)) \
+                and meta in data:
+            data.pop(meta, None)
+
     # Discard tombstone records written by the earlier bug. They are not
     # fires; they are the marker leaking into the name.
     _garbage = [k for k in list(data.keys()) if '~removed' in str(k)]
@@ -356,6 +369,12 @@ def _load_fire_state():
             + (' ...' if len(_garbage) > 5 else '') + '\n')
 
     for fn, entry in data.items():
+        # A fire record is a mapping. Anything else at this level is
+        # bookkeeping that slipped past the filter above.
+        if not isinstance(entry, dict):
+            sys.stderr.write(
+                f'[persistence] ignoring non-fire key {fn!r}\n')
+            continue
         if fn not in state.fires:
             # Synthesize a skeleton FireInfo so persisted state for fires
             # not visible on disk (e.g. hidden + cache wiped) can be

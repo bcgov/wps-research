@@ -2503,6 +2503,21 @@ class FireRoutes:
                             if not re.search(r'_l2_d\d{8}\.bin$', h)] \
                         or [h for h in hits
                             if h.endswith(f"_l2_d{d['date']}.bin")]
+                # "ready" must mean COMPLETE, not merely present.
+                #
+                # A .bin left behind by an interrupted or superseded
+                # build has no header and no date sidecar, and marking
+                # it ready claims a product the user never asked for and
+                # cannot actually use. Require all three parts.
+                def _complete(path):
+                    from ..l2_recent import date_polygons_path
+                    stem = os.path.splitext(path)[0]
+                    return (os.path.isfile(path)
+                            and os.path.getsize(path) > 0
+                            and os.path.isfile(stem + '.hdr')
+                            and os.path.isfile(date_polygons_path(path)))
+
+                hits = [h for h in hits if _complete(h)]
                 d['built'] = bool(hits)
                 d['sources'] = []
                 if hits:

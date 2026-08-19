@@ -745,6 +745,58 @@ def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
             except L2RecentError as exc:
                 raise AoiStackError(f'L2-recent composite failed: {exc}')
             override = l2_tmp
+
+            # Every L2 product for this AOI must sit on the SAME grid.
+            #
+            # The window is derived from the reference raster and the
+            # bbox, so it should already match -- but if a dated build
+            # ever lands on a different geotransform or size, the
+            # imagery shifts under the overlays and the BCWS perimeter
+            # appears in the wrong place, which is exactly the symptom
+            # that prompted this check. Compare against the default
+            # product when one exists and refuse to publish a
+            # mismatch rather than silently misregister it.
+            try:
+                import glob as _g
+                _safe = sanitize_identifier(identifier)
+                _h = aoi_identity_hash(identifier, instance_key)
+                _refs = [f for f in _g.glob(os.path.join(
+                    ram_dir, f'*_stack_{_safe}_{_h}_l2.bin'))
+                    if not re.search(r'_l2_d\d{8}\.bin$', f)]
+                if _refs and l2_start_date:
+                    a = gdal.Open(_refs[0], gdal.GA_ReadOnly)
+                    b = gdal.Open(l2_tmp, gdal.GA_ReadOnly)
+                    if a is not None and b is not None:
+                        ga, gb = a.GetGeoTransform(), b.GetGeoTransform()
+                        same = (a.RasterXSize == b.RasterXSize
+                                and a.RasterYSize == b.RasterYSize
+                                and all(abs(x - y) < 1e-6
+                                        for x, y in zip(ga, gb)))
+                        if not same:
+                            msg = (f'[aoi_stack] GRID MISMATCH for '
+                                   f'{identifier} date {l2_start_date}: '
+                                   f'{b.RasterXSize}x{b.RasterYSize} '
+                                   f'{gb} vs default '
+                                   f'{a.RasterXSize}x{a.RasterYSize} '
+                                   f'{ga}')
+                            sys.stderr.write(msg + '\n')
+                            if log_cb:
+                                log_cb('  ' + msg)
+                            raise AoiStackError(
+                                'the composite for this date landed on a '
+                                'different grid than the existing L2 '
+                                'product; refusing to publish it')
+                        sys.stderr.write(
+                            f'[aoi_stack] grid verified identical to the '
+                            f'default L2 product\n')
+                    a = None
+                    b = None
+            except AoiStackError:
+                raise
+            except Exception as exc:
+                sys.stderr.write(f'[aoi_stack] grid check skipped: '
+                                 f'{exc}\n')
+
             post_tag = ' L2'
             post_date = l2_info.get('post_date') or post_date
 
