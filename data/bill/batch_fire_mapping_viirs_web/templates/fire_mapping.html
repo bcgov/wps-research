@@ -1268,6 +1268,12 @@ async function _onPostSourceChangeInner() {
             // Guarded: an empty value would clear the selection and
             // leave the row looking as though VIIRS were chosen.
             currentHintMode = data.hint_mode || 'redwins_post';
+        // Show the Date select button as soon as the source is
+        // known. The call inside applySavedUiState is not enough:
+        // that function returns early for a fire with no saved
+        // GUI state, so on a fresh fire the button only appeared
+        // after a source switch happened to run the other hook.
+        try { syncDateSelectButton(); } catch (_) {}
             renderHintModeButtons();
         }
         if (data.status) updateStatusDisplay(data.status);
@@ -3648,9 +3654,14 @@ let _dateApplying = false;
 // The button belongs to the LEFT pane's source only, so it appears and
 // disappears with it rather than sitting there inert.
 function syncDateSelectButton() {
+    // Read the SELECTOR, not just the variable: the two are set at
+    // slightly different moments during load, and the selector is what
+    // the user is looking at.
+    const sel = document.getElementById('post-source-select');
+    const src = (sel && sel.value) ? sel.value : currentPostSource;
     const b = document.getElementById('btn-date-select');
     if (!b) return;
-    b.style.display = (currentPostSource === 'l2') ? '' : 'none';
+    b.style.display = (src === 'l2') ? '' : 'none';
 }
 
 function closeDatePicker() {

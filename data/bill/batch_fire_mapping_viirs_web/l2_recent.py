@@ -223,9 +223,28 @@ def available_acq_dates(bbox_native, crs_wkt: str = '',
     Newest first, which is the order the selector shows and the order
     the compositor walks backwards through.
     """
-    tiles = tiles_intersecting_bbox(bbox_native, crs_wkt,
-                                    tiles_shp=tiles_shp,
-                                    ref_raster=ref_raster)
+    # The tile lookup needs the AOI's CRS, and the compositor gets it by
+    # reading the reference raster's projection -- do exactly the same,
+    # so this listing can never disagree with the tiles a build would
+    # use. (tiles_intersecting_bbox takes no ref_raster; passing one was
+    # my error and is what raised the TypeError.)
+    proj = crs_wkt or ''
+    if not proj and ref_raster:
+        ref = gdal.Open(ref_raster, gdal.GA_ReadOnly)
+        if ref is None:
+            raise L2RecentError(
+                f'reference raster could not be opened: {ref_raster}')
+        try:
+            proj = ref.GetProjection()
+        finally:
+            ref = None
+    if not proj:
+        raise L2RecentError(
+            'no CRS available for the AOI; cannot find intersecting '
+            'Sentinel-2 tiles')
+
+    tiles = tiles_intersecting_bbox(bbox_native, proj,
+                                    tiles_shp=tiles_shp)
     seen = {}
     for t in tiles:
         for _key, acq8, _tok, path in zips_for_tile(t, mrap_dir=mrap_dir):
