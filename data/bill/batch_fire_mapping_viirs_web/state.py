@@ -143,6 +143,10 @@ class FireInfo:
     # record never accepted anything, so any directory bearing its name
     # belongs to some other fire and must not be removed with it.
     accepted_dir: str = ""
+    # Start date for the L2-recent composite (YYYYMMDD).
+    # Empty means 'the most recent available', which is what
+    # every fire built before this feature used.
+    l2_start_date: str = ""
     # Deleted from the list. Distinct from `hidden`, which is a
     # reversible admin action: a removed fire has had its products
     # purged, must not appear anywhere, and must not hold its name.

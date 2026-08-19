@@ -1941,8 +1941,46 @@ class FireRoutes:
             # is what the right-hand pane may be overriding.
             info = ensure_aoi_stack(
                 fire.fire_numbe, fire.bbox_native,
-                post_source=want_src)
+                post_source=want_src,
+                l2_start_date=(getattr(fire, 'l2_start_date', '')
+                               if want_src == 'l2' else ''))
             stack_path = info['path'] if isinstance(info, dict) else info
+
+            # Every L2 composite already built for this AOI joins the
+            # bundle, not only the one selected.
+            #
+            # Each start date is a distinct product on the ramdisk, and
+            # the reason for building an earlier one is usually that a
+            # recent acquisition was poor -- so the comparison between
+            # dates is exactly what the export is wanted for. Only
+            # products that ALREADY exist are added: the export must not
+            # trigger builds that take minutes.
+            extra_stacks = []
+            if want_src == 'l2':
+                try:
+                    import glob as _g
+                    from ..aoi_stack import (aoi_stack_path, RAM_DIR,
+                                             aoi_identity_hash,
+                                             sanitize_identifier)
+                    inst = getattr(state, 'shared_root', '') or ''
+                    safe = sanitize_identifier(fire.fire_numbe)
+                    h = aoi_identity_hash(fire.fire_numbe, inst)
+                    pat = os.path.join(
+                        RAM_DIR, f'*_stack_{safe}_{h}_l2*.bin')
+                    for cand in sorted(_g.glob(pat)):
+                        if os.path.abspath(cand) == os.path.abspath(
+                                stack_path):
+                            continue
+                        if os.path.isfile(cand):
+                            extra_stacks.append(cand)
+                    if extra_stacks:
+                        sys.stderr.write(
+                            f'[download] bundling {len(extra_stacks)} '
+                            f'additional L2 composite(s)\n')
+                except Exception as exc:
+                    sys.stderr.write(
+                        f'[download] could not list other L2 '
+                        f'composites: {exc}\n')
         except Exception as exc:
             self._send_json(
                 {'error': f'Could not obtain the {want_src.upper()} '
@@ -2125,6 +2163,27 @@ class FireRoutes:
                     if f_.endswith('.zip') or f_.endswith('.aux.xml'):
                         continue
                     zf.write(os.path.join(tmp_dir, f_), f_)
+
+                # The other L2 composites, each under its own folder so
+                # the dates are obvious and the ENVI pairs stay
+                # together. Raw stacks: they are the products as built,
+                # which is what a comparison between dates needs.
+                for extra in extra_stacks:
+                    try:
+                        stem = os.path.splitext(
+                            os.path.basename(extra))[0]
+                        m = re.search(r'_l2_d(\d{8})$', stem)
+                        label = (f'l2_{m.group(1)}' if m
+                                 else 'l2_most_recent')
+                        for side in (extra,
+                                     os.path.splitext(extra)[0] + '.hdr'):
+                            if os.path.isfile(side):
+                                zf.write(
+                                    side,
+                                    f'{label}/{os.path.basename(side)}')
+                    except Exception as exc:
+                        sys.stderr.write(
+                            f'[download] skipped {extra}: {exc}\n')
 
             size = os.path.getsize(zip_path)
             self.send_response(200)
@@ -2385,6 +2444,100 @@ class FireRoutes:
         })
 
     # -- Progress / queue / notifications / cache / abort --
+
+    def handle_api_l2_dates(self, fire_numbe):
+        """Acquisition dates available for this AOI's L2 composite.
+
+        Reports which dates already have a product on the ramdisk, so
+        the selector can show at a glance which switches are instant.
+        """
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        if not getattr(fire, 'bbox_native', None):
+            self._send_json({'error': 'Fire has no bbox on record.'}, 400)
+            return
+        try:
+            from ..l2_recent import available_acq_dates
+            from ..aoi_stack import aoi_stack_path, RAM_DIR
+            ref = (state.rasters_by_year.get(fire.fire_year)
+                   or state.raster_path)
+            dates = available_acq_dates(fire.bbox_native, '',
+                                        ref_raster=ref or '')
+        except Exception as exc:
+            self._send_json(
+                {'error': f'could not list acquisition dates: {exc}'},
+                500)
+            return
+
+        cur = getattr(fire, 'l2_start_date', '') or ''
+        newest = dates[0]['date'] if dates else ''
+        # An empty selection means "most recent", which IS the newest
+        # date -- show it ticked rather than leaving the list blank.
+        effective = cur or newest
+        inst = getattr(state, 'shared_root', '') or ''
+        for d in dates:
+            try:
+                # The default product carries no date suffix, so the
+                # newest date must be probed under both names.
+                cands = [aoi_stack_path(fire_numbe, '*', ram_dir=RAM_DIR,
+                                        instance_key=inst,
+                                        post_source='l2',
+                                        l2_date=d['date'])]
+                if d['date'] == newest:
+                    cands.append(
+                        aoi_stack_path(fire_numbe, '*', ram_dir=RAM_DIR,
+                                       instance_key=inst,
+                                       post_source='l2'))
+                import glob as _g
+                d['built'] = any(_g.glob(c.replace('*', '*'))
+                                 for c in cands)
+            except Exception:
+                d['built'] = False
+        self._send_json({'dates': dates, 'selected': effective,
+                         'newest': newest})
+
+    def handle_api_l2_date_apply(self, fire_numbe):
+        """Rebuild (or reuse) the L2 composite for a chosen start date."""
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        body = self._read_json() or {}
+        date = str(body.get('date', '')).strip()
+        if date and (len(date) != 8 or not date.isdigit()):
+            self._send_json({'error': 'date must be YYYYMMDD'}, 400)
+            return
+
+        prev = getattr(fire, 'l2_start_date', '') or ''
+        fire.l2_start_date = date
+        try:
+            from ..prepare import switch_post_source, set_user_post_source
+            # Rebuild through the SAME path a source switch uses, so
+            # stashes, previews and the fire's post_source all end up
+            # consistent. The stack path embeds the date, so a date
+            # already built is found rather than recomputed.
+            result = switch_post_source(fire, 'l2')
+            if not result.get('ok'):
+                fire.l2_start_date = prev      # nothing was changed
+                self._send_json(
+                    {'error': result.get('error', 'unknown'),
+                     'busy': bool(result.get('busy'))},
+                    409 if result.get('busy') else 400)
+                return
+            try:
+                set_user_post_source(fire, 'l2')
+            except Exception:
+                fire.user_post_source = 'l2'
+            _save_fire_state()
+            self._send_json({'ok': True, 'date': date,
+                             'post_source': 'l2'})
+        except Exception as exc:
+            fire.l2_start_date = prev
+            self._send_json({'error': str(exc)}, 500)
 
     def handle_api_progress(self, fire_numbe):
         """Live progress snapshot for a fire currently being mapped.

@@ -1278,10 +1278,9 @@ def switch_post_source(fire: FireInfo, source: str) -> dict:
     # that legitimately want to wait can retry; the UI reports it.
     lk = _source_switch_lock(fire.fire_numbe)
     if not lk.acquire(blocking=False):
-        # Say WHAT holds it. On a freshly prepared fire this is almost
+        # Say WHAT holds it: on a freshly prepared fire this is almost
         # always the background prebuild of the other source, which the
-        # caller should simply wait out -- quite different from another
-        # operator switching at the same moment.
+        # caller should simply wait out.
         why = ('the background prebuild of the other source'
                if getattr(fire, 'prebuilding', False)
                else 'another source switch')
@@ -1289,8 +1288,8 @@ def switch_post_source(fire: FireInfo, source: str) -> dict:
                 'holder': ('prebuild'
                            if getattr(fire, 'prebuilding', False)
                            else 'switch'),
-                'error': (f'Busy: {why} is using this fire. '
-                          f'Retrying automatically.')}
+                'error': f'Busy: {why} is using this fire. '
+                         f'Retrying automatically.'}
     try:
         # Already there: nothing to do, and saying so instantly is much
         # better than repeating the work.
@@ -1326,7 +1325,10 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
             fire.fire_numbe, fire.bbox_native, progress_cb=_cb,
             instance_key=getattr(state, 'shared_root', '') or '',
             post_source=source, ref_raster=ref_raster,
-            log_cb=lambda m: fire.console_log.append(m.rstrip()))
+            log_cb=lambda m: fire.console_log.append(m.rstrip()),
+            # Per-date L2 composites: empty means 'most recent',
+            # which is the historical behaviour.
+            l2_start_date=getattr(fire, 'l2_start_date', ''))
     except AoiStackError as exc:
         fire.progress = {}
         return {'ok': False, 'error': str(exc)}
@@ -1648,7 +1650,10 @@ def ensure_fire_stack_present(fire: FireInfo) -> dict:
         instance_key=getattr(state, 'shared_root', '') or '',
         post_source=getattr(fire, 'post_source', 'l2') or 'l2',
         ref_raster=(state.rasters_by_year.get(fire.fire_year)
-                    or state.raster_path))
+                    or state.raster_path),
+            # Per-date L2 composites: empty means 'most recent',
+            # which is the historical behaviour.
+            l2_start_date=getattr(fire, 'l2_start_date', ''))
     fire.crop_bin = info['path']
     if info.get('width'):
         fire.crop_w = info['width']
@@ -1816,7 +1821,10 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
             progress_cb=_stack_progress, force=True,
             instance_key=getattr(state, 'shared_root', '') or '',
             post_source=getattr(fire, 'post_source', 'l2') or 'l2',
-            ref_raster=ref_raster)
+            ref_raster=ref_raster,
+            # Per-date L2 composites: empty means 'most recent',
+            # which is the historical behaviour.
+            l2_start_date=getattr(fire, 'l2_start_date', ''))
     except AoiStackError as exc:
         _set_fire_status(fire, FireStatus.ERROR,
                          f'AOI stack build failed: {exc}')

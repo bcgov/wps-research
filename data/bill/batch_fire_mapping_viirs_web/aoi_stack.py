@@ -251,7 +251,8 @@ def aoi_identity_hash(identifier: str, instance_key: str = '') -> str:
 def aoi_stack_path(identifier: str, post_date: str,
                    ram_dir: str = RAM_DIR,
                    instance_key: str = '',
-                   post_source: str = 'mrap') -> str:
+                   post_source: str = 'mrap',
+                   l2_date: str = '') -> str:
     """``/ram/<postdate>_stack_<identifier>_<hash>[_l2].bin``
 
     The readable identifier is kept so the files are diagnosable by eye;
@@ -265,6 +266,15 @@ def aoi_stack_path(identifier: str, post_date: str,
     safe = sanitize_identifier(identifier)
     h = aoi_identity_hash(identifier, instance_key)
     suffix = '' if post_source == 'mrap' else f'_{post_source}'
+    # An L2 composite built from an earlier START DATE is a different
+    # product over the same AOI, so it gets its own file and both
+    # persist on the ramdisk. Switching back to a date already built is
+    # then a path lookup, not a rebuild.
+    #
+    # The default (no start date) keeps the plain '_l2' name, so every
+    # product built before this feature existed is still found.
+    if post_source == 'l2' and l2_date:
+        suffix += f'_d{l2_date}'
     return os.path.join(
         ram_dir, f'{post_date}_stack_{safe}_{h}{suffix}.bin')
 
@@ -654,7 +664,8 @@ def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
                      instance_key: str = '',
                      post_source: str = 'mrap',
                      ref_raster: str = None,
-                     log_cb=None) -> dict:
+                     log_cb=None,
+                     l2_start_date: str = '') -> dict:
     """Return the AOI stack for *identifier*, building it if needed.
 
     This is the function that makes the ramdisk safe to lose. ``/ram``
@@ -672,6 +683,8 @@ def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
     xmin, ymin, xmax, ymax = (float(v) for v in bbox_native)
     post_date, post_bin = find_latest_mrap()
     out_bin = aoi_stack_path(identifier, post_date, ram_dir=ram_dir,
+                             l2_date=(l2_start_date
+                                      if post_source == 'l2' else ''),
                              instance_key=instance_key,
                              post_source=post_source)
 
@@ -727,7 +740,8 @@ def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
                     progress_cb=(
                         (lambda d, f: progress_cb(d, 0.6 * f))
                         if progress_cb else None),
-                    log_cb=log_cb)
+                    log_cb=log_cb,
+                    start_date=l2_start_date or '')
             except L2RecentError as exc:
                 raise AoiStackError(f'L2-recent composite failed: {exc}')
             override = l2_tmp

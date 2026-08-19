@@ -161,6 +161,17 @@
                  the eraser tools. The rule is grouped away from the
                  hand-editing so the two are not mistaken for each
                  other. -->
+            <!-- Only meaningful for the L2 composite, and only for the
+                 LEFT pane's source, so it is hidden otherwise rather
+                 than shown disabled. -->
+            <button class="btn btn-secondary" id="btn-date-select"
+                    onclick="openDatePicker()"
+                    style="font-size:11px;padding:2px 8px;display:none;
+                           white-space:nowrap"
+                    title="Choose the acquisition date the L2 recent
+                           composite starts from. Older acquisitions are
+                           still used to fill gaps, exactly as
+                           usual.">Date select</button>
             <button class="btn btn-secondary" id="btn-custom-bands"
                     onclick="openBandPicker()"
                     style="font-size:11px;padding:2px 8px;
@@ -1125,6 +1136,7 @@ async function onPostSourceChange() {
         clearTimeout(killer);
         srcSwitchVisualDone();      // no-op if already released
         setSourceSelectorsEnabled(true);
+        try { syncDateSelectButton(); } catch (_) {}
         _srcSwitchBusy = false;
         _srcSwitchAbort = null;
     }
@@ -3306,6 +3318,7 @@ function applySavedUiState(ui, kgcParams) {
         setSel('view-select', leftView);
         setSel('view-select-right', rightView);
         setSel('post-source-select', currentPostSource);
+        try { syncDateSelectButton(); } catch (_) {}
         setSel('post-source-select-right', rightPostSource);
 
         // Split last: it reads the values above when it opens, and
@@ -3326,6 +3339,7 @@ function applySavedUiState(ui, kgcParams) {
         updateSubtitle('left', leftView);
         if (splitActive) updateSubtitle('right', rightView);
         invalidateOverlayLayers();
+        try { syncDateSelectButton(); } catch (_) {}
     } catch (_) { /* the panes will be loaded by the caller anyway */ }
 }
 
@@ -3627,6 +3641,166 @@ async function onRestrictHintChange() {
 // the only behaviour that does not silently throw away one or the
 // other.
 let _bandRows = [];
+
+let _dateRows = [];
+let _dateApplying = false;
+
+// The button belongs to the LEFT pane's source only, so it appears and
+// disappears with it rather than sitting there inert.
+function syncDateSelectButton() {
+    const b = document.getElementById('btn-date-select');
+    if (!b) return;
+    b.style.display = (currentPostSource === 'l2') ? '' : 'none';
+}
+
+function closeDatePicker() {
+    const d = document.getElementById('date-picker');
+    if (d) d.style.display = 'none';
+}
+
+async function openDatePicker() {
+    const dlg = document.getElementById('date-picker');
+    const list = document.getElementById('date-picker-list');
+    const note = document.getElementById('date-picker-note');
+    const prog = document.getElementById('date-picker-progress');
+    if (!dlg || !list) return;
+    list.innerHTML = '<div style="color:#888">Reading available '
+        + 'acquisition dates ...</div>';
+    if (note) note.textContent = '';
+    if (prog) { prog.style.display = 'none'; prog.textContent = ''; }
+    dlg.style.display = 'flex';
+    try {
+        const r = await fetch(
+            `/api/fire/${encodeURIComponent(FIRE)}/l2_dates`);
+        const j = await r.json();
+        if (!r.ok || j.error) {
+            list.innerHTML = `<div style="color:#a33">`
+                + `${j.error || ('HTTP ' + r.status)}</div>`;
+            return;
+        }
+        _dateRows = j.dates || [];
+        if (!_dateRows.length) {
+            list.innerHTML = '<div style="color:#a33">No Sentinel-2 '
+                + 'acquisitions found for the tiles covering this '
+                + 'AOI.</div>';
+            return;
+        }
+        const sel = j.selected || j.newest || '';
+        // Radios, not checkboxes: exactly one start date at a time.
+        list.innerHTML = _dateRows.map((d) => {
+            const pretty = `${d.date.slice(0, 4)}-${d.date.slice(4, 6)}`
+                + `-${d.date.slice(6, 8)}`;
+            const built = d.built
+                ? '<span style="color:#2d8a4e">ready</span>'
+                : '<span style="color:#888">builds on apply</span>';
+            const newestTag = (d.date === j.newest)
+                ? ' <span style="color:#3a7bd5">(most recent)</span>' : '';
+            return `
+            <label style="display:flex;align-items:center;gap:8px;
+                          padding:4px 0;font-size:12px;cursor:pointer">
+              <input type="radio" name="l2-date" class="date-pick"
+                     value="${d.date}" ${d.date === sel ? 'checked' : ''}>
+              <span style="min-width:6.5em">${pretty}</span>
+              <span style="color:#888;min-width:7em">${d.zips} zip(s),
+                    ${d.tiles.length} tile(s)</span>
+              <span>${built}${newestTag}</span>
+            </label>`;
+        }).join('');
+        if (note) {
+            note.textContent = 'The composite starts from the selected '
+                + 'date and fills gaps with earlier acquisitions, '
+                + 'exactly as the default does. Dates marked "ready" '
+                + 'are already built and switch immediately.';
+        }
+    } catch (err) {
+        list.innerHTML = `<div style="color:#a33">${err.message}</div>`;
+    }
+}
+
+async function applyDateSelection() {
+    if (_dateApplying) return;
+    const btn = document.getElementById('btn-apply-date');
+    const prog = document.getElementById('date-picker-progress');
+    const picked = document.querySelector('.date-pick:checked');
+    if (!picked) return;
+    const date = picked.value;
+
+    _dateApplying = true;
+    if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; }
+    if (prog) {
+        prog.style.display = '';
+        prog.textContent = 'Building the L2 composite from ' + date
+            + ' ...';
+    }
+    // Poll the fire's progress so a build that takes minutes reports
+    // like every other long operation.
+    const t0 = performance.now();
+    const poll = setInterval(async () => {
+        try {
+            const r = await fetch(
+                `/api/fire/${encodeURIComponent(FIRE)}/progress`,
+                {headers: {'X-Requested-With': 'fetch'}});
+            if (!r.ok) return;
+            const j = await r.json();
+            const d = (j.progress && j.progress.detail) || '';
+            const el = (performance.now() - t0) / 1000;
+            if (prog) {
+                prog.textContent = `Building from ${date} - `
+                    + `${el.toFixed(0)}s` + (d ? ` - ${d}` : '');
+            }
+        } catch (_) {}
+    }, 1500);
+
+    try {
+        let r, j;
+        for (;;) {
+            r = await fetch(
+                `/api/fire/${encodeURIComponent(FIRE)}/l2_date`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json',
+                          'X-Requested-With': 'fetch'},
+                body: JSON.stringify({date: date}),
+            });
+            j = await r.json().catch(() => ({}));
+            // Same courtesy as the source switch: a background prebuild
+            // holding the fire is something to wait out, not fail on.
+            if (r.status !== 409 || !j.busy) break;
+            if (prog) {
+                prog.textContent = 'Waiting for a background build to '
+                    + 'finish ...';
+            }
+            await new Promise((res) => setTimeout(res, 2000));
+        }
+        if (!r.ok || j.error) {
+            if (prog) {
+                prog.textContent = 'Failed: '
+                    + (j.error || ('HTTP ' + r.status));
+            }
+            log(`[date] apply failed: ${j.error || r.status}`, 'error');
+            return;
+        }
+        log(`[date] L2 composite now starts from ${date}`, 'success');
+        // The stack changed underneath every view, so drop cached
+        // previews and repaint from the server.
+        _previewStamp = Date.now();
+        for (const k of [..._previewBlobs.keys()]) {
+            try { URL.revokeObjectURL(_previewBlobs.get(k)); } catch (_) {}
+            _previewBlobs.delete(k);
+        }
+        invalidateEraseBuffers('L2 start date changed');
+        await loadPaneImage('left', leftView);
+        if (splitActive && rightView) await loadPaneImage('right', rightView);
+        invalidateOverlayLayers();
+        closeDatePicker();
+    } catch (err) {
+        if (prog) prog.textContent = 'Failed: ' + err.message;
+    } finally {
+        clearInterval(poll);
+        _dateApplying = false;
+        if (btn) { btn.disabled = false; btn.style.opacity = ''; }
+    }
+}
+
 
 async function openBandPicker() {
     const dlg = document.getElementById('band-picker');
@@ -7551,6 +7725,36 @@ restoreMethodToggle();
 
 <!-- Band picker. Populated from /bands when opened, so it always
      reflects the selection in force at that moment. -->
+<div id="date-picker" style="display:none;position:fixed;inset:0;
+     background:rgba(0,0,0,0.45);z-index:1000;align-items:center;
+     justify-content:center">
+  <div style="background:#fff;border-radius:6px;max-width:460px;
+              width:90%;max-height:80vh;display:flex;
+              flex-direction:column;box-shadow:0 8px 30px #0006">
+    <div style="padding:12px 16px;border-bottom:1px solid #e5e5e5;
+                display:flex;align-items:center;gap:10px">
+      <strong style="flex:1">L2 recent &mdash; start date</strong>
+      <button class="btn btn-secondary" style="font-size:11px;
+              padding:2px 8px" onclick="closeDatePicker()">Close</button>
+    </div>
+    <div id="date-picker-note"
+         style="padding:8px 16px;font-size:11px;color:#666"></div>
+    <!-- Scrolls: an AOI with several tiles can have many dates. -->
+    <div id="date-picker-list"
+         style="overflow:auto;padding:4px 16px 12px;flex:1;
+                min-height:80px"></div>
+    <div id="date-picker-progress"
+         style="display:none;padding:0 16px 10px;font-size:11px;
+                color:#555"></div>
+    <div style="padding:12px 16px;border-top:1px solid #e5e5e5;
+                display:flex;gap:8px;align-items:center">
+      <span style="flex:1"></span>
+      <button class="btn" id="btn-apply-date"
+              onclick="applyDateSelection()">Apply</button>
+    </div>
+  </div>
+</div>
+
 <div id="band-picker" style="display:none;position:fixed;inset:0;
      background:rgba(0,0,0,0.45);z-index:1000;align-items:center;
      justify-content:center">

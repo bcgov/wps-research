@@ -208,6 +208,42 @@ def zips_for_tile(tile: str, mrap_dir: str = MRAP_DIR) -> list:
     return out
 
 
+def available_acq_dates(bbox_native, crs_wkt: str = '',
+                        mrap_dir: str = MRAP_DIR,
+                        tiles_shp: str = TILES_SHP,
+                        ref_raster: str = '') -> list:
+    """Distinct acquisition dates (YYYYMMDD) available over an AOI.
+
+    Uses exactly the tiles the compositor would use, and the same zip
+    listing, so the dates offered are precisely the ones a build could
+    start from. The date is the first 8 characters of the acquisition
+    timestamp -- the third underscore-separated field of the zip name --
+    so several overpasses on one day collapse to a single entry.
+
+    Newest first, which is the order the selector shows and the order
+    the compositor walks backwards through.
+    """
+    tiles = tiles_intersecting_bbox(bbox_native, crs_wkt,
+                                    tiles_shp=tiles_shp,
+                                    ref_raster=ref_raster)
+    seen = {}
+    for t in tiles:
+        for _key, acq8, _tok, path in zips_for_tile(t, mrap_dir=mrap_dir):
+            if not acq8 or len(acq8) != 8 or not acq8.isdigit():
+                continue
+            e = seen.setdefault(acq8, {'date': acq8, 'tiles': set(),
+                                       'zips': 0})
+            e['tiles'].add(normalize_tile_id(t))
+            e['zips'] += 1
+    out = []
+    for d in sorted(seen.keys(), reverse=True):
+        e = seen[d]
+        out.append({'date': d,
+                    'tiles': sorted(e['tiles']),
+                    'zips': int(e['zips'])})
+    return out
+
+
 def most_recent_zip_for_tile(tile: str, mrap_dir: str = MRAP_DIR):
     """Newest zip for *tile* as ``(acq_yyyymmdd, path)``, or None."""
     z = zips_for_tile(tile, mrap_dir=mrap_dir)
@@ -497,7 +533,8 @@ def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
                          mrap_dir: str = MRAP_DIR,
                          tiles_shp: str = TILES_SHP,
                          log_cb=None,
-                         fill_target: float = FILL_TARGET) -> dict:
+                         fill_target: float = FILL_TARGET,
+                         start_date: str = '') -> dict:
     """Build the 4-band most-recent-L2 composite over the AOI.
 
     Output is on the SAME grid the AOI stack uses (from *ref_raster*),
@@ -558,9 +595,24 @@ def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
     _log(f'AOI is {xsize}x{ysize} px ({total_px:,} px at 20 m); '
          f'{len(tiles)} intersecting tile(s): {", ".join(tiles)}')
 
+    # start_date caps how recent an acquisition may be.
+    #
+    # The backfill already walks newest-first and stops when the tile's
+    # footprint is full, so dropping everything newer than start_date
+    # makes it start there and go back exactly as it always does. That
+    # is the whole change: same ordering, same threshold, same
+    # gap-filling -- only the starting point moves.
+    sd = (start_date or '').strip()
+    if sd and (len(sd) != 8 or not sd.isdigit()):
+        raise L2RecentError(f'start_date must be YYYYMMDD, got {sd!r}')
+    if sd:
+        _log(f'start date {sd}: ignoring acquisitions after this date')
+
     per_tile = []
     for t in tiles:
         z = zips_for_tile(t, mrap_dir=mrap_dir)
+        if sd:
+            z = [r for r in z if r[1] <= sd]
         if z:
             per_tile.append((t, z))
             _log(f'  {z[0][2]}: {len(z)} zip(s) available, '

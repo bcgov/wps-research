@@ -196,6 +196,12 @@ class BaseHandler:
         (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/progress$'),
          'handle_api_progress'),
+        (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/l2_dates$'),
+         'handle_api_l2_dates'),
+        (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/l2_date$'),
+         'handle_api_l2_date_apply'),
         (re.compile(r'^/api/queue$'), 'handle_api_queue'),
         (re.compile(r'^/api/notifications$'),
          'handle_api_notifications_get'),

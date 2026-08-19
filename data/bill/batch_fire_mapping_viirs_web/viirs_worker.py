@@ -751,7 +751,10 @@ def _viirs_worker(fire: FireInfo) -> None:
                 instance_key=getattr(state, 'shared_root', '') or '',
                 post_source=getattr(fire, 'post_source', 'l2') or 'l2',
                 ref_raster=ref_raster,
-                log_cb=lambda m: fire.console_log.append(m.rstrip()))
+                log_cb=lambda m: fire.console_log.append(m.rstrip()),
+            # Per-date L2 composites: empty means 'most recent',
+            # which is the historical behaviour.
+            l2_start_date=getattr(fire, 'l2_start_date', ''))
         except AoiStackError as exc:
             raise WorkerError(f'AOI stack build failed: {exc}')
         crop_bin = stack_info['path']

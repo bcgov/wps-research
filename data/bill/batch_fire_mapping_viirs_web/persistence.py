@@ -194,6 +194,8 @@ def _save_fire_state():
                     getattr(fire, 'clip_to_bcws', False))
                 if getattr(fire, 'accepted_dir', ''):
                     entry['accepted_dir'] = fire.accepted_dir
+                if getattr(fire, 'l2_start_date', ''):
+                    entry['l2_start_date'] = fire.l2_start_date
                 if getattr(fire, 'band_override', None):
                     entry['band_override'] = list(fire.band_override)
                 if getattr(fire, 'scaling', None):
@@ -490,6 +492,7 @@ def _load_fire_state():
             fire.diff_only = bool(entry.get('diff_only', False))
             fire.clip_to_bcws = bool(entry.get('clip_to_bcws', False))
             fire.accepted_dir = entry.get('accepted_dir', '') or ''
+            fire.l2_start_date = entry.get('l2_start_date', '') or ''
             fire.band_override = list(entry.get('band_override', []) or [])
             fire.scaling = dict(entry.get('scaling', {}) or {})
             fire.kgc_params = dict(entry.get('kgc_params', {}) or {})
