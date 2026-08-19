@@ -3823,17 +3823,49 @@ async function applyDateSelection() {
         }
         log(`[date] L2 composite now starts from ${date}`, 'success');
         if (prog) prog.textContent = 'Built. Loading the new imagery ...';
-        // The stack changed underneath every view, so drop cached
-        // previews and repaint from the server.
+        // The stack changed underneath EVERY view, so nothing cached
+        // client-side is still valid.
         _previewStamp = Date.now();
         for (const k of [..._previewBlobs.keys()]) {
             try { URL.revokeObjectURL(_previewBlobs.get(k)); } catch (_) {}
             _previewBlobs.delete(k);
         }
+        _geoByUrl.clear();          // sidecars are per rendered PNG
         invalidateEraseBuffers('L2 start date changed');
-        await loadPaneImage('left', leftView);
-        if (splitActive && rightView) await loadPaneImage('right', rightView);
+
+        // Load, then CHECK. The server re-renders previews as part of
+        // the switch, and a request that lands mid-render can return
+        // the old file or nothing at all -- which is how a freshly
+        // built composite could fail to appear. One retry after a short
+        // pause covers it, and the view falls back to post-fire if this
+        // particular layer has no preview for the new product.
+        const paneOk = async (pn, view) => {
+            await loadPaneImage(pn, view);
+            const { img } = getPaneElements(pn);
+            return !!(img && img.naturalWidth);
+        };
+        if (!await paneOk('left', leftView)) {
+            await new Promise((res) => setTimeout(res, 900));
+            _previewStamp = Date.now();
+            if (!await paneOk('left', leftView) && leftView !== 'post') {
+                log(`[date] "${leftView}" has no preview for this `
+                    + `composite yet; showing post-fire`, 'dim');
+                leftView = 'post';
+                const vs = document.getElementById('view-select');
+                if (vs) vs.value = 'post';
+                await loadPaneImage('left', 'post');
+                updateSubtitle('left', 'post');
+            }
+        }
+        if (splitActive && rightView) {
+            if (!await paneOk('right', rightView)) {
+                await new Promise((res) => setTimeout(res, 900));
+                _previewStamp = Date.now();
+                await loadPaneImage('right', rightView);
+            }
+        }
         invalidateOverlayLayers();
+        try { syncDateSelectButton(); } catch (_) {}
         closeDatePicker();
     } catch (err) {
         // "Failed to fetch" means the connection dropped, not that the

@@ -333,6 +333,31 @@ class FireListRoutes:
             # path, so match on the stack's hash rather than the name.
             try:
                 from ..aoi_stack import RAM_DIR
+
+                # Every AOI stack this fire owns, including one per L2
+                # start date.
+                #
+                # The path-derived purge above only catches the stack
+                # currently pointed at by crop_bin; a composite built
+                # for an earlier date has a different post-date prefix
+                # AND a '_l2_d<date>' suffix, so it survived and sat on
+                # the ramdisk after the fire was gone.
+                #
+                # The identity hash is derived from this fire's name and
+                # the instance key, and names are unique among live
+                # fires, so this cannot reach another fire's stack.
+                try:
+                    from ..aoi_stack import (aoi_identity_hash,
+                                             sanitize_identifier)
+                    inst = getattr(state, 'shared_root', '') or ''
+                    _safe = sanitize_identifier(fire_numbe)
+                    _h = aoi_identity_hash(fire_numbe, inst)
+                    for f in glob.glob(os.path.join(
+                            RAM_DIR, f'*_stack_{_safe}_{_h}*')):
+                        own.append(f)
+                except Exception as exc:
+                    sys.stderr.write(
+                        f'[remove] stack purge: {exc}\n')
                 tag = os.path.basename(stem)
                 for d in glob.glob(os.path.join(RAM_DIR, 'kgc_*')):
                     marker = os.path.join(d, '.stack')

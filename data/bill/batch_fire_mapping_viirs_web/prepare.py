@@ -1406,6 +1406,23 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
     # Previews are derived from the stack, so they must match the new
     # post bands. Restore this source's stash when one exists (cheap
     # copies) and only re-render when it does not.
+    # A DATE change is an l2 -> l2 switch, and the stash for 'l2' holds
+    # the PREVIOUS date's imagery. Restoring it would put the old
+    # composite straight back on screen -- which is exactly what
+    # happened: the build ran, and the display never changed. Drop the
+    # stale stash so the previews are re-rendered from the new stack.
+    if source == 'l2' and prev_src == 'l2':
+        try:
+            stale = _preview_stash_dir(fire, 'l2')
+            if os.path.isdir(stale):
+                shutil.rmtree(stale, ignore_errors=True)
+                sys.stderr.write(
+                    '[prepare] dropped the l2 preview stash: the start '
+                    'date changed, so it no longer describes this '
+                    'product\n')
+        except Exception as exc:
+            sys.stderr.write(f'[prepare] stash drop failed: {exc}\n')
+
     restored = _restore_previews(fire, source)
     if restored:
         try:
