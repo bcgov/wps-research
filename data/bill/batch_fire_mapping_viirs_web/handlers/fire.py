@@ -257,6 +257,11 @@ class FireRoutes:
             'sample_size': fire.sample_size,
             'perimeter_type': fire.perimeter_type,
             'hint_mode': fire.hint_mode,
+            # Which L2 composite is loaded. The client puts
+            # this in every L2 preview URL so a date switch
+            # cannot be served from another date's cache.
+            'l2_start_date': getattr(fire, 'l2_start_date',
+                                     '') or '',
             # Report what the USER is on, not the transient value the
             # background prebuild may currently be sitting at -- that
             # race made a new fire open on MRAP instead of L2.
@@ -296,6 +301,11 @@ class FireRoutes:
             'ok': True,
             'perimeter_type': fire.perimeter_type,
             'hint_mode': fire.hint_mode,
+            # Which L2 composite is loaded. The client puts
+            # this in every L2 preview URL so a date switch
+            # cannot be served from another date's cache.
+            'l2_start_date': getattr(fire, 'l2_start_date',
+                                     '') or '',
         })
 
     def handle_api_post_source(self, fire_numbe):

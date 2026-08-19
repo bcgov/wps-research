@@ -782,6 +782,10 @@ const VIEW_LABELS = {
 // default here would light the wrong button until the
 // first /prepare response arrived.
 let currentHintMode = 'redwins_post';
+// Which L2 composite is loaded: '' means the default (most recent).
+// Part of every L2 preview URL, so switching dates cannot be served
+// from a cache belonging to another date.
+let currentL2Date = '';
 
 // Which post imagery the stack is built from: 'l2' (most recent L2A
 // tiles over the AOI, default) or 'mrap' (province-wide composite).
@@ -1268,6 +1272,7 @@ async function _onPostSourceChangeInner() {
             // Guarded: an empty value would clear the selection and
             // leave the row looking as though VIIRS were chosen.
             currentHintMode = data.hint_mode || 'redwins_post';
+        currentL2Date = data.l2_start_date || '';
         // Show the Date select button as soon as the source is
         // known. The call inside applySavedUiState is not enough:
         // that function returns early for a fire with no saved
@@ -3835,6 +3840,12 @@ async function applyDateSelection() {
             return;
         }
         log(`[date] L2 composite now starts from ${date}`, 'success');
+        // Adopt it BEFORE reloading, so every request below asks for
+        // the new product by name.
+        currentL2Date = (j && typeof j.date === 'string') ? j.date : date;
+        currentPostSource = 'l2';
+        const _ls = document.getElementById('post-source-select');
+        if (_ls) _ls.value = 'l2';
         if (prog) prog.textContent = 'Built. Loading the new imagery ...';
         // The stack changed underneath EVERY view, so nothing cached
         // client-side is still valid.
@@ -3852,6 +3863,16 @@ async function applyDateSelection() {
         // built composite could fail to appear. One retry after a short
         // pause covers it, and the view falls back to post-fire if this
         // particular layer has no preview for the new product.
+        // Abandon anything already in flight before reloading.
+        //
+        // A request issued before the switch can land after it and
+        // repaint the OLD composite -- the pane then looks unchanged
+        // until something forces another load, which is what made a
+        // second switch appear to "fix" it. Bumping the generation
+        // makes every in-flight load discard its result.
+        for (const pn of ['left', 'right']) {
+            try { _paneGen[pn] = (_paneGen[pn] || 0) + 1; } catch (_) {}
+        }
         const paneOk = async (pn, view) => {
             await loadPaneImage(pn, view);
             const { img } = getPaneElements(pn);
@@ -5498,8 +5519,18 @@ function previewUrlFor(viewKey, pane) {
     const stamp = (viewKey === 'hint') ? _hintStamp : previewStamp();
     // Per-pane source, so the right pane can show the other imagery.
     const src = (pane === 'right') ? rightPostSource : currentPostSource;
+    // The L2 start date is part of the URL, because it selects a
+    // DIFFERENT product on the server.
+    //
+    // Without it, every date's preview shares one URL and only the
+    // cache-buster distinguishes them -- so a stale entry anywhere (the
+    // blob map, the browser's image cache, a proxy) could keep serving
+    // the previous composite, which is why a switch sometimes needed
+    // doing twice. Now the URL itself changes with the product.
+    const dpart = (src === 'l2')
+        ? `&l2=${currentL2Date || 'latest'}` : '';
     return `/api/fire/${encodeURIComponent(FIRE)}/preview/${viewKey}`
-        + `?src=${src}${modePart}&t=${stamp}`;
+        + `?src=${src}${modePart}${dpart}&t=${stamp}`;
 }
 
 // Composite the vector overlays onto a decoded image, returning a blob
