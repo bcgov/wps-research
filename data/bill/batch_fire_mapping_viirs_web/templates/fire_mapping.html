@@ -4485,7 +4485,8 @@ function applyEraserCursor(force) {
 // from it is exactly what erasing looks like -- rather than painting a
 // placeholder colour and hoping the server agrees.
 let _erasePrepGen = 0;
-let _erasePrepKey = '';      // pane + post URL the buffers were built from
+let _erasePrepKey = '';      // pane + full post URL (identity + stamp)
+let _erasePrepId = '';       // pane + product identity (source + date)
 
 async function prepareEraseCanvases(forPane) {
     // The pane is the caller's choice when given -- the pane a stroke
@@ -4531,7 +4532,9 @@ async function prepareEraseCanvases(forPane) {
         // change between MRAP and L2, so a size check cannot see it --
         // which is why erasing sometimes revealed the OTHER source's
         // imagery under the mask.
-        _erasePrepKey = `${pane}|${url.split('&t=')[0]}`;
+        _erasePrepKey = `${pane}|${url}`;
+        _erasePrepId = `${pane}|${url.split('&t=')[0]}`;
+        log(`[erase] base imagery: ${url.split('?')[1] || url}`, 'dim');
         const r = await fetch(url);
         if (!r.ok || myPrep !== _erasePrepGen) return;
         const blob = await r.blob();
@@ -4613,7 +4616,25 @@ function eraseAt(pane, clientX, clientY) {
     _erasePts.push([Math.round(p.ix), Math.round(p.iy)]);
 
     // Local preview: copy the same box out of the post-fire canvas.
-    if (_eraseWork && _eraseBase) {
+    //
+    // Only when the base belongs to the product this pane is showing.
+    // A base from another source or L2 date is the WRONG picture, and
+    // revealing it under the cursor -- then having the server's render
+    // replace it on mouse-up -- is worse than revealing nothing: it
+    // looks like the erase did something it did not do.
+    let _baseOk = !!_eraseBase;
+    if (_baseOk) {
+        try {
+            const _want = `${pane}|`
+                + previewUrlFor('post', pane).split('&t=')[0];
+            _baseOk = (_erasePrepId === _want)
+                && _eraseBase.width === _eraseWork.width
+                && _eraseBase.height === _eraseWork.height;
+        } catch (_) {
+            _baseOk = false;
+        }
+    }
+    if (_eraseWork && _baseOk) {
         const kx = maskToPreviewRatio(pane);
         const bw = Math.max(1, Math.round(eraserSize() * kx));
         const bh = bw;
@@ -5245,13 +5266,32 @@ function initPaneInteraction(pane) {
             // this stroke, and points reach the server regardless.
             {
                 const { img } = getPaneElements(pane);
-                const wantKey = `${pane}|`
-                    + previewUrlFor('post', pane).split('&t=')[0];
-                const stale = (_erasePane !== pane) || !_eraseWork
-                    || !_eraseBase
+                // Two different questions, with different answers.
+                //
+                // IDENTITY (source + L2 date) decides whether the base
+                // is the wrong PICTURE. If that changed, the cached
+                // base must not be drawn at all -- showing another
+                // date's imagery under the eraser and correcting it
+                // only on mouse-up is exactly the reported bug.
+                //
+                // FRESHNESS (the cache-buster) changes after every
+                // stroke, because syncing bumps it. That does not make
+                // the post imagery wrong, so it triggers a background
+                // refresh rather than blanking the base -- otherwise
+                // every stroke would start unable to paint.
+                const _u = previewUrlFor('post', pane);
+                const wantKey = `${pane}|${_u}`;
+                const wantId = `${pane}|${_u.split('&t=')[0]}`;
+                const wrongPicture = (_erasePane !== pane)
+                    || _erasePrepId !== wantId;
+                const stale = wrongPicture || !_eraseWork || !_eraseBase
                     || _erasePrepKey !== wantKey
                     || (img && img.naturalWidth
                         && _eraseWork.width !== img.naturalWidth);
+                if (wrongPicture) {
+                    // Blank it NOW, before any paint can use it.
+                    _eraseBase = null;
+                }
                 // Freeze the option for this stroke: what the local
                 // paint honours and what the server is told MUST be the
                 // same reading, or toggling mid-stroke desynchronises
