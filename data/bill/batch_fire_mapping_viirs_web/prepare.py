@@ -1254,36 +1254,39 @@ def set_user_post_source(fire: FireInfo, source: str) -> None:
 
 
 def _l2_selection_is_current(fire, source: str) -> bool:
-    """Is the loaded product already the one this fire is asking for?
+    """Is the product the fire is USING already the requested one?
 
-    For MRAP there is one product, so the answer is always yes. For L2
-    the start date selects among several, and the loaded one is
-    identified by the stack file that exists for this AOI: the path
-    embeds the date (or omits it for "most recent"). If that file is
-    missing, the requested product has not been built and the caller
-    must not be told there is nothing to do.
+    The question is about what is loaded, not what exists on disk.
+    Testing existence was wrong in the one case that matters: switching
+    back to a date whose product had already been built returned "there
+    is nothing to do" while crop_bin still pointed at a different
+    composite -- so the visualisation, and the clustering input, stayed
+    on the wrong date.
+
+    The loaded stack's own path carries the answer: it ends in
+    ``_l2_d<YYYYMMDD>.bin`` for a dated product and ``_l2.bin`` for the
+    default (most recent).
     """
     if source != 'l2':
         return True
-    try:
-        import glob as _g
-        from .aoi_stack import (RAM_DIR, aoi_identity_hash,
-                                sanitize_identifier)
-        want = getattr(fire, 'l2_start_date', '') or ''
-        inst = getattr(state, 'shared_root', '') or ''
-        safe = sanitize_identifier(fire.fire_numbe)
-        h = aoi_identity_hash(fire.fire_numbe, inst)
-        suffix = f'_l2_d{want}' if want else '_l2'
-        hits = _g.glob(os.path.join(
-            RAM_DIR, f'*_stack_{safe}_{h}{suffix}.bin'))
-        if want:
-            return bool(hits)
-        # "Most recent" has no date suffix, so exclude the dated
-        # products a glob on '_l2' would otherwise also match.
-        return any(not re.search(r'_l2_d\d{8}\.bin$', p) for p in hits)
-    except Exception as exc:
-        sys.stderr.write(f'[switch] date check failed: {exc}\n')
+    cur = getattr(fire, 'crop_bin', '') or ''
+    if not cur or not os.path.isfile(cur):
         return False
+    want = getattr(fire, 'l2_start_date', '') or ''
+    m = re.search(r'_l2_d(\d{8})\.bin$', cur)
+    if m:
+        have = m.group(1)
+    elif cur.endswith('_l2.bin'):
+        have = ''                     # the default, most-recent product
+    else:
+        return False                  # not an L2 stack at all
+    if have != want:
+        sys.stderr.write(
+            f'[switch] L2 date differs: loaded '
+            f'{have or "most-recent"}, requested '
+            f'{want or "most-recent"} -- rebuilding/repointing\n')
+        return False
+    return True
 
 
 def switch_post_source(fire: FireInfo, source: str) -> dict:
