@@ -535,7 +535,20 @@ def write_date_polygons(out_json: str, date_map, date_list,
     # Newest first so the legend reads in the same order as the
     # extraction log.
     entries.sort(key=lambda e: e['date'], reverse=True)
-    payload = {'width': xsize, 'height': ysize, 'dates': entries}
+    # Flat, deduplicated, most recent first: one entry per
+    # satellite/date pair that actually contributed to this composite.
+    # Built here because this is where the satellite is already known
+    # per date; the caller writes it beside the stack, so it can be read
+    # back later without reopening a single zip.
+    sources = sorted(
+        {f'{sat}_{acq}'
+         for acq, sats in (date_sats or {}).items()
+         for sat in (sats or ['S2'])
+         if acq},
+        key=lambda v: (v.split('_')[1], v.split('_')[0]),
+        reverse=True)
+    payload = {'width': xsize, 'height': ysize, 'dates': entries,
+               'sources': sources}
     try:
         tmp = f'{out_json}.tmp{os.getpid()}'
         with open(tmp, 'w', encoding='utf-8') as f:
@@ -906,6 +919,7 @@ def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
         'filled_fraction': aoi_frac,
         'dates_json': dates_json,
         'date_coverage': poly_payload['dates'],
+        'sources': poly_payload.get('sources', []),
         'filled_px': int(filled.sum()),
         'total_px': total_px,
         'geotransform': win_gt,

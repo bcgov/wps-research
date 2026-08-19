@@ -2493,10 +2493,33 @@ class FireRoutes:
                                        instance_key=inst,
                                        post_source='l2'))
                 import glob as _g
-                d['built'] = any(_g.glob(c.replace('*', '*'))
-                                 for c in cands)
+                hits = []
+                for c in cands:
+                    hits.extend(_g.glob(c))
+                # The newest date's default product has no date suffix,
+                # so its glob also matches the dated ones; drop those.
+                if d['date'] == newest:
+                    hits = [h for h in hits
+                            if not re.search(r'_l2_d\d{8}\.bin$', h)] \
+                        or [h for h in hits
+                            if h.endswith(f"_l2_d{d['date']}.bin")]
+                d['built'] = bool(hits)
+                d['sources'] = []
+                if hits:
+                    # Which zips went into THIS product, recorded when
+                    # it was built. Read from the sidecar beside the
+                    # stack, so listing costs no zip access at all.
+                    from ..l2_recent import date_polygons_path
+                    try:
+                        side = date_polygons_path(sorted(hits)[0])
+                        with open(side, encoding='utf-8') as fh:
+                            d['sources'] = (json.load(fh).get('sources')
+                                            or [])
+                    except Exception:
+                        d['sources'] = []
             except Exception:
                 d['built'] = False
+                d['sources'] = []
         self._send_json({'dates': dates, 'selected': effective,
                          'newest': newest})
 

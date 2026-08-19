@@ -3737,16 +3737,29 @@ async function openDatePicker() {
                 : '<span style="color:#888">builds on apply</span>';
             const newestTag = (d.date === j.newest)
                 ? ' <span style="color:#3a7bd5">(most recent)</span>' : '';
+            // What actually went into this product, once built. Wraps
+            // rather than truncating: with several tiles and a deep
+            // backfill the list is the interesting part of the row.
+            const src = (d.sources && d.sources.length)
+                ? `<div style="color:#555;font-size:11px;
+                               font-family:monospace;padding-left:1.6em;
+                               word-break:break-word">
+                     ${d.sources.join(', ')}
+                   </div>`
+                : '';
             return `
-            <label style="display:flex;align-items:center;gap:8px;
-                          padding:4px 0;font-size:12px;cursor:pointer">
-              <input type="radio" name="l2-date" class="date-pick"
-                     value="${d.date}" ${d.date === sel ? 'checked' : ''}>
-              <span style="min-width:6.5em">${pretty}</span>
-              <span style="color:#888;min-width:7em">${d.zips} zip(s),
-                    ${d.tiles.length} tile(s)</span>
-              <span>${built}${newestTag}</span>
-            </label>`;
+            <div style="padding:4px 0">
+              <label style="display:flex;align-items:center;gap:8px;
+                            font-size:12px;cursor:pointer">
+                <input type="radio" name="l2-date" class="date-pick"
+                       value="${d.date}" ${d.date === sel ? 'checked' : ''}>
+                <span style="min-width:6.5em">${pretty}</span>
+                <span style="color:#888;min-width:7em">${d.zips} zip(s),
+                      ${d.tiles.length} tile(s)</span>
+                <span>${built}${newestTag}</span>
+              </label>
+              ${src}
+            </div>`;
         }).join('');
         if (note) {
             note.textContent = 'The composite starts from the selected '
