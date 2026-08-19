@@ -428,8 +428,36 @@ tbody tr.row-mapping:hover { background: #ede1ff; }
     border-bottom: 1px solid #e0e0e5;
     display: flex;
     align-items: center;
-    gap: 12px;
+    /* One character space between items, and nothing else.
+     *
+     * Items previously carried their own margin-left (8/10/12px) on top
+     * of a 12px gap, and the split-view controls used margin-left:auto
+     * to jump to the right edge -- so the row's layout depended on
+     * which controls happened to be visible. Everything now packs from
+     * the left in DOM order, identically whether split view or the ML
+     * classification controls are showing. */
+    gap: 1ch;
+    row-gap: 4px;
+    flex-wrap: wrap;
+    justify-content: flex-start;
     flex-shrink: 0;
+}
+
+/* Neutralise per-item spacing set inline in the markup, so `gap` is the
+ * single source of truth for this row. Inline styles need !important to
+ * override; the alternative is editing a dozen style attributes and
+ * missing one. */
+.image-controls > *,
+.image-controls > *[style] {
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+}
+
+/* The split-view controls join the same left-packed flow instead of
+ * being pushed to the far right. */
+#right-pane-controls {
+    margin-left: 0 !important;
+    padding-left: 0 !important;
 }
 
 .image-controls select {
