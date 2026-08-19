@@ -10,6 +10,7 @@ import glob
 import json
 import os
 import shutil
+import re
 import sys
 import threading
 import time
@@ -1252,6 +1253,39 @@ def set_user_post_source(fire: FireInfo, source: str) -> None:
     fire.user_post_source = source
 
 
+def _l2_selection_is_current(fire, source: str) -> bool:
+    """Is the loaded product already the one this fire is asking for?
+
+    For MRAP there is one product, so the answer is always yes. For L2
+    the start date selects among several, and the loaded one is
+    identified by the stack file that exists for this AOI: the path
+    embeds the date (or omits it for "most recent"). If that file is
+    missing, the requested product has not been built and the caller
+    must not be told there is nothing to do.
+    """
+    if source != 'l2':
+        return True
+    try:
+        import glob as _g
+        from .aoi_stack import (RAM_DIR, aoi_identity_hash,
+                                sanitize_identifier)
+        want = getattr(fire, 'l2_start_date', '') or ''
+        inst = getattr(state, 'shared_root', '') or ''
+        safe = sanitize_identifier(fire.fire_numbe)
+        h = aoi_identity_hash(fire.fire_numbe, inst)
+        suffix = f'_l2_d{want}' if want else '_l2'
+        hits = _g.glob(os.path.join(
+            RAM_DIR, f'*_stack_{safe}_{h}{suffix}.bin'))
+        if want:
+            return bool(hits)
+        # "Most recent" has no date suffix, so exclude the dated
+        # products a glob on '_l2' would otherwise also match.
+        return any(not re.search(r'_l2_d\d{8}\.bin$', p) for p in hits)
+    except Exception as exc:
+        sys.stderr.write(f'[switch] date check failed: {exc}\n')
+        return False
+
+
 def switch_post_source(fire: FireInfo, source: str) -> dict:
     """Switch a fire between the L2-recent and MRAP post imagery.
 
@@ -1293,7 +1327,15 @@ def switch_post_source(fire: FireInfo, source: str) -> dict:
     try:
         # Already there: nothing to do, and saying so instantly is much
         # better than repeating the work.
-        if (getattr(fire, 'post_source', '') or 'l2') == source:
+        #
+        # "There" now includes the L2 START DATE. Without that check,
+        # applying a different date to a fire already on L2 matched this
+        # branch and returned success instantly, having built nothing --
+        # the menu closed, no progress appeared, and the old composite
+        # stayed on screen. The date is part of the product's identity,
+        # so it has to be part of this comparison.
+        if ((getattr(fire, 'post_source', '') or 'l2') == source
+                and _l2_selection_is_current(fire, source)):
             prev_dir = os.path.join(fire.cache_dir, 'previews')
             if os.path.isdir(prev_dir) and os.listdir(prev_dir):
                 return {'ok': True, 'unchanged': True,

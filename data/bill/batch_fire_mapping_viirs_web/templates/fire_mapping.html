@@ -166,7 +166,7 @@
                  than shown disabled. -->
             <button class="btn btn-secondary" id="btn-date-select"
                     onclick="openDatePicker()"
-                    style="font-size:11px;padding:2px 8px;display:none;
+                    style="font-size:11px;padding:2px 8px;
                            white-space:nowrap"
                     title="Choose the acquisition date the L2 recent
                            composite starts from. Older acquisitions are
@@ -3679,7 +3679,20 @@ function syncDateSelectButton() {
     const src = (sel && sel.value) ? sel.value : currentPostSource;
     const b = document.getElementById('btn-date-select');
     if (!b) return;
-    b.style.display = (src === 'l2') ? '' : 'none';
+    // ALWAYS visible.
+    //
+    // It was hidden unless the left pane showed L2, which meant it
+    // vanished exactly when a switch or a rebuild changed the source --
+    // including as a side effect of applying a date. A control that
+    // disappears while you are using it is worse than one that is
+    // occasionally not the thing you want; the menu itself explains
+    // what it applies to.
+    b.style.display = '';
+    b.title = (src === 'l2')
+        ? 'Choose the acquisition date the L2 recent composite starts '
+          + 'from.'
+        : 'Choose the L2 recent start date. Applying one also switches '
+          + 'the left pane to L2 recent.';
 }
 
 function closeDatePicker() {
@@ -3809,6 +3822,7 @@ async function applyDateSelection() {
             return;
         }
         log(`[date] L2 composite now starts from ${date}`, 'success');
+        if (prog) prog.textContent = 'Built. Loading the new imagery ...';
         // The stack changed underneath every view, so drop cached
         // previews and repaint from the server.
         _previewStamp = Date.now();
