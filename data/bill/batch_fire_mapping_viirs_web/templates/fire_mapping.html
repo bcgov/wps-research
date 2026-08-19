@@ -1127,6 +1127,16 @@ async function onPostSourceChange() {
     }
 }
 
+// Any source change invalidates the erase buffers: the "erased look"
+// comes from that source's post image.
+function invalidateEraseBuffers(why) {
+    _eraseBase = null;
+    _eraseWork = null;
+    _erasePrepKey = '';
+    _erasePrepGen++;
+    if (why) log(`[erase] buffers dropped (${why})`, 'dim');
+}
+
 function setSourceSelectorsEnabled(on) {
     for (const id of ['post-source-select', 'post-source-select-right']) {
         const el = document.getElementById(id);
@@ -1160,6 +1170,7 @@ async function _onPostSourceChangeInner() {
                 ? ':' + currentHintMode : ''}:${_previewStamp}`);
     if (canSwapInstantly) {
         currentPostSource = src;
+    try { invalidateEraseBuffers('source changed'); } catch (_) {}
         if (!splitActive) {
             // Not comparing: keep the right pane aligned so entering
             // split shows the same imagery on both sides.
@@ -1184,15 +1195,38 @@ async function _onPostSourceChangeInner() {
         ? `Showing ${srcLabel} (cached).`
         : `Loading ${srcLabel} ...`);
     try {
-        const r = await fetch(
-            `/api/fire/${encodeURIComponent(FIRE)}/post_source`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json',
-                      'X-Requested-With': 'fetch'},
-            body: JSON.stringify({source: src}),
-            signal: _srcSwitchAbort.signal,
-        });
-        const data = await r.json();
+        // Retry while the server says it is busy.
+        //
+        // A fire that has just become READY starts a BACKGROUND
+        // prebuild of the other source, and that holds the same
+        // per-fire lock. Switching in those first minutes was refused,
+        // the selector snapped back, and the switch only "took" on a
+        // later attempt -- which is why it needed doing two or three
+        // times. The work being waited for is usually the very build
+        // this switch needs, so waiting is exactly right; the bottom
+        // bar keeps reporting progress throughout.
+        let r, data;
+        for (;;) {
+            r = await fetch(
+                `/api/fire/${encodeURIComponent(FIRE)}/post_source`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json',
+                          'X-Requested-With': 'fetch'},
+                body: JSON.stringify({source: src}),
+                signal: _srcSwitchAbort.signal,
+            });
+            data = await r.json().catch(() => ({}));
+            if (r.status !== 409 || !data.busy) break;
+            _layerLabel = (src === 'l2'
+                ? 'Waiting for L2 recent tile'
+                : 'Waiting for MRAP composite')
+                + ' - a background build is using this fire';
+            layerStatusPaint();
+            // The abort controller still caps the total wait, so this
+            // cannot spin forever.
+            await new Promise((res) => setTimeout(res, 2000));
+            if (_srcSwitchAbort.signal.aborted) break;
+        }
         if (!r.ok || data.error) {
             log('Post source switch failed: ' + (data.error || 'unknown'),
                 'error');
@@ -1255,6 +1289,30 @@ async function _onPostSourceChangeInner() {
             await loadPaneImage('left', leftView);
             if (splitActive && rightView) {
                 await loadPaneImage('right', rightView);
+            }
+            // Confirm something actually rendered.
+            //
+            // The switch can succeed while this view's preview for the
+            // new source has not been written yet; the pane then stays
+            // blank and the switch looks like it did nothing. One
+            // retry, after a short pause, covers that -- and if the
+            // view genuinely has no preview for this source, fall back
+            // to post-fire, which every source always has.
+            const { img: li } = getPaneElements('left');
+            if (!li || !li.naturalWidth) {
+                await new Promise((res) => setTimeout(res, 700));
+                await loadPaneImage('left', leftView);
+                const { img: l2 } = getPaneElements('left');
+                if ((!l2 || !l2.naturalWidth) && leftView !== 'post') {
+                    log(`[source] "${leftView}" has no preview for `
+                        + `${src.toUpperCase()} yet; showing post-fire`,
+                        'dim');
+                    leftView = 'post';
+                    const vs = document.getElementById('view-select');
+                    if (vs) vs.value = 'post';
+                    await loadPaneImage('left', 'post');
+                    updateSubtitle('left', 'post');
+                }
             }
         }
         // The visible work is done: release the indicator HERE rather
@@ -4087,6 +4145,7 @@ function applyEraserCursor(force) {
 // from it is exactly what erasing looks like -- rather than painting a
 // placeholder colour and hoping the server agrees.
 let _erasePrepGen = 0;
+let _erasePrepKey = '';      // pane + post URL the buffers were built from
 
 async function prepareEraseCanvases(forPane) {
     // The pane is the caller's choice when given -- the pane a stroke
@@ -4127,6 +4186,12 @@ async function prepareEraseCanvases(forPane) {
         // under the mask in the pane being edited, regardless of what
         // the other pane shows.
         const url = previewUrlFor('post', pane);
+        // Key the buffers to the pane AND the exact post image used, so
+        // a later source switch is detected. The dimensions do not
+        // change between MRAP and L2, so a size check cannot see it --
+        // which is why erasing sometimes revealed the OTHER source's
+        // imagery under the mask.
+        _erasePrepKey = `${pane}|${url.split('&t=')[0]}`;
         const r = await fetch(url);
         if (!r.ok || myPrep !== _erasePrepGen) return;
         const blob = await r.blob();
@@ -4840,7 +4905,11 @@ function initPaneInteraction(pane) {
             // this stroke, and points reach the server regardless.
             {
                 const { img } = getPaneElements(pane);
+                const wantKey = `${pane}|`
+                    + previewUrlFor('post', pane).split('&t=')[0];
                 const stale = (_erasePane !== pane) || !_eraseWork
+                    || !_eraseBase
+                    || _erasePrepKey !== wantKey
                     || (img && img.naturalWidth
                         && _eraseWork.width !== img.naturalWidth);
                 // Freeze the option for this stroke: what the local
@@ -5450,6 +5519,7 @@ async function onRightPostSourceChange() {
     // change what mapping reads. The right pane is for comparison, so
     // it just displays the other source's already-stashed previews.
     rightPostSource = src;
+    try { invalidateEraseBuffers('source changed'); } catch (_) {}
     // Same treatment as the left: grey both selectors while this runs,
     // because both read the per-source preview stash.
     setSourceSelectorsEnabled(false);
