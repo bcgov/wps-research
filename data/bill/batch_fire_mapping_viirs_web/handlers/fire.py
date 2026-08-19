@@ -1027,12 +1027,26 @@ class FireRoutes:
                         cand_png = os.path.join(cand, f'{view}.png')
                         if os.path.isfile(cand_png):
                             png = cand_png
-            elif os.path.isdir(cand):
+            elif os.path.isdir(cand) and os.path.isfile(
+                    os.path.join(cand, f'{view}.png')):
                 _stash_dir = cand
-                cand_png = os.path.join(cand, f'{view}.png')
-                if os.path.isfile(cand_png):
-                    png = cand_png
+                png = os.path.join(cand, f'{view}.png')
             elif _src != _cur_src:
+                # Reached when the other source has NO stash, or has one
+                # that lacks THIS view.
+                #
+                # The second case used to fall through with png still
+                # pointing at the CURRENT source's file, so the right
+                # pane showed the left pane's imagery under the other
+                # source's label -- indistinguishable from a switch that
+                # did nothing. Both cases now take the on-demand build
+                # below, which is the only branch that can produce the
+                # requested source's pixels.
+                if os.path.isdir(cand):
+                    _stash_dir = cand
+                    sys.stderr.write(
+                        f'[preview] {fire_numbe}: {_src} stash has no '
+                        f'{view}.png; building it on demand\n')
                 # A source was explicitly requested, it is NOT the one
                 # currently loaded, and no stash exists for it.
                 #
