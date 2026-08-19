@@ -3822,12 +3822,66 @@ async function applyDateSelection() {
         invalidateOverlayLayers();
         closeDatePicker();
     } catch (err) {
-        if (prog) prog.textContent = 'Failed: ' + err.message;
+        // "Failed to fetch" means the connection dropped, not that the
+        // build failed: a composite can take minutes and the request is
+        // held open the whole time. The server keeps building, so poll
+        // for the result rather than declaring failure.
+        if (prog) {
+            prog.textContent = 'Connection dropped while building; '
+                + 'checking whether it finished ...';
+        }
+        log(`[date] request interrupted (${err.message}); polling for `
+            + `the result`, 'dim');
+        const ok = await waitForDateApplied(date, prog);
+        if (!ok) {
+            if (prog) {
+                prog.textContent = 'Failed: ' + err.message
+                    + ' (the build did not complete)';
+            }
+            return;
+        }
+        log(`[date] L2 composite now starts from ${date}`, 'success');
+        _previewStamp = Date.now();
+        for (const k of [..._previewBlobs.keys()]) {
+            try { URL.revokeObjectURL(_previewBlobs.get(k)); } catch (_) {}
+            _previewBlobs.delete(k);
+        }
+        invalidateEraseBuffers('L2 start date changed');
+        await loadPaneImage('left', leftView);
+        if (splitActive && rightView) await loadPaneImage('right', rightView);
+        invalidateOverlayLayers();
+        closeDatePicker();
     } finally {
         clearInterval(poll);
         _dateApplying = false;
         if (btn) { btn.disabled = false; btn.style.opacity = ''; }
     }
+}
+
+// Poll until the server reports this date as the selected one, or we
+// give up. Used when the POST connection drops mid-build: the work
+// carries on server-side, so the honest thing is to find out.
+async function waitForDateApplied(date, prog) {
+    const deadline = Date.now() + 20 * 60 * 1000;
+    while (Date.now() < deadline) {
+        await new Promise((res) => setTimeout(res, 3000));
+        try {
+            const r = await fetch(
+                `/api/fire/${encodeURIComponent(FIRE)}/l2_dates`);
+            if (!r.ok) continue;
+            const j = await r.json();
+            if ((j.selected || '') === date) {
+                const row = (j.dates || []).find((d) => d.date === date);
+                if (row && row.built) return true;
+            }
+            if (prog) {
+                const left = Math.round((deadline - Date.now()) / 1000);
+                prog.textContent = `Still building from ${date} `
+                    + `(giving up in ${Math.floor(left / 60)}m)`;
+            }
+        } catch (_) { /* server still busy; keep waiting */ }
+    }
+    return false;
 }
 
 

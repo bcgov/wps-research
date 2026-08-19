@@ -16,6 +16,7 @@ import shutil
 import tempfile
 import signal
 import subprocess
+import traceback
 import sys
 import threading
 import time
@@ -2506,7 +2507,7 @@ class FireRoutes:
             self._send_json({'error': 'Fire not found'}, 404)
             return
         fire = state.fires[fire_numbe]
-        body = self._read_json() or {}
+        body = self._read_body() or {}
         date = str(body.get('date', '')).strip()
         if date and (len(date) != 8 or not date.isdigit()):
             self._send_json({'error': 'date must be YYYYMMDD'}, 400)
@@ -2536,8 +2537,24 @@ class FireRoutes:
             self._send_json({'ok': True, 'date': date,
                              'post_source': 'l2'})
         except Exception as exc:
+            # Log the traceback: an exception escaping here closes the
+            # connection with no response, which the browser reports as
+            # the useless "Failed to fetch". The reply below is the
+            # useful half; this is so the server side is diagnosable at
+            # all.
             fire.l2_start_date = prev
-            self._send_json({'error': str(exc)}, 500)
+            sys.stderr.write(
+                f'[l2_date] {fire_numbe}: apply failed: '
+                f'{type(exc).__name__}: {exc}\n')
+            traceback.print_exc(file=sys.stderr)
+            try:
+                fire.console_log.append(
+                    f'  L2 date apply failed: {type(exc).__name__}: '
+                    f'{exc}')
+            except Exception:
+                pass
+            self._send_json(
+                {'error': f'{type(exc).__name__}: {exc}'}, 500)
 
     def handle_api_progress(self, fire_numbe):
         """Live progress snapshot for a fire currently being mapped.
