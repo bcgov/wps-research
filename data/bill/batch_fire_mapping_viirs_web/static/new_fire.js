@@ -508,10 +508,47 @@ function sizeCanvasToWrap() {
     canvas.height = zoomWrap.clientHeight;
 }
 
+// Reshaping the window keeps you looking at the same place.
+//
+// Zoomed OUT there is nothing to preserve: the image is bounded by the
+// viewport in both directions now, so a redraw shows the whole province
+// at whatever the new shape allows.
+//
+// Zoomed IN, the pan offset is in screen pixels, so a resize silently
+// moved the view: the same offset lands on a different part of the map
+// when the viewport changes size. The point at the centre of the
+// viewport is measured BEFORE the resize and put back at the centre of
+// the new one, which is the behaviour that matches what the user is
+// looking at.
+let _nfResizeRaf = null;
+
 window.addEventListener('resize', () => {
     if (!overview.complete) return;
-    sizeCanvasToWrap();
-    redraw();
+    if (_nfResizeRaf) cancelAnimationFrame(_nfResizeRaf);
+
+    // Centre of the viewport in CONTENT coordinates, before resizing.
+    let cx = null, cy = null;
+    if (zoomScale > 1 && zoomWrap) {
+        const w0 = zoomWrap.clientWidth, h0 = zoomWrap.clientHeight;
+        if (w0 && h0) {
+            cx = (w0 / 2 - zoomTx) / zoomScale;
+            cy = (h0 / 2 - zoomTy) / zoomScale;
+        }
+    }
+
+    // One repaint per frame: a drag-resize fires this continuously.
+    _nfResizeRaf = requestAnimationFrame(() => {
+        _nfResizeRaf = null;
+        sizeCanvasToWrap();
+        if (cx !== null && zoomWrap) {
+            const w1 = zoomWrap.clientWidth, h1 = zoomWrap.clientHeight;
+            zoomTx = w1 / 2 - cx * zoomScale;
+            zoomTy = h1 / 2 - cy * zoomScale;
+            try { clampPan(); } catch (_) {}
+            applyZoom();
+        }
+        redraw();
+    });
 });
 
 // ----- Coordinate conversions -----

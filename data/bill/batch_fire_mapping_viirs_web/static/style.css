@@ -1272,8 +1272,18 @@ tbody tr.row-mapping:hover { background: #ede1ff; }
 }
 .newfire-canvas-wrap img {
     display: block;
+    /* Fit the viewport in BOTH directions.
+     *
+     * Only max-width was constrained, so a short, wide window kept the
+     * image at full height and the bottom of the province ran off the
+     * page. The wrap shrinks to its content, so bounding the image is
+     * what bounds the map. The offset covers the header, toolbar and
+     * the caption block below the map. */
     max-width: 100%;
+    max-height: calc(100vh - 320px);
+    width: auto;
     height: auto;
+    object-fit: contain;
 }
 .newfire-canvas-wrap canvas {
     position: absolute;

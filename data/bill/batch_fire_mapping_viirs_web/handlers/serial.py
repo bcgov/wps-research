@@ -111,6 +111,67 @@ def init(app_state, helpers):
         g[name] = value
 
 
+def _auto_accept_first_result(fire) -> None:
+    """Accept automatically when a fire has exactly one result.
+
+    Pressing Accept on the only result there is adds nothing: the
+    default settings produced it, and until a second run exists there is
+    nothing to choose between. Accepting it makes Download work
+    immediately, which is what a first run is usually for.
+
+    Deliberately NOT conditional on the agreement score. Agreement is a
+    comparison against the hint, which is itself approximate -- a low
+    score is information about the hint as much as the result, and
+    refusing to accept on that basis would leave the user with a
+    perfectly good mask and a Download button that does nothing.
+
+    An EMPTY mask is different: there is nothing to download and
+    accepting one would overwrite a previous accepted output with
+    nothing, so those are skipped.
+
+    Only the FIRST result is automatic. Once a second run exists the
+    user is choosing, and the choice stays theirs -- accepting a later
+    run is the normal Accept button, unchanged.
+    """
+    try:
+        with state.lock:
+            runs = [r for r in (getattr(fire, 'serial_results', None) or [])
+                    if r.get('classified')]
+            already = bool(getattr(fire, 'accepted_dir', ''))
+        if already or len(runs) != 1:
+            return
+        r = runs[0]
+        area = r.get('ml_area_ha')
+        if area is not None and float(area) <= 0:
+            fire.console_log.append(
+                '  Auto-accept skipped: the result selected no pixels.')
+            return
+        clf = r.get('classified')
+        if not clf or not os.path.isfile(clf):
+            return
+
+        from ..prepare import _accept_fire_sync
+        out = _accept_fire_sync(fire.fire_numbe)
+        with state.lock:
+            fire.status = FireStatus.ACCEPTED
+            r['accepted'] = True
+        agr = r.get('agreement_pct')
+        fire.console_log.append(
+            '  Auto-accepted the first result (run '
+            + str(r.get('run_id', 1)) + ', '
+            + (f'agreement {agr}%' if agr is not None and agr >= 0
+               else 'agreement not computed')
+            + '); Download is ready. Run again and Accept another to '
+              'replace it.')
+        sys.stderr.write(
+            f'[accept] {fire.fire_numbe}: first result auto-accepted '
+            f'-> {out}\n')
+    except Exception as exc:
+        # Never let this break a run that otherwise succeeded.
+        sys.stderr.write(f'[accept] auto-accept skipped: '
+                         f'{type(exc).__name__}: {exc}\n')
+
+
 class SerialRoutes:
     """Serial-mapping (parameter-search) routes."""
 
@@ -315,6 +376,7 @@ class SerialRoutes:
                                     progress=_prog)
                 else:
                     run_kgc(fire, params, source=src, progress=_prog)
+                _auto_accept_first_result(fire)
                 try:
                     from ..persistence import _save_fire_state
                     _save_fire_state()
