@@ -6615,6 +6615,25 @@ async function pollFireState() {
             rebrushAdopted = false;
             setRebrushButtons(false);
             log('Rebrush finished on server. Refreshing views ...', 'dim');
+            // Drop every cached preview first.
+            //
+            // The rasters changed underneath the same URLs, so without
+            // a new cache-buster the pane redisplayed the blob it
+            // already had and the rebrush looked like it had done
+            // nothing -- until clicking a run requested a different URL.
+            try {
+                _previewStamp = Date.now();
+                for (const k of [..._previewBlobs.keys()]) {
+                    try { URL.revokeObjectURL(_previewBlobs.get(k)); }
+                    catch (_) {}
+                    _previewBlobs.delete(k);
+                }
+                _geoByUrl.clear();
+                invalidateEraseBuffers('rebrush changed the mask');
+                for (const pn of ['left', 'right']) {
+                    _paneGen[pn] = (_paneGen[pn] || 0) + 1;
+                }
+            } catch (_) {}
             // the pre-brush layer may now exist; make sure the
             // dropdown has it.
             const sel2 = document.getElementById('view-select');

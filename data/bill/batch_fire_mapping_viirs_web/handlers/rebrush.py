@@ -328,6 +328,17 @@ class RebrushRoutes:
                     except OSError:
                         pass
                 _write_envi_mask_like(brushed, clf_path, source_path)
+                # The pipeline just produced a new "original" for
+                # this run, so the revert baseline -- which points at
+                # the PREVIOUS brushed output -- must be retaken on
+                # the next erase. Only pipeline paths do this;
+                # erasing never touches the baseline.
+                try:
+                    from ..erase import reset_backup
+                    reset_backup(clf_path)
+                except Exception as exc:
+                    sys.stderr.write(
+                        f"[rebrush] baseline reset failed: {exc}\n")
                 # _write_envi_mask_like writes raw floats and copies a
                 # sibling .hdr; if that copy is missed or came from a
                 # raster on another grid, the mask still opens with the
@@ -401,6 +412,29 @@ class RebrushRoutes:
                         sys.stderr.write(
                             f'[rebrush] pre-brush layer failed: '
                             f'{_pexc}\n')
+
+                    # When the rebrushed run is the NEWEST one, the
+                    # canonical "ML classification" view shows it too --
+                    # so that preview has to be refreshed as well.
+                    #
+                    # Rendering only serial_<rid> meant the default view
+                    # (shown when no run is selected) kept the old
+                    # picture, and clicking the run was what finally
+                    # revealed the change. Same reasoning as the
+                    # canonical-mask sync after an erase.
+                    try:
+                        if is_serial:
+                            _runs = [int(_r.get('run_id') or 0)
+                                     for _r in (fire.serial_results or [])
+                                     if _r.get('classified')]
+                            if _runs and int(run_id) == max(_runs):
+                                _overlay_mask_on_post(
+                                    fire, clf_path, 'result',
+                                    (0.9, 0.1, 0.0))
+                    except Exception as _rexc:
+                        sys.stderr.write(
+                            f'[rebrush] result overlay refresh '
+                            f'failed: {_rexc}\n')
 
                     _agr = _compute_agreement(fire)
                     _area = _compute_ml_area(fire, clf_path)
