@@ -8,6 +8,12 @@
 Command line options:
   --N <int>         Only process every N-th date (default: 1, i.e. every date).
   --N_threads <int> Number of worker threads for parallel job execution (default: 1).
+  --most-recent-only     DEFAULT. Only generate outputs for dates strictly later
+                    than the most recent <yyyymmdd>_mrap.bin already present.
+                    Older outputs that were deleted to save space are treated as
+                    done, not as missing work.
+  --no-most-recent-only  Disable the above: generate any date whose output file
+                    is absent, however far back.
   [second arg]      If a second positional argument is present, EPSG is set to
                     3347 (Canada LCC); otherwise defaults to 3005 (BC Albers).
 
@@ -43,6 +49,26 @@ if '--N_threads' in args:
     N_threads = int(args[idx + 1])
     args.pop(idx)
     args.pop(idx)
+
+# --most-recent-only (DEFAULT ON): only generate outputs for dates strictly
+# LATER than the most recent <yyyymmdd>_mrap.bin already on disk.
+#
+# This exists for the case where older outputs have been deleted to reclaim
+# space: without it, every deleted past date looks like "missing work" and
+# gets regenerated, which is both expensive and usually unwanted.  With it,
+# the high-water mark of what has been generated is what matters -- anything
+# at or below that mark is considered done, whether or not its file is still
+# present.
+#
+# Pass --no-most-recent-only to restore the old behaviour (generate any date
+# whose output file is absent, however far back).
+most_recent_only = True
+if '--no-most-recent-only' in args:
+    args.remove('--no-most-recent-only')
+    most_recent_only = False
+if '--most-recent-only' in args:
+    args.remove('--most-recent-only')
+    most_recent_only = True
 
 EPSG = 3005 if len(args) < 2 else 3347  # BC Albers / Canada LCC
 
@@ -108,6 +134,26 @@ if existing_outputs:
         print(f'  {f}', flush=True)
 else:
     print('[DETECT] No existing output files found in current directory.', flush=True)
+
+# ---------------------------------------------------------------------------
+# high-water mark: the most recent date for which an output exists.
+# With --most-recent-only (the default), every date at or before this is
+# treated as already done -- deleted older outputs are NOT regenerated.
+# ---------------------------------------------------------------------------
+latest_output_date = existing_outputs[-1].split('_')[0] if existing_outputs else None
+
+if most_recent_only:
+    if latest_output_date is not None:
+        print(f'[DETECT] --most-recent-only (default): high-water mark is '
+              f'{latest_output_date}; only dates AFTER this will be generated.',
+              flush=True)
+    else:
+        print('[DETECT] --most-recent-only (default): no existing outputs, '
+              'so no high-water mark -- all eligible dates will be generated.',
+              flush=True)
+else:
+    print('[DETECT] --no-most-recent-only: any date whose output file is '
+          'missing will be generated, however far back.', flush=True)
 
 # --- timing stats shared across threads ---
 stats_lock = threading.Lock()
@@ -393,6 +439,10 @@ for date_idx, (d, df) in enumerate(date_mrap):
     mrap_product_file = str(d) + '_mrap.bin'
     if exists(mrap_product_file):
         print(f'SKIPPING (exists) {mrap_product_file}', flush=True)
+        continue
+    if most_recent_only and latest_output_date is not None and d <= latest_output_date:
+        print(f'SKIPPING (at or before high-water mark {latest_output_date}) '
+              f'{mrap_product_file}', flush=True)
         continue
 
     results = []
