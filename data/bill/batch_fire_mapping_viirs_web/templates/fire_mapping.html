@@ -111,7 +111,6 @@
                   font-size:11px;color:#555;white-space:nowrap;
                   position:absolute;left:50%;transform:translateX(-50%);
                   pointer-events:none"></span>
-            <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;display:none" id="btn-sync" onclick="toggleSync()" title="Sync pan/zoom between panes">Sync</button>
             <span class="info" id="zoom-info"></span>
             <!-- Affects only what the ML stage and the imagery export
                  receive. Visualisations and overviews never used B8,
@@ -1794,7 +1793,12 @@ const paneState = {
     left:  { scale: 1, panX: 0, panY: 0 },
     right: { scale: 1, panX: 0, panY: 0 },
 };
-let syncPanes = true;
+// Panes are ALWAYS synced.
+//
+// The Sync button existed to turn this off, but an unsynced split view
+// compares two different pieces of ground, which is never what is
+// wanted here -- so the control is gone and the behaviour is fixed on.
+const syncPanes = true;
 let isDragging = false;
 let dragPane = null;
 let dragStartX = 0, dragStartY = 0;
@@ -3931,6 +3935,9 @@ async function applyDateSelection() {
             }
         }
         invalidateOverlayLayers();
+        // Panes are always synced; realign after the swap so the
+        // two views cannot drift apart.
+        try { if (splitActive) resyncPanes(); } catch (_) {}
         try { syncDateSelectButton(); } catch (_) {}
         closeDatePicker();
     } catch (err) {
@@ -5486,18 +5493,17 @@ function setActivePane(pane) {
         `${Math.round(paneState[pane].scale * 100)}%`;
 }
 
-function toggleSync() {
-    syncPanes = !syncPanes;
-    const btn = document.getElementById('btn-sync');
-    btn.style.background = syncPanes ? '#0066cc' : '';
-    btn.style.color = syncPanes ? '#fff' : '';
-    if (syncPanes) {
-        // Sync right pane to left
-        const ls = paneState.left;
-        const rs = paneState.right;
-        rs.scale = ls.scale; rs.panX = ls.panX; rs.panY = ls.panY;
-        updateTransformForPane('right');
-    }
+// Point the right pane at whatever the left pane is showing.
+//
+// Formerly resyncPanes(); syncing is no longer optional, so this only
+// re-applies it. Called after anything that could leave the panes
+// disagreeing (a source switch, a new result, a re-layout).
+function resyncPanes() {
+    const ls = paneState.left;
+    const rs = paneState.right;
+    if (!ls || !rs) return;
+    rs.scale = ls.scale; rs.panX = ls.panX; rs.panY = ls.panY;
+    updateTransformForPane('right');
 }
 
 // -----------------------------------------------------------------------
@@ -7546,12 +7552,10 @@ function closeSplit() {
     const container = document.getElementById('image-viewer-container');
     const rightArea = document.getElementById('image-area-right');
     const btnSplit = document.getElementById('btn-split');
-    const btnSync = document.getElementById('btn-sync');
     container.classList.remove('split');
     rightArea.style.display = 'none';
     btnSplit.style.background = '';
     btnSplit.style.color = '';
-    btnSync.style.display = 'none';
     setActivePane('left');
     const sel = document.getElementById('view-select');
     if (sel.querySelector(`option[value="${leftView}"]`)) sel.value = leftView;
@@ -7588,7 +7592,6 @@ function toggleSplit(manual) {
     const leftArea = document.getElementById('image-area');
     const rightArea = document.getElementById('image-area-right');
     const btnSplit = document.getElementById('btn-split');
-    const btnSync = document.getElementById('btn-sync');
 
     if (splitActive) {
         container.classList.add('split');
@@ -7611,9 +7614,6 @@ function toggleSplit(manual) {
         syncRightViewOptions();
         btnSplit.style.background = '#0066cc';
         btnSplit.style.color = '#fff';
-        btnSync.style.display = '';
-        btnSync.style.background = syncPanes ? '#0066cc' : '';
-        btnSync.style.color = syncPanes ? '#fff' : '';
         initPaneInteraction('right');
 
         if (syncPanes) {
@@ -7655,7 +7655,6 @@ function toggleSplit(manual) {
         rightArea.style.display = 'none';
         btnSplit.style.background = '';
         btnSplit.style.color = '';
-        btnSync.style.display = 'none';
         setActivePane('left');
         // Update dropdown to reflect the surviving view
         const sel = document.getElementById('view-select');

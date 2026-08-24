@@ -455,7 +455,18 @@ class FireRoutes:
             from osgeo import gdal
 
             entry = None
-            gj = os.path.join(fire.cache_dir, 'previews', 'geo.json')
+            # Read the geo.json that sits BESIDE the PNG being served.
+            #
+            # This was fixed at cache_dir/previews/, so a preview served
+            # from another source's stash (previews_mrap/, previews_l2/)
+            # was described by the CURRENT source's geo.json. Whenever
+            # the two stacks differ at all, every vector overlay on that
+            # pane shifted -- which is the BCWS perimeter moving as the
+            # source is switched.
+            png_dir = os.path.dirname(os.path.abspath(png_path))
+            gj = os.path.join(png_dir, 'geo.json')
+            if not os.path.isfile(gj):
+                gj = os.path.join(fire.cache_dir, 'previews', 'geo.json')
             base = os.path.splitext(os.path.basename(png_path))[0]
             if os.path.isfile(gj):
                 try:

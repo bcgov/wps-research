@@ -760,10 +760,16 @@ def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
                 import glob as _g
                 _safe = sanitize_identifier(identifier)
                 _h = aoi_identity_hash(identifier, instance_key)
+                # Every product over this AOI must share one grid,
+                # whatever the source or date: the MRAP stack, the
+                # default L2 stack, and every dated L2 stack. Comparing
+                # only against the default L2 product left MRAP vs L2
+                # unchecked, and a difference there moves every vector
+                # overlay when the source is switched.
                 _refs = [f for f in _g.glob(os.path.join(
-                    ram_dir, f'*_stack_{_safe}_{_h}_l2.bin'))
-                    if not re.search(r'_l2_d\d{8}\.bin$', f)]
-                if _refs and l2_start_date:
+                    ram_dir, f'*_stack_{_safe}_{_h}*.bin'))
+                    if os.path.abspath(f) != os.path.abspath(l2_tmp)]
+                if _refs:
                     a = gdal.Open(_refs[0], gdal.GA_ReadOnly)
                     b = gdal.Open(l2_tmp, gdal.GA_ReadOnly)
                     if a is not None and b is not None:
@@ -774,7 +780,9 @@ def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
                                         for x, y in zip(ga, gb)))
                         if not same:
                             msg = (f'[aoi_stack] GRID MISMATCH for '
-                                   f'{identifier} date {l2_start_date}: '
+                                   f'{identifier} date '
+                                   f'{l2_start_date or "most-recent"} '
+                                   f'vs {os.path.basename(_refs[0])}: '
                                    f'{b.RasterXSize}x{b.RasterYSize} '
                                    f'{gb} vs default '
                                    f'{a.RasterXSize}x{a.RasterYSize} '
