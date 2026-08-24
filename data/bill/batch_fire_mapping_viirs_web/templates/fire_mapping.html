@@ -1261,7 +1261,11 @@ async function _onPostSourceChangeInner() {
                 signal: _srcSwitchAbort.signal,
             });
             data = await r.json().catch(() => ({}));
-            if (r.status !== 409 || !data.busy) break;
+            // Any 409 means "busy", whether or not the body says so.
+            // A 409 without the flag used to fall straight through to
+            // the failure path below, which reverted the selector --
+            // the switch appeared to happen and then undo itself.
+            if (r.status !== 409) break;
             _layerLabel = (src === 'l2'
                 ? 'Waiting for L2 recent tile'
                 : 'Waiting for MRAP composite')
@@ -1275,14 +1279,37 @@ async function _onPostSourceChangeInner() {
         if (!r.ok || data.error) {
             log('Post source switch failed: ' + (data.error || 'unknown'),
                 'error');
-            // Undo the optimistic swap so the view matches the server.
-            currentPostSource = prevSource;
-            sel.value = prevSource;
-            if (canSwapInstantly) {
-                loadPaneImage('left', leftView);
-                if (splitActive && rightView)
-                    loadPaneImage('right', rightView);
+            // Settle on what the SERVER actually has, not on an
+            // assumption.
+            //
+            // Reverting to prevSource was a guess, and a wrong one
+            // whenever the switch had in fact taken effect before the
+            // error (or the error was transient): the pane showed the
+            // new source for an instant and then snapped back, while
+            // the server was on the new source all along. Asking costs
+            // one request and cannot disagree with reality.
+            let actual = prevSource;
+            try {
+                const chk = await fetch(
+                    `/api/fire/${encodeURIComponent(FIRE)}/prepare`,
+                    {headers: {'X-Requested-With': 'fetch'}});
+                if (chk.ok) {
+                    const cj = await chk.json();
+                    if (cj && cj.post_source) actual = cj.post_source;
+                }
+            } catch (_) { /* keep the assumption */ }
+            currentPostSource = actual;
+            sel.value = actual;
+            if (actual !== prevSource) {
+                log(`[source] the server is on ${actual.toUpperCase()}; `
+                    + `showing that`, 'dim');
             }
+            _previewStamp = Date.now();
+            loadPaneImage('left', leftView);
+            if (splitActive && rightView) {
+                loadPaneImage('right', rightView);
+            }
+            try { syncDateSelectButton(); } catch (_) {}
             return;
         }
         // Previews for the OLD source stay valid (they are keyed by

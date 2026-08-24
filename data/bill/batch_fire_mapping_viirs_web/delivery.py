@@ -392,26 +392,34 @@ def build_manifest_pdf(out_path: str, fire_numbe: str, files: list,
         return False
 
 
-def _normalise_preview_sizes(prev_dir: str) -> None:
-    """Make every delivered preview the same pixel dimensions.
+def _normalise_preview_sizes(prev_dir: str, stage_dir: str) -> dict:
+    """Same-size copies of any previews that differ from the rest.
 
-    The views are rendered from one raster, so they should already
-    agree -- but they are produced by several code paths and one
-    (post) can come out at a different size. Different-sized images of
-    the same ground cannot be flicked through or stacked in a GIS, so
-    the odd one out is resampled to the size the majority share. Only
-    the copies in the archive are touched; nothing on the working side
-    changes.
+    Returns {original_path: replacement_path}; originals are NEVER
+    modified.
+
+    Resizing in place was a genuine bug, not just untidiness: the
+    download cache is keyed by a signature over these files, so
+    rewriting them changed the signature that the archive had just been
+    built for. The button went ready, the next poll saw a different
+    signature, and it greyed itself again -- once per build, for ever.
+
+    The views come from one raster and should already agree; one render
+    path can disagree, and images of different sizes cannot be flicked
+    through or stacked, so the outliers are matched to the majority.
     """
+    out = {}
     if not os.path.isdir(prev_dir):
-        return
+        return out
     try:
         from PIL import Image
     except Exception:
-        return
+        return out
     sizes, imgs = {}, {}
     for fn in sorted(os.listdir(prev_dir)):
         if not fn.lower().endswith(('.png', '.jpg', '.jpeg')):
+            continue
+        if '.low.' in fn:
             continue
         full = os.path.join(prev_dir, fn)
         try:
@@ -421,25 +429,31 @@ def _normalise_preview_sizes(prev_dir: str) -> None:
             continue
         sizes[imgs[full]] = sizes.get(imgs[full], 0) + 1
     if len(sizes) <= 1:
-        return
-    # The most common size wins; ties break toward the larger image so
-    # detail is never thrown away wholesale.
-    target = sorted(sizes.items(), key=lambda kv: (kv[1], kv[0][0]))[-1][0]
+        return out
+    # Most common size wins; ties break toward the larger image so
+    # detail is not thrown away wholesale.
+    target = sorted(sizes.items(),
+                    key=lambda kv: (kv[1], kv[0][0]))[-1][0]
+    try:
+        os.makedirs(stage_dir, exist_ok=True)
+    except OSError:
+        return out
     for full, size in imgs.items():
         if size == target:
             continue
+        dst = os.path.join(stage_dir, os.path.basename(full))
         try:
             with Image.open(full) as im:
-                im.convert('RGB' if full.lower().endswith(
-                    ('.jpg', '.jpeg')) else im.mode)
-                im.resize(target, Image.LANCZOS).save(full)
+                im.resize(target, Image.LANCZOS).save(dst)
+            out[full] = dst
             sys.stderr.write(
                 f'[delivery] {os.path.basename(full)}: {size[0]}x'
-                f'{size[1]} -> {target[0]}x{target[1]} so every preview '
-                f'matches\n')
+                f'{size[1]} -> {target[0]}x{target[1]} in the archive '
+                f'(original untouched)\n')
         except Exception as exc:
             sys.stderr.write(f'[delivery] resize failed for '
                              f'{full}: {exc}\n')
+    return out
 
 
 def build_archive(result_dir: str, fire_numbe: str, acq: dict,
@@ -495,7 +509,12 @@ def build_archive(result_dir: str, fire_numbe: str, acq: dict,
         seen_names.add(b)
         extra.append(pth)
 
-    _normalise_preview_sizes(os.path.join(result_dir, 'previews'))
+    # Uniform-size copies of any odd-sized previews, staged beside the
+    # zip so the accepted directory is left exactly as it was.
+    stage = os.path.join(os.path.dirname(out_zip) or '.',
+                         f'.{fire_numbe}.previews.{os.getpid()}')
+    swaps = _normalise_preview_sizes(
+        os.path.join(result_dir, 'previews'), stage)
 
     entries = []
     for root, _dirs, fnames in os.walk(result_dir):
@@ -510,7 +529,7 @@ def build_archive(result_dir: str, fire_numbe: str, acq: dict,
                 continue
             full = os.path.join(root, fn)
             rel = os.path.relpath(full, result_dir).replace(os.sep, '/')
-            entries.append((full, arcname(rel)))
+            entries.append((swaps.get(full, full), arcname(rel)))
 
     for pth in extra:
         b = os.path.basename(pth)
@@ -597,6 +616,12 @@ def build_archive(result_dir: str, fire_numbe: str, acq: dict,
         if os.path.isfile(tmp_manifest):
             os.remove(tmp_manifest)
     except OSError:
+        pass
+    try:
+        import shutil as _sh
+        if os.path.isdir(stage):
+            _sh.rmtree(stage, ignore_errors=True)
+    except Exception:
         pass
 
     renamed = sum(1 for _f, a in entries
