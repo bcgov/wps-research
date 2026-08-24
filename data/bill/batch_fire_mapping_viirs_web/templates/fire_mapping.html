@@ -653,17 +653,6 @@
                    href="/api/fire/{{ fire_numbe }}/download" download>
                     Download
                 </a>
-                <!-- Not an <a download>: the source has to be read
-                     from the right-hand selector at click time, so the
-                     URL cannot be baked into the template. -->
-                <button class="btn btn-secondary" id="btn-download-imagery"
-                        style="flex:1;text-align:center"
-                        onclick="downloadImagery()"
-                        title="Pre and post B12/B11/B9/B8 as an ENVI
-                               BSQ float32 stack, from the source
-                               selected in the right-most view">
-                    Download imagery
-                </button>
             </div>
 
             <!-- Per-acquisition coverage of the L2-recent buffer.
@@ -2299,38 +2288,12 @@ async function downloadBlinkGif() {
     }
 }
 
+// Superseded: imagery stacks now ship inside the Download archive
+// under imagery/, so there is no separate export and no second button.
+// Kept as a no-op because older saved UI state may still reference it.
 function downloadImagery() {
-    const src = splitActive ? rightPostSource : currentPostSource;
-    const btn = document.getElementById('btn-download-imagery');
-    const label = src === 'l2' ? 'L2 recent' : 'MRAP';
-    if (btn) {
-        // The server may have to build the stack first, which is not
-        // instant; without feedback the button looks inert.
-        btn.disabled = true;
-        btn.textContent = `Preparing ${label} ...`;
-    }
-    log(`[export] requesting ${label} pre/post stack`, 'dim');
-    const url = `/api/fire/${encodeURIComponent(FIRE)}`
-        + `/download_imagery?src=${encodeURIComponent(src)}`;
-    // Hidden iframe so the browser handles the download and any
-    // Content-Disposition, without navigating away from the fire.
-    let f = document.getElementById('imagery-dl-frame');
-    if (!f) {
-        f = document.createElement('iframe');
-        f.id = 'imagery-dl-frame';
-        f.style.display = 'none';
-        document.body.appendChild(f);
-    }
-    f.src = url;
-    // The response streams; there is no reliable completion event for
-    // an iframe download, so re-enable after a short delay rather than
-    // leaving the button stuck.
-    setTimeout(() => {
-        if (btn) {
-            btn.disabled = false;
-            btn.textContent = 'Download imagery';
-        }
-    }, 4000);
+    log('[export] imagery is included in Download; use that button.',
+        'dim');
 }
 
 async function loadNextCoverage() {
@@ -4674,11 +4637,26 @@ function eraseAt(pane, clientX, clientY) {
         }
     }
     if (_eraseWork && _baseOk) {
+        // Mirror the SERVER's box arithmetic exactly.
+        //
+        // The server erases, in MASK pixels, [cx-half, cx+half+1) with
+        // half = floor(size/2), centred on the ROUNDED point it was
+        // sent. Painting around the unrounded preview position with a
+        // box centred by bw/2 put the preview up to half a mask pixel
+        // -- times the zoom -- away from what was actually cleared,
+        // which is the shift that appears when the button is released.
         const kx = maskToPreviewRatio(pane);
-        const bw = Math.max(1, Math.round(eraserSize() * kx));
-        const bh = bw;
-        const x0 = Math.round(p.px - bw / 2);
-        const y0 = Math.round(p.py - bh / 2);
+        const half = Math.floor(eraserSize() / 2);
+        const mx = Math.round(p.ix);
+        const my = Math.round(p.iy);
+        const mx0 = mx - half;
+        const my0 = my - half;
+        const mx1 = mx + half + 1;
+        const my1 = my + half + 1;
+        const x0 = Math.round(mx0 * kx);
+        const y0 = Math.round(my0 * kx);
+        const bw = Math.max(1, Math.round(mx1 * kx) - x0);
+        const bh = Math.max(1, Math.round(my1 * kx) - y0);
         const ctx = _eraseWork.getContext('2d');
         const perimOK = _erasePerim && _erasePerimDims
             && _erasePerimDims.w === _eraseWork.width

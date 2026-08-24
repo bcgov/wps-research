@@ -58,7 +58,8 @@ def _to_local(dt_utc: str):
         return aware
 
 
-def acquisition_datetime(fire, stack_path: str = '') -> dict:
+def acquisition_datetime(fire, stack_path: str = '',
+                         ref_raster: str = '') -> dict:
     """Newest acquisition datetime behind this fire's imagery.
 
     Returns ``{'utc', 'local', 'source', 'exact'}``; ``exact`` says
@@ -99,23 +100,23 @@ def acquisition_datetime(fire, stack_path: str = '') -> dict:
         # Older products predate the datetime being recorded; fall
         # through to the estimate rather than failing the download.
 
-    return _estimate_from_tiles(fire, exact=False, src=src)
+    return _estimate_from_tiles(fire, exact=False, src=src,
+                                ref_raster=ref_raster)
 
 
-def _estimate_from_tiles(fire, exact: bool, src: str) -> dict:
-    """Newest acquisition available over this AOI's tiles."""
+def _estimate_from_tiles(fire, exact: bool, src: str,
+                         ref_raster: str = '') -> dict:
+    """Newest acquisition available over this AOI's tiles.
+
+    The reference raster is supplied by the caller. Reaching for the
+    application state from here did not work -- there is no module-level
+    state object to import -- so this silently returned nothing, which
+    is why delivered files kept their original names.
+    """
     try:
-        from .l2_recent import (tiles_intersecting_bbox, zips_for_tile,
-                                L2RecentError)
+        from .l2_recent import tiles_intersecting_bbox, zips_for_tile
         from osgeo import gdal
-        ref = ''
-        try:
-            from . import state as _st
-        except Exception:
-            _st = None
-        if _st is not None:
-            ref = (_st.state.rasters_by_year.get(fire.fire_year)
-                   or _st.state.raster_path or '')
+        ref = ref_raster or ''
         proj = ''
         if ref:
             ds = gdal.Open(ref, gdal.GA_ReadOnly)
@@ -138,7 +139,52 @@ def _estimate_from_tiles(fire, exact: bool, src: str) -> dict:
                     'source': src, 'exact': exact}
     except Exception as exc:
         sys.stderr.write(f'[delivery] tile scan failed: {exc}\n')
+
+    # Last resort: the date the loaded product was built for, which is
+    # the leading YYYYMMDD of the stack file name. The time of day is
+    # unknown, so it is reported as 00:00 and flagged inexact -- a dated
+    # product name with an approximate time is far more use than every
+    # file keeping its undated name.
+    try:
+        stem_name = os.path.basename(getattr(fire, 'crop_bin', '') or '')
+        m = re.match(r'^(\d{8})_', stem_name)
+        if not m:
+            m = re.match(r'^(\d{8})$',
+                         (getattr(fire, 'post_date', '') or '')[:8])
+        if m:
+            guess = m.group(1) + 'T000000'
+            sys.stderr.write(
+                f'[delivery] falling back to the product date '
+                f'{m.group(1)} (time unknown)\n')
+            return {'utc': guess, 'local': _to_local(guess),
+                    'source': src, 'exact': False}
+    except Exception as exc:
+        sys.stderr.write(f'[delivery] date fallback failed: {exc}\n')
+
     return {'utc': '', 'local': None, 'source': src, 'exact': False}
+
+
+def fallback_datetime(fire) -> dict:
+    """Last resort so products are ALWAYS named to the convention.
+
+    Uses the post date the stack was built for -- a real acquisition
+    date, without the time of day. The time is reported as 0000 and the
+    manifest states that the time was unavailable, so no precision is
+    implied that is not there.
+    """
+    cand = ''
+    m = re.search(r'(\d{8})_stack_',
+                  os.path.basename(getattr(fire, 'crop_bin', '') or ''))
+    if m:
+        cand = m.group(1)
+    if not cand:
+        cand = str(getattr(fire, 'post_date', '') or '').replace('-', '')
+    if not re.fullmatch(r'\d{8}', cand or ''):
+        return {'utc': '', 'local': None, 'source': '', 'exact': False}
+    return {'utc': cand + 'T000000',
+            'local': _to_local(cand + 'T000000'),
+            'source': (getattr(fire, 'post_source', '') or ''),
+            'exact': False, 'time_unknown': True}
 
 
 def delivery_stem(fire_numbe: str, acq: dict) -> str:
@@ -192,6 +238,15 @@ _DESCRIPTIONS = [
     ('MANIFEST', 'This file: what every file in the archive is.'),
 ]
 
+_IMAGERY_DESCRIPTIONS = [
+    ('l2_most_recent',
+     'Reflectance stack for the most recent L2 composite: the imagery '
+     'the classification was run on, analysis-ready.'),
+    ('l2_', 'Reflectance stack for the L2 composite built from this '
+            'start date.'),
+    ('mrap', 'Reflectance stack for the MRAP cloud-free composite.'),
+]
+
 _PREVIEW_DESCRIPTIONS = [
     ('geo.json',
      'Georeferencing for the images in this folder: for each view, the '
@@ -222,6 +277,11 @@ def describe(rel_path: str) -> str:
         # Headers travel with their raster and are not described
         # separately.
         return ''
+    if rel_path.startswith('imagery/'):
+        for key, text in _IMAGERY_DESCRIPTIONS:
+            if key in rel_path:
+                return text
+        return 'Reflectance imagery stack for the AOI.'
     if rel_path.startswith('previews' + os.sep) or \
             rel_path.startswith('previews/'):
         for key, text in _PREVIEW_DESCRIPTIONS:
@@ -332,8 +392,59 @@ def build_manifest_pdf(out_path: str, fire_numbe: str, files: list,
         return False
 
 
+def _normalise_preview_sizes(prev_dir: str) -> None:
+    """Make every delivered preview the same pixel dimensions.
+
+    The views are rendered from one raster, so they should already
+    agree -- but they are produced by several code paths and one
+    (post) can come out at a different size. Different-sized images of
+    the same ground cannot be flicked through or stacked in a GIS, so
+    the odd one out is resampled to the size the majority share. Only
+    the copies in the archive are touched; nothing on the working side
+    changes.
+    """
+    if not os.path.isdir(prev_dir):
+        return
+    try:
+        from PIL import Image
+    except Exception:
+        return
+    sizes, imgs = {}, {}
+    for fn in sorted(os.listdir(prev_dir)):
+        if not fn.lower().endswith(('.png', '.jpg', '.jpeg')):
+            continue
+        full = os.path.join(prev_dir, fn)
+        try:
+            with Image.open(full) as im:
+                imgs[full] = im.size
+        except Exception:
+            continue
+        sizes[imgs[full]] = sizes.get(imgs[full], 0) + 1
+    if len(sizes) <= 1:
+        return
+    # The most common size wins; ties break toward the larger image so
+    # detail is never thrown away wholesale.
+    target = sorted(sizes.items(), key=lambda kv: (kv[1], kv[0][0]))[-1][0]
+    for full, size in imgs.items():
+        if size == target:
+            continue
+        try:
+            with Image.open(full) as im:
+                im.convert('RGB' if full.lower().endswith(
+                    ('.jpg', '.jpeg')) else im.mode)
+                im.resize(target, Image.LANCZOS).save(full)
+            sys.stderr.write(
+                f'[delivery] {os.path.basename(full)}: {size[0]}x'
+                f'{size[1]} -> {target[0]}x{target[1]} so every preview '
+                f'matches\n')
+        except Exception as exc:
+            sys.stderr.write(f'[delivery] resize failed for '
+                             f'{full}: {exc}\n')
+
+
 def build_archive(result_dir: str, fire_numbe: str, acq: dict,
-                  out_zip: str, log=None) -> dict:
+                  out_zip: str, log=None, fire=None,
+                  imagery=None) -> dict:
     """Zip an accepted fire directory as a delivered product set.
 
     Entry-by-entry rather than zipping the folder, so the delivered
@@ -346,6 +457,15 @@ def build_archive(result_dir: str, fire_numbe: str, acq: dict,
     import zipfile
 
     stem = delivery_stem(fire_numbe, acq)
+    if not stem:
+        # Never ship un-renamed products just because the acquisition
+        # time could not be established.
+        acq = fallback_datetime(fire) if fire is not None else acq
+        stem = delivery_stem(fire_numbe, acq)
+        if stem:
+            sys.stderr.write(
+                '[delivery] acquisition time unavailable; naming from '
+                'the stack post date with time 0000\n')
     VEC = ('.shp', '.shx', '.dbf', '.prj', '.cpg', '.kml')
     fl = fire_numbe.lower()
 
@@ -362,6 +482,21 @@ def build_archive(result_dir: str, fire_numbe: str, acq: dict,
             return f'{stem}.hdr'
         return rel
 
+    # Imagery stacks join THIS archive.
+    #
+    # They used to come from a separate "Download imagery" button: two
+    # archives, two clicks, and nothing stating how they related.
+    # De-duplicated by basename so nothing ships twice.
+    extra, seen_names = [], set()
+    for pth in (imagery or []):
+        b = os.path.basename(pth)
+        if b in seen_names or not os.path.isfile(pth):
+            continue
+        seen_names.add(b)
+        extra.append(pth)
+
+    _normalise_preview_sizes(os.path.join(result_dir, 'previews'))
+
     entries = []
     for root, _dirs, fnames in os.walk(result_dir):
         for fn in sorted(fnames):
@@ -377,6 +512,19 @@ def build_archive(result_dir: str, fire_numbe: str, acq: dict,
             rel = os.path.relpath(full, result_dir).replace(os.sep, '/')
             entries.append((full, arcname(rel)))
 
+    for pth in extra:
+        b = os.path.basename(pth)
+        m = re.search(r'_l2_d(\d{8})\.', b)
+        if m:
+            folder = f'imagery/l2_{m.group(1)}'
+        elif '_l2.' in b:
+            folder = 'imagery/l2_most_recent'
+        else:
+            folder = 'imagery/mrap'
+        arc = f'{folder}/{b}'
+        if not any(a == arc for _f, a in entries):
+            entries.append((pth, arc))
+
     manifest_name = f'{fire_numbe}_ARCHIVE_CONTENTS.pdf'
     tmp_manifest = os.path.join(
         os.path.dirname(out_zip) or '.',
@@ -390,8 +538,33 @@ def build_archive(result_dir: str, fire_numbe: str, acq: dict,
         sys.stderr.write(f'[delivery] manifest failed: {exc}\n')
 
     if not have_manifest:
-        # A plain-text listing rather than nothing: the recipient still
-        # gets the descriptions even where reportlab is unavailable.
+        # reportlab is not installed everywhere; a PDF was asked for, so
+        # write one directly rather than degrading to plain text.
+        try:
+            have_manifest = build_manifest_pdf_simple(
+                tmp_manifest, fire_numbe, listed, acq,
+                stem or fire_numbe)
+            if have_manifest:
+                sys.stderr.write(
+                    '[delivery] manifest written without reportlab\n')
+        except Exception as exc:
+            sys.stderr.write(
+                f'[delivery] built-in pdf writer failed: {exc}\n')
+
+    if not have_manifest:
+        # reportlab is not installed here. Write the PDF ourselves
+        # rather than degrading the deliverable to a text file: the
+        # archive goes to people outside the team, and "PDF if a
+        # library happens to be present" is not a contract.
+        have_manifest = _simple_pdf(
+            tmp_manifest, f'{fire_numbe} archive contents',
+            _manifest_lines(fire_numbe, listed, acq, stem or fire_numbe))
+        if have_manifest:
+            sys.stderr.write(
+                '[delivery] manifest written without reportlab\n')
+
+    if not have_manifest:
+        # Both PDF paths failed: a text listing is better than nothing.
         manifest_name = f'{fire_numbe}_ARCHIVE_CONTENTS.txt'
         tmp_manifest = tmp_manifest[:-4] + '.txt'
         try:
@@ -438,3 +611,286 @@ def build_archive(result_dir: str, fire_numbe: str, acq: dict,
     if log:
         log('  ' + msg.split('] ', 1)[1])
     return summary
+
+
+# ---------------------------------------------------------------------
+# Minimal PDF writer
+# ---------------------------------------------------------------------
+#
+# reportlab is not installed everywhere this server runs, and the PDF
+# manifest was silently degrading to a .txt as a result. A contents
+# listing is plain text in a box, so it does not justify a dependency:
+# this writes the few hundred bytes of PDF structure directly, using the
+# built-in Helvetica/Courier fonts that every reader has.
+
+def _pdf_escape(txt: str) -> str:
+    return (str(txt).replace('\\', r'\\')
+            .replace('(', r'\(').replace(')', r'\)'))
+
+
+def _wrap(txt: str, width: int) -> list:
+    words, lines, cur = str(txt).split(), [], ''
+    for w in words:
+        trial = f'{cur} {w}'.strip()
+        if len(trial) <= width:
+            cur = trial
+        else:
+            if cur:
+                lines.append(cur)
+            cur = w
+    if cur:
+        lines.append(cur)
+    return lines or ['']
+
+
+def write_simple_pdf(out_path: str, lines: list) -> bool:
+    """Write `lines` as a PDF. Each line is (text, font_key, size).
+
+    font_key: 'B' bold, 'C' courier, anything else regular.
+    """
+    PAGE_W, PAGE_H = 612, 792
+    LEFT, TOP, BOTTOM = 56, 736, 56
+
+    pages, cur, y = [], [], TOP
+    for text, font, size in lines:
+        lead = size + 3.5
+        if y - lead < BOTTOM:
+            pages.append(cur)
+            cur, y = [], TOP
+        cur.append((text, font, size, y))
+        y -= lead
+    pages.append(cur)
+
+    FONTS = {'B': '/F2', 'C': '/F3'}
+    objs, streams = [], []
+    for page in pages:
+        parts = ['BT']
+        for text, font, size, y in page:
+            parts.append(f'{FONTS.get(font, "/F1")} {size} Tf')
+            parts.append(f'1 0 0 1 {LEFT} {y:.1f} Tm')
+            parts.append(f'({_pdf_escape(text)}) Tj')
+        parts.append('ET')
+        streams.append('\n'.join(parts).encode('latin-1', 'replace'))
+
+    n_pages = len(streams)
+    # 1 catalog, 2 pages, 3..(2+n) page objs, then contents, then fonts
+    first_content = 3 + n_pages
+    font_base = first_content + n_pages
+    kids = ' '.join(f'{3 + i} 0 R' for i in range(n_pages))
+
+    objs.append(b'<< /Type /Catalog /Pages 2 0 R >>')
+    objs.append(f'<< /Type /Pages /Count {n_pages} /Kids [{kids}] >>'
+                .encode())
+    for i in range(n_pages):
+        objs.append(
+            f'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {PAGE_W} '
+            f'{PAGE_H}] /Resources << /Font << /F1 {font_base} 0 R '
+            f'/F2 {font_base + 1} 0 R /F3 {font_base + 2} 0 R >> >> '
+            f'/Contents {first_content + i} 0 R >>'.encode())
+    for st in streams:
+        objs.append(b'<< /Length ' + str(len(st)).encode() + b' >>\n'
+                    b'stream\n' + st + b'\nendstream')
+    for base in ('Helvetica', 'Helvetica-Bold', 'Courier'):
+        objs.append(f'<< /Type /Font /Subtype /Type1 /BaseFont '
+                    f'/{base} /Encoding /WinAnsiEncoding >>'.encode())
+
+    try:
+        out = bytearray(b'%PDF-1.4\n')
+        offsets = [0]
+        for i, body in enumerate(objs, start=1):
+            offsets.append(len(out))
+            out += f'{i} 0 obj\n'.encode() + body + b'\nendobj\n'
+        xref = len(out)
+        out += f'xref\n0 {len(objs) + 1}\n'.encode()
+        out += b'0000000000 65535 f \n'
+        for off in offsets[1:]:
+            out += f'{off:010d} 00000 n \n'.encode()
+        out += (f'trailer\n<< /Size {len(objs) + 1} /Root 1 0 R >>\n'
+                f'startxref\n{xref}\n%%EOF\n').encode()
+        with open(out_path, 'wb') as fh:
+            fh.write(bytes(out))
+        return True
+    except Exception as exc:
+        sys.stderr.write(f'[delivery] simple pdf failed: {exc}\n')
+        return False
+
+
+def build_manifest_pdf_simple(out_path: str, fire_numbe: str,
+                              files: list, acq: dict, stem: str) -> bool:
+    """The manifest, without reportlab."""
+    L = []
+    L.append(('ARCHIVE CONTENTS', 'B', 16))
+    L.append((f'Fire mapping products - {fire_numbe}', '', 11))
+    L.append(('', '', 6))
+    loc = (acq or {}).get('local')
+    if loc is not None:
+        src = 'L2 recent' if (acq or {}).get('source') == 'l2' else 'MRAP'
+        L.append((f'Imagery source: {src}', '', 9.5))
+        L.append((f'Newest contributing acquisition: '
+                  f'{loc:%Y-%m-%d %H:%M %Z} (local) / '
+                  f'{(acq or {}).get("utc")} UTC', '', 9.5))
+        L.append((f'Product naming: {stem}.*', 'C', 9))
+        L.append(('', '', 4))
+        if (acq or {}).get('exact'):
+            note = ('The acquisition time is exact: this composite was '
+                    'assembled by the application, which recorded the '
+                    'datetime of every contributing acquisition.')
+        else:
+            note = ('The acquisition time is an ESTIMATE. It is the '
+                    'newest acquisition available over the tiles '
+                    'covering this area, not one confirmed to have '
+                    'contributed pixels here.')
+        for ln in _wrap(note, 92):
+            L.append((ln, '', 8.5))
+    L.append(('', '', 8))
+    L.append(('FILES', 'B', 11))
+    L.append(('', '', 4))
+    for rel in files:
+        d = describe(rel)
+        if not d:
+            continue
+        L.append((rel, 'C', 8.5))
+        for ln in _wrap(d, 96):
+            L.append(('    ' + ln, '', 8.5))
+        L.append(('', '', 2))
+    L.append(('', '', 6))
+    for ln in _wrap('Files ending in .hdr are ENVI headers describing '
+                    'the raster beside them (dimensions, data type and '
+                    'map projection) and are required to open it.', 92):
+        L.append((ln, '', 8.5))
+    return write_simple_pdf(out_path, L)
+
+
+# ---------------------------------------------------------------------
+# Minimal PDF writer
+# ---------------------------------------------------------------------
+# Used when reportlab is not installed on the server. The archive is a
+# deliverable to people outside the team, so "PDF unless a library
+# happens to be present" is not good enough -- this writes a valid PDF
+# with nothing but the standard library.
+
+def _pdf_escape(t: str) -> str:
+    return (t.replace('\\', r'\\').replace('(', r'\(')
+            .replace(')', r'\)'))
+
+
+def _simple_pdf(out_path: str, title: str, lines: list) -> bool:
+    """Write a plain multi-page PDF. `lines` are (style, text) pairs."""
+    try:
+        PW, PH = 612, 792
+        ML, MT = 56, 60
+        pages, cur, y = [], [], PH - MT
+        for style, text in lines:
+            size = {'h1': 15, 'h2': 11, 'mono': 8}.get(style, 9)
+            lead = size + 4
+            font = 'F2' if style == 'mono' else (
+                'F3' if style in ('h1', 'h2') else 'F1')
+            # Wrap on a conservative character width for the font size.
+            width = int((PW - 2 * ML) / (size * 0.52))
+            chunks = []
+            for para in (text or ' ').split('\n'):
+                while len(para) > width:
+                    cut = para.rfind(' ', 0, width)
+                    cut = cut if cut > 20 else width
+                    chunks.append(para[:cut])
+                    para = para[cut:].lstrip()
+                chunks.append(para)
+            for ch in chunks:
+                if y < MT:
+                    pages.append(cur)
+                    cur, y = [], PH - MT
+                cur.append(f'BT /{font} {size} Tf {ML} {y} Td '
+                           f'({_pdf_escape(ch)}) Tj ET')
+                y -= lead
+            y -= 3
+        pages.append(cur)
+
+        objs, kids = [], []
+        # 1=Catalog 2=Pages 3..=fonts, then per page content+page
+        fonts = ('/F1 4 0 R /F2 5 0 R /F3 6 0 R')
+        first_page_obj = 7
+        for i, content in enumerate(pages):
+            cid = first_page_obj + i * 2
+            pid = cid + 1
+            kids.append(f'{pid} 0 R')
+            stream = '\n'.join(content).encode('latin-1', 'replace')
+            objs.append((cid, b'<< /Length ' + str(len(stream)).encode()
+                         + b' >>\nstream\n' + stream + b'\nendstream'))
+            objs.append((pid, (
+                f'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {PW} {PH}]'
+                f' /Resources << /Font << {fonts} >> >>'
+                f' /Contents {cid} 0 R >>').encode()))
+        head = [
+            (1, f'<< /Type /Catalog /Pages 2 0 R >>'.encode()),
+            (2, (f'<< /Type /Pages /Kids [{" ".join(kids)}] '
+                 f'/Count {len(pages)} >>').encode()),
+            (3, b'<< /Title (' + _pdf_escape(title).encode('latin-1',
+                                                           'replace')
+             + b') >>'),
+            (4, b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'),
+            (5, b'<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>'),
+            (6, b'<< /Type /Font /Subtype /Type1 '
+                b'/BaseFont /Helvetica-Bold >>'),
+        ]
+        allobjs = sorted(head + objs)
+        out = bytearray(b'%PDF-1.4\n')
+        offsets = {}
+        for num, body in allobjs:
+            offsets[num] = len(out)
+            out += f'{num} 0 obj\n'.encode() + body + b'\nendobj\n'
+        xref = len(out)
+        n = max(offsets) + 1
+        out += f'xref\n0 {n}\n'.encode()
+        out += b'0000000000 65535 f \n'
+        for i in range(1, n):
+            out += f'{offsets.get(i, 0):010d} 00000 n \n'.encode()
+        out += (f'trailer\n<< /Size {n} /Root 1 0 R /Info 3 0 R >>\n'
+                f'startxref\n{xref}\n%%EOF\n').encode()
+        with open(out_path, 'wb') as fh:
+            fh.write(bytes(out))
+        return True
+    except Exception as exc:
+        sys.stderr.write(f'[delivery] simple pdf failed: {exc}\n')
+        return False
+
+
+def _manifest_lines(fire_numbe: str, files: list, acq: dict,
+                    stem: str) -> list:
+    out = [('h1', f'ARCHIVE CONTENTS - {fire_numbe}'), ('p', '')]
+    loc = (acq or {}).get('local')
+    if loc is not None:
+        src = 'L2 recent' if (acq or {}).get('source') == 'l2' else 'MRAP'
+        out.append(('p', f'Imagery source: {src}'))
+        if (acq or {}).get('time_unknown'):
+            out.append(('p', 'Newest contributing acquisition: '
+                             f'{loc:%Y-%m-%d} (time of day unavailable, '
+                             'shown as 0000)'))
+        else:
+            out.append(('p', 'Newest contributing acquisition: '
+                             f'{loc:%Y-%m-%d %H:%M %Z} local, '
+                             f'{(acq or {}).get("utc")} UTC'))
+        out.append(('p', f'Product naming: {stem}.*'))
+        if (acq or {}).get('exact'):
+            out.append(('p', 'This time is exact: the composite was '
+                             'assembled by the application, which '
+                             'recorded every contributing acquisition.'))
+        else:
+            out.append(('p', 'This time is an estimate. The MRAP '
+                             'composite is built by a back-end process '
+                             'that does not report which acquisitions '
+                             'supplied which pixels, so this is the '
+                             'newest acquisition available over the '
+                             'covering tiles.'))
+    out.append(('p', ''))
+    out.append(('h2', 'Files'))
+    for rel in files:
+        d = describe(rel)
+        if not d:
+            continue
+        out.append(('mono', rel))
+        out.append(('p', '    ' + d))
+    out.append(('p', ''))
+    out.append(('p', 'Files ending in .hdr are ENVI headers describing '
+                     'the raster beside them (dimensions, data type and '
+                     'map projection) and are required to open it.'))
+    return out

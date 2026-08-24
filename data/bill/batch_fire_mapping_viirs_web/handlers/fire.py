@@ -2382,10 +2382,33 @@ class FireRoutes:
         # handler only needs to report failure.
         try:
             from ..delivery import acquisition_datetime, build_archive
-            acq = acquisition_datetime(fire)
+            _ref = (state.rasters_by_year.get(fire.fire_year)
+                    or state.raster_path or '')
+            acq = acquisition_datetime(fire, ref_raster=_ref)
+            # Gather every imagery stack already built for this AOI,
+            # so one Download delivers products AND the imagery they
+            # came from. Only what exists: the archive must never
+            # trigger a multi-minute build.
+            imagery = []
+            try:
+                import glob as _g
+                from ..aoi_stack import (RAM_DIR, aoi_identity_hash,
+                                         sanitize_identifier)
+                _safe = sanitize_identifier(fire_numbe)
+                _h = aoi_identity_hash(
+                    fire_numbe, getattr(state, 'shared_root', '') or '')
+                for cand in sorted(_g.glob(os.path.join(
+                        RAM_DIR, f'*_stack_{_safe}_{_h}*'))):
+                    if os.path.isfile(cand):
+                        imagery.append(cand)
+            except Exception as _iexc:
+                sys.stderr.write(
+                    f'[download] imagery scan skipped: {_iexc}\n')
+
             build_archive(
                 result_dir, fire_numbe, acq, tmp_zip,
-                log=lambda m: fire.console_log.append(m))
+                log=lambda m: fire.console_log.append(m), fire=fire,
+                imagery=imagery)
         except Exception as exc:
             sys.stderr.write(
                 f'[download] {fire_numbe}: archive build failed: '
