@@ -6666,7 +6666,17 @@ async function pollFireState() {
             previouslyAccepted = !!data.previously_accepted;
             updateStatusDisplay(data.status, previouslyAccepted);
 
-            if (data.status === 'mapped' && (oldStatus === 'mapping' || isMapping)) {
+            // A run that has just finished, whichever state it landed
+            // in.
+            //
+            // Auto-accepting the first result moves the fire straight
+            // from 'mapping' to 'accepted', so this branch -- which
+            // opens the split view on the new result -- stopped firing
+            // for exactly the common case it was written for.
+            const _justMapped =
+                (data.status === 'mapped' || data.status === 'accepted')
+                && (oldStatus === 'mapping' || isMapping);
+            if (_justMapped) {
                 isMapping = false;
                 enableMapButtons();
 
@@ -6692,14 +6702,27 @@ async function pollFireState() {
                         'dim');
                 }
 
-                leftView = 'post'; rightView = 'result';
-                loadPaneImage('left', leftView);
-                if (splitActive) {
-                    loadPaneImage('right', rightView);
+                // Post-fire on the left, the new ML classification on
+                // the right, in split view.
+                leftView = 'post';
+                rightView = 'result';
+                if (!splitActive) {
+                    toggleSplit();          // also loads the right pane
                 } else {
-                    toggleSplit();
+                    loadPaneImage('right', rightView);
                 }
-                sel.value = (activePane === 'left') ? leftView : rightView;
+                loadPaneImage('left', leftView);
+                // Keep both dropdowns showing what their pane holds.
+                try {
+                    const lsel = document.getElementById('view-select');
+                    if (lsel) lsel.value = leftView;
+                    const rsel = document.getElementById(
+                        'view-select-right');
+                    if (rsel) rsel.value = rightView;
+                    syncRightPaneControls();
+                    updateSubtitle('left', leftView);
+                    updateSubtitle('right', rightView);
+                } catch (_) {}
 
                 if (oldStatus === 'mapping' && !sseActive) {
                     log('Mapping complete!', 'success');
@@ -6707,7 +6730,15 @@ async function pollFireState() {
 
             } else if (data.status === 'accepted') {
                 isMapping = false;
-                document.getElementById('serial-gallery').style.display = 'none';
+                // Keep the gallery when there is more than one run to
+                // choose between; auto-accept means an accepted fire
+                // normally still has runs worth comparing.
+                try {
+                    const _g = document.getElementById('serial-gallery');
+                    const _n = document.querySelectorAll(
+                        '#serial-gallery .serial-entry').length;
+                    if (_g) _g.style.display = (_n > 1) ? '' : 'none';
+                } catch (_) {}
                 enableMapButtons();
 
             } else if (data.status === 'error' && isMapping) {

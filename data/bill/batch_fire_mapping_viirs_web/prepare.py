@@ -2274,6 +2274,13 @@ def _accept_fire_sync(fire_numbe: str) -> str:
             for fname in os.listdir(src_previews):
                 if fname.startswith('serial_'):
                     continue
+                # Low-resolution variants exist only so the browser can
+                # paint something while the full image loads. They are
+                # the same picture at a fraction of the pixels, so they
+                # are noise in a delivered archive; the full-resolution
+                # file beside them is always shipped.
+                if '.low.' in fname:
+                    continue
                 src = os.path.join(src_previews, fname)
                 if not os.path.isfile(src):
                     continue

@@ -520,9 +520,11 @@ def _polygonize_date_mask(mask, date_str: str, simplify_px: float = 1.5):
 
 def write_date_polygons(out_json: str, date_map, date_list,
                         xsize: int, ysize: int,
-                        date_sats=None) -> dict:
+                        date_sats=None,
+                        acq_times=None) -> dict:
     """Build and persist the per-date coverage polygons."""
     date_sats = date_sats or {}
+    acq_times = list(acq_times or [])
     entries = []
     for idx, acq in enumerate(date_list):
         m = (date_map == idx)
@@ -548,7 +550,12 @@ def write_date_polygons(out_json: str, date_map, date_list,
         key=lambda v: (v.split('_')[1], v.split('_')[0]),
         reverse=True)
     payload = {'width': xsize, 'height': ysize, 'dates': entries,
-               'sources': sources}
+               'sources': sources,
+               # Newest acquisition datetime that actually went into
+               # this composite, UTC, YYYYMMDDTHHMMSS as it appears in
+               # the source file name. Used to date the delivered
+               # products, so it must be the datetime, not just the day.
+               'acq_newest_utc': (max(acq_times) if acq_times else '')}
     try:
         tmp = f'{out_json}.tmp{os.getpid()}'
         with open(tmp, 'w', encoding='utf-8') as f:
@@ -673,9 +680,11 @@ def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
     # date can be filled from more than one satellite where swaths
     # overlap, so this is a set per date, not a single value.
     date_sats = {}
+    acq_datetimes = set()
     date_lock = threading.Lock()
 
-    def _date_index(acq: str, sat: str = '') -> int:
+    def _date_index(acq: str, sat: str = '',
+                    dt: str = '') -> int:
         """Stable index for an acquisition date, assigned on first use.
 
         Workers run concurrently, so the registry is guarded; the index
@@ -684,6 +693,11 @@ def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
         with date_lock:
             if sat:
                 date_sats.setdefault(acq, set()).add(sat)
+            # Full acquisition datetime (UTC) of everything composited.
+            # The date alone is not enough to name a delivered product,
+            # which carries the hour and minute.
+            if dt:
+                acq_datetimes.add(dt)
             try:
                 return date_list.index(acq)
             except ValueError:
@@ -765,8 +779,13 @@ def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
                     # Platform prefix comes straight off the SAFE
                     # name (S2A_/S2B_/S2C_), so it needs no extra I/O.
                     _sat = os.path.basename(zpath)[:3].upper()
+                    # Third underscore field of the SAFE name is the
+                    # acquisition datetime (YYYYMMDDTHHMMSS, UTC);
+                    # `acq` is only its date half.
+                    _parts = os.path.basename(zpath).split('_')
+                    _dt = _parts[2] if len(_parts) > 2 else ''
                     local_date[gap] = _date_index(
-                        acq, _sat if _sat.startswith('S2') else '')
+                        acq, _sat if _sat.startswith('S2') else '', _dt)
                     local_used.append((token, acq))
                 after = int((local_filled & tile_mask).sum())
                 lines.append(f'      +{n_new:,} px; footprint now '
@@ -898,7 +917,8 @@ def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
     dates_json = date_polygons_path(out_bin)
     poly_payload = write_date_polygons(
         dates_json, date_map, date_list, xsize, ysize,
-        date_sats={k: sorted(v) for k, v in date_sats.items()})
+        date_sats={k: sorted(v) for k, v in date_sats.items()},
+        acq_times=sorted(acq_datetimes))
     # Deliberately does NOT print the path: this sidecar is written
     # beside the temporary post buffer and relocated next to the stack
     # by the caller, so printing it here shows a filename that no
@@ -920,6 +940,7 @@ def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
         'dates_json': dates_json,
         'date_coverage': poly_payload['dates'],
         'sources': poly_payload.get('sources', []),
+        'acq_newest_utc': poly_payload.get('acq_newest_utc', ''),
         'filled_px': int(filled.sum()),
         'total_px': total_px,
         'geotransform': win_gt,
