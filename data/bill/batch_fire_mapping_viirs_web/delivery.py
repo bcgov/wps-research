@@ -224,9 +224,7 @@ _DESCRIPTIONS = [
     ('_kgc_selected.bin',
      'Diagnostic: the clusters the algorithm selected as burned, '
      'before the brushing cleanup pass.'),
-    ('_classified.bin',
-     'Fire classification raster as delivered by the accepted run '
-     '(same content as the dated .bin above).'),
+
     ('_params.yaml',
      'Every parameter used for the accepted run: algorithm settings, '
      'brush settings, band selection and imagery source.'),
@@ -457,6 +455,54 @@ def _normalise_preview_sizes(prev_dir: str, stage_dir: str) -> dict:
     return out
 
 
+
+
+def _verify_serial_redundant(skipped: list, result_dir: str,
+                             fire_numbe: str) -> None:
+    """Confirm each omitted per-run raster matched the delivered one.
+
+    Dropping a file from a deliverable on the assumption that it is a
+    duplicate is only safe if the assumption is checked. Compares
+    content hashes; a mismatch is logged loudly and the operator can
+    ask for it back.
+    """
+    if not skipped:
+        return
+    import hashlib
+
+    def _sha(path):
+        h = hashlib.sha1()
+        try:
+            with open(path, 'rb') as fh:
+                for chunk in iter(lambda: fh.read(1 << 20), b''):
+                    h.update(chunk)
+        except OSError:
+            return None
+        return h.hexdigest()
+
+    canon = os.path.join(result_dir, f'{fire_numbe}_classified.bin')
+    ref = _sha(canon) if os.path.isfile(canon) else None
+    for path in skipped:
+        if not path.endswith('.bin'):
+            continue          # headers follow their raster
+        got = _sha(path)
+        name = os.path.basename(path)
+        if ref is None:
+            sys.stderr.write(
+                f'[delivery] omitted {name}: no accepted raster to '
+                f'compare against\n')
+        elif got == ref:
+            sys.stderr.write(
+                f'[delivery] omitted {name}: identical to the accepted '
+                f'classification\n')
+        else:
+            sys.stderr.write(
+                f'[delivery] WARNING omitted {name}: content DIFFERS '
+                f'from the accepted classification ({got} vs {ref}). '
+                f'The accepted run is not the newest; only the accepted '
+                f'raster is delivered.\n')
+
+
 def build_archive(result_dir: str, fire_numbe: str, acq: dict,
                   out_zip: str, log=None, fire=None,
                   imagery=None) -> dict:
@@ -516,11 +562,22 @@ def build_archive(result_dir: str, fire_numbe: str, acq: dict,
                          f'.{fire_numbe}.previews.{os.getpid()}')
     swaps = _normalise_preview_sizes(
         os.path.join(result_dir, 'previews'), stage)
-
     entries = []
+    _serial_skipped = []
     for root, _dirs, fnames in os.walk(result_dir):
         for fn in sorted(fnames):
             if fn.startswith('.'):
+                continue
+            # Per-run rasters are not delivered.
+            #
+            # The accepted classification IS the accepted run's raster,
+            # shipped under the dated product name, so a
+            # _serial_<N>_classified pair alongside it is the same
+            # bytes under a second name. Verified rather than assumed:
+            # if it ever differs, the archive says so in the log
+            # instead of quietly dropping something that mattered.
+            if re.search(r'_serial_\d+_classified\.(bin|hdr)$', fn):
+                _serial_skipped.append(os.path.join(root, fn))
                 continue
             # Low-resolution progressive variants are a loading aid, not
             # a product. Filtered HERE as well as at accept time, so an
@@ -531,6 +588,8 @@ def build_archive(result_dir: str, fire_numbe: str, acq: dict,
             full = os.path.join(root, fn)
             rel = os.path.relpath(full, result_dir).replace(os.sep, '/')
             entries.append((swaps.get(full, full), arcname(rel)))
+
+    _verify_serial_redundant(_serial_skipped, result_dir, fire_numbe)
 
     for pth in extra:
         b = os.path.basename(pth)
