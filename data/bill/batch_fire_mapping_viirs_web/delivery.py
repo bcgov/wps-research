@@ -19,6 +19,7 @@ and the difference is recorded rather than hidden -- see
 import os
 import re
 import sys
+import time
 import glob
 import json
 from datetime import datetime, timezone
@@ -607,9 +608,33 @@ def build_archive(result_dir: str, fire_numbe: str, acq: dict,
         except Exception as exc:
             sys.stderr.write(f'[delivery] text manifest failed: {exc}\n')
 
-    with zipfile.ZipFile(out_zip, 'w', zipfile.ZIP_DEFLATED) as zf:
+    # Big rasters go in uncompressed.
+    #
+    # float32 imagery barely compresses, so deflating a multi-hundred-MB
+    # stack costs minutes of CPU for a few percent of size -- which the
+    # operator experiences as a Download button stuck on "preparing".
+    # Small files still compress well and cost nothing.
+    STORE_ABOVE = 64 * 1024 * 1024
+    t0 = time.time()
+    total = 0
+    with zipfile.ZipFile(out_zip, 'w', zipfile.ZIP_DEFLATED,
+                         allowZip64=True) as zf:
         for full, arc in entries:
-            zf.write(full, f'{fire_numbe}/{arc}')
+            try:
+                sz = os.path.getsize(full)
+            except OSError:
+                sz = 0
+            total += sz
+            mode = (zipfile.ZIP_STORED if sz >= STORE_ABOVE
+                    else zipfile.ZIP_DEFLATED)
+            t1 = time.time()
+            zf.write(full, f'{fire_numbe}/{arc}', compress_type=mode)
+            dt = time.time() - t1
+            if sz >= STORE_ABOVE or dt > 1.0:
+                sys.stderr.write(
+                    f'[delivery]   {arc}: {sz / 1048576:.1f} MB '
+                    f'{"stored" if mode == zipfile.ZIP_STORED else "deflated"}'
+                    f' in {dt:.1f}s\n')
         if have_manifest:
             zf.write(tmp_manifest, f'{fire_numbe}/{manifest_name}')
     try:
@@ -630,6 +655,8 @@ def build_archive(result_dir: str, fire_numbe: str, acq: dict,
                'renamed': renamed, 'manifest': manifest_name
                if have_manifest else ''}
     msg = (f'[download] {fire_numbe}: {len(entries)} file(s), '
+           f'{total / 1048576:.1f} MB in '
+           f'{time.time() - t0:.1f}s, '
            f'{renamed} renamed to "{stem or "(unchanged)"}", '
            f'manifest={summary["manifest"] or "NONE"}')
     sys.stderr.write(msg + '\n')
@@ -943,7 +970,11 @@ def download_signature(result_dir: str, imagery=None) -> str:
                 continue
             rel = os.path.relpath(p, result_dir)
             h.update(f'{rel}|{int(st.st_mtime)}|{st.st_size}|'.encode())
-    for p in sorted(imagery or []):
+    # The caller passes only real stacks; guard anyway so a future
+    # caller cannot make the signature depend on scratch files that
+    # change constantly during clustering.
+    for p in sorted(x for x in (imagery or [])
+                    if '.kgc' not in os.path.basename(x).lower()):
         try:
             st = os.stat(p)
         except OSError:

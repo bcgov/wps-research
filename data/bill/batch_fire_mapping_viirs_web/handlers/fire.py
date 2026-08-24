@@ -2294,8 +2294,34 @@ class FireRoutes:
                 fire_numbe, getattr(state, 'shared_root', '') or '')
             for cand in sorted(_g.glob(os.path.join(
                     RAM_DIR, f'*_stack_{safe}_{h}*'))):
-                if os.path.isfile(cand):
-                    out.append(cand)
+                if not os.path.isfile(cand):
+                    continue
+                # ONLY the imagery itself.
+                #
+                # The clustering keeps its working files beside the
+                # stack -- .kgc_dedup, .kgc_knn_*, .kgc_backend -- and
+                # the neighbour tables run to gigabytes. This glob swept
+                # them in, so the archive was compressing multi-GB
+                # scratch data nobody asked for and the Download button
+                # sat on "preparing" for minutes.
+                # Positive match on the stack naming, rather than a
+                # list of things to exclude: scratch files are added
+                # over time and an exclusion list silently goes stale,
+                # whereas a stack name is a fixed shape.
+                base = os.path.basename(cand)
+                if not re.match(
+                        r'^\d{8}_stack_' + re.escape(safe) + '_'
+                        + re.escape(h)
+                        + r'(_l2(_d\d{8})?)?\.(bin|hdr)$', base):
+                    continue
+                out.append(cand)
+            try:
+                tot = sum(os.path.getsize(f) for f in out)
+                sys.stderr.write(
+                    f'[download] {fire_numbe}: {len(out)} imagery file(s), '
+                    f'{tot / 1048576:.1f} MB before compression\n')
+            except OSError:
+                pass
         except Exception as exc:
             sys.stderr.write(f'[download] imagery scan skipped: '
                              f'{exc}\n')
