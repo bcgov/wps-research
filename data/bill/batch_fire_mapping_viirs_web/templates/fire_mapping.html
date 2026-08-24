@@ -3261,6 +3261,17 @@ function updateTransformForPane(pane) {
     if (syncPanes && splitActive) {
         syncOtherPane(pane);
         logPaneGeometry();
+        // Report the grids once per pairing, so a mismatch is visible
+        // the moment two views are put side by side rather than only
+        // when someone thinks to look.
+        try {
+            const _sig = `${leftView}|${currentPostSource}|`
+                + `${rightView}|${rightPostSource}`;
+            if (_sig !== window._lastGeoSig) {
+                window._lastGeoSig = _sig;
+                paneGeoReport();
+            }
+        } catch (_) {}
     }
     // The overlay is drawn in screen space, so it must be repainted
     // whenever the pan or zoom changes.
@@ -4037,31 +4048,82 @@ function _setDownloadButton(state, bytes) {
 
 // Ask the server whether the archive is current, and keep asking while
 // it builds. Called after anything that changes what would be in it.
-async function refreshDownloadStatus() {
+let _dlPolls = 0;
+let _dlSince = 0;
+let _dlLastState = '';
+
+// Every transition is logged. A button stuck on "preparing" is
+// otherwise indistinguishable from a button that is simply slow, and
+// the failure is server-side where the user cannot see it.
+async function refreshDownloadStatus(why) {
+    const t0 = performance.now();
+    const tag = why ? ` (${why})` : '';
     try {
-        const r = await fetch(
-            `/api/fire/${encodeURIComponent(FIRE)}/download_status`);
-        if (!r.ok) { _setDownloadButton('none'); return; }
+        const url =
+            `/api/fire/${encodeURIComponent(FIRE)}/download_status`;
+        const r = await fetch(url);
+        const ms = (performance.now() - t0).toFixed(0);
+        if (!r.ok) {
+            log(`[download] status HTTP ${r.status} after ${ms} ms`
+                + `${tag} -- button disabled`, 'error');
+            _setDownloadButton('none');
+            if (_dlPoll) { clearInterval(_dlPoll); _dlPoll = null; }
+            return;
+        }
         const j = await r.json();
+        if (j.state !== _dlLastState) {
+            log(`[download] state ${_dlLastState || '(none)'} -> `
+                + `${j.state}${tag}, sig=${j.sig || '-'}, `
+                + `status in ${ms} ms`, 'dim');
+            _dlLastState = j.state;
+        }
         if (j.state === 'ready') {
             if (_dlPoll) { clearInterval(_dlPoll); _dlPoll = null; }
+            const waited = _dlSince
+                ? ((Date.now() - _dlSince) / 1000).toFixed(1) : '0';
             if (j.sig !== _dlSig) {
                 _dlSig = j.sig;
-                log(`[download] archive ready, ${_fmtMb(j.bytes)} MB`,
-                    'dim');
+                log(`[download] archive READY: ${j.bytes} bytes `
+                    + `(${_fmtMb(j.bytes)} MB), sig=${j.sig}, built in `
+                    + `~${waited}s after ${_dlPolls} poll(s)`,
+                    'success');
             }
+            _dlPolls = 0;
+            _dlSince = 0;
             _setDownloadButton('ready', j.bytes);
         } else if (j.state === 'building') {
             _setDownloadButton('building');
+            if (!_dlSince) _dlSince = Date.now();
+            _dlPolls += 1;
+            const secs = ((Date.now() - _dlSince) / 1000).toFixed(0);
+            if (_dlPolls === 1 || _dlPolls % 5 === 0) {
+                log(`[download] preparing archive, sig=${j.sig}, `
+                    + `${secs}s elapsed, poll ${_dlPolls}`, 'dim');
+            }
+            // A build that never finishes is a server-side failure the
+            // status endpoint cannot see: say so rather than spinning
+            // silently, and point at where the reason will be.
+            if (_dlPolls === 30) {
+                log(`[download] still preparing after ${secs}s. The `
+                    + `build runs server-side; check the fire console `
+                    + `above and the server log for a line starting `
+                    + `"[download]" or "[delivery]".`, 'error');
+            }
             if (!_dlPoll) {
-                _dlPoll = setInterval(refreshDownloadStatus, 2000);
+                _dlPoll = setInterval(
+                    () => refreshDownloadStatus('poll'), 2000);
             }
         } else {
             if (_dlPoll) { clearInterval(_dlPoll); _dlPoll = null; }
+            log(`[download] nothing to download`
+                + (j.reason ? `: ${j.reason}` : '') + tag, 'dim');
             _setDownloadButton('none');
         }
-    } catch (_) {
+    } catch (err) {
+        log(`[download] status request failed${tag}: ${err.message}`,
+            'error');
         _setDownloadButton('none');
+        if (_dlPoll) { clearInterval(_dlPoll); _dlPoll = null; }
     }
 }
 
@@ -5182,6 +5244,46 @@ function logPaneGeometry() {
     if (msg !== _lastGeoLog) { _lastGeoLog = msg; log(msg, 'dim'); }
 }
 
+
+// Print exactly what each pane believes it is showing.
+//
+// Alignment problems are impossible to reason about without the two
+// geotransforms side by side, so this makes them visible on demand:
+// type paneGeoReport() in the browser console.
+function paneGeoReport() {
+    for (const pane of ['left', 'right']) {
+        const { img } = getPaneElements(pane);
+        const g = geoForPane(pane);
+        const d = img ? paneImageDims(img) : null;
+        const r = img ? img.getBoundingClientRect() : null;
+        const view = (pane === 'left') ? leftView : rightView;
+        const src = (pane === 'left') ? currentPostSource
+                                      : rightPostSource;
+        log(`[geo] ${pane}: view=${view} src=${src}`
+            + ` png=${d ? d.w + 'x' + d.h : '?'}`
+            + ` raster=${g ? (g.rw + 'x' + g.rh) : 'NO GEO'}`
+            + ` gt=${g && g.gt ? '[' + g.gt.map(
+                (v) => Number(v).toFixed(3)).join(', ') + ']' : '-'}`
+            + ` authority=${g && g.src ? g.src : '-'}`
+            + ` screen=${r ? r.width.toFixed(0) + 'x'
+                             + r.height.toFixed(0) : '?'}`
+            + ` scale=${paneState[pane].scale.toFixed(3)}`, 'dim');
+    }
+    const gl = geoForPane('left'), gr = geoForPane('right');
+    if (gl && gr && gl.gt && gr.gt) {
+        const same = gl.gt.every((v, k) =>
+            Math.abs(Number(v) - Number(gr.gt[k])) < 1e-6)
+            && gl.rw === gr.rw && gl.rh === gr.rh;
+        log(`[geo] panes share one grid: ${same}`
+            + (same ? '' : '  <-- alignment will rely on the geo path'),
+            same ? 'dim' : 'error');
+    } else {
+        log('[geo] at least one pane has NO geo; sync falls back to '
+            + 'fraction matching, which aligns by pixel not by ground',
+            'error');
+    }
+}
+
 function syncOtherPane(pane) {
     const other = pane === 'left' ? 'right' : 'left';
     const { area, img } = getPaneElements(pane);
@@ -5190,32 +5292,46 @@ function syncOtherPane(pane) {
     const s = paneState[pane];
     const os = paneState[other];
 
-    // Identical pixel dimensions means the two panes are showing the
-    // same grid, so the transform copies across exactly. Taking this
-    // shortcut avoids introducing rounding drift through the CRS
-    // round-trip, and is provably exact.
-    const _dA = paneImageDims(img), _dB = paneImageDims(oImg);
-    if (_dA.w === _dB.w && _dA.h === _dB.h) {
-        os.scale = s.scale; os.panX = s.panX; os.panY = s.panY;
-        oImg.style.transform =
-            `translate(${os.panX}px, ${os.panY}px) scale(${os.scale})`;
-        return;
-    }
-
-    // Identical pixel dimensions mean identical grids -- guaranteed by
-    // the server re-rendering every preview onto the current AOI grid.
-    // Copy the transform verbatim. This is both exactly right and
-    // immune to any geo metadata being stale, which is what kept
-    // reintroducing the misalignment.
-    if (img.naturalWidth === oImg.naturalWidth
-            && img.naturalHeight === oImg.naturalHeight) {
-        os.scale = s.scale; os.panX = s.panX; os.panY = s.panY;
-        oImg.style.transform =
-            `translate(${os.panX}px, ${os.panY}px) scale(${os.scale})`;
-        return;
-    }
-
     const gA = geoForPane(pane), gB = geoForPane(other);
+
+    // Same pixel size is NOT the same ground.
+    //
+    // This used to copy the transform across whenever the two images
+    // had equal dimensions, on the assumption that equal dimensions
+    // meant an equal grid. That holds while both panes show the same
+    // source; it does not when they show different ones, and two
+    // equally-sized images over slightly different extents then line
+    // up by PIXEL instead of by ground. The vector overlays, which are
+    // positioned from each pane's own geotransform, stayed correct --
+    // which is exactly the reported symptom: perimeter consistent,
+    // raster content shifted.
+    //
+    // The shortcut now also requires the geotransforms to agree. When
+    // they do it is exact and avoids rounding through the CRS
+    // round-trip; when they do not, the geo path below is used.
+    const _dA = paneImageDims(img), _dB = paneImageDims(oImg);
+    const _sameGrid = (() => {
+        if (_dA.w !== _dB.w || _dA.h !== _dB.h) return false;
+        if (!gA || !gB || !gA.gt || !gB.gt) return true;  // nothing better
+        if ((gA.rw || 0) !== (gB.rw || 0)
+            || (gA.rh || 0) !== (gB.rh || 0)) return false;
+        for (let k = 0; k < 6; k++) {
+            const a = Number(gA.gt[k]), b = Number(gB.gt[k]);
+            if (!isFinite(a) || !isFinite(b)) return false;
+            // Tolerance is a millimetre of ground: real differences
+            // between products are metres, rounding is far below this.
+            if (Math.abs(a - b) > 1e-3) return false;
+        }
+        return true;
+    })();
+    if (_sameGrid) {
+        os.scale = s.scale; os.panX = s.panX; os.panY = s.panY;
+        oImg.style.transform =
+            `translate(${os.panX}px, ${os.panY}px) scale(${os.scale})`;
+        try { drawOverlayLayer(other); } catch (_) {}
+        return;
+    }
+
     if (gA && gB && gA.gt && gB.gt) {
         // Ground under this pane's centre.
         const cxA = (area.clientWidth / 2 - s.panX) / s.scale;

@@ -496,6 +496,38 @@ class FireRoutes:
                         ds = None
 
             if not entry:
+                # Last resort: the AOI crop. Every product over this
+                # AOI is held to one grid, so the crop's geotransform
+                # describes any of them.
+                #
+                # Returning nothing here dropped the client to
+                # fraction-matching sync, which lines panes up by pixel
+                # instead of by ground -- and that is invisible until
+                # two views of different pixel sizes are compared.
+                # Better to answer from the shared grid and say so.
+                try:
+                    cb = getattr(fire, 'crop_bin', '')
+                    if cb and os.path.isfile(cb):
+                        ds = gdal.Open(cb, gdal.GA_ReadOnly)
+                        if ds is not None:
+                            entry = {'gt': [float(v) for v in
+                                            ds.GetGeoTransform()],
+                                     'rw': ds.RasterXSize,
+                                     'rh': ds.RasterYSize}
+                            ds = None
+                            base = f'{base}~cropfallback'
+                            sys.stderr.write(
+                                f'[geo] {os.path.basename(png_path)}: no '
+                                f'recorded geo; using the AOI crop '
+                                f'grid\n')
+                except Exception as exc:
+                    sys.stderr.write(f'[geo] crop fallback failed: '
+                                     f'{exc}\n')
+            if not entry:
+                sys.stderr.write(
+                    f'[geo] {os.path.basename(png_path)}: NO geo '
+                    f'available; the client will fall back to '
+                    f'fraction sync\n')
                 return {}
 
             # The PNG's own dimensions must come from the PNG being
