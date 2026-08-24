@@ -2250,6 +2250,110 @@ class FireRoutes:
             if tmp_dir:
                 shutil.rmtree(tmp_dir, ignore_errors=True)
 
+    def _download_imagery_list(self, fire_numbe):
+        """Imagery stacks already on the ramdisk for this AOI."""
+        out = []
+        try:
+            import glob as _g
+            from ..aoi_stack import (RAM_DIR, aoi_identity_hash,
+                                     sanitize_identifier)
+            safe = sanitize_identifier(fire_numbe)
+            h = aoi_identity_hash(
+                fire_numbe, getattr(state, 'shared_root', '') or '')
+            for cand in sorted(_g.glob(os.path.join(
+                    RAM_DIR, f'*_stack_{safe}_{h}*'))):
+                if os.path.isfile(cand):
+                    out.append(cand)
+        except Exception as exc:
+            sys.stderr.write(f'[download] imagery scan skipped: '
+                             f'{exc}\n')
+        return out
+
+    def _build_download_zip(self, fire, fire_numbe, result_dir, sig,
+                            imagery):
+        """Build the archive into the cache. Returns its path or ''."""
+        from ..delivery import (acquisition_datetime, build_archive,
+                                cached_zip_path, prune_cache)
+        target = cached_zip_path(state.output_root, fire_numbe, sig)
+        tmp = target + f'.{os.getpid()}.part'
+        try:
+            ref = (state.rasters_by_year.get(fire.fire_year)
+                   or state.raster_path or '')
+            acq = acquisition_datetime(fire, ref_raster=ref)
+            build_archive(result_dir, fire_numbe, acq, tmp,
+                          log=lambda m: fire.console_log.append(m),
+                          fire=fire, imagery=imagery)
+            os.replace(tmp, target)
+            prune_cache(state.output_root, fire_numbe, keep=target)
+            return target
+        except Exception as exc:
+            sys.stderr.write(
+                f'[download] {fire_numbe}: build failed: '
+                f'{type(exc).__name__}: {exc}\n')
+            traceback.print_exc(file=sys.stderr)
+            try:
+                fire.console_log.append(
+                    f'  Download preparation failed: '
+                    f'{type(exc).__name__}: {exc}')
+            except Exception:
+                pass
+            for junk in (tmp,):
+                try:
+                    os.remove(junk)
+                except OSError:
+                    pass
+            return ''
+
+    def handle_api_download_status(self, fire_numbe):
+        """Is the archive ready, and how big is it?
+
+        Drives the Download button: it shows the size when ready and is
+        disabled while a build is in flight, so nobody clicks a link
+        that is not there yet.
+        """
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        result_dir = os.path.join(state.output_root, fire_numbe)
+        if not os.path.isdir(result_dir):
+            self._send_json({'state': 'none',
+                             'reason': 'no accepted result yet'})
+            return
+        from ..delivery import download_signature, cached_zip_path
+        imagery = self._download_imagery_list(fire_numbe)
+        sig = download_signature(result_dir, imagery)
+        path = cached_zip_path(state.output_root, fire_numbe, sig)
+        if os.path.isfile(path):
+            self._send_json({'state': 'ready', 'sig': sig,
+                             'bytes': os.path.getsize(path)})
+            return
+
+        # Not built for this content yet. Build it in the background so
+        # the request returns at once; the client polls.
+        key = f'{fire_numbe}:{sig}'
+        with state.lock:
+            builds = getattr(state, 'download_builds', None)
+            if builds is None:
+                builds = state.download_builds = {}
+            running = builds.get(key)
+        if not running:
+            with state.lock:
+                builds[key] = True
+
+            def _run():
+                try:
+                    self._build_download_zip(
+                        fire, fire_numbe, result_dir, sig, imagery)
+                finally:
+                    with state.lock:
+                        builds.pop(key, None)
+
+            threading.Thread(target=_run, daemon=True,
+                             name=f'dlzip-{fire_numbe}').start()
+        self._send_json({'state': 'building', 'sig': sig})
+
     def handle_api_download(self, fire_numbe):
         """Zip the fire's canonical accepted-result directory and stream
         it back as a download. The fire must have been accepted at
@@ -2373,48 +2477,22 @@ class FireRoutes:
         # shutil.make_archive wants the destination *without* the
         # extension it appends, and writes under <output_root>/, so the
         # tmp name is collision-safe via the pid/thread suffix.
-        tmp_base = os.path.join(
-            state.output_root,
-            f'.{fire_numbe}.{os.getpid()}.{threading.get_ident()}.tmp')
-        tmp_zip = tmp_base + '.zip'
-
-        # Delegated so it can be exercised directly in testing; the
-        # handler only needs to report failure.
-        try:
-            from ..delivery import acquisition_datetime, build_archive
-            _ref = (state.rasters_by_year.get(fire.fire_year)
-                    or state.raster_path or '')
-            acq = acquisition_datetime(fire, ref_raster=_ref)
-            # Gather every imagery stack already built for this AOI,
-            # so one Download delivers products AND the imagery they
-            # came from. Only what exists: the archive must never
-            # trigger a multi-minute build.
-            imagery = []
-            try:
-                import glob as _g
-                from ..aoi_stack import (RAM_DIR, aoi_identity_hash,
-                                         sanitize_identifier)
-                _safe = sanitize_identifier(fire_numbe)
-                _h = aoi_identity_hash(
-                    fire_numbe, getattr(state, 'shared_root', '') or '')
-                for cand in sorted(_g.glob(os.path.join(
-                        RAM_DIR, f'*_stack_{_safe}_{_h}*'))):
-                    if os.path.isfile(cand):
-                        imagery.append(cand)
-            except Exception as _iexc:
-                sys.stderr.write(
-                    f'[download] imagery scan skipped: {_iexc}\n')
-
-            build_archive(
-                result_dir, fire_numbe, acq, tmp_zip,
-                log=lambda m: fire.console_log.append(m), fire=fire,
-                imagery=imagery)
-        except Exception as exc:
-            sys.stderr.write(
-                f'[download] {fire_numbe}: archive build failed: '
-                f'{type(exc).__name__}: {exc}\n')
-            traceback.print_exc(file=sys.stderr)
-            self._send_json({'error': f'Zip failed: {exc}'}, 500)
+        # Serve the prepared archive.
+        #
+        # The status endpoint has usually built it already, keyed to the
+        # current contents; if not (a direct link, or a change since the
+        # last poll), build it now so the click still works.
+        from ..delivery import download_signature, cached_zip_path
+        imagery = self._download_imagery_list(fire_numbe)
+        sig = download_signature(result_dir, imagery)
+        tmp_zip = cached_zip_path(state.output_root, fire_numbe, sig)
+        if not os.path.isfile(tmp_zip):
+            tmp_zip = self._build_download_zip(
+                fire, fire_numbe, result_dir, sig, imagery)
+        if not tmp_zip or not os.path.isfile(tmp_zip):
+            self._send_json(
+                {'error': 'Could not prepare the archive; see the '
+                          'fire console for the reason.'}, 500)
             return
 
         try:
@@ -2429,10 +2507,9 @@ class FireRoutes:
             with open(tmp_zip, 'rb') as f:
                 shutil.copyfileobj(f, self.wfile)
         finally:
-            try:
-                os.remove(tmp_zip)
-            except OSError:
-                pass
+            # The archive is cached, not temporary: it is keyed to the
+            # contents it was built from and reused until those change.
+            pass
 
     def handle_api_console(self, fire_numbe):
         fire_numbe = unquote(fire_numbe)

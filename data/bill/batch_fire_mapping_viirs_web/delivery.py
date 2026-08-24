@@ -894,3 +894,62 @@ def _manifest_lines(fire_numbe: str, files: list, acq: dict,
                      'the raster beside them (dimensions, data type and '
                      'map projection) and are required to open it.'))
     return out
+
+
+# ---------------------------------------------------------------------
+# Prepared-download cache
+# ---------------------------------------------------------------------
+# The archive is built ahead of the click so the button can show its
+# size and be disabled while stale. Keyed by a signature of everything
+# that goes into it, so it rebuilds exactly when something changed and
+# is reused otherwise.
+
+def download_signature(result_dir: str, imagery=None) -> str:
+    import hashlib
+    h = hashlib.sha1()
+    for root, _dirs, fnames in sorted(os.walk(result_dir)):
+        for fn in sorted(fnames):
+            if fn.startswith('.') or '.low.' in fn:
+                continue
+            p = os.path.join(root, fn)
+            try:
+                st = os.stat(p)
+            except OSError:
+                continue
+            rel = os.path.relpath(p, result_dir)
+            h.update(f'{rel}|{int(st.st_mtime)}|{st.st_size}|'.encode())
+    for p in sorted(imagery or []):
+        try:
+            st = os.stat(p)
+        except OSError:
+            continue
+        h.update(f'{os.path.basename(p)}|{int(st.st_mtime)}|'
+                 f'{st.st_size}|'.encode())
+    return h.hexdigest()[:16]
+
+
+def cache_dir_for(output_root: str) -> str:
+    d = os.path.join(output_root, '.download_cache')
+    try:
+        os.makedirs(d, exist_ok=True)
+    except OSError:
+        pass
+    return d
+
+
+def cached_zip_path(output_root: str, fire_numbe: str, sig: str) -> str:
+    return os.path.join(cache_dir_for(output_root),
+                        f'{fire_numbe}__{sig}.zip')
+
+
+def prune_cache(output_root: str, fire_numbe: str, keep: str = '') -> None:
+    """Drop this fire's older archives; only the current one is useful."""
+    import glob as _g
+    for p in _g.glob(os.path.join(cache_dir_for(output_root),
+                                  f'{fire_numbe}__*.zip')):
+        if keep and os.path.abspath(p) == os.path.abspath(keep):
+            continue
+        try:
+            os.remove(p)
+        except OSError:
+            pass

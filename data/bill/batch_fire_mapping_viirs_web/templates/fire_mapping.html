@@ -648,9 +648,15 @@
             </div>
 
             <div class="action-buttons" style="align-items:center">
+                <!-- Starts disabled and unlinked: the label and the
+                     href are supplied by refreshDownloadStatus() once
+                     the archive is actually prepared, so the button can
+                     never be clicked before there is anything to
+                     download. -->
                 <a class="btn btn-secondary" id="btn-download"
-                   style="flex:1;text-align:center"
-                   href="/api/fire/{{ fire_numbe }}/download" download>
+                   style="flex:1;text-align:center;opacity:0.5;
+                          pointer-events:none"
+                   aria-disabled="true">
                     Download
                 </a>
             </div>
@@ -1293,6 +1299,9 @@ async function _onPostSourceChangeInner() {
             // leave the row looking as though VIIRS were chosen.
             currentHintMode = data.hint_mode || 'redwins_post';
         currentL2Date = data.l2_start_date || '';
+        // Archive contents changed: relabel the Download button.
+        try { refreshDownloadStatus(); } catch (_) {}
+        // Prepare the archive and label the button with its size.
         // Show the Date select button as soon as the source is
         // known. The call inside applySavedUiState is not enough:
         // that function returns early for a fire with no saved
@@ -3967,6 +3976,68 @@ async function waitForDateApplied(date, prog) {
 }
 
 
+let _dlPoll = null;
+let _dlSig = '';
+
+function _fmtMb(bytes) {
+    // One significant figure after the point, as requested.
+    return (bytes / (1024 * 1024)).toFixed(1);
+}
+
+function _setDownloadButton(state, bytes) {
+    const a = document.getElementById('btn-download');
+    if (!a) return;
+    if (state === 'ready') {
+        a.textContent = `Download (${_fmtMb(bytes)} MB)`;
+        a.href = `/api/fire/${encodeURIComponent(FIRE)}/download`;
+        a.setAttribute('download', '');
+        a.style.opacity = '';
+        a.style.pointerEvents = '';
+        a.removeAttribute('aria-disabled');
+        a.title = 'Download the product archive';
+    } else {
+        a.textContent = (state === 'building')
+            ? 'Download (preparing ...)' : 'Download';
+        a.removeAttribute('href');
+        a.style.opacity = '0.5';
+        a.style.pointerEvents = 'none';
+        a.setAttribute('aria-disabled', 'true');
+        a.title = (state === 'building')
+            ? 'The archive is being prepared'
+            : 'Available once a result has been accepted';
+    }
+}
+
+// Ask the server whether the archive is current, and keep asking while
+// it builds. Called after anything that changes what would be in it.
+async function refreshDownloadStatus() {
+    try {
+        const r = await fetch(
+            `/api/fire/${encodeURIComponent(FIRE)}/download_status`);
+        if (!r.ok) { _setDownloadButton('none'); return; }
+        const j = await r.json();
+        if (j.state === 'ready') {
+            if (_dlPoll) { clearInterval(_dlPoll); _dlPoll = null; }
+            if (j.sig !== _dlSig) {
+                _dlSig = j.sig;
+                log(`[download] archive ready, ${_fmtMb(j.bytes)} MB`,
+                    'dim');
+            }
+            _setDownloadButton('ready', j.bytes);
+        } else if (j.state === 'building') {
+            _setDownloadButton('building');
+            if (!_dlPoll) {
+                _dlPoll = setInterval(refreshDownloadStatus, 2000);
+            }
+        } else {
+            if (_dlPoll) { clearInterval(_dlPoll); _dlPoll = null; }
+            _setDownloadButton('none');
+        }
+    } catch (_) {
+        _setDownloadButton('none');
+    }
+}
+
 async function openBandPicker() {
     const dlg = document.getElementById('band-picker');
     const list = document.getElementById('band-picker-list');
@@ -6599,6 +6670,8 @@ async function pollFireState() {
             rebrushAdopted = false;
             setRebrushButtons(false);
             log('Rebrush finished on server. Refreshing views ...', 'dim');
+            // Archive contents changed: relabel the Download button.
+            try { refreshDownloadStatus(); } catch (_) {}
             // Drop every cached preview first.
             //
             // The rasters changed underneath the same URLs, so without
@@ -6707,6 +6780,8 @@ async function pollFireState() {
                     updateSubtitle('left', leftView);
                     updateSubtitle('right', rightView);
                 } catch (_) {}
+                // Archive contents changed: relabel the Download button.
+                try { refreshDownloadStatus(); } catch (_) {}
 
                 if (oldStatus === 'mapping' && !sseActive) {
                     log('Mapping complete!', 'success');

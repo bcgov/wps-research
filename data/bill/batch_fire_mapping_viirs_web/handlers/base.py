@@ -176,6 +176,9 @@ class BaseHandler:
             r'^/api/fire/(?P<fire_numbe>[^/]+)/download_imagery$'),
          'handle_api_download_imagery'),
         (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/download_status$'),
+         'handle_api_download_status'),
+        (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/download$'),
          'handle_api_download'),
         (re.compile(
