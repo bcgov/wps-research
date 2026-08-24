@@ -330,3 +330,111 @@ def build_manifest_pdf(out_path: str, fire_numbe: str, files: list,
     except Exception as exc:
         sys.stderr.write(f'[delivery] manifest build failed: {exc}\n')
         return False
+
+
+def build_archive(result_dir: str, fire_numbe: str, acq: dict,
+                  out_zip: str, log=None) -> dict:
+    """Zip an accepted fire directory as a delivered product set.
+
+    Entry-by-entry rather than zipping the folder, so the delivered
+    products can carry the dated naming pattern and a contents listing
+    can be added without changing anything on disk.
+
+    Returns a summary so the caller can log what actually happened
+    instead of assuming it worked.
+    """
+    import zipfile
+
+    stem = delivery_stem(fire_numbe, acq)
+    VEC = ('.shp', '.shx', '.dbf', '.prj', '.cpg', '.kml')
+    fl = fire_numbe.lower()
+
+    def arcname(rel: str) -> str:
+        if not stem or os.path.dirname(rel):
+            return rel                     # previews/ keep their names
+        low = os.path.basename(rel).lower()
+        ext = os.path.splitext(low)[1]
+        if ext in VEC and ('_perimeter' in low or '_detection_' in low):
+            return f'{stem}{ext}'
+        if low == f'{fl}_classified.bin':
+            return f'{stem}.bin'
+        if low == f'{fl}_classified.hdr':
+            return f'{stem}.hdr'
+        return rel
+
+    entries = []
+    for root, _dirs, fnames in os.walk(result_dir):
+        for fn in sorted(fnames):
+            if fn.startswith('.'):
+                continue
+            # Low-resolution progressive variants are a loading aid, not
+            # a product. Filtered HERE as well as at accept time, so an
+            # archive is clean even when the accepted directory was
+            # populated before that filter existed.
+            if '.low.' in fn:
+                continue
+            full = os.path.join(root, fn)
+            rel = os.path.relpath(full, result_dir).replace(os.sep, '/')
+            entries.append((full, arcname(rel)))
+
+    manifest_name = f'{fire_numbe}_ARCHIVE_CONTENTS.pdf'
+    tmp_manifest = os.path.join(
+        os.path.dirname(out_zip) or '.',
+        f'.{fire_numbe}.manifest.{os.getpid()}.pdf')
+    listed = sorted(a for _f, a in entries) + [manifest_name]
+    have_manifest = False
+    try:
+        have_manifest = build_manifest_pdf(
+            tmp_manifest, fire_numbe, listed, acq, stem or fire_numbe)
+    except Exception as exc:
+        sys.stderr.write(f'[delivery] manifest failed: {exc}\n')
+
+    if not have_manifest:
+        # A plain-text listing rather than nothing: the recipient still
+        # gets the descriptions even where reportlab is unavailable.
+        manifest_name = f'{fire_numbe}_ARCHIVE_CONTENTS.txt'
+        tmp_manifest = tmp_manifest[:-4] + '.txt'
+        try:
+            with open(tmp_manifest, 'w', encoding='utf-8') as fh:
+                fh.write(f'ARCHIVE CONTENTS - {fire_numbe}\n\n')
+                loc = (acq or {}).get('local')
+                if loc is not None:
+                    fh.write(
+                        f'Newest contributing acquisition: '
+                        f'{loc:%Y-%m-%d %H:%M %Z} (local), '
+                        f'{(acq or {}).get("utc")} UTC\n')
+                    fh.write(f'Exact: {bool((acq or {}).get("exact"))}\n')
+                    fh.write(f'Product naming: {stem}.*\n\n')
+                for rel in listed:
+                    d = describe(rel)
+                    if d:
+                        fh.write(f'{rel}\n    {d}\n')
+                fh.write('\nFiles ending in .hdr are ENVI headers for '
+                         'the raster beside them.\n')
+            have_manifest = True
+        except Exception as exc:
+            sys.stderr.write(f'[delivery] text manifest failed: {exc}\n')
+
+    with zipfile.ZipFile(out_zip, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for full, arc in entries:
+            zf.write(full, f'{fire_numbe}/{arc}')
+        if have_manifest:
+            zf.write(tmp_manifest, f'{fire_numbe}/{manifest_name}')
+    try:
+        if os.path.isfile(tmp_manifest):
+            os.remove(tmp_manifest)
+    except OSError:
+        pass
+
+    renamed = sum(1 for _f, a in entries
+                  if stem and os.path.basename(a).startswith(stem))
+    summary = {'stem': stem, 'entries': len(entries),
+               'renamed': renamed, 'manifest': manifest_name
+               if have_manifest else ''}
+    msg = (f'[download] {fire_numbe}: {len(entries)} file(s), '
+           f'{renamed} renamed to "{stem or "(unchanged)"}", '
+           f'manifest={summary["manifest"] or "NONE"}')
+    sys.stderr.write(msg + '\n')
+    if log:
+        log('  ' + msg.split('] ', 1)[1])
+    return summary

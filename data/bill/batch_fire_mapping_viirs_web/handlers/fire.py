@@ -2367,79 +2367,18 @@ class FireRoutes:
             f'.{fire_numbe}.{os.getpid()}.{threading.get_ident()}.tmp')
         tmp_zip = tmp_base + '.zip'
 
-        # Built entry by entry rather than zipping the directory, so the
-        # delivered products can be renamed to the agreed pattern and a
-        # manifest can be added without disturbing what is on disk.
+        # Delegated so it can be exercised directly in testing; the
+        # handler only needs to report failure.
         try:
-            from ..delivery import (acquisition_datetime, delivery_stem,
-                                    build_manifest_pdf, describe)
-            # No stack path here: delivery falls back to the fire's
-            # loaded crop, which is the product the run used.
+            from ..delivery import acquisition_datetime, build_archive
             acq = acquisition_datetime(fire)
-            stem = delivery_stem(fire_numbe, acq)
-            if not stem:
-                sys.stderr.write(
-                    f'[download] {fire_numbe}: no acquisition datetime '
-                    f'available; keeping original file names\n')
-
-            # Extensions that make up a delivered product set. The
-            # shapefile siblings MUST be renamed together or the set
-            # stops opening.
-            VEC = ('.shp', '.shx', '.dbf', '.prj', '.cpg', '.kml')
-
-            def arcname(rel):
-                base = os.path.basename(rel)
-                if not stem or os.path.dirname(rel):
-                    return rel            # previews/ keep their names
-                low = base.lower()
-                ext = os.path.splitext(low)[1]
-                if ext in VEC and ('_perimeter' in low
-                                   or '_detection_' in low):
-                    return f'{stem}{ext}'
-                # The accepted classification raster and its header.
-                if low.endswith(f'{fire_numbe.lower()}_classified.bin'):
-                    return f'{stem}.bin'
-                if low.endswith(f'{fire_numbe.lower()}_classified.hdr'):
-                    return f'{stem}.hdr'
-                return rel
-
-            entries = []
-            for root, _dirs, fnames in os.walk(result_dir):
-                for fn in sorted(fnames):
-                    full = os.path.join(root, fn)
-                    rel = os.path.relpath(full, result_dir)
-                    if rel.startswith('.'):
-                        continue
-                    entries.append((full, rel))
-
-            named = [(full, arcname(rel)) for full, rel in entries]
-
-            manifest_tmp = ''
-            try:
-                manifest_tmp = tmp_base + '.manifest.pdf'
-                listed = sorted(a for _f, a in named)
-                if build_manifest_pdf(manifest_tmp, fire_numbe, listed,
-                                      acq, stem or fire_numbe):
-                    named.append((manifest_tmp,
-                                  f'{fire_numbe}_ARCHIVE_CONTENTS.pdf'))
-                else:
-                    manifest_tmp = ''
-            except Exception as _mexc:
-                sys.stderr.write(
-                    f'[download] manifest skipped: {_mexc}\n')
-                manifest_tmp = ''
-
-            with zipfile.ZipFile(tmp_zip, 'w',
-                                 zipfile.ZIP_DEFLATED) as zf:
-                for full, arc in named:
-                    zf.write(full, os.path.join(fire_numbe, arc))
-            if manifest_tmp:
-                try:
-                    os.remove(manifest_tmp)
-                except OSError:
-                    pass
+            build_archive(
+                result_dir, fire_numbe, acq, tmp_zip,
+                log=lambda m: fire.console_log.append(m))
         except Exception as exc:
-            sys.stderr.write(f'[download] {fire_numbe}: {exc}\n')
+            sys.stderr.write(
+                f'[download] {fire_numbe}: archive build failed: '
+                f'{type(exc).__name__}: {exc}\n')
             traceback.print_exc(file=sys.stderr)
             self._send_json({'error': f'Zip failed: {exc}'}, 500)
             return
