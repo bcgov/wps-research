@@ -10,6 +10,7 @@ import json
 import os
 import re
 import sys
+import traceback
 
 import numpy as np
 from osgeo import gdal
@@ -615,11 +616,67 @@ def _overlay_mask_on_post(fire: 'FireInfo', raster_path: str,
 
                         arr = arr_aligned
                         aligned = True
-                except Exception:
-                    pass
+                    elif old_gt and new_gt:
+                        # Pixel sizes differ, so a shift cannot align
+                        # them. Warp into the crop grid instead of
+                        # giving up: this is exact for any north-up
+                        # grid, and it is the case that used to fall
+                        # through to the stretch below.
+                        try:
+                            mem = gdal.GetDriverByName('MEM').Create(
+                                '', new_w, new_h, 1, gdal.GDT_Float32)
+                            mem.SetGeoTransform(new_gt)
+                            mem.SetProjection(
+                                ds_crop.GetProjection() or '')
+                            gdal.ReprojectImage(
+                                ds, mem, ds.GetProjection() or '',
+                                ds_crop.GetProjection() or '',
+                                gdal.GRA_NearestNeighbour)
+                            arr_w = mem.GetRasterBand(1).ReadAsArray()
+                            mem = None
+                            if arr_w is not None:
+                                if new_h != ph or new_w != pw:
+                                    arr_w = scipy_zoom(
+                                        arr_w.astype(np.float32),
+                                        (ph / new_h, pw / new_w),
+                                        order=0)
+                                arr = arr_w
+                                aligned = True
+                                sys.stderr.write(
+                                    f'[overlay] {out_name}: warped the '
+                                    f'mask onto the crop grid (pixel '
+                                    f'sizes differed)\n')
+                        except Exception as wexc:
+                            sys.stderr.write(
+                                f'[overlay] {out_name}: warp failed: '
+                                f'{wexc}\n')
+                except Exception as exc:
+                    # NEVER silent.
+                    #
+                    # This swallowed every alignment failure and let the
+                    # naive stretch below run, which resamples a
+                    # different-extent raster across the preview and
+                    # shifts the mask relative to the imagery and the
+                    # vector overlays. Silent fallback is why the same
+                    # misregistration kept coming back: nothing ever
+                    # said it had happened.
+                    sys.stderr.write(
+                        f'[overlay] {out_name}: geo alignment failed '
+                        f'({type(exc).__name__}: {exc})\n')
+                    traceback.print_exc(file=sys.stderr)
 
             if not aligned:
-                # Fallback: naive resize (same-extent rasters)
+                # Last resort, and it is only correct when the two
+                # rasters cover the SAME ground. Say so loudly with the
+                # numbers, so a misregistered overlay is diagnosable
+                # from the log instead of from the screen.
+                sys.stderr.write(
+                    f'[overlay] {out_name}: WARNING falling back to a '
+                    f'naive stretch {aw}x{ah} -> {pw}x{ph}. This is '
+                    f'only correct if both rasters cover the same '
+                    f'extent; if the mask looks shifted, this line is '
+                    f'the reason. mask_gt={old_gt} crop_gt='
+                    f'{locals().get("new_gt")}\n')
                 arr = scipy_zoom(
                     arr.astype(np.float32),
                     (ph / ah, pw / aw), order=0)

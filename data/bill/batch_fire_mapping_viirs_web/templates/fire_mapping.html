@@ -5284,11 +5284,93 @@ function paneGeoReport() {
     }
 }
 
+// Screen <-> map for one pane, derived from its geotransform.
+//
+// This is the thing that makes alignment durable. Every earlier attempt
+// matched panes by PIXELS -- same dimensions, or the same fraction of
+// the image -- and pixels only correspond to ground when both panes
+// happen to show rasters of the same size over the same extent. That
+// assumption held for a while and then quietly stopped holding (a
+// result rendered at a different padding, an L2 preview beside an MRAP
+// one), and the panes drifted again.
+//
+// Map coordinates cannot drift: two panes showing the same easting and
+// northing at the same screen point ARE aligned, whatever the pixel
+// dimensions of what they are showing.
+function paneMapTransform(pane) {
+    const { area, img } = getPaneElements(pane);
+    const g = geoForPane(pane);
+    if (!area || !img || !g || !g.gt || !g.rw || !g.rh) return null;
+    const gt = g.gt.map(Number);
+    // North-up grids only. A rotated geotransform would need the full
+    // affine; every product here is north-up, and saying so beats
+    // silently mis-handling one that is not.
+    if (Math.abs(gt[2]) > 1e-9 || Math.abs(gt[4]) > 1e-9) return null;
+    if (!isFinite(gt[1]) || !isFinite(gt[5]) || gt[1] === 0 || gt[5] === 0) {
+        return null;
+    }
+    const d = paneImageDims(img);
+    if (!d.w || !d.h) return null;
+    const st = paneState[pane];
+    // PNG pixels per raster pixel (a preview may be downsampled).
+    const kx = d.w / g.rw;
+    const ky = d.h / g.rh;
+    if (!(kx > 0) || !(ky > 0)) return null;
+    return {
+        area, img, g, gt, d, st, kx, ky,
+        // Screen pixels per map unit, signed by the geotransform.
+        spmX: (st.scale * kx) / gt[1],
+        spmY: (st.scale * ky) / gt[5],
+        // Map coordinate under a point in the pane's own client box.
+        mapAt(sx, sy) {
+            const ix = (sx - st.panX) / st.scale / kx;
+            const iy = (sy - st.panY) / st.scale / ky;
+            return [gt[0] + ix * gt[1], gt[3] + iy * gt[5]];
+        },
+    };
+}
+
 function syncOtherPane(pane) {
     const other = pane === 'left' ? 'right' : 'left';
     const { area, img } = getPaneElements(pane);
     const { area: oArea, img: oImg } = getPaneElements(other);
     if (!img || !oImg || !img.naturalWidth || !oImg.naturalWidth) return;
+
+    // Preferred: align by ground, using both geotransforms.
+    try {
+        const A = paneMapTransform(pane);
+        const B = paneMapTransform(other);
+        if (A && B) {
+            // The map point under the source pane's centre goes under
+            // the other pane's centre, at the same ground scale.
+            const [mx, my] = A.mapAt(A.area.clientWidth / 2,
+                                     A.area.clientHeight / 2);
+            // Match ground scale: screen px per map unit equal on both.
+            const os = paneState[other];
+            os.scale = Math.abs(A.spmX) * Math.abs(B.gt[1]) / B.kx;
+            const ix = (mx - B.gt[0]) / B.gt[1];
+            const iy = (my - B.gt[3]) / B.gt[5];
+            os.panX = B.area.clientWidth / 2 - ix * B.kx * os.scale;
+            os.panY = B.area.clientHeight / 2 - iy * B.ky * os.scale;
+            oImg.style.transform =
+                `translate(${os.panX}px, ${os.panY}px) `
+                + `scale(${os.scale})`;
+            try { drawOverlayLayer(other); } catch (_) {}
+            if (window._syncPathLast !== 'geo') {
+                window._syncPathLast = 'geo';
+                log('[sync] aligning panes by map coordinates', 'dim');
+            }
+            return;
+        }
+        if (window._syncPathLast !== 'pixel') {
+            window._syncPathLast = 'pixel';
+            log('[sync] no geo for one pane; falling back to pixel '
+                + 'matching, which can misalign different rasters',
+                'error');
+        }
+    } catch (err) {
+        log(`[sync] geo alignment failed: ${err.message}`, 'error');
+    }
     const s = paneState[pane];
     const os = paneState[other];
 
