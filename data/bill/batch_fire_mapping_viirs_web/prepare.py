@@ -1344,7 +1344,19 @@ def _l2_selection_is_current(fire, source: str) -> bool:
     cur = getattr(fire, 'crop_bin', '') or ''
     if not cur or not os.path.isfile(cur):
         return False
-    want = getattr(fire, 'l2_start_date', '') or ''
+    # The REQUESTED date, which during a switch is the pending one.
+    #
+    # switch_post_source() records the caller's date in
+    # _pending_l2_date and deliberately does not apply it until inside
+    # the lock (so the outgoing product can be stashed under its own
+    # name). This check runs BEFORE that, so reading l2_start_date
+    # compared the loaded date against itself: always equal, always
+    # "nothing to do". The switch returned success instantly, having
+    # done nothing, and the old composite stayed on screen -- which is
+    # exactly why selecting a dated product changed nothing.
+    _pend = getattr(fire, '_pending_l2_date', None)
+    want = (getattr(fire, 'l2_start_date', '') or '') if _pend is None \
+        else (_pend or '')
     m = re.search(r'_l2_d(\d{8})\.bin$', cur)
     if m:
         have = m.group(1)
@@ -1397,6 +1409,13 @@ def switch_post_source(fire: FireInfo, source: str,
         why = ('the background prebuild of the other source'
                if getattr(fire, 'prebuilding', False)
                else 'another source switch')
+        # Busy: this call does nothing, so its date request dies here
+        # rather than being applied by whatever switches next.
+        try:
+            if hasattr(fire, '_pending_l2_date'):
+                del fire._pending_l2_date
+        except Exception:
+            pass
         return {'ok': False, 'busy': True,
                 'holder': ('prebuild'
                            if getattr(fire, 'prebuilding', False)
@@ -1421,6 +1440,18 @@ def switch_post_source(fire: FireInfo, source: str,
                         'post_source': source}
         return _switch_post_source_locked(fire, source)
     finally:
+        # The pending date must not outlive this call.
+        #
+        # The locked switch consumes it, but the short-circuit and
+        # busy paths above return without ever reaching it. A leftover
+        # value would then be read by the NEXT switch -- including a
+        # switch to MRAP -- and silently retarget it at a date the
+        # caller never asked for.
+        try:
+            if hasattr(fire, '_pending_l2_date'):
+                del fire._pending_l2_date
+        except Exception:
+            fire._pending_l2_date = None
         lk.release()
 
 
