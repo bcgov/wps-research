@@ -3940,8 +3940,32 @@ async function applyDateSelection() {
                 refreshSourceSelectors(pj.products);
             }
         } catch (_) {}
+        // Select the PRODUCT just built, not merely the source.
+        //
+        // This used to set the selector to 'l2', which was right when
+        // L2 meant one composite -- but it now names the most-recent
+        // one, so it undid the selection two lines above and the
+        // dropdown read "L2 recent" while everything else correctly
+        // used the dated product.
         const _ls = document.getElementById('post-source-select');
-        if (_ls) _ls.value = 'l2';
+        if (_ls) {
+            const _want = currentProductKey();
+            if ([..._ls.options].some((o) => o.value === _want)) {
+                _ls.value = _want;
+            } else {
+                // The list has not caught up (a build finishing just
+                // as the list was read). Add the entry rather than
+                // leaving the dropdown showing the wrong product.
+                const o = document.createElement('option');
+                o.value = _want;
+                o.textContent = productLabel(
+                    {source: 'l2', date: currentL2Date});
+                _ls.appendChild(o);
+                _ls.value = _want;
+                log(`[products] added ${_want} to the selector `
+                    + `directly; the list had not refreshed yet`, 'dim');
+            }
+        }
         if (prog) prog.textContent = 'Built. Loading the new imagery ...';
         // The stack changed underneath EVERY view, so nothing cached
         // client-side is still valid.
