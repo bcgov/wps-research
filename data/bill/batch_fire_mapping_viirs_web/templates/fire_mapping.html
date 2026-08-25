@@ -1329,7 +1329,13 @@ async function _onPostSourceChangeInner() {
         // including the source.
         currentPostSource = src;
         currentL2Date = _wantDate;
+        // Re-read the product list: a switch can be the first moment a
+        // product becomes complete, and the selector should show it
+        // without waiting for a page reload.
         try {
+            if (Array.isArray(data.products)) {
+                refreshSourceSelectors(data.products);
+            }
             const _ls = document.getElementById('post-source-select');
             if (_ls) _ls.value = currentProductKey();
         } catch (_) {}
@@ -4111,8 +4117,9 @@ let _products = [];
 function productLabel(p) {
     if (p.source === 'mrap') return 'MRAP composite';
     if (!p.date) return 'L2 recent tile';
-    const d = p.date;
-    return `L2 recent ${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
+    // Plain YYYYMMDD, matching how dates are written everywhere else
+    // in this application (product names, archive names, log lines).
+    return `L2 recent ${p.date}`;
 }
 
 function currentProductKey() {

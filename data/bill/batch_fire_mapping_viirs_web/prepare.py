@@ -1149,9 +1149,15 @@ def _restore_previews(fire: FireInfo, source: str) -> bool:
     if not os.path.isdir(src):
         return False
     try:
-        if fire.crop_bin and os.path.isfile(fire.crop_bin):
-            if os.path.getmtime(src) < os.path.getmtime(fire.crop_bin):
-                return False
+        # NOTE: no mtime comparison against the stack.
+        #
+        # It used to refuse any stash older than the stack file, which
+        # is wrong now that products are switched rather than rebuilt:
+        # returning to a composite touches its stack, so every stash
+        # made before that moment looked stale and every switch back
+        # re-rendered from scratch. The grid check below answers the
+        # real question -- does this stash describe THIS product's
+        # grid -- and answers it exactly.
         # The mtime test is circumstantial; the GRID test is decisive.
         # A stash whose recorded geotransform does not match the stack
         # being switched to would put a different extent on screen --

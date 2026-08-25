@@ -357,6 +357,15 @@ class FireRoutes:
         if not result.get('ok'):
             self._send_json({'error': result.get('error', 'unknown')}, 400)
             return
+        # The selectors read this: a switch is often the first moment
+        # a newly built product is complete on disk.
+        try:
+            result['products'] = self._built_products(fire_numbe, fire)
+            result['l2_start_date'] = getattr(fire, 'l2_start_date',
+                                              '') or ''
+        except Exception as exc:
+            sys.stderr.write(f'[products] not attached to switch '
+                             f'response: {exc}\n')
         self._send_json(result)
 
     def handle_api_fire_overlays(self, fire_numbe):
@@ -2421,35 +2430,49 @@ class FireRoutes:
             pass
 
     def _built_products(self, fire_numbe, fire):
-        """Products with a stack already on disk, newest date first."""
+        """Products with a complete stack on disk, for the selectors.
+
+        Derived from the fire's OWN loaded stack path rather than by
+        recomputing the identity hash: the hash depends on an instance
+        key that this handler would have to guess, and guessing it
+        wrong yields an empty list and a selector that never gains the
+        date the operator just built. crop_bin is the one path we know
+        is right, because the fire is displaying it.
+        """
         out = []
         try:
             import glob as _g
-            from ..aoi_stack import (RAM_DIR, aoi_identity_hash,
-                                     sanitize_identifier)
             from ..l2_recent import date_polygons_path
-            safe = sanitize_identifier(fire_numbe)
-            h = aoi_identity_hash(
-                fire_numbe, getattr(state, 'shared_root', '') or '')
+            cb = getattr(fire, 'crop_bin', '') or ''
+            base = os.path.basename(cb)
+            m = re.match(
+                r'^(\d{8})_stack_(?P<safe>.+?)_(?P<h>[0-9a-fA-F]{6,})'
+                r'(_l2(_d\d{8})?)?\.bin$', base)
+            if not m:
+                sys.stderr.write(
+                    f'[products] {fire_numbe}: cannot parse stack name '
+                    f'{base!r}; no products listed\n')
+                return out
+            ram = os.path.dirname(cb)
+            safe, h = m.group('safe'), m.group('h')
+            prod = re.compile(
+                r'^\d{8}_stack_' + re.escape(safe) + '_' + re.escape(h)
+                + r'(_l2(_d(\d{8}))?)?\.bin$')
             seen = set()
             for cand in sorted(_g.glob(os.path.join(
-                    RAM_DIR, f'*_stack_{safe}_{h}*.bin'))):
-                base = os.path.basename(cand)
-                m = re.fullmatch(
-                    r'\d{8}_stack_' + re.escape(safe) + '_'
-                    + re.escape(h) + r'(_l2(_d(\d{8}))?)?\.bin', base)
-                if not m:
-                    continue          # KGC scratch and similar
-                # A product counts as built only when it is complete:
-                # a bare .bin from an interrupted build would offer a
-                # selector entry that cannot be displayed.
+                    ram, f'*_stack_{safe}_{h}*.bin'))):
+                mm = prod.match(os.path.basename(cand))
+                if not mm:
+                    continue                     # KGC scratch etc.
                 stem = os.path.splitext(cand)[0]
+                # Complete means usable: an interrupted build would
+                # otherwise offer a selector entry that cannot display.
                 if not os.path.isfile(stem + '.hdr'):
                     continue
-                if m.group(1) is None:
+                if mm.group(1) is None:
                     key, src, date = 'mrap', 'mrap', ''
                 else:
-                    date = m.group(3) or ''
+                    date = mm.group(3) or ''
                     src = 'l2'
                     key = f'l2_d{date}' if date else 'l2'
                     if not os.path.isfile(date_polygons_path(cand)):
@@ -2458,20 +2481,18 @@ class FireRoutes:
                     continue
                 seen.add(key)
                 out.append({'key': key, 'source': src, 'date': date})
+            dated = sorted([p for p in out if p['date']],
+                           key=lambda p: p['date'], reverse=True)
+            out = ([p for p in out if p['source'] == 'mrap']
+                   + [p for p in out if p['source'] == 'l2'
+                      and not p['date']]
+                   + dated)
+            sys.stderr.write(
+                f'[products] {fire_numbe}: '
+                f'{", ".join(p["key"] for p in out) or "none"}\n')
         except Exception as exc:
             sys.stderr.write(f'[products] scan failed: {exc}\n')
-        # MRAP first, then L2 most-recent, then dated newest first --
-        # the order the selector shows them in.
-        def _rank(p):
-            if p['source'] == 'mrap':
-                return (0, '')
-            return (1, '') if not p['date'] else (2, p['date'])
-        out.sort(key=lambda p: _rank(p), reverse=False)
-        dated = [p for p in out if p['date']]
-        dated.sort(key=lambda p: p['date'], reverse=True)
-        return ([p for p in out if p['source'] == 'mrap']
-                + [p for p in out if p['source'] == 'l2' and not p['date']]
-                + dated)
+        return out
 
     def _download_imagery_list(self, fire_numbe):
         """Imagery stacks already on the ramdisk for this AOI."""
