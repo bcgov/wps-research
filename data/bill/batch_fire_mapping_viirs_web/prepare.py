@@ -858,7 +858,11 @@ def build_bcws_hint_for_fire(fire: FireInfo):
     # Per source like the others: the mask must match the dimensions of
     # whichever stack is current, and switching source repoints
     # crop_bin at a different raster.
-    out_path = os.path.join(out_dir, f'bcws_perimeter_{src}_hint.bin')
+    # Product-keyed for the same reason as the red-wins masks: the
+    # rasterisation follows the crop it is burned onto.
+    _pkey = product_key(src, getattr(fire, 'l2_start_date', '') or '')
+    out_path = os.path.join(out_dir,
+                            f'bcws_perimeter_{_pkey}_hint.bin')
 
     try:
         if (os.path.isfile(out_path)
@@ -1022,7 +1026,17 @@ def build_redwins_hint_for_fire(fire: FireInfo, mode: str):
     # source's hint. The rendered PNGs hid this (they are stashed per
     # source), so it would only have shown up in the mapping result.
     src = getattr(fire, 'post_source', 'l2') or 'l2'
-    out_path = os.path.join(out_dir, f'{mode}_{src}_hint.bin')
+    # Keyed by PRODUCT, not just source.
+    #
+    # Every L2 composite shared one filename, so the hint built for the
+    # most-recent product was reused for a dated one and vice versa. On
+    # a cloudy composite red-wins finds almost nothing, so selecting a
+    # clear dated product showed an empty hint (and fed that emptiness
+    # to the clustering), while red-wins-diff showed the other
+    # product's features. The date is part of what the mask is derived
+    # from, so it has to be part of its name.
+    _pkey = product_key(src, getattr(fire, 'l2_start_date', '') or '')
+    out_path = os.path.join(out_dir, f'{mode}_{_pkey}_hint.bin')
 
     # Reuse an existing mask when it is newer than the stack it was
     # derived from. Six call sites reach this function and several run
