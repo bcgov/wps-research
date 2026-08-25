@@ -258,16 +258,41 @@ def build_fire_overlays(state, fire, force: bool = False) -> dict:
     if not crop or not os.path.isfile(crop):
         return {'tiles': [], 'bcws': {}, 'width': 0, 'height': 0}
 
+    gt, proj, w, h = _crop_info(crop)
+
     cache = overlay_cache_path(crop)
     if not force and os.path.isfile(cache):
         try:
-            if os.path.getmtime(cache) >= os.path.getmtime(crop):
-                with open(cache, encoding='utf-8') as f:
-                    return json.load(f)
-        except (OSError, ValueError):
-            pass
-
-    gt, proj, w, h = _crop_info(crop)
+            with open(cache, encoding='utf-8') as f:
+                cached = json.load(f)
+            # Validate against the crop's ACTUAL grid, not against
+            # mtimes.
+            #
+            # Every coordinate in here is a pixel offset into a
+            # specific grid. An mtime test only asks "was this written
+            # after that file appeared", which a cache built for an
+            # earlier version of the same stack passes trivially -- and
+            # it then places the BCWS perimeter using the wrong grid,
+            # visibly offset, for that product only. Comparing the
+            # recorded grid to the current one cannot be fooled that
+            # way, and rebuilding is cheap.
+            c_gt = cached.get('gt')
+            ok = (int(cached.get('width', -1)) == int(w)
+                  and int(cached.get('height', -1)) == int(h)
+                  and isinstance(c_gt, (list, tuple))
+                  and len(c_gt) == 6
+                  and all(abs(float(a) - float(b)) < 1e-6
+                          for a, b in zip(c_gt, gt)))
+            if ok:
+                return cached
+            sys.stderr.write(
+                f'[fire_overlays] {os.path.basename(cache)}: built for '
+                f'{cached.get("width")}x{cached.get("height")} '
+                f'gt={c_gt} but the crop is {w}x{h} gt={list(gt)} -- '
+                f'rebuilding so the perimeter lands correctly\n')
+        except (OSError, ValueError) as exc:
+            sys.stderr.write(f'[fire_overlays] cache unreadable '
+                             f'({exc}); rebuilding\n')
     try:
         tiles = _tile_grid_px(gt, proj, w, h)
     except Exception as exc:
@@ -280,7 +305,10 @@ def build_fire_overlays(state, fire, force: bool = False) -> dict:
         bcws = {'polygons': [], 'points': [],
                 'polygon_fire_nums': [], 'point_fire_nums': []}
 
-    out = {'tiles': tiles, 'bcws': bcws, 'width': w, 'height': h}
+    # The grid is recorded WITH the coordinates it produced, so the
+    # next read can prove the cache belongs to the crop being drawn.
+    out = {'tiles': tiles, 'bcws': bcws, 'width': w, 'height': h,
+           'gt': [float(v) for v in gt]}
     try:
         tmp = f'{cache}.tmp{os.getpid()}'
         with open(tmp, 'w', encoding='utf-8') as f:

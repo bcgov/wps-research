@@ -1362,7 +1362,11 @@ async function _onPostSourceChangeInner() {
         try { syncDateSelectButton(); } catch (_) {}
         if (data.status) updateStatusDisplay(data.status);
         restoreMethodToggle();
-        loadFireOverlays();
+        // Overlays are pixel coordinates into the product's crop, so
+        // they belong to the product -- reload them for the one just
+        // switched to, and await it so nothing paints the previous
+        // product's vectors in between.
+        await loadFireOverlays();
         // Warm BOTH sources, not just the current one. The server has
         // already built and stashed both (see the prebuild in the
         // worker), so the other source's previews are sitting on disk
@@ -3052,6 +3056,28 @@ function drawOverlayLayer(pane) {
     const cw = _fireOverlays.width || 0;
     const ch = _fireOverlays.height || 0;
     if (!cw || !ch) return;
+
+    // The overlay's grid must be the grid this pane is showing.
+    //
+    // Overlay coordinates are pixel offsets into the crop they were
+    // built from. Drawing them over a pane whose raster is a different
+    // size silently misplaces the perimeter -- and a misplaced
+    // perimeter looks like real data, so it is worse than none.
+    try {
+        const g = geoForPane(pane);
+        if (g && g.rw && g.rh
+            && (Math.abs(g.rw - cw) > 0.5 || Math.abs(g.rh - ch) > 0.5)) {
+            if (window._ovlWarned !== `${cw}x${ch}|${g.rw}x${g.rh}`) {
+                window._ovlWarned = `${cw}x${ch}|${g.rw}x${g.rh}`;
+                log(`[overlay] not drawing: vectors are for `
+                    + `${cw}x${ch} but this pane shows ${g.rw}x${g.rh}. `
+                    + `Reloading overlays.`, 'error');
+                try { loadFireOverlays(); } catch (_) {}
+            }
+            cv.style.display = 'none';
+            return;
+        }
+    } catch (_) { /* geo unavailable: fall through and draw */ }
 
     const sx = ir.width / cw;           // screen px per crop px
     const sy = ir.height / ch;
