@@ -1120,6 +1120,40 @@ def _restore_previews(fire: FireInfo, source: str) -> bool:
         if fire.crop_bin and os.path.isfile(fire.crop_bin):
             if os.path.getmtime(src) < os.path.getmtime(fire.crop_bin):
                 return False
+        # The mtime test is circumstantial; the GRID test is decisive.
+        # A stash whose recorded geotransform does not match the stack
+        # being switched to would put a different extent on screen --
+        # the shorter, diagonally-shifted pane -- so it is deleted and
+        # re-rendered rather than restored. Once. After that the stash
+        # carries the current grid for ever.
+        try:
+            import json as _json
+            from osgeo import gdal
+            gj = os.path.join(src, 'geo.json')
+            entry = None
+            if os.path.isfile(gj):
+                with open(gj, encoding='utf-8') as fh:
+                    entry = (_json.load(fh) or {}).get('post')
+            ds = gdal.Open(fire.crop_bin, gdal.GA_ReadOnly)
+            if ds is not None:
+                rw, rh = ds.RasterXSize, ds.RasterYSize
+                gt = ds.GetGeoTransform()
+                ds = None
+                ok = bool(entry) and (
+                    int(entry.get('rw', -1)) == rw
+                    and int(entry.get('rh', -1)) == rh
+                    and all(abs(float(a) - float(b)) < 1e-6
+                            for a, b in zip(entry.get('gt', []), gt)))
+                if not ok:
+                    sys.stderr.write(
+                        f'[prepare] previews_{source} stash is on a '
+                        f'different grid (or predates geo recording); '
+                        f'deleting it and re-rendering\n')
+                    shutil.rmtree(src, ignore_errors=True)
+                    return False
+        except Exception as exc:
+            sys.stderr.write(f'[prepare] stash grid check skipped: '
+                             f'{exc}\n')
         dst = os.path.join(fire.cache_dir, 'previews')
         if os.path.isdir(dst):
             shutil.rmtree(dst, ignore_errors=True)

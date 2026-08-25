@@ -320,7 +320,17 @@ class FireRoutes:
         if body is None:
             return
         source = body.get('source', 'l2')
-        # An explicit user choice, so it becomes the stable value too.
+        # Record the user's intent BEFORE attempting the switch.
+        #
+        # The attempt can return busy while a background prebuild holds
+        # the lock, and that prebuild finishes by switching the fire
+        # back to what it believes the user wants. If intent is only
+        # recorded after success, the prebuild reads the OLD intent and
+        # undoes the very switch the user is waiting on -- the source
+        # flips to MRAP and then flips back, which is the reported
+        # first-click failure.
+        if source in ('l2', 'mrap'):
+            fire.user_post_source = source
         result = switch_post_source(fire, source)
         if result.get('ok'):
             try:
@@ -1071,8 +1081,8 @@ class FireRoutes:
                         cand_png = os.path.join(cand, f'{view}.png')
                         if os.path.isfile(cand_png):
                             png = cand_png
-            elif os.path.isdir(cand) and os.path.isfile(
-                    os.path.join(cand, f'{view}.png')):
+            elif os.path.isdir(cand) and self._stash_view_current(
+                    fire, cand, view):
                 _stash_dir = cand
                 png = os.path.join(cand, f'{view}.png')
             elif _src != _cur_src:
@@ -1117,18 +1127,36 @@ class FireRoutes:
                     # than the transient one -- the same race that made
                     # new fires open on MRAP.
                     fire.prebuilding = True
-                    fire.user_post_source = _cur_src
+                    # Only pin the intent if nothing has recorded one:
+                    # overwriting it here would erase a choice the user
+                    # made while this build was queued.
+                    if not getattr(fire, 'user_post_source', ''):
+                        fire.user_post_source = _cur_src
                     r1 = switch_post_source(fire, _src)
                     if not r1.get('ok'):
                         raise RuntimeError(
                             r1.get('error', 'switch failed'))
-                    r2 = switch_post_source(fire, _cur_src)
-                    fire.prebuilding = False
-                    if not r2.get('ok'):
+                    # Where should the fire END UP? Re-read the
+                    # user's intent NOW rather than trusting what was
+                    # current when this request began: the user may
+                    # have switched sources while the build ran, and
+                    # switching "back" would undo their click.
+                    _want = (getattr(fire, 'user_post_source', '')
+                             or _cur_src)
+                    if _want == _src:
+                        fire.prebuilding = False
                         sys.stderr.write(
-                            f'[preview] {fire_numbe}: could not switch '
-                            f'back to {_cur_src}: '
-                            f'{r2.get("error")}\n')
+                            f'[preview] {fire_numbe}: user switched to '
+                            f'{_src} while its previews were building; '
+                            f'staying on it\n')
+                    else:
+                        r2 = switch_post_source(fire, _want)
+                        fire.prebuilding = False
+                        if not r2.get('ok'):
+                            sys.stderr.write(
+                                f'[preview] {fire_numbe}: could not '
+                                f'switch back to {_want}: '
+                                f'{r2.get("error")}\n')
                     cand = os.path.join(fire.cache_dir,
                                         f'previews_{_src}')
                     if os.path.isdir(cand):
@@ -2281,6 +2309,80 @@ class FireRoutes:
         finally:
             if tmp_dir:
                 shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    def _stash_view_current(self, fire, stash_dir, view):
+        """Is this stashed preview on the CURRENT AOI grid?
+
+        Stashes survive everything -- sessions, restarts, and every
+        rebuild of the AOI, because a source switch RESTORES a stash
+        rather than re-rendering. One made before the grids were
+        unified keeps resurfacing for ever: its imagery covers a
+        different extent, so the pane shows a shorter, shifted image
+        beside the current one while the vector overlays (placed from
+        real geotransforms) stay correct. Exactly the reported symptom.
+
+        A stale stash is deleted here, which forces the on-demand
+        rebuild branch below -- so it is regenerated once on the
+        current grid and the problem cannot recur.
+        """
+        import json as _json
+        png = os.path.join(stash_dir, f'{view}.png')
+        if not os.path.isfile(png):
+            return False
+        try:
+            from osgeo import gdal
+            cb = getattr(fire, 'crop_bin', '')
+            ds = gdal.Open(cb, gdal.GA_ReadOnly) if cb else None
+            if ds is None:
+                return True          # no reference grid: cannot judge
+            rw, rh = ds.RasterXSize, ds.RasterYSize
+            gt = ds.GetGeoTransform()
+            ds = None
+            gj = os.path.join(stash_dir, 'geo.json')
+            entry = None
+            if os.path.isfile(gj):
+                with open(gj, encoding='utf-8') as fh:
+                    entry = (_json.load(fh) or {}).get(view)
+            if not entry:
+                # No recorded geo at all: predates the geo sidecars,
+                # therefore certainly predates grid unification.
+                self._drop_stale_stash(fire, stash_dir,
+                                       f'{view}: no recorded geo')
+                return False
+            same = (int(entry.get('rw', -1)) == rw
+                    and int(entry.get('rh', -1)) == rh
+                    and all(abs(float(a) - float(b)) < 1e-6
+                            for a, b in zip(entry.get('gt', []), gt)))
+            if not same:
+                self._drop_stale_stash(
+                    fire, stash_dir,
+                    f'{view}: stash grid '
+                    f'{entry.get("rw")}x{entry.get("rh")} '
+                    f'gt={entry.get("gt")} != current {rw}x{rh} '
+                    f'gt={list(gt)}')
+                return False
+            return True
+        except Exception as exc:
+            sys.stderr.write(f'[preview] stash check failed '
+                             f'({exc}); treating as current\n')
+            return True
+
+    def _drop_stale_stash(self, fire, stash_dir, why):
+        sys.stderr.write(
+            f'[preview] {fire.fire_numbe}: STALE stash '
+            f'{os.path.basename(stash_dir)} ({why}) -- deleting so it '
+            f'is rebuilt on the current grid\n')
+        try:
+            import shutil as _sh
+            _sh.rmtree(stash_dir, ignore_errors=True)
+        except Exception:
+            pass
+        try:
+            fire.console_log.append(
+                f'  Rebuilding outdated {os.path.basename(stash_dir)} '
+                f'previews on the current AOI grid.')
+        except Exception:
+            pass
 
     def _download_imagery_list(self, fire_numbe):
         """Imagery stacks already on the ramdisk for this AOI."""

@@ -1324,19 +1324,21 @@ async function _onPostSourceChangeInner() {
         if (data.hint_mode) {
             // Guarded: an empty value would clear the selection and
             // leave the row looking as though VIIRS were chosen.
-            currentHintMode = data.hint_mode || 'redwins_post';
-        currentL2Date = data.l2_start_date || '';
-        // Archive contents changed: relabel the Download button.
-        try { refreshDownloadStatus(); } catch (_) {}
-        // Prepare the archive and label the button with its size.
-        // Show the Date select button as soon as the source is
-        // known. The call inside applySavedUiState is not enough:
-        // that function returns early for a fire with no saved
-        // GUI state, so on a fresh fire the button only appeared
-        // after a source switch happened to run the other hook.
-        try { syncDateSelectButton(); } catch (_) {}
+            currentHintMode = data.hint_mode;
             renderHintModeButtons();
         }
+        // Earlier edits had accidentally nested the three lines below
+        // inside the hint_mode block above, so they only ran when the
+        // response happened to carry a hint mode -- and the L2 date
+        // was being RESET by responses that carried no date at all.
+        // Only adopt a date the server actually reported.
+        if (typeof data.l2_start_date === 'string') {
+            currentL2Date = data.l2_start_date;
+        }
+        // Archive contents changed: relabel the Download button.
+        try { refreshDownloadStatus(); } catch (_) {}
+        // Show the Date select button as soon as the source is known.
+        try { syncDateSelectButton(); } catch (_) {}
         if (data.status) updateStatusDisplay(data.status);
         restoreMethodToggle();
         loadFireOverlays();
@@ -1367,7 +1369,18 @@ async function _onPostSourceChangeInner() {
         // cache warming below ran before the indicator cleared, so the
         // bar claimed to be working for several seconds after the panes
         // had visibly switched.
-        if (!canSwapInstantly) {
+        // ALWAYS repaint from the server after a successful switch.
+        //
+        // The instant swap is an optimistic paint from a warm cache
+        // entry, and a warm entry fetched at the wrong moment can hold
+        // the previous source's pixels under this source's key. When
+        // the swap was "instant" nothing ever verified against the
+        // server, so a poisoned entry stayed on screen and the switch
+        // appeared not to take. One awaited reload with a fresh stamp
+        // is cheap, and after it the pane provably shows what the
+        // server has.
+        _previewStamp = Date.now();
+        {
             await loadPaneImage('left', leftView);
             if (splitActive && rightView) {
                 await loadPaneImage('right', rightView);
