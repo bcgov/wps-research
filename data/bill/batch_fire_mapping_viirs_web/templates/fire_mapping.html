@@ -780,6 +780,9 @@ let currentHintMode = 'redwins_post';
 // Part of every L2 preview URL, so switching dates cannot be served
 // from a cache belonging to another date.
 let currentL2Date = '';
+// The right pane's product date, independent of the left pane's.
+// Display-only: it never changes what is classified or exported.
+let rightL2Date = '';
 
 // Which post imagery the stack is built from: 'l2' (most recent L2A
 // tiles over the AOI, default) or 'mrap' (province-wide composite).
@@ -841,7 +844,8 @@ function cacheKeyFor(viewKey, pane) {
     // and without the date in the key a cached preview from one date
     // was served for another -- which is how a switch could appear not
     // to happen, and why switching away and back "fixed" it.
-    const datePart = (src === 'l2') ? `:${currentL2Date || 'latest'}` : '';
+    const _kdate = (pane === 'right') ? rightL2Date : currentL2Date;
+    const datePart = (src === 'l2') ? `:${_kdate || 'latest'}` : '';
     return `${src}${datePart}:${viewKey}${modePart}:${stamp}`;
 }
 
@@ -1183,8 +1187,13 @@ function setSourceSelectorsEnabled(on) {
 async function _onPostSourceChangeInner() {
     const sel = document.getElementById('post-source-select');
     if (!sel) return;
-    const src = sel.value;
-    if (src === currentPostSource) return;
+    // The selector's value is a PRODUCT key ('mrap', 'l2',
+    // 'l2_d20260805'), so a date change is a source change now.
+    const _sel = parseProductKey(sel.value);
+    const src = _sel.source;
+    const _wantDate = _sel.date;
+    if (src === currentPostSource
+        && _wantDate === (currentL2Date || '')) return;
     // Optimistic swap: if both this view's images are already cached
     // for the target source, repaint from cache NOW and let the server
     // catch up in the background. The server call still has to happen
@@ -1257,7 +1266,8 @@ async function _onPostSourceChangeInner() {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json',
                           'X-Requested-With': 'fetch'},
-                body: JSON.stringify({source: src}),
+                body: JSON.stringify({source: src,
+                                      l2_date: _wantDate}),
                 signal: _srcSwitchAbort.signal,
             });
             data = await r.json().catch(() => ({}));
@@ -1318,6 +1328,11 @@ async function _onPostSourceChangeInner() {
         // old source's entries by NOT clearing, and rely on the key
         // including the source.
         currentPostSource = src;
+        currentL2Date = _wantDate;
+        try {
+            const _ls = document.getElementById('post-source-select');
+            if (_ls) _ls.value = currentProductKey();
+        } catch (_) {}
         // The server rebuilds the hint (and may switch its mode) as
         // part of the swap, and returns the fire to READY -- mirror
         // both here so the badge and hint buttons don't lag behind.
@@ -1755,6 +1770,10 @@ async function prepareFire(padding) {
         }
         renderHintModeButtons();
         currentPostSource = data.post_source || 'l2';
+        currentL2Date = data.l2_start_date || '';
+        rightL2Date = currentL2Date;
+        // Build the selector lists from the products that exist.
+        try { refreshSourceSelectors(data.products); } catch (_) {}
         // Vector overlays depend on the crop's geotransform, so they
         // can only be built once preparation has produced it.
         loadFireOverlays();
@@ -3903,6 +3922,18 @@ async function applyDateSelection() {
         // the new product by name.
         currentL2Date = (j && typeof j.date === 'string') ? j.date : date;
         currentPostSource = 'l2';
+        // The new dated product exists now: offer it in both
+        // selectors immediately, which is the whole point of building
+        // it. The right pane keeps whatever it was showing.
+        try {
+            const pr = await fetch(
+                `/api/fire/${encodeURIComponent(FIRE)}/prepare`,
+                {headers: {'X-Requested-With': 'fetch'}});
+            if (pr.ok) {
+                const pj = await pr.json();
+                refreshSourceSelectors(pj.products);
+            }
+        } catch (_) {}
         const _ls = document.getElementById('post-source-select');
         if (_ls) _ls.value = 'l2';
         if (prog) prog.textContent = 'Built. Loading the new imagery ...';
@@ -4068,6 +4099,67 @@ let _dlLastState = '';
 // Every transition is logged. A button stuck on "preparing" is
 // otherwise indistinguishable from a button that is simply slow, and
 // the failure is server-side where the user cannot see it.
+// Products available to the source selectors.
+//
+// The LEFT selector is authoritative: choosing an entry there switches
+// the fire to that product, so it becomes what Map Fire classifies and
+// what Download exports. The RIGHT selector is display-only, which is
+// what makes a two-date comparison possible without disturbing the
+// classification.
+let _products = [];
+
+function productLabel(p) {
+    if (p.source === 'mrap') return 'MRAP composite';
+    if (!p.date) return 'L2 recent tile';
+    const d = p.date;
+    return `L2 recent ${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
+}
+
+function currentProductKey() {
+    if (currentPostSource !== 'l2') return 'mrap';
+    return currentL2Date ? `l2_d${currentL2Date}` : 'l2';
+}
+
+// Fill a selector, preserving its selection where it still exists.
+function fillSourceSelect(sel, wantKey) {
+    if (!sel) return;
+    const had = wantKey || sel.value || 'l2';
+    sel.innerHTML = '';
+    const list = _products.length
+        ? _products
+        : [{key: 'l2', source: 'l2', date: ''},
+           {key: 'mrap', source: 'mrap', date: ''}];
+    for (const p of list) {
+        const o = document.createElement('option');
+        o.value = p.key;
+        o.textContent = productLabel(p);
+        sel.appendChild(o);
+    }
+    // Keep the previous choice if it is still offered; otherwise fall
+    // back to the fire's current product rather than silently landing
+    // on whatever happens to be first.
+    sel.value = [...sel.options].some((o) => o.value === had)
+        ? had : currentProductKey();
+}
+
+function refreshSourceSelectors(products) {
+    if (Array.isArray(products)) _products = products;
+    const left = document.getElementById('post-source-select');
+    const right = document.getElementById('post-source-select-right');
+    const leftWant = currentProductKey();
+    const rightWant = right ? (right.value || leftWant) : leftWant;
+    fillSourceSelect(left, leftWant);
+    fillSourceSelect(right, rightWant);
+    log(`[products] ${_products.length} built: `
+        + _products.map((p) => p.key).join(', '), 'dim');
+}
+
+function parseProductKey(key) {
+    const m = /^l2_d(\d{8})$/.exec(key || '');
+    if (m) return {source: 'l2', date: m[1]};
+    return {source: key === 'mrap' ? 'mrap' : 'l2', date: ''};
+}
+
 async function refreshDownloadStatus(why) {
     const t0 = performance.now();
     const tag = why ? ` (${why})` : '';
@@ -5892,8 +5984,8 @@ function previewUrlFor(viewKey, pane) {
     // blob map, the browser's image cache, a proxy) could keep serving
     // the previous composite, which is why a switch sometimes needed
     // doing twice. Now the URL itself changes with the product.
-    const dpart = (src === 'l2')
-        ? `&l2=${currentL2Date || 'latest'}` : '';
+    const _pdate = (pane === 'right') ? rightL2Date : currentL2Date;
+    const dpart = (src === 'l2') ? `&l2=${_pdate || 'latest'}` : '';
     return `/api/fire/${encodeURIComponent(FIRE)}/preview/${viewKey}`
         + `?src=${src}${modePart}${dpart}&t=${stamp}`;
 }
@@ -6226,14 +6318,17 @@ async function onRightPostSourceChange() {
 
     const sel = document.getElementById('post-source-select-right');
     if (!sel) return;
-    const src = sel.value;
-    if (src === rightPostSource) return;
+    const _rsel = parseProductKey(sel.value);
+    const src = _rsel.source;
+    if (src === rightPostSource
+        && _rsel.date === (rightL2Date || '')) return;
 
     // Purely client-side: unlike the left selector this does NOT call
     // /post_source, because that repoints fire.crop_bin and would
     // change what mapping reads. The right pane is for comparison, so
     // it just displays the other source's already-stashed previews.
     rightPostSource = src;
+    rightL2Date = _rsel.date;
     try { invalidateEraseBuffers('source changed'); } catch (_) {}
     // Same treatment as the left: grey both selectors while this runs,
     // because both read the per-source preview stash.

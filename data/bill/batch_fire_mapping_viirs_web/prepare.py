@@ -1080,24 +1080,56 @@ def _source_switch_lock(fire_numbe: str) -> threading.Lock:
         return lk
 
 
-def _preview_stash_dir(fire: FireInfo, source: str) -> str:
-    """Per-source copy of the rendered previews.
+def product_key(source: str, l2_date: str = '') -> str:
+    """Identity of one displayable product: source AND, for L2, date.
+
+    'l2' and 'mrap' were enough while a fire had one L2 composite at a
+    time. Now that several dated L2 products coexist and can be shown
+    side by side, the date is part of what distinguishes one product
+    from another -- so it belongs in the stash name, the cache key and
+    the preview URL, all of which derive from here.
+    """
+    source = (source or 'l2').lower()
+    if source != 'l2':
+        return source
+    d = (l2_date or '').strip()
+    return f'l2_d{d}' if d else 'l2'
+
+
+def parse_product_key(key: str):
+    """'l2_d20260805' -> ('l2', '20260805'); 'mrap' -> ('mrap', '')."""
+    key = (key or 'l2').strip()
+    m = re.fullmatch(r'l2_d(\d{8})', key)
+    if m:
+        return 'l2', m.group(1)
+    return ('mrap' if key == 'mrap' else 'l2'), ''
+
+
+def _preview_stash_dir(fire: FireInfo, source: str,
+                       l2_date: str = None) -> str:
+    """Per-PRODUCT copy of the rendered previews.
 
     generate_all_previews() always writes to ``<cache>/previews``, so
-    the two post sources overwrite each other there. Without a stash,
-    every switch has to re-render every preview even though the stack
-    it renders from is already cached -- which is what made switching
-    slow. Keeping a copy per source turns a switch into a handful of
-    file copies.
+    products overwrite each other there. Without a stash, every switch
+    re-renders every preview even though the stack is already cached --
+    which is what made switching slow. A copy per product turns a
+    switch into a handful of file copies.
+
+    ``l2_date`` defaults to the fire's current date, which keeps every
+    existing caller correct: they stash the product that is loaded.
     """
-    return os.path.join(fire.cache_dir, f'previews_{source}')
+    if l2_date is None:
+        l2_date = getattr(fire, 'l2_start_date', '') or ''
+    return os.path.join(fire.cache_dir,
+                        f'previews_{product_key(source, l2_date)}')
 
 
-def _stash_previews(fire: FireInfo, source: str) -> None:
+def _stash_previews(fire: FireInfo, source: str,
+                    l2_date: str = None) -> None:
     src = os.path.join(fire.cache_dir, 'previews')
     if not os.path.isdir(src):
         return
-    dst = _preview_stash_dir(fire, source)
+    dst = _preview_stash_dir(fire, source, l2_date)
     try:
         if os.path.isdir(dst):
             shutil.rmtree(dst, ignore_errors=True)
@@ -1323,18 +1355,22 @@ def _l2_selection_is_current(fire, source: str) -> bool:
     return True
 
 
-def switch_post_source(fire: FireInfo, source: str) -> dict:
-    """Switch a fire between the L2-recent and MRAP post imagery.
+def switch_post_source(fire: FireInfo, source: str,
+                       l2_date: str = None) -> dict:
+    """Switch the fire to a product: a source, and for L2 a date.
 
-    Only the POST bands change. The pre bands are the same median
-    composite in both cases, and the anomaly is recomputed from
-    (new post, same pre) with the identical formula -- so 'Pre-fire'
-    looks the same either way while 'Post-fire' and 'Diff 1' follow the
-    selection, which is exactly the intended behaviour.
-
-    The stacks live at different paths per source, so switching back and
-    forth reuses whichever is already built rather than rebuilding.
+    ``l2_date`` of None means "keep the fire's current date", which is
+    what every pre-existing caller wants. An explicit date (or '' for
+    the most-recent composite) selects a specific L2 product, so the
+    left-pane selector can choose one directly.
     """
+    if l2_date is not None and (source or '').lower() == 'l2':
+        # Only RECORD the request here. Applying it now would corrupt
+        # the outgoing product's identity: the locked switch stashes
+        # the current previews under the date they actually describe,
+        # and it has to read that date before the new one lands.
+        fire._pending_l2_date = l2_date or ''
+
     if source not in ('l2', 'mrap'):
         return {'ok': False, 'error': f'Unknown post source: {source}'}
     if not getattr(fire, 'bbox_native', None):
@@ -1385,6 +1421,27 @@ def switch_post_source(fire: FireInfo, source: str) -> dict:
 def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
     from .aoi_stack import ensure_aoi_stack, AoiStackError
 
+    # Capture the OUTGOING product first, then apply any requested
+    # date.
+    #
+    # Order matters twice over: ensure_aoi_stack() below reads
+    # fire.l2_start_date to decide WHICH composite to build, so the new
+    # date has to be in place before it runs -- but the previews now on
+    # disk describe the OLD date, so that identity has to be recorded
+    # before it is overwritten. Getting this backwards stashes one
+    # product's previews under another product's name, which is
+    # unrecoverable once it happens.
+    _out_src = getattr(fire, 'post_source', '') or ''
+    _out_date = getattr(fire, 'l2_start_date', '') or ''
+    _pending_req = getattr(fire, '_pending_l2_date', None)
+    if _pending_req is not None:
+        if (source or '').lower() == 'l2':
+            fire.l2_start_date = _pending_req or ''
+        try:
+            del fire._pending_l2_date
+        except AttributeError:
+            fire._pending_l2_date = None
+
     ref_raster = (state.rasters_by_year.get(fire.fire_year)
                   or state.raster_path)
 
@@ -1426,10 +1483,15 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
     # view list after any source switch (and the on-demand stash build
     # in the preview handler performs two switches, so simply opening
     # a fire could do it).
-    prev_src = getattr(fire, 'post_source', '') or ''
-    if prev_src and prev_src != source:
+    # Identity captured at the top of this function, before the new
+    # date was applied.
+    prev_src = _out_src
+    prev_date = _out_date
+    _prev_key = product_key(prev_src, prev_date) if prev_src else ''
+    _new_key = product_key(source, getattr(fire, 'l2_start_date', ''))
+    if prev_src and _prev_key != _new_key:
         try:
-            _stash_previews(fire, prev_src)
+            _stash_previews(fire, prev_src, prev_date)
         except Exception as exc:
             sys.stderr.write(
                 f'[prepare] could not stash {prev_src} previews before '
@@ -1448,28 +1510,23 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
     # composite straight back on screen -- which is exactly what
     # happened: the build ran, and the display never changed. Drop the
     # stale stash so the previews are re-rendered from the new stack.
-    if source == 'l2' and prev_src == 'l2':
+    if source == 'l2' and prev_src == 'l2' and _prev_key != _new_key:
         try:
-            # The LIVE previews describe the outgoing date too, and
-            # each carries a geo sidecar naming the raster it was
-            # rendered from. Leaving them lets a view that is not
-            # re-rendered keep the old date's pixels AND its geo, which
-            # is how imagery and overlays end up disagreeing.
+            # The LIVE previews describe the OUTGOING date, so they
+            # cannot stay -- but they are no longer thrown away: they
+            # were just stashed under that date's own key above, and
+            # the incoming date's stash (if it has one) is restored
+            # below. Switching between two built dates is therefore a
+            # file copy, not a re-render.
             live = os.path.join(fire.cache_dir, 'previews')
             if os.path.isdir(live):
                 shutil.rmtree(live, ignore_errors=True)
                 sys.stderr.write(
-                    '[prepare] cleared live previews: the L2 start date '
-                    'changed, so every rendering is stale\n')
-            stale = _preview_stash_dir(fire, 'l2')
-            if os.path.isdir(stale):
-                shutil.rmtree(stale, ignore_errors=True)
-                sys.stderr.write(
-                    '[prepare] dropped the l2 preview stash: the start '
-                    'date changed, so it no longer describes this '
-                    'product\n')
+                    f'[prepare] cleared live previews: moving from '
+                    f'{_prev_key} to {_new_key}\n')
         except Exception as exc:
-            sys.stderr.write(f'[prepare] stash drop failed: {exc}\n')
+            sys.stderr.write(f'[prepare] live preview clear failed: '
+                             f'{exc}\n')
 
     restored = _restore_previews(fire, source)
     if restored:

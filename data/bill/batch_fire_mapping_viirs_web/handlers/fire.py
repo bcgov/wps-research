@@ -263,6 +263,11 @@ class FireRoutes:
             # cannot be served from another date's cache.
             'l2_start_date': getattr(fire, 'l2_start_date',
                                      '') or '',
+            # Every product that EXISTS for this AOI, for the source
+            # selectors. Only built products are listed: choosing one
+            # must never kick off a multi-minute build from a dropdown,
+            # which is what the Date select dialog is for.
+            'products': self._built_products(fire_numbe, fire),
             # Report what the USER is on, not the transient value the
             # background prebuild may currently be sitting at -- that
             # race made a new fire open on MRAP instead of L2.
@@ -320,6 +325,15 @@ class FireRoutes:
         if body is None:
             return
         source = body.get('source', 'l2')
+        # An explicit date makes the left selector authoritative: the
+        # product it names becomes the one classified and exported.
+        _date = body.get('l2_date', None)
+        if _date is not None:
+            _date = str(_date).strip()
+            if _date in ('latest', 'most_recent'):
+                _date = ''
+            if _date and not re.fullmatch(r'\d{8}', _date):
+                _date = None
         # Record the user's intent BEFORE attempting the switch.
         #
         # The attempt can return busy while a background prebuild holds
@@ -331,7 +345,9 @@ class FireRoutes:
         # first-click failure.
         if source in ('l2', 'mrap'):
             fire.user_post_source = source
-        result = switch_post_source(fire, source)
+            if _date is not None:
+                fire.user_l2_date = _date
+        result = switch_post_source(fire, source, l2_date=_date)
         if result.get('ok'):
             try:
                 from ..prepare import set_user_post_source
@@ -1066,9 +1082,24 @@ class FireRoutes:
 
         _stash_dir = None
         _cur_src = getattr(fire, 'post_source', 'l2') or 'l2'
+        # Which PRODUCT was asked for: source plus, for L2, a date.
+        #
+        # ?l2= used to be a cache-identity key the server ignored, so
+        # every L2 request returned whatever composite happened to be
+        # loaded. With several dated composites selectable it has to
+        # name one.
+        from ..prepare import product_key
+        _req_date = (_q.get('l2') or [''])[0].strip()
+        if _req_date in ('latest', 'most_recent'):
+            _req_date = ''
+        if not re.fullmatch(r'\d{8}', _req_date or ''):
+            _req_date = ''
+        _cur_date = getattr(fire, 'l2_start_date', '') or ''
+        _req_key = product_key(_src, _req_date)
+        _cur_key = product_key(_cur_src, _cur_date)
         if re.fullmatch(r'[A-Za-z0-9_-]+', _src or ''):
-            cand = os.path.join(fire.cache_dir, f'previews_{_src}')
-            if _src == _cur_src:
+            cand = os.path.join(fire.cache_dir, f'previews_{_req_key}')
+            if _req_key == _cur_key:
                 # The requested source IS the one loaded, so previews/
                 # is authoritative. A stash for the same source is a
                 # SNAPSHOT from before it was last made current, and
@@ -1085,7 +1116,7 @@ class FireRoutes:
                     fire, cand, view):
                 _stash_dir = cand
                 png = os.path.join(cand, f'{view}.png')
-            elif _src != _cur_src:
+            elif _req_key != _cur_key:
                 # Reached when the other source has NO stash, or has one
                 # that lacks THIS view.
                 #
@@ -1132,7 +1163,8 @@ class FireRoutes:
                     # made while this build was queued.
                     if not getattr(fire, 'user_post_source', ''):
                         fire.user_post_source = _cur_src
-                    r1 = switch_post_source(fire, _src)
+                    r1 = switch_post_source(fire, _src,
+                                            l2_date=_req_date)
                     if not r1.get('ok'):
                         raise RuntimeError(
                             r1.get('error', 'switch failed'))
@@ -1143,14 +1175,18 @@ class FireRoutes:
                     # switching "back" would undo their click.
                     _want = (getattr(fire, 'user_post_source', '')
                              or _cur_src)
-                    if _want == _src:
+                    _want_date = getattr(fire, 'user_l2_date', None)
+                    if _want_date is None:
+                        _want_date = _cur_date
+                    if product_key(_want, _want_date) == _req_key:
                         fire.prebuilding = False
                         sys.stderr.write(
                             f'[preview] {fire_numbe}: user switched to '
                             f'{_src} while its previews were building; '
                             f'staying on it\n')
                     else:
-                        r2 = switch_post_source(fire, _want)
+                        r2 = switch_post_source(fire, _want,
+                                                l2_date=_want_date)
                         fire.prebuilding = False
                         if not r2.get('ok'):
                             sys.stderr.write(
@@ -1158,7 +1194,7 @@ class FireRoutes:
                                 f'switch back to {_want}: '
                                 f'{r2.get("error")}\n')
                     cand = os.path.join(fire.cache_dir,
-                                        f'previews_{_src}')
+                                        f'previews_{_req_key}')
                     if os.path.isdir(cand):
                         _stash_dir = cand
                         cand_png = os.path.join(cand, f'{view}.png')
@@ -2383,6 +2419,59 @@ class FireRoutes:
                 f'previews on the current AOI grid.')
         except Exception:
             pass
+
+    def _built_products(self, fire_numbe, fire):
+        """Products with a stack already on disk, newest date first."""
+        out = []
+        try:
+            import glob as _g
+            from ..aoi_stack import (RAM_DIR, aoi_identity_hash,
+                                     sanitize_identifier)
+            from ..l2_recent import date_polygons_path
+            safe = sanitize_identifier(fire_numbe)
+            h = aoi_identity_hash(
+                fire_numbe, getattr(state, 'shared_root', '') or '')
+            seen = set()
+            for cand in sorted(_g.glob(os.path.join(
+                    RAM_DIR, f'*_stack_{safe}_{h}*.bin'))):
+                base = os.path.basename(cand)
+                m = re.fullmatch(
+                    r'\d{8}_stack_' + re.escape(safe) + '_'
+                    + re.escape(h) + r'(_l2(_d(\d{8}))?)?\.bin', base)
+                if not m:
+                    continue          # KGC scratch and similar
+                # A product counts as built only when it is complete:
+                # a bare .bin from an interrupted build would offer a
+                # selector entry that cannot be displayed.
+                stem = os.path.splitext(cand)[0]
+                if not os.path.isfile(stem + '.hdr'):
+                    continue
+                if m.group(1) is None:
+                    key, src, date = 'mrap', 'mrap', ''
+                else:
+                    date = m.group(3) or ''
+                    src = 'l2'
+                    key = f'l2_d{date}' if date else 'l2'
+                    if not os.path.isfile(date_polygons_path(cand)):
+                        continue
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append({'key': key, 'source': src, 'date': date})
+        except Exception as exc:
+            sys.stderr.write(f'[products] scan failed: {exc}\n')
+        # MRAP first, then L2 most-recent, then dated newest first --
+        # the order the selector shows them in.
+        def _rank(p):
+            if p['source'] == 'mrap':
+                return (0, '')
+            return (1, '') if not p['date'] else (2, p['date'])
+        out.sort(key=lambda p: _rank(p), reverse=False)
+        dated = [p for p in out if p['date']]
+        dated.sort(key=lambda p: p['date'], reverse=True)
+        return ([p for p in out if p['source'] == 'mrap']
+                + [p for p in out if p['source'] == 'l2' and not p['date']]
+                + dated)
 
     def _download_imagery_list(self, fire_numbe):
         """Imagery stacks already on the ramdisk for this AOI."""
