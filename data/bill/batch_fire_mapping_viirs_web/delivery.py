@@ -237,13 +237,21 @@ _DESCRIPTIONS = [
     ('MANIFEST', 'This file: what every file in the archive is.'),
 ]
 
+# Band layout is stated in every imagery description because the
+# pre-fire half is identical across products: without it, three
+# different stacks look like three copies of the same image in any
+# viewer that opens on band 1.
+_BANDS = (' Bands 1-N are the shared PRE-fire composite, N+1-2N are '
+          'this product\u2019s POST-fire imagery, 2N+1-3N are the '
+          'anomaly bands; the header opens on the post bands.')
+
 _IMAGERY_DESCRIPTIONS = [
     ('l2_most_recent',
-     'Reflectance stack for the most recent L2 composite: the imagery '
-     'the classification was run on, analysis-ready.'),
+     'Reflectance stack for the most recent L2 composite.' + _BANDS),
     ('l2_', 'Reflectance stack for the L2 composite built from this '
-            'start date.'),
-    ('mrap', 'Reflectance stack for the MRAP cloud-free composite.'),
+            'start date.' + _BANDS),
+    ('mrap', 'Reflectance stack for the MRAP cloud-free composite.'
+             + _BANDS),
 ]
 
 _PREVIEW_DESCRIPTIONS = [

@@ -545,6 +545,26 @@ def _write_envi_header(hdr_path, samples, lines, bands, band_names,
         'byte order = 0',
         'band names = {' + ',\n'.join(band_names) + '}',
     ]
+
+    # Open on the POST bands, not on band 1.
+    #
+    # The stack is pre | post | anomaly, so a viewer that defaults to
+    # bands 1-3 shows the PRE composite -- which is identical across
+    # every product for this AOI. Downloading MRAP, L2 and a dated L2
+    # then looks like three copies of the same image, when in fact only
+    # the half nobody was looking at differs. Naming the post bands as
+    # the default makes each file open on what distinguishes it.
+    try:
+        _post_start = next(
+            (i for i, nm in enumerate(band_names)
+             if nm.lower().startswith('pst')), None)
+        if _post_start is not None and bands >= _post_start + 3:
+            lines_out.append(
+                'default bands = {'
+                + ','.join(str(_post_start + 1 + k) for k in range(3))
+                + '}')
+    except Exception:
+        pass
     lines_out.extend(geo_records)
 
     tmp = hdr_path + '.tmp'
