@@ -2292,9 +2292,17 @@ function capturePaneFrame(pane) {
 function paneCaption(pane) {
     const view = (pane === 'left') ? leftView : rightView;
     const src = (pane === 'left') ? currentPostSource : rightPostSource;
+    const date = (pane === 'left') ? currentL2Date : rightL2Date;
     const vl = (typeof getViewLabel === 'function')
         ? getViewLabel(view) : view;
-    return `${vl} (${src === 'l2' ? 'L2 recent' : 'MRAP'})`;
+    // Name the PRODUCT, not just the source. Two dated composites
+    // would otherwise both be labelled "L2 recent" in the exported
+    // GIF, leaving the reader unable to tell which frame is which --
+    // which defeats the point of exporting the comparison.
+    const label = (src === 'l2')
+        ? (date ? `L2 recent ${date}` : 'L2 recent')
+        : 'MRAP';
+    return `${vl} (${label})`;
 }
 
 async function downloadBlinkGif() {
@@ -5202,18 +5210,26 @@ function beginFlicker(pane) {
     const otherView = pane === 'left' ? rightView : leftView;
     if (!otherView) return;
 
-    // Identity is (view, source), not view alone.
+    // Identity is (view, PRODUCT) -- source AND date.
     //
-    // Comparing view names only meant flicker refused whenever both
-    // panes showed the same view -- but since each pane has its own
-    // imagery source, "Post-fire (L2)" against "Post-fire (MRAP)" is
-    // two different pictures and exactly the comparison flicker exists
-    // for. Including the source makes those distinct while still
-    // skipping a genuinely identical pair.
-    const mySrc = (pane === 'left') ? currentPostSource : rightPostSource;
-    const otherSrc = (other === 'left') ? currentPostSource
-                                        : rightPostSource;
-    if (otherView === myView && otherSrc === mySrc) return;
+    // Comparing view names alone meant flicker refused whenever both
+    // panes showed the same view; adding the source fixed
+    // "Post-fire (L2)" against "Post-fire (MRAP)". But two L2
+    // composites from different dates share the source 'l2', so they
+    // still compared equal and flicker refused to run on exactly the
+    // pair the date feature exists to compare. The date is part of
+    // what makes them different pictures, so it belongs in the
+    // identity -- the same lesson as the cache keys and the stash
+    // names.
+    const myKey = (pane === 'left')
+        ? currentProductKey()
+        : (rightPostSource === 'l2'
+            ? (rightL2Date ? `l2_d${rightL2Date}` : 'l2') : 'mrap');
+    const otherKey = (other === 'left')
+        ? currentProductKey()
+        : (rightPostSource === 'l2'
+            ? (rightL2Date ? `l2_d${rightL2Date}` : 'l2') : 'mrap');
+    if (otherView === myView && otherKey === myKey) return;
 
     // Both images are ALREADY decoded and on screen, so the peek is a
     // straight src swap between the two <img> elements -- no fetch, no
