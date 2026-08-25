@@ -766,39 +766,78 @@ def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
                 # only against the default L2 product left MRAP vs L2
                 # unchecked, and a difference there moves every vector
                 # overlay when the source is switched.
-                _refs = [f for f in _g.glob(os.path.join(
-                    ram_dir, f'*_stack_{_safe}_{_h}*.bin'))
-                    if os.path.abspath(f) != os.path.abspath(l2_tmp)]
-                if _refs:
-                    a = gdal.Open(_refs[0], gdal.GA_ReadOnly)
-                    b = gdal.Open(l2_tmp, gdal.GA_ReadOnly)
-                    if a is not None and b is not None:
-                        ga, gb = a.GetGeoTransform(), b.GetGeoTransform()
-                        same = (a.RasterXSize == b.RasterXSize
-                                and a.RasterYSize == b.RasterYSize
-                                and all(abs(x - y) < 1e-6
-                                        for x, y in zip(ga, gb)))
-                        if not same:
-                            msg = (f'[aoi_stack] GRID MISMATCH for '
-                                   f'{identifier} date '
-                                   f'{l2_start_date or "most-recent"} '
-                                   f'vs {os.path.basename(_refs[0])}: '
-                                   f'{b.RasterXSize}x{b.RasterYSize} '
-                                   f'{gb} vs default '
-                                   f'{a.RasterXSize}x{a.RasterYSize} '
-                                   f'{ga}')
-                            sys.stderr.write(msg + '\n')
-                            if log_cb:
-                                log_cb('  ' + msg)
-                            raise AoiStackError(
-                                'the composite for this date landed on a '
-                                'different grid than the existing L2 '
-                                'product; refusing to publish it')
-                        sys.stderr.write(
-                            f'[aoi_stack] grid verified identical to the '
-                            f'default L2 product\n')
+                # Real product stacks ONLY.
+                #
+                # A '*_stack_<safe>_<hash>*.bin' glob also matches the
+                # clustering's neighbour tables (…​.bin.kgc_knn_32.bin),
+                # whose dimensions have nothing to do with the AOI. The
+                # check then compared this composite against a KNN
+                # table, found the shapes different, and refused to
+                # publish a perfectly good build.
+                _prod = re.compile(
+                    r'^\d{8}_stack_' + re.escape(_safe) + '_'
+                    + re.escape(_h) + r'(_l2(_d\d{8})?)?\.bin$')
+                _refs = [
+                    f for f in _g.glob(os.path.join(
+                        ram_dir, f'*_stack_{_safe}_{_h}*.bin'))
+                    if _prod.match(os.path.basename(f))
+                    and os.path.abspath(f) != os.path.abspath(l2_tmp)
+                    and os.path.isfile(os.path.splitext(f)[0] + '.hdr')]
+
+                b = gdal.Open(l2_tmp, gdal.GA_ReadOnly)
+                gb = b.GetGeoTransform() if b is not None else None
+                _stale = []
+                for _ref in _refs:
+                    a = gdal.Open(_ref, gdal.GA_ReadOnly)
+                    if a is None or b is None:
+                        a = None
+                        continue
+                    ga = a.GetGeoTransform()
+                    same = (a.RasterXSize == b.RasterXSize
+                            and a.RasterYSize == b.RasterYSize
+                            and all(abs(x - y) < 1e-6
+                                    for x, y in zip(ga, gb)))
+                    if not same:
+                        _stale.append(
+                            (_ref, f'{a.RasterXSize}x{a.RasterYSize}',
+                             tuple(round(v, 6) for v in ga)))
                     a = None
-                    b = None
+
+                if _stale:
+                    # Publish anyway, and retire the odd ones out.
+                    #
+                    # This build came from the CURRENT AOI window --
+                    # reference raster plus bounding box -- so when a
+                    # sibling disagrees it is the sibling that is out of
+                    # date, typically from before the grids were
+                    # unified. Refusing the new build left the operator
+                    # with a dead end and no way to fix it; deleting the
+                    # stale sibling is self-healing, because it is a
+                    # ramdisk cache that rebuilds on next use.
+                    for _ref, _dims, _gt in _stale:
+                        msg = (f'[aoi_stack] {identifier}: '
+                               f'{os.path.basename(_ref)} is on an OLD '
+                               f'grid ({_dims} {_gt}) -- this build is '
+                               f'{b.RasterXSize}x{b.RasterYSize} '
+                               f'{tuple(round(v, 6) for v in gb)}. '
+                               f'Retiring the old one so it rebuilds.')
+                        sys.stderr.write(msg + '\n')
+                        if log_cb:
+                            log_cb('  ' + msg)
+                        for _ext in ('.bin', '.hdr', '_dates.json'):
+                            _victim = os.path.splitext(_ref)[0] + _ext
+                            try:
+                                if os.path.isfile(_victim):
+                                    os.remove(_victim)
+                            except OSError as _rexc:
+                                sys.stderr.write(
+                                    f'[aoi_stack] could not remove '
+                                    f'{_victim}: {_rexc}\n')
+                elif _refs:
+                    sys.stderr.write(
+                        f'[aoi_stack] grid verified identical across '
+                        f'{len(_refs)} existing product(s)\n')
+                b = None
             except AoiStackError:
                 raise
             except Exception as exc:
