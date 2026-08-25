@@ -784,30 +784,50 @@ def _extract_class_band(selected_bin: str, ref_raster: str,
     return out_bin
 
 
-def resolve_stack_for_source(fire, want_src: str, log=None) -> str:
-    """AOI stack path for *want_src*, building it if needed.
+def resolve_stack_for_source(fire, want_src: str, log=None,
+                             want_date: str = None) -> str:
+    """AOI stack path for the requested PRODUCT, building if needed.
 
-    fire.crop_bin follows whichever source the fire was last switched
+    fire.crop_bin follows whichever product the fire was last switched
     to, and that can be flipped temporarily by the preview handler
-    while it builds the other source's stash. Reading crop_bin here
+    while it builds another product's stash. Reading crop_bin here
     therefore raced with the UI and could feed the classifier the
-    source the user was not looking at -- silently, since the run
-    still succeeds.
+    source the user was not looking at -- silently, since the run still
+    succeeds.
 
-    Asking ensure_aoi_stack for the source explicitly removes the race
-    and makes the KGC input match the selector the user actually set.
+    A product is a source AND, for L2, a start date. Rebuilding without
+    the date always resolved to the most-recent composite, so a run
+    launched while a dated product was displayed classified the cloudy
+    newest imagery instead -- exactly the case this docstring claimed
+    to prevent.
     """
     cur = getattr(fire, 'post_source', 'l2') or 'l2'
-    if not want_src or want_src == cur:
-        if fire.crop_bin and os.path.isfile(fire.crop_bin):
+    cur_date = getattr(fire, 'l2_start_date', '') or ''
+    src = want_src or cur
+    date = cur_date if want_date is None else (want_date or '')
+    if src != 'l2':
+        date = ''
+    # Already loaded? crop_bin names the product it came from, so this
+    # is checked against the path rather than against remembered state.
+    if fire.crop_bin and os.path.isfile(fire.crop_bin):
+        base = os.path.basename(fire.crop_bin)
+        m = re.search(r'_l2_d(\d{8})\.bin$', base)
+        have_date = m.group(1) if m else ''
+        have_src = 'l2' if ('_l2_d' in base or base.endswith('_l2.bin')) \
+            else 'mrap'
+        if have_src == src and have_date == date:
+            if log:
+                log(f'  KGC source: {src.upper()}'
+                    + (f' {date}' if date else '')
+                    + f' -> {base}')
             return fire.crop_bin
     from .aoi_stack import ensure_aoi_stack
     info = ensure_aoi_stack(fire.fire_numbe, fire.bbox_native,
-                            post_source=want_src or cur)
+                            post_source=src, l2_start_date=date)
     path = info['path'] if isinstance(info, dict) else info
     if log:
-        log(f'  KGC source: {(want_src or cur).upper()} '
-            f'-> {os.path.basename(path)}')
+        log(f'  KGC source: {src.upper()}' + (f' {date}' if date else '')
+            + f' -> {os.path.basename(path)}')
     return path
 
 
@@ -1026,6 +1046,47 @@ def run_kgc(fire, params: dict, log=None, progress=None,
     # are comparable and the exclusion checkboxes mean one thing.
     step('kgc_stack', 'preparing the band stack', 0.06)
     base_stack = resolve_stack_for_source(fire, want_src, log=emit)
+
+    # The hint must describe the SAME product as the bands.
+    #
+    # fire.hint_bin is rebuilt whenever the fire switches product, so
+    # normally it already matches. It does not when the run resolves a
+    # product the fire is not currently on -- and a hint derived from
+    # different imagery is not merely stale, it is what tells the
+    # clustering which pixels are burned, so the result would be built
+    # from one composite and steered by another.
+    if os.path.abspath(base_stack) != os.path.abspath(
+            fire.crop_bin or ''):
+        _mode = getattr(fire, 'hint_mode', 'redwins_post') \
+            or 'redwins_post'
+        try:
+            from .prepare import (DERIVED_HINT_MODES,
+                                  build_derived_hint_for_fire,
+                                  restrict_hint_to_bcws)
+            if _mode in DERIVED_HINT_MODES:
+                _saved = fire.crop_bin
+                try:
+                    # build_derived_hint_for_fire() derives from
+                    # crop_bin, so point it at the product this run is
+                    # actually classifying.
+                    fire.crop_bin = base_stack
+                    _hp, _herr = build_derived_hint_for_fire(fire, _mode)
+                    if _hp and getattr(fire, 'restrict_hint_bcws',
+                                       False):
+                        _hp = restrict_hint_to_bcws(fire, _hp)
+                finally:
+                    fire.crop_bin = _saved
+                if _hp:
+                    fire.hint_bin = _hp
+                    emit(f'  KGC hint rebuilt for '
+                         f'{os.path.basename(base_stack)}')
+                else:
+                    emit(f'  WARNING: could not rebuild the hint for '
+                         f'this product ({_herr}); using the existing '
+                         f'one')
+        except Exception as _hexc:
+            emit(f'  WARNING: hint rebuild failed ({_hexc}); using the '
+                 f'existing hint')
     image = reduced_stack(base_stack, fire, log=emit)
     emit(f'  KGC input stack: {os.path.basename(image)}')
     emit(f'  KGC hint: {os.path.basename(fire.hint_bin)} '
