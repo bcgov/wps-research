@@ -2481,6 +2481,29 @@ class FireRoutes:
                     continue
                 seen.add(key)
                 out.append({'key': key, 'source': src, 'date': date})
+            # The two BASE sources are always offered.
+            #
+            # Listing only what is already built was right for dated
+            # products -- picking one from a dropdown must never start a
+            # multi-minute build. But MRAP and the default L2 composite
+            # are not optional extras: they are the two sources this
+            # application has always had, and MRAP's stack is created by
+            # a background prebuild that finishes AFTER the fire page
+            # first opens. Scanning the disk therefore hid it until the
+            # user left the fire and came back, which looked like the
+            # source had disappeared.
+            #
+            # Selecting one that is not built yet switches to it and
+            # builds it, exactly as it did before dated products
+            # existed. Only the dated entries stay build-gated.
+            for base_key, base_src in (('mrap', 'mrap'), ('l2', 'l2')):
+                if base_key not in seen:
+                    seen.add(base_key)
+                    out.append({'key': base_key, 'source': base_src,
+                                'date': '', 'built': False})
+            for p in out:
+                p.setdefault('built', True)
+
             dated = sorted([p for p in out if p['date']],
                            key=lambda p: p['date'], reverse=True)
             out = ([p for p in out if p['source'] == 'mrap']
@@ -2489,7 +2512,10 @@ class FireRoutes:
                    + dated)
             sys.stderr.write(
                 f'[products] {fire_numbe}: '
-                f'{", ".join(p["key"] for p in out) or "none"}\n')
+                + (', '.join(
+                    p['key'] + ('' if p.get('built', True)
+                                else ' (not built yet)')
+                    for p in out) or 'none') + '\n')
         except Exception as exc:
             sys.stderr.write(f'[products] scan failed: {exc}\n')
         return out
