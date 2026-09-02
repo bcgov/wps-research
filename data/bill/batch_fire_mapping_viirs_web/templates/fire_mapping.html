@@ -1743,6 +1743,15 @@ async function prepareFire(padding) {
         // overwrote the restored views -- and even when the variables
         // survived, nothing set the selectors or reopened split, so a
         // fire came back looking like a fresh one.
+        //
+        // The product state and the selector OPTIONS are established
+        // first, below, for the same reason: restoring a saved
+        // 'l2_d20260805' into a dropdown that does not offer it yet
+        // silently falls back to whatever is first in the list.
+        currentPostSource = data.post_source || 'l2';
+        currentL2Date = data.l2_start_date || '';
+        rightL2Date = currentL2Date;
+        try { refreshSourceSelectors(data.products); } catch (_) {}
         try { applySavedUiState(data.ui_state, data.kgc_params); }
         catch (err) {
             log(`[ui] could not restore the saved view: ${err.message}`,
@@ -1779,10 +1788,10 @@ async function prepareFire(padding) {
             }
         }
         renderHintModeButtons();
-        currentPostSource = data.post_source || 'l2';
-        currentL2Date = data.l2_start_date || '';
-        rightL2Date = currentL2Date;
-        // Build the selector lists from the products that exist.
+        // Product state and selector options were established before
+        // applySavedUiState ran; re-running refreshSourceSelectors here
+        // would rebuild the lists and discard the restored right-pane
+        // choice, so only the list is refreshed, never the selection.
         try { refreshSourceSelectors(data.products); } catch (_) {}
         // Vector overlays depend on the crop's geotransform, so they
         // can only be built once preparation has produced it.
@@ -3388,6 +3397,12 @@ function collectUiState() {
         right_view: rightView,
         left_src: currentPostSource,
         right_src: rightPostSource,
+        // Full product identity, including the L2 date. left_src and
+        // right_src are kept beside these so a state file written by
+        // an older build still restores.
+        left_key: currentProductKey(),
+        right_key: (rightPostSource === 'l2'
+            ? (rightL2Date ? `l2_d${rightL2Date}` : 'l2') : 'mrap'),
         split: !!splitActive,
         overlays: !!overlaysVisible,
         use_hdbscan: c('use-hdbscan'),
@@ -3450,12 +3465,44 @@ function applySavedUiState(ui, kgcParams) {
         if (ui.right_view && views.has(ui.right_view)) {
             rightView = ui.right_view;
         }
-        if (ui.left_src === 'l2' || ui.left_src === 'mrap') {
+        // LEFT pane: the SERVER is authoritative.
+        //
+        // It persists post_source and l2_start_date, and they decide
+        // what gets classified and exported. Restoring a saved value
+        // over the top could show one product while the server used
+        // another -- the exact disagreement this session has spent so
+        // long eliminating. The saved key is used only if the server
+        // supplied nothing at all.
+        if (!currentPostSource
+            && (ui.left_src === 'l2' || ui.left_src === 'mrap')) {
             currentPostSource = ui.left_src;
         }
-        if (ui.right_src === 'l2' || ui.right_src === 'mrap') {
+
+        // RIGHT pane: display-only, so the saved choice is restored in
+        // full, date included. Prefer the product key; fall back to
+        // the older source-only field.
+        if (typeof ui.right_key === 'string' && ui.right_key) {
+            const rp = parseProductKey(ui.right_key);
+            rightPostSource = rp.source;
+            rightL2Date = rp.date;
+        } else if (ui.right_src === 'l2' || ui.right_src === 'mrap') {
             rightPostSource = ui.right_src;
+            rightL2Date = '';
         }
+        // A product that no longer exists (its stack was purged, or the
+        // fire was re-prepared) must not leave the pane pointing at
+        // something unloadable.
+        try {
+            const rkey = (rightPostSource === 'l2')
+                ? (rightL2Date ? `l2_d${rightL2Date}` : 'l2') : 'mrap';
+            if (_products.length
+                && !_products.some((q) => q.key === rkey)) {
+                log(`[ui] saved right-pane product ${rkey} no longer `
+                    + `exists; using the left pane's`, 'dim');
+                rightPostSource = currentPostSource;
+                rightL2Date = currentL2Date;
+            }
+        } catch (_) {}
         if (typeof ui.overlays === 'boolean') overlaysVisible = ui.overlays;
 
         const setSel = (id, val) => {
@@ -3464,9 +3511,13 @@ function applySavedUiState(ui, kgcParams) {
         };
         setSel('view-select', leftView);
         setSel('view-select-right', rightView);
-        setSel('post-source-select', currentPostSource);
+        // Selector values are PRODUCT keys now, not bare sources.
+        setSel('post-source-select', currentProductKey());
         try { syncDateSelectButton(); } catch (_) {}
-        setSel('post-source-select-right', rightPostSource);
+        setSel('post-source-select-right',
+               (rightPostSource === 'l2')
+                   ? (rightL2Date ? `l2_d${rightL2Date}` : 'l2')
+                   : 'mrap');
 
         // Split last: it reads the values above when it opens, and
         // openSplit(false) means "restoring", not "the user clicked",
@@ -3474,7 +3525,10 @@ function applySavedUiState(ui, kgcParams) {
         if (ui.split && !splitActive && typeof toggleSplit === 'function') {
             toggleSplit(false);
             setSel('view-select-right', rightView);
-            setSel('post-source-select-right', rightPostSource);
+            setSel('post-source-select-right',
+                   (rightPostSource === 'l2')
+                       ? (rightL2Date ? `l2_d${rightL2Date}` : 'l2')
+                       : 'mrap');
         }
     } finally {
         _uiRestoring = false;
