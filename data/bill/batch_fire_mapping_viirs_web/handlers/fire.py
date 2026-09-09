@@ -1524,6 +1524,14 @@ class FireRoutes:
         _hdrs['X-Preview-Source'] = (
             _src if _stash_dir else _cur_src)
         _hdrs['X-Preview-Requested-Source'] = _src or _cur_src
+        # Which PRODUCT these pixels belong to, at full granularity
+        # (source and night). The source alone cannot distinguish two
+        # MRAP composites, so a pane could show last night's imagery
+        # under tonight's label and nothing would notice. The client
+        # compares this to what it asked for and refuses to accept a
+        # mismatch.
+        _hdrs['X-Product'] = (_req_key if _stash_dir else _cur_key) or ''
+        _hdrs['X-Product-Requested'] = _req_key or ''
         try:
             _hdrs['X-Preview-Png-Bytes'] = str(os.path.getsize(png))
         except OSError:
@@ -1531,7 +1539,8 @@ class FireRoutes:
         _hdrs['Access-Control-Expose-Headers'] = (
             _hdrs.get('Access-Control-Expose-Headers', '')
             + ',X-Preview-Format,X-Preview-Png-Bytes'
-            + ',X-Preview-Source,X-Preview-Requested-Source').strip(',')
+            + ',X-Preview-Source,X-Preview-Requested-Source'
+            + ',X-Product,X-Product-Requested').strip(',')
         self._send_file(serve_path, serve_type, cache_seconds=86400,
                         extra_headers=_hdrs)
 

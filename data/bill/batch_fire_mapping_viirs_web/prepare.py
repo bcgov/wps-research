@@ -2872,8 +2872,18 @@ def refresh_products_for_all_fires(delay_s: float = 20.0) -> None:
                 if fire is None or not getattr(fire, 'bbox_native', None):
                     skipped += 1
                     continue
-                # Remember what the analyst was on, and put it back: this
-                # is a background refresh, not a change of their view.
+                # Remember EXACTLY what the analyst was on, and put it
+                # back: this is a background refresh, not a change of
+                # their view.
+                #
+                # By product key, not by source. "Switch back to MRAP"
+                # would land on the NEWEST MRAP composite -- the one this
+                # loop has just built -- silently moving a fire off the
+                # night's imagery its analyst had chosen. The product key
+                # names the specific file, and repointing to it costs a
+                # file copy.
+                was_key = product_key_for_path(
+                    getattr(fire, 'crop_bin', '') or '')
                 was_src = getattr(fire, 'post_source', 'l2') or 'l2'
                 was_date = getattr(fire, 'l2_start_date', '') or ''
                 for src in ('mrap', 'l2'):
@@ -2882,7 +2892,15 @@ def refresh_products_for_all_fires(delay_s: float = 20.0) -> None:
                         sys.stderr.write(
                             f'[startup] {fn}: {src} refresh: '
                             f'{r.get("error") or r.get("busy")}\n')
-                if was_src != 'l2' or was_date:
+                now_key = product_key_for_path(
+                    getattr(fire, 'crop_bin', '') or '')
+                if was_key and now_key != was_key:
+                    r = switch_post_source(fire, was_src, product=was_key)
+                    if not r.get('ok'):
+                        sys.stderr.write(
+                            f'[startup] {fn}: could not return to '
+                            f'{was_key}: {r.get("error")}\n')
+                elif not was_key and (was_src != 'l2' or was_date):
                     switch_post_source(fire, was_src, l2_date=was_date)
                 built += 1
             except Exception as exc:

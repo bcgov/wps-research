@@ -789,6 +789,13 @@ let rightL2Date = '';
 // alone cannot express.
 let leftProduct = '';
 let rightProduct = '';
+// Which product each blob URL actually holds, from the server's own
+// X-Product header -- so a pane can be checked against its selector.
+const _productByUrl = new Map();
+let _productMismatch = null;
+// One automatic refetch per pane per mismatch, so a persistent server
+// fault cannot turn into an infinite reload loop.
+const _paneRefetched = {left: false, right: false};
 
 // Which post imagery the stack is built from: 'l2' (most recent L2A
 // tiles over the AOI, default) or 'mrap' (province-wide composite).
@@ -911,8 +918,25 @@ function getPreviewObjectURL(key, url, announce) {
                 + `size ${fmtBytes(blob.size)} as ${fmt}, `
                 + `rate ${fmtBytes(blob.size / secs)}/s${saving}`, 'dim');
         }
+        // Verify the pixels are the product that was asked for.
+        //
+        // The cache key names a product; if the server answered with a
+        // different one, storing the bytes under this key would make
+        // every later read of that key show the wrong composite -- and
+        // the selector would say one thing while the pane showed
+        // another. Refusing here is what makes that impossible.
+        const served = r.headers.get('X-Product') || '';
+        const wanted = r.headers.get('X-Product-Requested') || '';
+        if (served && wanted && served !== wanted) {
+            log(`[product] server sent ${served} for a request for `
+                + `${wanted}; not caching it`, 'error');
+            _productMismatch = {served, wanted, at: Date.now()};
+            throw new Error(`product mismatch: got ${served}, `
+                            + `wanted ${wanted}`);
+        }
         const obj = URL.createObjectURL(blob);
         _previewBlobs.set(key, obj);
+        _productByUrl.set(obj, served || wanted || '');
         // Bind the georeferencing to the BYTES, not to a view name.
         // Whatever ends up in an <img>, its geotransform travels with
         // it -- so a pane can never be paired with another raster's
@@ -1209,6 +1233,14 @@ async function _onPostSourceChangeInner() {
     const src = _sel.source;
     const _wantDate = _sel.date;
     if (_key === currentProductKey()) return;   // already showing it
+    // Commit to the target now. Every preview request carries the
+    // pane's product, so if this waited for the server's reply, any
+    // fetch issued meanwhile -- the instant swap, a poll, an overlay
+    // reload -- would still ask for the OLD product and could paint it
+    // under the new label. The failure path below restores the server's
+    // truth if the switch does not go through.
+    const _prevProduct = leftProduct;
+    leftProduct = _key;
     // Optimistic swap: if both this view's images are already cached
     // for the target source, repaint from cache NOW and let the server
     // catch up in the background. The server call still has to happen
@@ -1315,6 +1347,7 @@ async function _onPostSourceChangeInner() {
             // the server was on the new source all along. Asking costs
             // one request and cannot disagree with reality.
             let actual = prevSource;
+            leftProduct = _prevProduct;
             try {
                 const chk = await fetch(
                     `/api/fire/${encodeURIComponent(FIRE)}/prepare`,
@@ -1322,6 +1355,7 @@ async function _onPostSourceChangeInner() {
                 if (chk.ok) {
                     const cj = await chk.json();
                     if (cj && cj.post_source) actual = cj.post_source;
+                    if (cj && cj.product_key) leftProduct = cj.product_key;
                 }
             } catch (_) { /* keep the assumption */ }
             currentPostSource = actual;
@@ -1775,6 +1809,7 @@ async function prepareFire(padding) {
         leftProduct = data.product_key || '';
         rightProduct = leftProduct;
         try { refreshSourceSelectors(data.products); } catch (_) {}
+        try { installSourceSelectGuard(); } catch (_) {}
         try { applySavedUiState(data.ui_state, data.kgc_params); }
         catch (err) {
             log(`[ui] could not restore the saved view: ${err.message}`,
@@ -4286,6 +4321,37 @@ function paneProductKey(pane) {
 // a stale insert, a future code path -- it is gone before the operator
 // can pick it, and the console says it happened so the cause can be
 // found rather than guessed at.
+// Watch both selectors and repair them the instant anything leaves
+// them blank -- an option list rebuilt mid-request, a value assigned
+// before its option exists, a code path not yet imagined. The observer
+// fires before the next paint, so an empty box is never displayed.
+let _sourceSelectGuard = null;
+function installSourceSelectGuard() {
+    if (_sourceSelectGuard || typeof MutationObserver === 'undefined') {
+        return;
+    }
+    const targets = ['post-source-select', 'post-source-select-right']
+        .map((id) => document.getElementById(id)).filter(Boolean);
+    if (!targets.length) return;
+    _sourceSelectGuard = new MutationObserver(() => {
+        for (const sel of targets) {
+            try {
+                pruneBlankOptions(sel);
+                if (!sel.value && sel.options.length) {
+                    const want = (sel.id === 'post-source-select')
+                        ? currentProductKey() : rightProductKey();
+                    setSourceSelectValue(sel, want);
+                }
+            } catch (_) {}
+        }
+    });
+    for (const sel of targets) {
+        _sourceSelectGuard.observe(sel, {childList: true, subtree: true,
+                                         attributes: true,
+                                         attributeFilter: ['value']});
+    }
+}
+
 function pruneBlankOptions(sel) {
     if (!sel) return;
     let removed = 0;
@@ -6512,6 +6578,34 @@ async function loadPaneImage(pane, viewKey) {
     // over the pane, so the labels keep a constant size at any zoom and
     // an edit does not have to re-encode the whole bitmap.
     const finalUrl = srcUrl;
+
+    // The pane must show the product its selector names. This is the
+    // last line of defence: the fetch layer already refuses to cache a
+    // mismatched product, so reaching here with one means a stale
+    // blob from before a switch. Drop it and fetch afresh rather than
+    // paint a picture that contradicts the label.
+    try {
+        const wantProd = paneProductKey(pane);
+        const haveProd = _productByUrl.get(finalUrl) || '';
+        if (wantProd && haveProd && wantProd !== haveProd) {
+            log(`[product] ${pane} pane: blob is ${haveProd} but the `
+                + `selector says ${wantProd}; refetching`, 'error');
+            try { URL.revokeObjectURL(finalUrl); } catch (_) {}
+            for (const [k, u] of [..._previewBlobs.entries()]) {
+                if (u === finalUrl) _previewBlobs.delete(k);
+            }
+            _productByUrl.delete(finalUrl);
+            if (!_paneRefetched[pane]) {
+                _paneRefetched[pane] = true;
+                _previewStamp = Date.now();
+                setTimeout(() => {
+                    _paneRefetched[pane] = false;
+                    loadPaneImage(pane, viewKey);
+                }, 0);
+            }
+            return;
+        }
+    } catch (_) { /* provenance unavailable: proceed */ }
 
     // Single assignment. Wait for it to decode too, so the fit maths
     // below reads real dimensions rather than the previous image's.
