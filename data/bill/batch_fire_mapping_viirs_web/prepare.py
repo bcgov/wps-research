@@ -1550,12 +1550,40 @@ def switch_post_source(fire: FireInfo, source: str,
         # the menu closed, no progress appeared, and the old composite
         # stayed on screen. The date is part of the product's identity,
         # so it has to be part of this comparison.
-        if ((getattr(fire, 'post_source', '') or 'l2') == source
-                and _l2_selection_is_current(fire, source)):
+        # Compare the PRODUCT, not the source and start date.
+        #
+        # Neither of those can tell last night's MRAP composite from
+        # tonight's, nor two L2-recent products from different nights:
+        # for all of them the source matches and the start date is
+        # empty, so this branch declared "already there" and returned
+        # success having done nothing. The selector snapped back, the
+        # imagery never changed, and trying again eventually worked
+        # only because something else had moved on in between. That is
+        # the whole "takes two or three attempts" symptom.
+        _cur_prod = product_key_for_path(
+            getattr(fire, 'crop_bin', '') or '')
+        _want_prod = ''
+        if product:
+            _want_prod = product
+            if _want_prod in ('mrap', 'l2'):
+                # A bare source means "the newest of that source",
+                # which is only a no-op if that is what is loaded AND
+                # nothing newer has been built since.
+                _want_prod = ''
+        if _want_prod:
+            _same = bool(_cur_prod) and _cur_prod == _want_prod
+        else:
+            _same = ((getattr(fire, 'post_source', '') or 'l2') == source
+                     and _l2_selection_is_current(fire, source))
+        if _same:
             prev_dir = os.path.join(fire.cache_dir, 'previews')
             if os.path.isdir(prev_dir) and os.listdir(prev_dir):
                 return {'ok': True, 'unchanged': True,
-                        'post_source': source}
+                        'post_source': source,
+                        'product_key': _cur_prod}
+            sys.stderr.write(
+                f'[prepare] {fire.fire_numbe}: on {_cur_prod or source} '
+                f'already but its previews are missing; re-rendering\n')
         return _switch_post_source_locked(fire, source)
     finally:
         # The pending date must not outlive this call.

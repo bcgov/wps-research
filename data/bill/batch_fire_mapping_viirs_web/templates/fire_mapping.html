@@ -4280,6 +4280,31 @@ function paneProductKey(pane) {
 // so any code assigning a bare source ('l2') empties the box while the
 // imagery it names is on screen. Every assignment goes through here,
 // which guarantees an option exists for whatever is being shown.
+// Remove any option that has no value or no visible text.
+//
+// Belt and braces: whatever creates one -- a malformed product entry,
+// a stale insert, a future code path -- it is gone before the operator
+// can pick it, and the console says it happened so the cause can be
+// found rather than guessed at.
+function pruneBlankOptions(sel) {
+    if (!sel) return;
+    let removed = 0;
+    for (const o of [...sel.options]) {
+        if (!o.value || !String(o.textContent || '').trim()) {
+            o.remove();
+            removed += 1;
+        }
+    }
+    if (removed) {
+        log(`[products] removed ${removed} blank menu entr`
+            + `${removed === 1 ? 'y' : 'ies'} from `
+            + `${sel.id || 'a source selector'}`, 'error');
+        if (!sel.value && sel.options.length) {
+            sel.value = sel.options[0].value;
+        }
+    }
+}
+
 function setSourceSelectValue(sel, key) {
     if (!sel) return;
     let want = key || '';
@@ -4295,14 +4320,17 @@ function setSourceSelectValue(sel, key) {
         }
     }
     if (want && !has(want)) {
+        const known = _products.find((q) => q.key === want);
+        const text = (known ? productLabel(known)
+                            : productLabel(parseProductKey(want)))
+            || want;
         const o = document.createElement('option');
         o.value = want;
-        const known = _products.find((q) => q.key === want);
-        o.textContent = known ? productLabel(known)
-                              : productLabel(parseProductKey(want));
+        o.textContent = text;      // never empty: falls back to the key
         sel.insertBefore(o, sel.firstChild);
     }
     sel.value = want;
+    pruneBlankOptions(sel);
     if (!sel.value && sel.options.length) {
         // Last resort: show something real rather than an empty box.
         sel.value = sel.options[0].value;
@@ -4315,18 +4343,26 @@ function fillSourceSelect(sel, wantKey) {
     if (!sel) return;
     const had = wantKey || sel.value || 'l2';
     sel.innerHTML = '';
-    const list = _products.length
+    const list = (_products.length
         ? _products
         : [{key: 'l2', source: 'l2', date: ''},
-           {key: 'mrap', source: 'mrap', date: ''}];
+           {key: 'mrap', source: 'mrap', date: ''}])
+        // An entry with no key would render as an empty row that
+        // selects nothing -- the "blank menu item". One malformed
+        // entry must not be able to put it there.
+        .filter((p) => p && p.key);
+    const added = new Set();
     for (const p of list) {
+        if (added.has(p.key)) continue;     // never list a key twice
+        added.add(p.key);
         const o = document.createElement('option');
         o.value = p.key;
-        o.textContent = productLabel(p);
+        o.textContent = productLabel(p) || p.key;
         sel.appendChild(o);
     }
 
     setSourceSelectValue(sel, had);
+    pruneBlankOptions(sel);
 }
 
 function refreshSourceSelectors(products) {
