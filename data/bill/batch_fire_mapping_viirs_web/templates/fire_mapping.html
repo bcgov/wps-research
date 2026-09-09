@@ -1128,7 +1128,7 @@ async function onPostSourceChange() {
         // Put the selector back rather than queueing: the server
         // serialises switches per fire, so a second one would block
         // until the first finished with nothing on screen to say why.
-        if (sel) sel.value = currentPostSource;
+        setSourceSelectValue(sel, currentProductKey());
         log('A source switch is already running; wait for it to '
             + 'finish.', 'dim');
         return;
@@ -1202,7 +1202,7 @@ async function _onPostSourceChangeInner() {
         // apart. Repair the display instead of asking the server to
         // switch to nothing.
         log('[products] left selector had no value; restoring it', 'dim');
-        sel.value = currentProductKey();
+        setSourceSelectValue(sel, currentProductKey());
         return;
     }
     const _sel = parseProductKey(_key);
@@ -1244,9 +1244,9 @@ async function _onPostSourceChangeInner() {
             // Not comparing: keep the right pane aligned so entering
             // split shows the same imagery on both sides.
             rightPostSource = src;
-            const rs1 = document.getElementById(
-                'post-source-select-right');
-            if (rs1) rs1.value = src;
+            setSourceSelectValue(
+                document.getElementById('post-source-select-right'),
+                rightProductKey());
         }
         loadPaneImage('left', leftView);
         if (splitActive && rightView) loadPaneImage('right', rightView);
@@ -1356,8 +1356,9 @@ async function _onPostSourceChangeInner() {
             if (Array.isArray(data.products)) {
                 refreshSourceSelectors(data.products);
             }
-            const _ls = document.getElementById('post-source-select');
-            if (_ls) _ls.value = currentProductKey();
+            setSourceSelectValue(
+                document.getElementById('post-source-select'),
+                currentProductKey());
         } catch (_) {}
         // The server rebuilds the hint (and may switch its mode) as
         // part of the swap, and returns the fire to READY -- mirror
@@ -1468,7 +1469,7 @@ async function _onPostSourceChangeInner() {
         drainWarmQueue();
     } catch (err) {
         log('Post source switch error: ' + err.message, 'error');
-        sel.value = currentPostSource;
+        setSourceSelectValue(sel, currentProductKey());
     } finally {
         sel.disabled = false;
         // Overlays are tied to the crop, which the switch may have
@@ -1823,7 +1824,13 @@ async function prepareFire(padding) {
         // seen in the date plot, so that data has to exist first.
         loadDatePlot().then(loadNextCoverage).catch(loadNextCoverage);
         const psSel = document.getElementById('post-source-select');
-        if (psSel) { psSel.value = currentPostSource; psSel.disabled = false; }
+        if (psSel) {
+            // currentPostSource is a bare 'l2'/'mrap'; the options are
+            // dated product keys. Assigning it directly is what left
+            // the box blank on entering a fire.
+            setSourceSelectValue(psSel, currentProductKey());
+            psSel.disabled = false;
+        }
 
         // Warm BOTH sources and every hint mode now, so the first
         // toggle of either menu is served from memory. The server has
@@ -3537,9 +3544,12 @@ function applySavedUiState(ui, kgcParams) {
         setSel('view-select', leftView);
         setSel('view-select-right', rightView);
         // Selector values are PRODUCT keys now, not bare sources.
-        setSel('post-source-select', currentProductKey());
+        setSourceSelectValue(document.getElementById('post-source-select'),
+                             currentProductKey());
         try { syncDateSelectButton(); } catch (_) {}
-        setSel('post-source-select-right', rightProductKey());
+        setSourceSelectValue(
+            document.getElementById('post-source-select-right'),
+            rightProductKey());
 
         // Split last: it reads the values above when it opens, and
         // openSplit(false) means "restoring", not "the user clicked",
@@ -3547,7 +3557,9 @@ function applySavedUiState(ui, kgcParams) {
         if (ui.split && !splitActive && typeof toggleSplit === 'function') {
             toggleSplit(false);
             setSel('view-select-right', rightView);
-            setSel('post-source-select-right', rightProductKey());
+            setSourceSelectValue(
+                document.getElementById('post-source-select-right'),
+                rightProductKey());
         }
     } finally {
         _uiRestoring = false;
@@ -4056,22 +4068,7 @@ async function applyDateSelection() {
         // used the dated product.
         const _ls = document.getElementById('post-source-select');
         if (_ls) {
-            const _want = currentProductKey();
-            if ([..._ls.options].some((o) => o.value === _want)) {
-                _ls.value = _want;
-            } else {
-                // The list has not caught up (a build finishing just
-                // as the list was read). Add the entry rather than
-                // leaving the dropdown showing the wrong product.
-                const o = document.createElement('option');
-                o.value = _want;
-                o.textContent = productLabel(
-                    {source: 'l2', date: currentL2Date});
-                _ls.appendChild(o);
-                _ls.value = _want;
-                log(`[products] added ${_want} to the selector `
-                    + `directly; the list had not refreshed yet`, 'dim');
-            }
+            setSourceSelectValue(_ls, currentProductKey());
         }
         if (prog) prog.textContent = 'Built. Loading the new imagery ...';
         // The stack changed underneath EVERY view, so nothing cached
@@ -4276,6 +4273,44 @@ function paneProductKey(pane) {
 }
 
 // Fill a selector, preserving its selection where it still exists.
+// Assign a source selector, and never leave it empty.
+//
+// A <select> given a value it has no option for renders BLANK -- no
+// error, no fallback. Options are dated product keys ('l2_p20260908'),
+// so any code assigning a bare source ('l2') empties the box while the
+// imagery it names is on screen. Every assignment goes through here,
+// which guarantees an option exists for whatever is being shown.
+function setSourceSelectValue(sel, key) {
+    if (!sel) return;
+    let want = key || '';
+    const has = (v) => [...sel.options].some((o) => o.value === v);
+    if (!want || !has(want)) {
+        // A bare source means "whatever product of that source is
+        // loaded". Resolve it against the list rather than guessing.
+        const src = parseProductKey(want).source;
+        const match = _products.find((q) => q.key === want)
+            || _products.find((q) => q.source === src);
+        if (match) {
+            want = match.key;
+        }
+    }
+    if (want && !has(want)) {
+        const o = document.createElement('option');
+        o.value = want;
+        const known = _products.find((q) => q.key === want);
+        o.textContent = known ? productLabel(known)
+                              : productLabel(parseProductKey(want));
+        sel.insertBefore(o, sel.firstChild);
+    }
+    sel.value = want;
+    if (!sel.value && sel.options.length) {
+        // Last resort: show something real rather than an empty box.
+        sel.value = sel.options[0].value;
+        log(`[products] could not select ${key || '(none)'}; showing `
+            + `${sel.value} instead`, 'error');
+    }
+}
+
 function fillSourceSelect(sel, wantKey) {
     if (!sel) return;
     const had = wantKey || sel.value || 'l2';
@@ -4291,25 +4326,7 @@ function fillSourceSelect(sel, wantKey) {
         sel.appendChild(o);
     }
 
-    // A <select> given a value it has no option for renders BLANK --
-    // no error, no fallback, just an empty box while the imagery it
-    // names is plainly on screen. So the wanted key is ADDED when it is
-    // missing rather than assumed present.
-    const wanted = [...sel.options].some((o) => o.value === had)
-        ? had
-        : (([...sel.options].some((o) => o.value === currentProductKey()))
-            ? currentProductKey() : had);
-    if (wanted && ![...sel.options].some((o) => o.value === wanted)) {
-        const o = document.createElement('option');
-        o.value = wanted;
-        const known = _products.find((q) => q.key === wanted);
-        o.textContent = known ? productLabel(known)
-                              : productLabel(parseProductKey(wanted));
-        sel.insertBefore(o, sel.firstChild);
-        log(`[products] selector had no entry for ${wanted}; added it`,
-            'dim');
-    }
-    sel.value = wanted;
+    setSourceSelectValue(sel, had);
 }
 
 function refreshSourceSelectors(products) {
@@ -6501,7 +6518,7 @@ async function onRightPostSourceChange() {
     const _rkey = sel.value;
     if (!_rkey) {
         log('[products] right selector had no value; restoring it', 'dim');
-        sel.value = rightProductKey();
+        setSourceSelectValue(sel, rightProductKey());
         return;
     }
     const _rsel = parseProductKey(_rkey);
@@ -6570,7 +6587,7 @@ function syncRightViewOptions() {
         // clustering run the pane opened on the other source with no
         // way to switch back, which is simply confusing.
         rs.disabled = false;
-        if (splitActive) rs.value = rightPostSource;
+        if (splitActive) setSourceSelectValue(rs, rightProductKey());
     }
 }
 
@@ -8209,8 +8226,11 @@ function toggleSplit(manual) {
         // Reset it to the left's, or re-entering split would silently
         // start on whatever was chosen last time.
         rightPostSource = currentPostSource;
-        const rs0 = document.getElementById('post-source-select-right');
-        if (rs0) rs0.value = rightPostSource;
+        rightL2Date = currentL2Date;
+        rightProduct = currentProductKey();
+        setSourceSelectValue(
+            document.getElementById('post-source-select-right'),
+            rightProductKey());
         syncRightViewOptions();
         // Close the pane the user is NOT focused on
         if (activePane === 'right') {
