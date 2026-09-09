@@ -2528,11 +2528,57 @@ class FireRoutes:
         # prebuild that finishes AFTER the page first opens, and
         # hiding it until then looks like the source disappeared.
         have_src = {p['source'] for p in out}
-        for base_key, base_src in (('mrap', 'mrap'), ('l2', 'l2')):
-            if base_src not in have_src:
-                out.append({'key': base_key, 'source': base_src,
-                            'date': '', 'label': product_label(base_key),
+        have_keys = {p['key'] for p in out}
+
+        # The base MRAP entry carries the date it WOULD build.
+        #
+        # An undated 'mrap' entry can never equal the key of the
+        # product it produces ('mrap_p<date>'), so after building it the
+        # selector held a value that was no longer in the list and went
+        # blank -- and the operator had to choose it a second time.
+        # Naming the mosaic up front makes the entry match its own
+        # result, and shows the date immediately rather than only after
+        # the first build.
+        if 'mrap' not in have_src:
+            mrap_key, mrap_date = 'mrap', ''
+            try:
+                from ..aoi_stack import find_latest_mrap
+                mrap_date, _mp = find_latest_mrap()
+                if re.fullmatch(r'\d{8}', mrap_date or ''):
+                    mrap_key = f'mrap_p{mrap_date}'
+                else:
+                    mrap_date = ''
+            except Exception as exc:
+                sys.stderr.write(
+                    f'[products] latest MRAP date unavailable '
+                    f'({exc}); offering an undated entry\n')
+            if mrap_key not in have_keys:
+                out.append({'key': mrap_key, 'source': 'mrap',
+                            'date': mrap_date,
+                            'label': product_label(mrap_key),
                             'built': False})
+                have_keys.add(mrap_key)
+        if 'l2' not in have_src and 'l2' not in have_keys:
+            out.append({'key': 'l2', 'source': 'l2', 'date': '',
+                        'label': product_label('l2'), 'built': False})
+            have_keys.add('l2')
+
+        # The product the fire is ON must always be offered.
+        #
+        # If the scan misses it for any reason -- an unwritable
+        # sidecar, a file appearing mid-scan -- the selector would be
+        # asked to display a value it has no option for, and a <select>
+        # given an unknown value renders BLANK. Better to list the
+        # product being shown than to show nothing.
+        loaded = self._loaded_product_key(fire)
+        if loaded and loaded not in have_keys:
+            lsrc, lstart, lpost = product_parts(loaded)
+            out.append({'key': loaded, 'source': lsrc,
+                        'date': lstart or lpost,
+                        'label': product_label(loaded), 'built': True})
+            sys.stderr.write(
+                f'[products] {fire_numbe}: added the loaded product '
+                f'{loaded}, which the scan did not return\n')
 
         # MRAP first, then L2, each newest date first -- the order the
         # selector shows them in.

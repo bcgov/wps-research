@@ -1197,6 +1197,14 @@ async function _onPostSourceChangeInner() {
     // The selector's value is a PRODUCT key ('mrap', 'l2',
     // 'l2_d20260805'), so a date change is a source change now.
     const _key = sel.value;
+    if (!_key) {
+        // An empty value means the list and the selection had drifted
+        // apart. Repair the display instead of asking the server to
+        // switch to nothing.
+        log('[products] left selector had no value; restoring it', 'dim');
+        sel.value = currentProductKey();
+        return;
+    }
     const _sel = parseProductKey(_key);
     const src = _sel.source;
     const _wantDate = _sel.date;
@@ -4240,12 +4248,15 @@ let _products = [];
 function productLabel(p) {
     // The server names products; the client does not re-derive names,
     // because two places inventing the same label is how they drift.
+    // The fallbacks below exist only for a key the server has not
+    // described -- which should not happen, and is logged when it does.
     if (p && p.label) return p.label;
     if (!p) return 'L2 recent tile';
+    const d = p.date || p.post || '';
     if (p.source === 'mrap') {
-        return p.date ? `MRAP composite ${p.date}` : 'MRAP composite';
+        return d ? `MRAP composite ${d}` : 'MRAP composite';
     }
-    return p.date ? `L2 recent ${p.date}` : 'L2 recent tile';
+    return d ? `L2 recent ${d}` : 'L2 recent tile';
 }
 
 function currentProductKey() {
@@ -4279,11 +4290,26 @@ function fillSourceSelect(sel, wantKey) {
         o.textContent = productLabel(p);
         sel.appendChild(o);
     }
-    // Keep the previous choice if it is still offered; otherwise fall
-    // back to the fire's current product rather than silently landing
-    // on whatever happens to be first.
-    sel.value = [...sel.options].some((o) => o.value === had)
-        ? had : currentProductKey();
+
+    // A <select> given a value it has no option for renders BLANK --
+    // no error, no fallback, just an empty box while the imagery it
+    // names is plainly on screen. So the wanted key is ADDED when it is
+    // missing rather than assumed present.
+    const wanted = [...sel.options].some((o) => o.value === had)
+        ? had
+        : (([...sel.options].some((o) => o.value === currentProductKey()))
+            ? currentProductKey() : had);
+    if (wanted && ![...sel.options].some((o) => o.value === wanted)) {
+        const o = document.createElement('option');
+        o.value = wanted;
+        const known = _products.find((q) => q.key === wanted);
+        o.textContent = known ? productLabel(known)
+                              : productLabel(parseProductKey(wanted));
+        sel.insertBefore(o, sel.firstChild);
+        log(`[products] selector had no entry for ${wanted}; added it`,
+            'dim');
+    }
+    sel.value = wanted;
 }
 
 function refreshSourceSelectors(products) {
@@ -6473,6 +6499,11 @@ async function onRightPostSourceChange() {
     const sel = document.getElementById('post-source-select-right');
     if (!sel) return;
     const _rkey = sel.value;
+    if (!_rkey) {
+        log('[products] right selector had no value; restoring it', 'dim');
+        sel.value = rightProductKey();
+        return;
+    }
     const _rsel = parseProductKey(_rkey);
     const src = _rsel.source;
     if (_rkey === rightProductKey()) return;
