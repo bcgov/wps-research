@@ -783,6 +783,12 @@ let currentL2Date = '';
 // The right pane's product date, independent of the left pane's.
 // Display-only: it never changes what is classified or exported.
 let rightL2Date = '';
+// Exact product each pane shows, as the SERVER names it -- e.g.
+// 'mrap_p20260823', 'l2_p20260824', 'l2_d20260805'. Two composites
+// from different nights are different products, which (source, date)
+// alone cannot express.
+let leftProduct = '';
+let rightProduct = '';
 
 // Which post imagery the stack is built from: 'l2' (most recent L2A
 // tiles over the AOI, default) or 'mrap' (province-wide composite).
@@ -844,8 +850,9 @@ function cacheKeyFor(viewKey, pane) {
     // and without the date in the key a cached preview from one date
     // was served for another -- which is how a switch could appear not
     // to happen, and why switching away and back "fixed" it.
-    const _kdate = (pane === 'right') ? rightL2Date : currentL2Date;
-    const datePart = (src === 'l2') ? `:${_kdate || 'latest'}` : '';
+    // Keyed by the exact product: two nights' MRAP composites must
+    // never share a cache entry.
+    const datePart = `:${paneProductKey(pane)}`;
     return `${src}${datePart}:${viewKey}${modePart}:${stamp}`;
 }
 
@@ -1189,11 +1196,11 @@ async function _onPostSourceChangeInner() {
     if (!sel) return;
     // The selector's value is a PRODUCT key ('mrap', 'l2',
     // 'l2_d20260805'), so a date change is a source change now.
-    const _sel = parseProductKey(sel.value);
+    const _key = sel.value;
+    const _sel = parseProductKey(_key);
     const src = _sel.source;
     const _wantDate = _sel.date;
-    if (src === currentPostSource
-        && _wantDate === (currentL2Date || '')) return;
+    if (_key === currentProductKey()) return;   // already showing it
     // Optimistic swap: if both this view's images are already cached
     // for the target source, repaint from cache NOW and let the server
     // catch up in the background. The server call still has to happen
@@ -1267,7 +1274,8 @@ async function _onPostSourceChangeInner() {
                 headers: {'Content-Type': 'application/json',
                           'X-Requested-With': 'fetch'},
                 body: JSON.stringify({source: src,
-                                      l2_date: _wantDate}),
+                                      l2_date: _wantDate,
+                                      product: _key}),
                 signal: _srcSwitchAbort.signal,
             });
             data = await r.json().catch(() => ({}));
@@ -1329,6 +1337,10 @@ async function _onPostSourceChangeInner() {
         // including the source.
         currentPostSource = src;
         currentL2Date = _wantDate;
+        leftProduct = (data && data.product_key) ? data.product_key : _key;
+        if (typeof data.l2_start_date === 'string') {
+            currentL2Date = data.l2_start_date;
+        }
         // Re-read the product list: a switch can be the first moment a
         // product becomes complete, and the selector should show it
         // without waiting for a page reload.
@@ -1751,6 +1763,8 @@ async function prepareFire(padding) {
         currentPostSource = data.post_source || 'l2';
         currentL2Date = data.l2_start_date || '';
         rightL2Date = currentL2Date;
+        leftProduct = data.product_key || '';
+        rightProduct = leftProduct;
         try { refreshSourceSelectors(data.products); } catch (_) {}
         try { applySavedUiState(data.ui_state, data.kgc_params); }
         catch (err) {
@@ -2308,9 +2322,11 @@ function paneCaption(pane) {
     // would otherwise both be labelled "L2 recent" in the exported
     // GIF, leaving the reader unable to tell which frame is which --
     // which defeats the point of exporting the comparison.
-    const label = (src === 'l2')
-        ? (date ? `L2 recent ${date}` : 'L2 recent')
-        : 'MRAP';
+    const _pk = paneProductKey(pane);
+    const _match = _products.find((q) => q.key === _pk);
+    const label = _match ? _match.label
+        : ((src === 'l2') ? (date ? `L2 recent ${date}` : 'L2 recent')
+                          : 'MRAP');
     return `${vl} (${label})`;
 }
 
@@ -3401,8 +3417,7 @@ function collectUiState() {
         // right_src are kept beside these so a state file written by
         // an older build still restores.
         left_key: currentProductKey(),
-        right_key: (rightPostSource === 'l2'
-            ? (rightL2Date ? `l2_d${rightL2Date}` : 'l2') : 'mrap'),
+        right_key: rightProductKey(),
         split: !!splitActive,
         overlays: !!overlaysVisible,
         use_hdbscan: c('use-hdbscan'),
@@ -3485,22 +3500,24 @@ function applySavedUiState(ui, kgcParams) {
             const rp = parseProductKey(ui.right_key);
             rightPostSource = rp.source;
             rightL2Date = rp.date;
+            rightProduct = ui.right_key;
         } else if (ui.right_src === 'l2' || ui.right_src === 'mrap') {
             rightPostSource = ui.right_src;
             rightL2Date = '';
+            rightProduct = '';
         }
         // A product that no longer exists (its stack was purged, or the
         // fire was re-prepared) must not leave the pane pointing at
         // something unloadable.
         try {
-            const rkey = (rightPostSource === 'l2')
-                ? (rightL2Date ? `l2_d${rightL2Date}` : 'l2') : 'mrap';
+            const rkey = rightProductKey();
             if (_products.length
                 && !_products.some((q) => q.key === rkey)) {
                 log(`[ui] saved right-pane product ${rkey} no longer `
                     + `exists; using the left pane's`, 'dim');
                 rightPostSource = currentPostSource;
                 rightL2Date = currentL2Date;
+                rightProduct = currentProductKey();
             }
         } catch (_) {}
         if (typeof ui.overlays === 'boolean') overlaysVisible = ui.overlays;
@@ -3514,10 +3531,7 @@ function applySavedUiState(ui, kgcParams) {
         // Selector values are PRODUCT keys now, not bare sources.
         setSel('post-source-select', currentProductKey());
         try { syncDateSelectButton(); } catch (_) {}
-        setSel('post-source-select-right',
-               (rightPostSource === 'l2')
-                   ? (rightL2Date ? `l2_d${rightL2Date}` : 'l2')
-                   : 'mrap');
+        setSel('post-source-select-right', rightProductKey());
 
         // Split last: it reads the values above when it opens, and
         // openSplit(false) means "restoring", not "the user clicked",
@@ -3525,10 +3539,7 @@ function applySavedUiState(ui, kgcParams) {
         if (ui.split && !splitActive && typeof toggleSplit === 'function') {
             toggleSplit(false);
             setSel('view-select-right', rightView);
-            setSel('post-source-select-right',
-                   (rightPostSource === 'l2')
-                       ? (rightL2Date ? `l2_d${rightL2Date}` : 'l2')
-                       : 'mrap');
+            setSel('post-source-select-right', rightProductKey());
         }
     } finally {
         _uiRestoring = false;
@@ -4227,16 +4238,30 @@ let _dlLastState = '';
 let _products = [];
 
 function productLabel(p) {
-    if (p.source === 'mrap') return 'MRAP composite';
-    if (!p.date) return 'L2 recent tile';
-    // Plain YYYYMMDD, matching how dates are written everywhere else
-    // in this application (product names, archive names, log lines).
-    return `L2 recent ${p.date}`;
+    // The server names products; the client does not re-derive names,
+    // because two places inventing the same label is how they drift.
+    if (p && p.label) return p.label;
+    if (!p) return 'L2 recent tile';
+    if (p.source === 'mrap') {
+        return p.date ? `MRAP composite ${p.date}` : 'MRAP composite';
+    }
+    return p.date ? `L2 recent ${p.date}` : 'L2 recent tile';
 }
 
 function currentProductKey() {
+    if (leftProduct) return leftProduct;
     if (currentPostSource !== 'l2') return 'mrap';
     return currentL2Date ? `l2_d${currentL2Date}` : 'l2';
+}
+
+function rightProductKey() {
+    if (rightProduct) return rightProduct;
+    if (rightPostSource !== 'l2') return 'mrap';
+    return rightL2Date ? `l2_d${rightL2Date}` : 'l2';
+}
+
+function paneProductKey(pane) {
+    return (pane === 'right') ? rightProductKey() : currentProductKey();
 }
 
 // Fill a selector, preserving its selection where it still exists.
@@ -4274,9 +4299,13 @@ function refreshSourceSelectors(products) {
 }
 
 function parseProductKey(key) {
-    const m = /^l2_d(\d{8})$/.exec(key || '');
-    if (m) return {source: 'l2', date: m[1]};
-    return {source: key === 'mrap' ? 'mrap' : 'l2', date: ''};
+    // l2_d<start> pins an acquisition window; <src>_p<date> names the
+    // night's mosaic a composite was built from.
+    let m = /^l2_d(\d{8})$/.exec(key || '');
+    if (m) return {source: 'l2', date: m[1], post: ''};
+    m = /^(mrap|l2)_p(\d{8})$/.exec(key || '');
+    if (m) return {source: m[1], date: '', post: m[2]};
+    return {source: key === 'mrap' ? 'mrap' : 'l2', date: '', post: ''};
 }
 
 async function refreshDownloadStatus(why) {
@@ -5275,14 +5304,8 @@ function beginFlicker(pane) {
     // what makes them different pictures, so it belongs in the
     // identity -- the same lesson as the cache keys and the stash
     // names.
-    const myKey = (pane === 'left')
-        ? currentProductKey()
-        : (rightPostSource === 'l2'
-            ? (rightL2Date ? `l2_d${rightL2Date}` : 'l2') : 'mrap');
-    const otherKey = (other === 'left')
-        ? currentProductKey()
-        : (rightPostSource === 'l2'
-            ? (rightL2Date ? `l2_d${rightL2Date}` : 'l2') : 'mrap');
+    const myKey = paneProductKey(pane);
+    const otherKey = paneProductKey(other);
     if (otherView === myView && otherKey === myKey) return;
 
     // Both images are ALREADY decoded and on screen, so the peek is a
@@ -6112,7 +6135,11 @@ function previewUrlFor(viewKey, pane) {
     // the previous composite, which is why a switch sometimes needed
     // doing twice. Now the URL itself changes with the product.
     const _pdate = (pane === 'right') ? rightL2Date : currentL2Date;
-    const dpart = (src === 'l2') ? `&l2=${_pdate || 'latest'}` : '';
+    // prod= is the authoritative identity; l2= is kept for older
+    // server builds and costs nothing.
+    const _prod = paneProductKey(pane);
+    const dpart = (src === 'l2' ? `&l2=${_pdate || 'latest'}` : '')
+        + (_prod ? `&prod=${encodeURIComponent(_prod)}` : '');
     return `/api/fire/${encodeURIComponent(FIRE)}/preview/${viewKey}`
         + `?src=${src}${modePart}${dpart}&t=${stamp}`;
 }
@@ -6445,10 +6472,10 @@ async function onRightPostSourceChange() {
 
     const sel = document.getElementById('post-source-select-right');
     if (!sel) return;
-    const _rsel = parseProductKey(sel.value);
+    const _rkey = sel.value;
+    const _rsel = parseProductKey(_rkey);
     const src = _rsel.source;
-    if (src === rightPostSource
-        && _rsel.date === (rightL2Date || '')) return;
+    if (_rkey === rightProductKey()) return;
 
     // Purely client-side: unlike the left selector this does NOT call
     // /post_source, because that repoints fire.crop_bin and would
@@ -6456,6 +6483,7 @@ async function onRightPostSourceChange() {
     // it just displays the other source's already-stashed previews.
     rightPostSource = src;
     rightL2Date = _rsel.date;
+    rightProduct = _rkey;
     try { invalidateEraseBuffers('source changed'); } catch (_) {}
     // Same treatment as the left: grey both selectors while this runs,
     // because both read the per-source preview stash.

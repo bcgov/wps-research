@@ -18,7 +18,7 @@ import subprocess
 import sys
 import threading
 import time
-from urllib.parse import urlparse, unquote, parse_qs
+from urllib.parse import urlparse, unquote, parse_qs, quote
 
 import numpy as np
 from osgeo import gdal
@@ -294,7 +294,7 @@ class BaseHandler:
         (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/serial/cancel$'),
          'handle_api_serial_cancel'),
-        (re.compile(r'^/api/admin/ip/(?P<action>approve|block|revoke|unblock)$'),
+        (re.compile(r'^/api/admin/ip/(?P<action>approve|block|revoke|restore|unrevoke|unblock)$'),
          'handle_api_admin_ip_action'),
         (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/unhide$'),
@@ -321,6 +321,16 @@ class BaseHandler:
     # Paths that bypass ALL auth (login page, static assets for login)
     _NO_SESSION = {'/login', '/static/style.css',
                    '/static/BC-Wildfire-Service-logo.png'}
+
+    # Everything that must still prove admin. Checked by prefix so a
+    # future /admin/... or /api/admin/... route is covered the moment
+    # it is added, rather than silently becoming public.
+    _ADMIN_PREFIXES = ('/admin', '/api/admin')
+
+    @classmethod
+    def _is_admin_path(cls, path: str) -> bool:
+        return any(path == p or path.startswith(p + '/')
+                   for p in cls._ADMIN_PREFIXES)
 
 
     def _route(self, routes):
@@ -494,21 +504,131 @@ class BaseHandler:
             self._username = ''
             return 'none'
 
-        # Check session cookie
+        # Ordinary use needs no login.
+        #
+        # Only the admin area is protected now. A session still confers
+        # 'admin' when one exists, so an admin who has logged in keeps
+        # their role everywhere; everyone else browses as 'user'
+        # without being asked for anything.
         role = self._check_session()
-        if role is None:
-            self._redirect('/login')
+        if role is not None and role != 'admin' \
+                and self._is_admin_path(path):
+            # A leftover 'user' session from before logins were dropped
+            # would otherwise reach the handler and be met with a bare
+            # 403. Ask for admin credentials instead, which is what the
+            # visitor actually needs to supply.
+            self._redirect('/login?next=' + quote(path, safe=''))
             return None
+        if role is None:
+            if self._is_admin_path(path):
+                # The admin area is the ONE place that still demands
+                # credentials. Send the browser to the login page
+                # rather than a bare 403 so there is somewhere to type
+                # them.
+                self._redirect('/login?next=' + quote(path, safe=''))
+                return None
+            self._role = 'user'
+            self._username = ''
+            role = 'user'
 
         # IP-exempt paths (access-status polling)
         if path in self._IP_EXEMPT:
             return role
 
-        # IP access control
-        if not self._check_ip(role):
-            return None
+        # IP access control: open by default, still tracked.
+        #
+        # Requiring approval would reintroduce the barrier that removing
+        # the login was meant to lift -- analysts would wait on a
+        # pending page instead of a password prompt. So every address is
+        # allowed unless an admin has closed the gate on it, and every
+        # address is still RECORDED, which is what makes closing the
+        # gate possible: the admin cannot revoke an address they have
+        # never seen.
+        if self._is_admin_path(path):
+            if not self._check_ip(role):
+                return None
+        else:
+            if not self._track_ip(role):
+                return None
 
         return role
+
+    # How stale a last_seen may get before the IP list is rewritten.
+    # Saving on every request would rewrite the file continuously for
+    # no benefit; five minutes keeps "who has used this" useful while
+    # costing almost nothing.
+    _IP_TOUCH_INTERVAL = 300
+
+    def _track_ip(self, role: str) -> bool:
+        """Record this address and say whether it may proceed.
+
+        Returns False (and sends the refusal) only for an address an
+        admin has explicitly closed.
+        """
+        ip = self._client_ip()
+        now_iso = datetime.datetime.now().isoformat(timespec='seconds')
+        now_s = time.time()
+        save_needed = False
+
+        with state.lock:
+            if ip in state.blocked_ips:
+                info = state.blocked_ips[ip]
+                info['last_seen'] = now_iso
+                blocked = 'blocked'
+            elif ip in state.revoked_ips:
+                # Revocation is what "closing the gate" means when
+                # access is open by default: removing the address from
+                # approved_ips would simply be undone by its next
+                # request, because that is the list this function fills
+                # in automatically.
+                info = state.revoked_ips[ip]
+                info['last_seen'] = now_iso
+                blocked = 'revoked'
+            else:
+                blocked = False
+                entry = state.approved_ips.get(ip)
+                if entry is None:
+                    # First sighting. Recorded as auto-allowed so the
+                    # admin page can tell these apart from addresses
+                    # somebody deliberately approved.
+                    state.approved_ips[ip] = {
+                        'username': getattr(self, '_username', '') or '',
+                        'role': role or 'user',
+                        'auto': True,
+                        'first_seen': now_iso,
+                        'last_seen': now_iso,
+                        'timestamp': now_iso,
+                    }
+                    save_needed = True
+                    sys.stderr.write(f'[access] new address {ip}\n')
+                else:
+                    entry['last_seen'] = now_iso
+                    if role == 'admin':
+                        entry['role'] = 'admin'
+                    last = entry.get('_last_saved', 0)
+                    if now_s - float(last or 0) > self._IP_TOUCH_INTERVAL:
+                        entry['_last_saved'] = now_s
+                        save_needed = True
+                # An address that was pending under the old approval
+                # flow is no longer waiting for anything.
+                state.pending_ips.pop(ip, None)
+
+        if save_needed:
+            try:
+                _save_ip_list()
+            except Exception as exc:
+                sys.stderr.write(
+                    f'[access] could not save the IP list: {exc}\n')
+
+        if blocked == 'revoked':
+            self.send_error(
+                403, 'Access from this address has been revoked by an '
+                     'administrator.')
+            return False
+        if blocked:
+            self.send_error(403, 'Access from this address is blocked.')
+            return False
+        return True
 
     def do_GET(self):
         if self._gate() is None:

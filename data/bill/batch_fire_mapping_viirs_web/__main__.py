@@ -740,6 +740,7 @@ def main():
             with open(app_state.ip_file) as _f:
                 _ip_data = yaml.safe_load(_f) or {}
             app_state.approved_ips = _ip_data.get('approved', {})
+            app_state.revoked_ips = _ip_data.get('revoked', {}) or {}
             app_state.blocked_ips = _ip_data.get('blocked', {})
             app_state.pending_ips = _ip_data.get('pending', {})
         except Exception as _e:
@@ -943,6 +944,19 @@ def main():
     app_state.init_fires_from_disk()
 
     init_app(app_state)
+
+    # Build today's composites for the fires that already exist.
+    #
+    # The province-wide MRAP mosaic turns over nightly, so after a
+    # restart every fire's newest product is one this server has never
+    # built. Doing it now, in the background, means the new date is
+    # already in the source menu when an analyst opens the fire --
+    # and because products are dated, yesterday's stays selectable.
+    try:
+        from .prepare import refresh_products_for_all_fires
+        refresh_products_for_all_fires()
+    except Exception as _exc:
+        _log(f'[startup] product refresh not started: {_exc}')
 
     # Download the latest BCWS current-fire points + polygons once at
     # startup, so the overlay is already populated when /new_fire is

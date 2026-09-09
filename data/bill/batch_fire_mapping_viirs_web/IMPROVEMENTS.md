@@ -294,3 +294,57 @@ Cheapest things with disproportionate value, extracted from above:
 | 32 | Sort fire list by actionability | S |
 | 19 | Persist zoom/pan per fire | S |
 | 1 | AOI-grid invariant test | M |
+
+## Persistence: move durable data off the ramdisk
+
+AOI stacks live on `/ram` (tmpfs), so a power cut or host reboot empties
+them and every fire rebuilds on next use. `ensure_fire_stack_present()`
+handles that correctly, but the cost is paid per fire, and KGC scratch
+(`.kgc_knn_*`, `.kgc_dedup`) shares the same ramdisk.
+
+Proposed: keep scratch on `/ram`, move stacks to `<output_root>/.stacks/`.
+Stacks are read sequentially; scratch is what needs the speed. Requires a
+migration path because `crop_bin` holds absolute paths — the existing
+grid validation would catch any mismatch.
+
+## Unmanaged disk areas
+
+`cache_retention.py` sweeps `.web_cache` (default 20 GB / 30 days) but
+does not know about:
+
+- `<output_root>/.download_cache/` — prepared ZIPs, now tens of MB each
+  because imagery is included. `prune_cache()` only removes *that fire's*
+  older archives, and only when that fire is downloaded again. A fire
+  downloaded once and never revisited keeps its ZIP for ever; a deleted
+  fire's ZIP is never cleaned up at all.
+- `<output_root>/_preview_cache/` — never swept.
+
+Also: `purge_other_aoi_stacks()` in `aoi_stack.py` is defined and never
+called. Nothing reclaims `/ram` during a run; we rely on reboots.
+
+Retention pins `READY` and `MAPPED` fires indefinitely, so a season of
+prepared-but-unaccepted fires can hold the cache above budget for ever.
+
+## Watch list for priority incidents
+
+Three quarters of the machinery exists: `cache_retention.py` already has
+pinning by status, and `acq_plans.py` already computes expected next
+coverage per AOI.
+
+A watch list would be one persisted boolean per fire with four effects:
+
+1. **Never swept** — hard-pin the cache regardless of status. The single
+   most useful behaviour: priority incidents stop being evicted.
+2. **Auto-build on new imagery** — when an acquisition covering a watched
+   AOI lands, build the composite in the background so the fire is ready
+   when opened.
+3. **Sorting and filtering** in the fire list: watched first, plus a
+   "watched only" filter beside the status filters.
+4. **Notification** when a watched fire gets new coverage, reusing the
+   existing toast mechanism.
+
+Open questions: does watching imply auto-*mapping* or only
+auto-*preparing*? (Prepare only — auto-mapping would generate results
+nobody asked for, and auto-accept would then make them downloadable.)
+Does it expire or persist until cleared? Per-user or server-wide? With a
+shared login, server-wide is simpler and matches how the team works.

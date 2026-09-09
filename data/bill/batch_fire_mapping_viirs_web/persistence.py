@@ -90,7 +90,7 @@ def _save_notes():
 
 
 def _save_ip_list():
-    """Persist approved, blocked, and pending IPs to disk."""
+    """Persist approved, blocked, revoked and pending IPs to disk."""
     if not state.ip_file:
         return
     try:
@@ -99,6 +99,9 @@ def _save_ip_list():
                 'approved': dict(state.approved_ips),
                 'blocked': dict(state.blocked_ips),
                 'pending': dict(state.pending_ips),
+                # Must outlive the process: a revocation that vanished
+                # on restart would silently readmit the address.
+                'revoked': dict(state.revoked_ips),
             }
         _atomic_yaml_dump(state.ip_file, data)
     except Exception as exc:

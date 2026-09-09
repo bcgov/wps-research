@@ -43,10 +43,25 @@
         <p class="empty-msg" id="approved-empty">No approved IPs</p>
     </div>
 
+    <!-- Revoked IPs -->
+    <div class="admin-card">
+        <h3>Revoked IPs</h3>
+        <p class="admin-desc">Access is open by default; these
+            addresses have had it withdrawn. Restore returns them to
+            the default.</p>
+        <table class="admin-table">
+            <thead><tr>
+                <th>IP Address</th><th>Username</th><th>Revoked By</th><th>Last seen</th><th>Actions</th>
+            </tr></thead>
+            <tbody id="revoked-body"></tbody>
+        </table>
+        <p class="empty-msg" id="revoked-empty">No revoked IPs</p>
+    </div>
+
     <!-- Blocked IPs -->
     <div class="admin-card">
         <h3>Blocked IPs</h3>
-        <p class="admin-desc">Denied access</p>
+        <p class="admin-desc">Denied access outright</p>
         <table class="admin-table">
             <thead><tr>
                 <th>IP Address</th><th>Username</th><th>Blocked By</th><th>Since</th><th>Actions</th>
@@ -202,6 +217,28 @@ async function loadData() {
         }
 
         // Blocked
+        // Revoked: addresses an admin has closed the gate on.
+        const rb = document.getElementById('revoked-body');
+        const re_ = document.getElementById('revoked-empty');
+        const revoked = Object.entries(data.revoked || {});
+        rb.innerHTML = '';
+        re_.style.display = revoked.length ? 'none' : 'block';
+        for (const [ip, info] of revoked) {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><code>${esc(ip)}</code></td>
+                <td>${esc(info.username)}</td>
+                <td>${esc(info.revoked_by)}</td>
+                <td>${esc(info.last_seen || info.timestamp)}</td>
+                <td>
+                    <button class="btn btn-sm"
+                        onclick="ipAction('restore','${esc(ip)}')">Restore</button>
+                    <button class="btn btn-sm btn-danger"
+                        onclick="ipAction('block','${esc(ip)}')">Block</button>
+                </td>`;
+            rb.appendChild(tr);
+        }
+
         const bb = document.getElementById('blocked-body');
         const be = document.getElementById('blocked-empty');
         const blocked = Object.entries(data.blocked || {});

@@ -34,7 +34,7 @@
     <h2>Batch Fire Mapping</h2>
     <p class="subtitle">Sign in to continue</p>
     <div class="error-msg" id="error-msg">{{{ error_msg }}}</div>
-    <form method="POST" action="/login">
+    <form method="POST" action="/login{{ next_qs }}">
         <input type="text" name="username" placeholder="Username"
                autocomplete="username" required>
         <input type="password" name="password" placeholder="Password"

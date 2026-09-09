@@ -268,6 +268,9 @@ class FireRoutes:
             # must never kick off a multi-minute build from a dropdown,
             # which is what the Date select dialog is for.
             'products': self._built_products(fire_numbe, fire),
+            # Which product the fire is actually on, so the selector
+            # can show it without the client re-deriving it.
+            'product_key': self._loaded_product_key(fire),
             # Report what the USER is on, not the transient value the
             # background prebuild may currently be sitting at -- that
             # race made a new fire open on MRAP instead of L2.
@@ -327,6 +330,14 @@ class FireRoutes:
         source = body.get('source', 'l2')
         # An explicit date makes the left selector authoritative: the
         # product it names becomes the one classified and exported.
+        # A product key names one specific composite, including which
+        # night's MRAP mosaic it was built from.
+        _product = body.get('product', None)
+        if _product is not None:
+            _product = str(_product).strip()
+            if not re.fullmatch(r'(mrap|l2)(_p\d{8}|_d\d{8})?',
+                                _product or ''):
+                _product = None
         _date = body.get('l2_date', None)
         if _date is not None:
             _date = str(_date).strip()
@@ -347,7 +358,11 @@ class FireRoutes:
             fire.user_post_source = source
             if _date is not None:
                 fire.user_l2_date = _date
-        result = switch_post_source(fire, source, l2_date=_date)
+        if _product:
+            fire.user_post_source = source
+            result = switch_post_source(fire, source, product=_product)
+        else:
+            result = switch_post_source(fire, source, l2_date=_date)
         if result.get('ok'):
             try:
                 from ..prepare import set_user_post_source
@@ -363,6 +378,7 @@ class FireRoutes:
             result['products'] = self._built_products(fire_numbe, fire)
             result['l2_start_date'] = getattr(fire, 'l2_start_date',
                                               '') or ''
+            result['product_key'] = self._loaded_product_key(fire)
         except Exception as exc:
             sys.stderr.write(f'[products] not attached to switch '
                              f'response: {exc}\n')
@@ -1097,15 +1113,32 @@ class FireRoutes:
         # every L2 request returned whatever composite happened to be
         # loaded. With several dated composites selectable it has to
         # name one.
-        from ..prepare import product_key
+        from ..prepare import product_key, product_key_for_path
         _req_date = (_q.get('l2') or [''])[0].strip()
         if _req_date in ('latest', 'most_recent'):
             _req_date = ''
         if not re.fullmatch(r'\d{8}', _req_date or ''):
             _req_date = ''
         _cur_date = getattr(fire, 'l2_start_date', '') or ''
-        _req_key = product_key(_src, _req_date)
-        _cur_key = product_key(_cur_src, _cur_date)
+        # ?prod= names the product exactly, including which night's
+        # mosaic it came from. It supersedes src+l2, which cannot
+        # distinguish two MRAP composites from different nights.
+        _req_prod = (_q.get('prod') or [''])[0].strip()
+        if not re.fullmatch(r'(mrap|l2)(_p\d{8}|_d\d{8})?',
+                            _req_prod or ''):
+            _req_prod = ''
+        _cur_key = (product_key_for_path(
+            getattr(fire, 'crop_bin', '') or '')
+            or product_key(_cur_src, _cur_date))
+        _req_key = _req_prod or product_key(_src, _req_date)
+        # A bare 'mrap'/'l2' means "whatever is loaded for that
+        # source", which is how older clients and warm-cache prefetches
+        # still address it.
+        if _req_key in ('mrap', 'l2'):
+            _csrc, _, _ = (
+                (_cur_key.split('_')[0], '', '') if _cur_key else ('', '', ''))
+            if _csrc == _req_key:
+                _req_key = _cur_key
         if re.fullmatch(r'[A-Za-z0-9_-]+', _src or ''):
             cand = os.path.join(fire.cache_dir, f'previews_{_req_key}')
             if _req_key == _cur_key:
@@ -2429,16 +2462,27 @@ class FireRoutes:
         except Exception:
             pass
 
-    def _built_products(self, fire_numbe, fire):
-        """Products with a complete stack on disk, for the selectors.
+    def _loaded_product_key(self, fire) -> str:
+        try:
+            from ..prepare import product_key_for_path
+            return product_key_for_path(
+                getattr(fire, 'crop_bin', '') or '')
+        except Exception:
+            return ''
 
-        Derived from the fire's OWN loaded stack path rather than by
-        recomputing the identity hash: the hash depends on an instance
-        key that this handler would have to guess, and guessing it
-        wrong yields an empty list and a selector that never gains the
-        date the operator just built. crop_bin is the one path we know
-        is right, because the fire is displaying it.
+    def _built_products(self, fire_numbe, fire):
+        """Every product on disk for this AOI, newest first.
+
+        One entry per STACK FILE, so last night's MRAP composite and
+        tonight's are separate selectable products rather than one
+        entry that silently changes meaning at the nightly turnover.
+
+        Derived from the fire's own loaded stack path: the identity
+        hash depends on an instance key this handler would have to
+        guess, and guessing wrong yields an empty list.
         """
+        from ..prepare import (product_key_for_path, product_label,
+                               product_parts)
         out = []
         try:
             import glob as _g
@@ -2451,73 +2495,61 @@ class FireRoutes:
             if not m:
                 sys.stderr.write(
                     f'[products] {fire_numbe}: cannot parse stack name '
-                    f'{base!r}; no products listed\n')
-                return out
-            ram = os.path.dirname(cb)
-            safe, h = m.group('safe'), m.group('h')
-            prod = re.compile(
-                r'^\d{8}_stack_' + re.escape(safe) + '_' + re.escape(h)
-                + r'(_l2(_d(\d{8}))?)?\.bin$')
-            seen = set()
-            for cand in sorted(_g.glob(os.path.join(
-                    ram, f'*_stack_{safe}_{h}*.bin'))):
-                mm = prod.match(os.path.basename(cand))
-                if not mm:
-                    continue                     # KGC scratch etc.
-                stem = os.path.splitext(cand)[0]
-                # Complete means usable: an interrupted build would
-                # otherwise offer a selector entry that cannot display.
-                if not os.path.isfile(stem + '.hdr'):
-                    continue
-                if mm.group(1) is None:
-                    key, src, date = 'mrap', 'mrap', ''
-                else:
-                    date = mm.group(3) or ''
-                    src = 'l2'
-                    key = f'l2_d{date}' if date else 'l2'
-                    if not os.path.isfile(date_polygons_path(cand)):
+                    f'{base!r}; offering base sources only\n')
+            else:
+                ram = os.path.dirname(cb)
+                safe, h = m.group('safe'), m.group('h')
+                seen = set()
+                for cand in sorted(_g.glob(os.path.join(
+                        ram, f'*_stack_{safe}_{h}*.bin'))):
+                    key = product_key_for_path(cand)
+                    if not key or key in seen:
+                        continue          # KGC scratch, or a duplicate
+                    stem = os.path.splitext(cand)[0]
+                    # Complete means usable: a bare .bin from an
+                    # interrupted build would offer an entry that
+                    # cannot be displayed.
+                    if not os.path.isfile(stem + '.hdr'):
                         continue
-                if key in seen:
-                    continue
-                seen.add(key)
-                out.append({'key': key, 'source': src, 'date': date})
-            # The two BASE sources are always offered.
-            #
-            # Listing only what is already built was right for dated
-            # products -- picking one from a dropdown must never start a
-            # multi-minute build. But MRAP and the default L2 composite
-            # are not optional extras: they are the two sources this
-            # application has always had, and MRAP's stack is created by
-            # a background prebuild that finishes AFTER the fire page
-            # first opens. Scanning the disk therefore hid it until the
-            # user left the fire and came back, which looked like the
-            # source had disappeared.
-            #
-            # Selecting one that is not built yet switches to it and
-            # builds it, exactly as it did before dated products
-            # existed. Only the dated entries stay build-gated.
-            for base_key, base_src in (('mrap', 'mrap'), ('l2', 'l2')):
-                if base_key not in seen:
-                    seen.add(base_key)
-                    out.append({'key': base_key, 'source': base_src,
-                                'date': '', 'built': False})
-            for p in out:
-                p.setdefault('built', True)
-
-            dated = sorted([p for p in out if p['date']],
-                           key=lambda p: p['date'], reverse=True)
-            out = ([p for p in out if p['source'] == 'mrap']
-                   + [p for p in out if p['source'] == 'l2'
-                      and not p['date']]
-                   + dated)
-            sys.stderr.write(
-                f'[products] {fire_numbe}: '
-                + (', '.join(
-                    p['key'] + ('' if p.get('built', True)
-                                else ' (not built yet)')
-                    for p in out) or 'none') + '\n')
+                    src, start, post = product_parts(key)
+                    if src == 'l2' and not os.path.isfile(
+                            date_polygons_path(cand)):
+                        continue
+                    seen.add(key)
+                    out.append({'key': key, 'source': src,
+                                'date': start or post,
+                                'label': product_label(key),
+                                'built': True})
         except Exception as exc:
             sys.stderr.write(f'[products] scan failed: {exc}\n')
+
+        # The two base sources are always offered, even before their
+        # first build: MRAP's stack is created by a background
+        # prebuild that finishes AFTER the page first opens, and
+        # hiding it until then looks like the source disappeared.
+        have_src = {p['source'] for p in out}
+        for base_key, base_src in (('mrap', 'mrap'), ('l2', 'l2')):
+            if base_src not in have_src:
+                out.append({'key': base_key, 'source': base_src,
+                            'date': '', 'label': product_label(base_key),
+                            'built': False})
+
+        # MRAP first, then L2, each newest date first -- the order the
+        # selector shows them in.
+        def _rank(p):
+            return (0 if p['source'] == 'mrap' else 1,
+                    '' if not p['date'] else p['date'])
+        out.sort(key=lambda p: (_rank(p)[0], _rank(p)[1]), reverse=False)
+        mrap = sorted([p for p in out if p['source'] == 'mrap'],
+                      key=lambda p: p['date'], reverse=True)
+        l2 = sorted([p for p in out if p['source'] == 'l2'],
+                    key=lambda p: p['date'], reverse=True)
+        out = mrap + l2
+        sys.stderr.write(
+            f'[products] {fire_numbe}: '
+            + (', '.join(p['key'] + ('' if p['built']
+                                     else ' (not built yet)')
+                         for p in out) or 'none') + '\n')
         return out
 
     def _download_imagery_list(self, fire_numbe):

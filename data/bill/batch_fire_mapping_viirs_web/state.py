@@ -316,6 +316,14 @@ class AppState:
         self.approved_ips: dict = {}
         self.blocked_ips: dict = {}
         self.pending_ips: dict = {}
+        # Addresses whose access an admin has withdrawn.
+        #
+        # Access is open by default and every caller is recorded in
+        # approved_ips, so removing an entry from that list would be
+        # undone by the visitor's next request. Revocation therefore
+        # needs its own list: it is the thing that survives, and it is
+        # what the auto-approve step checks before admitting anyone.
+        self.revoked_ips: dict = {}
         self.ip_file: str = ""
 
         # Recommended settings

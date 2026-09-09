@@ -1094,6 +1094,62 @@ def _source_switch_lock(fire_numbe: str) -> threading.Lock:
         return lk
 
 
+def product_key_for_path(path: str) -> str:
+    """Identity of the product a stack FILE represents.
+
+    Stack names are ``<postdate>_stack_<name>_<hash>[_l2[_d<start>]].bin``
+    where <postdate> is the imagery the composite was built from. That
+    date is what makes last night's product different from tonight's,
+    so it is part of the identity:
+
+        20260823_stack_F_h.bin              -> mrap_p20260823
+        20260823_stack_F_h_l2.bin           -> l2_p20260823
+        20260805_stack_F_h_l2_d20260805.bin -> l2_d20260805
+
+    Without the post date every nightly rebuild collided with the one
+    before it -- same key, same preview stash, same cache entry -- so
+    yesterday's imagery was unreachable the moment today's arrived.
+
+    A start-date L2 build keeps its start-date key: it is pinned to
+    that acquisition window and does not change when new imagery
+    lands, so it needs no post date to stay distinct.
+    """
+    base = os.path.basename(path or '')
+    m = re.match(
+        r'^(?P<post>\d{8})_stack_.+?_[0-9a-fA-F]{6,}'
+        r'(?P<l2>_l2(_d(?P<start>\d{8}))?)?\.bin$', base)
+    if not m:
+        return ''
+    if m.group('start'):
+        return f"l2_d{m.group('start')}"
+    if m.group('l2'):
+        return f"l2_p{m.group('post')}"
+    return f"mrap_p{m.group('post')}"
+
+
+def product_label(key: str) -> str:
+    """Human name for a product key, as the selectors show it."""
+    m = re.fullmatch(r'(mrap|l2)_p(\d{8})', key or '')
+    if m:
+        return (('MRAP composite ' if m.group(1) == 'mrap'
+                 else 'L2 recent ') + m.group(2))
+    m = re.fullmatch(r'l2_d(\d{8})', key or '')
+    if m:
+        return f'L2 recent {m.group(1)}'
+    return 'MRAP composite' if key == 'mrap' else 'L2 recent tile'
+
+
+def product_parts(key: str):
+    """('mrap'|'l2', l2_start_date, post_date) for a product key."""
+    m = re.fullmatch(r'(mrap|l2)_p(\d{8})', key or '')
+    if m:
+        return m.group(1), '', m.group(2)
+    m = re.fullmatch(r'l2_d(\d{8})', key or '')
+    if m:
+        return 'l2', m.group(1), ''
+    return ('mrap' if key == 'mrap' else 'l2'), '', ''
+
+
 def product_key(source: str, l2_date: str = '') -> str:
     """Identity of one displayable product: source AND, for L2, date.
 
@@ -1119,8 +1175,8 @@ def parse_product_key(key: str):
     return ('mrap' if key == 'mrap' else 'l2'), ''
 
 
-def _preview_stash_dir(fire: FireInfo, source: str,
-                       l2_date: str = None) -> str:
+def _preview_stash_dir(fire: FireInfo, source: str = None,
+                       l2_date: str = None, path: str = None) -> str:
     """Per-PRODUCT copy of the rendered previews.
 
     generate_all_previews() always writes to ``<cache>/previews``, so
@@ -1132,18 +1188,29 @@ def _preview_stash_dir(fire: FireInfo, source: str,
     ``l2_date`` defaults to the fire's current date, which keeps every
     existing caller correct: they stash the product that is loaded.
     """
-    if l2_date is None:
-        l2_date = getattr(fire, 'l2_start_date', '') or ''
-    return os.path.join(fire.cache_dir,
-                        f'previews_{product_key(source, l2_date)}')
+    # Prefer the identity of the STACK FILE the previews came from.
+    #
+    # (source, date) cannot tell last night's MRAP composite from
+    # tonight's, so both wrote to previews_mrap and the newer render
+    # overwrote the older -- stomping the very product the operator
+    # wants to go back to.
+    if path is None:
+        path = getattr(fire, 'crop_bin', '') or ''
+    key = product_key_for_path(path) if path else ''
+    if not key:
+        if l2_date is None:
+            l2_date = getattr(fire, 'l2_start_date', '') or ''
+        key = product_key(source or getattr(fire, 'post_source', 'l2'),
+                          l2_date)
+    return os.path.join(fire.cache_dir, f'previews_{key}')
 
 
 def _stash_previews(fire: FireInfo, source: str,
-                    l2_date: str = None) -> None:
+                    l2_date: str = None, path: str = None) -> None:
     src = os.path.join(fire.cache_dir, 'previews')
     if not os.path.isdir(src):
         return
-    dst = _preview_stash_dir(fire, source, l2_date)
+    dst = _preview_stash_dir(fire, source, l2_date, path=path)
     try:
         if os.path.isdir(dst):
             shutil.rmtree(dst, ignore_errors=True)
@@ -1152,14 +1219,15 @@ def _stash_previews(fire: FireInfo, source: str,
         sys.stderr.write(f'[prepare] preview stash failed: {exc}\n')
 
 
-def _restore_previews(fire: FireInfo, source: str) -> bool:
+def _restore_previews(fire: FireInfo, source: str,
+                      path: str = None) -> bool:
     """Put *source*'s stashed previews back in place. True if restored.
 
     Refuses a stash older than the stack it came from: a re-prepare can
     resize the crop, which makes every stashed PNG the wrong dimensions
     and would misregister the vector overlays drawn on top of them.
     """
-    src = _preview_stash_dir(fire, source)
+    src = _preview_stash_dir(fire, source, path=path)
     if not os.path.isdir(src):
         return False
     try:
@@ -1387,8 +1455,27 @@ def _l2_selection_is_current(fire, source: str) -> bool:
     return True
 
 
+def stack_path_for_product(fire, key: str) -> str:
+    """Existing stack file for a product key, or '' if not built."""
+    import glob as _g
+    cb = getattr(fire, 'crop_bin', '') or ''
+    ram = os.path.dirname(cb) or '/ram'
+    base = os.path.basename(cb)
+    m = re.match(r'^\d{8}_stack_(?P<safe>.+?)_(?P<h>[0-9a-fA-F]{6,})'
+                 r'(_l2(_d\d{8})?)?\.bin$', base)
+    if not m:
+        return ''
+    pat = os.path.join(
+        ram, f'*_stack_{m.group("safe")}_{m.group("h")}*.bin')
+    for cand in sorted(_g.glob(pat), reverse=True):
+        if product_key_for_path(cand) == key:
+            return cand
+    return ''
+
+
 def switch_post_source(fire: FireInfo, source: str,
-                       l2_date: str = None) -> dict:
+                       l2_date: str = None,
+                       product: str = None) -> dict:
     """Switch the fire to a product: a source, and for L2 a date.
 
     ``l2_date`` of None means "keep the fire's current date", which is
@@ -1396,6 +1483,23 @@ def switch_post_source(fire: FireInfo, source: str,
     the most-recent composite) selects a specific L2 product, so the
     left-pane selector can choose one directly.
     """
+    # A product key names one specific composite. If its file exists,
+    # the locked switch repoints instead of rebuilding -- which is the
+    # only way to reach an older MRAP mosaic, since the builder always
+    # takes the newest.
+    if product:
+        _psrc, _pstart, _ppost = product_parts(product)
+        source = _psrc
+        existing = stack_path_for_product(fire, product)
+        if existing:
+            fire._pending_product_path = existing
+            fire._pending_l2_date = _pstart
+        else:
+            # Not built: fall back to building that source, honouring a
+            # start date if the key carried one.
+            fire._pending_l2_date = _pstart
+        l2_date = None          # the key has already decided
+
     if l2_date is not None and (source or '').lower() == 'l2':
         # Only RECORD the request here. Applying it now would corrupt
         # the outgoing product's identity: the locked switch stashes
@@ -1484,6 +1588,8 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
     # unrecoverable once it happens.
     _out_src = getattr(fire, 'post_source', '') or ''
     _out_date = getattr(fire, 'l2_start_date', '') or ''
+    # The file the previews on disk were rendered from.
+    _out_path = getattr(fire, 'crop_bin', '') or ''
     _pending_req = getattr(fire, '_pending_l2_date', None)
     if _pending_req is not None:
         if (source or '').lower() == 'l2':
@@ -1507,15 +1613,41 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
         except Exception:
             pass
 
+    # Selecting a product that already exists is a repoint, not a build.
+    #
+    # An older MRAP composite cannot be rebuilt at all -- the builder
+    # always takes the newest mosaic -- so navigating back to last
+    # night's imagery is only possible by pointing at the file that is
+    # still on disk. Doing the same for any existing product also makes
+    # switching between them instant.
+    _want_path = getattr(fire, '_pending_product_path', None)
+    if _want_path:
+        try:
+            del fire._pending_product_path
+        except AttributeError:
+            fire._pending_product_path = None
+    if _want_path and os.path.isfile(_want_path):
+        sys.stderr.write(
+            f'[prepare] {fire.fire_numbe}: repointing to '
+            f'{os.path.basename(_want_path)} (already built)\n')
+        info = {'path': _want_path}
+        _src2, _start2, _post2 = product_parts(
+            product_key_for_path(_want_path))
+        fire.post_source = _src2
+        fire.l2_start_date = _start2
+    else:
+        info = None
+
     try:
-        info = ensure_aoi_stack(
-            fire.fire_numbe, fire.bbox_native, progress_cb=_cb,
-            instance_key=getattr(state, 'shared_root', '') or '',
-            post_source=source, ref_raster=ref_raster,
-            log_cb=lambda m: fire.console_log.append(m.rstrip()),
-            # Per-date L2 composites: empty means 'most recent',
-            # which is the historical behaviour.
-            l2_start_date=getattr(fire, 'l2_start_date', ''))
+        if info is None:
+            info = ensure_aoi_stack(
+                fire.fire_numbe, fire.bbox_native, progress_cb=_cb,
+                instance_key=getattr(state, 'shared_root', '') or '',
+                post_source=source, ref_raster=ref_raster,
+                log_cb=lambda m: fire.console_log.append(m.rstrip()),
+                # Per-date L2 composites: empty means 'most recent',
+                # which is the historical behaviour.
+                l2_start_date=getattr(fire, 'l2_start_date', ''))
     except AoiStackError as exc:
         fire.progress = {}
         return {'ok': False, 'error': str(exc)}
@@ -1538,11 +1670,18 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
     # date was applied.
     prev_src = _out_src
     prev_date = _out_date
-    _prev_key = product_key(prev_src, prev_date) if prev_src else ''
-    _new_key = product_key(source, getattr(fire, 'l2_start_date', ''))
-    if prev_src and _prev_key != _new_key:
+    # Compare the products by the identity of their FILES: two MRAP
+    # composites from different nights are different products even
+    # though (source, date) says they are the same.
+    _prev_key = (product_key_for_path(_out_path)
+                 or (product_key(prev_src, prev_date) if prev_src else ''))
+    _new_key = ''          # filled in after the stack is resolved
+    if prev_src and _out_path:
         try:
-            _stash_previews(fire, prev_src, prev_date)
+            # Always stash the outgoing product. It is keyed by its own
+            # file, so this cannot overwrite anything, and it is what
+            # makes returning to it a copy rather than a re-render.
+            _stash_previews(fire, prev_src, prev_date, path=_out_path)
         except Exception as exc:
             sys.stderr.write(
                 f'[prepare] could not stash {prev_src} previews before '
@@ -1561,13 +1700,14 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
     # composite straight back on screen -- which is exactly what
     # happened: the build ran, and the display never changed. Drop the
     # stale stash so the previews are re-rendered from the new stack.
-    if source == 'l2' and prev_src == 'l2' and _prev_key != _new_key:
+    _new_key = product_key_for_path(getattr(fire, 'crop_bin', '') or '')
+    if _prev_key and _new_key and _prev_key != _new_key:
         try:
-            # The LIVE previews describe the OUTGOING date, so they
+            # The LIVE previews describe the OUTGOING product, so they
             # cannot stay -- but they are no longer thrown away: they
-            # were just stashed under that date's own key above, and
-            # the incoming date's stash (if it has one) is restored
-            # below. Switching between two built dates is therefore a
+            # were stashed under that product's own key above, and the
+            # incoming product's stash (if it has one) is restored
+            # below. Moving between two built products is therefore a
             # file copy, not a re-render.
             live = os.path.join(fire.cache_dir, 'previews')
             if os.path.isdir(live):
@@ -1579,7 +1719,8 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
             sys.stderr.write(f'[prepare] live preview clear failed: '
                              f'{exc}\n')
 
-    restored = _restore_previews(fire, source)
+    restored = _restore_previews(fire, source,
+                                 path=getattr(fire, 'crop_bin', ''))
     if restored:
         try:
             # Only real VIEWS belong in this list. The previews dir
@@ -2664,3 +2805,71 @@ def _accept_fire_sync(fire_numbe: str) -> str:
     finally:
         with _accept_in_progress_lock:
             _accept_in_progress.discard(fire_numbe)
+
+
+def refresh_products_for_all_fires(delay_s: float = 20.0) -> None:
+    """Build today's MRAP and L2 composites for every existing fire.
+
+    Runs in the background at start-up. The province-wide MRAP mosaic
+    turns over nightly, so on the morning after a rebuild every fire's
+    newest product is one the server has never built. Without this the
+    first analyst to open each fire pays that build while they wait;
+    with it the new date is already in the source menu.
+
+    Deliberately additive: older products are left on disk, so the
+    operator can still switch back to the composite they were working
+    with yesterday. That is the whole point of dating them.
+
+    Never fatal -- a fire that cannot be prepared is logged and
+    skipped, because start-up must not depend on imagery being
+    available.
+    """
+    import threading
+
+    def _run():
+        time.sleep(max(0.0, delay_s))     # let the server finish booting
+        try:
+            with state.lock:
+                names = list(state.fires.keys())
+        except Exception:
+            return
+        if not names:
+            return
+        sys.stderr.write(
+            f'[startup] refreshing products for {len(names)} fire(s)\n')
+        built = skipped = failed = 0
+        for fn in names:
+            try:
+                fire = state.fires.get(fn)
+                if fire is None or not getattr(fire, 'bbox_native', None):
+                    skipped += 1
+                    continue
+                # Remember what the analyst was on, and put it back: this
+                # is a background refresh, not a change of their view.
+                was_src = getattr(fire, 'post_source', 'l2') or 'l2'
+                was_date = getattr(fire, 'l2_start_date', '') or ''
+                for src in ('mrap', 'l2'):
+                    r = switch_post_source(fire, src, l2_date='')
+                    if not r.get('ok') and not r.get('unchanged'):
+                        sys.stderr.write(
+                            f'[startup] {fn}: {src} refresh: '
+                            f'{r.get("error") or r.get("busy")}\n')
+                if was_src != 'l2' or was_date:
+                    switch_post_source(fire, was_src, l2_date=was_date)
+                built += 1
+            except Exception as exc:
+                failed += 1
+                sys.stderr.write(
+                    f'[startup] {fn}: product refresh failed: '
+                    f'{type(exc).__name__}: {exc}\n')
+        sys.stderr.write(
+            f'[startup] product refresh done: {built} refreshed, '
+            f'{skipped} skipped, {failed} failed\n')
+        try:
+            from .persistence import _save_fire_state
+            _save_fire_state()
+        except Exception:
+            pass
+
+    threading.Thread(target=_run, daemon=True,
+                     name='startup-products').start()

@@ -6,6 +6,7 @@ in :func:`init` so it tracks the live :class:`AppState` instance
 created by ``app.init_app``.
 """
 
+from urllib.parse import quote
 import datetime
 import glob
 import json
@@ -116,13 +117,39 @@ class AuthRoutes:
 
 
     def handle_login_page(self):
-        # Already logged in? Redirect to home.
+        # Already logged in? Go where they were headed.
         token = self._get_cookie('session')
+        nxt = self._login_next()
         if token and _hash_token(token) in state.sessions:
-            self._redirect('/')
+            self._redirect(nxt or '/')
             return
-        html = render_template('login.html', {'error_msg': ''})
+        html = render_template('login.html', {
+            'error_msg': '',
+            'next_qs': (f'?next={quote(nxt, safe="")}' if nxt else ''),
+        })
         self._send_html(html)
+
+    def _next_qs(self) -> str:
+        nxt = self._login_next()
+        return f'?next={quote(nxt, safe="")}' if nxt else ''
+
+    def _login_next(self) -> str:
+        """The page to return to after logging in.
+
+        Only same-site absolute paths are honoured: taking an arbitrary
+        URL from a query string and redirecting to it after
+        authenticating is an open-redirect, which is worth avoiding
+        even on an internal tool.
+        """
+        from urllib.parse import urlparse, parse_qs, unquote
+        try:
+            q = parse_qs(urlparse(self.path).query)
+            nxt = unquote((q.get('next') or [''])[0])
+        except Exception:
+            return ''
+        if nxt.startswith('/') and not nxt.startswith('//'):
+            return nxt
+        return ''
 
     def handle_login_post(self):
         import hmac
@@ -136,6 +163,7 @@ class AuthRoutes:
                 'error_msg': '<div class="error-msg" style="display:block">'
                              'Too many login attempts. '
                              'Please try again later.</div>',
+                'next_qs': self._next_qs(),
             })
             self._send_html(html, 429)
             return
@@ -168,6 +196,7 @@ class AuthRoutes:
             html = render_template('login.html', {
                 'error_msg': '<div class="error-msg" style="display:block">'
                              'Invalid password.</div>',
+                'next_qs': self._next_qs(),
             })
             self._send_html(html, 401)
             return
@@ -202,7 +231,7 @@ class AuthRoutes:
         cookie = (f'session={raw_token}; HttpOnly; SameSite=Lax; '
                   f'{secure_flag}Path=/; Max-Age={_SESSION_MAX_AGE}')
         self.send_response(302)
-        self.send_header('Location', '/')
+        self.send_header('Location', self._login_next() or '/')
         self.send_header('Set-Cookie', cookie)
         self.send_header('Cache-Control', 'no-store')
         self.end_headers()
@@ -256,6 +285,8 @@ class AuthRoutes:
             payload = {
                 'approved': {k: dict(v)
                              for k, v in state.approved_ips.items()},
+                'revoked': {k: dict(v)
+                            for k, v in state.revoked_ips.items()},
                 'blocked': {k: dict(v)
                             for k, v in state.blocked_ips.items()},
                 'pending': {k: dict(v)
@@ -302,6 +333,7 @@ class AuthRoutes:
                 }
                 state.pending_ips.pop(ip, None)
                 state.blocked_ips.pop(ip, None)
+                state.revoked_ips.pop(ip, None)
 
             elif action == 'block':
                 pending_info = state.pending_ips.get(ip, {})
@@ -314,12 +346,31 @@ class AuthRoutes:
                 }
                 state.approved_ips.pop(ip, None)
                 state.pending_ips.pop(ip, None)
+                state.revoked_ips.pop(ip, None)
 
             elif action == 'revoke':
+                # Record it. Access is open by default and every caller
+                # is auto-added to approved_ips, so dropping the entry
+                # alone would be undone by the address's next request.
+                approved_info = state.approved_ips.get(ip, {})
+                state.revoked_ips[ip] = {
+                    'username': approved_info.get('username', ''),
+                    'revoked_by': self._client_ip(),
+                    'timestamp': now,
+                    'first_seen': approved_info.get('first_seen', ''),
+                    'last_seen': approved_info.get('last_seen', ''),
+                }
                 state.approved_ips.pop(ip, None)
+                state.pending_ips.pop(ip, None)
+
+            elif action in ('restore', 'unrevoke'):
+                # Back to the default: allowed, and tracked again from
+                # the next request.
+                state.revoked_ips.pop(ip, None)
 
             elif action == 'unblock':
                 state.blocked_ips.pop(ip, None)
+                state.revoked_ips.pop(ip, None)
 
         _save_ip_list()
         self._send_json({'status': 'ok'})
