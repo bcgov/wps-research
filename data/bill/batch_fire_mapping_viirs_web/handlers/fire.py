@@ -493,11 +493,17 @@ class FireRoutes:
                 and not last.get('with_data')
                 and (time.time() - float(last.get('finished_at', 0))
                      < 120))
-            if missing and not running and not recent_fail:
-                _cc.fetch_in_background(
+            # Already answered, just not with a number? Then there is
+            # nothing to run and nothing to wait for. Without this the
+            # dialog polled for ever against days the mirror has no
+            # products for.
+            answered = bool(last and not last.get('failed')
+                            and last.get('attempted', 0) == 0)
+            if missing and not running and not recent_fail and not answered:
+                started = _cc.fetch_in_background(
                     root, tiles, missing, key,
                     log=lambda m: sys.stderr.write(m + '\n'))
-                running = True
+                running = started or _cc.is_fetching(key)
             self._send_json({
                 'cover': {d: round(v, 1) for d, v in have.items()},
                 # Keep polling only while work is actually running.
@@ -509,7 +515,7 @@ class FireRoutes:
                 # within a second, so without the second the dialog has
                 # nothing to report.
                 'progress': _cc.progress(key),
-                'last_run': last,
+                'last_run': _cc.last_run(key) or last,
             })
         except Exception as exc:
             sys.stderr.write(f'[cloud] {fire_numbe}: {exc}\n')

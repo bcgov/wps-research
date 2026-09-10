@@ -99,7 +99,15 @@ def _load(cache_root: str) -> dict:
     try:
         with open(cache_path(cache_root), encoding='utf-8') as f:
             data = json.load(f)
-        return data if isinstance(data, dict) else {}
+        if not isinstance(data, dict):
+            return {}
+        if int(data.get('_version', 1)) < CACHE_VERSION:
+            sys.stderr.write(
+                f'[cloud] discarding cache written by an older version '
+                f'({len(data)} entries): its tile matching was wrong, '
+                f'so its "no products" answers cannot be trusted\n')
+            return {}
+        return data
     except (OSError, ValueError):
         return {}
 
@@ -108,6 +116,8 @@ def _save(cache_root: str, data: dict) -> None:
     p = cache_path(cache_root)
     try:
         os.makedirs(os.path.dirname(p), exist_ok=True)
+        data = dict(data)
+        data['_version'] = CACHE_VERSION
         tmp = p + '.tmp'
         with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(data, f)
@@ -116,8 +126,33 @@ def _save(cache_root: str, data: dict) -> None:
         sys.stderr.write(f'[cloud] could not save cache: {exc}\n')
 
 
+# Cache format. Bumped when a change would make older entries wrong
+# rather than merely incomplete -- entries from an earlier version are
+# then ignored instead of being trusted.
+#
+# v2: tile IDs are canonicalised. v1 compared the shapefile's '10UFB'
+# against the 'T10UFB' in product filenames, so nothing ever matched
+# and every tile-day was recorded as "no products". Those entries have
+# to be discarded, not kept: they say the mirror has nothing, which is
+# false.
+CACHE_VERSION = 2
+
+
+def canon_tile(tile: str) -> str:
+    """'10UFB' or 't10ufb' -> 'T10UFB' (the form used in filenames).
+
+    The app's own tile lists come from the shapefile WITHOUT the leading
+    T; Sentinel-2 product names carry it. Both are correct in their own
+    context, so everything here converts to one form before comparing.
+    """
+    t = str(tile or '').strip().upper()
+    if re.fullmatch(r'[0-9]{2}[A-Z]{3}', t):
+        return 'T' + t
+    return t
+
+
 def _key(tile: str, day: str) -> str:
-    return f'{tile}:{day}'
+    return f'{canon_tile(tile)}:{day}'
 
 
 # ------------------------------------------------------- metadata parse
@@ -262,7 +297,7 @@ def cached_percentages(cache_root: str, tiles, days) -> dict:
     worse than one that is briefly absent.
     """
     data = _load(cache_root)
-    tiles = list(tiles or [])
+    tiles = sorted(set(canon_tile(t) for t in (tiles or []) if t))
     out = {}
     for day in days or []:
         vals = []
@@ -287,8 +322,8 @@ def fetch_percentages(cache_root: str, tiles, days,
     never fetched again, so opening the dialog a second time costs
     nothing and adding one new date costs only that date.
     """
-    tiles = sorted(set(t for t in (tiles or []) if t
-                       and tile_matches_utm_zone(t, utm_zone)))
+    tiles = sorted(set(canon_tile(t) for t in (tiles or []) if t))
+    tiles = [t for t in tiles if tile_matches_utm_zone(t, utm_zone)]
     days = sorted(set(d for d in (days or []) if d), reverse=True)
     if not tiles or not days:
         return {}
@@ -316,11 +351,26 @@ def fetch_percentages(cache_root: str, tiles, days,
             break
 
     if not todo:
+        # Nothing to look up, yet the caller asked. That means every
+        # requested day is already answered -- including days answered
+        # as "no products". Saying so is the difference between a
+        # feature that is finished and one that appears hung.
+        with _lock:
+            _last_run[','.join(tiles)] = {
+                'finished_at': time.time(), 'attempted': 0,
+                'with_data': 0, 'no_products': len(days),
+                'failed': 0, 'error': '',
+                'note': 'all requested dates already answered',
+            }
+        if log:
+            log(f'[cloud] nothing to look up: all {len(days)} date(s) '
+                f'already answered for {len(tiles)} tile(s)')
         return cached_percentages(cache_root, tiles, days)
 
     if log:
         log(f'[cloud] {len(todo)} day(s) to look up for '
-            f'{len(tiles)} tile(s)')
+            f'{len(tiles)} tile(s): {", ".join(tiles[:8])}'
+            + (' ...' if len(tiles) > 8 else ''))
     pkey = ','.join(tiles)
     with _lock:
         _progress[pkey] = {'done': 0, 'total': len(todo),

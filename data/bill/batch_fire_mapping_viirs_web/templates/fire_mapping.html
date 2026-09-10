@@ -3904,6 +3904,13 @@ async function loadCloudCover(days) {
         } else if (j.pending) {
             setCloudStatus('Reading cloud cover from the Sentinel-2 '
                            + 'mirror ...');
+        } else if (lr.note && !known) {
+            // Answered, but with no usable numbers -- the mirror has
+            // no products for these dates over these tiles.
+            setCloudStatus(
+                `No Sentinel-2 cloud cover on record for these dates `
+                + `over the ${(j.tiles || []).length} tile(s) covering `
+                + `this AOI.`, 'error');
         } else if (lr.failed && !lr.with_data) {
             // The run finished and produced nothing. Say why, with the
             // server's own message: "no cloud cover" on its own gives
