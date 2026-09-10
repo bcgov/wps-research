@@ -3818,6 +3818,13 @@ function closeDatePicker() {
 // from the same acquisitions.
 let _cloudCover = {};
 let _cloudPoll = null;
+// Has retrieval finished for the dates on screen?
+//
+// Until it has, an empty bar means "not looked up yet"; afterwards the
+// same empty bar means "looked up, nothing on record". Those are
+// different answers and must not look the same -- a grey bar that
+// might resolve is worth waiting for, one that never will is not.
+let _cloudSettled = false;
 
 // Fixed-width cell so rows never shift when the numbers arrive.
 //
@@ -3828,29 +3835,49 @@ function cloudCell(day) {
     const v = _cloudCover[day];
     const known = typeof v === 'number';
     const pct = known ? Math.max(0, Math.min(100, v)) : 0;
-    const txt = known ? v.toFixed(1).padStart(5, ' ') : '     ';
+    // The number column carries the same distinction: blank while it
+    // may still arrive, an em dash once it certainly will not.
+    const txt = known ? v.toFixed(1).padStart(5, ' ')
+        : (_cloudSettled ? '    \u2014' : '     ');
     // The whole track is the day: cloud in RED from the left, the
     // cloud-free remainder in GREEN. Reading the red length still gives
     // the cloud percentage, and the green length is what the operator
     // is actually shopping for -- usable imagery.
     const clear = 100 - pct;
-    const bar = known
-        ? `<span style="display:block;height:100%;width:${pct}%;
-                        background:#c0392b;float:left"></span>
-           <span style="display:block;height:100%;width:${clear}%;
-                        background:#2d8a4e;float:left"></span>`
-        : '';
+    // Three states, three appearances:
+    //   red/green split  -- a figure is known
+    //   pale stripes     -- still being looked up
+    //   flat grey + dash -- looked up, nothing on record
+    let bar;
+    if (known) {
+        bar = `<span style="display:block;height:100%;width:${pct}%;
+                            background:#c0392b;float:left"></span>
+               <span style="display:block;height:100%;width:${clear}%;
+                            background:#2d8a4e;float:left"></span>`;
+    } else if (!_cloudSettled) {
+        bar = `<span style="display:block;height:100%;width:100%;
+                     background:repeating-linear-gradient(
+                         135deg,#e4e4e4 0 4px,#f4f4f4 4px 8px)"></span>`;
+    } else {
+        bar = '';
+    }
     return `<span style="display:inline-flex;align-items:center;gap:6px;
                          flex:0 0 auto">
       <span style="font-family:monospace;font-size:11px;color:#555;
                    white-space:pre;width:3.4em;text-align:right"
             title="${known ? 'Cloud cover ' + v.toFixed(1) + '% ('
                              + clear.toFixed(1) + '% clear)'
-                           : 'Cloud cover not retrieved yet'}">${txt}</span>
+                           : (_cloudSettled
+                              ? 'No cloud cover on record for this date '
+                                + 'over this AOI\u2019s tiles'
+                              : 'Cloud cover is still being retrieved')
+                    }">${txt}</span>
       <span style="display:inline-block;width:70px;height:7px;
                    background:#eee;border-radius:3px;overflow:hidden"
             title="${known ? clear.toFixed(1) + '% cloud-free'
-                           : ''}">${bar}</span>
+                           : (_cloudSettled
+                              ? 'No cloud cover on record'
+                              : 'Still retrieving')}">${bar}</span>
     </span>`;
 }
 
@@ -3881,6 +3908,7 @@ function setCloudStatus(text, tone) {
 async function loadCloudCover(days) {
     if (_cloudPoll) { clearTimeout(_cloudPoll); _cloudPoll = null; }
     if (!days || !days.length) return;
+    _cloudSettled = false;
     try {
         const r = await fetch(
             `/api/fire/${encodeURIComponent(FIRE)}/cloud_cover`
@@ -3892,6 +3920,9 @@ async function loadCloudCover(days) {
         }
         const j = await r.json();
         Object.assign(_cloudCover, j.cover || {});
+        // Settled once nothing is running: from here an empty cell is
+        // an answer, not a gap.
+        _cloudSettled = !j.pending;
         paintCloudCells();
 
         const known = Object.keys(j.cover || {}).length;
