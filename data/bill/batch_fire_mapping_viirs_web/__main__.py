@@ -449,11 +449,49 @@ def main():
                 f'Each year must be unique.')
         rasters_by_year[y] = r
 
-    # Per-year output dirs: <out_root>/<raster_stem>_mapping_results
+    # Per-year output dirs: <out_root>/<year>_mapping_results
+    #
+    # Keyed by YEAR, not by the raster's filename.
+    #
+    # The province-wide MRAP mosaic turns over nightly, so naming this
+    # directory after the raster stem ('20260908_mrap_mapping_results')
+    # gave every restart a brand-new, empty home: fire_state.yaml, the
+    # accepted products and the caches were all still on disk under
+    # yesterday's name, and the fire list came up empty. Fires belong to
+    # an AOI and a year, not to whichever morning's imagery happened to
+    # be loaded when they were drawn.
     outdirs_by_year: dict = {}
     for y, r in rasters_by_year.items():
-        stem = os.path.splitext(os.path.basename(r))[0]
-        od = os.path.join(out_root, f'{stem}_mapping_results')
+        od = os.path.join(out_root, f'{y}_mapping_results')
+        if not os.path.isdir(od):
+            # Adopt the most recent legacy directory for this year
+            # rather than starting empty. Renaming is atomic and cheap
+            # (same filesystem) and leaves any older ones untouched for
+            # inspection.
+            import glob as _glob
+            legacy = [d for d in _glob.glob(
+                os.path.join(out_root, f'*_mapping_results'))
+                if os.path.isdir(d)
+                and os.path.basename(d) != f'{y}_mapping_results'
+                and os.path.isfile(os.path.join(d, 'fire_state.yaml'))]
+            # Only directories whose stem carries this year's date.
+            legacy = [d for d in legacy
+                      if os.path.basename(d)[:4] == str(y)]
+            if legacy:
+                newest = max(legacy, key=os.path.getmtime)
+                try:
+                    os.replace(newest, od)
+                    _log(f'  Migrated fire records: '
+                         f'{os.path.basename(newest)} -> '
+                         f'{os.path.basename(od)}')
+                    for other in legacy:
+                        if other != newest:
+                            _log(f'  NOTE: {os.path.basename(other)} '
+                                 f'also holds records; merge by hand '
+                                 f'if needed')
+                except OSError as exc:
+                    _log(f'  WARNING: could not migrate '
+                         f'{newest}: {exc}')
         os.makedirs(od, exist_ok=True)
         outdirs_by_year[y] = od
 

@@ -1129,23 +1129,9 @@ let _srcSwitchPoll = null;
 // means extracting tiles and can take minutes. With no progress and no
 // limit the page looked hung, and a second click queued behind the
 // server's per-fire lock and appeared to hang for good.
-function startSourceSwitchProgress(src) {
-    const label = (src === 'l2') ? 'L2 recent tile' : 'MRAP composite';
-    if (_srcSwitchPoll) clearInterval(_srcSwitchPoll);
-    _srcSwitchPoll = setInterval(async () => {
-        try {
-            const r = await fetch(
-                `/api/fire/${encodeURIComponent(FIRE)}/progress`,
-                {headers: {'X-Requested-With': 'fetch'}});
-            if (!r.ok) return;
-            const j = await r.json();
-            const d = (j.progress && j.progress.detail) || '';
-            _layerLabel = d ? `Switching to ${label} — ${d}`
-                            : `Switching to ${label}`;
-            layerStatusPaint();
-        } catch (_) { /* progress is a nicety, not a requirement */ }
-    }, 1500);
-}
+// startSourceSwitchProgress() removed: the left selector now paints from
+// the client and informs the server afterwards, so the old
+// wait-for-the-server path had no callers.
 
 function stopSourceSwitchProgress() {
     if (_srcSwitchPoll) clearInterval(_srcSwitchPoll);
@@ -1153,78 +1139,142 @@ function stopSourceSwitchProgress() {
 }
 
 async function onPostSourceChange() {
+    // Same method as the right pane: repaint from the client, then
+    // tell the server.
+    //
+    // The display does not depend on the server. Every product's
+    // previews are already on disk and addressed by product key, so
+    // painting is a fetch of files that exist -- which is why the right
+    // pane has always felt instant. The left pane additionally decides
+    // what Map Fire classifies and what Download exports, so the server
+    // still has to be told; but making the OPERATOR wait for that, and
+    // reverting the menu when it was slow or raced a background
+    // render, is what made this selector feel unpredictable.
+    //
+    // So: paint now, inform the server after, and never revert the
+    // selection. If the server call fails the display stays where the
+    // operator put it and the console says the classification source
+    // has not moved yet.
     const sel = document.getElementById('post-source-select');
-    const want = sel ? sel.value : currentPostSource;
-
-    if (_srcSwitchBusy) {
-        // Remember it instead of discarding it.
-        //
-        // Reverting the selector here is why a switch sometimes needed
-        // asking for twice: a choice made while the previous one was
-        // still running was silently dropped, and the operator saw the
-        // menu snap back with no change. The latest choice now runs as
-        // soon as the current switch finishes -- last one wins, so
-        // clicking through several products settles on the last.
-        _queuedProduct = want;
-        log(`A source switch is running; ${productLabel(
-            _products.find((q) => q.key === want)
-            || parseProductKey(want))} is queued.`, 'dim');
+    if (!sel) return;
+    const key = sel.value;
+    if (!key) {
+        setSourceSelectValue(sel, currentProductKey());
         return;
     }
-    const previous = currentPostSource;
-    // Any switch supersedes an in-flight resync: a reply that was
-    // already on its way describes the product we are leaving, and
-    // applying it afterwards is what made the selector show the wrong
-    // entry.
+    if (key === currentProductKey()) return;
+
+    const parts = parseProductKey(key);
+    const previous = currentProductKey();
+
+    // Adopt it immediately: the pane, the URLs and the cache keys all
+    // read these.
+    leftProduct = key;
+    currentPostSource = parts.source;
+    currentL2Date = parts.date || '';
     _switchEpoch += 1;
-    _srcSwitchBusy = true;
-    _srcBusyReleased = false;
-    // Grey out BOTH selectors: the right pane reads the same per-source
-    // preview stash, so letting it be changed mid-switch would race the
-    // very files being rewritten.
-    setSourceSelectorsEnabled(false);
-    _srcSwitchAbort = new AbortController();
-    // Generous, but finite: a build that has not finished in 20 minutes
-    // is stuck, and leaving the page waiting forever helps nobody.
-    const killer = setTimeout(() => {
-        try { _srcSwitchAbort.abort(); } catch (_) {}
-    }, 20 * 60 * 1000);
-    startSourceSwitchProgress(want);
+    if (!splitActive) {
+        // Not comparing: keep the right pane aligned so entering split
+        // shows the same imagery on both sides.
+        rightProduct = key;
+        rightPostSource = parts.source;
+        rightL2Date = parts.date || '';
+        setSourceSelectValue(
+            document.getElementById('post-source-select-right'), key);
+    }
+    try { invalidateEraseBuffers('source changed'); } catch (_) {}
     setTimeout(() => { try { saveUiState(); } catch (_) {} }, 0);
-    try {
-        return await _onPostSourceChangeInner();
-    } catch (err) {
-        // Revert, so the selector never claims a source that is not
-        // loaded.
-        currentPostSource = previous;
-        if (sel) sel.value = previous;
-        const aborted = err && err.name === 'AbortError';
-        log(aborted
-            ? 'Source switch timed out after 20 minutes and was '
-              + 'cancelled; the previous source is still loaded.'
-            : `Source switch failed: ${err.message}`, 'error');
-        try { updateSubtitle('left', leftView); } catch (_) {}
-    } finally {
-        clearTimeout(killer);
-        srcSwitchVisualDone();      // no-op if already released
-        setSourceSelectorsEnabled(true);
-        try { syncDateSelectButton(); } catch (_) {}
-        _srcSwitchBusy = false;
-        _srcSwitchAbort = null;
-        // Honour a choice made while this one was running.
-        if (_queuedProduct) {
-            const next = _queuedProduct;
-            _queuedProduct = '';
-            if (next !== currentProductKey()) {
-                const s2 = document.getElementById('post-source-select');
-                setSourceSelectValue(s2, next);
-                if (s2 && s2.value === next) {
-                    log(`[products] running the queued switch to `
-                        + `${next}`, 'dim');
-                    setTimeout(() => onPostSourceChange(), 0);
-                }
+
+    const label = productLabel(_products.find((q) => q.key === key)
+                               || parts);
+    layerBusyBegin(`Loading ${label}`);
+
+    (async () => {
+        try {
+            await loadPaneImage('left', leftView);
+            updateSubtitle('left', leftView);
+            if (splitActive && rightView) {
+                updateSubtitle('right', rightView);
             }
+            try { syncDateSelectButton(); } catch (_) {}
+            await loadFireOverlays();
+            loadFireGeo();
+            loadDatePlot().then(loadNextCoverage).catch(loadNextCoverage);
+            warmSourceCache(parts.source);
+            warmHintCache(parts.source);
+        } catch (err) {
+            log(`[source] could not display ${label}: ${err.message}`,
+                'error');
+        } finally {
+            layerBusyEnd();
         }
+        // Tell the server which product to classify and export from.
+        // Background: nothing on screen waits for it.
+        informServerOfProduct(key, previous, label);
+    })();
+}
+
+// Point the SERVER at the product the operator selected.
+//
+// Runs after the display has already changed. It never touches the
+// selector: the operator's choice stands, and a failure is reported
+// rather than silently undone.
+let _serverProductSeq = 0;
+async function informServerOfProduct(key, previous, label) {
+    const seq = ++_serverProductSeq;
+    const parts = parseProductKey(key);
+    try {
+        for (;;) {
+            const r = await fetch(
+                `/api/fire/${encodeURIComponent(FIRE)}/post_source`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json',
+                              'X-Requested-With': 'fetch'},
+                    body: JSON.stringify({source: parts.source,
+                                          l2_date: parts.date || '',
+                                          product: key}),
+                });
+            if (seq !== _serverProductSeq) return;   // superseded
+            const data = await r.json().catch(() => ({}));
+            if (r.status === 409) {
+                // A background build holds the per-fire lock. Wait and
+                // retry: the display is already correct, so this costs
+                // the operator nothing.
+                await new Promise((res) => setTimeout(res, 2000));
+                if (seq !== _serverProductSeq) return;
+                continue;
+            }
+            if (!r.ok || data.error) {
+                log(`[source] the display is on ${label}, but the `
+                    + `server could not switch: `
+                    + `${data.error || ('HTTP ' + r.status)}. Map Fire `
+                    + `and Download still use ${previous}.`, 'error');
+                return;
+            }
+            if (Array.isArray(data.products)) {
+                _products = data.products;
+                withSelectorGuardPaused(() => {
+                    buildOptions(
+                        document.getElementById('post-source-select'),
+                        currentProductKey());
+                    buildOptions(
+                        document.getElementById(
+                            'post-source-select-right'),
+                        rightProductKey());
+                });
+            }
+            if (data.hint_mode) {
+                currentHintMode = data.hint_mode;
+                renderHintModeButtons();
+            }
+            if (data.status) updateStatusDisplay(data.status);
+            try { refreshDownloadStatus(); } catch (_) {}
+            log(`[source] server now classifying from ${label}`, 'dim');
+            return;
+        }
+    } catch (err) {
+        log(`[source] server switch failed: ${err.message}. The `
+            + `display is on ${label}.`, 'error');
     }
 }
 
@@ -1248,316 +1298,9 @@ function setSourceSelectorsEnabled(on) {
     }
 }
 
-async function _onPostSourceChangeInner() {
-    const sel = document.getElementById('post-source-select');
-    if (!sel) return;
-    // The selector's value is a PRODUCT key ('mrap', 'l2',
-    // 'l2_d20260805'), so a date change is a source change now.
-    const _key = sel.value;
-    if (!_key) {
-        // An empty value means the list and the selection had drifted
-        // apart. Repair the display instead of asking the server to
-        // switch to nothing.
-        log('[products] left selector had no value; restoring it', 'dim');
-        setSourceSelectValue(sel, currentProductKey());
-        return;
-    }
-    const _sel = parseProductKey(_key);
-    const src = _sel.source;
-    const _wantDate = _sel.date;
-    if (_key === currentProductKey()) return;   // already showing it
-    // Commit to the target now. Every preview request carries the
-    // pane's product, so if this waited for the server's reply, any
-    // fetch issued meanwhile -- the instant swap, a poll, an overlay
-    // reload -- would still ask for the OLD product and could paint it
-    // under the new label. The failure path below restores the server's
-    // truth if the switch does not go through.
-    const _prevProduct = leftProduct;
-    leftProduct = _key;
-    // Optimistic swap: if both this view's images are already cached
-    // for the target source, repaint from cache NOW and let the server
-    // catch up in the background. The server call still has to happen
-    // (mapping reads fire.crop_bin, which it repoints), but the user
-    // should not wait on it just to look at the imagery.
-    const prevSource = currentPostSource;
-    // Held for the whole switch, including the server-side stack
-    // repoint, so the toolbar shows activity even when the pane is
-    // repainted instantly from cache.
-    layerBusyBegin(src === 'l2' ? 'Switching to L2 recent tile'
-                                : 'Switching to MRAP composite');
-    // Ask the SAME key builder the cache is filled with.
-    //
-    // This built its key by hand, so every change to cacheKeyFor (the
-    // source prefix, now the L2 date) silently desynchronised the two:
-    // the lookup missed, or worse matched an entry for a different
-    // product. Deriving it from the same function is the only way the
-    // two cannot drift.
-    const _swapKey = (() => {
-        const wasSrc = currentPostSource;
-        try {
-            currentPostSource = src;      // key for the TARGET source
-            return cacheKeyFor(leftView, 'left');
-        } finally {
-            currentPostSource = wasSrc;
-        }
-    })();
-    const canSwapInstantly = !!_swapKey && _previewBlobs.has(_swapKey);
-    if (canSwapInstantly) {
-        currentPostSource = src;
-    try { invalidateEraseBuffers('source changed'); } catch (_) {}
-        if (!splitActive) {
-            // Not comparing: keep the right pane aligned so entering
-            // split shows the same imagery on both sides.
-            rightPostSource = src;
-            rightL2Date = _wantDate;
-            rightProduct = _key;
-            setSourceSelectValue(
-                document.getElementById('post-source-select-right'),
-                rightProductKey());
-        }
-        loadPaneImage('left', leftView);
-        if (splitActive && rightView) loadPaneImage('right', rightView);
-    }
-
-    // Only lock the control when the user is actually waiting on the
-    // server. After an instant swap the view is already correct, so
-    // greying out the menu just looks like something is stuck.
-    sel.disabled = !canSwapInstantly;
-    // Don't claim a rebuild: the server keeps a per-source stack and
-    // preview stash, so a switch is normally a restore, not a rebuild.
-    // Saying "rebuilding" when nothing is being rebuilt is misleading.
-    const srcLabel = src === 'l2' ? 'L2 recent' : 'MRAP composite';
-    log(canSwapInstantly
-        ? `Showing ${srcLabel} (cached).`
-        : `Loading ${srcLabel} ...`);
-    try {
-        // Retry while the server says it is busy.
-        //
-        // A fire that has just become READY starts a BACKGROUND
-        // prebuild of the other source, and that holds the same
-        // per-fire lock. Switching in those first minutes was refused,
-        // the selector snapped back, and the switch only "took" on a
-        // later attempt -- which is why it needed doing two or three
-        // times. The work being waited for is usually the very build
-        // this switch needs, so waiting is exactly right; the bottom
-        // bar keeps reporting progress throughout.
-        let r, data;
-        for (;;) {
-            r = await fetch(
-                `/api/fire/${encodeURIComponent(FIRE)}/post_source`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json',
-                          'X-Requested-With': 'fetch'},
-                body: JSON.stringify({source: src,
-                                      l2_date: _wantDate,
-                                      product: _key}),
-                signal: _srcSwitchAbort.signal,
-            });
-            data = await r.json().catch(() => ({}));
-            // Any 409 means "busy", whether or not the body says so.
-            // A 409 without the flag used to fall straight through to
-            // the failure path below, which reverted the selector --
-            // the switch appeared to happen and then undo itself.
-            if (r.status !== 409) break;
-            _layerLabel = (src === 'l2'
-                ? 'Waiting for L2 recent tile'
-                : 'Waiting for MRAP composite')
-                + ' - a background build is using this fire';
-            layerStatusPaint();
-            // The abort controller still caps the total wait, so this
-            // cannot spin forever.
-            await new Promise((res) => setTimeout(res, 2000));
-            if (_srcSwitchAbort.signal.aborted) break;
-        }
-        if (!r.ok || data.error) {
-            log('Post source switch failed: ' + (data.error || 'unknown'),
-                'error');
-            // Settle on what the SERVER actually has, not on an
-            // assumption.
-            //
-            // Reverting to prevSource was a guess, and a wrong one
-            // whenever the switch had in fact taken effect before the
-            // error (or the error was transient): the pane showed the
-            // new source for an instant and then snapped back, while
-            // the server was on the new source all along. Asking costs
-            // one request and cannot disagree with reality.
-            let actual = prevSource;
-            leftProduct = _prevProduct;
-            try {
-                const chk = await fetch(
-                    `/api/fire/${encodeURIComponent(FIRE)}/prepare`,
-                    {headers: {'X-Requested-With': 'fetch'}});
-                if (chk.ok) {
-                    const cj = await chk.json();
-                    if (cj && cj.post_source) actual = cj.post_source;
-                    if (cj && (cj.user_product_key || cj.product_key)) {
-                        leftProduct = cj.user_product_key
-                            || cj.product_key;
-                    }
-                }
-            } catch (_) { /* keep the assumption */ }
-            currentPostSource = actual;
-            rebuildSourceSelectors();
-            if (actual !== prevSource) {
-                log(`[source] the server is on ${actual.toUpperCase()}; `
-                    + `showing that`, 'dim');
-            }
-            _previewStamp = Date.now();
-            loadPaneImage('left', leftView);
-            if (splitActive && rightView) {
-                loadPaneImage('right', rightView);
-            }
-            try { syncDateSelectButton(); } catch (_) {}
-            return;
-        }
-        // Previews for the OLD source stay valid (they are keyed by
-        // source), so only bump the stamp when the server actually
-        // regenerated them -- which it does on every switch. Keep the
-        // old source's entries by NOT clearing, and rely on the key
-        // including the source.
-        currentPostSource = src;
-        currentL2Date = _wantDate;
-        leftProduct = (data && (data.user_product_key || data.product_key))
-            || _key;
-        if (typeof data.l2_start_date === 'string') {
-            currentL2Date = data.l2_start_date;
-        }
-        // Re-read the product list: a switch can be the first moment a
-        // product becomes complete, and the selector should show it
-        // without waiting for a page reload.
-        try {
-            if (Array.isArray(data.products)) _products = data.products;
-            rebuildSourceSelectors();
-        } catch (_) {}
-        // The server rebuilds the hint (and may switch its mode) as
-        // part of the swap, and returns the fire to READY -- mirror
-        // both here so the badge and hint buttons don't lag behind.
-        if (data.hint_mode) {
-            // Guarded: an empty value would clear the selection and
-            // leave the row looking as though VIIRS were chosen.
-            currentHintMode = data.hint_mode;
-            renderHintModeButtons();
-        }
-        // Earlier edits had accidentally nested the three lines below
-        // inside the hint_mode block above, so they only ran when the
-        // response happened to carry a hint mode -- and the L2 date
-        // was being RESET by responses that carried no date at all.
-        // Only adopt a date the server actually reported.
-        if (typeof data.l2_start_date === 'string') {
-            currentL2Date = data.l2_start_date;
-        }
-        // Archive contents changed: relabel the Download button.
-        try { refreshDownloadStatus(); } catch (_) {}
-        // Show the Date select button as soon as the source is known.
-        try { syncDateSelectButton(); } catch (_) {}
-        if (data.status) updateStatusDisplay(data.status);
-        restoreMethodToggle();
-        // Overlays are pixel coordinates into the product's crop, so
-        // they belong to the product -- reload them for the one just
-        // switched to, and await it so nothing paints the previous
-        // product's vectors in between.
-        await loadFireOverlays();
-        // Warm only the product now in use.
-        //
-        // Warming the OTHER source asks the server for previews it may
-        // not have, and the preview endpoint answers by switching the
-        // fire to that product, rendering, and switching back. Doing
-        // that after every switch made each one slower AND gave any
-        // concurrent refresh a window in which the fire was pointed at
-        // the product the operator had just left. The other products
-        // are warmed when they are actually selected.
-        warmSourceCache(src);
-        warmHintCache(src);
-        if (data.tiles && data.tiles.length) {
-            const parts = Object.entries(data.tile_dates || {})
-                .map(([t, d]) => `${t}@${d}`).join(', ');
-            log(`Using L2 tiles: ${parts || data.tiles.join(', ')}`,
-                'success');
-        } else {
-            log(`Post imagery: ${src === 'l2'
-                ? 'L2 recent' : 'MRAP composite'}.`, 'success');
-        }
-        perfMark('post-source switch complete');
-        // Already repainted above when the cache had it; otherwise
-        // refresh now that the server has rebuilt.
-        //
-        // AWAITED, so "finished" means the new imagery is actually on
-        // screen. Previously these were fired and forgotten and the
-        // cache warming below ran before the indicator cleared, so the
-        // bar claimed to be working for several seconds after the panes
-        // had visibly switched.
-        // ALWAYS repaint from the server after a successful switch.
-        //
-        // The instant swap is an optimistic paint from a warm cache
-        // entry, and a warm entry fetched at the wrong moment can hold
-        // the previous source's pixels under this source's key. When
-        // the swap was "instant" nothing ever verified against the
-        // server, so a poisoned entry stayed on screen and the switch
-        // appeared not to take. One awaited reload with a fresh stamp
-        // is cheap, and after it the pane provably shows what the
-        // server has.
-        _previewStamp = Date.now();
-        {
-            await loadPaneImage('left', leftView);
-            if (splitActive && rightView) {
-                await loadPaneImage('right', rightView);
-            }
-            // Confirm something actually rendered.
-            //
-            // The switch can succeed while this view's preview for the
-            // new source has not been written yet; the pane then stays
-            // blank and the switch looks like it did nothing. One
-            // retry, after a short pause, covers that -- and if the
-            // view genuinely has no preview for this source, fall back
-            // to post-fire, which every source always has.
-            const { img: li } = getPaneElements('left');
-            if (!li || !li.naturalWidth) {
-                await new Promise((res) => setTimeout(res, 700));
-                await loadPaneImage('left', leftView);
-                const { img: l2 } = getPaneElements('left');
-                if ((!l2 || !l2.naturalWidth) && leftView !== 'post') {
-                    log(`[source] "${leftView}" has no preview for `
-                        + `${src.toUpperCase()} yet; showing post-fire`,
-                        'dim');
-                    leftView = 'post';
-                    const vs = document.getElementById('view-select');
-                    if (vs) vs.value = 'post';
-                    await loadPaneImage('left', 'post');
-                    updateSubtitle('left', 'post');
-                }
-            }
-        }
-        // The visible work is done: release the indicator HERE rather
-        // than after the background warming below.
-        srcSwitchVisualDone();
-
-        // Warm the cache for every stack-derived view of this source so
-        // subsequent toggles are instant regardless of which view is up.
-        // Deliberately not awaited and not covered by the indicator --
-        // it is prefetching, and the user is not waiting for it.
-        warmSourceCache(src);
-        warmHintCache(src);
-        drainWarmQueue();
-    } catch (err) {
-        log('Post source switch error: ' + err.message, 'error');
-        setSourceSelectValue(sel, currentProductKey());
-    } finally {
-        sel.disabled = false;
-        // One authoritative resync after EVERY switch, whatever the
-        // outcome. This is what stops state accumulating across
-        // repeated switching: the options and the selection are always
-        // re-derived from the server rather than patched in place.
-        scheduleProductResync('after switch');
-        // Overlays are tied to the crop, which the switch may have
-        // repointed at the other source's stack.
-        loadFireOverlays();
-        loadFireGeo();
-        // Sequenced deliberately: the expected-coverage panel compares
-        // the platforms it can predict against the platforms actually
-        // seen in the date plot, so that data has to exist first.
-        loadDatePlot().then(loadNextCoverage).catch(loadNextCoverage);
-    }
-}
+// _onPostSourceChangeInner() removed: the left selector now paints from
+// the client and informs the server afterwards, so the old
+// wait-for-the-server path had no callers.
 
 const HINT_MODES = [
     {id: 'viirs',         label: 'VIIRS'},
@@ -8741,6 +8484,11 @@ const PROGRESS_STAGE_LABELS = {
     downloading_viirs: 'VIIRS',
     accumulating: 'VIIRS accumulate',
     cropping: 'Build AOI stack',
+    locating: 'Locating imagery',
+    extracting: 'Reading Sentinel-2 data',
+    compositing: 'Building the AOI composite',
+    previews: 'Rendering preview imagery',
+    hint: 'Computing the hint layer',
     // KGC run stages (see kgc.KGC_STAGES).
     kgc_build: 'Build KGC',
     kgc_stack: 'Band stack',

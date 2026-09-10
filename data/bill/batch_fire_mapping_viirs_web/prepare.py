@@ -2330,7 +2330,12 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
         fire.acc_end = fire.viirs_end_date
 
     # -- Generate preview images --
+    set_prep_stage(fire, 'previews',
+                   detail='rendering the display layers',
+                   frac=0.05)
     views = generate_all_previews(crop_bin, cache_dir, fire_numbe)
+    set_prep_stage(fire, 'previews',
+                   detail='previews written', frac=1.0)
     try:
         from .mapping import record_base_preview_geo
         record_base_preview_geo(cache_dir, crop_bin)
@@ -2401,6 +2406,12 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
     if fire.hint_bin and os.path.isfile(fire.hint_bin):
         _overlay_mask_on_post(fire, fire.hint_bin, 'hint', (0.0, 0.8, 0.2))
 
+    # Clear the progress line: a finished fire must not keep
+    # showing the last step it happened to be on.
+    try:
+        fire.progress = {}
+    except Exception:
+        pass
     fire.status = FireStatus.READY
     _save_fire_state()
 
@@ -2959,7 +2970,25 @@ def set_prep_stage(fire, key: str, detail: str = '', frac: float = 0.0,
         # in is noise, and showing it invites the operator to trust it.
         eta = None
         if overall >= 0.04 and elapsed >= 5.0:
-            eta = max(0.0, elapsed * (1.0 - overall) / overall)
+            raw = max(0.0, elapsed * (1.0 - overall) / overall)
+            prev_eta = prev.get('eta_s')
+            if isinstance(prev_eta, (int, float)) and prev_eta >= 0 \
+                    and prev.get('kind') == kind:
+                # Blend with the previous figure, weighted by how far
+                # through the job we are.
+                #
+                # The raw estimate is elapsed/position, and position
+                # jumps at every stage boundary -- which is what made
+                # the countdown fall from two minutes to six seconds in
+                # a single poll. Early on the raw number is mostly
+                # noise, so it is damped heavily; as the job completes
+                # it becomes reliable and is trusted almost fully, so
+                # the estimate still converges to zero at the end
+                # instead of hanging above it.
+                alpha = min(0.9, 0.2 + 0.7 * overall)
+                eta = (1.0 - alpha) * prev_eta + alpha * raw
+            else:
+                eta = raw
 
         changed = (prev.get('stage') != key
                    or prev.get('detail') != detail)
