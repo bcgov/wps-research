@@ -2643,8 +2643,12 @@ async function loadDatePlot() {
     let data = null;
     try {
         const t0 = performance.now();
+        // Name the product being displayed: the server switches a
+        // moment after the client does, so asking about "the current
+        // source" could describe the previous one.
         const r = await fetch(
-            `/api/fire/${encodeURIComponent(FIRE)}/date_plot`);
+            `/api/fire/${encodeURIComponent(FIRE)}/date_plot`
+            + `?prod=${encodeURIComponent(currentProductKey())}`);
         const tH = performance.now();
         if (r.ok) {
             const txt = await r.text();
@@ -2673,6 +2677,9 @@ async function loadDatePlot() {
     // No coverage on record. Show the box with an explanation rather
     // than hiding silently -- an empty panel gave no clue that the
     // feature existed or why it was blank.
+    log(`[date_plot] nothing to draw for `
+        + `${(data && data.product) || currentProductKey()}`
+        + `${data && data.reason ? ': ' + data.reason : ''}`, 'dim');
     box.style.display = '';
     if (cv) cv.style.display = 'none';
     if (legend) {

@@ -430,17 +430,42 @@ class FireRoutes:
             self._send_json({'error': 'Fire not found'}, 404)
             return
         fire = state.fires[fire_numbe]
-        if getattr(fire, 'post_source', 'l2') != 'l2':
+        # Answer for the product the CALLER is displaying.
+        #
+        # The client switches products immediately and tells the server
+        # afterwards, so fire.post_source can still describe the
+        # previous one for a moment. Deciding from it returned "not
+        # applicable to MRAP" while an L2 composite was plainly on
+        # screen -- and the panel then had nothing to show, not even a
+        # legend. ?prod= names what is actually being viewed.
+        from ..prepare import (product_key_for_path, product_parts,
+                               stack_path_for_product)
+        _q = parse_qs(urlparse(self.path).query)
+        _prod = (_q.get('prod') or [''])[0].strip()
+        if not re.fullmatch(r'(mrap|l2)(_p\d{8}|_d\d{8})?', _prod or ''):
+            _prod = (getattr(fire, 'user_product', '')
+                     or self._loaded_product_key(fire))
+        _psrc = product_parts(_prod)[0] if _prod else (
+            getattr(fire, 'post_source', 'l2') or 'l2')
+        if _psrc != 'l2':
             self._send_json({'dates': [], 'width': 0, 'height': 0,
                              'reason': 'not applicable to MRAP',
-                             'product': self._loaded_product_key(fire)})
+                             'product': _prod})
             return
         try:
             from ..l2_recent import date_polygons_path
-            path = date_polygons_path(fire.crop_bin)
+            # The sidecar belongs to the requested product's stack, not
+            # to whichever stack happens to be loaded.
+            _stack = ''
+            if _prod and _prod != self._loaded_product_key(fire):
+                _stack = stack_path_for_product(fire, _prod)
+            if not _stack:
+                _stack = fire.crop_bin
+            path = date_polygons_path(_stack)
             if not path or not os.path.isfile(path):
                 self._send_json({'dates': [], 'width': 0, 'height': 0,
-                                 'reason': 'not generated yet'})
+                                 'reason': 'not generated yet',
+                                 'product': _prod})
                 return
             with open(path, encoding='utf-8') as f:
                 payload = json.loads(f.read())
@@ -451,7 +476,7 @@ class FireRoutes:
             if not payload.get('width') or not payload.get('height'):
                 try:
                     from osgeo import gdal
-                    ds = gdal.Open(fire.crop_bin, gdal.GA_ReadOnly)
+                    ds = gdal.Open(_stack, gdal.GA_ReadOnly)
                     if ds is not None:
                         payload['width'] = ds.RasterXSize
                         payload['height'] = ds.RasterYSize
@@ -479,6 +504,7 @@ class FireRoutes:
                         f'{fire_numbe}\n')
                 except OSError:
                     pass
+            payload['product'] = _prod or product_key_for_path(_stack)
             self._send_json(payload)
         except Exception as exc:
             self._send_json({'error': str(exc)}, 500)
@@ -499,7 +525,15 @@ class FireRoutes:
             self._send_json({'error': 'Fire not found'}, 404)
             return
         fire = state.fires[fire_numbe]
-        if getattr(fire, 'post_source', 'l2') != 'l2':
+        # Judged by the product the operator has chosen, for the same
+        # reason as the plot itself: the server can be a moment behind
+        # the client's switch.
+        _chosen = (getattr(fire, 'user_product', '')
+                   or self._loaded_product_key(fire))
+        from ..prepare import product_parts as _pp
+        _csrc = _pp(_chosen)[0] if _chosen else (
+            getattr(fire, 'post_source', 'l2') or 'l2')
+        if _csrc != 'l2':
             self._send_json(
                 {'error': 'Coverage applies to the L2 source only.'}, 400)
             return
