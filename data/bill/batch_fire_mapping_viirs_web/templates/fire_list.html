@@ -1604,5 +1604,24 @@ function markFireOpened(fireEnc) {
     } catch {}
 }
 </script>
+<script>
+// Report what only the browser knows: screen size and pixel ratio.
+// Once per page load, fire-and-forget -- nothing on the page waits for
+// it and a failure is not worth reporting to the user.
+(function () {
+    try {
+        fetch('/api/client/info', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json',
+                      'X-Requested-With': 'fetch'},
+            body: JSON.stringify({
+                w: (window.screen && window.screen.width) || 0,
+                h: (window.screen && window.screen.height) || 0,
+                dpr: window.devicePixelRatio || 1,
+            }),
+        }).catch(function () {});
+    } catch (e) { /* nothing here is worth breaking a page for */ }
+})();
+</script>
 </body>
 </html>

@@ -305,6 +305,52 @@ class AuthRoutes:
             'waiting': waiting,
         })
 
+    def handle_api_client_info(self):
+        """Record what only the browser knows: screen size and DPR.
+
+        Posted once per page load. Deliberately open to any visitor --
+        there are no logins for ordinary use, and refusing this would
+        simply leave the column empty for everyone who is not an admin.
+
+        Values are clamped and type-checked: this is unauthenticated
+        input, and it lands in a file an admin reads, so a hostile
+        payload must not be able to write arbitrary content there.
+        """
+        body = self._read_body()
+        if body is None:
+            return
+        ip = self._client_ip()
+
+        def _num(v, lo, hi):
+            try:
+                n = int(float(v))
+            except (TypeError, ValueError):
+                return 0
+            return n if lo <= n <= hi else 0
+
+        w = _num(body.get('w'), 1, 100000)
+        h = _num(body.get('h'), 1, 100000)
+        try:
+            dpr = round(float(body.get('dpr') or 0), 2)
+        except (TypeError, ValueError):
+            dpr = 0.0
+        if not (0.1 <= dpr <= 10.0):
+            dpr = 0.0
+
+        changed = False
+        with state.lock:
+            entry = state.approved_ips.get(ip)
+            if entry is not None:
+                if w and h and entry.get('screen') != f'{w}x{h}':
+                    entry['screen'] = f'{w}x{h}'
+                    changed = True
+                if dpr and entry.get('dpr') != dpr:
+                    entry['dpr'] = dpr
+                    changed = True
+        if changed:
+            _save_ip_list()
+        self._send_json({'status': 'ok'})
+
     def handle_api_admin_known_clear(self):
         """Erase the record of addresses seen.
 

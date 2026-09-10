@@ -298,6 +298,7 @@ class BaseHandler:
          'handle_api_admin_ip_action'),
         (re.compile(r'^/api/admin/known/clear$'),
          'handle_api_admin_known_clear'),
+        (re.compile(r'^/api/client/info$'), 'handle_api_client_info'),
         (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/unhide$'),
          'handle_api_unhide'),
@@ -573,6 +574,29 @@ class BaseHandler:
         ('Version/', 'Safari'),
     )
 
+    # Operating systems, most specific first: an iPad reports "Mac OS
+    # X" too, and Android reports Linux, so order decides correctness.
+    _OS_RULES = (
+        ('iPhone', 'iOS'),
+        ('iPad', 'iPadOS'),
+        ('Android', 'Android'),
+        ('Windows NT 10', 'Windows 10/11'),
+        ('Windows NT', 'Windows'),
+        ('Mac OS X', 'macOS'),
+        ('CrOS', 'ChromeOS'),
+        ('Linux', 'Linux'),
+    )
+
+    def _os_name(self) -> str:
+        """Readable operating system from the User-Agent header."""
+        ua = self.headers.get('User-Agent') or ''
+        if not ua:
+            return ''
+        for token, name in self._OS_RULES:
+            if token in ua:
+                return name
+        return ''
+
     def _browser_name(self) -> str:
         """Readable 'Name version' from the User-Agent header.
 
@@ -633,8 +657,10 @@ class BaseHandler:
                         'last_seen': now_iso,
                         'timestamp': now_iso,
                         'browser': self._browser_name(),
+                        'os': self._os_name(),
                         'user_agent': (self.headers.get('User-Agent')
                                        or '')[:300],
+                        'ever_admin': (role == 'admin'),
                         'hits': 1,
                     }
                     save_needed = True
@@ -654,10 +680,24 @@ class BaseHandler:
                         entry['user_agent'] = (
                             self.headers.get('User-Agent') or '')[:300]
                         save_needed = True
+                    o = self._os_name()
+                    if o and entry.get('os') != o:
+                        entry['os'] = o
+                        save_needed = True
                     if not entry.get('first_seen'):
                         entry['first_seen'] = entry.get('timestamp',
                                                         now_iso)
                     if role == 'admin':
+                        # Sticky. An address that has ever signed in as
+                        # admin stays marked as one: the session
+                        # expires, but the fact that somebody there
+                        # holds the password does not, and that is the
+                        # thing worth knowing when reading this list.
+                        if not entry.get('ever_admin'):
+                            entry['ever_admin'] = True
+                            save_needed = True
+                        entry['role'] = 'admin'
+                    elif entry.get('ever_admin'):
                         entry['role'] = 'admin'
                     last = entry.get('_last_saved', 0)
                     if now_s - float(last or 0) > self._IP_TOUCH_INTERVAL:
