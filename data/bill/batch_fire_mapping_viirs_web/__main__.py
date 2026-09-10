@@ -534,7 +534,6 @@ def main():
     _log(f'  Active year: {active_year}')
     _log(f'  Raster     : {raster_path}')
     _log(f'  Output     : {output_root}')
-    _log(f'  Admin user : {app_state.admin_username}')
     _log(f'  LAADS token: {args.laads_token_file}')
     _log(sep)
 
@@ -684,6 +683,10 @@ def main():
     app_state.admin_username = (args.admin_username
                                 or os.environ.get('FIRE_ADMIN_USERNAME')
                                 or 'admin')
+    # Logged HERE, not in the banner above: the banner runs before
+    # AppState is constructed, so naming app_state there raised
+    # UnboundLocalError at start-up.
+    _log(f'  Admin user : {app_state.admin_username}')
     app_state.admin_password = (args.admin_password
                                 or os.environ.get('FIRE_ADMIN_PASSWORD'))
     app_state.user_password  = (args.user_password
