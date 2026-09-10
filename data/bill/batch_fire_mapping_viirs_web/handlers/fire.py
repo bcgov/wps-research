@@ -478,7 +478,8 @@ class FireRoutes:
                                  'reason': 'no tiles for this AOI'})
                 return
             root = os.path.join(state.output_root, '.cloud_cover')
-            have = _cc.cached_percentages(root, tiles, days)
+            cov = _cc.cached_coverage(root, tiles, days)
+            have = {d: v[0] for d, v in cov.items()}
             missing = [d for d in days if d not in have]
             key = ','.join(tiles)
             running = _cc.is_fetching(key)
@@ -506,6 +507,11 @@ class FireRoutes:
                 running = started or _cc.is_fetching(key)
             self._send_json({
                 'cover': {d: round(v, 1) for d, v in have.items()},
+                # How many tiles each average is over. A day with two
+                # of four tiles imaged is a real answer, but the
+                # operator should be able to see that it is a partial
+                # one rather than assume the whole AOI.
+                'coverage': {d: [v[1], v[2]] for d, v in cov.items()},
                 # Keep polling only while work is actually running.
                 'pending': bool(running),
                 'missing': len(missing),

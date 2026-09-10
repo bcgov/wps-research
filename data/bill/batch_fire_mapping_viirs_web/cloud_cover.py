@@ -288,13 +288,18 @@ def _products_for_day(day: str, tiles, level: str = 'L2A',
 
 # ----------------------------------------------------------- public API
 
-def cached_percentages(cache_root: str, tiles, days) -> dict:
-    """Cloud cover already known, without touching the network.
+def cached_coverage(cache_root: str, tiles, days) -> dict:
+    """``{day: (mean, n_with_data, n_tiles)}`` from the cache alone.
 
-    Returns ``{day: percent}`` averaged over the AOI's tiles, including
-    only days where every tile is known -- a partial average would move
-    as the rest arrived, and a figure that changes under the operator is
-    worse than one that is briefly absent.
+    Averaged over the tiles that HAVE a figure, not only over days
+    where every tile does. Sentinel-2 does not image every tile on
+    every pass, so an AOI spanning four tiles routinely has two or
+    three of them on a given day -- and requiring all four meant those
+    days never resolved, were re-queried on every run, and sat striped
+    for ever.
+
+    The count travels with the mean so the caller can say what the
+    average is over rather than implying full coverage.
     """
     data = _load(cache_root)
     tiles = sorted(set(canon_tile(t) for t in (tiles or []) if t))
@@ -307,9 +312,15 @@ def cached_percentages(cache_root: str, tiles, days) -> dict:
                 v = v.get('pct')
             if isinstance(v, (int, float)):
                 vals.append(float(v))
-        if vals and len(vals) == len(tiles):
-            out[day] = sum(vals) / len(vals)
+        if vals:
+            out[day] = (sum(vals) / len(vals), len(vals), len(tiles))
     return out
+
+
+def cached_percentages(cache_root: str, tiles, days) -> dict:
+    """``{day: percent}`` -- the mean only, for callers that want it."""
+    return {d: v[0]
+            for d, v in cached_coverage(cache_root, tiles, days).items()}
 
 
 def fetch_percentages(cache_root: str, tiles, days,
@@ -447,16 +458,17 @@ def fetch_percentages(cache_root: str, tiles, days,
     for day, found, err in results:
         if err:
             continue
-        if not found:
-            # Nothing on the mirror for this day. Recorded so the same
-            # empty answer is not re-derived on every dialog open.
-            for t in tiles:
+        # The listing SUCCEEDED, so every tile without a product
+        # genuinely has none for this day -- Sentinel-2 simply did not
+        # image it. Recording that is what stops the day being looked
+        # up again on every dialog open; leaving those tiles blank is
+        # why partially-covered days were re-queried for ever.
+        for t in tiles:
+            if t in found:
+                data[_key(t, day)] = {'pct': round(float(found[t]), 2),
+                                      'at': now}
+            else:
                 data[_key(t, day)] = {'pct': None, 'empty_at': now}
-                changed += 1
-            continue
-        for t, pct in found.items():
-            data[_key(t, day)] = {'pct': round(float(pct), 2),
-                                  'at': now}
             changed += 1
 
     if changed:
