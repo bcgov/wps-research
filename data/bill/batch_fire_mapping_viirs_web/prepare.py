@@ -598,6 +598,7 @@ def verify_and_repair_fire(fire: FireInfo, log=None) -> dict:
         try:
             views = generate_all_previews(
                 crop, cache_dir, fire.fire_numbe)
+            stamp_previews_product(fire)
             try:
                 from .mapping import record_base_preview_geo
                 record_base_preview_geo(cache_dir, crop)
@@ -1173,6 +1174,40 @@ def parse_product_key(key: str):
     if m:
         return 'l2', m.group(1)
     return ('mrap' if key == 'mrap' else 'l2'), ''
+
+
+def stamp_previews_product(fire: FireInfo, path: str = None) -> None:
+    """Record which product the live previews were rendered from.
+
+    ``previews/`` is a single directory reused by every product, so its
+    contents can only be identified by remembering what wrote them. A
+    switch that repoints crop_bin but fails to re-render leaves last
+    product's pictures in place, and everything downstream then agrees
+    they belong to the new one -- the stack says MRAP, the previews are
+    L2, and nothing can tell. This marker makes that detectable.
+    """
+    try:
+        key = product_key_for_path(
+            path or getattr(fire, 'crop_bin', '') or '')
+        d = os.path.join(fire.cache_dir, 'previews')
+        if not key or not os.path.isdir(d):
+            return
+        with open(os.path.join(d, '.product'), 'w',
+                  encoding='utf-8') as f:
+            f.write(key)
+    except OSError as exc:
+        sys.stderr.write(f'[prepare] could not stamp previews: '
+                         f'{exc}\n')
+
+
+def previews_product(cache_dir: str) -> str:
+    """Which product a preview directory holds, or '' if unmarked."""
+    try:
+        with open(os.path.join(cache_dir, '.product'),
+                  encoding='utf-8') as f:
+            return f.read().strip()
+    except OSError:
+        return ''
 
 
 def _preview_stash_dir(fire: FireInfo, source: str = None,
@@ -1754,6 +1789,8 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
     restored = _restore_previews(fire, source,
                                  path=getattr(fire, 'crop_bin', ''))
     if restored:
+        stamp_previews_product(fire)
+    if restored:
         try:
             # Only real VIEWS belong in this list. The previews dir
             # also holds the per-mode hint renders (hint_redwins_post
@@ -1785,6 +1822,7 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
                            frac=0.1)
             views = generate_all_previews(
                 fire.crop_bin, fire.cache_dir, fire.fire_numbe)
+            stamp_previews_product(fire)
             try:
                 from .mapping import record_base_preview_geo
                 record_base_preview_geo(fire.cache_dir, fire.crop_bin)
@@ -2345,6 +2383,7 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
                    detail='rendering the display layers',
                    frac=0.05)
     views = generate_all_previews(crop_bin, cache_dir, fire_numbe)
+    stamp_previews_product(fire)
     set_prep_stage(fire, 'previews',
                    detail='previews written', frac=1.0)
     try:

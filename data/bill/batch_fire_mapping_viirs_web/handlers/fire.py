@@ -1294,9 +1294,32 @@ class FireRoutes:
                 (_cur_key.split('_')[0], '', '') if _cur_key else ('', '', ''))
             if _csrc == _req_key:
                 _req_key = _cur_key
+        # What the live previews ACTUALLY hold.
+        #
+        # _cur_key describes the stack crop_bin points at. The pictures
+        # in previews/ are a separate thing: a switch repoints the
+        # stack first and re-renders after, so between those two the
+        # directory still holds the previous product's images. Serving
+        # them because the stack agrees is how both panes ended up
+        # showing L2 while both selectors said MRAP -- and nothing
+        # downstream could tell, because every check compared the
+        # request to the stack rather than to the pixels.
+        from ..prepare import previews_product
+        _live_dir = os.path.join(fire.cache_dir, 'previews')
+        _live_key = previews_product(_live_dir)
+        if _live_key and _live_key != _cur_key:
+            sys.stderr.write(
+                f'[preview] {fire_numbe}: previews/ holds {_live_key} '
+                f'but the stack is {_cur_key}; treating the live '
+                f'directory as belonging to {_live_key}\n')
+
         if re.fullmatch(r'[A-Za-z0-9_-]+', _src or ''):
             cand = os.path.join(fire.cache_dir, f'previews_{_req_key}')
-            if _req_key == _cur_key:
+            # "Live is authoritative" only when the live pictures are
+            # the requested product's. When they are not, fall through
+            # to the stash or the on-demand build.
+            if _req_key == _cur_key and (not _live_key
+                                         or _live_key == _req_key):
                 # The requested source IS the one loaded, so previews/
                 # is authoritative. A stash for the same source is a
                 # SNAPSHOT from before it was last made current, and
@@ -1360,8 +1383,11 @@ class FireRoutes:
                     # made while this build was queued.
                     if not getattr(fire, 'user_post_source', ''):
                         fire.user_post_source = _cur_src
+                    # By PRODUCT, so a dated request builds that date
+                    # rather than whichever composite the source would
+                    # default to.
                     r1 = switch_post_source(fire, _src,
-                                            l2_date=_req_date)
+                                            product=_req_key)
                     if not r1.get('ok'):
                         raise RuntimeError(
                             r1.get('error', 'switch failed'))
@@ -1375,15 +1401,20 @@ class FireRoutes:
                     _want_date = getattr(fire, 'user_l2_date', None)
                     if _want_date is None:
                         _want_date = _cur_date
-                    if product_key(_want, _want_date) == _req_key:
+                    _want_key = (getattr(fire, 'user_product', '')
+                                 or product_key(_want, _want_date))
+                    if _want_key == _req_key:
                         fire.prebuilding = False
                         sys.stderr.write(
                             f'[preview] {fire_numbe}: user switched to '
                             f'{_src} while its previews were building; '
                             f'staying on it\n')
                     else:
-                        r2 = switch_post_source(fire, _want,
-                                                l2_date=_want_date)
+                        r2 = (switch_post_source(fire, _want,
+                                                 product=_want_key)
+                              if _want_key not in ('mrap', 'l2')
+                              else switch_post_source(
+                                  fire, _want, l2_date=_want_date))
                         fire.prebuilding = False
                         if not r2.get('ok'):
                             sys.stderr.write(
@@ -1685,7 +1716,17 @@ class FireRoutes:
         # under tonight's label and nothing would notice. The client
         # compares this to what it asked for and refuses to accept a
         # mismatch.
-        _hdrs['X-Product'] = (_req_key if _stash_dir else _cur_key) or ''
+        # Report the product the SERVED pixels belong to.
+        #
+        # From the stash's name when one was used, otherwise from the
+        # live directory's own marker -- never from the stack alone,
+        # which can describe a product the pictures are not yet.
+        if _stash_dir:
+            _served_key = os.path.basename(_stash_dir).replace(
+                'previews_', '', 1)
+        else:
+            _served_key = _live_key or _cur_key
+        _hdrs['X-Product'] = _served_key or ''
         _hdrs['X-Product-Requested'] = _req_key or ''
         try:
             _hdrs['X-Preview-Png-Bytes'] = str(os.path.getsize(png))
