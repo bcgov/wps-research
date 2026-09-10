@@ -305,6 +305,10 @@ class AppState:
         self.viirs_subprocs: dict = {}    # {fire_name: subprocess.Popen}
 
         # Authentication — two roles
+        # Admin sign-in requires BOTH of these. The username was
+        # previously collected by the form and then ignored, so
+        # the password alone was the whole credential.
+        self.admin_username: str = 'admin'
         self.admin_password: Optional[str] = None
         self.user_password: Optional[str] = None
 

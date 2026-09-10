@@ -330,6 +330,26 @@ class BaseHandler:
     # it is added, rather than silently becoming public.
     _ADMIN_PREFIXES = ('/admin', '/api/admin')
 
+    # How long an admin sign-in stays good for the admin area.
+    #
+    # The session itself lasts longer -- it is what keeps the Logout
+    # button and the admin role visible. This is narrower: re-entering
+    # the admin area after a break asks for the password again, so
+    # walking away from an unlocked browser does not leave the admin
+    # pages open to whoever sits down next.
+    _ADMIN_REVERIFY_S = 15 * 60
+
+    @staticmethod
+    def _admin_fresh(sess) -> bool:
+        """Has this session proved the admin password recently?"""
+        if not sess or sess.get('role') != 'admin':
+            return False
+        try:
+            return (time.time() - float(sess.get('admin_verified_at', 0))
+                    ) <= BaseHandler._ADMIN_REVERIFY_S
+        except (TypeError, ValueError):
+            return False
+
     @classmethod
     def _is_admin_path(cls, path: str) -> bool:
         return any(path == p or path.startswith(p + '/')
@@ -514,6 +534,21 @@ class BaseHandler:
         # their role everywhere; everyone else browses as 'user'
         # without being asked for anything.
         role = self._check_session()
+        if role == 'admin' and self._is_admin_path(path):
+            # Signed in, but how long ago? The admin area re-asks.
+            tok = self._get_cookie('session')
+            sess = (state.sessions.get(_hash_token(tok))
+                    if tok else None) or {}
+            if not self._admin_fresh(sess):
+                self._redirect('/login?next=' + quote(path, safe=''))
+                return None
+            # Still using it: keep the clock running rather than
+            # interrupting someone mid-task.
+            try:
+                with state.lock:
+                    sess['admin_verified_at'] = time.time()
+            except Exception:
+                pass
         if role is not None and role != 'admin' \
                 and self._is_admin_path(path):
             # A leftover 'user' session from before logins were dropped

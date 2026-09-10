@@ -120,13 +120,40 @@ class AuthRoutes:
         # Already logged in? Go where they were headed.
         token = self._get_cookie('session')
         nxt = self._login_next()
-        if token and _hash_token(token) in state.sessions:
+        sess = (state.sessions.get(_hash_token(token))
+                if token else None) or {}
+        if sess.get('role') == 'admin' and self._admin_fresh(sess):
             self._redirect(nxt or '/')
             return
+        if sess:
+            # A leftover non-admin session. Left in place it bounces
+            # forever: this page would send them on, and the admin gate
+            # would send them straight back. Drop it and show the form.
+            try:
+                with state.lock:
+                    state.sessions.pop(_hash_token(token), None)
+                _save_sessions()
+            except Exception:
+                pass
+            self._stale_session = True
         html = render_template('login.html', {
             'error_msg': '',
             'next_qs': (f'?next={quote(nxt, safe="")}' if nxt else ''),
         })
+        if getattr(self, '_stale_session', False):
+            # Expire the cookie along with the form, so the browser
+            # stops presenting a session the server has discarded.
+            body = html.encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('Set-Cookie',
+                             'session=; HttpOnly; SameSite=Lax; '
+                             'Path=/; Max-Age=0')
+            self.send_header('Cache-Control', 'no-store')
+            self.end_headers()
+            self.wfile.write(body)
+            return
         self._send_html(html)
 
     def _next_qs(self) -> str:
@@ -183,19 +210,28 @@ class AuthRoutes:
         username = form.get('username', [''])[0].strip()
         password = form.get('password', [''])[0]
 
+        # Both halves must be right, and only the admin credential
+        # grants anything.
+        #
+        # The username was read and discarded, so the password alone
+        # was the credential. And a correct USER password still minted
+        # a session -- which now confers nothing, yet was enough to
+        # make the login page think the visitor was signed in. That is
+        # what produced the redirect loop: the login page sent them to
+        # /admin, the gate sent them back for not being an admin.
+        want_user = (getattr(state, 'admin_username', '') or 'admin')
         role = None
         if (state.admin_password
-                and hmac.compare_digest(password, state.admin_password)):
+                and hmac.compare_digest(password, state.admin_password)
+                and hmac.compare_digest(username.lower(),
+                                        want_user.lower())):
             role = 'admin'
-        elif (state.user_password
-              and hmac.compare_digest(password, state.user_password)):
-            role = 'user'
 
         if role is None:
             _record_failed_login(ip)
             html = render_template('login.html', {
                 'error_msg': '<div class="error-msg" style="display:block">'
-                             'Invalid password.</div>',
+                             'Incorrect username or password.</div>',
                 'next_qs': self._next_qs(),
             })
             self._send_html(html, 401)
@@ -209,6 +245,9 @@ class AuthRoutes:
             state.sessions[hashed] = {
                 'role': role,
                 'username': username,
+                # When the password was actually proved. The admin area
+                # checks this, not merely that a session exists.
+                'admin_verified_at': time.time(),
                 'ip': self._client_ip(),
                 'created_at': datetime.datetime.now().isoformat(
                     timespec='seconds'),

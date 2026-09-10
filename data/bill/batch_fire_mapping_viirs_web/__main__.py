@@ -162,6 +162,9 @@ Example
                    help='Server port (default: 8765)')
 
     # Authentication
+    p.add_argument('--admin_username', default=None,
+                   help='Username required alongside --admin_password '
+                        '(default: admin).')
     p.add_argument('--admin_password', default=None,
                    help='Admin password (or env FIRE_ADMIN_PASSWORD)')
     p.add_argument('--user_password', default=None,
@@ -531,6 +534,7 @@ def main():
     _log(f'  Active year: {active_year}')
     _log(f'  Raster     : {raster_path}')
     _log(f'  Output     : {output_root}')
+    _log(f'  Admin user : {app_state.admin_username}')
     _log(f'  LAADS token: {args.laads_token_file}')
     _log(sep)
 
@@ -677,6 +681,9 @@ def main():
     app_state.viirs_concurrent_jobs = max(1, int(args.viirs_concurrent_jobs))
     app_state.viirs_download_workers = max(1, int(args.viirs_download_workers))
     app_state.viirs_shapify_workers = max(1, int(args.viirs_shapify_workers))
+    app_state.admin_username = (args.admin_username
+                                or os.environ.get('FIRE_ADMIN_USERNAME')
+                                or 'admin')
     app_state.admin_password = (args.admin_password
                                 or os.environ.get('FIRE_ADMIN_PASSWORD'))
     app_state.user_password  = (args.user_password
