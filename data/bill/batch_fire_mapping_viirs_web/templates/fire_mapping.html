@@ -3829,20 +3829,28 @@ function cloudCell(day) {
     const known = typeof v === 'number';
     const pct = known ? Math.max(0, Math.min(100, v)) : 0;
     const txt = known ? v.toFixed(1).padStart(5, ' ') : '     ';
-    // Bar grows to the RIGHT; the scale is 0-100% across a thin track.
-    const hue = known ? (pct < 20 ? '#2d8a4e'
-                        : (pct < 50 ? '#b8860b' : '#a33')) : 'transparent';
+    // The whole track is the day: cloud in RED from the left, the
+    // cloud-free remainder in GREEN. Reading the red length still gives
+    // the cloud percentage, and the green length is what the operator
+    // is actually shopping for -- usable imagery.
+    const clear = 100 - pct;
+    const bar = known
+        ? `<span style="display:block;height:100%;width:${pct}%;
+                        background:#c0392b;float:left"></span>
+           <span style="display:block;height:100%;width:${clear}%;
+                        background:#2d8a4e;float:left"></span>`
+        : '';
     return `<span style="display:inline-flex;align-items:center;gap:6px;
                          flex:0 0 auto">
       <span style="font-family:monospace;font-size:11px;color:#555;
                    white-space:pre;width:3.4em;text-align:right"
-            title="${known ? 'Cloud cover ' + v.toFixed(1) + '%'
+            title="${known ? 'Cloud cover ' + v.toFixed(1) + '% ('
+                             + clear.toFixed(1) + '% clear)'
                            : 'Cloud cover not retrieved yet'}">${txt}</span>
       <span style="display:inline-block;width:70px;height:7px;
-                   background:#eee;border-radius:3px;overflow:hidden">
-        <span style="display:block;height:100%;width:${pct}%;
-                     background:${hue}"></span>
-      </span>
+                   background:#eee;border-radius:3px;overflow:hidden"
+            title="${known ? clear.toFixed(1) + '% cloud-free'
+                           : ''}">${bar}</span>
     </span>`;
 }
 
