@@ -73,6 +73,48 @@ class AoiStackError(RuntimeError):
 # Source discovery
 # ----------------------------------------------------------------------
 
+def list_mrap_dates(mrap_dir: str = MRAP_DIR) -> list:
+    """Every province-wide MRAP mosaic on disk, newest first.
+
+    The counterpart of the L2 date list: it is what lets an operator
+    reach back to an earlier day's composite instead of only the newest
+    one the builder would pick on its own.
+    """
+    out = []
+    try:
+        for name in os.listdir(mrap_dir):
+            m = _MRAP_NAME_RE.match(name)
+            if not m:
+                continue
+            path = os.path.join(mrap_dir, name)
+            stem = os.path.splitext(path)[0]
+            # A mosaic without its header cannot be opened, so offering
+            # it would only produce a failed build later.
+            if not os.path.isfile(stem + '.hdr'):
+                continue
+            try:
+                size = os.path.getsize(path)
+            except OSError:
+                size = 0
+            out.append({'date': m.group(1), 'path': path,
+                        'bytes': size})
+    except OSError as exc:
+        sys.stderr.write(f'[mrap] cannot list {mrap_dir}: {exc}\n')
+    out.sort(key=lambda d: d['date'], reverse=True)
+    return out
+
+
+def find_mrap_for_date(date: str, mrap_dir: str = MRAP_DIR):
+    """(date, path) for one specific mosaic, or (None, None)."""
+    if not re.fullmatch(r'\d{8}', date or ''):
+        return None, None
+    cand = os.path.join(mrap_dir, f'{date}_mrap.bin')
+    if os.path.isfile(cand) and os.path.isfile(
+            os.path.splitext(cand)[0] + '.hdr'):
+        return date, cand
+    return None, None
+
+
 def find_latest_mrap(mrap_dir: str = MRAP_DIR):
     """Return ``(yyyymmdd, path)`` for the newest ``<date>_mrap.bin``.
 
@@ -685,7 +727,8 @@ def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
                      post_source: str = 'mrap',
                      ref_raster: str = None,
                      log_cb=None,
-                     l2_start_date: str = '') -> dict:
+                     l2_start_date: str = '',
+                     mrap_date: str = '') -> dict:
     """Return the AOI stack for *identifier*, building it if needed.
 
     This is the function that makes the ramdisk safe to lose. ``/ram``
@@ -701,7 +744,20 @@ def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
     the "regenerating" message reaches the UI.
     """
     xmin, ymin, xmax, ymax = (float(v) for v in bbox_native)
-    post_date, post_bin = find_latest_mrap()
+    # A specific mosaic, when asked for.
+    #
+    # Without this the builder always took the newest one, so an
+    # earlier day's MRAP composite could not be produced at all -- the
+    # imagery was on disk, but nothing could clip it to an AOI.
+    post_date, post_bin = (None, None)
+    if mrap_date:
+        post_date, post_bin = find_mrap_for_date(mrap_date)
+        if not post_bin:
+            raise AoiStackError(
+                f'No province-wide MRAP mosaic for {mrap_date} in '
+                f'{MRAP_DIR}.')
+    if not post_bin:
+        post_date, post_bin = find_latest_mrap()
     out_bin = aoi_stack_path(identifier, post_date, ram_dir=ram_dir,
                              l2_date=(l2_start_date
                                       if post_source == 'l2' else ''),

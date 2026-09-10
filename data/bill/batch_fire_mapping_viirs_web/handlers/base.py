@@ -202,6 +202,9 @@ class BaseHandler:
         (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/l2_dates$'),
          'handle_api_l2_dates'),
+        (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/mrap_dates$'),
+         'handle_api_mrap_dates'),
 
         (re.compile(r'^/api/queue$'), 'handle_api_queue'),
         (re.compile(r'^/api/notifications$'),

@@ -1495,9 +1495,13 @@ def switch_post_source(fire: FireInfo, source: str,
             fire._pending_product_path = existing
             fire._pending_l2_date = _pstart
         else:
-            # Not built: fall back to building that source, honouring a
-            # start date if the key carried one.
+            # Not built: build it. For L2 the key's start date decides
+            # the composite; for MRAP the key's date names which
+            # province-wide mosaic to clip, so an earlier day can be
+            # produced rather than silently getting the newest.
             fire._pending_l2_date = _pstart
+            if _psrc == 'mrap' and _ppost:
+                fire._pending_mrap_date = _ppost
         l2_date = None          # the key has already decided
 
     if l2_date is not None and (source or '').lower() == 'l2':
@@ -1661,8 +1665,15 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
 
     try:
         if info is None:
+            _mrap_req = getattr(fire, '_pending_mrap_date', '') or ''
+            if _mrap_req:
+                try:
+                    del fire._pending_mrap_date
+                except AttributeError:
+                    fire._pending_mrap_date = ''
             info = ensure_aoi_stack(
                 fire.fire_numbe, fire.bbox_native, progress_cb=_cb,
+                mrap_date=_mrap_req,
                 instance_key=getattr(state, 'shared_root', '') or '',
                 post_source=source, ref_raster=ref_raster,
                 log_cb=lambda m: fire.console_log.append(m.rstrip()),

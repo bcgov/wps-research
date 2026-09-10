@@ -416,6 +416,56 @@ class FireRoutes:
         except Exception as exc:
             self._send_json({'error': str(exc)}, 500)
 
+    def _coverage_cache_path(self, fire, product_key: str) -> str:
+        """Durable home for one product's per-acquisition coverage.
+
+        Under the fire's cache directory on real disk, named by
+        PRODUCT, so each dated composite keeps its own and none can
+        overwrite another.
+        """
+        cache = getattr(fire, 'cache_dir', '') or ''
+        if not cache or not product_key:
+            return ''
+        if not re.fullmatch(r'(mrap|l2)(_p\d{8}|_d\d{8})?',
+                            product_key):
+            return ''
+        return os.path.join(cache, 'coverage',
+                            f'{product_key}_dates.json')
+
+    def handle_api_mrap_dates(self, fire_numbe):
+        """Province-wide MRAP mosaics available to clip, newest first.
+
+        The MRAP counterpart of the L2 date list. Selecting one builds
+        a dated MRAP composite for this AOI, which is the only way to
+        reach back to an earlier day's imagery -- the builder otherwise
+        always takes the newest mosaic.
+        """
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        try:
+            from ..aoi_stack import list_mrap_dates
+            from ..prepare import product_key_for_path
+            built = set()
+            for p in self._built_products(fire_numbe, fire):
+                if p.get('source') == 'mrap' and p.get('built'):
+                    built.add(p.get('date') or '')
+            rows = []
+            for m in list_mrap_dates():
+                rows.append({
+                    'date': m['date'],
+                    'ready': m['date'] in built,
+                    'bytes': m['bytes'],
+                    'product': f'mrap_p{m["date"]}',
+                })
+            self._send_json({'dates': rows,
+                             'current': self._loaded_product_key(fire)})
+        except Exception as exc:
+            sys.stderr.write(f'[mrap_dates] {fire_numbe}: {exc}\n')
+            self._send_json({'error': str(exc)}, 500)
+
     def handle_api_fire_date_plot(self, fire_numbe):
         """Per-acquisition coverage polygons for the L2-recent buffer.
 
@@ -462,6 +512,22 @@ class FireRoutes:
             if not _stack:
                 _stack = fire.crop_bin
             path = date_polygons_path(_stack)
+
+            # Fall back to the durable copy.
+            #
+            # The sidecar is written beside the stack on /ram, so it
+            # dies with the ramdisk even though the coverage it
+            # describes never changes -- it is a property of the
+            # acquisitions that went into that dated composite. A copy
+            # under the fire's cache directory (SSD) survives, and is
+            # written below whenever the ram copy is read.
+            _durable = self._coverage_cache_path(fire, _prod)
+            if (not path or not os.path.isfile(path)) and _durable \
+                    and os.path.isfile(_durable):
+                path = _durable
+                sys.stderr.write(
+                    f'[date_plot] {fire_numbe}: served {_prod} coverage '
+                    f'from the durable copy\n')
             if not path or not os.path.isfile(path):
                 self._send_json({'dates': [], 'width': 0, 'height': 0,
                                  'reason': 'not generated yet',
@@ -505,6 +571,20 @@ class FireRoutes:
                 except OSError:
                     pass
             payload['product'] = _prod or product_key_for_path(_stack)
+            # Keep a copy that outlives the ramdisk.
+            try:
+                if _durable and not os.path.isfile(_durable):
+                    os.makedirs(os.path.dirname(_durable), exist_ok=True)
+                    tmp = _durable + '.tmp'
+                    with open(tmp, 'w', encoding='utf-8') as f:
+                        json.dump(payload, f)
+                    os.replace(tmp, _durable)
+                    sys.stderr.write(
+                        f'[date_plot] {fire_numbe}: saved {_prod} '
+                        f'coverage to {os.path.basename(_durable)}\n')
+            except OSError as exc:
+                sys.stderr.write(
+                    f'[date_plot] could not save coverage: {exc}\n')
             self._send_json(payload)
         except Exception as exc:
             self._send_json({'error': str(exc)}, 500)
@@ -2670,10 +2750,18 @@ class FireRoutes:
             return (0 if p['source'] == 'mrap' else 1,
                     '' if not p['date'] else p['date'])
         out.sort(key=lambda p: (_rank(p)[0], _rank(p)[1]), reverse=False)
+        # Sorted by DATE, newest first, within each source -- not
+        # alphabetically. The lists grow a row per day, and an operator
+        # scanning for "yesterday" should find it at the top rather
+        # than wherever its digits happen to fall. An undated base
+        # entry ('l2', 'mrap') has no date and sorts last within its
+        # group, since it is the fallback rather than a real product.
+        def _by_date(p):
+            return (1 if p.get('date') else 0, p.get('date') or '')
         mrap = sorted([p for p in out if p['source'] == 'mrap'],
-                      key=lambda p: p['date'], reverse=True)
+                      key=_by_date, reverse=True)
         l2 = sorted([p for p in out if p['source'] == 'l2'],
-                    key=lambda p: p['date'], reverse=True)
+                    key=_by_date, reverse=True)
         out = mrap + l2
         sys.stderr.write(
             f'[products] {fire_numbe}: '

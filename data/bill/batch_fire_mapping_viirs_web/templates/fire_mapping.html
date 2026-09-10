@@ -3796,16 +3796,70 @@ function syncDateSelectButton() {
     // occasionally not the thing you want; the menu itself explains
     // what it applies to.
     b.style.display = '';
-    b.title = (src === 'l2')
-        ? 'Choose the acquisition date the L2 recent composite starts '
-          + 'from.'
-        : 'Choose the L2 recent start date. Applying one also switches '
-          + 'the left pane to L2 recent.';
+    // The button does two different jobs, so it says which one.
+    const _bsrc = parseProductKey(src).source;
+    b.title = (_bsrc === 'mrap')
+        ? 'Choose which province-wide MRAP mosaic to clip to this AOI, '
+          + 'creating a dated MRAP composite.'
+        : 'Choose the acquisition date the L2 recent composite starts '
+          + 'from.';
 }
 
 function closeDatePicker() {
     const d = document.getElementById('date-picker');
     if (d) d.style.display = 'none';
+}
+
+// Which question the date dialog is currently asking.
+let _datePickerMode = 'l2';
+let _mrapRows = [];
+
+// Choose a province-wide MRAP mosaic to clip to this AOI.
+//
+// The builder always takes the newest mosaic on its own, so without
+// this an earlier day's MRAP composite could not be produced at all --
+// the imagery sits in /data/mrap_bc, but nothing clipped it.
+async function openMrapDatePicker(dlg, list, note, prog) {
+    list.innerHTML = '<div style="color:#888">Reading available MRAP '
+        + 'composites ...</div>';
+    try {
+        const r = await fetch(
+            `/api/fire/${encodeURIComponent(FIRE)}/mrap_dates`);
+        const j = await r.json();
+        if (!r.ok || j.error) {
+            list.innerHTML = `<div style="color:#a33">`
+                + `${j.error || ('HTTP ' + r.status)}</div>`;
+            return;
+        }
+        _mrapRows = j.dates || [];
+        if (!_mrapRows.length) {
+            list.innerHTML = '<div style="color:#a33">No province-wide '
+                + 'MRAP composites found.</div>';
+            return;
+        }
+        const cur = parseProductKey(j.current || '').post || '';
+        list.innerHTML = _mrapRows.map((d) => {
+            const gb = d.bytes ? (d.bytes / 1073741824).toFixed(1) : '';
+            return `<label style="display:flex;gap:8px;align-items:center;
+                        padding:3px 0;cursor:pointer">
+                <input type="radio" name="mrap-date" value="${d.date}"
+                       ${d.date === cur ? 'checked' : ''}>
+                <span style="font-family:monospace">${d.date}</span>
+                <span style="color:${d.ready ? '#2a7' : '#888'};
+                             font-size:11px">
+                    ${d.ready ? 'ready' : 'builds on apply'}</span>
+                <span style="color:#aaa;font-size:11px">
+                    ${gb ? gb + ' GB' : ''}</span>
+            </label>`;
+        }).join('');
+        if (note) {
+            note.textContent = 'Clips the chosen province-wide mosaic '
+                + 'to this AOI and adds it as a dated MRAP composite. '
+                + 'Existing products are kept.';
+        }
+    } catch (err) {
+        list.innerHTML = `<div style="color:#a33">${err.message}</div>`;
+    }
 }
 
 async function openDatePicker() {
@@ -3819,6 +3873,17 @@ async function openDatePicker() {
     if (note) note.textContent = '';
     if (prog) { prog.style.display = 'none'; prog.textContent = ''; }
     dlg.style.display = 'flex';
+
+    // Which kind of source is selected decides what this dialog is
+    // FOR. With L2 it picks the acquisition window a composite starts
+    // from; with MRAP it picks which night's province-wide mosaic to
+    // clip to this AOI. Both produce a dated product; the inputs are
+    // entirely different, so the dialog asks the matching question.
+    _datePickerMode = parseProductKey(currentProductKey()).source;
+    if (_datePickerMode === 'mrap') {
+        await openMrapDatePicker(dlg, list, note, prog);
+        return;
+    }
     try {
         const r = await fetch(
             `/api/fire/${encodeURIComponent(FIRE)}/l2_dates`);
@@ -3880,8 +3945,81 @@ async function openDatePicker() {
     }
 }
 
+// Build (or select) a dated MRAP composite for this AOI.
+//
+// Deliberately routed through the ordinary product switch: an existing
+// product is a repoint, a new one is a build, and either way the result
+// is a product keyed exactly like every other -- so the selectors, the
+// preview stashes and the persistence all treat it as they treat the
+// rest. No second code path to keep in step.
+async function applyMrapDateSelection() {
+    const btn = document.getElementById('btn-apply-date');
+    const prog = document.getElementById('date-picker-progress');
+    const picked = document.querySelector(
+        'input[name="mrap-date"]:checked');
+    if (!picked) return;
+    const date = picked.value;
+    const key = `mrap_p${date}`;
+    const row = _mrapRows.find((d) => d.date === date) || {};
+
+    _dateApplying = true;
+    if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; }
+    if (prog) {
+        prog.style.display = '';
+        prog.textContent = row.ready
+            ? `Loading the MRAP composite for ${date} ...`
+            : `Clipping the ${date} province-wide mosaic to this AOI. `
+              + `This takes a few minutes.`;
+    }
+    try {
+        const parts = parseProductKey(key);
+        // The display follows immediately, as with any other switch;
+        // the server is told in the same call because this one may
+        // have to BUILD, and the operator is waiting on that.
+        const r = await fetch(
+            `/api/fire/${encodeURIComponent(FIRE)}/post_source`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json',
+                          'X-Requested-With': 'fetch'},
+                body: JSON.stringify({source: 'mrap', product: key}),
+            });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok || data.error) {
+            if (prog) {
+                prog.textContent = 'Failed: '
+                    + (data.error || ('HTTP ' + r.status));
+            }
+            return;
+        }
+        leftProduct = data.user_product_key || data.product_key || key;
+        currentPostSource = 'mrap';
+        currentL2Date = '';
+        if (Array.isArray(data.products)) _products = data.products;
+        rebuildSourceSelectors();
+        closeDatePicker();
+        _previewStamp = Date.now();
+        await loadPaneImage('left', leftView);
+        updateSubtitle('left', leftView);
+        await loadFireOverlays();
+        loadDatePlot().then(loadNextCoverage).catch(loadNextCoverage);
+        try { refreshDownloadStatus(); } catch (_) {}
+        log(`[products] MRAP composite ${date} is now the source`,
+            'success');
+    } catch (err) {
+        if (prog) prog.textContent = 'Failed: ' + err.message;
+        log(`[products] could not apply MRAP ${date}: ${err.message}`,
+            'error');
+    } finally {
+        _dateApplying = false;
+        if (btn) { btn.disabled = false; btn.style.opacity = ''; }
+    }
+}
+
 async function applyDateSelection() {
     if (_dateApplying) return;
+    if (_datePickerMode === 'mrap') {
+        return applyMrapDateSelection();
+    }
     const btn = document.getElementById('btn-apply-date');
     const prog = document.getElementById('date-picker-progress');
     const picked = document.querySelector('.date-pick:checked');
