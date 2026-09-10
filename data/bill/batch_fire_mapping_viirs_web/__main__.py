@@ -778,7 +778,22 @@ def main():
             with open(app_state.ip_file) as _f:
                 _ip_data = yaml.safe_load(_f) or {}
             app_state.approved_ips = _ip_data.get('approved', {})
-            app_state.revoked_ips = _ip_data.get('revoked', {}) or {}
+            # Revocation has been folded into blocking: one denial
+            # state, one list. Anything previously revoked is carried
+            # over as blocked, because dropping it would silently
+            # readmit an address an admin had deliberately shut out.
+            _old_revoked = _ip_data.get('revoked', {}) or {}
+            if _old_revoked:
+                for _ip, _info in _old_revoked.items():
+                    if _ip not in app_state.blocked_ips:
+                        _info = dict(_info or {})
+                        _info.setdefault('blocked_by',
+                                         _info.get('revoked_by', 'admin'))
+                        _info['migrated_from'] = 'revoked'
+                        app_state.blocked_ips[_ip] = _info
+                _log(f'  Migrated {len(_old_revoked)} revoked address'
+                     f'{"" if len(_old_revoked) == 1 else "es"} to the '
+                     f'blocked list')
             app_state.blocked_ips = _ip_data.get('blocked', {})
             app_state.pending_ips = _ip_data.get('pending', {})
         except Exception as _e:

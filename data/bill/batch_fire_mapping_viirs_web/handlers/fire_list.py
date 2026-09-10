@@ -439,6 +439,20 @@ class FireListRoutes:
             except Exception as exc:
                 sys.stderr.write(f'[remove] queue purge: {exc}\n')
 
+            # Its pending messages go with it. A completion notice for
+            # a fire that no longer exists cannot be acted on and only
+            # confuses whoever opens the list next.
+            try:
+                from ..notifications import drop_notifications_for_fire
+                gone = drop_notifications_for_fire(fire_numbe)
+                if gone:
+                    sys.stderr.write(
+                        f'[remove] {fire_numbe}: dropped {gone} '
+                        f'pending notification(s)\n')
+            except Exception as exc:
+                sys.stderr.write(f'[remove] notification purge: '
+                                 f'{exc}\n')
+
             for attr in ('viirs_jobs', 'viirs_subprocs'):
                 d = getattr(state, attr, None)
                 if isinstance(d, dict):

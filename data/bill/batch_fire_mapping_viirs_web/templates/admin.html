@@ -59,21 +59,10 @@
         </div>
     </div>
 
-    <!-- Revoked IPs -->
-    <div class="admin-card">
-        <h3>Revoked IPs</h3>
-        <p class="admin-desc">Access is open by default; these
-            addresses have had it withdrawn. Restore returns them to
-            the default.</p>
-        <table class="admin-table">
-            <thead><tr>
-                <th>IP Address</th><th>Username</th><th>Revoked By</th><th>Last seen</th><th>Actions</th>
-            </tr></thead>
-            <tbody id="revoked-body"></tbody>
-        </table>
-        <p class="empty-msg" id="revoked-empty">No revoked IPs</p>
-    </div>
-
+    <!-- Revoked IPs — REMOVED. Revocation and blocking were the same
+         denial with two names; there is one Blocked list now, and any
+         previously revoked address was migrated into it at start-up.
+    -->
     <!-- Blocked IPs -->
     <div class="admin-card">
         <h3>Blocked IPs</h3>
@@ -264,35 +253,12 @@ async function loadData() {
                 <td>${esc(info.last_seen || '')}</td>
                 <td>
                     <button class="btn btn-danger" style="font-size:11px;padding:2px 8px"
-                        onclick="ipAction('revoke','${esc(ip)}')">Revoke</button>
-                    <button class="btn" style="font-size:11px;padding:2px 8px"
                         onclick="ipAction('block','${esc(ip)}')">Block</button>
                 </td>`;
             ab.appendChild(tr);
         }
 
-        // Revoked: addresses an admin has closed the gate on.
-        const rb = document.getElementById('revoked-body');
-        const re_ = document.getElementById('revoked-empty');
-        const revoked = Object.entries(data.revoked || {});
-        rb.innerHTML = '';
-        re_.style.display = revoked.length ? 'none' : 'block';
-        for (const [ip, info] of revoked) {
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td><code>${esc(ip)}</code></td>
-                <td>${esc(info.username)}</td>
-                <td>${esc(info.revoked_by)}</td>
-                <td>${esc(info.last_seen || info.timestamp)}</td>
-                <td>
-                    <button class="btn btn-sm"
-                        onclick="ipAction('restore','${esc(ip)}')">Restore</button>
-                    <button class="btn btn-sm btn-danger"
-                        onclick="ipAction('block','${esc(ip)}')">Block</button>
-                </td>`;
-            rb.appendChild(tr);
-        }
-
+        // Revoked list removed: blocking is the single denial state.
         const bb = document.getElementById('blocked-body');
         const be = document.getElementById('blocked-empty');
         const blocked = Object.entries(data.blocked || {});

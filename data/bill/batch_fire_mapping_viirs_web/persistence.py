@@ -99,9 +99,10 @@ def _save_ip_list():
                 'approved': dict(state.approved_ips),
                 'blocked': dict(state.blocked_ips),
                 'pending': dict(state.pending_ips),
-                # Must outlive the process: a revocation that vanished
-                # on restart would silently readmit the address.
-                'revoked': dict(state.revoked_ips),
+                # 'revoked' is no longer written: revocation and
+                # blocking were the same denial with two names, so they
+                # are one list now. Existing files are migrated into
+                # 'blocked' at start-up.
             }
         _atomic_yaml_dump(state.ip_file, data)
     except Exception as exc:

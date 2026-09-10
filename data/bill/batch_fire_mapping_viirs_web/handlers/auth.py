@@ -285,8 +285,6 @@ class AuthRoutes:
             payload = {
                 'approved': {k: dict(v)
                              for k, v in state.approved_ips.items()},
-                'revoked': {k: dict(v)
-                            for k, v in state.revoked_ips.items()},
                 'blocked': {k: dict(v)
                             for k, v in state.blocked_ips.items()},
                 'pending': {k: dict(v)
@@ -355,7 +353,6 @@ class AuthRoutes:
                 }
                 state.pending_ips.pop(ip, None)
                 state.blocked_ips.pop(ip, None)
-                state.revoked_ips.pop(ip, None)
 
             elif action == 'block':
                 pending_info = state.pending_ips.get(ip, {})
@@ -368,31 +365,28 @@ class AuthRoutes:
                 }
                 state.approved_ips.pop(ip, None)
                 state.pending_ips.pop(ip, None)
-                state.revoked_ips.pop(ip, None)
 
-            elif action == 'revoke':
-                # Record it. Access is open by default and every caller
-                # is auto-added to approved_ips, so dropping the entry
-                # alone would be undone by the address's next request.
-                approved_info = state.approved_ips.get(ip, {})
-                state.revoked_ips[ip] = {
-                    'username': approved_info.get('username', ''),
-                    'revoked_by': self._client_ip(),
-                    'timestamp': now,
-                    'first_seen': approved_info.get('first_seen', ''),
-                    'last_seen': approved_info.get('last_seen', ''),
-                }
-                state.approved_ips.pop(ip, None)
-                state.pending_ips.pop(ip, None)
-
-            elif action in ('restore', 'unrevoke'):
-                # Back to the default: allowed, and tracked again from
-                # the next request.
-                state.revoked_ips.pop(ip, None)
+            elif action in ('revoke', 'restore', 'unrevoke'):
+                # Revoke is now block; restore is now unblock. The
+                # actions are kept as aliases so an open admin page or
+                # a bookmarked call still does the expected thing
+                # rather than silently failing.
+                if action == 'revoke':
+                    approved_info = state.approved_ips.get(ip, {})
+                    state.blocked_ips[ip] = {
+                        'username': approved_info.get('username', ''),
+                        'blocked_by': self._client_ip(),
+                        'timestamp': now,
+                        'first_seen': approved_info.get('first_seen', ''),
+                        'last_seen': approved_info.get('last_seen', ''),
+                    }
+                    state.approved_ips.pop(ip, None)
+                    state.pending_ips.pop(ip, None)
+                else:
+                    state.blocked_ips.pop(ip, None)
 
             elif action == 'unblock':
                 state.blocked_ips.pop(ip, None)
-                state.revoked_ips.pop(ip, None)
 
         _save_ip_list()
         self._send_json({'status': 'ok'})

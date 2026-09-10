@@ -607,18 +607,17 @@ class BaseHandler:
 
         with state.lock:
             if ip in state.blocked_ips:
+                # The one denial state.
+                #
+                # "Revoked" used to be separate, on the reasoning that
+                # withdrawing access differs from refusing it. In
+                # practice both mean "this address is not to be
+                # served", both are set by an admin, and two lists that
+                # deny identically are two chances to disagree about
+                # who is shut out.
                 info = state.blocked_ips[ip]
                 info['last_seen'] = now_iso
                 blocked = 'blocked'
-            elif ip in state.revoked_ips:
-                # Revocation is what "closing the gate" means when
-                # access is open by default: removing the address from
-                # approved_ips would simply be undone by its next
-                # request, because that is the list this function fills
-                # in automatically.
-                info = state.revoked_ips[ip]
-                info['last_seen'] = now_iso
-                blocked = 'revoked'
             else:
                 blocked = False
                 entry = state.approved_ips.get(ip)
@@ -675,11 +674,6 @@ class BaseHandler:
                 sys.stderr.write(
                     f'[access] could not save the IP list: {exc}\n')
 
-        if blocked == 'revoked':
-            self.send_error(
-                403, 'Access from this address has been revoked by an '
-                     'administrator.')
-            return False
         if blocked:
             self.send_error(403, 'Access from this address is blocked.')
             return False

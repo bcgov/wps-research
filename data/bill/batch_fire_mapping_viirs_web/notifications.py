@@ -161,6 +161,53 @@ def _push_notification(session_hash: str | None,
     return entry
 
 
+def _fire_still_exists(entry) -> bool:
+    """Is this notification about a fire that still exists?
+
+    Notifications outlive the thing they describe: they are queued per
+    session, written to disk, and replayed on the next visit. Deleting
+    a fire never removed them, so opening the fire list could produce a
+    burst of messages about work on records that are long gone --
+    confusing, and impossible to act on.
+
+    Entries with no fire attached (server-wide notices) always pass.
+    """
+    name = (entry or {}).get('fire')
+    if not name:
+        return True
+    try:
+        return name in state.fires
+    except Exception:
+        return True
+
+
+def drop_notifications_for_fire(fire_numbe: str) -> int:
+    """Forget every queued notification about *fire_numbe*.
+
+    Called when a fire is removed, so its pending messages go with it
+    rather than surfacing later against a name that no longer resolves.
+    """
+    removed = 0
+    try:
+        with state.lock:
+            for key in list(state.notifications.keys()):
+                before = len(state.notifications[key])
+                state.notifications[key] = [
+                    e for e in state.notifications[key]
+                    if (e or {}).get('fire') != fire_numbe]
+                removed += before - len(state.notifications[key])
+                if not state.notifications[key]:
+                    del state.notifications[key]
+    except Exception:
+        return removed
+    if removed:
+        try:
+            _save_notifications()
+        except Exception:
+            pass
+    return removed
+
+
 def _pop_notifications(session_hash: str) -> list:
     """Return + dequeue this session's pending notifications.
 
@@ -188,4 +235,14 @@ def _pop_notifications(session_hash: str) -> list:
         _save_notifications()
     # Stable order by id
     out.sort(key=lambda e: e.get('id', 0))
+    # Discard anything about a fire that has since been deleted.
+    # Filtering HERE as well as on delete catches messages queued
+    # before that purge existed -- which is exactly the backlog a
+    # long-running server accumulates.
+    stale = [e for e in out if not _fire_still_exists(e)]
+    if stale:
+        out = [e for e in out if _fire_still_exists(e)]
+        sys.stderr.write(
+            f'[notify] dropped {len(stale)} message(s) about '
+            f'deleted fire(s)\n')
     return out
