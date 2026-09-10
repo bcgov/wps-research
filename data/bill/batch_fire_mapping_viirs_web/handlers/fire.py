@@ -274,8 +274,7 @@ class FireRoutes:
             # The product the operator selected. Differs from
             # product_key only while a background render has the fire
             # pointed elsewhere; the selector follows THIS.
-            'user_product_key': (getattr(fire, 'user_product', '')
-                                 or self._loaded_product_key(fire)),
+            'user_product_key': self._chosen_product_key(fire),
             # Report what the USER is on, not the transient value the
             # background prebuild may currently be sitting at -- that
             # race made a new fire open on MRAP instead of L2.
@@ -395,9 +394,7 @@ class FireRoutes:
             result['l2_start_date'] = getattr(fire, 'l2_start_date',
                                               '') or ''
             result['product_key'] = self._loaded_product_key(fire)
-            result['user_product_key'] = (
-                getattr(fire, 'user_product', '')
-                or result['product_key'])
+            result['user_product_key'] = self._chosen_product_key(fire)
         except Exception as exc:
             sys.stderr.write(f'[products] not attached to switch '
                              f'response: {exc}\n')
@@ -449,8 +446,7 @@ class FireRoutes:
         self._send_json({
             'products': self._built_products(fire_numbe, fire),
             'product_key': self._loaded_product_key(fire),
-            'user_product_key': (getattr(fire, 'user_product', '')
-                                 or self._loaded_product_key(fire)),
+            'user_product_key': self._chosen_product_key(fire),
             'post_source': getattr(fire, 'post_source', 'l2') or 'l2',
             'l2_start_date': getattr(fire, 'l2_start_date', '') or '',
         })
@@ -2788,6 +2784,35 @@ class FireRoutes:
                 f'previews on the current AOI grid.')
         except Exception:
             pass
+
+    def _chosen_product_key(self, fire, products=None) -> str:
+        """The operator's product, validated against what exists.
+
+        fire.user_product is written when they choose one, but a key
+        can go out of date: the product may have been purged, or -- as
+        happened when the two L2 forms were merged -- keyed differently
+        by a later version. Handing back a key nothing offers made the
+        selector resolve it by SOURCE, which lands on whichever product
+        is newest. That is why a reload appeared to move the selection.
+        """
+        loaded = self._loaded_product_key(fire)
+        want = getattr(fire, 'user_product', '') or ''
+        if not want:
+            return loaded
+        if products is None:
+            products = self._built_products(fire.fire_numbe, fire)
+        keys = {p.get('key') for p in (products or [])}
+        if want in keys:
+            return want
+        sys.stderr.write(
+            f'[products] {fire.fire_numbe}: remembered product '
+            f'{want!r} no longer exists; using {loaded!r}\n')
+        # Keep the fire's record honest so the next read agrees.
+        try:
+            fire.user_product = loaded
+        except Exception:
+            pass
+        return loaded
 
     def _loaded_product_key(self, fire) -> str:
         try:

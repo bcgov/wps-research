@@ -4667,9 +4667,11 @@ function productLabel(p) {
         const dm = p.post || p.date || '';
         return dm ? `MRAP composite ${dm}` : 'MRAP composite';
     }
-    if (p.post) return `L2 recent ${p.post}`;
-    if (p.date) return `L2 from ${p.date}`;
-    return 'L2 recent tile';
+    // One name for L2, whichever way it was built: a default build is
+    // "start from the newest date available", which is the same thing
+    // a chosen start date describes.
+    const dl = p.date || p.post || '';
+    return dl ? `L2 recent ${dl}` : 'L2 recent tile';
 }
 
 function currentProductKey() {

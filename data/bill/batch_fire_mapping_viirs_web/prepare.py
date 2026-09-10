@@ -1121,10 +1121,18 @@ def product_key_for_path(path: str) -> str:
         r'(?P<l2>_l2(_d(?P<start>\d{8}))?)?\.bin$', base)
     if not m:
         return ''
-    if m.group('start'):
-        return f"l2_d{m.group('start')}"
     if m.group('l2'):
-        return f"l2_p{m.group('post')}"
+        # ONE identity for L2, however it was built.
+        #
+        # A default build is "newest-first from whatever exists", which
+        # is the same thing as "start from the newest date available".
+        # They were keyed differently -- l2_p<newest> for the automatic
+        # one, l2_d<start> for a chosen one -- so on a day when the
+        # newest acquisition WAS the chosen date the selector listed
+        # the same imagery twice under two names. The start date is the
+        # identity; for a default build that is its newest acquisition,
+        # which is exactly what the filename prefix records.
+        return f"l2_d{m.group('start') or m.group('post')}"
     return f"mrap_p{m.group('post')}"
 
 
@@ -1136,14 +1144,10 @@ def product_label(key: str) -> str:
                  else 'L2 recent ') + m.group(2))
     m = re.fullmatch(r'l2_d(\d{8})', key or '')
     if m:
-        # A START-date build, not a recent composite.
-        #
-        # l2_p<date> is newest-first from that date backwards;
-        # l2_d<date> is pinned to that start date. On a day when the
-        # newest acquisition IS that date both exist, and labelling
-        # both "L2 recent <date>" put the same name in the selector
-        # twice with no way to tell them apart.
-        return f'L2 from {m.group(1)}'
+        # Same product, same name. Whether the operator chose this
+        # start date or the builder took the newest available, the
+        # result is an L2 composite starting from that date.
+        return f'L2 recent {m.group(1)}'
     return 'MRAP composite' if key == 'mrap' else 'L2 recent tile'
 
 
