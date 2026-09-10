@@ -68,6 +68,19 @@ def last_run(key: str) -> dict:
         return dict(_last_run.get(key) or {})
 
 
+def key_for(tiles) -> str:
+    """The progress/last-run key for a tile set.
+
+    Callers must use THIS rather than joining their own list: the
+    module canonicalises tile IDs ('10UFB' -> 'T10UFB') before keying,
+    so an endpoint joining the raw shapefile spelling looked up a key
+    that never existed -- progress and last-run came back empty for
+    ever, which is why the dialog polled without end and the bars never
+    resolved from "still retrieving" to "nothing on record".
+    """
+    return ','.join(sorted(set(canon_tile(t) for t in (tiles or []) if t)))
+
+
 def progress(key: str) -> dict:
     """Current retrieval progress for *key*, or {} if none."""
     with _lock:
@@ -323,6 +336,34 @@ def cached_percentages(cache_root: str, tiles, days) -> dict:
             for d, v in cached_coverage(cache_root, tiles, days).items()}
 
 
+def pending_days(cache_root: str, tiles, days) -> list:
+    """Days that would actually be looked up, newest first.
+
+    The caller needs this to decide whether to wait: a day whose tiles
+    are all recorded as "no product" is answered, even though it has no
+    number, and treating it as outstanding is what made the dialog poll
+    for ever.
+    """
+    tiles = sorted(set(canon_tile(t) for t in (tiles or []) if t))
+    data = _load(cache_root)
+    now = time.time()
+    out = []
+    for day in sorted(set(d for d in (days or []) if d), reverse=True):
+        for t in tiles:
+            v = data.get(_key(t, day))
+            if isinstance(v, dict):
+                if v.get('pct') is not None:
+                    continue
+                if (v.get('empty_at')
+                        and now - float(v['empty_at']) < _EMPTY_TTL_S):
+                    continue
+            elif isinstance(v, (int, float)):
+                continue
+            out.append(day)
+            break
+    return out
+
+
 def fetch_percentages(cache_root: str, tiles, days,
                       log=None, level: str = 'L2A',
                       workers: int = None, single_thread: bool = False,
@@ -342,24 +383,10 @@ def fetch_percentages(cache_root: str, tiles, days,
     data = _load(cache_root) if use_cache else {}
     now = time.time()
 
-    # What still needs looking up.
-    todo = []
-    for day in days:
-        for t in tiles:
-            v = data.get(_key(t, day))
-            if isinstance(v, dict):
-                if v.get('pct') is not None:
-                    continue
-                # A previous "none found" answer, still within its
-                # lifetime: leave it alone rather than re-scanning a day
-                # the mirror has nothing for.
-                if (v.get('empty_at')
-                        and now - float(v['empty_at']) < _EMPTY_TTL_S):
-                    continue
-            elif isinstance(v, (int, float)):
-                continue
-            todo.append(day)
-            break
+    # What still needs looking up -- the same test the caller uses, so
+    # "is there work?" and "do the work" can never disagree.
+    todo = (pending_days(cache_root, tiles, days) if use_cache
+            else list(days))
 
     if not todo:
         # Nothing to look up, yet the caller asked. That means every
@@ -367,7 +394,7 @@ def fetch_percentages(cache_root: str, tiles, days,
         # as "no products". Saying so is the difference between a
         # feature that is finished and one that appears hung.
         with _lock:
-            _last_run[','.join(tiles)] = {
+            _last_run[key_for(tiles)] = {
                 'finished_at': time.time(), 'attempted': 0,
                 'with_data': 0, 'no_products': len(days),
                 'failed': 0, 'error': '',
@@ -382,7 +409,7 @@ def fetch_percentages(cache_root: str, tiles, days,
         log(f'[cloud] {len(todo)} day(s) to look up for '
             f'{len(tiles)} tile(s): {", ".join(tiles[:8])}'
             + (' ...' if len(tiles) > 8 else ''))
-    pkey = ','.join(tiles)
+    pkey = key_for(tiles)
     with _lock:
         _progress[pkey] = {'done': 0, 'total': len(todo),
                            'started': time.time(), 'errors': 0,
@@ -405,6 +432,11 @@ def fetch_percentages(cache_root: str, tiles, days,
                 sys.stderr.write(
                     f'[cloud] {os.path.basename(s3_path)}: {exc}\n')
         return day, found, None
+
+    # Newest first. The operator is nearly always after recent
+    # imagery, so the dates they will look at first are the ones that
+    # resolve first; a long backfill fills in behind them.
+    todo = sorted(todo, reverse=True)
 
     results = []
     n_workers = int(workers or N_WORKERS)

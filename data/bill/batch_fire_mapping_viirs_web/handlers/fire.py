@@ -481,7 +481,10 @@ class FireRoutes:
             cov = _cc.cached_coverage(root, tiles, days)
             have = {d: v[0] for d, v in cov.items()}
             missing = [d for d in days if d not in have]
-            key = ','.join(tiles)
+            # Ask the module for the key: it canonicalises tile IDs,
+            # and joining our own spelling here looked up a key that
+            # never existed.
+            key = _cc.key_for(tiles)
             running = _cc.is_fetching(key)
             last = _cc.last_run(key)
             # Start a fill only if one is not already running AND the
@@ -494,15 +497,14 @@ class FireRoutes:
                 and not last.get('with_data')
                 and (time.time() - float(last.get('finished_at', 0))
                      < 120))
-            # Already answered, just not with a number? Then there is
-            # nothing to run and nothing to wait for. Without this the
-            # dialog polled for ever against days the mirror has no
-            # products for.
-            answered = bool(last and not last.get('failed')
-                            and last.get('attempted', 0) == 0)
-            if missing and not running and not recent_fail and not answered:
+            # Ask what would actually be looked up. A day whose tiles
+            # are all recorded as "no product" is answered even though
+            # it has no number, so treating every number-less day as
+            # outstanding made the dialog poll for ever.
+            todo = _cc.pending_days(root, tiles, days)
+            if missing and todo and not running and not recent_fail:
                 started = _cc.fetch_in_background(
-                    root, tiles, missing, key,
+                    root, tiles, todo, key,
                     log=lambda m: sys.stderr.write(m + '\n'))
                 running = started or _cc.is_fetching(key)
             self._send_json({
@@ -515,6 +517,7 @@ class FireRoutes:
                 # Keep polling only while work is actually running.
                 'pending': bool(running),
                 'missing': len(missing),
+                'outstanding': len(todo),
                 'tiles': tiles,
                 # What the retrieval is doing right now, and how the
                 # last attempt ended -- a fast failure clears progress

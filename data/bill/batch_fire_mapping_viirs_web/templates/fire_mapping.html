@@ -4070,6 +4070,13 @@ async function openDatePicker() {
     // clip to this AOI. Both produce a dated product; the inputs are
     // entirely different, so the dialog asks the matching question.
     _datePickerMode = parseProductKey(currentProductKey()).source;
+    // The dialog does two different jobs; the heading must say which.
+    const _t = document.getElementById('date-picker-title');
+    if (_t) {
+        _t.innerHTML = (_datePickerMode === 'mrap')
+            ? 'MRAP composite &mdash; choose a province-wide mosaic'
+            : 'L2 recent &mdash; start date';
+    }
     if (_datePickerMode === 'mrap') {
         await openMrapDatePicker(dlg, list, note, prog);
         return;
@@ -9184,7 +9191,7 @@ restoreMethodToggle();
               flex-direction:column;box-shadow:0 8px 30px #0006">
     <div style="padding:12px 16px;border-bottom:1px solid #e5e5e5;
                 display:flex;align-items:center;gap:10px">
-      <strong style="flex:1">L2 recent &mdash; start date</strong>
+      <strong style="flex:1" id="date-picker-title">L2 recent &mdash; start date</strong>
       <button class="btn btn-secondary" style="font-size:11px;
               padding:2px 8px" onclick="closeDatePicker()">Close</button>
     </div>
