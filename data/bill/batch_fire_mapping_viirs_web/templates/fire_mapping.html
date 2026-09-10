@@ -796,6 +796,10 @@ let _productMismatch = null;
 // One automatic refetch per pane per mismatch, so a persistent server
 // fault cannot turn into an infinite reload loop.
 const _paneRefetched = {left: false, right: false};
+// A choice made while a switch was running, and a counter that lets a
+// late server reply know it has been superseded.
+let _queuedProduct = '';
+let _switchEpoch = 0;
 
 // Which post imagery the stack is built from: 'l2' (most recent L2A
 // tiles over the AOI, default) or 'mrap' (province-wide composite).
@@ -1149,15 +1153,26 @@ async function onPostSourceChange() {
     const want = sel ? sel.value : currentPostSource;
 
     if (_srcSwitchBusy) {
-        // Put the selector back rather than queueing: the server
-        // serialises switches per fire, so a second one would block
-        // until the first finished with nothing on screen to say why.
-        setSourceSelectValue(sel, currentProductKey());
-        log('A source switch is already running; wait for it to '
-            + 'finish.', 'dim');
+        // Remember it instead of discarding it.
+        //
+        // Reverting the selector here is why a switch sometimes needed
+        // asking for twice: a choice made while the previous one was
+        // still running was silently dropped, and the operator saw the
+        // menu snap back with no change. The latest choice now runs as
+        // soon as the current switch finishes -- last one wins, so
+        // clicking through several products settles on the last.
+        _queuedProduct = want;
+        log(`A source switch is running; ${productLabel(
+            _products.find((q) => q.key === want)
+            || parseProductKey(want))} is queued.`, 'dim');
         return;
     }
     const previous = currentPostSource;
+    // Any switch supersedes an in-flight resync: a reply that was
+    // already on its way describes the product we are leaving, and
+    // applying it afterwards is what made the selector show the wrong
+    // entry.
+    _switchEpoch += 1;
     _srcSwitchBusy = true;
     _srcBusyReleased = false;
     // Grey out BOTH selectors: the right pane reads the same per-source
@@ -1192,6 +1207,20 @@ async function onPostSourceChange() {
         try { syncDateSelectButton(); } catch (_) {}
         _srcSwitchBusy = false;
         _srcSwitchAbort = null;
+        // Honour a choice made while this one was running.
+        if (_queuedProduct) {
+            const next = _queuedProduct;
+            _queuedProduct = '';
+            if (next !== currentProductKey()) {
+                const s2 = document.getElementById('post-source-select');
+                setSourceSelectValue(s2, next);
+                if (s2 && s2.value === next) {
+                    log(`[products] running the queued switch to `
+                        + `${next}`, 'dim');
+                    setTimeout(() => onPostSourceChange(), 0);
+                }
+            }
+        }
     }
 }
 
@@ -4444,13 +4473,25 @@ let _productResyncPending = false;
 async function syncProductsFromServer(why) {
     if (_productResyncPending) return;
     _productResyncPending = true;
+    const epoch = _switchEpoch;
     try {
         const r = await fetch(
             `/api/fire/${encodeURIComponent(FIRE)}/prepare`,
             {headers: {'X-Requested-With': 'fetch'}});
         if (!r.ok) return;
         const j = await r.json();
+        // The LIST is always safe to adopt -- more products can only
+        // have appeared. The SELECTION is not: if a switch began after
+        // this request went out, this reply describes the product the
+        // user has just left, and applying it would snap the selector
+        // back to the wrong entry.
         if (Array.isArray(j.products)) _products = j.products;
+        if (epoch !== _switchEpoch || _srcSwitchBusy) {
+            log('[products] resync superseded by a newer switch; '
+                + 'keeping the current selection', 'dim');
+            rebuildSourceSelectors();
+            return;
+        }
         if (typeof j.product_key === 'string' && j.product_key) {
             leftProduct = j.product_key;
         }
