@@ -3295,8 +3295,10 @@ function collectUiState() {
         // Full product identity, including the L2 date. left_src and
         // right_src are kept beside these so a state file written by
         // an older build still restores.
-        left_key: currentProductKey(),
-        right_key: rightProductKey(),
+        // Resolved keys, so a restart restores the same imagery and
+        // not merely the same source.
+        left_key: concreteProductKey(currentProductKey()),
+        right_key: concreteProductKey(rightProductKey()),
         split: !!splitActive,
         overlays: !!overlaysVisible,
         use_hdbscan: c('use-hdbscan'),
@@ -4657,8 +4659,28 @@ function currentProductKey() {
 
 function rightProductKey() {
     if (rightProduct) return rightProduct;
+    // Not chosen separately yet: the right pane mirrors the left, so
+    // say so concretely rather than returning a bare source.
+    if (!splitActive) return currentProductKey();
     if (rightPostSource !== 'l2') return 'mrap';
     return rightL2Date ? `l2_d${rightL2Date}` : 'l2';
+}
+
+// Turn a bare source key into the product it actually resolves to.
+//
+// 'l2' means "whichever L2 product is loaded", which is fine at
+// runtime but useless once written to disk: after a restart the newest
+// build may be a different date, so the pane came back on imagery the
+// operator never chose. Saving the resolved key makes the selection
+// mean the same thing tomorrow as it did today.
+function concreteProductKey(key) {
+    if (!key) return '';
+    if (/^(mrap|l2)_(p|d)\d{8}$/.test(key)) return key;
+    const src = parseProductKey(key).source;
+    const match = _products.find((q) => q.key === key)
+        || _products.find((q) => q.source === src && q.date)
+        || _products.find((q) => q.source === src);
+    return (match && match.key) || key;
 }
 
 function paneProductKey(pane) {
@@ -7356,7 +7378,33 @@ function renderAgreement(agreementPct, prevAccAgreement) {
 // result actually occupied).
 let currentMlAreaHa = -1;
 
-function hasMlResult() { return currentMlAreaHa > 0; }
+// The runs this fire has produced, kept so the label can consult the
+// evidence rather than one header field.
+let _knownRuns = [];
+
+function runMlArea() {
+    // The area of the run being shown, or of the accepted one, or of
+    // the newest -- whichever we can establish.
+    const byId = (id) => _knownRuns.find(
+        (r) => String(r.run_id) === String(id));
+    const pick = (typeof selectedRun !== 'undefined' && selectedRun
+                  ? byId(selectedRun) : null)
+        || _knownRuns.find((r) => r.accepted)
+        || _knownRuns[_knownRuns.length - 1];
+    const v = pick && pick.ml_area_ha;
+    return (typeof v === 'number') ? v : -1;
+}
+
+function hasMlResult() {
+    // Judge by the RUNS, not only by the header figure.
+    //
+    // currentMlAreaHa is the fire-level ML size, which stays unset for
+    // a fire accepted straight from a serial run -- so a pane showing a
+    // perfectly good classification was labelled "no ML result" while
+    // the results panel listed its area. The runs are the evidence.
+    if (currentMlAreaHa > 0) return true;
+    return runMlArea() > 0;
+}
 
 function updateMlSize(mlAreaHa) {
     currentMlAreaHa = (mlAreaHa == null) ? -1 : mlAreaHa;
@@ -7950,6 +7998,14 @@ async function pollFireState() {
         // re-renders after a per-run rebrush, which keeps the same
         // number of runs but changes their stats.
         const serialResults = data.serial_results || [];
+        _knownRuns = serialResults;
+        // Fill the header from the accepted run when the fire itself
+        // has no ML size: the number exists, it was just recorded per
+        // run rather than per fire.
+        if (!(currentMlAreaHa > 0)) {
+            const a = runMlArea();
+            if (a > 0) updateMlSize(a);
+        }
         if (serialResults.length > 0) {
             showSerialGallery(serialResults, data.settings_used || []);
             lastSerialCount = serialResults.length;
