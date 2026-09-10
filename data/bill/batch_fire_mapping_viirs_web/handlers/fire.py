@@ -3418,6 +3418,22 @@ class FireRoutes:
             # consistent. The stack path embeds the date, so a date
             # already built is found rather than recomputed.
             result = switch_post_source(fire, 'l2')
+            if result.get('ok'):
+                # Record it as the OPERATOR'S choice, exactly as the
+                # source selector does.
+                #
+                # Only /post_source did this, so a product chosen
+                # through Date select left user_product pointing at
+                # whatever was selected before it -- and a page reload,
+                # which trusts user_product, snapped the left pane back
+                # to that older product. The two ways of choosing a
+                # product must record the choice the same way.
+                from ..prepare import product_key_for_path
+                fire.user_post_source = 'l2'
+                fire.user_l2_date = getattr(fire, 'l2_start_date', '') or ''
+                fire.user_product = (
+                    product_key_for_path(getattr(fire, 'crop_bin', ''))
+                    or fire.user_product)
             if not result.get('ok'):
                 fire.l2_start_date = prev      # nothing was changed
                 self._send_json(

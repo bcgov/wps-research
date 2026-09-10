@@ -68,6 +68,14 @@
     <!-- =============================================================== -->
     <div class="image-panel">
         <div class="image-controls">
+            <button type="button" id="src-prev-left" class="btn"
+                    onclick="stepSource('left', -1)"
+                    title="Previous data source (older)"
+                    style="padding:2px 7px;min-width:0">&#9664;</button>
+            <button type="button" id="src-next-left" class="btn"
+                    onclick="stepSource('left', 1)"
+                    title="Next data source (newer)"
+                    style="padding:2px 7px;min-width:0">&#9654;</button>
             <select id="post-source-select" disabled
                     onchange="onPostSourceChange()"
                     title="Which post-fire imagery the stack is built from">
@@ -199,6 +207,14 @@
                 <span style="font-size:10px;color:#888;
                              text-transform:uppercase;
                              letter-spacing:0.5px">right</span>
+                <button type="button" id="src-prev-right" class="btn"
+                        onclick="stepSource('right', -1)"
+                        title="Previous data source (older)"
+                        style="padding:2px 7px;min-width:0">&#9664;</button>
+                <button type="button" id="src-next-right" class="btn"
+                        onclick="stepSource('right', 1)"
+                        title="Next data source (newer)"
+                        style="padding:2px 7px;min-width:0">&#9654;</button>
                 <select id="post-source-select-right"
                         onchange="onRightPostSourceChange()"
                         title="Imagery source for the right pane">
@@ -4875,6 +4891,39 @@ async function syncProductsFromServer(why) {
 // small list endpoint covers all of them with one mechanism rather
 // than a refresh call bolted onto each path.
 let _productWatch = null;
+
+// Step a pane's source one place through the list, with wraparound.
+//
+// The list is already ordered newest-first, so +1 means "newer" and
+// -1 "older" -- which is why the buttons are labelled by time rather
+// than by list position. Sources are not distinguished: stepping walks
+// whatever the selector offers, MRAP and L2 alike, which is what makes
+// it useful for flipping through everything built for an AOI.
+//
+// Applying the step goes through the selector's own change handler, so
+// a stepped selection behaves exactly like one picked by hand -- same
+// switch, same persistence, same repaint. Nothing here duplicates that
+// logic.
+function stepSource(pane, delta) {
+    const sel = document.getElementById(
+        pane === 'right' ? 'post-source-select-right'
+                         : 'post-source-select');
+    if (!sel || !sel.options.length) return;
+    const keys = [...sel.options].map((o) => o.value);
+    const cur = keys.indexOf(sel.value);
+    // The list is newest-first, so moving toward NEWER is index-1.
+    const step = (delta > 0) ? -1 : 1;
+    const next = ((cur < 0 ? 0 : cur) + step + keys.length) % keys.length;
+    if (keys[next] === sel.value) return;      // only one entry
+    sel.value = keys[next];
+    log(`[products] ${pane} pane stepped `
+        + `${delta > 0 ? 'newer' : 'older'} to ${sel.value}`, 'dim');
+    if (pane === 'right') {
+        onRightPostSourceChange();
+    } else {
+        onPostSourceChange();
+    }
+}
 
 function productKeysSignature(list) {
     return (list || []).map((p) => p && p.key).filter(Boolean)
