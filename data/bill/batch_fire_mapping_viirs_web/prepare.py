@@ -3091,3 +3091,140 @@ def stage_for_stack_detail(detail: str) -> str:
             or 'stack' in d or 'header' in d or 'writ' in d):
         return 'compositing'
     return 'compositing'
+
+
+# ---------------------------------------------------------------------
+# One-time migration: unified L2 product keys
+# ---------------------------------------------------------------------
+
+_L2P_RE = re.compile(r'(?<![A-Za-z0-9])l2_p(\d{8})(?![0-9])')
+
+
+def _unified_key(text: str) -> str:
+    """'…l2_p20260909…' -> '…l2_d20260909…'."""
+    return _L2P_RE.sub(lambda m: f'l2_d{m.group(1)}', text or '')
+
+
+def migrate_l2_product_keys() -> dict:
+    """Rename artefacts left under the old split L2 keys.
+
+    The identity change itself needs no migration: keys are derived
+    from stack FILENAMES, so existing stacks resolve to the unified key
+    the moment the new code runs. What does need moving is everything
+    NAMED after the old key -- preview stashes, hint masks, coverage
+    sidecars -- and the remembered selections in fire_state.yaml.
+
+    Without this they are simply not found: previews re-render, hints
+    rebuild, coverage is re-fetched from the mirror, and the operator's
+    saved product falls back to whatever is loaded. Nothing breaks, but
+    a good deal of work is repeated and a selection is lost, so the old
+    names are moved rather than abandoned.
+
+    Idempotent: a second run finds nothing to do. Never fatal.
+    """
+    stats = {'previews': 0, 'hints': 0, 'coverage': 0, 'fires': 0,
+             'skipped': 0}
+
+    def _rename(old_path: str, new_path: str) -> bool:
+        if old_path == new_path or not os.path.exists(old_path):
+            return False
+        if os.path.exists(new_path):
+            # The unified name already holds something -- the newer
+            # build. Leave it alone and drop the stale duplicate rather
+            # than overwrite work that is already correct.
+            try:
+                if os.path.isdir(old_path):
+                    shutil.rmtree(old_path, ignore_errors=True)
+                else:
+                    os.remove(old_path)
+            except OSError:
+                pass
+            stats['skipped'] += 1
+            return False
+        try:
+            os.replace(old_path, new_path)
+            return True
+        except OSError as exc:
+            sys.stderr.write(f'[migrate] {old_path}: {exc}\n')
+            return False
+
+    try:
+        with state.lock:
+            fires = list(state.fires.values())
+    except Exception:
+        fires = []
+
+    for fire in fires:
+        cache = getattr(fire, 'cache_dir', '') or ''
+        if cache and os.path.isdir(cache):
+            # Preview stashes: previews_l2_p<date> -> previews_l2_d<date>
+            try:
+                for name in os.listdir(cache):
+                    if not name.startswith('previews_l2_p'):
+                        continue
+                    if _rename(os.path.join(cache, name),
+                               os.path.join(cache, _unified_key(name))):
+                        stats['previews'] += 1
+            except OSError:
+                pass
+
+            # Derived hint masks under _redwins/
+            rw = os.path.join(cache, '_redwins')
+            if os.path.isdir(rw):
+                try:
+                    for name in os.listdir(rw):
+                        if 'l2_p' not in name:
+                            continue
+                        if _rename(os.path.join(rw, name),
+                                   os.path.join(rw, _unified_key(name))):
+                            stats['hints'] += 1
+                except OSError:
+                    pass
+
+            # Per-product coverage sidecars
+            cov = os.path.join(cache, 'coverage')
+            if os.path.isdir(cov):
+                try:
+                    for name in os.listdir(cov):
+                        if not name.startswith('l2_p'):
+                            continue
+                        if _rename(os.path.join(cov, name),
+                                   os.path.join(cov, _unified_key(name))):
+                            stats['coverage'] += 1
+                except OSError:
+                    pass
+
+        # Remembered selections, so a reload restores what the operator
+        # actually chose instead of falling back to what is loaded.
+        changed = False
+        try:
+            up = getattr(fire, 'user_product', '') or ''
+            if 'l2_p' in up:
+                fire.user_product = _unified_key(up)
+                changed = True
+            ui = getattr(fire, 'ui_state', None)
+            if isinstance(ui, dict):
+                for k in ('left_key', 'right_key'):
+                    v = ui.get(k)
+                    if isinstance(v, str) and 'l2_p' in v:
+                        ui[k] = _unified_key(v)
+                        changed = True
+        except Exception:
+            pass
+        if changed:
+            stats['fires'] += 1
+
+    if any(stats.values()):
+        sys.stderr.write(
+            f'[migrate] unified L2 keys: {stats["previews"]} preview '
+            f'stash(es), {stats["hints"]} hint(s), '
+            f'{stats["coverage"]} coverage file(s), '
+            f'{stats["fires"]} fire record(s)'
+            + (f', {stats["skipped"]} stale duplicate(s) removed'
+               if stats['skipped'] else '') + '\n')
+        try:
+            from .persistence import _save_fire_state
+            _save_fire_state()
+        except Exception:
+            pass
+    return stats

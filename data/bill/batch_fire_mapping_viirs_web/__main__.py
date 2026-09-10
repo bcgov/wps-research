@@ -1008,6 +1008,17 @@ def main():
 
     init_app(app_state)
 
+    # One-time rename of artefacts left under the old split L2 keys.
+    #
+    # Runs BEFORE the product refresh below, so that refresh sees the
+    # unified names and reuses the preview stashes, hints and coverage
+    # already on disk instead of rebuilding them.
+    try:
+        from .prepare import migrate_l2_product_keys
+        migrate_l2_product_keys()
+    except Exception as _exc:
+        _log(f'[startup] L2 key migration skipped: {_exc}')
+
     # Build today's composites for the fires that already exist.
     #
     # The province-wide MRAP mosaic turns over nightly, so after a
