@@ -4259,6 +4259,10 @@ async function applyMrapDateSelection() {
                                               product: `mrap_p${d2}`}),
                     });
                 log(`[products] built MRAP composite ${d2}`, 'dim');
+                // Offer it NOW. Waiting until the whole batch finishes
+                // meant a product that exists on disk was absent from
+                // both selectors until the page was reloaded.
+                await syncProductsFromServer(`built ${d2}`);
             } catch (e2) {
                 log(`[products] MRAP ${d2} failed: ${e2.message}`,
                     'error');
@@ -4382,6 +4386,7 @@ async function applyDateSelection() {
                             'error');
                     } else {
                         log(`[products] built L2 composite ${d2}`, 'dim');
+                        await syncProductsFromServer(`built ${d2}`);
                     }
                     break;
                 }
@@ -7216,7 +7221,13 @@ function syncRightViewOptions() {
         // clustering run the pane opened on the other source with no
         // way to switch back, which is simply confusing.
         rs.disabled = false;
-        if (splitActive) setSourceSelectValue(rs, rightProductKey());
+        if (splitActive) {
+            // Rebuild, don't just select. Products built while the
+            // view was unsplit are in _products but were never added
+            // to this control, so opening split showed a stale list.
+            withSelectorGuardPaused(
+                () => buildOptions(rs, rightProductKey()));
+        }
     }
 }
 
