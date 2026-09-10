@@ -208,6 +208,9 @@ class BaseHandler:
         (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/cloud_cover$'),
          'handle_api_cloud_cover'),
+        (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/products$'),
+         'handle_api_products'),
 
         (re.compile(r'^/api/queue$'), 'handle_api_queue'),
         (re.compile(r'^/api/notifications$'),

@@ -432,6 +432,29 @@ class FireRoutes:
         return os.path.join(cache, 'coverage',
                             f'{product_key}_dates.json')
 
+    def handle_api_products(self, fire_numbe):
+        """Just the product list -- cheap enough to poll.
+
+        /prepare answers this too, but it also assembles status, views,
+        params and coverage, which is far more work than a page needs
+        merely to notice that a new composite finished. A small
+        dedicated endpoint means the selectors can stay current without
+        anyone reloading, whoever or whatever built the product.
+        """
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        self._send_json({
+            'products': self._built_products(fire_numbe, fire),
+            'product_key': self._loaded_product_key(fire),
+            'user_product_key': (getattr(fire, 'user_product', '')
+                                 or self._loaded_product_key(fire)),
+            'post_source': getattr(fire, 'post_source', 'l2') or 'l2',
+            'l2_start_date': getattr(fire, 'l2_start_date', '') or '',
+        })
+
     def handle_api_cloud_cover(self, fire_numbe):
         """Cloud cover for the dates in the Date select menu.
 

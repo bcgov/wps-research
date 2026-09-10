@@ -1598,6 +1598,7 @@ async function prepareFire(padding) {
         rightProduct = leftProduct;
         try { refreshSourceSelectors(data.products); } catch (_) {}
         try { installSourceSelectGuard(); } catch (_) {}
+        try { startProductWatch(); } catch (_) {}
         try { applySavedUiState(data.ui_state, data.kgc_params); }
         catch (err) {
             log(`[ui] could not restore the saved view: ${err.message}`,
@@ -4312,6 +4313,9 @@ async function applyMrapDateSelection() {
         try { bp.stop(); } catch (_) {}
         _dateApplying = false;
         if (btn) { btn.disabled = false; btn.style.opacity = ''; }
+        // The batch is over: pick up everything it produced, including
+        // any build whose own response this page missed.
+        checkForNewProducts('batch finished');
     }
 }
 
@@ -4544,6 +4548,11 @@ async function applyDateSelection() {
         // The batch ticker and the per-build poller both write this
         // line; stopping the ticker here leaves one owner.
         try { bp.stop(); } catch (_) {}
+        // Pick up everything the batch produced. Deferred, because
+        // _dateApplying is still set at this point and the check
+        // deliberately skips while a build is in flight -- calling it
+        // here directly would do nothing at all.
+        setTimeout(() => checkForNewProducts('batch finished'), 0);
         _dateApplying = false;
         if (btn) { btn.disabled = false; btn.style.opacity = ''; }
     }
@@ -4832,6 +4841,60 @@ async function syncProductsFromServer(why) {
     } finally {
         _productResyncPending = false;
     }
+}
+
+// Keep the selectors current whoever built the product.
+//
+// Individual code paths refresh after their own builds, but that only
+// covers builds this page started. A product can also appear from the
+// start-up refresh, from another tab, or from a build whose response
+// this page never saw -- and in every one of those cases the operator
+// was left reloading to see something that already existed. Polling a
+// small list endpoint covers all of them with one mechanism rather
+// than a refresh call bolted onto each path.
+let _productWatch = null;
+
+function productKeysSignature(list) {
+    return (list || []).map((p) => p && p.key).filter(Boolean)
+        .sort().join(',');
+}
+
+async function checkForNewProducts(why) {
+    // Skip while a switch or a build is mid-flight: those own the
+    // state and refresh it themselves when they settle.
+    if (_dateApplying || _productResyncPending) return;
+    if (document.hidden) return;
+    try {
+        const r = await fetch(
+            `/api/fire/${encodeURIComponent(FIRE)}/products`,
+            {headers: {'X-Requested-With': 'fetch'}});
+        if (!r.ok) return;
+        const j = await r.json();
+        if (!Array.isArray(j.products)) return;
+        const before = productKeysSignature(_products);
+        const after = productKeysSignature(j.products);
+        if (before === after) return;
+        const had = before ? before.split(',') : [];
+        _products = j.products;
+        rebuildSourceSelectors();
+        const added = j.products.map((p) => p.key)
+            .filter((k) => had.indexOf(k) < 0);
+        log(`[products] list changed${why ? ' (' + why + ')' : ''}: `
+            + `${j.products.length} available`
+            + (added.length ? ` \u2014 new: ${added.join(', ')}` : ''),
+            'dim');
+    } catch (_) { /* a missed poll is not worth reporting */ }
+}
+
+function startProductWatch() {
+    if (_productWatch) return;
+    _productWatch = setInterval(() => checkForNewProducts('watch'),
+                                15000);
+    // And the moment the tab regains focus: someone coming back
+    // expects to see what finished while they were away.
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) checkForNewProducts('tab focused');
+    });
 }
 
 let _resyncTimer = null;
