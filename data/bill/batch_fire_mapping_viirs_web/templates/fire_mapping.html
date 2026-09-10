@@ -3855,6 +3855,21 @@ function paintCloudCells() {
 // Ask for the dates on screen, then keep asking while answers are
 // still coming in. Never blocks the dialog: the list is usable from the
 // first paint and the column fills in behind it.
+// Say what the retrieval is doing.
+//
+// Reading cloud cover means one listing plus one metadata read per
+// tile per day against a remote mirror, which can run to minutes on a
+// long date list. Without a line saying so, an empty column is
+// indistinguishable from a feature that does not work.
+function setCloudStatus(text, tone) {
+    const el = document.getElementById('cloud-status');
+    if (!el) return;
+    el.textContent = text || '';
+    el.style.color = (tone === 'error') ? '#a33'
+        : ((tone === 'done') ? '#2d8a4e' : '#666');
+    el.style.display = text ? '' : 'none';
+}
+
 async function loadCloudCover(days) {
     if (_cloudPoll) { clearTimeout(_cloudPoll); _cloudPoll = null; }
     if (!days || !days.length) return;
@@ -3862,18 +3877,55 @@ async function loadCloudCover(days) {
         const r = await fetch(
             `/api/fire/${encodeURIComponent(FIRE)}/cloud_cover`
             + `?days=${encodeURIComponent(days.join(','))}`);
-        if (!r.ok) return;
+        if (!r.ok) {
+            setCloudStatus(`Cloud cover unavailable (HTTP ${r.status})`,
+                           'error');
+            return;
+        }
         const j = await r.json();
         Object.assign(_cloudCover, j.cover || {});
         paintCloudCells();
+
+        const known = Object.keys(j.cover || {}).length;
+        const pr = j.progress || {};
+        if (j.error) {
+            setCloudStatus(`Cloud cover: ${j.error}`, 'error');
+        } else if (pr.total) {
+            const eta = (typeof pr.eta_s === 'number')
+                ? ` · about ${fmtShortDur(pr.eta_s)} left` : '';
+            const errs = pr.errors
+                ? ` · ${pr.errors} failed` : '';
+            setCloudStatus(
+                `Reading cloud cover from the Sentinel-2 mirror: `
+                + `${pr.done} of ${pr.total} day(s)`
+                + (pr.tiles ? ` over ${pr.tiles} tile(s)` : '')
+                + `${eta}${errs}`);
+        } else if (j.pending) {
+            setCloudStatus('Reading cloud cover from the Sentinel-2 '
+                           + 'mirror ...');
+        } else if (known) {
+            setCloudStatus(`Cloud cover: ${known} date(s), averaged over `
+                           + `${(j.tiles || []).length} tile(s) covering `
+                           + `this AOI`, 'done');
+        } else {
+            setCloudStatus('No cloud cover available for these dates',
+                           'error');
+        }
+
         if (j.pending) {
             _cloudPoll = setTimeout(() => loadCloudCover(days), 3000);
-        } else if (j.error) {
-            log(`[cloud] ${j.error}`, 'dim');
         }
     } catch (err) {
-        log(`[cloud] could not read cloud cover: ${err.message}`, 'dim');
+        setCloudStatus(`Cloud cover: ${err.message}`, 'error');
     }
+}
+
+function fmtShortDur(sec) {
+    if (!isFinite(sec) || sec < 0) return '--';
+    if (sec < 60) return `${Math.round(sec)}s`;
+    const m = Math.floor(sec / 60);
+    const r = Math.round(sec - m * 60);
+    return r ? `${m}m ${r}s` : `${m}m`;
 }
 
 // Which question the date dialog is currently asking.
@@ -3989,7 +4041,7 @@ async function openDatePicker() {
                 ? `<div style="color:#555;font-size:11px;
                                font-family:monospace;padding-left:1.6em;
                                word-break:break-word">
-                     ${d.sources.join(', ')}
+                     went in: ${d.sources.join(', ')}
                    </div>`
                 : '';
             return `
@@ -9071,7 +9123,8 @@ restoreMethodToggle();
     <div id="date-picker-note"
          style="padding:8px 16px;font-size:11px;color:#666"></div>
     <!-- Scrolls: an AOI with several tiles can have many dates. -->
-    <div id="date-picker-list"
+    <div id="cloud-status" style="font-size:11px;color:#666;padding:2px 0 6px 0;display:none"></div>
+        <div id="date-picker-list"
          style="overflow:auto;padding:4px 16px 12px;flex:1;
                 min-height:80px"></div>
     <div id="date-picker-progress"

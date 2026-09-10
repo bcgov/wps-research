@@ -45,6 +45,30 @@ _EMPTY_TTL_S = 6 * 3600
 _lock = threading.Lock()
 _inflight: dict = {}
 
+# Live progress per key, so the dialog can say what is happening rather
+# than leaving the operator to guess whether anything is running at all.
+_progress: dict = {}
+
+
+def progress(key: str) -> dict:
+    """Current retrieval progress for *key*, or {} if none."""
+    with _lock:
+        p = dict(_progress.get(key) or {})
+    if not p:
+        return {}
+    done, total = int(p.get('done', 0)), int(p.get('total', 0))
+    started = float(p.get('started', 0) or 0)
+    elapsed = max(0.0, time.time() - started) if started else 0.0
+    # ETA from the rate actually achieved. Withheld until a few days
+    # have completed, because the first lookups include DNS, TLS and
+    # the mirror warming up and are not representative of the rest.
+    eta = None
+    if done >= 3 and total > done and elapsed > 0:
+        eta = (elapsed / done) * (total - done)
+    p['elapsed_s'] = round(elapsed, 1)
+    p['eta_s'] = None if eta is None else round(eta, 1)
+    return p
+
 
 # ---------------------------------------------------------------- cache
 
@@ -220,6 +244,11 @@ def fetch_percentages(cache_root: str, tiles, days,
     if log:
         log(f'[cloud] {len(todo)} day(s) to look up for '
             f'{len(tiles)} tile(s)')
+    pkey = ','.join(tiles)
+    with _lock:
+        _progress[pkey] = {'done': 0, 'total': len(todo),
+                           'started': time.time(), 'errors': 0,
+                           'tiles': len(tiles), 'day': ''}
 
     def _one_day(day):
         found = {}
@@ -244,9 +273,22 @@ def fetch_percentages(cache_root: str, tiles, days,
             futs = {ex.submit(_one_day, d): d for d in todo}
             for fut in as_completed(futs):
                 try:
-                    results.append(fut.result())
+                    r = fut.result()
+                    results.append(r)
+                    with _lock:
+                        pr = _progress.get(pkey)
+                        if pr is not None:
+                            pr['done'] = int(pr.get('done', 0)) + 1
+                            pr['day'] = r[0]
+                            if r[2]:
+                                pr['errors'] = int(pr.get('errors', 0)) + 1
                 except Exception as exc:
                     sys.stderr.write(f'[cloud] worker failed: {exc}\n')
+                    with _lock:
+                        pr = _progress.get(pkey)
+                        if pr is not None:
+                            pr['done'] = int(pr.get('done', 0)) + 1
+                            pr['errors'] = int(pr.get('errors', 0)) + 1
     except Exception as exc:
         sys.stderr.write(f'[cloud] pool failed: {exc}\n')
 
@@ -270,6 +312,8 @@ def fetch_percentages(cache_root: str, tiles, days,
         _save(cache_root, data)
         if log:
             log(f'[cloud] cached {changed} tile-day value(s)')
+    with _lock:
+        _progress.pop(pkey, None)
     return cached_percentages(cache_root, tiles, days)
 
 

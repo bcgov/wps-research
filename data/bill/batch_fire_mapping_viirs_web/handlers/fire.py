@@ -490,6 +490,11 @@ class FireRoutes:
                 'pending': bool(missing) or _cc.is_fetching(key),
                 'missing': len(missing),
                 'tiles': tiles,
+                # What the retrieval is doing right now, so the dialog
+                # can report progress instead of showing an empty
+                # column and leaving the operator to wonder whether
+                # anything is running.
+                'progress': _cc.progress(key),
             })
         except Exception as exc:
             sys.stderr.write(f'[cloud] {fire_numbe}: {exc}\n')
