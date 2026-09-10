@@ -2791,19 +2791,22 @@ class FireRoutes:
             return (0 if p['source'] == 'mrap' else 1,
                     '' if not p['date'] else p['date'])
         out.sort(key=lambda p: (_rank(p)[0], _rank(p)[1]), reverse=False)
-        # Sorted by DATE, newest first, within each source -- not
-        # alphabetically. The lists grow a row per day, and an operator
-        # scanning for "yesterday" should find it at the top rather
-        # than wherever its digits happen to fall. An undated base
-        # entry ('l2', 'mrap') has no date and sorts last within its
-        # group, since it is the fallback rather than a real product.
+        # Sorted by DATE, newest first, across BOTH sources.
+        #
+        # Grouping by source first put an older MRAP composite above a
+        # newer L2 one, which reads as unsorted to anyone scanning for
+        # the most recent imagery -- the question these lists are
+        # actually asked. Date is the ordering the operator cares
+        # about; the label already says which source each row is.
+        #
+        # Undated base entries ('l2', 'mrap') sort last: they are
+        # fallbacks that build on selection, not products with a date.
+        # Source breaks ties so a same-day pair keeps a stable order.
         def _by_date(p):
-            return (1 if p.get('date') else 0, p.get('date') or '')
-        mrap = sorted([p for p in out if p['source'] == 'mrap'],
-                      key=_by_date, reverse=True)
-        l2 = sorted([p for p in out if p['source'] == 'l2'],
-                    key=_by_date, reverse=True)
-        out = mrap + l2
+            return (1 if p.get('date') else 0,
+                    p.get('date') or '',
+                    p.get('source') or '')
+        out = sorted(out, key=_by_date, reverse=True)
         sys.stderr.write(
             f'[products] {fire_numbe}: '
             + (', '.join(p['key'] + ('' if p['built']
