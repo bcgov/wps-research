@@ -348,3 +348,40 @@ auto-*preparing*? (Prepare only — auto-mapping would generate results
 nobody asked for, and auto-accept would then make them downloadable.)
 Does it expire or persist until cleared? Per-user or server-wide? With a
 shared login, server-wide is simpler and matches how the team works.
+
+## Persistence: what survives what, and what still needs doing
+
+Verified as of this change:
+
+| survives | fire records | GUI/UI state | products |
+|---|---|---|---|
+| server restart | yes | yes | yes |
+| new MRAP via the CLI | yes | yes | yes, and the new date is added |
+| `/ram` cleared | **no** | yes | **no** |
+
+Fire records, accepted results, per-fire GUI state (split view, per-pane
+products and views, KGC and brush parameters, eraser settings, band and
+scaling choices, hint mode, notes) all live in `fire_state.yaml` on the
+SSD and are reloaded at start-up. The **output directory is keyed by
+year**, not by the raster filename, which is what previously made fires
+disappear when a new MRAP mosaic arrived.
+
+What does NOT survive `/ram` being cleared: the AOI stacks themselves,
+their `_dates.json` and `_overlays.json` sidecars, and the KGC scratch.
+`ensure_fire_stack_present()` rebuilds today's products on demand, but
+**older dated composites cannot be rebuilt** -- the builder always takes
+the newest mosaic -- so navigating back to a previous day's imagery is
+lost with the ramdisk.
+
+### Still to do
+
+1. Move AOI stacks to `<output_root>/.stacks/`, keeping KGC scratch on
+   `/ram`. Stacks are read sequentially; scratch is what needs the
+   speed. Requires migrating absolute paths in `crop_bin`; the existing
+   grid validation would catch any mismatch.
+2. Decide a retention policy for dated composites once they are on
+   disk -- keeping every day of a season for every fire is unbounded.
+3. Bring `.download_cache` and `_preview_cache` under
+   `cache_retention.py`, which currently sweeps only `.web_cache`.
+4. `purge_other_aoi_stacks()` is defined and never called; nothing
+   reclaims `/ram` during a run.

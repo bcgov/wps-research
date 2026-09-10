@@ -796,6 +796,9 @@ let _productMismatch = null;
 // One automatic refetch per pane per mismatch, so a persistent server
 // fault cannot turn into an infinite reload loop.
 const _paneRefetched = {left: false, right: false};
+// Consecutive load failures per pane, so a late preview is waited for
+// instead of being reported as missing.
+const _paneLoadRetry = {left: 0, right: 0};
 // A choice made while a switch was running, and a counter that lets a
 // late server reply know it has been superseded.
 let _queuedProduct = '';
@@ -1661,11 +1664,15 @@ async function prepareFire(padding) {
         // already put that image on screen by now.
         // Queue the CURRENT source first so the views the user is most
         // likely to touch arrive soonest, then the other source.
-        const other = currentPostSource === 'l2' ? 'mrap' : 'l2';
+        // Only the product being displayed.
+        //
+        // Warming the OTHER one asks the server for previews it may not
+        // have, and it answers by switching the fire there, rendering,
+        // and switching back. Doing that while the page is still
+        // loading is how the first view could arrive as "not
+        // available" -- the product moved under it mid-request.
         warmSourceCache(currentPostSource);
         warmHintCache(currentPostSource);
-        warmSourceCache(other);
-        warmHintCache(other);
         // Drain only after the foreground image has landed, so warming
         // never competes with what the user is waiting to see.
         waitForFirstPaint().then(drainWarmQueue);
@@ -3325,6 +3332,35 @@ function saveUiState() {
         } catch (_) { /* a lost GUI preference is not worth a dialog */ }
     }, 800);
 }
+
+// Write pending GUI state NOW, because the page is going away.
+//
+// saveUiState() debounces by 800 ms so that typing in a number box
+// does not post per keystroke. Clicking "Back to fire list" within
+// that window discarded the write -- which is why opening split view
+// and leaving straight away lost it. keepalive lets the request
+// outlive the page.
+function flushUiState() {
+    if (_uiRestoring) return;
+    if (_uiSaveTimer) { clearTimeout(_uiSaveTimer); _uiSaveTimer = null; }
+    try {
+        const body = JSON.stringify({ui_state: collectUiState()});
+        const url = `/api/fire/${encodeURIComponent(FIRE)}/exclude_b8`;
+        fetch(url, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json',
+                      'X-Requested-With': 'fetch'},
+            body,
+            keepalive: true,
+        }).catch(() => {});
+    } catch (_) {}
+}
+
+window.addEventListener('pagehide', flushUiState);
+window.addEventListener('beforeunload', flushUiState);
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushUiState();
+});
 
 // Put the page back the way this fire was left: parameter boxes,
 // selectors, split, and the view and source of BOTH panes.
@@ -6460,6 +6496,35 @@ async function loadPaneImage(pane, viewKey) {
         }
     } catch (err) {
         if (stale()) return;
+        // Wait for it rather than declaring it missing.
+        //
+        // Opening a fire can land while the server is still writing
+        // that product's previews -- the first render after a restart,
+        // or a product whose stash is being rebuilt on demand. The
+        // layer is not absent, it is late, and saying "not available"
+        // sent the operator off to switch sources until it appeared.
+        // A few spaced retries cover the gap; only after those does
+        // this become a real failure.
+        const tries = (_paneLoadRetry[pane] || 0);
+        if (tries < 4) {
+            _paneLoadRetry[pane] = tries + 1;
+            const waitMs = 400 * (tries + 1);
+            if (pane === 'left') {
+                loadMsg.style.display = 'block';
+                loadMsg.textContent =
+                    `Preparing "${getViewLabel(viewKey)}" ...`;
+            }
+            log(`[pane] ${pane}: ${getViewLabel(viewKey)} not ready `
+                + `yet (${err.message}); retrying in ${waitMs} ms`,
+                'dim');
+            setTimeout(() => {
+                if (_paneGen[pane] === gen) {
+                    loadPaneImage(pane, viewKey);
+                }
+            }, waitMs);
+            return;
+        }
+        _paneLoadRetry[pane] = 0;
         if (pane === 'left') {
             loadMsg.style.display = 'block';
             loadMsg.textContent =
@@ -6535,6 +6600,8 @@ async function loadPaneImage(pane, viewKey) {
             return;
         }
     } catch (_) { /* provenance unavailable: proceed */ }
+
+    _paneLoadRetry[pane] = 0;      // it loaded; forget earlier misses
 
     // Single assignment. Wait for it to decode too, so the fit maths
     // below reads real dimensions rather than the previous image's.

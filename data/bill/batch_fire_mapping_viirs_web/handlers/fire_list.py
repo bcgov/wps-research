@@ -189,6 +189,7 @@ class FireListRoutes:
     # -- API handlers --
 
     def handle_api_fires(self):
+        _now = time.time()
         with state.lock:
             fires = [
                 {
@@ -227,8 +228,16 @@ class FireListRoutes:
                               if f.progress else None),
                     'progress_fraction': (f.progress.get('fraction')
                                           if f.progress else None),
-                    'elapsed_s': (f.progress.get('elapsed_s')
-                                  if f.progress else None),
+                    # Computed NOW, not when the last stage message
+                    # happened to be written. A long step with no
+                    # callbacks (reading a large zip) left this frozen
+                    # at whatever it was, so the list showed "0s
+                    # elapsed" for minutes.
+                    'elapsed_s': (
+                        max(0.0, _now - float(f.progress['started_at']))
+                        if (f.progress and f.progress.get('started_at'))
+                        else (f.progress.get('elapsed_s')
+                              if f.progress else None)),
                     'last_change_at': (f.progress.get('last_change_at')
                                        if f.progress else None),
                     'progress_fraction': (f.progress.get('fraction')
