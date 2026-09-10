@@ -4660,11 +4660,16 @@ function productLabel(p) {
     // described -- which should not happen, and is logged when it does.
     if (p && p.label) return p.label;
     if (!p) return 'L2 recent tile';
-    const d = p.date || p.post || '';
+    // Mirrors the server's naming, including the distinction between
+    // a recent composite ('L2 recent <date>') and one pinned to a
+    // start date ('L2 from <date>'). Both can exist for the same day.
     if (p.source === 'mrap') {
-        return d ? `MRAP composite ${d}` : 'MRAP composite';
+        const dm = p.post || p.date || '';
+        return dm ? `MRAP composite ${dm}` : 'MRAP composite';
     }
-    return d ? `L2 recent ${d}` : 'L2 recent tile';
+    if (p.post) return `L2 recent ${p.post}`;
+    if (p.date) return `L2 from ${p.date}`;
+    return 'L2 recent tile';
 }
 
 function currentProductKey() {

@@ -1136,7 +1136,14 @@ def product_label(key: str) -> str:
                  else 'L2 recent ') + m.group(2))
     m = re.fullmatch(r'l2_d(\d{8})', key or '')
     if m:
-        return f'L2 recent {m.group(1)}'
+        # A START-date build, not a recent composite.
+        #
+        # l2_p<date> is newest-first from that date backwards;
+        # l2_d<date> is pinned to that start date. On a day when the
+        # newest acquisition IS that date both exist, and labelling
+        # both "L2 recent <date>" put the same name in the selector
+        # twice with no way to tell them apart.
+        return f'L2 from {m.group(1)}'
     return 'MRAP composite' if key == 'mrap' else 'L2 recent tile'
 
 
