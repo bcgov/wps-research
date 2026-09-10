@@ -201,11 +201,47 @@ class RebrushRoutes:
                 staged_src = cache_main
             elif os.path.isfile(canon_main):
                 staged_src = canon_main
+
+            if staged_src is None:
+                # Fall back to the ACCEPTED RUN's own raster.
+                #
+                # Those three paths are all spellings of the canonical
+                # '<fire>_crop.bin_classified.bin', which a fire only
+                # has if it was mapped the non-serial way. A fire
+                # accepted from a serial run keeps its mask as
+                # '<fire>_serial_<rid>_classified.bin', so rebrush
+                # refused on a fire whose classification was plainly on
+                # screen. The result record carries the path, so use it.
+                runs = [r for r in (getattr(fire, 'serial_results', None)
+                                    or [])
+                        if r.get('classified')]
+                accepted = [r for r in runs if r.get('accepted')]
+                # Prefer the accepted run; otherwise the newest result,
+                # which is what the pane is showing.
+                for r in (accepted or list(reversed(runs))):
+                    cand = r.get('classified') or ''
+                    # The pre-brush sibling is the better source when it
+                    # exists: brushing a mask that has already been
+                    # brushed compounds the edits.
+                    raw = os.path.splitext(cand)[0] + '_raw.bin'
+                    if os.path.isfile(raw):
+                        staged_src = raw
+                        break
+                    if os.path.isfile(cand):
+                        staged_src = cand
+                        break
+                if staged_src:
+                    sys.stderr.write(
+                        f'[rebrush] {fire_numbe}: no canonical '
+                        f'classification; rebrushing from '
+                        f'{os.path.basename(staged_src)}\n')
+
             if staged_src is None:
                 self._send_json(
-                    {'error': 'Cannot rebrush an accepted fire whose '
-                              'cache and canonical classification are '
-                              'both missing.'},
+                    {'error': 'Cannot rebrush: no classification raster '
+                              'was found for this fire, in the cache, '
+                              'the accepted directory, or any run '
+                              'result.'},
                     404)
                 return
             try:
