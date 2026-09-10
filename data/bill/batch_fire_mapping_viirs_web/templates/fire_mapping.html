@@ -3810,6 +3810,72 @@ function closeDatePicker() {
     if (d) d.style.display = 'none';
 }
 
+// Cloud cover for the dates on screen, keyed by YYYYMMDD.
+//
+// The figure comes from the Sentinel-2 L2A metadata for the tiles over
+// this AOI, so it applies to both kinds of product: an L2 composite
+// built from that day, and a MRAP composite of the same day, are made
+// from the same acquisitions.
+let _cloudCover = {};
+let _cloudPoll = null;
+
+// Fixed-width cell so rows never shift when the numbers arrive.
+//
+// The column is rendered at full width from the start, holding blanks
+// until the answer is known. Growing the column later would nudge every
+// row sideways just as the operator went to click one.
+function cloudCell(day) {
+    const v = _cloudCover[day];
+    const known = typeof v === 'number';
+    const pct = known ? Math.max(0, Math.min(100, v)) : 0;
+    const txt = known ? v.toFixed(1).padStart(5, ' ') : '     ';
+    // Bar grows to the RIGHT; the scale is 0-100% across a thin track.
+    const hue = known ? (pct < 20 ? '#2d8a4e'
+                        : (pct < 50 ? '#b8860b' : '#a33')) : 'transparent';
+    return `<span style="display:inline-flex;align-items:center;gap:6px;
+                         flex:0 0 auto">
+      <span style="font-family:monospace;font-size:11px;color:#555;
+                   white-space:pre;width:3.4em;text-align:right"
+            title="${known ? 'Cloud cover ' + v.toFixed(1) + '%'
+                           : 'Cloud cover not retrieved yet'}">${txt}</span>
+      <span style="display:inline-block;width:70px;height:7px;
+                   background:#eee;border-radius:3px;overflow:hidden">
+        <span style="display:block;height:100%;width:${pct}%;
+                     background:${hue}"></span>
+      </span>
+    </span>`;
+}
+
+function paintCloudCells() {
+    for (const el of document.querySelectorAll('[data-cloud-day]')) {
+        el.innerHTML = cloudCell(el.getAttribute('data-cloud-day'));
+    }
+}
+
+// Ask for the dates on screen, then keep asking while answers are
+// still coming in. Never blocks the dialog: the list is usable from the
+// first paint and the column fills in behind it.
+async function loadCloudCover(days) {
+    if (_cloudPoll) { clearTimeout(_cloudPoll); _cloudPoll = null; }
+    if (!days || !days.length) return;
+    try {
+        const r = await fetch(
+            `/api/fire/${encodeURIComponent(FIRE)}/cloud_cover`
+            + `?days=${encodeURIComponent(days.join(','))}`);
+        if (!r.ok) return;
+        const j = await r.json();
+        Object.assign(_cloudCover, j.cover || {});
+        paintCloudCells();
+        if (j.pending) {
+            _cloudPoll = setTimeout(() => loadCloudCover(days), 3000);
+        } else if (j.error) {
+            log(`[cloud] ${j.error}`, 'dim');
+        }
+    } catch (err) {
+        log(`[cloud] could not read cloud cover: ${err.message}`, 'dim');
+    }
+}
+
 // Which question the date dialog is currently asking.
 let _datePickerMode = 'l2';
 let _mrapRows = [];
@@ -3842,8 +3908,9 @@ async function openMrapDatePicker(dlg, list, note, prog) {
             const gb = d.bytes ? (d.bytes / 1073741824).toFixed(1) : '';
             return `<label style="display:flex;gap:8px;align-items:center;
                         padding:3px 0;cursor:pointer">
-                <input type="radio" name="mrap-date" value="${d.date}"
+                <input type="checkbox" name="mrap-date" value="${d.date}"
                        ${d.date === cur ? 'checked' : ''}>
+                <span data-cloud-day="${d.date}">${cloudCell(d.date)}</span>
                 <span style="font-family:monospace">${d.date}</span>
                 <span style="color:${d.ready ? '#2a7' : '#888'};
                              font-size:11px">
@@ -3853,10 +3920,13 @@ async function openMrapDatePicker(dlg, list, note, prog) {
             </label>`;
         }).join('');
         if (note) {
-            note.textContent = 'Clips the chosen province-wide mosaic '
-                + 'to this AOI and adds it as a dated MRAP composite. '
-                + 'Existing products are kept.';
+            note.textContent = 'Clips the chosen province-wide mosaics '
+                + 'to this AOI and adds them as dated MRAP composites. '
+                + 'Several can be selected. Existing products are kept. '
+                + 'Cloud cover is from the Sentinel-2 acquisitions over '
+                + 'this AOI on the same day.';
         }
+        loadCloudCover(_mrapRows.map((d) => d.date));
     } catch (err) {
         list.innerHTML = `<div style="color:#a33">${err.message}</div>`;
     }
@@ -3901,7 +3971,9 @@ async function openDatePicker() {
             return;
         }
         const sel = j.selected || j.newest || '';
-        // Radios, not checkboxes: exactly one start date at a time.
+        // Checkboxes: several dates can be built in one go, which is
+        // the difference between choosing a date and stocking the menu
+        // with the days worth comparing.
         list.innerHTML = _dateRows.map((d) => {
             const pretty = `${d.date.slice(0, 4)}-${d.date.slice(4, 6)}`
                 + `-${d.date.slice(6, 8)}`;
@@ -3924,8 +3996,9 @@ async function openDatePicker() {
             <div style="padding:4px 0">
               <label style="display:flex;align-items:center;gap:8px;
                             font-size:12px;cursor:pointer">
-                <input type="radio" name="l2-date" class="date-pick"
+                <input type="checkbox" name="l2-date" class="date-pick"
                        value="${d.date}" ${d.date === sel ? 'checked' : ''}>
+                <span data-cloud-day="${d.date}">${cloudCell(d.date)}</span>
                 <span style="min-width:6.5em">${pretty}</span>
                 <span style="color:#888;min-width:7em">${d.zips} zip(s),
                       ${d.tiles.length} tile(s)</span>
@@ -3934,6 +4007,7 @@ async function openDatePicker() {
               ${src}
             </div>`;
         }).join('');
+        loadCloudCover(_dateRows.map((d) => d.date));
         if (note) {
             note.textContent = 'The composite starts from the selected '
                 + 'date and fills gaps with earlier acquisitions, '
@@ -3955,10 +4029,14 @@ async function openDatePicker() {
 async function applyMrapDateSelection() {
     const btn = document.getElementById('btn-apply-date');
     const prog = document.getElementById('date-picker-progress');
-    const picked = document.querySelector(
-        'input[name="mrap-date"]:checked');
-    if (!picked) return;
-    const date = picked.value;
+    const all = [...document.querySelectorAll(
+        'input[name="mrap-date"]:checked')].map((el) => el.value);
+    if (!all.length) return;
+    // Newest first, and the LAST one built becomes the displayed
+    // product -- so a multi-select ends on the oldest date chosen,
+    // which is the one an operator is usually reaching back for.
+    all.sort().reverse();
+    const date = all[all.length - 1];
     const key = `mrap_p${date}`;
     const row = _mrapRows.find((d) => d.date === date) || {};
 
@@ -3972,6 +4050,35 @@ async function applyMrapDateSelection() {
               + `This takes a few minutes.`;
     }
     try {
+        // Build the others first, one at a time. The server
+        // serialises work per fire anyway, so firing them together
+        // would only queue them behind each other with no progress
+        // shown; sequentially, each one reports as it lands.
+        for (let i = 0; i < all.length - 1; i++) {
+            const d2 = all[i];
+            if (prog) {
+                prog.textContent = `Building MRAP composite ${d2} `
+                    + `(${i + 1} of ${all.length}) ...`;
+            }
+            try {
+                await fetch(
+                    `/api/fire/${encodeURIComponent(FIRE)}/post_source`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json',
+                                  'X-Requested-With': 'fetch'},
+                        body: JSON.stringify({source: 'mrap',
+                                              product: `mrap_p${d2}`}),
+                    });
+                log(`[products] built MRAP composite ${d2}`, 'dim');
+            } catch (e2) {
+                log(`[products] MRAP ${d2} failed: ${e2.message}`,
+                    'error');
+            }
+        }
+        if (prog && all.length > 1) {
+            prog.textContent = `Building MRAP composite ${date} `
+                + `(${all.length} of ${all.length}) ...`;
+        }
         const parts = parseProductKey(key);
         // The display follows immediately, as with any other switch;
         // the server is told in the same call because this one may
@@ -4022,9 +4129,13 @@ async function applyDateSelection() {
     }
     const btn = document.getElementById('btn-apply-date');
     const prog = document.getElementById('date-picker-progress');
-    const picked = document.querySelector('.date-pick:checked');
-    if (!picked) return;
-    const date = picked.value;
+    const allPicked = [...document.querySelectorAll('.date-pick:checked')]
+        .map((el) => el.value);
+    if (!allPicked.length) return;
+    // Newest first; the last built is the one left displayed.
+    allPicked.sort().reverse();
+    const date = allPicked[allPicked.length - 1];
+    const extras = allPicked.slice(0, allPicked.length - 1);
 
     _dateApplying = true;
     if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; }
@@ -4053,6 +4164,47 @@ async function applyDateSelection() {
     }, 1500);
 
     try {
+        // Build the other selected dates first, one at a time. The
+        // server serialises per fire, so issuing them together would
+        // just queue them invisibly; sequentially each reports as it
+        // lands and the last one stays displayed.
+        for (let i = 0; i < extras.length; i++) {
+            const d2 = extras[i];
+            if (prog) {
+                prog.textContent = `Building the L2 composite from `
+                    + `${d2} (${i + 1} of ${extras.length + 1}) ...`;
+            }
+            try {
+                for (;;) {
+                    const r2 = await fetch(
+                        `/api/fire/${encodeURIComponent(FIRE)}/l2_date`, {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json',
+                                      'X-Requested-With': 'fetch'},
+                            body: JSON.stringify({date: d2}),
+                        });
+                    const j2 = await r2.json().catch(() => ({}));
+                    if (r2.status === 409 && j2.busy) {
+                        await new Promise((res) => setTimeout(res, 2000));
+                        continue;
+                    }
+                    if (!r2.ok || j2.error) {
+                        log(`[products] L2 ${d2} failed: `
+                            + `${j2.error || ('HTTP ' + r2.status)}`,
+                            'error');
+                    } else {
+                        log(`[products] built L2 composite ${d2}`, 'dim');
+                    }
+                    break;
+                }
+            } catch (e2) {
+                log(`[products] L2 ${d2} failed: ${e2.message}`, 'error');
+            }
+        }
+        if (prog && extras.length) {
+            prog.textContent = `Building the L2 composite from ${date} `
+                + `(${extras.length + 1} of ${extras.length + 1}) ...`;
+        }
         let r, j;
         for (;;) {
             r = await fetch(
@@ -6656,8 +6808,18 @@ async function loadPaneImage(pane, viewKey) {
             const waitMs = 400 * (tries + 1);
             if (pane === 'left') {
                 loadMsg.style.display = 'block';
+                // Say what is happening. A source layer is never
+                // genuinely absent -- we build it from imagery we know
+                // exists -- so "not available" describes a state that
+                // cannot occur and sends the operator looking for a
+                // fault instead of waiting a few seconds.
+                const _lbl = productLabel(
+                    _products.find((q) => q.key === paneProductKey(pane))
+                    || parseProductKey(paneProductKey(pane)));
                 loadMsg.textContent =
-                    `Preparing "${getViewLabel(viewKey)}" ...`;
+                    `Preparing ${_lbl} \u2014 `
+                    + `"${getViewLabel(viewKey)}" is being generated `
+                    + `(attempt ${tries + 1} of 5) ...`;
             }
             log(`[pane] ${pane}: ${getViewLabel(viewKey)} not ready `
                 + `yet (${err.message}); retrying in ${waitMs} ms`,
@@ -6672,8 +6834,15 @@ async function loadPaneImage(pane, viewKey) {
         _paneLoadRetry[pane] = 0;
         if (pane === 'left') {
             loadMsg.style.display = 'block';
+            const _lbl2 = productLabel(
+                _products.find((q) => q.key === paneProductKey(pane))
+                || parseProductKey(paneProductKey(pane)));
+            // Still not ready after several tries. Describe the state
+            // rather than declaring the layer missing: a long build is
+            // the usual reason, and the console carries the detail.
             loadMsg.textContent =
-                `View "${getViewLabel(viewKey)}" not available`;
+                `${_lbl2}: "${getViewLabel(viewKey)}" is still being `
+                + `prepared. It will appear when the build finishes.`;
         }
         // Clear the source as well as hiding: leaving the previous
         // layer's bitmap attached is how a missing layer looked like a

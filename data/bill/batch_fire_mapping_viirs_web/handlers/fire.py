@@ -432,6 +432,70 @@ class FireRoutes:
         return os.path.join(cache, 'coverage',
                             f'{product_key}_dates.json')
 
+    def handle_api_cloud_cover(self, fire_numbe):
+        """Cloud cover for the dates in the Date select menu.
+
+        Returns whatever is known NOW and starts a background fill for
+        the rest, so the dialog can render immediately and fill in as
+        answers arrive. The figures come from the Sentinel-2 L2A
+        metadata for the tiles covering this AOI, and apply equally to
+        an L2-recent start date and a MRAP composite: both are asking
+        whether that day was clear.
+        """
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        _q = parse_qs(urlparse(self.path).query)
+        days = [d for d in (_q.get('days') or [''])[0].split(',')
+                if re.fullmatch(r'\d{8}', d or '')]
+        if not days:
+            self._send_json({'cover': {}, 'pending': False})
+            return
+        # Cap the request. The menu shows a bounded list, and an
+        # unbounded one would turn a dialog open into hundreds of
+        # mirror listings.
+        days = sorted(set(days), reverse=True)[:400]
+        try:
+            from .. import cloud_cover as _cc
+            from ..l2_recent import tiles_intersecting_bbox
+            ref = (state.rasters_by_year.get(fire.fire_year)
+                   or state.raster_path)
+            crs = ''
+            try:
+                from osgeo import gdal
+                ds = gdal.Open(ref, gdal.GA_ReadOnly) if ref else None
+                if ds is not None:
+                    crs = ds.GetProjection()
+                    ds = None
+            except Exception:
+                crs = ''
+            tiles = sorted(set(
+                tiles_intersecting_bbox(fire.bbox_native, crs)))
+            if not tiles:
+                self._send_json({'cover': {}, 'pending': False,
+                                 'reason': 'no tiles for this AOI'})
+                return
+            root = os.path.join(state.output_root, '.cloud_cover')
+            have = _cc.cached_percentages(root, tiles, days)
+            missing = [d for d in days if d not in have]
+            key = ','.join(tiles)
+            if missing:
+                _cc.fetch_in_background(
+                    root, tiles, missing, key,
+                    log=lambda m: sys.stderr.write(m + '\n'))
+            self._send_json({
+                'cover': {d: round(v, 1) for d, v in have.items()},
+                'pending': bool(missing) or _cc.is_fetching(key),
+                'missing': len(missing),
+                'tiles': tiles,
+            })
+        except Exception as exc:
+            sys.stderr.write(f'[cloud] {fire_numbe}: {exc}\n')
+            self._send_json({'cover': {}, 'pending': False,
+                             'error': str(exc)})
+
     def handle_api_mrap_dates(self, fire_numbe):
         """Province-wide MRAP mosaics available to clip, newest first.
 
@@ -1448,10 +1512,10 @@ class FireRoutes:
                         f'previews_{_src}: {type(exc).__name__}: '
                         f'{exc}\n')
                     self._send_json(
-                        {'error': f'No {_src.upper()} imagery is '
-                                  f'available for this fire yet '
-                                  f'({exc}). Switch the left pane to '
-                                  f'{_src.upper()} once to build it.'},
+                        {'error': f'The {_src.upper()} imagery for '
+                                  f'this AOI is still being prepared '
+                                  f'({exc}). It will appear when the '
+                                  f'build finishes.'},
                         409)
                     return
 
